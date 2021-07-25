@@ -10,6 +10,7 @@ import (
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
+	"kubevpn/dns"
 	"kubevpn/exe"
 	"kubevpn/remote"
 	"net"
@@ -93,6 +94,12 @@ func main() {
 	}()
 	<-readyChan
 	log.Info("port forward ready")
+
+	if err := dns.Dns(clientset); err != nil {
+		log.Fatal(err)
+	} else {
+		log.Info("dns service ok")
+	}
 
 	if err := start(); err != nil {
 		log.Fatal(err)

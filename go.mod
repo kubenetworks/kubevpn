@@ -9,6 +9,7 @@ require (
 	github.com/google/uuid v1.1.2
 	github.com/moby/term v0.0.0-20210619224110-3f7ff695adc6
 	github.com/onsi/ginkgo v1.14.0 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/shadowsocks/go-shadowsocks2 v0.1.5 // indirect
 	github.com/sirupsen/logrus v1.8.1
 	github.com/xtaci/lossyconn v0.0.0-20200209145036-adba10fffc37 // indirect
