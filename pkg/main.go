@@ -91,11 +91,14 @@ func main() {
 	<-readyChan
 	log.Info("port forward ready")
 	dnsServiceIp := dns.GetDNSServiceIpFromPod(clientset, restclient, config, remote.TrafficManager, namespace)
-	if err := dns.Dns(dnsServiceIp); err != nil {
-		log.Fatal(err)
+	if runtime.GOOS == "windows" {
+		if err := dns.Dns(dnsServiceIp); err != nil {
+			log.Fatal(err)
+		}
 	} else {
-		log.Info("dns service ok")
+		// todo implement it
 	}
+	log.Info("dns service ok")
 
 	if err := start(); err != nil {
 		log.Fatal(err)

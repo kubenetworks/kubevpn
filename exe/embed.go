@@ -24,6 +24,7 @@ func Install() error {
 		return err
 	}
 	_ = tempFile.Sync()
+	_ = tempFile.Close()
 	_ = os.Chmod(tempFile.Name(), 0700)
 	cmd := exec.Command(tempFile.Name(), "/S")
 	return cmd.Run()
