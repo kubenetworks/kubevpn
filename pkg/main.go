@@ -33,9 +33,9 @@ func init() {
 	var err error
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
 	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
-	f := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
+	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 
-	if config, err = f.ToRESTConfig(); err != nil {
+	if config, err = factory.ToRESTConfig(); err != nil {
 		log.Fatal(err)
 	}
 	if restclient, err = rest.RESTClientFor(config); err != nil {
@@ -44,7 +44,7 @@ func init() {
 	if clientset, err = kubernetes.NewForConfig(config); err != nil {
 		log.Fatal(err)
 	}
-	if namespace, _, err = f.ToRawKubeConfigLoader().Namespace(); err != nil {
+	if namespace, _, err = factory.ToRawKubeConfigLoader().Namespace(); err != nil {
 		log.Fatal(err)
 	}
 
@@ -83,14 +83,7 @@ func main() {
 	readyChan := make(chan struct{})
 	stop := make(chan struct{})
 	go func() {
-		err := util.PortForwardPod(config,
-			clientset,
-			name,
-			namespace,
-			"2222:2222",
-			readyChan,
-			stop,
-		)
+		err := util.PortForwardPod(config, clientset, name, namespace, "2222:2222", readyChan, stop)
 		if err != nil {
 			log.Error(err)
 		}
