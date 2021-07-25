@@ -1,14 +1,15 @@
-package main
+package util
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"github.com/moby/term"
+	dockerterm "github.com/moby/term"
 	log "github.com/sirupsen/logrus"
+	"io"
 	v12 "k8s.io/api/autoscaling/v1"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -22,11 +23,11 @@ import (
 	clientgowatch "k8s.io/client-go/tools/watch"
 	"k8s.io/client-go/transport/spdy"
 	"k8s.io/client-go/util/retry"
-	"k8s.io/kubectl/pkg/cmd/util"
-	term2 "k8s.io/kubectl/pkg/util/term"
+	"k8s.io/kubectl/pkg/cmd/exec"
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -152,95 +153,58 @@ func ScaleDeploymentReplicasTo(options *kubernetes.Clientset, name, namespace st
 	}
 }
 
-type shellOptions interface {
-	GetNamespace() string
-	GetDeployment() string
-	GetLocalDir() string
-	GetRemoteDir() string
-	GetKubeconfig() string
-}
+func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace, cmd string) (string, error) {
+	pod, err := clientset.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
 
-func Shell(client *kubernetes.Clientset, options shellOptions) error {
-	deployment, err2 := client.AppsV1().Deployments(options.GetNamespace()).
-		Get(context.TODO(), options.GetDeployment(), metav1.GetOptions{})
-	if err2 != nil {
-		log.Error(err2)
-	}
-	labelMap, _ := metav1.LabelSelectorAsMap(deployment.Spec.Selector)
-	pods, err := client.CoreV1().Pods(options.GetNamespace()).
-		List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(labelMap).String()})
 	if err != nil {
-		log.Errorf("get kubedev pod error: %v", err)
+		return "", err
 	}
-	if len(pods.Items) <= 0 {
-		log.Warnf("this should not happened, pods items length: %d", len(pods.Items))
+	if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
+		err = fmt.Errorf("cannot exec into a container in a completed pod; current phase is %s", pod.Status.Phase)
+		return "", err
 	}
-	index := -1
-	for i, pod := range pods.Items {
-		if pod.Status.Phase == v1.PodRunning {
-			index = i
-			break
-		}
+	containerName := pod.Spec.Containers[0].Name
+	stdin, stdout, stderr := dockerterm.StdStreams()
+
+	stdoutBuf := bytes.NewBuffer(nil)
+	stdout = io.MultiWriter(stdout, stdoutBuf)
+	StreamOptions := exec.StreamOptions{
+		Namespace:     namespace,
+		PodName:       podName,
+		ContainerName: containerName,
+		IOStreams:     genericclioptions.IOStreams{In: stdin, Out: stdout, ErrOut: stderr},
 	}
-	if index < 0 {
-		return fmt.Errorf("cannot exec into a container in a completed pod; current phase is %s", pods.Items[0].Status.Phase)
-	}
-	stdin, stdout, stderr := term.StdStreams()
-	tty := term2.TTY{
-		Out: stdout,
-		In:  stdin,
-		Raw: true,
-	}
-	if !tty.IsTerminalIn() {
-		log.Error("Unable to use a TTY - input is not a terminal or the right kind of file")
-	}
-	var terminalSizeQueue remotecommand.TerminalSizeQueue
-	if tty.Raw {
-		terminalSizeQueue = tty.MonitorSize(tty.GetSize())
-	}
-	f := func() error {
-		configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-		kubeconfig := options.GetKubeconfig()
-		configFlags.KubeConfig = &kubeconfig
-		namespace := options.GetNamespace()
-		configFlags.Namespace = &namespace
-		f := util.NewFactory(util.NewMatchVersionFlags(configFlags))
-		config, _ := f.ToRESTConfig()
-		restClient, err := rest.RESTClientFor(config)
-		if err != nil {
-			return err
-		}
-		req := restClient.Post().
-			Resource("pods").
-			Name(pods.Items[index].Name).
-			Namespace(options.GetNamespace()).
-			SubResource("exec").
-			VersionedParams(
-				&v1.PodExecOptions{
-					Container: pods.Items[index].Spec.Containers[0].Name,
-					Command:   []string{"sh", "-c", "(bash||sh)"},
-					Stdin:     true,
-					Stdout:    true,
-					Stderr:    true,
-					TTY:       true,
-				},
-				scheme.ParameterCodec,
-			)
-		executor, err := remotecommand.NewSPDYExecutor(config, "POST", req.URL())
-		if err != nil {
-			return err
-		}
-		return executor.Stream(remotecommand.StreamOptions{
-			Stdin:             tty.In,
-			Stdout:            tty.Out,
-			Stderr:            stderr,
-			Tty:               true,
-			TerminalSizeQueue: terminalSizeQueue,
-		})
+	Executor := &exec.DefaultRemoteExecutor{}
+	// ensure we can recover the terminal while attached
+	tt := StreamOptions.SetupTTY()
+
+	var sizeQueue remotecommand.TerminalSizeQueue
+	if tt.Raw {
+		// this call spawns a goroutine to monitor/update the terminal size
+		sizeQueue = tt.MonitorSize(tt.GetSize())
+
+		// unset p.Err if it was previously set because both stdout and stderr go over p.Out when tty is
+		// true
+		StreamOptions.ErrOut = nil
 	}
 
-	if err = tty.Safe(f); err != nil {
-		return err
+	fn := func() error {
+		req := restclient.Post().
+			Resource("pods").
+			Name(pod.Name).
+			Namespace(pod.Namespace).
+			SubResource("exec")
+		req.VersionedParams(&v1.PodExecOptions{
+			Container: containerName,
+			Command:   []string{"sh", "-c", cmd},
+			Stdin:     StreamOptions.Stdin,
+			Stdout:    StreamOptions.Out != nil,
+			Stderr:    StreamOptions.ErrOut != nil,
+			TTY:       tt.Raw,
+		}, scheme.ParameterCodec)
+		return Executor.Execute("POST", req.URL(), config, StreamOptions.In, StreamOptions.Out, StreamOptions.ErrOut, tt.Raw, sizeQueue)
 	}
-	return nil
+
+	err = tt.Safe(fn)
+	return strings.TrimRight(stdoutBuf.String(), "\n"), err
 }

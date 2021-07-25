@@ -6,44 +6,47 @@ import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
-	restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"kubevpn/dns"
 	"kubevpn/exe"
 	"kubevpn/remote"
+	"kubevpn/util"
 	"net"
-	"path/filepath"
 	"runtime"
 	"strings"
 )
 
 var (
-	baseCfg   = &baseConfig{}
-	namespace string
-	clientset *kubernetes.Clientset
-	config    *restclient.Config
-	name      string
+	baseCfg    = &baseConfig{}
+	namespace  string
+	clientset  *kubernetes.Clientset
+	restclient *rest.RESTClient
+	config     *rest.Config
+	name       string
 )
 
 func init() {
 	var err error
-	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		&clientcmd.ClientConfigLoadingRules{
-			ExplicitPath: filepath.Join(homedir.HomeDir(), clientcmd.RecommendedHomeDir, clientcmd.RecommendedFileName),
-		},
-		nil,
-	)
-	config, err = clientConfig.ClientConfig()
-	if err != nil {
+	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
+	f := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
+
+	if config, err = f.ToRESTConfig(); err != nil {
 		log.Fatal(err)
 	}
-	clientset, err = kubernetes.NewForConfig(config)
-	if err != nil {
+	if restclient, err = rest.RESTClientFor(config); err != nil {
 		log.Fatal(err)
 	}
-	namespace, _, _ = clientConfig.Namespace()
+	if clientset, err = kubernetes.NewForConfig(config); err != nil {
+		log.Fatal(err)
+	}
+	if namespace, _, err = f.ToRawKubeConfigLoader().Namespace(); err != nil {
+		log.Fatal(err)
+	}
 
 	k8sCIDR, err := getCIDR(clientset, namespace)
 	if err != nil {
@@ -80,7 +83,7 @@ func main() {
 	readyChan := make(chan struct{})
 	stop := make(chan struct{})
 	go func() {
-		err := PortForwardPod(config,
+		err := util.PortForwardPod(config,
 			clientset,
 			name,
 			namespace,
@@ -94,8 +97,8 @@ func main() {
 	}()
 	<-readyChan
 	log.Info("port forward ready")
-
-	if err := dns.Dns(clientset); err != nil {
+	dnsServiceIp := dns.GetDNSServiceIpFromPod(clientset, restclient, config, remote.TrafficManager, namespace)
+	if err := dns.Dns(dnsServiceIp); err != nil {
 		log.Fatal(err)
 	} else {
 		log.Info("dns service ok")
