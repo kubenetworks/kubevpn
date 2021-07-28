@@ -40,9 +40,9 @@ func GetDNSIp(clientset *kubernetes.Clientset) (string, error) {
 }
 
 func GetDNSServiceIpFromPod(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) string {
-	//if ip, err := GetDNSIp(clientset); err == nil && len(ip) != 0 {
-	//	return ip
-	//}
+	if ip, err := GetDNSIp(clientset); err == nil && len(ip) != 0 {
+		return ip
+	}
 	if ip, err := util.Shell(clientset, restclient, config, remote.TrafficManager, namespace, "cat /etc/resolv.conf | grep nameserver | awk '{print$2}'"); err == nil && len(ip) != 0 {
 		return ip
 	}

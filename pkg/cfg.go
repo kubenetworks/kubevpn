@@ -6,7 +6,9 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
-	"github.com/ginuerzh/gost"
+	gost2 "kubevpn/gost"
+
+	//"github.com/ginuerzh/gost"
 	"io/ioutil"
 	"net"
 	"net/url"
@@ -62,7 +64,7 @@ func loadCA(caFile string) (cp *x509.CertPool, err error) {
 	return
 }
 
-func parseKCPConfig(configFile string) (*gost.KCPConfig, error) {
+func parseKCPConfig(configFile string) (*gost2.KCPConfig, error) {
 	if configFile == "" {
 		return nil, nil
 	}
@@ -72,7 +74,7 @@ func parseKCPConfig(configFile string) (*gost.KCPConfig, error) {
 	}
 	defer file.Close()
 
-	config := &gost.KCPConfig{}
+	config := &gost2.KCPConfig{}
 	if err = json.NewDecoder(file).Decode(config); err != nil {
 		return nil, err
 	}
@@ -107,7 +109,7 @@ func parseUsers(authFile string) (users []*url.Userinfo, err error) {
 	return
 }
 
-func parseAuthenticator(s string) (gost.Authenticator, error) {
+func parseAuthenticator(s string) (gost2.Authenticator, error) {
 	if s == "" {
 		return nil, nil
 	}
@@ -117,10 +119,10 @@ func parseAuthenticator(s string) (gost.Authenticator, error) {
 	}
 	defer f.Close()
 
-	au := gost.NewLocalAuthenticator(nil)
+	au := gost2.NewLocalAuthenticator(nil)
 	au.Reload(f)
 
-	go gost.PeriodReload(au, s)
+	go gost2.PeriodReload(au, s)
 
 	return au, nil
 }
@@ -164,11 +166,11 @@ func parseIP(s string, port string) (ips []string) {
 	return
 }
 
-func parseBypass(s string) *gost.Bypass {
+func parseBypass(s string) *gost2.Bypass {
 	if s == "" {
 		return nil
 	}
-	var matchers []gost.Matcher
+	var matchers []gost2.Matcher
 	var reversed bool
 	if strings.HasPrefix(s, "~") {
 		reversed = true
@@ -182,24 +184,24 @@ func parseBypass(s string) *gost.Bypass {
 			if s == "" {
 				continue
 			}
-			matchers = append(matchers, gost.NewMatcher(s))
+			matchers = append(matchers, gost2.NewMatcher(s))
 		}
-		return gost.NewBypass(reversed, matchers...)
+		return gost2.NewBypass(reversed, matchers...)
 	}
 	defer f.Close()
 
-	bp := gost.NewBypass(reversed)
+	bp := gost2.NewBypass(reversed)
 	bp.Reload(f)
-	go gost.PeriodReload(bp, s)
+	go gost2.PeriodReload(bp, s)
 
 	return bp
 }
 
-func parseResolver(cfg string) gost.Resolver {
+func parseResolver(cfg string) gost2.Resolver {
 	if cfg == "" {
 		return nil
 	}
-	var nss []gost.NameServer
+	var nss []gost2.NameServer
 
 	f, err := os.Open(cfg)
 	if err != nil {
@@ -217,7 +219,7 @@ func parseResolver(cfg string) gost.Resolver {
 				if u.Scheme == "https-chain" {
 					p = u.Scheme
 				}
-				ns := gost.NameServer{
+				ns := gost2.NameServer{
 					Addr:     s,
 					Protocol: p,
 				}
@@ -227,47 +229,47 @@ func parseResolver(cfg string) gost.Resolver {
 
 			ss := strings.Split(s, "/")
 			if len(ss) == 1 {
-				ns := gost.NameServer{
+				ns := gost2.NameServer{
 					Addr: ss[0],
 				}
 				nss = append(nss, ns)
 			}
 			if len(ss) == 2 {
-				ns := gost.NameServer{
+				ns := gost2.NameServer{
 					Addr:     ss[0],
 					Protocol: ss[1],
 				}
 				nss = append(nss, ns)
 			}
 		}
-		return gost.NewResolver(0, nss...)
+		return gost2.NewResolver(0, nss...)
 	}
 	defer f.Close()
 
-	resolver := gost.NewResolver(0)
+	resolver := gost2.NewResolver(0)
 	resolver.Reload(f)
 
-	go gost.PeriodReload(resolver, cfg)
+	go gost2.PeriodReload(resolver, cfg)
 
 	return resolver
 }
 
-func parseHosts(s string) *gost.Hosts {
+func parseHosts(s string) *gost2.Hosts {
 	f, err := os.Open(s)
 	if err != nil {
 		return nil
 	}
 	defer f.Close()
 
-	hosts := gost.NewHosts()
+	hosts := gost2.NewHosts()
 	hosts.Reload(f)
 
-	go gost.PeriodReload(hosts, s)
+	go gost2.PeriodReload(hosts, s)
 
 	return hosts
 }
 
-func parseIPRoutes(s string) (routes []gost.IPRoute) {
+func parseIPRoutes(s string) (routes []gost2.IPRoute) {
 	if s == "" {
 		return
 	}
@@ -277,7 +279,7 @@ func parseIPRoutes(s string) (routes []gost.IPRoute) {
 		ss := strings.Split(s, ",")
 		for _, s := range ss {
 			if _, inet, _ := net.ParseCIDR(strings.TrimSpace(s)); inet != nil {
-				routes = append(routes, gost.IPRoute{Dest: inet})
+				routes = append(routes, gost2.IPRoute{Dest: inet})
 			}
 		}
 		return
@@ -292,7 +294,7 @@ func parseIPRoutes(s string) (routes []gost.IPRoute) {
 			continue
 		}
 
-		var route gost.IPRoute
+		var route gost2.IPRoute
 		var ss []string
 		for _, s := range strings.Split(line, " ") {
 			if s = strings.TrimSpace(s); s != "" {

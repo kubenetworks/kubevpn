@@ -3,34 +3,27 @@ package dns
 import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
-	"k8s.io/client-go/kubernetes"
+	"os"
 	"os/exec"
 )
 
-// todo set dns ip
-// todo needs to test if set dns server do works or not
-func Windows(clientset *kubernetes.Clientset) error {
-	ip, err := GetDNSIp(clientset)
-	if err != nil {
-		return err
+func Windows(ip string) error {
+	tunName := os.Getenv("tunName")
+	fmt.Println("tun name: " + tunName)
+	args := []string{
+		"interface",
+		"ipv4",
+		"add",
+		"dnsserver",
+		fmt.Sprintf("name=\"%s\"", tunName),
+		fmt.Sprintf("address=%s", ip),
+		"index=2",
 	}
-	cmd := "interface ipv4 add dnsserver name=\"Ethernet\" address=%s  index=2"
-	output, err := exec.Command("netsh", fmt.Sprintf(cmd, ip)).CombinedOutput()
+	output, err := exec.Command("netsh", args...).CombinedOutput()
+	log.Info(string(output))
 	if err != nil {
-		return err
+		log.Error(err)
+		return nil
 	}
-	log.Info(output)
-	return nil
-}
-
-// todo update metrics, set default gateway
-func UpdateMetric() error {
-	// todo get tun name
-	cmd := "interface ip set interface interface=\"Ethernet0\" metric=290"
-	output, err := exec.Command("netsh", cmd).CombinedOutput()
-	if err != nil {
-		return err
-	}
-	log.Info(output)
 	return nil
 }

@@ -16,8 +16,10 @@ import (
 	"kubevpn/remote"
 	"kubevpn/util"
 	"net"
+	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
 
 var (
@@ -54,7 +56,11 @@ func init() {
 	}
 	list := []string{k8sCIDR.String()}
 
-	name = remote.CreateServer(clientset, namespace, "192.168.254.100/24")
+	trafficManager := net.IPNet{
+		IP:   net.IPv4(192, 168, 254, 100),
+		Mask: net.IPv4Mask(128, 0, 0, 0),
+	}
+	name = remote.CreateServer(clientset, namespace, trafficManager.String())
 	fmt.Println(name)
 
 	err = remote.InitDHCP(clientset, namespace, &net.IPNet{IP: net.IPv4(196, 168, 254, 100), Mask: net.IPv4Mask(255, 255, 255, 0)})
@@ -65,6 +71,11 @@ func init() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	//if runtime.GOOS == "windows" {
+	dhcp.Mask = net.IPv4Mask(0, 0, 0, 0)
+	//} else {
+	//	dhcp.Mask = net.IPv4Mask(255, 255, 255, 0)
+	//}
 	list = append(list, dhcp.String())
 
 	baseCfg.route.ChainNodes = []string{"ssh://127.0.0.1:2222"}
@@ -90,20 +101,23 @@ func main() {
 	}()
 	<-readyChan
 	log.Info("port forward ready")
-	dnsServiceIp := dns.GetDNSServiceIpFromPod(clientset, restclient, config, remote.TrafficManager, namespace)
-	if runtime.GOOS == "windows" {
-		if err := dns.Dns(dnsServiceIp); err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		// todo implement it
-	}
-	log.Info("dns service ok")
 
 	if err := start(); err != nil {
 		log.Fatal(err)
 	}
-
+	time.Sleep(time.Second * 5)
+	dnsServiceIp := dns.GetDNSServiceIpFromPod(clientset, restclient, config, remote.TrafficManager, namespace)
+	if runtime.GOOS != "windows" {
+		if err := dns.Dns(dnsServiceIp); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		if err := dns.Windows(dnsServiceIp); err != nil {
+			log.Fatal(err)
+		}
+	}
+	log.Info("dns service ok")
+	_ = exec.Command("ping", "-c", "4", "192.168.254.100").Run()
 	select {}
 }
 
