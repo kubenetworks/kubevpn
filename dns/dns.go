@@ -14,12 +14,13 @@ func Windows(ip string) error {
 		"interface",
 		"ipv4",
 		"add",
-		"dnsserver",
+		"dnsservers",
 		fmt.Sprintf("name=\"%s\"", tunName),
 		fmt.Sprintf("address=%s", ip),
-		"index=2",
+		"index=1",
 	}
 	output, err := exec.Command("netsh", args...).CombinedOutput()
+	fmt.Println(exec.Command("netsh", args...).Args)
 	log.Info(string(output))
 	if err != nil {
 		log.Error(err)

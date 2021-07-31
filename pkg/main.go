@@ -13,6 +13,7 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"kubevpn/dns"
 	"kubevpn/exe"
+	"kubevpn/gost"
 	"kubevpn/remote"
 	"kubevpn/util"
 	"net"
@@ -28,7 +29,6 @@ var (
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient
 	config     *rest.Config
-	name       string
 )
 
 func init() {
@@ -49,7 +49,9 @@ func init() {
 	if namespace, _, err = factory.ToRawKubeConfigLoader().Namespace(); err != nil {
 		log.Fatal(err)
 	}
+}
 
+func prepare() {
 	k8sCIDR, err := getCIDR(clientset, namespace)
 	if err != nil {
 		log.Fatal(err)
@@ -60,23 +62,26 @@ func init() {
 		IP:   net.IPv4(192, 168, 254, 100),
 		Mask: net.IPv4Mask(255, 255, 255, 0),
 	}
-	name = remote.CreateServer(clientset, namespace, trafficManager.String())
-	fmt.Println(name)
+	err = remote.CreateServer(clientset, namespace, trafficManager.String())
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	err = remote.InitDHCP(clientset, namespace, &net.IPNet{IP: net.IPv4(196, 168, 254, 100), Mask: net.IPv4Mask(255, 255, 255, 0)})
 	if err != nil {
 		log.Fatal(err)
 	}
-	dhcp, err := remote.GetIpFromDHCP(clientset, namespace)
+	tunIp, err := remote.GetIpFromDHCP(clientset, namespace)
 	if err != nil {
 		log.Fatal(err)
 	}
+	remote.AddCleanUpResourceHandler(clientset, namespace, tunIp)
 	//if runtime.GOOS == "windows" {
-	dhcp.Mask = net.IPv4Mask(0, 0, 0, 0)
+	tunIp.Mask = net.IPv4Mask(0, 0, 0, 0)
 	//} else {
 	//	dhcp.Mask = net.IPv4Mask(255, 255, 255, 0)
 	//}
-	list = append(list, dhcp.String())
+	list = append(list, tunIp.String())
 	//if runtime.GOOS == "windows" {
 	ipNet := net.IPNet{
 		IP:   net.IPv4(192, 168, 254, 100),
@@ -87,10 +92,10 @@ func init() {
 
 	baseCfg.route.ChainNodes = []string{"ssh://127.0.0.1:2222"}
 	baseCfg.route.ServeNodes = []string{
-		fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", dhcp.String(), strings.Join(list, ",")),
+		fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", tunIp.String(), strings.Join(list, ",")),
 	}
-	fmt.Println("your ip is " + dhcp.String())
-	baseCfg.Debug = true
+	fmt.Println("your ip is " + tunIp.String())
+	gost.Debug = true
 
 	if runtime.GOOS == "windows" {
 		exe.InstallTunTapDriver()
@@ -98,10 +103,12 @@ func init() {
 }
 
 func main() {
+	prepare()
+
 	readyChan := make(chan struct{})
 	stop := make(chan struct{})
 	go func() {
-		err := util.PortForwardPod(config, clientset, name, namespace, "2222:2222", readyChan, stop)
+		err := util.PortForwardPod(config, clientset, remote.TrafficManager, namespace, "2222:2222", readyChan, stop)
 		if err != nil {
 			log.Error(err)
 		}

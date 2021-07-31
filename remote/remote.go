@@ -2,7 +2,8 @@ package remote
 
 import (
 	"context"
-	"github.com/sirupsen/logrus"
+	"errors"
+	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -10,14 +11,13 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/util/podutils"
-	"log"
 	"sort"
 	"time"
 )
 
 const TrafficManager = "kubevpn.traffic.manager"
 
-func CreateServer(clientset *kubernetes.Clientset, namespace, ip string) string {
+func CreateServer(clientset *kubernetes.Clientset, namespace, ip string) error {
 	firstPod, i, err3 := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
 		namespace,
 		fields.OneTermEqualSelector("app", TrafficManager).String(),
@@ -28,7 +28,7 @@ func CreateServer(clientset *kubernetes.Clientset, namespace, ip string) string 
 	)
 
 	if err3 == nil && i != 0 && firstPod != nil {
-		return firstPod.GetName()
+		return nil
 	}
 
 	t := true
@@ -100,8 +100,9 @@ out:
 			}
 		case <-tick:
 			watch.Stop()
-			logrus.Error("timeout")
+			log.Error("timeout")
+			return errors.New("timeout")
 		}
 	}
-	return name
+	return nil
 }

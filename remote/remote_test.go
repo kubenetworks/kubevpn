@@ -62,14 +62,16 @@ func TestGetIPFromDHCP(t *testing.T) {
 	}
 	for i := 0; i < 10; i++ {
 		ipNet, err := GetIpFromDHCP(clientset, "test")
+		ipNet2, err := GetIpFromDHCP(clientset, "test")
 		if err != nil {
 			fmt.Println(err)
 			continue
 		} else {
-			fmt.Println(ipNet.String())
+			fmt.Printf("%s->%s\n", ipNet.String(), ipNet2.String())
 		}
 		time.Sleep(time.Millisecond * 10)
 		err = ReleaseIpToDHCP(clientset, "test", ipNet)
+		err = ReleaseIpToDHCP(clientset, "test", ipNet2)
 		if err != nil {
 			fmt.Println(err)
 		}
