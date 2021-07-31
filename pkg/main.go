@@ -58,7 +58,7 @@ func init() {
 
 	trafficManager := net.IPNet{
 		IP:   net.IPv4(192, 168, 254, 100),
-		Mask: net.IPv4Mask(128, 0, 0, 0),
+		Mask: net.IPv4Mask(255, 255, 255, 0),
 	}
 	name = remote.CreateServer(clientset, namespace, trafficManager.String())
 	fmt.Println(name)
@@ -77,6 +77,13 @@ func init() {
 	//	dhcp.Mask = net.IPv4Mask(255, 255, 255, 0)
 	//}
 	list = append(list, dhcp.String())
+	//if runtime.GOOS == "windows" {
+	ipNet := net.IPNet{
+		IP:   net.IPv4(192, 168, 254, 100),
+		Mask: net.IPv4Mask(255, 255, 255, 0),
+	}
+	list = append(list, ipNet.String())
+	//}
 
 	baseCfg.route.ChainNodes = []string{"ssh://127.0.0.1:2222"}
 	baseCfg.route.ServeNodes = []string{
