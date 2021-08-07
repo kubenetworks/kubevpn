@@ -1,3 +1,5 @@
+// +build windows
+
 package dns
 
 import (
@@ -7,7 +9,7 @@ import (
 	"os/exec"
 )
 
-func Windows(ip string) error {
+func DNS(ip string) error {
 	tunName := os.Getenv("tunName")
 	fmt.Println("tun name: " + tunName)
 	args := []string{

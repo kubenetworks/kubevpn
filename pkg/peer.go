@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"io/ioutil"
-	gost2 "kubevpn/gost"
+	"kubevpn/gost"
 	"strconv"
 	"strings"
 	"time"
@@ -18,8 +18,8 @@ type peerConfig struct {
 	FailTimeout time.Duration
 	period      time.Duration // the period for live reloading
 	Nodes       []string      `json:"nodes"`
-	group       *gost2.NodeGroup
-	baseNodes   []gost2.Node
+	group       *gost.NodeGroup
+	baseNodes   []gost.Node
 	stopped     chan struct{}
 }
 
@@ -45,14 +45,14 @@ func (cfg *peerConfig) Reload(r io.Reader) error {
 	group := cfg.group
 	group.SetSelector(
 		nil,
-		gost2.WithFilter(
-			&gost2.FailFilter{
+		gost.WithFilter(
+			&gost.FailFilter{
 				MaxFails:    cfg.MaxFails,
 				FailTimeout: cfg.FailTimeout,
 			},
-			&gost2.InvalidFilter{},
+			&gost.InvalidFilter{},
 		),
-		gost2.WithStrategy(gost2.NewStrategy(cfg.Strategy)),
+		gost.WithStrategy(gost.NewStrategy(cfg.Strategy)),
 	)
 
 	gNodes := cfg.baseNodes

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"errors"
 	gost2 "kubevpn/gost"
 
@@ -62,23 +61,6 @@ func loadCA(caFile string) (cp *x509.CertPool, err error) {
 		return nil, errors.New("AppendCertsFromPEM failed")
 	}
 	return
-}
-
-func parseKCPConfig(configFile string) (*gost2.KCPConfig, error) {
-	if configFile == "" {
-		return nil, nil
-	}
-	file, err := os.Open(configFile)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	config := &gost2.KCPConfig{}
-	if err = json.NewDecoder(file).Decode(config); err != nil {
-		return nil, err
-	}
-	return config, nil
 }
 
 func parseUsers(authFile string) (users []*url.Userinfo, err error) {

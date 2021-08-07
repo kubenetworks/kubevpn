@@ -127,15 +127,9 @@ func main() {
 		log.Fatal(err)
 	}
 	//time.Sleep(time.Second * 5)
-	dnsServiceIp := dns.GetDNSServiceIpFromPod(clientset, restclient, config, remote.TrafficManager, namespace)
-	if runtime.GOOS != "windows" {
-		if err := dns.Dns(dnsServiceIp); err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		if err := dns.Windows(dnsServiceIp); err != nil {
-			log.Fatal(err)
-		}
+	dnsServiceIp := util.GetDNSServiceIpFromPod(clientset, restclient, config, remote.TrafficManager, namespace)
+	if err := dns.DNS(dnsServiceIp); err != nil {
+		log.Fatal(err)
 	}
 	log.Info("dns service ok")
 	_ = exec.Command("ping", "-c", "4", "192.168.254.100").Run()
