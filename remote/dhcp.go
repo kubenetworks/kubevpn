@@ -41,14 +41,14 @@ func AddCleanUpResourceHandler(client *kubernetes.Clientset, namespace string, s
 		for _, s := range strings.Split(services, ",") {
 			util.ScaleDeploymentReplicasTo(client, namespace, s, 1)
 			newName := s + "-" + "shadow"
-			deletePod(client, newName, namespace)
+			deletePod(client, namespace, newName)
 		}
 		log.Info("clean up successful")
 		os.Exit(0)
 	}()
 }
 
-func deletePod(client *kubernetes.Clientset, podName, namespace string) {
+func deletePod(client *kubernetes.Clientset, namespace, podName string) {
 	zero := int64(0)
 	err := client.CoreV1().Pods(namespace).Delete(context.TODO(), podName, metav1.DeleteOptions{
 		GracePeriodSeconds: &zero,
@@ -59,12 +59,12 @@ func deletePod(client *kubernetes.Clientset, podName, namespace string) {
 }
 
 // vendor/k8s.io/kubectl/pkg/polymorphichelpers/rollback.go:99
-func updateRefCount(client *kubernetes.Clientset, namespace string, increment int) {
+func updateRefCount(client *kubernetes.Clientset, namespace, name string, increment int) {
 	err := retry.OnError(
 		retry.DefaultRetry,
 		func(err error) bool { return err != nil },
 		func() error {
-			configMap, err := client.CoreV1().ConfigMaps(namespace).Get(context.TODO(), util.TrafficManager, metav1.GetOptions{})
+			configMap, err := client.CoreV1().ConfigMaps(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 			if err != nil {
 				log.Errorf("update ref-count failed, increment: %d, error: %v", increment, err)
 				return err
@@ -94,7 +94,7 @@ func updateRefCount(client *kubernetes.Clientset, namespace string, increment in
 }
 
 func cleanUpTrafficManagerIfRefCountIsZero(client *kubernetes.Clientset, namespace string) {
-	updateRefCount(client, namespace, -1)
+	updateRefCount(client, namespace, util.TrafficManager, -1)
 	configMap, err := client.CoreV1().ConfigMaps(namespace).Get(context.TODO(), util.TrafficManager, metav1.GetOptions{})
 	if err != nil {
 		log.Error(err)
