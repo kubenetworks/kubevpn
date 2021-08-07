@@ -218,6 +218,6 @@ func getLabels(clientset *kubernetes.Clientset, namespace, service string) map[s
 		return nil
 	}
 	newName := service + "-" + "shadow"
-	deletePod(clientset, newName, namespace, true)
+	deletePod(clientset, newName, namespace)
 	return selector
 }

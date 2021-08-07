@@ -10,10 +10,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	net2 "k8s.io/apimachinery/pkg/util/net"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	"kubevpn/util"
@@ -42,45 +40,21 @@ func AddCleanUpResourceHandler(client *kubernetes.Clientset, namespace string, s
 		}
 		for _, s := range strings.Split(services, ",") {
 			util.ScaleDeploymentReplicasTo(client, s, namespace, 1)
+			newName := s + "-" + "shadow"
+			deletePod(client, newName, namespace)
 		}
 		log.Info("clean up successful")
 		os.Exit(0)
 	}()
 }
 
-func deletePod(client *kubernetes.Clientset, podName, namespace string, wait bool) {
+func deletePod(client *kubernetes.Clientset, podName, namespace string) {
 	zero := int64(0)
 	err := client.CoreV1().Pods(namespace).Delete(context.TODO(), podName, metav1.DeleteOptions{
 		GracePeriodSeconds: &zero,
 	})
-	if !wait {
-		return
-	}
 	if err != nil && errors.IsNotFound(err) {
 		log.Infof("not found shadow pod: %s, no need to delete it", podName)
-		return
-	}
-	log.Infof("waiting for pod: %s to be deleted...", podName)
-	if err == nil {
-		w, errs := client.CoreV1().Pods(namespace).
-			Watch(context.TODO(), metav1.ListOptions{
-				FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
-				Watch:         true,
-			})
-		if errs != nil {
-			log.Error(errs)
-			return
-		}
-	out:
-		for {
-			select {
-			case event := <-w.ResultChan():
-				if watch.Deleted == event.Type {
-					break out
-				}
-			}
-		}
-		log.Infof("delete pod: %s suecessfully", podName)
 	}
 }
 
