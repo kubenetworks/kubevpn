@@ -26,7 +26,6 @@ import (
 	"k8s.io/client-go/transport/spdy"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/cmd/exec"
-	"kubevpn/remote"
 	"net"
 	"net/http"
 	"os"
@@ -229,7 +228,7 @@ func GetDNSServiceIpFromPod(clientset *kubernetes.Clientset, restclient *rest.RE
 	if ip, err := GetDNSIp(clientset); err == nil && len(ip) != 0 {
 		return ip
 	}
-	if ip, err := Shell(clientset, restclient, config, remote.TrafficManager, namespace, "cat /etc/resolv.conf | grep nameserver | awk '{print$2}'"); err == nil && len(ip) != 0 {
+	if ip, err := Shell(clientset, restclient, config, TrafficManager, namespace, "cat /etc/resolv.conf | grep nameserver | awk '{print$2}'"); err == nil && len(ip) != 0 {
 		return ip
 	}
 	log.Fatal("this should not happened")

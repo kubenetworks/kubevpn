@@ -28,7 +28,7 @@ func TestCreateServer(t *testing.T) {
 		log.Fatal(err)
 	}
 
-	server := CreateServer(clientset, "test", "192.168.254.100/24")
+	server, err := CreateServerOutbound(clientset, "test", "192.168.254.100/24")
 	fmt.Println(server)
 }
 

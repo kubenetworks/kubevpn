@@ -27,6 +27,7 @@ var (
 	baseCfg        = &baseConfig{}
 	kubeconfigpath string
 	namespace      string
+	services       string
 	clientset      *kubernetes.Clientset
 	restclient     *rest.RESTClient
 	config         *rest.Config
@@ -35,8 +36,9 @@ var (
 func init() {
 	flag.StringVar(&kubeconfigpath, "kubeconfig", clientcmd.RecommendedHomeFile, "kubeconfig")
 	flag.StringVar(&namespace, "namespace", "", "namespace")
+	flag.StringVar(&services, "services", "", "services")
 	flag.Parse()
-
+	fmt.Printf("kubeconfig path: %s, namespace: %s, serivces: %s\n", kubeconfigpath, namespace, services)
 	var err error
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
 	configFlags.KubeConfig = &kubeconfigpath
@@ -68,10 +70,6 @@ func prepare() {
 		IP:   net.IPv4(192, 168, 254, 100),
 		Mask: net.IPv4Mask(255, 255, 255, 0),
 	}
-	err = remote.CreateServer(clientset, namespace, trafficManager.String())
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	err = remote.InitDHCP(clientset, namespace, &net.IPNet{IP: net.IPv4(196, 168, 254, 100), Mask: net.IPv4Mask(255, 255, 255, 0)})
 	if err != nil {
@@ -81,7 +79,20 @@ func prepare() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	remote.AddCleanUpResourceHandler(clientset, namespace, tunIp)
+	pod, err := remote.CreateServerOutbound(clientset, namespace, trafficManager.String())
+	if err != nil {
+		log.Fatal(err)
+	}
+	tempIps := []*net.IPNet{tunIp}
+	for _, service := range strings.Split(services, ",") {
+		virtualShadowIp, _ := remote.GetRandomIpFromDHCP(clientset, namespace)
+		tempIps = append(tempIps, virtualShadowIp)
+		err = remote.CreateServerOutboundAndInbound(clientset, namespace, service, tunIp.IP.String(), pod.Status.PodIP, virtualShadowIp.String())
+		if err != nil {
+			log.Error(err)
+		}
+	}
+	remote.AddCleanUpResourceHandler(clientset, namespace, services, tempIps...)
 	//if runtime.GOOS == "windows" {
 	tunIp.Mask = net.IPv4Mask(0, 0, 0, 0)
 	//} else {
@@ -115,7 +126,7 @@ func main() {
 	readyChan := make(chan struct{})
 	stop := make(chan struct{})
 	go func() {
-		err := util.PortForwardPod(config, clientset, remote.TrafficManager, namespace, "10800:10800", readyChan, stop)
+		err := util.PortForwardPod(config, clientset, util.TrafficManager, namespace, "10800:10800", readyChan, stop)
 		if err != nil {
 			log.Error(err)
 		}
@@ -127,7 +138,7 @@ func main() {
 		log.Fatal(err)
 	}
 	//time.Sleep(time.Second * 5)
-	dnsServiceIp := util.GetDNSServiceIpFromPod(clientset, restclient, config, remote.TrafficManager, namespace)
+	dnsServiceIp := util.GetDNSServiceIpFromPod(clientset, restclient, config, util.TrafficManager, namespace)
 	if err := dns.DNS(dnsServiceIp); err != nil {
 		log.Fatal(err)
 	}

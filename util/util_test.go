@@ -11,7 +11,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kubectl/pkg/cmd/util"
-	"kubevpn/remote"
 	"testing"
 )
 
@@ -42,7 +41,7 @@ func TestShell(t *testing.T) {
 		log.Fatal(err)
 	}
 
-	out, err := Shell(clientset, restclient, config, remote.TrafficManager, namespace, "cat /etc/resolv.conf | grep nameserver | awk '{print$2}'")
+	out, err := Shell(clientset, restclient, config, TrafficManager, namespace, "cat /etc/resolv.conf | grep nameserver | awk '{print$2}'")
 	serviceList, err := clientset.CoreV1().Services(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("metadata.name", "kube-dns").String(),
 	})

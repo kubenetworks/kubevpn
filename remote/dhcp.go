@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
+	"kubevpn/util"
 	"net"
 	"os"
 	"os/signal"
@@ -27,15 +28,20 @@ import (
 
 var stopChan = make(chan os.Signal)
 
-func AddCleanUpResourceHandler(client *kubernetes.Clientset, namespace string, ip *net.IPNet) {
+func AddCleanUpResourceHandler(client *kubernetes.Clientset, namespace string, services string, ip ...*net.IPNet) {
 	signal.Notify(stopChan, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL /*, syscall.SIGSTOP*/)
 	go func() {
 		<-stopChan
 		log.Info("prepare to exit, cleaning up")
 		//cleanUpTrafficManagerIfRefCountIsZero(client, namespace)
-		err := ReleaseIpToDHCP(client, namespace, ip)
-		if err != nil {
-			log.Errorf("failed to release ip to dhcp, err: %v", err)
+		for _, ipNet := range ip {
+			err := ReleaseIpToDHCP(client, namespace, ipNet)
+			if err != nil {
+				log.Errorf("failed to release ip to dhcp, err: %v", err)
+			}
+		}
+		for _, s := range strings.Split(services, ",") {
+			util.ScaleDeploymentReplicasTo(client, s, namespace, 1)
 		}
 		log.Info("clean up successful")
 		os.Exit(0)
@@ -43,12 +49,15 @@ func AddCleanUpResourceHandler(client *kubernetes.Clientset, namespace string, i
 }
 
 func deletePod(client *kubernetes.Clientset, podName, namespace string, wait bool) {
-	err := client.CoreV1().Pods(namespace).Delete(context.TODO(), podName, metav1.DeleteOptions{})
+	zero := int64(0)
+	err := client.CoreV1().Pods(namespace).Delete(context.TODO(), podName, metav1.DeleteOptions{
+		GracePeriodSeconds: &zero,
+	})
 	if !wait {
 		return
 	}
 	if err != nil && errors.IsNotFound(err) {
-		log.Info("not found shadow pod, no need to delete it")
+		log.Infof("not found shadow pod: %s, no need to delete it", podName)
 		return
 	}
 	log.Infof("waiting for pod: %s to be deleted...", podName)
@@ -81,7 +90,7 @@ func updateRefCount(client *kubernetes.Clientset, namespace string, increment in
 		retry.DefaultRetry,
 		func(err error) bool { return err != nil },
 		func() error {
-			configMap, err := client.CoreV1().ConfigMaps(namespace).Get(context.TODO(), TrafficManager, metav1.GetOptions{})
+			configMap, err := client.CoreV1().ConfigMaps(namespace).Get(context.TODO(), util.TrafficManager, metav1.GetOptions{})
 			if err != nil {
 				log.Errorf("update ref-count failed, increment: %d, error: %v", increment, err)
 				return err
@@ -99,7 +108,7 @@ func updateRefCount(client *kubernetes.Clientset, namespace string, increment in
 				},
 			})
 			_, err = client.CoreV1().ConfigMaps(namespace).
-				Patch(context.TODO(), TrafficManager, types.JSONPatchType, patch, metav1.PatchOptions{})
+				Patch(context.TODO(), util.TrafficManager, types.JSONPatchType, patch, metav1.PatchOptions{})
 			return err
 		},
 	)
@@ -112,7 +121,7 @@ func updateRefCount(client *kubernetes.Clientset, namespace string, increment in
 
 func cleanUpTrafficManagerIfRefCountIsZero(client *kubernetes.Clientset, namespace string) {
 	updateRefCount(client, namespace, -1)
-	configMap, err := client.CoreV1().ConfigMaps(namespace).Get(context.TODO(), TrafficManager, metav1.GetOptions{})
+	configMap, err := client.CoreV1().ConfigMaps(namespace).Get(context.TODO(), util.TrafficManager, metav1.GetOptions{})
 	if err != nil {
 		log.Error(err)
 		return
@@ -125,13 +134,13 @@ func cleanUpTrafficManagerIfRefCountIsZero(client *kubernetes.Clientset, namespa
 	// if refcount is less than zero or equals to zero, means no body will using this dns pod, so clean it
 	if refCount <= 0 {
 		log.Info("refCount is zero, prepare to clean up resource")
-		_ = client.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), TrafficManager, metav1.DeleteOptions{})
-		_ = client.CoreV1().Pods(namespace).Delete(context.TODO(), TrafficManager, metav1.DeleteOptions{})
+		_ = client.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), util.TrafficManager, metav1.DeleteOptions{})
+		_ = client.CoreV1().Pods(namespace).Delete(context.TODO(), util.TrafficManager, metav1.DeleteOptions{})
 	}
 }
 
 func InitDHCP(client *kubernetes.Clientset, namespace string, addr *net.IPNet) error {
-	get, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), TrafficManager, metav1.GetOptions{})
+	get, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
 	if err == nil && get != nil {
 		return nil
 	}
@@ -146,7 +155,7 @@ func InitDHCP(client *kubernetes.Clientset, namespace string, addr *net.IPNet) e
 	}
 	result := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      TrafficManager,
+			Name:      util.TrafficManager,
 			Namespace: namespace,
 			Labels:    map[string]string{},
 		},
@@ -161,7 +170,7 @@ func InitDHCP(client *kubernetes.Clientset, namespace string, addr *net.IPNet) e
 }
 
 func GetIpFromDHCP(client *kubernetes.Clientset, namespace string) (*net.IPNet, error) {
-	get, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), TrafficManager, metav1.GetOptions{})
+	get, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
 	if err != nil {
 		log.Errorf("failed to get ip from dhcp, err: %v", err)
 		return nil, err
@@ -179,6 +188,31 @@ func GetIpFromDHCP(client *kubernetes.Clientset, namespace string) (*net.IPNet, 
 
 	return &net.IPNet{
 		IP:   net.IPv4(192, 168, 254, byte(ip)),
+		Mask: net.IPv4Mask(255, 255, 255, 0),
+	}, nil
+}
+
+func GetRandomIpFromDHCP(client *kubernetes.Clientset, namespace string) (*net.IPNet, error) {
+	get, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
+	if err != nil {
+		log.Errorf("failed to get ip from dhcp, err: %v", err)
+		return nil, err
+	}
+	split := strings.Split(get.Data["DHCP"], ",")
+
+	ip := split[0]
+	split = split[1:]
+
+	get.Data["DHCP"] = strings.Join(split, ",")
+	_, err = client.CoreV1().ConfigMaps(namespace).Update(context.Background(), get, metav1.UpdateOptions{})
+	if err != nil {
+		log.Errorf("update dhcp error after get ip, need to put ip back, err: %v", err)
+		return nil, err
+	}
+
+	atoi, _ := strconv.Atoi(ip)
+	return &net.IPNet{
+		IP:   net.IPv4(192, 168, 254, byte(atoi)),
 		Mask: net.IPv4Mask(255, 255, 255, 0),
 	}, nil
 }
@@ -250,7 +284,7 @@ func BytesToInt(b []byte) uint32 {
 }
 
 func ReleaseIpToDHCP(client *kubernetes.Clientset, namespace string, ip *net.IPNet) error {
-	get, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), TrafficManager, metav1.GetOptions{})
+	get, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
 	if err != nil {
 		log.Errorf("failed to get dhcp, err: %v", err)
 		return err
