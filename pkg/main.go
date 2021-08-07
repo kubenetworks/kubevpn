@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,21 +21,25 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"time"
 )
 
 var (
-	baseCfg    = &baseConfig{}
-	namespace  string
-	clientset  *kubernetes.Clientset
-	restclient *rest.RESTClient
-	config     *rest.Config
+	baseCfg        = &baseConfig{}
+	kubeconfigpath string
+	namespace      string
+	clientset      *kubernetes.Clientset
+	restclient     *rest.RESTClient
+	config         *rest.Config
 )
 
 func init() {
+	flag.StringVar(&kubeconfigpath, "kubeconfig", clientcmd.RecommendedHomeFile, "kubeconfig")
+	flag.StringVar(&namespace, "namespace", "", "namespace")
+	flag.Parse()
+
 	var err error
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
+	configFlags.KubeConfig = &kubeconfigpath
 	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 
 	if config, err = factory.ToRESTConfig(); err != nil {
@@ -49,6 +54,7 @@ func init() {
 	if namespace, _, err = factory.ToRawKubeConfigLoader().Namespace(); err != nil {
 		log.Fatal(err)
 	}
+
 }
 
 func prepare() {
@@ -81,20 +87,22 @@ func prepare() {
 	//} else {
 	//	dhcp.Mask = net.IPv4Mask(255, 255, 255, 0)
 	//}
-	list = append(list, tunIp.String())
+	//list = append(list, tunIp.String())
 	//if runtime.GOOS == "windows" {
 	ipNet := net.IPNet{
 		IP:   net.IPv4(192, 168, 254, 100),
 		Mask: net.IPv4Mask(255, 255, 255, 0),
 	}
 	list = append(list, ipNet.String())
+	list = append(list, "192.168.254.162/32")
 	//}
 
-	baseCfg.route.ChainNodes = []string{"ssh://127.0.0.1:2222"}
+	baseCfg.route.ChainNodes = []string{"socks5://127.0.0.1:10800?notls=true"}
 	baseCfg.route.ServeNodes = []string{
 		fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", tunIp.String(), strings.Join(list, ",")),
 	}
 	fmt.Println("your ip is " + tunIp.String())
+	//fmt.Println(baseCfg.route.ServeNodes)
 	gost.Debug = true
 
 	if runtime.GOOS == "windows" {
@@ -104,11 +112,10 @@ func prepare() {
 
 func main() {
 	prepare()
-
 	readyChan := make(chan struct{})
 	stop := make(chan struct{})
 	go func() {
-		err := util.PortForwardPod(config, clientset, remote.TrafficManager, namespace, "2222:2222", readyChan, stop)
+		err := util.PortForwardPod(config, clientset, remote.TrafficManager, namespace, "10800:10800", readyChan, stop)
 		if err != nil {
 			log.Error(err)
 		}
@@ -119,7 +126,7 @@ func main() {
 	if err := start(); err != nil {
 		log.Fatal(err)
 	}
-	time.Sleep(time.Second * 5)
+	//time.Sleep(time.Second * 5)
 	dnsServiceIp := dns.GetDNSServiceIpFromPod(clientset, restclient, config, remote.TrafficManager, namespace)
 	if runtime.GOOS != "windows" {
 		if err := dns.Dns(dnsServiceIp); err != nil {

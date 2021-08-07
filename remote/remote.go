@@ -53,7 +53,7 @@ func CreateServer(clientset *kubernetes.Clientset, namespace, ip string) error {
 							"iptables -P FORWARD ACCEPT;" +
 							"iptables -t nat -A POSTROUTING -s 192.168.254.0/24 -o eth0 -j MASQUERADE;" +
 							"iptables -t nat -A POSTROUTING -s 172.20.0.0/16 -o eth0 -j MASQUERADE;" +
-							"gost -L ssh://:2222 -L tun://:8421?net=" + ip + " -D",
+							"gost -L socks5://:10800 -L tun://:8421?net=" + ip + " -D",
 					},
 					SecurityContext: &v1.SecurityContext{
 						Capabilities: &v1.Capabilities{
