@@ -39,7 +39,7 @@ func AddCleanUpResourceHandler(client *kubernetes.Clientset, namespace string, s
 			}
 		}
 		for _, s := range strings.Split(services, ",") {
-			util.ScaleDeploymentReplicasTo(client, s, namespace, 1)
+			util.ScaleDeploymentReplicasTo(client, namespace, s, 1)
 			newName := s + "-" + "shadow"
 			deletePod(client, newName, namespace)
 		}

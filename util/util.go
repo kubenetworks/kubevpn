@@ -138,7 +138,7 @@ func PortForwardPod(config *rest.Config, clientset *kubernetes.Clientset, podNam
 	return nil
 }
 
-func ScaleDeploymentReplicasTo(options *kubernetes.Clientset, name, namespace string, replicas int32) {
+func ScaleDeploymentReplicasTo(options *kubernetes.Clientset, namespace, name string, replicas int32) {
 	err := retry.OnError(
 		retry.DefaultRetry,
 		func(err error) bool { return err != nil },

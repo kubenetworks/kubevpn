@@ -28,7 +28,17 @@ func TestCreateServer(t *testing.T) {
 		log.Fatal(err)
 	}
 
-	server, err := CreateServerOutbound(clientset, "test", "192.168.254.100/24")
+	i := &net.IPNet{
+		IP:   net.ParseIP("192.168.254.100"),
+		Mask: net.IPv4Mask(255, 255, 255, 0),
+	}
+
+	j := &net.IPNet{
+		IP:   net.ParseIP("172.20.0.0"),
+		Mask: net.IPv4Mask(255, 255, 0, 0),
+	}
+
+	server, err := CreateServerOutbound(clientset, "test", i, j)
 	fmt.Println(server)
 }
 

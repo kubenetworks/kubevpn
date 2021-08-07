@@ -12,11 +12,12 @@ import (
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"kubevpn/util"
+	"net"
 	"sort"
 	"time"
 )
 
-func CreateServerOutbound(clientset *kubernetes.Clientset, namespace, serverIp string) (*v1.Pod, error) {
+func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, serverIp, nodeCIDR *net.IPNet) (*v1.Pod, error) {
 	firstPod, i, err3 := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
 		namespace,
 		fields.OneTermEqualSelector("app", util.TrafficManager).String(),
@@ -51,8 +52,8 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace, serverIp s
 							"iptables -P INPUT ACCEPT;" +
 							"iptables -P FORWARD ACCEPT;" +
 							"iptables -t nat -A POSTROUTING -s 192.168.254.0/24 -o eth0 -j MASQUERADE;" +
-							"iptables -t nat -A POSTROUTING -s 172.20.0.0/16 -o eth0 -j MASQUERADE;" +
-							"gost -L socks5://:10800 -L tun://:8421?net=" + serverIp + " -D",
+							"iptables -t nat -A POSTROUTING -s " + nodeCIDR.String() + " -o eth0 -j MASQUERADE;" +
+							"gost -L socks5://:10800 -L tun://:8421?net=" + serverIp.String() + " -D",
 					},
 					// todo get pod ip
 					Lifecycle: &v1.Lifecycle{
@@ -196,7 +197,7 @@ func updateReplicasToZeroAndGetLabels(clientset *kubernetes.Clientset, namespace
 		return nil
 	}
 	log.Info("prepare to expose local service to remote service: " + service)
-	util.ScaleDeploymentReplicasTo(clientset, service, namespace, 0)
+	util.ScaleDeploymentReplicasTo(clientset, namespace, service, 0)
 	labels := getLabels(clientset, namespace, service)
 	if labels == nil {
 		log.Info("fail to create shadow")

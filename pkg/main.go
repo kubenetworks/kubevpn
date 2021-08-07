@@ -79,7 +79,7 @@ func prepare() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	pod, err := remote.CreateServerOutbound(clientset, namespace, trafficManager.String())
+	pod, err := remote.CreateServerOutbound(clientset, namespace, &trafficManager, k8sCIDR)
 	if err != nil {
 		log.Fatal(err)
 	}
