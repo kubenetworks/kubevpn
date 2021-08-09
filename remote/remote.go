@@ -14,10 +14,11 @@ import (
 	"kubevpn/util"
 	"net"
 	"sort"
+	"strings"
 	"time"
 )
 
-func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, serverIp, nodeCIDR *net.IPNet) (*v1.Pod, error) {
+func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, serverIp *net.IPNet, nodeCIDR []*net.IPNet) (*v1.Pod, error) {
 	firstPod, i, err3 := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
 		namespace,
 		fields.OneTermEqualSelector("app", util.TrafficManager).String(),
@@ -30,6 +31,17 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 	if err3 == nil && i != 0 && firstPod != nil {
 		return firstPod, nil
 	}
+	args := []string{
+		"sysctl net.ipv4.ip_forward=1",
+		"iptables -F",
+		"iptables -P INPUT ACCEPT",
+		"iptables -P FORWARD ACCEPT",
+		"iptables -t nat -A POSTROUTING -s 192.168.254.0/24 -o eth0 -j MASQUERADE",
+	}
+	for _, ipNet := range nodeCIDR {
+		args = append(args, "iptables -t nat -A POSTROUTING -s "+ipNet.String()+" -o eth0 -j MASQUERADE")
+	}
+	args = append(args, "gost -L socks5://:10800 -L tun://:8421?net="+serverIp.String()+" -D")
 
 	t := true
 	zero := int64(0)
@@ -46,23 +58,7 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 					Name:    "vpn",
 					Image:   "naison/kubevpn:latest",
 					Command: []string{"/bin/sh", "-c"},
-					Args: []string{
-						"sysctl net.ipv4.ip_forward=1;" +
-							"iptables -F;" +
-							"iptables -P INPUT ACCEPT;" +
-							"iptables -P FORWARD ACCEPT;" +
-							"iptables -t nat -A POSTROUTING -s 192.168.254.0/24 -o eth0 -j MASQUERADE;" +
-							"iptables -t nat -A POSTROUTING -s " + nodeCIDR.String() + " -o eth0 -j MASQUERADE;" +
-							"gost -L socks5://:10800 -L tun://:8421?net=" + serverIp.String() + " -D",
-					},
-					// todo get pod ip
-					Lifecycle: &v1.Lifecycle{
-						PostStart: &v1.Handler{
-							Exec: &v1.ExecAction{
-								Command: []string{"env"},
-							},
-						},
-					},
+					Args:    []string{strings.Join(args, ";")},
 					SecurityContext: &v1.SecurityContext{
 						Capabilities: &v1.Capabilities{
 							Add: []v1.Capability{

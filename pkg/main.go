@@ -60,11 +60,14 @@ func init() {
 }
 
 func prepare() {
-	k8sCIDR, err := getCIDR(clientset, namespace)
+	k8sCIDRs, err := getCIDR(clientset, namespace)
 	if err != nil {
 		log.Fatal(err)
 	}
-	list := []string{k8sCIDR.String()}
+	var list []string
+	for _, ipNet := range k8sCIDRs {
+		list = append(list, ipNet.String())
+	}
 
 	trafficManager := net.IPNet{
 		IP:   net.IPv4(192, 168, 254, 100),
@@ -79,7 +82,7 @@ func prepare() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	pod, err := remote.CreateServerOutbound(clientset, namespace, &trafficManager, k8sCIDR)
+	pod, err := remote.CreateServerOutbound(clientset, namespace, &trafficManager, k8sCIDRs)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -173,28 +176,40 @@ func start() error {
 	return nil
 }
 
-func getCIDR(clientset *kubernetes.Clientset, ns string) (*net.IPNet, error) {
+func getCIDR(clientset *kubernetes.Clientset, ns string) (result []*net.IPNet, err error) {
+	var cidrs []*net.IPNet
 	if nodeList, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, node := range nodeList.Items {
 			if _, ip, err := net.ParseCIDR(node.Spec.PodCIDR); err == nil && ip != nil {
 				ip.Mask = net.IPv4Mask(255, 255, 0, 0)
-				return ip, nil
+				cidrs = append(cidrs, ip)
+				err = nil
 			}
 		}
 	}
 	if services, err := clientset.CoreV1().Services(ns).List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, service := range services.Items {
 			if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
-				return &net.IPNet{IP: ip, Mask: net.IPv4Mask(255, 255, 0, 0)}, nil
+				cidrs = append(cidrs, &net.IPNet{IP: ip, Mask: net.IPv4Mask(255, 255, 0, 0)})
 			}
 		}
 	}
 	if podList, err := clientset.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, pod := range podList.Items {
 			if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
-				return &net.IPNet{IP: ip, Mask: net.IPv4Mask(255, 255, 0, 0)}, nil
+				cidrs = append(cidrs, &net.IPNet{IP: ip, Mask: net.IPv4Mask(255, 255, 0, 0)})
 			}
 		}
+	}
+	tempMap := make(map[string]*net.IPNet)
+	for _, cidr := range cidrs {
+		if _, found := tempMap[cidr.String()]; !found {
+			tempMap[cidr.String()] = cidr
+			result = append(result, cidr)
+		}
+	}
+	if len(result) != 0 {
+		return
 	}
 	return nil, fmt.Errorf("can not found cidr")
 }
