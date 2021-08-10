@@ -91,6 +91,9 @@ func prepare() {
 	}
 	tempIps := []*net.IPNet{tunIp}
 	for _, service := range strings.Split(services, ",") {
+		if len(service) == 0 {
+			continue
+		}
 		virtualShadowIp, _ := remote.GetRandomIpFromDHCP(clientset, namespace)
 		tempIps = append(tempIps, virtualShadowIp)
 		err = remote.CreateServerOutboundAndInbound(clientset, namespace, service, tunIp.IP.String(), pod.Status.PodIP, virtualShadowIp.String())
@@ -185,7 +188,7 @@ func getCIDR(clientset *kubernetes.Clientset, ns string) (result []*net.IPNet, e
 	if nodeList, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, node := range nodeList.Items {
 			if _, ip, err := net.ParseCIDR(node.Spec.PodCIDR); err == nil && ip != nil {
-				ip.Mask = net.CIDRMask(24, 32)
+				ip.Mask = net.CIDRMask(16, 32)
 				ip.IP = ip.IP.Mask(ip.Mask)
 				cidrs = append(cidrs, ip)
 				err = nil
@@ -195,7 +198,7 @@ func getCIDR(clientset *kubernetes.Clientset, ns string) (result []*net.IPNet, e
 	if services, err := clientset.CoreV1().Services(ns).List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, service := range services.Items {
 			if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
-				mask := net.CIDRMask(24, 32)
+				mask := net.CIDRMask(16, 32)
 				cidrs = append(cidrs, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
 			}
 		}
@@ -203,7 +206,7 @@ func getCIDR(clientset *kubernetes.Clientset, ns string) (result []*net.IPNet, e
 	if podList, err := clientset.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, pod := range podList.Items {
 			if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
-				mask := net.CIDRMask(24, 32)
+				mask := net.CIDRMask(16, 32)
 				cidrs = append(cidrs, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
 			}
 		}
