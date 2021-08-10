@@ -16,6 +16,6 @@ func DNS(ip string) error {
 		log.Error(err)
 	}
 	filename := filepath.Join("/", "etc", "resolver", "local")
-	fileContent := "nameserver " + ip + "\nsearch default.svc.cluster.local svc.cluster.local cluster.local\noptions ndots:5"
+	fileContent := "nameserver " + ip
 	return ioutil.WriteFile(filename, []byte(fileContent), fs.ModePerm)
 }
