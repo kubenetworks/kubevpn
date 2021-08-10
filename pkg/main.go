@@ -34,6 +34,7 @@ var (
 )
 
 func init() {
+	gost.SetLogger(&gost.LogLogger{})
 	flag.StringVar(&kubeconfigpath, "kubeconfig", clientcmd.RecommendedHomeFile, "kubeconfig")
 	flag.StringVar(&namespace, "namespace", "", "namespace")
 	flag.StringVar(&services, "services", "", "services")
@@ -53,8 +54,10 @@ func init() {
 	if clientset, err = kubernetes.NewForConfig(config); err != nil {
 		log.Fatal(err)
 	}
-	if namespace, _, err = factory.ToRawKubeConfigLoader().Namespace(); err != nil {
-		log.Fatal(err)
+	if namespace == "" {
+		if namespace, _, err = factory.ToRawKubeConfigLoader().Namespace(); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 }
@@ -70,11 +73,11 @@ func prepare() {
 	}
 
 	trafficManager := net.IPNet{
-		IP:   net.IPv4(192, 168, 254, 100),
+		IP:   net.IPv4(192, 192, 254, 100),
 		Mask: net.IPv4Mask(255, 255, 255, 0),
 	}
 
-	err = remote.InitDHCP(clientset, namespace, &net.IPNet{IP: net.IPv4(196, 168, 254, 100), Mask: net.IPv4Mask(255, 255, 255, 0)})
+	err = remote.InitDHCP(clientset, namespace, &trafficManager)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -104,11 +107,11 @@ func prepare() {
 	//list = append(list, tunIp.String())
 	//if runtime.GOOS == "windows" {
 	ipNet := net.IPNet{
-		IP:   net.IPv4(192, 168, 254, 100),
+		IP:   net.IPv4(192, 192, 254, 100),
 		Mask: net.IPv4Mask(255, 255, 255, 0),
 	}
 	list = append(list, ipNet.String())
-	list = append(list, "192.168.254.162/32")
+	//list = append(list, "192.192.254.162/32")
 	//}
 
 	baseCfg.route.ChainNodes = []string{"socks5://127.0.0.1:10800?notls=true"}
@@ -146,7 +149,7 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Info("dns service ok")
-	_ = exec.Command("ping", "-c", "4", "192.168.254.100").Run()
+	_ = exec.Command("ping", "-c", "4", "192.192.254.100").Run()
 	select {}
 }
 
@@ -177,11 +180,13 @@ func start() error {
 }
 
 func getCIDR(clientset *kubernetes.Clientset, ns string) (result []*net.IPNet, err error) {
+	result = make([]*net.IPNet, 0)
 	var cidrs []*net.IPNet
 	if nodeList, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, node := range nodeList.Items {
 			if _, ip, err := net.ParseCIDR(node.Spec.PodCIDR); err == nil && ip != nil {
-				ip.Mask = net.IPv4Mask(255, 255, 0, 0)
+				ip.Mask = net.CIDRMask(24, 32)
+				ip.IP = ip.IP.Mask(ip.Mask)
 				cidrs = append(cidrs, ip)
 				err = nil
 			}
@@ -190,14 +195,16 @@ func getCIDR(clientset *kubernetes.Clientset, ns string) (result []*net.IPNet, e
 	if services, err := clientset.CoreV1().Services(ns).List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, service := range services.Items {
 			if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
-				cidrs = append(cidrs, &net.IPNet{IP: ip, Mask: net.IPv4Mask(255, 255, 0, 0)})
+				mask := net.CIDRMask(24, 32)
+				cidrs = append(cidrs, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
 			}
 		}
 	}
 	if podList, err := clientset.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, pod := range podList.Items {
 			if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
-				cidrs = append(cidrs, &net.IPNet{IP: ip, Mask: net.IPv4Mask(255, 255, 0, 0)})
+				mask := net.CIDRMask(24, 32)
+				cidrs = append(cidrs, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
 			}
 		}
 	}

@@ -36,7 +36,7 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 		"iptables -F",
 		"iptables -P INPUT ACCEPT",
 		"iptables -P FORWARD ACCEPT",
-		"iptables -t nat -A POSTROUTING -s 192.168.254.0/24 -o eth0 -j MASQUERADE",
+		"iptables -t nat -A POSTROUTING -s 192.192.254.0/24 -o eth0 -j MASQUERADE",
 	}
 	for _, ipNet := range nodeCIDR {
 		args = append(args, "iptables -t nat -A POSTROUTING -s "+ipNet.String()+" -o eth0 -j MASQUERADE")
