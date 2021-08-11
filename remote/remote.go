@@ -36,7 +36,7 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 		"iptables -F",
 		"iptables -P INPUT ACCEPT",
 		"iptables -P FORWARD ACCEPT",
-		"iptables -t nat -A POSTROUTING -s 192.192.254.0/24 -o eth0 -j MASQUERADE",
+		"iptables -t nat -A POSTROUTING -s 254.254.254.0/24 -o eth0 -j MASQUERADE",
 	}
 	for _, ipNet := range nodeCIDR {
 		args = append(args, "iptables -t nat -A POSTROUTING -s "+ipNet.String()+" -o eth0 -j MASQUERADE")
@@ -109,7 +109,7 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 	}
 }
 
-func CreateServerOutboundAndInbound(clientset *kubernetes.Clientset, namespace, service string, virtualLocalIp, realRouterIP, virtualShadowIp string) error {
+func CreateServerInbound(clientset *kubernetes.Clientset, namespace, service string, virtualLocalIp, realRouterIP, virtualShadowIp, routes string) error {
 	lables := updateReplicasToZeroAndGetLabels(clientset, namespace, service)
 	newName := service + "-" + "shadow"
 	t := true
@@ -135,7 +135,7 @@ func CreateServerOutboundAndInbound(clientset *kubernetes.Clientset, namespace, 
 							"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 2000:60000 -j MASQUERADE;" +
 							"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 2000:60000 -j DNAT --to " + virtualLocalIp + ":2000-60000;" +
 							"iptables -t nat -A POSTROUTING -p udp -m udp --dport 2000:60000 -j MASQUERADE;" +
-							"gost -L 'tun://0.0.0.0:8421/127.0.0.1:8421?net=" + virtualShadowIp + "&route=172.20.0.0/16' -F 'socks5://" + realRouterIP + ":10800?notls=true'",
+							"gost -L 'tun://0.0.0.0:8421/127.0.0.1:8421?net=" + virtualShadowIp + "&route=" + routes + "' -F 'socks5://" + realRouterIP + ":10800?notls=true'",
 					},
 					SecurityContext: &v1.SecurityContext{
 						Capabilities: &v1.Capabilities{
