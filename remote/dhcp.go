@@ -161,7 +161,7 @@ func GetIpFromDHCP(client *kubernetes.Clientset, namespace string) (*net.IPNet, 
 	}
 
 	return &net.IPNet{
-		IP:   net.IPv4(254, 254, 254, byte(ip)),
+		IP:   net.IPv4(223, 254, 254, byte(ip)),
 		Mask: net.IPv4Mask(255, 255, 255, 0),
 	}, nil
 }
@@ -186,7 +186,7 @@ func GetRandomIpFromDHCP(client *kubernetes.Clientset, namespace string) (*net.I
 
 	atoi, _ := strconv.Atoi(ip)
 	return &net.IPNet{
-		IP:   net.IPv4(254, 254, 254, byte(atoi)),
+		IP:   net.IPv4(223, 254, 254, byte(atoi)),
 		Mask: net.IPv4Mask(255, 255, 255, 0),
 	}, nil
 }

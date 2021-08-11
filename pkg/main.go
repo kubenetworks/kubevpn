@@ -73,8 +73,8 @@ func prepare() {
 	}
 
 	trafficManager := net.IPNet{
-		IP:   net.IPv4(254, 254, 254, 100),
-		Mask: net.IPv4Mask(255, 255, 255, 0),
+		IP:   net.IPv4(223, 254, 254, 100),
+		Mask: net.CIDRMask(24, 32),
 	}
 
 	err = remote.InitDHCP(clientset, namespace, &trafficManager)
@@ -96,22 +96,30 @@ func prepare() {
 		}
 		virtualShadowIp, _ := remote.GetRandomIpFromDHCP(clientset, namespace)
 		tempIps = append(tempIps, virtualShadowIp)
-		err = remote.CreateServerInbound(clientset, namespace, service, tunIp.IP.String(), pod.Status.PodIP, virtualShadowIp.String(), strings.Join(list, ","))
+		err = remote.CreateServerInbound(
+			clientset,
+			namespace,
+			service,
+			tunIp.IP.String(),
+			pod.Status.PodIP,
+			virtualShadowIp.String(),
+			strings.Join(list, ","),
+		)
 		if err != nil {
 			log.Error(err)
 		}
 	}
 	remote.AddCleanUpResourceHandler(clientset, namespace, services, tempIps...)
 	if runtime.GOOS == "windows" {
-		tunIp.Mask = net.IPv4Mask(0, 0, 0, 0)
+		tunIp.Mask = net.CIDRMask(0, 32)
 	} else {
-		tunIp.Mask = net.IPv4Mask(255, 255, 255, 0)
+		tunIp.Mask = net.CIDRMask(24, 32)
 	}
 	//list = append(list, tunIp.String())
 	//if runtime.GOOS == "windows" {
 	ipNet := net.IPNet{
-		IP:   net.IPv4(254, 254, 254, 100),
-		Mask: net.IPv4Mask(255, 255, 255, 0),
+		IP:   net.IPv4(223, 254, 254, 100),
+		Mask: net.CIDRMask(24, 32),
 	}
 	list = append(list, ipNet.String())
 	//list = append(list, "192.192.254.162/32")
@@ -152,7 +160,7 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Info("dns service ok")
-	_ = exec.Command("ping", "-c", "4", "254.254.254.100").Run()
+	_ = exec.Command("ping", "-c", "4", "223.254.254.100").Run()
 	select {}
 }
 
