@@ -48,3 +48,7 @@ func TestShell(t *testing.T) {
 
 	fmt.Println(out == serviceList.Items[0].Spec.ClusterIP)
 }
+
+func TestDeleteRule(t *testing.T) {
+	DeleteWindowsFirewallRule()
+}

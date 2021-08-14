@@ -115,15 +115,15 @@ func prepare() {
 	} else {
 		tunIp.Mask = net.CIDRMask(24, 32)
 	}
-	//list = append(list, tunIp.String())
-	//if runtime.GOOS == "windows" {
-	ipNet := net.IPNet{
-		IP:   net.IPv4(223, 254, 254, 100),
-		Mask: net.CIDRMask(24, 32),
+
+	//linux already exist this route, if add it will occurs error, maybe to change add tun_tap add route logic ???
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		ipNet := net.IPNet{
+			IP:   net.IPv4(223, 254, 254, 100),
+			Mask: net.CIDRMask(24, 32),
+		}
+		list = append(list, ipNet.String())
 	}
-	list = append(list, ipNet.String())
-	//list = append(list, "192.192.254.162/32")
-	//}
 
 	baseCfg.route.ChainNodes = []string{"socks5://127.0.0.1:10800?notls=true"}
 	baseCfg.route.ServeNodes = []string{
@@ -158,6 +158,12 @@ func main() {
 	dnsServiceIp := util.GetDNSServiceIpFromPod(clientset, restclient, config, util.TrafficManager, namespace)
 	if err := dns.DNS(dnsServiceIp); err != nil {
 		log.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		if !util.FindRule() {
+			util.AddFirewallRule()
+		}
+		util.DeleteWindowsFirewallRule()
 	}
 	log.Info("dns service ok")
 	_ = exec.Command("ping", "-c", "4", "223.254.254.100").Run()
