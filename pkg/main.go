@@ -17,6 +17,7 @@ import (
 	"kubevpn/gost"
 	"kubevpn/remote"
 	"kubevpn/util"
+	"math"
 	"net"
 	"os/exec"
 	"runtime"
@@ -140,12 +141,28 @@ func prepare() {
 
 func main() {
 	prepare()
-	readyChan := make(chan struct{})
-	stop := make(chan struct{})
+	readyChan := make(chan struct{}, math.MaxInt32)
 	go func() {
-		err := util.PortForwardPod(config, clientset, util.TrafficManager, namespace, "10800:10800", readyChan, stop)
-		if err != nil {
-			log.Error(err)
+		for {
+			func() {
+				defer func() {
+					if err := recover(); err != nil {
+						log.Warnf("recover error: %v, ignore", err)
+					}
+				}()
+				err := util.PortForwardPod(
+					config,
+					clientset,
+					util.TrafficManager,
+					namespace,
+					"10800:10800",
+					readyChan,
+					make(chan struct{}),
+				)
+				if err != nil {
+					log.Error(err)
+				}
+			}()
 		}
 	}()
 	<-readyChan
