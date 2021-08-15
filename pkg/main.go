@@ -136,6 +136,7 @@ func prepare() {
 
 	if runtime.GOOS == "windows" {
 		exe.InstallTunTapDriver()
+		RenameNic()
 	}
 }
 
@@ -253,4 +254,23 @@ func getCIDR(clientset *kubernetes.Clientset, ns string) (result []*net.IPNet, e
 		return
 	}
 	return nil, fmt.Errorf("can not found cidr")
+}
+
+func RenameNic() {
+	interfaces, _ := net.Interfaces()
+	for _, i := range interfaces {
+		if strings.Contains(i.Name, " ") {
+			out, err := exec.Command("netsh", []string{
+				"interface",
+				"set",
+				"interface",
+				fmt.Sprintf("name='%s'", i.Name),
+				"newname=" + strings.TrimSpace(i.Name),
+			}...).CombinedOutput()
+			if err != nil {
+				log.Warnf("rename %s --> %s failed, out: %s, error: %s",
+					i.Name, strings.TrimSpace(i.Name), string(out), err)
+			}
+		}
+	}
 }
