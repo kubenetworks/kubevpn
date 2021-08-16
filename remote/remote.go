@@ -110,7 +110,7 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 }
 
 func CreateServerInbound(clientset *kubernetes.Clientset, namespace, service string, virtualLocalIp, realRouterIP, virtualShadowIp, routes string) error {
-	lables := updateReplicasToZeroAndGetLabels(clientset, namespace, service)
+	lables, ports := updateReplicasToZeroAndGetLabels(clientset, namespace, service)
 	newName := service + "-" + "shadow"
 	t := true
 	zero := int64(0)
@@ -158,6 +158,9 @@ func CreateServerInbound(clientset *kubernetes.Clientset, namespace, service str
 						},
 					},
 					ImagePullPolicy: v1.PullAlways,
+					// without helm, not set ports are works fine, but if using helm, must set this filed, otherwise
+					// this pod will not add to service's endpoint
+					Ports: ports,
 				},
 			},
 			PriorityClassName: "system-cluster-critical",
@@ -187,34 +190,49 @@ func CreateServerInbound(clientset *kubernetes.Clientset, namespace, service str
 	}
 }
 
-func updateReplicasToZeroAndGetLabels(clientset *kubernetes.Clientset, namespace, service string) map[string]string {
+func updateReplicasToZeroAndGetLabels(clientset *kubernetes.Clientset, namespace, service string) (map[string]string, []v1.ContainerPort) {
 	if service == "" || namespace == "" {
 		log.Info("no need to expose local service to remote")
-		return nil
+		return nil, nil
 	}
 	log.Info("prepare to expose local service to remote service: " + service)
 	util.ScaleDeploymentReplicasTo(clientset, namespace, service, 0)
-	labels := getLabels(clientset, namespace, service)
+	labels, ports := getLabels(clientset, namespace, service)
 	if labels == nil {
 		log.Info("fail to create shadow")
-		return nil
+		return nil, nil
 	}
-	return labels
+	return labels, ports
 }
-func getLabels(clientset *kubernetes.Clientset, namespace, service string) map[string]string {
+func getLabels(clientset *kubernetes.Clientset, namespace, service string) (map[string]string, []v1.ContainerPort) {
 	get, err := clientset.CoreV1().Services(namespace).
 		Get(context.TODO(), service, metav1.GetOptions{})
 	if err != nil {
 		log.Error(err)
-		return nil
+		return nil, nil
 	}
 	selector := get.Spec.Selector
 	_, err = clientset.AppsV1().Deployments(namespace).Get(context.TODO(), service, metav1.GetOptions{})
 	if err != nil {
 		log.Error(err)
-		return nil
+		return nil, nil
 	}
 	newName := service + "-" + "shadow"
 	deletePod(clientset, namespace, newName)
-	return selector
+	var ports []v1.ContainerPort
+	for _, port := range get.Spec.Ports {
+		val := port.TargetPort.IntVal
+		if val == 0 {
+			//if strings.ToLower(port.TargetPort.StrVal) == "http" {
+			//	val = 8080
+			//}
+			val = port.Port
+		}
+		ports = append(ports, v1.ContainerPort{
+			Name:          port.Name,
+			ContainerPort: val,
+			Protocol:      port.Protocol,
+		})
+	}
+	return selector, ports
 }
