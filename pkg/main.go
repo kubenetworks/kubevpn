@@ -174,7 +174,7 @@ func main() {
 	}
 	//time.Sleep(time.Second * 5)
 	dnsServiceIp := util.GetDNSServiceIpFromPod(clientset, restclient, config, util.TrafficManager, namespace)
-	if err := dns.DNS(dnsServiceIp); err != nil {
+	if err := dns.DNS(dnsServiceIp, namespace); err != nil {
 		log.Fatal(err)
 	}
 	if runtime.GOOS == "windows" {
