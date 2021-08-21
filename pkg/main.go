@@ -117,14 +117,7 @@ func prepare() {
 		tunIp.Mask = net.CIDRMask(24, 32)
 	}
 
-	//linux already exist this route, if add it will occurs error, maybe to change add tun_tap add route logic ???
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		ipNet := net.IPNet{
-			IP:   net.IPv4(223, 254, 254, 100),
-			Mask: net.CIDRMask(24, 32),
-		}
-		list = append(list, ipNet.String())
-	}
+	list = append(list, trafficManager.String())
 
 	baseCfg.route.ChainNodes = []string{"socks5://127.0.0.1:10800?notls=true"}
 	baseCfg.route.ServeNodes = []string{
