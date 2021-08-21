@@ -170,11 +170,7 @@ func main() {
 	if err := start(); err != nil {
 		log.Fatal(err)
 	}
-	//time.Sleep(time.Second * 5)
-	dnsServiceIp := util.GetDNSServiceIpFromPod(clientset, restclient, config, util.TrafficManager, namespace)
-	if err := dns.DNS(dnsServiceIp, namespace); err != nil {
-		log.Fatal(err)
-	}
+
 	if runtime.GOOS == "windows" {
 		if !util.FindRule() {
 			util.AddFirewallRule()
@@ -183,6 +179,12 @@ func main() {
 	}
 	log.Info("dns service ok")
 	_ = exec.Command("ping", "-c", "4", "223.254.254.100").Run()
+
+	//time.Sleep(time.Second * 5)
+	dnsServiceIp := util.GetDNSServiceIpFromPod(clientset, restclient, config, util.TrafficManager, namespace)
+	if err := dns.DNS(dnsServiceIp, namespace); err != nil {
+		log.Fatal(err)
+	}
 	select {}
 }
 
