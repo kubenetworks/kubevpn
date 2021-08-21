@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	log "github.com/sirupsen/logrus"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
@@ -17,11 +18,11 @@ import (
 	"kubevpn/gost"
 	"kubevpn/remote"
 	"kubevpn/util"
-	"math"
 	"net"
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
 
 var (
@@ -40,7 +41,7 @@ func init() {
 	flag.StringVar(&namespace, "namespace", "", "namespace")
 	flag.StringVar(&services, "services", "", "services")
 	flag.Parse()
-	fmt.Printf("kubeconfig path: %s, namespace: %s, serivces: %s\n", kubeconfigpath, namespace, services)
+	log.Printf("kubeconfig path: %s, namespace: %s, serivces: %s\n", kubeconfigpath, namespace, services)
 	var err error
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
 	configFlags.KubeConfig = &kubeconfigpath
@@ -60,7 +61,6 @@ func init() {
 			log.Fatal(err)
 		}
 	}
-
 }
 
 func prepare() {
@@ -142,7 +142,7 @@ func prepare() {
 
 func main() {
 	prepare()
-	readyChan := make(chan struct{}, math.MaxInt32)
+	//readyChan := make(chan struct{}, math.MaxInt32)
 	go func() {
 		for {
 			func() {
@@ -157,16 +157,21 @@ func main() {
 					util.TrafficManager,
 					namespace,
 					"10800:10800",
-					readyChan,
+					make(chan struct{}),
 					make(chan struct{}),
 				)
+				if apierrors.IsNotFound(err) {
+					log.Fatalf("can not found port-forward resource, err: %v, exiting", err)
+				}
 				if err != nil {
-					log.Error(err)
+					log.Errorf("port-forward occurs error, err: %v, retrying", err)
+					time.Sleep(time.Second * 2)
 				}
 			}()
 		}
 	}()
-	<-readyChan
+	//<-readyChan
+	time.Sleep(time.Second * 4)
 	log.Info("port forward ready")
 
 	if err := start(); err != nil {
