@@ -15,6 +15,7 @@ func DNS(ip string, namespace string) error {
 	if err = os.MkdirAll(filepath.Join("/", "etc", "resolver"), fs.ModePerm); err != nil {
 		log.Error(err)
 	}
+	_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
 	filename := filepath.Join("/", "etc", "resolver", "local")
 	fileContent := "nameserver " + ip
 	_ = ioutil.WriteFile(filename, []byte(fileContent), fs.ModePerm)

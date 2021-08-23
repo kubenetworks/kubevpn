@@ -8,6 +8,7 @@ import (
 	"os/exec"
 )
 
+// systemd-resolve --status, systemd-resolve --flush-caches
 func DNS(ip string, namespace string) error {
 	tunName := os.Getenv("tunName")
 	if len(tunName) == 0 {
