@@ -260,16 +260,17 @@ func RenameNic() {
 	interfaces, _ := net.Interfaces()
 	for _, i := range interfaces {
 		if strings.Contains(i.Name, " ") {
-			out, err := exec.Command("netsh", []string{
+			cmd := exec.Command("netsh", []string{
 				"interface",
 				"set",
 				"interface",
 				fmt.Sprintf("name='%s'", i.Name),
-				"newname=" + strings.TrimSpace(i.Name),
-			}...).CombinedOutput()
+				"newname=" + strings.ReplaceAll(i.Name, " ", ""),
+			}...)
+			out, err := cmd.CombinedOutput()
 			if err != nil {
-				log.Warnf("rename %s --> %s failed, out: %s, error: %s",
-					i.Name, strings.TrimSpace(i.Name), string(out), err)
+				log.Warnf("rename %s --> %s failed, out: %s, error: %v, command: %s",
+					i.Name, strings.ReplaceAll(i.Name, " ", ""), string(out), err, cmd.Args)
 			}
 		}
 	}
