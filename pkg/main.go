@@ -22,11 +22,12 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
 var (
-	baseCfg        = &baseConfig{}
+	baseCfg        route
 	kubeconfigpath string
 	namespace      string
 	services       string
@@ -91,27 +92,35 @@ func prepare() {
 		log.Fatal(err)
 	}
 	tempIps := []*net.IPNet{tunIp}
+	wg := sync.WaitGroup{}
+	lock := sync.Mutex{}
 	for _, service := range strings.Split(services, ",") {
-		if len(service) == 0 {
-			continue
-		}
-		virtualShadowIp, _ := remote.GetRandomIpFromDHCP(clientset, namespace)
-		tempIps = append(tempIps, virtualShadowIp)
-		err = remote.CreateServerInbound(
-			clientset,
-			namespace,
-			service,
-			tunIp.IP.String(),
-			pod.Status.PodIP,
-			virtualShadowIp.String(),
-			strings.Join(list, ","),
-		)
-		if err != nil {
-			log.Error(err)
+		if len(service) > 0 {
+			wg.Add(1)
+			go func(finalService string) {
+				defer wg.Done()
+				lock.Lock()
+				virtualShadowIp, _ := remote.GetRandomIpFromDHCP(clientset, namespace)
+				tempIps = append(tempIps, virtualShadowIp)
+				lock.Unlock()
+				err = remote.CreateServerInbound(
+					clientset,
+					namespace,
+					finalService,
+					tunIp.IP.String(),
+					pod.Status.PodIP,
+					virtualShadowIp.String(),
+					strings.Join(list, ","),
+				)
+				if err != nil {
+					log.Error(err)
+				}
+			}(service)
 		}
 	}
+	wg.Wait()
 	remote.AddCleanUpResourceHandler(clientset, namespace, services, tempIps...)
-	if runtime.GOOS == "windows" {
+	if util.IsWindows() {
 		tunIp.Mask = net.CIDRMask(0, 32)
 	} else {
 		tunIp.Mask = net.CIDRMask(24, 32)
@@ -119,17 +128,14 @@ func prepare() {
 
 	list = append(list, trafficManager.String())
 
-	baseCfg.route.ChainNodes = []string{"socks5://127.0.0.1:10800?notls=true"}
-	baseCfg.route.ServeNodes = []string{
-		fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", tunIp.String(), strings.Join(list, ",")),
-	}
-	fmt.Println("your ip is " + tunIp.String())
-	//fmt.Println(baseCfg.route.ServeNodes)
+	baseCfg.ChainNodes = "socks5://127.0.0.1:10800?notls=true"
+	baseCfg.ServeNodes = fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", tunIp.String(), strings.Join(list, ","))
+
+	log.Info("your ip is " + tunIp.String())
 	gost.Debug = true
 
-	if runtime.GOOS == "windows" {
+	if util.IsWindows() {
 		exe.InstallTunTapDriver()
-		RenameNic()
 	}
 }
 
@@ -181,7 +187,7 @@ func main() {
 	_ = exec.Command("ping", "-c", "4", "223.254.254.100").Run()
 
 	//time.Sleep(time.Second * 5)
-	dnsServiceIp := util.GetDNSServiceIpFromPod(clientset, restclient, config, util.TrafficManager, namespace)
+	dnsServiceIp := dns.GetDNSServiceIpFromPod(clientset, restclient, config, util.TrafficManager, namespace)
 	if err := dns.DNS(dnsServiceIp, namespace); err != nil {
 		log.Fatal(err)
 	}
@@ -189,27 +195,20 @@ func main() {
 }
 
 func start() error {
-	var routerList []router
-	rts, err := baseCfg.route.GenRouters()
+	routers, err := baseCfg.GenRouters()
 	if err != nil {
 		return err
 	}
-	routerList = append(routerList, rts...)
 
-	for _, route := range baseCfg.Routes {
-		rts, err = route.GenRouters()
-		if err != nil {
-			return err
-		}
-		routerList = append(routerList, rts...)
-	}
-
-	if len(routerList) == 0 {
+	if routers == nil {
 		return errors.New("invalid config")
 	}
-	for i := range routerList {
-		go routerList[i].Serve()
-	}
+
+	go func() {
+		if err = routers.Serve(); err != nil {
+			log.Warn(err)
+		}
+	}()
 
 	return nil
 }
@@ -227,8 +226,8 @@ func getCIDR(clientset *kubernetes.Clientset, ns string) (result []*net.IPNet, e
 			}
 		}
 	}
-	if services, err := clientset.CoreV1().Services(ns).List(context.TODO(), metav1.ListOptions{}); err == nil {
-		for _, service := range services.Items {
+	if serviceList, err := clientset.CoreV1().Services(ns).List(context.TODO(), metav1.ListOptions{}); err == nil {
+		for _, service := range serviceList.Items {
 			if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
 				mask := net.CIDRMask(16, 32)
 				cidrs = append(cidrs, &net.IPNet{IP: ip.Mask(mask), Mask: mask})

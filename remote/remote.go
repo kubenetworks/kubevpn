@@ -48,9 +48,10 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 	name := util.TrafficManager
 	pod := v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-			Labels:    map[string]string{"app": util.TrafficManager},
+			Name:        name,
+			Namespace:   namespace,
+			Labels:      map[string]string{"app": util.TrafficManager},
+			Annotations: map[string]string{"ref-count": "0"},
 		},
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{

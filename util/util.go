@@ -5,13 +5,11 @@ import (
 	"context"
 	"fmt"
 	dockerterm "github.com/moby/term"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"io"
 	v12 "k8s.io/api/autoscaling/v1"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -29,6 +27,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -143,11 +142,20 @@ func ScaleDeploymentReplicasTo(options *kubernetes.Clientset, namespace, name st
 		retry.DefaultRetry,
 		func(err error) bool { return err != nil },
 		func() error {
-			_, err := options.AppsV1().Deployments(namespace).
-				UpdateScale(context.TODO(), name, &v12.Scale{
-					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-					Spec:       v12.ScaleSpec{Replicas: replicas},
-				}, metav1.UpdateOptions{})
+			_, err := options.AppsV1().Deployments(namespace).UpdateScale(
+				context.TODO(),
+				name,
+				&v12.Scale{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      name,
+						Namespace: namespace,
+					},
+					Spec: v12.ScaleSpec{
+						Replicas: replicas,
+					},
+				},
+				metav1.UpdateOptions{},
+			)
 			return err
 		})
 	if err != nil {
@@ -211,26 +219,6 @@ func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config 
 	return strings.TrimRight(stdoutBuf.String(), "\n"), err
 }
 
-func GetDNSIp(clientset *kubernetes.Clientset) (string, error) {
-	serviceList, err := clientset.CoreV1().Services(metav1.NamespaceSystem).List(context.Background(), metav1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("metadata.name", "kube-dns").String(),
-	})
-	if err != nil {
-		return "", err
-	}
-	if len(serviceList.Items) == 0 {
-		return "", errors.New("Not found kube-dns")
-	}
-	return serviceList.Items[0].Spec.ClusterIP, nil
-}
-
-func GetDNSServiceIpFromPod(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) string {
-	if ip, err := GetDNSIp(clientset); err == nil && len(ip) != 0 {
-		return ip
-	}
-	if ip, err := Shell(clientset, restclient, config, TrafficManager, namespace, "cat /etc/resolv.conf | grep nameserver | awk '{print$2}'"); err == nil && len(ip) != 0 {
-		return ip
-	}
-	log.Fatal("this should not happened")
-	return ""
+func IsWindows() bool {
+	return runtime.GOOS == "windows"
 }
