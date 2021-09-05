@@ -167,8 +167,8 @@ func BytesToInt(b []byte) uint32 {
 	return u
 }
 
-func ReleaseIpToDHCP(client *kubernetes.Clientset, namespace string, ip *net.IPNet) error {
-	get, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
+func ReleaseIpToDHCP(clientset *kubernetes.Clientset, namespace string, ip *net.IPNet) error {
+	get, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
 	if err != nil {
 		log.Errorf("failed to get dhcp, err: %v", err)
 		return err
@@ -176,7 +176,7 @@ func ReleaseIpToDHCP(client *kubernetes.Clientset, namespace string, ip *net.IPN
 	split := strings.Split(get.Data["DHCP"], ",")
 	split = append(split, strings.Split(ip.IP.To4().String(), ".")[3])
 	get.Data["DHCP"] = strings.Join(sortString(split), ",")
-	_, err = client.CoreV1().ConfigMaps(namespace).Update(context.Background(), get, metav1.UpdateOptions{})
+	_, err = clientset.CoreV1().ConfigMaps(namespace).Update(context.Background(), get, metav1.UpdateOptions{})
 	if err != nil {
 		log.Errorf("update dhcp error after release ip, need to try again, err: %v", err)
 		return err

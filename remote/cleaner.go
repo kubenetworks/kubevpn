@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -20,26 +21,30 @@ import (
 
 var stopChan = make(chan os.Signal)
 
-func AddCleanUpResourceHandler(client *kubernetes.Clientset, namespace string, services string, ip ...*net.IPNet) {
+func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string, services string, ip ...*net.IPNet) {
 	signal.Notify(stopChan, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL /*, syscall.SIGSTOP*/)
 	go func() {
 		<-stopChan
 		log.Info("prepare to exit, cleaning up")
 		for _, ipNet := range ip {
-			if err := ReleaseIpToDHCP(client, namespace, ipNet); err != nil {
+			if err := ReleaseIpToDHCP(clientset, namespace, ipNet); err != nil {
 				log.Errorf("failed to release ip to dhcp, err: %v", err)
 			}
 		}
-		cleanUpTrafficManagerIfRefCountIsZero(client, namespace)
+		cleanUpTrafficManagerIfRefCountIsZero(clientset, namespace)
 		wg := sync.WaitGroup{}
 		for _, service := range strings.Split(services, ",") {
 			if len(service) > 0 {
 				wg.Add(1)
 				go func(finalService string) {
 					defer wg.Done()
-					util.ScaleDeploymentReplicasTo(client, namespace, finalService, 1)
+					if controller, found := topLevelControllerMap.Load(fmt.Sprintf("%s/%s", namespace, finalService)); found {
+						if control, ok := controller.(TopLevelController); ok {
+							util.UpdateReplicasScale(clientset, namespace, control.Type, control.Name, 1)
+						}
+					}
 					newName := finalService + "-" + "shadow"
-					util.DeletePod(client, namespace, newName)
+					util.DeletePod(clientset, namespace, newName)
 				}(service)
 			}
 		}
@@ -50,11 +55,11 @@ func AddCleanUpResourceHandler(client *kubernetes.Clientset, namespace string, s
 }
 
 // vendor/k8s.io/kubectl/pkg/polymorphichelpers/rollback.go:99
-func updateRefCount(client *kubernetes.Clientset, namespace, name string, increment int) {
+func updateRefCount(clientset *kubernetes.Clientset, namespace, name string, increment int) {
 	if err := retry.OnError(retry.DefaultRetry, func(err error) bool {
 		return err != nil
 	}, func() error {
-		pod, err := client.CoreV1().Pods(namespace).Get(context.TODO(), name, v1.GetOptions{})
+		pod, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), name, v1.GetOptions{})
 		if err != nil {
 			log.Errorf("update ref-count failed, increment: %d, error: %v", increment, err)
 			return err
@@ -70,7 +75,7 @@ func updateRefCount(client *kubernetes.Clientset, namespace, name string, increm
 				"value": strconv.Itoa(curCount + increment),
 			},
 		})
-		_, err = client.CoreV1().Pods(namespace).
+		_, err = clientset.CoreV1().Pods(namespace).
 			Patch(context.TODO(), util.TrafficManager, types.JSONPatchType, patch, v1.PatchOptions{})
 		return err
 	}); err != nil {
@@ -80,9 +85,9 @@ func updateRefCount(client *kubernetes.Clientset, namespace, name string, increm
 	}
 }
 
-func cleanUpTrafficManagerIfRefCountIsZero(client *kubernetes.Clientset, namespace string) {
-	updateRefCount(client, namespace, util.TrafficManager, -1)
-	pod, err := client.CoreV1().Pods(namespace).Get(context.TODO(), util.TrafficManager, v1.GetOptions{})
+func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, namespace string) {
+	updateRefCount(clientset, namespace, util.TrafficManager, -1)
+	pod, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), util.TrafficManager, v1.GetOptions{})
 	if err != nil {
 		log.Error(err)
 		return
@@ -96,10 +101,10 @@ func cleanUpTrafficManagerIfRefCountIsZero(client *kubernetes.Clientset, namespa
 	if refCount <= 0 {
 		zero := int64(0)
 		log.Info("refCount is zero, prepare to clean up resource")
-		_ = client.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), util.TrafficManager, v1.DeleteOptions{
+		_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), util.TrafficManager, v1.DeleteOptions{
 			GracePeriodSeconds: &zero,
 		})
-		_ = client.CoreV1().Pods(namespace).Delete(context.TODO(), util.TrafficManager, v1.DeleteOptions{
+		_ = clientset.CoreV1().Pods(namespace).Delete(context.TODO(), util.TrafficManager, v1.DeleteOptions{
 			GracePeriodSeconds: &zero,
 		})
 	}

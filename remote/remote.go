@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"errors"
+	"fmt"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -15,8 +16,18 @@ import (
 	"net"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
+
+// record every pod's top level controller, like pod controllerBy replicaset, replicaset controllerBy deployment
+// service --> deployment
+var topLevelControllerMap = sync.Map{}
+
+type TopLevelController struct {
+	Type string
+	Name string
+}
 
 func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, serverIp *net.IPNet, nodeCIDR []*net.IPNet) (*v1.Pod, error) {
 	firstPod, i, err3 := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
@@ -168,9 +179,8 @@ func CreateServerInbound(clientset *kubernetes.Clientset, namespace, service str
 			PriorityClassName: "system-cluster-critical",
 		},
 	}
-	_, err2 := clientset.CoreV1().Pods(namespace).Create(context.TODO(), &pod, metav1.CreateOptions{})
-	if err2 != nil {
-		log.Fatal(err2)
+	if _, err := clientset.CoreV1().Pods(namespace).Create(context.TODO(), &pod, metav1.CreateOptions{}); err != nil {
+		log.Fatal(err)
 	}
 	watch, err := clientset.CoreV1().Pods(namespace).Watch(context.TODO(), metav1.SingleObject(metav1.ObjectMeta{Name: newName}))
 	if err != nil {
@@ -193,12 +203,20 @@ func CreateServerInbound(clientset *kubernetes.Clientset, namespace, service str
 }
 
 func updateReplicasToZeroAndGetLabels(clientset *kubernetes.Clientset, namespace, service string) (map[string]string, []v1.ContainerPort) {
-	if service == "" || namespace == "" {
+	if len(service) == 0 || len(namespace) == 0 {
 		log.Info("no need to expose local service to remote")
 		return nil, nil
 	}
 	log.Info("prepare to expose local service to remote service: " + service)
-	util.ScaleDeploymentReplicasTo(clientset, namespace, service, 0)
+	controllerType, controllerName := util.GetTopController(clientset, namespace, service)
+	if len(controllerType) == 0 || len(controllerName) == 0 {
+		log.Warnf("controller is empty, service: %s-%s", namespace, service)
+	}
+	topLevelControllerMap.Store(fmt.Sprintf("%s/%s", namespace, service), TopLevelController{
+		Type: controllerType,
+		Name: controllerName,
+	})
+	util.UpdateReplicasScale(clientset, namespace, controllerType, controllerName, 0)
 	labels, ports := util.GetLabels(clientset, namespace, service)
 	if labels == nil {
 		log.Info("fail to create shadow")
