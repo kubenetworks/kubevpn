@@ -27,7 +27,7 @@ import (
 )
 
 var (
-	baseCfg        route
+	nodeConfig     route
 	kubeconfigpath string
 	namespace      string
 	services       string
@@ -80,8 +80,7 @@ func prepare() {
 		Mask: net.CIDRMask(24, 32),
 	}
 
-	err = remote.InitDHCP(clientset, namespace, &trafficManager)
-	if err != nil {
+	if err = remote.InitDHCP(clientset, namespace, &trafficManager); err != nil {
 		log.Fatal(err)
 	}
 	tunIp, err := remote.GetIpFromDHCP(clientset, namespace)
@@ -129,8 +128,8 @@ func prepare() {
 
 	list = append(list, trafficManager.String())
 
-	baseCfg.ChainNodes = "socks5://127.0.0.1:10800?notls=true"
-	baseCfg.ServeNodes = fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", tunIp.String(), strings.Join(list, ","))
+	nodeConfig.ChainNodes = "socks5://127.0.0.1:10800?notls=true"
+	nodeConfig.ServeNodes = fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", tunIp.String(), strings.Join(list, ","))
 
 	log.Info("your ip is " + tunIp.String())
 
@@ -186,7 +185,6 @@ func main() {
 	log.Info("dns service ok")
 	_ = exec.Command("ping", "-c", "4", "223.254.254.100").Run()
 
-	//time.Sleep(time.Second * 5)
 	dnsServiceIp := dns.GetDNSServiceIpFromPod(clientset, restclient, config, util.TrafficManager, namespace)
 	if err := dns.DNS(dnsServiceIp, namespace); err != nil {
 		log.Fatal(err)
@@ -195,7 +193,7 @@ func main() {
 }
 
 func start() error {
-	routers, err := baseCfg.GenRouters()
+	routers, err := nodeConfig.GenRouters()
 	if err != nil {
 		return err
 	}
@@ -213,8 +211,7 @@ func start() error {
 	return nil
 }
 
-func getCIDR(clientset *kubernetes.Clientset, ns string) (result []*net.IPNet, err error) {
-	result = make([]*net.IPNet, 0)
+func getCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, error) {
 	var cidrs []*net.IPNet
 	if nodeList, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, node := range nodeList.Items {
@@ -222,11 +219,10 @@ func getCIDR(clientset *kubernetes.Clientset, ns string) (result []*net.IPNet, e
 				ip.Mask = net.CIDRMask(16, 32)
 				ip.IP = ip.IP.Mask(ip.Mask)
 				cidrs = append(cidrs, ip)
-				err = nil
 			}
 		}
 	}
-	if serviceList, err := clientset.CoreV1().Services(ns).List(context.TODO(), metav1.ListOptions{}); err == nil {
+	if serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, service := range serviceList.Items {
 			if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
 				mask := net.CIDRMask(16, 32)
@@ -234,7 +230,7 @@ func getCIDR(clientset *kubernetes.Clientset, ns string) (result []*net.IPNet, e
 			}
 		}
 	}
-	if podList, err := clientset.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{}); err == nil {
+	if podList, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, pod := range podList.Items {
 			if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
 				mask := net.CIDRMask(16, 32)
@@ -242,6 +238,7 @@ func getCIDR(clientset *kubernetes.Clientset, ns string) (result []*net.IPNet, e
 			}
 		}
 	}
+	result := make([]*net.IPNet, 0)
 	tempMap := make(map[string]*net.IPNet)
 	for _, cidr := range cidrs {
 		if _, found := tempMap[cidr.String()]; !found {
@@ -250,27 +247,7 @@ func getCIDR(clientset *kubernetes.Clientset, ns string) (result []*net.IPNet, e
 		}
 	}
 	if len(result) != 0 {
-		return
+		return result, nil
 	}
 	return nil, fmt.Errorf("can not found cidr")
-}
-
-func RenameNic() {
-	interfaces, _ := net.Interfaces()
-	for _, i := range interfaces {
-		if strings.Contains(i.Name, " ") {
-			cmd := exec.Command("netsh", []string{
-				"interface",
-				"set",
-				"interface",
-				fmt.Sprintf("name='%s'", i.Name),
-				"newname=" + strings.ReplaceAll(i.Name, " ", ""),
-			}...)
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				log.Warnf("rename %s --> %s failed, out: %s, error: %v, command: %s",
-					i.Name, strings.ReplaceAll(i.Name, " ", ""), string(out), err, cmd.Args)
-			}
-		}
-	}
 }

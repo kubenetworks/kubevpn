@@ -1,9 +1,8 @@
 package main
 
 import (
-	gost2 "kubevpn/gost"
-
 	"github.com/go-log/log"
+	"kubevpn/gost"
 	"net"
 	"strings"
 )
@@ -14,12 +13,12 @@ type route struct {
 	Retries    int
 }
 
-func (r *route) parseChain() (*gost2.Chain, error) {
-	chain := gost2.NewChain()
+func (r *route) parseChain() (*gost.Chain, error) {
+	chain := gost.NewChain()
 	chain.Retries = r.Retries
 	gid := 1 // group ID
 
-	ngroup := gost2.NewNodeGroup()
+	ngroup := gost.NewNodeGroup()
 	ngroup.ID = gid
 	gid++
 
@@ -37,14 +36,14 @@ func (r *route) parseChain() (*gost2.Chain, error) {
 	ngroup.AddNode(nodes...)
 
 	ngroup.SetSelector(nil,
-		gost2.WithFilter(
-			&gost2.FailFilter{
+		gost.WithFilter(
+			&gost.FailFilter{
 				MaxFails:    nodes[0].GetInt("max_fails"),
 				FailTimeout: nodes[0].GetDuration("fail_timeout"),
 			},
-			&gost2.InvalidFilter{},
+			&gost.InvalidFilter{},
 		),
-		gost2.WithStrategy(gost2.NewStrategy(nodes[0].Get("strategy"))),
+		gost.WithStrategy(gost.NewStrategy(nodes[0].Get("strategy"))),
 	)
 
 	chain.AddNodeGroup(ngroup)
@@ -52,8 +51,8 @@ func (r *route) parseChain() (*gost2.Chain, error) {
 	return chain, nil
 }
 
-func parseChainNode(ns string) (nodes []gost2.Node, err error) {
-	node, err := gost2.ParseNode(ns)
+func parseChainNode(ns string) (nodes []gost.Node, err error) {
+	node, err := gost.ParseNode(ns)
 	if err != nil {
 		return
 	}
@@ -63,28 +62,28 @@ func parseChainNode(ns string) (nodes []gost2.Node, err error) {
 	}
 	timeout := node.GetDuration("timeout")
 
-	var tr gost2.Transporter
+	var tr gost.Transporter
 	switch node.Transport {
 	case "ssh":
 		if node.Protocol == "direct" || node.Protocol == "remote" {
-			tr = gost2.SSHForwardTransporter()
+			tr = gost.SSHForwardTransporter()
 		} else {
-			tr = gost2.SSHTunnelTransporter()
+			tr = gost.SSHTunnelTransporter()
 		}
 	default:
-		tr = gost2.TCPTransporter()
+		tr = gost.TCPTransporter()
 	}
 
-	var connector gost2.Connector
+	var connector gost.Connector
 	switch node.Protocol {
 	case "ssu":
-		connector = gost2.ShadowUDPConnector(node.User)
+		connector = gost.ShadowUDPConnector(node.User)
 	case "direct":
-		connector = gost2.SSHDirectForwardConnector()
+		connector = gost.SSHDirectForwardConnector()
 	case "remote":
-		connector = gost2.SSHRemoteForwardConnector()
+		connector = gost.SSHRemoteForwardConnector()
 	default:
-		connector = gost2.AutoConnector(node.User)
+		connector = gost.AutoConnector(node.User)
 	}
 
 	host := node.Get("host")
@@ -93,25 +92,25 @@ func parseChainNode(ns string) (nodes []gost2.Node, err error) {
 	}
 
 	node.DialOptions = append(node.DialOptions,
-		gost2.TimeoutDialOption(timeout),
-		gost2.HostDialOption(host),
+		gost.TimeoutDialOption(timeout),
+		gost.HostDialOption(host),
 	)
 
-	node.ConnectOptions = []gost2.ConnectOption{
-		gost2.UserAgentConnectOption(node.Get("agent")),
-		gost2.NoTLSConnectOption(node.GetBool("notls")),
-		gost2.NoDelayConnectOption(node.GetBool("nodelay")),
+	node.ConnectOptions = []gost.ConnectOption{
+		gost.UserAgentConnectOption(node.Get("agent")),
+		gost.NoTLSConnectOption(node.GetBool("notls")),
+		gost.NoDelayConnectOption(node.GetBool("nodelay")),
 	}
 
-	handshakeOptions := []gost2.HandshakeOption{
-		gost2.AddrHandshakeOption(node.Addr),
-		gost2.HostHandshakeOption(host),
-		gost2.IntervalHandshakeOption(node.GetDuration("ping")),
-		gost2.TimeoutHandshakeOption(timeout),
-		gost2.RetryHandshakeOption(node.GetInt("retry")),
+	handshakeOptions := []gost.HandshakeOption{
+		gost.AddrHandshakeOption(node.Addr),
+		gost.HostHandshakeOption(host),
+		gost.IntervalHandshakeOption(node.GetDuration("ping")),
+		gost.TimeoutHandshakeOption(timeout),
+		gost.RetryHandshakeOption(node.GetInt("retry")),
 	}
 
-	node.Client = &gost2.Client{
+	node.Client = &gost.Client{
 		Connector:   connector,
 		Transporter: tr,
 	}
@@ -121,13 +120,13 @@ func parseChainNode(ns string) (nodes []gost2.Node, err error) {
 		nd := node.Clone()
 		nd.Addr = ip
 		// override the default node address
-		nd.HandshakeOptions = append(handshakeOptions, gost2.AddrHandshakeOption(ip))
+		nd.HandshakeOptions = append(handshakeOptions, gost.AddrHandshakeOption(ip))
 		// One node per IP
 		nodes = append(nodes, nd)
 	}
 	if len(ips) == 0 {
 		node.HandshakeOptions = handshakeOptions
-		nodes = []gost2.Node{node}
+		nodes = []gost.Node{node}
 	}
 
 	return
@@ -139,7 +138,7 @@ func (r *route) GenRouters() (*router, error) {
 		return nil, err
 	}
 
-	node, err := gost2.ParseNode(r.ServeNodes)
+	node, err := gost.ParseNode(r.ServeNodes)
 	if err != nil {
 		return nil, err
 	}
@@ -154,23 +153,23 @@ func (r *route) GenRouters() (*router, error) {
 		}
 	}
 
-	var ln gost2.Listener
+	var ln gost.Listener
 	switch node.Transport {
 	case "tcp":
 		// Directly use SSH port forwarding if the last chain node is forward+ssh
 		if chain.LastNode().Protocol == "forward" && chain.LastNode().Transport == "ssh" {
-			chain.Nodes()[len(chain.Nodes())-1].Client.Connector = gost2.SSHDirectForwardConnector()
-			chain.Nodes()[len(chain.Nodes())-1].Client.Transporter = gost2.SSHForwardTransporter()
+			chain.Nodes()[len(chain.Nodes())-1].Client.Connector = gost.SSHDirectForwardConnector()
+			chain.Nodes()[len(chain.Nodes())-1].Client.Transporter = gost.SSHForwardTransporter()
 		}
-		ln, err = gost2.TCPListener(node.Addr)
+		ln, err = gost.TCPListener(node.Addr)
 	case "udp":
-		ln, err = gost2.UDPListener(node.Addr, &gost2.UDPListenConfig{
+		ln, err = gost.UDPListener(node.Addr, &gost.UDPListenConfig{
 			TTL:       ttl,
 			Backlog:   node.GetInt("backlog"),
 			QueueSize: node.GetInt("queue"),
 		})
 	case "tun":
-		cfg := gost2.TunConfig{
+		cfg := gost.TunConfig{
 			Name:    node.Get("name"),
 			Addr:    node.Get("net"),
 			Peer:    node.Get("peer"),
@@ -178,57 +177,57 @@ func (r *route) GenRouters() (*router, error) {
 			Routes:  tunRoutes,
 			Gateway: node.Get("gw"),
 		}
-		ln, err = gost2.TunListener(cfg)
+		ln, err = gost.TunListener(cfg)
 	case "tap":
-		cfg := gost2.TapConfig{
+		cfg := gost.TapConfig{
 			Name:    node.Get("name"),
 			Addr:    node.Get("net"),
 			MTU:     node.GetInt("mtu"),
 			Routes:  strings.Split(node.Get("route"), ","),
 			Gateway: node.Get("gw"),
 		}
-		ln, err = gost2.TapListener(cfg)
+		ln, err = gost.TapListener(cfg)
 	default:
-		ln, err = gost2.TCPListener(node.Addr)
+		ln, err = gost.TCPListener(node.Addr)
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	var handler gost2.Handler
+	var handler gost.Handler
 	switch node.Protocol {
 	case "tcp":
-		handler = gost2.TCPDirectForwardHandler(node.Remote)
+		handler = gost.TCPDirectForwardHandler(node.Remote)
 	case "udp":
-		handler = gost2.UDPDirectForwardHandler(node.Remote)
+		handler = gost.UDPDirectForwardHandler(node.Remote)
 	case "tun":
-		handler = gost2.TunHandler()
+		handler = gost.TunHandler()
 	case "tap":
-		handler = gost2.TapHandler()
+		handler = gost.TapHandler()
 	case "dns":
-		handler = gost2.DNSHandler(node.Remote)
+		handler = gost.DNSHandler(node.Remote)
 	default:
 		// start from 2.5, if remote is not empty, then we assume that it is a forward tunnel.
 		if node.Remote != "" {
-			handler = gost2.TCPDirectForwardHandler(node.Remote)
+			handler = gost.TCPDirectForwardHandler(node.Remote)
 		} else {
-			handler = gost2.AutoHandler()
+			handler = gost.AutoHandler()
 		}
 	}
 
 	handler.Init(
-		gost2.AddrHandlerOption(ln.Addr().String()),
-		gost2.ChainHandlerOption(chain),
-		gost2.RetryHandlerOption(node.GetInt("retry")), // override the global retry option.
-		gost2.TimeoutHandlerOption(timeout),
-		gost2.NodeHandlerOption(node),
-		gost2.TCPModeHandlerOption(node.GetBool("tcp")),
-		gost2.IPRoutesHandlerOption(tunRoutes...),
+		gost.AddrHandlerOption(ln.Addr().String()),
+		gost.ChainHandlerOption(chain),
+		gost.RetryHandlerOption(node.GetInt("retry")), // override the global retry option.
+		gost.TimeoutHandlerOption(timeout),
+		gost.NodeHandlerOption(node),
+		gost.TCPModeHandlerOption(node.GetBool("tcp")),
+		gost.IPRoutesHandlerOption(tunRoutes...),
 	)
 
 	rt := router{
 		node:    node,
-		server:  &gost2.Server{Listener: ln},
+		server:  &gost.Server{Listener: ln},
 		handler: handler,
 		chain:   chain,
 	}
@@ -237,12 +236,12 @@ func (r *route) GenRouters() (*router, error) {
 }
 
 type router struct {
-	node     gost2.Node
-	server   *gost2.Server
-	handler  gost2.Handler
-	chain    *gost2.Chain
-	resolver gost2.Resolver
-	hosts    *gost2.Hosts
+	node     gost.Node
+	server   *gost.Server
+	handler  gost.Handler
+	chain    *gost.Chain
+	resolver gost.Resolver
+	hosts    *gost.Hosts
 }
 
 func (r *router) Serve() error {
