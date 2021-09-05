@@ -41,6 +41,7 @@ func init() {
 	flag.StringVar(&kubeconfigpath, "kubeconfig", clientcmd.RecommendedHomeFile, "kubeconfig")
 	flag.StringVar(&namespace, "namespace", "", "namespace")
 	flag.StringVar(&services, "services", "", "services")
+	flag.BoolVar(&gost.Debug, "debug", false, "true/false")
 	flag.Parse()
 	log.Printf("kubeconfig path: %s, namespace: %s, serivces: %s\n", kubeconfigpath, namespace, services)
 	var err error
@@ -132,7 +133,6 @@ func prepare() {
 	baseCfg.ServeNodes = fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", tunIp.String(), strings.Join(list, ","))
 
 	log.Info("your ip is " + tunIp.String())
-	gost.Debug = true
 
 	if util.IsWindows() {
 		exe.InstallTunTapDriver()
