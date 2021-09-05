@@ -48,8 +48,8 @@ func InitDHCP(client *kubernetes.Clientset, namespace string, addr *net.IPNet) e
 	return nil
 }
 
-func GetIpFromDHCP(client *kubernetes.Clientset, namespace string) (*net.IPNet, error) {
-	get, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
+func GetIpFromDHCP(clientset *kubernetes.Clientset, namespace string) (*net.IPNet, error) {
+	get, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
 	if err != nil {
 		log.Errorf("failed to get ip from dhcp, err: %v", err)
 		return nil, err
@@ -59,7 +59,7 @@ func GetIpFromDHCP(client *kubernetes.Clientset, namespace string) (*net.IPNet, 
 	ip, left := getIp(split)
 
 	get.Data["DHCP"] = strings.Join(left, ",")
-	_, err = client.CoreV1().ConfigMaps(namespace).Update(context.Background(), get, metav1.UpdateOptions{})
+	_, err = clientset.CoreV1().ConfigMaps(namespace).Update(context.Background(), get, metav1.UpdateOptions{})
 	if err != nil {
 		log.Errorf("update dhcp error after get ip, need to put ip back, err: %v", err)
 		return nil, err
@@ -71,8 +71,8 @@ func GetIpFromDHCP(client *kubernetes.Clientset, namespace string) (*net.IPNet, 
 	}, nil
 }
 
-func GetRandomIpFromDHCP(client *kubernetes.Clientset, namespace string) (*net.IPNet, error) {
-	get, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
+func GetRandomIpFromDHCP(clientset *kubernetes.Clientset, namespace string) (*net.IPNet, error) {
+	get, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
 	if err != nil {
 		log.Errorf("failed to get ip from dhcp, err: %v", err)
 		return nil, err
@@ -83,7 +83,7 @@ func GetRandomIpFromDHCP(client *kubernetes.Clientset, namespace string) (*net.I
 	split = split[1:]
 
 	get.Data["DHCP"] = strings.Join(split, ",")
-	_, err = client.CoreV1().ConfigMaps(namespace).Update(context.Background(), get, metav1.UpdateOptions{})
+	_, err = clientset.CoreV1().ConfigMaps(namespace).Update(context.Background(), get, metav1.UpdateOptions{})
 	if err != nil {
 		log.Errorf("update dhcp error after get ip, need to put ip back, err: %v", err)
 		return nil, err
