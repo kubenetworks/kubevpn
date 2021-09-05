@@ -5,3 +5,4 @@ vpn:
 .PHONY: build_image
 build_image:
 	docker build -t naison/kubevpn:latest -f ./remote/Dockerfile .
+	docker push naison/kubevpn:latest
