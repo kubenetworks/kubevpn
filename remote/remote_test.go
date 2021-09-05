@@ -1,13 +1,19 @@
 package remote
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	log "github.com/sirupsen/logrus"
+	v1 "k8s.io/api/apps/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -87,5 +93,41 @@ func TestGetIPFromDHCP(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond * 10)
 	}
+}
 
+func TestOwnerRef(t *testing.T) {
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		&clientcmd.ClientConfigLoadingRules{ExplicitPath: clientcmd.RecommendedHomeFile}, nil,
+	)
+	config, _ := clientConfig.ClientConfig()
+	clientset, _ := kubernetes.NewForConfig(config)
+	//get, _ := clientset.CoreV1().Pods("test").Get(context.Background(), "tomcat-7449544d95-nv7gr", metav1.GetOptions{})
+	get, _ := clientset.CoreV1().Pods("test").Get(context.Background(), "mysql-0", metav1.GetOptions{})
+
+	of := metav1.GetControllerOf(get)
+	for of != nil {
+		b, err := clientset.AppsV1().RESTClient().Get().Namespace("test").
+			Name(of.Name).Resource(strings.ToLower(of.Kind) + "s").Do(context.Background()).Raw()
+		if k8serrors.IsNotFound(err) {
+			return
+		}
+		var replicaSet v1.ReplicaSet
+		if err = json.Unmarshal(b, &replicaSet); err == nil && len(replicaSet.Name) != 0 {
+			fmt.Printf("%s-%s\n", replicaSet.Kind, replicaSet.Name)
+			of = metav1.GetControllerOfNoCopy(&replicaSet)
+			continue
+		}
+		var statefulSet v1.StatefulSet
+		if err = json.Unmarshal(b, &statefulSet); err == nil && len(statefulSet.Name) != 0 {
+			fmt.Printf("%s-%s\n", statefulSet.Kind, statefulSet.Name)
+			of = metav1.GetControllerOfNoCopy(&statefulSet)
+			continue
+		}
+		var deployment v1.Deployment
+		if err = json.Unmarshal(b, &deployment); err == nil && len(deployment.Name) != 0 {
+			fmt.Printf("%s-%s\n", deployment.Kind, deployment.Name)
+			of = metav1.GetControllerOfNoCopy(&deployment)
+			continue
+		}
+	}
 }

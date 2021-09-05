@@ -199,42 +199,10 @@ func updateReplicasToZeroAndGetLabels(clientset *kubernetes.Clientset, namespace
 	}
 	log.Info("prepare to expose local service to remote service: " + service)
 	util.ScaleDeploymentReplicasTo(clientset, namespace, service, 0)
-	labels, ports := getLabels(clientset, namespace, service)
+	labels, ports := util.GetLabels(clientset, namespace, service)
 	if labels == nil {
 		log.Info("fail to create shadow")
 		return nil, nil
 	}
 	return labels, ports
-}
-func getLabels(clientset *kubernetes.Clientset, namespace, service string) (map[string]string, []v1.ContainerPort) {
-	get, err := clientset.CoreV1().Services(namespace).
-		Get(context.TODO(), service, metav1.GetOptions{})
-	if err != nil {
-		log.Error(err)
-		return nil, nil
-	}
-	selector := get.Spec.Selector
-	_, err = clientset.AppsV1().Deployments(namespace).Get(context.TODO(), service, metav1.GetOptions{})
-	if err != nil {
-		log.Error(err)
-		return nil, nil
-	}
-	newName := service + "-" + "shadow"
-	deletePod(clientset, namespace, newName)
-	var ports []v1.ContainerPort
-	for _, port := range get.Spec.Ports {
-		val := port.TargetPort.IntVal
-		if val == 0 {
-			//if strings.ToLower(port.TargetPort.StrVal) == "http" {
-			//	val = 8080
-			//}
-			val = port.Port
-		}
-		ports = append(ports, v1.ContainerPort{
-			Name:          port.Name,
-			ContainerPort: val,
-			Protocol:      port.Protocol,
-		})
-	}
-	return selector, ports
 }

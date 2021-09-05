@@ -3,12 +3,15 @@ package util
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	dockerterm "github.com/moby/term"
 	log "github.com/sirupsen/logrus"
 	"io"
+	appsv1 "k8s.io/api/apps/v1"
 	v12 "k8s.io/api/autoscaling/v1"
 	"k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
@@ -24,6 +27,7 @@ import (
 	"k8s.io/client-go/transport/spdy"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/cmd/exec"
+	//"kubevpn/remote"
 	"net"
 	"net/http"
 	"os"
@@ -137,15 +141,67 @@ func PortForwardPod(config *rest.Config, clientset *kubernetes.Clientset, podNam
 	return nil
 }
 
-func ScaleDeploymentReplicasTo(options *kubernetes.Clientset, namespace, name string, replicas int32) {
+func GetTopController(clientset *kubernetes.Clientset, namespace, serviceName string) (resource string, name string) {
+	labels, _ := GetLabels(clientset, namespace, serviceName)
+
+	// todo verify it's correct or not
+	asSelector, _ := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchLabels: labels})
+	get, _ := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: asSelector.String(),
+	})
+	if len(get.Items) == 0 {
+		return
+	}
+	of := metav1.GetControllerOf(&get.Items[0])
+	for of != nil {
+		b, err := clientset.AppsV1().RESTClient().Get().Namespace("test").
+			Name(of.Name).Resource(strings.ToLower(of.Kind) + "s").Do(context.Background()).Raw()
+		if k8serrors.IsNotFound(err) {
+			return
+		}
+		var replicaSet appsv1.ReplicaSet
+		if err = json.Unmarshal(b, &replicaSet); err == nil && len(replicaSet.Name) != 0 {
+			resource = strings.ToLower(replicaSet.Kind) + "s"
+			name = replicaSet.Name
+			of = metav1.GetControllerOfNoCopy(&replicaSet)
+			continue
+		}
+		var statefulSet appsv1.StatefulSet
+		if err = json.Unmarshal(b, &statefulSet); err == nil && len(statefulSet.Name) != 0 {
+			resource = strings.ToLower(statefulSet.Kind) + "s"
+			name = statefulSet.Name
+			of = metav1.GetControllerOfNoCopy(&statefulSet)
+			continue
+		}
+		var deployment appsv1.Deployment
+		if err = json.Unmarshal(b, &deployment); err == nil && len(deployment.Name) != 0 {
+			resource = strings.ToLower(deployment.Kind) + "s"
+			name = deployment.Name
+			of = metav1.GetControllerOfNoCopy(&deployment)
+			continue
+		}
+	}
+	return
+}
+
+// todo restore scale if replicaset is zero, needs to remember top controller type and name
+func ScaleDeploymentReplicasTo(clientset *kubernetes.Clientset, namespace, serviceName string, replicas int32) {
+	controller, name := GetTopController(clientset, namespace, serviceName)
+	if len(controller) == 0 || len(name) == 0 {
+		log.Warnf("controller is empty, service: %s-%s", namespace, serviceName)
+	}
 	err := retry.OnError(
 		retry.DefaultRetry,
 		func(err error) bool { return err != nil },
 		func() error {
-			_, err := options.AppsV1().Deployments(namespace).UpdateScale(
-				context.TODO(),
-				name,
-				&v12.Scale{
+			result := &v12.Scale{}
+			err := clientset.AppsV1().RESTClient().Put().
+				Namespace(namespace).
+				Resource(controller).
+				Name(name).
+				SubResource("scale").
+				VersionedParams(&metav1.UpdateOptions{}, scheme.ParameterCodec).
+				Body(&v12.Scale{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      name,
 						Namespace: namespace,
@@ -153,13 +209,13 @@ func ScaleDeploymentReplicasTo(options *kubernetes.Clientset, namespace, name st
 					Spec: v12.ScaleSpec{
 						Replicas: replicas,
 					},
-				},
-				metav1.UpdateOptions{},
-			)
+				}).
+				Do(context.Background()).
+				Into(result)
 			return err
 		})
 	if err != nil {
-		log.Errorf("update deployment: %s's replicas to %d failed, error: %v", name, replicas, err)
+		log.Errorf("update deployment: %s's replicas to %d failed, error: %v", serviceName, replicas, err)
 	}
 }
 
@@ -221,4 +277,38 @@ func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config 
 
 func IsWindows() bool {
 	return runtime.GOOS == "windows"
+}
+func GetLabels(clientset *kubernetes.Clientset, namespace, service string) (map[string]string, []v1.ContainerPort) {
+	get, err := clientset.CoreV1().Services(namespace).
+		Get(context.TODO(), service, metav1.GetOptions{})
+	if err != nil {
+		log.Error(err)
+		return nil, nil
+	}
+	selector := get.Spec.Selector
+	newName := service + "-" + "shadow"
+	DeletePod(clientset, namespace, newName)
+	var ports []v1.ContainerPort
+	for _, port := range get.Spec.Ports {
+		val := port.TargetPort.IntVal
+		if val == 0 {
+			val = port.Port
+		}
+		ports = append(ports, v1.ContainerPort{
+			Name:          port.Name,
+			ContainerPort: val,
+			Protocol:      port.Protocol,
+		})
+	}
+	return selector, ports
+}
+
+func DeletePod(client *kubernetes.Clientset, namespace, podName string) {
+	zero := int64(0)
+	err := client.CoreV1().Pods(namespace).Delete(context.TODO(), podName, metav1.DeleteOptions{
+		GracePeriodSeconds: &zero,
+	})
+	if err != nil && k8serrors.IsNotFound(err) {
+		log.Infof("not found shadow pod: %s, no need to delete it", podName)
+	}
 }

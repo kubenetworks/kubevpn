@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	log "github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -40,7 +39,7 @@ func AddCleanUpResourceHandler(client *kubernetes.Clientset, namespace string, s
 					defer wg.Done()
 					util.ScaleDeploymentReplicasTo(client, namespace, finalService, 1)
 					newName := finalService + "-" + "shadow"
-					deletePod(client, namespace, newName)
+					util.DeletePod(client, namespace, newName)
 				}(service)
 			}
 		}
@@ -48,16 +47,6 @@ func AddCleanUpResourceHandler(client *kubernetes.Clientset, namespace string, s
 		log.Info("clean up successful")
 		os.Exit(0)
 	}()
-}
-
-func deletePod(client *kubernetes.Clientset, namespace, podName string) {
-	zero := int64(0)
-	err := client.CoreV1().Pods(namespace).Delete(context.TODO(), podName, v1.DeleteOptions{
-		GracePeriodSeconds: &zero,
-	})
-	if err != nil && errors.IsNotFound(err) {
-		log.Infof("not found shadow pod: %s, no need to delete it", podName)
-	}
 }
 
 // vendor/k8s.io/kubectl/pkg/polymorphichelpers/rollback.go:99

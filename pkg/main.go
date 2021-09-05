@@ -58,7 +58,7 @@ func init() {
 	if clientset, err = kubernetes.NewForConfig(config); err != nil {
 		log.Fatal(err)
 	}
-	if namespace == "" {
+	if len(namespace) == 0 {
 		if namespace, _, err = factory.ToRawKubeConfigLoader().Namespace(); err != nil {
 			log.Fatal(err)
 		}
