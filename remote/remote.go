@@ -29,6 +29,7 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 	)
 
 	if err3 == nil && i != 0 && firstPod != nil {
+		updateRefCount(clientset, namespace, firstPod.Name, 1)
 		return firstPod, nil
 	}
 	args := []string{
