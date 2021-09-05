@@ -1,6 +1,7 @@
 .PHONY: vpn
 vpn:
-	go build -o vpn ./pkg && chmod +x vpn
+	go build -o vpn ./pkg
+	chmod +x vpn
 
 .PHONY: build_image
 build_image:
