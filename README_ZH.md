@@ -5,7 +5,7 @@
 ### 链接到集群网络
 
 ```shell
-sudo ./vpn --namespace=test
+sudo kubevpn --namespace=test
 Password:
 INFO[0000] kubeconfig path: /Users/naison/.kube/config, namespace: test, serivces:  
 INFO[0001] update ref count successfully                
@@ -71,7 +71,7 @@ tomcat              ClusterIP   172.20.203.233   <none>        8080/TCP   30h
 ### 反向代理
 
 ```shell
-➜  ~ sudo ./vpn --namespace=test --services=nginx,tomcat
+➜  ~ sudo kubevpn --namespace=test --services=nginx,tomcat
 INFO[0000] kubeconfig path: /Users/naison/.kube/config, namespace: test, serivces: nginx,tomcat 
 INFO[0001] prepare to expose local service to remote service: tomcat 
 INFO[0001] prepare to expose local service to remote service: nginx 

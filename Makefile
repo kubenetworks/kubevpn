@@ -2,6 +2,7 @@
 vpn:
 	go build -o vpn ./pkg
 	chmod +x vpn
+	mv vpn /usr/local/bin/kubevpn
 
 .PHONY: build_image
 build_image:
