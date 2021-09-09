@@ -140,7 +140,7 @@ func PortForwardPod(config *rest.Config, clientset *kubernetes.Clientset, podNam
 	return nil
 }
 
-func GetTopController(clientset *kubernetes.Clientset, namespace, serviceName string) (resource string, name string) {
+func GetTopController(clientset *kubernetes.Clientset, namespace, serviceName string) (controller TopLevelController) {
 	labels, _ := GetLabels(clientset, namespace, serviceName)
 
 	asSelector, _ := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchLabels: labels})
@@ -159,22 +159,25 @@ func GetTopController(clientset *kubernetes.Clientset, namespace, serviceName st
 		}
 		var replicaSet appsv1.ReplicaSet
 		if err = json.Unmarshal(b, &replicaSet); err == nil && len(replicaSet.Name) != 0 {
-			resource = strings.ToLower(replicaSet.Kind) + "s"
-			name = replicaSet.Name
+			controller.Type = strings.ToLower(replicaSet.Kind) + "s"
+			controller.Name = replicaSet.Name
+			controller.Scale = *replicaSet.Spec.Replicas
 			of = metav1.GetControllerOfNoCopy(&replicaSet)
 			continue
 		}
 		var statefulSet appsv1.StatefulSet
 		if err = json.Unmarshal(b, &statefulSet); err == nil && len(statefulSet.Name) != 0 {
-			resource = strings.ToLower(statefulSet.Kind) + "s"
-			name = statefulSet.Name
+			controller.Type = strings.ToLower(statefulSet.Kind) + "s"
+			controller.Name = statefulSet.Name
+			controller.Scale = *statefulSet.Spec.Replicas
 			of = metav1.GetControllerOfNoCopy(&statefulSet)
 			continue
 		}
 		var deployment appsv1.Deployment
 		if err = json.Unmarshal(b, &deployment); err == nil && len(deployment.Name) != 0 {
-			resource = strings.ToLower(deployment.Kind) + "s"
-			name = deployment.Name
+			controller.Type = strings.ToLower(deployment.Kind) + "s"
+			controller.Name = deployment.Name
+			controller.Scale = *deployment.Spec.Replicas
 			of = metav1.GetControllerOfNoCopy(&deployment)
 			continue
 		}
@@ -182,7 +185,7 @@ func GetTopController(clientset *kubernetes.Clientset, namespace, serviceName st
 	return
 }
 
-func UpdateReplicasScale(clientset *kubernetes.Clientset, namespace, controllerType, controllerName string, replicas int32) {
+func UpdateReplicasScale(clientset *kubernetes.Clientset, namespace string, controller TopLevelController) {
 	err := retry.OnError(
 		retry.DefaultRetry,
 		func(err error) bool { return err != nil },
@@ -190,17 +193,17 @@ func UpdateReplicasScale(clientset *kubernetes.Clientset, namespace, controllerT
 			result := &autoscalingv1.Scale{}
 			err := clientset.AppsV1().RESTClient().Put().
 				Namespace(namespace).
-				Resource(controllerType).
-				Name(controllerName).
+				Resource(controller.Type).
+				Name(controller.Name).
 				SubResource("scale").
 				VersionedParams(&metav1.UpdateOptions{}, scheme.ParameterCodec).
 				Body(&autoscalingv1.Scale{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      controllerName,
+						Name:      controller.Name,
 						Namespace: namespace,
 					},
 					Spec: autoscalingv1.ScaleSpec{
-						Replicas: replicas,
+						Replicas: controller.Scale,
 					},
 				}).
 				Do(context.Background()).
@@ -208,7 +211,7 @@ func UpdateReplicasScale(clientset *kubernetes.Clientset, namespace, controllerT
 			return err
 		})
 	if err != nil {
-		log.Errorf("update scale: %s-%s's replicas to %d failed, error: %v", controllerType, controllerName, replicas, err)
+		log.Errorf("update scale: %s-%s's replicas to %d failed, error: %v", controller.Type, controller.Name, controller.Scale, err)
 	}
 }
 
@@ -303,4 +306,13 @@ func DeletePod(clientset *kubernetes.Clientset, namespace, podName string) {
 	if err != nil && k8serrors.IsNotFound(err) {
 		log.Infof("not found shadow pod: %s, no need to delete it", podName)
 	}
+}
+
+// TopLevelControllerSet record every pod's top level controller, like pod controllerBy replicaset, replicaset controllerBy deployment
+var TopLevelControllerSet []TopLevelController
+
+type TopLevelController struct {
+	Type  string
+	Name  string
+	Scale int32
 }

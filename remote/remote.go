@@ -3,7 +3,6 @@ package remote
 import (
 	"context"
 	"errors"
-	"fmt"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -16,18 +15,8 @@ import (
 	"net"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
-
-// record every pod's top level controller, like pod controllerBy replicaset, replicaset controllerBy deployment
-// service --> deployment
-var topLevelControllerMap = sync.Map{}
-
-type TopLevelController struct {
-	Type string
-	Name string
-}
 
 func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, serverIp *net.IPNet, nodeCIDR []*net.IPNet) (*v1.Pod, error) {
 	firstPod, i, err3 := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
@@ -208,15 +197,15 @@ func updateReplicasToZeroAndGetLabels(clientset *kubernetes.Clientset, namespace
 		return nil, nil
 	}
 	log.Info("prepare to expose local service to remote service: " + service)
-	controllerType, controllerName := util.GetTopController(clientset, namespace, service)
-	if len(controllerType) == 0 || len(controllerName) == 0 {
+	controller := util.GetTopController(clientset, namespace, service)
+	if len(controller.Type) == 0 || len(controller.Type) == 0 {
 		log.Warnf("controller is empty, service: %s-%s", namespace, service)
+		return nil, nil
 	}
-	topLevelControllerMap.Store(fmt.Sprintf("%s/%s", namespace, service), TopLevelController{
-		Type: controllerType,
-		Name: controllerName,
-	})
-	util.UpdateReplicasScale(clientset, namespace, controllerType, controllerName, 0)
+	util.TopLevelControllerSet = append(util.TopLevelControllerSet, controller)
+	controllerCopy := controller
+	controllerCopy.Scale = 0
+	util.UpdateReplicasScale(clientset, namespace, controllerCopy)
 	labels, ports := util.GetLabels(clientset, namespace, service)
 	if labels == nil {
 		log.Info("fail to create shadow")

@@ -3,7 +3,6 @@ package remote
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -38,15 +37,19 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 				wg.Add(1)
 				go func(finalService string) {
 					defer wg.Done()
-					if controller, found := topLevelControllerMap.Load(fmt.Sprintf("%s/%s", namespace, finalService)); found {
-						if control, ok := controller.(TopLevelController); ok {
-							util.UpdateReplicasScale(clientset, namespace, control.Type, control.Name, 1)
-						}
-					}
 					newName := finalService + "-" + "shadow"
 					util.DeletePod(clientset, namespace, newName)
 				}(service)
 			}
+		}
+		wg.Wait()
+		wg = sync.WaitGroup{}
+		for _, controller := range util.TopLevelControllerSet {
+			wg.Add(1)
+			go func(control util.TopLevelController) {
+				util.UpdateReplicasScale(clientset, namespace, control)
+				wg.Done()
+			}(controller)
 		}
 		wg.Wait()
 		log.Info("clean up successful")
