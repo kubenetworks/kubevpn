@@ -46,7 +46,7 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 		wg = sync.WaitGroup{}
 		for _, controller := range util.TopLevelControllerSet {
 			wg.Add(1)
-			go func(control util.TopLevelController) {
+			go func(control util.ResourceTuple) {
 				util.UpdateReplicasScale(clientset, namespace, control)
 				wg.Done()
 			}(controller)

@@ -16,7 +16,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
+
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
@@ -140,26 +142,26 @@ func PortForwardPod(config *rest.Config, clientset *kubernetes.Clientset, podNam
 	return nil
 }
 
-func GetTopController(clientset *kubernetes.Clientset, namespace, serviceName string) (controller TopLevelController) {
+func GetTopController(clientset *kubernetes.Clientset, namespace, serviceName string) (controller ResourceTuple) {
 	labels, _ := GetLabels(clientset, namespace, serviceName)
 
 	asSelector, _ := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchLabels: labels})
-	get, _ := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
+	podList, _ := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
 		LabelSelector: asSelector.String(),
 	})
-	if len(get.Items) == 0 {
+	if len(podList.Items) == 0 {
 		return
 	}
-	of := metav1.GetControllerOf(&get.Items[0])
+	of := metav1.GetControllerOf(&podList.Items[0])
 	for of != nil {
-		b, err := clientset.AppsV1().RESTClient().Get().Namespace("test").
+		b, err := clientset.AppsV1().RESTClient().Get().Namespace(namespace).
 			Name(of.Name).Resource(strings.ToLower(of.Kind) + "s").Do(context.Background()).Raw()
 		if k8serrors.IsNotFound(err) {
 			return
 		}
 		var replicaSet appsv1.ReplicaSet
 		if err = json.Unmarshal(b, &replicaSet); err == nil && len(replicaSet.Name) != 0 {
-			controller.Type = strings.ToLower(replicaSet.Kind) + "s"
+			controller.Resource = strings.ToLower(replicaSet.Kind) + "s"
 			controller.Name = replicaSet.Name
 			controller.Scale = *replicaSet.Spec.Replicas
 			of = metav1.GetControllerOfNoCopy(&replicaSet)
@@ -167,7 +169,7 @@ func GetTopController(clientset *kubernetes.Clientset, namespace, serviceName st
 		}
 		var statefulSet appsv1.StatefulSet
 		if err = json.Unmarshal(b, &statefulSet); err == nil && len(statefulSet.Name) != 0 {
-			controller.Type = strings.ToLower(statefulSet.Kind) + "s"
+			controller.Resource = strings.ToLower(statefulSet.Kind) + "s"
 			controller.Name = statefulSet.Name
 			controller.Scale = *statefulSet.Spec.Replicas
 			of = metav1.GetControllerOfNoCopy(&statefulSet)
@@ -175,7 +177,7 @@ func GetTopController(clientset *kubernetes.Clientset, namespace, serviceName st
 		}
 		var deployment appsv1.Deployment
 		if err = json.Unmarshal(b, &deployment); err == nil && len(deployment.Name) != 0 {
-			controller.Type = strings.ToLower(deployment.Kind) + "s"
+			controller.Resource = strings.ToLower(deployment.Kind) + "s"
 			controller.Name = deployment.Name
 			controller.Scale = *deployment.Spec.Replicas
 			of = metav1.GetControllerOfNoCopy(&deployment)
@@ -185,7 +187,7 @@ func GetTopController(clientset *kubernetes.Clientset, namespace, serviceName st
 	return
 }
 
-func UpdateReplicasScale(clientset *kubernetes.Clientset, namespace string, controller TopLevelController) {
+func UpdateReplicasScale(clientset *kubernetes.Clientset, namespace string, controller ResourceTuple) {
 	err := retry.OnError(
 		retry.DefaultRetry,
 		func(err error) bool { return err != nil },
@@ -193,7 +195,7 @@ func UpdateReplicasScale(clientset *kubernetes.Clientset, namespace string, cont
 			result := &autoscalingv1.Scale{}
 			err := clientset.AppsV1().RESTClient().Put().
 				Namespace(namespace).
-				Resource(controller.Type).
+				Resource(controller.Resource).
 				Name(controller.Name).
 				SubResource("scale").
 				VersionedParams(&metav1.UpdateOptions{}, scheme.ParameterCodec).
@@ -211,7 +213,7 @@ func UpdateReplicasScale(clientset *kubernetes.Clientset, namespace string, cont
 			return err
 		})
 	if err != nil {
-		log.Errorf("update scale: %s-%s's replicas to %d failed, error: %v", controller.Type, controller.Name, controller.Scale, err)
+		log.Errorf("update scale: %s-%s's replicas to %d failed, error: %v", controller.Resource, controller.Name, controller.Scale, err)
 	}
 }
 
@@ -309,10 +311,27 @@ func DeletePod(clientset *kubernetes.Clientset, namespace, podName string) {
 }
 
 // TopLevelControllerSet record every pod's top level controller, like pod controllerBy replicaset, replicaset controllerBy deployment
-var TopLevelControllerSet []TopLevelController
+var TopLevelControllerSet []ResourceTuple
 
-type TopLevelController struct {
-	Type  string
-	Name  string
-	Scale int32
+type ResourceTuple struct {
+	Resource string
+	Name     string
+	Scale    int32
+}
+
+// splitResourceTypeName handles type/name resource formats and returns a resource tuple
+// (empty or not), whether it successfully found one, and an error
+func SplitResourceTypeName(s string) (ResourceTuple, bool, error) {
+	if !strings.Contains(s, "/") {
+		return ResourceTuple{}, false, nil
+	}
+	seg := strings.Split(s, "/")
+	if len(seg) != 2 {
+		return ResourceTuple{}, false, fmt.Errorf("arguments in resource/name form may not have more than one slash")
+	}
+	resource, name := seg[0], seg[1]
+	if len(resource) == 0 || len(name) == 0 || len(runtimeresource.SplitResourceArgument(resource)) != 1 {
+		return ResourceTuple{}, false, fmt.Errorf("arguments in resource/name form must have a single resource and name")
+	}
+	return ResourceTuple{Resource: resource, Name: name}, true, nil
 }

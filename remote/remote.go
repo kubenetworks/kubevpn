@@ -198,7 +198,7 @@ func updateReplicasToZeroAndGetLabels(clientset *kubernetes.Clientset, namespace
 	}
 	log.Info("prepare to expose local service to remote service: " + service)
 	controller := util.GetTopController(clientset, namespace, service)
-	if len(controller.Type) == 0 || len(controller.Type) == 0 {
+	if len(controller.Resource) == 0 || len(controller.Name) == 0 {
 		log.Warnf("controller is empty, service: %s-%s", namespace, service)
 		return nil, nil
 	}
