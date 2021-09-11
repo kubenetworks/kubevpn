@@ -113,11 +113,11 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 }
 
 func CreateServerInbound(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads, virtualLocalIp, realRouterIP, virtualShadowIp, routes string) error {
-	name, b, err2 := util.SplitResourceTypeName(workloads)
-	if !b || err2 != nil {
+	resourceTuple, parsed, err2 := util.SplitResourceTypeName(workloads)
+	if !parsed || err2 != nil {
 		return errors.New("not need")
 	}
-	newName := name.Name + "-" + "shadow"
+	newName := resourceTuple.Name + "-" + "shadow"
 	util.DeletePod(clientset, namespace, newName)
 	err := updateScaleToZero(factory, clientset, namespace, workloads)
 	object, err2 := util.GetUnstructuredObject(factory, namespace, workloads)
@@ -177,7 +177,7 @@ func CreateServerInbound(factory cmdutil.Factory, clientset *kubernetes.Clientse
 			PriorityClassName: "system-cluster-critical",
 		},
 	}
-	if _, err := clientset.CoreV1().Pods(namespace).Create(context.TODO(), &pod, metav1.CreateOptions{}); err != nil {
+	if _, err = clientset.CoreV1().Pods(namespace).Create(context.TODO(), &pod, metav1.CreateOptions{}); err != nil {
 		log.Fatal(err)
 	}
 	watch, err := clientset.CoreV1().Pods(namespace).Watch(context.TODO(), metav1.SingleObject(metav1.ObjectMeta{Name: newName}))
