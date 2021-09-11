@@ -145,7 +145,6 @@ func Main() {
 	if err := dns.DNS(dnsServiceIp, namespace); err != nil {
 		log.Fatal(err)
 	}
-	select {}
 }
 
 func start() error {

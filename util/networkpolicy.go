@@ -9,17 +9,19 @@ import (
 // Delete all action block firewall rule
 func DeleteWindowsFirewallRule() {
 	ticker := time.NewTicker(time.Second)
-	for {
-		select {
-		case <-ticker.C:
-			_ = exec.Command("PowerShell", []string{
-				"Remove-NetFirewallRule",
-				"-Action",
-				"Block",
-			}...,
-			).Start()
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				_ = exec.Command("PowerShell", []string{
+					"Remove-NetFirewallRule",
+					"-Action",
+					"Block",
+				}...,
+				).Start()
+			}
 		}
-	}
+	}()
 }
 
 func AddFirewallRule() {
