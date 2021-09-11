@@ -1,16 +1,23 @@
 package remote
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	json2 "k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/cli-runtime/pkg/printers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"net"
 	"path/filepath"
 	"strings"
@@ -129,5 +136,73 @@ func TestOwnerRef(t *testing.T) {
 			of = metav1.GetControllerOfNoCopy(&deployment)
 			continue
 		}
+	}
+}
+
+func TestGet(t *testing.T) {
+	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
+	f := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
+	do := f.NewBuilder().
+		Unstructured().
+		NamespaceParam("test").DefaultNamespace().AllNamespaces(false).
+		ResourceTypeOrNameArgs(true, "deployment/productpage").
+		ContinueOnError().
+		Latest().
+		Flatten().
+		TransformRequests(func(req *rest.Request) { req.Param("includeObject", "Object") }).
+		Do()
+	if err := do.Err(); err != nil {
+		log.Warn(err)
+	}
+	infos, err := do.Infos()
+	if err != nil {
+		log.Println(err)
+	}
+	for _, info := range infos {
+		printer, err := printers.NewJSONPathPrinter("{.spec.selector}")
+		if err != nil {
+			log.Println(err)
+		}
+		buf := bytes.NewBuffer([]byte{})
+		err = printer.PrintObj(info.Object, buf)
+		if err != nil {
+			log.Println(err)
+		}
+		fmt.Println(buf.String())
+		l := &metav1.LabelSelector{}
+		err = json2.Unmarshal([]byte(buf.String()), l)
+		if err != nil || len(l.MatchLabels) == 0 {
+			m := map[string]string{}
+			_ = json2.Unmarshal([]byte(buf.String()), &m)
+			l = &metav1.LabelSelector{MatchLabels: m}
+		}
+		fmt.Println(l)
+	}
+	printer, err := printers.NewJSONPathPrinter("{.spec.template.spec.containers[0].ports}")
+	portPrinter, err := printers.NewJSONPathPrinter("{.spec.ports}")
+	var result []corev1.ContainerPort
+	for _, info := range infos {
+		buf := bytes.NewBuffer([]byte{})
+		err = printer.PrintObj(info.Object, buf)
+		if err != nil {
+			_ = portPrinter.PrintObj(info.Object, buf)
+			var ports []corev1.ServicePort
+			_ = json2.Unmarshal([]byte(buf.String()), &ports)
+			for _, port := range ports {
+				val := port.TargetPort.IntVal
+				if val == 0 {
+					val = port.Port
+				}
+				result = append(result, corev1.ContainerPort{
+					Name:          port.Name,
+					ContainerPort: val,
+					Protocol:      port.Protocol,
+				})
+			}
+		} else {
+			_ = json2.Unmarshal([]byte(buf.String()), &result)
+		}
+		fmt.Println(result)
 	}
 }

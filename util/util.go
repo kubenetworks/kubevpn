@@ -3,22 +3,26 @@ package util
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	dockerterm "github.com/moby/term"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"io"
-	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	"k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	json2 "k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/cli-runtime/pkg/printers"
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"strconv"
 
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
@@ -142,10 +146,12 @@ func PortForwardPod(config *rest.Config, clientset *kubernetes.Clientset, podNam
 	return nil
 }
 
-func GetTopController(clientset *kubernetes.Clientset, namespace, serviceName string) (controller ResourceTuple) {
-	labels, _ := GetLabels(clientset, namespace, serviceName)
-
-	asSelector, _ := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchLabels: labels})
+func GetTopController(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, serviceName string) (controller ResourceTupleWithScale) {
+	object, err := GetUnstructuredObject(factory, namespace, serviceName)
+	if err != nil {
+		return
+	}
+	asSelector, _ := metav1.LabelSelectorAsSelector(GetLabelSelector(object))
 	podList, _ := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
 		LabelSelector: asSelector.String(),
 	})
@@ -154,40 +160,19 @@ func GetTopController(clientset *kubernetes.Clientset, namespace, serviceName st
 	}
 	of := metav1.GetControllerOf(&podList.Items[0])
 	for of != nil {
-		b, err := clientset.AppsV1().RESTClient().Get().Namespace(namespace).
-			Name(of.Name).Resource(strings.ToLower(of.Kind) + "s").Do(context.Background()).Raw()
-		if k8serrors.IsNotFound(err) {
+		unstructuredObject, err := GetUnstructuredObject(factory, namespace, fmt.Sprintf("%s/%s", of.Kind, of.Name))
+		if err != nil {
 			return
 		}
-		var replicaSet appsv1.ReplicaSet
-		if err = json.Unmarshal(b, &replicaSet); err == nil && len(replicaSet.Name) != 0 {
-			controller.Resource = strings.ToLower(replicaSet.Kind) + "s"
-			controller.Name = replicaSet.Name
-			controller.Scale = *replicaSet.Spec.Replicas
-			of = metav1.GetControllerOfNoCopy(&replicaSet)
-			continue
-		}
-		var statefulSet appsv1.StatefulSet
-		if err = json.Unmarshal(b, &statefulSet); err == nil && len(statefulSet.Name) != 0 {
-			controller.Resource = strings.ToLower(statefulSet.Kind) + "s"
-			controller.Name = statefulSet.Name
-			controller.Scale = *statefulSet.Spec.Replicas
-			of = metav1.GetControllerOfNoCopy(&statefulSet)
-			continue
-		}
-		var deployment appsv1.Deployment
-		if err = json.Unmarshal(b, &deployment); err == nil && len(deployment.Name) != 0 {
-			controller.Resource = strings.ToLower(deployment.Kind) + "s"
-			controller.Name = deployment.Name
-			controller.Scale = *deployment.Spec.Replicas
-			of = metav1.GetControllerOfNoCopy(&deployment)
-			continue
-		}
+		controller.Resource = strings.ToLower(of.Kind) + "s"
+		controller.Name = of.Name
+		controller.Scale = GetScale(unstructuredObject)
+		of = GetOwnerReferences(unstructuredObject)
 	}
 	return
 }
 
-func UpdateReplicasScale(clientset *kubernetes.Clientset, namespace string, controller ResourceTuple) {
+func UpdateReplicasScale(clientset *kubernetes.Clientset, namespace string, controller ResourceTupleWithScale) {
 	err := retry.OnError(
 		retry.DefaultRetry,
 		func(err error) bool { return err != nil },
@@ -205,7 +190,7 @@ func UpdateReplicasScale(clientset *kubernetes.Clientset, namespace string, cont
 						Namespace: namespace,
 					},
 					Spec: autoscalingv1.ScaleSpec{
-						Replicas: controller.Scale,
+						Replicas: int32(controller.Scale),
 					},
 				}).
 				Do(context.Background()).
@@ -276,28 +261,105 @@ func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config 
 func IsWindows() bool {
 	return runtime.GOOS == "windows"
 }
-func GetLabels(clientset *kubernetes.Clientset, namespace, serviceName string) (map[string]string, []v1.ContainerPort) {
-	service, err := clientset.CoreV1().Services(namespace).Get(context.TODO(), serviceName, metav1.GetOptions{})
+
+func GetUnstructuredObject(f cmdutil.Factory, namespace string, workloads string) (k8sruntime.Object, error) {
+	do := f.NewBuilder().
+		Unstructured().
+		NamespaceParam(namespace).DefaultNamespace().AllNamespaces(false).
+		ResourceTypeOrNameArgs(true, workloads).
+		ContinueOnError().
+		Latest().
+		Flatten().
+		TransformRequests(func(req *rest.Request) { req.Param("includeObject", "Object") }).
+		Do()
+	if err := do.Err(); err != nil {
+		log.Warn(err)
+		return nil, err
+	}
+	infos, err := do.Infos()
 	if err != nil {
-		log.Error(err)
-		return nil, nil
+		log.Println(err)
+		return nil, err
 	}
-	selector := service.Spec.Selector
-	newName := serviceName + "-" + "shadow"
-	DeletePod(clientset, namespace, newName)
-	var ports []v1.ContainerPort
-	for _, port := range service.Spec.Ports {
-		val := port.TargetPort.IntVal
-		if val == 0 {
-			val = port.Port
+	if len(infos) == 0 {
+		return nil, errors.New("Not found")
+	}
+	return infos[0].Object, err
+}
+
+func GetLabelSelector(object k8sruntime.Object) *metav1.LabelSelector {
+	l := &metav1.LabelSelector{}
+
+	printer, _ := printers.NewJSONPathPrinter("{.spec.selector}")
+	buf := bytes.NewBuffer([]byte{})
+	if err := printer.PrintObj(object, buf); err != nil {
+		log.Println(err)
+	}
+	fmt.Println(buf.String())
+	err := json2.Unmarshal([]byte(buf.String()), l)
+	if err != nil || len(l.MatchLabels) == 0 {
+		m := map[string]string{}
+		_ = json2.Unmarshal([]byte(buf.String()), &m)
+		if len(m) != 0 {
+			l = &metav1.LabelSelector{MatchLabels: m}
 		}
-		ports = append(ports, v1.ContainerPort{
-			Name:          port.Name,
-			ContainerPort: val,
-			Protocol:      port.Protocol,
-		})
 	}
-	return selector, ports
+	return l
+}
+
+func GetPorts(object k8sruntime.Object) []v1.ContainerPort {
+	var result []v1.ContainerPort
+	replicasetPortPrinter, _ := printers.NewJSONPathPrinter("{.spec.template.spec.containers[0].ports}")
+	servicePortPrinter, _ := printers.NewJSONPathPrinter("{.spec.ports}")
+	buf := bytes.NewBuffer([]byte{})
+	err := replicasetPortPrinter.PrintObj(object, buf)
+	if err != nil {
+		_ = servicePortPrinter.PrintObj(object, buf)
+		var ports []v1.ServicePort
+		_ = json2.Unmarshal([]byte(buf.String()), &ports)
+		for _, port := range ports {
+			val := port.TargetPort.IntVal
+			if val == 0 {
+				val = port.Port
+			}
+			result = append(result, v1.ContainerPort{
+				Name:          port.Name,
+				ContainerPort: val,
+				Protocol:      port.Protocol,
+			})
+		}
+	} else {
+		_ = json2.Unmarshal([]byte(buf.String()), &result)
+	}
+	return result
+}
+
+func GetOwnerReferences(object k8sruntime.Object) *metav1.OwnerReference {
+	printer, _ := printers.NewJSONPathPrinter("{.metadata.ownerReferences}")
+	buf := bytes.NewBuffer([]byte{})
+	if err := printer.PrintObj(object, buf); err != nil {
+		return nil
+	}
+	var refs []metav1.OwnerReference
+	_ = json2.Unmarshal([]byte(buf.String()), &refs)
+	for i := range refs {
+		if refs[i].Controller != nil && *refs[i].Controller {
+			return &refs[i]
+		}
+	}
+	return nil
+}
+
+func GetScale(object k8sruntime.Object) int {
+	printer, _ := printers.NewJSONPathPrinter("{.spec.replicas}")
+	buf := bytes.NewBuffer([]byte{})
+	if err := printer.PrintObj(object, buf); err != nil {
+		return 0
+	}
+	if atoi, err := strconv.Atoi(buf.String()); err == nil {
+		return atoi
+	}
+	return 0
 }
 
 func DeletePod(clientset *kubernetes.Clientset, namespace, podName string) {
@@ -311,12 +373,17 @@ func DeletePod(clientset *kubernetes.Clientset, namespace, podName string) {
 }
 
 // TopLevelControllerSet record every pod's top level controller, like pod controllerBy replicaset, replicaset controllerBy deployment
-var TopLevelControllerSet []ResourceTuple
+var TopLevelControllerSet []ResourceTupleWithScale
 
 type ResourceTuple struct {
 	Resource string
 	Name     string
-	Scale    int32
+}
+
+type ResourceTupleWithScale struct {
+	Resource string
+	Name     string
+	Scale    int
 }
 
 // splitResourceTypeName handles type/name resource formats and returns a resource tuple

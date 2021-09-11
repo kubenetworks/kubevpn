@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"kubevpn/util"
@@ -111,16 +112,24 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 	}
 }
 
-func CreateServerInbound(clientset *kubernetes.Clientset, namespace, service string, virtualLocalIp, realRouterIP, virtualShadowIp, routes string) error {
-	lables, ports := updateReplicasToZeroAndGetLabels(clientset, namespace, service)
-	newName := service + "-" + "shadow"
+func CreateServerInbound(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads, virtualLocalIp, realRouterIP, virtualShadowIp, routes string) error {
+	name, b, err2 := util.SplitResourceTypeName(workloads)
+	if !b || err2 != nil {
+		return errors.New("not need")
+	}
+	newName := name.Name + "-" + "shadow"
+	util.DeletePod(clientset, namespace, newName)
+	err := updateScaleToZero(factory, clientset, namespace, workloads)
+	object, err2 := util.GetUnstructuredObject(factory, namespace, workloads)
+	lables := util.GetLabelSelector(object)
+	ports := util.GetPorts(object)
 	t := true
 	zero := int64(0)
 	pod := v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      newName,
 			Namespace: namespace,
-			Labels:    lables,
+			Labels:    lables.MatchLabels,
 		},
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
@@ -191,25 +200,20 @@ func CreateServerInbound(clientset *kubernetes.Clientset, namespace, service str
 	}
 }
 
-func updateReplicasToZeroAndGetLabels(clientset *kubernetes.Clientset, namespace, service string) (map[string]string, []v1.ContainerPort) {
-	if len(service) == 0 || len(namespace) == 0 {
+func updateScaleToZero(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads string) error {
+	if len(workloads) == 0 || len(namespace) == 0 {
 		log.Info("no need to expose local service to remote")
-		return nil, nil
+		return nil
 	}
-	log.Info("prepare to expose local service to remote service: " + service)
-	controller := util.GetTopController(clientset, namespace, service)
+	log.Info("prepare to expose local service to remote service: " + workloads)
+	controller := util.GetTopController(factory, clientset, namespace, workloads)
 	if len(controller.Resource) == 0 || len(controller.Name) == 0 {
-		log.Warnf("controller is empty, service: %s-%s", namespace, service)
-		return nil, nil
+		log.Warnf("controller is empty, service: %s-%s", namespace, workloads)
+		return nil
 	}
 	util.TopLevelControllerSet = append(util.TopLevelControllerSet, controller)
 	controllerCopy := controller
 	controllerCopy.Scale = 0
 	util.UpdateReplicasScale(clientset, namespace, controllerCopy)
-	labels, ports := util.GetLabels(clientset, namespace, service)
-	if labels == nil {
-		log.Info("fail to create shadow")
-		return nil, nil
-	}
-	return labels, ports
+	return nil
 }

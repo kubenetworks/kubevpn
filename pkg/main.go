@@ -3,19 +3,13 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"kubevpn/dns"
 	"kubevpn/exe"
-	"kubevpn/gost"
 	"kubevpn/remote"
 	"kubevpn/util"
 	"net"
@@ -25,45 +19,6 @@ import (
 	"sync"
 	"time"
 )
-
-var (
-	nodeConfig     route
-	kubeconfigpath string
-	namespace      string
-	services       string
-	clientset      *kubernetes.Clientset
-	restclient     *rest.RESTClient
-	config         *rest.Config
-)
-
-func init() {
-	gost.SetLogger(&gost.LogLogger{})
-	flag.StringVar(&kubeconfigpath, "kubeconfig", clientcmd.RecommendedHomeFile, "kubeconfig")
-	flag.StringVar(&namespace, "namespace", "", "namespace")
-	flag.StringVar(&services, "services", "", "services")
-	flag.BoolVar(&gost.Debug, "debug", false, "true/false")
-	flag.Parse()
-	log.Printf("kubeconfig path: %s, namespace: %s, serivces: %s\n", kubeconfigpath, namespace, services)
-	var err error
-	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-	configFlags.KubeConfig = &kubeconfigpath
-	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
-
-	if config, err = factory.ToRESTConfig(); err != nil {
-		log.Fatal(err)
-	}
-	if restclient, err = rest.RESTClientFor(config); err != nil {
-		log.Fatal(err)
-	}
-	if clientset, err = kubernetes.NewForConfig(config); err != nil {
-		log.Fatal(err)
-	}
-	if len(namespace) == 0 {
-		if namespace, _, err = factory.ToRawKubeConfigLoader().Namespace(); err != nil {
-			log.Fatal(err)
-		}
-	}
-}
 
 func prepare() {
 	k8sCIDRs, err := getCIDR(clientset, namespace)
@@ -94,19 +49,20 @@ func prepare() {
 	tempIps := []*net.IPNet{tunIp}
 	wg := sync.WaitGroup{}
 	lock := sync.Mutex{}
-	for _, service := range strings.Split(services, ",") {
-		if len(service) > 0 {
+	for _, workload := range workloads {
+		if len(workload) > 0 {
 			wg.Add(1)
-			go func(finalService string) {
+			go func(finalWorkload string) {
 				defer wg.Done()
 				lock.Lock()
 				virtualShadowIp, _ := remote.GetRandomIpFromDHCP(clientset, namespace)
 				tempIps = append(tempIps, virtualShadowIp)
 				lock.Unlock()
 				err = remote.CreateServerInbound(
+					factory,
 					clientset,
 					namespace,
-					finalService,
+					finalWorkload,
 					tunIp.IP.String(),
 					pod.Status.PodIP,
 					virtualShadowIp.String(),
@@ -115,11 +71,11 @@ func prepare() {
 				if err != nil {
 					log.Error(err)
 				}
-			}(service)
+			}(workload)
 		}
 	}
 	wg.Wait()
-	remote.AddCleanUpResourceHandler(clientset, namespace, services, tempIps...)
+	remote.AddCleanUpResourceHandler(clientset, namespace, workloads, tempIps...)
 	if util.IsWindows() {
 		tunIp.Mask = net.CIDRMask(0, 32)
 	} else {
@@ -138,7 +94,7 @@ func prepare() {
 	}
 }
 
-func main() {
+func Main() {
 	prepare()
 	//readyChan := make(chan struct{}, math.MaxInt32)
 	go func() {
