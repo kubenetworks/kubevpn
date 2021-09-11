@@ -160,14 +160,14 @@ func GetTopController(factory cmdutil.Factory, clientset *kubernetes.Clientset, 
 	}
 	of := metav1.GetControllerOf(&podList.Items[0])
 	for of != nil {
-		unstructuredObject, err := GetUnstructuredObject(factory, namespace, fmt.Sprintf("%s/%s", of.Kind, of.Name))
+		object, err = GetUnstructuredObject(factory, namespace, fmt.Sprintf("%s/%s", of.Kind, of.Name))
 		if err != nil {
 			return
 		}
 		controller.Resource = strings.ToLower(of.Kind) + "s"
 		controller.Name = of.Name
-		controller.Scale = GetScale(unstructuredObject)
-		of = GetOwnerReferences(unstructuredObject)
+		controller.Scale = GetScale(object)
+		of = GetOwnerReferences(object)
 	}
 	return
 }
@@ -295,7 +295,6 @@ func GetLabelSelector(object k8sruntime.Object) *metav1.LabelSelector {
 	if err := printer.PrintObj(object, buf); err != nil {
 		log.Println(err)
 	}
-	fmt.Println(buf.String())
 	err := json2.Unmarshal([]byte(buf.String()), l)
 	if err != nil || len(l.MatchLabels) == 0 {
 		m := map[string]string{}

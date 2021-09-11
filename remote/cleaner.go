@@ -32,13 +32,13 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 		cleanUpTrafficManagerIfRefCountIsZero(clientset, namespace)
 		wg := sync.WaitGroup{}
 		for _, service := range workloads {
-			if len(service) > 0 {
+			if tuple, ok, err := util.SplitResourceTypeName(service); ok && err == nil {
 				wg.Add(1)
-				go func(finalService string) {
+				go func(finalTuple util.ResourceTuple) {
 					defer wg.Done()
-					newName := finalService + "-" + "shadow"
-					util.DeletePod(clientset, namespace, newName)
-				}(service)
+					podName := finalTuple.Name + "-" + "shadow"
+					util.DeletePod(clientset, namespace, podName)
+				}(tuple)
 			}
 		}
 		wg.Wait()
