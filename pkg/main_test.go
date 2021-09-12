@@ -105,7 +105,7 @@ func checkSum(msg []byte) uint16 {
 
 func TestHttpServer(t *testing.T) {
 	http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
-		_, _ = io.WriteString(writer, "hello")
+		_, _ = io.WriteString(writer, "hello world!")
 	})
-	_ = http.ListenAndServe(":9080", nil)
+	_ = http.ListenAndServe(":8080", nil)
 }

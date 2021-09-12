@@ -8,5 +8,7 @@
 
 ## 优化 DHCP 功能
 
-## 支持多种类型，例如 statefulset, replicaset...
+## 支持多种类型，例如 statefulset, replicaset... --完成
+
+## 支持 ipv6
 

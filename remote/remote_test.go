@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"kubevpn/util"
 	"net"
 	"path/filepath"
 	"strings"
@@ -28,7 +29,7 @@ import (
 func TestCreateServer(t *testing.T) {
 	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		&clientcmd.ClientConfigLoadingRules{
-			ExplicitPath: filepath.Join(homedir.HomeDir(), clientcmd.RecommendedHomeDir, clientcmd.RecommendedFileName),
+			ExplicitPath: clientcmd.RecommendedHomeFile,
 		},
 		nil,
 	)
@@ -205,4 +206,15 @@ func TestGet(t *testing.T) {
 		}
 		fmt.Println(result)
 	}
+}
+
+func TestGetTopController(t *testing.T) {
+	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
+	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
+	clientset, _ := factory.KubernetesClientSet()
+	controller := util.GetTopController(factory, clientset, "test", "pods/tomcat-7449544d95-n72zb")
+	fmt.Println(controller.Resource)
+	fmt.Println(controller.Name)
+	fmt.Println(controller.Scale)
 }

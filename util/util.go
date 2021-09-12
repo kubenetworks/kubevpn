@@ -293,7 +293,8 @@ func GetLabelSelector(object k8sruntime.Object) *metav1.LabelSelector {
 	printer, _ := printers.NewJSONPathPrinter("{.spec.selector}")
 	buf := bytes.NewBuffer([]byte{})
 	if err := printer.PrintObj(object, buf); err != nil {
-		log.Println(err)
+		pathPrinter, _ := printers.NewJSONPathPrinter("{.metadata.labels}")
+		_ = pathPrinter.PrintObj(object, buf)
 	}
 	err := json2.Unmarshal([]byte(buf.String()), l)
 	if err != nil || len(l.MatchLabels) == 0 {
