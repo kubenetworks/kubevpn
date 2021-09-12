@@ -7,7 +7,13 @@
 ```shell
 git clone https://github.com/wencaiwulue/kubevpn.git
 cd kubevpn
-make kubevpn
+make kubevpn-linux/kubevpn-macos/kubevpn-windows
+```
+
+如果你在使用 Windows 系统，可以使用下面这条命令构建：
+
+```shell
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o kubevpn.exe ./pkg
 ```
 
 注意，执行需要 sudo 权限，如果是 Windows 系统，需要在管理员模式下的 terminal 中运行
