@@ -5,7 +5,7 @@
 ### 链接到集群网络
 
 ```shell
-sudo kubevpn --namespace=test
+sudo kubevpn connect --namespace=test
 Password:
 INFO[0000] kubeconfig path: /Users/naison/.kube/config, namespace: test, serivces:  
 INFO[0001] update ref count successfully                
@@ -71,8 +71,8 @@ tomcat              ClusterIP   172.20.203.233   <none>        8080/TCP   30h
 ### 反向代理
 
 ```shell
-➜  ~ sudo kubevpn --namespace=test --services=nginx,tomcat
-INFO[0000] kubeconfig path: /Users/naison/.kube/config, namespace: test, serivces: nginx,tomcat 
+➜  ~ sudo kubevpn --namespace=test --workloads=service/nginx --workloads=service/tomcat
+INFO[0000] kubeconfig path: /Users/naison/.kube/config, namespace: test, serivces: service/nginx,service/tomcat 
 INFO[0001] prepare to expose local service to remote service: tomcat 
 INFO[0001] prepare to expose local service to remote service: nginx 
 INFO[0032] your ip is 223.254.254.43/24                 
@@ -104,3 +104,19 @@ Hello world!%
 ➜  ~ curl tomcat.test.svc.cluster.local:8080
 Hello world!%
 ```
+
+### 支持多种协议
+
+- TCP
+- UDP
+- HTTP
+- ICMP
+- ...
+
+### 支持三大平台
+
+- MacOS
+- Linux
+- Windows
+
+Windows 下需要安装 ```TAP/TUN```[驱动](./exe/tap-windows-9.21.2.exe)和```PowerShell```

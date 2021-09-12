@@ -5,7 +5,7 @@
 ### Connect to k8s cluster network
 
 ```shell
-sudo kubevpn --namespace=test
+sudo kubevpn connect --namespace=test
 Password:
 INFO[0000] kubeconfig path: /Users/naison/.kube/config, namespace: test, serivces:  
 INFO[0001] update ref count successfully                
@@ -71,8 +71,8 @@ tomcat              ClusterIP   172.20.203.233   <none>        8080/TCP   30h
 ### Reverse proxy
 
 ```shell
-➜  ~ sudo kubevpn --namespace=test --services=nginx,tomcat
-INFO[0000] kubeconfig path: /Users/naison/.kube/config, namespace: test, serivces: nginx,tomcat 
+➜  ~ sudo kubevpn connect --namespace=test --workloads=service/nginx --workloads=serivce/tomcat
+INFO[0000] kubeconfig path: /Users/naison/.kube/config, namespace: test, serivces: serivce/nginx,service/tomcat 
 INFO[0001] prepare to expose local service to remote service: tomcat 
 INFO[0001] prepare to expose local service to remote service: nginx 
 INFO[0032] your ip is 223.254.254.43/24                 
@@ -104,3 +104,19 @@ Hello world!%
 ➜  ~ curl tomcat.test.svc.cluster.local:8080
 Hello world!%
 ```
+
+### Multiple Protocol
+
+- TCP
+- UDP
+- HTTP
+- ICMP
+- ...
+
+### Cross-platform
+
+- MacOS
+- Linux
+- Windows
+
+on Windows platform, you need to install ```TAP/TUN``` [driver](./exe/tap-windows-9.21.2.exe) and ```PowerShell```
