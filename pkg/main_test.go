@@ -5,12 +5,14 @@ import (
 	"crypto/md5"
 	"fmt"
 	log "github.com/sirupsen/logrus"
+	"io"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	net2 "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"kubevpn/remote"
 	"net"
+	"net/http"
 	"os/exec"
 	"testing"
 	"time"
@@ -99,4 +101,11 @@ func checkSum(msg []byte) uint16 {
 	sum = (sum >> 16) + (sum & 0xffff)
 	sum += sum >> 16
 	return uint16(^sum)
+}
+
+func TestHttpServer(t *testing.T) {
+	http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = io.WriteString(writer, "hello")
+	})
+	_ = http.ListenAndServe(":9080", nil)
 }

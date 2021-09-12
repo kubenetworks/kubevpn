@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 package dns
@@ -11,8 +12,9 @@ import (
 
 func DNS(ip string, namespace string) error {
 	tunName := os.Getenv("tunName")
-	fmt.Println("tun name: " + tunName)
-	args := []string{
+	log.Info("tun name: " + tunName)
+	_ = cleanDnsServer(tunName)
+	cmd := exec.Command("netsh", []string{
 		"interface",
 		"ipv4",
 		"add",
@@ -20,29 +22,58 @@ func DNS(ip string, namespace string) error {
 		fmt.Sprintf("name=\"%s\"", tunName),
 		fmt.Sprintf("address=%s", ip),
 		"index=1",
-	}
-	output, err := exec.Command("netsh", args...).CombinedOutput()
-	fmt.Println(exec.Command("netsh", args...).Args)
-	log.Info(string(output))
-	_ = addNicSuffix(namespace)
+	}...)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Error(err)
-		return nil
+		log.Warnf("error while set dns server, error: %v, output: %s, command: %v", err, string(output), cmd.Args)
 	}
+	_ = addNicSuffixSearchList(namespace)
+	_ = updateNicMetric(tunName)
 	return nil
 }
 
 // @see https://docs.microsoft.com/en-us/powershell/module/dnsclient/set-dnsclientglobalsetting?view=windowsserver2019-ps#example-1--set-the-dns-suffix-search-list
-func addNicSuffix(namespace string) error {
+func addNicSuffixSearchList(namespace string) error {
 	cmd := exec.Command("PowerShell", []string{
 		"Set-DnsClientGlobalSetting",
 		"-SuffixSearchList",
 		fmt.Sprintf("@(\"%s.svc.cluster.local\", \"svc.cluster.local\")", namespace),
 	}...)
 	output, err := cmd.CombinedOutput()
+	log.Info(cmd.Args)
 	if err != nil {
-		log.Warn(err)
+		log.Warnf("error while set dns suffix search list, err: %v, output: %s, command: %v", err, string(output), cmd.Args)
 	}
-	log.Info(string(output))
+	return err
+}
+
+func updateNicMetric(name string) error {
+	cmd := exec.Command("PowerShell", []string{
+		"Set-NetIPInterface",
+		"-InterfaceAlias",
+		fmt.Sprintf("\"%s\"", name),
+		"-InterfaceMetric",
+		"1",
+	}...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Warnf("error while update nic metrics, error: %v, output: %s, command: %v", err, string(out), cmd.Args)
+	}
+	return err
+}
+
+func cleanDnsServer(name string) error {
+	cmd := exec.Command("netsh", []string{
+		"interface",
+		"ipv4",
+		"delete",
+		"dnsservers",
+		fmt.Sprintf("\"%s\"", name),
+		"all",
+	}...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Warnf("clean dnsservers failed, error: %v, output: %s, command: %v", err, string(out), cmd.Args)
+	}
 	return err
 }
