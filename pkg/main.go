@@ -14,7 +14,6 @@ import (
 	"kubevpn/util"
 	"net"
 	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -96,7 +95,7 @@ func prepare() {
 
 func Main() {
 	prepare()
-	//readyChan := make(chan struct{}, math.MaxInt32)
+	var readyChanRef *chan struct{}
 	go func() {
 		for {
 			func() {
@@ -105,13 +104,15 @@ func Main() {
 						log.Warnf("recover error: %v, ignore", err)
 					}
 				}()
+				readChan := make(chan struct{})
+				readyChanRef = &readChan
 				err := util.PortForwardPod(
 					config,
 					clientset,
 					util.TrafficManager,
 					namespace,
 					"10800:10800",
-					make(chan struct{}),
+					readChan,
 					make(chan struct{}),
 				)
 				if apierrors.IsNotFound(err) {
@@ -124,15 +125,16 @@ func Main() {
 			}()
 		}
 	}()
-	//<-readyChan
-	time.Sleep(time.Second * 4)
+	for readyChanRef == nil {
+	}
+	<-*readyChanRef
 	log.Info("port forward ready")
 
 	if err := start(); err != nil {
 		log.Fatal(err)
 	}
 
-	if runtime.GOOS == "windows" {
+	if util.IsWindows() {
 		if !util.FindRule() {
 			util.AddFirewallRule()
 		}
