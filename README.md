@@ -1,5 +1,18 @@
 # kubevpn
 
+A tools which can connect to kubernetes cluster network, you can access remote kubernetes cluster network, remote
+kubernetes cluster service can also access your local service
+
+## QuickStart
+
+```shell
+git clone https://github.com/wencaiwulue/kubevpn.git
+cd kubevpn
+make kubevpn
+```
+
+attention: if you are using Windows, you need run kubevpn.exe in terminal which needs to be opened by administrator
+
 ## Functions
 
 ### Connect to k8s cluster network

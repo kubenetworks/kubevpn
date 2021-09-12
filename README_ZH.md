@@ -1,5 +1,17 @@
 # kubevpn
 
+一个本地连接云端 kubernetes 网络的工具，可以在本地直接访问远端集群的服务。也可以在远端集群访问到本地服务，便于调试及开发
+
+## 快速开始
+
+```shell
+git clone https://github.com/wencaiwulue/kubevpn.git
+cd kubevpn
+make kubevpn
+```
+
+注意，执行需要 sudo 权限，如果是 Windows 系统，需要在管理员模式下的 terminal 中运行
+
 ## 功能
 
 ### 链接到集群网络
