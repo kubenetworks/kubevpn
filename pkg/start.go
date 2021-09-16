@@ -25,8 +25,8 @@ var (
 func init() {
 	gost.SetLogger(&gost.LogLogger{})
 	connectCmd.Flags().StringVar(&kubeconfigpath, "kubeconfig", clientcmd.RecommendedHomeFile, "kubeconfig")
-	connectCmd.Flags().StringVar(&namespace, "namespace", "", "namespace")
-	connectCmd.PersistentFlags().StringArrayVar(&workloads, "workloads", []string{}, "workloads")
+	connectCmd.Flags().StringVarP(&namespace, "namespace", "n", "", "namespace")
+	connectCmd.PersistentFlags().StringArrayVar(&workloads, "workloads", []string{}, "workloads, like: services/tomcat, deployment/nginx, replicaset/tomcat...")
 	connectCmd.Flags().BoolVar(&gost.Debug, "debug", false, "true/false")
 	RootCmd.AddCommand(connectCmd)
 }
