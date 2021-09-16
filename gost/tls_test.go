@@ -9,89 +9,6 @@ import (
 	"testing"
 )
 
-func httpOverTLSRoundtrip(targetURL string, data []byte, tlsConfig *tls.Config,
-	clientInfo *url.Userinfo, serverInfo []*url.Userinfo) error {
-
-	ln, err := TLSListener("", tlsConfig)
-	if err != nil {
-		return err
-	}
-
-	client := &Client{
-		Connector:   HTTPConnector(clientInfo),
-		Transporter: TLSTransporter(),
-	}
-
-	server := &Server{
-		Listener: ln,
-		Handler: HTTPHandler(
-			UsersHandlerOption(serverInfo...),
-		),
-	}
-
-	go server.Run()
-	defer server.Close()
-
-	return proxyRoundtrip(client, server, targetURL, data)
-}
-
-func TestHTTPOverTLS(t *testing.T) {
-	httpSrv := httptest.NewServer(httpTestHandler)
-	defer httpSrv.Close()
-
-	sendData := make([]byte, 128)
-	rand.Read(sendData)
-
-	for i, tc := range httpProxyTests {
-		err := httpOverTLSRoundtrip(httpSrv.URL, sendData, nil, tc.cliUser, tc.srvUsers)
-		if err == nil {
-			if tc.errStr != "" {
-				t.Errorf("#%d should failed with error %s", i, tc.errStr)
-			}
-		} else {
-			if tc.errStr == "" {
-				t.Errorf("#%d got error %v", i, err)
-			}
-			if err.Error() != tc.errStr {
-				t.Errorf("#%d got error %v, want %v", i, err, tc.errStr)
-			}
-		}
-	}
-}
-
-func BenchmarkHTTPOverTLS(b *testing.B) {
-	httpSrv := httptest.NewServer(httpTestHandler)
-	defer httpSrv.Close()
-
-	sendData := make([]byte, 128)
-	rand.Read(sendData)
-
-	ln, err := TLSListener("", nil)
-	if err != nil {
-		b.Error(err)
-	}
-
-	client := &Client{
-		Connector:   HTTPConnector(url.UserPassword("admin", "123456")),
-		Transporter: TLSTransporter(),
-	}
-
-	server := &Server{
-		Listener: ln,
-		Handler: HTTPHandler(
-			UsersHandlerOption(url.UserPassword("admin", "123456")),
-		),
-	}
-	go server.Run()
-	defer server.Close()
-
-	for i := 0; i < b.N; i++ {
-		if err := proxyRoundtrip(client, server, httpSrv.URL, sendData); err != nil {
-			b.Error(err)
-		}
-	}
-}
-
 func BenchmarkHTTPOverTLSParallel(b *testing.B) {
 	httpSrv := httptest.NewServer(httpTestHandler)
 	defer httpSrv.Close()
@@ -303,33 +220,6 @@ func TestSSOverTLS(t *testing.T) {
 	}
 }
 
-func sniOverTLSRoundtrip(targetURL string, data []byte, host string) error {
-	ln, err := TLSListener("", nil)
-	if err != nil {
-		return err
-	}
-
-	u, err := url.Parse(targetURL)
-	if err != nil {
-		return err
-	}
-
-	client := &Client{
-		Connector:   SNIConnector(host),
-		Transporter: TLSTransporter(),
-	}
-
-	server := &Server{
-		Listener: ln,
-		Handler:  SNIHandler(HostHandlerOption(u.Host)),
-	}
-
-	go server.Run()
-	defer server.Close()
-
-	return sniRoundtrip(client, server, targetURL, data)
-}
-
 func TestSNIOverTLS(t *testing.T) {
 	httpSrv := httptest.NewServer(httpTestHandler)
 	defer httpSrv.Close()
@@ -406,56 +296,6 @@ func TestTLSForwardTunnel(t *testing.T) {
 	err := tlsForwardTunnelRoundtrip(httpSrv.URL, sendData)
 	if err != nil {
 		t.Error(err)
-	}
-}
-
-func httpOverMTLSRoundtrip(targetURL string, data []byte, tlsConfig *tls.Config,
-	clientInfo *url.Userinfo, serverInfo []*url.Userinfo) error {
-
-	ln, err := MTLSListener("", tlsConfig)
-	if err != nil {
-		return err
-	}
-
-	client := &Client{
-		Connector:   HTTPConnector(clientInfo),
-		Transporter: MTLSTransporter(),
-	}
-
-	server := &Server{
-		Listener: ln,
-		Handler: HTTPHandler(
-			UsersHandlerOption(serverInfo...),
-		),
-	}
-
-	go server.Run()
-	defer server.Close()
-
-	return proxyRoundtrip(client, server, targetURL, data)
-}
-
-func TestHTTPOverMTLS(t *testing.T) {
-	httpSrv := httptest.NewServer(httpTestHandler)
-	defer httpSrv.Close()
-
-	sendData := make([]byte, 128)
-	rand.Read(sendData)
-
-	for i, tc := range httpProxyTests {
-		err := httpOverMTLSRoundtrip(httpSrv.URL, sendData, nil, tc.cliUser, tc.srvUsers)
-		if err == nil {
-			if tc.errStr != "" {
-				t.Errorf("#%d should failed with error %s", i, tc.errStr)
-			}
-		} else {
-			if tc.errStr == "" {
-				t.Errorf("#%d got error %v", i, err)
-			}
-			if err.Error() != tc.errStr {
-				t.Errorf("#%d got error %v, want %v", i, err, tc.errStr)
-			}
-		}
 	}
 }
 

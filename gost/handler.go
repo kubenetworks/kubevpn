@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/ginuerzh/gosocks4"
 	"github.com/ginuerzh/gosocks5"
 	"github.com/go-log/log"
 )
@@ -25,16 +24,11 @@ type HandlerOptions struct {
 	Users         []*url.Userinfo
 	Authenticator Authenticator
 	TLSConfig     *tls.Config
-	Whitelist     *Permissions
-	Blacklist     *Permissions
 	Strategy      Strategy
 	MaxFails      int
 	FailTimeout   time.Duration
-	Bypass        *Bypass
 	Retries       int
 	Timeout       time.Duration
-	Resolver      Resolver
-	Hosts         *Hosts
 	ProbeResist   string
 	KnockingHost  string
 	Node          Node
@@ -92,27 +86,6 @@ func TLSConfigHandlerOption(config *tls.Config) HandlerOption {
 	}
 }
 
-// WhitelistHandlerOption sets the Whitelist option of HandlerOptions.
-func WhitelistHandlerOption(whitelist *Permissions) HandlerOption {
-	return func(opts *HandlerOptions) {
-		opts.Whitelist = whitelist
-	}
-}
-
-// BlacklistHandlerOption sets the Blacklist option of HandlerOptions.
-func BlacklistHandlerOption(blacklist *Permissions) HandlerOption {
-	return func(opts *HandlerOptions) {
-		opts.Blacklist = blacklist
-	}
-}
-
-// BypassHandlerOption sets the bypass option of HandlerOptions.
-func BypassHandlerOption(bypass *Bypass) HandlerOption {
-	return func(opts *HandlerOptions) {
-		opts.Bypass = bypass
-	}
-}
-
 // StrategyHandlerOption sets the strategy option of HandlerOptions.
 func StrategyHandlerOption(strategy Strategy) HandlerOption {
 	return func(opts *HandlerOptions) {
@@ -145,27 +118,6 @@ func RetryHandlerOption(retries int) HandlerOption {
 func TimeoutHandlerOption(timeout time.Duration) HandlerOption {
 	return func(opts *HandlerOptions) {
 		opts.Timeout = timeout
-	}
-}
-
-// ResolverHandlerOption sets the resolver option of HandlerOptions.
-func ResolverHandlerOption(resolver Resolver) HandlerOption {
-	return func(opts *HandlerOptions) {
-		opts.Resolver = resolver
-	}
-}
-
-// HostsHandlerOption sets the Hosts option of HandlerOptions.
-func HostsHandlerOption(hosts *Hosts) HandlerOption {
-	return func(opts *HandlerOptions) {
-		opts.Hosts = hosts
-	}
-}
-
-// ProbeResistHandlerOption adds the probe resistance for HTTP proxy.
-func ProbeResistHandlerOption(pr string) HandlerOption {
-	return func(opts *HandlerOptions) {
-		opts.ProbeResist = pr
 	}
 }
 
@@ -243,18 +195,8 @@ func (h *autoHandler) Handle(conn net.Conn) {
 	cc := &bufferdConn{Conn: conn, br: br}
 	var handler Handler
 	switch b[0] {
-	case gosocks4.Ver4:
-		// SOCKS4(a) does not suppport authentication method,
-		// so we ignore it when credentials are specified for security reason.
-		if len(h.options.Users) > 0 {
-			cc.Close()
-			return
-		}
-		handler = &socks4Handler{options: h.options}
 	case gosocks5.Ver5: // socks5
 		handler = &socks5Handler{options: h.options}
-	default: // http
-		handler = &httpHandler{options: h.options}
 	}
 	handler.Init()
 	handler.Handle(cc)

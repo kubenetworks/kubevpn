@@ -31,7 +31,6 @@ type Node struct {
 	ConnectOptions   []ConnectOption
 	Client           *Client
 	marker           *failMarker
-	Bypass           *Bypass
 }
 
 // ParseNode parses the node info.

@@ -1,6 +1,7 @@
 package gost
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"time"
@@ -56,7 +57,8 @@ func (s *Server) Serve(h Handler, opts ...ServerOption) error {
 		h = s.Handler
 	}
 	if h == nil {
-		h = HTTPHandler()
+		fmt.Println("handler is nil =====================================================")
+		//h = HTTPHandler()
 	}
 
 	l := s.Listener

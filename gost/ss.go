@@ -142,18 +142,6 @@ func (h *shadowHandler) Handle(conn net.Conn) {
 	log.Logf("[ss] %s -> %s",
 		conn.RemoteAddr(), host)
 
-	if !Can("tcp", host, h.options.Whitelist, h.options.Blacklist) {
-		log.Logf("[ss] %s - %s : Unauthorized to tcp connect to %s",
-			conn.RemoteAddr(), conn.LocalAddr(), host)
-		return
-	}
-
-	if h.options.Bypass.Contains(host) {
-		log.Logf("[ss] %s - %s : Bypass %s",
-			conn.RemoteAddr(), conn.LocalAddr(), host)
-		return
-	}
-
 	retries := 1
 	if h.options.Chain != nil && h.options.Chain.Retries > 0 {
 		retries = h.options.Chain.Retries
@@ -183,8 +171,6 @@ func (h *shadowHandler) Handle(conn net.Conn) {
 
 		cc, err = route.Dial(host,
 			TimeoutChainOption(h.options.Timeout),
-			HostsChainOption(h.options.Hosts),
-			ResolverChainOption(h.options.Resolver),
 		)
 		if err == nil {
 			break
@@ -434,10 +420,6 @@ func (h *shadowUDPHandler) transportUDP(conn net.Conn, cc net.PacketConn) error 
 				if err != nil {
 					return
 				}
-				if h.options.Bypass.Contains(addr.String()) {
-					log.Log("[ssu] bypass", addr)
-					return // bypass
-				}
 				_, err = cc.WriteTo(dgram.Data, addr)
 				return
 			}()
@@ -461,10 +443,6 @@ func (h *shadowUDPHandler) transportUDP(conn net.Conn, cc net.PacketConn) error 
 				}
 				if Debug {
 					log.Logf("[ssu] %s <<< %s length: %d", conn.RemoteAddr(), addr, n)
-				}
-				if h.options.Bypass.Contains(addr.String()) {
-					log.Log("[ssu] bypass", addr)
-					return // bypass
 				}
 				dgram := gosocks5.NewUDPDatagram(
 					gosocks5.NewUDPHeader(uint16(n), 0, toSocksAddr(addr)), b[:n])

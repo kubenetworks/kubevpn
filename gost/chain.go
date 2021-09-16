@@ -3,10 +3,9 @@ package gost
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"time"
-
-	"github.com/go-log/log"
 )
 
 var (
@@ -142,7 +141,7 @@ func (c *Chain) dialWithOptions(ctx context.Context, network, address string, op
 
 	ipAddr := address
 	if address != "" {
-		ipAddr = c.resolve(address, options.Resolver, options.Hosts)
+		ipAddr = c.resolve(address)
 	}
 
 	timeout := options.Timeout
@@ -179,22 +178,10 @@ func (c *Chain) dialWithOptions(ctx context.Context, network, address string, op
 	return cc, nil
 }
 
-func (*Chain) resolve(addr string, resolver Resolver, hosts *Hosts) string {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return addr
-	}
-
-	if ip := hosts.Lookup(host); ip != nil {
-		return net.JoinHostPort(ip.String(), port)
-	}
-	if resolver != nil {
-		ips, err := resolver.Resolve(host)
-		if err != nil {
-			log.Logf("[resolver] %s: %v", host, err)
-		}
-		if len(ips) > 0 {
-			return net.JoinHostPort(ips[0].String(), port)
+func (*Chain) resolve(addr string) string {
+	if host, port, err := net.SplitHostPort(addr); err == nil {
+		if ips, err := net.LookupIP(host); err == nil && len(ips) > 0 {
+			return fmt.Sprintf("%s:%s", ips[0].String(), port)
 		}
 	}
 	return addr
@@ -302,10 +289,6 @@ func (c *Chain) selectRouteFor(addr string) (route *Chain, err error) {
 			return
 		}
 
-		if node.Bypass.Contains(addr) {
-			break
-		}
-
 		if node.Client.Transporter.Multiplex() {
 			node.DialOptions = append(node.DialOptions,
 				ChainDialOption(route),
@@ -324,10 +307,8 @@ func (c *Chain) selectRouteFor(addr string) (route *Chain, err error) {
 
 // ChainOptions holds options for Chain.
 type ChainOptions struct {
-	Retries  int
-	Timeout  time.Duration
-	Hosts    *Hosts
-	Resolver Resolver
+	Retries int
+	Timeout time.Duration
 }
 
 // ChainOption allows a common way to set chain options.
@@ -344,19 +325,5 @@ func RetryChainOption(retries int) ChainOption {
 func TimeoutChainOption(timeout time.Duration) ChainOption {
 	return func(opts *ChainOptions) {
 		opts.Timeout = timeout
-	}
-}
-
-// HostsChainOption specifies the hosts used by Chain.Dial.
-func HostsChainOption(hosts *Hosts) ChainOption {
-	return func(opts *ChainOptions) {
-		opts.Hosts = hosts
-	}
-}
-
-// ResolverChainOption specifies the Resolver used by Chain.Dial.
-func ResolverChainOption(resolver Resolver) ChainOption {
-	return func(opts *ChainOptions) {
-		opts.Resolver = resolver
 	}
 }

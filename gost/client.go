@@ -3,6 +3,7 @@ package gost
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/url"
 	"time"
@@ -17,24 +18,6 @@ import (
 type Client struct {
 	Connector
 	Transporter
-}
-
-// DefaultClient is a standard HTTP proxy client.
-var DefaultClient = &Client{Connector: HTTPConnector(nil), Transporter: TCPTransporter()}
-
-// Dial connects to the address addr via the DefaultClient.
-func Dial(addr string, options ...DialOption) (net.Conn, error) {
-	return DefaultClient.Dial(addr, options...)
-}
-
-// Handshake performs a handshake via the DefaultClient.
-func Handshake(conn net.Conn, options ...HandshakeOption) (net.Conn, error) {
-	return DefaultClient.Handshake(conn, options...)
-}
-
-// Connect connects to the address addr via the DefaultClient.
-func Connect(conn net.Conn, addr string) (net.Conn, error) {
-	return DefaultClient.Connect(conn, addr)
 }
 
 // Connector is responsible for connecting to the destination address.
@@ -63,7 +46,8 @@ func (c *autoConnector) ConnectContext(ctx context.Context, conn net.Conn, netwo
 	var cnr Connector
 	switch network {
 	case "tcp", "tcp4", "tcp6":
-		cnr = &httpConnector{User: c.User}
+		fmt.Println("xxxxxxxxxxxxxxxxxxxxxxx------------------------------------------")
+		//cnr = &httpConnector{User: c.User}
 	default:
 		cnr = &socks5UDPTunConnector{User: c.User}
 	}
@@ -119,10 +103,7 @@ type HandshakeOptions struct {
 	Interval   time.Duration
 	Retry      int
 	TLSConfig  *tls.Config
-	WSOptions  *WSOptions
-	KCPConfig  *KCPConfig
 	QUICConfig *QUICConfig
-	SSHConfig  *SSHConfig
 }
 
 // HandshakeOption allows a common way to set HandshakeOptions.
@@ -177,31 +158,10 @@ func TLSConfigHandshakeOption(config *tls.Config) HandshakeOption {
 	}
 }
 
-// WSOptionsHandshakeOption specifies the websocket options used by websocket handshake
-func WSOptionsHandshakeOption(options *WSOptions) HandshakeOption {
-	return func(opts *HandshakeOptions) {
-		opts.WSOptions = options
-	}
-}
-
-// KCPConfigHandshakeOption specifies the KCP config used by KCP handshake
-func KCPConfigHandshakeOption(config *KCPConfig) HandshakeOption {
-	return func(opts *HandshakeOptions) {
-		opts.KCPConfig = config
-	}
-}
-
 // QUICConfigHandshakeOption specifies the QUIC config used by QUIC handshake
 func QUICConfigHandshakeOption(config *QUICConfig) HandshakeOption {
 	return func(opts *HandshakeOptions) {
 		opts.QUICConfig = config
-	}
-}
-
-// SSHConfigHandshakeOption specifies the ssh config used by SSH client handshake.
-func SSHConfigHandshakeOption(config *SSHConfig) HandshakeOption {
-	return func(opts *HandshakeOptions) {
-		opts.SSHConfig = config
 	}
 }
 

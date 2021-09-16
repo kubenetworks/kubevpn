@@ -62,30 +62,6 @@ func parseChainNode(ns string) (nodes []gost.Node, err error) {
 	}
 	timeout := node.GetDuration("timeout")
 
-	var tr gost.Transporter
-	switch node.Transport {
-	case "ssh":
-		if node.Protocol == "direct" || node.Protocol == "remote" {
-			tr = gost.SSHForwardTransporter()
-		} else {
-			tr = gost.SSHTunnelTransporter()
-		}
-	default:
-		tr = gost.TCPTransporter()
-	}
-
-	var connector gost.Connector
-	switch node.Protocol {
-	case "ssu":
-		connector = gost.ShadowUDPConnector(node.User)
-	case "direct":
-		connector = gost.SSHDirectForwardConnector()
-	case "remote":
-		connector = gost.SSHRemoteForwardConnector()
-	default:
-		connector = gost.AutoConnector(node.User)
-	}
-
 	host := node.Get("host")
 	if host == "" {
 		host = node.Host
@@ -111,8 +87,8 @@ func parseChainNode(ns string) (nodes []gost.Node, err error) {
 	}
 
 	node.Client = &gost.Client{
-		Connector:   connector,
-		Transporter: tr,
+		Connector:   gost.AutoConnector(node.User),
+		Transporter: gost.TCPTransporter(),
 	}
 
 	ips := parseIP(node.Get("ip"), sport)
@@ -157,10 +133,6 @@ func (r *route) GenRouters() (*router, error) {
 	switch node.Transport {
 	case "tcp":
 		// Directly use SSH port forwarding if the last chain node is forward+ssh
-		if chain.LastNode().Protocol == "forward" && chain.LastNode().Transport == "ssh" {
-			chain.Nodes()[len(chain.Nodes())-1].Client.Connector = gost.SSHDirectForwardConnector()
-			chain.Nodes()[len(chain.Nodes())-1].Client.Transporter = gost.SSHForwardTransporter()
-		}
 		ln, err = gost.TCPListener(node.Addr)
 	case "udp":
 		ln, err = gost.UDPListener(node.Addr, &gost.UDPListenConfig{
@@ -204,8 +176,6 @@ func (r *route) GenRouters() (*router, error) {
 		handler = gost.TunHandler()
 	case "tap":
 		handler = gost.TapHandler()
-	case "dns":
-		handler = gost.DNSHandler(node.Remote)
 	default:
 		// start from 2.5, if remote is not empty, then we assume that it is a forward tunnel.
 		if node.Remote != "" {
@@ -236,12 +206,10 @@ func (r *route) GenRouters() (*router, error) {
 }
 
 type router struct {
-	node     gost.Node
-	server   *gost.Server
-	handler  gost.Handler
-	chain    *gost.Chain
-	resolver gost.Resolver
-	hosts    *gost.Hosts
+	node    gost.Node
+	server  *gost.Server
+	handler gost.Handler
+	chain   *gost.Chain
 }
 
 func (r *router) Serve() error {
