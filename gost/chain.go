@@ -219,7 +219,7 @@ func (c *Chain) Conn(opts ...ChainOption) (conn net.Conn, err error) {
 }
 
 // getConn obtains a connection to the last node of the chain.
-func (c *Chain) getConn(ctx context.Context) (conn net.Conn, err error) {
+func (c *Chain) getConn(_ context.Context) (conn net.Conn, err error) {
 	if c.IsEmpty() {
 		err = ErrEmptyChain
 		return
@@ -229,39 +229,14 @@ func (c *Chain) getConn(ctx context.Context) (conn net.Conn, err error) {
 
 	cc, err := node.Client.Dial(node.Addr, node.DialOptions...)
 	if err != nil {
-		node.MarkDead()
 		return
 	}
 
 	cn, err := node.Client.Handshake(cc, node.HandshakeOptions...)
 	if err != nil {
 		cc.Close()
-		node.MarkDead()
 		return
 	}
-	node.ResetDead()
-
-	preNode := node
-	for _, node := range nodes[1:] {
-		var cc net.Conn
-		cc, err = preNode.Client.ConnectContext(ctx, cn, "tcp", node.Addr, preNode.ConnectOptions...)
-		if err != nil {
-			cn.Close()
-			node.MarkDead()
-			return
-		}
-		cc, err = node.Client.Handshake(cc, node.HandshakeOptions...)
-		if err != nil {
-			cn.Close()
-			node.MarkDead()
-			return
-		}
-		node.ResetDead()
-
-		cn = cc
-		preNode = node
-	}
-
 	conn = cn
 	return
 }

@@ -30,7 +30,6 @@ type Node struct {
 	HandshakeOptions []HandshakeOption
 	ConnectOptions   []ConnectOption
 	Client           *Client
-	marker           *failMarker
 }
 
 // ParseNode parses the node info.
@@ -56,7 +55,6 @@ func ParseNode(s string) (node Node, err error) {
 		Remote: strings.Trim(u.EscapedPath(), "/"),
 		Values: u.Query(),
 		User:   u.User,
-		marker: &failMarker{},
 		url:    u,
 	}
 
@@ -118,28 +116,9 @@ func ParseNode(s string) (node Node, err error) {
 	return
 }
 
-// MarkDead marks the node fail status.
-func (node *Node) MarkDead() {
-	if node.marker == nil {
-		return
-	}
-	node.marker.Mark()
-}
-
-// ResetDead resets the node fail status.
-func (node *Node) ResetDead() {
-	if node.marker == nil {
-		return
-	}
-	node.marker.Reset()
-}
-
 // Clone clones the node, it will prevent data race.
 func (node *Node) Clone() Node {
 	nd := *node
-	if node.marker != nil {
-		nd.marker = node.marker.Clone()
-	}
 	return nd
 }
 
@@ -185,8 +164,6 @@ func (node Node) String() string {
 type NodeGroup struct {
 	ID              int
 	nodes           []Node
-	selectorOptions []SelectOption
-	selector        NodeSelector
 	mux             sync.RWMutex
 }
 
@@ -223,18 +200,6 @@ func (group *NodeGroup) SetNodes(nodes ...Node) []Node {
 	return old
 }
 
-// SetSelector sets node selector with options for the group.
-func (group *NodeGroup) SetSelector(selector NodeSelector, opts ...SelectOption) {
-	if group == nil {
-		return
-	}
-	group.mux.Lock()
-	defer group.mux.Unlock()
-
-	group.selector = selector
-	group.selectorOptions = opts
-}
-
 // Nodes returns the node list in the group
 func (group *NodeGroup) Nodes() []Node {
 	if group == nil {
@@ -264,20 +229,6 @@ func (group *NodeGroup) Next() (node Node, err error) {
 	if group == nil {
 		return
 	}
-
-	group.mux.RLock()
-	defer group.mux.RUnlock()
-
-	selector := group.selector
-	if selector == nil {
-		selector = &defaultSelector{}
-	}
-
-	// select node from node group
-	node, err = selector.Select(group.nodes, group.selectorOptions...)
-	if err != nil {
-		return
-	}
-
+	node = group.nodes[0]
 	return
 }

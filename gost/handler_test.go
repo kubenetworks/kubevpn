@@ -8,53 +8,6 @@ import (
 	"testing"
 )
 
-func autoHTTPProxyRoundtrip(targetURL string, data []byte, clientInfo *url.Userinfo, serverInfo []*url.Userinfo) error {
-	ln, err := TCPListener("")
-	if err != nil {
-		return err
-	}
-
-	client := &Client{
-		Connector:   HTTPConnector(clientInfo),
-		Transporter: TCPTransporter(),
-	}
-	server := &Server{
-		Listener: ln,
-		Handler: AutoHandler(
-			UsersHandlerOption(serverInfo...),
-		),
-	}
-
-	go server.Run()
-	defer server.Close()
-
-	return proxyRoundtrip(client, server, targetURL, data)
-}
-
-func TestAutoHTTPProxy(t *testing.T) {
-	httpSrv := httptest.NewServer(httpTestHandler)
-	defer httpSrv.Close()
-
-	sendData := make([]byte, 128)
-	rand.Read(sendData)
-
-	for i, tc := range httpProxyTests {
-		err := autoHTTPProxyRoundtrip(httpSrv.URL, sendData, tc.cliUser, tc.srvUsers)
-		if err == nil {
-			if tc.errStr != "" {
-				t.Errorf("#%d should failed with error %s", i, tc.errStr)
-			}
-		} else {
-			if tc.errStr == "" {
-				t.Errorf("#%d got error %v", i, err)
-			}
-			if err.Error() != tc.errStr {
-				t.Errorf("#%d got error %v, want %v", i, err, tc.errStr)
-			}
-		}
-	}
-}
-
 func autoSocks5ProxyRoundtrip(targetURL string, data []byte, clientInfo *url.Userinfo, serverInfo []*url.Userinfo) error {
 	ln, err := TCPListener("")
 	if err != nil {

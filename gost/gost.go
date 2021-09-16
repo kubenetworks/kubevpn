@@ -8,11 +8,8 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
-	"io"
 	"math/big"
 	"net"
-	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -77,9 +74,6 @@ var (
 	// DefaultTLSConfig is a default TLS config for internal use.
 	DefaultTLSConfig *tls.Config
 
-	// DefaultUserAgent is the default HTTP User-Agent header used by HTTP and websocket.
-	DefaultUserAgent = "Chrome/78.0.3904.106"
-
 	// DefaultMTU is the default mtu for tun/tap device
 	DefaultMTU = 1350
 )
@@ -134,23 +128,6 @@ func generateKeyPair() (rawCert, rawKey []byte, err error) {
 	return
 }
 
-type readWriter struct {
-	r io.Reader
-	w io.Writer
-}
-
-func (rw *readWriter) Read(p []byte) (n int, err error) {
-	return rw.r.Read(p)
-}
-
-func (rw *readWriter) Write(p []byte) (n int, err error) {
-	return rw.w.Write(p)
-}
-
-var (
-	nopClientConn = &nopConn{}
-)
-
 // a nop connection implements net.Conn,
 // it does nothing.
 type nopConn struct{}
@@ -185,32 +162,4 @@ func (c *nopConn) SetReadDeadline(t time.Time) error {
 
 func (c *nopConn) SetWriteDeadline(t time.Time) error {
 	return &net.OpError{Op: "set", Net: "nop", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
-}
-
-// splitLine splits a line text by white space, mainly used by config parser.
-func splitLine(line string) []string {
-	if line == "" {
-		return nil
-	}
-	if n := strings.IndexByte(line, '#'); n >= 0 {
-		line = line[:n]
-	}
-	line = strings.Replace(line, "\t", " ", -1)
-	line = strings.TrimSpace(line)
-
-	var ss []string
-	for _, s := range strings.Split(line, " ") {
-		if s = strings.TrimSpace(s); s != "" {
-			ss = append(ss, s)
-		}
-	}
-	return ss
-}
-
-func connStateCallback(conn net.Conn, cs http.ConnState) {
-	switch cs {
-	case http.StateNew:
-		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	default:
-	}
 }

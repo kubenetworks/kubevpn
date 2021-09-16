@@ -35,17 +35,6 @@ func (r *route) parseChain() (*gost.Chain, error) {
 	}
 	ngroup.AddNode(nodes...)
 
-	ngroup.SetSelector(nil,
-		gost.WithFilter(
-			&gost.FailFilter{
-				MaxFails:    nodes[0].GetInt("max_fails"),
-				FailTimeout: nodes[0].GetDuration("fail_timeout"),
-			},
-			&gost.InvalidFilter{},
-		),
-		gost.WithStrategy(gost.NewStrategy(nodes[0].Get("strategy"))),
-	)
-
 	chain.AddNodeGroup(ngroup)
 
 	return chain, nil

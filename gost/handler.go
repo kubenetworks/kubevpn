@@ -24,7 +24,6 @@ type HandlerOptions struct {
 	Users         []*url.Userinfo
 	Authenticator Authenticator
 	TLSConfig     *tls.Config
-	Strategy      Strategy
 	MaxFails      int
 	FailTimeout   time.Duration
 	Retries       int
@@ -83,13 +82,6 @@ func AuthenticatorHandlerOption(au Authenticator) HandlerOption {
 func TLSConfigHandlerOption(config *tls.Config) HandlerOption {
 	return func(opts *HandlerOptions) {
 		opts.TLSConfig = config
-	}
-}
-
-// StrategyHandlerOption sets the strategy option of HandlerOptions.
-func StrategyHandlerOption(strategy Strategy) HandlerOption {
-	return func(opts *HandlerOptions) {
-		opts.Strategy = strategy
 	}
 }
 

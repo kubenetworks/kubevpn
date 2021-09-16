@@ -96,14 +96,13 @@ func HostDialOption(host string) DialOption {
 
 // HandshakeOptions describes the options for handshake.
 type HandshakeOptions struct {
-	Addr       string
-	Host       string
-	User       *url.Userinfo
-	Timeout    time.Duration
-	Interval   time.Duration
-	Retry      int
-	TLSConfig  *tls.Config
-	QUICConfig *QUICConfig
+	Addr      string
+	Host      string
+	User      *url.Userinfo
+	Timeout   time.Duration
+	Interval  time.Duration
+	Retry     int
+	TLSConfig *tls.Config
 }
 
 // HandshakeOption allows a common way to set HandshakeOptions.
@@ -155,13 +154,6 @@ func RetryHandshakeOption(retry int) HandshakeOption {
 func TLSConfigHandshakeOption(config *tls.Config) HandshakeOption {
 	return func(opts *HandshakeOptions) {
 		opts.TLSConfig = config
-	}
-}
-
-// QUICConfigHandshakeOption specifies the QUIC config used by QUIC handshake
-func QUICConfigHandshakeOption(config *QUICConfig) HandshakeOption {
-	return func(opts *HandshakeOptions) {
-		opts.QUICConfig = config
 	}
 }
 
