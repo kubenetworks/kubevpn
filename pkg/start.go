@@ -56,10 +56,10 @@ func InitClient() {
 	if config, err = factory.ToRESTConfig(); err != nil {
 		log.Fatal(err)
 	}
-	if restclient, err = rest.RESTClientFor(config); err != nil {
+	if restclient, err = factory.RESTClient(); err != nil {
 		log.Fatal(err)
 	}
-	if clientset, err = kubernetes.NewForConfig(config); err != nil {
+	if clientset, err = factory.KubernetesClientSet(); err != nil {
 		log.Fatal(err)
 	}
 	if len(namespace) == 0 {

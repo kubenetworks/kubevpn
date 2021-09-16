@@ -108,7 +108,7 @@ func Main() {
 				readyChanRef = &readChan
 				err := util.PortForwardPod(
 					config,
-					clientset,
+					restclient,
 					util.TrafficManager,
 					namespace,
 					"10800:10800",

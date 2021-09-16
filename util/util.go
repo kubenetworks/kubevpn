@@ -117,9 +117,8 @@ func WaitPod(clientset *kubernetes.Clientset, namespace string, list metav1.List
 	)
 }
 
-func PortForwardPod(config *rest.Config, clientset *kubernetes.Clientset, podName, namespace, portPair string, readyChan, stopChan chan struct{}) error {
-	url := clientset.CoreV1().
-		RESTClient().
+func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, namespace, portPair string, readyChan, stopChan chan struct{}) error {
+	url := clientset.
 		Post().
 		Resource("pods").
 		Namespace(namespace).
@@ -133,7 +132,7 @@ func PortForwardPod(config *rest.Config, clientset *kubernetes.Clientset, podNam
 	}
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
 	p := []string{portPair}
-	forwarder, err := portforward.New(dialer, p, stopChan, readyChan, os.Stdout, os.Stderr)
+	forwarder, err := portforward.NewOnAddresses(dialer, []string{"0.0.0.0"}, p, stopChan, readyChan, os.Stdout, os.Stderr)
 	if err != nil {
 		log.Error(err)
 		return err
