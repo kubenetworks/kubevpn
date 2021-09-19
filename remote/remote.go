@@ -43,7 +43,7 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 	for _, ipNet := range nodeCIDR {
 		args = append(args, "iptables -t nat -A POSTROUTING -s "+ipNet.String()+" -o eth0 -j MASQUERADE")
 	}
-	args = append(args, "gost -L socks5://:10800 -L tun://:8421?net="+serverIp.String()+" -D")
+	args = append(args, "gost server -L socks5://:10800 -L tun://:8421?net="+serverIp.String()+"")
 
 	t := true
 	zero := int64(0)
@@ -59,7 +59,7 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 			Containers: []v1.Container{
 				{
 					Name:    "vpn",
-					Image:   "naison/kubevpn:latest",
+					Image:   "naison/kubevpn:v2",
 					Command: []string{"/bin/sh", "-c"},
 					Args:    []string{strings.Join(args, ";")},
 					SecurityContext: &v1.SecurityContext{
@@ -135,7 +135,7 @@ func CreateServerInbound(factory cmdutil.Factory, clientset *kubernetes.Clientse
 			Containers: []v1.Container{
 				{
 					Name:    "vpn",
-					Image:   "naison/kubevpn:latest",
+					Image:   "naison/kubevpn:v2",
 					Command: []string{"/bin/sh", "-c"},
 					Args: []string{
 						"sysctl net.ipv4.ip_forward=1;" +
@@ -146,7 +146,7 @@ func CreateServerInbound(factory cmdutil.Factory, clientset *kubernetes.Clientse
 							"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 -j MASQUERADE;" +
 							"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 -j DNAT --to " + virtualLocalIp + ":80-60000;" +
 							"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 -j MASQUERADE;" +
-							"gost -L 'tun://0.0.0.0:8421/127.0.0.1:8421?net=" + virtualShadowIp + "&route=" + routes + "' -F 'socks5://" + realRouterIP + ":10800?notls=true'",
+							"gost server -L 'tun://0.0.0.0:8421/127.0.0.1:8421?net=" + virtualShadowIp + "&route=" + routes + "' -F 'socks5://" + realRouterIP + ":10800?notls=true'",
 					},
 					SecurityContext: &v1.SecurityContext{
 						Capabilities: &v1.Capabilities{

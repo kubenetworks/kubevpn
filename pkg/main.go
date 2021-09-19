@@ -84,7 +84,7 @@ func prepare() {
 	list = append(list, trafficManager.String())
 
 	nodeConfig.ChainNodes = "socks5://127.0.0.1:10800?notls=true"
-	nodeConfig.ServeNodes = fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", tunIp.String(), strings.Join(list, ","))
+	nodeConfig.ServeNodes = []string{fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", tunIp.String(), strings.Join(list, ","))}
 
 	log.Info("your ip is " + tunIp.String())
 
@@ -155,15 +155,17 @@ func start() error {
 		return err
 	}
 
-	if routers == nil {
+	if len(routers) == 0 {
 		return errors.New("invalid config")
 	}
 
-	go func() {
-		if err = routers.Serve(); err != nil {
-			log.Warn(err)
-		}
-	}()
+	for i := range routers {
+		go func(finalI int) {
+			if err = routers[finalI].Serve(); err != nil {
+				log.Warn(err)
+			}
+		}(i)
+	}
 
 	return nil
 }
