@@ -138,4 +138,4 @@ Hello world!%
 - Linux
 - Windows
 
-on Windows platform, you need to install ```TAP/TUN``` [driver](./exe/tap-windows-9.21.2.exe) and ```PowerShell```
+on Windows platform, you need to install ```TAP/TUN``` [driver](windowstaptundriver/tap-windows-9.21.2.exe) and ```PowerShell```

@@ -8,7 +8,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	"kubevpn/gost"
+	"kubevpn/core"
 )
 
 var (
@@ -23,11 +23,11 @@ var (
 )
 
 func init() {
-	gost.SetLogger(&gost.LogLogger{})
+	core.SetLogger(&core.LogLogger{})
 	connectCmd.Flags().StringVar(&kubeconfigpath, "kubeconfig", clientcmd.RecommendedHomeFile, "kubeconfig")
 	connectCmd.Flags().StringVarP(&namespace, "namespace", "n", "", "namespace")
 	connectCmd.PersistentFlags().StringArrayVar(&workloads, "workloads", []string{}, "workloads, like: services/tomcat, deployment/nginx, replicaset/tomcat...")
-	connectCmd.Flags().BoolVar(&gost.Debug, "debug", false, "true/false")
+	connectCmd.Flags().BoolVar(&core.Debug, "debug", false, "true/false")
 	RootCmd.AddCommand(connectCmd)
 }
 

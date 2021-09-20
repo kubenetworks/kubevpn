@@ -3,7 +3,6 @@ module kubevpn
 go 1.16
 
 require (
-	github.com/Yawning/chacha20 v0.0.0-20170904085104-e3b1f968fc63 // indirect
 	github.com/coreos/go-iptables v0.6.0 // indirect
 	github.com/docker/libcontainer v2.2.1+incompatible
 	github.com/ginuerzh/gosocks4 v0.0.1
@@ -17,7 +16,6 @@ require (
 	github.com/onsi/ginkgo v1.14.0 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/shadowsocks/go-shadowsocks2 v0.1.5
-	github.com/shadowsocks/shadowsocks-go v0.0.0-20170121203516-97a5c71f80ba
 	github.com/sirupsen/logrus v1.8.1
 	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
 	github.com/spf13/cobra v1.1.1

@@ -1,4 +1,4 @@
-package gost
+package core
 
 import (
 	"context"
@@ -58,9 +58,9 @@ func (h *baseForwardHandler) Init(options ...HandlerOption) {
 		// We treat the remote target server as a node, so we can put them in a group,
 		// and perform the node selection for load balancing.
 		h.group.AddNode(Node{
-			ID:     n,
-			Addr:   addr,
-			Host:   addr,
+			ID:   n,
+			Addr: addr,
+			Host: addr,
 		})
 
 		n++

@@ -1,4 +1,4 @@
-package gost
+package core
 
 import (
 	"errors"
@@ -162,9 +162,9 @@ func (node Node) String() string {
 
 // NodeGroup is a group of nodes.
 type NodeGroup struct {
-	ID              int
-	nodes           []Node
-	mux             sync.RWMutex
+	ID    int
+	nodes []Node
+	mux   sync.RWMutex
 }
 
 // NewNodeGroup creates a node group

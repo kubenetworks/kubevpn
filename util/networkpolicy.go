@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Delete all action block firewall rule
+// DeleteWindowsFirewallRule Delete all action block firewall rule
 func DeleteWindowsFirewallRule() {
 	ticker := time.NewTicker(time.Second)
 	go func() {

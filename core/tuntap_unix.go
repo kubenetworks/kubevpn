@@ -1,6 +1,7 @@
+//go:build !linux && !windows && !darwin
 // +build !linux,!windows,!darwin
 
-package gost
+package core
 
 import (
 	"fmt"

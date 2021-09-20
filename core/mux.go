@@ -1,9 +1,8 @@
-package gost
+package core
 
 import (
+	"github.com/xtaci/smux"
 	"net"
-
-	smux "github.com/xtaci/smux"
 )
 
 type muxStreamConn struct {

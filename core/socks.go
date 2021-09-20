@@ -1,4 +1,4 @@
-package gost
+package core
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ import (
 	"github.com/ginuerzh/gosocks4"
 	"github.com/ginuerzh/gosocks5"
 	"github.com/go-log/log"
-	smux "github.com/xtaci/smux"
+	"github.com/xtaci/smux"
 )
 
 const (

@@ -1,4 +1,4 @@
-package gost
+package core
 
 import (
 	"crypto/rand"
@@ -15,9 +15,6 @@ import (
 
 	"github.com/go-log/log"
 )
-
-// Version is the gost version.
-const Version = "2.11.1"
 
 // Debug is a flag that enables the debug log.
 var Debug bool
@@ -108,7 +105,7 @@ func generateKeyPair() (rawCert, rawKey []byte, err error) {
 	template := x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			Organization: []string{"gost"},
+			Organization: []string{"kubevpn"},
 		},
 		NotBefore: notBefore,
 		NotAfter:  notAfter,
