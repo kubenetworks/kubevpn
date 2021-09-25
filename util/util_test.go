@@ -11,6 +11,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kubectl/pkg/cmd/util"
+	"net"
 	"testing"
 )
 
@@ -51,4 +52,13 @@ func TestShell(t *testing.T) {
 
 func TestDeleteRule(t *testing.T) {
 	DeleteWindowsFirewallRule()
+}
+
+func TestSocks5(t *testing.T) {
+	relay, err := net.ListenUDP("udp", &net.UDPAddr{Port: 12345})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(relay.LocalAddr())
+	fmt.Println(relay.RemoteAddr())
 }

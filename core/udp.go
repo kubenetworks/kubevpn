@@ -10,37 +10,6 @@ import (
 	"github.com/go-log/log"
 )
 
-// udpTransporter is a raw UDP transporter.
-type udpTransporter struct{}
-
-// UDPTransporter creates a Transporter for UDP client.
-func UDPTransporter() Transporter {
-	return &udpTransporter{}
-}
-
-func (tr *udpTransporter) Dial(addr string, options ...DialOption) (net.Conn, error) {
-	taddr, err := net.ResolveUDPAddr("udp", addr)
-	if err != nil {
-		return nil, err
-	}
-
-	conn, err := net.DialUDP("udp", nil, taddr)
-	if err != nil {
-		return nil, err
-	}
-	return &udpClientConn{
-		UDPConn: conn,
-	}, nil
-}
-
-func (tr *udpTransporter) Handshake(conn net.Conn, options ...HandshakeOption) (net.Conn, error) {
-	return conn, nil
-}
-
-func (tr *udpTransporter) Multiplex() bool {
-	return false
-}
-
 // UDPListenConfig is the config for UDP Listener.
 type UDPListenConfig struct {
 	TTL       time.Duration // timeout per connection
@@ -339,18 +308,4 @@ func (c *udpServerConn) SetReadDeadline(t time.Time) error {
 
 func (c *udpServerConn) SetWriteDeadline(t time.Time) error {
 	return c.conn.SetWriteDeadline(t)
-}
-
-type udpClientConn struct {
-	*net.UDPConn
-}
-
-func (c *udpClientConn) WriteTo(b []byte, addr net.Addr) (int, error) {
-	return c.UDPConn.Write(b)
-}
-
-func (c *udpClientConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
-	n, err = c.UDPConn.Read(b)
-	addr = c.RemoteAddr()
-	return
 }

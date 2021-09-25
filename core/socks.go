@@ -10,30 +10,10 @@ import (
 	"net"
 	"net/url"
 	"strconv"
-	"sync"
 	"time"
 
-	"github.com/ginuerzh/gosocks4"
 	"github.com/ginuerzh/gosocks5"
 	"github.com/go-log/log"
-	"github.com/xtaci/smux"
-)
-
-const (
-	// MethodTLS is an extended SOCKS5 method with tls encryption support.
-	MethodTLS uint8 = 0x80
-	// MethodTLSAuth is an extended SOCKS5 method with tls encryption and authentication support.
-	MethodTLSAuth uint8 = 0x82
-	// MethodMux is an extended SOCKS5 method for stream multiplexing.
-	MethodMux = 0x88
-)
-
-const (
-	// CmdMuxBind is an extended SOCKS5 request CMD for
-	// multiplexing transport with the binding server.
-	CmdMuxBind uint8 = 0xF2
-	// CmdUDPTun is an extended SOCKS5 request CMD for UDP over TCP.
-	CmdUDPTun uint8 = 0xF3
 )
 
 var (
@@ -66,14 +46,7 @@ func (selector *clientSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 		log.Log("[socks5] method selected:", method)
 	}
 	switch method {
-	case MethodTLS:
-		conn = tls.Client(conn, selector.TLSConfig)
-
-	case gosocks5.MethodUserPass, MethodTLSAuth:
-		if method == MethodTLSAuth {
-			conn = tls.Client(conn, selector.TLSConfig)
-		}
-
+	case gosocks5.MethodUserPass:
 		var username, password string
 		if selector.User != nil {
 			username = selector.User.Username()
@@ -126,20 +99,10 @@ func (selector *serverSelector) Select(methods ...uint8) (method uint8) {
 		log.Logf("[socks5] %d %d %v", gosocks5.Ver5, len(methods), methods)
 	}
 	method = gosocks5.MethodNoAuth
-	for _, m := range methods {
-		if m == MethodTLS {
-			method = m
-			break
-		}
-	}
-
 	// when Authenticator is set, auth is mandatory
 	if selector.Authenticator != nil {
 		if method == gosocks5.MethodNoAuth {
 			method = gosocks5.MethodUserPass
-		}
-		if method == MethodTLS {
-			method = MethodTLSAuth
 		}
 	}
 
@@ -151,14 +114,7 @@ func (selector *serverSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 		log.Logf("[socks5] %d %d", gosocks5.Ver5, method)
 	}
 	switch method {
-	case MethodTLS:
-		conn = tls.Server(conn, selector.TLSConfig)
-
-	case gosocks5.MethodUserPass, MethodTLSAuth:
-		if method == MethodTLSAuth {
-			conn = tls.Server(conn, selector.TLSConfig)
-		}
-
+	case gosocks5.MethodUserPass:
 		req, err := gosocks5.ReadUserPassRequest(conn)
 		if err != nil {
 			log.Logf("[socks5] %s - %s: %s", conn.RemoteAddr(), conn.LocalAddr(), err)
@@ -276,264 +232,6 @@ func (c *socks5Connector) ConnectContext(ctx context.Context, conn net.Conn, net
 	}
 
 	return conn, nil
-}
-
-type socks5BindConnector struct {
-	User *url.Userinfo
-}
-
-// SOCKS5BindConnector creates a connector for SOCKS5 bind.
-// It accepts an optional auth info for SOCKS5 Username/Password Authentication.
-func SOCKS5BindConnector(user *url.Userinfo) Connector {
-	return &socks5BindConnector{User: user}
-}
-
-func (c *socks5BindConnector) Connect(conn net.Conn, address string, options ...ConnectOption) (net.Conn, error) {
-	return c.ConnectContext(context.Background(), conn, "tcp", address, options...)
-}
-
-func (c *socks5BindConnector) ConnectContext(ctx context.Context, conn net.Conn, network, address string, options ...ConnectOption) (net.Conn, error) {
-	switch network {
-	case "udp", "udp4", "udp6":
-		return nil, fmt.Errorf("%s unsupported", network)
-	}
-
-	opts := &ConnectOptions{}
-	for _, option := range options {
-		option(opts)
-	}
-
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = ConnectTimeout
-	}
-
-	conn.SetDeadline(time.Now().Add(timeout))
-	defer conn.SetDeadline(time.Time{})
-
-	user := opts.User
-	if user == nil {
-		user = c.User
-	}
-	cc, err := socks5Handshake(conn,
-		selectorSocks5HandshakeOption(opts.Selector),
-		userSocks5HandshakeOption(user),
-		noTLSSocks5HandshakeOption(opts.NoTLS),
-	)
-	if err != nil {
-		return nil, err
-	}
-	conn = cc
-
-	laddr, err := net.ResolveTCPAddr("tcp", address)
-	if err != nil {
-		log.Log(err)
-		return nil, err
-	}
-
-	req := gosocks5.NewRequest(gosocks5.CmdBind, &gosocks5.Addr{
-		Type: gosocks5.AddrIPv4,
-		Host: laddr.IP.String(),
-		Port: uint16(laddr.Port),
-	})
-
-	if err := req.Write(conn); err != nil {
-		return nil, err
-	}
-
-	if Debug {
-		log.Log("[socks5] bind\n", req)
-	}
-
-	reply, err := gosocks5.ReadReply(conn)
-	if err != nil {
-		return nil, err
-	}
-
-	if Debug {
-		log.Log("[socks5] bind\n", reply)
-	}
-
-	if reply.Rep != gosocks5.Succeeded {
-		log.Logf("[socks5] bind on %s failure", address)
-		return nil, fmt.Errorf("SOCKS5 bind on %s failure", address)
-	}
-	baddr, err := net.ResolveTCPAddr("tcp", reply.Addr.String())
-	if err != nil {
-		return nil, err
-	}
-	log.Logf("[socks5] bind on %s OK", baddr)
-
-	return &socks5BindConn{Conn: conn, laddr: baddr}, nil
-}
-
-type socks5MuxBindConnector struct{}
-
-// Socks5MuxBindConnector creates a Connector for SOCKS5 multiplex bind client.
-func Socks5MuxBindConnector() Connector {
-	return &socks5MuxBindConnector{}
-}
-
-func (c *socks5MuxBindConnector) Connect(conn net.Conn, address string, options ...ConnectOption) (net.Conn, error) {
-	return c.ConnectContext(context.Background(), conn, "tcp", address, options...)
-}
-
-// NOTE: the conn must be *muxBindClientConn.
-func (c *socks5MuxBindConnector) ConnectContext(ctx context.Context, conn net.Conn, network, address string, options ...ConnectOption) (net.Conn, error) {
-	switch network {
-	case "udp", "udp4", "udp6":
-		return nil, fmt.Errorf("%s unsupported", network)
-	}
-
-	accepter, ok := conn.(Accepter)
-	if !ok {
-		return nil, errors.New("wrong connection type")
-	}
-
-	return accepter.Accept()
-}
-
-type socks5MuxBindTransporter struct {
-	bindAddr     string
-	sessions     map[string]*muxSession // server addr to session mapping
-	sessionMutex sync.Mutex
-}
-
-// SOCKS5MuxBindTransporter creates a Transporter for SOCKS5 multiplex bind client.
-func SOCKS5MuxBindTransporter(bindAddr string) Transporter {
-	return &socks5MuxBindTransporter{
-		bindAddr: bindAddr,
-		sessions: make(map[string]*muxSession),
-	}
-}
-
-func (tr *socks5MuxBindTransporter) Dial(addr string, options ...DialOption) (conn net.Conn, err error) {
-	opts := &DialOptions{}
-	for _, option := range options {
-		option(opts)
-	}
-
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = DialTimeout
-	}
-
-	tr.sessionMutex.Lock()
-	defer tr.sessionMutex.Unlock()
-
-	session, ok := tr.sessions[addr]
-	if session != nil && session.IsClosed() {
-		delete(tr.sessions, addr)
-		ok = false
-	}
-	if !ok {
-		if opts.Chain == nil {
-			conn, err = net.DialTimeout("tcp", addr, timeout)
-		} else {
-			conn, err = opts.Chain.Dial(addr)
-		}
-		if err != nil {
-			return
-		}
-		session = &muxSession{conn: conn}
-		tr.sessions[addr] = session
-	}
-	return session.conn, nil
-}
-
-func (tr *socks5MuxBindTransporter) Handshake(conn net.Conn, options ...HandshakeOption) (net.Conn, error) {
-	opts := &HandshakeOptions{}
-	for _, option := range options {
-		option(opts)
-	}
-
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = HandshakeTimeout
-	}
-
-	tr.sessionMutex.Lock()
-	defer tr.sessionMutex.Unlock()
-
-	conn.SetDeadline(time.Now().Add(timeout))
-	defer conn.SetDeadline(time.Time{})
-
-	session, ok := tr.sessions[opts.Addr]
-	if !ok || session.session == nil {
-		s, err := tr.initSession(conn, tr.bindAddr, opts)
-		if err != nil {
-			conn.Close()
-			delete(tr.sessions, opts.Addr)
-			return nil, err
-		}
-		session = s
-		tr.sessions[opts.Addr] = session
-	}
-
-	return &muxBindClientConn{session: session}, nil
-}
-
-func (tr *socks5MuxBindTransporter) initSession(conn net.Conn, addr string, opts *HandshakeOptions) (*muxSession, error) {
-	if opts == nil {
-		opts = &HandshakeOptions{}
-	}
-
-	cc, err := socks5Handshake(conn,
-		userSocks5HandshakeOption(opts.User),
-	)
-	if err != nil {
-		return nil, err
-	}
-	conn = cc
-
-	bindAddr, err := net.ResolveTCPAddr("tcp", addr)
-	if err != nil {
-		return nil, err
-	}
-
-	req := gosocks5.NewRequest(CmdMuxBind, &gosocks5.Addr{
-		Type: gosocks5.AddrIPv4,
-		Host: bindAddr.IP.String(),
-		Port: uint16(bindAddr.Port),
-	})
-
-	if err = req.Write(conn); err != nil {
-		return nil, err
-	}
-
-	if Debug {
-		log.Log("[socks5] mbind\n", req)
-	}
-
-	reply, err := gosocks5.ReadReply(conn)
-	if err != nil {
-		return nil, err
-	}
-
-	if Debug {
-		log.Log("[socks5] mbind\n", reply)
-	}
-
-	if reply.Rep != gosocks5.Succeeded {
-		log.Logf("[socks5] mbind on %s failure", addr)
-		return nil, fmt.Errorf("SOCKS5 mbind on %s failure", addr)
-	}
-	baddr, err := net.ResolveTCPAddr("tcp", reply.Addr.String())
-	if err != nil {
-		return nil, err
-	}
-	log.Logf("[socks5] mbind on %s OK", baddr)
-
-	// Upgrade connection to multiplex stream.
-	session, err := smux.Server(conn, smux.DefaultConfig())
-	if err != nil {
-		return nil, err
-	}
-	return &muxSession{conn: conn, session: session}, nil
-}
-
-func (tr *socks5MuxBindTransporter) Multiplex() bool {
-	return true
 }
 
 type socks5UDPConnector struct {
@@ -674,137 +372,6 @@ func (c *socks5UDPTunConnector) ConnectContext(ctx context.Context, conn net.Con
 	)
 }
 
-type socks4Connector struct{}
-
-// SOCKS4Connector creates a Connector for SOCKS4 proxy client.
-func SOCKS4Connector() Connector {
-	return &socks4Connector{}
-}
-
-func (c *socks4Connector) Connect(conn net.Conn, address string, options ...ConnectOption) (net.Conn, error) {
-	return c.ConnectContext(context.Background(), conn, "tcp", address, options...)
-}
-
-func (c *socks4Connector) ConnectContext(ctx context.Context, conn net.Conn, network, address string, options ...ConnectOption) (net.Conn, error) {
-	switch network {
-	case "udp", "udp4", "udp6":
-		return nil, fmt.Errorf("%s unsupported", network)
-	}
-
-	opts := &ConnectOptions{}
-	for _, option := range options {
-		option(opts)
-	}
-
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = ConnectTimeout
-	}
-
-	conn.SetDeadline(time.Now().Add(timeout))
-	defer conn.SetDeadline(time.Time{})
-
-	taddr, err := net.ResolveTCPAddr("tcp4", address)
-	if err != nil {
-		return nil, err
-	}
-	if len(taddr.IP) == 0 {
-		taddr.IP = net.IPv4zero
-	}
-
-	req := gosocks4.NewRequest(gosocks4.CmdConnect,
-		&gosocks4.Addr{
-			Type: gosocks4.AddrIPv4,
-			Host: taddr.IP.String(),
-			Port: uint16(taddr.Port),
-		}, nil,
-	)
-	if err := req.Write(conn); err != nil {
-		return nil, err
-	}
-
-	if Debug {
-		log.Logf("[socks4] %s", req)
-	}
-
-	reply, err := gosocks4.ReadReply(conn)
-	if err != nil {
-		return nil, err
-	}
-
-	if Debug {
-		log.Logf("[socks4] %s", reply)
-	}
-
-	if reply.Code != gosocks4.Granted {
-		return nil, fmt.Errorf("[socks4] %d", reply.Code)
-	}
-
-	return conn, nil
-}
-
-type socks4aConnector struct{}
-
-// SOCKS4AConnector creates a Connector for SOCKS4A proxy client.
-func SOCKS4AConnector() Connector {
-	return &socks4aConnector{}
-}
-
-func (c *socks4aConnector) Connect(conn net.Conn, address string, options ...ConnectOption) (net.Conn, error) {
-	return c.ConnectContext(context.Background(), conn, "tcp", address, options...)
-}
-
-func (c *socks4aConnector) ConnectContext(ctx context.Context, conn net.Conn, network, address string, options ...ConnectOption) (net.Conn, error) {
-	switch network {
-	case "udp", "udp4", "udp6":
-		return nil, fmt.Errorf("%s unsupported", network)
-	}
-
-	opts := &ConnectOptions{}
-	for _, option := range options {
-		option(opts)
-	}
-
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = ConnectTimeout
-	}
-
-	conn.SetDeadline(time.Now().Add(timeout))
-	defer conn.SetDeadline(time.Time{})
-
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		return nil, err
-	}
-	p, _ := strconv.Atoi(port)
-
-	req := gosocks4.NewRequest(gosocks4.CmdConnect,
-		&gosocks4.Addr{Type: gosocks4.AddrDomain, Host: host, Port: uint16(p)}, nil)
-	if err := req.Write(conn); err != nil {
-		return nil, err
-	}
-
-	if Debug {
-		log.Logf("[socks4a] %s", req)
-	}
-
-	reply, err := gosocks4.ReadReply(conn)
-	if err != nil {
-		return nil, err
-	}
-
-	if Debug {
-		log.Logf("[socks4a] %s", reply)
-	}
-
-	if reply.Code != gosocks4.Granted {
-		return nil, fmt.Errorf("[socks4a] %d", reply.Code)
-	}
-
-	return conn, nil
-}
-
 type socks5Handler struct {
 	selector *serverSelector
 	options  *HandlerOptions
@@ -840,8 +407,6 @@ func (h *socks5Handler) Init(options ...HandlerOption) {
 	h.selector.AddMethod(
 		gosocks5.MethodNoAuth,
 		gosocks5.MethodUserPass,
-		MethodTLS,
-		MethodTLSAuth,
 	)
 }
 
@@ -864,17 +429,8 @@ func (h *socks5Handler) Handle(conn net.Conn) {
 	case gosocks5.CmdConnect:
 		h.handleConnect(conn, req)
 
-	case gosocks5.CmdBind:
-		h.handleBind(conn, req)
-
 	case gosocks5.CmdUdp:
-		h.handleUDPRelay(conn, req)
-
-	case CmdMuxBind:
-		h.handleMuxBind(conn, req)
-
-	case CmdUDPTun:
-		h.handleUDPTunnel(conn, req)
+		h.handleUDP(conn, req)
 
 	default:
 		log.Logf("[socks5] %s - %s : Unrecognized request: %d",
@@ -950,231 +506,6 @@ func (h *socks5Handler) handleConnect(conn net.Conn, req *gosocks5.Request) {
 	log.Logf("[socks5] %s <-> %s", conn.RemoteAddr(), host)
 	transport(conn, cc)
 	log.Logf("[socks5] %s >-< %s", conn.RemoteAddr(), host)
-}
-
-func (h *socks5Handler) handleBind(conn net.Conn, req *gosocks5.Request) {
-	addr := req.Addr.String()
-
-	log.Logf("[socks5-bind] %s -> %s -> %s",
-		conn.RemoteAddr(), h.options.Node.String(), addr)
-
-	if h.options.Chain.IsEmpty() {
-		h.bindOn(conn, addr)
-		return
-	}
-
-	cc, err := h.options.Chain.Conn()
-	if err != nil {
-		log.Logf("[socks5-bind] %s <- %s : %s",
-			conn.RemoteAddr(), conn.LocalAddr(), err)
-		reply := gosocks5.NewReply(gosocks5.Failure, nil)
-		reply.Write(conn)
-		if Debug {
-			log.Logf("[socks5-bind] %s <- %s\n%s",
-				conn.RemoteAddr(), conn.LocalAddr(), reply)
-		}
-		return
-	}
-
-	// forward request
-	// note: this type of request forwarding is defined when starting server,
-	// so we don't need to authenticate it, as it's as explicit as whitelisting
-	defer cc.Close()
-	req.Write(cc)
-	log.Logf("[socks5-bind] %s <-> %s", conn.RemoteAddr(), addr)
-	transport(conn, cc)
-	log.Logf("[socks5-bind] %s >-< %s", conn.RemoteAddr(), addr)
-}
-
-func (h *socks5Handler) bindOn(conn net.Conn, addr string) {
-	bindAddr, _ := net.ResolveTCPAddr("tcp", addr)
-	ln, err := net.ListenTCP("tcp", bindAddr) // strict mode: if the port already in use, it will return error
-	if err != nil {
-		log.Logf("[socks5-bind] %s -> %s : %s",
-			conn.RemoteAddr(), conn.LocalAddr(), err)
-		gosocks5.NewReply(gosocks5.Failure, nil).Write(conn)
-		return
-	}
-
-	socksAddr := toSocksAddr(ln.Addr())
-	// Issue: may not reachable when host has multi-interface
-	socksAddr.Host, _, _ = net.SplitHostPort(conn.LocalAddr().String())
-	reply := gosocks5.NewReply(gosocks5.Succeeded, socksAddr)
-	if err := reply.Write(conn); err != nil {
-		log.Logf("[socks5-bind] %s <- %s : %s",
-			conn.RemoteAddr(), conn.LocalAddr(), err)
-		ln.Close()
-		return
-	}
-	if Debug {
-		log.Logf("[socks5-bind] %s <- %s\n%s",
-			conn.RemoteAddr(), conn.LocalAddr(), reply)
-	}
-	log.Logf("[socks5-bind] %s - %s BIND ON %s OK",
-		conn.RemoteAddr(), conn.LocalAddr(), socksAddr)
-
-	var pconn net.Conn
-	accept := func() <-chan error {
-		errc := make(chan error, 1)
-
-		go func() {
-			defer close(errc)
-			defer ln.Close()
-
-			c, err := ln.AcceptTCP()
-			if err != nil {
-				errc <- err
-				return
-			}
-			pconn = c
-		}()
-
-		return errc
-	}
-
-	pc1, pc2 := net.Pipe()
-	pipe := func() <-chan error {
-		errc := make(chan error, 1)
-
-		go func() {
-			defer close(errc)
-			defer pc1.Close()
-
-			errc <- transport(conn, pc1)
-		}()
-
-		return errc
-	}
-
-	defer pc2.Close()
-
-	for {
-		select {
-		case err := <-accept():
-			if err != nil || pconn == nil {
-				log.Logf("[socks5-bind] %s <- %s : %v", conn.RemoteAddr(), addr, err)
-				return
-			}
-			defer pconn.Close()
-
-			reply := gosocks5.NewReply(gosocks5.Succeeded, toSocksAddr(pconn.RemoteAddr()))
-			if err := reply.Write(pc2); err != nil {
-				log.Logf("[socks5-bind] %s <- %s : %v", conn.RemoteAddr(), addr, err)
-			}
-			if Debug {
-				log.Logf("[socks5-bind] %s <- %s\n%s", conn.RemoteAddr(), addr, reply)
-			}
-			log.Logf("[socks5-bind] %s <- %s PEER %s ACCEPTED", conn.RemoteAddr(), socksAddr, pconn.RemoteAddr())
-
-			log.Logf("[socks5-bind] %s <-> %s", conn.RemoteAddr(), pconn.RemoteAddr())
-			if err = transport(pc2, pconn); err != nil {
-				log.Logf("[socks5-bind] %s - %s : %v", conn.RemoteAddr(), pconn.RemoteAddr(), err)
-			}
-			log.Logf("[socks5-bind] %s >-< %s", conn.RemoteAddr(), pconn.RemoteAddr())
-			return
-		case err := <-pipe():
-			if err != nil {
-				log.Logf("[socks5-bind] %s -> %s : %v", conn.RemoteAddr(), addr, err)
-			}
-			ln.Close()
-			return
-		}
-	}
-}
-
-func (h *socks5Handler) handleUDPRelay(conn net.Conn, req *gosocks5.Request) {
-	//addr := req.Addr.String()
-
-	relay, err := net.ListenUDP("udp", nil)
-	if err != nil {
-		log.Logf("[socks5-udp] %s -> %s : %s", conn.RemoteAddr(), conn.LocalAddr(), err)
-		reply := gosocks5.NewReply(gosocks5.Failure, nil)
-		reply.Write(conn)
-		if Debug {
-			log.Logf("[socks5-udp] %s <- %s\n%s", conn.RemoteAddr(), conn.LocalAddr(), reply)
-		}
-		return
-	}
-	defer relay.Close()
-
-	socksAddr := toSocksAddr(relay.LocalAddr())
-	socksAddr.Host, _, _ = net.SplitHostPort(conn.LocalAddr().String()) // replace the IP to the out-going interface's
-	reply := gosocks5.NewReply(gosocks5.Succeeded, socksAddr)
-	if err := reply.Write(conn); err != nil {
-		log.Logf("[socks5-udp] %s <- %s : %s", conn.RemoteAddr(), conn.LocalAddr(), err)
-		return
-	}
-	if Debug {
-		log.Logf("[socks5-udp] %s <- %s\n%s", conn.RemoteAddr(), conn.LocalAddr(), reply)
-	}
-	log.Logf("[socks5-udp] %s - %s BIND ON %s OK", conn.RemoteAddr(), conn.LocalAddr(), socksAddr)
-
-	// serve as standard socks5 udp relay local <-> remote
-	if h.options.Chain.IsEmpty() {
-		peer, er := net.ListenUDP("udp", nil)
-		if er != nil {
-			log.Logf("[socks5-udp] %s -> %s : %s", conn.RemoteAddr(), conn.LocalAddr(), er)
-			return
-		}
-		defer peer.Close()
-
-		go h.transportUDP(relay, peer)
-		log.Logf("[socks5-udp] %s <-> %s : associated on %s", conn.RemoteAddr(), conn.LocalAddr(), socksAddr)
-		if err := h.discardClientData(conn); err != nil {
-			log.Logf("[socks5-udp] %s - %s : %s", conn.RemoteAddr(), conn.LocalAddr(), err)
-		}
-		log.Logf("[socks5-udp] %s >-< %s : associated on %s", conn.RemoteAddr(), conn.LocalAddr(), socksAddr)
-		return
-	}
-
-	// forward udp local <-> tunnel
-	cc, err := h.options.Chain.Conn()
-	// connection error
-	if err != nil {
-		log.Logf("[socks5-udp] %s -> %s : %s", conn.RemoteAddr(), socksAddr, err)
-		return
-	}
-	defer cc.Close()
-
-	cc, err = socks5Handshake(cc, userSocks5HandshakeOption(h.options.Chain.LastNode().User))
-	if err != nil {
-		log.Logf("[socks5-udp] %s -> %s : %s", conn.RemoteAddr(), socksAddr, err)
-		return
-	}
-
-	cc.SetWriteDeadline(time.Now().Add(WriteTimeout))
-	r := gosocks5.NewRequest(CmdUDPTun, nil)
-	if err := r.Write(cc); err != nil {
-		log.Logf("[socks5-udp] %s -> %s : %s", conn.RemoteAddr(), cc.RemoteAddr(), err)
-		return
-	}
-	cc.SetWriteDeadline(time.Time{})
-	if Debug {
-		log.Logf("[socks5-udp] %s -> %s\n%s", conn.RemoteAddr(), cc.RemoteAddr(), r)
-	}
-	cc.SetReadDeadline(time.Now().Add(ReadTimeout))
-	reply, err = gosocks5.ReadReply(cc)
-	if err != nil {
-		log.Logf("[socks5-udp] %s -> %s : %s", conn.RemoteAddr(), cc.RemoteAddr(), err)
-		return
-	}
-	if Debug {
-		log.Logf("[socks5-udp] %s <- %s\n%s", conn.RemoteAddr(), cc.RemoteAddr(), reply)
-	}
-
-	if reply.Rep != gosocks5.Succeeded {
-		log.Logf("[socks5-udp] %s <- %s : udp associate failed", conn.RemoteAddr(), cc.RemoteAddr())
-		return
-	}
-	cc.SetReadDeadline(time.Time{})
-	log.Logf("[socks5-udp] %s <-> %s [tun: %s]", conn.RemoteAddr(), socksAddr, reply.Addr)
-
-	go h.tunnelClientUDP(relay, cc)
-	log.Logf("[socks5-udp] %s <-> %s", conn.RemoteAddr(), socksAddr)
-	if err := h.discardClientData(conn); err != nil {
-		log.Logf("[socks5-udp] %s - %s : %s", conn.RemoteAddr(), socksAddr, err)
-	}
-	log.Logf("[socks5-udp] %s >-< %s", conn.RemoteAddr(), socksAddr)
 }
 
 func (h *socks5Handler) discardClientData(conn net.Conn) (err error) {
@@ -1339,7 +670,7 @@ func (h *socks5Handler) tunnelClientUDP(uc *net.UDPConn, cc net.Conn) (err error
 	return
 }
 
-func (h *socks5Handler) handleUDPTunnel(conn net.Conn, req *gosocks5.Request) {
+func (h *socks5Handler) handleUDP(conn net.Conn, req *gosocks5.Request) {
 	// serve tunnel udp, tunnel <-> remote, handle tunnel udp request
 	if h.options.Chain.IsEmpty() {
 		addr := req.Addr.String()
@@ -1387,11 +718,11 @@ func (h *socks5Handler) handleUDPTunnel(conn net.Conn, req *gosocks5.Request) {
 	// tunnel <-> tunnel, direct forwarding
 	// note: this type of request forwarding is defined when starting server
 	// so we don't need to authenticate it, as it's as explicit as whitelisting
-	req.Write(cc)
-
-	log.Logf("[socks5] udp-tun %s <-> %s", conn.RemoteAddr(), cc.RemoteAddr())
-	transport(conn, cc)
-	log.Logf("[socks5] udp-tun %s >-< %s", conn.RemoteAddr(), cc.RemoteAddr())
+	//req.Write(cc)
+	//log.Logf("--------------------------------------------------------")
+	//log.Logf("[socks5] udp-tun %s <-> %s", conn.RemoteAddr(), cc.RemoteAddr())
+	//transport(conn, cc)
+	//log.Logf("[socks5] udp-tun %s >-< %s", conn.RemoteAddr(), cc.RemoteAddr())
 }
 
 func (h *socks5Handler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err error) {
@@ -1455,109 +786,6 @@ func (h *socks5Handler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err err
 	return
 }
 
-func (h *socks5Handler) handleMuxBind(conn net.Conn, req *gosocks5.Request) {
-	if h.options.Chain.IsEmpty() {
-		addr := req.Addr.String()
-		h.muxBindOn(conn, addr)
-		return
-	}
-
-	cc, err := h.options.Chain.Conn()
-	if err != nil {
-		log.Logf("[socks5] mbind %s <- %s : %s", conn.RemoteAddr(), req.Addr, err)
-		reply := gosocks5.NewReply(gosocks5.Failure, nil)
-		reply.Write(conn)
-		if Debug {
-			log.Logf("[socks5] mbind %s <- %s\n%s", conn.RemoteAddr(), req.Addr, reply)
-		}
-		return
-	}
-
-	// forward request
-	// note: this type of request forwarding is defined when starting server,
-	// so we don't need to authenticate it, as it's as explicit as whitelisting.
-	defer cc.Close()
-	req.Write(cc)
-	log.Logf("[socks5] mbind %s <-> %s", conn.RemoteAddr(), cc.RemoteAddr())
-	transport(conn, cc)
-	log.Logf("[socks5] mbind %s >-< %s", conn.RemoteAddr(), cc.RemoteAddr())
-}
-
-func (h *socks5Handler) muxBindOn(conn net.Conn, addr string) {
-	bindAddr, _ := net.ResolveTCPAddr("tcp", addr)
-	ln, err := net.ListenTCP("tcp", bindAddr) // strict mode: if the port already in use, it will return error
-	if err != nil {
-		log.Logf("[socks5] mbind %s -> %s : %s", conn.RemoteAddr(), addr, err)
-		gosocks5.NewReply(gosocks5.Failure, nil).Write(conn)
-		return
-	}
-	defer ln.Close()
-
-	socksAddr := toSocksAddr(ln.Addr())
-	// Issue: may not reachable when host has multi-interface.
-	socksAddr.Host, _, _ = net.SplitHostPort(conn.LocalAddr().String())
-	reply := gosocks5.NewReply(gosocks5.Succeeded, socksAddr)
-	if err := reply.Write(conn); err != nil {
-		log.Logf("[socks5] mbind %s <- %s : %s", conn.RemoteAddr(), addr, err)
-		return
-	}
-	if Debug {
-		log.Logf("[socks5] mbind %s <- %s\n%s", conn.RemoteAddr(), addr, reply)
-	}
-	log.Logf("[socks5] mbind %s - %s BIND ON %s OK", conn.RemoteAddr(), addr, socksAddr)
-
-	// Upgrade connection to multiplex stream.
-	s, err := smux.Client(conn, smux.DefaultConfig())
-	if err != nil {
-		log.Logf("[socks5] mbind %s - %s : %s", conn.RemoteAddr(), socksAddr, err)
-		return
-	}
-
-	log.Logf("[socks5] mbind %s <-> %s", conn.RemoteAddr(), socksAddr)
-	defer log.Logf("[socks5] mbind %s >-< %s", conn.RemoteAddr(), socksAddr)
-
-	session := &muxSession{
-		conn:    conn,
-		session: s,
-	}
-	defer session.Close()
-
-	go func() {
-		for {
-			conn, err := session.Accept()
-			if err != nil {
-				log.Logf("[socks5] mbind accept : %v", err)
-				ln.Close()
-				return
-			}
-			conn.Close() // we do not handle incoming connection.
-		}
-	}()
-
-	for {
-		cc, err := ln.Accept()
-		if err != nil {
-			log.Logf("[socks5] mbind %s <- %s : %v", conn.RemoteAddr(), socksAddr, err)
-			return
-		}
-		log.Logf("[socks5] mbind %s <- %s : ACCEPT peer %s",
-			conn.RemoteAddr(), socksAddr, cc.RemoteAddr())
-
-		go func(c net.Conn) {
-			defer c.Close()
-
-			sc, err := session.GetConn()
-			if err != nil {
-				log.Logf("[socks5] mbind %s <- %s : %s", conn.RemoteAddr(), socksAddr, err)
-				return
-			}
-			defer sc.Close()
-
-			transport(sc, c)
-		}(cc)
-	}
-}
-
 // TODO: support ipv6 and domain
 func toSocksAddr(addr net.Addr) *gosocks5.Addr {
 	host := "0.0.0.0"
@@ -1572,160 +800,6 @@ func toSocksAddr(addr net.Addr) *gosocks5.Addr {
 		Host: host,
 		Port: uint16(port),
 	}
-}
-
-type socks4Handler struct {
-	options *HandlerOptions
-}
-
-// SOCKS4Handler creates a server Handler for SOCKS4(A) proxy server.
-func SOCKS4Handler(opts ...HandlerOption) Handler {
-	h := &socks4Handler{}
-	h.Init(opts...)
-
-	return h
-}
-
-func (h *socks4Handler) Init(options ...HandlerOption) {
-	if h.options == nil {
-		h.options = &HandlerOptions{}
-	}
-
-	for _, opt := range options {
-		opt(h.options)
-	}
-}
-
-func (h *socks4Handler) Handle(conn net.Conn) {
-	defer conn.Close()
-
-	req, err := gosocks4.ReadRequest(conn)
-	if err != nil {
-		log.Logf("[socks4] %s -> %s : %s",
-			conn.RemoteAddr(), conn.LocalAddr(), err)
-		return
-	}
-
-	if Debug {
-		log.Logf("[socks4] %s -> %s\n%s",
-			conn.RemoteAddr(), conn.LocalAddr(), req)
-	}
-
-	switch req.Cmd {
-	case gosocks4.CmdConnect:
-		h.handleConnect(conn, req)
-
-	case gosocks4.CmdBind:
-		log.Logf("[socks4-bind] %s - %s", conn.RemoteAddr(), req.Addr)
-		h.handleBind(conn, req)
-
-	default:
-		log.Logf("[socks4] %s - %s : Unrecognized request: %d",
-			conn.RemoteAddr(), conn.LocalAddr(), req.Cmd)
-	}
-}
-
-func (h *socks4Handler) handleConnect(conn net.Conn, req *gosocks4.Request) {
-	addr := req.Addr.String()
-
-	log.Logf("[socks4] %s -> %s -> %s",
-		conn.RemoteAddr(), h.options.Node.String(), addr)
-
-	retries := 1
-	if h.options.Chain != nil && h.options.Chain.Retries > 0 {
-		retries = h.options.Chain.Retries
-	}
-	if h.options.Retries > 0 {
-		retries = h.options.Retries
-	}
-
-	var err error
-	var cc net.Conn
-	var route *Chain
-	for i := 0; i < retries; i++ {
-		route, err = h.options.Chain.selectRouteFor(addr)
-		if err != nil {
-			log.Logf("[socks4] %s -> %s : %s",
-				conn.RemoteAddr(), conn.LocalAddr(), err)
-			continue
-		}
-
-		buf := bytes.Buffer{}
-		fmt.Fprintf(&buf, "%s -> %s -> ",
-			conn.RemoteAddr(), h.options.Node.String())
-		for _, nd := range route.route {
-			fmt.Fprintf(&buf, "%d@%s -> ", nd.ID, nd.String())
-		}
-		fmt.Fprintf(&buf, "%s", addr)
-		log.Log("[route]", buf.String())
-
-		cc, err = route.Dial(addr,
-			TimeoutChainOption(h.options.Timeout),
-		)
-		if err == nil {
-			break
-		}
-		log.Logf("[socks4] %s -> %s : %s",
-			conn.RemoteAddr(), conn.LocalAddr(), err)
-	}
-
-	if err != nil {
-		rep := gosocks4.NewReply(gosocks4.Failed, nil)
-		rep.Write(conn)
-		if Debug {
-			log.Logf("[socks4] %s <- %s\n%s",
-				conn.RemoteAddr(), conn.LocalAddr(), rep)
-		}
-		return
-	}
-	defer cc.Close()
-
-	rep := gosocks4.NewReply(gosocks4.Granted, nil)
-	if err := rep.Write(conn); err != nil {
-		log.Logf("[socks4] %s <- %s : %s",
-			conn.RemoteAddr(), conn.LocalAddr(), err)
-		return
-	}
-	if Debug {
-		log.Logf("[socks4] %s <- %s\n%s",
-			conn.RemoteAddr(), conn.LocalAddr(), rep)
-	}
-
-	log.Logf("[socks4] %s <-> %s", conn.RemoteAddr(), addr)
-	transport(conn, cc)
-	log.Logf("[socks4] %s >-< %s", conn.RemoteAddr(), addr)
-}
-
-func (h *socks4Handler) handleBind(conn net.Conn, req *gosocks4.Request) {
-	// TODO: serve socks4 bind
-	if h.options.Chain.IsEmpty() {
-		reply := gosocks4.NewReply(gosocks4.Rejected, nil)
-		reply.Write(conn)
-		if Debug {
-			log.Logf("[socks4-bind] %s <- %s\n%s", conn.RemoteAddr(), req.Addr, reply)
-		}
-		return
-	}
-
-	cc, err := h.options.Chain.Conn()
-	// connection error
-	if err != nil && err != ErrEmptyChain {
-		log.Logf("[socks4-bind] %s <- %s : %s", conn.RemoteAddr(), req.Addr, err)
-		reply := gosocks4.NewReply(gosocks4.Failed, nil)
-		reply.Write(conn)
-		if Debug {
-			log.Logf("[socks4-bind] %s <- %s\n%s", conn.RemoteAddr(), req.Addr, reply)
-		}
-		return
-	}
-
-	defer cc.Close()
-	// forward request
-	req.Write(cc)
-
-	log.Logf("[socks4-bind] %s <-> %s", conn.RemoteAddr(), cc.RemoteAddr())
-	transport(conn, cc)
-	log.Logf("[socks4-bind] %s >-< %s", conn.RemoteAddr(), cc.RemoteAddr())
 }
 
 type socks5HandshakeOptions struct {
@@ -1770,9 +844,6 @@ func socks5Handshake(conn net.Conn, opts ...socks5HandshakeOption) (net.Conn, er
 			gosocks5.MethodNoAuth,
 			gosocks5.MethodUserPass,
 		)
-		if !options.noTLS {
-			cs.AddMethod(MethodTLS)
-		}
 		selector = cs
 	}
 
@@ -1812,7 +883,7 @@ func newSocks5UDPTunnelConn(conn net.Conn, raddr, taddr net.Addr, opts ...socks5
 		return nil, err
 	}
 
-	req := gosocks5.NewRequest(CmdUDPTun, toSocksAddr(raddr))
+	req := gosocks5.NewRequest(gosocks5.CmdUdp, toSocksAddr(raddr))
 	if err := req.Write(cc); err != nil {
 		return nil, err
 	}
@@ -1872,59 +943,6 @@ func (c *socks5UDPTunnelConn) WriteTo(b []byte, addr net.Addr) (n int, err error
 	return len(b), nil
 }
 
-// socks5BindConn is a connection for SOCKS5 bind client.
-type socks5BindConn struct {
-	raddr net.Addr
-	laddr net.Addr
-	net.Conn
-	handshaked   bool
-	handshakeMux sync.Mutex
-}
-
-// Handshake waits for a peer to connect to the bind port.
-func (c *socks5BindConn) Handshake() (err error) {
-	c.handshakeMux.Lock()
-	defer c.handshakeMux.Unlock()
-
-	if c.handshaked {
-		return nil
-	}
-
-	c.handshaked = true
-
-	rep, err := gosocks5.ReadReply(c.Conn)
-	if err != nil {
-		return fmt.Errorf("bind: read reply %v", err)
-	}
-	if rep.Rep != gosocks5.Succeeded {
-		return fmt.Errorf("bind: peer connect failure")
-	}
-	c.raddr, err = net.ResolveTCPAddr("tcp", rep.Addr.String())
-	return
-}
-
-func (c *socks5BindConn) Read(b []byte) (n int, err error) {
-	if err = c.Handshake(); err != nil {
-		return
-	}
-	return c.Conn.Read(b)
-}
-
-func (c *socks5BindConn) Write(b []byte) (n int, err error) {
-	if err = c.Handshake(); err != nil {
-		return
-	}
-	return c.Conn.Write(b)
-}
-
-func (c *socks5BindConn) LocalAddr() net.Addr {
-	return c.laddr
-}
-
-func (c *socks5BindConn) RemoteAddr() net.Addr {
-	return c.raddr
-}
-
 type socks5UDPConn struct {
 	*net.UDPConn
 	taddr net.Addr
@@ -1969,14 +987,4 @@ func (c *socks5UDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 		return 0, err
 	}
 	return len(b), nil
-}
-
-// a dummy client conn for multiplex bind used by SOCKS5 multiplex bind client connector
-type muxBindClientConn struct {
-	nopConn
-	session *muxSession
-}
-
-func (c *muxBindClientConn) Accept() (net.Conn, error) {
-	return c.session.Accept()
 }

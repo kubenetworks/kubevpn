@@ -126,7 +126,6 @@ func (r *route) GenRouters() ([]router, error) {
 		var ln core.Listener
 		switch node.Transport {
 		case "tcp":
-			// Directly use SSH port forwarding if the last chain node is forward+ssh
 			ln, err = core.TCPListener(node.Addr)
 		case "udp":
 			ln, err = core.UDPListener(node.Addr, &core.UDPListenConfig{
@@ -162,21 +161,12 @@ func (r *route) GenRouters() ([]router, error) {
 
 		var handler core.Handler
 		switch node.Protocol {
-		case "tcp":
-			handler = core.TCPDirectForwardHandler(node.Remote)
-		case "udp":
-			handler = core.UDPDirectForwardHandler(node.Remote)
 		case "tun":
 			handler = core.TunHandler()
 		case "tap":
 			handler = core.TapHandler()
 		default:
-			// start from 2.5, if remote is not empty, then we assume that it is a forward tunnel.
-			if node.Remote != "" {
-				handler = core.TCPDirectForwardHandler(node.Remote)
-			} else {
-				handler = core.AutoHandler()
-			}
+			handler = core.AutoHandler()
 		}
 
 		handler.Init(

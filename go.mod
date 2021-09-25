@@ -5,7 +5,6 @@ go 1.16
 require (
 	github.com/coreos/go-iptables v0.6.0 // indirect
 	github.com/docker/libcontainer v2.2.1+incompatible
-	github.com/ginuerzh/gosocks4 v0.0.1
 	github.com/ginuerzh/gosocks5 v0.2.0
 	github.com/go-log/log v0.2.0
 	github.com/google/go-cmp v0.5.5 // indirect

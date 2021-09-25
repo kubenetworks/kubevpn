@@ -127,20 +127,6 @@ func NodeHandlerOption(node Node) HandlerOption {
 	}
 }
 
-// HostHandlerOption sets the target host for SNI proxy.
-func HostHandlerOption(host string) HandlerOption {
-	return func(opts *HandlerOptions) {
-		opts.Host = host
-	}
-}
-
-// IPsHandlerOption sets the ip list for port forward.
-func IPsHandlerOption(ips []string) HandlerOption {
-	return func(opts *HandlerOptions) {
-		opts.IPs = ips
-	}
-}
-
 // TCPModeHandlerOption sets the tcp mode for tun/tap device.
 func TCPModeHandlerOption(b bool) HandlerOption {
 	return func(opts *HandlerOptions) {
