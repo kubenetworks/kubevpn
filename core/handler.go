@@ -28,11 +28,7 @@ type HandlerOptions struct {
 	FailTimeout   time.Duration
 	Retries       int
 	Timeout       time.Duration
-	ProbeResist   string
-	KnockingHost  string
 	Node          Node
-	Host          string
-	IPs           []string
 	TCPMode       bool
 	IPRoutes      []IPRoute
 }
@@ -54,34 +50,10 @@ func ChainHandlerOption(chain *Chain) HandlerOption {
 	}
 }
 
-// UsersHandlerOption sets the Users option of HandlerOptions.
-func UsersHandlerOption(users ...*url.Userinfo) HandlerOption {
+// AuthenticatorHandlerOption set the authenticator of HandlerOptions
+func AuthenticatorHandlerOption(authenticator Authenticator) HandlerOption {
 	return func(opts *HandlerOptions) {
-		opts.Users = users
-
-		kvs := make(map[string]string)
-		for _, u := range users {
-			if u != nil {
-				kvs[u.Username()], _ = u.Password()
-			}
-		}
-		if len(kvs) > 0 {
-			opts.Authenticator = NewLocalAuthenticator(kvs)
-		}
-	}
-}
-
-// AuthenticatorHandlerOption sets the Authenticator option of HandlerOptions.
-func AuthenticatorHandlerOption(au Authenticator) HandlerOption {
-	return func(opts *HandlerOptions) {
-		opts.Authenticator = au
-	}
-}
-
-// TLSConfigHandlerOption sets the TLSConfig option of HandlerOptions.
-func TLSConfigHandlerOption(config *tls.Config) HandlerOption {
-	return func(opts *HandlerOptions) {
-		opts.TLSConfig = config
+		opts.Authenticator = authenticator
 	}
 }
 
@@ -110,13 +82,6 @@ func RetryHandlerOption(retries int) HandlerOption {
 func TimeoutHandlerOption(timeout time.Duration) HandlerOption {
 	return func(opts *HandlerOptions) {
 		opts.Timeout = timeout
-	}
-}
-
-// KnockingHandlerOption adds the knocking host for probe resistance.
-func KnockingHandlerOption(host string) HandlerOption {
-	return func(opts *HandlerOptions) {
-		opts.KnockingHost = host
 	}
 }
 

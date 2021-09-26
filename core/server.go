@@ -9,11 +9,6 @@ import (
 	"github.com/go-log/log"
 )
 
-// Accepter represents a network endpoint that can accept connection from peer.
-type Accepter interface {
-	Accept() (net.Conn, error)
-}
-
 // Server is a proxy server.
 type Server struct {
 	Listener Listener
@@ -21,7 +16,7 @@ type Server struct {
 	options  *ServerOptions
 }
 
-// Init intializes server with given options.
+// Init initializes server with given options.
 func (s *Server) Init(opts ...ServerOption) {
 	if s.options == nil {
 		s.options = &ServerOptions{}

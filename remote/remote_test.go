@@ -223,7 +223,7 @@ func TestDdp(t *testing.T) {
 	go func() {
 		server()
 	}()
-	time.Sleep(time.Second * 5)
+	time.Sleep(time.Second * 1)
 	client()
 }
 

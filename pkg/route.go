@@ -29,11 +29,6 @@ func (r *route) parseChain() (*core.Chain, error) {
 		return nil, err
 	}
 
-	nid := 1 // node ID
-	for i := range nodes {
-		nodes[i].ID = nid
-		nid++
-	}
 	ngroup.AddNode(nodes...)
 
 	chain.AddNodeGroup(ngroup)
@@ -172,7 +167,8 @@ func (r *route) GenRouters() ([]router, error) {
 		handler.Init(
 			core.AddrHandlerOption(ln.Addr().String()),
 			core.ChainHandlerOption(chain),
-			core.RetryHandlerOption(node.GetInt("retry")), // override the global retry option.
+			core.AuthenticatorHandlerOption(core.DefaultAuthenticator),
+			core.RetryHandlerOption(node.GetInt("retry")),
 			core.TimeoutHandlerOption(timeout),
 			core.NodeHandlerOption(node),
 			core.TCPModeHandlerOption(node.GetBool("tcp")),

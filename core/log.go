@@ -22,15 +22,3 @@ func (l *LogLogger) Log(v ...interface{}) {
 func (l *LogLogger) Logf(format string, v ...interface{}) {
 	log.Output(3, fmt.Sprintf(format, v...))
 }
-
-// NopLogger is a dummy logger that discards the log outputs
-type NopLogger struct {
-}
-
-// Log does nothing
-func (l *NopLogger) Log(v ...interface{}) {
-}
-
-// Logf does nothing
-func (l *NopLogger) Logf(format string, v ...interface{}) {
-}

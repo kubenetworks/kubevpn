@@ -3,10 +3,8 @@ package core
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/url"
 	"strconv"
@@ -16,14 +14,9 @@ import (
 	"github.com/go-log/log"
 )
 
-var (
-	_ net.PacketConn = (*socks5UDPTunnelConn)(nil)
-)
-
 type clientSelector struct {
-	methods   []uint8
-	User      *url.Userinfo
-	TLSConfig *tls.Config
+	methods []uint8
+	User    *url.Userinfo
 }
 
 func (selector *clientSelector) Methods() []uint8 {
@@ -83,7 +76,6 @@ type serverSelector struct {
 	methods []uint8
 	// Users     []*url.Userinfo
 	Authenticator Authenticator
-	TLSConfig     *tls.Config
 }
 
 func (selector *serverSelector) Methods() []uint8 {
@@ -193,7 +185,6 @@ func (c *socks5Connector) ConnectContext(ctx context.Context, conn net.Conn, net
 	cc, err := socks5Handshake(conn,
 		selectorSocks5HandshakeOption(opts.Selector),
 		userSocks5HandshakeOption(user),
-		noTLSSocks5HandshakeOption(opts.NoTLS),
 	)
 	if err != nil {
 		return nil, err
@@ -232,98 +223,6 @@ func (c *socks5Connector) ConnectContext(ctx context.Context, conn net.Conn, net
 	}
 
 	return conn, nil
-}
-
-type socks5UDPConnector struct {
-	User *url.Userinfo
-}
-
-// SOCKS5UDPConnector creates a connector for SOCKS5 UDP relay.
-// It accepts an optional auth info for SOCKS5 Username/Password Authentication.
-func SOCKS5UDPConnector(user *url.Userinfo) Connector {
-	return &socks5UDPConnector{User: user}
-}
-
-func (c *socks5UDPConnector) Connect(conn net.Conn, address string, options ...ConnectOption) (net.Conn, error) {
-	return c.ConnectContext(context.Background(), conn, "udp", address, options...)
-}
-
-func (c *socks5UDPConnector) ConnectContext(ctx context.Context, conn net.Conn, network, address string, options ...ConnectOption) (net.Conn, error) {
-	switch network {
-	case "tcp", "tcp4", "tcp6":
-		return nil, fmt.Errorf("%s unsupported", network)
-	}
-
-	opts := &ConnectOptions{}
-	for _, option := range options {
-		option(opts)
-	}
-
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = ConnectTimeout
-	}
-
-	conn.SetDeadline(time.Now().Add(timeout))
-	defer conn.SetDeadline(time.Time{})
-
-	user := opts.User
-	if user == nil {
-		user = c.User
-	}
-	cc, err := socks5Handshake(conn,
-		selectorSocks5HandshakeOption(opts.Selector),
-		userSocks5HandshakeOption(user),
-		noTLSSocks5HandshakeOption(opts.NoTLS),
-	)
-	if err != nil {
-		return nil, err
-	}
-	conn = cc
-
-	taddr, err := net.ResolveUDPAddr("udp", address)
-	if err != nil {
-		return nil, err
-	}
-
-	req := gosocks5.NewRequest(gosocks5.CmdUdp, &gosocks5.Addr{
-		Type: gosocks5.AddrIPv4,
-	})
-
-	if err := req.Write(conn); err != nil {
-		return nil, err
-	}
-
-	if Debug {
-		log.Log("[socks5] udp\n", req)
-	}
-
-	reply, err := gosocks5.ReadReply(conn)
-	if err != nil {
-		return nil, err
-	}
-
-	if Debug {
-		log.Log("[socks5] udp\n", reply)
-	}
-
-	if reply.Rep != gosocks5.Succeeded {
-		log.Logf("[socks5] udp relay failure")
-		return nil, fmt.Errorf("SOCKS5 udp relay failure")
-	}
-	baddr, err := net.ResolveUDPAddr("udp", reply.Addr.String())
-	if err != nil {
-		return nil, err
-	}
-	log.Logf("[socks5] udp associate on %s OK", baddr)
-
-	uc, err := net.DialUDP("udp", nil, baddr)
-	if err != nil {
-		return nil, err
-	}
-	// log.Logf("udp laddr:%s, raddr:%s", uc.LocalAddr(), uc.RemoteAddr())
-
-	return &socks5UDPConn{UDPConn: uc, taddr: taddr}, nil
 }
 
 type socks5UDPTunConnector struct {
@@ -368,7 +267,6 @@ func (c *socks5UDPTunConnector) ConnectContext(ctx context.Context, conn net.Con
 		nil, taddr,
 		selectorSocks5HandshakeOption(opts.Selector),
 		userSocks5HandshakeOption(user),
-		noTLSSocks5HandshakeOption(opts.NoTLS),
 	)
 }
 
@@ -394,14 +292,9 @@ func (h *socks5Handler) Init(options ...HandlerOption) {
 		opt(h.options)
 	}
 
-	tlsConfig := h.options.TLSConfig
-	if tlsConfig == nil {
-		tlsConfig = DefaultTLSConfig
-	}
 	h.selector = &serverSelector{ // socks5 server selector
 		// Users:     h.options.Users,
 		Authenticator: h.options.Authenticator,
-		TLSConfig:     tlsConfig,
 	}
 	// methods that socks5 server supported
 	h.selector.AddMethod(
@@ -429,8 +322,11 @@ func (h *socks5Handler) Handle(conn net.Conn) {
 	case gosocks5.CmdConnect:
 		h.handleConnect(conn, req)
 
+	//case gosocks5.CmdBind:
+	//	h.handleBind(conn, req)
+	//
 	case gosocks5.CmdUdp:
-		h.handleUDP(conn, req)
+		h.handleUDPTunnel(conn, req)
 
 	default:
 		log.Logf("[socks5] %s - %s : Unrecognized request: %d",
@@ -467,7 +363,7 @@ func (h *socks5Handler) handleConnect(conn net.Conn, req *gosocks5.Request) {
 		fmt.Fprintf(&buf, "%s -> %s -> ",
 			conn.RemoteAddr(), h.options.Node.String())
 		for _, nd := range route.route {
-			fmt.Fprintf(&buf, "%d@%s -> ", nd.ID, nd.String())
+			fmt.Fprintf(&buf, "%s -> ", nd.String())
 		}
 		fmt.Fprintf(&buf, "%s", host)
 		log.Log("[route]", buf.String())
@@ -508,20 +404,134 @@ func (h *socks5Handler) handleConnect(conn net.Conn, req *gosocks5.Request) {
 	log.Logf("[socks5] %s >-< %s", conn.RemoteAddr(), host)
 }
 
-func (h *socks5Handler) discardClientData(conn net.Conn) (err error) {
-	b := make([]byte, tinyBufferSize)
-	n := 0
-	for {
-		n, err = conn.Read(b) // discard any data from tcp connection
-		if err != nil {
-			if err == io.EOF { // disconnect normally
-				err = nil
-			}
-			break // client disconnected
-		}
-		log.Logf("[socks5-udp] read %d UNEXPECTED TCP data from client", n)
+func (h *socks5Handler) handleBind(conn net.Conn, req *gosocks5.Request) {
+	addr := req.Addr.String()
+
+	log.Logf("[socks5-bind] %s -> %s -> %s",
+		conn.RemoteAddr(), h.options.Node.String(), addr)
+
+	if h.options.Chain.IsEmpty() {
+		h.bindOn(conn, addr)
+		return
 	}
-	return
+
+	cc, err := h.options.Chain.Conn()
+	if err != nil {
+		log.Logf("[socks5-bind] %s <- %s : %s",
+			conn.RemoteAddr(), conn.LocalAddr(), err)
+		reply := gosocks5.NewReply(gosocks5.Failure, nil)
+		reply.Write(conn)
+		if Debug {
+			log.Logf("[socks5-bind] %s <- %s\n%s",
+				conn.RemoteAddr(), conn.LocalAddr(), reply)
+		}
+		return
+	}
+
+	// forward request
+	// note: this type of request forwarding is defined when starting server,
+	// so we don't need to authenticate it, as it's as explicit as whitelisting
+	defer cc.Close()
+	req.Write(cc)
+	log.Logf("[socks5-bind] %s <-> %s", conn.RemoteAddr(), addr)
+	transport(conn, cc)
+	log.Logf("[socks5-bind] %s >-< %s", conn.RemoteAddr(), addr)
+}
+
+func (h *socks5Handler) bindOn(conn net.Conn, addr string) {
+	bindAddr, _ := net.ResolveTCPAddr("tcp", addr)
+	ln, err := net.ListenTCP("tcp", bindAddr) // strict mode: if the port already in use, it will return error
+	if err != nil {
+		log.Logf("[socks5-bind] %s -> %s : %s",
+			conn.RemoteAddr(), conn.LocalAddr(), err)
+		gosocks5.NewReply(gosocks5.Failure, nil).Write(conn)
+		return
+	}
+
+	socksAddr := toSocksAddr(ln.Addr())
+	// Issue: may not reachable when host has multi-interface
+	socksAddr.Host, _, _ = net.SplitHostPort(conn.LocalAddr().String())
+	reply := gosocks5.NewReply(gosocks5.Succeeded, socksAddr)
+	if err := reply.Write(conn); err != nil {
+		log.Logf("[socks5-bind] %s <- %s : %s",
+			conn.RemoteAddr(), conn.LocalAddr(), err)
+		ln.Close()
+		return
+	}
+	if Debug {
+		log.Logf("[socks5-bind] %s <- %s\n%s",
+			conn.RemoteAddr(), conn.LocalAddr(), reply)
+	}
+	log.Logf("[socks5-bind] %s - %s BIND ON %s OK",
+		conn.RemoteAddr(), conn.LocalAddr(), socksAddr)
+
+	var pconn net.Conn
+	accept := func() <-chan error {
+		errc := make(chan error, 1)
+
+		go func() {
+			defer close(errc)
+			defer ln.Close()
+
+			c, err := ln.AcceptTCP()
+			if err != nil {
+				errc <- err
+				return
+			}
+			pconn = c
+		}()
+
+		return errc
+	}
+
+	pc1, pc2 := net.Pipe()
+	pipe := func() <-chan error {
+		errc := make(chan error, 1)
+
+		go func() {
+			defer close(errc)
+			defer pc1.Close()
+
+			errc <- transport(conn, pc1)
+		}()
+
+		return errc
+	}
+
+	defer pc2.Close()
+
+	for {
+		select {
+		case err := <-accept():
+			if err != nil || pconn == nil {
+				log.Logf("[socks5-bind] %s <- %s : %v", conn.RemoteAddr(), addr, err)
+				return
+			}
+			defer pconn.Close()
+
+			reply := gosocks5.NewReply(gosocks5.Succeeded, toSocksAddr(pconn.RemoteAddr()))
+			if err := reply.Write(pc2); err != nil {
+				log.Logf("[socks5-bind] %s <- %s : %v", conn.RemoteAddr(), addr, err)
+			}
+			if Debug {
+				log.Logf("[socks5-bind] %s <- %s\n%s", conn.RemoteAddr(), addr, reply)
+			}
+			log.Logf("[socks5-bind] %s <- %s PEER %s ACCEPTED", conn.RemoteAddr(), socksAddr, pconn.RemoteAddr())
+
+			log.Logf("[socks5-bind] %s <-> %s", conn.RemoteAddr(), pconn.RemoteAddr())
+			if err = transport(pc2, pconn); err != nil {
+				log.Logf("[socks5-bind] %s - %s : %v", conn.RemoteAddr(), pconn.RemoteAddr(), err)
+			}
+			log.Logf("[socks5-bind] %s >-< %s", conn.RemoteAddr(), pconn.RemoteAddr())
+			return
+		case err := <-pipe():
+			if err != nil {
+				log.Logf("[socks5-bind] %s -> %s : %v", conn.RemoteAddr(), addr, err)
+			}
+			ln.Close()
+			return
+		}
+	}
 }
 
 func (h *socks5Handler) transportUDP(relay, peer net.PacketConn) (err error) {
@@ -670,7 +680,7 @@ func (h *socks5Handler) tunnelClientUDP(uc *net.UDPConn, cc net.Conn) (err error
 	return
 }
 
-func (h *socks5Handler) handleUDP(conn net.Conn, req *gosocks5.Request) {
+func (h *socks5Handler) handleUDPTunnel(conn net.Conn, req *gosocks5.Request) {
 	// serve tunnel udp, tunnel <-> remote, handle tunnel udp request
 	if h.options.Chain.IsEmpty() {
 		addr := req.Addr.String()
@@ -718,11 +728,11 @@ func (h *socks5Handler) handleUDP(conn net.Conn, req *gosocks5.Request) {
 	// tunnel <-> tunnel, direct forwarding
 	// note: this type of request forwarding is defined when starting server
 	// so we don't need to authenticate it, as it's as explicit as whitelisting
-	//req.Write(cc)
-	//log.Logf("--------------------------------------------------------")
-	//log.Logf("[socks5] udp-tun %s <-> %s", conn.RemoteAddr(), cc.RemoteAddr())
-	//transport(conn, cc)
-	//log.Logf("[socks5] udp-tun %s >-< %s", conn.RemoteAddr(), cc.RemoteAddr())
+	req.Write(cc)
+
+	log.Logf("[socks5] udp-tun %s <-> %s", conn.RemoteAddr(), cc.RemoteAddr())
+	transport(conn, cc)
+	log.Logf("[socks5] udp-tun %s >-< %s", conn.RemoteAddr(), cc.RemoteAddr())
 }
 
 func (h *socks5Handler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err error) {
@@ -803,10 +813,8 @@ func toSocksAddr(addr net.Addr) *gosocks5.Addr {
 }
 
 type socks5HandshakeOptions struct {
-	selector  gosocks5.Selector
-	user      *url.Userinfo
-	tlsConfig *tls.Config
-	noTLS     bool
+	selector gosocks5.Selector
+	user     *url.Userinfo
 }
 
 type socks5HandshakeOption func(opts *socks5HandshakeOptions)
@@ -823,12 +831,6 @@ func userSocks5HandshakeOption(user *url.Userinfo) socks5HandshakeOption {
 	}
 }
 
-func noTLSSocks5HandshakeOption(noTLS bool) socks5HandshakeOption {
-	return func(opts *socks5HandshakeOptions) {
-		opts.noTLS = noTLS
-	}
-}
-
 func socks5Handshake(conn net.Conn, opts ...socks5HandshakeOption) (net.Conn, error) {
 	options := socks5HandshakeOptions{}
 	for _, opt := range opts {
@@ -837,8 +839,7 @@ func socks5Handshake(conn net.Conn, opts ...socks5HandshakeOption) (net.Conn, er
 	selector := options.selector
 	if selector == nil {
 		cs := &clientSelector{
-			TLSConfig: &tls.Config{InsecureSkipVerify: true},
-			User:      options.user,
+			User: options.user,
 		}
 		cs.AddMethod(
 			gosocks5.MethodNoAuth,
@@ -852,24 +853,6 @@ func socks5Handshake(conn net.Conn, opts ...socks5HandshakeOption) (net.Conn, er
 		return nil, err
 	}
 	return cc, nil
-}
-
-func getSocks5UDPTunnel(chain *Chain, addr net.Addr) (net.Conn, error) {
-	c, err := chain.Conn()
-	if err != nil {
-		return nil, err
-	}
-
-	node := chain.LastNode()
-	conn, err := newSocks5UDPTunnelConn(c,
-		addr, nil,
-		userSocks5HandshakeOption(node.User),
-		noTLSSocks5HandshakeOption(node.GetBool("notls")),
-	)
-	if err != nil {
-		c.Close()
-	}
-	return conn, err
 }
 
 type socks5UDPTunnelConn struct {

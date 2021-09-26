@@ -17,7 +17,6 @@ var (
 
 // Node is a proxy node, mainly used to construct a proxy chain.
 type Node struct {
-	ID               int
 	Addr             string
 	Host             string
 	Protocol         string
