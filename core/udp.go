@@ -59,7 +59,7 @@ func UDPListener(addr string, cfg *UDPListenConfig) (Listener, error) {
 func (l *udpListener) listenLoop() {
 	for {
 		// NOTE: this buffer will be released in the udpServerConn after read.
-		b := mPool.Get().([]byte)
+		b := MPool.Get().([]byte)
 
 		n, raddr, err := l.ln.ReadFrom(b)
 		if err != nil {
@@ -212,7 +212,7 @@ func (c *udpServerConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 	case bb := <-c.rChan:
 		n = copy(b, bb)
 		if cap(bb) == mediumBufferSize {
-			mPool.Put(bb[:cap(bb)])
+			MPool.Put(bb[:cap(bb)])
 		}
 	case <-c.closed:
 		err = errors.New("read from closed connection")

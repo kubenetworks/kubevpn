@@ -11,7 +11,6 @@ import (
 	"kubevpn/dns"
 	"kubevpn/remote"
 	"kubevpn/util"
-	"kubevpn/windowstaptundriver"
 	"net"
 	"os/exec"
 	"strings"
@@ -88,9 +87,9 @@ func prepare() {
 
 	log.Info("your ip is " + tunIp.String())
 
-	if util.IsWindows() {
-		exe.InstallTunTapDriver()
-	}
+	//if util.IsWindows() {
+	//	exe.InstallTunTapDriver()
+	//}
 }
 
 func Main() {
