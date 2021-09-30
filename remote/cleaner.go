@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
+	"kubevpn/driver"
 	"kubevpn/util"
 	"net"
 	"os"
@@ -51,6 +52,7 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 			}(controller)
 		}
 		wg.Wait()
+		driver.UninstallWireGuardTunDriver()
 		log.Info("clean up successful")
 		os.Exit(0)
 	}()

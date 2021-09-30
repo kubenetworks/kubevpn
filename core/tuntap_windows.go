@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/pkg/errors"
+	"k8s.io/client-go/util/retry"
 	"net"
 	"os/exec"
 	"strings"
@@ -27,9 +28,17 @@ func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
 		"source=static addr=%s mask=%s gateway=none",
 		ifce.Name(), ip.String(), ipMask(ipNet.Mask))
 	log.Log("[tun]", cmd)
+
 	args := strings.Split(cmd, " ")
-	if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
-		err = fmt.Errorf("%s: %v", cmd, er)
+	err = retry.OnError(retry.DefaultRetry, func(err error) bool {
+		return err != nil
+	}, func() error {
+		if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
+			return fmt.Errorf("%s: %v", cmd, er)
+		}
+		return nil
+	})
+	if err != nil {
 		return
 	}
 

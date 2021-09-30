@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"kubevpn/dns"
+	driver "kubevpn/driver"
 	"kubevpn/remote"
 	"kubevpn/util"
 	"net"
@@ -87,9 +88,9 @@ func prepare() {
 
 	log.Info("your ip is " + tunIp.String())
 
-	//if util.IsWindows() {
-	//	exe.InstallTunTapDriver()
-	//}
+	if util.IsWindows() {
+		driver.InstallWireGuardTunDriver()
+	}
 }
 
 func Main() {
