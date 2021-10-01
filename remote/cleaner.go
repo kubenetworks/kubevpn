@@ -27,7 +27,9 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 		<-stopChan
 		log.Info("prepare to exit, cleaning up")
 		for _, function := range CancelFunctions {
-			function()
+			if function != nil {
+				function()
+			}
 		}
 		for _, ipNet := range ip {
 			if err := ReleaseIpToDHCP(clientset, namespace, ipNet); err != nil {
@@ -56,7 +58,14 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 			}(controller)
 		}
 		wg.Wait()
-		driver.UninstallWireGuardTunDriver()
+		err := retry.OnError(retry.DefaultRetry, func(err error) bool {
+			return err != nil
+		}, func() error {
+			return driver.UninstallWireGuardTunDriver()
+		})
+		if err != nil {
+			log.Warnln(err)
+		}
 		log.Info("clean up successful")
 		os.Exit(0)
 	}()

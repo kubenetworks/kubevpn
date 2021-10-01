@@ -100,7 +100,7 @@ func Main() {
 	remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)
 	go func() {
 		for ctx.Err() == nil {
-			go func() {
+			func() {
 				defer func() {
 					if err := recover(); err != nil {
 						log.Warnf("recover error: %v, ignore", err)

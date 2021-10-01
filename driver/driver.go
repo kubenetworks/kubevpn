@@ -29,13 +29,13 @@ func InstallWireGuardTunDriver() {
 	}
 }
 
-func UninstallWireGuardTunDriver() {
+func UninstallWireGuardTunDriver() error {
 	wd, err := os.Getwd()
 	if err != nil {
-		return
+		return err
 	}
 	filename := filepath.Join(wd, "wintun.dll")
-	_ = os.Remove(filename)
+	return os.Remove(filename)
 }
 
 func UninstallTunTapDriver() {
