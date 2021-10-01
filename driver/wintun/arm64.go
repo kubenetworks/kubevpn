@@ -1,7 +1,7 @@
-//go:build windows && x86
-// +build windows,x86
+//go:build windows && arm64
+// +build windows,arm64
 
-package x86
+package wintun
 
 import (
 	"embed"
@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 )
 
-//go:embed wintun.dll
+//go:embed arm64.dll
 var wintunFs embed.FS
 
 func InstallWintunDriver() error {
