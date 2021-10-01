@@ -1,7 +1,7 @@
 //go:build windows && x86
 // +build windows,x86
 
-package wintun
+package x86
 
 import (
 	"embed"

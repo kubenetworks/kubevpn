@@ -3,7 +3,11 @@ package core
 import (
 	"context"
 	"fmt"
+	"github.com/datawire/dlib/derror"
 	"github.com/pkg/errors"
+	"golang.org/x/sys/windows"
+	"golang.zx2c4.com/wireguard/tun"
+	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 	"k8s.io/client-go/util/retry"
 	"net"
 	"os/exec"
@@ -19,14 +23,15 @@ func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
 	if err != nil {
 		return
 	}
-	ifce, err := OpenTun(context.Background())
+	ifce, itf, err := openTun(context.Background())
 	if err != nil {
 		return
 	}
+	name, err := ifce.Name()
 
 	cmd := fmt.Sprintf("netsh interface ip set address name=\"%s\" "+
 		"source=static addr=%s mask=%s gateway=none",
-		ifce.Name(), ip.String(), ipMask(ipNet.Mask))
+		name, ip.String(), ipMask(ipNet.Mask))
 	log.Log("[tun]", cmd)
 
 	args := strings.Split(cmd, " ")
@@ -42,11 +47,11 @@ func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
 		return
 	}
 
-	if err = addTunRoutes(ifce.Name(), cfg.Gateway, cfg.Routes...); err != nil {
+	if err = addTunRoutes(name, cfg.Gateway, cfg.Routes...); err != nil {
 		return
 	}
 
-	itf, err = net.InterfaceByName(ifce.Name())
+	itf, err = net.InterfaceByName(name)
 	if err != nil {
 		return
 	}
@@ -58,8 +63,84 @@ func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
 	return
 }
 
+func openTun(ctx context.Context) (td tun.Device, p *net.Interface, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			var ok bool
+			if err, ok = r.(error); !ok {
+				err = derror.PanicToError(r)
+			}
+		}
+	}()
+	interfaceName := "wg1"
+	if td, err = tun.CreateTUN(interfaceName, 0); err != nil {
+		return nil, nil, fmt.Errorf("failed to create TUN device: %w", err)
+	}
+	if _, err = td.Name(); err != nil {
+		return nil, nil, fmt.Errorf("failed to get real name of TUN device: %w", err)
+	}
+	if i, err := winipcfg.LUID(td.(*tun.NativeTun).LUID()).Interface(); err != nil {
+		return nil, nil, fmt.Errorf("failed to get interface for TUN device: %w", err)
+	} else {
+		if p, err = net.InterfaceByIndex(int(i.InterfaceIndex)); err != nil {
+			return nil, nil, fmt.Errorf("failed to get interface for TUN device: %w", err)
+		}
+	}
+	return td, p, nil
+}
+
+func (t *WinTunConn) Close() error {
+	// The tun.NativeTun device has a closing mutex which is read locked during
+	// a call to Read(). The read lock prevents a call to Close() to proceed
+	// until Read() actually receives something. To resolve that "deadlock",
+	// we call Close() in one goroutine to wait for the lock and write a bogus
+	// message in another that will be returned by Read().
+	closeCh := make(chan error)
+	go func() {
+		// first message is just to indicate that this goroutine has started
+		closeCh <- nil
+		closeCh <- t.ifce.Close()
+		close(closeCh)
+	}()
+
+	// Not 100%, but we can be fairly sure that Close() is
+	// hanging on the lock, or at least will be by the time
+	// the Read() returns
+	<-closeCh
+	return <-closeCh
+}
+
+func (t *WinTunConn) getLUID() winipcfg.LUID {
+	return winipcfg.LUID(t.ifce.(*tun.NativeTun).LUID())
+}
+
+func (t *WinTunConn) addSubnet(_ context.Context, subnet *net.IPNet) error {
+	return t.getLUID().AddIPAddress(*subnet)
+}
+
+func (t *WinTunConn) removeSubnet(_ context.Context, subnet *net.IPNet) error {
+	return t.getLUID().DeleteIPAddress(*subnet)
+}
+
+func (t *WinTunConn) setDNS(ctx context.Context, server net.IP, domains []string) (err error) {
+	ipFamily := func(ip net.IP) winipcfg.AddressFamily {
+		f := winipcfg.AddressFamily(windows.AF_INET6)
+		if ip4 := ip.To4(); ip4 != nil {
+			f = windows.AF_INET
+		}
+		return f
+	}
+	family := ipFamily(server)
+	luid := t.getLUID()
+	if err = luid.SetDNS(family, []net.IP{server}, domains); err != nil {
+		return err
+	}
+	_ = exec.CommandContext(ctx, "ipconfig", "/flushdns").Run()
+	return nil
+}
+
 type WinTunConn struct {
-	ifce *Device
+	ifce tun.Device
 	addr net.Addr
 }
 
@@ -69,10 +150,6 @@ func (c *WinTunConn) Read(b []byte) (n int, err error) {
 
 func (c *WinTunConn) Write(b []byte) (n int, err error) {
 	return c.ifce.Write(b, 0)
-}
-
-func (c *WinTunConn) Close() (err error) {
-	return c.ifce.Close()
 }
 
 func (c *WinTunConn) LocalAddr() net.Addr {

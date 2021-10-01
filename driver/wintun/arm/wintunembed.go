@@ -1,7 +1,7 @@
-//go:build windows && arm64
-// +build windows,arm64
+//go:build windows && arm
+// +build windows,arm
 
-package wintun
+package arm
 
 import (
 	"embed"
