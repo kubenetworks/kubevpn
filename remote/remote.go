@@ -146,7 +146,7 @@ func CreateServerInbound(factory cmdutil.Factory, clientset *kubernetes.Clientse
 							"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 -j MASQUERADE;" +
 							"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 -j DNAT --to " + virtualLocalIp + ":80-60000;" +
 							"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 -j MASQUERADE;" +
-							"kubevpn server -L 'tun://0.0.0.0:8421/127.0.0.1:8421?net=" + virtualShadowIp + "&route=" + routes + "' -F 'socks5://" + realRouterIP + ":10800?notls=true' --debug=true",
+							"kubevpn server -L 'tun://0.0.0.0:8421/" + realRouterIP + ":8421?net=" + virtualShadowIp + "&route=" + routes + "' --debug=true",
 					},
 					SecurityContext: &v1.SecurityContext{
 						Capabilities: &v1.Capabilities{
