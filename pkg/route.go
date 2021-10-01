@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"github.com/go-log/log"
 	"github.com/pkg/errors"
 	"kubevpn/core"
@@ -194,9 +195,9 @@ type router struct {
 	chain   *core.Chain
 }
 
-func (r *router) Serve() error {
+func (r *router) Serve(ctx context.Context) error {
 	log.Logf("%s on %s", r.node.String(), r.server.Addr())
-	return r.server.Serve(r.handler)
+	return r.server.Serve(ctx, r.handler)
 }
 
 func (r *router) Close() error {

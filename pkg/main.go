@@ -9,9 +9,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"kubevpn/dns"
+	driver "kubevpn/driver"
 	"kubevpn/remote"
 	"kubevpn/util"
-	"kubevpn/windowstaptundriver"
 	"net"
 	"os/exec"
 	"strings"
@@ -89,15 +89,17 @@ func prepare() {
 	log.Info("your ip is " + tunIp.String())
 
 	if util.IsWindows() {
-		exe.InstallTunTapDriver()
+		driver.InstallWireGuardTunDriver()
 	}
 }
 
 func Main() {
 	prepare()
 	var readyChanRef *chan struct{}
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)
 	go func() {
-		for {
+		for ctx.Err() == nil {
 			func() {
 				defer func() {
 					if err := recover(); err != nil {
@@ -160,11 +162,13 @@ func start() error {
 	}
 
 	for i := range routers {
-		go func(finalI int) {
-			if err = routers[finalI].Serve(); err != nil {
+		ctx, cancelFunc := context.WithCancel(context.Background())
+		remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)
+		go func(finalCtx context.Context, finalI int) {
+			if err = routers[finalI].Serve(finalCtx); err != nil {
 				log.Warn(err)
 			}
-		}(i)
+		}(ctx, i)
 	}
 
 	return nil

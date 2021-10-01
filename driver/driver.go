@@ -1,8 +1,9 @@
-package exe
+package driver
 
 import (
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/util/retry"
+	"kubevpn/driver/wintun/bin/amd64"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,25 @@ func InstallTunTapDriver() {
 	}); err != nil {
 		log.Warn(err)
 	}
+}
+
+func InstallWireGuardTunDriver() {
+	if err := retry.OnError(retry.DefaultRetry, func(err error) bool {
+		return err != nil
+	}, func() error {
+		return wintun.InstallWintunDriver()
+	}); err != nil {
+		log.Warn(err)
+	}
+}
+
+func UninstallWireGuardTunDriver() error {
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	filename := filepath.Join(wd, "wintun.dll")
+	return os.Remove(filename)
 }
 
 func UninstallTunTapDriver() {

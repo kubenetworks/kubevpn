@@ -261,8 +261,8 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 	go func() {
 		for {
 			err := func() error {
-				b := sPool.Get().([]byte)
-				defer sPool.Put(b)
+				b := SPool.Get().([]byte)
+				defer SPool.Put(b)
 
 				n, err := tun.Read(b)
 				if err != nil {
@@ -335,8 +335,8 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 	go func() {
 		for {
 			err := func() error {
-				b := sPool.Get().([]byte)
-				defer sPool.Put(b)
+				b := SPool.Get().([]byte)
+				defer SPool.Put(b)
 
 				n, addr, err := conn.ReadFrom(b)
 				if err != nil &&
@@ -637,8 +637,8 @@ func (h *tapHandler) transportTap(tap net.Conn, conn net.PacketConn, raddr net.A
 	go func() {
 		for {
 			err := func() error {
-				b := sPool.Get().([]byte)
-				defer sPool.Put(b)
+				b := SPool.Get().([]byte)
+				defer SPool.Put(b)
 
 				n, err := tap.Read(b)
 				if err != nil {
@@ -697,8 +697,8 @@ func (h *tapHandler) transportTap(tap net.Conn, conn net.PacketConn, raddr net.A
 	go func() {
 		for {
 			err := func() error {
-				b := sPool.Get().([]byte)
-				defer sPool.Put(b)
+				b := SPool.Get().([]byte)
+				defer SPool.Put(b)
 
 				n, addr, err := conn.ReadFrom(b)
 				if err != nil &&

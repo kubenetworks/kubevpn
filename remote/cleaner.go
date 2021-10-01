@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
+	"kubevpn/driver"
 	"kubevpn/util"
 	"net"
 	"os"
@@ -18,12 +19,18 @@ import (
 )
 
 var stopChan = make(chan os.Signal)
+var CancelFunctions = make([]context.CancelFunc, 3)
 
 func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string, workloads []string, ip ...*net.IPNet) {
 	signal.Notify(stopChan, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL /*, syscall.SIGSTOP*/)
 	go func() {
 		<-stopChan
 		log.Info("prepare to exit, cleaning up")
+		for _, function := range CancelFunctions {
+			if function != nil {
+				function()
+			}
+		}
 		for _, ipNet := range ip {
 			if err := ReleaseIpToDHCP(clientset, namespace, ipNet); err != nil {
 				log.Errorf("failed to release ip to dhcp, err: %v", err)
@@ -51,6 +58,14 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 			}(controller)
 		}
 		wg.Wait()
+		err := retry.OnError(retry.DefaultRetry, func(err error) bool {
+			return err != nil
+		}, func() error {
+			return driver.UninstallWireGuardTunDriver()
+		})
+		if err != nil {
+			log.Warnln(err)
+		}
 		log.Info("clean up successful")
 		os.Exit(0)
 	}()

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -37,7 +38,7 @@ func (s *Server) Close() error {
 }
 
 // Serve serves as a proxy server.
-func (s *Server) Serve(h Handler, opts ...ServerOption) error {
+func (s *Server) Serve(ctx context.Context, h Handler, opts ...ServerOption) error {
 	s.Init(opts...)
 
 	if s.Listener == nil {
@@ -58,7 +59,7 @@ func (s *Server) Serve(h Handler, opts ...ServerOption) error {
 
 	l := s.Listener
 	var tempDelay time.Duration
-	for {
+	for ctx.Err() == nil {
 		conn, e := l.Accept()
 		if e != nil {
 			if ne, ok := e.(net.Error); ok && ne.Temporary() {
@@ -80,11 +81,7 @@ func (s *Server) Serve(h Handler, opts ...ServerOption) error {
 
 		go h.Handle(conn)
 	}
-}
-
-// Run starts to serve.
-func (s *Server) Run() error {
-	return s.Serve(s.Handler)
+	return nil
 }
 
 // ServerOptions holds the options for Server.
@@ -117,8 +114,8 @@ func transport(rw1, rw2 io.ReadWriter) error {
 }
 
 func copyBuffer(dst io.Writer, src io.Reader) error {
-	buf := lPool.Get().([]byte)
-	defer lPool.Put(buf)
+	buf := LPool.Get().([]byte)
+	defer LPool.Put(buf)
 
 	_, err := io.CopyBuffer(dst, src, buf)
 	return err
