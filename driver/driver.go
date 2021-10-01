@@ -3,7 +3,7 @@ package driver
 import (
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/util/retry"
-	"kubevpn/driver/wintun/bin/amd64"
+	"kubevpn/driver/wintun"
 	"os"
 	"os/exec"
 	"path/filepath"
