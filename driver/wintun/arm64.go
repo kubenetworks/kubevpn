@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 )
 
-//go:embed arm64.dll
+//go:embed bin/arm64/wintun.dll
 var wintunFs embed.FS
 
 func InstallWintunDriver() error {
