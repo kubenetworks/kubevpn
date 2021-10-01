@@ -96,9 +96,11 @@ func prepare() {
 func Main() {
 	prepare()
 	var readyChanRef *chan struct{}
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)
 	go func() {
-		for {
-			func() {
+		for ctx.Err() == nil {
+			go func() {
 				defer func() {
 					if err := recover(); err != nil {
 						log.Warnf("recover error: %v, ignore", err)
@@ -160,11 +162,13 @@ func start() error {
 	}
 
 	for i := range routers {
-		go func(finalI int) {
-			if err = routers[finalI].Serve(); err != nil {
+		ctx, cancelFunc := context.WithCancel(context.Background())
+		remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)
+		go func(finalCtx context.Context, finalI int) {
+			if err = routers[finalI].Serve(finalCtx); err != nil {
 				log.Warn(err)
 			}
-		}(i)
+		}(ctx, i)
 	}
 
 	return nil
