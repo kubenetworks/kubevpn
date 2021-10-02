@@ -1,8 +1,3 @@
-/*
-* Copyright (C) 2021 THL A29 Limited, a Tencent company.  All rights reserved.
-* This source code is licensed under the Apache License Version 2.0.
- */
-
 package util
 
 import (
@@ -10,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"k8s.io/client-go/tools/portforward"
 	"net"
 	"net/http"
 	"sort"
@@ -23,10 +19,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/apimachinery/pkg/util/runtime"
 )
-
-// PortForwardProtocolV1Name is the subprotocol used for port forwarding.
-// TODO move to API machinery and re-unify with kubelet/server/portfoward
-const PortForwardProtocolV1Name = "portforward.k8s.io"
 
 // PortForwarder knows how to listen for local connections and forward them to
 // a remote pod via an upgraded HTTP request.
@@ -180,7 +172,7 @@ func (pf *PortForwarder) ForwardPorts() error {
 	defer pf.Close()
 
 	var err error
-	pf.streamConn, _, err = pf.dialer.Dial(PortForwardProtocolV1Name)
+	pf.streamConn, _, err = pf.dialer.Dial(portforward.PortForwardProtocolV1Name)
 	if err != nil {
 		return fmt.Errorf("error upgrading connection: %s", err)
 	}
@@ -319,15 +311,17 @@ func (pf *PortForwarder) handleConnection(conn net.Conn, port ForwardedPort) {
 		fmt.Fprintf(pf.out, "Handling connection for %d\n", port.Local)
 	}
 
-	requestID := pf.nextRequestID()
+	defaultRetry := 5
 
+firstCreateStream:
+	requestID := pf.nextRequestID()
 	// create error stream
 	headers := http.Header{}
 	headers.Set(v1.StreamType, v1.StreamTypeError)
 	headers.Set(v1.PortHeader, fmt.Sprintf("%d", port.Remote))
 	headers.Set(v1.PortForwardRequestIDHeader, strconv.Itoa(requestID))
 	var err error
-	errorStream, err := pf.tryToCreateStream(headers)
+	errorStream, err := pf.tryToCreateStream(&headers)
 	if err != nil {
 		runtime.HandleError(fmt.Errorf("error creating error stream for port %d -> %d: %v", port.Local, port.Remote, err))
 		return
@@ -349,8 +343,12 @@ func (pf *PortForwarder) handleConnection(conn net.Conn, port ForwardedPort) {
 
 	// create data stream
 	headers.Set(v1.StreamType, v1.StreamTypeData)
-	dataStream, err := pf.tryToCreateStream(headers)
+	dataStream, err := pf.streamConn.CreateStream(headers)
 	if err != nil {
+		defaultRetry--
+		if defaultRetry > 0 {
+			goto firstCreateStream
+		}
 		runtime.HandleError(fmt.Errorf("error creating forwarding stream for port %d -> %d: %v", port.Local, port.Remote, err))
 		return
 	}
@@ -420,34 +418,35 @@ func (pf *PortForwarder) GetPorts() ([]ForwardedPort, error) {
 	}
 }
 
-func (pf *PortForwarder) tryToCreateStream(header http.Header) (httpstream.Stream, error) {
-	errorChan := make(chan error)
-	var result atomic.Value
+func (pf *PortForwarder) tryToCreateStream(header *http.Header) (httpstream.Stream, error) {
+	errorChan := make(chan error, 2)
+	var value atomic.Value
 	time.AfterFunc(time.Second*1, func() {
 		errorChan <- errors.New("timeout")
 	})
 	go func() {
-		stream, err := pf.streamConn.CreateStream(header)
-		if err == nil {
-			errorChan <- nil
-			result.Store(stream)
-		} else {
-			errorChan <- err
+		if pf.streamConn != nil {
+			if stream, err := pf.streamConn.CreateStream(*header); err == nil && stream != nil {
+				errorChan <- nil
+				value.Store(stream)
+				return
+			}
 		}
+		errorChan <- errors.New("")
 	}()
 	if err := <-errorChan; err == nil {
-		return result.Load().(httpstream.Stream), nil
+		return value.Load().(httpstream.Stream), nil
 	}
 	// close old connection in case of resource leak
-	_ = pf.streamConn.Close()
+	if pf.streamConn != nil {
+		_ = pf.streamConn.Close()
+	}
 	var err error
-	pf.streamConn, _, err = pf.dialer.Dial(PortForwardProtocolV1Name)
+	pf.streamConn, _, err = pf.dialer.Dial(portforward.PortForwardProtocolV1Name)
 	if err != nil {
 		runtime.HandleError(fmt.Errorf("error upgrading connection: %s", err))
 		return nil, err
 	}
-	if stream, err := pf.streamConn.CreateStream(header); err == nil {
-		return stream, nil
-	}
-	return nil, err
+	header.Set(v1.PortForwardRequestIDHeader, strconv.Itoa(pf.nextRequestID()))
+	return pf.streamConn.CreateStream(*header)
 }
