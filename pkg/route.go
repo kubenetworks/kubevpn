@@ -6,7 +6,6 @@ import (
 	"github.com/pkg/errors"
 	"kubevpn/core"
 	"net"
-	"strings"
 )
 
 type route struct {
@@ -139,15 +138,6 @@ func (r *route) GenRouters() ([]router, error) {
 				Gateway: node.Get("gw"),
 			}
 			ln, err = core.TunListener(cfg)
-		case "tap":
-			cfg := core.TapConfig{
-				Name:    node.Get("name"),
-				Addr:    node.Get("net"),
-				MTU:     node.GetInt("mtu"),
-				Routes:  strings.Split(node.Get("route"), ","),
-				Gateway: node.Get("gw"),
-			}
-			ln, err = core.TapListener(cfg)
 		default:
 			ln, err = core.TCPListener(node.Addr)
 		}
@@ -159,8 +149,6 @@ func (r *route) GenRouters() ([]router, error) {
 		switch node.Protocol {
 		case "tun":
 			handler = core.TunHandler()
-		case "tap":
-			handler = core.TapHandler()
 		default:
 			handler = core.AutoHandler()
 		}
