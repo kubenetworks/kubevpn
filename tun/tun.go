@@ -119,11 +119,6 @@ func (c *tunConn) SetWriteDeadline(t time.Time) error {
 	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
 }
 
-// IsIPv6Multicast reports whether the address addr is an IPv6 multicast address.
-func IsIPv6Multicast(addr net.HardwareAddr) bool {
-	return addr[0] == 0x33 && addr[1] == 0x33
-}
-
 // IPRoute is an IP routing entry.
 type IPRoute struct {
 	Dest    *net.IPNet
