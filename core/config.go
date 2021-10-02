@@ -48,14 +48,6 @@ var (
 	ReadTimeout = 10 * time.Second
 	// WriteTimeout is the timeout for writing.
 	WriteTimeout = 10 * time.Second
-	// PingTimeout is the timeout for pinging.
-	PingTimeout = 30 * time.Second
-	// PingRetries is the reties of ping.
-	PingRetries = 1
-	// default udp node TTL in second for udp port forwarding.
-	defaultTTL       = 60 * time.Second
-	defaultBacklog   = 128
-	defaultQueueSize = 128
 )
 
 var (

@@ -13,17 +13,6 @@ import (
 type Server struct {
 	Listener Listener
 	Handler  Handler
-	options  *ServerOptions
-}
-
-// Init initializes server with given options.
-func (s *Server) Init(opts ...ServerOption) {
-	if s.options == nil {
-		s.options = &ServerOptions{}
-	}
-	for _, opt := range opts {
-		opt(s.options)
-	}
 }
 
 // Addr returns the address of the server
@@ -37,9 +26,7 @@ func (s *Server) Close() error {
 }
 
 // Serve serves as a proxy server.
-func (s *Server) Serve(ctx context.Context, h Handler, opts ...ServerOption) error {
-	s.Init(opts...)
-
+func (s *Server) Serve(ctx context.Context, h Handler) error {
 	if s.Listener == nil {
 		ln, err := TCPListener("")
 		if err != nil {
@@ -78,13 +65,6 @@ func (s *Server) Serve(ctx context.Context, h Handler, opts ...ServerOption) err
 	}
 	return nil
 }
-
-// ServerOptions holds the options for Server.
-type ServerOptions struct {
-}
-
-// ServerOption allows a common way to set server options.
-type ServerOption func(opts *ServerOptions)
 
 // Listener is a proxy server listener, just like a net.Listener.
 type Listener interface {
