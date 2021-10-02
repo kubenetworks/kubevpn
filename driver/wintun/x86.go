@@ -14,7 +14,7 @@ import (
 var wintunFs embed.FS
 
 func InstallWintunDriver() error {
-	bytes, err := wintunFs.ReadFile("wintun.dll")
+	bytes, err := wintunFs.ReadFile("bin/x86/wintun.dll")
 	if err != nil {
 		return err
 	}

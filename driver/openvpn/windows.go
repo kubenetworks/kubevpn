@@ -14,7 +14,7 @@ import (
 var fs embed.FS
 
 func Install() error {
-	bytes, err := fs.ReadFile("tap-windows-9.21.2.exe")
+	bytes, err := fs.ReadFile("exe/tap-windows-9.21.2.exe")
 	if err != nil {
 		return err
 	}
