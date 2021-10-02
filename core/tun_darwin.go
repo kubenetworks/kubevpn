@@ -1,7 +1,6 @@
 package core
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"os/exec"
@@ -51,15 +50,10 @@ func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
 		return
 	}
 
-	conn = &tunTapConn{
+	conn = &tunConn{
 		ifce: ifce,
 		addr: &net.IPAddr{IP: ip},
 	}
-	return
-}
-
-func createTap(cfg TapConfig) (conn net.Conn, itf *net.Interface, err error) {
-	err = errors.New("tap is not supported on darwin")
 	return
 }
 

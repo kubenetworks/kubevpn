@@ -49,7 +49,7 @@ func (c *autoConnector) ConnectContext(ctx context.Context, conn net.Conn, netwo
 		fmt.Println("xxxxxxxxxxxxxxxxxxxxxxx------------------------------------------")
 		//cnr = &httpConnector{User: c.User}
 	default:
-		cnr = &socks5UDPTunConnector{User: c.User}
+		cnr = SOCKS5UDPTunConnector(c.User)
 	}
 
 	return cnr.ConnectContext(ctx, conn, network, address, options...)

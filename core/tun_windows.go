@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/go-log/log"
-	"github.com/songgao/water"
 )
 
 func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
@@ -56,7 +55,7 @@ func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
 		return
 	}
 
-	conn = &WinTunConn{
+	conn = &winTunConn{
 		ifce: ifce,
 		addr: &net.IPAddr{IP: ip},
 	}
@@ -89,7 +88,7 @@ func openTun(ctx context.Context) (td tun.Device, p *net.Interface, err error) {
 	return td, p, nil
 }
 
-func (t *WinTunConn) Close() error {
+func (t *winTunConn) Close() error {
 	// The tun.NativeTun device has a closing mutex which is read locked during
 	// a call to Read(). The read lock prevents a call to Close() to proceed
 	// until Read() actually receives something. To resolve that "deadlock",
@@ -110,19 +109,19 @@ func (t *WinTunConn) Close() error {
 	return <-closeCh
 }
 
-func (t *WinTunConn) getLUID() winipcfg.LUID {
+func (t *winTunConn) getLUID() winipcfg.LUID {
 	return winipcfg.LUID(t.ifce.(*tun.NativeTun).LUID())
 }
 
-func (t *WinTunConn) addSubnet(_ context.Context, subnet *net.IPNet) error {
+func (t *winTunConn) addSubnet(_ context.Context, subnet *net.IPNet) error {
 	return t.getLUID().AddIPAddress(*subnet)
 }
 
-func (t *WinTunConn) removeSubnet(_ context.Context, subnet *net.IPNet) error {
+func (t *winTunConn) removeSubnet(_ context.Context, subnet *net.IPNet) error {
 	return t.getLUID().DeleteIPAddress(*subnet)
 }
 
-func (t *WinTunConn) setDNS(ctx context.Context, server net.IP, domains []string) (err error) {
+func (t *winTunConn) setDNS(ctx context.Context, server net.IP, domains []string) (err error) {
 	ipFamily := func(ip net.IP) winipcfg.AddressFamily {
 		f := winipcfg.AddressFamily(windows.AF_INET6)
 		if ip4 := ip.To4(); ip4 != nil {
@@ -139,80 +138,37 @@ func (t *WinTunConn) setDNS(ctx context.Context, server net.IP, domains []string
 	return nil
 }
 
-type WinTunConn struct {
+type winTunConn struct {
 	ifce tun.Device
 	addr net.Addr
 }
 
-func (c *WinTunConn) Read(b []byte) (n int, err error) {
+func (c *winTunConn) Read(b []byte) (n int, err error) {
 	return c.ifce.Read(b, 0)
 }
 
-func (c *WinTunConn) Write(b []byte) (n int, err error) {
+func (c *winTunConn) Write(b []byte) (n int, err error) {
 	return c.ifce.Write(b, 0)
 }
 
-func (c *WinTunConn) LocalAddr() net.Addr {
+func (c *winTunConn) LocalAddr() net.Addr {
 	return c.addr
 }
 
-func (c *WinTunConn) RemoteAddr() net.Addr {
+func (c *winTunConn) RemoteAddr() net.Addr {
 	return &net.IPAddr{}
 }
 
-func (c *WinTunConn) SetDeadline(t time.Time) error {
-	return &net.OpError{Op: "set", Net: "tuntap", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
+func (c *winTunConn) SetDeadline(t time.Time) error {
+	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
 }
 
-func (c *WinTunConn) SetReadDeadline(t time.Time) error {
-	return &net.OpError{Op: "set", Net: "tuntap", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
+func (c *winTunConn) SetReadDeadline(t time.Time) error {
+	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
 }
 
-func (c *WinTunConn) SetWriteDeadline(t time.Time) error {
-	return &net.OpError{Op: "set", Net: "tuntap", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
-}
-
-func createTap(cfg TapConfig) (conn net.Conn, itf *net.Interface, err error) {
-	ip, ipNet, _ := net.ParseCIDR(cfg.Addr)
-
-	ifce, err := water.New(water.Config{
-		DeviceType: water.TAP,
-		PlatformSpecificParams: water.PlatformSpecificParams{
-			ComponentID:   "tap0901",
-			InterfaceName: cfg.Name,
-			Network:       cfg.Addr,
-		},
-	})
-	if err != nil {
-		return
-	}
-
-	if ip != nil && ipNet != nil {
-		cmd := fmt.Sprintf("netsh interface ip set address name=\"%s\" "+
-			"source=static addr=%s mask=%s gateway=none",
-			ifce.Name(), ip.String(), ipMask(ipNet.Mask))
-		log.Log("[tap]", cmd)
-		args := strings.Split(cmd, " ")
-		if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
-			err = fmt.Errorf("%s: %v", cmd, er)
-			return
-		}
-	}
-
-	if err = addTapRoutes(ifce.Name(), cfg.Gateway, cfg.Routes...); err != nil {
-		return
-	}
-
-	itf, err = net.InterfaceByName(ifce.Name())
-	if err != nil {
-		return
-	}
-
-	conn = &tunTapConn{
-		ifce: ifce,
-		addr: &net.IPAddr{IP: ip},
-	}
-	return
+func (c *winTunConn) SetWriteDeadline(t time.Time) error {
+	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
 }
 
 func addTunRoutes(ifName string, gw string, routes ...IPRoute) error {
@@ -229,28 +185,6 @@ func addTunRoutes(ifName string, gw string, routes ...IPRoute) error {
 			cmd += " nexthop=" + gw
 		}
 		log.Logf("[tun] %s", cmd)
-		args := strings.Split(cmd, " ")
-		if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
-			return fmt.Errorf("%s: %v", cmd, er)
-		}
-	}
-	return nil
-}
-
-func addTapRoutes(ifName string, gw string, routes ...string) error {
-	for _, route := range routes {
-		if route == "" {
-			continue
-		}
-
-		deleteRoute(ifName, route)
-
-		cmd := fmt.Sprintf("netsh interface ip add route prefix=%s interface=\"%s\" store=active",
-			route, ifName)
-		if gw != "" {
-			cmd += " nexthop=" + gw
-		}
-		log.Logf("[tap] %s", cmd)
 		args := strings.Split(cmd, " ")
 		if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
 			return fmt.Errorf("%s: %v", cmd, er)

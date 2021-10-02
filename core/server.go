@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"time"
@@ -51,10 +50,6 @@ func (s *Server) Serve(ctx context.Context, h Handler, opts ...ServerOption) err
 
 	if h == nil {
 		h = s.Handler
-	}
-	if h == nil {
-		fmt.Println("handler is nil =====================================================")
-		//h = HTTPHandler()
 	}
 
 	l := s.Listener
