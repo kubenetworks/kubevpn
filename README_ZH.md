@@ -137,4 +137,4 @@ Hello world!%
 - Linux
 - Windows
 
-Windows 下需要安装 ```TAP/TUN```[驱动](driver/tap-windows-9.21.2.exe)和```PowerShell```
+Windows 下需要安装 ```TAP/TUN```[驱动](driver/openvpn/exe/tap-windows-9.21.2.exe)和```PowerShell```

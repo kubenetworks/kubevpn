@@ -1,4 +1,7 @@
-package driver
+//go:build windows
+// +build windows
+
+package openvpn
 
 import (
 	"embed"
@@ -7,7 +10,7 @@ import (
 	"os/exec"
 )
 
-//go:embed tap-windows-9.21.2.exe
+//go:embed exe/tap-windows-9.21.2.exe
 var fs embed.FS
 
 func Install() error {

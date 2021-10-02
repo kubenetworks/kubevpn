@@ -3,6 +3,7 @@ package driver
 import (
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/util/retry"
+	"kubevpn/driver/openvpn"
 	"kubevpn/driver/wintun"
 	"os"
 	"os/exec"
@@ -13,7 +14,7 @@ func InstallTunTapDriver() {
 	if err := retry.OnError(retry.DefaultRetry, func(err error) bool {
 		return err != nil
 	}, func() error {
-		return Install()
+		return openvpn.Install()
 	}); err != nil {
 		log.Warn(err)
 	}
