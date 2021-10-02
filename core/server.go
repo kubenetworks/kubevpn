@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"io"
+	"kubevpn/tun"
+	"kubevpn/util"
 	"net"
 	"time"
 
@@ -11,7 +13,7 @@ import (
 
 // Server is a proxy server.
 type Server struct {
-	Listener Listener
+	Listener tun.Listener
 	Handler  Handler
 }
 
@@ -66,11 +68,6 @@ func (s *Server) Serve(ctx context.Context, h Handler) error {
 	return nil
 }
 
-// Listener is a proxy server listener, just like a net.Listener.
-type Listener interface {
-	net.Listener
-}
-
 func transport(rw1, rw2 io.ReadWriter) error {
 	errc := make(chan error, 1)
 	go func() {
@@ -89,8 +86,8 @@ func transport(rw1, rw2 io.ReadWriter) error {
 }
 
 func copyBuffer(dst io.Writer, src io.Reader) error {
-	buf := LPool.Get().([]byte)
-	defer LPool.Put(buf)
+	buf := util.LPool.Get().([]byte)
+	defer util.LPool.Put(buf)
 
 	_, err := io.CopyBuffer(dst, src, buf)
 	return err

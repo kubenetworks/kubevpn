@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"kubevpn/util"
 	"net"
 	"net/url"
 	"strconv"
@@ -20,7 +21,7 @@ type clientSelector struct {
 }
 
 func (selector *clientSelector) Methods() []uint8 {
-	if Debug {
+	if util.Debug {
 		log.Log("[socks5] methods:", selector.methods)
 	}
 	return selector.methods
@@ -35,7 +36,7 @@ func (selector *clientSelector) Select(methods ...uint8) (method uint8) {
 }
 
 func (selector *clientSelector) OnSelected(method uint8, conn net.Conn) (net.Conn, error) {
-	if Debug {
+	if util.Debug {
 		log.Log("[socks5] method selected:", method)
 	}
 	switch method {
@@ -51,7 +52,7 @@ func (selector *clientSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 			log.Log("[socks5]", err)
 			return nil, err
 		}
-		if Debug {
+		if util.Debug {
 			log.Log("[socks5]", req)
 		}
 		resp, err := gosocks5.ReadUserPassResponse(conn)
@@ -59,7 +60,7 @@ func (selector *clientSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 			log.Log("[socks5]", err)
 			return nil, err
 		}
-		if Debug {
+		if util.Debug {
 			log.Log("[socks5]", resp)
 		}
 		if resp.Status != gosocks5.Succeeded {
@@ -87,7 +88,7 @@ func (selector *serverSelector) AddMethod(methods ...uint8) {
 }
 
 func (selector *serverSelector) Select(methods ...uint8) (method uint8) {
-	if Debug {
+	if util.Debug {
 		log.Logf("[socks5] %d %d %v", gosocks5.Ver5, len(methods), methods)
 	}
 	method = gosocks5.MethodNoAuth
@@ -102,7 +103,7 @@ func (selector *serverSelector) Select(methods ...uint8) (method uint8) {
 }
 
 func (selector *serverSelector) OnSelected(method uint8, conn net.Conn) (net.Conn, error) {
-	if Debug {
+	if util.Debug {
 		log.Logf("[socks5] %d %d", gosocks5.Ver5, method)
 	}
 	switch method {
@@ -112,7 +113,7 @@ func (selector *serverSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 			log.Logf("[socks5] %s - %s: %s", conn.RemoteAddr(), conn.LocalAddr(), err)
 			return nil, err
 		}
-		if Debug {
+		if util.Debug {
 			log.Logf("[socks5] %s - %s: %s", conn.RemoteAddr(), conn.LocalAddr(), req.String())
 		}
 
@@ -122,7 +123,7 @@ func (selector *serverSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 				log.Logf("[socks5] %s - %s: %s", conn.RemoteAddr(), conn.LocalAddr(), err)
 				return nil, err
 			}
-			if Debug {
+			if util.Debug {
 				log.Logf("[socks5] %s - %s: %s", conn.RemoteAddr(), conn.LocalAddr(), resp)
 			}
 			log.Logf("[socks5] %s - %s: proxy authentication required", conn.RemoteAddr(), conn.LocalAddr())
@@ -134,7 +135,7 @@ func (selector *serverSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 			log.Logf("[socks5] %s - %s: %s", conn.RemoteAddr(), conn.LocalAddr(), err)
 			return nil, err
 		}
-		if Debug {
+		if util.Debug {
 			log.Logf("[socks5] %s - %s: %s", conn.RemoteAddr(), conn.LocalAddr(), resp)
 		}
 	case gosocks5.MethodNoAcceptable:
@@ -165,7 +166,7 @@ func (c *socks5Connector) ConnectContext(ctx context.Context, conn net.Conn, net
 		return cnr.ConnectContext(ctx, conn, network, address)
 	}
 
-	conn.SetDeadline(time.Now().Add(ConnectTimeout))
+	conn.SetDeadline(time.Now().Add(util.ConnectTimeout))
 	defer conn.SetDeadline(time.Time{})
 
 	cc, err := socks5Handshake(conn,
@@ -190,7 +191,7 @@ func (c *socks5Connector) ConnectContext(ctx context.Context, conn net.Conn, net
 		return nil, err
 	}
 
-	if Debug {
+	if util.Debug {
 		log.Log("[socks5]", req)
 	}
 
@@ -199,7 +200,7 @@ func (c *socks5Connector) ConnectContext(ctx context.Context, conn net.Conn, net
 		return nil, err
 	}
 
-	if Debug {
+	if util.Debug {
 		log.Log("[socks5]", reply)
 	}
 
@@ -225,7 +226,7 @@ func (c *socks5UDPTunConnector) ConnectContext(ctx context.Context, conn net.Con
 	case "tcp", "tcp4", "tcp6":
 		return nil, fmt.Errorf("%s unsupported", network)
 	}
-	conn.SetDeadline(time.Now().Add(ConnectTimeout))
+	conn.SetDeadline(time.Now().Add(util.ConnectTimeout))
 	defer conn.SetDeadline(time.Time{})
 
 	taddr, _ := net.ResolveUDPAddr("udp", address)
@@ -276,7 +277,7 @@ func (h *socks5Handler) Handle(conn net.Conn) {
 		return
 	}
 
-	if Debug {
+	if util.Debug {
 		log.Logf("[socks5] %s -> %s\n%s",
 			conn.RemoteAddr(), conn.LocalAddr(), req)
 	}
@@ -338,7 +339,7 @@ func (h *socks5Handler) handleConnect(conn net.Conn, req *gosocks5.Request) {
 	if err != nil {
 		rep := gosocks5.NewReply(gosocks5.HostUnreachable, nil)
 		rep.Write(conn)
-		if Debug {
+		if util.Debug {
 			log.Logf("[socks5] %s <- %s\n%s",
 				conn.RemoteAddr(), conn.LocalAddr(), rep)
 		}
@@ -352,7 +353,7 @@ func (h *socks5Handler) handleConnect(conn net.Conn, req *gosocks5.Request) {
 			conn.RemoteAddr(), conn.LocalAddr(), err)
 		return
 	}
-	if Debug {
+	if util.Debug {
 		log.Logf("[socks5] %s <- %s\n%s",
 			conn.RemoteAddr(), conn.LocalAddr(), rep)
 	}
@@ -378,7 +379,7 @@ func (h *socks5Handler) handleBind(conn net.Conn, req *gosocks5.Request) {
 			conn.RemoteAddr(), conn.LocalAddr(), err)
 		reply := gosocks5.NewReply(gosocks5.Failure, nil)
 		reply.Write(conn)
-		if Debug {
+		if util.Debug {
 			log.Logf("[socks5-bind] %s <- %s\n%s",
 				conn.RemoteAddr(), conn.LocalAddr(), reply)
 		}
@@ -415,7 +416,7 @@ func (h *socks5Handler) bindOn(conn net.Conn, addr string) {
 		ln.Close()
 		return
 	}
-	if Debug {
+	if util.Debug {
 		log.Logf("[socks5-bind] %s <- %s\n%s",
 			conn.RemoteAddr(), conn.LocalAddr(), reply)
 	}
@@ -470,7 +471,7 @@ func (h *socks5Handler) bindOn(conn net.Conn, addr string) {
 			if err := reply.Write(pc2); err != nil {
 				log.Logf("[socks5-bind] %s <- %s : %v", conn.RemoteAddr(), addr, err)
 			}
-			if Debug {
+			if util.Debug {
 				log.Logf("[socks5-bind] %s <- %s\n%s", conn.RemoteAddr(), addr, reply)
 			}
 			log.Logf("[socks5-bind] %s <- %s PEER %s ACCEPTED", conn.RemoteAddr(), socksAddr, pconn.RemoteAddr())
@@ -497,8 +498,8 @@ func (h *socks5Handler) transportUDP(relay, peer net.PacketConn) (err error) {
 	var clientAddr net.Addr
 
 	go func() {
-		b := MPool.Get().([]byte)
-		defer MPool.Put(b)
+		b := util.MPool.Get().([]byte)
+		defer util.MPool.Put(b)
 
 		for {
 			n, laddr, err := relay.ReadFrom(b)
@@ -523,15 +524,15 @@ func (h *socks5Handler) transportUDP(relay, peer net.PacketConn) (err error) {
 				errc <- err
 				return
 			}
-			if Debug {
+			if util.Debug {
 				log.Logf("[socks5-udp] %s >>> %s length: %d", relay.LocalAddr(), raddr, len(dgram.Data))
 			}
 		}
 	}()
 
 	go func() {
-		b := MPool.Get().([]byte)
-		defer MPool.Put(b)
+		b := util.MPool.Get().([]byte)
+		defer util.MPool.Put(b)
 
 		for {
 			n, raddr, err := peer.ReadFrom(b)
@@ -549,7 +550,7 @@ func (h *socks5Handler) transportUDP(relay, peer net.PacketConn) (err error) {
 				errc <- err
 				return
 			}
-			if Debug {
+			if util.Debug {
 				log.Logf("[socks5-udp] %s <<< %s length: %d", relay.LocalAddr(), raddr, len(dgram.Data))
 			}
 		}
@@ -569,8 +570,8 @@ func (h *socks5Handler) tunnelClientUDP(uc *net.UDPConn, cc net.Conn) (err error
 	var clientAddr *net.UDPAddr
 
 	go func() {
-		b := MPool.Get().([]byte)
-		defer MPool.Put(b)
+		b := util.MPool.Get().([]byte)
+		defer util.MPool.Put(b)
 
 		for {
 			n, addr, err := uc.ReadFromUDP(b)
@@ -596,7 +597,7 @@ func (h *socks5Handler) tunnelClientUDP(uc *net.UDPConn, cc net.Conn) (err error
 				errc <- err
 				return
 			}
-			if Debug {
+			if util.Debug {
 				log.Logf("[udp-tun] %s >>> %s length: %d", uc.LocalAddr(), dgram.Header.Addr, len(dgram.Data))
 			}
 		}
@@ -624,7 +625,7 @@ func (h *socks5Handler) tunnelClientUDP(uc *net.UDPConn, cc net.Conn) (err error
 				errc <- err
 				return
 			}
-			if Debug {
+			if util.Debug {
 				log.Logf("[udp-tun] %s <<< %s length: %d", uc.LocalAddr(), dgram.Header.Addr, len(dgram.Data))
 			}
 		}
@@ -657,7 +658,7 @@ func (h *socks5Handler) handleUDPTunnel(conn net.Conn, req *gosocks5.Request) {
 			log.Logf("[socks5] udp-tun %s <- %s : %s", conn.RemoteAddr(), socksAddr, err)
 			return
 		}
-		if Debug {
+		if util.Debug {
 			log.Logf("[socks5] udp-tun %s <- %s\n%s", conn.RemoteAddr(), socksAddr, reply)
 		}
 		log.Logf("[socks5] udp-tun %s <-> %s", conn.RemoteAddr(), socksAddr)
@@ -696,8 +697,8 @@ func (h *socks5Handler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err err
 	errc := make(chan error, 2)
 
 	go func() {
-		b := MPool.Get().([]byte)
-		defer MPool.Put(b)
+		b := util.MPool.Get().([]byte)
+		defer util.MPool.Put(b)
 
 		for {
 			n, addr, err := pc.ReadFrom(b)
@@ -715,7 +716,7 @@ func (h *socks5Handler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err err
 				errc <- err
 				return
 			}
-			if Debug {
+			if util.Debug {
 				log.Logf("[socks5] udp-tun %s <<< %s length: %d", cc.RemoteAddr(), dgram.Header.Addr, len(dgram.Data))
 			}
 		}
@@ -740,7 +741,7 @@ func (h *socks5Handler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err err
 				errc <- err
 				return
 			}
-			if Debug {
+			if util.Debug {
 				log.Logf("[socks5] udp-tun %s >>> %s length: %d", cc.RemoteAddr(), addr, len(dgram.Data))
 			}
 		}
@@ -827,7 +828,7 @@ func newSocks5UDPTunnelConn(conn net.Conn, raddr, taddr net.Addr, opts ...socks5
 	if err := req.Write(cc); err != nil {
 		return nil, err
 	}
-	if Debug {
+	if util.Debug {
 		log.Log("[socks5] udp-tun", req)
 	}
 
@@ -836,7 +837,7 @@ func newSocks5UDPTunnelConn(conn net.Conn, raddr, taddr net.Addr, opts ...socks5
 		return nil, err
 	}
 
-	if Debug {
+	if util.Debug {
 		log.Log("[socks5] udp-tun", reply)
 	}
 
@@ -894,8 +895,8 @@ func (c *socks5UDPConn) Read(b []byte) (n int, err error) {
 }
 
 func (c *socks5UDPConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
-	data := MPool.Get().([]byte)
-	defer MPool.Put(data)
+	data := util.MPool.Get().([]byte)
+	defer util.MPool.Put(data)
 
 	n, err = c.UDPConn.Read(data)
 	if err != nil {

@@ -4,13 +4,14 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"kubevpn/core"
+	"kubevpn/util"
 )
 
 func init() {
-	core.SetLogger(&core.LogLogger{})
+	util.SetLogger(&core.LogLogger{})
 	ServerCmd.Flags().StringArrayVarP(&nodeConfig.ServeNodes, "nodeCommand", "L", []string{}, "command needs to be executed")
 	ServerCmd.Flags().StringVarP(&nodeConfig.ChainNodes, "chainCommand", "F", "", "command needs to be executed")
-	ServerCmd.Flags().BoolVar(&core.Debug, "debug", false, "true/false")
+	ServerCmd.Flags().BoolVar(&util.Debug, "debug", false, "true/false")
 	RootCmd.AddCommand(ServerCmd)
 }
 

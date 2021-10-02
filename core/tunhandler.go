@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"kubevpn/util"
 	"net"
 	"os"
 	"sync"
@@ -13,7 +14,6 @@ import (
 	"github.com/go-log/log"
 	"github.com/shadowsocks/go-shadowsocks2/core"
 	"github.com/shadowsocks/go-shadowsocks2/shadowaead"
-	"github.com/songgao/water"
 	"github.com/songgao/water/waterutil"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -38,85 +38,11 @@ func ipProtocol(p waterutil.IPProtocol) string {
 	return fmt.Sprintf("unknown(%d)", p)
 }
 
-// IPRoute is an IP routing entry.
-type IPRoute struct {
-	Dest    *net.IPNet
-	Gateway net.IP
-}
-
-// TunConfig is the config for TUN device.
-type TunConfig struct {
-	Name    string
-	Addr    string
-	Peer    string // peer addr of point-to-point on MacOS
-	MTU     int
-	Routes  []IPRoute
-	Gateway string
-}
-
 type tunRouteKey [16]byte
 
 func ipToTunRouteKey(ip net.IP) (key tunRouteKey) {
 	copy(key[:], ip.To16())
 	return
-}
-
-type tunListener struct {
-	addr   net.Addr
-	conns  chan net.Conn
-	closed chan struct{}
-	config TunConfig
-}
-
-// TunListener creates a listener for tun tunnel.
-func TunListener(cfg TunConfig) (Listener, error) {
-	threads := 1
-	ln := &tunListener{
-		conns:  make(chan net.Conn, threads),
-		closed: make(chan struct{}),
-		config: cfg,
-	}
-
-	for i := 0; i < threads; i++ {
-		conn, ifce, err := createTun(cfg)
-		if err != nil {
-			return nil, err
-		}
-		ln.addr = conn.LocalAddr()
-
-		addrs, _ := ifce.Addrs()
-		_ = os.Setenv("tunName", ifce.Name)
-		log.Logf("[tun] %s: name: %s, mtu: %d, addrs: %s",
-			conn.LocalAddr(), ifce.Name, ifce.MTU, addrs)
-
-		ln.conns <- conn
-	}
-
-	return ln, nil
-}
-
-func (l *tunListener) Accept() (net.Conn, error) {
-	select {
-	case conn := <-l.conns:
-		return conn, nil
-	case <-l.closed:
-	}
-
-	return nil, errors.New("accept on closed listener")
-}
-
-func (l *tunListener) Addr() net.Addr {
-	return l.addr
-}
-
-func (l *tunListener) Close() error {
-	select {
-	case <-l.closed:
-		return errors.New("listener has been closed")
-	default:
-		close(l.closed)
-	}
-	return nil
 }
 
 type tunHandler struct {
@@ -252,8 +178,8 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 	go func() {
 		for {
 			err := func() error {
-				b := SPool.Get().([]byte)
-				defer SPool.Put(b)
+				b := util.SPool.Get().([]byte)
+				defer util.SPool.Put(b)
 
 				n, err := tun.Read(b)
 				if err != nil {
@@ -271,7 +197,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 						log.Logf("[tun] %s: %v", tun.LocalAddr(), err)
 						return nil
 					}
-					if Debug {
+					if util.Debug {
 						log.Logf("[tun] %s -> %s %-4s %d/%-4d %-4x %d",
 							header.Src, header.Dst, ipProtocol(waterutil.IPv4Protocol(b[:n])),
 							header.Len, header.TotalLen, header.ID, header.Flags)
@@ -283,7 +209,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 						log.Logf("[tun] %s: %v", tun.LocalAddr(), err)
 						return nil
 					}
-					if Debug {
+					if util.Debug {
 						log.Logf("[tun] %s -> %s %s %d %d",
 							header.Src, header.Dst,
 							ipProtocol(waterutil.IPProtocol(header.NextHeader)),
@@ -307,7 +233,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 					return nil
 				}
 
-				if Debug {
+				if util.Debug {
 					log.Logf("[tun] find route: %s -> %s", dst, addr)
 				}
 				if _, err := conn.WriteTo(b[:n], addr); err != nil {
@@ -326,8 +252,8 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 	go func() {
 		for {
 			err := func() error {
-				b := SPool.Get().([]byte)
-				defer SPool.Put(b)
+				b := util.SPool.Get().([]byte)
+				defer util.SPool.Put(b)
 
 				n, addr, err := conn.ReadFrom(b)
 				if err != nil &&
@@ -342,7 +268,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 						log.Logf("[tun] %s: %v", tun.LocalAddr(), err)
 						return nil
 					}
-					if Debug {
+					if util.Debug {
 						log.Logf("[tun] %s -> %s %-4s %d/%-4d %-4x %d",
 							header.Src, header.Dst, ipProtocol(waterutil.IPv4Protocol(b[:n])),
 							header.Len, header.TotalLen, header.ID, header.Flags)
@@ -354,7 +280,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 						log.Logf("[tun] %s: %v", tun.LocalAddr(), err)
 						return nil
 					}
-					if Debug {
+					if util.Debug {
 						log.Logf("[tun] %s -> %s %s %d %d",
 							header.Src, header.Dst,
 							ipProtocol(waterutil.IPProtocol(header.NextHeader)),
@@ -384,7 +310,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 				}
 
 				if addr := h.findRouteFor(dst); addr != nil {
-					if Debug {
+					if util.Debug {
 						log.Logf("[tun] find route: %s -> %s", dst, addr)
 					}
 					_, err := conn.WriteTo(b[:n], addr)
@@ -427,46 +353,4 @@ func etherType(et waterutil.Ethertype) string {
 		return s
 	}
 	return fmt.Sprintf("unknown(%v)", et)
-}
-
-type tunConn struct {
-	ifce *water.Interface
-	addr net.Addr
-}
-
-func (c *tunConn) Read(b []byte) (n int, err error) {
-	return c.ifce.Read(b)
-}
-
-func (c *tunConn) Write(b []byte) (n int, err error) {
-	return c.ifce.Write(b)
-}
-
-func (c *tunConn) Close() (err error) {
-	return c.ifce.Close()
-}
-
-func (c *tunConn) LocalAddr() net.Addr {
-	return c.addr
-}
-
-func (c *tunConn) RemoteAddr() net.Addr {
-	return &net.IPAddr{}
-}
-
-func (c *tunConn) SetDeadline(t time.Time) error {
-	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
-}
-
-func (c *tunConn) SetReadDeadline(t time.Time) error {
-	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
-}
-
-func (c *tunConn) SetWriteDeadline(t time.Time) error {
-	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
-}
-
-// IsIPv6Multicast reports whether the address addr is an IPv6 multicast address.
-func IsIPv6Multicast(addr net.HardwareAddr) bool {
-	return addr[0] == 0x33 && addr[1] == 0x33
 }

@@ -1,4 +1,4 @@
-package core
+package tun
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"github.com/datawire/dlib/derror"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
-	"golang.zx2c4.com/wireguard/tun"
+	wireguardtun "golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 	"k8s.io/client-go/util/retry"
 	"net"
@@ -62,7 +62,7 @@ func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
 	return
 }
 
-func openTun(ctx context.Context) (td tun.Device, p *net.Interface, err error) {
+func openTun(ctx context.Context) (td wireguardtun.Device, p *net.Interface, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			var ok bool
@@ -72,13 +72,13 @@ func openTun(ctx context.Context) (td tun.Device, p *net.Interface, err error) {
 		}
 	}()
 	interfaceName := "wg1"
-	if td, err = tun.CreateTUN(interfaceName, 0); err != nil {
+	if td, err = wireguardtun.CreateTUN(interfaceName, 0); err != nil {
 		return nil, nil, fmt.Errorf("failed to create TUN device: %w", err)
 	}
 	if _, err = td.Name(); err != nil {
 		return nil, nil, fmt.Errorf("failed to get real name of TUN device: %w", err)
 	}
-	if i, err := winipcfg.LUID(td.(*tun.NativeTun).LUID()).Interface(); err != nil {
+	if i, err := winipcfg.LUID(td.(*wireguardtun.NativeTun).LUID()).Interface(); err != nil {
 		return nil, nil, fmt.Errorf("failed to get interface for TUN device: %w", err)
 	} else {
 		if p, err = net.InterfaceByIndex(int(i.InterfaceIndex)); err != nil {
@@ -110,7 +110,7 @@ func (t *winTunConn) Close() error {
 }
 
 func (t *winTunConn) getLUID() winipcfg.LUID {
-	return winipcfg.LUID(t.ifce.(*tun.NativeTun).LUID())
+	return winipcfg.LUID(t.ifce.(*wireguardtun.NativeTun).LUID())
 }
 
 func (t *winTunConn) addSubnet(_ context.Context, subnet *net.IPNet) error {
@@ -139,7 +139,7 @@ func (t *winTunConn) setDNS(ctx context.Context, server net.IP, domains []string
 }
 
 type winTunConn struct {
-	ifce tun.Device
+	ifce wireguardtun.Device
 	addr net.Addr
 }
 

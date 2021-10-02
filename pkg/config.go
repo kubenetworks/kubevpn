@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-	"kubevpn/core"
+	"kubevpn/tun"
 	"net"
 	"os"
 	"strings"
@@ -47,7 +47,7 @@ func parseIP(s string, port string) (ips []string) {
 	return
 }
 
-func parseIPRoutes(routeStringList string) (routes []core.IPRoute) {
+func parseIPRoutes(routeStringList string) (routes []tun.IPRoute) {
 	if len(routeStringList) == 0 {
 		return
 	}
@@ -55,7 +55,7 @@ func parseIPRoutes(routeStringList string) (routes []core.IPRoute) {
 	ss := strings.Split(routeStringList, ",")
 	for _, s := range ss {
 		if _, inet, _ := net.ParseCIDR(strings.TrimSpace(s)); inet != nil {
-			routes = append(routes, core.IPRoute{Dest: inet})
+			routes = append(routes, tun.IPRoute{Dest: inet})
 		}
 	}
 	return

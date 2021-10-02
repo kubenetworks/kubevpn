@@ -5,6 +5,7 @@ import (
 	"github.com/go-log/log"
 	"github.com/pkg/errors"
 	"kubevpn/core"
+	"kubevpn/tun"
 	"net"
 )
 
@@ -88,12 +89,12 @@ func (r *route) GenRouters() ([]router, error) {
 			}
 		}
 
-		var ln core.Listener
+		var ln tun.Listener
 		switch node.Transport {
 		case "tcp":
 			ln, err = core.TCPListener(node.Addr)
 		case "tun":
-			cfg := core.TunConfig{
+			cfg := tun.TunConfig{
 				Name:    node.Get("name"),
 				Addr:    node.Get("net"),
 				Peer:    node.Get("peer"),
@@ -101,7 +102,7 @@ func (r *route) GenRouters() ([]router, error) {
 				Routes:  tunRoutes,
 				Gateway: node.Get("gw"),
 			}
-			ln, err = core.TunListener(cfg)
+			ln, err = tun.TunListener(cfg)
 		default:
 			ln, err = core.TCPListener(node.Addr)
 		}

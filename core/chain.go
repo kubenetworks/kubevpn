@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"kubevpn/util"
 	"net"
 )
 
@@ -135,7 +136,7 @@ func (c *Chain) dial(ctx context.Context, network, address string) (net.Conn, er
 		default:
 		}
 		d := &net.Dialer{
-			Timeout: DialTimeout,
+			Timeout: util.DialTimeout,
 			// LocalAddr: laddr, // TODO: optional local address
 		}
 		return d.DialContext(ctx, network, ipAddr)

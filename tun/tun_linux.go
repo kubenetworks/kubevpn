@@ -1,8 +1,9 @@
-package core
+package tun
 
 import (
 	"errors"
 	"fmt"
+	"kubevpn/util"
 	"net"
 	"syscall"
 
@@ -35,7 +36,7 @@ func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
 
 	mtu := cfg.MTU
 	if mtu <= 0 {
-		mtu = DefaultMTU
+		mtu = util.DefaultMTU
 	}
 
 	cmd := fmt.Sprintf("ip link set dev %s mtu %d", ifce.Name(), mtu)

@@ -1,7 +1,8 @@
-package core
+package tun
 
 import (
 	"fmt"
+	"kubevpn/util"
 	"net"
 	"os/exec"
 	"strings"
@@ -25,7 +26,7 @@ func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
 
 	mtu := cfg.MTU
 	if mtu <= 0 {
-		mtu = DefaultMTU
+		mtu = util.DefaultMTU
 	}
 
 	peer := cfg.Peer

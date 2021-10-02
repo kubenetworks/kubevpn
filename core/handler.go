@@ -1,6 +1,7 @@
 package core
 
 import (
+	"kubevpn/tun"
 	"net"
 	"net/url"
 )
@@ -17,7 +18,7 @@ type HandlerOptions struct {
 	Users         []*url.Userinfo
 	Authenticator Authenticator
 	Node          Node
-	IPRoutes      []IPRoute
+	IPRoutes      []tun.IPRoute
 }
 
 // HandlerOption allows a common way to set handler options.
@@ -45,7 +46,7 @@ func NodeHandlerOption(node Node) HandlerOption {
 }
 
 // IPRoutesHandlerOption sets the IP routes for tun tunnel.
-func IPRoutesHandlerOption(routes ...IPRoute) HandlerOption {
+func IPRoutesHandlerOption(routes ...tun.IPRoute) HandlerOption {
 	return func(opts *HandlerOptions) {
 		opts.IPRoutes = routes
 	}

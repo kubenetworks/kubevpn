@@ -1,6 +1,8 @@
 package core
 
 import (
+	"kubevpn/tun"
+	"kubevpn/util"
 	"net"
 )
 
@@ -13,7 +15,7 @@ func TCPTransporter() Transporter {
 }
 
 func (tr *tcpTransporter) Dial(addr string) (net.Conn, error) {
-	return net.DialTimeout("tcp", addr, DialTimeout)
+	return net.DialTimeout("tcp", addr, util.DialTimeout)
 }
 
 type tcpListener struct {
@@ -21,7 +23,7 @@ type tcpListener struct {
 }
 
 // TCPListener creates a Listener for TCP proxy server.
-func TCPListener(addr string) (Listener, error) {
+func TCPListener(addr string) (tun.Listener, error) {
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -43,6 +45,6 @@ func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
 		return
 	}
 	tc.SetKeepAlive(true)
-	tc.SetKeepAlivePeriod(KeepAliveTime)
+	tc.SetKeepAlivePeriod(util.KeepAliveTime)
 	return tc, nil
 }

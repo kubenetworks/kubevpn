@@ -1,10 +1,11 @@
 //go:build !linux && !windows && !darwin
 // +build !linux,!windows,!darwin
 
-package core
+package tun
 
 import (
 	"fmt"
+	"kubevpn/util"
 	"net"
 	"os/exec"
 	"strings"
@@ -28,7 +29,7 @@ func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
 
 	mtu := cfg.MTU
 	if mtu <= 0 {
-		mtu = DefaultMTU
+		mtu = util.DefaultMTU
 	}
 
 	cmd := fmt.Sprintf("ifconfig %s inet %s mtu %d up", ifce.Name(), cfg.Addr, mtu)
