@@ -154,37 +154,22 @@ func SOCKS5Connector(user *url.Userinfo) Connector {
 	return &socks5Connector{User: user}
 }
 
-func (c *socks5Connector) Connect(conn net.Conn, address string, options ...ConnectOption) (net.Conn, error) {
-	return c.ConnectContext(context.Background(), conn, "tcp", address, options...)
+func (c *socks5Connector) Connect(conn net.Conn, address string) (net.Conn, error) {
+	return c.ConnectContext(context.Background(), conn, "tcp", address)
 }
 
-func (c *socks5Connector) ConnectContext(ctx context.Context, conn net.Conn, network, address string, options ...ConnectOption) (net.Conn, error) {
+func (c *socks5Connector) ConnectContext(ctx context.Context, conn net.Conn, network, address string) (net.Conn, error) {
 	switch network {
 	case "udp", "udp4", "udp6":
 		cnr := &socks5UDPTunConnector{User: c.User}
-		return cnr.ConnectContext(ctx, conn, network, address, options...)
+		return cnr.ConnectContext(ctx, conn, network, address)
 	}
 
-	opts := &ConnectOptions{}
-	for _, option := range options {
-		option(opts)
-	}
-
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = ConnectTimeout
-	}
-
-	conn.SetDeadline(time.Now().Add(timeout))
+	conn.SetDeadline(time.Now().Add(ConnectTimeout))
 	defer conn.SetDeadline(time.Time{})
 
-	user := opts.User
-	if user == nil {
-		user = c.User
-	}
 	cc, err := socks5Handshake(conn,
-		selectorSocks5HandshakeOption(opts.Selector),
-		userSocks5HandshakeOption(user),
+		userSocks5HandshakeOption(c.User),
 	)
 	if err != nil {
 		return nil, err
@@ -219,7 +204,7 @@ func (c *socks5Connector) ConnectContext(ctx context.Context, conn net.Conn, net
 	}
 
 	if reply.Rep != gosocks5.Succeeded {
-		return nil, errors.New("Service unavailable")
+		return nil, errors.New("service unavailable")
 	}
 
 	return conn, nil
@@ -235,39 +220,16 @@ func SOCKS5UDPTunConnector(user *url.Userinfo) Connector {
 	return &socks5UDPTunConnector{User: user}
 }
 
-func (c *socks5UDPTunConnector) Connect(conn net.Conn, address string, options ...ConnectOption) (net.Conn, error) {
-	return c.ConnectContext(context.Background(), conn, "udp", address, options...)
-}
-
-func (c *socks5UDPTunConnector) ConnectContext(ctx context.Context, conn net.Conn, network, address string, options ...ConnectOption) (net.Conn, error) {
+func (c *socks5UDPTunConnector) ConnectContext(ctx context.Context, conn net.Conn, network, address string) (net.Conn, error) {
 	switch network {
 	case "tcp", "tcp4", "tcp6":
 		return nil, fmt.Errorf("%s unsupported", network)
 	}
-
-	opts := &ConnectOptions{}
-	for _, option := range options {
-		option(opts)
-	}
-
-	user := opts.User
-	if user == nil {
-		user = c.User
-	}
-
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = ConnectTimeout
-	}
-	conn.SetDeadline(time.Now().Add(timeout))
+	conn.SetDeadline(time.Now().Add(ConnectTimeout))
 	defer conn.SetDeadline(time.Time{})
 
 	taddr, _ := net.ResolveUDPAddr("udp", address)
-	return newSocks5UDPTunnelConn(conn,
-		nil, taddr,
-		selectorSocks5HandshakeOption(opts.Selector),
-		userSocks5HandshakeOption(user),
-	)
+	return newSocks5UDPTunnelConn(conn, nil, taddr, userSocks5HandshakeOption(c.User))
 }
 
 type socks5Handler struct {
@@ -344,9 +306,6 @@ func (h *socks5Handler) handleConnect(conn net.Conn, req *gosocks5.Request) {
 	if h.options.Chain != nil && h.options.Chain.Retries > 0 {
 		retries = h.options.Chain.Retries
 	}
-	if h.options.Retries > 0 {
-		retries = h.options.Retries
-	}
 
 	var err error
 	var cc net.Conn
@@ -368,9 +327,7 @@ func (h *socks5Handler) handleConnect(conn net.Conn, req *gosocks5.Request) {
 		fmt.Fprintf(&buf, "%s", host)
 		log.Log("[route]", buf.String())
 
-		cc, err = route.Dial(host,
-			TimeoutChainOption(h.options.Timeout),
-		)
+		cc, err = route.DialContext(context.Background(), "tcp", host)
 		if err == nil {
 			break
 		}

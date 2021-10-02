@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"time"
 )
 
 var (
@@ -100,29 +99,15 @@ func (c *Chain) IsEmpty() bool {
 	return c == nil || len(c.nodeGroups) == 0
 }
 
-// Dial connects to the target TCP address addr through the chain.
-// Deprecated: use DialContext instead.
-func (c *Chain) Dial(address string, opts ...ChainOption) (conn net.Conn, err error) {
-	return c.DialContext(context.Background(), "tcp", address, opts...)
-}
-
 // DialContext connects to the address on the named network using the provided context.
-func (c *Chain) DialContext(ctx context.Context, network, address string, opts ...ChainOption) (conn net.Conn, err error) {
-	options := &ChainOptions{}
-	for _, opt := range opts {
-		opt(options)
-	}
-
+func (c *Chain) DialContext(ctx context.Context, network, address string) (conn net.Conn, err error) {
 	retries := 1
 	if c != nil && c.Retries > 0 {
 		retries = c.Retries
 	}
-	if options.Retries > 0 {
-		retries = options.Retries
-	}
 
 	for i := 0; i < retries; i++ {
-		conn, err = c.dialWithOptions(ctx, network, address, options)
+		conn, err = c.dial(ctx, network, address)
 		if err == nil {
 			break
 		}
@@ -130,10 +115,7 @@ func (c *Chain) DialContext(ctx context.Context, network, address string, opts .
 	return
 }
 
-func (c *Chain) dialWithOptions(ctx context.Context, network, address string, options *ChainOptions) (net.Conn, error) {
-	if options == nil {
-		options = &ChainOptions{}
-	}
+func (c *Chain) dial(ctx context.Context, network, address string) (net.Conn, error) {
 	route, err := c.selectRouteFor(address)
 	if err != nil {
 		return nil, err
@@ -142,11 +124,6 @@ func (c *Chain) dialWithOptions(ctx context.Context, network, address string, op
 	ipAddr := address
 	if address != "" {
 		ipAddr = c.resolve(address)
-	}
-
-	timeout := options.Timeout
-	if timeout <= 0 {
-		timeout = DialTimeout
 	}
 
 	if route.IsEmpty() {
@@ -158,7 +135,7 @@ func (c *Chain) dialWithOptions(ctx context.Context, network, address string, op
 		default:
 		}
 		d := &net.Dialer{
-			Timeout: timeout,
+			Timeout: DialTimeout,
 			// LocalAddr: laddr, // TODO: optional local address
 		}
 		return d.DialContext(ctx, network, ipAddr)
@@ -169,8 +146,7 @@ func (c *Chain) dialWithOptions(ctx context.Context, network, address string, op
 		return nil, err
 	}
 
-	cOpts := append([]ConnectOption{AddrConnectOption(address)}, route.LastNode().ConnectOptions...)
-	cc, err := route.LastNode().Client.ConnectContext(ctx, conn, network, ipAddr, cOpts...)
+	cc, err := route.LastNode().Client.ConnectContext(ctx, conn, network, ipAddr)
 	if err != nil {
 		conn.Close()
 		return nil, err
@@ -188,20 +164,12 @@ func (*Chain) resolve(addr string) string {
 }
 
 // Conn obtains a handshaked connection to the last node of the chain.
-func (c *Chain) Conn(opts ...ChainOption) (conn net.Conn, err error) {
-	options := &ChainOptions{}
-	for _, opt := range opts {
-		opt(options)
-	}
-
+func (c *Chain) Conn() (conn net.Conn, err error) {
 	ctx := context.Background()
 
 	retries := 1
 	if c != nil && c.Retries > 0 {
 		retries = c.Retries
-	}
-	if options.Retries > 0 {
-		retries = options.Retries
 	}
 
 	for i := 0; i < retries; i++ {
@@ -227,17 +195,12 @@ func (c *Chain) getConn(_ context.Context) (conn net.Conn, err error) {
 	nodes := c.Nodes()
 	node := nodes[0]
 
-	cc, err := node.Client.Dial(node.Addr, node.DialOptions...)
+	cc, err := node.Client.Dial(node.Addr)
 	if err != nil {
 		return
 	}
 
-	cn, err := node.Client.Handshake(cc, node.HandshakeOptions...)
-	if err != nil {
-		cc.Close()
-		return
-	}
-	conn = cn
+	conn = cc
 	return
 }
 
@@ -255,7 +218,7 @@ func (c *Chain) selectRouteFor(addr string) (route *Chain, err error) {
 	}
 
 	route = newRoute()
-	var nl []Node
+	var nodes []Node
 
 	for _, group := range c.nodeGroups {
 		var node Node
@@ -264,41 +227,10 @@ func (c *Chain) selectRouteFor(addr string) (route *Chain, err error) {
 			return
 		}
 
-		if node.Client.Transporter.Multiplex() {
-			node.DialOptions = append(node.DialOptions,
-				ChainDialOption(route),
-			)
-			route = newRoute() // cutoff the chain for multiplex node.
-		}
-
 		route.AddNode(node)
-		nl = append(nl, node)
+		nodes = append(nodes, node)
 	}
 
-	route.route = nl
-
+	route.route = nodes
 	return
-}
-
-// ChainOptions holds options for Chain.
-type ChainOptions struct {
-	Retries int
-	Timeout time.Duration
-}
-
-// ChainOption allows a common way to set chain options.
-type ChainOption func(opts *ChainOptions)
-
-// RetryChainOption specifies the times of retry used by Chain.Dial.
-func RetryChainOption(retries int) ChainOption {
-	return func(opts *ChainOptions) {
-		opts.Retries = retries
-	}
-}
-
-// TimeoutChainOption specifies the timeout used by Chain.Dial.
-func TimeoutChainOption(timeout time.Duration) ChainOption {
-	return func(opts *ChainOptions) {
-		opts.Timeout = timeout
-	}
 }

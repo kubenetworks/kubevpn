@@ -15,7 +15,6 @@ import (
 	"github.com/shadowsocks/go-shadowsocks2/shadowaead"
 	"github.com/songgao/water"
 	"github.com/songgao/water/waterutil"
-	"github.com/xtaci/tcpraw"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 )
@@ -181,16 +180,8 @@ func (h *tunHandler) Handle(conn net.Conn) {
 					return err
 				}
 			} else {
-				if h.options.TCPMode {
-					if raddr != nil {
-						pc, err = tcpraw.Dial("tcp", raddr.String())
-					} else {
-						pc, err = tcpraw.Listen("tcp", h.options.Node.Addr)
-					}
-				} else {
-					laddr, _ := net.ResolveUDPAddr("udp", h.options.Node.Addr)
-					pc, err = net.ListenUDP("udp", laddr)
-				}
+				laddr, _ := net.ResolveUDPAddr("udp", h.options.Node.Addr)
+				pc, err = net.ListenUDP("udp", laddr)
 			}
 			if err != nil {
 				return err

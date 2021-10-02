@@ -1,6 +1,8 @@
 package core
 
-import "net"
+import (
+	"net"
+)
 
 // tcpTransporter is a raw TCP transporter.
 type tcpTransporter struct{}
@@ -10,28 +12,8 @@ func TCPTransporter() Transporter {
 	return &tcpTransporter{}
 }
 
-func (tr *tcpTransporter) Dial(addr string, options ...DialOption) (net.Conn, error) {
-	opts := &DialOptions{}
-	for _, option := range options {
-		option(opts)
-	}
-
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = DialTimeout
-	}
-	if opts.Chain == nil {
-		return net.DialTimeout("tcp", addr, timeout)
-	}
-	return opts.Chain.Dial(addr)
-}
-
-func (tr *tcpTransporter) Handshake(conn net.Conn, options ...HandshakeOption) (net.Conn, error) {
-	return conn, nil
-}
-
-func (tr *tcpTransporter) Multiplex() bool {
-	return false
+func (tr *tcpTransporter) Dial(addr string) (net.Conn, error) {
+	return net.DialTimeout("tcp", addr, DialTimeout)
 }
 
 type tcpListener struct {

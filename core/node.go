@@ -17,18 +17,14 @@ var (
 
 // Node is a proxy node, mainly used to construct a proxy chain.
 type Node struct {
-	Addr             string
-	Host             string
-	Protocol         string
-	Transport        string
-	Remote           string   // remote address, used by tcp/udp port forwarding
-	url              *url.URL // raw url
-	User             *url.Userinfo
-	Values           url.Values
-	DialOptions      []DialOption
-	HandshakeOptions []HandshakeOption
-	ConnectOptions   []ConnectOption
-	Client           *Client
+	Addr      string
+	Protocol  string
+	Transport string
+	Remote    string   // remote address, used by tcp/udp port forwarding
+	url       *url.URL // raw url
+	User      *url.Userinfo
+	Values    url.Values
+	Client    *Client
 }
 
 // ParseNode parses the node info.
@@ -50,7 +46,6 @@ func ParseNode(s string) (node Node, err error) {
 
 	node = Node{
 		Addr:   u.Host,
-		Host:   u.Host,
 		Remote: strings.Trim(u.EscapedPath(), "/"),
 		Values: u.Query(),
 		User:   u.User,

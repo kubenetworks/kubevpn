@@ -45,34 +45,9 @@ func parseChainNode(ns string) (nodes []core.Node, err error) {
 	if serverName == "" {
 		serverName = "localhost" // default server name
 	}
-	timeout := node.GetDuration("timeout")
-
-	host := node.Get("host")
-	if host == "" {
-		host = node.Host
-	}
-
-	node.DialOptions = append(node.DialOptions,
-		core.TimeoutDialOption(timeout),
-		core.HostDialOption(host),
-	)
-
-	node.ConnectOptions = []core.ConnectOption{
-		core.UserAgentConnectOption(node.Get("agent")),
-		core.NoTLSConnectOption(node.GetBool("notls")),
-		core.NoDelayConnectOption(node.GetBool("nodelay")),
-	}
-
-	handshakeOptions := []core.HandshakeOption{
-		core.AddrHandshakeOption(node.Addr),
-		core.HostHandshakeOption(host),
-		core.IntervalHandshakeOption(node.GetDuration("ping")),
-		core.TimeoutHandshakeOption(timeout),
-		core.RetryHandshakeOption(node.GetInt("retry")),
-	}
 
 	node.Client = &core.Client{
-		Connector:   core.AutoConnector(node.User),
+		Connector:   core.SOCKS5UDPTunConnector(node.User),
 		Transporter: core.TCPTransporter(),
 	}
 
@@ -80,13 +55,10 @@ func parseChainNode(ns string) (nodes []core.Node, err error) {
 	for _, ip := range ips {
 		nd := node.Clone()
 		nd.Addr = ip
-		// override the default node address
-		nd.HandshakeOptions = append(handshakeOptions, core.AddrHandshakeOption(ip))
 		// One node per IP
 		nodes = append(nodes, nd)
 	}
 	if len(ips) == 0 {
-		node.HandshakeOptions = handshakeOptions
 		nodes = []core.Node{node}
 	}
 
@@ -107,8 +79,6 @@ func (r *route) GenRouters() ([]router, error) {
 		if err != nil {
 			return nil, err
 		}
-		ttl := node.GetDuration("ttl")
-		timeout := node.GetDuration("timeout")
 
 		tunRoutes := parseIPRoutes(node.Get("route"))
 		gw := net.ParseIP(node.Get("gw")) // default gateway
@@ -122,12 +92,6 @@ func (r *route) GenRouters() ([]router, error) {
 		switch node.Transport {
 		case "tcp":
 			ln, err = core.TCPListener(node.Addr)
-		case "udp":
-			ln, err = core.UDPListener(node.Addr, &core.UDPListenConfig{
-				TTL:       ttl,
-				Backlog:   node.GetInt("backlog"),
-				QueueSize: node.GetInt("queue"),
-			})
 		case "tun":
 			cfg := core.TunConfig{
 				Name:    node.Get("name"),
@@ -150,17 +114,13 @@ func (r *route) GenRouters() ([]router, error) {
 		case "tun":
 			handler = core.TunHandler()
 		default:
-			handler = core.AutoHandler()
+			handler = core.SOCKS5Handler()
 		}
 
 		handler.Init(
-			core.AddrHandlerOption(ln.Addr().String()),
 			core.ChainHandlerOption(chain),
 			core.AuthenticatorHandlerOption(core.DefaultAuthenticator),
-			core.RetryHandlerOption(node.GetInt("retry")),
-			core.TimeoutHandlerOption(timeout),
 			core.NodeHandlerOption(node),
-			core.TCPModeHandlerOption(node.GetBool("tcp")),
 			core.IPRoutesHandlerOption(tunRoutes...),
 		)
 
