@@ -340,17 +340,3 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 	}
 	return err
 }
-
-var mEtherTypes = map[waterutil.Ethertype]string{
-	waterutil.IPv4: "ip",
-	waterutil.ARP:  "arp",
-	waterutil.RARP: "rarp",
-	waterutil.IPv6: "ip6",
-}
-
-func etherType(et waterutil.Ethertype) string {
-	if s, ok := mEtherTypes[et]; ok {
-		return s
-	}
-	return fmt.Sprintf("unknown(%v)", et)
-}
