@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shadowsocks/go-shadowsocks2/core"
 	"github.com/shadowsocks/go-shadowsocks2/shadowaead"
 	log "github.com/sirupsen/logrus"
 	"github.com/songgao/water/waterutil"
@@ -113,11 +112,6 @@ func (h *tunHandler) Handle(conn net.Conn) {
 				return err
 			}
 
-			pc, err = h.initTunnelConn(pc)
-			if err != nil {
-				return err
-			}
-
 			return h.transportTun(conn, pc, raddr)
 		}()
 		if err != nil {
@@ -144,18 +138,6 @@ func (h *tunHandler) Handle(conn net.Conn) {
 		}
 		tempDelay = 0
 	}
-}
-
-func (h *tunHandler) initTunnelConn(pc net.PacketConn) (net.PacketConn, error) {
-	if len(h.options.Users) > 0 && h.options.Users[0] != nil {
-		passwd, _ := h.options.Users[0].Password()
-		cipher, err := core.PickCipher(h.options.Users[0].Username(), nil, passwd)
-		if err != nil {
-			return nil, err
-		}
-		pc = cipher.PacketConn(pc)
-	}
-	return pc, nil
 }
 
 func (h *tunHandler) findRouteFor(dst net.IP) net.Addr {

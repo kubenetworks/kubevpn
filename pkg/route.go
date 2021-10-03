@@ -120,7 +120,6 @@ func (r *route) GenRouters() ([]router, error) {
 
 		handler.Init(
 			core.ChainHandlerOption(chain),
-			core.AuthenticatorHandlerOption(core.DefaultAuthenticator),
 			core.NodeHandlerOption(node),
 			core.IPRoutesHandlerOption(tunRoutes...),
 		)

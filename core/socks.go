@@ -17,7 +17,6 @@ import (
 
 type clientSelector struct {
 	methods []uint8
-	User    *url.Userinfo
 }
 
 func (selector *clientSelector) Methods() []uint8 {
@@ -40,34 +39,9 @@ func (selector *clientSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 		log.Debug("[socks5] method selected:", method)
 	}
 	switch method {
-	case gosocks5.MethodUserPass:
-		var username, password string
-		if selector.User != nil {
-			username = selector.User.Username()
-			password, _ = selector.User.Password()
-		}
-
-		req := gosocks5.NewUserPassRequest(gosocks5.UserPassVer, username, password)
-		if err := req.Write(conn); err != nil {
-			log.Debug("[socks5]", err)
-			return nil, err
-		}
-		if util.Debug {
-			log.Debug("[socks5]", req)
-		}
-		resp, err := gosocks5.ReadUserPassResponse(conn)
-		if err != nil {
-			log.Debug("[socks5]", err)
-			return nil, err
-		}
-		if util.Debug {
-			log.Debug("[socks5]", resp)
-		}
-		if resp.Status != gosocks5.Succeeded {
-			return nil, gosocks5.ErrAuthFailure
-		}
-	case gosocks5.MethodNoAcceptable:
-		return nil, gosocks5.ErrBadMethod
+	case gosocks5.MethodNoAuth:
+		log.Debug("[socks5] client", "no auth")
+		return conn, nil
 	}
 
 	return conn, nil
@@ -75,8 +49,6 @@ func (selector *clientSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 
 type serverSelector struct {
 	methods []uint8
-	// Users     []*url.Userinfo
-	Authenticator Authenticator
 }
 
 func (selector *serverSelector) Methods() []uint8 {
@@ -92,13 +64,6 @@ func (selector *serverSelector) Select(methods ...uint8) (method uint8) {
 		log.Debugf("[socks5] %d %d %v", gosocks5.Ver5, len(methods), methods)
 	}
 	method = gosocks5.MethodNoAuth
-	// when Authenticator is set, auth is mandatory
-	if selector.Authenticator != nil {
-		if method == gosocks5.MethodNoAuth {
-			method = gosocks5.MethodUserPass
-		}
-	}
-
 	return
 }
 
@@ -107,105 +72,11 @@ func (selector *serverSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 		log.Debugf("[socks5] %d %d", gosocks5.Ver5, method)
 	}
 	switch method {
-	case gosocks5.MethodUserPass:
-		req, err := gosocks5.ReadUserPassRequest(conn)
-		if err != nil {
-			log.Debugf("[socks5] %s - %s: %s", conn.RemoteAddr(), conn.LocalAddr(), err)
-			return nil, err
-		}
-		if util.Debug {
-			log.Debugf("[socks5] %s - %s: %s", conn.RemoteAddr(), conn.LocalAddr(), req.String())
-		}
-
-		if selector.Authenticator != nil && !selector.Authenticator.Authenticate(req.Username, req.Password) {
-			resp := gosocks5.NewUserPassResponse(gosocks5.UserPassVer, gosocks5.Failure)
-			if err := resp.Write(conn); err != nil {
-				log.Debugf("[socks5] %s - %s: %s", conn.RemoteAddr(), conn.LocalAddr(), err)
-				return nil, err
-			}
-			if util.Debug {
-				log.Debugf("[socks5] %s - %s: %s", conn.RemoteAddr(), conn.LocalAddr(), resp)
-			}
-			log.Debugf("[socks5] %s - %s: proxy authentication required", conn.RemoteAddr(), conn.LocalAddr())
-			return nil, gosocks5.ErrAuthFailure
-		}
-
-		resp := gosocks5.NewUserPassResponse(gosocks5.UserPassVer, gosocks5.Succeeded)
-		if err := resp.Write(conn); err != nil {
-			log.Debugf("[socks5] %s - %s: %s", conn.RemoteAddr(), conn.LocalAddr(), err)
-			return nil, err
-		}
-		if util.Debug {
-			log.Debugf("[socks5] %s - %s: %s", conn.RemoteAddr(), conn.LocalAddr(), resp)
-		}
+	case gosocks5.MethodNoAuth:
+		log.Debugf("[socks5] server, no auth")
+		return conn, nil
 	case gosocks5.MethodNoAcceptable:
 		return nil, gosocks5.ErrBadMethod
-	}
-
-	return conn, nil
-}
-
-type socks5Connector struct {
-	User *url.Userinfo
-}
-
-// SOCKS5Connector creates a connector for SOCKS5 proxy client.
-// It accepts an optional auth info for SOCKS5 Username/Password Authentication.
-func SOCKS5Connector(user *url.Userinfo) Connector {
-	return &socks5Connector{User: user}
-}
-
-func (c *socks5Connector) Connect(conn net.Conn, address string) (net.Conn, error) {
-	return c.ConnectContext(context.Background(), conn, "tcp", address)
-}
-
-func (c *socks5Connector) ConnectContext(ctx context.Context, conn net.Conn, network, address string) (net.Conn, error) {
-	switch network {
-	case "udp", "udp4", "udp6":
-		cnr := &socks5UDPTunConnector{User: c.User}
-		return cnr.ConnectContext(ctx, conn, network, address)
-	}
-
-	conn.SetDeadline(time.Now().Add(util.ConnectTimeout))
-	defer conn.SetDeadline(time.Time{})
-
-	cc, err := socks5Handshake(conn,
-		userSocks5HandshakeOption(c.User),
-	)
-	if err != nil {
-		return nil, err
-	}
-	conn = cc
-
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		return nil, err
-	}
-	p, _ := strconv.Atoi(port)
-	req := gosocks5.NewRequest(gosocks5.CmdConnect, &gosocks5.Addr{
-		Type: gosocks5.AddrDomain,
-		Host: host,
-		Port: uint16(p),
-	})
-	if err := req.Write(conn); err != nil {
-		return nil, err
-	}
-
-	if util.Debug {
-		log.Debug("[socks5]", req)
-	}
-
-	reply, err := gosocks5.ReadReply(conn)
-	if err != nil {
-		return nil, err
-	}
-
-	if util.Debug {
-		log.Debug("[socks5]", reply)
-	}
-
-	if reply.Rep != gosocks5.Succeeded {
-		return nil, errors.New("service unavailable")
 	}
 
 	return conn, nil
@@ -230,7 +101,7 @@ func (c *socks5UDPTunConnector) ConnectContext(ctx context.Context, conn net.Con
 	defer conn.SetDeadline(time.Time{})
 
 	taddr, _ := net.ResolveUDPAddr("udp", address)
-	return newSocks5UDPTunnelConn(conn, nil, taddr, userSocks5HandshakeOption(c.User))
+	return newSocks5UDPTunnelConn(conn, nil, taddr)
 }
 
 type socks5Handler struct {
@@ -255,14 +126,9 @@ func (h *socks5Handler) Init(options ...HandlerOption) {
 		opt(h.options)
 	}
 
-	h.selector = &serverSelector{ // socks5 server selector
-		// Users:     h.options.Users,
-		Authenticator: h.options.Authenticator,
-	}
-	// methods that socks5 server supported
+	h.selector = &serverSelector{}
 	h.selector.AddMethod(
 		gosocks5.MethodNoAuth,
-		gosocks5.MethodUserPass,
 	)
 }
 
@@ -678,7 +544,7 @@ func (h *socks5Handler) handleUDPTunnel(conn net.Conn, req *gosocks5.Request) {
 	}
 	defer cc.Close()
 
-	cc, err = socks5Handshake(cc, userSocks5HandshakeOption(h.options.Chain.LastNode().User))
+	cc, err = socks5Handshake(cc)
 	if err != nil {
 		log.Debugf("[socks5] udp-tun %s -> %s : %s", conn.RemoteAddr(), req.Addr, err)
 		return
@@ -789,24 +655,13 @@ func userSocks5HandshakeOption(user *url.Userinfo) socks5HandshakeOption {
 	}
 }
 
-func socks5Handshake(conn net.Conn, opts ...socks5HandshakeOption) (net.Conn, error) {
-	options := socks5HandshakeOptions{}
-	for _, opt := range opts {
-		opt(&options)
-	}
-	selector := options.selector
-	if selector == nil {
-		cs := &clientSelector{
-			User: options.user,
-		}
-		cs.AddMethod(
-			gosocks5.MethodNoAuth,
-			gosocks5.MethodUserPass,
-		)
-		selector = cs
-	}
+func socks5Handshake(conn net.Conn) (net.Conn, error) {
+	cs := &clientSelector{}
+	cs.AddMethod(
+		gosocks5.MethodNoAuth,
+	)
 
-	cc := gosocks5.ClientConn(conn, selector)
+	cc := gosocks5.ClientConn(conn, cs)
 	if err := cc.Handleshake(); err != nil {
 		return nil, err
 	}
@@ -818,8 +673,8 @@ type socks5UDPTunnelConn struct {
 	taddr net.Addr
 }
 
-func newSocks5UDPTunnelConn(conn net.Conn, raddr, taddr net.Addr, opts ...socks5HandshakeOption) (net.Conn, error) {
-	cc, err := socks5Handshake(conn, opts...)
+func newSocks5UDPTunnelConn(conn net.Conn, raddr, taddr net.Addr) (net.Conn, error) {
+	cc, err := socks5Handshake(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -880,52 +735,6 @@ func (c *socks5UDPTunnelConn) WriteTo(b []byte, addr net.Addr) (n int, err error
 	dgram := gosocks5.NewUDPDatagram(gosocks5.NewUDPHeader(uint16(len(b)), 0, toSocksAddr(addr)), b)
 	if err = dgram.Write(c.Conn); err != nil {
 		return
-	}
-	return len(b), nil
-}
-
-type socks5UDPConn struct {
-	*net.UDPConn
-	taddr net.Addr
-}
-
-func (c *socks5UDPConn) Read(b []byte) (n int, err error) {
-	n, _, err = c.ReadFrom(b)
-	return
-}
-
-func (c *socks5UDPConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
-	data := util.MPool.Get().([]byte)
-	defer util.MPool.Put(data)
-
-	n, err = c.UDPConn.Read(data)
-	if err != nil {
-		return
-	}
-	dg, err := gosocks5.ReadUDPDatagram(bytes.NewReader(data[:n]))
-	if err != nil {
-		return
-	}
-
-	n = copy(b, dg.Data)
-	addr, err = net.ResolveUDPAddr("udp", dg.Header.Addr.String())
-
-	return
-}
-
-func (c *socks5UDPConn) Write(b []byte) (int, error) {
-	return c.WriteTo(b, c.taddr)
-}
-
-func (c *socks5UDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
-	adr, err := gosocks5.NewAddr(addr.String())
-	if err != nil {
-		return 0, err
-	}
-	h := gosocks5.NewUDPHeader(0, 0, adr)
-	dg := gosocks5.NewUDPDatagram(h, b)
-	if err = dg.Write(c.UDPConn); err != nil {
-		return 0, err
 	}
 	return len(b), nil
 }

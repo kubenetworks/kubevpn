@@ -3,7 +3,6 @@ package core
 import (
 	"kubevpn/tun"
 	"net"
-	"net/url"
 )
 
 // Handler is a proxy server handler
@@ -14,11 +13,9 @@ type Handler interface {
 
 // HandlerOptions describes the options for Handler.
 type HandlerOptions struct {
-	Chain         *Chain
-	Users         []*url.Userinfo
-	Authenticator Authenticator
-	Node          Node
-	IPRoutes      []tun.IPRoute
+	Chain    *Chain
+	Node     Node
+	IPRoutes []tun.IPRoute
 }
 
 // HandlerOption allows a common way to set handler options.
@@ -28,13 +25,6 @@ type HandlerOption func(opts *HandlerOptions)
 func ChainHandlerOption(chain *Chain) HandlerOption {
 	return func(opts *HandlerOptions) {
 		opts.Chain = chain
-	}
-}
-
-// AuthenticatorHandlerOption set the authenticator of HandlerOptions
-func AuthenticatorHandlerOption(authenticator Authenticator) HandlerOption {
-	return func(opts *HandlerOptions) {
-		opts.Authenticator = authenticator
 	}
 }
 
