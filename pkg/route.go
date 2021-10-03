@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"github.com/go-log/log"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"kubevpn/core"
 	"kubevpn/tun"
 	"net"
@@ -145,7 +145,7 @@ type router struct {
 }
 
 func (r *router) Serve(ctx context.Context) error {
-	log.Logf("%s on %s", r.node.String(), r.server.Addr())
+	log.Debugf("%s on %s", r.node.String(), r.server.Addr())
 	return r.server.Serve(ctx, r.handler)
 }
 

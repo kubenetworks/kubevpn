@@ -8,7 +8,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	"kubevpn/core"
 	"kubevpn/util"
 )
 
@@ -24,7 +23,6 @@ var (
 )
 
 func init() {
-	util.SetLogger(&core.LogLogger{})
 	connectCmd.Flags().StringVar(&kubeconfigpath, "kubeconfig", clientcmd.RecommendedHomeFile, "kubeconfig")
 	connectCmd.Flags().StringVarP(&namespace, "namespace", "n", "", "namespace")
 	connectCmd.PersistentFlags().StringArrayVar(&workloads, "workloads", []string{}, "workloads, like: services/tomcat, deployment/nginx, replicaset/tomcat...")
@@ -40,6 +38,7 @@ var connectCmd = &cobra.Command{
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
+		util.SetupLogger()
 		InitClient()
 		Main()
 		// hang up
@@ -48,7 +47,7 @@ var connectCmd = &cobra.Command{
 }
 
 func InitClient() {
-	log.Printf("kubeconfig path: %s, namespace: %s, serivces: %v\n", kubeconfigpath, namespace, workloads)
+	log.Infof("kubeconfig path: %s, namespace: %s, serivces: %v", kubeconfigpath, namespace, workloads)
 	var err error
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
 	configFlags.KubeConfig = &kubeconfigpath

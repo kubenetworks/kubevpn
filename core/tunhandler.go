@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-log/log"
 	"github.com/shadowsocks/go-shadowsocks2/core"
 	"github.com/shadowsocks/go-shadowsocks2/shadowaead"
+	log "github.com/sirupsen/logrus"
 	"github.com/songgao/water/waterutil"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -82,7 +82,7 @@ func (h *tunHandler) Handle(conn net.Conn) {
 	if addr := h.options.Node.Remote; addr != "" {
 		raddr, err = net.ResolveUDPAddr("udp", addr)
 		if err != nil {
-			log.Logf("[tun] %s: remote addr: %v", conn.LocalAddr(), err)
+			log.Debugf("[tun] %s: remote addr: %v", conn.LocalAddr(), err)
 			return
 		}
 	}
@@ -102,7 +102,7 @@ func (h *tunHandler) Handle(conn net.Conn) {
 				pc, ok = cc.(net.PacketConn)
 				if !ok {
 					err = errors.New("not a packet connection")
-					log.Logf("[tun] %s - %s: %s", conn.LocalAddr(), raddr, err)
+					log.Debugf("[tun] %s - %s: %s", conn.LocalAddr(), raddr, err)
 					return err
 				}
 			} else {
@@ -121,7 +121,7 @@ func (h *tunHandler) Handle(conn net.Conn) {
 			return h.transportTun(conn, pc, raddr)
 		}()
 		if err != nil {
-			log.Logf("[tun] %s: %v", conn.LocalAddr(), err)
+			log.Debugf("[tun] %s: %v", conn.LocalAddr(), err)
 		}
 
 		select {
@@ -194,11 +194,11 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 				if waterutil.IsIPv4(b[:n]) {
 					header, err := ipv4.ParseHeader(b[:n])
 					if err != nil {
-						log.Logf("[tun] %s: %v", tun.LocalAddr(), err)
+						log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
 						return nil
 					}
 					if util.Debug {
-						log.Logf("[tun] %s -> %s %-4s %d/%-4d %-4x %d",
+						log.Debugf("[tun] %s -> %s %-4s %d/%-4d %-4x %d",
 							header.Src, header.Dst, ipProtocol(waterutil.IPv4Protocol(b[:n])),
 							header.Len, header.TotalLen, header.ID, header.Flags)
 					}
@@ -206,18 +206,18 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 				} else if waterutil.IsIPv6(b[:n]) {
 					header, err := ipv6.ParseHeader(b[:n])
 					if err != nil {
-						log.Logf("[tun] %s: %v", tun.LocalAddr(), err)
+						log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
 						return nil
 					}
 					if util.Debug {
-						log.Logf("[tun] %s -> %s %s %d %d",
+						log.Debugf("[tun] %s -> %s %s %d %d",
 							header.Src, header.Dst,
 							ipProtocol(waterutil.IPProtocol(header.NextHeader)),
 							header.PayloadLen, header.TrafficClass)
 					}
 					src, dst = header.Src, header.Dst
 				} else {
-					log.Logf("[tun] unknown packet")
+					log.Debugf("[tun] unknown packet")
 					return nil
 				}
 
@@ -229,12 +229,12 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 
 				addr := h.findRouteFor(dst)
 				if addr == nil {
-					log.Logf("[tun] no route for %s -> %s", src, dst)
+					log.Debugf("[tun] no route for %s -> %s", src, dst)
 					return nil
 				}
 
 				if util.Debug {
-					log.Logf("[tun] find route: %s -> %s", dst, addr)
+					log.Debugf("[tun] find route: %s -> %s", dst, addr)
 				}
 				if _, err := conn.WriteTo(b[:n], addr); err != nil {
 					return err
@@ -265,11 +265,11 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 				if waterutil.IsIPv4(b[:n]) {
 					header, err := ipv4.ParseHeader(b[:n])
 					if err != nil {
-						log.Logf("[tun] %s: %v", tun.LocalAddr(), err)
+						log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
 						return nil
 					}
 					if util.Debug {
-						log.Logf("[tun] %s -> %s %-4s %d/%-4d %-4x %d",
+						log.Debugf("[tun] %s -> %s %-4s %d/%-4d %-4x %d",
 							header.Src, header.Dst, ipProtocol(waterutil.IPv4Protocol(b[:n])),
 							header.Len, header.TotalLen, header.ID, header.Flags)
 					}
@@ -277,18 +277,18 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 				} else if waterutil.IsIPv6(b[:n]) {
 					header, err := ipv6.ParseHeader(b[:n])
 					if err != nil {
-						log.Logf("[tun] %s: %v", tun.LocalAddr(), err)
+						log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
 						return nil
 					}
 					if util.Debug {
-						log.Logf("[tun] %s -> %s %s %d %d",
+						log.Debugf("[tun] %s -> %s %s %d %d",
 							header.Src, header.Dst,
 							ipProtocol(waterutil.IPProtocol(header.NextHeader)),
 							header.PayloadLen, header.TrafficClass)
 					}
 					src, dst = header.Src, header.Dst
 				} else {
-					log.Logf("[tun] unknown packet")
+					log.Debugf("[tun] unknown packet")
 					return nil
 				}
 
@@ -301,17 +301,17 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 				rkey := ipToTunRouteKey(src)
 				if actual, loaded := h.routes.LoadOrStore(rkey, addr); loaded {
 					if actual.(net.Addr).String() != addr.String() {
-						log.Logf("[tun] update route: %s -> %s (old %s)",
+						log.Debugf("[tun] update route: %s -> %s (old %s)",
 							src, addr, actual.(net.Addr))
 						h.routes.Store(rkey, addr)
 					}
 				} else {
-					log.Logf("[tun] new route: %s -> %s", src, addr)
+					log.Debugf("[tun] new route: %s -> %s", src, addr)
 				}
 
 				if addr := h.findRouteFor(dst); addr != nil {
 					if util.Debug {
-						log.Logf("[tun] find route: %s -> %s", dst, addr)
+						log.Debugf("[tun] find route: %s -> %s", dst, addr)
 					}
 					_, err := conn.WriteTo(b[:n], addr)
 					return err

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-log/log"
+	log "github.com/sirupsen/logrus"
 )
 
 func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
@@ -31,7 +31,7 @@ func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
 	cmd := fmt.Sprintf("netsh interface ip set address name=\"%s\" "+
 		"source=static addr=%s mask=%s gateway=none",
 		name, ip.String(), ipMask(ipNet.Mask))
-	log.Log("[tun]", cmd)
+	log.Debug("[tun]", cmd)
 
 	args := strings.Split(cmd, " ")
 	err = retry.OnError(retry.DefaultRetry, func(err error) bool {
@@ -184,7 +184,7 @@ func addTunRoutes(ifName string, gw string, routes ...IPRoute) error {
 		if gw != "" {
 			cmd += " nexthop=" + gw
 		}
-		log.Logf("[tun] %s", cmd)
+		log.Debugf("[tun] %s", cmd)
 		args := strings.Split(cmd, " ")
 		if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
 			return fmt.Errorf("%s: %v", cmd, er)

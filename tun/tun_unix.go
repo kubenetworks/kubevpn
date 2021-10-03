@@ -10,7 +10,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/go-log/log"
+	log "github.com/sirupsen/logrus"
 	"github.com/songgao/water"
 )
 
@@ -33,7 +33,7 @@ func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	cmd := fmt.Sprintf("ifconfig %s inet %s mtu %d up", ifce.Name(), cfg.Addr, mtu)
-	log.Log("[tun]", cmd)
+	log.Debug("[tun]", cmd)
 	args := strings.Split(cmd, " ")
 	if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
@@ -62,7 +62,7 @@ func addTunRoutes(ifName string, routes ...IPRoute) error {
 			continue
 		}
 		cmd := fmt.Sprintf("route add -net %s -interface %s", route.Dest.String(), ifName)
-		log.Logf("[tun] %s", cmd)
+		log.Debugf("[tun] %s", cmd)
 		args := strings.Split(cmd, " ")
 		if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
 			return fmt.Errorf("%s: %v", cmd, er)

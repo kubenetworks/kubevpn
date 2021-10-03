@@ -3,12 +3,10 @@ package main
 import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"kubevpn/core"
 	"kubevpn/util"
 )
 
 func init() {
-	util.SetLogger(&core.LogLogger{})
 	ServerCmd.Flags().StringArrayVarP(&nodeConfig.ServeNodes, "nodeCommand", "L", []string{}, "command needs to be executed")
 	ServerCmd.Flags().StringVarP(&nodeConfig.ChainNodes, "chainCommand", "F", "", "command needs to be executed")
 	ServerCmd.Flags().BoolVar(&util.Debug, "debug", false, "true/false")
@@ -23,6 +21,7 @@ var ServerCmd = &cobra.Command{
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
+		util.SetupLogger()
 		if err := start(); err != nil {
 			log.Fatal(err)
 		}

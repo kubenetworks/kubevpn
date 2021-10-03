@@ -8,7 +8,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/go-log/log"
+	log "github.com/sirupsen/logrus"
 )
 
 // Server is a proxy server.
@@ -55,7 +55,7 @@ func (s *Server) Serve(ctx context.Context, h Handler) error {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
-				log.Logf("server: Accept error: %v; retrying in %v", e, tempDelay)
+				log.Warnf("server: Accept error: %v; retrying in %v", e, tempDelay)
 				time.Sleep(tempDelay)
 				continue
 			}

@@ -6,7 +6,6 @@ require (
 	github.com/datawire/dlib v1.2.4
 	github.com/docker/libcontainer v2.2.1+incompatible
 	github.com/ginuerzh/gosocks5 v0.2.0
-	github.com/go-log/log v0.2.0
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
 	github.com/google/go-cmp v0.5.5 // indirect
 	github.com/googleapis/gnostic v0.5.1 // indirect

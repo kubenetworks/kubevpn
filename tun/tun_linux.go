@@ -8,8 +8,8 @@ import (
 	"syscall"
 
 	"github.com/docker/libcontainer/netlink"
-	"github.com/go-log/log"
 	"github.com/milosgajdos/tenus"
+	log "github.com/sirupsen/logrus"
 	"github.com/songgao/water"
 )
 
@@ -40,21 +40,21 @@ func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	cmd := fmt.Sprintf("ip link set dev %s mtu %d", ifce.Name(), mtu)
-	log.Log("[tun]", cmd)
+	log.Debug("[tun]", cmd)
 	if er := link.SetLinkMTU(mtu); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
 	}
 
 	cmd = fmt.Sprintf("ip address add %s dev %s", cfg.Addr, ifce.Name())
-	log.Log("[tun]", cmd)
+	log.Debug("[tun]", cmd)
 	if er := link.SetLinkIp(ip, ipNet); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
 	}
 
 	cmd = fmt.Sprintf("ip link set dev %s up", ifce.Name())
-	log.Log("[tun]", cmd)
+	log.Debug("[tun]", cmd)
 	if er := link.SetLinkUp(); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
@@ -82,7 +82,7 @@ func addTunRoutes(ifName string, routes ...IPRoute) error {
 			continue
 		}
 		cmd := fmt.Sprintf("ip route add %s dev %s", route.Dest.String(), ifName)
-		log.Logf("[tun] %s", cmd)
+		log.Debugf("[tun] %s", cmd)
 		if err := netlink.AddRoute(route.Dest.String(), "", "", ifName); err != nil && !errors.Is(err, syscall.EEXIST) {
 			return fmt.Errorf("%s: %v", cmd, err)
 		}

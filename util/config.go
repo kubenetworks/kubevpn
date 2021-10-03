@@ -3,15 +3,12 @@ package util
 import (
 	"sync"
 	"time"
-
-	"github.com/go-log/log"
 )
 
 // Debug is a flag that enables the debug log.
 var Debug bool
 
 var (
-	tinyBufferSize   = 512
 	smallBufferSize  = 2 * 1024  // 2KB small buffer
 	mediumBufferSize = 8 * 1024  // 8KB medium buffer
 	largeBufferSize  = 32 * 1024 // 32KB large buffer
@@ -51,11 +48,5 @@ var (
 )
 
 var (
-	// DefaultMTU is the default mtu for tun/tap device
 	DefaultMTU = 1350
 )
-
-// SetLogger sets a new logger for internal log system.
-func SetLogger(logger log.Logger) {
-	log.DefaultLogger = logger
-}

@@ -2,7 +2,7 @@ package tun
 
 import (
 	"errors"
-	"github.com/go-log/log"
+	log "github.com/sirupsen/logrus"
 	"github.com/songgao/water"
 	"net"
 	"os"
@@ -44,7 +44,7 @@ func TunListener(cfg TunConfig) (Listener, error) {
 
 		addrs, _ := ifce.Addrs()
 		_ = os.Setenv("tunName", ifce.Name)
-		log.Logf("[tun] %s: name: %s, mtu: %d, addrs: %s",
+		log.Debugf("[tun] %s: name: %s, mtu: %d, addrs: %s",
 			conn.LocalAddr(), ifce.Name, ifce.MTU, addrs)
 
 		ln.conns <- conn
