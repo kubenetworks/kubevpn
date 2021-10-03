@@ -29,15 +29,10 @@ type Node struct {
 
 // ParseNode parses the node info.
 // The proxy node string pattern is [scheme://][user:pass@host]:port.
-// Scheme can be divided into two parts by character '+', such as: http+tls.
 func ParseNode(s string) (node Node, err error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return Node{}, ErrInvalidNode
-	}
-
-	if !strings.Contains(s, "://") {
-		s = "auto://" + s
 	}
 	u, err := url.Parse(s)
 	if err != nil {
@@ -55,58 +50,16 @@ func ParseNode(s string) (node Node, err error) {
 	u.RawQuery = ""
 	u.User = nil
 
-	schemes := strings.Split(u.Scheme, "+")
-	if len(schemes) == 1 {
-		node.Protocol = schemes[0]
-		node.Transport = schemes[0]
-	}
-	if len(schemes) == 2 {
-		node.Protocol = schemes[0]
-		node.Transport = schemes[1]
-	}
-
-	switch node.Transport {
-	case "https":
-		node.Transport = "tls"
-	case "tls", "mtls":
-	case "http2", "h2", "h2c":
-	case "ws", "mws", "wss", "mwss":
-	case "kcp", "ssh", "quic":
-	case "ssu":
-		node.Transport = "udp"
-	case "ohttp", "otls", "obfs4": // obfs
-	case "tcp", "udp":
-	case "rtcp", "rudp": // rtcp and rudp are for remote port forwarding
-	case "tun", "tap": // tun/tap device
-	case "ftcp": // fake TCP
-	case "dns":
-	case "redu", "redirectu": // UDP tproxy
-	default:
+	switch u.Scheme {
+	case "tun":
+		node.Protocol = u.Scheme
+		node.Transport = u.Scheme
+	case "socks5":
+		node.Protocol = u.Scheme
 		node.Transport = "tcp"
-	}
-
-	switch node.Protocol {
-	case "http", "http2":
-	case "https":
-		node.Protocol = "http"
-	case "socks4", "socks4a":
-	case "socks", "socks5":
-		node.Protocol = "socks5"
-	case "ss", "ssu":
-	case "ss2": // as of 2.10.1, ss2 is same as ss
-		node.Protocol = "ss"
-	case "sni":
-	case "tcp", "udp", "rtcp", "rudp": // port forwarding
-	case "direct", "remote", "forward": // forwarding
-	case "red", "redirect", "redu", "redirectu": // TCP,UDP transparent proxy
-	case "tun", "tap": // tun/tap device
-	case "ftcp": // fake TCP
-	case "dns", "dot", "doh":
-	case "relay":
 	default:
-		node.Protocol = ""
+		return Node{}, ErrInvalidNode
 	}
-
 	return
 }
 
@@ -150,8 +103,7 @@ func (node Node) String() string {
 	if scheme == "" {
 		scheme = fmt.Sprintf("%s+%s", node.Protocol, node.Transport)
 	}
-	return fmt.Sprintf("%s://%s",
-		scheme, node.Addr)
+	return fmt.Sprintf("%s://%s", scheme, node.Addr)
 }
 
 // NodeGroup is a group of nodes.
