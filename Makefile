@@ -14,8 +14,8 @@ kubevpn-linux:
 	chmod +x kubevpn
 	mv kubevpn /usr/local/bin/kubevpn
 
-.PHONY: build_image
-build_image:
+.PHONY: image
+image:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o kubevpn ./pkg
 	chmod +x kubevpn
 	docker build -t naison/kubevpn:v2 -f ./remote/Dockerfile .
