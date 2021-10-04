@@ -10,19 +10,14 @@ import (
 )
 
 type route struct {
-	ServeNodes []string // tun
-	ChainNodes string   // socks5
+	ServeNodes []string // -L tun
+	ChainNodes string   // -F socks5
 	Retries    int
 }
 
 func (r *route) parseChain() (*core.Chain, error) {
 	chain := core.NewChain()
 	chain.Retries = r.Retries
-	gid := 1 // group ID
-
-	ngroup := core.NewNodeGroup()
-	ngroup.ID = gid
-	gid++
 
 	// parse the base nodes
 	nodes, err := parseChainNode(r.ChainNodes)
@@ -30,40 +25,21 @@ func (r *route) parseChain() (*core.Chain, error) {
 		return nil, err
 	}
 
-	ngroup.AddNode(nodes...)
-
-	chain.AddNodeGroup(ngroup)
+	chain.AddNodeGroup(nodes)
 
 	return chain, nil
 }
 
-func parseChainNode(ns string) (nodes []core.Node, err error) {
+func parseChainNode(ns string) (*core.Node, error) {
 	node, err := core.ParseNode(ns)
 	if err != nil {
-		return
+		return nil, err
 	}
-	serverName, sport, _ := net.SplitHostPort(node.Addr)
-	if serverName == "" {
-		serverName = "localhost" // default server name
-	}
-
 	node.Client = &core.Client{
-		Connector:   core.SOCKS5UDPTunConnector(node.User),
+		Connector:   core.SOCKS5UDPTunConnector(),
 		Transporter: core.TCPTransporter(),
 	}
-
-	ips := parseIP(node.Get("ip"), sport)
-	for _, ip := range ips {
-		nd := node.Clone()
-		nd.Addr = ip
-		// One node per IP
-		nodes = append(nodes, nd)
-	}
-	if len(ips) == 0 {
-		nodes = []core.Node{node}
-	}
-
-	return
+	return &node, nil
 }
 
 func (r *route) GenRouters() ([]router, error) {

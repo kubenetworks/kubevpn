@@ -15,89 +15,61 @@ var (
 
 // Chain is a proxy chain that holds a list of proxy node groups.
 type Chain struct {
-	isRoute    bool
-	Retries    int
-	nodeGroups []*NodeGroup
-	route      []Node // nodes in the selected route
+	isRoute bool
+	Retries int
+	node    *Node
 }
 
 // NewChain creates a proxy chain with a list of proxy nodes.
 // It creates the node groups automatically, one group per node.
-func NewChain(nodes ...Node) *Chain {
-	chain := &Chain{}
-	for _, node := range nodes {
-		chain.nodeGroups = append(chain.nodeGroups, NewNodeGroup(node))
-	}
-	return chain
+func NewChain() *Chain {
+	return &Chain{}
 }
 
 // newRoute creates a chain route.
 // a chain route is the final route after node selection.
-func newRoute(nodes ...Node) *Chain {
-	chain := NewChain(nodes...)
+func newRoute() *Chain {
+	chain := NewChain()
 	chain.isRoute = true
 	return chain
 }
 
 // Nodes returns the proxy nodes that the chain holds.
 // The first node in each group will be returned.
-func (c *Chain) Nodes() (nodes []Node) {
-	for _, group := range c.nodeGroups {
-		if ns := group.Nodes(); len(ns) > 0 {
-			nodes = append(nodes, ns[0])
-		}
-	}
-	return
-}
-
-// NodeGroups returns the list of node group.
-func (c *Chain) NodeGroups() []*NodeGroup {
-	return c.nodeGroups
+func (c *Chain) Nodes() *Node {
+	return c.node
 }
 
 // LastNode returns the last node of the node list.
 // If the chain is empty, an empty node will be returned.
 // If the last node is a node group, the first node in the group will be returned.
-func (c *Chain) LastNode() Node {
+func (c *Chain) LastNode() *Node {
 	if c.IsEmpty() {
-		return Node{}
+		return &Node{}
 	}
-	group := c.nodeGroups[len(c.nodeGroups)-1]
-	return group.GetNode(0)
-}
-
-// LastNodeGroup returns the last group of the group list.
-func (c *Chain) LastNodeGroup() *NodeGroup {
-	if c.IsEmpty() {
-		return nil
-	}
-	return c.nodeGroups[len(c.nodeGroups)-1]
+	return c.node
 }
 
 // AddNode appends the node(s) to the chain.
-func (c *Chain) AddNode(nodes ...Node) {
+func (c *Chain) AddNode(node *Node) {
 	if c == nil {
 		return
 	}
-	for _, node := range nodes {
-		c.nodeGroups = append(c.nodeGroups, NewNodeGroup(node))
-	}
+	c.node = node
 }
 
 // AddNodeGroup appends the group(s) to the chain.
-func (c *Chain) AddNodeGroup(groups ...*NodeGroup) {
+func (c *Chain) AddNodeGroup(groups *Node) {
 	if c == nil {
 		return
 	}
-	for _, group := range groups {
-		c.nodeGroups = append(c.nodeGroups, group)
-	}
+	c.node = groups
 }
 
 // IsEmpty checks if the chain is empty.
 // An empty chain means that there is no proxy node or node group in the chain.
 func (c *Chain) IsEmpty() bool {
-	return c == nil || len(c.nodeGroups) == 0
+	return c == nil || c.node == nil
 }
 
 // DialContext connects to the address on the named network using the provided context.
@@ -193,9 +165,7 @@ func (c *Chain) getConn(_ context.Context) (conn net.Conn, err error) {
 		err = ErrEmptyChain
 		return
 	}
-	nodes := c.Nodes()
-	node := nodes[0]
-
+	node := c.Nodes()
 	cc, err := node.Client.Dial(node.Addr)
 	if err != nil {
 		return
@@ -219,19 +189,6 @@ func (c *Chain) selectRouteFor(addr string) (route *Chain, err error) {
 	}
 
 	route = newRoute()
-	var nodes []Node
-
-	for _, group := range c.nodeGroups {
-		var node Node
-		node, err = group.Next()
-		if err != nil {
-			return
-		}
-
-		route.AddNode(node)
-		nodes = append(nodes, node)
-	}
-
-	route.route = nodes
+	route.AddNode(c.node)
 	return
 }

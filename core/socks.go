@@ -83,13 +83,12 @@ func (selector *serverSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 }
 
 type socks5UDPTunConnector struct {
-	User *url.Userinfo
 }
 
 // SOCKS5UDPTunConnector creates a connector for SOCKS5 UDP-over-TCP relay.
 // It accepts an optional auth info for SOCKS5 Username/Password Authentication.
-func SOCKS5UDPTunConnector(user *url.Userinfo) Connector {
-	return &socks5UDPTunConnector{User: user}
+func SOCKS5UDPTunConnector() Connector {
+	return &socks5UDPTunConnector{}
 }
 
 func (c *socks5UDPTunConnector) ConnectContext(ctx context.Context, conn net.Conn, network, address string) (net.Conn, error) {
@@ -138,14 +137,12 @@ func (h *socks5Handler) Handle(conn net.Conn) {
 	conn = gosocks5.ServerConn(conn, h.selector)
 	req, err := gosocks5.ReadRequest(conn)
 	if err != nil {
-		log.Debugf("[socks5] %s -> %s : %s",
-			conn.RemoteAddr(), conn.LocalAddr(), err)
+		log.Debugf("[socks5] %s -> %s : %s", conn.RemoteAddr(), conn.LocalAddr(), err)
 		return
 	}
 
 	if util.Debug {
-		log.Debugf("[socks5] %s -> %s\n%s",
-			conn.RemoteAddr(), conn.LocalAddr(), req)
+		log.Debugf("[socks5] %s -> %s\n%s", conn.RemoteAddr(), conn.LocalAddr(), req)
 	}
 	switch req.Cmd {
 	case gosocks5.CmdConnect:
@@ -158,16 +155,14 @@ func (h *socks5Handler) Handle(conn net.Conn) {
 		h.handleUDPTunnel(conn, req)
 
 	default:
-		log.Debugf("[socks5] %s - %s : Unrecognized request: %d",
-			conn.RemoteAddr(), conn.LocalAddr(), req.Cmd)
+		log.Debugf("[socks5] %s - %s : Unrecognized request: %d", conn.RemoteAddr(), conn.LocalAddr(), req.Cmd)
 	}
 }
 
 func (h *socks5Handler) handleConnect(conn net.Conn, req *gosocks5.Request) {
 	host := req.Addr.String()
 
-	log.Debugf("[socks5] %s -> %s -> %s",
-		conn.RemoteAddr(), h.options.Node.String(), host)
+	log.Debugf("[socks5] %s -> %s -> %s", conn.RemoteAddr(), h.options.Node.String(), host)
 
 	retries := 1
 	if h.options.Chain != nil && h.options.Chain.Retries > 0 {
@@ -180,26 +175,21 @@ func (h *socks5Handler) handleConnect(conn net.Conn, req *gosocks5.Request) {
 	for i := 0; i < retries; i++ {
 		route, err = h.options.Chain.selectRouteFor(host)
 		if err != nil {
-			log.Debugf("[socks5] %s -> %s : %s",
-				conn.RemoteAddr(), conn.LocalAddr(), err)
+			log.Debugf("[socks5] %s -> %s : %s", conn.RemoteAddr(), conn.LocalAddr(), err)
 			continue
 		}
 
 		buf := bytes.Buffer{}
-		fmt.Fprintf(&buf, "%s -> %s -> ",
-			conn.RemoteAddr(), h.options.Node.String())
-		for _, nd := range route.route {
-			fmt.Fprintf(&buf, "%s -> ", nd.String())
-		}
-		fmt.Fprintf(&buf, "%s", host)
+		_, _ = fmt.Fprintf(&buf, "%s -> %s -> ", conn.RemoteAddr(), h.options.Node.String())
+		_, _ = fmt.Fprintf(&buf, "%s -> ", route.node.String())
+		_, _ = fmt.Fprintf(&buf, "%s", host)
 		log.Debug("[route]", buf.String())
 
 		cc, err = route.DialContext(context.Background(), "tcp", host)
 		if err == nil {
 			break
 		}
-		log.Debugf("[socks5] %s -> %s : %s",
-			conn.RemoteAddr(), conn.LocalAddr(), err)
+		log.Debugf("[socks5] %s -> %s : %s", conn.RemoteAddr(), conn.LocalAddr(), err)
 	}
 
 	if err != nil {
@@ -231,8 +221,7 @@ func (h *socks5Handler) handleConnect(conn net.Conn, req *gosocks5.Request) {
 func (h *socks5Handler) handleBind(conn net.Conn, req *gosocks5.Request) {
 	addr := req.Addr.String()
 
-	log.Debugf("[socks5-bind] %s -> %s -> %s",
-		conn.RemoteAddr(), h.options.Node.String(), addr)
+	log.Debugf("[socks5-bind] %s -> %s -> %s", conn.RemoteAddr(), h.options.Node.String(), addr)
 
 	if h.options.Chain.IsEmpty() {
 		h.bindOn(conn, addr)
@@ -241,13 +230,11 @@ func (h *socks5Handler) handleBind(conn net.Conn, req *gosocks5.Request) {
 
 	cc, err := h.options.Chain.Conn()
 	if err != nil {
-		log.Debugf("[socks5-bind] %s <- %s : %s",
-			conn.RemoteAddr(), conn.LocalAddr(), err)
+		log.Debugf("[socks5-bind] %s <- %s : %s", conn.RemoteAddr(), conn.LocalAddr(), err)
 		reply := gosocks5.NewReply(gosocks5.Failure, nil)
 		reply.Write(conn)
 		if util.Debug {
-			log.Debugf("[socks5-bind] %s <- %s\n%s",
-				conn.RemoteAddr(), conn.LocalAddr(), reply)
+			log.Debugf("[socks5-bind] %s <- %s\n%s", conn.RemoteAddr(), conn.LocalAddr(), reply)
 		}
 		return
 	}
@@ -266,8 +253,7 @@ func (h *socks5Handler) bindOn(conn net.Conn, addr string) {
 	bindAddr, _ := net.ResolveTCPAddr("tcp", addr)
 	ln, err := net.ListenTCP("tcp", bindAddr) // strict mode: if the port already in use, it will return error
 	if err != nil {
-		log.Debugf("[socks5-bind] %s -> %s : %s",
-			conn.RemoteAddr(), conn.LocalAddr(), err)
+		log.Debugf("[socks5-bind] %s -> %s : %s", conn.RemoteAddr(), conn.LocalAddr(), err)
 		gosocks5.NewReply(gosocks5.Failure, nil).Write(conn)
 		return
 	}
@@ -277,17 +263,14 @@ func (h *socks5Handler) bindOn(conn net.Conn, addr string) {
 	socksAddr.Host, _, _ = net.SplitHostPort(conn.LocalAddr().String())
 	reply := gosocks5.NewReply(gosocks5.Succeeded, socksAddr)
 	if err := reply.Write(conn); err != nil {
-		log.Debugf("[socks5-bind] %s <- %s : %s",
-			conn.RemoteAddr(), conn.LocalAddr(), err)
+		log.Debugf("[socks5-bind] %s <- %s : %s", conn.RemoteAddr(), conn.LocalAddr(), err)
 		ln.Close()
 		return
 	}
 	if util.Debug {
-		log.Debugf("[socks5-bind] %s <- %s\n%s",
-			conn.RemoteAddr(), conn.LocalAddr(), reply)
+		log.Debugf("[socks5-bind] %s <- %s\n%s", conn.RemoteAddr(), conn.LocalAddr(), reply)
 	}
-	log.Debugf("[socks5-bind] %s - %s BIND ON %s OK",
-		conn.RemoteAddr(), conn.LocalAddr(), socksAddr)
+	log.Debugf("[socks5-bind] %s - %s BIND ON %s OK", conn.RemoteAddr(), conn.LocalAddr(), socksAddr)
 
 	var pconn net.Conn
 	accept := func() <-chan error {
