@@ -1,11 +1,11 @@
-package main
+package pkg
 
 import (
 	"context"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"kubevpn/core"
-	"kubevpn/tun"
+	"github.com/wencaiwulue/kubevpn/core"
+	"github.com/wencaiwulue/kubevpn/tun"
 	"net"
 )
 

@@ -2,7 +2,7 @@ package tun
 
 import (
 	"fmt"
-	"kubevpn/util"
+	"github.com/wencaiwulue/kubevpn/util"
 	"net"
 	"os/exec"
 	"strings"

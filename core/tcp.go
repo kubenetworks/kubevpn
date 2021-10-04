@@ -1,8 +1,8 @@
 package core
 
 import (
-	"kubevpn/tun"
-	"kubevpn/util"
+	"github.com/wencaiwulue/kubevpn/tun"
+	"github.com/wencaiwulue/kubevpn/util"
 	"net"
 )
 

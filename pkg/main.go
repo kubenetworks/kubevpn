@@ -1,17 +1,17 @@
-package main
+package pkg
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/dns"
+	"github.com/wencaiwulue/kubevpn/driver"
+	"github.com/wencaiwulue/kubevpn/remote"
+	"github.com/wencaiwulue/kubevpn/util"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"kubevpn/dns"
-	"kubevpn/driver"
-	"kubevpn/remote"
-	"kubevpn/util"
 	"net"
 	"os/exec"
 	"strings"

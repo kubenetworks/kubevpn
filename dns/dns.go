@@ -4,11 +4,11 @@ import (
 	"context"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/util"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"kubevpn/util"
 )
 
 func GetDNSServiceIpFromPod(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) string {

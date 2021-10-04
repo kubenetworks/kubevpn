@@ -1,16 +1,16 @@
-package main
+package pkg
 
 import (
 	"context"
 	"crypto/md5"
 	"fmt"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/remote"
 	"io"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	net2 "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
-	"kubevpn/remote"
 	"net"
 	"net/http"
 	"os/exec"

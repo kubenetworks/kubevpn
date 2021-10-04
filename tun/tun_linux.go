@@ -3,7 +3,7 @@ package tun
 import (
 	"errors"
 	"fmt"
-	"kubevpn/util"
+	"github.com/wencaiwulue/kubevpn/util"
 	"net"
 	"syscall"
 

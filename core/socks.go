@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"kubevpn/util"
+	"github.com/wencaiwulue/kubevpn/util"
 	"net"
 	"net/url"
 	"strconv"

@@ -2,9 +2,9 @@ package core
 
 import (
 	"context"
+	"github.com/wencaiwulue/kubevpn/tun"
+	"github.com/wencaiwulue/kubevpn/util"
 	"io"
-	"kubevpn/tun"
-	"kubevpn/util"
 	"net"
 	"time"
 

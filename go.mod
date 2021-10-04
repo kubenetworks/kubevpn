@@ -1,4 +1,4 @@
-module kubevpn
+module github.com/wencaiwulue/kubevpn
 
 go 1.16
 

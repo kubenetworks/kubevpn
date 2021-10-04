@@ -2,9 +2,9 @@ package driver
 
 import (
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/driver/openvpn"
+	"github.com/wencaiwulue/kubevpn/driver/wintun"
 	"k8s.io/client-go/util/retry"
-	"kubevpn/driver/openvpn"
-	"kubevpn/driver/wintun"
 	"os"
 	"os/exec"
 	"path/filepath"

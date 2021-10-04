@@ -1,8 +1,8 @@
-package main
+package pkg
 
 import (
 	"bufio"
-	"kubevpn/tun"
+	"github.com/wencaiwulue/kubevpn/tun"
 	"net"
 	"os"
 	"strings"
