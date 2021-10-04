@@ -5,6 +5,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/tun"
 	"github.com/wencaiwulue/kubevpn/util"
 	"io"
+	"k8s.io/client-go/util/retry"
 	"net"
 	"time"
 
@@ -43,6 +44,19 @@ func (s *Server) Serve(ctx context.Context, h Handler) error {
 
 	l := s.Listener
 	var tempDelay time.Duration
+	go func() {
+		select {
+		case <-ctx.Done():
+			err := retry.OnError(retry.DefaultBackoff, func(err error) bool {
+				return err != nil
+			}, func() error {
+				return l.Close()
+			})
+			if err != nil {
+				log.Warnf("error while close listener, err: %v", err)
+			}
+		}
+	}()
 	for ctx.Err() == nil {
 		conn, e := l.Accept()
 		if e != nil {

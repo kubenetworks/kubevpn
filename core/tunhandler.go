@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/wencaiwulue/kubevpn/remote"
 	"github.com/wencaiwulue/kubevpn/util"
 	"io"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -73,8 +73,10 @@ func (h *tunHandler) Init(options ...HandlerOption) {
 }
 
 func (h *tunHandler) Handle(conn net.Conn) {
-	defer os.Exit(0)
+	//defer os.Exit(0)
 	defer conn.Close()
+	ctx, cancelFunc := context.WithCancel(context.TODO())
+	remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)
 
 	var err error
 	var raddr net.Addr
@@ -87,7 +89,7 @@ func (h *tunHandler) Handle(conn net.Conn) {
 	}
 
 	var tempDelay time.Duration
-	for {
+	for ctx.Err() == nil {
 		err := func() error {
 			var err error
 			var pc net.PacketConn
@@ -121,6 +123,8 @@ func (h *tunHandler) Handle(conn net.Conn) {
 		select {
 		case <-h.chExit:
 			return
+		case <-ctx.Done():
+			h.chExit <- struct{}{}
 		default:
 		}
 
@@ -156,9 +160,10 @@ func (h *tunHandler) findRouteFor(dst net.IP) net.Addr {
 
 func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.Addr) error {
 	errc := make(chan error, 1)
-
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)
 	go func() {
-		for {
+		for ctx.Err() == nil {
 			err := func() error {
 				b := util.SPool.Get().([]byte)
 				defer util.SPool.Put(b)
@@ -232,7 +237,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 	}()
 
 	go func() {
-		for {
+		for ctx.Err() == nil {
 			err := func() error {
 				b := util.SPool.Get().([]byte)
 				defer util.SPool.Put(b)
@@ -316,9 +321,18 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 		}
 	}()
 
-	err := <-errc
-	if err != nil && err == io.EOF {
-		err = nil
+	select {
+	case err := <-errc:
+		if err != nil && err == io.EOF {
+			err = nil
+		}
+		return err
+	case <-ctx.Done():
+		return nil
 	}
-	return err
+	//err := <-errc
+	//if err != nil && err == io.EOF {
+	//	err = nil
+	//}
+	//return err
 }

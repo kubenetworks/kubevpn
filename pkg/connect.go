@@ -11,6 +11,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"os"
+	"path/filepath"
 )
 
 var (
@@ -46,11 +48,19 @@ var connectCmd = &cobra.Command{
 	},
 	PostRun: func(_ *cobra.Command, _ []string) {
 		if util.IsWindows() {
-			_ = retry.OnError(retry.DefaultRetry, func(err error) bool {
+			err := retry.OnError(retry.DefaultRetry, func(err error) bool {
 				return err != nil
 			}, func() error {
 				return driver.UninstallWireGuardTunDriver()
 			})
+			if err != nil {
+				wd, _ := os.Getwd()
+				filename := filepath.Join(wd, "wintun.dll")
+				err = os.Rename(filename, filepath.Join(os.TempDir(), "wintun.dll"))
+				if err != nil {
+					log.Warn(err)
+				}
+			}
 		}
 	},
 }

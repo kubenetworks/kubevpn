@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/driver"
 	"github.com/wencaiwulue/kubevpn/util"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -26,11 +25,6 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 	go func() {
 		<-stopChan
 		log.Info("prepare to exit, cleaning up")
-		for _, function := range CancelFunctions {
-			if function != nil {
-				function()
-			}
-		}
 		for _, ipNet := range ip {
 			if err := ReleaseIpToDHCP(clientset, namespace, ipNet); err != nil {
 				log.Errorf("failed to release ip to dhcp, err: %v", err)
@@ -58,16 +52,12 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 			}(controller)
 		}
 		wg.Wait()
-		err := retry.OnError(retry.DefaultRetry, func(err error) bool {
-			return err != nil
-		}, func() error {
-			return driver.UninstallWireGuardTunDriver()
-		})
-		if err != nil {
-			log.Warnln(err)
-		}
 		log.Info("clean up successful")
-		os.Exit(0)
+		for _, function := range CancelFunctions {
+			if function != nil {
+				function()
+			}
+		}
 	}()
 }
 
