@@ -43,7 +43,7 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 	for _, ipNet := range nodeCIDR {
 		args = append(args, "iptables -t nat -A POSTROUTING -s "+ipNet.String()+" -o eth0 -j MASQUERADE")
 	}
-	args = append(args, "kubevpn server -L socks5://:10800 -L tun://:8421?net="+serverIp.String()+" --debug=true")
+	args = append(args, "kubevpn serve -L socks5://:10800 -L tun://:8421?net="+serverIp.String()+" --debug=true")
 
 	t := true
 	zero := int64(0)
@@ -146,7 +146,7 @@ func CreateServerInbound(factory cmdutil.Factory, clientset *kubernetes.Clientse
 							"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 -j MASQUERADE;" +
 							"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 -j DNAT --to " + virtualLocalIp + ":80-60000;" +
 							"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 -j MASQUERADE;" +
-							"kubevpn server -L 'tun://0.0.0.0:8421/" + realRouterIP + ":8421?net=" + virtualShadowIp + "&route=" + routes + "' --debug=true",
+							"kubevpn serve -L 'tun://0.0.0.0:8421/" + realRouterIP + ":8421?net=" + virtualShadowIp + "&route=" + routes + "' --debug=true",
 					},
 					SecurityContext: &v1.SecurityContext{
 						Capabilities: &v1.Capabilities{

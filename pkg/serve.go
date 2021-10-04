@@ -14,9 +14,9 @@ func init() {
 }
 
 var ServerCmd = &cobra.Command{
-	Use:   "server",
-	Short: "server",
-	Long:  `server`,
+	Use:   "serve",
+	Short: "serve",
+	Long:  `serve`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		return nil
 	},
