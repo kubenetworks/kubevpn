@@ -1,4 +1,5 @@
 //go:build !windows
+// +build !windows
 
 package util
 
@@ -8,13 +9,14 @@ import (
 	"os/exec"
 )
 
+//	TODO optimize while send single CRTL+C, command will quit immediately, but output will cutoff and print util quit final
 func RunWithElevated() {
-	command := exec.Command("sudo", os.Args...)
-	log.Info(command.Args)
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
-	command.Stdin = os.Stdin
-	err := command.Run()
+	cmd := exec.Command("sudo", os.Args...)
+	log.Info(cmd.Args)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	err := cmd.Run()
 	if err != nil {
 		log.Warn(err)
 	}
