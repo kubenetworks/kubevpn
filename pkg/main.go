@@ -149,6 +149,10 @@ func Main() {
 	if err := dns.DNS(dnsServiceIp, namespace); err != nil {
 		log.Fatal(err)
 	}
+	// wait for exit
+	select {
+	case <-ctx.Done():
+	}
 }
 
 func start() error {

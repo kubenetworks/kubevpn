@@ -3,11 +3,13 @@ package pkg
 import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/wencaiwulue/kubevpn/driver"
 	"github.com/wencaiwulue/kubevpn/util"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
 
@@ -41,8 +43,15 @@ var connectCmd = &cobra.Command{
 		util.SetupLogger()
 		InitClient()
 		Main()
-		// hang up
-		select {}
+	},
+	PostRun: func(_ *cobra.Command, _ []string) {
+		if util.IsWindows() {
+			_ = retry.OnError(retry.DefaultRetry, func(err error) bool {
+				return err != nil
+			}, func() error {
+				return driver.UninstallWireGuardTunDriver()
+			})
+		}
 	},
 }
 
