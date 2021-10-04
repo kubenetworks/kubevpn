@@ -7,6 +7,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/core"
 	"github.com/wencaiwulue/kubevpn/tun"
 	"net"
+	"strings"
 )
 
 type route struct {
@@ -129,4 +130,18 @@ func (r *router) Close() error {
 		return nil
 	}
 	return r.server.Close()
+}
+
+func parseIPRoutes(routeStringList string) (routes []tun.IPRoute) {
+	if len(routeStringList) == 0 {
+		return
+	}
+
+	ss := strings.Split(routeStringList, ",")
+	for _, s := range ss {
+		if _, inet, _ := net.ParseCIDR(strings.TrimSpace(s)); inet != nil {
+			routes = append(routes, tun.IPRoute{Dest: inet})
+		}
+	}
+	return
 }
