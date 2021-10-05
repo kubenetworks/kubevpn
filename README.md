@@ -8,16 +8,18 @@ kubernetes cluster service can also access your local service
 ```shell
 git clone https://github.com/wencaiwulue/kubevpn.git
 cd kubevpn
-make kubevpn-linux/kubevpn-macos/kubevpn-windows
+make kubevpn-linux
+make kubevpn-macos
+make kubevpn-windows
 ```
 
 if you are using windows, you can build by this command:
 
 ```shell
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o kubevpn.exe ./pkg
+go build
 ```
 
-attention: if you are using Windows, you need run kubevpn.exe in terminal which needs to be opened by administrator
+attention: if you are using Windows, run kubevpn.exe in terminal which needs to be opened by administrator
 
 ## Functions
 
