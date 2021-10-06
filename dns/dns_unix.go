@@ -113,8 +113,8 @@ func networkCancel() {
 					dnsServers := strings.Split(string(output), "\n")
 					dnsServers = dnsServers[1 : len(dnsServers)-1]
 					if len(dnsServers) == 0 {
-						// set default dns server to 1.1.1.1
-						dnsServers = append(dnsServers, "1.1.1.1")
+						// set default dns server to 1.1.1.1 or just keep on empty
+						dnsServers = append(dnsServers, "empty")
 					}
 					args := []string{"-setdnsservers", s}
 					combinedOutput, err := exec.Command("networksetup", append(args, dnsServers...)...).Output()
