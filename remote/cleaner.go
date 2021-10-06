@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/dns"
 	"github.com/wencaiwulue/kubevpn/util"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -25,6 +26,7 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 	go func() {
 		<-stopChan
 		log.Info("prepare to exit, cleaning up")
+		dns.CancelDNS()
 		for _, ipNet := range ip {
 			if err := ReleaseIpToDHCP(clientset, namespace, ipNet); err != nil {
 				log.Errorf("failed to release ip to dhcp, err: %v", err)

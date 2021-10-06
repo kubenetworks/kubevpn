@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package dns
@@ -9,7 +10,7 @@ import (
 )
 
 // systemd-resolve --status, systemd-resolve --flush-caches
-func DNS(ip string, namespace string) error {
+func SetupDNS(ip string, namespace string) error {
 	tunName := os.Getenv("tunName")
 	if len(tunName) == 0 {
 		tunName = "tun0"
@@ -28,4 +29,7 @@ func DNS(ip string, namespace string) error {
 	}
 
 	return nil
+}
+
+func CancelDNS() {
 }

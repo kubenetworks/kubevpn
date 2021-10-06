@@ -10,7 +10,7 @@ import (
 	"os/exec"
 )
 
-func DNS(ip string, namespace string) error {
+func SetupDNS(ip string, namespace string) error {
 	tunName := os.Getenv("tunName")
 	log.Info("tun name: " + tunName)
 	_ = cleanDnsServer(tunName)
@@ -30,6 +30,9 @@ func DNS(ip string, namespace string) error {
 	_ = addNicSuffixSearchList(namespace)
 	_ = updateNicMetric(tunName)
 	return nil
+}
+
+func CancelDNS() {
 }
 
 // @see https://docs.microsoft.com/en-us/powershell/module/dnsclient/set-dnsclientglobalsetting?view=windowsserver2019-ps#example-1--set-the-dns-suffix-search-list

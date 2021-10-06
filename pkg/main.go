@@ -146,7 +146,7 @@ func Main() {
 	_ = exec.Command("ping", "-c", "4", "223.254.254.100").Run()
 
 	dnsServiceIp := dns.GetDNSServiceIpFromPod(clientset, restclient, config, util.TrafficManager, namespace)
-	if err := dns.DNS(dnsServiceIp, namespace); err != nil {
+	if err := dns.SetupDNS(dnsServiceIp, namespace); err != nil {
 		log.Fatal(err)
 	}
 	// wait for exit
