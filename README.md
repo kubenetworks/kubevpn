@@ -1,4 +1,4 @@
-# kubevpn
+# KubeVPN
 
 A tools which can connect to kubernetes cluster network, you can access remote kubernetes cluster network, remote
 kubernetes cluster service can also access your local service
