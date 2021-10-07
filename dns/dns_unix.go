@@ -16,6 +16,7 @@ import (
 )
 
 var cancel context.CancelFunc
+var resolv = "/etc/resolv.conf"
 
 func SetupDNS(ip string, namespace string) error {
 	/*var err error
@@ -34,7 +35,6 @@ func SetupDNS(ip string, namespace string) error {
 	var ctx context.Context
 	ctx, cancel = context.WithCancel(context.TODO())
 	go func() {
-		resolv := "/etc/resolv.conf"
 		//ticker := time.NewTicker(time.Second * 10)
 		newWatcher, _ := fsnotify.NewWatcher()
 		defer newWatcher.Close()
@@ -128,8 +128,12 @@ func networkSetup(ip string, namespace string) {
 		output, err := cmd.Output()
 		if err == nil {
 			var nameservers []string
-			if strings.Contains(string(output), "There aren't any") {
+			if strings.Contains(string(output), "There aren't any DNS Servers") {
 				nameservers = make([]string, 0, 0)
+				// fix networksetup -getdnsservers is empty, but resolv.conf nameserver is not empty
+				if rc, err := miekgdns.ClientConfigFromFile(resolv); err == nil {
+					nameservers = rc.Servers
+				}
 			} else {
 				nameservers = strings.Split(string(output), "\n")
 				nameservers = nameservers[:len(nameservers)-1]

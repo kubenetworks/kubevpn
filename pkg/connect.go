@@ -66,7 +66,6 @@ var connectCmd = &cobra.Command{
 }
 
 func InitClient() {
-	log.Infof("kubeconfig path: %s, namespace: %s, serivces: %v", kubeconfigpath, namespace, workloads)
 	var err error
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
 	configFlags.KubeConfig = &kubeconfigpath
@@ -86,4 +85,5 @@ func InitClient() {
 			log.Fatal(err)
 		}
 	}
+	log.Infof("kubeconfig path: %s, namespace: %s, serivces: %v", kubeconfigpath, namespace, workloads)
 }

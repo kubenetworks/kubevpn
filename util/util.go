@@ -211,10 +211,10 @@ func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config 
 		return "", err
 	}
 	containerName := pod.Spec.Containers[0].Name
-	stdin, stdout, stderr := dockerterm.StdStreams()
+	stdin, _, stderr := dockerterm.StdStreams()
 
 	stdoutBuf := bytes.NewBuffer(nil)
-	stdout = io.MultiWriter(stdout, stdoutBuf)
+	stdout := io.MultiWriter(stdoutBuf)
 	StreamOptions := exec.StreamOptions{
 		Namespace:     namespace,
 		PodName:       podName,
