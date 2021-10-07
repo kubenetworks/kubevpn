@@ -4,6 +4,7 @@
 package dns
 
 import (
+	"context"
 	"fmt"
 	"github.com/fsnotify/fsnotify"
 	miekgdns "github.com/miekg/dns"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"time"
 )
+
+var cancel context.CancelFunc
 
 func SetupDNS(ip string, namespace string) error {
 	/*var err error
@@ -29,6 +32,8 @@ func SetupDNS(ip string, namespace string) error {
 	fileContent = "nameserver " + ip + "\nsearch " + namespace + ".svc.cluster.local svc.cluster.local cluster.local\noptions ndots:5"
 	_ = ioutil.WriteFile(filename, []byte(fileContent), fs.ModePerm)*/
 	networkSetup(ip, namespace)
+	var ctx context.Context
+	ctx, cancel = context.WithCancel(context.TODO())
 	go func() {
 		resolv := "/etc/resolv.conf"
 		ticker := time.NewTicker(time.Second * 10)
@@ -58,6 +63,8 @@ func SetupDNS(ip string, namespace string) error {
 					rc.Timeout = 1
 					_ = ioutil.WriteFile(resolv, []byte(toString(*rc)), 0644)
 				}
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
@@ -95,6 +102,7 @@ func toString(config miekgdns.ClientConfig) string {
 }
 
 func CancelDNS() {
+	cancel()
 	networkCancel()
 }
 
