@@ -13,7 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"os/exec"
 	"strings"
-	"time"
 )
 
 var cancel context.CancelFunc
@@ -36,7 +35,7 @@ func SetupDNS(ip string, namespace string) error {
 	ctx, cancel = context.WithCancel(context.TODO())
 	go func() {
 		resolv := "/etc/resolv.conf"
-		ticker := time.NewTicker(time.Second * 10)
+		//ticker := time.NewTicker(time.Second * 10)
 		newWatcher, _ := fsnotify.NewWatcher()
 		defer newWatcher.Close()
 		_ = newWatcher.Add(resolv)
@@ -44,8 +43,8 @@ func SetupDNS(ip string, namespace string) error {
 		c <- struct{}{}
 		for {
 			select {
-			case <-ticker.C:
-				c <- struct{}{}
+			//case <-ticker.C:
+			//	c <- struct{}{}
 			case e := <-newWatcher.Events:
 				if e.Op == fsnotify.Write {
 					c <- struct{}{}
@@ -57,9 +56,9 @@ func SetupDNS(ip string, namespace string) error {
 						for _, s := range []string{namespace + ".svc.cluster.local", "svc.cluster.local", "cluster.local"} {
 							rc.Search = append(rc.Search, s)
 						}
-						rc.Ndots = 5
+						//rc.Ndots = 5
 					}
-					rc.Attempts = 1
+					//rc.Attempts = 1
 					rc.Timeout = 1
 					_ = ioutil.WriteFile(resolv, []byte(toString(*rc)), 0644)
 				}
@@ -92,12 +91,12 @@ func toString(config miekgdns.ClientConfig) string {
 	if len(config.Search) > 0 {
 		builder.WriteString(fmt.Sprintf("search %s\n", strings.Join(config.Search, " ")))
 	}
-	for _, server := range config.Servers {
-		builder.WriteString(fmt.Sprintf("nameserver %s\n", server))
+	for i := range config.Servers {
+		builder.WriteString(fmt.Sprintf("nameserver %s\n", config.Servers[i]))
 	}
 	builder.WriteString(fmt.Sprintf("options ndots:%d\n", config.Ndots))
 	builder.WriteString(fmt.Sprintf("options timeout:%d\n", config.Timeout))
-	builder.WriteString(fmt.Sprintf("options attempts:%d\n", config.Attempts))
+	//builder.WriteString(fmt.Sprintf("options attempts:%d\n", config.Attempts))
 	return builder.String()
 }
 
@@ -135,11 +134,10 @@ func networkSetup(ip string, namespace string) {
 				nameservers = strings.Split(string(output), "\n")
 				nameservers = nameservers[:len(nameservers)-1]
 			}
-			newNameservers := make([]string, len(nameservers)+1, len(nameservers)+1)
-			copy(newNameservers[1:], nameservers)
-			newNameservers[0] = ip
+			// add to tail
+			nameservers = append(nameservers, ip)
 			args := []string{"-setdnsservers", s}
-			output, err = exec.Command("networksetup", append(args, newNameservers...)...).Output()
+			output, err = exec.Command("networksetup", append(args, nameservers...)...).Output()
 			if err != nil {
 				log.Warnf("error while set dnsserver for %s, err: %v, output: %s\n", s, err, string(output))
 			}
@@ -186,7 +184,9 @@ func networkCancel() {
 				output, err := exec.Command("networksetup", "-getdnsservers", s).Output()
 				if err == nil {
 					dnsServers := strings.Split(string(output), "\n")
-					dnsServers = dnsServers[1 : len(dnsServers)-1]
+					// dnsServers[len(dnsServers)-1]=""
+					// dnsServers[len(dnsServers)-2]="ip which added by KubeVPN"
+					dnsServers = dnsServers[:len(dnsServers)-2]
 					if len(dnsServers) == 0 {
 						// set default dns server to 1.1.1.1 or just keep on empty
 						dnsServers = append(dnsServers, "empty")
