@@ -1,6 +1,8 @@
 package util
 
 import (
+	"bytes"
+	"net"
 	"sync"
 	"time"
 )
@@ -48,5 +50,16 @@ var (
 )
 
 var (
-	DefaultMTU = 1350
+	DefaultMTU = getMTU()
 )
+
+func getMTU() int {
+	if ift, err := net.Interfaces(); err == nil {
+		for _, ifi := range ift {
+			if ifi.Flags&net.FlagUp != 0 && bytes.Compare(ifi.HardwareAddr, nil) != 0 {
+				return ifi.MTU
+			}
+		}
+	}
+	return 1350
+}
