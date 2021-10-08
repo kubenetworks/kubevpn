@@ -42,22 +42,20 @@ var connectCmd = &cobra.Command{
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		util.SetupLogger()
+		util.SetupLogger(util.Debug)
 		InitClient()
 		Main()
 	},
 	PostRun: func(_ *cobra.Command, _ []string) {
 		if util.IsWindows() {
-			err := retry.OnError(retry.DefaultRetry, func(err error) bool {
+			if err := retry.OnError(retry.DefaultRetry, func(err error) bool {
 				return err != nil
 			}, func() error {
 				return driver.UninstallWireGuardTunDriver()
-			})
-			if err != nil {
+			}); err != nil {
 				wd, _ := os.Getwd()
 				filename := filepath.Join(wd, "wintun.dll")
-				err = os.Rename(filename, filepath.Join(os.TempDir(), "wintun.dll"))
-				if err != nil {
+				if err = os.Rename(filename, filepath.Join(os.TempDir(), "wintun.dll")); err != nil {
 					log.Warn(err)
 				}
 			}

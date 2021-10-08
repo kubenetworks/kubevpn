@@ -21,7 +21,7 @@ var ServerCmd = &cobra.Command{
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		util.SetupLogger()
+		util.SetupLogger(util.Debug)
 		if err := start(); err != nil {
 			log.Fatal(err)
 		}
