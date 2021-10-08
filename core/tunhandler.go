@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/wencaiwulue/kubevpn/remote"
 	"github.com/wencaiwulue/kubevpn/util"
 	"io"
@@ -17,25 +16,6 @@ import (
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 )
-
-var mIPProts = map[waterutil.IPProtocol]string{
-	waterutil.HOPOPT:     "HOPOPT",
-	waterutil.ICMP:       "ICMP",
-	waterutil.IGMP:       "IGMP",
-	waterutil.GGP:        "GGP",
-	waterutil.TCP:        "TCP",
-	waterutil.UDP:        "UDP",
-	waterutil.IPv6_Route: "IPv6-Route",
-	waterutil.IPv6_Frag:  "IPv6-Frag",
-	waterutil.IPv6_ICMP:  "IPv6-ICMP",
-}
-
-func ipProtocol(p waterutil.IPProtocol) string {
-	if v, ok := mIPProts[p]; ok {
-		return v
-	}
-	return fmt.Sprintf("unknown(%d)", p)
-}
 
 type tunRouteKey [16]byte
 
@@ -185,9 +165,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 						return nil
 					}
 					if util.Debug {
-						log.Debugf("[tun] %s -> %s %-4s %d/%-4d %-4x %d",
-							header.Src, header.Dst, ipProtocol(waterutil.IPv4Protocol(b[:n])),
-							header.Len, header.TotalLen, header.ID, header.Flags)
+						log.Debugf("[tun] %s", header.String())
 					}
 					src, dst = header.Src, header.Dst
 				} else if waterutil.IsIPv6(b[:n]) {
@@ -197,10 +175,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 						return nil
 					}
 					if util.Debug {
-						log.Debugf("[tun] %s -> %s %s %d %d",
-							header.Src, header.Dst,
-							ipProtocol(waterutil.IPProtocol(header.NextHeader)),
-							header.PayloadLen, header.TrafficClass)
+						log.Debugf("[tun] %s", header.String())
 					}
 					src, dst = header.Src, header.Dst
 				} else {
@@ -256,9 +231,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 						return nil
 					}
 					if util.Debug {
-						log.Debugf("[tun] %s -> %s %-4s %d/%-4d %-4x %d",
-							header.Src, header.Dst, ipProtocol(waterutil.IPv4Protocol(b[:n])),
-							header.Len, header.TotalLen, header.ID, header.Flags)
+						log.Debugf("[tun] %s", header.String())
 					}
 					src, dst = header.Src, header.Dst
 				} else if waterutil.IsIPv6(b[:n]) {
@@ -268,10 +241,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 						return nil
 					}
 					if util.Debug {
-						log.Debugf("[tun] %s -> %s %s %d %d",
-							header.Src, header.Dst,
-							ipProtocol(waterutil.IPProtocol(header.NextHeader)),
-							header.PayloadLen, header.TrafficClass)
+						log.Debugf("[tun] %s", header.String())
 					}
 					src, dst = header.Src, header.Dst
 				} else {
