@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 var cancel context.CancelFunc
@@ -35,20 +36,21 @@ func SetupDNS(ip string, namespace string) error {
 	var ctx context.Context
 	ctx, cancel = context.WithCancel(context.TODO())
 	go func() {
-		//ticker := time.NewTicker(time.Second * 10)
+		ticker := time.NewTicker(time.Second * 10)
 		newWatcher, _ := fsnotify.NewWatcher()
 		defer newWatcher.Close()
+		defer ticker.Stop()
 		_ = newWatcher.Add(resolv)
 		c := make(chan struct{}, 1)
 		c <- struct{}{}
 		for {
 			select {
-			//case <-ticker.C:
-			//	c <- struct{}{}
-			case e := <-newWatcher.Events:
-				if e.Op == fsnotify.Write {
-					c <- struct{}{}
-				}
+			case <-ticker.C:
+				c <- struct{}{}
+			case /*e :=*/ <-newWatcher.Events:
+				//if e.Op == fsnotify.Write {
+				c <- struct{}{}
+				//}
 			case <-c:
 				if rc, err := miekgdns.ClientConfigFromFile(resolv); err == nil && rc.Timeout != 1 {
 					if !sets.NewString(rc.Servers...).Has(ip) {
