@@ -9,9 +9,12 @@ import (
 	"github.com/fsnotify/fsnotify"
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
+	"io/fs"
 	"io/ioutil"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -19,19 +22,35 @@ import (
 var cancel context.CancelFunc
 var resolv = "/etc/resolv.conf"
 
+//	sw_vers to using different strategy on different
 func SetupDNS(ip string, namespace string) error {
-	/*var err error
+	usingResolver(ip, namespace)
+	_ = exec.Command("killall", "mDNSResponderHelper").Run()
+	_ = exec.Command("killall", "-HUP", "mDNSResponder").Run()
+	_ = exec.Command("dscacheutil", "-flushcache").Run()
+	return nil
+}
+
+func usingResolver(ip string, namespace string) {
+	var err error
 	_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
 	if err = os.MkdirAll(filepath.Join("/", "etc", "resolver"), fs.ModePerm); err != nil {
 		log.Error(err)
 	}
+	builder := strings.Builder{}
+	builder.WriteString(fmt.Sprintf("nameserver %s\n", ip))
+	builder.WriteString(fmt.Sprintf("search %s\n", strings.Join([]string{namespace + ".svc.cluster.local", "svc.cluster.local", "cluster.local"}, " ")))
+	builder.WriteString(fmt.Sprintf("options ndots:5\n"))
+	builder.WriteString(fmt.Sprintf("options timeout:1\n"))
+
 	filename := filepath.Join("/", "etc", "resolver", "local")
-	fileContent := "nameserver " + ip
-	_ = ioutil.WriteFile(filename, []byte(fileContent), fs.ModePerm)
+	_ = ioutil.WriteFile(filename, []byte(builder.String()), 0644)
 
 	filename = filepath.Join("/", "etc", "resolver", namespace)
-	fileContent = "nameserver " + ip + "\nsearch " + namespace + ".svc.cluster.local svc.cluster.local cluster.local\noptions ndots:5"
-	_ = ioutil.WriteFile(filename, []byte(fileContent), fs.ModePerm)*/
+	_ = ioutil.WriteFile(filename, []byte(builder.String()), 0644)
+}
+
+func usingNetworkSetup(ip string, namespace string) {
 	networkSetup(ip, namespace)
 	var ctx context.Context
 	ctx, cancel = context.WithCancel(context.TODO())
@@ -69,7 +88,6 @@ func SetupDNS(ip string, namespace string) error {
 			}
 		}
 	}()
-	return nil
 }
 
 func toString(config miekgdns.ClientConfig) string {
@@ -103,8 +121,11 @@ func toString(config miekgdns.ClientConfig) string {
 }
 
 func CancelDNS() {
-	cancel()
-	networkCancel()
+	if cancel != nil {
+		cancel()
+	}
+	_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
+	//networkCancel()
 }
 
 /*
