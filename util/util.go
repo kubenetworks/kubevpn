@@ -104,6 +104,19 @@ func GetAvailablePortOrDie() int {
 	return listener.Addr().(*net.TCPAddr).Port
 }
 
+func GetAvailableUDPPortOrDie() int {
+	address, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:0", "0.0.0.0"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	listener, err := net.ListenUDP("udp", address)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer listener.Close()
+	return listener.LocalAddr().(*net.UDPAddr).Port
+}
+
 func WaitPod(clientset *kubernetes.Clientset, namespace string, list metav1.ListOptions, checker func(*v1.Pod) bool) error {
 	return WaitResource(
 		clientset,
