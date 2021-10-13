@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/wencaiwulue/kubevpn/util"
 	"net"
-	"net/url"
 	"strconv"
 	"time"
 
@@ -616,25 +615,6 @@ func toSocksAddr(addr net.Addr) *gosocks5.Addr {
 		Type: gosocks5.AddrIPv4,
 		Host: host,
 		Port: uint16(port),
-	}
-}
-
-type socks5HandshakeOptions struct {
-	selector gosocks5.Selector
-	user     *url.Userinfo
-}
-
-type socks5HandshakeOption func(opts *socks5HandshakeOptions)
-
-func selectorSocks5HandshakeOption(selector gosocks5.Selector) socks5HandshakeOption {
-	return func(opts *socks5HandshakeOptions) {
-		opts.selector = selector
-	}
-}
-
-func userSocks5HandshakeOption(user *url.Userinfo) socks5HandshakeOption {
-	return func(opts *socks5HandshakeOptions) {
-		opts.user = user
 	}
 }
 
