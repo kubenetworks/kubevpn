@@ -30,11 +30,11 @@ const (
 )
 
 type ConnectOptions struct {
-	nodeConfig     Route
-	Kubeconfigpath string
+	KubeconfigPath string
 	Namespace      string
 	Mode           Mode
 	Workloads      []string
+	nodeConfig     Route
 	clientset      *kubernetes.Clientset
 	restclient     *rest.RESTClient
 	config         *rest.Config
@@ -265,7 +265,7 @@ func getCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, e
 func (c *ConnectOptions) InitClient() {
 	var err error
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-	configFlags.KubeConfig = &c.Kubeconfigpath
+	configFlags.KubeConfig = &c.KubeconfigPath
 	c.factory = cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 
 	if c.config, err = c.factory.ToRESTConfig(); err != nil {
@@ -282,5 +282,5 @@ func (c *ConnectOptions) InitClient() {
 			log.Fatal(err)
 		}
 	}
-	log.Infof("kubeconfig path: %s, namespace: %s, serivces: %v", c.Kubeconfigpath, c.Namespace, c.Workloads)
+	log.Infof("kubeconfig path: %s, namespace: %s, serivces: %v", c.KubeconfigPath, c.Namespace, c.Workloads)
 }
