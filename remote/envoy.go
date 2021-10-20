@@ -134,7 +134,7 @@ var s = `static_resources:
                       routes:
                         - match:
                             headers:
-                              - name: kubernetes-route-as
+                              - name: KubeVPN-Routing-Tag
                                 exact_match: %s
                             prefix: "/"
                           route:
