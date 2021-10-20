@@ -137,10 +137,10 @@ func parseIPRoutes(routeStringList string) (routes []tun.IPRoute) {
 		return
 	}
 
-	ss := strings.Split(routeStringList, ",")
-	for _, s := range ss {
-		if _, inet, _ := net.ParseCIDR(strings.TrimSpace(s)); inet != nil {
-			routes = append(routes, tun.IPRoute{Dest: inet})
+	routeList := strings.Split(routeStringList, ",")
+	for _, route := range routeList {
+		if _, ipNet, _ := net.ParseCIDR(strings.TrimSpace(route)); ipNet != nil {
+			routes = append(routes, tun.IPRoute{Dest: ipNet})
 		}
 	}
 	return

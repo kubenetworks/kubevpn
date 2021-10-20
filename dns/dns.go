@@ -11,8 +11,8 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-func GetDNSServiceIpFromPod(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) string {
-	if ip, err := getDNSIp(clientset); err == nil && len(ip) != 0 {
+func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) string {
+	if ip, err := getDNSIP(clientset); err == nil && len(ip) != 0 {
 		return ip
 	}
 	if ip, err := util.Shell(clientset, restclient, config, util.TrafficManager, namespace, "cat /etc/resolv.conf | grep nameserver | awk '{print$2}'"); err == nil && len(ip) != 0 {
@@ -22,7 +22,7 @@ func GetDNSServiceIpFromPod(clientset *kubernetes.Clientset, restclient *rest.RE
 	return ""
 }
 
-func getDNSIp(clientset *kubernetes.Clientset) (string, error) {
+func getDNSIP(clientset *kubernetes.Clientset) (string, error) {
 	serviceList, err := clientset.CoreV1().Services(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("metadata.name", "kube-dns").String(),
 	})
