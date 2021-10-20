@@ -11,7 +11,10 @@ import (
 	"github.com/wencaiwulue/kubevpn/util"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"net"
 	"os/exec"
 	"strings"
@@ -19,8 +22,27 @@ import (
 	"time"
 )
 
-func prepare() {
-	k8sCIDRs, err := getCIDR(clientset, namespace)
+type Mode string
+
+const (
+	Mesh    Mode = "mesh"
+	Reverse Mode = "reverse"
+)
+
+type ConnectOptions struct {
+	nodeConfig     Route
+	Kubeconfigpath string
+	Namespace      string
+	Mode           Mode
+	Workloads      []string
+	clientset      *kubernetes.Clientset
+	restclient     *rest.RESTClient
+	config         *rest.Config
+	factory        cmdutil.Factory
+}
+
+func (c *ConnectOptions) createRemotePod() {
+	k8sCIDRs, err := getCIDR(c.clientset, c.Namespace)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -34,36 +56,37 @@ func prepare() {
 		Mask: net.CIDRMask(24, 32),
 	}
 
-	if err = remote.InitDHCP(clientset, namespace, &trafficManager); err != nil {
+	manager := remote.NewDHCPManager(c.clientset, c.Namespace, &trafficManager)
+	if err = manager.InitDHCP(); err != nil {
 		log.Fatal(err)
 	}
-	tunIp, err := remote.GetIpFromDHCP(clientset, namespace)
+	tunIp, err := manager.RentIPBaseNICAddress()
 	if err != nil {
 		log.Fatal(err)
 	}
-	pod, err := remote.CreateServerOutbound(clientset, namespace, &trafficManager, k8sCIDRs)
+	pod, err := remote.CreateServerOutbound(c.clientset, c.Namespace, &trafficManager, k8sCIDRs)
 	if err != nil {
 		log.Fatal(err)
 	}
 	tempIps := []*net.IPNet{tunIp}
 	wg := sync.WaitGroup{}
 	lock := sync.Mutex{}
-	for _, workload := range workloads {
+	for _, workload := range c.Workloads {
 		if len(workload) > 0 {
 			wg.Add(1)
 			go func(finalWorkload string) {
 				defer wg.Done()
 				lock.Lock()
-				virtualShadowIp, _ := remote.GetRandomIpFromDHCP(clientset, namespace)
+				virtualShadowIp, _ := manager.RentIPRandom()
 				tempIps = append(tempIps, virtualShadowIp)
 				lock.Unlock()
 
 				// TODO OPTIMIZE CODE
-				if mesh == mode {
+				if c.Mode == Mesh {
 					err = remote.PatchSidecar(
-						factory,
-						clientset,
-						namespace,
+						c.factory,
+						c.clientset,
+						c.Namespace,
 						finalWorkload,
 						tunIp.IP.String(),
 						pod.Status.PodIP,
@@ -72,9 +95,9 @@ func prepare() {
 					)
 				} else {
 					err = remote.CreateServerInbound(
-						factory,
-						clientset,
-						namespace,
+						c.factory,
+						c.clientset,
+						c.Namespace,
 						finalWorkload,
 						tunIp.IP.String(),
 						pod.Status.PodIP,
@@ -89,7 +112,7 @@ func prepare() {
 		}
 	}
 	wg.Wait()
-	remote.AddCleanUpResourceHandler(clientset, namespace, workloads, tempIps...)
+	remote.AddCleanUpResourceHandler(c.clientset, c.Namespace, c.Workloads, manager, tempIps...)
 	if util.IsWindows() {
 		tunIp.Mask = net.CIDRMask(0, 32)
 	} else {
@@ -98,8 +121,8 @@ func prepare() {
 
 	list = append(list, trafficManager.String())
 
-	nodeConfig.ChainNodes = "socks5://127.0.0.1:10800?notls=true"
-	nodeConfig.ServeNodes = []string{fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", tunIp.String(), strings.Join(list, ","))}
+	c.nodeConfig.ChainNodes = "socks5://127.0.0.1:10800?notls=true"
+	c.nodeConfig.ServeNodes = []string{fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", tunIp.String(), strings.Join(list, ","))}
 
 	log.Info("your ip is " + tunIp.String())
 
@@ -108,8 +131,8 @@ func prepare() {
 	}
 }
 
-func Main() {
-	prepare()
+func (c *ConnectOptions) DoConnect() {
+	c.createRemotePod()
 	var readyChanRef *chan struct{}
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)
@@ -124,10 +147,10 @@ func Main() {
 				readChan := make(chan struct{})
 				readyChanRef = &readChan
 				err := util.PortForwardPod(
-					config,
-					restclient,
+					c.config,
+					c.restclient,
 					util.TrafficManager,
-					namespace,
+					c.Namespace,
 					"10800:10800",
 					readChan,
 					make(chan struct{}),
@@ -147,7 +170,7 @@ func Main() {
 	<-*readyChanRef
 	log.Info("port forward ready")
 
-	if err := start(); err != nil {
+	if err := Start(c.nodeConfig); err != nil {
 		log.Fatal(err)
 	}
 
@@ -160,18 +183,16 @@ func Main() {
 	log.Info("dns service ok")
 	_ = exec.Command("ping", "-c", "4", "223.254.254.100").Run()
 
-	dnsServiceIp := dns.GetDNSServiceIpFromPod(clientset, restclient, config, util.TrafficManager, namespace)
-	if err := dns.SetupDNS(dnsServiceIp, namespace); err != nil {
+	dnsServiceIp := dns.GetDNSServiceIpFromPod(c.clientset, c.restclient, c.config, util.TrafficManager, c.Namespace)
+	if err := dns.SetupDNS(dnsServiceIp, c.Namespace); err != nil {
 		log.Fatal(err)
 	}
 	// wait for exit
-	select {
-	case <-ctx.Done():
-	}
+	<-ctx.Done()
 }
 
-func start() error {
-	routers, err := nodeConfig.GenRouters()
+func Start(r Route) error {
+	routers, err := r.GenRouters()
 	if err != nil {
 		return err
 	}
@@ -232,4 +253,27 @@ func getCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, e
 		return result, nil
 	}
 	return nil, fmt.Errorf("can not found cidr")
+}
+
+func (c *ConnectOptions) InitClient() {
+	var err error
+	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags.KubeConfig = &c.Kubeconfigpath
+	c.factory = cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
+
+	if c.config, err = c.factory.ToRESTConfig(); err != nil {
+		log.Fatal(err)
+	}
+	if c.restclient, err = c.factory.RESTClient(); err != nil {
+		log.Fatal(err)
+	}
+	if c.clientset, err = c.factory.KubernetesClientSet(); err != nil {
+		log.Fatal(err)
+	}
+	if len(c.Namespace) == 0 {
+		if c.Namespace, _, err = c.factory.ToRawKubeConfigLoader().Namespace(); err != nil {
+			log.Fatal(err)
+		}
+	}
+	log.Infof("kubeconfig path: %s, namespace: %s, serivces: %v", c.Kubeconfigpath, c.Namespace, c.Workloads)
 }

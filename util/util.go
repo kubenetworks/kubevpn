@@ -3,6 +3,7 @@ package util
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	dockerterm "github.com/moby/term"
 	"github.com/pkg/errors"
@@ -416,4 +417,13 @@ func SplitResourceTypeName(s string) (ResourceTuple, bool, error) {
 
 func DeleteConfigMap(clientset *kubernetes.Clientset, namespace, configMapName string) {
 	_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.Background(), configMapName, metav1.DeleteOptions{})
+}
+
+func BytesToInt(b []byte) uint32 {
+	buffer := bytes.NewBuffer(b)
+	var u uint32
+	if err := binary.Read(buffer, binary.BigEndian, &u); err != nil {
+		log.Warn(err)
+	}
+	return u
 }

@@ -10,13 +10,13 @@ import (
 	"strings"
 )
 
-type route struct {
+type Route struct {
 	ServeNodes []string // -L tun
 	ChainNodes string   // -F socks5
 	Retries    int
 }
 
-func (r *route) parseChain() (*core.Chain, error) {
+func (r *Route) parseChain() (*core.Chain, error) {
 	chain := core.NewChain()
 	chain.Retries = r.Retries
 
@@ -43,7 +43,7 @@ func parseChainNode(ns string) (*core.Node, error) {
 	return &node, nil
 }
 
-func (r *route) GenRouters() ([]router, error) {
+func (r *Route) GenRouters() ([]router, error) {
 	chain, err := r.parseChain()
 	if err != nil {
 		if !errors.Is(err, core.ErrInvalidNode) {

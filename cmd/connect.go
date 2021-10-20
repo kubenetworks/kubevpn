@@ -1,0 +1,53 @@
+package cmd
+
+import (
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
+	"github.com/wencaiwulue/kubevpn/driver"
+	"github.com/wencaiwulue/kubevpn/pkg"
+	"github.com/wencaiwulue/kubevpn/util"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/retry"
+	"os"
+	"path/filepath"
+)
+
+var connect pkg.ConnectOptions
+
+func init() {
+	connectCmd.Flags().StringVar(&connect.Kubeconfigpath, "kubeconfig", clientcmd.RecommendedHomeFile, "kubeconfig")
+	connectCmd.Flags().StringVarP(&connect.Namespace, "namespace", "n", "", "namespace")
+	connectCmd.PersistentFlags().StringArrayVar(&connect.Workloads, "workloads", []string{}, "workloads, like: services/tomcat, deployment/nginx, replicaset/tomcat...")
+	connectCmd.Flags().StringVar((*string)(&connect.Mode), "mode", string(pkg.Reverse), "default mode is reverse")
+	connectCmd.Flags().BoolVar(&util.Debug, "debug", false, "true/false")
+	RootCmd.AddCommand(connectCmd)
+}
+
+var connectCmd = &cobra.Command{
+	Use:   "connect",
+	Short: "connect",
+	Long:  `connect`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		return nil
+	},
+	Run: func(cmd *cobra.Command, args []string) {
+		util.SetupLogger(util.Debug)
+		connect.InitClient()
+		connect.DoConnect()
+	},
+	PostRun: func(_ *cobra.Command, _ []string) {
+		if util.IsWindows() {
+			if err := retry.OnError(retry.DefaultRetry, func(err error) bool {
+				return err != nil
+			}, func() error {
+				return driver.UninstallWireGuardTunDriver()
+			}); err != nil {
+				wd, _ := os.Getwd()
+				filename := filepath.Join(wd, "wintun.dll")
+				if err = os.Rename(filename, filepath.Join(os.TempDir(), "wintun.dll")); err != nil {
+					log.Warn(err)
+				}
+			}
+		}
+	},
+}

@@ -1,10 +1,8 @@
 package remote
 
 import (
-	"bytes"
 	"context"
 	"crypto/md5"
-	"encoding/binary"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/util"
 	v1 "k8s.io/api/core/v1"
@@ -17,14 +15,33 @@ import (
 	"strings"
 )
 
-// todo optimize dhcp, using mac address, ip and deadline as unit
-func InitDHCP(client *kubernetes.Clientset, namespace string, addr *net.IPNet) error {
-	get, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
+type DHCP interface {
+	RentIP() net.IPNet
+	ReleaseIP(ip net.IPNet)
+}
+
+type DHCPManager struct {
+	client    *kubernetes.Clientset
+	namespace string
+	cidr      *net.IPNet
+}
+
+func NewDHCPManager(client *kubernetes.Clientset, namespace string, addr *net.IPNet) *DHCPManager {
+	return &DHCPManager{
+		client:    client,
+		namespace: namespace,
+		cidr:      addr,
+	}
+}
+
+//	todo optimize dhcp, using mac address, ip and deadline as unit
+func (d *DHCPManager) InitDHCP() error {
+	get, err := d.client.CoreV1().ConfigMaps(d.namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
 	if err == nil && get != nil {
 		return nil
 	}
-	if addr == nil {
-		addr = &net.IPNet{IP: net.IPv4(254, 254, 254, 100), Mask: net.IPv4Mask(255, 255, 255, 0)}
+	if d.cidr == nil {
+		d.cidr = &net.IPNet{IP: net.IPv4(254, 254, 254, 100), Mask: net.IPv4Mask(255, 255, 255, 0)}
 	}
 	var ips []string
 	for i := 2; i < 254; i++ {
@@ -35,12 +52,12 @@ func InitDHCP(client *kubernetes.Clientset, namespace string, addr *net.IPNet) e
 	result := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      util.TrafficManager,
-			Namespace: namespace,
+			Namespace: d.namespace,
 			Labels:    map[string]string{},
 		},
 		Data: map[string]string{"DHCP": strings.Join(ips, ",")},
 	}
-	_, err = client.CoreV1().ConfigMaps(namespace).Create(context.Background(), result, metav1.CreateOptions{})
+	_, err = d.client.CoreV1().ConfigMaps(d.namespace).Create(context.Background(), result, metav1.CreateOptions{})
 	if err != nil {
 		log.Errorf("create dhcp error, err: %v", err)
 		return err
@@ -48,8 +65,8 @@ func InitDHCP(client *kubernetes.Clientset, namespace string, addr *net.IPNet) e
 	return nil
 }
 
-func GetIpFromDHCP(clientset *kubernetes.Clientset, namespace string) (*net.IPNet, error) {
-	get, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
+func (d *DHCPManager) RentIPBaseNICAddress() (*net.IPNet, error) {
+	get, err := d.client.CoreV1().ConfigMaps(d.namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
 	if err != nil {
 		log.Errorf("failed to get ip from dhcp, err: %v", err)
 		return nil, err
@@ -59,7 +76,7 @@ func GetIpFromDHCP(clientset *kubernetes.Clientset, namespace string) (*net.IPNe
 	ip, left := getIp(split)
 
 	get.Data["DHCP"] = strings.Join(left, ",")
-	_, err = clientset.CoreV1().ConfigMaps(namespace).Update(context.Background(), get, metav1.UpdateOptions{})
+	_, err = d.client.CoreV1().ConfigMaps(d.namespace).Update(context.Background(), get, metav1.UpdateOptions{})
 	if err != nil {
 		log.Errorf("update dhcp error after get ip, need to put ip back, err: %v", err)
 		return nil, err
@@ -71,8 +88,8 @@ func GetIpFromDHCP(clientset *kubernetes.Clientset, namespace string) (*net.IPNe
 	}, nil
 }
 
-func GetRandomIpFromDHCP(clientset *kubernetes.Clientset, namespace string) (*net.IPNet, error) {
-	get, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
+func (d *DHCPManager) RentIPRandom() (*net.IPNet, error) {
+	get, err := d.client.CoreV1().ConfigMaps(d.namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
 	if err != nil {
 		log.Errorf("failed to get ip from dhcp, err: %v", err)
 		return nil, err
@@ -83,7 +100,7 @@ func GetRandomIpFromDHCP(clientset *kubernetes.Clientset, namespace string) (*ne
 	split = split[1:]
 
 	get.Data["DHCP"] = strings.Join(split, ",")
-	_, err = clientset.CoreV1().ConfigMaps(namespace).Update(context.Background(), get, metav1.UpdateOptions{})
+	_, err = d.client.CoreV1().ConfigMaps(d.namespace).Update(context.Background(), get, metav1.UpdateOptions{})
 	if err != nil {
 		log.Errorf("update dhcp error after get ip, need to put ip back, err: %v", err)
 		return nil, err
@@ -108,7 +125,7 @@ out:
 				hash := md5.New()
 				hash.Write([]byte(i.HardwareAddr.String()))
 				sum := hash.Sum(nil)
-				v = BytesToInt(sum)
+				v = util.BytesToInt(sum)
 				break out
 			}
 		}
@@ -158,17 +175,8 @@ func sortString(m []string) []string {
 	return s
 }
 
-func BytesToInt(b []byte) uint32 {
-	buffer := bytes.NewBuffer(b)
-	var u uint32
-	if err := binary.Read(buffer, binary.BigEndian, &u); err != nil {
-		log.Warn(err)
-	}
-	return u
-}
-
-func ReleaseIpToDHCP(clientset *kubernetes.Clientset, namespace string, ip *net.IPNet) error {
-	get, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
+func (d *DHCPManager) ReleaseIpToDHCP(ip *net.IPNet) error {
+	get, err := d.client.CoreV1().ConfigMaps(d.namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
 	if err != nil {
 		log.Errorf("failed to get dhcp, err: %v", err)
 		return err
@@ -176,7 +184,7 @@ func ReleaseIpToDHCP(clientset *kubernetes.Clientset, namespace string, ip *net.
 	split := strings.Split(get.Data["DHCP"], ",")
 	split = append(split, strings.Split(ip.IP.To4().String(), ".")[3])
 	get.Data["DHCP"] = strings.Join(sortString(split), ",")
-	_, err = clientset.CoreV1().ConfigMaps(namespace).Update(context.Background(), get, metav1.UpdateOptions{})
+	_, err = d.client.CoreV1().ConfigMaps(d.namespace).Update(context.Background(), get, metav1.UpdateOptions{})
 	if err != nil {
 		log.Errorf("update dhcp error after release ip, need to try again, err: %v", err)
 		return err

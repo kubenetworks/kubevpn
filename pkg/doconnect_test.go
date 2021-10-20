@@ -5,7 +5,7 @@ import (
 	"crypto/md5"
 	"fmt"
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/remote"
+	"github.com/wencaiwulue/kubevpn/util"
 	"io"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	net2 "k8s.io/apimachinery/pkg/util/net"
@@ -56,7 +56,7 @@ func TestGetMacAddress(t *testing.T) {
 				hash := md5.New()
 				hash.Write([]byte(i.HardwareAddr.String()))
 				sum := hash.Sum(nil)
-				toInt := remote.BytesToInt(sum)
+				toInt := util.BytesToInt(sum)
 				fmt.Println(toInt)
 			}
 		}
