@@ -57,16 +57,31 @@ func prepare() {
 				virtualShadowIp, _ := remote.GetRandomIpFromDHCP(clientset, namespace)
 				tempIps = append(tempIps, virtualShadowIp)
 				lock.Unlock()
-				err = remote.CreateServerInbound(
-					factory,
-					clientset,
-					namespace,
-					finalWorkload,
-					tunIp.IP.String(),
-					pod.Status.PodIP,
-					virtualShadowIp.String(),
-					strings.Join(list, ","),
-				)
+
+				// TODO OPTIMIZE CODE
+				if mesh == mode {
+					err = remote.PatchSidecar(
+						factory,
+						clientset,
+						namespace,
+						finalWorkload,
+						tunIp.IP.String(),
+						pod.Status.PodIP,
+						virtualShadowIp.String(),
+						strings.Join(list, ","),
+					)
+				} else {
+					err = remote.CreateServerInbound(
+						factory,
+						clientset,
+						namespace,
+						finalWorkload,
+						tunIp.IP.String(),
+						pod.Status.PodIP,
+						virtualShadowIp.String(),
+						strings.Join(list, ","),
+					)
+				}
 				if err != nil {
 					log.Error(err)
 				}

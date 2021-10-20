@@ -19,6 +19,7 @@ var (
 	nodeConfig     route
 	kubeconfigpath string
 	namespace      string
+	mode           Mode
 	workloads      []string
 	clientset      *kubernetes.Clientset
 	restclient     *rest.RESTClient
@@ -26,10 +27,18 @@ var (
 	factory        cmdutil.Factory
 )
 
+type Mode string
+
+const (
+	mesh    Mode = "mesh"
+	reverse Mode = "reverse"
+)
+
 func init() {
 	connectCmd.Flags().StringVar(&kubeconfigpath, "kubeconfig", clientcmd.RecommendedHomeFile, "kubeconfig")
 	connectCmd.Flags().StringVarP(&namespace, "namespace", "n", "", "namespace")
 	connectCmd.PersistentFlags().StringArrayVar(&workloads, "workloads", []string{}, "workloads, like: services/tomcat, deployment/nginx, replicaset/tomcat...")
+	connectCmd.Flags().StringVar((*string)(&mode), "mode", string(reverse), "default mode is reverse")
 	connectCmd.Flags().BoolVar(&util.Debug, "debug", false, "true/false")
 	RootCmd.AddCommand(connectCmd)
 }

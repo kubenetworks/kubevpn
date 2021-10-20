@@ -413,3 +413,7 @@ func SplitResourceTypeName(s string) (ResourceTuple, bool, error) {
 	}
 	return ResourceTuple{Resource: resource, Name: name}, true, nil
 }
+
+func DeleteConfigMap(clientset *kubernetes.Clientset, namespace, configMapName string) {
+	_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.Background(), configMapName, metav1.DeleteOptions{})
+}

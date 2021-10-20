@@ -20,4 +20,9 @@ image:
 	chmod +x kubevpn
 	docker build -t naison/kubevpn:v2 -f ./remote/Dockerfile .
 	docker push naison/kubevpn:v2
-	rm -fr kubevpn
+	rm -fr kubevpn.PHONY: image
+
+.PHONY: image_mesh
+image_mesh:
+	docker build -t naison/kubevpnmesh:v2 -f ./remote/DockerfileMesh .
+	docker push naison/kubevpnmesh:v2
