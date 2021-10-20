@@ -32,7 +32,7 @@ func TCPListener(addr string) (tun.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &tcpListener{Listener: tcpKeepAliveListener{ln}}, nil
+	return &tcpListener{Listener: tcpKeepAliveListener{TCPListener: ln}}, nil
 }
 
 type tcpKeepAliveListener struct {
@@ -44,7 +44,7 @@ func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
 	if err != nil {
 		return
 	}
-	tc.SetKeepAlive(true)
-	tc.SetKeepAlivePeriod(util.KeepAliveTime)
+	_ = tc.SetKeepAlive(true)
+	_ = tc.SetKeepAlivePeriod(util.KeepAliveTime)
 	return tc, nil
 }

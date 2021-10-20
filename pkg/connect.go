@@ -225,7 +225,7 @@ func getCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, e
 	var cidrs []*net.IPNet
 	if nodeList, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, node := range nodeList.Items {
-			if _, ip, err := net.ParseCIDR(node.Spec.PodCIDR); err == nil && ip != nil {
+			if _, ip, _ := net.ParseCIDR(node.Spec.PodCIDR); ip != nil {
 				ip.Mask = net.CIDRMask(16, 32)
 				ip.IP = ip.IP.Mask(ip.Mask)
 				cidrs = append(cidrs, ip)
