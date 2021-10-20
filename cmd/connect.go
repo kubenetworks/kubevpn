@@ -27,11 +27,10 @@ var connectCmd = &cobra.Command{
 	Use:   "connect",
 	Short: "connect",
 	Long:  `connect`,
-	Args: func(cmd *cobra.Command, args []string) error {
-		return nil
+	PreRun: func(*cobra.Command, []string) {
+		util.InitLogger(util.Debug)
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		util.SetupLogger(util.Debug)
 		connect.InitClient()
 		connect.DoConnect()
 	},

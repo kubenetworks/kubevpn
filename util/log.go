@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-func SetupLogger(debug bool) {
+func InitLogger(debug bool) {
 	if debug {
 		log.SetLevel(log.DebugLevel)
 	}

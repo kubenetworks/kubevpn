@@ -20,11 +20,10 @@ var ServerCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "serve",
 	Long:  `serve`,
-	Args: func(cmd *cobra.Command, args []string) error {
-		return nil
+	PreRun: func(*cobra.Command, []string) {
+		util.InitLogger(util.Debug)
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		util.SetupLogger(util.Debug)
 		if err := pkg.Start(nodeConfig); err != nil {
 			log.Fatal(err)
 		}
