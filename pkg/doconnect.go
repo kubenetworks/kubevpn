@@ -121,7 +121,7 @@ func (c *ConnectOptions) createRemotePod() {
 
 	list = append(list, trafficManager.String())
 
-	c.nodeConfig.ChainNodes = "socks5://127.0.0.1:10800"
+	c.nodeConfig.ChainNode = "socks5://127.0.0.1:10800"
 	c.nodeConfig.ServeNodes = []string{fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", tunIp.String(), strings.Join(list, ","))}
 
 	log.Info("your ip is " + tunIp.String())

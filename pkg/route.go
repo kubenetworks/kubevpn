@@ -12,7 +12,7 @@ import (
 
 type Route struct {
 	ServeNodes []string // -L tun
-	ChainNodes string   // -F socks5
+	ChainNode  string   // -F socks5
 	Retries    int
 }
 
@@ -21,13 +21,11 @@ func (r *Route) parseChain() (*core.Chain, error) {
 	chain.Retries = r.Retries
 
 	// parse the base nodes
-	nodes, err := parseChainNode(r.ChainNodes)
+	nodes, err := parseChainNode(r.ChainNode)
 	if err != nil {
 		return nil, err
 	}
-
-	chain.AddNodeGroup(nodes)
-
+	chain.SetNode(nodes)
 	return chain, nil
 }
 

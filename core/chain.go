@@ -34,36 +34,12 @@ func newRoute() *Chain {
 	return chain
 }
 
-// Nodes returns the proxy nodes that the chain holds.
-// The first node in each group will be returned.
-func (c *Chain) Nodes() *Node {
+func (c *Chain) Node() *Node {
 	return c.node
 }
 
-// LastNode returns the last node of the node list.
-// If the chain is empty, an empty node will be returned.
-// If the last node is a node group, the first node in the group will be returned.
-func (c *Chain) LastNode() *Node {
-	if c.IsEmpty() {
-		return &Node{}
-	}
-	return c.node
-}
-
-// AddNode appends the node(s) to the chain.
-func (c *Chain) AddNode(node *Node) {
-	if c == nil {
-		return
-	}
+func (c *Chain) SetNode(node *Node) {
 	c.node = node
-}
-
-// AddNodeGroup appends the group(s) to the chain.
-func (c *Chain) AddNodeGroup(groups *Node) {
-	if c == nil {
-		return
-	}
-	c.node = groups
 }
 
 // IsEmpty checks if the chain is empty.
@@ -119,7 +95,7 @@ func (c *Chain) dial(ctx context.Context, network, address string) (net.Conn, er
 		return nil, err
 	}
 
-	cc, err := route.LastNode().Client.ConnectContext(ctx, conn, network, ipAddr)
+	cc, err := route.Node().Client.ConnectContext(ctx, conn, network, ipAddr)
 	if err != nil {
 		conn.Close()
 		return nil, err
@@ -165,7 +141,7 @@ func (c *Chain) getConn(_ context.Context) (conn net.Conn, err error) {
 		err = ErrEmptyChain
 		return
 	}
-	node := c.Nodes()
+	node := c.Node()
 	cc, err := node.Client.Dial(node.Addr)
 	if err != nil {
 		return
@@ -189,6 +165,6 @@ func (c *Chain) selectRouteFor(addr string) (route *Chain, err error) {
 	}
 
 	route = newRoute()
-	route.AddNode(c.node)
+	route.SetNode(c.node)
 	return
 }

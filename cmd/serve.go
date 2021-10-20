@@ -11,7 +11,7 @@ var nodeConfig pkg.Route
 
 func init() {
 	ServerCmd.Flags().StringArrayVarP(&nodeConfig.ServeNodes, "nodeCommand", "L", []string{}, "command needs to be executed")
-	ServerCmd.Flags().StringVarP(&nodeConfig.ChainNodes, "chainCommand", "F", "", "command needs to be executed")
+	ServerCmd.Flags().StringVarP(&nodeConfig.ChainNode, "chainCommand", "F", "", "command needs to be executed")
 	ServerCmd.Flags().BoolVar(&util.Debug, "debug", false, "true/false")
 	RootCmd.AddCommand(ServerCmd)
 }
