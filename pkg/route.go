@@ -34,6 +34,7 @@ func parseChainNode(ns string) (*core.Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	// TODO, how to change it to shadowsocks client
 	node.Client = &core.Client{
 		Connector:   core.SOCKS5UDPTunConnector(),
 		Transporter: core.TCPTransporter(),
@@ -89,21 +90,19 @@ func (r *Route) GenRouters() ([]router, error) {
 		switch node.Protocol {
 		case "tun":
 			handler = core.TunHandler()
+			handler.Init(
+				core.ChainHandlerOption(chain),
+				core.NodeHandlerOption(node),
+				core.IPRoutesHandlerOption(tunRoutes...),
+			)
 		default:
 			handler = core.SOCKS5Handler()
 		}
-
-		handler.Init(
-			core.ChainHandlerOption(chain),
-			core.NodeHandlerOption(node),
-			core.IPRoutesHandlerOption(tunRoutes...),
-		)
 
 		rt := router{
 			node:    node,
 			server:  &core.Server{Listener: ln},
 			handler: handler,
-			chain:   chain,
 		}
 		routers = append(routers, rt)
 	}
@@ -115,7 +114,6 @@ type router struct {
 	node    core.Node
 	server  *core.Server
 	handler core.Handler
-	chain   *core.Chain
 }
 
 func (r *router) Serve(ctx context.Context) error {
