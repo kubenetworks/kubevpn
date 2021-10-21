@@ -3,7 +3,6 @@ package tun
 import (
 	"context"
 	"fmt"
-	"github.com/datawire/dlib/derror"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
 	wireguardtun "golang.zx2c4.com/wireguard/tun"
@@ -63,14 +62,6 @@ func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
 }
 
 func openTun(ctx context.Context) (td wireguardtun.Device, p *net.Interface, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			var ok bool
-			if err, ok = r.(error); !ok {
-				err = derror.PanicToError(r)
-			}
-		}
-	}()
 	interfaceName := "wg1"
 	if td, err = wireguardtun.CreateTUN(interfaceName, 0); err != nil {
 		return nil, nil, fmt.Errorf("failed to create TUN device: %w", err)
