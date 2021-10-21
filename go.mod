@@ -3,9 +3,8 @@ module github.com/wencaiwulue/kubevpn
 go 1.16
 
 require (
-	github.com/datawire/dlib v1.2.4
 	github.com/docker/libcontainer v2.2.1+incompatible
-	github.com/fsnotify/fsnotify v1.4.9 // indirect
+	github.com/fsnotify/fsnotify v1.4.9
 	github.com/ginuerzh/gosocks5 v0.2.0
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
 	github.com/google/go-cmp v0.5.5 // indirect
@@ -22,6 +21,7 @@ require (
 	github.com/sirupsen/logrus v1.8.1
 	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
 	github.com/spf13/cobra v1.1.3
+	github.com/stretchr/testify v1.7.0 // indirect
 	golang.org/x/net v0.0.0-20210927181540-4e4d966f7476
 	golang.org/x/sys v0.0.0-20210927094055-39ccf1dd6fa6
 	golang.zx2c4.com/wireguard v0.0.0-20210927201915-bb745b2ea326
