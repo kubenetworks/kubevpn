@@ -73,7 +73,6 @@ func (h *tunHandler) Handle(conn net.Conn) {
 		err := func() error {
 			var err error
 			var pc net.PacketConn
-			// fake tcp mode will be ignored when the client specifies a chain.
 			if raddr != nil && !h.options.Chain.IsEmpty() {
 				cc, err := h.options.Chain.DialContext(context.Background(), "udp", raddr.String())
 				if err != nil {
@@ -218,8 +217,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 				defer util.SPool.Put(b)
 
 				n, addr, err := conn.ReadFrom(b)
-				if err != nil &&
-					err != shadowaead.ErrShortPacket {
+				if err != nil && err != shadowaead.ErrShortPacket {
 					return err
 				}
 
@@ -258,8 +256,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 				rkey := ipToTunRouteKey(src)
 				if actual, loaded := h.routes.LoadOrStore(rkey, addr); loaded {
 					if actual.(net.Addr).String() != addr.String() {
-						log.Debugf("[tun] update route: %s -> %s (old %s)",
-							src, addr, actual.(net.Addr))
+						log.Debugf("[tun] update route: %s -> %s (old %s)", src, addr, actual.(net.Addr))
 						h.routes.Store(rkey, addr)
 					}
 				} else {
@@ -300,9 +297,4 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 	case <-ctx.Done():
 		return nil
 	}
-	//err := <-errc
-	//if err != nil && err == io.EOF {
-	//	err = nil
-	//}
-	//return err
 }

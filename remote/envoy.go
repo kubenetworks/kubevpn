@@ -292,8 +292,8 @@ func CreateServerInboundForMesh(clientset *kubernetes.Clientset, namespace, work
 }
 
 func RemoveSidecar(clientset *kubernetes.Clientset, namespace, workloads string) error {
-	resourceTuple, parsed, err2 := util.SplitResourceTypeName(workloads)
-	if !parsed || err2 != nil {
+	resourceTuple, parsed, err := util.SplitResourceTypeName(workloads)
+	if !parsed || err != nil {
 		return errors.New("not need")
 	}
 	//controller := util.GetTopController(factory, clientset, namespace, workloads)
@@ -301,19 +301,19 @@ func RemoveSidecar(clientset *kubernetes.Clientset, namespace, workloads string)
 	//	log.Warnf("controller is empty, service: %s-%s", namespace, workloads)
 	//	return nil
 	//}
-	deployment, err2 := clientset.AppsV1().Deployments(namespace).Get(context.TODO(), resourceTuple.Name, metav1.GetOptions{})
-	if err2 != nil {
-		return err2
+	deployment, err := clientset.AppsV1().Deployments(namespace).Get(context.TODO(), resourceTuple.Name, metav1.GetOptions{})
+	if err != nil {
+		return err
 	}
 	// rollback using annotation backup
-	if s2 := deployment.Annotations["kubevpn"]; len(s2) != 0 {
+	if backup := deployment.Annotations["kubevpn"]; len(backup) != 0 {
 		_ = clientset.AppsV1().Deployments(namespace).Delete(context.TODO(), resourceTuple.Name, metav1.DeleteOptions{})
 		d := &v12.Deployment{}
-		if err2 = json.Unmarshal([]byte(s2), d); err2 == nil {
+		if err = json.Unmarshal([]byte(backup), d); err == nil {
 			d.ResourceVersion = ""
-			_, err2 = clientset.AppsV1().Deployments(namespace).Create(context.TODO(), d, metav1.CreateOptions{})
-			if err2 != nil {
-				log.Warnln(err2)
+			_, err = clientset.AppsV1().Deployments(namespace).Create(context.TODO(), d, metav1.CreateOptions{})
+			if err != nil {
+				log.Warnln(err)
 			}
 		}
 	}
