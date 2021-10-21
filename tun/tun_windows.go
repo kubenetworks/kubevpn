@@ -89,24 +89,7 @@ func openTun(ctx context.Context) (td wireguardtun.Device, p *net.Interface, err
 }
 
 func (t *winTunConn) Close() error {
-	// The tun.NativeTun device has a closing mutex which is read locked during
-	// a call to Read(). The read lock prevents a call to Close() to proceed
-	// until Read() actually receives something. To resolve that "deadlock",
-	// we call Close() in one goroutine to wait for the lock and write a bogus
-	// message in another that will be returned by Read().
-	closeCh := make(chan error)
-	go func() {
-		// first message is just to indicate that this goroutine has started
-		closeCh <- nil
-		closeCh <- t.ifce.Close()
-		close(closeCh)
-	}()
-
-	// Not 100%, but we can be fairly sure that Close() is
-	// hanging on the lock, or at least will be by the time
-	// the Read() returns
-	<-closeCh
-	return <-closeCh
+	return t.ifce.Close()
 }
 
 func (t *winTunConn) getLUID() winipcfg.LUID {
