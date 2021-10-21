@@ -17,6 +17,7 @@ import (
 	"time"
 )
 
+// https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
 type controller interface {
 	PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads, virtualLocalIp, realRouterIP, virtualShadowIp, routes string)
 	RemoveSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads, virtualLocalIp, realRouterIP, virtualShadowIp, routes string)
@@ -69,9 +70,9 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 				"iptables -F;" +
 				"iptables -P INPUT ACCEPT;" +
 				"iptables -P FORWARD ACCEPT;" +
-				"iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80:60000 ! -s 127.0.0.1 -j DNAT --to 127.0.0.1:10501;" +
+				"iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80:60000 ! -s 127.0.0.1 -j DNAT --to 127.0.0.1:15006;" +
 				"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 ! -s 127.0.0.1 -j MASQUERADE;" +
-				"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 ! -s 127.0.0.1 -j DNAT --to 127.0.0.1:10501;" +
+				"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 ! -s 127.0.0.1 -j DNAT --to 127.0.0.1:15006;" +
 				"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 ! -s 127.0.0.1 -j MASQUERADE;" +
 				"envoy -c /etc/envoy.yaml",
 		},
@@ -113,7 +114,7 @@ var s = `static_resources:
       address:
         socket_address:
           address: 0.0.0.0
-          port_value: 10501
+          port_value: 15006
       filter_chains:
         - filters:
             - name: envoy.filters.network.http_connection_manager
