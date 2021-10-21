@@ -98,8 +98,8 @@ func (c *socks5UDPTunConnector) ConnectContext(ctx context.Context, conn net.Con
 	conn.SetDeadline(time.Now().Add(util.ConnectTimeout))
 	defer conn.SetDeadline(time.Time{})
 
-	taddr, _ := net.ResolveUDPAddr("udp", address)
-	return newSocks5UDPTunnelConn(conn, nil, taddr)
+	targetAddr, _ := net.ResolveUDPAddr("udp", address)
+	return newSocks5UDPTunnelConn(conn, nil, targetAddr)
 }
 
 type socks5Handler struct {
@@ -407,18 +407,20 @@ func socks5Handshake(conn net.Conn) (net.Conn, error) {
 	return cc, nil
 }
 
+// fake upd connect over tcp
 type socks5UDPTunnelConn struct {
+	// tcp connection
 	net.Conn
-	taddr net.Addr
+	targetAddr net.Addr
 }
 
-func newSocks5UDPTunnelConn(conn net.Conn, raddr, taddr net.Addr) (net.Conn, error) {
+func newSocks5UDPTunnelConn(conn net.Conn, serverAddr, targetAddr net.Addr) (net.Conn, error) {
 	cc, err := socks5Handshake(conn)
 	if err != nil {
 		return nil, err
 	}
 
-	req := gosocks5.NewRequest(gosocks5.CmdUdp, toSocksAddr(raddr))
+	req := gosocks5.NewRequest(gosocks5.CmdUdp, toSocksAddr(serverAddr))
 	if err := req.Write(cc); err != nil {
 		return nil, err
 	}
@@ -439,15 +441,15 @@ func newSocks5UDPTunnelConn(conn net.Conn, raddr, taddr net.Addr) (net.Conn, err
 		return nil, errors.New("socks5 UDP tunnel failure")
 	}
 
-	baddr, err := net.ResolveUDPAddr("udp", reply.Addr.String())
+	bindAddr, err := net.ResolveUDPAddr("udp", reply.Addr.String())
 	if err != nil {
 		return nil, err
 	}
-	log.Debugf("[socks5] udp-tun associate on %s OK", baddr)
+	log.Debugf("[socks5] udp-tun associate on %s OK", bindAddr)
 
 	return &socks5UDPTunnelConn{
-		Conn:  cc,
-		taddr: taddr,
+		Conn:       cc,
+		targetAddr: targetAddr,
 	}, nil
 }
 
@@ -467,7 +469,7 @@ func (c *socks5UDPTunnelConn) ReadFrom(b []byte) (n int, addr net.Addr, err erro
 }
 
 func (c *socks5UDPTunnelConn) Write(b []byte) (n int, err error) {
-	return c.WriteTo(b, c.taddr)
+	return c.WriteTo(b, c.targetAddr)
 }
 
 func (c *socks5UDPTunnelConn) WriteTo(b []byte, addr net.Addr) (n int, err error) {

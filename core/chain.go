@@ -65,7 +65,7 @@ func (c *Chain) DialContext(ctx context.Context, network, address string) (conn 
 }
 
 func (c *Chain) dial(ctx context.Context, network, address string) (net.Conn, error) {
-	route, err := c.selectRouteFor(address)
+	route, err := c.selectRoute()
 	if err != nil {
 		return nil, err
 	}
@@ -152,18 +152,12 @@ func (c *Chain) getConn(_ context.Context) (conn net.Conn, err error) {
 }
 
 func (c *Chain) selectRoute() (route *Chain, err error) {
-	return c.selectRouteFor("")
-}
-
-// selectRouteFor selects route with bypass testing.
-func (c *Chain) selectRouteFor(addr string) (route *Chain, err error) {
 	if c.IsEmpty() {
 		return newRoute(), nil
 	}
 	if c.isRoute {
 		return c, nil
 	}
-
 	route = newRoute()
 	route.SetNode(c.node)
 	return

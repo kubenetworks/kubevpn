@@ -53,7 +53,6 @@ func (h *tunHandler) Init(options ...HandlerOption) {
 }
 
 func (h *tunHandler) Handle(conn net.Conn) {
-	//defer os.Exit(0)
 	defer conn.Close()
 	ctx, cancelFunc := context.WithCancel(context.TODO())
 	remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)

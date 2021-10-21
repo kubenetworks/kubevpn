@@ -100,9 +100,8 @@ func (r *Route) GenRouters() ([]router, error) {
 		}
 
 		rt := router{
-			node:    node,
-			server:  &core.Server{Listener: ln},
-			handler: handler,
+			node:   node,
+			server: &core.Server{Listener: ln, Handler: handler},
 		}
 		routers = append(routers, rt)
 	}
@@ -111,14 +110,13 @@ func (r *Route) GenRouters() ([]router, error) {
 }
 
 type router struct {
-	node    core.Node
-	server  *core.Server
-	handler core.Handler
+	node   core.Node
+	server *core.Server
 }
 
 func (r *router) Serve(ctx context.Context) error {
 	log.Debugf("%s on %s", r.node.String(), r.server.Addr())
-	return r.server.Serve(ctx, r.handler)
+	return r.server.Serve(ctx, r.server.Handler)
 }
 
 func (r *router) Close() error {
