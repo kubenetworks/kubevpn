@@ -65,17 +65,12 @@ func (c *Chain) DialContext(ctx context.Context, network, address string) (conn 
 }
 
 func (c *Chain) dial(ctx context.Context, network, address string) (net.Conn, error) {
-	route, err := c.selectRoute()
-	if err != nil {
-		return nil, err
-	}
-
 	ipAddr := address
 	if address != "" {
 		ipAddr = c.resolve(address)
 	}
 
-	if route.IsEmpty() {
+	if c.IsEmpty() {
 		switch network {
 		case "udp", "udp4", "udp6":
 			if address == "" {
@@ -90,12 +85,12 @@ func (c *Chain) dial(ctx context.Context, network, address string) (net.Conn, er
 		return d.DialContext(ctx, network, ipAddr)
 	}
 
-	conn, err := route.getConn(ctx)
+	conn, err := c.getConn(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	cc, err := route.Node().Client.ConnectContext(ctx, conn, network, ipAddr)
+	cc, err := c.Node().Client.ConnectContext(ctx, conn, network, ipAddr)
 	if err != nil {
 		conn.Close()
 		return nil, err
@@ -122,12 +117,7 @@ func (c *Chain) Conn() (conn net.Conn, err error) {
 	}
 
 	for i := 0; i < retries; i++ {
-		var route *Chain
-		route, err = c.selectRoute()
-		if err != nil {
-			continue
-		}
-		conn, err = route.getConn(ctx)
+		conn, err = c.getConn(ctx)
 		if err == nil {
 			break
 		}
@@ -148,17 +138,5 @@ func (c *Chain) getConn(_ context.Context) (conn net.Conn, err error) {
 	}
 
 	conn = cc
-	return
-}
-
-func (c *Chain) selectRoute() (route *Chain, err error) {
-	if c.IsEmpty() {
-		return newRoute(), nil
-	}
-	if c.isRoute {
-		return c, nil
-	}
-	route = newRoute()
-	route.SetNode(c.node)
 	return
 }

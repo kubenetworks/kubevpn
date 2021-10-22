@@ -17,10 +17,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"net"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -28,10 +26,7 @@ import (
 
 func TestCreateServer(t *testing.T) {
 	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		&clientcmd.ClientConfigLoadingRules{
-			ExplicitPath: clientcmd.RecommendedHomeFile,
-		},
-		nil,
+		&clientcmd.ClientConfigLoadingRules{ExplicitPath: clientcmd.RecommendedHomeFile}, nil,
 	)
 	config, err := clientConfig.ClientConfig()
 	if err != nil {
@@ -66,10 +61,7 @@ func TestGetIp(t *testing.T) {
 
 func TestGetIPFromDHCP(t *testing.T) {
 	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		&clientcmd.ClientConfigLoadingRules{
-			ExplicitPath: filepath.Join(homedir.HomeDir(), clientcmd.RecommendedHomeDir, clientcmd.RecommendedFileName),
-		},
-		nil,
+		&clientcmd.ClientConfigLoadingRules{ExplicitPath: clientcmd.RecommendedHomeFile}, nil,
 	)
 	config, err := clientConfig.ClientConfig()
 	if err != nil {
@@ -80,13 +72,10 @@ func TestGetIPFromDHCP(t *testing.T) {
 		log.Fatal(err)
 	}
 
-	err = InitDHCP(clientset, "test", nil)
-	if err != nil {
-		fmt.Println(err)
-	}
+	manager := NewDHCPManager(clientset, "test", nil)
 	for i := 0; i < 10; i++ {
-		ipNet, err := GetIpFromDHCP(clientset, "test")
-		ipNet2, err := GetIpFromDHCP(clientset, "test")
+		ipNet, err := manager.RentIPRandom()
+		ipNet2, err := manager.RentIPRandom()
 		if err != nil {
 			fmt.Println(err)
 			continue
@@ -94,8 +83,8 @@ func TestGetIPFromDHCP(t *testing.T) {
 			fmt.Printf("%s->%s\n", ipNet.String(), ipNet2.String())
 		}
 		time.Sleep(time.Millisecond * 10)
-		err = ReleaseIpToDHCP(clientset, "test", ipNet)
-		err = ReleaseIpToDHCP(clientset, "test", ipNet2)
+		err = manager.ReleaseIpToDHCP(ipNet)
+		err = manager.ReleaseIpToDHCP(ipNet2)
 		if err != nil {
 			fmt.Println(err)
 		}
