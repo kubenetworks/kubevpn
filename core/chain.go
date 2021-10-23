@@ -15,31 +15,18 @@ var (
 
 // Chain is a proxy chain that holds a list of proxy node groups.
 type Chain struct {
-	isRoute bool
 	Retries int
 	node    *Node
 }
 
 // NewChain creates a proxy chain with a list of proxy nodes.
 // It creates the node groups automatically, one group per node.
-func NewChain() *Chain {
-	return &Chain{}
-}
-
-// newRoute creates a chain route.
-// a chain route is the final route after node selection.
-func newRoute() *Chain {
-	chain := NewChain()
-	chain.isRoute = true
-	return chain
+func NewChain(retry int, node *Node) *Chain {
+	return &Chain{Retries: retry, node: node}
 }
 
 func (c *Chain) Node() *Node {
 	return c.node
-}
-
-func (c *Chain) SetNode(node *Node) {
-	c.node = node
 }
 
 // IsEmpty checks if the chain is empty.

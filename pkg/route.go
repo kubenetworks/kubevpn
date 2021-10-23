@@ -17,16 +17,12 @@ type Route struct {
 }
 
 func (r *Route) parseChain() (*core.Chain, error) {
-	chain := core.NewChain()
-	chain.Retries = r.Retries
-
 	// parse the base nodes
-	nodes, err := parseChainNode(r.ChainNode)
+	node, err := parseChainNode(r.ChainNode)
 	if err != nil {
 		return nil, err
 	}
-	chain.SetNode(nodes)
-	return chain, nil
+	return core.NewChain(r.Retries, node), nil
 }
 
 func parseChainNode(ns string) (*core.Node, error) {
