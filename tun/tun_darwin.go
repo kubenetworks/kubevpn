@@ -29,12 +29,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		mtu = util.DefaultMTU
 	}
 
-	peer := cfg.Peer
-	if peer == "" {
-		peer = ip.String()
-	}
-	cmd := fmt.Sprintf("ifconfig %s inet %s %s mtu %d up",
-		ifce.Name(), cfg.Addr, peer, mtu)
+	cmd := fmt.Sprintf("ifconfig %s inet %s %s mtu %d up", ifce.Name(), cfg.Addr, ip.String(), mtu)
 	log.Debug("[tun]", cmd)
 	args := strings.Split(cmd, " ")
 	if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
