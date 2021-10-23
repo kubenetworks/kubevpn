@@ -4,50 +4,48 @@
 package dns
 
 import (
+	"context"
 	"fmt"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sys/windows"
+	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
+	"net"
 	"os"
 	"os/exec"
+	"strconv"
 )
 
 func SetupDNS(ip string, namespace string) error {
-	tunName := os.Getenv("tunName")
-	log.Info("tun name: " + tunName)
-	_ = cleanDnsServer(tunName)
-	cmd := exec.Command("netsh", []string{
-		"interface",
-		"ipv4",
-		"add",
-		"dnsservers",
-		fmt.Sprintf("name=\"%s\"", tunName),
-		fmt.Sprintf("address=%s", ip),
-		"index=1",
-	}...)
-	output, err := cmd.CombinedOutput()
+	getenv := os.Getenv("luid")
+	parseUint, err := strconv.ParseUint(getenv, 10, 64)
 	if err != nil {
-		log.Warnf("error while set dns server, error: %v, output: %s, command: %v", err, string(output), cmd.Args)
+		log.Warningln(err)
+		return err
 	}
-	_ = addNicSuffixSearchList(namespace)
-	_ = updateNicMetric(tunName)
+	luid := winipcfg.LUID(parseUint)
+	err = luid.SetDNS(windows.AF_INET, []net.IP{net.ParseIP(ip)}, []string{
+		namespace + ".svc.cluster.local",
+		"svc.cluster.local",
+		"cluster.local",
+	})
+	_ = exec.CommandContext(context.Background(), "ipconfig", "/flushdns").Run()
+	if err != nil {
+		log.Warningln(err)
+		return err
+	}
+	//_ = updateNicMetric(tunName)
 	return nil
 }
 
 func CancelDNS() {
-}
-
-// @see https://docs.microsoft.com/en-us/powershell/module/dnsclient/set-dnsclientglobalsetting?view=windowsserver2019-ps#example-1--set-the-dns-suffix-search-list
-func addNicSuffixSearchList(namespace string) error {
-	cmd := exec.Command("PowerShell", []string{
-		"Set-DnsClientGlobalSetting",
-		"-SuffixSearchList",
-		fmt.Sprintf("@(\"%s.svc.cluster.local\", \"svc.cluster.local\")", namespace),
-	}...)
-	output, err := cmd.CombinedOutput()
-	log.Info(cmd.Args)
+	getenv := os.Getenv("luid")
+	parseUint, err := strconv.ParseUint(getenv, 10, 64)
 	if err != nil {
-		log.Warnf("error while set dns suffix search list, err: %v, output: %s, command: %v", err, string(output), cmd.Args)
+		log.Warningln(err)
+		return
 	}
-	return err
+	luid := winipcfg.LUID(parseUint)
+	_ = luid.FlushDNS(windows.AF_INET)
 }
 
 func updateNicMetric(name string) error {
@@ -61,22 +59,6 @@ func updateNicMetric(name string) error {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Warnf("error while update nic metrics, error: %v, output: %s, command: %v", err, string(out), cmd.Args)
-	}
-	return err
-}
-
-func cleanDnsServer(name string) error {
-	cmd := exec.Command("netsh", []string{
-		"interface",
-		"ipv4",
-		"delete",
-		"dnsservers",
-		fmt.Sprintf("\"%s\"", name),
-		"all",
-	}...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Warnf("clean dnsservers failed, error: %v, output: %s, command: %v", err, string(out), cmd.Args)
 	}
 	return err
 }

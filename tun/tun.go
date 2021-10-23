@@ -9,11 +9,10 @@ import (
 	"time"
 )
 
-// TunConfig is the config for TUN device.
-type TunConfig struct {
+// Config is the config for TUN device.
+type Config struct {
 	Name    string
 	Addr    string
-	Peer    string // peer addr of point-to-point on MacOS
 	MTU     int
 	Routes  []IPRoute
 	Gateway string
@@ -23,11 +22,11 @@ type tunListener struct {
 	addr   net.Addr
 	conns  chan net.Conn
 	closed chan struct{}
-	config TunConfig
+	config Config
 }
 
 // TunListener creates a listener for tun tunnel.
-func TunListener(cfg TunConfig) (Listener, error) {
+func TunListener(cfg Config) (Listener, error) {
 	threads := 1
 	ln := &tunListener{
 		conns:  make(chan net.Conn, threads),

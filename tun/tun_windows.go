@@ -1,120 +1,76 @@
 package tun
 
 import (
-	"context"
 	"fmt"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
 	wireguardtun "golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
-	"k8s.io/client-go/util/retry"
 	"net"
-	"os/exec"
-	"strings"
+	"os"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 )
 
-func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
+func createTun(cfg Config) (net.Conn, *net.Interface, error) {
 	ip, ipNet, err := net.ParseCIDR(cfg.Addr)
 	if err != nil {
-		return
+		return nil, nil, err
 	}
-	ifce, itf, err := openTun(context.Background())
-	if err != nil {
-		return
-	}
-	name, err := ifce.Name()
-
-	cmd := fmt.Sprintf("netsh interface ip set address name=\"%s\" "+
-		"source=static addr=%s mask=%s gateway=none",
-		name, ip.String(), ipMask(ipNet.Mask))
-	log.Debug("[tun]", cmd)
-
-	args := strings.Split(cmd, " ")
-	err = retry.OnError(retry.DefaultRetry, func(err error) bool {
-		return err != nil
-	}, func() error {
-		if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
-			return fmt.Errorf("%s: %v", cmd, er)
-		}
-		return nil
-	})
-	if err != nil {
-		return
-	}
-
-	if err = addTunRoutes(name, cfg.Gateway, cfg.Routes...); err != nil {
-		return
-	}
-
-	itf, err = net.InterfaceByName(name)
-	if err != nil {
-		return
-	}
-
-	conn = &winTunConn{
-		ifce: ifce,
-		addr: &net.IPAddr{IP: ip},
-	}
-	return
-}
-
-func openTun(ctx context.Context) (td wireguardtun.Device, p *net.Interface, err error) {
 	interfaceName := "wg1"
-	if td, err = wireguardtun.CreateTUN(interfaceName, 0); err != nil {
+	if len(cfg.Name) != 0 {
+		interfaceName = cfg.Name
+	}
+	tunDevice, err := wireguardtun.CreateTUN(interfaceName, cfg.MTU)
+	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create TUN device: %w", err)
 	}
-	if _, err = td.Name(); err != nil {
-		return nil, nil, fmt.Errorf("failed to get real name of TUN device: %w", err)
+	_ = os.Setenv("luid", fmt.Sprintf("%d", tunDevice.(*wireguardtun.NativeTun).LUID()))
+
+	luid := winipcfg.LUID(tunDevice.(*wireguardtun.NativeTun).LUID())
+	if err = luid.AddIPAddress(net.IPNet{IP: ip, Mask: ipNet.Mask}); err != nil {
+		return nil, nil, err
 	}
-	if i, err := winipcfg.LUID(td.(*wireguardtun.NativeTun).LUID()).Interface(); err != nil {
-		return nil, nil, fmt.Errorf("failed to get interface for TUN device: %w", err)
-	} else {
-		if p, err = net.InterfaceByIndex(int(i.InterfaceIndex)); err != nil {
-			return nil, nil, fmt.Errorf("failed to get interface for TUN device: %w", err)
+
+	if err = addTunRoutes(luid, cfg.Gateway, cfg.Routes...); err != nil {
+		return nil, nil, err
+	}
+
+	row2, _ := luid.Interface()
+	iface, _ := net.InterfaceByIndex(int(row2.InterfaceIndex))
+	return &winTunConn{ifce: tunDevice, addr: &net.IPAddr{IP: ip}}, iface, nil
+}
+
+func addTunRoutes(ifName winipcfg.LUID, gw string, routes ...IPRoute) error {
+	_ = ifName.FlushRoutes(windows.AF_INET)
+	for _, route := range routes {
+		if route.Dest == nil {
+			continue
+		}
+		if gw != "" {
+			route.Gateway = net.ParseIP(gw)
+		} else {
+			route.Gateway = net.IPv4(0, 0, 0, 0)
+		}
+		if err := ifName.AddRoute(*route.Dest, route.Gateway, 0); err != nil {
+			return err
 		}
 	}
-	return td, p, nil
-}
-
-func (t *winTunConn) Close() error {
-	return t.ifce.Close()
-}
-
-func (t *winTunConn) getLUID() winipcfg.LUID {
-	return winipcfg.LUID(t.ifce.(*wireguardtun.NativeTun).LUID())
-}
-
-func (t *winTunConn) addSubnet(_ context.Context, subnet *net.IPNet) error {
-	return t.getLUID().AddIPAddress(*subnet)
-}
-
-func (t *winTunConn) removeSubnet(_ context.Context, subnet *net.IPNet) error {
-	return t.getLUID().DeleteIPAddress(*subnet)
-}
-
-func (t *winTunConn) setDNS(ctx context.Context, server net.IP, domains []string) (err error) {
-	ipFamily := func(ip net.IP) winipcfg.AddressFamily {
-		f := winipcfg.AddressFamily(windows.AF_INET6)
-		if ip4 := ip.To4(); ip4 != nil {
-			f = windows.AF_INET
-		}
-		return f
-	}
-	family := ipFamily(server)
-	luid := t.getLUID()
-	if err = luid.SetDNS(family, []net.IP{server}, domains); err != nil {
-		return err
-	}
-	_ = exec.CommandContext(ctx, "ipconfig", "/flushdns").Run()
 	return nil
 }
 
 type winTunConn struct {
 	ifce wireguardtun.Device
 	addr net.Addr
+}
+
+func (c *winTunConn) Close() error {
+	err := c.ifce.Close()
+	if name, err := c.ifce.Name(); err == nil {
+		if wt, err := wireguardtun.WintunPool.OpenAdapter(name); err == nil {
+			_, err = wt.Delete(true)
+		}
+	}
+	return err
 }
 
 func (c *winTunConn) Read(b []byte) (n int, err error) {
@@ -133,47 +89,14 @@ func (c *winTunConn) RemoteAddr() net.Addr {
 	return &net.IPAddr{}
 }
 
-func (c *winTunConn) SetDeadline(t time.Time) error {
+func (c *winTunConn) SetDeadline(time.Time) error {
 	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
 }
 
-func (c *winTunConn) SetReadDeadline(t time.Time) error {
+func (c *winTunConn) SetReadDeadline(time.Time) error {
 	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
 }
 
-func (c *winTunConn) SetWriteDeadline(t time.Time) error {
+func (c *winTunConn) SetWriteDeadline(time.Time) error {
 	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
-}
-
-func addTunRoutes(ifName string, gw string, routes ...IPRoute) error {
-	for _, route := range routes {
-		if route.Dest == nil {
-			continue
-		}
-
-		deleteRoute(ifName, route.Dest.String())
-
-		cmd := fmt.Sprintf("netsh interface ip add route prefix=%s interface=\"%s\" store=active",
-			route.Dest.String(), ifName)
-		if gw != "" {
-			cmd += " nexthop=" + gw
-		}
-		log.Debugf("[tun] %s", cmd)
-		args := strings.Split(cmd, " ")
-		if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
-			return fmt.Errorf("%s: %v", cmd, er)
-		}
-	}
-	return nil
-}
-
-func deleteRoute(ifName string, route string) error {
-	cmd := fmt.Sprintf("netsh interface ip delete route prefix=%s interface=\"%s\" store=active",
-		route, ifName)
-	args := strings.Split(cmd, " ")
-	return exec.Command(args[0], args[1:]...).Run()
-}
-
-func ipMask(mask net.IPMask) string {
-	return fmt.Sprintf("%d.%d.%d.%d", mask[0], mask[1], mask[2], mask[3])
 }

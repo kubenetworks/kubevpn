@@ -70,10 +70,9 @@ func (r *Route) GenRouters() ([]router, error) {
 		case "tcp":
 			ln, err = core.TCPListener(node.Addr)
 		case "tun":
-			cfg := tun.TunConfig{
+			cfg := tun.Config{
 				Name:    node.Get("name"),
 				Addr:    node.Get("net"),
-				Peer:    node.Get("peer"),
 				MTU:     node.GetInt("mtu"),
 				Routes:  tunRoutes,
 				Gateway: node.Get("gw"),

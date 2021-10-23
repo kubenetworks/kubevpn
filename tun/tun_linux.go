@@ -13,7 +13,7 @@ import (
 	"github.com/songgao/water"
 )
 
-func createTun(cfg TunConfig) (conn net.Conn, itf *net.Interface, err error) {
+func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	ip, ipNet, err := net.ParseCIDR(cfg.Addr)
 	if err != nil {
 		return
