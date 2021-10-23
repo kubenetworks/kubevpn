@@ -27,27 +27,23 @@ type tunListener struct {
 
 // TunListener creates a listener for tun tunnel.
 func TunListener(cfg Config) (Listener, error) {
-	threads := 1
 	ln := &tunListener{
-		conns:  make(chan net.Conn, threads),
+		conns:  make(chan net.Conn, 1),
 		closed: make(chan struct{}),
 		config: cfg,
 	}
 
-	for i := 0; i < threads; i++ {
-		conn, ifce, err := createTun(cfg)
-		if err != nil {
-			return nil, err
-		}
-		ln.addr = conn.LocalAddr()
-
-		addrs, _ := ifce.Addrs()
-		_ = os.Setenv("tunName", ifce.Name)
-		log.Debugf("[tun] %s: name: %s, mtu: %d, addrs: %s",
-			conn.LocalAddr(), ifce.Name, ifce.MTU, addrs)
-
-		ln.conns <- conn
+	conn, ifce, err := createTun(cfg)
+	if err != nil {
+		return nil, err
 	}
+	ln.addr = conn.LocalAddr()
+
+	addrs, _ := ifce.Addrs()
+	_ = os.Setenv("tunName", ifce.Name)
+	log.Debugf("[tun] %s: name: %s, mtu: %d, addrs: %s", conn.LocalAddr(), ifce.Name, ifce.MTU, addrs)
+
+	ln.conns <- conn
 
 	return ln, nil
 }
@@ -106,16 +102,16 @@ func (c *tunConn) RemoteAddr() net.Addr {
 	return &net.IPAddr{}
 }
 
-func (c *tunConn) SetDeadline(t time.Time) error {
+func (c *tunConn) SetDeadline(time.Time) error {
 	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
 }
 
-func (c *tunConn) SetReadDeadline(t time.Time) error {
-	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
+func (c *tunConn) SetReadDeadline(time.Time) error {
+	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("read deadline not supported")}
 }
 
-func (c *tunConn) SetWriteDeadline(t time.Time) error {
-	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
+func (c *tunConn) SetWriteDeadline(time.Time) error {
+	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("write deadline not supported")}
 }
 
 // IPRoute is an IP routing entry.
