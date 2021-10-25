@@ -3,19 +3,17 @@ module github.com/wencaiwulue/kubevpn
 go 1.16
 
 require (
+	github.com/containerd/containerd v1.5.7
 	github.com/docker/libcontainer v2.2.1+incompatible
 	github.com/fsnotify/fsnotify v1.4.9
 	github.com/ginuerzh/gosocks5 v0.2.0
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
-	github.com/google/go-cmp v0.5.5 // indirect
 	github.com/googleapis/gnostic v0.5.1 // indirect
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
-	github.com/imdario/mergo v0.3.11 // indirect
 	github.com/miekg/dns v1.0.14
 	github.com/milosgajdos/tenus v0.0.3
 	github.com/moby/term v0.0.0-20210619224110-3f7ff695adc6
 	github.com/onsi/ginkgo v1.14.1 // indirect
-	github.com/onsi/gomega v1.10.2 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/shadowsocks/go-shadowsocks2 v0.1.5
 	github.com/sirupsen/logrus v1.8.1

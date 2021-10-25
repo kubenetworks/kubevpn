@@ -3,12 +3,14 @@ package util
 import (
 	"errors"
 	"fmt"
+	containerderrors "github.com/containerd/containerd/errdefs"
 	"io"
 	"io/ioutil"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/portforward"
 	"net"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -390,6 +392,19 @@ firstCreateStream:
 	// always expect something on errorChan (it may be nil)
 	err = <-errorChan
 	if err != nil {
+		// docker
+		if IsContainerNotFoundError(err) {
+			close(pf.innerStopChan)
+		} else
+		// containerd
+		if containerderrors.IsNotFound(err) {
+			close(pf.innerStopChan)
+		} else
+		// others
+		if strings.Contains(err.Error(), "no such container") ||
+			strings.Contains(err.Error(), "does not exist") {
+			close(pf.innerStopChan)
+		}
 		runtime.HandleError(err)
 	}
 }
@@ -457,4 +472,12 @@ func (pf *PortForwarder) tryToCreateStream(header *http.Header) (httpstream.Stre
 	}
 	header.Set(v1.PortForwardRequestIDHeader, strconv.Itoa(pf.nextRequestID()))
 	return pf.streamConn.CreateStream(*header)
+}
+
+// containerNotFoundErrorRegx is the regexp of container not found error message.
+var containerNotFoundErrorRegx = regexp.MustCompile(`No such container: [0-9a-z]+`)
+
+// IsContainerNotFoundError checks whether the error is container not found error.
+func IsContainerNotFoundError(err error) bool {
+	return containerNotFoundErrorRegx.MatchString(err.Error())
 }
