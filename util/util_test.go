@@ -54,7 +54,7 @@ func TestDeleteRule(t *testing.T) {
 	DeleteWindowsFirewallRule()
 }
 
-func TestSocks5(t *testing.T) {
+func TestUDP(t *testing.T) {
 	relay, err := net.ListenUDP("udp", &net.UDPAddr{Port: 12345})
 	if err != nil {
 		log.Fatal(err)

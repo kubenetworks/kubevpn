@@ -16,9 +16,9 @@ import (
 type fakeUDPTunConnector struct {
 }
 
-// SOCKS5UDPTunConnector creates a connector for SOCKS5 UDP-over-TCP relay.
+// UDPOverTCPTunnelConnector creates a connector for SOCKS5 UDP-over-TCP relay.
 // It accepts an optional auth info for SOCKS5 Username/Password Authentication.
-func SOCKS5UDPTunConnector() Connector {
+func UDPOverTCPTunnelConnector() Connector {
 	return &fakeUDPTunConnector{}
 }
 
@@ -31,14 +31,14 @@ func (c *fakeUDPTunConnector) ConnectContext(_ context.Context, conn net.Conn, n
 	defer conn.SetDeadline(time.Time{})
 
 	targetAddr, _ := net.ResolveUDPAddr("udp", address)
-	return newFakeUDPTunnelConnOverTcp(conn, targetAddr)
+	return newFakeUDPTunnelConnOverTCP(conn, targetAddr)
 }
 
 type fakeUdpHandler struct {
 }
 
-// SOCKS5Handler creates a server Handler for SOCKS5 proxy server.
-func SOCKS5Handler() Handler {
+// TCPHandler creates a server Handler for SOCKS5 proxy server.
+func TCPHandler() Handler {
 	h := &fakeUdpHandler{}
 	h.Init()
 
@@ -51,7 +51,7 @@ func (h *fakeUdpHandler) Init(...HandlerOption) {
 func (h *fakeUdpHandler) Handle(conn net.Conn) {
 	defer conn.Close()
 	if util.Debug {
-		log.Debugf("[socks5] %s -> %s\n", conn.RemoteAddr(), conn.LocalAddr())
+		log.Debugf("[tcpserver] %s -> %s\n", conn.RemoteAddr(), conn.LocalAddr())
 	}
 	h.handleUDPTunnel(conn)
 }
@@ -89,7 +89,7 @@ func (h *fakeUdpHandler) transportUDP(relay, peer net.PacketConn) (err error) {
 				return
 			}
 			if util.Debug {
-				log.Debugf("[socks5-udp] %s >>> %s length: %d", relay.LocalAddr(), raddr, len(dgram.Data))
+				log.Debugf("[tcpserver-udp] %s >>> %s length: %d", relay.LocalAddr(), raddr, len(dgram.Data))
 			}
 		}
 	}()
@@ -115,77 +115,7 @@ func (h *fakeUdpHandler) transportUDP(relay, peer net.PacketConn) (err error) {
 				return
 			}
 			if util.Debug {
-				log.Debugf("[socks5-udp] %s <<< %s length: %d", relay.LocalAddr(), raddr, len(dgram.Data))
-			}
-		}
-	}()
-
-	return <-errc
-}
-
-func (h *fakeUdpHandler) tunnelClientUDP(uc *net.UDPConn, cc net.Conn) (err error) {
-	errc := make(chan error, 2)
-
-	var clientAddr *net.UDPAddr
-
-	go func() {
-		b := util.MPool.Get().([]byte)
-		defer util.MPool.Put(b)
-
-		for {
-			n, addr, err := uc.ReadFromUDP(b)
-			if err != nil {
-				log.Debugf("[udp-tun] %s <- %s : %s", cc.RemoteAddr(), addr, err)
-				errc <- err
-				return
-			}
-
-			// glog.V(LDEBUG).Infof("read udp %d, % #x", n, b[:n])
-			// pipe from relay to tunnel
-			dgram, err := gosocks5.ReadUDPDatagram(bytes.NewReader(b[:n]))
-			if err != nil {
-				errc <- err
-				return
-			}
-			if clientAddr == nil {
-				clientAddr = addr
-			}
-			//raddr := dgram.Header.Addr.String()
-			dgram.Header.Rsv = uint16(len(dgram.Data))
-			if err := dgram.Write(cc); err != nil {
-				errc <- err
-				return
-			}
-			if util.Debug {
-				log.Debugf("[udp-tun] %s >>> %s length: %d", uc.LocalAddr(), dgram.Header.Addr, len(dgram.Data))
-			}
-		}
-	}()
-
-	go func() {
-		for {
-			dgram, err := gosocks5.ReadUDPDatagram(cc)
-			if err != nil {
-				log.Debugf("[udp-tun] %s -> 0 : %s", cc.RemoteAddr(), err)
-				errc <- err
-				return
-			}
-
-			// pipe from tunnel to relay
-			if clientAddr == nil {
-				continue
-			}
-			//raddr := dgram.Header.Addr.String()
-			dgram.Header.Rsv = 0
-
-			buf := bytes.Buffer{}
-			_ = dgram.Write(&buf)
-			if _, err := uc.WriteToUDP(buf.Bytes(), clientAddr); err != nil {
-				errc <- err
-				return
-			}
-			if util.Debug {
-				log.Debugf("[udp-tun] %s <<< %s length: %d", uc.LocalAddr(), dgram.Header.Addr, len(dgram.Data))
+				log.Debugf("[tcpserver-udp] %s <<< %s length: %d", relay.LocalAddr(), raddr, len(dgram.Data))
 			}
 		}
 	}()
@@ -198,16 +128,16 @@ func (h *fakeUdpHandler) handleUDPTunnel(conn net.Conn) {
 	bindAddr, _ := net.ResolveUDPAddr("udp", ":0")
 	uc, err := net.ListenUDP("udp", bindAddr)
 	if err != nil {
-		log.Debugf("[socks5] udp-tun %s -> %s : %s", conn.RemoteAddr(), bindAddr, err)
+		log.Debugf("[tcpserver] udp-tun %s -> %s : %s", conn.RemoteAddr(), bindAddr, err)
 		return
 	}
 	defer uc.Close()
 	if util.Debug {
-		log.Debugf("[socks5] udp-tun %s <- %s\n", conn.RemoteAddr(), uc.LocalAddr())
+		log.Debugf("[tcpserver] udp-tun %s <- %s\n", conn.RemoteAddr(), uc.LocalAddr())
 	}
-	log.Debugf("[socks5] udp-tun %s <-> %s", conn.RemoteAddr(), uc.LocalAddr())
+	log.Debugf("[tcpserver] udp-tun %s <-> %s", conn.RemoteAddr(), uc.LocalAddr())
 	_ = h.tunnelServerUDP(conn, uc)
-	log.Debugf("[socks5] udp-tun %s >-< %s", conn.RemoteAddr(), uc.LocalAddr())
+	log.Debugf("[tcpserver] udp-tun %s >-< %s", conn.RemoteAddr(), uc.LocalAddr())
 	return
 }
 
@@ -229,12 +159,12 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err er
 			// pipe from peer to tunnel
 			dgram := gosocks5.NewUDPDatagram(gosocks5.NewUDPHeader(uint16(n), 0, toSocksAddr(addr)), b[:n])
 			if err := dgram.Write(cc); err != nil {
-				log.Debugf("[socks5] udp-tun %s <- %s : %s", cc.RemoteAddr(), dgram.Header.Addr, err)
+				log.Debugf("[tcpserver] udp-tun %s <- %s : %s", cc.RemoteAddr(), dgram.Header.Addr, err)
 				errc <- err
 				return
 			}
 			if util.Debug {
-				log.Debugf("[socks5] udp-tun %s <<< %s length: %d", cc.RemoteAddr(), dgram.Header.Addr, len(dgram.Data))
+				log.Debugf("[tcpserver] udp-tun %s <<< %s length: %d", cc.RemoteAddr(), dgram.Header.Addr, len(dgram.Data))
 			}
 		}
 	}()
@@ -254,12 +184,12 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err er
 				continue // drop silently
 			}
 			if _, err := pc.WriteTo(dgram.Data, addr); err != nil {
-				log.Debugf("[socks5] udp-tun %s -> %s : %s", cc.RemoteAddr(), addr, err)
+				log.Debugf("[tcpserver] udp-tun %s -> %s : %s", cc.RemoteAddr(), addr, err)
 				errc <- err
 				return
 			}
 			if util.Debug {
-				log.Debugf("[socks5] udp-tun %s >>> %s length: %d", cc.RemoteAddr(), addr, len(dgram.Data))
+				log.Debugf("[tcpserver] udp-tun %s >>> %s length: %d", cc.RemoteAddr(), addr, len(dgram.Data))
 			}
 		}
 	}()
@@ -289,7 +219,7 @@ type fakeUDPTunnelConn struct {
 	targetAddr net.Addr
 }
 
-func newFakeUDPTunnelConnOverTcp(conn net.Conn, targetAddr net.Addr) (net.Conn, error) {
+func newFakeUDPTunnelConnOverTCP(conn net.Conn, targetAddr net.Addr) (net.Conn, error) {
 	return &fakeUDPTunnelConn{
 		Conn:       conn,
 		targetAddr: targetAddr,

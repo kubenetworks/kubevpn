@@ -12,7 +12,7 @@ import (
 
 type Route struct {
 	ServeNodes []string // -L tun
-	ChainNode  string   // -F socks5
+	ChainNode  string   // -F tcp
 	Retries    int
 }
 
@@ -30,9 +30,8 @@ func parseChainNode(ns string) (*core.Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	// TODO, how to change it to shadowsocks client
 	node.Client = &core.Client{
-		Connector:   core.SOCKS5UDPTunConnector(),
+		Connector:   core.UDPOverTCPTunnelConnector(),
 		Transporter: core.TCPTransporter(),
 	}
 	return &node, nil
@@ -91,7 +90,7 @@ func (r *Route) GenRouters() ([]router, error) {
 				core.IPRoutesHandlerOption(tunRoutes...),
 			)
 		default:
-			handler = core.SOCKS5Handler()
+			handler = core.TCPHandler()
 		}
 
 		rt := router{

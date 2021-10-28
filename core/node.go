@@ -50,8 +50,8 @@ func ParseNode(s string) (node Node, err error) {
 	case "tun":
 		node.Protocol = u.Scheme
 		node.Transport = u.Scheme
-	case "socks5":
-		node.Protocol = u.Scheme
+	case "tcp":
+		node.Protocol = "tcp"
 		node.Transport = "tcp"
 	default:
 		return Node{}, ErrInvalidNode

@@ -43,7 +43,7 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 	for _, ipNet := range nodeCIDR {
 		args = append(args, "iptables -t nat -A POSTROUTING -s "+ipNet.String()+" -o eth0 -j MASQUERADE")
 	}
-	args = append(args, "kubevpn serve -L socks5://:10800 -L tun://:8421?net="+serverIp.String()+" --debug=true")
+	args = append(args, "kubevpn serve -L tcp://:10800 -L tun://:8421?net="+serverIp.String()+" --debug=true")
 
 	t := true
 	zero := int64(0)
