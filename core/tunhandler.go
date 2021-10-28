@@ -3,9 +3,9 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/wencaiwulue/kubevpn/remote"
 	"github.com/wencaiwulue/kubevpn/util"
-	"io"
 	"net"
 	"sync"
 	"time"
@@ -69,7 +69,7 @@ func (h *tunHandler) Handle(conn net.Conn) {
 
 	var tempDelay time.Duration
 	for ctx.Err() == nil {
-		err := func() error {
+		err = func() error {
 			var err error
 			var pc net.PacketConn
 			if raddr != nil && !h.options.Chain.IsEmpty() {
@@ -104,6 +104,7 @@ func (h *tunHandler) Handle(conn net.Conn) {
 		case <-ctx.Done():
 			h.chExit <- struct{}{}
 		default:
+			fmt.Println("next loop")
 		}
 
 		if err != nil {
@@ -137,7 +138,8 @@ func (h *tunHandler) findRouteFor(dst net.IP) net.Addr {
 }
 
 func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.Addr) error {
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
+	defer conn.Close()
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)
 	go func() {
@@ -282,6 +284,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 
 			if err != nil {
 				errc <- err
+				cancelFunc()
 				return
 			}
 		}
@@ -289,9 +292,6 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 
 	select {
 	case err := <-errc:
-		if err != nil && err == io.EOF {
-			err = nil
-		}
 		return err
 	case <-ctx.Done():
 		return nil

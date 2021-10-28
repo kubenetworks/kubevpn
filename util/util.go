@@ -20,6 +20,7 @@ import (
 	"k8s.io/cli-runtime/pkg/printers"
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/portforward"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"strconv"
 
@@ -145,7 +146,7 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 	}
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
 	p := []string{portPair}
-	forwarder, err := NewOnAddresses(dialer, []string{"0.0.0.0"}, p, stopChan, readyChan, os.Stdout, os.Stderr)
+	forwarder, err := portforward.NewOnAddresses(dialer, []string{"0.0.0.0"}, p, stopChan, readyChan, os.Stdout, os.Stderr)
 	if err != nil {
 		log.Error(err)
 		return err

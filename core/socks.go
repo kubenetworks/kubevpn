@@ -221,7 +221,7 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err er
 		for {
 			n, addr, err := pc.ReadFrom(b)
 			if err != nil {
-				// log.Debugf("[udp-tun] %s : %s", cc.RemoteAddr(), err)
+				log.Debugf("[udp-tun] %s : %s", cc.RemoteAddr(), err)
 				errc <- err
 				return
 			}
@@ -243,7 +243,7 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err er
 		for {
 			dgram, err := gosocks5.ReadUDPDatagram(cc)
 			if err != nil {
-				// log.Debugf("[udp-tun] %s -> 0 : %s", cc.RemoteAddr(), err)
+				log.Debugf("[udp-tun] %s -> 0 : %s", cc.RemoteAddr(), err)
 				errc <- err
 				return
 			}
