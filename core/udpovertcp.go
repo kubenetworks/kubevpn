@@ -27,20 +27,6 @@ type DatagramPacket struct {
 	Data       []byte // []byte
 }
 
-func (addr *DatagramPacket) Length() (n int) {
-	switch addr.Type {
-	case AddrIPv4:
-		n = 10
-	case AddrIPv6:
-		n = 22
-	case AddrDomain:
-		n = 7 + len(addr.Host)
-	default:
-		n = 10
-	}
-	return
-}
-
 func (addr *DatagramPacket) String() string {
 	if addr == nil {
 		return ""
