@@ -14,8 +14,7 @@ import (
 type fakeUDPTunConnector struct {
 }
 
-// UDPOverTCPTunnelConnector creates a connector for SOCKS5 UDP-over-TCP relay.
-// It accepts an optional auth info for SOCKS5 Username/Password Authentication.
+// UDPOverTCPTunnelConnector creates a connector for UDP-over-TCP
 func UDPOverTCPTunnelConnector() Connector {
 	return &fakeUDPTunConnector{}
 }
@@ -35,7 +34,7 @@ func (c *fakeUDPTunConnector) ConnectContext(_ context.Context, conn net.Conn, n
 type fakeUdpHandler struct {
 }
 
-// TCPHandler creates a server Handler for SOCKS5 proxy server.
+// TCPHandler creates a server Handler
 func TCPHandler() Handler {
 	h := &fakeUdpHandler{}
 	h.Init()
