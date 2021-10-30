@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/wencaiwulue/kubevpn/util"
 	"net"
-	"strconv"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -75,6 +74,7 @@ func (h *fakeUdpHandler) transportUDP(relay, peer net.PacketConn) (err error) {
 			}
 			dgram, err := ReadDatagramPacket(bytes.NewReader(b[:n]))
 			if err != nil {
+				log.Errorln(err)
 				errc <- err
 				return
 			}
@@ -173,7 +173,7 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err er
 		for {
 			dgram, err := ReadDatagramPacket(cc)
 			if err != nil {
-				log.Debugf("[udp-tun] %s -> 0 : %s", cc.RemoteAddr(), err)
+				log.Debugf("[udp-tun] %s -> 0 : %v", cc.RemoteAddr(), err)
 				errc <- err
 				return
 			}
@@ -198,21 +198,6 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err er
 	return <-errc
 }
 
-func toSocksAddr(addr net.Addr) *DatagramPacket {
-	host := "0.0.0.0"
-	port := 0
-	if addr != nil {
-		h, p, _ := net.SplitHostPort(addr.String())
-		host = h
-		port, _ = strconv.Atoi(p)
-	}
-	return &DatagramPacket{
-		Type: AddrIPv4,
-		Host: host,
-		Port: uint16(port),
-	}
-}
-
 // fake udp connect over tcp
 type fakeUDPTunnelConn struct {
 	// tcp connection
@@ -235,6 +220,7 @@ func (c *fakeUDPTunnelConn) Read(b []byte) (n int, err error) {
 func (c *fakeUDPTunnelConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 	dgram, err := ReadDatagramPacket(c.Conn)
 	if err != nil {
+		log.Errorln(err)
 		return
 	}
 	n = copy(b, dgram.Data)
