@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/util"
 	"io"
 	"net"
 	"strconv"
@@ -84,17 +85,15 @@ func ReadDatagramPacket(r io.Reader) (rr *DatagramPacket, errsss error) {
 	defer func() {
 		log.Infof("result: %s", rr.String())
 	}()
-	//b := util.LPool.Get().([]byte)
-	//defer util.LPool.Put(b)
-	oneB := make([]byte, 1)
-
-	_, err := io.ReadFull(r, oneB)
+	b := util.LPool.Get().([]byte)
+	defer util.LPool.Put(b)
+	_, err := io.ReadFull(r, b[:1])
 	if err != nil {
 		log.Info(err)
 		return nil, err
 	}
 
-	atype := oneB[0]
+	atype := b[0]
 	d := &DatagramPacket{Type: atype}
 	hostLength := 0
 	switch atype {
@@ -103,45 +102,43 @@ func ReadDatagramPacket(r io.Reader) (rr *DatagramPacket, errsss error) {
 	case AddrIPv6:
 		hostLength = net.IPv6len
 	case AddrDomain:
-		_, err = io.ReadFull(r, oneB)
+		_, err = io.ReadFull(r, b[:1])
 		if err != nil {
 			return nil, err
 		}
-		hostLength = int(oneB[0])
+		hostLength = int(b[0])
 	default:
 		return nil, errors.New("")
 	}
 
-	hostB := make([]byte, hostLength)
-
-	if _, err = io.ReadFull(r, hostB); err != nil {
+	if _, err = io.ReadFull(r, b[:hostLength]); err != nil {
 		return nil, err
 	}
 	var host string
 	switch atype {
 	case AddrIPv4:
-		host = net.IPv4(hostB[0], hostB[1], hostB[2], hostB[3]).String()
+		host = net.IPv4(b[0], b[1], b[2], b[3]).String()
 	case AddrIPv6:
 		p := make(net.IP, net.IPv6len)
-		copy(p, hostB)
+		copy(p, b[:hostLength])
 		host = p.String()
 	case AddrDomain:
-		host = string(hostB)
+		host = string(b[:hostLength])
 	}
 	d.Host = host
 
-	fourB := make([]byte, 4)
-	if _, err = io.ReadFull(r, fourB); err != nil {
+	if _, err = io.ReadFull(r, b[:4]); err != nil {
 		return nil, err
 	}
-	d.Port = binary.BigEndian.Uint16(fourB[:2])
-	d.DataLength = binary.BigEndian.Uint16(fourB[2:])
+	d.Port = binary.BigEndian.Uint16(b[:2])
+	d.DataLength = binary.BigEndian.Uint16(b[2:4])
 
-	data := make([]byte, d.DataLength)
-	if _, err = io.ReadFull(r, data); err != nil && (err != io.ErrUnexpectedEOF || err != io.EOF) {
+	if _, err = io.ReadFull(r, b[:d.DataLength]); err != nil && (err != io.ErrUnexpectedEOF || err != io.EOF) {
 		return nil, err
 	}
-	d.Data = data
+	i := make([]byte, d.DataLength)
+	copy(i, b[:d.DataLength])
+	d.Data = i
 	rr = d
 	return d, nil
 }
