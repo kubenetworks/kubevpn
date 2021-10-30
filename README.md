@@ -1,5 +1,7 @@
 # KubeVPN
 
+[中文](README_ZH.md) | [English](README.md)
+
 A tools which can connect to kubernetes cluster network, you can access remote kubernetes cluster network, remote
 kubernetes cluster service can also access your local service
 
@@ -19,7 +21,11 @@ if you are using windows, you can build by this command:
 go build
 ```
 
-attention: if you are using Windows, run kubevpn.exe in terminal which needs to be opened by administrator
+if you installed Go 1.16+, you can use install it by this command directly:
+
+```shell
+go install github.com/wencaiwulue/kubevpn@latest
+```
 
 ## Functions
 
