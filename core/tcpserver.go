@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ginuerzh/gosocks5"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -74,14 +73,15 @@ func (h *fakeUdpHandler) transportUDP(relay, peer net.PacketConn) (err error) {
 			if clientAddr == nil {
 				clientAddr = laddr
 			}
-			dgram, err := gosocks5.ReadUDPDatagram(bytes.NewReader(b[:n]))
+			dgram, err := ReadDatagramPacket(bytes.NewReader(b[:n]))
 			if err != nil {
 				errc <- err
 				return
 			}
 
-			raddr, err := net.ResolveUDPAddr("udp", dgram.Header.Addr.String())
+			raddr, err := net.ResolveUDPAddr("udp", dgram.Addr())
 			if err != nil {
+				log.Debugf("[tcpserver-udp] addr error, addr: %s, err: %v", dgram.Addr(), err)
 				continue // drop silently
 			}
 			if _, err := peer.WriteTo(dgram.Data, raddr); err != nil {
@@ -108,7 +108,7 @@ func (h *fakeUdpHandler) transportUDP(relay, peer net.PacketConn) (err error) {
 				continue
 			}
 			buf := bytes.Buffer{}
-			dgram := gosocks5.NewUDPDatagram(gosocks5.NewUDPHeader(0, 0, toSocksAddr(raddr)), b[:n])
+			dgram := NewDatagramPacket(raddr, b[:n])
 			_ = dgram.Write(&buf)
 			if _, err := relay.WriteTo(buf.Bytes(), clientAddr); err != nil {
 				errc <- err
@@ -157,21 +157,21 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err er
 			}
 
 			// pipe from peer to tunnel
-			dgram := gosocks5.NewUDPDatagram(gosocks5.NewUDPHeader(uint16(n), 0, toSocksAddr(addr)), b[:n])
+			dgram := NewDatagramPacket(addr, b[:n])
 			if err := dgram.Write(cc); err != nil {
-				log.Debugf("[tcpserver] udp-tun %s <- %s : %s", cc.RemoteAddr(), dgram.Header.Addr, err)
+				log.Debugf("[tcpserver] udp-tun %s <- %s : %s", cc.RemoteAddr(), dgram.Addr(), err)
 				errc <- err
 				return
 			}
 			if util.Debug {
-				log.Debugf("[tcpserver] udp-tun %s <<< %s length: %d", cc.RemoteAddr(), dgram.Header.Addr, len(dgram.Data))
+				log.Debugf("[tcpserver] udp-tun %s <<< %s length: %d", cc.RemoteAddr(), dgram.Addr(), len(dgram.Data))
 			}
 		}
 	}()
 
 	go func() {
 		for {
-			dgram, err := gosocks5.ReadUDPDatagram(cc)
+			dgram, err := ReadDatagramPacket(cc)
 			if err != nil {
 				log.Debugf("[udp-tun] %s -> 0 : %s", cc.RemoteAddr(), err)
 				errc <- err
@@ -179,8 +179,9 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err er
 			}
 
 			// pipe from tunnel to peer
-			addr, err := net.ResolveUDPAddr("udp", dgram.Header.Addr.String())
+			addr, err := net.ResolveUDPAddr("udp", dgram.Addr())
 			if err != nil {
+				log.Debugf("[tcpserver-udp] addr error, addr: %s, err: %v", dgram.Addr(), err)
 				continue // drop silently
 			}
 			if _, err := pc.WriteTo(dgram.Data, addr); err != nil {
@@ -197,7 +198,7 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err er
 	return <-errc
 }
 
-func toSocksAddr(addr net.Addr) *gosocks5.Addr {
+func toSocksAddr(addr net.Addr) *DatagramPacket {
 	host := "0.0.0.0"
 	port := 0
 	if addr != nil {
@@ -205,14 +206,14 @@ func toSocksAddr(addr net.Addr) *gosocks5.Addr {
 		host = h
 		port, _ = strconv.Atoi(p)
 	}
-	return &gosocks5.Addr{
-		Type: gosocks5.AddrIPv4,
+	return &DatagramPacket{
+		Type: AddrIPv4,
 		Host: host,
 		Port: uint16(port),
 	}
 }
 
-// fake upd connect over tcp
+// fake udp connect over tcp
 type fakeUDPTunnelConn struct {
 	// tcp connection
 	net.Conn
@@ -232,12 +233,15 @@ func (c *fakeUDPTunnelConn) Read(b []byte) (n int, err error) {
 }
 
 func (c *fakeUDPTunnelConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
-	dgram, err := gosocks5.ReadUDPDatagram(c.Conn)
+	dgram, err := ReadDatagramPacket(c.Conn)
 	if err != nil {
 		return
 	}
 	n = copy(b, dgram.Data)
-	addr, err = net.ResolveUDPAddr("udp", dgram.Header.Addr.String())
+	addr, err = net.ResolveUDPAddr("udp", dgram.Addr())
+	if err != nil {
+		log.Debugf("[tcpserver-udp] addr error, addr: %s, err: %v", dgram.Addr(), err)
+	}
 	return
 }
 
@@ -246,7 +250,7 @@ func (c *fakeUDPTunnelConn) Write(b []byte) (n int, err error) {
 }
 
 func (c *fakeUDPTunnelConn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
-	dgram := gosocks5.NewUDPDatagram(gosocks5.NewUDPHeader(uint16(len(b)), 0, toSocksAddr(addr)), b)
+	dgram := NewDatagramPacket(addr, b)
 	if err = dgram.Write(c.Conn); err != nil {
 		return
 	}
