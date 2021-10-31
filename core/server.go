@@ -3,8 +3,6 @@ package core
 import (
 	"context"
 	"github.com/wencaiwulue/kubevpn/tun"
-	"github.com/wencaiwulue/kubevpn/util"
-	"io"
 	"k8s.io/client-go/util/retry"
 	"net"
 	"time"
@@ -30,14 +28,6 @@ func (s *Server) Close() error {
 
 // Serve serves as a proxy server.
 func (s *Server) Serve(ctx context.Context, h Handler) error {
-	if s.Listener == nil {
-		ln, err := TCPListener("")
-		if err != nil {
-			return err
-		}
-		s.Listener = ln
-	}
-
 	if h == nil {
 		h = s.Handler
 	}
@@ -80,29 +70,4 @@ func (s *Server) Serve(ctx context.Context, h Handler) error {
 		go h.Handle(conn)
 	}
 	return nil
-}
-
-func transport(rw1, rw2 io.ReadWriter) error {
-	errc := make(chan error, 1)
-	go func() {
-		errc <- copyBuffer(rw1, rw2)
-	}()
-
-	go func() {
-		errc <- copyBuffer(rw2, rw1)
-	}()
-
-	err := <-errc
-	if err != nil && err == io.EOF {
-		err = nil
-	}
-	return err
-}
-
-func copyBuffer(dst io.Writer, src io.Reader) error {
-	buf := util.LPool.Get().([]byte)
-	defer util.LPool.Put(buf)
-
-	_, err := io.CopyBuffer(dst, src, buf)
-	return err
 }

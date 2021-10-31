@@ -1,6 +1,8 @@
 package core
 
 import (
+	"crypto/tls"
+	"github.com/wencaiwulue/kubevpn/tlsconfig"
 	"github.com/wencaiwulue/kubevpn/tun"
 	"github.com/wencaiwulue/kubevpn/util"
 	"net"
@@ -15,7 +17,8 @@ func TCPTransporter() Transporter {
 }
 
 func (tr *tcpTransporter) Dial(addr string) (net.Conn, error) {
-	return net.DialTimeout("tcp", addr, util.DialTimeout)
+	dialer := &net.Dialer{Timeout: util.DialTimeout}
+	return tls.DialWithDialer(dialer, "tcp", addr, tlsconfig.TlsconfigClient)
 }
 
 type tcpListener struct {

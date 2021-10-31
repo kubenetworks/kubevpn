@@ -118,8 +118,7 @@ func (c *Chain) getConn(_ context.Context) (conn net.Conn, err error) {
 		err = ErrEmptyChain
 		return
 	}
-	node := c.Node()
-	cc, err := node.Client.Dial(node.Addr)
+	cc, err := c.Node().Client.Dial(c.Node().Addr)
 	if err != nil {
 		return
 	}

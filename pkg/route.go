@@ -2,9 +2,11 @@ package pkg
 
 import (
 	"context"
+	"crypto/tls"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/core"
+	"github.com/wencaiwulue/kubevpn/tlsconfig"
 	"github.com/wencaiwulue/kubevpn/tun"
 	"net"
 	"strings"
@@ -63,7 +65,8 @@ func (r *Route) GenRouters() ([]router, error) {
 		var ln tun.Listener
 		switch node.Transport {
 		case "tcp":
-			ln, err = core.TCPListener(node.Addr)
+			tcpListener, _ := core.TCPListener(node.Addr)
+			ln = tls.NewListener(tcpListener, tlsconfig.TlsconfigServer)
 		case "tun":
 			cfg := tun.Config{
 				Name:    node.Get("name"),
@@ -73,8 +76,9 @@ func (r *Route) GenRouters() ([]router, error) {
 				Gateway: node.Get("gw"),
 			}
 			ln, err = tun.TunListener(cfg)
-		default:
-			ln, err = core.TCPListener(node.Addr)
+			//default:
+			//	innerLn, _ := core.TCPListener(node.Addr)
+			//	ln = tls.NewListener(innerLn, tlsconfig.TlsconfigServer)
 		}
 		if err != nil {
 			return nil, err

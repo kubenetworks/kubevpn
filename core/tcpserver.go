@@ -37,7 +37,7 @@ type fakeUdpHandler struct {
 // TCPHandler creates a server Handler
 func TCPHandler() Handler {
 	h := &fakeUdpHandler{}
-	h.Init()
+	//h.Init()
 
 	return h
 }

@@ -208,7 +208,7 @@ func TestGetTopController(t *testing.T) {
 	fmt.Println(controller.Scale)
 }
 
-func TestUdp(t *testing.T) {
+func TestUDP(t *testing.T) {
 	go func() {
 		server()
 	}()
