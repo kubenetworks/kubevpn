@@ -182,16 +182,24 @@ func (c *ConnectOptions) DoConnect() {
 	}
 	log.Info("dns service ok")
 	go func() {
+		tick := time.Tick(time.Second * 15)
+		c2 := make(chan struct{}, 1)
+		c2 <- struct{}{}
 		for {
 			select {
-			case <-time.Tick(time.Second * 15):
+			case <-tick:
+				c2 <- struct{}{}
+			case <-c2:
 				_ = exec.Command("ping", "-c", "4", "223.254.254.100").Run()
 			}
 		}
 	}()
 
-	dnsServiceIp := dns.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, util.TrafficManager, c.Namespace)
-	if err := dns.SetupDNS(dnsServiceIp, c.Namespace); err != nil {
+	relovConf, err := dns.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, util.TrafficManager, c.Namespace)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err = dns.SetupDNS(relovConf); err != nil {
 		log.Fatal(err)
 	}
 	// wait for exit

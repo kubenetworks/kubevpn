@@ -6,6 +6,7 @@ package dns
 import (
 	"context"
 	"fmt"
+	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
@@ -15,7 +16,7 @@ import (
 	"strconv"
 )
 
-func SetupDNS(ip string, namespace string) error {
+func SetupDNS(config miekgdns.ClientConfig) error {
 	getenv := os.Getenv("luid")
 	parseUint, err := strconv.ParseUint(getenv, 10, 64)
 	if err != nil {
@@ -23,11 +24,7 @@ func SetupDNS(ip string, namespace string) error {
 		return err
 	}
 	luid := winipcfg.LUID(parseUint)
-	err = luid.SetDNS(windows.AF_INET, []net.IP{net.ParseIP(ip)}, []string{
-		namespace + ".svc.cluster.local",
-		"svc.cluster.local",
-		"cluster.local",
-	})
+	err = luid.SetDNS(windows.AF_INET, []net.IP{net.ParseIP(config.Servers[0])}, config.Search)
 	_ = exec.CommandContext(context.Background(), "ipconfig", "/flushdns").Run()
 	if err != nil {
 		log.Warningln(err)

@@ -30,23 +30,23 @@ var resolv = "/etc/resolv.conf"
 // service.namespace.svc:port
 // service.namespace.svc.cluster:port
 // service.namespace.svc.cluster.local:port
-func SetupDNS(ip string, namespace string) error {
-	usingResolver(ip, namespace)
+func SetupDNS(config *miekgdns.ClientConfig) error {
+	usingResolver(config)
 	_ = exec.Command("killall", "mDNSResponderHelper").Run()
 	_ = exec.Command("killall", "-HUP", "mDNSResponder").Run()
 	_ = exec.Command("dscacheutil", "-flushcache").Run()
 	return nil
 }
 
-func usingResolver(ip string, namespace string) {
+func usingResolver(clientConfig *miekgdns.ClientConfig) {
 	var err error
 	_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
 	if err = os.MkdirAll(filepath.Join("/", "etc", "resolver"), fs.ModePerm); err != nil {
 		log.Error(err)
 	}
 	config := miekgdns.ClientConfig{
-		Servers: []string{ip},
-		Search:  []string{namespace + ".svc.cluster.local", "svc.cluster.local", "cluster.local"},
+		Servers: clientConfig.Servers,
+		Search:  clientConfig.Search,
 		Ndots:   5,
 		Timeout: 1,
 	}
@@ -56,19 +56,19 @@ func usingResolver(ip string, namespace string) {
 
 	// for support like: service.namespace:port, service.namespace.svc:port, service.namespace.svc.cluster:port
 	port := util.GetAvailableUDPPortOrDie()
-	go func(port int, ip, namespace string) {
-		if err = NewDNSServer("udp", "127.0.0.1:"+strconv.Itoa(port), ip+":53", namespace); err != nil {
+	go func(port int, clientConfig *miekgdns.ClientConfig) {
+		if err = NewDNSServer("udp", "127.0.0.1:"+strconv.Itoa(port), clientConfig); err != nil {
 			log.Warnln(err)
 		}
-	}(port, ip, namespace)
+	}(port, clientConfig)
 	config = miekgdns.ClientConfig{
 		Servers: []string{"127.0.0.1"},
-		Search:  []string{namespace + ".svc.cluster.local", "svc.cluster.local", "cluster.local"},
+		Search:  clientConfig.Search,
 		Port:    strconv.Itoa(port),
-		Ndots:   5,
+		Ndots:   clientConfig.Ndots,
 		Timeout: 1,
 	}
-	for _, s := range []string{namespace, "svc", "cluster"} {
+	for _, s := range strings.Split(clientConfig.Search[0], ".") {
 		filename = filepath.Join("/", "etc", "resolver", s)
 		_ = ioutil.WriteFile(filename, []byte(toString(config)), 0644)
 	}

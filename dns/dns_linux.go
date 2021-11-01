@@ -4,24 +4,26 @@
 package dns
 
 import (
+	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 	"os"
 	"os/exec"
 )
 
 // systemd-resolve --status, systemd-resolve --flush-caches
-func SetupDNS(ip string, namespace string) error {
+func SetupDNS(config miekgdns.ClientConfig) error {
 	tunName := os.Getenv("tunName")
 	if len(tunName) == 0 {
 		tunName = "tun0"
 	}
 	cmd := exec.Command("systemd-resolve", []string{
 		"--set-dns",
-		ip,
+		config,
 		"--interface",
 		tunName,
-		"--set-domain=" + namespace + ".svc.cluster.local",
-		"--set-domain=svc.cluster.local",
+		"--set-domain=" + config.Search[0],
+		"--set-domain=" + config.Search[1],
+		"--set-domain=" + config.Search[2],
 	}...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
