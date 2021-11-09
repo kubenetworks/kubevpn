@@ -135,9 +135,9 @@ func CreateServerInbound(factory cmdutil.Factory, clientset *kubernetes.Clientse
 	case "service", "services":
 		sc = NewServiceController(factory, clientset, namespace, resourceTuple.Name)
 	case "pod", "pods":
-		sc = NewPodController(factory, clientset, namespace, resourceTuple.Name)
+		sc = NewPodController(factory, clientset, namespace, "pods", resourceTuple.Name)
 	default:
-		sc = NewPodController(factory, clientset, namespace, resourceTuple.Name)
+		sc = NewPodController(factory, clientset, namespace, resourceTuple.Resource, resourceTuple.Name)
 	}
 	remote.CancelFunctions = append(remote.CancelFunctions, func() {
 		if err := sc.Cancel(); err != nil {

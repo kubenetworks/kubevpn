@@ -52,12 +52,9 @@ func (s *ServiceController) ScaleToZero() (map[string]string, []v1.ContainerPort
 		}
 		return get.Spec.Selector, ports, nil
 	}
-	podController := PodController{
-		factory:   s.factory,
-		clientset: s.clientset,
-		namespace: s.namespace,
-		name:      podList.Items[0].Name, // if podList is not one, needs to merge ???
-	}
+	// if podList is not one, needs to merge ???
+	podController := NewPodController(s.factory, s.clientset, s.namespace, "pods", podList.Items[0].Name)
+
 	zero, ports, err := podController.ScaleToZero()
 	s.f = podController.f
 	return zero, ports, err

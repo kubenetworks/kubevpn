@@ -16,11 +16,12 @@ type PodController struct {
 	factory   cmdutil.Factory
 	clientset *kubernetes.Clientset
 	namespace string
+	resource  string
 	name      string
 	f         func() error
 }
 
-func NewPodController(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, name string) *PodController {
+func NewPodController(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, resource, name string) *PodController {
 	return &PodController{
 		factory:   factory,
 		clientset: clientset,
@@ -30,7 +31,7 @@ func NewPodController(factory cmdutil.Factory, clientset *kubernetes.Clientset, 
 }
 
 func (pod *PodController) ScaleToZero() (map[string]string, []v1.ContainerPort, error) {
-	topController := util.GetTopController(pod.factory, pod.clientset, pod.namespace, fmt.Sprintf("pods/%s", pod.name))
+	topController := util.GetTopController(pod.factory, pod.clientset, pod.namespace, fmt.Sprintf("%s/%s", pod.resource, pod.name))
 	// controllerBy is empty
 	if len(topController.Name) == 0 || len(topController.Resource) == 0 {
 		get, err := pod.clientset.CoreV1().Pods(pod.namespace).Get(context.TODO(), pod.name, v12.GetOptions{})
