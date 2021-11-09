@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/pkg"
 	"github.com/wencaiwulue/kubevpn/util"
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -47,7 +48,7 @@ func TestCreateServer(t *testing.T) {
 		Mask: net.IPv4Mask(255, 255, 0, 0),
 	}
 
-	server, err := CreateServerOutbound(clientset, "test", i, []*net.IPNet{j})
+	server, err := pkg.CreateServerOutbound(clientset, "test", i, []*net.IPNet{j})
 	fmt.Println(server)
 }
 

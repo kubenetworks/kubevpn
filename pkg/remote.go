@@ -1,9 +1,10 @@
-package remote
+package pkg
 
 import (
 	"context"
 	"errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/remote"
 	"github.com/wencaiwulue/kubevpn/util"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -30,7 +31,7 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 	)
 
 	if err3 == nil && i != 0 && firstPod != nil {
-		updateRefCount(clientset, namespace, firstPod.Name, 1)
+		remote.UpdateRefCount(clientset, namespace, firstPod.Name, 1)
 		return firstPod, nil
 	}
 	args := []string{
@@ -119,17 +120,38 @@ func CreateServerInbound(factory cmdutil.Factory, clientset *kubernetes.Clientse
 	}
 	newName := resourceTuple.Name + "-" + "shadow"
 	util.DeletePod(clientset, namespace, newName)
-	err := updateScaleToZero(factory, clientset, namespace, workloads)
-	object, err2 := util.GetUnstructuredObject(factory, namespace, workloads)
-	lables := util.GetLabelSelector(object)
-	ports := util.GetPorts(object)
+	//err := updateScaleToZero(factory, clientset, namespace, workloads)
+	//object, err2 := util.GetUnstructuredObject(factory, namespace, workloads)
+	//labels := util.GetLabelSelector(object.Object)
+	//ports := util.GetPorts(object.Object)
+	var sc Scalable
+	switch strings.ToLower(resourceTuple.Resource) {
+	case "deployment", "deployments":
+		sc = NewDeploymentController(factory, clientset, namespace, resourceTuple.Name)
+	case "statefulset", "statefulsets":
+		sc = NewStatefulsetController(factory, clientset, namespace, resourceTuple.Name)
+	case "replicas":
+		sc = NewReplicasController(factory, clientset, namespace, resourceTuple.Name)
+	case "service", "services":
+		sc = NewServiceController(factory, clientset, namespace, resourceTuple.Name)
+	case "pod", "pods":
+		sc = NewPodController(factory, clientset, namespace, resourceTuple.Name)
+	default:
+		sc = NewPodController(factory, clientset, namespace, resourceTuple.Name)
+	}
+	remote.CancelFunctions = append(remote.CancelFunctions, func() {
+		if err := sc.Cancel(); err != nil {
+			log.Warnln(err)
+		}
+	})
+	labels, ports, err2 := sc.ScaleToZero()
 	t := true
 	zero := int64(0)
 	pod := v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      newName,
 			Namespace: namespace,
-			Labels:    lables.MatchLabels,
+			Labels:    labels,
 		},
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
@@ -177,7 +199,7 @@ func CreateServerInbound(factory cmdutil.Factory, clientset *kubernetes.Clientse
 			PriorityClassName: "system-cluster-critical",
 		},
 	}
-	if _, err = clientset.CoreV1().Pods(namespace).Create(context.TODO(), &pod, metav1.CreateOptions{}); err != nil {
+	if _, err := clientset.CoreV1().Pods(namespace).Create(context.TODO(), &pod, metav1.CreateOptions{}); err != nil {
 		log.Fatal(err)
 	}
 	watch, err := clientset.CoreV1().Pods(namespace).Watch(context.TODO(), metav1.SingleObject(metav1.ObjectMeta{Name: newName}))

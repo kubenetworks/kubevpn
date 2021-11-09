@@ -164,7 +164,7 @@ func GetTopController(factory cmdutil.Factory, clientset *kubernetes.Clientset, 
 	if err != nil {
 		return
 	}
-	asSelector, _ := metav1.LabelSelectorAsSelector(GetLabelSelector(object))
+	asSelector, _ := metav1.LabelSelectorAsSelector(GetLabelSelector(object.Object))
 	podList, _ := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
 		LabelSelector: asSelector.String(),
 	})
@@ -179,8 +179,8 @@ func GetTopController(factory cmdutil.Factory, clientset *kubernetes.Clientset, 
 		}
 		controller.Resource = strings.ToLower(of.Kind) + "s"
 		controller.Name = of.Name
-		controller.Scale = GetScale(object)
-		of = GetOwnerReferences(object)
+		controller.Scale = GetScale(object.Object)
+		of = GetOwnerReferences(object.Object)
 	}
 	return
 }
@@ -275,7 +275,7 @@ func IsWindows() bool {
 	return runtime.GOOS == "windows"
 }
 
-func GetUnstructuredObject(f cmdutil.Factory, namespace string, workloads string) (k8sruntime.Object, error) {
+func GetUnstructuredObject(f cmdutil.Factory, namespace string, workloads string) (*runtimeresource.Info, error) {
 	do := f.NewBuilder().
 		Unstructured().
 		NamespaceParam(namespace).DefaultNamespace().AllNamespaces(false).
@@ -297,7 +297,7 @@ func GetUnstructuredObject(f cmdutil.Factory, namespace string, workloads string
 	if len(infos) == 0 {
 		return nil, errors.New("Not found")
 	}
-	return infos[0].Object, err
+	return infos[0], err
 }
 
 func GetLabelSelector(object k8sruntime.Object) *metav1.LabelSelector {

@@ -64,7 +64,7 @@ func (c *ConnectOptions) createRemotePod() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	pod, err := remote.CreateServerOutbound(c.clientset, c.Namespace, &trafficManager, k8sCIDRs)
+	pod, err := CreateServerOutbound(c.clientset, c.Namespace, &trafficManager, k8sCIDRs)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func (c *ConnectOptions) createRemotePod() {
 						strings.Join(list, ","),
 					)
 				} else {
-					err = remote.CreateServerInbound(
+					err = CreateServerInbound(
 						c.factory,
 						c.clientset,
 						c.Namespace,

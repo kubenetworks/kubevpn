@@ -186,7 +186,7 @@ func createEnvoyConfigMapIfNeeded(factory cmdutil.Factory, clientset *kubernetes
 	if err != nil {
 		return
 	}
-	asSelector, _ := metav1.LabelSelectorAsSelector(util.GetLabelSelector(object))
+	asSelector, _ := metav1.LabelSelectorAsSelector(util.GetLabelSelector(object.Object))
 	serviceList, _ := clientset.CoreV1().Services(namespace).List(context.Background(), metav1.ListOptions{
 		LabelSelector: asSelector.String(),
 	})

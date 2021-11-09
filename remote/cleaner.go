@@ -50,15 +50,15 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 			}
 		}
 		wg.Wait()
-		wg = sync.WaitGroup{}
-		for _, controller := range util.TopLevelControllerSet {
-			wg.Add(1)
-			go func(control util.ResourceTupleWithScale) {
-				util.UpdateReplicasScale(clientset, namespace, control)
-				wg.Done()
-			}(controller)
-		}
-		wg.Wait()
+		//wg = sync.WaitGroup{}
+		//for _, controller := range util.TopLevelControllerSet {
+		//	wg.Add(1)
+		//	go func(control util.ResourceTupleWithScale) {
+		//		util.UpdateReplicasScale(clientset, namespace, control)
+		//		wg.Done()
+		//	}(controller)
+		//}
+		//wg.Wait()
 		log.Info("clean up successful")
 		for _, function := range CancelFunctions {
 			if function != nil {
@@ -69,7 +69,7 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 }
 
 // vendor/k8s.io/kubectl/pkg/polymorphichelpers/rollback.go:99
-func updateRefCount(clientset *kubernetes.Clientset, namespace, name string, increment int) {
+func UpdateRefCount(clientset *kubernetes.Clientset, namespace, name string, increment int) {
 	if err := retry.OnError(retry.DefaultRetry, func(err error) bool {
 		return err != nil
 	}, func() error {
@@ -100,7 +100,7 @@ func updateRefCount(clientset *kubernetes.Clientset, namespace, name string, inc
 }
 
 func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, namespace string) {
-	updateRefCount(clientset, namespace, util.TrafficManager, -1)
+	UpdateRefCount(clientset, namespace, util.TrafficManager, -1)
 	pod, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), util.TrafficManager, v1.GetOptions{})
 	if err != nil {
 		log.Error(err)
