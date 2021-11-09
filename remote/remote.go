@@ -53,7 +53,7 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 			Name:        name,
 			Namespace:   namespace,
 			Labels:      map[string]string{"app": util.TrafficManager},
-			Annotations: map[string]string{"ref-count": "0"},
+			Annotations: map[string]string{"ref-count": "1"},
 		},
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
