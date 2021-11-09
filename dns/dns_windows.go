@@ -31,6 +31,7 @@ func SetupDNS(config *miekgdns.ClientConfig) error {
 		return err
 	}
 	//_ = updateNicMetric(tunName)
+	_ = addNicSuffixSearchList(config.Search)
 	return nil
 }
 
@@ -56,6 +57,21 @@ func updateNicMetric(name string) error {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Warnf("error while update nic metrics, error: %v, output: %s, command: %v", err, string(out), cmd.Args)
+	}
+	return err
+}
+
+// @see https://docs.microsoft.com/en-us/powershell/module/dnsclient/set-dnsclientglobalsetting?view=windowsserver2019-ps#example-1--set-the-dns-suffix-search-list
+func addNicSuffixSearchList(search []string) error {
+	cmd := exec.Command("PowerShell", []string{
+		"Set-DnsClientGlobalSetting",
+		"-SuffixSearchList",
+		fmt.Sprintf("@(\"%s\", \"%s\", \"%s\")", search[0], search[1], search[2]),
+	}...)
+	output, err := cmd.CombinedOutput()
+	log.Info(cmd.Args)
+	if err != nil {
+		log.Warnf("error while set dns suffix search list, err: %v, output: %s, command: %v", err, string(output), cmd.Args)
 	}
 	return err
 }
