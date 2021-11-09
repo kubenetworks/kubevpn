@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"github.com/wencaiwulue/kubevpn/tun"
 	"k8s.io/client-go/util/retry"
 	"net"
 	"time"
@@ -12,7 +11,7 @@ import (
 
 // Server is a proxy server.
 type Server struct {
-	Listener tun.Listener
+	Listener net.Listener
 	Handler  Handler
 }
 

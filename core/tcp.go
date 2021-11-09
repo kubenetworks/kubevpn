@@ -3,7 +3,6 @@ package core
 import (
 	"crypto/tls"
 	"github.com/wencaiwulue/kubevpn/tlsconfig"
-	"github.com/wencaiwulue/kubevpn/tun"
 	"github.com/wencaiwulue/kubevpn/util"
 	"net"
 )
@@ -26,7 +25,7 @@ type tcpListener struct {
 }
 
 // TCPListener creates a Listener for TCP proxy server.
-func TCPListener(addr string) (tun.Listener, error) {
+func TCPListener(addr string) (net.Listener, error) {
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err

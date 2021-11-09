@@ -36,15 +36,13 @@ func parseChainNode(ns string) (*core.Node, error) {
 		Connector:   core.UDPOverTCPTunnelConnector(),
 		Transporter: core.TCPTransporter(),
 	}
-	return &node, nil
+	return node, nil
 }
 
 func (r *Route) GenRouters() ([]router, error) {
 	chain, err := r.parseChain()
-	if err != nil {
-		if !errors.Is(err, core.ErrInvalidNode) {
-			return nil, err
-		}
+	if err != nil && !errors.Is(err, core.ErrorInvalidNode) {
+		return nil, err
 	}
 
 	routers := make([]router, 0, len(r.ServeNodes))
@@ -62,23 +60,20 @@ func (r *Route) GenRouters() ([]router, error) {
 			}
 		}
 
-		var ln tun.Listener
+		var ln net.Listener
 		switch node.Transport {
 		case "tcp":
 			tcpListener, _ := core.TCPListener(node.Addr)
 			ln = tls.NewListener(tcpListener, tlsconfig.TlsconfigServer)
 		case "tun":
-			cfg := tun.Config{
+			config := tun.Config{
 				Name:    node.Get("name"),
 				Addr:    node.Get("net"),
 				MTU:     node.GetInt("mtu"),
 				Routes:  tunRoutes,
 				Gateway: node.Get("gw"),
 			}
-			ln, err = tun.TunListener(cfg)
-			//default:
-			//	innerLn, _ := core.TCPListener(node.Addr)
-			//	ln = tls.NewListener(innerLn, tlsconfig.TlsconfigServer)
+			ln, err = tun.Listener(config)
 		}
 		if err != nil {
 			return nil, err
@@ -108,12 +103,12 @@ func (r *Route) GenRouters() ([]router, error) {
 }
 
 type router struct {
-	node   core.Node
+	node   *core.Node
 	server *core.Server
 }
 
 func (r *router) Serve(ctx context.Context) error {
-	log.Debugf("%s on %s", r.node.String(), r.server.Addr())
+	log.Debugf("%s on %s", r.node.Protocol, r.server.Addr())
 	return r.server.Serve(ctx, r.server.Handler)
 }
 

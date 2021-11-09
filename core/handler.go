@@ -14,7 +14,7 @@ type Handler interface {
 // HandlerOptions describes the options for Handler.
 type HandlerOptions struct {
 	Chain    *Chain
-	Node     Node
+	Node     *Node
 	IPRoutes []tun.IPRoute
 }
 
@@ -29,7 +29,7 @@ func ChainHandlerOption(chain *Chain) HandlerOption {
 }
 
 // NodeHandlerOption set the server node for server handler.
-func NodeHandlerOption(node Node) HandlerOption {
+func NodeHandlerOption(node *Node) HandlerOption {
 	return func(opts *HandlerOptions) {
 		opts.Node = node
 	}

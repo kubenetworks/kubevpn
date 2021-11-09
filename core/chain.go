@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/wencaiwulue/kubevpn/util"
 	"net"
 )
 
 var (
-	// ErrEmptyChain is an error that implies the chain is empty.
-	ErrEmptyChain = errors.New("empty chain")
+	// ErrorEmptyChain is an error that implies the chain is empty.
+	ErrorEmptyChain = errors.New("empty chain")
 )
 
 // Chain is a proxy chain that holds a list of proxy node groups.
@@ -58,18 +57,7 @@ func (c *Chain) dial(ctx context.Context, network, address string) (net.Conn, er
 	}
 
 	if c.IsEmpty() {
-		switch network {
-		case "udp", "udp4", "udp6":
-			if address == "" {
-				return net.ListenUDP(network, nil)
-			}
-		default:
-		}
-		d := &net.Dialer{
-			Timeout: util.DialTimeout,
-			// LocalAddr: laddr, // TODO: optional local address
-		}
-		return d.DialContext(ctx, network, ipAddr)
+		return nil, ErrorEmptyChain
 	}
 
 	conn, err := c.getConn(ctx)
@@ -115,7 +103,7 @@ func (c *Chain) Conn() (conn net.Conn, err error) {
 // getConn obtains a connection to the last node of the chain.
 func (c *Chain) getConn(_ context.Context) (conn net.Conn, err error) {
 	if c.IsEmpty() {
-		err = ErrEmptyChain
+		err = ErrorEmptyChain
 		return
 	}
 	cc, err := c.Node().Client.Dial(c.Node().Addr)

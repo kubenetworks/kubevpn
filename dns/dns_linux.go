@@ -18,7 +18,7 @@ func SetupDNS(config *miekgdns.ClientConfig) error {
 	}
 	cmd := exec.Command("systemd-resolve", []string{
 		"--set-dns",
-		config,
+		config.Servers[0],
 		"--interface",
 		tunName,
 		"--set-domain=" + config.Search[0],

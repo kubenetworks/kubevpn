@@ -25,15 +25,15 @@ type tunListener struct {
 	config Config
 }
 
-// TunListener creates a listener for tun tunnel.
-func TunListener(cfg Config) (Listener, error) {
+// Listener TunListener creates a listener for tun tunnel.
+func Listener(config Config) (net.Listener, error) {
 	ln := &tunListener{
 		conns:  make(chan net.Conn, 1),
 		closed: make(chan struct{}),
-		config: cfg,
+		config: config,
 	}
 
-	conn, ifce, err := createTun(cfg)
+	conn, ifce, err := createTun(config)
 	if err != nil {
 		return nil, err
 	}
@@ -46,11 +46,6 @@ func TunListener(cfg Config) (Listener, error) {
 	ln.conns <- conn
 
 	return ln, nil
-}
-
-// Listener is a proxy server listener, just like a net.Listener.
-type Listener interface {
-	net.Listener
 }
 
 func (l *tunListener) Accept() (net.Conn, error) {
