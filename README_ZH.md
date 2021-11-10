@@ -136,6 +136,18 @@ Hello world!%
 只支持 HTTP 和 GRPC, 携带了指定 header `"KubeVPN-Routing-Tag: kubevpn"` 的流量，将会路由到本地
 
 ```shell
+➜  ~ sudo kubevpn connect --namespace=test --workloads=service/nginx --workloads=serivce/tomcat --mode=mesh
+INFO[0000] kubeconfig path: /Users/naison/.kube/config, namespace: test, serivces: serivce/nginx,service/tomcat 
+INFO[0001] prepare to expose local service to remote service: tomcat 
+INFO[0001] prepare to expose local service to remote service: nginx 
+INFO[0032] your ip is 223.254.254.43/24                 
+Forwarding from 127.0.0.1:10800 -> 10800
+Forwarding from [::1]:10800 -> 10800
+INFO[0036] port forward ready 
+...
+```
+
+```shell
 ➜  ~ curl tomcat:8080
 <!doctype html><html lang="en"><head><title>HTTP Status 404 – Not Found</title><style type="text/css">body {font-family:Tahoma,Arial,sans-serif;} h1, h2, h3, b {color:white;background-color:#525D76;} h1 {font-size:22px;} h2 {font-size:16px;} h3 {font-size:14px;} p {font-size:12px;} a {color:black;} .line {height:1px;background-color:#525D76;border:none;}</style></head><body><h1>HTTP Status 404 – Not Found</h1><hr class="line" /><p><b>Type</b> Status Report</p><p><b>Description</b> The origin server did not find a current representation for the target resource or is not willing to disclose that one exists.</p><hr class="line" /><h3>Apache Tomcat/9.0.52</h3></body></html>%
 ➜  ~ curl tomcat:8080 -H "KubeVPN-Routing-Tag: kubevpn"
