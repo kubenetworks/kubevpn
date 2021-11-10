@@ -301,8 +301,12 @@ func GetUnstructuredObject(f cmdutil.Factory, namespace string, workloads string
 }
 
 func GetLabelSelector(object k8sruntime.Object) *metav1.LabelSelector {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Errorln(err)
+		}
+	}()
 	l := &metav1.LabelSelector{}
-
 	printer, _ := printers.NewJSONPathPrinter("{.spec.selector}")
 	buf := bytes.NewBuffer([]byte{})
 	if err := printer.PrintObj(object, buf); err != nil {
@@ -321,6 +325,11 @@ func GetLabelSelector(object k8sruntime.Object) *metav1.LabelSelector {
 }
 
 func GetPorts(object k8sruntime.Object) []v1.ContainerPort {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Errorln(err)
+		}
+	}()
 	var result []v1.ContainerPort
 	replicasetPortPrinter, _ := printers.NewJSONPathPrinter("{.spec.template.spec.containers[0].ports}")
 	servicePortPrinter, _ := printers.NewJSONPathPrinter("{.spec.ports}")
@@ -348,6 +357,11 @@ func GetPorts(object k8sruntime.Object) []v1.ContainerPort {
 }
 
 func GetOwnerReferences(object k8sruntime.Object) *metav1.OwnerReference {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Errorln(err)
+		}
+	}()
 	printer, _ := printers.NewJSONPathPrinter("{.metadata.ownerReferences}")
 	buf := bytes.NewBuffer([]byte{})
 	if err := printer.PrintObj(object, buf); err != nil {
@@ -364,6 +378,11 @@ func GetOwnerReferences(object k8sruntime.Object) *metav1.OwnerReference {
 }
 
 func GetScale(object k8sruntime.Object) int {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Errorln(err)
+		}
+	}()
 	printer, _ := printers.NewJSONPathPrinter("{.spec.replicas}")
 	buf := bytes.NewBuffer([]byte{})
 	if err := printer.PrintObj(object, buf); err != nil {
@@ -384,9 +403,6 @@ func DeletePod(clientset *kubernetes.Clientset, namespace, podName string) {
 		log.Infof("not found shadow pod: %s, no need to delete it", podName)
 	}
 }
-
-// TopLevelControllerSet record every pod's top level controller, like pod controllerBy replicaset, replicaset controllerBy deployment
-var TopLevelControllerSet []ResourceTupleWithScale
 
 type ResourceTuple struct {
 	Resource string

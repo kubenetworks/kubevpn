@@ -6,11 +6,10 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/util"
-	v12 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -19,10 +18,6 @@ import (
 )
 
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
-type controller interface {
-	PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads, virtualLocalIp, realRouterIP, virtualShadowIp, routes string)
-	RemoveSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads, virtualLocalIp, realRouterIP, virtualShadowIp, routes string)
-}
 
 //	patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
 // TODO if using envoy needs to create another pod, if using diy proxy, using one container is enough
@@ -118,7 +113,7 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 			},
 		},
 	})
-	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+	if err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		_, err = clientset.CoreV1().Pods(namespace).Create(context.TODO(), &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      resourceTuple.Name + "-shadow",
@@ -128,7 +123,15 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 			Spec: *inject,
 		}, metav1.CreateOptions{})
 		return err
+	}); err != nil {
+		return err
+	}
+	_ = util.WaitPod(clientset, namespace, metav1.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("metadata.name", resourceTuple.Name+"-shadow").String(),
+	}, func(pod *v1.Pod) bool {
+		return pod.Status.Phase == v1.PodRunning
 	})
+	return nil
 }
 
 var s = `static_resources:
@@ -314,33 +317,4 @@ func CreateServerInboundForMesh(clientset *kubernetes.Clientset, namespace, work
 			return errors.New("create inbound mesh timeout"), ""
 		}
 	}
-}
-
-func RemoveSidecar(clientset *kubernetes.Clientset, namespace, workloads string) error {
-	resourceTuple, parsed, err := util.SplitResourceTypeName(workloads)
-	if !parsed || err != nil {
-		return errors.New("not need")
-	}
-	//controller := util.GetTopController(factory, clientset, namespace, workloads)
-	//if len(controller.Resource) == 0 || len(controller.Name) == 0 {
-	//	log.Warnf("controller is empty, service: %s-%s", namespace, workloads)
-	//	return nil
-	//}
-	deployment, err := clientset.AppsV1().Deployments(namespace).Get(context.TODO(), resourceTuple.Name, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	// rollback using annotation backup
-	if backup := deployment.Annotations["kubevpn"]; len(backup) != 0 {
-		_ = clientset.AppsV1().Deployments(namespace).Delete(context.TODO(), resourceTuple.Name, metav1.DeleteOptions{})
-		d := &v12.Deployment{}
-		if err = json.Unmarshal([]byte(backup), d); err == nil {
-			d.ResourceVersion = ""
-			_, err = clientset.AppsV1().Deployments(namespace).Create(context.TODO(), d, metav1.CreateOptions{})
-			if err != nil {
-				log.Warnln(err)
-			}
-		}
-	}
-	return nil
 }

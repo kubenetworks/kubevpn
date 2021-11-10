@@ -45,7 +45,6 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 					podName = finalTuple.Name + "-" + "shadow-mesh"
 					util.DeletePod(clientset, namespace, podName)
 					util.DeleteConfigMap(clientset, namespace, fmt.Sprintf("%s-%s", namespace, tuple.Name))
-					_ = RemoveSidecar(clientset, namespace, service)
 				}(tuple)
 			}
 		}

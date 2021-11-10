@@ -221,21 +221,3 @@ func CreateServerInbound(factory cmdutil.Factory, clientset *kubernetes.Clientse
 		}
 	}
 }
-
-func updateScaleToZero(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads string) error {
-	if len(workloads) == 0 || len(namespace) == 0 {
-		log.Info("no need to expose local service to remote")
-		return nil
-	}
-	log.Info("prepare to expose local service to remote service: " + workloads)
-	controller := util.GetTopController(factory, clientset, namespace, workloads)
-	if len(controller.Resource) == 0 || len(controller.Name) == 0 {
-		log.Warnf("controller is empty, service: %s-%s", namespace, workloads)
-		return nil
-	}
-	util.TopLevelControllerSet = append(util.TopLevelControllerSet, controller)
-	controllerCopy := controller
-	controllerCopy.Scale = 0
-	util.UpdateReplicasScale(clientset, namespace, controllerCopy)
-	return nil
-}
