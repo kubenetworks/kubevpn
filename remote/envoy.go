@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"strings"
 	"time"
 )
 
@@ -24,6 +25,7 @@ type controller interface {
 }
 
 //	patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
+// TODO if using envoy needs to create another pod, if using diy proxy, using one container is enough
 func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads, virtualLocalIp, realRouterIP, virtualShadowIp, routes string) error {
 	// create pod in bound for mesh
 	err, podIp := CreateServerInboundForMesh(clientset, namespace, workloads, virtualLocalIp, realRouterIP, virtualShadowIp, routes)
@@ -36,22 +38,38 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 	if !parsed || err2 != nil {
 		return errors.New("not need")
 	}
-	controller := util.GetTopController(factory, clientset, namespace, workloads)
-	if len(controller.Resource) == 0 || len(controller.Name) == 0 {
-		log.Warnf("controller is empty, service: %s-%s", namespace, workloads)
-		return nil
-	}
 	t := true
 	zero := int64(0)
-	deployment, err2 := clientset.AppsV1().Deployments(namespace).Get(context.TODO(), resourceTuple.Name, metav1.GetOptions{})
-	if err2 != nil {
-		return err2
+	var sc Injectable
+	switch strings.ToLower(resourceTuple.Resource) {
+	case "deployment", "deployments":
+		sc = NewDeploymentController(factory, clientset, namespace, resourceTuple.Name)
+	case "statefulset", "statefulsets":
+		sc = NewStatefulsetController(factory, clientset, namespace, resourceTuple.Name)
+	case "replicaset", "replicasets":
+		sc = NewReplicasController(factory, clientset, namespace, resourceTuple.Name)
+	case "service", "services":
+		sc = NewServiceController(factory, clientset, namespace, resourceTuple.Name)
+	case "pod", "pods":
+		sc = NewPodController(factory, clientset, namespace, "pods", resourceTuple.Name)
+	default:
+		sc = NewPodController(factory, clientset, namespace, resourceTuple.Resource, resourceTuple.Name)
 	}
-	marshal, err := json.Marshal(deployment)
+	CancelFunctions = append(CancelFunctions, func() {
+		if err = sc.Cancel(); err != nil {
+			log.Warnln(err)
+		}
+	})
+
+	labels, inject, err := sc.Inject()
+	if err != nil {
+		return err
+	}
+	delete(labels, "pod-template-hash")
 
 	name := fmt.Sprintf("%s-%s", namespace, resourceTuple.Name)
 	createEnvoyConfigMapIfNeeded(factory, clientset, namespace, workloads, podIp)
-	deployment.Spec.Template.Spec.Volumes = append(deployment.Spec.Template.Spec.Volumes, v1.Volume{
+	inject.Volumes = append(inject.Volumes, v1.Volume{
 		Name: "envoy-config",
 		VolumeSource: v1.VolumeSource{
 			ConfigMap: &v1.ConfigMapVolumeSource{
@@ -61,7 +79,7 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 			},
 		},
 	})
-	deployment.Spec.Template.Spec.Containers = append(deployment.Spec.Template.Spec.Containers, v1.Container{
+	inject.Containers = append(inject.Containers, v1.Container{
 		Name:    "envoy-proxy",
 		Image:   "naison/kubevpnmesh:v2",
 		Command: []string{"/bin/sh", "-c"},
@@ -100,10 +118,16 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 			},
 		},
 	})
-	deployment.Annotations["kubevpn"] = string(marshal)
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		_, err2 = clientset.AppsV1().Deployments(namespace).Update(context.TODO(), deployment, metav1.UpdateOptions{})
-		return err2
+		_, err = clientset.CoreV1().Pods(namespace).Create(context.TODO(), &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      resourceTuple.Name + "-shadow",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			Spec: *inject,
+		}, metav1.CreateOptions{})
+		return err
 	})
 }
 

@@ -25,6 +25,7 @@ func NewPodController(factory cmdutil.Factory, clientset *kubernetes.Clientset, 
 	return &PodController{
 		factory:   factory,
 		clientset: clientset,
+		resource:  resource,
 		namespace: namespace,
 		name:      name,
 	}

@@ -130,7 +130,7 @@ func CreateServerInbound(factory cmdutil.Factory, clientset *kubernetes.Clientse
 		sc = NewDeploymentController(factory, clientset, namespace, resourceTuple.Name)
 	case "statefulset", "statefulsets":
 		sc = NewStatefulsetController(factory, clientset, namespace, resourceTuple.Name)
-	case "replicas":
+	case "replicaset", "replicasets":
 		sc = NewReplicasController(factory, clientset, namespace, resourceTuple.Name)
 	case "service", "services":
 		sc = NewServiceController(factory, clientset, namespace, resourceTuple.Name)
