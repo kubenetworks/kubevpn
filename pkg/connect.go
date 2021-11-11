@@ -6,7 +6,6 @@ import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/dns"
-	"github.com/wencaiwulue/kubevpn/driver"
 	"github.com/wencaiwulue/kubevpn/remote"
 	"github.com/wencaiwulue/kubevpn/util"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -39,35 +38,27 @@ type ConnectOptions struct {
 	restclient     *rest.RESTClient
 	config         *rest.Config
 	factory        cmdutil.Factory
+	cidrs          []*net.IPNet
+	routerIP       string
+	dhcp           *remote.DHCPManager
 }
 
-func (c *ConnectOptions) createRemotePod() {
-	k8sCIDRs, err := getCIDR(c.clientset, c.Namespace)
-	if err != nil {
-		log.Fatal(err)
-	}
+var trafficManager = net.IPNet{
+	IP:   net.IPv4(223, 254, 254, 100),
+	Mask: net.CIDRMask(24, 32),
+}
+
+func (c *ConnectOptions) createRemoteInboundPod() {
 	var list []string
-	for _, ipNet := range k8sCIDRs {
+	for _, ipNet := range c.cidrs {
 		list = append(list, ipNet.String())
 	}
 
-	trafficManager := net.IPNet{
-		IP:   net.IPv4(223, 254, 254, 100),
-		Mask: net.CIDRMask(24, 32),
+	tunIp, err := c.dhcp.RentIPBaseNICAddress()
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	manager := remote.NewDHCPManager(c.clientset, c.Namespace, &trafficManager)
-	if err = manager.InitDHCP(); err != nil {
-		log.Fatal(err)
-	}
-	tunIp, err := manager.RentIPBaseNICAddress()
-	if err != nil {
-		log.Fatal(err)
-	}
-	pod, err := CreateServerOutbound(c.clientset, c.Namespace, &trafficManager, k8sCIDRs)
-	if err != nil {
-		log.Fatal(err)
-	}
 	tempIps := []*net.IPNet{tunIp}
 	wg := sync.WaitGroup{}
 	lock := sync.Mutex{}
@@ -77,7 +68,7 @@ func (c *ConnectOptions) createRemotePod() {
 			go func(finalWorkload string) {
 				defer wg.Done()
 				lock.Lock()
-				virtualShadowIp, _ := manager.RentIPRandom()
+				virtualShadowIp, _ := c.dhcp.RentIPRandom()
 				tempIps = append(tempIps, virtualShadowIp)
 				lock.Unlock()
 
@@ -89,18 +80,18 @@ func (c *ConnectOptions) createRemotePod() {
 						c.Namespace,
 						finalWorkload,
 						tunIp.IP.String(),
-						pod.Status.PodIP,
+						c.routerIP,
 						virtualShadowIp.String(),
 						strings.Join(list, ","),
 					)
 				} else {
-					err = CreateServerInbound(
+					err = CreateInboundPod(
 						c.factory,
 						c.clientset,
 						c.Namespace,
 						finalWorkload,
 						tunIp.IP.String(),
-						pod.Status.PodIP,
+						c.routerIP,
 						virtualShadowIp.String(),
 						strings.Join(list, ","),
 					)
@@ -112,7 +103,7 @@ func (c *ConnectOptions) createRemotePod() {
 		}
 	}
 	wg.Wait()
-	remote.AddCleanUpResourceHandler(c.clientset, c.Namespace, c.Workloads, manager, tempIps...)
+	remote.AddCleanUpResourceHandler(c.clientset, c.Namespace, c.Workloads, c.dhcp, tempIps...)
 	if util.IsWindows() {
 		tunIp.Mask = net.CIDRMask(0, 32)
 	} else {
@@ -125,14 +116,44 @@ func (c *ConnectOptions) createRemotePod() {
 	c.nodeConfig.ServeNodes = []string{fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", tunIp.String(), strings.Join(list, ","))}
 
 	log.Info("your ip is " + tunIp.String())
-
-	if util.IsWindows() {
-		driver.InstallWireGuardTunDriver()
-	}
 }
 
 func (c *ConnectOptions) DoConnect() {
-	c.createRemotePod()
+	var err error
+	c.cidrs, err = getCIDR(c.clientset, c.Namespace)
+	if err != nil {
+		log.Fatal(err)
+	}
+	c.routerIP, err = CreateOutboundRouterPod(c.clientset, c.Namespace, &trafficManager, c.cidrs)
+	if err != nil {
+		log.Fatal(err)
+	}
+	c.dhcp = remote.NewDHCPManager(c.clientset, c.Namespace, &trafficManager)
+	if err = c.dhcp.InitDHCP(); err != nil {
+		log.Fatal(err)
+	}
+	c.createRemoteInboundPod()
+	c.portForward()
+	c.startLocalTunServe()
+}
+
+func (c ConnectOptions) heartbeats() {
+	go func() {
+		tick := time.Tick(time.Second * 15)
+		c2 := make(chan struct{}, 1)
+		c2 <- struct{}{}
+		for {
+			select {
+			case <-tick:
+				c2 <- struct{}{}
+			case <-c2:
+				_ = exec.Command("ping", "-c", "4", "223.254.254.100").Run()
+			}
+		}
+	}()
+}
+
+func (c *ConnectOptions) portForward() {
 	var readyChanRef *chan struct{}
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)
@@ -169,8 +190,11 @@ func (c *ConnectOptions) DoConnect() {
 	}
 	<-*readyChanRef
 	log.Info("port forward ready")
+}
 
-	if err := Start(c.nodeConfig); err != nil {
+func (c *ConnectOptions) startLocalTunServe() {
+	errChan, err := Start(c.nodeConfig)
+	if err != nil {
 		log.Fatal(err)
 	}
 
@@ -180,21 +204,14 @@ func (c *ConnectOptions) DoConnect() {
 		}
 		util.DeleteWindowsFirewallRule()
 	}
+	c.heartbeats()
+	c.setupDNS()
 	log.Info("dns service ok")
-	go func() {
-		tick := time.Tick(time.Second * 15)
-		c2 := make(chan struct{}, 1)
-		c2 <- struct{}{}
-		for {
-			select {
-			case <-tick:
-				c2 <- struct{}{}
-			case <-c2:
-				_ = exec.Command("ping", "-c", "4", "223.254.254.100").Run()
-			}
-		}
-	}()
+	// wait for exit
+	<-errChan
+}
 
+func (c ConnectOptions) setupDNS() {
 	relovConf, err := dns.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, util.TrafficManager, c.Namespace)
 	if err != nil {
 		log.Fatal(err)
@@ -202,31 +219,30 @@ func (c *ConnectOptions) DoConnect() {
 	if err = dns.SetupDNS(relovConf); err != nil {
 		log.Fatal(err)
 	}
-	// wait for exit
-	<-ctx.Done()
 }
 
-func Start(r Route) error {
+func Start(r Route) (chan error, error) {
 	routers, err := r.GenRouters()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if len(routers) == 0 {
-		return errors.New("invalid config")
+		return nil, errors.New("invalid config")
 	}
-
+	c := make(chan error, len(routers))
 	for i := range routers {
 		ctx, cancelFunc := context.WithCancel(context.Background())
 		remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)
-		go func(finalCtx context.Context, finalI int) {
+		go func(finalCtx context.Context, finalI int, c chan error) {
 			if err = routers[finalI].Serve(finalCtx); err != nil {
 				log.Warn(err)
+				c <- err
 			}
-		}(ctx, i)
+		}(ctx, i, c)
 	}
 
-	return nil
+	return c, nil
 }
 
 func getCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, error) {

@@ -29,6 +29,9 @@ var connectCmd = &cobra.Command{
 	Long:  `connect`,
 	PreRun: func(*cobra.Command, []string) {
 		util.InitLogger(util.Debug)
+		if util.IsWindows() {
+			driver.InstallWireGuardTunDriver()
+		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		connect.InitClient()

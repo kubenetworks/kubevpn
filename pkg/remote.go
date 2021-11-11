@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, serverIp *net.IPNet, nodeCIDR []*net.IPNet) (*v1.Pod, error) {
+func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, serverIp *net.IPNet, nodeCIDR []*net.IPNet) (string, error) {
 	firstPod, i, err3 := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
 		namespace,
 		fields.OneTermEqualSelector("app", util.TrafficManager).String(),
@@ -32,7 +32,7 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 
 	if err3 == nil && i != 0 && firstPod != nil {
 		remote.UpdateRefCount(clientset, namespace, firstPod.Name, 1)
-		return firstPod, nil
+		return firstPod.Status.PodIP, nil
 	}
 	args := []string{
 		"sysctl net.ipv4.ip_forward=1",
@@ -104,17 +104,17 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 		case e := <-watch.ResultChan():
 			if e.Object.(*v1.Pod).Status.Phase == v1.PodRunning {
 				watch.Stop()
-				return e.Object.(*v1.Pod), nil
+				return e.Object.(*v1.Pod).Status.PodIP, nil
 			}
 		case <-tick:
 			watch.Stop()
 			log.Error("timeout")
-			return nil, errors.New("timeout")
+			return "", errors.New("timeout")
 		}
 	}
 }
 
-func CreateServerInbound(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads, virtualLocalIp, realRouterIP, virtualShadowIp, routes string) error {
+func CreateInboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads, virtualLocalIp, realRouterIP, virtualShadowIp, routes string) error {
 	resourceTuple, parsed, err2 := util.SplitResourceTypeName(workloads)
 	if !parsed || err2 != nil {
 		return errors.New("not need")

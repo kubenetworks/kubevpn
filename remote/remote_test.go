@@ -48,7 +48,7 @@ func TestCreateServer(t *testing.T) {
 		Mask: net.IPv4Mask(255, 255, 0, 0),
 	}
 
-	server, err := pkg.CreateServerOutbound(clientset, "test", i, []*net.IPNet{j})
+	server, err := pkg.CreateOutboundRouterPod(clientset, "test", i, []*net.IPNet{j})
 	fmt.Println(server)
 }
 
