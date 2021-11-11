@@ -57,6 +57,7 @@ func CreateServerOutbound(clientset *kubernetes.Clientset, namespace string, ser
 			Annotations: map[string]string{"ref-count": "1"},
 		},
 		Spec: v1.PodSpec{
+			RestartPolicy: v1.RestartPolicyAlways,
 			Containers: []v1.Container{
 				{
 					Name:    "vpn",
@@ -154,6 +155,7 @@ func CreateServerInbound(factory cmdutil.Factory, clientset *kubernetes.Clientse
 			Labels:    labels,
 		},
 		Spec: v1.PodSpec{
+			RestartPolicy: v1.RestartPolicyAlways,
 			Containers: []v1.Container{
 				{
 					Name:    "vpn",

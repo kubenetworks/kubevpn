@@ -255,6 +255,7 @@ func CreateServerInboundForMesh(clientset *kubernetes.Clientset, namespace, work
 			Namespace: namespace,
 		},
 		Spec: v1.PodSpec{
+			RestartPolicy: v1.RestartPolicyAlways,
 			Containers: []v1.Container{
 				{
 					Name:    "vpn",
