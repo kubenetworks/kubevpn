@@ -179,7 +179,6 @@ func GetTopController(factory cmdutil.Factory, clientset *kubernetes.Clientset, 
 		}
 		controller.Resource = strings.ToLower(of.Kind) + "s"
 		controller.Name = of.Name
-		controller.Scale = GetScale(object.Object)
 		of = GetOwnerReferences(object.Object)
 	}
 	return
@@ -301,27 +300,8 @@ func GetUnstructuredObject(f cmdutil.Factory, namespace string, workloads string
 }
 
 func GetLabelSelector(object k8sruntime.Object) *metav1.LabelSelector {
-	defer func() {
-		if err := recover(); err != nil {
-			log.Errorln(err)
-		}
-	}()
-	l := &metav1.LabelSelector{}
-	printer, _ := printers.NewJSONPathPrinter("{.spec.selector}")
-	buf := bytes.NewBuffer([]byte{})
-	if err := printer.PrintObj(object, buf); err != nil {
-		pathPrinter, _ := printers.NewJSONPathPrinter("{.metadata.labels}")
-		_ = pathPrinter.PrintObj(object, buf)
-	}
-	err := json2.Unmarshal([]byte(buf.String()), l)
-	if err != nil || len(l.MatchLabels) == 0 {
-		m := map[string]string{}
-		_ = json2.Unmarshal([]byte(buf.String()), &m)
-		if len(m) != 0 {
-			l = &metav1.LabelSelector{MatchLabels: m}
-		}
-	}
-	return l
+	labels := object.(metav1.Object).GetLabels()
+	return &metav1.LabelSelector{MatchLabels: labels}
 }
 
 func GetPorts(object k8sruntime.Object) []v1.ContainerPort {
@@ -357,18 +337,7 @@ func GetPorts(object k8sruntime.Object) []v1.ContainerPort {
 }
 
 func GetOwnerReferences(object k8sruntime.Object) *metav1.OwnerReference {
-	defer func() {
-		if err := recover(); err != nil {
-			log.Errorln(err)
-		}
-	}()
-	printer, _ := printers.NewJSONPathPrinter("{.metadata.ownerReferences}")
-	buf := bytes.NewBuffer([]byte{})
-	if err := printer.PrintObj(object, buf); err != nil {
-		return nil
-	}
-	var refs []metav1.OwnerReference
-	_ = json2.Unmarshal([]byte(buf.String()), &refs)
+	refs := object.(metav1.Object).GetOwnerReferences()
 	for i := range refs {
 		if refs[i].Controller != nil && *refs[i].Controller {
 			return &refs[i]

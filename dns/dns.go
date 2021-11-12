@@ -5,7 +5,6 @@ import (
 	"context"
 	miekgdns "github.com/miekg/dns"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/util"
 	v12 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,7 +18,7 @@ func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RE
 	if ips, err := getDNSIPFromDnsPod(clientset); err == nil && len(ips) != 0 {
 		ipp = ips
 	}
-	if ip, err := util.Shell(clientset, restclient, config, util.TrafficManager, namespace, "cat /etc/resolv.conf"); err == nil {
+	if ip, err := util.Shell(clientset, restclient, config, podName, namespace, "cat /etc/resolv.conf"); err == nil {
 		if resolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(ip)); err == nil {
 			if len(ipp) != 0 {
 				resolvConf.Servers = append(resolvConf.Servers, make([]string, len(ipp))...)
@@ -35,7 +34,6 @@ func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RE
 	} else {
 		return nil, err
 	}
-	logrus.Fatal("this should not happened")
 	return nil, errors.New("this should not happened")
 }
 

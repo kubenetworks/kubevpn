@@ -17,9 +17,9 @@ import (
 	"golang.org/x/net/ipv6"
 )
 
-type tunRouteKey [16]byte
+type key [16]byte
 
-func ipToTunRouteKey(ip net.IP) (key tunRouteKey) {
+func ipToTunRouteKey(ip net.IP) (key key) {
 	copy(key[:], ip.To16())
 	return
 }
@@ -39,7 +39,6 @@ func TunHandler(opts ...HandlerOption) Handler {
 	for _, opt := range opts {
 		opt(h.options)
 	}
-
 	return h
 }
 
@@ -138,7 +137,7 @@ func (h *tunHandler) findRouteFor(dst net.IP) net.Addr {
 }
 
 func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.Addr) error {
-	errc := make(chan error, 2)
+	errChan := make(chan error, 2)
 	defer conn.Close()
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)
@@ -205,7 +204,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 			}()
 
 			if err != nil {
-				errc <- err
+				errChan <- err
 				return
 			}
 		}
@@ -283,7 +282,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 			}()
 
 			if err != nil {
-				errc <- err
+				errChan <- err
 				cancelFunc()
 				return
 			}
@@ -291,7 +290,7 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 	}()
 
 	select {
-	case err := <-errc:
+	case err := <-errChan:
 		return err
 	case <-ctx.Done():
 		return nil

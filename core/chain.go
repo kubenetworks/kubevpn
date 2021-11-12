@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 )
 
@@ -36,12 +37,7 @@ func (c *Chain) IsEmpty() bool {
 
 // DialContext connects to the address on the named network using the provided context.
 func (c *Chain) DialContext(ctx context.Context, network, address string) (conn net.Conn, err error) {
-	retries := 1
-	if c != nil && c.Retries > 0 {
-		retries = c.Retries
-	}
-
-	for i := 0; i < retries; i++ {
+	for i := 0; i < int(math.Max(float64(1), float64(c.Retries))); i++ {
 		conn, err = c.dial(ctx, network, address)
 		if err == nil {
 			break
@@ -67,7 +63,7 @@ func (c *Chain) dial(ctx context.Context, network, address string) (net.Conn, er
 
 	cc, err := c.Node().Client.ConnectContext(ctx, conn, network, ipAddr)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, err
 	}
 	return cc, nil
@@ -82,35 +78,10 @@ func (*Chain) resolve(addr string) string {
 	return addr
 }
 
-// Conn obtains a handshaked connection to the last node of the chain.
-func (c *Chain) Conn() (conn net.Conn, err error) {
-	ctx := context.Background()
-
-	retries := 1
-	if c != nil && c.Retries > 0 {
-		retries = c.Retries
-	}
-
-	for i := 0; i < retries; i++ {
-		conn, err = c.getConn(ctx)
-		if err == nil {
-			break
-		}
-	}
-	return
-}
-
 // getConn obtains a connection to the last node of the chain.
-func (c *Chain) getConn(_ context.Context) (conn net.Conn, err error) {
+func (c *Chain) getConn(_ context.Context) (net.Conn, error) {
 	if c.IsEmpty() {
-		err = ErrorEmptyChain
-		return
+		return nil, ErrorEmptyChain
 	}
-	cc, err := c.Node().Client.Dial(c.Node().Addr)
-	if err != nil {
-		return
-	}
-
-	conn = cc
-	return
+	return c.Node().Client.Dial(c.Node().Addr)
 }

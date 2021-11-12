@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/pkg"
 	"github.com/wencaiwulue/kubevpn/util"
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -25,32 +24,32 @@ import (
 	"time"
 )
 
-func TestCreateServer(t *testing.T) {
-	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		&clientcmd.ClientConfigLoadingRules{ExplicitPath: clientcmd.RecommendedHomeFile}, nil,
-	)
-	config, err := clientConfig.ClientConfig()
-	if err != nil {
-		log.Fatal(err)
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	i := &net.IPNet{
-		IP:   net.ParseIP("192.168.254.100"),
-		Mask: net.IPv4Mask(255, 255, 255, 0),
-	}
-
-	j := &net.IPNet{
-		IP:   net.ParseIP("172.20.0.0"),
-		Mask: net.IPv4Mask(255, 255, 0, 0),
-	}
-
-	server, err := pkg.CreateOutboundRouterPod(clientset, "test", i, []*net.IPNet{j})
-	fmt.Println(server)
-}
+//func TestCreateServer(t *testing.T) {
+//	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+//		&clientcmd.ClientConfigLoadingRules{ExplicitPath: clientcmd.RecommendedHomeFile}, nil,
+//	)
+//	config, err := clientConfig.ClientConfig()
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	clientset, err := kubernetes.NewForConfig(config)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//
+//	i := &net.IPNet{
+//		IP:   net.ParseIP("192.168.254.100"),
+//		Mask: net.IPv4Mask(255, 255, 255, 0),
+//	}
+//
+//	j := &net.IPNet{
+//		IP:   net.ParseIP("172.20.0.0"),
+//		Mask: net.IPv4Mask(255, 255, 0, 0),
+//	}
+//
+//	server, err := pkg.CreateOutboundRouterPod(clientset, "test", i, []*net.IPNet{j})
+//	fmt.Println(server)
+//}
 
 func TestGetIp(t *testing.T) {
 	ip := &net.IPNet{
@@ -203,7 +202,7 @@ func TestGetTopController(t *testing.T) {
 	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
 	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 	clientset, _ := factory.KubernetesClientSet()
-	controller := util.GetTopController(factory, clientset, "test", "pods/tomcat-7449544d95-n72zb")
+	controller := util.GetTopController(factory, clientset, "default", "pods/productpage-69cf486c4f-z8hb9")
 	fmt.Println(controller.Resource)
 	fmt.Println(controller.Name)
 	fmt.Println(controller.Scale)
