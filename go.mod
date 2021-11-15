@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/containerd/containerd v1.5.7
 	github.com/docker/libcontainer v2.2.1+incompatible
+	github.com/envoyproxy/go-control-plane v0.9.4
 	github.com/fsnotify/fsnotify v1.4.9
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
 	github.com/googleapis/gnostic v0.5.1 // indirect
@@ -30,4 +31,5 @@ require (
 	k8s.io/client-go v0.21.2
 	k8s.io/klog/v2 v2.10.0 // indirect
 	k8s.io/kubectl v0.21.2
+	sigs.k8s.io/yaml v1.2.0 // indirect
 )

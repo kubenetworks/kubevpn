@@ -2,7 +2,14 @@ package remote
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	v22 "github.com/envoyproxy/go-control-plane/envoy/api/v2"
+	core "github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
+	endpoint "github.com/envoyproxy/go-control-plane/envoy/api/v2/endpoint"
+	route "github.com/envoyproxy/go-control-plane/envoy/api/v2/route"
+	v3 "github.com/envoyproxy/go-control-plane/envoy/config/bootstrap/v2"
+	envoyresource "github.com/envoyproxy/go-control-plane/pkg/test/resource"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/util"
@@ -13,6 +20,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"sigs.k8s.io/yaml"
 	"strings"
 	"time"
 )
@@ -319,4 +327,77 @@ func CreateServerInboundForMesh(clientset *kubernetes.Clientset, namespace, work
 			return errors.New("create inbound mesh timeout"), ""
 		}
 	}
+}
+
+func getEnvoyConfig(port uint32, localAddress string) string {
+	httpListener := envoyresource.MakeHTTPListener("", "listen0", 15006, "route0")
+	routes := envoyresource.MakeRoute("route0", "service_debug_withoutHeader")
+	routes.VirtualHosts[0].Routes = append(routes.VirtualHosts[0].Routes, &route.Route{
+		Match: &route.RouteMatch{
+			PathSpecifier: &route.RouteMatch_Prefix{
+				Prefix: "/",
+			},
+			Headers: []*route.HeaderMatcher{{
+				Name:                 "KubeVPN-Routing-Tag",
+				HeaderMatchSpecifier: &route.HeaderMatcher_ExactMatch{ExactMatch: "kubevpn"},
+			}},
+		},
+		Action: &route.Route_Route{
+			Route: &route.RouteAction{
+				ClusterSpecifier: &route.RouteAction_Cluster{
+					Cluster: "service_debug_withHeader",
+				},
+			},
+		},
+	})
+
+	withHeader := envoyresource.MakeCluster("", "service_debug_withHeader")
+	withHeader.LoadAssignment = &v22.ClusterLoadAssignment{
+		ClusterName: "service_debug_withoutHeader",
+		Endpoints: []*endpoint.LocalityLbEndpoints{
+			{LbEndpoints: []*endpoint.LbEndpoint{{
+				HostIdentifier: &endpoint.LbEndpoint_Endpoint{Endpoint: &endpoint.Endpoint{
+					Address: &core.Address{
+						Address: &core.Address_SocketAddress{
+							SocketAddress: &core.SocketAddress{
+								Address: localAddress,
+								PortSpecifier: &core.SocketAddress_PortValue{
+									PortValue: port,
+								},
+							},
+						}},
+				}},
+			}}},
+		},
+		Policy: nil,
+	}
+	withoutHeader := envoyresource.MakeCluster("", "service_debug_withoutHeader")
+	withoutHeader.LoadAssignment = &v22.ClusterLoadAssignment{
+		ClusterName: "service_debug_withoutHeader",
+		Endpoints: []*endpoint.LocalityLbEndpoints{
+			{LbEndpoints: []*endpoint.LbEndpoint{{
+				HostIdentifier: &endpoint.LbEndpoint_Endpoint{Endpoint: &endpoint.Endpoint{
+					Address: &core.Address{
+						Address: &core.Address_SocketAddress{
+							SocketAddress: &core.SocketAddress{
+								Address: "127.0.0.1",
+								PortSpecifier: &core.SocketAddress_PortValue{
+									PortValue: port,
+								},
+							},
+						}},
+				}},
+			}}},
+		},
+		Policy: nil,
+	}
+	resources := v3.Bootstrap{
+		StaticResources: &v3.Bootstrap_StaticResources{
+			Listeners: []*v22.Listener{httpListener},
+			Clusters:  []*v22.Cluster{withHeader, withoutHeader},
+		},
+	}
+	marshal, _ := json.Marshal(&resources)
+	toYAML, _ := yaml.JSONToYAML(marshal)
+	return string(toYAML)
 }

@@ -275,3 +275,13 @@ func server() {
 		}
 	}
 }
+
+func TestParseEnvoy(t *testing.T) {
+	port := uint32(0)
+	localAddress := ""
+	getEnvoyConfig(port, localAddress)
+}
+
+func init() {
+	util.InitLogger(util.Debug)
+}
