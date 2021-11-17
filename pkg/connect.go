@@ -82,7 +82,7 @@ func (c *ConnectOptions) createRemoteInboundPod() {
 						tunIp.IP.String(),
 						c.routerIP,
 						virtualShadowIp.String(),
-						strings.Join(list, ","),
+						trafficManager.String(),
 					)
 				} else {
 					err = CreateInboundPod(
@@ -93,7 +93,7 @@ func (c *ConnectOptions) createRemoteInboundPod() {
 						tunIp.IP.String(),
 						c.routerIP,
 						virtualShadowIp.String(),
-						strings.Join(list, ","),
+						trafficManager.String(),
 					)
 				}
 				if err != nil {

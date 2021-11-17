@@ -26,8 +26,8 @@ func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RE
 				for i := range ipp {
 					resolvConf.Servers[i] = ipp[i]
 				}
-				return resolvConf, nil
 			}
+			return resolvConf, nil
 		} else {
 			return nil, err
 		}

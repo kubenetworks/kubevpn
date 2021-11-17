@@ -352,6 +352,8 @@ func getEnvoyConfig(port uint32, localAddress string) string {
 	})
 
 	withHeader := envoyresource.MakeCluster("", "service_debug_withHeader")
+	withHeader.ClusterDiscoveryType = &v22.Cluster_Type{Type: v22.Cluster_STATIC}
+	withHeader.EdsClusterConfig = nil
 	withHeader.LoadAssignment = &v22.ClusterLoadAssignment{
 		ClusterName: "service_debug_withoutHeader",
 		Endpoints: []*endpoint.LocalityLbEndpoints{
@@ -372,6 +374,8 @@ func getEnvoyConfig(port uint32, localAddress string) string {
 		Policy: nil,
 	}
 	withoutHeader := envoyresource.MakeCluster("", "service_debug_withoutHeader")
+	withoutHeader.ClusterDiscoveryType = &v22.Cluster_Type{Type: v22.Cluster_STATIC}
+	withoutHeader.EdsClusterConfig = nil
 	withoutHeader.LoadAssignment = &v22.ClusterLoadAssignment{
 		ClusterName: "service_debug_withoutHeader",
 		Endpoints: []*endpoint.LocalityLbEndpoints{
@@ -397,7 +401,7 @@ func getEnvoyConfig(port uint32, localAddress string) string {
 			Clusters:  []*v22.Cluster{withHeader, withoutHeader},
 		},
 	}
-	marshal, _ := json.Marshal(&resources)
+	marshal, _ := json.Marshal(resources)
 	toYAML, _ := yaml.JSONToYAML(marshal)
 	return string(toYAML)
 }

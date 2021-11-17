@@ -17,11 +17,8 @@ import (
 	"golang.org/x/net/ipv6"
 )
 
-type key [16]byte
-
-func ipToTunRouteKey(ip net.IP) (key key) {
-	copy(key[:], ip.To16())
-	return
+func ipToTunRouteKey(ip net.IP) string {
+	return ip.To16().String()
 }
 
 type tunHandler struct {
@@ -253,11 +250,11 @@ func (h *tunHandler) transportTun(tun net.Conn, conn net.PacketConn, raddr net.A
 					return err
 				}
 
-				rkey := ipToTunRouteKey(src)
-				if actual, loaded := h.routes.LoadOrStore(rkey, addr); loaded {
+				routeKey := ipToTunRouteKey(src)
+				if actual, loaded := h.routes.LoadOrStore(routeKey, addr); loaded {
 					if actual.(net.Addr).String() != addr.String() {
 						log.Debugf("[tun] update route: %s -> %s (old %s)", src, addr, actual.(net.Addr))
-						h.routes.Store(rkey, addr)
+						h.routes.Store(routeKey, addr)
 					}
 				} else {
 					log.Debugf("[tun] new route: %s -> %s", src, addr)
