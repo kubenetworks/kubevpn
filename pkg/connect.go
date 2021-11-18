@@ -211,7 +211,7 @@ func (c *ConnectOptions) startLocalTunServe() {
 	<-errChan
 }
 
-func (c ConnectOptions) setupDNS() {
+func (c *ConnectOptions) setupDNS() {
 	relovConf, err := dns.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, util.TrafficManager, c.Namespace)
 	if err != nil {
 		log.Fatal(err)
