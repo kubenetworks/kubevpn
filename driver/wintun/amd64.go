@@ -18,11 +18,11 @@ func InstallWintunDriver() error {
 	if err != nil {
 		return err
 	}
-	wd, err := os.Getwd()
+	executable, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	filename := filepath.Join(wd, "wintun.dll")
+	filename := filepath.Join(filepath.Dir(executable), "wintun.dll")
 	_ = os.Remove(filename)
 	err = ioutil.WriteFile(filename, bytes, 644)
 	return err
