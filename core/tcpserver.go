@@ -213,7 +213,7 @@ func (c *fakeUDPTunnelConn) Read(b []byte) (n int, err error) {
 func (c *fakeUDPTunnelConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 	dgram, err := ReadDatagramPacket(c.Conn)
 	if err != nil {
-		log.Errorln(err)
+		log.Debug(err)
 		return
 	}
 	n = copy(b, dgram.Data)

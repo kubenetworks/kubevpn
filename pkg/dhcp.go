@@ -36,8 +36,8 @@ func NewDHCPManager(client *kubernetes.Clientset, namespace string, addr *net.IP
 
 //	todo optimize dhcp, using mac address, ip and deadline as unit
 func (d *DHCPManager) InitDHCP() error {
-	get, err := d.client.CoreV1().ConfigMaps(d.namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
-	if err == nil && get != nil {
+	configMap, err := d.client.CoreV1().ConfigMaps(d.namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
+	if err == nil && configMap != nil {
 		return nil
 	}
 	if d.cidr == nil {

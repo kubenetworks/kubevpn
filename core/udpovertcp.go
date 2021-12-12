@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/util"
 	"io"
 	"net"
@@ -69,7 +68,6 @@ func ReadDatagramPacket(r io.Reader) (rr *DatagramPacket, errsss error) {
 	defer util.LPool.Put(b)
 	_, err := io.ReadFull(r, b[:1])
 	if err != nil {
-		log.Info(err)
 		return nil, err
 	}
 

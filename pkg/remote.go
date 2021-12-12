@@ -21,7 +21,7 @@ import (
 )
 
 func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, trafficManagerIP *net.IPNet, nodeCIDR []*net.IPNet) (net.IP, error) {
-	firstPod, i, err3 := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
+	firstPod, _, err := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
 		namespace,
 		fields.OneTermEqualSelector("app", util.TrafficManager).String(),
 		time.Second*5,
@@ -30,7 +30,7 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 		},
 	)
 
-	if err3 == nil && i != 0 && firstPod != nil {
+	if err == nil && firstPod != nil {
 		UpdateRefCount(clientset, namespace, firstPod.Name, 1)
 		return net.ParseIP(firstPod.Status.PodIP), nil
 	}
@@ -90,24 +90,22 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 			PriorityClassName: "system-cluster-critical",
 		},
 	}
-	_, err2 := clientset.CoreV1().Pods(namespace).Create(context.TODO(), &pod, metav1.CreateOptions{})
-	if err2 != nil {
-		log.Fatal(err2)
+	_, err = clientset.CoreV1().Pods(namespace).Create(context.TODO(), &pod, metav1.CreateOptions{})
+	if err != nil {
+		return nil, err
 	}
 	watch, err := clientset.CoreV1().Pods(namespace).Watch(context.TODO(), metav1.SingleObject(metav1.ObjectMeta{Name: name}))
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
-	tick := time.Tick(time.Minute * 2)
+	defer watch.Stop()
 	for {
 		select {
 		case e := <-watch.ResultChan():
-			if e.Object.(*v1.Pod).Status.Phase == v1.PodRunning {
-				watch.Stop()
-				return net.ParseIP(e.Object.(*v1.Pod).Status.PodIP), nil
+			if podT, ok := e.Object.(*v1.Pod); ok && podT.Status.Phase == v1.PodRunning {
+				return net.ParseIP(podT.Status.PodIP), nil
 			}
-		case <-tick:
-			watch.Stop()
+		case <-time.Tick(time.Minute * 2):
 			log.Error("timeout")
 			return nil, errors.New("timeout")
 		}

@@ -46,11 +46,10 @@ var trafficManager = net.IPNet{
 	Mask: net.CIDRMask(24, 32),
 }
 
-func (c *ConnectOptions) createRemoteInboundPod() {
-	var err error
+func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 	c.localTunIP, err = c.dhcp.RentIPBaseNICAddress()
 	if err != nil {
-		log.Fatal(err)
+		return
 	}
 
 	tempIps := []*net.IPNet{c.localTunIP}
@@ -59,7 +58,7 @@ func (c *ConnectOptions) createRemoteInboundPod() {
 	for _, workload := range c.Workloads {
 		if len(workload) > 0 {
 			wg.Add(1)
-			go func(finalWorkload string) {
+			/*go*/ func(finalWorkload string) {
 				defer wg.Done()
 				lock.Lock()
 				virtualShadowIp, _ := c.dhcp.RentIPRandom()
@@ -97,26 +96,29 @@ func (c *ConnectOptions) createRemoteInboundPod() {
 	}
 	wg.Wait()
 	AddCleanUpResourceHandler(c.clientset, c.Namespace, c.Workloads, c.dhcp, tempIps...)
+	return
 }
 
-func (c *ConnectOptions) DoConnect() {
-	var err error
+func (c *ConnectOptions) DoConnect() (err error) {
 	c.cidrs, err = getCIDR(c.clientset, c.Namespace)
 	if err != nil {
-		log.Fatal(err)
+		return
 	}
 	c.routerIP, err = CreateOutboundRouterPod(c.clientset, c.Namespace, &trafficManager, c.cidrs)
 	if err != nil {
-		log.Fatal(err)
+		return
 	}
 	c.dhcp = NewDHCPManager(c.clientset, c.Namespace, &trafficManager)
 	if err = c.dhcp.InitDHCP(); err != nil {
-		log.Fatal(err)
+		return
 	}
-	c.createRemoteInboundPod()
+	if err = c.createRemoteInboundPod(); err != nil {
+		return
+	}
 	c.portForward(ctx)
 	c.startLocalTunServe(ctx)
 	c.deleteFirewallRuleAndSetupDNS()
+	return
 }
 
 func (c ConnectOptions) heartbeats() {
@@ -193,8 +195,7 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context) {
 	}
 
 	log.Info("your ip is " + c.localTunIP.IP.String())
-	err := Start(ctx, r)
-	if err != nil {
+	if err := Start(ctx, r); err != nil {
 		log.Fatal(err)
 	}
 	log.Info("tunnel connected")
@@ -234,7 +235,7 @@ func Start(ctx context.Context, r Route) error {
 	for _, rr := range routers {
 		go func(ctx context.Context, rr router) {
 			if err = rr.Serve(ctx); err != nil {
-				log.Warnln(err)
+				log.Debug(err)
 				cancel()
 			}
 		}(ctx, rr)

@@ -16,20 +16,15 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	json2 "k8s.io/apimachinery/pkg/util/json"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/cli-runtime/pkg/printers"
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/restmapper"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/tools/remotecommand"
-	clientgowatch "k8s.io/client-go/tools/watch"
 	"k8s.io/client-go/transport/spdy"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/cmd/exec"
@@ -41,57 +36,6 @@ import (
 	"strings"
 	"time"
 )
-
-func WaitResource(clientset *kubernetes.Clientset, getter cache.Getter, namespace, apiVersion, kind string, list metav1.ListOptions, checker func(interface{}) bool) error {
-	groupResources, _ := restmapper.GetAPIGroupResources(clientset)
-	mapper := restmapper.NewDiscoveryRESTMapper(groupResources)
-	groupVersionKind := schema.FromAPIVersionAndKind(apiVersion, kind)
-	mapping, err := mapper.RESTMapping(groupVersionKind.GroupKind(), groupVersionKind.Version)
-	if err != nil {
-		log.Error(err)
-		return err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-
-	watchlist := cache.NewFilteredListWatchFromClient(
-		getter,
-		mapping.Resource.Resource,
-		namespace,
-		func(options *metav1.ListOptions) {
-			options.LabelSelector = list.LabelSelector
-			options.FieldSelector = list.FieldSelector
-			options.Watch = list.Watch
-		},
-	)
-
-	preConditionFunc := func(store cache.Store) (bool, error) {
-		if len(store.List()) == 0 {
-			return false, nil
-		}
-		for _, p := range store.List() {
-			if !checker(p) {
-				return false, nil
-			}
-		}
-		return true, nil
-	}
-
-	conditionFunc := func(e watch.Event) (bool, error) { return checker(e.Object), nil }
-
-	object, err := scheme.Scheme.New(mapping.GroupVersionKind)
-	if err != nil {
-		return err
-	}
-
-	event, err := clientgowatch.UntilWithSync(ctx, watchlist, object, preConditionFunc, conditionFunc)
-	if err != nil {
-		log.Infof("wait to ready failed, error: %v, event: %v", err, event)
-		return err
-	}
-	return nil
-}
 
 func GetAvailablePortOrDie() int {
 	address, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", "0.0.0.0"))
@@ -120,15 +64,25 @@ func GetAvailableUDPPortOrDie() int {
 }
 
 func WaitPod(clientset *kubernetes.Clientset, namespace string, list metav1.ListOptions, checker func(*v1.Pod) bool) error {
-	return WaitResource(
-		clientset,
-		clientset.CoreV1().RESTClient(),
-		namespace,
-		"v1",
-		"Pod",
-		list,
-		func(i interface{}) bool { return checker(i.(*v1.Pod)) },
-	)
+	ctx, cancelFunc := context.WithTimeout(context.TODO(), time.Minute*10)
+	defer cancelFunc()
+	watch, err := clientset.CoreV1().Pods(namespace).Watch(ctx, list)
+	if err != nil {
+		return err
+	}
+	defer watch.Stop()
+	for {
+		select {
+		case e := <-watch.ResultChan():
+			if pod, ok := e.Object.(*v1.Pod); ok {
+				if checker(pod) {
+					return nil
+				}
+			}
+		case <-ctx.Done():
+			return errors.New("wait for pod to be ready timeout")
+		}
+	}
 }
 
 func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, namespace, portPair string, readyChan chan struct{}, stopChan <-chan struct{}) error {
