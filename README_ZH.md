@@ -17,13 +17,13 @@ make kubevpn-windows
 如果你在使用 Windows 系统，可以使用下面这条命令构建：
 
 ```shell
-go build
+go build github.com/wencaiwulue/kubevpn/cmd/kubevpn
 ```
 
 如果安装了 Go 1.16 及以上版本，可以使用如下命令安装：
 
 ```shell
-go install github.com/wencaiwulue/kubevpn@latest
+go install github.com/wencaiwulue/kubevpn/cmd/kubevpn@latest
 ```
 
 ## 功能

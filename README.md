@@ -18,13 +18,13 @@ make kubevpn-windows
 if you are using windows, you can build by this command:
 
 ```shell
-go build
+go build github.com/wencaiwulue/kubevpn/cmd/kubevpn
 ```
 
 if you installed Go 1.16+, you can use install it by this command directly:
 
 ```shell
-go install github.com/wencaiwulue/kubevpn@latest
+go install github.com/wencaiwulue/kubevpn/cmd/kubevpn@latest
 ```
 
 ### Install bookinfo as demo application

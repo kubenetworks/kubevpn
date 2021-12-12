@@ -1,4 +1,4 @@
-package cmd
+package cmds
 
 import (
 	log "github.com/sirupsen/logrus"
