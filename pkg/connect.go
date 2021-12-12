@@ -6,7 +6,6 @@ import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/dns"
-	"github.com/wencaiwulue/kubevpn/remote"
 	"github.com/wencaiwulue/kubevpn/util"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,7 +38,7 @@ type ConnectOptions struct {
 	factory        cmdutil.Factory
 	cidrs          []*net.IPNet
 	routerIP       string
-	dhcp           *remote.DHCPManager
+	dhcp           *DHCPManager
 }
 
 var trafficManager = net.IPNet{
@@ -70,18 +69,20 @@ func (c *ConnectOptions) createRemoteInboundPod() {
 				virtualShadowIp, _ := c.dhcp.RentIPRandom()
 				tempIps = append(tempIps, virtualShadowIp)
 				lock.Unlock()
-
+				config := PodRouteConfig{
+					LocalTunIP:           tunIp.IP.String(),
+					InboundPodTunIP:      virtualShadowIp.String(),
+					TrafficManagerRealIP: c.routerIP,
+					Route:                trafficManager.String(),
+				}
 				// TODO OPTIMIZE CODE
 				if c.Mode == Mesh {
-					err = remote.PatchSidecar(
+					err = PatchSidecar(
 						c.factory,
 						c.clientset,
 						c.Namespace,
 						finalWorkload,
-						tunIp.IP.String(),
-						c.routerIP,
-						virtualShadowIp.String(),
-						trafficManager.String(),
+						config,
 					)
 				} else {
 					err = CreateInboundPod(
@@ -89,10 +90,7 @@ func (c *ConnectOptions) createRemoteInboundPod() {
 						c.clientset,
 						c.Namespace,
 						finalWorkload,
-						tunIp.IP.String(),
-						c.routerIP,
-						virtualShadowIp.String(),
-						trafficManager.String(),
+						config,
 					)
 				}
 				if err != nil {
@@ -102,7 +100,7 @@ func (c *ConnectOptions) createRemoteInboundPod() {
 		}
 	}
 	wg.Wait()
-	remote.AddCleanUpResourceHandler(c.clientset, c.Namespace, c.Workloads, c.dhcp, tempIps...)
+	AddCleanUpResourceHandler(c.clientset, c.Namespace, c.Workloads, c.dhcp, tempIps...)
 	if util.IsWindows() {
 		tunIp.Mask = net.CIDRMask(0, 32)
 	} else {
@@ -127,7 +125,7 @@ func (c *ConnectOptions) DoConnect() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	c.dhcp = remote.NewDHCPManager(c.clientset, c.Namespace, &trafficManager)
+	c.dhcp = NewDHCPManager(c.clientset, c.Namespace, &trafficManager)
 	if err = c.dhcp.InitDHCP(); err != nil {
 		log.Fatal(err)
 	}
@@ -157,7 +155,7 @@ func (c ConnectOptions) heartbeats() {
 func (c *ConnectOptions) portForward() {
 	var readyChanRef *chan struct{}
 	ctx, cancelFunc := context.WithCancel(context.Background())
-	remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)
+	CancelFunctions = append(CancelFunctions, cancelFunc)
 	go func() {
 		for ctx.Err() == nil {
 			func() {
@@ -234,7 +232,7 @@ func Start(r Route) (chan error, error) {
 	c := make(chan error, len(routers))
 	for i := range routers {
 		ctx, cancelFunc := context.WithCancel(context.Background())
-		remote.CancelFunctions = append(remote.CancelFunctions, cancelFunc)
+		CancelFunctions = append(CancelFunctions, cancelFunc)
 		go func(finalCtx context.Context, finalI int, c chan error) {
 			if err = routers[finalI].Serve(finalCtx); err != nil {
 				log.Warn(err)

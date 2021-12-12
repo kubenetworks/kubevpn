@@ -38,7 +38,6 @@ import (
 	"net/http"
 	"os"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -345,23 +344,6 @@ func GetOwnerReferences(object k8sruntime.Object) *metav1.OwnerReference {
 		}
 	}
 	return nil
-}
-
-func GetScale(object k8sruntime.Object) int {
-	defer func() {
-		if err := recover(); err != nil {
-			log.Errorln(err)
-		}
-	}()
-	printer, _ := printers.NewJSONPathPrinter("{.spec.replicas}")
-	buf := bytes.NewBuffer([]byte{})
-	if err := printer.PrintObj(object, buf); err != nil {
-		return 0
-	}
-	if atoi, err := strconv.Atoi(buf.String()); err == nil {
-		return atoi
-	}
-	return 0
 }
 
 func DeletePod(clientset *kubernetes.Clientset, namespace, podName string) {

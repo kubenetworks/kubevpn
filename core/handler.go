@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"github.com/wencaiwulue/kubevpn/tun"
 	"net"
 )
@@ -8,7 +9,7 @@ import (
 // Handler is a proxy server handler
 type Handler interface {
 	Init(options ...HandlerOption)
-	Handle(net.Conn)
+	Handle(ctx context.Context, conn net.Conn)
 }
 
 // HandlerOptions describes the options for Handler.

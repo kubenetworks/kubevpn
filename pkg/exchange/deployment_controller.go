@@ -1,4 +1,4 @@
-package remote
+package exchange
 
 import (
 	"context"
@@ -26,30 +26,30 @@ func NewDeploymentController(factory cmdutil.Factory, clientset *kubernetes.Clie
 	}
 }
 
-func (c *DeploymentController) Inject() (map[string]string, *v1.PodSpec, error) {
-	scale, err2 := c.clientset.AppsV1().Deployments(c.namespace).GetScale(context.TODO(), c.name, metav1.GetOptions{})
+func (deployment *DeploymentController) ScaleToZero() (map[string]string, []v1.ContainerPort, error) {
+	scale, err2 := deployment.clientset.AppsV1().Deployments(deployment.namespace).GetScale(context.TODO(), deployment.name, metav1.GetOptions{})
 	if err2 != nil {
 		return nil, nil, err2
 	}
-	c.f = func() error {
-		_, err := c.clientset.AppsV1().Deployments(c.namespace).UpdateScale(
+	deployment.f = func() error {
+		_, err := deployment.clientset.AppsV1().Deployments(deployment.namespace).UpdateScale(
 			context.TODO(),
-			c.name,
+			deployment.name,
 			&autoscalingv1.Scale{
-				ObjectMeta: metav1.ObjectMeta{Name: c.name, Namespace: c.namespace},
+				ObjectMeta: metav1.ObjectMeta{Name: deployment.name, Namespace: deployment.namespace},
 				Spec:       autoscalingv1.ScaleSpec{Replicas: scale.Spec.Replicas},
 			},
 			metav1.UpdateOptions{},
 		)
 		return err
 	}
-	_, err := c.clientset.AppsV1().Deployments(c.namespace).UpdateScale(
+	_, err := deployment.clientset.AppsV1().Deployments(deployment.namespace).UpdateScale(
 		context.TODO(),
-		c.name,
+		deployment.name,
 		&autoscalingv1.Scale{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      c.name,
-				Namespace: c.namespace,
+				Name:      deployment.name,
+				Namespace: deployment.namespace,
 			},
 			Spec: autoscalingv1.ScaleSpec{
 				Replicas: int32(0),
@@ -60,13 +60,13 @@ func (c *DeploymentController) Inject() (map[string]string, *v1.PodSpec, error) 
 	if err != nil {
 		return nil, nil, err
 	}
-	get, err := c.clientset.AppsV1().Deployments(c.namespace).Get(context.TODO(), c.name, metav1.GetOptions{})
+	get, err := deployment.clientset.AppsV1().Deployments(deployment.namespace).Get(context.TODO(), deployment.name, metav1.GetOptions{})
 	if err != nil {
 		return nil, nil, err
 	}
-	return get.Spec.Template.Labels, &get.Spec.Template.Spec, nil
+	return get.Spec.Template.GetLabels(), get.Spec.Template.Spec.Containers[0].Ports, nil
 }
 
-func (c *DeploymentController) Cancel() error {
-	return c.f()
+func (deployment *DeploymentController) Cancel() error {
+	return deployment.f()
 }

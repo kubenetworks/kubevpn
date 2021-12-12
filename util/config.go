@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const TrafficManager = "kubevpn.traffic.manager"
+
 // Debug is a flag that enables the debug log.
 var Debug bool
 

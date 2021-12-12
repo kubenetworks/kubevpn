@@ -1,8 +1,7 @@
-package remote
+package exchange
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/wencaiwulue/kubevpn/util"
 	v1 "k8s.io/api/core/v1"
@@ -28,7 +27,12 @@ func NewServiceController(factory cmdutil.Factory, clientset *kubernetes.Clients
 	}
 }
 
-func (s *ServiceController) Inject() (map[string]string, *v1.PodSpec, error) {
+func (s *ServiceController) ScaleToZero() (map[string]string, []v1.ContainerPort, error) {
+	get, err := s.clientset.CoreV1().Services(s.namespace).Get(context.TODO(), s.name, metav1.GetOptions{})
+	if err != nil {
+		return nil, nil, err
+	}
+
 	object, err := util.GetUnstructuredObject(s.factory, s.namespace, fmt.Sprintf("services/%s", s.name))
 	if err != nil {
 		return nil, nil, err
@@ -38,14 +42,22 @@ func (s *ServiceController) Inject() (map[string]string, *v1.PodSpec, error) {
 		LabelSelector: asSelector.String(),
 	})
 	if len(podList.Items) == 0 {
-		return nil, nil, errors.New("this should not happened")
+		var ports []v1.ContainerPort
+		for _, port := range get.Spec.Ports {
+			ports = append(ports, v1.ContainerPort{
+				Name:          port.Name,
+				ContainerPort: port.Port,
+				Protocol:      port.Protocol,
+			})
+		}
+		return get.Spec.Selector, ports, nil
 	}
 	// if podList is not one, needs to merge ???
 	podController := NewPodController(s.factory, s.clientset, s.namespace, "pods", podList.Items[0].Name)
 
-	labels, zero, err := podController.Inject()
+	zero, ports, err := podController.ScaleToZero()
 	s.f = podController.f
-	return labels, zero, err
+	return zero, ports, err
 }
 
 func (s *ServiceController) Cancel() error {

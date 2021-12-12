@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/remote"
+	"github.com/wencaiwulue/kubevpn/pkg/exchange"
 	"github.com/wencaiwulue/kubevpn/util"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, serverIp *net.IPNet, nodeCIDR []*net.IPNet) (string, error) {
+func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, trafficManagerIP *net.IPNet, nodeCIDR []*net.IPNet) (string, error) {
 	firstPod, i, err3 := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
 		namespace,
 		fields.OneTermEqualSelector("app", util.TrafficManager).String(),
@@ -31,7 +31,7 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 	)
 
 	if err3 == nil && i != 0 && firstPod != nil {
-		remote.UpdateRefCount(clientset, namespace, firstPod.Name, 1)
+		UpdateRefCount(clientset, namespace, firstPod.Name, 1)
 		return firstPod.Status.PodIP, nil
 	}
 	args := []string{
@@ -44,7 +44,7 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 	for _, ipNet := range nodeCIDR {
 		args = append(args, "iptables -t nat -A POSTROUTING -s "+ipNet.String()+" -o eth0 -j MASQUERADE")
 	}
-	args = append(args, "kubevpn serve -L tcp://:10800 -L tun://:8421?net="+serverIp.String()+" --debug=true")
+	args = append(args, "kubevpn serve -L tcp://:10800 -L tun://:8421?net="+trafficManagerIP.String()+" --debug=true")
 
 	t := true
 	zero := int64(0)
@@ -114,38 +114,45 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 	}
 }
 
-func CreateInboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads, virtualLocalIp, realRouterIP, virtualShadowIp, routes string) error {
+func CreateInboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads string, config PodRouteConfig) error {
 	resourceTuple, parsed, err2 := util.SplitResourceTypeName(workloads)
 	if !parsed || err2 != nil {
 		return errors.New("not need")
 	}
 	newName := resourceTuple.Name + "-" + "shadow"
 	util.DeletePod(clientset, namespace, newName)
-	//err := updateScaleToZero(factory, clientset, namespace, workloads)
-	//object, err2 := util.GetUnstructuredObject(factory, namespace, workloads)
-	//labels := util.GetLabelSelector(object.Object)
-	//ports := util.GetPorts(object.Object)
-	var sc Scalable
+	var sc exchange.Scalable
 	switch strings.ToLower(resourceTuple.Resource) {
 	case "deployment", "deployments":
-		sc = NewDeploymentController(factory, clientset, namespace, resourceTuple.Name)
+		sc = exchange.NewDeploymentController(factory, clientset, namespace, resourceTuple.Name)
 	case "statefulset", "statefulsets":
-		sc = NewStatefulsetController(factory, clientset, namespace, resourceTuple.Name)
+		sc = exchange.NewStatefulsetController(factory, clientset, namespace, resourceTuple.Name)
 	case "replicaset", "replicasets":
-		sc = NewReplicasController(factory, clientset, namespace, resourceTuple.Name)
+		sc = exchange.NewReplicasController(factory, clientset, namespace, resourceTuple.Name)
 	case "service", "services":
-		sc = NewServiceController(factory, clientset, namespace, resourceTuple.Name)
+		sc = exchange.NewServiceController(factory, clientset, namespace, resourceTuple.Name)
 	case "pod", "pods":
-		sc = NewPodController(factory, clientset, namespace, "pods", resourceTuple.Name)
+		sc = exchange.NewPodController(factory, clientset, namespace, "pods", resourceTuple.Name)
 	default:
-		sc = NewPodController(factory, clientset, namespace, resourceTuple.Resource, resourceTuple.Name)
+		sc = exchange.NewPodController(factory, clientset, namespace, resourceTuple.Resource, resourceTuple.Name)
 	}
-	remote.CancelFunctions = append(remote.CancelFunctions, func() {
+	CancelFunctions = append(CancelFunctions, func() {
 		if err := sc.Cancel(); err != nil {
 			log.Warnln(err)
 		}
 	})
 	labels, ports, err2 := sc.ScaleToZero()
+	//sc.CreateOutboundPod()
+	return createInboundPod(newName, namespace, labels, ports, clientset, config)
+}
+
+func createInboundPod(newName string,
+	namespace string,
+	labels map[string]string,
+	ports []v1.ContainerPort,
+	clientset *kubernetes.Clientset,
+	c PodRouteConfig,
+) error {
 	t := true
 	zero := int64(0)
 	pod := v1.Pod{
@@ -166,11 +173,11 @@ func CreateInboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset, 
 							"iptables -F;" +
 							"iptables -P INPUT ACCEPT;" +
 							"iptables -P FORWARD ACCEPT;" +
-							"iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80:60000 -j DNAT --to " + virtualLocalIp + ":80-60000;" +
+							"iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80:60000 -j DNAT --to " + c.LocalTunIP + ":80-60000;" +
 							"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 -j MASQUERADE;" +
-							"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 -j DNAT --to " + virtualLocalIp + ":80-60000;" +
+							"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 -j DNAT --to " + c.LocalTunIP + ":80-60000;" +
 							"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 -j MASQUERADE;" +
-							"kubevpn serve -L 'tun://0.0.0.0:8421/" + realRouterIP + ":8421?net=" + virtualShadowIp + "&route=" + routes + "' --debug=true",
+							"kubevpn serve -L 'tun://0.0.0.0:8421/" + c.TrafficManagerRealIP + ":8421?net=" + c.InboundPodTunIP + "&route=" + c.Route + "' --debug=true",
 					},
 					SecurityContext: &v1.SecurityContext{
 						Capabilities: &v1.Capabilities{

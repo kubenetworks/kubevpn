@@ -41,7 +41,7 @@ func TCPHandler() Handler {
 func (h *fakeUdpHandler) Init(...HandlerOption) {
 }
 
-func (h *fakeUdpHandler) Handle(conn net.Conn) {
+func (h *fakeUdpHandler) Handle(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	if util.Debug {
 		log.Debugf("[tcpserver] %s -> %s\n", conn.RemoteAddr(), conn.LocalAddr())

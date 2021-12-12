@@ -1,4 +1,4 @@
-package remote
+package exchange
 
 import (
 	"context"
@@ -26,8 +26,8 @@ func NewStatefulsetController(factory cmdutil.Factory, clientset *kubernetes.Cli
 	}
 }
 
-func (s *StatefulsetController) Inject() (map[string]string, *v1.PodSpec, error) {
-	statefulSet, err := s.clientset.AppsV1().StatefulSets(s.namespace).Get(context.TODO(), s.name, metav1.GetOptions{})
+func (s *StatefulsetController) ScaleToZero() (map[string]string, []v1.ContainerPort, error) {
+	scale, err := s.clientset.AppsV1().StatefulSets(s.namespace).Get(context.TODO(), s.name, metav1.GetOptions{})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -40,7 +40,7 @@ func (s *StatefulsetController) Inject() (map[string]string, *v1.PodSpec, error)
 					Namespace: s.namespace,
 				},
 				Spec: autoscalingv1.ScaleSpec{
-					Replicas: *statefulSet.Spec.Replicas,
+					Replicas: *scale.Spec.Replicas,
 				},
 			}, metav1.UpdateOptions{})
 		return err
@@ -59,7 +59,7 @@ func (s *StatefulsetController) Inject() (map[string]string, *v1.PodSpec, error)
 	if err != nil {
 		return nil, nil, err
 	}
-	return statefulSet.Spec.Template.Labels, &statefulSet.Spec.Template.Spec, nil
+	return scale.Spec.Template.Labels, scale.Spec.Template.Spec.Containers[0].Ports, nil
 }
 
 func (s *StatefulsetController) Cancel() error {

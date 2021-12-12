@@ -1,4 +1,4 @@
-package remote
+package pkg
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	envoyresource "github.com/envoyproxy/go-control-plane/pkg/test/resource"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/pkg/mesh"
 	"github.com/wencaiwulue/kubevpn/util"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -30,9 +31,9 @@ import (
 //	patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
 // TODO if using envoy needs to create another pod, if using diy proxy, using one container is enough
 // TODO support multiple port
-func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads, virtualLocalIp, realRouterIP, virtualShadowIp, routes string) error {
+func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads string, c PodRouteConfig) error {
 	// create pod in bound for mesh
-	err, podIp := CreateServerInboundForMesh(clientset, namespace, workloads, virtualLocalIp, realRouterIP, virtualShadowIp, routes)
+	err, podIp := CreateServerInboundForMesh(clientset, namespace, workloads, c)
 	if err != nil {
 		log.Warnln(err)
 		return err
@@ -44,20 +45,20 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 	}
 	t := true
 	zero := int64(0)
-	var sc Injectable
+	var sc mesh.Injectable
 	switch strings.ToLower(resourceTuple.Resource) {
 	case "deployment", "deployments":
-		sc = NewDeploymentController(factory, clientset, namespace, resourceTuple.Name)
+		sc = mesh.NewDeploymentController(factory, clientset, namespace, resourceTuple.Name)
 	case "statefulset", "statefulsets":
-		sc = NewStatefulsetController(factory, clientset, namespace, resourceTuple.Name)
+		sc = mesh.NewStatefulsetController(factory, clientset, namespace, resourceTuple.Name)
 	case "replicaset", "replicasets":
-		sc = NewReplicasController(factory, clientset, namespace, resourceTuple.Name)
+		sc = mesh.NewReplicasController(factory, clientset, namespace, resourceTuple.Name)
 	case "service", "services":
-		sc = NewServiceController(factory, clientset, namespace, resourceTuple.Name)
+		sc = mesh.NewServiceController(factory, clientset, namespace, resourceTuple.Name)
 	case "pod", "pods":
-		sc = NewPodController(factory, clientset, namespace, "pods", resourceTuple.Name)
+		sc = mesh.NewPodController(factory, clientset, namespace, "pods", resourceTuple.Name)
 	default:
-		sc = NewPodController(factory, clientset, namespace, resourceTuple.Resource, resourceTuple.Name)
+		sc = mesh.NewPodController(factory, clientset, namespace, resourceTuple.Resource, resourceTuple.Name)
 	}
 	CancelFunctions = append(CancelFunctions, func() {
 		if err = sc.Cancel(); err != nil {
@@ -248,7 +249,7 @@ func createEnvoyConfigMapIfNeeded(factory cmdutil.Factory, clientset *kubernetes
 	}
 }
 
-func CreateServerInboundForMesh(clientset *kubernetes.Clientset, namespace, workloads, virtualLocalIp, realRouterIP, virtualShadowIp, routes string) (error, string) {
+func CreateServerInboundForMesh(clientset *kubernetes.Clientset, namespace, workloads string, config PodRouteConfig) (error, string) {
 	resourceTuple, parsed, err2 := util.SplitResourceTypeName(workloads)
 	if !parsed || err2 != nil {
 		return errors.New("not need"), ""
@@ -274,11 +275,11 @@ func CreateServerInboundForMesh(clientset *kubernetes.Clientset, namespace, work
 							"iptables -F;" +
 							"iptables -P INPUT ACCEPT;" +
 							"iptables -P FORWARD ACCEPT;" +
-							"iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80:60000 -j DNAT --to " + virtualLocalIp + ":80-60000;" +
+							"iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80:60000 -j DNAT --to " + config.LocalTunIP + ":80-60000;" +
 							"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 -j MASQUERADE;" +
-							"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 -j DNAT --to " + virtualLocalIp + ":80-60000;" +
+							"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 -j DNAT --to " + config.LocalTunIP + ":80-60000;" +
 							"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 -j MASQUERADE;" +
-							"kubevpn serve -L 'tun://0.0.0.0:8421/" + realRouterIP + ":8421?net=" + virtualShadowIp + "&route=" + routes + "' --debug=true",
+							"kubevpn serve -L 'tun://0.0.0.0:8421/" + config.TrafficManagerRealIP + ":8421?net=" + config.InboundPodTunIP + "&route=" + config.Route + "' --debug=true",
 					},
 					SecurityContext: &v1.SecurityContext{
 						Capabilities: &v1.Capabilities{

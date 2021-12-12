@@ -1,4 +1,4 @@
-package pkg
+package exchange
 
 import (
 	"context"
