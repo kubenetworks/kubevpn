@@ -34,7 +34,9 @@ var connectCmd = &cobra.Command{
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		connect.InitClient()
+		if err := connect.InitClient(); err != nil {
+			log.Fatal(err)
+		}
 		connect.DoConnect()
 	},
 	PostRun: func(_ *cobra.Command, _ []string) {

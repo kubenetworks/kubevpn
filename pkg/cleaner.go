@@ -20,7 +20,8 @@ import (
 )
 
 var stopChan = make(chan os.Signal)
-var CancelFunctions = make([]context.CancelFunc, 3)
+var rollbackFuncs = make([]func(), 2)
+var ctx, cancel = context.WithCancel(context.TODO())
 
 func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string, workloads []string, manager *DHCPManager, ip ...*net.IPNet) {
 	signal.Notify(stopChan, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL /*, syscall.SIGSTOP*/)
@@ -34,6 +35,12 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 			}
 		}
 		cleanUpTrafficManagerIfRefCountIsZero(clientset, namespace)
+		cancel()
+		for _, function := range rollbackFuncs {
+			if function != nil {
+				function()
+			}
+		}
 		wg := sync.WaitGroup{}
 		for _, service := range workloads {
 			if tuple, ok, err := util.SplitResourceTypeName(service); ok && err == nil {
@@ -49,21 +56,7 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 			}
 		}
 		wg.Wait()
-		//wg = sync.WaitGroup{}
-		//for _, controller := range util.TopLevelControllerSet {
-		//	wg.Add(1)
-		//	go func(control util.ResourceTupleWithScale) {
-		//		util.UpdateReplicasScale(clientset, namespace, control)
-		//		wg.Done()
-		//	}(controller)
-		//}
-		//wg.Wait()
 		log.Info("clean up successful")
-		for _, function := range CancelFunctions {
-			if function != nil {
-				function()
-			}
-		}
 	}()
 }
 

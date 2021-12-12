@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/wencaiwulue/kubevpn/pkg"
@@ -24,12 +25,6 @@ var ServerCmd = &cobra.Command{
 		util.InitLogger(util.Debug)
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		c, err := pkg.Start(config)
-		if err != nil {
-			log.Fatal(err)
-		}
-		if err := <-c; err != nil {
-			log.Fatal(err)
-		}
+		log.Fatal(pkg.Start(context.TODO(), config))
 	},
 }

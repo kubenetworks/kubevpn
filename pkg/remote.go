@@ -136,7 +136,7 @@ func CreateInboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset, 
 	default:
 		sc = exchange.NewPodController(factory, clientset, namespace, resourceTuple.Resource, resourceTuple.Name)
 	}
-	CancelFunctions = append(CancelFunctions, func() {
+	rollbackFuncs = append(rollbackFuncs, func() {
 		if err := sc.Cancel(); err != nil {
 			log.Warnln(err)
 		}

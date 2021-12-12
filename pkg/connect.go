@@ -130,8 +130,9 @@ func (c *ConnectOptions) DoConnect() {
 		log.Fatal(err)
 	}
 	c.createRemoteInboundPod()
-	c.portForward()
-	c.startLocalTunServe()
+	c.portForward(ctx)
+	c.startLocalTunServe(ctx)
+	<-ctx.Done()
 }
 
 func (c ConnectOptions) heartbeats() {
@@ -152,10 +153,8 @@ func (c ConnectOptions) heartbeats() {
 	}()
 }
 
-func (c *ConnectOptions) portForward() {
+func (c *ConnectOptions) portForward(ctx context.Context) {
 	var readyChanRef *chan struct{}
-	ctx, cancelFunc := context.WithCancel(context.Background())
-	CancelFunctions = append(CancelFunctions, cancelFunc)
 	go func() {
 		for ctx.Err() == nil {
 			func() {
@@ -173,7 +172,7 @@ func (c *ConnectOptions) portForward() {
 					c.Namespace,
 					"10800:10800",
 					readChan,
-					make(chan struct{}),
+					ctx.Done(),
 				)
 				if apierrors.IsNotFound(err) {
 					log.Fatalf("can not found port-forward resource, err: %v, exiting", err)
@@ -191,8 +190,8 @@ func (c *ConnectOptions) portForward() {
 	log.Info("port forward ready")
 }
 
-func (c *ConnectOptions) startLocalTunServe() {
-	errChan, err := Start(c.nodeConfig)
+func (c *ConnectOptions) startLocalTunServe(ctx context.Context) {
+	err := Start(ctx, c.nodeConfig)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -206,8 +205,6 @@ func (c *ConnectOptions) startLocalTunServe() {
 	c.heartbeats()
 	c.setupDNS()
 	log.Info("dns service ok")
-	// wait for exit
-	<-errChan
 }
 
 func (c *ConnectOptions) setupDNS() {
@@ -220,28 +217,23 @@ func (c *ConnectOptions) setupDNS() {
 	}
 }
 
-func Start(r Route) (chan error, error) {
+func Start(ctx context.Context, r Route) error {
 	routers, err := r.GenRouters()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if len(routers) == 0 {
-		return nil, errors.New("invalid config")
+		return errors.New("invalid config")
 	}
-	c := make(chan error, len(routers))
-	for i := range routers {
-		ctx, cancelFunc := context.WithCancel(context.Background())
-		CancelFunctions = append(CancelFunctions, cancelFunc)
-		go func(finalCtx context.Context, finalI int, c chan error) {
-			if err = routers[finalI].Serve(finalCtx); err != nil {
-				log.Warn(err)
-				c <- err
+	for _, rr := range routers {
+		go func(ctx context.Context, rr router) {
+			if err = rr.Serve(ctx); err != nil {
+				log.Fatal(err)
 			}
-		}(ctx, i, c)
+		}(ctx, rr)
 	}
-
-	return c, nil
+	return nil
 }
 
 func getCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, error) {
@@ -285,25 +277,25 @@ func getCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, e
 	return nil, fmt.Errorf("can not found cidr")
 }
 
-func (c *ConnectOptions) InitClient() {
-	var err error
+func (c *ConnectOptions) InitClient() (err error) {
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
 	configFlags.KubeConfig = &c.KubeconfigPath
 	c.factory = cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 
 	if c.config, err = c.factory.ToRESTConfig(); err != nil {
-		log.Fatal(err)
+		return
 	}
 	if c.restclient, err = c.factory.RESTClient(); err != nil {
-		log.Fatal(err)
+		return
 	}
 	if c.clientset, err = c.factory.KubernetesClientSet(); err != nil {
-		log.Fatal(err)
+		return
 	}
 	if len(c.Namespace) == 0 {
 		if c.Namespace, _, err = c.factory.ToRawKubeConfigLoader().Namespace(); err != nil {
-			log.Fatal(err)
+			return
 		}
 	}
 	log.Infof("kubeconfig path: %s, namespace: %s, serivces: %v", c.KubeconfigPath, c.Namespace, c.Workloads)
+	return
 }
