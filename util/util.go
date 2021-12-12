@@ -8,11 +8,14 @@ import (
 	dockerterm "github.com/moby/term"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
 	"io"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	"k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	json2 "k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/watch"
@@ -20,24 +23,22 @@ import (
 	"k8s.io/cli-runtime/pkg/printers"
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/portforward"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	"strconv"
-
-	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/tools/remotecommand"
 	clientgowatch "k8s.io/client-go/tools/watch"
 	"k8s.io/client-go/transport/spdy"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/cmd/exec"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"net"
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -412,4 +413,44 @@ func BytesToInt(b []byte) uint32 {
 		log.Warn(err)
 	}
 	return u
+}
+
+func Ping(targetIP string) (bool, error) {
+	conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close()
+
+	message := icmp.Message{
+		Type: ipv4.ICMPTypeEcho, Code: 0,
+		Body: &icmp.Echo{
+			ID:   os.Getpid() & 0xffff,
+			Seq:  1,
+			Data: []byte("HELLO-R-U-THERE"),
+		},
+	}
+	data, err := message.Marshal(nil)
+	if err != nil {
+		return false, nil
+	}
+	if _, err = conn.WriteTo(data, &net.IPAddr{IP: net.ParseIP(targetIP)}); err != nil {
+		return false, err
+	}
+
+	rb := make([]byte, 1500)
+	n, _, err := conn.ReadFrom(rb)
+	if err != nil {
+		return false, err
+	}
+	rm, err := icmp.ParseMessage(ipv4.ICMPTypeEchoReply.Protocol(), rb[:n])
+	if err != nil {
+		return false, err
+	}
+	switch rm.Type {
+	case ipv4.ICMPTypeEchoReply:
+		return true, nil
+	default:
+		return false, nil
+	}
 }

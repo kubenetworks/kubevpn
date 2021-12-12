@@ -15,7 +15,6 @@ import (
 	"k8s.io/client-go/rest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"net"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -147,7 +146,9 @@ func (c ConnectOptions) heartbeats() {
 			case <-tick:
 				c2 <- struct{}{}
 			case <-c2:
-				_ = exec.Command("ping", "-c", "4", "223.254.254.100").Run()
+				for i := 0; i < 4; i++ {
+					_, _ = util.Ping("223.254.254.100")
+				}
 			}
 		}
 	}()
