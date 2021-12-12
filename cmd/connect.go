@@ -38,6 +38,7 @@ var connectCmd = &cobra.Command{
 			log.Fatal(err)
 		}
 		connect.DoConnect()
+		select {}
 	},
 	PostRun: func(_ *cobra.Command, _ []string) {
 		if util.IsWindows() {

@@ -57,6 +57,7 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 		}
 		wg.Wait()
 		log.Info("clean up successful")
+		os.Exit(0)
 	}()
 }
 

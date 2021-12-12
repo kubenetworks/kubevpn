@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, trafficManagerIP *net.IPNet, nodeCIDR []*net.IPNet) (string, error) {
+func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, trafficManagerIP *net.IPNet, nodeCIDR []*net.IPNet) (net.IP, error) {
 	firstPod, i, err3 := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
 		namespace,
 		fields.OneTermEqualSelector("app", util.TrafficManager).String(),
@@ -32,7 +32,7 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 
 	if err3 == nil && i != 0 && firstPod != nil {
 		UpdateRefCount(clientset, namespace, firstPod.Name, 1)
-		return firstPod.Status.PodIP, nil
+		return net.ParseIP(firstPod.Status.PodIP), nil
 	}
 	args := []string{
 		"sysctl net.ipv4.ip_forward=1",
@@ -104,12 +104,12 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 		case e := <-watch.ResultChan():
 			if e.Object.(*v1.Pod).Status.Phase == v1.PodRunning {
 				watch.Stop()
-				return e.Object.(*v1.Pod).Status.PodIP, nil
+				return net.ParseIP(e.Object.(*v1.Pod).Status.PodIP), nil
 			}
 		case <-tick:
 			watch.Stop()
 			log.Error("timeout")
-			return "", errors.New("timeout")
+			return nil, errors.New("timeout")
 		}
 	}
 }

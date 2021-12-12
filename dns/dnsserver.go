@@ -1,7 +1,6 @@
 package dns
 
 import (
-	"fmt"
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/cache"
@@ -45,7 +44,6 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, r *miekgdns.Msg) {
 	case 5:
 	}
 	r.Question = []miekgdns.Question{question}
-	fmt.Println(r.Question)
 	answer, err := miekgdns.Exchange(r, s.forwardDNS.Servers[0]+":53")
 	if err != nil {
 		log.Warnln(err)

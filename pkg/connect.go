@@ -31,14 +31,14 @@ type ConnectOptions struct {
 	Namespace      string
 	Mode           Mode
 	Workloads      []string
-	nodeConfig     Route
 	clientset      *kubernetes.Clientset
 	restclient     *rest.RESTClient
 	config         *rest.Config
 	factory        cmdutil.Factory
 	cidrs          []*net.IPNet
-	routerIP       string
 	dhcp           *DHCPManager
+	routerIP       net.IP
+	localTunIP     *net.IPNet
 }
 
 var trafficManager = net.IPNet{
@@ -47,17 +47,13 @@ var trafficManager = net.IPNet{
 }
 
 func (c *ConnectOptions) createRemoteInboundPod() {
-	var list []string
-	for _, ipNet := range c.cidrs {
-		list = append(list, ipNet.String())
-	}
-
-	tunIp, err := c.dhcp.RentIPBaseNICAddress()
+	var err error
+	c.localTunIP, err = c.dhcp.RentIPBaseNICAddress()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	tempIps := []*net.IPNet{tunIp}
+	tempIps := []*net.IPNet{c.localTunIP}
 	wg := sync.WaitGroup{}
 	lock := sync.Mutex{}
 	for _, workload := range c.Workloads {
@@ -70,9 +66,9 @@ func (c *ConnectOptions) createRemoteInboundPod() {
 				tempIps = append(tempIps, virtualShadowIp)
 				lock.Unlock()
 				config := PodRouteConfig{
-					LocalTunIP:           tunIp.IP.String(),
+					LocalTunIP:           c.localTunIP.IP.String(),
 					InboundPodTunIP:      virtualShadowIp.String(),
-					TrafficManagerRealIP: c.routerIP,
+					TrafficManagerRealIP: c.routerIP.String(),
 					Route:                trafficManager.String(),
 				}
 				// TODO OPTIMIZE CODE
@@ -101,18 +97,6 @@ func (c *ConnectOptions) createRemoteInboundPod() {
 	}
 	wg.Wait()
 	AddCleanUpResourceHandler(c.clientset, c.Namespace, c.Workloads, c.dhcp, tempIps...)
-	if util.IsWindows() {
-		tunIp.Mask = net.CIDRMask(0, 32)
-	} else {
-		tunIp.Mask = net.CIDRMask(24, 32)
-	}
-
-	list = append(list, trafficManager.String())
-
-	c.nodeConfig.ChainNode = "tcp://127.0.0.1:10800"
-	c.nodeConfig.ServeNodes = []string{fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", tunIp.String(), strings.Join(list, ","))}
-
-	log.Info("your ip is " + tunIp.String())
 }
 
 func (c *ConnectOptions) DoConnect() {
@@ -132,7 +116,7 @@ func (c *ConnectOptions) DoConnect() {
 	c.createRemoteInboundPod()
 	c.portForward(ctx)
 	c.startLocalTunServe(ctx)
-	<-ctx.Done()
+	c.deleteFirewallRuleAndSetupDNS()
 }
 
 func (c ConnectOptions) heartbeats() {
@@ -191,11 +175,32 @@ func (c *ConnectOptions) portForward(ctx context.Context) {
 }
 
 func (c *ConnectOptions) startLocalTunServe(ctx context.Context) {
-	err := Start(ctx, c.nodeConfig)
+	if util.IsWindows() {
+		c.localTunIP.Mask = net.CIDRMask(0, 32)
+	} else {
+		c.localTunIP.Mask = net.CIDRMask(24, 32)
+	}
+	var list = []string{trafficManager.String()}
+	for _, ipNet := range c.cidrs {
+		list = append(list, ipNet.String())
+	}
+	r := Route{
+		ServeNodes: []string{
+			fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", c.localTunIP.String(), strings.Join(list, ",")),
+		},
+		ChainNode: "tcp://127.0.0.1:10800",
+		Retries:   5,
+	}
+
+	log.Info("your ip is " + c.localTunIP.IP.String())
+	err := Start(ctx, r)
 	if err != nil {
 		log.Fatal(err)
 	}
+	log.Info("tunnel connected")
+}
 
+func (c ConnectOptions) deleteFirewallRuleAndSetupDNS() {
 	if util.IsWindows() {
 		if !util.FindRule() {
 			util.AddFirewallRule()
@@ -229,7 +234,8 @@ func Start(ctx context.Context, r Route) error {
 	for _, rr := range routers {
 		go func(ctx context.Context, rr router) {
 			if err = rr.Serve(ctx); err != nil {
-				log.Fatal(err)
+				log.Warnln(err)
+				cancel()
 			}
 		}(ctx, rr)
 	}

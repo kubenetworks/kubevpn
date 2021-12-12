@@ -25,6 +25,9 @@ var ServerCmd = &cobra.Command{
 		util.InitLogger(util.Debug)
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		log.Fatal(pkg.Start(context.TODO(), config))
+		if err := pkg.Start(context.TODO(), config); err != nil {
+			log.Fatal(err)
+		}
+		select {}
 	},
 }
