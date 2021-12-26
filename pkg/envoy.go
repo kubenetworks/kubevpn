@@ -2,14 +2,7 @@ package pkg
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	v22 "github.com/envoyproxy/go-control-plane/envoy/api/v2"
-	core "github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
-	endpoint "github.com/envoyproxy/go-control-plane/envoy/api/v2/endpoint"
-	route "github.com/envoyproxy/go-control-plane/envoy/api/v2/route"
-	v3 "github.com/envoyproxy/go-control-plane/envoy/config/bootstrap/v2"
-	envoyresource "github.com/envoyproxy/go-control-plane/pkg/test/resource"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/pkg/mesh"
@@ -21,7 +14,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	"sigs.k8s.io/yaml"
 	"strings"
 )
 
@@ -73,6 +65,16 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 				LocalObjectReference: v1.LocalObjectReference{
 					Name: name,
 				},
+				Items: []v1.KeyToPath{
+					{
+						Key:  "base-envoy.yaml",
+						Path: "base-envoy.yaml",
+					},
+					{
+						Key:  "envoy-config.yaml",
+						Path: "envoy-config.yaml",
+					},
+				},
 			},
 		},
 	})
@@ -118,7 +120,7 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 				"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 ! -s 127.0.0.1 ! -d 223.254.254.1/24 -j MASQUERADE;" +
 				"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 ! -s 127.0.0.1 ! -d 223.254.254.1/24 -j DNAT --to 127.0.0.1:15006;" +
 				"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 ! -s 127.0.0.1 ! -d 223.254.254.1/24 -j MASQUERADE;" +
-				"envoy -c /etc/envoy.yaml",
+				"envoy -c /etc/envoy/base-envoy.yaml",
 		},
 		SecurityContext: &v1.SecurityContext{
 			RunAsUser:  &zero,
@@ -139,8 +141,8 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 			{
 				Name:      "envoy-config",
 				ReadOnly:  false,
-				MountPath: "/etc/envoy.yaml",
-				SubPath:   "envoy.yaml",
+				MountPath: "/etc/envoy/",
+				//SubPath:   "envoy.yaml",
 			},
 		},
 	})
@@ -165,73 +167,63 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 	return nil
 }
 
-var s = `static_resources:
-
-  listeners:
-    - name: listener_0
-      address:
-        socket_address:
-          address: 0.0.0.0
-          port_value: 15006
-      filter_chains:
-        - filters:
-            - name: envoy.filters.network.http_connection_manager
-              typed_config:
-                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
-                stat_prefix: ingress_http
-                access_log:
-                  - name: envoy.access_loggers.stdout
-                    typed_config:
-                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
-                http_filters:
-                  - name: envoy.filters.http.router
-                route_config:
-                  name: local_route
-                  virtual_hosts:
-                    - name: local_service
-                      domains: ["*"]
-                      routes:
-                        - match:
-                            headers:
-                              - name: KubeVPN-Routing-Tag
-                                exact_match: %s
-                            prefix: "/"
-                          route:
-                            # host_rewrite_literal: www.envoyproxy.io
-                            cluster: service_debug_withHeader
-                        - match:
-                            prefix: "/"
-                          route:
-                            # host_rewrite_literal: www.envoyproxy.io
-                            cluster: service_debug_withoutHeader
-
+var s = `
+static_resources:
   clusters:
-    - name: service_debug_withHeader
-      type: LOGICAL_DNS
-      # Comment out the following line to test on v6 networks
-      dns_lookup_family: V4_ONLY
+    - connect_timeout: 1s
       load_assignment:
-        cluster_name: service_debug_withHeader
-        endpoints:
-          - lb_endpoints:
-              - endpoint:
-                  address:
-                    socket_address:
-                      address: %s
-                      port_value: %s
-    - name: service_debug_withoutHeader
-      type: LOGICAL_DNS
-      # Comment out the following line to test on v6 networks
-      dns_lookup_family: V4_ONLY
-      load_assignment:
-        cluster_name: service_debug_withoutHeader
+        cluster_name: xds_cluster
         endpoints:
           - lb_endpoints:
               - endpoint:
                   address:
                     socket_address:
                       address: 127.0.0.1
-                      port_value: %s
+                      port_value: 9002
+      http2_protocol_options: {}
+      name: xds_cluster
+dynamic_resources:
+  cds_config:
+    resource_api_version: V3
+    api_config_source:
+      api_type: GRPC
+      transport_api_version: V3
+      grpc_services:
+        - envoy_grpc:
+            cluster_name: xds_cluster
+      set_node_on_first_message_only: true
+  lds_config:
+    resource_api_version: V3
+    api_config_source:
+      api_type: GRPC
+      transport_api_version: V3
+      grpc_services:
+        - envoy_grpc:
+            cluster_name: xds_cluster
+      set_node_on_first_message_only: true
+node:
+  cluster: test-cluster
+  id: test-id
+layered_runtime:
+  layers:
+    - name: runtime-0
+      rtds_layer:
+        rtds_config:
+          resource_api_version: V3
+          api_config_source:
+            transport_api_version: V3
+            api_type: GRPC
+            grpc_services:
+              envoy_grpc:
+                cluster_name: xds_cluster
+        name: runtime-0
+admin:
+  access_log_path: /dev/null
+  address:
+    socket_address:
+      address: 127.0.0.1
+      port_value: 9003
+
 `
 
 func createEnvoyConfigMapIfNeeded(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads, podIp string) {
@@ -251,98 +243,24 @@ func createEnvoyConfigMapIfNeeded(factory cmdutil.Factory, clientset *kubernetes
 	if len(serviceList.Items) == 0 {
 		return
 	}
-	port := serviceList.Items[0].Spec.Ports[0]
+	//port := serviceList.Items[0].Spec.Ports[0]
 	configMap := v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 			Labels:    map[string]string{"kubevpn": "kubevpn"},
 		},
-		Data: map[string]string{"envoy.yaml": fmt.Sprintf(s, "kubevpn", podIp, port.TargetPort.String(), port.TargetPort.String())},
+		Data: map[string]string{
+			"base-envoy.yaml":   fmt.Sprintf(s, /*"kubevpn", podIp, port.TargetPort.String(), port.TargetPort.String()*/),
+			"envoy-config.yaml": "",
+		},
 	}
 	_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
 	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		_, err := clientset.CoreV1().ConfigMaps(namespace).Create(context.TODO(), &configMap, metav1.CreateOptions{})
+		_, err = clientset.CoreV1().ConfigMaps(namespace).Create(context.TODO(), &configMap, metav1.CreateOptions{})
 		return err
 	})
 	if err != nil {
 		log.Warnln(err)
 	}
-}
-
-func getEnvoyConfig(port uint32, localAddress string) string {
-	httpListener := envoyresource.MakeHTTPListener("", "listen0", 15006, "route0")
-	routes := envoyresource.MakeRoute("route0", "service_debug_withoutHeader")
-	routes.VirtualHosts[0].Routes = append(routes.VirtualHosts[0].Routes, &route.Route{
-		Match: &route.RouteMatch{
-			PathSpecifier: &route.RouteMatch_Prefix{
-				Prefix: "/",
-			},
-			Headers: []*route.HeaderMatcher{{
-				Name:                 "KubeVPN-Routing-Tag",
-				HeaderMatchSpecifier: &route.HeaderMatcher_ExactMatch{ExactMatch: "kubevpn"},
-			}},
-		},
-		Action: &route.Route_Route{
-			Route: &route.RouteAction{
-				ClusterSpecifier: &route.RouteAction_Cluster{
-					Cluster: "service_debug_withHeader",
-				},
-			},
-		},
-	})
-
-	withHeader := envoyresource.MakeCluster("", "service_debug_withHeader")
-	withHeader.ClusterDiscoveryType = &v22.Cluster_Type{Type: v22.Cluster_STATIC}
-	withHeader.EdsClusterConfig = nil
-	withHeader.LoadAssignment = &v22.ClusterLoadAssignment{
-		ClusterName: "service_debug_withoutHeader",
-		Endpoints: []*endpoint.LocalityLbEndpoints{
-			{LbEndpoints: []*endpoint.LbEndpoint{{
-				HostIdentifier: &endpoint.LbEndpoint_Endpoint{Endpoint: &endpoint.Endpoint{
-					Address: &core.Address{
-						Address: &core.Address_SocketAddress{
-							SocketAddress: &core.SocketAddress{
-								Address: localAddress,
-								PortSpecifier: &core.SocketAddress_PortValue{
-									PortValue: port,
-								},
-							},
-						}},
-				}},
-			}}},
-		},
-		Policy: nil,
-	}
-	withoutHeader := envoyresource.MakeCluster("", "service_debug_withoutHeader")
-	withoutHeader.ClusterDiscoveryType = &v22.Cluster_Type{Type: v22.Cluster_STATIC}
-	withoutHeader.EdsClusterConfig = nil
-	withoutHeader.LoadAssignment = &v22.ClusterLoadAssignment{
-		ClusterName: "service_debug_withoutHeader",
-		Endpoints: []*endpoint.LocalityLbEndpoints{
-			{LbEndpoints: []*endpoint.LbEndpoint{{
-				HostIdentifier: &endpoint.LbEndpoint_Endpoint{Endpoint: &endpoint.Endpoint{
-					Address: &core.Address{
-						Address: &core.Address_SocketAddress{
-							SocketAddress: &core.SocketAddress{
-								Address: "127.0.0.1",
-								PortSpecifier: &core.SocketAddress_PortValue{
-									PortValue: port,
-								},
-							},
-						}},
-				}},
-			}}},
-		},
-		Policy: nil,
-	}
-	resources := v3.Bootstrap{
-		StaticResources: &v3.Bootstrap_StaticResources{
-			Listeners: []*v22.Listener{httpListener},
-			Clusters:  []*v22.Cluster{withHeader, withoutHeader},
-		},
-	}
-	marshal, _ := json.Marshal(resources)
-	toYAML, _ := yaml.JSONToYAML(marshal)
-	return string(toYAML)
 }
