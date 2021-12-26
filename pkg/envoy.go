@@ -23,7 +23,6 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/yaml"
 	"strings"
-	"time"
 )
 
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
@@ -32,13 +31,6 @@ import (
 // TODO if using envoy needs to create another pod, if using diy proxy, using one container is enough
 // TODO support multiple port
 func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads string, c PodRouteConfig) error {
-	// create pod in bound for mesh
-	err, podIp := CreateServerInboundForMesh(clientset, namespace, workloads, c)
-	if err != nil {
-		log.Warnln(err)
-		return err
-	}
-	log.Infof(podIp)
 	resourceTuple, parsed, err2 := util.SplitResourceTypeName(workloads)
 	if !parsed || err2 != nil {
 		return errors.New("not need")
@@ -61,7 +53,7 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 		sc = mesh.NewPodController(factory, clientset, namespace, resourceTuple.Resource, resourceTuple.Name)
 	}
 	rollbackFuncs = append(rollbackFuncs, func() {
-		if err = sc.Cancel(); err != nil {
+		if err := sc.Cancel(); err != nil {
 			log.Warnln(err)
 		}
 	})
@@ -73,7 +65,7 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 	delete(labels, "pod-template-hash")
 
 	name := fmt.Sprintf("%s-%s", namespace, resourceTuple.Name)
-	createEnvoyConfigMapIfNeeded(factory, clientset, namespace, workloads, podIp)
+	createEnvoyConfigMapIfNeeded(factory, clientset, namespace, workloads, c.LocalTunIP)
 	inject.Volumes = append(inject.Volumes, v1.Volume{
 		Name: "envoy-config",
 		VolumeSource: v1.VolumeSource{
@@ -85,6 +77,35 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 		},
 	})
 	inject.Containers = append(inject.Containers, v1.Container{
+		Name:    "vpn",
+		Image:   "naison/kubevpn:v2",
+		Command: []string{"/bin/sh", "-c"},
+		Args: []string{
+			"kubevpn serve -L 'tun://0.0.0.0:8421/" + c.TrafficManagerRealIP + ":8421?net=" + c.InboundPodTunIP + "&route=" + c.Route + "' --debug=true",
+		},
+		SecurityContext: &v1.SecurityContext{
+			Capabilities: &v1.Capabilities{
+				Add: []v1.Capability{
+					"NET_ADMIN",
+					//"SYS_MODULE",
+				},
+			},
+			RunAsUser:  &zero,
+			Privileged: &t,
+		},
+		Resources: v1.ResourceRequirements{
+			Requests: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:    resource.MustParse("128m"),
+				v1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+			Limits: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:    resource.MustParse("256m"),
+				v1.ResourceMemory: resource.MustParse("256Mi"),
+			},
+		},
+		ImagePullPolicy: v1.PullAlways,
+	})
+	inject.Containers = append(inject.Containers, v1.Container{
 		Name:    "envoy-proxy",
 		Image:   "naison/kubevpnmesh:v2",
 		Command: []string{"/bin/sh", "-c"},
@@ -93,10 +114,10 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 				"iptables -F;" +
 				"iptables -P INPUT ACCEPT;" +
 				"iptables -P FORWARD ACCEPT;" +
-				"iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80:60000 ! -s 127.0.0.1 -j DNAT --to 127.0.0.1:15006;" +
-				"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 ! -s 127.0.0.1 -j MASQUERADE;" +
-				"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 ! -s 127.0.0.1 -j DNAT --to 127.0.0.1:15006;" +
-				"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 ! -s 127.0.0.1 -j MASQUERADE;" +
+				"iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80:60000 ! -s 127.0.0.1 ! -d 223.254.254.1/24 -j DNAT --to 127.0.0.1:15006;" +
+				"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 ! -s 127.0.0.1 ! -d 223.254.254.1/24 -j MASQUERADE;" +
+				"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 ! -s 127.0.0.1 ! -d 223.254.254.1/24 -j DNAT --to 127.0.0.1:15006;" +
+				"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 ! -s 127.0.0.1 ! -d 223.254.254.1/24 -j MASQUERADE;" +
 				"envoy -c /etc/envoy.yaml",
 		},
 		SecurityContext: &v1.SecurityContext{
@@ -246,87 +267,6 @@ func createEnvoyConfigMapIfNeeded(factory cmdutil.Factory, clientset *kubernetes
 	})
 	if err != nil {
 		log.Warnln(err)
-	}
-}
-
-func CreateServerInboundForMesh(clientset *kubernetes.Clientset, namespace, workloads string, config PodRouteConfig) (error, string) {
-	resourceTuple, parsed, err2 := util.SplitResourceTypeName(workloads)
-	if !parsed || err2 != nil {
-		return errors.New("not need"), ""
-	}
-	newName := resourceTuple.Name + "-shadow-mesh"
-	util.DeletePod(clientset, namespace, newName)
-	t := true
-	zero := int64(0)
-	pod := v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      newName,
-			Namespace: namespace,
-		},
-		Spec: v1.PodSpec{
-			RestartPolicy: v1.RestartPolicyAlways,
-			Containers: []v1.Container{
-				{
-					Name:    "vpn",
-					Image:   "naison/kubevpn:v2",
-					Command: []string{"/bin/sh", "-c"},
-					Args: []string{
-						"sysctl net.ipv4.ip_forward=1;" +
-							"iptables -F;" +
-							"iptables -P INPUT ACCEPT;" +
-							"iptables -P FORWARD ACCEPT;" +
-							"iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80:60000 -j DNAT --to " + config.LocalTunIP + ":80-60000;" +
-							"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 -j MASQUERADE;" +
-							"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 -j DNAT --to " + config.LocalTunIP + ":80-60000;" +
-							"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 -j MASQUERADE;" +
-							"kubevpn serve -L 'tun://0.0.0.0:8421/" + config.TrafficManagerRealIP + ":8421?net=" + config.InboundPodTunIP + "&route=" + config.Route + "' --debug=true",
-					},
-					SecurityContext: &v1.SecurityContext{
-						Capabilities: &v1.Capabilities{
-							Add: []v1.Capability{
-								"NET_ADMIN",
-								//"SYS_MODULE",
-							},
-						},
-						RunAsUser:  &zero,
-						Privileged: &t,
-					},
-					Resources: v1.ResourceRequirements{
-						Requests: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:    resource.MustParse("128m"),
-							v1.ResourceMemory: resource.MustParse("128Mi"),
-						},
-						Limits: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:    resource.MustParse("256m"),
-							v1.ResourceMemory: resource.MustParse("256Mi"),
-						},
-					},
-					ImagePullPolicy: v1.PullAlways,
-				},
-			},
-			PriorityClassName: "system-cluster-critical",
-		},
-	}
-	if _, err := clientset.CoreV1().Pods(namespace).Create(context.TODO(), &pod, metav1.CreateOptions{}); err != nil {
-		log.Fatal(err)
-	}
-	watch, err := clientset.CoreV1().Pods(namespace).Watch(context.TODO(), metav1.SingleObject(metav1.ObjectMeta{Name: newName}))
-	if err != nil {
-		log.Fatal(err)
-	}
-	tick := time.Tick(time.Minute * 2)
-	for {
-		select {
-		case e := <-watch.ResultChan():
-			if e.Object.(*v1.Pod).Status.Phase == v1.PodRunning {
-				watch.Stop()
-				return nil, e.Object.(*v1.Pod).Status.PodIP
-			}
-		case <-tick:
-			watch.Stop()
-			log.Error("create mesh inbound timeout")
-			return errors.New("create inbound mesh timeout"), ""
-		}
 	}
 }
 
