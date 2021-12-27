@@ -18,7 +18,6 @@ import (
 const (
 	UpstreamHost = "www.envoyproxy.io"
 	UpstreamPort = 80
-	Tag          = "KubeVPN-Routing-Tag"
 )
 
 func MakeCluster(clusterName string) *cluster.Cluster {
@@ -74,15 +73,19 @@ func MakeRoute(routes []Route) *route.RouteConfiguration {
 	var rts []*route.Route
 
 	for _, r := range routes {
+		var rr []*route.HeaderMatcher
+		for _, header := range r.Headers {
+			rr = append(rr, &route.HeaderMatcher{
+				Name: header.Key,
+				HeaderMatchSpecifier: &route.HeaderMatcher_ExactMatch{
+					ExactMatch: header.Value,
+				},
+			})
+		}
 		rts = append(rts, &route.Route{
 			//Name: r.Name,
 			Match: &route.RouteMatch{
-				Headers: []*route.HeaderMatcher{{
-					Name: Tag,
-					HeaderMatchSpecifier: &route.HeaderMatcher_ExactMatch{
-						ExactMatch: r.Value,
-					},
-				}},
+				Headers: rr,
 			},
 			Action: &route.Route_Route{
 				Route: &route.RouteAction{

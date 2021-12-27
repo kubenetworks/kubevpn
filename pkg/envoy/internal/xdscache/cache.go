@@ -2,6 +2,7 @@ package xdscache
 
 import (
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
+	"github.com/wencaiwulue/kubevpn/pkg/envoy/apis/v1alpha1"
 	"github.com/wencaiwulue/kubevpn/pkg/envoy/internal/resources"
 )
 
@@ -61,10 +62,17 @@ func (xds *XDSCache) AddListener(name string, routeNames []string, address strin
 	}
 }
 
-func (xds *XDSCache) AddRoute(name, value string, clusters []string) {
+func (xds *XDSCache) AddRoute(name string, headers []v1alpha1.HeaderMatch, clusters []string) {
+	var h []resources.Header
+	for _, header := range headers {
+		h = append(h, resources.Header{
+			Key:   header.Key,
+			Value: header.Value,
+		})
+	}
 	xds.Routes[name] = resources.Route{
 		Name:    name,
-		Value:   value,
+		Headers: h,
 		Cluster: clusters[0],
 	}
 }

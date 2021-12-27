@@ -10,21 +10,15 @@ import (
 	routeservice "github.com/envoyproxy/go-control-plane/envoy/service/route/v3"
 	runtimeservice "github.com/envoyproxy/go-control-plane/envoy/service/runtime/v3"
 	secretservice "github.com/envoyproxy/go-control-plane/envoy/service/secret/v3"
+	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
+	"google.golang.org/grpc"
 	"log"
 	"net"
-
-	"google.golang.org/grpc"
-
-	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
 )
 
 const (
 	grpcMaxConcurrentStreams = 1000000
 )
-
-func registerServer(grpcServer *grpc.Server, server serverv3.Server) {
-	// register services
-}
 
 // RunServer starts an xDS server at the given port.
 func RunServer(ctx context.Context, server serverv3.Server, port uint) {
