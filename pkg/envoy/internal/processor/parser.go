@@ -3,9 +3,8 @@ package processor
 import (
 	"fmt"
 	"github.com/wencaiwulue/kubevpn/pkg/envoy/apis/v1alpha1"
-	"io/ioutil"
-
 	"gopkg.in/yaml.v2"
+	"io/ioutil"
 )
 
 // parseYaml takes in a yaml envoy config and returns a typed version

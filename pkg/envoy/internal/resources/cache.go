@@ -9,8 +9,13 @@ type Listener struct {
 
 type Route struct {
 	Name    string
-	Value   string
+	Headers []Header
 	Cluster string
+}
+
+type Header struct {
+	Key   string
+	Value string
 }
 
 type Cluster struct {

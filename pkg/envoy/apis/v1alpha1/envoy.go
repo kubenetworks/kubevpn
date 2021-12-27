@@ -18,9 +18,14 @@ type Listener struct {
 }
 
 type Route struct {
-	Name         string   `yaml:"name"`
-	Value        string   `yaml:"value"`
-	ClusterNames []string `yaml:"clusters"`
+	Name         string        `yaml:"name"`
+	Headers      []HeaderMatch `yaml:"headers"`
+	ClusterNames []string      `yaml:"clusters"`
+}
+
+type HeaderMatch struct {
+	Key   string `yaml:"key"`
+	Value string `yaml:"value"`
 }
 
 type Cluster struct {
@@ -30,5 +35,5 @@ type Cluster struct {
 
 type Endpoint struct {
 	Address string `yaml:"address"`
-	Port    uint32 `yaml:port"`
+	Port    uint32 `yaml:"port"`
 }
