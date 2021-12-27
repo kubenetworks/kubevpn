@@ -7,6 +7,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/envoy/internal/resources"
 	"github.com/wencaiwulue/kubevpn/pkg/envoy/internal/watcher"
 	"github.com/wencaiwulue/kubevpn/pkg/envoy/internal/xdscache"
+	"github.com/wencaiwulue/kubevpn/util"
 	"math"
 	"math/rand"
 	"os"
@@ -58,7 +59,7 @@ func (p *Processor) newSnapshotVersion() string {
 func (p *Processor) ProcessFile(file watcher.NotifyMessage) {
 
 	// Parse file into object
-	envoyConfig, err := parseYaml(file.FilePath)
+	envoyConfig, err := util.ParseYaml(file.FilePath)
 	if err != nil {
 		p.Errorf("error parsing yaml file: %+v", err)
 		return

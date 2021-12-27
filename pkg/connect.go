@@ -30,6 +30,7 @@ type ConnectOptions struct {
 	KubeconfigPath string
 	Namespace      string
 	Mode           Mode
+	Headers        map[string]string
 	Workloads      []string
 	clientset      *kubernetes.Clientset
 	restclient     *rest.RESTClient
@@ -78,6 +79,7 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 						c.Namespace,
 						finalWorkload,
 						config,
+						c.Headers,
 					)
 				} else {
 					err = CreateInboundPod(
