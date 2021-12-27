@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"google.golang.org/protobuf/types/known/durationpb"
 	"time"
 
 	"github.com/golang/protobuf/ptypes"
@@ -15,15 +16,10 @@ import (
 	"github.com/envoyproxy/go-control-plane/pkg/wellknown"
 )
 
-const (
-	UpstreamHost = "www.envoyproxy.io"
-	UpstreamPort = 80
-)
-
 func MakeCluster(clusterName string) *cluster.Cluster {
 	return &cluster.Cluster{
 		Name:                 clusterName,
-		ConnectTimeout:       ptypes.DurationProto(5 * time.Second),
+		ConnectTimeout:       durationpb.New(5 * time.Second),
 		ClusterDiscoveryType: &cluster.Cluster_Type{Type: cluster.Cluster_EDS},
 		LbPolicy:             cluster.Cluster_ROUND_ROBIN,
 		//LoadAssignment:       makeEndpoint(clusterName, UpstreamHost),

@@ -27,6 +27,7 @@ require (
 	golang.zx2c4.com/wireguard/windows v0.4.10
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/grpc v1.33.2
+	google.golang.org/protobuf v1.26.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.21.2
 	k8s.io/apimachinery v0.21.2

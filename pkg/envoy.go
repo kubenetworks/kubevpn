@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/pkg/envoy/apis/v1alpha1"
 	"github.com/wencaiwulue/kubevpn/pkg/mesh"
 	"github.com/wencaiwulue/kubevpn/util"
+	"gopkg.in/yaml.v2"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,6 +16,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"strconv"
 	"strings"
 )
 
@@ -22,7 +25,7 @@ import (
 //	patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
 // TODO if using envoy needs to create another pod, if using diy proxy, using one container is enough
 // TODO support multiple port
-func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads string, c PodRouteConfig) error {
+func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads string, c PodRouteConfig, headers map[string]string) error {
 	resourceTuple, parsed, err2 := util.SplitResourceTypeName(workloads)
 	if !parsed || err2 != nil {
 		return errors.New("not need")
@@ -57,7 +60,12 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 	delete(labels, "pod-template-hash")
 
 	name := fmt.Sprintf("%s-%s", namespace, resourceTuple.Name)
-	createEnvoyConfigMapIfNeeded(factory, clientset, namespace, workloads, c.LocalTunIP)
+	createEnvoyConfigMapIfNeeded(factory, clientset, namespace, workloads)
+	err = addEnvoyConfig(factory, clientset, namespace, workloads, c.LocalTunIP, headers)
+	if err != nil {
+		log.Warnln(err)
+		return err
+	}
 	inject.Volumes = append(inject.Volumes, v1.Volume{
 		Name: "envoy-config",
 		VolumeSource: v1.VolumeSource{
@@ -146,6 +154,21 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 			},
 		},
 	})
+	inject.Containers = append(inject.Containers, v1.Container{
+		Name:    "control-plane",
+		Image:   "naison/envoy-xds-server:latest",
+		Command: []string{"envoy-xds-server"},
+		Args:    []string{"--watchDirectoryFileName", "/etc/envoy-config/envoy-config.yaml"},
+		VolumeMounts: []v1.VolumeMount{
+			{
+				Name:      "envoy-config",
+				ReadOnly:  false,
+				MountPath: "/etc/envoy-config/",
+				//SubPath:   "envoy.yaml",
+			},
+		},
+		ImagePullPolicy: v1.PullAlways,
+	})
 	if err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		_, err = clientset.CoreV1().Pods(namespace).Create(context.TODO(), &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -225,8 +248,96 @@ admin:
       port_value: 9003
 
 `
+var ss = `name: config-test
+spec:
+  listeners:
+  - name: listener1
+    address: 127.0.0.1
+    port: 15006
+    routes:
+    - name: route-0
+      clusters:
+      - cluster-0
+  clusters:
+  - name: cluster-0
+    endpoints:
+    - address: 127.0.0.1
+      port: %s
+`
 
-func createEnvoyConfigMapIfNeeded(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads, podIp string) {
+func addEnvoyConfig(factory cmdutil.Factory,
+	clientset *kubernetes.Clientset,
+	namespace,
+	workloads,
+	localTUNIP string,
+	headers map[string]string,
+) error {
+	resourceTuple, parsed, err := util.SplitResourceTypeName(workloads)
+	if !parsed || err != nil {
+		return errors.New("parse resource error")
+	}
+	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
+	if err != nil {
+		return err
+	}
+	asSelector, _ := metav1.LabelSelectorAsSelector(util.GetLabelSelector(object.Object))
+	serviceList, _ := clientset.CoreV1().Services(namespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: asSelector.String(),
+	})
+	if len(serviceList.Items) == 0 {
+		return errors.New("service list is empty")
+	}
+	port := serviceList.Items[0].Spec.Ports[0].Port
+	name := fmt.Sprintf("%s-%s", namespace, resourceTuple.Name)
+	get, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	s2, ok := get.Data["envoy-config.yaml"]
+	if !ok {
+		return errors.New("can not found value for key: envoy-config.yaml")
+	}
+	envoyConfig, err := util.ParseYamlBytes([]byte(s2))
+	if err != nil {
+		return err
+	}
+	var headersMatch []v1alpha1.HeaderMatch
+	for k, v := range headers {
+		headersMatch = append(headersMatch, v1alpha1.HeaderMatch{
+			Key:   k,
+			Value: v,
+		})
+	}
+	// move router to front
+	i := len(envoyConfig.Listeners[0].Routes)
+	index := strconv.Itoa(i)
+	envoyConfig.Listeners[0].Routes = append(envoyConfig.Listeners[0].Routes, v1alpha1.Route{
+		Name:         "route-" + index,
+		Headers:      headersMatch,
+		ClusterNames: []string{"cluster-" + index},
+	})
+	// swap last element and the last second element
+	temp := envoyConfig.Listeners[0].Routes[i-1]
+	envoyConfig.Listeners[0].Routes[i-1] = envoyConfig.Listeners[0].Routes[i]
+	envoyConfig.Listeners[0].Routes[i] = temp
+
+	envoyConfig.Clusters = append(envoyConfig.Clusters, v1alpha1.Cluster{
+		Name: "cluster-" + index,
+		Endpoints: []v1alpha1.Endpoint{{
+			Address: localTUNIP,
+			Port:    uint32(port),
+		}},
+	})
+	marshal, err := yaml.Marshal(envoyConfig)
+	if err != nil {
+		return err
+	}
+	get.Data["envoy-config.yaml"] = string(marshal)
+	_, err = clientset.CoreV1().ConfigMaps(namespace).Update(context.TODO(), get, metav1.UpdateOptions{})
+	return err
+}
+
+func createEnvoyConfigMapIfNeeded(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads string) {
 	resourceTuple, parsed, err2 := util.SplitResourceTypeName(workloads)
 	if !parsed || err2 != nil {
 		return
@@ -243,7 +354,7 @@ func createEnvoyConfigMapIfNeeded(factory cmdutil.Factory, clientset *kubernetes
 	if len(serviceList.Items) == 0 {
 		return
 	}
-	//port := serviceList.Items[0].Spec.Ports[0]
+	port := serviceList.Items[0].Spec.Ports[0]
 	configMap := v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -251,8 +362,8 @@ func createEnvoyConfigMapIfNeeded(factory cmdutil.Factory, clientset *kubernetes
 			Labels:    map[string]string{"kubevpn": "kubevpn"},
 		},
 		Data: map[string]string{
-			"base-envoy.yaml":   fmt.Sprintf(s, /*"kubevpn", podIp, port.TargetPort.String(), port.TargetPort.String()*/),
-			"envoy-config.yaml": "",
+			"base-envoy.yaml":   fmt.Sprintf(s /*"kubevpn", podIp, port.TargetPort.String(), port.TargetPort.String()*/),
+			"envoy-config.yaml": fmt.Sprintf(ss, port.TargetPort.String()),
 		},
 	}
 	_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})

@@ -8,9 +8,12 @@ import (
 	dockerterm "github.com/moby/term"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/pkg/envoy/apis/v1alpha1"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
+	"gopkg.in/yaml.v2"
 	"io"
+	"io/ioutil"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	"k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -389,4 +392,30 @@ func Ping(targetIP string) (bool, error) {
 	default:
 		return false, nil
 	}
+}
+
+// ParseYaml takes in a yaml envoy config and returns a typed version
+func ParseYaml(file string) (*v1alpha1.EnvoyConfig, error) {
+	var config v1alpha1.EnvoyConfig
+
+	yamlFile, err := ioutil.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("Error reading YAML file: %s\n", err)
+	}
+
+	err = yaml.Unmarshal(yamlFile, &config)
+	if err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
+func ParseYamlBytes(file []byte) (*v1alpha1.EnvoyConfig, error) {
+	var config v1alpha1.EnvoyConfig
+	err := yaml.Unmarshal(file, &config)
+	if err != nil {
+		return nil, err
+	}
+	return &config, nil
 }
