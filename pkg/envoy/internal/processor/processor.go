@@ -1,8 +1,10 @@
 package processor
 
 import (
+	"context"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
+	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/pkg/envoy/internal/resources"
 	"github.com/wencaiwulue/kubevpn/pkg/envoy/internal/watcher"
@@ -88,17 +90,21 @@ func (p *Processor) ProcessFile(file watcher.NotifyMessage) {
 			p.xdsCache.AddEndpoint(c.Name, e.Address, e.Port)
 		}
 	}
-
+	a := map[resource.Type][]types.Resource{
+		resource.EndpointType: p.xdsCache.EndpointsContents(), // endpoints
+		resource.ClusterType:  p.xdsCache.ClusterContents(),   // clusters
+		resource.RouteType:    p.xdsCache.RouteContents(),     // routes
+		resource.ListenerType: p.xdsCache.ListenerContents(),  // listeners
+		resource.RuntimeType:  {},                             // runtimes
+		resource.SecretType:   {},                             // secrets
+	}
 	// Create the snapshot that we'll serve to Envoy
-	snapshot := cache.NewSnapshot(
-		p.newSnapshotVersion(),         // version
-		p.xdsCache.EndpointsContents(), // endpoints
-		p.xdsCache.ClusterContents(),   // clusters
-		p.xdsCache.RouteContents(),     // routes
-		p.xdsCache.ListenerContents(),  // listeners
-		[]types.Resource{},             // runtimes
-		[]types.Resource{},             // secrets
-	)
+	snapshot, err := cache.NewSnapshot(p.newSnapshotVersion(), a)
+
+	if err != nil {
+		p.Errorf("snapshot inconsistency err: %+v\n\n\n%+v", snapshot, err)
+		return
+	}
 
 	if err = snapshot.Consistent(); err != nil {
 		p.Errorf("snapshot inconsistency: %+v\n\n\n%+v", snapshot, err)
@@ -107,7 +113,7 @@ func (p *Processor) ProcessFile(file watcher.NotifyMessage) {
 	p.Debugf("will serve snapshot %+v", snapshot)
 
 	// Add the snapshot to the cache
-	if err := p.cache.SetSnapshot(p.nodeID, snapshot); err != nil {
+	if err = p.cache.SetSnapshot(context.TODO(), p.nodeID, snapshot); err != nil {
 		p.Errorf("snapshot error %q for %+v", err, snapshot)
 		os.Exit(1)
 	}

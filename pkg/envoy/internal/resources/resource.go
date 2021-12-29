@@ -1,10 +1,10 @@
 package resources
 
 import (
+	etmv3 "github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"time"
-
-	"github.com/golang/protobuf/ptypes"
 
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -73,14 +73,22 @@ func MakeRoute(routes []Route) *route.RouteConfiguration {
 		for _, header := range r.Headers {
 			rr = append(rr, &route.HeaderMatcher{
 				Name: header.Key,
-				HeaderMatchSpecifier: &route.HeaderMatcher_ExactMatch{
-					ExactMatch: header.Value,
+				HeaderMatchSpecifier: &route.HeaderMatcher_StringMatch{
+					StringMatch: &etmv3.StringMatcher{
+						MatchPattern: &etmv3.StringMatcher_Contains{
+							Contains: header.Value,
+						},
+						IgnoreCase: true,
+					},
 				},
 			})
 		}
 		rts = append(rts, &route.Route{
 			//Name: r.Name,
 			Match: &route.RouteMatch{
+				PathSpecifier: &route.RouteMatch_Prefix{
+					Prefix: "/",
+				},
 				Headers: rr,
 			},
 			Action: &route.Route_Route{
@@ -93,21 +101,21 @@ func MakeRoute(routes []Route) *route.RouteConfiguration {
 		})
 	}
 
-	rts = append(rts, &route.Route{
-		//Name: r.Name,
-		Match: &route.RouteMatch{
-			PathSpecifier: &route.RouteMatch_Prefix{
-				Prefix: "/",
-			},
-		},
-		Action: &route.Route_Route{
-			Route: &route.RouteAction{
-				ClusterSpecifier: &route.RouteAction_Cluster{
-					Cluster: "default_cluster",
-				},
-			},
-		},
-	})
+	//rts = append(rts, &route.Route{
+	//	//Name: r.Name,
+	//	Match: &route.RouteMatch{
+	//		PathSpecifier: &route.RouteMatch_Prefix{
+	//			Prefix: "/",
+	//		},
+	//	},
+	//	Action: &route.Route_Route{
+	//		Route: &route.RouteAction{
+	//			ClusterSpecifier: &route.RouteAction_Cluster{
+	//				Cluster: "default_cluster",
+	//			},
+	//		},
+	//	},
+	//})
 
 	return &route.RouteConfiguration{
 		Name: "listener_0",
@@ -134,7 +142,7 @@ func MakeHTTPListener(listenerName, route, address string, port uint32) *listene
 			Name: wellknown.Router,
 		}},
 	}
-	pbst, err := ptypes.MarshalAny(manager)
+	pbst, err := anypb.New(manager)
 	if err != nil {
 		panic(err)
 	}
