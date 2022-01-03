@@ -31,6 +31,8 @@ jobs:
         kubectl get pods -n kube-system
         cat ~/.kube/config
         ls -lah ~/.kube/config
+    - name: Install demo bookinfo
+      run: kubectl apply -f samples/bookinfo/platform/kube/bookinfo.yaml
 
     - name: Build
       run: make kubevpn-linux
