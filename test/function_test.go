@@ -1,11 +1,43 @@
 package test
 
 import (
+	"context"
 	"fmt"
+	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/util"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"net"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
+
+var (
+	namespace  string
+	clientset  *kubernetes.Clientset
+	restclient *rest.RESTClient
+	config     *rest.Config
+)
+
+func TestPingPodIP(t *testing.T) {
+	list, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), v1.ListOptions{})
+	if err != nil {
+		t.FailNow()
+	}
+	for _, item := range list.Items {
+		command := exec.Command("ping", "-c", "4", item.Status.PodIP)
+		command.Run()
+		if !command.ProcessState.Success() {
+			t.FailNow()
+		}
+	}
+}
 
 func TestUDP(t *testing.T) {
 	go func() {
@@ -75,5 +107,41 @@ func server() {
 			fmt.Println("发送数据失败!", err)
 			return
 		}
+	}
+}
+
+func init() {
+	initClient()
+
+	command := exec.Command("nhctl", "connect", "--workloads=ratings")
+	c := make(chan struct{})
+	_, _, _ = util.RunWithRollingOutWithChecker(command, func(log string) bool {
+		ok := strings.Contains(log, "dns service ok")
+		if ok {
+			c <- struct{}{}
+		}
+		return ok
+	})
+	<-c
+}
+
+func initClient() {
+	var err error
+
+	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
+	f := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
+
+	if config, err = f.ToRESTConfig(); err != nil {
+		log.Fatal(err)
+	}
+	if restclient, err = rest.RESTClientFor(config); err != nil {
+		log.Fatal(err)
+	}
+	if clientset, err = kubernetes.NewForConfig(config); err != nil {
+		log.Fatal(err)
+	}
+	if namespace, _, err = f.ToRawKubeConfigLoader().Namespace(); err != nil {
+		log.Fatal(err)
 	}
 }
