@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 )
 
-var connect pkg.ConnectOptions
+var connect = pkg.ConnectOptions{}
 
 func init() {
 	connectCmd.Flags().StringVar(&connect.KubeconfigPath, "kubeconfig", clientcmd.RecommendedHomeFile, "kubeconfig")
@@ -38,6 +38,7 @@ var connectCmd = &cobra.Command{
 		if err := connect.InitClient(); err != nil {
 			log.Fatal(err)
 		}
+		connect.PreCheckResource()
 		if err := connect.DoConnect(); err != nil {
 			log.Fatal(err)
 		}

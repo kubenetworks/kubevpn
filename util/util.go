@@ -120,29 +120,18 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 	return nil
 }
 
-func GetTopController(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, serviceName string) (controller ResourceTupleWithScale) {
-	object, err := GetUnstructuredObject(factory, namespace, serviceName)
-	if err != nil {
-		return
-	}
-	asSelector, _ := metav1.LabelSelectorAsSelector(GetLabelSelector(object.Object))
-	podList, _ := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
-		LabelSelector: asSelector.String(),
-	})
-	if len(podList.Items) == 0 {
-		return
-	}
-	of := metav1.GetControllerOf(&podList.Items[0])
-	for of != nil {
-		object, err = GetUnstructuredObject(factory, namespace, fmt.Sprintf("%s/%s", of.Kind, of.Name))
+func GetTopOwnerReference(factory cmdutil.Factory, namespace, workload string) (*runtimeresource.Info, error) {
+	for {
+		object, err := GetUnstructuredObject(factory, namespace, workload)
 		if err != nil {
-			return
+			return nil, err
 		}
-		controller.Resource = strings.ToLower(of.Kind) + "s"
-		controller.Name = of.Name
-		of = GetOwnerReferences(object.Object)
+		ownerReference := metav1.GetControllerOf(object.Object.(*unstructured.Unstructured))
+		if ownerReference == nil {
+			return object, nil
+		}
+		workload = fmt.Sprintf("%s/%s", ownerReference.Kind, ownerReference.Name)
 	}
-	return
 }
 
 func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace, cmd string) (string, error) {

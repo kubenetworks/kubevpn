@@ -295,3 +295,12 @@ func (c *ConnectOptions) InitClient() (err error) {
 	log.Infof("kubeconfig path: %s, namespace: %s, serivces: %v", c.KubeconfigPath, c.Namespace, c.Workloads)
 	return
 }
+
+func (c *ConnectOptions) PreCheckResource() {
+	for i, workload := range c.Workloads {
+		ownerReference, err := util.GetTopOwnerReference(c.factory, c.Namespace, workload)
+		if err == nil {
+			c.Workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.Resource.Resource, ownerReference.Name)
+		}
+	}
+}

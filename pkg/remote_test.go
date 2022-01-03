@@ -198,14 +198,14 @@ func TestGet(t *testing.T) {
 }
 
 func TestGetTopController(t *testing.T) {
+	s := "/Users/naison/.kube/devpool"
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
+	configFlags.KubeConfig = &s
 	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
-	clientset, _ := factory.KubernetesClientSet()
-	controller := util.GetTopController(factory, clientset, "default", "pods/productpage-69cf486c4f-z8hb9")
-	fmt.Println(controller.Resource)
+	controller, err := util.GetTopOwnerReference(factory, "nh90bwck", "pods/services-authors-shadow")
 	fmt.Println(controller.Name)
-	fmt.Println(controller.Scale)
+	fmt.Println(controller.Mapping.Resource.Resource)
+	fmt.Println(err)
 }
 
 func TestUDP(t *testing.T) {
