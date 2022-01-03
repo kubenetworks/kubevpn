@@ -2,8 +2,8 @@ package xdscache
 
 import (
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
-	"github.com/wencaiwulue/kubevpn/pkg/envoy/apis/v1alpha1"
-	"github.com/wencaiwulue/kubevpn/pkg/envoy/internal/resources"
+	"github.com/wencaiwulue/kubevpn/pkg/control_plane/apis/v1alpha1"
+	"github.com/wencaiwulue/kubevpn/pkg/control_plane/internal/resources"
 )
 
 type XDSCache struct {

@@ -11,7 +11,7 @@ import (
 	dockerterm "github.com/moby/term"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/pkg/envoy/apis/v1alpha1"
+	"github.com/wencaiwulue/kubevpn/pkg/control_plane/apis/v1alpha1"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"gopkg.in/yaml.v2"

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/pkg/envoy/apis/v1alpha1"
+	"github.com/wencaiwulue/kubevpn/pkg/control_plane/apis/v1alpha1"
 	"github.com/wencaiwulue/kubevpn/pkg/mesh"
 	"github.com/wencaiwulue/kubevpn/util"
 	"gopkg.in/yaml.v2"
