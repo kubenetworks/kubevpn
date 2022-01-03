@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"k8s.io/kubectl/pkg/polymorphichelpers"
+
+	"encoding/json"
 	"fmt"
 	dockerterm "github.com/moby/term"
 	"github.com/pkg/errors"
@@ -14,24 +17,25 @@ import (
 	"gopkg.in/yaml.v2"
 	"io"
 	"io/ioutil"
-	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	"k8s.io/api/core/v1"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/fields"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
-	json2 "k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/cli-runtime/pkg/printers"
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/tools/remotecommand"
+	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/client-go/transport/spdy"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/cmd/exec"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/util/interrupt"
 	"net"
 	"net/http"
 	"os"
@@ -141,36 +145,6 @@ func GetTopController(factory cmdutil.Factory, clientset *kubernetes.Clientset, 
 	return
 }
 
-func UpdateReplicasScale(clientset *kubernetes.Clientset, namespace string, controller ResourceTupleWithScale) {
-	err := retry.OnError(
-		retry.DefaultRetry,
-		func(err error) bool { return err != nil },
-		func() error {
-			result := &autoscalingv1.Scale{}
-			err := clientset.AppsV1().RESTClient().Put().
-				Namespace(namespace).
-				Resource(controller.Resource).
-				Name(controller.Name).
-				SubResource("scale").
-				VersionedParams(&metav1.UpdateOptions{}, scheme.ParameterCodec).
-				Body(&autoscalingv1.Scale{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      controller.Name,
-						Namespace: namespace,
-					},
-					Spec: autoscalingv1.ScaleSpec{
-						Replicas: int32(controller.Scale),
-					},
-				}).
-				Do(context.Background()).
-				Into(result)
-			return err
-		})
-	if err != nil {
-		log.Errorf("update scale: %s-%s's replicas to %d failed, error: %v", controller.Resource, controller.Name, controller.Scale, err)
-	}
-}
-
 func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace, cmd string) (string, error) {
 	pod, err := clientset.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
 
@@ -256,41 +230,32 @@ func GetUnstructuredObject(f cmdutil.Factory, namespace string, workloads string
 	return infos[0], err
 }
 
+func GetPodSpecDepth(u *unstructured.Unstructured) (*v1.PodTemplateSpec, []string, error) {
+	var stringMap map[string]interface{}
+	var b bool
+	var err error
+	var depth []string
+	if stringMap, b, err = unstructured.NestedMap(u.Object, "spec", "template"); b && err == nil {
+		depth = []string{"spec", "template"}
+	} else if stringMap, b, err = unstructured.NestedMap(u.Object); b && err == nil {
+		depth = []string{}
+	} else {
+		return nil, nil, err
+	}
+	marshal, err := json.Marshal(stringMap)
+	if err != nil {
+		return nil, nil, err
+	}
+	var p v1.PodTemplateSpec
+	if err = json.Unmarshal(marshal, &p); err != nil {
+		return nil, nil, err
+	}
+	return &p, depth, nil
+}
+
 func GetLabelSelector(object k8sruntime.Object) *metav1.LabelSelector {
 	labels := object.(metav1.Object).GetLabels()
 	return &metav1.LabelSelector{MatchLabels: labels}
-}
-
-func GetPorts(object k8sruntime.Object) []v1.ContainerPort {
-	defer func() {
-		if err := recover(); err != nil {
-			log.Errorln(err)
-		}
-	}()
-	var result []v1.ContainerPort
-	replicasetPortPrinter, _ := printers.NewJSONPathPrinter("{.spec.template.spec.containers[0].ports}")
-	servicePortPrinter, _ := printers.NewJSONPathPrinter("{.spec.ports}")
-	buf := bytes.NewBuffer([]byte{})
-	err := replicasetPortPrinter.PrintObj(object, buf)
-	if err != nil {
-		_ = servicePortPrinter.PrintObj(object, buf)
-		var ports []v1.ServicePort
-		_ = json2.Unmarshal([]byte(buf.String()), &ports)
-		for _, port := range ports {
-			val := port.TargetPort.IntVal
-			if val == 0 {
-				val = port.Port
-			}
-			result = append(result, v1.ContainerPort{
-				Name:          port.Name,
-				ContainerPort: val,
-				Protocol:      port.Protocol,
-			})
-		}
-	} else {
-		_ = json2.Unmarshal([]byte(buf.String()), &result)
-	}
-	return result
 }
 
 func GetOwnerReferences(object k8sruntime.Object) *metav1.OwnerReference {
@@ -303,16 +268,6 @@ func GetOwnerReferences(object k8sruntime.Object) *metav1.OwnerReference {
 	return nil
 }
 
-func DeletePod(clientset *kubernetes.Clientset, namespace, podName string) {
-	zero := int64(0)
-	err := clientset.CoreV1().Pods(namespace).Delete(context.TODO(), podName, metav1.DeleteOptions{
-		GracePeriodSeconds: &zero,
-	})
-	if err != nil && k8serrors.IsNotFound(err) {
-		log.Infof("not found shadow pod: %s, no need to delete it", podName)
-	}
-}
-
 type ResourceTuple struct {
 	Resource string
 	Name     string
@@ -322,27 +277,6 @@ type ResourceTupleWithScale struct {
 	Resource string
 	Name     string
 	Scale    int
-}
-
-// splitResourceTypeName handles type/name resource formats and returns a resource tuple
-// (empty or not), whether it successfully found one, and an error
-func SplitResourceTypeName(s string) (ResourceTuple, bool, error) {
-	if !strings.Contains(s, "/") {
-		return ResourceTuple{}, false, nil
-	}
-	seg := strings.Split(s, "/")
-	if len(seg) != 2 {
-		return ResourceTuple{}, false, fmt.Errorf("arguments in resource/name form may not have more than one slash")
-	}
-	resource, name := seg[0], seg[1]
-	if len(resource) == 0 || len(name) == 0 || len(runtimeresource.SplitResourceArgument(resource)) != 1 {
-		return ResourceTuple{}, false, fmt.Errorf("arguments in resource/name form must have a single resource and name")
-	}
-	return ResourceTuple{Resource: resource, Name: name}, true, nil
-}
-
-func DeleteConfigMap(clientset *kubernetes.Clientset, namespace, configMapName string) {
-	_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.Background(), configMapName, metav1.DeleteOptions{})
 }
 
 func BytesToInt(b []byte) uint32 {
@@ -418,4 +352,76 @@ func ParseYamlBytes(file []byte) (*v1alpha1.EnvoyConfig, error) {
 		return nil, err
 	}
 	return &config, nil
+}
+
+func RolloutStatus(factory cmdutil.Factory, namespace, workloads string, timeout time.Duration) error {
+	client, _ := factory.DynamicClient()
+	r := factory.NewBuilder().
+		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
+		NamespaceParam(namespace).DefaultNamespace().
+		ResourceTypeOrNameArgs(true, workloads).
+		SingleResourceType().
+		Latest().
+		Do()
+	err := r.Err()
+	if err != nil {
+		return err
+	}
+
+	infos, err := r.Infos()
+	if err != nil {
+		return err
+	}
+	if len(infos) != 1 {
+		return fmt.Errorf("rollout status is only supported on individual resources and resource collections - %d resources were found", len(infos))
+	}
+	info := infos[0]
+	mapping := info.ResourceMapping()
+
+	statusViewer, err := polymorphichelpers.StatusViewerFn(mapping)
+	if err != nil {
+		return err
+	}
+
+	fieldSelector := fields.OneTermEqualSelector("metadata.name", info.Name).String()
+	lw := &cache.ListWatch{
+		ListFunc: func(options metav1.ListOptions) (k8sruntime.Object, error) {
+			options.FieldSelector = fieldSelector
+			return client.Resource(info.Mapping.Resource).Namespace(info.Namespace).List(context.TODO(), options)
+		},
+		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			options.FieldSelector = fieldSelector
+			return client.Resource(info.Mapping.Resource).Namespace(info.Namespace).Watch(context.TODO(), options)
+		},
+	}
+
+	// if the rollout isn't done yet, keep watching deployment status
+	ctx, cancel := watchtools.ContextWithOptionalTimeout(context.Background(), timeout)
+	intr := interrupt.New(nil, cancel)
+	return intr.Run(func() error {
+		_, err = watchtools.UntilWithSync(ctx, lw, &unstructured.Unstructured{}, nil, func(e watch.Event) (bool, error) {
+			switch t := e.Type; t {
+			case watch.Added, watch.Modified:
+				status, done, err := statusViewer.Status(e.Object.(k8sruntime.Unstructured), 0)
+				if err != nil {
+					return false, err
+				}
+				_, _ = fmt.Fprintf(os.Stdout, "%s", status)
+				// Quit waiting if the rollout is done
+				if done {
+					return true, nil
+				}
+
+				return false, nil
+
+			case watch.Deleted:
+				// We need to abort to avoid cases of recreation and not to silently watch the wrong (new) object
+				return true, fmt.Errorf("object has been deleted")
+
+			default:
+				return true, fmt.Errorf("internal error: unexpected event %#v", e)
+			}
+		})
+		return err
+	})
 }

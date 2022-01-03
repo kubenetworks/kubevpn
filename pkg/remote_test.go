@@ -276,11 +276,8 @@ func server() {
 	}
 }
 
-func TestParseEnvoy(t *testing.T) {
-	port := uint32(8080)
-	localAddress := "223.254.254.2"
-	config := getEnvoyConfig(port, localAddress)
-	fmt.Println(config)
+func TestName(t *testing.T) {
+	println(1)
 }
 
 func init() {

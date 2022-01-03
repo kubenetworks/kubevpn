@@ -3,7 +3,6 @@ package pkg
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/dns"
 	"github.com/wencaiwulue/kubevpn/util"
@@ -15,7 +14,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"sync"
 	"syscall"
 )
 
@@ -41,21 +39,6 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 				function()
 			}
 		}
-		wg := sync.WaitGroup{}
-		for _, service := range workloads {
-			if tuple, ok, err := util.SplitResourceTypeName(service); ok && err == nil {
-				wg.Add(1)
-				go func(finalTuple util.ResourceTuple) {
-					defer wg.Done()
-					podName := finalTuple.Name + "-" + "shadow"
-					util.DeletePod(clientset, namespace, podName)
-					podName = finalTuple.Name + "-" + "shadow-mesh"
-					util.DeletePod(clientset, namespace, podName)
-					util.DeleteConfigMap(clientset, namespace, fmt.Sprintf("%s-%s", namespace, tuple.Name))
-				}(tuple)
-			}
-		}
-		wg.Wait()
 		log.Info("clean up successful")
 		os.Exit(0)
 	}()

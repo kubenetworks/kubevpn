@@ -65,7 +65,7 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 				virtualShadowIp, _ := c.dhcp.RentIPRandom()
 				tempIps = append(tempIps, virtualShadowIp)
 				lock.Unlock()
-				config := PodRouteConfig{
+				config := util.PodRouteConfig{
 					LocalTunIP:           c.localTunIP.IP.String(),
 					InboundPodTunIP:      virtualShadowIp.String(),
 					TrafficManagerRealIP: c.routerIP.String(),
@@ -73,22 +73,9 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 				}
 				// TODO OPTIMIZE CODE
 				if c.Mode == Mesh {
-					err = PatchSidecar(
-						c.factory,
-						c.clientset,
-						c.Namespace,
-						finalWorkload,
-						config,
-						c.Headers,
-					)
+					err = PatchSidecar(c.factory, c.clientset, c.Namespace, finalWorkload, config, c.Headers)
 				} else {
-					err = CreateInboundPod(
-						c.factory,
-						c.clientset,
-						c.Namespace,
-						finalWorkload,
-						config,
-					)
+					err = CreateInboundPod(c.factory, c.Namespace, finalWorkload, config)
 				}
 				if err != nil {
 					log.Error(err)
