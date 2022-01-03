@@ -17,7 +17,7 @@ var connect = pkg.ConnectOptions{}
 func init() {
 	connectCmd.Flags().StringVar(&connect.KubeconfigPath, "kubeconfig", clientcmd.RecommendedHomeFile, "kubeconfig")
 	connectCmd.Flags().StringVarP(&connect.Namespace, "namespace", "n", "", "namespace")
-	connectCmd.PersistentFlags().StringArrayVar(&connect.Workloads, "workloads", []string{}, "workloads, like: services/tomcat, deployment/nginx, replicaset/tomcat...")
+	connectCmd.PersistentFlags().StringArrayVar(&connect.Workloads, "workloads", []string{}, "workloads, like: pods/tomcat, deployment/nginx, replicaset/tomcat...")
 	connectCmd.Flags().StringVar((*string)(&connect.Mode), "mode", string(pkg.Reverse), "default mode is reverse")
 	connectCmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "headers, format is k=v, like: k1=v1,k2=v2")
 	connectCmd.Flags().BoolVar(&util.Debug, "debug", false, "true/false")
