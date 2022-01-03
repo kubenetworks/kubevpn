@@ -22,6 +22,7 @@ control-plane-linux:
 .PHONY: image
 image: kubevpn-linux
 	docker build -t naison/kubevpn:v2 -f ./dockerfile/server/Dockerfile .
+	rm -fr kubevpn
 	docker push naison/kubevpn:v2
 
 .PHONY: image_mesh
@@ -32,5 +33,6 @@ image_mesh:
 .PHONY: image_control_plane
 image_control_plane: control-plane-linux
 	docker build -t naison/envoy-xds-server:latest -f ./dockerfile/mesh/Dockerfile .
+	rm -fr envoy-xds-server
 	docker push naison/envoy-xds-server:latest
 
