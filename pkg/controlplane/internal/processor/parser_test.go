@@ -7,7 +7,7 @@ package processor
 
 import (
 	"fmt"
-	"github.com/wencaiwulue/kubevpn/pkg/control_plane/apis/v1alpha1"
+	"github.com/wencaiwulue/kubevpn/pkg/controlplane/apis/v1alpha1"
 	"github.com/wencaiwulue/kubevpn/util"
 	"gopkg.in/yaml.v2"
 	"testing"

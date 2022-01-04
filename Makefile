@@ -16,7 +16,7 @@ kubevpn-linux:
 
 .PHONY: control-plane-linux
 control-plane-linux:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o envoy-xds-server github.com/wencaiwulue/kubevpn/pkg/control_plane/cmd/server
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o envoy-xds-server github.com/wencaiwulue/kubevpn/pkg/controlplane/cmd/server
 	chmod +x envoy-xds-server
 
 .PHONY: image
@@ -32,7 +32,7 @@ image_mesh:
 
 .PHONY: image_control_plane
 image_control_plane: control-plane-linux
-	docker build -t naison/envoy-xds-server:latest -f ./dockerfile/control_plane/Dockerfile .
+	docker build -t naison/envoy-xds-server:latest -f ./dockerfile/controlplane/Dockerfile .
 	rm -fr envoy-xds-server
 	docker push naison/envoy-xds-server:latest
 

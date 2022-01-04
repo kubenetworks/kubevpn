@@ -6,9 +6,9 @@ import (
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/pkg/control_plane/internal/processor"
-	"github.com/wencaiwulue/kubevpn/pkg/control_plane/internal/server"
-	"github.com/wencaiwulue/kubevpn/pkg/control_plane/internal/watcher"
+	"github.com/wencaiwulue/kubevpn/pkg/controlplane/internal/processor"
+	"github.com/wencaiwulue/kubevpn/pkg/controlplane/internal/server"
+	"github.com/wencaiwulue/kubevpn/pkg/controlplane/internal/watcher"
 )
 
 var (
