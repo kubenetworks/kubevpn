@@ -84,7 +84,7 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 		}
 	}
 	wg.Wait()
-	AddCleanUpResourceHandler(c.clientset, c.Namespace, c.Workloads, c.dhcp, tempIps...)
+	AddCleanUpResourceHandler(c.clientset, c.Namespace, c.dhcp, tempIps...)
 	return
 }
 

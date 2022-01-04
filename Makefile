@@ -32,7 +32,7 @@ image_mesh:
 
 .PHONY: image_control_plane
 image_control_plane: control-plane-linux
-	docker build -t naison/envoy-xds-server:latest -f ./dockerfile/mesh/Dockerfile .
+	docker build -t naison/envoy-xds-server:latest -f ./dockerfile/control_plane/Dockerfile .
 	rm -fr envoy-xds-server
 	docker push naison/envoy-xds-server:latest
 

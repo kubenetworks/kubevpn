@@ -21,7 +21,7 @@ var stopChan = make(chan os.Signal)
 var rollbackFuncs = make([]func(), 2)
 var ctx, cancel = context.WithCancel(context.TODO())
 
-func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string, workloads []string, manager *DHCPManager, ip ...*net.IPNet) {
+func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string, manager *DHCPManager, ip ...*net.IPNet) {
 	signal.Notify(stopChan, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL /*, syscall.SIGSTOP*/)
 	go func() {
 		<-stopChan
