@@ -10,15 +10,14 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	"net"
-	"sort"
 	"strconv"
 	"strings"
 )
 
-type DHCP interface {
-	RentIP() net.IPNet
-	ReleaseIP(ip net.IPNet)
-}
+const (
+	DHCP     = "DHCP"
+	SPLITTER = ","
+)
 
 type DHCPManager struct {
 	client    *kubernetes.Clientset
@@ -49,7 +48,7 @@ func (d *DHCPManager) InitDHCP() error {
 			Namespace: d.namespace,
 			Labels:    map[string]string{},
 		},
-		Data: map[string]string{"DHCP": "100"},
+		Data: map[string]string{DHCP: "100"},
 	}
 	_, err = d.client.CoreV1().ConfigMaps(d.namespace).Create(context.Background(), result, metav1.CreateOptions{})
 	if err != nil {
@@ -60,57 +59,41 @@ func (d *DHCPManager) InitDHCP() error {
 }
 
 func (d *DHCPManager) RentIPBaseNICAddress() (*net.IPNet, error) {
-	get, err := d.client.CoreV1().ConfigMaps(d.namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
+	var ipC = make(chan int, 1)
+	err := d.updateDHCPConfigMap(func(i sets.Int) sets.Int {
+		ip := getIP(i)
+		ipC <- ip
+		return i.Insert(ip)
+	})
 	if err != nil {
-		log.Errorf("failed to get ip from dhcp, err: %v", err)
 		return nil, err
 	}
-	split := strings.Split(get.Data["DHCP"], ",")
-
-	ip, added := getIP(split)
-
-	get.Data["DHCP"] = strings.Join(added, ",")
-	_, err = d.client.CoreV1().ConfigMaps(d.namespace).Update(context.Background(), get, metav1.UpdateOptions{})
-	if err != nil {
-		log.Errorf("update dhcp error after get ip, need to put ip back, err: %v", err)
-		return nil, err
-	}
-
-	return &net.IPNet{IP: net.IPv4(223, 254, 254, byte(ip)), Mask: net.CIDRMask(24, 32)}, nil
+	return &net.IPNet{IP: net.IPv4(223, 254, 254, byte(<-ipC)), Mask: net.CIDRMask(24, 32)}, nil
 }
 
 func (d *DHCPManager) RentIPRandom() (*net.IPNet, error) {
-	get, err := d.client.CoreV1().ConfigMaps(d.namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
-	if err != nil {
-		log.Errorf("failed to get ip from dhcp, err: %v", err)
-		return nil, err
-	}
-	alreadyInUse := strings.Split(get.Data["DHCP"], ",")
-	m := sets.NewInt()
-	for _, ip := range alreadyInUse {
-		if atoi, err := strconv.Atoi(ip); err == nil {
-			m.Insert(atoi)
+	var ipC = make(chan int, 1)
+	err := d.updateDHCPConfigMap(func(alreadyInUse sets.Int) sets.Int {
+		ip := 0
+		for i := 1; i < 255; i++ {
+			if !alreadyInUse.Has(i) && i != 100 {
+				ip = i
+				break
+			}
 		}
-	}
-	ip := 0
-	for i := 1; i < 255; i++ {
-		if !m.Has(i) && i != 100 {
-			ip = i
-			break
-		}
-	}
+		ipC <- ip
+		return alreadyInUse.Insert(ip)
+	})
 
-	get.Data["DHCP"] = strings.Join(append(alreadyInUse, strconv.Itoa(ip)), ",")
-	_, err = d.client.CoreV1().ConfigMaps(d.namespace).Update(context.Background(), get, metav1.UpdateOptions{})
 	if err != nil {
 		log.Errorf("update dhcp error after get ip, need to put ip back, err: %v", err)
 		return nil, err
 	}
 
-	return &net.IPNet{IP: net.IPv4(223, 254, 254, byte(ip)), Mask: net.CIDRMask(24, 32)}, nil
+	return &net.IPNet{IP: net.IPv4(223, 254, 254, byte(<-ipC)), Mask: net.CIDRMask(24, 32)}, nil
 }
 
-func getIP(alreadyInUse []string) (int, []string) {
+func getIP(alreadyInUse sets.Int) int {
 	var v uint32
 	interfaces, _ := net.Interfaces()
 	for _, i := range interfaces {
@@ -121,46 +104,46 @@ func getIP(alreadyInUse []string) (int, []string) {
 			v = util.BytesToInt(sum)
 		}
 	}
-	m := sets.NewInt()
-	for _, ip := range alreadyInUse {
-		if atoi, err := strconv.Atoi(ip); err == nil {
-			m.Insert(atoi)
-		}
-	}
 	for {
-		if i := int(v % 255); !m.Has(i) && i != 100 && i != 0 {
-			return i, append(alreadyInUse, strconv.Itoa(i))
+		if i := int(v % 255); !alreadyInUse.Has(i) && i != 100 && i != 0 {
+			return i
 		}
 		v++
 	}
 }
 
-func sortString(m []string) []string {
-	var result []int
-	for _, v := range m {
-		if len(v) > 0 {
-			if atoi, err := strconv.Atoi(v); err == nil {
-				result = append(result, atoi)
-			}
-		}
+func convertToString(m sets.Int) []string {
+	var result []string
+	for _, i := range m.List() {
+		result = append(result, strconv.Itoa(i))
 	}
-	sort.Ints(result)
-	var s []string
-	for _, i := range result {
-		s = append(s, strconv.Itoa(i))
-	}
-	return s
+	return result
 }
 
 func (d *DHCPManager) ReleaseIpToDHCP(ip *net.IPNet) error {
+	ipN, err := strconv.Atoi(strings.Split(ip.IP.To4().String(), ".")[3])
+	if err != nil {
+		return err
+	}
+	return d.updateDHCPConfigMap(func(i sets.Int) sets.Int {
+		return i.Delete(ipN)
+	})
+}
+
+func (d *DHCPManager) updateDHCPConfigMap(f func(sets.Int) sets.Int) error {
 	get, err := d.client.CoreV1().ConfigMaps(d.namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
 	if err != nil {
 		log.Errorf("failed to get dhcp, err: %v", err)
 		return err
 	}
-	split := strings.Split(get.Data["DHCP"], ",")
-	split = append(split, strings.Split(ip.IP.To4().String(), ".")[3])
-	get.Data["DHCP"] = strings.Join(sortString(split), ",")
+	alreadyInUsed := strings.Split(get.Data[DHCP], SPLITTER)
+	ipSet := sets.NewInt()
+	for _, ip := range alreadyInUsed {
+		if i, err := strconv.Atoi(ip); err == nil {
+			ipSet.Insert(i)
+		}
+	}
+	get.Data[DHCP] = strings.Join(convertToString(f(ipSet)), SPLITTER)
 	_, err = d.client.CoreV1().ConfigMaps(d.namespace).Update(context.Background(), get, metav1.UpdateOptions{})
 	if err != nil {
 		log.Errorf("update dhcp error after release ip, need to try again, err: %v", err)
