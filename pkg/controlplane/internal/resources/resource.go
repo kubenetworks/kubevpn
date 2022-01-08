@@ -190,6 +190,7 @@ func makeConfigSource() *core.ConfigSource {
 }
 
 // todo consider using redirect instead of route
+// doc https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/dynamic_forward_proxy_filter#config-http-filters-dynamic-forward-proxy
 // &route.Route_Redirect{
 //				Redirect: &route.RedirectAction{
 //					HostRedirect: "",
