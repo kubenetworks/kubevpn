@@ -6,6 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/dns"
 	"github.com/wencaiwulue/kubevpn/util"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -47,7 +48,7 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 // vendor/k8s.io/kubectl/pkg/polymorphichelpers/rollback.go:99
 func UpdateRefCount(clientset *kubernetes.Clientset, namespace, name string, increment int) {
 	if err := retry.OnError(retry.DefaultRetry, func(err error) bool {
-		return err != nil
+		return !k8serrors.IsNotFound(err)
 	}, func() error {
 		pod, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), name, v1.GetOptions{})
 		if err != nil {
