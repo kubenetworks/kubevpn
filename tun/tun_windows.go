@@ -65,11 +65,11 @@ type winTunConn struct {
 
 func (c *winTunConn) Close() error {
 	err := c.ifce.Close()
-	if name, err := c.ifce.Name(); err == nil {
-		if wt, err := wireguardtun.WintunPool.OpenAdapter(name); err == nil {
-			_, err = wt.Delete(true)
-		}
-	}
+	//if name, err := c.ifce.Name(); err == nil {
+	//	if wt, err := wireguardtun.WintunPool.OpenAdapter(name); err == nil {
+	//		_, err = wt.Delete(true)
+	//	}
+	//}
 	return err
 }
 
