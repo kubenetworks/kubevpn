@@ -1,7 +1,6 @@
 package util
 
 import (
-	"bytes"
 	"net"
 	"sync"
 	"time"
@@ -63,16 +62,8 @@ var (
 )
 
 var (
-	DefaultMTU = getMTU()
+	//	network layer ip needs 20 bytes
+	//	transport layer UDP header needs 8 bytes
+	//	UDP over TCP header needs 22 bytes
+	DefaultMTU = 1500 - 20 - 8 - 21
 )
-
-func getMTU() int {
-	if ift, err := net.Interfaces(); err == nil {
-		for _, ifi := range ift {
-			if ifi.Flags&net.FlagUp != 0 && bytes.Compare(ifi.HardwareAddr, nil) != 0 {
-				return ifi.MTU
-			}
-		}
-	}
-	return 1350
-}
