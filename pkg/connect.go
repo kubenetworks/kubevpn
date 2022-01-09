@@ -160,10 +160,9 @@ func (c *ConnectOptions) portForward(ctx context.Context) error {
 }
 
 func (c *ConnectOptions) startLocalTunServe(ctx context.Context) (err error) {
+	// todo fighter it out why
 	if util.IsWindows() {
 		c.localTunIP.Mask = net.CIDRMask(0, 32)
-	} else {
-		c.localTunIP.Mask = net.CIDRMask(24, 32)
 	}
 	var list = []string{trafficManager.String()}
 	for _, ipNet := range c.cidrs {
