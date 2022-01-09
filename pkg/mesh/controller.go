@@ -75,10 +75,10 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, configMapName string, c util.Pod
 				"iptables -F;" +
 				"iptables -P INPUT ACCEPT;" +
 				"iptables -P FORWARD ACCEPT;" +
-				"iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80:60000 ! -s 127.0.0.1 ! -d 223.254.254.1/24 -j DNAT --to 127.0.0.1:15006;" +
-				"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 ! -s 127.0.0.1 ! -d 223.254.254.1/24 -j MASQUERADE;" +
-				"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 ! -s 127.0.0.1 ! -d 223.254.254.1/24 -j DNAT --to 127.0.0.1:15006;" +
-				"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 ! -s 127.0.0.1 ! -d 223.254.254.1/24 -j MASQUERADE;" +
+				"iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80:60000 ! -s 127.0.0.1 ! -d " + util.CIDR.String() + " -j DNAT --to 127.0.0.1:15006;" +
+				"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 ! -s 127.0.0.1 ! -d " + util.CIDR.String() + " -j MASQUERADE;" +
+				"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 ! -s 127.0.0.1 ! -d " + util.CIDR.String() + " -j DNAT --to 127.0.0.1:15006;" +
+				"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 ! -s 127.0.0.1 ! -d " + util.CIDR.String() + " -j MASQUERADE;" +
 				"envoy -c /etc/envoy/base-envoy.yaml",
 		},
 		SecurityContext: &v1.SecurityContext{

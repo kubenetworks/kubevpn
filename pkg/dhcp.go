@@ -68,7 +68,10 @@ func (d *DHCPManager) RentIPBaseNICAddress() (*net.IPNet, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &net.IPNet{IP: net.IPv4(223, 254, 254, byte(<-ipC)), Mask: net.CIDRMask(24, 32)}, nil
+	p := make(net.IP, net.IPv4len)
+	copy(p, util.RouterIP.To4())
+	p[3] = byte(<-ipC)
+	return &net.IPNet{IP: p, Mask: util.CIDR.Mask}, nil
 }
 
 func (d *DHCPManager) RentIPRandom() (*net.IPNet, error) {
@@ -89,8 +92,10 @@ func (d *DHCPManager) RentIPRandom() (*net.IPNet, error) {
 		log.Errorf("update dhcp error after get ip, need to put ip back, err: %v", err)
 		return nil, err
 	}
-
-	return &net.IPNet{IP: net.IPv4(223, 254, 254, byte(<-ipC)), Mask: net.CIDRMask(24, 32)}, nil
+	p := make(net.IP, net.IPv4len)
+	copy(p, util.RouterIP.To4())
+	p[3] = byte(<-ipC)
+	return &net.IPNet{IP: p, Mask: util.CIDR.Mask}, nil
 }
 
 func getIP(alreadyInUse sets.Int) int {

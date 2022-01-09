@@ -43,7 +43,7 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 		"iptables -F",
 		"iptables -P INPUT ACCEPT",
 		"iptables -P FORWARD ACCEPT",
-		"iptables -t nat -A POSTROUTING -s 223.254.254.0/24 -o eth0 -j MASQUERADE",
+		"iptables -t nat -A POSTROUTING -s " + util.CIDR.String() + " -o eth0 -j MASQUERADE",
 	}
 	for _, ipNet := range nodeCIDR {
 		args = append(args, "iptables -t nat -A POSTROUTING -s "+ipNet.String()+" -o eth0 -j MASQUERADE")

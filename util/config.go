@@ -9,6 +9,17 @@ import (
 
 const TrafficManager = "kubevpn.traffic.manager"
 
+var CIDR *net.IPNet
+var RouterIP net.IP
+
+const (
+	s = "223.254.254.100/24"
+)
+
+func init() {
+	RouterIP, CIDR, _ = net.ParseCIDR(s)
+}
+
 // Debug is a flag that enables the debug log.
 var Debug bool
 

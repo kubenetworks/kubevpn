@@ -426,7 +426,7 @@ func Heartbeats(ctx context.Context) {
 			c2 <- struct{}{}
 		case <-c2:
 			for i := 0; i < 4; i++ {
-				_, _ = Ping("223.254.254.100")
+				_, _ = Ping(RouterIP.String())
 			}
 		case <-ctx.Done():
 			return

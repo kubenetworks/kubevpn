@@ -44,8 +44,8 @@ type ConnectOptions struct {
 }
 
 var trafficManager = net.IPNet{
-	IP:   net.IPv4(223, 254, 254, 100),
-	Mask: net.CIDRMask(24, 32),
+	IP:   util.RouterIP,
+	Mask: util.CIDR.Mask,
 }
 
 func (c *ConnectOptions) createRemoteInboundPod() (err error) {
