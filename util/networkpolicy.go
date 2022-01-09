@@ -1,23 +1,26 @@
 package util
 
 import (
+	"context"
 	log "github.com/sirupsen/logrus"
 	"os/exec"
 	"time"
 )
 
 // DeleteWindowsFirewallRule Delete all action block firewall rule
-func DeleteWindowsFirewallRule() {
-	go func() {
-		for {
+func DeleteWindowsFirewallRule(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.Tick(time.Second * 10):
 			_ = exec.Command("PowerShell", []string{
 				"Remove-NetFirewallRule",
 				"-Action",
 				"Block",
 			}...).Run()
-			time.Sleep(time.Second * 10)
 		}
-	}()
+	}
 }
 
 func AddFirewallRule() {

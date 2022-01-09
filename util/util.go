@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
+	"strconv"
 
 	"encoding/json"
 	"fmt"
@@ -44,19 +45,6 @@ import (
 	"strings"
 	"time"
 )
-
-func GetAvailablePortOrDie() int {
-	address, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", "0.0.0.0"))
-	if err != nil {
-		log.Fatal(err)
-	}
-	listener, err := net.ListenTCP("tcp", address)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port
-}
 
 func GetAvailableUDPPortOrDie() int {
 	address, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:0", "0.0.0.0"))
@@ -220,15 +208,15 @@ func GetUnstructuredObject(f cmdutil.Factory, namespace string, workloads string
 	return infos[0], err
 }
 
-func GetPodSpecDepth(u *unstructured.Unstructured) (*v1.PodTemplateSpec, []string, error) {
+func GetPodTemplateSpecPath(u *unstructured.Unstructured) (*v1.PodTemplateSpec, []string, error) {
 	var stringMap map[string]interface{}
 	var b bool
 	var err error
-	var depth []string
+	var path []string
 	if stringMap, b, err = unstructured.NestedMap(u.Object, "spec", "template"); b && err == nil {
-		depth = []string{"spec", "template"}
+		path = []string{"spec", "template"}
 	} else if stringMap, b, err = unstructured.NestedMap(u.Object); b && err == nil {
-		depth = []string{}
+		path = []string{}
 	} else {
 		return nil, nil, err
 	}
@@ -240,33 +228,7 @@ func GetPodSpecDepth(u *unstructured.Unstructured) (*v1.PodTemplateSpec, []strin
 	if err = json.Unmarshal(marshal, &p); err != nil {
 		return nil, nil, err
 	}
-	return &p, depth, nil
-}
-
-func GetLabelSelector(object k8sruntime.Object) *metav1.LabelSelector {
-	labels := object.(metav1.Object).GetLabels()
-	return &metav1.LabelSelector{MatchLabels: labels}
-}
-
-func GetOwnerReferences(object k8sruntime.Object) *metav1.OwnerReference {
-	refs := object.(metav1.Object).GetOwnerReferences()
-	for i := range refs {
-		if refs[i].Controller != nil && *refs[i].Controller {
-			return &refs[i]
-		}
-	}
-	return nil
-}
-
-type ResourceTuple struct {
-	Resource string
-	Name     string
-}
-
-type ResourceTupleWithScale struct {
-	Resource string
-	Name     string
-	Scale    int
+	return &p, path, nil
 }
 
 func BytesToInt(b []byte) uint32 {
@@ -453,4 +415,44 @@ func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string) bool
 	stderrStr := strings.TrimSpace(stderrBuf.String())
 
 	return stdoutStr, stderrStr, err
+}
+
+func Heartbeats(ctx context.Context) {
+	c2 := make(chan struct{}, 1)
+	c2 <- struct{}{}
+	for {
+		select {
+		case <-time.Tick(time.Second * 15):
+			c2 <- struct{}{}
+		case <-c2:
+			for i := 0; i < 4; i++ {
+				_, _ = Ping("223.254.254.100")
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func WaitPortToBeFree(port int, timeout time.Duration) error {
+	for {
+		select {
+		case <-time.Tick(timeout):
+			return fmt.Errorf("wait port %v to be free timeout", port)
+		case <-time.Tick(time.Second * 1):
+			if !IsPortListening(port) {
+				return nil
+			}
+		}
+	}
+}
+
+func IsPortListening(port int) bool {
+	listener, err := net.Listen("tcp4", net.JoinHostPort("0.0.0.0", strconv.Itoa(port)))
+	if err != nil {
+		return true
+	} else {
+		listener.Close()
+		return false
+	}
 }

@@ -51,7 +51,7 @@ func TestShell(t *testing.T) {
 }
 
 func TestDeleteRule(t *testing.T) {
-	DeleteWindowsFirewallRule()
+	DeleteWindowsFirewallRule(context.Background())
 }
 
 func TestUDP(t *testing.T) {

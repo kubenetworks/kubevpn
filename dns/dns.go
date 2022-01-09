@@ -15,14 +15,14 @@ import (
 
 func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) (*miekgdns.ClientConfig, error) {
 	var ipp []string
-	if ips, err := getDNSIPFromDnsPod(clientset); err == nil && len(ips) != 0 {
+	if ips, err := getDNSIPFromDnsPod(clientset); err == nil {
 		ipp = ips
 	}
-	ip, err := util.Shell(clientset, restclient, config, podName, namespace, "cat /etc/resolv.conf")
+	resolvConfStr, err := util.Shell(clientset, restclient, config, podName, namespace, "cat /etc/resolv.conf")
 	if err != nil {
 		return nil, err
 	}
-	resolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(ip))
+	resolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(resolvConfStr))
 	if err != nil {
 		return nil, err
 	}

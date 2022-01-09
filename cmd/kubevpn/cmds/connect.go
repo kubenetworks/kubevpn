@@ -10,6 +10,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 var connect = pkg.ConnectOptions{}
@@ -40,7 +41,8 @@ var connectCmd = &cobra.Command{
 		}
 		connect.PreCheckResource()
 		if err := connect.DoConnect(); err != nil {
-			log.Fatal(err)
+			log.Errorln(err)
+			pkg.Cleanup(syscall.SIGQUIT)
 		}
 		select {}
 	},

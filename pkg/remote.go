@@ -25,7 +25,7 @@ import (
 )
 
 func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, trafficManagerIP *net.IPNet, nodeCIDR []*net.IPNet) (net.IP, error) {
-	firstPod, _, err := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
+	manager, _, err := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
 		namespace,
 		fields.OneTermEqualSelector("app", util.TrafficManager).String(),
 		time.Second*5,
@@ -34,9 +34,9 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 		},
 	)
 
-	if err == nil && firstPod != nil {
-		UpdateRefCount(clientset, namespace, firstPod.Name, 1)
-		return net.ParseIP(firstPod.Status.PodIP), nil
+	if err == nil && manager != nil {
+		UpdateRefCount(clientset, namespace, manager.Name, 1)
+		return net.ParseIP(manager.Status.PodIP), nil
 	}
 	args := []string{
 		"sysctl net.ipv4.ip_forward=1",
@@ -52,10 +52,9 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 
 	t := true
 	zero := int64(0)
-	name := util.TrafficManager
-	pod := v1.Pod{
+	manager = &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        name,
+			Name:        util.TrafficManager,
 			Namespace:   namespace,
 			Labels:      map[string]string{"app": util.TrafficManager},
 			Annotations: map[string]string{"ref-count": "1"},
@@ -94,11 +93,11 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 			PriorityClassName: "system-cluster-critical",
 		},
 	}
-	_, err = clientset.CoreV1().Pods(namespace).Create(context.TODO(), &pod, metav1.CreateOptions{})
+	_, err = clientset.CoreV1().Pods(namespace).Create(context.TODO(), manager, metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
 	}
-	watch, err := clientset.CoreV1().Pods(namespace).Watch(context.TODO(), metav1.SingleObject(metav1.ObjectMeta{Name: name}))
+	watch, err := clientset.CoreV1().Pods(namespace).Watch(context.TODO(), metav1.SingleObject(metav1.ObjectMeta{Name: manager.GetName()}))
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +123,7 @@ func CreateInboundPod(factory cmdutil.Factory, namespace, workloads string, conf
 
 	u := object.Object.(*unstructured.Unstructured)
 
-	podTempSpec, path, err := util.GetPodSpecDepth(u)
+	podTempSpec, path, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
 		return err
 	}
@@ -160,7 +159,7 @@ func CreateInboundPod(factory cmdutil.Factory, namespace, workloads string, conf
 	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{
 		//Force: &t,
 	})
-	rollbackFuncs = append(rollbackFuncs, func() {
+	rollbackFuncList = append(rollbackFuncList, func() {
 		if err = RemoveInboundPod(factory, namespace, workloads); err != nil {
 			log.Error(err)
 		}
@@ -177,7 +176,7 @@ func RemoveInboundPod(factory cmdutil.Factory, namespace, workloads string) erro
 
 	u := object.Object.(*unstructured.Unstructured)
 
-	podTempSpec, path, err := util.GetPodSpecDepth(u)
+	podTempSpec, path, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
 		return err
 	}

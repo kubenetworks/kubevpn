@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	errors2 "github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/dns"
 	"github.com/wencaiwulue/kubevpn/util"
@@ -104,68 +105,61 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err = c.createRemoteInboundPod(); err != nil {
 		return
 	}
-	c.portForward(ctx)
-	c.startLocalTunServe(ctx)
-	c.deleteFirewallRuleAndSetupDNS()
+	if err = util.WaitPortToBeFree(10800, time.Minute*2); err != nil {
+		return err
+	}
+	if err = c.portForward(ctx); err != nil {
+		return err
+	}
+	if err = c.startLocalTunServe(ctx); err != nil {
+		return err
+	}
+	c.deleteFirewallRuleAndSetupDNS(ctx)
 	return
 }
 
-func (c ConnectOptions) heartbeats() {
-	go func() {
-		tick := time.Tick(time.Second * 15)
-		c2 := make(chan struct{}, 1)
-		c2 <- struct{}{}
-		for {
-			select {
-			case <-tick:
-				c2 <- struct{}{}
-			case <-c2:
-				for i := 0; i < 4; i++ {
-					_, _ = util.Ping("223.254.254.100")
-				}
-			}
-		}
-	}()
-}
-
-func (c *ConnectOptions) portForward(ctx context.Context) {
-	var readyChanRef *chan struct{}
+func (c *ConnectOptions) portForward(ctx context.Context) error {
+	var readyChan = make(chan struct{}, 1)
+	var errChan = make(chan error, 1)
+	var first = true
 	go func() {
 		for ctx.Err() == nil {
 			func() {
-				defer func() {
-					if err := recover(); err != nil {
-						log.Warnf("recover error: %v, ignore", err)
-					}
-				}()
-				readChan := make(chan struct{})
-				readyChanRef = &readChan
+				if !first {
+					readyChan = make(chan struct{}, 1)
+				}
 				err := util.PortForwardPod(
 					c.config,
 					c.restclient,
 					util.TrafficManager,
 					c.Namespace,
 					"10800:10800",
-					readChan,
+					readyChan,
 					ctx.Done(),
 				)
+				if first {
+					errChan <- err
+				}
+				first = false
 				if apierrors.IsNotFound(err) {
-					log.Fatalf("can not found port-forward resource, err: %v, exiting", err)
-				}
-				if err != nil {
+					log.Errorf("can not found port-forward resource, err: %v, exiting", err)
+				} else if err != nil {
 					log.Errorf("port-forward occurs error, err: %v, retrying", err)
-					time.Sleep(time.Second * 2)
 				}
+				time.Sleep(time.Second * 2)
 			}()
 		}
 	}()
-	for readyChanRef == nil {
+	select {
+	case err := <-errChan:
+		return err
+	case <-readyChan:
+		log.Info("port forward ready")
+		return nil
 	}
-	<-*readyChanRef
-	log.Info("port forward ready")
 }
 
-func (c *ConnectOptions) startLocalTunServe(ctx context.Context) {
+func (c *ConnectOptions) startLocalTunServe(ctx context.Context) (err error) {
 	if util.IsWindows() {
 		c.localTunIP.Mask = net.CIDRMask(0, 32)
 	} else {
@@ -184,20 +178,22 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context) {
 	}
 
 	log.Info("your ip is " + c.localTunIP.IP.String())
-	if err := Start(ctx, r); err != nil {
-		log.Fatal(err)
+	if err = Start(ctx, r); err != nil {
+		log.Errorf("error while create tunnel, err: %v", err)
+	} else {
+		log.Info("tunnel connected")
 	}
-	log.Info("tunnel connected")
+	return
 }
 
-func (c ConnectOptions) deleteFirewallRuleAndSetupDNS() {
+func (c *ConnectOptions) deleteFirewallRuleAndSetupDNS(ctx context.Context) {
 	if util.IsWindows() {
 		if !util.FindRule() {
 			util.AddFirewallRule()
 		}
-		util.DeleteWindowsFirewallRule()
+		go util.DeleteWindowsFirewallRule(ctx)
 	}
-	c.heartbeats()
+	go util.Heartbeats(ctx)
 	c.setupDNS()
 	log.Info("dns service ok")
 }
@@ -215,7 +211,7 @@ func (c *ConnectOptions) setupDNS() {
 func Start(ctx context.Context, r Route) error {
 	routers, err := r.GenRouters()
 	if err != nil {
-		return err
+		return errors2.WithStack(err)
 	}
 
 	if len(routers) == 0 {
@@ -225,7 +221,6 @@ func Start(ctx context.Context, r Route) error {
 		go func(ctx context.Context, rr router) {
 			if err = rr.Serve(ctx); err != nil {
 				log.Debug(err)
-				cancel()
 			}
 		}(ctx, rr)
 	}

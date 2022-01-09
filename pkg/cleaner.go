@@ -19,7 +19,7 @@ import (
 )
 
 var stopChan = make(chan os.Signal)
-var rollbackFuncs = make([]func(), 2)
+var rollbackFuncList = make([]func(), 2)
 var ctx, cancel = context.WithCancel(context.TODO())
 
 func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string, manager *DHCPManager, ip ...*net.IPNet) {
@@ -35,7 +35,7 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 		}
 		cleanUpTrafficManagerIfRefCountIsZero(clientset, namespace)
 		cancel()
-		for _, function := range rollbackFuncs {
+		for _, function := range rollbackFuncList {
 			if function != nil {
 				function()
 			}
@@ -43,6 +43,13 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string
 		log.Info("clean up successful")
 		os.Exit(0)
 	}()
+}
+
+func Cleanup(s os.Signal) {
+	select {
+	case stopChan <- s:
+	default:
+	}
 }
 
 // vendor/k8s.io/kubectl/pkg/polymorphichelpers/rollback.go:99

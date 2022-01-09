@@ -35,7 +35,7 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 	}
 
 	u := object.Object.(*unstructured.Unstructured)
-	templateSpec, depth, err := util.GetPodSpecDepth(u)
+	templateSpec, depth, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 	//}, func(pod *v1.Pod) bool {
 	//	return pod.Status.Phase == v1.PodRunning
 	//})
-	rollbackFuncs = append(rollbackFuncs, func() {
+	rollbackFuncList = append(rollbackFuncList, func() {
 		if err = UnPatchContainer(factory, clientset, namespace, workloads, headers); err != nil {
 			log.Error(err)
 		}
@@ -92,7 +92,7 @@ func UnPatchContainer(factory cmdutil.Factory, clientset *kubernetes.Clientset, 
 	}
 
 	u := object.Object.(*unstructured.Unstructured)
-	templateSpec, depth, err := util.GetPodSpecDepth(u)
+	templateSpec, depth, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
 		return err
 	}
