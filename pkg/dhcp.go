@@ -22,14 +22,12 @@ const (
 type DHCPManager struct {
 	client    *kubernetes.Clientset
 	namespace string
-	cidr      *net.IPNet
 }
 
-func NewDHCPManager(client *kubernetes.Clientset, namespace string, addr *net.IPNet) *DHCPManager {
+func NewDHCPManager(client *kubernetes.Clientset, namespace string) *DHCPManager {
 	return &DHCPManager{
 		client:    client,
 		namespace: namespace,
-		cidr:      addr,
 	}
 }
 
@@ -38,9 +36,6 @@ func (d *DHCPManager) InitDHCP() error {
 	configMap, err := d.client.CoreV1().ConfigMaps(d.namespace).Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
 	if err == nil && configMap != nil {
 		return nil
-	}
-	if d.cidr == nil {
-		d.cidr = &net.IPNet{IP: net.IPv4(254, 254, 254, 100), Mask: net.IPv4Mask(255, 255, 255, 0)}
 	}
 	result := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{

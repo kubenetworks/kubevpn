@@ -43,11 +43,6 @@ type ConnectOptions struct {
 	localTunIP     *net.IPNet
 }
 
-var trafficManager = net.IPNet{
-	IP:   util.RouterIP,
-	Mask: util.CIDR.Mask,
-}
-
 func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 	c.localTunIP, err = c.dhcp.RentIPBaseNICAddress()
 	if err != nil {
@@ -70,7 +65,7 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 					LocalTunIP:           c.localTunIP.IP.String(),
 					InboundPodTunIP:      virtualShadowIp.String(),
 					TrafficManagerRealIP: c.routerIP.String(),
-					Route:                trafficManager.String(),
+					Route:                util.CIDR.String(),
 				}
 				// TODO OPTIMIZE CODE
 				if c.Mode == Mesh {
@@ -94,11 +89,12 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err != nil {
 		return
 	}
-	c.routerIP, err = CreateOutboundRouterPod(c.clientset, c.Namespace, &trafficManager, c.cidrs)
+	trafficMangerNet := net.IPNet{IP: util.RouterIP, Mask: util.CIDR.Mask}
+	c.routerIP, err = CreateOutboundRouterPod(c.clientset, c.Namespace, trafficMangerNet.String(), c.cidrs)
 	if err != nil {
 		return
 	}
-	c.dhcp = NewDHCPManager(c.clientset, c.Namespace, &trafficManager)
+	c.dhcp = NewDHCPManager(c.clientset, c.Namespace)
 	if err = c.dhcp.InitDHCP(); err != nil {
 		return
 	}
@@ -164,7 +160,7 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context) (err error) {
 	if util.IsWindows() {
 		c.localTunIP.Mask = net.CIDRMask(0, 32)
 	}
-	var list = []string{trafficManager.String()}
+	var list = []string{util.CIDR.String()}
 	for _, ipNet := range c.cidrs {
 		list = append(list, ipNet.String())
 	}
