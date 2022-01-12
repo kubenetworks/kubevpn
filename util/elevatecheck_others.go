@@ -4,14 +4,22 @@
 package util
 
 import (
+	"flag"
 	log "github.com/sirupsen/logrus"
+	"k8s.io/client-go/tools/clientcmd"
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"syscall"
 )
 
 func RunWithElevated() {
+	// fix if startup with normal user, after elevated home dir will change to root user in linux
+	// but unix don't have this issue
+	if runtime.GOOS == "linux" && flag.Lookup("kubeconfig") == nil {
+		os.Args = append(os.Args, "--kubeconfig", clientcmd.RecommendedHomeFile)
+	}
 	cmd := exec.Command("sudo", os.Args...)
 	log.Info(cmd.Args)
 	cmd.Stdout = os.Stdout
