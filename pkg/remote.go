@@ -136,18 +136,10 @@ func CreateInboundPod(factory cmdutil.Factory, namespace, workloads string, conf
 		return err
 	}
 
+	origin := *podTempSpec
+
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 
-	// pods
-	zero := int64(0)
-	if len(path) == 0 {
-		_, err = helper.DeleteWithOptions(object.Namespace, object.Name, &metav1.DeleteOptions{
-			GracePeriodSeconds: &zero,
-		})
-		if err != nil {
-			return err
-		}
-	}
 	// how to scale to one
 	exchange.AddContainer(&podTempSpec.Spec, config)
 
@@ -163,15 +155,46 @@ func CreateInboundPod(factory cmdutil.Factory, namespace, workloads string, conf
 	if err != nil {
 		return err
 	}
-	//t := true
-	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{
-		//Force: &t,
-	})
-	rollbackFuncList = append(rollbackFuncList, func() {
-		if err = RemoveInboundPod(factory, namespace, workloads); err != nil {
-			log.Error(err)
+
+	// pods
+	zero := int64(0)
+	if len(path) == 0 {
+		if _, err = helper.DeleteWithOptions(object.Namespace, object.Name, &metav1.DeleteOptions{
+			GracePeriodSeconds: &zero,
+		}); err != nil {
+			return err
 		}
-	})
+		// wait for api-server to delete this pods
+		<-time.Tick(time.Second * 2)
+		podTempSpec.Spec.PriorityClassName = ""
+		if _, err = helper.Create(object.Namespace, true, &v1.Pod{
+			ObjectMeta: podTempSpec.ObjectMeta, Spec: podTempSpec.Spec,
+		}); err != nil {
+			log.Error(err)
+			return err
+		}
+		rollbackFuncList = append(rollbackFuncList, func() {
+			if _, err = helper.DeleteWithOptions(object.Namespace, object.Name, &metav1.DeleteOptions{
+				GracePeriodSeconds: &zero,
+			}); err != nil {
+				log.Error(err)
+			}
+			// wait for api-server to delete this pods
+			<-time.Tick(time.Second * 2)
+			if _, err = helper.Create(object.Namespace, true, &v1.Pod{
+				ObjectMeta: origin.ObjectMeta, Spec: origin.Spec,
+			}); err != nil {
+				log.Error(err)
+			}
+		})
+	} else {
+		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
+		rollbackFuncList = append(rollbackFuncList, func() {
+			if err = RemoveInboundPod(factory, namespace, workloads); err != nil {
+				log.Error(err)
+			}
+		})
+	}
 	_ = util.RolloutStatus(factory, namespace, workloads, time.Minute*5)
 	return err
 }
