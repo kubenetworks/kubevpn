@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/pkg/exchange"
 	"github.com/wencaiwulue/kubevpn/util"
@@ -102,15 +103,22 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 		return nil, err
 	}
 	defer watch.Stop()
+	var phase v1.PodPhase
 	for {
 		select {
 		case e := <-watch.ResultChan():
-			if podT, ok := e.Object.(*v1.Pod); ok && podT.Status.Phase == v1.PodRunning {
-				return net.ParseIP(podT.Status.PodIP), nil
+			if podT, ok := e.Object.(*v1.Pod); ok {
+				if phase != podT.Status.Phase {
+					log.Infof("pod %s status is %s", util.TrafficManager, podT.Status.Phase)
+				}
+				if podT.Status.Phase == v1.PodRunning {
+					return net.ParseIP(podT.Status.PodIP), nil
+				}
+				phase = podT.Status.Phase
 			}
-		case <-time.Tick(time.Minute * 2):
-			log.Error("timeout")
-			return nil, errors.New("timeout")
+		case <-time.Tick(time.Minute * 5):
+			log.Errorf("wait pod %s to be ready timeout", util.TrafficManager)
+			return nil, errors.New(fmt.Sprintf("wait pod %s to be ready timeout", util.TrafficManager))
 		}
 	}
 }

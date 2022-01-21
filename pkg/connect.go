@@ -122,7 +122,7 @@ func (c *ConnectOptions) portForward(ctx context.Context) error {
 		for ctx.Err() == nil {
 			func() {
 				if !first {
-					readyChan = make(chan struct{}, 1)
+					readyChan = nil
 				}
 				err := util.PortForwardPod(
 					c.config,
@@ -147,6 +147,8 @@ func (c *ConnectOptions) portForward(ctx context.Context) error {
 		}
 	}()
 	select {
+	case <-time.Tick(time.Second * 60):
+		return errors.New("port forward timeout")
 	case err := <-errChan:
 		return err
 	case <-readyChan:
@@ -282,7 +284,7 @@ func (c *ConnectOptions) InitClient() (err error) {
 			return
 		}
 	}
-	log.Infof("kubeconfig path: %s, namespace: %s, serivces: %v", c.KubeconfigPath, c.Namespace, c.Workloads)
+	log.Infof("kubeconfig path: %s, namespace: %s, services: %v", c.KubeconfigPath, c.Namespace, c.Workloads)
 	return
 }
 
