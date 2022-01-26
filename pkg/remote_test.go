@@ -149,6 +149,17 @@ func TestBackoff(t *testing.T) {
 	})
 }
 
+func TestGetCRD(t *testing.T) {
+	join := filepath.Join(homedir.HomeDir(), ".kube", "nocalhost.large")
+	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags.KubeConfig = &join
+	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
+	Namespace, _, _ := factory.ToRawKubeConfigLoader().Namespace()
+	object, err := util.GetUnstructuredObject(factory, Namespace, "statefulsets.apps.kruise.io/sample-beta1")
+	fmt.Println(object)
+	fmt.Println(err)
+}
+
 func TestDeleteAndCreate(t *testing.T) {
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
 	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
@@ -158,7 +169,7 @@ func TestDeleteAndCreate(t *testing.T) {
 	//restclient, err := factory.RESTClient()
 	//clientset, err := factory.KubernetesClientSet()
 	Namespace, _, err := factory.ToRawKubeConfigLoader().Namespace()
-	object, err := util.GetUnstructuredObject(factory, Namespace, "pods/nginx")
+	object, err := util.GetUnstructuredObject(factory, Namespace, "statefulsets.apps.kruise.io/sample-beta1")
 
 	u := object.Object.(*unstructured.Unstructured)
 	var pp v1.Pod

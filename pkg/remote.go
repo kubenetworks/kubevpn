@@ -9,13 +9,17 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/exchange"
 	"github.com/wencaiwulue/kubevpn/util"
 	v1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/watch"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/util/podutils"
@@ -94,19 +98,22 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 			PriorityClassName: "system-cluster-critical",
 		},
 	}
-	_, err = clientset.CoreV1().Pods(namespace).Create(context.TODO(), manager, metav1.CreateOptions{})
+	newPod, err := clientset.CoreV1().Pods(namespace).Create(context.TODO(), manager, metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
 	}
-	watch, err := clientset.CoreV1().Pods(namespace).Watch(context.TODO(), metav1.SingleObject(metav1.ObjectMeta{Name: manager.GetName()}))
+	if newPod.Status.Phase == v1.PodRunning {
+		return net.ParseIP(newPod.Status.PodIP), nil
+	}
+	watchStream, err := clientset.CoreV1().Pods(namespace).Watch(context.TODO(), metav1.SingleObject(metav1.ObjectMeta{Name: manager.GetName()}))
 	if err != nil {
 		return nil, err
 	}
-	defer watch.Stop()
+	defer watchStream.Stop()
 	var phase v1.PodPhase
 	for {
 		select {
-		case e := <-watch.ResultChan():
+		case e := <-watchStream.ResultChan():
 			if podT, ok := e.Object.(*v1.Pod); ok {
 				if phase != podT.Status.Phase {
 					log.Infof("pod %s status is %s", util.TrafficManager, podT.Status.Phase)
@@ -164,26 +171,53 @@ func CreateInboundPod(factory cmdutil.Factory, namespace, workloads string, conf
 		}); err != nil {
 			return err
 		}
-		// wait for api-server to delete this pods
-		<-time.Tick(time.Second * 2)
+		if single, err := helper.WatchSingle(object.Namespace, object.Name, object.ResourceVersion); err == nil {
+		out:
+			for {
+				select {
+				case e, ok := <-single.ResultChan():
+					if ok {
+						if e.Type == watch.Deleted {
+							single.Stop()
+							break out
+						}
+					}
+				}
+			}
+		}
+		//// wait for api-server to delete this pods
+		//<-time.Tick(time.Second * 3)
 		podTempSpec.Spec.PriorityClassName = ""
-		if _, err = helper.Create(object.Namespace, true, &v1.Pod{
-			ObjectMeta: podTempSpec.ObjectMeta, Spec: podTempSpec.Spec,
+		p := &v1.Pod{ObjectMeta: podTempSpec.ObjectMeta, Spec: podTempSpec.Spec}
+		CleanupUselessInfo(p)
+		if err = retry.OnError(wait.Backoff{
+			Steps:    10,
+			Duration: 50 * time.Millisecond,
+			Factor:   5.0,
+			Jitter:   1,
+		}, func(err error) bool {
+			return !(k8serrors.IsAlreadyExists(err) && !strings.Contains(err.Error(), "object is being deleted"))
+		}, func() error {
+			if _, err = helper.Create(object.Namespace, true, p); err != nil {
+				return err
+			}
+			return errors.New("")
 		}); err != nil {
 			log.Error(err)
 			return err
 		}
+
 		rollbackFuncList = append(rollbackFuncList, func() {
 			if _, err = helper.DeleteWithOptions(object.Namespace, object.Name, &metav1.DeleteOptions{
 				GracePeriodSeconds: &zero,
 			}); err != nil {
 				log.Error(err)
 			}
-			// wait for api-server to delete this pods
-			<-time.Tick(time.Second * 2)
-			if _, err = helper.Create(object.Namespace, true, &v1.Pod{
-				ObjectMeta: origin.ObjectMeta, Spec: origin.Spec,
-			}); err != nil {
+			//// wait for api-server to delete this pods
+			//<-time.Tick(time.Second * 2)
+			p2 := &v1.Pod{ObjectMeta: origin.ObjectMeta, Spec: origin.Spec}
+			CleanupUselessInfo(p2)
+			if _, err = helper.Create(object.Namespace, true, p2); err != nil {
 				log.Error(err)
 			}
 		})
@@ -244,4 +278,15 @@ func RemoveInboundPod(factory cmdutil.Factory, namespace, workloads string) erro
 		//Force: &t,
 	})
 	return err
+}
+
+func CleanupUselessInfo(pod *v1.Pod) {
+	pod.SetSelfLink("")
+	pod.SetGeneration(0)
+	pod.SetResourceVersion("")
+	pod.SetUID("")
+	pod.SetDeletionTimestamp(nil)
+	pod.SetSelfLink("")
+	pod.SetManagedFields(nil)
+	pod.SetOwnerReferences(nil)
 }

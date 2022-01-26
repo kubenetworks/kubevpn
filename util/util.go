@@ -120,7 +120,14 @@ func GetTopOwnerReference(factory cmdutil.Factory, namespace, workload string) (
 		if ownerReference == nil {
 			return object, nil
 		}
-		workload = fmt.Sprintf("%s/%s", ownerReference.Kind, ownerReference.Name)
+		// apiVersion format is Group/Version is like: apps/v1, apps.kruise.io/v1beta1
+		// we need to trans it to Kind.Group
+		split := strings.Split(ownerReference.APIVersion, "/")
+		gk := metav1.GroupKind{
+			Group: split[0],
+			Kind:  ownerReference.Kind,
+		}
+		workload = fmt.Sprintf("%s/%s", gk.String(), ownerReference.Name)
 	}
 }
 
@@ -132,9 +139,9 @@ func GetTopOwnerReferenceBySelector(factory cmdutil.Factory, namespace, selector
 	}
 	set := sets.NewString()
 	for _, info := range object {
-		reference, err := GetTopOwnerReference(factory, namespace, fmt.Sprintf("%s/%s", info.Mapping.Resource.Resource, info.Name))
+		reference, err := GetTopOwnerReference(factory, namespace, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
 		if err == nil && reference.Mapping.Resource.Resource != "services" {
-			set.Insert(fmt.Sprintf("%s/%s", reference.Mapping.Resource.Resource, reference.Name))
+			set.Insert(fmt.Sprintf("%s/%s", reference.Mapping.GroupVersionKind.GroupKind().String(), reference.Name))
 		}
 	}
 	return set, nil

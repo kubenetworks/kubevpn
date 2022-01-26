@@ -17,7 +17,6 @@ import (
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"net"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -40,8 +39,10 @@ type ConnectOptions struct {
 	factory        cmdutil.Factory
 	cidrs          []*net.IPNet
 	dhcp           *DHCPManager
-	routerIP       net.IP
-	localTunIP     *net.IPNet
+	// needs to give it back to dhcp
+	usedIPs    []*net.IPNet
+	routerIP   net.IP
+	localTunIP *net.IPNet
 }
 
 func (c *ConnectOptions) createRemoteInboundPod() (err error) {
@@ -51,17 +52,18 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 	}
 
 	tempIps := []*net.IPNet{c.localTunIP}
-	wg := sync.WaitGroup{}
-	lock := sync.Mutex{}
+	//wg := &sync.WaitGroup{}
+	//lock := &sync.Mutex{}
 	for _, workload := range c.Workloads {
 		if len(workload) > 0 {
-			wg.Add(1)
-			/*go*/ func(finalWorkload string) {
-				defer wg.Done()
-				lock.Lock()
+			//wg.Add(1)
+			/*go*/
+			func(finalWorkload string) {
+				//defer wg.Done()
+				//lock.Lock()
 				virtualShadowIp, _ := c.dhcp.RentIPRandom()
 				tempIps = append(tempIps, virtualShadowIp)
-				lock.Unlock()
+				//lock.Unlock()
 				config := util.PodRouteConfig{
 					LocalTunIP:           c.localTunIP.IP.String(),
 					InboundPodTunIP:      virtualShadowIp.String(),
@@ -80,12 +82,13 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 			}(workload)
 		}
 	}
-	wg.Wait()
-	AddCleanUpResourceHandler(c.clientset, c.Namespace, c.dhcp, tempIps...)
+	//wg.Wait()
+	c.usedIPs = tempIps
 	return
 }
 
 func (c *ConnectOptions) DoConnect() (err error) {
+	c.addCleanUpResourceHandler(c.clientset, c.Namespace)
 	c.cidrs, err = getCIDR(c.clientset, c.Namespace)
 	if err != nil {
 		return
@@ -306,7 +309,7 @@ func (c *ConnectOptions) PreCheckResource() {
 	for i, workload := range c.Workloads {
 		ownerReference, err := util.GetTopOwnerReference(c.factory, c.Namespace, workload)
 		if err == nil {
-			c.Workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.Resource.Resource, ownerReference.Name)
+			c.Workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.GroupVersionKind.GroupKind().String(), ownerReference.Name)
 		}
 	}
 	// service which associate with pod
@@ -330,7 +333,7 @@ func (c *ConnectOptions) PreCheckResource() {
 			if err == nil && list != nil && len(list.Items) != 0 {
 				ownerReference, err := util.GetTopOwnerReference(c.factory, c.Namespace, fmt.Sprintf("%s/%s", "pods", list.Items[0].Name))
 				if err == nil {
-					c.Workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.Resource.Resource, ownerReference.Name)
+					c.Workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.GroupVersionKind.GroupKind().String(), ownerReference.Name)
 				}
 			} else
 			// if list is empty, means not create pods, just controllers

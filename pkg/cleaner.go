@@ -11,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
-	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -22,14 +21,14 @@ var stopChan = make(chan os.Signal)
 var rollbackFuncList = make([]func(), 2)
 var ctx, cancel = context.WithCancel(context.TODO())
 
-func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string, manager *DHCPManager, ip ...*net.IPNet) {
+func (c *ConnectOptions) addCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string) {
 	signal.Notify(stopChan, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL /*, syscall.SIGSTOP*/)
 	go func() {
 		<-stopChan
 		log.Info("prepare to exit, cleaning up")
 		dns.CancelDNS()
-		for _, ipNet := range ip {
-			if err := manager.ReleaseIpToDHCP(ipNet); err != nil {
+		for _, ipNet := range c.usedIPs {
+			if err := c.dhcp.ReleaseIpToDHCP(ipNet); err != nil {
 				log.Errorf("failed to release ip to dhcp, err: %v", err)
 			}
 		}
