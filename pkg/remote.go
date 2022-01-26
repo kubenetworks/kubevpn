@@ -16,7 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/apimachinery/pkg/watch"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
@@ -164,60 +163,18 @@ func CreateInboundPod(factory cmdutil.Factory, namespace, workloads string, conf
 	}
 
 	// pods
-	zero := int64(0)
 	if len(path) == 0 {
-		if _, err = helper.DeleteWithOptions(object.Namespace, object.Name, &metav1.DeleteOptions{
-			GracePeriodSeconds: &zero,
-		}); err != nil {
-			return err
-		}
-		if single, err := helper.WatchSingle(object.Namespace, object.Name, object.ResourceVersion); err == nil {
-		out:
-			for {
-				select {
-				case e, ok := <-single.ResultChan():
-					if ok {
-						if e.Type == watch.Deleted {
-							single.Stop()
-							break out
-						}
-					}
-				}
-			}
-		}
-		//// wait for api-server to delete this pods
-		//<-time.Tick(time.Second * 3)
 		podTempSpec.Spec.PriorityClassName = ""
 		p := &v1.Pod{ObjectMeta: podTempSpec.ObjectMeta, Spec: podTempSpec.Spec}
 		CleanupUselessInfo(p)
-		if err = retry.OnError(wait.Backoff{
-			Steps:    10,
-			Duration: 50 * time.Millisecond,
-			Factor:   5.0,
-			Jitter:   1,
-		}, func(err error) bool {
-			return !(k8serrors.IsAlreadyExists(err) && !strings.Contains(err.Error(), "object is being deleted"))
-		}, func() error {
-			if _, err = helper.Create(object.Namespace, true, p); err != nil {
-				return err
-			}
-			return errors.New("")
-		}); err != nil {
-			log.Error(err)
+		if err = createAfterDeletePod(factory, p, helper); err != nil {
 			return err
 		}
 
 		rollbackFuncList = append(rollbackFuncList, func() {
-			if _, err = helper.DeleteWithOptions(object.Namespace, object.Name, &metav1.DeleteOptions{
-				GracePeriodSeconds: &zero,
-			}); err != nil {
-				log.Error(err)
-			}
-			//// wait for api-server to delete this pods
-			//<-time.Tick(time.Second * 2)
 			p2 := &v1.Pod{ObjectMeta: origin.ObjectMeta, Spec: origin.Spec}
 			CleanupUselessInfo(p2)
-			if _, err = helper.Create(object.Namespace, true, p2); err != nil {
+			if err = createAfterDeletePod(factory, p2, helper); err != nil {
 				log.Error(err)
 			}
 		})
@@ -231,6 +188,42 @@ func CreateInboundPod(factory cmdutil.Factory, namespace, workloads string, conf
 	}
 	_ = util.RolloutStatus(factory, namespace, workloads, time.Minute*5)
 	return err
+}
+
+func createAfterDeletePod(factory cmdutil.Factory, p *v1.Pod, helper *pkgresource.Helper) error {
+	zero := int64(0)
+	if _, err := helper.DeleteWithOptions(p.Namespace, p.Name, &metav1.DeleteOptions{
+		GracePeriodSeconds: &zero,
+	}); err != nil {
+		log.Error(err)
+	}
+	if err := retry.OnError(wait.Backoff{
+		Steps:    10,
+		Duration: 50 * time.Millisecond,
+		Factor:   5.0,
+		Jitter:   1,
+	}, func(err error) bool {
+		if !k8serrors.IsAlreadyExists(err) {
+			return true
+		}
+		clientset, err := factory.KubernetesClientSet()
+		get, err := clientset.CoreV1().Pods(p.Namespace).Get(context.TODO(), p.Name, metav1.GetOptions{})
+		if err != nil || get.Status.Phase != v1.PodRunning {
+			return true
+		}
+		return false
+	}, func() error {
+		if _, err := helper.Create(p.Namespace, true, p); err != nil {
+			return err
+		}
+		return errors.New("")
+	}); err != nil {
+		if k8serrors.IsAlreadyExists(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func RemoveInboundPod(factory cmdutil.Factory, namespace, workloads string) error {

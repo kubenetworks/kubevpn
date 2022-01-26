@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
@@ -161,15 +161,14 @@ func TestGetCRD(t *testing.T) {
 }
 
 func TestDeleteAndCreate(t *testing.T) {
+	file := clientcmd.RecommendedHomeFile
+	file = filepath.Join(homedir.HomeDir(), ".kube", "config")
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
+	configFlags.KubeConfig = &file
 	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 
-	//config, err := factory.ToRESTConfig()
-	//restclient, err := factory.RESTClient()
-	//clientset, err := factory.KubernetesClientSet()
 	Namespace, _, err := factory.ToRawKubeConfigLoader().Namespace()
-	object, err := util.GetUnstructuredObject(factory, Namespace, "statefulsets.apps.kruise.io/sample-beta1")
+	object, err := util.GetUnstructuredObject(factory, Namespace, "pods/nginx")
 
 	u := object.Object.(*unstructured.Unstructured)
 	var pp v1.Pod
@@ -177,28 +176,12 @@ func TestDeleteAndCreate(t *testing.T) {
 	err = json.Unmarshal(marshal, &pp)
 
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
-	//zero := int64(0)
+	zero := int64(0)
 	if _, err = helper.DeleteWithOptions(object.Namespace, object.Name, &metav1.DeleteOptions{
-		//GracePeriodSeconds: &zero,
+		GracePeriodSeconds: &zero,
 	}); err != nil {
 		log.Fatal(err)
 	}
-
-	if single, err := helper.WatchSingle(object.Namespace, object.Name, object.ResourceVersion); err == nil {
-	out:
-		for {
-			select {
-			case e, ok := <-single.ResultChan():
-				if ok {
-					if e.Type == watch.Deleted {
-						single.Stop()
-						break out
-					}
-				}
-			}
-		}
-	}
-
 	_ = exec.Command("kubectl", "wait", "pods/nginx", "--for=delete").Run()
 
 	p := &v1.Pod{ObjectMeta: pp.ObjectMeta, Spec: pp.Spec}
@@ -209,16 +192,16 @@ func TestDeleteAndCreate(t *testing.T) {
 		Factor:   5.0,
 		Jitter:   1,
 	}, func(err error) bool {
-		return !k8serrors.IsAlreadyExists(err)
+		if !k8serrors.IsAlreadyExists(err) {
+			return true
+		}
+		clientset, err := factory.KubernetesClientSet()
+		get, err := clientset.CoreV1().Pods(p.Namespace).Get(context.TODO(), p.Name, metav1.GetOptions{})
+		if err != nil || get.Status.Phase != v1.PodRunning {
+			return true
+		}
+		return false
 	}, func() error {
-		//if get, err2 := helper.Get(object.Namespace, object.Name); err2 == nil {
-		//	if ppp, ok := get.(*v1.Pod); ok {
-		//		if ppp.Status.Phase == v1.PodRunning {
-		//			return nil
-		//		}
-		//	}
-		//	return errors.New("")
-		//}
 		_, err = helper.Create(object.Namespace, true, p)
 		if err != nil {
 			return err
