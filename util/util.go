@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"strconv"
 
@@ -123,6 +124,22 @@ func GetTopOwnerReference(factory cmdutil.Factory, namespace, workload string) (
 	}
 }
 
+// GetTopOwnerReferenceBySelector assume pods, controller has same labels
+func GetTopOwnerReferenceBySelector(factory cmdutil.Factory, namespace, selector string) (sets.String, error) {
+	object, err := GetUnstructuredObjectBySelector(factory, namespace, selector)
+	if err != nil {
+		return nil, err
+	}
+	set := sets.NewString()
+	for _, info := range object {
+		reference, err := GetTopOwnerReference(factory, namespace, fmt.Sprintf("%s/%s", info.Mapping.Resource.Resource, info.Name))
+		if err == nil && reference.Mapping.Resource.Resource != "services" {
+			set.Insert(fmt.Sprintf("%s/%s", reference.Mapping.Resource.Resource, reference.Name))
+		}
+	}
+	return set, nil
+}
+
 func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace, cmd string) (string, error) {
 	pod, err := clientset.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
 
@@ -206,6 +223,32 @@ func GetUnstructuredObject(f cmdutil.Factory, namespace string, workloads string
 		return nil, errors.New("Not found")
 	}
 	return infos[0], err
+}
+
+func GetUnstructuredObjectBySelector(f cmdutil.Factory, namespace string, selector string) ([]*runtimeresource.Info, error) {
+	do := f.NewBuilder().
+		Unstructured().
+		NamespaceParam(namespace).DefaultNamespace().AllNamespaces(false).
+		ResourceTypeOrNameArgs(true, "all").
+		LabelSelector(selector).
+		ContinueOnError().
+		Latest().
+		Flatten().
+		TransformRequests(func(req *rest.Request) { req.Param("includeObject", "Object") }).
+		Do()
+	if err := do.Err(); err != nil {
+		log.Warn(err)
+		return nil, err
+	}
+	infos, err := do.Infos()
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	if len(infos) == 0 {
+		return nil, errors.New("Not found")
+	}
+	return infos, err
 }
 
 func GetPodTemplateSpecPath(u *unstructured.Unstructured) (*v1.PodTemplateSpec, []string, error) {

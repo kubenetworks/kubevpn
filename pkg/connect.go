@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"net"
 	"strings"
 	"sync"
@@ -288,11 +289,63 @@ func (c *ConnectOptions) InitClient() (err error) {
 	return
 }
 
+// PreCheckResource transform user parameter to normal, example:
+// pod: productpage-7667dfcddb-cbsn5
+// replicast: productpage-7667dfcddb
+// deployment: productpage
+// transform:
+// pod/productpage-7667dfcddb-cbsn5 --> deployment/productpage
+// service/productpage --> deployment/productpage
+// replicaset/productpage-7667dfcddb --> deployment/productpage
+//
+// pods without controller
+// pod/productpage-without-controller --> pod/productpage-without-controller
+// service/productpage-without-pod --> controller/controllerName
 func (c *ConnectOptions) PreCheckResource() {
+	// normal workloads, like pod with controller, deployments, statefulset, replicaset etc...
 	for i, workload := range c.Workloads {
 		ownerReference, err := util.GetTopOwnerReference(c.factory, c.Namespace, workload)
 		if err == nil {
 			c.Workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.Resource.Resource, ownerReference.Name)
+		}
+	}
+	// service which associate with pod
+	for i, workload := range c.Workloads {
+		object, err := util.GetUnstructuredObject(c.factory, c.Namespace, workload)
+		if err != nil {
+			continue
+		}
+		if object.Mapping.Resource.Resource != "services" {
+			continue
+		}
+		get, err := c.clientset.CoreV1().Services(c.Namespace).Get(context.TODO(), object.Name, metav1.GetOptions{})
+		if err != nil {
+			continue
+		}
+		if ns, selector, err := polymorphichelpers.SelectorsForObject(get); err == nil {
+			list, err := c.clientset.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{
+				LabelSelector: selector.String(),
+			})
+			// if pod is not empty, using pods to find top controller
+			if err == nil && list != nil && len(list.Items) != 0 {
+				ownerReference, err := util.GetTopOwnerReference(c.factory, c.Namespace, fmt.Sprintf("%s/%s", "pods", list.Items[0].Name))
+				if err == nil {
+					c.Workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.Resource.Resource, ownerReference.Name)
+				}
+			} else
+			// if list is empty, means not create pods, just controllers
+			{
+				controller, err := util.GetTopOwnerReferenceBySelector(c.factory, c.Namespace, selector.String())
+				if err == nil {
+					if len(controller) > 0 {
+						c.Workloads[i] = controller.List()[0]
+					}
+				}
+				// only a single service, not support it yet
+				if controller.Len() == 0 {
+					log.Fatalf("Not support resources: %s", workload)
+				}
+			}
 		}
 	}
 }
