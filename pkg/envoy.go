@@ -35,10 +35,12 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 	}
 
 	u := object.Object.(*unstructured.Unstructured)
-	templateSpec, depth, err := util.GetPodTemplateSpecPath(u)
+	templateSpec, path, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
 		return err
 	}
+
+	origin := *templateSpec
 
 	port := uint32(templateSpec.Spec.Containers[0].Ports[0].ContainerPort)
 	configMapName := fmt.Sprintf("%s-%s", object.Mapping.Resource.Resource, object.Name)
@@ -58,7 +60,7 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 		Value interface{} `json:"value"`
 	}{{
 		Op:    "replace",
-		Path:  "/" + strings.Join(append(depth, "spec"), "/"),
+		Path:  "/" + strings.Join(append(path, "spec"), "/"),
 		Value: templateSpec.Spec,
 	}})
 	if err != nil {
@@ -69,6 +71,13 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 		//Force: &t,
 	})
 
+	removePatch, restorePatch := patch(origin, path)
+	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, removePatch, &metav1.PatchOptions{})
+	if err != nil {
+		log.Warnf("error while remove probe of resource: %s %s, ignore, err: %v",
+			object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
+	}
+
 	//_ = util.WaitPod(clientset, namespace, metav1.ListOptions{
 	//	FieldSelector: fields.OneTermEqualSelector("metadata.name", object.Name+"-shadow").String(),
 	//}, func(pod *v1.Pod) bool {
@@ -77,6 +86,10 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 	rollbackFuncList = append(rollbackFuncList, func() {
 		if err = UnPatchContainer(factory, clientset, namespace, workloads, headers); err != nil {
 			log.Error(err)
+		}
+		if _, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, restorePatch, &metav1.PatchOptions{}); err != nil {
+			log.Warnf("error while restore probe of resource: %s %s, ignore, err: %v",
+				object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
 		}
 	})
 	_ = util.RolloutStatus(factory, namespace, workloads, time.Minute*5)

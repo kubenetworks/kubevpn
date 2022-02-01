@@ -94,7 +94,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 		return
 	}
 	trafficMangerNet := net.IPNet{IP: util.RouterIP, Mask: util.CIDR.Mask}
-	c.routerIP, err = CreateOutboundRouterPod(c.clientset, c.Namespace, trafficMangerNet.String(), c.cidrs)
+	c.routerIP, err = CreateOutboundPod(c.clientset, c.Namespace, trafficMangerNet.String(), c.cidrs)
 	if err != nil {
 		return
 	}
@@ -141,9 +141,21 @@ func (c *ConnectOptions) portForward(ctx context.Context) error {
 					errChan <- err
 				}
 				first = false
+				// exit normal, let context.err to judge to exit or not
+				if err == nil {
+					return
+				}
 				if apierrors.IsNotFound(err) {
-					log.Errorf("can not found port-forward resource, err: %v, exiting", err)
-				} else if err != nil {
+					log.Errorln("can not found outbound pod, try to create one")
+					tm := net.IPNet{IP: util.RouterIP, Mask: util.CIDR.Mask}
+					if _, err = CreateOutboundPod(c.clientset, c.Namespace, tm.String(), c.cidrs); err != nil {
+						log.Errorf("error while create traffic manager, will retry after a snap, err: %v", err)
+					}
+				} else if strings.Contains(err.Error(), "unable to listen on any of the requested ports") ||
+					strings.Contains(err.Error(), "address already in use") {
+					log.Errorf("port 10800 already in use, needs to release it manually")
+					time.Sleep(time.Second * 5)
+				} else {
 					log.Errorf("port-forward occurs error, err: %v, retrying", err)
 				}
 				time.Sleep(time.Second * 2)

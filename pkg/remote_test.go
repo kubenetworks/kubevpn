@@ -11,6 +11,8 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
@@ -49,7 +51,7 @@ import (
 //		Mask: net.IPv4Mask(255, 255, 0, 0),
 //	}
 //
-//	server, err := pkg.CreateOutboundRouterPod(clientset, "test", i, []*net.IPNet{j})
+//	server, err := pkg.CreateOutboundPod(clientset, "test", i, []*net.IPNet{j})
 //	fmt.Println(server)
 //}
 
@@ -210,4 +212,38 @@ func TestDeleteAndCreate(t *testing.T) {
 	}); !k8serrors.IsAlreadyExists(err) {
 		log.Fatal(err)
 	}
+}
+
+func TestReadiness(t *testing.T) {
+	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
+	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
+	object, err := util.GetUnstructuredObject(factory, "default", "deployment/authors")
+	if err != nil {
+		panic(err)
+	}
+	podTemplateSpec, path, err := util.GetPodTemplateSpecPath(object.Object.(*unstructured.Unstructured))
+	if err != nil {
+		panic(err)
+	}
+	helper := pkgresource.NewHelper(object.Client, object.Mapping)
+	removePatch, restorePatch := patch(*podTemplateSpec, path)
+	_, err = patchs(helper, object.Namespace, object.Name, removePatch)
+	if err != nil {
+		panic(err)
+	}
+	_, err = patchs(helper, object.Namespace, object.Name, restorePatch)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func patchs(helper *pkgresource.Helper, namespace, name string, p []byte) (k8sruntime.Object, error) {
+	return helper.Patch(
+		namespace,
+		name,
+		types.JSONPatchType,
+		p,
+		&metav1.PatchOptions{},
+	)
 }

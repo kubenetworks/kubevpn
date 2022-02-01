@@ -19,15 +19,15 @@ func RemoveContainer(spec *v1.PodSpec) {
 }
 
 func AddContainer(spec *v1.PodSpec, c util.PodRouteConfig) {
-	var result []v1.Container
-	for _, container := range spec.Containers {
-		if container.Name != VPN {
-			result = append(result, container)
+	// remove vpn container is already exist
+	for i := 0; i < len(spec.Containers); i++ {
+		if spec.Containers[i].Name == VPN {
+			spec.Containers = append(spec.Containers[:i], spec.Containers[i+1:]...)
 		}
 	}
 	t := true
 	zero := int64(0)
-	result = append(spec.Containers, v1.Container{
+	spec.Containers = append(spec.Containers, v1.Container{
 		Name:    VPN,
 		Image:   "naison/kubevpn:v2",
 		Command: []string{"/bin/sh", "-c"},
@@ -64,7 +64,6 @@ func AddContainer(spec *v1.PodSpec, c util.PodRouteConfig) {
 		},
 		ImagePullPolicy: v1.PullAlways,
 	})
-	spec.Containers = result
 	if len(spec.PriorityClassName) == 0 {
 		spec.PriorityClassName = "system-cluster-critical"
 	}

@@ -24,11 +24,12 @@ import (
 	"k8s.io/kubectl/pkg/util/podutils"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
-func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, trafficManagerIP string, nodeCIDR []*net.IPNet) (net.IP, error) {
+func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, trafficManagerIP string, nodeCIDR []*net.IPNet) (net.IP, error) {
 	manager, _, err := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
 		namespace,
 		fields.OneTermEqualSelector("app", util.TrafficManager).String(),
@@ -39,9 +40,11 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 	)
 
 	if err == nil && manager != nil {
+		log.Infoln("traffic manager already exist, reuse it")
 		UpdateRefCount(clientset, namespace, manager.Name, 1)
 		return net.ParseIP(manager.Status.PodIP), nil
 	}
+	log.Infoln("traffic manager not exist, try to create it...")
 	args := []string{
 		"sysctl net.ipv4.ip_forward=1",
 		"iptables -F",
@@ -123,7 +126,6 @@ func CreateOutboundRouterPod(clientset *kubernetes.Clientset, namespace string, 
 				phase = podT.Status.Phase
 			}
 		case <-time.Tick(time.Minute * 5):
-			log.Errorf("wait pod %s to be ready timeout", util.TrafficManager)
 			return nil, errors.New(fmt.Sprintf("wait pod %s to be ready timeout", util.TrafficManager))
 		}
 	}
@@ -146,25 +148,16 @@ func CreateInboundPod(factory cmdutil.Factory, namespace, workloads string, conf
 
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 
-	// how to scale to one
 	exchange.AddContainer(&podTempSpec.Spec, config)
 
-	bytes, err := json.Marshal([]struct {
-		Op    string      `json:"op"`
-		Path  string      `json:"path"`
-		Value interface{} `json:"value"`
-	}{{
-		Op:    "replace",
-		Path:  "/" + strings.Join(append(path, "spec"), "/"),
-		Value: podTempSpec.Spec,
-	}})
-	if err != nil {
-		return err
-	}
-
-	// pods
+	// pods without controller
 	if len(path) == 0 {
 		podTempSpec.Spec.PriorityClassName = ""
+		for _, c := range podTempSpec.Spec.Containers {
+			c.LivenessProbe = nil
+			c.StartupProbe = nil
+			c.ReadinessProbe = nil
+		}
 		p := &v1.Pod{ObjectMeta: podTempSpec.ObjectMeta, Spec: podTempSpec.Spec}
 		CleanupUselessInfo(p)
 		if err = createAfterDeletePod(factory, p, helper); err != nil {
@@ -178,11 +171,36 @@ func CreateInboundPod(factory cmdutil.Factory, namespace, workloads string, conf
 				log.Error(err)
 			}
 		})
-	} else {
+	} else
+	// controllers
+	{
+		bytes, _ := json.Marshal([]struct {
+			Op    string      `json:"op"`
+			Path  string      `json:"path"`
+			Value interface{} `json:"value"`
+		}{{
+			Op:    "replace",
+			Path:  "/" + strings.Join(append(path, "spec"), "/"),
+			Value: podTempSpec.Spec,
+		}})
 		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
+		if err != nil {
+			log.Errorf("error while inject proxy container, err: %v, exiting...")
+			return err
+		}
+		removePatch, restorePatch := patch(origin, path)
+		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, removePatch, &metav1.PatchOptions{})
+		if err != nil {
+			log.Warnf("error while remove probe of resource: %s %s, ignore, err: %v",
+				object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
+		}
 		rollbackFuncList = append(rollbackFuncList, func() {
-			if err = RemoveInboundPod(factory, namespace, workloads); err != nil {
+			if err = removeInboundContainer(factory, namespace, workloads); err != nil {
 				log.Error(err)
+			}
+			if _, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, restorePatch, &metav1.PatchOptions{}); err != nil {
+				log.Warnf("error while restore probe of resource: %s %s, ignore, err: %v",
+					object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
 			}
 		})
 	}
@@ -226,7 +244,7 @@ func createAfterDeletePod(factory cmdutil.Factory, p *v1.Pod, helper *pkgresourc
 	return nil
 }
 
-func RemoveInboundPod(factory cmdutil.Factory, namespace, workloads string) error {
+func removeInboundContainer(factory cmdutil.Factory, namespace, workloads string) error {
 	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
 	if err != nil {
 		return err
@@ -282,4 +300,48 @@ func CleanupUselessInfo(pod *v1.Pod) {
 	pod.SetSelfLink("")
 	pod.SetManagedFields(nil)
 	pod.SetOwnerReferences(nil)
+}
+
+func patch(spec v1.PodTemplateSpec, path []string) (removePatch []byte, restorePatch []byte) {
+	type P struct {
+		Op    string      `json:"op,omitempty"`
+		Path  string      `json:"path,omitempty"`
+		Value interface{} `json:"value,omitempty"`
+	}
+	var remove, restore []P
+	for i := range spec.Spec.Containers {
+		index := strconv.Itoa(i)
+		readinessPath := "/" + strings.Join(append(path, "spec", "containers", index, "readinessProbe"), "/")
+		livenessPath := "/" + strings.Join(append(path, "spec", "containers", index, "livenessProbe"), "/")
+		startupPath := "/" + strings.Join(append(path, "spec", "containers", index, "startupProbe"), "/")
+		remove = append(remove, P{
+			Op:    "replace",
+			Path:  readinessPath,
+			Value: nil,
+		}, P{
+			Op:    "replace",
+			Path:  livenessPath,
+			Value: nil,
+		}, P{
+			Op:    "replace",
+			Path:  startupPath,
+			Value: nil,
+		})
+		restore = append(restore, P{
+			Op:    "replace",
+			Path:  readinessPath,
+			Value: spec.Spec.Containers[i].ReadinessProbe,
+		}, P{
+			Op:    "replace",
+			Path:  livenessPath,
+			Value: spec.Spec.Containers[i].LivenessProbe,
+		}, P{
+			Op:    "replace",
+			Path:  startupPath,
+			Value: spec.Spec.Containers[i].StartupProbe,
+		})
+	}
+	removePatch, _ = json.Marshal(remove)
+	restorePatch, _ = json.Marshal(restore)
+	return
 }
