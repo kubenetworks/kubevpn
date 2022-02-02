@@ -38,4 +38,4 @@ jobs:
       run: make kubevpn-linux
 
     - name: Test
-      run: go test -v ./...
+      run: go test -v ./test/

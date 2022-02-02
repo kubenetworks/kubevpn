@@ -5,7 +5,9 @@ import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/util"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -13,6 +15,8 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"net"
 	"os/exec"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -23,35 +27,53 @@ var (
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient
 	config     *rest.Config
+	cancelFunc context.CancelFunc
 )
 
-func TestPingPodIP(t *testing.T) {
-	list, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), v1.ListOptions{})
+func TestFunctions(t *testing.T) {
+	t.Run(runtime.FuncForPC(reflect.ValueOf(PingPodIP).Pointer()).Name(), PingPodIP)
+	t.Run(runtime.FuncForPC(reflect.ValueOf(UDP).Pointer()).Name(), UDP)
+	t.Run("cancel", func(t *testing.T) { cancelFunc() })
+}
+
+func PingPodIP(t *testing.T) {
+	ctx, f := context.WithTimeout(context.TODO(), time.Second*60)
+	defer f()
+	list, err := clientset.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{})
 	if err != nil {
-		t.FailNow()
+		t.Error(err)
 	}
 	for _, item := range list.Items {
-		command := exec.Command("ping", "-c", "4", item.Status.PodIP)
-		command.Run()
-		if !command.ProcessState.Success() {
-			t.FailNow()
+		if item.Status.Phase == corev1.PodRunning {
+			command := exec.Command("ping", "-c", "4", item.Status.PodIP)
+			if err = command.Run(); err == nil {
+				if !command.ProcessState.Success() {
+					t.Errorf("can not ping ip: %s of pod: %s", item.Status.PodIP, item.Name)
+				}
+			}
 		}
 	}
 }
 
-func TestUDP(t *testing.T) {
+func UDP(t *testing.T) {
+	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{
+		LabelSelector: fields.OneTermEqualSelector("app", "reviews").String(),
+	})
+	if err != nil {
+		t.Error(err)
+	}
 	go func() {
 		server()
 	}()
-	time.Sleep(time.Second * 1)
-	if err := client(); err != nil {
-		t.FailNow()
+	time.Sleep(time.Second * 2)
+	if err = client(list.Items[0].Status.PodIP); err != nil {
+		t.Error(err)
 	}
 }
 
-func client() error {
+func client(serviceIP string) error {
 	socket, err := net.DialUDP("udp4", nil, &net.UDPAddr{
-		IP:   net.IPv4(172, 20, 225, 47),
+		IP:   net.ParseIP(serviceIP),
 		Port: 55555,
 	})
 	if err != nil {
@@ -112,10 +134,12 @@ func server() {
 
 func init() {
 	initClient()
+	var ctx context.Context
+	ctx, cancelFunc = context.WithCancel(context.TODO())
 
-	command := exec.Command("nhctl", "connect", "--workloads=ratings")
-	c := make(chan struct{})
-	_, _, _ = util.RunWithRollingOutWithChecker(command, func(log string) bool {
+	command := exec.CommandContext(ctx, "kubevpn", "connect", "--workloads", "deployments/reviews")
+	c := make(chan struct{}, 1)
+	go util.RunWithRollingOutWithChecker(command, func(log string) bool {
 		ok := strings.Contains(log, "dns service ok")
 		if ok {
 			c <- struct{}{}
@@ -128,7 +152,7 @@ func init() {
 func initClient() {
 	var err error
 
-	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags := genericclioptions.NewConfigFlags(true)
 	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
 	f := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 
