@@ -34,7 +34,7 @@ var (
 
 func TestFunctions(t *testing.T) {
 	t.Cleanup(cancelFunc)
-	t.Parallel()
+	//t.Parallel()
 	t.Run(runtime.FuncForPC(reflect.ValueOf(pingPodIP).Pointer()).Name(), pingPodIP)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(curlUDP).Pointer()).Name(), curlUDP)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(healthCheck).Pointer()).Name(), healthCheck)
