@@ -25,7 +25,7 @@ jobs:
     - name: Kubernetes info
       run: |
         kubectl cluster-info
-        kubectl get pods -n kube-system
+        kubectl get pods -n kube-system -o wide
         cat ~/.kube/config
         ls -lah ~/.kube/config
     - name: Install demo bookinfo
