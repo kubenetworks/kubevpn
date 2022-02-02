@@ -174,7 +174,7 @@ func init() {
 	ctx, cancelFunc = context.WithCancel(context.TODO())
 	timeoutCtx, timeoutFunc := context.WithTimeout(ctx, time.Minute*10)
 
-	command := exec.CommandContext(ctx, "kubevpn", "connect", "--workloads", "deployments/reviews-v1")
+	command := exec.CommandContext(ctx, "kubevpn", "connect", "--debug", "--workloads", "deployments/reviews-v1")
 	go util.RunWithRollingOutWithChecker(command, func(log string) bool {
 		ok := strings.Contains(log, "dns service ok")
 		if ok {
