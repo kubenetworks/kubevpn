@@ -36,7 +36,7 @@ func TestFunctions(t *testing.T) {
 	t.Cleanup(cancelFunc)
 	//t.Parallel()
 	t.Run(runtime.FuncForPC(reflect.ValueOf(pingPodIP).Pointer()).Name(), pingPodIP)
-	t.Run(runtime.FuncForPC(reflect.ValueOf(curlUDP).Pointer()).Name(), curlUDP)
+	t.Run(runtime.FuncForPC(reflect.ValueOf(dialUDP).Pointer()).Name(), dialUDP)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(healthCheck).Pointer()).Name(), healthCheck)
 }
 
@@ -88,27 +88,40 @@ func healthCheck(t *testing.T) {
 	}
 }
 
-func curlUDP(t *testing.T) {
+func dialUDP(t *testing.T) {
+	port := util.GetAvailableUDPPortOrDie()
+	go server(port)
+
 	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", "reviews").String(),
 	})
 	if err != nil {
 		t.Error(err)
 	}
-	if len(list.Items) == 0 {
+	var ip string
+	for _, item := range list.Items {
+		if item.DeletionTimestamp == nil && item.Status.Phase == corev1.PodRunning {
+			ip = item.Status.PodIP
+			break
+		}
+	}
+	if len(ip) == 0 {
 		t.Errorf("can not found pods for service reviews")
 	}
-	port := util.GetAvailableUDPPortOrDie()
-	go server(port)
-	time.Sleep(time.Second * 2)
-	err = client(list.Items[0].Status.PodIP, port)
-	if err != nil {
-		t.Error(err)
+	time.Sleep(time.Second * 5)
+	log.Infof("dail udp to ip: %s", ip)
+	for i := 0; i < 10; i++ {
+		err = client(ip, port)
+		if err == nil {
+			return
+		}
+		time.Sleep(time.Second * 2)
 	}
+	t.Errorf("can not access pod ip: %s", ip)
 }
 
 func client(ip string, port int) error {
-	socket, err := net.DialUDP("udp4", nil, &net.UDPAddr{
+	udpConn, err := net.DialUDP("udp4", nil, &net.UDPAddr{
 		IP:   net.ParseIP(ip),
 		Port: port,
 	})
@@ -116,11 +129,11 @@ func client(ip string, port int) error {
 		fmt.Println("连接失败!", err)
 		return err
 	}
-	defer socket.Close()
+	defer udpConn.Close()
 
 	// 发送数据
-	senddata := []byte("hello server!")
-	_, err = socket.Write(senddata)
+	sendData := []byte("hello server!")
+	_, err = udpConn.Write(sendData)
 	if err != nil {
 		fmt.Println("发送数据失败!", err)
 		return err
@@ -128,7 +141,7 @@ func client(ip string, port int) error {
 
 	// 接收数据
 	data := make([]byte, 4096)
-	read, remoteAddr, err := socket.ReadFromUDP(data)
+	read, remoteAddr, err := udpConn.ReadFromUDP(data)
 	if err != nil {
 		fmt.Println("读取数据失败!", err)
 		return err
@@ -140,18 +153,18 @@ func client(ip string, port int) error {
 
 func server(port int) {
 	// 创建监听
-	socket, err := net.ListenUDP("udp4", &net.UDPAddr{
+	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
 		IP:   net.IPv4(0, 0, 0, 0),
 		Port: port,
 	})
 	if err != nil {
 		return
 	}
-	defer socket.Close()
+	defer udpConn.Close()
 
 	for {
 		data := make([]byte, 4096)
-		read, remoteAddr, err := socket.ReadFromUDP(data)
+		read, remoteAddr, err := udpConn.ReadFromUDP(data)
 		if err != nil {
 			fmt.Println("读取数据失败!", err)
 			continue
@@ -159,8 +172,8 @@ func server(port int) {
 		fmt.Println(read, remoteAddr)
 		fmt.Printf("%s\n\n", data[0:read])
 
-		senddata := []byte("hello client!")
-		_, err = socket.WriteToUDP(senddata, remoteAddr)
+		sendData := []byte("hello client!")
+		_, err = udpConn.WriteToUDP(sendData, remoteAddr)
 		if err != nil {
 			fmt.Println("发送数据失败!", err)
 			return
@@ -174,7 +187,7 @@ func init() {
 	ctx, cancelFunc = context.WithCancel(context.TODO())
 	timeoutCtx, timeoutFunc := context.WithTimeout(ctx, time.Minute*10)
 
-	command := exec.CommandContext(ctx, "kubevpn", "connect", "--debug", "--workloads", "deployments/reviews-v1")
+	command := exec.CommandContext(ctx, "kubevpn", "connect", "--workloads", "deployments/reviews-v1")
 	go util.RunWithRollingOutWithChecker(command, func(log string) bool {
 		ok := strings.Contains(log, "dns service ok")
 		if ok {
