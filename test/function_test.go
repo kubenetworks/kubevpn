@@ -63,19 +63,18 @@ func UDP(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	go func() {
-		server()
-	}()
+	port := util.GetAvailableUDPPortOrDie()
+	go server(port)
 	time.Sleep(time.Second * 2)
-	if err = client(list.Items[0].Status.PodIP); err != nil {
+	if err = client(list.Items[0].Status.PodIP, port); err != nil {
 		t.Error(err)
 	}
 }
 
-func client(serviceIP string) error {
+func client(ip string, port int) error {
 	socket, err := net.DialUDP("udp4", nil, &net.UDPAddr{
-		IP:   net.ParseIP(serviceIP),
-		Port: 55555,
+		IP:   net.ParseIP(ip),
+		Port: port,
 	})
 	if err != nil {
 		fmt.Println("连接失败!", err)
@@ -103,11 +102,11 @@ func client(serviceIP string) error {
 	return nil
 }
 
-func server() {
+func server(port int) {
 	// 创建监听
 	socket, err := net.ListenUDP("udp4", &net.UDPAddr{
 		IP:   net.IPv4(0, 0, 0, 0),
-		Port: 55555,
+		Port: port,
 	})
 	if err != nil {
 		return
