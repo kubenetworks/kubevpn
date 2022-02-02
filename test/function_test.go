@@ -32,6 +32,7 @@ var (
 
 func TestFunctions(t *testing.T) {
 	t.Cleanup(cancelFunc)
+	t.Parallel()
 	t.Run(runtime.FuncForPC(reflect.ValueOf(PingPodIP).Pointer()).Name(), PingPodIP)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(UDP).Pointer()).Name(), UDP)
 }
