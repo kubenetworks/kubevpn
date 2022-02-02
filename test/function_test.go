@@ -14,10 +14,12 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"net"
+	"net/http"
 	"os/exec"
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -33,40 +35,74 @@ var (
 func TestFunctions(t *testing.T) {
 	t.Cleanup(cancelFunc)
 	t.Parallel()
-	t.Run(runtime.FuncForPC(reflect.ValueOf(PingPodIP).Pointer()).Name(), PingPodIP)
-	t.Run(runtime.FuncForPC(reflect.ValueOf(UDP).Pointer()).Name(), UDP)
+	t.Run(runtime.FuncForPC(reflect.ValueOf(pingPodIP).Pointer()).Name(), pingPodIP)
+	t.Run(runtime.FuncForPC(reflect.ValueOf(curlUDP).Pointer()).Name(), curlUDP)
+	t.Run(runtime.FuncForPC(reflect.ValueOf(healthCheck).Pointer()).Name(), healthCheck)
 }
 
-func PingPodIP(t *testing.T) {
+func pingPodIP(t *testing.T) {
 	ctx, f := context.WithTimeout(context.TODO(), time.Second*60)
 	defer f()
 	list, err := clientset.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{})
 	if err != nil {
 		t.Error(err)
 	}
+	var wg = &sync.WaitGroup{}
 	for _, item := range list.Items {
 		if item.Status.Phase == corev1.PodRunning {
-			command := exec.Command("ping", "-c", "4", item.Status.PodIP)
-			if err = command.Run(); err == nil {
-				if !command.ProcessState.Success() {
-					t.Errorf("can not ping ip: %s of pod: %s", item.Status.PodIP, item.Name)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				command := exec.Command("ping", "-c", "4", item.Status.PodIP)
+				if err = command.Run(); err == nil {
+					if !command.ProcessState.Success() {
+						t.Errorf("can not ping ip: %s of pod: %s", item.Status.PodIP, item.Name)
+					}
 				}
-			}
+			}()
 		}
+	}
+	wg.Wait()
+}
+
+func healthCheck(t *testing.T) {
+	list, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), v1.ListOptions{
+		LabelSelector: fields.OneTermEqualSelector("app", "productpage").String(),
+	})
+	if err != nil {
+		t.Error(err)
+	}
+	if len(list.Items) == 0 {
+		t.Error("can not found pods of product page")
+	}
+	endpoint := fmt.Sprintf("http://%s/health", list.Items[0].Status.PodIP)
+	req, _ := http.NewRequest("GET", endpoint, nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	if res == nil || res.StatusCode != 200 {
+		t.Errorf("health check not pass")
+		return
 	}
 }
 
-func UDP(t *testing.T) {
+func curlUDP(t *testing.T) {
 	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", "reviews").String(),
 	})
 	if err != nil {
 		t.Error(err)
 	}
+	if len(list.Items) == 0 {
+		t.Errorf("can not found pods for service reviews")
+	}
 	port := util.GetAvailableUDPPortOrDie()
 	go server(port)
 	time.Sleep(time.Second * 2)
-	if err = client(list.Items[0].Status.PodIP, port); err != nil {
+	err = client(list.Items[0].Status.PodIP, port)
+	if err != nil {
 		t.Error(err)
 	}
 }
