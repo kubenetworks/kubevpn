@@ -136,17 +136,17 @@ func init() {
 	initClient()
 	var ctx context.Context
 	ctx, cancelFunc = context.WithCancel(context.TODO())
+	timeoutCtx, timeoutFunc := context.WithTimeout(ctx, time.Minute*10)
 
-	command := exec.CommandContext(ctx, "kubevpn", "connect", "--workloads", "deployments/reviews")
-	c := make(chan struct{}, 1)
+	command := exec.CommandContext(ctx, "kubevpn", "connect", "--workloads", "deployments/reviews-v1")
 	go util.RunWithRollingOutWithChecker(command, func(log string) bool {
 		ok := strings.Contains(log, "dns service ok")
 		if ok {
-			c <- struct{}{}
+			timeoutFunc()
 		}
 		return ok
 	})
-	<-c
+	<-timeoutCtx.Done()
 }
 
 func initClient() {

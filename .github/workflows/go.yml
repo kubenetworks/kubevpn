@@ -22,9 +22,6 @@ jobs:
       timeout-minutes: 30
       uses: medyagh/setup-minikube@master
 
-    - name: Sleep 180 seconds waiting for minikube ready
-      run: sleep 180
-
     - name: Kubernetes info
       run: |
         kubectl cluster-info
@@ -36,6 +33,9 @@ jobs:
 
     - name: Build
       run: make kubevpn-linux
+
+    - name: Wait for pods reviews to be ready
+      run: kubectl wait pods -l app=reviews --for=condition=Ready --timeout=600s
 
     - name: Test
       run: go test -v ./test/
