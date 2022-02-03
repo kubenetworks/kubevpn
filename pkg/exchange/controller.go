@@ -9,17 +9,15 @@ import (
 const VPN = "vpn"
 
 func RemoveContainer(spec *v1.PodSpec) {
-	var c []v1.Container
-	for _, container := range spec.Containers {
-		if container.Name != VPN {
-			c = append(c, container)
+	for i := 0; i < len(spec.Containers); i++ {
+		if spec.Containers[i].Name == VPN {
+			spec.Containers = append(spec.Containers[:i], spec.Containers[i+1:]...)
 		}
 	}
-	spec.Containers = c
 }
 
 func AddContainer(spec *v1.PodSpec, c util.PodRouteConfig) {
-	// remove vpn container is already exist
+	// remove vpn container if already exist
 	for i := 0; i < len(spec.Containers); i++ {
 		if spec.Containers[i].Name == VPN {
 			spec.Containers = append(spec.Containers[:i], spec.Containers[i+1:]...)

@@ -14,7 +14,32 @@ const (
 	EnvoyConfig  = "envoy-config"
 )
 
+func RemoveContainers(spec *v1.PodTemplateSpec) {
+	for i := 0; i < len(spec.Spec.Volumes); i++ {
+		if spec.Spec.Volumes[i].Name == EnvoyConfig {
+			spec.Spec.Volumes = append(spec.Spec.Volumes[:i], spec.Spec.Volumes[i+1:]...)
+		}
+	}
+	for i := 0; i < len(spec.Spec.Containers); i++ {
+		if sets.NewString(EnvoyProxy, ControlPlane, VPN).Has(spec.Spec.Containers[i].Name) {
+			spec.Spec.Containers = append(spec.Spec.Containers[:i], spec.Spec.Containers[i+1:]...)
+		}
+	}
+}
+
 func AddMeshContainer(spec *v1.PodTemplateSpec, configMapName string, c util.PodRouteConfig) {
+	// remove volume envoyConfig if already exist
+	for i := 0; i < len(spec.Spec.Volumes); i++ {
+		if spec.Spec.Volumes[i].Name == EnvoyConfig {
+			spec.Spec.Volumes = append(spec.Spec.Volumes[:i], spec.Spec.Volumes[i+1:]...)
+		}
+	}
+	// remove envoy proxy containers if already exist
+	for i := 0; i < len(spec.Spec.Containers); i++ {
+		if sets.NewString(EnvoyProxy, ControlPlane, VPN).Has(spec.Spec.Containers[i].Name) {
+			spec.Spec.Containers = append(spec.Spec.Containers[:i], spec.Spec.Containers[i+1:]...)
+		}
+	}
 	zero := int64(0)
 	t := true
 	spec.Spec.Volumes = append(spec.Spec.Volumes, v1.Volume{
@@ -79,7 +104,7 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, configMapName string, c util.Pod
 				"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 ! -s 127.0.0.1 ! -d " + util.CIDR.String() + " -j MASQUERADE;" +
 				"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 ! -s 127.0.0.1 ! -d " + util.CIDR.String() + " -j DNAT --to 127.0.0.1:15006;" +
 				"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 ! -s 127.0.0.1 ! -d " + util.CIDR.String() + " -j MASQUERADE;" +
-				"envoy -c /etc/envoy/base-envoy.yaml",
+				"envoy -l debug -c /etc/envoy/base-envoy.yaml",
 		},
 		SecurityContext: &v1.SecurityContext{
 			RunAsUser:  &zero,
@@ -120,21 +145,4 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, configMapName string, c util.Pod
 		},
 		ImagePullPolicy: v1.PullAlways,
 	})
-}
-
-func RemoveContainers(spec *v1.PodTemplateSpec) {
-	var volumeC []v1.Volume
-	for _, volume := range spec.Spec.Volumes {
-		if volume.Name != EnvoyConfig {
-			volumeC = append(volumeC, volume)
-		}
-	}
-	spec.Spec.Volumes = volumeC
-	var containerC []v1.Container
-	for _, container := range spec.Spec.Containers {
-		if !sets.NewString(EnvoyProxy, ControlPlane, VPN).Has(container.Name) {
-			containerC = append(containerC, container)
-		}
-	}
-	spec.Spec.Containers = containerC
 }
