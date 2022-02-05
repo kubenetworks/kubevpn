@@ -106,18 +106,9 @@ jobs:
       - run: |
           docker version
           docker run --rm hello-world
-      - uses: AbsaOSS/k3d-action@v2
-        name: "Create Single Cluster"
-        with:
-          cluster-name: "test-cluster-1"
-          args: >-
-            -p "8083:80@agent:0:direct"
-            -p "8443:443@agent:0:direct"
-            -p "5053:53/udp@agent:0:direct"
-            --agents 3
-            --no-lb
-            --image docker.io/rancher/k3s:v1.20.4-k3s1
-            --k3s-arg "--no-deploy=traefik,servicelb,metrics-server@server:*"
+      - run: |
+          choco install minikube
+          minikube start
       - name: Kubernetes info
         run: |
           kubectl cluster-info
