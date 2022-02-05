@@ -104,7 +104,6 @@ jobs:
           go-version: 1.17
       - uses: docker-practice/actions-setup-docker@master
       - run: |
-          set -x
           docker version
           docker run --rm hello-world
       - uses: AbsaOSS/k3d-action@v2
