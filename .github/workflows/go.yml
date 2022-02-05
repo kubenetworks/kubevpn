@@ -44,42 +44,42 @@ jobs:
       - name: Test
         run: go test -v ./test/
 
-  macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v2
-
-      - name: Set up Go
-        uses: actions/setup-go@v2
-        with:
-          go-version: 1.17
-      - name: Setup Minikube
-        timeout-minutes: 30
-        uses: opsgang/ga-setup-minikube@v0.1.2
-
-      - name: Kubernetes info
-        run: |
-          minikube config set vm-driver docker
-          minikube config set kubernetes-version v1.15.1
-          minikube start
-          minikube update-context
-          kubectl cluster-info
-          cat ~/.kube/config
-          kubectl get pods -n kube-system -o wide
-      - name: Install demo bookinfo
-        run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
-
-      - name: Build
-        run: make kubevpn-macos
-
-      - name: Wait for pods reviews to be ready
-        run: |
-          kubectl wait pods -l app=reviews --for=condition=Ready --timeout=600s
-          kubectl get all -o wide
-          kubectl get nodes -o yaml
-          ifconfig
-          route -n
-
-      - name: Test
-        run: go test -v ./test/
-
+#  macos:
+#    runs-on: macos-latest
+#    steps:
+#      - uses: actions/checkout@v2
+#
+#      - name: Set up Go
+#        uses: actions/setup-go@v2
+#        with:
+#          go-version: 1.17
+#      - name: Setup Minikube
+#        timeout-minutes: 30
+#        uses: opsgang/ga-setup-minikube@v0.1.2
+#
+#      - name: Kubernetes info
+#        run: |
+#          minikube config set vm-driver docker
+#          minikube config set kubernetes-version v1.15.1
+#          minikube start
+#          minikube update-context
+#          kubectl cluster-info
+#          cat ~/.kube/config
+#          kubectl get pods -n kube-system -o wide
+#      - name: Install demo bookinfo
+#        run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
+#
+#      - name: Build
+#        run: make kubevpn-macos
+#
+#      - name: Wait for pods reviews to be ready
+#        run: |
+#          kubectl wait pods -l app=reviews --for=condition=Ready --timeout=600s
+#          kubectl get all -o wide
+#          kubectl get nodes -o yaml
+#          ifconfig
+#          route -n
+#
+#      - name: Test
+#        run: go test -v ./test/
+#
