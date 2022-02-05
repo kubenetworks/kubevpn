@@ -36,6 +36,8 @@ jobs:
         run: |
           kubectl wait pods -l app=reviews --for=condition=Ready --timeout=600s
           kubectl get all -o wide
+          ifconfig
+          route -nr
 
       - name: Test
         run: go test -v ./test/
