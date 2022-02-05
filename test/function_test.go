@@ -209,7 +209,7 @@ func init() {
 	initClient()
 	var ctx context.Context
 	ctx, cancelFunc = context.WithCancel(context.TODO())
-	timeoutCtx, timeoutFunc := context.WithTimeout(ctx, time.Minute*10)
+	childCtx, timeoutFunc := context.WithTimeout(ctx, time.Minute*10)
 
 	cmd := exec.CommandContext(ctx, "kubevpn", "connect", "--workloads", "deployments/reviews")
 	go util.RunWithRollingOutWithChecker(cmd, func(log string) bool {
@@ -219,7 +219,7 @@ func init() {
 		}
 		return ok
 	})
-	<-timeoutCtx.Done()
+	<-childCtx.Done()
 }
 
 func initClient() {
