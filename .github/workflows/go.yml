@@ -99,15 +99,11 @@ jobs:
       - run: |
           docker version
           docker run --rm hello-world
-      - uses: Amadevus/pwsh-script@v2
-        id: script
-        with:
-          script: |
-            choco install minikube
-            minikube start --driver=docker
-            minikube kubectl -- get po -A
-            choco install make
-            dir
+      - run: |
+          choco install minikube
+          minikube start --driver=docker
+          minikube kubectl -- get po -A
+          choco install make
       - name: Kubernetes info
         run: |
           kubectl cluster-info dump
