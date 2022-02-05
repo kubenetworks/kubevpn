@@ -53,12 +53,18 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.17
-      - name: Setup K3s
-        timeout-minutes: 30
-        uses: debianmaster/actions-k3s@master
-        id: k3s
+      - uses: AbsaOSS/k3d-action@v2
+        name: "Create Single Cluster"
         with:
-          version: 'latest'
+          cluster-name: "test-cluster-1"
+          args: >-
+            -p "8083:80@agent:0:direct"
+            -p "8443:443@agent:0:direct"
+            -p "5053:53/udp@agent:0:direct"
+            --agents 3
+            --no-lb
+            --image docker.io/rancher/k3s:v1.20.4-k3s1
+            --k3s-arg "--no-deploy=traefik,servicelb,metrics-server@server:*"
 
       - name: Kubernetes info
         run: |
@@ -91,13 +97,18 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.17
-      - name: Setup K3s
-        timeout-minutes: 30
-        uses: debianmaster/actions-k3s@master
-        id: k3s
+      - uses: AbsaOSS/k3d-action@v2
+        name: "Create Single Cluster"
         with:
-          version: 'latest'
-
+          cluster-name: "test-cluster-1"
+          args: >-
+            -p "8083:80@agent:0:direct"
+            -p "8443:443@agent:0:direct"
+            -p "5053:53/udp@agent:0:direct"
+            --agents 3
+            --no-lb
+            --image docker.io/rancher/k3s:v1.20.4-k3s1
+            --k3s-arg "--no-deploy=traefik,servicelb,metrics-server@server:*"
       - name: Kubernetes info
         run: |
           kubectl cluster-info
