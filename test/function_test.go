@@ -34,11 +34,13 @@ var (
 
 func TestFunctions(t *testing.T) {
 	t.Cleanup(cancelFunc)
-	//t.Parallel()
+	t.Parallel()
 	t.Run(runtime.FuncForPC(reflect.ValueOf(pingPodIP).Pointer()).Name(), pingPodIP)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(dialUDP).Pointer()).Name(), dialUDP)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(healthCheckPod).Pointer()).Name(), healthCheckPod)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(healthCheckService).Pointer()).Name(), healthCheckService)
+	t.Run(runtime.FuncForPC(reflect.ValueOf(shortDomain).Pointer()).Name(), shortDomain)
+	t.Run(runtime.FuncForPC(reflect.ValueOf(fullDomain).Pointer()).Name(), fullDomain)
 }
 
 func pingPodIP(t *testing.T) {
@@ -112,6 +114,54 @@ func healthCheckService(t *testing.T) {
 	}
 }
 
+func shortDomain(t *testing.T) {
+	var app = "productpage"
+	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), v1.ListOptions{
+		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
+	})
+	if err != nil {
+		t.Error(err)
+	}
+	if len(serviceList.Items) == 0 {
+		t.Errorf("can not found pods of %s", app)
+	}
+	endpoint := fmt.Sprintf("http://%s:%v/health", app, serviceList.Items[0].Spec.Ports[0].Port)
+	req, _ := http.NewRequest("GET", endpoint, nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	if res == nil || res.StatusCode != 200 {
+		t.Errorf("health check not pass")
+		return
+	}
+}
+
+func fullDomain(t *testing.T) {
+	var app = "productpage"
+	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), v1.ListOptions{
+		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
+	})
+	if err != nil {
+		t.Error(err)
+	}
+	if len(serviceList.Items) == 0 {
+		t.Errorf("can not found pods of %s", app)
+	}
+	endpoint := fmt.Sprintf("http://%s:%v/health", fmt.Sprintf("%s.%s.svc.cluster.local", app, namespace), serviceList.Items[0].Spec.Ports[0].Port)
+	req, _ := http.NewRequest("GET", endpoint, nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	if res == nil || res.StatusCode != 200 {
+		t.Errorf("health check not pass")
+		return
+	}
+}
+
 func dialUDP(t *testing.T) {
 	port := util.GetAvailableUDPPortOrDie()
 	go server(port)
@@ -134,14 +184,10 @@ func dialUDP(t *testing.T) {
 	}
 	time.Sleep(time.Second * 5)
 	log.Infof("dail udp to ip: %s", ip)
-	for i := 0; i < 10; i++ {
-		err = client(ip, port)
-		if err == nil {
-			return
-		}
-		time.Sleep(time.Second * 2)
+	err = client(ip, port)
+	if err != nil {
+		t.Errorf("can not access pod ip: %s, port: %v", ip, port)
 	}
-	t.Errorf("can not access pod ip: %s", ip)
 }
 
 func client(ip string, port int) error {
@@ -206,8 +252,6 @@ func server(port int) {
 }
 
 func init() {
-	output, err := exec.Command("route", "-n").CombinedOutput()
-	fmt.Println(string(output), err)
 	initClient()
 	var ctx context.Context
 	ctx, cancelFunc = context.WithCancel(context.TODO())
@@ -222,8 +266,6 @@ func init() {
 		return ok
 	})
 	<-childCtx.Done()
-	output, err = exec.Command("route", "-n").CombinedOutput()
-	fmt.Println(string(output), err)
 }
 
 func initClient() {
