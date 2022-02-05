@@ -29,7 +29,7 @@ jobs:
         cat ~/.kube/config
         ls -lah ~/.kube/config
     - name: Install demo bookinfo
-      run: kubectl apply -l version!=v2,version!=v3 -f https://raw.githubusercontent.com/istio/istio/release-1.12/samples/bookinfo/platform/kube/bookinfo.yaml
+      run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
 
     - name: Build
       run: make kubevpn-linux

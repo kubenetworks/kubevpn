@@ -36,8 +36,9 @@ func TestFunctions(t *testing.T) {
 	t.Cleanup(cancelFunc)
 	//t.Parallel()
 	t.Run(runtime.FuncForPC(reflect.ValueOf(pingPodIP).Pointer()).Name(), pingPodIP)
-	t.Run(runtime.FuncForPC(reflect.ValueOf(dialUDP).Pointer()).Name(), dialUDP)
-	t.Run(runtime.FuncForPC(reflect.ValueOf(healthCheck).Pointer()).Name(), healthCheck)
+	//t.Run(runtime.FuncForPC(reflect.ValueOf(dialUDP).Pointer()).Name(), dialUDP)
+	t.Run(runtime.FuncForPC(reflect.ValueOf(healthCheckPod).Pointer()).Name(), healthCheckPod)
+	t.Run(runtime.FuncForPC(reflect.ValueOf(healthCheckService).Pointer()).Name(), healthCheckService)
 }
 
 func pingPodIP(t *testing.T) {
@@ -65,17 +66,40 @@ func pingPodIP(t *testing.T) {
 	wg.Wait()
 }
 
-func healthCheck(t *testing.T) {
-	list, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), v1.ListOptions{
+func healthCheckPod(t *testing.T) {
+	podList, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", "productpage").String(),
 	})
 	if err != nil {
 		t.Error(err)
 	}
-	if len(list.Items) == 0 {
+	if len(podList.Items) == 0 {
 		t.Error("can not found pods of product page")
 	}
-	endpoint := fmt.Sprintf("http://%s/health", list.Items[0].Status.PodIP)
+	endpoint := fmt.Sprintf("http://%s:%v/health", podList.Items[0].Status.PodIP, podList.Items[0].Spec.Containers[0].Ports[0].ContainerPort)
+	req, _ := http.NewRequest("GET", endpoint, nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	if res == nil || res.StatusCode != 200 {
+		t.Errorf("health check not pass")
+		return
+	}
+}
+
+func healthCheckService(t *testing.T) {
+	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), v1.ListOptions{
+		LabelSelector: fields.OneTermEqualSelector("app", "productpage").String(),
+	})
+	if err != nil {
+		t.Error(err)
+	}
+	if len(serviceList.Items) == 0 {
+		t.Error("can not found pods of product page")
+	}
+	endpoint := fmt.Sprintf("http://%s:%v/health", serviceList.Items[0].Spec.ClusterIP, serviceList.Items[0].Spec.Ports[0].Port)
 	req, _ := http.NewRequest("GET", endpoint, nil)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -187,8 +211,8 @@ func init() {
 	ctx, cancelFunc = context.WithCancel(context.TODO())
 	timeoutCtx, timeoutFunc := context.WithTimeout(ctx, time.Minute*10)
 
-	command := exec.CommandContext(ctx, "kubevpn", "connect", "--workloads", "deployments/reviews-v1")
-	go util.RunWithRollingOutWithChecker(command, func(log string) bool {
+	cmd := exec.CommandContext(ctx, "kubevpn", "connect", "--workloads", "deployments/reviews")
+	go util.RunWithRollingOutWithChecker(cmd, func(log string) bool {
 		ok := strings.Contains(log, "dns service ok")
 		if ok {
 			timeoutFunc()
