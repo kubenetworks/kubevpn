@@ -1,6 +1,6 @@
 # KubeVPN
 
-[English](README.md) | [中文](README_ZH.md)
+[English](README.md) | [中文](README_ZH.md) | [维基](https://github.com/wencaiwulue/kubevpn/wiki/%E6%9E%B6%E6%9E%84)
 
 一个本地连接云端 kubernetes 网络的工具，可以在本地直接访问远端集群的服务。也可以在远端集群访问到本地服务，便于调试及开发
 
