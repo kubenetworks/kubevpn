@@ -30,7 +30,7 @@ go install github.com/wencaiwulue/kubevpn/cmd/kubevpn@latest
 ### Install bookinfo as demo application
 
 ```shell
-kubectl apply -f samples/bookinfo/platform/kube/bookinfo.yaml
+kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
 ```
 
 ## Functions

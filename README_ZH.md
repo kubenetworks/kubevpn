@@ -25,6 +25,12 @@ go build github.com/wencaiwulue/kubevpn/cmd/kubevpn
 ```shell
 go install github.com/wencaiwulue/kubevpn/cmd/kubevpn@latest
 ```
+### 安装 bookinfo 作为 demo 应用
+
+```shell
+kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
+```
+
 
 ## 功能
 
