@@ -53,6 +53,11 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.17
+      - uses: docker-practice/actions-setup-docker@master
+      - run: |
+          set -x
+          docker version
+          docker run --rm hello-world
       - uses: AbsaOSS/k3d-action@v2
         name: "Create Single Cluster"
         with:
@@ -97,6 +102,11 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.17
+      - uses: docker-practice/actions-setup-docker@master
+      - run: |
+          set -x
+          docker version
+          docker run --rm hello-world
       - uses: AbsaOSS/k3d-action@v2
         name: "Create Single Cluster"
         with:
