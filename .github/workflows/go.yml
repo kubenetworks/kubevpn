@@ -85,41 +85,41 @@ jobs:
       - name: Test
         run: go test -v ./test/
 
-  windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v2
-
-      - name: Set up Go
-        uses: actions/setup-go@v2
-        with:
-          go-version: 1.17
-      - uses: docker-practice/actions-setup-docker@master
-      - run: |
-          docker version
-          docker run --rm hello-world
-      - run: |
-          winget install minikube
-          minikube start --driver=docker
-          minikube kubectl -- get po -A
-          choco install make
-      - name: Kubernetes info
-        run: |
-          kubectl cluster-info dump
-          kubectl get pods -n kube-system -o wide
-      - name: Install demo bookinfo
-        run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
-
-      - name: Build
-        run: make kubevpn-windows
-
-      - name: Wait for pods reviews to be ready
-        run: |
-          kubectl wait pods -l app=reviews --for=condition=Ready --timeout=600s
-          kubectl get all -o wide
-          kubectl get nodes -o yaml
-          ipconfig
-
-      - name: Test
-        run: go test -v ./test/
+#  windows:
+#    runs-on: windows-latest
+#    steps:
+#      - uses: actions/checkout@v2
+#
+#      - name: Set up Go
+#        uses: actions/setup-go@v2
+#        with:
+#          go-version: 1.17
+#      - uses: docker-practice/actions-setup-docker@master
+#      - run: |
+#          docker version
+#          docker run --rm hello-world
+#      - run: |
+#          winget install minikube
+#          minikube start --driver=docker
+#          minikube kubectl -- get po -A
+#          choco install make
+#      - name: Kubernetes info
+#        run: |
+#          kubectl cluster-info dump
+#          kubectl get pods -n kube-system -o wide
+#      - name: Install demo bookinfo
+#        run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
+#
+#      - name: Build
+#        run: make kubevpn-windows
+#
+#      - name: Wait for pods reviews to be ready
+#        run: |
+#          kubectl wait pods -l app=reviews --for=condition=Ready --timeout=600s
+#          kubectl get all -o wide
+#          kubectl get nodes -o yaml
+#          ipconfig
+#
+#      - name: Test
+#        run: go test -v ./test/
 
