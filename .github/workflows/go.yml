@@ -109,6 +109,7 @@ jobs:
       - run: |
           choco install minikube
           minikube start
+          choco install make
       - name: Kubernetes info
         run: |
           kubectl cluster-info
@@ -118,7 +119,7 @@ jobs:
         run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
 
       - name: Build
-        run: make kubevpn-macos
+        run: make kubevpn-windows
 
       - name: Wait for pods reviews to be ready
         run: |
