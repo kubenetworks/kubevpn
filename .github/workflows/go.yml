@@ -25,6 +25,7 @@ jobs:
       - name: Kubernetes info
         run: |
           kubectl cluster-info
+          cat ~/.kube/config
           kubectl get pods -n kube-system -o wide
       - name: Install demo bookinfo
         run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
@@ -36,6 +37,7 @@ jobs:
         run: |
           kubectl wait pods -l app=reviews --for=condition=Ready --timeout=600s
           kubectl get all -o wide
+          kubectl get nodes -o yaml
           ifconfig
           route -n
 

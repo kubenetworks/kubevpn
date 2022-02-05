@@ -275,8 +275,17 @@ func getCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, e
 	if serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, service := range serviceList.Items {
 			if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
-				mask := net.CIDRMask(16, 32)
-				CIDRList = append(CIDRList, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
+				var contains bool
+				for _, CIDR := range CIDRList {
+					if CIDR.Contains(ip) {
+						contains = true
+						break
+					}
+				}
+				if !contains {
+					mask := net.CIDRMask(16, 32)
+					CIDRList = append(CIDRList, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
+				}
 			}
 		}
 	}
