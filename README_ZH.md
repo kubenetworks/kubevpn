@@ -219,4 +219,5 @@ Hello world!%
 - Linux
 - Windows
 
-Windows 下需要安装 ```PowerShell```
+Windows
+下需要安装 [PowerShell](https://docs.microsoft.com/zh-cn/powershell/scripting/install/installing-powershell-on-windows?view=powershell-7.2)
