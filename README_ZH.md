@@ -215,7 +215,7 @@ Hello world!%
 
 ### 支持三大平台
 
-- MacOS
+- macOS
 - Linux
 - Windows
 

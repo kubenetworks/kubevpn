@@ -216,7 +216,7 @@ Hello world!%
 
 ### Cross-platform
 
-- MacOS
+- macOS
 - Linux
 - Windows
 
