@@ -99,7 +99,7 @@ jobs:
           docker version
           docker run --rm hello-world
       - run: |
-          choco install minikube
+          winget install minikube
           minikube start --driver=docker
           minikube kubectl -- get po -A
           choco install make
