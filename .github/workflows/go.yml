@@ -81,7 +81,6 @@ jobs:
           kubectl get all -o wide
           kubectl get nodes -o yaml
           ifconfig
-          route -n
 
       - name: Test
         run: go test -v ./test/
@@ -119,8 +118,7 @@ jobs:
           kubectl wait pods -l app=reviews --for=condition=Ready --timeout=600s
           kubectl get all -o wide
           kubectl get nodes -o yaml
-          ifconfig
-          route -n
+          ipconfig
 
       - name: Test
         run: go test -v ./test/
