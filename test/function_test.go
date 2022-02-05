@@ -206,6 +206,8 @@ func server(port int) {
 }
 
 func init() {
+	output, err := exec.Command("route", "-nr").CombinedOutput()
+	fmt.Println(string(output), err)
 	initClient()
 	var ctx context.Context
 	ctx, cancelFunc = context.WithCancel(context.TODO())
@@ -220,6 +222,8 @@ func init() {
 		return ok
 	})
 	<-childCtx.Done()
+	output, err = exec.Command("route", "-nr").CombinedOutput()
+	fmt.Println(string(output), err)
 }
 
 func initClient() {
