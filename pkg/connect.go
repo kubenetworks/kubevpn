@@ -260,12 +260,19 @@ func getCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, e
 			}
 		}
 	}
-	// if node spec can not find pod CIDR, try to get it from pod IP
-	if len(CIDRList) == 0 {
-		if podList, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{}); err == nil {
-			for _, pod := range podList.Items {
-				if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
-					mask := net.CIDRMask(16, 32)
+	// if node spec can not contain pod IP
+	if podList, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{}); err == nil {
+		for _, pod := range podList.Items {
+			if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
+				var contains bool
+				for _, CIDR := range CIDRList {
+					if CIDR.Contains(ip) {
+						contains = true
+						break
+					}
+				}
+				if !contains {
+					mask := net.CIDRMask(24, 32)
 					CIDRList = append(CIDRList, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
 				}
 			}
