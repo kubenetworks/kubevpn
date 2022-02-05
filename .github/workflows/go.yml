@@ -58,19 +58,11 @@ jobs:
           set -x
           docker version
           docker run --rm hello-world
-      - uses: AbsaOSS/k3d-action@v2
-        name: "Create Single Cluster"
-        with:
-          cluster-name: "test-cluster-1"
-          args: >-
-            -p "8083:80@agent:0:direct"
-            -p "8443:443@agent:0:direct"
-            -p "5053:53/udp@agent:0:direct"
-            --agents 3
-            --no-lb
-            --image docker.io/rancher/k3s:v1.20.4-k3s1
-            --k3s-arg "--no-deploy=traefik,servicelb,metrics-server@server:*"
-
+      - run: |
+          brew install minikube
+          minikube start --driver=docker
+          kubectl get po -A
+          minikube kubectl -- get po -A
       - name: Kubernetes info
         run: |
           kubectl cluster-info
@@ -109,12 +101,12 @@ jobs:
       - run: |
           choco install minikube
           minikube start --driver=docker
+          minikube kubectl -- get po -A
           choco install make
           dir
       - name: Kubernetes info
         run: |
           kubectl cluster-info dump
-          cat ~/.kube/config
           kubectl get pods -n kube-system -o wide
       - name: Install demo bookinfo
         run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
