@@ -103,9 +103,8 @@ jobs:
         id: script
         with:
           script: |
-            Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All
             choco install minikube
-            minikube start --driver=hyperv
+            minikube start --driver=docker
             minikube kubectl -- get po -A
             choco install make
             dir
