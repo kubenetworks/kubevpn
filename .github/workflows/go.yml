@@ -53,11 +53,11 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.17
-#      - uses: docker-practice/actions-setup-docker@master
-#      - run: |
-#          set -x
-#          docker version
-#          docker run --rm hello-world
+      #      - uses: docker-practice/actions-setup-docker@master
+      #      - run: |
+      #          set -x
+      #          docker version
+      #          docker run --rm hello-world
       - run: |
           brew install minikube
           minikube start --driver=docker
@@ -98,14 +98,16 @@ jobs:
       - run: |
           docker version
           docker run --rm hello-world
-      - run: |
-          Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All
-          choco install minikube
-          minikube start --driver=hyperv
-          minikube kubectl -- get po -A
-          choco install make
-          dir
-        shell: bash
+      - uses: Amadevus/pwsh-script@v2
+        id: script
+        with:
+          script: |
+            Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All
+            choco install minikube
+            minikube start --driver=hyperv
+            minikube kubectl -- get po -A
+            choco install make
+            dir
       - name: Kubernetes info
         run: |
           kubectl cluster-info dump
