@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: |
+            Changes in this Release
+            - First Change
+            - Second Change
+          draft: false
+          prerelease: false
+
+      - name: Collect Release Info
+        run: |
+          echo "${{ steps.create_release.outputs.upload_url }}" >> UPLOAD_URL
+          echo ${{ env.RELEASE_VERSION }} >> RELEASE_VERSION
+          git reset --hard
+
+      - name: Upload RELEASE_VERSION
+        uses: actions/upload-artifact@v2
+        with:
+          name: RELEASE_VERSION
+          path: RELEASE_VERSION
+
+      - name: Upload UPLOAD_URL
+        uses: actions/upload-artifact@v2
+        with:
+          name: UPLOAD_URL
+          path: UPLOAD_URL
+      - name: Build kubevpn-linux
+        run: make kubevpn-linux
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: kubevpn
+          asset_name: kubevpn-linux-amd64
+          asset_content_type: application/octet-stream
+
+      - name: Build kubevpn-macos
+        run: make kubevpn-macos
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: kubevpn
+          asset_name: kubevpn-darwin-amd64
+          asset_content_type: application/octet-stream
+
+      - name: Build kubevpn-windows
+        run: make kubevpn-windows
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: kubevpn.exe
+          asset_name: kubevpn-windows-amd64.exe
+          asset_content_type: application/octet-stream
