@@ -125,7 +125,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 				}
 				phase = podT.Status.Phase
 			}
-		case <-time.Tick(time.Minute * 5):
+		case <-time.Tick(time.Minute * 10):
 			return nil, errors.New(fmt.Sprintf("wait pod %s to be ready timeout", util.TrafficManager))
 		}
 	}
