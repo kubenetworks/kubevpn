@@ -245,18 +245,18 @@ func getCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, e
 	var CIDRList []*net.IPNet
 	// get pod CIDR from node spec
 	if nodeList, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{}); err == nil {
+		var podCIDRs = sets.NewString()
 		for _, node := range nodeList.Items {
-			var podCIDRs []string
 			if node.Spec.PodCIDRs != nil {
-				podCIDRs = append(podCIDRs, node.Spec.PodCIDRs...)
+				podCIDRs.Insert(node.Spec.PodCIDRs...)
 			}
 			if len(node.Spec.PodCIDR) != 0 {
-				podCIDRs = append(podCIDRs, node.Spec.PodCIDR)
+				podCIDRs.Insert(node.Spec.PodCIDR)
 			}
-			for _, podCIDR := range podCIDRs {
-				if _, CIDR, err := net.ParseCIDR(podCIDR); err == nil {
-					CIDRList = append(CIDRList, CIDR)
-				}
+		}
+		for _, podCIDR := range podCIDRs.List() {
+			if _, CIDR, err := net.ParseCIDR(podCIDR); err == nil {
+				CIDRList = append(CIDRList, CIDR)
 			}
 		}
 	}
