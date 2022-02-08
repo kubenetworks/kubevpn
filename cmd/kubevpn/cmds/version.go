@@ -20,7 +20,7 @@ var (
 func reformatDate(buildTime string) string {
 	t, errTime := time.Parse(time.RFC3339Nano, buildTime)
 	if errTime == nil {
-		return t.Format(time.ANSIC)
+		return t.Format("2006-01-02 15:04:05")
 	}
 	return buildTime
 }
