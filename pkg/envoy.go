@@ -110,10 +110,10 @@ func UnPatchContainer(factory cmdutil.Factory, clientset *kubernetes.Clientset, 
 		return err
 	}
 
-	port := uint32(templateSpec.Spec.Containers[0].Ports[0].ContainerPort)
+	//port := uint32(templateSpec.Spec.Containers[0].Ports[0].ContainerPort)
 	configMapName := fmt.Sprintf("%s-%s", object.Mapping.Resource.Resource, object.Name)
 
-	createEnvoyConfigMapIfNeeded(clientset, object.Namespace, configMapName, strconv.Itoa(int(port)))
+	//createEnvoyConfigMapIfNeeded(clientset, object.Namespace, configMapName, strconv.Itoa(int(port)))
 	err = removeEnvoyConfig(clientset, object.Namespace, configMapName, headers)
 	if err != nil {
 		log.Warnln(err)

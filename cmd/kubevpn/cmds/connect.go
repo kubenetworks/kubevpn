@@ -29,6 +29,12 @@ var connectCmd = &cobra.Command{
 	Use:   "connect",
 	Short: "connect",
 	Long:  `connect`,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if !util.IsAdmin() {
+			util.RunWithElevated()
+			os.Exit(0)
+		}
+	},
 	PreRun: func(*cobra.Command, []string) {
 		util.InitLogger(util.Debug)
 		if util.IsWindows() {

@@ -185,7 +185,7 @@ func CreateInboundPod(factory cmdutil.Factory, namespace, workloads string, conf
 		}})
 		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 		if err != nil {
-			log.Errorf("error while inject proxy container, err: %v, exiting...")
+			log.Errorf("error while inject proxy container, err: %v, exiting...", err)
 			return err
 		}
 		removePatch, restorePatch := patch(origin, path)

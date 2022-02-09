@@ -21,8 +21,15 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 		}
 	}
 	for i := 0; i < len(spec.Spec.Containers); i++ {
+		for j := 0; j < len(spec.Spec.Containers[i].VolumeMounts); j++ {
+			if spec.Spec.Containers[i].VolumeMounts[j].Name == EnvoyConfig {
+				spec.Spec.Containers[i].VolumeMounts = append(spec.Spec.Containers[i].VolumeMounts[:j],
+					spec.Spec.Containers[i].VolumeMounts[j+1:]...)
+			}
+		}
 		if sets.NewString(EnvoyProxy, ControlPlane, VPN).Has(spec.Spec.Containers[i].Name) {
 			spec.Spec.Containers = append(spec.Spec.Containers[:i], spec.Spec.Containers[i+1:]...)
+			i--
 		}
 	}
 }
@@ -38,6 +45,7 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, configMapName string, c util.Pod
 	for i := 0; i < len(spec.Spec.Containers); i++ {
 		if sets.NewString(EnvoyProxy, ControlPlane, VPN).Has(spec.Spec.Containers[i].Name) {
 			spec.Spec.Containers = append(spec.Spec.Containers[:i], spec.Spec.Containers[i+1:]...)
+			i--
 		}
 	}
 	zero := int64(0)

@@ -247,3 +247,14 @@ func patchs(helper *pkgresource.Helper, namespace, name string, p []byte) (k8sru
 		&metav1.PatchOptions{},
 	)
 }
+
+func TestSliceRemove(t *testing.T) {
+	a := []string{"a", "a", "b", "c"}
+	for i := 0; i < len(a); i++ {
+		if a[i] == "a" {
+			a = append(a[:i], a[i+1:]...)
+			//i--
+		}
+	}
+	fmt.Println(a)
+}
