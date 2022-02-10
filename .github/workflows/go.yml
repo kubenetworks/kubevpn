@@ -58,6 +58,8 @@ jobs:
           rm '/usr/local/bin/kubectl'
           set -x
           docker version
+          docker pull naison/kubevpn:v2
+          docker pull naison/kubevpnmesh:v2
           docker run --rm hello-world
       - run: |
           brew install minikube
