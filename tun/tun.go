@@ -4,8 +4,10 @@ import (
 	"errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/songgao/water"
+	"github.com/wencaiwulue/kubevpn/util"
 	"net"
 	"os"
+	"runtime"
 	"time"
 )
 
@@ -37,6 +39,13 @@ func Listener(config Config) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
+	// todo optimize it
+	if runtime.GOOS == "darwin" {
+		if err = util.DetectAndDisableConflictDevice(ifce.Name); err != nil {
+			log.Warnf("error occours while disable conflict devices, err: %v", err)
+		}
+	}
+
 	ln.addr = conn.LocalAddr()
 
 	addrs, _ := ifce.Addrs()
