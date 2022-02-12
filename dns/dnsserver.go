@@ -5,6 +5,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/cache"
 	"strings"
+	"time"
 )
 
 type server struct {
@@ -44,7 +45,9 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, r *miekgdns.Msg) {
 	case 5:
 	}
 	r.Question = []miekgdns.Question{question}
-	answer, err := miekgdns.Exchange(r, s.forwardDNS.Servers[0]+":53")
+	client := miekgdns.Client{Net: "udp", Timeout: time.Second * 5}
+	answer, _, err := client.Exchange(r, s.forwardDNS.Servers[0]+":53")
+	//answer, err := miekgdns.Exchange(r, s.forwardDNS.Servers[0]+":53")
 	if err != nil {
 		log.Warnln(err)
 		err = w.WriteMsg(r)
