@@ -54,6 +54,7 @@ jobs:
         with:
           go-version: 1.17
       - uses: docker-practice/actions-setup-docker@master
+      - name: Pull image in advance
         run: |
           rm '/usr/local/bin/kubectl'
           set -x
