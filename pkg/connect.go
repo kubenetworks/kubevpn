@@ -17,6 +17,7 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"net"
+	"os"
 	"strings"
 	"time"
 )
@@ -116,6 +117,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 		return err
 	}
 	c.deleteFirewallRuleAndSetupDNS(ctx)
+	c.detectConflictDevice()
 	return
 }
 
@@ -210,6 +212,16 @@ func (c *ConnectOptions) deleteFirewallRuleAndSetupDNS(ctx context.Context) {
 	go util.Heartbeats(ctx)
 	c.setupDNS()
 	log.Info("dns service ok")
+}
+
+func (c *ConnectOptions) detectConflictDevice() {
+	tun := os.Getenv("tunName")
+	if len(tun) == 0 {
+		return
+	}
+	if err := DetectAndDisableConflictDevice(tun); err != nil {
+		log.Warnf("error occours while disable conflict devices, err: %v", err)
+	}
 }
 
 func (c *ConnectOptions) setupDNS() {

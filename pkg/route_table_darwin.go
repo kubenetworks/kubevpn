@@ -1,13 +1,32 @@
-package util
+//go:build darwin
+// +build darwin
+
+package pkg
 
 import (
+	log "github.com/sirupsen/logrus"
 	"net"
 	"os/exec"
 	"strconv"
 	"strings"
 )
 
-func getRouteTableByNetstat() (map[string][]*net.IPNet, error) {
+// sudo ifconfig utun3 down
+func disableDevice(conflict []string) error {
+	for _, dev := range conflict {
+		if err := exec.Command("sudo", "ifconfig", dev, "down").Run(); err != nil {
+			log.Errorf("can not disable interface: %s, err: %v", dev, err)
+			return err
+		} else {
+			rollbackFuncList = append(rollbackFuncList, func() {
+				_ = exec.Command("sudo", "ifconfig", dev, "up").Run()
+			})
+		}
+	}
+	return nil
+}
+
+func getRouteTable() (map[string][]*net.IPNet, error) {
 	output, err := exec.Command("netstat", "-anr").CombinedOutput()
 	if err != nil {
 		return nil, err

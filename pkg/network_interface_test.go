@@ -1,4 +1,4 @@
-package util
+package pkg
 
 import (
 	"fmt"
@@ -84,7 +84,7 @@ func removeEmptyElement(message *route.RouteMessage) []route.Addr {
 }
 
 func TestGetRouteTableByNetstat(t *testing.T) {
-	routeTable, err := getRouteTableByNetstat()
+	routeTable, err := getRouteTable()
 	if err != nil {
 		return
 	}

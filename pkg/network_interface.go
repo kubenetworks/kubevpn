@@ -1,4 +1,4 @@
-package util
+package pkg
 
 import (
 	"bytes"
@@ -6,7 +6,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	net2 "k8s.io/utils/net"
 	"net"
-	"os/exec"
 	"strings"
 )
 
@@ -15,7 +14,7 @@ import (
 // 2, detect conflict
 // 3, disable device
 func DetectAndDisableConflictDevice(origin string) error {
-	routeTable, err := getRouteTableByNetstat()
+	routeTable, err := getRouteTable()
 	if err != nil {
 		return err
 	}
@@ -25,17 +24,6 @@ func DetectAndDisableConflictDevice(origin string) error {
 	}
 	err = disableDevice(conflict)
 	return err
-}
-
-// sudo ifconfig utun3 down
-func disableDevice(conflict []string) error {
-	for _, dev := range conflict {
-		if err := exec.Command("sudo", "ifconfig", dev, "down").Run(); err != nil {
-			log.Errorf("can not disable interface: %s, err: %v", dev, err)
-			return err
-		}
-	}
-	return nil
 }
 
 func detectConflictDevice(origin string, routeTable map[string][]*net.IPNet) []string {
