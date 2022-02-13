@@ -62,6 +62,12 @@ func detectConflictDevice(origin string, routeTable map[string][]*net.IPNet) []s
 }
 
 func intersect(n1, n2 *net.IPNet) bool {
+	if len(n1.IP) != len(n2.IP) {
+		return false
+	}
+	if len(n1.Mask) != len(n2.Mask) {
+		return false
+	}
 	for i := range n1.IP {
 		if n1.IP[i]&n1.Mask[i] != n2.IP[i]&n2.Mask[i]&n1.Mask[i] {
 			return false
