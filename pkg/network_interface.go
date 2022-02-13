@@ -71,7 +71,14 @@ func intersect(n1, n2 *net.IPNet) bool {
 	if len(n1.IP) == 0 || len(n1.Mask) == 0 {
 		return false
 	}
-	for i := range n1.IP {
+	ip := n1.IP.To4()
+	if ip == nil {
+		ip = n1.IP.To16()
+	}
+	if ip == nil {
+		return false
+	}
+	for i := range ip {
 		if n1.IP[i]&n1.Mask[i] != n2.IP[i]&n2.Mask[i]&n1.Mask[i] {
 			return false
 		}

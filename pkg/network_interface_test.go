@@ -2,10 +2,11 @@ package pkg
 
 import (
 	"fmt"
-	"golang.org/x/net/route"
 	"net"
 	"syscall"
 	"testing"
+
+	"golang.org/x/net/route"
 )
 
 // netstat -anr | grep 10.61
@@ -84,9 +85,8 @@ func removeEmptyElement(message *route.RouteMessage) []route.Addr {
 }
 
 func TestGetRouteTableByNetstat(t *testing.T) {
-	routeTable, err := getRouteTable()
-	if err != nil {
-		return
+	ip := net.ParseIP("192.168.1.1")
+	for i := range ip.To4() {
+		fmt.Println(i)
 	}
-	fmt.Println(routeTable)
 }
