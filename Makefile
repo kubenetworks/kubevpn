@@ -20,19 +20,19 @@ LDFLAGS=--ldflags "-w -s \
 
 .PHONY: kubevpn-macos
 kubevpn-macos:
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build ${LDFLAGS} -o ${TARGET} github.com/wencaiwulue/kubevpn/cmd/kubevpn
-	chmod +x ${TARGET}
-	cp ${TARGET} /usr/local/bin/kubevpn
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build ${LDFLAGS} -o kubevpn-darwin-amd64 github.com/wencaiwulue/kubevpn/cmd/kubevpn
+	chmod +x kubevpn-darwin-amd64
+	cp kubevpn-darwin-amd64 /usr/local/bin/kubevpn
 
 .PHONY: kubevpn-windows
 kubevpn-windows:
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ${LDFLAGS} -o ${TARGET}.exe github.com/wencaiwulue/kubevpn/cmd/kubevpn
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ${LDFLAGS} -o kubevpn-windows-amd64.exe github.com/wencaiwulue/kubevpn/cmd/kubevpn
 
 .PHONY: kubevpn-linux
 kubevpn-linux:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ${LDFLAGS} -o ${TARGET} github.com/wencaiwulue/kubevpn/cmd/kubevpn
-	chmod +x ${TARGET}
-	cp ${TARGET} /usr/local/bin/kubevpn
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ${LDFLAGS} -o kubevpn-linux-amd64 github.com/wencaiwulue/kubevpn/cmd/kubevpn
+	chmod +x kubevpn-linux-amd64
+	cp kubevpn-linux-amd64 /usr/local/bin/kubevpn
 
 .PHONY: control-plane-linux
 control-plane-linux:
@@ -41,7 +41,7 @@ control-plane-linux:
 
 .PHONY: image
 image: kubevpn-linux
-	mv ${TARGET} kubevpn
+	mv kubevpn-linux-amd64 kubevpn
 	docker build -t naison/kubevpn:v2 -f ./dockerfile/server/Dockerfile .
 	rm -fr kubevpn
 	docker push naison/kubevpn:v2
