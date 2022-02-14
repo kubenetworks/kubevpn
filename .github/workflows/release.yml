@@ -56,7 +56,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: kubevpn
+          asset_path: kubevpn-linux-amd64
           asset_name: kubevpn-linux-amd64
           asset_content_type: application/octet-stream
 
@@ -68,7 +68,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: kubevpn
+          asset_path: kubevpn-darwin-amd64
           asset_name: kubevpn-darwin-amd64
           asset_content_type: application/octet-stream
 
@@ -80,6 +80,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: kubevpn.exe
+          asset_path: kubevpn-windows-amd64.exe
           asset_name: kubevpn-windows-amd64.exe
           asset_content_type: application/octet-stream
