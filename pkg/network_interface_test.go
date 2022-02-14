@@ -90,3 +90,67 @@ func TestGetRouteTableByNetstat(t *testing.T) {
 		fmt.Println(i)
 	}
 }
+
+func TestInteract(t *testing.T) {
+	type data struct {
+		ipNet1 *net.IPNet
+		ipNet2 *net.IPNet
+		result bool
+	}
+	var list = []data{{
+		ipNet1: &net.IPNet{
+			IP:   net.ParseIP("192.168.1.1"),
+			Mask: net.CIDRMask(24, 32),
+		},
+		ipNet2: &net.IPNet{
+			IP:   net.ParseIP("192.168.100.100"),
+			Mask: net.CIDRMask(16, 32),
+		},
+		result: true,
+	}, {
+		ipNet1: &net.IPNet{
+			IP:   net.ParseIP("192.168.0.0"),
+			Mask: net.CIDRMask(17, 32),
+		},
+		ipNet2: &net.IPNet{
+			IP:   net.ParseIP("192.168.0.0"),
+			Mask: net.CIDRMask(16, 32),
+		},
+		result: true,
+	}, {
+		ipNet1: &net.IPNet{
+			IP:   net.ParseIP("191.168.0.0"),
+			Mask: net.CIDRMask(17, 32),
+		},
+		ipNet2: &net.IPNet{
+			IP:   net.ParseIP("192.168.0.0"),
+			Mask: net.CIDRMask(16, 32),
+		},
+		result: false,
+	}, {
+		ipNet1: &net.IPNet{
+			IP:   net.ParseIP("255.255.255.0"),
+			Mask: net.CIDRMask(24, 32),
+		},
+		ipNet2: &net.IPNet{
+			IP:   net.ParseIP("255.255.0.0"),
+			Mask: net.CIDRMask(16, 32),
+		},
+		result: true,
+	}, {
+		ipNet1: &net.IPNet{
+			IP:   net.ParseIP("255.255.255.255"),
+			Mask: net.CIDRMask(32, 32),
+		},
+		ipNet2: &net.IPNet{
+			IP:   net.ParseIP("255.255.0.0"),
+			Mask: net.CIDRMask(16, 32),
+		},
+		result: false,
+	}}
+	for _, d := range list {
+		if b := d.ipNet1.Contains(d.ipNet2.IP) || d.ipNet2.Contains(d.ipNet1.IP); d.result != b {
+			t.FailNow()
+		}
+	}
+}

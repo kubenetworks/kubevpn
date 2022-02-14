@@ -4,7 +4,6 @@ import (
 	"bytes"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
-	net2 "k8s.io/utils/net"
 	"net"
 	"strings"
 )
@@ -36,16 +35,11 @@ func detectConflictDevice(origin string, routeTable map[string][]*net.IPNet) []s
 	out:
 		for _, originNet := range originRoute {
 			for _, vpnNet := range vpnRoute {
-				// should be same type
-				if net2.IsIPv6(originNet.IP) && net2.IsIPv4(vpnNet.IP) ||
-					net2.IsIPv4(originNet.IP) && net2.IsIPv6(vpnNet.IP) {
-					continue
-				}
 				// like 255.255.0.0/16 should not take effect
 				if bytes.Equal(originNet.IP, originNet.Mask) || bytes.Equal(vpnNet.IP, vpnNet.Mask) {
 					continue
 				}
-				if intersect(vpnNet, originNet) {
+				if vpnNet.Contains(originNet.IP) || originNet.Contains(vpnNet.IP) {
 					originMask, _ := originNet.Mask.Size()
 					vpnMask, _ := vpnNet.Mask.Size()
 					// means interface: k is more precisely, traffic will go to interface k because route table feature
@@ -59,29 +53,4 @@ func detectConflictDevice(origin string, routeTable map[string][]*net.IPNet) []s
 		}
 	}
 	return conflict.Delete(origin).List()
-}
-
-func intersect(n1, n2 *net.IPNet) bool {
-	if len(n1.IP) != len(n2.IP) {
-		return false
-	}
-	if len(n1.Mask) != len(n2.Mask) {
-		return false
-	}
-	if len(n1.IP) == 0 || len(n1.Mask) == 0 {
-		return false
-	}
-	ip := n1.IP.To4()
-	if ip == nil {
-		ip = n1.IP.To16()
-	}
-	if ip == nil {
-		return false
-	}
-	for i := range ip {
-		if n1.IP[i]&n1.Mask[i] != n2.IP[i]&n2.Mask[i]&n1.Mask[i] {
-			return false
-		}
-	}
-	return true
 }
