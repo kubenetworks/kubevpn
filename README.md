@@ -10,9 +10,9 @@ kubernetes cluster service can also access your local service
 ```shell
 git clone https://github.com/wencaiwulue/kubevpn.git
 cd kubevpn
-make kubevpn-linux
-make kubevpn-macos
-make kubevpn-windows
+make kubevpn-linux-amd64
+make kubevpn-darwin-amd64
+make kubevpn-windows-amd64
 ```
 
 if you are using windows, you can build by this command:

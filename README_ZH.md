@@ -9,9 +9,9 @@
 ```shell
 git clone https://github.com/wencaiwulue/kubevpn.git
 cd kubevpn
-make kubevpn-linux
-make kubevpn-macos
-make kubevpn-windows
+make kubevpn-linux-amd64
+make kubevpn-darwin-amd64
+make kubevpn-windows-amd64
 ```
 
 如果你在使用 Windows 系统，可以使用下面这条命令构建：

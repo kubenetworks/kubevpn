@@ -9,6 +9,18 @@ jobs:
   build:
     name: Create Release
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os-arch: [
+          kubevpn-darwin-amd64,
+          kubevpn-darwin-arm64,
+          kubevpn-windows-amd64.exe,
+          kubevpn-windows-arm64.exe,
+          kubevpn-windows-386.exe,
+          kubevpn-linux-amd64,
+          kubevpn-linux-arm64,
+          kubevpn-linux-386,
+        ]
     steps:
       - name: Set up Go
         uses: actions/setup-go@v2
@@ -48,38 +60,16 @@ jobs:
         with:
           name: UPLOAD_URL
           path: UPLOAD_URL
-      - name: Build kubevpn-linux
-        run: make kubevpn-linux
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: kubevpn-linux-amd64
-          asset_name: kubevpn-linux-amd64
-          asset_content_type: application/octet-stream
 
-      - name: Build kubevpn-macos
-        run: make kubevpn-macos
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: kubevpn-darwin-amd64
-          asset_name: kubevpn-darwin-amd64
-          asset_content_type: application/octet-stream
+      - name: Build kubevpn-all-arch
+        run: make all
 
-      - name: Build kubevpn-windows
-        run: make kubevpn-windows
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: kubevpn-windows-amd64.exe
-          asset_name: kubevpn-windows-amd64.exe
+          asset_path: ${{ matrix.os-arch }}
+          asset_name: ${{ matrix.os-arch }}
           asset_content_type: application/octet-stream

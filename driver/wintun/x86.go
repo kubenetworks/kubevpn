@@ -1,5 +1,6 @@
-//go:build windows && x86
-// +build windows,x86
+//go:build windows && (x86 || 386)
+// +build windows
+// +build x86 386
 
 package wintun
 
