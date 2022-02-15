@@ -1,5 +1,5 @@
-//go:build !windows || ignore || !darwin
-// +build !windows ignore !darwin
+//go:build !windows && !darwin
+// +build !windows,!darwin
 
 package pkg
 
