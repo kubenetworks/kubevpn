@@ -8,10 +8,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"net"
 	"net/http"
@@ -33,6 +35,7 @@ var (
 )
 
 func TestFunctions(t *testing.T) {
+	kubevpnConnect()
 	t.Cleanup(cancelFunc)
 	t.Parallel()
 	t.Run(runtime.FuncForPC(reflect.ValueOf(pingPodIP).Pointer()).Name(), pingPodIP)
@@ -182,10 +185,14 @@ func dialUDP(t *testing.T) {
 	if len(ip) == 0 {
 		t.Errorf("can not found pods for service reviews")
 	}
-	time.Sleep(time.Second * 5)
-	log.Infof("dail udp to ip: %s", ip)
-	err = client(ip, port)
-	if err != nil {
+	log.Printf("dail udp to ip: %s", ip)
+	if err = retry.OnError(
+		wait.Backoff{Duration: time.Second, Factor: 2, Jitter: 0.2, Steps: 5},
+		func(err error) bool {
+			return err != nil
+		}, func() error {
+			return client(ip, port)
+		}); err != nil {
 		t.Errorf("can not access pod ip: %s, port: %v", ip, port)
 	}
 }
@@ -200,6 +207,11 @@ func client(ip string, port int) error {
 		return err
 	}
 	defer udpConn.Close()
+
+	err = udpConn.SetDeadline(time.Now().Add(time.Second * 30))
+	if err != nil {
+		return err
+	}
 
 	// 发送数据
 	sendData := []byte("hello server!")
@@ -251,8 +263,7 @@ func server(port int) {
 	}
 }
 
-func init() {
-	initClient()
+func kubevpnConnect() {
 	var ctx context.Context
 	ctx, cancelFunc = context.WithCancel(context.TODO())
 	childCtx, timeoutFunc := context.WithTimeout(ctx, time.Minute*10)
@@ -268,7 +279,7 @@ func init() {
 	<-childCtx.Done()
 }
 
-func initClient() {
+func init() {
 	var err error
 
 	configFlags := genericclioptions.NewConfigFlags(true)
