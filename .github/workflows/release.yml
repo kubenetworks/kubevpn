@@ -58,5 +58,5 @@ jobs:
         uses: peter-evans/repository-dispatch@v1
         with:
           token: ${{ secrets.REPOSITORYDISPATCH }}
-          event-type: my-event
-          client-payload: '{"url": "${{ steps.create_release.outputs.upload_url }}"}'
+          event-type: release-event
+          client-payload: '{"url": "${{ steps.create_release.outputs.upload_url }}", "tag": "${{ github.ref }}"}'
