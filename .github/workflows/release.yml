@@ -9,18 +9,6 @@ jobs:
   build:
     name: Create Release
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        os-arch: [
-          kubevpn-darwin-amd64,
-          kubevpn-darwin-arm64,
-          kubevpn-windows-amd64.exe,
-          kubevpn-windows-arm64.exe,
-          kubevpn-windows-386.exe,
-          kubevpn-linux-amd64,
-          kubevpn-linux-arm64,
-          kubevpn-linux-386,
-        ]
     steps:
       - name: Set up Go
         uses: actions/setup-go@v2
@@ -38,8 +26,8 @@ jobs:
           release_name: Release ${{ github.ref }}
           body: |
             Changes in this Release
-            - First Change
-            - Second Change
+            - Fix known bugs
+            - Optimize code
           draft: false
           prerelease: false
 
@@ -61,15 +49,15 @@ jobs:
           name: UPLOAD_URL
           path: UPLOAD_URL
 
-      - name: Build kubevpn-all-arch
-        run: make all
+      - name: Push image to Github packages
+        run: |
+          echo ${{ secrets.GPR_PASS }} | docker login docker.pkg.github.com -u ${{ secrets.GPR_USER }} --password-stdin
+          make all-image
 
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Repository Dispatch
+        uses: peter-evans/repository-dispatch@v1
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ matrix.os-arch }}
-          asset_name: ${{ matrix.os-arch }}
-          asset_content_type: application/octet-stream
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: wencaiwulue/kubevpn
+          event-type: my-event
+          client-payload: '{"url": "${{ steps.create_release.outputs.upload_url }}"}'

@@ -22,10 +22,15 @@ LDFLAGS=--ldflags "-w -s \
 "
 
 .PHONY: all
-all: kubevpn-darwin-amd64 kubevpn-darwin-arm64 \
+all: all-kubevpn all-image
+
+.PHONY: all-kubevpn
+all-kubevpn: kubevpn-darwin-amd64 kubevpn-darwin-arm64 \
 kubevpn-windows-amd64 kubevpn-windows-386 kubevpn-windows-arm64 \
-kubevpn-linux-amd64 kubevpn-linux-386 kubevpn-linux-arm64 \
-image image-mesh image-control-plane
+kubevpn-linux-amd64 kubevpn-linux-386 kubevpn-linux-arm64
+
+.PHONY: all-image
+all-image: image image-mesh image-control-plane
 
 # ---------darwin-----------
 .PHONY: kubevpn-darwin-amd64

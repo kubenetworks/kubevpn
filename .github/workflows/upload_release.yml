@@ -1,0 +1,42 @@
+name: Upload release
+
+on:
+  repository_dispatch:
+    types: [ my-event ]
+
+jobs:
+  build:
+    name: Create Release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os-arch: [
+          kubevpn-darwin-amd64,
+          kubevpn-darwin-arm64,
+          kubevpn-windows-amd64.exe,
+          kubevpn-windows-arm64.exe,
+          kubevpn-windows-386.exe,
+          kubevpn-linux-amd64,
+          kubevpn-linux-arm64,
+          kubevpn-linux-386,
+        ]
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.17
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Build kubevpn-all-arch
+        run: make all-kubevpn
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.client_payload.url }}
+          asset_path: ${{ matrix.os-arch }}
+          asset_name: ${{ matrix.os-arch }}
+          asset_content_type: application/octet-stream
