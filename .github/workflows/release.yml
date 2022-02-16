@@ -49,9 +49,9 @@ jobs:
           name: UPLOAD_URL
           path: UPLOAD_URL
 
-      - name: Push image to Github packages
+      - name: Push image to docker hub
         run: |
-          echo ${{ secrets.GPR_PASS }} | docker login docker.pkg.github.com -u ${{ secrets.GPR_USER }} --password-stdin
+          echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USER }} --password-stdin
           make all-image
 
       - name: Repository Dispatch
