@@ -31,7 +31,7 @@ jobs:
         run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
 
       - name: Build
-        run: make kubevpn-linux
+        run: make kubevpn-linux-amd64
 
       - name: Wait for pods reviews to be ready
         run: |
@@ -80,7 +80,7 @@ jobs:
         run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
 
       - name: Build
-        run: make kubevpn-macos
+        run: make kubevpn-darwin-amd64
 
       - name: Wait for pods reviews to be ready
         run: |
