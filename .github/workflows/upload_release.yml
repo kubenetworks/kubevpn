@@ -11,14 +11,14 @@ jobs:
     strategy:
       matrix:
         os-arch: [
-          kubevpn-darwin-amd64,
-          kubevpn-darwin-arm64,
-          kubevpn-windows-amd64.exe,
-          kubevpn-windows-arm64.exe,
-          kubevpn-windows-386.exe,
-          kubevpn-linux-amd64,
-          kubevpn-linux-arm64,
-          kubevpn-linux-386,
+            kubevpn-darwin-amd64,
+            kubevpn-darwin-arm64,
+            kubevpn-windows-amd64.exe,
+            kubevpn-windows-arm64.exe,
+            kubevpn-windows-386.exe,
+            kubevpn-linux-amd64,
+            kubevpn-linux-arm64,
+            kubevpn-linux-386,
         ]
     steps:
       - name: Set up Go
@@ -30,7 +30,7 @@ jobs:
 
       - name: Build kubevpn-all-arch
         run: |
-          git tag ${{ github.event.client_payload.tag }} || true
+          git tag `echo ${{ github.event.client_payload.tag }} | sed 's/refs\/tags\///' | sed 's/\(.*\)-.*/\1/' | sed 's/-[0-9]*$//' || true` || true
           make all-kubevpn
 
       - name: Upload Release Asset
