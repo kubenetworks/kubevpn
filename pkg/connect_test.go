@@ -7,9 +7,15 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/util"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	net2 "k8s.io/apimachinery/pkg/util/net"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"net"
 	"os/exec"
 	"testing"
@@ -99,4 +105,40 @@ func checkSum(msg []byte) uint16 {
 	sum = (sum >> 16) + (sum & 0xffff)
 	sum += sum >> 16
 	return uint16(^sum)
+}
+
+func TestPatchAnnotation(t *testing.T) {
+	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
+	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
+	do := factory.NewBuilder().
+		Unstructured().
+		NamespaceParam("default").DefaultNamespace().AllNamespaces(false).
+		ResourceTypeOrNameArgs(true, "deployments/reviews").
+		ContinueOnError().
+		Latest().
+		Flatten().
+		TransformRequests(func(req *rest.Request) { req.Param("includeObject", "Object") }).
+		Do()
+	err := do.Err()
+	if err != nil {
+		panic(err)
+	}
+	infos, err := do.Infos()
+	if err != nil {
+		panic(err)
+	}
+	info := infos[0]
+	helper := resource.NewHelper(info.Client, info.Mapping)
+
+	object, err := helper.Patch(
+		info.Namespace,
+		info.Name,
+		types.JSONPatchType,
+		[]byte(`[{"op":"replace","path":"/metadata/annotations/dev.nocalhost","value":{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"annotations":{"deployment.kubernetes.io/revision":"1","dev.nocalhost/application-name":"bookinfo","dev.nocalhost/application-namespace":"default"},"labels":{"app":"reviews","app.kubernetes.io/managed-by":"nocalhost"},"name":"reviews","namespace":"default","selfLink":"/apis/apps/v1/namespaces/default/deployments/reviews"},"spec":{"progressDeadlineSeconds":600,"replicas":1,"revisionHistoryLimit":10,"selector":{"matchLabels":{"app":"reviews"}},"strategy":{"rollingUpdate":{"maxSurge":"25%","maxUnavailable":"25%"},"type":"RollingUpdate"},"template":{"metadata":{"creationTimestamp":null,"labels":{"app":"reviews"}},"spec":{"containers":[{"env":[{"name":"LOG_DIR","value":"/tmp/logs"}],"image":"nocalhost-docker.pkg.coding.net/nocalhost/bookinfo/reviews:latest","imagePullPolicy":"Always","name":"reviews","ports":[{"containerPort":9080,"protocol":"TCP"}],"readinessProbe":{"failureThreshold":3,"initialDelaySeconds":5,"periodSeconds":10,"successThreshold":1,"tcpSocket":{"port":9080},"timeoutSeconds":1},"resources":{"limits":{"cpu":"1","memory":"512Mi"},"requests":{"cpu":"10m","memory":"32Mi"}},"terminationMessagePath":"/dev/termination-log","terminationMessagePolicy":"File","volumeMounts":[{"mountPath":"/tmp","name":"tmp"},{"mountPath":"/opt/ibm/wlp/output","name":"wlp-output"}]}],"dnsPolicy":"ClusterFirst","restartPolicy":"Always","schedulerName":"default-scheduler","securityContext":{},"terminationGracePeriodSeconds":30,"volumes":[{"emptyDir":{},"name":"wlp-output"},{"emptyDir":{},"name":"tmp"}]}}}}}]`),
+		&metav1.PatchOptions{})
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(object.(*unstructured.Unstructured).GetAnnotations())
 }

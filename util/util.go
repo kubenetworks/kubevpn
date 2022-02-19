@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"strconv"
@@ -121,10 +122,12 @@ func GetTopOwnerReference(factory cmdutil.Factory, namespace, workload string) (
 			return object, nil
 		}
 		// apiVersion format is Group/Version is like: apps/v1, apps.kruise.io/v1beta1
-		// we need to trans it to Kind.Group
-		split := strings.Split(ownerReference.APIVersion, "/")
+		version, err := schema.ParseGroupVersion(ownerReference.APIVersion)
+		if err != nil {
+			return object, nil
+		}
 		gk := metav1.GroupKind{
-			Group: split[0],
+			Group: version.Group,
 			Kind:  ownerReference.Kind,
 		}
 		workload = fmt.Sprintf("%s/%s", gk.String(), ownerReference.Name)
