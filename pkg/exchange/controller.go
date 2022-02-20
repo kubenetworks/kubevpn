@@ -34,10 +34,10 @@ func AddContainer(spec *v1.PodSpec, c util.PodRouteConfig) {
 				"iptables -F;" +
 				"iptables -P INPUT ACCEPT;" +
 				"iptables -P FORWARD ACCEPT;" +
-				"iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80:60000 -j DNAT --to " + c.LocalTunIP + ":80-60000;" +
-				"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 -j MASQUERADE;" +
-				"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 -j DNAT --to " + c.LocalTunIP + ":80-60000;" +
-				"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 -j MASQUERADE;" +
+				"iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to " + c.LocalTunIP + ";" +
+				"iptables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE;" +
+				"sysctl -w net.ipv4.conf.all.route_localnet=1;" +
+				"iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination " + c.LocalTunIP + ";" +
 				"kubevpn serve -L 'tun://0.0.0.0:8421/" + c.TrafficManagerRealIP + ":8421?net=" + c.InboundPodTunIP + "&route=" + c.Route + "' --debug=true",
 		},
 		SecurityContext: &v1.SecurityContext{
