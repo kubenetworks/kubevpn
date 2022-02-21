@@ -74,7 +74,7 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 				}
 				// TODO OPTIMIZE CODE
 				if c.Mode == Mesh {
-					err = PatchSidecar(c.factory, c.clientset, c.Namespace, finalWorkload, config, c.Headers)
+					err = PatchSidecar(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, finalWorkload, config, c.Headers)
 				} else {
 					err = CreateInboundPod(c.factory, c.Namespace, finalWorkload, config)
 				}
@@ -100,7 +100,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err != nil {
 		return
 	}
-	c.dhcp = NewDHCPManager(c.clientset, c.Namespace)
+	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, &trafficMangerNet)
 	if err = c.dhcp.InitDHCP(); err != nil {
 		return
 	}

@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/wencaiwulue/kubevpn/util"
 	"net"
 	"sync"
@@ -96,7 +95,7 @@ func (h *tunHandler) Handle(ctx context.Context, conn net.Conn) {
 		case <-ctx.Done():
 			h.chExit <- struct{}{}
 		default:
-			fmt.Println("next loop")
+			log.Warnln("next loop")
 		}
 
 		if err != nil {

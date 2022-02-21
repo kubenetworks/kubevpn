@@ -34,16 +34,9 @@ func (s *Server) Serve(ctx context.Context, h Handler) error {
 	l := s.Listener
 	var tempDelay time.Duration
 	go func() {
-		select {
-		case <-ctx.Done():
-			err := retry.OnError(retry.DefaultBackoff, func(err error) bool {
-				return err != nil
-			}, func() error {
-				return l.Close()
-			})
-			if err != nil {
-				log.Warnf("error while close listener, err: %v", err)
-			}
+		<-ctx.Done()
+		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return err != nil }, l.Close); err != nil {
+			log.Warnf("error while close listener, err: %v", err)
 		}
 	}()
 	for ctx.Err() == nil {

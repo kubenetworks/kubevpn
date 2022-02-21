@@ -15,7 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
-	"k8s.io/client-go/kubernetes"
+	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"strconv"
 	"strings"
@@ -26,7 +26,7 @@ import (
 
 //	patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
 // TODO support multiple port
-func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads string, c util.PodRouteConfig, headers map[string]string) error {
+func PatchSidecar(factory cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workloads string, c util.PodRouteConfig, headers map[string]string) error {
 	//t := true
 	//zero := int64(0)
 	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
@@ -46,7 +46,7 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 	configMapName := fmt.Sprintf("%s-%s", object.Mapping.Resource.Resource, object.Name)
 
 	createEnvoyConfigMapIfNeeded(clientset, object.Namespace, configMapName, strconv.Itoa(int(port)))
-	err = addEnvoyConfig(clientset, object.Namespace, configMapName, c.LocalTunIP, headers, port)
+	err = addEnvoyConfig(clientset, configMapName, c.LocalTunIP, headers, port)
 	if err != nil {
 		log.Warnln(err)
 		return err
@@ -96,7 +96,7 @@ func PatchSidecar(factory cmdutil.Factory, clientset *kubernetes.Clientset, name
 	return err
 }
 
-func UnPatchContainer(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workloads string, headers map[string]string) error {
+func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, namespace, workloads string, headers map[string]string) error {
 	//t := true
 	//zero := int64(0)
 	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
@@ -113,8 +113,8 @@ func UnPatchContainer(factory cmdutil.Factory, clientset *kubernetes.Clientset, 
 	//port := uint32(templateSpec.Spec.Containers[0].Ports[0].ContainerPort)
 	configMapName := fmt.Sprintf("%s-%s", object.Mapping.Resource.Resource, object.Name)
 
-	//createEnvoyConfigMapIfNeeded(clientset, object.Namespace, configMapName, strconv.Itoa(int(port)))
-	err = removeEnvoyConfig(clientset, object.Namespace, configMapName, headers)
+	//createEnvoyConfigMapIfNeeded(mapInterface, object.Namespace, configMapName, strconv.Itoa(int(port)))
+	err = removeEnvoyConfig(mapInterface, configMapName, headers)
 	if err != nil {
 		log.Warnln(err)
 		return err
@@ -139,7 +139,7 @@ func UnPatchContainer(factory cmdutil.Factory, clientset *kubernetes.Clientset, 
 		//Force: &t,
 	})
 
-	//_ = util.WaitPod(clientset, namespace, metav1.ListOptions{
+	//_ = util.WaitPod(mapInterface, namespace, metav1.ListOptions{
 	//	FieldSelector: fields.OneTermEqualSelector("metadata.name", object.Name+"-shadow").String(),
 	//}, func(pod *v1.Pod) bool {
 	//	return pod.Status.Phase == v1.PodRunning
@@ -222,8 +222,8 @@ spec:
       port: %s
 `
 
-func addEnvoyConfig(clientset *kubernetes.Clientset, namespace, workloads, localTUNIP string, headers map[string]string, port uint32) error {
-	get, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.TODO(), workloads, metav1.GetOptions{})
+func addEnvoyConfig(clientset v12.ConfigMapInterface, workloads, localTUNIP string, headers map[string]string, port uint32) error {
+	get, err := clientset.Get(context.TODO(), workloads, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
@@ -267,12 +267,12 @@ func addEnvoyConfig(clientset *kubernetes.Clientset, namespace, workloads, local
 		return err
 	}
 	get.Data["envoy-config.yaml"] = string(marshal)
-	_, err = clientset.CoreV1().ConfigMaps(namespace).Update(context.TODO(), get, metav1.UpdateOptions{})
+	_, err = clientset.Update(context.TODO(), get, metav1.UpdateOptions{})
 	return err
 }
 
-func removeEnvoyConfig(clientset *kubernetes.Clientset, namespace, configMapName string, headers map[string]string) error {
-	configMap, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.TODO(), configMapName, metav1.GetOptions{})
+func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, configMapName string, headers map[string]string) error {
+	configMap, err := mapInterface.Get(context.TODO(), configMapName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
@@ -319,12 +319,12 @@ func removeEnvoyConfig(clientset *kubernetes.Clientset, namespace, configMapName
 		return err
 	}
 	configMap.Data["envoy-config.yaml"] = string(marshal)
-	_, err = clientset.CoreV1().ConfigMaps(namespace).Update(context.TODO(), configMap, metav1.UpdateOptions{})
+	_, err = mapInterface.Update(context.TODO(), configMap, metav1.UpdateOptions{})
 	return err
 }
 
-func createEnvoyConfigMapIfNeeded(clientset *kubernetes.Clientset, namespace, configMapName, port string) {
-	cm, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.TODO(), configMapName, metav1.GetOptions{})
+func createEnvoyConfigMapIfNeeded(clientset v12.ConfigMapInterface, namespace, configMapName, port string) {
+	cm, err := clientset.Get(context.TODO(), configMapName, metav1.GetOptions{})
 	if err == nil && cm != nil {
 		return
 	}
@@ -341,7 +341,7 @@ func createEnvoyConfigMapIfNeeded(clientset *kubernetes.Clientset, namespace, co
 		},
 	}
 
-	_, err = clientset.CoreV1().ConfigMaps(namespace).Create(context.TODO(), &configMap, metav1.CreateOptions{})
+	_, err = clientset.Create(context.TODO(), &configMap, metav1.CreateOptions{})
 	if err != nil {
 		log.Warnln(err)
 	}

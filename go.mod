@@ -3,6 +3,7 @@ module github.com/wencaiwulue/kubevpn
 go 1.17
 
 require (
+	github.com/cilium/ipam v0.0.0-20211026130907-54a76012817c
 	github.com/containerd/containerd v1.5.7
 	github.com/docker/libcontainer v2.2.1+incompatible
 	github.com/envoyproxy/go-control-plane v0.10.1
@@ -33,7 +34,6 @@ require (
 	k8s.io/client-go v0.21.2
 	k8s.io/klog/v2 v2.10.0 // indirect
 	k8s.io/kubectl v0.21.2
-	k8s.io/utils v0.0.0-20201110183641-67b214c5f920
 )
 
 require (
@@ -91,6 +91,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.0-20200615113413-eeeca48fe776 // indirect
 	k8s.io/component-base v0.21.2 // indirect
 	k8s.io/kube-openapi v0.0.0-20210305001622-591a79e4bda7 // indirect
+	k8s.io/utils v0.0.0-20201110183641-67b214c5f920 // indirect
 	sigs.k8s.io/kustomize/api v0.8.8 // indirect
 	sigs.k8s.io/kustomize/kyaml v0.10.17 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.1.0 // indirect
