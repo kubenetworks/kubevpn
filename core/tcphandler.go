@@ -133,10 +133,10 @@ func newFakeUDPTunnelConnOverTCP(conn net.Conn, targetAddr net.Addr) (net.Conn, 
 	}, nil
 }
 
-func (c *fakeUDPTunnelConn) Read(b []byte) (n int, err error) {
-	n, _, err = c.ReadFrom(b)
-	return
-}
+//func (c *fakeUDPTunnelConn) Read(b []byte) (n int, err error) {
+//	n, _, err = c.ReadFrom(b)
+//	return
+//}
 
 func (c *fakeUDPTunnelConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 	dgram, err := ReadDatagramPacket(c.Conn)
@@ -149,11 +149,11 @@ func (c *fakeUDPTunnelConn) ReadFrom(b []byte) (n int, addr net.Addr, err error)
 	return
 }
 
-func (c *fakeUDPTunnelConn) Write(b []byte) (n int, err error) {
-	return c.WriteTo(b)
-}
+//func (c *fakeUDPTunnelConn) Write(b []byte) (n int, err error) {
+//	return c.WriteTo(b, nil)
+//}
 
-func (c *fakeUDPTunnelConn) WriteTo(b []byte) (n int, err error) {
+func (c *fakeUDPTunnelConn) WriteTo(b []byte, _ net.Addr) (n int, err error) {
 	dgram := NewDatagramPacket(b)
 	if err = dgram.Write(c.Conn); err != nil {
 		return
