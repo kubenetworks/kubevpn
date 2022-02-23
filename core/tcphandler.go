@@ -1,7 +1,6 @@
 package core
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	log "github.com/sirupsen/logrus"
@@ -49,77 +48,12 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, conn net.Conn) {
 	h.handleUDPTunnel(conn)
 }
 
-func (h *fakeUdpHandler) transportUDP(relay, peer net.PacketConn) (err error) {
-	errChan := make(chan error, 2)
-	var clientAddr net.Addr
-	go func() {
-		b := util.MPool.Get().([]byte)
-		defer util.MPool.Put(b)
-
-		for {
-			n, laddr, err := relay.ReadFrom(b)
-			if err != nil {
-				errChan <- err
-				return
-			}
-			if clientAddr == nil {
-				clientAddr = laddr
-			}
-			dgram, err := ReadDatagramPacket(bytes.NewReader(b[:n]))
-			if err != nil {
-				log.Errorln(err)
-				errChan <- err
-				return
-			}
-
-			raddr, err := net.ResolveUDPAddr("udp", dgram.Addr())
-			if err != nil {
-				log.Debugf("[tcpserver-udp] addr error, addr: %s, err: %v", dgram.Addr(), err)
-				continue // drop silently
-			}
-			if _, err := peer.WriteTo(dgram.Data, raddr); err != nil {
-				errChan <- err
-				return
-			}
-			if util.Debug {
-				log.Debugf("[tcpserver-udp] %s >>> %s length: %d", relay.LocalAddr(), raddr, len(dgram.Data))
-			}
-		}
-	}()
-
-	go func() {
-		b := util.MPool.Get().([]byte)
-		defer util.MPool.Put(b)
-
-		for {
-			n, raddr, err := peer.ReadFrom(b)
-			if err != nil {
-				errChan <- err
-				return
-			}
-			if clientAddr == nil {
-				continue
-			}
-			buf := bytes.Buffer{}
-			dgram := NewDatagramPacket(raddr, b[:n])
-			_ = dgram.Write(&buf)
-			if _, err := relay.WriteTo(buf.Bytes(), clientAddr); err != nil {
-				errChan <- err
-				return
-			}
-			if util.Debug {
-				log.Debugf("[tcpserver-udp] %s <<< %s length: %d", relay.LocalAddr(), raddr, len(dgram.Data))
-			}
-		}
-	}()
-
-	return <-errChan
-}
+var Server8422, _ = net.ResolveUDPAddr("udp", "127.0.0.1:8422")
 
 func (h *fakeUdpHandler) handleUDPTunnel(conn net.Conn) {
 	// serve tunnel udp, tunnel <-> remote, handle tunnel udp request
 	bindAddr, _ := net.ResolveUDPAddr("udp", ":0")
-	uc, err := net.ListenUDP("udp", bindAddr)
+	uc, err := net.DialUDP("udp", bindAddr, Server8422)
 	if err != nil {
 		log.Debugf("[tcpserver] udp-tun %s -> %s : %s", conn.RemoteAddr(), bindAddr, err)
 		return
@@ -134,7 +68,7 @@ func (h *fakeUdpHandler) handleUDPTunnel(conn net.Conn) {
 	return
 }
 
-func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err error) {
+func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc *net.UDPConn) (err error) {
 	errChan := make(chan error, 2)
 
 	go func() {
@@ -142,7 +76,7 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err er
 		defer util.MPool.Put(b)
 
 		for {
-			n, addr, err := pc.ReadFrom(b)
+			n, err := pc.Read(b)
 			if err != nil {
 				log.Debugf("[udp-tun] %s : %s", cc.RemoteAddr(), err)
 				errChan <- err
@@ -150,8 +84,8 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err er
 			}
 
 			// pipe from peer to tunnel
-			dgram := NewDatagramPacket(addr, b[:n])
-			if err := dgram.Write(cc); err != nil {
+			dgram := NewDatagramPacket(b[:n])
+			if err = dgram.Write(cc); err != nil {
 				log.Debugf("[tcpserver] udp-tun %s <- %s : %s", cc.RemoteAddr(), dgram.Addr(), err)
 				errChan <- err
 				return
@@ -171,19 +105,13 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc net.PacketConn) (err er
 				return
 			}
 
-			// pipe from tunnel to peer
-			addr, err := net.ResolveUDPAddr("udp", dgram.Addr())
-			if err != nil {
-				log.Debugf("[tcpserver-udp] addr error, addr: %s, err: %v", dgram.Addr(), err)
-				continue // drop silently
-			}
-			if _, err := pc.WriteTo(dgram.Data, addr); err != nil {
-				log.Debugf("[tcpserver] udp-tun %s -> %s : %s", cc.RemoteAddr(), addr, err)
+			if _, err = pc.Write(dgram.Data); err != nil {
+				log.Debugf("[tcpserver] udp-tun %s -> %s : %s", cc.RemoteAddr(), Server8422, err)
 				errChan <- err
 				return
 			}
 			if util.Debug {
-				log.Debugf("[tcpserver] udp-tun %s >>> %s length: %d", cc.RemoteAddr(), addr, len(dgram.Data))
+				log.Debugf("[tcpserver] udp-tun %s >>> %s length: %d", cc.RemoteAddr(), Server8422, len(dgram.Data))
 			}
 		}
 	}()
@@ -217,19 +145,16 @@ func (c *fakeUDPTunnelConn) ReadFrom(b []byte) (n int, addr net.Addr, err error)
 		return
 	}
 	n = copy(b, dgram.Data)
-	addr, err = net.ResolveUDPAddr("udp", dgram.Addr())
-	if err != nil {
-		log.Debugf("[tcpserver-udp] addr error, addr: %s, err: %v", dgram.Addr(), err)
-	}
+	addr = dgram.Addr()
 	return
 }
 
 func (c *fakeUDPTunnelConn) Write(b []byte) (n int, err error) {
-	return c.WriteTo(b, c.targetAddr)
+	return c.WriteTo(b)
 }
 
-func (c *fakeUDPTunnelConn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
-	dgram := NewDatagramPacket(addr, b)
+func (c *fakeUDPTunnelConn) WriteTo(b []byte) (n int, err error) {
+	dgram := NewDatagramPacket(b)
 	if err = dgram.Write(c.Conn); err != nil {
 		return
 	}

@@ -117,7 +117,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 		return err
 	}
 	c.deleteFirewallRuleAndSetupDNS(ctx)
-	c.detectConflictDevice()
+	//c.detectConflictDevice()
 	return
 }
 
@@ -187,7 +187,7 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context) (err error) {
 	}
 	r := Route{
 		ServeNodes: []string{
-			fmt.Sprintf("tun://:8421/127.0.0.1:8421?net=%s&route=%s", c.localTunIP.String(), strings.Join(list, ",")),
+			fmt.Sprintf("tun://:8421/127.0.0.1:8422?net=%s&route=%s", c.localTunIP.String(), strings.Join(list, ",")),
 		},
 		ChainNode: "tcp://127.0.0.1:10800",
 		Retries:   5,

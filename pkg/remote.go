@@ -55,7 +55,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 	for _, ipNet := range nodeCIDR {
 		args = append(args, "iptables -t nat -A POSTROUTING -s "+ipNet.String()+" -o eth0 -j MASQUERADE")
 	}
-	args = append(args, "kubevpn serve -L tcp://:10800 -L tun://:8421?net="+trafficManagerIP+" --debug=true")
+	args = append(args, "kubevpn serve -L tcp://:10800 -L tun://:8422?net="+trafficManagerIP+" --debug=true")
 
 	t := true
 	zero := int64(0)

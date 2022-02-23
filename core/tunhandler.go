@@ -20,16 +20,21 @@ func ipToTunRouteKey(ip net.IP) string {
 }
 
 type tunHandler struct {
-	options *HandlerOptions
-	routes  sync.Map
-	chExit  chan struct{}
+	options      *HandlerOptions
+	routes       sync.Map
+	chExit       chan struct{}
+	requestChan  chan []byte
+	responseChan chan []byte
 }
 
 // TunHandler creates a handler for tun tunnel.
 func TunHandler(opts ...HandlerOption) Handler {
 	h := &tunHandler{
-		options: &HandlerOptions{},
-		chExit:  make(chan struct{}, 1),
+		options:      &HandlerOptions{},
+		routes:       sync.Map{},
+		chExit:       make(chan struct{}, 1),
+		requestChan:  make(chan []byte, 1000*1000),
+		responseChan: make(chan []byte, 1000*1000),
 	}
 	for _, opt := range opts {
 		opt(h.options)
@@ -144,7 +149,6 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 			err := func() error {
 				b := util.SPool.Get().([]byte)
 				defer util.SPool.Put(b)
-
 				n, err := tun.Read(b)
 				if err != nil {
 					select {
@@ -153,52 +157,8 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 					}
 					return err
 				}
-
-				var src, dst net.IP
-				if waterutil.IsIPv4(b[:n]) {
-					header, err := ipv4.ParseHeader(b[:n])
-					if err != nil {
-						log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
-						return nil
-					}
-					if util.Debug {
-						log.Debugf("[tun] %s", header.String())
-					}
-					src, dst = header.Src, header.Dst
-				} else if waterutil.IsIPv6(b[:n]) {
-					header, err := ipv6.ParseHeader(b[:n])
-					if err != nil {
-						log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
-						return nil
-					}
-					if util.Debug {
-						log.Debugf("[tun] %s", header.String())
-					}
-					src, dst = header.Src, header.Dst
-				} else {
-					log.Debugf("[tun] unknown packet")
-					return nil
-				}
-
-				// client side, deliver packet directly.
-				if raddr != nil {
-					_, err := conn.WriteTo(b[:n], raddr)
-					return err
-				}
-
-				addr := h.findRouteFor(dst)
-				if addr == nil {
-					log.Debugf("[tun] no route for %s -> %s", src, dst)
-					return nil
-				}
-
-				if util.Debug {
-					log.Debugf("[tun] find route: %s -> %s", dst, addr)
-				}
-				if _, err := conn.WriteTo(b[:n], addr); err != nil {
-					return err
-				}
-				return nil
+				h.requestChan <- b[:n]
+				return h.processRequest(b[:n], tun, raddr, conn)
 			}()
 
 			if err != nil {
@@ -218,65 +178,8 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 				if err != nil && err != shadowaead.ErrShortPacket {
 					return err
 				}
-
-				var src, dst net.IP
-				if waterutil.IsIPv4(b[:n]) {
-					header, err := ipv4.ParseHeader(b[:n])
-					if err != nil {
-						log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
-						return nil
-					}
-					if util.Debug {
-						log.Debugf("[tun] %s", header.String())
-					}
-					src, dst = header.Src, header.Dst
-				} else if waterutil.IsIPv6(b[:n]) {
-					header, err := ipv6.ParseHeader(b[:n])
-					if err != nil {
-						log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
-						return nil
-					}
-					if util.Debug {
-						log.Debugf("[tun] %s", header.String())
-					}
-					src, dst = header.Src, header.Dst
-				} else {
-					log.Debugf("[tun] unknown packet")
-					return nil
-				}
-
-				// client side, deliver packet to tun device.
-				if raddr != nil {
-					_, err := tun.Write(b[:n])
-					return err
-				}
-
-				routeKey := ipToTunRouteKey(src)
-				if actual, loaded := h.routes.LoadOrStore(routeKey, addr); loaded {
-					if actual.(net.Addr).String() != addr.String() {
-						log.Debugf("[tun] update route: %s -> %s (old %s)", src, addr, actual.(net.Addr))
-						h.routes.Store(routeKey, addr)
-					}
-				} else {
-					log.Debugf("[tun] new route: %s -> %s", src, addr)
-				}
-
-				if addr := h.findRouteFor(dst); addr != nil {
-					if util.Debug {
-						log.Debugf("[tun] find route: %s -> %s", dst, addr)
-					}
-					_, err := conn.WriteTo(b[:n], addr)
-					return err
-				}
-
-				if _, err := tun.Write(b[:n]); err != nil {
-					select {
-					case h.chExit <- struct{}{}:
-					default:
-					}
-					return err
-				}
-				return nil
+				h.responseChan <- b[:n]
+				return h.processResponse(b, tun, raddr, addr, conn)
 			}()
 
 			if err != nil {
@@ -292,4 +195,113 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 	case <-ctx.Done():
 		return nil
 	}
+}
+
+func (h *tunHandler) processResponse(b []byte, tun net.Conn, raddr net.Addr, addr net.Addr, conn net.PacketConn) error {
+	var src, dst net.IP
+	if waterutil.IsIPv4(b) {
+		header, err := ipv4.ParseHeader(b)
+		if err != nil {
+			log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
+			return nil
+		}
+		if util.Debug {
+			log.Debugf("[tun] %s", header.String())
+		}
+		src, dst = header.Src, header.Dst
+	} else if waterutil.IsIPv6(b) {
+		header, err := ipv6.ParseHeader(b)
+		if err != nil {
+			log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
+			return nil
+		}
+		if util.Debug {
+			log.Debugf("[tun] %s", header.String())
+		}
+		src, dst = header.Src, header.Dst
+	} else {
+		log.Debugf("[tun] unknown packet")
+		return nil
+	}
+
+	// client side, deliver packet to tun device.
+	if raddr != nil {
+		_, err := tun.Write(b)
+		return err
+	}
+
+	routeKey := ipToTunRouteKey(src)
+	if actual, loaded := h.routes.LoadOrStore(routeKey, addr); loaded {
+		if actual.(net.Addr).String() != addr.String() {
+			log.Debugf("[tun] update route: %s -> %s (old %s)", src, addr, actual.(net.Addr))
+			h.routes.Store(routeKey, addr)
+		}
+	} else {
+		log.Debugf("[tun] new route: %s -> %s", src, addr)
+	}
+
+	if addr := h.findRouteFor(dst); addr != nil {
+		if util.Debug {
+			log.Debugf("[tun] find route: %s -> %s", dst, addr)
+		}
+		_, err := conn.WriteTo(b, addr)
+		return err
+	}
+
+	if _, err := tun.Write(b); err != nil {
+		select {
+		case h.chExit <- struct{}{}:
+		default:
+		}
+		return err
+	}
+	return nil
+}
+
+func (h *tunHandler) processRequest(b []byte, tun net.Conn, raddr net.Addr, conn net.PacketConn) error {
+	var src, dst net.IP
+	if waterutil.IsIPv4(b) {
+		header, err := ipv4.ParseHeader(b)
+		if err != nil {
+			log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
+			return nil
+		}
+		if util.Debug {
+			log.Debugf("[tun] %s", header.String())
+		}
+		src, dst = header.Src, header.Dst
+	} else if waterutil.IsIPv6(b) {
+		header, err := ipv6.ParseHeader(b)
+		if err != nil {
+			log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
+			return nil
+		}
+		if util.Debug {
+			log.Debugf("[tun] %s", header.String())
+		}
+		src, dst = header.Src, header.Dst
+	} else {
+		log.Debugf("[tun] unknown packet")
+		return nil
+	}
+
+	// client side, deliver packet directly.
+	if raddr != nil {
+		_, err := conn.WriteTo(b, raddr)
+		return err
+	}
+
+	addr := h.findRouteFor(dst)
+	if addr == nil {
+		log.Debugf("[tun] no route for %s -> %s", src, dst)
+		return nil
+	}
+
+	if util.Debug {
+		log.Debugf("[tun] find route: %s -> %s", dst, addr)
+	}
+	if _, err := conn.WriteTo(b, addr); err != nil {
+		return err
+	}
+	return nil
 }
