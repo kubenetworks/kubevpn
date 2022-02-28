@@ -7,9 +7,22 @@ on:
     branches: [ master ]
 
 jobs:
-
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.17
+      - name: Push image to docker hub
+        run: |
+          echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USER }} --password-stdin
+          export VERSION=test
+          make all-image
   linux:
     runs-on: ubuntu-latest
+    needs: [ "image" ]
     steps:
       - uses: actions/checkout@v2
 
@@ -31,7 +44,9 @@ jobs:
         run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
 
       - name: Build
-        run: make kubevpn-linux-amd64
+        run: |
+          export VERSION=test
+          make kubevpn-linux-amd64
 
       - name: Wait for pods reviews to be ready
         run: |
@@ -46,6 +61,7 @@ jobs:
 
   macos:
     runs-on: macos-latest
+    needs: [ "image" ]
     steps:
       - uses: actions/checkout@v2
 
@@ -80,7 +96,9 @@ jobs:
         run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
 
       - name: Build
-        run: make kubevpn-darwin-amd64
+        run: |
+          export VERSION=test
+          make kubevpn-darwin-amd64
 
       - name: Wait for pods reviews to be ready
         run: |

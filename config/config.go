@@ -13,11 +13,14 @@ const (
 	SidecarEnvoyConfig  = "envoy-config"
 	SidecarVPN          = "vpn"
 
-	ImageServer       = "naison/kubevpn:v2"
-	ImageMesh         = "naison/kubevpnmesh:v2"
-	ImageControlPlane = "naison/envoy-xds-server:latest"
-
 	s = "223.254.254.100/24"
+)
+
+var (
+	Version           = ""
+	ImageServer       = "naison/kubevpn:" + Version
+	ImageMesh         = "naison/kubevpnmesh:" + Version
+	ImageControlPlane = "naison/envoy-xds-server:" + Version
 )
 
 var CIDR *net.IPNet

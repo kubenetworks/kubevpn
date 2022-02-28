@@ -1,5 +1,4 @@
-# These are the values we want to pass for VERSION and BUILD
-VERSION := $(shell git tag -l --sort=v:refname | tail -1)
+VERSION ?= $(shell git tag -l --sort=v:refname | tail -1)
 GIT_COMMIT := $(shell git describe --match=NeVeRmAtCh --always --abbrev=40)
 BUILD_TIME := $(shell date +"%Y-%m-%dT%H:%M:%SZ")
 BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
@@ -9,12 +8,13 @@ GOARCH := $(shell go env GOHOSTARCH)
 TARGET := kubevpn-${GOOS}-${GOARCH}
 OS_ARCH := ${GOOS}/${GOARCH}
 
-FOLDER := github.com/wencaiwulue/kubevpn/cmd/kubevpn
-CONTROL_PLANE_FOLDER := github.com/wencaiwulue/kubevpn/pkg/controlplane/cmd/server
+BASE := github.com/wencaiwulue/kubevpn
+FOLDER := ${BASE}/cmd/kubevpn
+CONTROL_PLANE_FOLDER := ${BASE}/pkg/controlplane/cmd/server
 
 # Setup the -ldflags option for go build here, interpolate the variable values
 LDFLAGS=--ldflags "\
- -X ${FOLDER}/cmds.Version=${VERSION} \
+ -X ${BASE}/config.Version=${VERSION} \
  -X ${FOLDER}/cmds.BuildTime=${BUILD_TIME} \
  -X ${FOLDER}/cmds.GitCommit=${GIT_COMMIT} \
  -X ${FOLDER}/cmds.Branch=${BRANCH} \
@@ -78,20 +78,20 @@ kubevpn-linux-386:
 .PHONY: image
 image: kubevpn-linux-amd64
 	mv kubevpn-linux-amd64 kubevpn
-	docker build -t naison/kubevpn:v2 -f ./dockerfile/server/Dockerfile .
+	docker build -t naison/kubevpn:${VERSION} -f ./dockerfile/server/Dockerfile .
 	rm -fr kubevpn
-	docker push naison/kubevpn:v2
+	docker push naison/kubevpn:${VERSION}
 
 .PHONY: image-mesh
 image-mesh:
-	docker build -t naison/kubevpnmesh:v2 -f ./dockerfile/mesh/Dockerfile .
-	docker push naison/kubevpnmesh:v2
+	docker build -t naison/kubevpnmesh:${VERSION} -f ./dockerfile/mesh/Dockerfile .
+	docker push naison/kubevpnmesh:${VERSION}
 
 .PHONY: image-control-plane
 image-control-plane:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o envoy-xds-server ${CONTROL_PLANE_FOLDER}
 	chmod +x envoy-xds-server
-	docker build -t naison/envoy-xds-server:latest -f ./dockerfile/controlplane/Dockerfile .
+	docker build -t naison/envoy-xds-server:${VERSION} -f ./dockerfile/controlplane/Dockerfile .
 	rm -fr envoy-xds-server
-	docker push naison/envoy-xds-server:latest
+	docker push naison/envoy-xds-server:${VERSION}
 
