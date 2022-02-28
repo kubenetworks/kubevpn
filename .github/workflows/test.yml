@@ -42,7 +42,7 @@ jobs:
           route -n
 
       - name: Test
-        run: go test -v ./test/
+        run: go test -v ./test/function_test.go
 
   macos:
     runs-on: macos-latest
@@ -91,7 +91,7 @@ jobs:
           netstat -anr
 
       - name: Test
-        run: go test -v ./test/
+        run: go test -v ./test/function_test.go
 
 #  windows:
 #    runs-on: windows-latest
