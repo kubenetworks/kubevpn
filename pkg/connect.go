@@ -6,6 +6,7 @@ import (
 	"fmt"
 	errors2 "github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/config"
 	"github.com/wencaiwulue/kubevpn/dns"
 	"github.com/wencaiwulue/kubevpn/util"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -70,7 +71,7 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 					LocalTunIP:           c.localTunIP.IP.String(),
 					InboundPodTunIP:      virtualShadowIp.String(),
 					TrafficManagerRealIP: c.routerIP.String(),
-					Route:                util.CIDR.String(),
+					Route:                config.CIDR.String(),
 				}
 				// TODO OPTIMIZE CODE
 				if c.Mode == Mesh {
@@ -95,7 +96,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err != nil {
 		return
 	}
-	trafficMangerNet := net.IPNet{IP: util.RouterIP, Mask: util.CIDR.Mask}
+	trafficMangerNet := net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}
 	c.routerIP, err = CreateOutboundPod(c.clientset, c.Namespace, trafficMangerNet.String(), c.cidrs)
 	if err != nil {
 		return
@@ -134,7 +135,7 @@ func (c *ConnectOptions) portForward(ctx context.Context) error {
 				err := util.PortForwardPod(
 					c.config,
 					c.restclient,
-					util.TrafficManager,
+					config.PodTrafficManager,
 					c.Namespace,
 					"10800:10800",
 					readyChan,
@@ -150,7 +151,7 @@ func (c *ConnectOptions) portForward(ctx context.Context) error {
 				}
 				if apierrors.IsNotFound(err) {
 					log.Errorln("can not found outbound pod, try to create one")
-					tm := net.IPNet{IP: util.RouterIP, Mask: util.CIDR.Mask}
+					tm := net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}
 					if _, err = CreateOutboundPod(c.clientset, c.Namespace, tm.String(), c.cidrs); err != nil {
 						log.Errorf("error while create traffic manager, will retry after a snap, err: %v", err)
 					}
@@ -181,7 +182,7 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context) (err error) {
 	if util.IsWindows() {
 		c.localTunIP.Mask = net.CIDRMask(0, 32)
 	}
-	var list = []string{util.CIDR.String()}
+	var list = []string{config.CIDR.String()}
 	for _, ipNet := range c.cidrs {
 		list = append(list, ipNet.String())
 	}
@@ -225,7 +226,7 @@ func (c *ConnectOptions) detectConflictDevice() {
 }
 
 func (c *ConnectOptions) setupDNS() {
-	relovConf, err := dns.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, util.TrafficManager, c.Namespace)
+	relovConf, err := dns.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, config.PodTrafficManager, c.Namespace)
 	if err != nil {
 		log.Fatal(err)
 	}

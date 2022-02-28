@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/config"
 	"github.com/wencaiwulue/kubevpn/dns"
-	"github.com/wencaiwulue/kubevpn/util"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -73,7 +73,7 @@ func UpdateRefCount(clientset *kubernetes.Clientset, namespace, name string, inc
 			},
 		})
 		_, err = clientset.CoreV1().Pods(namespace).
-			Patch(context.TODO(), util.TrafficManager, types.JSONPatchType, patch, v1.PatchOptions{})
+			Patch(context.TODO(), config.PodTrafficManager, types.JSONPatchType, patch, v1.PatchOptions{})
 		return err
 	}); err != nil {
 		log.Errorf("update ref count error, error: %v", err)
@@ -83,8 +83,8 @@ func UpdateRefCount(clientset *kubernetes.Clientset, namespace, name string, inc
 }
 
 func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, namespace string) {
-	UpdateRefCount(clientset, namespace, util.TrafficManager, -1)
-	pod, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), util.TrafficManager, v1.GetOptions{})
+	UpdateRefCount(clientset, namespace, config.PodTrafficManager, -1)
+	pod, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), config.PodTrafficManager, v1.GetOptions{})
 	if err != nil {
 		log.Error(err)
 		return
@@ -98,10 +98,10 @@ func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, name
 	if refCount <= 0 {
 		zero := int64(0)
 		log.Info("refCount is zero, prepare to clean up resource")
-		_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), util.TrafficManager, v1.DeleteOptions{
+		_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), config.PodTrafficManager, v1.DeleteOptions{
 			GracePeriodSeconds: &zero,
 		})
-		_ = clientset.CoreV1().Pods(namespace).Delete(context.TODO(), util.TrafficManager, v1.DeleteOptions{
+		_ = clientset.CoreV1().Pods(namespace).Delete(context.TODO(), config.PodTrafficManager, v1.DeleteOptions{
 			GracePeriodSeconds: &zero,
 		})
 	}

@@ -13,7 +13,7 @@ FOLDER := github.com/wencaiwulue/kubevpn/cmd/kubevpn
 CONTROL_PLANE_FOLDER := github.com/wencaiwulue/kubevpn/pkg/controlplane/cmd/server
 
 # Setup the -ldflags option for go build here, interpolate the variable values
-LDFLAGS=--ldflags "-w -s \
+LDFLAGS=--ldflags "\
  -X ${FOLDER}/cmds.Version=${VERSION} \
  -X ${FOLDER}/cmds.BuildTime=${BUILD_TIME} \
  -X ${FOLDER}/cmds.GitCommit=${GIT_COMMIT} \

@@ -3,11 +3,13 @@ package cmds
 import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	config2 "github.com/wencaiwulue/kubevpn/config"
 	"github.com/wencaiwulue/kubevpn/driver"
 	"github.com/wencaiwulue/kubevpn/pkg"
 	"github.com/wencaiwulue/kubevpn/util"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
+	"net/http"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -21,7 +23,7 @@ func init() {
 	connectCmd.PersistentFlags().StringArrayVar(&connect.Workloads, "workloads", []string{}, "workloads, like: pods/tomcat, deployment/nginx, replicaset/tomcat...")
 	connectCmd.Flags().StringVar((*string)(&connect.Mode), "mode", string(pkg.Reverse), "default mode is reverse")
 	connectCmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "headers, format is k=v, like: k1=v1,k2=v2")
-	connectCmd.Flags().BoolVar(&util.Debug, "debug", false, "true/false")
+	connectCmd.Flags().BoolVar(&config2.Debug, "debug", false, "true/false")
 	RootCmd.AddCommand(connectCmd)
 }
 
@@ -33,10 +35,12 @@ var connectCmd = &cobra.Command{
 		if !util.IsAdmin() {
 			util.RunWithElevated()
 			os.Exit(0)
+		} else {
+			go func() { log.Info(http.ListenAndServe("localhost:6060", nil)) }()
 		}
 	},
 	PreRun: func(*cobra.Command, []string) {
-		util.InitLogger(util.Debug)
+		util.InitLogger(config2.Debug)
 		if util.IsWindows() {
 			driver.InstallWireGuardTunDriver()
 		}

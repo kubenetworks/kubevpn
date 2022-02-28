@@ -2,7 +2,7 @@ package tun
 
 import (
 	"fmt"
-	"github.com/wencaiwulue/kubevpn/util"
+	"github.com/wencaiwulue/kubevpn/config"
 	"net"
 	"os/exec"
 	"strings"
@@ -26,7 +26,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 
 	mtu := cfg.MTU
 	if mtu <= 0 {
-		mtu = util.DefaultMTU
+		mtu = config.DefaultMTU
 	}
 
 	cmd := fmt.Sprintf("ifconfig %s inet %s %s mtu %d up", ifce.Name(), cfg.Addr, ip.String(), mtu)

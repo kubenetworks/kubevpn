@@ -1,16 +1,15 @@
 package exchange
 
 import (
+	"github.com/wencaiwulue/kubevpn/config"
 	"github.com/wencaiwulue/kubevpn/util"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-const VPN = "vpn"
-
 func RemoveContainer(spec *v1.PodSpec) {
 	for i := 0; i < len(spec.Containers); i++ {
-		if spec.Containers[i].Name == VPN {
+		if spec.Containers[i].Name == config.SidecarVPN {
 			spec.Containers = append(spec.Containers[:i], spec.Containers[i+1:]...)
 		}
 	}
@@ -19,15 +18,15 @@ func RemoveContainer(spec *v1.PodSpec) {
 func AddContainer(spec *v1.PodSpec, c util.PodRouteConfig) {
 	// remove vpn container if already exist
 	for i := 0; i < len(spec.Containers); i++ {
-		if spec.Containers[i].Name == VPN {
+		if spec.Containers[i].Name == config.SidecarVPN {
 			spec.Containers = append(spec.Containers[:i], spec.Containers[i+1:]...)
 		}
 	}
 	t := true
 	zero := int64(0)
 	spec.Containers = append(spec.Containers, v1.Container{
-		Name:    VPN,
-		Image:   "naison/kubevpn:v2",
+		Name:    config.SidecarVPN,
+		Image:   config.ImageServer,
 		Command: []string{"/bin/sh", "-c"},
 		Args: []string{
 			"sysctl net.ipv4.ip_forward=1;" +
@@ -38,7 +37,7 @@ func AddContainer(spec *v1.PodSpec, c util.PodRouteConfig) {
 				"iptables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE;" +
 				"sysctl -w net.ipv4.conf.all.route_localnet=1;" +
 				"iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination " + c.LocalTunIP + ";" +
-				"kubevpn serve -L 'tun://0.0.0.0:8421/" + c.TrafficManagerRealIP + ":8421?net=" + c.InboundPodTunIP + "&route=" + c.Route + "' --debug=true",
+				"kubevpn serve -L 'tun://0.0.0.0:8421/" + c.TrafficManagerRealIP + ":8422?net=" + c.InboundPodTunIP + "&route=" + c.Route + "' --debug=true",
 		},
 		SecurityContext: &v1.SecurityContext{
 			Capabilities: &v1.Capabilities{

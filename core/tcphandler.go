@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/util"
+	"github.com/wencaiwulue/kubevpn/config"
 	"net"
 	"time"
 )
@@ -22,7 +22,7 @@ func (c *fakeUDPTunConnector) ConnectContext(_ context.Context, conn net.Conn, n
 	case "tcp", "tcp4", "tcp6":
 		return nil, fmt.Errorf("%s unsupported", network)
 	}
-	_ = conn.SetDeadline(time.Now().Add(util.ConnectTimeout))
+	_ = conn.SetDeadline(time.Now().Add(config.ConnectTimeout))
 	defer conn.SetDeadline(time.Time{})
 
 	targetAddr, _ := net.ResolveUDPAddr("udp", address)
@@ -42,7 +42,7 @@ func (h *fakeUdpHandler) Init(...HandlerOption) {
 
 func (h *fakeUdpHandler) Handle(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
-	if util.Debug {
+	if config.Debug {
 		log.Debugf("[tcpserver] %s -> %s\n", conn.RemoteAddr(), conn.LocalAddr())
 	}
 	h.handleUDPTunnel(conn)
@@ -59,7 +59,7 @@ func (h *fakeUdpHandler) handleUDPTunnel(conn net.Conn) {
 		return
 	}
 	defer uc.Close()
-	if util.Debug {
+	if config.Debug {
 		log.Debugf("[tcpserver] udp-tun %s <- %s\n", conn.RemoteAddr(), uc.LocalAddr())
 	}
 	log.Debugf("[tcpserver] udp-tun %s <-> %s", conn.RemoteAddr(), uc.LocalAddr())
@@ -72,8 +72,8 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc *net.UDPConn) (err erro
 	errChan := make(chan error, 2)
 
 	go func() {
-		b := util.MPool.Get().([]byte)
-		defer util.MPool.Put(b)
+		b := MPool.Get().([]byte)
+		defer MPool.Put(b)
 
 		for {
 			n, err := pc.Read(b)
@@ -90,7 +90,7 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc *net.UDPConn) (err erro
 				errChan <- err
 				return
 			}
-			if util.Debug {
+			if config.Debug {
 				log.Debugf("[tcpserver] udp-tun %s <<< %s length: %d", cc.RemoteAddr(), dgram.Addr(), len(dgram.Data))
 			}
 		}
@@ -110,7 +110,7 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc *net.UDPConn) (err erro
 				errChan <- err
 				return
 			}
-			if util.Debug {
+			if config.Debug {
 				log.Debugf("[tcpserver] udp-tun %s >>> %s length: %d", cc.RemoteAddr(), Server8422, len(dgram.Data))
 			}
 		}

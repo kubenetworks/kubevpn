@@ -1,4 +1,4 @@
-package tlsconfig
+package config
 
 import (
 	"crypto/tls"
@@ -16,7 +16,7 @@ func init() {
 
 func TestName(t *testing.T) {
 	listen, _ := net.Listen("tcp", ":9090")
-	listener := tls.NewListener(listen, TlsconfigServer)
+	listener := tls.NewListener(listen, TlsConfigServer)
 	go func() {
 		for {
 			conn, err := listener.Accept()
@@ -41,7 +41,7 @@ func TestName(t *testing.T) {
 		log.Errorln(err)
 	}
 
-	client := tls.Client(dial, TlsconfigClient)
+	client := tls.Client(dial, TlsConfigClient)
 	client.Write([]byte("hi server"))
 	all, err := io.ReadAll(client)
 	if err != nil {

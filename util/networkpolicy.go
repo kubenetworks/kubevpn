@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/config"
 	"os/exec"
 	"time"
 )
@@ -29,11 +30,11 @@ func AddFirewallRule() {
 		"firewall",
 		"add",
 		"rule",
-		"name=" + TrafficManager,
+		"name=" + config.PodTrafficManager,
 		"dir=in",
 		"action=allow",
 		"enable=yes",
-		"remoteip=" + CIDR.String() + ",LocalSubnet",
+		"remoteip=" + config.CIDR.String() + ",LocalSubnet",
 	}...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		log.Infof("error while exec command: %s, out: %s, err: %v", cmd.Args, string(out), err)
@@ -46,7 +47,7 @@ func FindRule() bool {
 		"firewall",
 		"show",
 		"rule",
-		"name=" + TrafficManager,
+		"name=" + config.PodTrafficManager,
 	}...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		log.Infof("find route out: %s error: %v", string(out), err)

@@ -5,7 +5,7 @@ import (
 	"github.com/cilium/ipam/service/allocator"
 	"github.com/cilium/ipam/service/ipallocator"
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/util"
+	"github.com/wencaiwulue/kubevpn/config"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -32,13 +32,13 @@ func NewDHCPManager(client v12.ConfigMapInterface, namespace string, cidr *net.I
 
 //	todo optimize dhcp, using mac address, ip and deadline as unit
 func (d *DHCPManager) InitDHCP() error {
-	configMap, err := d.client.Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
+	configMap, err := d.client.Get(context.Background(), config.PodTrafficManager, metav1.GetOptions{})
 	if err == nil && configMap != nil {
 		return nil
 	}
 	result := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      util.TrafficManager,
+			Name:      config.PodTrafficManager,
 			Namespace: d.namespace,
 			Labels:    map[string]string{},
 		},
@@ -90,7 +90,7 @@ func (d *DHCPManager) ReleaseIpToDHCP(ip *net.IPNet) error {
 }
 
 func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) error {
-	cm, err := d.client.Get(context.Background(), util.TrafficManager, metav1.GetOptions{})
+	cm, err := d.client.Get(context.Background(), config.PodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		log.Errorf("failed to get dhcp, err: %v", err)
 		return err

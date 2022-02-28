@@ -3,7 +3,7 @@ package tun
 import (
 	"errors"
 	"fmt"
-	"github.com/wencaiwulue/kubevpn/util"
+	"github.com/wencaiwulue/kubevpn/config"
 	"net"
 	"syscall"
 
@@ -36,7 +36,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 
 	mtu := cfg.MTU
 	if mtu <= 0 {
-		mtu = util.DefaultMTU
+		mtu = config.DefaultMTU
 	}
 
 	cmd := fmt.Sprintf("ip link set dev %s mtu %d", ifce.Name(), mtu)

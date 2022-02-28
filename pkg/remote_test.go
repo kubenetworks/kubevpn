@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/config"
 	"github.com/wencaiwulue/kubevpn/util"
 	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -131,7 +132,7 @@ func TestPreCheck(t *testing.T) {
 }
 
 func init() {
-	util.InitLogger(util.Debug)
+	util.InitLogger(config.Debug)
 }
 
 func TestBackoff(t *testing.T) {

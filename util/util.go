@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"github.com/wencaiwulue/kubevpn/config"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
@@ -479,7 +480,7 @@ func Heartbeats(ctx context.Context) {
 			c2 <- struct{}{}
 		case <-c2:
 			for i := 0; i < 4; i++ {
-				_, _ = Ping(RouterIP.String())
+				_, _ = Ping(config.RouterIP.String())
 			}
 		case <-ctx.Done():
 			return

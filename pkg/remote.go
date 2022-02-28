@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/config"
 	"github.com/wencaiwulue/kubevpn/pkg/exchange"
 	"github.com/wencaiwulue/kubevpn/util"
 	v1 "k8s.io/api/core/v1"
@@ -32,7 +33,7 @@ import (
 func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, trafficManagerIP string, nodeCIDR []*net.IPNet) (net.IP, error) {
 	manager, _, err := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
 		namespace,
-		fields.OneTermEqualSelector("app", util.TrafficManager).String(),
+		fields.OneTermEqualSelector("app", config.PodTrafficManager).String(),
 		time.Second*5,
 		func(pods []*v1.Pod) sort.Interface {
 			return sort.Reverse(podutils.ActivePods(pods))
@@ -50,7 +51,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 		"iptables -F",
 		"iptables -P INPUT ACCEPT",
 		"iptables -P FORWARD ACCEPT",
-		"iptables -t nat -A POSTROUTING -s " + util.CIDR.String() + " -o eth0 -j MASQUERADE",
+		"iptables -t nat -A POSTROUTING -s " + config.CIDR.String() + " -o eth0 -j MASQUERADE",
 	}
 	for _, ipNet := range nodeCIDR {
 		args = append(args, "iptables -t nat -A POSTROUTING -s "+ipNet.String()+" -o eth0 -j MASQUERADE")
@@ -61,17 +62,17 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 	zero := int64(0)
 	manager = &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        util.TrafficManager,
+			Name:        config.PodTrafficManager,
 			Namespace:   namespace,
-			Labels:      map[string]string{"app": util.TrafficManager},
+			Labels:      map[string]string{"app": config.PodTrafficManager},
 			Annotations: map[string]string{"ref-count": "1"},
 		},
 		Spec: v1.PodSpec{
 			RestartPolicy: v1.RestartPolicyAlways,
 			Containers: []v1.Container{
 				{
-					Name:    "vpn",
-					Image:   "naison/kubevpn:v2",
+					Name:    config.SidecarVPN,
+					Image:   config.ImageServer,
 					Command: []string{"/bin/sh", "-c"},
 					Args:    []string{strings.Join(args, ";")},
 					SecurityContext: &v1.SecurityContext{
@@ -118,7 +119,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 		case e := <-watchStream.ResultChan():
 			if podT, ok := e.Object.(*v1.Pod); ok {
 				if phase != podT.Status.Phase {
-					log.Infof("pod %s status is %s", util.TrafficManager, podT.Status.Phase)
+					log.Infof("pod %s status is %s", config.PodTrafficManager, podT.Status.Phase)
 				}
 				if podT.Status.Phase == v1.PodRunning {
 					return net.ParseIP(podT.Status.PodIP), nil
@@ -126,7 +127,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 				phase = podT.Status.Phase
 			}
 		case <-time.Tick(time.Minute * 10):
-			return nil, errors.New(fmt.Sprintf("wait pod %s to be ready timeout", util.TrafficManager))
+			return nil, errors.New(fmt.Sprintf("wait pod %s to be ready timeout", config.PodTrafficManager))
 		}
 	}
 }

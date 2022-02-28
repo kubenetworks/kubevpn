@@ -1,19 +1,28 @@
-package util
+package config
 
 import (
 	"net"
-	"sync"
 	"time"
 )
 
-const TrafficManager = "kubevpn.traffic.manager"
-
-var CIDR *net.IPNet
-var RouterIP net.IP
-
 const (
+	PodTrafficManager = "kubevpn.traffic.manager"
+
+	SidecarEnvoyProxy   = "envoy-proxy"
+	SidecarControlPlane = "control-plane"
+	SidecarEnvoyConfig  = "envoy-config"
+	SidecarVPN          = "vpn"
+
+	ImageServer       = "naison/kubevpn:v2"
+	ImageMesh         = "naison/kubevpnmesh:v2"
+	ImageControlPlane = "naison/envoy-xds-server:latest"
+
 	s = "223.254.254.100/24"
 )
+
+var CIDR *net.IPNet
+
+var RouterIP net.IP
 
 func init() {
 	RouterIP, CIDR, _ = net.ParseCIDR(s)
@@ -23,27 +32,9 @@ func init() {
 var Debug bool
 
 var (
-	smallBufferSize  = 2 * 1024  // 2KB small buffer
-	mediumBufferSize = 8 * 1024  // 8KB medium buffer
-	largeBufferSize  = 32 * 1024 // 32KB large buffer
-)
-
-var (
-	SPool = sync.Pool{
-		New: func() interface{} {
-			return make([]byte, smallBufferSize)
-		},
-	}
-	MPool = sync.Pool{
-		New: func() interface{} {
-			return make([]byte, mediumBufferSize)
-		},
-	}
-	LPool = sync.Pool{
-		New: func() interface{} {
-			return make([]byte, largeBufferSize)
-		},
-	}
+	SmallBufferSize  = 2 * 1024  // 2KB small buffer
+	MediumBufferSize = 8 * 1024  // 8KB medium buffer
+	LargeBufferSize  = 32 * 1024 // 32KB large buffer
 )
 
 var (

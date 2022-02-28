@@ -1,4 +1,4 @@
-package tlsconfig
+package config
 
 import (
 	"crypto/tls"
@@ -12,8 +12,8 @@ var crt embed.FS
 //go:embed server.key
 var key embed.FS
 
-var TlsconfigServer *tls.Config
-var TlsconfigClient *tls.Config
+var TlsConfigServer *tls.Config
+var TlsConfigClient *tls.Config
 
 func init() {
 	crtBytes, _ := crt.ReadFile("server.crt")
@@ -22,11 +22,11 @@ func init() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	TlsconfigServer = &tls.Config{
+	TlsConfigServer = &tls.Config{
 		Certificates: []tls.Certificate{pair},
 	}
 
-	TlsconfigClient = &tls.Config{
+	TlsConfigClient = &tls.Config{
 		Certificates:       []tls.Certificate{pair},
 		InsecureSkipVerify: true,
 	}

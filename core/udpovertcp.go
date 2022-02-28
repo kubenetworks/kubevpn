@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/wencaiwulue/kubevpn/util"
 	"io"
 	"net"
 )
@@ -33,8 +32,8 @@ func (addr *DatagramPacket) Addr() net.Addr {
 }
 
 func ReadDatagramPacket(r io.Reader) (*DatagramPacket, error) {
-	b := util.LPool.Get().([]byte)
-	defer util.LPool.Put(b)
+	b := LPool.Get().([]byte)
+	defer LPool.Put(b)
 	_, err := io.ReadFull(r, b[:2])
 	if err != nil {
 		return nil, err

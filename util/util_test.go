@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	log "github.com/sirupsen/logrus"
+	config2 "github.com/wencaiwulue/kubevpn/config"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -42,7 +43,7 @@ func TestShell(t *testing.T) {
 		log.Fatal(err)
 	}
 
-	out, err := Shell(clientset, restclient, config, TrafficManager, namespace, "cat /etc/resolv.conf | grep nameserver | awk '{print$2}'")
+	out, err := Shell(clientset, restclient, config, config2.PodTrafficManager, namespace, "cat /etc/resolv.conf | grep nameserver | awk '{print$2}'")
 	serviceList, err := clientset.CoreV1().Services(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("metadata.name", "kube-dns").String(),
 	})

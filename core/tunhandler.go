@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 	"errors"
-	"github.com/wencaiwulue/kubevpn/util"
+	"github.com/wencaiwulue/kubevpn/config"
 	"net"
 	"sync"
 	"time"
@@ -20,21 +20,17 @@ func ipToTunRouteKey(ip net.IP) string {
 }
 
 type tunHandler struct {
-	options      *HandlerOptions
-	routes       sync.Map
-	chExit       chan struct{}
-	requestChan  chan []byte
-	responseChan chan []byte
+	options *HandlerOptions
+	routes  sync.Map
+	chExit  chan struct{}
 }
 
 // TunHandler creates a handler for tun tunnel.
 func TunHandler(opts ...HandlerOption) Handler {
 	h := &tunHandler{
-		options:      &HandlerOptions{},
-		routes:       sync.Map{},
-		chExit:       make(chan struct{}, 1),
-		requestChan:  make(chan []byte, 1000*1000),
-		responseChan: make(chan []byte, 1000*1000),
+		options: &HandlerOptions{},
+		routes:  sync.Map{},
+		chExit:  make(chan struct{}, 1),
 	}
 	for _, opt := range opts {
 		opt(h.options)
@@ -123,13 +119,13 @@ func (h *tunHandler) findRouteFor(dst net.IP) net.Addr {
 	if v, ok := h.routes.Load(ipToTunRouteKey(dst)); ok {
 		return v.(net.Addr)
 	}
-	for _, route := range h.options.IPRoutes {
-		if route.Dest.Contains(dst) && route.Gateway != nil {
-			if v, ok := h.routes.Load(ipToTunRouteKey(route.Gateway)); ok {
-				return v.(net.Addr)
-			}
-		}
-	}
+	//for _, route := range h.options.IPRoutes {
+	//	if route.Dest.Contains(dst) && route.Gateway != nil {
+	//		if v, ok := h.routes.Load(ipToTunRouteKey(route.Gateway)); ok {
+	//			return v.(net.Addr)
+	//		}
+	//	}
+	//}
 	return nil
 }
 
@@ -147,8 +143,8 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 	go func() {
 		for ctx.Err() == nil {
 			err := func() error {
-				b := util.SPool.Get().([]byte)
-				defer util.SPool.Put(b)
+				b := SPool.Get().([]byte)
+				defer SPool.Put(b)
 				n, err := tun.Read(b)
 				if err != nil {
 					select {
@@ -157,7 +153,6 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 					}
 					return err
 				}
-				h.requestChan <- b[:n]
 				return h.processRequest(b[:n], tun, raddr, conn)
 			}()
 
@@ -171,15 +166,14 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 	go func() {
 		for ctx.Err() == nil {
 			err := func() error {
-				b := util.SPool.Get().([]byte)
-				defer util.SPool.Put(b)
+				b := SPool.Get().([]byte)
+				defer SPool.Put(b)
 
 				n, addr, err := conn.ReadFrom(b)
 				if err != nil && err != shadowaead.ErrShortPacket {
 					return err
 				}
-				h.responseChan <- b[:n]
-				return h.processResponse(b, tun, raddr, addr, conn)
+				return h.processResponse(b[:n], tun, raddr, addr, conn)
 			}()
 
 			if err != nil {
@@ -205,7 +199,7 @@ func (h *tunHandler) processResponse(b []byte, tun net.Conn, raddr net.Addr, add
 			log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
 			return nil
 		}
-		if util.Debug {
+		if config.Debug {
 			log.Debugf("[tun] %s", header.String())
 		}
 		src, dst = header.Src, header.Dst
@@ -215,7 +209,7 @@ func (h *tunHandler) processResponse(b []byte, tun net.Conn, raddr net.Addr, add
 			log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
 			return nil
 		}
-		if util.Debug {
+		if config.Debug {
 			log.Debugf("[tun] %s", header.String())
 		}
 		src, dst = header.Src, header.Dst
@@ -241,7 +235,7 @@ func (h *tunHandler) processResponse(b []byte, tun net.Conn, raddr net.Addr, add
 	}
 
 	if addr := h.findRouteFor(dst); addr != nil {
-		if util.Debug {
+		if config.Debug {
 			log.Debugf("[tun] find route: %s -> %s", dst, addr)
 		}
 		_, err := conn.WriteTo(b, addr)
@@ -266,7 +260,7 @@ func (h *tunHandler) processRequest(b []byte, tun net.Conn, raddr net.Addr, conn
 			log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
 			return nil
 		}
-		if util.Debug {
+		if config.Debug {
 			log.Debugf("[tun] %s", header.String())
 		}
 		src, dst = header.Src, header.Dst
@@ -276,7 +270,7 @@ func (h *tunHandler) processRequest(b []byte, tun net.Conn, raddr net.Addr, conn
 			log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
 			return nil
 		}
-		if util.Debug {
+		if config.Debug {
 			log.Debugf("[tun] %s", header.String())
 		}
 		src, dst = header.Src, header.Dst
@@ -297,7 +291,7 @@ func (h *tunHandler) processRequest(b []byte, tun net.Conn, raddr net.Addr, conn
 		return nil
 	}
 
-	if util.Debug {
+	if config.Debug {
 		log.Debugf("[tun] find route: %s -> %s", dst, addr)
 	}
 	if _, err := conn.WriteTo(b, addr); err != nil {
