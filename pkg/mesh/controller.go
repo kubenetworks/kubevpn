@@ -10,19 +10,8 @@ import (
 )
 
 func RemoveContainers(spec *v1.PodTemplateSpec) {
-	for i := 0; i < len(spec.Spec.Volumes); i++ {
-		if spec.Spec.Volumes[i].Name == config.SidecarEnvoyConfig {
-			spec.Spec.Volumes = append(spec.Spec.Volumes[:i], spec.Spec.Volumes[i+1:]...)
-		}
-	}
 	for i := 0; i < len(spec.Spec.Containers); i++ {
-		for j := 0; j < len(spec.Spec.Containers[i].VolumeMounts); j++ {
-			if spec.Spec.Containers[i].VolumeMounts[j].Name == config.SidecarEnvoyConfig {
-				spec.Spec.Containers[i].VolumeMounts = append(spec.Spec.Containers[i].VolumeMounts[:j],
-					spec.Spec.Containers[i].VolumeMounts[j+1:]...)
-			}
-		}
-		if sets.NewString(config.SidecarEnvoyProxy, config.SidecarControlPlane, config.SidecarVPN).Has(spec.Spec.Containers[i].Name) {
+		if sets.NewString(config.SidecarEnvoyProxy, config.SidecarVPN).Has(spec.Spec.Containers[i].Name) {
 			spec.Spec.Containers = append(spec.Spec.Containers[:i], spec.Spec.Containers[i+1:]...)
 			i--
 		}
@@ -30,19 +19,8 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 }
 
 func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteConfig) {
-	// remove volume envoyConfig if already exist
-	for i := 0; i < len(spec.Spec.Volumes); i++ {
-		if spec.Spec.Volumes[i].Name == config.SidecarEnvoyConfig {
-			spec.Spec.Volumes = append(spec.Spec.Volumes[:i], spec.Spec.Volumes[i+1:]...)
-		}
-	}
 	// remove envoy proxy containers if already exist
-	for i := 0; i < len(spec.Spec.Containers); i++ {
-		if sets.NewString(config.SidecarEnvoyProxy, config.SidecarControlPlane, config.SidecarVPN).Has(spec.Spec.Containers[i].Name) {
-			spec.Spec.Containers = append(spec.Spec.Containers[:i], spec.Spec.Containers[i+1:]...)
-			i--
-		}
-	}
+	RemoveContainers(spec)
 	zero := int64(0)
 	t := true
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{

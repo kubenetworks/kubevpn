@@ -12,9 +12,9 @@ const (
 
 	SidecarEnvoyProxy   = "envoy-proxy"
 	SidecarControlPlane = "control-plane"
-	SidecarEnvoyConfig  = "envoy-config"
 	SidecarVPN          = "vpn"
-	VolumeEnvoyConfig   = "envoy-config"
+
+	VolumeEnvoyConfig = "envoy-config"
 
 	s = "223.254.254.100/24"
 )
@@ -36,7 +36,6 @@ func init() {
 	RouterIP, CIDR, _ = net.ParseCIDR(s)
 }
 
-// Debug is a flag that enables the debug log.
 var Debug bool
 
 var (
@@ -46,18 +45,12 @@ var (
 )
 
 var (
-	// KeepAliveTime is the keep alive time period for TCP connection.
-	KeepAliveTime = 180 * time.Second
-	// DialTimeout is the timeout of dial.
-	DialTimeout = 15 * time.Second
-	// HandshakeTimeout is the timeout of handshake.
+	KeepAliveTime    = 180 * time.Second
+	DialTimeout      = 15 * time.Second
 	HandshakeTimeout = 5 * time.Second
-	// ConnectTimeout is the timeout for connect.
-	ConnectTimeout = 5 * time.Second
-	// ReadTimeout is the timeout for reading.
-	ReadTimeout = 10 * time.Second
-	// WriteTimeout is the timeout for writing.
-	WriteTimeout = 10 * time.Second
+	ConnectTimeout   = 5 * time.Second
+	ReadTimeout      = 10 * time.Second
+	WriteTimeout     = 10 * time.Second
 )
 
 var (

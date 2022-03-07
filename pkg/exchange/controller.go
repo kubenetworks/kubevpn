@@ -11,17 +11,14 @@ func RemoveContainer(spec *v1.PodSpec) {
 	for i := 0; i < len(spec.Containers); i++ {
 		if spec.Containers[i].Name == config.SidecarVPN {
 			spec.Containers = append(spec.Containers[:i], spec.Containers[i+1:]...)
+			i--
 		}
 	}
 }
 
 func AddContainer(spec *v1.PodSpec, c util.PodRouteConfig) {
 	// remove vpn container if already exist
-	for i := 0; i < len(spec.Containers); i++ {
-		if spec.Containers[i].Name == config.SidecarVPN {
-			spec.Containers = append(spec.Containers[:i], spec.Containers[i+1:]...)
-		}
-	}
+	RemoveContainer(spec)
 	t := true
 	zero := int64(0)
 	spec.Containers = append(spec.Containers, v1.Container{
