@@ -80,12 +80,17 @@ image: kubevpn-linux-amd64
 	mv kubevpn-linux-amd64 kubevpn
 	docker build -t naison/kubevpn:${VERSION} -f ./dockerfile/server/Dockerfile .
 	rm -fr kubevpn
+	docker tag naison/kubevpn:${VERSION} naison/kubevpn:latest
 	docker push naison/kubevpn:${VERSION}
+	docker push naison/kubevpn:latest
 
 .PHONY: image-mesh
 image-mesh:
 	docker build -t naison/kubevpn-mesh:${VERSION} -f ./dockerfile/mesh/Dockerfile .
+	docker tag naison/kubevpn-mesh:${VERSION} naison/kubevpn-mesh:latest
 	docker push naison/kubevpn-mesh:${VERSION}
+	docker push naison/kubevpn-mesh:latest
+
 
 .PHONY: image-control-plane
 image-control-plane:
@@ -93,5 +98,7 @@ image-control-plane:
 	chmod +x envoy-xds-server
 	docker build -t naison/envoy-xds-server:${VERSION} -f ./dockerfile/control_plane/Dockerfile .
 	rm -fr envoy-xds-server
+	docker tag naison/envoy-xds-server:${VERSION} naison/envoy-xds-server:latest
 	docker push naison/envoy-xds-server:${VERSION}
+	docker push naison/envoy-xds-server:latest
 

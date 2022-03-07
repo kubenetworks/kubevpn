@@ -79,7 +79,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 						Items: []v1.KeyToPath{
 							{
 								Key:  config.Envoy,
-								Path: "envoy.yaml",
+								Path: "envoy-config.yaml",
 							},
 						},
 						Optional: &f,
@@ -114,20 +114,20 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 					},
 					ImagePullPolicy: v1.PullAlways,
 				},
-				//{
-				//	Name:    config.SidecarControlPlane,
-				//	Image:   config.ImageControlPlane,
-				//	Command: []string{"envoy-xds-server"},
-				//	Args:    []string{"--watchDirectoryFileName", "/etc/envoy/envoy.yaml"},
-				//	VolumeMounts: []v1.VolumeMount{
-				//		{
-				//			Name:      config.VolumeEnvoyConfig,
-				//			ReadOnly:  true,
-				//			MountPath: "/etc/envoy",
-				//		},
-				//	},
-				//	ImagePullPolicy: v1.PullAlways,
-				//},
+				{
+					Name:    config.SidecarControlPlane,
+					Image:   config.ImageControlPlane,
+					Command: []string{"envoy-xds-server"},
+					Args:    []string{"--watchDirectoryFileName", "/etc/envoy/envoy-config.yaml"},
+					VolumeMounts: []v1.VolumeMount{
+						{
+							Name:      config.VolumeEnvoyConfig,
+							ReadOnly:  true,
+							MountPath: "/etc/envoy",
+						},
+					},
+					ImagePullPolicy: v1.PullAlways,
+				},
 			},
 			RestartPolicy:     v1.RestartPolicyAlways,
 			PriorityClassName: "system-cluster-critical",

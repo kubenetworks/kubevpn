@@ -20,7 +20,6 @@ const (
 	grpcMaxConcurrentStreams = 1000000
 )
 
-// RunServer starts an xDS server at the given port.
 func RunServer(ctx context.Context, server serverv3.Server, port uint) {
 	grpcServer := grpc.NewServer(grpc.MaxConcurrentStreams(grpcMaxConcurrentStreams))
 
@@ -40,6 +39,6 @@ func RunServer(ctx context.Context, server serverv3.Server, port uint) {
 
 	log.Printf("management server listening on %d\n", port)
 	if err = grpcServer.Serve(listener); err != nil {
-		log.Println(err)
+		log.Fatal(err)
 	}
 }

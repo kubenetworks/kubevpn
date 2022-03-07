@@ -54,12 +54,8 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteCo
 				"iptables -F;" +
 				"iptables -P INPUT ACCEPT;" +
 				"iptables -P FORWARD ACCEPT;" +
-				//"iptables -t nat -A PREROUTING ! -p icmp ! -s 127.0.0.1 ! -d " + config.CIDR.String() + " -j DNAT --to 127.0.0.1:15006;" +
-				//"iptables -t nat -A POSTROUTING ! -p icmp ! -s 127.0.0.1 ! -d " + config.CIDR.String() + " -j MASQUERADE;" +
-				"iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80:60000 ! -s 127.0.0.1 ! -d " + config.CIDR.String() + " -j DNAT --to 127.0.0.1:15006;" +
-				"iptables -t nat -A POSTROUTING -p tcp -m tcp --dport 80:60000 ! -s 127.0.0.1 ! -d " + config.CIDR.String() + " -j MASQUERADE;" +
-				"iptables -t nat -A PREROUTING -i eth0 -p udp --dport 80:60000 ! -s 127.0.0.1 ! -d " + config.CIDR.String() + " -j DNAT --to 127.0.0.1:15006;" +
-				"iptables -t nat -A POSTROUTING -p udp -m udp --dport 80:60000 ! -s 127.0.0.1 ! -d " + config.CIDR.String() + " -j MASQUERADE;" +
+				"iptables -t nat -A PREROUTING ! -p icmp ! -s 127.0.0.1 ! -d " + config.CIDR.String() + " -j DNAT --to 127.0.0.1:15006;" +
+				"iptables -t nat -A POSTROUTING ! -p icmp ! -s 127.0.0.1 ! -d " + config.CIDR.String() + " -j MASQUERADE;" +
 				"kubevpn serve -L 'tun://0.0.0.0:8421/" + c.TrafficManagerRealIP + ":8422?net=" + c.InboundPodTunIP + "&route=" + c.Route + "' --debug=true",
 		},
 		SecurityContext: &v1.SecurityContext{
@@ -89,7 +85,7 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteCo
 		Image:   config.ImageMesh,
 		Command: []string{"envoy", "-l", "debug", "--config-yaml"},
 		Args: []string{
-			fmt.Sprintf(s, nodeId, nodeId /*c.TrafficManagerRealIP*/, "127.0.0.1"),
+			fmt.Sprintf(s, nodeId, nodeId, c.TrafficManagerRealIP),
 		},
 		Resources: v1.ResourceRequirements{
 			Requests: map[v1.ResourceName]resource.Quantity{
@@ -102,37 +98,5 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteCo
 			},
 		},
 		ImagePullPolicy: v1.PullAlways,
-	})
-	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
-		Name:    config.SidecarControlPlane,
-		Image:   config.ImageControlPlane,
-		Command: []string{"envoy-xds-server"},
-		Args:    []string{"--watchDirectoryFileName", "/etc/envoy/envoy-config.yaml"},
-		VolumeMounts: []v1.VolumeMount{
-			{
-				Name:      config.VolumeEnvoyConfig,
-				ReadOnly:  true,
-				MountPath: "/etc/envoy",
-			},
-		},
-		ImagePullPolicy: v1.PullAlways,
-	})
-	f := false
-	spec.Spec.Volumes = append(spec.Spec.Volumes, v1.Volume{
-		Name: config.VolumeEnvoyConfig,
-		VolumeSource: v1.VolumeSource{
-			ConfigMap: &v1.ConfigMapVolumeSource{
-				LocalObjectReference: v1.LocalObjectReference{
-					Name: config.PodTrafficManager,
-				},
-				Items: []v1.KeyToPath{
-					{
-						Key:  config.Envoy,
-						Path: "envoy-config.yaml",
-					},
-				},
-				Optional: &f,
-			},
-		},
 	})
 }

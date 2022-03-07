@@ -21,7 +21,7 @@ const (
 
 var (
 	// Version inject --ldflags -X
-	Version = ""
+	Version = "latest"
 
 	ImageServer       = "naison/kubevpn:" + Version
 	ImageMesh         = "naison/kubevpn-mesh:" + Version

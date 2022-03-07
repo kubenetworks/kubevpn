@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	logger                 log.FieldLogger
+	logger                 *log.Logger
 	watchDirectoryFileName string
 	port                   uint = 9002
 )
@@ -25,25 +25,23 @@ func init() {
 }
 
 func main() {
-	// Create a cache
 	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, logger)
-	// Create a processor
-	proc := control_plane.NewProcessor(snapshotCache, log.WithField("context", "processor"))
+	proc := control_plane.NewProcessor(snapshotCache, logger)
 
 	go func() {
-		// Run the xDS server
 		ctx := context.Background()
-		srv := serverv3.NewServer(ctx, snapshotCache, nil)
-		control_plane.RunServer(ctx, srv, port)
+		server := serverv3.NewServer(ctx, snapshotCache, nil)
+		control_plane.RunServer(ctx, server, port)
 	}()
 
-	// Notify channel for file system events
-	notifyCh := make(chan control_plane.NotifyMessage)
+	notifyCh := make(chan control_plane.NotifyMessage, 100)
 
-	go func() {
-		// Watch for file changes
-		control_plane.Watch(watchDirectoryFileName, notifyCh)
-	}()
+	notifyCh <- control_plane.NotifyMessage{
+		Operation: control_plane.Create,
+		FilePath:  watchDirectoryFileName,
+	}
+
+	go control_plane.Watch(watchDirectoryFileName, notifyCh)
 
 	for {
 		select {
@@ -52,58 +50,4 @@ func main() {
 			proc.ProcessFile(msg)
 		}
 	}
-
-	//config, err := rest.InClusterConfig()
-	//if err != nil {
-	//	panic(err)
-	//}
-	//clientset, err := kubernetes.NewForConfig(config)
-	//if err != nil {
-	//	panic(err)
-	//}
-	//namespace, _, err := util.Namespace()
-	//if err != nil {
-	//	panic(err)
-	//}
-
-	//informerFactory := informers.NewSharedInformerFactoryWithOptions(
-	//	clientset,
-	//	time.Second*5,
-	//	informers.WithNamespace(namespace),
-	//	informers.WithTweakListOptions(func(options *metav1.ListOptions) {
-	//		options.FieldSelector = fields.OneTermEqualSelector(
-	//			"metadata.name", config2.PodTrafficManager,
-	//		).String()
-	//	}),
-	//)
-	//informer, err := informerFactory.ForResource(v1.SchemeGroupVersion.WithResource("configmaps"))
-	//if err != nil {
-	//	panic(err)
-	//}
-	//informer.Informer().AddEventHandler(
-	//	k8scache.FilteringResourceEventHandler{
-	//		FilterFunc: func(obj interface{}) bool {
-	//			if cm, ok := obj.(*v1.ConfigMap); ok {
-	//				if _, found := cm.Data[config2.Envoy]; found {
-	//					return true
-	//				}
-	//			}
-	//			return false
-	//		},
-	//		Handler: k8scache.ResourceEventHandlerFuncs{
-	//			AddFunc: func(obj interface{}) {
-	//				proc.ProcessConfig(obj.(*v1.ConfigMap).Data[config2.Envoy])
-	//			},
-	//			UpdateFunc: func(_, newObj interface{}) {
-	//				proc.ProcessConfig(newObj.(*v1.ConfigMap).Data[config2.Envoy])
-	//			},
-	//			DeleteFunc: func(obj interface{}) {
-	//				proc.ProcessConfig(obj.(*v1.ConfigMap).Data[config2.Envoy])
-	//			},
-	//		},
-	//	},
-	//)
-	//informerFactory.Start(context.TODO().Done())
-	//informerFactory.WaitForCacheSync(context.TODO().Done())
-	//<-context.TODO().Done()
 }
