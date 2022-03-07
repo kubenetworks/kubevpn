@@ -1,4 +1,4 @@
-package server
+package control_plane
 
 import (
 	"context"

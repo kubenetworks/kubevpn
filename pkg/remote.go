@@ -59,6 +59,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 	args = append(args, "kubevpn serve -L tcp://:10800 -L tun://:8422?net="+trafficManagerIP+" --debug=true")
 
 	t := true
+	f := false
 	zero := int64(0)
 	manager = &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -68,7 +69,23 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 			Annotations: map[string]string{"ref-count": "1"},
 		},
 		Spec: v1.PodSpec{
-			RestartPolicy: v1.RestartPolicyAlways,
+			Volumes: []v1.Volume{{
+				Name: config.VolumeEnvoyConfig,
+				VolumeSource: v1.VolumeSource{
+					ConfigMap: &v1.ConfigMapVolumeSource{
+						LocalObjectReference: v1.LocalObjectReference{
+							Name: config.PodTrafficManager,
+						},
+						Items: []v1.KeyToPath{
+							{
+								Key:  config.Envoy,
+								Path: "envoy.yaml",
+							},
+						},
+						Optional: &f,
+					},
+				},
+			}},
 			Containers: []v1.Container{
 				{
 					Name:    config.SidecarVPN,
@@ -97,7 +114,22 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 					},
 					ImagePullPolicy: v1.PullAlways,
 				},
+				//{
+				//	Name:    config.SidecarControlPlane,
+				//	Image:   config.ImageControlPlane,
+				//	Command: []string{"envoy-xds-server"},
+				//	Args:    []string{"--watchDirectoryFileName", "/etc/envoy/envoy.yaml"},
+				//	VolumeMounts: []v1.VolumeMount{
+				//		{
+				//			Name:      config.VolumeEnvoyConfig,
+				//			ReadOnly:  true,
+				//			MountPath: "/etc/envoy",
+				//		},
+				//	},
+				//	ImagePullPolicy: v1.PullAlways,
+				//},
 			},
+			RestartPolicy:     v1.RestartPolicyAlways,
 			PriorityClassName: "system-cluster-critical",
 		},
 	}

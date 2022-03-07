@@ -15,12 +15,9 @@ import (
 	dockerterm "github.com/moby/term"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/pkg/controlplane/apis/v1alpha1"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
-	"gopkg.in/yaml.v2"
 	"io"
-	"io/ioutil"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -334,32 +331,6 @@ func Ping(targetIP string) (bool, error) {
 	}
 }
 
-// ParseYaml takes in a yaml envoy config and returns a typed version
-func ParseYaml(file string) (*v1alpha1.EnvoyConfig, error) {
-	var config v1alpha1.EnvoyConfig
-
-	yamlFile, err := ioutil.ReadFile(file)
-	if err != nil {
-		return nil, fmt.Errorf("Error reading YAML file: %s\n", err)
-	}
-
-	err = yaml.Unmarshal(yamlFile, &config)
-	if err != nil {
-		return nil, err
-	}
-
-	return &config, nil
-}
-
-func ParseYamlBytes(file []byte) (*v1alpha1.EnvoyConfig, error) {
-	var config v1alpha1.EnvoyConfig
-	err := yaml.Unmarshal(file, &config)
-	if err != nil {
-		return nil, err
-	}
-	return &config, nil
-}
-
 func RolloutStatus(factory cmdutil.Factory, namespace, workloads string, timeout time.Duration) error {
 	client, _ := factory.DynamicClient()
 	r := factory.NewBuilder().
@@ -489,12 +460,14 @@ func Heartbeats(ctx context.Context) {
 }
 
 func WaitPortToBeFree(port int, timeout time.Duration) error {
+	log.Infoln(fmt.Sprintf("wait port %v to be free...", port))
 	for {
 		select {
 		case <-time.Tick(timeout):
 			return fmt.Errorf("wait port %v to be free timeout", port)
-		case <-time.Tick(time.Second * 1):
+		case <-time.Tick(time.Second * 2):
 			if !IsPortListening(port) {
+				log.Infoln(fmt.Sprintf("port %v are free", port))
 				return nil
 			}
 		}

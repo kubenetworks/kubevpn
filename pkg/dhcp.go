@@ -2,18 +2,16 @@ package pkg
 
 import (
 	"context"
+	"fmt"
 	"github.com/cilium/ipam/service/allocator"
 	"github.com/cilium/ipam/service/ipallocator"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/config"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"net"
-)
-
-const (
-	DHCP = "DHCP"
 )
 
 type DHCPManager struct {
@@ -34,6 +32,16 @@ func NewDHCPManager(client v12.ConfigMapInterface, namespace string, cidr *net.I
 func (d *DHCPManager) InitDHCP() error {
 	configMap, err := d.client.Get(context.Background(), config.PodTrafficManager, metav1.GetOptions{})
 	if err == nil && configMap != nil {
+		if _, found := configMap.Data[config.Envoy]; !found {
+			_, err = d.client.Patch(
+				context.Background(),
+				configMap.Name,
+				types.MergePatchType,
+				[]byte(fmt.Sprintf("{\"data\":{\"%s\":\"%s\"}}", config.Envoy, "")),
+				metav1.PatchOptions{},
+			)
+			return err
+		}
 		return nil
 	}
 	result := &v1.ConfigMap{
@@ -42,7 +50,7 @@ func (d *DHCPManager) InitDHCP() error {
 			Namespace: d.namespace,
 			Labels:    map[string]string{},
 		},
-		Data: map[string]string{},
+		Data: map[string]string{config.Envoy: ""},
 	}
 	_, err = d.client.Create(context.Background(), result, metav1.CreateOptions{})
 	if err != nil {
@@ -104,7 +112,7 @@ func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) erro
 	if err != nil {
 		return err
 	}
-	if err = dhcp.Restore(d.cidr, []byte(cm.Data[DHCP])); err != nil {
+	if err = dhcp.Restore(d.cidr, []byte(cm.Data[config.DHCP])); err != nil {
 		return err
 	}
 	if err = f(dhcp); err != nil {
@@ -114,10 +122,10 @@ func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) erro
 	if err != nil {
 		return err
 	}
-	cm.Data[DHCP] = string(bytes)
+	cm.Data[config.DHCP] = string(bytes)
 	_, err = d.client.Update(context.Background(), cm, metav1.UpdateOptions{})
 	if err != nil {
-		log.Errorf("update dhcp error after release ip, need to try again, err: %v", err)
+		log.Errorf("update dhcp failed, err: %v", err)
 		return err
 	}
 	return nil

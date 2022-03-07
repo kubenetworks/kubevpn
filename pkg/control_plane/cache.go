@@ -1,4 +1,4 @@
-package resources
+package control_plane
 
 type Listener struct {
 	Name       string
