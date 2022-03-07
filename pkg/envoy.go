@@ -18,7 +18,6 @@ import (
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/yaml"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -26,7 +25,6 @@ import (
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
 
 //	patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
-// TODO support multiple port
 func PatchSidecar(factory cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workloads string, c util.PodRouteConfig, headers map[string]string) error {
 	//t := true
 	//zero := int64(0)
@@ -47,7 +45,7 @@ func PatchSidecar(factory cmdutil.Factory, clientset v12.ConfigMapInterface, nam
 	for _, container := range templateSpec.Spec.Containers {
 		port = append(port, container.Ports...)
 	}
-	nodeID := fmt.Sprintf("%s-%s-%s", object.Mapping.Resource.Resource, object.Mapping.Resource.Group, object.Name)
+	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 
 	err = addEnvoyConfig(clientset, nodeID, c.LocalTunIP, headers, port)
 	if err != nil {
@@ -137,12 +135,12 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 	return err
 }
 
-func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUNIP string, headers map[string]string, containerPorts []v1.ContainerPort) error {
+func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUNIP string, headers map[string]string, port []v1.ContainerPort) error {
 	configMap, err := mapInterface.Get(context.TODO(), config2.PodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
-	var v = make([]*control_plane.EnvoyConfig, 0)
+	var v = make([]*control_plane.Virtual, 0)
 	if str, ok := configMap.Data[config2.Envoy]; ok {
 		if err = yaml.Unmarshal([]byte(str), &v); err != nil {
 			return err
@@ -150,78 +148,24 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUN
 	}
 	var index = -1
 	for i, virtual := range v {
-		if nodeID == virtual.NodeID {
+		if nodeID == virtual.Uid {
 			index = i
 		}
 	}
-	var h []control_plane.HeaderMatch
-	for k, v := range headers {
-		h = append(h, control_plane.HeaderMatch{Key: k, Value: v})
-	}
-	var l []control_plane.ListenerTemp
-	var c []control_plane.ClusterTemp
-	// if we can't find nodeID, just add it
 	if index < 0 {
-		for _, port := range containerPorts {
-			clusterName := localTUNIP + "_" + strconv.Itoa(int(port.ContainerPort))
-			c = append(c, control_plane.ClusterTemp{
-				Name:      clusterName,
-				Endpoints: []control_plane.EndpointTemp{{Address: localTUNIP, Port: uint32(port.ContainerPort)}},
-			})
-			l = append(l, control_plane.ListenerTemp{
-				Name:    strconv.Itoa(int(port.ContainerPort)),
-				Address: "0.0.0.0",
-				Port:    uint32(port.ContainerPort),
-				Routes: []control_plane.RouteTemp{
-					{
-						Headers:     h,
-						ClusterName: clusterName,
-					},
-					{
-						Headers:     nil,
-						ClusterName: "origin_cluster",
-					},
-				},
-			})
-		}
-		v = append(v, &control_plane.EnvoyConfig{
-			NodeID: nodeID,
-			Spec: control_plane.Spec{
-				Listeners: l,
-				Clusters:  c,
-			},
+		v = append(v, &control_plane.Virtual{
+			Uid:   nodeID,
+			Ports: port,
+			Rules: []*control_plane.Rule{{
+				Headers:    headers,
+				LocalTunIP: localTUNIP,
+			}},
 		})
 	} else {
-		// if listener already exist, needs to add route
-		// if not exist, needs to create this listener, and then add route
-		// make sure position of default route is last
-
-		for _, port := range containerPorts {
-			clusterName := localTUNIP + "_" + strconv.Itoa(int(port.ContainerPort))
-			for _, listener := range v[index].Spec.Listeners {
-				if listener.Port == uint32(port.ContainerPort) {
-					listener.Routes = append(
-						[]control_plane.RouteTemp{{Headers: h, ClusterName: clusterName}}, listener.Routes...,
-					)
-				}
-			}
-			var found = false
-			for _, cluster := range v[index].Spec.Clusters {
-				if cluster.Name == clusterName {
-					found = true
-					break
-				}
-			}
-			if !found {
-				v[index].Spec.Clusters = append(v[index].Spec.Clusters, control_plane.ClusterTemp{
-					Name: clusterName,
-					Endpoints: []control_plane.EndpointTemp{{
-						Address: localTUNIP,
-						Port:    uint32(port.ContainerPort),
-					}},
-				})
-			}
-		}
+		v[index].Rules = append(v[index].Rules, &control_plane.Rule{
+			Headers:    headers,
+			LocalTunIP: localTUNIP,
+		})
 	}
 
 	marshal, err := yaml.Marshal(v)
@@ -254,6 +198,13 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, heade
 					i--
 				}
 			}
+		}
+	}
+	// remove default
+	for i := 0; i < len(v); i++ {
+		if nodeID == v[i].Uid && len(v[i].Rules) == 0 {
+			v = append(v[:i], v[i+1:]...)
+			i--
 		}
 	}
 	marshal, err := yaml.Marshal(v)
