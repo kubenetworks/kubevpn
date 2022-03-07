@@ -97,12 +97,12 @@ func (c *ConnectOptions) DoConnect() (err error) {
 		return
 	}
 	trafficMangerNet := net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}
-	c.routerIP, err = CreateOutboundPod(c.clientset, c.Namespace, trafficMangerNet.String(), c.cidrs)
-	if err != nil {
-		return
-	}
 	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, &trafficMangerNet)
 	if err = c.dhcp.InitDHCP(); err != nil {
+		return
+	}
+	c.routerIP, err = CreateOutboundPod(c.clientset, c.Namespace, trafficMangerNet.String(), c.cidrs)
+	if err != nil {
 		return
 	}
 	if err = c.createRemoteInboundPod(); err != nil {
@@ -344,6 +344,7 @@ func (c *ConnectOptions) InitClient() (err error) {
 			return
 		}
 	}
+	c.factory.ToRESTConfig()
 	log.Infof("kubeconfig path: %s, namespace: %s, services: %v", c.KubeconfigPath, c.Namespace, c.Workloads)
 	return
 }

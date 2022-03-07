@@ -1,23 +1,21 @@
-package xdscache
+package control_plane
 
 import (
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
-	"github.com/wencaiwulue/kubevpn/pkg/controlplane/apis/v1alpha1"
-	"github.com/wencaiwulue/kubevpn/pkg/controlplane/internal/resources"
 )
 
 type XDSCache struct {
-	Listeners map[string]resources.Listener
-	Routes    map[string]resources.Route
-	Clusters  map[string]resources.Cluster
-	Endpoints map[string]resources.Endpoint
+	Listeners map[string]Listener
+	Routes    map[string]Route
+	Clusters  map[string]Cluster
+	Endpoints map[string]Endpoint
 }
 
 func (xds *XDSCache) ClusterContents() []types.Resource {
 	var r []types.Resource
 
 	for _, c := range xds.Clusters {
-		r = append(r, resources.MakeCluster(c.Name))
+		r = append(r, MakeCluster(c.Name))
 	}
 
 	return r
@@ -25,19 +23,19 @@ func (xds *XDSCache) ClusterContents() []types.Resource {
 
 func (xds *XDSCache) RouteContents() []types.Resource {
 
-	var routesArray []resources.Route
+	var routesArray []Route
 	for _, r := range xds.Routes {
 		routesArray = append(routesArray, r)
 	}
 
-	return []types.Resource{resources.MakeRoute(routesArray)}
+	return []types.Resource{MakeRoute(routesArray)}
 }
 
 func (xds *XDSCache) ListenerContents() []types.Resource {
 	var r []types.Resource
 
 	for _, l := range xds.Listeners {
-		r = append(r, resources.MakeHTTPListener(l.Name, l.RouteNames[0], l.Address, l.Port))
+		r = append(r, MakeHTTPListener(l.Name, l.RouteNames[0], l.Address, l.Port))
 	}
 
 	return r
@@ -47,14 +45,14 @@ func (xds *XDSCache) EndpointsContents() []types.Resource {
 	var r []types.Resource
 
 	for _, c := range xds.Clusters {
-		r = append(r, resources.MakeEndpoint(c.Name, c.Endpoints))
+		r = append(r, MakeEndpoint(c.Name, c.Endpoints))
 	}
 
 	return r
 }
 
 func (xds *XDSCache) AddListener(name string, routeNames []string, address string, port uint32) {
-	xds.Listeners[name] = resources.Listener{
+	xds.Listeners[name] = Listener{
 		Name:       name,
 		Address:    address,
 		Port:       port,
@@ -62,23 +60,23 @@ func (xds *XDSCache) AddListener(name string, routeNames []string, address strin
 	}
 }
 
-func (xds *XDSCache) AddRoute(name string, headers []v1alpha1.HeaderMatch, clusters []string) {
-	var h []resources.Header
+func (xds *XDSCache) AddRoute(name string, headers []HeaderMatch, clusterName string) {
+	var h []Header
 	for _, header := range headers {
-		h = append(h, resources.Header{
+		h = append(h, Header{
 			Key:   header.Key,
 			Value: header.Value,
 		})
 	}
-	xds.Routes[name] = resources.Route{
+	xds.Routes[name] = Route{
 		Name:    name,
 		Headers: h,
-		Cluster: clusters[0],
+		Cluster: clusterName,
 	}
 }
 
 func (xds *XDSCache) AddCluster(name string) {
-	xds.Clusters[name] = resources.Cluster{
+	xds.Clusters[name] = Cluster{
 		Name: name,
 	}
 }
@@ -86,7 +84,7 @@ func (xds *XDSCache) AddCluster(name string) {
 func (xds *XDSCache) AddEndpoint(clusterName, upstreamHost string, upstreamPort uint32) {
 	cluster := xds.Clusters[clusterName]
 
-	cluster.Endpoints = append(cluster.Endpoints, resources.Endpoint{
+	cluster.Endpoints = append(cluster.Endpoints, Endpoint{
 		UpstreamHost: upstreamHost,
 		UpstreamPort: upstreamPort,
 	})

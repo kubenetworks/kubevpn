@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/pkg/controlplane/apis/v1alpha1"
+	config2 "github.com/wencaiwulue/kubevpn/config"
+	"github.com/wencaiwulue/kubevpn/pkg/control_plane"
 	"github.com/wencaiwulue/kubevpn/pkg/mesh"
 	"github.com/wencaiwulue/kubevpn/util"
-	"gopkg.in/yaml.v2"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -17,6 +17,7 @@ import (
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"sigs.k8s.io/yaml"
 	"strconv"
 	"strings"
 	"time"
@@ -42,17 +43,19 @@ func PatchSidecar(factory cmdutil.Factory, clientset v12.ConfigMapInterface, nam
 
 	origin := *templateSpec
 
-	port := uint32(templateSpec.Spec.Containers[0].Ports[0].ContainerPort)
-	configMapName := fmt.Sprintf("%s-%s", object.Mapping.Resource.Resource, object.Name)
+	var port []v1.ContainerPort
+	for _, container := range templateSpec.Spec.Containers {
+		port = append(port, container.Ports...)
+	}
+	nodeID := fmt.Sprintf("%s-%s-%s", object.Mapping.Resource.Resource, object.Mapping.Resource.Group, object.Name)
 
-	createEnvoyConfigMapIfNeeded(clientset, object.Namespace, configMapName, strconv.Itoa(int(port)))
-	err = addEnvoyConfig(clientset, configMapName, c.LocalTunIP, headers, port)
+	err = addEnvoyConfig(clientset, nodeID, c.LocalTunIP, headers, port)
 	if err != nil {
 		log.Warnln(err)
 		return err
 	}
 
-	mesh.AddMeshContainer(templateSpec, configMapName, c)
+	mesh.AddMeshContainer(templateSpec, nodeID, c)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	bytes, err := json.Marshal([]struct {
 		Op    string      `json:"op"`
@@ -78,11 +81,6 @@ func PatchSidecar(factory cmdutil.Factory, clientset v12.ConfigMapInterface, nam
 			object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
 	}
 
-	//_ = util.WaitPod(clientset, namespace, metav1.ListOptions{
-	//	FieldSelector: fields.OneTermEqualSelector("metadata.name", object.Name+"-shadow").String(),
-	//}, func(pod *v1.Pod) bool {
-	//	return pod.Status.Phase == v1.PodRunning
-	//})
 	rollbackFuncList = append(rollbackFuncList, func() {
 		if err = UnPatchContainer(factory, clientset, namespace, workloads, headers); err != nil {
 			log.Error(err)
@@ -110,11 +108,9 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 		return err
 	}
 
-	//port := uint32(templateSpec.Spec.Containers[0].Ports[0].ContainerPort)
-	configMapName := fmt.Sprintf("%s-%s", object.Mapping.Resource.Resource, object.Name)
+	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 
-	//createEnvoyConfigMapIfNeeded(mapInterface, object.Namespace, configMapName, strconv.Itoa(int(port)))
-	err = removeEnvoyConfig(mapInterface, configMapName, headers)
+	err = removeEnvoyConfig(mapInterface, nodeID, headers)
 	if err != nil {
 		log.Warnln(err)
 		return err
@@ -138,211 +134,142 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{
 		//Force: &t,
 	})
-
-	//_ = util.WaitPod(mapInterface, namespace, metav1.ListOptions{
-	//	FieldSelector: fields.OneTermEqualSelector("metadata.name", object.Name+"-shadow").String(),
-	//}, func(pod *v1.Pod) bool {
-	//	return pod.Status.Phase == v1.PodRunning
-	//})
 	return err
 }
 
-var s = `
-static_resources:
-  clusters:
-    - connect_timeout: 1s
-      load_assignment:
-        cluster_name: xds_cluster
-        endpoints:
-          - lb_endpoints:
-              - endpoint:
-                  address:
-                    socket_address:
-                      address: 127.0.0.1
-                      port_value: 9002
-      http2_protocol_options: {}
-      name: xds_cluster
-dynamic_resources:
-  cds_config:
-    resource_api_version: V3
-    api_config_source:
-      api_type: GRPC
-      transport_api_version: V3
-      grpc_services:
-        - envoy_grpc:
-            cluster_name: xds_cluster
-      set_node_on_first_message_only: true
-  lds_config:
-    resource_api_version: V3
-    api_config_source:
-      api_type: GRPC
-      transport_api_version: V3
-      grpc_services:
-        - envoy_grpc:
-            cluster_name: xds_cluster
-      set_node_on_first_message_only: true
-node:
-  cluster: test-cluster
-  id: test-id
-layered_runtime:
-  layers:
-    - name: runtime-0
-      rtds_layer:
-        rtds_config:
-          resource_api_version: V3
-          api_config_source:
-            transport_api_version: V3
-            api_type: GRPC
-            grpc_services:
-              envoy_grpc:
-                cluster_name: xds_cluster
-        name: runtime-0
-admin:
-  access_log_path: /dev/null
-  address:
-    socket_address:
-      address: 127.0.0.1
-      port_value: 9003
-
-`
-var ss = `name: config-test
-spec:
-  listeners:
-  - name: listener1
-    address: 127.0.0.1
-    port: 15006
-    routes:
-    - name: route-0
-      clusters:
-      - cluster-0
-  clusters:
-  - name: cluster-0
-    endpoints:
-    - address: 127.0.0.1
-      port: %s
-`
-
-func addEnvoyConfig(clientset v12.ConfigMapInterface, workloads, localTUNIP string, headers map[string]string, port uint32) error {
-	get, err := clientset.Get(context.TODO(), workloads, metav1.GetOptions{})
+func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUNIP string, headers map[string]string, containerPorts []v1.ContainerPort) error {
+	configMap, err := mapInterface.Get(context.TODO(), config2.PodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
-	s2, ok := get.Data["envoy-config.yaml"]
-	if !ok {
-		return errors.New("can not found value for key: envoy-config.yaml")
-	}
-	envoyConfig, err := util.ParseYamlBytes([]byte(s2))
-	if err != nil {
-		return err
-	}
-	var headersMatch []v1alpha1.HeaderMatch
-	for k, v := range headers {
-		headersMatch = append(headersMatch, v1alpha1.HeaderMatch{
-			Key:   k,
-			Value: v,
-		})
-	}
-	// move router to front
-	i := len(envoyConfig.Listeners[0].Routes)
-	index := strconv.Itoa(i)
-	envoyConfig.Listeners[0].Routes = append(envoyConfig.Listeners[0].Routes, v1alpha1.Route{
-		Name:         "route-" + index,
-		Headers:      headersMatch,
-		ClusterNames: []string{"cluster-" + index},
-	})
-	// swap last element and the last second element
-	temp := envoyConfig.Listeners[0].Routes[i-1]
-	envoyConfig.Listeners[0].Routes[i-1] = envoyConfig.Listeners[0].Routes[i]
-	envoyConfig.Listeners[0].Routes[i] = temp
-
-	envoyConfig.Clusters = append(envoyConfig.Clusters, v1alpha1.Cluster{
-		Name: "cluster-" + index,
-		Endpoints: []v1alpha1.Endpoint{{
-			Address: localTUNIP,
-			Port:    port,
-		}},
-	})
-	marshal, err := yaml.Marshal(envoyConfig)
-	if err != nil {
-		return err
-	}
-	get.Data["envoy-config.yaml"] = string(marshal)
-	_, err = clientset.Update(context.TODO(), get, metav1.UpdateOptions{})
-	return err
-}
-
-func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, configMapName string, headers map[string]string) error {
-	configMap, err := mapInterface.Get(context.TODO(), configMapName, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	s2, ok := configMap.Data["envoy-config.yaml"]
-	if !ok {
-		return errors.New("can not found value for key: envoy-config.yaml")
-	}
-	envoyConfig, err := util.ParseYamlBytes([]byte(s2))
-	if err != nil {
-		return err
-	}
-	var routeC []v1alpha1.Route
-	var name string
-	var route v1alpha1.Route
-	for _, route = range envoyConfig.Listeners[0].Routes {
-		var m = make(map[string]string)
-		for _, header := range route.Headers {
-			m[header.Key] = header.Value
+	var v = make([]*control_plane.EnvoyConfig, 0)
+	if str, ok := configMap.Data[config2.Envoy]; ok {
+		if err = yaml.Unmarshal([]byte(str), &v); err != nil {
+			return err
 		}
-		allMatch := true
-		for k, v := range headers {
-			if value, ok := m[k]; !ok || value != v {
-				allMatch = false
+	}
+	var index = -1
+	for i, virtual := range v {
+		if nodeID == virtual.NodeID {
+			index = i
+		}
+	}
+	var h []control_plane.HeaderMatch
+	for k, v := range headers {
+		h = append(h, control_plane.HeaderMatch{Key: k, Value: v})
+	}
+	var l []control_plane.ListenerTemp
+	var c []control_plane.ClusterTemp
+	// if we can't find nodeID, just add it
+	if index < 0 {
+		for _, port := range containerPorts {
+			clusterName := localTUNIP + "_" + strconv.Itoa(int(port.ContainerPort))
+			c = append(c, control_plane.ClusterTemp{
+				Name:      clusterName,
+				Endpoints: []control_plane.EndpointTemp{{Address: localTUNIP, Port: uint32(port.ContainerPort)}},
+			})
+			l = append(l, control_plane.ListenerTemp{
+				Name:    strconv.Itoa(int(port.ContainerPort)),
+				Address: "0.0.0.0",
+				Port:    uint32(port.ContainerPort),
+				Routes: []control_plane.RouteTemp{
+					{
+						Headers:     h,
+						ClusterName: clusterName,
+					},
+					{
+						Headers:     nil,
+						ClusterName: "origin_cluster",
+					},
+				},
+			})
+		}
+		v = append(v, &control_plane.EnvoyConfig{
+			NodeID: nodeID,
+			Spec: control_plane.Spec{
+				Listeners: l,
+				Clusters:  c,
+			},
+		})
+	} else {
+		// if listener already exist, needs to add route
+		// if not exist, needs to create this listener, and then add route
+		// make sure position of default route is last
+
+		for _, port := range containerPorts {
+			clusterName := localTUNIP + "_" + strconv.Itoa(int(port.ContainerPort))
+			for _, listener := range v[index].Spec.Listeners {
+				if listener.Port == uint32(port.ContainerPort) {
+					listener.Routes = append(
+						[]control_plane.RouteTemp{{Headers: h, ClusterName: clusterName}}, listener.Routes...,
+					)
+				}
+			}
+			var found = false
+			for _, cluster := range v[index].Spec.Clusters {
+				if cluster.Name == clusterName {
+					found = true
+					break
+				}
+			}
+			if !found {
+				v[index].Spec.Clusters = append(v[index].Spec.Clusters, control_plane.ClusterTemp{
+					Name: clusterName,
+					Endpoints: []control_plane.EndpointTemp{{
+						Address: localTUNIP,
+						Port:    uint32(port.ContainerPort),
+					}},
+				})
 			}
 		}
-		if !allMatch {
-			routeC = append(routeC, route)
-		} else {
-			name = route.ClusterNames[0]
-		}
 	}
-	// move router to front
-	envoyConfig.Listeners[0].Routes = routeC
 
-	var clusterC []v1alpha1.Cluster
-	for _, cluster := range envoyConfig.Clusters {
-		if cluster.Name != name {
-			clusterC = append(clusterC, cluster)
-		}
-	}
-	envoyConfig.Clusters = clusterC
-	marshal, err := yaml.Marshal(envoyConfig)
+	marshal, err := yaml.Marshal(v)
 	if err != nil {
 		return err
 	}
-	configMap.Data["envoy-config.yaml"] = string(marshal)
-	_, err = mapInterface.Update(context.TODO(), configMap, metav1.UpdateOptions{})
+	configMap.Data[config2.Envoy] = string(marshal)
+	_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
 	return err
 }
 
-func createEnvoyConfigMapIfNeeded(clientset v12.ConfigMapInterface, namespace, configMapName, port string) {
-	cm, err := clientset.Get(context.TODO(), configMapName, metav1.GetOptions{})
-	if err == nil && cm != nil {
-		return
-	}
-
-	configMap := v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      configMapName,
-			Namespace: namespace,
-			Labels:    map[string]string{"kubevpn": "kubevpn"},
-		},
-		Data: map[string]string{
-			"base-envoy.yaml":   fmt.Sprintf(s /*"kubevpn", podIp, port.TargetPort.String(), port.TargetPort.String()*/),
-			"envoy-config.yaml": fmt.Sprintf(ss, port),
-		},
-	}
-
-	_, err = clientset.Create(context.TODO(), &configMap, metav1.CreateOptions{})
+func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, headers map[string]string) error {
+	configMap, err := mapInterface.Get(context.TODO(), config2.PodTrafficManager, metav1.GetOptions{})
 	if err != nil {
-		log.Warnln(err)
+		return err
 	}
+	str, ok := configMap.Data[config2.Envoy]
+	if !ok {
+		return errors.New("can not found value for key: envoy-config.yaml")
+	}
+	var v []*control_plane.Virtual
+	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
+		return err
+	}
+	for _, virtual := range v {
+		if nodeID == virtual.Uid {
+			for i := 0; i < len(virtual.Rules); i++ {
+				if contains(virtual.Rules[i].Headers, headers) {
+					virtual.Rules = append(virtual.Rules[:i], virtual.Rules[i+1:]...)
+					i--
+				}
+			}
+		}
+	}
+	marshal, err := yaml.Marshal(v)
+	if err != nil {
+		return err
+	}
+	configMap.Data[config2.Envoy] = string(marshal)
+	_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
+	return err
+}
+
+func contains(a map[string]string, sub map[string]string) bool {
+	for k, v := range sub {
+		if a[k] != v {
+			return false
+		}
+	}
+	return true
 }

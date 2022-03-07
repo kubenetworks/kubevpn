@@ -10,7 +10,7 @@ OS_ARCH := ${GOOS}/${GOARCH}
 
 BASE := github.com/wencaiwulue/kubevpn
 FOLDER := ${BASE}/cmd/kubevpn
-CONTROL_PLANE_FOLDER := ${BASE}/pkg/controlplane/cmd/server
+CONTROL_PLANE_FOLDER := ${BASE}/cmd/mesh
 
 # Setup the -ldflags option for go build here, interpolate the variable values
 LDFLAGS=--ldflags "\
@@ -84,14 +84,14 @@ image: kubevpn-linux-amd64
 
 .PHONY: image-mesh
 image-mesh:
-	docker build -t naison/kubevpnmesh:${VERSION} -f ./dockerfile/mesh/Dockerfile .
-	docker push naison/kubevpnmesh:${VERSION}
+	docker build -t naison/kubevpn-mesh:${VERSION} -f ./dockerfile/mesh/Dockerfile .
+	docker push naison/kubevpn-mesh:${VERSION}
 
 .PHONY: image-control-plane
 image-control-plane:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o envoy-xds-server ${CONTROL_PLANE_FOLDER}
 	chmod +x envoy-xds-server
-	docker build -t naison/envoy-xds-server:${VERSION} -f ./dockerfile/controlplane/Dockerfile .
+	docker build -t naison/envoy-xds-server:${VERSION} -f ./dockerfile/control_plane/Dockerfile .
 	rm -fr envoy-xds-server
 	docker push naison/envoy-xds-server:${VERSION}
 

@@ -1,4 +1,4 @@
-package watcher
+package control_plane
 
 import (
 	"log"

@@ -7,19 +7,24 @@ import (
 
 const (
 	PodTrafficManager = "kubevpn.traffic.manager"
+	DHCP              = "DHCP"
+	Envoy             = "ENVOY_CONFIG"
 
 	SidecarEnvoyProxy   = "envoy-proxy"
 	SidecarControlPlane = "control-plane"
 	SidecarEnvoyConfig  = "envoy-config"
 	SidecarVPN          = "vpn"
+	VolumeEnvoyConfig   = "envoy-config"
 
 	s = "223.254.254.100/24"
 )
 
 var (
-	Version           = ""
+	// Version inject --ldflags -X
+	Version = ""
+
 	ImageServer       = "naison/kubevpn:" + Version
-	ImageMesh         = "naison/kubevpnmesh:" + Version
+	ImageMesh         = "naison/kubevpn-mesh:" + Version
 	ImageControlPlane = "naison/envoy-xds-server:" + Version
 )
 
