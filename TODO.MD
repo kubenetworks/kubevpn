@@ -13,7 +13,7 @@
 - [ ] 写个 CNI 网络插件，直接提供 VPN 功能
 - [x] 优化重连逻辑
 - [x] 支持 service mesh
-- [ ] service mesh 支持多端口
+- [x] service mesh 支持多端口
 - [x] 使用自己写的 proxy 替换 envoy
 - [ ] 优化性能，Windows 上考虑使用 IPC 通信
 - [x] 自己写个 control plane
