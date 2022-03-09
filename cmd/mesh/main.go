@@ -22,6 +22,7 @@ func init() {
 	log.SetReportCaller(true)
 	log.SetFormatter(&util.Format{})
 	flag.StringVar(&watchDirectoryFileName, "watchDirectoryFileName", "/etc/envoy/envoy-config.yaml", "full path to directory to watch for files")
+	flag.Parse()
 }
 
 func main() {
