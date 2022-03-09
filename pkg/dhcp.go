@@ -93,8 +93,15 @@ func (d *DHCPManager) RentIPRandom() (*net.IPNet, error) {
 	return &net.IPNet{IP: <-ipC, Mask: d.cidr.Mask}, nil
 }
 
-func (d *DHCPManager) ReleaseIpToDHCP(ip *net.IPNet) error {
-	return d.updateDHCPConfigMap(func(r *ipallocator.Range) error { return r.Release(ip.IP) })
+func (d *DHCPManager) ReleaseIpToDHCP(ips ...*net.IPNet) error {
+	return d.updateDHCPConfigMap(func(r *ipallocator.Range) error {
+		for _, ip := range ips {
+			if err := r.Release(ip.IP); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) error {

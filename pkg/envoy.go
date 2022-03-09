@@ -11,6 +11,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/mesh"
 	"github.com/wencaiwulue/kubevpn/util"
 	v1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -179,6 +180,9 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUN
 
 func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, headers map[string]string) error {
 	configMap, err := mapInterface.Get(context.TODO(), config2.PodTrafficManager, metav1.GetOptions{})
+	if k8serrors.IsNotFound(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

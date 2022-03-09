@@ -42,7 +42,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 
 	if err == nil && manager != nil {
 		log.Infoln("traffic manager already exist, reuse it")
-		UpdateRefCount(clientset, namespace, manager.Name, 1)
+		UpdateRefCount(clientset.CoreV1().Pods(namespace), manager.Name, 1)
 		return net.ParseIP(manager.Status.PodIP), nil
 	}
 	log.Infoln("traffic manager not exist, try to create it...")

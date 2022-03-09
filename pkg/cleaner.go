@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/util/retry"
 	"os"
 	"os/signal"
@@ -27,18 +28,16 @@ func (c *ConnectOptions) addCleanUpResourceHandler(clientset *kubernetes.Clients
 		<-stopChan
 		log.Info("prepare to exit, cleaning up")
 		dns.CancelDNS()
-		for _, ipNet := range c.usedIPs {
-			if err := c.dhcp.ReleaseIpToDHCP(ipNet); err != nil {
-				log.Errorf("failed to release ip to dhcp, err: %v", err)
-			}
+		if err := c.dhcp.ReleaseIpToDHCP(c.usedIPs...); err != nil {
+			log.Errorf("failed to release ip to dhcp, err: %v", err)
 		}
-		cleanUpTrafficManagerIfRefCountIsZero(clientset, namespace)
 		cancel()
 		for _, function := range rollbackFuncList {
 			if function != nil {
 				function()
 			}
 		}
+		cleanUpTrafficManagerIfRefCountIsZero(clientset, namespace)
 		log.Info("clean up successful")
 		os.Exit(0)
 	}()
@@ -52,11 +51,11 @@ func Cleanup(s os.Signal) {
 }
 
 // vendor/k8s.io/kubectl/pkg/polymorphichelpers/rollback.go:99
-func UpdateRefCount(clientset *kubernetes.Clientset, namespace, name string, increment int) {
+func UpdateRefCount(clientset v12.PodInterface, name string, increment int) {
 	if err := retry.OnError(retry.DefaultRetry, func(err error) bool {
 		return !k8serrors.IsNotFound(err)
 	}, func() error {
-		pod, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), name, v1.GetOptions{})
+		pod, err := clientset.Get(context.TODO(), name, v1.GetOptions{})
 		if err != nil {
 			log.Errorf("update ref-count failed, increment: %d, error: %v", increment, err)
 			return err
@@ -65,15 +64,14 @@ func UpdateRefCount(clientset *kubernetes.Clientset, namespace, name string, inc
 		if ref := pod.GetAnnotations()["ref-count"]; len(ref) > 0 {
 			curCount, err = strconv.Atoi(ref)
 		}
-		patch, _ := json.Marshal([]interface{}{
+		p, _ := json.Marshal([]interface{}{
 			map[string]interface{}{
 				"op":    "replace",
 				"path":  "/metadata/annotations/ref-count",
 				"value": strconv.Itoa(curCount + increment),
 			},
 		})
-		_, err = clientset.CoreV1().Pods(namespace).
-			Patch(context.TODO(), config.PodTrafficManager, types.JSONPatchType, patch, v1.PatchOptions{})
+		_, err = clientset.Patch(context.TODO(), config.PodTrafficManager, types.JSONPatchType, p, v1.PatchOptions{})
 		return err
 	}); err != nil {
 		log.Errorf("update ref count error, error: %v", err)
@@ -83,7 +81,7 @@ func UpdateRefCount(clientset *kubernetes.Clientset, namespace, name string, inc
 }
 
 func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, namespace string) {
-	UpdateRefCount(clientset, namespace, config.PodTrafficManager, -1)
+	UpdateRefCount(clientset.CoreV1().Pods(namespace), config.PodTrafficManager, -1)
 	pod, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), config.PodTrafficManager, v1.GetOptions{})
 	if err != nil {
 		log.Error(err)
