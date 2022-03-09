@@ -25,7 +25,7 @@ func RunWithElevated() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	// while send single CRTL+C, command will quit immediately, but output will cut off and print util quit final
+	// while send single CTRL+C, command will quit immediately, but output will cut off and print util quit final
 	// so, mute single CTRL+C, let inner command handle single only
 	go func() {
 		signals := make(chan os.Signal)

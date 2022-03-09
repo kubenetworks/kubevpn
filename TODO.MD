@@ -17,7 +17,7 @@
 - [x] 使用自己写的 proxy 替换 envoy
 - [ ] 优化性能，Windows 上考虑使用 IPC 通信
 - [x] 自己写个 control plane
-- [ ] 考虑是否将 control plane 和服务分开
+- [x] 考虑是否将 control plane 和服务分开
 - [x] 写单元测试，优化 GitHub action
 - [ ] Linux 和 macOS 也改用 WireGuard library
 - [x] 探测是否有重复路由的 utun设备，禁用 `sudo ifconfig utun1 down`
