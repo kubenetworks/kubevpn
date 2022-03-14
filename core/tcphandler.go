@@ -11,7 +11,6 @@ import (
 type fakeUDPTunConnector struct {
 }
 
-// UDPOverTCPTunnelConnector creates a connector for UDP-over-TCP
 func UDPOverTCPTunnelConnector() Connector {
 	return &fakeUDPTunConnector{}
 }
@@ -29,20 +28,11 @@ func TCPHandler() Handler {
 	return &fakeUdpHandler{}
 }
 
-func (h *fakeUdpHandler) Init(...HandlerOption) {
-}
-
 func (h *fakeUdpHandler) Handle(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	if config.Debug {
 		log.Debugf("[tcpserver] %s -> %s\n", conn.RemoteAddr(), conn.LocalAddr())
 	}
-	h.handleUDPTunnel(conn)
-}
-
-var Server8422, _ = net.ResolveUDPAddr("udp", "127.0.0.1:8422")
-
-func (h *fakeUdpHandler) handleUDPTunnel(conn net.Conn) {
 	// serve tunnel udp, tunnel <-> remote, handle tunnel udp request
 	bindAddr, _ := net.ResolveUDPAddr("udp", ":0")
 	uc, err := net.DialUDP("udp", bindAddr, Server8422)
@@ -59,6 +49,8 @@ func (h *fakeUdpHandler) handleUDPTunnel(conn net.Conn) {
 	log.Debugf("[tcpserver] udp-tun %s >-< %s", conn.RemoteAddr(), uc.LocalAddr())
 	return
 }
+
+var Server8422, _ = net.ResolveUDPAddr("udp", "127.0.0.1:8422")
 
 func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc *net.UDPConn) (err error) {
 	errChan := make(chan error, 2)
@@ -121,11 +113,6 @@ func newFakeUDPTunnelConnOverTCP(conn net.Conn) (net.Conn, error) {
 	return &fakeUDPTunnelConn{Conn: conn}, nil
 }
 
-//func (c *fakeUDPTunnelConn) Read(b []byte) (n int, err error) {
-//	n, _, err = c.ReadFrom(b)
-//	return
-//}
-
 func (c *fakeUDPTunnelConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 	dgram, err := ReadDatagramPacket(c.Conn)
 	if err != nil {
@@ -136,10 +123,6 @@ func (c *fakeUDPTunnelConn) ReadFrom(b []byte) (n int, addr net.Addr, err error)
 	addr = dgram.Addr()
 	return
 }
-
-//func (c *fakeUDPTunnelConn) Write(b []byte) (n int, err error) {
-//	return c.WriteTo(b, nil)
-//}
 
 func (c *fakeUDPTunnelConn) WriteTo(b []byte, _ net.Addr) (n int, err error) {
 	dgram := NewDatagramPacket(b)

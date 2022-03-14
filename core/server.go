@@ -9,29 +9,15 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Server is a proxy server.
 type Server struct {
 	Listener net.Listener
 	Handler  Handler
 }
 
-// Addr returns the address of the server
-func (s *Server) Addr() net.Addr {
-	return s.Listener.Addr()
-}
-
-// Close closes the server
-func (s *Server) Close() error {
-	return s.Listener.Close()
-}
-
 // Serve serves as a proxy server.
-func (s *Server) Serve(ctx context.Context, h Handler) error {
-	if h == nil {
-		h = s.Handler
-	}
-
+func (s *Server) Serve(ctx context.Context) error {
 	l := s.Listener
+	defer l.Close()
 	var tempDelay time.Duration
 	go func() {
 		<-ctx.Done()
@@ -59,7 +45,7 @@ func (s *Server) Serve(ctx context.Context, h Handler) error {
 		}
 		tempDelay = 0
 
-		go h.Handle(ctx, conn)
+		go s.Handler.Handle(ctx, conn)
 	}
 	return nil
 }

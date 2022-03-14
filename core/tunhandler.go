@@ -20,30 +20,19 @@ func ipToTunRouteKey(ip net.IP) string {
 }
 
 type tunHandler struct {
-	options *HandlerOptions
-	routes  *sync.Map
-	chExit  chan struct{}
+	chain  *Chain
+	node   *Node
+	routes *sync.Map
+	chExit chan struct{}
 }
 
 // TunHandler creates a handler for tun tunnel.
-func TunHandler(opts ...HandlerOption) Handler {
-	h := &tunHandler{
-		options: &HandlerOptions{},
-		routes:  &sync.Map{},
-		chExit:  make(chan struct{}, 1),
-	}
-	for _, opt := range opts {
-		opt(h.options)
-	}
-	return h
-}
-
-func (h *tunHandler) Init(options ...HandlerOption) {
-	if h.options == nil {
-		h.options = &HandlerOptions{}
-	}
-	for _, opt := range options {
-		opt(h.options)
+func TunHandler(chain *Chain, node *Node) Handler {
+	return &tunHandler{
+		chain:  chain,
+		node:   node,
+		routes: &sync.Map{},
+		chExit: make(chan struct{}, 1),
 	}
 }
 
@@ -51,7 +40,7 @@ func (h *tunHandler) Handle(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	var err error
 	var raddr net.Addr
-	if addr := h.options.Node.Remote; addr != "" {
+	if addr := h.node.Remote; addr != "" {
 		raddr, err = net.ResolveUDPAddr("udp", addr)
 		if err != nil {
 			log.Debugf("[tun] %s: remote addr: %v", conn.LocalAddr(), err)
@@ -64,8 +53,8 @@ func (h *tunHandler) Handle(ctx context.Context, conn net.Conn) {
 		err = func() error {
 			var err error
 			var pc net.PacketConn
-			if raddr != nil && !h.options.Chain.IsEmpty() {
-				cc, err := h.options.Chain.DialContext(ctx)
+			if raddr != nil && !h.chain.IsEmpty() {
+				cc, err := h.chain.DialContext(ctx)
 				if err != nil {
 					return err
 				}
@@ -77,7 +66,7 @@ func (h *tunHandler) Handle(ctx context.Context, conn net.Conn) {
 					return err
 				}
 			} else {
-				laddr, _ := net.ResolveUDPAddr("udp", h.options.Node.Addr)
+				laddr, _ := net.ResolveUDPAddr("udp", h.node.Addr)
 				pc, err = net.ListenUDP("udp", laddr)
 			}
 			if err != nil {

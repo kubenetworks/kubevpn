@@ -7,6 +7,7 @@ import (
 	errors2 "github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/config"
+	"github.com/wencaiwulue/kubevpn/core"
 	"github.com/wencaiwulue/kubevpn/dns"
 	"github.com/wencaiwulue/kubevpn/util"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -236,17 +237,16 @@ func (c *ConnectOptions) setupDNS() {
 }
 
 func Start(ctx context.Context, r Route) error {
-	routers, err := r.GenRouters()
+	servers, err := r.GenerateServers()
 	if err != nil {
 		return errors2.WithStack(err)
 	}
-
-	if len(routers) == 0 {
+	if len(servers) == 0 {
 		return errors.New("invalid config")
 	}
-	for _, rr := range routers {
-		go func(ctx context.Context, rr router) {
-			if err = rr.Serve(ctx); err != nil {
+	for _, rr := range servers {
+		go func(ctx context.Context, server core.Server) {
+			if err = server.Serve(ctx); err != nil {
 				log.Debug(err)
 			}
 		}(ctx, rr)
