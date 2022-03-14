@@ -30,9 +30,9 @@ func (c *Chain) IsEmpty() bool {
 	return c == nil || c.node == nil
 }
 
-func (c *Chain) DialContext(ctx context.Context, network, address string) (conn net.Conn, err error) {
+func (c *Chain) DialContext(ctx context.Context) (conn net.Conn, err error) {
 	for i := 0; i < int(math.Max(float64(1), float64(c.Retries))); i++ {
-		conn, err = c.dial(ctx, network, address)
+		conn, err = c.dial(ctx)
 		if err == nil {
 			break
 		}
@@ -40,12 +40,7 @@ func (c *Chain) DialContext(ctx context.Context, network, address string) (conn 
 	return
 }
 
-func (c *Chain) dial(ctx context.Context, network, address string) (net.Conn, error) {
-	ipAddr := address
-	if address != "" {
-		ipAddr = c.resolve(address)
-	}
-
+func (c *Chain) dial(ctx context.Context) (net.Conn, error) {
 	if c.IsEmpty() {
 		return nil, ErrorEmptyChain
 	}
@@ -55,7 +50,7 @@ func (c *Chain) dial(ctx context.Context, network, address string) (net.Conn, er
 		return nil, err
 	}
 
-	cc, err := c.Node().Client.ConnectContext(ctx, conn, network, ipAddr)
+	cc, err := c.Node().Client.ConnectContext(ctx, conn)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err

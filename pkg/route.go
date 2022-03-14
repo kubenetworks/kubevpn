@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/config"
 	"github.com/wencaiwulue/kubevpn/core"
 	"github.com/wencaiwulue/kubevpn/tun"
@@ -93,7 +92,6 @@ func (r *Route) GenRouters() ([]router, error) {
 		}
 
 		rt := router{
-			node:   node,
 			server: &core.Server{Listener: ln, Handler: handler},
 		}
 		routers = append(routers, rt)
@@ -103,12 +101,10 @@ func (r *Route) GenRouters() ([]router, error) {
 }
 
 type router struct {
-	node   *core.Node
 	server *core.Server
 }
 
 func (r *router) Serve(ctx context.Context) error {
-	log.Debugf("%s on %s", r.node.Protocol, r.server.Addr())
 	return r.server.Serve(ctx, r.server.Handler)
 }
 
