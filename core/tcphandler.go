@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"fmt"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/config"
 	"net"
@@ -17,16 +16,9 @@ func UDPOverTCPTunnelConnector() Connector {
 	return &fakeUDPTunConnector{}
 }
 
-func (c *fakeUDPTunConnector) ConnectContext(_ context.Context, conn net.Conn, network, address string) (net.Conn, error) {
-	switch network {
-	case "tcp", "tcp4", "tcp6":
-		return nil, fmt.Errorf("%s unsupported", network)
-	}
-	_ = conn.SetDeadline(time.Now().Add(config.ConnectTimeout))
+func (c *fakeUDPTunConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
 	defer conn.SetDeadline(time.Time{})
-
-	targetAddr, _ := net.ResolveUDPAddr("udp", address)
-	return newFakeUDPTunnelConnOverTCP(conn, targetAddr)
+	return newFakeUDPTunnelConnOverTCP(conn)
 }
 
 type fakeUdpHandler struct {
@@ -123,14 +115,10 @@ func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc *net.UDPConn) (err erro
 type fakeUDPTunnelConn struct {
 	// tcp connection
 	net.Conn
-	targetAddr net.Addr
 }
 
-func newFakeUDPTunnelConnOverTCP(conn net.Conn, targetAddr net.Addr) (net.Conn, error) {
-	return &fakeUDPTunnelConn{
-		Conn:       conn,
-		targetAddr: targetAddr,
-	}, nil
+func newFakeUDPTunnelConnOverTCP(conn net.Conn) (net.Conn, error) {
+	return &fakeUDPTunnelConn{Conn: conn}, nil
 }
 
 //func (c *fakeUDPTunnelConn) Read(b []byte) (n int, err error) {

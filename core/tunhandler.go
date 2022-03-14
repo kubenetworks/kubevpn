@@ -21,7 +21,7 @@ func ipToTunRouteKey(ip net.IP) string {
 
 type tunHandler struct {
 	options *HandlerOptions
-	routes  sync.Map
+	routes  *sync.Map
 	chExit  chan struct{}
 }
 
@@ -29,7 +29,7 @@ type tunHandler struct {
 func TunHandler(opts ...HandlerOption) Handler {
 	h := &tunHandler{
 		options: &HandlerOptions{},
-		routes:  sync.Map{},
+		routes:  &sync.Map{},
 		chExit:  make(chan struct{}, 1),
 	}
 	for _, opt := range opts {
@@ -65,7 +65,7 @@ func (h *tunHandler) Handle(ctx context.Context, conn net.Conn) {
 			var err error
 			var pc net.PacketConn
 			if raddr != nil && !h.options.Chain.IsEmpty() {
-				cc, err := h.options.Chain.DialContext(ctx, "udp", raddr.String())
+				cc, err := h.options.Chain.DialContext(ctx)
 				if err != nil {
 					return err
 				}
