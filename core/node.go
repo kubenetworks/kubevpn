@@ -12,46 +12,29 @@ var (
 )
 
 type Node struct {
-	Addr      string
-	Protocol  string
-	Transport string
-	Remote    string // remote address, used by tcp/udp port forwarding
-	Values    url.Values
-	Client    *Client
+	Addr     string
+	Protocol string
+	Remote   string // remote address, used by tcp/udp port forwarding
+	Values   url.Values
+	Client   *Client
 }
 
-// ParseNode parses the node info.
-// The proxy node string pattern is [scheme://][user:pass@host]:port.
-func ParseNode(s string) (node *Node, err error) {
+// ParseNode pattern is [scheme://][user:pass@host]:port.
+func ParseNode(s string) (*Node, error) {
 	s = strings.TrimSpace(s)
-	if s == "" {
+	if len(s) == 0 {
 		return nil, ErrorInvalidNode
 	}
 	u, err := url.Parse(s)
 	if err != nil {
-		return
+		return nil, err
 	}
-
-	node = &Node{
-		Addr:   u.Host,
-		Remote: strings.Trim(u.EscapedPath(), "/"),
-		Values: u.Query(),
-	}
-
-	u.RawQuery = ""
-	u.User = nil
-
-	switch u.Scheme {
-	case "tun":
-		node.Protocol = u.Scheme
-		node.Transport = u.Scheme
-	case "tcp":
-		node.Protocol = "tcp"
-		node.Transport = "tcp"
-	default:
-		return nil, ErrorInvalidNode
-	}
-	return
+	return &Node{
+		Addr:     u.Host,
+		Remote:   strings.Trim(u.EscapedPath(), "/"),
+		Values:   u.Query(),
+		Protocol: u.Scheme,
+	}, nil
 }
 
 // Get returns node parameter specified by key.
