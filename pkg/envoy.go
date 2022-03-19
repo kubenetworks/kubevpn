@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -52,6 +53,22 @@ func PatchSidecar(factory cmdutil.Factory, clientset v12.ConfigMapInterface, nam
 	if err != nil {
 		log.Warnln(err)
 		return err
+	}
+
+	// already inject container vpn and envoy-proxy, do nothing
+	containerNames := sets.NewString()
+	for _, container := range templateSpec.Spec.Containers {
+		containerNames.Insert(container.Name)
+	}
+	if containerNames.HasAll(config2.SidecarVPN, config2.SidecarEnvoyProxy) {
+		// add rollback func to remove envoy config
+		rollbackFuncList = append(rollbackFuncList, func() {
+			err = removeEnvoyConfig(clientset, nodeID, headers)
+			if err != nil {
+				log.Warnln(err)
+			}
+		})
+		return nil
 	}
 
 	mesh.AddMeshContainer(templateSpec, nodeID, c)
@@ -151,6 +168,7 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUN
 	for i, virtual := range v {
 		if nodeID == virtual.Uid {
 			index = i
+			break
 		}
 	}
 	if index < 0 {
