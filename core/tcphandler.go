@@ -8,14 +8,14 @@ import (
 	"time"
 )
 
-type fakeUDPTunConnector struct {
+type fakeUDPTunnelConnector struct {
 }
 
 func UDPOverTCPTunnelConnector() Connector {
-	return &fakeUDPTunConnector{}
+	return &fakeUDPTunnelConnector{}
 }
 
-func (c *fakeUDPTunConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
+func (c *fakeUDPTunnelConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
 	defer conn.SetDeadline(time.Time{})
 	return newFakeUDPTunnelConnOverTCP(conn)
 }
@@ -28,78 +28,75 @@ func TCPHandler() Handler {
 	return &fakeUdpHandler{}
 }
 
-func (h *fakeUdpHandler) Handle(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
+func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
+	defer tcpConn.Close()
 	if config.Debug {
-		log.Debugf("[tcpserver] %s -> %s\n", conn.RemoteAddr(), conn.LocalAddr())
+		log.Debugf("[tcpserver] %s -> %s\n", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 	}
 	// serve tunnel udp, tunnel <-> remote, handle tunnel udp request
-	bindAddr, _ := net.ResolveUDPAddr("udp", ":0")
-	uc, err := net.DialUDP("udp", bindAddr, Server8422)
+	udpConn, err := net.DialUDP("udp", nil, Server8422)
 	if err != nil {
-		log.Debugf("[tcpserver] udp-tun %s -> %s : %s", conn.RemoteAddr(), bindAddr, err)
+		log.Debugf("[tcpserver] udp-tun %s -> %s : %s", tcpConn.RemoteAddr(), udpConn.LocalAddr(), err)
 		return
 	}
-	defer uc.Close()
+	defer udpConn.Close()
 	if config.Debug {
-		log.Debugf("[tcpserver] udp-tun %s <- %s\n", conn.RemoteAddr(), uc.LocalAddr())
+		log.Debugf("[tcpserver] udp-tun %s <- %s\n", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 	}
-	log.Debugf("[tcpserver] udp-tun %s <-> %s", conn.RemoteAddr(), uc.LocalAddr())
-	_ = h.tunnelServerUDP(conn, uc)
-	log.Debugf("[tcpserver] udp-tun %s >-< %s", conn.RemoteAddr(), uc.LocalAddr())
+	log.Debugf("[tcpserver] udp-tun %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
+	_ = h.tunnelServerUDP(tcpConn, udpConn)
+	log.Debugf("[tcpserver] udp-tun %s >-< %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 	return
 }
 
 var Server8422, _ = net.ResolveUDPAddr("udp", "127.0.0.1:8422")
 
-func (h *fakeUdpHandler) tunnelServerUDP(cc net.Conn, pc *net.UDPConn) (err error) {
+func (h *fakeUdpHandler) tunnelServerUDP(tcpConn net.Conn, udpConn *net.UDPConn) (err error) {
 	errChan := make(chan error, 2)
+	go func() {
+		for {
+			dgram, err := ReadDatagramPacket(tcpConn)
+			if err != nil {
+				log.Debugf("[udp-tun] %s -> 0 : %v", tcpConn.RemoteAddr(), err)
+				errChan <- err
+				return
+			}
+
+			if _, err = udpConn.Write(dgram.Data); err != nil {
+				log.Debugf("[tcpserver] udp-tun %s -> %s : %s", tcpConn.RemoteAddr(), Server8422, err)
+				errChan <- err
+				return
+			}
+			if config.Debug {
+				log.Debugf("[tcpserver] udp-tun %s >>> %s length: %d", tcpConn.RemoteAddr(), Server8422, len(dgram.Data))
+			}
+		}
+	}()
 
 	go func() {
 		b := MPool.Get().([]byte)
 		defer MPool.Put(b)
 
 		for {
-			n, err := pc.Read(b)
+			n, err := udpConn.Read(b)
 			if err != nil {
-				log.Debugf("[udp-tun] %s : %s", cc.RemoteAddr(), err)
+				log.Debugf("[udp-tun] %s : %s", tcpConn.RemoteAddr(), err)
 				errChan <- err
 				return
 			}
 
 			// pipe from peer to tunnel
 			dgram := NewDatagramPacket(b[:n])
-			if err = dgram.Write(cc); err != nil {
-				log.Debugf("[tcpserver] udp-tun %s <- %s : %s", cc.RemoteAddr(), dgram.Addr(), err)
+			if err = dgram.Write(tcpConn); err != nil {
+				log.Debugf("[tcpserver] udp-tun %s <- %s : %s", tcpConn.RemoteAddr(), dgram.Addr(), err)
 				errChan <- err
 				return
 			}
 			if config.Debug {
-				log.Debugf("[tcpserver] udp-tun %s <<< %s length: %d", cc.RemoteAddr(), dgram.Addr(), len(dgram.Data))
+				log.Debugf("[tcpserver] udp-tun %s <<< %s length: %d", tcpConn.RemoteAddr(), dgram.Addr(), len(dgram.Data))
 			}
 		}
 	}()
-
-	go func() {
-		for {
-			dgram, err := ReadDatagramPacket(cc)
-			if err != nil {
-				log.Debugf("[udp-tun] %s -> 0 : %v", cc.RemoteAddr(), err)
-				errChan <- err
-				return
-			}
-
-			if _, err = pc.Write(dgram.Data); err != nil {
-				log.Debugf("[tcpserver] udp-tun %s -> %s : %s", cc.RemoteAddr(), Server8422, err)
-				errChan <- err
-				return
-			}
-			if config.Debug {
-				log.Debugf("[tcpserver] udp-tun %s >>> %s length: %d", cc.RemoteAddr(), Server8422, len(dgram.Data))
-			}
-		}
-	}()
-
 	return <-errChan
 }
 

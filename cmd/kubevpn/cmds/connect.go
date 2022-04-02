@@ -1,6 +1,7 @@
 package cmds
 
 import (
+	"fmt"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	config2 "github.com/wencaiwulue/kubevpn/config"
@@ -54,6 +55,10 @@ var connectCmd = &cobra.Command{
 			log.Errorln(err)
 			pkg.Cleanup(syscall.SIGQUIT)
 		}
+		fmt.Println(`
+-----------------------------------------------------------------------------
+  Now you can access to resources in the kubernetes cluster, enjoy it
+-----------------------------------------------------------------------------`)
 		select {}
 	},
 	PostRun: func(_ *cobra.Command, _ []string) {
