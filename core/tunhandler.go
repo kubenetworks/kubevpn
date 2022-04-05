@@ -142,6 +142,13 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 					}
 					return err
 				}
+
+				// client side, deliver packet directly.
+				if raddr != nil {
+					_, err = conn.WriteTo(b[:n], raddr)
+					return err
+				}
+
 				var src, dst net.IP
 				if waterutil.IsIPv4(b[:n]) {
 					header, err := ipv4.ParseHeader(b[:n])
@@ -166,12 +173,6 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 				} else {
 					log.Debugf("[tun] unknown packet")
 					return nil
-				}
-
-				// client side, deliver packet directly.
-				if raddr != nil {
-					_, err = conn.WriteTo(b[:n], raddr)
-					return err
 				}
 
 				addr := h.findRouteFor(dst)
@@ -204,6 +205,13 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 				if err != nil && err != shadowaead.ErrShortPacket {
 					return err
 				}
+
+				// client side, deliver packet to tun device.
+				if raddr != nil {
+					_, err = tun.Write(b[:n])
+					return err
+				}
+
 				var src, dst net.IP
 				if waterutil.IsIPv4(b[:n]) {
 					header, err := ipv4.ParseHeader(b[:n])
@@ -228,12 +236,6 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 				} else {
 					log.Debugf("[tun] unknown packet")
 					return nil
-				}
-
-				// client side, deliver packet to tun device.
-				if raddr != nil {
-					_, err = tun.Write(b[:n])
-					return err
 				}
 
 				routeKey := ipToTunRouteKey(src)
