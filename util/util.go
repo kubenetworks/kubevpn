@@ -81,7 +81,7 @@ func WaitPod(clientset *kubernetes.Clientset, namespace string, list metav1.List
 	}
 }
 
-func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, namespace, portPair string, readyChan chan struct{}, stopChan <-chan struct{}) error {
+func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, namespace, port string, readyChan chan struct{}, stopChan <-chan struct{}) error {
 	url := clientset.
 		Post().
 		Resource("pods").
@@ -95,7 +95,7 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 		return err
 	}
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
-	p := []string{portPair}
+	p := []string{port}
 	forwarder, err := portforward.NewOnAddresses(dialer, []string{"0.0.0.0"}, p, stopChan, readyChan, os.Stdout, os.Stderr)
 	if err != nil {
 		log.Error(err)
@@ -459,11 +459,11 @@ func Heartbeats(ctx context.Context) {
 	}
 }
 
-func WaitPortToBeFree(port int, timeout time.Duration) error {
+func WaitPortToBeFree(ctx context.Context, port int) error {
 	log.Infoln(fmt.Sprintf("wait port %v to be free...", port))
 	for {
 		select {
-		case <-time.Tick(timeout):
+		case <-ctx.Done():
 			return fmt.Errorf("wait port %v to be free timeout", port)
 		case <-time.Tick(time.Second * 2):
 			if !IsPortListening(port) {

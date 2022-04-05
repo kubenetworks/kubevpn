@@ -10,8 +10,10 @@ import (
 	"github.com/wencaiwulue/kubevpn/core"
 	"github.com/wencaiwulue/kubevpn/dns"
 	"github.com/wencaiwulue/kubevpn/util"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
@@ -20,6 +22,7 @@ import (
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -68,7 +71,7 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 				virtualShadowIp, _ := c.dhcp.RentIPRandom()
 				tempIps = append(tempIps, virtualShadowIp)
 				//lock.Unlock()
-				config := util.PodRouteConfig{
+				configInfo := util.PodRouteConfig{
 					LocalTunIP:           c.localTunIP.IP.String(),
 					InboundPodTunIP:      virtualShadowIp.String(),
 					TrafficManagerRealIP: c.routerIP.String(),
@@ -76,9 +79,9 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 				}
 				// TODO OPTIMIZE CODE
 				if c.Mode == Mesh {
-					err = PatchSidecar(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, finalWorkload, config, c.Headers)
+					err = InjectVPNAndEnvoySidecar(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, finalWorkload, configInfo, c.Headers)
 				} else {
-					err = CreateInboundPod(c.factory, c.Namespace, finalWorkload, config)
+					err = InjectVPNSidecar(c.factory, c.Namespace, finalWorkload, configInfo)
 				}
 				if err != nil {
 					log.Error(err)
@@ -109,10 +112,12 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err = c.createRemoteInboundPod(); err != nil {
 		return
 	}
-	if err = util.WaitPortToBeFree(10800, time.Minute*2); err != nil {
+	subCtx, cancelFunc := context.WithTimeout(ctx, time.Minute*2)
+	defer cancelFunc()
+	if err = util.WaitPortToBeFree(subCtx, 10800); err != nil {
 		return err
 	}
-	if err = c.portForward(ctx); err != nil {
+	if err = c.portForward(ctx, 10800); err != nil {
 		return err
 	}
 	if err = c.startLocalTunServe(ctx); err != nil {
@@ -123,7 +128,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	return
 }
 
-func (c *ConnectOptions) portForward(ctx context.Context) error {
+func (c *ConnectOptions) portForward(ctx context.Context, port int) error {
 	var readyChan = make(chan struct{}, 1)
 	var errChan = make(chan error, 1)
 	var first = true
@@ -133,12 +138,17 @@ func (c *ConnectOptions) portForward(ctx context.Context) error {
 				if !first {
 					readyChan = nil
 				}
-				err := util.PortForwardPod(
+				pod, err := c.GetRunningPod()
+				if err != nil {
+					time.Sleep(time.Second * 1)
+					return
+				}
+				err = util.PortForwardPod(
 					c.config,
 					c.restclient,
-					config.PodTrafficManager,
+					pod[0].GetName(),
 					c.Namespace,
-					"10800:10800",
+					strconv.Itoa(port),
 					readyChan,
 					ctx.Done(),
 				)
@@ -227,7 +237,11 @@ func (c *ConnectOptions) detectConflictDevice() {
 }
 
 func (c *ConnectOptions) setupDNS() {
-	relovConf, err := dns.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, config.PodTrafficManager, c.Namespace)
+	pod, err := c.GetRunningPod()
+	if err != nil {
+		log.Fatal(err)
+	}
+	relovConf, err := dns.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, pod[0].GetName(), c.Namespace)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -408,4 +422,23 @@ func (c *ConnectOptions) PreCheckResource() {
 			}
 		}
 	}
+}
+
+func (c *ConnectOptions) GetRunningPod() ([]v1.Pod, error) {
+	list, err := c.clientset.CoreV1().Pods(c.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fields.OneTermEqualSelector("app", config.PodTrafficManager).String(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < len(list.Items); i++ {
+		if list.Items[i].GetDeletionTimestamp() != nil || list.Items[i].Status.Phase != v1.PodRunning {
+			list.Items = append(list.Items[:i], list.Items[i+1:]...)
+			i--
+		}
+	}
+	if len(list.Items) == 0 {
+		return nil, errors.New("can not found any running pod")
+	}
+	return list.Items, nil
 }

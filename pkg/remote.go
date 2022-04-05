@@ -9,6 +9,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/config"
 	"github.com/wencaiwulue/kubevpn/pkg/exchange"
 	"github.com/wencaiwulue/kubevpn/util"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -16,36 +17,63 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	"k8s.io/kubectl/pkg/polymorphichelpers"
-	"k8s.io/kubectl/pkg/util/podutils"
 	"net"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
 
 func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, trafficManagerIP string, nodeCIDR []*net.IPNet) (net.IP, error) {
-	manager, _, err := polymorphichelpers.GetFirstPod(clientset.CoreV1(),
-		namespace,
-		fields.OneTermEqualSelector("app", config.PodTrafficManager).String(),
-		time.Second*5,
-		func(pods []*v1.Pod) sort.Interface {
-			return sort.Reverse(podutils.ActivePods(pods))
-		},
-	)
+	podInterface := clientset.CoreV1().Pods(namespace)
+	serviceInterface := clientset.CoreV1().Services(namespace)
 
-	if err == nil && manager != nil {
+	service, err := serviceInterface.Get(context.Background(), config.PodTrafficManager, metav1.GetOptions{})
+	if err == nil && service != nil {
 		log.Infoln("traffic manager already exist, reuse it")
-		UpdateRefCount(clientset.CoreV1().Pods(namespace), manager.Name, 1)
-		return net.ParseIP(manager.Status.PodIP), nil
+		updateServiceRefCount(serviceInterface, service.GetName(), 1)
+		return net.ParseIP(service.Spec.ClusterIP), nil
 	}
 	log.Infoln("traffic manager not exist, try to create it...")
+	udp8422 := "8422-for-udp"
+	tcp10800 := "10800-for-tcp"
+	tcp9002 := "9002-for-envoy"
+	svc, err := serviceInterface.Create(context.Background(), &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        config.PodTrafficManager,
+			Namespace:   namespace,
+			Annotations: map[string]string{"ref-count": "1"},
+		},
+		Spec: v1.ServiceSpec{
+			Ports: []v1.ServicePort{{
+				Name:       udp8422,
+				Protocol:   v1.ProtocolUDP,
+				Port:       8422,
+				TargetPort: intstr.FromInt(8422),
+			}, {
+				Name:       tcp10800,
+				Protocol:   v1.ProtocolTCP,
+				Port:       10800,
+				TargetPort: intstr.FromInt(10800),
+			}, {
+				Name:       tcp9002,
+				Protocol:   v1.ProtocolTCP,
+				Port:       9002,
+				TargetPort: intstr.FromInt(9002),
+			}},
+			Selector: map[string]string{"app": config.PodTrafficManager},
+			Type:     v1.ServiceTypeClusterIP,
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		return nil, err
+	}
+
 	args := []string{
 		"sysctl net.ipv4.ip_forward=1",
 		"iptables -F",
@@ -61,91 +89,115 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 	t := true
 	f := false
 	zero := int64(0)
-	manager = &v1.Pod{
+	one := int32(1)
+	statefulset := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        config.PodTrafficManager,
-			Namespace:   namespace,
-			Labels:      map[string]string{"app": config.PodTrafficManager},
-			Annotations: map[string]string{"ref-count": "1"},
+			Name:      config.PodTrafficManager,
+			Namespace: namespace,
 		},
-		Spec: v1.PodSpec{
-			Volumes: []v1.Volume{{
-				Name: config.VolumeEnvoyConfig,
-				VolumeSource: v1.VolumeSource{
-					ConfigMap: &v1.ConfigMapVolumeSource{
-						LocalObjectReference: v1.LocalObjectReference{
-							Name: config.PodTrafficManager,
-						},
-						Items: []v1.KeyToPath{
-							{
-								Key:  config.Envoy,
-								Path: "envoy-config.yaml",
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: &one,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": config.PodTrafficManager},
+			},
+			Template: v1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": config.PodTrafficManager},
+				},
+				Spec: v1.PodSpec{
+					Volumes: []v1.Volume{{
+						Name: config.VolumeEnvoyConfig,
+						VolumeSource: v1.VolumeSource{
+							ConfigMap: &v1.ConfigMapVolumeSource{
+								LocalObjectReference: v1.LocalObjectReference{
+									Name: config.PodTrafficManager,
+								},
+								Items: []v1.KeyToPath{
+									{
+										Key:  config.Envoy,
+										Path: "envoy-config.yaml",
+									},
+								},
+								Optional: &f,
 							},
 						},
-						Optional: &f,
-					},
-				},
-			}},
-			Containers: []v1.Container{
-				{
-					Name:    config.SidecarVPN,
-					Image:   config.ImageServer,
-					Command: []string{"/bin/sh", "-c"},
-					Args:    []string{strings.Join(args, ";")},
-					SecurityContext: &v1.SecurityContext{
-						Capabilities: &v1.Capabilities{
-							Add: []v1.Capability{
-								"NET_ADMIN",
-								//"SYS_MODULE",
-							},
-						},
-						RunAsUser:  &zero,
-						Privileged: &t,
-					},
-					Resources: v1.ResourceRequirements{
-						Requests: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:    resource.MustParse("128m"),
-							v1.ResourceMemory: resource.MustParse("256Mi"),
-						},
-						Limits: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:    resource.MustParse("256m"),
-							v1.ResourceMemory: resource.MustParse("512Mi"),
-						},
-					},
-					ImagePullPolicy: v1.PullAlways,
-				},
-				{
-					Name:    config.SidecarControlPlane,
-					Image:   config.ImageControlPlane,
-					Command: []string{"envoy-xds-server"},
-					Args:    []string{"--watchDirectoryFileName", "/etc/envoy/envoy-config.yaml"},
-					VolumeMounts: []v1.VolumeMount{
+					}},
+					Containers: []v1.Container{
 						{
-							Name:      config.VolumeEnvoyConfig,
-							ReadOnly:  true,
-							MountPath: "/etc/envoy",
+							Name:    config.SidecarVPN,
+							Image:   config.ImageServer,
+							Command: []string{"/bin/sh", "-c"},
+							Args:    []string{strings.Join(args, ";")},
+							Ports: []v1.ContainerPort{{
+								Name:          udp8422,
+								ContainerPort: 8422,
+								Protocol:      v1.ProtocolUDP,
+							}, {
+								Name:          tcp10800,
+								ContainerPort: 10800,
+								Protocol:      v1.ProtocolTCP,
+							}},
+							Resources: v1.ResourceRequirements{
+								Requests: map[v1.ResourceName]resource.Quantity{
+									v1.ResourceCPU:    resource.MustParse("128m"),
+									v1.ResourceMemory: resource.MustParse("256Mi"),
+								},
+								Limits: map[v1.ResourceName]resource.Quantity{
+									v1.ResourceCPU:    resource.MustParse("256m"),
+									v1.ResourceMemory: resource.MustParse("512Mi"),
+								},
+							},
+							ImagePullPolicy: v1.PullAlways,
+							SecurityContext: &v1.SecurityContext{
+								Capabilities: &v1.Capabilities{
+									Add: []v1.Capability{
+										"NET_ADMIN",
+										//"SYS_MODULE",
+									},
+								},
+								RunAsUser:  &zero,
+								Privileged: &t,
+							},
+						},
+						{
+							Name:    config.SidecarControlPlane,
+							Image:   config.ImageControlPlane,
+							Command: []string{"envoy-xds-server"},
+							Args:    []string{"--watchDirectoryFileName", "/etc/envoy/envoy-config.yaml"},
+							Ports: []v1.ContainerPort{{
+								Name:          tcp9002,
+								ContainerPort: 9002,
+								Protocol:      v1.ProtocolTCP,
+							}},
+							VolumeMounts: []v1.VolumeMount{
+								{
+									Name:      config.VolumeEnvoyConfig,
+									ReadOnly:  true,
+									MountPath: "/etc/envoy",
+								},
+							},
+							ImagePullPolicy: v1.PullAlways,
 						},
 					},
-					ImagePullPolicy: v1.PullAlways,
+					RestartPolicy:     v1.RestartPolicyAlways,
+					PriorityClassName: "system-cluster-critical",
 				},
 			},
-			RestartPolicy:     v1.RestartPolicyAlways,
-			PriorityClassName: "system-cluster-critical",
+			ServiceName: config.PodTrafficManager,
 		},
 	}
-	newPod, err := clientset.CoreV1().Pods(namespace).Create(context.TODO(), manager, metav1.CreateOptions{})
-	if err != nil {
-		return nil, err
-	}
-	if newPod.Status.Phase == v1.PodRunning {
-		return net.ParseIP(newPod.Status.PodIP), nil
-	}
-	watchStream, err := clientset.CoreV1().Pods(namespace).Watch(context.TODO(), metav1.SingleObject(metav1.ObjectMeta{Name: manager.GetName()}))
+	watchStream, err := podInterface.Watch(context.TODO(), metav1.ListOptions{
+		LabelSelector: fields.OneTermEqualSelector("app", config.PodTrafficManager).String(),
+	})
 	if err != nil {
 		return nil, err
 	}
 	defer watchStream.Stop()
+	if _, err = clientset.AppsV1().StatefulSets(namespace).Create(context.TODO(), statefulset, metav1.CreateOptions{}); err != nil {
+		return nil, err
+	}
 	var phase v1.PodPhase
+out:
 	for {
 		select {
 		case e := <-watchStream.ResultChan():
@@ -154,7 +206,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 					log.Infof("pod %s status is %s", config.PodTrafficManager, podT.Status.Phase)
 				}
 				if podT.Status.Phase == v1.PodRunning {
-					return net.ParseIP(podT.Status.PodIP), nil
+					break out
 				}
 				phase = podT.Status.Phase
 			}
@@ -162,9 +214,10 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 			return nil, errors.New(fmt.Sprintf("wait pod %s to be ready timeout", config.PodTrafficManager))
 		}
 	}
+	return net.ParseIP(svc.Spec.ClusterIP), nil
 }
 
-func CreateInboundPod(factory cmdutil.Factory, namespace, workloads string, config util.PodRouteConfig) error {
+func InjectVPNSidecar(factory cmdutil.Factory, namespace, workloads string, config util.PodRouteConfig) error {
 	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
 	if err != nil {
 		return err

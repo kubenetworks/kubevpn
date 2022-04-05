@@ -170,7 +170,7 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 
 				// client side, deliver packet directly.
 				if raddr != nil {
-					_, err := conn.WriteTo(b[:n], raddr)
+					_, err = conn.WriteTo(b[:n], raddr)
 					return err
 				}
 

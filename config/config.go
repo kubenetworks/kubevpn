@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	PodTrafficManager = "kubevpn.traffic.manager"
+	PodTrafficManager = "kubevpn-traffic-manager"
 	DHCP              = "DHCP"
 	Envoy             = "ENVOY_CONFIG"
 

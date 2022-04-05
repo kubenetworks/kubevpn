@@ -54,6 +54,7 @@ var connectCmd = &cobra.Command{
 		if err := connect.DoConnect(); err != nil {
 			log.Errorln(err)
 			pkg.Cleanup(syscall.SIGQUIT)
+			return
 		}
 		fmt.Println(`
 -----------------------------------------------------------------------------

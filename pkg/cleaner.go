@@ -51,17 +51,17 @@ func Cleanup(s os.Signal) {
 }
 
 // vendor/k8s.io/kubectl/pkg/polymorphichelpers/rollback.go:99
-func UpdateRefCount(clientset v12.PodInterface, name string, increment int) {
+func updateServiceRefCount(serviceInterface v12.ServiceInterface, name string, increment int) {
 	if err := retry.OnError(retry.DefaultRetry, func(err error) bool {
 		return !k8serrors.IsNotFound(err)
 	}, func() error {
-		pod, err := clientset.Get(context.TODO(), name, v1.GetOptions{})
+		service, err := serviceInterface.Get(context.TODO(), name, v1.GetOptions{})
 		if err != nil {
 			log.Errorf("update ref-count failed, increment: %d, error: %v", increment, err)
 			return err
 		}
 		curCount := 0
-		if ref := pod.GetAnnotations()["ref-count"]; len(ref) > 0 {
+		if ref := service.GetAnnotations()["ref-count"]; len(ref) > 0 {
 			curCount, err = strconv.Atoi(ref)
 		}
 		p, _ := json.Marshal([]interface{}{
@@ -71,7 +71,7 @@ func UpdateRefCount(clientset v12.PodInterface, name string, increment int) {
 				"value": strconv.Itoa(curCount + increment),
 			},
 		})
-		_, err = clientset.Patch(context.TODO(), config.PodTrafficManager, types.JSONPatchType, p, v1.PatchOptions{})
+		_, err = serviceInterface.Patch(context.TODO(), config.PodTrafficManager, types.JSONPatchType, p, v1.PatchOptions{})
 		return err
 	}); err != nil {
 		log.Errorf("update ref count error, error: %v", err)
@@ -81,8 +81,8 @@ func UpdateRefCount(clientset v12.PodInterface, name string, increment int) {
 }
 
 func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, namespace string) {
-	UpdateRefCount(clientset.CoreV1().Pods(namespace), config.PodTrafficManager, -1)
-	pod, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), config.PodTrafficManager, v1.GetOptions{})
+	updateServiceRefCount(clientset.CoreV1().Services(namespace), config.PodTrafficManager, -1)
+	pod, err := clientset.CoreV1().Services(namespace).Get(context.TODO(), config.PodTrafficManager, v1.GetOptions{})
 	if err != nil {
 		log.Error(err)
 		return
@@ -92,15 +92,13 @@ func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, name
 		log.Error(err)
 		return
 	}
-	// if refcount is less than zero or equals to zero, means no body will using this dns pod, so clean it
+	// if refcount is less than zero or equals to zero, means nobody is using this traffic pod, so clean it
 	if refCount <= 0 {
 		zero := int64(0)
 		log.Info("refCount is zero, prepare to clean up resource")
-		_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), config.PodTrafficManager, v1.DeleteOptions{
-			GracePeriodSeconds: &zero,
-		})
-		_ = clientset.CoreV1().Pods(namespace).Delete(context.TODO(), config.PodTrafficManager, v1.DeleteOptions{
-			GracePeriodSeconds: &zero,
-		})
+		deleteOptions := v1.DeleteOptions{GracePeriodSeconds: &zero}
+		_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), config.PodTrafficManager, deleteOptions)
+		_ = clientset.CoreV1().Services(namespace).Delete(context.TODO(), config.PodTrafficManager, deleteOptions)
+		_ = clientset.AppsV1().StatefulSets(namespace).Delete(context.TODO(), config.PodTrafficManager, deleteOptions)
 	}
 }
