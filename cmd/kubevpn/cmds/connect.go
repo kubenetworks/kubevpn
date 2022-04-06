@@ -58,7 +58,7 @@ var connectCmd = &cobra.Command{
 		}
 		fmt.Println(`
 -----------------------------------------------------------------------------
-  Now you can access to resources in the kubernetes cluster, enjoy it
+  Now you can access resources in the kubernetes cluster, enjoy it
 -----------------------------------------------------------------------------`)
 		select {}
 	},
