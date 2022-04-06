@@ -130,11 +130,12 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 		_ = conn.Close()
 	}()
 	go func() {
+		b := SPool.Get().([]byte)
+		defer SPool.Put(b)
+
 		for ctx.Err() == nil {
 			err := func() error {
-				b := SPool.Get().([]byte)
-				defer SPool.Put(b)
-				n, err := tun.Read(b)
+				n, err := tun.Read(b[:])
 				if err != nil {
 					select {
 					case h.chExit <- struct{}{}:
@@ -196,12 +197,12 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 	}()
 
 	go func() {
+		b := LPool.Get().([]byte)
+		defer LPool.Put(b)
+
 		for ctx.Err() == nil {
 			err := func() error {
-				b := SPool.Get().([]byte)
-				defer SPool.Put(b)
-
-				n, addr, err := conn.ReadFrom(b)
+				n, addr, err := conn.ReadFrom(b[:])
 				if err != nil && err != shadowaead.ErrShortPacket {
 					return err
 				}

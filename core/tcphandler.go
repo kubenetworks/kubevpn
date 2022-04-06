@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/config"
 	"net"
@@ -17,7 +18,7 @@ func UDPOverTCPTunnelConnector() Connector {
 
 func (c *fakeUDPTunnelConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
 	defer conn.SetDeadline(time.Time{})
-	return newFakeUDPTunnelConnOverTCP(conn)
+	return newFakeUDPTunnelConnOverTCP(ctx, conn)
 }
 
 type fakeUdpHandler struct {
@@ -54,8 +55,11 @@ var Server8422, _ = net.ResolveUDPAddr("udp", "127.0.0.1:8422")
 func (h *fakeUdpHandler) tunnelServerUDP(tcpConn net.Conn, udpConn *net.UDPConn) (err error) {
 	errChan := make(chan error, 2)
 	go func() {
+		b := LPool.Get().([]byte)
+		defer LPool.Put(b)
+
 		for {
-			dgram, err := ReadDatagramPacket(tcpConn)
+			dgram, err := readDatagramPacket(tcpConn, b[:])
 			if err != nil {
 				log.Debugf("[udp-tun] %s -> 0 : %v", tcpConn.RemoteAddr(), err)
 				errChan <- err
@@ -78,7 +82,7 @@ func (h *fakeUdpHandler) tunnelServerUDP(tcpConn net.Conn, udpConn *net.UDPConn)
 		defer MPool.Put(b)
 
 		for {
-			n, err := udpConn.Read(b)
+			n, err := udpConn.Read(b[:])
 			if err != nil {
 				log.Debugf("[udp-tun] %s : %s", tcpConn.RemoteAddr(), err)
 				errChan <- err
@@ -86,7 +90,7 @@ func (h *fakeUdpHandler) tunnelServerUDP(tcpConn net.Conn, udpConn *net.UDPConn)
 			}
 
 			// pipe from peer to tunnel
-			dgram := NewDatagramPacket(b[:n])
+			dgram := newDatagramPacket(b[:n])
 			if err = dgram.Write(tcpConn); err != nil {
 				log.Debugf("[tcpserver] udp-tun %s <- %s : %s", tcpConn.RemoteAddr(), dgram.Addr(), err)
 				errChan <- err
@@ -104,27 +108,30 @@ func (h *fakeUdpHandler) tunnelServerUDP(tcpConn net.Conn, udpConn *net.UDPConn)
 type fakeUDPTunnelConn struct {
 	// tcp connection
 	net.Conn
+	ctx context.Context
 }
 
-func newFakeUDPTunnelConnOverTCP(conn net.Conn) (net.Conn, error) {
-	return &fakeUDPTunnelConn{Conn: conn}, nil
+func newFakeUDPTunnelConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, error) {
+	return &fakeUDPTunnelConn{ctx: ctx, Conn: conn}, nil
 }
 
-func (c *fakeUDPTunnelConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
-	dgram, err := ReadDatagramPacket(c.Conn)
-	if err != nil {
-		log.Debug(err)
-		return
+func (c *fakeUDPTunnelConn) ReadFrom(b []byte) (int, net.Addr, error) {
+	select {
+	case <-c.ctx.Done():
+		return 0, nil, errors.New("closed connection")
+	default:
+		dgram, err := readDatagramPacket(c.Conn, b)
+		if err != nil {
+			return 0, nil, err
+		}
+		return int(dgram.DataLength), dgram.Addr(), nil
 	}
-	n = copy(b, dgram.Data)
-	addr = dgram.Addr()
-	return
 }
 
-func (c *fakeUDPTunnelConn) WriteTo(b []byte, _ net.Addr) (n int, err error) {
-	dgram := NewDatagramPacket(b)
-	if err = dgram.Write(c.Conn); err != nil {
-		return
+func (c *fakeUDPTunnelConn) WriteTo(b []byte, _ net.Addr) (int, error) {
+	dgram := newDatagramPacket(b)
+	if err := dgram.Write(c.Conn); err != nil {
+		return 0, err
 	}
 	return len(b), nil
 }

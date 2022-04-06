@@ -1,7 +1,6 @@
 package core
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -20,7 +19,7 @@ func (addr *datagramPacket) String() string {
 	return fmt.Sprintf("DataLength: %d, Data: %v\n", addr.DataLength, addr.Data)
 }
 
-func NewDatagramPacket(data []byte) (r *datagramPacket) {
+func newDatagramPacket(data []byte) (r *datagramPacket) {
 	return &datagramPacket{
 		DataLength: uint16(len(data)),
 		Data:       data,
@@ -31,9 +30,7 @@ func (addr *datagramPacket) Addr() net.Addr {
 	return Server8422
 }
 
-func ReadDatagramPacket(r io.Reader) (*datagramPacket, error) {
-	b := LPool.Get().([]byte)
-	defer LPool.Put(b)
+func readDatagramPacket(r io.Reader, b []byte) (*datagramPacket, error) {
 	_, err := io.ReadFull(r, b[:2])
 	if err != nil {
 		return nil, err
@@ -48,13 +45,13 @@ func ReadDatagramPacket(r io.Reader) (*datagramPacket, error) {
 }
 
 func (addr *datagramPacket) Write(w io.Writer) error {
-	buf := bytes.Buffer{}
-	i := make([]byte, 2)
-	binary.BigEndian.PutUint16(i, uint16(len(addr.Data)))
-	buf.Write(i)
-	if _, err := buf.Write(addr.Data); err != nil {
+	b := make([]byte, 2)
+	binary.BigEndian.PutUint16(b[:], uint16(len(addr.Data)))
+	if _, err := w.Write(b); err != nil {
 		return err
 	}
-	_, err := buf.WriteTo(w)
-	return err
+	if _, err := w.Write(addr.Data); err != nil {
+		return err
+	}
+	return nil
 }
