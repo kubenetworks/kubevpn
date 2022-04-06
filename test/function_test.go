@@ -266,7 +266,7 @@ func server(port int) {
 func kubevpnConnect() {
 	var ctx context.Context
 	ctx, cancelFunc = context.WithCancel(context.TODO())
-	childCtx, timeoutFunc := context.WithTimeout(ctx, time.Minute*10)
+	childCtx, timeoutFunc := context.WithTimeout(ctx, 2*time.Hour)
 
 	cmd := exec.CommandContext(ctx, "kubevpn", "connect", "--debug", "--workloads", "deployments/reviews")
 	go util.RunWithRollingOutWithChecker(cmd, func(log string) bool {
