@@ -189,7 +189,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, port int) error {
 }
 
 func (c *ConnectOptions) startLocalTunServe(ctx context.Context) (err error) {
-	// todo fighter it out why
+	// todo figure it out why
 	if util.IsWindows() {
 		c.localTunIP.Mask = net.CIDRMask(0, 32)
 	}
