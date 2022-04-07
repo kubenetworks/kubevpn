@@ -43,13 +43,10 @@ func readDatagramPacket(r io.Reader, b []byte) (*datagramPacket, error) {
 }
 
 func (addr *datagramPacket) Write(w io.Writer) error {
-	b := make([]byte, 2)
-	binary.BigEndian.PutUint16(b[:], uint16(len(addr.Data)))
-	if _, err := w.Write(b); err != nil {
-		return err
-	}
-	if _, err := w.Write(addr.Data); err != nil {
-		return err
-	}
-	return nil
+	b := LPool.Get().([]byte)
+	defer LPool.Put(b)
+	binary.BigEndian.PutUint16(b[:2], uint16(len(addr.Data)))
+	n := copy(b[2:], addr.Data)
+	_, err := w.Write(b[:n+2])
+	return err
 }
