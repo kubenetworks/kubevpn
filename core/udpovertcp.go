@@ -35,13 +35,11 @@ func readDatagramPacket(r io.Reader, b []byte) (*datagramPacket, error) {
 	if err != nil {
 		return nil, err
 	}
-	d := &datagramPacket{}
-	d.DataLength = binary.BigEndian.Uint16(b[:2])
-	if _, err = io.ReadFull(r, b[:d.DataLength]); err != nil && (err != io.ErrUnexpectedEOF || err != io.EOF) {
+	dataLength := binary.BigEndian.Uint16(b[:2])
+	if _, err = io.ReadFull(r, b[:dataLength]); err != nil && (err != io.ErrUnexpectedEOF || err != io.EOF) {
 		return nil, err
 	}
-	d.Data = b[:d.DataLength]
-	return d, nil
+	return &datagramPacket{DataLength: dataLength, Data: b[:dataLength]}, nil
 }
 
 func (addr *datagramPacket) Write(w io.Writer) error {
