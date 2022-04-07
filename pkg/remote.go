@@ -90,12 +90,12 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 	f := false
 	zero := int64(0)
 	one := int32(1)
-	statefulset := &appsv1.StatefulSet{
+	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.PodTrafficManager,
 			Namespace: namespace,
 		},
-		Spec: appsv1.StatefulSetSpec{
+		Spec: appsv1.DeploymentSpec{
 			Replicas: &one,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{"app": config.PodTrafficManager},
@@ -183,7 +183,6 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 					PriorityClassName: "system-cluster-critical",
 				},
 			},
-			ServiceName: config.PodTrafficManager,
 		},
 	}
 	watchStream, err := podInterface.Watch(context.TODO(), metav1.ListOptions{
@@ -193,7 +192,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 		return nil, err
 	}
 	defer watchStream.Stop()
-	if _, err = clientset.AppsV1().StatefulSets(namespace).Create(context.TODO(), statefulset, metav1.CreateOptions{}); err != nil {
+	if _, err = clientset.AppsV1().Deployments(namespace).Create(context.TODO(), deployment, metav1.CreateOptions{}); err != nil {
 		return nil, err
 	}
 	var phase v1.PodPhase

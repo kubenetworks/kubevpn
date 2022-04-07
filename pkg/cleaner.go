@@ -99,6 +99,6 @@ func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, name
 		deleteOptions := v1.DeleteOptions{GracePeriodSeconds: &zero}
 		_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), config.PodTrafficManager, deleteOptions)
 		_ = clientset.CoreV1().Services(namespace).Delete(context.TODO(), config.PodTrafficManager, deleteOptions)
-		_ = clientset.AppsV1().StatefulSets(namespace).Delete(context.TODO(), config.PodTrafficManager, deleteOptions)
+		_ = clientset.AppsV1().Deployments(namespace).Delete(context.TODO(), config.PodTrafficManager, deleteOptions)
 	}
 }

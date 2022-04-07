@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -24,6 +25,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -128,29 +130,36 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	return
 }
 
+// detect pod is delete event, if pod is deleted, needs to redo port-forward immediately
 func (c *ConnectOptions) portForward(ctx context.Context, port int) error {
+	var childCtx context.Context
+	var cancelFunc context.CancelFunc
+	var curPodName = &atomic.Value{}
 	var readyChan = make(chan struct{}, 1)
 	var errChan = make(chan error, 1)
 	var first = true
 	go func() {
 		for ctx.Err() == nil {
 			func() {
-				if !first {
-					readyChan = nil
-				}
-				pod, err := c.GetRunningPod()
+				podList, err := c.GetRunningPodList()
 				if err != nil {
 					time.Sleep(time.Second * 1)
 					return
 				}
+				childCtx, cancelFunc = context.WithCancel(ctx)
+				defer cancelFunc()
+				if !first {
+					readyChan = nil
+				}
+				curPodName.Store(podList[0].GetName())
 				err = util.PortForwardPod(
 					c.config,
 					c.restclient,
-					pod[0].GetName(),
+					podList[0].GetName(),
 					c.Namespace,
 					strconv.Itoa(port),
 					readyChan,
-					ctx.Done(),
+					childCtx.Done(),
 				)
 				if first {
 					errChan <- err
@@ -174,6 +183,38 @@ func (c *ConnectOptions) portForward(ctx context.Context, port int) error {
 					log.Errorf("port-forward occurs error, err: %v, retrying", err)
 				}
 				time.Sleep(time.Second * 2)
+			}()
+		}
+	}()
+
+	// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
+	go func() {
+		for ctx.Err() == nil {
+			func() {
+				podName := curPodName.Load()
+				if podName == nil || childCtx == nil || cancelFunc == nil {
+					time.Sleep(2 * time.Second)
+					return
+				}
+				watchStream, err := c.clientset.CoreV1().Pods(c.Namespace).Watch(childCtx, metav1.ListOptions{
+					FieldSelector: fields.OneTermEqualSelector("metadata.name", podName.(string)).String(),
+				})
+				if apierrors.IsForbidden(err) {
+					time.Sleep(5 * time.Second)
+					return
+				}
+				if err != nil {
+					return
+				}
+				defer watchStream.Stop()
+				for childCtx.Err() == nil {
+					select {
+					case e := <-watchStream.ResultChan():
+						if e.Type == watch.Deleted {
+							cancelFunc()
+						}
+					}
+				}
 			}()
 		}
 	}()
@@ -237,7 +278,7 @@ func (c *ConnectOptions) detectConflictDevice() {
 }
 
 func (c *ConnectOptions) setupDNS() {
-	pod, err := c.GetRunningPod()
+	pod, err := c.GetRunningPodList()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -424,7 +465,7 @@ func (c *ConnectOptions) PreCheckResource() {
 	}
 }
 
-func (c *ConnectOptions) GetRunningPod() ([]v1.Pod, error) {
+func (c *ConnectOptions) GetRunningPodList() ([]v1.Pod, error) {
 	list, err := c.clientset.CoreV1().Pods(c.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", config.PodTrafficManager).String(),
 	})
