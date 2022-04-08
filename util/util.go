@@ -96,7 +96,7 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 	}
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
 	p := []string{port}
-	forwarder, err := portforward.NewOnAddresses(dialer, []string{"0.0.0.0"}, p, stopChan, readyChan, os.Stdout, os.Stderr)
+	forwarder, err := portforward.NewOnAddresses(dialer, []string{"0.0.0.0"}, p, stopChan, readyChan, nil, os.Stderr)
 	if err != nil {
 		log.Error(err)
 		return err

@@ -49,7 +49,6 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, r *miekgdns.Msg) {
 	answer, _, err := client.Exchange(r, s.forwardDNS.Servers[0]+":53")
 	//answer, err := miekgdns.Exchange(r, s.forwardDNS.Servers[0]+":53")
 	if err != nil {
-		log.Warnln(err)
 		err = w.WriteMsg(r)
 		if err != nil {
 			log.Warnln(err)
