@@ -11,20 +11,20 @@ jobs:
     strategy:
       matrix:
         os-arch: [
-            kubevpn-darwin-amd64,
-            kubevpn-darwin-arm64,
-            kubevpn-windows-amd64.exe,
-            kubevpn-windows-arm64.exe,
-            kubevpn-windows-386.exe,
-            kubevpn-linux-amd64,
-            kubevpn-linux-arm64,
-            kubevpn-linux-386,
+          kubevpn-darwin-amd64,
+          kubevpn-darwin-arm64,
+          kubevpn-windows-amd64.exe,
+          kubevpn-windows-arm64.exe,
+          kubevpn-windows-386.exe,
+          kubevpn-linux-amd64,
+          kubevpn-linux-arm64,
+          kubevpn-linux-386,
         ]
     steps:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: 1.17
+          go-version: 1.18
       - name: Checkout code
         uses: actions/checkout@v2
 

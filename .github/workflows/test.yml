@@ -14,7 +14,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: 1.17
+          go-version: 1.18
       - name: Push image to docker hub
         run: |
           echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USER }} --password-stdin
@@ -29,7 +29,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: 1.17
+          go-version: 1.18
 
       - name: Setup Minikube
         timeout-minutes: 30
@@ -68,7 +68,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: 1.17
+          go-version: 1.18
       - uses: docker-practice/actions-setup-docker@master
       - name: Pull image in advance
         run: |
@@ -126,7 +126,7 @@ jobs:
 #      - name: Set up Go
 #        uses: actions/setup-go@v2
 #        with:
-#          go-version: 1.17
+#          go-version: 1.18
 #      #      - run: |
 #      #          choco install docker-desktop
 #      #          docker version
