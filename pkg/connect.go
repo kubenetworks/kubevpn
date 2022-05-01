@@ -333,38 +333,66 @@ func getCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, e
 			}
 		}
 	}
-	// if node spec can not contain pod IP
+	// get pod CIDR from pod ip, why doing this: notice that node's pod cidr is not correct in minikube
+	// ➜  ~ kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}'
+	//10.244.0.0/24%
+	// ➜  ~  kubectl get pods -o=custom-columns=podIP:.status.podIP
+	//podIP
+	//172.17.0.5
+	//172.17.0.4
+	//172.17.0.4
+	//172.17.0.3
+	//172.17.0.3
+	//172.17.0.6
+	//172.17.0.8
+	//172.17.0.3
+	//172.17.0.7
+	//172.17.0.2
 	if podList, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, pod := range podList.Items {
 			if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
-				var contains bool
+				var contain bool
 				for _, CIDR := range CIDRList {
 					if CIDR.Contains(ip) {
-						contains = true
+						contain = true
 						break
 					}
 				}
-				if !contains {
+				if !contain {
 					mask := net.CIDRMask(24, 32)
 					CIDRList = append(CIDRList, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
 				}
 			}
 		}
 	}
-	// pod CIDR maybe is not same with service CIDR
-	if serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), metav1.ListOptions{}); err == nil {
-		for _, service := range serviceList.Items {
-			if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
-				var contains bool
-				for _, CIDR := range CIDRList {
-					if CIDR.Contains(ip) {
-						contains = true
-						break
+
+	// get service CIDR
+	defaultCIDRIndex := "The range of valid IPs is"
+	if _, err := clientset.CoreV1().Services(namespace).Create(context.TODO(), &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{GenerateName: "foo-svc-"},
+		Spec:       v1.ServiceSpec{Ports: []v1.ServicePort{{Port: 80}}, ClusterIP: "0.0.0.0"},
+	}, metav1.CreateOptions{}); err != nil {
+		idx := strings.LastIndex(err.Error(), defaultCIDRIndex)
+		if idx != -1 {
+			if _, cidr, err := net.ParseCIDR(strings.TrimSpace(err.Error()[idx+len(defaultCIDRIndex):])); err == nil {
+				CIDRList = append(CIDRList, cidr)
+			}
+		}
+	} else {
+		if serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), metav1.ListOptions{}); err == nil {
+			for _, service := range serviceList.Items {
+				if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
+					var contain bool
+					for _, CIDR := range CIDRList {
+						if CIDR.Contains(ip) {
+							contain = true
+							break
+						}
 					}
-				}
-				if !contains {
-					mask := net.CIDRMask(16, 32)
-					CIDRList = append(CIDRList, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
+					if !contain {
+						mask := net.CIDRMask(16, 32)
+						CIDRList = append(CIDRList, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
+					}
 				}
 			}
 		}
