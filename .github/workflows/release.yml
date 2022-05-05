@@ -16,6 +16,13 @@ jobs:
           go-version: 1.18
       - name: Checkout code
         uses: actions/checkout@v2
+      - name: Get tag
+        run: |
+          echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+          echo "PREVERSION=$(git for-each-ref --sort='-creatordate' --format='%(refname:lstrip=2)' --count=50 'refs/tags/*' | grep -v 'rc' | awk 'NR==2')" >> $GITHUB_ENV
+      - name: Release Note
+        run: |
+          echo "$(../release-note.sh ${{ env.PREVERSION }} ${{ env.RELEASE_VERSION }})" > release_note.md
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -24,12 +31,9 @@ jobs:
         with:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
-          body: |
-            Changes in this Release
-            - Fix known bugs
-            - Optimize code
           draft: false
           prerelease: false
+          body_path: release_note.md
 
       - name: Collect Release Info
         run: |
