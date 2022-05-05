@@ -22,7 +22,7 @@ jobs:
           echo "PREVERSION=$(git for-each-ref --sort='-creatordate' --format='%(refname:lstrip=2)' --count=50 'refs/tags/*' | grep -v 'rc' | awk 'NR==2')" >> $GITHUB_ENV
       - name: Release Note
         run: |
-          echo "$(../release-note.sh ${{ env.PREVERSION }} ${{ env.RELEASE_VERSION }})" > release_note.md
+          echo "$(./.github/release-note.sh ${{ env.PREVERSION }} ${{ env.RELEASE_VERSION }})" > release_note.md
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
