@@ -56,7 +56,7 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteCo
 				v1.ResourceMemory: resource.MustParse("256Mi"),
 			},
 		},
-		ImagePullPolicy: v1.PullAlways,
+		ImagePullPolicy: v1.PullIfNotPresent,
 	})
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.SidecarEnvoyProxy,
@@ -75,6 +75,6 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteCo
 				v1.ResourceMemory: resource.MustParse("256Mi"),
 			},
 		},
-		ImagePullPolicy: v1.PullAlways,
+		ImagePullPolicy: v1.PullIfNotPresent,
 	})
 }

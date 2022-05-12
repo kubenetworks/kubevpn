@@ -147,7 +147,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 									v1.ResourceMemory: resource.MustParse("512Mi"),
 								},
 							},
-							ImagePullPolicy: v1.PullAlways,
+							ImagePullPolicy: v1.PullIfNotPresent,
 							SecurityContext: &v1.SecurityContext{
 								Capabilities: &v1.Capabilities{
 									Add: []v1.Capability{
@@ -176,7 +176,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 									MountPath: "/etc/envoy",
 								},
 							},
-							ImagePullPolicy: v1.PullAlways,
+							ImagePullPolicy: v1.PullIfNotPresent,
 						},
 					},
 					RestartPolicy:     v1.RestartPolicyAlways,
