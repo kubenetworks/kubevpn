@@ -4,8 +4,12 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
+	"net"
+	"os/exec"
+	"testing"
+	"time"
+
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/util"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -16,10 +20,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	"net"
-	"os/exec"
-	"testing"
-	"time"
+
+	"github.com/wencaiwulue/kubevpn/util"
 )
 
 var (

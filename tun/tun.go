@@ -2,11 +2,12 @@ package tun
 
 import (
 	"errors"
-	log "github.com/sirupsen/logrus"
-	"github.com/songgao/water"
 	"net"
 	"os"
 	"time"
+
+	log "github.com/sirupsen/logrus"
+	"github.com/songgao/water"
 )
 
 // Config is the config for TUN device.

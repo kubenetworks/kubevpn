@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"os/exec"
+	"path/filepath"
+	"testing"
+	"time"
+
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/config"
-	"github.com/wencaiwulue/kubevpn/util"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -22,11 +26,9 @@ import (
 	"k8s.io/client-go/util/homedir"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	"net"
-	"os/exec"
-	"path/filepath"
-	"testing"
-	"time"
+
+	"github.com/wencaiwulue/kubevpn/config"
+	"github.com/wencaiwulue/kubevpn/util"
 )
 
 //func TestCreateServer(t *testing.T) {
@@ -174,7 +176,7 @@ func TestDeleteAndCreate(t *testing.T) {
 	object, err := util.GetUnstructuredObject(factory, Namespace, "pods/nginx")
 
 	u := object.Object.(*unstructured.Unstructured)
-	var pp v1.Pod
+	var pp corev1.Pod
 	marshal, err := json.Marshal(u)
 	err = json.Unmarshal(marshal, &pp)
 
@@ -187,7 +189,7 @@ func TestDeleteAndCreate(t *testing.T) {
 	}
 	_ = exec.Command("kubectl", "wait", "pods/nginx", "--for=delete").Run()
 
-	p := &v1.Pod{ObjectMeta: pp.ObjectMeta, Spec: pp.Spec}
+	p := &corev1.Pod{ObjectMeta: pp.ObjectMeta, Spec: pp.Spec}
 	CleanupUselessInfo(p)
 	if err = retry.OnError(wait.Backoff{
 		Steps:    10,
@@ -200,7 +202,7 @@ func TestDeleteAndCreate(t *testing.T) {
 		}
 		clientset, err := factory.KubernetesClientSet()
 		get, err := clientset.CoreV1().Pods(p.Namespace).Get(context.TODO(), p.Name, metav1.GetOptions{})
-		if err != nil || get.Status.Phase != v1.PodRunning {
+		if err != nil || get.Status.Phase != corev1.PodRunning {
 			return true
 		}
 		return false

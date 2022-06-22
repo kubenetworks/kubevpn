@@ -1,13 +1,15 @@
 package driver
 
 import (
-	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/driver/openvpn"
-	"github.com/wencaiwulue/kubevpn/driver/wintun"
-	"k8s.io/client-go/util/retry"
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	log "github.com/sirupsen/logrus"
+	"k8s.io/client-go/util/retry"
+
+	"github.com/wencaiwulue/kubevpn/driver/openvpn"
+	"github.com/wencaiwulue/kubevpn/driver/wintun"
 )
 
 func InstallTunTapDriver() {

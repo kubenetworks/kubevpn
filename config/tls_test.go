@@ -3,11 +3,12 @@ package config
 import (
 	"crypto/tls"
 	"fmt"
-	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/util"
 	"io"
 	"net"
 	"testing"
+
+	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/util"
 )
 
 func init() {

@@ -3,24 +3,26 @@ package pkg
 import (
 	"context"
 	"fmt"
+	"net"
+
 	"github.com/cilium/ipam/service/allocator"
 	"github.com/cilium/ipam/service/ipallocator"
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/config"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"net"
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+
+	"github.com/wencaiwulue/kubevpn/config"
 )
 
 type DHCPManager struct {
-	client    v12.ConfigMapInterface
+	client    corev1.ConfigMapInterface
 	cidr      *net.IPNet
 	namespace string
 }
 
-func NewDHCPManager(client v12.ConfigMapInterface, namespace string, cidr *net.IPNet) *DHCPManager {
+func NewDHCPManager(client corev1.ConfigMapInterface, namespace string, cidr *net.IPNet) *DHCPManager {
 	return &DHCPManager{
 		client:    client,
 		namespace: namespace,

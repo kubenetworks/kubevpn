@@ -2,15 +2,17 @@ package control_plane
 
 import (
 	"fmt"
+	"time"
+
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	route "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	httpinspector "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/listener/http_inspector/v3"
-	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
-	tcp "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
-	v32 "github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3"
+	httpconnectionmanager "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
+	tcpproxy "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
+	matcher "github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/wellknown"
@@ -18,13 +20,12 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
-	v1 "k8s.io/api/core/v1"
-	"time"
+	corev1 "k8s.io/api/core/v1"
 )
 
 type Virtual struct {
 	Uid   string // group.resource.name
-	Ports []v1.ContainerPort
+	Ports []corev1.ContainerPort
 	Rules []*Rule
 }
 
@@ -126,8 +127,8 @@ func ToRoute(clusterName string, headers map[string]string) *route.Route {
 		r = append(r, &route.HeaderMatcher{
 			Name: k,
 			HeaderMatchSpecifier: &route.HeaderMatcher_StringMatch{
-				StringMatch: &v32.StringMatcher{
-					MatchPattern: &v32.StringMatcher_Exact{
+				StringMatch: &matcher.StringMatcher{
+					MatchPattern: &matcher.StringMatcher_Exact{
 						Exact: v,
 					},
 				},
@@ -168,14 +169,14 @@ func DefaultRoute() *route.Route {
 	}
 }
 
-func ToListener(listenerName string, routeName string, port int32, p v1.Protocol) *listener.Listener {
+func ToListener(listenerName string, routeName string, port int32, p corev1.Protocol) *listener.Listener {
 	var protocol core.SocketAddress_Protocol
 	switch p {
-	case v1.ProtocolTCP:
+	case corev1.ProtocolTCP:
 		protocol = core.SocketAddress_TCP
-	case v1.ProtocolUDP:
+	case corev1.ProtocolUDP:
 		protocol = core.SocketAddress_UDP
-	case v1.ProtocolSCTP:
+	case corev1.ProtocolSCTP:
 		protocol = core.SocketAddress_TCP
 	}
 
@@ -184,14 +185,14 @@ func ToListener(listenerName string, routeName string, port int32, p v1.Protocol
 		return pbst
 	}
 
-	httpManager := &hcm.HttpConnectionManager{
-		CodecType:  hcm.HttpConnectionManager_AUTO,
+	httpManager := &httpconnectionmanager.HttpConnectionManager{
+		CodecType:  httpconnectionmanager.HttpConnectionManager_AUTO,
 		StatPrefix: "http",
-		HttpFilters: []*hcm.HttpFilter{{
+		HttpFilters: []*httpconnectionmanager.HttpFilter{{
 			Name: wellknown.Router,
 		}},
-		RouteSpecifier: &hcm.HttpConnectionManager_Rds{
-			Rds: &hcm.Rds{
+		RouteSpecifier: &httpconnectionmanager.HttpConnectionManager_Rds{
+			Rds: &httpconnectionmanager.Rds{
 				ConfigSource: &core.ConfigSource{
 					ResourceApiVersion: resource.DefaultAPIVersion,
 					ConfigSourceSpecifier: &core.ConfigSource_ApiConfigSource{
@@ -212,9 +213,9 @@ func ToListener(listenerName string, routeName string, port int32, p v1.Protocol
 		},
 	}
 
-	tcpConfig := &tcp.TcpProxy{
+	tcpConfig := &tcpproxy.TcpProxy{
 		StatPrefix: "tcp",
-		ClusterSpecifier: &tcp.TcpProxy_Cluster{
+		ClusterSpecifier: &tcpproxy.TcpProxy_Cluster{
 			Cluster: "origin_cluster",
 		},
 	}

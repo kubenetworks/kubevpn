@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"errors"
-	"github.com/wencaiwulue/kubevpn/config"
 	"net"
 	"sync"
 	"time"
@@ -13,6 +12,8 @@ import (
 	"github.com/songgao/water/waterutil"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+
+	"github.com/wencaiwulue/kubevpn/config"
 )
 
 func ipToTunRouteKey(ip net.IP) string {

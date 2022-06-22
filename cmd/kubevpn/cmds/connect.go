@@ -2,18 +2,20 @@ package cmds
 
 import (
 	"fmt"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
-	config2 "github.com/wencaiwulue/kubevpn/config"
-	"github.com/wencaiwulue/kubevpn/driver"
-	"github.com/wencaiwulue/kubevpn/pkg"
-	"github.com/wencaiwulue/kubevpn/util"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/retry"
 	"net/http"
 	"os"
 	"path/filepath"
 	"syscall"
+
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/retry"
+
+	"github.com/wencaiwulue/kubevpn/config"
+	"github.com/wencaiwulue/kubevpn/driver"
+	"github.com/wencaiwulue/kubevpn/pkg"
+	"github.com/wencaiwulue/kubevpn/util"
 )
 
 var connect = pkg.ConnectOptions{}
@@ -24,7 +26,7 @@ func init() {
 	connectCmd.PersistentFlags().StringArrayVar(&connect.Workloads, "workloads", []string{}, "workloads, like: pods/tomcat, deployment/nginx, replicaset/tomcat...")
 	connectCmd.Flags().StringVar((*string)(&connect.Mode), "mode", string(pkg.Reverse), "default mode is reverse")
 	connectCmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "headers, format is k=v, like: k1=v1,k2=v2")
-	connectCmd.Flags().BoolVar(&config2.Debug, "debug", false, "true/false")
+	connectCmd.Flags().BoolVar(&config.Debug, "debug", false, "true/false")
 	RootCmd.AddCommand(connectCmd)
 }
 
@@ -41,7 +43,7 @@ var connectCmd = &cobra.Command{
 		}
 	},
 	PreRun: func(*cobra.Command, []string) {
-		util.InitLogger(config2.Debug)
+		util.InitLogger(config.Debug)
 		if util.IsWindows() {
 			driver.InstallWireGuardTunDriver()
 		}

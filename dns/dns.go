@@ -3,14 +3,16 @@ package dns
 import (
 	"bytes"
 	"context"
+
 	miekgdns "github.com/miekg/dns"
 	"github.com/pkg/errors"
-	"github.com/wencaiwulue/kubevpn/util"
 	v12 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	"github.com/wencaiwulue/kubevpn/util"
 )
 
 func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) (*miekgdns.ClientConfig, error) {

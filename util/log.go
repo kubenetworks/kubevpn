@@ -2,8 +2,9 @@ package util
 
 import (
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"path/filepath"
+
+	log "github.com/sirupsen/logrus"
 )
 
 func InitLogger(debug bool) {

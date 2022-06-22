@@ -4,10 +4,11 @@
 package dns
 
 import (
-	miekgdns "github.com/miekg/dns"
-	log "github.com/sirupsen/logrus"
 	"os"
 	"os/exec"
+
+	miekgdns "github.com/miekg/dns"
+	log "github.com/sirupsen/logrus"
 )
 
 // systemd-resolve --status, systemd-resolve --flush-caches

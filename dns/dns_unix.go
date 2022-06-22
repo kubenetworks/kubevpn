@@ -6,19 +6,21 @@ package dns
 import (
 	"context"
 	"fmt"
-	"github.com/fsnotify/fsnotify"
-	miekgdns "github.com/miekg/dns"
-	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/util"
 	"io/fs"
 	"io/ioutil"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
+	miekgdns "github.com/miekg/dns"
+	log "github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/util/sets"
+
+	"github.com/wencaiwulue/kubevpn/util"
 )
 
 var cancel context.CancelFunc

@@ -2,11 +2,11 @@ package core
 
 import (
 	"context"
-	"k8s.io/client-go/util/retry"
 	"net"
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"k8s.io/client-go/util/retry"
 )
 
 type Server struct {

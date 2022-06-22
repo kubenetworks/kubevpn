@@ -3,10 +3,12 @@ package core
 import (
 	"context"
 	"errors"
-	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/config"
 	"net"
 	"time"
+
+	log "github.com/sirupsen/logrus"
+
+	"github.com/wencaiwulue/kubevpn/config"
 )
 
 type fakeUDPTunnelConnector struct {

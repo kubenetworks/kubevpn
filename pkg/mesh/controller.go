@@ -2,11 +2,13 @@ package mesh
 
 import (
 	"fmt"
-	"github.com/wencaiwulue/kubevpn/config"
-	"github.com/wencaiwulue/kubevpn/util"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	"github.com/wencaiwulue/kubevpn/config"
+	"github.com/wencaiwulue/kubevpn/util"
 )
 
 func RemoveContainers(spec *v1.PodTemplateSpec) {

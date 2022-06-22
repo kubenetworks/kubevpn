@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
+	"strings"
+	"time"
+
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/config"
-	"github.com/wencaiwulue/kubevpn/pkg/exchange"
-	"github.com/wencaiwulue/kubevpn/util"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -23,10 +25,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	"net"
-	"strconv"
-	"strings"
-	"time"
+
+	"github.com/wencaiwulue/kubevpn/config"
+	"github.com/wencaiwulue/kubevpn/pkg/exchange"
+	"github.com/wencaiwulue/kubevpn/util"
 )
 
 func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, trafficManagerIP string, nodeCIDR []*net.IPNet) (net.IP, error) {

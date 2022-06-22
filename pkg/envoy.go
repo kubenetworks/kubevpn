@@ -4,12 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	config2 "github.com/wencaiwulue/kubevpn/config"
-	"github.com/wencaiwulue/kubevpn/pkg/control_plane"
-	"github.com/wencaiwulue/kubevpn/pkg/mesh"
-	"github.com/wencaiwulue/kubevpn/util"
 	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,8 +19,11 @@ import (
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/yaml"
-	"strings"
-	"time"
+
+	"github.com/wencaiwulue/kubevpn/config"
+	"github.com/wencaiwulue/kubevpn/pkg/control_plane"
+	"github.com/wencaiwulue/kubevpn/pkg/mesh"
+	"github.com/wencaiwulue/kubevpn/util"
 )
 
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
@@ -60,7 +62,7 @@ func InjectVPNAndEnvoySidecar(factory cmdutil.Factory, clientset v12.ConfigMapIn
 	for _, container := range templateSpec.Spec.Containers {
 		containerNames.Insert(container.Name)
 	}
-	if containerNames.HasAll(config2.SidecarVPN, config2.SidecarEnvoyProxy) {
+	if containerNames.HasAll(config.SidecarVPN, config.SidecarEnvoyProxy) {
 		// add rollback func to remove envoy config
 		rollbackFuncList = append(rollbackFuncList, func() {
 			err = removeEnvoyConfig(clientset, nodeID, headers)
@@ -154,12 +156,12 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 }
 
 func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUNIP string, headers map[string]string, port []v1.ContainerPort) error {
-	configMap, err := mapInterface.Get(context.TODO(), config2.PodTrafficManager, metav1.GetOptions{})
+	configMap, err := mapInterface.Get(context.TODO(), config.PodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 	var v = make([]*control_plane.Virtual, 0)
-	if str, ok := configMap.Data[config2.Envoy]; ok {
+	if str, ok := configMap.Data[config.Envoy]; ok {
 		if err = yaml.Unmarshal([]byte(str), &v); err != nil {
 			return err
 		}
@@ -191,20 +193,20 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUN
 	if err != nil {
 		return err
 	}
-	configMap.Data[config2.Envoy] = string(marshal)
+	configMap.Data[config.Envoy] = string(marshal)
 	_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
 	return err
 }
 
 func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, headers map[string]string) error {
-	configMap, err := mapInterface.Get(context.TODO(), config2.PodTrafficManager, metav1.GetOptions{})
+	configMap, err := mapInterface.Get(context.TODO(), config.PodTrafficManager, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	str, ok := configMap.Data[config2.Envoy]
+	str, ok := configMap.Data[config.Envoy]
 	if !ok {
 		return errors.New("can not found value for key: envoy-config.yaml")
 	}
@@ -233,7 +235,7 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, heade
 	if err != nil {
 		return err
 	}
-	configMap.Data[config2.Envoy] = string(marshal)
+	configMap.Data[config.Envoy] = string(marshal)
 	_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
 	return err
 }

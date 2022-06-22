@@ -2,12 +2,14 @@ package pkg
 
 import (
 	"crypto/tls"
+	"net"
+	"strings"
+
 	"github.com/pkg/errors"
+
 	"github.com/wencaiwulue/kubevpn/config"
 	"github.com/wencaiwulue/kubevpn/core"
 	"github.com/wencaiwulue/kubevpn/tun"
-	"net"
-	"strings"
 )
 
 type Route struct {

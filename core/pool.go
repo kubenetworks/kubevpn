@@ -1,8 +1,9 @@
 package core
 
 import (
-	"github.com/wencaiwulue/kubevpn/config"
 	"sync"
+
+	"github.com/wencaiwulue/kubevpn/config"
 )
 
 var (

@@ -2,10 +2,11 @@ package util
 
 import (
 	"context"
-	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/config"
 	"os/exec"
 	"time"
+
+	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/config"
 )
 
 // DeleteWindowsFirewallRule Delete all action block firewall rule

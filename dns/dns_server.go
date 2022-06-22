@@ -1,11 +1,12 @@
 package dns
 
 import (
+	"strings"
+	"time"
+
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/cache"
-	"strings"
-	"time"
 )
 
 type server struct {

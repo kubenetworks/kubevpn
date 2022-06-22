@@ -2,13 +2,14 @@ package tun
 
 import (
 	"fmt"
+	"net"
+	"os"
+	"time"
+
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
 	wireguardtun "golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
-	"net"
-	"os"
-	"time"
 )
 
 func createTun(cfg Config) (net.Conn, *net.Interface, error) {

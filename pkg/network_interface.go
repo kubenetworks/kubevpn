@@ -2,10 +2,11 @@ package pkg
 
 import (
 	"bytes"
-	log "github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"net"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // DetectAndDisableConflictDevice will detect conflict route table and try to disable device

@@ -3,19 +3,21 @@ package pkg
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"os/signal"
+	"strconv"
+	"syscall"
+
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/config"
-	"github.com/wencaiwulue/kubevpn/dns"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/util/retry"
-	"os"
-	"os/signal"
-	"strconv"
-	"syscall"
+	
+	"github.com/wencaiwulue/kubevpn/config"
+	"github.com/wencaiwulue/kubevpn/dns"
 )
 
 var stopChan = make(chan os.Signal)

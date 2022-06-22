@@ -3,7 +3,6 @@ package tun
 import (
 	"errors"
 	"fmt"
-	"github.com/wencaiwulue/kubevpn/config"
 	"net"
 	"syscall"
 
@@ -11,6 +10,8 @@ import (
 	"github.com/milosgajdos/tenus"
 	log "github.com/sirupsen/logrus"
 	"github.com/songgao/water"
+
+	"github.com/wencaiwulue/kubevpn/config"
 )
 
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {

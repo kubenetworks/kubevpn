@@ -1,10 +1,12 @@
 package main
 
 import (
-	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/tun"
 	"io"
 	"net"
+
+	log "github.com/sirupsen/logrus"
+
+	"github.com/wencaiwulue/kubevpn/tun"
 )
 
 func main() {

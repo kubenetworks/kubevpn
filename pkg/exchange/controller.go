@@ -1,13 +1,14 @@
 package exchange
 
 import (
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"github.com/wencaiwulue/kubevpn/config"
 	"github.com/wencaiwulue/kubevpn/util"
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-func RemoveContainer(spec *v1.PodSpec) {
+func RemoveContainer(spec *corev1.PodSpec) {
 	for i := 0; i < len(spec.Containers); i++ {
 		if spec.Containers[i].Name == config.SidecarVPN {
 			spec.Containers = append(spec.Containers[:i], spec.Containers[i+1:]...)
@@ -16,12 +17,12 @@ func RemoveContainer(spec *v1.PodSpec) {
 	}
 }
 
-func AddContainer(spec *v1.PodSpec, c util.PodRouteConfig) {
+func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig) {
 	// remove vpn container if already exist
 	RemoveContainer(spec)
 	t := true
 	zero := int64(0)
-	spec.Containers = append(spec.Containers, v1.Container{
+	spec.Containers = append(spec.Containers, corev1.Container{
 		Name:    config.SidecarVPN,
 		Image:   config.ImageServer,
 		Command: []string{"/bin/sh", "-c"},
@@ -36,9 +37,9 @@ func AddContainer(spec *v1.PodSpec, c util.PodRouteConfig) {
 				"iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination " + c.LocalTunIP + ";" +
 				"kubevpn serve -L 'tun://0.0.0.0:8421/" + c.TrafficManagerRealIP + ":8422?net=" + c.InboundPodTunIP + "&route=" + c.Route + "' --debug=true",
 		},
-		SecurityContext: &v1.SecurityContext{
-			Capabilities: &v1.Capabilities{
-				Add: []v1.Capability{
+		SecurityContext: &corev1.SecurityContext{
+			Capabilities: &corev1.Capabilities{
+				Add: []corev1.Capability{
 					"NET_ADMIN",
 					//"SYS_MODULE",
 				},
@@ -46,17 +47,17 @@ func AddContainer(spec *v1.PodSpec, c util.PodRouteConfig) {
 			RunAsUser:  &zero,
 			Privileged: &t,
 		},
-		Resources: v1.ResourceRequirements{
-			Requests: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("128m"),
-				v1.ResourceMemory: resource.MustParse("128Mi"),
+		Resources: corev1.ResourceRequirements{
+			Requests: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU:    resource.MustParse("128m"),
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
 			},
-			Limits: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("256m"),
-				v1.ResourceMemory: resource.MustParse("256Mi"),
+			Limits: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU:    resource.MustParse("256m"),
+				corev1.ResourceMemory: resource.MustParse("256Mi"),
 			},
 		},
-		ImagePullPolicy: v1.PullIfNotPresent,
+		ImagePullPolicy: corev1.PullIfNotPresent,
 	})
 	if len(spec.PriorityClassName) == 0 {
 		spec.PriorityClassName = "system-cluster-critical"

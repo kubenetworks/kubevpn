@@ -6,14 +6,15 @@ package dns
 import (
 	"context"
 	"fmt"
-	miekgdns "github.com/miekg/dns"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/sys/windows"
-	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 	"net"
 	"os"
 	"os/exec"
 	"strconv"
+
+	miekgdns "github.com/miekg/dns"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sys/windows"
+	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
 func SetupDNS(config *miekgdns.ClientConfig) error {

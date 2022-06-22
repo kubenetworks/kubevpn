@@ -2,8 +2,9 @@ package core
 
 import (
 	"crypto/tls"
-	"github.com/wencaiwulue/kubevpn/config"
 	"net"
+
+	"github.com/wencaiwulue/kubevpn/config"
 )
 
 type tcpTransporter struct{}

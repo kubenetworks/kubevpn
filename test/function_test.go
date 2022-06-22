@@ -3,18 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/util"
-	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/retry"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"net"
 	"net/http"
 	"os/exec"
@@ -24,6 +12,20 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	log "github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/retry"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+
+	"github.com/wencaiwulue/kubevpn/util"
 )
 
 var (
@@ -49,7 +51,7 @@ func TestFunctions(t *testing.T) {
 func pingPodIP(t *testing.T) {
 	ctx, f := context.WithTimeout(context.TODO(), time.Second*60)
 	defer f()
-	list, err := clientset.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{})
+	list, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		t.Error(err)
 	}
@@ -72,7 +74,7 @@ func pingPodIP(t *testing.T) {
 }
 
 func healthCheckPod(t *testing.T) {
-	podList, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), v1.ListOptions{
+	podList, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", "productpage").String(),
 	})
 	if err != nil {
@@ -95,7 +97,7 @@ func healthCheckPod(t *testing.T) {
 }
 
 func healthCheckService(t *testing.T) {
-	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), v1.ListOptions{
+	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", "productpage").String(),
 	})
 	if err != nil {
@@ -119,7 +121,7 @@ func healthCheckService(t *testing.T) {
 
 func shortDomain(t *testing.T) {
 	var app = "productpage"
-	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), v1.ListOptions{
+	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
 	if err != nil {
@@ -143,7 +145,7 @@ func shortDomain(t *testing.T) {
 
 func fullDomain(t *testing.T) {
 	var app = "productpage"
-	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), v1.ListOptions{
+	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
 	if err != nil {
@@ -169,7 +171,7 @@ func dialUDP(t *testing.T) {
 	port := util.GetAvailableUDPPortOrDie()
 	go server(port)
 
-	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{
+	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", "reviews").String(),
 	})
 	if err != nil {

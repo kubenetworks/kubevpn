@@ -2,11 +2,13 @@ package dns
 
 import (
 	"fmt"
-	miekgdns "github.com/miekg/dns"
-	"github.com/wencaiwulue/kubevpn/util"
 	"strconv"
 	"testing"
 	"time"
+
+	miekgdns "github.com/miekg/dns"
+
+	"github.com/wencaiwulue/kubevpn/util"
 )
 
 func TestSetupDnsServer(t *testing.T) {

@@ -4,11 +4,12 @@
 package util
 
 import (
-	"github.com/sirupsen/logrus"
-	"golang.org/x/sys/windows"
 	"os"
 	"strings"
 	"syscall"
+
+	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/windows"
 )
 
 //	ref https://stackoverflow.com/questions/31558066/how-to-ask-for-administer-privileges-on-windows-with-go

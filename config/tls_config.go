@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/tls"
 	"embed"
+
 	log "github.com/sirupsen/logrus"
 )
 

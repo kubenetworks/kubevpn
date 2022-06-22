@@ -2,9 +2,15 @@ package pkg
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	errors2 "github.com/pkg/errors"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/config"
 	"github.com/wencaiwulue/kubevpn/core"
@@ -22,12 +28,6 @@ import (
 	"k8s.io/client-go/rest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
-	"net"
-	"os"
-	"strconv"
-	"strings"
-	"sync/atomic"
-	"time"
 )
 
 type Mode string
@@ -299,7 +299,7 @@ func (c *ConnectOptions) setupDNS() {
 func Start(ctx context.Context, r Route) error {
 	servers, err := r.GenerateServers()
 	if err != nil {
-		return errors2.WithStack(err)
+		return errors.WithStack(err)
 	}
 	if len(servers) == 0 {
 		return errors.New("invalid config")
@@ -415,7 +415,10 @@ func getCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, e
 
 func (c *ConnectOptions) InitClient() (err error) {
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-	configFlags.KubeConfig = &c.KubeconfigPath
+	if _, err = os.Stat(c.KubeconfigPath); err == nil {
+		configFlags.KubeConfig = &c.KubeconfigPath
+	}
+
 	c.factory = cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 
 	if c.config, err = c.factory.ToRESTConfig(); err != nil {
@@ -432,7 +435,6 @@ func (c *ConnectOptions) InitClient() (err error) {
 			return
 		}
 	}
-	c.factory.ToRESTConfig()
 	log.Infof("kubeconfig path: %s, namespace: %s, services: %v", c.KubeconfigPath, c.Namespace, c.Workloads)
 	return
 }

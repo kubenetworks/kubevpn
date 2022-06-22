@@ -4,11 +4,12 @@
 package pkg
 
 import (
-	log "github.com/sirupsen/logrus"
 	"net"
 	"os/exec"
 	"strconv"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // sudo ifconfig utun3 down

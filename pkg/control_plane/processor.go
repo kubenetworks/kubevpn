@@ -3,15 +3,16 @@ package control_plane
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
+	"math"
+	"math/rand"
+	"strconv"
+
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"github.com/sirupsen/logrus"
-	"io/ioutil"
 	"k8s.io/apimachinery/pkg/util/yaml"
-	"math"
-	"math/rand"
-	"strconv"
 )
 
 type Processor struct {

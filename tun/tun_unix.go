@@ -5,13 +5,14 @@ package tun
 
 import (
 	"fmt"
-	"github.com/wencaiwulue/kubevpn/config"
 	"net"
 	"os/exec"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/songgao/water"
+
+	"github.com/wencaiwulue/kubevpn/config"
 )
 
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
