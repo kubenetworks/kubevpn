@@ -8,7 +8,7 @@ import (
 	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/wencaiwulue/kubevpn/pkg/control_plane"
+	"github.com/wencaiwulue/kubevpn/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -29,22 +29,22 @@ func init() {
 
 func main() {
 	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, logger)
-	proc := control_plane.NewProcessor(snapshotCache, logger)
+	proc := controlplane.NewProcessor(snapshotCache, logger)
 
 	go func() {
 		ctx := context.Background()
 		server := serverv3.NewServer(ctx, snapshotCache, nil)
-		control_plane.RunServer(ctx, server, port)
+		controlplane.RunServer(ctx, server, port)
 	}()
 
-	notifyCh := make(chan control_plane.NotifyMessage, 100)
+	notifyCh := make(chan controlplane.NotifyMessage, 100)
 
-	notifyCh <- control_plane.NotifyMessage{
-		Operation: control_plane.Create,
+	notifyCh <- controlplane.NotifyMessage{
+		Operation: controlplane.Create,
 		FilePath:  watchDirectoryFileName,
 	}
 
-	go control_plane.Watch(watchDirectoryFileName, notifyCh)
+	go controlplane.Watch(watchDirectoryFileName, notifyCh)
 
 	for {
 		select {

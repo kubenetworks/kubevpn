@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
-	"github.com/wencaiwulue/kubevpn/pkg/control_plane"
+	"github.com/wencaiwulue/kubevpn/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/pkg/mesh"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -160,7 +160,7 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUN
 	if err != nil {
 		return err
 	}
-	var v = make([]*control_plane.Virtual, 0)
+	var v = make([]*controlplane.Virtual, 0)
 	if str, ok := configMap.Data[config.Envoy]; ok {
 		if err = yaml.Unmarshal([]byte(str), &v); err != nil {
 			return err
@@ -174,16 +174,16 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUN
 		}
 	}
 	if index < 0 {
-		v = append(v, &control_plane.Virtual{
+		v = append(v, &controlplane.Virtual{
 			Uid:   nodeID,
 			Ports: port,
-			Rules: []*control_plane.Rule{{
+			Rules: []*controlplane.Rule{{
 				Headers:    headers,
 				LocalTunIP: localTUNIP,
 			}},
 		})
 	} else {
-		v[index].Rules = append(v[index].Rules, &control_plane.Rule{
+		v[index].Rules = append(v[index].Rules, &controlplane.Rule{
 			Headers:    headers,
 			LocalTunIP: localTUNIP,
 		})
@@ -210,7 +210,7 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, heade
 	if !ok {
 		return errors.New("can not found value for key: envoy-config.yaml")
 	}
-	var v []*control_plane.Virtual
+	var v []*controlplane.Virtual
 	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
 		return err
 	}

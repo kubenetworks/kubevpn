@@ -1,4 +1,4 @@
-package control_plane
+package controlplane
 
 import (
 	"log"
