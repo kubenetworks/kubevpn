@@ -24,7 +24,7 @@ func RunWithElevated() {
 		}
 	}
 	cmd := exec.Command("sudo", os.Args...)
-	log.Info(cmd.Args)
+	log.Debug(cmd.Args)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

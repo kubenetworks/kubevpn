@@ -59,9 +59,9 @@ var connectCmd = &cobra.Command{
 			return
 		}
 		fmt.Println(`
------------------------------------------------------------------------------
-  Now you can access resources in the kubernetes cluster, enjoy it
------------------------------------------------------------------------------`)
+---------------------------------------------------------------------------
+    Now you can access resources in the kubernetes cluster, enjoy it :)
+---------------------------------------------------------------------------`)
 		select {}
 	},
 	PostRun: func(_ *cobra.Command, _ []string) {

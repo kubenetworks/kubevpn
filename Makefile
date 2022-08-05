@@ -34,6 +34,10 @@ kubevpn-linux-amd64 kubevpn-linux-386 kubevpn-linux-arm64
 .PHONY: all-image
 all-image: image image-mesh image-control-plane
 
+.PHONY: kubevpn
+kubevpn:
+	make $(TARGET)
+
 # ---------darwin-----------
 .PHONY: kubevpn-darwin-amd64
 kubevpn-darwin-amd64:
