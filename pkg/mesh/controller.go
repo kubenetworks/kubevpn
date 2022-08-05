@@ -7,8 +7,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/wencaiwulue/kubevpn/config"
-	"github.com/wencaiwulue/kubevpn/util"
+	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
 func RemoveContainers(spec *v1.PodTemplateSpec) {

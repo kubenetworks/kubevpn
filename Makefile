@@ -10,7 +10,9 @@ OS_ARCH := ${GOOS}/${GOARCH}
 
 BASE := github.com/wencaiwulue/kubevpn
 FOLDER := ${BASE}/cmd/kubevpn
-CONTROL_PLANE_FOLDER := ${BASE}/cmd/mesh
+BUILD_DIR := ./build
+OUTPUT_DIR := ./bin
+REGISTRY ?= naison
 
 # Setup the -ldflags option for go build here, interpolate the variable values
 LDFLAGS=--ldflags "\
@@ -35,70 +37,60 @@ all-image: image image-mesh image-control-plane
 # ---------darwin-----------
 .PHONY: kubevpn-darwin-amd64
 kubevpn-darwin-amd64:
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build ${LDFLAGS} -o kubevpn-darwin-amd64 ${FOLDER}
-	chmod +x kubevpn-darwin-amd64
-	cp kubevpn-darwin-amd64 /usr/local/bin/kubevpn
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-darwin-amd64 ${FOLDER}
+	chmod +x $(OUTPUT_DIR)/kubevpn-darwin-amd64
 .PHONY: kubevpn-darwin-arm64
 kubevpn-darwin-arm64:
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ${LDFLAGS} -o kubevpn-darwin-arm64 ${FOLDER}
-	chmod +x kubevpn-darwin-arm64
-	cp kubevpn-darwin-arm64 /usr/local/bin/kubevpn
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-darwin-arm64 ${FOLDER}
+	chmod +x $(OUTPUT_DIR)/kubevpn-darwin-arm64
 # ---------darwin-----------
 
 # ---------windows-----------
 .PHONY: kubevpn-windows-amd64
 kubevpn-windows-amd64:
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ${LDFLAGS} -o kubevpn-windows-amd64.exe ${FOLDER}
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-windows-amd64.exe ${FOLDER}
 .PHONY: kubevpn-windows-arm64
 kubevpn-windows-arm64:
-	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build ${LDFLAGS} -o kubevpn-windows-arm64.exe ${FOLDER}
+	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-windows-arm64.exe ${FOLDER}
 .PHONY: kubevpn-windows-386
 kubevpn-windows-386:
-	CGO_ENABLED=0 GOOS=windows GOARCH=386 go build ${LDFLAGS} -o kubevpn-windows-386.exe ${FOLDER}
+	CGO_ENABLED=0 GOOS=windows GOARCH=386 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-windows-386.exe ${FOLDER}
 # ---------windows-----------
 
 # ---------linux-----------
 .PHONY: kubevpn-linux-amd64
 kubevpn-linux-amd64:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ${LDFLAGS} -o kubevpn-linux-amd64 ${FOLDER}
-	chmod +x kubevpn-linux-amd64
-	cp kubevpn-linux-amd64 /usr/local/bin/kubevpn
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-linux-amd64 ${FOLDER}
+	chmod +x $(OUTPUT_DIR)/kubevpn-linux-amd64
 .PHONY: kubevpn-linux-arm64
 kubevpn-linux-arm64:
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ${LDFLAGS} -o kubevpn-linux-arm64 ${FOLDER}
-	chmod +x kubevpn-linux-arm64
-	cp kubevpn-linux-arm64 /usr/local/bin/kubevpn
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-linux-arm64 ${FOLDER}
+	chmod +x $(OUTPUT_DIR)/kubevpn-linux-arm64
 .PHONY: kubevpn-linux-386
 kubevpn-linux-386:
-	CGO_ENABLED=0 GOOS=linux GOARCH=386 go build ${LDFLAGS} -o kubevpn-linux-386 ${FOLDER}
-	chmod +x kubevpn-linux-386
-	cp kubevpn-linux-386 /usr/local/bin/kubevpn
+	CGO_ENABLED=0 GOOS=linux GOARCH=386 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-linux-386 ${FOLDER}
+	chmod +x $(OUTPUT_DIR)/kubevpn-linux-386
 # ---------linux-----------
 
 .PHONY: image
-image: kubevpn-linux-amd64
-	mv kubevpn-linux-amd64 kubevpn
-	docker build -t naison/kubevpn:${VERSION} -f ./dockerfile/server/Dockerfile .
-	rm -fr kubevpn
-	docker tag naison/kubevpn:${VERSION} naison/kubevpn:latest
-	docker push naison/kubevpn:${VERSION}
-	docker push naison/kubevpn:latest
+image:
+	docker build -t $(REGISTRY)/kubevpn:${VERSION} -f $(BUILD_DIR)/server/Dockerfile .
+	docker tag $(REGISTRY)/kubevpn:${VERSION} $(REGISTRY)/kubevpn:latest
+	docker push $(REGISTRY)/kubevpn:${VERSION}
+	docker push $(REGISTRY)/kubevpn:latest
 
 .PHONY: image-mesh
 image-mesh:
-	docker build -t naison/kubevpn-mesh:${VERSION} -f ./dockerfile/mesh/Dockerfile .
-	docker tag naison/kubevpn-mesh:${VERSION} naison/kubevpn-mesh:latest
-	docker push naison/kubevpn-mesh:${VERSION}
-	docker push naison/kubevpn-mesh:latest
+	docker build -t $(REGISTRY)/kubevpn-mesh:${VERSION} -f $(BUILD_DIR)/mesh/Dockerfile .
+	docker tag $(REGISTRY)/kubevpn-mesh:${VERSION} $(REGISTRY)/kubevpn-mesh:latest
+	docker push $(REGISTRY)/kubevpn-mesh:${VERSION}
+	docker push $(REGISTRY)/kubevpn-mesh:latest
 
 
 .PHONY: image-control-plane
 image-control-plane:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o envoy-xds-server ${CONTROL_PLANE_FOLDER}
-	chmod +x envoy-xds-server
-	docker build -t naison/envoy-xds-server:${VERSION} -f ./dockerfile/control_plane/Dockerfile .
-	rm -fr envoy-xds-server
-	docker tag naison/envoy-xds-server:${VERSION} naison/envoy-xds-server:latest
-	docker push naison/envoy-xds-server:${VERSION}
-	docker push naison/envoy-xds-server:latest
+	docker build -t $(REGISTRY)/envoy-xds-server:${VERSION} -f $(BUILD_DIR)/control_plane/Dockerfile .
+	docker tag $(REGISTRY)/envoy-xds-server:${VERSION} $(REGISTRY)/envoy-xds-server:latest
+	docker push $(REGISTRY)/envoy-xds-server:${VERSION}
+	docker push $(REGISTRY)/envoy-xds-server:latest
 

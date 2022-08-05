@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/wencaiwulue/kubevpn/config"
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
 // --ldflags -X

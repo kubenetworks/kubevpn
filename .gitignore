@@ -19,4 +19,4 @@
 .vscode/
 
 # Build artifacts
-kubevpn
+bin

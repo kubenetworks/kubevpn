@@ -7,12 +7,12 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
-	"github.com/wencaiwulue/kubevpn/config"
-	"github.com/wencaiwulue/kubevpn/pkg"
-	"github.com/wencaiwulue/kubevpn/util"
+	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/handler"
+	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-var route pkg.Route
+var route handler.Route
 
 func init() {
 	ServerCmd.Flags().StringArrayVarP(&route.ServeNodes, "nodeCommand", "L", []string{}, "command needs to be executed")
@@ -30,7 +30,7 @@ var ServerCmd = &cobra.Command{
 		go func() { log.Info(http.ListenAndServe("localhost:6060", nil)) }()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		if err := pkg.Start(context.TODO(), route); err != nil {
+		if err := handler.Start(context.TODO(), route); err != nil {
 			log.Fatal(err)
 		}
 		select {}
