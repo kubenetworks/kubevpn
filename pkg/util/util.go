@@ -427,7 +427,9 @@ func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string) bool
 		}
 	}()
 	if err := cmd.Start(); err != nil {
-		_ = cmd.Process.Kill()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
 		return stdoutBuf.String(), stderrBuf.String(), err
 	}
 	_ = cmd.Wait()
