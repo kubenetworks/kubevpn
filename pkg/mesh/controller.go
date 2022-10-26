@@ -63,7 +63,7 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteCo
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.SidecarEnvoyProxy,
 		Image:   config.ImageMesh,
-		Command: []string{"envoy", "-l", "debug", "--config-yaml"},
+		Command: []string{"envoy", "-l", "debug", "--base-id", "1", "--config-yaml"},
 		Args: []string{
 			fmt.Sprintf(s, nodeId, nodeId, c.TrafficManagerRealIP),
 		},

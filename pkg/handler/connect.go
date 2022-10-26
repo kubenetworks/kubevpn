@@ -352,6 +352,9 @@ func getCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, e
 	//172.17.0.2
 	if podList, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{}); err == nil {
 		for _, pod := range podList.Items {
+			if pod.Spec.HostNetwork {
+				continue
+			}
 			if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
 				var contain bool
 				for _, CIDR := range CIDRList {
