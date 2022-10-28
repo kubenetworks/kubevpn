@@ -24,7 +24,7 @@ func init() {
 	connectCmd.Flags().StringVar(&connect.KubeconfigPath, "kubeconfig", clientcmd.RecommendedHomeFile, "kubeconfig")
 	connectCmd.Flags().StringVarP(&connect.Namespace, "namespace", "n", "", "namespace")
 	connectCmd.PersistentFlags().StringArrayVar(&connect.Workloads, "workloads", []string{}, "workloads, like: pods/tomcat, deployment/nginx, replicaset/tomcat...")
-	connectCmd.Flags().StringVar((*string)(&connect.Mode), "mode", string(handler.Reverse), "default mode is reverse")
+	connectCmd.Flags().StringVar((*string)(&connect.Mode), "mode", string(handler.Reverse), "mode(reverse/mesh), reverse: proxy all traffic into local, mesh: proxy traffic with special headers into local")
 	connectCmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "headers, format is k=v, like: k1=v1,k2=v2")
 	connectCmd.Flags().BoolVar(&config.Debug, "debug", false, "true/false")
 	RootCmd.AddCommand(connectCmd)

@@ -29,14 +29,31 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteCo
 		Name:    config.SidecarVPN,
 		Image:   config.ImageServer,
 		Command: []string{"/bin/sh", "-c"},
-		Args: []string{
-			"sysctl net.ipv4.ip_forward=1;" +
-				"iptables -F;" +
-				"iptables -P INPUT ACCEPT;" +
-				"iptables -P FORWARD ACCEPT;" +
-				"iptables -t nat -A PREROUTING ! -p icmp ! -s 127.0.0.1 ! -d " + config.CIDR.String() + " -j DNAT --to 127.0.0.1:15006;" +
-				"iptables -t nat -A POSTROUTING ! -p icmp ! -s 127.0.0.1 ! -d " + config.CIDR.String() + " -j MASQUERADE;" +
-				"kubevpn serve -L 'tun:/" + c.TrafficManagerRealIP + ":8422?net=" + c.InboundPodTunIP + "&route=" + c.Route + "' --debug=true",
+		Args: []string{`
+sysctl net.ipv4.ip_forward=1
+update-alternatives --set iptables /usr/sbin/iptables-legacy
+iptables -F
+iptables -P INPUT ACCEPT
+iptables -P FORWARD ACCEPT
+iptables -t nat -A PREROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR} -j DNAT --to 127.0.0.1:15006
+iptables -t nat -A POSTROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR} -j MASQUERADE
+kubevpn serve -L 'tun:/${TrafficManagerRealIP}:8422?net=${InboundPodTunIP}&route=${Route}' --debug=true`,
+		},
+		Env: []v1.EnvVar{
+			{
+				Name:  "CIDR",
+				Value: config.CIDR.String(),
+			},
+			{
+				Name:  "TrafficManagerRealIP",
+				Value: c.TrafficManagerRealIP},
+			{
+				Name:  "InboundPodTunIP",
+				Value: c.InboundPodTunIP},
+			{
+				Name:  "Route",
+				Value: c.Route,
+			},
 		},
 		SecurityContext: &v1.SecurityContext{
 			Capabilities: &v1.Capabilities{

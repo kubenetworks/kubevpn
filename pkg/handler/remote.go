@@ -76,17 +76,10 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 		return nil, err
 	}
 
-	args := []string{
-		"sysctl net.ipv4.ip_forward=1",
-		"iptables -F",
-		"iptables -P INPUT ACCEPT",
-		"iptables -P FORWARD ACCEPT",
-		"iptables -t nat -A POSTROUTING -s " + config.CIDR.String() + " -o eth0 -j MASQUERADE",
-	}
+	var s = []string{config.CIDR.String()}
 	for _, ipNet := range nodeCIDR {
-		args = append(args, "iptables -t nat -A POSTROUTING -s "+ipNet.String()+" -o eth0 -j MASQUERADE")
+		s = append(s, ipNet.String())
 	}
-	args = append(args, "kubevpn serve -L tcp://:10800 -L tun://:8422?net="+trafficManagerIP+" --debug=true")
 
 	t := true
 	f := false
@@ -129,7 +122,25 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 							Name:    config.SidecarVPN,
 							Image:   config.ImageServer,
 							Command: []string{"/bin/sh", "-c"},
-							Args:    []string{strings.Join(args, ";")},
+							Args: []string{`
+sysctl net.ipv4.ip_forward=1
+update-alternatives --set iptables /usr/sbin/iptables-legacy
+iptables -F
+iptables -P INPUT ACCEPT || true
+iptables -P FORWARD ACCEPT || true
+iptables -t nat -A POSTROUTING -s ${CIDR} -o eth0 -j MASQUERADE
+kubevpn serve -L tcp://:10800 -L tun://:8422?net=${TrafficManagerIP} --debug=true`,
+							},
+							Env: []v1.EnvVar{
+								{
+									Name:  "CIDR",
+									Value: strings.Join(s, ","),
+								},
+								{
+									Name:  "TrafficManagerIP",
+									Value: trafficManagerIP,
+								},
+							},
 							Ports: []v1.ContainerPort{{
 								Name:          udp8422,
 								ContainerPort: 8422,

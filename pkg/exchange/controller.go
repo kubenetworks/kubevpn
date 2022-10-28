@@ -23,19 +23,38 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig) {
 	t := true
 	zero := int64(0)
 	spec.Containers = append(spec.Containers, corev1.Container{
-		Name:    config.SidecarVPN,
-		Image:   config.ImageServer,
+		Name:  config.SidecarVPN,
+		Image: config.ImageServer,
+		Env: []corev1.EnvVar{
+			{
+				Name:  "LocalTunIP",
+				Value: c.LocalTunIP,
+			},
+			{
+				Name:  "TrafficManagerRealIP",
+				Value: c.TrafficManagerRealIP,
+			},
+			{
+				Name:  "InboundPodTunIP",
+				Value: c.InboundPodTunIP,
+			},
+			{
+				Name:  "Route",
+				Value: c.Route,
+			},
+		},
 		Command: []string{"/bin/sh", "-c"},
-		Args: []string{
-			"sysctl net.ipv4.ip_forward=1;" +
-				"iptables -F;" +
-				"iptables -P INPUT ACCEPT;" +
-				"iptables -P FORWARD ACCEPT;" +
-				"iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to " + c.LocalTunIP + ";" +
-				"iptables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE;" +
-				"sysctl -w net.ipv4.conf.all.route_localnet=1;" +
-				"iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination " + c.LocalTunIP + ";" +
-				"kubevpn serve -L 'tun://0.0.0.0:8421/" + c.TrafficManagerRealIP + ":8422?net=" + c.InboundPodTunIP + "&route=" + c.Route + "' --debug=true",
+		Args: []string{`
+sysctl net.ipv4.ip_forward=1
+sysctl -w net.ipv4.conf.all.route_localnet=1
+update-alternatives --set iptables /usr/sbin/iptables-legacy
+iptables -F
+iptables -P INPUT ACCEPT || true
+iptables -P FORWARD ACCEPT || true
+iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to $(LocalTunIP)
+iptables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
+iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination $(LocalTunIP)
+kubevpn serve -L 'tun://0.0.0.0:8421/$(TrafficManagerRealIP):8422?net=$(InboundPodTunIP)&route=$(Route)' --debug=true`,
 		},
 		SecurityContext: &corev1.SecurityContext{
 			Capabilities: &corev1.Capabilities{
