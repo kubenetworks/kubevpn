@@ -34,6 +34,9 @@ kubevpn-linux-amd64 kubevpn-linux-386 kubevpn-linux-arm64
 .PHONY: all-image
 all-image: image image-mesh image-control-plane
 
+.PHONY: all-image-local
+all-image-local: image-local image-mesh-local image-control-plane-local
+
 .PHONY: kubevpn
 kubevpn:
 	make $(TARGET)
@@ -98,3 +101,21 @@ image-control-plane:
 	docker push $(REGISTRY)/envoy-xds-server:${VERSION}
 	docker push $(REGISTRY)/envoy-xds-server:latest
 
+############################ build local
+.PHONY: image-local
+image-local: kubevpn-linux-amd64
+	docker build -t $(REGISTRY)/kubevpn:${VERSION} -f $(BUILD_DIR)/server/local.Dockerfile .
+	docker tag $(REGISTRY)/kubevpn:${VERSION} $(REGISTRY)/kubevpn:latest
+	docker push $(REGISTRY)/kubevpn:${VERSION}
+
+.PHONY: image-mesh-local
+image-mesh-local:
+	docker build -t $(REGISTRY)/kubevpn-mesh:${VERSION} -f $(BUILD_DIR)/mesh/local.Dockerfile .
+	docker tag $(REGISTRY)/kubevpn-mesh:${VERSION} $(REGISTRY)/kubevpn-mesh:latest
+	docker push $(REGISTRY)/kubevpn-mesh:${VERSION}
+
+.PHONY: image-control-plane-local
+image-control-plane-local:
+	docker build -t $(REGISTRY)/envoy-xds-server:${VERSION} -f $(BUILD_DIR)/control_plane/local.Dockerfile .
+	docker tag $(REGISTRY)/envoy-xds-server:${VERSION} $(REGISTRY)/envoy-xds-server:latest
+	docker push $(REGISTRY)/envoy-xds-server:${VERSION}
