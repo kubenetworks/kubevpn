@@ -126,8 +126,8 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 sysctl net.ipv4.ip_forward=1
 update-alternatives --set iptables /usr/sbin/iptables-legacy
 iptables -F
-iptables -P INPUT ACCEPT || true
-iptables -P FORWARD ACCEPT || true
+iptables -P INPUT ACCEPT
+iptables -P FORWARD ACCEPT
 iptables -t nat -A POSTROUTING -s ${CIDR} -o eth0 -j MASQUERADE
 kubevpn serve -L tcp://:10800 -L tun://:8422?net=${TrafficManagerIP} --debug=true`,
 							},

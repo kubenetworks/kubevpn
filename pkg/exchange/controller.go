@@ -49,8 +49,8 @@ sysctl net.ipv4.ip_forward=1
 sysctl -w net.ipv4.conf.all.route_localnet=1
 update-alternatives --set iptables /usr/sbin/iptables-legacy
 iptables -F
-iptables -P INPUT ACCEPT || true
-iptables -P FORWARD ACCEPT || true
+iptables -P INPUT ACCEPT
+iptables -P FORWARD ACCEPT
 iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to $(LocalTunIP)
 iptables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
 iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination $(LocalTunIP)
