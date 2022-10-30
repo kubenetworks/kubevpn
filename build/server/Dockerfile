@@ -6,6 +6,7 @@ COPY . /go/src/$BASE
 
 WORKDIR /go/src/$BASE
 
+RUN go env -w GO111MODULE=on && go env -w GOPROXY=https://goproxy.cn,direct
 RUN make kubevpn-linux-amd64
 
 FROM ubuntu:latest

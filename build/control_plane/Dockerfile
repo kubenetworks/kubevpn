@@ -6,6 +6,7 @@ COPY . /go/src/$BASE
 
 WORKDIR /go/src/$BASE
 
+RUN go env -w GO111MODULE=on && go env -w GOPROXY=https://goproxy.cn,direct
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o envoy-xds-server /go/src/$BASE/cmd/mesh
 
 FROM ubuntu:latest

@@ -23,6 +23,9 @@ LDFLAGS=--ldflags "\
  -X ${FOLDER}/cmds.OsArch=${OS_ARCH} \
 "
 
+GO111MODULE=on
+GOPROXY=https://goproxy.cn,direct
+
 .PHONY: all
 all: all-kubevpn all-image
 
