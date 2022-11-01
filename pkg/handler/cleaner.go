@@ -73,7 +73,7 @@ func updateServiceRefCount(serviceInterface v12.ServiceInterface, name string, i
 				"value": strconv.Itoa(curCount + increment),
 			},
 		})
-		_, err = serviceInterface.Patch(context.TODO(), config.PodTrafficManager, types.JSONPatchType, p, v1.PatchOptions{})
+		_, err = serviceInterface.Patch(context.TODO(), config.ConfigMapPodTrafficManager, types.JSONPatchType, p, v1.PatchOptions{})
 		return err
 	}); err != nil {
 		log.Errorf("update ref count error, error: %v", err)
@@ -83,8 +83,8 @@ func updateServiceRefCount(serviceInterface v12.ServiceInterface, name string, i
 }
 
 func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, namespace string) {
-	updateServiceRefCount(clientset.CoreV1().Services(namespace), config.PodTrafficManager, -1)
-	pod, err := clientset.CoreV1().Services(namespace).Get(context.TODO(), config.PodTrafficManager, v1.GetOptions{})
+	updateServiceRefCount(clientset.CoreV1().Services(namespace), config.ConfigMapPodTrafficManager, -1)
+	pod, err := clientset.CoreV1().Services(namespace).Get(context.TODO(), config.ConfigMapPodTrafficManager, v1.GetOptions{})
 	if err != nil {
 		log.Error(err)
 		return
@@ -99,8 +99,8 @@ func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, name
 		zero := int64(0)
 		log.Info("refCount is zero, prepare to clean up resource")
 		deleteOptions := v1.DeleteOptions{GracePeriodSeconds: &zero}
-		_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), config.PodTrafficManager, deleteOptions)
-		_ = clientset.CoreV1().Services(namespace).Delete(context.TODO(), config.PodTrafficManager, deleteOptions)
-		_ = clientset.AppsV1().Deployments(namespace).Delete(context.TODO(), config.PodTrafficManager, deleteOptions)
+		_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), config.ConfigMapPodTrafficManager, deleteOptions)
+		_ = clientset.CoreV1().Services(namespace).Delete(context.TODO(), config.ConfigMapPodTrafficManager, deleteOptions)
+		_ = clientset.AppsV1().Deployments(namespace).Delete(context.TODO(), config.ConfigMapPodTrafficManager, deleteOptions)
 	}
 }

@@ -34,7 +34,7 @@ var (
 )
 
 func TestGetCIDR(t *testing.T) {
-	cidr, err := getCIDR(clientsets, namespaces)
+	cidr, err := util.GetCIDR(clientsets, namespaces)
 	if err == nil {
 		for _, ipNet := range cidr {
 			fmt.Println(ipNet)

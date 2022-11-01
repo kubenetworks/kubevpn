@@ -32,14 +32,14 @@ func NewDHCPManager(client corev1.ConfigMapInterface, namespace string, cidr *ne
 
 //	todo optimize dhcp, using mac address, ip and deadline as unit
 func (d *DHCPManager) InitDHCP() error {
-	configMap, err := d.client.Get(context.Background(), config.PodTrafficManager, metav1.GetOptions{})
+	configMap, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err == nil && configMap != nil {
-		if _, found := configMap.Data[config.Envoy]; !found {
+		if _, found := configMap.Data[config.KeyEnvoy]; !found {
 			_, err = d.client.Patch(
 				context.Background(),
 				configMap.Name,
 				types.MergePatchType,
-				[]byte(fmt.Sprintf("{\"data\":{\"%s\":\"%s\"}}", config.Envoy, "")),
+				[]byte(fmt.Sprintf("{\"data\":{\"%s\":\"%s\"}}", config.KeyEnvoy, "")),
 				metav1.PatchOptions{},
 			)
 			return err
@@ -48,11 +48,11 @@ func (d *DHCPManager) InitDHCP() error {
 	}
 	result := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      config.PodTrafficManager,
+			Name:      config.ConfigMapPodTrafficManager,
 			Namespace: d.namespace,
 			Labels:    map[string]string{},
 		},
-		Data: map[string]string{config.Envoy: ""},
+		Data: map[string]string{config.KeyEnvoy: ""},
 	}
 	_, err = d.client.Create(context.Background(), result, metav1.CreateOptions{})
 	if err != nil {
@@ -107,7 +107,7 @@ func (d *DHCPManager) ReleaseIpToDHCP(ips ...*net.IPNet) error {
 }
 
 func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) error {
-	cm, err := d.client.Get(context.Background(), config.PodTrafficManager, metav1.GetOptions{})
+	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		log.Errorf("failed to get dhcp, err: %v", err)
 		return err
@@ -121,7 +121,7 @@ func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) erro
 	if err != nil {
 		return err
 	}
-	if err = dhcp.Restore(d.cidr, []byte(cm.Data[config.DHCP])); err != nil {
+	if err = dhcp.Restore(d.cidr, []byte(cm.Data[config.KeyDHCP])); err != nil {
 		return err
 	}
 	if err = f(dhcp); err != nil {
@@ -131,7 +131,7 @@ func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) erro
 	if err != nil {
 		return err
 	}
-	cm.Data[config.DHCP] = string(bytes)
+	cm.Data[config.KeyDHCP] = string(bytes)
 	_, err = d.client.Update(context.Background(), cm, metav1.UpdateOptions{})
 	if err != nil {
 		log.Errorf("update dhcp failed, err: %v", err)
