@@ -6,17 +6,24 @@ import (
 )
 
 const (
-	PodTrafficManager = "kubevpn-traffic-manager"
-	DHCP              = "DHCP"
-	Envoy             = "ENVOY_CONFIG"
+	// configmap name
+	ConfigMapPodTrafficManager = "kubevpn-traffic-manager"
 
-	SidecarEnvoyProxy   = "envoy-proxy"
-	SidecarControlPlane = "control-plane"
-	SidecarVPN          = "vpn"
+	// config map keys
+	KeyDHCP             = "DHCP"
+	KeyEnvoy            = "ENVOY_CONFIG"
+	KeyClusterIPv4POOLS = "IPv4_POOLS"
+
+	// container name
+	ContainerSidecarEnvoyProxy   = "envoy-proxy"
+	ContainerSidecarControlPlane = "control-plane"
+	ContainerSidecarVPN          = "vpn"
 
 	VolumeEnvoyConfig = "envoy-config"
 
-	s = "223.254.254.100/24"
+	innerIPv4Pool = "223.254.254.100/24"
+
+	DefaultNetDir = "/etc/cni/net.d"
 )
 
 var (
@@ -33,7 +40,7 @@ var CIDR *net.IPNet
 var RouterIP net.IP
 
 func init() {
-	RouterIP, CIDR, _ = net.ParseCIDR(s)
+	RouterIP, CIDR, _ = net.ParseCIDR(innerIPv4Pool)
 }
 
 var Debug bool

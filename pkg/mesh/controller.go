@@ -13,7 +13,7 @@ import (
 
 func RemoveContainers(spec *v1.PodTemplateSpec) {
 	for i := 0; i < len(spec.Spec.Containers); i++ {
-		if sets.NewString(config.SidecarEnvoyProxy, config.SidecarVPN).Has(spec.Spec.Containers[i].Name) {
+		if sets.NewString(config.ContainerSidecarEnvoyProxy, config.ContainerSidecarVPN).Has(spec.Spec.Containers[i].Name) {
 			spec.Spec.Containers = append(spec.Spec.Containers[:i], spec.Spec.Containers[i+1:]...)
 			i--
 		}
@@ -26,7 +26,7 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteCo
 	zero := int64(0)
 	t := true
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
-		Name:    config.SidecarVPN,
+		Name:    config.ContainerSidecarVPN,
 		Image:   config.ImageServer,
 		Command: []string{"/bin/sh", "-c"},
 		Args: []string{`
@@ -78,7 +78,7 @@ kubevpn serve -L 'tun:/${TrafficManagerRealIP}:8422?net=${InboundPodTunIP}&route
 		ImagePullPolicy: v1.PullIfNotPresent,
 	})
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
-		Name:    config.SidecarEnvoyProxy,
+		Name:    config.ContainerSidecarEnvoyProxy,
 		Image:   config.ImageMesh,
 		Command: []string{"envoy", "-l", "debug", "--base-id", "1", "--config-yaml"},
 		Args: []string{

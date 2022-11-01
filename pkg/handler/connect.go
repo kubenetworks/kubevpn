@@ -17,7 +17,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
@@ -101,7 +100,7 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 
 func (c *ConnectOptions) DoConnect() (err error) {
 	c.addCleanUpResourceHandler(c.clientset, c.Namespace)
-	c.cidrs, err = getCIDR(c.clientset, c.Namespace)
+	c.cidrs, err = util.GetCidrFromCNI(c.clientset, c.restclient, c.config, c.Namespace)
 	if err != nil {
 		return
 	}
@@ -316,108 +315,6 @@ func Start(ctx context.Context, r Route) error {
 	return nil
 }
 
-func getCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, error) {
-	var CIDRList []*net.IPNet
-	// get pod CIDR from node spec
-	if nodeList, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{}); err == nil {
-		var podCIDRs = sets.NewString()
-		for _, node := range nodeList.Items {
-			if node.Spec.PodCIDRs != nil {
-				podCIDRs.Insert(node.Spec.PodCIDRs...)
-			}
-			if len(node.Spec.PodCIDR) != 0 {
-				podCIDRs.Insert(node.Spec.PodCIDR)
-			}
-		}
-		for _, podCIDR := range podCIDRs.List() {
-			if _, CIDR, err := net.ParseCIDR(podCIDR); err == nil {
-				CIDRList = append(CIDRList, CIDR)
-			}
-		}
-	}
-	// get pod CIDR from pod ip, why doing this: notice that node's pod cidr is not correct in minikube
-	// ➜  ~ kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}'
-	//10.244.0.0/24%
-	// ➜  ~  kubectl get pods -o=custom-columns=podIP:.status.podIP
-	//podIP
-	//172.17.0.5
-	//172.17.0.4
-	//172.17.0.4
-	//172.17.0.3
-	//172.17.0.3
-	//172.17.0.6
-	//172.17.0.8
-	//172.17.0.3
-	//172.17.0.7
-	//172.17.0.2
-	if podList, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{}); err == nil {
-		for _, pod := range podList.Items {
-			if pod.Spec.HostNetwork {
-				continue
-			}
-			if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
-				var contain bool
-				for _, CIDR := range CIDRList {
-					if CIDR.Contains(ip) {
-						contain = true
-						break
-					}
-				}
-				if !contain {
-					mask := net.CIDRMask(24, 32)
-					CIDRList = append(CIDRList, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
-				}
-			}
-		}
-	}
-
-	// get service CIDR
-	defaultCIDRIndex := "The range of valid IPs is"
-	if _, err := clientset.CoreV1().Services(namespace).Create(context.TODO(), &v1.Service{
-		ObjectMeta: metav1.ObjectMeta{GenerateName: "foo-svc-"},
-		Spec:       v1.ServiceSpec{Ports: []v1.ServicePort{{Port: 80}}, ClusterIP: "0.0.0.0"},
-	}, metav1.CreateOptions{}); err != nil {
-		idx := strings.LastIndex(err.Error(), defaultCIDRIndex)
-		if idx != -1 {
-			if _, cidr, err := net.ParseCIDR(strings.TrimSpace(err.Error()[idx+len(defaultCIDRIndex):])); err == nil {
-				CIDRList = append(CIDRList, cidr)
-			}
-		}
-	} else {
-		if serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), metav1.ListOptions{}); err == nil {
-			for _, service := range serviceList.Items {
-				if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
-					var contain bool
-					for _, CIDR := range CIDRList {
-						if CIDR.Contains(ip) {
-							contain = true
-							break
-						}
-					}
-					if !contain {
-						mask := net.CIDRMask(16, 32)
-						CIDRList = append(CIDRList, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
-					}
-				}
-			}
-		}
-	}
-
-	// remove duplicate CIDR
-	result := make([]*net.IPNet, 0)
-	set := sets.NewString()
-	for _, cidr := range CIDRList {
-		if !set.Has(cidr.String()) {
-			set.Insert(cidr.String())
-			result = append(result, cidr)
-		}
-	}
-	if len(result) == 0 {
-		return nil, fmt.Errorf("can not found any CIDR")
-	}
-	return result, nil
-}
-
 func (c *ConnectOptions) InitClient() (err error) {
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
 	if _, err = os.Stat(c.KubeconfigPath); err == nil {
@@ -507,7 +404,7 @@ func (c *ConnectOptions) PreCheckResource() {
 
 func (c *ConnectOptions) GetRunningPodList() ([]v1.Pod, error) {
 	list, err := c.clientset.CoreV1().Pods(c.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("app", config.PodTrafficManager).String(),
+		LabelSelector: fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String(),
 	})
 	if err != nil {
 		return nil, err

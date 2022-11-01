@@ -62,7 +62,7 @@ func InjectVPNAndEnvoySidecar(factory cmdutil.Factory, clientset v12.ConfigMapIn
 	for _, container := range templateSpec.Spec.Containers {
 		containerNames.Insert(container.Name)
 	}
-	if containerNames.HasAll(config.SidecarVPN, config.SidecarEnvoyProxy) {
+	if containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
 		// add rollback func to remove envoy config
 		RollbackFuncList = append(RollbackFuncList, func() {
 			err = removeEnvoyConfig(clientset, nodeID, headers)
@@ -156,12 +156,12 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 }
 
 func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUNIP string, headers map[string]string, port []v1.ContainerPort) error {
-	configMap, err := mapInterface.Get(context.TODO(), config.PodTrafficManager, metav1.GetOptions{})
+	configMap, err := mapInterface.Get(context.TODO(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 	var v = make([]*controlplane.Virtual, 0)
-	if str, ok := configMap.Data[config.Envoy]; ok {
+	if str, ok := configMap.Data[config.KeyEnvoy]; ok {
 		if err = yaml.Unmarshal([]byte(str), &v); err != nil {
 			return err
 		}
@@ -193,20 +193,20 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUN
 	if err != nil {
 		return err
 	}
-	configMap.Data[config.Envoy] = string(marshal)
+	configMap.Data[config.KeyEnvoy] = string(marshal)
 	_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
 	return err
 }
 
 func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, headers map[string]string) error {
-	configMap, err := mapInterface.Get(context.TODO(), config.PodTrafficManager, metav1.GetOptions{})
+	configMap, err := mapInterface.Get(context.TODO(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	str, ok := configMap.Data[config.Envoy]
+	str, ok := configMap.Data[config.KeyEnvoy]
 	if !ok {
 		return errors.New("can not found value for key: envoy-config.yaml")
 	}
@@ -235,7 +235,7 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, heade
 	if err != nil {
 		return err
 	}
-	configMap.Data[config.Envoy] = string(marshal)
+	configMap.Data[config.KeyEnvoy] = string(marshal)
 	_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
 	return err
 }

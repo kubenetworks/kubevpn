@@ -31,7 +31,7 @@ func AddFirewallRule() {
 		"firewall",
 		"add",
 		"rule",
-		"name=" + config.PodTrafficManager,
+		"name=" + config.ConfigMapPodTrafficManager,
 		"dir=in",
 		"action=allow",
 		"enable=yes",
@@ -48,7 +48,7 @@ func FindRule() bool {
 		"firewall",
 		"show",
 		"rule",
-		"name=" + config.PodTrafficManager,
+		"name=" + config.ConfigMapPodTrafficManager,
 	}...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		log.Infof("find route out: %s error: %v", string(out), err)

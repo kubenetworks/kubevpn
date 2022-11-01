@@ -10,7 +10,7 @@ import (
 
 func RemoveContainer(spec *corev1.PodSpec) {
 	for i := 0; i < len(spec.Containers); i++ {
-		if spec.Containers[i].Name == config.SidecarVPN {
+		if spec.Containers[i].Name == config.ContainerSidecarVPN {
 			spec.Containers = append(spec.Containers[:i], spec.Containers[i+1:]...)
 			i--
 		}
@@ -23,7 +23,7 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig) {
 	t := true
 	zero := int64(0)
 	spec.Containers = append(spec.Containers, corev1.Container{
-		Name:  config.SidecarVPN,
+		Name:  config.ContainerSidecarVPN,
 		Image: config.ImageServer,
 		Env: []corev1.EnvVar{
 			{

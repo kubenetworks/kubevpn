@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"k8s.io/utils/pointer"
 	"net"
 	"strconv"
 	"strings"
@@ -35,7 +36,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 	podInterface := clientset.CoreV1().Pods(namespace)
 	serviceInterface := clientset.CoreV1().Services(namespace)
 
-	service, err := serviceInterface.Get(context.Background(), config.PodTrafficManager, metav1.GetOptions{})
+	service, err := serviceInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err == nil && service != nil {
 		log.Infoln("traffic manager already exist, reuse it")
 		updateServiceRefCount(serviceInterface, service.GetName(), 1)
@@ -47,7 +48,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 	tcp9002 := "9002-for-envoy"
 	svc, err := serviceInterface.Create(context.Background(), &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        config.PodTrafficManager,
+			Name:        config.ConfigMapPodTrafficManager,
 			Namespace:   namespace,
 			Annotations: map[string]string{"ref-count": "1"},
 		},
@@ -68,7 +69,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 				Port:       9002,
 				TargetPort: intstr.FromInt(9002),
 			}},
-			Selector: map[string]string{"app": config.PodTrafficManager},
+			Selector: map[string]string{"app": config.ConfigMapPodTrafficManager},
 			Type:     v1.ServiceTypeClusterIP,
 		},
 	}, metav1.CreateOptions{})
@@ -81,23 +82,19 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 		s = append(s, ipNet.String())
 	}
 
-	t := true
-	f := false
-	zero := int64(0)
-	one := int32(1)
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      config.PodTrafficManager,
+			Name:      config.ConfigMapPodTrafficManager,
 			Namespace: namespace,
 		},
 		Spec: appsv1.DeploymentSpec{
-			Replicas: &one,
+			Replicas: pointer.Int32(1),
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": config.PodTrafficManager},
+				MatchLabels: map[string]string{"app": config.ConfigMapPodTrafficManager},
 			},
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"app": config.PodTrafficManager},
+					Labels: map[string]string{"app": config.ConfigMapPodTrafficManager},
 				},
 				Spec: v1.PodSpec{
 					Volumes: []v1.Volume{{
@@ -105,21 +102,21 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 						VolumeSource: v1.VolumeSource{
 							ConfigMap: &v1.ConfigMapVolumeSource{
 								LocalObjectReference: v1.LocalObjectReference{
-									Name: config.PodTrafficManager,
+									Name: config.ConfigMapPodTrafficManager,
 								},
 								Items: []v1.KeyToPath{
 									{
-										Key:  config.Envoy,
+										Key:  config.KeyEnvoy,
 										Path: "envoy-config.yaml",
 									},
 								},
-								Optional: &f,
+								Optional: pointer.Bool(false),
 							},
 						},
 					}},
 					Containers: []v1.Container{
 						{
-							Name:    config.SidecarVPN,
+							Name:    config.ContainerSidecarVPN,
 							Image:   config.ImageServer,
 							Command: []string{"/bin/sh", "-c"},
 							Args: []string{`
@@ -168,12 +165,12 @@ kubevpn serve -L tcp://:10800 -L tun://:8422?net=${TrafficManagerIP} --debug=tru
 										//"SYS_MODULE",
 									},
 								},
-								RunAsUser:  &zero,
-								Privileged: &t,
+								RunAsUser:  pointer.Int64(0),
+								Privileged: pointer.Bool(true),
 							},
 						},
 						{
-							Name:    config.SidecarControlPlane,
+							Name:    config.ContainerSidecarControlPlane,
 							Image:   config.ImageControlPlane,
 							Command: []string{"envoy-xds-server"},
 							Args:    []string{"--watchDirectoryFileName", "/etc/envoy/envoy-config.yaml"},
@@ -199,7 +196,7 @@ kubevpn serve -L tcp://:10800 -L tun://:8422?net=${TrafficManagerIP} --debug=tru
 		},
 	}
 	watchStream, err := podInterface.Watch(context.TODO(), metav1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("app", config.PodTrafficManager).String(),
+		LabelSelector: fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String(),
 	})
 	if err != nil {
 		return nil, err
@@ -215,7 +212,7 @@ out:
 		case e := <-watchStream.ResultChan():
 			if podT, ok := e.Object.(*v1.Pod); ok {
 				if phase != podT.Status.Phase {
-					log.Infof("pod %s status is %s", config.PodTrafficManager, podT.Status.Phase)
+					log.Infof("pod %s status is %s", config.ConfigMapPodTrafficManager, podT.Status.Phase)
 				}
 				if podT.Status.Phase == v1.PodRunning {
 					break out
@@ -223,7 +220,7 @@ out:
 				phase = podT.Status.Phase
 			}
 		case <-time.Tick(time.Minute * 10):
-			return nil, errors.New(fmt.Sprintf("wait pod %s to be ready timeout", config.PodTrafficManager))
+			return nil, errors.New(fmt.Sprintf("wait pod %s to be ready timeout", config.ConfigMapPodTrafficManager))
 		}
 	}
 	return net.ParseIP(svc.Spec.ClusterIP), nil

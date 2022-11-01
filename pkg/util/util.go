@@ -33,6 +33,7 @@ import (
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/remotecommand"
@@ -59,10 +60,10 @@ func GetAvailableUDPPortOrDie() int {
 	return listener.LocalAddr().(*net.UDPAddr).Port
 }
 
-func WaitPod(clientset *kubernetes.Clientset, namespace string, list metav1.ListOptions, checker func(*v1.Pod) bool) error {
+func WaitPod(podInterface v12.PodInterface, list metav1.ListOptions, checker func(*v1.Pod) bool) error {
 	ctx, cancelFunc := context.WithTimeout(context.TODO(), time.Minute*10)
 	defer cancelFunc()
-	watch, err := clientset.CoreV1().Pods(namespace).Watch(ctx, list)
+	watch, err := podInterface.Watch(ctx, list)
 	if err != nil {
 		return err
 	}
@@ -197,6 +198,7 @@ func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config 
 			Stderr:    StreamOptions.ErrOut != nil,
 			TTY:       tt.Raw,
 		}, scheme.ParameterCodec)
+		fmt.Println(req.URL())
 		return Executor.Execute("POST", req.URL(), config, StreamOptions.In, StreamOptions.Out, StreamOptions.ErrOut, tt.Raw, sizeQueue)
 	}
 
