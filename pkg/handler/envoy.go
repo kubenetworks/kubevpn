@@ -65,47 +65,39 @@ func InjectVPNAndEnvoySidecar(factory cmdutil.Factory, clientset v12.ConfigMapIn
 	if containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
 		// add rollback func to remove envoy config
 		RollbackFuncList = append(RollbackFuncList, func() {
-			err = removeEnvoyConfig(clientset, nodeID, headers)
+			err := UnPatchContainer(factory, clientset, namespace, workloads, headers)
 			if err != nil {
-				log.Warnln(err)
+				log.Error(err)
 			}
 		})
 		return nil
 	}
-
+	// (1) add mesh container
+	removePatch, restorePatch := patch(origin, path)
+	b, _ := json.Marshal(restorePatch)
 	mesh.AddMeshContainer(templateSpec, nodeID, c)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
-	bytes, err := json.Marshal([]struct {
-		Op    string      `json:"op"`
-		Path  string      `json:"path"`
-		Value interface{} `json:"value"`
-	}{{
+	ps := []P{{
 		Op:    "replace",
 		Path:  "/" + strings.Join(append(path, "spec"), "/"),
 		Value: templateSpec.Spec,
-	}})
+	}, {
+		Op:    "replace",
+		Path:  "/metadata/annotations/probe",
+		Value: b,
+	}}
+	bytes, err := json.Marshal(append(ps, removePatch...))
 	if err != nil {
 		return err
 	}
-	//t := true
-	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{
-		//Force: &t,
-	})
-
-	removePatch, restorePatch := patch(origin, path)
-	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, removePatch, &metav1.PatchOptions{})
+	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 	if err != nil {
-		log.Warnf("error while remove probe of resource: %s %s, ignore, err: %v",
-			object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
+		log.Warnf("error while remove probe of resource: %s %s, ignore, err: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
 	}
 
 	RollbackFuncList = append(RollbackFuncList, func() {
 		if err = UnPatchContainer(factory, clientset, namespace, workloads, headers); err != nil {
 			log.Error(err)
-		}
-		if _, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, restorePatch, &metav1.PatchOptions{}); err != nil {
-			log.Warnf("error while restore probe of resource: %s %s, ignore, err: %v",
-				object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
 		}
 	})
 	_ = util.RolloutStatus(factory, namespace, workloads, time.Minute*5)
@@ -128,30 +120,34 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 
 	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 
-	err = removeEnvoyConfig(mapInterface, nodeID, headers)
+	var empty bool
+	empty, err = removeEnvoyConfig(mapInterface, nodeID, headers)
 	if err != nil {
 		log.Warnln(err)
 		return err
 	}
 
-	mesh.RemoveContainers(templateSpec)
-	helper := pkgresource.NewHelper(object.Client, object.Mapping)
-	bytes, err := json.Marshal([]struct {
-		Op    string      `json:"op"`
-		Path  string      `json:"path"`
-		Value interface{} `json:"value"`
-	}{{
-		Op:    "replace",
-		Path:  "/" + strings.Join(append(depth, "spec"), "/"),
-		Value: templateSpec.Spec,
-	}})
-	if err != nil {
-		return err
+	if empty {
+		mesh.RemoveContainers(templateSpec)
+		helper := pkgresource.NewHelper(object.Client, object.Mapping)
+		bytes, err := json.Marshal([]struct {
+			Op    string      `json:"op"`
+			Path  string      `json:"path"`
+			Value interface{} `json:"value"`
+		}{{
+			Op:    "replace",
+			Path:  "/" + strings.Join(append(depth, "spec"), "/"),
+			Value: templateSpec.Spec,
+		}, {
+			Op:    "replace",
+			Path:  "/metadata/annotations/probe",
+			Value: "",
+		}})
+		if err != nil {
+			return err
+		}
+		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 	}
-	//t := true
-	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{
-		//Force: &t,
-	})
 	return err
 }
 
@@ -198,21 +194,21 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUN
 	return err
 }
 
-func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, headers map[string]string) error {
+func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, headers map[string]string) (bool, error) {
 	configMap, err := mapInterface.Get(context.TODO(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
-		return nil
+		return true, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	str, ok := configMap.Data[config.KeyEnvoy]
 	if !ok {
-		return errors.New("can not found value for key: envoy-config.yaml")
+		return false, errors.New("can not found value for key: envoy-config.yaml")
 	}
 	var v []*controlplane.Virtual
 	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
-		return err
+		return false, err
 	}
 	for _, virtual := range v {
 		if nodeID == virtual.Uid {
@@ -224,20 +220,22 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, heade
 			}
 		}
 	}
+	var empty bool
 	// remove default
 	for i := 0; i < len(v); i++ {
 		if nodeID == v[i].Uid && len(v[i].Rules) == 0 {
 			v = append(v[:i], v[i+1:]...)
 			i--
+			empty = true
 		}
 	}
 	marshal, err := yaml.Marshal(v)
 	if err != nil {
-		return err
+		return false, err
 	}
 	configMap.Data[config.KeyEnvoy] = string(marshal)
 	_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
-	return err
+	return empty, err
 }
 
 func contains(a map[string]string, sub map[string]string) bool {

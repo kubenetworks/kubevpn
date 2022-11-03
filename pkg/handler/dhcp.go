@@ -139,3 +139,34 @@ func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) erro
 	}
 	return nil
 }
+
+func (d *DHCPManager) Set(key, value string) error {
+	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		log.Errorf("failed to get data, err: %v", err)
+		return err
+	}
+	if cm.Data == nil {
+		cm.Data = make(map[string]string)
+	}
+	cm.Data[key] = value
+	_, err = d.client.Update(context.Background(), cm, metav1.UpdateOptions{})
+	if err != nil {
+		log.Errorf("update data failed, err: %v", err)
+		return err
+	}
+	return nil
+}
+
+func (d *DHCPManager) Get(key string) (string, error) {
+	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	if cm != nil && cm.Data != nil {
+		if v, ok := cm.Data[key]; ok {
+			return v, nil
+		}
+	}
+	return "", fmt.Errorf("can not get data")
+}
