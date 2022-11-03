@@ -222,7 +222,7 @@ out:
 				}
 				phase = podT.Status.Phase
 			}
-		case <-time.Tick(time.Minute * 10):
+		case <-time.Tick(time.Minute * 60):
 			return nil, errors.New(fmt.Sprintf("wait pod %s to be ready timeout", config.ConfigMapPodTrafficManager))
 		}
 	}

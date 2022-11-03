@@ -61,7 +61,7 @@ func GetAvailableUDPPortOrDie() int {
 }
 
 func WaitPod(podInterface v12.PodInterface, list metav1.ListOptions, checker func(*v1.Pod) bool) error {
-	ctx, cancelFunc := context.WithTimeout(context.TODO(), time.Minute*10)
+	ctx, cancelFunc := context.WithTimeout(context.TODO(), time.Minute*60)
 	defer cancelFunc()
 	watch, err := podInterface.Watch(ctx, list)
 	if err != nil {
