@@ -82,6 +82,17 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 		s = append(s, ipNet.String())
 	}
 
+	var Resources = v1.ResourceRequirements{
+		Requests: map[v1.ResourceName]resource.Quantity{
+			v1.ResourceCPU:    resource.MustParse("128m"),
+			v1.ResourceMemory: resource.MustParse("256Mi"),
+		},
+		Limits: map[v1.ResourceName]resource.Quantity{
+			v1.ResourceCPU:    resource.MustParse("256m"),
+			v1.ResourceMemory: resource.MustParse("512Mi"),
+		},
+	}
+
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
@@ -147,16 +158,7 @@ kubevpn serve -L tcp://:10800 -L tun://:8422?net=${TrafficManagerIP} --debug=tru
 								ContainerPort: 10800,
 								Protocol:      v1.ProtocolTCP,
 							}},
-							Resources: v1.ResourceRequirements{
-								Requests: map[v1.ResourceName]resource.Quantity{
-									v1.ResourceCPU:    resource.MustParse("128m"),
-									v1.ResourceMemory: resource.MustParse("256Mi"),
-								},
-								Limits: map[v1.ResourceName]resource.Quantity{
-									v1.ResourceCPU:    resource.MustParse("256m"),
-									v1.ResourceMemory: resource.MustParse("512Mi"),
-								},
-							},
+							Resources:       Resources,
 							ImagePullPolicy: v1.PullIfNotPresent,
 							SecurityContext: &v1.SecurityContext{
 								Capabilities: &v1.Capabilities{
@@ -187,6 +189,7 @@ kubevpn serve -L tcp://:10800 -L tun://:8422?net=${TrafficManagerIP} --debug=tru
 								},
 							},
 							ImagePullPolicy: v1.PullIfNotPresent,
+							Resources:       Resources,
 						},
 					},
 					RestartPolicy:     v1.RestartPolicyAlways,
@@ -269,31 +272,26 @@ func InjectVPNSidecar(factory cmdutil.Factory, namespace, workloads string, conf
 	} else
 	// controllers
 	{
-		bytes, _ := json.Marshal([]struct {
-			Op    string      `json:"op"`
-			Path  string      `json:"path"`
-			Value interface{} `json:"value"`
-		}{{
+		// remove probe
+		removePatch, restorePatch := patch(origin, path)
+		p := []P{{
 			Op:    "replace",
 			Path:  "/" + strings.Join(append(path, "spec"), "/"),
 			Value: podTempSpec.Spec,
-		}})
+		}}
+		bytes, _ := json.Marshal(append(p, removePatch...))
 		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 		if err != nil {
 			log.Errorf("error while inject proxy container, err: %v, exiting...", err)
 			return err
 		}
-		removePatch, restorePatch := patch(origin, path)
-		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, removePatch, &metav1.PatchOptions{})
-		if err != nil {
-			log.Warnf("error while remove probe of resource: %s %s, ignore, err: %v",
-				object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
-		}
+
 		RollbackFuncList = append(RollbackFuncList, func() {
 			if err = removeInboundContainer(factory, namespace, workloads); err != nil {
 				log.Error(err)
 			}
-			if _, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, restorePatch, &metav1.PatchOptions{}); err != nil {
+			b, _ := json.Marshal(restorePatch)
+			if _, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, b, &metav1.PatchOptions{}); err != nil {
 				log.Warnf("error while restore probe of resource: %s %s, ignore, err: %v",
 					object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
 			}
@@ -397,13 +395,13 @@ func CleanupUselessInfo(pod *v1.Pod) {
 	pod.SetOwnerReferences(nil)
 }
 
-func patch(spec v1.PodTemplateSpec, path []string) (removePatch []byte, restorePatch []byte) {
-	type P struct {
-		Op    string      `json:"op,omitempty"`
-		Path  string      `json:"path,omitempty"`
-		Value interface{} `json:"value,omitempty"`
-	}
-	var remove, restore []P
+type P struct {
+	Op    string      `json:"op,omitempty"`
+	Path  string      `json:"path,omitempty"`
+	Value interface{} `json:"value,omitempty"`
+}
+
+func patch(spec v1.PodTemplateSpec, path []string) (remove []P, restore []P) {
 	for i := range spec.Spec.Containers {
 		index := strconv.Itoa(i)
 		readinessPath := "/" + strings.Join(append(path, "spec", "containers", index, "readinessProbe"), "/")
@@ -436,7 +434,5 @@ func patch(spec v1.PodTemplateSpec, path []string) (removePatch []byte, restoreP
 			Value: spec.Spec.Containers[i].StartupProbe,
 		})
 	}
-	removePatch, _ = json.Marshal(remove)
-	restorePatch, _ = json.Marshal(restore)
 	return
 }

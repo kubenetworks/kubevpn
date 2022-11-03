@@ -30,7 +30,8 @@ var ServerCmd = &cobra.Command{
 		go func() { log.Info(http.ListenAndServe("localhost:6060", nil)) }()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		if err := handler.Start(context.TODO(), route); err != nil {
+		err := handler.Start(context.TODO(), route)
+		if err != nil {
 			log.Fatal(err)
 		}
 		select {}

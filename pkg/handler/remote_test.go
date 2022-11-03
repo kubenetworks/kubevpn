@@ -125,7 +125,6 @@ func TestPreCheck(t *testing.T) {
 	options := ConnectOptions{
 		KubeconfigPath: filepath.Join(homedir.HomeDir(), ".kube", "mesh"),
 		Namespace:      "naison-test",
-		Mode:           "reverse",
 		Workloads:      []string{"services/authors"},
 	}
 	options.InitClient()

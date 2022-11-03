@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
@@ -31,17 +32,9 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-type Mode string
-
-const (
-	Mesh    Mode = "mesh"
-	Reverse Mode = "reverse"
-)
-
 type ConnectOptions struct {
 	KubeconfigPath string
 	Namespace      string
-	Mode           Mode
 	Headers        map[string]string
 	Workloads      []string
 	clientset      *kubernetes.Clientset
@@ -62,51 +55,40 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 		return
 	}
 
-	tempIps := []*net.IPNet{c.localTunIP}
-	//wg := &sync.WaitGroup{}
-	//lock := &sync.Mutex{}
 	for _, workload := range c.Workloads {
 		if len(workload) > 0 {
-			//wg.Add(1)
-			/*go*/
-			func(finalWorkload string) {
-				//defer wg.Done()
-				//lock.Lock()
-				virtualShadowIp, _ := c.dhcp.RentIPRandom()
-				tempIps = append(tempIps, virtualShadowIp)
-				//lock.Unlock()
-				configInfo := util.PodRouteConfig{
-					LocalTunIP:           c.localTunIP.IP.String(),
-					InboundPodTunIP:      virtualShadowIp.String(),
-					TrafficManagerRealIP: c.routerIP.String(),
-					Route:                config.CIDR.String(),
-				}
-				// TODO OPTIMIZE CODE
-				if c.Mode == Mesh {
-					err = InjectVPNAndEnvoySidecar(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, finalWorkload, configInfo, c.Headers)
-				} else {
-					err = InjectVPNSidecar(c.factory, c.Namespace, finalWorkload, configInfo)
-				}
-				if err != nil {
-					log.Error(err)
-				}
-			}(workload)
+			virtualShadowIp, _ := c.dhcp.RentIPRandom()
+			c.usedIPs = append(c.usedIPs, virtualShadowIp)
+			configInfo := util.PodRouteConfig{
+				LocalTunIP:           c.localTunIP.IP.String(),
+				InboundPodTunIP:      virtualShadowIp.String(),
+				TrafficManagerRealIP: c.routerIP.String(),
+				Route:                config.CIDR.String(),
+			}
+			// means mesh mode
+			if len(c.Headers) != 0 {
+				err = InjectVPNAndEnvoySidecar(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers)
+			} else {
+				err = InjectVPNSidecar(c.factory, c.Namespace, workload, configInfo)
+			}
+			if err != nil {
+				log.Error(err)
+				return err
+			}
 		}
 	}
-	//wg.Wait()
-	c.usedIPs = tempIps
 	return
 }
 
 func (c *ConnectOptions) DoConnect() (err error) {
 	c.addCleanUpResourceHandler(c.clientset, c.Namespace)
-	c.cidrs, err = util.GetCidrFromCNI(c.clientset, c.restclient, c.config, c.Namespace)
-	if err != nil {
-		return
-	}
 	trafficMangerNet := net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}
 	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, &trafficMangerNet)
 	if err = c.dhcp.InitDHCP(); err != nil {
+		return
+	}
+	err = c.GetCIDR()
+	if err != nil {
 		return
 	}
 	c.routerIP, err = CreateOutboundPod(c.clientset, c.Namespace, trafficMangerNet.String(), c.cidrs)
@@ -419,4 +401,36 @@ func (c *ConnectOptions) GetRunningPodList() ([]v1.Pod, error) {
 		return nil, errors.New("can not found any running pod")
 	}
 	return list.Items, nil
+}
+
+func (c *ConnectOptions) GetCIDR() (err error) {
+	// (1) get cidr from cache
+	var value string
+	value, err = c.dhcp.Get(config.KeyClusterIPv4POOLS)
+	if err == nil && len(value) != 0 {
+		for _, s := range strings.Split(value, " ") {
+			_, cidr, _ := net.ParseCIDR(s)
+			if cidr != nil {
+				c.cidrs = append(c.cidrs, cidr)
+			}
+		}
+	}
+	if len(c.cidrs) != 0 {
+		return
+	}
+
+	// (2) get cache from cni
+	c.cidrs, err = util.GetCidrFromCNI(c.clientset, c.restclient, c.config, c.Namespace)
+	if err == nil {
+		s := sets.NewString()
+		for _, cidr := range c.cidrs {
+			s.Insert(cidr.String())
+		}
+		_ = c.dhcp.Set(config.KeyClusterIPv4POOLS, strings.Join(s.List(), " "))
+		return
+	}
+
+	// (3) fallback to get cidr from node/pod/service
+	c.cidrs, err = util.GetCIDRFromResource(c.clientset, c.Namespace)
+	return
 }

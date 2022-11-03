@@ -20,27 +20,20 @@ import (
 	"strings"
 )
 
-func GetCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, error) {
-	var CIDRList []*net.IPNet
-	// get pod CIDR from node spec
+func GetCIDRFromResource(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, error) {
+	var list []*net.IPNet
+	// (1) get pod CIDR from node spec
 	nodeList, err := clientset.CoreV1().Nodes().List(context.TODO(), v1.ListOptions{})
-	if err == nil {
-		var podCIDRs = sets.NewString()
-		for _, node := range nodeList.Items {
-			if node.Spec.PodCIDRs != nil {
-				podCIDRs.Insert(node.Spec.PodCIDRs...)
-			}
-			if len(node.Spec.PodCIDR) != 0 {
-				podCIDRs.Insert(node.Spec.PodCIDR)
-			}
-		}
-		for _, podCIDR := range podCIDRs.List() {
-			if _, CIDR, err := net.ParseCIDR(podCIDR); err == nil {
-				CIDRList = append(CIDRList, CIDR)
+	for _, node := range nodeList.Items {
+		for _, c := range sets.NewString(node.Spec.PodCIDRs...).Insert(node.Spec.PodCIDR).List() {
+			_, cidr, _ := net.ParseCIDR(c)
+			if cidr != nil {
+				list = append(list, cidr)
 			}
 		}
 	}
-	// get pod CIDR from pod ip, why doing this: notice that node's pod cidr is not correct in minikube
+
+	// (2) get pod CIDR from pod ip, why doing this: notice that node's pod cidr is not correct in minikube
 	// ➜  ~ kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}'
 	//10.244.0.0/24%
 	// ➜  ~  kubectl get pods -o=custom-columns=podIP:.status.podIP
@@ -55,29 +48,27 @@ func GetCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, e
 	//172.17.0.3
 	//172.17.0.7
 	//172.17.0.2
-	podList, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), v1.ListOptions{})
-	if err == nil {
-		for _, pod := range podList.Items {
-			if pod.Spec.HostNetwork {
-				continue
+	podList, _ := clientset.CoreV1().Pods(namespace).List(context.TODO(), v1.ListOptions{})
+	for _, pod := range podList.Items {
+		if pod.Spec.HostNetwork {
+			continue
+		}
+		if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
+			var contain bool
+			for _, cidr := range list {
+				if cidr.Contains(ip) {
+					contain = true
+					break
+				}
 			}
-			if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
-				var contain bool
-				for _, CIDR := range CIDRList {
-					if CIDR.Contains(ip) {
-						contain = true
-						break
-					}
-				}
-				if !contain {
-					mask := net.CIDRMask(24, 32)
-					CIDRList = append(CIDRList, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
-				}
+			if !contain {
+				mask := net.CIDRMask(24, 32)
+				list = append(list, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
 			}
 		}
 	}
 
-	// get service CIDR
+	// (3) get service CIDR
 	defaultCIDRIndex := "The range of valid IPs is"
 	_, err = clientset.CoreV1().Services(namespace).Create(context.TODO(), &v12.Service{
 		ObjectMeta: v1.ObjectMeta{GenerateName: "foo-svc-"},
@@ -86,36 +77,34 @@ func GetCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, e
 	if err != nil {
 		idx := strings.LastIndex(err.Error(), defaultCIDRIndex)
 		if idx != -1 {
-			_, cidr, err := net.ParseCIDR(strings.TrimSpace(err.Error()[idx+len(defaultCIDRIndex):]))
-			if err == nil {
-				CIDRList = append(CIDRList, cidr)
+			_, cidr, _ := net.ParseCIDR(strings.TrimSpace(err.Error()[idx+len(defaultCIDRIndex):]))
+			if cidr != nil {
+				list = append(list, cidr)
 			}
 		}
 	} else {
-		serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), v1.ListOptions{})
-		if err == nil {
-			for _, service := range serviceList.Items {
-				if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
-					var contain bool
-					for _, CIDR := range CIDRList {
-						if CIDR.Contains(ip) {
-							contain = true
-							break
-						}
+		serviceList, _ := clientset.CoreV1().Services(namespace).List(context.TODO(), v1.ListOptions{})
+		for _, service := range serviceList.Items {
+			if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
+				var contain bool
+				for _, CIDR := range list {
+					if CIDR.Contains(ip) {
+						contain = true
+						break
 					}
-					if !contain {
-						mask := net.CIDRMask(16, 32)
-						CIDRList = append(CIDRList, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
-					}
+				}
+				if !contain {
+					mask := net.CIDRMask(24, 32)
+					list = append(list, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
 				}
 			}
 		}
 	}
 
-	// remove duplicate CIDR
+	// (4) remove duplicate CIDR
 	result := make([]*net.IPNet, 0)
 	set := sets.NewString()
-	for _, cidr := range CIDRList {
+	for _, cidr := range list {
 		if !set.Has(cidr.String()) {
 			set.Insert(cidr.String())
 			result = append(result, cidr)
@@ -127,18 +116,18 @@ func GetCIDR(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, e
 	return result, nil
 }
 
-// todo use patch to update this pod
 func GetCidrFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient, restconfig *rest.Config, namespace string) ([]*net.IPNet, error) {
+	var name = "cni-net-dir-kubevpn"
 	hostPathType := v12.HostPathDirectoryOrCreate
 	pod := &v12.Pod{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      config.ConfigMapPodTrafficManager,
+			Name:      name,
 			Namespace: namespace,
 		},
 		Spec: v12.PodSpec{
 			Volumes: []v12.Volume{
 				{
-					Name: "cni-net-dir",
+					Name: name,
 					VolumeSource: v12.VolumeSource{
 						HostPath: &v12.HostPathVolumeSource{
 							Path: config.DefaultNetDir,
@@ -149,7 +138,7 @@ func GetCidrFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 			},
 			Containers: []v12.Container{
 				{
-					Name:    config.ContainerSidecarVPN,
+					Name:    name,
 					Image:   "guosen-dev.cargo.io/epscplibrary/kubevpn:latest",
 					Command: []string{"tail", "-f", "/dev/null"},
 					Resources: v12.ResourceRequirements{
@@ -164,7 +153,7 @@ func GetCidrFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 					},
 					VolumeMounts: []v12.VolumeMount{
 						{
-							Name:      "cni-net-dir",
+							Name:      name,
 							ReadOnly:  true,
 							MountPath: config.DefaultNetDir,
 						},
@@ -176,15 +165,18 @@ func GetCidrFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 	}
 	get, err := clientset.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, v1.GetOptions{})
 	if k8serrors.IsNotFound(err) || get.Status.Phase != v12.PodRunning {
-		create, err := clientset.CoreV1().Pods(namespace).Create(context.Background(), pod, v1.CreateOptions{})
+		var deleteFunc = func() {
+			_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), pod.Name, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
+		}
+		// delete pod anyway
+		deleteFunc()
+		pod, err = clientset.CoreV1().Pods(namespace).Create(context.Background(), pod, v1.CreateOptions{})
 		if err != nil {
 			return nil, err
 		}
-		defer clientset.CoreV1().Pods(namespace).Delete(context.TODO(), create.Name, v1.DeleteOptions{
-			GracePeriodSeconds: pointer.Int64(0),
-		})
+		defer deleteFunc()
 		err = WaitPod(clientset.CoreV1().Pods(namespace), v1.ListOptions{
-			FieldSelector: fields.OneTermEqualSelector("metadata.name", create.Name).String(),
+			FieldSelector: fields.OneTermEqualSelector("metadata.name", pod.Name).String(),
 		}, func(pod *v12.Pod) bool {
 			return pod.Status.Phase == v12.PodRunning
 		})
@@ -221,6 +213,10 @@ func GetCidrFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 		if err == nil {
 			result = append(result, ipNet)
 		}
+	}
+
+	if len(result) == 0 {
+		return nil, fmt.Errorf("can not found any cidr")
 	}
 
 	return result, nil
