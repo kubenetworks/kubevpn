@@ -51,10 +51,10 @@ update-alternatives --set iptables /usr/sbin/iptables-legacy
 iptables -F
 iptables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
-iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to $(LocalTunIP)
+iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIP}
 iptables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
-iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination $(LocalTunIP)
-kubevpn serve -L 'tun://0.0.0.0:8421/$(TrafficManagerRealIP):8422?net=$(InboundPodTunIP)&route=$(Route)' --debug=true`,
+iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIP}
+kubevpn serve -L 'tun://0.0.0.0:8421/${TrafficManagerRealIP}:8422?net=${InboundPodTunIP}&route=${Route}' --debug=true`,
 		},
 		SecurityContext: &corev1.SecurityContext{
 			Capabilities: &corev1.Capabilities{
