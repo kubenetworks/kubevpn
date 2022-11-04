@@ -172,8 +172,8 @@ Hello world!%
 Only support HTTP and GRPC, with specific header `"a: 1"` will route to your local machine
 
 ```shell
-➜  ~ kubevpn connect --workloads=service/productpage --mode=mesh --headers a=1
-INFO[0000] [sudo kubevpn connect --workloads=service/productpage --mode=mesh --headers a=1]
+➜  ~ kubevpn connect --workloads=service/productpage --headers a=1
+INFO[0000] [sudo kubevpn connect --workloads=service/productpage --headers a=1]
 2022/02/05 12:22:28 connect.go:303: kubeconfig path: /Users/naison/.kube/config, namespace: default, services: [service/productpage]
 2022/02/05 12:22:34 remote.go:47: traffic manager not exist, try to create it...
 2022/02/05 12:22:34 remote.go:121: pod kubevpn.traffic.manager status is Pending
