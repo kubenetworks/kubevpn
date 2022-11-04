@@ -37,7 +37,7 @@ var (
 )
 
 func TestFunctions(t *testing.T) {
-	kubevpnConnect()
+	kubevpnConnect(t)
 	t.Cleanup(cancelFunc)
 	t.Parallel()
 	t.Run(runtime.FuncForPC(reflect.ValueOf(pingPodIP).Pointer()).Name(), pingPodIP)
@@ -265,20 +265,23 @@ func server(port int) {
 	}
 }
 
-func kubevpnConnect() {
+func kubevpnConnect(t *testing.T) {
 	var ctx context.Context
 	ctx, cancelFunc = context.WithCancel(context.TODO())
-	childCtx, timeoutFunc := context.WithTimeout(ctx, 2*time.Hour)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Hour)
 
 	cmd := exec.CommandContext(ctx, "kubevpn", "connect", "--debug", "--workloads", "deployments/reviews")
-	go util.RunWithRollingOutWithChecker(cmd, func(log string) bool {
-		ok := strings.Contains(log, "dns service ok")
-		if ok {
-			timeoutFunc()
+	go func() {
+		_, _, err := util.RunWithRollingOutWithChecker(cmd, func(log string) {
+			if strings.Contains(log, "dns service ok") {
+				cancel()
+			}
+		})
+		if err != nil {
+			t.Error(err)
 		}
-		return ok
-	})
-	<-childCtx.Done()
+	}()
+	<-ctx.Done()
 }
 
 func init() {

@@ -404,9 +404,22 @@ func RolloutStatus(factory cmdutil.Factory, namespace, workloads string, timeout
 	})
 }
 
-func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string) bool) (string, string, error) {
-	stdoutBuf := bytes.NewBuffer(make([]byte, 0))
-	stderrBuf := bytes.NewBuffer(make([]byte, 0))
+type proxyWriter struct {
+	*bytes.Buffer
+	checker func(log string)
+}
+
+func (w *proxyWriter) Write(b []byte) (int, error) {
+	write, err := w.Buffer.Write(b)
+	if w.checker != nil {
+		w.checker(w.Buffer.String())
+	}
+	return write, err
+}
+
+func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string)) (string, string, error) {
+	stdoutBuf := &proxyWriter{Buffer: bytes.NewBuffer(make([]byte, 0)), checker: checker}
+	stderrBuf := &proxyWriter{Buffer: bytes.NewBuffer(make([]byte, 0)), checker: checker}
 
 	stdoutPipe, _ := cmd.StdoutPipe()
 	stderrPipe, _ := cmd.StderrPipe()
@@ -417,15 +430,6 @@ func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string) bool
 	}()
 	go func() {
 		_, _ = io.Copy(stderr, stderrPipe)
-	}()
-	go func() {
-		if checker != nil {
-			for {
-				if checker(stdoutBuf.String()) || checker(stderrBuf.String()) {
-					break
-				}
-			}
-		}
 	}()
 	if err := cmd.Start(); err != nil {
 		if cmd.Process != nil {
