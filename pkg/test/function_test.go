@@ -278,7 +278,7 @@ func kubevpnConnect(t *testing.T) {
 			}
 		})
 		if err != nil {
-			t.Error(err)
+			t.Log(err)
 		}
 	}()
 	<-ctx.Done()
