@@ -149,7 +149,7 @@ func GetCidrFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 			Containers: []v12.Container{
 				{
 					Name:    name,
-					Image:   "guosen-dev.cargo.io/epscplibrary/kubevpn:latest",
+					Image:   config.ImageServer,
 					Command: []string{"tail", "-f", "/dev/null"},
 					Resources: v12.ResourceRequirements{
 						Requests: map[v12.ResourceName]resource.Quantity{
