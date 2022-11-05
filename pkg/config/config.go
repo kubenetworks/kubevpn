@@ -24,6 +24,8 @@ const (
 	innerIPv4Pool = "223.254.254.100/24"
 
 	DefaultNetDir = "/etc/cni/net.d"
+
+	Proc = "/proc"
 )
 
 var (

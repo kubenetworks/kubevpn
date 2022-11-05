@@ -403,6 +403,9 @@ func (c *ConnectOptions) GetRunningPodList() ([]v1.Pod, error) {
 	return list.Items, nil
 }
 
+// GetCIDR
+// 1: get pod cidr
+// 2: get service cidr
 func (c *ConnectOptions) GetCIDR() (err error) {
 	// (1) get cidr from cache
 	var value string
@@ -419,7 +422,7 @@ func (c *ConnectOptions) GetCIDR() (err error) {
 		return
 	}
 
-	// (2) get cache from cni
+	// (2) get cidr from cni
 	c.cidrs, err = util.GetCidrFromCNI(c.clientset, c.restclient, c.config, c.Namespace)
 	if err == nil {
 		s := sets.NewString()

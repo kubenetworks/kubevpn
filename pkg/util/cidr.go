@@ -69,7 +69,7 @@ func GetCIDRFromResource(clientset *kubernetes.Clientset, namespace string) ([]*
 	}
 
 	// (3) get service CIDR
-	defaultCIDRIndex := "The range of valid IPs is"
+	defaultCIDRIndex := "valid IPs is"
 	_, err = clientset.CoreV1().Services(namespace).Create(context.TODO(), &v12.Service{
 		ObjectMeta: v1.ObjectMeta{GenerateName: "foo-svc-"},
 		Spec:       v12.ServiceSpec{Ports: []v12.ServicePort{{Port: 80}}, ClusterIP: "0.0.0.0"},
@@ -118,6 +118,7 @@ func GetCIDRFromResource(clientset *kubernetes.Clientset, namespace string) ([]*
 
 func GetCidrFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient, restconfig *rest.Config, namespace string) ([]*net.IPNet, error) {
 	var name = "cni-net-dir-kubevpn"
+	var procName = "proc-dir-kubevpn"
 	hostPathType := v12.HostPathDirectoryOrCreate
 	pod := &v12.Pod{
 		ObjectMeta: v1.ObjectMeta{
@@ -131,6 +132,15 @@ func GetCidrFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 					VolumeSource: v12.VolumeSource{
 						HostPath: &v12.HostPathVolumeSource{
 							Path: config.DefaultNetDir,
+							Type: &hostPathType,
+						},
+					},
+				},
+				{
+					Name: procName,
+					VolumeSource: v12.VolumeSource{
+						HostPath: &v12.HostPathVolumeSource{
+							Path: config.Proc,
 							Type: &hostPathType,
 						},
 					},
@@ -156,6 +166,11 @@ func GetCidrFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 							Name:      name,
 							ReadOnly:  true,
 							MountPath: config.DefaultNetDir,
+						},
+						{
+							Name:      procName,
+							ReadOnly:  true,
+							MountPath: "/etc/cni" + config.Proc,
 						},
 					},
 					ImagePullPolicy: v12.PullIfNotPresent,
@@ -184,34 +199,43 @@ func GetCidrFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 			return nil, err
 		}
 	}
-	content, err := Shell(clientset, restclient, restconfig, pod.Name, pod.Namespace, "cat /etc/cni/net.d/*.conflist")
-	if err != nil {
-		return nil, err
-	}
 
-	conf, err := libcni.ConfListFromFile(content)
-	if err == nil {
-		log.Print("get cni {} config", conf.Name)
+	var cmds = []string{
+		"cat /etc/cni/net.d/*.conflist",
+		`grep -a -R "service-cluster-ip-range\|cluster-ip-range\|cluster-cidr\|cidr" /etc/cni/proc/*/cmdline | grep -a -v grep`,
 	}
-
-	v4 := regexp.MustCompile(`(([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,})`)
-	v6 := regexp.MustCompile(`(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))/[0-9]{1,}`)
 
 	var result []*net.IPNet
-	ipv4 := v4.FindAllString(content, -1)
-	ipv6 := v6.FindAllString(content, -1)
 
-	for _, s := range ipv4 {
-		_, ipNet, err := net.ParseCIDR(s)
-		if err == nil {
-			result = append(result, ipNet)
+	for _, cmd := range cmds {
+		content, err := Shell(clientset, restclient, restconfig, pod.Name, pod.Namespace, cmd)
+		if err != nil {
+			return nil, err
 		}
-	}
 
-	for _, s := range ipv6 {
-		_, ipNet, err := net.ParseCIDR(s)
+		conf, err := libcni.ConfListFromFile(content)
 		if err == nil {
-			result = append(result, ipNet)
+			log.Print("get cni {} config", conf.Name)
+		}
+
+		v4 := regexp.MustCompile(`(([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,})`)
+		v6 := regexp.MustCompile(`(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))/[0-9]{1,}`)
+
+		ipv4 := v4.FindAllString(content, -1)
+		ipv6 := v6.FindAllString(content, -1)
+
+		for _, s := range ipv4 {
+			_, ipNet, err := net.ParseCIDR(s)
+			if err == nil {
+				result = append(result, ipNet)
+			}
+		}
+
+		for _, s := range ipv6 {
+			_, ipNet, err := net.ParseCIDR(s)
+			if err == nil {
+				result = append(result, ipNet)
+			}
 		}
 	}
 
