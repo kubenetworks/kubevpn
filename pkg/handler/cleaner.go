@@ -99,7 +99,8 @@ func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, name
 		zero := int64(0)
 		log.Info("refCount is zero, prepare to clean up resource")
 		deleteOptions := v1.DeleteOptions{GracePeriodSeconds: &zero}
-		_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), config.ConfigMapPodTrafficManager, deleteOptions)
+		// keep configmap
+		//_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), config.ConfigMapPodTrafficManager, deleteOptions)
 		_ = clientset.CoreV1().Services(namespace).Delete(context.TODO(), config.ConfigMapPodTrafficManager, deleteOptions)
 		_ = clientset.AppsV1().Deployments(namespace).Delete(context.TODO(), config.ConfigMapPodTrafficManager, deleteOptions)
 	}
