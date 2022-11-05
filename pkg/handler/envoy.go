@@ -77,22 +77,26 @@ func InjectVPNAndEnvoySidecar(factory cmdutil.Factory, clientset v12.ConfigMapIn
 	b, _ := json.Marshal(restorePatch)
 	mesh.AddMeshContainer(templateSpec, nodeID, c)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
-	ps := []P{{
-		Op:    "replace",
-		Path:  "/" + strings.Join(append(path, "spec"), "/"),
-		Value: templateSpec.Spec,
-	}, {
-		Op:    "replace",
-		Path:  "/metadata/annotations/probe",
-		Value: b,
-	}}
+	ps := []P{
+		{
+			Op:    "replace",
+			Path:  "/" + strings.Join(append(path, "spec"), "/"),
+			Value: templateSpec.Spec,
+		},
+		{
+			Op:    "replace",
+			Path:  "/metadata/annotations/probe",
+			Value: b,
+		},
+	}
 	bytes, err := json.Marshal(append(ps, removePatch...))
 	if err != nil {
 		return err
 	}
 	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 	if err != nil {
-		log.Warnf("error while remove probe of resource: %s %s, ignore, err: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
+		log.Warnf("error while path resource: %s %s, err: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
+		return err
 	}
 
 	RollbackFuncList = append(RollbackFuncList, func() {
