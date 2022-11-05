@@ -210,7 +210,7 @@ func GetCidrFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 	for _, cmd := range cmds {
 		content, err := Shell(clientset, restclient, restconfig, pod.Name, pod.Namespace, cmd)
 		if err != nil {
-			return nil, err
+			continue
 		}
 
 		conf, err := libcni.ConfListFromFile(content)

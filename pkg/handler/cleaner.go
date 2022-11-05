@@ -22,7 +22,7 @@ import (
 
 var stopChan = make(chan os.Signal)
 var RollbackFuncList = make([]func(), 2)
-var ctx, cancel = context.WithCancel(context.TODO())
+var ctx, cancel = context.WithCancel(context.Background())
 
 func (c *ConnectOptions) addCleanUpResourceHandler(clientset *kubernetes.Clientset, namespace string) {
 	signal.Notify(stopChan, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL /*, syscall.SIGSTOP*/)

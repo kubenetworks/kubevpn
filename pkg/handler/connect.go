@@ -100,6 +100,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	}
 	subCtx, cancelFunc := context.WithTimeout(ctx, time.Minute*2)
 	defer cancelFunc()
+	util.GetAvailableUDPPortOrDie()
 	if err = util.WaitPortToBeFree(subCtx, 10800); err != nil {
 		return err
 	}

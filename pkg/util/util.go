@@ -60,6 +60,19 @@ func GetAvailableUDPPortOrDie() int {
 	return listener.LocalAddr().(*net.UDPAddr).Port
 }
 
+func GetAvailableTCPPortOrDie() int {
+	address, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", "0.0.0.0"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	listener, err := net.ListenTCP("tcp", address)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer listener.Close()
+	return listener.Addr().(*net.TCPAddr).Port
+}
+
 func WaitPod(podInterface v12.PodInterface, list metav1.ListOptions, checker func(*v1.Pod) bool) error {
 	ctx, cancelFunc := context.WithTimeout(context.TODO(), time.Minute*60)
 	defer cancelFunc()
