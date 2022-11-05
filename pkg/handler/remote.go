@@ -137,7 +137,7 @@ iptables -F
 iptables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
 iptables -t nat -A POSTROUTING -s ${CIDR} -o eth0 -j MASQUERADE
-kubevpn serve -L tcp://:10800 -L tun://:8422?net=${TrafficManagerIP} --debug=true`,
+kubevpn serve -L "tcp://:10800 -L tun://:8422?net=${TrafficManagerIP}" --debug=true`,
 							},
 							Env: []v1.EnvVar{
 								{
