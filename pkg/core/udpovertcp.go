@@ -36,7 +36,8 @@ func readDatagramPacket(r io.Reader, b []byte) (*datagramPacket, error) {
 		return nil, err
 	}
 	dataLength := binary.BigEndian.Uint16(b[:2])
-	if _, err = io.ReadFull(r, b[:dataLength]); err != nil && (err != io.ErrUnexpectedEOF || err != io.EOF) {
+	_, err = io.ReadFull(r, b[:dataLength])
+	if err != nil && (err != io.ErrUnexpectedEOF || err != io.EOF) {
 		return nil, err
 	}
 	return &datagramPacket{DataLength: dataLength, Data: b[:dataLength]}, nil

@@ -30,7 +30,8 @@ func (c *ConnectOptions) addCleanUpResourceHandler(clientset *kubernetes.Clients
 		<-stopChan
 		log.Info("prepare to exit, cleaning up")
 		dns.CancelDNS()
-		if err := c.dhcp.ReleaseIpToDHCP(c.usedIPs...); err != nil {
+		err := c.dhcp.ReleaseIpToDHCP(c.usedIPs...)
+		if err != nil {
 			log.Errorf("failed to release ip to dhcp, err: %v", err)
 		}
 		cancel()
@@ -54,28 +55,30 @@ func Cleanup(s os.Signal) {
 
 // vendor/k8s.io/kubectl/pkg/polymorphichelpers/rollback.go:99
 func updateServiceRefCount(serviceInterface v12.ServiceInterface, name string, increment int) {
-	if err := retry.OnError(retry.DefaultRetry, func(err error) bool {
-		return !k8serrors.IsNotFound(err)
-	}, func() error {
-		service, err := serviceInterface.Get(context.TODO(), name, v1.GetOptions{})
-		if err != nil {
-			log.Errorf("update ref-count failed, increment: %d, error: %v", increment, err)
+	err := retry.OnError(
+		retry.DefaultRetry,
+		func(err error) bool { return !k8serrors.IsNotFound(err) },
+		func() error {
+			service, err := serviceInterface.Get(context.TODO(), name, v1.GetOptions{})
+			if err != nil {
+				log.Errorf("update ref-count failed, increment: %d, error: %v", increment, err)
+				return err
+			}
+			curCount := 0
+			if ref := service.GetAnnotations()["ref-count"]; len(ref) > 0 {
+				curCount, err = strconv.Atoi(ref)
+			}
+			p, _ := json.Marshal([]interface{}{
+				map[string]interface{}{
+					"op":    "replace",
+					"path":  "/metadata/annotations/ref-count",
+					"value": strconv.Itoa(curCount + increment),
+				},
+			})
+			_, err = serviceInterface.Patch(context.TODO(), config.ConfigMapPodTrafficManager, types.JSONPatchType, p, v1.PatchOptions{})
 			return err
-		}
-		curCount := 0
-		if ref := service.GetAnnotations()["ref-count"]; len(ref) > 0 {
-			curCount, err = strconv.Atoi(ref)
-		}
-		p, _ := json.Marshal([]interface{}{
-			map[string]interface{}{
-				"op":    "replace",
-				"path":  "/metadata/annotations/ref-count",
-				"value": strconv.Itoa(curCount + increment),
-			},
 		})
-		_, err = serviceInterface.Patch(context.TODO(), config.ConfigMapPodTrafficManager, types.JSONPatchType, p, v1.PatchOptions{})
-		return err
-	}); err != nil {
+	if err != nil {
 		log.Errorf("update ref count error, error: %v", err)
 	} else {
 		log.Info("update ref count successfully")

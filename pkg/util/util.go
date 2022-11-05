@@ -311,7 +311,8 @@ func Ping(targetIP string) (bool, error) {
 	if err != nil {
 		return false, nil
 	}
-	if _, err = conn.WriteTo(data, &net.IPAddr{IP: net.ParseIP(targetIP)}); err != nil {
+	_, err = conn.WriteTo(data, &net.IPAddr{IP: net.ParseIP(targetIP)})
+	if err != nil {
 		return false, err
 	}
 
@@ -486,7 +487,7 @@ func IsPortListening(port int) bool {
 	if err != nil {
 		return true
 	} else {
-		listener.Close()
+		_ = listener.Close()
 		return false
 	}
 }

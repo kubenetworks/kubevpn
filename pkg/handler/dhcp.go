@@ -33,13 +33,13 @@ func NewDHCPManager(client corev1.ConfigMapInterface, namespace string, cidr *ne
 //	todo optimize dhcp, using mac address, ip and deadline as unit
 func (d *DHCPManager) InitDHCP() error {
 	configMap, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err == nil && configMap != nil {
+	if err == nil {
 		if _, found := configMap.Data[config.KeyEnvoy]; !found {
 			_, err = d.client.Patch(
 				context.Background(),
 				configMap.Name,
 				types.MergePatchType,
-				[]byte(fmt.Sprintf("{\"data\":{\"%s\":\"%s\"}}", config.KeyEnvoy, "")),
+				[]byte(fmt.Sprintf(`{"data":{"%s":"%s"}}`, config.KeyEnvoy, "")),
 				metav1.PatchOptions{},
 			)
 			return err
@@ -121,7 +121,8 @@ func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) erro
 	if err != nil {
 		return err
 	}
-	if err = dhcp.Restore(d.cidr, []byte(cm.Data[config.KeyDHCP])); err != nil {
+	err = dhcp.Restore(d.cidr, []byte(cm.Data[config.KeyDHCP]))
+	if err != nil {
 		return err
 	}
 	if err = f(dhcp); err != nil {
