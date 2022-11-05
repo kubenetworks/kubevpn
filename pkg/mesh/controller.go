@@ -37,7 +37,7 @@ iptables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
 iptables -t nat -A PREROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR} -j DNAT --to 127.0.0.1:15006
 iptables -t nat -A POSTROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR} -j MASQUERADE
-kubevpn serve -L 'tun:/${TrafficManagerRealIP}:8422?net=${InboundPodTunIP}&route=${Route}' --debug=true`,
+kubevpn serve -L "tun:/${TrafficManagerRealIP}:8422?net=${InboundPodTunIP}&route=${Route}" --debug=true`,
 		},
 		Env: []v1.EnvVar{
 			{
