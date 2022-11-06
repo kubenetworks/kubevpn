@@ -29,12 +29,8 @@ const (
 )
 
 var (
-	// Version inject --ldflags -X
-	Version = "latest"
-
-	ImageServer       = "naison/kubevpn:" + Version
-	ImageMesh         = "naison/kubevpn-mesh:" + Version
-	ImageControlPlane = "naison/envoy-xds-server:" + Version
+	// Image inject --ldflags -X
+	Image = "docker.io/naison/kubevpn:latest"
 )
 
 var CIDR *net.IPNet

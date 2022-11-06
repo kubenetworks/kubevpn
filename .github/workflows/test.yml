@@ -19,7 +19,7 @@ jobs:
         run: |
           echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USER }} --password-stdin
           export VERSION=test
-          make all-image
+          make container
   linux:
     runs-on: ubuntu-latest
     needs: [ "image" ]

@@ -24,7 +24,7 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig) {
 	zero := int64(0)
 	spec.Containers = append(spec.Containers, corev1.Container{
 		Name:  config.ContainerSidecarVPN,
-		Image: config.ImageServer,
+		Image: config.Image,
 		Env: []corev1.EnvVar{
 			{
 				Name:  "LocalTunIP",

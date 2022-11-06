@@ -58,7 +58,7 @@ jobs:
       - name: Push image to docker hub
         run: |
           echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USER }} --password-stdin
-          make all-image
+          make container
 
       - name: Repository Dispatch
         uses: peter-evans/repository-dispatch@v1
