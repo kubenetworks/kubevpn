@@ -17,6 +17,7 @@ var (
 	GitCommit = ""
 	BuildTime = ""
 	Branch    = ""
+	Version   = "latest"
 )
 
 func reformatDate(buildTime string) string {
@@ -33,7 +34,8 @@ var versionCmd = &cobra.Command{
 	Long:  `This is the version of KubeVPN`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("KubeVPN: CLI\n")
-		fmt.Printf("    Version: %s\n", config.Version)
+		fmt.Printf("    Version: %s\n", Version)
+		fmt.Printf("    Image: %s\n", config.Image)
 		fmt.Printf("    Branch: %s\n", Branch)
 		fmt.Printf("    Git commit: %s\n", GitCommit)
 		fmt.Printf("    Built time: %s\n", reformatDate(BuildTime))
@@ -45,9 +47,9 @@ var versionCmd = &cobra.Command{
 func init() {
 	RootCmd.AddCommand(versionCmd)
 	// Prefer version number inserted at build using --ldflags
-	if config.Version == "" {
+	if Version == "" {
 		if i, ok := debug.ReadBuildInfo(); ok {
-			config.Version = i.Main.Version
+			Version = i.Main.Version
 		}
 	}
 }

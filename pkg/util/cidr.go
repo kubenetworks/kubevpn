@@ -149,7 +149,7 @@ func GetCidrFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 			Containers: []v12.Container{
 				{
 					Name:    name,
-					Image:   config.ImageServer,
+					Image:   config.Image,
 					Command: []string{"tail", "-f", "/dev/null"},
 					Resources: v12.ResourceRequirements{
 						Requests: map[v12.ResourceName]resource.Quantity{

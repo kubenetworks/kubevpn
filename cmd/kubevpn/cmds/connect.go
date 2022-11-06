@@ -26,6 +26,7 @@ func init() {
 	connectCmd.PersistentFlags().StringArrayVar(&connect.Workloads, "workloads", []string{}, "workloads, like: pods/tomcat, deployment/nginx, replicaset/tomcat...")
 	connectCmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "headers, format is k=v, like: k1=v1,k2=v2")
 	connectCmd.Flags().BoolVar(&config.Debug, "debug", false, "true/false")
+	connectCmd.Flags().StringVar(&config.Image, "image", config.Image, "use this image to startup container")
 	RootCmd.AddCommand(connectCmd)
 }
 

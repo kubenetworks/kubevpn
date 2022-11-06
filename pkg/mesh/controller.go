@@ -27,7 +27,7 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteCo
 	t := true
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarVPN,
-		Image:   config.ImageServer,
+		Image:   config.Image,
 		Command: []string{"/bin/sh", "-c"},
 		Args: []string{`
 sysctl net.ipv4.ip_forward=1
@@ -79,7 +79,7 @@ kubevpn serve -L "tun:/${TrafficManagerRealIP}:8422?net=${InboundPodTunIP}&route
 	})
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarEnvoyProxy,
-		Image:   config.ImageMesh,
+		Image:   config.Image,
 		Command: []string{"envoy", "-l", "debug", "--base-id", "1", "--config-yaml"},
 		Args: []string{
 			fmt.Sprintf(s, nodeId, nodeId, c.TrafficManagerRealIP),

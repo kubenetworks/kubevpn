@@ -128,7 +128,7 @@ func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, traffi
 					Containers: []v1.Container{
 						{
 							Name:    config.ContainerSidecarVPN,
-							Image:   config.ImageServer,
+							Image:   config.Image,
 							Command: []string{"/bin/sh", "-c"},
 							Args: []string{`
 sysctl net.ipv4.ip_forward=1
@@ -173,7 +173,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug
 						},
 						{
 							Name:    config.ContainerSidecarControlPlane,
-							Image:   config.ImageControlPlane,
+							Image:   config.Image,
 							Command: []string{"envoy-xds-server"},
 							Args:    []string{"--watchDirectoryFileName", "/etc/envoy/envoy-config.yaml"},
 							Ports: []v1.ContainerPort{{
