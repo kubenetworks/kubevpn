@@ -60,10 +60,7 @@ func usingResolver(clientConfig *miekgdns.ClientConfig) {
 	port := util.GetAvailableUDPPortOrDie()
 	go func(port int, clientConfig *miekgdns.ClientConfig) {
 		for {
-			err = NewDNSServer("udp", "127.0.0.1:"+strconv.Itoa(port), clientConfig)
-			if err != nil {
-				log.Warnln(err)
-			}
+			log.Errorln(NewDNSServer("udp", "127.0.0.1:"+strconv.Itoa(port), clientConfig))
 		}
 	}(port, clientConfig)
 	config = miekgdns.ClientConfig{

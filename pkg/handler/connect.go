@@ -407,11 +407,15 @@ func (c *ConnectOptions) GetRunningPodList() ([]v1.Pod, error) {
 // GetCIDR
 // 1: get pod cidr
 // 2: get service cidr
+// todo optimize code should distinguish service cidr and pod cidr
+// https://stackoverflow.com/questions/45903123/kubernetes-set-service-cidr-and-pod-cidr-the-same
+// https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster/54183373#54183373
+// https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster
 func (c *ConnectOptions) GetCIDR() (err error) {
 	// (1) get cidr from cache
 	var value string
 	value, err = c.dhcp.Get(config.KeyClusterIPv4POOLS)
-	if err == nil && len(value) != 0 {
+	if err == nil {
 		for _, s := range strings.Split(value, " ") {
 			_, cidr, _ := net.ParseCIDR(s)
 			if cidr != nil {
@@ -419,12 +423,13 @@ func (c *ConnectOptions) GetCIDR() (err error) {
 			}
 		}
 	}
-	if len(c.cidrs) != 0 {
+	if len(c.cidrs) == 2 {
+		log.Infoln("got cidr from cache")
 		return
 	}
 
 	// (2) get cidr from cni
-	c.cidrs, err = util.GetCidrFromCNI(c.clientset, c.restclient, c.config, c.Namespace)
+	c.cidrs, err = util.GetCIDRElegant(c.clientset, c.restclient, c.config, c.Namespace)
 	if err == nil {
 		s := sets.NewString()
 		for _, cidr := range c.cidrs {
@@ -435,6 +440,6 @@ func (c *ConnectOptions) GetCIDR() (err error) {
 	}
 
 	// (3) fallback to get cidr from node/pod/service
-	c.cidrs, err = util.GetCIDRFromResource(c.clientset, c.Namespace)
+	c.cidrs, err = util.GetCIDRFromResourceUgly(c.clientset, c.Namespace)
 	return
 }

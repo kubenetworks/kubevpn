@@ -58,10 +58,9 @@ var connectCmd = &cobra.Command{
 			handler.Cleanup(syscall.SIGQUIT)
 			return
 		}
-		fmt.Println(`
----------------------------------------------------------------------------
-    Now you can access resources in the kubernetes cluster, enjoy it :)
----------------------------------------------------------------------------`)
+		fmt.Println(`---------------------------------------------------------------------------`)
+		fmt.Println(`    Now you can access resources in the kubernetes cluster, enjoy it :)    `)
+		fmt.Println(`---------------------------------------------------------------------------`)
 		select {}
 	},
 	PostRun: func(_ *cobra.Command, _ []string) {
@@ -74,7 +73,7 @@ var connectCmd = &cobra.Command{
 				wd, _ := os.Getwd()
 				filename := filepath.Join(wd, "wintun.dll")
 				if err = os.Rename(filename, filepath.Join(os.TempDir(), "wintun.dll")); err != nil {
-					log.Warn(err)
+					log.Debugln(err)
 				}
 			}
 		}

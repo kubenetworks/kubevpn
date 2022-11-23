@@ -22,6 +22,7 @@ var (
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient
 	restconfig *rest.Config
+	f          util.Factory
 )
 
 func TestShell(t *testing.T) {
@@ -29,7 +30,7 @@ func TestShell(t *testing.T) {
 
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
 	configFlags.KubeConfig = pointer.String("/Users/bytedance/.kube/vestack_upgrade")
-	f := util.NewFactory(util.NewMatchVersionFlags(configFlags))
+	f = util.NewFactory(util.NewMatchVersionFlags(configFlags))
 
 	if restconfig, err = f.ToRESTConfig(); err != nil {
 		log.Fatal(err)

@@ -1,12 +1,14 @@
 package dns
 
 import (
+	"context"
 	"strings"
 	"time"
 
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/cache"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 type server struct {
@@ -17,53 +19,58 @@ type server struct {
 
 func NewDNSServer(network, address string, forwardDNS *miekgdns.ClientConfig) error {
 	return miekgdns.ListenAndServe(address, network, &server{
-		dnsCache: cache.NewLRUExpireCache(1000), forwardDNS: forwardDNS,
+		dnsCache:   cache.NewLRUExpireCache(1000),
+		forwardDNS: forwardDNS,
 	})
 }
 
 // ServeDNS consider using a cache
-/*
-
-nameserver 172.20.135.131
-search nocalhost.svc.cluster.local svc.cluster.local cluster.local
-options ndots:5
-
-*/
 func (s *server) ServeDNS(w miekgdns.ResponseWriter, r *miekgdns.Msg) {
-	q := r.Question
-	r.Question = make([]miekgdns.Question, 0, len(q))
-	question := q[0]
-	name := question.Name
-	switch strings.Count(question.Name, ".") {
-	case 1:
-		question.Name = question.Name + s.forwardDNS.Search[0] + "."
-	case 2:
-		question.Name = question.Name + s.forwardDNS.Search[1] + "."
-	case 3:
-		question.Name = question.Name + s.forwardDNS.Search[2] + "."
-	case 4:
-		question.Name = question.Name + strings.Split(s.forwardDNS.Search[2], ".")[1] + "."
-	case 5:
+	//defer w.Close()
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*3)
+	defer cancelFunc()
+
+	for _, dnsAddr := range s.forwardDNS.Servers {
+		var msg = new(miekgdns.Msg)
+		*msg = *r
+		go func(r miekgdns.Msg, dnsAddr string) {
+			var q = r.Question[0]
+			var originName = q.Name
+			q.Name = fix(originName, s.forwardDNS.Search[0])
+			r.Question = []miekgdns.Question{q}
+			answer, err := miekgdns.Exchange(&r, dnsAddr+":53")
+			if err == nil && len(answer.Answer) != 0 {
+				if len(answer.Answer) != 0 {
+					answer.Answer[0].Header().Name = originName
+				}
+				if len(answer.Question) != 0 {
+					answer.Question[0].Name = originName
+				}
+				if ctx.Err() == nil {
+					defer cancelFunc()
+					err = w.WriteMsg(answer)
+					if err != nil {
+						log.Debugf(err.Error())
+					}
+				}
+				return
+			}
+			if err != nil {
+				log.Debugf(err.Error())
+			}
+		}(*msg, dnsAddr)
 	}
-	r.Question = []miekgdns.Question{question}
-	client := miekgdns.Client{Net: "udp", Timeout: time.Second * 5}
-	answer, _, err := client.Exchange(r, s.forwardDNS.Servers[0]+":53")
-	//answer, err := miekgdns.Exchange(r, s.forwardDNS.Servers[0]+":53")
-	if err != nil {
-		err = w.WriteMsg(r)
-		if err != nil {
-			log.Warnln(err)
-		}
-	} else {
-		if len(answer.Answer) != 0 {
-			answer.Answer[0].Header().Name = name
-		}
-		if len(answer.Question) != 0 {
-			answer.Question[0].Name = name
-		}
-		err = w.WriteMsg(answer)
-		if err != nil {
-			log.Warnln(err)
-		}
+	<-ctx.Done()
+	if ctx.Err() != context.Canceled {
+		r.Response = true
+		_ = w.WriteMsg(r)
 	}
+}
+
+func fix(domain, suffix string) string {
+	namespace := strings.Split(suffix, ".")[0]
+	if sets.NewString(strings.Split(domain, ".")...).Has(namespace) {
+		domain = domain[0:strings.LastIndex(domain, namespace)]
+	}
+	return strings.TrimSuffix(domain, ".") + "." + suffix + "."
 }
