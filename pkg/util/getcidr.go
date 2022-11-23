@@ -121,9 +121,9 @@ func getServiceCIDRByCreateSvc(serviceInterface corev1.ServiceInterface) (*net.I
 }
 
 func getPodCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient, restconfig *rest.Config, namespace string) (*net.IPNet, error) {
-	pod, err2 := createCIDRPod(clientset, namespace)
-	if err2 != nil {
-		return nil, err2
+	pod, err := createCIDRPod(clientset, namespace)
+	if err != nil {
+		return nil, err
 	}
 
 	var cmd = "cat /etc/cni/net.d/*.conflist"

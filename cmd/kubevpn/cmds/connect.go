@@ -9,7 +9,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
@@ -21,7 +20,7 @@ import (
 var connect = handler.ConnectOptions{}
 
 func init() {
-	connectCmd.Flags().StringVar(&connect.KubeconfigPath, "kubeconfig", clientcmd.RecommendedHomeFile, "kubeconfig")
+	connectCmd.Flags().StringVar(&connect.KubeconfigPath, "kubeconfig", "", "kubeconfig")
 	connectCmd.Flags().StringVarP(&connect.Namespace, "namespace", "n", "", "namespace")
 	connectCmd.PersistentFlags().StringArrayVar(&connect.Workloads, "workloads", []string{}, "workloads, like: pods/tomcat, deployment/nginx, replicaset/tomcat...")
 	connectCmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "headers, format is k=v, like: k1=v1,k2=v2")
