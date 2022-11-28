@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -98,16 +97,13 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err = c.createRemoteInboundPod(); err != nil {
 		return
 	}
-	subCtx, cancelFunc := context.WithTimeout(ctx, time.Minute*2)
-	defer cancelFunc()
-	util.GetAvailableUDPPortOrDie()
-	if err = util.WaitPortToBeFree(subCtx, 10800); err != nil {
+	port := util.GetAvailableTCPPortOrDie()
+	err = c.portForward(ctx, fmt.Sprintf("%d:10800", port))
+	if err != nil {
 		return err
 	}
-	if err = c.portForward(ctx, 10800); err != nil {
-		return err
-	}
-	if err = c.startLocalTunServe(ctx); err != nil {
+	err = c.startLocalTunServe(ctx, fmt.Sprintf("tcp://127.0.0.1:%d", port))
+	if err != nil {
 		return err
 	}
 	c.deleteFirewallRuleAndSetupDNS(ctx)
@@ -116,7 +112,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 }
 
 // detect pod is delete event, if pod is deleted, needs to redo port-forward immediately
-func (c *ConnectOptions) portForward(ctx context.Context, port int) error {
+func (c *ConnectOptions) portForward(ctx context.Context, port string) error {
 	var childCtx context.Context
 	var cancelFunc context.CancelFunc
 	var curPodName = &atomic.Value{}
@@ -151,7 +147,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, port int) error {
 					c.restclient,
 					podName,
 					c.Namespace,
-					strconv.Itoa(port),
+					port,
 					readyChan,
 					childCtx.Done(),
 				)
@@ -165,7 +161,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, port int) error {
 				}
 				if strings.Contains(err.Error(), "unable to listen on any of the requested ports") ||
 					strings.Contains(err.Error(), "address already in use") {
-					log.Errorf("port %d already in use, needs to release it manually", port)
+					log.Errorf("port %s already in use, needs to release it manually", port)
 					time.Sleep(time.Second * 5)
 				} else {
 					log.Errorf("port-forward occurs error, err: %v, retrying", err)
@@ -218,7 +214,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, port int) error {
 	}
 }
 
-func (c *ConnectOptions) startLocalTunServe(ctx context.Context) (err error) {
+func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress string) (err error) {
 	// todo figure it out why
 	if util.IsWindows() {
 		c.localTunIP.Mask = net.CIDRMask(0, 32)
@@ -231,7 +227,7 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context) (err error) {
 		ServeNodes: []string{
 			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", c.localTunIP.String(), strings.Join(list, ",")),
 		},
-		ChainNode: "tcp://127.0.0.1:10800",
+		ChainNode: forwardAddress,
 		Retries:   5,
 	}
 
@@ -423,7 +419,7 @@ func (c *ConnectOptions) GetCIDR() (err error) {
 			}
 		}
 	}
-	if len(c.cidrs) == 2 {
+	if len(c.cidrs) != 0 {
 		log.Infoln("got cidr from cache")
 		return
 	}

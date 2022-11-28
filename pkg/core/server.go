@@ -28,7 +28,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	for ctx.Err() == nil {
 		conn, e := l.Accept()
 		if e != nil {
-			if ne, ok := e.(net.Error); ok && ne.Temporary() {
+			if ne, ok := e.(net.Error); ok && ne.Timeout() {
 				if tempDelay == 0 {
 					tempDelay = 5 * time.Millisecond
 				} else {
