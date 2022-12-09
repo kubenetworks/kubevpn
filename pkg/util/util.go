@@ -42,7 +42,6 @@ import (
 	"k8s.io/kubectl/pkg/cmd/exec"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
-	"k8s.io/kubectl/pkg/util/interrupt"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
@@ -74,7 +73,7 @@ func GetAvailableTCPPortOrDie() int {
 }
 
 func WaitPod(podInterface v12.PodInterface, list metav1.ListOptions, checker func(*v1.Pod) bool) error {
-	ctx, cancelFunc := context.WithTimeout(context.TODO(), time.Minute*60)
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Minute*60)
 	defer cancelFunc()
 	watch, err := podInterface.Watch(ctx, list)
 	if err != nil {
@@ -379,18 +378,18 @@ func RolloutStatus(factory cmdutil.Factory, namespace, workloads string, timeout
 	lw := &cache.ListWatch{
 		ListFunc: func(options metav1.ListOptions) (k8sruntime.Object, error) {
 			options.FieldSelector = fieldSelector
-			return client.Resource(info.Mapping.Resource).Namespace(info.Namespace).List(context.TODO(), options)
+			return client.Resource(info.Mapping.Resource).Namespace(info.Namespace).List(context.Background(), options)
 		},
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			options.FieldSelector = fieldSelector
-			return client.Resource(info.Mapping.Resource).Namespace(info.Namespace).Watch(context.TODO(), options)
+			return client.Resource(info.Mapping.Resource).Namespace(info.Namespace).Watch(context.Background(), options)
 		},
 	}
 
 	// if the rollout isn't done yet, keep watching deployment status
 	ctx, cancel := watchtools.ContextWithOptionalTimeout(context.Background(), timeout)
-	intr := interrupt.New(nil, cancel)
-	return intr.Run(func() error {
+	defer cancel()
+	return func() error {
 		_, err = watchtools.UntilWithSync(ctx, lw, &unstructured.Unstructured{}, nil, func(e watch.Event) (bool, error) {
 			switch t := e.Type; t {
 			case watch.Added, watch.Modified:
@@ -415,7 +414,7 @@ func RolloutStatus(factory cmdutil.Factory, namespace, workloads string, timeout
 			}
 		})
 		return err
-	})
+	}()
 }
 
 type proxyWriter struct {

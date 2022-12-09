@@ -19,10 +19,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
+	"k8s.io/kubectl/pkg/scheme"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/core"
@@ -64,6 +66,29 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 				TrafficManagerRealIP: c.routerIP.String(),
 				Route:                config.CIDR.String(),
 			}
+			RollbackFuncList = append(RollbackFuncList, func() {
+				r := c.factory.NewBuilder().
+					WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
+					NamespaceParam(c.Namespace).DefaultNamespace().
+					ResourceTypeOrNameArgs(true, workload).
+					ContinueOnError().
+					Latest().
+					Flatten().
+					Do()
+				if r.Err() == nil {
+					_ = r.Visit(func(info *resource.Info, err error) error {
+						if err != nil {
+							return err
+						}
+						rollbacker, err := polymorphichelpers.RollbackerFn(c.factory, info.ResourceMapping())
+						if err != nil {
+							return err
+						}
+						_, err = rollbacker.Rollback(info.Object, nil, 0, cmdutil.DryRunNone)
+						return err
+					})
+				}
+			})
 			// means mesh mode
 			if len(c.Headers) != 0 {
 				err = InjectVPNAndEnvoySidecar(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers)
@@ -74,6 +99,7 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 				log.Error(err)
 				return err
 			}
+			RollbackFuncList = RollbackFuncList[0 : len(RollbackFuncList)-1]
 		}
 	}
 	return
@@ -90,7 +116,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err != nil {
 		return
 	}
-	c.routerIP, err = CreateOutboundPod(c.clientset, c.Namespace, trafficMangerNet.String(), c.cidrs)
+	c.routerIP, err = CreateOutboundPod(c.factory, c.clientset, c.Namespace, trafficMangerNet.String(), c.cidrs)
 	if err != nil {
 		return
 	}
@@ -349,12 +375,12 @@ func (c *ConnectOptions) PreCheckResource() {
 		if object.Mapping.Resource.Resource != "services" {
 			continue
 		}
-		get, err := c.clientset.CoreV1().Services(c.Namespace).Get(context.TODO(), object.Name, metav1.GetOptions{})
+		get, err := c.clientset.CoreV1().Services(c.Namespace).Get(context.Background(), object.Name, metav1.GetOptions{})
 		if err != nil {
 			continue
 		}
 		if ns, selector, err := polymorphichelpers.SelectorsForObject(get); err == nil {
-			list, err := c.clientset.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{
+			list, err := c.clientset.CoreV1().Pods(ns).List(context.Background(), metav1.ListOptions{
 				LabelSelector: selector.String(),
 			})
 			// if pod is not empty, using pods to find top controller

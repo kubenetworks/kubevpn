@@ -27,7 +27,7 @@ import (
 
 // get cidr by dump cluster info
 func getCIDRByDumpClusterInfo(clientset *kubernetes.Clientset) ([]*net.IPNet, error) {
-	p, err := clientset.CoreV1().Pods("kube-system").List(context.TODO(), v1.ListOptions{
+	p, err := clientset.CoreV1().Pods("kube-system").List(context.Background(), v1.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("status.phase", string(v12.PodRunning)).String(),
 	})
 	if err != nil {
@@ -102,7 +102,7 @@ func getCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 
 func getServiceCIDRByCreateSvc(serviceInterface corev1.ServiceInterface) (*net.IPNet, error) {
 	defaultCIDRIndex := "valid IPs is"
-	_, err := serviceInterface.Create(context.TODO(), &v12.Service{
+	_, err := serviceInterface.Create(context.Background(), &v12.Service{
 		ObjectMeta: v1.ObjectMeta{GenerateName: "foo-svc-"},
 		Spec:       v12.ServiceSpec{Ports: []v12.ServicePort{{Port: 80}}, ClusterIP: "0.0.0.0"},
 	}, v1.CreateOptions{})
@@ -135,7 +135,7 @@ func getPodCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTCli
 
 	conf, err := libcni.ConfListFromFile(content)
 	if err == nil {
-		log.Infoln("get cni %s config", conf.Name)
+		log.Infoln("get cni config", conf.Name)
 	}
 
 	result := parseCIDRFromString(content)
@@ -270,7 +270,7 @@ func createCIDRPod(clientset *kubernetes.Clientset, namespace string) (*v12.Pod,
 }
 
 func getPodCIDRFromPod(clientset *kubernetes.Clientset, namespace string, svc *net.IPNet) ([]*net.IPNet, error) {
-	get, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), name, v1.GetOptions{})
+	get, err := clientset.CoreV1().Pods(namespace).Get(context.Background(), name, v1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}

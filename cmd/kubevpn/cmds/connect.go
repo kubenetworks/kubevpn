@@ -55,7 +55,7 @@ var connectCmd = &cobra.Command{
 		if err := connect.DoConnect(); err != nil {
 			log.Errorln(err)
 			handler.Cleanup(syscall.SIGQUIT)
-			return
+			select {}
 		}
 		fmt.Println(`---------------------------------------------------------------------------`)
 		fmt.Println(`    Now you can access resources in the kubernetes cluster, enjoy it :)    `)

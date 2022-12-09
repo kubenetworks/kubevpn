@@ -68,7 +68,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) {
 			return
 		}
 		p.logger.Debugf("will serve snapshot %+v, nodeID: %s", snapshot, config.Uid)
-		if err = p.cache.SetSnapshot(context.TODO(), config.Uid, snapshot); err != nil {
+		if err = p.cache.SetSnapshot(context.Background(), config.Uid, snapshot); err != nil {
 			p.logger.Errorf("snapshot error %q for %v", err, snapshot)
 			p.logger.Fatal(err)
 		}

@@ -63,6 +63,7 @@ func (a *Virtual) To() (
 					Routes:  rr,
 				},
 			},
+			MaxDirectResponseBodySizeBytes: nil,
 		})
 	}
 	return
@@ -147,6 +148,12 @@ func ToRoute(clusterName string, headers map[string]string) *route.Route {
 				ClusterSpecifier: &route.RouteAction_Cluster{
 					Cluster: clusterName,
 				},
+				Timeout:     durationpb.New(0),
+				IdleTimeout: durationpb.New(0),
+				MaxStreamDuration: &route.RouteAction_MaxStreamDuration{
+					MaxStreamDuration:    durationpb.New(0),
+					GrpcTimeoutHeaderMax: durationpb.New(0),
+				},
 			},
 		},
 	}
@@ -163,6 +170,12 @@ func DefaultRoute() *route.Route {
 			Route: &route.RouteAction{
 				ClusterSpecifier: &route.RouteAction_Cluster{
 					Cluster: "origin_cluster",
+				},
+				Timeout:     durationpb.New(0),
+				IdleTimeout: durationpb.New(0),
+				MaxStreamDuration: &route.RouteAction_MaxStreamDuration{
+					MaxStreamDuration:    durationpb.New(0),
+					GrpcTimeoutHeaderMax: durationpb.New(0),
 				},
 			},
 		},
@@ -188,9 +201,6 @@ func ToListener(listenerName string, routeName string, port int32, p corev1.Prot
 	httpManager := &httpconnectionmanager.HttpConnectionManager{
 		CodecType:  httpconnectionmanager.HttpConnectionManager_AUTO,
 		StatPrefix: "http",
-		HttpFilters: []*httpconnectionmanager.HttpFilter{{
-			Name: wellknown.Router,
-		}},
 		RouteSpecifier: &httpconnectionmanager.HttpConnectionManager_Rds{
 			Rds: &httpconnectionmanager.Rds{
 				ConfigSource: &core.ConfigSource{
@@ -211,6 +221,10 @@ func ToListener(listenerName string, routeName string, port int32, p corev1.Prot
 				RouteConfigName: routeName,
 			},
 		},
+		HttpFilters: []*httpconnectionmanager.HttpFilter{{
+			Name: wellknown.Router,
+		}},
+		StreamIdleTimeout: durationpb.New(0),
 	}
 
 	tcpConfig := &tcpproxy.TcpProxy{

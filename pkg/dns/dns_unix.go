@@ -79,7 +79,7 @@ func usingResolver(clientConfig *miekgdns.ClientConfig) {
 func usingNetworkSetup(ip string, namespace string) {
 	networkSetup(ip, namespace)
 	var ctx context.Context
-	ctx, cancel = context.WithCancel(context.TODO())
+	ctx, cancel = context.WithCancel(context.Background())
 	go func() {
 		ticker := time.NewTicker(time.Second * 10)
 		newWatcher, _ := fsnotify.NewWatcher()

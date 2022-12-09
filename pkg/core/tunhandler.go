@@ -86,7 +86,7 @@ func (h *tunHandler) Handle(ctx context.Context, conn net.Conn) {
 		case <-ctx.Done():
 			h.chExit <- struct{}{}
 		default:
-			log.Warnf("next loop, err: %v", err)
+			log.Debugf("next loop, err: %v", err)
 		}
 
 		if err != nil {

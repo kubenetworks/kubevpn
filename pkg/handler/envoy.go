@@ -30,8 +30,6 @@ import (
 
 //	patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
 func InjectVPNAndEnvoySidecar(factory cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workloads string, c util.PodRouteConfig, headers map[string]string) error {
-	//t := true
-	//zero := int64(0)
 	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
 	if err != nil {
 		return err
@@ -109,8 +107,6 @@ func InjectVPNAndEnvoySidecar(factory cmdutil.Factory, clientset v12.ConfigMapIn
 }
 
 func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, namespace, workloads string, headers map[string]string) error {
-	//t := true
-	//zero := int64(0)
 	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
 	if err != nil {
 		return err
@@ -156,7 +152,7 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 }
 
 func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUNIP string, headers map[string]string, port []v1.ContainerPort) error {
-	configMap, err := mapInterface.Get(context.TODO(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
@@ -199,7 +195,7 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUN
 }
 
 func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, headers map[string]string) (bool, error) {
-	configMap, err := mapInterface.Get(context.TODO(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return true, nil
 	}

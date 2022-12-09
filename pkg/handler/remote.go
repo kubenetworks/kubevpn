@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"k8s.io/utils/pointer"
 	"net"
 	"strconv"
 	"strings"
@@ -26,22 +25,37 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/polymorphichelpers"
+	"k8s.io/kubectl/pkg/util/podutils"
+	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/exchange"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-func CreateOutboundPod(clientset *kubernetes.Clientset, namespace string, trafficManagerIP string, nodeCIDR []*net.IPNet) (net.IP, error) {
+func CreateOutboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace string, trafficManagerIP string, nodeCIDR []*net.IPNet) (ip net.IP, err error) {
 	podInterface := clientset.CoreV1().Pods(namespace)
 	serviceInterface := clientset.CoreV1().Services(namespace)
-
 	service, err := serviceInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err == nil && service != nil {
-		log.Infoln("traffic manager already exist, reuse it")
-		updateServiceRefCount(serviceInterface, service.GetName(), 1)
-		return net.ParseIP(service.Spec.ClusterIP), nil
+	if err == nil {
+		_, err = polymorphichelpers.AttachablePodForObjectFn(factory, service, 2*time.Second)
+		if err == nil {
+			log.Infoln("traffic manager already exist, reuse it")
+			updateServiceRefCount(serviceInterface, service.GetName(), 1)
+			return net.ParseIP(service.Spec.ClusterIP), nil
+		}
 	}
+	var f = func() {
+		_ = serviceInterface.Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
+		_ = clientset.AppsV1().Deployments(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
+	}
+	defer func() {
+		if err != nil {
+			f()
+		}
+	}()
+	f()
 	log.Infoln("traffic manager not exist, try to create it...")
 	udp8422 := "8422-for-udp"
 	tcp10800 := "10800-for-tcp"
@@ -198,29 +212,42 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug
 			},
 		},
 	}
-	watchStream, err := podInterface.Watch(context.TODO(), metav1.ListOptions{
+	watchStream, err := podInterface.Watch(context.Background(), metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String(),
 	})
 	if err != nil {
 		return nil, err
 	}
 	defer watchStream.Stop()
-	if _, err = clientset.AppsV1().Deployments(namespace).Create(context.TODO(), deployment, metav1.CreateOptions{}); err != nil {
+	if _, err = clientset.AppsV1().Deployments(namespace).Create(context.Background(), deployment, metav1.CreateOptions{}); err != nil {
 		return nil, err
 	}
-	var phase v1.PodPhase
+	var last string
 out:
 	for {
 		select {
 		case e := <-watchStream.ResultChan():
 			if podT, ok := e.Object.(*v1.Pod); ok {
-				if phase != podT.Status.Phase {
-					log.Infof("pod %s status is %s", config.ConfigMapPodTrafficManager, podT.Status.Phase)
+				var sb = strings.Builder{}
+				sb.WriteString(fmt.Sprintf("pod %s status is %s", config.ConfigMapPodTrafficManager, podT.Status.Phase))
+				for _, status := range podT.Status.ContainerStatuses {
+					if status.State.Waiting != nil {
+						if len(status.State.Waiting.Reason) != 0 {
+							sb.WriteString(fmt.Sprintf(" reason: %s", status.State.Waiting.Reason))
+						}
+						if len(status.State.Waiting.Message) != 0 {
+							sb.WriteString(fmt.Sprintf(" message: %s", status.State.Waiting.Message))
+						}
+					}
 				}
-				if podT.Status.Phase == v1.PodRunning {
+
+				if last != sb.String() {
+					log.Infof(sb.String())
+				}
+				if podutils.IsPodReady(podT) {
 					break out
 				}
-				phase = podT.Status.Phase
+				last = sb.String()
 			}
 		case <-time.Tick(time.Minute * 60):
 			return nil, errors.New(fmt.Sprintf("wait pod %s to be ready timeout", config.ConfigMapPodTrafficManager))
@@ -302,9 +329,8 @@ func InjectVPNSidecar(factory cmdutil.Factory, namespace, workloads string, conf
 }
 
 func createAfterDeletePod(factory cmdutil.Factory, p *v1.Pod, helper *pkgresource.Helper) error {
-	zero := int64(0)
 	if _, err := helper.DeleteWithOptions(p.Namespace, p.Name, &metav1.DeleteOptions{
-		GracePeriodSeconds: &zero,
+		GracePeriodSeconds: pointer.Int64(0),
 	}); err != nil {
 		log.Error(err)
 	}
@@ -318,7 +344,7 @@ func createAfterDeletePod(factory cmdutil.Factory, p *v1.Pod, helper *pkgresourc
 			return true
 		}
 		clientset, err := factory.KubernetesClientSet()
-		get, err := clientset.CoreV1().Pods(p.Namespace).Get(context.TODO(), p.Name, metav1.GetOptions{})
+		get, err := clientset.CoreV1().Pods(p.Namespace).Get(context.Background(), p.Name, metav1.GetOptions{})
 		if err != nil || get.Status.Phase != v1.PodRunning {
 			return true
 		}
@@ -353,10 +379,9 @@ func removeInboundContainer(factory cmdutil.Factory, namespace, workloads string
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 
 	// pods
-	zero := int64(0)
 	if len(path) == 0 {
 		_, err = helper.DeleteWithOptions(object.Namespace, object.Name, &metav1.DeleteOptions{
-			GracePeriodSeconds: &zero,
+			GracePeriodSeconds: pointer.Int64(0),
 		})
 		if err != nil {
 			return err
@@ -377,7 +402,6 @@ func removeInboundContainer(factory cmdutil.Factory, namespace, workloads string
 	if err != nil {
 		return err
 	}
-	//t := true
 	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{
 		//Force: &t,
 	})

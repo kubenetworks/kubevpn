@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/signal"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/dns"
@@ -59,7 +61,7 @@ func updateServiceRefCount(serviceInterface v12.ServiceInterface, name string, i
 		retry.DefaultRetry,
 		func(err error) bool { return !k8serrors.IsNotFound(err) },
 		func() error {
-			service, err := serviceInterface.Get(context.TODO(), name, v1.GetOptions{})
+			service, err := serviceInterface.Get(context.Background(), name, v1.GetOptions{})
 			if err != nil {
 				log.Errorf("update ref-count failed, increment: %d, error: %v", increment, err)
 				return err
@@ -75,7 +77,7 @@ func updateServiceRefCount(serviceInterface v12.ServiceInterface, name string, i
 					"value": strconv.Itoa(curCount + increment),
 				},
 			})
-			_, err = serviceInterface.Patch(context.TODO(), config.ConfigMapPodTrafficManager, types.JSONPatchType, p, v1.PatchOptions{})
+			_, err = serviceInterface.Patch(context.Background(), config.ConfigMapPodTrafficManager, types.JSONPatchType, p, v1.PatchOptions{})
 			return err
 		})
 	if err != nil {
@@ -87,7 +89,7 @@ func updateServiceRefCount(serviceInterface v12.ServiceInterface, name string, i
 
 func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, namespace string) {
 	updateServiceRefCount(clientset.CoreV1().Services(namespace), config.ConfigMapPodTrafficManager, -1)
-	pod, err := clientset.CoreV1().Services(namespace).Get(context.TODO(), config.ConfigMapPodTrafficManager, v1.GetOptions{})
+	pod, err := clientset.CoreV1().Services(namespace).Get(context.Background(), config.ConfigMapPodTrafficManager, v1.GetOptions{})
 	if err != nil {
 		log.Error(err)
 		return
@@ -99,12 +101,12 @@ func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, name
 	}
 	// if refcount is less than zero or equals to zero, means nobody is using this traffic pod, so clean it
 	if refCount <= 0 {
-		zero := int64(0)
 		log.Info("refCount is zero, prepare to clean up resource")
-		deleteOptions := v1.DeleteOptions{GracePeriodSeconds: &zero}
 		// keep configmap
-		//_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), config.ConfigMapPodTrafficManager, deleteOptions)
-		_ = clientset.CoreV1().Services(namespace).Delete(context.TODO(), config.ConfigMapPodTrafficManager, deleteOptions)
-		_ = clientset.AppsV1().Deployments(namespace).Delete(context.TODO(), config.ConfigMapPodTrafficManager, deleteOptions)
+		p := []byte(fmt.Sprintf(`[{"op": "remove", "path": "/data/%s"}]`, config.KeyDHCP))
+		_, err = clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), config.ConfigMapPodTrafficManager, types.JSONPatchType, p, v1.PatchOptions{})
+		deleteOptions := v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)}
+		_ = clientset.CoreV1().Services(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, deleteOptions)
+		_ = clientset.AppsV1().Deployments(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, deleteOptions)
 	}
 }

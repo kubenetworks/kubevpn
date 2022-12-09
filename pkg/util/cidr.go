@@ -74,7 +74,7 @@ func GetCIDRFromResourceUgly(clientset *kubernetes.Clientset, namespace string) 
 	//172.17.0.3
 	//172.17.0.7
 	//172.17.0.2
-	podList, _ := clientset.CoreV1().Pods(namespace).List(context.TODO(), v1.ListOptions{})
+	podList, _ := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{})
 	for _, pod := range podList.Items {
 		if pod.Spec.HostNetwork {
 			continue
@@ -87,7 +87,7 @@ func GetCIDRFromResourceUgly(clientset *kubernetes.Clientset, namespace string) 
 	}
 
 	// (2) get service CIDR
-	serviceList, _ := clientset.CoreV1().Services(namespace).List(context.TODO(), v1.ListOptions{})
+	serviceList, _ := clientset.CoreV1().Services(namespace).List(context.Background(), v1.ListOptions{})
 	for _, service := range serviceList.Items {
 		if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
 			mask := net.CIDRMask(16, 32)

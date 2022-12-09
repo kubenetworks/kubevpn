@@ -3,6 +3,7 @@ package exchange
 import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
@@ -20,8 +21,6 @@ func RemoveContainer(spec *corev1.PodSpec) {
 func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig) {
 	// remove vpn container if already exist
 	RemoveContainer(spec)
-	t := true
-	zero := int64(0)
 	spec.Containers = append(spec.Containers, corev1.Container{
 		Name:  config.ContainerSidecarVPN,
 		Image: config.Image,
@@ -63,8 +62,8 @@ kubevpn serve -L "tun://0.0.0.0:8421/${TrafficManagerRealIP}:8422?net=${InboundP
 					//"SYS_MODULE",
 				},
 			},
-			RunAsUser:  &zero,
-			Privileged: &t,
+			RunAsUser:  pointer.Int64(0),
+			Privileged: pointer.Bool(true),
 		},
 		Resources: corev1.ResourceRequirements{
 			Requests: map[corev1.ResourceName]resource.Quantity{

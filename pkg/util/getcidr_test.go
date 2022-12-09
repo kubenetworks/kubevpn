@@ -62,3 +62,21 @@ func TestElegant(t *testing.T) {
 		fmt.Println(net.String())
 	}
 }
+
+func TestCal(t *testing.T) {
+	ints := []int{
+		5, 26,
+		8, 22,
+		25, 8,
+		8, 10,
+		25, 23,
+		8, 22,
+		8, 24,
+		8, 23,
+	}
+	sum := 0
+	for _, i := range ints {
+		sum += i
+	}
+	println(sum)
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"k8s.io/utils/pointer"
 	"net"
 	"os/exec"
 	"path/filepath"
@@ -180,9 +181,8 @@ func TestDeleteAndCreate(t *testing.T) {
 	err = json.Unmarshal(marshal, &pp)
 
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
-	zero := int64(0)
 	if _, err = helper.DeleteWithOptions(object.Namespace, object.Name, &metav1.DeleteOptions{
-		GracePeriodSeconds: &zero,
+		GracePeriodSeconds: pointer.Int64(0),
 	}); err != nil {
 		log.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestDeleteAndCreate(t *testing.T) {
 			return true
 		}
 		clientset, err := factory.KubernetesClientSet()
-		get, err := clientset.CoreV1().Pods(p.Namespace).Get(context.TODO(), p.Name, metav1.GetOptions{})
+		get, err := clientset.CoreV1().Pods(p.Namespace).Get(context.Background(), p.Name, metav1.GetOptions{})
 		if err != nil || get.Status.Phase != corev1.PodRunning {
 			return true
 		}
@@ -230,11 +230,13 @@ func TestReadiness(t *testing.T) {
 	}
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	removePatch, restorePatch := patch(*podTemplateSpec, path)
-	_, err = patchs(helper, object.Namespace, object.Name, removePatch)
+	marshal, _ := json.Marshal(removePatch)
+	bytes, _ := json.Marshal(restorePatch)
+	_, err = patchs(helper, object.Namespace, object.Name, marshal)
 	if err != nil {
 		panic(err)
 	}
-	_, err = patchs(helper, object.Namespace, object.Name, restorePatch)
+	_, err = patchs(helper, object.Namespace, object.Name, bytes)
 	if err != nil {
 		panic(err)
 	}

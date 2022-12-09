@@ -49,7 +49,7 @@ func TestFunctions(t *testing.T) {
 }
 
 func pingPodIP(t *testing.T) {
-	ctx, f := context.WithTimeout(context.TODO(), time.Second*60)
+	ctx, f := context.WithTimeout(context.Background(), time.Second*60)
 	defer f()
 	list, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -74,7 +74,7 @@ func pingPodIP(t *testing.T) {
 }
 
 func healthCheckPod(t *testing.T) {
-	podList, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+	podList, err := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", "productpage").String(),
 	})
 	if err != nil {
@@ -97,7 +97,7 @@ func healthCheckPod(t *testing.T) {
 }
 
 func healthCheckService(t *testing.T) {
-	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), metav1.ListOptions{
+	serviceList, err := clientset.CoreV1().Services(namespace).List(context.Background(), metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", "productpage").String(),
 	})
 	if err != nil {
@@ -121,7 +121,7 @@ func healthCheckService(t *testing.T) {
 
 func shortDomain(t *testing.T) {
 	var app = "productpage"
-	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), metav1.ListOptions{
+	serviceList, err := clientset.CoreV1().Services(namespace).List(context.Background(), metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
 	if err != nil {
@@ -145,7 +145,7 @@ func shortDomain(t *testing.T) {
 
 func fullDomain(t *testing.T) {
 	var app = "productpage"
-	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), metav1.ListOptions{
+	serviceList, err := clientset.CoreV1().Services(namespace).List(context.Background(), metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
 	if err != nil {
@@ -267,7 +267,7 @@ func server(port int) {
 
 func kubevpnConnect(t *testing.T) {
 	var ctx context.Context
-	ctx, cancelFunc = context.WithCancel(context.TODO())
+	ctx, cancelFunc = context.WithCancel(context.Background())
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Hour)
 
 	cmd := exec.CommandContext(ctx, "kubevpn", "connect", "--debug", "--workloads", "deployments/reviews")
