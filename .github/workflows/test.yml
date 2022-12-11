@@ -57,6 +57,7 @@ jobs:
           kubectl get nodes -o yaml
           ifconfig
           route -n
+          ln /usr/bin/resolvectl /usr/bin/systemd-resolve
 
       - name: Test
         run: go test -v ./pkg/test/function_test.go
