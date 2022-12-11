@@ -20,3 +20,4 @@
 
 # Build artifacts
 bin
+vendor/
