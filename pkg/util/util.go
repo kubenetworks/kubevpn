@@ -172,7 +172,7 @@ func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config 
 		return "", err
 	}
 	containerName := pod.Spec.Containers[0].Name
-	stdin, _, stderr := dockerterm.StdStreams()
+	stdin, _, _ := dockerterm.StdStreams()
 
 	stdoutBuf := bytes.NewBuffer(nil)
 	stdout := io.MultiWriter(stdoutBuf)
@@ -180,7 +180,7 @@ func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config 
 		Namespace:     namespace,
 		PodName:       podName,
 		ContainerName: containerName,
-		IOStreams:     genericclioptions.IOStreams{In: stdin, Out: stdout, ErrOut: stderr},
+		IOStreams:     genericclioptions.IOStreams{In: stdin, Out: stdout, ErrOut: nil},
 	}
 	Executor := &exec.DefaultRemoteExecutor{}
 	// ensure we can recover the terminal while attached

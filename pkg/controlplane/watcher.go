@@ -62,7 +62,7 @@ func Watch(directory string, notifyCh chan<- NotifyMessage) {
 
 		case <-time.Tick(time.Second * 3):
 			notifyCh <- NotifyMessage{
-				Operation: Remove,
+				Operation: Modify,
 				FilePath:  directory,
 			}
 		}

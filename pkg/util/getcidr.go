@@ -26,7 +26,7 @@ import (
 )
 
 // get cidr by dump cluster info
-func getCIDRByDumpClusterInfo(clientset *kubernetes.Clientset) ([]*net.IPNet, error) {
+func getCIDRByDumpClusterInfo(clientset *kubernetes.Clientset) (result []*net.IPNet, err error) {
 	p, err := clientset.CoreV1().Pods("kube-system").List(context.Background(), v1.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("status.phase", string(v12.PodRunning)).String(),
 	})
@@ -41,7 +41,6 @@ func getCIDRByDumpClusterInfo(clientset *kubernetes.Clientset) ([]*net.IPNet, er
 	svcCIDR := `service-cluster-ip-range`
 	podCIDR := `cluster-cidr`
 	reader := bufio.NewReader(bytes.NewBufferString(string(marshal)))
-	pod := sets.NewString()
 	svc := sets.NewString()
 	v4P := regexp.MustCompile(v4)
 	v6P := regexp.MustCompile(v6)
@@ -58,24 +57,18 @@ func getCIDRByDumpClusterInfo(clientset *kubernetes.Clientset) ([]*net.IPNet, er
 		if strings.Contains(string(line), podCIDR) {
 			ipv4 := v4P.FindAllString(string(line), -1)
 			ipv6 := v6P.FindAllString(string(line), -1)
-			pod.Insert(ipv4...).Insert(ipv6...)
+			svc.Insert(ipv4...).Insert(ipv6...)
 		}
 	}
-	if pod.Len() != 1 {
-		return nil, fmt.Errorf("pod cidr range is not 1, real: %d", pod.Len())
+
+	for _, s := range svc.List() {
+		_, ipnet, err := net.ParseCIDR(s)
+		if err != nil {
+			result = append(result, ipnet)
+		}
 	}
-	if svc.Len() != 1 {
-		return nil, fmt.Errorf("service cidr range is not 1, real: %d", pod.Len())
-	}
-	_, ipnet, err := net.ParseCIDR(pod.List()[0])
-	if err != nil {
-		return nil, err
-	}
-	_, ipnet1, err := net.ParseCIDR(svc.List()[0])
-	if err != nil {
-		return nil, err
-	}
-	return []*net.IPNet{ipnet, ipnet1}, nil
+
+	return result, nil
 }
 
 func getCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient, restconfig *rest.Config, namespace string) ([]*net.IPNet, error) {
@@ -93,7 +86,7 @@ func getCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 	}
 	result = parseCIDRFromString(content)
 
-	if len(result) != 2 {
+	if len(result) == 0 {
 		return nil, fmt.Errorf("can not found any cidr")
 	}
 
@@ -120,7 +113,7 @@ func getServiceCIDRByCreateSvc(serviceInterface corev1.ServiceInterface) (*net.I
 	return nil, err
 }
 
-func getPodCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient, restconfig *rest.Config, namespace string) (*net.IPNet, error) {
+func getPodCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient, restconfig *rest.Config, namespace string) ([]*net.IPNet, error) {
 	pod, err := createCIDRPod(clientset, namespace)
 	if err != nil {
 		return nil, err
@@ -143,11 +136,8 @@ func getPodCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTCli
 	if len(result) == 0 {
 		return nil, fmt.Errorf("can not found any cidr")
 	}
-	if len(result) != 1 {
-		return nil, fmt.Errorf("pod cidr range is not 1, real: %d", len(result))
-	}
 
-	return result[0], nil
+	return result, nil
 }
 
 const name = "cni-net-dir-kubevpn"

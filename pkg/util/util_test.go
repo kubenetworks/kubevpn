@@ -3,7 +3,6 @@ package util
 import (
 	"context"
 	"fmt"
-	"k8s.io/utils/pointer"
 	"net"
 	"regexp"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/utils/pointer"
 )
 
 var (

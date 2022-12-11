@@ -17,7 +17,7 @@ import (
 // 2) grep cmdline
 // 3) create svc + cat *.conflist
 // 4) create svc + get pod ip with svc mask
-func GetCIDRElegant(clientset *kubernetes.Clientset, restclient *rest.RESTClient, restconfig *rest.Config, namespace string) ([]*net.IPNet, error) {
+func GetCIDRElegant(clientset *kubernetes.Clientset, restclient *rest.RESTClient, restconfig *rest.Config, namespace string) (result []*net.IPNet, err1 error) {
 	defer func() {
 		_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), name, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
 	}()
@@ -26,22 +26,23 @@ func GetCIDRElegant(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 	info, err := getCIDRByDumpClusterInfo(clientset)
 	if err == nil {
 		log.Infoln("get cidr from cluster info ok")
-		return info, nil
+		result = append(result, info...)
 	}
 
 	log.Infoln("get cidr from cni...")
 	cni, err := getCIDRFromCNI(clientset, restclient, restconfig, namespace)
 	if err == nil {
 		log.Infoln("get cidr from cni ok")
-		return cni, nil
+		result = append(result, cni...)
 	}
 
 	svc, err := getServiceCIDRByCreateSvc(clientset.CoreV1().Services(namespace))
 	if err == nil {
+		result = append(result, svc)
 		fromCNI, err := getPodCIDRFromCNI(clientset, restclient, restconfig, namespace)
 		if err == nil {
 			log.Infoln("get cidr from cni ok")
-			return []*net.IPNet{fromCNI, svc}, nil
+			result = append(result, fromCNI...)
 		}
 	}
 
@@ -49,10 +50,13 @@ func GetCIDRElegant(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 	pod, err := getPodCIDRFromPod(clientset, namespace, svc)
 	if err == nil {
 		log.Infoln("get cidr from svc ok")
-		return pod, nil
+		result = append(result, pod...)
 	}
 
-	return nil, fmt.Errorf("can not get any cidr, please make sure you have prilivage")
+	if len(result) == 0 {
+		return nil, fmt.Errorf("can not get any cidr, please make sure you have prilivage")
+	}
+	return
 }
 
 // GetCIDRFromResourceUgly
