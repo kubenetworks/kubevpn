@@ -1,7 +1,6 @@
 package webhook
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -60,16 +59,6 @@ func admitPods(ar v1.AdmissionReview) *v1.AdmissionResponse {
 							return toV1AdmissionResponse(err)
 						}
 						cmi := clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
-						if cmi == nil {
-							err = fmt.Errorf("why cmi is nil")
-							klog.Error(err)
-							return toV1AdmissionResponse(err)
-						}
-						_, err = cmi.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-						if err != nil {
-							klog.Error(err)
-							return toV1AdmissionResponse(err)
-						}
 						dhcp := handler.NewDHCPManager(cmi, ar.Request.Namespace, &net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask})
 						random, err := dhcp.RentIPRandom()
 						if err != nil {
@@ -81,15 +70,18 @@ func admitPods(ar v1.AdmissionReview) *v1.AdmissionResponse {
 				}
 			}
 		}
-		fmt.Println(found)
 		if found {
 			to, _ := json.Marshal(pod)
 			patch, _ := jsonpatch.CreatePatch(from, to)
 			marshal, _ := json.Marshal(patch)
-			return applyPodPatch(ar, func(pod *corev1.Pod) bool {
-				name, _ := podcmd.FindContainerByName(pod, config.ContainerSidecarVPN)
-				return name != nil
-			}, string(marshal))
+			return applyPodPatch(
+				ar,
+				func(pod *corev1.Pod) bool {
+					name, _ := podcmd.FindContainerByName(pod, config.ContainerSidecarVPN)
+					return name != nil
+				},
+				string(marshal),
+			)
 		}
 		return &v1.AdmissionResponse{
 			Allowed: true,
@@ -112,11 +104,6 @@ func admitPods(ar v1.AdmissionReview) *v1.AdmissionResponse {
 							return toV1AdmissionResponse(err)
 						}
 						cmi := clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
-						if cmi == nil {
-							err = fmt.Errorf("why cmi is nil")
-							klog.Error(err)
-							return toV1AdmissionResponse(err)
-						}
 						ipnet := &net.IPNet{
 							IP:   ip,
 							Mask: cidr.Mask,
@@ -134,7 +121,9 @@ func admitPods(ar v1.AdmissionReview) *v1.AdmissionResponse {
 			Allowed: true,
 		}
 	default:
-		return toV1AdmissionResponse(fmt.Errorf("expect operation is %s or %s, not %s", v1.Create, v1.Delete, ar.Request.Operation))
+		err := fmt.Errorf("expect operation is %s or %s, not %s", v1.Create, v1.Delete, ar.Request.Operation)
+		klog.Error(err)
+		return toV1AdmissionResponse(err)
 	}
 }
 
