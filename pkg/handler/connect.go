@@ -58,11 +58,11 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 
 	for _, workload := range c.Workloads {
 		if len(workload) > 0 {
-			virtualShadowIp, _ := c.dhcp.RentIPRandom()
-			c.usedIPs = append(c.usedIPs, virtualShadowIp)
+			//virtualShadowIp, _ := c.dhcp.RentIPRandom()
+			//c.usedIPs = append(c.usedIPs, virtualShadowIp)
 			configInfo := util.PodRouteConfig{
-				LocalTunIP:           c.localTunIP.IP.String(),
-				InboundPodTunIP:      virtualShadowIp.String(),
+				LocalTunIP: c.localTunIP.IP.String(),
+				//InboundPodTunIP:      virtualShadowIp.String(),
 				TrafficManagerRealIP: c.routerIP.String(),
 				Route:                config.CIDR.String(),
 			}

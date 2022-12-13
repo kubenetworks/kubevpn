@@ -106,6 +106,10 @@ func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, name
 		p := []byte(fmt.Sprintf(`[{"op": "remove", "path": "/data/%s"}]`, config.KeyDHCP))
 		_, err = clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), config.ConfigMapPodTrafficManager, types.JSONPatchType, p, v1.PatchOptions{})
 		deleteOptions := v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)}
+		_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(context.Background(), config.ConfigMapPodTrafficManager+"."+namespace, deleteOptions)
+		_ = clientset.RbacV1().RoleBindings(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, deleteOptions)
+		_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, deleteOptions)
+		_ = clientset.RbacV1().Roles(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, deleteOptions)
 		_ = clientset.CoreV1().Services(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, deleteOptions)
 		_ = clientset.AppsV1().Deployments(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, deleteOptions)
 	}

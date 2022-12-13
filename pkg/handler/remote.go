@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,8 +12,10 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -23,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/cert"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
@@ -46,20 +50,91 @@ func CreateOutboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset,
 			return net.ParseIP(service.Spec.ClusterIP), nil
 		}
 	}
-	var f = func() {
+	var deleteResource = func() {
+		_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(context.Background(), config.ConfigMapPodTrafficManager+"."+namespace, metav1.DeleteOptions{})
+		_ = clientset.RbacV1().RoleBindings(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
+		_ = clientset.RbacV1().Roles(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
+		_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
 		_ = serviceInterface.Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
 		_ = clientset.AppsV1().Deployments(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
 	}
 	defer func() {
 		if err != nil {
-			f()
+			deleteResource()
 		}
 	}()
-	f()
+	deleteResource()
 	log.Infoln("traffic manager not exist, try to create it...")
+
+	// 1) label namespace
+	ns, err := clientset.CoreV1().Namespaces().Get(context.Background(), namespace, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if ns.Labels == nil {
+		ns.Labels = map[string]string{}
+	}
+	ns.Labels["ns"] = namespace
+	_, err = clientset.CoreV1().Namespaces().Update(context.Background(), ns, metav1.UpdateOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	// 2) create serviceAccount
+	_, err = clientset.CoreV1().ServiceAccounts(namespace).Create(ctx, &v1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.ConfigMapPodTrafficManager,
+			Namespace: namespace,
+		},
+		AutomountServiceAccountToken: pointer.Bool(true),
+	}, metav1.CreateOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	// 3) create roles
+	_, err = clientset.RbacV1().Roles(namespace).Create(ctx, &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.ConfigMapPodTrafficManager,
+			Namespace: namespace,
+		},
+		Rules: []rbacv1.PolicyRule{{
+			Verbs:         []string{"get", "list", "watch", "create", "update", "patch", "delete"},
+			APIGroups:     []string{""},
+			Resources:     []string{"configmaps"},
+			ResourceNames: []string{config.ConfigMapPodTrafficManager},
+		}},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	// 4) create roleBinding
+	_, err = clientset.RbacV1().RoleBindings(namespace).Create(ctx, &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.ConfigMapPodTrafficManager,
+			Namespace: namespace,
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind: "ServiceAccount",
+			//APIGroup:  "rbac.authorization.k8s.io",
+			Name:      config.ConfigMapPodTrafficManager,
+			Namespace: namespace,
+		}},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "Role",
+			Name:     config.ConfigMapPodTrafficManager,
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		return nil, err
+	}
+
 	udp8422 := "8422-for-udp"
 	tcp10800 := "10800-for-tcp"
 	tcp9002 := "9002-for-envoy"
+	tcp80 := "80-for-webhook"
 	svc, err := serviceInterface.Create(context.Background(), &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        config.ConfigMapPodTrafficManager,
@@ -82,6 +157,11 @@ func CreateOutboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset,
 				Protocol:   v1.ProtocolTCP,
 				Port:       9002,
 				TargetPort: intstr.FromInt(9002),
+			}, {
+				Name:       tcp80,
+				Protocol:   v1.ProtocolTCP,
+				Port:       80,
+				TargetPort: intstr.FromInt(80),
 			}},
 			Selector: map[string]string{"app": config.ConfigMapPodTrafficManager},
 			Type:     v1.ServiceTypeClusterIP,
@@ -107,6 +187,9 @@ func CreateOutboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset,
 		},
 	}
 
+	h := config.ConfigMapPodTrafficManager + "." + namespace + "." + "svc"
+	cert, key, _ := cert.GenerateSelfSignedCertKey(h, nil, nil)
+
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
@@ -122,6 +205,7 @@ func CreateOutboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset,
 					Labels: map[string]string{"app": config.ConfigMapPodTrafficManager},
 				},
 				Spec: v1.PodSpec{
+					ServiceAccountName: config.ConfigMapPodTrafficManager,
 					Volumes: []v1.Volume{{
 						Name: config.VolumeEnvoyConfig,
 						VolumeSource: v1.VolumeSource{
@@ -205,6 +289,28 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug
 							ImagePullPolicy: v1.PullIfNotPresent,
 							Resources:       Resources,
 						},
+						{
+							Name:    "webhook",
+							Image:   config.Image,
+							Command: []string{"kubevpn"},
+							Args:    []string{"webhook"},
+							Ports: []v1.ContainerPort{{
+								Name:          tcp80,
+								ContainerPort: 80,
+								Protocol:      v1.ProtocolTCP,
+							}},
+							Env: []v1.EnvVar{
+								{
+									Name:  "CERT",
+									Value: base64.StdEncoding.EncodeToString(cert),
+								}, {
+									Name:  "KEY",
+									Value: base64.StdEncoding.EncodeToString(key),
+								},
+							},
+							ImagePullPolicy: v1.PullIfNotPresent,
+							Resources:       Resources,
+						},
 					},
 					RestartPolicy:     v1.RestartPolicyAlways,
 					PriorityClassName: "system-cluster-critical",
@@ -252,6 +358,43 @@ out:
 		case <-time.Tick(time.Minute * 60):
 			return nil, errors.New(fmt.Sprintf("wait pod %s to be ready timeout", config.ConfigMapPodTrafficManager))
 		}
+	}
+	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, &admissionv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.ConfigMapPodTrafficManager + "." + namespace,
+			Namespace: namespace,
+		},
+		Webhooks: []admissionv1.MutatingWebhook{{
+			Name: config.ConfigMapPodTrafficManager + ".naison.xxx", // 没意义的
+			ClientConfig: admissionv1.WebhookClientConfig{
+				Service: &admissionv1.ServiceReference{
+					Namespace: namespace,
+					Name:      config.ConfigMapPodTrafficManager,
+					Path:      pointer.String("/pods"),
+					Port:      pointer.Int32(80),
+				},
+				CABundle: cert,
+			},
+			Rules: []admissionv1.RuleWithOperations{{
+				Operations: []admissionv1.OperationType{admissionv1.Create, admissionv1.Delete},
+				Rule: admissionv1.Rule{
+					APIGroups:   []string{""},
+					APIVersions: []string{"v1"},
+					Resources:   []string{"pods"},
+					Scope:       (*admissionv1.ScopeType)(pointer.String(string(admissionv1.NamespacedScope))),
+				},
+			}},
+			// same as above label ns
+			NamespaceSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"ns": namespace}},
+			SideEffects:             (*admissionv1.SideEffectClass)(pointer.String(string(admissionv1.SideEffectClassNone))),
+			TimeoutSeconds:          nil,
+			AdmissionReviewVersions: []string{"v1", "v1beta1"},
+			ReinvocationPolicy:      (*admissionv1.ReinvocationPolicyType)(pointer.String(string(admissionv1.NeverReinvocationPolicy))),
+		},
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		return nil, err
 	}
 	return net.ParseIP(svc.Spec.ClusterIP), nil
 }
