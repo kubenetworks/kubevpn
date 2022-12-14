@@ -2,7 +2,7 @@ package dns
 
 import (
 	"fmt"
-	miekgdns "github.com/miekg/dns"
+	log "github.com/sirupsen/logrus"
 	"io/fs"
 	"io/ioutil"
 	"os"
@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	miekgdns "github.com/miekg/dns"
 
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -22,12 +24,7 @@ func TestSetupDnsServer(t *testing.T) {
 		Port:    "53",
 		Ndots:   0,
 	}
-	go func() {
-		err := NewDNSServer("udp", "127.0.0.1:"+strconv.Itoa(port), clientConfig)
-		if err != nil {
-			t.FailNow()
-		}
-	}()
+	go func() { log.Fatal(NewDNSServer("udp", "127.0.0.1:"+strconv.Itoa(port), clientConfig)) }()
 	config := miekgdns.ClientConfig{
 		Servers: []string{"127.0.0.1"},
 		Search:  clientConfig.Search,
@@ -72,69 +69,4 @@ func TestFull(t *testing.T) {
 	fmt.Println(p.Question)
 
 	fmt.Println(p2.Question)
-}
-
-func TestName(t *testing.T) {
-	type name struct {
-		input  string
-		output string
-	}
-	var data = []name{
-		{
-			input:  "ry-server",
-			output: "ry-server.vke-system.svc.cluster.local",
-		},
-		{
-			input:  "ry-server.",
-			output: "ry-server.vke-system.svc.cluster.local",
-		},
-		{
-			input:  "ry-server.vke-system",
-			output: "ry-server.vke-system.svc.cluster.local",
-		}, {
-			input:  "ry-server.vke-system.",
-			output: "ry-server.vke-system.svc.cluster.local",
-		},
-		{
-			input:  "ry-server.vke-system.svc",
-			output: "ry-server.vke-system.svc.cluster.local",
-		},
-		{
-			input:  "ry-server.vke-system.svc.",
-			output: "ry-server.vke-system.svc.cluster.local",
-		},
-		{
-			input:  "ry-server.vke-system.svc.cluster",
-			output: "ry-server.vke-system.svc.cluster.local",
-		},
-		{
-			input:  "mongodb-1.mongodb-headless",
-			output: "mongodb-1.mongodb-headless.vke-system.svc.cluster.local",
-		}, {
-			input:  "mongodb-1.mongodb-headless.",
-			output: "mongodb-1.mongodb-headless.vke-system.svc.cluster.local",
-		},
-		{
-			input:  "mongodb-1.mongodb-headless.vke-system",
-			output: "mongodb-1.mongodb-headless.vke-system.svc.cluster.local",
-		},
-		{
-			input:  "mongodb-1.mongodb-headless.vke-system.",
-			output: "mongodb-1.mongodb-headless.vke-system.svc.cluster.local",
-		},
-		{
-			input:  "mongodb-1.mongodb-headless.vke-system.svc",
-			output: "mongodb-1.mongodb-headless.vke-system.svc.cluster.local",
-		},
-		{
-			input:  "mongodb-1.mongodb-headless.vke-system.svc.cluster",
-			output: "mongodb-1.mongodb-headless.vke-system.svc.cluster.local",
-		},
-	}
-	for _, datum := range data {
-		if o := fix(datum.input, "vke-system.svc.cluster.local"); o != datum.output {
-			t.Logf("output: %s, expected: %s", o, datum.output)
-			t.FailNow()
-		}
-	}
 }

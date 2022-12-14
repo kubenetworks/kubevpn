@@ -12,7 +12,7 @@ import (
 )
 
 // systemd-resolve --status, systemd-resolve --flush-caches
-func SetupDNS(config *miekgdns.ClientConfig) error {
+func SetupDNS(config *miekgdns.ClientConfig, _ []string) error {
 	tunName := os.Getenv("tunName")
 	if len(tunName) == 0 {
 		tunName = "tun0"

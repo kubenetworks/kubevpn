@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -289,6 +290,7 @@ func (c *ConnectOptions) detectConflictDevice() {
 }
 
 func (c *ConnectOptions) setupDNS() {
+	const port = 53
 	pod, err := c.GetRunningPodList()
 	if err != nil {
 		log.Fatal(err)
@@ -297,7 +299,23 @@ func (c *ConnectOptions) setupDNS() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err = dns.SetupDNS(relovConf); err != nil {
+	if relovConf.Port == "" {
+		relovConf.Port = strconv.Itoa(port)
+	}
+	ns := sets.NewString()
+	list, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err == nil {
+		for _, item := range list.Items {
+			ns.Insert(item.Name)
+		}
+	}
+	svc, err := c.clientset.CoreV1().Services(c.Namespace).List(ctx, metav1.ListOptions{})
+	if err == nil {
+		for _, item := range svc.Items {
+			ns.Insert(item.Name)
+		}
+	}
+	if err = dns.SetupDNS(relovConf, ns.List()); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -17,7 +17,7 @@ import (
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
-func SetupDNS(config *miekgdns.ClientConfig) error {
+func SetupDNS(config *miekgdns.ClientConfig, _ []string) error {
 	getenv := os.Getenv("luid")
 	parseUint, err := strconv.ParseUint(getenv, 10, 64)
 	if err != nil {

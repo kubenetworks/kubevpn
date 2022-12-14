@@ -32,15 +32,15 @@ var resolv = "/etc/resolv.conf"
 // service.namespace.svc:port
 // service.namespace.svc.cluster:port
 // service.namespace.svc.cluster.local:port
-func SetupDNS(config *miekgdns.ClientConfig) error {
-	usingResolver(config)
+func SetupDNS(config *miekgdns.ClientConfig, ns []string) error {
+	usingResolver(config, ns)
 	_ = exec.Command("killall", "mDNSResponderHelper").Run()
 	_ = exec.Command("killall", "-HUP", "mDNSResponder").Run()
 	_ = exec.Command("dscacheutil", "-flushcache").Run()
 	return nil
 }
 
-func usingResolver(clientConfig *miekgdns.ClientConfig) {
+func usingResolver(clientConfig *miekgdns.ClientConfig, ns []string) {
 	var err error
 	_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
 	if err = os.MkdirAll(filepath.Join("/", "etc", "resolver"), fs.ModePerm); err != nil {
@@ -70,7 +70,7 @@ func usingResolver(clientConfig *miekgdns.ClientConfig) {
 		Ndots:   clientConfig.Ndots,
 		Timeout: 1,
 	}
-	for _, s := range strings.Split(clientConfig.Search[0], ".") {
+	for _, s := range sets.NewString(strings.Split(clientConfig.Search[0], ".")...).Insert(ns...).List() {
 		filename = filepath.Join("/", "etc", "resolver", s)
 		_ = ioutil.WriteFile(filename, []byte(toString(config)), 0644)
 	}
