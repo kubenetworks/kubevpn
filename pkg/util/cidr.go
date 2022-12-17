@@ -10,6 +10,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/pointer"
+
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
 // GetCIDRElegant
@@ -19,7 +21,7 @@ import (
 // 4) create svc + get pod ip with svc mask
 func GetCIDRElegant(clientset *kubernetes.Clientset, restclient *rest.RESTClient, restconfig *rest.Config, namespace string) (result []*net.IPNet, err1 error) {
 	defer func() {
-		_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), name, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
+		_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
 	}()
 
 	log.Infoln("get cidr from cluster info...")

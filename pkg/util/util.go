@@ -73,16 +73,16 @@ func GetAvailableTCPPortOrDie() int {
 }
 
 func WaitPod(podInterface v12.PodInterface, list metav1.ListOptions, checker func(*v1.Pod) bool) error {
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Minute*60)
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancelFunc()
-	watch, err := podInterface.Watch(ctx, list)
+	w, err := podInterface.Watch(ctx, list)
 	if err != nil {
 		return err
 	}
-	defer watch.Stop()
+	defer w.Stop()
 	for {
 		select {
-		case e := <-watch.ResultChan():
+		case e := <-w.ResultChan():
 			if pod, ok := e.Object.(*v1.Pod); ok {
 				if checker(pod) {
 					return nil

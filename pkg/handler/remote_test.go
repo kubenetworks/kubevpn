@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -261,4 +262,10 @@ func TestSliceRemove(t *testing.T) {
 		}
 	}
 	fmt.Println(a)
+}
+
+func TestDHCP(t *testing.T) {
+	s := "AQ=="
+	decodeString, err := base64.StdEncoding.DecodeString(s)
+	fmt.Println(string(decodeString), err)
 }

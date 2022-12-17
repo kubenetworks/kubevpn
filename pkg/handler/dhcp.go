@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net"
 
@@ -121,9 +122,12 @@ func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) erro
 	if err != nil {
 		return err
 	}
-	err = dhcp.Restore(d.cidr, []byte(cm.Data[config.KeyDHCP]))
-	if err != nil {
-		return err
+	str, err := base64.StdEncoding.DecodeString(cm.Data[config.KeyDHCP])
+	if err == nil {
+		err = dhcp.Restore(d.cidr, str)
+		if err != nil {
+			return err
+		}
 	}
 	if err = f(dhcp); err != nil {
 		return err
@@ -132,7 +136,7 @@ func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) erro
 	if err != nil {
 		return err
 	}
-	cm.Data[config.KeyDHCP] = string(bytes)
+	cm.Data[config.KeyDHCP] = base64.StdEncoding.EncodeToString(bytes)
 	_, err = d.client.Update(context.Background(), cm, metav1.UpdateOptions{})
 	if err != nil {
 		log.Errorf("update dhcp failed, err: %v", err)

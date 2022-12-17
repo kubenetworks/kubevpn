@@ -140,19 +140,17 @@ func getPodCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTCli
 	return result, nil
 }
 
-const name = "cni-net-dir-kubevpn"
-
 func createCIDRPod(clientset *kubernetes.Clientset, namespace string) (*v12.Pod, error) {
 	var procName = "proc-dir-kubevpn"
 	pod := &v12.Pod{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      name,
+			Name:      config.CniNetName,
 			Namespace: namespace,
 		},
 		Spec: v12.PodSpec{
 			Volumes: []v12.Volume{
 				{
-					Name: name,
+					Name: config.CniNetName,
 					VolumeSource: v12.VolumeSource{
 						HostPath: &v12.HostPathVolumeSource{
 							Path: config.DefaultNetDir,
@@ -172,7 +170,7 @@ func createCIDRPod(clientset *kubernetes.Clientset, namespace string) (*v12.Pod,
 			},
 			Containers: []v12.Container{
 				{
-					Name:    name,
+					Name:    config.CniNetName,
 					Image:   config.Image,
 					Command: []string{"tail", "-f", "/dev/null"},
 					Resources: v12.ResourceRequirements{
@@ -187,7 +185,7 @@ func createCIDRPod(clientset *kubernetes.Clientset, namespace string) (*v12.Pod,
 					},
 					VolumeMounts: []v12.VolumeMount{
 						{
-							Name:      name,
+							Name:      config.CniNetName,
 							ReadOnly:  true,
 							MountPath: config.DefaultNetDir,
 						},
@@ -260,7 +258,7 @@ func createCIDRPod(clientset *kubernetes.Clientset, namespace string) (*v12.Pod,
 }
 
 func getPodCIDRFromPod(clientset *kubernetes.Clientset, namespace string, svc *net.IPNet) ([]*net.IPNet, error) {
-	get, err := clientset.CoreV1().Pods(namespace).Get(context.Background(), name, v1.GetOptions{})
+	get, err := clientset.CoreV1().Pods(namespace).Get(context.Background(), config.CniNetName, v1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}

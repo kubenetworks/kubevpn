@@ -42,6 +42,7 @@ func (c *ConnectOptions) addCleanUpResourceHandler(clientset *kubernetes.Clients
 				function()
 			}
 		}
+		_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
 		cleanUpTrafficManagerIfRefCountIsZero(clientset, namespace)
 		log.Info("clean up successful")
 		os.Exit(0)

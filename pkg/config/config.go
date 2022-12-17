@@ -26,6 +26,8 @@ const (
 	DefaultNetDir = "/etc/cni/net.d"
 
 	Proc = "/proc"
+
+	CniNetName = "cni-net-dir-kubevpn"
 )
 
 var (
