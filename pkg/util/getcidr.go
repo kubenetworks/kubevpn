@@ -258,12 +258,25 @@ func createCIDRPod(clientset *kubernetes.Clientset, namespace string) (*v12.Pod,
 }
 
 func getPodCIDRFromPod(clientset *kubernetes.Clientset, namespace string, svc *net.IPNet) ([]*net.IPNet, error) {
-	get, err := clientset.CoreV1().Pods(namespace).Get(context.Background(), config.CniNetName, v1.GetOptions{})
+	podList, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
-	ip := net.ParseIP(get.Status.PodIP)
-	return []*net.IPNet{svc, {IP: ip, Mask: svc.Mask}}, nil
+	for i := 0; i < len(podList.Items); i++ {
+		if podList.Items[i].Spec.HostNetwork || net.ParseIP(podList.Items[i].Status.PodIP) == nil {
+			podList.Items = append(podList.Items[:i], podList.Items[i+1:]...)
+			i--
+		}
+	}
+	for _, item := range podList.Items {
+		if item.Name == config.CniNetName {
+			return []*net.IPNet{svc, {IP: net.ParseIP(item.Status.PodIP), Mask: svc.Mask}}, nil
+		}
+	}
+	for _, item := range podList.Items {
+		return []*net.IPNet{svc, {IP: net.ParseIP(item.Status.PodIP), Mask: svc.Mask}}, nil
+	}
+	return nil, fmt.Errorf("can not found pod cidr from pod list")
 }
 
 func parseCIDRFromString(content string) (result []*net.IPNet) {
