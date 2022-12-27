@@ -270,11 +270,11 @@ func getPodCIDRFromPod(clientset *kubernetes.Clientset, namespace string, svc *n
 	}
 	for _, item := range podList.Items {
 		if item.Name == config.CniNetName {
-			return []*net.IPNet{svc, {IP: net.ParseIP(item.Status.PodIP), Mask: /*svc.Mask*/ net.CIDRMask(16, 32)}}, nil
+			return []*net.IPNet{svc, {IP: net.ParseIP(item.Status.PodIP), Mask: /*svc.Mask*/ net.CIDRMask(24, 32)}}, nil
 		}
 	}
 	for _, item := range podList.Items {
-		return []*net.IPNet{svc, {IP: net.ParseIP(item.Status.PodIP), Mask: /*svc.Mask*/ net.CIDRMask(16, 32)}}, nil
+		return []*net.IPNet{svc, {IP: net.ParseIP(item.Status.PodIP), Mask: /*svc.Mask*/ net.CIDRMask(24, 32)}}, nil
 	}
 	return nil, fmt.Errorf("can not found pod cidr from pod list")
 }
