@@ -8,9 +8,9 @@ import (
 
 var CmdWebhook = &cobra.Command{
 	Use:   "webhook",
-	Short: "Starts a HTTP server, useful for creating MutatingAdmissionWebhook and ValidatingAdmissionWebhook",
-	Long: `Starts a HTTP server, useful for creating MutatingAdmissionWebhook and ValidatingAdmissionWebhook.
-After deploying it to Kubernetes cluster, the Administrator needs to create a ValidatingWebhookConfiguration
+	Short: "Starts a HTTP server, useful for creating MutatingAdmissionWebhook",
+	Long: `Starts a HTTP server, useful for creating MutatingAdmissionWebhook.
+After deploying it to Kubernetes cluster, the Administrator needs to create a MutatingWebhookConfiguration
 in the Kubernetes cluster to register remote webhook admission controllers.`,
 	Args: cobra.MaximumNArgs(0),
 	Run:  webhook.Main,

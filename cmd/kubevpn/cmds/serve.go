@@ -23,8 +23,8 @@ func init() {
 
 var ServerCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "serve",
-	Long:  `serve`,
+	Short: "Server side, startup traffic manager, forward inbound and outbound traffic",
+	Long:  `Server side, startup traffic manager, forward inbound and outbound traffic.`,
 	PreRun: func(*cobra.Command, []string) {
 		util.InitLogger(config.Debug)
 		go func() { log.Info(http.ListenAndServe("localhost:6060", nil)) }()

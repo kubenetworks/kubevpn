@@ -31,8 +31,8 @@ func init() {
 
 var connectCmd = &cobra.Command{
 	Use:   "connect",
-	Short: "connect",
-	Long:  `connect`,
+	Short: "Connect to kubernetes cluster network, or proxy kubernetes workloads inbound traffic into local PC",
+	Long:  `Connect to kubernetes cluster network, or proxy kubernetes workloads inbound traffic into local PC`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if !util.IsAdmin() {
 			util.RunWithElevated()
