@@ -31,14 +31,14 @@ func NewDHCPManager(client corev1.ConfigMapInterface, namespace string, cidr *ne
 	}
 }
 
-//	todo optimize dhcp, using mac address, ip and deadline as unit
+// todo optimize dhcp, using mac address, ip and deadline as unit
 func (d *DHCPManager) InitDHCP() error {
-	configMap, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err == nil {
-		if _, found := configMap.Data[config.KeyEnvoy]; !found {
+		if _, found := cm.Data[config.KeyEnvoy]; !found {
 			_, err = d.client.Patch(
 				context.Background(),
-				configMap.Name,
+				cm.Name,
 				types.MergePatchType,
 				[]byte(fmt.Sprintf(`{"data":{"%s":"%s"}}`, config.KeyEnvoy, "")),
 				metav1.PatchOptions{},
@@ -47,15 +47,16 @@ func (d *DHCPManager) InitDHCP() error {
 		}
 		return nil
 	}
-	result := &v1.ConfigMap{
+	cm = &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      config.ConfigMapPodTrafficManager,
-			Namespace: d.namespace,
-			Labels:    map[string]string{},
+			Name:        config.ConfigMapPodTrafficManager,
+			Namespace:   d.namespace,
+			Labels:      map[string]string{},
+			Annotations: map[string]string{config.AnnoRefCount: "0"},
 		},
 		Data: map[string]string{config.KeyEnvoy: ""},
 	}
-	_, err = d.client.Create(context.Background(), result, metav1.CreateOptions{})
+	_, err = d.client.Create(context.Background(), cm, metav1.CreateOptions{})
 	if err != nil {
 		log.Errorf("create dhcp error, err: %v", err)
 		return err

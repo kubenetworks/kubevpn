@@ -43,7 +43,7 @@ func (c *ConnectOptions) addCleanUpResourceHandler(clientset *kubernetes.Clients
 			}
 		}
 		_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
-		cleanUpTrafficManagerIfRefCountIsZero(clientset, namespace)
+		cleanupIfRefCountIsZero(clientset, namespace, config.ConfigMapPodTrafficManager)
 		log.Info("clean up successful")
 		os.Exit(0)
 	}()
@@ -57,28 +57,28 @@ func Cleanup(s os.Signal) {
 }
 
 // vendor/k8s.io/kubectl/pkg/polymorphichelpers/rollback.go:99
-func updateServiceRefCount(serviceInterface v12.ServiceInterface, name string, increment int) {
+func updateRefCount(configMapInterface v12.ConfigMapInterface, name string, increment int) {
 	err := retry.OnError(
 		retry.DefaultRetry,
 		func(err error) bool { return !k8serrors.IsNotFound(err) },
 		func() error {
-			service, err := serviceInterface.Get(context.Background(), name, v1.GetOptions{})
+			cm, err := configMapInterface.Get(context.Background(), name, v1.GetOptions{})
 			if err != nil {
 				log.Errorf("update ref-count failed, increment: %d, error: %v", increment, err)
 				return err
 			}
 			curCount := 0
-			if ref := service.GetAnnotations()["ref-count"]; len(ref) > 0 {
+			if ref := cm.GetAnnotations()[config.AnnoRefCount]; len(ref) > 0 {
 				curCount, err = strconv.Atoi(ref)
 			}
 			p, _ := json.Marshal([]interface{}{
 				map[string]interface{}{
 					"op":    "replace",
-					"path":  "/metadata/annotations/ref-count",
+					"path":  fmt.Sprintf("/metadata/annotations/%s", config.AnnoRefCount),
 					"value": strconv.Itoa(curCount + increment),
 				},
 			})
-			_, err = serviceInterface.Patch(context.Background(), config.ConfigMapPodTrafficManager, types.JSONPatchType, p, v1.PatchOptions{})
+			_, err = configMapInterface.Patch(context.Background(), name, types.JSONPatchType, p, v1.PatchOptions{})
 			return err
 		})
 	if err != nil {
@@ -88,30 +88,36 @@ func updateServiceRefCount(serviceInterface v12.ServiceInterface, name string, i
 	}
 }
 
-func cleanUpTrafficManagerIfRefCountIsZero(clientset *kubernetes.Clientset, namespace string) {
-	updateServiceRefCount(clientset.CoreV1().Services(namespace), config.ConfigMapPodTrafficManager, -1)
-	pod, err := clientset.CoreV1().Services(namespace).Get(context.Background(), config.ConfigMapPodTrafficManager, v1.GetOptions{})
+func cleanupIfRefCountIsZero(clientset *kubernetes.Clientset, namespace, name string) {
+	updateRefCount(clientset.CoreV1().ConfigMaps(namespace), name, -1)
+	cm, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), name, v1.GetOptions{})
 	if err != nil {
 		log.Error(err)
 		return
 	}
-	refCount, err := strconv.Atoi(pod.GetAnnotations()["ref-count"])
+	refCount, err := strconv.Atoi(cm.GetAnnotations()[config.AnnoRefCount])
 	if err != nil {
 		log.Error(err)
 		return
 	}
-	// if refcount is less than zero or equals to zero, means nobody is using this traffic pod, so clean it
+	// if ref-count is less than zero or equals to zero, means nobody is using this traffic pod, so clean it
 	if refCount <= 0 {
 		log.Info("refCount is zero, prepare to clean up resource")
 		// keep configmap
-		p := []byte(fmt.Sprintf(`[{"op": "remove", "path": "/data/%s"}]`, config.KeyDHCP))
-		_, err = clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), config.ConfigMapPodTrafficManager, types.JSONPatchType, p, v1.PatchOptions{})
-		deleteOptions := v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)}
-		_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(context.Background(), config.ConfigMapPodTrafficManager+"."+namespace, deleteOptions)
-		_ = clientset.RbacV1().RoleBindings(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, deleteOptions)
-		_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, deleteOptions)
-		_ = clientset.RbacV1().Roles(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, deleteOptions)
-		_ = clientset.CoreV1().Services(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, deleteOptions)
-		_ = clientset.AppsV1().Deployments(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, deleteOptions)
+		p := []byte(
+			fmt.Sprintf(`[{"op": "remove", "path": "/data/%s"}]`, config.KeyDHCP),
+		)
+		_, err = clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), name, types.JSONPatchType, p, v1.PatchOptions{})
+		p = []byte(
+			fmt.Sprintf(`[{"op": "replace", "path": "/metadata/annotations/%s", "value": "0"}]`, config.AnnoRefCount),
+		)
+		_, err = clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), name, types.JSONPatchType, p, v1.PatchOptions{})
+		options := v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)}
+		_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(context.Background(), name+"."+namespace, options)
+		_ = clientset.RbacV1().RoleBindings(namespace).Delete(context.Background(), name, options)
+		_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(context.Background(), name, options)
+		_ = clientset.RbacV1().Roles(namespace).Delete(context.Background(), name, options)
+		_ = clientset.CoreV1().Services(namespace).Delete(context.Background(), name, options)
+		_ = clientset.AppsV1().Deployments(namespace).Delete(context.Background(), name, options)
 	}
 }

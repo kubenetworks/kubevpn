@@ -13,6 +13,8 @@ const (
 	KeyDHCP             = "DHCP"
 	KeyEnvoy            = "ENVOY_CONFIG"
 	KeyClusterIPv4POOLS = "IPv4_POOLS"
+	// config map annotation
+	AnnoRefCount = "ref-count"
 
 	// container name
 	ContainerSidecarEnvoyProxy   = "envoy-proxy"
@@ -21,7 +23,7 @@ const (
 
 	VolumeEnvoyConfig = "envoy-config"
 
-	innerIPv4Pool = "223.254.254.100/24"
+	innerIPv4Pool = "223.254.0.100/16"
 
 	DefaultNetDir = "/etc/cni/net.d"
 

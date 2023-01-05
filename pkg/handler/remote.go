@@ -39,14 +39,12 @@ import (
 )
 
 func CreateOutboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace string, trafficManagerIP string, nodeCIDR []*net.IPNet) (ip net.IP, err error) {
-	podInterface := clientset.CoreV1().Pods(namespace)
-	serviceInterface := clientset.CoreV1().Services(namespace)
-	service, err := serviceInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	service, err := clientset.CoreV1().Services(namespace).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err == nil {
 		_, err = polymorphichelpers.AttachablePodForObjectFn(factory, service, 2*time.Second)
 		if err == nil {
 			log.Infoln("traffic manager already exist, reuse it")
-			updateServiceRefCount(serviceInterface, service.GetName(), 1)
+			updateRefCount(clientset.CoreV1().ConfigMaps(namespace), config.ConfigMapPodTrafficManager, 1)
 			return net.ParseIP(service.Spec.ClusterIP), nil
 		}
 	}
@@ -55,7 +53,7 @@ func CreateOutboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset,
 		_ = clientset.RbacV1().RoleBindings(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
 		_ = clientset.RbacV1().Roles(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
 		_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
-		_ = serviceInterface.Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
+		_ = clientset.CoreV1().Services(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
 		_ = clientset.AppsV1().Deployments(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
 	}
 	defer func() {
@@ -135,11 +133,10 @@ func CreateOutboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset,
 	tcp10800 := "10800-for-tcp"
 	tcp9002 := "9002-for-envoy"
 	tcp80 := "80-for-webhook"
-	svc, err := serviceInterface.Create(context.Background(), &v1.Service{
+	svc, err := clientset.CoreV1().Services(namespace).Create(context.Background(), &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        config.ConfigMapPodTrafficManager,
-			Namespace:   namespace,
-			Annotations: map[string]string{"ref-count": "1"},
+			Name:      config.ConfigMapPodTrafficManager,
+			Namespace: namespace,
 		},
 		Spec: v1.ServiceSpec{
 			Ports: []v1.ServicePort{{
@@ -318,7 +315,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug
 			},
 		},
 	}
-	watchStream, err := podInterface.Watch(context.Background(), metav1.ListOptions{
+	watchStream, err := clientset.CoreV1().Pods(namespace).Watch(context.Background(), metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String(),
 	})
 	if err != nil {
