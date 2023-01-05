@@ -354,7 +354,7 @@ func (c *ConnectOptions) InitClient() (err error) {
 			return
 		}
 	}
-	log.Infof("kubeconfig path: %s, namespace: %s, services: %v", c.KubeconfigPath, c.Namespace, c.Workloads)
+	log.Infof("kubeconfig path: %s, namespace: %s, workloads: %v", c.KubeconfigPath, c.Namespace, c.Workloads)
 	return
 }
 
