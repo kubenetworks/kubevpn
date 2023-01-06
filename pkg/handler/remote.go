@@ -43,8 +43,11 @@ func CreateOutboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset,
 	if err == nil {
 		_, err = polymorphichelpers.AttachablePodForObjectFn(factory, service, 2*time.Second)
 		if err == nil {
+			_, err = updateRefCount(clientset.CoreV1().ConfigMaps(namespace), config.ConfigMapPodTrafficManager, 1)
+			if err != nil {
+				return
+			}
 			log.Infoln("traffic manager already exist, reuse it")
-			updateRefCount(clientset.CoreV1().ConfigMaps(namespace), config.ConfigMapPodTrafficManager, 1)
 			return net.ParseIP(service.Spec.ClusterIP), nil
 		}
 	}
@@ -269,8 +272,8 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug
 						{
 							Name:    config.ContainerSidecarControlPlane,
 							Image:   config.Image,
-							Command: []string{"envoy-xds-server"},
-							Args:    []string{"--watchDirectoryFileName", "/etc/envoy/envoy-config.yaml"},
+							Command: []string{"kubevpn"},
+							Args:    []string{"control-plane", "--watchDirectoryFilename", "/etc/envoy/envoy-config.yaml"},
 							Ports: []v1.ContainerPort{{
 								Name:          tcp9002,
 								ContainerPort: 9002,
@@ -362,7 +365,7 @@ out:
 			Namespace: namespace,
 		},
 		Webhooks: []admissionv1.MutatingWebhook{{
-			Name: config.ConfigMapPodTrafficManager + ".naison.xxx", // 没意义的
+			Name: config.ConfigMapPodTrafficManager + ".naison.io", // 没意义的
 			ClientConfig: admissionv1.WebhookClientConfig{
 				Service: &admissionv1.ServiceReference{
 					Namespace: namespace,
@@ -391,7 +394,11 @@ out:
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create MutatingWebhookConfigurations, err: %v", err)
+	}
+	_, err = updateRefCount(clientset.CoreV1().ConfigMaps(namespace), config.ConfigMapPodTrafficManager, 1)
+	if err != nil {
+		return
 	}
 	return net.ParseIP(svc.Spec.ClusterIP), nil
 }

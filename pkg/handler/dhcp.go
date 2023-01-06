@@ -35,6 +35,7 @@ func NewDHCPManager(client corev1.ConfigMapInterface, namespace string, cidr *ne
 func (d *DHCPManager) InitDHCP() error {
 	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err == nil {
+		// add key envoy in case of mount not exist content
 		if _, found := cm.Data[config.KeyEnvoy]; !found {
 			_, err = d.client.Patch(
 				context.Background(),
@@ -49,17 +50,18 @@ func (d *DHCPManager) InitDHCP() error {
 	}
 	cm = &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        config.ConfigMapPodTrafficManager,
-			Namespace:   d.namespace,
-			Labels:      map[string]string{},
-			Annotations: map[string]string{config.AnnoRefCount: "0"},
+			Name:      config.ConfigMapPodTrafficManager,
+			Namespace: d.namespace,
+			Labels:    map[string]string{},
 		},
-		Data: map[string]string{config.KeyEnvoy: ""},
+		Data: map[string]string{
+			config.KeyEnvoy:    "",
+			config.KeyRefCount: "0",
+		},
 	}
 	_, err = d.client.Create(context.Background(), cm, metav1.CreateOptions{})
 	if err != nil {
-		log.Errorf("create dhcp error, err: %v", err)
-		return err
+		return fmt.Errorf("create dhcp error, err: %v", err)
 	}
 	return nil
 }

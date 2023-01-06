@@ -82,12 +82,6 @@ jobs:
           docker pull naison/kubevpn:test   || true
           docker pull naison/kubevpn:latest || true
           docker pull naison/kubevpn:${tag} || true
-          docker pull naison/kubevpn-mesh:test   || true
-          docker pull naison/kubevpn-mesh:latest || true
-          docker pull naison/kubevpn-mesh:${tag} || true
-          docker pull naison/envoy-xds-server:test   || true
-          docker pull naison/envoy-xds-server:latest || true
-          docker pull naison/envoy-xds-server:${tag} || true
 
       - name: Install minikube
         run: |

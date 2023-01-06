@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+
 	log "github.com/sirupsen/logrus"
 )
 
@@ -18,6 +19,7 @@ type Format struct {
 }
 
 //	2009/01/23 01:23:23 d.go:23: message
+//
 // same like log.SetFlags(log.LstdFlags | log.Lshortfile)
 func (*Format) Format(e *log.Entry) ([]byte, error) {
 	return []byte(

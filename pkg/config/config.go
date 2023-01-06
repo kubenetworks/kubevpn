@@ -13,8 +13,7 @@ const (
 	KeyDHCP             = "DHCP"
 	KeyEnvoy            = "ENVOY_CONFIG"
 	KeyClusterIPv4POOLS = "IPv4_POOLS"
-	// config map annotation
-	AnnoRefCount = "ref-count"
+	KeyRefCount         = "REF_COUNT"
 
 	// container name
 	ContainerSidecarEnvoyProxy   = "envoy-proxy"

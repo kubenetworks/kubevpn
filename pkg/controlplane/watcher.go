@@ -20,17 +20,7 @@ type NotifyMessage struct {
 	FilePath  string
 }
 
-func Watch(directory string, notifyCh chan<- NotifyMessage) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer watcher.Close()
-	err = watcher.Add(directory)
-	if err != nil {
-		log.Fatal(err)
-	}
-
+func Watch(watcher *fsnotify.Watcher, filename string, notifyCh chan<- NotifyMessage) {
 	for {
 		select {
 		case event, ok := <-watcher.Events:
@@ -63,7 +53,7 @@ func Watch(directory string, notifyCh chan<- NotifyMessage) {
 		case <-time.Tick(time.Second * 3):
 			notifyCh <- NotifyMessage{
 				Operation: Modify,
-				FilePath:  directory,
+				FilePath:  filename,
 			}
 		}
 	}

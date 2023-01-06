@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/wencaiwulue/kubevpn/cmd/kubevpn/cmds"
-
 	_ "net/http/pprof"
+
+	"github.com/wencaiwulue/kubevpn/cmd/kubevpn/cmds"
 )
 
 func main() {

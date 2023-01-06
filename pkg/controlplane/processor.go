@@ -3,9 +3,9 @@ package controlplane
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/rand"
+	"os"
 	"strconv"
 
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
@@ -78,7 +78,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) {
 func ParseYaml(file string) ([]*Virtual, error) {
 	var virtualList = make([]*Virtual, 0)
 
-	yamlFile, err := ioutil.ReadFile(file)
+	yamlFile, err := os.ReadFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("Error reading YAML file: %s\n", err)
 	}

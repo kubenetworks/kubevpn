@@ -9,8 +9,6 @@ WORKDIR /go/src/$BASE
 
 RUN go env -w GO111MODULE=on && go env -w GOPROXY=https://goproxy.cn,direct
 RUN make kubevpn-linux-amd64
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/envoy-xds-server /go/src/$BASE/cmd/mesh
-
 
 FROM ubuntu:latest
 
@@ -22,5 +20,4 @@ RUN apt-get clean && apt-get update && apt-get install -y wget dnsutils vim curl
 WORKDIR /app
 
 COPY --from=builder /go/src/$BASE/bin/kubevpn-linux-amd64 /usr/local/bin/kubevpn
-COPY --from=builder /go/src/$BASE/bin/envoy-xds-server /bin/envoy-xds-server
 COPY --from=envoy /usr/local/bin/envoy /usr/local/bin/envoy

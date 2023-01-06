@@ -91,7 +91,6 @@ container:
 ############################ build local
 .PHONY: container-local
 container-local: kubevpn-linux-amd64
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ./bin/envoy-xds-server ./cmd/mesh
 	docker build --platform linux/amd64 -t ${IMAGE} -f $(BUILD_DIR)/local.Dockerfile .
 	docker push ${IMAGE}
 	docker tag ${IMAGE} ${IMAGE_DEFAULT}

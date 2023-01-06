@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"strconv"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -22,7 +21,7 @@ func (c *ConnectOptions) Reset(ctx2 context.Context) error {
 		return err
 	}
 	var v = make([]*controlplane.Virtual, 0)
-	if str, ok := cm.Data[config.KeyEnvoy]; ok {
+	if str, ok := cm.Data[config.KeyEnvoy]; ok && len(str) != 0 {
 		if err = yaml.Unmarshal([]byte(str), &v); err != nil {
 			log.Error(err)
 			return err
@@ -40,11 +39,6 @@ func (c *ConnectOptions) Reset(ctx2 context.Context) error {
 			}
 		}
 	}
-	curCount := 0
-	if ref := cm.GetAnnotations()[config.AnnoRefCount]; len(ref) > 0 {
-		curCount, err = strconv.Atoi(ref)
-	}
-	updateRefCount(c.clientset.CoreV1().ConfigMaps(c.Namespace), config.ConfigMapPodTrafficManager, 0-curCount)
-	cleanupIfRefCountIsZero(c.clientset, c.Namespace, config.ConfigMapPodTrafficManager)
+	cleanup(c.clientset, c.Namespace, config.ConfigMapPodTrafficManager)
 	return nil
 }
