@@ -15,6 +15,8 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.18
+          check-latest: true
+          cache: true
       - name: Push image to docker hub
         run: |
           echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USER }} --password-stdin
@@ -30,7 +32,8 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.18
-
+          check-latest: true
+          cache: true
       - name: Setup Minikube
         timeout-minutes: 30
         uses: medyagh/setup-minikube@master
@@ -72,6 +75,8 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.18
+          check-latest: true
+          cache: true
       - uses: docker-practice/actions-setup-docker@master
       - name: Pull image in advance
         run: |
