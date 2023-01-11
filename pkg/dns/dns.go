@@ -39,13 +39,26 @@ func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RE
 }
 
 func getDNSIPFromDnsPod(clientset *kubernetes.Clientset) (ips []string, err error) {
-	serviceList, err := clientset.CoreV1().Pods(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{
+	var serviceList *v12.ServiceList
+	serviceList, err = clientset.CoreV1().Services(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{
+		LabelSelector: fields.OneTermEqualSelector("k8s-app", "kube-dns").String(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range serviceList.Items {
+		if len(item.Spec.ClusterIP) != 0 {
+			ips = append(ips, item.Spec.ClusterIP)
+		}
+	}
+	var podList *v12.PodList
+	podList, err = clientset.CoreV1().Pods(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("k8s-app", "kube-dns").String(),
 	})
 	if err != nil {
 		return
 	}
-	for _, pod := range serviceList.Items {
+	for _, pod := range podList.Items {
 		if pod.Status.Phase == v12.PodRunning && pod.DeletionTimestamp == nil {
 			ips = append(ips, pod.Status.PodIP)
 		}
