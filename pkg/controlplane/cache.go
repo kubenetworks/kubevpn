@@ -225,6 +225,9 @@ func ToListener(listenerName string, routeName string, port int32, p corev1.Prot
 			Name: wellknown.Router,
 		}},
 		StreamIdleTimeout: durationpb.New(0),
+		UpgradeConfigs: []*httpconnectionmanager.HttpConnectionManager_UpgradeConfig{{
+			UpgradeType: "websocket",
+		}},
 	}
 
 	tcpConfig := &tcpproxy.TcpProxy{
