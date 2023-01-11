@@ -26,6 +26,7 @@ LDFLAGS=--ldflags "\
  -X ${FOLDER}/cmds.GitCommit=${GIT_COMMIT} \
  -X ${FOLDER}/cmds.Branch=${BRANCH} \
  -X ${FOLDER}/cmds.OsArch=${OS_ARCH} \
+ -X ${FOLDER}/cmds.GitHubOAuthToken=${GitHubOAuthToken} \
 "
 
 GO111MODULE=on

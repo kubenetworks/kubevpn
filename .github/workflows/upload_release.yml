@@ -33,6 +33,7 @@ jobs:
       - name: Build kubevpn-all-arch
         run: |
           git tag `echo ${{ github.event.client_payload.tag }} | sed 's/refs\/tags\///' | sed 's/\(.*\)-.*/\1/' | sed 's/-[0-9]*$//' || true` || true
+          export GitHubOAuthToken=${{ secrets.KUBEVPN_UPGRADE_OAUTH }}
           make all-kubevpn
 
       - name: Upload Release Asset
