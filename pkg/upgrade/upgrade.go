@@ -81,13 +81,16 @@ func getManifest(httpCli *http.Client) (version string, url string, err error) {
 	version = m.TagName
 	for _, asset := range m.Assets {
 		name := fmt.Sprintf("%s-%s-%s", "kubevpn", runtime.GOOS, runtime.GOARCH)
+		if runtime.GOOS == "windows" {
+			name = fmt.Sprintf("%s-%s-%s.exe", "kubevpn", runtime.GOOS, runtime.GOARCH)
+		}
 		if name == asset.Name {
 			url = asset.BrowserDownloadUrl
 			break
 		}
 	}
 	if len(url) == 0 {
-		err = fmt.Errorf("failed to resp latest version url of KubeVPN")
+		err = fmt.Errorf("failed to resp latest version url of KubeVPN, resp: %s", string(all))
 		return
 	}
 	return

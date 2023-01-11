@@ -21,7 +21,6 @@ var upgradeCmd = &cobra.Command{
 	Short: "Upgrade KubeVPN version",
 	Long:  `Upgrade KubeVPN version, automatically download latest KubeVPN from GitHub`,
 	Run: func(cmd *cobra.Command, args []string) {
-		println(GitHubOAuthToken)
 		var client = http.DefaultClient
 		if GitHubOAuthToken != "" {
 			client = oauth2.NewClient(cmd.Context(), oauth2.StaticTokenSource(&oauth2.Token{AccessToken: GitHubOAuthToken, TokenType: "Bearer"}))
