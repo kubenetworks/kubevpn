@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -334,23 +335,21 @@ out:
 		select {
 		case e := <-watchStream.ResultChan():
 			if podT, ok := e.Object.(*v1.Pod); ok {
-				var sb = strings.Builder{}
-				sb.WriteString(fmt.Sprintf("pod %s status is %s", config.ConfigMapPodTrafficManager, podT.Status.Phase))
-				for _, status := range podT.Status.ContainerStatuses {
-					if status.State.Waiting != nil {
-						if len(status.State.Waiting.Reason) != 0 {
-							sb.WriteString(fmt.Sprintf(" reason: %s", status.State.Waiting.Reason))
-						}
-						if len(status.State.Waiting.Message) != 0 {
-							sb.WriteString(fmt.Sprintf(" message: %s", status.State.Waiting.Message))
-						}
-					}
-				}
+				var sb = bytes.NewBuffer(nil)
+				sb.WriteString(fmt.Sprintf("pod [%s] status is %s\n", config.ConfigMapPodTrafficManager, podT.Status.Phase))
+				util.PrintStatus(podT, sb)
 
 				if last != sb.String() {
 					log.Infof(sb.String())
 				}
-				if podutils.IsPodReady(podT) {
+				if podutils.IsPodReady(podT) && func() bool {
+					for _, status := range podT.Status.ContainerStatuses {
+						if !status.Ready {
+							return false
+						}
+					}
+					return true
+				}() {
 					break out
 				}
 				last = sb.String()
@@ -384,6 +383,7 @@ out:
 					Scope:       (*admissionv1.ScopeType)(pointer.String(string(admissionv1.NamespacedScope))),
 				},
 			}},
+			FailurePolicy: (*admissionv1.FailurePolicyType)(pointer.String(string(admissionv1.Ignore))),
 			// same as above label ns
 			NamespaceSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"ns": namespace}},
 			SideEffects:             (*admissionv1.SideEffectClass)(pointer.String(string(admissionv1.SideEffectClassNone))),
