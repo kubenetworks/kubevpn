@@ -40,6 +40,10 @@ func Main(current string, client *http.Client) error {
 	if err != nil {
 		return err
 	}
+	err = temp.Close()
+	if err != nil {
+		return err
+	}
 	err = download(client, url, temp.Name())
 	if err != nil {
 		return err
@@ -53,9 +57,23 @@ func Main(current string, client *http.Client) error {
 	if err != nil {
 		return err
 	}
-	createTemp, err := os.CreateTemp("", "")
+	var createTemp *os.File
+	createTemp, err = os.CreateTemp("", "")
+	if err != nil {
+		return err
+	}
+	err = createTemp.Close()
+	if err != nil {
+		return err
+	}
 	err = os.Remove(createTemp.Name())
+	if err != nil {
+		return err
+	}
 	err = os.Rename(curFolder, createTemp.Name())
+	if err != nil {
+		return err
+	}
 	err = os.Rename(temp.Name(), curFolder)
 	return err
 }
@@ -134,6 +152,7 @@ func download(client *http.Client, url string, filename string) error {
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 	buf := make([]byte, 10<<(10*2)) // 10M
 	_, err = io.CopyBuffer(f, p, buf)
 	return err
