@@ -6,7 +6,7 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
 
-func Main() *cobra.Command {
+func NewKubeVPNCommand() *cobra.Command {
 	var cmd = &cobra.Command{
 		Use:   "kubevpn",
 		Short: "kubevpn",

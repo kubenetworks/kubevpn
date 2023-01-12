@@ -7,5 +7,5 @@ import (
 )
 
 func main() {
-	_ = cmds.Main().Execute()
+	_ = cmds.NewKubeVPNCommand().Execute()
 }
