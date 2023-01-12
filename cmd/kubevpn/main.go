@@ -7,5 +7,5 @@ import (
 )
 
 func main() {
-	_ = cmds.RootCmd.Execute()
+	_ = cmds.Main().Execute()
 }
