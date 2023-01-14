@@ -20,7 +20,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-func CmdConnect(factory cmdutil.Factory) *cobra.Command {
+func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	var connect = handler.ConnectOptions{}
 	cmd := &cobra.Command{
 		Use:   "connect",
@@ -39,45 +39,54 @@ func CmdConnect(factory cmdutil.Factory) *cobra.Command {
 		# Reverse proxy with mesh, traffic with header a=1, will hit local PC, otherwise no effect
 		kubevpn connect --workloads=service/productpage --headers a=1
 `)),
-		PersistentPreRun: func(*cobra.Command, []string) {
+		PreRun: func(*cobra.Command, []string) {
 			if !util.IsAdmin() {
 				util.RunWithElevated()
 				os.Exit(0)
-			} else {
-				go func() { log.Info(http.ListenAndServe("localhost:6060", nil)) }()
 			}
-		},
-		PreRun: func(*cobra.Command, []string) {
+			go http.ListenAndServe("localhost:6060", nil)
 			util.InitLogger(config.Debug)
 			if util.IsWindows() {
 				driver.InstallWireGuardTunDriver()
 			}
 		},
-		Run: func(cmd *cobra.Command, args []string) {
-			if err := connect.InitClient(factory); err != nil {
-				log.Fatal(err)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := connect.InitClient(f); err != nil {
+				return err
 			}
 			connect.PreCheckResource()
 			if err := connect.DoConnect(); err != nil {
 				log.Errorln(err)
 				handler.Cleanup(syscall.SIGQUIT)
-				select {}
+			} else {
+				fmt.Println(`---------------------------------------------------------------------------`)
+				fmt.Println(`    Now you can access resources in the kubernetes cluster, enjoy it :)    `)
+				fmt.Println(`---------------------------------------------------------------------------`)
 			}
-			fmt.Println(`---------------------------------------------------------------------------`)
-			fmt.Println(`    Now you can access resources in the kubernetes cluster, enjoy it :)    `)
-			fmt.Println(`---------------------------------------------------------------------------`)
 			select {}
 		},
-		PostRun: func(_ *cobra.Command, _ []string) {
+		PostRun: func(*cobra.Command, []string) {
 			if util.IsWindows() {
-				if err := retry.OnError(retry.DefaultRetry, func(err error) bool {
+				err := retry.OnError(retry.DefaultRetry, func(err error) bool {
 					return err != nil
 				}, func() error {
 					return driver.UninstallWireGuardTunDriver()
-				}); err != nil {
-					wd, _ := os.Getwd()
+				})
+				if err != nil {
+					var wd string
+					wd, err = os.Getwd()
+					if err != nil {
+						return
+					}
 					filename := filepath.Join(wd, "wintun.dll")
-					if err = os.Rename(filename, filepath.Join(os.TempDir(), "wintun.dll")); err != nil {
+					var temp *os.File
+					if temp, err = os.CreateTemp("", ""); err != nil {
+						return
+					}
+					if err = temp.Close(); err != nil {
+						return
+					}
+					if err = os.Rename(filename, temp.Name()); err != nil {
 						log.Debugln(err)
 					}
 				}

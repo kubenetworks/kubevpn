@@ -21,6 +21,9 @@ func PrintStatus(pod *corev1.Pod, writer io.Writer) {
 		if status.State.Waiting != nil {
 			show(status.Name, status.State.Waiting.Reason, status.State.Waiting.Message)
 		}
+		if status.State.Running != nil {
+			show(status.Name, "ContainerRunning", "")
+		}
 		if status.State.Terminated != nil {
 			show(status.Name, status.State.Terminated.Reason, status.State.Terminated.Message)
 		}
