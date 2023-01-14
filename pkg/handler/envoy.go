@@ -29,7 +29,7 @@ import (
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
 
 // patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
-func InjectVPNAndEnvoySidecar(factory cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workloads string, c util.PodRouteConfig, headers map[string]string) error {
+func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workloads string, c util.PodRouteConfig, headers map[string]string) error {
 	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
 	if err != nil {
 		return err
@@ -102,7 +102,7 @@ func InjectVPNAndEnvoySidecar(factory cmdutil.Factory, clientset v12.ConfigMapIn
 			log.Error(err)
 		}
 	})
-	_ = util.RolloutStatus(factory, namespace, workloads, time.Minute*5)
+	_ = util.RolloutStatus(ctx1, factory, namespace, workloads, time.Minute*5)
 	return err
 }
 

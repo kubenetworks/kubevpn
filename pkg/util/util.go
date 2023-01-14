@@ -345,7 +345,7 @@ func Ping(targetIP string) (bool, error) {
 	}
 }
 
-func RolloutStatus(factory cmdutil.Factory, namespace, workloads string, timeout time.Duration) error {
+func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, workloads string, timeout time.Duration) error {
 	client, _ := factory.DynamicClient()
 	r := factory.NewBuilder().
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
@@ -387,7 +387,7 @@ func RolloutStatus(factory cmdutil.Factory, namespace, workloads string, timeout
 	}
 
 	// if the rollout isn't done yet, keep watching deployment status
-	ctx, cancel := watchtools.ContextWithOptionalTimeout(context.Background(), timeout)
+	ctx, cancel := watchtools.ContextWithOptionalTimeout(ctx1, timeout)
 	defer cancel()
 	return func() error {
 		_, err = watchtools.UntilWithSync(ctx, lw, &unstructured.Unstructured{}, nil, func(e watch.Event) (bool, error) {

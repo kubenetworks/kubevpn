@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"k8s.io/utils/pointer"
 	"net"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +13,8 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,6 +29,7 @@ import (
 	"k8s.io/client-go/util/homedir"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
@@ -124,12 +126,23 @@ func TestGetTopControllerByLabel(t *testing.T) {
 }
 
 func TestPreCheck(t *testing.T) {
+	var cmd = &cobra.Command{
+		Use:   "kubevpn",
+		Short: "kubevpn",
+		Long:  `kubevpn`,
+	}
+	flags := cmd.PersistentFlags()
+	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags.AddFlags(flags)
+	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
+	matchVersionFlags.AddFlags(flags)
+	factory := cmdutil.NewFactory(matchVersionFlags)
 	options := ConnectOptions{
-		//KubeconfigPath: filepath.Join(homedir.HomeDir(), ".kube", "mesh"),
 		Namespace: "naison-test",
 		Workloads: []string{"services/authors"},
 	}
-	options.InitClient(nil)
+	err := options.InitClient(factory)
+	assert.Nil(t, err)
 	options.PreCheckResource()
 	fmt.Println(options.Workloads)
 }

@@ -50,7 +50,7 @@ type ConnectOptions struct {
 	localTunIP *net.IPNet
 }
 
-func (c *ConnectOptions) createRemoteInboundPod() (err error) {
+func (c *ConnectOptions) createRemoteInboundPod(ctx1 context.Context) (err error) {
 	c.localTunIP, err = c.dhcp.RentIPBaseNICAddress()
 	if err != nil {
 		return
@@ -91,9 +91,9 @@ func (c *ConnectOptions) createRemoteInboundPod() (err error) {
 			})
 			// means mesh mode
 			if len(c.Headers) != 0 {
-				err = InjectVPNAndEnvoySidecar(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers)
+				err = InjectVPNAndEnvoySidecar(ctx1, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers)
 			} else {
-				err = InjectVPNSidecar(c.factory, c.Namespace, workload, configInfo)
+				err = InjectVPNSidecar(ctx1, c.factory, c.Namespace, workload, configInfo)
 			}
 			if err != nil {
 				log.Error(err)
@@ -120,7 +120,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err != nil {
 		return
 	}
-	if err = c.createRemoteInboundPod(); err != nil {
+	if err = c.createRemoteInboundPod(ctx); err != nil {
 		return
 	}
 	port := util.GetAvailableTCPPortOrDie()

@@ -404,7 +404,7 @@ out:
 	return net.ParseIP(svc.Spec.ClusterIP), nil
 }
 
-func InjectVPNSidecar(factory cmdutil.Factory, namespace, workloads string, config util.PodRouteConfig) error {
+func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, workloads string, config util.PodRouteConfig) error {
 	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
 	if err != nil {
 		return err
@@ -472,7 +472,7 @@ func InjectVPNSidecar(factory cmdutil.Factory, namespace, workloads string, conf
 			}
 		})
 	}
-	_ = util.RolloutStatus(factory, namespace, workloads, time.Minute*5)
+	_ = util.RolloutStatus(ctx1, factory, namespace, workloads, time.Minute*5)
 	return err
 }
 
