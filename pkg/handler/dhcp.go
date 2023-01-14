@@ -32,13 +32,13 @@ func NewDHCPManager(client corev1.ConfigMapInterface, namespace string, cidr *ne
 }
 
 // todo optimize dhcp, using mac address, ip and deadline as unit
-func (d *DHCPManager) InitDHCP() error {
-	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+func (d *DHCPManager) InitDHCP(ctx context.Context) error {
+	cm, err := d.client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err == nil {
 		// add key envoy in case of mount not exist content
 		if _, found := cm.Data[config.KeyEnvoy]; !found {
 			_, err = d.client.Patch(
-				context.Background(),
+				ctx,
 				cm.Name,
 				types.MergePatchType,
 				[]byte(fmt.Sprintf(`{"data":{"%s":"%s"}}`, config.KeyEnvoy, "")),
@@ -59,7 +59,7 @@ func (d *DHCPManager) InitDHCP() error {
 			config.KeyRefCount: "0",
 		},
 	}
-	_, err = d.client.Create(context.Background(), cm, metav1.CreateOptions{})
+	_, err = d.client.Create(ctx, cm, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("create dhcp error, err: %v", err)
 	}

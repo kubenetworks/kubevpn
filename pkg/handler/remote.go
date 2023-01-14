@@ -39,8 +39,8 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-func CreateOutboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace string, trafficManagerIP string, nodeCIDR []*net.IPNet) (ip net.IP, err error) {
-	service, err := clientset.CoreV1().Services(namespace).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace string, trafficManagerIP string, nodeCIDR []*net.IPNet) (ip net.IP, err error) {
+	service, err := clientset.CoreV1().Services(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err == nil {
 		_, err = polymorphichelpers.AttachablePodForObjectFn(factory, service, 2*time.Second)
 		if err == nil {
@@ -52,24 +52,25 @@ func CreateOutboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset,
 			return net.ParseIP(service.Spec.ClusterIP), nil
 		}
 	}
-	var deleteResource = func() {
-		_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(context.Background(), config.ConfigMapPodTrafficManager+"."+namespace, metav1.DeleteOptions{})
-		_ = clientset.RbacV1().RoleBindings(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
-		_ = clientset.RbacV1().Roles(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
-		_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
-		_ = clientset.CoreV1().Services(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
-		_ = clientset.AppsV1().Deployments(namespace).Delete(context.Background(), config.ConfigMapPodTrafficManager, metav1.DeleteOptions{})
+	var deleteResource = func(ctx context.Context) {
+		options := metav1.DeleteOptions{}
+		_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, config.ConfigMapPodTrafficManager+"."+namespace, options)
+		_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, config.ConfigMapPodTrafficManager, options)
+		_ = clientset.RbacV1().Roles(namespace).Delete(ctx, config.ConfigMapPodTrafficManager, options)
+		_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, config.ConfigMapPodTrafficManager, options)
+		_ = clientset.CoreV1().Services(namespace).Delete(ctx, config.ConfigMapPodTrafficManager, options)
+		_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, config.ConfigMapPodTrafficManager, options)
 	}
 	defer func() {
 		if err != nil {
-			deleteResource()
+			deleteResource(context.Background())
 		}
 	}()
-	deleteResource()
+	deleteResource(context.Background())
 	log.Infoln("traffic manager not exist, try to create it...")
 
 	// 1) label namespace
-	ns, err := clientset.CoreV1().Namespaces().Get(context.Background(), namespace, metav1.GetOptions{})
+	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +78,7 @@ func CreateOutboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset,
 		ns.Labels = map[string]string{}
 	}
 	ns.Labels["ns"] = namespace
-	_, err = clientset.CoreV1().Namespaces().Update(context.Background(), ns, metav1.UpdateOptions{})
+	_, err = clientset.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +138,7 @@ func CreateOutboundPod(factory cmdutil.Factory, clientset *kubernetes.Clientset,
 	tcp10800 := "10800-for-tcp"
 	tcp9002 := "9002-for-envoy"
 	tcp80 := "80-for-webhook"
-	svc, err := clientset.CoreV1().Services(namespace).Create(context.Background(), &v1.Service{
+	svc, err := clientset.CoreV1().Services(namespace).Create(ctx, &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
 			Namespace: namespace,
@@ -319,14 +320,14 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug
 			},
 		},
 	}
-	watchStream, err := clientset.CoreV1().Pods(namespace).Watch(context.Background(), metav1.ListOptions{
+	watchStream, err := clientset.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String(),
 	})
 	if err != nil {
 		return nil, err
 	}
 	defer watchStream.Stop()
-	if _, err = clientset.AppsV1().Deployments(namespace).Create(context.Background(), deployment, metav1.CreateOptions{}); err != nil {
+	if _, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{}); err != nil {
 		return nil, err
 	}
 	var last string

@@ -18,7 +18,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -36,16 +35,15 @@ import (
 )
 
 type ConnectOptions struct {
-	KubeconfigPath string
-	Namespace      string
-	Headers        map[string]string
-	Workloads      []string
-	clientset      *kubernetes.Clientset
-	restclient     *rest.RESTClient
-	config         *rest.Config
-	factory        cmdutil.Factory
-	cidrs          []*net.IPNet
-	dhcp           *DHCPManager
+	Namespace  string
+	Headers    map[string]string
+	Workloads  []string
+	clientset  *kubernetes.Clientset
+	restclient *rest.RESTClient
+	config     *rest.Config
+	factory    cmdutil.Factory
+	cidrs      []*net.IPNet
+	dhcp       *DHCPManager
 	// needs to give it back to dhcp
 	usedIPs    []*net.IPNet
 	routerIP   net.IP
@@ -111,14 +109,14 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	c.addCleanUpResourceHandler(c.clientset, c.Namespace)
 	trafficMangerNet := net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}
 	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, &trafficMangerNet)
-	if err = c.dhcp.InitDHCP(); err != nil {
+	if err = c.dhcp.InitDHCP(ctx); err != nil {
 		return
 	}
-	err = c.GetCIDR()
+	err = c.GetCIDR(ctx)
 	if err != nil {
 		return
 	}
-	c.routerIP, err = CreateOutboundPod(c.factory, c.clientset, c.Namespace, trafficMangerNet.String(), c.cidrs)
+	c.routerIP, err = CreateOutboundPod(ctx, c.factory, c.clientset, c.Namespace, trafficMangerNet.String(), c.cidrs)
 	if err != nil {
 		return
 	}
@@ -332,13 +330,8 @@ func Start(ctx context.Context, r Route) error {
 	return nil
 }
 
-func (c *ConnectOptions) InitClient() (err error) {
-	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-	if _, err = os.Stat(c.KubeconfigPath); err == nil {
-		configFlags.KubeConfig = &c.KubeconfigPath
-	}
-
-	c.factory = cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
+func (c *ConnectOptions) InitClient(f cmdutil.Factory) (err error) {
+	c.factory = f
 
 	if c.config, err = c.factory.ToRESTConfig(); err != nil {
 		return
@@ -349,12 +342,9 @@ func (c *ConnectOptions) InitClient() (err error) {
 	if c.clientset, err = c.factory.KubernetesClientSet(); err != nil {
 		return
 	}
-	if len(c.Namespace) == 0 {
-		if c.Namespace, _, err = c.factory.ToRawKubeConfigLoader().Namespace(); err != nil {
-			return
-		}
+	if c.Namespace, _, err = c.factory.ToRawKubeConfigLoader().Namespace(); err != nil {
+		return
 	}
-	log.Infof("kubeconfig path: %s, namespace: %s, workloads: %v", c.KubeconfigPath, c.Namespace, c.Workloads)
 	return
 }
 
@@ -445,7 +435,7 @@ func (c *ConnectOptions) GetRunningPodList() ([]v1.Pod, error) {
 // https://stackoverflow.com/questions/45903123/kubernetes-set-service-cidr-and-pod-cidr-the-same
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster/54183373#54183373
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster
-func (c *ConnectOptions) GetCIDR() (err error) {
+func (c *ConnectOptions) GetCIDR(ctx context.Context) (err error) {
 	// (1) get cidr from cache
 	var value string
 	value, err = c.dhcp.Get(config.KeyClusterIPv4POOLS)

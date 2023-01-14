@@ -82,7 +82,7 @@ func TestGetIPFromDHCP(t *testing.T) {
 	}
 	_, ipNet, err := net.ParseCIDR("192.168.1.100/24")
 	manager := NewDHCPManager(clientset.CoreV1().ConfigMaps("test"), "test", ipNet)
-	manager.InitDHCP()
+	manager.InitDHCP(context.Background())
 	for i := 0; i < 10; i++ {
 		ipNet, err := manager.RentIPRandom()
 		ipNet2, err := manager.RentIPRandom()
@@ -125,11 +125,11 @@ func TestGetTopControllerByLabel(t *testing.T) {
 
 func TestPreCheck(t *testing.T) {
 	options := ConnectOptions{
-		KubeconfigPath: filepath.Join(homedir.HomeDir(), ".kube", "mesh"),
-		Namespace:      "naison-test",
-		Workloads:      []string{"services/authors"},
+		//KubeconfigPath: filepath.Join(homedir.HomeDir(), ".kube", "mesh"),
+		Namespace: "naison-test",
+		Workloads: []string{"services/authors"},
 	}
-	options.InitClient()
+	options.InitClient(nil)
 	options.PreCheckResource()
 	fmt.Println(options.Workloads)
 }
