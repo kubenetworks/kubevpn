@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/tools/clientcmd"
@@ -49,11 +50,18 @@ func IsAdmin() bool {
 	_, ok := os.LookupEnv(envStartSudoKubeVPNByKubeVPN)
 	if os.Getuid() == 0 {
 		if !ok {
+			fmt.Println()
 			fmt.Println(`----------------------------------------------------------------------------------`)
 			fmt.Println(`    Warn: Use sudo to execute command kubevpn can not use user env KUBECONFIG.    `)
 			fmt.Println(`    Because of sudo user env and user env are different.    `)
 			fmt.Println(`    Current env KUBECONFIG value: ` + os.Getenv(clientcmd.RecommendedConfigPathEnvVar))
 			fmt.Println(`----------------------------------------------------------------------------------`)
+			fmt.Println()
+			for i := 5; i >= 0; i-- {
+				_, _ = fmt.Printf("\r %ds", i)
+				time.Sleep(time.Second * 1)
+			}
+			_, _ = fmt.Printf("\r")
 		}
 	}
 	return os.Getuid() == 0
