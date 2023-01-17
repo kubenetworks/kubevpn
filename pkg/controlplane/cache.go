@@ -16,10 +16,10 @@ import (
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/wellknown"
-	"github.com/golang/protobuf/ptypes/wrappers"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -240,8 +240,8 @@ func ToListener(listenerName string, routeName string, port int32, p corev1.Prot
 	return &listener.Listener{
 		Name:             listenerName,
 		TrafficDirection: core.TrafficDirection_INBOUND,
-		BindToPort:       &wrappers.BoolValue{Value: false},
-		UseOriginalDst:   &wrappers.BoolValue{Value: true},
+		BindToPort:       &wrapperspb.BoolValue{Value: false},
+		UseOriginalDst:   &wrapperspb.BoolValue{Value: true},
 
 		Address: &core.Address{
 			Address: &core.Address_SocketAddress{
