@@ -59,9 +59,11 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				log.Errorln(err)
 				handler.Cleanup(syscall.SIGQUIT)
 			} else {
+				fmt.Println()
 				fmt.Println(`---------------------------------------------------------------------------`)
 				fmt.Println(`    Now you can access resources in the kubernetes cluster, enjoy it :)    `)
 				fmt.Println(`---------------------------------------------------------------------------`)
+				fmt.Println()
 			}
 			select {}
 		},

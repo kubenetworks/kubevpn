@@ -36,9 +36,11 @@ require (
 	github.com/containernetworking/cni v1.1.2
 	github.com/hashicorp/go-version v1.6.0
 	github.com/mattbaird/jsonpatch v0.0.0-20200820163806-098863c1fc24
+	github.com/schollz/progressbar/v3 v3.13.0
 	github.com/stretchr/testify v1.8.1
 	golang.org/x/exp v0.0.0-20230113213754-f9f960f08ad4
 	golang.org/x/oauth2 v0.4.0
+	golang.org/x/term v0.4.0
 	k8s.io/utils v0.0.0-20230115233650-391b47cb4029
 	sigs.k8s.io/yaml v1.3.0
 )
@@ -75,6 +77,8 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/mattn/go-runewidth v0.0.14 // indirect
+	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/moby/spdystream v0.2.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
@@ -84,13 +88,13 @@ require (
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/riobard/go-bloom v0.0.0-20200614022211-cdc8013cb5b3 // indirect
+	github.com/rivo/uniseg v0.4.3 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/xlab/treeprint v1.1.0 // indirect
 	go.starlark.net v0.0.0-20230112144946-fae38c8a6d89 // indirect
 	golang.org/x/crypto v0.5.0 // indirect
 	golang.org/x/mod v0.7.0 // indirect
-	golang.org/x/term v0.4.0 // indirect
 	golang.org/x/text v0.6.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	golang.org/x/tools v0.5.0 // indirect

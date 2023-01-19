@@ -6,10 +6,12 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 
 	goversion "github.com/hashicorp/go-version"
-	"k8s.io/utils/pointer"
+	"github.com/schollz/progressbar/v3"
+	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
 // Main
@@ -17,24 +19,48 @@ import (
 // 2) get the latest version
 // 3) compare two version decide needs to download or not
 // 4) download newer version
-// 5) chmod +x, move old to /temp, move new to CURRENT_FOLDER
+// 5) check permission of putting new kubevpn back
+// 6) chmod +x, move old to /temp, move new to CURRENT_FOLDER
 func Main(current string, client *http.Client) error {
 	version, url, err := getManifest(client)
 	if err != nil {
 		return err
 	}
-	cVersion, err := goversion.NewVersion(current)
+	fmt.Printf("The latest version is: %s\n", version)
+	var cVersion, dVersion *goversion.Version
+	cVersion, err = goversion.NewVersion(current)
 	if err != nil {
 		return err
 	}
-	dVersion, err := goversion.NewVersion(version)
+	dVersion, err = goversion.NewVersion(version)
 	if err != nil {
 		return err
 	}
 	if cVersion.GreaterThanOrEqual(dVersion) {
-		fmt.Println("current version is bigger than latest version, don't needs to download")
+		fmt.Println("Already up to date, don't needs to upgrade")
 		return nil
 	}
+
+	var executable string
+	executable, err = os.Executable()
+	if err != nil {
+		return err
+	}
+	var tem *os.File
+	tem, err = os.Create(filepath.Join(filepath.Dir(executable), ".test"))
+	if tem != nil {
+		_ = tem.Close()
+		_ = os.Remove(tem.Name())
+	}
+	if os.IsPermission(err) {
+		util.RunWithElevated()
+		os.Exit(0)
+	} else if err != nil {
+		return err
+	}
+
+	fmt.Printf("Current version is: %s less than latest version: %s, needs to upgrade\n", cVersion, dVersion)
+
 	var temp *os.File
 	temp, err = os.CreateTemp("", "")
 	if err != nil {
@@ -82,18 +108,19 @@ func getManifest(httpCli *http.Client) (version string, url string, err error) {
 	var resp *http.Response
 	resp, err = httpCli.Get("https://api.github.com/repos/wencaiwulue/kubevpn/releases/latest")
 	if err != nil {
-		err = fmt.Errorf("failed to resp latest version of KubeVPN, err: %v", err)
+		err = fmt.Errorf("failed to call github api, err: %v", err)
 		return
 	}
-	all, err := io.ReadAll(resp.Body)
+	var all []byte
+	all, err = io.ReadAll(resp.Body)
 	if err != nil {
-		err = fmt.Errorf("failed to resp latest version of KubeVPN, err: %v", err)
+		err = fmt.Errorf("failed to read all reponse from github api, err: %v", err)
 		return
 	}
 	var m RootEntity
 	err = json.Unmarshal(all, &m)
 	if err != nil {
-		err = fmt.Errorf("failed to resp latest version of KubeVPN, err: %v", err)
+		err = fmt.Errorf("failed to unmarshal reponse, err: %v", err)
 		return
 	}
 	version = m.TagName
@@ -108,7 +135,7 @@ func getManifest(httpCli *http.Client) (version string, url string, err error) {
 		}
 	}
 	if len(url) == 0 {
-		err = fmt.Errorf("failed to resp latest version url of KubeVPN, resp: %s", string(all))
+		err = fmt.Errorf("can not found latest version url of KubeVPN, resp: %s", string(all))
 		return
 	}
 	return
@@ -121,39 +148,34 @@ func download(client *http.Client, url string, filename string) error {
 	if err != nil {
 		return err
 	}
-	pr := make(chan Update, 1)
-	p := &progressReader{
-		rc:    get.Body,
-		count: pointer.Int64(0),
-		progress: &progress{
-			updates:    pr,
-			lastUpdate: &Update{},
-		},
-	}
-	p.progress.total(get.ContentLength)
-	go func() {
-		var last string
-		for {
-			select {
-			case u, ok := <-pr:
-				if ok {
-					per := float32(u.Complete) / float32(u.Total) * 100
-					s := fmt.Sprintf("%.0f%%", per)
-					if last != s {
-						fmt.Printf(fmt.Sprintf("\r%s%%", s))
-						last = s
-					}
-				}
-			}
-		}
-	}()
+	defer get.Body.Close()
+	total := float64(get.ContentLength) / 1024 / 1024
+	fmt.Printf("Length: 68276642 (%0.2fM)\n", total)
+
 	var f *os.File
 	f, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	bar := progressbar.NewOptions(int(get.ContentLength),
+		progressbar.OptionSetWriter(os.Stdout),
+		progressbar.OptionEnableColorCodes(true),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionSetWidth(50),
+		progressbar.OptionOnCompletion(func() {
+			_, _ = fmt.Fprint(os.Stderr, "\n")
+		}),
+		progressbar.OptionSetRenderBlankState(true),
+		progressbar.OptionSetDescription("Writing temp file..."),
+		progressbar.OptionSetTheme(progressbar.Theme{
+			Saucer:        "=",
+			SaucerHead:    ">",
+			SaucerPadding: " ",
+			BarStart:      "[",
+			BarEnd:        "]",
+		}))
 	buf := make([]byte, 10<<(10*2)) // 10M
-	_, err = io.CopyBuffer(f, p, buf)
+	_, err = io.CopyBuffer(io.MultiWriter(f, bar), get.Body, buf)
 	return err
 }

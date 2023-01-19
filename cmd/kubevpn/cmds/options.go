@@ -12,7 +12,7 @@ import (
 var (
 	optionsExample = templates.Examples(i18n.T(`
 		# Print flags inherited by all commands
-		kubectl options`))
+		kubevpn options`))
 )
 
 func CmdOptions(cmdutil.Factory) *cobra.Command {
