@@ -1,6 +1,6 @@
 module github.com/wencaiwulue/kubevpn
 
-go 1.18
+go 1.19
 
 require (
 	github.com/cilium/ipam v0.0.0-20220824141044-46ef3d556735
@@ -40,7 +40,7 @@ require (
 	github.com/stretchr/testify v1.8.1
 	golang.org/x/exp v0.0.0-20230113213754-f9f960f08ad4
 	golang.org/x/oauth2 v0.4.0
-	golang.org/x/term v0.4.0
+	golang.org/x/text v0.6.0
 	k8s.io/utils v0.0.0-20230115233650-391b47cb4029
 	sigs.k8s.io/yaml v1.3.0
 )
@@ -95,7 +95,7 @@ require (
 	go.starlark.net v0.0.0-20230112144946-fae38c8a6d89 // indirect
 	golang.org/x/crypto v0.5.0 // indirect
 	golang.org/x/mod v0.7.0 // indirect
-	golang.org/x/text v0.6.0 // indirect
+	golang.org/x/term v0.4.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	golang.org/x/tools v0.5.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20211104114900-415007cec224 // indirect

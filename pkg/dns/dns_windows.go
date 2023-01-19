@@ -6,7 +6,7 @@ package dns
 import (
 	"context"
 	"fmt"
-	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"strconv"
@@ -25,7 +25,17 @@ func SetupDNS(config *miekgdns.ClientConfig, _ []string) error {
 		return err
 	}
 	luid := winipcfg.LUID(parseUint)
-	err = luid.SetDNS(windows.AF_INET, []net.IP{net.ParseIP(config.Servers[0])}, config.Search)
+	var servers []netip.Addr
+	for _, s := range config.Servers {
+		var addr netip.Addr
+		addr, err = netip.ParseAddr(s)
+		if err != nil {
+			log.Warningln(err)
+			return err
+		}
+		servers = append(servers, addr)
+	}
+	err = luid.SetDNS(windows.AF_INET, servers, config.Search)
 	_ = exec.CommandContext(context.Background(), "ipconfig", "/flushdns").Run()
 	if err != nil {
 		log.Warningln(err)
@@ -70,7 +80,7 @@ func addNicSuffixSearchList(search []string) error {
 		fmt.Sprintf("@(\"%s\", \"%s\", \"%s\")", search[0], search[1], search[2]),
 	}...)
 	output, err := cmd.CombinedOutput()
-	log.Info(cmd.Args)
+	log.Debugln(cmd.Args)
 	if err != nil {
 		log.Warnf("error while set dns suffix search list, err: %v, output: %s, command: %v", err, string(output), cmd.Args)
 	}

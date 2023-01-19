@@ -264,6 +264,7 @@ func (c *ConnectOptions) deleteFirewallRuleAndSetupDNS(ctx context.Context) {
 		if !util.FindRule() {
 			util.AddFirewallRule()
 		}
+		RollbackFuncList = append(RollbackFuncList, util.DeleteFirewallRule)
 		go util.DeleteWindowsFirewallRule(ctx)
 	}
 	go util.Heartbeats(ctx)

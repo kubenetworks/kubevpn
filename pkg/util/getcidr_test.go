@@ -1,10 +1,12 @@
 package util
 
 import (
+	"encoding/base64"
 	"fmt"
 	"testing"
 
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/text/encoding/simplifiedchinese"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -79,4 +81,29 @@ func TestCal(t *testing.T) {
 		sum += i
 	}
 	println(sum)
+}
+
+func TestName222(t *testing.T) {
+	ss := `DQrDu9PQ0+vWuLaoserXvM/gxqXF5LXEuebU8qGjDQoNCg==`
+	out, err := base64.StdEncoding.DecodeString(ss)
+	if err != nil {
+		panic(err)
+	}
+	s := string(out)
+	var b []byte
+	b, err = simplifiedchinese.GB18030.NewDecoder().Bytes(out)
+	if err == nil {
+		s = string(b)
+		println(s)
+	}
+	b, err = simplifiedchinese.GBK.NewDecoder().Bytes(out)
+	if err == nil {
+		s = string(b)
+		println(s)
+	}
+	b, err = simplifiedchinese.HZGB2312.NewDecoder().Bytes(out)
+	if err == nil {
+		s = string(b)
+	}
+	println(string(s))
 }

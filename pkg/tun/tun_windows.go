@@ -3,6 +3,7 @@ package tun
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 )
 
 func createTun(cfg Config) (net.Conn, *net.Interface, error) {
-	ip, ipNet, err := net.ParseCIDR(cfg.Addr)
+	ip, _, err := net.ParseCIDR(cfg.Addr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -28,7 +29,14 @@ func createTun(cfg Config) (net.Conn, *net.Interface, error) {
 	_ = os.Setenv("luid", fmt.Sprintf("%d", tunDevice.(*wireguardtun.NativeTun).LUID()))
 
 	luid := winipcfg.LUID(tunDevice.(*wireguardtun.NativeTun).LUID())
-	if err = luid.AddIPAddress(net.IPNet{IP: ip, Mask: ipNet.Mask}); err != nil {
+
+	var prefix netip.Prefix
+	prefix, err = netip.ParsePrefix(cfg.Addr)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if err = luid.AddIPAddress(prefix); err != nil {
 		return nil, nil, err
 	}
 
@@ -52,7 +60,16 @@ func addTunRoutes(ifName winipcfg.LUID, gw string, routes ...IPRoute) error {
 		} else {
 			route.Gateway = net.IPv4(0, 0, 0, 0)
 		}
-		if err := ifName.AddRoute(*route.Dest, route.Gateway, 0); err != nil {
+		prefix, err := netip.ParsePrefix(route.Dest.String())
+		if err != nil {
+			return err
+		}
+		var addr netip.Addr
+		addr, err = netip.ParseAddr(route.Gateway.String())
+		if err != nil {
+			return err
+		}
+		if err = ifName.AddRoute(prefix, addr, 0); err != nil {
 			return err
 		}
 	}

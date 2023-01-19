@@ -6,6 +6,8 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/text/encoding/simplifiedchinese"
+
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
@@ -42,6 +44,19 @@ func AddFirewallRule() {
 	}
 }
 
+func DeleteFirewallRule() {
+	cmd := exec.Command("netsh", []string{
+		"advfirewall",
+		"firewall",
+		"delete",
+		"rule",
+		"name=" + config.ConfigMapPodTrafficManager,
+	}...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		log.Errorf("error while exec command: %s, out: %s, err: %v", cmd.Args, string(out), err)
+	}
+}
+
 func FindRule() bool {
 	cmd := exec.Command("netsh", []string{
 		"advfirewall",
@@ -51,7 +66,17 @@ func FindRule() bool {
 		"name=" + config.ConfigMapPodTrafficManager,
 	}...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Infof("find route out: %s error: %v", string(out), err)
+		s := string(out)
+		var b []byte
+		b, err = simplifiedchinese.GB18030.NewDecoder().Bytes(out)
+		if err == nil {
+			s = string(b)
+		}
+		b, err = simplifiedchinese.GBK.NewDecoder().Bytes(out)
+		if err == nil {
+			s = string(b)
+		}
+		log.Debugf("find route out: %s", s)
 		return false
 	} else {
 		return true
