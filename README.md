@@ -7,24 +7,16 @@ kubernetes cluster service can also access your local service
 
 ## QuickStart
 
+#### Install from GitHub release
+
+[link](https://github.com/wencaiwulue/kubevpn/releases/latest)
+
+#### Install from build it manually
+
 ```shell
 git clone https://github.com/wencaiwulue/kubevpn.git
 cd kubevpn
-make kubevpn-linux-amd64
-make kubevpn-darwin-amd64
-make kubevpn-windows-amd64
-```
-
-if you are using windows, you can build by this command:
-
-```shell
-go build github.com/wencaiwulue/kubevpn/cmd/kubevpn -o kubevpn.exe
-```
-
-if you installed Go 1.16+, you can use install it by this command directly:
-
-```shell
-go install github.com/wencaiwulue/kubevpn/cmd/kubevpn@latest
+make kubevpn
 ```
 
 ### Install bookinfo as demo application
@@ -39,19 +31,40 @@ kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/sa
 
 ```shell
 ➜  ~ kubevpn connect
-INFO[0000] [sudo kubevpn connect]
-Password:
-2022/02/05 12:09:22 connect.go:303: kubeconfig path: /Users/naison/.kube/config, namespace: default, services: []
-2022/02/05 12:09:28 remote.go:47: traffic manager not exist, try to create it...
-2022/02/05 12:09:28 remote.go:121: pod kubevpn.traffic.manager status is Pending
-2022/02/05 12:09:29 remote.go:121: pod kubevpn.traffic.manager status is Running
-Forwarding from 0.0.0.0:10800 -> 10800
-2022/02/05 12:09:31 connect.go:171: port forward ready
-2022/02/05 12:09:31 connect.go:193: your ip is 223.254.254.176
-2022/02/05 12:09:31 connect.go:197: tunnel connected
-Handling connection for 10800
-2022/02/05 12:09:31 connect.go:211: dns service ok
+get cidr from cluster info...
+get cidr from cluster info ok
+get cidr from cni...
+get cidr from svc...
+get cidr from svc ok
+traffic manager not exist, try to create it...
+pod [kubevpn-traffic-manager] status is Pending
+Container Reason Message
+
+pod [kubevpn-traffic-manager] status is Pending
+Container     Reason            Message
+control-plane ContainerCreating
+vpn           ContainerCreating
+webhook       ContainerCreating
+
+pod [kubevpn-traffic-manager] status is Running
+Container     Reason           Message
+control-plane ContainerRunning
+vpn           ContainerRunning
+webhook       ContainerRunning
+
+update ref count successfully
+port forward ready
+your ip is 223.254.0.101
+tunnel connected
+dns service ok
+
+---------------------------------------------------------------------------
+    Now you can access resources in the kubernetes cluster, enjoy it :)
+---------------------------------------------------------------------------
+
 ```
+
+**after you see this prompt, then leave this terminal alone, open a new terminal, continue operation**
 
 ```shell
 ➜  ~ kubectl get pods -o wide
@@ -126,22 +139,31 @@ reviews       ClusterIP   172.27.255.155   <none>        9080/TCP   9m6s    app=
 ### Reverse proxy
 
 ```shell
-➜  ~ kubevpn connect --workloads=service/productpage
-INFO[0000] [sudo kubevpn connect --workloads=service/productpage]
-Password:
-2022/02/05 12:18:22 connect.go:303: kubeconfig path: /Users/naison/.kube/config, namespace: default, services: [service/productpage]
-2022/02/05 12:18:28 remote.go:47: traffic manager not exist, try to create it...
-2022/02/05 12:18:28 remote.go:121: pod kubevpn.traffic.manager status is Pending
-2022/02/05 12:18:29 remote.go:121: pod kubevpn.traffic.manager status is Running
+➜  ~ kubevpn connect --workloads deployment/productpage
+got cidr from cache
+traffic manager not exist, try to create it...
+pod [kubevpn-traffic-manager] status is Running
+Container     Reason           Message
+control-plane ContainerRunning
+vpn           ContainerRunning
+webhook       ContainerRunning
+
+update ref count successfully
+Waiting for deployment "productpage" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "productpage" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "productpage" rollout to finish: 1 out of 2 new replicas have been updated...
 Waiting for deployment "productpage" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "productpage" rollout to finish: 1 old replicas are pending termination...
 deployment "productpage" successfully rolled out
-Forwarding from 0.0.0.0:10800 -> 10800
-2022/02/05 12:18:34 connect.go:171: port forward ready
-2022/02/05 12:18:34 connect.go:193: your ip is 223.254.254.176
-2022/02/05 12:18:34 connect.go:197: tunnel connected
-Handling connection for 10800
-2022/02/05 12:18:35 connect.go:211: dns service ok
+port forward ready
+your ip is 223.254.0.101
+tunnel connected
+dns service ok
+
+---------------------------------------------------------------------------
+    Now you can access resources in the kubernetes cluster, enjoy it :)
+---------------------------------------------------------------------------
+
 ```
 
 ```go
@@ -172,21 +194,31 @@ Hello world!%
 Only support HTTP and GRPC, with specific header `"a: 1"` will route to your local machine
 
 ```shell
-➜  ~ kubevpn connect --workloads=service/productpage --headers a=1
-INFO[0000] [sudo kubevpn connect --workloads=service/productpage --headers a=1]
-2022/02/05 12:22:28 connect.go:303: kubeconfig path: /Users/naison/.kube/config, namespace: default, services: [service/productpage]
-2022/02/05 12:22:34 remote.go:47: traffic manager not exist, try to create it...
-2022/02/05 12:22:34 remote.go:121: pod kubevpn.traffic.manager status is Pending
-2022/02/05 12:22:36 remote.go:121: pod kubevpn.traffic.manager status is Running
+➜  ~ kubevpn connect --workloads=deployment/productpage --headers a=1
+got cidr from cache
+traffic manager not exist, try to create it...
+pod [kubevpn-traffic-manager] status is Running
+Container     Reason           Message
+control-plane ContainerRunning
+vpn           ContainerRunning
+webhook       ContainerRunning
+
+update ref count successfully
+Waiting for deployment "productpage" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "productpage" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "productpage" rollout to finish: 1 out of 2 new replicas have been updated...
 Waiting for deployment "productpage" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "productpage" rollout to finish: 1 old replicas are pending termination...
 deployment "productpage" successfully rolled out
-Forwarding from 0.0.0.0:10800 -> 10800
-2022/02/05 12:22:43 connect.go:171: port forward ready
-2022/02/05 12:22:43 connect.go:193: your ip is 223.254.254.176
-2022/02/05 12:22:43 connect.go:197: tunnel connected
-Handling connection for 10800
-2022/02/05 12:22:43 connect.go:211: dns service ok
+port forward ready
+your ip is 223.254.0.101
+tunnel connected
+dns service ok
+
+---------------------------------------------------------------------------
+    Now you can access resources in the kubernetes cluster, enjoy it :)
+---------------------------------------------------------------------------
+
 ```
 
 ```shell
@@ -223,3 +255,41 @@ Hello world!%
 on Windows platform, you need to
 install [PowerShell](https://docs.microsoft.com/en-us/powershell/scripting/install/installing-powershell-on-windows?view=powershell-7.2)
 in advance
+
+## FAQ
+
+- What should I do if the dependent image cannot be pulled, or the inner environment cannot access docker.io?
+- Answer: In the network that can access docker.io, transfer the image in the command `kubevpn version` to your own
+  private image registry, and then add option `--image` to special image when starting the command.
+  Example:
+
+``` shell
+  ➜  ~ kubevpn version
+  KubeVPN: CLI
+  Version: v1.1.14
+  Image: docker.io/naison/kubevpn:v1.1.14
+  Branch: master
+  Git commit: 87dac42dad3d8f472a9dcdfc2c6cd801551f23d1
+  Built time: 2023-01-15 04:19:45
+  Built OS/Arch: linux/amd64
+  Built Go version: go1.18.10
+  ➜  ~
+  ```
+
+Image is `docker.io/naison/kubevpn:v1.1.14`, transfer this image to private docker registry
+
+```text
+docker pull docker.io/naison/kubevpn:v1.1.14
+docker tag docker.io/naison/kubevpn:v1.1.14 [docker registry]/[namespace]/[repo]:[tag]
+docker push [docker registry]/[namespace]/[repo]:[tag]
+```
+
+Then you can use this image, as follows:
+
+```text
+➜  ~ kubevpn connect --image [docker registry]/[namespace]/[repo]:[tag]
+got cidr from cache
+traffic manager not exist, try to create it...
+pod [kubevpn-traffic-manager] status is Running
+...
+```
