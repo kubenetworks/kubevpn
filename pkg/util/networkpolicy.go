@@ -40,7 +40,14 @@ func AddFirewallRule() {
 		"remoteip=" + config.CIDR.String() + ",LocalSubnet",
 	}...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Infof("error while exec command: %s, out: %s, err: %v", cmd.Args, string(out), err)
+		var s string
+		var b []byte
+		if b, err = decode(out); err == nil {
+			s = string(b)
+		} else {
+			s = string(out)
+		}
+		log.Infof("error while exec command: %s, out: %s", cmd.Args, s)
 	}
 }
 
@@ -53,7 +60,14 @@ func DeleteFirewallRule() {
 		"name=" + config.ConfigMapPodTrafficManager,
 	}...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Errorf("error while exec command: %s, out: %s, err: %v", cmd.Args, string(out), err)
+		var s string
+		var b []byte
+		if b, err = decode(out); err == nil {
+			s = string(b)
+		} else {
+			s = string(out)
+		}
+		log.Errorf("error while exec command: %s, out: %s", cmd.Args, s)
 	}
 }
 
@@ -68,12 +82,7 @@ func FindRule() bool {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		s := string(out)
 		var b []byte
-		b, err = simplifiedchinese.GB18030.NewDecoder().Bytes(out)
-		if err == nil {
-			s = string(b)
-		}
-		b, err = simplifiedchinese.GBK.NewDecoder().Bytes(out)
-		if err == nil {
+		if b, err = decode(out); err == nil {
 			s = string(b)
 		}
 		log.Debugf("find route out: %s", s)
@@ -81,4 +90,17 @@ func FindRule() bool {
 	} else {
 		return true
 	}
+}
+
+func decode(in []byte) (out []byte, err error) {
+	out = in
+	out, err = simplifiedchinese.GB18030.NewDecoder().Bytes(in)
+	if err == nil {
+		return
+	}
+	out, err = simplifiedchinese.GBK.NewDecoder().Bytes(in)
+	if err == nil {
+		return
+	}
+	return
 }
