@@ -14,7 +14,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: 1.18
+          go-version: 1.19
           check-latest: true
           cache: true
       - name: Push image to docker hub
@@ -31,7 +31,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: 1.18
+          go-version: 1.19
           check-latest: true
           cache: true
       - name: Setup Minikube
@@ -74,7 +74,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: 1.18
+          go-version: 1.19
           check-latest: true
           cache: true
       - uses: docker-practice/actions-setup-docker@master
@@ -130,7 +130,7 @@ jobs:
 #      - name: Set up Go
 #        uses: actions/setup-go@v2
 #        with:
-#          go-version: 1.18
+#          go-version: 1.19
 #      #      - run: |
 #      #          choco install docker-desktop
 #      #          docker version
