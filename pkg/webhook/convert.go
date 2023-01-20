@@ -26,43 +26,6 @@ func convertAdmissionRequestToV1(r *v1beta1.AdmissionRequest) *v1.AdmissionReque
 	}
 }
 
-func convertAdmissionRequestToV1beta1(r *v1.AdmissionRequest) *v1beta1.AdmissionRequest {
-	return &v1beta1.AdmissionRequest{
-		Kind:               r.Kind,
-		Namespace:          r.Namespace,
-		Name:               r.Name,
-		Object:             r.Object,
-		Resource:           r.Resource,
-		Operation:          v1beta1.Operation(r.Operation),
-		UID:                r.UID,
-		DryRun:             r.DryRun,
-		OldObject:          r.OldObject,
-		Options:            r.Options,
-		RequestKind:        r.RequestKind,
-		RequestResource:    r.RequestResource,
-		RequestSubResource: r.RequestSubResource,
-		SubResource:        r.SubResource,
-		UserInfo:           r.UserInfo,
-	}
-}
-
-func convertAdmissionResponseToV1(r *v1beta1.AdmissionResponse) *v1.AdmissionResponse {
-	var pt *v1.PatchType
-	if r.PatchType != nil {
-		t := v1.PatchType(*r.PatchType)
-		pt = &t
-	}
-	return &v1.AdmissionResponse{
-		UID:              r.UID,
-		Allowed:          r.Allowed,
-		AuditAnnotations: r.AuditAnnotations,
-		Patch:            r.Patch,
-		PatchType:        pt,
-		Result:           r.Result,
-		Warnings:         r.Warnings,
-	}
-}
-
 func convertAdmissionResponseToV1beta1(r *v1.AdmissionResponse) *v1beta1.AdmissionResponse {
 	var pt *v1beta1.PatchType
 	if r.PatchType != nil {

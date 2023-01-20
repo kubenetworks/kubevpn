@@ -40,7 +40,6 @@ func admitPods(ar v1.AdmissionReview) *v1.AdmissionResponse {
 	switch ar.Request.Operation {
 	case v1.Create:
 		from, _ := json.Marshal(pod)
-		fmt.Println(ar.String())
 		var found bool
 		for i := 0; i < len(pod.Spec.Containers); i++ {
 			if pod.Spec.Containers[i].Name == config.ContainerSidecarVPN {
@@ -150,42 +149,4 @@ func applyPodPatch(ar v1.AdmissionReview, shouldPatchPod func(*corev1.Pod) bool,
 		reviewResponse.PatchType = &pt
 	}
 	return &reviewResponse
-}
-
-// denySpecificAttachment denies `kubectl attach to-be-attached-pod -i -c=container1"
-// or equivalent client requests.
-func denySpecificAttachment(ar v1.AdmissionReview) *v1.AdmissionResponse {
-	klog.V(2).Info("handling attaching pods")
-	if ar.Request.Name != "to-be-attached-pod" {
-		return &v1.AdmissionResponse{Allowed: true}
-	}
-	podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-	if e, a := podResource, ar.Request.Resource; e != a {
-		err := fmt.Errorf("expect resource to be %s, got %s", e, a)
-		klog.Error(err)
-		return toV1AdmissionResponse(err)
-	}
-	if e, a := "attach", ar.Request.SubResource; e != a {
-		err := fmt.Errorf("expect subresource to be %s, got %s", e, a)
-		klog.Error(err)
-		return toV1AdmissionResponse(err)
-	}
-
-	raw := ar.Request.Object.Raw
-	podAttachOptions := corev1.PodAttachOptions{}
-	deserializer := codecs.UniversalDeserializer()
-	if _, _, err := deserializer.Decode(raw, nil, &podAttachOptions); err != nil {
-		klog.Error(err)
-		return toV1AdmissionResponse(err)
-	}
-	klog.V(2).Info(fmt.Sprintf("podAttachOptions=%#v\n", podAttachOptions))
-	if !podAttachOptions.Stdin || podAttachOptions.Container != "container1" {
-		return &v1.AdmissionResponse{Allowed: true}
-	}
-	return &v1.AdmissionResponse{
-		Allowed: false,
-		Result: &metav1.Status{
-			Message: "attaching to pod 'to-be-attached-pod' is not allowed",
-		},
-	}
 }
