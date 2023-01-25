@@ -70,7 +70,15 @@ func updateRefCount(configMapInterface v12.ConfigMapInterface, name string, incr
 	err = retry.OnError(
 		retry.DefaultRetry,
 		func(err error) bool {
-			return !k8serrors.IsNotFound(err)
+			notFound := k8serrors.IsNotFound(err)
+			if notFound {
+				return false
+			}
+			conflict := k8serrors.IsConflict(err)
+			if conflict {
+				return true
+			}
+			return false
 		},
 		func() (err error) {
 			var cm *corev1.ConfigMap

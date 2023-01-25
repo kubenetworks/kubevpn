@@ -1,7 +1,7 @@
 ARG BASE=github.com/wencaiwulue/kubevpn
 
 FROM envoyproxy/envoy:v1.21.1 AS envoy
-FROM golang:1.18 AS builder
+FROM golang:1.19 AS builder
 
 COPY . /go/src/$BASE
 
