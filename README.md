@@ -2,7 +2,7 @@
 
 [中文](README_ZH.md) | [English](README.md) | [Wiki](https://github.com/wencaiwulue/kubevpn/wiki/Architecture)
 
-A tools which can connect to kubernetes cluster network, you can access remote kubernetes cluster network, remote
+A tunnel tools which can connect to kubernetes cluster network, you can access remote kubernetes cluster network, remote
 kubernetes cluster service can also access your local service
 
 ## QuickStart

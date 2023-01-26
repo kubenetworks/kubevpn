@@ -4,7 +4,9 @@
 package util
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"syscall"
 
@@ -30,6 +32,30 @@ func RunWithElevated() {
 	if err != nil {
 		logrus.Warn(err)
 	}
+}
+
+// still can't use env KUBECONFIG
+func RunWithElevatedInnerExec() error {
+	var si windows.StartupInfo
+	var pi windows.ProcessInformation
+	path, err := exec.LookPath("Powershell")
+	if err != nil {
+		return err
+	}
+	executable, _ := os.Executable()
+	join := strings.Join(append([]string{executable}, os.Args[1:]...), " ")
+	// Powershell Start C:\Users\naison\Desktop\kubevpn-windows-amd64.exe  -Verb Runas -Wait -WindowStyle Hidden
+	c, _ := syscall.UTF16PtrFromString(fmt.Sprintf(`%s Start "%s" -Verb Runas`, path, join))
+	err = windows.CreateProcess(nil, c, nil, nil, true, windows.INHERIT_PARENT_AFFINITY, nil, nil, &si, &pi)
+	if err != nil {
+		return err
+	}
+	p, err := os.FindProcess(int(pi.ProcessId))
+	if err != nil {
+		return err
+	}
+	_, err = p.Wait()
+	return err
 }
 
 func IsAdmin() bool {
