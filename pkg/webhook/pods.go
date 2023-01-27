@@ -9,8 +9,6 @@ import (
 	"k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	"k8s.io/kubectl/pkg/cmd/util/podcmd"
 
@@ -19,7 +17,7 @@ import (
 )
 
 // only allow pods to pull images from specific registry.
-func admitPods(ar v1.AdmissionReview) *v1.AdmissionResponse {
+func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionResponse {
 	klog.V(2).Info("admitting pods")
 	podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 	if ar.Request.Resource != podResource {
@@ -47,12 +45,7 @@ func admitPods(ar v1.AdmissionReview) *v1.AdmissionResponse {
 					pair := pod.Spec.Containers[i].Env[j]
 					if pair.Name == "InboundPodTunIP" {
 						found = true
-						conf, err := rest.InClusterConfig()
-						if err != nil {
-							klog.Error(err)
-							return toV1AdmissionResponse(err)
-						}
-						clientset, err := kubernetes.NewForConfig(conf)
+						clientset, err := h.f.KubernetesClientSet()
 						if err != nil {
 							klog.Error(err)
 							return toV1AdmissionResponse(err)
@@ -92,12 +85,7 @@ func admitPods(ar v1.AdmissionReview) *v1.AdmissionResponse {
 				if envVar.Name == "InboundPodTunIP" {
 					ip, cidr, err := net.ParseCIDR(envVar.Value)
 					if err == nil {
-						conf, err := rest.InClusterConfig()
-						if err != nil {
-							klog.Error(err)
-							return toV1AdmissionResponse(err)
-						}
-						clientset, err := kubernetes.NewForConfig(conf)
+						clientset, err := h.f.KubernetesClientSet()
 						if err != nil {
 							klog.Error(err)
 							return toV1AdmissionResponse(err)

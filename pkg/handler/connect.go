@@ -250,7 +250,7 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 		Retries:   5,
 	}
 
-	log.Info("your ip is " + c.localTunIP.IP.String())
+	log.Debugf("your ip is %s", c.localTunIP.IP.String())
 	if err = Start(ctx, r); err != nil {
 		log.Errorf("error while create tunnel, err: %v", err)
 	} else {

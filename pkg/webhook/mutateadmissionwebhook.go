@@ -9,13 +9,17 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/spf13/cobra"
-
 	v1 "k8s.io/api/admission/v1"
 	"k8s.io/api/admission/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
+
+// admissionReviewHandler is a handler to handle business logic, holding an util.Factory
+type admissionReviewHandler struct {
+	f cmdutil.Factory
+}
 
 // admitv1beta1Func handles a v1beta1 admission
 type admitv1beta1Func func(v1beta1.AdmissionReview) *v1beta1.AdmissionResponse
@@ -116,23 +120,30 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	}
 }
 
-func servePods(w http.ResponseWriter, r *http.Request) {
-	serve(w, r, newDelegateToV1AdmitHandler(admitPods))
-}
-
-func Main(cmd *cobra.Command, args []string) {
-	http.HandleFunc("/pods", servePods)
-	http.HandleFunc("/readyz", func(w http.ResponseWriter, req *http.Request) { w.Write([]byte("ok")) })
-	cert, _ := base64.StdEncoding.DecodeString(os.Getenv("CERT"))
-	key, _ := base64.StdEncoding.DecodeString(os.Getenv("KEY"))
-	pair, _ := tls.X509KeyPair(cert, key)
+func Main(f cmdutil.Factory) error {
+	h := &admissionReviewHandler{f: f}
+	http.HandleFunc("/pods", func(w http.ResponseWriter, r *http.Request) {
+		serve(w, r, newDelegateToV1AdmitHandler(h.admitPods))
+	})
+	http.HandleFunc("/readyz", func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	})
+	cert, err := base64.StdEncoding.DecodeString(os.Getenv("CERT"))
+	if err != nil {
+		return err
+	}
+	key, err := base64.StdEncoding.DecodeString(os.Getenv("KEY"))
+	if err != nil {
+		return err
+	}
+	pair, err := tls.X509KeyPair(cert, key)
+	if err != nil {
+		return err
+	}
 	t := &tls.Config{Certificates: []tls.Certificate{pair}}
 	server := &http.Server{
 		Addr:      fmt.Sprintf(":%d", 80),
 		TLSConfig: t,
 	}
-	err := server.ListenAndServeTLS("", "")
-	if err != nil {
-		panic(err)
-	}
+	return server.ListenAndServeTLS("", "")
 }
