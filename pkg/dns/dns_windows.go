@@ -15,18 +15,20 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
+
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
-func SetupDNS(config *miekgdns.ClientConfig, _ []string) error {
-	getenv := os.Getenv("luid")
-	parseUint, err := strconv.ParseUint(getenv, 10, 64)
+func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string) error {
+	env := os.Getenv(config.EnvTunNameOrLUID)
+	parseUint, err := strconv.ParseUint(env, 10, 64)
 	if err != nil {
 		log.Warningln(err)
 		return err
 	}
 	luid := winipcfg.LUID(parseUint)
 	var servers []netip.Addr
-	for _, s := range config.Servers {
+	for _, s := range clientConfig.Servers {
 		var addr netip.Addr
 		addr, err = netip.ParseAddr(s)
 		if err != nil {
@@ -35,14 +37,14 @@ func SetupDNS(config *miekgdns.ClientConfig, _ []string) error {
 		}
 		servers = append(servers, addr)
 	}
-	err = luid.SetDNS(windows.AF_INET, servers, config.Search)
+	err = luid.SetDNS(windows.AF_INET, servers, clientConfig.Search)
 	_ = exec.CommandContext(context.Background(), "ipconfig", "/flushdns").Run()
 	if err != nil {
 		log.Warningln(err)
 		return err
 	}
 	//_ = updateNicMetric(tunName)
-	_ = addNicSuffixSearchList(config.Search)
+	_ = addNicSuffixSearchList(clientConfig.Search)
 	return nil
 }
 

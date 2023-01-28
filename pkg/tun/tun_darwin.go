@@ -1,8 +1,12 @@
+//go:build !linux && !windows && darwin
+// +build !linux,!windows,darwin
+
 package tun
 
 import (
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -31,11 +35,14 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	cmd := fmt.Sprintf("ifconfig %s inet %s %s mtu %d up", ifce.Name(), cfg.Addr, ip.String(), mtu)
-	log.Debug("[tun]", cmd)
+	log.Debugf("[tun] %s", cmd)
 	args := strings.Split(cmd, " ")
 	if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
+	}
+	if err = os.Setenv(config.EnvTunNameOrLUID, ifce.Name()); err != nil {
+		return nil, nil, err
 	}
 
 	if err = addTunRoutes(ifce.Name(), cfg.Routes...); err != nil {
@@ -60,7 +67,7 @@ func addTunRoutes(ifName string, routes ...IPRoute) error {
 			continue
 		}
 		cmd := fmt.Sprintf("route add -net %s -interface %s", route.Dest.String(), ifName)
-		log.Debug("[tun]", cmd)
+		log.Debugf("[tun] %s", cmd)
 		args := strings.Split(cmd, " ")
 		if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
 			return fmt.Errorf("%s: %v", cmd, er)

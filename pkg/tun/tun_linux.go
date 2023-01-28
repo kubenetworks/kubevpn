@@ -1,9 +1,13 @@
+//go:build linux && !windows && !darwin
+// +build linux,!windows,!darwin
+
 package tun
 
 import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"syscall"
 
 	"github.com/docker/libcontainer/netlink"
@@ -41,24 +45,28 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	cmd := fmt.Sprintf("ip link set dev %s mtu %d", ifce.Name(), mtu)
-	log.Debug("[tun]", cmd)
+	log.Debugf("[tun] %s", cmd)
 	if er := link.SetLinkMTU(mtu); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
 	}
 
 	cmd = fmt.Sprintf("ip address add %s dev %s", cfg.Addr, ifce.Name())
-	log.Debug("[tun]", cmd)
+	log.Debugf("[tun] %s", cmd)
 	if er := link.SetLinkIp(ip, ipNet); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
 	}
 
 	cmd = fmt.Sprintf("ip link set dev %s up", ifce.Name())
-	log.Debug("[tun]", cmd)
+	log.Debugf("[tun] %s", cmd)
 	if er := link.SetLinkUp(); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
+	}
+
+	if err = os.Setenv(config.EnvTunNameOrLUID, ifce.Name()); err != nil {
+		return nil, nil, err
 	}
 
 	if err = addTunRoutes(ifce.Name(), cfg.Routes...); err != nil {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	probing "github.com/prometheus-community/pro-bing"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -143,4 +144,20 @@ func TestPatchAnnotation(t *testing.T) {
 		panic(err)
 	}
 	fmt.Println(object.(*unstructured.Unstructured).GetAnnotations())
+}
+
+func TestPing(t *testing.T) {
+	ip := "10.233.98.197"
+	ping, _ := Ping(ip)
+	pinger, err := probing.NewPinger(ip)
+	if err != nil {
+		panic(err)
+	}
+	pinger.Count = 3
+	err = pinger.Run() // Blocks until finished.
+	if err != nil {
+		panic(err)
+	}
+	stats := pinger.Statistics() // get send/receive/duplicate/rtt stats
+	fmt.Println(ping)
 }

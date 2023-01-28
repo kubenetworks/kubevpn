@@ -31,6 +31,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/core"
 	"github.com/wencaiwulue/kubevpn/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/pkg/route"
+	"github.com/wencaiwulue/kubevpn/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -132,7 +133,10 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err != nil {
 		return err
 	}
-	c.deleteFirewallRuleAndSetupDNS(ctx)
+	go c.addRouteDynamic(ctx)
+	c.deleteFirewallRule(ctx)
+	c.setupDNS()
+	log.Info("dns service ok")
 	//c.detectConflictDevice()
 	return
 }
@@ -259,7 +263,60 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 	return
 }
 
-func (c *ConnectOptions) deleteFirewallRuleAndSetupDNS(ctx context.Context) {
+// Listen all pod, add route if needed
+func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
+	for ctx.Err() == nil {
+		func() {
+			w, err := c.clientset.CoreV1().Pods(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{Watch: true, TimeoutSeconds: pointer.Int64(30)})
+			if err != nil {
+				log.Debugf("wait pod failed, err: %v", err)
+				return
+			}
+			defer w.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case e, ok := <-w.ResultChan():
+					if !ok || e.Type != watch.Added {
+						continue
+					}
+					var pod *v1.Pod
+					pod, ok = e.Object.(*v1.Pod)
+					if !ok {
+						continue
+					}
+					if pod.Spec.HostNetwork {
+						continue
+					}
+					ip := pod.Status.PodIP
+					if ip == "" {
+						continue
+					}
+					if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
+						continue
+					}
+					go func(phase v1.PodPhase, name, ip string) {
+						// if pod is running and ping is ok, not need add route
+						if phase == v1.PodRunning {
+							if ok, _ := util.Ping(ip); ok {
+								return
+							}
+						}
+						err := tun.AddRoutes(tun.IPRoute{Dest: &net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(32, 32)}})
+						if err != nil {
+							log.Debugf("[route] add route failed, pod: %s, ip: %s,err: %v", name, ip, err)
+						} else {
+							log.Debugf("[route] add route ok, pod: %s, ip: %s", name, ip)
+						}
+					}(pod.Status.Phase, pod.Name, ip)
+				}
+			}
+		}()
+	}
+}
+
+func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
 	if util.IsWindows() {
 		if !util.FindRule() {
 			util.AddFirewallRule()
@@ -268,16 +325,14 @@ func (c *ConnectOptions) deleteFirewallRuleAndSetupDNS(ctx context.Context) {
 		go util.DeleteWindowsFirewallRule(ctx)
 	}
 	go util.Heartbeats(ctx)
-	c.setupDNS()
-	log.Info("dns service ok")
 }
 
 func (c *ConnectOptions) detectConflictDevice() {
-	tun := os.Getenv("tunName")
-	if len(tun) == 0 {
+	tunName := os.Getenv(config.EnvTunNameOrLUID)
+	if len(tunName) == 0 {
 		return
 	}
-	if err := route.DetectAndDisableConflictDevice(tun); err != nil {
+	if err := route.DetectAndDisableConflictDevice(tunName); err != nil {
 		log.Warnf("error occours while disable conflict devices, err: %v", err)
 	}
 }

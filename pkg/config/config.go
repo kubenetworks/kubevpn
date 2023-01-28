@@ -29,6 +29,8 @@ const (
 	Proc = "/proc"
 
 	CniNetName = "cni-net-dir-kubevpn"
+
+	EnvTunNameOrLUID = "TunNameOrLUID"
 )
 
 var (

@@ -34,11 +34,15 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	cmd := fmt.Sprintf("ifconfig %s inet %s mtu %d up", ifce.Name(), cfg.Addr, mtu)
-	log.Debug("[tun]", cmd)
+	log.Debugf("[tun] %s", cmd)
 	args := strings.Split(cmd, " ")
 	if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
+	}
+
+	if err = os.Setenv(config.EnvTunNameOrLUID, ifce.Name()); err != nil {
+		return nil, nil, err
 	}
 
 	if err = addTunRoutes(ifce.Name(), cfg.Routes...); err != nil {

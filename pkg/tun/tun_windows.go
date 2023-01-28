@@ -1,3 +1,6 @@
+//go:build !linux && windows && !darwin
+// +build !linux,windows,!darwin
+
 package tun
 
 import (
@@ -5,12 +8,15 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
 	wireguardtun "golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
+
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
 func createTun(cfg Config) (net.Conn, *net.Interface, error) {
@@ -26,9 +32,8 @@ func createTun(cfg Config) (net.Conn, *net.Interface, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create TUN device: %w", err)
 	}
-	_ = os.Setenv("luid", fmt.Sprintf("%d", tunDevice.(*wireguardtun.NativeTun).LUID()))
 
-	luid := winipcfg.LUID(tunDevice.(*wireguardtun.NativeTun).LUID())
+	ifName := winipcfg.LUID(tunDevice.(*wireguardtun.NativeTun).LUID())
 
 	var prefix netip.Prefix
 	prefix, err = netip.ParsePrefix(cfg.Addr)
@@ -36,25 +41,35 @@ func createTun(cfg Config) (net.Conn, *net.Interface, error) {
 		return nil, nil, err
 	}
 
-	if err = luid.AddIPAddress(prefix); err != nil {
+	if err = ifName.AddIPAddress(prefix); err != nil {
 		return nil, nil, err
 	}
 
-	if err = addTunRoutes(luid, cfg.Gateway, cfg.Routes...); err != nil {
+	luid := fmt.Sprintf("%d", tunDevice.(*wireguardtun.NativeTun).LUID())
+	if err = os.Setenv(config.EnvTunNameOrLUID, luid); err != nil {
+		return nil, nil, err
+	}
+	if err = addTunRoutes(luid /*cfg.Gateway,*/, cfg.Routes...); err != nil {
 		return nil, nil, err
 	}
 
-	row2, _ := luid.Interface()
-	iface, _ := net.InterfaceByIndex(int(row2.InterfaceIndex))
+	row, _ := ifName.Interface()
+	iface, _ := net.InterfaceByIndex(int(row.InterfaceIndex))
 	return &winTunConn{ifce: tunDevice, addr: &net.IPAddr{IP: ip}}, iface, nil
 }
 
-func addTunRoutes(ifName winipcfg.LUID, gw string, routes ...IPRoute) error {
+func addTunRoutes(luid string, routes ...IPRoute) error {
+	parseUint, err := strconv.ParseUint(luid, 10, 64)
+	if err != nil {
+		return err
+	}
+	ifName := winipcfg.LUID(parseUint)
 	_ = ifName.FlushRoutes(windows.AF_INET)
 	for _, route := range routes {
 		if route.Dest == nil {
 			continue
 		}
+		var gw string
 		if gw != "" {
 			route.Gateway = net.ParseIP(gw)
 		} else {

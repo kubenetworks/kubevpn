@@ -18,9 +18,8 @@ import (
 
 	dockerterm "github.com/moby/term"
 	"github.com/pkg/errors"
+	probing "github.com/prometheus-community/pro-bing"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/icmp"
-	"golang.org/x/net/ipv4"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -305,44 +304,19 @@ func BytesToInt(b []byte) uint32 {
 }
 
 func Ping(targetIP string) (bool, error) {
-	conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+	pinger, err := probing.NewPinger(targetIP)
 	if err != nil {
 		return false, err
 	}
-	defer conn.Close()
-
-	message := icmp.Message{
-		Type: ipv4.ICMPTypeEcho, Code: 0,
-		Body: &icmp.Echo{
-			ID:   os.Getpid() & 0xffff,
-			Seq:  1,
-			Data: []byte("HELLO-R-U-THERE"),
-		},
-	}
-	data, err := message.Marshal(nil)
-	if err != nil {
-		return false, nil
-	}
-	_, err = conn.WriteTo(data, &net.IPAddr{IP: net.ParseIP(targetIP)})
+	pinger.SetPrivileged(true)
+	pinger.Count = 3
+	pinger.Timeout = time.Millisecond * 1500
+	err = pinger.Run() // Blocks until finished.
 	if err != nil {
 		return false, err
 	}
-
-	rb := make([]byte, 1500)
-	n, _, err := conn.ReadFrom(rb)
-	if err != nil {
-		return false, err
-	}
-	rm, err := icmp.ParseMessage(ipv4.ICMPTypeEchoReply.Protocol(), rb[:n])
-	if err != nil {
-		return false, err
-	}
-	switch rm.Type {
-	case ipv4.ICMPTypeEchoReply:
-		return true, nil
-	default:
-		return false, nil
-	}
+	stat := pinger.Statistics()
+	return stat.PacketsRecv == stat.PacketsSent, err
 }
 
 func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, workloads string, timeout time.Duration) error {
@@ -463,13 +437,13 @@ func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string)) (st
 }
 
 func Heartbeats(ctx context.Context) {
-	c2 := make(chan struct{}, 1)
-	c2 <- struct{}{}
+	c := make(chan struct{}, 1)
+	c <- struct{}{}
 	for {
 		select {
 		case <-time.Tick(time.Second * 15):
-			c2 <- struct{}{}
-		case <-c2:
+			c <- struct{}{}
+		case <-c:
 			for i := 0; i < 4; i++ {
 				_, _ = Ping(config.RouterIP.String())
 			}

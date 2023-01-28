@@ -8,6 +8,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/songgao/water"
+
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
 // Config is the config for TUN device.
@@ -38,15 +40,11 @@ func Listener(config Config) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	ln.addr = conn.LocalAddr()
-
 	addrs, _ := ifce.Addrs()
-	_ = os.Setenv("tunName", ifce.Name)
 	log.Debugf("[tun] %s: name: %s, mtu: %d, addrs: %s", conn.LocalAddr(), ifce.Name, ifce.MTU, addrs)
 
+	ln.addr = conn.LocalAddr()
 	ln.conns <- conn
-
 	return ln, nil
 }
 
@@ -115,4 +113,10 @@ func (c *tunConn) SetWriteDeadline(time.Time) error {
 type IPRoute struct {
 	Dest    *net.IPNet
 	Gateway net.IP
+}
+
+// AddRoutes for outer called
+func AddRoutes(routes ...IPRoute) error {
+	env := os.Getenv(config.EnvTunNameOrLUID)
+	return addTunRoutes(env, routes...)
 }

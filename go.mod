@@ -36,6 +36,7 @@ require (
 	github.com/containernetworking/cni v1.1.2
 	github.com/hashicorp/go-version v1.6.0
 	github.com/mattbaird/jsonpatch v0.0.0-20200820163806-098863c1fc24
+	github.com/prometheus-community/pro-bing v0.1.0
 	github.com/schollz/progressbar/v3 v3.13.0
 	github.com/stretchr/testify v1.8.1
 	golang.org/x/exp v0.0.0-20230113213754-f9f960f08ad4
@@ -95,6 +96,7 @@ require (
 	go.starlark.net v0.0.0-20230112144946-fae38c8a6d89 // indirect
 	golang.org/x/crypto v0.5.0 // indirect
 	golang.org/x/mod v0.7.0 // indirect
+	golang.org/x/sync v0.1.0 // indirect
 	golang.org/x/term v0.4.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	golang.org/x/tools v0.5.0 // indirect
