@@ -62,9 +62,9 @@ func GetCIDRElegant(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 }
 
 // GetCIDRFromResourceUgly
-// use podIP/16 and serviceIP/16 as cidr
+// use podIP/24 and serviceIP/16 as cidr
 func GetCIDRFromResourceUgly(clientset *kubernetes.Clientset, namespace string) ([]*net.IPNet, error) {
-	var podC, svcC *net.IPNet
+	var cidrs []*net.IPNet
 	// (2) get pod CIDR from pod ip, why doing this: notice that node's pod cidr is not correct in minikube
 	// ➜  ~ kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}'
 	//10.244.0.0/24%
@@ -86,9 +86,8 @@ func GetCIDRFromResourceUgly(clientset *kubernetes.Clientset, namespace string) 
 			continue
 		}
 		if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
-			mask := net.CIDRMask(16, 32)
-			podC = &net.IPNet{IP: ip.Mask(mask), Mask: mask}
-			break
+			mask := net.CIDRMask(24, 32)
+			cidrs = append(cidrs, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
 		}
 	}
 
@@ -97,13 +96,9 @@ func GetCIDRFromResourceUgly(clientset *kubernetes.Clientset, namespace string) 
 	for _, service := range serviceList.Items {
 		if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
 			mask := net.CIDRMask(16, 32)
-			svcC = &net.IPNet{IP: ip.Mask(mask), Mask: mask}
-			break
+			cidrs = append(cidrs, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
 		}
 	}
 
-	if podC == nil || svcC == nil {
-		return nil, fmt.Errorf("can not found any CIDR")
-	}
-	return []*net.IPNet{svcC, podC}, nil
+	return cidrs, nil
 }
