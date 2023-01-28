@@ -515,6 +515,11 @@ func (c *ConnectOptions) GetCIDR(ctx context.Context) (err error) {
 		for _, cidr := range c.cidrs {
 			s.Insert(cidr.String())
 		}
+		cidrs, _ := util.GetCIDRFromResourceUgly(c.clientset, c.Namespace)
+		for _, cidr := range cidrs {
+			s.Insert(cidr.String())
+		}
+		c.cidrs = append(c.cidrs, cidrs...)
 		_ = c.dhcp.Set(config.KeyClusterIPv4POOLS, strings.Join(s.List(), " "))
 		return
 	}
