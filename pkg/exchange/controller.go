@@ -38,11 +38,12 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig) {
 				Value: c.InboundPodTunIP,
 			},
 			{
-				Name:  "Route",
-				Value: c.Route,
+				Name:  "CIDR",
+				Value: config.CIDR.String(),
 			},
 		},
 		Command: []string{"/bin/sh", "-c"},
+		// https://www.netfilter.org/documentation/HOWTO/NAT-HOWTO-6.html#ss6.2
 		Args: []string{`
 sysctl net.ipv4.ip_forward=1
 sysctl -w net.ipv4.conf.all.route_localnet=1
@@ -53,7 +54,7 @@ iptables -P FORWARD ACCEPT
 iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIP}
 iptables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
 iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIP}
-kubevpn serve -L "tun://0.0.0.0:8421/${TrafficManagerRealIP}:8422?net=${InboundPodTunIP}&route=${Route}" --debug=true`,
+kubevpn serve -L "tun://0.0.0.0:8421/${TrafficManagerRealIP}:8422?net=${InboundPodTunIP}&route=${CIDR}" --debug=true`,
 		},
 		SecurityContext: &corev1.SecurityContext{
 			Capabilities: &corev1.Capabilities{

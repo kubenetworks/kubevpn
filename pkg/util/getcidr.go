@@ -77,7 +77,7 @@ func getCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 		return nil, err
 	}
 
-	var cmd = `grep -a -R "service-cluster-ip-range\|cluster-ip-range\|cluster-cidr\|cidr" /etc/cni/proc/*/cmdline | grep -a -v grep`
+	var cmd = `grep -a -R "service-cluster-ip-range\|cluster-ip-range\|cluster-cidr" /etc/cni/proc/*/cmdline | grep -a -v grep`
 
 	var result []*net.IPNet
 	content, err := Shell(clientset, restclient, restconfig, pod.Name, pod.Namespace, cmd)

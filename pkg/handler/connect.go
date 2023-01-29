@@ -59,13 +59,9 @@ func (c *ConnectOptions) createRemoteInboundPod(ctx1 context.Context) (err error
 
 	for _, workload := range c.Workloads {
 		if len(workload) > 0 {
-			//virtualShadowIp, _ := c.dhcp.RentIPRandom()
-			//c.usedIPs = append(c.usedIPs, virtualShadowIp)
 			configInfo := util.PodRouteConfig{
-				LocalTunIP: c.localTunIP.IP.String(),
-				//InboundPodTunIP:      virtualShadowIp.String(),
+				LocalTunIP:           c.localTunIP.IP.String(),
 				TrafficManagerRealIP: c.routerIP.String(),
-				Route:                config.CIDR.String(),
 			}
 			RollbackFuncList = append(RollbackFuncList, func() {
 				r := c.factory.NewBuilder().
@@ -117,7 +113,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err != nil {
 		return
 	}
-	c.routerIP, err = CreateOutboundPod(ctx, c.factory, c.clientset, c.Namespace, trafficMangerNet.String(), c.cidrs)
+	c.routerIP, err = CreateOutboundPod(ctx, c.factory, c.clientset, c.Namespace, trafficMangerNet.String())
 	if err != nil {
 		return
 	}
@@ -242,13 +238,13 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 	if util.IsWindows() {
 		c.localTunIP.Mask = net.CIDRMask(0, 32)
 	}
-	var list = []string{config.CIDR.String()}
+	var list = sets.NewString(config.CIDR.String())
 	for _, ipNet := range c.cidrs {
-		list = append(list, ipNet.String())
+		list.Insert(ipNet.String())
 	}
 	r := Route{
 		ServeNodes: []string{
-			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", c.localTunIP.String(), strings.Join(list, ",")),
+			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", c.localTunIP.String(), strings.Join(list.List(), ",")),
 		},
 		ChainNode: forwardAddress,
 		Retries:   5,

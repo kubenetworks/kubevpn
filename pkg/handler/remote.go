@@ -39,7 +39,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace string, trafficManagerIP string, nodeCIDR []*net.IPNet) (ip net.IP, err error) {
+func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace string, trafficManagerIP string) (ip net.IP, err error) {
 	service, err := clientset.CoreV1().Services(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err == nil {
 		_, err = polymorphichelpers.AttachablePodForObjectFn(factory, service, 2*time.Second)
@@ -174,9 +174,9 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	}
 
 	var s = []string{config.CIDR.String()}
-	for _, ipNet := range nodeCIDR {
-		s = append(s, ipNet.String())
-	}
+	//for _, ipNet := range nodeCIDR {
+	//	s = append(s, ipNet.String())
+	//}
 
 	var Resources = v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
@@ -190,7 +190,7 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	}
 
 	h := config.ConfigMapPodTrafficManager + "." + namespace + "." + "svc"
-	cert, key, _ := cert.GenerateSelfSignedCertKey(h, nil, nil)
+	certificate, key, _ := cert.GenerateSelfSignedCertKey(h, nil, nil)
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -304,7 +304,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug
 							Env: []v1.EnvVar{
 								{
 									Name:  "CERT",
-									Value: base64.StdEncoding.EncodeToString(cert),
+									Value: base64.StdEncoding.EncodeToString(certificate),
 								}, {
 									Name:  "KEY",
 									Value: base64.StdEncoding.EncodeToString(key),
@@ -373,7 +373,7 @@ out:
 					Path:      pointer.String("/pods"),
 					Port:      pointer.Int32(80),
 				},
-				CABundle: cert,
+				CABundle: certificate,
 			},
 			Rules: []admissionv1.RuleWithOperations{{
 				Operations: []admissionv1.OperationType{admissionv1.Create, admissionv1.Delete},
