@@ -191,7 +191,7 @@ Hello world!%
 
 ### Reverse proxy with mesh
 
-Only support HTTP and GRPC, with specific header `"a: 1"` will route to your local machine
+Only support HTTP, GRPC and WebSocket, with specific header `"a: 1"` will route to your local machine
 
 ```shell
 ➜  ~ kubevpn connect --workloads=deployment/productpage --headers a=1

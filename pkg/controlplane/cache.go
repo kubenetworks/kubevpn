@@ -9,9 +9,13 @@ import (
 	endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	route "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
+	corsv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/cors/v3"
+	grpcwebv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/grpc_web/v3"
+	routerv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/router/v3"
 	httpinspector "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/listener/http_inspector/v3"
 	httpconnectionmanager "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	tcpproxy "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
+	httpv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/upstreams/http/v3"
 	matcher "github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
@@ -94,12 +98,13 @@ func ToEndPoint(clusterName string, localTunIP string, port int32) *endpoint.Clu
 }
 
 func ToCluster(clusterName string) *cluster.Cluster {
+	anyFunc := func(m proto.Message) *anypb.Any {
+		pbst, _ := anypb.New(m)
+		return pbst
+	}
 	return &cluster.Cluster{
 		Name:                 clusterName,
-		ConnectTimeout:       durationpb.New(5 * time.Second),
 		ClusterDiscoveryType: &cluster.Cluster_Type{Type: cluster.Cluster_EDS},
-		LbPolicy:             cluster.Cluster_ROUND_ROBIN,
-		DnsLookupFamily:      cluster.Cluster_V4_ONLY,
 		EdsClusterConfig: &cluster.Cluster_EdsClusterConfig{
 			EdsConfig: &core.ConfigSource{
 				ResourceApiVersion: resource.DefaultAPIVersion,
@@ -108,6 +113,16 @@ func ToCluster(clusterName string) *cluster.Cluster {
 				},
 			},
 		},
+		ConnectTimeout: durationpb.New(5 * time.Second),
+		LbPolicy:       cluster.Cluster_ROUND_ROBIN,
+		TypedExtensionProtocolOptions: map[string]*anypb.Any{
+			"envoy.extensions.upstreams.http.v3.HttpProtocolOptions": anyFunc(&httpv3.HttpProtocolOptions{
+				UpstreamProtocolOptions: &httpv3.HttpProtocolOptions_UseDownstreamProtocolConfig{
+					UseDownstreamProtocolConfig: &httpv3.HttpProtocolOptions_UseDownstreamHttpConfig{},
+				},
+			}),
+		},
+		DnsLookupFamily: cluster.Cluster_V4_ONLY,
 	}
 }
 
@@ -193,7 +208,7 @@ func ToListener(listenerName string, routeName string, port int32, p corev1.Prot
 		protocol = core.SocketAddress_TCP
 	}
 
-	any := func(m proto.Message) *anypb.Any {
+	anyFunc := func(m proto.Message) *anypb.Any {
 		pbst, _ := anypb.New(m)
 		return pbst
 	}
@@ -221,9 +236,27 @@ func ToListener(listenerName string, routeName string, port int32, p corev1.Prot
 				RouteConfigName: routeName,
 			},
 		},
-		HttpFilters: []*httpconnectionmanager.HttpFilter{{
-			Name: wellknown.Router,
-		}},
+		// "details": "Error: terminal filter named envoy.filters.http.router of type envoy.filters.http.router must be the last filter in a http filter chain."
+		HttpFilters: []*httpconnectionmanager.HttpFilter{
+			{
+				Name: wellknown.GRPCWeb,
+				ConfigType: &httpconnectionmanager.HttpFilter_TypedConfig{
+					TypedConfig: anyFunc(&grpcwebv3.GrpcWeb{}),
+				},
+			},
+			{
+				Name: wellknown.CORS,
+				ConfigType: &httpconnectionmanager.HttpFilter_TypedConfig{
+					TypedConfig: anyFunc(&corsv3.Cors{}),
+				},
+			},
+			{
+				Name: wellknown.Router,
+				ConfigType: &httpconnectionmanager.HttpFilter_TypedConfig{
+					TypedConfig: anyFunc(&routerv3.Router{}),
+				},
+			},
+		},
 		StreamIdleTimeout: durationpb.New(0),
 		UpgradeConfigs: []*httpconnectionmanager.HttpConnectionManager_UpgradeConfig{{
 			UpgradeType: "websocket",
@@ -263,7 +296,7 @@ func ToListener(listenerName string, routeName string, port int32, p corev1.Prot
 					{
 						Name: wellknown.HTTPConnectionManager,
 						ConfigType: &listener.Filter_TypedConfig{
-							TypedConfig: any(httpManager),
+							TypedConfig: anyFunc(httpManager),
 						},
 					},
 				},
@@ -273,7 +306,7 @@ func ToListener(listenerName string, routeName string, port int32, p corev1.Prot
 					{
 						Name: wellknown.TCPProxy,
 						ConfigType: &listener.Filter_TypedConfig{
-							TypedConfig: any(tcpConfig),
+							TypedConfig: anyFunc(tcpConfig),
 						},
 					},
 				},
@@ -283,7 +316,7 @@ func ToListener(listenerName string, routeName string, port int32, p corev1.Prot
 			{
 				Name: wellknown.HttpInspector,
 				ConfigType: &listener.ListenerFilter_TypedConfig{
-					TypedConfig: any(&httpinspector.HttpInspector{}),
+					TypedConfig: anyFunc(&httpinspector.HttpInspector{}),
 				},
 			},
 		},
