@@ -30,7 +30,9 @@ const (
 
 	CniNetName = "cni-net-dir-kubevpn"
 
-	EnvTunNameOrLUID = "TunNameOrLUID"
+	// env name
+	EnvTunNameOrLUID   = "TunNameOrLUID"
+	EnvInboundPodTunIP = "InboundPodTunIP"
 )
 
 var (

@@ -34,7 +34,7 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig) {
 				Value: c.TrafficManagerRealIP,
 			},
 			{
-				Name:  "InboundPodTunIP",
+				Name:  config.EnvInboundPodTunIP,
 				Value: c.InboundPodTunIP,
 			},
 			{

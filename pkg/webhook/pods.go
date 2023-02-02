@@ -43,7 +43,7 @@ func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionR
 			if pod.Spec.Containers[i].Name == config.ContainerSidecarVPN {
 				for j := 0; j < len(pod.Spec.Containers[i].Env); j++ {
 					pair := pod.Spec.Containers[i].Env[j]
-					if pair.Name == "InboundPodTunIP" {
+					if pair.Name == config.EnvInboundPodTunIP && pair.Value == "" {
 						found = true
 						clientset, err := h.f.KubernetesClientSet()
 						if err != nil {
@@ -82,7 +82,7 @@ func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionR
 		name, _ := podcmd.FindContainerByName(&pod, config.ContainerSidecarVPN)
 		if name != nil {
 			for _, envVar := range name.Env {
-				if envVar.Name == "InboundPodTunIP" {
+				if envVar.Name == config.EnvInboundPodTunIP && envVar.Value != "" {
 					ip, cidr, err := net.ParseCIDR(envVar.Value)
 					if err == nil {
 						clientset, err := h.f.KubernetesClientSet()
