@@ -10,16 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        os-arch: [
-          kubevpn-darwin-amd64,
-          kubevpn-darwin-arm64,
-          kubevpn-windows-amd64.exe,
-          kubevpn-windows-arm64.exe,
-          kubevpn-windows-386.exe,
-          kubevpn-linux-amd64,
-          kubevpn-linux-arm64,
-          kubevpn-linux-386,
-        ]
+        os: [ darwin, windows, linux ]
+        arch: [ amd64, arm64, 386 ]
+        exclude:
+          - os: darwin
+            arch: 386
     steps:
       - name: Set up Go
         uses: actions/setup-go@v2
@@ -30,11 +25,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Build kubevpn-all-arch
+      - name: Build kubevpn
         run: |
-          git tag `echo ${{ github.event.client_payload.tag }} | sed 's/refs\/tags\///' | sed 's/\(.*\)-.*/\1/' | sed 's/-[0-9]*$//' || true` || true
+          TAG=`echo ${{ github.event.client_payload.tag }} | sed 's/refs\/tags\///' | sed 's/\(.*\)-.*/\1/' | sed 's/-[0-9]*$//' || true`
+          git tag ${TAG} || true
           export GitHubOAuthToken=${{ secrets.KUBEVPN_UPGRADE_OAUTH }}
-          make all-kubevpn
+          make kubevpn-${{ matrix.os }}-${{ matrix.arch }}
+          SUFFIX=""
+          if [${{ matrix.os }} == "windows"]; then
+            SUFFIX=".exe"
+          fi
+          
+          shasum -a 256 ./bin/kubevpn-${{ matrix.os }}-${{ matrix.arch }}${SUFFIX} | awk '{print $1}' > checksums.txt
+          zip -r kubevpn_${TAG}_${{ matrix.os }}_${{ matrix.arch }}.zip ./bin/kubevpn-${{ matrix.os }}-${{ matrix.arch }}${SUFFIX} LICENSE README.md README_ZH.md checksums.txt
 
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
@@ -42,6 +45,26 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ github.event.client_payload.url }}
-          asset_path: ./bin/${{ matrix.os-arch }}
-          asset_name: ${{ matrix.os-arch }}
-          asset_content_type: application/octet-stream
+          asset_path: ./kubevpn_`echo ${{ github.event.client_payload.tag }} | sed 's/refs\/tags\///' | sed 's/\(.*\)-.*/\1/' | sed 's/-[0-9]*$//' || true`_${{ matrix.os }}_${{ matrix.arch }}.zip
+          asset_name: kubevpn_`echo ${{ github.event.client_payload.tag }} | sed 's/refs\/tags\///' | sed 's/\(.*\)-.*/\1/' | sed 's/-[0-9]*$//' || true`_${{ matrix.os }}_${{ matrix.arch }}.zip
+          asset_content_type: application/zip
+  wait:
+    needs: build
+    name: Update brew
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.19
+          check-latest: true
+          cache: true
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Update new version in krew-index
+        uses: rajatjindal/krew-release-bot@v0.0.43
+        with:
+          krew_template_file: .github/krew.yaml
+

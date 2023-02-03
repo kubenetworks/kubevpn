@@ -33,10 +33,10 @@ GO111MODULE=on
 GOPROXY=https://goproxy.cn,direct
 
 .PHONY: all
-all: all-kubevpn container
+all: kubevpn-all container
 
-.PHONY: all-kubevpn
-all-kubevpn: kubevpn-darwin-amd64 kubevpn-darwin-arm64 \
+.PHONY: kubevpn-all
+kubevpn-all: kubevpn-darwin-amd64 kubevpn-darwin-arm64 \
 kubevpn-windows-amd64 kubevpn-windows-386 kubevpn-windows-arm64 \
 kubevpn-linux-amd64 kubevpn-linux-386 kubevpn-linux-arm64
 
@@ -47,39 +47,39 @@ kubevpn:
 # ---------darwin-----------
 .PHONY: kubevpn-darwin-amd64
 kubevpn-darwin-amd64:
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-darwin-amd64 ${FOLDER}
-	chmod +x $(OUTPUT_DIR)/kubevpn-darwin-amd64
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn ${FOLDER}
+	chmod +x $(OUTPUT_DIR)/kubevpn
 .PHONY: kubevpn-darwin-arm64
 kubevpn-darwin-arm64:
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-darwin-arm64 ${FOLDER}
-	chmod +x $(OUTPUT_DIR)/kubevpn-darwin-arm64
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn ${FOLDER}
+	chmod +x $(OUTPUT_DIR)/kubevpn
 # ---------darwin-----------
 
 # ---------windows-----------
 .PHONY: kubevpn-windows-amd64
 kubevpn-windows-amd64:
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-windows-amd64.exe ${FOLDER}
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn.exe ${FOLDER}
 .PHONY: kubevpn-windows-arm64
 kubevpn-windows-arm64:
-	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-windows-arm64.exe ${FOLDER}
+	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn.exe ${FOLDER}
 .PHONY: kubevpn-windows-386
 kubevpn-windows-386:
-	CGO_ENABLED=0 GOOS=windows GOARCH=386 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-windows-386.exe ${FOLDER}
+	CGO_ENABLED=0 GOOS=windows GOARCH=386 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn.exe ${FOLDER}
 # ---------windows-----------
 
 # ---------linux-----------
 .PHONY: kubevpn-linux-amd64
 kubevpn-linux-amd64:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-linux-amd64 ${FOLDER}
-	chmod +x $(OUTPUT_DIR)/kubevpn-linux-amd64
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn ${FOLDER}
+	chmod +x $(OUTPUT_DIR)/kubevpn
 .PHONY: kubevpn-linux-arm64
 kubevpn-linux-arm64:
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-linux-arm64 ${FOLDER}
-	chmod +x $(OUTPUT_DIR)/kubevpn-linux-arm64
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn ${FOLDER}
+	chmod +x $(OUTPUT_DIR)/kubevpn
 .PHONY: kubevpn-linux-386
 kubevpn-linux-386:
-	CGO_ENABLED=0 GOOS=linux GOARCH=386 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn-linux-386 ${FOLDER}
-	chmod +x $(OUTPUT_DIR)/kubevpn-linux-386
+	CGO_ENABLED=0 GOOS=linux GOARCH=386 go build ${LDFLAGS} -o $(OUTPUT_DIR)/kubevpn ${FOLDER}
+	chmod +x $(OUTPUT_DIR)/kubevpn
 # ---------linux-----------
 
 .PHONY: container
