@@ -112,7 +112,7 @@ func Main(current string, client *http.Client) error {
 	if err != nil {
 		return err
 	}
-	err = os.Rename(temp.Name(), curFolder)
+	err = os.Rename(file.Name(), curFolder)
 	return err
 }
 
@@ -137,11 +137,7 @@ func getManifest(httpCli *http.Client) (version string, url string, err error) {
 	}
 	version = m.TagName
 	for _, asset := range m.Assets {
-		name := fmt.Sprintf("%s-%s-%s", "kubevpn", runtime.GOOS, runtime.GOARCH)
-		if runtime.GOOS == "windows" {
-			name = fmt.Sprintf("%s-%s-%s.exe", "kubevpn", runtime.GOOS, runtime.GOARCH)
-		}
-		if name == asset.Name {
+		if strings.Contains(asset.Name, runtime.GOARCH) && strings.Contains(asset.Name, runtime.GOOS) {
 			url = asset.BrowserDownloadUrl
 			break
 		}
