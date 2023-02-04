@@ -173,11 +173,6 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		return nil, err
 	}
 
-	var s = []string{config.CIDR.String()}
-	//for _, ipNet := range nodeCIDR {
-	//	s = append(s, ipNet.String())
-	//}
-
 	var Resources = v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
 			v1.ResourceCPU:    resource.MustParse("128m"),
@@ -242,7 +237,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug
 							Env: []v1.EnvVar{
 								{
 									Name:  "CIDR",
-									Value: strings.Join(s, ","),
+									Value: config.CIDR.String(),
 								},
 								{
 									Name:  "TrafficManagerIP",
@@ -365,7 +360,7 @@ out:
 			Namespace: namespace,
 		},
 		Webhooks: []admissionv1.MutatingWebhook{{
-			Name: config.ConfigMapPodTrafficManager + ".naison.io", // 没意义的
+			Name: config.ConfigMapPodTrafficManager + ".naison.io", // no sense
 			ClientConfig: admissionv1.WebhookClientConfig{
 				Service: &admissionv1.ServiceReference{
 					Namespace: namespace,
@@ -391,10 +386,9 @@ out:
 			TimeoutSeconds:          nil,
 			AdmissionReviewVersions: []string{"v1", "v1beta1"},
 			ReinvocationPolicy:      (*admissionv1.ReinvocationPolicyType)(pointer.String(string(admissionv1.NeverReinvocationPolicy))),
-		},
-		},
+		}},
 	}, metav1.CreateOptions{})
-	if err != nil {
+	if err != nil && !k8serrors.IsForbidden(err) && !k8serrors.IsAlreadyExists(err) {
 		return nil, fmt.Errorf("failed to create MutatingWebhookConfigurations, err: %v", err)
 	}
 	_, err = updateRefCount(clientset.CoreV1().ConfigMaps(namespace), config.ConfigMapPodTrafficManager, 1)

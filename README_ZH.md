@@ -190,7 +190,7 @@ Hello world!%
 
 ### 反向代理支持 service mesh
 
-只支持 HTTP, GRPC 和 WebSocket, 携带了指定 header `"a: 1"` 的流量，将会路由到本地
+支持 HTTP, GRPC 和 WebSocket 等, 携带了指定 header `"a: 1"` 的流量，将会路由到本地
 
 ```shell
 ➜  ~ kubevpn connect --workloads=deployment/productpage --headers a=1
