@@ -50,8 +50,8 @@ jobs:
         run: |
           export VERSION=test
           make kubevpn-linux-amd64
-          chmod +x ./bin/kubevpn-linux-amd64
-          cp ./bin/kubevpn-linux-amd64 /usr/local/bin/kubevpn
+          chmod +x ./bin/kubevpn
+          cp ./bin/kubevpn /usr/local/bin/kubevpn
 
       - name: Wait for pods reviews to be ready
         run: |
@@ -108,8 +108,8 @@ jobs:
         run: |
           export VERSION=test
           make kubevpn-darwin-amd64
-          chmod +x ./bin/kubevpn-darwin-amd64
-          cp ./bin/kubevpn-darwin-amd64 /usr/local/bin/kubevpn
+          chmod +x ./bin/kubevpn
+          cp ./bin/kubevpn /usr/local/bin/kubevpn
 
       - name: Wait for pods reviews to be ready
         run: |

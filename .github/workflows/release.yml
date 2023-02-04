@@ -63,8 +63,13 @@ jobs:
           make container
 
       - name: Repository Dispatch
-        uses: peter-evans/repository-dispatch@v1
+        uses: aurelien-baudet/workflow-dispatch@v2
         with:
+          workflow: Upload_release
           token: ${{ secrets.REPOSITORYDISPATCH }}
-          event-type: release-event
-          client-payload: '{"url": "${{ steps.create_release.outputs.upload_url }}", "tag": "${{ github.ref }}"}'
+          inputs: '{"url": "${{ steps.create_release.outputs.upload_url }}", "tag": "${{ github.ref_name }}"}'
+
+      - name: Update new version in krew-index
+        uses: rajatjindal/krew-release-bot@v0.0.43
+        with:
+          krew_template_file: .github/krew.yaml

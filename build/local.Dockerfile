@@ -8,5 +8,5 @@ RUN apt-get clean && apt-get update && apt-get install -y wget dnsutils vim curl
 
 WORKDIR /app
 
-COPY bin/kubevpn-linux-amd64 /usr/local/bin/kubevpn
+COPY bin/kubevpn /usr/local/bin/kubevpn
 COPY --from=envoy /usr/local/bin/envoy /usr/local/bin/envoy
