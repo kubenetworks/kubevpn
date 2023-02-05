@@ -10,12 +10,23 @@
 
 [链接](https://github.com/wencaiwulue/kubevpn/releases/latest)
 
+#### 从 自定义 Krew 仓库安装
+
+```shell
+(
+  kubectl krew index add kubevpn https://github.com/wencaiwulue/kubevpn.git && \
+  kubectl krew install kubevpn/kubevpn && kubectl kubevpn 
+) 
+```
+
 ### 自己构建二进制文件
 
 ```shell
-git clone https://github.com/wencaiwulue/kubevpn.git
-cd kubevpn
-make kubevpn
+(
+  git clone https://github.com/wencaiwulue/kubevpn.git && \
+  cd kubevpn && make kubevpn && ./bin/kubevpn
+)
+
 ```
 
 ### 安装 bookinfo 作为 demo 应用

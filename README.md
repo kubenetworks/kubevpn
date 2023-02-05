@@ -9,14 +9,25 @@ kubernetes cluster service can also access your local service
 
 #### Install from GitHub release
 
-[link](https://github.com/wencaiwulue/kubevpn/releases/latest)
+[LINK](https://github.com/wencaiwulue/kubevpn/releases/latest)
+
+#### Install from custom krew index
+
+```shell
+(
+  kubectl krew index add kubevpn https://github.com/wencaiwulue/kubevpn.git && \
+  kubectl krew install kubevpn/kubevpn && kubectl kubevpn 
+) 
+```
 
 #### Install from build it manually
 
 ```shell
-git clone https://github.com/wencaiwulue/kubevpn.git
-cd kubevpn
-make kubevpn
+(
+  git clone https://github.com/wencaiwulue/kubevpn.git && \
+  cd kubevpn && make kubevpn && ./bin/kubevpn
+)
+
 ```
 
 ### Install bookinfo as demo application

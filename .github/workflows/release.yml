@@ -73,3 +73,4 @@ jobs:
         uses: rajatjindal/krew-release-bot@v0.0.43
         with:
           krew_template_file: .github/krew.yaml
+          debug: true
