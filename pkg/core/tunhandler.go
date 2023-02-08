@@ -3,21 +3,17 @@ package core
 import (
 	"context"
 	"errors"
-	"net"
-	"sync"
-	"time"
-
-	"github.com/shadowsocks/go-shadowsocks2/shadowaead"
-	log "github.com/sirupsen/logrus"
-	"github.com/songgao/water/waterutil"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+	"net"
+	"sync"
 
-	"github.com/wencaiwulue/kubevpn/pkg/config"
+	log "github.com/sirupsen/logrus"
+	"github.com/songgao/water/waterutil"
 )
 
 func ipToTunRouteKey(ip net.IP) string {
-	return ip.To16().String()
+	return ip.String()
 }
 
 type tunHandler struct {
@@ -37,71 +33,55 @@ func TunHandler(chain *Chain, node *Node) Handler {
 	}
 }
 
-func (h *tunHandler) Handle(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
+func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
+	defer tun.Close()
 	var err error
-	var raddr net.Addr
+	var remoteAddr net.Addr
 	if addr := h.node.Remote; addr != "" {
-		raddr, err = net.ResolveUDPAddr("udp", addr)
+		remoteAddr, err = net.ResolveUDPAddr("udp", addr)
 		if err != nil {
-			log.Debugf("[tun] %s: remote addr: %v", conn.LocalAddr(), err)
+			log.Errorf("[tun] %s: remote addr: %v", tun.LocalAddr(), err)
 			return
 		}
 	}
 
-	var tempDelay time.Duration
-	for ctx.Err() == nil {
+	for {
 		err = func() error {
 			var err error
-			var pc net.PacketConn
-			if raddr != nil && !h.chain.IsEmpty() {
+			var packetConn net.PacketConn
+			if remoteAddr != nil && !h.chain.IsEmpty() {
 				cc, err := h.chain.DialContext(ctx)
 				if err != nil {
 					return err
 				}
 				var ok bool
-				pc, ok = cc.(net.PacketConn)
+				packetConn, ok = cc.(net.PacketConn)
 				if !ok {
 					err = errors.New("not a packet connection")
-					log.Debugf("[tun] %s - %s: %s", conn.LocalAddr(), raddr, err)
+					log.Errorf("[tun] %s - %s: %s", tun.LocalAddr(), remoteAddr, err)
 					return err
 				}
 			} else {
-				laddr, _ := net.ResolveUDPAddr("udp", h.node.Addr)
-				pc, err = net.ListenUDP("udp", laddr)
+				var lc net.ListenConfig
+				packetConn, err = lc.ListenPacket(ctx, "udp", h.node.Addr)
 			}
 			if err != nil {
 				return err
 			}
 
-			return h.transportTun(ctx, conn, pc, raddr)
+			return h.transportTun(ctx, tun, packetConn, remoteAddr)
 		}()
 		if err != nil {
-			log.Debugf("[tun] %s: %v", conn.LocalAddr(), err)
+			log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
 		}
 
 		select {
 		case <-h.chExit:
-			return
 		case <-ctx.Done():
-			h.chExit <- struct{}{}
+			return
 		default:
 			log.Debugf("next loop, err: %v", err)
 		}
-
-		if err != nil {
-			if tempDelay == 0 {
-				tempDelay = 1000 * time.Millisecond
-			} else {
-				tempDelay *= 2
-			}
-			if max := 6 * time.Second; tempDelay > max {
-				tempDelay = max
-			}
-			time.Sleep(tempDelay)
-			continue
-		}
-		tempDelay = 0
 	}
 }
 
@@ -119,24 +99,17 @@ func (h *tunHandler) findRouteFor(dst net.IP) net.Addr {
 	return nil
 }
 
-func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.PacketConn, raddr net.Addr) error {
+func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.PacketConn, remoteAddr net.Addr) error {
 	errChan := make(chan error, 2)
-	defer func() {
-		if c, ok := conn.(interface{ CloseRead() error }); ok {
-			_ = c.CloseRead()
-		}
-		if c, ok := conn.(interface{ CloseWrite() error }); ok {
-			_ = c.CloseWrite()
-		}
-		_ = conn.Close()
-	}()
+	defer conn.Close()
 	go func() {
 		b := SPool.Get().([]byte)
 		defer SPool.Put(b)
+		offset := 8
 
-		for ctx.Err() == nil {
+		for {
 			err := func() error {
-				n, err := tun.Read(b[:])
+				n, err := tun.Read(b[offset:])
 				if err != nil {
 					select {
 					case h.chExit <- struct{}{}:
@@ -146,8 +119,8 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 				}
 
 				// client side, deliver packet directly.
-				if raddr != nil {
-					_, err = conn.WriteTo(b[:n], raddr)
+				if remoteAddr != nil {
+					_, err = conn.WriteTo(b[:n], remoteAddr)
 					return err
 				}
 
@@ -155,25 +128,21 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 				if waterutil.IsIPv4(b[:n]) {
 					header, err := ipv4.ParseHeader(b[:n])
 					if err != nil {
-						log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
+						log.Errorf("[tun] %s: %v", tun.LocalAddr(), err)
 						return nil
 					}
-					if config.Debug {
-						log.Debugf("[tun] %s", header.String())
-					}
+					log.Debugf("[tun] %s", header.String())
 					src, dst = header.Src, header.Dst
 				} else if waterutil.IsIPv6(b[:n]) {
 					header, err := ipv6.ParseHeader(b[:n])
 					if err != nil {
-						log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
+						log.Errorf("[tun] %s: %v", tun.LocalAddr(), err)
 						return nil
 					}
-					if config.Debug {
-						log.Debugf("[tun] %s", header.String())
-					}
+					log.Debugf("[tun] %s", header.String())
 					src, dst = header.Src, header.Dst
 				} else {
-					log.Debugf("[tun] unknown packet")
+					log.Errorf("[tun] unknown packet")
 					return nil
 				}
 
@@ -183,15 +152,16 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 					return nil
 				}
 
-				if config.Debug {
-					log.Debugf("[tun] find route: %s -> %s", dst, addr)
-				}
+				log.Debugf("[tun] find route: %s -> %s", dst, addr)
 				_, err = conn.WriteTo(b[:n], addr)
 				return err
 			}()
 
 			if err != nil {
-				errChan <- err
+				select {
+				case errChan <- err:
+				default:
+				}
 				return
 			}
 		}
@@ -201,15 +171,15 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 		b := LPool.Get().([]byte)
 		defer LPool.Put(b)
 
-		for ctx.Err() == nil {
+		for {
 			err := func() error {
-				n, addr, err := conn.ReadFrom(b[:])
-				if err != nil && err != shadowaead.ErrShortPacket {
+				n, srcAddr, err := conn.ReadFrom(b[:])
+				if err != nil {
 					return err
 				}
 
 				// client side, deliver packet to tun device.
-				if raddr != nil {
+				if remoteAddr != nil {
 					_, err = tun.Write(b[:n])
 					return err
 				}
@@ -218,42 +188,36 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 				if waterutil.IsIPv4(b[:n]) {
 					header, err := ipv4.ParseHeader(b[:n])
 					if err != nil {
-						log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
+						log.Errorf("[tun] %s: %v", tun.LocalAddr(), err)
 						return nil
 					}
-					if config.Debug {
-						log.Debugf("[tun] %s", header.String())
-					}
+					log.Debugf("[tun] %s", header.String())
 					src, dst = header.Src, header.Dst
 				} else if waterutil.IsIPv6(b[:n]) {
 					header, err := ipv6.ParseHeader(b[:n])
 					if err != nil {
-						log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
+						log.Errorf("[tun] %s: %v", tun.LocalAddr(), err)
 						return nil
 					}
-					if config.Debug {
-						log.Debugf("[tun] %s", header.String())
-					}
+					log.Debugf("[tun] %s", header.String())
 					src, dst = header.Src, header.Dst
 				} else {
-					log.Debugf("[tun] unknown packet")
+					log.Errorf("[tun] unknown packet")
 					return nil
 				}
 
 				routeKey := ipToTunRouteKey(src)
-				if actual, loaded := h.routes.LoadOrStore(routeKey, addr); loaded {
-					if actual.(net.Addr).String() != addr.String() {
-						log.Debugf("[tun] update route: %s -> %s (old %s)", src, addr, actual.(net.Addr))
-						h.routes.Store(routeKey, addr)
+				if actual, loaded := h.routes.LoadOrStore(routeKey, srcAddr); loaded {
+					if actual.(net.Addr).String() != srcAddr.String() {
+						log.Debugf("[tun] update route: %s -> %s (old %s)", src, srcAddr, actual.(net.Addr))
+						h.routes.Store(routeKey, srcAddr)
 					}
 				} else {
-					log.Debugf("[tun] new route: %s -> %s", src, addr)
+					log.Debugf("[tun] new route: %s -> %s", src, srcAddr)
 				}
 
 				if routeToAddr := h.findRouteFor(dst); routeToAddr != nil {
-					if config.Debug {
-						log.Debugf("[tun] find route: %s -> %s", dst, routeToAddr)
-					}
+					log.Debugf("[tun] find route: %s -> %s", dst, routeToAddr)
 					_, err = conn.WriteTo(b[:n], routeToAddr)
 					return err
 				}
@@ -269,7 +233,10 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 			}()
 
 			if err != nil {
-				errChan <- err
+				select {
+				case errChan <- err:
+				default:
+				}
 				return
 			}
 		}

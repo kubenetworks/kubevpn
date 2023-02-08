@@ -7,8 +7,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-
-	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
 type fakeUDPTunnelConnector struct {
@@ -33,19 +31,14 @@ func TCPHandler() Handler {
 
 func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
-	if config.Debug {
-		log.Debugf("[tcpserver] %s -> %s\n", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
-	}
+	log.Debugf("[tcpserver] %s -> %s\n", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 	// serve tunnel udp, tunnel <-> remote, handle tunnel udp request
 	udpConn, err := net.DialUDP("udp", nil, Server8422)
 	if err != nil {
-		log.Debugf("[tcpserver] udp-tun %s -> %s : %s", tcpConn.RemoteAddr(), udpConn.LocalAddr(), err)
+		log.Errorf("[tcpserver] udp-tun %s -> %s : %s", tcpConn.RemoteAddr(), udpConn.LocalAddr(), err)
 		return
 	}
 	defer udpConn.Close()
-	if config.Debug {
-		log.Debugf("[tcpserver] udp-tun %s <- %s\n", tcpConn.RemoteAddr(), udpConn.LocalAddr())
-	}
 	log.Debugf("[tcpserver] udp-tun %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 	_ = h.tunnelServerUDP(tcpConn, udpConn)
 	log.Debugf("[tcpserver] udp-tun %s >-< %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
@@ -73,9 +66,7 @@ func (h *fakeUdpHandler) tunnelServerUDP(tcpConn net.Conn, udpConn *net.UDPConn)
 				errChan <- err
 				return
 			}
-			if config.Debug {
-				log.Debugf("[tcpserver] udp-tun %s >>> %s length: %d", tcpConn.RemoteAddr(), Server8422, len(dgram.Data))
-			}
+			log.Debugf("[tcpserver] udp-tun %s >>> %s length: %d", tcpConn.RemoteAddr(), Server8422, len(dgram.Data))
 		}
 	}()
 
@@ -98,9 +89,7 @@ func (h *fakeUdpHandler) tunnelServerUDP(tcpConn net.Conn, udpConn *net.UDPConn)
 				errChan <- err
 				return
 			}
-			if config.Debug {
-				log.Debugf("[tcpserver] udp-tun %s <<< %s length: %d", tcpConn.RemoteAddr(), dgram.Addr(), len(dgram.Data))
-			}
+			log.Debugf("[tcpserver] udp-tun %s <<< %s length: %d", tcpConn.RemoteAddr(), dgram.Addr(), len(dgram.Data))
 		}
 	}()
 	return <-errChan
@@ -140,18 +129,4 @@ func (c *fakeUDPTunnelConn) WriteTo(b []byte, _ net.Addr) (int, error) {
 
 func (c *fakeUDPTunnelConn) Close() error {
 	return c.Conn.Close()
-}
-
-func (c *fakeUDPTunnelConn) CloseWrite() error {
-	if cc, ok := c.Conn.(interface{ CloseWrite() error }); ok {
-		return cc.CloseWrite()
-	}
-	return nil
-}
-
-func (c *fakeUDPTunnelConn) CloseRead() error {
-	if cc, ok := c.Conn.(interface{ CloseRead() error }); ok {
-		return cc.CloseRead()
-	}
-	return nil
 }

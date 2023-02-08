@@ -12,7 +12,6 @@ require (
 	github.com/milosgajdos/tenus v0.0.3
 	github.com/moby/term v0.0.0-20221205130635-1aeaba878587
 	github.com/pkg/errors v0.9.1
-	github.com/shadowsocks/go-shadowsocks2 v0.1.5
 	github.com/sirupsen/logrus v1.9.0
 	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
 	github.com/spf13/cobra v1.6.1
@@ -88,13 +87,11 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/riobard/go-bloom v0.0.0-20200614022211-cdc8013cb5b3 // indirect
 	github.com/rivo/uniseg v0.4.3 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/xlab/treeprint v1.1.0 // indirect
 	go.starlark.net v0.0.0-20230112144946-fae38c8a6d89 // indirect
-	golang.org/x/crypto v0.5.0 // indirect
 	golang.org/x/mod v0.7.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
 	golang.org/x/term v0.4.0 // indirect

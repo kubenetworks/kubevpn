@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/containernetworking/cni/pkg/types"
 	log "github.com/sirupsen/logrus"
 	"github.com/songgao/water"
 
@@ -17,7 +18,7 @@ type Config struct {
 	Name    string
 	Addr    string
 	MTU     int
-	Routes  []IPRoute
+	Routes  []types.Route
 	Gateway string
 }
 
@@ -109,14 +110,8 @@ func (c *tunConn) SetWriteDeadline(time.Time) error {
 	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("write deadline not supported")}
 }
 
-// IPRoute is an IP routing entry.
-type IPRoute struct {
-	Dest    *net.IPNet
-	Gateway net.IP
-}
-
 // AddRoutes for outer called
-func AddRoutes(routes ...IPRoute) error {
+func AddRoutes(routes ...types.Route) error {
 	env := os.Getenv(config.EnvTunNameOrLUID)
 	return addTunRoutes(env, routes...)
 }

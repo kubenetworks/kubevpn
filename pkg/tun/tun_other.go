@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/containernetworking/cni/pkg/types"
 	log "github.com/sirupsen/logrus"
 	"github.com/songgao/water"
 
@@ -61,12 +62,12 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	return
 }
 
-func addTunRoutes(ifName string, routes ...IPRoute) error {
+func addTunRoutes(ifName string, routes ...types.Route) error {
 	for _, route := range routes {
-		if route.Dest == nil {
+		if route.Dst.String() == "" {
 			continue
 		}
-		cmd := fmt.Sprintf("route add -net %s -interface %s", route.Dest.String(), ifName)
+		cmd := fmt.Sprintf("route add -net %s -interface %s", route.Dst.String(), ifName)
 		log.Debugf("[tun] %s", cmd)
 		args := strings.Split(cmd, " ")
 		if er := exec.Command(args[0], args[1:]...).Run(); er != nil {

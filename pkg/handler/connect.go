@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/containernetworking/cni/pkg/types"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
@@ -30,7 +30,6 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/core"
 	"github.com/wencaiwulue/kubevpn/pkg/dns"
-	"github.com/wencaiwulue/kubevpn/pkg/route"
 	"github.com/wencaiwulue/kubevpn/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -133,7 +132,6 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	c.deleteFirewallRule(ctx)
 	c.setupDNS()
 	log.Info("dns service ok")
-	//c.detectConflictDevice()
 	return
 }
 
@@ -144,7 +142,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, port string) error {
 	podInterface := c.clientset.CoreV1().Pods(c.Namespace)
 	go func() {
 		var first = pointer.Bool(true)
-		for ctx.Err() == nil {
+		for {
 			func() {
 				podList, err := c.GetRunningPodList()
 				if err != nil {
@@ -261,7 +259,7 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 
 // Listen all pod, add route if needed
 func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
-	for ctx.Err() == nil {
+	for {
 		func() {
 			w, err := c.clientset.CoreV1().Pods(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{Watch: true, TimeoutSeconds: pointer.Int64(30)})
 			if err != nil {
@@ -299,7 +297,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
 								return
 							}
 						}
-						err := tun.AddRoutes(tun.IPRoute{Dest: &net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(32, 32)}})
+						err := tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(32, 32)}})
 						if err != nil {
 							log.Debugf("[route] add route failed, pod: %s, ip: %s,err: %v", name, ip, err)
 						} else {
@@ -321,16 +319,6 @@ func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
 		go util.DeleteWindowsFirewallRule(ctx)
 	}
 	go util.Heartbeats(ctx)
-}
-
-func (c *ConnectOptions) detectConflictDevice() {
-	tunName := os.Getenv(config.EnvTunNameOrLUID)
-	if len(tunName) == 0 {
-		return
-	}
-	if err := route.DetectAndDisableConflictDevice(tunName); err != nil {
-		log.Warnf("error occours while disable conflict devices, err: %v", err)
-	}
 }
 
 func (c *ConnectOptions) setupDNS() {

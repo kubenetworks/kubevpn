@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/containernetworking/cni/pkg/types"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
 	wireguardtun "golang.zx2c4.com/wireguard/tun"
@@ -58,7 +59,7 @@ func createTun(cfg Config) (net.Conn, *net.Interface, error) {
 	return &winTunConn{ifce: tunDevice, addr: &net.IPAddr{IP: ip}}, iface, nil
 }
 
-func addTunRoutes(luid string, routes ...IPRoute) error {
+func addTunRoutes(luid string, routes ...types.Route) error {
 	parseUint, err := strconv.ParseUint(luid, 10, 64)
 	if err != nil {
 		return err
@@ -66,21 +67,21 @@ func addTunRoutes(luid string, routes ...IPRoute) error {
 	ifName := winipcfg.LUID(parseUint)
 	_ = ifName.FlushRoutes(windows.AF_INET)
 	for _, route := range routes {
-		if route.Dest == nil {
+		if route.Dst.String() == "" {
 			continue
 		}
 		var gw string
 		if gw != "" {
-			route.Gateway = net.ParseIP(gw)
+			route.GW = net.ParseIP(gw)
 		} else {
-			route.Gateway = net.IPv4(0, 0, 0, 0)
+			route.GW = net.IPv4(0, 0, 0, 0)
 		}
-		prefix, err := netip.ParsePrefix(route.Dest.String())
+		prefix, err := netip.ParsePrefix(route.Dst.String())
 		if err != nil {
 			return err
 		}
 		var addr netip.Addr
-		addr, err = netip.ParseAddr(route.Gateway.String())
+		addr, err = netip.ParseAddr(route.GW.String())
 		if err != nil {
 			return err
 		}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"syscall"
 
+	"github.com/containernetworking/cni/pkg/types"
 	"github.com/docker/libcontainer/netlink"
 	"github.com/milosgajdos/tenus"
 	log "github.com/sirupsen/logrus"
@@ -85,14 +86,14 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	return
 }
 
-func addTunRoutes(ifName string, routes ...IPRoute) error {
+func addTunRoutes(ifName string, routes ...types.Route) error {
 	for _, route := range routes {
-		if route.Dest == nil {
+		if route.Dst.String() == "" {
 			continue
 		}
-		cmd := fmt.Sprintf("ip route add %s dev %s", route.Dest.String(), ifName)
+		cmd := fmt.Sprintf("ip route add %s dev %s", route.Dst.String(), ifName)
 		log.Debugf("[tun] %s", cmd)
-		if err := netlink.AddRoute(route.Dest.String(), "", "", ifName); err != nil && !errors.Is(err, syscall.EEXIST) {
+		if err := netlink.AddRoute(route.Dst.String(), "", "", ifName); err != nil && !errors.Is(err, syscall.EEXIST) {
 			return fmt.Errorf("%s: %v", cmd, err)
 		}
 	}

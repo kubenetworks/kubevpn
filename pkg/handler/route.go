@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/containernetworking/cni/pkg/types"
 	"github.com/pkg/errors"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
@@ -12,6 +13,10 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/tun"
 )
 
+// Route example:
+// -L "tcp://:10800" -L "tun://:8422?net=223.254.0.100/16"
+// -L "tun:/10.233.24.133:8422?net=223.254.0.102/16&route=223.254.0.0/16"
+// -L "tun:/127.0.0.1:8422?net=223.254.0.102/16&route=223.254.0.0/16,10.233.0.0/16" -F "tcp://127.0.0.1:10800"
 type Route struct {
 	ServeNodes []string // -L tun
 	ChainNode  string   // -F tcp
@@ -78,7 +83,7 @@ func (r *Route) GenerateServers() ([]core.Server, error) {
 	return servers, nil
 }
 
-func parseIPRoutes(routeStringList string) (routes []tun.IPRoute) {
+func parseIPRoutes(routeStringList string) (routes []types.Route) {
 	if len(routeStringList) == 0 {
 		return
 	}
@@ -86,7 +91,7 @@ func parseIPRoutes(routeStringList string) (routes []tun.IPRoute) {
 	routeList := strings.Split(routeStringList, ",")
 	for _, route := range routeList {
 		if _, ipNet, _ := net.ParseCIDR(strings.TrimSpace(route)); ipNet != nil {
-			routes = append(routes, tun.IPRoute{Dest: ipNet})
+			routes = append(routes, types.Route{Dst: *ipNet})
 		}
 	}
 	return

@@ -148,7 +148,6 @@ func TestPatchAnnotation(t *testing.T) {
 
 func TestPing(t *testing.T) {
 	ip := "10.233.98.197"
-	ping, _ := Ping(ip)
 	pinger, err := probing.NewPinger(ip)
 	if err != nil {
 		panic(err)
@@ -159,5 +158,5 @@ func TestPing(t *testing.T) {
 		panic(err)
 	}
 	stats := pinger.Statistics() // get send/receive/duplicate/rtt stats
-	fmt.Println(ping)
+	fmt.Println(stats)
 }
