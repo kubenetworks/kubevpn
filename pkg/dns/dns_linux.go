@@ -19,6 +19,17 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string) error {
 	if len(tunName) == 0 {
 		tunName = "tun0"
 	}
+	// try to solve:
+	// sudo systemd-resolve --set-dns 172.28.64.10 --interface tun0 --set-domain=vke-system.svc.cluster.local --set-domain=svc.cluster.local --set-domain=cluster.local
+	//Failed to set DNS configuration: Unit dbus-org.freedesktop.resolve1.service not found.
+	// ref: https://superuser.com/questions/1427311/activation-via-systemd-failed-for-unit-dbus-org-freedesktop-resolve1-service
+	// systemctl enable systemd-resolved.service
+	_ = exec.Command("systemctl", "enable", "systemd-resolved.service").Run()
+	// systemctl start systemd-resolved.service
+	_ = exec.Command("systemctl", "start", "systemd-resolved.service").Run()
+	//systemctl status systemd-resolved.service
+	_ = exec.Command("systemctl", "status", "systemd-resolved.service").Run()
+
 	cmd := exec.Command("systemd-resolve", []string{
 		"--set-dns",
 		clientConfig.Servers[0],
