@@ -272,7 +272,10 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				case e, ok := <-w.ResultChan():
-					if !ok || e.Type != watch.Added {
+					if !ok {
+						return
+					}
+					if e.Type != watch.Added {
 						continue
 					}
 					var pod *v1.Pod
@@ -350,6 +353,7 @@ func (c *ConnectOptions) setupDNS() {
 	if err = dns.SetupDNS(relovConf, ns.List()); err != nil {
 		log.Fatal(err)
 	}
+	// todo dumpServiceHost
 }
 
 func Start(ctx context.Context, r Route) error {
