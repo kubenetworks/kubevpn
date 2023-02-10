@@ -308,6 +308,7 @@ func Ping(targetIP string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	pinger.SetLogger(nil)
 	pinger.SetPrivileged(true)
 	pinger.Count = 3
 	pinger.Timeout = time.Millisecond * 1500
