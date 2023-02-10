@@ -33,6 +33,7 @@ const (
 	// env name
 	EnvTunNameOrLUID   = "TunNameOrLUID"
 	EnvInboundPodTunIP = "InboundPodTunIP"
+	EnvNamespace       = "Namespace"
 )
 
 var (

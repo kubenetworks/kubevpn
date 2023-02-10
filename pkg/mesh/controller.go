@@ -21,7 +21,7 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 	}
 }
 
-func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteConfig) {
+func AddMeshContainer(spec *v1.PodTemplateSpec, ns, nodeId string, c util.PodRouteConfig) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
@@ -50,6 +50,10 @@ kubevpn serve -L "tun:/${TrafficManagerRealIP}:8422?net=${InboundPodTunIP}&route
 			{
 				Name:  config.EnvInboundPodTunIP,
 				Value: c.InboundPodTunIP,
+			},
+			{
+				Name:  config.EnvNamespace,
+				Value: ns,
 			},
 		},
 		SecurityContext: &v1.SecurityContext{
