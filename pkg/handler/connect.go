@@ -260,56 +260,61 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 // Listen all pod, add route if needed
 func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
 	for {
-		func() {
-			w, err := c.clientset.CoreV1().Pods(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{Watch: true, TimeoutSeconds: pointer.Int64(30)})
-			if err != nil {
-				log.Debugf("wait pod failed, err: %v", err)
-				return
-			}
-			defer w.Stop()
-			for {
-				select {
-				case <-ctx.Done():
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			func() {
+				w, err := c.clientset.CoreV1().Pods(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{Watch: true, TimeoutSeconds: pointer.Int64(30)})
+				if err != nil {
+					log.Debugf("wait pod failed, err: %v", err)
 					return
-				case e, ok := <-w.ResultChan():
-					if !ok {
-						return
-					}
-					if e.Type != watch.Added {
-						continue
-					}
-					var pod *v1.Pod
-					pod, ok = e.Object.(*v1.Pod)
-					if !ok {
-						continue
-					}
-					if pod.Spec.HostNetwork {
-						continue
-					}
-					ip := pod.Status.PodIP
-					if ip == "" {
-						continue
-					}
-					if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
-						continue
-					}
-					go func(phase v1.PodPhase, name, ip string) {
-						// if pod is running and ping is ok, not need add route
-						if phase == v1.PodRunning {
-							if ok, _ := util.Ping(ip); ok {
-								return
-							}
-						}
-						err := tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(32, 32)}})
-						if err != nil {
-							log.Debugf("[route] add route failed, pod: %s, ip: %s,err: %v", name, ip, err)
-						} else {
-							log.Debugf("[route] add route ok, pod: %s, ip: %s", name, ip)
-						}
-					}(pod.Status.Phase, pod.Name, ip)
 				}
-			}
-		}()
+				defer w.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case e, ok := <-w.ResultChan():
+						if !ok {
+							return
+						}
+						if e.Type != watch.Added {
+							continue
+						}
+						var pod *v1.Pod
+						pod, ok = e.Object.(*v1.Pod)
+						if !ok {
+							continue
+						}
+						if pod.Spec.HostNetwork {
+							continue
+						}
+						ip := pod.Status.PodIP
+						if ip == "" {
+							continue
+						}
+						if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
+							continue
+						}
+						go func(phase v1.PodPhase, name, ip string) {
+							// if pod is running and ping is ok, not need add route
+							if phase == v1.PodRunning {
+								if ok, _ := util.Ping(ip); ok {
+									return
+								}
+							}
+							err := tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(32, 32)}})
+							if err != nil {
+								log.Debugf("[route] add route failed, pod: %s, ip: %s,err: %v", name, ip, err)
+							} else {
+								log.Debugf("[route] add route ok, pod: %s, ip: %s", name, ip)
+							}
+						}(pod.Status.Phase, pod.Name, ip)
+					}
+				}
+			}()
+		}
 	}
 }
 

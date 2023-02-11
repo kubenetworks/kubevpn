@@ -13,7 +13,7 @@ import (
 )
 
 func ipToTunRouteKey(ip net.IP) string {
-	return ip.String()
+	return ip.To16().String()
 }
 
 type tunHandler struct {
@@ -105,11 +105,10 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 	go func() {
 		b := SPool.Get().([]byte)
 		defer SPool.Put(b)
-		offset := 8
 
 		for {
 			err := func() error {
-				n, err := tun.Read(b[offset:])
+				n, err := tun.Read(b[:])
 				if err != nil {
 					select {
 					case h.chExit <- struct{}{}:
