@@ -43,6 +43,16 @@ func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RE
 			resolvConf.Servers[i] = ipp[i]
 		}
 	}
+
+	// duplicate server
+	set := sets.NewString()
+	for i := 0; i < len(resolvConf.Servers); i++ {
+		if set.Has(resolvConf.Servers[i]) {
+			resolvConf.Servers = append(resolvConf.Servers[:i], resolvConf.Servers[i+1:]...)
+			i--
+		}
+		set.Insert(resolvConf.Servers[i])
+	}
 	return resolvConf, nil
 }
 
@@ -143,7 +153,19 @@ func updateHosts(str string) error {
 
 	s := sb.String()
 
-	return os.WriteFile(path, []byte(s), 0644)
+	// remove last empty line
+	strList := strings.Split(s, "\n")
+	for {
+		if len(strList) > 0 {
+			if strList[len(strList)-1] == "" {
+				strList = strList[:len(strList)-1]
+				continue
+			}
+		}
+		break
+	}
+
+	return os.WriteFile(path, []byte(strings.Join(strList, "\n")), 0644)
 }
 
 func generateHostsEntry(list []v12.Service) string {

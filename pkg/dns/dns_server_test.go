@@ -166,3 +166,15 @@ func TestRemoveWrittenHost(t *testing.T) {
 	err := updateHosts("")
 	assert.Nil(t, err)
 }
+
+func TestFix(t *testing.T) {
+	clientConfig := &miekgdns.ClientConfig{
+		Servers: []string{"10.233.93.190"},
+		Search:  []string{"vke-system.svc.cluster.local", "svc.cluster.local", "cluster.local"},
+		Port:    "53",
+		Ndots:   5,
+	}
+	for _, s := range clientConfig.NameList("productpage") {
+		println(s)
+	}
+}

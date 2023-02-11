@@ -49,7 +49,7 @@ func usingResolver(clientConfig *miekgdns.ClientConfig, ns []string) {
 		Servers: clientConfig.Servers,
 		Search:  clientConfig.Search,
 		Ndots:   5,
-		Timeout: 1,
+		Timeout: 2,
 	}
 	// for support like: service:port, service.namespace.svc.cluster.local:port
 	filename := filepath.Join("/", "etc", "resolver", "local")
@@ -67,7 +67,7 @@ func usingResolver(clientConfig *miekgdns.ClientConfig, ns []string) {
 		Search:  clientConfig.Search,
 		Port:    strconv.Itoa(port),
 		Ndots:   clientConfig.Ndots,
-		Timeout: 1,
+		Timeout: 2,
 	}
 	for _, s := range sets.NewString(strings.Split(clientConfig.Search[0], ".")...).Insert(ns...).List() {
 		filename = filepath.Join("/", "etc", "resolver", s)
