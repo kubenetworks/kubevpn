@@ -79,12 +79,12 @@ dns service ok
 
 ```shell
 ➜  ~ kubectl get pods -o wide
-NAME                          READY   STATUS      RESTARTS   AGE     IP             NODE          NOMINATED NODE   READINESS GATES
-details-7db5668668-mq9qr      1/1     Running     0          7m      172.27.0.199   172.30.0.14   <none>           <none>
-kubevpn.traffic.manager       1/1     Running     0          74s     172.27.0.207   172.30.0.14   <none>           <none>
-productpage-8f9d86644-z8snh   1/1     Running     0          6m59s   172.27.0.206   172.30.0.14   <none>           <none>
-ratings-859b96848d-68d7n      1/1     Running     0          6m59s   172.27.0.201   172.30.0.14   <none>           <none>
-reviews-dcf754f9d-46l4j       1/1     Running     0          6m59s   172.27.0.202   172.30.0.14   <none>           <none>
+NAME                                     READY   STATUS      RESTARTS   AGE     IP             NODE          NOMINATED NODE   READINESS GATES
+details-7db5668668-mq9qr                 1/1     Running     0          7m      172.27.0.199   172.30.0.14   <none>           <none>
+kubevpn-traffic-manager-99f8c8d77-x9xjt  1/1     Running     0          74s     172.27.0.207   172.30.0.14   <none>           <none>
+productpage-8f9d86644-z8snh              1/1     Running     0          6m59s   172.27.0.206   172.30.0.14   <none>           <none>
+ratings-859b96848d-68d7n                 1/1     Running     0          6m59s   172.27.0.201   172.30.0.14   <none>           <none>
+reviews-dcf754f9d-46l4j                  1/1     Running     0          6m59s   172.27.0.202   172.30.0.14   <none>           <none>
 ```
 
 ```shell
