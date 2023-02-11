@@ -49,6 +49,7 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string) error {
 }
 
 func CancelDNS() {
+	updateHosts("")
 	getenv := os.Getenv("luid")
 	parseUint, err := strconv.ParseUint(getenv, 10, 64)
 	if err != nil {
@@ -87,4 +88,8 @@ func addNicSuffixSearchList(search []string) error {
 		log.Warnf("error while set dns suffix search list, err: %v, output: %s, command: %v", err, string(output), cmd.Args)
 	}
 	return err
+}
+
+func GetHostFile() string {
+	return "/windows/system32/drivers/etc/hosts"
 }

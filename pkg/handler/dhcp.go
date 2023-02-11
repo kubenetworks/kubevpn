@@ -31,7 +31,8 @@ func NewDHCPManager(client corev1.ConfigMapInterface, namespace string, cidr *ne
 	}
 }
 
-// todo optimize dhcp, using mac address, ip and deadline as unit
+// InitDHCP
+// TODO optimize dhcp, using mac address, ip and deadline as unit
 func (d *DHCPManager) InitDHCP(ctx context.Context) error {
 	cm, err := d.client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err == nil {
@@ -67,36 +68,28 @@ func (d *DHCPManager) InitDHCP(ctx context.Context) error {
 }
 
 func (d *DHCPManager) RentIPBaseNICAddress() (*net.IPNet, error) {
-	ips := make(chan net.IP, 1)
-	err := d.updateDHCPConfigMap(func(allocator *ipallocator.Range) error {
-		ip, err := allocator.AllocateNext()
-		if err != nil {
-			return err
-		}
-		ips <- ip
-		return nil
+	var ip net.IP
+	err := d.updateDHCPConfigMap(func(allocator *ipallocator.Range) (err error) {
+		ip, err = allocator.AllocateNext()
+		return
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &net.IPNet{IP: <-ips, Mask: d.cidr.Mask}, nil
+	return &net.IPNet{IP: ip, Mask: d.cidr.Mask}, nil
 }
 
 func (d *DHCPManager) RentIPRandom() (*net.IPNet, error) {
-	var ipC = make(chan net.IP, 1)
-	err := d.updateDHCPConfigMap(func(dhcp *ipallocator.Range) error {
-		ip, err := dhcp.AllocateNext()
-		if err != nil {
-			return err
-		}
-		ipC <- ip
-		return nil
+	var ip net.IP
+	err := d.updateDHCPConfigMap(func(dhcp *ipallocator.Range) (err error) {
+		ip, err = dhcp.AllocateNext()
+		return
 	})
 	if err != nil {
-		log.Errorf("update dhcp error after get ip, need to put ip back, err: %v", err)
+		log.Errorf("failed to rent ip from DHCP server, err: %v", err)
 		return nil, err
 	}
-	return &net.IPNet{IP: <-ipC, Mask: d.cidr.Mask}, nil
+	return &net.IPNet{IP: ip, Mask: d.cidr.Mask}, nil
 }
 
 func (d *DHCPManager) ReleaseIpToDHCP(ips ...*net.IPNet) error {
@@ -113,7 +106,7 @@ func (d *DHCPManager) ReleaseIpToDHCP(ips ...*net.IPNet) error {
 func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) error {
 	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
-		log.Errorf("failed to get dhcp, err: %v", err)
+		log.Errorf("failed to get cm DHCP server, err: %v", err)
 		return err
 	}
 	if cm.Data == nil {

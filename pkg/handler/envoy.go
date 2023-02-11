@@ -28,7 +28,7 @@ import (
 
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
 
-// patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
+// InjectVPNAndEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
 func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workloads string, c util.PodRouteConfig, headers map[string]string) error {
 	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
 	if err != nil {
@@ -36,7 +36,9 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	}
 
 	u := object.Object.(*unstructured.Unstructured)
-	templateSpec, path, err := util.GetPodTemplateSpecPath(u)
+	var templateSpec *v1.PodTemplateSpec
+	var path []string
+	templateSpec, path, err = util.GetPodTemplateSpecPath(u)
 	if err != nil {
 		return err
 	}
@@ -87,7 +89,8 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 			Value: b,
 		},
 	}
-	bytes, err := json.Marshal(append(ps, removePatch...))
+	var bytes []byte
+	bytes, err = json.Marshal(append(ps, removePatch...))
 	if err != nil {
 		return err
 	}
@@ -98,7 +101,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	}
 
 	RollbackFuncList = append(RollbackFuncList, func() {
-		if err = UnPatchContainer(factory, clientset, namespace, workloads, headers); err != nil {
+		if err := UnPatchContainer(factory, clientset, namespace, workloads, headers); err != nil {
 			log.Error(err)
 		}
 	})
@@ -130,7 +133,8 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 	if empty {
 		mesh.RemoveContainers(templateSpec)
 		helper := pkgresource.NewHelper(object.Client, object.Mapping)
-		bytes, err := json.Marshal([]struct {
+		var bytes []byte
+		bytes, err = json.Marshal([]struct {
 			Op    string      `json:"op"`
 			Path  string      `json:"path"`
 			Value interface{} `json:"value"`
@@ -229,11 +233,12 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, heade
 			empty = true
 		}
 	}
-	marshal, err := yaml.Marshal(v)
+	var bytes []byte
+	bytes, err = yaml.Marshal(v)
 	if err != nil {
 		return false, err
 	}
-	configMap.Data[config.KeyEnvoy] = string(marshal)
+	configMap.Data[config.KeyEnvoy] = string(bytes)
 	_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
 	return empty, err
 }

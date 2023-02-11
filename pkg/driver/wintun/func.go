@@ -2,7 +2,6 @@ package wintun
 
 import (
 	"bytes"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 )
@@ -15,7 +14,7 @@ func copyDriver(b []byte) error {
 	}
 	filename := filepath.Join(filepath.Dir(executable), "wintun.dll")
 	var content []byte
-	content, err = ioutil.ReadFile(filename)
+	content, err = os.ReadFile(filename)
 	if err == nil {
 		// already exists and content are same, not need to copy this file
 		if bytes.Compare(b, content) == 0 {
@@ -23,6 +22,6 @@ func copyDriver(b []byte) error {
 		}
 		_ = os.Remove(filename)
 	}
-	err = ioutil.WriteFile(filename, b, 644)
+	err = os.WriteFile(filename, b, 644)
 	return err
 }

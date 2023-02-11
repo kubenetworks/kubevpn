@@ -3,13 +3,21 @@ package dns
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+	"text/tabwriter"
 
 	miekgdns "github.com/miekg/dns"
 	"github.com/pkg/errors"
 	v12 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	v13 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 
 	"github.com/wencaiwulue/kubevpn/pkg/util"
@@ -67,4 +75,114 @@ func getDNSIPFromDnsPod(clientset *kubernetes.Clientset) (ips []string, err erro
 		return nil, errors.New("")
 	}
 	return ips, nil
+}
+
+func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInterface) {
+	var last string
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			func() {
+				w, err := serviceInterface.Watch(ctx, v1.ListOptions{})
+				if err != nil {
+					return
+				}
+				defer w.Stop()
+				for {
+					select {
+					case c, ok := <-w.ResultChan():
+						if !ok {
+							return
+						}
+						if watch.Deleted == c.Type || watch.Error == c.Type {
+							continue
+						}
+						list, err := serviceInterface.List(ctx, v1.ListOptions{})
+						if err != nil {
+							return
+						}
+						entry := generateHostsEntry(list.Items)
+						if entry == last {
+							continue
+						}
+						err = updateHosts(entry)
+						if err != nil {
+							return
+						}
+						last = entry
+					}
+				}
+			}()
+		}
+	}
+}
+
+func updateHosts(str string) error {
+	path := GetHostFile()
+
+	file, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	split := strings.Split(string(file), "\n")
+	for i := 0; i < len(split); i++ {
+		if strings.Contains(split[i], "KubeVPN") {
+			split = append(split[:i], split[i+1:]...)
+			i--
+		}
+	}
+	var sb strings.Builder
+
+	sb.WriteString(strings.Join(split, "\n"))
+	if str != "" {
+		sb.WriteString("\n")
+		sb.WriteString(str)
+	}
+
+	s := sb.String()
+
+	return os.WriteFile(path, []byte(s), 0644)
+}
+
+func generateHostsEntry(list []v12.Service) string {
+	type entry struct {
+		IP     string
+		Domain string
+	}
+
+	const ServiceKubernetes = "kubernetes"
+
+	var entryList []entry
+
+	for _, item := range list {
+		if strings.EqualFold(item.Name, ServiceKubernetes) {
+			continue
+		}
+		ipList := sets.NewString(item.Spec.ClusterIPs...).Insert(item.Spec.ExternalIPs...).List()
+		domainList := sets.NewString(item.Name).Insert(item.Spec.ExternalName).List()
+		for _, ip := range ipList {
+			for _, domain := range domainList {
+				if ip == "" || domain == "" {
+					continue
+				}
+				entryList = append(entryList, entry{IP: ip, Domain: domain})
+			}
+		}
+	}
+	sort.SliceStable(entryList, func(i, j int) bool {
+		if entryList[i].Domain == entryList[j].Domain {
+			return entryList[i].IP > entryList[j].IP
+		}
+		return entryList[i].Domain > entryList[j].Domain
+	})
+
+	var sb = new(bytes.Buffer)
+	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
+	for _, e := range entryList {
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.IP, e.Domain, "", "# Add by KubeVPN")
+	}
+	_ = w.Flush()
+	return sb.String()
 }

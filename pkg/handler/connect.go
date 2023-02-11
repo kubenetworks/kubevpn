@@ -328,11 +328,11 @@ func (c *ConnectOptions) setupDNS() {
 	const port = 53
 	pod, err := c.GetRunningPodList()
 	if err != nil {
-		log.Fatal(err)
+		log.Errorln(err)
 	}
 	relovConf, err := dns.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, pod[0].GetName(), c.Namespace)
 	if err != nil {
-		log.Fatal(err)
+		log.Errorln(err)
 	}
 	if relovConf.Port == "" {
 		relovConf.Port = strconv.Itoa(port)
@@ -351,9 +351,10 @@ func (c *ConnectOptions) setupDNS() {
 		}
 	}
 	if err = dns.SetupDNS(relovConf, ns.List()); err != nil {
-		log.Fatal(err)
+		log.Warningln(err)
 	}
-	// todo dumpServiceHost
+	// dump service in current namespace for support DNS resolve service:port
+	go dns.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.Namespace))
 }
 
 func Start(ctx context.Context, r Route) error {

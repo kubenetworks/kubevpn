@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,7 +53,7 @@ func usingResolver(clientConfig *miekgdns.ClientConfig, ns []string) {
 	}
 	// for support like: service:port, service.namespace.svc.cluster.local:port
 	filename := filepath.Join("/", "etc", "resolver", "local")
-	_ = ioutil.WriteFile(filename, []byte(toString(config)), 0644)
+	_ = os.WriteFile(filename, []byte(toString(config)), 0644)
 
 	// for support like: service.namespace:port, service.namespace.svc:port, service.namespace.svc.cluster:port
 	port := util.GetAvailableUDPPortOrDie()
@@ -72,7 +71,7 @@ func usingResolver(clientConfig *miekgdns.ClientConfig, ns []string) {
 	}
 	for _, s := range sets.NewString(strings.Split(clientConfig.Search[0], ".")...).Insert(ns...).List() {
 		filename = filepath.Join("/", "etc", "resolver", s)
-		_ = ioutil.WriteFile(filename, []byte(toString(config)), 0644)
+		_ = os.WriteFile(filename, []byte(toString(config)), 0644)
 	}
 }
 
@@ -107,7 +106,7 @@ func usingNetworkSetup(ip string, namespace string) {
 					}
 					//rc.Attempts = 1
 					rc.Timeout = 1
-					_ = ioutil.WriteFile(resolv, []byte(toString(*rc)), 0644)
+					_ = os.WriteFile(resolv, []byte(toString(*rc)), 0644)
 				}
 			case <-ctx.Done():
 				return
@@ -155,6 +154,7 @@ func CancelDNS() {
 	}
 	_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
 	//networkCancel()
+	updateHosts("")
 }
 
 /*
@@ -256,4 +256,8 @@ func networkCancel() {
 			}
 		}
 	}
+}
+
+func GetHostFile() string {
+	return "/etc/hosts"
 }

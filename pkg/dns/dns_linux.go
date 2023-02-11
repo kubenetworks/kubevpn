@@ -19,6 +19,7 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string) error {
 	if len(tunName) == 0 {
 		tunName = "tun0"
 	}
+	// TODO consider use https://wiki.debian.org/NetworkManager and nmcli to config DNS
 	// try to solve:
 	// sudo systemd-resolve --set-dns 172.28.64.10 --interface tun0 --set-domain=vke-system.svc.cluster.local --set-domain=svc.cluster.local --set-domain=cluster.local
 	//Failed to set DNS configuration: Unit dbus-org.freedesktop.resolve1.service not found.
@@ -48,4 +49,9 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string) error {
 }
 
 func CancelDNS() {
+	updateHosts("")
+}
+
+func GetHostFile() string {
+	return "/etc/hosts"
 }
