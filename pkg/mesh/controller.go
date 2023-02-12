@@ -19,11 +19,13 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 			i--
 		}
 	}
+	spec.Spec.ServiceAccountName = ""
 }
 
 func AddMeshContainer(spec *v1.PodTemplateSpec, ns, nodeId string, c util.PodRouteConfig) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
+	spec.Spec.ServiceAccountName = config.ConfigMapPodTrafficManager
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarVPN,
 		Image:   config.Image,

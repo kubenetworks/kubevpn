@@ -329,8 +329,14 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug
 out:
 	for {
 		select {
-		case e := <-watchStream.ResultChan():
+		case e, ok := <-watchStream.ResultChan():
+			if !ok {
+				return nil, fmt.Errorf("can not wait pod to be ready because of watch chan has closed")
+			}
 			if podT, ok := e.Object.(*v1.Pod); ok {
+				if podT.DeletionTimestamp != nil {
+					continue
+				}
 				var sb = bytes.NewBuffer(nil)
 				sb.WriteString(fmt.Sprintf("pod [%s] status is %s\n", config.ConfigMapPodTrafficManager, podT.Status.Phase))
 				util.PrintStatus(podT, sb)
