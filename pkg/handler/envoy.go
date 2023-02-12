@@ -43,7 +43,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 		return err
 	}
 
-	origin := *templateSpec
+	origin := templateSpec.DeepCopy()
 
 	var port []v1.ContainerPort
 	for _, container := range templateSpec.Spec.Containers {
@@ -73,7 +73,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 		return nil
 	}
 	// (1) add mesh container
-	removePatch, restorePatch := patch(origin, path)
+	removePatch, restorePatch := patch(*origin, path)
 	b, _ := json.Marshal(restorePatch)
 	mesh.AddMeshContainer(templateSpec, namespace, nodeID, c)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
@@ -187,6 +187,9 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUN
 			Headers:    headers,
 			LocalTunIP: localTUNIP,
 		})
+		if v[index].Ports == nil {
+			v[index].Ports = port
+		}
 	}
 
 	marshal, err := yaml.Marshal(v)

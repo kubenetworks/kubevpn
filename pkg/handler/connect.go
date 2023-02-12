@@ -58,44 +58,50 @@ func (c *ConnectOptions) createRemoteInboundPod(ctx1 context.Context) (err error
 
 	for _, workload := range c.Workloads {
 		if len(workload) > 0 {
-			configInfo := util.PodRouteConfig{
-				LocalTunIP:           c.localTunIP.IP.String(),
-				TrafficManagerRealIP: c.routerIP.String(),
-			}
-			RollbackFuncList = append(RollbackFuncList, func() {
-				r := c.factory.NewBuilder().
-					WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
-					NamespaceParam(c.Namespace).DefaultNamespace().
-					ResourceTypeOrNameArgs(true, workload).
-					ContinueOnError().
-					Latest().
-					Flatten().
-					Do()
-				if r.Err() == nil {
-					_ = r.Visit(func(info *resource.Info, err error) error {
-						if err != nil {
-							return err
-						}
-						rollbacker, err := polymorphichelpers.RollbackerFn(c.factory, info.ResourceMapping())
-						if err != nil {
-							return err
-						}
-						_, err = rollbacker.Rollback(info.Object, nil, 0, cmdutil.DryRunNone)
-						return err
-					})
+			err = func() (err error) {
+				configInfo := util.PodRouteConfig{
+					LocalTunIP:           c.localTunIP.IP.String(),
+					TrafficManagerRealIP: c.routerIP.String(),
 				}
-			})
-			// means mesh mode
-			if len(c.Headers) != 0 {
-				err = InjectVPNAndEnvoySidecar(ctx1, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers)
-			} else {
-				err = InjectVPNSidecar(ctx1, c.factory, c.Namespace, workload, configInfo)
-			}
+				defer func() {
+					if err != nil {
+						RollbackFuncList = append(RollbackFuncList, func() {
+							r := c.factory.NewBuilder().
+								WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
+								NamespaceParam(c.Namespace).DefaultNamespace().
+								ResourceTypeOrNameArgs(true, workload).
+								ContinueOnError().
+								Latest().
+								Flatten().
+								Do()
+							if r.Err() == nil {
+								_ = r.Visit(func(info *resource.Info, err error) error {
+									if err != nil {
+										return err
+									}
+									rollbacker, err := polymorphichelpers.RollbackerFn(c.factory, info.ResourceMapping())
+									if err != nil {
+										return err
+									}
+									_, err = rollbacker.Rollback(info.Object, nil, 0, cmdutil.DryRunNone)
+									return err
+								})
+							}
+						})
+					}
+				}()
+
+				// means mesh mode
+				if len(c.Headers) != 0 {
+					err = InjectVPNAndEnvoySidecar(ctx1, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers)
+				} else {
+					err = InjectVPNSidecar(ctx1, c.factory, c.Namespace, workload, configInfo)
+				}
+				return err
+			}()
 			if err != nil {
-				log.Error(err)
 				return err
 			}
-			RollbackFuncList = RollbackFuncList[0 : len(RollbackFuncList)-1]
 		}
 	}
 	return
@@ -128,7 +134,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err != nil {
 		return err
 	}
-	go c.addRouteDynamic(ctx)
+	//go c.addRouteDynamic(ctx)
 	c.deleteFirewallRule(ctx)
 	c.setupDNS()
 	log.Info("dns service ok")
