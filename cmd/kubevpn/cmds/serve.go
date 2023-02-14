@@ -38,9 +38,6 @@ func CmdServe(factory cmdutil.Factory) *cobra.Command {
 				}
 				namespace, found, _ := factory.ToRawKubeConfigLoader().Namespace()
 				if !found {
-					namespace = os.Getenv(config.EnvNamespace)
-				}
-				if namespace == "" {
 					return fmt.Errorf("can not get namespace")
 				}
 				cmi := clientset.CoreV1().ConfigMaps(namespace)
@@ -85,9 +82,6 @@ func CmdServe(factory cmdutil.Factory) *cobra.Command {
 			}
 			namespace, found, _ := factory.ToRawKubeConfigLoader().Namespace()
 			if !found {
-				namespace = os.Getenv(config.EnvNamespace)
-			}
-			if namespace == "" {
 				return fmt.Errorf("can not get namespace")
 			}
 			cmi := clientset.CoreV1().ConfigMaps(namespace)

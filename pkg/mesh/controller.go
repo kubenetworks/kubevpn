@@ -54,8 +54,12 @@ kubevpn serve -L "tun:/${TrafficManagerRealIP}:8422?net=${InboundPodTunIP}&route
 				Value: c.InboundPodTunIP,
 			},
 			{
-				Name:  config.EnvNamespace,
-				Value: ns,
+				Name: "POD_NAMESPACE",
+				ValueFrom: &v1.EnvVarSource{
+					FieldRef: &v1.ObjectFieldSelector{
+						FieldPath: "metadata.namespace",
+					},
+				},
 			},
 		},
 		SecurityContext: &v1.SecurityContext{
