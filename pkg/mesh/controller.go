@@ -19,7 +19,6 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 			i--
 		}
 	}
-	spec.Spec.ServiceAccountName = ""
 }
 
 func AddMeshContainer(spec *v1.PodTemplateSpec, ns, nodeId string, c util.PodRouteConfig) {

@@ -39,6 +39,7 @@ import (
 	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/client-go/transport/spdy"
 	"k8s.io/kubectl/pkg/cmd/exec"
+	"k8s.io/kubectl/pkg/cmd/util"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 
@@ -479,4 +480,20 @@ func IsPortListening(port int) bool {
 		_ = listener.Close()
 		return false
 	}
+}
+
+func GetAnnotation(f util.Factory, ns string, resources string) (map[string]string, error) {
+	ownerReference, err := GetTopOwnerReference(f, ns, resources)
+	if err != nil {
+		return nil, err
+	}
+	u, ok := ownerReference.Object.(*unstructured.Unstructured)
+	if !ok {
+		return nil, fmt.Errorf("can not convert to unstaructed")
+	}
+	annotations := u.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	return annotations, nil
 }

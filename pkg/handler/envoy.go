@@ -88,6 +88,11 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 			Path:  "/metadata/annotations/probe",
 			Value: b,
 		},
+		{
+			Op:    "replace",
+			Path:  "/metadata/annotations/" + config.AnnoServiceAccountName,
+			Value: origin.Spec.ServiceAccountName,
+		},
 	}
 	var bytes []byte
 	bytes, err = json.Marshal(append(ps, removePatch...))
@@ -131,6 +136,15 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 	}
 
 	if empty {
+		var anno map[string]string
+		anno, err = util.GetAnnotation(factory, namespace, workloads)
+		if err != nil {
+			return err
+		}
+		if v, ok := anno[config.AnnoServiceAccountName]; ok {
+			templateSpec.Spec.ServiceAccountName = v
+		}
+
 		mesh.RemoveContainers(templateSpec)
 		helper := pkgresource.NewHelper(object.Client, object.Mapping)
 		var bytes []byte
@@ -151,6 +165,9 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 			return err
 		}
 		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
+		if err != nil {
+			return err
+		}
 	}
 	return err
 }
