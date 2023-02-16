@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/docker/cli/cli/command"
@@ -74,16 +75,39 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client) (err err
 	}
 	log.Infof("Wait container %s to be running...", name)
 	chanStop := make(chan struct{})
+	var inspect types.ContainerJSON
 	wait.Until(func() {
-		inspect, err2 := cli.ContainerInspect(ctx, create.ID)
-		if err2 != nil {
+		inspect, err = cli.ContainerInspect(ctx, create.ID)
+		if err != nil {
 			return
 		}
 		if inspect.State != nil && inspect.State.Running {
 			close(chanStop)
 		}
 	}, time.Second, chanStop)
-	log.Infof("Container %s is running now", name)
+
+	// print port mapping to host
+	var empty = true
+	var str string
+	if inspect.NetworkSettings != nil && inspect.NetworkSettings.Ports != nil {
+		var list []string
+		for port, bindings := range inspect.NetworkSettings.Ports {
+			var p []string
+			for _, binding := range bindings {
+				if binding.HostPort != "" {
+					p = append(p, binding.HostPort)
+					empty = false
+				}
+			}
+			list = append(list, fmt.Sprintf("%s:%s", port, strings.Join(p, ",")))
+		}
+		str = fmt.Sprintf("Container %s is running on port %s now", name, strings.Join(list, " "))
+	}
+	if !empty {
+		log.Infoln(str)
+	} else {
+		log.Infof("Container %s is running now", name)
+	}
 	return nil
 }
 
