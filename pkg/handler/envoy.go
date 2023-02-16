@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
+	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/yaml"
@@ -29,8 +30,9 @@ import (
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
 
 // InjectVPNAndEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
-func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workloads string, c util.PodRouteConfig, headers map[string]string) error {
-	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
+func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workloads string, c util.PodRouteConfig, headers map[string]string) (err error) {
+	var object *runtimeresource.Info
+	object, err = util.GetUnstructuredObject(factory, namespace, workloads)
 	if err != nil {
 		return err
 	}
