@@ -160,7 +160,7 @@ func GetTopOwnerReferenceBySelector(factory cmdutil.Factory, namespace, selector
 	return set, nil
 }
 
-func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace, cmd string) (string, error) {
+func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, containerName, namespace string, cmd []string) (string, error) {
 	pod, err := clientset.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
 
 	if err != nil {
@@ -170,7 +170,9 @@ func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config 
 		err = fmt.Errorf("cannot exec into a container in a completed pod; current phase is %s", pod.Status.Phase)
 		return "", err
 	}
-	containerName := pod.Spec.Containers[0].Name
+	if containerName == "" {
+		containerName = pod.Spec.Containers[0].Name
+	}
 	stdin, _, _ := dockerterm.StdStreams()
 
 	stdoutBuf := bytes.NewBuffer(nil)
@@ -203,7 +205,7 @@ func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config 
 			SubResource("exec")
 		req.VersionedParams(&v1.PodExecOptions{
 			Container: containerName,
-			Command:   []string{"sh", "-c", cmd},
+			Command:   cmd,
 			Stdin:     StreamOptions.Stdin,
 			Stdout:    StreamOptions.Out != nil,
 			Stderr:    StreamOptions.ErrOut != nil,

@@ -45,7 +45,9 @@ func TestShell(t *testing.T) {
 		log.Fatal(err)
 	}
 
-	out, err := Shell(clientset, restclient, restconfig, "kubevpn-traffic-manager-588d5c8475-rj2cd", "default", "cat /etc/resolv.conf | grep nameserver | awk '{print$2}'")
+	var cmd = "cat /etc/resolv.conf | grep nameserver | awk '{print$2}'"
+	var podName = "kubevpn-traffic-manager-588d5c8475-rj2cd"
+	out, err := Shell(clientset, restclient, restconfig, podName, "", "default", []string{"sh", "-c", cmd})
 	fmt.Println(out)
 	serviceList, err := clientset.CoreV1().Services(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("metadata.name", "kube-dns").String(),

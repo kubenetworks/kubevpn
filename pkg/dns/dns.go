@@ -28,7 +28,7 @@ func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RE
 	if ips, err := getDNSIPFromDnsPod(clientset); err == nil {
 		ipp = ips
 	}
-	resolvConfStr, err := util.Shell(clientset, restclient, config, podName, namespace, "cat /etc/resolv.conf")
+	resolvConfStr, err := util.Shell(clientset, restclient, config, podName, "", namespace, []string{"cat", "/etc/resolv.conf"})
 	if err != nil {
 		return nil, err
 	}
