@@ -50,6 +50,7 @@ func createTun(cfg Config) (net.Conn, *net.Interface, error) {
 	if err = os.Setenv(config.EnvTunNameOrLUID, luid); err != nil {
 		return nil, nil, err
 	}
+	_ = ifName.FlushRoutes(windows.AF_INET)
 	if err = addTunRoutes(luid /*cfg.Gateway,*/, cfg.Routes...); err != nil {
 		return nil, nil, err
 	}
@@ -65,7 +66,6 @@ func addTunRoutes(luid string, routes ...types.Route) error {
 		return err
 	}
 	ifName := winipcfg.LUID(parseUint)
-	_ = ifName.FlushRoutes(windows.AF_INET)
 	for _, route := range routes {
 		if route.Dst.String() == "" {
 			continue
@@ -133,4 +133,21 @@ func (c *winTunConn) SetReadDeadline(time.Time) error {
 
 func (c *winTunConn) SetWriteDeadline(time.Time) error {
 	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
+}
+
+func getInterface() (*net.Interface, error) {
+	env := os.Getenv(config.EnvTunNameOrLUID)
+	parseUint, err := strconv.ParseUint(env, 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	ifRow, err := winipcfg.LUID(parseUint).Interface()
+	if err != nil {
+		return nil, err
+	}
+	iface, err := net.InterfaceByIndex(int(ifRow.InterfaceIndex))
+	if err != nil {
+		return nil, err
+	}
+	return iface, nil
 }

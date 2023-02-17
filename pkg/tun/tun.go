@@ -115,3 +115,7 @@ func AddRoutes(routes ...types.Route) error {
 	env := os.Getenv(config.EnvTunNameOrLUID)
 	return addTunRoutes(env, routes...)
 }
+
+func GetInterface() (*net.Interface, error) {
+	return getInterface()
+}

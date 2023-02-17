@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
+	netroute "github.com/libp2p/go-netroute"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
@@ -127,7 +128,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err != nil {
 		return err
 	}
-	//go c.addRouteDynamic(ctx)
+	go c.addRouteDynamic(ctx)
 	c.deleteFirewallRule(ctx)
 	c.setupDNS()
 	log.Info("dns service ok")
@@ -258,6 +259,16 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 
 // Listen all pod, add route if needed
 func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
+	r, err := netroute.New()
+	if err != nil {
+		return
+	}
+
+	tunIface, err := tun.GetInterface()
+	if err != nil {
+		return
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -290,26 +301,21 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
 							continue
 						}
 						ip := pod.Status.PodIP
-						if ip == "" {
+						if ip == "" || net.ParseIP(ip) == nil {
 							continue
 						}
 						if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
 							continue
 						}
-						go func(phase v1.PodPhase, name, ip string) {
-							// if pod is running and ping is ok, not need add route
-							if phase == v1.PodRunning {
-								if ok, _ := util.Ping(ip); ok {
-									return
-								}
-							}
-							err := tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(32, 32)}})
-							if err != nil {
-								log.Debugf("[route] add route failed, pod: %s, ip: %s,err: %v", name, ip, err)
-							} else {
-								log.Debugf("[route] add route ok, pod: %s, ip: %s", name, ip)
-							}
-						}(pod.Status.Phase, pod.Name, ip)
+						// if route is right, not need add route
+						iface, _, _, err := r.Route(net.ParseIP(ip))
+						if err == nil && tunIface.Name == iface.Name {
+							continue
+						}
+						err = tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(32, 32)}})
+						if err != nil {
+							log.Debugf("[route] add route failed, pod: %s, ip: %s,err: %v", pod.Name, ip, err)
+						}
 					}
 				}
 			}()

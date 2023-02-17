@@ -99,3 +99,7 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 	}
 	return nil
 }
+
+func getInterface() (*net.Interface, error) {
+	return net.InterfaceByName(os.Getenv(config.EnvTunNameOrLUID))
+}
