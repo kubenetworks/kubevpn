@@ -2,6 +2,7 @@ package dev
 
 import (
 	"context"
+	"math/rand"
 	"sort"
 	"time"
 
@@ -47,6 +48,7 @@ type Options struct {
 }
 
 func (d Options) Main(ctx context.Context) error {
+	rand.Seed(time.Now().UnixNano())
 	object, err := util.GetUnstructuredObject(d.Factory, d.Namespace, d.Workload)
 	if err != nil {
 		return err
@@ -115,6 +117,7 @@ func (d Options) Main(ctx context.Context) error {
 		config.hostConfig.DNSOptions = nil
 		config.hostConfig.DNSSearch = nil
 		config.hostConfig.PublishAllPorts = false
+		config.config.Hostname = ""
 	}
 
 	handler.RollbackFuncList = append(handler.RollbackFuncList, func() {

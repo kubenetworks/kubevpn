@@ -12,6 +12,7 @@ import (
 	"github.com/docker/cli/cli/command/container"
 	"github.com/docker/cli/cli/streams"
 	"github.com/docker/docker/api/types"
+	typescommand "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
 	dockerterm "github.com/moby/term"
@@ -30,12 +31,13 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client) (err err
 	var name = runConfig.containerName
 
 	var needPull bool
-	img, _, err := cli.ImageInspectWithRaw(ctx, config.Image)
+	var img types.ImageInspect
+	img, _, err = cli.ImageInspectWithRaw(ctx, config.Image)
 	if err != nil {
 		needPull = true
 		err = nil
 	}
-	if platform.Architecture != "" && platform.OS != "" {
+	if platform != nil && platform.Architecture != "" && platform.OS != "" {
 		if img.Os != platform.OS || img.Architecture != platform.Architecture {
 			needPull = true
 		}
@@ -59,7 +61,8 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client) (err err
 		}
 	}
 
-	create, err := cli.ContainerCreate(ctx, config, hostConfig, networkConfig, platform, name)
+	var create typescommand.CreateResponse
+	create, err = cli.ContainerCreate(ctx, config, hostConfig, networkConfig, platform, name)
 	if err != nil {
 		return err
 	}

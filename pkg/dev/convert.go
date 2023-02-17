@@ -49,7 +49,7 @@ func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, e
 				if hostname == "" {
 					for _, envEntry := range envMap[c.Name] {
 						env := strings.Split(envEntry, "=")
-						if len(env) == 2 {
+						if len(env) == 2 && env[0] == "HOSTNAME" {
 							hostname = env[1]
 							break
 						}
@@ -151,7 +151,7 @@ func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, e
 		r.config = config
 		r.hostConfig = hostConfig
 		r.networkingConfig = nil
-		r.platform = &v12.Platform{Architecture: "amd64", OS: "linux"}
+		r.platform = /*&v12.Platform{Architecture: "amd64", OS: "linux"}*/ nil
 
 		runConfigList = append(runConfigList, &r)
 	}
