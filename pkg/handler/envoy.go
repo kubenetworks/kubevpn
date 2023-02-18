@@ -112,7 +112,10 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 			log.Error(err)
 		}
 	})
-	_ = util.RolloutStatus(ctx1, factory, namespace, workloads, time.Minute*5)
+	if err != nil {
+		return err
+	}
+	err = util.RolloutStatus(ctx1, factory, namespace, workloads, time.Minute*60)
 	return err
 }
 
