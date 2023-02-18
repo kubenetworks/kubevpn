@@ -238,3 +238,62 @@ spec:
         - name: tmp
           emptyDir: { }
 ---
+# Authors services
+apiVersion: v1
+kind: Service
+metadata:
+  name: authors
+  labels:
+    app: authors
+    service: authors
+spec:
+  ports:
+    - port: 9080
+      name: http
+  selector:
+    app: authors
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authors
+  labels:
+    app: authors
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: authors
+  template:
+    metadata:
+      labels:
+        app: authors
+    spec:
+      containers:
+        - name: authors
+          image: docker.io/naison/authors:latest
+          ports:
+            - containerPort: 9080
+          readinessProbe:
+            tcpSocket:
+              port: 9080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: 50m
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+        - name: nginx
+          image: docker.io/library/nginx:latest
+          ports:
+            - containerPort: 80
+          resources:
+            limits:
+              cpu: 50m
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
