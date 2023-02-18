@@ -14,6 +14,7 @@ import (
 	goversion "github.com/hashicorp/go-version"
 	"github.com/schollz/progressbar/v3"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // Main
@@ -143,8 +144,26 @@ func getManifest(httpCli *http.Client) (version string, url string, err error) {
 		}
 	}
 	if len(url) == 0 {
-		err = fmt.Errorf("can not found latest version url of KubeVPN, resp: %s", string(all))
-		return
+		var found bool
+		// if os is not windows and darwin, default is linux
+		if !sets.New[string]("windows", "darwin").Has(runtime.GOOS) {
+			for _, asset := range m.Assets {
+				if strings.Contains(asset.Name, "linux") && strings.Contains(asset.Name, runtime.GOARCH) {
+					url = asset.BrowserDownloadUrl
+					found = true
+					break
+				}
+			}
+		}
+
+		if !found {
+			var link []string
+			for _, asset := range m.Assets {
+				link = append(link, asset.BrowserDownloadUrl)
+			}
+			err = fmt.Errorf("Can not found latest version url of KubeVPN, you can download it manually: \n%s", strings.Join(link, "\n"))
+			return
+		}
 	}
 	return
 }
