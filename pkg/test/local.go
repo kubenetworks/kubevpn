@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 
+	"github.com/containernetworking/cni/pkg/types"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/pkg/tun"
@@ -14,13 +15,13 @@ func main() {
 	listener, err := tun.Listener(tun.Config{
 		Addr: ip.String() + "/24",
 		MTU:  1350,
-		Routes: []tun.IPRoute{{
-			Dest: &net.IPNet{
+		Routes: []types.Route{{
+			Dst: net.IPNet{
 				IP:   ip,
 				Mask: net.CIDRMask(24, 32),
 			},
 		}, {
-			Dest: &net.IPNet{
+			Dst: net.IPNet{
 				IP:   net.ParseIP("192.168.0.0"),
 				Mask: net.CIDRMask(24, 32),
 			},

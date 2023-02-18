@@ -33,13 +33,10 @@ var (
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient
 	config     *rest.Config
-	cancelFunc context.CancelFunc
 )
 
 func TestFunctions(t *testing.T) {
 	kubevpnConnect(t)
-	t.Cleanup(cancelFunc)
-	t.Parallel()
 	t.Run(runtime.FuncForPC(reflect.ValueOf(pingPodIP).Pointer()).Name(), pingPodIP)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(dialUDP).Pointer()).Name(), dialUDP)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(healthCheckPod).Pointer()).Name(), healthCheckPod)
@@ -219,7 +216,7 @@ func client(ip string, port int) error {
 	sendData := []byte("hello server!")
 	_, err = udpConn.Write(sendData)
 	if err != nil {
-		fmt.Println("发送数据失败!", err)
+		fmt.Println("[client] 发送数据失败!", err)
 		return err
 	}
 
@@ -227,7 +224,7 @@ func client(ip string, port int) error {
 	data := make([]byte, 4096)
 	read, remoteAddr, err := udpConn.ReadFromUDP(data)
 	if err != nil {
-		fmt.Println("读取数据失败!", err)
+		fmt.Println("[client] 读取数据失败!", err)
 		return err
 	}
 	fmt.Println(read, remoteAddr)
@@ -250,7 +247,7 @@ func server(port int) {
 		data := make([]byte, 4096)
 		read, remoteAddr, err := udpConn.ReadFromUDP(data)
 		if err != nil {
-			fmt.Println("读取数据失败!", err)
+			fmt.Println("[server] 读取数据失败!", err)
 			continue
 		}
 		fmt.Println(read, remoteAddr)
@@ -259,24 +256,22 @@ func server(port int) {
 		sendData := []byte("hello client!")
 		_, err = udpConn.WriteToUDP(sendData, remoteAddr)
 		if err != nil {
-			fmt.Println("发送数据失败!", err)
+			fmt.Println("[server] 发送数据失败!", err)
 			return
 		}
 	}
 }
 
 func kubevpnConnect(t *testing.T) {
-	var ctx context.Context
-	ctx, cancelFunc = context.WithCancel(context.Background())
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Hour)
-
-	cmd := exec.CommandContext(ctx, "kubevpn", "connect", "--debug", "--workloads", "deployments/reviews")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+	cmd := exec.CommandContext(context.Background(), "kubevpn", "connect", "--debug", "--workloads", "deployments/reviews")
 	go func() {
-		_, _, err := util.RunWithRollingOutWithChecker(cmd, func(log string) {
+		var checker = func(log string) {
 			if strings.Contains(log, "dns service ok") {
 				cancel()
 			}
-		})
+		}
+		_, _, err := util.RunWithRollingOutWithChecker(cmd, checker)
 		if err != nil {
 			t.Log(err)
 		}

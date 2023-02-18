@@ -272,6 +272,7 @@ spec:
       containers:
         - name: authors
           image: docker.io/naison/authors:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 9080
           readinessProbe:
@@ -288,6 +289,7 @@ spec:
               memory: 32Mi
         - name: nginx
           image: docker.io/library/nginx:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
           resources:
