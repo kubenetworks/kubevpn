@@ -65,62 +65,62 @@ jobs:
       - name: Test
         run: go test -v ./pkg/test/function_test.go
 
-  macos:
-    runs-on: macos-10.15
-    needs: [ "image" ]
-    steps:
-      - uses: actions/checkout@v2
-
-      - name: Set up Go
-        uses: actions/setup-go@v2
-        with:
-          go-version: 1.19
-          check-latest: true
-          cache: true
-      - uses: docker-practice/actions-setup-docker@master
-      - name: Pull image in advance
-        run: |
-          rm '/usr/local/bin/kubectl'
-          set -x
-          docker version
-          tag=`echo ${{ github.ref }} | sed 's/refs\/tags\///' | sed 's/\(.*\)-.*/\1/' | sed 's/-[0-9]*$//' || true`
-          docker pull naison/kubevpn:test   || true
-          docker pull naison/kubevpn:latest || true
-          docker pull naison/kubevpn:${tag} || true
-
-      - name: Install minikube
-        run: |
-          brew install minikube
-          minikube start --driver=docker
-          kubectl get po -A
-          minikube kubectl -- get po -A
-
-      - name: Kubernetes info
-        run: |
-          kubectl cluster-info
-          cat ~/.kube/config
-          kubectl get pods -n kube-system -o wide
-
-      - name: Install demo bookinfo
-        run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
-
-      - name: Build
-        run: |
-          export VERSION=test
-          make kubevpn-darwin-amd64
-          chmod +x ./bin/kubevpn
-          cp ./bin/kubevpn /usr/local/bin/kubevpn
-
-      - name: Wait for pods reviews to be ready
-        run: |
-          kubectl wait pods -l app=reviews --for=condition=Ready --timeout=3600s
-          kubectl get all -o wide
-          kubectl get nodes -o yaml
-          ifconfig
-          netstat -anr
-
-      - name: Test
-        run: go test -v ./pkg/test/function_test.go
+#  macos:
+#    runs-on: macos-10.15
+#    needs: [ "image" ]
+#    steps:
+#      - uses: actions/checkout@v2
+#
+#      - name: Set up Go
+#        uses: actions/setup-go@v2
+#        with:
+#          go-version: 1.19
+#          check-latest: true
+#          cache: true
+#      - uses: docker-practice/actions-setup-docker@master
+#      - name: Pull image in advance
+#        run: |
+#          rm '/usr/local/bin/kubectl'
+#          set -x
+#          docker version
+#          tag=`echo ${{ github.ref }} | sed 's/refs\/tags\///' | sed 's/\(.*\)-.*/\1/' | sed 's/-[0-9]*$//' || true`
+#          docker pull naison/kubevpn:test   || true
+#          docker pull naison/kubevpn:latest || true
+#          docker pull naison/kubevpn:${tag} || true
+#
+#      - name: Install minikube
+#        run: |
+#          brew install minikube
+#          minikube start --driver=docker
+#          kubectl get po -A
+#          minikube kubectl -- get po -A
+#
+#      - name: Kubernetes info
+#        run: |
+#          kubectl cluster-info
+#          cat ~/.kube/config
+#          kubectl get pods -n kube-system -o wide
+#
+#      - name: Install demo bookinfo
+#        run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
+#
+#      - name: Build
+#        run: |
+#          export VERSION=test
+#          make kubevpn-darwin-amd64
+#          chmod +x ./bin/kubevpn
+#          cp ./bin/kubevpn /usr/local/bin/kubevpn
+#
+#      - name: Wait for pods reviews to be ready
+#        run: |
+#          kubectl wait pods -l app=reviews --for=condition=Ready --timeout=3600s
+#          kubectl get all -o wide
+#          kubectl get nodes -o yaml
+#          ifconfig
+#          netstat -anr
+#
+#      - name: Test
+#        run: go test -v ./pkg/test/function_test.go
 
 #  windows:
 #    runs-on: windows-latest

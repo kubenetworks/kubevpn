@@ -7,10 +7,12 @@ spec:
   homepage: https://github.com/wencaiwulue/kubevpn
   shortDescription: "A vpn tunnel tools which can connect to kubernetes cluster network"
   description: |
-    KubeVPN, A vpn tunnel tools which can connect to kubernetes cluster network, 
-    you can access remote kubernetes cluster network, remote kubernetes cluster service can also access your local service.
+    KubeVPN is Cloud Native Dev Environment, connect to kubernetes cluster network, you can access remote kubernetes
+    cluster network, remote
+    kubernetes cluster service can also access your local service. and more, you can run your kubernetes pod on local Docker
+    container with same environment、volume、and network. you can develop your application on local PC totally.
 
-  platforms:
+platforms:
   - selector:
       matchLabels:
         os: windows
