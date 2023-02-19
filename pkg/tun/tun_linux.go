@@ -1,5 +1,4 @@
-//go:build linux && !windows && !darwin
-// +build linux,!windows,!darwin
+//go:build linux
 
 package tun
 
@@ -14,7 +13,7 @@ import (
 	"github.com/docker/libcontainer/netlink"
 	"github.com/milosgajdos/tenus"
 	log "github.com/sirupsen/logrus"
-	"github.com/songgao/water"
+	"golang.zx2c4.com/wireguard/tun"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
@@ -25,56 +24,58 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		return
 	}
 
-	ifce, err := water.New(water.Config{
-		DeviceType: water.TUN,
-		PlatformSpecificParams: water.PlatformSpecificParams{
-			Name: cfg.Name,
-		},
-	})
-	if err != nil {
-		return
-	}
-
-	link, err := tenus.NewLinkFrom(ifce.Name())
-	if err != nil {
-		return
-	}
-
 	mtu := cfg.MTU
 	if mtu <= 0 {
 		mtu = config.DefaultMTU
 	}
 
-	cmd := fmt.Sprintf("ip link set dev %s mtu %d", ifce.Name(), mtu)
+	var ifce tun.Device
+	ifce, err = tun.CreateTUN("utun", mtu)
+	if err != nil {
+		return
+	}
+
+	var name string
+	name, err = ifce.Name()
+	if err != nil {
+		return
+	}
+
+	link, err := tenus.NewLinkFrom(name)
+	if err != nil {
+		return
+	}
+
+	cmd := fmt.Sprintf("ip link set dev %s mtu %d", name, mtu)
 	log.Debugf("[tun] %s", cmd)
 	if er := link.SetLinkMTU(mtu); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
 	}
 
-	cmd = fmt.Sprintf("ip address add %s dev %s", cfg.Addr, ifce.Name())
+	cmd = fmt.Sprintf("ip address add %s dev %s", cfg.Addr, name)
 	log.Debugf("[tun] %s", cmd)
 	if er := link.SetLinkIp(ip, ipNet); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
 	}
 
-	cmd = fmt.Sprintf("ip link set dev %s up", ifce.Name())
+	cmd = fmt.Sprintf("ip link set dev %s up", name)
 	log.Debugf("[tun] %s", cmd)
 	if er := link.SetLinkUp(); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
 	}
 
-	if err = os.Setenv(config.EnvTunNameOrLUID, ifce.Name()); err != nil {
+	if err = os.Setenv(config.EnvTunNameOrLUID, name); err != nil {
 		return nil, nil, err
 	}
 
-	if err = addTunRoutes(ifce.Name(), cfg.Routes...); err != nil {
+	if err = addTunRoutes(name, cfg.Routes...); err != nil {
 		return
 	}
 
-	itf, err = net.InterfaceByName(ifce.Name())
+	itf, err = net.InterfaceByName(name)
 	if err != nil {
 		return
 	}

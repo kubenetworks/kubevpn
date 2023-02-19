@@ -1,11 +1,10 @@
-//go:build darwin
+//go:build openbsd
 
 package tun
 
 import (
 	"fmt"
 	"net"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -39,22 +38,23 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		return
 	}
 
-	cmd := fmt.Sprintf("ifconfig %s inet %s %s mtu %d up", name, cfg.Addr, ip.String(), mtu)
+	cmd := fmt.Sprintf("ifconfig %s inet %s mtu %d up", ifce.Name(), cfg.Addr, mtu)
 	log.Debugf("[tun] %s", cmd)
 	args := strings.Split(cmd, " ")
 	if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
 	}
-	if err = os.Setenv(config.EnvTunNameOrLUID, name); err != nil {
+
+	if err = os.Setenv(config.EnvTunNameOrLUID, ifce.Name()); err != nil {
 		return nil, nil, err
 	}
 
-	if err = addTunRoutes(name, cfg.Routes...); err != nil {
+	if err = addTunRoutes(ifce.Name(), cfg.Routes...); err != nil {
 		return
 	}
 
-	itf, err = net.InterfaceByName(name)
+	itf, err = net.InterfaceByName(ifce.Name())
 	if err != nil {
 		return
 	}
@@ -74,9 +74,8 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 		cmd := fmt.Sprintf("route add -net %s -interface %s", route.Dst.String(), ifName)
 		log.Debugf("[tun] %s", cmd)
 		args := strings.Split(cmd, " ")
-		err := exec.Command(args[0], args[1:]...).Run()
-		if err != nil {
-			return fmt.Errorf("%s: %v", cmd, err)
+		if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
+			return fmt.Errorf("%s: %v", cmd, er)
 		}
 	}
 	return nil

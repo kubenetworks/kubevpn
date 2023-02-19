@@ -9,7 +9,8 @@ import (
 	"sync"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/songgao/water/waterutil"
+
+	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
 func ipToTunRouteKey(ip net.IP) string {
@@ -103,8 +104,8 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 	errChan := make(chan error, 2)
 	defer conn.Close()
 	go func() {
-		b := SPool.Get().([]byte)
-		defer SPool.Put(b)
+		b := LPool.Get().([]byte)
+		defer LPool.Put(b)
 
 		for {
 			err := func() error {
@@ -124,7 +125,7 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 				}
 
 				var src, dst net.IP
-				if waterutil.IsIPv4(b[:n]) {
+				if util.IsIPv4(b[:n]) {
 					header, err := ipv4.ParseHeader(b[:n])
 					if err != nil {
 						log.Errorf("[tun] %s: %v", tun.LocalAddr(), err)
@@ -132,7 +133,7 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 					}
 					log.Debugf("[tun] %s", header.String())
 					src, dst = header.Src, header.Dst
-				} else if waterutil.IsIPv6(b[:n]) {
+				} else if util.IsIPv6(b[:n]) {
 					header, err := ipv6.ParseHeader(b[:n])
 					if err != nil {
 						log.Errorf("[tun] %s: %v", tun.LocalAddr(), err)
@@ -184,7 +185,7 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 				}
 
 				var src, dst net.IP
-				if waterutil.IsIPv4(b[:n]) {
+				if util.IsIPv4(b[:n]) {
 					header, err := ipv4.ParseHeader(b[:n])
 					if err != nil {
 						log.Errorf("[tun] %s: %v", tun.LocalAddr(), err)
@@ -192,7 +193,7 @@ func (h *tunHandler) transportTun(ctx context.Context, tun net.Conn, conn net.Pa
 					}
 					log.Debugf("[tun] %s", header.String())
 					src, dst = header.Src, header.Dst
-				} else if waterutil.IsIPv6(b[:n]) {
+				} else if util.IsIPv6(b[:n]) {
 					header, err := ipv6.ParseHeader(b[:n])
 					if err != nil {
 						log.Errorf("[tun] %s: %v", tun.LocalAddr(), err)

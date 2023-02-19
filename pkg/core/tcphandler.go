@@ -71,8 +71,8 @@ func (h *fakeUdpHandler) tunnelServerUDP(tcpConn net.Conn, udpConn *net.UDPConn)
 	}()
 
 	go func() {
-		b := MPool.Get().([]byte)
-		defer MPool.Put(b)
+		b := LPool.Get().([]byte)
+		defer LPool.Put(b)
 
 		for {
 			n, err := udpConn.Read(b[:])

@@ -97,3 +97,8 @@ container-local: kubevpn-linux-amd64
 	docker tag ${IMAGE} ${IMAGE_DEFAULT}
 	docker push ${IMAGE_DEFAULT}
 
+.PHONY: container-test
+container-test: kubevpn-linux-amd64
+	docker build --platform linux/amd64 -t ${IMAGE} -f $(BUILD_DIR)/test.Dockerfile .
+	docker tag ${IMAGE} docker.io/naison/kubevpn:testp
+	docker push docker.io/naison/kubevpn:testp

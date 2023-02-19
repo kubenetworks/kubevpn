@@ -8,7 +8,9 @@ import (
 
 	"github.com/containernetworking/cni/pkg/types"
 	log "github.com/sirupsen/logrus"
-	"github.com/songgao/water"
+	"github.com/wencaiwulue/kubevpn/pkg/core"
+	"golang.zx2c4.com/wireguard/device"
+	"golang.zx2c4.com/wireguard/tun"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
@@ -74,16 +76,32 @@ func (l *tunListener) Close() error {
 }
 
 type tunConn struct {
-	ifce *water.Interface
+	ifce tun.Device
 	addr net.Addr
 }
 
 func (c *tunConn) Read(b []byte) (n int, err error) {
-	return c.ifce.Read(b)
+	offset := device.MessageTransportHeaderSize
+	bytes := core.LPool.Get().([]byte)
+	core.LPool.Put(bytes)
+
+	size, err := c.ifce.Read(bytes[:], offset)
+	if size == 0 || size > device.MaxSegmentSize-device.MessageTransportHeaderSize {
+		return 0, nil
+	}
+	return copy(b, bytes[offset:offset+size]), nil
 }
 
 func (c *tunConn) Write(b []byte) (n int, err error) {
-	return c.ifce.Write(b)
+	if len(b) < device.MessageTransportHeaderSize {
+		return 0, err
+	}
+	bytes := core.LPool.Get().([]byte)
+	defer core.LPool.Put(bytes)
+
+	copy(bytes[device.MessageTransportOffsetContent:], b)
+
+	return c.ifce.Write(bytes[:device.MessageTransportOffsetContent+len(b)], device.MessageTransportOffsetContent)
 }
 
 func (c *tunConn) Close() (err error) {

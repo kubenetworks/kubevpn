@@ -1,5 +1,4 @@
-//go:build !linux && !windows && !darwin
-// +build !linux,!windows,!darwin
+//go:build freebsd
 
 package tun
 
@@ -11,7 +10,7 @@ import (
 
 	"github.com/containernetworking/cni/pkg/types"
 	log "github.com/sirupsen/logrus"
-	"github.com/songgao/water"
+	"golang.zx2c4.com/wireguard/tun"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
@@ -22,16 +21,21 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		return
 	}
 
-	ifce, err := water.New(water.Config{
-		DeviceType: water.TUN,
-	})
+	mtu := cfg.MTU
+	if mtu <= 0 {
+		mtu = config.DefaultMTU
+	}
+
+	var ifce tun.Device
+	ifce, err = tun.CreateTUN("utun", mtu)
 	if err != nil {
 		return
 	}
 
-	mtu := cfg.MTU
-	if mtu <= 0 {
-		mtu = config.DefaultMTU
+	var name string
+	name, err = ifce.Name()
+	if err != nil {
+		return
 	}
 
 	cmd := fmt.Sprintf("ifconfig %s inet %s mtu %d up", ifce.Name(), cfg.Addr, mtu)
