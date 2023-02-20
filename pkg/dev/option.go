@@ -44,6 +44,7 @@ func fillOptions(r Run, copts Options) error {
 		} else {
 			config.config.Entrypoint = strslice.StrSlice{copts.Entrypoint}
 		}
+		config.config.Cmd = []string{}
 	}
 	if copts.Platform != "" {
 		split := strings.Split(copts.Platform, "/")

@@ -96,6 +96,7 @@ func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, e
 			VolumeDriver:    "",
 			VolumesFrom:     nil,
 			ConsoleSize:     [2]uint{},
+			CapAdd:          strslice.StrSlice{"SYS_PTRACE", "SYS_ADMIN"}, // for dlv
 			CgroupnsMode:    "",
 			DNS:             dnsConfig.Servers,
 			DNSOptions:      []string{fmt.Sprintf("ndots=%d", dnsConfig.Ndots)},
@@ -107,10 +108,10 @@ func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, e
 			Links:           nil,
 			OomScoreAdj:     0,
 			PidMode:         "",
-			Privileged:      false,
+			Privileged:      true,
 			PublishAllPorts: false,
 			ReadonlyRootfs:  false,
-			SecurityOpt:     nil,
+			SecurityOpt:     []string{"apparmor=unconfined", "seccomp=unconfined"},
 			StorageOpt:      nil,
 			Tmpfs:           nil,
 			UTSMode:         "",
@@ -138,7 +139,7 @@ func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, e
 		hostConfig.PortBindings = portmap
 		config.ExposedPorts = portset
 		if c.SecurityContext != nil && c.SecurityContext.Capabilities != nil {
-			hostConfig.CapAdd = *(*strslice.StrSlice)(unsafe.Pointer(&c.SecurityContext.Capabilities.Add))
+			hostConfig.CapAdd = append(hostConfig.CapAdd, *(*strslice.StrSlice)(unsafe.Pointer(&c.SecurityContext.Capabilities.Add))...)
 			hostConfig.CapDrop = *(*strslice.StrSlice)(unsafe.Pointer(&c.SecurityContext.Capabilities.Drop))
 		}
 		var suffix string
@@ -222,7 +223,8 @@ func GetVolume(ctx context.Context, f util.Factory, ns, pod string) (map[string]
 			}
 			err = copyOptions.Run()
 			if err != nil {
-				return nil, err
+				_, _ = fmt.Fprintf(os.Stderr, "Can not download volume %s path %s, ignore...", volumeMount.Name, volumeMount.MountPath)
+				continue
 			}
 			m = append(m, mount.Mount{
 				Type:   mount.TypeBind,

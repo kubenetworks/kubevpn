@@ -209,7 +209,7 @@ func (t *TarPipe) initReadFrom(n uint64) {
 
 	go func() {
 		defer t.outStream.Close()
-		cmdutil.CheckErr(t.o.execute(options))
+		t.o.execute(options)
 	}()
 }
 

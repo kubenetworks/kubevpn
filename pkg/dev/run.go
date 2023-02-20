@@ -45,7 +45,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client) (err err
 	if needPull {
 		var readCloser io.ReadCloser
 		var plat string
-		if runConfig.platform.Architecture != "" && runConfig.platform.OS != "" {
+		if runConfig.platform != nil && runConfig.platform.Architecture != "" && runConfig.platform.OS != "" {
 			plat = fmt.Sprintf("%s/%s", runConfig.platform.OS, runConfig.platform.Architecture)
 		}
 		readCloser, err = cli.ImagePull(ctx, config.Image, types.ImagePullOptions{Platform: plat})
