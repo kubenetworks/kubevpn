@@ -76,8 +76,12 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	}
 	// (1) add mesh container
 	removePatch, restorePatch := patch(*origin, path)
-	b, _ := json.Marshal(restorePatch)
-	mesh.AddMeshContainer(templateSpec, namespace, nodeID, c)
+	var b []byte
+	b, err = json.Marshal(restorePatch)
+	if err != nil {
+		return err
+	}
+	mesh.AddMeshContainer(templateSpec, nodeID, c)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	ps := []P{
 		{

@@ -21,7 +21,7 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 	}
 }
 
-func AddMeshContainer(spec *v1.PodTemplateSpec, ns, nodeId string, c util.PodRouteConfig) {
+func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteConfig) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 	spec.Spec.ServiceAccountName = config.ConfigMapPodTrafficManager

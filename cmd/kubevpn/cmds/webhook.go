@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
+	"github.com/wencaiwulue/kubevpn/pkg/util"
 	"github.com/wencaiwulue/kubevpn/pkg/webhook"
 )
 
@@ -15,6 +16,9 @@ func CmdWebhook(f cmdutil.Factory) *cobra.Command {
 After deploying it to Kubernetes cluster, the Administrator needs to create a MutatingWebhookConfiguration
 in the Kubernetes cluster to register remote webhook admission controllers.`,
 		Args: cobra.MaximumNArgs(0),
+		PreRun: func(cmd *cobra.Command, args []string) {
+			util.InitLogger(true)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return webhook.Main(f)
 		},
