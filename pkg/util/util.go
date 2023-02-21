@@ -21,6 +21,7 @@ import (
 	probing "github.com/prometheus-community/pro-bing"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
@@ -496,4 +497,53 @@ func GetAnnotation(f util.Factory, ns string, resources string) (map[string]stri
 		annotations = map[string]string{}
 	}
 	return annotations, nil
+}
+
+func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.PolicyRule) (allowed bool, err error) {
+	var roleBindingList *rbacv1.RoleBindingList
+	roleBindingList, err = clientset.RbacV1().RoleBindings(ns).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return false, err
+	}
+	for _, item := range roleBindingList.Items {
+		for _, subject := range item.Subjects {
+			if subject.Name == sa && subject.Kind == "ServiceAccount" {
+				var role *rbacv1.Role
+				role, err = clientset.RbacV1().Roles(ns).Get(context.Background(), item.RoleRef.Name, metav1.GetOptions{})
+				if err != nil {
+					return false, err
+				}
+				for _, rule := range role.Rules {
+					if sets.New[string](rule.Resources...).HasAll(resource.Resources...) && sets.New[string](rule.Verbs...).HasAll(resource.Verbs...) {
+						if len(rule.ResourceNames) == 0 || sets.New[string](rule.ResourceNames...).HasAll(resource.ResourceNames...) {
+							return true, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	var clusterRoleBindingList *rbacv1.ClusterRoleBindingList
+	clusterRoleBindingList, err = clientset.RbacV1().ClusterRoleBindings().List(context.Background(), metav1.ListOptions{})
+	for _, item := range clusterRoleBindingList.Items {
+		for _, subject := range item.Subjects {
+			if subject.Name == sa && subject.Kind == "ServiceAccount" {
+				var role *rbacv1.ClusterRole
+				role, err = clientset.RbacV1().ClusterRoles().Get(context.Background(), item.RoleRef.Name, metav1.GetOptions{})
+				if err != nil {
+					return false, err
+				}
+				for _, rule := range role.Rules {
+					if sets.New[string](rule.Resources...).HasAll(resource.Resources...) && sets.New[string](rule.Verbs...).HasAll(resource.Verbs...) {
+						if len(rule.ResourceNames) == 0 || sets.New[string](rule.ResourceNames...).HasAll(resource.ResourceNames...) {
+							return true, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return false, nil
 }

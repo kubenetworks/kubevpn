@@ -10,6 +10,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -17,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/yaml"
@@ -81,7 +83,27 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	if err != nil {
 		return err
 	}
+
+	var client *kubernetes.Clientset
+	client, err = factory.KubernetesClientSet()
+	if err != nil {
+		return err
+	}
+
 	mesh.AddMeshContainer(templateSpec, nodeID, c)
+	rules := &rbacv1.PolicyRule{
+		Verbs:         []string{"get", "list", "watch", "create", "update", "patch", "delete"},
+		APIGroups:     []string{""},
+		Resources:     []string{"configmaps", "secrets"},
+		ResourceNames: []string{config.ConfigMapPodTrafficManager},
+	}
+	var allowed bool
+	allowed, err = util.CanI(client, templateSpec.Spec.ServiceAccountName, namespace, rules)
+	// only if not have permission needs to change SA
+	if err != nil || !allowed {
+		templateSpec.Spec.ServiceAccountName = config.ConfigMapPodTrafficManager
+	}
+
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	ps := []P{
 		{

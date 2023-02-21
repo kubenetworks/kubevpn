@@ -104,7 +104,7 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		Rules: []rbacv1.PolicyRule{{
 			Verbs:         []string{"get", "list", "watch", "create", "update", "patch", "delete"},
 			APIGroups:     []string{""},
-			Resources:     []string{"configmaps"},
+			Resources:     []string{"configmaps", "secrets"},
 			ResourceNames: []string{config.ConfigMapPodTrafficManager},
 		}},
 	}, metav1.CreateOptions{})
