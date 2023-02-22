@@ -183,20 +183,28 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		},
 	}
 
-	h := config.ConfigMapPodTrafficManager + "." + namespace + "." + "svc"
-	certificate, key, _ := cert.GenerateSelfSignedCertKey(h, nil, nil)
+	domain := util.GetTlsDomain(namespace)
+	var crt, key []byte
+	crt, key, err = cert.GenerateSelfSignedCertKey(domain, nil, nil)
+	if err != nil {
+		return nil, err
+	}
 
-	_, err = clientset.CoreV1().Secrets(namespace).Create(ctx, &v1.Secret{
+	// reason why not use v1.SecretTypeTls is because it needs key called tls.crt and tls.key, but tls.key can not as env variable
+	// ➜  ~ export tls.key=a
+	//export: not valid in this context: tls.key
+	secret := &v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
 			Namespace: namespace,
 		},
 		Data: map[string][]byte{
-			v1.TLSCertKey:       certificate,
-			v1.TLSPrivateKeyKey: key,
+			config.TLSCertKey:       crt,
+			config.TLSPrivateKeyKey: key,
 		},
-		Type: v1.SecretTypeTLS,
-	}, metav1.CreateOptions{})
+		Type: v1.SecretTypeOpaque,
+	}
+	_, err = clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
 
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
 		return nil, err
@@ -325,6 +333,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug
 									},
 								},
 							}},
+							Env:             []v1.EnvVar{},
 							ImagePullPolicy: v1.PullIfNotPresent,
 							Resources:       Resources,
 						},
@@ -394,7 +403,7 @@ out:
 					Path:      pointer.String("/pods"),
 					Port:      pointer.Int32(80),
 				},
-				CABundle: certificate,
+				CABundle: crt,
 			},
 			Rules: []admissionv1.RuleWithOperations{{
 				Operations: []admissionv1.OperationType{admissionv1.Create, admissionv1.Delete},

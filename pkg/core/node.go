@@ -39,6 +39,12 @@ func ParseNode(s string) (*Node, error) {
 
 // Get returns node parameter specified by key.
 func (node *Node) Get(key string) string {
+	values := node.Values[key]
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
 	return node.Values.Get(key)
 }
 

@@ -25,6 +25,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/kubectl/pkg/cmd/util"
 
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/dns"
 	util2 "github.com/wencaiwulue/kubevpn/pkg/util"
 	"github.com/wencaiwulue/kubevpn/pkg/util/cp"
@@ -201,6 +202,10 @@ func GetVolume(ctx context.Context, f util.Factory, ns, pod string) (map[string]
 	}
 	result := map[string][]mount.Mount{}
 	for _, c := range get.Spec.Containers {
+		// if container name is vpn or envoy-proxy, not need to download volume
+		if c.Name == config.ContainerSidecarVPN || c.Name == config.ContainerSidecarEnvoyProxy {
+			continue
+		}
 		var m []mount.Mount
 		for _, volumeMount := range c.VolumeMounts {
 			if volumeMount.MountPath == "/tmp" {

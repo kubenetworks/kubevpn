@@ -75,7 +75,10 @@ func (r *Route) GenerateServers() ([]core.Server, error) {
 			}
 		default:
 			handler = core.TCPHandler()
-			tcpListener, _ := core.TCPListener(node.Addr)
+			tcpListener, err := core.TCPListener(node.Addr)
+			if err != nil {
+				return nil, err
+			}
 			ln = tls.NewListener(tcpListener, config.TlsConfigServer)
 		}
 		servers = append(servers, core.Server{Listener: ln, Handler: handler})

@@ -551,9 +551,9 @@ func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.Polic
 }
 
 func DoReq(request *http.Request) (body []byte, err error) {
-	cert, ok := os.LookupEnv(v1.TLSCertKey)
+	cert, ok := os.LookupEnv(config.TLSCertKey)
 	if !ok {
-		return nil, fmt.Errorf("can not get %s from env", v1.TLSCertKey)
+		return nil, fmt.Errorf("can not get %s from env", config.TLSCertKey)
 	}
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM([]byte(cert))
@@ -580,4 +580,8 @@ func DoReq(request *http.Request) (body []byte, err error) {
 		return body, nil
 	}
 	return body, fmt.Errorf("http status is %d", resp.StatusCode)
+}
+
+func GetTlsDomain(namespace string) string {
+	return config.ConfigMapPodTrafficManager + "." + namespace + "." + "svc"
 }

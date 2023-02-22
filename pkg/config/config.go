@@ -15,6 +15,12 @@ const (
 	KeyClusterIPv4POOLS = "IPv4_POOLS"
 	KeyRefCount         = "REF_COUNT"
 
+	// secret keys
+	// TLSCertKey is the key for tls certificates in a TLS secret.
+	TLSCertKey = "tls_crt"
+	// TLSPrivateKeyKey is the key for the private key field in a TLS secret.
+	TLSPrivateKeyKey = "tls_key"
+
 	// container name
 	ContainerSidecarEnvoyProxy   = "envoy-proxy"
 	ContainerSidecarControlPlane = "control-plane"
@@ -43,6 +49,10 @@ const (
 	HeaderPodName      = "POD_NAME"
 	HeaderPodNamespace = "POD_NAMESPACE"
 	HeaderIP           = "IP"
+
+	// api
+	APIRentIP    = "/rent/ip"
+	APIReleaseIP = "/release/ip"
 )
 
 var (

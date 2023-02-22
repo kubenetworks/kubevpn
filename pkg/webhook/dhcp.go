@@ -55,7 +55,7 @@ func (d *dhcpServer) releaseIP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Infof("handling rent ip request, pod name: %s, ns: %s", podName, namespace)
+	log.Infof("handling release ip request, pod name: %s, ns: %s", podName, namespace)
 	clientset, err := d.f.KubernetesClientSet()
 	if err != nil {
 		log.Error(err)
