@@ -3,6 +3,8 @@ package util
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -546,4 +548,36 @@ func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.Polic
 	}
 
 	return false, nil
+}
+
+func DoReq(request *http.Request) (body []byte, err error) {
+	cert, ok := os.LookupEnv(v1.TLSCertKey)
+	if !ok {
+		return nil, fmt.Errorf("can not get %s from env", v1.TLSCertKey)
+	}
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM([]byte(cert))
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: caCertPool,
+			},
+		},
+	}
+
+	var resp *http.Response
+	resp, err = client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("err: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("can not read body, err: %v", err)
+	}
+	if resp.StatusCode == http.StatusOK {
+		return body, nil
+	}
+	return body, fmt.Errorf("http status is %d", resp.StatusCode)
 }

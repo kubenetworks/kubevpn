@@ -3,7 +3,6 @@ package handler
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -187,6 +186,22 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	h := config.ConfigMapPodTrafficManager + "." + namespace + "." + "svc"
 	certificate, key, _ := cert.GenerateSelfSignedCertKey(h, nil, nil)
 
+	_, err = clientset.CoreV1().Secrets(namespace).Create(ctx, &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.ConfigMapPodTrafficManager,
+			Namespace: namespace,
+		},
+		Data: map[string][]byte{
+			v1.TLSCertKey:       certificate,
+			v1.TLSPrivateKeyKey: key,
+		},
+		Type: v1.SecretTypeTLS,
+	}, metav1.CreateOptions{})
+
+	if err != nil && !k8serrors.IsAlreadyExists(err) {
+		return nil, err
+	}
+
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
@@ -234,6 +249,13 @@ iptables -P FORWARD ACCEPT
 iptables -t nat -A POSTROUTING -s ${CIDR} -o eth0 -j MASQUERADE
 kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug=true`,
 							},
+							EnvFrom: []v1.EnvFromSource{{
+								SecretRef: &v1.SecretEnvSource{
+									LocalObjectReference: v1.LocalObjectReference{
+										Name: config.ConfigMapPodTrafficManager,
+									},
+								},
+							}},
 							Env: []v1.EnvVar{
 								{
 									Name:  "CIDR",
@@ -296,15 +318,13 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug
 								ContainerPort: 80,
 								Protocol:      v1.ProtocolTCP,
 							}},
-							Env: []v1.EnvVar{
-								{
-									Name:  "CERT",
-									Value: base64.StdEncoding.EncodeToString(certificate),
-								}, {
-									Name:  "KEY",
-									Value: base64.StdEncoding.EncodeToString(key),
+							EnvFrom: []v1.EnvFromSource{{
+								SecretRef: &v1.SecretEnvSource{
+									LocalObjectReference: v1.LocalObjectReference{
+										Name: config.ConfigMapPodTrafficManager,
+									},
 								},
-							},
+							}},
 							ImagePullPolicy: v1.PullIfNotPresent,
 							Resources:       Resources,
 						},

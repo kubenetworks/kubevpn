@@ -2,7 +2,6 @@ package webhook
 
 import (
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/admission/v1"
 	"k8s.io/api/admission/v1beta1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
@@ -122,21 +122,20 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 
 func Main(f cmdutil.Factory) error {
 	h := &admissionReviewHandler{f: f}
-	http.HandleFunc("/pods", func(w http.ResponseWriter, r *http.Request) {
-		serve(w, r, newDelegateToV1AdmitHandler(h.admitPods))
-	})
-	http.HandleFunc("/readyz", func(w http.ResponseWriter, req *http.Request) {
-		_, _ = w.Write([]byte("ok"))
-	})
-	cert, err := base64.StdEncoding.DecodeString(os.Getenv("CERT"))
-	if err != nil {
-		return err
+	http.HandleFunc("/pods", func(w http.ResponseWriter, r *http.Request) { serve(w, r, newDelegateToV1AdmitHandler(h.admitPods)) })
+	http.HandleFunc("/readyz", func(w http.ResponseWriter, req *http.Request) { _, _ = w.Write([]byte("ok")) })
+	s := dhcpServer{f: f}
+	http.HandleFunc("/rent/ip", s.rentIP)
+	http.HandleFunc("/release/ip", s.releaseIP)
+	cert, ok := os.LookupEnv(corev1.TLSCertKey)
+	if !ok {
+		return fmt.Errorf("can not get %s from env", corev1.TLSCertKey)
 	}
-	key, err := base64.StdEncoding.DecodeString(os.Getenv("KEY"))
-	if err != nil {
-		return err
+	key, ok := os.LookupEnv(corev1.TLSPrivateKeyKey)
+	if !ok {
+		return fmt.Errorf("can not get %s from env", corev1.TLSPrivateKeyKey)
 	}
-	pair, err := tls.X509KeyPair(cert, key)
+	pair, err := tls.X509KeyPair([]byte(cert), []byte(key))
 	if err != nil {
 		return err
 	}

@@ -33,9 +33,16 @@ const (
 	// env name
 	EnvTunNameOrLUID   = "TunNameOrLUID"
 	EnvInboundPodTunIP = "InboundPodTunIP"
+	EnvPodName         = "POD_NAME"
+	EnvPodNamespace    = "POD_NAMESPACE"
 
 	// annotation
 	AnnoServiceAccountName = "service_account_name_backup_by_kubevpn"
+
+	// header name
+	HeaderPodName      = "POD_NAME"
+	HeaderPodNamespace = "POD_NAMESPACE"
+	HeaderIP           = "IP"
 )
 
 var (

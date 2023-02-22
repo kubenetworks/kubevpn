@@ -3,7 +3,6 @@ package cmds
 import (
 	"context"
 	"fmt"
-	"k8s.io/klog/v2"
 	"net"
 	"net/http"
 	"os"
@@ -31,25 +30,25 @@ func CmdServe(factory cmdutil.Factory) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if v, ok := os.LookupEnv(config.EnvInboundPodTunIP); ok && v == "" {
-				clientset, err := factory.KubernetesClientSet()
-				if err != nil {
-					klog.Error(err)
-					return err
-				}
-				namespace, found, _ := factory.ToRawKubeConfigLoader().Namespace()
-				if !found {
+				namespace := os.Getenv(config.EnvPodNamespace)
+				if namespace == "" {
 					return fmt.Errorf("can not get namespace")
 				}
-				cmi := clientset.CoreV1().ConfigMaps(namespace)
-				dhcp := handler.NewDHCPManager(cmi, namespace, &net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask})
-				random, err := dhcp.RentIPRandom()
+				url := fmt.Sprintf("%s.%s:80/rent/ip", config.ConfigMapPodTrafficManager, namespace)
+				request, err := http.NewRequest("GET", url, nil)
 				if err != nil {
-					klog.Error(err)
+					return fmt.Errorf("can not new request, err: %v", err)
+				}
+				request.Header.Set(config.HeaderPodName, os.Getenv(config.EnvPodName))
+				request.Header.Set(config.HeaderPodNamespace, namespace)
+				ip, err := util.DoReq(request)
+				if err != nil {
+					log.Error(err)
 					return err
 				}
-				err = os.Setenv(config.EnvInboundPodTunIP, random.String())
+				err = os.Setenv(config.EnvInboundPodTunIP, string(ip))
 				if err != nil {
-					klog.Error(err)
+					log.Error(err)
 					return err
 				}
 			}
@@ -72,21 +71,20 @@ func CmdServe(factory cmdutil.Factory) *cobra.Command {
 			if !ok || v == "" {
 				return nil
 			}
-			_, ipNet, err := net.ParseCIDR(v)
+			_, _, err := net.ParseCIDR(v)
 			if err != nil {
 				return err
 			}
-			clientset, err := factory.KubernetesClientSet()
+			namespace := os.Getenv(config.EnvPodNamespace)
+			url := fmt.Sprintf("%s.%s:80/release/ip", config.ConfigMapPodTrafficManager, namespace)
+			request, err := http.NewRequest("DELETE", url, nil)
 			if err != nil {
-				return err
+				return fmt.Errorf("can not new request, err: %v", err)
 			}
-			namespace, found, _ := factory.ToRawKubeConfigLoader().Namespace()
-			if !found {
-				return fmt.Errorf("can not get namespace")
-			}
-			cmi := clientset.CoreV1().ConfigMaps(namespace)
-			dhcp := handler.NewDHCPManager(cmi, namespace, &net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask})
-			err = dhcp.ReleaseIpToDHCP(ipNet)
+			request.Header.Set(config.HeaderPodName, os.Getenv(config.EnvPodName))
+			request.Header.Set(config.HeaderPodNamespace, namespace)
+			request.Header.Set(config.HeaderIP, v)
+			_, err = util.DoReq(request)
 			return err
 		},
 	}

@@ -38,6 +38,13 @@ iptables -t nat -A PREROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR} -j DNAT --to
 iptables -t nat -A POSTROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR} -j MASQUERADE
 kubevpn serve -L "tun:/${TrafficManagerRealIP}:8422?net=${InboundPodTunIP}&route=${CIDR}" --debug=true`,
 		},
+		EnvFrom: []v1.EnvFromSource{{
+			SecretRef: &v1.SecretEnvSource{
+				LocalObjectReference: v1.LocalObjectReference{
+					Name: config.ConfigMapPodTrafficManager,
+				},
+			},
+		}},
 		Env: []v1.EnvVar{
 			{
 				Name:  "CIDR",
@@ -52,23 +59,21 @@ kubevpn serve -L "tun:/${TrafficManagerRealIP}:8422?net=${InboundPodTunIP}&route
 				Value: c.InboundPodTunIP,
 			},
 			{
-				Name: "POD_NAMESPACE",
+				Name: config.EnvPodNamespace,
 				ValueFrom: &v1.EnvVarSource{
 					FieldRef: &v1.ObjectFieldSelector{
 						FieldPath: "metadata.namespace",
 					},
 				},
 			},
-		},
-		SecurityContext: &v1.SecurityContext{
-			Capabilities: &v1.Capabilities{
-				Add: []v1.Capability{
-					"NET_ADMIN",
-					//"SYS_MODULE",
+			{
+				Name: config.EnvPodName,
+				ValueFrom: &v1.EnvVarSource{
+					FieldRef: &v1.ObjectFieldSelector{
+						FieldPath: "metadata.name",
+					},
 				},
 			},
-			RunAsUser:  pointer.Int64(0),
-			Privileged: pointer.Bool(true),
 		},
 		Resources: v1.ResourceRequirements{
 			Requests: map[v1.ResourceName]resource.Quantity{
@@ -81,6 +86,16 @@ kubevpn serve -L "tun:/${TrafficManagerRealIP}:8422?net=${InboundPodTunIP}&route
 			},
 		},
 		ImagePullPolicy: v1.PullIfNotPresent,
+		SecurityContext: &v1.SecurityContext{
+			Capabilities: &v1.Capabilities{
+				Add: []v1.Capability{
+					"NET_ADMIN",
+					//"SYS_MODULE",
+				},
+			},
+			RunAsUser:  pointer.Int64(0),
+			Privileged: pointer.Bool(true),
+		},
 	})
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarEnvoyProxy,

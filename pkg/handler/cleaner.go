@@ -131,6 +131,7 @@ func cleanup(clientset *kubernetes.Clientset, namespace, name string) {
 	p = []byte(fmt.Sprintf(`{"data":{"%s":"%s"}}`, config.KeyRefCount, strconv.Itoa(0)))
 	_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), name, types.MergePatchType, p, v1.PatchOptions{})
 	options := v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)}
+	_ = clientset.CoreV1().Secrets(namespace).Delete(context.Background(), name, options)
 	_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(context.Background(), name+"."+namespace, options)
 	_ = clientset.RbacV1().RoleBindings(namespace).Delete(context.Background(), name, options)
 	_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(context.Background(), name, options)
