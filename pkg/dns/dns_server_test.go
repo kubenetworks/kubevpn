@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/docker/libnetwork/resolvconf"
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -176,5 +177,19 @@ func TestFix(t *testing.T) {
 	}
 	for _, s := range clientConfig.NameList("productpage") {
 		println(s)
+	}
+}
+
+func TestName(t *testing.T) {
+	temp, _ := os.CreateTemp("", "")
+	temp.Close()
+	println(temp.Name())
+	_, err := resolvconf.Build(temp.Name(), []string{"10.233.0.3", "10.233.97.159", "10.233.122.162"}, []string{
+		"vke-system.svc.cluster.local",
+		"svc.cluster.local",
+		"cluster.local",
+	}, []string{"ndots:5", "timeout:5"})
+	if err != nil {
+		panic(err)
 	}
 }

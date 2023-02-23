@@ -211,24 +211,27 @@ func GetVolume(ctx context.Context, f util.Factory, ns, pod string) (map[string]
 			if volumeMount.MountPath == "/tmp" {
 				continue
 			}
-
 			join := filepath.Join(os.TempDir(), strconv.Itoa(rand.Int()))
 			err = os.MkdirAll(join, 0755)
 			if err != nil {
 				return nil, err
+			}
+			if volumeMount.SubPath != "" {
+				join = filepath.Join(join, volumeMount.SubPath)
 			}
 			// pod-namespace/pod-name:path
 			remotePath := fmt.Sprintf("%s/%s:%s", ns, pod, volumeMount.MountPath)
 			stdIn, stdOut, stdErr := dockerterm.StdStreams()
 			copyOptions := cp.NewCopyOptions(genericclioptions.IOStreams{In: stdIn, Out: stdOut, ErrOut: stdErr})
 			copyOptions.Container = c.Name
+			copyOptions.MaxTries = 10
 			err = copyOptions.Complete(f, &cobra.Command{}, []string{remotePath, join})
 			if err != nil {
 				return nil, err
 			}
 			err = copyOptions.Run()
 			if err != nil {
-				_, _ = fmt.Fprintf(os.Stderr, "Can not download volume %s path %s, ignore...", volumeMount.Name, volumeMount.MountPath)
+				_, _ = fmt.Fprintf(os.Stderr, "Can not download volume %s path %s, err: %v, ignore...\n", volumeMount.Name, volumeMount.MountPath, err)
 				continue
 			}
 			m = append(m, mount.Mount{

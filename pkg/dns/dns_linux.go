@@ -4,9 +4,14 @@
 package dns
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 
+	"github.com/docker/docker/libnetwork/resolvconf"
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 
@@ -42,16 +47,55 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string) error {
 	}...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Warnf("cmd: %s, output: %s, error: %v\n", cmd.Args, string(output), err)
+		log.Debugf("failed to exec cmd: %s, message: %s, ignore", strings.Join(cmd.Args, " "), string(output))
 	}
 
-	return nil
+	filename := filepath.Join("/", "etc", "resolv.conf")
+	readFile, err := os.ReadFile(filename)
+	if err == nil {
+		resolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(readFile)))
+		if err == nil {
+			if len(resolvConf.Servers) != 0 {
+				clientConfig.Servers = append(clientConfig.Servers, resolvConf.Servers...)
+			}
+			if len(resolvConf.Search) != 0 {
+				clientConfig.Search = append(clientConfig.Search, resolvConf.Search...)
+			}
+		}
+	}
+
+	return WriteResolvConf(*clientConfig)
 }
 
 func CancelDNS() {
 	updateHosts("")
+
+	filename := filepath.Join("/", "etc", "resolv.conf")
+	_ = os.Rename(getBackupFilename(filename), filename)
 }
 
 func GetHostFile() string {
 	return "/etc/hosts"
+}
+
+func WriteResolvConf(config miekgdns.ClientConfig) error {
+	var options []string
+	if config.Ndots != 0 {
+		options = append(options, fmt.Sprintf("ndots:%d", config.Ndots))
+	}
+	if config.Attempts != 0 {
+		options = append(options, fmt.Sprintf("attempts:%d", config.Attempts))
+	}
+	if config.Timeout != 0 {
+		options = append(options, fmt.Sprintf("timeout:%d", config.Timeout))
+	}
+
+	filename := filepath.Join("/", "etc", "resolv.conf")
+	_ = os.Rename(filename, getBackupFilename(filename))
+	_, err := resolvconf.Build(filename, config.Servers, config.Search, options)
+	return err
+}
+
+func getBackupFilename(filename string) string {
+	return filename + ".kubevpn_backup"
 }

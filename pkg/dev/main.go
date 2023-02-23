@@ -35,16 +35,17 @@ type Options struct {
 	// docker options
 	Platform string
 	//Pull         string // always, missing, never
-	PublishAll   bool
-	Entrypoint   string
-	DockerImage  string
-	Publish      opts.ListOpts
-	Expose       opts.ListOpts
-	ExtraHosts   opts.ListOpts
-	Env          opts.ListOpts
-	Mounts       opts.MountOpt
-	Volumes      opts.ListOpts
-	VolumeDriver string
+	PublishAll      bool
+	Entrypoint      string
+	DockerImage     string
+	Publish         opts.ListOpts
+	Expose          opts.ListOpts
+	ExtraHosts      opts.ListOpts
+	ParentContainer string
+	Env             opts.ListOpts
+	Mounts          opts.MountOpt
+	Volumes         opts.ListOpts
+	VolumeDriver    string
 }
 
 func (d Options) Main(ctx context.Context) error {
@@ -103,21 +104,42 @@ func (d Options) Main(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var dockerCli *command.DockerCli
+	_, dockerCli, err = GetClient()
+	if err != nil {
+		return err
+	}
+	if d.ParentContainer != "" {
+		for _, config := range list[:] {
+			// remove expose port
+			config.config.ExposedPorts = nil
+			config.hostConfig.NetworkMode = containertypes.NetworkMode("container:" + d.ParentContainer)
+			config.hostConfig.PidMode = containertypes.PidMode("container:" + d.ParentContainer)
+			config.hostConfig.PortBindings = nil
 
-	// skip first
-	for _, config := range list[1:] {
-		// remove expose port
-		config.config.ExposedPorts = nil
-		config.hostConfig.NetworkMode = containertypes.NetworkMode("container:" + list[0].containerName)
-		config.hostConfig.PidMode = containertypes.PidMode("container:" + list[0].containerName)
-		config.hostConfig.PortBindings = nil
+			// remove dns
+			config.hostConfig.DNS = nil
+			config.hostConfig.DNSOptions = nil
+			config.hostConfig.DNSSearch = nil
+			config.hostConfig.PublishAllPorts = false
+			config.config.Hostname = ""
+		}
+	} else {
+		// skip first
+		for _, config := range list[1:] {
+			// remove expose port
+			config.config.ExposedPorts = nil
+			config.hostConfig.NetworkMode = containertypes.NetworkMode("container:" + list[0].containerName)
+			config.hostConfig.PidMode = containertypes.PidMode("container:" + list[0].containerName)
+			config.hostConfig.PortBindings = nil
 
-		// remove dns
-		config.hostConfig.DNS = nil
-		config.hostConfig.DNSOptions = nil
-		config.hostConfig.DNSSearch = nil
-		config.hostConfig.PublishAllPorts = false
-		config.config.Hostname = ""
+			// remove dns
+			config.hostConfig.DNS = nil
+			config.hostConfig.DNSOptions = nil
+			config.hostConfig.DNSSearch = nil
+			config.hostConfig.PublishAllPorts = false
+			config.config.Hostname = ""
+		}
 	}
 
 	handler.RollbackFuncList = append(handler.RollbackFuncList, func() {
@@ -127,11 +149,7 @@ func (d Options) Main(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, cli, err := GetClient()
-	if err != nil {
-		return err
-	}
-	return terminal(list[0].containerName, cli)
+	return terminal(list[0].containerName, dockerCli)
 }
 
 type Run []*RunConfig

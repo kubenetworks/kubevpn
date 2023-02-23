@@ -50,7 +50,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client) (err err
 		}
 		readCloser, err = cli.ImagePull(ctx, config.Image, types.ImagePullOptions{Platform: plat})
 		if err != nil {
-			return err
+			return fmt.Errorf("can not pull image %s, err: %s, please make sure image is exist and can be pulled from local", config.Image, err)
 		}
 		defer readCloser.Close()
 		_, stdout, _ := dockerterm.StdStreams()
@@ -64,7 +64,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client) (err err
 	var create typescommand.CreateResponse
 	create, err = cli.ContainerCreate(ctx, config, hostConfig, networkConfig, platform, name)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create container %s, err: %s", name, err)
 	}
 
 	log.Infof("Created container: %s", name)

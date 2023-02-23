@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/docker/cli/cli"
 	"github.com/docker/cli/opts"
+	"github.com/docker/docker/api/types"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/util/retry"
@@ -68,6 +70,24 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 				Workloads: []string{devOptions.Workload},
 			}
 
+			if devOptions.ParentContainer != "" {
+				client, _, err := dev.GetClient()
+				if err != nil {
+					return err
+				}
+				var inspect types.ContainerJSON
+				inspect, err = client.ContainerInspect(context.Background(), devOptions.ParentContainer)
+				if err != nil {
+					return err
+				}
+				if inspect.State == nil {
+					return fmt.Errorf("can not get container status, please make contianer name is valid")
+				}
+				if !inspect.State.Running {
+					return fmt.Errorf("container %s status is %s, expect is running, please make sure your outer docker name is correct", devOptions.ParentContainer, inspect.State.Status)
+				}
+			}
+
 			if err := connect.InitClient(f); err != nil {
 				return err
 			}
@@ -123,6 +143,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 
 	// docker options
 	cmd.Flags().Var(&devOptions.ExtraHosts, "add-host", "Add a custom host-to-IP mapping (host:ip)")
+	cmd.Flags().StringVar(&devOptions.ParentContainer, "parent-container", "", "Parent container name if running in Docker (Docker in Docker)")
 	cmd.Flags().VarP(&devOptions.Volumes, "volume", "v", "Bind mount a volume")
 	cmd.Flags().Var(&devOptions.Mounts, "mount", "Attach a filesystem mount to the container")
 	cmd.Flags().Var(&devOptions.Expose, "expose", "Expose a port or a range of ports")
