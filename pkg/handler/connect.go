@@ -128,7 +128,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err != nil {
 		return err
 	}
-	go c.addRouteDynamic(ctx)
+	c.addRouteDynamic(ctx)
 	c.deleteFirewallRule(ctx)
 	c.setupDNS()
 	log.Info("dns service ok")
@@ -269,58 +269,113 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
 		return
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
+	addRouteFunc := func(resource, ip string) {
+		if ip == "" || net.ParseIP(ip) == nil {
 			return
-		default:
-			func() {
-				w, err := c.clientset.CoreV1().Pods(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{Watch: true, TimeoutSeconds: pointer.Int64(30)})
-				if err != nil {
-					log.Debugf("wait pod failed, err: %v", err)
-					return
-				}
-				defer w.Stop()
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case e, ok := <-w.ResultChan():
-						if !ok {
-							return
-						}
-						if e.Type != watch.Added {
-							continue
-						}
-						var pod *v1.Pod
-						pod, ok = e.Object.(*v1.Pod)
-						if !ok {
-							continue
-						}
-						if pod.Spec.HostNetwork {
-							continue
-						}
-						ip := pod.Status.PodIP
-						if ip == "" || net.ParseIP(ip) == nil {
-							continue
-						}
-						if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
-							continue
-						}
-						// if route is right, not need add route
-						iface, _, _, err := r.Route(net.ParseIP(ip))
-						if err == nil && tunIface.Name == iface.Name {
-							continue
-						}
-						err = tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(32, 32)}})
-						if err != nil {
-							log.Debugf("[route] add route failed, pod: %s, ip: %s,err: %v", pod.Name, ip, err)
-						}
-					}
-				}
-			}()
+		}
+		// if route is right, not need add route
+		iface, _, _, err := r.Route(net.ParseIP(ip))
+		if err == nil && tunIface.Name == iface.Name {
+			return
+		}
+		err = tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(32, 32)}})
+		if err != nil {
+			log.Debugf("[route] add route failed, pod: %s, ip: %s,err: %v", resource, ip, err)
 		}
 	}
+
+	// add pod route
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				func() {
+					defer func() {
+						if er := recover(); er != nil {
+							log.Errorln(er)
+						}
+					}()
+					w, err := c.clientset.CoreV1().Pods(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{Watch: true, TimeoutSeconds: pointer.Int64(30)})
+					if err != nil {
+						log.Debugf("wait pod failed, err: %v", err)
+						return
+					}
+					defer w.Stop()
+					for {
+						select {
+						case <-ctx.Done():
+							return
+						case e, ok := <-w.ResultChan():
+							if !ok {
+								return
+							}
+							if e.Type != watch.Added {
+								continue
+							}
+							var pod *v1.Pod
+							pod, ok = e.Object.(*v1.Pod)
+							if !ok {
+								continue
+							}
+							if pod.Spec.HostNetwork {
+								continue
+							}
+							if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
+								continue
+							}
+							addRouteFunc(pod.Name, pod.Status.PodIP)
+						}
+					}
+				}()
+			}
+		}
+	}()
+
+	// add service route
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				func() {
+					defer func() {
+						if er := recover(); er != nil {
+							log.Errorln(er)
+						}
+					}()
+					w, err := c.clientset.CoreV1().Services(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{Watch: true, TimeoutSeconds: pointer.Int64(30)})
+					if err != nil {
+						log.Debugf("wait service failed, err: %v", err)
+						return
+					}
+					defer w.Stop()
+					for {
+						select {
+						case <-ctx.Done():
+							return
+						case e, ok := <-w.ResultChan():
+							if !ok {
+								return
+							}
+							if e.Type != watch.Added {
+								continue
+							}
+							var pod *v1.Service
+							pod, ok = e.Object.(*v1.Service)
+							if !ok {
+								continue
+							}
+							ip := pod.Spec.ClusterIP
+							addRouteFunc(pod.Name, ip)
+						}
+					}
+				}()
+			}
+		}
+	}()
 }
 
 func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
