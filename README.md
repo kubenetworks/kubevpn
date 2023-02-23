@@ -269,11 +269,11 @@ tunnel connected
 dns service ok
 tar: removing leading '/' from member names
 /var/folders/4_/wt19r8113kq_mfws8sb_w1z00000gn/T/3264799524258261475:/var/run/secrets/kubernetes.io/serviceaccount
-tar: Removing leading `/' from member names
-tar: Removing leading `/' from hard link targets
+tar: Removing leading '/' from member names
+tar: Removing leading '/' from hard link targets
 /var/folders/4_/wt19r8113kq_mfws8sb_w1z00000gn/T/4472770436329940969:/var/run/secrets/kubernetes.io/serviceaccount
-tar: Removing leading `/' from member names
-tar: Removing leading `/' from hard link targets
+tar: Removing leading '/' from member names
+tar: Removing leading '/' from hard link targets
 /var/folders/4_/wt19r8113kq_mfws8sb_w1z00000gn/T/359584695576599326:/var/run/secrets/kubernetes.io/serviceaccount
 Created container: authors_kube-system_kubevpn_a7d82
 Wait container authors_kube-system_kubevpn_a7d82 to be running...
@@ -379,8 +379,8 @@ tunnel connected
 dns service ok
 tar: removing leading '/' from member names
 /tmp/3122262358661539581:/var/run/secrets/kubernetes.io/serviceaccount
-tar: Removing leading `/' from member names
-tar: Removing leading `/' from hard link targets
+tar: Removing leading '/' from member names
+tar: Removing leading '/' from hard link targets
 /tmp/7677066538742627822:/var/run/secrets/kubernetes.io/serviceaccount
 latest: Pulling from naison/authors
 Digest: sha256:2e7b2d6a4c6143cde888fcdb70ba091d533e11de70e13e151adff7510a5d52d4
