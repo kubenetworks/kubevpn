@@ -240,7 +240,7 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 	for _, ipNet := range c.cidrs {
 		list.Insert(ipNet.String())
 	}
-	r := Route{
+	r := core.Route{
 		ServeNodes: []string{
 			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", c.localTunIP.String(), strings.Join(list.List(), ",")),
 		},
@@ -299,6 +299,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
 					}()
 					w, err := c.clientset.CoreV1().Pods(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{Watch: true, TimeoutSeconds: pointer.Int64(30)})
 					if err != nil {
+						time.Sleep(time.Second * 5)
 						log.Debugf("wait pod failed, err: %v", err)
 						return
 					}
@@ -349,6 +350,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
 					w, err := c.clientset.CoreV1().Services(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{Watch: true, TimeoutSeconds: pointer.Int64(30)})
 					if err != nil {
 						log.Debugf("wait service failed, err: %v", err)
+						time.Sleep(time.Second * 5)
 						return
 					}
 					defer w.Stop()
@@ -389,15 +391,17 @@ func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
 	go util.Heartbeats(ctx)
 }
 
-func (c *ConnectOptions) setupDNS() {
+func (c *ConnectOptions) setupDNS() error {
 	const port = 53
 	pod, err := c.GetRunningPodList()
 	if err != nil {
 		log.Errorln(err)
+		return err
 	}
 	relovConf, err := dns.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, pod[0].GetName(), c.Namespace)
 	if err != nil {
 		log.Errorln(err)
+		return err
 	}
 	if relovConf.Port == "" {
 		relovConf.Port = strconv.Itoa(port)
@@ -416,13 +420,14 @@ func (c *ConnectOptions) setupDNS() {
 		}
 	}
 	if err = dns.SetupDNS(relovConf, ns.List()); err != nil {
-		log.Warningln(err)
+		return err
 	}
 	// dump service in current namespace for support DNS resolve service:port
 	go dns.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.Namespace))
+	return nil
 }
 
-func Start(ctx context.Context, r Route) error {
+func Start(ctx context.Context, r core.Route) error {
 	servers, err := r.GenerateServers()
 	if err != nil {
 		return errors.WithStack(err)
@@ -430,12 +435,19 @@ func Start(ctx context.Context, r Route) error {
 	if len(servers) == 0 {
 		return errors.New("invalid config")
 	}
-	for _, rr := range servers {
+	for _, server := range servers {
 		go func(ctx context.Context, server core.Server) {
-			if err = server.Serve(ctx); err != nil {
-				log.Debug(err)
+			l := server.Listener
+			defer l.Close()
+			for {
+				conn, err := l.Accept()
+				if err != nil {
+					log.Warnf("server: accept error: %v", err)
+					continue
+				}
+				go server.Handler.Handle(ctx, conn)
 			}
-		}(ctx, rr)
+		}(ctx, server)
 	}
 	return nil
 }

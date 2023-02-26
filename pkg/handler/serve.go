@@ -14,7 +14,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-func Complete(route *Route) error {
+func Complete(route *core.Route) error {
 	if v, ok := os.LookupEnv(config.EnvInboundPodTunIP); ok && v == "" {
 		namespace := os.Getenv(config.EnvPodNamespace)
 		if namespace == "" {

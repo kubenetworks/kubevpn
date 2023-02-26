@@ -7,6 +7,8 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
 type fakeUDPTunnelConnector struct {
@@ -18,40 +20,48 @@ func UDPOverTCPTunnelConnector() Connector {
 
 func (c *fakeUDPTunnelConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
 	defer conn.SetDeadline(time.Time{})
+	switch con := conn.(type) {
+	case *net.TCPConn:
+		err := con.SetNoDelay(true)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return newFakeUDPTunnelConnOverTCP(ctx, conn)
 }
 
 type fakeUdpHandler struct {
+	nat *NAT
 }
 
-// TCPHandler creates a server Handler
 func TCPHandler() Handler {
-	return &fakeUdpHandler{}
+	return &fakeUdpHandler{
+		nat: RouteNAT,
+	}
 }
+
+var Server8422, _ = net.ResolveUDPAddr("udp", "127.0.0.1:8422")
 
 func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
 	log.Debugf("[tcpserver] %s -> %s\n", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
-	// serve tunnel udp, tunnel <-> remote, handle tunnel udp request
 	udpConn, err := net.DialUDP("udp", nil, Server8422)
 	if err != nil {
 		log.Errorf("[tcpserver] udp-tun %s -> %s : %s", tcpConn.RemoteAddr(), udpConn.LocalAddr(), err)
 		return
 	}
 	defer udpConn.Close()
+
+	defer func(addr net.Addr) {
+		n := h.nat.RemoveAddr(addr)
+		log.Debugf("delete addr %s from globle route, deleted count %d", addr, n)
+	}(udpConn.LocalAddr())
+
 	log.Debugf("[tcpserver] udp-tun %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
-	_ = h.tunnelServerUDP(tcpConn, udpConn)
-	log.Debugf("[tcpserver] udp-tun %s >-< %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
-	return
-}
-
-var Server8422, _ = net.ResolveUDPAddr("udp", "127.0.0.1:8422")
-
-func (h *fakeUdpHandler) tunnelServerUDP(tcpConn net.Conn, udpConn *net.UDPConn) (err error) {
 	errChan := make(chan error, 2)
 	go func() {
-		b := LPool.Get().([]byte)
-		defer LPool.Put(b)
+		b := config.LPool.Get().([]byte)
+		defer config.LPool.Put(b[:])
 
 		for {
 			dgram, err := readDatagramPacket(tcpConn, b[:])
@@ -71,8 +81,8 @@ func (h *fakeUdpHandler) tunnelServerUDP(tcpConn net.Conn, udpConn *net.UDPConn)
 	}()
 
 	go func() {
-		b := LPool.Get().([]byte)
-		defer LPool.Put(b)
+		b := config.LPool.Get().([]byte)
+		defer config.LPool.Put(b[:])
 
 		for {
 			n, err := udpConn.Read(b[:])
@@ -92,7 +102,12 @@ func (h *fakeUdpHandler) tunnelServerUDP(tcpConn net.Conn, udpConn *net.UDPConn)
 			log.Debugf("[tcpserver] udp-tun %s <<< %s length: %d", tcpConn.RemoteAddr(), dgram.Addr(), len(dgram.Data))
 		}
 	}()
-	return <-errChan
+	err = <-errChan
+	if err != nil {
+		log.Error(err)
+	}
+	log.Debugf("[tcpserver] udp-tun %s >-< %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
+	return
 }
 
 // fake udp connect over tcp

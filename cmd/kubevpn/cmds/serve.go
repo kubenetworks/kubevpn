@@ -9,15 +9,17 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	_ "go.uber.org/automaxprocs"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/core"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
 func CmdServe(factory cmdutil.Factory) *cobra.Command {
-	var route = &handler.Route{}
+	var route = &core.Route{}
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Server side, startup traffic manager, forward inbound and outbound traffic",

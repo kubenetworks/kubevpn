@@ -6,15 +6,14 @@ package util
 import (
 	"flag"
 	"fmt"
+	log "github.com/sirupsen/logrus"
+	"k8s.io/client-go/tools/clientcmd"
 	"os"
 	"os/exec"
 	"os/signal"
 	"runtime"
 	"syscall"
 	"time"
-
-	log "github.com/sirupsen/logrus"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 const envStartSudoKubeVPNByKubeVPN = "DEPTH_SIGNED_BY_NAISON"

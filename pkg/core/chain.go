@@ -67,9 +67,31 @@ func (*Chain) resolve(addr string) string {
 	return addr
 }
 
-func (c *Chain) getConn(_ context.Context) (net.Conn, error) {
+func (c *Chain) getConn(ctx context.Context) (net.Conn, error) {
 	if c.IsEmpty() {
 		return nil, ErrorEmptyChain
 	}
-	return c.Node().Client.Dial(c.Node().Addr)
+	return c.Node().Client.Dial(ctx, c.Node().Addr)
+}
+
+type Handler interface {
+	Handle(ctx context.Context, conn net.Conn)
+}
+
+type Client struct {
+	Connector
+	Transporter
+}
+
+type Connector interface {
+	ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error)
+}
+
+type Transporter interface {
+	Dial(ctx context.Context, addr string) (net.Conn, error)
+}
+
+type Server struct {
+	Listener net.Listener
+	Handler  Handler
 }

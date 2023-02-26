@@ -8,7 +8,6 @@ import (
 
 	"github.com/containernetworking/cni/pkg/types"
 	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/pkg/core"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
 
@@ -82,10 +81,14 @@ type tunConn struct {
 
 func (c *tunConn) Read(b []byte) (n int, err error) {
 	offset := device.MessageTransportHeaderSize
-	bytes := core.LPool.Get().([]byte)
-	core.LPool.Put(bytes)
+	bytes := config.LPool.Get().([]byte)
+	defer config.LPool.Put(bytes[:])
 
-	size, err := c.ifce.Read(bytes[:], offset)
+	var size int
+	size, err = c.ifce.Read(bytes[:], offset)
+	if err != nil {
+		return 0, err
+	}
 	if size == 0 || size > device.MaxSegmentSize-device.MessageTransportHeaderSize {
 		return 0, nil
 	}
@@ -96,8 +99,8 @@ func (c *tunConn) Write(b []byte) (n int, err error) {
 	if len(b) < device.MessageTransportHeaderSize {
 		return 0, err
 	}
-	bytes := core.LPool.Get().([]byte)
-	defer core.LPool.Put(bytes)
+	bytes := config.LPool.Get().([]byte)
+	defer config.LPool.Put(bytes[:])
 
 	copy(bytes[device.MessageTransportOffsetContent:], b)
 

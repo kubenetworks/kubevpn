@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
 type datagramPacket struct {
@@ -44,8 +46,8 @@ func readDatagramPacket(r io.Reader, b []byte) (*datagramPacket, error) {
 }
 
 func (addr *datagramPacket) Write(w io.Writer) error {
-	b := LPool.Get().([]byte)
-	defer LPool.Put(b)
+	b := config.LPool.Get().([]byte)
+	defer config.LPool.Put(b[:])
 	binary.BigEndian.PutUint16(b[:2], uint16(len(addr.Data)))
 	n := copy(b[2:], addr.Data)
 	_, err := w.Write(b[:n+2])

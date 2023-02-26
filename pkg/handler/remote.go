@@ -174,12 +174,12 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 
 	var Resources = v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
-			v1.ResourceCPU:    resource.MustParse("128m"),
-			v1.ResourceMemory: resource.MustParse("256Mi"),
+			v1.ResourceCPU:    resource.MustParse("1000m"),
+			v1.ResourceMemory: resource.MustParse("1024Mi"),
 		},
 		Limits: map[v1.ResourceName]resource.Quantity{
-			v1.ResourceCPU:    resource.MustParse("256m"),
-			v1.ResourceMemory: resource.MustParse("512Mi"),
+			v1.ResourceCPU:    resource.MustParse("2000m"),
+			v1.ResourceMemory: resource.MustParse("2048Mi"),
 		},
 	}
 

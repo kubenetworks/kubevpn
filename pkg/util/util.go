@@ -585,3 +585,11 @@ func DoReq(request *http.Request) (body []byte, err error) {
 func GetTlsDomain(namespace string) string {
 	return config.ConfigMapPodTrafficManager + "." + namespace + "." + "svc"
 }
+
+func IsIPv4(packet []byte) bool {
+	return 4 == (packet[0] >> 4)
+}
+
+func IsIPv6(packet []byte) bool {
+	return 6 == (packet[0] >> 4)
+}

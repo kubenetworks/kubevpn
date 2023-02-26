@@ -2,6 +2,7 @@ package config
 
 import (
 	"net"
+	"sync"
 	"time"
 )
 
@@ -41,9 +42,6 @@ const (
 	EnvInboundPodTunIP = "InboundPodTunIP"
 	EnvPodName         = "POD_NAME"
 	EnvPodNamespace    = "POD_NAMESPACE"
-
-	// annotation
-	AnnoServiceAccountName = "service_account_name_backup_by_kubevpn"
 
 	// header name
 	HeaderPodName      = "POD_NAME"
@@ -90,4 +88,12 @@ var (
 	//	transport layer UDP header needs 8 bytes
 	//	UDP over TCP header needs 22 bytes
 	DefaultMTU = 1500 - 20 - 8 - 21
+)
+
+var (
+	LPool = &sync.Pool{
+		New: func() interface{} {
+			return make([]byte, LargeBufferSize)
+		},
+	}
 )
