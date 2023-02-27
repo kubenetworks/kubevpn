@@ -130,7 +130,10 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	}
 	c.addRouteDynamic(ctx)
 	c.deleteFirewallRule(ctx)
-	c.setupDNS()
+	err = c.setupDNS()
+	if err != nil {
+		return err
+	}
 	log.Info("dns service ok")
 	return
 }
