@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"sync/atomic"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -40,7 +41,8 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 				if !h.chain.IsEmpty() {
 					cc, errs := h.chain.DialContext(ctx)
 					if errs != nil {
-						log.Error(errs)
+						log.Debug(errs)
+						time.Sleep(time.Second * 5)
 						continue
 					}
 					var ok bool

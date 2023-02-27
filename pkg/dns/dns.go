@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"sort"
 	"strings"
@@ -186,7 +187,7 @@ func generateHostsEntry(list []v12.Service) string {
 		domainList := sets.NewString(item.Name).Insert(item.Spec.ExternalName).List()
 		for _, ip := range ipList {
 			for _, domain := range domainList {
-				if ip == "" || domain == "" {
+				if net.ParseIP(ip) == nil || domain == "" {
 					continue
 				}
 				entryList = append(entryList, entry{IP: ip, Domain: domain})

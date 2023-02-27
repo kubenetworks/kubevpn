@@ -13,7 +13,6 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/runtime"
@@ -160,10 +159,8 @@ func (c *ConnectOptions) portForward(ctx context.Context, port string) error {
 				podName := podList[0].GetName()
 				// if port-forward occurs error, check pod is deleted or not, speed up fail
 				runtime.ErrorHandlers = []func(error){func(err error) {
-					pod, err := podInterface.Get(childCtx, podName, metav1.GetOptions{})
-					if apierrors.IsNotFound(err) || (pod != nil && pod.GetDeletionTimestamp() != nil) {
-						cancelFunc()
-					}
+					log.Errorf("port-forward occurs error, err: %v, retrying", err)
+					cancelFunc()
 				}}
 				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
 				go checkPodStatus(childCtx, cancelFunc, podName, podInterface)

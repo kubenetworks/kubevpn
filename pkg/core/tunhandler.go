@@ -303,12 +303,19 @@ type Peer struct {
 	errChan chan error
 }
 
+func (p *Peer) sendErr(err error) {
+	select {
+	case p.errChan <- err:
+	default:
+	}
+}
+
 func (p *Peer) readFromConn() {
 	for {
 		b := config.LPool.Get().([]byte)
 		n, srcAddr, err := p.conn.ReadFrom(b[:])
 		if err != nil {
-			p.errChan <- err
+			p.sendErr(err)
 			return
 		}
 		if p.closed.Load() {
@@ -357,7 +364,8 @@ func (p *Peer) route() {
 			_, err := p.conn.WriteTo(e.data[:e.length], routeToAddr)
 			config.LPool.Put(e.data[:])
 			if err != nil {
-				log.Error(err)
+				p.sendErr(err)
+				return
 			}
 		} else {
 			if !p.tun.closed.Load() {
