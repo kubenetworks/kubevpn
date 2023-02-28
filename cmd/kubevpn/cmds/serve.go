@@ -2,10 +2,12 @@ package cmds
 
 import (
 	"context"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -29,6 +31,7 @@ func CmdServe(factory cmdutil.Factory) *cobra.Command {
 			go func() { log.Info(http.ListenAndServe("localhost:6060", nil)) }()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			rand.Seed(time.Now().UnixNano())
 			err := handler.Complete(route)
 			if err != nil {
 				return err

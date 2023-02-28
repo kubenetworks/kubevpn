@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -81,10 +82,13 @@ func (n *NAT) LoadOrStore(to net.IP, addr net.Addr) (result net.Addr, load bool)
 func (n *NAT) RouteTo(ip net.IP) net.Addr {
 	n.lock.Lock()
 	defer n.lock.Unlock()
-	for _, addr := range n.routes[ip.String()] {
-		return addr
+	addrList := n.routes[ip.String()]
+	if len(addrList) == 0 {
+		return nil
 	}
-	return nil
+	// for load balance
+	index := rand.Intn(len(n.routes[ip.String()]))
+	return addrList[index]
 }
 
 func (n *NAT) Remove(ip net.IP, addr net.Addr) {

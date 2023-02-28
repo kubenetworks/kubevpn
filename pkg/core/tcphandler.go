@@ -19,13 +19,15 @@ func UDPOverTCPTunnelConnector() Connector {
 }
 
 func (c *fakeUDPTunnelConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
-	defer conn.SetDeadline(time.Time{})
+	//defer conn.SetDeadline(time.Time{})
 	switch con := conn.(type) {
 	case *net.TCPConn:
 		err := con.SetNoDelay(true)
 		if err != nil {
 			return nil, err
 		}
+		con.SetKeepAlive(true)
+		con.SetKeepAlivePeriod(30 * time.Second)
 	}
 	return newFakeUDPTunnelConnOverTCP(ctx, conn)
 }

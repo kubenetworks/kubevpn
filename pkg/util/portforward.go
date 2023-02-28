@@ -24,10 +24,9 @@ import (
 // PortForwarder knows how to listen for local connections and forward them to
 // a remote pod via an upgraded HTTP request.
 type PortForwarder struct {
-	addresses     []listenAddress
-	ports         []ForwardedPort
-	stopChan      <-chan struct{}
-	innerStopChan chan struct{}
+	addresses []listenAddress
+	ports     []ForwardedPort
+	stopChan  <-chan struct{}
 	// if failed to find socat, send error
 	// if pod is not found, send error
 	errChan chan error
@@ -49,18 +48,18 @@ type ForwardedPort struct {
 }
 
 /*
-	valid port specifications:
+valid port specifications:
 
-	5000
-	- forwards from localhost:5000 to pod:5000
+5000
+- forwards from localhost:5000 to pod:5000
 
-	8888:5000
-	- forwards from localhost:8888 to pod:5000
+8888:5000
+- forwards from localhost:8888 to pod:5000
 
-	0:5000
-	:5000
-	- selects a random available local port,
-	  forwards from localhost:<random port> to pod:5000
+0:5000
+:5000
+  - selects a random available local port,
+    forwards from localhost:<random port> to pod:5000
 */
 func parsePorts(ports []string) ([]ForwardedPort, error) {
 	var forwards []ForwardedPort
@@ -156,15 +155,14 @@ func NewOnAddresses(dialer httpstream.Dialer, addresses []string, ports []string
 		return nil, err
 	}
 	return &PortForwarder{
-		dialer:        dialer,
-		addresses:     parsedAddresses,
-		ports:         parsedPorts,
-		stopChan:      stopChan,
-		innerStopChan: make(chan struct{}, 1),
-		errChan:       make(chan error, 1),
-		Ready:         readyChan,
-		out:           out,
-		errOut:        errOut,
+		dialer:    dialer,
+		addresses: parsedAddresses,
+		ports:     parsedPorts,
+		stopChan:  stopChan,
+		errChan:   make(chan error, 1),
+		Ready:     readyChan,
+		out:       out,
+		errOut:    errOut,
 	}, nil
 }
 
@@ -214,7 +212,6 @@ func (pf *PortForwarder) forward() error {
 	// wait for interrupt or conn closure
 	select {
 	case <-pf.stopChan:
-	case <-pf.innerStopChan:
 		runtime.HandleError(errors.New("lost connection to pod"))
 	}
 	select {
@@ -320,9 +317,6 @@ func (pf *PortForwarder) handleConnection(conn net.Conn, port ForwardedPort) {
 		fmt.Fprintf(pf.out, "Handling connection for %d\n", port.Local)
 	}
 
-	defaultRetry := 5
-
-firstCreateStream:
 	requestID := pf.nextRequestID()
 	// create error stream
 	headers := http.Header{}
@@ -330,7 +324,7 @@ firstCreateStream:
 	headers.Set(v1.PortHeader, fmt.Sprintf("%d", port.Remote))
 	headers.Set(v1.PortForwardRequestIDHeader, strconv.Itoa(requestID))
 	var err error
-	errorStream, err := pf.tryToCreateStream(&headers)
+	errorStream, err := pf.streamConn.CreateStream(headers)
 	if err != nil {
 		runtime.HandleError(fmt.Errorf("error creating error stream for port %d -> %d: %v", port.Local, port.Remote, err))
 		return
@@ -354,10 +348,6 @@ firstCreateStream:
 	headers.Set(v1.StreamType, v1.StreamTypeData)
 	dataStream, err := pf.streamConn.CreateStream(headers)
 	if err != nil {
-		defaultRetry--
-		if defaultRetry > 0 {
-			goto firstCreateStream
-		}
 		runtime.HandleError(fmt.Errorf("error creating forwarding stream for port %d -> %d: %v", port.Local, port.Remote, err))
 		return
 	}
@@ -401,7 +391,6 @@ firstCreateStream:
 			case pf.errChan <- err:
 			default:
 			}
-			close(pf.innerStopChan)
 		}
 		runtime.HandleError(err)
 	}
@@ -466,7 +455,6 @@ func (pf *PortForwarder) tryToCreateStream(header *http.Header) (httpstream.Stre
 			case pf.errChan <- err:
 			default:
 			}
-			close(pf.innerStopChan)
 		} else {
 			runtime.HandleError(fmt.Errorf("error upgrading connection: %s", err))
 		}
