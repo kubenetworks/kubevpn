@@ -36,7 +36,7 @@ iptables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
 iptables -t nat -A PREROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR} -j DNAT --to 127.0.0.1:15006
 iptables -t nat -A POSTROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR} -j MASQUERADE
-kubevpn serve -L "tun:/127.0.0.1:8422?net=${InboundPodTunIP}&route=${CIDR}" -F "tcp://${TrafficManagerRealIP}:10800" --debug=true`,
+kubevpn serve -L "tun:/127.0.0.1:8422?net=${InboundPodTunIP}&route=${CIDR}" -F "tcp://${TrafficManagerRealIP}:10800"`,
 		},
 		EnvFrom: []v1.EnvFromSource{{
 			SecretRef: &v1.SecretEnvSource{
@@ -100,7 +100,7 @@ kubevpn serve -L "tun:/127.0.0.1:8422?net=${InboundPodTunIP}&route=${CIDR}" -F "
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarEnvoyProxy,
 		Image:   config.Image,
-		Command: []string{"envoy", "-l", "debug", "--base-id", "1", "--config-yaml"},
+		Command: []string{"envoy", "-l", "error", "--base-id", "1", "--config-yaml"},
 		Args: []string{
 			fmt.Sprintf(s, nodeId, nodeId, c.TrafficManagerRealIP),
 		},

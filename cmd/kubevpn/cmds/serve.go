@@ -11,7 +11,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	_ "go.uber.org/automaxprocs"
+	"go.uber.org/automaxprocs/maxprocs"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
@@ -32,6 +32,7 @@ func CmdServe(factory cmdutil.Factory) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rand.Seed(time.Now().UnixNano())
+			_, _ = maxprocs.Set(maxprocs.Logger(nil))
 			err := handler.Complete(route)
 			if err != nil {
 				return err

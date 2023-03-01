@@ -61,7 +61,7 @@ iptables -P FORWARD ACCEPT
 iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIP}
 iptables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
 iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIP}
-kubevpn serve -L "tun:/127.0.0.1:8422?net=${InboundPodTunIP}&route=${CIDR}" -F "tcp://${TrafficManagerRealIP}:10800" --debug=true`,
+kubevpn serve -L "tun:/127.0.0.1:8422?net=${InboundPodTunIP}&route=${CIDR}" -F "tcp://${TrafficManagerRealIP}:10800"`,
 		},
 		SecurityContext: &corev1.SecurityContext{
 			Capabilities: &corev1.Capabilities{

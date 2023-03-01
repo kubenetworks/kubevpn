@@ -2,6 +2,8 @@ package cmds
 
 import (
 	"fmt"
+	"io"
+	defaultlog "log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -46,6 +48,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			}
 			go http.ListenAndServe("localhost:6060", nil)
 			util.InitLogger(config.Debug)
+			defaultlog.Default().SetOutput(io.Discard)
 			if util.IsWindows() {
 				driver.InstallWireGuardTunDriver()
 			}
