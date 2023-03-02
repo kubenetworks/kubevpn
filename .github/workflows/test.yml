@@ -70,6 +70,7 @@ jobs:
           make kubevpn-linux-amd64
           chmod +x ./bin/kubevpn
           cp ./bin/kubevpn /usr/local/bin/kubevpn
+          kubevpn version
 
       - name: Wait for pods reviews to be ready
         run: |
@@ -143,6 +144,7 @@ jobs:
           make kubevpn-darwin-amd64
           chmod +x ./bin/kubevpn
           cp ./bin/kubevpn /usr/local/bin/kubevpn
+          kubevpn version
 
       - name: Wait for pods reviews to be ready
         run: |
