@@ -36,6 +36,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		Volumes:    opts.NewListOpts(nil),
 		ExtraHosts: opts.NewListOpts(nil),
 	}
+	var sshConf = util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "dev",
 		Short: i18n.T("Proxy kubernetes workloads inbound traffic into local PC and dev in docker container"),
@@ -88,7 +89,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 				}
 			}
 
-			if err := connect.InitClient(f); err != nil {
+			if err := connect.InitClient(f, cmd.Flags(), sshConf); err != nil {
 				return err
 			}
 			connect.PreCheckResource()
@@ -156,5 +157,11 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&devOptions.Platform, "platform", os.Getenv("DOCKER_DEFAULT_PLATFORM"), "Set platform if server is multi-platform capable")
 	cmd.Flags().StringVar(&devOptions.VolumeDriver, "volume-driver", "", "Optional volume driver for the container")
 	_ = cmd.Flags().SetAnnotation("platform", "version", []string{"1.32"})
+
+	// for ssh jumper host
+	cmd.Flags().StringVar(&sshConf.Addr, "ssh-addr", "", "ssh connection string address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
+	cmd.Flags().StringVar(&sshConf.User, "ssh-username", "", "username for ssh")
+	cmd.Flags().StringVar(&sshConf.Password, "ssh-password", "", "password for ssh")
+	cmd.Flags().StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "file with private key for SSH authentication")
 	return cmd
 }

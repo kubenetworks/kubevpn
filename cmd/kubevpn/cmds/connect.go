@@ -24,6 +24,7 @@ import (
 
 func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	var connect = handler.ConnectOptions{}
+	var sshConf = util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "connect",
 		Short: i18n.T("Connect to kubernetes cluster network, or proxy kubernetes workloads inbound traffic into local PC"),
@@ -54,7 +55,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			}
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := connect.InitClient(f); err != nil {
+			if err := connect.InitClient(f, cmd.Flags(), sshConf); err != nil {
 				return err
 			}
 			connect.PreCheckResource()
@@ -102,5 +103,11 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "Traffic with special headers with reverse it to local PC, you should startup your service after reverse workloads successfully, If not special, redirect all traffic to local PC, format is k=v, like: k1=v1,k2=v2")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "use this image to startup container")
+
+	// for ssh jumper host
+	cmd.Flags().StringVar(&sshConf.Addr, "ssh-addr", "", "ssh connection string address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
+	cmd.Flags().StringVar(&sshConf.User, "ssh-username", "", "username for ssh")
+	cmd.Flags().StringVar(&sshConf.Password, "ssh-password", "", "password for ssh")
+	cmd.Flags().StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "file with private key for SSH authentication")
 	return cmd
 }

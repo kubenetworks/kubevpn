@@ -2,8 +2,12 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
+	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -12,16 +16,23 @@ import (
 	netroute "github.com/libp2p/go-netroute"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/pflag"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/clientcmd/api"
+	"k8s.io/client-go/tools/clientcmd/api/latest"
+	clientcmdlatest "k8s.io/client-go/tools/clientcmd/api/latest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/scheme"
@@ -452,9 +463,11 @@ func Start(ctx context.Context, r core.Route) error {
 	return nil
 }
 
-func (c *ConnectOptions) InitClient(f cmdutil.Factory) (err error) {
+func (c *ConnectOptions) InitClient(f cmdutil.Factory, flags *pflag.FlagSet, conf util.SshConfig) (err error) {
 	c.factory = f
-
+	if err = sshJump(conf, flags); err != nil {
+		return err
+	}
 	if c.config, err = c.factory.ToRESTConfig(); err != nil {
 		return
 	}
@@ -468,6 +481,76 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory) (err error) {
 		return
 	}
 	return
+}
+
+func sshJump(conf util.SshConfig, flags *pflag.FlagSet) (err error) {
+	if conf.Addr == "" {
+		return nil
+	}
+	defer func() {
+		if er := recover(); er != nil {
+			err = er.(error)
+		}
+	}()
+	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	lookup := flags.Lookup("kubeconfig")
+	if lookup != nil && lookup.Value != nil && lookup.Value.String() != "" {
+		configFlags.KubeConfig = pointer.String(lookup.Value.String())
+	}
+	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
+	rawConfig, err := matchVersionFlags.ToRawKubeConfigLoader().RawConfig()
+	if err != nil {
+		return err
+	}
+	err = api.FlattenConfig(&rawConfig)
+	server := rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].Server
+	u, err := url.Parse(server)
+	if err != nil {
+		return err
+	}
+	remote, err := netip.ParseAddrPort(u.Host)
+	if err != nil {
+		return err
+	}
+
+	var local = &netip.AddrPort{}
+	errChan := make(chan error, 1)
+	readyChan := make(chan struct{}, 1)
+	go func() {
+		err := util.Main(ctx, &remote, local, conf, readyChan)
+		if err != nil {
+			errChan <- err
+			return
+		}
+	}()
+	select {
+	case <-readyChan:
+	case err = <-errChan:
+		return err
+	}
+
+	rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].Server = fmt.Sprintf("%s://%s", u.Scheme, local.String())
+	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})
+
+	convertedObj, err := latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
+	if err != nil {
+		return err
+	}
+	marshal, err := json.Marshal(convertedObj)
+	if err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp("", "*.kubeconfig")
+	if err != nil {
+		return err
+	}
+	_ = temp.Close()
+	err = os.WriteFile(temp.Name(), marshal, 0644)
+	if err != nil {
+		return err
+	}
+	err = os.Setenv(clientcmd.RecommendedConfigPathEnvVar, temp.Name())
+	return err
 }
 
 // PreCheckResource transform user parameter to normal, example:
