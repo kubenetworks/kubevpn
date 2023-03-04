@@ -41,8 +41,18 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 
 		# Reverse proxy with mesh, traffic with header a=1, will hit local PC, otherwise no effect
 		kubevpn connect --workloads=service/productpage --headers a=1
+
+		# Connect to api-server behind of bastion host or ssh jump host
+		kubevpn connect --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem
+
+		# it also support ProxyJump, like
+		┌─────┐      ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
+		│  pc ├─────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
+		└─────┘      └──────┘     └──────┘     └──────┘                 └────────────┘
+		kubevpn connect --ssh-alias <alias>
+
 `)),
-		PreRun: func(*cobra.Command, []string) {
+		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			if !util.IsAdmin() {
 				util.RunWithElevated()
 				os.Exit(0)
@@ -53,9 +63,10 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			if util.IsWindows() {
 				driver.InstallWireGuardTunDriver()
 			}
+			return handler.SshJump(sshConf, cmd.Flags())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := connect.InitClient(f, cmd.Flags(), sshConf); err != nil {
+			if err := connect.InitClient(f); err != nil {
 				return err
 			}
 			connect.PreCheckResource()
@@ -105,9 +116,10 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "use this image to startup container")
 
 	// for ssh jumper host
-	cmd.Flags().StringVar(&sshConf.Addr, "ssh-addr", "", "ssh connection string address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
-	cmd.Flags().StringVar(&sshConf.User, "ssh-username", "", "username for ssh")
-	cmd.Flags().StringVar(&sshConf.Password, "ssh-password", "", "password for ssh")
-	cmd.Flags().StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "file with private key for SSH authentication")
+	cmd.Flags().StringVar(&sshConf.Addr, "ssh-addr", "", "Optional ssh jump server address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
+	cmd.Flags().StringVar(&sshConf.User, "ssh-username", "", "Optional username for ssh jump server")
+	cmd.Flags().StringVar(&sshConf.Password, "ssh-password", "", "Optional password for ssh jump server")
+	cmd.Flags().StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "Optional file with private key for SSH authentication")
+	cmd.Flags().StringVar(&sshConf.ConfigAlias, "ssh-alias", "", "Optional config alias with ~/.ssh/config for SSH authentication")
 	return cmd
 }

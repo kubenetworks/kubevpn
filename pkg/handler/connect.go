@@ -463,11 +463,8 @@ func Start(ctx context.Context, r core.Route) error {
 	return nil
 }
 
-func (c *ConnectOptions) InitClient(f cmdutil.Factory, flags *pflag.FlagSet, conf util.SshConfig) (err error) {
+func (c *ConnectOptions) InitClient(f cmdutil.Factory) (err error) {
 	c.factory = f
-	if err = sshJump(conf, flags); err != nil {
-		return err
-	}
 	if c.config, err = c.factory.ToRESTConfig(); err != nil {
 		return
 	}
@@ -483,9 +480,9 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory, flags *pflag.FlagSet, con
 	return
 }
 
-func sshJump(conf util.SshConfig, flags *pflag.FlagSet) (err error) {
-	if conf.Addr == "" {
-		return nil
+func SshJump(conf util.SshConfig, flags *pflag.FlagSet) (err error) {
+	if conf.Addr == "" && conf.ConfigAlias == "" {
+		return
 	}
 	defer func() {
 		if er := recover(); er != nil {
@@ -493,9 +490,11 @@ func sshJump(conf util.SshConfig, flags *pflag.FlagSet) (err error) {
 		}
 	}()
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-	lookup := flags.Lookup("kubeconfig")
-	if lookup != nil && lookup.Value != nil && lookup.Value.String() != "" {
-		configFlags.KubeConfig = pointer.String(lookup.Value.String())
+	if flags != nil {
+		lookup := flags.Lookup("kubeconfig")
+		if lookup != nil && lookup.Value != nil && lookup.Value.String() != "" {
+			configFlags.KubeConfig = pointer.String(lookup.Value.String())
+		}
 	}
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
 	rawConfig, err := matchVersionFlags.ToRawKubeConfigLoader().RawConfig()
@@ -517,12 +516,13 @@ func sshJump(conf util.SshConfig, flags *pflag.FlagSet) (err error) {
 	errChan := make(chan error, 1)
 	readyChan := make(chan struct{}, 1)
 	go func() {
-		err := util.Main(ctx, &remote, local, conf, readyChan)
+		err := util.Main(&remote, local, conf, readyChan)
 		if err != nil {
 			errChan <- err
 			return
 		}
 	}()
+	log.Infof("wait jump to bastion host...")
 	select {
 	case <-readyChan:
 	case err = <-errChan:
@@ -549,6 +549,7 @@ func sshJump(conf util.SshConfig, flags *pflag.FlagSet) (err error) {
 	if err != nil {
 		return err
 	}
+	log.Infof("using temp kubeconfig %s", temp.Name())
 	err = os.Setenv(clientcmd.RecommendedConfigPathEnvVar, temp.Name())
 	return err
 }

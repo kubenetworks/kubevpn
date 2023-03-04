@@ -141,7 +141,7 @@ func TestPreCheck(t *testing.T) {
 		Namespace: "naison-test",
 		Workloads: []string{"services/authors"},
 	}
-	err := options.InitClient(factory, cmd.Flags(), util.SshConfig{})
+	err := options.InitClient(factory)
 	assert.Nil(t, err)
 	options.PreCheckResource()
 	fmt.Println(options.Workloads)

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/kevinburke/ssh_config"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -108,4 +109,63 @@ func TestName(t *testing.T) {
 	v6 := regexp.MustCompile(`(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))/[0-9]{1,}`)
 	fmt.Println(compile.FindAllString(s, -1))
 	fmt.Println(v6.FindAllString(s, -1))
+}
+
+func TestParse(t *testing.T) {
+	all, _ := ssh_config.GetAllStrict("ry-agd-of", "ProxyJump")
+	for _, s := range all {
+		println(s)
+	}
+}
+
+func TestGetProxyJump(t *testing.T) {
+	value := confList.Get("ry-agd-of", "ProxyJump")
+	println(value)
+}
+
+func TestJ(t *testing.T) {
+
+	//sshConfig := &ssh.ClientConfig{
+	//	// SSH connection username
+	//	User:            "root",
+	//	Auth:            []ssh.AuthMethod{publicKeyFile("/Users/bytedance/.ssh/byte.pem")},
+	//	HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	//}
+
+	// sClient is an ssh client connected to the service host, through the bastion host.
+
+	var lc net.ListenConfig
+	ctx := context.Background()
+	listen, err := lc.Listen(ctx, "tcp", "localhost:8088")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer listen.Close()
+	fmt.Println(listen.Addr().String())
+
+	sClient, err := jump(nil, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	dial, err := sClient.Dial("tcp", "10.1.1.22:5443")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// handle incoming connections on reverse forwarded tunnel
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		accept, err := listen.Accept()
+		if err != nil {
+			log.Fatal(err)
+		}
+		go func() {
+			handleClient(accept, dial)
+		}()
+	}
 }

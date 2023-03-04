@@ -38,6 +38,7 @@ require (
 	github.com/containernetworking/cni v1.1.2
 	github.com/google/uuid v1.3.0
 	github.com/hashicorp/go-version v1.6.0
+	github.com/kevinburke/ssh_config v1.2.0
 	github.com/libp2p/go-netroute v0.2.1
 	github.com/mattbaird/jsonpatch v0.0.0-20200820163806-098863c1fc24
 	github.com/prometheus-community/pro-bing v0.1.0
