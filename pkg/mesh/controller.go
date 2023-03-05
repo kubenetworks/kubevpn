@@ -1,16 +1,21 @@
 package mesh
 
 import (
-	"fmt"
+	_ "embed"
 
+	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
+
+//go:embed envoy.yaml
+var envoyConfig []byte
 
 func RemoveContainers(spec *v1.PodTemplateSpec) {
 	for i := 0; i < len(spec.Spec.Containers); i++ {
@@ -98,11 +103,22 @@ kubevpn serve -L "tun:/127.0.0.1:8422?net=${InboundPodTunIP}&route=${CIDR}" -F "
 		},
 	})
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
-		Name:    config.ContainerSidecarEnvoyProxy,
-		Image:   config.Image,
-		Command: []string{"envoy", "-l", "error", "--base-id", "1", "--config-yaml"},
+		Name:  config.ContainerSidecarEnvoyProxy,
+		Image: config.Image,
+		Command: []string{
+			"envoy",
+			"-l",
+			"error",
+			"--base-id",
+			"1",
+			"--service-node",
+			nodeId,
+			"--service-cluster",
+			nodeId,
+			"--config-yaml",
+		},
 		Args: []string{
-			fmt.Sprintf(s, nodeId, nodeId, c.TrafficManagerRealIP),
+			string(envoyConfig),
 		},
 		Resources: v1.ResourceRequirements{
 			Requests: map[v1.ResourceName]resource.Quantity{
@@ -116,4 +132,13 @@ kubevpn serve -L "tun:/127.0.0.1:8422?net=${InboundPodTunIP}&route=${CIDR}" -F "
 		},
 		ImagePullPolicy: v1.PullIfNotPresent,
 	})
+}
+
+func init() {
+	json, err := yaml.ToJSON(envoyConfig)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+	envoyConfig = json
 }
