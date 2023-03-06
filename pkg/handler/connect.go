@@ -549,6 +549,7 @@ func SshJump(conf util.SshConfig, flags *pflag.FlagSet) (err error) {
 	if err != nil {
 		return err
 	}
+	_ = os.Chmod(temp.Name(), 0644)
 	log.Infof("using temp kubeconfig %s", temp.Name())
 	err = os.Setenv(clientcmd.RecommendedConfigPathEnvVar, temp.Name())
 	return err

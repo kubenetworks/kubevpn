@@ -20,8 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-func run(ctx context.Context, runConfig *RunConfig, cli *client.Client) (err error) {
-
+func run(ctx context.Context, runConfig *RunConfig, cli *client.Client) (id string, err error) {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	var config = runConfig.config
@@ -50,31 +49,31 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client) (err err
 		}
 		readCloser, err = cli.ImagePull(ctx, config.Image, types.ImagePullOptions{Platform: plat})
 		if err != nil {
-			return fmt.Errorf("can not pull image %s, err: %s, please make sure image is exist and can be pulled from local", config.Image, err)
+			err = fmt.Errorf("can not pull image %s, err: %s, please make sure image is exist and can be pulled from local", config.Image, err)
+			return
 		}
 		defer readCloser.Close()
 		_, stdout, _ := dockerterm.StdStreams()
 		out := streams.NewOut(stdout)
 		err = jsonmessage.DisplayJSONMessagesToStream(readCloser, out, nil)
 		if err != nil {
-			return err
+			err = fmt.Errorf("can not display message, err: %v", err)
+			return
 		}
 	}
 
 	var create typescommand.CreateResponse
 	create, err = cli.ContainerCreate(ctx, config, hostConfig, networkConfig, platform, name)
 	if err != nil {
-		return fmt.Errorf("failed to create container %s, err: %s", name, err)
+		err = fmt.Errorf("failed to create container %s, err: %s", name, err)
+		return
 	}
-
+	id = create.ID
 	log.Infof("Created container: %s", name)
-	if err != nil {
-		return err
-	}
 
 	err = cli.ContainerStart(ctx, create.ID, types.ContainerStartOptions{})
 	if err != nil {
-		return err
+		return
 	}
 	log.Infof("Wait container %s to be running...", name)
 	chanStop := make(chan struct{})
@@ -111,7 +110,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client) (err err
 	} else {
 		log.Infof("Container %s is running now", name)
 	}
-	return nil
+	return
 }
 
 func terminal(c string, cli *command.DockerCli) error {
