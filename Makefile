@@ -84,21 +84,13 @@ kubevpn-linux-386:
 
 .PHONY: container
 container:
-	docker build -t ${IMAGE} -f $(BUILD_DIR)/Dockerfile .
-	docker push ${IMAGE}
-	docker tag ${IMAGE} ${IMAGE_DEFAULT}
-	docker push ${IMAGE_DEFAULT}
+	docker buildx build --platform linux/amd64,linux/arm64 -t ${IMAGE} -t ${IMAGE_DEFAULT} -f $(BUILD_DIR)/Dockerfile --push .
 
 ############################ build local
 .PHONY: container-local
 container-local: kubevpn-linux-amd64
-	docker build --platform linux/amd64 -t ${IMAGE} -f $(BUILD_DIR)/local.Dockerfile .
-	docker push ${IMAGE}
-	docker tag ${IMAGE} ${IMAGE_DEFAULT}
-	docker push ${IMAGE_DEFAULT}
+	docker buildx build --platform linux/amd64 -t ${IMAGE} -f $(BUILD_DIR)/local.Dockerfile .
 
 .PHONY: container-test
 container-test: kubevpn-linux-amd64
-	docker build --platform linux/amd64 -t ${IMAGE} -f $(BUILD_DIR)/test.Dockerfile .
-	docker tag ${IMAGE} docker.io/naison/kubevpn:testp
-	docker push docker.io/naison/kubevpn:testp
+	docker buildx build --platform linux/amd64 -t ${IMAGE} -f $(BUILD_DIR)/test.Dockerfile .

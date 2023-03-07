@@ -259,7 +259,7 @@ func (r Run) copyToContainer(ctx context.Context, volume []mount.Mount, cli *cli
 			CopyUIDGID:                true,
 		})
 		if err != nil {
-			log.Info(fmt.Errorf("can not copy %s to %s of container %s:%s, err: %v", v.Source, id, v.Target, err))
+			log.Info(fmt.Errorf("can not copy %s to container %s:%s, err: %v", v.Source, id, v.Target, err))
 		}
 	}
 	return nil

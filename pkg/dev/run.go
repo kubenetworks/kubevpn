@@ -118,6 +118,6 @@ func terminal(c string, cli *command.DockerCli) error {
 	options.Interactive = true
 	options.TTY = true
 	options.Container = c
-	options.Command = []string{"/bin/sh"}
+	options.Command = []string{"sh", "-c", `command -v bash >/dev/null && exec bash || exec sh`}
 	return container.RunExec(cli, options)
 }
