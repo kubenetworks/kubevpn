@@ -1,4 +1,4 @@
-package main
+package handler
 
 import (
 	"context"
@@ -32,7 +32,7 @@ var (
 	namespace  string
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient
-	config     *rest.Config
+	c          *rest.Config
 )
 
 func TestFunctions(t *testing.T) {
@@ -286,13 +286,13 @@ func init() {
 	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
 	f := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 
-	if config, err = f.ToRESTConfig(); err != nil {
+	if c, err = f.ToRESTConfig(); err != nil {
 		log.Fatal(err)
 	}
-	if restclient, err = rest.RESTClientFor(config); err != nil {
+	if restclient, err = rest.RESTClientFor(c); err != nil {
 		log.Fatal(err)
 	}
-	if clientset, err = kubernetes.NewForConfig(config); err != nil {
+	if clientset, err = kubernetes.NewForConfig(c); err != nil {
 		log.Fatal(err)
 	}
 	if namespace, _, err = f.ToRawKubeConfigLoader().Namespace(); err != nil {

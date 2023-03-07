@@ -1,74 +1,10 @@
 package util
 
 import (
-	"context"
 	"fmt"
-	"net"
 	"regexp"
 	"testing"
-
-	"github.com/kevinburke/ssh_config"
-	log "github.com/sirupsen/logrus"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/kubectl/pkg/cmd/util"
-	"k8s.io/utils/pointer"
 )
-
-var (
-	namespace  string
-	clientset  *kubernetes.Clientset
-	restclient *rest.RESTClient
-	restconfig *rest.Config
-	f          util.Factory
-)
-
-func TestShell(t *testing.T) {
-	var err error
-
-	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-	configFlags.KubeConfig = pointer.String("/Users/bytedance/.kube/vestack_upgrade")
-	f = util.NewFactory(util.NewMatchVersionFlags(configFlags))
-
-	if restconfig, err = f.ToRESTConfig(); err != nil {
-		log.Fatal(err)
-	}
-	if restclient, err = rest.RESTClientFor(restconfig); err != nil {
-		log.Fatal(err)
-	}
-	if clientset, err = kubernetes.NewForConfig(restconfig); err != nil {
-		log.Fatal(err)
-	}
-	if namespace, _, err = f.ToRawKubeConfigLoader().Namespace(); err != nil {
-		log.Fatal(err)
-	}
-
-	var cmd = "cat /etc/resolv.conf | grep nameserver | awk '{print$2}'"
-	var podName = "kubevpn-traffic-manager-588d5c8475-rj2cd"
-	out, err := Shell(clientset, restclient, restconfig, podName, "", "default", []string{"sh", "-c", cmd})
-	fmt.Println(out)
-	serviceList, err := clientset.CoreV1().Services(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("metadata.name", "kube-dns").String(),
-	})
-
-	fmt.Println(out == serviceList.Items[0].Spec.ClusterIP)
-}
-
-func TestDeleteRule(t *testing.T) {
-	DeleteWindowsFirewallRule(context.Background())
-}
-
-func TestUDP(t *testing.T) {
-	relay, err := net.ListenUDP("udp", &net.UDPAddr{Port: 12345})
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(relay.LocalAddr())
-	fmt.Println(relay.RemoteAddr())
-}
 
 func TestName(t *testing.T) {
 	var s = `
@@ -109,63 +45,4 @@ func TestName(t *testing.T) {
 	v6 := regexp.MustCompile(`(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))/[0-9]{1,}`)
 	fmt.Println(compile.FindAllString(s, -1))
 	fmt.Println(v6.FindAllString(s, -1))
-}
-
-func TestParse(t *testing.T) {
-	all, _ := ssh_config.GetAllStrict("ry-agd-of", "ProxyJump")
-	for _, s := range all {
-		println(s)
-	}
-}
-
-func TestGetProxyJump(t *testing.T) {
-	value := confList.Get("ry-agd-of", "ProxyJump")
-	println(value)
-}
-
-func TestJ(t *testing.T) {
-
-	//sshConfig := &ssh.ClientConfig{
-	//	// SSH connection username
-	//	User:            "root",
-	//	Auth:            []ssh.AuthMethod{publicKeyFile("/Users/bytedance/.ssh/byte.pem")},
-	//	HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-	//}
-
-	// sClient is an ssh client connected to the service host, through the bastion host.
-
-	var lc net.ListenConfig
-	ctx := context.Background()
-	listen, err := lc.Listen(ctx, "tcp", "localhost:8088")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer listen.Close()
-	fmt.Println(listen.Addr().String())
-
-	sClient, err := jump(nil, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	dial, err := sClient.Dial("tcp", "10.1.1.22:5443")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// handle incoming connections on reverse forwarded tunnel
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		accept, err := listen.Accept()
-		if err != nil {
-			log.Fatal(err)
-		}
-		go func() {
-			handleClient(accept, dial)
-		}()
-	}
 }

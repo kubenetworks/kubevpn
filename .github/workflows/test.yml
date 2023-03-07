@@ -20,6 +20,7 @@ jobs:
       - name: Push image to docker hub
         run: |
           echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USER }} --password-stdin
+          docker buildx create --use
           export VERSION=test
           make container
   linux:
@@ -83,7 +84,7 @@ jobs:
           sudo ln /usr/bin/resolvectl /usr/bin/systemd-resolve
 
       - name: Test
-        run: go test -v ./pkg/test/function_test.go
+        run: go test -v ./... -timeout=60m
 
   macos:
     runs-on: macos-10.15
@@ -156,7 +157,7 @@ jobs:
           netstat -anr
 
       - name: Test
-        run: go test -v ./pkg/test/function_test.go
+        run: go test -v ./... -timeout=60m
 
 #  windows:
 #    runs-on: windows-latest
@@ -195,5 +196,5 @@ jobs:
 #          ipconfig
 #
 #      - name: Test
-#        run: go test -v ./test/
+#        run: go test -v ./... -timeout=60m
 
