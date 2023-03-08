@@ -45,6 +45,7 @@ import (
 	"k8s.io/kubectl/pkg/cmd/util"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
+	"k8s.io/kubectl/pkg/util/podutils"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
@@ -76,7 +77,7 @@ func GetAvailableTCPPortOrDie() int {
 }
 
 func WaitPod(podInterface v12.PodInterface, list metav1.ListOptions, checker func(*v1.Pod) bool) error {
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*60)
 	defer cancelFunc()
 	w, err := podInterface.Watch(ctx, list)
 	if err != nil {
@@ -150,12 +151,12 @@ func GetTopOwnerReference(factory cmdutil.Factory, namespace, workload string) (
 }
 
 // GetTopOwnerReferenceBySelector assume pods, controller has same labels
-func GetTopOwnerReferenceBySelector(factory cmdutil.Factory, namespace, selector string) (sets.String, error) {
+func GetTopOwnerReferenceBySelector(factory cmdutil.Factory, namespace, selector string) (sets.Set[string], error) {
 	object, err := GetUnstructuredObjectBySelector(factory, namespace, selector)
 	if err != nil {
 		return nil, err
 	}
-	set := sets.NewString()
+	set := sets.New[string]()
 	for _, info := range object {
 		reference, err := GetTopOwnerReference(factory, namespace, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
 		if err == nil && reference.Mapping.Resource.Resource != "services" {
@@ -593,4 +594,28 @@ func IsIPv4(packet []byte) bool {
 
 func IsIPv6(packet []byte) bool {
 	return 6 == (packet[0] >> 4)
+}
+
+func Deduplicate(cidr []*net.IPNet) (result []*net.IPNet) {
+	var set = sets.New[string]()
+	for _, ipNet := range cidr {
+		if !set.Has(ipNet.String()) {
+			result = append(result, ipNet)
+		}
+		set.Insert(ipNet.String())
+	}
+	return
+}
+
+func AllContainerIsRunning(pod *v1.Pod) bool {
+	isReady := podutils.IsPodReady(pod)
+	if !isReady {
+		return false
+	}
+	for _, status := range pod.Status.ContainerStatuses {
+		if !status.Ready {
+			return false
+		}
+	}
+	return true
 }

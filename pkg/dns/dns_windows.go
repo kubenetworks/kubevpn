@@ -4,7 +4,6 @@
 package dns
 
 import (
-	"context"
 	"fmt"
 	"net/netip"
 	"os"
@@ -38,7 +37,11 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string) error {
 		servers = append(servers, addr)
 	}
 	err = luid.SetDNS(windows.AF_INET, servers, clientConfig.Search)
-	_ = exec.CommandContext(context.Background(), "ipconfig", "/flushdns").Run()
+	if err != nil {
+		log.Warningln(err)
+		return err
+	}
+	err = luid.FlushDNS(windows.AF_INET)
 	if err != nil {
 		log.Warningln(err)
 		return err

@@ -46,7 +46,7 @@ func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RE
 	}
 
 	// duplicate server
-	set := sets.NewString()
+	set := sets.New[string]()
 	for i := 0; i < len(resolvConf.Servers); i++ {
 		if set.Has(resolvConf.Servers[i]) {
 			resolvConf.Servers = append(resolvConf.Servers[:i], resolvConf.Servers[i+1:]...)
@@ -183,8 +183,8 @@ func generateHostsEntry(list []v12.Service) string {
 		if strings.EqualFold(item.Name, ServiceKubernetes) {
 			continue
 		}
-		ipList := sets.NewString(item.Spec.ClusterIPs...).Insert(item.Spec.ExternalIPs...).List()
-		domainList := sets.NewString(item.Name).Insert(item.Spec.ExternalName).List()
+		ipList := sets.New[string](item.Spec.ClusterIPs...).Insert(item.Spec.ExternalIPs...).UnsortedList()
+		domainList := sets.New[string](item.Name).Insert(item.Spec.ExternalName).UnsortedList()
 		for _, ip := range ipList {
 			for _, domain := range domainList {
 				if net.ParseIP(ip) == nil || domain == "" {

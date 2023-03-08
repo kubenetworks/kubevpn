@@ -60,7 +60,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	}
 
 	// already inject container vpn and envoy-proxy, do nothing
-	containerNames := sets.NewString()
+	containerNames := sets.New[string]()
 	for _, container := range templateSpec.Spec.Containers {
 		containerNames.Insert(container.Name)
 	}

@@ -247,13 +247,13 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 	if util.IsWindows() {
 		c.localTunIP.Mask = net.CIDRMask(0, 32)
 	}
-	var list = sets.NewString(config.CIDR.String())
+	var list = sets.New[string](config.CIDR.String())
 	for _, ipNet := range c.cidrs {
 		list.Insert(ipNet.String())
 	}
 	r := core.Route{
 		ServeNodes: []string{
-			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", c.localTunIP.String(), strings.Join(list.List(), ",")),
+			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", c.localTunIP.String(), strings.Join(list.UnsortedList(), ",")),
 		},
 		ChainNode: forwardAddress,
 		Retries:   5,
@@ -261,7 +261,7 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 
 	log.Debugf("your ip is %s", c.localTunIP.IP.String())
 	if err = Start(ctx, r); err != nil {
-		log.Errorf("error while create tunnel, err: %v", err)
+		log.Errorf("error while create tunnel, err: %v", errors.WithStack(err))
 	} else {
 		log.Info("tunnel connected")
 	}
@@ -417,7 +417,7 @@ func (c *ConnectOptions) setupDNS() error {
 	if relovConf.Port == "" {
 		relovConf.Port = strconv.Itoa(port)
 	}
-	ns := sets.NewString()
+	ns := sets.New[string]()
 	list, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err == nil {
 		for _, item := range list.Items {
@@ -430,7 +430,7 @@ func (c *ConnectOptions) setupDNS() error {
 			ns.Insert(item.Name)
 		}
 	}
-	if err = dns.SetupDNS(relovConf, ns.List()); err != nil {
+	if err = dns.SetupDNS(relovConf, ns.UnsortedList()); err != nil {
 		return err
 	}
 	// dump service in current namespace for support DNS resolve service:port
@@ -604,7 +604,7 @@ func (c *ConnectOptions) PreCheckResource() {
 				controller, err := util.GetTopOwnerReferenceBySelector(c.factory, c.Namespace, selector.String())
 				if err == nil {
 					if len(controller) > 0 {
-						c.Workloads[i] = controller.List()[0]
+						c.Workloads[i] = controller.UnsortedList()[0]
 					}
 				}
 				// only a single service, not support it yet
@@ -624,7 +624,7 @@ func (c *ConnectOptions) GetRunningPodList() ([]v1.Pod, error) {
 		return nil, err
 	}
 	for i := 0; i < len(list.Items); i++ {
-		if list.Items[i].GetDeletionTimestamp() != nil || list.Items[i].Status.Phase != v1.PodRunning {
+		if list.Items[i].GetDeletionTimestamp() != nil || !util.AllContainerIsRunning(&list.Items[i]) {
 			list.Items = append(list.Items[:i], list.Items[i+1:]...)
 			i--
 		}
@@ -645,12 +645,12 @@ func (c *ConnectOptions) GetRunningPodList() ([]v1.Pod, error) {
 func (c *ConnectOptions) GetCIDR(ctx context.Context) (err error) {
 	// (1) get cidr from cache
 	var value string
-	value, err = c.dhcp.Get(config.KeyClusterIPv4POOLS)
+	value, err = c.dhcp.Get(ctx, config.KeyClusterIPv4POOLS)
 	if err == nil {
 		for _, s := range strings.Split(value, " ") {
 			_, cidr, _ := net.ParseCIDR(s)
 			if cidr != nil {
-				c.cidrs = append(c.cidrs, cidr)
+				c.cidrs = util.Deduplicate(append(c.cidrs, cidr))
 			}
 		}
 	}
@@ -662,7 +662,7 @@ func (c *ConnectOptions) GetCIDR(ctx context.Context) (err error) {
 	// (2) get cidr from cni
 	c.cidrs, err = util.GetCIDRElegant(c.clientset, c.restclient, c.config, c.Namespace)
 	if err == nil {
-		s := sets.NewString()
+		s := sets.New[string]()
 		for _, cidr := range c.cidrs {
 			s.Insert(cidr.String())
 		}
@@ -670,8 +670,8 @@ func (c *ConnectOptions) GetCIDR(ctx context.Context) (err error) {
 		for _, cidr := range cidrs {
 			s.Insert(cidr.String())
 		}
-		c.cidrs = append(c.cidrs, cidrs...)
-		_ = c.dhcp.Set(config.KeyClusterIPv4POOLS, strings.Join(s.List(), " "))
+		c.cidrs = util.Deduplicate(append(c.cidrs, cidrs...))
+		_ = c.dhcp.Set(config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
 		return
 	}
 

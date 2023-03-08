@@ -46,7 +46,7 @@ func CmdReset(factory cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				log.Fatal(err)
 			}
-			log.Infoln("done")
+			log.Println("done")
 		},
 	}
 

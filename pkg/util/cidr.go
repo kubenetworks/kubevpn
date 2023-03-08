@@ -38,25 +38,28 @@ func GetCIDRElegant(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 		result = append(result, cni...)
 	}
 
+	pod, err := getPodCIDRFromCNI(clientset, restclient, restconfig, namespace)
+	if err == nil {
+		result = append(result, pod...)
+	}
+
 	svc, err := getServiceCIDRByCreateSvc(clientset.CoreV1().Services(namespace))
 	if err == nil {
 		result = append(result, svc)
-		fromCNI, err := getPodCIDRFromCNI(clientset, restclient, restconfig, namespace)
-		if err == nil {
-			log.Infoln("get cidr from cni ok")
-			result = append(result, fromCNI...)
-		}
 	}
 
 	log.Infoln("get cidr from svc...")
-	pod, err := getPodCIDRFromPod(clientset, namespace, svc)
+	pod, err = getPodCIDRFromPod(clientset, namespace, svc)
 	if err == nil {
 		log.Infoln("get cidr from svc ok")
 		result = append(result, pod...)
 	}
 
+	result = Deduplicate(result)
+
 	if len(result) == 0 {
-		return nil, fmt.Errorf("can not get any cidr, please make sure you have prilivage")
+		err = fmt.Errorf("can not get any cidr, please make sure you have prilivage")
+		return
 	}
 	return
 }
@@ -95,7 +98,7 @@ func GetCIDRFromResourceUgly(clientset *kubernetes.Clientset, namespace string) 
 	serviceList, _ := clientset.CoreV1().Services(namespace).List(context.Background(), v1.ListOptions{})
 	for _, service := range serviceList.Items {
 		if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
-			mask := net.CIDRMask(16, 32)
+			mask := net.CIDRMask(24, 32)
 			cidrs = append(cidrs, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
 		}
 	}

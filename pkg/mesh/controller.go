@@ -19,7 +19,7 @@ var envoyConfig []byte
 
 func RemoveContainers(spec *v1.PodTemplateSpec) {
 	for i := 0; i < len(spec.Spec.Containers); i++ {
-		if sets.NewString(config.ContainerSidecarEnvoyProxy, config.ContainerSidecarVPN).Has(spec.Spec.Containers[i].Name) {
+		if sets.New[string](config.ContainerSidecarEnvoyProxy, config.ContainerSidecarVPN).Has(spec.Spec.Containers[i].Name) {
 			spec.Spec.Containers = append(spec.Spec.Containers[:i], spec.Spec.Containers[i+1:]...)
 			i--
 		}

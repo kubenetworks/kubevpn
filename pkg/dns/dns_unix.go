@@ -69,7 +69,7 @@ func usingResolver(clientConfig *miekgdns.ClientConfig, ns []string) {
 		Ndots:   clientConfig.Ndots,
 		Timeout: 2,
 	}
-	for _, s := range sets.NewString(strings.Split(clientConfig.Search[0], ".")...).Insert(ns...).List() {
+	for _, s := range sets.New[string](strings.Split(clientConfig.Search[0], ".")...).Insert(ns...).UnsortedList() {
 		filename = filepath.Join("/", "etc", "resolver", s)
 		_ = os.WriteFile(filename, []byte(toString(config)), 0644)
 	}
@@ -97,7 +97,7 @@ func usingNetworkSetup(ip string, namespace string) {
 				//}
 			case <-c:
 				if rc, err := miekgdns.ClientConfigFromFile(resolv); err == nil && rc.Timeout != 1 {
-					if !sets.NewString(rc.Servers...).Has(ip) {
+					if !sets.New[string](rc.Servers...).Has(ip) {
 						rc.Servers = append(rc.Servers, ip)
 						for _, s := range []string{namespace + ".svc.cluster.local", "svc.cluster.local", "cluster.local"} {
 							rc.Search = append(rc.Search, s)

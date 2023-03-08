@@ -48,7 +48,8 @@ func (c *ConnectOptions) addCleanUpResourceHandler(clientset *kubernetes.Clients
 		if err == nil {
 			// if ref-count is less than zero or equals to zero, means nobody is using this traffic pod, so clean it
 			if count <= 0 {
-				cleanup(clientset, namespace, config.ConfigMapPodTrafficManager)
+				log.Info("ref-count is zero, prepare to clean up resource")
+				cleanup(clientset, namespace, config.ConfigMapPodTrafficManager, true)
 			}
 		} else {
 			log.Error(err)
@@ -123,14 +124,20 @@ func updateRefCount(configMapInterface v12.ConfigMapInterface, name string, incr
 	return
 }
 
-func cleanup(clientset *kubernetes.Clientset, namespace, name string) {
-	log.Info("ref-count is zero, prepare to clean up resource")
-	// keep configmap
-	p := []byte(fmt.Sprintf(`[{"op": "remove", "path": "/data/%s"}]`, config.KeyDHCP))
-	_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), name, types.JSONPatchType, p, v1.PatchOptions{})
-	p = []byte(fmt.Sprintf(`{"data":{"%s":"%s"}}`, config.KeyRefCount, strconv.Itoa(0)))
-	_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), name, types.MergePatchType, p, v1.PatchOptions{})
+func cleanup(clientset *kubernetes.Clientset, namespace, name string, keepCidr bool) {
 	options := v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)}
+
+	if keepCidr {
+		// keep configmap
+		p := []byte(fmt.Sprintf(`[{"op": "remove", "path": "/data/%s"}]`, config.KeyDHCP))
+		_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), name, types.JSONPatchType, p, v1.PatchOptions{})
+		p = []byte(fmt.Sprintf(`{"data":{"%s":"%s"}}`, config.KeyRefCount, strconv.Itoa(0)))
+		_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), name, types.MergePatchType, p, v1.PatchOptions{})
+	} else {
+		_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.Background(), name, options)
+	}
+
+	_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), config.CniNetName, options)
 	_ = clientset.CoreV1().Secrets(namespace).Delete(context.Background(), name, options)
 	_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(context.Background(), name+"."+namespace, options)
 	_ = clientset.RbacV1().RoleBindings(namespace).Delete(context.Background(), name, options)

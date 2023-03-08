@@ -84,7 +84,8 @@ func addTunRoutes(luid string, routes ...types.Route) error {
 		if err != nil {
 			return err
 		}
-		if err = ifName.AddRoute(prefix, addr, 0); err != nil {
+		err = ifName.AddRoute(prefix, addr, 0)
+		if err != nil && err != windows.ERROR_OBJECT_ALREADY_EXISTS {
 			return err
 		}
 	}

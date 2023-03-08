@@ -159,8 +159,8 @@ func (d *DHCPManager) Set(key, value string) error {
 	return nil
 }
 
-func (d *DHCPManager) Get(key string) (string, error) {
-	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+func (d *DHCPManager) Get(ctx2 context.Context, key string) (string, error) {
+	cm, err := d.client.Get(ctx2, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}

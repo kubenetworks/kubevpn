@@ -1,9 +1,12 @@
 package util
 
 import (
-	"fmt"
-	"regexp"
+	"encoding/json"
 	"testing"
+
+	"github.com/containernetworking/cni/libcni"
+	log "github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestName(t *testing.T) {
@@ -41,8 +44,16 @@ func TestName(t *testing.T) {
 `
 
 	// IPv6 with CIDR
-	compile := regexp.MustCompile(`(([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,})`)
-	v6 := regexp.MustCompile(`(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))/[0-9]{1,}`)
-	fmt.Println(compile.FindAllString(s, -1))
-	fmt.Println(v6.FindAllString(s, -1))
+	configList, err := libcni.ConfListFromBytes([]byte(s))
+	if err == nil {
+		log.Infoln("get cni config", configList.Name)
+	}
+	for _, plugin := range configList.Plugins {
+		var m map[string]interface{}
+		_ = json.Unmarshal(plugin.Bytes, &m)
+		slice, _, _ := unstructured.NestedStringSlice(m, "ipam", "ipv4_pools")
+		for _, i := range slice {
+			println(i)
+		}
+	}
 }

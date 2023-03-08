@@ -39,6 +39,6 @@ func (c *ConnectOptions) Reset(ctx2 context.Context) error {
 			}
 		}
 	}
-	cleanup(c.clientset, c.Namespace, config.ConfigMapPodTrafficManager)
+	cleanup(c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, false)
 	return nil
 }

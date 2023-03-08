@@ -1,6 +1,7 @@
 package util
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"text/tabwriter"
@@ -28,6 +29,28 @@ func PrintStatus(pod *corev1.Pod, writer io.Writer) {
 			show(status.Name, status.State.Terminated.Reason, status.State.Terminated.Message)
 		}
 	}
+}
+
+func PrintStatusInline(pod *corev1.Pod) string {
+	var sb = bytes.NewBuffer(nil)
+	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
+	show := func(v1, v2 any) {
+		_, _ = fmt.Fprintf(w, "%v\t\t%v", v1, v2)
+	}
+
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.State.Waiting != nil {
+			show(status.State.Waiting.Reason, status.State.Waiting.Message)
+		}
+		if status.State.Running != nil {
+			show("ContainerRunning", "")
+		}
+		if status.State.Terminated != nil {
+			show(status.State.Terminated.Reason, status.State.Terminated.Message)
+		}
+	}
+	_ = w.Flush()
+	return sb.String()
 }
 
 func max[T constraints.Ordered](a T, b T) T {
