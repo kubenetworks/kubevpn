@@ -26,8 +26,14 @@ func (c *fakeUDPTunnelConnector) ConnectContext(ctx context.Context, conn net.Co
 		if err != nil {
 			return nil, err
 		}
-		con.SetKeepAlive(true)
-		con.SetKeepAlivePeriod(30 * time.Second)
+		err = con.SetKeepAlive(true)
+		if err != nil {
+			return nil, err
+		}
+		err = con.SetKeepAlivePeriod(15 * time.Second)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return newFakeUDPTunnelConnOverTCP(ctx, conn)
 }
@@ -68,7 +74,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		for {
 			dgram, err := readDatagramPacket(tcpConn, b[:])
 			if err != nil {
-				log.Debugf("[udp-tun] %s -> 0 : %v", tcpConn.RemoteAddr(), err)
+				log.Debugf("[tcpserver] %s -> 0 : %v", tcpConn.RemoteAddr(), err)
 				errChan <- err
 				return
 			}
@@ -89,7 +95,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		for {
 			n, err := udpConn.Read(b[:])
 			if err != nil {
-				log.Debugf("[udp-tun] %s : %s", tcpConn.RemoteAddr(), err)
+				log.Debugf("[tcpserver] %s : %s", tcpConn.RemoteAddr(), err)
 				errChan <- err
 				return
 			}
@@ -145,5 +151,11 @@ func (c *fakeUDPTunnelConn) WriteTo(b []byte, _ net.Addr) (int, error) {
 }
 
 func (c *fakeUDPTunnelConn) Close() error {
+	if cc, ok := c.Conn.(interface{ CloseRead() error }); ok {
+		_ = cc.CloseRead()
+	}
+	if cc, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		_ = cc.CloseWrite()
+	}
 	return c.Conn.Close()
 }

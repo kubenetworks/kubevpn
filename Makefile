@@ -93,4 +93,4 @@ container-local: kubevpn-linux-amd64
 
 .PHONY: container-test
 container-test: kubevpn-linux-amd64
-	docker buildx build --platform linux/amd64 -t ${IMAGE} -f $(BUILD_DIR)/test.Dockerfile .
+	docker buildx build --platform linux/amd64 -t ${IMAGE} -f $(BUILD_DIR)/test.Dockerfile --push .

@@ -34,36 +34,48 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	for i := 0; i < MaxThread; i++ {
 		go func() {
 			for {
-				if ctx.Err() != nil {
+				select {
+				case <-ctx.Done():
 					return
+				default:
 				}
-				var packetConn net.PacketConn
-				if !h.chain.IsEmpty() {
-					cc, errs := h.chain.DialContext(ctx)
+
+				func() {
+					cancel, cancelFunc := context.WithCancel(ctx)
+					defer cancelFunc()
+					var packetConn net.PacketConn
+					defer func() {
+						if packetConn != nil {
+							_ = packetConn.Close()
+						}
+					}()
+					if !h.chain.IsEmpty() {
+						cc, errs := h.chain.DialContext(cancel)
+						if errs != nil {
+							log.Debug(errs)
+							time.Sleep(time.Second * 5)
+							return
+						}
+						var ok bool
+						if packetConn, ok = cc.(net.PacketConn); !ok {
+							errs = errors.New("not a packet connection")
+							log.Errorf("[tun] %s - %s: %s", tun.LocalAddr(), remoteAddr, errs)
+							return
+						}
+					} else {
+						var errs error
+						var lc net.ListenConfig
+						packetConn, errs = lc.ListenPacket(cancel, "udp", "")
+						if errs != nil {
+							log.Error(errs)
+							return
+						}
+					}
+					errs := h.transportTunCli(cancel, d, packetConn, remoteAddr)
 					if errs != nil {
-						log.Debug(errs)
-						time.Sleep(time.Second * 5)
-						continue
+						log.Debugf("[tun] %s: %v", tun.LocalAddr(), errs)
 					}
-					var ok bool
-					if packetConn, ok = cc.(net.PacketConn); !ok {
-						errs = errors.New("not a packet connection")
-						log.Errorf("[tun] %s - %s: %s", tun.LocalAddr(), remoteAddr, errs)
-						continue
-					}
-				} else {
-					var errs error
-					var lc net.ListenConfig
-					packetConn, errs = lc.ListenPacket(ctx, "udp", "")
-					if errs != nil {
-						log.Error(err)
-						continue
-					}
-				}
-				errs := h.transportTunCli(ctx, d, packetConn, remoteAddr)
-				if errs != nil {
-					log.Debugf("[tun] %s: %v", tun.LocalAddr(), errs)
-				}
+				}()
 			}
 		}()
 	}
@@ -82,8 +94,13 @@ func (h *tunHandler) transportTunCli(ctx context.Context, d *Device, conn net.Pa
 	defer conn.Close()
 
 	go func() {
-		var err error
 		for e := range d.tunInbound {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			if e.src.Equal(e.dst) {
 				if d.closed.Load() {
 					return
@@ -91,7 +108,7 @@ func (h *tunHandler) transportTunCli(ctx context.Context, d *Device, conn net.Pa
 				d.tunOutbound <- e
 				continue
 			}
-			_, err = conn.WriteTo(e.data[:e.length], remoteAddr)
+			_, err := conn.WriteTo(e.data[:e.length], remoteAddr)
 			config.LPool.Put(e.data[:])
 			if err != nil {
 				errChan <- err
@@ -102,6 +119,12 @@ func (h *tunHandler) transportTunCli(ctx context.Context, d *Device, conn net.Pa
 
 	go func() {
 		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			b := config.LPool.Get().([]byte)
 			n, _, err := conn.ReadFrom(b[:])
 			if err != nil {

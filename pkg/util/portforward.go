@@ -381,10 +381,16 @@ func (pf *PortForwarder) handleConnection(conn net.Conn, port ForwardedPort) {
 	select {
 	case <-remoteDone:
 	case <-localError:
+	// wait for interrupt or conn closure
+	case <-pf.stopChan:
+		runtime.HandleError(errors.New("lost connection to pod"))
 	}
 
 	// always expect something on errorChan (it may be nil)
-	err = <-errorChan
+	select {
+	case err = <-errorChan:
+	default:
+	}
 	if err != nil {
 		if strings.Contains(err.Error(), "failed to find socat") {
 			select {

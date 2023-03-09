@@ -256,25 +256,27 @@ func (h *tunHandler) HandleServer(ctx context.Context, tunConn net.Conn) {
 	tun.Start()
 
 	for {
-		var lc net.ListenConfig
-		packetConn, err := lc.ListenPacket(ctx, "udp", h.node.Addr)
-		if err != nil {
-			log.Debugf("[udp] can not listen %s, err: %v", h.node.Addr, err)
-			goto errH
-		}
-
-		err = h.transportTun(ctx, tun, packetConn)
-		if err != nil {
-			log.Debugf("[tun] %s: %v", tunConn.LocalAddr(), err)
-		}
-	errH:
 		select {
 		case <-h.chExit:
+			return
 		case <-ctx.Done():
 			return
 		default:
-			log.Debugf("next loop, err: %v", err)
 		}
+		func() {
+			cancel, cancelFunc := context.WithCancel(ctx)
+			defer cancelFunc()
+			var lc net.ListenConfig
+			packetConn, err := lc.ListenPacket(cancel, "udp", h.node.Addr)
+			if err != nil {
+				log.Debugf("[udp] can not listen %s, err: %v", h.node.Addr, err)
+				return
+			}
+			err = h.transportTun(cancel, tun, packetConn)
+			if err != nil {
+				log.Debugf("[tun] %s: %v", tunConn.LocalAddr(), err)
+			}
+		}()
 	}
 }
 
@@ -416,33 +418,28 @@ func (h *tunHandler) transportTun(ctx context.Context, tun *Device, conn net.Pac
 	p.Start()
 
 	go func() {
-		var err error
 		for e := range tun.tunInbound {
-		retry:
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			addr := h.routes.RouteTo(e.dst)
 			if addr == nil {
+				config.LPool.Put(e.data[:])
 				log.Debug(fmt.Errorf("[tun] no route for %s -> %s", e.src, e.dst))
 				continue
 			}
 
 			log.Debugf("[tun] find route: %s -> %s", e.dst, addr)
-			_, err = conn.WriteTo(e.data[:e.length], addr)
-			// err should never nil, so retry is not work
-			if err != nil {
-				h.routes.Remove(e.dst, addr)
-				log.Debugf("[tun] remove invalid route: %s -> %s", e.dst, addr)
-				goto retry
-			}
+			_, err := conn.WriteTo(e.data[:e.length], addr)
 			config.LPool.Put(e.data[:])
-
 			if err != nil {
-				goto errH
+				log.Debugf("[tun] can not route: %s -> %s", e.dst, addr)
+				errChan <- err
+				return
 			}
-		}
-	errH:
-		if err != nil {
-			errChan <- err
-			return
 		}
 	}()
 

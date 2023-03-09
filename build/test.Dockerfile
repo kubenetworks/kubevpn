@@ -1,4 +1,4 @@
-FROM naison/kubevpn:v1.1.19
+FROM naison/kubevpn:latest
 
 WORKDIR /app
 
