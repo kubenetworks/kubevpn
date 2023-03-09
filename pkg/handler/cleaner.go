@@ -20,6 +20,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/dns"
+	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
 var stopChan = make(chan os.Signal)
@@ -55,6 +56,7 @@ func (c *ConnectOptions) addCleanUpResourceHandler(clientset *kubernetes.Clients
 			log.Error(err)
 		}
 		log.Info("clean up successful")
+		util.CleanExtensionLib()
 		os.Exit(0)
 	}()
 }

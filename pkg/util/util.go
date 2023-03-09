@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	osexec "os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -41,6 +42,7 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/client-go/transport/spdy"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/cmd/exec"
 	"k8s.io/kubectl/pkg/cmd/util"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -48,6 +50,7 @@ import (
 	"k8s.io/kubectl/pkg/util/podutils"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/driver"
 )
 
 func GetAvailableUDPPortOrDie() int {
@@ -77,7 +80,7 @@ func GetAvailableTCPPortOrDie() int {
 }
 
 func WaitPod(podInterface v12.PodInterface, list metav1.ListOptions, checker func(*v1.Pod) bool) error {
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*60)
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancelFunc()
 	w, err := podInterface.Watch(ctx, list)
 	if err != nil {
@@ -618,4 +621,32 @@ func AllContainerIsRunning(pod *v1.Pod) bool {
 		}
 	}
 	return true
+}
+
+func CleanExtensionLib() {
+	if IsWindows() {
+		err := retry.OnError(retry.DefaultRetry, func(err error) bool {
+			return err != nil
+		}, func() error {
+			return driver.UninstallWireGuardTunDriver()
+		})
+		if err != nil {
+			var wd string
+			wd, err = os.Getwd()
+			if err != nil {
+				return
+			}
+			filename := filepath.Join(wd, "wintun.dll")
+			var temp *os.File
+			if temp, err = os.CreateTemp("", ""); err != nil {
+				return
+			}
+			if err = temp.Close(); err != nil {
+				return
+			}
+			if err = os.Rename(filename, temp.Name()); err != nil {
+				log.Debugln(err)
+			}
+		}
+	}
 }

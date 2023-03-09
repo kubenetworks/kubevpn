@@ -6,12 +6,10 @@ import (
 	defaultlog "log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -81,33 +79,6 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				fmt.Println()
 			}
 			select {}
-		},
-		PostRun: func(*cobra.Command, []string) {
-			if util.IsWindows() {
-				err := retry.OnError(retry.DefaultRetry, func(err error) bool {
-					return err != nil
-				}, func() error {
-					return driver.UninstallWireGuardTunDriver()
-				})
-				if err != nil {
-					var wd string
-					wd, err = os.Getwd()
-					if err != nil {
-						return
-					}
-					filename := filepath.Join(wd, "wintun.dll")
-					var temp *os.File
-					if temp, err = os.CreateTemp("", ""); err != nil {
-						return
-					}
-					if err = temp.Close(); err != nil {
-						return
-					}
-					if err = os.Rename(filename, temp.Name()); err != nil {
-						log.Debugln(err)
-					}
-				}
-			}
 		},
 	}
 	cmd.Flags().StringArrayVar(&connect.Workloads, "workloads", []string{}, "Kubernetes workloads, special which workloads you want to proxy it to local PC, If not special, just connect to cluster network, like: pods/tomcat, deployment/nginx, replicaset/tomcat etc")
