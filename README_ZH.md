@@ -322,9 +322,10 @@ de9e2f8ab57d        nginx:latest            "/docker-entrypoint.…"   5 seconds
 如果你想指定在本地启动容器的镜像, 可以使用参数 `--docker-image`, 当本地不存在该镜像时, 会从对应的镜像仓库拉取。如果你想指定启动参数，可以使用 `--entrypoint`
 参数，替换为你想要执行的命令，比如 `--entrypoint "tail -f /dev/null"`, 更多使用参数，请参见 `kubevpn dev --help`.
 
-注意：
-***如果你想在本地使用 Docker in Docker (DinD) 的方式启动开发模式, 由于程序会读写 `/tmp` 目录，您需要手动添加参数 `-v /tmp:/tmp`, 还有一点需要注意, 如果使用 DinD
-模式，为了共享容器网络和 pid, 还需要指定参数 `--parent-container` ***
+### DinD ( Docker in Docker ) 在 Docker 中使用 kubevpn
+
+如果你想在本地使用 Docker in Docker (DinD) 的方式启动开发模式, 由于程序会读写 `/tmp` 目录，您需要手动添加参数 `-v /tmp:/tmp`, 还有一点需要注意, 如果使用 DinD
+模式，为了共享容器网络和 pid, 还需要指定参数 `--parent-container`
 
 例如:
 
@@ -495,3 +496,24 @@ traffic manager not exist, try to create it...
 pod [kubevpn-traffic-manager] status is Running
 ...
 ```
+
+- 在使用 `kubevpn dev` 进入开发模式的时候,有出现报错 137, 改怎么解决 ?
+
+```text
+dns service ok
+tar: Removing leading `/' from member names
+tar: Removing leading `/' from hard link targets
+/var/folders/30/cmv9c_5j3mq_kthx63sb1t5c0000gn/T/7375606548554947868:/var/run/secrets/kubernetes.io/serviceaccount
+Created container: server_vke-system_kubevpn_0db84
+Wait container server_vke-system_kubevpn_0db84 to be running...
+Container server_vke-system_kubevpn_0db84 is running on port 8888/tcp: 6789/tcp:6789 now
+$ Status: , Code: 137
+prepare to exit, cleaning up
+port-forward occurs error, err: lost connection to pod, retrying
+update ref count successfully
+ref-count is zero, prepare to clean up resource
+clean up successful
+```
+
+这是因为你的 `Docker-desktop` 声明的资源, 小于 container 容器启动时所需要的资源, 因此被 OOM 杀掉了, 你可以增加 `Docker-desktop` 对于 resources
+的设置, 目录是：`Preferences --> Resources --> Memory`

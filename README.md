@@ -329,11 +329,11 @@ image does not exist locally, it will be pulled from the corresponding mirror wa
 parameters, you can use `--entrypoint` parameter, replace it with the command you want to execute, such
 as `--entrypoint "tail -f /dev/null"`, for more parameters, see `kubevpn dev --help`.
 
-Notice:
-***If you want to start the development mode locally using Docker in Docker (DinD), since the program will read and
+### DinD ( Docker in Docker ) use kubevpn in Docker
+
+If you want to start the development mode locally using Docker in Docker (DinD), because the program will read and
 write the `/tmp` directory, you need to manually add the parameter `-v /tmp:/tmp` (outer docker) and other thing is you
-need to special
-parameter `--parent-container` (inner docker) for sharing network and pid ***
+need to special parameter `--parent-container` (inner docker) for sharing network and pid
 
 Example:
 
@@ -506,3 +506,24 @@ traffic manager not exist, try to create it...
 pod [kubevpn-traffic-manager] status is Running
 ...
 ```
+
+- When use kubevpn dev, but got error code 137, how to resolve ?
+
+```text
+dns service ok
+tar: Removing leading `/' from member names
+tar: Removing leading `/' from hard link targets
+/var/folders/30/cmv9c_5j3mq_kthx63sb1t5c0000gn/T/7375606548554947868:/var/run/secrets/kubernetes.io/serviceaccount
+Created container: server_vke-system_kubevpn_0db84
+Wait container server_vke-system_kubevpn_0db84 to be running...
+Container server_vke-system_kubevpn_0db84 is running on port 8888/tcp: 6789/tcp:6789 now
+$ Status: , Code: 137
+prepare to exit, cleaning up
+port-forward occurs error, err: lost connection to pod, retrying
+update ref count successfully
+ref-count is zero, prepare to clean up resource
+clean up successful
+```
+
+This is because of your docker-desktop required resource is less than pod running request resource, it OOM killed, so
+you can add more resource in your docker-desktop setting `Preferences --> Resources --> Memory`
