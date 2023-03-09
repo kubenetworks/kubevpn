@@ -60,6 +60,7 @@ jobs:
       - name: Push image to docker hub
         run: |
           echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USER }} --password-stdin
+          docker buildx create --use
           make container
 
       - name: Repository Dispatch
