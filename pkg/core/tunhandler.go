@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
@@ -233,12 +235,73 @@ func (d *Device) Close() {
 	close(d.tunOutbound)
 }
 
+func (d *Device) heartbeats() {
+	src := d.tun.LocalAddr().(*net.IPAddr).IP.To4()
+	dst := config.RouterIP.To4()
+
+	var bytes []byte
+	var err error
+
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
+
+	for ; true; <-ticker.C {
+		if bytes == nil {
+			bytes, err = genICMPPacket(src, dst)
+			if err != nil {
+				log.Error(err)
+				continue
+			}
+		}
+		data := config.LPool.Get().([]byte)[:]
+		length := copy(data, bytes)
+		if d.closed.Load() {
+			return
+		}
+		d.tunInbound <- &DataElem{
+			data:   data,
+			length: length,
+			src:    src,
+			dst:    dst,
+		}
+	}
+}
+
+func genICMPPacket(src net.IP, dst net.IP) ([]byte, error) {
+	buf := gopacket.NewSerializeBuffer()
+	icmpLayer := layers.ICMPv4{
+		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+		Id:       3842,
+		Seq:      1,
+	}
+	ipLayer := layers.IPv4{
+		Version:  4,
+		SrcIP:    src,
+		DstIP:    dst,
+		Protocol: layers.IPProtocolICMPv4,
+		Flags:    layers.IPv4DontFragment,
+		TTL:      64,
+		IHL:      5,
+		Id:       55664,
+	}
+	opts := gopacket.SerializeOptions{
+		FixLengths:       true,
+		ComputeChecksums: true,
+	}
+	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize icmp packet, err: %v", err)
+	}
+	return buf.Bytes(), nil
+}
+
 func (d *Device) Start() {
 	go d.readFromTun()
 	for i := 0; i < d.thread; i++ {
 		go d.parseIPHeader()
 	}
 	go d.writeToTun()
+	go d.heartbeats()
 }
 
 func (h *tunHandler) HandleServer(ctx context.Context, tunConn net.Conn) {

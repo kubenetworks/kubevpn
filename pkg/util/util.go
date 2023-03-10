@@ -448,23 +448,6 @@ func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string)) (st
 	return stdoutStr, stderrStr, err
 }
 
-func Heartbeats(ctx context.Context) {
-	c := make(chan struct{}, 1)
-	c <- struct{}{}
-	for {
-		select {
-		case <-time.Tick(time.Second * 15):
-			c <- struct{}{}
-		case <-c:
-			for i := 0; i < 4; i++ {
-				_, _ = Ping(config.RouterIP.String())
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
 func WaitPortToBeFree(ctx context.Context, port int) error {
 	log.Infoln(fmt.Sprintf("wait port %v to be free...", port))
 	for {

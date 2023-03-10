@@ -2,9 +2,13 @@ package util
 
 import (
 	"encoding/json"
+	"net"
 	"testing"
 
 	"github.com/containernetworking/cni/libcni"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/examples/util"
+	"github.com/google/gopacket/layers"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -56,4 +60,47 @@ func TestName(t *testing.T) {
 			println(i)
 		}
 	}
+}
+
+func TestPing(t *testing.T) {
+	defer util.Run()()
+	SrcIP := net.ParseIP("223.254.0.102").To4()
+	DstIP := net.ParseIP("223.254.0.100").To4()
+
+	icmpLayer := layers.ICMPv4{
+		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+		Id:       8888,
+		Seq:      1,
+	}
+	ipLayer := layers.IPv4{
+		Version:  4,
+		SrcIP:    SrcIP,
+		DstIP:    DstIP,
+		Protocol: layers.IPProtocolICMPv4,
+		Flags:    layers.IPv4DontFragment,
+		TTL:      64,
+		IHL:      5,
+		Id:       55664,
+	}
+	opts := gopacket.SerializeOptions{
+		FixLengths:       true,
+		ComputeChecksums: true,
+	}
+	buf := gopacket.NewSerializeBuffer()
+	err := gopacket.SerializeLayers(buf, opts, &icmpLayer, &ipLayer)
+	if err != nil {
+		log.Infof("failed to serialize icmp packet, err: %v", err)
+		return
+	}
+	ipConn, err := net.ListenPacket("ip4:icmp", "0.0.0.0")
+	if err != nil {
+		t.Error(err)
+	}
+	bytes := buf.Bytes()
+
+	_, err = ipConn.WriteTo(bytes, &net.IPAddr{IP: ipLayer.DstIP})
+	if err != nil {
+		t.Error(err)
+	}
+	log.Print("packet sent!")
 }

@@ -399,7 +399,6 @@ func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
 		RollbackFuncList = append(RollbackFuncList, util.DeleteFirewallRule)
 		go util.DeleteWindowsFirewallRule(ctx)
 	}
-	go util.Heartbeats(ctx)
 }
 
 func (c *ConnectOptions) setupDNS() error {
