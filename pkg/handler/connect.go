@@ -392,13 +392,11 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
 }
 
 func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
-	if util.IsWindows() {
-		if !util.FindRule() {
-			util.AddFirewallRule()
-		}
-		RollbackFuncList = append(RollbackFuncList, util.DeleteFirewallRule)
-		go util.DeleteWindowsFirewallRule(ctx)
+	if !util.FindAllowFirewallRule() {
+		util.AddAllowFirewallRule()
 	}
+	RollbackFuncList = append(RollbackFuncList, util.DeleteAllowFirewallRule)
+	go util.DeleteBlockFirewallRule(ctx)
 }
 
 func (c *ConnectOptions) setupDNS() error {

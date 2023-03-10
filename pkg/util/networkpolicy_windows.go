@@ -1,8 +1,11 @@
+//go:build windows
+
 package util
 
 import (
 	"context"
 	"os/exec"
+	"syscall"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -11,23 +14,27 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
-// DeleteWindowsFirewallRule Delete all action block firewall rule
-func DeleteWindowsFirewallRule(ctx context.Context) {
+// DeleteBlockFirewallRule Delete all action block firewall rule
+func DeleteBlockFirewallRule(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.Tick(time.Second * 10):
-			_ = exec.Command("PowerShell", []string{
+			// PowerShell Remove-NetFirewallRule -Action Block
+			cmd := exec.Command("PowerShell", []string{
 				"Remove-NetFirewallRule",
 				"-Action",
 				"Block",
-			}...).Run()
+			}...)
+			cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+			cmd.Run()
 		}
 	}
 }
 
-func AddFirewallRule() {
+func AddAllowFirewallRule() {
+	// netsh advfirewall firewall add rule name=kubevpn-traffic-manager dir=in action=allow enable=yes remoteip=223.254.0.100/16,LocalSubnet
 	cmd := exec.Command("netsh", []string{
 		"advfirewall",
 		"firewall",
@@ -39,6 +46,7 @@ func AddFirewallRule() {
 		"enable=yes",
 		"remoteip=" + config.CIDR.String() + ",LocalSubnet",
 	}...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		var s string
 		var b []byte
@@ -51,7 +59,8 @@ func AddFirewallRule() {
 	}
 }
 
-func DeleteFirewallRule() {
+func DeleteAllowFirewallRule() {
+	// netsh advfirewall firewall delete rule name=kubevpn-traffic-manager
 	cmd := exec.Command("netsh", []string{
 		"advfirewall",
 		"firewall",
@@ -59,6 +68,7 @@ func DeleteFirewallRule() {
 		"rule",
 		"name=" + config.ConfigMapPodTrafficManager,
 	}...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		var s string
 		var b []byte
@@ -71,7 +81,8 @@ func DeleteFirewallRule() {
 	}
 }
 
-func FindRule() bool {
+func FindAllowFirewallRule() bool {
+	// netsh advfirewall firewall show rule name=kubevpn-traffic-manager
 	cmd := exec.Command("netsh", []string{
 		"advfirewall",
 		"firewall",
@@ -79,6 +90,7 @@ func FindRule() bool {
 		"rule",
 		"name=" + config.ConfigMapPodTrafficManager,
 	}...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		s := string(out)
 		var b []byte
