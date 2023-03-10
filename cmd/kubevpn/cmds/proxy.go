@@ -11,6 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	utilcomp "k8s.io/kubectl/pkg/util/completion"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
 
@@ -20,25 +21,37 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-func CmdConnect(f cmdutil.Factory) *cobra.Command {
+func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	var connect = handler.ConnectOptions{}
 	var sshConf = util.SshConfig{}
 	cmd := &cobra.Command{
-		Use:   "connect",
+		Use:   "proxy",
 		Short: i18n.T("Connect to kubernetes cluster network, or proxy kubernetes workloads inbound traffic into local PC"),
 		Long:  templates.LongDesc(i18n.T(`Connect to kubernetes cluster network, or proxy kubernetes workloads inbound traffic into local PC`)),
 		Example: templates.Examples(i18n.T(`
-		# Connect to k8s cluster network
-		kubevpn connect
+		# Reverse proxy
+		- proxy deployment
+		  kubevpn proxy deployment/productpage
 
-		# Connect to api-server behind of bastion host or ssh jump host
-		kubevpn connect --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem
+		- proxy service
+		  kubevpn proxy service/productpage
+
+        - proxy multiple workloads
+          kubevpn proxy deployment/authors deployment/productpage
+          or 
+          kubevpn proxy deployment authors productpage
+
+		# Reverse proxy with mesh, traffic with header a=1, will hit local PC, otherwise no effect
+		kubevpn proxy service/productpage --headers a=1
+
+		# Connect to api-server behind of bastion host or ssh jump host and proxy kubernetes resource traffic into local PC
+		kubevpn proxy --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem service/productpage --headers a=1
 
 		# it also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
-		kubevpn connect --ssh-alias <alias>
+		kubevpn proxy service/productpage --ssh-alias <alias> --headers a=1
 
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
@@ -58,7 +71,21 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			if err := connect.InitClient(f); err != nil {
 				return err
 			}
-			if err := connect.DoConnect(); err != nil {
+			if len(args) == 0 {
+				fmt.Fprintf(os.Stdout, "You must specify the type of resource to proxy. %s\n\n", cmdutil.SuggestAPIResources("kubevpn"))
+				fullCmdName := cmd.Parent().CommandPath()
+				usageString := "Required resource not specified."
+				if len(fullCmdName) > 0 && cmdutil.IsSiblingCommandExists(cmd, "explain") {
+					usageString = fmt.Sprintf("%s\nUse \"%s explain <resource>\" for a detailed description of that resource (e.g. %[2]s explain pods).", usageString, fullCmdName)
+				}
+				return cmdutil.UsageErrorf(cmd, usageString)
+			}
+			connect.Workloads = args
+			err := connect.PreCheckResource()
+			if err != nil {
+				return err
+			}
+			if err = connect.DoConnect(); err != nil {
 				log.Errorln(err)
 				handler.Cleanup(syscall.SIGQUIT)
 			} else {
@@ -71,8 +98,9 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			select {}
 		},
 	}
-	cmd.Flags().BoolVar(&config.Debug, "debug", false, "enable debug mode or not, true or false")
-	cmd.Flags().StringVar(&config.Image, "image", config.Image, "use this image to startup container")
+	cmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "Traffic with special headers with reverse it to local PC, you should startup your service after reverse workloads successfully, If not special, redirect all traffic to local PC, format is k=v, like: k1=v1,k2=v2")
+	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug mode or not, true or false")
+	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
 
 	// for ssh jumper host
 	cmd.Flags().StringVar(&sshConf.Addr, "ssh-addr", "", "Optional ssh jump server address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
@@ -80,5 +108,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&sshConf.Password, "ssh-password", "", "Optional password for ssh jump server")
 	cmd.Flags().StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "Optional file with private key for SSH authentication")
 	cmd.Flags().StringVar(&sshConf.ConfigAlias, "ssh-alias", "", "Optional config alias with ~/.ssh/config for SSH authentication")
+
+	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd
 }

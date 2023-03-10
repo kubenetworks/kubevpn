@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"syscall"
 
 	"github.com/docker/cli/cli"
@@ -13,7 +12,6 @@ import (
 	"github.com/docker/docker/api/types"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/completion"
 	"k8s.io/kubectl/pkg/util/i18n"
@@ -35,6 +33,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		Env:        opts.NewListOpts(nil),
 		Volumes:    opts.NewListOpts(nil),
 		ExtraHosts: opts.NewListOpts(nil),
+		NoProxy:    false,
 	}
 	var sshConf = util.SshConfig{}
 	cmd := &cobra.Command{
@@ -45,6 +44,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
         # Dev reverse proxy
 		- reverse deployment
 		  kubevpn dev deployment/productpage
+
 		- reverse service
 		  kubevpn dev service/productpage
 
@@ -75,11 +75,9 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 			return handler.SshJump(sshConf, cmd.Flags())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			devOptions.Workload = args[0]
-
 			connect := handler.ConnectOptions{
 				Headers:   devOptions.Headers,
-				Workloads: []string{devOptions.Workload},
+				Workloads: args,
 			}
 
 			if devOptions.ParentContainer != "" {
@@ -103,7 +101,26 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 			if err := connect.InitClient(f); err != nil {
 				return err
 			}
-			connect.PreCheckResource()
+			err2 := connect.PreCheckResource()
+			if err2 != nil {
+				return err2
+			}
+
+			if len(connect.Workloads) > 1 {
+				return fmt.Errorf("can only dev one workloads at same time, workloads: %v", connect.Workloads)
+			}
+			if len(connect.Workloads) < 1 {
+				return fmt.Errorf("you must provide resource to dev, workloads : %v is invaild", connect.Workloads)
+			}
+
+			devOptions.Workload = connect.Workloads[0]
+			// if no-proxy is true, not needs to intercept traffic
+			if devOptions.NoProxy {
+				if len(connect.Headers) != 0 {
+					return fmt.Errorf("not needs to provide headers if is no-proxy mode")
+				}
+				connect.Workloads = []string{}
+			}
 			defer func() {
 				handler.Cleanup(syscall.SIGQUIT)
 				select {}
@@ -119,37 +136,11 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 			}
 			return err
 		},
-		PostRun: func(*cobra.Command, []string) {
-			if util.IsWindows() {
-				err := retry.OnError(retry.DefaultRetry, func(err error) bool {
-					return err != nil
-				}, func() error {
-					return driver.UninstallWireGuardTunDriver()
-				})
-				if err != nil {
-					var wd string
-					wd, err = os.Getwd()
-					if err != nil {
-						return
-					}
-					filename := filepath.Join(wd, "wintun.dll")
-					var temp *os.File
-					if temp, err = os.CreateTemp("", ""); err != nil {
-						return
-					}
-					if err = temp.Close(); err != nil {
-						return
-					}
-					if err = os.Rename(filename, temp.Name()); err != nil {
-						log.Debugln(err)
-					}
-				}
-			}
-		},
 	}
 	cmd.Flags().StringToStringVarP(&devOptions.Headers, "headers", "H", map[string]string{}, "Traffic with special headers with reverse it to local PC, you should startup your service after reverse workloads successfully, If not special, redirect all traffic to local PC, format is k=v, like: k1=v1,k2=v2")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "use this image to startup container")
+	cmd.Flags().BoolVar(&devOptions.NoProxy, "no-proxy", false, "Whether proxy remote workloads traffic into local or not, true: just startup container on local without inject containers to intercept traffic, false: intercept traffic and forward to local")
 	cmdutil.AddContainerVarFlags(cmd, &devOptions.ContainerName, devOptions.ContainerName)
 	cmdutil.CheckErr(cmd.RegisterFlagCompletionFunc("container", completion.ContainerCompletionFunc(f)))
 

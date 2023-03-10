@@ -264,7 +264,7 @@ func server(port int) {
 
 func kubevpnConnect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
-	cmd := exec.CommandContext(context.Background(), "kubevpn", "connect", "--debug", "--workloads", "deployments/reviews")
+	cmd := exec.CommandContext(context.Background(), "kubevpn", "proxy", "deployments/reviews", "--debug")
 	go func() {
 		var checker = func(log string) {
 			if strings.Contains(log, "dns service ok") {

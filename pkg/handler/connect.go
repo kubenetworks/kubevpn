@@ -564,7 +564,17 @@ func SshJump(conf util.SshConfig, flags *pflag.FlagSet) (err error) {
 // pods without controller
 // pod/productpage-without-controller --> pod/productpage-without-controller
 // service/productpage-without-pod --> controller/controllerName
-func (c *ConnectOptions) PreCheckResource() {
+func (c *ConnectOptions) PreCheckResource() error {
+	list, err := util.GetUnstructuredObjectList(c.factory, c.Namespace, c.Workloads)
+	if err != nil {
+		return err
+	}
+	var resources []string
+	for _, info := range list {
+		resources = append(resources, fmt.Sprintf("%s/%s", info.Mapping.GroupVersionKind.GroupKind().String(), info.Name))
+	}
+	c.Workloads = resources
+
 	// normal workloads, like pod with controller, deployments, statefulset, replicaset etc...
 	for i, workload := range c.Workloads {
 		ownerReference, err := util.GetTopOwnerReference(c.factory, c.Namespace, workload)
@@ -576,7 +586,7 @@ func (c *ConnectOptions) PreCheckResource() {
 	for i, workload := range c.Workloads {
 		object, err := util.GetUnstructuredObject(c.factory, c.Namespace, workload)
 		if err != nil {
-			continue
+			return err
 		}
 		if object.Mapping.Resource.Resource != "services" {
 			continue
@@ -606,11 +616,12 @@ func (c *ConnectOptions) PreCheckResource() {
 				}
 				// only a single service, not support it yet
 				if controller.Len() == 0 {
-					log.Fatalf("Not support resources: %s", workload)
+					return fmt.Errorf("not support resources: %s", workload)
 				}
 			}
 		}
 	}
+	return nil
 }
 
 func (c *ConnectOptions) GetRunningPodList() ([]v1.Pod, error) {

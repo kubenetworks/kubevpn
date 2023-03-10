@@ -37,6 +37,7 @@ type Options struct {
 	Workload      string
 	Factory       cmdutil.Factory
 	ContainerName string
+	NoProxy       bool
 
 	// docker options
 	Platform string

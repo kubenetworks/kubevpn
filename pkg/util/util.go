@@ -251,9 +251,33 @@ func GetUnstructuredObject(f cmdutil.Factory, namespace string, workloads string
 		return nil, err
 	}
 	if len(infos) == 0 {
-		return nil, errors.New("Not found")
+		return nil, fmt.Errorf("not found workloads %s", workloads)
 	}
 	return infos[0], err
+}
+
+func GetUnstructuredObjectList(f cmdutil.Factory, namespace string, workloads []string) ([]*runtimeresource.Info, error) {
+	do := f.NewBuilder().
+		Unstructured().
+		NamespaceParam(namespace).DefaultNamespace().AllNamespaces(false).
+		ResourceTypeOrNameArgs(true, workloads...).
+		ContinueOnError().
+		Latest().
+		Flatten().
+		TransformRequests(func(req *rest.Request) { req.Param("includeObject", "Object") }).
+		Do()
+	if err := do.Err(); err != nil {
+		log.Warn(err)
+		return nil, err
+	}
+	infos, err := do.Infos()
+	if err != nil {
+		return nil, err
+	}
+	if len(infos) == 0 {
+		return nil, fmt.Errorf("not found resource %v", workloads)
+	}
+	return infos, err
 }
 
 func GetUnstructuredObjectBySelector(f cmdutil.Factory, namespace string, selector string) ([]*runtimeresource.Info, error) {

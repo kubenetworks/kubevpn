@@ -150,7 +150,7 @@ reviews       ClusterIP   172.27.255.155   <none>        9080/TCP   9m6s    app=
 ### 反向代理
 
 ```shell
-➜  ~ kubevpn connect --workloads deployment/productpage
+➜  ~ kubevpn proxy deployment/productpage
 got cidr from cache
 traffic manager not exist, try to create it...
 pod [kubevpn-traffic-manager] status is Running
@@ -205,7 +205,7 @@ Hello world!%
 支持 HTTP, GRPC 和 WebSocket 等, 携带了指定 header `"a: 1"` 的流量，将会路由到本地
 
 ```shell
-➜  ~ kubevpn connect --workloads=deployment/productpage --headers a=1
+➜  ~ kubevpn proxy deployment/productpage --headers a=1
 got cidr from cache
 traffic manager not exist, try to create it...
 pod [kubevpn-traffic-manager] status is Running

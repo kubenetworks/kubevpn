@@ -152,7 +152,7 @@ reviews       ClusterIP   172.27.255.155   <none>        9080/TCP   9m6s    app=
 ### Reverse proxy
 
 ```shell
-➜  ~ kubevpn connect --workloads deployment/productpage
+➜  ~ kubevpn proxy deployment/productpage
 got cidr from cache
 traffic manager not exist, try to create it...
 pod [kubevpn-traffic-manager] status is Running
@@ -207,7 +207,7 @@ Hello world!%
 Support HTTP, GRPC and WebSocket etc. with specific header `"a: 1"` will route to your local machine
 
 ```shell
-➜  ~ kubevpn connect --workloads=deployment/productpage --headers a=1
+➜  ~ kubevpn proxy deployment/productpage --headers a=1
 got cidr from cache
 traffic manager not exist, try to create it...
 pod [kubevpn-traffic-manager] status is Running
