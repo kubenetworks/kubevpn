@@ -44,9 +44,9 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		kubevpn connect --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem
 
 		# it also support ProxyJump, like
-		┌─────┐      ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
-		│  pc ├─────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
-		└─────┘      └──────┘     └──────┘     └──────┘                 └────────────┘
+		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
+		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
+		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
 		kubevpn connect --ssh-alias <alias>
 
 `)),
