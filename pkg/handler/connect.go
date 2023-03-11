@@ -41,6 +41,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/core"
 	"github.com/wencaiwulue/kubevpn/pkg/dns"
+	"github.com/wencaiwulue/kubevpn/pkg/driver"
 	"github.com/wencaiwulue/kubevpn/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -133,6 +134,9 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	err = c.portForward(ctx, fmt.Sprintf("%d:10800", port))
 	if err != nil {
 		return err
+	}
+	if util.IsWindows() {
+		driver.InstallWireGuardTunDriver()
 	}
 	err = c.startLocalTunServe(ctx, fmt.Sprintf("tcp://127.0.0.1:%d", port))
 	if err != nil {

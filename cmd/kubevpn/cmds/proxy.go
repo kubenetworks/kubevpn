@@ -16,7 +16,6 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
-	"github.com/wencaiwulue/kubevpn/pkg/driver"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -62,9 +61,6 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			go http.ListenAndServe("localhost:6060", nil)
 			util.InitLogger(config.Debug)
 			defaultlog.Default().SetOutput(io.Discard)
-			if util.IsWindows() {
-				driver.InstallWireGuardTunDriver()
-			}
 			return handler.SshJump(sshConf, cmd.Flags())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {

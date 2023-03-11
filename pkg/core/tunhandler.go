@@ -238,31 +238,37 @@ func (d *Device) Close() {
 func (d *Device) heartbeats() {
 	src := d.tun.LocalAddr().(*net.IPAddr).IP.To4()
 	dst := config.RouterIP.To4()
+	if dst.Equal(src) {
+		return
+	}
 
 	var bytes []byte
 	var err error
 
-	ticker := time.NewTicker(time.Second * 5)
+	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
 
 	for ; true; <-ticker.C {
-		if bytes == nil {
-			bytes, err = genICMPPacket(src, dst)
-			if err != nil {
-				log.Error(err)
-				continue
+		for i := 0; i < 4; i++ {
+			if bytes == nil {
+				bytes, err = genICMPPacket(src, dst)
+				if err != nil {
+					log.Error(err)
+					continue
+				}
 			}
-		}
-		data := config.LPool.Get().([]byte)[:]
-		length := copy(data, bytes)
-		if d.closed.Load() {
-			return
-		}
-		d.tunInbound <- &DataElem{
-			data:   data,
-			length: length,
-			src:    src,
-			dst:    dst,
+			data := config.LPool.Get().([]byte)[:]
+			length := copy(data, bytes)
+			if d.closed.Load() {
+				return
+			}
+			d.tunInbound <- &DataElem{
+				data:   data,
+				length: length,
+				src:    src,
+				dst:    dst,
+			}
+			time.Sleep(time.Second)
 		}
 	}
 }
