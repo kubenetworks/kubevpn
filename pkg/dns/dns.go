@@ -25,10 +25,6 @@ import (
 )
 
 func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) (*miekgdns.ClientConfig, error) {
-	var ipp []string
-	if ips, err := getDNSIPFromDnsPod(clientset); err == nil {
-		ipp = ips
-	}
 	resolvConfStr, err := util.Shell(clientset, restclient, config, podName, "", namespace, []string{"cat", "/etc/resolv.conf"})
 	if err != nil {
 		return nil, err
@@ -37,23 +33,15 @@ func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RE
 	if err != nil {
 		return nil, err
 	}
-	if len(ipp) != 0 {
-		resolvConf.Servers = append(resolvConf.Servers, make([]string, len(ipp))...)
-		copy(resolvConf.Servers[len(ipp):], resolvConf.Servers[:len(resolvConf.Servers)-len(ipp)])
-		for i := range ipp {
-			resolvConf.Servers[i] = ipp[i]
-		}
+	if ips, err := getDNSIPFromDnsPod(clientset); err == nil && len(ips) != 0 {
+		resolvConf.Servers = ips
 	}
 
-	// duplicate server
-	set := sets.New[string]()
-	for i := 0; i < len(resolvConf.Servers); i++ {
-		if set.Has(resolvConf.Servers[i]) {
-			resolvConf.Servers = append(resolvConf.Servers[:i], resolvConf.Servers[i+1:]...)
-			i--
-		}
-		set.Insert(resolvConf.Servers[i])
+	// linux nameserver only support amount is 3, so if namespace too much, just use two, left one to system
+	if len(resolvConf.Servers) > 2 {
+		resolvConf.Servers = resolvConf.Servers[:2]
 	}
+
 	return resolvConf, nil
 }
 
@@ -63,7 +51,7 @@ func getDNSIPFromDnsPod(clientset *kubernetes.Clientset) (ips []string, err erro
 		LabelSelector: fields.OneTermEqualSelector("k8s-app", "kube-dns").String(),
 	})
 	if err != nil {
-		return nil, err
+		return
 	}
 	for _, item := range serviceList.Items {
 		if len(item.Spec.ClusterIP) != 0 {
@@ -74,18 +62,19 @@ func getDNSIPFromDnsPod(clientset *kubernetes.Clientset) (ips []string, err erro
 	podList, err = clientset.CoreV1().Pods(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("k8s-app", "kube-dns").String(),
 	})
-	if err != nil {
-		return
-	}
-	for _, pod := range podList.Items {
-		if pod.Status.Phase == v12.PodRunning && pod.DeletionTimestamp == nil {
-			ips = append(ips, pod.Status.PodIP)
+	if err == nil {
+		for _, pod := range podList.Items {
+			if pod.Status.Phase == v12.PodRunning && pod.DeletionTimestamp == nil {
+				ips = append(ips, pod.Status.PodIP)
+			}
 		}
 	}
 	if len(ips) == 0 {
-		return nil, errors.New("")
+		err = errors.New("can not found any dns service ip")
+		return
 	}
-	return ips, nil
+	err = nil
+	return
 }
 
 func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInterface) {
