@@ -25,7 +25,7 @@ import (
 // kubectl exec POD_NAME -c CONTAINER_NAME /sbin/killall5 or ephemeralcontainers
 func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 	var duplicateOptions = handler.DuplicateOptions{}
-	var sshConf = util.SshConfig{}
+	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "duplicate",
 		Short: i18n.T("Connect to kubernetes cluster network, or proxy kubernetes workloads inbound traffic into local PC"),
@@ -102,11 +102,7 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Println()
-				fmt.Println(`----------------------------------------------------------------------------------`)
-				fmt.Println(`    Now duplicate workloads running successfully on other cluster, enjoy it :)    `)
-				fmt.Println(`----------------------------------------------------------------------------------`)
-				fmt.Println()
+				util.Print(os.Stdout, "Now duplicate workloads running successfully on other cluster, enjoy it :)")
 			}
 			select {}
 		},
@@ -119,13 +115,7 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&duplicateOptions.TargetNamespace, "target-namespace", "", "Duplicate workloads in this namespace, if not special, use origin namespace")
 	cmd.Flags().StringVar(&duplicateOptions.TargetKubeconfig, "target-kubeconfig", "", "Duplicate workloads will create in this cluster, if not special, use origin cluster")
 
-	// for ssh jumper host
-	cmd.Flags().StringVar(&sshConf.Addr, "ssh-addr", "", "Optional ssh jump server address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
-	cmd.Flags().StringVar(&sshConf.User, "ssh-username", "", "Optional username for ssh jump server")
-	cmd.Flags().StringVar(&sshConf.Password, "ssh-password", "", "Optional password for ssh jump server")
-	cmd.Flags().StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "Optional file with private key for SSH authentication")
-	cmd.Flags().StringVar(&sshConf.ConfigAlias, "ssh-alias", "", "Optional config alias with ~/.ssh/config for SSH authentication")
-
+	addSshFlag(cmd, sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd
 }

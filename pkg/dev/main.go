@@ -92,11 +92,11 @@ func (d Options) Main(ctx context.Context) error {
 
 	pod := firstPod.Name
 
-	env, err := GetEnv(ctx, d.Factory, d.Namespace, pod)
+	env, err := util.GetEnv(ctx, d.Factory, d.Namespace, pod)
 	if err != nil {
 		return err
 	}
-	volume, err := GetVolume(ctx, d.Factory, d.Namespace, pod)
+	volume, err := util.GetVolume(ctx, d.Factory, d.Namespace, pod)
 	if err != nil {
 		return err
 	}

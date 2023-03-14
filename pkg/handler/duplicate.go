@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/wencaiwulue/kubevpn/pkg/dev"
-	"github.com/wencaiwulue/kubevpn/pkg/mesh"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -35,6 +33,7 @@ import (
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/mesh"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -532,7 +531,7 @@ func (d DuplicateOptions) setEnv(u *unstructured.Unstructured) error {
 	}
 
 	var envMap map[string][]string
-	envMap, err = dev.GetEnv(context.Background(), d.factory, d.Namespace, pod.Name)
+	envMap, err = util.GetEnv(context.Background(), d.factory, d.Namespace, pod.Name)
 	if err != nil {
 		return err
 	}
@@ -595,7 +594,7 @@ func (d DuplicateOptions) setEnv(u *unstructured.Unstructured) error {
 		}
 
 		for _, envVar := range container.Env {
-			println(envVar)
+			fmt.Print(envVar)
 		}
 	}
 	return nil

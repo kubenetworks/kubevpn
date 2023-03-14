@@ -34,7 +34,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		ExtraHosts: opts.NewListOpts(nil),
 		NoProxy:    false,
 	}
-	var sshConf = util.SshConfig{}
+	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "dev",
 		Short: i18n.T("Proxy kubernetes workloads inbound traffic into local PC and dev in docker container"),
@@ -156,11 +156,6 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&devOptions.VolumeDriver, "volume-driver", "", "Optional volume driver for the container")
 	_ = cmd.Flags().SetAnnotation("platform", "version", []string{"1.32"})
 
-	// for ssh jumper host
-	cmd.Flags().StringVar(&sshConf.Addr, "ssh-addr", "", "Optional ssh jump server address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
-	cmd.Flags().StringVar(&sshConf.User, "ssh-username", "", "Optional username for ssh jump server")
-	cmd.Flags().StringVar(&sshConf.Password, "ssh-password", "", "Optional password for ssh jump server")
-	cmd.Flags().StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "Optional file with private key for SSH authentication")
-	cmd.Flags().StringVar(&sshConf.ConfigAlias, "ssh-alias", "", "Optional config alias with ~/.ssh/config for SSH authentication")
+	addSshFlag(cmd, sshConf)
 	return cmd
 }

@@ -13,7 +13,7 @@ import (
 
 func CmdReset(factory cmdutil.Factory) *cobra.Command {
 	var connect = handler.ConnectOptions{}
-	var sshConf = util.SshConfig{}
+	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "reset",
 		Short: "Reset KubeVPN",
