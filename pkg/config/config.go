@@ -4,6 +4,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"sigs.k8s.io/kustomize/api/konfig"
 )
 
 const (
@@ -51,6 +53,11 @@ const (
 	// api
 	APIRentIP    = "/rent/ip"
 	APIReleaseIP = "/release/ip"
+
+	KUBECONFIG = "kubeconfig"
+
+	// labels
+	ManageBy = konfig.ManagedbyLabelKey
 )
 
 var (
