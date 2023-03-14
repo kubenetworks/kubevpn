@@ -31,6 +31,7 @@ func NewKubeVPNCommand() *cobra.Command {
 				CmdConnect(factory),
 				CmdProxy(factory),
 				CmdDev(factory),
+				CmdDuplicate(factory),
 				CmdReset(factory),
 				CmdUpgrade(factory),
 				CmdVersion(factory),
