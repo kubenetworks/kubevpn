@@ -26,9 +26,9 @@ import (
 	"k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/cp"
 	"github.com/wencaiwulue/kubevpn/pkg/dns"
 	util2 "github.com/wencaiwulue/kubevpn/pkg/util"
-	"github.com/wencaiwulue/kubevpn/pkg/util/cp"
 )
 
 type RunConfig struct {
