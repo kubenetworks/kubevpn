@@ -112,9 +112,16 @@ func (d Options) Main(ctx context.Context) error {
 		return fmt.Errorf("can not fill docker options, err: %v", err)
 	}
 	var dockerCli *command.DockerCli
-	_, dockerCli, err = GetClient()
+	var cli *client.Client
+	cli, dockerCli, err = GetClient()
 	if err != nil {
 		return err
+	}
+	// check resource
+	var outOfMemory bool
+	outOfMemory, _ = checkOutOfMemory(templateSpec, cli)
+	if outOfMemory {
+		return fmt.Errorf("your pod resource request is bigger than docker-desktop resource, please adjust your docker-desktop resource")
 	}
 	if d.ParentContainer != "" {
 		for _, config := range list[:] {
@@ -299,4 +306,25 @@ func createFolder(ctx context.Context, cli *client.Client, id string, src string
 		}
 	}, time.Second, chanStop)
 	return target, nil
+}
+
+func checkOutOfMemory(spec *v1.PodTemplateSpec, cli *client.Client) (outOfMemory bool, err error) {
+	var info types.Info
+	info, err = cli.Info(context.Background())
+	if err != nil {
+		return
+	}
+	total := info.MemTotal
+	var req int64
+	for _, container := range spec.Spec.Containers {
+		memory := container.Resources.Requests.Memory()
+		if memory != nil {
+			req += memory.Value()
+		}
+	}
+	if req > total {
+		outOfMemory = true
+		return
+	}
+	return
 }
