@@ -481,7 +481,7 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory) (err error) {
 	return
 }
 
-func SshJump(conf util.SshConfig, flags *pflag.FlagSet) (err error) {
+func SshJump(conf *util.SshConfig, flags *pflag.FlagSet) (err error) {
 	if conf.Addr == "" && conf.ConfigAlias == "" {
 		return
 	}

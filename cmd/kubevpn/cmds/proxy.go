@@ -22,7 +22,7 @@ import (
 
 func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	var connect = handler.ConnectOptions{}
-	var sshConf = util.SshConfig{}
+	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "proxy",
 		Short: i18n.T("Connect to kubernetes cluster network, or proxy kubernetes workloads inbound traffic into local PC"),
@@ -85,11 +85,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				log.Errorln(err)
 				handler.Cleanup(syscall.SIGQUIT)
 			} else {
-				fmt.Println()
-				fmt.Println(`---------------------------------------------------------------------------`)
-				fmt.Println(`    Now you can access resources in the kubernetes cluster, enjoy it :)    `)
-				fmt.Println(`---------------------------------------------------------------------------`)
-				fmt.Println()
+				util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 			}
 			select {}
 		},
@@ -98,13 +94,16 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
 
+	addSshFlag(cmd, sshConf)
+	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
+	return cmd
+}
+
+func addSshFlag(cmd *cobra.Command, sshConf *util.SshConfig) {
 	// for ssh jumper host
 	cmd.Flags().StringVar(&sshConf.Addr, "ssh-addr", "", "Optional ssh jump server address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
 	cmd.Flags().StringVar(&sshConf.User, "ssh-username", "", "Optional username for ssh jump server")
 	cmd.Flags().StringVar(&sshConf.Password, "ssh-password", "", "Optional password for ssh jump server")
 	cmd.Flags().StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "Optional file with private key for SSH authentication")
 	cmd.Flags().StringVar(&sshConf.ConfigAlias, "ssh-alias", "", "Optional config alias with ~/.ssh/config for SSH authentication")
-
-	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
-	return cmd
 }

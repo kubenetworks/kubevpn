@@ -701,3 +701,23 @@ func WaitPodToBeReady(ctx context.Context, podInterface v12.PodInterface, select
 		}
 	}
 }
+
+func Print(writer io.Writer, slogan string) {
+	length := len(slogan) + 4 + 4
+	var sb strings.Builder
+
+	sb.WriteByte('\n')
+	sb.WriteString("+" + strings.Repeat("-", length) + "+")
+	sb.WriteByte('\n')
+	sb.WriteString("╎")
+	sb.WriteString(strings.Repeat(" ", 4))
+	sb.WriteString(slogan)
+	sb.WriteString(strings.Repeat(" ", 4))
+	sb.WriteString("╎")
+	sb.WriteByte('\n')
+	sb.WriteString("+" + strings.Repeat("-", length) + "+")
+	sb.WriteByte('\n')
+	sb.WriteByte('\n')
+
+	_, _ = writer.Write([]byte(sb.String()))
+}

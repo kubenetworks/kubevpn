@@ -26,7 +26,7 @@ type SshConfig struct {
 	ConfigAlias string
 }
 
-func Main(remoteEndpoint, localEndpoint *netip.AddrPort, conf SshConfig, done chan struct{}) error {
+func Main(remoteEndpoint, localEndpoint *netip.AddrPort, conf *SshConfig, done chan struct{}) error {
 	var remote *ssh.Client
 	var err error
 	if conf.ConfigAlias != "" {
