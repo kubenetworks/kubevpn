@@ -132,6 +132,9 @@ func (o *CopyOptions) Run() error {
 	if len(srcSpec.PodName) != 0 {
 		return o.copyFromPod(srcSpec, destSpec)
 	}
+	if len(destSpec.PodName) != 0 {
+		return o.copyToPod(srcSpec, destSpec, &exec.ExecOptions{})
+	}
 	return fmt.Errorf("one of src or dest must be a remote file specification")
 }
 
@@ -155,6 +158,54 @@ func (o *CopyOptions) checkDestinationIsDir(dest fileSpec) error {
 		Executor: &exec.DefaultRemoteExecutor{},
 	}
 
+	return o.execute(options)
+}
+
+func (o *CopyOptions) copyToPod(src, dest fileSpec, options *exec.ExecOptions) error {
+	if _, err := os.Stat(src.File.String()); err != nil {
+		return fmt.Errorf("%s doesn't exist in local filesystem", src.File)
+	}
+	reader, writer := io.Pipe()
+
+	srcFile := src.File.(localPath)
+	destFile := dest.File.(remotePath)
+
+	if err := o.checkDestinationIsDir(dest); err == nil {
+		// If no error, dest.File was found to be a directory.
+		// Copy specified src into it
+		destFile = destFile.Join(srcFile.Base())
+	}
+
+	go func(src localPath, dest remotePath, writer io.WriteCloser) {
+		defer writer.Close()
+		cmdutil.CheckErr(makeTar(src, dest, writer))
+	}(srcFile, destFile, writer)
+	var cmdArr []string
+
+	if o.NoPreserve {
+		cmdArr = []string{"tar", "--no-same-permissions", "--no-same-owner", "-xmfh", "-"}
+	} else {
+		cmdArr = []string{"tar", "-xmfh", "-"}
+	}
+	destFileDir := destFile.Dir().String()
+	if len(destFileDir) > 0 {
+		cmdArr = append(cmdArr, "-C", destFileDir)
+	}
+
+	options.StreamOptions = exec.StreamOptions{
+		IOStreams: genericclioptions.IOStreams{
+			In:     reader,
+			Out:    o.Out,
+			ErrOut: o.ErrOut,
+		},
+		Stdin: true,
+
+		Namespace: dest.PodNamespace,
+		PodName:   dest.PodName,
+	}
+
+	options.Command = cmdArr
+	options.Executor = &exec.DefaultRemoteExecutor{}
 	return o.execute(options)
 }
 
@@ -199,17 +250,16 @@ func (t *TarPipe) initReadFrom(n uint64) {
 			PodName:   t.src.PodName,
 		},
 
-		// TODO: Improve error messages by first testing if 'tar' is present in the container?
-		Command:  []string{"tar", "hcf", "-", t.src.File.String()},
+		Command:  []string{"tar", "cfh", "-", t.src.File.String()},
 		Executor: &exec.DefaultRemoteExecutor{},
 	}
 	if t.o.MaxTries != 0 {
-		options.Command = []string{"sh", "-c", fmt.Sprintf("tar hcf - %s | tail -c+%d", t.src.File, n)}
+		options.Command = []string{"sh", "-c", fmt.Sprintf("tar cfh - %s | tail -c+%d", t.src.File, n)}
 	}
 
 	go func() {
 		defer t.outStream.Close()
-		t.o.execute(options)
+		cmdutil.CheckErr(t.o.execute(options))
 	}()
 }
 
@@ -230,16 +280,91 @@ func (t *TarPipe) Read(p []byte) (n int, err error) {
 	return
 }
 
+func makeTar(src localPath, dest remotePath, writer io.Writer) error {
+	// TODO: use compression here?
+	tarWriter := tar.NewWriter(writer)
+	defer tarWriter.Close()
+
+	srcPath := src.Clean()
+	destPath := dest.Clean()
+	return recursiveTar(srcPath.Dir(), srcPath.Base(), destPath.Dir(), destPath.Base(), tarWriter)
+}
+
+func recursiveTar(srcDir, srcFile localPath, destDir, destFile remotePath, tw *tar.Writer) error {
+	matchedPaths, err := srcDir.Join(srcFile).Glob()
+	if err != nil {
+		return err
+	}
+	for _, fpath := range matchedPaths {
+		stat, err := os.Lstat(fpath)
+		if err != nil {
+			return err
+		}
+		if stat.IsDir() {
+			files, err := os.ReadDir(fpath)
+			if err != nil {
+				return err
+			}
+			if len(files) == 0 {
+				//case empty directory
+				hdr, _ := tar.FileInfoHeader(stat, fpath)
+				hdr.Name = destFile.String()
+				if err := tw.WriteHeader(hdr); err != nil {
+					return err
+				}
+			}
+			for _, f := range files {
+				if err := recursiveTar(srcDir, srcFile.Join(newLocalPath(f.Name())),
+					destDir, destFile.Join(newRemotePath(f.Name())), tw); err != nil {
+					return err
+				}
+			}
+			return nil
+		} else if stat.Mode()&os.ModeSymlink != 0 {
+			//case soft link
+			hdr, _ := tar.FileInfoHeader(stat, fpath)
+			target, err := os.Readlink(fpath)
+			if err != nil {
+				return err
+			}
+
+			hdr.Linkname = target
+			hdr.Name = destFile.String()
+			if err := tw.WriteHeader(hdr); err != nil {
+				return err
+			}
+		} else {
+			//case regular file or other file type like pipe
+			hdr, err := tar.FileInfoHeader(stat, fpath)
+			if err != nil {
+				return err
+			}
+			hdr.Name = destFile.String()
+
+			if err := tw.WriteHeader(hdr); err != nil {
+				return err
+			}
+
+			f, err := os.Open(fpath)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+
+			if _, err := io.Copy(tw, f); err != nil {
+				return err
+			}
+			return f.Close()
+		}
+	}
+	return nil
+}
+
 func (o *CopyOptions) untarAll(prefix string, dest localPath, reader io.Reader) error {
 	// TODO: use compression here?
 	tarReader := tar.NewReader(reader)
-	var link []tar.Header
-	// basic file information
-	//mode := header.FileInfo().Mode()
-	// header.Name is a name of the REMOTE file, so we need to create
-	// a remotePath so that it goes through appropriate processing related
-	// with cleaning remote paths
-	var fun = func(headerName string) localPath {
+	var linkList []tar.Header
+	var genDstFilename = func(headerName string) localPath {
 		return dest.Join(newRemotePath(headerName[len(prefix):]))
 	}
 	for {
@@ -260,50 +385,47 @@ func (o *CopyOptions) untarAll(prefix string, dest localPath, reader io.Reader) 
 			return fmt.Errorf("tar contents corrupted")
 		}
 
-		destFileName := fun(header.Name)
+		// header.Name is a name of the REMOTE file, so we need to create
+		// a remotePath so that it goes through appropriate processing related
+		// with cleaning remote paths
+		destFileName := genDstFilename(header.Name)
 
 		if !isRelative(dest, destFileName) {
 			fmt.Fprintf(o.IOStreams.ErrOut, "warning: file %q is outside target destination, skipping\n", destFileName)
 			continue
 		}
 
-		if err = os.MkdirAll(destFileName.Dir().String(), 0755); err != nil {
+		if err := os.MkdirAll(destFileName.Dir().String(), 0755); err != nil {
 			return err
 		}
 		if header.FileInfo().IsDir() {
-			if err = os.MkdirAll(destFileName.String(), 0755); err != nil {
+			if err := os.MkdirAll(destFileName.String(), 0755); err != nil {
 				return err
 			}
 			continue
 		}
 
-		if header.FileInfo().Mode()&os.ModeSymlink != 0 {
-			fmt.Fprintf(o.IOStreams.ErrOut, "warning: skipping symlink: %q -> %q\n", destFileName, header.Linkname)
-			continue
-		}
-		var outFile *os.File
-		outFile, err = os.Create(destFileName.String())
+		outFile, err := os.Create(destFileName.String())
 		if err != nil {
 			return err
 		}
-		var n int64
-		if n, err = io.Copy(outFile, tarReader); err != nil {
+		defer outFile.Close()
+		if _, err := io.Copy(outFile, tarReader); err != nil {
 			return err
 		}
-		if n != header.Size {
-			return fmt.Errorf("file size not equal to written, writen: %d, real: %d", n, header.Size)
-		}
-		if err = outFile.Close(); err != nil {
+		if err := outFile.Close(); err != nil {
 			return err
 		}
-		// means link to another file
+
+		// all file became into normal file, this means linkList to another file, do it later
 		if header.Linkname != "" {
-			link = append(link, *header)
+			linkList = append(linkList, *header)
 		}
 	}
 
-	for _, f := range link {
-		err := process(link, f, fun)
+	// handle linked file
+	for _, f := range linkList {
+		err := copyFromLink(linkList, f, genDstFilename)
 		if err != nil {
 			return err
 		}
