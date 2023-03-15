@@ -302,17 +302,12 @@ func init() {
 }
 
 func TestName(t *testing.T) {
-	name := "alpine@sha256:b733d4a32c4da6a00a84df2ca32791bb03df95400243648d8c539e7b4cce329c"
+	name := "docker.io/naison/alpine@sha256:b733d4a32c4da6a00a84df2ca32791bb03df95400243648d8c539e7b4cce329c"
 	named, err := reference.ParseNormalizedNamed(name)
 	if err != nil {
 		t.Error(err)
 	}
-	named = reference.TagNameOnly(named)
 	domain := reference.Domain(named)
 	path := reference.Path(named)
-	tagged, ok := named.(reference.Tagged)
-	if !ok {
-		t.Fail()
-	}
-	fmt.Println(domain, path, tagged)
+	fmt.Println(domain, path)
 }

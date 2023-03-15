@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/distribution/reference"
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,11 +45,12 @@ type DuplicateOptions struct {
 	Workloads []string
 	ExtraCIDR []string
 
-	TargetKubeconfig string
-	TargetNamespace  string
-	TargetContainer  string
-	TargetImage      string
-	TargetRegistry   string
+	TargetKubeconfig       string
+	TargetNamespace        string
+	TargetContainer        string
+	TargetImage            string
+	TargetRegistry         string
+	IsChangeTargetRegistry bool
 
 	isSame bool
 
@@ -157,7 +160,6 @@ func (d *DuplicateOptions) DoDuplicate(ctx context.Context) error {
 				return err
 			}
 		}
-		d.replaceRegistry(u)
 
 		labelsMap := map[string]string{
 			config.ManageBy: config.ConfigMapPodTrafficManager,
@@ -302,6 +304,9 @@ func (d *DuplicateOptions) DoDuplicate(ctx context.Context) error {
 			v = unstructured.Unstructured{}
 			err = v.UnmarshalJSON(marshal)
 			if err = unstructured.SetNestedField(u.Object, append(containers, v.Object), containersPath...); err != nil {
+				return err
+			}
+			if err = d.replaceRegistry(u); err != nil {
 				return err
 			}
 
@@ -646,9 +651,10 @@ func (d *DuplicateOptions) setEnv(u *unstructured.Unstructured) error {
 	return nil
 }
 
-// todo replace origin registry with special registry for pulling image
+// replace origin registry with special registry for pulling image
 func (d *DuplicateOptions) replaceRegistry(u *unstructured.Unstructured) error {
-	if d.TargetRegistry == "" {
+	// not pass this options, do nothing
+	if !d.IsChangeTargetRegistry {
 		return nil
 	}
 
@@ -657,9 +663,29 @@ func (d *DuplicateOptions) replaceRegistry(u *unstructured.Unstructured) error {
 		return err
 	}
 
-	//for i, container := range temp.Spec.InitContainers {
-	//	if container.Image
-	//}
+	for i, container := range temp.Spec.InitContainers {
+		oldImage := container.Image
+		named, err := reference.ParseNormalizedNamed(oldImage)
+		if err != nil {
+			return err
+		}
+		domain := reference.Domain(named)
+		newImage := strings.TrimPrefix(strings.ReplaceAll(oldImage, domain, d.TargetRegistry), "/")
+		temp.Spec.InitContainers[i].Image = newImage
+		log.Debugf("update init container: %s image: %s --> %s", container.Name, oldImage, newImage)
+	}
+
+	for i, container := range temp.Spec.Containers {
+		oldImage := container.Image
+		named, err := reference.ParseNormalizedNamed(oldImage)
+		if err != nil {
+			return err
+		}
+		domain := reference.Domain(named)
+		newImage := strings.TrimPrefix(strings.ReplaceAll(oldImage, domain, d.TargetRegistry), "/")
+		temp.Spec.Containers[i].Image = newImage
+		log.Debugf("update container: %s image: %s --> %s", container.Name, oldImage, newImage)
+	}
 
 	var marshal []byte
 	if marshal, err = json.Marshal(temp.Spec); err != nil {
