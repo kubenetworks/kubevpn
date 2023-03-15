@@ -46,6 +46,7 @@ type DuplicateOptions struct {
 	TargetNamespace  string
 	TargetContainer  string
 	TargetImage      string
+	TargetRegistry   string
 
 	isSame bool
 
@@ -146,10 +147,16 @@ func (d *DuplicateOptions) DoDuplicate(ctx context.Context) error {
 		}
 		u.SetName(fmt.Sprintf("%s-dup-%s", u.GetName(), newUUID.String()[:5]))
 
-		err = d.CreateNecessaryResource(u)
-		if err != nil {
-			return err
+		// if is another cluster, needs to set volume and set env
+		if !d.isSame {
+			if err = d.setVolume(u); err != nil {
+				return err
+			}
+			if err = d.setEnv(u); err != nil {
+				return err
+			}
 		}
+		d.replaceRegistry(u)
 
 		labelsMap := map[string]string{
 			config.ManageBy: config.ConfigMapPodTrafficManager,
@@ -297,7 +304,8 @@ func (d *DuplicateOptions) DoDuplicate(ctx context.Context) error {
 				return err
 			}
 
-			_, createErr := runtimeresource.NewHelper(object.Client, object.Mapping).Create(d.TargetNamespace, true, u)
+			_, createErr := client.Resource(object.Mapping.Resource).Namespace(d.TargetNamespace).Create(context.Background(), u, metav1.CreateOptions{})
+			//_, createErr := runtimeresource.NewHelper(object.Client, object.Mapping).Create(d.TargetNamespace, true, u)
 			return createErr
 		})
 		if retryErr != nil {
@@ -333,11 +341,11 @@ func RemoveUselessInfo(u *unstructured.Unstructured) {
 	u.SetAnnotations(a)
 }
 
-// CreateNecessaryResource
+// setVolume
 /*
 1) calculate volume content, and download it into emptyDir
 */
-func (d *DuplicateOptions) CreateNecessaryResource(u *unstructured.Unstructured) error {
+func (d *DuplicateOptions) setVolume(u *unstructured.Unstructured) error {
 
 	const TokenVolumeMountPath = "/var/run/secrets/kubernetes.io/serviceaccount"
 
@@ -367,6 +375,7 @@ func (d *DuplicateOptions) CreateNecessaryResource(u *unstructured.Unstructured)
 
 	// remove serviceAccount info
 	temp.Spec.ServiceAccountName = ""
+	temp.Spec.DeprecatedServiceAccount = ""
 	temp.Spec.AutomountServiceAccountToken = pointer.Bool(false)
 
 	var volumeMap = make(map[string]v1.Volume)
@@ -426,17 +435,13 @@ func (d *DuplicateOptions) CreateNecessaryResource(u *unstructured.Unstructured)
 		// means maybe volume only used in initContainers
 		if len(args) == 0 {
 			for i := 0; i < len(temp.Spec.InitContainers); i++ {
-				var found bool
 				for _, mount := range temp.Spec.InitContainers[i].VolumeMounts {
-					if mount.MountPath == TokenVolumeMountPath {
-						found = true
+					if mount.Name == volume.Name {
+						// remove useless initContainer
+						temp.Spec.InitContainers = append(temp.Spec.InitContainers[:i], temp.Spec.InitContainers[i+1:]...)
+						i--
 						break
 					}
-				}
-				// remove useless initContainer
-				if found {
-					temp.Spec.InitContainers = append(temp.Spec.InitContainers[:i], temp.Spec.InitContainers[i+1:]...)
-					i--
 				}
 			}
 			continue
@@ -498,8 +503,7 @@ func (d *DuplicateOptions) CreateNecessaryResource(u *unstructured.Unstructured)
 		return err
 	}
 	var content map[string]interface{}
-	err = json.Unmarshal(marshal, &content)
-	if err != nil {
+	if err = json.Unmarshal(marshal, &content); err != nil {
 		return err
 	}
 	if err = unstructured.SetNestedField(u.Object, content, append(path, "spec")...); err != nil {
@@ -508,14 +512,13 @@ func (d *DuplicateOptions) CreateNecessaryResource(u *unstructured.Unstructured)
 	return nil
 }
 
-// todo set env
-func (d DuplicateOptions) setEnv(u *unstructured.Unstructured) error {
-	temp, _, err := util.GetPodTemplateSpecPath(u)
+func (d *DuplicateOptions) setEnv(u *unstructured.Unstructured) error {
+	temp, path, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
 		return err
 	}
 
-	sortBy := func(pods []*v1.Pod) sort.Interface {
+	/*sortBy := func(pods []*v1.Pod) sort.Interface {
 		for i := 0; i < len(pods); i++ {
 			if pods[i].DeletionTimestamp != nil {
 				pods = append(pods[:i], pods[i+1:]...)
@@ -534,8 +537,7 @@ func (d DuplicateOptions) setEnv(u *unstructured.Unstructured) error {
 	envMap, err = util.GetEnv(context.Background(), d.factory, d.Namespace, pod.Name)
 	if err != nil {
 		return err
-	}
-	println(envMap)
+	}*/
 
 	var secretMap = make(map[string]*v1.Secret)
 	var configmapMap = make(map[string]*v1.ConfigMap)
@@ -557,6 +559,7 @@ func (d DuplicateOptions) setEnv(u *unstructured.Unstructured) error {
 		}
 	}
 
+	// get all ref configmaps and secrets
 	for _, container := range temp.Spec.Containers {
 		for _, envVar := range container.Env {
 			if envVar.ValueFrom != nil {
@@ -580,22 +583,71 @@ func (d DuplicateOptions) setEnv(u *unstructured.Unstructured) error {
 		}
 	}
 
+	// parse real value from secrets and configmaps
 	for i := 0; i < len(temp.Spec.Containers); i++ {
 		container := temp.Spec.Containers[i]
-		for i, envFromSource := range container.EnvFrom {
+		var envVars []v1.EnvVar
+		for _, envFromSource := range container.EnvFrom {
 			if ref := envFromSource.ConfigMapRef; ref != nil && configmapMap[ref.Name] != nil {
-				if envFromSource.Prefix != "" {
-					println(i)
+				cm := configmapMap[ref.Name]
+				for k, v := range cm.Data {
+					if strings.HasPrefix(k, envFromSource.Prefix) {
+						envVars = append(envVars, v1.EnvVar{
+							Name:  k,
+							Value: v,
+						})
+					}
 				}
 			}
-			if envFromSource.SecretRef != nil {
-
+			if ref := envFromSource.SecretRef; ref != nil && secretMap[ref.Name] != nil {
+				secret := secretMap[ref.Name]
+				for k, v := range secret.Data {
+					if strings.HasPrefix(k, envFromSource.Prefix) {
+						envVars = append(envVars, v1.EnvVar{
+							Name:  k,
+							Value: string(v),
+						})
+					}
+				}
 			}
 		}
+		temp.Spec.Containers[i].EnvFrom = nil
+		temp.Spec.Containers[i].Env = append(temp.Spec.Containers[i].Env, envVars...)
 
-		for _, envVar := range container.Env {
-			fmt.Print(envVar)
+		for j, envVar := range container.Env {
+			if envVar.ValueFrom != nil {
+				if ref := envVar.ValueFrom.ConfigMapKeyRef; ref != nil {
+					if configMap := configmapMap[ref.Name]; configMap != nil {
+						temp.Spec.Containers[i].Env[j].Value = configMap.Data[ref.Key]
+						temp.Spec.Containers[i].Env[j].ValueFrom = nil
+					}
+				}
+				if ref := envVar.ValueFrom.SecretKeyRef; ref != nil {
+					if secret := secretMap[ref.Name]; secret != nil {
+						temp.Spec.Containers[i].Env[j].Value = string(secret.Data[ref.Key])
+						temp.Spec.Containers[i].Env[j].ValueFrom = nil
+					}
+				}
+			}
 		}
 	}
+	var marshal []byte
+	if marshal, err = json.Marshal(temp.Spec); err != nil {
+		return err
+	}
+	var content map[string]interface{}
+	if err = json.Unmarshal(marshal, &content); err != nil {
+		return err
+	}
+	if err = unstructured.SetNestedField(u.Object, content, append(path, "spec")...); err != nil {
+		return err
+	}
 	return nil
+}
+
+// todo replace origin registry with special registry for pulling image
+func (d *DuplicateOptions) replaceRegistry(u *unstructured.Unstructured) {
+	if d.TargetRegistry != "" {
+
+	}
 }
