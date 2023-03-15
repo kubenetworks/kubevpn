@@ -23,8 +23,8 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "connect",
-		Short: i18n.T("Connect to kubernetes cluster network, or proxy kubernetes workloads inbound traffic into local PC"),
-		Long:  templates.LongDesc(i18n.T(`Connect to kubernetes cluster network, or proxy kubernetes workloads inbound traffic into local PC`)),
+		Short: i18n.T("Connect to kubernetes cluster network"),
+		Long:  templates.LongDesc(i18n.T(`Connect to kubernetes cluster network`)),
 		Example: templates.Examples(i18n.T(`
 		# Connect to k8s cluster network
 		kubevpn connect
