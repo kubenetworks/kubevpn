@@ -76,6 +76,8 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 				}
 				return cmdutil.UsageErrorf(cmd, usageString)
 			}
+			// special empty string, eg: --target-registry ""
+			duplicateOptions.IsChangeTargetRegistry = cmd.Flags().Changed("target-registry")
 
 			connectOptions := handler.ConnectOptions{
 				Namespace: duplicateOptions.Namespace,
