@@ -47,9 +47,11 @@ import (
 )
 
 type ConnectOptions struct {
-	Namespace  string
-	Headers    map[string]string
-	Workloads  []string
+	Namespace string
+	Headers   map[string]string
+	Workloads []string
+	ExtraCIDR []string
+
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient
 	config     *rest.Config
@@ -254,6 +256,14 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 	var list = sets.New[string](config.CIDR.String())
 	for _, ipNet := range c.cidrs {
 		list.Insert(ipNet.String())
+	}
+	// add extra-cidr
+	for _, s := range c.ExtraCIDR {
+		_, _, err = net.ParseCIDR(s)
+		if err != nil {
+			return fmt.Errorf("invalid extra-cidr %s, err: %v", s, err)
+		}
+		list.Insert(s)
 	}
 	r := core.Route{
 		ServeNodes: []string{

@@ -41,6 +41,7 @@ type DuplicateOptions struct {
 	Namespace string
 	Headers   map[string]string
 	Workloads []string
+	ExtraCIDR []string
 
 	TargetKubeconfig string
 	TargetNamespace  string
@@ -646,8 +647,31 @@ func (d *DuplicateOptions) setEnv(u *unstructured.Unstructured) error {
 }
 
 // todo replace origin registry with special registry for pulling image
-func (d *DuplicateOptions) replaceRegistry(u *unstructured.Unstructured) {
-	if d.TargetRegistry != "" {
-
+func (d *DuplicateOptions) replaceRegistry(u *unstructured.Unstructured) error {
+	if d.TargetRegistry == "" {
+		return nil
 	}
+
+	temp, path, err := util.GetPodTemplateSpecPath(u)
+	if err != nil {
+		return err
+	}
+
+	//for i, container := range temp.Spec.InitContainers {
+	//	if container.Image
+	//}
+
+	var marshal []byte
+	if marshal, err = json.Marshal(temp.Spec); err != nil {
+		return err
+	}
+	var content map[string]interface{}
+	if err = json.Unmarshal(marshal, &content); err != nil {
+		return err
+	}
+	if err = unstructured.SetNestedField(u.Object, content, append(path, "spec")...); err != nil {
+		return err
+	}
+
+	return nil
 }
