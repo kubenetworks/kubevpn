@@ -25,7 +25,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "proxy",
-		Short: i18n.T("Connect to kubernetes cluster network, or proxy kubernetes workloads inbound traffic into local PC"),
+		Short: i18n.T("Connect to kubernetes cluster network and proxy kubernetes workloads inbound traffic into local PC"),
 		Long:  templates.LongDesc(i18n.T(`Connect to kubernetes cluster network, or proxy kubernetes workloads inbound traffic into local PC`)),
 		Example: templates.Examples(i18n.T(`
 		# Reverse proxy
