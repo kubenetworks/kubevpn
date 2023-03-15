@@ -33,6 +33,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		Volumes:    opts.NewListOpts(nil),
 		ExtraHosts: opts.NewListOpts(nil),
 		NoProxy:    false,
+		ExtraCIDR:  []string{},
 	}
 	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
@@ -74,6 +75,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 			connect := handler.ConnectOptions{
 				Headers:   devOptions.Headers,
 				Workloads: args,
+				ExtraCIDR: devOptions.ExtraCIDR,
 			}
 
 			if devOptions.ParentContainer != "" {
@@ -97,9 +99,9 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 			if err := connect.InitClient(f); err != nil {
 				return err
 			}
-			err2 := connect.PreCheckResource()
-			if err2 != nil {
-				return err2
+			err := connect.PreCheckResource()
+			if err != nil {
+				return err
 			}
 
 			if len(connect.Workloads) > 1 {
@@ -121,12 +123,12 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 				handler.Cleanup(syscall.SIGQUIT)
 				select {}
 			}()
-			if err := connect.DoConnect(); err != nil {
+			if err = connect.DoConnect(); err != nil {
 				log.Errorln(err)
 				return err
 			}
 			devOptions.Namespace = connect.Namespace
-			err := devOptions.Main(context.Background())
+			err = devOptions.Main(context.Background())
 			if err != nil {
 				log.Errorln(err)
 			}
@@ -139,6 +141,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&devOptions.NoProxy, "no-proxy", false, "Whether proxy remote workloads traffic into local or not, true: just startup container on local without inject containers to intercept traffic, false: intercept traffic and forward to local")
 	cmdutil.AddContainerVarFlags(cmd, &devOptions.ContainerName, devOptions.ContainerName)
 	cmdutil.CheckErr(cmd.RegisterFlagCompletionFunc("container", completion.ContainerCompletionFunc(f)))
+	cmd.Flags().StringArrayVar(&devOptions.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
 
 	// docker options
 	cmd.Flags().Var(&devOptions.ExtraHosts, "add-host", "Add a custom host-to-IP mapping (host:ip)")

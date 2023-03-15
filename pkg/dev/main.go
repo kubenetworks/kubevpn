@@ -38,6 +38,7 @@ type Options struct {
 	Factory       cmdutil.Factory
 	ContainerName string
 	NoProxy       bool
+	ExtraCIDR     []string
 
 	// docker options
 	Platform string
