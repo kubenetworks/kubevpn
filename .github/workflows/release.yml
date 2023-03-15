@@ -70,8 +70,8 @@ jobs:
           token: ${{ secrets.REPOSITORYDISPATCH }}
           inputs: '{"url": "${{ steps.create_release.outputs.upload_url }}", "tag": "${{ github.ref_name }}"}'
 
-      - name: Update new version in krew-index
-        uses: rajatjindal/krew-release-bot@v0.0.43
-        with:
-          krew_template_file: .github/krew.yaml
-          debug: true
+#      - name: Update new version in krew-index
+#        uses: rajatjindal/krew-release-bot@v0.0.43
+#        with:
+#          krew_template_file: .github/krew.yaml
+#          debug: true
