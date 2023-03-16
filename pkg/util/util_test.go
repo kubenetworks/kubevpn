@@ -3,6 +3,7 @@ package util
 import (
 	"encoding/json"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/containernetworking/cni/libcni"
@@ -94,6 +95,9 @@ func TestPing(t *testing.T) {
 	}
 	ipConn, err := net.ListenPacket("ip4:icmp", "0.0.0.0")
 	if err != nil {
+		if strings.Contains(err.Error(), "operation not permitted") {
+			return
+		}
 		t.Error(err)
 	}
 	bytes := buf.Bytes()

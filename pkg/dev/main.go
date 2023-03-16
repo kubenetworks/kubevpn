@@ -44,14 +44,14 @@ type Options struct {
 	// docker options
 	Platform string
 	//Pull         string // always, missing, never
-	PublishAll   bool
-	Entrypoint   string
-	DockerImage  string
-	Publish      opts.ListOpts
-	Expose       opts.ListOpts
-	ExtraHosts   opts.ListOpts
-	NetMode      opts.NetworkOpt
-	Aliases      opts.ListOpts
+	PublishAll  bool
+	Entrypoint  string
+	DockerImage string
+	Publish     opts.ListOpts
+	Expose      opts.ListOpts
+	ExtraHosts  opts.ListOpts
+	NetMode     opts.NetworkOpt
+	//Aliases      opts.ListOpts
 	Env          opts.ListOpts
 	Mounts       opts.MountOpt
 	Volumes      opts.ListOpts
@@ -99,7 +99,7 @@ func (d Options) Main(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	volume, err := util.GetVolume(ctx, d.Factory, d.Namespace, pod)
+	volume, err := GetVolume(ctx, d.Factory, d.Namespace, pod)
 	if err != nil {
 		return err
 	}
@@ -232,7 +232,7 @@ func (r Run) Run(ctx context.Context, volume map[string][]mount.Mount) error {
 		id, err = run(ctx, config, cli)
 		if err != nil {
 			// try another way to startup container
-			log.Info("try another way to startup container")
+			log.Infof("occur err: %v, try another way to startup container...", err)
 			config.hostConfig.Mounts = nil
 			id, err = run(ctx, config, cli)
 			if err != nil {

@@ -31,6 +31,7 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
@@ -631,30 +632,48 @@ func AllContainerIsRunning(pod *v1.Pod) bool {
 }
 
 func CleanExtensionLib() {
-	if IsWindows() {
-		err := retry.OnError(retry.DefaultRetry, func(err error) bool {
-			return err != nil
-		}, func() error {
-			return driver.UninstallWireGuardTunDriver()
-		})
-		if err != nil {
-			var wd string
-			wd, err = os.Getwd()
-			if err != nil {
-				return
-			}
-			filename := filepath.Join(wd, "wintun.dll")
-			var temp *os.File
-			if temp, err = os.CreateTemp("", ""); err != nil {
-				return
-			}
-			if err = temp.Close(); err != nil {
-				return
-			}
-			if err = os.Rename(filename, temp.Name()); err != nil {
-				log.Debugln(err)
-			}
-		}
+	if !IsWindows() {
+		return
+	}
+	path, err := os.Executable()
+	if err != nil {
+		return
+	}
+	filename := filepath.Join(filepath.Dir(path), "wintun.dll")
+	_ = retry.OnError(
+		// step : 0 13 34 55 100 194 433 661 1384 2689 (ms)
+		// total: 5.57s
+		wait.Backoff{
+			Steps:    10,
+			Duration: 10 * time.Millisecond,
+			Factor:   2.0,
+			Jitter:   0.5,
+		},
+		func(error) bool {
+			_, err = os.Lstat(filename)
+			return !errors.Is(err, os.ErrNotExist)
+		},
+		func() error {
+			err = driver.UninstallWireGuardTunDriver()
+			return fmt.Errorf("%v", err)
+		},
+	)
+	_, err = os.Lstat(filename)
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	var temp *os.File
+	if temp, err = os.CreateTemp("", ""); err != nil {
+		return
+	}
+	if err = temp.Close(); err != nil {
+		return
+	}
+	if err = os.Remove(temp.Name()); err != nil {
+		return
+	}
+	if err = os.Rename(filename, temp.Name()); err != nil {
+		log.Debugln(err)
 	}
 }
 
