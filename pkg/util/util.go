@@ -721,3 +721,7 @@ func Print(writer io.Writer, slogan string) {
 
 	_, _ = writer.Write([]byte(sb.String()))
 }
+
+func StartupPProf(port int) {
+	log.Errorln(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
+}
