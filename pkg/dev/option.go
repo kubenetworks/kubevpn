@@ -148,6 +148,11 @@ func fillOptions(r Run, copts Options) error {
 
 	config.hostConfig.Binds = binds
 
+	// todo
+	if copts.Aliases.Len() != 0 {
+		//config.networkingConfig.EndpointsConfig
+	}
+
 	return nil
 }
 

@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
@@ -52,7 +53,10 @@ func extractFileSpec(arg string) (fileSpec, error) {
 	if i == 0 {
 		return fileSpec{}, errFileSpecDoesntMatchFormat
 	}
-	if i == -1 {
+
+	// C:\Users\ADMINI~1\AppData\Local\Temp\849198392506502457
+	// disk name C is not a pod name
+	if i == -1 || (runtime.GOOS == "windows" && strings.Contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", arg[:i])) {
 		return fileSpec{
 			File: newLocalPath(arg),
 		}, nil
@@ -178,7 +182,9 @@ func (o *CopyOptions) copyToPod(src, dest fileSpec, options *exec.ExecOptions) e
 
 	go func(src localPath, dest remotePath, writer io.WriteCloser) {
 		defer writer.Close()
-		cmdutil.CheckErr(makeTar(src, dest, writer))
+		if err := makeTar(src, dest, writer); err != nil {
+			log.Error(err)
+		}
 	}(srcFile, destFile, writer)
 	var cmdArr []string
 
@@ -259,7 +265,9 @@ func (t *TarPipe) initReadFrom(n uint64) {
 
 	go func() {
 		defer t.outStream.Close()
-		cmdutil.CheckErr(t.o.execute(options))
+		if err := t.o.execute(options); err != nil {
+			log.Error(err)
+		}
 	}()
 }
 
