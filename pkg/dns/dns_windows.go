@@ -53,7 +53,7 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string) error {
 
 func CancelDNS() {
 	updateHosts("")
-	getenv := os.Getenv("luid")
+	getenv := os.Getenv(config.EnvTunNameOrLUID)
 	parseUint, err := strconv.ParseUint(getenv, 10, 64)
 	if err != nil {
 		log.Warningln(err)
@@ -61,6 +61,7 @@ func CancelDNS() {
 	}
 	luid := winipcfg.LUID(parseUint)
 	_ = luid.FlushDNS(windows.AF_INET)
+	_ = luid.FlushRoutes(windows.AF_INET)
 }
 
 func updateNicMetric(name string) error {

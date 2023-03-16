@@ -70,6 +70,11 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client) (id stri
 	}
 	id = create.ID
 	log.Infof("Created container: %s", name)
+	defer func() {
+		if err != nil {
+			_ = cli.ContainerRemove(ctx, id, types.ContainerRemoveOptions{Force: true})
+		}
+	}()
 
 	err = cli.ContainerStart(ctx, create.ID, types.ContainerStartOptions{})
 	if err != nil {

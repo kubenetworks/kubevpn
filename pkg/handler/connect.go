@@ -71,20 +71,18 @@ func (c *ConnectOptions) createRemoteInboundPod(ctx1 context.Context) (err error
 	}
 
 	for _, workload := range c.Workloads {
-		if len(workload) > 0 {
-			configInfo := util.PodRouteConfig{
-				LocalTunIP:           c.localTunIP.IP.String(),
-				TrafficManagerRealIP: c.routerIP.String(),
-			}
-			// means mesh mode
-			if len(c.Headers) != 0 {
-				err = InjectVPNAndEnvoySidecar(ctx1, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers)
-			} else {
-				err = InjectVPNSidecar(ctx1, c.factory, c.Namespace, workload, configInfo)
-			}
-			if err != nil {
-				return err
-			}
+		configInfo := util.PodRouteConfig{
+			LocalTunIP:           c.localTunIP.IP.String(),
+			TrafficManagerRealIP: c.routerIP.String(),
+		}
+		// means mesh mode
+		if len(c.Headers) != 0 {
+			err = InjectVPNAndEnvoySidecar(ctx1, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers)
+		} else {
+			err = InjectVPNSidecar(ctx1, c.factory, c.Namespace, workload, configInfo)
+		}
+		if err != nil {
+			return err
 		}
 	}
 	return
@@ -115,7 +113,7 @@ func Rollback(f cmdutil.Factory, ns, workload string) {
 }
 
 func (c *ConnectOptions) DoConnect() (err error) {
-	c.addCleanUpResourceHandler(c.clientset, c.Namespace)
+	c.addCleanUpResourceHandler()
 	trafficMangerNet := net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}
 	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, &trafficMangerNet)
 	if err = c.dhcp.InitDHCP(ctx); err != nil {
