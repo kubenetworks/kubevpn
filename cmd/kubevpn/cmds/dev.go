@@ -3,7 +3,6 @@ package cmds
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"syscall"
 
@@ -72,7 +71,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 				util.RunWithElevated()
 				os.Exit(0)
 			}
-			go http.ListenAndServe("localhost:6060", nil)
+			go util.StartupPProf(config.PProfPort)
 			util.InitLogger(config.Debug)
 			return handler.SshJump(sshConf, cmd.Flags())
 		},

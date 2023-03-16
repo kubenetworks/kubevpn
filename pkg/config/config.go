@@ -58,6 +58,9 @@ const (
 
 	// labels
 	ManageBy = konfig.ManagedbyLabelKey
+
+	// pprof port
+	PProfPort = 32345
 )
 
 var (

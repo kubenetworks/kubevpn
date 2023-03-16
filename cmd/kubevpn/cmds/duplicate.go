@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	defaultlog "log"
-	"net/http"
 	"os"
 	"syscall"
 
@@ -64,7 +63,7 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 				util.RunWithElevated()
 				os.Exit(0)
 			}
-			go http.ListenAndServe("localhost:6060", nil)
+			go util.StartupPProf(config.PProfPort)
 			util.InitLogger(config.Debug)
 			defaultlog.Default().SetOutput(io.Discard)
 			return handler.SshJump(sshConf, cmd.Flags())
