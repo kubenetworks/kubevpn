@@ -13,6 +13,7 @@ import (
 	"github.com/docker/cli/cli/flags"
 	"github.com/docker/cli/opts"
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
@@ -43,17 +44,18 @@ type Options struct {
 	// docker options
 	Platform string
 	//Pull         string // always, missing, never
-	PublishAll      bool
-	Entrypoint      string
-	DockerImage     string
-	Publish         opts.ListOpts
-	Expose          opts.ListOpts
-	ExtraHosts      opts.ListOpts
-	ParentContainer string
-	Env             opts.ListOpts
-	Mounts          opts.MountOpt
-	Volumes         opts.ListOpts
-	VolumeDriver    string
+	PublishAll   bool
+	Entrypoint   string
+	DockerImage  string
+	Publish      opts.ListOpts
+	Expose       opts.ListOpts
+	ExtraHosts   opts.ListOpts
+	NetMode      opts.NetworkOpt
+	Aliases      opts.ListOpts
+	Env          opts.ListOpts
+	Mounts       opts.MountOpt
+	Volumes      opts.ListOpts
+	VolumeDriver string
 }
 
 func (d Options) Main(ctx context.Context) error {
@@ -124,12 +126,15 @@ func (d Options) Main(ctx context.Context) error {
 	if outOfMemory {
 		return fmt.Errorf("your pod resource request is bigger than docker-desktop resource, please adjust your docker-desktop resource")
 	}
-	if d.ParentContainer != "" {
+	mode := container.NetworkMode(d.NetMode.NetworkMode())
+	if mode.IsUserDefined() {
 		for _, config := range list[:] {
 			// remove expose port
 			config.config.ExposedPorts = nil
-			config.hostConfig.NetworkMode = containertypes.NetworkMode("container:" + d.ParentContainer)
-			config.hostConfig.PidMode = containertypes.PidMode("container:" + d.ParentContainer)
+			config.hostConfig.NetworkMode = mode
+			if mode.IsContainer() {
+				config.hostConfig.PidMode = containertypes.PidMode(d.NetMode.NetworkMode())
+			}
 			config.hostConfig.PortBindings = nil
 
 			// remove dns

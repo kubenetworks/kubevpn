@@ -333,7 +333,7 @@ as `--entrypoint "tail -f /dev/null"`, for more parameters, see `kubevpn dev --h
 
 If you want to start the development mode locally using Docker in Docker (DinD), because the program will read and
 write the `/tmp` directory, you need to manually add the parameter `-v /tmp:/tmp` (outer docker) and other thing is you
-need to special parameter `--parent-container` (inner docker) for sharing network and pid
+need to special parameter `--network` (inner docker) for sharing network and pid
 
 Example:
 
@@ -345,7 +345,7 @@ docker run -it --privileged -v /var/run/docker.sock:/var/run/docker.sock -v /tmp
 ➜  ~ docker run -it --privileged -c authors -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v /Users/naison/.kube/vke:/root/.kube/config -v /Users/naison/Desktop/kubevpn/bin:/app naison/kubevpn:v1.1.21
 root@4d0c3c4eae2b:/# hostname
 4d0c3c4eae2b
-root@4d0c3c4eae2b:/# kubevpn dev deployment/authors -n kube-system --image naison/kubevpn:v1.1.21 --headers user=naison --parent-container 4d0c3c4eae2b --entrypoint "tail -f /dev/null"
+root@4d0c3c4eae2b:/# kubevpn dev deployment/authors -n kube-system --image naison/kubevpn:v1.1.21 --headers user=naison --network container:4d0c3c4eae2b --entrypoint "tail -f /dev/null"
 
 ----------------------------------------------------------------------------------
     Warn: Use sudo to execute command kubevpn can not use user env KUBECONFIG.
@@ -507,7 +507,7 @@ pod [kubevpn-traffic-manager] status is Running
 ...
 ```
 
-- When use kubevpn dev, but got error code 137, how to resolve ?
+- When use `kubevpn dev`, but got error code 137, how to resolve ?
 
 ```text
 dns service ok
@@ -527,3 +527,15 @@ clean up successful
 
 This is because of your docker-desktop required resource is less than pod running request resource, it OOM killed, so
 you can add more resource in your docker-desktop setting `Preferences --> Resources --> Memory`
+
+- I am using WSL( Windows Sub Linux ) Docker, when use mode `kubevpn dev`, can not connect to cluster network, how to
+  solve this problem?
+
+Answer: this is because WSL'Docker using Windows's Network, so if even start a container in WSL, this container will
+not use WSL network, but use Windows network
+Solution:
+
+- 1): install docker in WSL, not use Windows Docker-desktop
+- 2): use command `kubevpn connect` on Windows, and then startup `kubevpn dev` in WSL
+- 3): startup a container using command `kubevpn connect` on Windows, and then
+  startup `kubevpn dev --network container:$CONTAINER_ID` in WSL

@@ -25,8 +25,8 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "proxy",
-		Short: i18n.T("Connect to kubernetes cluster network and proxy kubernetes workloads inbound traffic into local PC"),
-		Long:  templates.LongDesc(i18n.T(`Connect to kubernetes cluster network, or proxy kubernetes workloads inbound traffic into local PC`)),
+		Short: i18n.T("Proxy kubernetes workloads inbound traffic into local PC"),
+		Long:  templates.LongDesc(i18n.T(`Proxy kubernetes workloads inbound traffic into local PC`)),
 		Example: templates.Examples(i18n.T(`
 		# Reverse proxy
 		- proxy deployment
@@ -44,7 +44,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 		kubevpn proxy service/productpage --headers a=1
 
 		# Connect to api-server behind of bastion host or ssh jump host and proxy kubernetes resource traffic into local PC
-		kubevpn proxy --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem service/productpage --headers a=1
+		kubevpn proxy deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem --headers a=1
 
 		# it also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐

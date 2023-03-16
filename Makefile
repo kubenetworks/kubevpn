@@ -89,7 +89,7 @@ container:
 ############################ build local
 .PHONY: container-local
 container-local: kubevpn-linux-amd64
-	docker buildx build --platform linux/amd64 -t docker.io/naison/kubevpn:latest -f $(BUILD_DIR)/local.Dockerfile .
+	docker buildx build --platform linux/amd64 -t docker.io/naison/kubevpn:latest -f $(BUILD_DIR)/local.Dockerfile --push .
 
 .PHONY: container-test
 container-test: kubevpn-linux-amd64

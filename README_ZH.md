@@ -325,7 +325,7 @@ de9e2f8ab57d        nginx:latest            "/docker-entrypoint.…"   5 seconds
 ### DinD ( Docker in Docker ) 在 Docker 中使用 kubevpn
 
 如果你想在本地使用 Docker in Docker (DinD) 的方式启动开发模式, 由于程序会读写 `/tmp` 目录，您需要手动添加参数 `-v /tmp:/tmp`, 还有一点需要注意, 如果使用 DinD
-模式，为了共享容器网络和 pid, 还需要指定参数 `--parent-container`
+模式，为了共享容器网络和 pid, 还需要指定参数 `--network`
 
 例如:
 
@@ -337,7 +337,7 @@ docker run -it --privileged -v /var/run/docker.sock:/var/run/docker.sock -v /tmp
 ➜  ~ docker run -it --privileged -c authors -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v /Users/naison/.kube/config:/root/.kube/config naison/kubevpn:v1.1.21
 root@4d0c3c4eae2b:/# hostname
 4d0c3c4eae2b
-root@4d0c3c4eae2b:/# kubevpn dev deployment/authors -n kube-system --image naison/kubevpn:v1.1.21 --headers user=naison --parent-container 4d0c3c4eae2b --entrypoint "tail -f /dev/null"
+root@4d0c3c4eae2b:/# kubevpn dev deployment/authors -n kube-system --image naison/kubevpn:v1.1.21 --headers user=naison --network container:4d0c3c4eae2b --entrypoint "tail -f /dev/null"
 
 ----------------------------------------------------------------------------------
     Warn: Use sudo to execute command kubevpn can not use user env KUBECONFIG.
@@ -517,3 +517,13 @@ clean up successful
 
 这是因为你的 `Docker-desktop` 声明的资源, 小于 container 容器启动时所需要的资源, 因此被 OOM 杀掉了, 你可以增加 `Docker-desktop` 对于 resources
 的设置, 目录是：`Preferences --> Resources --> Memory`
+
+- 我在使用 WSL( Windows Sub Linux ) Docker, 当我在使用命令 `kubevpn dev` 进入开发模式的时候, 在 terminal 中无法提示链接集群网络, 这是为什么, 如何解决?
+
+答案: 这是因为 WSL 的 Docker 使用的是 主机 Windows 的网络, 所以即便在 WSL 中启动 container, 这个 container 不会使用 WSL 的网络，而是使用 Windows 的网络。
+解决方案:
+
+- 1): 在 WSL 中安装 Docker, 不要使用 Windows 版本的 Docker-desktop
+- 2): 在主机 Windows 使用命令 `kubevpn connect`, 然后在 WSL 中使用 `kubevpn dev` 进入开发模式
+- 3): 在主机 Windows 上启动一个 container，在 container 中使用命令 `kubevpn connect`, 然后在 WSL
+  中使用 `kubevpn dev --network container:$CONTAINER_ID`

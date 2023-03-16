@@ -10,6 +10,7 @@ import (
 	"github.com/docker/cli/cli"
 	"github.com/docker/cli/opts"
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -32,26 +33,30 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		Env:        opts.NewListOpts(nil),
 		Volumes:    opts.NewListOpts(nil),
 		ExtraHosts: opts.NewListOpts(nil),
+		Aliases:    opts.NewListOpts(nil),
 		NoProxy:    false,
 		ExtraCIDR:  []string{},
 	}
 	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "dev",
-		Short: i18n.T("Proxy kubernetes workloads inbound traffic into local PC and dev in docker container"),
-		Long:  templates.LongDesc(i18n.T(`Proxy kubernetes workloads inbound traffic into local PC`)),
+		Short: i18n.T("Startup your workloads in local Docker container use same volume、env、and network with cluster"),
+		Long:  templates.LongDesc(i18n.T(`Startup your workloads in local Docker container use same volume、env、and network with cluster`)),
 		Example: templates.Examples(i18n.T(`
-        # Dev reverse proxy
-		- reverse deployment
+        # Develop workloads
+		- develop deployment
 		  kubevpn dev deployment/productpage
 
-		- reverse service
+		- develop service
 		  kubevpn dev service/productpage
 
-		# Reverse proxy with mesh, traffic with header a=1, will hit local PC, otherwise no effect
+		# Develop workloads with mesh, traffic with header a=1, will hit local PC, otherwise no effect
 		kubevpn dev service/productpage --headers a=1
 
-		# Dev reverse proxy api-server behind of bastion host or ssh jump host
+        # Develop workloads without proxy traffic
+		kubevpn dev service/productpage --no-proxy
+
+		# Develop workloads which api-server behind of bastion host or ssh jump host
 		kubevpn dev deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem
 
 		# it also support ProxyJump, like
@@ -78,13 +83,14 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 				ExtraCIDR: devOptions.ExtraCIDR,
 			}
 
-			if devOptions.ParentContainer != "" {
+			mode := container.NetworkMode(devOptions.NetMode.NetworkMode())
+			if mode.IsContainer() {
 				client, _, err := dev.GetClient()
 				if err != nil {
 					return err
 				}
 				var inspect types.ContainerJSON
-				inspect, err = client.ContainerInspect(context.Background(), devOptions.ParentContainer)
+				inspect, err = client.ContainerInspect(context.Background(), mode.ConnectedContainer())
 				if err != nil {
 					return err
 				}
@@ -92,7 +98,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 					return fmt.Errorf("can not get container status, please make contianer name is valid")
 				}
 				if !inspect.State.Running {
-					return fmt.Errorf("container %s status is %s, expect is running, please make sure your outer docker name is correct", devOptions.ParentContainer, inspect.State.Status)
+					return fmt.Errorf("container %s status is %s, expect is running, please make sure your outer docker name is correct", mode.ConnectedContainer(), inspect.State.Status)
 				}
 			}
 
@@ -145,7 +151,15 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 
 	// docker options
 	cmd.Flags().Var(&devOptions.ExtraHosts, "add-host", "Add a custom host-to-IP mapping (host:ip)")
-	cmd.Flags().StringVar(&devOptions.ParentContainer, "parent-container", "", "Parent container name if running in Docker (Docker in Docker)")
+	//cmd.Flags().StringVar(&devOptions.ParentContainer, "parent-container", "", "Parent container name if running in Docker (Docker in Docker)")
+	// We allow for both "--net" and "--network", although the latter is the recommended way.
+	cmd.Flags().Var(&devOptions.NetMode, "net", "Connect a container to a network")
+	cmd.Flags().Var(&devOptions.NetMode, "network", "Connect a container to a network")
+	cmd.Flags().MarkHidden("net")
+	// We allow for both "--net-alias" and "--network-alias", although the latter is the recommended way.
+	cmd.Flags().Var(&devOptions.Aliases, "net-alias", "Add network-scoped alias for the container")
+	cmd.Flags().Var(&devOptions.Aliases, "network-alias", "Add network-scoped alias for the container")
+	cmd.Flags().MarkHidden("net-alias")
 	cmd.Flags().VarP(&devOptions.Volumes, "volume", "v", "Bind mount a volume")
 	cmd.Flags().Var(&devOptions.Mounts, "mount", "Attach a filesystem mount to the container")
 	cmd.Flags().Var(&devOptions.Expose, "expose", "Expose a port or a range of ports")

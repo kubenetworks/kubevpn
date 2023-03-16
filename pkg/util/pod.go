@@ -146,7 +146,7 @@ func GetVolume(ctx context.Context, f util.Factory, ns, pod string) (map[string]
 			}
 			err = copyOptions.Run()
 			if err != nil {
-				_, _ = fmt.Fprintf(os.Stderr, "Can not download volume %s path %s, err: %v, ignore...\n", volumeMount.Name, volumeMount.MountPath, err)
+				_, _ = fmt.Fprintf(os.Stderr, "failed to download volume %s path %s to %s, err: %v, ignore...\n", volumeMount.Name, remotePath, join, err)
 				continue
 			}
 			m = append(m, mount.Mount{

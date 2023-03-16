@@ -28,26 +28,29 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "duplicate",
-		Short: i18n.T("Connect to kubernetes cluster network, and duplicate workloads to target-kubeconfig cluster with same volume、env、and network"),
-		Long:  templates.LongDesc(i18n.T(`Connect to kubernetes cluster network, and duplicate workloads to target-kubeconfig cluster with same volume、env、and network`)),
+		Short: i18n.T("Duplicate workloads to target-kubeconfig cluster with same volume、env、and network"),
+		Long:  templates.LongDesc(i18n.T(`Duplicate workloads to target-kubeconfig cluster with same volume、env、and network`)),
 		Example: templates.Examples(i18n.T(`
 		# duplicate
-		- duplicate deployment
+		- duplicate deployment in current cluster and current namespace
 		  kubevpn duplicate deployment/productpage
 
-		- duplicate service
-		  kubevpn proxy service/productpage
+		- duplicate deployment in current cluster with different namespace
+		  kubevpn duplicate deployment/productpage -n test
+        
+		- duplicate deployment to another cluster
+		  kubevpn duplicate deployment/productpage --target-kubeconfig ~/.kube/other-kubeconfig
 
         - duplicate multiple workloads
           kubevpn duplicate deployment/authors deployment/productpage
           or 
           kubevpn duplicate deployment authors productpage
 
-		# Reverse duplicate with mesh, traffic with header a=1, will hit local PC, otherwise no effect
-		kubevpn duplicate service/productpage --headers a=1
+		# duplicate with mesh, traffic with header a=1, will hit duplicate workloads, otherwise hit origin workloads
+		kubevpn duplicate deployment/productpage --headers a=1
 
-		# Connect to api-server behind of bastion host or ssh jump host and proxy kubernetes resource traffic into local PC
-		kubevpn duplicate --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem service/productpage --headers a=1
+		# duplicate workloads which api-server behind of bastion host or ssh jump host
+		kubevpn duplicate deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem --headers a=1
 
 		# it also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
