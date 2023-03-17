@@ -127,7 +127,7 @@ func (d Options) Main(ctx context.Context) error {
 		return fmt.Errorf("your pod resource request is bigger than docker-desktop resource, please adjust your docker-desktop resource")
 	}
 	mode := container.NetworkMode(d.NetMode.NetworkMode())
-	if mode.IsUserDefined() {
+	if mode.IsBridge() || mode.IsHost() || mode.IsContainer() || mode.IsDefault() || mode.IsNone() {
 		for _, config := range list[:] {
 			// remove expose port
 			config.config.ExposedPorts = nil
