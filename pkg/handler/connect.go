@@ -148,6 +148,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err != nil {
 		return err
 	}
+	go c.heartbeats()
 	log.Info("dns service ok")
 	return
 }
@@ -698,4 +699,28 @@ func (c *ConnectOptions) GetCIDR(ctx context.Context) (err error) {
 	// (3) fallback to get cidr from node/pod/service
 	c.cidrs, err = util.GetCIDRFromResourceUgly(c.clientset, c.Namespace)
 	return
+}
+
+func (c *ConnectOptions) heartbeats() {
+	ticker := time.NewTicker(time.Second * 30)
+	defer ticker.Stop()
+
+	for ; true; <-ticker.C {
+		func() {
+			defer func() {
+				if err := recover(); err != nil {
+					log.Debug(err)
+				}
+			}()
+
+			err := c.dhcp.ForEach(func(ip net.IP) {
+				go func() {
+					_, _ = util.Ping(ip.String())
+				}()
+			})
+			if err != nil {
+				log.Debug(err)
+			}
+		}()
+	}
 }
