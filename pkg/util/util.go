@@ -31,7 +31,6 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
@@ -641,14 +640,7 @@ func CleanExtensionLib() {
 	}
 	filename := filepath.Join(filepath.Dir(path), "wintun.dll")
 	_ = retry.OnError(
-		// step : 0 13 34 55 100 194 433 661 1384 2689 (ms)
-		// total: 5.57s
-		wait.Backoff{
-			Steps:    10,
-			Duration: 10 * time.Millisecond,
-			Factor:   2.0,
-			Jitter:   0.5,
-		},
+		retry.DefaultRetry,
 		func(error) bool {
 			_, err = os.Lstat(filename)
 			return !errors.Is(err, os.ErrNotExist)
@@ -662,19 +654,7 @@ func CleanExtensionLib() {
 	if errors.Is(err, os.ErrNotExist) {
 		return
 	}
-	var temp *os.File
-	if temp, err = os.CreateTemp("", ""); err != nil {
-		return
-	}
-	if err = temp.Close(); err != nil {
-		return
-	}
-	if err = os.Remove(temp.Name()); err != nil {
-		return
-	}
-	if err = os.Rename(filename, temp.Name()); err != nil {
-		log.Debugln(err)
-	}
+	MoveToTemp()
 }
 
 func WaitPodToBeReady(ctx context.Context, podInterface v12.PodInterface, selector metav1.LabelSelector) error {
@@ -742,5 +722,30 @@ func Print(writer io.Writer, slogan string) {
 }
 
 func StartupPProf(port int) {
-	log.Errorln(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
+	_ = http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
+}
+
+func MoveToTemp() {
+	path, err := os.Executable()
+	if err != nil {
+		return
+	}
+	filename := filepath.Join(filepath.Dir(path), "wintun.dll")
+	_, err = os.Lstat(filename)
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	var temp *os.File
+	if temp, err = os.CreateTemp("", ""); err != nil {
+		return
+	}
+	if err = temp.Close(); err != nil {
+		return
+	}
+	if err = os.Remove(temp.Name()); err != nil {
+		return
+	}
+	if err = os.Rename(filename, temp.Name()); err != nil {
+		log.Debugln(err)
+	}
 }
