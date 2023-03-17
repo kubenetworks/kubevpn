@@ -41,7 +41,6 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string) error {
 		log.Warningln(err)
 		return err
 	}
-	err = luid.FlushDNS(windows.AF_INET)
 	if err != nil {
 		log.Warningln(err)
 		return err
@@ -95,5 +94,6 @@ func addNicSuffixSearchList(search []string) error {
 }
 
 func GetHostFile() string {
-	return "/windows/system32/drivers/etc/hosts"
+	//return "/windows/system32/drivers/etc/hosts"
+	return "C:\\Windows\\System32\\drivers\\etc\\hosts"
 }
