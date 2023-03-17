@@ -13,6 +13,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
+	wintun "golang.zx2c4.com/wintun"
 	wireguardtun "golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 
@@ -104,6 +105,7 @@ func (c *winTunConn) Close() error {
 	//		_, err = wt.Delete(true)
 	//	}
 	//}
+	wintun.Uninstall()
 	return err
 }
 
