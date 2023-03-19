@@ -6,12 +6,15 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"reflect"
 	"strconv"
+	"time"
 
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"github.com/sirupsen/logrus"
+	utilcache "k8s.io/apimachinery/pkg/util/cache"
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
@@ -19,13 +22,16 @@ type Processor struct {
 	cache   cache.SnapshotCache
 	logger  *logrus.Logger
 	version int64
+
+	expireCache *utilcache.Expiring
 }
 
 func NewProcessor(cache cache.SnapshotCache, log *logrus.Logger) *Processor {
 	return &Processor{
-		cache:   cache,
-		logger:  log,
-		version: rand.Int63n(1000),
+		cache:       cache,
+		logger:      log,
+		version:     rand.Int63n(1000),
+		expireCache: utilcache.NewExpiring(),
 	}
 }
 
@@ -47,6 +53,13 @@ func (p *Processor) ProcessFile(file NotifyMessage) {
 		if len(config.Uid) == 0 {
 			continue
 		}
+		lastConfig, ok := p.expireCache.Get(config.Uid)
+		if ok && reflect.DeepEqual(lastConfig.(*Virtual), config) {
+			p.logger.Infof("config are same, not needs to update, %v", config)
+			continue
+		}
+		p.logger.Infof("update config, version %d, config %v", p.version, config)
+
 		listeners, clusters, routes, endpoints := config.To()
 		resources := map[resource.Type][]types.Resource{
 			resource.ListenerType: listeners, // listeners
@@ -72,6 +85,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) {
 			p.logger.Errorf("snapshot error %q for %v", err, snapshot)
 			p.logger.Fatal(err)
 		}
+		p.expireCache.Set(config.Uid, config, time.Minute*5)
 	}
 }
 

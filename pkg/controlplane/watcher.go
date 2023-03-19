@@ -50,7 +50,7 @@ func Watch(watcher *fsnotify.Watcher, filename string, notifyCh chan<- NotifyMes
 			}
 			log.Println("error:", err)
 
-		case <-time.Tick(time.Second * 3):
+		case <-time.Tick(time.Second * 5):
 			notifyCh <- NotifyMessage{
 				Operation: Modify,
 				FilePath:  filename,

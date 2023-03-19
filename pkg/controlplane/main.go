@@ -3,10 +3,10 @@ package controlplane
 import (
 	"context"
 	"fmt"
-	"github.com/fsnotify/fsnotify"
 
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
+	"github.com/fsnotify/fsnotify"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -41,7 +41,6 @@ func Main(filename string, port uint, logger *log.Logger) {
 	for {
 		select {
 		case msg := <-notifyCh:
-			log.Infof("path: %s, event: %v", msg.FilePath, msg.Operation)
 			proc.ProcessFile(msg)
 		}
 	}
