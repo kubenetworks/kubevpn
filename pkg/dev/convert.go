@@ -59,7 +59,7 @@ func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, e
 				return hostname
 			}(),
 			Domainname:      spec.Subdomain,
-			User:            "",
+			User:            "root",
 			AttachStdin:     false,
 			AttachStdout:    false,
 			AttachStderr:    false,
