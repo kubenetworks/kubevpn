@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"os/exec"
 	"path"
+	"strings"
 	"sync"
 	"text/template"
 
@@ -11,10 +14,21 @@ import (
 )
 
 func main() {
-	filePath := "../../../.github/krew.yaml"
-	value := map[string]string{"TagName": "v1.1.20"}
+	// git describe --tags `git rev-list --tags --max-count=1`
+	commitId, err2 := exec.Command("git", "rev-list", "--tags", "--max-count=1").Output()
+	if err2 != nil {
+		panic(err2)
+	}
+	tag, err2 := exec.Command("git", "describe", "--tags", strings.TrimSpace(string(commitId))).Output()
+	if err2 != nil {
+		panic(err2)
+	}
+	fmt.Printf("latest tag is %s", strings.TrimSpace(string(tag)))
+	tplFile := ".github/krew.yaml"
+	dstFile := "plugins/kubevpn.yaml"
+	value := map[string]string{"TagName": strings.TrimSpace(string(tag))}
 
-	name := path.Base(filePath)
+	name := path.Base(tplFile)
 	var links []string
 	t := template.New(name).Funcs(map[string]interface{}{
 		"addURIAndSha": func(url, tag string) string {
@@ -39,7 +53,7 @@ func main() {
 		},
 	})
 
-	templateObject, err := t.ParseFiles(filePath)
+	templateObject, err := t.ParseFiles(tplFile)
 	if err != nil {
 		panic(err)
 	}
@@ -67,12 +81,12 @@ func main() {
 		}(i, link)
 	}
 	wg.Wait()
-	processTemplate, err := ProcessTemplate(filePath, value, sha256Map)
+	processTemplate, err := ProcessTemplate(tplFile, value, sha256Map)
 	if err != nil {
 		panic(err)
 	}
 	println(string(processTemplate))
-	err = os.WriteFile("../../../plugins/kubevpn.yaml", processTemplate, 0644)
+	err = os.WriteFile(dstFile, processTemplate, 0644)
 	if err != nil {
 		panic(err)
 	}
