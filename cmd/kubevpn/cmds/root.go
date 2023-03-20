@@ -15,6 +15,9 @@ func NewKubeVPNCommand() *cobra.Command {
 		Long: templates.LongDesc(`
       kubevpn connect to Kubernetes cluster network.
       `),
+		Run: func(cmd *cobra.Command, args []string) {
+			cmd.Help()
+		},
 	}
 
 	flags := cmd.PersistentFlags()
@@ -35,7 +38,6 @@ func NewKubeVPNCommand() *cobra.Command {
 				CmdReset(factory),
 				CmdUpgrade(factory),
 				CmdVersion(factory),
-				CmdOptions(factory),
 				CmdCp(factory),
 			},
 		},
@@ -50,5 +52,6 @@ func NewKubeVPNCommand() *cobra.Command {
 	}
 	groups.Add(cmd)
 	templates.ActsAsRootCommand(cmd, []string{"options"}, groups...)
+	cmd.AddCommand(CmdOptions(factory))
 	return cmd
 }
