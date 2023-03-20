@@ -40,6 +40,7 @@ type Options struct {
 	ContainerName string
 	NoProxy       bool
 	ExtraCIDR     []string
+	ExtraDomain   []string
 
 	// docker options
 	Platform string

@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
+	"github.com/google/gopacket/routing"
 	netroute "github.com/libp2p/go-netroute"
+	miekgdns "github.com/miekg/dns"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -47,10 +49,11 @@ import (
 )
 
 type ConnectOptions struct {
-	Namespace string
-	Headers   map[string]string
-	Workloads []string
-	ExtraCIDR []string
+	Namespace   string
+	Headers     map[string]string
+	Workloads   []string
+	ExtraCIDR   []string
+	ExtraDomain []string
 
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient
@@ -149,6 +152,10 @@ func (c *ConnectOptions) DoConnect() (err error) {
 		return err
 	}
 	go c.heartbeats()
+	err = c.addExtraRoute(ctx)
+	if err != nil {
+		return err
+	}
 	log.Info("dns service ok")
 	return
 }
@@ -723,4 +730,66 @@ func (c *ConnectOptions) heartbeats() {
 			}
 		}()
 	}
+}
+
+func (c *ConnectOptions) addExtraRoute(ctx context.Context) (err error) {
+	if len(c.ExtraDomain) == 0 {
+		return
+	}
+	var ips []string
+	ips, err = dns.GetDNSIPFromDnsPod(c.clientset)
+	if err != nil {
+		return
+	}
+	if len(ips) == 0 {
+		err = fmt.Errorf("can't found any dns server")
+		return
+	}
+
+	var r routing.Router
+	r, err = netroute.New()
+	if err != nil {
+		return
+	}
+
+	var tunIface *net.Interface
+	tunIface, err = tun.GetInterface()
+	if err != nil {
+		return
+	}
+
+	addRouteFunc := func(resource, ip string) {
+		if ip == "" || net.ParseIP(ip) == nil {
+			return
+		}
+		// if route is right, not need add route
+		iface, _, _, errs := r.Route(net.ParseIP(ip))
+		if errs == nil && tunIface.Name == iface.Name {
+			return
+		}
+		errs = tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(32, 32)}})
+		if errs != nil {
+			log.Debugf("[route] add route failed, domain: %s, ip: %s,err: %v", resource, ip, err)
+		}
+	}
+
+	client := &miekgdns.Client{Net: "udp", SingleInflight: true, DialTimeout: time.Second * 30}
+	for _, domain := range c.ExtraDomain {
+		var answer *miekgdns.Msg
+		answer, _, err = client.ExchangeContext(ctx, &miekgdns.Msg{
+			Question: []miekgdns.Question{{
+				Name:  domain + ".",
+				Qtype: miekgdns.TypeA,
+			}},
+		}, fmt.Sprintf("%s:%d", ips[0], 53))
+		if err != nil {
+			return
+		}
+		for _, rr := range answer.Answer {
+			if a, ok := rr.(*miekgdns.A); ok && a.A != nil {
+				addRouteFunc(domain, a.A.String())
+			}
+		}
+	}
+	return
 }

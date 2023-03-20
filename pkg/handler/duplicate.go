@@ -40,10 +40,11 @@ import (
 )
 
 type DuplicateOptions struct {
-	Namespace string
-	Headers   map[string]string
-	Workloads []string
-	ExtraCIDR []string
+	Namespace   string
+	Headers     map[string]string
+	Workloads   []string
+	ExtraCIDR   []string
+	ExtraDomain []string
 
 	TargetKubeconfig       string
 	TargetNamespace        string

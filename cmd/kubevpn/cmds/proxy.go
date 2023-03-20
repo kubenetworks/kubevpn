@@ -93,6 +93,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
 	cmd.Flags().StringArrayVar(&connect.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
+	cmd.Flags().StringArrayVar(&connect.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
 
 	addSshFlag(cmd, sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)

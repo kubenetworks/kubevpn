@@ -33,7 +33,7 @@ func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RE
 	if err != nil {
 		return nil, err
 	}
-	if ips, err := getDNSIPFromDnsPod(clientset); err == nil && len(ips) != 0 {
+	if ips, err := GetDNSIPFromDnsPod(clientset); err == nil && len(ips) != 0 {
 		resolvConf.Servers = ips
 	}
 
@@ -45,7 +45,7 @@ func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RE
 	return resolvConf, nil
 }
 
-func getDNSIPFromDnsPod(clientset *kubernetes.Clientset) (ips []string, err error) {
+func GetDNSIPFromDnsPod(clientset *kubernetes.Clientset) (ips []string, err error) {
 	var serviceList *v12.ServiceList
 	serviceList, err = clientset.CoreV1().Services(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("k8s-app", "kube-dns").String(),

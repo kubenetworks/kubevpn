@@ -84,9 +84,10 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			connect := handler.ConnectOptions{
-				Headers:   devOptions.Headers,
-				Workloads: args,
-				ExtraCIDR: devOptions.ExtraCIDR,
+				Headers:     devOptions.Headers,
+				Workloads:   args,
+				ExtraCIDR:   devOptions.ExtraCIDR,
+				ExtraDomain: devOptions.ExtraDomain,
 			}
 
 			mode := container.NetworkMode(devOptions.NetMode.NetworkMode())
@@ -154,6 +155,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 	cmdutil.AddContainerVarFlags(cmd, &devOptions.ContainerName, devOptions.ContainerName)
 	cmdutil.CheckErr(cmd.RegisterFlagCompletionFunc("container", completion.ContainerCompletionFunc(f)))
 	cmd.Flags().StringArrayVar(&devOptions.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
+	cmd.Flags().StringArrayVar(&devOptions.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
 
 	// docker options
 	cmd.Flags().Var(&devOptions.ExtraHosts, "add-host", "Add a custom host-to-IP mapping (host:ip)")
