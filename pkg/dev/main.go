@@ -127,7 +127,7 @@ func (d Options) Main(ctx context.Context) error {
 		return fmt.Errorf("your pod resource request is bigger than docker-desktop resource, please adjust your docker-desktop resource")
 	}
 	mode := container.NetworkMode(d.NetMode.NetworkMode())
-	if mode.IsBridge() || mode.IsHost() || mode.IsContainer() || mode.IsDefault() || mode.IsNone() {
+	if mode.IsBridge() || mode.IsHost() || mode.IsContainer() || mode.IsNone() {
 		for _, config := range list[:] {
 			// remove expose port
 			config.config.ExposedPorts = nil
@@ -223,18 +223,18 @@ func GetClient() (*client.Client, *command.DockerCli, error) {
 }
 
 func (r Run) Run(ctx context.Context, volume map[string][]mount.Mount) error {
-	cli, _, err := GetClient()
+	cli, c, err := GetClient()
 	if err != nil {
 		return err
 	}
 	for _, config := range r {
 		var id string
-		id, err = run(ctx, config, cli)
+		id, err = run(ctx, config, cli, c)
 		if err != nil {
 			// try another way to startup container
 			log.Infof("occur err: %v, try another way to startup container...", err)
 			config.hostConfig.Mounts = nil
-			id, err = run(ctx, config, cli)
+			id, err = run(ctx, config, cli, c)
 			if err != nil {
 				return err
 			}
