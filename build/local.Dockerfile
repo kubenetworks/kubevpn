@@ -1,3 +1,7 @@
+FROM golang:1.19 AS builder
+RUN go env -w GO111MODULE=on && go env -w GOPROXY=https://goproxy.cn,direct
+RUN go install github.com/go-delve/delve/cmd/dlv@latest
+
 FROM envoyproxy/envoy:v1.25.0 AS envoy
 FROM ubuntu:latest
 
@@ -19,3 +23,4 @@ WORKDIR /app
 
 COPY bin/kubevpn /usr/local/bin/kubevpn
 COPY --from=envoy /usr/local/bin/envoy /usr/local/bin/envoy
+COPY --from=builder /go/bin/dlv /usr/local/bin/dlv
