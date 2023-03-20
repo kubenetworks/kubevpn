@@ -10,17 +10,21 @@ import (
 
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/cli/command/container"
+	"github.com/docker/cli/cli/command/image"
 	"github.com/docker/cli/cli/streams"
+	"github.com/docker/cli/cli/trust"
+	"github.com/docker/distribution/reference"
 	"github.com/docker/docker/api/types"
 	typescommand "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
 	dockerterm "github.com/moby/term"
+	v12 "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-func run(ctx context.Context, runConfig *RunConfig, cli *client.Client) (id string, err error) {
+func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *command.DockerCli) (id string, err error) {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	var config = runConfig.config
@@ -42,22 +46,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client) (id stri
 		}
 	}
 	if needPull {
-		var readCloser io.ReadCloser
-		var plat string
-		if runConfig.platform != nil && runConfig.platform.Architecture != "" && runConfig.platform.OS != "" {
-			plat = fmt.Sprintf("%s/%s", runConfig.platform.OS, runConfig.platform.Architecture)
-		}
-		readCloser, err = cli.ImagePull(ctx, config.Image, types.ImagePullOptions{Platform: plat})
-		if err != nil {
-			err = fmt.Errorf("can not pull image %s, err: %s, please make sure image is exist and can be pulled from local", config.Image, err)
-			return
-		}
-		defer readCloser.Close()
-		_, stdout, _ := dockerterm.StdStreams()
-		out := streams.NewOut(stdout)
-		err = jsonmessage.DisplayJSONMessagesToStream(readCloser, out, nil)
-		if err != nil {
-			err = fmt.Errorf("can not display message, err: %v", err)
+		if err = pullImage(ctx, runConfig.platform, cli, c, config.Image); err != nil {
 			return
 		}
 	}
@@ -116,6 +105,48 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client) (id stri
 		log.Infof("Container %s is running now", name)
 	}
 	return
+}
+
+func pullImage(ctx context.Context, platform *v12.Platform, cli *client.Client, c *command.DockerCli, img string) error {
+	var readCloser io.ReadCloser
+	var plat string
+	if platform != nil && platform.Architecture != "" && platform.OS != "" {
+		plat = fmt.Sprintf("%s/%s", platform.OS, platform.Architecture)
+	}
+	distributionRef, err := reference.ParseNormalizedNamed(img)
+	if err != nil {
+		return err
+	}
+	var imgRefAndAuth trust.ImageRefAndAuth
+	imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, nil, image.AuthResolver(c), distributionRef.String())
+	if err != nil {
+		return err
+	}
+	var encodedAuth string
+	encodedAuth, err = command.EncodeAuthToBase64(*imgRefAndAuth.AuthConfig())
+	if err != nil {
+		return err
+	}
+	requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(c, imgRefAndAuth.RepoInfo().Index, "pull")
+	readCloser, err = cli.ImagePull(ctx, img, types.ImagePullOptions{
+		All:           false,
+		RegistryAuth:  encodedAuth,
+		PrivilegeFunc: requestPrivilege,
+		Platform:      plat,
+	})
+	if err != nil {
+		err = fmt.Errorf("can not pull image %s, err: %s, please make sure image is exist and can be pulled from local", img, err)
+		return err
+	}
+	defer readCloser.Close()
+	_, stdout, _ := dockerterm.StdStreams()
+	out := streams.NewOut(stdout)
+	err = jsonmessage.DisplayJSONMessagesToStream(readCloser, out, nil)
+	if err != nil {
+		err = fmt.Errorf("can not display message, err: %v", err)
+		return err
+	}
+	return nil
 }
 
 func terminal(c string, cli *command.DockerCli) error {
