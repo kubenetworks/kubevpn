@@ -7,11 +7,13 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"reflect"
 	"strconv"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
 	wintun "golang.zx2c4.com/wintun"
 	wireguardtun "golang.zx2c4.com/wireguard/tun"
@@ -100,12 +102,18 @@ type winTunConn struct {
 
 func (c *winTunConn) Close() error {
 	err := c.ifce.Close()
-	//if name, err := c.ifce.Name(); err == nil {
-	//	if wt, err := wireguardtun.WintunPool.OpenAdapter(name); err == nil {
-	//		_, err = wt.Delete(true)
-	//	}
-	//}
 	wintun.Uninstall()
+	defer func() {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Debug(err)
+			}
+		}()
+		tun := c.ifce.(*wireguardtun.NativeTun)
+		v := reflect.ValueOf(tun).Elem().FieldByName("wt")
+		vv := reflect.Indirect(v).FieldByName("handle")
+		err = windows.FreeLibrary(windows.Handle(vv.Uint()))
+	}()
 	return err
 }
 
