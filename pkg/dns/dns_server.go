@@ -19,14 +19,14 @@ import (
 type server struct {
 	dnsCache   *cache.LRUExpireCache
 	forwardDNS *miekgdns.ClientConfig
-	c          *miekgdns.Client
+	client     *miekgdns.Client
 }
 
 func NewDNSServer(network, address string, forwardDNS *miekgdns.ClientConfig) error {
 	return miekgdns.ListenAndServe(address, network, &server{
 		dnsCache:   cache.NewLRUExpireCache(1000),
 		forwardDNS: forwardDNS,
-		c:          &miekgdns.Client{Net: "udp", SingleInflight: false},
+		client:     &miekgdns.Client{Net: "udp", SingleInflight: true, Timeout: time.Second * 30},
 	})
 }
 
@@ -78,9 +78,9 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, r *miekgdns.Msg) {
 				msg.Extra = nil
 
 				//msg.Id = uint16(rand.Intn(math.MaxUint16 + 1))
-				client := miekgdns.Client{Net: "udp", Timeout: time.Second * 30}
+				//client := miekgdns.Client{Net: "udp", Timeout: time.Second * 30}
 				//r, _, err = client.ExchangeContext(ctx, m, a)
-				answer, _, err := client.ExchangeContext(context.Background(), &msg, fmt.Sprintf("%s:%s", dnsAddr, s.forwardDNS.Port))
+				answer, _, err := s.client.ExchangeContext(context.Background(), &msg, fmt.Sprintf("%s:%s", dnsAddr, s.forwardDNS.Port))
 
 				if err == nil && len(answer.Answer) != 0 {
 					s.dnsCache.Add(originName, name, time.Hour*24*365*100) // never expire
