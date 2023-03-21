@@ -25,16 +25,18 @@ import (
 
 func CmdDev(f cmdutil.Factory) *cobra.Command {
 	var devOptions = dev.Options{
-		Factory:    f,
-		Entrypoint: "",
-		Publish:    opts.NewListOpts(nil),
-		Expose:     opts.NewListOpts(nil),
-		Env:        opts.NewListOpts(nil),
-		Volumes:    opts.NewListOpts(nil),
-		ExtraHosts: opts.NewListOpts(nil),
-		Aliases:    opts.NewListOpts(nil),
-		NoProxy:    false,
-		ExtraCIDR:  []string{},
+		Factory:      f,
+		Entrypoint:   "",
+		Publish:      opts.NewListOpts(nil),
+		Expose:       opts.NewListOpts(nil),
+		Env:          opts.NewListOpts(nil),
+		Volumes:      opts.NewListOpts(nil),
+		ExtraHosts:   opts.NewListOpts(nil),
+		Aliases:      opts.NewListOpts(nil),
+		Links:        opts.NewListOpts(nil),
+		LinkLocalIPs: opts.NewListOpts(nil),
+		NoProxy:      false,
+		ExtraCIDR:    []string{},
 	}
 	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
@@ -163,6 +165,8 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 	cmd.Flags().Var(&devOptions.NetMode, "net", "Connect a container to a network, eg: [default|bridge|host|none|container:$CONTAINER_ID]")
 	cmd.Flags().Var(&devOptions.NetMode, "network", "Connect a container to a network")
 	cmd.Flags().MarkHidden("net")
+	cmd.Flags().Var(&devOptions.Links, "link", "Add link to another container")
+	cmd.Flags().Var(&devOptions.LinkLocalIPs, "link-local-ip", "Container IPv4/IPv6 link-local addresses")
 	// We allow for both "--net-alias" and "--network-alias", although the latter is the recommended way.
 	cmd.Flags().Var(&devOptions.Aliases, "net-alias", "Add network-scoped alias for the container")
 	cmd.Flags().Var(&devOptions.Aliases, "network-alias", "Add network-scoped alias for the container")

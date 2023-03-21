@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"time"
 
@@ -58,6 +59,8 @@ type Options struct {
 	ExtraHosts   opts.ListOpts
 	NetMode      opts.NetworkOpt
 	Aliases      opts.ListOpts
+	Links        opts.ListOpts
+	LinkLocalIPs opts.ListOpts
 	Env          opts.ListOpts
 	Mounts       opts.MountOpt
 	Volumes      opts.ListOpts
@@ -134,74 +137,46 @@ func (d Options) Main(ctx context.Context) error {
 	}
 	mode := container.NetworkMode(d.NetMode.NetworkMode())
 	if mode.IsBridge() || mode.IsHost() || mode.IsContainer() || mode.IsNone() {
-		for _, config := range list[:] {
+		for _, runConfig := range list[:] {
 			// remove expose port
-			config.config.ExposedPorts = nil
-			config.hostConfig.NetworkMode = mode
+			runConfig.config.ExposedPorts = nil
+			runConfig.hostConfig.NetworkMode = mode
 			if mode.IsContainer() {
-				config.hostConfig.PidMode = containertypes.PidMode(d.NetMode.NetworkMode())
+				runConfig.hostConfig.PidMode = containertypes.PidMode(d.NetMode.NetworkMode())
 			}
-			config.hostConfig.PortBindings = nil
+			runConfig.hostConfig.PortBindings = nil
 
 			// remove dns
-			config.hostConfig.DNS = nil
-			config.hostConfig.DNSOptions = nil
-			config.hostConfig.DNSSearch = nil
-			config.hostConfig.PublishAllPorts = false
-			config.config.Hostname = ""
+			runConfig.hostConfig.DNS = nil
+			runConfig.hostConfig.DNSOptions = nil
+			runConfig.hostConfig.DNSSearch = nil
+			runConfig.hostConfig.PublishAllPorts = false
+			runConfig.config.Hostname = ""
 		}
 	} else {
-		getInterface, err := tun.GetInterface()
+		var networkID string
+		networkID, err = createNetwork(ctx, cli, list[0].containerName)
 		if err != nil {
-			return err
-		}
-		addrs, err := getInterface.Addrs()
-		if err != nil {
-			return err
-		}
-		cidr, _, err := net.ParseCIDR(addrs[0].String())
-		if err != nil {
-			return err
-		}
-		create, err := cli.NetworkCreate(ctx, list[0].containerName, types.NetworkCreate{
-			Driver: "bridge",
-			Scope:  "local",
-			IPAM: &network.IPAM{
-				Driver:  "",
-				Options: nil,
-				Config: []network.IPAMConfig{
-					{
-						Subnet:  config.CIDR.String(),
-						Gateway: cidr.String(),
-					},
-				},
-			},
-			Internal: true,
-		})
-		if err != nil {
-			if errdefs.IsForbidden(err) {
-				_, _ = cli.NetworkList(ctx, types.NetworkListOptions{})
-			}
 			return err
 		}
 
 		list[0].networkingConfig.EndpointsConfig[list[0].containerName] = &network.EndpointSettings{
-			NetworkID: create.ID,
+			NetworkID: networkID,
 		}
 		// skip first
-		for _, config := range list[1:] {
+		for _, runConfig := range list[1:] {
 			// remove expose port
-			config.config.ExposedPorts = nil
-			config.hostConfig.NetworkMode = containertypes.NetworkMode("container:" + list[0].containerName)
-			config.hostConfig.PidMode = containertypes.PidMode("container:" + list[0].containerName)
-			config.hostConfig.PortBindings = nil
+			runConfig.config.ExposedPorts = nil
+			runConfig.hostConfig.NetworkMode = containertypes.NetworkMode("container:" + list[0].containerName)
+			runConfig.hostConfig.PidMode = containertypes.PidMode("container:" + list[0].containerName)
+			runConfig.hostConfig.PortBindings = nil
 
 			// remove dns
-			config.hostConfig.DNS = nil
-			config.hostConfig.DNSOptions = nil
-			config.hostConfig.DNSSearch = nil
-			config.hostConfig.PublishAllPorts = false
-			config.config.Hostname = ""
+			runConfig.hostConfig.DNS = nil
+			runConfig.hostConfig.DNSOptions = nil
+			runConfig.hostConfig.DNSSearch = nil
+			runConfig.hostConfig.PublishAllPorts = false
+			runConfig.config.Hostname = ""
 		}
 	}
 
@@ -215,6 +190,50 @@ func (d Options) Main(ctx context.Context) error {
 	return terminal(list[0].containerName, dockerCli)
 }
 
+func createNetwork(ctx context.Context, cli *client.Client, networkName string) (string, error) {
+	getInterface, err := tun.GetInterface()
+	if err != nil {
+		return "", err
+	}
+	addrs, err := getInterface.Addrs()
+	if err != nil {
+		return "", err
+	}
+	cidr, _, err := net.ParseCIDR(addrs[0].String())
+	if err != nil {
+		return "", err
+	}
+	by := map[string]string{"created_by": config.ConfigMapPodTrafficManager}
+	create, err := cli.NetworkCreate(ctx, networkName, types.NetworkCreate{
+		Driver: "bridge",
+		Scope:  "local",
+		IPAM: &network.IPAM{
+			Driver:  "",
+			Options: nil,
+			Config: []network.IPAMConfig{
+				{
+					Subnet:  config.CIDR.String(),
+					Gateway: cidr.String(),
+				},
+			},
+		},
+		Internal: true,
+		Labels:   by,
+	})
+	if err != nil {
+		if errdefs.IsForbidden(err) {
+			list, _ := cli.NetworkList(ctx, types.NetworkListOptions{})
+			for _, resource := range list {
+				if reflect.DeepEqual(resource.Labels, by) {
+					return resource.ID, nil
+				}
+			}
+		}
+		return "", err
+	}
+	return create.ID, nil
+}
+
 type Run []*RunConfig
 
 func (r Run) Remove(ctx context.Context) error {
@@ -223,22 +242,22 @@ func (r Run) Remove(ctx context.Context) error {
 		return err
 	}
 
-	for _, config := range r {
-		err = cli.NetworkDisconnect(ctx, config.containerName, config.containerName, true)
+	for _, runConfig := range r {
+		err = cli.NetworkDisconnect(ctx, runConfig.containerName, runConfig.containerName, true)
 		if err != nil {
-			log.Errorln(err)
+			log.Debug(err)
 		}
-		err = cli.ContainerRemove(ctx, config.containerName, types.ContainerRemoveOptions{Force: true})
+		err = cli.ContainerRemove(ctx, runConfig.containerName, types.ContainerRemoveOptions{Force: true})
 		if err != nil {
-			log.Errorln(err)
+			log.Debug(err)
 		}
 	}
-	for _, config := range r {
-		_, err = cli.NetworkInspect(ctx, config.containerName, types.NetworkInspectOptions{})
+	for _, runConfig := range r {
+		_, err = cli.NetworkInspect(ctx, runConfig.containerName, types.NetworkInspectOptions{})
 		if err == nil {
-			err = cli.NetworkRemove(ctx, config.containerName)
+			err = cli.NetworkRemove(ctx, runConfig.containerName)
 			if err != nil {
-				log.Errorln(err)
+				log.Debug(err)
 			}
 		}
 	}
