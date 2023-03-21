@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	log "github.com/sirupsen/logrus"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
@@ -13,7 +14,8 @@ import (
 )
 
 type dhcpServer struct {
-	f util.Factory
+	f         util.Factory
+	clientset *kubernetes.Clientset
 }
 
 func (d *dhcpServer) rentIP(w http.ResponseWriter, r *http.Request) {
@@ -21,13 +23,7 @@ func (d *dhcpServer) rentIP(w http.ResponseWriter, r *http.Request) {
 	namespace := r.Header.Get("POD_NAMESPACE")
 
 	log.Infof("handling rent ip request, pod name: %s, ns: %s", podName, namespace)
-	clientset, err := d.f.KubernetesClientSet()
-	if err != nil {
-		log.Error(err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	cmi := clientset.CoreV1().ConfigMaps(namespace)
+	cmi := d.clientset.CoreV1().ConfigMaps(namespace)
 	dhcp := handler.NewDHCPManager(cmi, namespace, &net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask})
 	random, err := dhcp.RentIPRandom()
 	if err != nil {
@@ -56,13 +52,7 @@ func (d *dhcpServer) releaseIP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Infof("handling release ip request, pod name: %s, ns: %s", podName, namespace)
-	clientset, err := d.f.KubernetesClientSet()
-	if err != nil {
-		log.Error(err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	cmi := clientset.CoreV1().ConfigMaps(namespace)
+	cmi := d.clientset.CoreV1().ConfigMaps(namespace)
 	dhcp := handler.NewDHCPManager(cmi, namespace, &net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask})
 	err = dhcp.ReleaseIpToDHCP(ipNet)
 	if err != nil {

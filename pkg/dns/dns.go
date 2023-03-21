@@ -9,17 +9,22 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	miekgdns "github.com/miekg/dns"
 	"github.com/pkg/errors"
 	v12 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	v13 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/flowcontrol"
+	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -78,6 +83,9 @@ func GetDNSIPFromDnsPod(clientset *kubernetes.Clientset) (ips []string, err erro
 }
 
 func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInterface) {
+	rateLimiter := flowcontrol.NewTokenBucketRateLimiter(0.2, 1)
+	defer rateLimiter.Stop()
+
 	var last string
 	for {
 		select {
@@ -85,8 +93,13 @@ func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInte
 			return
 		default:
 			func() {
-				w, err := serviceInterface.Watch(ctx, v1.ListOptions{})
+				w, err := serviceInterface.Watch(ctx, v1.ListOptions{
+					Watch: true, TimeoutSeconds: pointer.Int64(30),
+				})
 				if err != nil {
+					if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) {
+						time.Sleep(time.Second * 5)
+					}
 					return
 				}
 				defer w.Stop()
@@ -98,6 +111,9 @@ func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInte
 						}
 						if watch.Deleted == c.Type || watch.Error == c.Type {
 							continue
+						}
+						if !rateLimiter.TryAccept() {
+							return
 						}
 						list, err := serviceInterface.List(ctx, v1.ListOptions{})
 						if err != nil {

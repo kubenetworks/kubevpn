@@ -20,11 +20,14 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/cli-runtime/pkg/resource"
@@ -35,9 +38,11 @@ import (
 	"k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/tools/clientcmd/api/latest"
 	clientcmdlatest "k8s.io/client-go/tools/clientcmd/api/latest"
+	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/scheme"
+	"k8s.io/utils/clock"
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
@@ -145,7 +150,10 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err != nil {
 		return err
 	}
-	c.addRouteDynamic(ctx)
+	err = c.addRouteDynamic(ctx)
+	if err != nil {
+		return err
+	}
 	c.deleteFirewallRule(ctx)
 	err = c.setupDNS()
 	if err != nil {
@@ -289,13 +297,15 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 }
 
 // Listen all pod, add route if needed
-func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
-	r, err := netroute.New()
+func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
+	var r routing.Router
+	r, err = netroute.New()
 	if err != nil {
 		return
 	}
 
-	tunIface, err := tun.GetInterface()
+	var tunIface *net.Interface
+	tunIface, err = tun.GetInterface()
 	if err != nil {
 		return
 	}
@@ -305,14 +315,33 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
 			return
 		}
 		// if route is right, not need add route
-		iface, _, _, err := r.Route(net.ParseIP(ip))
-		if err == nil && tunIface.Name == iface.Name {
+		iface, _, _, errs := r.Route(net.ParseIP(ip))
+		if errs == nil && tunIface.Name == iface.Name {
 			return
 		}
-		err = tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(32, 32)}})
-		if err != nil {
-			log.Debugf("[route] add route failed, pod: %s, ip: %s,err: %v", resource, ip, err)
+		errs = tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(32, 32)}})
+		if errs != nil {
+			log.Debugf("[route] add route failed, resource: %s, ip: %s,err: %v", resource, ip, err)
 		}
+	}
+
+	manager := wait.NewExponentialBackoffManager(800*time.Millisecond, 30*time.Second, 2*time.Minute, 2.0, 1.0, clock.RealClock{})
+
+	var podList *v1.PodList
+	podList, err = c.clientset.CoreV1().Pods(v1.NamespaceAll).List(ctx, metav1.ListOptions{TimeoutSeconds: pointer.Int64(30)})
+	if err != nil {
+		log.Debugf("list pod failed, err: %v", err)
+		return
+	}
+
+	for _, pod := range podList.Items {
+		if pod.Spec.HostNetwork {
+			continue
+		}
+		if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
+			continue
+		}
+		addRouteFunc(pod.Name, pod.Status.PodIP)
 	}
 
 	// add pod route
@@ -328,10 +357,16 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
 							log.Errorln(er)
 						}
 					}()
-					w, err := c.clientset.CoreV1().Pods(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{Watch: true, TimeoutSeconds: pointer.Int64(30)})
-					if err != nil {
+					w, errs := c.clientset.CoreV1().Pods(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{
+						Watch: true, TimeoutSeconds: pointer.Int64(30), ResourceVersion: podList.ResourceVersion,
+					})
+					if errs != nil {
+						if utilnet.IsConnectionRefused(errs) || apierrors.IsTooManyRequests(errs) {
+							<-manager.Backoff().C()
+							return
+						}
 						time.Sleep(time.Second * 5)
-						log.Debugf("wait pod failed, err: %v", err)
+						log.Debugf("wait pod failed, err: %v", errs)
 						return
 					}
 					defer w.Stop()
@@ -365,6 +400,18 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
 		}
 	}()
 
+	var serviceList *v1.ServiceList
+	serviceList, err = c.clientset.CoreV1().Services(v1.NamespaceAll).List(ctx, metav1.ListOptions{
+		TimeoutSeconds: pointer.Int64(30),
+	})
+	if err != nil {
+		err = fmt.Errorf("can not list service to add it to route table, err: %v", err)
+		return
+	}
+	for _, item := range serviceList.Items {
+		addRouteFunc(item.Name, item.Spec.ClusterIP)
+	}
+
 	// add service route
 	go func() {
 		for {
@@ -378,9 +425,15 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
 							log.Errorln(er)
 						}
 					}()
-					w, err := c.clientset.CoreV1().Services(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{Watch: true, TimeoutSeconds: pointer.Int64(30)})
-					if err != nil {
-						log.Debugf("wait service failed, err: %v", err)
+					w, errs := c.clientset.CoreV1().Services(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{
+						Watch: true, TimeoutSeconds: pointer.Int64(30), ResourceVersion: serviceList.ResourceVersion,
+					})
+					if errs != nil {
+						if utilnet.IsConnectionRefused(errs) || apierrors.IsTooManyRequests(errs) {
+							<-manager.Backoff().C()
+							return
+						}
+						log.Debugf("wait service failed, err: %v", errs)
 						time.Sleep(time.Second * 5)
 						return
 					}
@@ -396,19 +449,21 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) {
 							if e.Type != watch.Added {
 								continue
 							}
-							var pod *v1.Service
-							pod, ok = e.Object.(*v1.Service)
+							var svc *v1.Service
+							svc, ok = e.Object.(*v1.Service)
 							if !ok {
 								continue
 							}
-							ip := pod.Spec.ClusterIP
-							addRouteFunc(pod.Name, ip)
+							ip := svc.Spec.ClusterIP
+							addRouteFunc(svc.Name, ip)
 						}
 					}
 				}()
 			}
 		}
 	}()
+
+	return
 }
 
 func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
@@ -759,7 +814,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) (err error) {
 	}
 
 	addRouteFunc := func(resource, ip string) {
-		if ip == "" || net.ParseIP(ip) == nil {
+		if net.ParseIP(ip) == nil {
 			return
 		}
 		// if route is right, not need add route
@@ -775,20 +830,31 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) (err error) {
 
 	client := &miekgdns.Client{Net: "udp", SingleInflight: true, DialTimeout: time.Second * 30}
 	for _, domain := range c.ExtraDomain {
-		var answer *miekgdns.Msg
-		answer, _, err = client.ExchangeContext(ctx, &miekgdns.Msg{
-			Question: []miekgdns.Question{{
-				Name:  domain + ".",
-				Qtype: miekgdns.TypeA,
-			}},
-		}, fmt.Sprintf("%s:%d", ips[0], 53))
+		err = retry.OnError(
+			retry.DefaultRetry,
+			func(err error) bool {
+				return err != nil
+			},
+			func() error {
+				var answer *miekgdns.Msg
+				answer, _, err = client.ExchangeContext(ctx, &miekgdns.Msg{
+					Question: []miekgdns.Question{{
+						Name:  domain + ".",
+						Qtype: miekgdns.TypeA,
+					}},
+				}, fmt.Sprintf("%s:%d", ips[0], 53))
+				if err != nil {
+					return err
+				}
+				for _, rr := range answer.Answer {
+					if a, ok := rr.(*miekgdns.A); ok && a.A != nil {
+						addRouteFunc(domain, a.A.String())
+					}
+				}
+				return nil
+			})
 		if err != nil {
-			return
-		}
-		for _, rr := range answer.Answer {
-			if a, ok := rr.(*miekgdns.A); ok && a.A != nil {
-				addRouteFunc(domain, a.A.String())
-			}
+			return err
 		}
 	}
 	return

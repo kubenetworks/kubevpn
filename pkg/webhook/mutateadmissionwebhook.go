@@ -12,6 +12,7 @@ import (
 	v1 "k8s.io/api/admission/v1"
 	"k8s.io/api/admission/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
@@ -19,7 +20,8 @@ import (
 
 // admissionReviewHandler is a handler to handle business logic, holding an util.Factory
 type admissionReviewHandler struct {
-	f cmdutil.Factory
+	f         cmdutil.Factory
+	clientset *kubernetes.Clientset
 }
 
 // admitv1beta1Func handles a v1beta1 admission
@@ -122,12 +124,19 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 }
 
 func Main(f cmdutil.Factory) error {
-	h := &admissionReviewHandler{f: f}
+	clientset, err2 := f.KubernetesClientSet()
+	if err2 != nil {
+		return err2
+	}
+	h := &admissionReviewHandler{f: f, clientset: clientset}
+
 	http.HandleFunc("/pods", func(w http.ResponseWriter, r *http.Request) { serve(w, r, newDelegateToV1AdmitHandler(h.admitPods)) })
 	http.HandleFunc("/readyz", func(w http.ResponseWriter, req *http.Request) { w.Write([]byte("ok")) })
-	s := dhcpServer{f: f}
+
+	s := &dhcpServer{f: f, clientset: clientset}
 	http.HandleFunc(config.APIRentIP, s.rentIP)
 	http.HandleFunc(config.APIReleaseIP, s.releaseIP)
+
 	cert, ok := os.LookupEnv(config.TLSCertKey)
 	if !ok {
 		return fmt.Errorf("can not get %s from env", config.TLSCertKey)

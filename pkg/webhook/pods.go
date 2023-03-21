@@ -11,7 +11,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/cmd/util/podcmd"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
@@ -51,13 +50,7 @@ func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionR
 					pair := pod.Spec.Containers[i].Env[j]
 					if pair.Name == config.EnvInboundPodTunIP && pair.Value == "" {
 						found = true
-						var clientset *kubernetes.Clientset
-						clientset, err = h.f.KubernetesClientSet()
-						if err != nil {
-							log.Errorf("can not get clientset, err: %v", err)
-							return toV1AdmissionResponse(err)
-						}
-						cmi := clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
+						cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
 						dhcp := handler.NewDHCPManager(cmi, ar.Request.Namespace, &net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask})
 						var random *net.IPNet
 						random, err = dhcp.RentIPRandom()
@@ -123,13 +116,7 @@ func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionR
 				if envVar.Name == config.EnvInboundPodTunIP && envVar.Value != "" {
 					ip, cidr, err := net.ParseCIDR(envVar.Value)
 					if err == nil {
-						var clientset *kubernetes.Clientset
-						clientset, err = h.f.KubernetesClientSet()
-						if err != nil {
-							log.Errorf("can not get clientset, err: %v", err)
-							return toV1AdmissionResponse(err)
-						}
-						cmi := clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
+						cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
 						ipnet := &net.IPNet{
 							IP:   ip,
 							Mask: cidr.Mask,
