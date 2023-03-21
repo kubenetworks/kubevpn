@@ -3,13 +3,17 @@ package dev
 import (
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/docker/cli/cli/compose/loader"
 	"github.com/docker/cli/opts"
+	"github.com/docker/docker/api/types/container"
 	mounttypes "github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/strslice"
+	"github.com/docker/docker/errdefs"
 	"github.com/docker/go-connections/nat"
 	v12 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -147,6 +151,11 @@ func fillOptions(r Run, copts Options) error {
 	}
 
 	config.hostConfig.Binds = binds
+	networkOpts, err := parseNetworkOpts(copts)
+	if err != nil {
+		return err
+	}
+	config.networkingConfig = &network.NetworkingConfig{EndpointsConfig: networkOpts}
 
 	return nil
 }
@@ -170,4 +179,88 @@ func convertToStandardNotation(ports []string) ([]string, error) {
 		}
 	}
 	return optsList, nil
+}
+
+// parseNetworkOpts converts --network advanced options to endpoint-specs, and combines
+// them with the old --network-alias and --links. If returns an error if conflicting options
+// are found.
+//
+// this function may return _multiple_ endpoints, which is not currently supported
+// by the daemon, but may be in future; it's up to the daemon to produce an error
+// in case that is not supported.
+func parseNetworkOpts(copts Options) (map[string]*network.EndpointSettings, error) {
+	var (
+		endpoints                         = make(map[string]*network.EndpointSettings, len(copts.NetMode.Value()))
+		hasUserDefined, hasNonUserDefined bool
+	)
+
+	for i, n := range copts.NetMode.Value() {
+		n := n
+		if container.NetworkMode(n.Target).IsUserDefined() {
+			hasUserDefined = true
+		} else {
+			hasNonUserDefined = true
+		}
+		if i == 0 {
+			// The first network corresponds with what was previously the "only"
+			// network, and what would be used when using the non-advanced syntax
+			// `--network-alias`, `--link`, `--ip`, `--ip6`, and `--link-local-ip`
+			// are set on this network, to preserve backward compatibility with
+			// the non-advanced notation
+			n.Aliases = copts.Aliases.GetAll()
+		}
+		ep, err := parseNetworkAttachmentOpt(n)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := endpoints[n.Target]; ok {
+			return nil, errdefs.InvalidParameter(errors.Errorf("network %q is specified multiple times", n.Target))
+		}
+
+		// For backward compatibility: if no custom options are provided for the network,
+		// and only a single network is specified, omit the endpoint-configuration
+		// on the client (the daemon will still create it when creating the container)
+		if i == 0 && len(copts.NetMode.Value()) == 1 {
+			if ep == nil || reflect.DeepEqual(*ep, network.EndpointSettings{}) {
+				continue
+			}
+		}
+		endpoints[n.Target] = ep
+	}
+	if hasUserDefined && hasNonUserDefined {
+		return nil, errdefs.InvalidParameter(errors.New("conflicting options: cannot attach both user-defined and non-user-defined network-modes"))
+	}
+	return endpoints, nil
+}
+
+func parseNetworkAttachmentOpt(ep opts.NetworkAttachmentOpts) (*network.EndpointSettings, error) {
+	if strings.TrimSpace(ep.Target) == "" {
+		return nil, errors.New("no name set for network")
+	}
+	if !container.NetworkMode(ep.Target).IsUserDefined() {
+		if len(ep.Aliases) > 0 {
+			return nil, errors.New("network-scoped aliases are only supported for user-defined networks")
+		}
+		if len(ep.Links) > 0 {
+			return nil, errors.New("links are only supported for user-defined networks")
+		}
+	}
+
+	epConfig := &network.EndpointSettings{}
+	epConfig.Aliases = append(epConfig.Aliases, ep.Aliases...)
+	if len(ep.DriverOpts) > 0 {
+		epConfig.DriverOpts = make(map[string]string)
+		epConfig.DriverOpts = ep.DriverOpts
+	}
+	if len(ep.Links) > 0 {
+		epConfig.Links = ep.Links
+	}
+	if ep.IPv4Address != "" || ep.IPv6Address != "" || len(ep.LinkLocalIPs) > 0 {
+		epConfig.IPAMConfig = &network.EndpointIPAMConfig{
+			IPv4Address:  ep.IPv4Address,
+			IPv6Address:  ep.IPv6Address,
+			LinkLocalIPs: ep.LinkLocalIPs,
+		}
+	}
+	return epConfig, nil
 }

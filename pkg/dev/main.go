@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,7 +17,9 @@ import (
 	"github.com/docker/docker/api/types/container"
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/archive"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
@@ -27,8 +30,10 @@ import (
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/util/podutils"
 
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/mesh"
+	"github.com/wencaiwulue/kubevpn/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -45,14 +50,14 @@ type Options struct {
 	// docker options
 	Platform string
 	//Pull         string // always, missing, never
-	PublishAll  bool
-	Entrypoint  string
-	DockerImage string
-	Publish     opts.ListOpts
-	Expose      opts.ListOpts
-	ExtraHosts  opts.ListOpts
-	NetMode     opts.NetworkOpt
-	//Aliases      opts.ListOpts
+	PublishAll   bool
+	Entrypoint   string
+	DockerImage  string
+	Publish      opts.ListOpts
+	Expose       opts.ListOpts
+	ExtraHosts   opts.ListOpts
+	NetMode      opts.NetworkOpt
+	Aliases      opts.ListOpts
 	Env          opts.ListOpts
 	Mounts       opts.MountOpt
 	Volumes      opts.ListOpts
@@ -146,6 +151,43 @@ func (d Options) Main(ctx context.Context) error {
 			config.config.Hostname = ""
 		}
 	} else {
+		getInterface, err := tun.GetInterface()
+		if err != nil {
+			return err
+		}
+		addrs, err := getInterface.Addrs()
+		if err != nil {
+			return err
+		}
+		cidr, _, err := net.ParseCIDR(addrs[0].String())
+		if err != nil {
+			return err
+		}
+		create, err := cli.NetworkCreate(ctx, list[0].containerName, types.NetworkCreate{
+			Driver: "bridge",
+			Scope:  "local",
+			IPAM: &network.IPAM{
+				Driver:  "",
+				Options: nil,
+				Config: []network.IPAMConfig{
+					{
+						Subnet:  config.CIDR.String(),
+						Gateway: cidr.String(),
+					},
+				},
+			},
+			Internal: true,
+		})
+		if err != nil {
+			if errdefs.IsForbidden(err) {
+				_, _ = cli.NetworkList(ctx, types.NetworkListOptions{})
+			}
+			return err
+		}
+
+		list[0].networkingConfig.EndpointsConfig[list[0].containerName] = &network.EndpointSettings{
+			NetworkID: create.ID,
+		}
 		// skip first
 		for _, config := range list[1:] {
 			// remove expose port
@@ -182,24 +224,24 @@ func (r Run) Remove(ctx context.Context) error {
 	}
 
 	for _, config := range r {
-		//err = cli.NetworkDisconnect(ctx, config.networkName, config.containerName, true)
-		//if err != nil {
-		//	log.Errorln(err)
-		//}
+		err = cli.NetworkDisconnect(ctx, config.containerName, config.containerName, true)
+		if err != nil {
+			log.Errorln(err)
+		}
 		err = cli.ContainerRemove(ctx, config.containerName, types.ContainerRemoveOptions{Force: true})
 		if err != nil {
 			log.Errorln(err)
 		}
 	}
-	//for _, config := range r {
-	//	_, err = cli.NetworkInspect(ctx, config.networkName, types.NetworkInspectOptions{})
-	//	if err == nil {
-	//		err = cli.NetworkRemove(ctx, config.networkName)
-	//		if err != nil {
-	//			log.Errorln(err)
-	//		}
-	//	}
-	//}
+	for _, config := range r {
+		_, err = cli.NetworkInspect(ctx, config.containerName, types.NetworkInspectOptions{})
+		if err == nil {
+			err = cli.NetworkRemove(ctx, config.containerName)
+			if err != nil {
+				log.Errorln(err)
+			}
+		}
+	}
 	return nil
 }
 

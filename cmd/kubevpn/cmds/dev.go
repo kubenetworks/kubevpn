@@ -32,9 +32,9 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		Env:        opts.NewListOpts(nil),
 		Volumes:    opts.NewListOpts(nil),
 		ExtraHosts: opts.NewListOpts(nil),
-		//Aliases:    opts.NewListOpts(nil),
-		NoProxy:   false,
-		ExtraCIDR: []string{},
+		Aliases:    opts.NewListOpts(nil),
+		NoProxy:    false,
+		ExtraCIDR:  []string{},
 	}
 	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
@@ -164,9 +164,9 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 	cmd.Flags().Var(&devOptions.NetMode, "network", "Connect a container to a network")
 	cmd.Flags().MarkHidden("net")
 	// We allow for both "--net-alias" and "--network-alias", although the latter is the recommended way.
-	//cmd.Flags().Var(&devOptions.Aliases, "net-alias", "Add network-scoped alias for the container")
-	//cmd.Flags().Var(&devOptions.Aliases, "network-alias", "Add network-scoped alias for the container")
-	//cmd.Flags().MarkHidden("net-alias")
+	cmd.Flags().Var(&devOptions.Aliases, "net-alias", "Add network-scoped alias for the container")
+	cmd.Flags().Var(&devOptions.Aliases, "network-alias", "Add network-scoped alias for the container")
+	cmd.Flags().MarkHidden("net-alias")
 	cmd.Flags().VarP(&devOptions.Volumes, "volume", "v", "Bind mount a volume")
 	cmd.Flags().Var(&devOptions.Mounts, "mount", "Attach a filesystem mount to the container")
 	cmd.Flags().Var(&devOptions.Expose, "expose", "Expose a port or a range of ports")
