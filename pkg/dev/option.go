@@ -201,14 +201,6 @@ func parseNetworkOpts(copts Options) (map[string]*network.EndpointSettings, erro
 		} else {
 			hasNonUserDefined = true
 		}
-		if i == 0 {
-			// The first network corresponds with what was previously the "only"
-			// network, and what would be used when using the non-advanced syntax
-			// `--network-alias`, `--link`, `--ip`, `--ip6`, and `--link-local-ip`
-			// are set on this network, to preserve backward compatibility with
-			// the non-advanced notation
-			n.Aliases = copts.Aliases.GetAll()
-		}
 		ep, err := parseNetworkAttachmentOpt(n)
 		if err != nil {
 			return nil, err
@@ -246,7 +238,9 @@ func parseNetworkAttachmentOpt(ep opts.NetworkAttachmentOpts) (*network.Endpoint
 		}
 	}
 
-	epConfig := &network.EndpointSettings{}
+	epConfig := &network.EndpointSettings{
+		NetworkID: ep.Target,
+	}
 	epConfig.Aliases = append(epConfig.Aliases, ep.Aliases...)
 	if len(ep.DriverOpts) > 0 {
 		epConfig.DriverOpts = make(map[string]string)

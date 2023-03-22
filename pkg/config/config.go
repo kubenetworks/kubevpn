@@ -32,6 +32,22 @@ const (
 	VolumeEnvoyConfig = "envoy-config"
 
 	innerIPv4Pool = "223.254.0.100/16"
+	// 原因：在docker环境中，设置docker的 gateway 和 subnet，不能 inner 的冲突，也不能和 docker的 172.17 冲突
+	// 不然的话，请求会不通的
+	// 解决的问题：在 k8s 中的  名叫 kubernetes 的 service ip 为
+	// ➜  ~ kubectl get service kubernetes
+	//NAME         TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
+	//kubernetes   ClusterIP   172.17.0.1   <none>        443/TCP   190d
+	//
+	// ➜  ~ docker network inspect bridge | jq '.[0].IPAM.Config'
+	//[
+	//  {
+	//    "Subnet": "172.17.0.0/16",
+	//    "Gateway": "172.17.0.1"
+	//  }
+	//]
+	// 如果不创建 network，那么是无法请求到 这个 kubernetes 的 service 的
+	dockerInnerIPv4Pool = "223.255.0.100/16"
 
 	DefaultNetDir = "/etc/cni/net.d"
 
@@ -61,6 +77,9 @@ const (
 
 	// pprof port
 	PProfPort = 32345
+
+	// startup by KubeVPN
+	EnvStartSudoKubeVPNByKubeVPN = "DEPTH_SIGNED_BY_NAISON"
 )
 
 var (
@@ -68,12 +87,18 @@ var (
 	Image = "docker.io/naison/kubevpn:latest"
 )
 
-var CIDR *net.IPNet
+var (
+	CIDR     *net.IPNet
+	RouterIP net.IP
 
-var RouterIP net.IP
+	// for creating docker network
+	DockerCIDR     *net.IPNet
+	DockerRouterIP net.IP
+)
 
 func init() {
 	RouterIP, CIDR, _ = net.ParseCIDR(innerIPv4Pool)
+	DockerRouterIP, DockerCIDR, _ = net.ParseCIDR(dockerInnerIPv4Pool)
 }
 
 var Debug bool

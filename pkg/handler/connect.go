@@ -23,6 +23,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	pkgruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/runtime"
@@ -121,12 +122,12 @@ func Rollback(f cmdutil.Factory, ns, workload string) {
 }
 
 func (c *ConnectOptions) DoConnect() (err error) {
-	c.addCleanUpResourceHandler()
 	trafficMangerNet := net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}
 	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, &trafficMangerNet)
 	if err = c.dhcp.InitDHCP(ctx); err != nil {
 		return
 	}
+	AddCleanUpResourceHandler(c.clientset, c.Namespace, c.dhcp, c.usedIPs...)
 	err = c.GetCIDR(ctx)
 	if err != nil {
 		return
@@ -858,4 +859,46 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) (err error) {
 		}
 	}
 	return
+}
+
+func (c *ConnectOptions) GetKubeconfigPath() (string, error) {
+	rawConfig, err := c.factory.ToRawKubeConfigLoader().RawConfig()
+	if err != nil {
+		return "", err
+	}
+	err = api.FlattenConfig(&rawConfig)
+	if err != nil {
+		return "", err
+	}
+	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})
+	var convertedObj pkgruntime.Object
+	convertedObj, err = latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
+	if err != nil {
+		return "", err
+	}
+	var kubeconfigJsonBytes []byte
+	kubeconfigJsonBytes, err = json.Marshal(convertedObj)
+	if err != nil {
+		return "", err
+	}
+
+	temp, err := os.CreateTemp("", "*.kubeconfig")
+	if err != nil {
+		return "", err
+	}
+	temp.Close()
+	err = os.WriteFile(temp.Name(), kubeconfigJsonBytes, 0644)
+	if err != nil {
+		return "", err
+	}
+	err = os.Chmod(temp.Name(), 0644)
+	if err != nil {
+		return "", err
+	}
+
+	return temp.Name(), nil
+}
+
+func (c ConnectOptions) GetClientset() *kubernetes.Clientset {
+	return c.clientset
 }

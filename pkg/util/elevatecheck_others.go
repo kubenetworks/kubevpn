@@ -6,17 +6,20 @@ package util
 import (
 	"flag"
 	"fmt"
-	log "github.com/sirupsen/logrus"
-	"k8s.io/client-go/tools/clientcmd"
 	"os"
 	"os/exec"
 	"os/signal"
 	"runtime"
 	"syscall"
 	"time"
+
+	log "github.com/sirupsen/logrus"
+	"k8s.io/client-go/tools/clientcmd"
+
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
-const envStartSudoKubeVPNByKubeVPN = "DEPTH_SIGNED_BY_NAISON"
+const envStartSudoKubeVPNByKubeVPN = config.EnvStartSudoKubeVPNByKubeVPN
 
 func RunWithElevated() {
 	// fix if startup with normal user, after elevated home dir will change to root user in linux

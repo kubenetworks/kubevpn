@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -27,28 +28,29 @@ var stopChan = make(chan os.Signal)
 var RollbackFuncList = make([]func(), 2)
 var ctx, cancel = context.WithCancel(context.Background())
 
-func (c *ConnectOptions) addCleanUpResourceHandler() {
+func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, ns string, dhcp *DHCPManager, usedIPs ...*net.IPNet) {
 	signal.Notify(stopChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL)
 	go func() {
 		<-stopChan
 		log.Info("prepare to exit, cleaning up")
-		err := c.dhcp.ReleaseIpToDHCP(c.usedIPs...)
-		if err != nil {
-			log.Errorf("failed to release ip to dhcp, err: %v", err)
+		if dhcp != nil {
+			err := dhcp.ReleaseIpToDHCP(usedIPs...)
+			if err != nil {
+				log.Errorf("failed to release ip to dhcp, err: %v", err)
+			}
 		}
 		for _, function := range RollbackFuncList {
 			if function != nil {
 				function()
 			}
 		}
-		_ = c.clientset.CoreV1().Pods(c.Namespace).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
-		var count int
-		count, err = updateRefCount(c.clientset.CoreV1().ConfigMaps(c.Namespace), config.ConfigMapPodTrafficManager, -1)
+		_ = clientset.CoreV1().Pods(ns).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
+		count, err := updateRefCount(clientset.CoreV1().ConfigMaps(ns), config.ConfigMapPodTrafficManager, -1)
 		if err == nil {
 			// if ref-count is less than zero or equals to zero, means nobody is using this traffic pod, so clean it
 			if count <= 0 {
 				log.Info("ref-count is zero, prepare to clean up resource")
-				cleanup(c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, true)
+				cleanup(clientset, ns, config.ConfigMapPodTrafficManager, true)
 			}
 		} else {
 			log.Error(err)
