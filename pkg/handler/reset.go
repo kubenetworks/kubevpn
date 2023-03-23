@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/client"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
@@ -40,5 +42,16 @@ func (c *ConnectOptions) Reset(ctx2 context.Context) error {
 		}
 	}
 	cleanup(c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, false)
+	var cli *client.Client
+	if cli, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation()); err != nil {
+		return nil
+	}
+	var i types.NetworkResource
+	if i, err = cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{}); err != nil {
+		return nil
+	}
+	if len(i.Containers) == 0 {
+		return cli.NetworkRemove(ctx, config.ConfigMapPodTrafficManager)
+	}
 	return nil
 }

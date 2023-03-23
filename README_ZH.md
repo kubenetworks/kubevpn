@@ -462,9 +462,10 @@ Windows
 
 ## 问答
 
-- 依赖的镜像拉不下来，或者内网环境无法访问 docker.io 怎么办？
-- 答：在可以访问 docker.io 的网络中，将命令 `kubevpn version` 中的 image 镜像， 转存到自己的私有镜像仓库，然后启动命令的时候，加上 `--image 新镜像` 即可。
-  例如:
+### 1，依赖的镜像拉不下来，或者内网环境无法访问 docker.io 怎么办？
+
+答：在可以访问 docker.io 的网络中，将命令 `kubevpn version` 中的 image 镜像， 转存到自己的私有镜像仓库，然后启动命令的时候，加上 `--image 新镜像` 即可。
+例如:
 
 ``` shell
   ➜  ~ kubevpn version
@@ -497,7 +498,7 @@ pod [kubevpn-traffic-manager] status is Running
 ...
 ```
 
-- 在使用 `kubevpn dev` 进入开发模式的时候,有出现报错 137, 改怎么解决 ?
+### 2，在使用 `kubevpn dev` 进入开发模式的时候,有出现报错 137, 改怎么解决 ?
 
 ```text
 dns service ok
@@ -518,7 +519,7 @@ clean up successful
 这是因为你的 `Docker-desktop` 声明的资源, 小于 container 容器启动时所需要的资源, 因此被 OOM 杀掉了, 你可以增加 `Docker-desktop` 对于 resources
 的设置, 目录是：`Preferences --> Resources --> Memory`
 
-- 我在使用 WSL( Windows Sub Linux ) Docker, 当我在使用命令 `kubevpn dev` 进入开发模式的时候, 在 terminal 中无法提示链接集群网络, 这是为什么, 如何解决?
+### 3，使用 WSL( Windows Sub Linux ) Docker, 用命令 `kubevpn dev` 进入开发模式的时候, 在 terminal 中无法提示链接集群网络, 这是为什么, 如何解决?
 
 答案: 这是因为 WSL 的 Docker 使用的是 主机 Windows 的网络, 所以即便在 WSL 中启动 container, 这个 container 不会使用 WSL 的网络，而是使用 Windows 的网络。
 解决方案:
@@ -527,3 +528,53 @@ clean up successful
 - 2): 在主机 Windows 使用命令 `kubevpn connect`, 然后在 WSL 中使用 `kubevpn dev` 进入开发模式
 - 3): 在主机 Windows 上启动一个 container，在 container 中使用命令 `kubevpn connect`, 然后在 WSL
   中使用 `kubevpn dev --network container:$CONTAINER_ID`
+
+### 4，在使用 `kubevpn dev` 进入开发模式后，无法访问容器网络，出现错误 `172.17.0.1:443 connect refusued`，该如何解决？
+
+答案：大概率是因为 k8s 容器网络和 docker 网络网段冲突了。
+
+解决方案：
+
+- 使用参数 `--connect-mode container` 在容器中链接，也可以解决此问题
+- 可以修改文件 `~/.docker/daemon.json` 增加不冲突的网络，例如 `"bip": "172.15.0.1/24"`.
+
+```shell
+➜  ~ cat ~/.docker/daemon.json
+{
+  "builder": {
+    "gc": {
+      "defaultKeepStorage": "20GB",
+      "enabled": true
+    }
+  },
+  "experimental": false,
+  "features": {
+    "buildkit": true
+  },
+  "insecure-registries": [
+  ],
+}
+```
+
+增加不冲突的网段
+
+```shell
+➜  ~ cat ~/.docker/daemon.json
+{
+  "builder": {
+    "gc": {
+      "defaultKeepStorage": "20GB",
+      "enabled": true
+    }
+  },
+  "experimental": false,
+  "features": {
+    "buildkit": true
+  },
+  "insecure-registries": [
+  ],
+  "bip": "172.15.0.1/24"
+}
+```
+
+重启 docker，重新操作即可

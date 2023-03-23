@@ -45,14 +45,8 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, ns string, dhcp 
 			}
 		}
 		_ = clientset.CoreV1().Pods(ns).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
-		count, err := updateRefCount(clientset.CoreV1().ConfigMaps(ns), config.ConfigMapPodTrafficManager, -1)
-		if err == nil {
-			// if ref-count is less than zero or equals to zero, means nobody is using this traffic pod, so clean it
-			if count <= 0 {
-				log.Info("ref-count is zero, prepare to clean up resource")
-				cleanup(clientset, ns, config.ConfigMapPodTrafficManager, true)
-			}
-		} else {
+		_, err := updateRefCount(clientset.CoreV1().ConfigMaps(ns), config.ConfigMapPodTrafficManager, -1)
+		if err != nil {
 			log.Error(err)
 		}
 		dns.CancelDNS()

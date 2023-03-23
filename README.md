@@ -471,10 +471,13 @@ in advance
 
 ## FAQ
 
-- What should I do if the dependent image cannot be pulled, or the inner environment cannot access docker.io?
-- Answer: In the network that can access docker.io, transfer the image in the command `kubevpn version` to your own
-  private image registry, and then add option `--image` to special image when starting the command.
-  Example:
+### 1, What should I do if the dependent image cannot be pulled, or the inner environment cannot access docker.io?
+
+Answer:
+
+In the network that can access docker.io, transfer the image in the command `kubevpn version` to your own
+private image registry, and then add option `--image` to special image when starting the command.
+Example:
 
 ``` shell
   ➜  ~ kubevpn version
@@ -507,7 +510,7 @@ pod [kubevpn-traffic-manager] status is Running
 ...
 ```
 
-- When use `kubevpn dev`, but got error code 137, how to resolve ?
+### 2, When use `kubevpn dev`, but got error code 137, how to resolve ?
 
 ```text
 dns service ok
@@ -528,14 +531,68 @@ clean up successful
 This is because of your docker-desktop required resource is less than pod running request resource, it OOM killed, so
 you can add more resource in your docker-desktop setting `Preferences --> Resources --> Memory`
 
-- I am using WSL( Windows Sub Linux ) Docker, when use mode `kubevpn dev`, can not connect to cluster network, how to
-  solve this problem?
+### 3, Using WSL( Windows Sub Linux ) Docker, when use mode `kubevpn dev`, can not connect to cluster network, how to solve this problem?
 
-Answer: this is because WSL'Docker using Windows's Network, so if even start a container in WSL, this container will
-not use WSL network, but use Windows network
+Answer:
+
+this is because WSL'Docker using Windows's Network, so if even start a container in WSL, this container will not use WSL
+network, but use Windows network
+
 Solution:
 
 - 1): install docker in WSL, not use Windows Docker-desktop
 - 2): use command `kubevpn connect` on Windows, and then startup `kubevpn dev` in WSL
 - 3): startup a container using command `kubevpn connect` on Windows, and then
   startup `kubevpn dev --network container:$CONTAINER_ID` in WSL
+
+### 4，After use command `kubevpn dev` enter develop mode，but can't assess kubernetes api-server，occur error `172.17.0.1:443 connect refusued`，how to solve this problem?
+
+Answer:
+
+Maybe k8s network subnet is conflict with docker subnet
+
+Solution:
+
+- Use option `--connect-mode container` to startup command `kubevpn dev`
+- Modify `~/.docker/daemon.json`, add not conflict subnet, eg: `"bip": "172.15.0.1/24"`.
+
+```shell
+➜  ~ cat ~/.docker/daemon.json
+{
+  "builder": {
+    "gc": {
+      "defaultKeepStorage": "20GB",
+      "enabled": true
+    }
+  },
+  "experimental": false,
+  "features": {
+    "buildkit": true
+  },
+  "insecure-registries": [
+  ],
+}
+```
+
+add subnet not conflict, eg: 172.15.0.1/24
+
+```shell
+➜  ~ cat ~/.docker/daemon.json
+{
+  "builder": {
+    "gc": {
+      "defaultKeepStorage": "20GB",
+      "enabled": true
+    }
+  },
+  "experimental": false,
+  "features": {
+    "buildkit": true
+  },
+  "insecure-registries": [
+  ],
+  "bip": "172.15.0.1/24"
+}
+```
+
+restart docker and retry
