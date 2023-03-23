@@ -220,14 +220,13 @@ func (r Run) Remove(ctx context.Context) error {
 			log.Debug(err)
 		}
 	}
-	for _, runConfig := range r {
-		_, err = cli.NetworkInspect(ctx, runConfig.containerName, types.NetworkInspectOptions{})
-		if err == nil {
-			err = cli.NetworkRemove(ctx, runConfig.containerName)
-			if err != nil {
-				log.Debug(err)
-			}
-		}
+	var i types.NetworkResource
+	i, err = cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{})
+	if err != nil {
+		return err
+	}
+	if len(i.Containers) == 0 {
+		return cli.NetworkRemove(ctx, config.ConfigMapPodTrafficManager)
 	}
 	return nil
 }
@@ -543,7 +542,9 @@ func DoDev(devOptions Options, args []string, f cmdutil.Factory) error {
 		if id, err = run(ctx, c, cli, dockerCli); err != nil {
 			return err
 		}
-		h := interrupt.New(nil, func() {
+		h := interrupt.New(func(signal os.Signal) {
+			os.Exit(0)
+		}, func() {
 			cancel()
 			_ = cli.ContainerKill(context.Background(), id, "SIGTERM")
 			_ = runLogsSinceNow(dockerCli, id)
@@ -551,6 +552,10 @@ func DoDev(devOptions Options, args []string, f cmdutil.Factory) error {
 		go h.Run(func() error { select {} })
 		defer h.Close()
 		if err = runLogsWaitRunning(ctx, dockerCli, id); err != nil {
+			// interrupt by signal KILL
+			if ctx.Err() == context.Canceled {
+				return nil
+			}
 			return err
 		}
 		if err = devOptions.NetMode.Set("container:" + id); err != nil {
@@ -709,7 +714,7 @@ func createKubevpnNetwork(ctx context.Context, cli *client.Client) (string, erro
 		}
 	}
 
-	create, err := cli.NetworkCreate(ctx, "kubevpn", types.NetworkCreate{
+	create, err := cli.NetworkCreate(ctx, config.ConfigMapPodTrafficManager, types.NetworkCreate{
 		Driver: "bridge",
 		Scope:  "local",
 		IPAM: &network.IPAM{
