@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
+	"github.com/docker/distribution/reference"
 	"github.com/google/gopacket/routing"
 	netroute "github.com/libp2p/go-netroute"
 	miekgdns "github.com/miekg/dns"
@@ -45,6 +46,7 @@ import (
 	"k8s.io/kubectl/pkg/scheme"
 	"k8s.io/utils/clock"
 	"k8s.io/utils/pointer"
+	pkgclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/core"
@@ -135,6 +137,10 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	c.routerIP, err = CreateOutboundPod(ctx, c.factory, c.clientset, c.Namespace, trafficMangerNet.String())
 	if err != nil {
 		return
+	}
+	err = c.UpdateImage(ctx)
+	if err != nil {
+		return err
 	}
 	if err = c.createRemoteInboundPod(ctx); err != nil {
 		return
@@ -901,4 +907,52 @@ func (c *ConnectOptions) GetKubeconfigPath() (string, error) {
 
 func (c ConnectOptions) GetClientset() *kubernetes.Clientset {
 	return c.clientset
+}
+
+// update to newer image
+func (c *ConnectOptions) UpdateImage(ctx context.Context) error {
+	deployment, err := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	origin := deployment.DeepCopy()
+	newImg, err := reference.ParseNormalizedNamed(config.Image)
+	if err != nil {
+		return err
+	}
+	newTag, ok := newImg.(reference.NamedTagged)
+	if !ok {
+		return nil
+	}
+	oldImg, err := reference.ParseNormalizedNamed(deployment.Spec.Template.Spec.Containers[0].Image)
+	if err != nil {
+		return err
+	}
+	var oldTag reference.NamedTagged
+	oldTag, ok = oldImg.(reference.NamedTagged)
+	if !ok {
+		return nil
+	}
+	if reference.Domain(newImg) != reference.Domain(oldImg) {
+		return nil
+	}
+	if oldTag.Tag() >= newTag.Tag() {
+		return nil
+	}
+
+	log.Infof("found newer image %s, set image from %s to it...", config.Image, deployment.Spec.Template.Spec.Containers[0].Image)
+	for i := range deployment.Spec.Template.Spec.Containers {
+		deployment.Spec.Template.Spec.Containers[i].Image = config.Image
+	}
+	p := pkgclient.MergeFrom(deployment)
+	data, err := pkgclient.MergeFrom(origin).Data(deployment)
+	if err != nil {
+		return err
+	}
+	_, err = c.clientset.AppsV1().Deployments(c.Namespace).Patch(ctx, config.ConfigMapPodTrafficManager, p.Type(), data, metav1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+	err = util.RolloutStatus(ctx, c.factory, c.Namespace, fmt.Sprintf("deployment/%s", config.ConfigMapPodTrafficManager), time.Minute*60)
+	return err
 }
