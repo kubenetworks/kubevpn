@@ -36,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
+	"k8s.io/kubectl/pkg/util/interrupt"
 	"k8s.io/kubectl/pkg/util/podutils"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
@@ -166,7 +167,7 @@ func (d Options) Main(ctx context.Context) error {
 		}
 	} else {
 		var networkID string
-		networkID, err = createKubevpnNetwork(ctx, cli, list[0].containerName)
+		networkID, err = createKubevpnNetwork(ctx, cli)
 		if err != nil {
 			return err
 		}
@@ -518,12 +519,12 @@ func DoDev(devOptions Options, args []string, f cmdutil.Factory) error {
 		if newUUID, err := uuid.NewUUID(); err == nil {
 			suffix = strings.ReplaceAll(newUUID.String(), "-", "")[:5]
 		}
-		name := fmt.Sprintf("%s_%s_%s", "kubevpn", "local", suffix)
 		var kubevpnNetwork string
-		kubevpnNetwork, err = createKubevpnNetwork(context.Background(), cli, name)
+		kubevpnNetwork, err = createKubevpnNetwork(context.Background(), cli)
 		if err != nil {
 			return err
 		}
+		name := fmt.Sprintf("%s_%s_%s", "kubevpn", "local", suffix)
 		c := &RunConfig{
 			config:     runConfig,
 			hostConfig: hostConfig,
@@ -537,16 +538,19 @@ func DoDev(devOptions Options, args []string, f cmdutil.Factory) error {
 			k8sContainerName: name,
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		handler.AddCleanUpResourceHandler(connect.GetClientset(), connect.Namespace, nil)
-		handler.RollbackFuncList = append(handler.RollbackFuncList, cancel)
+		defer cancel()
 		var id string
 		if id, err = run(ctx, c, cli, dockerCli); err != nil {
 			return err
 		}
-		handler.RollbackFuncList = append(handler.RollbackFuncList, func() {
-			_ = cli.ContainerKill(context.Background(), id, "KILL")
+		h := interrupt.New(nil, func() {
+			cancel()
+			_ = cli.ContainerKill(context.Background(), id, "SIGTERM")
+			_ = runLogsSinceNow(dockerCli, id)
 		})
-		if err = runLogs(dockerCli, id); err != nil {
+		go h.Run(func() error { select {} })
+		defer h.Close()
+		if err = runLogsWaitRunning(ctx, dockerCli, id); err != nil {
 			return err
 		}
 		if err = devOptions.NetMode.Set("container:" + id); err != nil {
@@ -556,10 +560,6 @@ func DoDev(devOptions Options, args []string, f cmdutil.Factory) error {
 		return fmt.Errorf("unsupport connect mode: %s", devOptions.ConnectMode)
 	}
 
-	defer func() {
-		handler.Cleanup(os.Kill)
-		select {}
-	}()
 	devOptions.Namespace = connect.Namespace
 	err = devOptions.Main(context.Background())
 	if err != nil {
@@ -568,9 +568,7 @@ func DoDev(devOptions Options, args []string, f cmdutil.Factory) error {
 	return err
 }
 
-func runLogs(dockerCli command.Cli, container string) error {
-	ctx := context.Background()
-
+func runLogsWaitRunning(ctx context.Context, dockerCli command.Cli, container string) error {
 	c, err := dockerCli.Client().ContainerInspect(ctx, container)
 	if err != nil {
 		return err
@@ -624,11 +622,39 @@ func runLogs(dockerCli command.Cli, container string) error {
 	}
 }
 
+func runLogsSinceNow(dockerCli command.Cli, container string) error {
+	ctx := context.Background()
+
+	c, err := dockerCli.Client().ContainerInspect(ctx, container)
+	if err != nil {
+		return err
+	}
+
+	options := types.ContainerLogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Since:      "0m",
+		Follow:     true,
+	}
+	responseBody, err := dockerCli.Client().ContainerLogs(ctx, c.ID, options)
+	if err != nil {
+		return err
+	}
+	defer responseBody.Close()
+
+	if c.Config.Tty {
+		_, err = io.Copy(dockerCli.Out(), responseBody)
+	} else {
+		_, err = stdcopy.StdCopy(dockerCli.Out(), dockerCli.Err(), responseBody)
+	}
+	return err
+}
+
 func runKill(dockerCli command.Cli, containers ...string) error {
 	var errs []string
 	ctx := context.Background()
 	errChan := parallelOperation(ctx, append([]string{}, containers...), func(ctx context.Context, container string) error {
-		return dockerCli.Client().ContainerKill(ctx, container, "KILL")
+		return dockerCli.Client().ContainerKill(ctx, container, "SIGTERM")
 	})
 	for _, name := range containers {
 		if err := <-errChan; err != nil {
@@ -674,9 +700,16 @@ func parallelOperation(ctx context.Context, containers []string, op func(ctx con
 	return errChan
 }
 
-func createKubevpnNetwork(ctx context.Context, cli *client.Client, networkName string) (string, error) {
+func createKubevpnNetwork(ctx context.Context, cli *client.Client) (string, error) {
 	by := map[string]string{"owner": config.ConfigMapPodTrafficManager}
-	create, err := cli.NetworkCreate(ctx, networkName, types.NetworkCreate{
+	list, _ := cli.NetworkList(ctx, types.NetworkListOptions{})
+	for _, resource := range list {
+		if reflect.DeepEqual(resource.Labels, by) {
+			return resource.ID, nil
+		}
+	}
+
+	create, err := cli.NetworkCreate(ctx, "kubevpn", types.NetworkCreate{
 		Driver: "bridge",
 		Scope:  "local",
 		IPAM: &network.IPAM{
@@ -694,7 +727,7 @@ func createKubevpnNetwork(ctx context.Context, cli *client.Client, networkName s
 	})
 	if err != nil {
 		if errdefs.IsForbidden(err) {
-			list, _ := cli.NetworkList(ctx, types.NetworkListOptions{})
+			list, _ = cli.NetworkList(ctx, types.NetworkListOptions{})
 			for _, resource := range list {
 				if reflect.DeepEqual(resource.Labels, by) {
 					return resource.ID, nil
