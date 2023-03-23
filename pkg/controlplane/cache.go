@@ -147,6 +147,7 @@ func ToRoute(clusterName string, headers map[string]string) *route.Route {
 					MatchPattern: &matcher.StringMatcher_Exact{
 						Exact: v,
 					},
+					IgnoreCase: true,
 				},
 			},
 		})
