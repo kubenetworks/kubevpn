@@ -167,7 +167,7 @@ func fullDomain(t *testing.T) {
 
 func dialUDP(t *testing.T) {
 	port := util.GetAvailableUDPPortOrDie()
-	go server(port)
+	go UDPServer(port)
 
 	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", "reviews").String(),
@@ -191,13 +191,13 @@ func dialUDP(t *testing.T) {
 		func(err error) bool {
 			return err != nil
 		}, func() error {
-			return client(ip, port)
+			return UDPClient(ip, port)
 		}); err != nil {
 		t.Errorf("can not access pod ip: %s, port: %v", ip, port)
 	}
 }
 
-func client(ip string, port int) error {
+func UDPClient(ip string, port int) error {
 	udpConn, err := net.DialUDP("udp4", nil, &net.UDPAddr{
 		IP:   net.ParseIP(ip),
 		Port: port,
@@ -233,7 +233,7 @@ func client(ip string, port int) error {
 	return nil
 }
 
-func server(port int) {
+func UDPServer(port int) {
 	// 创建监听
 	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
 		IP:   net.IPv4(0, 0, 0, 0),

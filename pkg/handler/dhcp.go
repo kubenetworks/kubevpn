@@ -106,8 +106,7 @@ func (d *DHCPManager) ReleaseIpToDHCP(ips ...*net.IPNet) error {
 func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) error {
 	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
-		log.Errorf("failed to get cm DHCP server, err: %v", err)
-		return err
+		return fmt.Errorf("failed to get cm DHCP server, err: %v", err)
 	}
 	if cm.Data == nil {
 		cm.Data = make(map[string]string)
@@ -175,8 +174,7 @@ func (d *DHCPManager) Get(ctx2 context.Context, key string) (string, error) {
 func (d *DHCPManager) ForEach(fn func(net.IP)) error {
 	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
-		log.Errorf("failed to get cm DHCP server, err: %v", err)
-		return err
+		return fmt.Errorf("failed to get cm DHCP server, err: %v", err)
 	}
 	if cm.Data == nil {
 		cm.Data = make(map[string]string)
