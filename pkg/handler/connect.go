@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	pkgtypes "k8s.io/apimachinery/pkg/types"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -41,6 +42,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd/api/latest"
 	clientcmdlatest "k8s.io/client-go/tools/clientcmd/api/latest"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/kubectl/pkg/cmd/set"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/scheme"
@@ -138,7 +140,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err != nil {
 		return
 	}
-	err = c.UpdateImage(ctx)
+	err = c.SetImage(ctx)
 	if err != nil {
 		return err
 	}
@@ -953,6 +955,85 @@ func (c *ConnectOptions) UpdateImage(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	err = util.RolloutStatus(ctx, c.factory, c.Namespace, fmt.Sprintf("deployment/%s", config.ConfigMapPodTrafficManager), time.Minute*60)
+	err = util.RolloutStatus(ctx, c.factory, c.Namespace, fmt.Sprintf("deployments/%s", config.ConfigMapPodTrafficManager), time.Minute*60)
 	return err
+}
+
+func (c *ConnectOptions) SetImage(ctx context.Context) error {
+	deployment, err := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	newImg, err := reference.ParseNormalizedNamed(config.Image)
+	if err != nil {
+		return err
+	}
+	newTag, ok := newImg.(reference.NamedTagged)
+	if !ok {
+		return nil
+	}
+
+	oldImg, err := reference.ParseNormalizedNamed(deployment.Spec.Template.Spec.Containers[0].Image)
+	if err != nil {
+		return err
+	}
+	var oldTag reference.NamedTagged
+	oldTag, ok = oldImg.(reference.NamedTagged)
+	if !ok {
+		return nil
+	}
+	if reference.Domain(newImg) != reference.Domain(oldImg) {
+		return nil
+	}
+	if oldTag.Tag() >= newTag.Tag() {
+		return nil
+	}
+
+	log.Infof("found newer image %s, set image from %s to it...", config.Image, deployment.Spec.Template.Spec.Containers[0].Image)
+
+	r := c.factory.NewBuilder().
+		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
+		NamespaceParam(c.Namespace).DefaultNamespace().
+		ResourceNames("deployments", deployment.Name).
+		ContinueOnError().
+		Latest().
+		Flatten().
+		Do()
+	if err = r.Err(); err != nil {
+		return err
+	}
+	infos, err := r.Infos()
+	if err != nil {
+		return err
+	}
+	patches := set.CalculatePatches(infos, scheme.DefaultJSONEncoder(), func(obj pkgruntime.Object) ([]byte, error) {
+		_, err = polymorphichelpers.UpdatePodSpecForObjectFn(obj, func(spec *v1.PodSpec) error {
+			for i := range spec.Containers {
+				spec.Containers[i].Image = config.Image
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return pkgruntime.Encode(scheme.DefaultJSONEncoder(), obj)
+	})
+
+	if err != nil {
+		return err
+	}
+	for _, p := range patches {
+		_, err = resource.
+			NewHelper(p.Info.Client, p.Info.Mapping).
+			DryRun(false).
+			Patch(p.Info.Namespace, p.Info.Name, pkgtypes.StrategicMergePatchType, p.Patch, nil)
+		if err != nil {
+			return fmt.Errorf("failed to patch image update to pod template: %v", err)
+		}
+		err = util.RolloutStatus(ctx, c.factory, c.Namespace, fmt.Sprintf("%s/%s", p.Info.Mapping.Resource.GroupResource().String(), p.Info.Name), time.Minute*60)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
