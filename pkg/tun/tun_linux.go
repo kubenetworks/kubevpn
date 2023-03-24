@@ -11,7 +11,6 @@ import (
 
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/docker/libcontainer/netlink"
-	"github.com/milosgajdos/tenus"
 	log "github.com/sirupsen/logrus"
 	"golang.zx2c4.com/wireguard/tun"
 
@@ -29,40 +28,40 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		mtu = config.DefaultMTU
 	}
 
-	var ifce tun.Device
-	ifce, err = tun.CreateTUN("utun", mtu)
+	var device tun.Device
+	device, err = tun.CreateTUN("utun", mtu)
 	if err != nil {
 		return
 	}
 
 	var name string
-	name, err = ifce.Name()
+	name, err = device.Name()
 	if err != nil {
 		return
 	}
-
-	link, err := tenus.NewLinkFrom(name)
+	ifc, err := net.InterfaceByName(name)
 	if err != nil {
+		err = fmt.Errorf("could not find interface name: %s", err)
 		return
 	}
 
 	cmd := fmt.Sprintf("ip link set dev %s mtu %d", name, mtu)
 	log.Debugf("[tun] %s", cmd)
-	if er := link.SetLinkMTU(mtu); er != nil {
+	if er := netlink.NetworkSetMTU(ifc, mtu); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
 	}
 
 	cmd = fmt.Sprintf("ip address add %s dev %s", cfg.Addr, name)
 	log.Debugf("[tun] %s", cmd)
-	if er := link.SetLinkIp(ip, ipNet); er != nil {
+	if er := netlink.NetworkLinkAddIp(ifc, ip, ipNet); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
 	}
 
 	cmd = fmt.Sprintf("ip link set dev %s up", name)
 	log.Debugf("[tun] %s", cmd)
-	if er := link.SetLinkUp(); er != nil {
+	if er := netlink.NetworkLinkUp(ifc); er != nil {
 		err = fmt.Errorf("%s: %v", cmd, er)
 		return
 	}
@@ -81,7 +80,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	conn = &tunConn{
-		ifce: ifce,
+		ifce: device,
 		addr: &net.IPAddr{IP: ip},
 	}
 	return

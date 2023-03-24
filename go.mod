@@ -12,7 +12,6 @@ require (
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/go-openapi/jsonpointer v0.19.6 // indirect
 	github.com/miekg/dns v1.1.50
-	github.com/milosgajdos/tenus v0.0.3
 	github.com/moby/term v0.0.0-20221205130635-1aeaba878587
 	github.com/opencontainers/image-spec v1.0.3-0.20220303224323-02efb9a75ee1
 	github.com/pkg/errors v0.9.1
