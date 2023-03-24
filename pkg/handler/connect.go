@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/netip"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/docker/distribution/reference"
 	"github.com/google/gopacket/routing"
+	goversion "github.com/hashicorp/go-version"
 	netroute "github.com/libp2p/go-netroute"
 	miekgdns "github.com/miekg/dns"
 	"github.com/pkg/errors"
@@ -786,6 +788,7 @@ func (c *ConnectOptions) heartbeats() {
 
 			err := c.dhcp.ForEach(func(ip net.IP) {
 				go func() {
+					time.Sleep(time.Millisecond * time.Duration(rand.Intn(1000)))
 					_, _ = util.Ping(ip.String())
 				}()
 			})
@@ -938,7 +941,16 @@ func (c *ConnectOptions) UpdateImage(ctx context.Context) error {
 	if reference.Domain(newImg) != reference.Domain(oldImg) {
 		return nil
 	}
-	if oldTag.Tag() >= newTag.Tag() {
+	var oldVersion, newVersion *goversion.Version
+	oldVersion, err = goversion.NewVersion(oldTag.Tag())
+	if err != nil {
+		return nil
+	}
+	newVersion, err = goversion.NewVersion(newTag.Tag())
+	if err != nil {
+		return nil
+	}
+	if oldVersion.GreaterThanOrEqual(newVersion) {
 		return nil
 	}
 
@@ -985,10 +997,18 @@ func (c *ConnectOptions) SetImage(ctx context.Context) error {
 	if reference.Domain(newImg) != reference.Domain(oldImg) {
 		return nil
 	}
-	if oldTag.Tag() >= newTag.Tag() {
+	var oldVersion, newVersion *goversion.Version
+	oldVersion, err = goversion.NewVersion(oldTag.Tag())
+	if err != nil {
 		return nil
 	}
-
+	newVersion, err = goversion.NewVersion(newTag.Tag())
+	if err != nil {
+		return nil
+	}
+	if oldVersion.GreaterThanOrEqual(newVersion) {
+		return nil
+	}
 	log.Infof("found newer image %s, set image from %s to it...", config.Image, deployment.Spec.Template.Spec.Containers[0].Image)
 
 	r := c.factory.NewBuilder().

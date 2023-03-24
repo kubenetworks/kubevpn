@@ -70,6 +70,35 @@ jobs:
           token: ${{ secrets.REPOSITORYDISPATCH }}
           inputs: '{"url": "${{ steps.create_release.outputs.upload_url }}", "tag": "${{ github.ref_name }}"}'
 
+      - name: Make changes to pull request
+        run: make version
+      - name: Create Pull Request
+        id: cpr
+        uses: peter-evans/create-pull-request@v4
+        with:
+          add-paths: |
+            *.yaml
+          token: ${{ secrets.REPOSITORYDISPATCH }}
+          commit-message: "feat: update krew index version to ${{ github.ref }}"
+          committer: GitHub <noreply@github.com>
+          author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
+          signoff: false
+          branch: feat/update-krew-index-version
+          base: master
+          delete-branch: true
+          title: 'feat: update krew index version to ${{ github.ref }}'
+          body: |
+            update report
+            - update with *today's* date
+            - update krew index version to ${{ github.ref }}
+          labels: |
+            report
+            automated pr
+#          team-reviewers: |
+#            owners
+#            maintainers
+          draft: false
+
 #      - name: Update new version in krew-index
 #        uses: rajatjindal/krew-release-bot@v0.0.43
 #        with:
