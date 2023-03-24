@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"fmt"
-	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -28,26 +27,33 @@ var stopChan = make(chan os.Signal)
 var RollbackFuncList = make([]func(), 2)
 var ctx, cancel = context.WithCancel(context.Background())
 
-func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, ns string, dhcp *DHCPManager, usedIPs ...*net.IPNet) {
+func (c *ConnectOptions) addCleanUpResourceHandler() {
 	signal.Notify(stopChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL)
 	go func() {
 		<-stopChan
 		log.Info("prepare to exit, cleaning up")
-		if dhcp != nil {
-			err := dhcp.ReleaseIpToDHCP(usedIPs...)
-			if err != nil {
-				log.Errorf("failed to release ip to dhcp, err: %v", err)
-			}
+		err := c.dhcp.ReleaseIpToDHCP(append(c.usedIPs, c.localTunIP)...)
+		if err != nil {
+			log.Errorf("failed to release ip to dhcp, err: %v", err)
 		}
 		for _, function := range RollbackFuncList {
 			if function != nil {
 				function()
 			}
 		}
-		_ = clientset.CoreV1().Pods(ns).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
-		_, err := updateRefCount(clientset.CoreV1().ConfigMaps(ns), config.ConfigMapPodTrafficManager, -1)
+		_ = c.clientset.CoreV1().Pods(c.Namespace).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
+		count, err := updateRefCount(c.clientset.CoreV1().ConfigMaps(c.Namespace), config.ConfigMapPodTrafficManager, -1)
+		if err == nil {
+			// only if ref is zero and deployment is not ready, needs to clean up
+			if count <= 0 {
+				deployment, errs := c.clientset.AppsV1().Deployments(c.Namespace).Get(context.Background(), config.ConfigMapPodTrafficManager, v1.GetOptions{})
+				if errs == nil && deployment.Status.UnavailableReplicas != 0 {
+					cleanup(c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, true)
+				}
+			}
+		}
 		if err != nil {
-			log.Error(err)
+			log.Errorf("can not update ref-count: %v", err)
 		}
 		dns.CancelDNS()
 		cancel()

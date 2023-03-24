@@ -85,8 +85,15 @@ func GetDNSIPFromDnsPod(clientset *kubernetes.Clientset) (ips []string, err erro
 func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInterface) {
 	rateLimiter := flowcontrol.NewTokenBucketRateLimiter(0.2, 1)
 	defer rateLimiter.Stop()
-
 	var last string
+
+	serviceList, err := serviceInterface.List(ctx, v1.ListOptions{})
+	if err == nil && len(serviceList.Items) != 0 {
+		entry := generateHostsEntry(serviceList.Items)
+		if err = updateHosts(entry); err == nil {
+			last = entry
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -94,7 +101,7 @@ func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInte
 		default:
 			func() {
 				w, err := serviceInterface.Watch(ctx, v1.ListOptions{
-					Watch: true, TimeoutSeconds: pointer.Int64(30),
+					Watch: true, TimeoutSeconds: pointer.Int64(30), ResourceVersion: serviceList.ResourceVersion,
 				})
 				if err != nil {
 					if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) {
@@ -109,7 +116,7 @@ func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInte
 						if !ok {
 							return
 						}
-						if watch.Deleted == c.Type || watch.Error == c.Type {
+						if watch.Error == c.Type || watch.Bookmark == c.Type {
 							continue
 						}
 						if !rateLimiter.TryAccept() {
@@ -123,8 +130,7 @@ func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInte
 						if entry == last {
 							continue
 						}
-						err = updateHosts(entry)
-						if err != nil {
+						if err = updateHosts(entry); err != nil {
 							return
 						}
 						last = entry

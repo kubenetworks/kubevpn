@@ -16,8 +16,8 @@ func CmdReset(factory cmdutil.Factory) *cobra.Command {
 	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "reset",
-		Short: "Reset KubeVPN",
-		Long:  `Reset KubeVPN if any error occurs`,
+		Short: "Reset all changes made by KubeVPN",
+		Long:  `Reset all changes made by KubeVPN`,
 		Example: templates.Examples(i18n.T(`
         # Reset default namespace
 		  kubevpn reset
