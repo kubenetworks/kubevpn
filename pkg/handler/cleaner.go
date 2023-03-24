@@ -45,9 +45,18 @@ func AddCleanUpResourceHandler(clientset *kubernetes.Clientset, ns string, dhcp 
 			}
 		}
 		_ = clientset.CoreV1().Pods(ns).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
-		_, err := updateRefCount(clientset.CoreV1().ConfigMaps(ns), config.ConfigMapPodTrafficManager, -1)
+		count, err := updateRefCount(clientset.CoreV1().ConfigMaps(ns), config.ConfigMapPodTrafficManager, -1)
+		if err == nil {
+			// only if ref is zero and deployment is not ready, needs to clean up
+			if count <= 0 {
+				deployment, errs := clientset.AppsV1().Deployments(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, v1.GetOptions{})
+				if errs == nil && deployment.Status.UnavailableReplicas != 0 {
+					cleanup(clientset, ns, config.ConfigMapPodTrafficManager, true)
+				}
+			}
+		}
 		if err != nil {
-			log.Error(err)
+			log.Errorf("can not update ref-count: %v", err)
 		}
 		dns.CancelDNS()
 		cancel()
