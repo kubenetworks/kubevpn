@@ -18,10 +18,12 @@ import (
 )
 
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
-	ip, ipNet, err := net.ParseCIDR(cfg.Addr)
-	if err != nil {
+	if cfg.Addr == "" && cfg.Addr6 == "" {
+		err = fmt.Errorf("ipv4 address and ipv6 address can not be empty at same time")
 		return
 	}
+
+	var ipv4, ipv6 net.IP
 
 	mtu := cfg.MTU
 	if mtu <= 0 {
@@ -29,8 +31,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	var device tun.Device
-	device, err = tun.CreateTUN("utun", mtu)
-	if err != nil {
+	if device, err = tun.CreateTUN("utun", mtu); err != nil {
 		return
 	}
 
@@ -39,49 +40,60 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if err != nil {
 		return
 	}
-	ifc, err := net.InterfaceByName(name)
-	if err != nil {
+	var ifc *net.Interface
+	if ifc, err = net.InterfaceByName(name); err != nil {
 		err = fmt.Errorf("could not find interface name: %s", err)
 		return
 	}
 
-	cmd := fmt.Sprintf("ip link set dev %s mtu %d", name, mtu)
-	log.Debugf("[tun] %s", cmd)
-	if er := netlink.NetworkSetMTU(ifc, mtu); er != nil {
-		err = fmt.Errorf("%s: %v", cmd, er)
+	if err = netlink.NetworkSetMTU(ifc, mtu); err != nil {
+		err = fmt.Errorf("can not setup mtu %d to device %s : %v", mtu, name, err)
 		return
 	}
 
-	cmd = fmt.Sprintf("ip address add %s dev %s", cfg.Addr, name)
-	log.Debugf("[tun] %s", cmd)
-	if er := netlink.NetworkLinkAddIp(ifc, ip, ipNet); er != nil {
-		err = fmt.Errorf("%s: %v", cmd, er)
-		return
+	if cfg.Addr != "" {
+		var ipv4CIDR *net.IPNet
+		if ipv4, ipv4CIDR, err = net.ParseCIDR(cfg.Addr); err != nil {
+			return
+		}
+		if err = netlink.NetworkLinkAddIp(ifc, ipv4, ipv4CIDR); err != nil {
+			err = fmt.Errorf("can not set ipv4 address %s to device %s : %v", ipv4.String(), name, err)
+			return
+		}
 	}
 
-	cmd = fmt.Sprintf("ip link set dev %s up", name)
-	log.Debugf("[tun] %s", cmd)
-	if er := netlink.NetworkLinkUp(ifc); er != nil {
-		err = fmt.Errorf("%s: %v", cmd, er)
+	if cfg.Addr6 != "" {
+		var ipv6CIDR *net.IPNet
+		if ipv6, ipv6CIDR, err = net.ParseCIDR(cfg.Addr6); err != nil {
+			return
+		}
+		if err = netlink.NetworkLinkAddIp(ifc, ipv6, ipv6CIDR); err != nil {
+			err = fmt.Errorf("can not setup ipv6 address %s to device %s : %v", ipv6.String(), name, err)
+			return
+		}
+	}
+
+	if err = netlink.NetworkLinkUp(ifc); err != nil {
+		err = fmt.Errorf("can not up device %s : %v", name, err)
 		return
 	}
 
 	if err = os.Setenv(config.EnvTunNameOrLUID, name); err != nil {
-		return nil, nil, err
+		return
 	}
 
 	if err = addTunRoutes(name, cfg.Routes...); err != nil {
 		return
 	}
 
-	itf, err = net.InterfaceByName(name)
-	if err != nil {
+	if itf, err = net.InterfaceByName(name); err != nil {
 		return
 	}
 
 	conn = &tunConn{
-		ifce: device,
-		addr: &net.IPAddr{IP: ip},
+		ifce:  device,
+		addr:  &net.IPAddr{IP: ipv4},
+		addr6: &net.IPAddr{IP: ipv6},
 	}
 	return
 }
@@ -93,7 +105,8 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 		}
 		cmd := fmt.Sprintf("ip route add %s dev %s", route.Dst.String(), ifName)
 		log.Debugf("[tun] %s", cmd)
-		if err := netlink.AddRoute(route.Dst.String(), "", "", ifName); err != nil && !errors.Is(err, syscall.EEXIST) {
+		err := netlink.AddRoute(route.Dst.String(), "", "", ifName)
+		if err != nil && !errors.Is(err, syscall.EEXIST) {
 			return fmt.Errorf("%s: %v", cmd, err)
 		}
 	}

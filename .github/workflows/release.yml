@@ -71,13 +71,14 @@ jobs:
           inputs: '{"url": "${{ steps.create_release.outputs.upload_url }}", "tag": "${{ github.ref_name }}"}'
 
       - name: Make changes to pull request
-        run: make version
+        run: make version && echo ${GITHUB_REF#refs/*/} > plugins/stable.txt
       - name: Create Pull Request
         id: cpr
         uses: peter-evans/create-pull-request@v4
         with:
           add-paths: |
             *.yaml
+            plugins/stable.txt
           token: ${{ secrets.REPOSITORYDISPATCH }}
           commit-message: "feat: update krew index version to ${{ github.ref }}"
           committer: GitHub <noreply@github.com>

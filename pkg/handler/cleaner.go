@@ -32,7 +32,7 @@ func (c *ConnectOptions) addCleanUpResourceHandler() {
 	go func() {
 		<-stopChan
 		log.Info("prepare to exit, cleaning up")
-		err := c.dhcp.ReleaseIpToDHCP(append(c.usedIPs, c.localTunIP)...)
+		err := c.dhcp.ReleaseIpToDHCP(c.localTunIPv4.IP, c.localTunIPv6.IP)
 		if err != nil {
 			log.Errorf("failed to release ip to dhcp, err: %v", err)
 		}
@@ -133,7 +133,7 @@ func cleanup(clientset *kubernetes.Clientset, namespace, name string, keepCidr b
 
 	if keepCidr {
 		// keep configmap
-		p := []byte(fmt.Sprintf(`[{"op": "remove", "path": "/data/%s"}]`, config.KeyDHCP))
+		p := []byte(fmt.Sprintf(`[{"op": "remove", "path": "/data/%s"},{"op": "remove", "path": "/data/%s"}]`, config.KeyDHCP, config.KeyDHCP6))
 		_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), name, types.JSONPatchType, p, v1.PatchOptions{})
 		p = []byte(fmt.Sprintf(`{"data":{"%s":"%s"}}`, config.KeyRefCount, strconv.Itoa(0)))
 		_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), name, types.MergePatchType, p, v1.PatchOptions{})

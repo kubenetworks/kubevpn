@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"net"
 	"net/netip"
 	"net/url"
@@ -74,21 +73,20 @@ type ConnectOptions struct {
 	cidrs      []*net.IPNet
 	dhcp       *DHCPManager
 	// needs to give it back to dhcp
-	usedIPs    []*net.IPNet
-	routerIP   net.IP
-	localTunIP *net.IPNet
+	localTunIPv4 *net.IPNet
+	localTunIPv6 *net.IPNet
 }
 
 func (c *ConnectOptions) createRemoteInboundPod(ctx1 context.Context) (err error) {
-	c.localTunIP, err = c.dhcp.RentIPBaseNICAddress()
+	c.localTunIPv4, c.localTunIPv6, err = c.dhcp.RentIPBaseNICAddress()
 	if err != nil {
 		return
 	}
 
 	for _, workload := range c.Workloads {
 		configInfo := util.PodRouteConfig{
-			LocalTunIP:           c.localTunIP.IP.String(),
-			TrafficManagerRealIP: c.routerIP.String(),
+			LocalTunIPv4: c.localTunIPv4.IP.String(),
+			LocalTunIPv6: c.localTunIPv6.IP.String(),
 		}
 		// means mesh mode
 		if len(c.Headers) != 0 {
@@ -128,52 +126,44 @@ func Rollback(f cmdutil.Factory, ns, workload string) {
 }
 
 func (c *ConnectOptions) DoConnect() (err error) {
-	trafficMangerNet := net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}
-	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, &trafficMangerNet)
+	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
 	if err = c.dhcp.InitDHCP(ctx); err != nil {
 		return
 	}
 	c.addCleanUpResourceHandler()
-	err = c.GetCIDR(ctx)
-	if err != nil {
+	if err = c.getCIDR(ctx); err != nil {
 		return
 	}
-	c.routerIP, err = CreateOutboundPod(ctx, c.factory, c.clientset, c.Namespace, trafficMangerNet.String())
-	if err != nil {
+	if err = createOutboundPod(ctx, c.factory, c.clientset, c.Namespace); err != nil {
 		return
 	}
-	err = c.SetImage(ctx)
-	if err != nil {
-		return err
+	if err = c.setImage(ctx); err != nil {
+		return
 	}
 	if err = c.createRemoteInboundPod(ctx); err != nil {
 		return
 	}
 	port := util.GetAvailableTCPPortOrDie()
-	err = c.portForward(ctx, fmt.Sprintf("%d:10800", port))
-	if err != nil {
-		return err
+	if err = c.portForward(ctx, fmt.Sprintf("%d:10800", port)); err != nil {
+		return
 	}
 	if util.IsWindows() {
 		driver.InstallWireGuardTunDriver()
 	}
-	err = c.startLocalTunServe(ctx, fmt.Sprintf("tcp://127.0.0.1:%d", port))
-	if err != nil {
-		return err
+	forward := fmt.Sprintf("tcp://127.0.0.1:%d", port)
+	if err = c.startLocalTunServe(ctx, forward); err != nil {
+		return
 	}
-	err = c.addRouteDynamic(ctx)
-	if err != nil {
-		return err
+	if err = c.addRouteDynamic(ctx); err != nil {
+		return
 	}
 	c.deleteFirewallRule(ctx)
-	err = c.setupDNS()
-	if err != nil {
-		return err
+	if err = c.setupDNS(); err != nil {
+		return
 	}
-	go c.heartbeats()
-	err = c.addExtraRoute(ctx)
-	if err != nil {
-		return err
+	//go util.Heartbeats()
+	if err = c.addExtraRoute(ctx); err != nil {
+		return
 	}
 	log.Info("dns service ok")
 	return
@@ -276,7 +266,7 @@ func checkPodStatus(cCtx context.Context, cFunc context.CancelFunc, podName stri
 func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress string) (err error) {
 	// todo figure it out why
 	if util.IsWindows() {
-		c.localTunIP.Mask = net.CIDRMask(0, 32)
+		c.localTunIPv4.Mask = net.CIDRMask(0, 32)
 	}
 	var list = sets.New[string](config.CIDR.String())
 	for _, ipNet := range c.cidrs {
@@ -290,15 +280,19 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 		}
 		list.Insert(s)
 	}
+	if err = os.Setenv(config.EnvInboundPodTunIPv6, c.localTunIPv6.String()); err != nil {
+		return err
+	}
+
 	r := core.Route{
 		ServeNodes: []string{
-			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", c.localTunIP.String(), strings.Join(list.UnsortedList(), ",")),
+			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", c.localTunIPv4.String(), strings.Join(list.UnsortedList(), ",")),
 		},
 		ChainNode: forwardAddress,
 		Retries:   5,
 	}
 
-	log.Debugf("your ip is %s", c.localTunIP.IP.String())
+	log.Debugf("ipv4: %s, ipv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
 	if err = Start(ctx, r); err != nil {
 		log.Errorf("error while create tunnel, err: %v", errors.WithStack(err))
 	} else {
@@ -527,16 +521,22 @@ func Start(ctx context.Context, r core.Route) error {
 		return errors.WithStack(err)
 	}
 	if len(servers) == 0 {
-		return errors.New("invalid config")
+		return fmt.Errorf("server is empty, server config: %s", strings.Join(r.ServeNodes, ","))
 	}
 	for _, server := range servers {
 		go func(ctx context.Context, server core.Server) {
 			l := server.Listener
-			defer l.Close()
 			for {
-				conn, err := l.Accept()
-				if err != nil {
-					log.Warnf("server: accept error: %v", err)
+				select {
+				case <-ctx.Done():
+					_ = l.Close()
+					return
+				default:
+				}
+
+				conn, errs := l.Accept()
+				if errs != nil {
+					log.Debugf("server accept connect error: %v", errs)
 					continue
 				}
 				go server.Handler.Handle(ctx, conn)
@@ -729,14 +729,14 @@ func (c *ConnectOptions) GetRunningPodList() ([]v1.Pod, error) {
 	return list.Items, nil
 }
 
-// GetCIDR
+// getCIDR
 // 1: get pod cidr
 // 2: get service cidr
 // todo optimize code should distinguish service cidr and pod cidr
 // https://stackoverflow.com/questions/45903123/kubernetes-set-service-cidr-and-pod-cidr-the-same
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster/54183373#54183373
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster
-func (c *ConnectOptions) GetCIDR(ctx context.Context) (err error) {
+func (c *ConnectOptions) getCIDR(ctx context.Context) (err error) {
 	// (1) get cidr from cache
 	var value string
 	value, err = c.dhcp.Get(ctx, config.KeyClusterIPv4POOLS)
@@ -772,31 +772,6 @@ func (c *ConnectOptions) GetCIDR(ctx context.Context) (err error) {
 	// (3) fallback to get cidr from node/pod/service
 	c.cidrs, err = util.GetCIDRFromResourceUgly(c.clientset, c.Namespace)
 	return
-}
-
-func (c *ConnectOptions) heartbeats() {
-	ticker := time.NewTicker(time.Second * 30)
-	defer ticker.Stop()
-
-	for ; true; <-ticker.C {
-		func() {
-			defer func() {
-				if err := recover(); err != nil {
-					log.Debug(err)
-				}
-			}()
-
-			err := c.dhcp.ForEach(func(ip net.IP) {
-				go func() {
-					time.Sleep(time.Millisecond * time.Duration(rand.Intn(1000)))
-					_, _ = util.Ping(ip.String())
-				}()
-			})
-			if err != nil {
-				log.Debug(err)
-			}
-		}()
-	}
 }
 
 func (c *ConnectOptions) addExtraRoute(ctx context.Context) (err error) {
@@ -971,7 +946,7 @@ func (c *ConnectOptions) UpdateImage(ctx context.Context) error {
 	return err
 }
 
-func (c *ConnectOptions) SetImage(ctx context.Context) error {
+func (c *ConnectOptions) setImage(ctx context.Context) error {
 	deployment, err := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err

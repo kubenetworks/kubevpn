@@ -34,8 +34,9 @@ type Virtual struct {
 }
 
 type Rule struct {
-	Headers    map[string]string
-	LocalTunIP string
+	Headers      map[string]string
+	LocalTunIPv4 string
+	LocalTunIPv6 string
 }
 
 func (a *Virtual) To() (
@@ -52,10 +53,12 @@ func (a *Virtual) To() (
 
 		var rr []*route.Route
 		for _, rule := range a.Rules {
-			clusterName := fmt.Sprintf("%s_%v", rule.LocalTunIP, port.ContainerPort)
-			clusters = append(clusters, ToCluster(clusterName))
-			endpoints = append(endpoints, ToEndPoint(clusterName, rule.LocalTunIP, port.ContainerPort))
-			rr = append(rr, ToRoute(clusterName, rule.Headers))
+			for _, ip := range []string{rule.LocalTunIPv4, rule.LocalTunIPv6} {
+				clusterName := fmt.Sprintf("%s_%v", ip, port.ContainerPort)
+				clusters = append(clusters, ToCluster(clusterName))
+				endpoints = append(endpoints, ToEndPoint(clusterName, ip, port.ContainerPort))
+				rr = append(rr, ToRoute(clusterName, rule.Headers))
+			}
 		}
 		rr = append(rr, DefaultRoute())
 		routes = append(routes, &route.RouteConfiguration{
@@ -122,7 +125,7 @@ func ToCluster(clusterName string) *cluster.Cluster {
 				},
 			}),
 		},
-		DnsLookupFamily: cluster.Cluster_V4_ONLY,
+		DnsLookupFamily: cluster.Cluster_ALL,
 	}
 }
 

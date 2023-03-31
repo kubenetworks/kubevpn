@@ -19,43 +19,44 @@ type dhcpServer struct {
 }
 
 func (d *dhcpServer) rentIP(w http.ResponseWriter, r *http.Request) {
-	podName := r.Header.Get("POD_NAME")
-	namespace := r.Header.Get("POD_NAMESPACE")
+	podName := r.Header.Get(config.HeaderPodName)
+	namespace := r.Header.Get(config.HeaderPodNamespace)
 
 	log.Infof("handling rent ip request, pod name: %s, ns: %s", podName, namespace)
 	cmi := d.clientset.CoreV1().ConfigMaps(namespace)
-	dhcp := handler.NewDHCPManager(cmi, namespace, &net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask})
-	random, err := dhcp.RentIPRandom()
+	dhcp := handler.NewDHCPManager(cmi, namespace)
+	v4, v6, err := dhcp.RentIPRandom()
 	if err != nil {
 		log.Error(err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	_, err = w.Write([]byte(random.String()))
+	// todo patch annotation
+	_, err = w.Write([]byte(fmt.Sprintf("%s,%s", v4.String(), v6.String())))
 	if err != nil {
 		log.Error(err)
 	}
 }
 
 func (d *dhcpServer) releaseIP(w http.ResponseWriter, r *http.Request) {
-	podName := r.Header.Get("POD_NAME")
-	namespace := r.Header.Get("POD_NAMESPACE")
-	ip := r.Header.Get("IP")
+	podName := r.Header.Get(config.HeaderPodName)
+	namespace := r.Header.Get(config.HeaderPodNamespace)
 
-	_, ipNet, err := net.ParseCIDR(ip)
-	if err != nil {
-		log.Errorf("ip is invailed, ip: %s, err: %v", ip, err)
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(fmt.Sprintf("ip is invailed, ip: %s, err: %v", ip, err)))
-		return
+	var ips []net.IP
+	for _, s := range []string{r.Header.Get(config.HeaderIPv4), r.Header.Get(config.HeaderIPv6)} {
+		ip, _, err := net.ParseCIDR(s)
+		if err != nil {
+			log.Errorf("ip is invailed, ip: %s, err: %v", ip.String(), err)
+			continue
+		}
+		ips = append(ips, ip)
 	}
 
 	log.Infof("handling release ip request, pod name: %s, ns: %s", podName, namespace)
 	cmi := d.clientset.CoreV1().ConfigMaps(namespace)
-	dhcp := handler.NewDHCPManager(cmi, namespace, &net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask})
-	err = dhcp.ReleaseIpToDHCP(ipNet)
-	if err != nil {
+	dhcp := handler.NewDHCPManager(cmi, namespace)
+	if err := dhcp.ReleaseIpToDHCP(ips...); err != nil {
 		log.Error(err)
 		w.WriteHeader(http.StatusBadRequest)
 		return

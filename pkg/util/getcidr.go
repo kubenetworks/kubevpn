@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
@@ -140,7 +141,8 @@ func getPodCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTCli
 			var m map[string]interface{}
 			_ = json.Unmarshal(plugin.Bytes, &m)
 			slice, _, _ := unstructured.NestedStringSlice(m, "ipam", "ipv4_pools")
-			for _, s := range slice {
+			slice6, _, _ := unstructured.NestedStringSlice(m, "ipam", "ipv6_pools")
+			for _, s := range sets.New[string]().Insert(slice...).Insert(slice6...).UnsortedList() {
 				if _, ipNet, _ := net.ParseCIDR(s); ipNet != nil {
 					cidr = append(cidr, ipNet)
 				}
@@ -286,20 +288,36 @@ func getPodCIDRFromPod(clientset *kubernetes.Clientset, namespace string, svc *n
 		return nil, err
 	}
 	for i := 0; i < len(podList.Items); i++ {
-		if podList.Items[i].Spec.HostNetwork || net.ParseIP(podList.Items[i].Status.PodIP) == nil {
+		if podList.Items[i].Spec.HostNetwork {
 			podList.Items = append(podList.Items[:i], podList.Items[i+1:]...)
 			i--
 		}
 	}
+	var result []*net.IPNet
 	for _, item := range podList.Items {
-		if item.Name == config.CniNetName {
-			return []*net.IPNet{svc, {IP: net.ParseIP(item.Status.PodIP), Mask: /*svc.Mask*/ net.CIDRMask(24, 32)}}, nil
+		s := sets.New[string]().Insert(item.Status.PodIP)
+		for _, p := range item.Status.PodIPs {
+			s.Insert(p.IP)
+		}
+		for _, t := range s.UnsortedList() {
+			if ip := net.ParseIP(t); ip != nil {
+				var mask net.IPMask
+				if ip.To4() != nil {
+					mask = net.CIDRMask(24, 32)
+				} else {
+					mask = net.CIDRMask(64, 128)
+				}
+				result = append(result, &net.IPNet{IP: ip, Mask: /*svc.Mask*/ mask})
+			}
 		}
 	}
-	for _, item := range podList.Items {
-		return []*net.IPNet{svc, {IP: net.ParseIP(item.Status.PodIP), Mask: /*svc.Mask*/ net.CIDRMask(24, 32)}}, nil
+
+	if len(result) == 0 {
+		return nil, fmt.Errorf("can not found pod cidr from pod list")
 	}
-	return nil, fmt.Errorf("can not found pod cidr from pod list")
+
+	return result, nil
+
 }
 
 /*

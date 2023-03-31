@@ -23,9 +23,10 @@ import (
 func CmdServe(factory cmdutil.Factory) *cobra.Command {
 	var route = &core.Route{}
 	cmd := &cobra.Command{
-		Use:   "serve",
-		Short: "Server side, startup traffic manager, forward inbound and outbound traffic",
-		Long:  `Server side, startup traffic manager, forward inbound and outbound traffic.`,
+		Use:    "serve",
+		Hidden: true,
+		Short:  "Server side, startup traffic manager, forward inbound and outbound traffic",
+		Long:   `Server side, startup traffic manager, forward inbound and outbound traffic.`,
 		PreRun: func(*cobra.Command, []string) {
 			util.InitLogger(config.Debug)
 			go func() { log.Info(http.ListenAndServe("localhost:6060", nil)) }()
@@ -48,10 +49,10 @@ func CmdServe(factory cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			//go util.Heartbeats()
 			<-ctx.Done()
-			return nil
+			return handler.Final()
 		},
-		PostRunE: func(cmd *cobra.Command, args []string) error { return handler.Final() },
 	}
 	cmd.Flags().StringArrayVarP(&route.ServeNodes, "nodeCommand", "L", []string{}, "command needs to be executed")
 	cmd.Flags().StringVarP(&route.ChainNode, "chainCommand", "F", "", "command needs to be executed")

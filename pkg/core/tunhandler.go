@@ -15,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	pkgtun "github.com/wencaiwulue/kubevpn/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -236,37 +237,78 @@ func (d *Device) Close() {
 }
 
 func (d *Device) heartbeats() {
-	src := d.tun.LocalAddr().(*net.IPAddr).IP.To4()
-	dst := config.RouterIP.To4()
-	if dst.Equal(src) {
+	tunIface, err := pkgtun.GetInterface()
+	if err != nil {
+		return
+	}
+	addrs, err := tunIface.Addrs()
+	if err != nil {
+		return
+	}
+	var srcIPv4, srcIPv6 net.IP
+	for _, addr := range addrs {
+		ip, cidr, err := net.ParseCIDR(addr.String())
+		if err != nil {
+			continue
+		}
+		if cidr.Contains(config.RouterIP) {
+			srcIPv4 = ip
+		}
+		if cidr.Contains(config.RouterIP6) {
+			srcIPv6 = ip
+		}
+	}
+	if srcIPv4 == nil || srcIPv6 == nil {
+		return
+	}
+	if config.RouterIP.To4().Equal(srcIPv4) {
+		return
+	}
+	if config.RouterIP6.To4().Equal(srcIPv6) {
 		return
 	}
 
 	var bytes []byte
-	var err error
+	var bytes6 []byte
 
-	ticker := time.NewTicker(time.Second * 15)
+	ticker := time.NewTicker(time.Second * 5)
 	defer ticker.Stop()
 
 	for ; true; <-ticker.C {
 		for i := 0; i < 4; i++ {
 			if bytes == nil {
-				bytes, err = genICMPPacket(src, dst)
+				bytes, err = genICMPPacket(srcIPv4, config.RouterIP)
 				if err != nil {
 					log.Error(err)
 					continue
 				}
 			}
-			data := config.LPool.Get().([]byte)[:]
-			length := copy(data, bytes)
-			if d.closed.Load() {
-				return
+			if bytes6 == nil {
+				bytes6, err = genICMPPacketIPv6(srcIPv6, config.RouterIP6)
+				if err != nil {
+					log.Error(err)
+					continue
+				}
 			}
-			d.tunInbound <- &DataElem{
-				data:   data,
-				length: length,
-				src:    src,
-				dst:    dst,
+			for index, i2 := range [][]byte{bytes, bytes6} {
+				if d.closed.Load() {
+					return
+				}
+
+				data := config.LPool.Get().([]byte)[:]
+				length := copy(data, i2)
+				var src, dst net.IP
+				if index == 0 {
+					src, dst = srcIPv4, config.RouterIP
+				} else {
+					src, dst = srcIPv6, config.RouterIP6
+				}
+				d.tunInbound <- &DataElem{
+					data:   data,
+					length: length,
+					src:    src,
+					dst:    dst,
+				}
 			}
 			time.Sleep(time.Second)
 		}
@@ -297,6 +339,28 @@ func genICMPPacket(src net.IP, dst net.IP) ([]byte, error) {
 	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize icmp packet, err: %v", err)
+	}
+	return buf.Bytes(), nil
+}
+
+func genICMPPacketIPv6(src net.IP, dst net.IP) ([]byte, error) {
+	buf := gopacket.NewSerializeBuffer()
+	icmpLayer := layers.ICMPv6{
+		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
+	}
+	ipLayer := layers.IPv6{
+		Version:    6,
+		SrcIP:      src,
+		DstIP:      dst,
+		NextHeader: layers.IPProtocolICMPv6,
+		HopLimit:   255,
+	}
+	opts := gopacket.SerializeOptions{
+		FixLengths: true,
+	}
+	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize icmp6 packet, err: %v", err)
 	}
 	return buf.Bytes(), nil
 }

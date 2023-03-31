@@ -2,11 +2,13 @@ package core
 
 import (
 	"net"
+	"os"
 	"strings"
 
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/pkg/errors"
 
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/tun"
 )
 
@@ -69,6 +71,7 @@ func (r *Route) GenerateServers() ([]Server, error) {
 			ln, err = tun.Listener(tun.Config{
 				Name:    node.Get("name"),
 				Addr:    node.Get("net"),
+				Addr6:   os.Getenv(config.EnvInboundPodTunIPv6),
 				MTU:     node.GetInt("mtu"),
 				Routes:  parseIPRoutes(node.Get("route")),
 				Gateway: node.Get("gw"),

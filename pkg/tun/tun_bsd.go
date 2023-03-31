@@ -1,4 +1,4 @@
-//go:build freebsd
+//go:build freebsd || openbsd
 
 package tun
 
@@ -16,10 +16,12 @@ import (
 )
 
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
-	ip, _, err := net.ParseCIDR(cfg.Addr)
-	if err != nil {
+	if cfg.Addr == "" && cfg.Addr6 == "" {
+		err = fmt.Errorf("ipv4 address and ipv6 address can not be empty at same time")
 		return
 	}
+
+	var ipv4, ipv6 net.IP
 
 	mtu := cfg.MTU
 	if mtu <= 0 {
@@ -38,12 +40,31 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		return
 	}
 
-	cmd := fmt.Sprintf("ifconfig %s inet %s mtu %d up", ifce.Name(), cfg.Addr, mtu)
-	log.Debugf("[tun] %s", cmd)
-	args := strings.Split(cmd, " ")
-	if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
-		err = fmt.Errorf("%s: %v", cmd, er)
-		return
+	if cfg.Addr != "" {
+		ipv4, _, err = net.ParseCIDR(cfg.Addr6)
+		if err != nil {
+			return
+		}
+		cmd := fmt.Sprintf("ifconfig %s inet %s mtu %d up", ifce.Name(), cfg.Addr, mtu)
+		log.Debugf("[tun] %s", cmd)
+		args := strings.Split(cmd, " ")
+		if err = exec.Command(args[0], args[1:]...).Run(); err != nil {
+			err = fmt.Errorf("%s: %v", cmd, err)
+			return
+		}
+	}
+	if cfg.Addr6 != "" {
+		ipv6, _, err = net.ParseCIDR(cfg.Addr6)
+		if err != nil {
+			return
+		}
+		cmd := fmt.Sprintf("ifconfig %s add %s", ifce.Name(), cfg.Addr6)
+		log.Debugf("[tun] %s", cmd)
+		args := strings.Split(cmd, " ")
+		if err = exec.Command(args[0], args[1:]...).Run(); err != nil {
+			err = fmt.Errorf("%s: %v", cmd, err)
+			return
+		}
 	}
 
 	if err = os.Setenv(config.EnvTunNameOrLUID, ifce.Name()); err != nil {
@@ -60,8 +81,9 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	conn = &tunConn{
-		ifce: ifce,
-		addr: &net.IPAddr{IP: ip},
+		ifce:  ifce,
+		addr:  &net.IPAddr{IP: ipv4},
+		addr6: &net.IPAddr{IP: ipv6},
 	}
 	return
 }
@@ -71,7 +93,11 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 		if route.Dst.String() == "" {
 			continue
 		}
-		cmd := fmt.Sprintf("route add -net %s -interface %s", route.Dst.String(), ifName)
+		if route.Dst.IP.To4() != nil {
+			cmd := fmt.Sprintf("route add -net %s -interface %s", route.Dst.String(), ifName)
+		} else {
+			cmd := fmt.Sprintf("route add -inet6 %s -interface %s", route.Dst.String(), ifName)
+		}
 		log.Debugf("[tun] %s", cmd)
 		args := strings.Split(cmd, " ")
 		if er := exec.Command(args[0], args[1:]...).Run(); er != nil {

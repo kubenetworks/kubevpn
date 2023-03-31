@@ -33,35 +33,55 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig) {
 		}},
 		Env: []corev1.EnvVar{
 			{
-				Name:  "LocalTunIP",
-				Value: c.LocalTunIP,
+				Name:  "LocalTunIPv4",
+				Value: c.LocalTunIPv4,
 			},
 			{
-				Name:  "TrafficManagerRealIP",
-				Value: c.TrafficManagerRealIP,
+				Name:  "LocalTunIPv6",
+				Value: c.LocalTunIPv6,
 			},
 			{
-				Name:  config.EnvInboundPodTunIP,
-				Value: c.InboundPodTunIP,
+				Name:  config.EnvInboundPodTunIPv4,
+				Value: "",
 			},
 			{
-				Name:  "CIDR",
+				Name:  config.EnvInboundPodTunIPv6,
+				Value: "",
+			},
+			{
+				Name:  "CIDR4",
 				Value: config.CIDR.String(),
+			},
+			{
+				Name:  "CIDR6",
+				Value: config.CIDR6.String(),
+			},
+			{
+				Name:  "TrafficManagerService",
+				Value: config.ConfigMapPodTrafficManager,
 			},
 		},
 		Command: []string{"/bin/sh", "-c"},
 		// https://www.netfilter.org/documentation/HOWTO/NAT-HOWTO-6.html#ss6.2
 		Args: []string{`
-sysctl net.ipv4.ip_forward=1
+sysctl -w net.ipv4.ip_forward=1
+sysctl -w net.ipv6.conf.all.forwarding=1
 sysctl -w net.ipv4.conf.all.route_localnet=1
 update-alternatives --set iptables /usr/sbin/iptables-legacy
 iptables -F
+ip6tables -F
 iptables -P INPUT ACCEPT
+ip6tables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
-iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIP}
+ip6tables -P FORWARD ACCEPT
+iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIPv4}
+ip6tables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIPv6}
 iptables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
-iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIP}
-kubevpn serve -L "tun:/127.0.0.1:8422?net=${InboundPodTunIP}&route=${CIDR}" -F "tcp://${TrafficManagerRealIP}:10800"`,
+ip6tables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
+# for curl -g -6 [efff:ffff:ffff:ffff:ffff:ffff:ffff:999a]:9080/health or curl 127.0.0.1:9080/health hit local PC 
+iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIPv4}
+ip6tables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIPv6}
+kubevpn serve -L "tun:/127.0.0.1:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://${TrafficManagerService}:10800"`,
 		},
 		SecurityContext: &corev1.SecurityContext{
 			Capabilities: &corev1.Capabilities{

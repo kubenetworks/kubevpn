@@ -53,7 +53,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	}
 	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 
-	err = addEnvoyConfig(clientset, nodeID, c.LocalTunIP, headers, port)
+	err = addEnvoyConfig(clientset, nodeID, c, headers, port)
 	if err != nil {
 		log.Warnln(err)
 		return err
@@ -168,7 +168,7 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 	return err
 }
 
-func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUNIP string, headers map[string]string, port []v1.ContainerPort) error {
+func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP util.PodRouteConfig, headers map[string]string, port []v1.ContainerPort) error {
 	configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err
@@ -191,14 +191,16 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTUN
 			Uid:   nodeID,
 			Ports: port,
 			Rules: []*controlplane.Rule{{
-				Headers:    headers,
-				LocalTunIP: localTUNIP,
+				Headers:      headers,
+				LocalTunIPv4: tunIP.LocalTunIPv4,
+				LocalTunIPv6: tunIP.LocalTunIPv6,
 			}},
 		})
 	} else {
 		v[index].Rules = append(v[index].Rules, &controlplane.Rule{
-			Headers:    headers,
-			LocalTunIP: localTUNIP,
+			Headers:      headers,
+			LocalTunIPv4: tunIP.LocalTunIPv4,
+			LocalTunIPv6: tunIP.LocalTunIPv6,
 		})
 		if v[index].Ports == nil {
 			v[index].Ports = port

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -15,7 +14,7 @@ import (
 )
 
 func Complete(route *core.Route) error {
-	if v, ok := os.LookupEnv(config.EnvInboundPodTunIP); ok && v == "" {
+	if v, ok := os.LookupEnv(config.EnvInboundPodTunIPv4); ok && v == "" {
 		namespace := os.Getenv(config.EnvPodNamespace)
 		if namespace == "" {
 			return fmt.Errorf("can not get namespace")
@@ -34,8 +33,15 @@ func Complete(route *core.Route) error {
 			return err
 		}
 		log.Infof("rent an ip %s", strings.TrimSpace(string(ip)))
-		err = os.Setenv(config.EnvInboundPodTunIP, strings.TrimSpace(string(ip)))
-		if err != nil {
+		ips := strings.Split(string(ip), ",")
+		if len(ips) != 2 {
+			return fmt.Errorf("can not get ip from %s", string(ip))
+		}
+		if err = os.Setenv(config.EnvInboundPodTunIPv4, ips[0]); err != nil {
+			log.Error(err)
+			return err
+		}
+		if err = os.Setenv(config.EnvInboundPodTunIPv6, ips[1]); err != nil {
 			log.Error(err)
 			return err
 		}
@@ -55,14 +61,6 @@ func Complete(route *core.Route) error {
 }
 
 func Final() error {
-	v, ok := os.LookupEnv(config.EnvInboundPodTunIP)
-	if !ok || v == "" {
-		return nil
-	}
-	_, _, err := net.ParseCIDR(v)
-	if err != nil {
-		return err
-	}
 	namespace := os.Getenv(config.EnvPodNamespace)
 	url := fmt.Sprintf("https://%s:80%s", util.GetTlsDomain(namespace), config.APIReleaseIP)
 	req, err := http.NewRequest("DELETE", url, nil)
@@ -71,7 +69,8 @@ func Final() error {
 	}
 	req.Header.Set(config.HeaderPodName, os.Getenv(config.EnvPodName))
 	req.Header.Set(config.HeaderPodNamespace, namespace)
-	req.Header.Set(config.HeaderIP, v)
+	req.Header.Set(config.HeaderIPv4, os.Getenv(config.EnvInboundPodTunIPv4))
+	req.Header.Set(config.HeaderIPv6, os.Getenv(config.EnvInboundPodTunIPv6))
 	_, err = util.DoReq(req)
 	return err
 }
