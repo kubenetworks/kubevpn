@@ -20,14 +20,16 @@ import (
 type DHCPManager struct {
 	client    corev1.ConfigMapInterface
 	cidr      *net.IPNet
+	cidr6     *net.IPNet
 	namespace string
 }
 
-func NewDHCPManager(client corev1.ConfigMapInterface, namespace string, cidr *net.IPNet) *DHCPManager {
+func NewDHCPManager(client corev1.ConfigMapInterface, namespace string) *DHCPManager {
 	return &DHCPManager{
 		client:    client,
 		namespace: namespace,
-		cidr:      cidr,
+		cidr:      &net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask},
+		cidr6:     &net.IPNet{IP: config.RouterIP6, Mask: config.CIDR6.Mask},
 	}
 }
 
@@ -67,35 +69,51 @@ func (d *DHCPManager) InitDHCP(ctx context.Context) error {
 	return nil
 }
 
-func (d *DHCPManager) RentIPBaseNICAddress() (*net.IPNet, error) {
-	var ip net.IP
-	err := d.updateDHCPConfigMap(func(allocator *ipallocator.Range) (err error) {
-		ip, err = allocator.AllocateNext()
+func (d *DHCPManager) RentIPBaseNICAddress() (*net.IPNet, *net.IPNet, error) {
+	var v4, v6 net.IP
+	err := d.updateDHCPConfigMap(func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
+		if v4, err = ipv4.AllocateNext(); err != nil {
+			return err
+		}
+		if v6, err = ipv6.AllocateNext(); err != nil {
+			return err
+		}
 		return
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &net.IPNet{IP: ip, Mask: d.cidr.Mask}, nil
+	return &net.IPNet{IP: v4, Mask: d.cidr.Mask}, &net.IPNet{IP: v6, Mask: d.cidr6.Mask}, nil
 }
 
-func (d *DHCPManager) RentIPRandom() (*net.IPNet, error) {
-	var ip net.IP
-	err := d.updateDHCPConfigMap(func(dhcp *ipallocator.Range) (err error) {
-		ip, err = dhcp.AllocateNext()
+func (d *DHCPManager) RentIPRandom() (*net.IPNet, *net.IPNet, error) {
+	var v4, v6 net.IP
+	err := d.updateDHCPConfigMap(func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
+		if v4, err = ipv4.AllocateNext(); err != nil {
+			return err
+		}
+		if v6, err = ipv6.AllocateNext(); err != nil {
+			return err
+		}
 		return
 	})
 	if err != nil {
 		log.Errorf("failed to rent ip from DHCP server, err: %v", err)
-		return nil, err
+		return nil, nil, err
 	}
-	return &net.IPNet{IP: ip, Mask: d.cidr.Mask}, nil
+	return &net.IPNet{IP: v4, Mask: d.cidr.Mask}, &net.IPNet{IP: v6, Mask: d.cidr6.Mask}, nil
 }
 
-func (d *DHCPManager) ReleaseIpToDHCP(ips ...*net.IPNet) error {
-	return d.updateDHCPConfigMap(func(r *ipallocator.Range) error {
+func (d *DHCPManager) ReleaseIpToDHCP(ips ...net.IP) error {
+	return d.updateDHCPConfigMap(func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
 		for _, ip := range ips {
-			if err := r.Release(ip.IP); err != nil {
+			var use *ipallocator.Range
+			if ip.To4() != nil {
+				use = ipv4
+			} else {
+				use = ipv6
+			}
+			if err := use.Release(ip); err != nil {
 				return err
 			}
 		}
@@ -103,7 +121,7 @@ func (d *DHCPManager) ReleaseIpToDHCP(ips ...*net.IPNet) error {
 	})
 }
 
-func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) error {
+func (d *DHCPManager) updateDHCPConfigMap(f func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error) error {
 	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get cm DHCP server, err: %v", err)
@@ -124,18 +142,40 @@ func (d *DHCPManager) updateDHCPConfigMap(f func(*ipallocator.Range) error) erro
 			return err
 		}
 	}
-	if err = f(dhcp); err != nil {
-		return err
-	}
-	_, bytes, err := dhcp.Snapshot()
+
+	dhcp6, err := ipallocator.NewAllocatorCIDRRange(d.cidr6, func(max int, rangeSpec string) (allocator.Interface, error) {
+		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
+	})
 	if err != nil {
 		return err
 	}
-	cm.Data[config.KeyDHCP] = base64.StdEncoding.EncodeToString(bytes)
+	str, err = base64.StdEncoding.DecodeString(cm.Data[config.KeyDHCP6])
+	if err == nil {
+		err = dhcp6.Restore(d.cidr6, str)
+		if err != nil {
+			return err
+		}
+	}
+	if err = f(dhcp, dhcp6); err != nil {
+		return err
+	}
+
+	for index, i := range []*ipallocator.Range{dhcp, dhcp6} {
+		var bytes []byte
+		if _, bytes, err = i.Snapshot(); err != nil {
+			return err
+		}
+		var key string
+		if index == 0 {
+			key = config.KeyDHCP
+		} else {
+			key = config.KeyDHCP6
+		}
+		cm.Data[key] = base64.StdEncoding.EncodeToString(bytes)
+	}
 	_, err = d.client.Update(context.Background(), cm, metav1.UpdateOptions{})
 	if err != nil {
-		log.Errorf("update dhcp failed, err: %v", err)
-		return err
+		return fmt.Errorf("update dhcp failed, err: %v", err)
 	}
 	return nil
 }
@@ -169,30 +209,4 @@ func (d *DHCPManager) Get(ctx2 context.Context, key string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("can not get data")
-}
-
-func (d *DHCPManager) ForEach(fn func(net.IP)) error {
-	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to get cm DHCP server, err: %v", err)
-	}
-	if cm.Data == nil {
-		cm.Data = make(map[string]string)
-	}
-	dhcp, err := ipallocator.NewAllocatorCIDRRange(d.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
-		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
-	})
-	if err != nil {
-		return err
-	}
-	str, err := base64.StdEncoding.DecodeString(cm.Data[config.KeyDHCP])
-	if err != nil {
-		return err
-	}
-	err = dhcp.Restore(d.cidr, str)
-	if err != nil {
-		return err
-	}
-	dhcp.ForEach(fn)
-	return nil
 }

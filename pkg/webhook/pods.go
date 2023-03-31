@@ -46,14 +46,14 @@ func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionR
 		var found bool
 		for i := 0; i < len(pod.Spec.Containers); i++ {
 			if pod.Spec.Containers[i].Name == config.ContainerSidecarVPN {
+				var v4, v6 *net.IPNet
 				for j := 0; j < len(pod.Spec.Containers[i].Env); j++ {
 					pair := pod.Spec.Containers[i].Env[j]
-					if pair.Name == config.EnvInboundPodTunIP && pair.Value == "" {
+					if pair.Name == config.EnvInboundPodTunIPv4 && pair.Value == "" {
 						found = true
 						cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
-						dhcp := handler.NewDHCPManager(cmi, ar.Request.Namespace, &net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask})
-						var random *net.IPNet
-						random, err = dhcp.RentIPRandom()
+						dhcp := handler.NewDHCPManager(cmi, ar.Request.Namespace)
+						v4, v6, err = dhcp.RentIPRandom()
 						if err != nil {
 							log.Errorf("rent ip random failed, err: %v", err)
 							return toV1AdmissionResponse(err)
@@ -62,9 +62,16 @@ func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionR
 						if accessor, errT := meta.Accessor(ar.Request.Object); errT == nil {
 							name = accessor.GetName()
 						}
-
-						log.Infof("rent ip %s for pod %s in namespace: %s", random.String(), name, ar.Request.Namespace)
-						pod.Spec.Containers[i].Env[j].Value = random.String()
+						log.Infof("rent ipv4: %s ipv6: %s for pod %s in namespace: %s", v4.String(), v6.String(), name, ar.Request.Namespace)
+					}
+				}
+				for j := 0; j < len(pod.Spec.Containers[i].Env); j++ {
+					pair := pod.Spec.Containers[i].Env[j]
+					if pair.Name == config.EnvInboundPodTunIPv4 && v4 != nil {
+						pod.Spec.Containers[i].Env[j].Value = v4.String()
+					}
+					if pair.Name == config.EnvInboundPodTunIPv6 && v6 != nil {
+						pod.Spec.Containers[i].Env[j].Value = v6.String()
 					}
 				}
 			}
@@ -110,28 +117,24 @@ func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionR
 			return toV1AdmissionResponse(err)
 		}
 
-		name, _ := podcmd.FindContainerByName(&pod, config.ContainerSidecarVPN)
-		if name != nil {
-			for _, envVar := range name.Env {
-				if envVar.Name == config.EnvInboundPodTunIP && envVar.Value != "" {
-					ip, cidr, err := net.ParseCIDR(envVar.Value)
-					if err == nil {
-						cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
-						ipnet := &net.IPNet{
-							IP:   ip,
-							Mask: cidr.Mask,
-						}
-						err = handler.NewDHCPManager(cmi, ar.Request.Namespace, &net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}).ReleaseIpToDHCP(ipnet)
-						if err != nil {
-							log.Errorf("release ip to dhcp err: %v, ip: %s", err, envVar.Value)
-						} else {
-							log.Errorf("release ip to dhcp ok, ip: %s", envVar.Value)
-						}
+		container, _ := podcmd.FindContainerByName(&pod, config.ContainerSidecarVPN)
+		if container != nil {
+			var ips []net.IP
+			for _, envVar := range container.Env {
+				if envVar.Name == config.EnvInboundPodTunIPv4 || envVar.Name == config.EnvInboundPodTunIPv6 {
+					if ip, _, err := net.ParseCIDR(envVar.Value); err == nil {
+						ips = append(ips, ip)
 					}
 				}
 			}
+			cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
+			err := handler.NewDHCPManager(cmi, ar.Request.Namespace).ReleaseIpToDHCP(ips...)
+			if err != nil {
+				log.Errorf("release ip to dhcp err: %v, ips: %v", err, ips)
+			} else {
+				log.Errorf("release ip to dhcp ok, ip: %v", ips)
+			}
 		}
-
 		return &v1.AdmissionResponse{
 			Allowed: true,
 		}

@@ -18,6 +18,7 @@ import (
 type Config struct {
 	Name    string
 	Addr    string
+	Addr6   string
 	MTU     int
 	Routes  []types.Route
 	Gateway string
@@ -75,8 +76,9 @@ func (l *tunListener) Close() error {
 }
 
 type tunConn struct {
-	ifce tun.Device
-	addr net.Addr
+	ifce  tun.Device
+	addr  net.Addr
+	addr6 net.Addr
 }
 
 func (c *tunConn) Read(b []byte) (n int, err error) {

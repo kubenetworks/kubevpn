@@ -10,8 +10,9 @@ import (
 
 func CmdWebhook(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "webhook",
-		Short: "Starts a HTTP server, useful for creating MutatingAdmissionWebhook",
+		Use:    "webhook",
+		Hidden: true,
+		Short:  "Starts a HTTP server, useful for creating MutatingAdmissionWebhook",
 		Long: `Starts a HTTP server, useful for creating MutatingAdmissionWebhook.
 After deploying it to Kubernetes cluster, the Administrator needs to create a MutatingWebhookConfiguration
 in the Kubernetes cluster to register remote webhook admission controllers.`,

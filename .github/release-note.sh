@@ -8,9 +8,10 @@ CHANGELOG=$(git log --no-merges --date=short --pretty=format:'- %h %an %ad %s' "
 
 cat <<EOF
 ## ${RELEASE}
-KubeVPN ${RELEASE} is available now !
+KubeVPN ${RELEASE} is available now ! 🎉
+- fix known bugs 🛠
 ## Installation and Upgrading
-You can download binary file to use it directly
+
 ## Changelog
 ${CHANGELOG}
 EOF

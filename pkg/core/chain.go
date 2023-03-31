@@ -71,7 +71,7 @@ func (c *Chain) getConn(ctx context.Context) (net.Conn, error) {
 	if c.IsEmpty() {
 		return nil, ErrorEmptyChain
 	}
-	return c.Node().Client.Dial(ctx, c.Node().Addr)
+	return c.Node().Client.Dial(ctx, c.resolve(c.Node().Addr))
 }
 
 type Handler interface {

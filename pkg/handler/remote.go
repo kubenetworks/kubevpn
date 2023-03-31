@@ -38,7 +38,10 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace string, trafficManagerIP string) (ip net.IP, err error) {
+func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace string) (err error) {
+	innerIpv4CIDR := net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}
+	innerIpv6CIDR := net.IPNet{IP: config.RouterIP6, Mask: config.CIDR6.Mask}
+
 	service, err := clientset.CoreV1().Services(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err == nil {
 		_, err = polymorphichelpers.AttachablePodForObjectFn(factory, service, 2*time.Second)
@@ -48,7 +51,7 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 				return
 			}
 			log.Infoln("traffic manager already exist, reuse it")
-			return net.ParseIP(service.Spec.ClusterIP), nil
+			return nil
 		}
 	}
 	var deleteResource = func(ctx context.Context) {
@@ -71,7 +74,7 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	// 1) label namespace
 	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if ns.Labels == nil {
 		ns.Labels = map[string]string{}
@@ -79,7 +82,7 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	ns.Labels["ns"] = namespace
 	_, err = clientset.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// 2) create serviceAccount
@@ -91,7 +94,7 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		AutomountServiceAccountToken: pointer.Bool(true),
 	}, metav1.CreateOptions{})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// 3) create roles
@@ -108,7 +111,7 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		}},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// 4) create roleBinding
@@ -130,14 +133,14 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	udp8422 := "8422-for-udp"
 	tcp10800 := "10800-for-tcp"
 	tcp9002 := "9002-for-envoy"
 	tcp80 := "80-for-webhook"
-	svc, err := clientset.CoreV1().Services(namespace).Create(ctx, &v1.Service{
+	_, err = clientset.CoreV1().Services(namespace).Create(ctx, &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
 			Namespace: namespace,
@@ -169,7 +172,7 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	var Resources = v1.ResourceRequirements{
@@ -187,7 +190,7 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	var crt, key []byte
 	crt, key, err = cert.GenerateSelfSignedCertKey(domain, nil, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// reason why not use v1.SecretTypeTls is because it needs key called tls.crt and tls.key, but tls.key can not as env variable
@@ -207,7 +210,7 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	_, err = clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
 
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
-		return nil, err
+		return err
 	}
 
 	deployment := &appsv1.Deployment{
@@ -249,13 +252,18 @@ func CreateOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 							Image:   config.Image,
 							Command: []string{"/bin/sh", "-c"},
 							Args: []string{`
-sysctl net.ipv4.ip_forward=1
+sysctl -w net.ipv4.ip_forward=1
+sysctl -w net.ipv6.conf.all.forwarding=1
 update-alternatives --set iptables /usr/sbin/iptables-legacy
 iptables -F
+ip6tables -F
 iptables -P INPUT ACCEPT
+ip6tables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
-iptables -t nat -A POSTROUTING -s ${CIDR} -o eth0 -j MASQUERADE
-kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug=true`,
+ip6tables -P FORWARD ACCEPT
+iptables -t nat -A POSTROUTING -s ${CIDR4} -o eth0 -j MASQUERADE
+ip6tables -t nat -A POSTROUTING -s ${CIDR6} -o eth0 -j MASQUERADE
+kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" --debug=true`,
 							},
 							EnvFrom: []v1.EnvFromSource{{
 								SecretRef: &v1.SecretEnvSource{
@@ -266,12 +274,20 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug
 							}},
 							Env: []v1.EnvVar{
 								{
-									Name:  "CIDR",
+									Name:  "CIDR4",
 									Value: config.CIDR.String(),
 								},
 								{
-									Name:  "TrafficManagerIP",
-									Value: trafficManagerIP,
+									Name:  "CIDR6",
+									Value: config.CIDR6.String(),
+								},
+								{
+									Name:  config.EnvInboundPodTunIPv4,
+									Value: innerIpv4CIDR.String(),
+								},
+								{
+									Name:  config.EnvInboundPodTunIPv6,
+									Value: innerIpv6CIDR.String(),
 								},
 							},
 							Ports: []v1.ContainerPort{{
@@ -348,11 +364,11 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TrafficManagerIP}" --debug
 		LabelSelector: fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String(),
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer watchStream.Stop()
 	if _, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{}); err != nil {
-		return nil, err
+		return err
 	}
 	var last string
 out:
@@ -360,7 +376,7 @@ out:
 		select {
 		case e, ok := <-watchStream.ResultChan():
 			if !ok {
-				return nil, fmt.Errorf("can not wait pod to be ready because of watch chan has closed")
+				return fmt.Errorf("can not wait pod to be ready because of watch chan has closed")
 			}
 			if podT, ok := e.Object.(*v1.Pod); ok {
 				if podT.DeletionTimestamp != nil {
@@ -386,7 +402,7 @@ out:
 				last = sb.String()
 			}
 		case <-time.Tick(time.Minute * 60):
-			return nil, errors.New(fmt.Sprintf("wait pod %s to be ready timeout", config.ConfigMapPodTrafficManager))
+			return errors.New(fmt.Sprintf("wait pod %s to be ready timeout", config.ConfigMapPodTrafficManager))
 		}
 	}
 	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, &admissionv1.MutatingWebhookConfiguration{
@@ -424,13 +440,13 @@ out:
 		}},
 	}, metav1.CreateOptions{})
 	if err != nil && !k8serrors.IsForbidden(err) && !k8serrors.IsAlreadyExists(err) {
-		return nil, fmt.Errorf("failed to create MutatingWebhookConfigurations, err: %v", err)
+		return fmt.Errorf("failed to create MutatingWebhookConfigurations, err: %v", err)
 	}
 	_, err = updateRefCount(clientset.CoreV1().ConfigMaps(namespace), config.ConfigMapPodTrafficManager, 1)
 	if err != nil {
 		return
 	}
-	return net.ParseIP(svc.Spec.ClusterIP), nil
+	return
 }
 
 func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, workloads string, config util.PodRouteConfig) error {

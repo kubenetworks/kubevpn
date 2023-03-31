@@ -5,14 +5,24 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
+	"net"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"golang.org/x/exp/constraints"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubectl/pkg/cmd/util"
+
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
+
+type PodRouteConfig struct {
+	LocalTunIPv4 string
+	LocalTunIPv6 string
+}
 
 func PrintStatus(pod *corev1.Pod, writer io.Writer) {
 	w := tabwriter.NewWriter(writer, 1, 1, 1, ' ', 0)
@@ -91,4 +101,16 @@ func GetEnv(ctx context.Context, f util.Factory, ns, pod string) (map[string][]s
 		result[c.Name] = split
 	}
 	return result, nil
+}
+
+func Heartbeats() {
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
+
+	for ; true; <-ticker.C {
+		for _, ip := range []net.IP{config.RouterIP, config.RouterIP6} {
+			time.Sleep(time.Millisecond * time.Duration(rand.Intn(1000)))
+			_, _ = Ping(ip.String())
+		}
+	}
 }

@@ -26,6 +26,7 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 	}
 }
 
+// todo envoy support ipv6
 func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteConfig) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
@@ -34,14 +35,20 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteCo
 		Image:   config.Image,
 		Command: []string{"/bin/sh", "-c"},
 		Args: []string{`
-sysctl net.ipv4.ip_forward=1
+sysctl -w net.ipv4.ip_forward=1
+sysctl -w net.ipv6.conf.all.forwarding=1
 update-alternatives --set iptables /usr/sbin/iptables-legacy
 iptables -F
+ip6tables -F
 iptables -P INPUT ACCEPT
+ip6tables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
-iptables -t nat -A PREROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR} -j DNAT --to 127.0.0.1:15006
-iptables -t nat -A POSTROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR} -j MASQUERADE
-kubevpn serve -L "tun:/127.0.0.1:8422?net=${InboundPodTunIP}&route=${CIDR}" -F "tcp://${TrafficManagerRealIP}:10800"`,
+ip6tables -P FORWARD ACCEPT
+iptables -t nat -A PREROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to 127.0.0.1:15006
+ip6tables -t nat -A PREROUTING ! -p icmp ! -s 0:0:0:0:0:0:0:1 ! -d ${CIDR6} -j DNAT --to 0:0:0:0:0:0:0:1:15006
+iptables -t nat -A POSTROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR4} -j MASQUERADE
+ip6tables -t nat -A POSTROUTING ! -p icmp ! -s 0:0:0:0:0:0:0:1 ! -d ${CIDR6} -j MASQUERADE
+kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://${TrafficManagerService}:10800"`,
 		},
 		EnvFrom: []v1.EnvFromSource{{
 			SecretRef: &v1.SecretEnvSource{
@@ -52,16 +59,24 @@ kubevpn serve -L "tun:/127.0.0.1:8422?net=${InboundPodTunIP}&route=${CIDR}" -F "
 		}},
 		Env: []v1.EnvVar{
 			{
-				Name:  "CIDR",
+				Name:  "CIDR4",
 				Value: config.CIDR.String(),
 			},
 			{
-				Name:  "TrafficManagerRealIP",
-				Value: c.TrafficManagerRealIP,
+				Name:  "CIDR6",
+				Value: config.CIDR6.String(),
 			},
 			{
-				Name:  config.EnvInboundPodTunIP,
-				Value: c.InboundPodTunIP,
+				Name:  config.EnvInboundPodTunIPv4,
+				Value: "",
+			},
+			{
+				Name:  config.EnvInboundPodTunIPv6,
+				Value: "",
+			},
+			{
+				Name:  "TrafficManagerService",
+				Value: config.ConfigMapPodTrafficManager,
 			},
 			{
 				Name: config.EnvPodNamespace,

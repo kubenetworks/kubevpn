@@ -22,44 +22,71 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
-func createTun(cfg Config) (net.Conn, *net.Interface, error) {
-	ip, _, err := net.ParseCIDR(cfg.Addr)
-	if err != nil {
-		return nil, nil, err
+func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
+	if cfg.Addr == "" && cfg.Addr6 == "" {
+		err = fmt.Errorf("ipv4 address and ipv6 address can not be empty at same time")
+		return
 	}
-	interfaceName := "wg1"
+
+	interfaceName := "kubevpn"
 	if len(cfg.Name) != 0 {
 		interfaceName = cfg.Name
 	}
 	tunDevice, err := wireguardtun.CreateTUN(interfaceName, cfg.MTU)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create TUN device: %w", err)
+		err = fmt.Errorf("failed to create TUN device: %w", err)
+		return
 	}
 
 	ifName := winipcfg.LUID(tunDevice.(*wireguardtun.NativeTun).LUID())
 
-	var prefix netip.Prefix
-	prefix, err = netip.ParsePrefix(cfg.Addr)
-	if err != nil {
-		return nil, nil, err
+	var ipv4, ipv6 net.IP
+	if cfg.Addr != "" {
+		if ipv4, _, err = net.ParseCIDR(cfg.Addr); err != nil {
+			return
+		}
+		var prefix netip.Prefix
+		if prefix, err = netip.ParsePrefix(cfg.Addr); err != nil {
+			return
+		}
+		if err = ifName.AddIPAddress(prefix); err != nil {
+			return
+		}
 	}
 
-	if err = ifName.AddIPAddress(prefix); err != nil {
-		return nil, nil, err
+	if cfg.Addr6 != "" {
+		if ipv6, _, err = net.ParseCIDR(cfg.Addr6); err != nil {
+			return
+		}
+		var prefix netip.Prefix
+		if prefix, err = netip.ParsePrefix(cfg.Addr6); err != nil {
+			return
+		}
+		if err = ifName.AddIPAddress(prefix); err != nil {
+			return
+		}
 	}
 
 	luid := fmt.Sprintf("%d", tunDevice.(*wireguardtun.NativeTun).LUID())
 	if err = os.Setenv(config.EnvTunNameOrLUID, luid); err != nil {
-		return nil, nil, err
-	}
-	_ = ifName.FlushRoutes(windows.AF_INET)
-	if err = addTunRoutes(luid /*cfg.Gateway,*/, cfg.Routes...); err != nil {
-		return nil, nil, err
+		return
 	}
 
-	row, _ := ifName.Interface()
-	iface, _ := net.InterfaceByIndex(int(row.InterfaceIndex))
-	return &winTunConn{ifce: tunDevice, addr: &net.IPAddr{IP: ip}}, iface, nil
+	_ = ifName.FlushRoutes(windows.AF_INET)
+	_ = ifName.FlushRoutes(windows.AF_INET6)
+
+	if err = addTunRoutes(luid /*cfg.Gateway,*/, cfg.Routes...); err != nil {
+		return
+	}
+	var row *winipcfg.MibIfRow2
+	if row, err = ifName.Interface(); err != nil {
+		return
+	}
+	if itf, err = net.InterfaceByIndex(int(row.InterfaceIndex)); err != nil {
+		return
+	}
+	conn = &winTunConn{ifce: tunDevice, addr: &net.IPAddr{IP: ipv4}, addr6: &net.IPAddr{IP: ipv6}}
+	return
 }
 
 func addTunRoutes(luid string, routes ...types.Route) error {
@@ -76,7 +103,11 @@ func addTunRoutes(luid string, routes ...types.Route) error {
 		if gw != "" {
 			route.GW = net.ParseIP(gw)
 		} else {
-			route.GW = net.IPv4(0, 0, 0, 0)
+			if route.Dst.IP.To4() != nil {
+				route.GW = net.IPv4zero
+			} else {
+				route.GW = net.IPv6zero
+			}
 		}
 		prefix, err := netip.ParsePrefix(route.Dst.String())
 		if err != nil {
@@ -96,8 +127,9 @@ func addTunRoutes(luid string, routes ...types.Route) error {
 }
 
 type winTunConn struct {
-	ifce wireguardtun.Device
-	addr net.Addr
+	ifce  wireguardtun.Device
+	addr  net.Addr
+	addr6 net.Addr
 }
 
 func (c *winTunConn) Close() error {

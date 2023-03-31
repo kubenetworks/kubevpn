@@ -16,9 +16,10 @@ func CmdControlPlane(_ cmdutil.Factory) *cobra.Command {
 		port                   uint = 9002
 	)
 	cmd := &cobra.Command{
-		Use:   "control-plane",
-		Short: "Control-plane is a envoy xds server",
-		Long:  `Control-plane is a envoy xds server, distribute envoy route configuration`,
+		Use:    "control-plane",
+		Hidden: true,
+		Short:  "Control-plane is a envoy xds server",
+		Long:   `Control-plane is a envoy xds server, distribute envoy route configuration`,
 		Run: func(cmd *cobra.Command, args []string) {
 			util.InitLogger(config.Debug)
 			controlplane.Main(watchDirectoryFilename, port, log.StandardLogger())

@@ -2,8 +2,9 @@ admin:
   access_log_path: /dev/null
   address:
     socket_address:
-      address: 0.0.0.0
+      address: "::"
       port_value: 9003
+      ipv4_compat: true
 dynamic_resources:
   ads_config:
     api_type: GRPC
@@ -23,8 +24,9 @@ static_resources:
     - name: default_listener
       address:
         socket_address:
-          address: 0.0.0.0
+          address: "::"
           port_value: 15006
+          ipv4_compat: true
       use_original_dst: true
       filter_chains:
         - filters:
@@ -47,8 +49,10 @@ static_resources:
                     socket_address:
                       address: kubevpn-traffic-manager
                       port_value: 9002
+                      ipv4_compat: true
       http2_protocol_options: { }
     - name: origin_cluster
       connect_timeout: 5s
       type: ORIGINAL_DST
       lb_policy: CLUSTER_PROVIDED
+      dns_lookup_family: ALL

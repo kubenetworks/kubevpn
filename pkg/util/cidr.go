@@ -7,6 +7,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/pointer"
@@ -88,18 +89,40 @@ func GetCIDRFromResourceUgly(clientset *kubernetes.Clientset, namespace string) 
 		if pod.Spec.HostNetwork {
 			continue
 		}
-		if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
-			mask := net.CIDRMask(24, 32)
-			cidrs = append(cidrs, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
+		s := sets.Set[string]{}.Insert(pod.Status.PodIP)
+		for _, p := range pod.Status.PodIPs {
+			s.Insert(p.IP)
+		}
+		for _, t := range s.UnsortedList() {
+			if ip := net.ParseIP(t); ip != nil {
+				var mask net.IPMask
+				if ip.To4() != nil {
+					mask = net.CIDRMask(24, 32)
+				} else {
+					mask = net.CIDRMask(64, 128)
+				}
+				cidrs = append(cidrs, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
+			}
 		}
 	}
 
 	// (2) get service CIDR
 	serviceList, _ := clientset.CoreV1().Services(namespace).List(context.Background(), v1.ListOptions{})
 	for _, service := range serviceList.Items {
-		if ip := net.ParseIP(service.Spec.ClusterIP); ip != nil {
-			mask := net.CIDRMask(24, 32)
-			cidrs = append(cidrs, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
+		s := sets.Set[string]{}.Insert(service.Spec.ClusterIP)
+		for _, p := range service.Spec.ClusterIPs {
+			s.Insert(p)
+		}
+		for _, t := range s.UnsortedList() {
+			if ip := net.ParseIP(t); ip != nil {
+				var mask net.IPMask
+				if ip.To4() != nil {
+					mask = net.CIDRMask(24, 32)
+				} else {
+					mask = net.CIDRMask(64, 128)
+				}
+				cidrs = append(cidrs, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
+			}
 		}
 	}
 

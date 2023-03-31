@@ -14,6 +14,7 @@ const (
 
 	// config map keys
 	KeyDHCP             = "DHCP"
+	KeyDHCP6            = "DHCP6"
 	KeyEnvoy            = "ENVOY_CONFIG"
 	KeyClusterIPv4POOLS = "IPv4_POOLS"
 	KeyRefCount         = "REF_COUNT"
@@ -49,6 +50,9 @@ const (
 	// 如果不创建 network，那么是无法请求到 这个 kubernetes 的 service 的
 	dockerInnerIPv4Pool = "223.255.0.100/16"
 
+	//The IPv6 address prefixes FE80::/10 and FF02::/16 are not routable
+	innerIPv6Pool = "efff:ffff:ffff:ffff:ffff:ffff:ffff:9999/64"
+
 	DefaultNetDir = "/etc/cni/net.d"
 
 	Proc = "/proc"
@@ -56,15 +60,17 @@ const (
 	CniNetName = "cni-net-dir-kubevpn"
 
 	// env name
-	EnvTunNameOrLUID   = "TunNameOrLUID"
-	EnvInboundPodTunIP = "InboundPodTunIP"
-	EnvPodName         = "POD_NAME"
-	EnvPodNamespace    = "POD_NAMESPACE"
+	EnvTunNameOrLUID     = "TunNameOrLUID"
+	EnvInboundPodTunIPv4 = "TunIPv4"
+	EnvInboundPodTunIPv6 = "TunIPv6"
+	EnvPodName           = "POD_NAME"
+	EnvPodNamespace      = "POD_NAMESPACE"
 
 	// header name
 	HeaderPodName      = "POD_NAME"
 	HeaderPodNamespace = "POD_NAMESPACE"
-	HeaderIP           = "IP"
+	HeaderIPv4         = "IPv4"
+	HeaderIPv6         = "IPv6"
 
 	// api
 	APIRentIP    = "/rent/ip"
@@ -88,8 +94,10 @@ var (
 )
 
 var (
-	CIDR     *net.IPNet
-	RouterIP net.IP
+	CIDR      *net.IPNet
+	CIDR6     *net.IPNet
+	RouterIP  net.IP
+	RouterIP6 net.IP
 
 	// for creating docker network
 	DockerCIDR     *net.IPNet
@@ -98,6 +106,7 @@ var (
 
 func init() {
 	RouterIP, CIDR, _ = net.ParseCIDR(innerIPv4Pool)
+	RouterIP6, CIDR6, _ = net.ParseCIDR(innerIPv6Pool)
 	DockerRouterIP, DockerCIDR, _ = net.ParseCIDR(dockerInnerIPv4Pool)
 }
 

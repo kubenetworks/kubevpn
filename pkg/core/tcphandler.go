@@ -48,7 +48,7 @@ func TCPHandler() Handler {
 	}
 }
 
-var Server8422, _ = net.ResolveUDPAddr("udp", "127.0.0.1:8422")
+var Server8422, _ = net.ResolveUDPAddr("udp", "localhost:8422")
 
 func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
