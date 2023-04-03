@@ -22,6 +22,7 @@ func CmdControlPlane(_ cmdutil.Factory) *cobra.Command {
 		Long:   `Control-plane is a envoy xds server, distribute envoy route configuration`,
 		Run: func(cmd *cobra.Command, args []string) {
 			util.InitLogger(config.Debug)
+			go util.StartupPProf(0)
 			controlplane.Main(watchDirectoryFilename, port, log.StandardLogger())
 		},
 	}

@@ -1,7 +1,7 @@
 package controlplane
 
 import (
-	"log"
+	"fmt"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -20,12 +20,14 @@ type NotifyMessage struct {
 	FilePath  string
 }
 
-func Watch(watcher *fsnotify.Watcher, filename string, notifyCh chan<- NotifyMessage) {
+func Watch(watcher *fsnotify.Watcher, filename string, notifyCh chan<- NotifyMessage) error {
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
 	for {
 		select {
 		case event, ok := <-watcher.Events:
 			if !ok {
-				return
+				return fmt.Errorf("watcher has closed")
 			}
 			if event.Op&fsnotify.Write == fsnotify.Write {
 				notifyCh <- NotifyMessage{
@@ -46,11 +48,11 @@ func Watch(watcher *fsnotify.Watcher, filename string, notifyCh chan<- NotifyMes
 
 		case err, ok := <-watcher.Errors:
 			if !ok {
-				return
+				return fmt.Errorf("watcher error closed")
 			}
-			log.Println("error:", err)
+			return err
 
-		case <-time.Tick(time.Second * 5):
+		case <-ticker.C:
 			notifyCh <- NotifyMessage{
 				Operation: Modify,
 				FilePath:  filename,

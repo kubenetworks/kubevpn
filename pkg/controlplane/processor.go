@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -55,10 +56,11 @@ func (p *Processor) ProcessFile(file NotifyMessage) {
 		}
 		lastConfig, ok := p.expireCache.Get(config.Uid)
 		if ok && reflect.DeepEqual(lastConfig.(*Virtual), config) {
-			p.logger.Infof("config are same, not needs to update, %v", config)
+			marshal, _ := json.Marshal(config)
+			p.logger.Debugf("config are same, not needs to update, config: %s", string(marshal))
 			continue
 		}
-		p.logger.Infof("update config, version %d, config %v", p.version, config)
+		p.logger.Debugf("update config, version %d, config %v", p.version, config)
 
 		listeners, clusters, routes, endpoints := config.To()
 		resources := map[resource.Type][]types.Resource{
@@ -69,7 +71,8 @@ func (p *Processor) ProcessFile(file NotifyMessage) {
 			resource.RuntimeType:  {},        // runtimes
 			resource.SecretType:   {},        // secrets
 		}
-		snapshot, err := cache.NewSnapshot(p.newVersion(), resources)
+		var snapshot *cache.Snapshot
+		snapshot, err = cache.NewSnapshot(p.newVersion(), resources)
 
 		if err != nil {
 			p.logger.Errorf("snapshot inconsistency: %v, err: %v", snapshot, err)
@@ -85,6 +88,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) {
 			p.logger.Errorf("snapshot error %q for %v", err, snapshot)
 			p.logger.Fatal(err)
 		}
+
 		p.expireCache.Set(config.Uid, config, time.Minute*5)
 	}
 }

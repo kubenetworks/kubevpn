@@ -19,6 +19,7 @@ in the Kubernetes cluster to register remote webhook admission controllers.`,
 		Args: cobra.MaximumNArgs(0),
 		PreRun: func(cmd *cobra.Command, args []string) {
 			util.InitLogger(true)
+			go util.StartupPProf(0)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return webhook.Main(f)

@@ -3,7 +3,6 @@ package controlplane
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 
 	clusterservice "github.com/envoyproxy/go-control-plane/envoy/service/cluster/v3"
@@ -14,6 +13,7 @@ import (
 	runtimeservice "github.com/envoyproxy/go-control-plane/envoy/service/runtime/v3"
 	secretservice "github.com/envoyproxy/go-control-plane/envoy/service/secret/v3"
 	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
+	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
 
@@ -38,7 +38,7 @@ func RunServer(ctx context.Context, server serverv3.Server, port uint) {
 	secretservice.RegisterSecretDiscoveryServiceServer(grpcServer, server)
 	runtimeservice.RegisterRuntimeDiscoveryServiceServer(grpcServer, server)
 
-	log.Printf("management server listening on %d\n", port)
+	log.Infof("management server listening on %d", port)
 	if err = grpcServer.Serve(listener); err != nil {
 		log.Fatal(err)
 	}

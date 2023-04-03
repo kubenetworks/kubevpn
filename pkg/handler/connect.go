@@ -127,7 +127,7 @@ func Rollback(f cmdutil.Factory, ns, workload string) {
 
 func (c *ConnectOptions) DoConnect() (err error) {
 	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
-	if err = c.dhcp.InitDHCP(ctx); err != nil {
+	if err = c.dhcp.initDHCP(ctx); err != nil {
 		return
 	}
 	c.addCleanUpResourceHandler()
@@ -161,7 +161,6 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err = c.setupDNS(); err != nil {
 		return
 	}
-	//go util.Heartbeats()
 	if err = c.addExtraRoute(ctx); err != nil {
 		return
 	}

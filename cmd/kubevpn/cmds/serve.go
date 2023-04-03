@@ -3,13 +3,11 @@ package cmds
 import (
 	"context"
 	"math/rand"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"go.uber.org/automaxprocs/maxprocs"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -29,7 +27,7 @@ func CmdServe(factory cmdutil.Factory) *cobra.Command {
 		Long:   `Server side, startup traffic manager, forward inbound and outbound traffic.`,
 		PreRun: func(*cobra.Command, []string) {
 			util.InitLogger(config.Debug)
-			go func() { log.Info(http.ListenAndServe("localhost:6060", nil)) }()
+			go util.StartupPProf(0)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rand.Seed(time.Now().UnixNano())
@@ -49,7 +47,6 @@ func CmdServe(factory cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			//go util.Heartbeats()
 			<-ctx.Done()
 			return handler.Final()
 		},

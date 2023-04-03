@@ -42,7 +42,8 @@ func (c *ConnectOptions) addCleanUpResourceHandler() {
 			}
 		}
 		_ = c.clientset.CoreV1().Pods(c.Namespace).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
-		count, err := updateRefCount(c.clientset.CoreV1().ConfigMaps(c.Namespace), config.ConfigMapPodTrafficManager, -1)
+		var count int
+		count, err = updateRefCount(c.clientset.CoreV1().ConfigMaps(c.Namespace), config.ConfigMapPodTrafficManager, -1)
 		if err == nil {
 			// only if ref is zero and deployment is not ready, needs to clean up
 			if count <= 0 {
@@ -128,25 +129,26 @@ func updateRefCount(configMapInterface v12.ConfigMapInterface, name string, incr
 	return
 }
 
-func cleanup(clientset *kubernetes.Clientset, namespace, name string, keepCidr bool) {
+func cleanup(clientset *kubernetes.Clientset, namespace, name string, keepCIDR bool) {
 	options := v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)}
+	ctx1 := context.Background()
 
-	if keepCidr {
+	if keepCIDR {
 		// keep configmap
 		p := []byte(fmt.Sprintf(`[{"op": "remove", "path": "/data/%s"},{"op": "remove", "path": "/data/%s"}]`, config.KeyDHCP, config.KeyDHCP6))
-		_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), name, types.JSONPatchType, p, v1.PatchOptions{})
+		_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(ctx1, name, types.JSONPatchType, p, v1.PatchOptions{})
 		p = []byte(fmt.Sprintf(`{"data":{"%s":"%s"}}`, config.KeyRefCount, strconv.Itoa(0)))
-		_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), name, types.MergePatchType, p, v1.PatchOptions{})
+		_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(ctx1, name, types.MergePatchType, p, v1.PatchOptions{})
 	} else {
-		_ = clientset.CoreV1().ConfigMaps(namespace).Delete(context.Background(), name, options)
+		_ = clientset.CoreV1().ConfigMaps(namespace).Delete(ctx1, name, options)
 	}
 
-	_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), config.CniNetName, options)
-	_ = clientset.CoreV1().Secrets(namespace).Delete(context.Background(), name, options)
-	_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(context.Background(), name+"."+namespace, options)
-	_ = clientset.RbacV1().RoleBindings(namespace).Delete(context.Background(), name, options)
-	_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(context.Background(), name, options)
-	_ = clientset.RbacV1().Roles(namespace).Delete(context.Background(), name, options)
-	_ = clientset.CoreV1().Services(namespace).Delete(context.Background(), name, options)
-	_ = clientset.AppsV1().Deployments(namespace).Delete(context.Background(), name, options)
+	_ = clientset.CoreV1().Pods(namespace).Delete(ctx1, config.CniNetName, options)
+	_ = clientset.CoreV1().Secrets(namespace).Delete(ctx1, name, options)
+	_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx1, name+"."+namespace, options)
+	_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx1, name, options)
+	_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx1, name, options)
+	_ = clientset.RbacV1().Roles(namespace).Delete(ctx1, name, options)
+	_ = clientset.CoreV1().Services(namespace).Delete(ctx1, name, options)
+	_ = clientset.AppsV1().Deployments(namespace).Delete(ctx1, name, options)
 }

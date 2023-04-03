@@ -124,35 +124,41 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 }
 
 func Main(f cmdutil.Factory) error {
-	clientset, err2 := f.KubernetesClientSet()
-	if err2 != nil {
-		return err2
+	clientset, err := f.KubernetesClientSet()
+	if err != nil {
+		return err
 	}
 	h := &admissionReviewHandler{f: f, clientset: clientset}
 
 	http.HandleFunc("/pods", func(w http.ResponseWriter, r *http.Request) { serve(w, r, newDelegateToV1AdmitHandler(h.admitPods)) })
-	http.HandleFunc("/readyz", func(w http.ResponseWriter, req *http.Request) { w.Write([]byte("ok")) })
+	http.HandleFunc("/readyz", func(w http.ResponseWriter, req *http.Request) { _, _ = w.Write([]byte("ok")) })
 
 	s := &dhcpServer{f: f, clientset: clientset}
 	http.HandleFunc(config.APIRentIP, s.rentIP)
 	http.HandleFunc(config.APIReleaseIP, s.releaseIP)
 
-	cert, ok := os.LookupEnv(config.TLSCertKey)
-	if !ok {
-		return fmt.Errorf("can not get %s from env", config.TLSCertKey)
-	}
-	key, ok := os.LookupEnv(config.TLSPrivateKeyKey)
-	if !ok {
-		return fmt.Errorf("can not get %s from env", config.TLSPrivateKeyKey)
-	}
-	pair, err := tls.X509KeyPair([]byte(cert), []byte(key))
+	var pairs []tls.Certificate
+	pairs, err = getSSLKeyPairs()
 	if err != nil {
 		return err
 	}
-	t := &tls.Config{Certificates: []tls.Certificate{pair}}
-	server := &http.Server{
-		Addr:      fmt.Sprintf(":%d", 80),
-		TLSConfig: t,
-	}
+	server := &http.Server{Addr: fmt.Sprintf(":%d", 80), TLSConfig: &tls.Config{Certificates: pairs}}
 	return server.ListenAndServeTLS("", "")
+}
+
+func getSSLKeyPairs() ([]tls.Certificate, error) {
+	cert, ok := os.LookupEnv(config.TLSCertKey)
+	if !ok {
+		return nil, fmt.Errorf("can not get %s from env", config.TLSCertKey)
+	}
+	var key string
+	key, ok = os.LookupEnv(config.TLSPrivateKeyKey)
+	if !ok {
+		return nil, fmt.Errorf("can not get %s from env", config.TLSPrivateKeyKey)
+	}
+	pair, err := tls.X509KeyPair([]byte(cert), []byte(key))
+	if err != nil {
+		return nil, fmt.Errorf("failed to load certificate and key ,err: %v", err)
+	}
+	return []tls.Certificate{pair}, nil
 }

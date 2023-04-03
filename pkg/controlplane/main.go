@@ -32,11 +32,12 @@ func Main(filename string, port uint, logger *log.Logger) {
 		log.Fatal(fmt.Errorf("failed to create file watcher, err: %v", err))
 	}
 	defer watcher.Close()
-	err = watcher.Add(filename)
-	if err != nil {
+	if err = watcher.Add(filename); err != nil {
 		log.Fatal(fmt.Errorf("failed to add file: %s to wather, err: %v", filename, err))
 	}
-	go Watch(watcher, filename, notifyCh)
+	go func() {
+		log.Fatal(Watch(watcher, filename, notifyCh))
+	}()
 
 	for {
 		select {

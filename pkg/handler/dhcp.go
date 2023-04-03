@@ -10,6 +10,7 @@ import (
 	"github.com/cilium/ipam/service/ipallocator"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -33,10 +34,13 @@ func NewDHCPManager(client corev1.ConfigMapInterface, namespace string) *DHCPMan
 	}
 }
 
-// InitDHCP
+// initDHCP
 // TODO optimize dhcp, using mac address, ip and deadline as unit
-func (d *DHCPManager) InitDHCP(ctx context.Context) error {
+func (d *DHCPManager) initDHCP(ctx context.Context) error {
 	cm, err := d.client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get configmap %s, err: %v", config.ConfigMapPodTrafficManager, err)
+	}
 	if err == nil {
 		// add key envoy in case of mount not exist content
 		if _, found := cm.Data[config.KeyEnvoy]; !found {
@@ -47,7 +51,7 @@ func (d *DHCPManager) InitDHCP(ctx context.Context) error {
 				[]byte(fmt.Sprintf(`{"data":{"%s":"%s"}}`, config.KeyEnvoy, "")),
 				metav1.PatchOptions{},
 			)
-			return err
+			return fmt.Errorf("failed to patch configmap %s, err: %v", config.ConfigMapPodTrafficManager, err)
 		}
 		return nil
 	}
