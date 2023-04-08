@@ -86,6 +86,7 @@ const (
 
 	// startup by KubeVPN
 	EnvStartSudoKubeVPNByKubeVPN = "DEPTH_SIGNED_BY_NAISON"
+	EnvSSHJump                   = "SSH_JUMP_BY_KUBEVPN"
 )
 
 var (

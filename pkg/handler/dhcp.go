@@ -108,7 +108,7 @@ func (d *DHCPManager) RentIPRandom() (*net.IPNet, *net.IPNet, error) {
 	return &net.IPNet{IP: v4, Mask: d.cidr.Mask}, &net.IPNet{IP: v6, Mask: d.cidr6.Mask}, nil
 }
 
-func (d *DHCPManager) ReleaseIpToDHCP(ips ...net.IP) error {
+func (d *DHCPManager) ReleaseIP(ips ...net.IP) error {
 	return d.updateDHCPConfigMap(func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
 		for _, ip := range ips {
 			var use *ipallocator.Range

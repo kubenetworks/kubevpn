@@ -128,7 +128,7 @@ func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionR
 				}
 			}
 			cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
-			err := handler.NewDHCPManager(cmi, ar.Request.Namespace).ReleaseIpToDHCP(ips...)
+			err := handler.NewDHCPManager(cmi, ar.Request.Namespace).ReleaseIP(ips...)
 			if err != nil {
 				log.Errorf("release ip to dhcp err: %v, ips: %v", err, ips)
 			} else {

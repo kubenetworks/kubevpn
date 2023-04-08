@@ -56,7 +56,7 @@ func (d *dhcpServer) releaseIP(w http.ResponseWriter, r *http.Request) {
 	log.Infof("handling release ip request, pod name: %s, ns: %s", podName, namespace)
 	cmi := d.clientset.CoreV1().ConfigMaps(namespace)
 	dhcp := handler.NewDHCPManager(cmi, namespace)
-	if err := dhcp.ReleaseIpToDHCP(ips...); err != nil {
+	if err := dhcp.ReleaseIP(ips...); err != nil {
 		log.Error(err)
 		w.WriteHeader(http.StatusBadRequest)
 		return

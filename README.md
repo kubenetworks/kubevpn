@@ -251,7 +251,7 @@ dns service ok
 Hello world!%
 ```
 
-### Dev mode in local
+### Dev mode in local 🐳
 
 Run the Kubernetes pod in the local Docker container, and cooperate with the service mesh to intercept the traffic with
 the specified header to the local, or all the traffic to the local.

@@ -32,7 +32,7 @@ func (c *ConnectOptions) addCleanUpResourceHandler() {
 	go func() {
 		<-stopChan
 		log.Info("prepare to exit, cleaning up")
-		err := c.dhcp.ReleaseIpToDHCP(c.localTunIPv4.IP, c.localTunIPv6.IP)
+		err := c.dhcp.ReleaseIP(c.localTunIPv4.IP, c.localTunIPv6.IP)
 		if err != nil {
 			log.Errorf("failed to release ip to dhcp, err: %v", err)
 		}

@@ -1,11 +1,18 @@
 package cmds
 
 import (
+	"os"
+
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/rest"
+	restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
+
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
 func NewKubeVPNCommand() *cobra.Command {
@@ -22,6 +29,17 @@ func NewKubeVPNCommand() *cobra.Command {
 
 	flags := cmd.PersistentFlags()
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags.WrapConfigFn = func(c *rest.Config) *rest.Config {
+		if path, ok := os.LookupEnv(config.EnvSSHJump); ok {
+			kubeconfigBytes, err := os.ReadFile(path)
+			cmdutil.CheckErr(err)
+			var conf *restclient.Config
+			conf, err = clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+			cmdutil.CheckErr(err)
+			return conf
+		}
+		return c
+	}
 	configFlags.AddFlags(flags)
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
 	matchVersionFlags.AddFlags(flags)

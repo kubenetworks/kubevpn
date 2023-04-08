@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"math/rand"
 	"net"
 	"net/netip"
 	"net/url"
@@ -323,7 +325,13 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 		if errs == nil && tunIface.Name == iface.Name {
 			return
 		}
-		errs = tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(32, 32)}})
+		var mask net.IPMask
+		if net.ParseIP(ip).To4() != nil {
+			mask = net.CIDRMask(32, 32)
+		} else {
+			mask = net.CIDRMask(128, 128)
+		}
+		errs = tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: mask}})
 		if errs != nil {
 			log.Debugf("[route] add route failed, resource: %s, ip: %s,err: %v", resource, ip, err)
 		}
@@ -634,6 +642,10 @@ func SshJump(conf *util.SshConfig, flags *pflag.FlagSet) (err error) {
 	_ = os.Chmod(temp.Name(), 0644)
 	log.Infof("using temp kubeconfig %s", temp.Name())
 	err = os.Setenv(clientcmd.RecommendedConfigPathEnvVar, temp.Name())
+	if err != nil {
+		return err
+	}
+	err = os.Setenv(config.EnvSSHJump, temp.Name())
 	return err
 }
 
@@ -808,7 +820,13 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) (err error) {
 		if errs == nil && tunIface.Name == iface.Name {
 			return
 		}
-		errs = tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(32, 32)}})
+		var mask net.IPMask
+		if net.ParseIP(ip).To4() != nil {
+			mask = net.CIDRMask(32, 32)
+		} else {
+			mask = net.CIDRMask(128, 128)
+		}
+		errs = tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: mask}})
 		if errs != nil {
 			log.Debugf("[route] add route failed, domain: %s, ip: %s,err: %v", resource, ip, err)
 		}
@@ -816,31 +834,41 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) (err error) {
 
 	client := &miekgdns.Client{Net: "udp", SingleInflight: true, DialTimeout: time.Second * 30}
 	for _, domain := range c.ExtraDomain {
-		err = retry.OnError(
-			retry.DefaultRetry,
-			func(err error) bool {
-				return err != nil
-			},
-			func() error {
-				var answer *miekgdns.Msg
-				answer, _, err = client.ExchangeContext(ctx, &miekgdns.Msg{
-					Question: []miekgdns.Question{{
-						Name:  domain + ".",
-						Qtype: miekgdns.TypeA,
-					}},
-				}, fmt.Sprintf("%s:%d", ips[0], 53))
-				if err != nil {
-					return err
-				}
-				for _, rr := range answer.Answer {
-					if a, ok := rr.(*miekgdns.A); ok && a.A != nil {
-						addRouteFunc(domain, a.A.String())
+		for _, qType := range []uint16{miekgdns.TypeA, miekgdns.TypeAAAA} {
+			err = retry.OnError(
+				retry.DefaultRetry,
+				func(err error) bool {
+					return err != nil
+				},
+				func() error {
+					var answer *miekgdns.Msg
+					answer, _, err = client.ExchangeContext(ctx, &miekgdns.Msg{
+						MsgHdr: miekgdns.MsgHdr{
+							Id: uint16(rand.Intn(math.MaxUint16 + 1)),
+						},
+						Question: []miekgdns.Question{
+							{
+								Name:  domain + ".",
+								Qtype: qType,
+							},
+						},
+					}, fmt.Sprintf("%s:%d", ips[0], 53))
+					if err != nil {
+						return err
 					}
-				}
-				return nil
-			})
-		if err != nil {
-			return err
+					for _, rr := range answer.Answer {
+						switch a := rr.(type) {
+						case *miekgdns.A:
+							addRouteFunc(domain, a.A.String())
+						case *miekgdns.AAAA:
+							addRouteFunc(domain, a.AAAA.String())
+						}
+					}
+					return nil
+				})
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return
