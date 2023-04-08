@@ -93,6 +93,15 @@ func Main(remoteEndpoint, localEndpoint *netip.AddrPort, conf *SshConfig, done c
 }
 
 func publicKeyFile(file string) ssh.AuthMethod {
+	var err error
+	if len(file) != 0 && file[0] == '~' {
+		file = filepath.Join(homedir.HomeDir(), file[1:])
+	}
+	file, err = filepath.Abs(file)
+	if err != nil {
+		log.Fatalln(fmt.Sprintf("Cannot read SSH public key file %s", file))
+		return nil
+	}
 	buffer, err := os.ReadFile(file)
 	if err != nil {
 		log.Fatalln(fmt.Sprintf("Cannot read SSH public key file %s", file))
@@ -226,7 +235,7 @@ func (c conf) Get(alias string, key string) string {
 			return v
 		}
 	}
-	return ""
+	return ssh_config.Get(alias, key)
 }
 
 var once sync.Once
