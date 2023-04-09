@@ -18,8 +18,8 @@ import (
 // Reset
 // 1, get all proxy-resources from configmap
 // 2, cleanup all containers
-func (c *ConnectOptions) Reset(ctx2 context.Context) error {
-	cm, err := c.clientset.CoreV1().ConfigMaps(c.Namespace).Get(ctx2, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+func (c *ConnectOptions) Reset(ctx context.Context) error {
+	cm, err := c.clientset.CoreV1().ConfigMaps(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
@@ -44,7 +44,7 @@ func (c *ConnectOptions) Reset(ctx2 context.Context) error {
 			}
 		}
 	}
-	cleanup(c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, false)
+	cleanup(ctx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, false)
 	var cli *client.Client
 	if cli, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation()); err != nil {
 		return nil

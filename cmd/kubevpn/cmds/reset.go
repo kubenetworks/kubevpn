@@ -1,6 +1,9 @@
 package cmds
 
 import (
+	"fmt"
+	"os"
+
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -46,7 +49,7 @@ func CmdReset(factory cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				log.Fatal(err)
 			}
-			log.Println("done")
+			fmt.Fprint(os.Stdout, "Done")
 		},
 	}
 

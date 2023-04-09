@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
@@ -32,7 +33,9 @@ func (c *ConnectOptions) addCleanUpResourceHandler() {
 	go func() {
 		<-stopChan
 		log.Info("prepare to exit, cleaning up")
-		err := c.dhcp.ReleaseIP(c.localTunIPv4.IP, c.localTunIPv6.IP)
+		cleanupCtx, cancelFunc := context.WithTimeout(context.Background(), time.Second*5)
+		defer cancelFunc()
+		err := c.dhcp.ReleaseIP(cleanupCtx, c.localTunIPv4.IP, c.localTunIPv6.IP)
 		if err != nil {
 			log.Errorf("failed to release ip to dhcp, err: %v", err)
 		}
@@ -41,16 +44,14 @@ func (c *ConnectOptions) addCleanUpResourceHandler() {
 				function()
 			}
 		}
-		_ = c.clientset.CoreV1().Pods(c.Namespace).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
+		_ = c.clientset.CoreV1().Pods(c.Namespace).Delete(cleanupCtx, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
 		var count int
-		count, err = updateRefCount(c.clientset.CoreV1().ConfigMaps(c.Namespace), config.ConfigMapPodTrafficManager, -1)
-		if err == nil {
-			// only if ref is zero and deployment is not ready, needs to clean up
-			if count <= 0 {
-				deployment, errs := c.clientset.AppsV1().Deployments(c.Namespace).Get(context.Background(), config.ConfigMapPodTrafficManager, v1.GetOptions{})
-				if errs == nil && deployment.Status.UnavailableReplicas != 0 {
-					cleanup(c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, true)
-				}
+		count, err = updateRefCount(cleanupCtx, c.clientset.CoreV1().ConfigMaps(c.Namespace), config.ConfigMapPodTrafficManager, -1)
+		// only if ref is zero and deployment is not ready, needs to clean up
+		if err == nil && count <= 0 {
+			deployment, errs := c.clientset.AppsV1().Deployments(c.Namespace).Get(cleanupCtx, config.ConfigMapPodTrafficManager, v1.GetOptions{})
+			if errs == nil && deployment.Status.UnavailableReplicas != 0 {
+				cleanup(cleanupCtx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, true)
 			}
 		}
 		if err != nil {
@@ -72,7 +73,7 @@ func Cleanup(s os.Signal) {
 }
 
 // vendor/k8s.io/kubectl/pkg/polymorphichelpers/rollback.go:99
-func updateRefCount(configMapInterface v12.ConfigMapInterface, name string, increment int) (current int, err error) {
+func updateRefCount(ctx context.Context, configMapInterface v12.ConfigMapInterface, name string, increment int) (current int, err error) {
 	err = retry.OnError(
 		retry.DefaultRetry,
 		func(err error) bool {
@@ -88,7 +89,7 @@ func updateRefCount(configMapInterface v12.ConfigMapInterface, name string, incr
 		},
 		func() (err error) {
 			var cm *corev1.ConfigMap
-			cm, err = configMapInterface.Get(context.Background(), name, v1.GetOptions{})
+			cm, err = configMapInterface.Get(ctx, name, v1.GetOptions{})
 			if err != nil {
 				if k8serrors.IsNotFound(err) {
 					return err
@@ -102,7 +103,7 @@ func updateRefCount(configMapInterface v12.ConfigMapInterface, name string, incr
 				newVal = 0
 			}
 			p := []byte(fmt.Sprintf(`{"data":{"%s":"%s"}}`, config.KeyRefCount, strconv.Itoa(newVal)))
-			_, err = configMapInterface.Patch(context.Background(), name, types.MergePatchType, p, v1.PatchOptions{})
+			_, err = configMapInterface.Patch(ctx, name, types.MergePatchType, p, v1.PatchOptions{})
 			if err != nil {
 				if k8serrors.IsNotFound(err) {
 					return err
@@ -117,7 +118,7 @@ func updateRefCount(configMapInterface v12.ConfigMapInterface, name string, incr
 	}
 	log.Info("update ref count successfully")
 	var cm *corev1.ConfigMap
-	cm, err = configMapInterface.Get(context.Background(), name, v1.GetOptions{})
+	cm, err = configMapInterface.Get(ctx, name, v1.GetOptions{})
 	if err != nil {
 		err = fmt.Errorf("failed to get cm: %s, err: %v", name, err)
 		return
@@ -129,26 +130,25 @@ func updateRefCount(configMapInterface v12.ConfigMapInterface, name string, incr
 	return
 }
 
-func cleanup(clientset *kubernetes.Clientset, namespace, name string, keepCIDR bool) {
+func cleanup(ctx context.Context, clientset *kubernetes.Clientset, namespace, name string, keepCIDR bool) {
 	options := v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)}
-	ctx1 := context.Background()
 
 	if keepCIDR {
 		// keep configmap
 		p := []byte(fmt.Sprintf(`[{"op": "remove", "path": "/data/%s"},{"op": "remove", "path": "/data/%s"}]`, config.KeyDHCP, config.KeyDHCP6))
-		_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(ctx1, name, types.JSONPatchType, p, v1.PatchOptions{})
+		_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(ctx, name, types.JSONPatchType, p, v1.PatchOptions{})
 		p = []byte(fmt.Sprintf(`{"data":{"%s":"%s"}}`, config.KeyRefCount, strconv.Itoa(0)))
-		_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(ctx1, name, types.MergePatchType, p, v1.PatchOptions{})
+		_, _ = clientset.CoreV1().ConfigMaps(namespace).Patch(ctx, name, types.MergePatchType, p, v1.PatchOptions{})
 	} else {
-		_ = clientset.CoreV1().ConfigMaps(namespace).Delete(ctx1, name, options)
+		_ = clientset.CoreV1().ConfigMaps(namespace).Delete(ctx, name, options)
 	}
 
-	_ = clientset.CoreV1().Pods(namespace).Delete(ctx1, config.CniNetName, options)
-	_ = clientset.CoreV1().Secrets(namespace).Delete(ctx1, name, options)
-	_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx1, name+"."+namespace, options)
-	_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx1, name, options)
-	_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx1, name, options)
-	_ = clientset.RbacV1().Roles(namespace).Delete(ctx1, name, options)
-	_ = clientset.CoreV1().Services(namespace).Delete(ctx1, name, options)
-	_ = clientset.AppsV1().Deployments(namespace).Delete(ctx1, name, options)
+	_ = clientset.CoreV1().Pods(namespace).Delete(ctx, config.CniNetName, options)
+	_ = clientset.CoreV1().Secrets(namespace).Delete(ctx, name, options)
+	_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, name+"."+namespace, options)
+	_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, name, options)
+	_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, name, options)
+	_ = clientset.RbacV1().Roles(namespace).Delete(ctx, name, options)
+	_ = clientset.CoreV1().Services(namespace).Delete(ctx, name, options)
+	_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, name, options)
 }

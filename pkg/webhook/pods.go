@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -53,7 +54,7 @@ func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionR
 						found = true
 						cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
 						dhcp := handler.NewDHCPManager(cmi, ar.Request.Namespace)
-						v4, v6, err = dhcp.RentIPRandom()
+						v4, v6, err = dhcp.RentIPRandom(context.Background())
 						if err != nil {
 							log.Errorf("rent ip random failed, err: %v", err)
 							return toV1AdmissionResponse(err)
@@ -128,7 +129,7 @@ func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionR
 				}
 			}
 			cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
-			err := handler.NewDHCPManager(cmi, ar.Request.Namespace).ReleaseIP(ips...)
+			err := handler.NewDHCPManager(cmi, ar.Request.Namespace).ReleaseIP(context.Background(), ips...)
 			if err != nil {
 				log.Errorf("release ip to dhcp err: %v, ips: %v", err, ips)
 			} else {

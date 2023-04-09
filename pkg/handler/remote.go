@@ -46,7 +46,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	if err == nil {
 		_, err = polymorphichelpers.AttachablePodForObjectFn(factory, service, 2*time.Second)
 		if err == nil {
-			_, err = updateRefCount(clientset.CoreV1().ConfigMaps(namespace), config.ConfigMapPodTrafficManager, 1)
+			_, err = updateRefCount(ctx, clientset.CoreV1().ConfigMaps(namespace), config.ConfigMapPodTrafficManager, 1)
 			if err != nil {
 				return
 			}
@@ -442,7 +442,7 @@ out:
 	if err != nil && !k8serrors.IsForbidden(err) && !k8serrors.IsAlreadyExists(err) {
 		return fmt.Errorf("failed to create MutatingWebhookConfigurations, err: %v", err)
 	}
-	_, err = updateRefCount(clientset.CoreV1().ConfigMaps(namespace), config.ConfigMapPodTrafficManager, 1)
+	_, err = updateRefCount(ctx, clientset.CoreV1().ConfigMaps(namespace), config.ConfigMapPodTrafficManager, 1)
 	if err != nil {
 		return
 	}

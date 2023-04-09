@@ -73,9 +73,9 @@ func (d *DHCPManager) initDHCP(ctx context.Context) error {
 	return nil
 }
 
-func (d *DHCPManager) RentIPBaseNICAddress() (*net.IPNet, *net.IPNet, error) {
+func (d *DHCPManager) RentIPBaseNICAddress(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 	var v4, v6 net.IP
-	err := d.updateDHCPConfigMap(func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
+	err := d.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
 		if v4, err = ipv4.AllocateNext(); err != nil {
 			return err
 		}
@@ -90,9 +90,9 @@ func (d *DHCPManager) RentIPBaseNICAddress() (*net.IPNet, *net.IPNet, error) {
 	return &net.IPNet{IP: v4, Mask: d.cidr.Mask}, &net.IPNet{IP: v6, Mask: d.cidr6.Mask}, nil
 }
 
-func (d *DHCPManager) RentIPRandom() (*net.IPNet, *net.IPNet, error) {
+func (d *DHCPManager) RentIPRandom(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 	var v4, v6 net.IP
-	err := d.updateDHCPConfigMap(func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
+	err := d.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
 		if v4, err = ipv4.AllocateNext(); err != nil {
 			return err
 		}
@@ -108,8 +108,8 @@ func (d *DHCPManager) RentIPRandom() (*net.IPNet, *net.IPNet, error) {
 	return &net.IPNet{IP: v4, Mask: d.cidr.Mask}, &net.IPNet{IP: v6, Mask: d.cidr6.Mask}, nil
 }
 
-func (d *DHCPManager) ReleaseIP(ips ...net.IP) error {
-	return d.updateDHCPConfigMap(func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
+func (d *DHCPManager) ReleaseIP(ctx context.Context, ips ...net.IP) error {
+	return d.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
 		for _, ip := range ips {
 			var use *ipallocator.Range
 			if ip.To4() != nil {
@@ -125,21 +125,23 @@ func (d *DHCPManager) ReleaseIP(ips ...net.IP) error {
 	})
 }
 
-func (d *DHCPManager) updateDHCPConfigMap(f func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error) error {
-	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+func (d *DHCPManager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error) error {
+	cm, err := d.client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get cm DHCP server, err: %v", err)
 	}
 	if cm.Data == nil {
 		cm.Data = make(map[string]string)
 	}
-	dhcp, err := ipallocator.NewAllocatorCIDRRange(d.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
+	var dhcp *ipallocator.Range
+	dhcp, err = ipallocator.NewAllocatorCIDRRange(d.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
 		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
 	})
 	if err != nil {
 		return err
 	}
-	str, err := base64.StdEncoding.DecodeString(cm.Data[config.KeyDHCP])
+	var str []byte
+	str, err = base64.StdEncoding.DecodeString(cm.Data[config.KeyDHCP])
 	if err == nil {
 		err = dhcp.Restore(d.cidr, str)
 		if err != nil {
@@ -147,7 +149,8 @@ func (d *DHCPManager) updateDHCPConfigMap(f func(ipv4 *ipallocator.Range, ipv6 *
 		}
 	}
 
-	dhcp6, err := ipallocator.NewAllocatorCIDRRange(d.cidr6, func(max int, rangeSpec string) (allocator.Interface, error) {
+	var dhcp6 *ipallocator.Range
+	dhcp6, err = ipallocator.NewAllocatorCIDRRange(d.cidr6, func(max int, rangeSpec string) (allocator.Interface, error) {
 		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
 	})
 	if err != nil {
@@ -177,7 +180,7 @@ func (d *DHCPManager) updateDHCPConfigMap(f func(ipv4 *ipallocator.Range, ipv6 *
 		}
 		cm.Data[key] = base64.StdEncoding.EncodeToString(bytes)
 	}
-	_, err = d.client.Update(context.Background(), cm, metav1.UpdateOptions{})
+	_, err = d.client.Update(ctx, cm, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("update dhcp failed, err: %v", err)
 	}

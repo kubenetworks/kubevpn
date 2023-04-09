@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -21,11 +22,12 @@ type dhcpServer struct {
 func (d *dhcpServer) rentIP(w http.ResponseWriter, r *http.Request) {
 	podName := r.Header.Get(config.HeaderPodName)
 	namespace := r.Header.Get(config.HeaderPodNamespace)
+	ctx := context.Background()
 
 	log.Infof("handling rent ip request, pod name: %s, ns: %s", podName, namespace)
 	cmi := d.clientset.CoreV1().ConfigMaps(namespace)
 	dhcp := handler.NewDHCPManager(cmi, namespace)
-	v4, v6, err := dhcp.RentIPRandom()
+	v4, v6, err := dhcp.RentIPRandom(ctx)
 	if err != nil {
 		log.Error(err)
 		w.WriteHeader(http.StatusBadRequest)
@@ -56,7 +58,7 @@ func (d *dhcpServer) releaseIP(w http.ResponseWriter, r *http.Request) {
 	log.Infof("handling release ip request, pod name: %s, ns: %s", podName, namespace)
 	cmi := d.clientset.CoreV1().ConfigMaps(namespace)
 	dhcp := handler.NewDHCPManager(cmi, namespace)
-	if err := dhcp.ReleaseIP(ips...); err != nil {
+	if err := dhcp.ReleaseIP(context.Background(), ips...); err != nil {
 		log.Error(err)
 		w.WriteHeader(http.StatusBadRequest)
 		return

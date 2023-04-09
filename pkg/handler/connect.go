@@ -79,8 +79,8 @@ type ConnectOptions struct {
 	localTunIPv6 *net.IPNet
 }
 
-func (c *ConnectOptions) createRemoteInboundPod(ctx1 context.Context) (err error) {
-	c.localTunIPv4, c.localTunIPv6, err = c.dhcp.RentIPBaseNICAddress()
+func (c *ConnectOptions) createRemoteInboundPod(ctx context.Context) (err error) {
+	c.localTunIPv4, c.localTunIPv6, err = c.dhcp.RentIPBaseNICAddress(ctx)
 	if err != nil {
 		return
 	}
@@ -92,9 +92,9 @@ func (c *ConnectOptions) createRemoteInboundPod(ctx1 context.Context) (err error
 		}
 		// means mesh mode
 		if len(c.Headers) != 0 {
-			err = InjectVPNAndEnvoySidecar(ctx1, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers)
+			err = InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers)
 		} else {
-			err = InjectVPNSidecar(ctx1, c.factory, c.Namespace, workload, configInfo)
+			err = InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, configInfo)
 		}
 		if err != nil {
 			return err
