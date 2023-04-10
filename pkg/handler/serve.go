@@ -52,7 +52,7 @@ func Complete(route *core.Route) error {
 			}
 			if node.Protocol == "tun" {
 				if get := node.Get("net"); get == "" {
-					route.ServeNodes[i] = route.ServeNodes[i] + "&net=" + string(ip)
+					route.ServeNodes[i] = route.ServeNodes[i] + "&net=" + string(ip[0])
 				}
 			}
 		}
