@@ -256,18 +256,18 @@ func (r Run) Run(ctx context.Context, volume map[string][]mount.Mount) error {
 	if err != nil {
 		return err
 	}
-	for _, config := range r {
+	for _, runConfig := range r {
 		var id string
-		id, err = run(ctx, config, cli, c)
+		id, err = run(ctx, runConfig, cli, c)
 		if err != nil {
 			// try another way to startup container
 			log.Infof("occur err: %v, try another way to startup container...", err)
-			config.hostConfig.Mounts = nil
-			id, err = run(ctx, config, cli, c)
+			runConfig.hostConfig.Mounts = nil
+			id, err = run(ctx, runConfig, cli, c)
 			if err != nil {
 				return err
 			}
-			err = r.copyToContainer(ctx, volume[config.k8sContainerName], cli, id)
+			err = r.copyToContainer(ctx, volume[runConfig.k8sContainerName], cli, id)
 			if err != nil {
 				return err
 			}

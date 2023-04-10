@@ -13,6 +13,7 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/dev"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -20,6 +21,7 @@ import (
 func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	var connect = &handler.ConnectOptions{}
 	var sshConf = &util.SshConfig{}
+	var transferImage bool
 	cmd := &cobra.Command{
 		Use:   "connect",
 		Short: i18n.T("Connect to kubernetes cluster network"),
@@ -46,6 +48,11 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			go util.StartupPProf(config.PProfPort)
 			util.InitLogger(config.Debug)
 			defaultlog.Default().SetOutput(io.Discard)
+			if transferImage {
+				if err = dev.TransferImage(cmd.Context(), sshConf); err != nil {
+					return err
+				}
+			}
 			return handler.SshJump(sshConf, cmd.Flags())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -65,7 +72,8 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "use this image to startup container")
 	cmd.Flags().StringArrayVar(&connect.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
 	cmd.Flags().StringArrayVar(&connect.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
+	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to "+config.Image)
 
-	addSshFlag(cmd, sshConf)
+	addSshFlags(cmd, sshConf)
 	return cmd
 }

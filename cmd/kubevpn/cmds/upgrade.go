@@ -8,6 +8,7 @@ import (
 	"golang.org/x/oauth2"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/upgrade"
 )
 
@@ -27,7 +28,7 @@ func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
 			if GitHubOAuthToken != "" {
 				client = oauth2.NewClient(cmd.Context(), oauth2.StaticTokenSource(&oauth2.Token{AccessToken: GitHubOAuthToken, TokenType: "Bearer"}))
 			}
-			err := upgrade.Main(Version, client)
+			err := upgrade.Main(config.Version, client)
 			if err != nil {
 				log.Fatal(err)
 			}

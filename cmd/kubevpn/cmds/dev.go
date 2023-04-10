@@ -30,6 +30,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		ExtraCIDR:  []string{},
 	}
 	var sshConf = &util.SshConfig{}
+	var transferImage bool
 	cmd := &cobra.Command{
 		Use:   "dev",
 		Short: i18n.T("Startup your kubernetes workloads in local Docker container with same volume、env、and network"),
@@ -73,6 +74,11 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 			}
 			go util.StartupPProf(config.PProfPort)
 			util.InitLogger(config.Debug)
+			if transferImage {
+				if err := dev.TransferImage(cmd.Context(), sshConf); err != nil {
+					return err
+				}
+			}
 			return handler.SshJump(sshConf, cmd.Flags())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -88,6 +94,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 	cmd.Flags().StringArrayVar(&devOptions.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
 	cmd.Flags().StringArrayVar(&devOptions.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
 	cmd.Flags().StringVar((*string)(&devOptions.ConnectMode), "connect-mode", string(dev.ConnectModeHost), "Connect to kubernetes network in container or in host, eg: ["+string(dev.ConnectModeContainer)+"|"+string(dev.ConnectModeHost)+"]")
+	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to "+config.Image)
 
 	// docker options
 	cmd.Flags().Var(&devOptions.ExtraHosts, "add-host", "Add a custom host-to-IP mapping (host:ip)")
@@ -108,6 +115,6 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 	cmd.Flags().StringVar(&devOptions.VolumeDriver, "volume-driver", "", "Optional volume driver for the container")
 	_ = cmd.Flags().SetAnnotation("platform", "version", []string{"1.32"})
 
-	addSshFlag(cmd, sshConf)
+	addSshFlags(cmd, sshConf)
 	return cmd
 }

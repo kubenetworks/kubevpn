@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,6 +24,9 @@ import (
 	v12 "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
+
+	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
 func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *command.DockerCli) (id string, err error) {
@@ -46,7 +51,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 		}
 	}
 	if needPull {
-		if err = pullImage(ctx, runConfig.platform, cli, c, config.Image); err != nil {
+		if err = PullImage(ctx, runConfig.platform, cli, c, config.Image); err != nil {
 			return
 		}
 	}
@@ -107,7 +112,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 	return
 }
 
-func pullImage(ctx context.Context, platform *v12.Platform, cli *client.Client, c *command.DockerCli, img string) error {
+func PullImage(ctx context.Context, platform *v12.Platform, cli *client.Client, c *command.DockerCli, img string) error {
 	var readCloser io.ReadCloser
 	var plat string
 	if platform != nil && platform.Architecture != "" && platform.OS != "" {
@@ -156,4 +161,98 @@ func terminal(c string, cli *command.DockerCli) error {
 	options.Container = c
 	options.Command = []string{"sh", "-c", `command -v bash >/dev/null && exec bash || exec sh`}
 	return container.RunExec(cli, options)
+}
+
+// TransferImage
+// 1) if not special ssh config, just pull image and tag and push
+// 2) if special ssh config, pull image, tag image, save image and scp image to remote, load image and push
+func TransferImage(ctx context.Context, conf *util.SshConfig) error {
+	cli, c, err := GetClient()
+	if err != nil {
+		return err
+	}
+	// todo add flags? or detect k8s node runtime ?
+	err = PullImage(ctx, &v12.Platform{
+		Architecture: "amd64",
+		OS:           "linux",
+	}, cli, c, config.OriginImage)
+	if err != nil {
+		return err
+	}
+
+	err = cli.ImageTag(ctx, config.OriginImage, config.Image)
+	if err != nil {
+		return err
+	}
+
+	// use it if sshConfig is not empty
+	if conf.ConfigAlias == "" && conf.Addr == "" {
+		distributionRef, err := reference.ParseNormalizedNamed(config.Image)
+		if err != nil {
+			return err
+		}
+		var imgRefAndAuth trust.ImageRefAndAuth
+		imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, nil, image.AuthResolver(c), distributionRef.String())
+		if err != nil {
+			return err
+		}
+		var encodedAuth string
+		encodedAuth, err = command.EncodeAuthToBase64(*imgRefAndAuth.AuthConfig())
+		if err != nil {
+			return err
+		}
+		requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(c, imgRefAndAuth.RepoInfo().Index, "push")
+		var readCloser io.ReadCloser
+		readCloser, err = cli.ImagePush(ctx, config.Image, types.ImagePushOptions{
+			RegistryAuth:  encodedAuth,
+			PrivilegeFunc: requestPrivilege,
+		})
+		if err != nil {
+			err = fmt.Errorf("can not push image %s, err: %v", config.Image, err)
+			return err
+		}
+		defer readCloser.Close()
+		_, stdout, _ := dockerterm.StdStreams()
+		out := streams.NewOut(stdout)
+		err = jsonmessage.DisplayJSONMessagesToStream(readCloser, out, nil)
+		if err != nil {
+			err = fmt.Errorf("can not display message, err: %v", err)
+			return err
+		}
+		return nil
+	}
+
+	// transfer image to remote
+	var responseReader io.ReadCloser
+	responseReader, err = cli.ImageSave(ctx, []string{config.Image})
+	if err != nil {
+		return err
+	}
+	defer responseReader.Close()
+	file, err := os.CreateTemp("", "*.tar")
+	if err != nil {
+		return err
+	}
+	log.Infof("saving image %s to temp file %s", config.Image, file.Name())
+	if _, err = io.Copy(file, responseReader); err != nil {
+		return err
+	}
+	if err = file.Close(); err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+
+	log.Infof("Transfering image %s", config.Image)
+	err = util.SCP(conf, file.Name(), []string{
+		fmt.Sprintf(
+			"(docker load image -i kubevpndir/%s && docker push %s) || (nerdctl image load -i kubevpndir/%s && nerdctl image push %s)",
+			filepath.Base(file.Name()), config.Image,
+			filepath.Base(file.Name()), config.Image,
+		),
+	}...)
+	if err != nil {
+		return err
+	}
+	log.Infof("Loaded image: %s", config.Image)
+	return nil
 }

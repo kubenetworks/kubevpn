@@ -21,7 +21,7 @@ IMAGE_DEFAULT = docker.io/naison/kubevpn:latest
 # Setup the -ldflags option for go build here, interpolate the variable values
 LDFLAGS=--ldflags "\
  -X ${BASE}/pkg/config.Image=${IMAGE} \
- -X ${FOLDER}/cmds.Version=${VERSION} \
+ -X ${BASE}/pkg/config.Version=${VERSION} \
  -X ${FOLDER}/cmds.BuildTime=${BUILD_TIME} \
  -X ${FOLDER}/cmds.GitCommit=${GIT_COMMIT} \
  -X ${FOLDER}/cmds.Branch=${BRANCH} \

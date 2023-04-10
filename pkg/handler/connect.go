@@ -645,8 +645,7 @@ func SshJump(conf *util.SshConfig, flags *pflag.FlagSet) (err error) {
 	if err != nil {
 		return err
 	}
-	err = os.Setenv(config.EnvSSHJump, temp.Name())
-	return err
+	return os.Setenv(config.EnvSSHJump, temp.Name())
 }
 
 // PreCheckResource transform user parameter to normal, example:

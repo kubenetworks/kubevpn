@@ -15,6 +15,7 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/dev"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -22,6 +23,7 @@ import (
 func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	var connect = handler.ConnectOptions{}
 	var sshConf = &util.SshConfig{}
+	var transferImage bool
 	cmd := &cobra.Command{
 		Use:   "proxy",
 		Short: i18n.T("Proxy kubernetes workloads inbound traffic into local PC"),
@@ -60,6 +62,11 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			go util.StartupPProf(config.PProfPort)
 			util.InitLogger(config.Debug)
 			defaultlog.Default().SetOutput(io.Discard)
+			if transferImage {
+				if err = dev.TransferImage(cmd.Context(), sshConf); err != nil {
+					return err
+				}
+			}
 			return handler.SshJump(sshConf, cmd.Flags())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -94,13 +101,14 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
 	cmd.Flags().StringArrayVar(&connect.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
 	cmd.Flags().StringArrayVar(&connect.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
+	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to "+config.Image)
 
-	addSshFlag(cmd, sshConf)
+	addSshFlags(cmd, sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd
 }
 
-func addSshFlag(cmd *cobra.Command, sshConf *util.SshConfig) {
+func addSshFlags(cmd *cobra.Command, sshConf *util.SshConfig) {
 	// for ssh jumper host
 	cmd.Flags().StringVar(&sshConf.Addr, "ssh-addr", "", "Optional ssh jump server address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
 	cmd.Flags().StringVar(&sshConf.User, "ssh-username", "", "Optional username for ssh jump server")

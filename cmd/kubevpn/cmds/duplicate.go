@@ -16,6 +16,7 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/dev"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -25,6 +26,7 @@ import (
 func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 	var duplicateOptions = handler.DuplicateOptions{}
 	var sshConf = &util.SshConfig{}
+	var transferImage bool
 	cmd := &cobra.Command{
 		Use:   "duplicate",
 		Short: i18n.T("Duplicate workloads to target-kubeconfig cluster with same volume、env、and network"),
@@ -66,6 +68,11 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 			go util.StartupPProf(config.PProfPort)
 			util.InitLogger(config.Debug)
 			defaultlog.Default().SetOutput(io.Discard)
+			if transferImage {
+				if err = dev.TransferImage(cmd.Context(), sshConf); err != nil {
+					return err
+				}
+			}
 			return handler.SshJump(sshConf, cmd.Flags())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -117,6 +124,7 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
 	cmd.Flags().StringArrayVar(&duplicateOptions.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
 	cmd.Flags().StringArrayVar(&duplicateOptions.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
+	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to "+config.Image)
 
 	cmd.Flags().StringVar(&duplicateOptions.TargetImage, "target-image", "", "Duplicate container use this image to startup container, if not special, use origin origin image")
 	cmd.Flags().StringVar(&duplicateOptions.TargetContainer, "target-container", "", "Duplicate container use special image to startup this container, if not special, use origin origin image")
@@ -124,7 +132,7 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&duplicateOptions.TargetKubeconfig, "target-kubeconfig", "", "Duplicate workloads will create in this cluster, if not special, use origin cluster")
 	cmd.Flags().StringVar(&duplicateOptions.TargetRegistry, "target-registry", "", "Duplicate workloads will create this registry domain to replace origin registry, if not special, use origin registry")
 
-	addSshFlag(cmd, sshConf)
+	addSshFlags(cmd, sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd
 }
