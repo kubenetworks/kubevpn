@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"math/rand"
 	"os"
 	"strings"
 	"sync"
@@ -13,24 +15,38 @@ import (
 
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/semaphore"
+	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/util/cache"
 )
 
+var (
+	maxConcurrent int64 = 1024
+	logInterval         = 2 * time.Second
+)
+
+// github.com/docker/docker@v23.0.1+incompatible/libnetwork/network_windows.go:53
 type server struct {
 	dnsCache   *cache.LRUExpireCache
 	forwardDNS *miekgdns.ClientConfig
 	client     *miekgdns.Client
+
+	fwdSem      *semaphore.Weighted // Limit the number of concurrent external DNS requests in-flight
+	logInverval rate.Sometimes      // Rate-limit logging about hitting the fwdSem limit
 }
 
 func NewDNSServer(network, address string, forwardDNS *miekgdns.ClientConfig) error {
 	return miekgdns.ListenAndServe(address, network, &server{
-		dnsCache:   cache.NewLRUExpireCache(1000),
-		forwardDNS: forwardDNS,
-		client:     &miekgdns.Client{Net: "udp", SingleInflight: true, Timeout: time.Second * 30},
+		dnsCache:    cache.NewLRUExpireCache(1000),
+		forwardDNS:  forwardDNS,
+		client:      &miekgdns.Client{Net: "udp", SingleInflight: true, Timeout: time.Second * 30},
+		fwdSem:      semaphore.NewWeighted(maxConcurrent),
+		logInverval: rate.Sometimes{Interval: logInterval},
 	})
 }
 
 // ServeDNS consider using a cache
+// eg: nslookup -port=56571 code.byted.org 127.0.0.1
 func (s *server) ServeDNS(w miekgdns.ResponseWriter, r *miekgdns.Msg) {
 	defer w.Close()
 	if len(r.Question) == 0 {
@@ -41,6 +57,16 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, r *miekgdns.Msg) {
 
 	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancelFunc()
+	// limits the number of outstanding concurrent queries
+	err := s.fwdSem.Acquire(ctx, 1)
+	if err != nil {
+		s.logInverval.Do(func() {
+			log.Errorf("dns-server more than %v concurrent queries", maxConcurrent)
+		})
+		r.SetRcode(r, miekgdns.RcodeRefused)
+		return
+	}
+	defer s.fwdSem.Release(1)
 
 	var wg = &sync.WaitGroup{}
 
@@ -72,14 +98,10 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, r *miekgdns.Msg) {
 				_ = json.Unmarshal(marshal, &msg)
 				for i := 0; i < len(msg.Question); i++ {
 					msg.Question[i].Name = name
-					msg.Question[i].Qtype = miekgdns.TypeA // IPV4
 				}
 				msg.Ns = nil
 				msg.Extra = nil
-
-				//msg.Id = uint16(rand.Intn(math.MaxUint16 + 1))
-				//client := miekgdns.Client{Net: "udp", Timeout: time.Second * 30}
-				//r, _, err = client.ExchangeContext(ctx, m, a)
+				msg.Id = uint16(rand.Intn(math.MaxUint16 + 1))
 				answer, _, err := s.client.ExchangeContext(context.Background(), &msg, fmt.Sprintf("%s:%s", dnsAddr, s.forwardDNS.Port))
 
 				if err == nil && len(answer.Answer) != 0 {
