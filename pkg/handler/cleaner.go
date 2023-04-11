@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -35,7 +36,14 @@ func (c *ConnectOptions) addCleanUpResourceHandler() {
 		log.Info("prepare to exit, cleaning up")
 		cleanupCtx, cancelFunc := context.WithTimeout(context.Background(), time.Second*5)
 		defer cancelFunc()
-		err := c.dhcp.ReleaseIP(cleanupCtx, c.localTunIPv4.IP, c.localTunIPv6.IP)
+		var ips []net.IP
+		if c.localTunIPv4 != nil && c.localTunIPv4.IP != nil {
+			ips = append(ips, c.localTunIPv4.IP)
+		}
+		if c.localTunIPv6 != nil && c.localTunIPv6.IP != nil {
+			ips = append(ips, c.localTunIPv6.IP)
+		}
+		err := c.dhcp.ReleaseIP(cleanupCtx, ips...)
 		if err != nil {
 			log.Errorf("failed to release ip to dhcp, err: %v", err)
 		}
