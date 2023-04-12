@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/cli/cli/command"
@@ -19,6 +20,7 @@ import (
 	"github.com/docker/docker/api/types"
 	typescommand "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/jsonmessage"
 	dockerterm "github.com/moby/term"
 	v12 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -72,20 +74,31 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 
 	err = cli.ContainerStart(ctx, create.ID, types.ContainerStartOptions{})
 	if err != nil {
+		err = fmt.Errorf("failed to startup container %s: %v", name, err)
 		return
 	}
 	log.Infof("Wait container %s to be running...", name)
 	chanStop := make(chan struct{})
 	var inspect types.ContainerJSON
+	var once = &sync.Once{}
 	wait.Until(func() {
 		inspect, err = cli.ContainerInspect(ctx, create.ID)
+		if err != nil && errdefs.IsNotFound(err) {
+			once.Do(func() { close(chanStop) })
+			return
+		}
 		if err != nil {
 			return
 		}
 		if inspect.State != nil && inspect.State.Running {
-			close(chanStop)
+			once.Do(func() { close(chanStop) })
+			return
 		}
 	}, time.Second, chanStop)
+	if err != nil {
+		err = fmt.Errorf("failed to wait container to be ready: %v", err)
+		return
+	}
 
 	// print port mapping to host
 	var empty = true
@@ -120,17 +133,17 @@ func PullImage(ctx context.Context, platform *v12.Platform, cli *client.Client, 
 	}
 	distributionRef, err := reference.ParseNormalizedNamed(img)
 	if err != nil {
-		return err
+		return fmt.Errorf("can not parse image name %s: %v", img, err)
 	}
 	var imgRefAndAuth trust.ImageRefAndAuth
 	imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, nil, image.AuthResolver(c), distributionRef.String())
 	if err != nil {
-		return err
+		return fmt.Errorf("can not get image auth: %v", err)
 	}
 	var encodedAuth string
 	encodedAuth, err = command.EncodeAuthToBase64(*imgRefAndAuth.AuthConfig())
 	if err != nil {
-		return err
+		return fmt.Errorf("can not encode auth config to base64:%v", err)
 	}
 	requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(c, imgRefAndAuth.RepoInfo().Index, "pull")
 	readCloser, err = cli.ImagePull(ctx, img, types.ImagePullOptions{
@@ -169,7 +182,7 @@ func terminal(c string, cli *command.DockerCli) error {
 func TransferImage(ctx context.Context, conf *util.SshConfig) error {
 	cli, c, err := GetClient()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get docker client: %v", err)
 	}
 	// todo add flags? or detect k8s node runtime ?
 	err = PullImage(ctx, &v12.Platform{
@@ -177,29 +190,30 @@ func TransferImage(ctx context.Context, conf *util.SshConfig) error {
 		OS:           "linux",
 	}, cli, c, config.OriginImage)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to pull image: %v", err)
 	}
 
 	err = cli.ImageTag(ctx, config.OriginImage, config.Image)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to tag image %s to %s: %v", config.OriginImage, config.Image, err)
 	}
 
 	// use it if sshConfig is not empty
 	if conf.ConfigAlias == "" && conf.Addr == "" {
-		distributionRef, err := reference.ParseNormalizedNamed(config.Image)
+		var distributionRef reference.Named
+		distributionRef, err = reference.ParseNormalizedNamed(config.Image)
 		if err != nil {
-			return err
+			return fmt.Errorf("can not parse image name %s: %v", config.Image, err)
 		}
 		var imgRefAndAuth trust.ImageRefAndAuth
 		imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, nil, image.AuthResolver(c), distributionRef.String())
 		if err != nil {
-			return err
+			return fmt.Errorf("can not get image auth: %v", err)
 		}
 		var encodedAuth string
 		encodedAuth, err = command.EncodeAuthToBase64(*imgRefAndAuth.AuthConfig())
 		if err != nil {
-			return err
+			return fmt.Errorf("can not encode auth config to base64: %v", err)
 		}
 		requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(c, imgRefAndAuth.RepoInfo().Index, "push")
 		var readCloser io.ReadCloser

@@ -253,6 +253,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 							Command: []string{"/bin/sh", "-c"},
 							Args: []string{`
 sysctl -w net.ipv4.ip_forward=1
+sysctl -w net.ipv6.conf.all.disable_ipv6=0
 sysctl -w net.ipv6.conf.all.forwarding=1
 update-alternatives --set iptables /usr/sbin/iptables-legacy
 iptables -F

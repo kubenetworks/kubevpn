@@ -65,6 +65,7 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig) {
 		// https://www.netfilter.org/documentation/HOWTO/NAT-HOWTO-6.html#ss6.2
 		Args: []string{`
 sysctl -w net.ipv4.ip_forward=1
+sysctl -w net.ipv6.conf.all.disable_ipv6=0
 sysctl -w net.ipv6.conf.all.forwarding=1
 sysctl -w net.ipv4.conf.all.route_localnet=1
 update-alternatives --set iptables /usr/sbin/iptables-legacy
