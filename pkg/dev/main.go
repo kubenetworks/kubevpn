@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/containerd/containerd/platforms"
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/cli/flags"
 	"github.com/docker/cli/opts"
@@ -29,6 +30,8 @@ import (
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/google/uuid"
+	specs "github.com/opencontainers/image-spec/specs-go/v1"
+	pkgerr "github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -406,6 +409,15 @@ func DoDev(devOptions Options, args []string, f cmdutil.Factory) error {
 		return fmt.Errorf("you must provide resource to dev, workloads : %v is invaild", connect.Workloads)
 	}
 
+	var platform *specs.Platform
+	if devOptions.Platform != "" {
+		p, err := platforms.Parse(devOptions.Platform)
+		if err != nil {
+			return pkgerr.Wrap(err, "error parsing specified platform")
+		}
+		platform = &p
+	}
+
 	devOptions.Workload = connect.Workloads[0]
 	// if no-proxy is true, not needs to intercept traffic
 	if devOptions.NoProxy {
@@ -532,7 +544,7 @@ func DoDev(devOptions Options, args []string, f cmdutil.Factory) error {
 					NetworkID: kubevpnNetwork,
 				}},
 			},
-			platform:         nil,
+			platform:         platform,
 			containerName:    name,
 			k8sContainerName: name,
 		}
