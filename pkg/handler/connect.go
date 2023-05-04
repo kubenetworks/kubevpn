@@ -77,6 +77,8 @@ type ConnectOptions struct {
 	// needs to give it back to dhcp
 	localTunIPv4 *net.IPNet
 	localTunIPv6 *net.IPNet
+
+	apiServerIPs []net.IP
 }
 
 func (c *ConnectOptions) createRemoteInboundPod(ctx context.Context) (err error) {
@@ -317,7 +319,15 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 	}
 
 	addRouteFunc := func(resource, ip string) {
-		if ip == "" || net.ParseIP(ip) == nil {
+		if net.ParseIP(ip) == nil {
+			return
+		}
+		apiServer := sets.New[string]()
+		for _, p := range c.apiServerIPs {
+			apiServer.Insert(p.String())
+		}
+		// if pod ip or service ip is equal to apiServer ip, can not add it to route table
+		if apiServer.Has(ip) {
 			return
 		}
 		// if route is right, not need add route
@@ -747,6 +757,36 @@ func (c *ConnectOptions) GetRunningPodList() ([]v1.Pod, error) {
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster/54183373#54183373
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster
 func (c *ConnectOptions) getCIDR(ctx context.Context) (err error) {
+	defer func() {
+		if err == nil {
+			u, err2 := url.Parse(c.config.Host)
+			if err2 != nil {
+				return
+			}
+			host, _, err3 := net.SplitHostPort(u.Host)
+			if err3 != nil {
+				return
+			}
+			var ipList []net.IP
+			if ip := net.ParseIP(host); ip != nil {
+				ipList = append(ipList, ip)
+			}
+			ips, _ := net.LookupIP(host)
+			if ips != nil {
+				ipList = append(ipList, ips...)
+			}
+			c.apiServerIPs = ipList
+			for i := 0; i < len(c.cidrs); i++ {
+				for _, ip := range ipList {
+					if c.cidrs[i].Contains(ip) {
+						c.cidrs = append(c.cidrs[:i], c.cidrs[i+1:]...)
+						i--
+					}
+				}
+			}
+		}
+	}()
+
 	// (1) get cidr from cache
 	var value string
 	value, err = c.dhcp.Get(ctx, config.KeyClusterIPv4POOLS)
