@@ -18,7 +18,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-func CmdServe(factory cmdutil.Factory) *cobra.Command {
+func CmdServe(_ cmdutil.Factory) *cobra.Command {
 	var route = &core.Route{}
 	cmd := &cobra.Command{
 		Use:    "serve",
@@ -36,6 +36,7 @@ func CmdServe(factory cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer handler.Final()
 			ctx, cancelFunc := context.WithCancel(context.Background())
 			stopChan := make(chan os.Signal)
 			signal.Notify(stopChan, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL /*, syscall.SIGSTOP*/)
@@ -43,12 +44,11 @@ func CmdServe(factory cmdutil.Factory) *cobra.Command {
 				<-stopChan
 				cancelFunc()
 			}()
-			err = handler.Start(ctx, *route)
+			servers, err := handler.Parse(*route)
 			if err != nil {
 				return err
 			}
-			<-ctx.Done()
-			return handler.Final()
+			return handler.Run(ctx, servers)
 		},
 	}
 	cmd.Flags().StringArrayVarP(&route.ServeNodes, "nodeCommand", "L", []string{}, "command needs to be executed")

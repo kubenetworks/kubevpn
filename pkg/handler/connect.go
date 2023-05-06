@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -23,6 +24,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"golang.org/x/sync/errgroup"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -296,11 +298,15 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 	}
 
 	log.Debugf("ipv4: %s, ipv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
-	if err = Start(ctx, r); err != nil {
-		log.Errorf("error while create tunnel, err: %v", errors.WithStack(err))
-	} else {
-		log.Info("tunnel connected")
+	servers, err := Parse(r)
+	if err != nil {
+		return errors.Wrap(err, "error while create tunnel")
 	}
+	go func() {
+		log.Error(Run(ctx, servers))
+		Cleanup(syscall.SIGQUIT)
+	}()
+	log.Info("tunnel connected")
 	return
 }
 
@@ -532,22 +538,17 @@ func (c *ConnectOptions) setupDNS() error {
 	return nil
 }
 
-func Start(ctx context.Context, r core.Route) error {
-	servers, err := r.GenerateServers()
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if len(servers) == 0 {
-		return fmt.Errorf("server is empty, server config: %s", strings.Join(r.ServeNodes, ","))
-	}
-	for _, server := range servers {
-		go func(ctx context.Context, server core.Server) {
-			l := server.Listener
+func Run(ctx context.Context, servers []core.Server) error {
+	group, _ := errgroup.WithContext(ctx)
+	for i := range servers {
+		i := i
+		group.Go(func() error {
+			l := servers[i].Listener
+			defer l.Close()
 			for {
 				select {
 				case <-ctx.Done():
-					_ = l.Close()
-					return
+					return nil
 				default:
 				}
 
@@ -556,11 +557,22 @@ func Start(ctx context.Context, r core.Route) error {
 					log.Debugf("server accept connect error: %v", errs)
 					continue
 				}
-				go server.Handler.Handle(ctx, conn)
+				go servers[i].Handler.Handle(ctx, conn)
 			}
-		}(ctx, server)
+		})
 	}
-	return nil
+	return group.Wait()
+}
+
+func Parse(r core.Route) ([]core.Server, error) {
+	servers, err := r.GenerateServers()
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	if len(servers) == 0 {
+		return nil, fmt.Errorf("server is empty, server config: %s", strings.Join(r.ServeNodes, ","))
+	}
+	return servers, nil
 }
 
 func (c *ConnectOptions) InitClient(f cmdutil.Factory) (err error) {
