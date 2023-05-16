@@ -32,19 +32,23 @@ import (
 )
 
 type RunConfig struct {
+	containerName    string
+	k8sContainerName string
+
 	config           *container.Config
 	hostConfig       *container.HostConfig
 	networkingConfig *network.NetworkingConfig
 	platform         *v12.Platform
-	containerName    string
-	k8sContainerName string
+
+	Options RunOptions
+	Copts   *ContainerOptions
 }
 
-func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, envMap map[string][]string, mountVolume map[string][]mount.Mount, dnsConfig *miekgdns.ClientConfig) (runConfigList Run) {
+func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, envMap map[string][]string, mountVolume map[string][]mount.Mount, dnsConfig *miekgdns.ClientConfig) (runConfigList ConfigList) {
 	spec := temp.Spec
 	for _, c := range spec.Containers {
 		var r RunConfig
-		config := &container.Config{
+		tmpConfig := &container.Config{
 			Hostname: func() string {
 				var hostname = spec.Hostname
 				if hostname == "" {
@@ -84,7 +88,7 @@ func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, e
 			Shell:           nil,
 		}
 		if temp.DeletionGracePeriodSeconds != nil {
-			config.StopTimeout = (*int)(unsafe.Pointer(temp.DeletionGracePeriodSeconds))
+			tmpConfig.StopTimeout = (*int)(unsafe.Pointer(temp.DeletionGracePeriodSeconds))
 		}
 		hostConfig := &container.HostConfig{
 			Binds:           []string{},
@@ -138,7 +142,7 @@ func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, e
 			portset[port1] = struct{}{}
 		}
 		hostConfig.PortBindings = portmap
-		config.ExposedPorts = portset
+		tmpConfig.ExposedPorts = portset
 		if c.SecurityContext != nil && c.SecurityContext.Capabilities != nil {
 			hostConfig.CapAdd = append(hostConfig.CapAdd, *(*strslice.StrSlice)(unsafe.Pointer(&c.SecurityContext.Capabilities.Add))...)
 			hostConfig.CapDrop = *(*strslice.StrSlice)(unsafe.Pointer(&c.SecurityContext.Capabilities.Drop))
@@ -150,10 +154,10 @@ func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, e
 		}
 		r.containerName = fmt.Sprintf("%s_%s_%s_%s", c.Name, namespace, "kubevpn", suffix)
 		r.k8sContainerName = c.Name
-		r.config = config
+		r.config = tmpConfig
 		r.hostConfig = hostConfig
 		r.networkingConfig = &network.NetworkingConfig{EndpointsConfig: make(map[string]*network.EndpointSettings)}
-		r.platform = /*&v12.Platform{Architecture: "amd64", OS: "linux"}*/ nil
+		r.platform = nil
 
 		runConfigList = append(runConfigList, &r)
 	}
@@ -179,11 +183,11 @@ func GetDNS(ctx context.Context, f util.Factory, ns, pod string) (*miekgdns.Clie
 		return nil, err
 	}
 
-	fromPod, err := dns.GetDNSServiceIPFromPod(clientSet, client, config, pod, ns)
+	clientConfig, err := dns.GetDNSServiceIPFromPod(clientSet, client, config, pod, ns)
 	if err != nil {
 		return nil, err
 	}
-	return fromPod, nil
+	return clientConfig, nil
 }
 
 // GetVolume key format: [container name]-[volume mount name]

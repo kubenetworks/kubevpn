@@ -2,11 +2,13 @@ package dev
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,10 +22,13 @@ import (
 	"github.com/docker/docker/api/types"
 	typescommand "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	apiclient "github.com/docker/docker/client"
 	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/jsonmessage"
+	"github.com/moby/term"
 	dockerterm "github.com/moby/term"
 	v12 "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
 
@@ -90,6 +95,11 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 		if err != nil {
 			return
 		}
+		if inspect.State != nil && (inspect.State.Status == "exited" || inspect.State.Status == "dead" || inspect.State.Dead) {
+			once.Do(func() { close(chanStop) })
+			err = errors.New(fmt.Sprintf("container status: %s", inspect.State.Status))
+			return
+		}
 		if inspect.State != nil && inspect.State.Running {
 			once.Do(func() { close(chanStop) })
 			return
@@ -122,6 +132,175 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 	} else {
 		log.Infof("Container %s is running now", name)
 	}
+	return
+}
+
+func runFirst(ctx context.Context, runConfig *RunConfig, cli *apiclient.Client, dockerCli *command.DockerCli) (id string, err error) {
+	rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	defer func() {
+		if err != nil {
+			_ = cli.ContainerRemove(ctx, id, types.ContainerRemoveOptions{Force: true})
+		}
+	}()
+
+	stdout, stderr := dockerCli.Out(), dockerCli.Err()
+	client := dockerCli.Client()
+
+	runConfig.config.ArgsEscaped = false
+
+	if err := dockerCli.In().CheckTty(runConfig.config.AttachStdin, runConfig.config.Tty); err != nil {
+		return id, err
+	}
+
+	if !runConfig.Options.Detach {
+		if err := dockerCli.In().CheckTty(runConfig.config.AttachStdin, runConfig.config.Tty); err != nil {
+			return id, err
+		}
+	} else {
+		if runConfig.Copts.attach.Len() != 0 {
+			return id, errors.New("Conflicting options: -a and -d")
+		}
+
+		runConfig.config.AttachStdin = false
+		runConfig.config.AttachStdout = false
+		runConfig.config.AttachStderr = false
+		runConfig.config.StdinOnce = false
+	}
+
+	ctx, cancelFun := context.WithCancel(context.Background())
+	defer cancelFun()
+
+	createResponse, err := createContainer(ctx, dockerCli, &containerConfig{
+		Config:           runConfig.config,
+		HostConfig:       runConfig.hostConfig,
+		NetworkingConfig: runConfig.networkingConfig,
+	}, &runConfig.Options.createOptions)
+	if err != nil {
+		return "", err
+	}
+	log.Infof("Created container: %s", runConfig.containerName)
+
+	var (
+		waitDisplayID chan struct{}
+		errCh         chan error
+	)
+	if !runConfig.config.AttachStdout && !runConfig.config.AttachStderr {
+		// Make this asynchronous to allow the client to write to stdin before having to read the ID
+		waitDisplayID = make(chan struct{})
+		go func() {
+			defer close(waitDisplayID)
+			fmt.Fprintln(stdout, createResponse.ID)
+		}()
+	}
+	attach := runConfig.config.AttachStdin || runConfig.config.AttachStdout || runConfig.config.AttachStderr
+	if attach {
+		close, err := attachContainer(ctx, dockerCli, &errCh, runConfig.config, createResponse.ID)
+
+		if err != nil {
+			return id, err
+		}
+		defer close()
+	}
+	statusChan := waitExitOrRemoved(ctx, dockerCli, createResponse.ID, runConfig.Copts.autoRemove)
+	// start the container
+	if err := client.ContainerStart(ctx, createResponse.ID, types.ContainerStartOptions{}); err != nil {
+		// If we have hijackedIOStreamer, we should notify
+		// hijackedIOStreamer we are going to exit and wait
+		// to avoid the terminal are not restored.
+		if attach {
+			cancelFun()
+			<-errCh
+		}
+
+		reportError(stderr, "run", err.Error(), false)
+		if runConfig.Copts.autoRemove {
+			// wait container to be removed
+			<-statusChan
+		}
+		return id, runStartContainerErr(err)
+	}
+
+	if (runConfig.config.AttachStdin || runConfig.config.AttachStdout || runConfig.config.AttachStderr) && runConfig.config.Tty && dockerCli.Out().IsTerminal() {
+		if err := container.MonitorTtySize(ctx, dockerCli, createResponse.ID, false); err != nil {
+			fmt.Fprintln(stderr, "Error monitoring TTY size:", err)
+		}
+	}
+
+	if errCh != nil {
+		if err := <-errCh; err != nil {
+			if _, ok := err.(term.EscapeError); ok {
+				// The user entered the detach escape sequence.
+				return id, nil
+			}
+
+			logrus.Debugf("Error hijack: %s", err)
+			return id, err
+		}
+	}
+
+	// Detached mode: wait for the id to be displayed and return.
+	if !runConfig.config.AttachStdout && !runConfig.config.AttachStderr {
+		// Detached mode
+		<-waitDisplayID
+		return id, nil
+	}
+
+	status := <-statusChan
+	if status != 0 {
+		return id, errors.New(strconv.Itoa(status))
+	}
+	log.Infof("Wait container %s to be running...", runConfig.containerName)
+	chanStop := make(chan struct{})
+	var inspect types.ContainerJSON
+	var once = &sync.Once{}
+	wait.Until(func() {
+		inspect, err = cli.ContainerInspect(ctx, createResponse.ID)
+		if err != nil && errdefs.IsNotFound(err) {
+			once.Do(func() { close(chanStop) })
+			return
+		}
+		if err != nil {
+			return
+		}
+		if inspect.State != nil && (inspect.State.Status == "exited" || inspect.State.Status == "dead" || inspect.State.Dead) {
+			once.Do(func() { close(chanStop) })
+			err = errors.New(fmt.Sprintf("container status: %s", inspect.State.Status))
+			return
+		}
+		if inspect.State != nil && inspect.State.Running {
+			once.Do(func() { close(chanStop) })
+			return
+		}
+	}, time.Second, chanStop)
+	if err != nil {
+		err = fmt.Errorf("failed to wait container to be ready: %v", err)
+		return
+	}
+
+	// print port mapping to host
+	var empty = true
+	var str string
+	if inspect.NetworkSettings != nil && inspect.NetworkSettings.Ports != nil {
+		var list []string
+		for port, bindings := range inspect.NetworkSettings.Ports {
+			var p []string
+			for _, binding := range bindings {
+				if binding.HostPort != "" {
+					p = append(p, binding.HostPort)
+					empty = false
+				}
+			}
+			list = append(list, fmt.Sprintf("%s:%s", port, strings.Join(p, ",")))
+		}
+		str = fmt.Sprintf("Container %s is running on port %s now", runConfig.containerName, strings.Join(list, " "))
+	}
+	if !empty {
+		log.Infoln(str)
+	} else {
+		log.Infof("Container %s is running now", runConfig.containerName)
+	}
+
 	return
 }
 

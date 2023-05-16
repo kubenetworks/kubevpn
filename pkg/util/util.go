@@ -749,3 +749,15 @@ func MoveToTemp() {
 		log.Debugln(err)
 	}
 }
+
+func Merge[K comparable, V any](fromMap, ToMap map[K]V) map[K]V {
+	for keyToMap, valueToMap := range ToMap {
+		fromMap[keyToMap] = valueToMap
+	}
+	if fromMap == nil {
+		// merge(nil, map[string]interface{...}) -> map[string]interface{...}
+		return ToMap
+	}
+
+	return fromMap
+}
