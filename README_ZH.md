@@ -254,7 +254,7 @@ Hello world!%
 将 Kubernetes pod 运行在本地的 Docker 容器中，同时配合 service mesh, 拦截带有制定 header 的流量到本地，或者所有的流量到本地。这个开发模式依赖于本地 Docker .
 
 ```shell
-➜  ~ kubevpn dev deployment/authors -n kube-system --headers a=1 -p 9080:9080 -p 80:80
+➜  ~ kubevpn -n kube-system --headers a=1 -p 9080:9080 -p 80:80 dev deployment/authors
 got cidr from cache
 update ref count successfully
 traffic manager already exist, reuse it
@@ -320,7 +320,7 @@ de9e2f8ab57d        nginx:latest            "/docker-entrypoint.…"   5 seconds
 ```
 
 如果你想指定在本地启动容器的镜像, 可以使用参数 `--docker-image`, 当本地不存在该镜像时, 会从对应的镜像仓库拉取。如果你想指定启动参数，可以使用 `--entrypoint`
-参数，替换为你想要执行的命令，比如 `--entrypoint "tail -f /dev/null"`, 更多使用参数，请参见 `kubevpn dev --help`.
+参数，替换为你想要执行的命令，比如 `--entrypoint /bin/bash`, 更多使用参数，请参见 `kubevpn dev --help`.
 
 ### DinD ( Docker in Docker ) 在 Docker 中使用 kubevpn
 
@@ -337,7 +337,7 @@ docker run -it --privileged -v /var/run/docker.sock:/var/run/docker.sock -v /tmp
 ➜  ~ docker run -it --privileged -c authors -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v /Users/naison/.kube/config:/root/.kube/config naison/kubevpn:v1.1.21
 root@4d0c3c4eae2b:/# hostname
 4d0c3c4eae2b
-root@4d0c3c4eae2b:/# kubevpn dev deployment/authors -n kube-system --image naison/kubevpn:v1.1.21 --headers user=naison --network container:4d0c3c4eae2b --entrypoint "tail -f /dev/null"
+root@4d0c3c4eae2b:/# kubevpn -n kube-system --image naison/kubevpn:v1.1.21 --headers user=naison --network container:4d0c3c4eae2b --entrypoint /bin/bash  dev deployment/authors
 
 ----------------------------------------------------------------------------------
     Warn: Use sudo to execute command kubevpn can not use user env KUBECONFIG.

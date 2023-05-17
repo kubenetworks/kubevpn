@@ -257,7 +257,7 @@ Run the Kubernetes pod in the local Docker container, and cooperate with the ser
 the specified header to the local, or all the traffic to the local.
 
 ```shell
-➜  ~ kubevpn dev deployment/authors -n kube-system --headers a=1 -p 9080:9080 -p 80:80
+➜  ~ kubevpn -n kube-system --headers a=1 -p 9080:9080 -p 80:80 dev deployment/authors
 got cidr from cache
 update ref count successfully
 traffic manager already exist, reuse it
@@ -327,7 +327,7 @@ de9e2f8ab57d        nginx:latest            "/docker-entrypoint.…"   5 seconds
 If you want to specify the image to start the container locally, you can use the parameter `--docker-image`. When the
 image does not exist locally, it will be pulled from the corresponding mirror warehouse. If you want to specify startup
 parameters, you can use `--entrypoint` parameter, replace it with the command you want to execute, such
-as `--entrypoint "tail -f /dev/null"`, for more parameters, see `kubevpn dev --help`.
+as `--entrypoint /bin/bash`, for more parameters, see `kubevpn dev --help`.
 
 ### DinD ( Docker in Docker ) use kubevpn in Docker
 
@@ -345,7 +345,7 @@ docker run -it --privileged -v /var/run/docker.sock:/var/run/docker.sock -v /tmp
 ➜  ~ docker run -it --privileged -c authors -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v /Users/naison/.kube/vke:/root/.kube/config -v /Users/naison/Desktop/kubevpn/bin:/app naison/kubevpn:v1.1.21
 root@4d0c3c4eae2b:/# hostname
 4d0c3c4eae2b
-root@4d0c3c4eae2b:/# kubevpn dev deployment/authors -n kube-system --image naison/kubevpn:v1.1.21 --headers user=naison --network container:4d0c3c4eae2b --entrypoint "tail -f /dev/null"
+root@4d0c3c4eae2b:/# kubevpn -n kube-system --image naison/kubevpn:v1.1.21 --headers user=naison --network container:4d0c3c4eae2b --entrypoint /bin/bash dev deployment/authors
 
 ----------------------------------------------------------------------------------
     Warn: Use sudo to execute command kubevpn can not use user env KUBECONFIG.
