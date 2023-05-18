@@ -79,7 +79,6 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 				}
 			}
 			return handler.SshJump(sshConf, cmd.Flags())
-			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			devOptions.Workload = args[0]
@@ -89,6 +88,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 			return dev.DoDev(devOptions, cmd.Flags(), f)
 		},
 	}
+	cmd.Flags().SortFlags = false
 	cmd.Flags().StringToStringVarP(&devOptions.Headers, "headers", "H", map[string]string{}, "Traffic with special headers with reverse it to local PC, you should startup your service after reverse workloads successfully, If not special, redirect all traffic to local PC, format is k=v, like: k1=v1,k2=v2")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "use this image to startup container")

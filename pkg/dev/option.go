@@ -4,6 +4,7 @@ import (
 	"github.com/containerd/containerd/platforms"
 	"github.com/docker/docker/api/types/network"
 	"github.com/pkg/errors"
+
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -41,6 +42,13 @@ func mergeDockerOptions(r ConfigList, copts *Options, tempContainerConfig *conta
 		config.platform = &p
 	}
 
+	tempContainerConfig.HostConfig.CapAdd = append(tempContainerConfig.HostConfig.CapAdd, config.hostConfig.CapAdd...)
+	tempContainerConfig.HostConfig.SecurityOpt = append(tempContainerConfig.HostConfig.SecurityOpt, config.hostConfig.SecurityOpt...)
+	tempContainerConfig.HostConfig.VolumesFrom = append(tempContainerConfig.HostConfig.VolumesFrom, config.hostConfig.VolumesFrom...)
+	tempContainerConfig.HostConfig.DNS = append(tempContainerConfig.HostConfig.DNS, config.hostConfig.DNS...)
+	tempContainerConfig.HostConfig.DNSOptions = append(tempContainerConfig.HostConfig.DNSOptions, config.hostConfig.DNSOptions...)
+	tempContainerConfig.HostConfig.DNSSearch = append(tempContainerConfig.HostConfig.DNSSearch, config.hostConfig.DNSSearch...)
+
 	config.hostConfig = tempContainerConfig.HostConfig
 	config.networkingConfig.EndpointsConfig = util.Merge[string, *network.EndpointSettings](tempContainerConfig.NetworkingConfig.EndpointsConfig, config.networkingConfig.EndpointsConfig)
 
@@ -62,7 +70,11 @@ func mergeDockerOptions(r ConfigList, copts *Options, tempContainerConfig *conta
 	if c.User == "" {
 		c.User = config.config.User
 	}
+	c.Labels = util.Merge[string, string](config.config.Labels, c.Labels)
 	c.Volumes = util.Merge[string, struct{}](c.Volumes, config.config.Volumes)
+	if c.WorkingDir == "" {
+		c.WorkingDir = config.config.WorkingDir
+	}
 
 	config.config = c
 
