@@ -1,6 +1,7 @@
 package util
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -19,11 +20,12 @@ import (
 )
 
 type SshConfig struct {
-	Addr        string
-	User        string
-	Password    string
-	Keyfile     string
-	ConfigAlias string
+	Addr             string
+	User             string
+	Password         string
+	Keyfile          string
+	ConfigAlias      string
+	RemoteKubeconfig string
 }
 
 func Main(remoteEndpoint, localEndpoint *netip.AddrPort, conf *SshConfig, done chan struct{}) error {
@@ -90,6 +92,55 @@ func Main(remoteEndpoint, localEndpoint *netip.AddrPort, conf *SshConfig, done c
 			handleClient(local, conn)
 		}()
 	}
+}
+
+func Run(conf *SshConfig, cmd string, env []string) (output []byte, errOut []byte, err error) {
+	var remote *ssh.Client
+	if conf.ConfigAlias != "" {
+		remote, err = jumpRecursion(conf.ConfigAlias)
+	} else {
+		var auth []ssh.AuthMethod
+		if conf.Keyfile != "" {
+			auth = append(auth, publicKeyFile(conf.Keyfile))
+		}
+		if conf.Password != "" {
+			auth = append(auth, ssh.Password(conf.Password))
+		}
+		// refer to https://godoc.org/golang.org/x/crypto/ssh for other authentication types
+		sshConfig := &ssh.ClientConfig{
+			// SSH connection username
+			User:            conf.User,
+			Auth:            auth,
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		}
+		// Connect to SSH remote server using serverEndpoint
+		remote, err = ssh.Dial("tcp", conf.Addr, sshConfig)
+	}
+	if err != nil {
+		log.Errorf("Dial INTO remote server error: %s", err)
+		return
+	}
+	defer remote.Close()
+	var session *ssh.Session
+	session, err = remote.NewSession()
+	if err != nil {
+		return
+	}
+	if len(env) == 2 {
+		// /etc/ssh/sshd_config
+		// AcceptEnv DEBIAN_FRONTEND
+		if err = session.Setenv(env[0], env[1]); err != nil {
+			log.Warn(err)
+			err = nil
+		}
+	}
+	defer remote.Close()
+	var out bytes.Buffer
+	var er bytes.Buffer
+	session.Stdout = &out
+	session.Stderr = &er
+	err = session.Run(cmd)
+	return out.Bytes(), er.Bytes(), err
 }
 
 func publicKeyFile(file string) ssh.AuthMethod {

@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -601,11 +602,52 @@ func SshJump(conf *util.SshConfig, flags *pflag.FlagSet) (err error) {
 			err = er.(error)
 		}
 	}()
+
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-	if flags != nil {
-		lookup := flags.Lookup("kubeconfig")
-		if lookup != nil && lookup.Value != nil && lookup.Value.String() != "" {
-			configFlags.KubeConfig = pointer.String(lookup.Value.String())
+
+	if conf.RemoteKubeconfig != "" || flags.Changed("remote-kubeconfig") {
+		var stdOut []byte
+		var errOut []byte
+		if len(conf.RemoteKubeconfig) != 0 && conf.RemoteKubeconfig[0] == '~' {
+			conf.RemoteKubeconfig = filepath.Join("/", conf.User, conf.RemoteKubeconfig[1:])
+		}
+		if conf.RemoteKubeconfig == "" {
+			// if `--remote-kubeconfig` is parsed then Entrypoint is reset
+			conf.RemoteKubeconfig = filepath.Join("/", conf.User, clientcmd.RecommendedHomeDir, clientcmd.RecommendedFileName)
+		}
+		stdOut, errOut, err = util.Run(conf,
+			fmt.Sprintf("sh -c 'kubectl config view --flatten --raw --kubeconfig %s || minikube kubectl -- config view --flatten --raw --kubeconfig %s'",
+				conf.RemoteKubeconfig,
+				conf.RemoteKubeconfig),
+			[]string{clientcmd.RecommendedConfigPathEnvVar, conf.RemoteKubeconfig},
+		)
+		if err != nil {
+			return errors.Wrap(err, string(errOut))
+		}
+		if len(stdOut) == 0 {
+			return errors.Errorf("can not get kubeconfig %s from remote ssh server: %s", conf.RemoteKubeconfig, string(errOut))
+		}
+
+		var temp *os.File
+		if temp, err = os.CreateTemp("", "kubevpn"); err != nil {
+			return err
+		}
+		if err = temp.Close(); err != nil {
+			return err
+		}
+		if err = os.WriteFile(temp.Name(), stdOut, 0644); err != nil {
+			return err
+		}
+		if err = os.Chmod(temp.Name(), 0644); err != nil {
+			return err
+		}
+		configFlags.KubeConfig = pointer.String(temp.Name())
+	} else {
+		if flags != nil {
+			lookup := flags.Lookup("kubeconfig")
+			if lookup != nil && lookup.Value != nil && lookup.Value.String() != "" {
+				configFlags.KubeConfig = pointer.String(lookup.Value.String())
+			}
 		}
 	}
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
@@ -613,9 +655,21 @@ func SshJump(conf *util.SshConfig, flags *pflag.FlagSet) (err error) {
 	if err != nil {
 		return err
 	}
-	err = api.FlattenConfig(&rawConfig)
-	server := rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].Server
-	u, err := url.Parse(server)
+	if err = api.FlattenConfig(&rawConfig); err != nil {
+		return err
+	}
+	if rawConfig.Contexts == nil {
+		return errors.New("kubeconfig is invalid")
+	}
+	kubeContext := rawConfig.Contexts[rawConfig.CurrentContext]
+	if kubeContext == nil {
+		return errors.New("kubeconfig is invalid")
+	}
+	cluster := rawConfig.Clusters[kubeContext.Cluster]
+	if cluster == nil {
+		return errors.New("kubeconfig is invalid")
+	}
+	u, err := url.Parse(cluster.Server)
 	if err != nil {
 		return err
 	}
@@ -656,12 +710,15 @@ func SshJump(conf *util.SshConfig, flags *pflag.FlagSet) (err error) {
 	if err != nil {
 		return err
 	}
-	_ = temp.Close()
-	err = os.WriteFile(temp.Name(), marshal, 0644)
-	if err != nil {
+	if err = temp.Close(); err != nil {
 		return err
 	}
-	_ = os.Chmod(temp.Name(), 0644)
+	if err = os.WriteFile(temp.Name(), marshal, 0644); err != nil {
+		return err
+	}
+	if err = os.Chmod(temp.Name(), 0644); err != nil {
+		return err
+	}
 	log.Infof("using temp kubeconfig %s", temp.Name())
 	err = os.Setenv(clientcmd.RecommendedConfigPathEnvVar, temp.Name())
 	if err != nil {

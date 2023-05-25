@@ -65,7 +65,8 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 		kubevpn dev --ssh-alias <alias> deployment/productpage
 
 `)),
-		Args: cli.RequiresMinArgs(1),
+		Args:                  cli.RequiresMinArgs(1),
+		DisableFlagsInUseLine: true,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if !util.IsAdmin() {
 				util.RunWithElevated()

@@ -115,4 +115,7 @@ func addSshFlags(cmd *cobra.Command, sshConf *util.SshConfig) {
 	cmd.Flags().StringVar(&sshConf.Password, "ssh-password", "", "Optional password for ssh jump server")
 	cmd.Flags().StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "Optional file with private key for SSH authentication")
 	cmd.Flags().StringVar(&sshConf.ConfigAlias, "ssh-alias", "", "Optional config alias with ~/.ssh/config for SSH authentication")
+	cmd.Flags().StringVar(&sshConf.RemoteKubeconfig, "remote-kubeconfig", "", "Remote kubeconfig abstract path of ssh server, default is /$ssh-user/.kube/config")
+	lookup := cmd.Flags().Lookup("remote-kubeconfig")
+	lookup.NoOptDefVal = "~/.kube/config"
 }

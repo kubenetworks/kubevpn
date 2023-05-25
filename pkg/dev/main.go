@@ -394,7 +394,7 @@ func DoDev(devOptions *Options, flags *pflag.FlagSet, f cmdutil.Factory) error {
 		}
 	}
 
-	if err := connect.InitClient(f); err != nil {
+	if err = connect.InitClient(f); err != nil {
 		return err
 	}
 	if err = connect.PreCheckResource(); err != nil {
