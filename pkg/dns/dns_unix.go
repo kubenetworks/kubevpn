@@ -31,7 +31,7 @@ var resolv = "/etc/resolv.conf"
 // service.namespace.svc:port
 // service.namespace.svc.cluster:port
 // service.namespace.svc.cluster.local:port
-func SetupDNS(config *miekgdns.ClientConfig, ns []string) error {
+func SetupDNS(config *miekgdns.ClientConfig, ns []string, _ bool) error {
 	usingResolver(config, ns)
 	_ = exec.Command("killall", "mDNSResponderHelper").Run()
 	_ = exec.Command("killall", "-HUP", "mDNSResponder").Run()

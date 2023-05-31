@@ -18,7 +18,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
-func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string) error {
+func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, _ bool) error {
 	env := os.Getenv(config.EnvTunNameOrLUID)
 	parseUint, err := strconv.ParseUint(env, 10, 64)
 	if err != nil {
