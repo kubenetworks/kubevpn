@@ -70,6 +70,7 @@ type ConnectOptions struct {
 	Workloads   []string
 	ExtraCIDR   []string
 	ExtraDomain []string
+	UseLocalDNS bool
 
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient
@@ -531,7 +532,7 @@ func (c *ConnectOptions) setupDNS() error {
 			ns.Insert(item.Name)
 		}
 	}
-	if err = dns.SetupDNS(relovConf, ns.UnsortedList()); err != nil {
+	if err = dns.SetupDNS(relovConf, ns.UnsortedList(), c.UseLocalDNS); err != nil {
 		return err
 	}
 	// dump service in current namespace for support DNS resolve service:port

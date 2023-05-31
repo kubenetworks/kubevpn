@@ -15,11 +15,37 @@ import (
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/coredns/caddy"
+	_ "github.com/coredns/coredns/core/dnsserver"
+	_ "github.com/coredns/coredns/core/plugin"
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
 // systemd-resolve --status, systemd-resolve --flush-caches
-func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string) error {
+func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, useLocalDNS bool) error {
+	existNameservers := make([]string, 0)
+	existSearches := make([]string, 0)
+	filename := filepath.Join("/", "etc", "resolv.conf")
+	readFile, err := os.ReadFile(filename)
+	if err == nil {
+		resolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(readFile)))
+		if err == nil {
+			if len(resolvConf.Servers) != 0 {
+				existNameservers = append(existNameservers, resolvConf.Servers...)
+			}
+			if len(resolvConf.Search) != 0 {
+				existSearches = append(existSearches, resolvConf.Search...)
+			}
+		}
+	}
+
+	if useLocalDNS {
+		if err := SetupLocalDNS(clientConfig, existNameservers); err != nil {
+			return err
+		}
+		clientConfig.Servers[0] = "127.0.0.1"
+	}
+
 	tunName := os.Getenv(config.EnvTunNameOrLUID)
 	if len(tunName) == 0 {
 		tunName = "tun0"
@@ -50,21 +76,36 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string) error {
 		log.Debugf("failed to exec cmd: %s, message: %s, ignore", strings.Join(cmd.Args, " "), string(output))
 	}
 
-	filename := filepath.Join("/", "etc", "resolv.conf")
-	readFile, err := os.ReadFile(filename)
-	if err == nil {
-		resolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(readFile)))
-		if err == nil {
-			if len(resolvConf.Servers) != 0 {
-				clientConfig.Servers = append(clientConfig.Servers, resolvConf.Servers...)
-			}
-			if len(resolvConf.Search) != 0 {
-				clientConfig.Search = append(clientConfig.Search, resolvConf.Search...)
-			}
-		}
+	if len(existNameservers) != 0 {
+		clientConfig.Servers = append(clientConfig.Servers, existNameservers...)
+	}
+	if len(existSearches) != 0 {
+		clientConfig.Search = append(clientConfig.Search, existSearches...)
 	}
 
 	return WriteResolvConf(*clientConfig)
+}
+
+func SetupLocalDNS(clientConfig *miekgdns.ClientConfig, existNameservers []string) error {
+	corefile, err := BuildCoreFile(CoreFileTmpl{
+		UpstreamDNS: clientConfig.Servers[0],
+		Nameservers: strings.Join(existNameservers, " "),
+	})
+	if err != nil {
+		return err
+	}
+
+	log.Debugf("corefile content: %s", string(corefile.Body()))
+
+	// Start your engines
+	instance, err := caddy.Start(corefile)
+	if err != nil {
+		return err
+	}
+
+	// Twiddle your thumbs
+	go instance.Wait()
+	return nil
 }
 
 func CancelDNS() {
