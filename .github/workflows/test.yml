@@ -53,7 +53,6 @@ jobs:
           minikube image load --remote naison/authors:latest
           minikube image load --remote nginx:latest
           minikube image load --remote naison/kubevpn:test
-          minikube image load --remote naison/kubevpn:latest
           minikube image ls
           eval $(minikube docker-env)
           kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
@@ -120,7 +119,6 @@ jobs:
           minikube image load --remote naison/authors:latest
           minikube image load --remote nginx:latest
           minikube image load --remote naison/kubevpn:test
-          minikube image load --remote naison/kubevpn:latest
           minikube image ls
           eval $(minikube docker-env)
           kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
