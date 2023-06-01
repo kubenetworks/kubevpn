@@ -56,3 +56,4 @@ static_resources:
       type: ORIGINAL_DST
       lb_policy: CLUSTER_PROVIDED
       dns_lookup_family: ALL
+      http2_protocol_options: { }
