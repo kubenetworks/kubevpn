@@ -473,11 +473,11 @@ in advance
 
 ### 1, What should I do if the dependent image cannot be pulled, or the inner environment cannot access docker.io?
 
-Answer:
+Answer: here are two solution to solve this problem
 
-In the network that can access docker.io, transfer the image in the command `kubevpn version` to your own
-private image registry, and then add option `--image` to special image when starting the command.
-Example:
+- Solution 1: In the network that can access docker.io, transfer the image in the command `kubevpn version` to your own
+  private image registry, and then add option `--image` to special image when starting the command.
+  Example:
 
 ``` shell
   ➜  ~ kubevpn version
@@ -508,6 +508,39 @@ got cidr from cache
 traffic manager not exist, try to create it...
 pod [kubevpn-traffic-manager] status is Running
 ...
+```
+
+- Solution 2: Use options `--transfer-image`, enable this flags will transfer image from default image to `--image`
+  special address automatically。
+  Example
+
+```shell
+➜  ~ kubevpn connect --transfer-image --image nocalhost-team-docker.pkg.coding.net/nocalhost/public/kubevpn:v1.1.33
+Password:
+v1.1.33: Pulling from naison/kubevpn
+Digest: sha256:970c0c82a2d9cbac1595edb56a31e8fc84e02712c00a7211762efee5f66ea70c
+Status: Image is up to date for naison/kubevpn:v1.1.33
+The push refers to repository [nocalhost-team-docker.pkg.coding.net/nocalhost/public/kubevpn]
+9d72fec6b077: Pushed
+12a6a77eb79e: Pushed
+c7d0f62ec57f: Pushed
+5605cea4b7c8: Pushed
+4231fec7b258: Pushed
+babe72b5fcae: Pushed
+6caa74b4bcf0: Pushed
+b8a36d10656a: Pushed
+v1.1.33: digest: sha256:1bc5e589bec6dc279418009b5e82ce0fd29a2c0e8b9266988964035ad7fbeba5 size: 2000
+got cidr from cache
+update ref count successfully
+traffic manager already exist, reuse it
+port forward ready
+tunnel connected
+dns service ok
+
++---------------------------------------------------------------------------+
+|    Now you can access resources in the kubernetes cluster, enjoy it :)    |
++---------------------------------------------------------------------------+
+
 ```
 
 ### 2, When use `kubevpn dev`, but got error code 137, how to resolve ?

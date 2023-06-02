@@ -464,8 +464,10 @@ Windows
 
 ### 1，依赖的镜像拉不下来，或者内网环境无法访问 docker.io 怎么办？
 
-答：在可以访问 docker.io 的网络中，将命令 `kubevpn version` 中的 image 镜像， 转存到自己的私有镜像仓库，然后启动命令的时候，加上 `--image 新镜像` 即可。
-例如:
+答：有两种方法可以解决
+
+- 第一种，在可以访问 docker.io 的网络中，将命令 `kubevpn version` 中的 image 镜像， 转存到自己的私有镜像仓库，然后启动命令的时候，加上 `--image 新镜像` 即可。
+  例如:
 
 ``` shell
   ➜  ~ kubevpn version
@@ -496,6 +498,38 @@ got cidr from cache
 traffic manager not exist, try to create it...
 pod [kubevpn-traffic-manager] status is Running
 ...
+```
+
+- 第二种，使用选项 `--transfer-image`, 这个选项将会自动转存镜像到选项 `--image` 指定的地址。
+  例如：
+
+```shell
+➜  ~ kubevpn connect --transfer-image --image nocalhost-team-docker.pkg.coding.net/nocalhost/public/kubevpn:v1.1.33
+Password:
+v1.1.33: Pulling from naison/kubevpn
+Digest: sha256:970c0c82a2d9cbac1595edb56a31e8fc84e02712c00a7211762efee5f66ea70c
+Status: Image is up to date for naison/kubevpn:v1.1.33
+The push refers to repository [nocalhost-team-docker.pkg.coding.net/nocalhost/public/kubevpn]
+9d72fec6b077: Pushed
+12a6a77eb79e: Pushed
+c7d0f62ec57f: Pushed
+5605cea4b7c8: Pushed
+4231fec7b258: Pushed
+babe72b5fcae: Pushed
+6caa74b4bcf0: Pushed
+b8a36d10656a: Pushed
+v1.1.33: digest: sha256:1bc5e589bec6dc279418009b5e82ce0fd29a2c0e8b9266988964035ad7fbeba5 size: 2000
+got cidr from cache
+update ref count successfully
+traffic manager already exist, reuse it
+port forward ready
+tunnel connected
+dns service ok
+
++---------------------------------------------------------------------------+
+|    Now you can access resources in the kubernetes cluster, enjoy it :)    |
++---------------------------------------------------------------------------+
+
 ```
 
 ### 2，在使用 `kubevpn dev` 进入开发模式的时候,有出现报错 137, 改怎么解决 ?
