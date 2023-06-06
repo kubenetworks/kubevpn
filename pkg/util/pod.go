@@ -31,6 +31,15 @@ func PrintStatus(pod *corev1.Pod, writer io.Writer) {
 		_, _ = fmt.Fprintf(w, "%s\t%v\t%v\n", name, v1, v2)
 	}
 
+	if len(pod.Status.ContainerStatuses) == 0 {
+		show("Type", "Reason", "Message")
+		for _, condition := range pod.Status.Conditions {
+			if condition.Status == corev1.ConditionFalse {
+				show(string(condition.Type), condition.Reason, condition.Message)
+			}
+		}
+		return
+	}
 	show("Container", "Reason", "Message")
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.State.Waiting != nil {

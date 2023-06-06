@@ -460,7 +460,9 @@ func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string)) (st
 		}
 		return stdoutBuf.String(), stderrBuf.String(), err
 	}
-	_ = cmd.Wait()
+	if err := cmd.Wait(); err != nil {
+		return "", "", err
+	}
 	var err error
 	if !cmd.ProcessState.Success() {
 		err = errors.New("exit code is not 0")

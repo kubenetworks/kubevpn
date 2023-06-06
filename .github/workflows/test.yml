@@ -22,7 +22,7 @@ jobs:
           echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USER }} --password-stdin
           docker buildx create --use
           export VERSION=test
-          make container
+  #          make container
   linux:
     runs-on: ubuntu-latest
     needs: [ "image" ]
@@ -36,8 +36,11 @@ jobs:
           check-latest: true
           cache: true
       - name: Setup Minikube
+        id: minikube
         timeout-minutes: 30
         uses: medyagh/setup-minikube@master
+        with:
+          cache: true
 
       - name: Kubernetes info
         run: |
@@ -69,6 +72,8 @@ jobs:
         run: |
           kubectl wait pods -l app=reviews --for=condition=Ready --timeout=3600s
           kubectl wait pods -l app=productpage --for=condition=Ready --timeout=3600s
+          kubectl get svc -A -o wide
+          kubectl get pod -A -o wide
           kubectl get all -o wide
           kubectl get nodes -o yaml
           ifconfig
@@ -76,10 +81,10 @@ jobs:
           sudo ln /usr/bin/resolvectl /usr/bin/systemd-resolve
 
       - name: Test
-        run: go test -v ./... -timeout=60m
+        run: go test -v -failfast ./... -timeout=60m
 
   macos:
-    runs-on: macos-10.15
+    runs-on: macos-latest
     needs: [ "image" ]
     steps:
       - uses: actions/checkout@v2
@@ -90,19 +95,17 @@ jobs:
           go-version: 1.19
           check-latest: true
           cache: true
-      - uses: docker-practice/actions-setup-docker@master
-      - name: Pull image in advance
-        run: |
-          rm '/usr/local/bin/kubectl'
-          set -x
-          docker version
+      - name: Setup Docker on macOS
+        uses: douglascamata/setup-docker-macos-action@v1-alpha
 
       - name: Install minikube
         run: |
+          set -x
+          docker version
           brew install minikube
           minikube start --driver=docker
-          kubectl get po -A
-          minikube kubectl -- get po -A
+          kubectl get pod -A -o wide
+          minikube kubectl -- get pod -A -o wide
 
       - name: Kubernetes info
         run: |
@@ -135,13 +138,15 @@ jobs:
         run: |
           kubectl wait pods -l app=reviews --for=condition=Ready --timeout=3600s
           kubectl wait pods -l app=productpage --for=condition=Ready --timeout=3600s
-          kubectl get all -o wide
-          kubectl get nodes -o yaml
+          kubectl get svc -A -o wide || true
+          kubectl get pod -A -o wide || true
+          kubectl get all -o wide || true
+          kubectl get nodes -o yaml || true
           ifconfig
           netstat -anr
 
       - name: Test
-        run: go test -v ./... -timeout=60m
+        run: go test -v -failfast ./... -timeout=60m
 
 #  windows:
 #    runs-on: windows-latest

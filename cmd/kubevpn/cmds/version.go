@@ -31,8 +31,8 @@ func reformatDate(buildTime string) string {
 func CmdVersion(cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "version",
-		Short: "Print the version number of KubeVPN",
-		Long:  `This is the version of KubeVPN`,
+		Short: "Print the client version information",
+		Long:  `Print the client version information`,
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Printf("KubeVPN: CLI\n")
 			fmt.Printf("    Version: %s\n", config.Version)

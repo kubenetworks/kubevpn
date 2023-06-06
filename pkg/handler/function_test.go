@@ -13,10 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/distribution/reference"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -33,7 +32,7 @@ var (
 	namespace  string
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient
-	c          *rest.Config
+	restconfig *rest.Config
 )
 
 func TestFunctions(t *testing.T) {
@@ -47,9 +46,7 @@ func TestFunctions(t *testing.T) {
 }
 
 func pingPodIP(t *testing.T) {
-	ctx, f := context.WithTimeout(context.Background(), time.Second*60)
-	defer f()
-	list, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{})
 	if err != nil {
 		t.Error(err)
 	}
@@ -72,44 +69,69 @@ func pingPodIP(t *testing.T) {
 }
 
 func healthCheckPod(t *testing.T) {
-	podList, err := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("app", "productpage").String(),
+	var app = "authors"
+	podList, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), v1.ListOptions{
+		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
 	if err != nil {
 		t.Error(err)
 	}
 	if len(podList.Items) == 0 {
-		t.Error("can not found pods of product page")
+		t.Error("can not found pods of authors")
 	}
-	endpoint := fmt.Sprintf("http://%s:%v/health", podList.Items[0].Status.PodIP, podList.Items[0].Spec.Containers[0].Ports[0].ContainerPort)
-	req, _ := http.NewRequest("GET", endpoint, nil)
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if res == nil || res.StatusCode != 200 {
-		t.Errorf("health check not pass")
-		return
+	for _, pod := range podList.Items {
+		pod := pod
+		if pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		endpoint := fmt.Sprintf("http://%s:%v/health", pod.Status.PodIP, pod.Spec.Containers[0].Ports[0].ContainerPort)
+		req, _ := http.NewRequest("GET", endpoint, nil)
+		var res *http.Response
+		err = retry.OnError(
+			wait.Backoff{Duration: time.Second, Factor: 2, Jitter: 0.2, Steps: 5},
+			func(err error) bool {
+				return err != nil
+			},
+			func() error {
+				res, err = http.DefaultClient.Do(req)
+				return err
+			},
+		)
+		if err != nil {
+			t.Error(err)
+		}
+		if res == nil || res.StatusCode != 200 {
+			t.Errorf("health check not pass")
+		}
 	}
 }
 
 func healthCheckService(t *testing.T) {
-	serviceList, err := clientset.CoreV1().Services(namespace).List(context.Background(), metav1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("app", "productpage").String(),
+	var app = "authors"
+	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), v1.ListOptions{
+		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
 	if err != nil {
 		t.Error(err)
 	}
 	if len(serviceList.Items) == 0 {
-		t.Error("can not found pods of product page")
+		t.Error("can not found pods of authors")
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", serviceList.Items[0].Spec.ClusterIP, serviceList.Items[0].Spec.Ports[0].Port)
 	req, _ := http.NewRequest("GET", endpoint, nil)
-	res, err := http.DefaultClient.Do(req)
+	var res *http.Response
+	err = retry.OnError(
+		wait.Backoff{Duration: time.Second, Factor: 2, Jitter: 0.2, Steps: 5},
+		func(err error) bool {
+			return err != nil
+		},
+		func() error {
+			res, err = http.DefaultClient.Do(req)
+			return err
+		},
+	)
 	if err != nil {
 		t.Error(err)
-		return
 	}
 	if res == nil || res.StatusCode != 200 {
 		t.Errorf("health check not pass")
@@ -118,8 +140,8 @@ func healthCheckService(t *testing.T) {
 }
 
 func shortDomain(t *testing.T) {
-	var app = "productpage"
-	serviceList, err := clientset.CoreV1().Services(namespace).List(context.Background(), metav1.ListOptions{
+	var app = "authors"
+	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
 	if err != nil {
@@ -130,20 +152,28 @@ func shortDomain(t *testing.T) {
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", app, serviceList.Items[0].Spec.Ports[0].Port)
 	req, _ := http.NewRequest("GET", endpoint, nil)
-	res, err := http.DefaultClient.Do(req)
+	var res *http.Response
+	err = retry.OnError(
+		wait.Backoff{Duration: time.Second, Factor: 2, Jitter: 0.2, Steps: 5},
+		func(err error) bool {
+			return err != nil
+		},
+		func() error {
+			res, err = http.DefaultClient.Do(req)
+			return err
+		},
+	)
 	if err != nil {
 		t.Error(err)
-		return
 	}
 	if res == nil || res.StatusCode != 200 {
 		t.Errorf("health check not pass")
-		return
 	}
 }
 
 func fullDomain(t *testing.T) {
-	var app = "productpage"
-	serviceList, err := clientset.CoreV1().Services(namespace).List(context.Background(), metav1.ListOptions{
+	var app = "authors"
+	serviceList, err := clientset.CoreV1().Services(namespace).List(context.TODO(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
 	if err != nil {
@@ -154,10 +184,19 @@ func fullDomain(t *testing.T) {
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", fmt.Sprintf("%s.%s.svc.cluster.local", app, namespace), serviceList.Items[0].Spec.Ports[0].Port)
 	req, _ := http.NewRequest("GET", endpoint, nil)
-	res, err := http.DefaultClient.Do(req)
+	var res *http.Response
+	err = retry.OnError(
+		wait.Backoff{Duration: time.Second, Factor: 2, Jitter: 0.2, Steps: 5},
+		func(err error) bool {
+			return err != nil
+		},
+		func() error {
+			res, err = http.DefaultClient.Do(req)
+			return err
+		},
+	)
 	if err != nil {
 		t.Error(err)
-		return
 	}
 	if res == nil || res.StatusCode != 200 {
 		t.Errorf("health check not pass")
@@ -167,9 +206,9 @@ func fullDomain(t *testing.T) {
 
 func dialUDP(t *testing.T) {
 	port := util.GetAvailableUDPPortOrDie()
-	go UDPServer(port)
+	go server(port)
 
-	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
+	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", "reviews").String(),
 	})
 	if err != nil {
@@ -184,6 +223,7 @@ func dialUDP(t *testing.T) {
 	}
 	if len(ip) == 0 {
 		t.Errorf("can not found pods for service reviews")
+		return
 	}
 	log.Printf("dail udp to ip: %s", ip)
 	if err = retry.OnError(
@@ -191,13 +231,13 @@ func dialUDP(t *testing.T) {
 		func(err error) bool {
 			return err != nil
 		}, func() error {
-			return UDPClient(ip, port)
+			return udpclient(ip, port)
 		}); err != nil {
 		t.Errorf("can not access pod ip: %s, port: %v", ip, port)
 	}
 }
 
-func UDPClient(ip string, port int) error {
+func udpclient(ip string, port int) error {
 	udpConn, err := net.DialUDP("udp4", nil, &net.UDPAddr{
 		IP:   net.ParseIP(ip),
 		Port: port,
@@ -217,7 +257,7 @@ func UDPClient(ip string, port int) error {
 	sendData := []byte("hello server!")
 	_, err = udpConn.Write(sendData)
 	if err != nil {
-		fmt.Println("[client] 发送数据失败!", err)
+		fmt.Println("发送数据失败!", err)
 		return err
 	}
 
@@ -225,7 +265,7 @@ func UDPClient(ip string, port int) error {
 	data := make([]byte, 4096)
 	read, remoteAddr, err := udpConn.ReadFromUDP(data)
 	if err != nil {
-		fmt.Println("[client] 读取数据失败!", err)
+		fmt.Println("读取数据失败!", err)
 		return err
 	}
 	fmt.Println(read, remoteAddr)
@@ -233,7 +273,7 @@ func UDPClient(ip string, port int) error {
 	return nil
 }
 
-func UDPServer(port int) {
+func server(port int) {
 	// 创建监听
 	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
 		IP:   net.IPv4(0, 0, 0, 0),
@@ -248,7 +288,7 @@ func UDPServer(port int) {
 		data := make([]byte, 4096)
 		read, remoteAddr, err := udpConn.ReadFromUDP(data)
 		if err != nil {
-			fmt.Println("[server] 读取数据失败!", err)
+			fmt.Println("读取数据失败!", err)
 			continue
 		}
 		fmt.Println(read, remoteAddr)
@@ -257,27 +297,32 @@ func UDPServer(port int) {
 		sendData := []byte("hello client!")
 		_, err = udpConn.WriteToUDP(sendData, remoteAddr)
 		if err != nil {
-			fmt.Println("[server] 发送数据失败!", err)
+			fmt.Println("发送数据失败!", err)
 			return
 		}
 	}
 }
 
 func kubevpnConnect(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
-	cmd := exec.CommandContext(context.Background(), "kubevpn", "proxy", "deployments/reviews", "--debug")
+	ctx2, timeoutFunc := context.WithTimeout(context.Background(), 2*time.Hour)
+
+	cmd := exec.Command("kubevpn", "proxy", "--debug", "deployments/reviews")
 	go func() {
-		var checker = func(log string) {
-			if strings.Contains(log, "dns service ok") {
-				cancel()
+		stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) {
+			ok := strings.Contains(log, "dns service ok")
+			if ok {
+				timeoutFunc()
 			}
-		}
-		_, _, err := util.RunWithRollingOutWithChecker(cmd, checker)
+		})
+		defer timeoutFunc()
 		if err != nil {
-			t.Log(err)
+			t.Log(stdout, stderr)
+			t.Error(err)
+			t.Fail()
+			return
 		}
 	}()
-	<-ctx.Done()
+	<-ctx2.Done()
 }
 
 func init() {
@@ -287,27 +332,16 @@ func init() {
 	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
 	f := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 
-	if c, err = f.ToRESTConfig(); err != nil {
+	if restconfig, err = f.ToRESTConfig(); err != nil {
 		log.Fatal(err)
 	}
-	if restclient, err = rest.RESTClientFor(c); err != nil {
+	if restclient, err = rest.RESTClientFor(restconfig); err != nil {
 		log.Fatal(err)
 	}
-	if clientset, err = kubernetes.NewForConfig(c); err != nil {
+	if clientset, err = kubernetes.NewForConfig(restconfig); err != nil {
 		log.Fatal(err)
 	}
 	if namespace, _, err = f.ToRawKubeConfigLoader().Namespace(); err != nil {
 		log.Fatal(err)
 	}
-}
-
-func TestName(t *testing.T) {
-	name := "docker.io/naison/alpine@sha256:b733d4a32c4da6a00a84df2ca32791bb03df95400243648d8c539e7b4cce329c"
-	named, err := reference.ParseNormalizedNamed(name)
-	if err != nil {
-		t.Error(err)
-	}
-	domain := reference.Domain(named)
-	path := reference.Path(named)
-	fmt.Println(domain, path)
 }

@@ -177,11 +177,11 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 
 	var Resources = v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
-			v1.ResourceCPU:    resource.MustParse("500m"),
+			v1.ResourceCPU:    resource.MustParse("250m"),
 			v1.ResourceMemory: resource.MustParse("512Mi"),
 		},
 		Limits: map[v1.ResourceName]resource.Quantity{
-			v1.ResourceCPU:    resource.MustParse("2000m"),
+			v1.ResourceCPU:    resource.MustParse("1000m"),
 			v1.ResourceMemory: resource.MustParse("2048Mi"),
 		},
 	}
@@ -371,41 +371,50 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" --debug=true`,
 	if _, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{}); err != nil {
 		return err
 	}
-	var last string
-out:
-	for {
-		select {
-		case e, ok := <-watchStream.ResultChan():
-			if !ok {
-				return fmt.Errorf("can not wait pod to be ready because of watch chan has closed")
-			}
-			if podT, ok := e.Object.(*v1.Pod); ok {
-				if podT.DeletionTimestamp != nil {
-					continue
-				}
-				var sb = bytes.NewBuffer(nil)
-				sb.WriteString(fmt.Sprintf("pod [%s] status is %s\n", config.ConfigMapPodTrafficManager, podT.Status.Phase))
-				util.PrintStatus(podT, sb)
-
-				if last != sb.String() {
-					log.Infof(sb.String())
-				}
-				if podutils.IsPodReady(podT) && func() bool {
-					for _, status := range podT.Status.ContainerStatuses {
-						if !status.Ready {
-							return false
-						}
-					}
-					return true
-				}() {
-					break out
-				}
-				last = sb.String()
-			}
-		case <-time.Tick(time.Minute * 60):
-			return errors.New(fmt.Sprintf("wait pod %s to be ready timeout", config.ConfigMapPodTrafficManager))
+	var ok bool
+	ctx2, cancelFunc := context.WithTimeout(ctx, time.Minute*60)
+	defer cancelFunc()
+	wait.UntilWithContext(ctx2, func(ctx context.Context) {
+		podList, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String(),
+		})
+		if err != nil {
+			return
 		}
+
+		for _, podT := range podList.Items {
+			podT := &podT
+			if podT.DeletionTimestamp != nil {
+				continue
+			}
+			var sb = bytes.NewBuffer(nil)
+			sb.WriteString(fmt.Sprintf("pod %s is %s\n", podT.Name, podT.Status.Phase))
+			if podT.Status.Reason != "" {
+				sb.WriteString(fmt.Sprintf(" reason %s", podT.Status.Reason))
+			}
+			if podT.Status.Message != "" {
+				sb.WriteString(fmt.Sprintf(" message %s", podT.Status.Message))
+			}
+			util.PrintStatus(podT, sb)
+			log.Infof(sb.String())
+
+			if podutils.IsPodReady(podT) && func() bool {
+				for _, status := range podT.Status.ContainerStatuses {
+					if !status.Ready {
+						return false
+					}
+				}
+				return true
+			}() {
+				cancelFunc()
+				ok = true
+			}
+		}
+	}, time.Second*3)
+	if !ok {
+		return errors.New(fmt.Sprintf("wait pod %s to be ready timeout", config.ConfigMapPodTrafficManager))
 	}
+
 	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, &admissionv1.MutatingWebhookConfiguration{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager + "." + namespace,
