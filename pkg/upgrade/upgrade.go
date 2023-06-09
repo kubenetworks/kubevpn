@@ -119,7 +119,7 @@ func Main(current string, client *http.Client) error {
 
 func getManifest(httpCli *http.Client) (version string, url string, err error) {
 	var resp *http.Response
-	resp, err = httpCli.Get("https://api.github.com/repos/wencaiwulue/kubevpn/releases/latest")
+	resp, err = httpCli.Get("https://api.github.com/repos/KubeNetworks/kubevpn/releases/latest")
 	if err != nil {
 		err = fmt.Errorf("failed to call github api, err: %v", err)
 		return
@@ -168,8 +168,8 @@ func getManifest(httpCli *http.Client) (version string, url string, err error) {
 	return
 }
 
-// https://api.github.com/repos/wencaiwulue/kubevpn/releases
-// https://github.com/wencaiwulue/kubevpn/releases/download/v1.1.13/kubevpn-windows-arm64.exe
+// https://api.github.com/repos/KubeNetworks/kubevpn/releases
+// https://github.com/KubeNetworks/kubevpn/releases/download/v1.1.13/kubevpn-windows-arm64.exe
 func download(client *http.Client, url string, filename string) error {
 	get, err := client.Get(url)
 	if err != nil {

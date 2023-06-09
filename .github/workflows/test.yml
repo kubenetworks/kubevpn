@@ -58,7 +58,7 @@ jobs:
           minikube image load --remote naison/kubevpn:test
           minikube image ls
           eval $(minikube docker-env)
-          kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
+          kubectl apply -f https://raw.githubusercontent.com/KubeNetworks/kubevpn/master/samples/bookinfo.yaml
 
       - name: Build
         run: |
@@ -124,7 +124,7 @@ jobs:
           minikube image load --remote naison/kubevpn:test
           minikube image ls
           eval $(minikube docker-env)
-          kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
+          kubectl apply -f https://raw.githubusercontent.com/KubeNetworks/kubevpn/master/samples/bookinfo.yaml
 
       - name: Build
         run: |
@@ -172,7 +172,7 @@ jobs:
 #          kubectl cluster-info dump
 #          kubectl get pods -n kube-system -o wide
 #      - name: Install demo bookinfo
-#        run: kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
+#        run: kubectl apply -f https://raw.githubusercontent.com/KubeNetworks/kubevpn/master/samples/bookinfo.yaml
 #
 #      - name: Build
 #        run: make kubevpn-windows

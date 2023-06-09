@@ -1,30 +1,30 @@
 ![kubevpn](samples/flat_log.png)
 
-[![GitHub Workflow][1]](https://github.com/wencaiwulue/kubevpn/actions)
-[![Go Version][2]](https://github.com/wencaiwulue/kubevpn/blob/master/go.mod)
-[![Go Report][3]](https://goreportcard.com/badge/github.com/wencaiwulue/kubevpn)
-[![Maintainability][4]](https://codeclimate.com/github/wencaiwulue/kubevpn/maintainability)
-[![GitHub License][5]](https://github.com/wencaiwulue/kubevpn/blob/main/LICENSE)
+[![GitHub Workflow][1]](https://github.com/KubeNetworks/kubevpn/actions)
+[![Go Version][2]](https://github.com/KubeNetworks/kubevpn/blob/master/go.mod)
+[![Go Report][3]](https://goreportcard.com/badge/github.com/KubeNetworks/kubevpn)
+[![Maintainability][4]](https://codeclimate.com/github/KubeNetworks/kubevpn/maintainability)
+[![GitHub License][5]](https://github.com/KubeNetworks/kubevpn/blob/main/LICENSE)
 [![Docker Pulls][6]](https://hub.docker.com/r/naison/kubevpn)
-[![Releases][7]](https://github.com/wencaiwulue/kubevpn/releases)
+[![Releases][7]](https://github.com/KubeNetworks/kubevpn/releases)
 
-[1]: https://img.shields.io/github/actions/workflow/status/wencaiwulue/kubevpn/release.yml?logo=github
+[1]: https://img.shields.io/github/actions/workflow/status/KubeNetworks/kubevpn/release.yml?logo=github
 
-[2]: https://img.shields.io/github/go-mod/go-version/wencaiwulue/kubevpn?logo=go
+[2]: https://img.shields.io/github/go-mod/go-version/KubeNetworks/kubevpn?logo=go
 
-[3]: https://goreportcard.com/badge/github.com/wencaiwulue/kubevpn
+[3]: https://goreportcard.com/badge/github.com/KubeNetworks/kubevpn
 
 [4]: https://api.codeclimate.com/v1/badges/b5b30239174fc6603aca/maintainability
 
-[5]: https://img.shields.io/github/license/wencaiwulue/kubevpn
+[5]: https://img.shields.io/github/license/KubeNetworks/kubevpn
 
 [6]: https://img.shields.io/docker/pulls/naison/kubevpn?logo=docker
 
-[7]: https://img.shields.io/github/v/release/wencaiwulue/kubevpn?logo=smartthings
+[7]: https://img.shields.io/github/v/release/KubeNetworks/kubevpn?logo=smartthings
 
 # KubeVPN
 
-[中文](README_ZH.md) | [English](README.md) | [Wiki](https://github.com/wencaiwulue/kubevpn/wiki/Architecture)
+[中文](README_ZH.md) | [English](README.md) | [Wiki](https://github.com/KubeNetworks/kubevpn/wiki/Architecture)
 
 KubeVPN is Cloud Native Dev Environment, connect to kubernetes cluster network, you can access remote kubernetes
 cluster network, remote
@@ -35,13 +35,13 @@ container with same environment、volume、and network. you can develop your app
 
 #### Install from GitHub release
 
-[LINK](https://github.com/wencaiwulue/kubevpn/releases/latest)
+[LINK](https://github.com/KubeNetworks/kubevpn/releases/latest)
 
 #### Install from custom krew index
 
 ```shell
 (
-  kubectl krew index add kubevpn https://github.com/wencaiwulue/kubevpn.git && \
+  kubectl krew index add kubevpn https://github.com/KubeNetworks/kubevpn.git && \
   kubectl krew install kubevpn/kubevpn && kubectl kubevpn 
 ) 
 ```
@@ -50,7 +50,7 @@ container with same environment、volume、and network. you can develop your app
 
 ```shell
 (
-  git clone https://github.com/wencaiwulue/kubevpn.git && \
+  git clone https://github.com/KubeNetworks/kubevpn.git && \
   cd kubevpn && make kubevpn && ./bin/kubevpn
 )
 
@@ -59,7 +59,7 @@ container with same environment、volume、and network. you can develop your app
 ### Install bookinfo as demo application
 
 ```shell
-kubectl apply -f https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/bookinfo.yaml
+kubectl apply -f https://raw.githubusercontent.com/KubeNetworks/kubevpn/master/samples/bookinfo.yaml
 ```
 
 ## Functions

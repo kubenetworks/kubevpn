@@ -11,7 +11,7 @@ cat <<EOF
 KubeVPN ${RELEASE} is available now ! 🎉
 - fix known bugs 🛠
 ## Installation and Upgrading
-wget -LO "https://github.com/wencaiwulue/kubevpn/releases/download/$(curl -L -s https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/plugins/stable.txt)/kubevpn_$(curl -L -s https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/plugins/stable.txt)_darwin_amd64.zip"
+wget -LO "https://github.com/KubeNetworks/kubevpn/releases/download/$(curl -L -s https://raw.githubusercontent.com/KubeNetworks/kubevpn/master/plugins/stable.txt)/kubevpn_$(curl -L -s https://raw.githubusercontent.com/KubeNetworks/kubevpn/master/plugins/stable.txt)_darwin_amd64.zip"
 ## Changelog
 ${CHANGELOG}
 EOF

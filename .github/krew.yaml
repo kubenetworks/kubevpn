@@ -4,7 +4,7 @@ metadata:
   name: kubevpn
 spec:
   version: {{ .TagName }}
-  homepage: https://github.com/wencaiwulue/kubevpn
+  homepage: https://github.com/KubeNetworks/kubevpn
   shortDescription: "A vpn tunnel tools which can connect to kubernetes cluster network"
   description: |
     KubeVPN is Cloud Native Dev Environment, connect to kubernetes cluster network, you can access remote kubernetes
