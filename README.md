@@ -12,7 +12,7 @@
 
 [2]: https://img.shields.io/github/go-mod/go-version/KubeNetworks/kubevpn?logo=go
 
-[3]: https://goreportcard.com/badge/github.com/KubeNetworks/kubevpn
+[3]: https://img.shields.io/badge/go%20report-A+-brightgreen.svg?style=flat
 
 [4]: https://api.codeclimate.com/v1/badges/b5b30239174fc6603aca/maintainability
 
