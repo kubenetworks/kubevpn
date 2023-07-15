@@ -172,6 +172,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err = c.addExtraRoute(ctx); err != nil {
 		return
 	}
+	go c.heartbeats()
 	log.Info("dns service ok")
 	return
 }
@@ -1167,4 +1168,31 @@ func (c *ConnectOptions) setImage(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (c *ConnectOptions) heartbeats() {
+	if !util.IsWindows() {
+		return
+	}
+	ticker := time.NewTicker(time.Second * 15)
+	defer ticker.Stop()
+
+	for ; true; <-ticker.C {
+		func() {
+			defer func() {
+				if err := recover(); err != nil {
+					log.Debug(err)
+				}
+			}()
+
+			err := c.dhcp.ForEach(func(ip net.IP) {
+				go func() {
+					_, _ = util.Ping(ip.String())
+				}()
+			})
+			if err != nil {
+				log.Debug(err)
+			}
+		}()
+	}
 }
