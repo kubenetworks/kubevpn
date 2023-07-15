@@ -13,6 +13,7 @@ import (
 	grpcwebv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/grpc_web/v3"
 	routerv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/router/v3"
 	httpinspector "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/listener/http_inspector/v3"
+	dstv3inspector "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/listener/original_dst/v3"
 	httpconnectionmanager "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	tcpproxy "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
 	httpv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/upstreams/http/v3"
@@ -61,6 +62,7 @@ func (a *Virtual) To() (
 			}
 		}
 		rr = append(rr, DefaultRoute())
+		clusters = append(clusters, OriginCluster())
 		routes = append(routes, &route.RouteConfiguration{
 			Name: routeName,
 			VirtualHosts: []*route.VirtualHost{
@@ -130,12 +132,23 @@ func ToCluster(clusterName string) *cluster.Cluster {
 }
 
 func OriginCluster() *cluster.Cluster {
+	anyFunc := func(m proto.Message) *anypb.Any {
+		pbst, _ := anypb.New(m)
+		return pbst
+	}
 	return &cluster.Cluster{
 		Name:           "origin_cluster",
 		ConnectTimeout: durationpb.New(time.Second * 5),
 		LbPolicy:       cluster.Cluster_CLUSTER_PROVIDED,
 		ClusterDiscoveryType: &cluster.Cluster_Type{
 			Type: cluster.Cluster_ORIGINAL_DST,
+		},
+		TypedExtensionProtocolOptions: map[string]*anypb.Any{
+			"envoy.extensions.upstreams.http.v3.HttpProtocolOptions": anyFunc(&httpv3.HttpProtocolOptions{
+				UpstreamProtocolOptions: &httpv3.HttpProtocolOptions_UseDownstreamProtocolConfig{
+					UseDownstreamProtocolConfig: &httpv3.HttpProtocolOptions_UseDownstreamHttpConfig{},
+				},
+			}),
 		},
 	}
 }
@@ -321,6 +334,12 @@ func ToListener(listenerName string, routeName string, port int32, p corev1.Prot
 				Name: wellknown.HttpInspector,
 				ConfigType: &listener.ListenerFilter_TypedConfig{
 					TypedConfig: anyFunc(&httpinspector.HttpInspector{}),
+				},
+			},
+			{
+				Name: wellknown.OriginalDestination,
+				ConfigType: &listener.ListenerFilter_TypedConfig{
+					TypedConfig: anyFunc(&dstv3inspector.OriginalDst{}),
 				},
 			},
 		},

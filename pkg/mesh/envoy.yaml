@@ -51,9 +51,3 @@ static_resources:
                       port_value: 9002
                       ipv4_compat: true
       http2_protocol_options: { }
-    - name: origin_cluster
-      connect_timeout: 5s
-      type: ORIGINAL_DST
-      lb_policy: CLUSTER_PROVIDED
-      dns_lookup_family: ALL
-      http2_protocol_options: { }
