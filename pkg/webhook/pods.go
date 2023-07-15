@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/kubectl/pkg/cmd/util/podcmd"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
@@ -50,10 +51,23 @@ func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionR
 				var v4, v6 *net.IPNet
 				for j := 0; j < len(pod.Spec.Containers[i].Env); j++ {
 					pair := pod.Spec.Containers[i].Env[j]
-					if pair.Name == config.EnvInboundPodTunIPv4 && pair.Value == "" {
+					if pair.Name == config.EnvInboundPodTunIPv4 {
 						found = true
 						cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
 						dhcp := handler.NewDHCPManager(cmi, ar.Request.Namespace)
+						// remove old values
+						if pair.Value != "" {
+							var ips []net.IP
+							for k := 0; k < len(pod.Spec.Containers[i].Env); k++ {
+								envVar := pod.Spec.Containers[i].Env[k]
+								if sets.New[string](config.EnvInboundPodTunIPv4, config.EnvInboundPodTunIPv6).Has(envVar.Name) && envVar.Value != "" {
+									if ip, _, _ := net.ParseCIDR(envVar.Value); ip != nil {
+										ips = append(ips, ip)
+									}
+								}
+							}
+							_ = dhcp.ReleaseIP(context.Background(), ips...)
+						}
 						v4, v6, err = dhcp.RentIPRandom(context.Background())
 						if err != nil {
 							log.Errorf("rent ip random failed, err: %v", err)
