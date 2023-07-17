@@ -17,7 +17,7 @@ spec:
       matchLabels:
         os: windows
         arch: amd64
-    {{addURIAndSha "https://github.com/wencaiwulue/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_windows_amd64.zip" .TagName }}
+    {{addURIAndSha "https://github.com/KubeNetworks/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_windows_amd64.zip" .TagName }}
     files:
       - from: ./bin/kubevpn.exe
         to: .
@@ -28,7 +28,7 @@ spec:
       matchLabels:
         os: windows
         arch: arm64
-    {{addURIAndSha "https://github.com/wencaiwulue/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_windows_arm64.zip" .TagName }}
+    {{addURIAndSha "https://github.com/KubeNetworks/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_windows_arm64.zip" .TagName }}
     files:
       - from: ./bin/kubevpn.exe
         to: .
@@ -39,7 +39,7 @@ spec:
       matchLabels:
         os: windows
         arch: 386
-    {{addURIAndSha "https://github.com/wencaiwulue/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_windows_386.zip" .TagName }}
+    {{addURIAndSha "https://github.com/KubeNetworks/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_windows_386.zip" .TagName }}
     files:
       - from: ./bin/kubevpn.exe
         to: .
@@ -50,7 +50,7 @@ spec:
       matchLabels:
         os: linux
         arch: amd64
-    {{addURIAndSha "https://github.com/wencaiwulue/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_linux_amd64.zip" .TagName }}
+    {{addURIAndSha "https://github.com/KubeNetworks/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_linux_amd64.zip" .TagName }}
     files:
       - from: ./bin/kubevpn
         to: .
@@ -61,7 +61,7 @@ spec:
       matchLabels:
         os: linux
         arch: arm64
-    {{addURIAndSha "https://github.com/wencaiwulue/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_linux_arm64.zip" .TagName }}
+    {{addURIAndSha "https://github.com/KubeNetworks/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_linux_arm64.zip" .TagName }}
     files:
       - from: ./bin/kubevpn
         to: .
@@ -72,7 +72,7 @@ spec:
       matchLabels:
         os: linux
         arch: 386
-    {{addURIAndSha "https://github.com/wencaiwulue/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_linux_386.zip" .TagName }}
+    {{addURIAndSha "https://github.com/KubeNetworks/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_linux_386.zip" .TagName }}
     files:
       - from: ./bin/kubevpn
         to: .
@@ -83,7 +83,7 @@ spec:
       matchLabels:
         os: darwin
         arch: amd64
-    {{addURIAndSha "https://github.com/wencaiwulue/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_darwin_amd64.zip" .TagName }}
+    {{addURIAndSha "https://github.com/KubeNetworks/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_darwin_amd64.zip" .TagName }}
     files:
       - from: ./bin/kubevpn
         to: .
@@ -94,7 +94,7 @@ spec:
       matchLabels:
         os: darwin
         arch: arm64
-    {{addURIAndSha "https://github.com/wencaiwulue/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_darwin_arm64.zip" .TagName }}
+    {{addURIAndSha "https://github.com/KubeNetworks/kubevpn/releases/download/{{ .TagName }}/kubevpn_{{ .TagName }}_darwin_arm64.zip" .TagName }}
     files:
       - from: ./bin/kubevpn
         to: .
