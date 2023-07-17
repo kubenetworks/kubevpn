@@ -345,3 +345,19 @@ func init() {
 		log.Fatal(err)
 	}
 }
+
+func TestWaitBackoff(t *testing.T) {
+	var last = time.Now()
+	_ = retry.OnError(
+		wait.Backoff{
+			Steps:    10,
+			Duration: time.Millisecond * 50,
+		}, func(err error) bool {
+			return err != nil
+		}, func() error {
+			now := time.Now()
+			fmt.Println(now.Sub(last).String())
+			last = now
+			return fmt.Errorf("")
+		})
+}

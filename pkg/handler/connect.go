@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
 	"net"
 	"net/netip"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -83,6 +85,7 @@ type ConnectOptions struct {
 	localTunIPv6 *net.IPNet
 
 	apiServerIPs []net.IP
+	extraHost    []dns.Entry
 }
 
 func (c *ConnectOptions) createRemoteInboundPod(ctx context.Context) (err error) {
@@ -166,10 +169,10 @@ func (c *ConnectOptions) DoConnect() (err error) {
 		return
 	}
 	c.deleteFirewallRule(ctx)
-	if err = c.setupDNS(); err != nil {
+	if err = c.addExtraRoute(ctx); err != nil {
 		return
 	}
-	if err = c.addExtraRoute(ctx); err != nil {
+	if err = c.setupDNS(); err != nil {
 		return
 	}
 	go c.heartbeats()
@@ -537,7 +540,7 @@ func (c *ConnectOptions) setupDNS() error {
 		return err
 	}
 	// dump service in current namespace for support DNS resolve service:port
-	go dns.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.Namespace))
+	go dns.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.Namespace), c.extraHost...)
 	return nil
 }
 
@@ -895,30 +898,41 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) (err error) {
 	return
 }
 
-func (c *ConnectOptions) addExtraRoute(ctx context.Context) (err error) {
+func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 	if len(c.ExtraDomain) == 0 {
-		return
+		return nil
 	}
-	var ips []string
-	ips, err = dns.GetDNSIPFromDnsPod(c.clientset)
+	ips, err := dns.GetDNSIPFromDnsPod(c.clientset)
 	if err != nil {
-		return
+		return err
 	}
 	if len(ips) == 0 {
 		err = fmt.Errorf("can't found any dns server")
-		return
+		return err
 	}
+
+	ctx2, cancelFunc := context.WithTimeout(ctx, time.Second*10)
+	wait.UntilWithContext(ctx2, func(context.Context) {
+		for _, ip := range ips {
+			pong, err2 := util.Ping(ip)
+			if err2 == nil && pong {
+				ips = []string{ip}
+				cancelFunc()
+				return
+			}
+		}
+	}, time.Millisecond*50)
 
 	var r routing.Router
 	r, err = netroute.New()
 	if err != nil {
-		return
+		return err
 	}
 
 	var tunIface *net.Interface
 	tunIface, err = tun.GetInterface()
 	if err != nil {
-		return
+		return err
 	}
 
 	addRouteFunc := func(resource, ip string) {
@@ -942,11 +956,38 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) (err error) {
 		}
 	}
 
-	client := &miekgdns.Client{Net: "udp", SingleInflight: true, DialTimeout: time.Second * 30}
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	go func() {
+		for _, domain := range c.ExtraDomain {
+			domain := domain
+			go func() {
+				for ; true; <-ticker.C {
+					func() {
+						// if use nslookup to query dns at first, it will speed up mikdns query process
+						subCtx, c2 := context.WithTimeout(ctx, time.Second*2)
+						defer c2()
+						cmd := exec.CommandContext(subCtx, "nslookup", domain, ips[0])
+						cmd.Stderr = io.Discard
+						cmd.Stdout = io.Discard
+						_ = cmd.Start()
+						_ = cmd.Wait()
+					}()
+				}
+			}()
+		}
+	}()
+
+	client := &miekgdns.Client{Net: "udp", Timeout: time.Second * 2, SingleInflight: true}
 	for _, domain := range c.ExtraDomain {
-		for _, qType := range []uint16{miekgdns.TypeA, miekgdns.TypeAAAA} {
+		var success = false
+		for _, qType := range []uint16{miekgdns.TypeA /*, miekgdns.TypeAAAA*/} {
+			var iErr = errors.New("No retry")
 			err = retry.OnError(
-				retry.DefaultRetry,
+				wait.Backoff{
+					Steps:    1000,
+					Duration: time.Millisecond * 30,
+				},
 				func(err error) bool {
 					return err != nil
 				},
@@ -966,22 +1007,35 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) (err error) {
 					if err != nil {
 						return err
 					}
+					if len(answer.Answer) == 0 {
+						return iErr
+					}
 					for _, rr := range answer.Answer {
 						switch a := rr.(type) {
 						case *miekgdns.A:
 							addRouteFunc(domain, a.A.String())
+							c.extraHost = append(c.extraHost, dns.Entry{IP: a.A.String(), Domain: domain})
+							success = true
 						case *miekgdns.AAAA:
 							addRouteFunc(domain, a.AAAA.String())
+							c.extraHost = append(c.extraHost, dns.Entry{IP: a.AAAA.String(), Domain: domain})
+							success = true
 						}
 					}
 					return nil
 				})
-			if err != nil {
+			if err != nil && err != iErr {
 				return err
 			}
+			if success {
+				break
+			}
+		}
+		if !success {
+			return fmt.Errorf("failed to resolve dns for domain %s", domain)
 		}
 	}
-	return
+	return nil
 }
 
 func (c *ConnectOptions) GetKubeconfigPath() (string, error) {

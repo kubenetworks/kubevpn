@@ -82,14 +82,14 @@ func GetDNSIPFromDnsPod(clientset *kubernetes.Clientset) (ips []string, err erro
 	return
 }
 
-func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInterface) {
+func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInterface, hosts ...Entry) {
 	rateLimiter := flowcontrol.NewTokenBucketRateLimiter(0.2, 1)
 	defer rateLimiter.Stop()
 	var last string
 
 	serviceList, err := serviceInterface.List(ctx, v1.ListOptions{})
 	if err == nil && len(serviceList.Items) != 0 {
-		entry := generateHostsEntry(serviceList.Items)
+		entry := generateHostsEntry(serviceList.Items, hosts)
 		if err = updateHosts(entry); err == nil {
 			last = entry
 		}
@@ -126,7 +126,7 @@ func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInte
 						if err != nil {
 							return
 						}
-						entry := generateHostsEntry(list.Items)
+						entry := generateHostsEntry(list.Items, hosts)
 						if entry == last {
 							continue
 						}
@@ -180,15 +180,14 @@ func updateHosts(str string) error {
 	return os.WriteFile(path, []byte(strings.Join(strList, "\n")), 0644)
 }
 
-func generateHostsEntry(list []v12.Service) string {
-	type entry struct {
-		IP     string
-		Domain string
-	}
+type Entry struct {
+	IP     string
+	Domain string
+}
 
+func generateHostsEntry(list []v12.Service, hosts []Entry) string {
 	const ServiceKubernetes = "kubernetes"
-
-	var entryList []entry
+	var entryList []Entry
 
 	for _, item := range list {
 		if strings.EqualFold(item.Name, ServiceKubernetes) {
@@ -201,7 +200,7 @@ func generateHostsEntry(list []v12.Service) string {
 				if net.ParseIP(ip) == nil || domain == "" {
 					continue
 				}
-				entryList = append(entryList, entry{IP: ip, Domain: domain})
+				entryList = append(entryList, Entry{IP: ip, Domain: domain})
 			}
 		}
 	}
@@ -211,6 +210,7 @@ func generateHostsEntry(list []v12.Service) string {
 		}
 		return entryList[i].Domain > entryList[j].Domain
 	})
+	entryList = append(entryList, hosts...)
 
 	var sb = new(bytes.Buffer)
 	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
