@@ -51,8 +51,8 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 			return handler.Run(ctx, servers)
 		},
 	}
-	cmd.Flags().StringArrayVarP(&route.ServeNodes, "nodeCommand", "L", []string{}, "command needs to be executed")
-	cmd.Flags().StringVarP(&route.ChainNode, "chainCommand", "F", "", "command needs to be executed")
-	cmd.Flags().BoolVar(&config.Debug, "debug", false, "true/false")
+	cmd.Flags().StringArrayVarP(&route.ServeNodes, "node", "L", []string{}, "Startup node server. eg: tcp://localhost:1080")
+	cmd.Flags().StringVarP(&route.ChainNode, "chain", "F", "", "Forward chain. eg: tcp://192.168.1.100:2345")
+	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug log or not")
 	return cmd
 }
