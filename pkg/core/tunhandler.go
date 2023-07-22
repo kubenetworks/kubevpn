@@ -20,15 +20,18 @@ import (
 )
 
 const (
-	MaxSize   = 1024
+	MaxSize   = 1000000
 	MaxThread = 10
+	MaxConn   = 10
 )
 
 type tunHandler struct {
-	chain  *Chain
-	node   *Node
-	routes *NAT
-	chExit chan error
+	chain    *Chain
+	node     *Node
+	routeNAT *NAT
+	// map[srcIP]net.Conn
+	routeConnNAT *sync.Map
+	chExit       chan error
 }
 
 type NAT struct {
@@ -60,9 +63,9 @@ func (n *NAT) RemoveAddr(addr net.Addr) (count int) {
 }
 
 func (n *NAT) LoadOrStore(to net.IP, addr net.Addr) (result net.Addr, load bool) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
+	n.lock.RLock()
 	addrList := n.routes[to.String()]
+	n.lock.RUnlock()
 	for _, add := range addrList {
 		if add.String() == addr.String() {
 			load = true
@@ -71,6 +74,8 @@ func (n *NAT) LoadOrStore(to net.IP, addr net.Addr) (result net.Addr, load bool)
 		}
 	}
 
+	n.lock.Lock()
+	defer n.lock.Unlock()
 	if addrList == nil {
 		n.routes[to.String()] = []net.Addr{addr}
 		result = addr
@@ -113,8 +118,8 @@ func (n *NAT) Remove(ip net.IP, addr net.Addr) {
 }
 
 func (n *NAT) Range(f func(key string, v []net.Addr)) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
+	n.lock.RLock()
+	defer n.lock.RUnlock()
 	for k, v := range n.routes {
 		f(k, v)
 	}
@@ -123,10 +128,11 @@ func (n *NAT) Range(f func(key string, v []net.Addr)) {
 // TunHandler creates a handler for tun tunnel.
 func TunHandler(chain *Chain, node *Node) Handler {
 	return &tunHandler{
-		chain:  chain,
-		node:   node,
-		routes: RouteNAT,
-		chExit: make(chan error, 1),
+		chain:        chain,
+		node:         node,
+		routeNAT:     RouteNAT,
+		routeConnNAT: RouteConnNAT,
+		chExit:       make(chan error, 1),
 	}
 }
 
@@ -143,7 +149,7 @@ func (h tunHandler) printRoute() {
 		select {
 		case <-time.Tick(time.Second * 5):
 			var i int
-			h.routes.Range(func(key string, value []net.Addr) {
+			h.routeNAT.Range(func(key string, value []net.Addr) {
 				i++
 				var s []string
 				for _, addr := range value {
@@ -371,7 +377,7 @@ func (d *Device) Start() {
 		go d.parseIPHeader()
 	}
 	go d.writeToTun()
-	go d.heartbeats()
+	//go d.heartbeats()
 }
 
 func (h *tunHandler) HandleServer(ctx context.Context, tunConn net.Conn) {
@@ -436,8 +442,11 @@ type Peer struct {
 	connInbound    chan *udpElem
 	parsedConnInfo chan *udpElem
 
-	tun    *Device
-	routes *NAT
+	tun      *Device
+	routeNAT *NAT
+	// map[srcIP]net.Conn
+	// 	routeConnNAT sync.Map
+	routeConnNAT *sync.Map
 
 	errChan chan error
 }
@@ -484,8 +493,8 @@ func (p *Peer) parseHeader() {
 			continue
 		}
 
-		if _, loaded := p.routes.LoadOrStore(e.src, e.from); loaded {
-			log.Debugf("[tun] add route: %s -> %s", e.src, e.from)
+		if _, loaded := p.routeNAT.LoadOrStore(e.src, e.from); loaded {
+			log.Debugf("[tun] find route: %s -> %s", e.src, e.from)
 		} else {
 			log.Debugf("[tun] new route: %s -> %s", e.src, e.from)
 		}
@@ -498,7 +507,7 @@ func (p *Peer) parseHeader() {
 
 func (p *Peer) route() {
 	for e := range p.parsedConnInfo {
-		if routeToAddr := p.routes.RouteTo(e.dst); routeToAddr != nil {
+		if routeToAddr := p.routeNAT.RouteTo(e.dst); routeToAddr != nil {
 			log.Debugf("[tun] find route: %s -> %s", e.dst, routeToAddr)
 			_, err := p.conn.WriteTo(e.data[:e.length], routeToAddr)
 			config.LPool.Put(e.data[:])
@@ -506,6 +515,14 @@ func (p *Peer) route() {
 				p.sendErr(err)
 				return
 			}
+		} else if conn, ok := p.routeConnNAT.Load(e.dst.String()); ok {
+			dgram := newDatagramPacket(e.data[:e.length])
+			if err := dgram.Write(conn.(net.Conn)); err != nil {
+				log.Debugf("[tcpserver] udp-tun %s <- %s : %s", conn.(net.Conn).RemoteAddr(), dgram.Addr(), err)
+				p.sendErr(err)
+				return
+			}
+			config.LPool.Put(e.data[:])
 		} else {
 			if !p.tun.closed.Load() {
 				p.tun.tunOutbound <- &DataElem{
@@ -536,14 +553,15 @@ func (p *Peer) Close() {
 
 func (h *tunHandler) transportTun(ctx context.Context, tun *Device, conn net.PacketConn) error {
 	errChan := make(chan error, 2)
-	p := Peer{
+	p := &Peer{
 		conn:           conn,
 		thread:         MaxThread,
 		closed:         &atomic.Bool{},
 		connInbound:    make(chan *udpElem, MaxSize),
 		parsedConnInfo: make(chan *udpElem, MaxSize),
 		tun:            tun,
-		routes:         h.routes,
+		routeNAT:       h.routeNAT,
+		routeConnNAT:   h.routeConnNAT,
 		errChan:        errChan,
 	}
 
@@ -551,27 +569,62 @@ func (h *tunHandler) transportTun(ctx context.Context, tun *Device, conn net.Pac
 	p.Start()
 
 	go func() {
-		for e := range tun.tunInbound {
+		for packet := range Chan {
 			select {
 			case <-ctx.Done():
 				return
 			default:
 			}
 
-			addr := h.routes.RouteTo(e.dst)
-			if addr == nil {
-				config.LPool.Put(e.data[:])
-				log.Debug(fmt.Errorf("[tun] no route for %s -> %s", e.src, e.dst))
+			u := &udpElem{
+				data:   packet.data.Data[:],
+				length: int(packet.data.DataLength),
+			}
+			if util.IsIPv4(packet.data.Data) {
+				// ipv4.ParseHeader
+				b := packet.data.Data
+				u.src = net.IPv4(b[12], b[13], b[14], b[15])
+				u.dst = net.IPv4(b[16], b[17], b[18], b[19])
+			} else if util.IsIPv6(packet.data.Data) {
+				// ipv6.ParseHeader
+				u.src = packet.data.Data[8:24]
+				u.dst = packet.data.Data[24:40]
+			} else {
+				log.Errorf("[tun] unknown packet")
 				continue
 			}
-
-			log.Debugf("[tun] find route: %s -> %s", e.dst, addr)
-			_, err := conn.WriteTo(e.data[:e.length], addr)
-			config.LPool.Put(e.data[:])
-			if err != nil {
-				log.Debugf("[tun] can not route: %s -> %s", e.dst, addr)
-				errChan <- err
+			log.Debugf("[tcpserver] udp-tun %s >>> %s length: %d", u.src, u.dst, u.length)
+			p.routeConnNAT.LoadOrStore(u.src.String(), packet.conn)
+			log.Debugf("[tun] new routeConnNAT: %s -> %s-%s", u.src, packet.conn.LocalAddr(), packet.conn.RemoteAddr())
+			p.parsedConnInfo <- u
+		}
+	}()
+	go func() {
+		for e := range tun.tunInbound {
+			select {
+			case <-ctx.Done():
 				return
+			default:
+			}
+			if addr := h.routeNAT.RouteTo(e.dst); addr != nil {
+				log.Debugf("[tun] find route: %s -> %s", e.dst, addr)
+				_, err := conn.WriteTo(e.data[:e.length], addr)
+				config.LPool.Put(e.data[:])
+				if err != nil {
+					log.Debugf("[tun] can not route: %s -> %s", e.dst, addr)
+					p.sendErr(err)
+					return
+				}
+			} else if conn, ok := p.routeConnNAT.Load(e.dst.String()); ok {
+				dgram := newDatagramPacket(e.data[:e.length])
+				if err := dgram.Write(conn.(net.Conn)); err != nil {
+					log.Debugf("[tcpserver] udp-tun %s <- %s : %s", conn.(net.Conn).RemoteAddr(), dgram.Addr(), err)
+					p.sendErr(err)
+					return
+				}
+			} else {
+				config.LPool.Put(e.data[:])
+				log.Debug(fmt.Errorf("[tun] no route for %s -> %s", e.src, e.dst))
 			}
 		}
 	}()

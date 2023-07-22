@@ -45,6 +45,20 @@ func readDatagramPacket(r io.Reader, b []byte) (*datagramPacket, error) {
 	return &datagramPacket{DataLength: dataLength, Data: b[:dataLength]}, nil
 }
 
+// this method will return all byte array in the way: b[:]
+func readDatagramPacketServer(r io.Reader, b []byte) (*datagramPacket, error) {
+	_, err := io.ReadFull(r, b[:2])
+	if err != nil {
+		return nil, err
+	}
+	dataLength := binary.BigEndian.Uint16(b[:2])
+	_, err = io.ReadFull(r, b[:dataLength])
+	if err != nil /*&& (err != io.ErrUnexpectedEOF || err != io.EOF)*/ {
+		return nil, err
+	}
+	return &datagramPacket{DataLength: dataLength, Data: b[:]}, nil
+}
+
 func (addr *datagramPacket) Write(w io.Writer) error {
 	b := config.LPool.Get().([]byte)
 	defer config.LPool.Put(b[:])

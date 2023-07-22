@@ -39,6 +39,7 @@ import (
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/tools/remotecommand"
 	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/client-go/transport/spdy"
@@ -107,17 +108,16 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 		Resource("pods").
 		Namespace(namespace).
 		Name(podName).
-		SubResource("portforward").Timeout(time.Second * 30).
-		MaxRetries(3).
+		SubResource("portforward").
 		URL()
 	transport, upgrader, err := spdy.RoundTripperFor(config)
 	if err != nil {
 		log.Error(err)
 		return err
 	}
-	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport, Timeout: time.Second * 30}, "POST", url)
+	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
 	p := []string{port}
-	forwarder, err := NewOnAddresses(dialer, []string{"0.0.0.0"}, p, stopChan, readyChan, nil, os.Stderr)
+	forwarder, err := portforward.NewOnAddresses(dialer, []string{"0.0.0.0"}, p, stopChan, readyChan, nil, os.Stderr)
 	if err != nil {
 		log.Error(err)
 		return err

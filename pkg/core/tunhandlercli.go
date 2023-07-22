@@ -31,7 +31,7 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 		return
 	}
 
-	for i := 0; i < MaxThread; i++ {
+	for i := 0; i < MaxConn; i++ {
 		go func() {
 			for {
 				select {

@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/pkg/errors"
@@ -15,7 +16,16 @@ import (
 var (
 	// RouteNAT Globe route table for inner ip
 	RouteNAT = NewNAT()
+	// RouteConnNAT map[srcIP]net.Conn
+	RouteConnNAT = &sync.Map{}
+	// Chan tcp connects
+	Chan = make(chan *TCPUDPacket, MaxSize)
 )
+
+type TCPUDPacket struct {
+	conn net.Conn
+	data *datagramPacket
+}
 
 // Route example:
 // -L "tcp://:10800" -L "tun://:8422?net=223.254.0.100/16"
