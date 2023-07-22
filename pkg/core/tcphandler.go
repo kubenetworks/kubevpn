@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -39,12 +40,15 @@ func (c *fakeUDPTunnelConnector) ConnectContext(ctx context.Context, conn net.Co
 }
 
 type fakeUdpHandler struct {
-	nat *NAT
+	// map[srcIP]net.Conn
+	connNAT *sync.Map
+	ch      chan *TCPUDPacket
 }
 
 func TCPHandler() Handler {
 	return &fakeUdpHandler{
-		nat: RouteNAT,
+		connNAT: RouteConnNAT,
+		ch:      Chan,
 	}
 }
 
@@ -53,69 +57,33 @@ var Server8422, _ = net.ResolveUDPAddr("udp", "localhost:8422")
 func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
 	log.Debugf("[tcpserver] %s -> %s\n", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
-	udpConn, err := net.DialUDP("udp", nil, Server8422)
-	if err != nil {
-		log.Errorf("[tcpserver] udp-tun %s -> %s : %s", tcpConn.RemoteAddr(), udpConn.LocalAddr(), err)
-		return
-	}
-	defer udpConn.Close()
 
 	defer func(addr net.Addr) {
-		n := h.nat.RemoveAddr(addr)
-		log.Debugf("delete addr %s from globle route, deleted count %d", addr, n)
-	}(udpConn.LocalAddr())
-
-	log.Debugf("[tcpserver] udp-tun %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
-	errChan := make(chan error, 2)
-	go func() {
-		b := config.LPool.Get().([]byte)
-		defer config.LPool.Put(b[:])
-
-		for {
-			dgram, err := readDatagramPacket(tcpConn, b[:])
-			if err != nil {
-				log.Debugf("[tcpserver] %s -> 0 : %v", tcpConn.RemoteAddr(), err)
-				errChan <- err
-				return
+		var keys []string
+		h.connNAT.Range(func(key, value any) bool {
+			if value.(net.Conn) == tcpConn {
+				keys = append(keys, key.(string))
 			}
-
-			if _, err = udpConn.Write(dgram.Data); err != nil {
-				log.Debugf("[tcpserver] udp-tun %s -> %s : %s", tcpConn.RemoteAddr(), Server8422, err)
-				errChan <- err
-				return
-			}
-			log.Debugf("[tcpserver] udp-tun %s >>> %s length: %d", tcpConn.RemoteAddr(), Server8422, len(dgram.Data))
+			return true
+		})
+		for _, key := range keys {
+			h.connNAT.Delete(key)
 		}
-	}()
+		log.Debugf("delete conn %s from globle routeConnNAT, deleted count %d", addr, len(keys))
+	}(tcpConn.LocalAddr())
 
-	go func() {
+	for {
 		b := config.LPool.Get().([]byte)
-		defer config.LPool.Put(b[:])
-
-		for {
-			n, err := udpConn.Read(b[:])
-			if err != nil {
-				log.Debugf("[tcpserver] %s : %s", tcpConn.RemoteAddr(), err)
-				errChan <- err
-				return
-			}
-
-			// pipe from peer to tunnel
-			dgram := newDatagramPacket(b[:n])
-			if err = dgram.Write(tcpConn); err != nil {
-				log.Debugf("[tcpserver] udp-tun %s <- %s : %s", tcpConn.RemoteAddr(), dgram.Addr(), err)
-				errChan <- err
-				return
-			}
-			log.Debugf("[tcpserver] udp-tun %s <<< %s length: %d", tcpConn.RemoteAddr(), dgram.Addr(), len(dgram.Data))
+		dgram, err := readDatagramPacketServer(tcpConn, b[:])
+		if err != nil {
+			log.Debugf("[tcpserver] %s -> 0 : %v", tcpConn.RemoteAddr(), err)
+			return
 		}
-	}()
-	err = <-errChan
-	if err != nil {
-		log.Error(err)
+		h.ch <- &TCPUDPacket{
+			conn: tcpConn,
+			data: dgram,
+		}
 	}
-	log.Debugf("[tcpserver] udp-tun %s >-< %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
-	return
 }
 
 // fake udp connect over tcp

@@ -135,7 +135,7 @@ var (
 	//	network layer ip needs 20 bytes
 	//	transport layer UDP header needs 8 bytes
 	//	UDP over TCP header needs 22 bytes
-	DefaultMTU = 1500 - 20 - 8 - 21
+	DefaultMTU = 65521
 )
 
 var (

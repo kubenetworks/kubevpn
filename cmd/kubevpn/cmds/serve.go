@@ -1,16 +1,13 @@
 package cmds
 
 import (
-	"context"
 	"math/rand"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/automaxprocs/maxprocs"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/core"
@@ -37,17 +34,11 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			defer handler.Final()
-			ctx, cancelFunc := context.WithCancel(context.Background())
-			stopChan := make(chan os.Signal)
-			signal.Notify(stopChan, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL /*, syscall.SIGSTOP*/)
-			go func() {
-				<-stopChan
-				cancelFunc()
-			}()
 			servers, err := handler.Parse(*route)
 			if err != nil {
 				return err
 			}
+			ctx := ctrl.SetupSignalHandler()
 			return handler.Run(ctx, servers)
 		},
 	}
