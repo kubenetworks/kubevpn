@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -15,7 +14,6 @@ import (
 func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	d := &Device{
 		tun:           tun,
-		closed:        atomic.Bool{},
 		thread:        MaxThread,
 		tunInboundRaw: make(chan *DataElem, MaxSize),
 		tunInbound:    make(chan *DataElem, MaxSize),
@@ -95,16 +93,7 @@ func (h *tunHandler) transportTunCli(ctx context.Context, d *Device, conn net.Pa
 
 	go func() {
 		for e := range d.tunInbound {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
 			if e.src.Equal(e.dst) {
-				if d.closed.Load() {
-					return
-				}
 				d.tunOutbound <- e
 				continue
 			}
@@ -129,9 +118,6 @@ func (h *tunHandler) transportTunCli(ctx context.Context, d *Device, conn net.Pa
 			n, _, err := conn.ReadFrom(b[:])
 			if err != nil {
 				errChan <- err
-				return
-			}
-			if d.closed.Load() {
 				return
 			}
 			d.tunOutbound <- &DataElem{data: b[:], length: n}

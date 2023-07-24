@@ -10,6 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
 type fakeUDPTunnelConnector struct {
@@ -42,7 +43,7 @@ func (c *fakeUDPTunnelConnector) ConnectContext(ctx context.Context, conn net.Co
 type fakeUdpHandler struct {
 	// map[srcIP]net.Conn
 	connNAT *sync.Map
-	ch      chan *TCPUDPacket
+	ch      chan *datagramPacket
 }
 
 func TCPHandler() Handler {
@@ -72,6 +73,8 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		log.Debugf("delete conn %s from globle routeConnNAT, deleted count %d", addr, len(keys))
 	}(tcpConn.LocalAddr())
 
+	var firstIPv4 = true
+	var firstIPv6 = true
 	for {
 		b := config.LPool.Get().([]byte)
 		dgram, err := readDatagramPacketServer(tcpConn, b[:])
@@ -79,10 +82,24 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 			log.Debugf("[tcpserver] %s -> 0 : %v", tcpConn.RemoteAddr(), err)
 			return
 		}
-		h.ch <- &TCPUDPacket{
-			conn: tcpConn,
-			data: dgram,
+
+		if firstIPv4 || firstIPv6 {
+			var src net.IP
+			bb := dgram.Data[:dgram.DataLength]
+			if util.IsIPv4(bb) {
+				src = net.IPv4(bb[12], bb[13], bb[14], bb[15])
+				firstIPv4 = false
+			} else if util.IsIPv6(bb) {
+				src = bb[8:24]
+				firstIPv6 = false
+			} else {
+				log.Errorf("[tun] unknown packet")
+				continue
+			}
+			h.connNAT.LoadOrStore(src.String(), tcpConn)
+			log.Debugf("[tun] new routeConnNAT: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 		}
+		h.ch <- dgram
 	}
 }
 
