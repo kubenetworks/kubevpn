@@ -7,7 +7,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/gopacket"
@@ -20,9 +19,9 @@ import (
 )
 
 const (
-	MaxSize   = 1000000
+	MaxSize   = 1000
 	MaxThread = 10
-	MaxConn   = 10
+	MaxConn   = 1
 )
 
 type tunHandler struct {
@@ -166,7 +165,6 @@ func (h tunHandler) printRoute() {
 
 type Device struct {
 	tun    net.Conn
-	closed atomic.Bool
 	thread int
 
 	tunInboundRaw chan *DataElem
@@ -185,9 +183,6 @@ func (d *Device) readFromTun() {
 			case d.chExit <- err:
 			default:
 			}
-			return
-		}
-		if d.closed.Load() {
 			return
 		}
 		d.tunInboundRaw <- &DataElem{
@@ -228,18 +223,12 @@ func (d *Device) parseIPHeader() {
 		}
 
 		log.Debugf("[tun] %s --> %s", e.src, e.dst)
-		if d.closed.Load() {
-			return
-		}
 		d.tunInbound <- e
 	}
 }
 
 func (d *Device) Close() {
-	d.closed.Store(true)
 	d.tun.Close()
-	close(d.tunInboundRaw)
-	close(d.tunOutbound)
 }
 
 func (d *Device) heartbeats() {
@@ -297,10 +286,6 @@ func (d *Device) heartbeats() {
 				}
 			}
 			for index, i2 := range [][]byte{bytes, bytes6} {
-				if d.closed.Load() {
-					return
-				}
-
 				data := config.LPool.Get().([]byte)[:]
 				length := copy(data, i2)
 				var src, dst net.IP
@@ -385,7 +370,6 @@ func (h *tunHandler) HandleServer(ctx context.Context, tunConn net.Conn) {
 	tun := &Device{
 		tun:           tunConn,
 		thread:        MaxThread,
-		closed:        atomic.Bool{},
 		tunInboundRaw: make(chan *DataElem, MaxSize),
 		tunInbound:    make(chan *DataElem, MaxSize),
 		tunOutbound:   make(chan *DataElem, MaxSize),
@@ -437,7 +421,6 @@ type udpElem struct {
 type Peer struct {
 	conn   net.PacketConn
 	thread int
-	closed *atomic.Bool
 
 	connInbound    chan *udpElem
 	parsedConnInfo chan *udpElem
@@ -466,9 +449,6 @@ func (p *Peer) readFromConn() {
 			p.sendErr(err)
 			return
 		}
-		if p.closed.Load() {
-			return
-		}
 		p.connInbound <- &udpElem{
 			from:   srcAddr,
 			data:   b[:],
@@ -478,28 +458,33 @@ func (p *Peer) readFromConn() {
 }
 
 func (p *Peer) parseHeader() {
+	var firstIPv4, firstIPv6 = true, true
 	for e := range p.connInbound {
+		b := e.data[:e.length]
 		if util.IsIPv4(e.data[:e.length]) {
 			// ipv4.ParseHeader
-			b := e.data[:e.length]
 			e.src = net.IPv4(b[12], b[13], b[14], b[15])
 			e.dst = net.IPv4(b[16], b[17], b[18], b[19])
 		} else if util.IsIPv6(e.data[:e.length]) {
 			// ipv6.ParseHeader
-			e.src = e.data[:e.length][8:24]
-			e.dst = e.data[:e.length][24:40]
+			e.src = b[:e.length][8:24]
+			e.dst = b[:e.length][24:40]
 		} else {
 			log.Errorf("[tun] unknown packet")
 			continue
 		}
 
-		if _, loaded := p.routeNAT.LoadOrStore(e.src, e.from); loaded {
-			log.Debugf("[tun] find route: %s -> %s", e.src, e.from)
-		} else {
-			log.Debugf("[tun] new route: %s -> %s", e.src, e.from)
-		}
-		if p.closed.Load() {
-			return
+		if firstIPv4 || firstIPv6 {
+			if util.IsIPv4(e.data[:e.length]) {
+				firstIPv4 = false
+			} else {
+				firstIPv6 = false
+			}
+			if _, loaded := p.routeNAT.LoadOrStore(e.src, e.from); loaded {
+				log.Debugf("[tun] find route: %s -> %s", e.src, e.from)
+			} else {
+				log.Debugf("[tun] new route: %s -> %s", e.src, e.from)
+			}
 		}
 		p.parsedConnInfo <- e
 	}
@@ -524,13 +509,11 @@ func (p *Peer) route() {
 			}
 			config.LPool.Put(e.data[:])
 		} else {
-			if !p.tun.closed.Load() {
-				p.tun.tunOutbound <- &DataElem{
-					data:   e.data,
-					length: e.length,
-					src:    e.src,
-					dst:    e.dst,
-				}
+			p.tun.tunOutbound <- &DataElem{
+				data:   e.data,
+				length: e.length,
+				src:    e.src,
+				dst:    e.dst,
 			}
 		}
 	}
@@ -545,10 +528,7 @@ func (p *Peer) Start() {
 }
 
 func (p *Peer) Close() {
-	p.closed.Store(true)
 	p.conn.Close()
-	close(p.connInbound)
-	close(p.parsedConnInfo)
 }
 
 func (h *tunHandler) transportTun(ctx context.Context, tun *Device, conn net.PacketConn) error {
@@ -556,7 +536,6 @@ func (h *tunHandler) transportTun(ctx context.Context, tun *Device, conn net.Pac
 	p := &Peer{
 		conn:           conn,
 		thread:         MaxThread,
-		closed:         &atomic.Bool{},
 		connInbound:    make(chan *udpElem, MaxSize),
 		parsedConnInfo: make(chan *udpElem, MaxSize),
 		tun:            tun,
@@ -570,42 +549,29 @@ func (h *tunHandler) transportTun(ctx context.Context, tun *Device, conn net.Pac
 
 	go func() {
 		for packet := range Chan {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
 			u := &udpElem{
-				data:   packet.data.Data[:],
-				length: int(packet.data.DataLength),
+				data:   packet.Data[:],
+				length: int(packet.DataLength),
 			}
-			if util.IsIPv4(packet.data.Data) {
+			b := packet.Data
+			if util.IsIPv4(packet.Data) {
 				// ipv4.ParseHeader
-				b := packet.data.Data
 				u.src = net.IPv4(b[12], b[13], b[14], b[15])
 				u.dst = net.IPv4(b[16], b[17], b[18], b[19])
-			} else if util.IsIPv6(packet.data.Data) {
+			} else if util.IsIPv6(packet.Data) {
 				// ipv6.ParseHeader
-				u.src = packet.data.Data[8:24]
-				u.dst = packet.data.Data[24:40]
+				u.src = b[8:24]
+				u.dst = b[24:40]
 			} else {
 				log.Errorf("[tun] unknown packet")
 				continue
 			}
 			log.Debugf("[tcpserver] udp-tun %s >>> %s length: %d", u.src, u.dst, u.length)
-			p.routeConnNAT.LoadOrStore(u.src.String(), packet.conn)
-			log.Debugf("[tun] new routeConnNAT: %s -> %s-%s", u.src, packet.conn.LocalAddr(), packet.conn.RemoteAddr())
 			p.parsedConnInfo <- u
 		}
 	}()
 	go func() {
 		for e := range tun.tunInbound {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
 			if addr := h.routeNAT.RouteTo(e.dst); addr != nil {
 				log.Debugf("[tun] find route: %s -> %s", e.dst, addr)
 				_, err := conn.WriteTo(e.data[:e.length], addr)
@@ -617,7 +583,9 @@ func (h *tunHandler) transportTun(ctx context.Context, tun *Device, conn net.Pac
 				}
 			} else if conn, ok := p.routeConnNAT.Load(e.dst.String()); ok {
 				dgram := newDatagramPacket(e.data[:e.length])
-				if err := dgram.Write(conn.(net.Conn)); err != nil {
+				err := dgram.Write(conn.(net.Conn))
+				config.LPool.Put(e.data[:])
+				if err != nil {
 					log.Debugf("[tcpserver] udp-tun %s <- %s : %s", conn.(net.Conn).RemoteAddr(), dgram.Addr(), err)
 					p.sendErr(err)
 					return

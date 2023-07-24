@@ -19,11 +19,10 @@ var (
 	// RouteConnNAT map[srcIP]net.Conn
 	RouteConnNAT = &sync.Map{}
 	// Chan tcp connects
-	Chan = make(chan *TCPUDPacket, MaxSize)
+	Chan = make(chan *datagramPacket, MaxSize)
 )
 
 type TCPUDPacket struct {
-	conn net.Conn
 	data *datagramPacket
 }
 
