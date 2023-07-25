@@ -4,6 +4,7 @@ import (
 	"io"
 	defaultlog "log"
 	"os"
+	"runtime"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
@@ -56,6 +57,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			return handler.SshJump(sshConf, cmd.Flags())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			runtime.GOMAXPROCS(0)
 			if err := connect.InitClient(f); err != nil {
 				return err
 			}
