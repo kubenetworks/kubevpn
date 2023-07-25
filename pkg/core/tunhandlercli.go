@@ -32,12 +32,6 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	for i := 0; i < MaxConn; i++ {
 		go func() {
 			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-
 				func() {
 					cancel, cancelFunc := context.WithCancel(ctx)
 					defer cancelFunc()
@@ -108,12 +102,6 @@ func (h *tunHandler) transportTunCli(ctx context.Context, d *Device, conn net.Pa
 
 	go func() {
 		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
 			b := config.LPool.Get().([]byte)
 			n, _, err := conn.ReadFrom(b[:])
 			if err != nil {
