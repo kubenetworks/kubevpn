@@ -53,7 +53,7 @@ func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionR
 				for j := 0; j < len(pod.Spec.Containers[i].Env); j++ {
 					pair := pod.Spec.Containers[i].Env[j]
 					if pair.Name == config.EnvInboundPodTunIPv4 {
-						if pair.Value == config.RouterIP.String() {
+						if x, _, _ := net.ParseCIDR(pair.Value); config.RouterIP.Equal(x) {
 							break out
 						}
 						found = true
@@ -140,7 +140,7 @@ func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionR
 		if container != nil {
 			var ips []net.IP
 			for _, envVar := range container.Env {
-				if envVar.Value == config.RouterIP.String() {
+				if x, _, _ := net.ParseCIDR(envVar.Value); config.RouterIP.Equal(x) {
 					break
 				}
 				if envVar.Name == config.EnvInboundPodTunIPv4 || envVar.Name == config.EnvInboundPodTunIPv6 {
