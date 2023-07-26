@@ -177,11 +177,21 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 
 	var Resources = v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
-			v1.ResourceCPU:    resource.MustParse("250m"),
+			v1.ResourceCPU:    resource.MustParse("100m"),
+			v1.ResourceMemory: resource.MustParse("128Mi"),
+		},
+		Limits: map[v1.ResourceName]resource.Quantity{
+			v1.ResourceCPU:    resource.MustParse("200m"),
+			v1.ResourceMemory: resource.MustParse("256Mi"),
+		},
+	}
+	var ResourcesContainerVPN = v1.ResourceRequirements{
+		Requests: map[v1.ResourceName]resource.Quantity{
+			v1.ResourceCPU:    resource.MustParse("500m"),
 			v1.ResourceMemory: resource.MustParse("512Mi"),
 		},
 		Limits: map[v1.ResourceName]resource.Quantity{
-			v1.ResourceCPU:    resource.MustParse("1000m"),
+			v1.ResourceCPU:    resource.MustParse("2000m"),
 			v1.ResourceMemory: resource.MustParse("2048Mi"),
 		},
 	}
@@ -300,7 +310,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" --debug=true`,
 								ContainerPort: 10800,
 								Protocol:      v1.ProtocolTCP,
 							}},
-							Resources:       Resources,
+							Resources:       ResourcesContainerVPN,
 							ImagePullPolicy: v1.PullIfNotPresent,
 							SecurityContext: &v1.SecurityContext{
 								Capabilities: &v1.Capabilities{
