@@ -8,6 +8,8 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
+// 这里的逻辑是找到指定的容器。然后以传入的参数 tempContainerConfig 为准。即也就是用户命令行指定的参数为准。
+// 然后附加上 deployment 中原本的声明
 func mergeDockerOptions(r ConfigList, copts *Options, tempContainerConfig *containerConfig) error {
 	if copts.ContainerName != "" {
 		var index = -1
@@ -48,6 +50,14 @@ func mergeDockerOptions(r ConfigList, copts *Options, tempContainerConfig *conta
 	tempContainerConfig.HostConfig.DNS = append(tempContainerConfig.HostConfig.DNS, config.hostConfig.DNS...)
 	tempContainerConfig.HostConfig.DNSOptions = append(tempContainerConfig.HostConfig.DNSOptions, config.hostConfig.DNSOptions...)
 	tempContainerConfig.HostConfig.DNSSearch = append(tempContainerConfig.HostConfig.DNSSearch, config.hostConfig.DNSSearch...)
+	tempContainerConfig.HostConfig.Mounts = append(tempContainerConfig.HostConfig.Mounts, config.hostConfig.Mounts...)
+	for port, bindings := range config.hostConfig.PortBindings {
+		if v, ok := tempContainerConfig.HostConfig.PortBindings[port]; ok {
+			tempContainerConfig.HostConfig.PortBindings[port] = append(v, bindings...)
+		} else {
+			tempContainerConfig.HostConfig.PortBindings[port] = bindings
+		}
+	}
 
 	config.hostConfig = tempContainerConfig.HostConfig
 	config.networkingConfig.EndpointsConfig = util.Merge[string, *network.EndpointSettings](tempContainerConfig.NetworkingConfig.EndpointsConfig, config.networkingConfig.EndpointsConfig)
@@ -74,6 +84,11 @@ func mergeDockerOptions(r ConfigList, copts *Options, tempContainerConfig *conta
 	c.Volumes = util.Merge[string, struct{}](c.Volumes, config.config.Volumes)
 	if c.WorkingDir == "" {
 		c.WorkingDir = config.config.WorkingDir
+	}
+	for k, v := range config.config.ExposedPorts {
+		if _, found := c.ExposedPorts[k]; !found {
+			c.ExposedPorts[k] = v
+		}
 	}
 
 	config.config = c
