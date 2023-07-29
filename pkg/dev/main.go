@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -578,7 +579,7 @@ func createConnectContainer(devOptions Options, connect handler.ConnectOptions, 
 		UTSMode:         "",
 		UsernsMode:      "",
 		ShmSize:         0,
-		Sysctls:         nil,
+		Sysctls:         map[string]string{"net.ipv6.conf.all.disable_ipv6": strconv.Itoa(0)},
 		Runtime:         "",
 		Isolation:       "",
 		Resources:       container.Resources{},
