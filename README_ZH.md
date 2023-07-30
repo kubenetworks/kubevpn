@@ -354,14 +354,14 @@ de9e2f8ab57d        nginx:latest            "/docker-entrypoint.…"   5 seconds
 例如:
 
 ```shell
-docker run -it --privileged -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v /Users/naison/.kube/config:/root/.kube/config naison/kubevpn:v1.1.21
+docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v /Users/naison/.kube/config:/root/.kube/config naison/kubevpn:v1.1.35
 ```
 
 ```shell
-➜  ~ docker run -it --privileged -c authors -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v /Users/naison/.kube/config:/root/.kube/config naison/kubevpn:v1.1.21
+➜  ~ docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -c authors -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v /Users/naison/.kube/config:/root/.kube/config naison/kubevpn:v1.1.35
 root@4d0c3c4eae2b:/# hostname
 4d0c3c4eae2b
-root@4d0c3c4eae2b:/# kubevpn -n kube-system --image naison/kubevpn:v1.1.21 --headers user=naison --network container:4d0c3c4eae2b --entrypoint /bin/bash  dev deployment/authors
+root@4d0c3c4eae2b:/# kubevpn -n kube-system --image naison/kubevpn:v1.1.35 --headers user=naison --network container:4d0c3c4eae2b --entrypoint /bin/bash  dev deployment/authors
 
 ----------------------------------------------------------------------------------
     Warn: Use sudo to execute command kubevpn can not use user env KUBECONFIG.
@@ -410,7 +410,7 @@ Container nginx_kube-system_kubevpn_c68e7 is running now
 /opt/microservices # ps -ef
 PID   USER     TIME  COMMAND
     1 root      0:00 {bash} /usr/bin/qemu-x86_64 /bin/bash /bin/bash
-   60 root      0:07 {kubevpn} /usr/bin/qemu-x86_64 kubevpn kubevpn dev deployment/authors -n kube-system --image naison/kubevpn:v1.1.21 --headers user=naison --parent
+   60 root      0:07 {kubevpn} /usr/bin/qemu-x86_64 kubevpn kubevpn dev deployment/authors -n kube-system --image naison/kubevpn:v1.1.35 --headers user=naison --parent
    73 root      0:00 {tail} /usr/bin/qemu-x86_64 /usr/bin/tail tail -f /dev/null
    80 root      0:00 {nginx} /usr/bin/qemu-x86_64 /usr/sbin/nginx nginx -g daemon off;
    92 root      0:00 {sh} /usr/bin/qemu-x86_64 /bin/sh /bin/sh
@@ -496,8 +496,8 @@ Windows
 ``` shell
   ➜  ~ kubevpn version
   KubeVPN: CLI
-  Version: v1.1.14
-  Image: docker.io/naison/kubevpn:v1.1.14
+  Version: v1.1.35
+  Image: docker.io/naison/kubevpn:v1.1.35
   Branch: master
   Git commit: 87dac42dad3d8f472a9dcdfc2c6cd801551f23d1
   Built time: 2023-01-15 04:19:45
@@ -506,18 +506,18 @@ Windows
   ➜  ~
   ```
 
-镜像是 `docker.io/naison/kubevpn:v1.1.14`，将此镜像转存到自己的镜像仓库。
+镜像是 `docker.io/naison/kubevpn:v1.1.35`，将此镜像转存到自己的镜像仓库。
 
 ```text
-docker pull docker.io/naison/kubevpn:v1.1.14
-docker tag docker.io/naison/kubevpn:v1.1.14 [镜像仓库地址]/[命名空间]/[镜像仓库]:[镜像版本号]
+docker pull docker.io/naison/kubevpn:v1.1.35
+docker tag docker.io/naison/kubevpn:v1.1.35 [镜像仓库地址]/[命名空间]/[镜像仓库]:[镜像版本号]
 docker push [镜像仓库地址]/[命名空间]/[镜像仓库]:[镜像版本号]
 ```
 
 然后就可以使用这个镜像了，如下：
 
 ```text
-➜  ~ kubevpn connect --image docker.io/naison/kubevpn:v1.1.14
+➜  ~ kubevpn connect --image docker.io/naison/kubevpn:v1.1.35
 got cidr from cache
 traffic manager not exist, try to create it...
 pod [kubevpn-traffic-manager] status is Running
