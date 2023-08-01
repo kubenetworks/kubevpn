@@ -362,7 +362,7 @@ func (d *Device) Start() {
 		go d.parseIPHeader()
 	}
 	go d.writeToTun()
-	//go d.heartbeats()
+	go d.heartbeats()
 }
 
 func (h *tunHandler) HandleServer(ctx context.Context, tunConn net.Conn) {
