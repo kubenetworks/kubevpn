@@ -361,8 +361,16 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 
 	manager := wait.NewExponentialBackoffManager(800*time.Millisecond, 30*time.Second, 2*time.Minute, 2.0, 1.0, clock.RealClock{})
 
+	var podNs string
 	var podList *v1.PodList
-	podList, err = c.clientset.CoreV1().Pods(v1.NamespaceAll).List(ctx, metav1.ListOptions{TimeoutSeconds: pointer.Int64(30)})
+	for _, n := range []string{v1.NamespaceAll, c.Namespace} {
+		podList, err = c.clientset.CoreV1().Pods(n).List(ctx, metav1.ListOptions{TimeoutSeconds: pointer.Int64(30)})
+		if err != nil {
+			continue
+		}
+		podNs = n
+		break
+	}
 	if err != nil {
 		log.Debugf("list pod failed, err: %v", err)
 		return
@@ -391,7 +399,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 							log.Errorln(er)
 						}
 					}()
-					w, errs := c.clientset.CoreV1().Pods(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{
+					w, errs := c.clientset.CoreV1().Pods(podNs).Watch(ctx, metav1.ListOptions{
 						Watch: true, TimeoutSeconds: pointer.Int64(30), ResourceVersion: podList.ResourceVersion,
 					})
 					if errs != nil {
@@ -434,10 +442,18 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 		}
 	}()
 
+	var svcNs string
 	var serviceList *v1.ServiceList
-	serviceList, err = c.clientset.CoreV1().Services(v1.NamespaceAll).List(ctx, metav1.ListOptions{
-		TimeoutSeconds: pointer.Int64(30),
-	})
+	for _, n := range []string{v1.NamespaceAll, c.Namespace} {
+		serviceList, err = c.clientset.CoreV1().Services(n).List(ctx, metav1.ListOptions{
+			TimeoutSeconds: pointer.Int64(30),
+		})
+		if err != nil {
+			continue
+		}
+		svcNs = n
+		break
+	}
 	if err != nil {
 		err = fmt.Errorf("can not list service to add it to route table, err: %v", err)
 		return
@@ -459,7 +475,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 							log.Errorln(er)
 						}
 					}()
-					w, errs := c.clientset.CoreV1().Services(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{
+					w, errs := c.clientset.CoreV1().Services(svcNs).Watch(ctx, metav1.ListOptions{
 						Watch: true, TimeoutSeconds: pointer.Int64(30), ResourceVersion: serviceList.ResourceVersion,
 					})
 					if errs != nil {
