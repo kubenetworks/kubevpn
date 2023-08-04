@@ -31,7 +31,7 @@ func attachContainer(ctx context.Context, dockerCli command.Cli, errCh *chan err
 
 	resp, errAttach := dockerCli.Client().ContainerAttach(ctx, containerID, options)
 	if errAttach != nil {
-		return nil, errAttach
+		return nil, fmt.Errorf("failed to attach to container: %s, err: %v", containerID, errAttach)
 	}
 
 	var (
