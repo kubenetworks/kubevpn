@@ -87,8 +87,8 @@ func (n *NAT) LoadOrStore(to net.IP, addr net.Addr) (result net.Addr, load bool)
 }
 
 func (n *NAT) RouteTo(ip net.IP) net.Addr {
-	n.lock.Lock()
-	defer n.lock.Unlock()
+	n.lock.RLock()
+	defer n.lock.RUnlock()
 	addrList := n.routes[ip.String()]
 	if len(addrList) == 0 {
 		return nil
