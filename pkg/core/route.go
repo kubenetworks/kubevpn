@@ -101,6 +101,12 @@ func (r *Route) GenerateServers() ([]Server, error) {
 			if err != nil {
 				return nil, err
 			}
+		case "gudp":
+			handler = GvisorUDPHandler()
+			ln, err = GvisorUDPListener(node.Addr)
+			if err != nil {
+				return nil, err
+			}
 		default:
 			return nil, fmt.Errorf("not support protocol %s", node.Protocol)
 		}

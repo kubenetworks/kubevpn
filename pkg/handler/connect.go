@@ -161,6 +161,9 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err = c.portForward(ctx, "10801:10801"); err != nil {
 		return
 	}
+	if err = c.portForward(ctx, "10802:10802"); err != nil {
+		return
+	}
 	if util.IsWindows() {
 		driver.InstallWireGuardTunDriver()
 	}
