@@ -136,7 +136,7 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 					continue
 				}
 				// if is tcp use gvisor
-				if ipProtocol == int(layers.IPProtocolTCP) &&
+				if (ipProtocol == int(layers.IPProtocolUDP) || ipProtocol == int(layers.IPProtocolTCP)) &&
 					(!config.CIDR.Contains(dst) && !config.CIDR6.Contains(dst)) {
 					pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 						ReserveHeaderBytes: 0,
@@ -145,6 +145,7 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 					//defer pkt.DecRef()
 					config.LPool.Put(bytes[:])
 					e.endpoint.InjectInbound(protocol, pkt)
+					log.Debugf("[TUN-%s] IP-Protocol: %s, SRC: %s, DST: %s, Length: %d", layers.IPProtocol(ipProtocol).String(), layers.IPProtocol(ipProtocol).String(), src.String(), dst, read)
 				} else {
 					log.Debugf("[TUN-RAW] IP-Protocol: %s, SRC: %s, DST: %s, Length: %d", layers.IPProtocol(ipProtocol).String(), src.String(), dst, read)
 					e.in <- NewDataElem(bytes[:], read, src, dst)

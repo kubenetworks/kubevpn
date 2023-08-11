@@ -13,6 +13,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/raw"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
+	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 )
 
 var _ stack.UniqueID = (*id)(nil)
@@ -32,6 +33,7 @@ func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 		},
 		TransportProtocols: []stack.TransportProtocolFactory{
 			tcp.NewProtocol,
+			udp.NewProtocol,
 		},
 		Clock:                    tcpip.NewStdClock(),
 		AllowPacketEndpointWrite: true,
@@ -43,6 +45,7 @@ func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 	})
 	// set handler for TCP UDP ICMP
 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, TCPForwarder(s))
+	s.SetTransportProtocolHandler(udp.ProtocolNumber, UDPForwarder(s))
 
 	s.SetRouteTable([]tcpip.Route{
 		{
