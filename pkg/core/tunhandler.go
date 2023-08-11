@@ -225,7 +225,7 @@ func (d *Device) parseIPHeader() {
 			e.src = e.data[:e.length][8:24]
 			e.dst = e.data[:e.length][24:40]
 		} else {
-			log.Errorf("[tun] unknown packet")
+			log.Errorf("[tun-packet] unknown packet")
 			continue
 		}
 
@@ -238,7 +238,7 @@ func (d *Device) Close() {
 	d.tun.Close()
 }
 
-func (d *Device) heartbeats() {
+func heartbeats(in chan<- *DataElem) {
 	tunIface, err := tun.GetInterface()
 	if err != nil {
 		return
@@ -301,7 +301,7 @@ func (d *Device) heartbeats() {
 				} else {
 					src, dst = srcIPv6, config.RouterIP6
 				}
-				d.tunInbound <- &DataElem{
+				in <- &DataElem{
 					data:   data,
 					length: length,
 					src:    src,
@@ -370,7 +370,7 @@ func (d *Device) Start(ctx context.Context) {
 	}
 	go d.tunInboundHandler(d.tunInbound, d.tunOutbound)
 	go d.writeToTun()
-	go d.heartbeats()
+	//go heartbeats(d.tunInbound)
 
 	select {
 	case err := <-d.chExit:
@@ -418,6 +418,23 @@ type DataElem struct {
 	length int
 	src    net.IP
 	dst    net.IP
+}
+
+func NewDataElem(data []byte, length int, src net.IP, dst net.IP) *DataElem {
+	return &DataElem{
+		data:   data,
+		length: length,
+		src:    src,
+		dst:    dst,
+	}
+}
+
+func (d *DataElem) Data() []byte {
+	return d.data
+}
+
+func (d *DataElem) Length() int {
+	return d.length
 }
 
 type udpElem struct {
@@ -485,7 +502,7 @@ func (p *Peer) readFromTCPConn() {
 			u.src = b[8:24]
 			u.dst = b[24:40]
 		} else {
-			log.Errorf("[tun] unknown packet")
+			log.Errorf("[tun-conn] unknown packet")
 			continue
 		}
 		log.Debugf("[tcpserver] udp-tun %s >>> %s length: %d", u.src, u.dst, u.length)

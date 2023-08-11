@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -88,12 +89,20 @@ func (r *Route) GenerateServers() ([]Server, error) {
 			if err != nil {
 				return nil, err
 			}
-		default:
+		case "tcp":
 			handler = TCPHandler()
 			ln, err = TCPListener(node.Addr)
 			if err != nil {
 				return nil, err
 			}
+		case "gtcp":
+			handler = GvisorTCPHandler()
+			ln, err = GvisorTCPListener(node.Addr)
+			if err != nil {
+				return nil, err
+			}
+		default:
+			return nil, fmt.Errorf("not support protocol %s", node.Protocol)
 		}
 		servers = append(servers, Server{Listener: ln, Handler: handler})
 	}

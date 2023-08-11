@@ -70,7 +70,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		for _, key := range keys {
 			h.connNAT.Delete(key)
 		}
-		log.Debugf("delete conn %s from globle routeConnNAT, deleted count %d", addr, len(keys))
+		log.Debugf("[tcpserver] delete conn %s from globle routeConnNAT, deleted count %d", addr, len(keys))
 	}(tcpConn.LocalAddr())
 
 	var firstIPv4 = true
@@ -93,11 +93,11 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 				src = bb[8:24]
 				firstIPv6 = false
 			} else {
-				log.Errorf("[tun] unknown packet")
+				log.Errorf("[tcpserver] unknown packet")
 				continue
 			}
 			h.connNAT.LoadOrStore(src.String(), tcpConn)
-			log.Debugf("[tun] new routeConnNAT: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+			log.Debugf("[tcpserver] new routeConnNAT: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 		}
 		h.ch <- dgram
 	}
