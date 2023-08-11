@@ -73,8 +73,6 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		log.Debugf("[tcpserver] delete conn %s from globle routeConnNAT, deleted count %d", addr, len(keys))
 	}(tcpConn.LocalAddr())
 
-	var firstIPv4 = true
-	var firstIPv6 = true
 	for {
 		b := config.LPool.Get().([]byte)
 		dgram, err := readDatagramPacketServer(tcpConn, b[:])
@@ -83,20 +81,24 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 			return
 		}
 
-		if firstIPv4 || firstIPv6 {
-			var src net.IP
-			bb := dgram.Data[:dgram.DataLength]
-			if util.IsIPv4(bb) {
-				src = net.IPv4(bb[12], bb[13], bb[14], bb[15])
-				firstIPv4 = false
-			} else if util.IsIPv6(bb) {
-				src = bb[8:24]
-				firstIPv6 = false
-			} else {
-				log.Errorf("[tcpserver] unknown packet")
-				continue
+		var src net.IP
+		bb := dgram.Data[:dgram.DataLength]
+		if util.IsIPv4(bb) {
+			src = net.IPv4(bb[12], bb[13], bb[14], bb[15])
+		} else if util.IsIPv6(bb) {
+			src = bb[8:24]
+		} else {
+			log.Errorf("[tcpserver] unknown packet")
+			continue
+		}
+		value, loaded := h.connNAT.LoadOrStore(src.String(), tcpConn)
+		if loaded {
+			if tcpConn != value.(net.Conn) {
+				h.connNAT.Store(src.String(), tcpConn)
+				log.Debugf("[tcpserver] replace routeConnNAT: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 			}
-			h.connNAT.LoadOrStore(src.String(), tcpConn)
+			log.Debugf("[tcpserver] find routeConnNAT: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+		} else {
 			log.Debugf("[tcpserver] new routeConnNAT: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 		}
 		h.ch <- dgram
