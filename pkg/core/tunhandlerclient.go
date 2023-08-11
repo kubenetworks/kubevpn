@@ -17,16 +17,18 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 		log.Errorf("[tun] %s: remote addr: %v", tun.LocalAddr(), err)
 		return
 	}
+	in := make(chan *DataElem, MaxSize)
+	out := make(chan *DataElem, MaxSize)
+	endpoint := NewTunEndpoint(ctx, tun, uint32(config.DefaultMTU), in, out)
+	stack := NewStack(ctx, endpoint)
+	go stack.Wait()
 
-	device := &Device{
-		tun:           tun,
-		thread:        MaxThread,
-		tunInboundRaw: make(chan *DataElem, MaxSize),
-		tunInbound:    make(chan *DataElem, MaxSize),
-		tunOutbound:   make(chan *DataElem, MaxSize),
-		chExit:        h.chExit,
+	d := &ClientDevice{
+		tunInbound:  in,
+		tunOutbound: out,
+		chExit:      h.chExit,
 	}
-	device.SetTunInboundHandler(func(tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem) {
+	d.SetTunInboundHandler(func(tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem) {
 		for {
 			packetConn, err := getRemotePacketConn(ctx, h.chain)
 			if err != nil {
@@ -41,8 +43,7 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 		}
 	})
 
-	defer device.Close()
-	device.Start(ctx)
+	d.Start(ctx)
 }
 
 func getRemotePacketConn(ctx context.Context, chain *Chain) (net.PacketConn, error) {
@@ -104,4 +105,29 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 	case <-ctx.Done():
 		return nil
 	}
+}
+
+type ClientDevice struct {
+	tunInbound  chan *DataElem
+	tunOutbound chan *DataElem
+	// your main logic
+	tunInboundHandler func(tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem)
+	chExit            chan error
+}
+
+func (d *ClientDevice) Start(ctx context.Context) {
+	go d.tunInboundHandler(d.tunInbound, d.tunOutbound)
+	//go heartbeats(d.tunInbound)
+
+	select {
+	case err := <-d.chExit:
+		log.Error(err)
+		return
+	case <-ctx.Done():
+		return
+	}
+}
+
+func (d *ClientDevice) SetTunInboundHandler(handler func(tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem)) {
+	d.tunInboundHandler = handler
 }

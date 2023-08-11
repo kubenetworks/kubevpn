@@ -158,6 +158,9 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err = c.portForward(ctx, fmt.Sprintf("%d:10800", port)); err != nil {
 		return
 	}
+	if err = c.portForward(ctx, "10801:10801"); err != nil {
+		return
+	}
 	if util.IsWindows() {
 		driver.InstallWireGuardTunDriver()
 	}
@@ -175,7 +178,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err = c.setupDNS(); err != nil {
 		return
 	}
-	go c.heartbeats()
+	//go c.heartbeats()
 	log.Info("dns service ok")
 	return
 }

@@ -145,3 +145,9 @@ var (
 		},
 	}
 )
+
+var SPool = sync.Pool{
+	New: func() any {
+		return make([]byte, 2)
+	},
+}
