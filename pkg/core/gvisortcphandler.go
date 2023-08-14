@@ -2,13 +2,40 @@ package core
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net"
-	"strconv"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 )
+
+type gvisorTCPTunnelConnector struct {
+}
+
+func GvisorTCPTunnelConnector() Connector {
+	return &gvisorTCPTunnelConnector{}
+}
+
+func (c *gvisorTCPTunnelConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
+	switch con := conn.(type) {
+	case *net.TCPConn:
+		err := con.SetNoDelay(true)
+		if err != nil {
+			return nil, err
+		}
+		err = con.SetKeepAlive(true)
+		if err != nil {
+			return nil, err
+		}
+		err = con.SetKeepAlivePeriod(15 * time.Second)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return conn, nil
+}
 
 type gvisorTCPHandler struct{}
 
@@ -18,30 +45,41 @@ func GvisorTCPHandler() Handler {
 
 func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
-	log.Debugf("[GvisorTCPServer] %s -> %s\n", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
-	func(conn net.Conn) {
-		defer conn.Close()
-		// 1, get proxy info
-		endpointID, err := ParseProxyInfo(conn)
-		if err != nil {
-			log.Warning("failed to parse proxy info", "err: ", err)
-			return
-		}
-		log.Debugf("[TUN-TCP] Info: LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
-			endpointID.LocalPort, endpointID.LocalAddress.String(), endpointID.RemotePort, endpointID.RemoteAddress.String(),
-		)
-		// 2, dial proxy
-		s := net.ParseIP(endpointID.LocalAddress.String()).String()
-		port := strconv.FormatUint(uint64(endpointID.LocalPort), 10)
-		var dial net.Conn
-		dial, err = net.DialTimeout("tcp", net.JoinHostPort(s, port), time.Second*5)
-		if err != nil {
-			log.Warningln(err)
-			return
-		}
-		go io.Copy(conn, dial)
-		io.Copy(dial, conn)
-	}(tcpConn)
+	log.Debugf("[TUN-TCP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
+	// 1, get proxy info
+	endpointID, err := ParseProxyInfo(tcpConn)
+	if err != nil {
+		log.Errorf("[TUN-TCP] Error: failed to parse proxy info: %v", err)
+		return
+	}
+	log.Debugf("[TUN-TCP] Debug: LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
+		endpointID.LocalPort, endpointID.LocalAddress.String(), endpointID.RemotePort, endpointID.RemoteAddress.String(),
+	)
+	// 2, dial proxy
+	host := endpointID.LocalAddress.String()
+	port := fmt.Sprintf("%d", endpointID.LocalPort)
+	var remote net.Conn
+	remote, err = net.DialTimeout("tcp", net.JoinHostPort(host, port), time.Second*5)
+	if err != nil {
+		log.Errorf("[TUN-TCP] Error: failed to connect addr %s: %v", net.JoinHostPort(host, port), err)
+		return
+	}
+
+	errChan := make(chan error, 2)
+	go func() {
+		written, err2 := io.Copy(remote, tcpConn)
+		log.Errorf("[TUN-TCP] Debug: write length %d data to remote", written)
+		errChan <- err2
+	}()
+	go func() {
+		written, err2 := io.Copy(tcpConn, remote)
+		log.Errorf("[TUN-TCP] Debug: read length %d data from remote", written)
+		errChan <- err2
+	}()
+	err = <-errChan
+	if err != nil && !errors.Is(err, io.EOF) {
+		log.Errorf("[TUN-TCP] Error: dsiconnect: %s >-<: %s: %v", tcpConn.LocalAddr(), remote.RemoteAddr(), err)
+	}
 }
 
 func GvisorTCPListener(addr string) (net.Listener, error) {

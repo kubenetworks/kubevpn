@@ -102,7 +102,7 @@ func WaitPod(podInterface v12.PodInterface, list metav1.ListOptions, checker fun
 	}
 }
 
-func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, namespace, port string, readyChan chan struct{}, stopChan <-chan struct{}) error {
+func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, namespace, portPair string, readyChan chan struct{}, stopChan <-chan struct{}) error {
 	url := clientset.
 		Post().
 		Resource("pods").
@@ -116,7 +116,7 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 		return err
 	}
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
-	p := []string{port}
+	p := []string{portPair}
 	forwarder, err := portforward.NewOnAddresses(dialer, []string{"0.0.0.0"}, p, stopChan, readyChan, nil, os.Stderr)
 	if err != nil {
 		log.Error(err)

@@ -158,16 +158,20 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err = c.portForward(ctx, fmt.Sprintf("%d:10800", port)); err != nil {
 		return
 	}
-	if err = c.portForward(ctx, "10801:10801"); err != nil {
+	tcpForwardPort := util.GetAvailableTCPPortOrDie()
+	if err = c.portForward(ctx, fmt.Sprintf("%d:10801", tcpForwardPort)); err != nil {
 		return
 	}
-	if err = c.portForward(ctx, "10802:10802"); err != nil {
+	udpForwardPort := util.GetAvailableTCPPortOrDie()
+	if err = c.portForward(ctx, fmt.Sprintf("%d:10802", udpForwardPort)); err != nil {
 		return
 	}
 	if util.IsWindows() {
 		driver.InstallWireGuardTunDriver()
 	}
 	forward := fmt.Sprintf("tcp://127.0.0.1:%d", port)
+	core.GvisorTCPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", tcpForwardPort)
+	core.GvisorUDPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", udpForwardPort)
 	if err = c.startLocalTunServe(ctx, forward); err != nil {
 		return
 	}
@@ -181,13 +185,13 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err = c.setupDNS(); err != nil {
 		return
 	}
-	//go c.heartbeats()
+	go c.heartbeats()
 	log.Info("dns service ok")
 	return
 }
 
 // detect pod is delete event, if pod is deleted, needs to redo port-forward immediately
-func (c *ConnectOptions) portForward(ctx context.Context, port string) error {
+func (c *ConnectOptions) portForward(ctx context.Context, portPair string) error {
 	var readyChan = make(chan struct{}, 1)
 	var errChan = make(chan error, 1)
 	podInterface := c.clientset.CoreV1().Pods(c.Namespace)
@@ -218,7 +222,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, port string) error {
 					c.restclient,
 					podName,
 					c.Namespace,
-					port,
+					portPair,
 					readyChan,
 					childCtx.Done(),
 				)
@@ -232,7 +236,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, port string) error {
 				}
 				if strings.Contains(err.Error(), "unable to listen on any of the requested ports") ||
 					strings.Contains(err.Error(), "address already in use") {
-					log.Errorf("port %s already in use, needs to release it manually", port)
+					log.Errorf("port %s already in use, needs to release it manually", portPair)
 					time.Sleep(time.Second * 5)
 				} else {
 					log.Debugf("port-forward occurs error, err: %v, retrying", err)
@@ -247,7 +251,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, port string) error {
 	case err := <-errChan:
 		return err
 	case <-readyChan:
-		log.Info("port forward ready")
+		log.Infof("port forward %s ready", portPair)
 		return nil
 	}
 }
@@ -576,7 +580,7 @@ func Run(ctx context.Context, servers []core.Server) error {
 			for {
 				select {
 				case <-ctx.Done():
-					return nil
+					return ctx.Err()
 				default:
 				}
 

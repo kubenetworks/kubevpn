@@ -229,7 +229,7 @@ func (d *Device) parseIPHeader() {
 			continue
 		}
 
-		log.Debugf("[tun] %s --> %s", e.src, e.dst)
+		log.Debugf("[tun] %s --> %s, length: %d", e.src, e.dst, e.length)
 		d.tunInbound <- e
 	}
 }
@@ -370,7 +370,7 @@ func (d *Device) Start(ctx context.Context) {
 	}
 	go d.tunInboundHandler(d.tunInbound, d.tunOutbound)
 	go d.writeToTun()
-	//go heartbeats(d.tunInbound)
+	go heartbeats(d.tunInbound)
 
 	select {
 	case err := <-d.chExit:

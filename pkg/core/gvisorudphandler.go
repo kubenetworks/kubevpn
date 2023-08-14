@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,17 +13,17 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
-type GvisorFakeUDPTunnelConnector struct {
+type gvisorUDPOverTCPTunnelConnector struct {
 	Id stack.TransportEndpointID
 }
 
 func GvisorUDPOverTCPTunnelConnector(endpointID stack.TransportEndpointID) Connector {
-	return &GvisorFakeUDPTunnelConnector{
+	return &gvisorUDPOverTCPTunnelConnector{
 		Id: endpointID,
 	}
 }
 
-func (c *GvisorFakeUDPTunnelConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
+func (c *gvisorUDPOverTCPTunnelConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
 	switch con := conn.(type) {
 	case *net.TCPConn:
 		err := con.SetNoDelay(true)
@@ -52,31 +51,27 @@ func GvisorUDPHandler() Handler {
 func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
 	log.Debugf("[TUN-UDP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
-	func(conn net.Conn) {
-		defer conn.Close()
-		// 1, get proxy info
-		endpointID, err := ParseProxyInfo(conn)
-		if err != nil {
-			log.Warningf("[TUN-UDP] ERROR Failed to parse proxy info: %v", err)
-			return
-		}
-		log.Infof("[TUN-UDP] Info: LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
-			endpointID.LocalPort, endpointID.LocalAddress.String(), endpointID.RemotePort, endpointID.RemoteAddress.String(),
-		)
-		// 2, dial proxy
-		var dial *net.UDPConn
-		// todo 发送到 localhost:8422 ? 🤔
-		addr := &net.UDPAddr{
-			IP:   endpointID.LocalAddress.AsSlice(),
-			Port: int(endpointID.LocalPort),
-		}
-		dial, err = net.DialUDP("udp", nil, addr)
-		if err != nil {
-			log.Warningln(err)
-			return
-		}
-		h.HandleInner(ctx, tcpConn, dial)
-	}(tcpConn)
+	// 1, get proxy info
+	endpointID, err := ParseProxyInfo(tcpConn)
+	if err != nil {
+		log.Warningf("[TUN-UDP] Error: Failed to parse proxy info: %v", err)
+		return
+	}
+	log.Debugf("[TUN-UDP] Debug: LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
+		endpointID.LocalPort, endpointID.LocalAddress.String(), endpointID.RemotePort, endpointID.RemoteAddress.String(),
+	)
+	// 2, dial proxy
+	addr := &net.UDPAddr{
+		IP:   endpointID.LocalAddress.AsSlice(),
+		Port: int(endpointID.LocalPort),
+	}
+	var remote *net.UDPConn
+	remote, err = net.DialUDP("udp", nil, addr)
+	if err != nil {
+		log.Errorf("[TUN-UDP] Error: failed to connect addr %s: %v", addr.String(), err)
+		return
+	}
+	handle(ctx, tcpConn, remote)
 }
 
 // fake udp connect over tcp
@@ -93,7 +88,7 @@ func newGvisorFakeUDPTunnelConnOverTCP(ctx context.Context, conn net.Conn) (net.
 func (c *gvisorFakeUDPTunnelConn) Read(b []byte) (int, error) {
 	select {
 	case <-c.ctx.Done():
-		return 0, errors.New("closed connection")
+		return 0, c.ctx.Err()
 	default:
 		dgram, err := readDatagramPacket(c.Conn, b)
 		if err != nil {
@@ -156,10 +151,9 @@ func copyPacketData(dst, src net.PacketConn, to net.Addr, timeout time.Duration)
 	}
 }
 
-func (h *gvisorUDPHandler) HandleInner(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
+func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	defer udpConn.Close()
-	log.Debugf("[TUN-UDP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
-	log.Debugf("[TUN-UDP] udp-tun %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
+	log.Debugf("[TUN-UDP] Debug: %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 	errChan := make(chan error, 2)
 	go func() {
 		b := config.LPool.Get().([]byte)
@@ -168,22 +162,22 @@ func (h *gvisorUDPHandler) HandleInner(ctx context.Context, tcpConn net.Conn, ud
 		for {
 			dgram, err := readDatagramPacket(tcpConn, b[:])
 			if err != nil {
-				log.Debugf("[TUN-UDP] %s -> 0 : %v", tcpConn.RemoteAddr(), err)
+				log.Debugf("[TUN-UDP] Debug: %s -> 0 : %v", tcpConn.RemoteAddr(), err)
 				errChan <- err
 				return
 			}
 			if dgram.DataLength == 0 {
-				log.Debugf("[TUN-UDP] length is zero")
+				log.Debugf("[TUN-UDP] Error: length is zero")
 				errChan <- fmt.Errorf("length of read packet is zero")
 				return
 			}
 
 			if _, err = udpConn.Write(dgram.Data); err != nil {
-				log.Debugf("[TUN-UDP] udp-tun %s -> %s : %s", tcpConn.RemoteAddr(), Server8422, err)
+				log.Debugf("[TUN-UDP] Error: %s -> %s : %s", tcpConn.RemoteAddr(), Server8422, err)
 				errChan <- err
 				return
 			}
-			log.Debugf("[TUN-UDP] udp-tun %s >>> %s length: %d", tcpConn.RemoteAddr(), Server8422, dgram.DataLength)
+			log.Debugf("[TUN-UDP] Debug: %s >>> %s length: %d", tcpConn.RemoteAddr(), Server8422, dgram.DataLength)
 		}
 	}()
 
@@ -194,12 +188,12 @@ func (h *gvisorUDPHandler) HandleInner(ctx context.Context, tcpConn net.Conn, ud
 		for {
 			n, _, err := udpConn.ReadFrom(b[:])
 			if err != nil {
-				log.Debugf("[TUN-UDP] %s : %s", tcpConn.RemoteAddr(), err)
+				log.Debugf("[TUN-UDP] Error: %s : %s", tcpConn.RemoteAddr(), err)
 				errChan <- err
 				return
 			}
 			if n == 0 {
-				log.Debugf("[TUN-UDP] length is zero")
+				log.Debugf("[TUN-UDP] Error: length is zero")
 				errChan <- fmt.Errorf("length of read packet is zero")
 				return
 			}
@@ -207,17 +201,17 @@ func (h *gvisorUDPHandler) HandleInner(ctx context.Context, tcpConn net.Conn, ud
 			// pipe from peer to tunnel
 			dgram := newDatagramPacket(b[:n])
 			if err = dgram.Write(tcpConn); err != nil {
-				log.Debugf("[TUN-UDP] udp-tun %s <- %s : %s", tcpConn.RemoteAddr(), dgram.Addr(), err)
+				log.Debugf("[TUN-UDP] Error: %s <- %s : %s", tcpConn.RemoteAddr(), dgram.Addr(), err)
 				errChan <- err
 				return
 			}
-			log.Debugf("[TUN-UDP] udp-tun %s <<< %s length: %d", tcpConn.RemoteAddr(), dgram.Addr(), len(dgram.Data))
+			log.Debugf("[TUN-UDP] Debug: %s <<< %s length: %d", tcpConn.RemoteAddr(), dgram.Addr(), len(dgram.Data))
 		}
 	}()
 	err := <-errChan
 	if err != nil {
-		log.Error(err)
+		log.Debugf("[TUN-UDP] Error: %v", err)
 	}
-	log.Debugf("[TUN-UDP] udp-tun %s >-< %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
+	log.Debugf("[TUN-UDP] Debug: %s >-< %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 	return
 }
