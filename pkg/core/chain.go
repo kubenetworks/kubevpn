@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"net"
 )
@@ -61,7 +60,7 @@ func (c *Chain) dial(ctx context.Context) (net.Conn, error) {
 func (*Chain) resolve(addr string) string {
 	if host, port, err := net.SplitHostPort(addr); err == nil {
 		if ips, err := net.LookupIP(host); err == nil && len(ips) > 0 {
-			return fmt.Sprintf("%s:%s", ips[0].String(), port)
+			return net.JoinHostPort(ips[0].String(), port)
 		}
 	}
 	return addr

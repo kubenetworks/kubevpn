@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"math/rand"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -102,7 +102,7 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, r *miekgdns.Msg) {
 				msg.Ns = nil
 				msg.Extra = nil
 				msg.Id = uint16(rand.Intn(math.MaxUint16 + 1))
-				answer, _, err := s.client.ExchangeContext(context.Background(), &msg, fmt.Sprintf("%s:%s", dnsAddr, s.forwardDNS.Port))
+				answer, _, err := s.client.ExchangeContext(context.Background(), &msg, net.JoinHostPort(dnsAddr, s.forwardDNS.Port))
 
 				if err == nil && len(answer.Answer) != 0 {
 					s.dnsCache.Add(originName, name, time.Hour*24*365*100) // never expire

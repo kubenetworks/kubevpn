@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"errors"
 	"net"
 	"sync"
 	"time"
@@ -119,7 +118,7 @@ func newFakeUDPTunnelConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, 
 func (c *fakeUDPTunnelConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	select {
 	case <-c.ctx.Done():
-		return 0, nil, errors.New("closed connection")
+		return 0, nil, c.ctx.Err()
 	default:
 		dgram, err := readDatagramPacket(c.Conn, b)
 		if err != nil {

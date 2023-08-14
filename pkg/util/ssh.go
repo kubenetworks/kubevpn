@@ -245,7 +245,7 @@ func getBastion(name string) *SshConfig {
 			config.Keyfile = value
 		}
 	}
-	config.Addr = fmt.Sprintf("%s:%s", host, port)
+	config.Addr = net.JoinHostPort(host, port)
 	return &config
 }
 
