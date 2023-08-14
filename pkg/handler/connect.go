@@ -212,8 +212,10 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair string) error
 				podName := podList[0].GetName()
 				// if port-forward occurs error, check pod is deleted or not, speed up fail
 				runtime.ErrorHandlers = []func(error){func(err error) {
-					log.Debugf("port-forward occurs error, err: %v, retrying", err)
-					cancelFunc()
+					if !strings.Contains(err.Error(), "an error occurred forwarding") {
+						log.Debugf("port-forward occurs error, err: %v, retrying", err)
+						cancelFunc()
+					}
 				}}
 				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
 				go checkPodStatus(childCtx, cancelFunc, podName, podInterface)
