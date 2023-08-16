@@ -73,6 +73,10 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 					return err
 				}
 			}
+			// not support temporally
+			if duplicateOptions.Engine == config.EngineGvisor {
+				return fmt.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
+			}
 			return handler.SshJump(sshConf, cmd.Flags())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -92,6 +96,7 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 				Namespace: duplicateOptions.Namespace,
 				Workloads: args,
 				ExtraCIDR: duplicateOptions.ExtraCIDR,
+				Engine:    duplicateOptions.Engine,
 			}
 			if err := connectOptions.InitClient(f); err != nil {
 				return err
@@ -125,6 +130,7 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringArrayVar(&duplicateOptions.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
 	cmd.Flags().StringArrayVar(&duplicateOptions.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
 	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
+	cmd.Flags().StringVar((*string)(&duplicateOptions.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
 
 	cmd.Flags().StringVar(&duplicateOptions.TargetImage, "target-image", "", "Duplicate container use this image to startup container, if not special, use origin origin image")
 	cmd.Flags().StringVar(&duplicateOptions.TargetContainer, "target-container", "", "Duplicate container use special image to startup this container, if not special, use origin origin image")

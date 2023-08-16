@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"net"
+	"os"
 	"sync"
 
 	"github.com/google/gopacket/layers"
@@ -92,8 +93,10 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 		}()
 		// tun --> dispatcher
 		go func() {
+			// full(all use gvisor), mix(cluster network use gvisor), raw(not use gvisor)
+			mode := config.Engine(os.Getenv(config.EnvKubeVPNTransportEngine))
 			for {
-				bytes := config.LPool.Get().([]byte)
+				bytes := config.LPool.Get().([]byte)[:]
 				read, err := e.tun.Read(bytes[:])
 				if err != nil {
 					log.Warningln(err)
@@ -132,12 +135,15 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 					src = ipHeader.Src
 					dst = ipHeader.Dst
 				} else {
-					log.Errorf("[TUN-gvisor] unknown packet version %d", version)
+					log.Debugf("[TUN-gvisor] unknown packet version %d", version)
 					continue
 				}
-				// if is tcp use gvisor
-				if (ipProtocol == int(layers.IPProtocolUDP) || ipProtocol == int(layers.IPProtocolTCP)) &&
-					(!config.CIDR.Contains(dst) && !config.CIDR6.Contains(dst)) {
+				// only tcp and udp needs to distinguish transport engine
+				//   gvisor: all network use gvisor
+				//   mix: cluster network use gvisor, diy network use raw
+				//   raw: all network use raw
+				if (ipProtocol == int(layers.IPProtocolUDP) || ipProtocol == int(layers.IPProtocolUDPLite) || ipProtocol == int(layers.IPProtocolTCP)) &&
+					(mode == config.EngineGvisor || (mode == config.EngineMix && (!config.CIDR.Contains(dst) && !config.CIDR6.Contains(dst)))) {
 					pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 						ReserveHeaderBytes: 0,
 						Payload:            buffer.MakeWithData(bytes[:read]),
@@ -157,7 +163,7 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 				_, err := e.tun.Write(elem.Data()[:elem.Length()])
 				config.LPool.Put(elem.Data()[:])
 				if err != nil {
-					panic(err)
+					log.Fatalf("[TUN] Fatal: failed to write data to tun device: %v", err)
 				}
 			}
 		}()

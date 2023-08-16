@@ -73,6 +73,7 @@ type ConnectOptions struct {
 	ExtraCIDR   []string
 	ExtraDomain []string
 	UseLocalDNS bool
+	Engine      config.Engine
 
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient
@@ -137,6 +138,7 @@ func Rollback(f cmdutil.Factory, ns, workload string) {
 }
 
 func (c *ConnectOptions) DoConnect() (err error) {
+	_ = os.Setenv(config.EnvKubeVPNTransportEngine, string(c.Engine))
 	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
 	if err = c.dhcp.initDHCP(ctx); err != nil {
 		return
@@ -154,24 +156,22 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	if err = c.createRemoteInboundPod(ctx); err != nil {
 		return
 	}
-	port := util.GetAvailableTCPPortOrDie()
-	if err = c.portForward(ctx, fmt.Sprintf("%d:10800", port)); err != nil {
-		return
-	}
-	tcpForwardPort := util.GetAvailableTCPPortOrDie()
-	if err = c.portForward(ctx, fmt.Sprintf("%d:10801", tcpForwardPort)); err != nil {
-		return
-	}
-	udpForwardPort := util.GetAvailableTCPPortOrDie()
-	if err = c.portForward(ctx, fmt.Sprintf("%d:10802", udpForwardPort)); err != nil {
+	rawTCPForwardPort := util.GetAvailableTCPPortOrDie()
+	gvisorTCPForwardPort := util.GetAvailableTCPPortOrDie()
+	gvisorUDPForwardPort := util.GetAvailableTCPPortOrDie()
+	if err = c.portForward(ctx, []string{
+		fmt.Sprintf("%d:10800", rawTCPForwardPort),
+		fmt.Sprintf("%d:10801", gvisorTCPForwardPort),
+		fmt.Sprintf("%d:10802", gvisorUDPForwardPort),
+	}); err != nil {
 		return
 	}
 	if util.IsWindows() {
 		driver.InstallWireGuardTunDriver()
 	}
-	forward := fmt.Sprintf("tcp://127.0.0.1:%d", port)
-	core.GvisorTCPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", tcpForwardPort)
-	core.GvisorUDPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", udpForwardPort)
+	forward := fmt.Sprintf("tcp://127.0.0.1:%d", rawTCPForwardPort)
+	core.GvisorTCPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
+	core.GvisorUDPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorUDPForwardPort)
 	if err = c.startLocalTunServe(ctx, forward); err != nil {
 		return
 	}
@@ -191,7 +191,7 @@ func (c *ConnectOptions) DoConnect() (err error) {
 }
 
 // detect pod is delete event, if pod is deleted, needs to redo port-forward immediately
-func (c *ConnectOptions) portForward(ctx context.Context, portPair string) error {
+func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) error {
 	var readyChan = make(chan struct{}, 1)
 	var errChan = make(chan error, 1)
 	podInterface := c.clientset.CoreV1().Pods(c.Namespace)
@@ -253,7 +253,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair string) error
 	case err := <-errChan:
 		return err
 	case <-readyChan:
-		log.Infof("port forward %s ready", portPair)
+		log.Info("port forward ready")
 		return nil
 	}
 }

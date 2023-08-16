@@ -9,6 +9,8 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
 type gvisorTCPTunnelConnector struct {
@@ -49,7 +51,7 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	// 1, get proxy info
 	endpointID, err := ParseProxyInfo(tcpConn)
 	if err != nil {
-		log.Errorf("[TUN-TCP] Error: failed to parse proxy info: %v", err)
+		log.Debugf("[TUN-TCP] Error: failed to parse proxy info: %v", err)
 		return
 	}
 	log.Debugf("[TUN-TCP] Debug: LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
@@ -61,24 +63,28 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	var remote net.Conn
 	remote, err = net.DialTimeout("tcp", net.JoinHostPort(host, port), time.Second*5)
 	if err != nil {
-		log.Errorf("[TUN-TCP] Error: failed to connect addr %s: %v", net.JoinHostPort(host, port), err)
+		log.Debugf("[TUN-TCP] Error: failed to connect addr %s: %v", net.JoinHostPort(host, port), err)
 		return
 	}
 
 	errChan := make(chan error, 2)
 	go func() {
-		written, err2 := io.Copy(remote, tcpConn)
-		log.Errorf("[TUN-TCP] Debug: write length %d data to remote", written)
+		i := config.LPool.Get().([]byte)[:]
+		defer config.LPool.Put(i[:])
+		written, err2 := io.CopyBuffer(remote, tcpConn, i)
+		log.Debugf("[TUN-TCP] Debug: write length %d data to remote", written)
 		errChan <- err2
 	}()
 	go func() {
-		written, err2 := io.Copy(tcpConn, remote)
-		log.Errorf("[TUN-TCP] Debug: read length %d data from remote", written)
+		i := config.LPool.Get().([]byte)[:]
+		defer config.LPool.Put(i[:])
+		written, err2 := io.CopyBuffer(tcpConn, remote, i)
+		log.Debugf("[TUN-TCP] Debug: read length %d data from remote", written)
 		errChan <- err2
 	}()
 	err = <-errChan
 	if err != nil && !errors.Is(err, io.EOF) {
-		log.Errorf("[TUN-TCP] Error: dsiconnect: %s >-<: %s: %v", tcpConn.LocalAddr(), remote.RemoteAddr(), err)
+		log.Debugf("[TUN-TCP] Error: dsiconnect: %s >-<: %s: %v", tcpConn.LocalAddr(), remote.RemoteAddr(), err)
 	}
 }
 

@@ -32,13 +32,13 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 		for {
 			packetConn, err := getRemotePacketConn(ctx, h.chain)
 			if err != nil {
-				log.Debugf("[tun] %s - %s: %s", tun.LocalAddr(), remoteAddr, err)
+				log.Debugf("[tun-client] %s - %s: %s", tun.LocalAddr(), remoteAddr, err)
 				time.Sleep(time.Second * 2)
 				continue
 			}
 			err = transportTunClient(ctx, tunInbound, tunOutbound, packetConn, remoteAddr)
 			if err != nil {
-				log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
+				log.Debugf("[tun-client] %s: %v", tun.LocalAddr(), err)
 			}
 		}
 	})
@@ -89,7 +89,7 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 
 	go func() {
 		for {
-			b := config.LPool.Get().([]byte)
+			b := config.LPool.Get().([]byte)[:]
 			n, _, err := packetConn.ReadFrom(b[:])
 			if err != nil {
 				errChan <- err
