@@ -87,6 +87,9 @@ const (
 	// startup by KubeVPN
 	EnvStartSudoKubeVPNByKubeVPN = "DEPTH_SIGNED_BY_NAISON"
 	EnvSSHJump                   = "SSH_JUMP_BY_KUBEVPN"
+
+	// transport mode
+	EnvKubeVPNTransportEngine = "EnvKubeVPNTransportEngine"
 )
 
 var (
@@ -151,3 +154,11 @@ var SPool = sync.Pool{
 		return make([]byte, 2)
 	},
 }
+
+type Engine string
+
+const (
+	EngineGvisor Engine = "gvisor"
+	EngineMix    Engine = "mix"
+	EngineRaw    Engine = "raw"
+)

@@ -73,7 +73,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	}(tcpConn.LocalAddr())
 
 	for {
-		b := config.LPool.Get().([]byte)
+		b := config.LPool.Get().([]byte)[:]
 		dgram, err := readDatagramPacketServer(tcpConn, b[:])
 		if err != nil {
 			log.Debugf("[tcpserver] %s -> 0 : %v", tcpConn.RemoteAddr(), err)

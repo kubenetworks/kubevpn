@@ -68,6 +68,7 @@ type Options struct {
 	ExtraCIDR     []string
 	ExtraDomain   []string
 	ConnectMode   ConnectMode
+	Engine        config.Engine
 
 	// docker options
 	DockerImage string
@@ -374,6 +375,7 @@ func DoDev(devOptions *Options, flags *pflag.FlagSet, f cmdutil.Factory) error {
 		Workloads:   []string{devOptions.Workload},
 		ExtraCIDR:   devOptions.ExtraCIDR,
 		ExtraDomain: devOptions.ExtraDomain,
+		Engine:      devOptions.Engine,
 	}
 	cli, dockerCli, err := GetClient()
 	if err != nil {

@@ -183,7 +183,7 @@ type Device struct {
 
 func (d *Device) readFromTun() {
 	for {
-		b := config.LPool.Get().([]byte)
+		b := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(b[:])
 		if err != nil {
 			select {
@@ -472,7 +472,7 @@ func (p *Peer) sendErr(err error) {
 
 func (p *Peer) readFromConn() {
 	for {
-		b := config.LPool.Get().([]byte)
+		b := config.LPool.Get().([]byte)[:]
 		n, srcAddr, err := p.conn.ReadFrom(b[:])
 		if err != nil {
 			p.sendErr(err)

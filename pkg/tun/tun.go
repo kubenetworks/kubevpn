@@ -83,7 +83,7 @@ type tunConn struct {
 
 func (c *tunConn) Read(b []byte) (n int, err error) {
 	offset := device.MessageTransportHeaderSize
-	bytes := config.LPool.Get().([]byte)
+	bytes := config.LPool.Get().([]byte)[:]
 	defer config.LPool.Put(bytes[:])
 
 	var size int
@@ -101,7 +101,7 @@ func (c *tunConn) Write(b []byte) (n int, err error) {
 	if len(b) < device.MessageTransportHeaderSize {
 		return 0, err
 	}
-	bytes := config.LPool.Get().([]byte)
+	bytes := config.LPool.Get().([]byte)[:]
 	defer config.LPool.Put(bytes[:])
 
 	copy(bytes[device.MessageTransportOffsetContent:], b)

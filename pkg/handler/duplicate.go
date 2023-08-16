@@ -45,6 +45,7 @@ type DuplicateOptions struct {
 	Workloads   []string
 	ExtraCIDR   []string
 	ExtraDomain []string
+	Engine      config.Engine
 
 	TargetKubeconfig       string
 	TargetNamespace        string

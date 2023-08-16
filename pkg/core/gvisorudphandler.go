@@ -68,7 +68,7 @@ func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	var remote *net.UDPConn
 	remote, err = net.DialUDP("udp", nil, addr)
 	if err != nil {
-		log.Errorf("[TUN-UDP] Error: failed to connect addr %s: %v", addr.String(), err)
+		log.Debugf("[TUN-UDP] Error: failed to connect addr %s: %v", addr.String(), err)
 		return
 	}
 	handle(ctx, tcpConn, remote)
@@ -156,7 +156,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	log.Debugf("[TUN-UDP] Debug: %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 	errChan := make(chan error, 2)
 	go func() {
-		b := config.LPool.Get().([]byte)
+		b := config.LPool.Get().([]byte)[:]
 		defer config.LPool.Put(b[:])
 
 		for {
@@ -182,7 +182,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	}()
 
 	go func() {
-		b := config.LPool.Get().([]byte)
+		b := config.LPool.Get().([]byte)[:]
 		defer config.LPool.Put(b[:])
 
 		for {
