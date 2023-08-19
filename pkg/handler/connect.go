@@ -927,18 +927,6 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 		return err
 	}
 
-	ctx2, cancelFunc := context.WithTimeout(ctx, time.Second*10)
-	wait.UntilWithContext(ctx2, func(context.Context) {
-		for _, ip := range ips {
-			pong, err2 := util.Ping(ip)
-			if err2 == nil && pong {
-				ips = []string{ip}
-				cancelFunc()
-				return
-			}
-		}
-	}, time.Millisecond*50)
-
 	var r routing.Router
 	r, err = netroute.New()
 	if err != nil {
@@ -972,15 +960,43 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 		}
 	}
 
-	ticker := time.NewTicker(time.Second)
+	// 1) use dig +short query, if ok, just return
+	podList, err := c.GetRunningPodList()
+	if err != nil {
+		return err
+	}
+	for _, domain := range c.ExtraDomain {
+		ip, err := util.Shell(c.clientset, c.restclient, c.config, podList[0].Name, config.ContainerSidecarVPN, c.Namespace, []string{"dig", "+short", domain})
+		if err != nil || net.ParseIP(ip) == nil {
+			goto RetryWithDNSClient
+		}
+		addRouteFunc(domain, ip)
+		c.extraHost = append(c.extraHost, dns.Entry{IP: net.ParseIP(ip).String(), Domain: domain})
+	}
+	return nil
+
+RetryWithDNSClient:
+	// 2) wait until can ping dns server ip ok
+	ctx2, cancelFunc := context.WithTimeout(ctx, time.Second*10)
+	wait.UntilWithContext(ctx2, func(context.Context) {
+		for _, ip := range ips {
+			pong, err2 := util.Ping(ip)
+			if err2 == nil && pong {
+				ips = []string{ip}
+				cancelFunc()
+				return
+			}
+		}
+	}, time.Millisecond*50)
+
+	// 3) use nslookup to query dns at first, it will speed up mikdns query process
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	go func() {
 		for _, domain := range c.ExtraDomain {
-			domain := domain
-			go func() {
+			go func(domain string) {
 				for ; true; <-ticker.C {
 					func() {
-						// if use nslookup to query dns at first, it will speed up mikdns query process
 						subCtx, c2 := context.WithTimeout(ctx, time.Second*2)
 						defer c2()
 						cmd := exec.CommandContext(subCtx, "nslookup", domain, ips[0])
@@ -990,10 +1006,11 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 						_ = cmd.Wait()
 					}()
 				}
-			}()
+			}(domain)
 		}
 	}()
 
+	// 4) query with dns client
 	client := &miekgdns.Client{Net: "udp", Timeout: time.Second * 2, SingleInflight: true}
 	for _, domain := range c.ExtraDomain {
 		var success = false
