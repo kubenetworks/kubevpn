@@ -95,8 +95,8 @@ jobs:
           go-version: 1.19
           check-latest: true
           cache: true
-      - name: Setup Docker on macOS
-        uses: douglascamata/setup-docker-macos-action@v1-alpha
+      - name: Set up Docker
+        uses: crazy-max/ghaction-setup-docker@v1
 
       - name: Install minikube
         run: |
@@ -158,6 +158,19 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.19
+
+      - name: Set up Docker
+        uses: crazy-max/ghaction-setup-docker@v1
+      - run: |
+         dir C:\hostedtoolcache\windows\docker-stable\24.0.5\x64 
+         C:\hostedtoolcache\windows\docker-stable\24.0.5\x64\docker-proxy.exe --help
+         C:\hostedtoolcache\windows\docker-stable\24.0.5\x64\dockerd.exe --help
+         C:\hostedtoolcache\windows\docker-stable\24.0.5\x64\docker.exe --help
+         docker info --format '{{.OSType}}'
+      - run: |
+         choco install minikube
+         minikube start --driver=docker
+         choco install make
 
       - name: Build
         run: make kubevpn-windows-amd64
