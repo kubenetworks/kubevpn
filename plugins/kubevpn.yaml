@@ -18,7 +18,7 @@ spec:
         os: windows
         arch: amd64
     uri: https://github.com/KubeNetworks/kubevpn/releases/download/v1.1.36/kubevpn_v1.1.36_windows_amd64.zip
-    sha256: d106ab19f3c33b5da02abf22b28f56cd2c08856281823925ccc507d3e7da4071
+    sha256: 53cf4c316436127e59967cb2d74451a5c919185d27c58eda7f1d361add4ea34d
     files:
       - from: ./bin/kubevpn.exe
         to: .
@@ -30,7 +30,7 @@ spec:
         os: windows
         arch: arm64
     uri: https://github.com/KubeNetworks/kubevpn/releases/download/v1.1.36/kubevpn_v1.1.36_windows_arm64.zip
-    sha256: 1679d340d5c59a15f18bfe1d9645485fb0b124a088e9c849049fd97e3bce17c5
+    sha256: 07801a005ebbea9089e1e3d81ca3f6a4f08c9e33e35c352f4b668a4b6b585102
     files:
       - from: ./bin/kubevpn.exe
         to: .
@@ -42,7 +42,7 @@ spec:
         os: windows
         arch: 386
     uri: https://github.com/KubeNetworks/kubevpn/releases/download/v1.1.36/kubevpn_v1.1.36_windows_386.zip
-    sha256: 1f67d69aa97ebd13bf58063c817befd4f4675202e9a28c0b4ec0a533112a52d4
+    sha256: c235f6acd57752e53d46b9f1b826ab63dfa84eeea1bdeffdb08bb026c0471dff
     files:
       - from: ./bin/kubevpn.exe
         to: .
@@ -54,7 +54,7 @@ spec:
         os: linux
         arch: amd64
     uri: https://github.com/KubeNetworks/kubevpn/releases/download/v1.1.36/kubevpn_v1.1.36_linux_amd64.zip
-    sha256: 13b87eeca3fdf1a4493b58b04d1b295c11838e3addf43a566cb46d7501fd5924
+    sha256: 5945245f1904619da3f98134555f32910218acfe4c151d7131561d99188de455
     files:
       - from: ./bin/kubevpn
         to: .
@@ -66,7 +66,7 @@ spec:
         os: linux
         arch: arm64
     uri: https://github.com/KubeNetworks/kubevpn/releases/download/v1.1.36/kubevpn_v1.1.36_linux_arm64.zip
-    sha256: 05d6763b84430ac5b2293af11c26a108603162dbbfabf096841451cbf3ae0c63
+    sha256: 38476c1041672ebba15cd5a8a51be7ca6faf01b2c586ff8c196c6d6d3b21684a
     files:
       - from: ./bin/kubevpn
         to: .
@@ -78,7 +78,7 @@ spec:
         os: linux
         arch: 386
     uri: https://github.com/KubeNetworks/kubevpn/releases/download/v1.1.36/kubevpn_v1.1.36_linux_386.zip
-    sha256: 90bce1c91fd571891539615930672f8a0f2def798f1e07c5cf545d8c27f0e324
+    sha256: 049c34d0496a254917fada727ef1b41aefb06a131b1d8adead8d264c35838019
     files:
       - from: ./bin/kubevpn
         to: .
@@ -90,7 +90,7 @@ spec:
         os: darwin
         arch: amd64
     uri: https://github.com/KubeNetworks/kubevpn/releases/download/v1.1.36/kubevpn_v1.1.36_darwin_amd64.zip
-    sha256: 448153f18621e7708dd5506133f98e5ad18b758b714d11d5649411a536daed15
+    sha256: 6505ab4e26a02f4a132ca820e3f93fe47760767ee197da3f3008f48049158cc1
     files:
       - from: ./bin/kubevpn
         to: .
@@ -102,7 +102,7 @@ spec:
         os: darwin
         arch: arm64
     uri: https://github.com/KubeNetworks/kubevpn/releases/download/v1.1.36/kubevpn_v1.1.36_darwin_arm64.zip
-    sha256: 998c8b1efe5e67d7ce7528763f6a8ab6573f3d86298a2ebf2ce502abf3861492
+    sha256: bb1f627475e4283800102dc3e86281a6f36e5d72002ee4b723e2117ad0a1d5df
     files:
       - from: ./bin/kubevpn
         to: .
