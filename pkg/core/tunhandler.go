@@ -302,7 +302,7 @@ func heartbeats(in chan<- *DataElem) {
 					src, dst = srcIPv6, config.RouterIP6
 				}
 				in <- &DataElem{
-					data:   data,
+					data:   data[:],
 					length: length,
 					src:    src,
 					dst:    dst,
