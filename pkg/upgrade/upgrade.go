@@ -25,12 +25,12 @@ import (
 // 5) unzip to temp file
 // 6) check permission of putting new kubevpn back
 // 7) chmod +x, move old to /temp, move new to CURRENT_FOLDER
-func Main(current string, client *http.Client) error {
-	version, url, err := getManifest(client)
+func Main(current string, commit string, client *http.Client) error {
+	version, dcommit, url, err := getManifest(client)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("The latest version is: %s\n", version)
+	fmt.Printf("The latest version is: %s, commit: %s\n", version, dcommit)
 	var cVersion, dVersion *goversion.Version
 	cVersion, err = goversion.NewVersion(current)
 	if err != nil {
@@ -40,7 +40,7 @@ func Main(current string, client *http.Client) error {
 	if err != nil {
 		return err
 	}
-	if cVersion.GreaterThanOrEqual(dVersion) {
+	if cVersion.GreaterThan(dVersion) || (cVersion.Equal(dVersion) && commit == dcommit) {
 		fmt.Println("Already up to date, don't needs to upgrade")
 		return nil
 	}
@@ -117,7 +117,7 @@ func Main(current string, client *http.Client) error {
 	return err
 }
 
-func getManifest(httpCli *http.Client) (version string, url string, err error) {
+func getManifest(httpCli *http.Client) (version string, commit string, url string, err error) {
 	var resp *http.Response
 	resp, err = httpCli.Get("https://api.github.com/repos/KubeNetworks/kubevpn/releases/latest")
 	if err != nil {
@@ -137,6 +137,7 @@ func getManifest(httpCli *http.Client) (version string, url string, err error) {
 		return
 	}
 	version = m.TagName
+	commit = m.TargetCommitish
 	for _, asset := range m.Assets {
 		if strings.Contains(asset.Name, runtime.GOARCH) && strings.Contains(asset.Name, runtime.GOOS) {
 			url = asset.BrowserDownloadUrl

@@ -94,8 +94,9 @@ const (
 
 var (
 	// Image inject --ldflags -X
-	Image   = "docker.io/naison/kubevpn:latest"
-	Version = "latest"
+	Image     = "docker.io/naison/kubevpn:latest"
+	Version   = "latest"
+	GitCommit = ""
 
 	OriginImage = "docker.io/naison/kubevpn:" + Version
 )

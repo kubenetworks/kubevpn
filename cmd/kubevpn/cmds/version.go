@@ -15,7 +15,6 @@ import (
 // --ldflags -X
 var (
 	OsArch    = ""
-	GitCommit = ""
 	BuildTime = ""
 	Branch    = ""
 )
@@ -38,7 +37,7 @@ func CmdVersion(cmdutil.Factory) *cobra.Command {
 			fmt.Printf("    Version: %s\n", config.Version)
 			fmt.Printf("    Image: %s\n", config.Image)
 			fmt.Printf("    Branch: %s\n", Branch)
-			fmt.Printf("    Git commit: %s\n", GitCommit)
+			fmt.Printf("    Git commit: %s\n", config.GitCommit)
 			fmt.Printf("    Built time: %s\n", reformatDate(BuildTime))
 			fmt.Printf("    Built OS/Arch: %s\n", OsArch)
 			fmt.Printf("    Built Go version: %s\n", runtime.Version())
