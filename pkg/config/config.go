@@ -2,6 +2,8 @@ package config
 
 import (
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -99,6 +101,8 @@ var (
 	GitCommit = ""
 
 	OriginImage = "docker.io/naison/kubevpn:" + Version
+
+	DaemonPortPath string
 )
 
 var (
@@ -116,6 +120,8 @@ func init() {
 	RouterIP, CIDR, _ = net.ParseCIDR(innerIPv4Pool)
 	RouterIP6, CIDR6, _ = net.ParseCIDR(innerIPv6Pool)
 	DockerRouterIP, DockerCIDR, _ = net.ParseCIDR(dockerInnerIPv4Pool)
+	dir, _ := os.UserHomeDir()
+	DaemonPortPath = filepath.Join(dir, ".kubevpn", "daemon")
 }
 
 var Debug bool
