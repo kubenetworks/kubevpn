@@ -98,3 +98,7 @@ container-test: kubevpn-linux-amd64
 .PHONY: version
 version:
 	go run github.com/wencaiwulue/kubevpn/pkg/util/krew
+
+.PHONY: gen
+gen:
+	go generate ./...

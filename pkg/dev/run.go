@@ -32,7 +32,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -358,7 +357,7 @@ func terminal(c string, cli *command.DockerCli) error {
 // TransferImage
 // 1) if not special ssh config, just pull image and tag and push
 // 2) if special ssh config, pull image, tag image, save image and scp image to remote, load image and push
-func TransferImage(ctx context.Context, conf *util.SshConfig) error {
+func TransferImage(ctx context.Context, conf *util.SshConfig, from, to string) error {
 	cli, c, err := GetClient()
 	if err != nil {
 		return fmt.Errorf("failed to get docker client: %v", err)
@@ -367,22 +366,22 @@ func TransferImage(ctx context.Context, conf *util.SshConfig) error {
 	err = PullImage(ctx, &v12.Platform{
 		Architecture: "amd64",
 		OS:           "linux",
-	}, cli, c, config.OriginImage)
+	}, cli, c, from)
 	if err != nil {
 		return fmt.Errorf("failed to pull image: %v", err)
 	}
 
-	err = cli.ImageTag(ctx, config.OriginImage, config.Image)
+	err = cli.ImageTag(ctx, from, to)
 	if err != nil {
-		return fmt.Errorf("failed to tag image %s to %s: %v", config.OriginImage, config.Image, err)
+		return fmt.Errorf("failed to tag image %s to %s: %v", from, to, err)
 	}
 
 	// use it if sshConfig is not empty
 	if conf.ConfigAlias == "" && conf.Addr == "" {
 		var distributionRef reference.Named
-		distributionRef, err = reference.ParseNormalizedNamed(config.Image)
+		distributionRef, err = reference.ParseNormalizedNamed(to)
 		if err != nil {
-			return fmt.Errorf("can not parse image name %s: %v", config.Image, err)
+			return fmt.Errorf("can not parse image name %s: %v", to, err)
 		}
 		var imgRefAndAuth trust.ImageRefAndAuth
 		imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, nil, image.AuthResolver(c), distributionRef.String())
@@ -396,12 +395,12 @@ func TransferImage(ctx context.Context, conf *util.SshConfig) error {
 		}
 		requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(c, imgRefAndAuth.RepoInfo().Index, "push")
 		var readCloser io.ReadCloser
-		readCloser, err = cli.ImagePush(ctx, config.Image, types.ImagePushOptions{
+		readCloser, err = cli.ImagePush(ctx, to, types.ImagePushOptions{
 			RegistryAuth:  encodedAuth,
 			PrivilegeFunc: requestPrivilege,
 		})
 		if err != nil {
-			err = fmt.Errorf("can not push image %s, err: %v", config.Image, err)
+			err = fmt.Errorf("can not push image %s, err: %v", to, err)
 			return err
 		}
 		defer readCloser.Close()
@@ -417,7 +416,7 @@ func TransferImage(ctx context.Context, conf *util.SshConfig) error {
 
 	// transfer image to remote
 	var responseReader io.ReadCloser
-	responseReader, err = cli.ImageSave(ctx, []string{config.Image})
+	responseReader, err = cli.ImageSave(ctx, []string{to})
 	if err != nil {
 		return err
 	}
@@ -426,7 +425,7 @@ func TransferImage(ctx context.Context, conf *util.SshConfig) error {
 	if err != nil {
 		return err
 	}
-	log.Infof("saving image %s to temp file %s", config.Image, file.Name())
+	log.Infof("saving image %s to temp file %s", to, file.Name())
 	if _, err = io.Copy(file, responseReader); err != nil {
 		return err
 	}
@@ -435,17 +434,17 @@ func TransferImage(ctx context.Context, conf *util.SshConfig) error {
 	}
 	defer os.Remove(file.Name())
 
-	log.Infof("Transfering image %s", config.Image)
+	log.Infof("Transfering image %s", to)
 	err = util.SCP(conf, file.Name(), []string{
 		fmt.Sprintf(
 			"(docker load image -i kubevpndir/%s && docker push %s) || (nerdctl image load -i kubevpndir/%s && nerdctl image push %s)",
-			filepath.Base(file.Name()), config.Image,
-			filepath.Base(file.Name()), config.Image,
+			filepath.Base(file.Name()), to,
+			filepath.Base(file.Name()), to,
 		),
 	}...)
 	if err != nil {
 		return err
 	}
-	log.Infof("Loaded image: %s", config.Image)
+	log.Infof("Loaded image: %s", to)
 	return nil
 }

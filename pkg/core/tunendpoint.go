@@ -81,6 +81,11 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 	e.once.Do(func() {
 		go func() {
 			for {
+				select {
+				case <-e.ctx.Done():
+					return
+				default:
+				}
 				read := e.endpoint.ReadContext(e.ctx)
 				if !read.IsNil() {
 					bb := read.ToView().AsSlice()
@@ -100,7 +105,6 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 				read, err := e.tun.Read(bytes[:])
 				if err != nil {
 					log.Warningln(err)
-					panic(err)
 					return
 				}
 				if read == 0 {

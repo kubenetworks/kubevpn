@@ -2,11 +2,11 @@ package action
 
 import (
 	"context"
+	"errors"
 	"io"
 	defaultlog "log"
 	"os"
 	"runtime"
-	"syscall"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -39,20 +39,30 @@ func newWarp(server rpc.Daemon_ConnectServer) io.Writer {
 	return &warp{server: server}
 }
 
-func InitFactory(kubeconfig string, ns string) cmdutil.Factory {
+func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
 	configFlags.WrapConfigFn = func(c *rest.Config) *rest.Config {
 		if path, ok := os.LookupEnv(config.EnvSSHJump); ok {
-			kubeconfigBytes, err := os.ReadFile(path)
+			bytes, err := os.ReadFile(path)
 			cmdutil.CheckErr(err)
 			var conf *restclient.Config
-			conf, err = clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+			conf, err = clientcmd.RESTConfigFromKubeConfig(bytes)
 			cmdutil.CheckErr(err)
 			return conf
 		}
 		return c
 	}
-	configFlags.KubeConfig = pointer.String(kubeconfig)
+	// todo optimize here
+	temp, err := os.CreateTemp("", "*.json")
+	if err != nil {
+		return nil
+	}
+	temp.Close()
+	err = os.WriteFile(temp.Name(), []byte(kubeconfigBytes), os.ModePerm)
+	if err != nil {
+		return nil
+	}
+	configFlags.KubeConfig = pointer.String(temp.Name())
 	configFlags.Namespace = pointer.String(ns)
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
 	return cmdutil.NewFactory(matchVersionFlags)
@@ -61,8 +71,14 @@ func InitFactory(kubeconfig string, ns string) cmdutil.Factory {
 func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) error {
 	out := newWarp(resp)
 	log.SetOutput(out)
-	svr.timestamp = time.Now()
-	var connect = &handler.ConnectOptions{
+	ctx := context.Background()
+	if !svr.t.IsZero() {
+		log.Debugf("already connect to kubeconfig: %s, namespace: %s", "", req.Namespace)
+		// todo define already connect error?
+		return errors.New("already connected")
+	}
+	svr.t = time.Now()
+	svr.connect = &handler.ConnectOptions{
 		Namespace:   req.Namespace,
 		Headers:     req.Headers,
 		Workloads:   req.Workloads,
@@ -85,7 +101,8 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	util.InitLogger(config.Debug)
 	defaultlog.Default().SetOutput(io.Discard)
 	if transferImage {
-		if err := dev.TransferImage(context.Background(), sshConf); err != nil {
+		err := dev.TransferImage(ctx, sshConf, config.OriginImage, config.Image)
+		if err != nil {
 			return err
 		}
 	}
@@ -94,13 +111,13 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		return err
 	}
 	runtime.GOMAXPROCS(0)
-	err = connect.InitClient(InitFactory(req.Kubeconfig, req.Namespace))
+	err = svr.connect.InitClient(InitFactory(req.KubeconfigBytes, req.Namespace))
 	if err != nil {
 		return err
 	}
-	if err = connect.DoConnect(); err != nil {
+	if err = svr.connect.DoConnect(ctx); err != nil {
 		log.Errorln(err)
-		handler.Cleanup(syscall.SIGQUIT)
+		svr.connect.Cleanup()
 	} else {
 		util.Print(out, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 	}
