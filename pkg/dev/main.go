@@ -218,9 +218,11 @@ func (l ConfigList) Remove(ctx context.Context, cli *client.Client) error {
 		if err != nil {
 			log.Debug(err)
 		}
-		err = cli.ContainerRemove(ctx, runConfig.containerName, types.ContainerRemoveOptions{Force: true})
-		if err != nil {
-			log.Debug(err)
+		if runConfig.hostConfig.AutoRemove {
+			err = cli.ContainerRemove(ctx, runConfig.containerName, types.ContainerRemoveOptions{Force: true})
+			if err != nil {
+				log.Debug(err)
+			}
 		}
 	}
 	i, err := cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{})
@@ -395,6 +397,16 @@ func DoDev(devOptions *Options, flags *pflag.FlagSet, f cmdutil.Factory) error {
 		if !inspect.State.Running {
 			return fmt.Errorf("container %s status is %s, expect is running, please make sure your outer docker name is correct", mode.ConnectedContainer(), inspect.State.Status)
 		}
+	} else if mode.IsDefault() && util.RunningInContainer() {
+		var hostname string
+		if hostname, err = os.Hostname(); err != nil {
+			return err
+		}
+		log.Infof("hostname %s", hostname)
+		err = devOptions.Copts.netMode.Set(fmt.Sprintf("container:%s", hostname))
+		if err != nil {
+			return err
+		}
 	}
 
 	if err = connect.InitClient(f); err != nil {
@@ -444,7 +456,7 @@ func DoDev(devOptions *Options, flags *pflag.FlagSet, f cmdutil.Factory) error {
 		}
 	case ConnectModeContainer:
 		var connectContainer *RunConfig
-		connectContainer, err = createConnectContainer(*devOptions, connect, path, err, cli, platform)
+		connectContainer, err = createConnectContainer(*devOptions, connect, path, cli, platform)
 		if err != nil {
 			return err
 		}
@@ -510,7 +522,7 @@ func DoDev(devOptions *Options, flags *pflag.FlagSet, f cmdutil.Factory) error {
 	return err
 }
 
-func createConnectContainer(devOptions Options, connect handler.ConnectOptions, path string, err error, cli *client.Client, platform *specs.Platform) (*RunConfig, error) {
+func createConnectContainer(devOptions Options, connect handler.ConnectOptions, path string, cli *client.Client, platform *specs.Platform) (*RunConfig, error) {
 	var entrypoint []string
 	if devOptions.NoProxy {
 		entrypoint = []string{"kubevpn", "connect", "-n", connect.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image}
@@ -593,8 +605,7 @@ func createConnectContainer(devOptions Options, connect handler.ConnectOptions, 
 	if newUUID, err := uuid.NewUUID(); err == nil {
 		suffix = strings.ReplaceAll(newUUID.String(), "-", "")[:5]
 	}
-	var kubevpnNetwork string
-	kubevpnNetwork, err = createKubevpnNetwork(context.Background(), cli)
+	kubevpnNetwork, err := createKubevpnNetwork(context.Background(), cli)
 	if err != nil {
 		return nil, err
 	}

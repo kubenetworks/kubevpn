@@ -45,7 +45,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 		kubevpn proxy service/productpage --headers a=1
 
 		# Connect to api-server behind of bastion host or ssh jump host and proxy kubernetes resource traffic into local PC
-		kubevpn proxy deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem --headers a=1
+		kubevpn proxy deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem --headers a=1
 
 		# it also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐

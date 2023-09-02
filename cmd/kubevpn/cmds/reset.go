@@ -29,7 +29,7 @@ func CmdReset(factory cmdutil.Factory) *cobra.Command {
 		  kubevpn reset -n test
 
 		# Reset cluster api-server behind of bastion host or ssh jump host
-		kubevpn reset --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem
+		kubevpn reset --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
 		# it also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐

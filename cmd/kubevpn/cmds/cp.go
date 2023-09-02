@@ -44,7 +44,7 @@ var cpExample = templates.Examples(i18n.T(`
 		kubectl cp <some-namespace>/<some-pod>:/tmp/foo /tmp/bar
 
 		# copy reverse proxy api-server behind of bastion host or ssh jump host
-		kubevpn cp deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem
+		kubevpn cp deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
 		# it also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐

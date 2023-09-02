@@ -72,7 +72,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 	id = create.ID
 	log.Infof("Created container: %s", name)
 	defer func() {
-		if err != nil {
+		if err != nil && runConfig.hostConfig.AutoRemove {
 			_ = cli.ContainerRemove(ctx, id, types.ContainerRemoveOptions{Force: true})
 		}
 	}()
@@ -139,7 +139,7 @@ func runFirst(ctx context.Context, runConfig *RunConfig, cli *apiclient.Client, 
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	defer func() {
-		if err != nil {
+		if err != nil && runConfig.hostConfig.AutoRemove {
 			_ = cli.ContainerRemove(ctx, id, types.ContainerRemoveOptions{Force: true})
 		}
 	}()

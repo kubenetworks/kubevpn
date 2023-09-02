@@ -281,7 +281,7 @@ Run the Kubernetes pod in the local Docker container, and cooperate with the ser
 the specified header to the local, or all the traffic to the local.
 
 ```shell
-➜  ~ kubevpn -n kube-system --headers a=1 -p 9080:9080 -p 80:80 dev deployment/authors
+➜  ~ kubevpn -n kube-system --headers a=1 -p 9080:9080 -p 80:80 -it --entrypoint sh dev deployment/authors
 got cidr from cache
 update ref count successfully
 traffic manager already exist, reuse it
@@ -348,6 +348,41 @@ de9e2f8ab57d        nginx:latest            "/docker-entrypoint.…"   5 seconds
 ➜  ~
 ```
 
+If you just want to start up a docker image, you can use simple way like this:
+
+```shell
+kubevpn --headers user=naison dev deployment/authors
+```
+
+Example：
+
+```shell
+root@27b74bde78b6:/app# kubevpn --headers user=naison dev deployment/authors
+hostname 27b74bde78b6
+got cidr from cache
+update ref count successfully
+traffic manager already exist, reuse it
+Waiting for deployment "authors" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "authors" rollout to finish: 1 old replicas are pending termination...
+deployment "authors" successfully rolled out
+port forward ready
+tunnel connected
+dns service ok
+tar: removing leading '/' from member names
+/tmp/3795398593261835591:/var/run/secrets/kubernetes.io/serviceaccount
+tar: Removing leading `/' from member names
+tar: Removing leading `/' from hard link targets
+/tmp/1432525228828829439:/var/run/secrets/kubernetes.io/serviceaccount
+Created container: nginx_default_kubevpn_08aba
+Wait container nginx_default_kubevpn_08aba to be running...
+Container nginx_default_kubevpn_08aba is running now
+WARNING: The requested image's platform (linux/amd64) does not match the detected host platform (linux/arm64/v8) and no specific platform was requested
+Created container: authors_default_kubevpn_08ab9
+2023/09/02 00:17:00 Start listening http port 9080 ...
+```
+
+Now the main process will hang up to show you log.
+
 If you want to specify the image to start the container locally, you can use the parameter `--docker-image`. When the
 image does not exist locally, it will be pulled from the corresponding mirror warehouse. If you want to specify startup
 parameters, you can use `--entrypoint` parameter, replace it with the command you want to execute, such
@@ -362,14 +397,13 @@ need to special parameter `--network` (inner docker) for sharing network and pid
 Example:
 
 ```shell
-docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v /Users/naison/.kube/config:/root/.kube/config naison/kubevpn:v1.1.35
+docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v ~/.kube/config:/root/.kube/config naison/kubevpn:v1.1.36
 ```
 
 ```shell
-➜  ~ docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -c authors -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v /Users/naison/.kube/vke:/root/.kube/config -v /Users/naison/Desktop/kubevpn/bin:/app naison/kubevpn:v1.1.35
-root@4d0c3c4eae2b:/# hostname
-4d0c3c4eae2b
-root@4d0c3c4eae2b:/# kubevpn -n kube-system --image naison/kubevpn:v1.1.35 --headers user=naison --network container:4d0c3c4eae2b --entrypoint /bin/bash dev deployment/authors
+➜  ~ docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -c authors -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v ~/.kube/vke:/root/.kube/config naison/kubevpn:v1.1.36
+root@4d0c3c4eae2b:/# 
+root@4d0c3c4eae2b:/# kubevpn -n kube-system --image naison/kubevpn:v1.1.36 --headers user=naison -it --entrypoint sh dev deployment/authors
 
 ----------------------------------------------------------------------------------
     Warn: Use sudo to execute command kubevpn can not use user env KUBECONFIG.
@@ -418,7 +452,7 @@ Container nginx_kube-system_kubevpn_c68e7 is running now
 /opt/microservices # ps -ef
 PID   USER     TIME  COMMAND
     1 root      0:00 {bash} /usr/bin/qemu-x86_64 /bin/bash /bin/bash
-   60 root      0:07 {kubevpn} /usr/bin/qemu-x86_64 kubevpn kubevpn dev deployment/authors -n kube-system --image naison/kubevpn:v1.1.35 --headers user=naison --parent
+   60 root      0:07 {kubevpn} /usr/bin/qemu-x86_64 kubevpn kubevpn dev deployment/authors -n kube-system --image naison/kubevpn:v1.1.36 --headers user=naison --parent
    73 root      0:00 {tail} /usr/bin/qemu-x86_64 /usr/bin/tail tail -f /dev/null
    80 root      0:00 {nginx} /usr/bin/qemu-x86_64 /usr/sbin/nginx nginx -g daemon off;
    92 root      0:00 {sh} /usr/bin/qemu-x86_64 /bin/sh /bin/sh
@@ -506,8 +540,8 @@ Answer: here are two solution to solve this problem
 ``` shell
   ➜  ~ kubevpn version
   KubeVPN: CLI
-  Version: v1.1.35
-  Image: docker.io/naison/kubevpn:v1.1.35
+  Version: v1.1.36
+  Image: docker.io/naison/kubevpn:v1.1.36
   Branch: master
   Git commit: 87dac42dad3d8f472a9dcdfc2c6cd801551f23d1
   Built time: 2023-01-15 04:19:45
@@ -516,11 +550,11 @@ Answer: here are two solution to solve this problem
   ➜  ~
   ```
 
-Image is `docker.io/naison/kubevpn:v1.1.35`, transfer this image to private docker registry
+Image is `docker.io/naison/kubevpn:v1.1.36`, transfer this image to private docker registry
 
 ```text
-docker pull docker.io/naison/kubevpn:v1.1.35
-docker tag docker.io/naison/kubevpn:v1.1.35 [docker registry]/[namespace]/[repo]:[tag]
+docker pull docker.io/naison/kubevpn:v1.1.36
+docker tag docker.io/naison/kubevpn:v1.1.36 [docker registry]/[namespace]/[repo]:[tag]
 docker push [docker registry]/[namespace]/[repo]:[tag]
 ```
 

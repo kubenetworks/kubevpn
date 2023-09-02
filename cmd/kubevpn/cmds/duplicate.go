@@ -51,7 +51,7 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 		kubevpn duplicate deployment/productpage --headers a=1
 
 		# duplicate workloads which api-server behind of bastion host or ssh jump host
-		kubevpn duplicate deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem --headers a=1
+		kubevpn duplicate deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem --headers a=1
 
 		# it also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐

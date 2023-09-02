@@ -57,7 +57,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 		kubevpn dev --no-proxy service/productpage
 
 		# Develop workloads which api-server behind of bastion host or ssh jump host
-		kubevpn dev --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem deployment/productpage
+		kubevpn dev --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem deployment/productpage
 
 		# it also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐

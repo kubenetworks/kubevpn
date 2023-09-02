@@ -11,6 +11,7 @@ import (
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	log "github.com/sirupsen/logrus"
 )
 
 type RunOptions struct {
@@ -87,6 +88,7 @@ func reportError(stderr io.Writer, name string, str string, withHelp bool) {
 	if withHelp {
 		str += "\nSee 'docker " + name + " --help'."
 	}
+	log.Error(str)
 	_, _ = fmt.Fprintln(stderr, "docker:", str)
 }
 

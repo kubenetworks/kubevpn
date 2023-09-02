@@ -33,7 +33,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		kubevpn connect
 
 		# Connect to api-server behind of bastion host or ssh jump host
-		kubevpn connect --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem
+		kubevpn connect --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
 		# it also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
