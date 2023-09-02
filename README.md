@@ -397,13 +397,13 @@ need to special parameter `--network` (inner docker) for sharing network and pid
 Example:
 
 ```shell
-docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v ~/.kube/config:/root/.kube/config naison/kubevpn:v1.1.36
+docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v ~/.kube/config:/root/.kube/config naison/kubevpn:v1.2.0
 ```
 
 ```shell
-➜  ~ docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -c authors -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v ~/.kube/vke:/root/.kube/config naison/kubevpn:v1.1.36
+➜  ~ docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -c authors -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v ~/.kube/vke:/root/.kube/config naison/kubevpn:v1.2.0
 root@4d0c3c4eae2b:/# 
-root@4d0c3c4eae2b:/# kubevpn -n kube-system --image naison/kubevpn:v1.1.36 --headers user=naison -it --entrypoint sh dev deployment/authors
+root@4d0c3c4eae2b:/# kubevpn -n kube-system --image naison/kubevpn:v1.2.0 --headers user=naison -it --entrypoint sh dev deployment/authors
 
 ----------------------------------------------------------------------------------
     Warn: Use sudo to execute command kubevpn can not use user env KUBECONFIG.
