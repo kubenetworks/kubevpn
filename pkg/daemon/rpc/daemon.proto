@@ -6,12 +6,13 @@ package rpc;
 
 service Daemon {
   rpc Connect (ConnectRequest) returns (stream ConnectResponse) {}
+  rpc Logs (LogRequest) returns (stream LogResponse) {}
   rpc Status (StatusRequest) returns (StatusResponse) {}
-  rpc Quit (QuitRequest) returns (QuitResponse) {}
+  rpc Quit (QuitRequest) returns (stream QuitResponse) {}
 }
 
 message ConnectRequest {
-  string Kubeconfig = 1;
+  string KubeconfigBytes = 1;
   string Namespace = 2;
   map<string, string> Headers = 3;
   repeated string Workloads = 4;
@@ -30,6 +31,9 @@ message ConnectRequest {
   // transfer image
   bool TransferImage = 15;
   string Image = 16;
+
+  // log level
+  int32 Level = 17;
 }
 
 message ConnectResponse {
@@ -37,7 +41,6 @@ message ConnectResponse {
 }
 
 message QuitRequest {
-  string name = 1;
 }
 
 message QuitResponse {
@@ -49,5 +52,12 @@ message StatusRequest {
 }
 
 message StatusResponse {
+  string message = 1;
+}
+
+message LogRequest {
+}
+
+message LogResponse {
   string message = 1;
 }

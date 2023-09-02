@@ -3,17 +3,15 @@ package cmds
 import (
 	"context"
 	"fmt"
-	"io"
-	defaultlog "log"
-	"os"
-	"syscall"
-
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"io"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	utilcomp "k8s.io/kubectl/pkg/util/completion"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
+	defaultlog "log"
+	"os"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/dev"
@@ -69,7 +67,7 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 			util.InitLogger(config.Debug)
 			defaultlog.Default().SetOutput(io.Discard)
 			if transferImage {
-				if err = dev.TransferImage(cmd.Context(), sshConf); err != nil {
+				if err = dev.TransferImage(cmd.Context(), sshConf, config.OriginImage, config.Image); err != nil {
 					return err
 				}
 			}
@@ -107,9 +105,9 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 			}
 			duplicateOptions.Workloads = connectOptions.Workloads
 			connectOptions.Workloads = []string{}
-			if err = connectOptions.DoConnect(); err != nil {
+			if err = connectOptions.DoConnect(cmd.Context()); err != nil {
 				log.Errorln(err)
-				handler.Cleanup(syscall.SIGQUIT)
+				connectOptions.Cleanup()
 			} else {
 				err = duplicateOptions.InitClient(f)
 				if err != nil {

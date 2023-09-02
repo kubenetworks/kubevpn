@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -74,6 +73,9 @@ type ConnectOptions struct {
 	ExtraDomain []string
 	UseLocalDNS bool
 	Engine      config.Engine
+
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient
@@ -137,29 +139,31 @@ func Rollback(f cmdutil.Factory, ns, workload string) {
 	}
 }
 
-func (c *ConnectOptions) DoConnect() (err error) {
+func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
+	c.ctx, c.cancel = context.WithCancel(ctx)
+
 	_ = os.Setenv(config.EnvKubeVPNTransportEngine, string(c.Engine))
 	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
-	if err = c.dhcp.initDHCP(ctx); err != nil {
+	if err = c.dhcp.initDHCP(c.ctx); err != nil {
 		return
 	}
 	c.addCleanUpResourceHandler()
-	if err = c.getCIDR(ctx); err != nil {
+	if err = c.getCIDR(c.ctx); err != nil {
 		return
 	}
-	if err = createOutboundPod(ctx, c.factory, c.clientset, c.Namespace); err != nil {
+	if err = createOutboundPod(c.ctx, c.factory, c.clientset, c.Namespace); err != nil {
 		return
 	}
-	if err = c.setImage(ctx); err != nil {
+	if err = c.setImage(c.ctx); err != nil {
 		return
 	}
-	if err = c.createRemoteInboundPod(ctx); err != nil {
+	if err = c.createRemoteInboundPod(c.ctx); err != nil {
 		return
 	}
 	rawTCPForwardPort := util.GetAvailableTCPPortOrDie()
 	gvisorTCPForwardPort := util.GetAvailableTCPPortOrDie()
 	gvisorUDPForwardPort := util.GetAvailableTCPPortOrDie()
-	if err = c.portForward(ctx, []string{
+	if err = c.portForward(c.ctx, []string{
 		fmt.Sprintf("%d:10800", rawTCPForwardPort),
 		fmt.Sprintf("%d:10801", gvisorTCPForwardPort),
 		fmt.Sprintf("%d:10802", gvisorUDPForwardPort),
@@ -172,20 +176,20 @@ func (c *ConnectOptions) DoConnect() (err error) {
 	forward := fmt.Sprintf("tcp://127.0.0.1:%d", rawTCPForwardPort)
 	core.GvisorTCPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
 	core.GvisorUDPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorUDPForwardPort)
-	if err = c.startLocalTunServe(ctx, forward); err != nil {
+	if err = c.startLocalTunServe(c.ctx, forward); err != nil {
 		return
 	}
-	if err = c.addRouteDynamic(ctx); err != nil {
+	if err = c.addRouteDynamic(c.ctx); err != nil {
 		return
 	}
-	c.deleteFirewallRule(ctx)
-	if err = c.addExtraRoute(ctx); err != nil {
+	c.deleteFirewallRule(c.ctx)
+	if err = c.addExtraRoute(c.ctx); err != nil {
 		return
 	}
-	if err = c.setupDNS(); err != nil {
+	if err = c.setupDNS(c.ctx); err != nil {
 		return
 	}
-	go c.heartbeats()
+	go c.heartbeats(c.ctx)
 	log.Info("dns service ok")
 	return
 }
@@ -199,7 +203,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 		var first = pointer.Bool(true)
 		for {
 			func() {
-				podList, err := c.GetRunningPodList()
+				podList, err := c.GetRunningPodList(ctx)
 				if err != nil {
 					time.Sleep(time.Second * 3)
 					return
@@ -322,7 +326,7 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 	}
 	go func() {
 		log.Error(Run(ctx, servers))
-		Cleanup(syscall.SIGQUIT)
+		c.Cleanup()
 	}()
 	log.Info("tunnel connected")
 	return
@@ -536,9 +540,9 @@ func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
 	go util.DeleteBlockFirewallRule(ctx)
 }
 
-func (c *ConnectOptions) setupDNS() error {
+func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	const port = 53
-	pod, err := c.GetRunningPodList()
+	pod, err := c.GetRunningPodList(ctx)
 	if err != nil {
 		log.Errorln(err)
 		return err
@@ -638,7 +642,7 @@ func SshJump(conf *util.SshConfig, flags *pflag.FlagSet) (err error) {
 
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
 
-	if conf.RemoteKubeconfig != "" || flags.Changed("remote-kubeconfig") {
+	if conf.RemoteKubeconfig != "" || (flags != nil && flags.Changed("remote-kubeconfig")) {
 		var stdOut []byte
 		var errOut []byte
 		if len(conf.RemoteKubeconfig) != 0 && conf.RemoteKubeconfig[0] == '~' {
@@ -832,7 +836,7 @@ func (c *ConnectOptions) PreCheckResource() error {
 	return nil
 }
 
-func (c *ConnectOptions) GetRunningPodList() ([]v1.Pod, error) {
+func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error) {
 	list, err := c.clientset.CoreV1().Pods(c.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String(),
 	})
@@ -973,7 +977,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 	}
 
 	// 1) use dig +short query, if ok, just return
-	podList, err := c.GetRunningPodList()
+	podList, err := c.GetRunningPodList(ctx)
 	if err != nil {
 		return err
 	}
@@ -1269,7 +1273,7 @@ func (c *ConnectOptions) setImage(ctx context.Context) error {
 	return nil
 }
 
-func (c *ConnectOptions) heartbeats() {
+func (c *ConnectOptions) heartbeats(ctx context.Context) {
 	if !util.IsWindows() {
 		return
 	}
@@ -1277,6 +1281,11 @@ func (c *ConnectOptions) heartbeats() {
 	defer ticker.Stop()
 
 	for ; true; <-ticker.C {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		func() {
 			defer func() {
 				if err := recover(); err != nil {

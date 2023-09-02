@@ -1,21 +1,28 @@
 package cmds
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	defaultlog "log"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
-	"syscall"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
+	"k8s.io/client-go/tools/clientcmd/api/latest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
-	"github.com/wencaiwulue/kubevpn/pkg/dev"
+	"github.com/wencaiwulue/kubevpn/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -43,32 +50,59 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			if !util.IsAdmin() {
-				util.RunWithElevated()
-				os.Exit(0)
+			// startup daemon process and sudo process
+			err = startupDaemon(cmd.Context())
+			if err != nil {
+				return err
 			}
 			go util.StartupPProf(config.PProfPort)
 			util.InitLogger(config.Debug)
 			defaultlog.Default().SetOutput(io.Discard)
-			if transferImage {
-				if err = dev.TransferImage(cmd.Context(), sshConf); err != nil {
+			runtime.GOMAXPROCS(0)
+			return err
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			bytes, err2 := ConvertToKubeconfigBytes(f)
+			if err2 != nil {
+				return err2
+			}
+			client, err := daemon.GetClient(true).Connect(
+				cmd.Context(),
+				&rpc.ConnectRequest{
+					KubeconfigBytes:  string(bytes),
+					Namespace:        connect.Namespace,
+					Headers:          connect.Headers,
+					Workloads:        connect.Workloads,
+					ExtraCIDR:        connect.ExtraCIDR,
+					ExtraDomain:      connect.ExtraDomain,
+					UseLocalDNS:      connect.UseLocalDNS,
+					Engine:           string(connect.Engine),
+					Addr:             sshConf.Addr,
+					User:             sshConf.User,
+					Password:         sshConf.Password,
+					Keyfile:          sshConf.Keyfile,
+					ConfigAlias:      sshConf.ConfigAlias,
+					RemoteKubeconfig: sshConf.RemoteKubeconfig,
+					TransferImage:    transferImage,
+					Image:            config.Image,
+					Level:            int32(log.DebugLevel),
+				},
+			)
+			if err != nil {
+				return err
+			}
+			var resp *rpc.ConnectResponse
+			for {
+				resp, err = client.Recv()
+				if err == io.EOF {
+					break
+				} else if err == nil {
+					log.Println(resp.Message)
+				} else {
 					return err
 				}
 			}
-			return handler.SshJump(sshConf, cmd.Flags())
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			runtime.GOMAXPROCS(0)
-			if err := connect.InitClient(f); err != nil {
-				return err
-			}
-			if err := connect.DoConnect(); err != nil {
-				log.Errorln(err)
-				handler.Cleanup(syscall.SIGQUIT)
-			} else {
-				util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
-			}
-			select {}
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "enable debug mode or not, true or false")
@@ -81,4 +115,106 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 
 	addSshFlags(cmd, sshConf)
 	return cmd
+}
+
+func startupDaemon(ctx context.Context) (err error) {
+	if daemon.GetClient(false) == nil {
+		err = runDaemon(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	_, err = daemon.GetClient(false).Status(ctx, &rpc.StatusRequest{})
+	if err != nil {
+		err = runDaemon(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
+	// sudo
+	if client := daemon.GetClient(true); client == nil {
+		err = runSudoDaemon(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	_, err = daemon.GetClient(true).Status(ctx, &rpc.StatusRequest{})
+	if err != nil {
+		err = runSudoDaemon(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	return err
+}
+
+func runSudoDaemon(ctx context.Context) error {
+	if !util.IsAdmin() {
+		util.RunWithElevated()
+		os.Exit(0)
+	}
+	port := filepath.Join(config.DaemonPortPath, "sudo_daemon")
+	cmd := exec.CommandContext(ctx, "sudo", "--preserve-env", "/usr/local/bin/kubevpn", "daemon")
+	cmd.SysProcAttr = &unix.SysProcAttr{
+		Setpgid: true,
+	}
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	os.Remove(port)
+	err := cmd.Start()
+	if err != nil {
+		return err
+	}
+	go func() {
+		cmd.Wait()
+	}()
+	for ctx.Err() == nil {
+		time.Sleep(time.Millisecond * 50)
+		_, err = os.Stat(port)
+		if err == nil {
+			break
+		}
+	}
+	return err
+}
+
+func runDaemon(ctx context.Context) error {
+	port := filepath.Join(config.DaemonPortPath, "daemon")
+	err := os.Remove(port)
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "kubevpn", "daemon")
+	cmd.SysProcAttr = &unix.SysProcAttr{
+		Setpgid: true,
+	}
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err = cmd.Start()
+	if err != nil {
+		return err
+	}
+	go func() {
+		cmd.Wait()
+	}()
+	for ctx.Err() == nil {
+		time.Sleep(time.Millisecond * 50)
+		_, err = os.Stat(port)
+		if err == nil {
+			break
+		}
+	}
+	return err
+}
+
+func ConvertToKubeconfigBytes(factory cmdutil.Factory) ([]byte, error) {
+	rawConfig, err := factory.ToRawKubeConfigLoader().RawConfig()
+	convertedObj, err := latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(convertedObj)
 }

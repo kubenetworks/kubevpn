@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion7
 
 const (
 	Daemon_Connect_FullMethodName = "/rpc.Daemon/Connect"
+	Daemon_Logs_FullMethodName    = "/rpc.Daemon/Logs"
 	Daemon_Status_FullMethodName  = "/rpc.Daemon/Status"
 	Daemon_Quit_FullMethodName    = "/rpc.Daemon/Quit"
 )
@@ -29,8 +30,9 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DaemonClient interface {
 	Connect(ctx context.Context, in *ConnectRequest, opts ...grpc.CallOption) (Daemon_ConnectClient, error)
+	Logs(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (Daemon_LogsClient, error)
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
-	Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (*QuitResponse, error)
+	Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error)
 }
 
 type daemonClient struct {
@@ -73,6 +75,38 @@ func (x *daemonConnectClient) Recv() (*ConnectResponse, error) {
 	return m, nil
 }
 
+func (c *daemonClient) Logs(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (Daemon_LogsClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[1], Daemon_Logs_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &daemonLogsClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Daemon_LogsClient interface {
+	Recv() (*LogResponse, error)
+	grpc.ClientStream
+}
+
+type daemonLogsClient struct {
+	grpc.ClientStream
+}
+
+func (x *daemonLogsClient) Recv() (*LogResponse, error) {
+	m := new(LogResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *daemonClient) Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error) {
 	out := new(StatusResponse)
 	err := c.cc.Invoke(ctx, Daemon_Status_FullMethodName, in, out, opts...)
@@ -82,13 +116,36 @@ func (c *daemonClient) Status(ctx context.Context, in *StatusRequest, opts ...gr
 	return out, nil
 }
 
-func (c *daemonClient) Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (*QuitResponse, error) {
-	out := new(QuitResponse)
-	err := c.cc.Invoke(ctx, Daemon_Quit_FullMethodName, in, out, opts...)
+func (c *daemonClient) Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[2], Daemon_Quit_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &daemonQuitClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Daemon_QuitClient interface {
+	Recv() (*QuitResponse, error)
+	grpc.ClientStream
+}
+
+type daemonQuitClient struct {
+	grpc.ClientStream
+}
+
+func (x *daemonQuitClient) Recv() (*QuitResponse, error) {
+	m := new(QuitResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // DaemonServer is the server API for Daemon service.
@@ -96,8 +153,9 @@ func (c *daemonClient) Quit(ctx context.Context, in *QuitRequest, opts ...grpc.C
 // for forward compatibility
 type DaemonServer interface {
 	Connect(*ConnectRequest, Daemon_ConnectServer) error
+	Logs(*LogRequest, Daemon_LogsServer) error
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
-	Quit(context.Context, *QuitRequest) (*QuitResponse, error)
+	Quit(*QuitRequest, Daemon_QuitServer) error
 	mustEmbedUnimplementedDaemonServer()
 }
 
@@ -108,11 +166,14 @@ type UnimplementedDaemonServer struct {
 func (UnimplementedDaemonServer) Connect(*ConnectRequest, Daemon_ConnectServer) error {
 	return status.Errorf(codes.Unimplemented, "method Connect not implemented")
 }
+func (UnimplementedDaemonServer) Logs(*LogRequest, Daemon_LogsServer) error {
+	return status.Errorf(codes.Unimplemented, "method Logs not implemented")
+}
 func (UnimplementedDaemonServer) Status(context.Context, *StatusRequest) (*StatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Status not implemented")
 }
-func (UnimplementedDaemonServer) Quit(context.Context, *QuitRequest) (*QuitResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Quit not implemented")
+func (UnimplementedDaemonServer) Quit(*QuitRequest, Daemon_QuitServer) error {
+	return status.Errorf(codes.Unimplemented, "method Quit not implemented")
 }
 func (UnimplementedDaemonServer) mustEmbedUnimplementedDaemonServer() {}
 
@@ -148,6 +209,27 @@ func (x *daemonConnectServer) Send(m *ConnectResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Daemon_Logs_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(LogRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DaemonServer).Logs(m, &daemonLogsServer{stream})
+}
+
+type Daemon_LogsServer interface {
+	Send(*LogResponse) error
+	grpc.ServerStream
+}
+
+type daemonLogsServer struct {
+	grpc.ServerStream
+}
+
+func (x *daemonLogsServer) Send(m *LogResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 func _Daemon_Status_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(StatusRequest)
 	if err := dec(in); err != nil {
@@ -166,22 +248,25 @@ func _Daemon_Status_Handler(srv interface{}, ctx context.Context, dec func(inter
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Daemon_Quit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QuitRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+func _Daemon_Quit_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(QuitRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(DaemonServer).Quit(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Daemon_Quit_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonServer).Quit(ctx, req.(*QuitRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(DaemonServer).Quit(m, &daemonQuitServer{stream})
+}
+
+type Daemon_QuitServer interface {
+	Send(*QuitResponse) error
+	grpc.ServerStream
+}
+
+type daemonQuitServer struct {
+	grpc.ServerStream
+}
+
+func (x *daemonQuitServer) Send(m *QuitResponse) error {
+	return x.ServerStream.SendMsg(m)
 }
 
 // Daemon_ServiceDesc is the grpc.ServiceDesc for Daemon service.
@@ -195,15 +280,21 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Status",
 			Handler:    _Daemon_Status_Handler,
 		},
-		{
-			MethodName: "Quit",
-			Handler:    _Daemon_Quit_Handler,
-		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Connect",
 			Handler:       _Daemon_Connect_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Logs",
+			Handler:       _Daemon_Logs_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Quit",
+			Handler:       _Daemon_Quit_Handler,
 			ServerStreams: true,
 		},
 	},

@@ -76,7 +76,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 			go util.StartupPProf(config.PProfPort)
 			util.InitLogger(config.Debug)
 			if transferImage {
-				if err := dev.TransferImage(cmd.Context(), sshConf); err != nil {
+				if err := dev.TransferImage(cmd.Context(), sshConf, config.OriginImage, config.Image); err != nil {
 					return err
 				}
 			}

@@ -2,17 +2,15 @@ package cmds
 
 import (
 	"fmt"
-	"io"
-	defaultlog "log"
-	"os"
-	"syscall"
-
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"io"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	utilcomp "k8s.io/kubectl/pkg/util/completion"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
+	defaultlog "log"
+	"os"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/dev"
@@ -63,7 +61,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			util.InitLogger(config.Debug)
 			defaultlog.Default().SetOutput(io.Discard)
 			if transferImage {
-				if err = dev.TransferImage(cmd.Context(), sshConf); err != nil {
+				if err = dev.TransferImage(cmd.Context(), sshConf, config.OriginImage, config.Image); err != nil {
 					return err
 				}
 			}
@@ -91,9 +89,9 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err = connect.DoConnect(); err != nil {
+			if err = connect.DoConnect(cmd.Context()); err != nil {
 				log.Errorln(err)
-				handler.Cleanup(syscall.SIGQUIT)
+				connect.Cleanup()
 			} else {
 				util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 			}

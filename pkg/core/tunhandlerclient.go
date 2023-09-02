@@ -12,6 +12,7 @@ import (
 )
 
 func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
+	defer tun.Close()
 	remoteAddr, err := net.ResolveUDPAddr("udp", h.node.Remote)
 	if err != nil {
 		log.Errorf("[tun] %s: remote addr: %v", tun.LocalAddr(), err)

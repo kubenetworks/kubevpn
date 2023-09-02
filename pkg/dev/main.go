@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/containerd/containerd/platforms"
@@ -372,6 +371,8 @@ func checkOutOfMemory(spec *v1.PodTemplateSpec, cli *client.Client) (outOfMemory
 }
 
 func DoDev(devOptions *Options, flags *pflag.FlagSet, f cmdutil.Factory) error {
+	ctx := context.Background()
+
 	connect := handler.ConnectOptions{
 		Headers:     devOptions.Headers,
 		Workloads:   []string{devOptions.Workload},
@@ -387,7 +388,7 @@ func DoDev(devOptions *Options, flags *pflag.FlagSet, f cmdutil.Factory) error {
 	mode := container.NetworkMode(devOptions.Copts.netMode.NetworkMode())
 	if mode.IsContainer() {
 		var inspect types.ContainerJSON
-		inspect, err = cli.ContainerInspect(context.Background(), mode.ConnectedContainer())
+		inspect, err = cli.ContainerInspect(ctx, mode.ConnectedContainer())
 		if err != nil {
 			return err
 		}
@@ -447,10 +448,10 @@ func DoDev(devOptions *Options, flags *pflag.FlagSet, f cmdutil.Factory) error {
 	switch devOptions.ConnectMode {
 	case ConnectModeHost:
 		defer func() {
-			handler.Cleanup(syscall.SIGQUIT)
+			connect.Cleanup()
 			select {}
 		}()
-		if err = connect.DoConnect(); err != nil {
+		if err = connect.DoConnect(ctx); err != nil {
 			log.Errorln(err)
 			return err
 		}
@@ -460,7 +461,7 @@ func DoDev(devOptions *Options, flags *pflag.FlagSet, f cmdutil.Factory) error {
 		if err != nil {
 			return err
 		}
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		var id string
 		if id, err = run(ctx, connectContainer, cli, dockerCli); err != nil {
@@ -470,7 +471,7 @@ func DoDev(devOptions *Options, flags *pflag.FlagSet, f cmdutil.Factory) error {
 			os.Exit(0)
 		}, func() {
 			cancel()
-			_ = cli.ContainerKill(context.Background(), id, "SIGTERM")
+			_ = cli.ContainerKill(ctx, id, "SIGTERM")
 			_ = runLogsSinceNow(dockerCli, id)
 		})
 		go h.Run(func() error { select {} })
@@ -515,7 +516,7 @@ func DoDev(devOptions *Options, flags *pflag.FlagSet, f cmdutil.Factory) error {
 	}
 
 	devOptions.Namespace = connect.Namespace
-	err = devOptions.Main(context.Background(), cli, dockerCli, tempContainerConfig)
+	err = devOptions.Main(ctx, cli, dockerCli, tempContainerConfig)
 	if err != nil {
 		log.Errorln(err)
 	}

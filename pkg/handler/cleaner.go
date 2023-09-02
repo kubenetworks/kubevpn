@@ -25,59 +25,55 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-var stopChan = make(chan os.Signal)
 var RollbackFuncList = make([]func(), 2)
-var ctx, cancel = context.WithCancel(context.Background())
 
 func (c *ConnectOptions) addCleanUpResourceHandler() {
+	var stopChan = make(chan os.Signal)
 	signal.Notify(stopChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL)
 	go func() {
 		<-stopChan
-		log.Info("prepare to exit, cleaning up")
-		cleanupCtx, cancelFunc := context.WithTimeout(context.Background(), time.Second*5)
-		defer cancelFunc()
-		var ips []net.IP
-		if c.localTunIPv4 != nil && c.localTunIPv4.IP != nil {
-			ips = append(ips, c.localTunIPv4.IP)
-		}
-		if c.localTunIPv6 != nil && c.localTunIPv6.IP != nil {
-			ips = append(ips, c.localTunIPv6.IP)
-		}
-		err := c.dhcp.ReleaseIP(cleanupCtx, ips...)
-		if err != nil {
-			log.Errorf("failed to release ip to dhcp, err: %v", err)
-		}
-		for _, function := range RollbackFuncList {
-			if function != nil {
-				function()
-			}
-		}
-		_ = c.clientset.CoreV1().Pods(c.Namespace).Delete(cleanupCtx, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
-		var count int
-		count, err = updateRefCount(cleanupCtx, c.clientset.CoreV1().ConfigMaps(c.Namespace), config.ConfigMapPodTrafficManager, -1)
-		// only if ref is zero and deployment is not ready, needs to clean up
-		if err == nil && count <= 0 {
-			deployment, errs := c.clientset.AppsV1().Deployments(c.Namespace).Get(cleanupCtx, config.ConfigMapPodTrafficManager, v1.GetOptions{})
-			if errs == nil && deployment.Status.UnavailableReplicas != 0 {
-				cleanup(cleanupCtx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, true)
-			}
-		}
-		if err != nil {
-			log.Errorf("can not update ref-count: %v", err)
-		}
-		dns.CancelDNS()
-		cancel()
-		log.Info("clean up successful")
-		util.CleanExtensionLib()
-		os.Exit(0)
+		c.Cleanup()
 	}()
 }
 
-func Cleanup(s os.Signal) {
-	select {
-	case stopChan <- s:
-	default:
+func (c *ConnectOptions) Cleanup() {
+	log.Info("prepare to exit, cleaning up")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	c.cancel()
+	var ips []net.IP
+	if c.localTunIPv4 != nil && c.localTunIPv4.IP != nil {
+		ips = append(ips, c.localTunIPv4.IP)
 	}
+	if c.localTunIPv6 != nil && c.localTunIPv6.IP != nil {
+		ips = append(ips, c.localTunIPv6.IP)
+	}
+	err := c.dhcp.ReleaseIP(ctx, ips...)
+	if err != nil {
+		log.Errorf("failed to release ip to dhcp, err: %v", err)
+	}
+	for _, function := range RollbackFuncList {
+		if function != nil {
+			function()
+		}
+	}
+	_ = c.clientset.CoreV1().Pods(c.Namespace).Delete(ctx, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
+	var count int
+	count, err = updateRefCount(ctx, c.clientset.CoreV1().ConfigMaps(c.Namespace), config.ConfigMapPodTrafficManager, -1)
+	// only if ref is zero and deployment is not ready, needs to clean up
+	if err == nil && count <= 0 {
+		deployment, errs := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, v1.GetOptions{})
+		if errs == nil && deployment.Status.UnavailableReplicas != 0 {
+			cleanup(ctx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, true)
+		}
+	}
+	if err != nil {
+		log.Errorf("can not update ref-count: %v", err)
+	}
+	RollbackFuncList = RollbackFuncList[:]
+	dns.CancelDNS()
+	log.Info("clean up successful")
+	util.CleanExtensionLib()
 }
 
 // vendor/k8s.io/kubectl/pkg/polymorphichelpers/rollback.go:99
