@@ -49,7 +49,7 @@ func NewKubeVPNCommand() *cobra.Command {
 		{
 			Message: "Client Commands:",
 			Commands: []*cobra.Command{
-				CmdConnect(factory),
+				CmdConnect2(factory),
 				CmdProxy(factory),
 				CmdDev(factory),
 				CmdDuplicate(factory),
@@ -60,6 +60,7 @@ func NewKubeVPNCommand() *cobra.Command {
 				// Hidden, Server Commands (DO NOT USE IT !!!)
 				CmdControlPlane(factory),
 				CmdServe(factory),
+				CmdDaemon(factory),
 				CmdWebhook(factory),
 			},
 		},
