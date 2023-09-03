@@ -3,8 +3,9 @@ package daemon
 import (
 	"context"
 	"fmt"
-	"github.com/wencaiwulue/kubevpn/pkg/daemon/action"
 	"net"
+	"os"
+	"strconv"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -12,6 +13,7 @@ import (
 	"google.golang.org/grpc/admin"
 	"google.golang.org/grpc/reflection"
 
+	"github.com/wencaiwulue/kubevpn/pkg/daemon/action"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 )
 
@@ -22,7 +24,8 @@ type SvrOption struct {
 	uptime int64
 	svr    *grpc.Server
 
-	Port int
+	IsSudo bool
+	Port   int
 }
 
 func (o *SvrOption) Start(ctx context.Context) error {
@@ -33,10 +36,22 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		return err
 	}
 	defer lis.Close()
+
+	portPath := GetPortPath(o.IsSudo)
+	err = os.WriteFile(portPath, []byte(strconv.Itoa(lis.Addr().(*net.TCPAddr).Port)), os.ModePerm)
+	if err != nil {
+		return err
+	}
+	err = os.Chmod(portPath, os.ModePerm)
+	if err != nil {
+		return err
+	}
+
 	o.svr = grpc.NewServer()
 	cleanup, err := admin.Register(o.svr)
 	if err != nil {
-		log.Fatalf("failed to register admin: %v", err)
+		log.Errorf("failed to register admin: %v", err)
+		return err
 	}
 	defer cleanup()
 	reflection.Register(o.svr)
@@ -47,5 +62,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 
 func (o *SvrOption) Stop() {
 	o.cancel()
-	o.svr.GracefulStop()
+	if o.svr != nil {
+		o.svr.GracefulStop()
+	}
 }

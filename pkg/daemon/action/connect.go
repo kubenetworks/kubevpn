@@ -77,6 +77,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		// todo define already connect error?
 		return errors.New("already connected")
 	}
+	util.InitLogger(true)
 	svr.t = time.Now()
 	svr.connect = &handler.ConnectOptions{
 		Namespace:   req.Namespace,

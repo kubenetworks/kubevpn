@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 
@@ -17,12 +18,13 @@ import (
 )
 
 func GetClient(isSudo bool) rpc.DaemonClient {
-	name := "daemon"
-	if isSudo {
-		name = "sudo_daemon"
+	port, err := os.ReadFile(GetPortPath(isSudo))
+	if err != nil {
+		return nil
 	}
-	port, err2 := os.ReadFile(filepath.Join(config.DaemonPortPath, name))
-	if err2 != nil {
+	listen, err := net.Listen("tcp", fmt.Sprintf(":%s", string(port)))
+	if err == nil {
+		_ = listen.Close()
 		return nil
 	}
 	ctx := context.Background()
@@ -31,5 +33,26 @@ func GetClient(isSudo bool) rpc.DaemonClient {
 		log.Errorf("cannot connect to server: %v", err)
 		return nil
 	}
-	return rpc.NewDaemonClient(conn)
+	c := rpc.NewDaemonClient(conn)
+	_, err = c.Status(ctx, &rpc.StatusRequest{})
+	if err != nil {
+		return nil
+	}
+	return c
+}
+
+func GetPortPath(isSudo bool) string {
+	name := config.PortPath
+	if isSudo {
+		name = config.SudoPortPath
+	}
+	return filepath.Join(config.DaemonPath, name)
+}
+
+func GetPidPath(isSudo bool) string {
+	name := config.PidPath
+	if isSudo {
+		name = config.SudoPidPath
+	}
+	return filepath.Join(config.DaemonPath, name)
 }
