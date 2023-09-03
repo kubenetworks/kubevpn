@@ -1,6 +1,8 @@
 package main
 
 import (
+	ctrl "sigs.k8s.io/controller-runtime"
+
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	_ "net/http/pprof"
 
@@ -8,5 +10,6 @@ import (
 )
 
 func main() {
-	_ = cmds.NewKubeVPNCommand().Execute()
+	ctx := ctrl.SetupSignalHandler()
+	_ = cmds.NewKubeVPNCommand().ExecuteContext(ctx)
 }

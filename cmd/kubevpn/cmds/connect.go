@@ -3,13 +3,14 @@ package cmds
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	defaultlog "log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
+	"strconv"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -118,35 +119,20 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 }
 
 func startupDaemon(ctx context.Context) (err error) {
+	// normal
 	if daemon.GetClient(false) == nil {
-		err = runDaemon(ctx)
-		if err != nil {
-			return err
-		}
-	}
-	_, err = daemon.GetClient(false).Status(ctx, &rpc.StatusRequest{})
-	if err != nil {
-		err = runDaemon(ctx)
-		if err != nil {
+		if err = runDaemon(ctx); err != nil {
 			return err
 		}
 	}
 
 	// sudo
 	if client := daemon.GetClient(true); client == nil {
-		err = runSudoDaemon(ctx)
-		if err != nil {
+		if err = runSudoDaemon(ctx); err != nil {
 			return err
 		}
 	}
-	_, err = daemon.GetClient(true).Status(ctx, &rpc.StatusRequest{})
-	if err != nil {
-		err = runSudoDaemon(ctx)
-		if err != nil {
-			return err
-		}
-	}
-	return err
+	return nil
 }
 
 func runSudoDaemon(ctx context.Context) error {
@@ -154,16 +140,39 @@ func runSudoDaemon(ctx context.Context) error {
 		util.RunWithElevated()
 		os.Exit(0)
 	}
-	port := filepath.Join(config.DaemonPortPath, "sudo_daemon")
-	cmd := exec.CommandContext(ctx, "sudo", "--preserve-env", "/usr/local/bin/kubevpn", "daemon")
+
+	port := daemon.GetPortPath(true)
+	err := os.Remove(port)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	path := daemon.GetPidPath(true)
+	if file, err := os.ReadFile(path); err == nil {
+		if pid, err := strconv.Atoi(string(file)); err == nil {
+			if p, err := os.FindProcess(pid); err == nil {
+				if err = p.Kill(); err != nil && err != os.ErrProcessDone {
+					log.Error(err)
+				}
+			}
+		}
+	}
+
+	log.Info(os.Args[0])
+	cmd := exec.CommandContext(ctx, "sudo", "--preserve-env", os.Args[0], "daemon", "--sudo")
 	cmd.SysProcAttr = &unix.SysProcAttr{
 		Setpgid: true,
 	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	os.Remove(port)
-	err := cmd.Start()
+	if err = cmd.Start(); err != nil {
+		return err
+	}
+	err = os.WriteFile(path, []byte(strconv.Itoa(cmd.Process.Pid)), os.ModePerm)
+	if err != nil {
+		return err
+	}
+	err = os.Chmod(daemon.GetPidPath(true), os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -171,9 +180,9 @@ func runSudoDaemon(ctx context.Context) error {
 		cmd.Wait()
 	}()
 	for ctx.Err() == nil {
+		println("wait")
 		time.Sleep(time.Millisecond * 50)
-		_, err = os.Stat(port)
-		if err == nil {
+		if _, err = os.Stat(port); err == nil {
 			break
 		}
 	}
@@ -181,29 +190,48 @@ func runSudoDaemon(ctx context.Context) error {
 }
 
 func runDaemon(ctx context.Context) error {
-	port := filepath.Join(config.DaemonPortPath, "daemon")
-	err := os.Remove(port)
-	if err != nil {
+	path := daemon.GetPortPath(false)
+	err := os.Remove(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, "kubevpn", "daemon")
+	pidPath := daemon.GetPidPath(false)
+	if file, err := os.ReadFile(pidPath); err == nil {
+		if pid, err := strconv.Atoi(string(file)); err == nil {
+			if p, err := os.FindProcess(pid); err == nil {
+				if err = p.Kill(); err != nil && err != os.ErrProcessDone {
+					log.Error(err)
+				}
+			}
+		}
+	}
+	fmt.Println(os.Args[0])
+	cmd := exec.CommandContext(ctx, os.Args[0], "daemon")
+	log.Info(cmd.Args)
 	cmd.SysProcAttr = &unix.SysProcAttr{
 		Setpgid: true,
 	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err = cmd.Start()
+	if err = cmd.Start(); err != nil {
+		return err
+	}
+	err = os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), os.ModePerm)
+	if err != nil {
+		return err
+	}
+	err = os.Chmod(daemon.GetPidPath(false), os.ModePerm)
 	if err != nil {
 		return err
 	}
 	go func() {
 		cmd.Wait()
 	}()
+
 	for ctx.Err() == nil {
 		time.Sleep(time.Millisecond * 50)
-		_, err = os.Stat(port)
-		if err == nil {
+		if _, err = os.Stat(path); err == nil {
 			break
 		}
 	}

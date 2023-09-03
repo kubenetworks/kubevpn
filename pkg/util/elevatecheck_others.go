@@ -59,7 +59,7 @@ func IsAdmin() bool {
 			fmt.Println(`    Current env KUBECONFIG value: ` + os.Getenv(clientcmd.RecommendedConfigPathEnvVar))
 			fmt.Println(`----------------------------------------------------------------------------------`)
 			fmt.Println()
-			for i := 5; i >= 0; i-- {
+			for i := 0; i >= 0; i-- {
 				_, _ = fmt.Printf("\r %ds", i)
 				time.Sleep(time.Second * 1)
 			}
