@@ -2,7 +2,6 @@ package action
 
 import (
 	"io"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -25,10 +24,6 @@ func newQuitWarp(server rpc.Daemon_QuitServer) io.Writer {
 }
 
 func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error {
-	if svr.connect == nil {
-		return nil
-	}
-
 	out := newQuitWarp(resp)
 	origin := log.StandardLogger().Out
 	defer func() {
@@ -36,8 +31,13 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 	}()
 	multiWriter := io.MultiWriter(origin, out)
 	log.SetOutput(multiWriter)
-	svr.connect.Cleanup()
-	svr.t = time.Time{}
-	svr.connect = nil
+
+	if svr.connect != nil {
+		svr.connect.Cleanup()
+	}
+	if svr.Cancel != nil {
+		log.SetOutput(origin)
+		svr.Cancel()
+	}
 	return nil
 }

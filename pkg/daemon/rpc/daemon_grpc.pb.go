@@ -19,10 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	Daemon_Connect_FullMethodName = "/rpc.Daemon/Connect"
-	Daemon_Logs_FullMethodName    = "/rpc.Daemon/Logs"
-	Daemon_Status_FullMethodName  = "/rpc.Daemon/Status"
-	Daemon_Quit_FullMethodName    = "/rpc.Daemon/Quit"
+	Daemon_Connect_FullMethodName    = "/rpc.Daemon/Connect"
+	Daemon_Disconnect_FullMethodName = "/rpc.Daemon/Disconnect"
+	Daemon_Logs_FullMethodName       = "/rpc.Daemon/Logs"
+	Daemon_Status_FullMethodName     = "/rpc.Daemon/Status"
+	Daemon_Quit_FullMethodName       = "/rpc.Daemon/Quit"
 )
 
 // DaemonClient is the client API for Daemon service.
@@ -30,6 +31,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DaemonClient interface {
 	Connect(ctx context.Context, in *ConnectRequest, opts ...grpc.CallOption) (Daemon_ConnectClient, error)
+	Disconnect(ctx context.Context, in *DisconnectRequest, opts ...grpc.CallOption) (Daemon_DisconnectClient, error)
 	Logs(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (Daemon_LogsClient, error)
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
 	Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error)
@@ -75,8 +77,40 @@ func (x *daemonConnectClient) Recv() (*ConnectResponse, error) {
 	return m, nil
 }
 
+func (c *daemonClient) Disconnect(ctx context.Context, in *DisconnectRequest, opts ...grpc.CallOption) (Daemon_DisconnectClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[1], Daemon_Disconnect_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &daemonDisconnectClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Daemon_DisconnectClient interface {
+	Recv() (*DisconnectResponse, error)
+	grpc.ClientStream
+}
+
+type daemonDisconnectClient struct {
+	grpc.ClientStream
+}
+
+func (x *daemonDisconnectClient) Recv() (*DisconnectResponse, error) {
+	m := new(DisconnectResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *daemonClient) Logs(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (Daemon_LogsClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[1], Daemon_Logs_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[2], Daemon_Logs_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +151,7 @@ func (c *daemonClient) Status(ctx context.Context, in *StatusRequest, opts ...gr
 }
 
 func (c *daemonClient) Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[2], Daemon_Quit_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[3], Daemon_Quit_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -153,6 +187,7 @@ func (x *daemonQuitClient) Recv() (*QuitResponse, error) {
 // for forward compatibility
 type DaemonServer interface {
 	Connect(*ConnectRequest, Daemon_ConnectServer) error
+	Disconnect(*DisconnectRequest, Daemon_DisconnectServer) error
 	Logs(*LogRequest, Daemon_LogsServer) error
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
 	Quit(*QuitRequest, Daemon_QuitServer) error
@@ -165,6 +200,9 @@ type UnimplementedDaemonServer struct {
 
 func (UnimplementedDaemonServer) Connect(*ConnectRequest, Daemon_ConnectServer) error {
 	return status.Errorf(codes.Unimplemented, "method Connect not implemented")
+}
+func (UnimplementedDaemonServer) Disconnect(*DisconnectRequest, Daemon_DisconnectServer) error {
+	return status.Errorf(codes.Unimplemented, "method Disconnect not implemented")
 }
 func (UnimplementedDaemonServer) Logs(*LogRequest, Daemon_LogsServer) error {
 	return status.Errorf(codes.Unimplemented, "method Logs not implemented")
@@ -206,6 +244,27 @@ type daemonConnectServer struct {
 }
 
 func (x *daemonConnectServer) Send(m *ConnectResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func _Daemon_Disconnect_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(DisconnectRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DaemonServer).Disconnect(m, &daemonDisconnectServer{stream})
+}
+
+type Daemon_DisconnectServer interface {
+	Send(*DisconnectResponse) error
+	grpc.ServerStream
+}
+
+type daemonDisconnectServer struct {
+	grpc.ServerStream
+}
+
+func (x *daemonDisconnectServer) Send(m *DisconnectResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
@@ -285,6 +344,11 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Connect",
 			Handler:       _Daemon_Connect_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Disconnect",
+			Handler:       _Daemon_Disconnect_Handler,
 			ServerStreams: true,
 		},
 		{

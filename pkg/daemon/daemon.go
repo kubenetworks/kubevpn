@@ -55,7 +55,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	}
 	defer cleanup()
 	reflection.Register(o.svr)
-	rpc.RegisterDaemonServer(o.svr, &action.Server{})
+	rpc.RegisterDaemonServer(o.svr, &action.Server{Cancel: o.Stop})
 	o.uptime = time.Now().Unix()
 	return o.svr.Serve(lis)
 }
@@ -63,6 +63,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 func (o *SvrOption) Stop() {
 	o.cancel()
 	if o.svr != nil {
-		o.svr.GracefulStop()
+		//o.svr.GracefulStop()
+		o.svr.Stop()
 	}
 }

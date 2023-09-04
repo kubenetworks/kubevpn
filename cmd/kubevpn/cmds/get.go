@@ -1,35 +1,26 @@
 package cmds
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"os"
-	"strconv"
-	"time"
-
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"k8s.io/client-go/tools/clientcmd/api/latest"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	"k8s.io/kubectl/pkg/util/i18n"
-	"k8s.io/kubectl/pkg/util/templates"
-
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
+	"io"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 )
 
-func CmdConnect(f cmdutil.Factory) *cobra.Command {
+func CmdGet(f cmdutil.Factory) *cobra.Command {
 	var connect = &handler.ConnectOptions{}
 	var sshConf = &util.SshConfig{}
 	var transferImage bool
 	cmd := &cobra.Command{
-		Use:   "connect",
+		Use:   "get",
 		Short: i18n.T("Connect to kubernetes cluster network"),
 		Long:  templates.LongDesc(i18n.T(`Connect to kubernetes cluster network`)),
 		Example: templates.Examples(i18n.T(`
@@ -86,7 +77,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				if err == io.EOF {
 					break
 				} else if err == nil {
-					log.Print(resp.Message)
+					log.Println(resp.Message)
 				} else {
 					return err
 				}
@@ -104,74 +95,4 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 
 	addSshFlags(cmd, sshConf)
 	return cmd
-}
-
-func startupDaemon(ctx context.Context) error {
-	// normal daemon
-	if daemon.GetClient(false) == nil {
-		if err := runDaemon(ctx, false); err != nil {
-			return err
-		}
-	}
-
-	// sudo daemon
-	if daemon.GetClient(true) == nil {
-		if err := runDaemon(ctx, true); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func runDaemon(ctx context.Context, isSudo bool) error {
-	portPath := daemon.GetPortPath(isSudo)
-	err := os.Remove(portPath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	pidPath := daemon.GetPidPath(isSudo)
-	if file, err := os.ReadFile(pidPath); err == nil {
-		if pid, err := strconv.Atoi(string(file)); err == nil {
-			if p, err := os.FindProcess(pid); err == nil {
-				if err = p.Kill(); err != nil && err != os.ErrProcessDone {
-					log.Error(err)
-				}
-			}
-		}
-	}
-	cmd := daemon.GetDaemonCommand(isSudo)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err = cmd.Start(); err != nil {
-		return err
-	}
-	err = os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), os.ModePerm)
-	if err != nil {
-		return err
-	}
-	err = os.Chmod(daemon.GetPidPath(false), os.ModePerm)
-	if err != nil {
-		return err
-	}
-	go func() {
-		cmd.Wait()
-	}()
-
-	for ctx.Err() == nil {
-		time.Sleep(time.Millisecond * 50)
-		if _, err = os.Stat(portPath); err == nil {
-			break
-		}
-	}
-	return err
-}
-
-func ConvertToKubeconfigBytes(factory cmdutil.Factory) ([]byte, error) {
-	rawConfig, err := factory.ToRawKubeConfigLoader().RawConfig()
-	convertedObj, err := latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(convertedObj)
 }

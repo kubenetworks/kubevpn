@@ -11,6 +11,8 @@ const (
 
 	PidPath     = "daemon_pid"
 	SudoPidPath = "sudo_daemon_pid"
+
+	LogFile = "daemon.log"
 )
 
 func init() {

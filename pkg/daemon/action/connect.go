@@ -6,6 +6,7 @@ import (
 	"io"
 	defaultlog "log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -70,14 +71,23 @@ func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 
 func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) error {
 	out := newWarp(resp)
-	log.SetOutput(out)
+	file, err := os.OpenFile(GetDaemonLog(), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
+	if err != nil {
+		log.Error(err)
+		return err
+	}
+	log.SetOutput(io.MultiWriter(out, file))
+	defer func() {
+		log.SetOutput(io.MultiWriter(file))
+		log.SetLevel(log.DebugLevel)
+	}()
 	ctx := context.Background()
 	if !svr.t.IsZero() {
 		log.Debugf("already connect to kubeconfig: %s, namespace: %s", "", req.Namespace)
 		// todo define already connect error?
 		return errors.New("already connected")
 	}
-	util.InitLogger(true)
+	util.InitLogger(false)
 	svr.t = time.Now()
 	svr.connect = &handler.ConnectOptions{
 		Namespace:   req.Namespace,
@@ -99,7 +109,6 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	var transferImage = req.TransferImage
 
 	go util.StartupPProf(config.PProfPort)
-	util.InitLogger(config.Debug)
 	defaultlog.Default().SetOutput(io.Discard)
 	if transferImage {
 		err := dev.TransferImage(ctx, sshConf, config.OriginImage, config.Image)
@@ -107,7 +116,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 			return err
 		}
 	}
-	err := handler.SshJump(sshConf, nil)
+	err = handler.SshJump(sshConf, nil)
 	if err != nil {
 		return err
 	}
@@ -123,4 +132,8 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		util.Print(out, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 	}
 	return nil
+}
+
+func GetDaemonLog() string {
+	return filepath.Join(config.DaemonPath, config.LogFile)
 }

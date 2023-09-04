@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"math/rand"
+	"runtime"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -24,6 +25,7 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 		Long:   `Server side, startup traffic manager, forward inbound and outbound traffic.`,
 		PreRun: func(*cobra.Command, []string) {
 			util.InitLogger(config.Debug)
+			runtime.GOMAXPROCS(0)
 			go util.StartupPProf(0)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {

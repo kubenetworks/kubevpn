@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	log "github.com/sirupsen/logrus"
@@ -55,4 +56,11 @@ func GetPidPath(isSudo bool) string {
 		name = config.SudoPidPath
 	}
 	return filepath.Join(config.DaemonPath, name)
+}
+
+func GetDaemonCommand(isSudo bool) *exec.Cmd {
+	if isSudo {
+		return exec.Command("sudo", "--preserve-env", os.Args[0], "daemon", "--sudo")
+	}
+	return exec.Command(os.Args[0], "daemon")
 }
