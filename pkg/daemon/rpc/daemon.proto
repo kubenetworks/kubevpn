@@ -6,6 +6,7 @@ package rpc;
 
 service Daemon {
   rpc Connect (ConnectRequest) returns (stream ConnectResponse) {}
+  rpc Disconnect (DisconnectRequest) returns (stream DisconnectResponse) {}
   rpc Logs (LogRequest) returns (stream LogResponse) {}
   rpc Status (StatusRequest) returns (StatusResponse) {}
   rpc Quit (QuitRequest) returns (stream QuitResponse) {}
@@ -59,5 +60,12 @@ message LogRequest {
 }
 
 message LogResponse {
+  string message = 1;
+}
+
+message DisconnectRequest {
+}
+
+message DisconnectResponse {
   string message = 1;
 }

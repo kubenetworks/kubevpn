@@ -50,6 +50,7 @@ func NewKubeVPNCommand() *cobra.Command {
 			Message: "Client Commands:",
 			Commands: []*cobra.Command{
 				CmdConnect(factory),
+				CmdDisconnect(factory),
 				CmdQuit(factory),
 				CmdLogs(factory),
 				CmdProxy(factory),

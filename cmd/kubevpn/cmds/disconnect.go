@@ -1,9 +1,9 @@
 package cmds
 
 import (
+	"fmt"
 	"io"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
@@ -13,36 +13,37 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 )
 
-func CmdLogs(f cmdutil.Factory) *cobra.Command {
+func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "logs",
-		Short:   i18n.T("Logs to kubernetes cluster network"),
-		Long:    templates.LongDesc(i18n.T(`Logs to kubernetes cluster network`)),
+		Use:     "disconnect",
+		Short:   i18n.T("Disconnect from kubernetes cluster network"),
+		Long:    templates.LongDesc(i18n.T(`Disconnect from kubernetes cluster network`)),
 		Example: templates.Examples(i18n.T(``)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			// startup daemon process and sudo process
-			return startupDaemon(cmd.Context())
+			if daemon.GetClient(true) == nil {
+				return fmt.Errorf("sudo daemon not start")
+			}
+			return
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := daemon.GetClient(true).Logs(
+			client, err := daemon.GetClient(true).Disconnect(
 				cmd.Context(),
-				&rpc.LogRequest{},
+				&rpc.DisconnectRequest{},
 			)
 			if err != nil {
 				return err
 			}
-			var resp *rpc.LogResponse
+			var resp *rpc.DisconnectResponse
 			for {
 				resp, err = client.Recv()
 				if err == io.EOF {
-					break
+					return nil
 				} else if err == nil {
-					log.Println(resp.Message)
+					fmt.Print(resp.Message)
 				} else {
 					return err
 				}
 			}
-			return nil
 		},
 	}
 	return cmd
