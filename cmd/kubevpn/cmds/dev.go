@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/docker/cli/cli"
+	dockercli "github.com/docker/cli/cli"
 	"github.com/docker/cli/cli/command"
 	dockercomp "github.com/docker/cli/cli/command/completion"
 	"github.com/spf13/cobra"
@@ -20,14 +20,16 @@ import (
 )
 
 func CmdDev(f cmdutil.Factory) *cobra.Command {
+	cli, dockerCli, err := util.GetClient()
+	if err != nil {
+		panic(err)
+	}
 	var devOptions = &dev.Options{
 		Factory:   f,
 		NoProxy:   false,
 		ExtraCIDR: []string{},
-	}
-	_, dockerCli, err := dev.GetClient()
-	if err != nil {
-		panic(err)
+		Cli:       cli,
+		DockerCli: dockerCli,
 	}
 	var sshConf = &util.SshConfig{}
 	var transferImage bool
@@ -66,19 +68,12 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 		kubevpn dev --ssh-alias <alias> deployment/productpage
 
 `)),
-		Args:                  cli.RequiresMinArgs(1),
+		Args:                  dockercli.RequiresMinArgs(1),
 		DisableFlagsInUseLine: true,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if !util.IsAdmin() {
-				util.RunWithElevated()
-				os.Exit(0)
-			}
-			go util.StartupPProf(config.PProfPort)
-			util.InitLogger(config.Debug)
-			if transferImage {
-				if err := dev.TransferImage(cmd.Context(), sshConf, config.OriginImage, config.Image); err != nil {
-					return err
-				}
+			err = startupDaemon(cmd.Context())
+			if err != nil {
+				return err
 			}
 			// not support temporally
 			if devOptions.Engine == config.EngineGvisor {
@@ -91,7 +86,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 			if len(args) > 1 {
 				devOptions.Copts.Args = args[1:]
 			}
-			return dev.DoDev(devOptions, cmd.Flags(), f)
+			return dev.DoDev(cmd.Context(), devOptions, cmd.Flags(), f, transferImage)
 		},
 	}
 	cmd.Flags().SortFlags = false

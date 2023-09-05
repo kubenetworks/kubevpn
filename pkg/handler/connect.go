@@ -777,6 +777,10 @@ func SshJump(conf *util.SshConfig, flags *pflag.FlagSet) (err error) {
 // pod/productpage-without-controller --> pod/productpage-without-controller
 // service/productpage-without-pod --> controller/controllerName
 func (c *ConnectOptions) PreCheckResource() error {
+	if len(c.Workloads) == 0 {
+		return nil
+	}
+
 	list, err := util.GetUnstructuredObjectList(c.factory, c.Namespace, c.Workloads)
 	if err != nil {
 		return err

@@ -2,18 +2,19 @@ package cmds
 
 import (
 	"fmt"
+	"io"
+	"os"
+
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"io"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	utilcomp "k8s.io/kubectl/pkg/util/completion"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
-	defaultlog "log"
-	"os"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
-	"github.com/wencaiwulue/kubevpn/pkg/dev"
+	"github.com/wencaiwulue/kubevpn/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -53,28 +54,16 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			if !util.IsAdmin() {
-				util.RunWithElevated()
-				os.Exit(0)
-			}
-			go util.StartupPProf(config.PProfPort)
-			util.InitLogger(config.Debug)
-			defaultlog.Default().SetOutput(io.Discard)
-			if transferImage {
-				if err = dev.TransferImage(cmd.Context(), sshConf, config.OriginImage, config.Image); err != nil {
-					return err
-				}
+			if err = startupDaemon(cmd.Context()); err != nil {
+				return err
 			}
 			// not support temporally
 			if connect.Engine == config.EngineGvisor {
 				return fmt.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
 			}
-			return handler.SshJump(sshConf, cmd.Flags())
+			return err
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := connect.InitClient(f); err != nil {
-				return err
-			}
 			if len(args) == 0 {
 				fmt.Fprintf(os.Stdout, "You must specify the type of resource to proxy. %s\n\n", cmdutil.SuggestAPIResources("kubevpn"))
 				fullCmdName := cmd.Parent().CommandPath()
@@ -84,18 +73,49 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				}
 				return cmdutil.UsageErrorf(cmd, usageString)
 			}
-			connect.Workloads = args
-			err := connect.PreCheckResource()
+
+			bytes, err := util.ConvertToKubeconfigBytes(f)
 			if err != nil {
 				return err
 			}
-			if err = connect.DoConnect(cmd.Context()); err != nil {
-				log.Errorln(err)
-				connect.Cleanup()
-			} else {
-				util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
+			// todo 将 doConnect 方法封装？内部使用 client 发送到daemon？
+			client, err := daemon.GetClient(true).Connect(
+				cmd.Context(),
+				&rpc.ConnectRequest{
+					KubeconfigBytes:  string(bytes),
+					Namespace:        connect.Namespace,
+					Headers:          connect.Headers,
+					Workloads:        args,
+					ExtraCIDR:        connect.ExtraCIDR,
+					ExtraDomain:      connect.ExtraDomain,
+					UseLocalDNS:      connect.UseLocalDNS,
+					Engine:           string(connect.Engine),
+					Addr:             sshConf.Addr,
+					User:             sshConf.User,
+					Password:         sshConf.Password,
+					Keyfile:          sshConf.Keyfile,
+					ConfigAlias:      sshConf.ConfigAlias,
+					RemoteKubeconfig: sshConf.RemoteKubeconfig,
+					TransferImage:    transferImage,
+					Image:            config.Image,
+					Level:            int32(log.DebugLevel),
+				},
+			)
+			if err != nil {
+				return err
 			}
-			select {}
+			var resp *rpc.ConnectResponse
+			for {
+				resp, err = client.Recv()
+				if err == io.EOF {
+					break
+				} else if err == nil {
+					log.Print(resp.Message)
+				} else {
+					return err
+				}
+			}
+			return nil
 		},
 	}
 	cmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "Traffic with special headers with reverse it to local PC, you should startup your service after reverse workloads successfully, If not special, redirect all traffic to local PC, format is k=v, like: k1=v1,k2=v2")

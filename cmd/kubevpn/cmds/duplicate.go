@@ -5,16 +5,13 @@ import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"io"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	utilcomp "k8s.io/kubectl/pkg/util/completion"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
-	defaultlog "log"
 	"os"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
-	"github.com/wencaiwulue/kubevpn/pkg/dev"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -59,18 +56,6 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			if !util.IsAdmin() {
-				util.RunWithElevated()
-				os.Exit(0)
-			}
-			go util.StartupPProf(config.PProfPort)
-			util.InitLogger(config.Debug)
-			defaultlog.Default().SetOutput(io.Discard)
-			if transferImage {
-				if err = dev.TransferImage(cmd.Context(), sshConf, config.OriginImage, config.Image); err != nil {
-					return err
-				}
-			}
 			// not support temporally
 			if duplicateOptions.Engine == config.EngineGvisor {
 				return fmt.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
