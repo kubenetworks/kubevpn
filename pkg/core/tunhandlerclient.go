@@ -31,6 +31,12 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	}
 	d.SetTunInboundHandler(func(tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem) {
 		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			packetConn, err := getRemotePacketConn(ctx, h.chain)
 			if err != nil {
 				log.Debugf("[tun-client] %s - %s: %s", tun.LocalAddr(), remoteAddr, err)
