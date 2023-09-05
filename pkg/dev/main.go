@@ -17,7 +17,6 @@ import (
 
 	"github.com/containerd/containerd/platforms"
 	"github.com/docker/cli/cli/command"
-	"github.com/docker/cli/cli/flags"
 	"github.com/docker/cli/opts"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -45,6 +44,8 @@ import (
 	"k8s.io/kubectl/pkg/util/podutils"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/mesh"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
@@ -73,9 +74,13 @@ type Options struct {
 	DockerImage string
 	Options     RunOptions
 	Copts       *ContainerOptions
+
+	// inner
+	Cli       *client.Client
+	DockerCli *command.DockerCli
 }
 
-func (d *Options) Main(ctx context.Context, cli *client.Client, dockerCli *command.DockerCli, tempContainerConfig *containerConfig) error {
+func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig) error {
 	rand.Seed(time.Now().UnixNano())
 	object, err := util.GetUnstructuredObject(d.Factory, d.Namespace, d.Workload)
 	if err != nil {
@@ -133,7 +138,7 @@ func (d *Options) Main(ctx context.Context, cli *client.Client, dockerCli *comma
 	}
 	// check resource
 	var outOfMemory bool
-	outOfMemory, _ = checkOutOfMemory(templateSpec, cli)
+	outOfMemory, _ = checkOutOfMemory(templateSpec, d.Cli)
 	if outOfMemory {
 		return fmt.Errorf("your pod resource request is bigger than docker-desktop resource, please adjust your docker-desktop resource")
 	}
@@ -157,7 +162,7 @@ func (d *Options) Main(ctx context.Context, cli *client.Client, dockerCli *comma
 		}
 	} else {
 		var networkID string
-		networkID, err = createKubevpnNetwork(ctx, cli)
+		networkID, err = createKubevpnNetwork(ctx, d.Cli)
 		if err != nil {
 			return err
 		}
@@ -200,13 +205,13 @@ func (d *Options) Main(ctx context.Context, cli *client.Client, dockerCli *comma
 	}
 
 	handler.RollbackFuncList = append(handler.RollbackFuncList, func() {
-		_ = runConfigList.Remove(ctx, cli)
+		_ = runConfigList.Remove(ctx, d.Cli)
 	})
-	err = runConfigList.Run(ctx, volume, cli, dockerCli)
+	err = runConfigList.Run(ctx, volume, d.Cli, d.DockerCli)
 	if err != nil {
 		return err
 	}
-	return terminal(runConfigList[0].containerName, dockerCli)
+	return terminal(runConfigList[0].containerName, d.DockerCli)
 }
 
 type ConfigList []*RunConfig
@@ -232,26 +237,6 @@ func (l ConfigList) Remove(ctx context.Context, cli *client.Client) error {
 		return cli.NetworkRemove(ctx, config.ConfigMapPodTrafficManager)
 	}
 	return nil
-}
-
-func GetClient() (*client.Client, *command.DockerCli, error) {
-	cli, err := client.NewClientWithOpts(
-		client.FromEnv,
-		client.WithAPIVersionNegotiation(),
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("can not create docker client from env, err: %v", err)
-	}
-	var dockerCli *command.DockerCli
-	dockerCli, err = command.NewDockerCli(command.WithAPIClient(cli))
-	if err != nil {
-		return nil, nil, fmt.Errorf("can not create docker client from env, err: %v", err)
-	}
-	err = dockerCli.Initialize(flags.NewClientOptions())
-	if err != nil {
-		return nil, nil, fmt.Errorf("can not init docker client, err: %v", err)
-	}
-	return cli, dockerCli, nil
 }
 
 func (l ConfigList) Run(ctx context.Context, volume map[string][]mount.Mount, cli *client.Client, dockerCli *command.DockerCli) error {
@@ -370,22 +355,12 @@ func checkOutOfMemory(spec *v1.PodTemplateSpec, cli *client.Client) (outOfMemory
 	return
 }
 
-func DoDev(devOptions *Options, flags *pflag.FlagSet, f cmdutil.Factory) error {
-	ctx := context.Background()
-
-	connect := handler.ConnectOptions{
-		Headers:     devOptions.Headers,
-		Workloads:   []string{devOptions.Workload},
-		ExtraCIDR:   devOptions.ExtraCIDR,
-		ExtraDomain: devOptions.ExtraDomain,
-		Engine:      devOptions.Engine,
-	}
-	cli, dockerCli, err := GetClient()
+func DoDev(ctx context.Context, devOption *Options, flags *pflag.FlagSet, f cmdutil.Factory, transferImage bool) error {
+	cli, dockerCli, err := util.GetClient()
 	if err != nil {
 		return err
 	}
-
-	mode := container.NetworkMode(devOptions.Copts.netMode.NetworkMode())
+	mode := container.NetworkMode(devOption.Copts.netMode.NetworkMode())
 	if mode.IsContainer() {
 		var inspect types.ContainerJSON
 		inspect, err = cli.ContainerInspect(ctx, mode.ConnectedContainer())
@@ -404,129 +379,181 @@ func DoDev(devOptions *Options, flags *pflag.FlagSet, f cmdutil.Factory) error {
 			return err
 		}
 		log.Infof("hostname %s", hostname)
-		err = devOptions.Copts.netMode.Set(fmt.Sprintf("container:%s", hostname))
+		err = devOption.Copts.netMode.Set(fmt.Sprintf("container:%s", hostname))
 		if err != nil {
 			return err
 		}
 	}
 
-	if err = connect.InitClient(f); err != nil {
-		return err
-	}
-	if err = connect.PreCheckResource(); err != nil {
+	// connect to cluster, in container or host
+	err = devOption.doConnect(ctx, f, transferImage)
+	if err != nil {
 		return err
 	}
 
+	var tempContainerConfig *containerConfig
+	err = validatePullOpt(devOption.Options.Pull)
+	if err != nil {
+		return err
+	}
+	proxyConfig := dockerCli.ConfigFile().ParseProxyConfig(dockerCli.Client().DaemonHost(), opts.ConvertKVStringsToMapWithNil(devOption.Copts.env.GetAll()))
+	var newEnv []string
+	for k, v := range proxyConfig {
+		if v == nil {
+			newEnv = append(newEnv, k)
+		} else {
+			newEnv = append(newEnv, fmt.Sprintf("%s=%s", k, *v))
+		}
+	}
+	devOption.Copts.env = *opts.NewListOptsRef(&newEnv, nil)
+	tempContainerConfig, err = parse(flags, devOption.Copts, dockerCli.ServerInfo().OSType)
+	// just in case the parse does not exit
+	if err != nil {
+		return err
+	}
+	if err = validateAPIVersion(tempContainerConfig, dockerCli.Client().ClientVersion()); err != nil {
+		return err
+	}
+
+	return devOption.Main(ctx, tempContainerConfig)
+}
+
+func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, transferImage bool) error {
+	connect := &handler.ConnectOptions{
+		Headers:     d.Headers,
+		Workloads:   []string{d.Workload},
+		ExtraCIDR:   d.ExtraCIDR,
+		ExtraDomain: d.ExtraDomain,
+		Engine:      d.Engine,
+	}
+	if err := connect.InitClient(f); err != nil {
+		return err
+	}
+	d.Namespace = connect.Namespace
+
+	if err := connect.PreCheckResource(); err != nil {
+		return err
+	}
 	if len(connect.Workloads) > 1 {
 		return fmt.Errorf("can only dev one workloads at same time, workloads: %v", connect.Workloads)
 	}
 	if len(connect.Workloads) < 1 {
 		return fmt.Errorf("you must provide resource to dev, workloads : %v is invaild", connect.Workloads)
 	}
+	d.Workload = connect.Workloads[0]
 
-	var platform *specs.Platform
-	if devOptions.Options.Platform != "" {
-		p, err := platforms.Parse(devOptions.Options.Platform)
-		if err != nil {
-			return pkgerr.Wrap(err, "error parsing specified platform")
-		}
-		platform = &p
-	}
-
-	devOptions.Workload = connect.Workloads[0]
 	// if no-proxy is true, not needs to intercept traffic
-	if devOptions.NoProxy {
+	if d.NoProxy {
 		if len(connect.Headers) != 0 {
 			return fmt.Errorf("not needs to provide headers if is no-proxy mode")
 		}
 		connect.Workloads = []string{}
 	}
-	path, err := connect.GetKubeconfigPath()
-	if err != nil {
-		return err
-	}
-	switch devOptions.ConnectMode {
+
+	switch d.ConnectMode {
 	case ConnectModeHost:
-		defer func() {
-			connect.Cleanup()
-			select {}
+		go func() {
+			<-ctx.Done()
+			connectClient, err := daemon.GetClient(true).Disconnect(ctx, &rpc.DisconnectRequest{})
+			if err != nil {
+				log.Error(err)
+				return
+			}
+			for {
+				recv, err := connectClient.Recv()
+				if err == io.EOF {
+					return
+				} else if err != nil {
+					log.Error(err)
+					return
+				}
+				log.Print(recv.Message)
+			}
 		}()
-		if err = connect.DoConnect(ctx); err != nil {
-			log.Errorln(err)
+		kubeconfig, err := util.ConvertToKubeconfigBytes(f)
+		if err != nil {
 			return err
 		}
+		req := &rpc.ConnectRequest{
+			KubeconfigBytes: string(kubeconfig),
+			Namespace:       connect.Namespace,
+			Headers:         connect.Headers,
+			Workloads:       connect.Workloads,
+			ExtraCIDR:       connect.ExtraCIDR,
+			ExtraDomain:     connect.ExtraDomain,
+			UseLocalDNS:     connect.UseLocalDNS,
+			Engine:          string(connect.Engine),
+			TransferImage:   transferImage,
+			Image:           config.Image,
+			Level:           int32(log.DebugLevel),
+		}
+		connectClient, err := daemon.GetClient(true).Connect(ctx, req)
+		if err != nil {
+			return err
+		}
+		for {
+			recv, err := connectClient.Recv()
+			if err == io.EOF {
+				return nil
+			} else if err != nil {
+				return err
+			}
+			log.Print(recv.Message)
+		}
+
 	case ConnectModeContainer:
 		var connectContainer *RunConfig
-		connectContainer, err = createConnectContainer(*devOptions, connect, path, cli, platform)
+		path, err := connect.GetKubeconfigPath()
+		if err != nil {
+			return err
+		}
+		var platform *specs.Platform
+		if d.Options.Platform != "" {
+			p, err := platforms.Parse(d.Options.Platform)
+			if err != nil {
+				return pkgerr.Wrap(err, "error parsing specified platform")
+			}
+			platform = &p
+		}
+		connectContainer, err = createConnectContainer(d.NoProxy, *connect, path, d.Cli, platform)
 		if err != nil {
 			return err
 		}
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		var id string
-		if id, err = run(ctx, connectContainer, cli, dockerCli); err != nil {
+		if id, err = run(ctx, connectContainer, d.Cli, d.DockerCli); err != nil {
 			return err
 		}
 		h := interrupt.New(func(signal os.Signal) {
 			os.Exit(0)
 		}, func() {
 			cancel()
-			_ = cli.ContainerKill(ctx, id, "SIGTERM")
-			_ = runLogsSinceNow(dockerCli, id)
+			_ = d.Cli.ContainerKill(ctx, id, "SIGTERM")
+			_ = runLogsSinceNow(d.DockerCli, id)
 		})
 		go h.Run(func() error { select {} })
 		defer h.Close()
-		if err = runLogsWaitRunning(ctx, dockerCli, id); err != nil {
+		if err = runLogsWaitRunning(ctx, d.DockerCli, id); err != nil {
 			// interrupt by signal KILL
 			if ctx.Err() == context.Canceled {
 				return nil
 			}
 			return err
 		}
-		if err = devOptions.Copts.netMode.Set("container:" + id); err != nil {
+		if err = d.Copts.netMode.Set("container:" + id); err != nil {
 			return err
 		}
 	default:
-		return fmt.Errorf("unsupport connect mode: %s", devOptions.ConnectMode)
+		return fmt.Errorf("unsupport connect mode: %s", d.ConnectMode)
 	}
-
-	var tempContainerConfig *containerConfig
-	{
-		if err := validatePullOpt(devOptions.Options.Pull); err != nil {
-			return err
-		}
-		proxyConfig := dockerCli.ConfigFile().ParseProxyConfig(dockerCli.Client().DaemonHost(), opts.ConvertKVStringsToMapWithNil(devOptions.Copts.env.GetAll()))
-		newEnv := []string{}
-		for k, v := range proxyConfig {
-			if v == nil {
-				newEnv = append(newEnv, k)
-			} else {
-				newEnv = append(newEnv, fmt.Sprintf("%s=%s", k, *v))
-			}
-		}
-		devOptions.Copts.env = *opts.NewListOptsRef(&newEnv, nil)
-		tempContainerConfig, err = parse(flags, devOptions.Copts, dockerCli.ServerInfo().OSType)
-		// just in case the parse does not exit
-		if err != nil {
-			return err
-		}
-		if err = validateAPIVersion(tempContainerConfig, dockerCli.Client().ClientVersion()); err != nil {
-			return err
-		}
-	}
-
-	devOptions.Namespace = connect.Namespace
-	err = devOptions.Main(ctx, cli, dockerCli, tempContainerConfig)
-	if err != nil {
-		log.Errorln(err)
-	}
-	return err
+	return nil
 }
 
-func createConnectContainer(devOptions Options, connect handler.ConnectOptions, path string, cli *client.Client, platform *specs.Platform) (*RunConfig, error) {
+func createConnectContainer(devOptions bool, connect handler.ConnectOptions, path string, cli *client.Client, platform *specs.Platform) (*RunConfig, error) {
 	var entrypoint []string
-	if devOptions.NoProxy {
-		entrypoint = []string{"kubevpn", "connect", "-n", connect.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image}
+	if devOptions {
+		entrypoint = []string{"kubevpn", "connect", "--foreground", "-n", connect.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image}
 		for _, v := range connect.ExtraCIDR {
 			entrypoint = append(entrypoint, "--extra-cidr", v)
 		}
@@ -534,7 +561,7 @@ func createConnectContainer(devOptions Options, connect handler.ConnectOptions, 
 			entrypoint = append(entrypoint, "--extra-domain", v)
 		}
 	} else {
-		entrypoint = []string{"kubevpn", "proxy", connect.Workloads[0], "-n", connect.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image}
+		entrypoint = []string{"kubevpn", "proxy", connect.Workloads[0], "--foreground", "-n", connect.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image}
 		for k, v := range connect.Headers {
 			entrypoint = append(entrypoint, "--headers", fmt.Sprintf("%s=%s", k, v))
 		}

@@ -7,7 +7,6 @@ import (
 	defaultlog "log"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -20,7 +19,6 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/pkg/dev"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -111,7 +109,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	go util.StartupPProf(config.PProfPort)
 	defaultlog.Default().SetOutput(io.Discard)
 	if transferImage {
-		err := dev.TransferImage(ctx, sshConf, config.OriginImage, config.Image)
+		err = util.TransferImage(ctx, sshConf, config.OriginImage, req.Image)
 		if err != nil {
 			return err
 		}
@@ -120,17 +118,21 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if err != nil {
 		return err
 	}
-	runtime.GOMAXPROCS(0)
 	err = svr.connect.InitClient(InitFactory(req.KubeconfigBytes, req.Namespace))
 	if err != nil {
 		return err
 	}
-	if err = svr.connect.DoConnect(ctx); err != nil {
+	err = svr.connect.PreCheckResource()
+	if err != nil {
+		return err
+	}
+	err = svr.connect.DoConnect(ctx)
+	if err != nil {
 		log.Errorln(err)
 		svr.connect.Cleanup()
-	} else {
-		util.Print(out, "Now you can access resources in the kubernetes cluster, enjoy it :)")
+		return err
 	}
+	util.Print(out, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 	return nil
 }
 

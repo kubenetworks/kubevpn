@@ -42,7 +42,7 @@ func CmdGet(f cmdutil.Factory) *cobra.Command {
 			return startupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bytes, err := ConvertToKubeconfigBytes(f)
+			bytes, err := util.ConvertToKubeconfigBytes(f)
 			if err != nil {
 				return err
 			}

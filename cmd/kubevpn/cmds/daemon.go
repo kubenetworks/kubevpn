@@ -11,15 +11,15 @@ import (
 func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 	var opt = &daemon.SvrOption{}
 	cmd := &cobra.Command{
-		Use:                   "daemon",
-		DisableFlagsInUseLine: true,
-		Short:                 i18n.T(""),
-		Long:                  i18n.T(""),
-		Example:               ``,
+		Use:   "daemon",
+		Short: i18n.T("Startup GRPC server"),
+		Long:  i18n.T(`Startup GRPC server`),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer opt.Stop()
 			return opt.Start(cmd.Context())
 		},
+		Hidden:                true,
+		DisableFlagsInUseLine: true,
 	}
 	cmd.Flags().BoolVar(&opt.IsSudo, "sudo", false, "is sudo or not")
 	return cmd
