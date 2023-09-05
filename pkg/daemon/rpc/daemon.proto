@@ -10,6 +10,7 @@ service Daemon {
   rpc Logs (LogRequest) returns (stream LogResponse) {}
   rpc Status (StatusRequest) returns (StatusResponse) {}
   rpc Quit (QuitRequest) returns (stream QuitResponse) {}
+  rpc List (ListRequest) returns (ListResponse) {}
 }
 
 message ConnectRequest {
@@ -68,4 +69,11 @@ message DisconnectRequest {
 
 message DisconnectResponse {
   string message = 1;
+}
+
+message ListRequest {
+}
+
+message ListResponse {
+  repeated string Workloads = 1;
 }

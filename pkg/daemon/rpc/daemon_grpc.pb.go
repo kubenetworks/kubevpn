@@ -24,6 +24,7 @@ const (
 	Daemon_Logs_FullMethodName       = "/rpc.Daemon/Logs"
 	Daemon_Status_FullMethodName     = "/rpc.Daemon/Status"
 	Daemon_Quit_FullMethodName       = "/rpc.Daemon/Quit"
+	Daemon_List_FullMethodName       = "/rpc.Daemon/List"
 )
 
 // DaemonClient is the client API for Daemon service.
@@ -35,6 +36,7 @@ type DaemonClient interface {
 	Logs(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (Daemon_LogsClient, error)
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
 	Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error)
+	List(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error)
 }
 
 type daemonClient struct {
@@ -182,6 +184,15 @@ func (x *daemonQuitClient) Recv() (*QuitResponse, error) {
 	return m, nil
 }
 
+func (c *daemonClient) List(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error) {
+	out := new(ListResponse)
+	err := c.cc.Invoke(ctx, Daemon_List_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonServer is the server API for Daemon service.
 // All implementations must embed UnimplementedDaemonServer
 // for forward compatibility
@@ -191,6 +202,7 @@ type DaemonServer interface {
 	Logs(*LogRequest, Daemon_LogsServer) error
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
 	Quit(*QuitRequest, Daemon_QuitServer) error
+	List(context.Context, *ListRequest) (*ListResponse, error)
 	mustEmbedUnimplementedDaemonServer()
 }
 
@@ -212,6 +224,9 @@ func (UnimplementedDaemonServer) Status(context.Context, *StatusRequest) (*Statu
 }
 func (UnimplementedDaemonServer) Quit(*QuitRequest, Daemon_QuitServer) error {
 	return status.Errorf(codes.Unimplemented, "method Quit not implemented")
+}
+func (UnimplementedDaemonServer) List(context.Context, *ListRequest) (*ListResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method List not implemented")
 }
 func (UnimplementedDaemonServer) mustEmbedUnimplementedDaemonServer() {}
 
@@ -328,6 +343,24 @@ func (x *daemonQuitServer) Send(m *QuitResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Daemon_List_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).List(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_List_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).List(ctx, req.(*ListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Daemon_ServiceDesc is the grpc.ServiceDesc for Daemon service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -338,6 +371,10 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Status",
 			Handler:    _Daemon_Status_Handler,
+		},
+		{
+			MethodName: "List",
+			Handler:    _Daemon_List_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
