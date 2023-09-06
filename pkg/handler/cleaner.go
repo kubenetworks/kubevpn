@@ -40,7 +40,9 @@ func (c *ConnectOptions) Cleanup() {
 	log.Info("prepare to exit, cleaning up")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	c.cancel()
+	if c.cancel != nil {
+		c.cancel()
+	}
 	var ips []net.IP
 	if c.localTunIPv4 != nil && c.localTunIPv4.IP != nil {
 		ips = append(ips, c.localTunIPv4.IP)

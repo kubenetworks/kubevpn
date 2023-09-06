@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"google.golang.org/grpc/metadata"
 	"io"
 	"math"
 	"math/rand"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -91,10 +93,56 @@ type ConnectOptions struct {
 	extraHost    []dns.Entry
 }
 
-func (c *ConnectOptions) createRemoteInboundPod(ctx context.Context) (err error) {
-	c.localTunIPv4, c.localTunIPv6, err = c.dhcp.RentIPBaseNICAddress(ctx)
-	if err != nil {
-		return
+func (c *ConnectOptions) InitDHCP(ctx context.Context) error {
+	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
+	err := c.dhcp.initDHCP(ctx)
+	return err
+}
+
+func (c *ConnectOptions) RentInnerIP(ctx context.Context) (context.Context, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if ok {
+		ipv4s := md.Get(config.HeaderIPv4)
+		if len(ipv4s) != 0 {
+			_, c.localTunIPv4, _ = net.ParseCIDR(ipv4s[0])
+			if c.localTunIPv4 != nil {
+				log.Debugf("get ipv4 %s from context", c.localTunIPv4.String())
+			}
+		}
+		ipv6s := md.Get(config.HeaderIPv6)
+		if len(ipv6s) != 0 {
+			_, c.localTunIPv6, _ = net.ParseCIDR(ipv6s[0])
+			if c.localTunIPv6 != nil {
+				log.Debugf("get ipv6 %s from context", c.localTunIPv6.String())
+			}
+		}
+	}
+	if c.dhcp == nil {
+		if err := c.InitDHCP(ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	var err error
+	if c.localTunIPv4 == nil || c.localTunIPv6 == nil {
+		c.localTunIPv4, c.localTunIPv6, err = c.dhcp.RentIPBaseNICAddress(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ctx = metadata.AppendToOutgoingContext(ctx,
+			config.HeaderIPv4, c.localTunIPv4.String(),
+			config.HeaderIPv6, c.localTunIPv6.String(),
+		)
+	}
+	return ctx, nil
+}
+
+func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error) {
+	if c.localTunIPv4 == nil || c.localTunIPv6 == nil {
+		c.localTunIPv4, c.localTunIPv6, err = c.dhcp.RentIPBaseNICAddress(ctx)
+		if err != nil {
+			return
+		}
 	}
 
 	for _, workload := range c.Workloads {
@@ -143,8 +191,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	_ = os.Setenv(config.EnvKubeVPNTransportEngine, string(c.Engine))
-	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
-	if err = c.dhcp.initDHCP(c.ctx); err != nil {
+	if err = c.InitDHCP(c.ctx); err != nil {
 		return
 	}
 	c.addCleanUpResourceHandler()
@@ -157,9 +204,9 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	if err = c.setImage(c.ctx); err != nil {
 		return
 	}
-	if err = c.createRemoteInboundPod(c.ctx); err != nil {
-		return
-	}
+	//if err = c.CreateRemoteInboundPod(c.ctx); err != nil {
+	//	return
+	//}
 	rawTCPForwardPort := util.GetAvailableTCPPortOrDie()
 	gvisorTCPForwardPort := util.GetAvailableTCPPortOrDie()
 	gvisorUDPForwardPort := util.GetAvailableTCPPortOrDie()
@@ -1307,4 +1354,11 @@ func (c *ConnectOptions) heartbeats(ctx context.Context) {
 			}
 		}()
 	}
+}
+
+func (c *ConnectOptions) Equal(a *ConnectOptions) bool {
+	return c.UseLocalDNS == a.UseLocalDNS &&
+		c.Engine == a.Engine &&
+		reflect.DeepEqual(c.ExtraDomain, a.ExtraDomain) &&
+		reflect.DeepEqual(c.ExtraCIDR, a.ExtraCIDR)
 }

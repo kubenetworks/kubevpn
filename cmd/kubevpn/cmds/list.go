@@ -35,9 +35,7 @@ func CmdList(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			for _, workload := range client.Workloads {
-				fmt.Println(workload)
-			}
+			fmt.Println(client.GetMessage())
 			return nil
 		},
 	}

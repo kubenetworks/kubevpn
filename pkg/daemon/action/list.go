@@ -3,9 +3,11 @@ package action
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
+	yaml2 "sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/controlplane"
@@ -27,11 +29,14 @@ func (svr *Server) List(ctx context.Context, req *rpc.ListRequest) (*rpc.ListRes
 			return nil, err
 		}
 	}
-	var workloads []string
 	for _, virtual := range v {
-		workloads = append(workloads, virtual.Uid)
+		// deployments.apps.ry-server --> deployments.apps/ry-server
+		lastIndex := strings.LastIndex(virtual.Uid, ".")
+		virtual.Uid = virtual.Uid[:lastIndex] + "/" + virtual.Uid[lastIndex+1:]
 	}
-	return &rpc.ListResponse{
-		Workloads: workloads,
-	}, nil
+	bytes, err := yaml2.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return &rpc.ListResponse{Message: string(bytes)}, nil
 }
