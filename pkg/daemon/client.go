@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -19,17 +20,18 @@ import (
 )
 
 func GetClient(isSudo bool) rpc.DaemonClient {
-	port, err := os.ReadFile(GetPortPath(isSudo))
+	p, err := os.ReadFile(GetPortPath(isSudo))
 	if err != nil {
 		return nil
 	}
-	listen, err := net.Listen("tcp", fmt.Sprintf(":%s", string(port)))
+	port := strings.TrimSpace(string(p))
+	listen, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
 	if err == nil {
 		_ = listen.Close()
 		return nil
 	}
 	ctx := context.Background()
-	conn, err := grpc.DialContext(ctx, fmt.Sprintf("localhost:%s", string(port)), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.DialContext(ctx, fmt.Sprintf("localhost:%s", port), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Errorf("cannot connect to server: %v", err)
 		return nil

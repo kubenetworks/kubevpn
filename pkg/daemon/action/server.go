@@ -10,7 +10,9 @@ import (
 type Server struct {
 	rpc.UnimplementedDaemonServer
 
-	Cancel func()
+	Cancel    func()
+	GetClient func(isSudo bool) rpc.DaemonClient
+	IsSudo    bool
 
 	t       time.Time
 	connect *handler.ConnectOptions
