@@ -53,26 +53,31 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	d.Start(ctx)
 }
 
-func getRemotePacketConn(ctx context.Context, chain *Chain) (net.PacketConn, error) {
-	var packetConn net.PacketConn
+func getRemotePacketConn(ctx context.Context, chain *Chain) (packetConn net.PacketConn, err error) {
+	defer func() {
+		if err != nil && packetConn != nil {
+			_ = packetConn.Close()
+		}
+	}()
 	if !chain.IsEmpty() {
-		cc, err := chain.DialContext(ctx)
+		var cc net.Conn
+		cc, err = chain.DialContext(ctx)
 		if err != nil {
-			return nil, err
+			return
 		}
 		var ok bool
 		if packetConn, ok = cc.(net.PacketConn); !ok {
-			return nil, errors.New("not a packet connection")
+			err = errors.New("not a packet connection")
+			return
 		}
 	} else {
-		var err error
 		var lc net.ListenConfig
 		packetConn, err = lc.ListenPacket(ctx, "udp", "")
 		if err != nil {
-			return nil, err
+			return
 		}
 	}
-	return packetConn, nil
+	return
 }
 
 func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem, packetConn net.PacketConn, remoteAddr net.Addr) error {

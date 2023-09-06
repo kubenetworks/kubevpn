@@ -1,6 +1,7 @@
 package action
 
 import (
+	"fmt"
 	"io"
 	"time"
 
@@ -25,6 +26,31 @@ func newDisconnectWarp(server rpc.Daemon_DisconnectServer) io.Writer {
 }
 
 func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_DisconnectServer) error {
+	if !svr.IsSudo {
+		cli := svr.GetClient(true)
+		if cli != nil {
+			return fmt.Errorf("sudo daemon not start")
+		}
+		connResp, err := cli.Disconnect(resp.Context(), req)
+		if err != nil {
+			return err
+		}
+		for {
+			recv, err := connResp.Recv()
+			if err == io.EOF {
+				svr.t = time.Time{}
+				svr.connect = nil
+				return nil
+			} else if err != nil {
+				return err
+			}
+			err = resp.Send(recv)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	out := newDisconnectWarp(resp)
 	origin := log.StandardLogger().Out
 	defer func() {

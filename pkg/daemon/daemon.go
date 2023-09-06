@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"time"
@@ -55,7 +56,9 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	}
 	defer cleanup()
 	reflection.Register(o.svr)
-	rpc.RegisterDaemonServer(o.svr, &action.Server{Cancel: o.Stop})
+	// [tun-client] 223.254.0.101 - 127.0.0.1:8422: dial tcp 127.0.0.1:55407: connect: can't assign requested address
+	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
+	rpc.RegisterDaemonServer(o.svr, &action.Server{Cancel: o.Stop, IsSudo: o.IsSudo, GetClient: GetClient})
 	o.uptime = time.Now().Unix()
 	return o.svr.Serve(lis)
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -70,13 +71,22 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				Image:            config.Image,
 				Level:            int32(log.DebugLevel),
 			}
-			err = Connect(cmd.Context(), daemon.GetClient(true), req)
+			stream, err := daemon.GetClient(false).Connect(cmd.Context(), req)
 			if err != nil {
 				return err
 			}
+			for {
+				resp, err := stream.Recv()
+				if err == io.EOF {
+					break
+				} else if err != nil {
+					return err
+				}
+				log.Print(resp.GetMessage())
+			}
 			// hangup
 			if foreground {
-				select {}
+				<-cmd.Context().Done()
 			}
 			return nil
 		},
@@ -118,9 +128,12 @@ func runDaemon(ctx context.Context, isSudo bool) error {
 		return err
 	}
 	pidPath := daemon.GetPidPath(isSudo)
-	if file, err := os.ReadFile(pidPath); err == nil {
-		if pid, err := strconv.Atoi(string(file)); err == nil {
-			if p, err := os.FindProcess(pid); err == nil {
+	var file []byte
+	if file, err = os.ReadFile(pidPath); err == nil {
+		var pid int
+		if pid, err = strconv.Atoi(strings.TrimSpace(string(file))); err == nil {
+			var p *os.Process
+			if p, err = os.FindProcess(pid); err == nil {
 				if err = p.Kill(); err != nil && err != os.ErrProcessDone {
 					log.Error(err)
 				}
@@ -152,23 +165,12 @@ func runDaemon(ctx context.Context, isSudo bool) error {
 			break
 		}
 	}
-	return err
-}
 
-func Connect(ctx context.Context, client rpc.DaemonClient, req *rpc.ConnectRequest) error {
-	stream, err := client.Connect(ctx, req)
-	if err != nil {
-		return err
+	client := daemon.GetClient(isSudo)
+	if client == nil {
+		return fmt.Errorf("can not get daemon server client")
 	}
-	for {
-		resp, err := stream.Recv()
-		if err == io.EOF {
-			break
-		} else if err == nil {
-			log.Print(resp.GetMessage())
-		} else {
-			return err
-		}
-	}
-	return nil
+	_, err = client.Status(ctx, &rpc.StatusRequest{})
+
+	return err
 }

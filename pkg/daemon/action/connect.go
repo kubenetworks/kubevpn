@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	defaultlog "log"
 	"os"
@@ -68,6 +69,10 @@ func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 }
 
 func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) error {
+	if !svr.IsSudo {
+		return svr.redirectToSudoDaemon(req, resp)
+	}
+
 	out := newWarp(resp)
 	file, err := os.OpenFile(GetDaemonLog(), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
 	if err != nil {
@@ -133,6 +138,61 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		return err
 	}
 	util.Print(out, "Now you can access resources in the kubernetes cluster, enjoy it :)")
+	return nil
+}
+
+func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) error {
+	cli := svr.GetClient(true)
+	if cli == nil {
+		return fmt.Errorf("sudo daemon not start")
+	}
+	connResp, err := cli.Connect(resp.Context(), req)
+	if err != nil {
+		return err
+	}
+	for {
+		recv, err := connResp.Recv()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return err
+		}
+		err = resp.Send(recv)
+		if err != nil {
+			return err
+		}
+	}
+
+	svr.t = time.Now()
+	svr.connect = &handler.ConnectOptions{
+		Namespace:   req.Namespace,
+		Headers:     req.Headers,
+		Workloads:   req.Workloads,
+		ExtraCIDR:   req.ExtraCIDR,
+		ExtraDomain: req.ExtraDomain,
+		UseLocalDNS: req.UseLocalDNS,
+		Engine:      config.Engine(req.Engine),
+	}
+	var sshConf = &util.SshConfig{
+		Addr:             req.Addr,
+		User:             req.User,
+		Password:         req.Password,
+		Keyfile:          req.Keyfile,
+		ConfigAlias:      req.ConfigAlias,
+		RemoteKubeconfig: req.RemoteKubeconfig,
+	}
+	err = handler.SshJump(sshConf, nil)
+	if err != nil {
+		return err
+	}
+	err = svr.connect.InitClient(InitFactory(req.KubeconfigBytes, req.Namespace))
+	if err != nil {
+		return err
+	}
+	err = svr.connect.PreCheckResource()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

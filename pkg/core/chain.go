@@ -49,7 +49,8 @@ func (c *Chain) dial(ctx context.Context) (net.Conn, error) {
 		return nil, err
 	}
 
-	cc, err := c.Node().Client.ConnectContext(ctx, conn)
+	var cc net.Conn
+	cc, err = c.Node().Client.ConnectContext(ctx, conn)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err

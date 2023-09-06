@@ -37,7 +37,7 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
 				if err == io.EOF {
 					break
 				} else if err == nil {
-					log.Println(resp.Message)
+					log.Print(resp.Message)
 				} else {
 					return err
 				}
