@@ -72,6 +72,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if !svr.IsSudo {
 		return svr.redirectToSudoDaemon(req, resp)
 	}
+	ctx := resp.Context()
 
 	out := newWarp(resp)
 	file, err := os.OpenFile(GetDaemonLog(), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
@@ -84,9 +85,8 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		log.SetOutput(io.MultiWriter(file))
 		log.SetLevel(log.DebugLevel)
 	}()
-	ctx := context.Background()
 	if !svr.t.IsZero() {
-		log.Debugf("already connect to kubeconfig: %s, namespace: %s", "", req.Namespace)
+		log.Debugf("already connect to another cluster, you can disconnect this connect by command `kubevpn disconnect`")
 		// todo define already connect error?
 		return errors.New("already connected")
 	}
@@ -131,7 +131,12 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if err != nil {
 		return err
 	}
-	err = svr.connect.DoConnect(ctx)
+	_, err = svr.connect.RentInnerIP(ctx)
+	if err != nil {
+		return err
+	}
+
+	err = svr.connect.DoConnect(context.Background())
 	if err != nil {
 		log.Errorln(err)
 		svr.connect.Cleanup()
@@ -146,7 +151,41 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	if cli == nil {
 		return fmt.Errorf("sudo daemon not start")
 	}
-	connResp, err := cli.Connect(resp.Context(), req)
+	connect := &handler.ConnectOptions{
+		Namespace:   req.Namespace,
+		Headers:     req.Headers,
+		Workloads:   req.Workloads,
+		ExtraCIDR:   req.ExtraCIDR,
+		ExtraDomain: req.ExtraDomain,
+		UseLocalDNS: req.UseLocalDNS,
+		Engine:      config.Engine(req.Engine),
+	}
+	var sshConf = &util.SshConfig{
+		Addr:             req.Addr,
+		User:             req.User,
+		Password:         req.Password,
+		Keyfile:          req.Keyfile,
+		ConfigAlias:      req.ConfigAlias,
+		RemoteKubeconfig: req.RemoteKubeconfig,
+	}
+	err := handler.SshJump(sshConf, nil)
+	if err != nil {
+		return err
+	}
+	err = connect.InitClient(InitFactory(req.KubeconfigBytes, req.Namespace))
+	if err != nil {
+		return err
+	}
+	err = connect.PreCheckResource()
+	if err != nil {
+		return err
+	}
+	ctx, err := connect.RentInnerIP(resp.Context())
+	if err != nil {
+		return err
+	}
+
+	connResp, err := cli.Connect(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -164,35 +203,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	}
 
 	svr.t = time.Now()
-	svr.connect = &handler.ConnectOptions{
-		Namespace:   req.Namespace,
-		Headers:     req.Headers,
-		Workloads:   req.Workloads,
-		ExtraCIDR:   req.ExtraCIDR,
-		ExtraDomain: req.ExtraDomain,
-		UseLocalDNS: req.UseLocalDNS,
-		Engine:      config.Engine(req.Engine),
-	}
-	var sshConf = &util.SshConfig{
-		Addr:             req.Addr,
-		User:             req.User,
-		Password:         req.Password,
-		Keyfile:          req.Keyfile,
-		ConfigAlias:      req.ConfigAlias,
-		RemoteKubeconfig: req.RemoteKubeconfig,
-	}
-	err = handler.SshJump(sshConf, nil)
-	if err != nil {
-		return err
-	}
-	err = svr.connect.InitClient(InitFactory(req.KubeconfigBytes, req.Namespace))
-	if err != nil {
-		return err
-	}
-	err = svr.connect.PreCheckResource()
-	if err != nil {
-		return err
-	}
+	svr.connect = connect
 	return nil
 }
 
