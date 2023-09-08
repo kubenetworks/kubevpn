@@ -2,16 +2,16 @@ package daemon
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/admin"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/action"
@@ -32,18 +32,13 @@ type SvrOption struct {
 func (o *SvrOption) Start(ctx context.Context) error {
 	o.ctx, o.cancel = context.WithCancel(ctx)
 	var lc net.ListenConfig
-	lis, err := lc.Listen(o.ctx, "tcp", fmt.Sprintf(":%d", o.Port))
+	lis, err := lc.Listen(o.ctx, "unix", GetPortPath(o.IsSudo))
 	if err != nil {
 		return err
 	}
 	defer lis.Close()
 
-	portPath := GetPortPath(o.IsSudo)
-	err = os.WriteFile(portPath, []byte(strconv.Itoa(lis.Addr().(*net.TCPAddr).Port)), os.ModePerm)
-	if err != nil {
-		return err
-	}
-	err = os.Chmod(portPath, os.ModePerm)
+	err = os.Chmod(GetPortPath(o.IsSudo), os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -54,6 +49,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		log.Errorf("failed to register admin: %v", err)
 		return err
 	}
+	grpc_health_v1.RegisterHealthServer(o.svr, health.NewServer())
 	defer cleanup()
 	reflection.Register(o.svr)
 	// [tun-client] 223.254.0.101 - 127.0.0.1:8422: dial tcp 127.0.0.1:55407: connect: can't assign requested address
@@ -69,4 +65,6 @@ func (o *SvrOption) Stop() {
 		//o.svr.GracefulStop()
 		o.svr.Stop()
 	}
+	path := GetPortPath(o.IsSudo)
+	_ = os.Remove(path)
 }

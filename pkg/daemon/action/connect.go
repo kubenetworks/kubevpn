@@ -57,7 +57,10 @@ func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 	if err != nil {
 		return nil
 	}
-	temp.Close()
+	err = temp.Close()
+	if err != nil {
+		return nil
+	}
 	err = os.WriteFile(temp.Name(), []byte(kubeconfigBytes), os.ModePerm)
 	if err != nil {
 		return nil

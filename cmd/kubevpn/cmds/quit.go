@@ -22,10 +22,10 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
 		Example: templates.Examples(i18n.T(``)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			if daemon.GetClient(false) == nil {
-				return fmt.Errorf("daemon not start")
+				fmt.Println("daemon not start")
 			}
 			if daemon.GetClient(true) == nil {
-				return fmt.Errorf("sudo daemon not start")
+				fmt.Println("sudo daemon not start")
 			}
 			return
 		},
@@ -39,10 +39,11 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
 }
 
 func quit(ctx context.Context, isSudo bool) error {
-	client, err := daemon.GetClient(isSudo).Quit(
-		ctx,
-		&rpc.QuitRequest{},
-	)
+	cli := daemon.GetClient(isSudo)
+	if cli == nil {
+		return nil
+	}
+	client, err := cli.Quit(ctx, &rpc.QuitRequest{})
 	if err != nil {
 		return err
 	}
