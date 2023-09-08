@@ -16,6 +16,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/action"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
 type SvrOption struct {
@@ -26,19 +27,20 @@ type SvrOption struct {
 	svr    *grpc.Server
 
 	IsSudo bool
-	Port   int
 }
 
 func (o *SvrOption) Start(ctx context.Context) error {
+	util.InitLogger(true)
+
 	o.ctx, o.cancel = context.WithCancel(ctx)
 	var lc net.ListenConfig
-	lis, err := lc.Listen(o.ctx, "unix", GetPortPath(o.IsSudo))
+	lis, err := lc.Listen(o.ctx, "unix", GetSockPath(o.IsSudo))
 	if err != nil {
 		return err
 	}
 	defer lis.Close()
 
-	err = os.Chmod(GetPortPath(o.IsSudo), os.ModePerm)
+	err = os.Chmod(GetSockPath(o.IsSudo), os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -65,6 +67,6 @@ func (o *SvrOption) Stop() {
 		//o.svr.GracefulStop()
 		o.svr.Stop()
 	}
-	path := GetPortPath(o.IsSudo)
+	path := GetSockPath(o.IsSudo)
 	_ = os.Remove(path)
 }

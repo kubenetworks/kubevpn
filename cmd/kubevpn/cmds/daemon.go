@@ -15,10 +15,6 @@ func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 		Short: i18n.T("Startup GRPC server"),
 		Long:  i18n.T(`Startup GRPC server`),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opt.Port = 50123
-			if opt.IsSudo {
-				opt.Port = 50124
-			}
 			defer opt.Stop()
 			return opt.Start(cmd.Context())
 		},

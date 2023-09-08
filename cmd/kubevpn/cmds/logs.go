@@ -21,7 +21,7 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
 		Example: templates.Examples(i18n.T(``)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			// startup daemon process and sudo process
-			return startupDaemon(cmd.Context())
+			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := daemon.GetClient(true).Logs(

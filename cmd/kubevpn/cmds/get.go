@@ -39,7 +39,7 @@ func CmdGet(f cmdutil.Factory) *cobra.Command {
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			// startup daemon process and sudo process
-			return startupDaemon(cmd.Context())
+			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			bytes, err := util.ConvertToKubeconfigBytes(f)

@@ -38,5 +38,7 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 	for _, workload := range req.GetWorkloads() {
 		println(workload)
 	}
+	svr.t = time.Time{}
+	svr.connect = nil
 	return nil
 }

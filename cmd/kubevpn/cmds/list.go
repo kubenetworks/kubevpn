@@ -19,13 +19,7 @@ func CmdList(f cmdutil.Factory) *cobra.Command {
 		Long:    templates.LongDesc(i18n.T(`Disconnect from kubernetes cluster network`)),
 		Example: templates.Examples(i18n.T(``)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			if daemon.GetClient(false) == nil {
-				return fmt.Errorf("daemon not start")
-			}
-			if daemon.GetClient(true) == nil {
-				return fmt.Errorf("sudo daemon not start")
-			}
-			return
+			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := daemon.GetClient(true).List(

@@ -21,13 +21,7 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
 		Long:    templates.LongDesc(i18n.T(`Quit to kubernetes cluster network`)),
 		Example: templates.Examples(i18n.T(``)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			if daemon.GetClient(false) == nil {
-				fmt.Println("daemon not start")
-			}
-			if daemon.GetClient(true) == nil {
-				fmt.Println("sudo daemon not start")
-			}
-			return
+			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_ = quit(cmd.Context(), true)

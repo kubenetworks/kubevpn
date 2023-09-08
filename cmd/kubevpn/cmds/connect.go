@@ -2,12 +2,8 @@ package cmds
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"os"
-	"strconv"
-	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -47,7 +43,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			// startup daemon process and sudo process
-			return startupDaemon(cmd.Context())
+			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			bytes, err := util.ConvertToKubeconfigBytes(f)
@@ -71,7 +67,8 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				Image:            config.Image,
 				Level:            int32(log.DebugLevel),
 			}
-			stream, err := daemon.GetClient(false).Connect(cmd.Context(), req)
+			cli := daemon.GetClient(false)
+			stream, err := cli.Connect(cmd.Context(), req)
 			if err != nil {
 				return err
 			}
@@ -86,7 +83,26 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			}
 			// hangup
 			if foreground {
+				// disconnect from cluster network
 				<-cmd.Context().Done()
+
+				now := time.Now()
+				stream, err := cli.Disconnect(context.Background(), &rpc.DisconnectRequest{})
+				fmt.Printf("call api disconnect use %s\n", time.Now().Sub(now).String())
+				if err != nil {
+					return err
+				}
+				var resp *rpc.DisconnectResponse
+				for {
+					resp, err = stream.Recv()
+					if err == io.EOF {
+						return nil
+					} else if err == nil {
+						fmt.Print(resp.Message)
+					} else {
+						return err
+					}
+				}
 			}
 			return nil
 		},
@@ -102,75 +118,4 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 
 	addSshFlags(cmd, sshConf)
 	return cmd
-}
-
-func startupDaemon(ctx context.Context) error {
-	// normal daemon
-	if daemon.GetClient(false) == nil {
-		if err := runDaemon(ctx, false); err != nil {
-			return err
-		}
-	}
-
-	// sudo daemon
-	if daemon.GetClient(true) == nil {
-		if err := runDaemon(ctx, true); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func runDaemon(ctx context.Context, isSudo bool) error {
-	portPath := daemon.GetPortPath(isSudo)
-	err := os.Remove(portPath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	pidPath := daemon.GetPidPath(isSudo)
-	var file []byte
-	if file, err = os.ReadFile(pidPath); err == nil {
-		var pid int
-		if pid, err = strconv.Atoi(strings.TrimSpace(string(file))); err == nil {
-			var p *os.Process
-			if p, err = os.FindProcess(pid); err == nil {
-				if err = p.Kill(); err != nil && err != os.ErrProcessDone {
-					log.Error(err)
-				}
-			}
-		}
-	}
-	cmd := daemon.GetDaemonCommand(isSudo)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err = cmd.Start(); err != nil {
-		return err
-	}
-	err = os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), os.ModePerm)
-	if err != nil {
-		return err
-	}
-	err = os.Chmod(daemon.GetPidPath(false), os.ModePerm)
-	if err != nil {
-		return err
-	}
-	go func() {
-		cmd.Wait()
-	}()
-
-	for ctx.Err() == nil {
-		time.Sleep(time.Millisecond * 50)
-		if _, err = os.Stat(portPath); err == nil {
-			break
-		}
-	}
-
-	client := daemon.GetClient(isSudo)
-	if client == nil {
-		return fmt.Errorf("can not get daemon server client")
-	}
-	_, err = client.Status(ctx, &rpc.StatusRequest{})
-
-	return err
 }

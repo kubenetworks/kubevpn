@@ -6,8 +6,8 @@ const (
 	HOME   = ".kubevpn"
 	Daemon = "daemon"
 
-	PortPath     = "daemon_port"
-	SudoPortPath = "sudo_daemon_port"
+	SockPath     = "daemon.sock"
+	SudoSockPath = "sudo_daemon.sock"
 
 	PidPath     = "daemon_pid"
 	SudoPidPath = "sudo_daemon_pid"

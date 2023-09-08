@@ -54,7 +54,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			if err = startupDaemon(cmd.Context()); err != nil {
+			if err = daemon.StartupDaemon(cmd.Context()); err != nil {
 				return err
 			}
 			// not support temporally

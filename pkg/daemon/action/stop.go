@@ -33,6 +33,7 @@ func (svr *Server) Stop(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 	origin := log.StandardLogger().Out
 	defer func() {
 		log.SetOutput(origin)
+		log.SetLevel(log.DebugLevel)
 	}()
 	multiWriter := io.MultiWriter(origin, out)
 	log.SetOutput(multiWriter)

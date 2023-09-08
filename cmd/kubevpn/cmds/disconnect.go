@@ -3,6 +3,7 @@ package cmds
 import (
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -20,19 +21,18 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 		Long:    templates.LongDesc(i18n.T(`Disconnect from kubernetes cluster network`)),
 		Example: templates.Examples(i18n.T(``)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			if daemon.GetClient(false) == nil {
-				return fmt.Errorf("daemon not start")
-			}
-			if daemon.GetClient(true) == nil {
-				return fmt.Errorf("sudo daemon not start")
-			}
-			return
+			t := time.Now()
+			err = daemon.StartupDaemon(cmd.Context())
+			fmt.Printf("exec prerun use %s\n", time.Now().Sub(t).String())
+			return err
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			now := time.Now()
 			client, err := daemon.GetClient(false).Disconnect(
 				cmd.Context(),
 				&rpc.DisconnectRequest{},
 			)
+			fmt.Printf("call api disconnect use %s\n", time.Now().Sub(now).String())
 			if err != nil {
 				return err
 			}
