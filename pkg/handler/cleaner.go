@@ -54,11 +54,6 @@ func (c *ConnectOptions) Cleanup() {
 	if err != nil {
 		log.Errorf("failed to release ip to dhcp, err: %v", err)
 	}
-	for _, function := range RollbackFuncList {
-		if function != nil {
-			function()
-		}
-	}
 	_ = c.clientset.CoreV1().Pods(c.Namespace).Delete(ctx, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
 	var count int
 	count, err = updateRefCount(ctx, c.clientset.CoreV1().ConfigMaps(c.Namespace), config.ConfigMapPodTrafficManager, -1)
@@ -71,6 +66,11 @@ func (c *ConnectOptions) Cleanup() {
 	}
 	if err != nil {
 		log.Errorf("can not update ref-count: %v", err)
+	}
+	for _, function := range RollbackFuncList {
+		if function != nil {
+			function()
+		}
 	}
 	RollbackFuncList = RollbackFuncList[:]
 	dns.CancelDNS()

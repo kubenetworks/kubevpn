@@ -132,7 +132,10 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		Name:     "kubeconfig",
 		DefValue: tempFile,
 	})
-	err = handler.SshJump(context.Background(), sshConf, flags)
+
+	sshCtx, sshCancel := context.WithCancel(context.Background())
+	handler.RollbackFuncList = append(handler.RollbackFuncList, sshCancel)
+	err = handler.SshJump(sshCtx, sshConf, flags)
 	if err != nil {
 		return err
 	}
@@ -150,7 +153,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	}
 
 	config.Image = req.Image
-	err = svr.connect.DoConnect(context.Background())
+	err = svr.connect.DoConnect(sshCtx)
 	if err != nil {
 		log.Errorln(err)
 		svr.connect.Cleanup()
@@ -191,7 +194,9 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		Name:     "kubeconfig",
 		DefValue: tempFile,
 	})
-	err = handler.SshJump(context.Background(), sshConf, flags)
+	sshCtx, sshCancel := context.WithCancel(context.Background())
+	handler.RollbackFuncList = append(handler.RollbackFuncList, sshCancel)
+	err = handler.SshJump(sshCtx, sshConf, flags)
 	if err != nil {
 		return err
 	}

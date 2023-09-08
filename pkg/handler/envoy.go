@@ -30,9 +30,9 @@ import (
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
 
 // InjectVPNAndEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
-func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workloads string, c util.PodRouteConfig, headers map[string]string) (err error) {
+func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workload string, c util.PodRouteConfig, headers map[string]string) (err error) {
 	var object *runtimeresource.Info
-	object, err = util.GetUnstructuredObject(factory, namespace, workloads)
+	object, err = util.GetUnstructuredObject(factory, namespace, workload)
 	if err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	if containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
 		// add rollback func to remove envoy config
 		RollbackFuncList = append(RollbackFuncList, func() {
-			err := UnPatchContainer(factory, clientset, namespace, workloads, headers)
+			err := UnPatchContainer(factory, clientset, namespace, workload, headers)
 			if err != nil {
 				log.Error(err)
 			}
@@ -108,14 +108,14 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	}
 
 	RollbackFuncList = append(RollbackFuncList, func() {
-		if err := UnPatchContainer(factory, clientset, namespace, workloads, headers); err != nil {
+		if err := UnPatchContainer(factory, clientset, namespace, workload, headers); err != nil {
 			log.Error(err)
 		}
 	})
 	if err != nil {
 		return err
 	}
-	err = util.RolloutStatus(ctx1, factory, namespace, workloads, time.Minute*60)
+	err = util.RolloutStatus(ctx1, factory, namespace, workload, time.Minute*60)
 	return err
 }
 

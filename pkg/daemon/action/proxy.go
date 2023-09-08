@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"fmt"
+	"github.com/spf13/pflag"
 	"io"
 	"os"
 	"time"
@@ -44,7 +45,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		log.SetOutput(os.Stdout)
 		log.SetLevel(log.DebugLevel)
 	}()
-	ctx := context.Background()
+	ctx := resp.Context()
 	util.InitLogger(false)
 	connect := &handler.ConnectOptions{
 		Namespace:   req.Namespace,
@@ -63,7 +64,17 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		ConfigAlias:      req.ConfigAlias,
 		RemoteKubeconfig: req.RemoteKubeconfig,
 	}
-	err := handler.SshJump(ctx, sshConf, nil)
+
+	file, err := util.ConvertToTempFile([]byte(req.KubeconfigBytes))
+	if err != nil {
+		return err
+	}
+	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
+	flags.AddFlag(&pflag.Flag{
+		Name:     "kubeconfig",
+		DefValue: file,
+	})
+	err = handler.SshJump(ctx, sshConf, flags)
 	if err != nil {
 		return err
 	}
@@ -76,6 +87,10 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		return err
 	}
 
+	daemonClient := svr.GetClient(false)
+	if daemonClient == nil {
+		return fmt.Errorf("daemon is not avaliable")
+	}
 	if svr.connect != nil {
 		isSameCluster, err := util.IsSameCluster(
 			svr.connect.GetClientset().CoreV1().ConfigMaps(svr.connect.Namespace), svr.connect.Namespace,
@@ -86,7 +101,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 			log.Debugf("already connect to cluster")
 		} else {
 			log.Debugf("try to disconnect from another cluster")
-			disconnect, err := svr.GetClient(true).Disconnect(ctx, &rpc.DisconnectRequest{})
+			disconnect, err := daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{})
 			if err != nil {
 				return err
 			}
@@ -102,18 +117,12 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 					return err
 				}
 			}
-			svr.connect = nil
 		}
 	}
 
 	if svr.connect == nil {
-		svr.connect = connect
-		ctx, err = connect.RentInnerIP(ctx)
-		if err != nil {
-			return err
-		}
-		log.Debugf("connect to cluster")
-		connResp, err := svr.GetClient(true).Connect(ctx, req)
+		log.Debugf("connectting to cluster")
+		connResp, err := daemonClient.Connect(ctx, req)
 		if err != nil {
 			return err
 		}
@@ -131,7 +140,9 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		}
 	}
 
+	log.Debugf("proxy resource...")
 	err = svr.connect.CreateRemoteInboundPod(ctx)
+	log.Debugf("proxy resource done")
 	return err
 }
 
@@ -175,7 +186,16 @@ func (svr *Server) redirectToSudoDaemon1(req *rpc.ConnectRequest, resp rpc.Daemo
 		ConfigAlias:      req.ConfigAlias,
 		RemoteKubeconfig: req.RemoteKubeconfig,
 	}
-	err = handler.SshJump(context.Background(), sshConf, nil)
+	file, err := util.ConvertToTempFile([]byte(req.KubeconfigBytes))
+	if err != nil {
+		return err
+	}
+	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
+	flags.AddFlag(&pflag.Flag{
+		Name:     "kubeconfig",
+		DefValue: file,
+	})
+	err = handler.SshJump(context.Background(), sshConf, flags)
 	if err != nil {
 		return err
 	}
