@@ -1,10 +1,11 @@
 package action
 
 import (
+	"fmt"
 	log "github.com/sirupsen/logrus"
-	"io"
-
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/handler"
+	"io"
 )
 
 type leaveWarp struct {
@@ -30,9 +31,19 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 	}()
 	multiWriter := io.MultiWriter(origin, out)
 	log.SetOutput(multiWriter)
+	if svr.connect == nil {
+		return fmt.Errorf("not proxy any resource in cluster")
+	}
 
+	factory := svr.connect.GetFactory()
+	namespace := svr.connect.Namespace
+	maps := svr.connect.GetClientset().CoreV1().ConfigMaps(namespace)
 	for _, workload := range req.GetWorkloads() {
-		println(workload)
+		// add rollback func to remove envoy config
+		err := handler.UnPatchContainer(factory, maps, namespace, workload, svr.connect.GetLocalTunIPv4())
+		if err != nil {
+			log.Error(err)
+		}
 	}
 	return nil
 }

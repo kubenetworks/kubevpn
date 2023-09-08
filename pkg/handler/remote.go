@@ -469,7 +469,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 	return
 }
 
-func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, workloads string, config util.PodRouteConfig) error {
+func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, workloads string, c util.PodRouteConfig) error {
 	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
 	if err != nil {
 		return err
@@ -486,39 +486,47 @@ func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, 
 
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 
-	exchange.AddContainer(&podTempSpec.Spec, config)
+	exchange.AddContainer(&podTempSpec.Spec, c)
 
 	// pods without controller
 	if len(path) == 0 {
 		podTempSpec.Spec.PriorityClassName = ""
-		for _, c := range podTempSpec.Spec.Containers {
-			c.LivenessProbe = nil
-			c.StartupProbe = nil
-			c.ReadinessProbe = nil
+		for _, container := range podTempSpec.Spec.Containers {
+			container.LivenessProbe = nil
+			container.StartupProbe = nil
+			container.ReadinessProbe = nil
 		}
 		p := &v1.Pod{ObjectMeta: podTempSpec.ObjectMeta, Spec: podTempSpec.Spec}
 		CleanupUselessInfo(p)
-		if err = createAfterDeletePod(factory, p, helper); err != nil {
+		if err = CreateAfterDeletePod(factory, p, helper); err != nil {
 			return err
 		}
 
-		RollbackFuncList = append(RollbackFuncList, func() {
-			p2 := &v1.Pod{ObjectMeta: origin.ObjectMeta, Spec: origin.Spec}
-			CleanupUselessInfo(p2)
-			if err = createAfterDeletePod(factory, p2, helper); err != nil {
-				log.Error(err)
-			}
-		})
+		//RollbackFuncList = append(RollbackFuncList, func() {
+		//	p2 := &v1.Pod{ObjectMeta: origin.ObjectMeta, Spec: origin.Spec}
+		//	CleanupUselessInfo(p2)
+		//	if err = CreateAfterDeletePod(factory, p2, helper); err != nil {
+		//		log.Error(err)
+		//	}
+		//})
 	} else
 	// controllers
 	{
 		// remove probe
 		removePatch, restorePatch := patch(origin, path)
-		p := []P{{
-			Op:    "replace",
-			Path:  "/" + strings.Join(append(path, "spec"), "/"),
-			Value: podTempSpec.Spec,
-		}}
+		b, _ := json.Marshal(restorePatch)
+		p := []P{
+			{
+				Op:    "replace",
+				Path:  "/" + strings.Join(append(path, "spec"), "/"),
+				Value: podTempSpec.Spec,
+			},
+			{
+				Op:    "replace",
+				Path:  "/metadata/annotations/" + config.KubeVPNRestorePatchKey,
+				Value: b,
+			},
+		}
 		bytes, _ := json.Marshal(append(p, removePatch...))
 		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 		if err != nil {
@@ -526,16 +534,16 @@ func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, 
 			return err
 		}
 
-		RollbackFuncList = append(RollbackFuncList, func() {
-			if err = removeInboundContainer(factory, namespace, workloads); err != nil {
-				log.Error(err)
-			}
-			b, _ := json.Marshal(restorePatch)
-			if _, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, b, &metav1.PatchOptions{}); err != nil {
-				log.Warnf("error while restore probe of resource: %s %s, ignore, err: %v",
-					object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
-			}
-		})
+		//RollbackFuncList = append(RollbackFuncList, func() {
+		//	if err = removeInboundContainer(factory, namespace, workloads); err != nil {
+		//		log.Error(err)
+		//	}
+		//	//b, _ := json.Marshal(restorePatch)
+		//	if _, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, b, &metav1.PatchOptions{}); err != nil {
+		//		log.Warnf("error while restore probe of resource: %s %s, ignore, err: %v",
+		//			object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
+		//	}
+		//})
 	}
 	if err != nil {
 		return err
@@ -545,7 +553,7 @@ func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, 
 	return err
 }
 
-func createAfterDeletePod(factory cmdutil.Factory, p *v1.Pod, helper *pkgresource.Helper) error {
+func CreateAfterDeletePod(factory cmdutil.Factory, p *v1.Pod, helper *pkgresource.Helper) error {
 	if _, err := helper.DeleteWithOptions(p.Namespace, p.Name, &metav1.DeleteOptions{
 		GracePeriodSeconds: pointer.Int64(0),
 	}); err != nil {
@@ -676,4 +684,29 @@ func patch(spec v1.PodTemplateSpec, path []string) (remove []P, restore []P) {
 		})
 	}
 	return
+}
+
+func fromPatchToProbe(spec *v1.PodTemplateSpec, patch []P) {
+	// 3 = readiness + liveness + startup
+	if len(patch) != 3*len(spec.Spec.Containers) {
+		log.Debugf("patch not match container num, not restore")
+		return
+	}
+	for i := range spec.Spec.Containers {
+		ps := patch[i*3 : i*3+3]
+		marshal, err := json.Marshal(ps[0].Value)
+		if err == nil {
+			err = json.Unmarshal(marshal, spec.Spec.Containers[i].ReadinessProbe)
+		}
+
+		marshal, err = json.Marshal(ps[1].Value)
+		if err == nil {
+			err = json.Unmarshal(marshal, spec.Spec.Containers[i].LivenessProbe)
+		}
+
+		marshal, err = json.Marshal(ps[2].Value)
+		if err == nil {
+			err = json.Unmarshal(marshal, spec.Spec.Containers[i].StartupProbe)
+		}
+	}
 }

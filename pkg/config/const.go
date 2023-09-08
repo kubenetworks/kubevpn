@@ -13,6 +13,8 @@ const (
 	SudoPidPath = "sudo_daemon_pid"
 
 	LogFile = "daemon.log"
+
+	KubeVPNRestorePatchKey = "kubevpnrestorepatch"
 )
 
 func init() {

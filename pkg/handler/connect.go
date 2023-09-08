@@ -141,10 +141,7 @@ func (c *ConnectOptions) RentInnerIP(ctx context.Context) (context.Context, erro
 
 func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error) {
 	if c.localTunIPv4 == nil || c.localTunIPv6 == nil {
-		c.localTunIPv4, c.localTunIPv6, err = c.dhcp.RentIPBaseNICAddress(ctx)
-		if err != nil {
-			return
-		}
+		return fmt.Errorf("local tun ip is invalid")
 	}
 
 	for _, workload := range c.Workloads {
@@ -1184,8 +1181,23 @@ func (c *ConnectOptions) GetKubeconfigPath() (string, error) {
 	return temp.Name(), nil
 }
 
-func (c ConnectOptions) GetClientset() *kubernetes.Clientset {
+func (c *ConnectOptions) GetClientset() *kubernetes.Clientset {
 	return c.clientset
+}
+
+func (c *ConnectOptions) GetFactory() cmdutil.Factory {
+	return c.factory
+}
+
+func (c *ConnectOptions) GetLocalTunIPv4() string {
+	if c.localTunIPv4 != nil {
+		return c.localTunIPv4.IP.String()
+	}
+	srcIPv4, _, err := util.GetLocalTunIP()
+	if err != nil {
+		return ""
+	}
+	return srcIPv4.String()
 }
 
 // update to newer image
