@@ -60,7 +60,7 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 			if duplicateOptions.Engine == config.EngineGvisor {
 				return fmt.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
 			}
-			return handler.SshJump(sshConf, cmd.Flags())
+			return handler.SshJump(cmd.Context(), sshConf, cmd.Flags())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {

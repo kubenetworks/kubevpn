@@ -63,7 +63,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		ConfigAlias:      req.ConfigAlias,
 		RemoteKubeconfig: req.RemoteKubeconfig,
 	}
-	err := handler.SshJump(sshConf, nil)
+	err := handler.SshJump(ctx, sshConf, nil)
 	if err != nil {
 		return err
 	}
@@ -175,7 +175,7 @@ func (svr *Server) redirectToSudoDaemon1(req *rpc.ConnectRequest, resp rpc.Daemo
 		ConfigAlias:      req.ConfigAlias,
 		RemoteKubeconfig: req.RemoteKubeconfig,
 	}
-	err = handler.SshJump(sshConf, nil)
+	err = handler.SshJump(context.Background(), sshConf, nil)
 	if err != nil {
 		return err
 	}

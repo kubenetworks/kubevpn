@@ -11,6 +11,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/pflag"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/rest"
 	restclient "k8s.io/client-go/rest"
@@ -122,7 +123,16 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 			return err
 		}
 	}
-	err = handler.SshJump(sshConf, nil)
+	tempFile, err := util.ConvertToTempFile([]byte(req.KubeconfigBytes))
+	if err != nil {
+		return err
+	}
+	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
+	flags.AddFlag(&pflag.Flag{
+		Name:     "kubeconfig",
+		DefValue: tempFile,
+	})
+	err = handler.SshJump(context.Background(), sshConf, flags)
 	if err != nil {
 		return err
 	}
@@ -139,6 +149,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		return err
 	}
 
+	config.Image = req.Image
 	err = svr.connect.DoConnect(context.Background())
 	if err != nil {
 		log.Errorln(err)
@@ -171,7 +182,16 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		ConfigAlias:      req.ConfigAlias,
 		RemoteKubeconfig: req.RemoteKubeconfig,
 	}
-	err := handler.SshJump(sshConf, nil)
+	tempFile, err := util.ConvertToTempFile([]byte(req.KubeconfigBytes))
+	if err != nil {
+		return err
+	}
+	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
+	flags.AddFlag(&pflag.Flag{
+		Name:     "kubeconfig",
+		DefValue: tempFile,
+	})
+	err = handler.SshJump(context.Background(), sshConf, flags)
 	if err != nil {
 		return err
 	}
