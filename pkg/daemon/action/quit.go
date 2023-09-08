@@ -24,19 +24,17 @@ func newQuitWarp(server rpc.Daemon_QuitServer) io.Writer {
 }
 
 func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error {
-	out := newQuitWarp(resp)
 	origin := log.StandardLogger().Out
 	defer func() {
 		log.SetOutput(origin)
+		log.SetLevel(log.DebugLevel)
 	}()
-	multiWriter := io.MultiWriter(origin, out)
-	log.SetOutput(multiWriter)
+	log.SetOutput(io.MultiWriter(origin, newQuitWarp(resp)))
 
 	if svr.connect != nil {
 		svr.connect.Cleanup()
 	}
 	if svr.Cancel != nil {
-		log.SetOutput(origin)
 		svr.Cancel()
 	}
 	return nil

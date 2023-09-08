@@ -17,7 +17,7 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 		Short: "leave reverse remote resource traffic to local machine",
 		Long:  `leave remote traffic to local machine`,
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			return startupDaemon(cmd.Context())
+			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			leave, err := daemon.GetClient(false).Leave(cmd.Context(), &rpc.LeaveRequest{

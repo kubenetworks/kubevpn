@@ -2,11 +2,12 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,90 +22,56 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 )
 
+var daemonClient, sudoDaemonClient rpc.DaemonClient
+
 func GetClient(isSudo bool) rpc.DaemonClient {
+	if isSudo && sudoDaemonClient != nil {
+		return sudoDaemonClient
+	}
+	if !isSudo && daemonClient != nil {
+		return daemonClient
+	}
+
 	sudo := ""
 	if isSudo {
 		sudo = "sudo"
 	}
 	ctx := context.Background()
-	conn, err := grpc.DialContext(ctx, "passthrough:///unix://"+GetPortPath(isSudo), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.DialContext(ctx, "passthrough:///unix://"+GetSockPath(isSudo), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Errorf("cannot connect to %s server: %v", sudo, err)
 		fmt.Println(fmt.Errorf("cannot connect to %s server: %v", sudo, err))
 		return nil
 	}
 	c := rpc.NewDaemonClient(conn)
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Millisecond*200)
-	defer cancelFunc()
 	now := time.Now()
 	healthClient := grpc_health_v1.NewHealthClient(conn)
-	response, err := healthClient.Check(context.Background(), &grpc_health_v1.HealthCheckRequest{})
+	response, err := healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
 	if err != nil {
 		log.Printf("%v", err)
 		return nil
 	}
 	fmt.Println(response.Status, sudo, time.Now().Sub(now).String())
 	now = time.Now()
-	_, err = c.Status(context.Background(), &rpc.StatusRequest{})
+	_, err = c.Status(ctx, &rpc.StatusRequest{})
 	fmt.Printf("call %s api status use %s\n", sudo, time.Now().Sub(now))
 	if err != nil {
 		fmt.Println(fmt.Errorf("cannot call %s api status: %v", sudo, err))
 		log.Error(err)
 		return nil
 	}
+	if isSudo {
+		sudoDaemonClient = c
+	} else {
+		daemonClient = c
+	}
 	return c
 }
 
-type Apply interface {
-	Apply(f func(cli rpc.DaemonClient)) error
-}
-
-type apply struct {
-	err error
-}
-
-func (a *apply) Apply(f func(cli rpc.DaemonClient)) error {
-	if a.err != nil {
-		return a.err
-	}
-
-	return nil
-}
-
-func GetClients(isSudo bool) Apply {
-	a := &apply{}
-	p, err := os.ReadFile(GetPortPath(isSudo))
-	if err != nil {
-		a.err = err
-		return a
-	}
-	port := strings.TrimSpace(string(p))
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
-	defer cancelFunc()
-	var lc net.ListenConfig
-	listen, err := lc.Listen(ctx, "tcp", fmt.Sprintf("localhost:%s", port))
-	if err == nil {
-		_ = listen.Close()
-		return nil
-	}
-
-	conn, err := grpc.DialContext(ctx, fmt.Sprintf("localhost:%s", port), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		log.Errorf("cannot connect to server: %v", err)
-		return nil
-	}
-	c := rpc.NewDaemonClient(conn)
-	_, err = c.Status(ctx, &rpc.StatusRequest{})
-	if err != nil {
-		return nil
-	}
-	return a
-}
-
-func GetPortPath(isSudo bool) string {
-	name := config.PortPath
+func GetSockPath(isSudo bool) string {
+	name := config.SockPath
 	if isSudo {
-		name = config.SudoPortPath
+		name = config.SudoSockPath
 	}
 	return filepath.Join(config.DaemonPath, name)
 }
@@ -122,4 +89,75 @@ func GetDaemonCommand(isSudo bool) *exec.Cmd {
 		return exec.Command("sudo", "--preserve-env", os.Args[0], "daemon", "--sudo")
 	}
 	return exec.Command(os.Args[0], "daemon")
+}
+
+func StartupDaemon(ctx context.Context) error {
+	// normal daemon
+	if daemonClient = GetClient(false); daemonClient == nil {
+		if err := runDaemon(ctx, false); err != nil {
+			return err
+		}
+	}
+
+	// sudo daemon
+	if sudoDaemonClient = GetClient(true); sudoDaemonClient == nil {
+		if err := runDaemon(ctx, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runDaemon(ctx context.Context, isSudo bool) error {
+	portPath := GetSockPath(isSudo)
+	err := os.Remove(portPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	pidPath := GetPidPath(isSudo)
+	var file []byte
+	if file, err = os.ReadFile(pidPath); err == nil {
+		var pid int
+		if pid, err = strconv.Atoi(strings.TrimSpace(string(file))); err == nil {
+			var p *os.Process
+			if p, err = os.FindProcess(pid); err == nil {
+				if err = p.Kill(); err != nil && err != os.ErrProcessDone {
+					log.Error(err)
+				}
+			}
+		}
+	}
+	cmd := GetDaemonCommand(isSudo)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err = cmd.Start(); err != nil {
+		return err
+	}
+	err = os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), os.ModePerm)
+	if err != nil {
+		return err
+	}
+	err = os.Chmod(GetPidPath(false), os.ModePerm)
+	if err != nil {
+		return err
+	}
+	go func() {
+		cmd.Wait()
+	}()
+
+	for ctx.Err() == nil {
+		time.Sleep(time.Millisecond * 50)
+		if _, err = os.Stat(portPath); err == nil {
+			break
+		}
+	}
+
+	client := GetClient(isSudo)
+	if client == nil {
+		return fmt.Errorf("can not get daemon server client")
+	}
+	_, err = client.Status(ctx, &rpc.StatusRequest{})
+
+	return err
 }

@@ -28,7 +28,7 @@ func newDisconnectWarp(server rpc.Daemon_DisconnectServer) io.Writer {
 func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_DisconnectServer) error {
 	if !svr.IsSudo {
 		cli := svr.GetClient(true)
-		if cli != nil {
+		if cli == nil {
 			return fmt.Errorf("sudo daemon not start")
 		}
 		connResp, err := cli.Disconnect(resp.Context(), req)
@@ -55,8 +55,6 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 	origin := log.StandardLogger().Out
 	defer func() {
 		log.SetOutput(origin)
-		svr.t = time.Time{}
-		svr.connect = nil
 	}()
 	multiWriter := io.MultiWriter(origin, out)
 	log.SetOutput(multiWriter)
@@ -64,5 +62,7 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 	if svr.connect != nil {
 		svr.connect.Cleanup()
 	}
+	svr.t = time.Time{}
+	svr.connect = nil
 	return nil
 }

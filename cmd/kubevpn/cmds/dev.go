@@ -14,6 +14,7 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/pkg/dev"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
@@ -71,7 +72,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 		Args:                  dockercli.RequiresMinArgs(1),
 		DisableFlagsInUseLine: true,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			err = startupDaemon(cmd.Context())
+			err = daemon.StartupDaemon(cmd.Context())
 			if err != nil {
 				return err
 			}
