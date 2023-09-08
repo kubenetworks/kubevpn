@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	"encoding/json"
+	"os"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,11 +40,36 @@ func IsSameCluster(client v12.ConfigMapInterface, namespace string, clientB v12.
 	return a.UID == b.UID, nil
 }
 
-func ConvertToKubeconfigBytes(factory cmdutil.Factory) ([]byte, error) {
-	rawConfig, err := factory.ToRawKubeConfigLoader().RawConfig()
+func ConvertToKubeconfigBytes(factory cmdutil.Factory) ([]byte, string, error) {
+	loader := factory.ToRawKubeConfigLoader()
+	namespace, _, err2 := loader.Namespace()
+	if err2 != nil {
+		return nil, "", err2
+	}
+	rawConfig, err := loader.RawConfig()
 	convertedObj, err := latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return json.Marshal(convertedObj)
+	marshal, err2 := json.Marshal(convertedObj)
+	if err2 != nil {
+		return nil, "", err2
+	}
+	return marshal, namespace, nil
+}
+
+func ConvertToTempFile(kubeconfigBytes []byte) (string, error) {
+	temp, err := os.CreateTemp("", "")
+	if err != nil {
+		return "", err
+	}
+	err = temp.Close()
+	if err != nil {
+		return "", err
+	}
+	err = os.WriteFile(temp.Name(), kubeconfigBytes, os.ModePerm)
+	if err != nil {
+		return "", err
+	}
+	return temp.Name(), nil
 }

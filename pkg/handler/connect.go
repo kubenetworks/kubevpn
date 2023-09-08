@@ -104,15 +104,17 @@ func (c *ConnectOptions) RentInnerIP(ctx context.Context) (context.Context, erro
 	if ok {
 		ipv4s := md.Get(config.HeaderIPv4)
 		if len(ipv4s) != 0 {
-			_, c.localTunIPv4, _ = net.ParseCIDR(ipv4s[0])
-			if c.localTunIPv4 != nil {
+			ip, ipNet, err := net.ParseCIDR(ipv4s[0])
+			if err == nil {
+				c.localTunIPv4 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
 				log.Debugf("get ipv4 %s from context", c.localTunIPv4.String())
 			}
 		}
 		ipv6s := md.Get(config.HeaderIPv6)
 		if len(ipv6s) != 0 {
-			_, c.localTunIPv6, _ = net.ParseCIDR(ipv6s[0])
-			if c.localTunIPv6 != nil {
+			ip, ipNet, err := net.ParseCIDR(ipv6s[0])
+			if err == nil {
+				c.localTunIPv6 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
 				log.Debugf("get ipv6 %s from context", c.localTunIPv6.String())
 			}
 		}
@@ -677,7 +679,7 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory) (err error) {
 	return
 }
 
-func SshJump(conf *util.SshConfig, flags *pflag.FlagSet) (err error) {
+func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet) (err error) {
 	if conf.Addr == "" && conf.ConfigAlias == "" {
 		return
 	}
@@ -729,8 +731,12 @@ func SshJump(conf *util.SshConfig, flags *pflag.FlagSet) (err error) {
 	} else {
 		if flags != nil {
 			lookup := flags.Lookup("kubeconfig")
-			if lookup != nil && lookup.Value != nil && lookup.Value.String() != "" {
-				configFlags.KubeConfig = pointer.String(lookup.Value.String())
+			if lookup != nil {
+				if lookup.Value != nil && lookup.Value.String() != "" {
+					configFlags.KubeConfig = pointer.String(lookup.Value.String())
+				} else if lookup.DefValue != "" {
+					configFlags.KubeConfig = pointer.String(lookup.DefValue)
+				}
 			}
 		}
 	}
@@ -766,8 +772,9 @@ func SshJump(conf *util.SshConfig, flags *pflag.FlagSet) (err error) {
 	errChan := make(chan error, 1)
 	readyChan := make(chan struct{}, 1)
 	go func() {
-		err := util.Main(&remote, local, conf, readyChan)
+		err := util.Main(ctx, &remote, local, conf, readyChan)
 		if err != nil {
+			log.Errorf("ssh forward failed err: %v", err)
 			errChan <- err
 			return
 		}
@@ -776,6 +783,7 @@ func SshJump(conf *util.SshConfig, flags *pflag.FlagSet) (err error) {
 	select {
 	case <-readyChan:
 	case err = <-errChan:
+		log.Errorf("ssh proxy err: %v", err)
 		return err
 	}
 

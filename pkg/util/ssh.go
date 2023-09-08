@@ -2,6 +2,7 @@ package util
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -28,7 +29,7 @@ type SshConfig struct {
 	RemoteKubeconfig string
 }
 
-func Main(remoteEndpoint, localEndpoint *netip.AddrPort, conf *SshConfig, done chan struct{}) error {
+func Main(ctx context.Context, remoteEndpoint, localEndpoint *netip.AddrPort, conf *SshConfig, done chan struct{}) error {
 	var remote *ssh.Client
 	var err error
 	if conf.ConfigAlias != "" {
@@ -57,7 +58,8 @@ func Main(remoteEndpoint, localEndpoint *netip.AddrPort, conf *SshConfig, done c
 	}
 
 	// Listen on remote server port
-	listen, err := net.Listen("tcp", "localhost:0")
+	var lc net.ListenConfig
+	listen, err := lc.Listen(ctx, "tcp", "localhost:0")
 	if err != nil {
 		return err
 	}
@@ -70,6 +72,12 @@ func Main(remoteEndpoint, localEndpoint *netip.AddrPort, conf *SshConfig, done c
 	done <- struct{}{}
 	// handle incoming connections on reverse forwarded tunnel
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		local, err := listen.Accept()
 		if err != nil {
 			log.Error(err)
@@ -89,6 +97,7 @@ func Main(remoteEndpoint, localEndpoint *netip.AddrPort, conf *SshConfig, done c
 			if conn == nil {
 				return
 			}
+			defer conn.Close()
 			handleClient(local, conn)
 		}()
 	}

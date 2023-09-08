@@ -476,13 +476,14 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, transferImag
 			}
 		}
 		var kubeconfig []byte
-		kubeconfig, err = util.ConvertToKubeconfigBytes(f)
+		var ns string
+		kubeconfig, ns, err = util.ConvertToKubeconfigBytes(f)
 		if err != nil {
 			return
 		}
 		req := &rpc.ConnectRequest{
 			KubeconfigBytes: string(kubeconfig),
-			Namespace:       connect.Namespace,
+			Namespace:       ns,
 			Headers:         connect.Headers,
 			Workloads:       connect.Workloads,
 			ExtraCIDR:       connect.ExtraCIDR,

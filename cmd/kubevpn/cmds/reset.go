@@ -39,7 +39,7 @@ func CmdReset(factory cmdutil.Factory) *cobra.Command {
 
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return handler.SshJump(sshConf, cmd.Flags())
+			return handler.SshJump(cmd.Context(), sshConf, cmd.Flags())
 		},
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := connect.InitClient(factory); err != nil {

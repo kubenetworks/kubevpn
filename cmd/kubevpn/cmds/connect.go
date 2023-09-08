@@ -46,13 +46,13 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bytes, err := util.ConvertToKubeconfigBytes(f)
+			bytes, ns, err := util.ConvertToKubeconfigBytes(f)
 			if err != nil {
 				return err
 			}
 			req := &rpc.ConnectRequest{
 				KubeconfigBytes:  string(bytes),
-				Namespace:        connect.Namespace,
+				Namespace:        ns,
 				ExtraCIDR:        connect.ExtraCIDR,
 				ExtraDomain:      connect.ExtraDomain,
 				UseLocalDNS:      connect.UseLocalDNS,

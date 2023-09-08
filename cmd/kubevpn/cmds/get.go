@@ -42,7 +42,7 @@ func CmdGet(f cmdutil.Factory) *cobra.Command {
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bytes, err := util.ConvertToKubeconfigBytes(f)
+			bytes, ns, err := util.ConvertToKubeconfigBytes(f)
 			if err != nil {
 				return err
 			}
@@ -50,7 +50,7 @@ func CmdGet(f cmdutil.Factory) *cobra.Command {
 				cmd.Context(),
 				&rpc.ConnectRequest{
 					KubeconfigBytes:  string(bytes),
-					Namespace:        connect.Namespace,
+					Namespace:        ns,
 					Headers:          connect.Headers,
 					Workloads:        connect.Workloads,
 					ExtraCIDR:        connect.ExtraCIDR,

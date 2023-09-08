@@ -80,7 +80,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 			if devOptions.Engine == config.EngineGvisor {
 				return fmt.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
 			}
-			return handler.SshJump(sshConf, cmd.Flags())
+			return handler.SshJump(cmd.Context(), sshConf, cmd.Flags())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			devOptions.Workload = args[0]

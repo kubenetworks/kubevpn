@@ -74,7 +74,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				return cmdutil.UsageErrorf(cmd, usageString)
 			}
 
-			bytes, err := util.ConvertToKubeconfigBytes(f)
+			bytes, ns, err := util.ConvertToKubeconfigBytes(f)
 			if err != nil {
 				return err
 			}
@@ -83,7 +83,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				cmd.Context(),
 				&rpc.ConnectRequest{
 					KubeconfigBytes:  string(bytes),
-					Namespace:        connect.Namespace,
+					Namespace:        ns,
 					Headers:          connect.Headers,
 					Workloads:        args,
 					ExtraCIDR:        connect.ExtraCIDR,
