@@ -24,6 +24,7 @@ func (c *ConnectOptions) Reset(ctx context.Context) error {
 		return err
 	}
 	var v = make([]*controlplane.Virtual, 0)
+	localTunIPv4 := c.GetLocalTunIPv4()
 	if cm != nil && cm.Data != nil {
 		if str, ok := cm.Data[config.KeyEnvoy]; ok && len(str) != 0 {
 			if err = yaml.Unmarshal([]byte(str), &v); err != nil {
@@ -34,12 +35,10 @@ func (c *ConnectOptions) Reset(ctx context.Context) error {
 				// deployments.apps.ry-server --> deployments.apps/ry-server
 				lastIndex := strings.LastIndex(virtual.Uid, ".")
 				uid := virtual.Uid[:lastIndex] + "/" + virtual.Uid[lastIndex+1:]
-				for _, rule := range virtual.Rules {
-					err = UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, uid, rule.Headers)
-					if err != nil {
-						log.Error(err)
-						continue
-					}
+				err = UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, uid, localTunIPv4)
+				if err != nil {
+					log.Error(err)
+					continue
 				}
 			}
 		}

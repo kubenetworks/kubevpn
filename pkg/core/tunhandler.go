@@ -14,7 +14,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
-	"github.com/wencaiwulue/kubevpn/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -239,28 +238,8 @@ func (d *Device) Close() {
 }
 
 func heartbeats(in chan<- *DataElem) {
-	tunIface, err := tun.GetInterface()
+	srcIPv4, srcIPv6, err := util.GetLocalTunIP()
 	if err != nil {
-		return
-	}
-	addrs, err := tunIface.Addrs()
-	if err != nil {
-		return
-	}
-	var srcIPv4, srcIPv6 net.IP
-	for _, addr := range addrs {
-		ip, cidr, err := net.ParseCIDR(addr.String())
-		if err != nil {
-			continue
-		}
-		if cidr.Contains(config.RouterIP) {
-			srcIPv4 = ip
-		}
-		if cidr.Contains(config.RouterIP6) {
-			srcIPv6 = ip
-		}
-	}
-	if srcIPv4 == nil || srcIPv6 == nil {
 		return
 	}
 	if config.RouterIP.To4().Equal(srcIPv4) {

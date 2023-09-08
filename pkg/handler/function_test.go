@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -325,7 +326,7 @@ func kubevpnConnect(t *testing.T) {
 	<-ctx2.Done()
 }
 
-func init() {
+func init1() {
 	var err error
 
 	configFlags := genericclioptions.NewConfigFlags(true)
@@ -360,4 +361,21 @@ func TestWaitBackoff(t *testing.T) {
 			last = now
 			return fmt.Errorf("")
 		})
+}
+
+func TestArray(t *testing.T) {
+	s := []int{1, 2, 3, 1, 2, 3, 1, 2, 3}
+	for i := 0; i < 3; i++ {
+		ints := s[i*3 : i*3+3]
+		println(ints[0], ints[1], ints[2])
+	}
+}
+func TestPatch(t *testing.T) {
+	s := "W3sib3AiOiJyZXBsYWNlIiwicGF0aCI6Ii9zcGVjL3RlbXBsYXRlL3NwZWMvY29udGFpbmVycy8wL3JlYWRpbmVzc1Byb2JlIiwidmFsdWUiOm51bGx9LHsib3AiOiJyZXBsYWNlIiwicGF0aCI6Ii9zcGVjL3RlbXBsYXRlL3NwZWMvY29udGFpbmVycy8wL2xpdmVuZXNzUHJvYmUiLCJ2YWx1ZSI6eyJodHRwR2V0Ijp7InBhdGgiOiIvaGVhbHRoIiwicG9ydCI6OTA4MCwic2NoZW1lIjoiSFRUUCJ9LCJ0aW1lb3V0U2Vjb25kcyI6MSwicGVyaW9kU2Vjb25kcyI6MTAsInN1Y2Nlc3NUaHJlc2hvbGQiOjEsImZhaWx1cmVUaHJlc2hvbGQiOjN9fSx7Im9wIjoicmVwbGFjZSIsInBhdGgiOiIvc3BlYy90ZW1wbGF0ZS9zcGVjL2NvbnRhaW5lcnMvMC9zdGFydHVwUHJvYmUiLCJ2YWx1ZSI6bnVsbH0seyJvcCI6InJlcGxhY2UiLCJwYXRoIjoiL3NwZWMvdGVtcGxhdGUvc3BlYy9jb250YWluZXJzLzEvcmVhZGluZXNzUHJvYmUiLCJ2YWx1ZSI6bnVsbH0seyJvcCI6InJlcGxhY2UiLCJwYXRoIjoiL3NwZWMvdGVtcGxhdGUvc3BlYy9jb250YWluZXJzLzEvbGl2ZW5lc3NQcm9iZSIsInZhbHVlIjpudWxsfSx7Im9wIjoicmVwbGFjZSIsInBhdGgiOiIvc3BlYy90ZW1wbGF0ZS9zcGVjL2NvbnRhaW5lcnMvMS9zdGFydHVwUHJvYmUiLCJ2YWx1ZSI6bnVsbH1d"
+	var pp []P
+	err := json.Unmarshal([]byte(s), &pp)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(pp)
 }

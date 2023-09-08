@@ -66,12 +66,12 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	}
 	if containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
 		// add rollback func to remove envoy config
-		RollbackFuncList = append(RollbackFuncList, func() {
-			err := UnPatchContainer(factory, clientset, namespace, workload, headers)
-			if err != nil {
-				log.Error(err)
-			}
-		})
+		//RollbackFuncList = append(RollbackFuncList, func() {
+		//	err := UnPatchContainer(factory, clientset, namespace, workload, c.LocalTunIPv4)
+		//	if err != nil {
+		//		log.Error(err)
+		//	}
+		//})
 		return nil
 	}
 	// (1) add mesh container
@@ -92,8 +92,8 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 		},
 		{
 			Op:    "replace",
-			Path:  "/metadata/annotations/probe",
-			Value: b,
+			Path:  "/metadata/annotations/" + config.KubeVPNRestorePatchKey,
+			Value: string(b),
 		},
 	}
 	var bytes []byte
@@ -107,11 +107,11 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 		return err
 	}
 
-	RollbackFuncList = append(RollbackFuncList, func() {
-		if err := UnPatchContainer(factory, clientset, namespace, workload, headers); err != nil {
-			log.Error(err)
-		}
-	})
+	//RollbackFuncList = append(RollbackFuncList, func() {
+	//	if err := UnPatchContainer(factory, clientset, namespace, workload, c.LocalTunIPv4); err != nil {
+	//		log.Error(err)
+	//	}
+	//})
 	if err != nil {
 		return err
 	}
@@ -119,8 +119,8 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	return err
 }
 
-func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, namespace, workloads string, headers map[string]string) error {
-	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
+func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, namespace, workload string, localTunIPv4 string) error {
+	object, err := util.GetUnstructuredObject(factory, namespace, workload)
 	if err != nil {
 		return err
 	}
@@ -134,29 +134,48 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 
 	var empty bool
-	empty, err = removeEnvoyConfig(mapInterface, nodeID, headers)
+	empty, err = removeEnvoyConfig(mapInterface, nodeID, localTunIPv4)
 	if err != nil {
 		log.Warnln(err)
 		return err
 	}
 
+	var ps []P
+	if u.GetAnnotations() != nil && u.GetAnnotations()[config.KubeVPNRestorePatchKey] != "" {
+		patchStr := u.GetAnnotations()[config.KubeVPNRestorePatchKey]
+		err = json.Unmarshal([]byte(patchStr), &ps)
+		if err != nil {
+			return fmt.Errorf("unmarshal json patch: %s failed, err: %v", patchStr, err)
+		}
+	}
+
 	if empty {
 		mesh.RemoveContainers(templateSpec)
 		helper := pkgresource.NewHelper(object.Client, object.Mapping)
+		// pod without controller
+		if len(depth) == 0 {
+			fromPatchToProbe(templateSpec, ps)
+			delete(templateSpec.ObjectMeta.GetAnnotations(), config.KubeVPNRestorePatchKey)
+			pod := &v1.Pod{ObjectMeta: templateSpec.ObjectMeta, Spec: templateSpec.Spec}
+			CleanupUselessInfo(pod)
+			err = CreateAfterDeletePod(factory, pod, helper)
+			return err
+		}
+
+		// resource with controller, like deployment,statefulset
 		var bytes []byte
-		bytes, err = json.Marshal([]struct {
-			Op    string      `json:"op"`
-			Path  string      `json:"path"`
-			Value interface{} `json:"value"`
-		}{{
-			Op:    "replace",
-			Path:  "/" + strings.Join(append(depth, "spec"), "/"),
-			Value: templateSpec.Spec,
-		}, {
-			Op:    "replace",
-			Path:  "/metadata/annotations/probe",
-			Value: "",
-		}})
+		bytes, err = json.Marshal(append(ps, []P{
+			{
+				Op:    "replace",
+				Path:  "/" + strings.Join(append(depth, "spec"), "/"),
+				Value: templateSpec.Spec,
+			},
+			{
+				Op:    "replace",
+				Path:  "/metadata/annotations/" + config.KubeVPNRestorePatchKey,
+				Value: "",
+			}}...,
+		))
 		if err != nil {
 			return err
 		}
@@ -216,7 +235,7 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP ut
 	return err
 }
 
-func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, headers map[string]string) (bool, error) {
+func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTunIPv4 string) (bool, error) {
 	configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return true, nil
@@ -235,7 +254,7 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, heade
 	for _, virtual := range v {
 		if nodeID == virtual.Uid {
 			for i := 0; i < len(virtual.Rules); i++ {
-				if contains(virtual.Rules[i].Headers, headers) {
+				if virtual.Rules[i].LocalTunIPv4 == localTunIPv4 {
 					virtual.Rules = append(virtual.Rules[:i], virtual.Rules[i+1:]...)
 					i--
 				}

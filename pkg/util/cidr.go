@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	"fmt"
+	"github.com/wencaiwulue/kubevpn/pkg/tun"
 	"net"
 
 	log "github.com/sirupsen/logrus"
@@ -127,4 +128,32 @@ func GetCIDRFromResourceUgly(clientset *kubernetes.Clientset, namespace string) 
 	}
 
 	return cidrs, nil
+}
+
+func GetLocalTunIP() (net.IP, net.IP, error) {
+	tunIface, err := tun.GetInterface()
+	if err != nil {
+		return nil, nil, err
+	}
+	addrs, err := tunIface.Addrs()
+	if err != nil {
+		return nil, nil, err
+	}
+	var srcIPv4, srcIPv6 net.IP
+	for _, addr := range addrs {
+		ip, cidr, err := net.ParseCIDR(addr.String())
+		if err != nil {
+			continue
+		}
+		if cidr.Contains(config.RouterIP) {
+			srcIPv4 = ip
+		}
+		if cidr.Contains(config.RouterIP6) {
+			srcIPv6 = ip
+		}
+	}
+	if srcIPv4 == nil || srcIPv6 == nil {
+		return srcIPv4, srcIPv6, fmt.Errorf("not found all ip")
+	}
+	return srcIPv4, srcIPv6, nil
 }
