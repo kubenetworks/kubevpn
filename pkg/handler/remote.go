@@ -540,6 +540,7 @@ func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, 
 	if err != nil {
 		return err
 	}
+	// todo not work?
 	err = util.RolloutStatus(ctx1, factory, namespace, workloads, time.Minute*60)
 	return err
 }

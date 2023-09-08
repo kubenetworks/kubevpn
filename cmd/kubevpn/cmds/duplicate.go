@@ -90,6 +90,7 @@ func CmdDuplicate(f cmdutil.Factory) *cobra.Command {
 			}
 			duplicateOptions.Workloads = connectOptions.Workloads
 			connectOptions.Workloads = []string{}
+			// todo use rpc
 			if err = connectOptions.DoConnect(cmd.Context()); err != nil {
 				log.Errorln(err)
 				connectOptions.Cleanup()

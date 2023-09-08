@@ -1,10 +1,8 @@
 package action
 
 import (
-	"io"
-	"time"
-
 	log "github.com/sirupsen/logrus"
+	"io"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 )
@@ -29,8 +27,6 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 	origin := log.StandardLogger().Out
 	defer func() {
 		log.SetOutput(origin)
-		svr.t = time.Time{}
-		svr.connect = nil
 	}()
 	multiWriter := io.MultiWriter(origin, out)
 	log.SetOutput(multiWriter)
@@ -38,7 +34,5 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 	for _, workload := range req.GetWorkloads() {
 		println(workload)
 	}
-	svr.t = time.Time{}
-	svr.connect = nil
 	return nil
 }
