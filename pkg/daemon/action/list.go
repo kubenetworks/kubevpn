@@ -7,7 +7,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
-	yaml2 "sigs.k8s.io/yaml"
+	k8syaml "sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/controlplane"
@@ -34,7 +34,7 @@ func (svr *Server) List(ctx context.Context, req *rpc.ListRequest) (*rpc.ListRes
 		lastIndex := strings.LastIndex(virtual.Uid, ".")
 		virtual.Uid = virtual.Uid[:lastIndex] + "/" + virtual.Uid[lastIndex+1:]
 	}
-	bytes, err := yaml2.Marshal(v)
+	bytes, err := k8syaml.Marshal(v)
 	if err != nil {
 		return nil, err
 	}

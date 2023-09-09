@@ -42,6 +42,7 @@ require (
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.3.0
 	github.com/hashicorp/go-version v1.6.0
+	github.com/hpcloud/tail v1.0.0
 	github.com/kevinburke/ssh_config v1.2.0
 	github.com/libp2p/go-netroute v0.2.1
 	github.com/mattbaird/jsonpatch v0.0.0-20200820163806-098863c1fc24
@@ -200,7 +201,9 @@ require (
 	google.golang.org/api v0.109.0 // indirect
 	google.golang.org/genproto v0.0.0-20230113154510-dbe35b8444a5 // indirect
 	gopkg.in/DataDog/dd-trace-go.v1 v1.47.0 // indirect
+	gopkg.in/fsnotify.v1 v1.4.7 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
+	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	inet.af/netaddr v0.0.0-20220617031823-097006376321 // indirect
 	k8s.io/apiextensions-apiserver v0.26.3 // indirect

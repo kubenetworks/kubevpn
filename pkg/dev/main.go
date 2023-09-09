@@ -386,13 +386,13 @@ func DoDev(ctx context.Context, devOption *Options, flags *pflag.FlagSet, f cmdu
 	}
 
 	// connect to cluster, in container or host
-	finalFunc, err := devOption.doConnect(ctx, f, transferImage)
+	cancel, err := devOption.doConnect(ctx, f, transferImage)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if finalFunc != nil {
-			finalFunc()
+		if cancel != nil {
+			cancel()
 		}
 	}()
 
@@ -416,14 +416,16 @@ func DoDev(ctx context.Context, devOption *Options, flags *pflag.FlagSet, f cmdu
 	if err != nil {
 		return err
 	}
-	if err = validateAPIVersion(tempContainerConfig, dockerCli.Client().ClientVersion()); err != nil {
+	err = validateAPIVersion(tempContainerConfig, dockerCli.Client().ClientVersion())
+	if err != nil {
 		return err
 	}
 
 	return devOption.Main(ctx, tempContainerConfig)
 }
 
-func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, transferImage bool) (ff func(), err error) {
+// connect to cluster network on docker container or host
+func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, transferImage bool) (cancel func(), err error) {
 	connect := &handler.ConnectOptions{
 		Headers:     d.Headers,
 		Workloads:   []string{d.Workload},
@@ -457,30 +459,15 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, transferImag
 
 	switch d.ConnectMode {
 	case ConnectModeHost:
-		daemonClient := daemon.GetClient(true)
-		ff = func() {
-			connectClient, err := daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{})
-			if err != nil {
-				log.Error(err)
-				return
-			}
-			for {
-				recv, err := connectClient.Recv()
-				if err == io.EOF {
-					return
-				} else if err != nil {
-					log.Error(err)
-					return
-				}
-				log.Print(recv.Message)
-			}
-		}
+		daemonCli := daemon.GetClient(false)
 		var kubeconfig []byte
 		var ns string
 		kubeconfig, ns, err = util.ConvertToKubeconfigBytes(f)
 		if err != nil {
 			return
 		}
+		// not needs to ssh jump in daemon, because dev mode will hang up until user exit,
+		// so just ssh jump in client is enough
 		req := &rpc.ConnectRequest{
 			KubeconfigBytes: string(kubeconfig),
 			Namespace:       ns,
@@ -494,71 +481,92 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, transferImag
 			Image:           config.Image,
 			Level:           int32(log.DebugLevel),
 		}
-		var connectClient rpc.Daemon_ConnectClient
-		connectClient, err = daemonClient.Connect(ctx, req)
+		cancel = disconnect(ctx, daemonCli)
+		var resp rpc.Daemon_ConnectClient
+		resp, err = daemonCli.Connect(ctx, req)
 		if err != nil {
 			return
 		}
 		for {
-			recv, err := connectClient.Recv()
+			recv, err := resp.Recv()
 			if err == io.EOF {
-				return ff, nil
+				return cancel, nil
 			} else if err != nil {
-				return ff, err
+				return cancel, err
 			}
 			log.Print(recv.Message)
 		}
 
 	case ConnectModeContainer:
-		var connectContainer *RunConfig
 		var path string
 		path, err = connect.GetKubeconfigPath()
 		if err != nil {
 			return
 		}
-		var platform *specs.Platform
+		var platform specs.Platform
 		if d.Options.Platform != "" {
-			var p specs.Platform
-			p, err = platforms.Parse(d.Options.Platform)
+			platform, err = platforms.Parse(d.Options.Platform)
 			if err != nil {
 				return nil, pkgerr.Wrap(err, "error parsing specified platform")
 			}
-			platform = &p
 		}
-		connectContainer, err = createConnectContainer(d.NoProxy, *connect, path, d.Cli, platform)
+
+		var connectContainer *RunConfig
+		connectContainer, err = createConnectContainer(d.NoProxy, *connect, path, d.Cli, &platform)
 		if err != nil {
 			return
 		}
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
+		cancelCtx, cancelFunc := context.WithCancel(ctx)
+		defer cancelFunc()
 		var id string
-		id, err = run(ctx, connectContainer, d.Cli, d.DockerCli)
+		id, err = run(cancelCtx, connectContainer, d.Cli, d.DockerCli)
 		if err != nil {
 			return
 		}
-		h := interrupt.New(func(signal os.Signal) {
-			os.Exit(0)
-		}, func() {
-			cancel()
-			_ = d.Cli.ContainerKill(ctx, id, "SIGTERM")
-			_ = runLogsSinceNow(d.DockerCli, id)
-		})
+		h := interrupt.New(
+			func(signal os.Signal) { return },
+			func() {
+				cancelFunc()
+				_ = d.Cli.ContainerKill(context.Background(), id, "SIGTERM")
+				_ = runLogsSinceNow(d.DockerCli, id)
+			},
+		)
 		go h.Run(func() error { select {} })
 		defer h.Close()
-		if err = runLogsWaitRunning(ctx, d.DockerCli, id); err != nil {
+		err = runLogsWaitRunning(cancelCtx, d.DockerCli, id)
+		if err != nil {
 			// interrupt by signal KILL
-			if ctx.Err() == context.Canceled {
-				return nil, nil
+			if errors.Is(err, context.Canceled) {
+				err = nil
+				return
 			}
-			return nil, err
+			return
 		}
-		if err = d.Copts.netMode.Set("container:" + id); err != nil {
-			return nil, err
-		}
+		err = d.Copts.netMode.Set(fmt.Sprintf("container:%s", id))
+		return
 	default:
 		return nil, fmt.Errorf("unsupport connect mode: %s", d.ConnectMode)
 	}
-	return nil, nil
+}
+
+func disconnect(ctx context.Context, daemonClient rpc.DaemonClient) func() {
+	return func() {
+		resp, err := daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{})
+		if err != nil {
+			log.Error(err)
+			return
+		}
+		for {
+			msg, err := resp.Recv()
+			if err == io.EOF {
+				return
+			} else if err != nil {
+				log.Error(err)
+				return
+			}
+			log.Print(msg.Message)
+		}
+	}
 }
 
 func createConnectContainer(devOptions bool, connect handler.ConnectOptions, path string, cli *client.Client, platform *specs.Platform) (*RunConfig, error) {
@@ -675,35 +683,37 @@ func runLogsWaitRunning(ctx context.Context, dockerCli command.Cli, container st
 		ShowStderr: true,
 		Follow:     true,
 	}
-	responseBody, err := dockerCli.Client().ContainerLogs(ctx, c.ID, options)
+	logStream, err := dockerCli.Client().ContainerLogs(ctx, c.ID, options)
 	if err != nil {
 		return err
 	}
-	defer responseBody.Close()
+	defer logStream.Close()
 
 	buf := bytes.NewBuffer(nil)
-	writer := io.MultiWriter(buf, dockerCli.Out())
+	w := io.MultiWriter(buf, dockerCli.Out())
 
-	var errChan = make(chan error)
-	var stopChan = make(chan struct{})
+	cancel, cancelFunc := context.WithCancel(ctx)
+	defer cancelFunc()
 
 	go func() {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
+		t := time.NewTicker(time.Second)
+		defer t.Stop()
+		for range t.C {
+			// keyword, maybe can find another way more elegant
 			if strings.Contains(buf.String(), "enjoy it") {
-				close(stopChan)
+				cancelFunc()
 				return
 			}
 		}
 	}()
 
+	var errChan = make(chan error)
 	go func() {
 		var err error
 		if c.Config.Tty {
-			_, err = io.Copy(writer, responseBody)
+			_, err = io.Copy(w, logStream)
 		} else {
-			_, err = stdcopy.StdCopy(writer, dockerCli.Err(), responseBody)
+			_, err = stdcopy.StdCopy(w, dockerCli.Err(), logStream)
 		}
 		if err != nil {
 			errChan <- err
@@ -713,7 +723,7 @@ func runLogsWaitRunning(ctx context.Context, dockerCli command.Cli, container st
 	select {
 	case err = <-errChan:
 		return err
-	case <-stopChan:
+	case <-cancel.Done():
 		return nil
 	}
 }

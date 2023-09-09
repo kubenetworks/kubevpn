@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -68,18 +69,18 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				Level:            int32(log.DebugLevel),
 			}
 			cli := daemon.GetClient(false)
-			stream, err := cli.Connect(cmd.Context(), req)
+			resp, err := cli.Connect(cmd.Context(), req)
 			if err != nil {
 				return err
 			}
 			for {
-				resp, err := stream.Recv()
+				recv, err := resp.Recv()
 				if err == io.EOF {
 					break
 				} else if err != nil {
 					return err
 				}
-				log.Print(resp.GetMessage())
+				log.Print(recv.GetMessage())
 			}
 			// hangup
 			if foreground {
@@ -97,11 +98,10 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 					resp, err = stream.Recv()
 					if err == io.EOF {
 						return nil
-					} else if err == nil {
-						fmt.Print(resp.Message)
-					} else {
+					} else if err != nil {
 						return err
 					}
+					fmt.Fprint(os.Stdout, resp.Message)
 				}
 			}
 			return nil

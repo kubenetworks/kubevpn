@@ -3,6 +3,7 @@ package cmds
 import (
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -42,7 +43,7 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 				if err == io.EOF {
 					return nil
 				} else if err == nil {
-					fmt.Print(resp.Message)
+					fmt.Fprint(os.Stdout, resp.Message)
 				} else {
 					return err
 				}

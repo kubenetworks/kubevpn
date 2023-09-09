@@ -1,36 +1,30 @@
 package action
 
 import (
-	"io"
-
-	log "github.com/sirupsen/logrus"
+	"github.com/hpcloud/tail"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 )
 
-type logWarp struct {
-	server rpc.Daemon_LogsServer
-}
-
-func (r *logWarp) Write(p []byte) (n int, err error) {
-	err = r.server.Send(&rpc.LogResponse{
-		Message: string(p),
-	})
-	return len(p), err
-}
-
-func newLogWarp(server rpc.Daemon_LogsServer) io.Writer {
-	return &logWarp{server: server}
-}
-
 func (svr *Server) Logs(req *rpc.LogRequest, resp rpc.Daemon_LogsServer) error {
-	out := newLogWarp(resp)
-	origin := log.StandardLogger().Out
-	defer func() {
-		log.SetOutput(origin)
-	}()
-	multiWriter := io.MultiWriter(origin, out)
-	log.SetOutput(multiWriter)
-	<-resp.Context().Done()
-	return nil
+	path := GetDaemonLog()
+	config := tail.Config{Follow: true, ReOpen: true, MustExist: true}
+	file, err := tail.TailFile(path, config)
+	if err != nil {
+		return err
+	}
+	for {
+		select {
+		case <-resp.Context().Done():
+			return nil
+		case line := <-file.Lines:
+			if line.Err != nil {
+				return err
+			}
+			err = resp.Send(&rpc.LogResponse{Message: line.Text})
+			if err != nil {
+				return err
+			}
+		}
+	}
 }

@@ -1,7 +1,9 @@
 package cmds
 
 import (
+	"fmt"
 	"net/http"
+	"os"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -32,7 +34,7 @@ func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				log.Fatal(err)
 			}
-			println("Done")
+			fmt.Fprint(os.Stdout, "Done")
 		},
 	}
 	return cmd

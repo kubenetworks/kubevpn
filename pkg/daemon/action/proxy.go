@@ -3,12 +3,12 @@ package action
 import (
 	"context"
 	"fmt"
-	"github.com/spf13/pflag"
 	"io"
 	"os"
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/pflag"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"

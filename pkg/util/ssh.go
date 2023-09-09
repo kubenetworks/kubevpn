@@ -48,6 +48,7 @@ func Main(ctx context.Context, remoteEndpoint, localEndpoint *netip.AddrPort, co
 			User:            conf.User,
 			Auth:            auth,
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			Timeout:         time.Second * 10,
 		}
 		// Connect to SSH remote server using serverEndpoint
 		remote, err = ssh.Dial("tcp", conf.Addr, sshConfig)
@@ -122,6 +123,7 @@ func Run(conf *SshConfig, cmd string, env []string) (output []byte, errOut []byt
 			User:            conf.User,
 			Auth:            auth,
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			Timeout:         time.Second * 10,
 		}
 		// Connect to SSH remote server using serverEndpoint
 		remote, err = ssh.Dial("tcp", conf.Addr, sshConfig)

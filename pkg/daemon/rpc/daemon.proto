@@ -60,6 +60,7 @@ message StatusResponse {
 }
 
 message LogRequest {
+  bool Follow = 1;
 }
 
 message LogResponse {

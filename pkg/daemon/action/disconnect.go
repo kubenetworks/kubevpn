@@ -10,11 +10,11 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 )
 
-type DisconnectWarp struct {
+type disconnectWarp struct {
 	server rpc.Daemon_DisconnectServer
 }
 
-func (r *DisconnectWarp) Write(p []byte) (n int, err error) {
+func (r *disconnectWarp) Write(p []byte) (n int, err error) {
 	err = r.server.Send(&rpc.DisconnectResponse{
 		Message: string(p),
 	})
@@ -22,7 +22,7 @@ func (r *DisconnectWarp) Write(p []byte) (n int, err error) {
 }
 
 func newDisconnectWarp(server rpc.Daemon_DisconnectServer) io.Writer {
-	return &DisconnectWarp{server: server}
+	return &disconnectWarp{server: server}
 }
 
 func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_DisconnectServer) error {
