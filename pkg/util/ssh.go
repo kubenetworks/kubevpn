@@ -69,7 +69,9 @@ func Main(ctx context.Context, remoteEndpoint, localEndpoint *netip.AddrPort, co
 	if err != nil {
 		return err
 	}
-	done <- struct{}{}
+	select {
+	case done <- struct{}{}:
+	}
 	// handle incoming connections on reverse forwarded tunnel
 	for {
 		select {
@@ -80,10 +82,9 @@ func Main(ctx context.Context, remoteEndpoint, localEndpoint *netip.AddrPort, co
 
 		local, err := listen.Accept()
 		if err != nil {
-			log.Error(err)
-			continue
+			return err
 		}
-		go func() {
+		go func(local net.Conn) {
 			defer local.Close()
 			var conn net.Conn
 			var err error
@@ -99,7 +100,7 @@ func Main(ctx context.Context, remoteEndpoint, localEndpoint *netip.AddrPort, co
 			}
 			defer conn.Close()
 			handleClient(local, conn)
-		}()
+		}(local)
 	}
 }
 
