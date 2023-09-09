@@ -6,6 +6,7 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"os"
+	"strconv"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon"
 )
@@ -22,7 +23,18 @@ func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
-			return nil
+			pidPath := daemon.GetPidPath(opt.IsSudo)
+			err = os.Remove(pidPath)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			pid := os.Getpid()
+			err = os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), os.ModePerm)
+			if err != nil {
+				return err
+			}
+			err = os.Chmod(pidPath, os.ModePerm)
+			return err
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer opt.Stop()

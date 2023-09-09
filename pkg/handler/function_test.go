@@ -2,13 +2,15 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	json2 "k8s.io/apimachinery/pkg/util/json"
 	"net"
 	"net/http"
 	"os/exec"
 	"reflect"
 	"runtime"
+	"sigs.k8s.io/yaml"
 	"strings"
 	"sync"
 	"testing"
@@ -371,11 +373,27 @@ func TestArray(t *testing.T) {
 	}
 }
 func TestPatch(t *testing.T) {
-	s := "W3sib3AiOiJyZXBsYWNlIiwicGF0aCI6Ii9zcGVjL3RlbXBsYXRlL3NwZWMvY29udGFpbmVycy8wL3JlYWRpbmVzc1Byb2JlIiwidmFsdWUiOm51bGx9LHsib3AiOiJyZXBsYWNlIiwicGF0aCI6Ii9zcGVjL3RlbXBsYXRlL3NwZWMvY29udGFpbmVycy8wL2xpdmVuZXNzUHJvYmUiLCJ2YWx1ZSI6eyJodHRwR2V0Ijp7InBhdGgiOiIvaGVhbHRoIiwicG9ydCI6OTA4MCwic2NoZW1lIjoiSFRUUCJ9LCJ0aW1lb3V0U2Vjb25kcyI6MSwicGVyaW9kU2Vjb25kcyI6MTAsInN1Y2Nlc3NUaHJlc2hvbGQiOjEsImZhaWx1cmVUaHJlc2hvbGQiOjN9fSx7Im9wIjoicmVwbGFjZSIsInBhdGgiOiIvc3BlYy90ZW1wbGF0ZS9zcGVjL2NvbnRhaW5lcnMvMC9zdGFydHVwUHJvYmUiLCJ2YWx1ZSI6bnVsbH0seyJvcCI6InJlcGxhY2UiLCJwYXRoIjoiL3NwZWMvdGVtcGxhdGUvc3BlYy9jb250YWluZXJzLzEvcmVhZGluZXNzUHJvYmUiLCJ2YWx1ZSI6bnVsbH0seyJvcCI6InJlcGxhY2UiLCJwYXRoIjoiL3NwZWMvdGVtcGxhdGUvc3BlYy9jb250YWluZXJzLzEvbGl2ZW5lc3NQcm9iZSIsInZhbHVlIjpudWxsfSx7Im9wIjoicmVwbGFjZSIsInBhdGgiOiIvc3BlYy90ZW1wbGF0ZS9zcGVjL2NvbnRhaW5lcnMvMS9zdGFydHVwUHJvYmUiLCJ2YWx1ZSI6bnVsbH1d"
-	var pp []P
-	err := json.Unmarshal([]byte(s), &pp)
+	var p = corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+			Path:   "/health",
+			Port:   intstr.FromInt(9080),
+			Scheme: "HTTP",
+		}},
+	}
+	marshal, err := json2.Marshal(p)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(pp)
+	fmt.Println(string(marshal))
+
+	var pp corev1.Probe
+	err = json2.Unmarshal(marshal, &pp)
+	if err != nil {
+		panic(err)
+	}
+	bytes, err := yaml.Marshal(pp)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(string(bytes))
 }

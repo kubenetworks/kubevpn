@@ -406,7 +406,7 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, wor
 				if err != nil {
 					return false, err
 				}
-				_, _ = fmt.Fprintf(os.Stdout, "%s", status)
+				log.Infof("%s", status)
 				// Quit waiting if the rollout is done
 				if done {
 					return true, nil
@@ -752,8 +752,8 @@ func MoveToTemp() {
 }
 
 func Merge[K comparable, V any](fromMap, ToMap map[K]V) map[K]V {
-	for keyToMap, valueToMap := range ToMap {
-		fromMap[keyToMap] = valueToMap
+	for k, v := range ToMap {
+		fromMap[k] = v
 	}
 	if fromMap == nil {
 		// merge(nil, map[string]interface{...}) -> map[string]interface{...}

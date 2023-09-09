@@ -25,6 +25,9 @@ import (
 var daemonClient, sudoDaemonClient rpc.DaemonClient
 
 func GetClient(isSudo bool) rpc.DaemonClient {
+	if _, err := os.Stat(GetSockPath(isSudo)); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	if isSudo && sudoDaemonClient != nil {
 		return sudoDaemonClient
 	}

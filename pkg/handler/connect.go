@@ -769,11 +769,22 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet) (e
 	errChan := make(chan error, 1)
 	readyChan := make(chan struct{}, 1)
 	go func() {
-		err := util.Main(ctx, &remote, local, conf, readyChan)
-		if err != nil {
-			log.Errorf("ssh forward failed err: %v", err)
-			errChan <- err
-			return
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			err := util.Main(ctx, &remote, local, conf, readyChan)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					log.Errorf("ssh forward failed err: %v", err)
+				}
+				select {
+				case errChan <- err:
+				}
+			}
 		}
 	}()
 	log.Infof("wait jump to bastion host...")

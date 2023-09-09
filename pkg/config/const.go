@@ -14,7 +14,7 @@ const (
 
 	LogFile = "daemon.log"
 
-	KubeVPNRestorePatchKey = "kubevpnrestorepatch"
+	KubeVPNRestorePatchKey = "kubevpn-probe-restore-patch"
 )
 
 func init() {

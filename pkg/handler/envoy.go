@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	k8sjson "k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/sets"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
@@ -77,7 +78,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	// (1) add mesh container
 	removePatch, restorePatch := patch(*origin, path)
 	var b []byte
-	b, err = json.Marshal(restorePatch)
+	b, err = k8sjson.Marshal(restorePatch)
 	if err != nil {
 		return err
 	}
@@ -97,7 +98,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 		},
 	}
 	var bytes []byte
-	bytes, err = json.Marshal(append(ps, removePatch...))
+	bytes, err = k8sjson.Marshal(append(ps, removePatch...))
 	if err != nil {
 		return err
 	}
@@ -140,21 +141,21 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 		return err
 	}
 
-	var ps []P
+	mesh.RemoveContainers(templateSpec)
 	if u.GetAnnotations() != nil && u.GetAnnotations()[config.KubeVPNRestorePatchKey] != "" {
 		patchStr := u.GetAnnotations()[config.KubeVPNRestorePatchKey]
+		var ps []P
 		err = json.Unmarshal([]byte(patchStr), &ps)
 		if err != nil {
 			return fmt.Errorf("unmarshal json patch: %s failed, err: %v", patchStr, err)
 		}
+		fromPatchToProbe(templateSpec, depth, ps)
 	}
 
 	if empty {
-		mesh.RemoveContainers(templateSpec)
 		helper := pkgresource.NewHelper(object.Client, object.Mapping)
 		// pod without controller
 		if len(depth) == 0 {
-			fromPatchToProbe(templateSpec, ps)
 			delete(templateSpec.ObjectMeta.GetAnnotations(), config.KubeVPNRestorePatchKey)
 			pod := &v1.Pod{ObjectMeta: templateSpec.ObjectMeta, Spec: templateSpec.Spec}
 			CleanupUselessInfo(pod)
@@ -164,7 +165,7 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 
 		// resource with controller, like deployment,statefulset
 		var bytes []byte
-		bytes, err = json.Marshal(append(ps, []P{
+		bytes, err = json.Marshal([]P{
 			{
 				Op:    "replace",
 				Path:  "/" + strings.Join(append(depth, "spec"), "/"),
@@ -174,8 +175,8 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 				Op:    "replace",
 				Path:  "/metadata/annotations/" + config.KubeVPNRestorePatchKey,
 				Value: "",
-			}}...,
-		))
+			},
+		})
 		if err != nil {
 			return err
 		}
@@ -216,13 +217,23 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP ut
 			}},
 		})
 	} else {
-		v[index].Rules = append(v[index].Rules, &controlplane.Rule{
-			Headers:      headers,
-			LocalTunIPv4: tunIP.LocalTunIPv4,
-			LocalTunIPv6: tunIP.LocalTunIPv6,
-		})
-		if v[index].Ports == nil {
-			v[index].Ports = port
+		var found bool
+		for j, rule := range v[index].Rules {
+			if rule.LocalTunIPv4 == tunIP.LocalTunIPv4 &&
+				rule.LocalTunIPv6 == tunIP.LocalTunIPv6 {
+				found = true
+				v[index].Rules[j].Headers = util.Merge[string, string](v[index].Rules[j].Headers, headers)
+			}
+		}
+		if !found {
+			v[index].Rules = append(v[index].Rules, &controlplane.Rule{
+				Headers:      headers,
+				LocalTunIPv4: tunIP.LocalTunIPv4,
+				LocalTunIPv6: tunIP.LocalTunIPv6,
+			})
+			if v[index].Ports == nil {
+				v[index].Ports = port
+			}
 		}
 	}
 

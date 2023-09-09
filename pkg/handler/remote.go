@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	k8sjson "k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/wait"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
@@ -527,8 +528,8 @@ func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, 
 				Value: b,
 			},
 		}
-		bytes, _ := json.Marshal(append(p, removePatch...))
-		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
+		marshal, _ := json.Marshal(append(p, removePatch...))
+		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, marshal, &metav1.PatchOptions{})
 		if err != nil {
 			log.Errorf("error while inject proxy container, err: %v, exiting...", err)
 			return err
@@ -656,6 +657,17 @@ func patch(spec v1.PodTemplateSpec, path []string) (remove []P, restore []P) {
 		readinessPath := "/" + strings.Join(append(path, "spec", "containers", index, "readinessProbe"), "/")
 		livenessPath := "/" + strings.Join(append(path, "spec", "containers", index, "livenessProbe"), "/")
 		startupPath := "/" + strings.Join(append(path, "spec", "containers", index, "startupProbe"), "/")
+		f := func(p *v1.Probe) string {
+			if p == nil {
+				return ""
+			}
+			marshal, err := k8sjson.Marshal(p)
+			if err != nil {
+				log.Error(err)
+				return ""
+			}
+			return string(marshal)
+		}
 		remove = append(remove, P{
 			Op:    "replace",
 			Path:  readinessPath,
@@ -672,41 +684,64 @@ func patch(spec v1.PodTemplateSpec, path []string) (remove []P, restore []P) {
 		restore = append(restore, P{
 			Op:    "replace",
 			Path:  readinessPath,
-			Value: spec.Spec.Containers[i].ReadinessProbe,
+			Value: f(spec.Spec.Containers[i].ReadinessProbe),
 		}, P{
 			Op:    "replace",
 			Path:  livenessPath,
-			Value: spec.Spec.Containers[i].LivenessProbe,
+			Value: f(spec.Spec.Containers[i].LivenessProbe),
 		}, P{
 			Op:    "replace",
 			Path:  startupPath,
-			Value: spec.Spec.Containers[i].StartupProbe,
+			Value: f(spec.Spec.Containers[i].StartupProbe),
 		})
 	}
 	return
 }
 
-func fromPatchToProbe(spec *v1.PodTemplateSpec, patch []P) {
+func fromPatchToProbe(spec *v1.PodTemplateSpec, path []string, patch []P) {
 	// 3 = readiness + liveness + startup
 	if len(patch) != 3*len(spec.Spec.Containers) {
 		log.Debugf("patch not match container num, not restore")
 		return
 	}
 	for i := range spec.Spec.Containers {
-		ps := patch[i*3 : i*3+3]
-		marshal, err := json.Marshal(ps[0].Value)
-		if err == nil {
-			err = json.Unmarshal(marshal, spec.Spec.Containers[i].ReadinessProbe)
+		index := strconv.Itoa(i)
+		readinessPath := "/" + strings.Join(append(path, "spec", "containers", index, "readinessProbe"), "/")
+		livenessPath := "/" + strings.Join(append(path, "spec", "containers", index, "livenessProbe"), "/")
+		startupPath := "/" + strings.Join(append(path, "spec", "containers", index, "startupProbe"), "/")
+		var f = func(value any) *v1.Probe {
+			if value == nil {
+				return nil
+			}
+			str, ok := value.(string)
+			if ok && str == "" {
+				return nil
+			}
+			if !ok {
+				marshal, err := k8sjson.Marshal(value)
+				if err != nil {
+					log.Error(err)
+					return nil
+				}
+				str = string(marshal)
+			}
+			var probe v1.Probe
+			err := k8sjson.Unmarshal([]byte(str), &probe)
+			if err != nil {
+				log.Error(err)
+				return nil
+			}
+			return &probe
 		}
-
-		marshal, err = json.Marshal(ps[1].Value)
-		if err == nil {
-			err = json.Unmarshal(marshal, spec.Spec.Containers[i].LivenessProbe)
-		}
-
-		marshal, err = json.Marshal(ps[2].Value)
-		if err == nil {
-			err = json.Unmarshal(marshal, spec.Spec.Containers[i].StartupProbe)
+		for _, p := range patch {
+			switch p.Path {
+			case readinessPath:
+				spec.Spec.Containers[i].ReadinessProbe = f(p.Value)
+			case livenessPath:
+				spec.Spec.Containers[i].LivenessProbe = f(p.Value)
+			case startupPath:
+				spec.Spec.Containers[i].StartupProbe = f(p.Value)
+			}
 		}
 	}
 }
