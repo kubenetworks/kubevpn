@@ -72,13 +72,14 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 		Args:                  dockercli.RequiresMinArgs(1),
 		DisableFlagsInUseLine: true,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			err = daemon.StartupDaemon(cmd.Context())
-			if err != nil {
-				return err
-			}
 			// not support temporally
 			if devOptions.Engine == config.EngineGvisor {
 				return fmt.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
+			}
+
+			err = daemon.StartupDaemon(cmd.Context())
+			if err != nil {
+				return err
 			}
 			return handler.SshJump(cmd.Context(), sshConf, cmd.Flags())
 		},

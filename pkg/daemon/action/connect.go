@@ -76,8 +76,8 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if !svr.IsSudo {
 		return svr.redirectToSudoDaemon(req, resp)
 	}
-	ctx := resp.Context()
 
+	ctx := resp.Context()
 	out := newWarp(resp)
 	file, err := os.OpenFile(GetDaemonLog(), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
 	if err != nil {
@@ -118,7 +118,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	go util.StartupPProf(config.PProfPort)
 	defaultlog.Default().SetOutput(io.Discard)
 	if transferImage {
-		err = util.TransferImage(ctx, sshConf, config.OriginImage, req.Image)
+		err = util.TransferImage(ctx, sshConf, config.OriginImage, req.Image, io.MultiWriter(out, file))
 		if err != nil {
 			return err
 		}
@@ -155,7 +155,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	config.Image = req.Image
 	err = svr.connect.DoConnect(sshCtx)
 	if err != nil {
-		log.Errorln(err)
+		log.Error(err)
 		svr.connect.Cleanup()
 		return err
 	}

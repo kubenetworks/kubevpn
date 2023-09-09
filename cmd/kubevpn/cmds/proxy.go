@@ -110,7 +110,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				if err == io.EOF {
 					break
 				} else if err == nil {
-					log.Print(resp.Message)
+					fmt.Fprint(os.Stdout, resp.Message)
 				} else {
 					return err
 				}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -47,7 +48,7 @@ func quit(ctx context.Context, isSudo bool) error {
 		if err == io.EOF {
 			break
 		} else if err == nil {
-			fmt.Print(resp.Message)
+			fmt.Fprint(os.Stdout, resp.Message)
 		} else {
 			return err
 		}

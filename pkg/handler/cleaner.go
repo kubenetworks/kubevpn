@@ -50,22 +50,25 @@ func (c *ConnectOptions) Cleanup() {
 	if c.localTunIPv6 != nil && c.localTunIPv6.IP != nil {
 		ips = append(ips, c.localTunIPv6.IP)
 	}
-	err := c.dhcp.ReleaseIP(ctx, ips...)
-	if err != nil {
-		log.Errorf("failed to release ip to dhcp, err: %v", err)
-	}
-	_ = c.clientset.CoreV1().Pods(c.Namespace).Delete(ctx, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
-	var count int
-	count, err = updateRefCount(ctx, c.clientset.CoreV1().ConfigMaps(c.Namespace), config.ConfigMapPodTrafficManager, -1)
-	// only if ref is zero and deployment is not ready, needs to clean up
-	if err == nil && count <= 0 {
-		deployment, errs := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, v1.GetOptions{})
-		if errs == nil && deployment.Status.UnavailableReplicas != 0 {
-			cleanup(ctx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, true)
+	if c.dhcp != nil {
+		err := c.dhcp.ReleaseIP(ctx, ips...)
+		if err != nil {
+			log.Errorf("failed to release ip to dhcp, err: %v", err)
 		}
 	}
-	if err != nil {
-		log.Errorf("can not update ref-count: %v", err)
+	if c.clientset != nil {
+		_ = c.clientset.CoreV1().Pods(c.Namespace).Delete(ctx, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
+		count, err := updateRefCount(ctx, c.clientset.CoreV1().ConfigMaps(c.Namespace), config.ConfigMapPodTrafficManager, -1)
+		// only if ref is zero and deployment is not ready, needs to clean up
+		if err == nil && count <= 0 {
+			deployment, errs := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, v1.GetOptions{})
+			if errs == nil && deployment.Status.UnavailableReplicas != 0 {
+				cleanup(ctx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, true)
+			}
+		}
+		if err != nil {
+			log.Errorf("can not update ref-count: %v", err)
+		}
 	}
 	for _, function := range RollbackFuncList {
 		if function != nil {

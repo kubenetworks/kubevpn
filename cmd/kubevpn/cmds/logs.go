@@ -14,6 +14,7 @@ import (
 )
 
 func CmdLogs(f cmdutil.Factory) *cobra.Command {
+	req := &rpc.LogRequest{}
 	cmd := &cobra.Command{
 		Use:     "logs",
 		Short:   i18n.T("Logs to kubernetes cluster network"),
@@ -24,10 +25,7 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := daemon.GetClient(true).Logs(
-				cmd.Context(),
-				&rpc.LogRequest{},
-			)
+			client, err := daemon.GetClient(true).Logs(cmd.Context(), req)
 			if err != nil {
 				return err
 			}
@@ -45,5 +43,6 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVarP(&req.Follow, "follow", "f", false, "Specify if the logs should be streamed.")
 	return cmd
 }

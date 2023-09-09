@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/tools/clientcmd/api/latest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
@@ -42,18 +43,22 @@ func IsSameCluster(client v12.ConfigMapInterface, namespace string, clientB v12.
 
 func ConvertToKubeconfigBytes(factory cmdutil.Factory) ([]byte, string, error) {
 	loader := factory.ToRawKubeConfigLoader()
-	namespace, _, err2 := loader.Namespace()
-	if err2 != nil {
-		return nil, "", err2
+	namespace, _, err := loader.Namespace()
+	if err != nil {
+		return nil, "", err
 	}
 	rawConfig, err := loader.RawConfig()
+	err = api.FlattenConfig(&rawConfig)
+	if err != nil {
+		return nil, "", err
+	}
 	convertedObj, err := latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
 	if err != nil {
 		return nil, "", err
 	}
-	marshal, err2 := json.Marshal(convertedObj)
-	if err2 != nil {
-		return nil, "", err2
+	marshal, err := json.Marshal(convertedObj)
+	if err != nil {
+		return nil, "", err
 	}
 	return marshal, namespace, nil
 }

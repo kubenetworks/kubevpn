@@ -47,7 +47,8 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 		}
 	}
 	if needPull {
-		if err = util.PullImage(ctx, runConfig.platform, cli, c, config.Image); err != nil {
+		err = util.PullImage(ctx, runConfig.platform, cli, c, config.Image, nil)
+		if err != nil {
 			return
 		}
 	}

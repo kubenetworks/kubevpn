@@ -2,10 +2,12 @@ package action
 
 import (
 	"fmt"
+	"io"
+
 	log "github.com/sirupsen/logrus"
+
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
-	"io"
 )
 
 type leaveWarp struct {

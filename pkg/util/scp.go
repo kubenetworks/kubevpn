@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/schollz/progressbar/v3"
 	log "github.com/sirupsen/logrus"
@@ -29,6 +30,7 @@ func SCP(conf *SshConfig, filename string, commands ...string) error {
 			User:            conf.User,
 			Auth:            auth,
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			Timeout:         time.Second * 10,
 		}
 		remote, err = ssh.Dial("tcp", conf.Addr, sshConfig)
 	}
@@ -52,10 +54,10 @@ func SCP(conf *SshConfig, filename string, commands ...string) error {
 	for _, command := range commands {
 		output, err := sess.CombinedOutput(command)
 		if err != nil {
-			fmt.Fprint(os.Stderr, string(output))
+			log.Error(string(output))
 			return err
 		} else {
-			fmt.Fprint(os.Stdout, string(output))
+			log.Info(string(output))
 		}
 	}
 	return nil

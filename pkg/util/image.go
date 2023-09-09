@@ -44,16 +44,14 @@ func GetClient() (*client.Client, *command.DockerCli, error) {
 // TransferImage
 // 1) if not special ssh config, just pull image and tag and push
 // 2) if special ssh config, pull image, tag image, save image and scp image to remote, load image and push
-func TransferImage(ctx context.Context, conf *SshConfig, from, to string) error {
+func TransferImage(ctx context.Context, conf *SshConfig, from, to string, out io.Writer) error {
 	cli, c, err := GetClient()
 	if err != nil {
 		return fmt.Errorf("failed to get docker client: %v", err)
 	}
 	// todo add flags? or detect k8s node runtime ?
-	err = PullImage(ctx, &v1.Platform{
-		Architecture: "amd64",
-		OS:           "linux",
-	}, cli, c, from)
+	platform := &v1.Platform{Architecture: "amd64", OS: "linux"}
+	err = PullImage(ctx, platform, cli, c, from, out)
 	if err != nil {
 		return fmt.Errorf("failed to pull image: %v", err)
 	}
@@ -91,9 +89,11 @@ func TransferImage(ctx context.Context, conf *SshConfig, from, to string) error 
 			return err
 		}
 		defer readCloser.Close()
-		_, stdout, _ := term.StdStreams()
-		out := streams.NewOut(stdout)
-		err = jsonmessage.DisplayJSONMessagesToStream(readCloser, out, nil)
+		if out == nil {
+			_, out, _ = term.StdStreams()
+		}
+		outWarp := streams.NewOut(out)
+		err = jsonmessage.DisplayJSONMessagesToStream(readCloser, outWarp, nil)
 		if err != nil {
 			err = fmt.Errorf("can not display message, err: %v", err)
 			return err
@@ -122,13 +122,12 @@ func TransferImage(ctx context.Context, conf *SshConfig, from, to string) error 
 	defer os.Remove(file.Name())
 
 	logrus.Infof("Transfering image %s", to)
-	err = SCP(conf, file.Name(), []string{
-		fmt.Sprintf(
-			"(docker load image -i kubevpndir/%s && docker push %s) || (nerdctl image load -i kubevpndir/%s && nerdctl image push %s)",
-			filepath.Base(file.Name()), to,
-			filepath.Base(file.Name()), to,
-		),
-	}...)
+	cmd := fmt.Sprintf(
+		"(docker load image -i kubevpndir/%s && docker push %s) || (nerdctl image load -i kubevpndir/%s && nerdctl image push %s)",
+		filepath.Base(file.Name()), to,
+		filepath.Base(file.Name()), to,
+	)
+	err = SCP(conf, file.Name(), []string{cmd}...)
 	if err != nil {
 		return err
 	}
@@ -136,7 +135,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, from, to string) error 
 	return nil
 }
 
-func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, c *command.DockerCli, img string) error {
+func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, c *command.DockerCli, img string, out io.Writer) error {
 	var readCloser io.ReadCloser
 	var plat string
 	if platform != nil && platform.Architecture != "" && platform.OS != "" {
@@ -168,9 +167,11 @@ func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, c
 		return err
 	}
 	defer readCloser.Close()
-	_, stdout, _ := term.StdStreams()
-	out := streams.NewOut(stdout)
-	err = jsonmessage.DisplayJSONMessagesToStream(readCloser, out, nil)
+	if out == nil {
+		_, out, _ = term.StdStreams()
+	}
+	outWarp := streams.NewOut(out)
+	err = jsonmessage.DisplayJSONMessagesToStream(readCloser, outWarp, nil)
 	if err != nil {
 		err = fmt.Errorf("can not display message, err: %v", err)
 		return err

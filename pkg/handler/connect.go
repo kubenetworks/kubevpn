@@ -458,7 +458,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 				func() {
 					defer func() {
 						if er := recover(); er != nil {
-							log.Errorln(er)
+							log.Error(er)
 						}
 					}()
 					w, errs := c.clientset.CoreV1().Pods(podNs).Watch(ctx, metav1.ListOptions{
@@ -590,7 +590,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	const port = 53
 	pod, err := c.GetRunningPodList(ctx)
 	if err != nil {
-		log.Errorln(err)
+		log.Error(err)
 		return err
 	}
 	relovConf, err := dns.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, pod[0].GetName(), c.Namespace)
