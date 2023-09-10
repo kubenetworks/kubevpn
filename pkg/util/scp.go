@@ -21,7 +21,12 @@ func SCP(conf *SshConfig, filename string, commands ...string) error {
 	} else {
 		var auth []ssh.AuthMethod
 		if conf.Keyfile != "" {
-			auth = append(auth, publicKeyFile(conf.Keyfile))
+			var file ssh.AuthMethod
+			file, err = publicKeyFile(conf.Keyfile)
+			if err != nil {
+				return err
+			}
+			auth = append(auth, file)
 		}
 		if conf.Password != "" {
 			auth = append(auth, ssh.Password(conf.Password))
@@ -35,7 +40,7 @@ func SCP(conf *SshConfig, filename string, commands ...string) error {
 		remote, err = ssh.Dial("tcp", conf.Addr, sshConfig)
 	}
 	if err != nil {
-		log.Errorf("Dial INTO remote server error: %s", err)
+		log.Errorf("Dial into remote server error: %s", err)
 		return err
 	}
 

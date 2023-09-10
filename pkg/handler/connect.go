@@ -206,9 +206,19 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	//if err = c.CreateRemoteInboundPod(c.ctx); err != nil {
 	//	return
 	//}
-	rawTCPForwardPort := util.GetAvailableTCPPortOrDie()
-	gvisorTCPForwardPort := util.GetAvailableTCPPortOrDie()
-	gvisorUDPForwardPort := util.GetAvailableTCPPortOrDie()
+	var rawTCPForwardPort, gvisorTCPForwardPort, gvisorUDPForwardPort int
+	rawTCPForwardPort, err = util.GetAvailableTCPPortOrDie()
+	if err != nil {
+		return err
+	}
+	gvisorTCPForwardPort, err = util.GetAvailableTCPPortOrDie()
+	if err != nil {
+		return err
+	}
+	gvisorUDPForwardPort, err = util.GetAvailableTCPPortOrDie()
+	if err != nil {
+		return err
+	}
 	if err = c.portForward(c.ctx, []string{
 		fmt.Sprintf("%d:10800", rawTCPForwardPort),
 		fmt.Sprintf("%d:10801", gvisorTCPForwardPort),
@@ -764,8 +774,11 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet) (e
 	if err != nil {
 		return err
 	}
-
-	port := util.GetAvailableTCPPortOrDie()
+	var port int
+	port, err = util.GetAvailableTCPPortOrDie()
+	if err != nil {
+		return err
+	}
 	var local netip.AddrPort
 	local, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 	if err != nil {
@@ -788,6 +801,7 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet) (e
 				}
 				select {
 				case errChan <- err:
+				default:
 				}
 			}
 		}

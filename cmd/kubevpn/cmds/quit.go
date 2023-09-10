@@ -18,8 +18,8 @@ import (
 func CmdQuit(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "quit",
-		Short:   i18n.T("Quit to kubernetes cluster network"),
-		Long:    templates.LongDesc(i18n.T(`Quit to kubernetes cluster network`)),
+		Short:   i18n.T("Quit daemon"),
+		Long:    templates.LongDesc(i18n.T(`Disconnect from cluster, leave proxy resources, and quit daemon`)),
 		Example: templates.Examples(i18n.T(``)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			return daemon.StartupDaemon(cmd.Context())

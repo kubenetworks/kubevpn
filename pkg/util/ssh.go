@@ -3,7 +3,6 @@ package util
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kevinburke/ssh_config"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 	"k8s.io/client-go/util/homedir"
@@ -40,7 +40,12 @@ func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, co
 	} else {
 		var auth []ssh.AuthMethod
 		if conf.Keyfile != "" {
-			auth = append(auth, publicKeyFile(conf.Keyfile))
+			var keyFile ssh.AuthMethod
+			keyFile, err = publicKeyFile(conf.Keyfile)
+			if err != nil {
+				return err
+			}
+			auth = append(auth, keyFile)
 		}
 		if conf.Password != "" {
 			auth = append(auth, ssh.Password(conf.Password))
@@ -57,7 +62,7 @@ func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, co
 		remote, err = ssh.Dial("tcp", conf.Addr, sshConfig)
 	}
 	if err != nil {
-		log.Errorf("Dial INTO remote server error: %s", err)
+		log.Errorf("Dial into remote server error: %s", err)
 		return err
 	}
 
@@ -71,6 +76,7 @@ func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, co
 
 	select {
 	case done <- struct{}{}:
+	default:
 	}
 	// handle incoming connections on reverse forwarded tunnel
 	for {
@@ -112,7 +118,12 @@ func Run(conf *SshConfig, cmd string, env []string) (output []byte, errOut []byt
 	} else {
 		var auth []ssh.AuthMethod
 		if conf.Keyfile != "" {
-			auth = append(auth, publicKeyFile(conf.Keyfile))
+			var keyFile ssh.AuthMethod
+			keyFile, err = publicKeyFile(conf.Keyfile)
+			if err != nil {
+				return
+			}
+			auth = append(auth, keyFile)
 		}
 		if conf.Password != "" {
 			auth = append(auth, ssh.Password(conf.Password))
@@ -129,7 +140,7 @@ func Run(conf *SshConfig, cmd string, env []string) (output []byte, errOut []byt
 		remote, err = ssh.Dial("tcp", conf.Addr, sshConfig)
 	}
 	if err != nil {
-		log.Errorf("Dial INTO remote server error: %s", err)
+		log.Errorf("Dial into remote server error: %s", err)
 		return
 	}
 	defer remote.Close()
@@ -155,28 +166,28 @@ func Run(conf *SshConfig, cmd string, env []string) (output []byte, errOut []byt
 	return out.Bytes(), er.Bytes(), err
 }
 
-func publicKeyFile(file string) ssh.AuthMethod {
+func publicKeyFile(file string) (ssh.AuthMethod, error) {
 	var err error
 	if len(file) != 0 && file[0] == '~' {
 		file = filepath.Join(homedir.HomeDir(), file[1:])
 	}
 	file, err = filepath.Abs(file)
 	if err != nil {
-		log.Fatalln(fmt.Sprintf("Cannot read SSH public key file %s", file))
-		return nil
+		err = errors.Wrap(err, fmt.Sprintf("Cannot read SSH public key file %s", file))
+		return nil, err
 	}
 	buffer, err := os.ReadFile(file)
 	if err != nil {
-		log.Fatalln(fmt.Sprintf("Cannot read SSH public key file %s", file))
-		return nil
+		err = errors.Wrap(err, fmt.Sprintf("Cannot read SSH public key file %s", file))
+		return nil, err
 	}
 
 	key, err := ssh.ParsePrivateKey(buffer)
 	if err != nil {
-		log.Fatalln(fmt.Sprintf("Cannot parse SSH public key file %s", file))
-		return nil
+		err = errors.Wrap(err, fmt.Sprintf("Cannot parse SSH public key file %s", file))
+		return nil, err
 	}
-	return ssh.PublicKeys(key)
+	return ssh.PublicKeys(key), nil
 }
 
 func handleClient(client net.Conn, remote net.Conn) {
@@ -188,7 +199,10 @@ func handleClient(client net.Conn, remote net.Conn) {
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			log.Debugf("error while copy remote->local: %s", err)
 		}
-		chDone <- true
+		select {
+		case chDone <- true:
+		default:
+		}
 	}()
 
 	// start local -> remote data transfer
@@ -197,7 +211,10 @@ func handleClient(client net.Conn, remote net.Conn) {
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			log.Debugf("error while copy local->remote: %s", err)
 		}
-		chDone <- true
+		select {
+		case chDone <- true:
+		default:
+		}
 	}()
 
 	<-chDone
@@ -263,9 +280,13 @@ func getBastion(name string) *SshConfig {
 
 func dial(from *SshConfig) (*ssh.Client, error) {
 	// connect to the bastion host
+	authMethod, err := publicKeyFile(from.Keyfile)
+	if err != nil {
+		return nil, err
+	}
 	return ssh.Dial("tcp", from.Addr, &ssh.ClientConfig{
 		User:            from.User,
-		Auth:            []ssh.AuthMethod{publicKeyFile(from.Keyfile)},
+		Auth:            []ssh.AuthMethod{authMethod},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         time.Second * 10,
 	})
@@ -278,9 +299,13 @@ func jump(bClient *ssh.Client, to *SshConfig) (*ssh.Client, error) {
 		return nil, err
 	}
 
+	authMethod, err := publicKeyFile(to.Keyfile)
+	if err != nil {
+		return nil, err
+	}
 	ncc, chans, reqs, err := ssh.NewClientConn(conn, to.Addr, &ssh.ClientConfig{
 		User:            to.User,
-		Auth:            []ssh.AuthMethod{publicKeyFile(to.Keyfile)},
+		Auth:            []ssh.AuthMethod{authMethod},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         time.Second * 10,
 	})
