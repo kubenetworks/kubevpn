@@ -6,14 +6,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"go.uber.org/automaxprocs/maxprocs"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	ctrl "sigs.k8s.io/controller-runtime"
-
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/core"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
+	"go.uber.org/automaxprocs/maxprocs"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
 
 func CmdServe(_ cmdutil.Factory) *cobra.Command {
@@ -40,7 +38,7 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx := ctrl.SetupSignalHandler()
+			ctx := cmd.Context()
 			return handler.Run(ctx, servers)
 		},
 	}

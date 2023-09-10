@@ -54,30 +54,30 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/driver"
 )
 
-func GetAvailableUDPPortOrDie() int {
+func GetAvailableUDPPortOrDie() (int, error) {
 	address, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:0", "localhost"))
 	if err != nil {
-		log.Fatal(err)
+		return 0, err
 	}
 	listener, err := net.ListenUDP("udp", address)
 	if err != nil {
-		log.Fatal(err)
+		return 0, err
 	}
 	defer listener.Close()
-	return listener.LocalAddr().(*net.UDPAddr).Port
+	return listener.LocalAddr().(*net.UDPAddr).Port, nil
 }
 
-func GetAvailableTCPPortOrDie() int {
+func GetAvailableTCPPortOrDie() (int, error) {
 	address, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", "localhost"))
 	if err != nil {
-		log.Fatal(err)
+		return 0, err
 	}
 	listener, err := net.ListenTCP("tcp", address)
 	if err != nil {
-		log.Fatal(err)
+		return 0, err
 	}
 	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port
+	return listener.Addr().(*net.TCPAddr).Port, nil
 }
 
 func WaitPod(podInterface v12.PodInterface, list metav1.ListOptions, checker func(*v1.Pod) bool) error {
@@ -723,7 +723,7 @@ func Print(writer io.Writer, slogan string) {
 }
 
 func StartupPProf(port int) {
-	_ = http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
+	_ = http.ListenAndServe(fmt.Sprintf("localhost:%d", port), nil)
 }
 
 func MoveToTemp() {
