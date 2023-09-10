@@ -30,7 +30,13 @@ type SvrOption struct {
 }
 
 func (o *SvrOption) Start(ctx context.Context) error {
+	file, err := os.OpenFile(action.GetDaemonLogPath(), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
+	if err != nil {
+		log.Error(err)
+		return err
+	}
 	util.InitLogger(true)
+	log.StandardLogger().SetOutput(file)
 
 	o.ctx, o.cancel = context.WithCancel(ctx)
 	var lc net.ListenConfig

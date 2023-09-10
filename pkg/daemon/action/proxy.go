@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -40,13 +39,14 @@ func newProxyWarp(server rpc.Daemon_ProxyServer) io.Writer {
 
 func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) error {
 	out := newProxyWarp(resp)
-	log.SetOutput(out)
+	origin := log.StandardLogger().Out
+	log.SetOutput(io.MultiWriter(out, origin))
 	defer func() {
-		log.SetOutput(os.Stdout)
+		log.SetOutput(origin)
 		log.SetLevel(log.DebugLevel)
 	}()
-	ctx := resp.Context()
 	util.InitLogger(false)
+	ctx := resp.Context()
 	connect := &handler.ConnectOptions{
 		Namespace:   req.Namespace,
 		Headers:     req.Headers,

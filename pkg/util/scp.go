@@ -92,10 +92,10 @@ func main(sess *ssh.Session, filename string) error {
 
 func sCopy(dst io.Writer, src io.Reader, size int64) error {
 	total := float64(size) / 1024 / 1024
-	fmt.Printf("Length: 68276642 (%0.2fM)\n", total)
+	log.Printf("Length: 68276642 (%0.2fM)\n", total)
 
 	bar := progressbar.NewOptions(int(size),
-		progressbar.OptionSetWriter(os.Stdout),
+		progressbar.OptionSetWriter(log.StandardLogger().Out),
 		progressbar.OptionEnableColorCodes(true),
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionSetWidth(50),
