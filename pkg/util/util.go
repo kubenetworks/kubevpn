@@ -55,7 +55,7 @@ import (
 )
 
 func GetAvailableUDPPortOrDie() int {
-	address, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:0", "0.0.0.0"))
+	address, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:0", "localhost"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func GetAvailableUDPPortOrDie() int {
 }
 
 func GetAvailableTCPPortOrDie() int {
-	address, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", "0.0.0.0"))
+	address, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", "localhost"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -489,7 +489,7 @@ func WaitPortToBeFree(ctx context.Context, port int) error {
 }
 
 func IsPortListening(port int) bool {
-	listener, err := net.Listen("tcp4", net.JoinHostPort("0.0.0.0", strconv.Itoa(port)))
+	listener, err := net.Listen("tcp4", net.JoinHostPort("localhost", strconv.Itoa(port)))
 	if err != nil {
 		return true
 	} else {

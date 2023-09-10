@@ -2,7 +2,6 @@ package action
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	defaultlog "log"
@@ -11,6 +10,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/rest"
 	restclient "k8s.io/client-go/rest"
@@ -88,7 +89,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if !svr.t.IsZero() {
 		log.Debugf("already connect to another cluster, you can disconnect this connect by command `kubevpn disconnect`")
 		// todo define already connect error?
-		return errors.New("already connected")
+		return status.Error(codes.AlreadyExists, "")
 	}
 	svr.t = time.Now()
 	svr.connect = &handler.ConnectOptions{
@@ -118,14 +119,14 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 			return err
 		}
 	}
-	tempFile, err := util.ConvertToTempFile([]byte(req.KubeconfigBytes))
+	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
 		return err
 	}
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
 	flags.AddFlag(&pflag.Flag{
 		Name:     "kubeconfig",
-		DefValue: tempFile,
+		DefValue: file,
 	})
 
 	sshCtx, sshCancel := context.WithCancel(context.Background())
@@ -154,7 +155,6 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		svr.connect.Cleanup()
 		return err
 	}
-	util.Print(out, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 	return nil
 }
 
@@ -180,14 +180,14 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		ConfigAlias:      req.ConfigAlias,
 		RemoteKubeconfig: req.RemoteKubeconfig,
 	}
-	tempFile, err := util.ConvertToTempFile([]byte(req.KubeconfigBytes))
+	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
 		return err
 	}
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
 	flags.AddFlag(&pflag.Flag{
 		Name:     "kubeconfig",
-		DefValue: tempFile,
+		DefValue: file,
 	})
 	sshCtx, sshCancel := context.WithCancel(context.Background())
 	handler.RollbackFuncList = append(handler.RollbackFuncList, sshCancel)

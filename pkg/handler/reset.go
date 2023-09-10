@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"fmt"
+	corev1 "k8s.io/api/core/v1"
 	"strings"
 
 	"github.com/docker/docker/api/types"
@@ -19,41 +21,59 @@ import (
 // 1, get all proxy-resources from configmap
 // 2, cleanup all containers
 func (c *ConnectOptions) Reset(ctx context.Context) error {
-	cm, err := c.clientset.CoreV1().ConfigMaps(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
+	err := c.LeaveProxyResources(ctx)
+	if err != nil {
+		log.Error(err)
 	}
-	var v = make([]*controlplane.Virtual, 0)
-	localTunIPv4 := c.GetLocalTunIPv4()
-	if cm != nil && cm.Data != nil {
-		if str, ok := cm.Data[config.KeyEnvoy]; ok && len(str) != 0 {
-			if err = yaml.Unmarshal([]byte(str), &v); err != nil {
-				log.Error(err)
-				return err
-			}
-			for _, virtual := range v {
-				// deployments.apps.ry-server --> deployments.apps/ry-server
-				lastIndex := strings.LastIndex(virtual.Uid, ".")
-				uid := virtual.Uid[:lastIndex] + "/" + virtual.Uid[lastIndex+1:]
-				err = UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, uid, localTunIPv4)
-				if err != nil {
-					log.Error(err)
-					continue
-				}
-			}
-		}
-	}
+
 	cleanup(ctx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, false)
 	var cli *client.Client
-	if cli, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation()); err != nil {
+	cli, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
 		return nil
 	}
-	var i types.NetworkResource
-	if i, err = cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{}); err != nil {
+	var networkResource types.NetworkResource
+	networkResource, err = cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{})
+	if err != nil {
 		return nil
 	}
-	if len(i.Containers) == 0 {
+	if len(networkResource.Containers) == 0 {
 		return cli.NetworkRemove(ctx, config.ConfigMapPodTrafficManager)
 	}
 	return nil
+}
+
+func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
+	if c == nil || c.clientset == nil {
+		return
+	}
+
+	mapInterface := c.clientset.CoreV1().ConfigMaps(c.Namespace)
+	var cm *corev1.ConfigMap
+	cm, err = mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return
+	}
+	if cm == nil || cm.Data == nil || len(cm.Data[config.KeyEnvoy]) == 0 {
+		err = fmt.Errorf("can not found proxy resources")
+		return
+	}
+	var v = make([]*controlplane.Virtual, 0)
+	str := cm.Data[config.KeyEnvoy]
+	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
+		log.Error(err)
+		return
+	}
+	localTunIPv4 := c.GetLocalTunIPv4()
+	for _, virtual := range v {
+		// deployments.apps.ry-server --> deployments.apps/ry-server
+		lastIndex := strings.LastIndex(virtual.Uid, ".")
+		uid := virtual.Uid[:lastIndex] + "/" + virtual.Uid[lastIndex+1:]
+		err = UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, uid, localTunIPv4)
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+	}
+	return err
 }

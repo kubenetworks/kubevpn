@@ -10,21 +10,6 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 )
 
-type leaveWarp struct {
-	server rpc.Daemon_LeaveServer
-}
-
-func (r *leaveWarp) Write(p []byte) (n int, err error) {
-	err = r.server.Send(&rpc.LeaveResponse{
-		Message: string(p),
-	})
-	return len(p), err
-}
-
-func newLeaveWarp(server rpc.Daemon_LeaveServer) io.Writer {
-	return &leaveWarp{server: server}
-}
-
 func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) error {
 	out := newLeaveWarp(resp)
 	origin := log.StandardLogger().Out
@@ -48,4 +33,19 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 		}
 	}
 	return nil
+}
+
+type leaveWarp struct {
+	server rpc.Daemon_LeaveServer
+}
+
+func (r *leaveWarp) Write(p []byte) (n int, err error) {
+	err = r.server.Send(&rpc.LeaveResponse{
+		Message: string(p),
+	})
+	return len(p), err
+}
+
+func newLeaveWarp(server rpc.Daemon_LeaveServer) io.Writer {
+	return &leaveWarp{server: server}
 }

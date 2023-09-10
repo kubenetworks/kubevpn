@@ -93,7 +93,7 @@ func TestPing(t *testing.T) {
 		log.Infof("failed to serialize icmp packet, err: %v", err)
 		return
 	}
-	ipConn, err := net.ListenPacket("ip4:icmp", "0.0.0.0")
+	ipConn, err := net.ListenPacket("ip4:icmp", "localhost")
 	if err != nil {
 		if strings.Contains(err.Error(), "operation not permitted") {
 			return

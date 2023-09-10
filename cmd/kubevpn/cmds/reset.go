@@ -42,6 +42,7 @@ func CmdReset(factory cmdutil.Factory) *cobra.Command {
 			return handler.SshJump(cmd.Context(), sshConf, cmd.Flags())
 		},
 		Run: func(cmd *cobra.Command, args []string) {
+			util.InitLogger(false)
 			if err := connect.InitClient(factory); err != nil {
 				log.Fatal(err)
 			}

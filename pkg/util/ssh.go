@@ -29,7 +29,10 @@ type SshConfig struct {
 	RemoteKubeconfig string
 }
 
-func Main(ctx context.Context, remoteEndpoint, localEndpoint *netip.AddrPort, conf *SshConfig, done chan struct{}) error {
+func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, conf *SshConfig, done chan struct{}) error {
+	ctx, cancelFunc := context.WithCancel(pctx)
+	defer cancelFunc()
+
 	var remote *ssh.Client
 	var err error
 	if conf.ConfigAlias != "" {
@@ -60,16 +63,12 @@ func Main(ctx context.Context, remoteEndpoint, localEndpoint *netip.AddrPort, co
 
 	// Listen on remote server port
 	var lc net.ListenConfig
-	listen, err := lc.Listen(ctx, "tcp", "localhost:0")
+	listen, err := lc.Listen(ctx, "tcp", localEndpoint.String())
 	if err != nil {
 		return err
 	}
 	defer listen.Close()
 
-	*localEndpoint, err = netip.ParseAddrPort(listen.Addr().String())
-	if err != nil {
-		return err
-	}
 	select {
 	case done <- struct{}{}:
 	}
@@ -94,9 +93,10 @@ func Main(ctx context.Context, remoteEndpoint, localEndpoint *netip.AddrPort, co
 				if err == nil {
 					break
 				}
-				time.Sleep(time.Second)
+				time.Sleep(time.Millisecond * 200)
 			}
 			if conn == nil {
+				cancelFunc()
 				return
 			}
 			defer conn.Close()
@@ -180,12 +180,12 @@ func publicKeyFile(file string) ssh.AuthMethod {
 }
 
 func handleClient(client net.Conn, remote net.Conn) {
-	chDone := make(chan bool)
+	chDone := make(chan bool, 2)
 
 	// start remote -> local data transfer
 	go func() {
 		_, err := io.Copy(client, remote)
-		if err != nil {
+		if err != nil && !errors.Is(err, net.ErrClosed) {
 			log.Debugf("error while copy remote->local: %s", err)
 		}
 		chDone <- true
@@ -194,7 +194,7 @@ func handleClient(client net.Conn, remote net.Conn) {
 	// start local -> remote data transfer
 	go func() {
 		_, err := io.Copy(remote, client)
-		if err != nil {
+		if err != nil && !errors.Is(err, net.ErrClosed) {
 			log.Debugf("error while copy local->remote: %s", err)
 		}
 		chDone <- true
@@ -267,6 +267,7 @@ func dial(from *SshConfig) (*ssh.Client, error) {
 		User:            from.User,
 		Auth:            []ssh.AuthMethod{publicKeyFile(from.Keyfile)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         time.Second * 10,
 	})
 }
 
@@ -281,6 +282,7 @@ func jump(bClient *ssh.Client, to *SshConfig) (*ssh.Client, error) {
 		User:            to.User,
 		Auth:            []ssh.AuthMethod{publicKeyFile(to.Keyfile)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         time.Second * 10,
 	})
 	if err != nil {
 		return nil, err

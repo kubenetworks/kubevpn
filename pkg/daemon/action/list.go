@@ -16,7 +16,7 @@ import (
 
 func (svr *Server) List(ctx context.Context, req *rpc.ListRequest) (*rpc.ListResponse, error) {
 	if svr.connect == nil {
-		return nil, fmt.Errorf("no proxy workloads found")
+		return nil, fmt.Errorf("not connect to any cluster")
 	}
 	mapInterface := svr.connect.GetClientset().CoreV1().ConfigMaps(svr.connect.Namespace)
 	configMap, err := mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
