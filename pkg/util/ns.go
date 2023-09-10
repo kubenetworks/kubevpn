@@ -63,8 +63,8 @@ func ConvertToKubeconfigBytes(factory cmdutil.Factory) ([]byte, string, error) {
 	return marshal, namespace, nil
 }
 
-func ConvertToTempFile(kubeconfigBytes []byte) (string, error) {
-	temp, err := os.CreateTemp("", "")
+func ConvertToTempKubeconfigFile(kubeconfigBytes []byte) (string, error) {
+	temp, err := os.CreateTemp("", "*.tmp.kubeconfig")
 	if err != nil {
 		return "", err
 	}

@@ -82,6 +82,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				}
 				log.Print(recv.GetMessage())
 			}
+			util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 			// hangup
 			if foreground {
 				// disconnect from cluster network

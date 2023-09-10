@@ -1,9 +1,12 @@
 package cmds
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"io"
+	"os"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
@@ -35,7 +38,9 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
 				if err == io.EOF {
 					break
 				} else if err == nil {
-					log.Print(resp.Message)
+					fmt.Fprintln(os.Stdout, resp.Message)
+				} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return nil
 				} else {
 					return err
 				}

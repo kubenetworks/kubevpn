@@ -765,7 +765,12 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet) (e
 		return err
 	}
 
-	var local = &netip.AddrPort{}
+	port := util.GetAvailableTCPPortOrDie()
+	var local netip.AddrPort
+	local, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		return err
+	}
 	errChan := make(chan error, 1)
 	readyChan := make(chan struct{}, 1)
 	go func() {
@@ -776,7 +781,7 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet) (e
 			default:
 			}
 
-			err := util.Main(ctx, &remote, local, conf, readyChan)
+			err := util.Main(ctx, remote, local, conf, readyChan)
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
 					log.Errorf("ssh forward failed err: %v", err)

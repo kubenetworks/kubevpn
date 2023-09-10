@@ -8,21 +8,6 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 )
 
-type QuitWarp struct {
-	server rpc.Daemon_QuitServer
-}
-
-func (r *QuitWarp) Write(p []byte) (n int, err error) {
-	err = r.server.Send(&rpc.QuitResponse{
-		Message: string(p),
-	})
-	return len(p), err
-}
-
-func newQuitWarp(server rpc.Daemon_QuitServer) io.Writer {
-	return &QuitWarp{server: server}
-}
-
 func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error {
 	origin := log.StandardLogger().Out
 	defer func() {
@@ -38,4 +23,19 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 		svr.Cancel()
 	}
 	return nil
+}
+
+type quitWarp struct {
+	server rpc.Daemon_QuitServer
+}
+
+func (r *quitWarp) Write(p []byte) (n int, err error) {
+	err = r.server.Send(&rpc.QuitResponse{
+		Message: string(p),
+	})
+	return len(p), err
+}
+
+func newQuitWarp(server rpc.Daemon_QuitServer) io.Writer {
+	return &quitWarp{server: server}
 }
