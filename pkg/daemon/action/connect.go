@@ -7,7 +7,6 @@ import (
 	"io"
 	defaultlog "log"
 	"os"
-	"path/filepath"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -73,28 +72,24 @@ func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 }
 
 func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) error {
+	origin := log.StandardLogger().Out
+	out := io.MultiWriter(newWarp(resp), origin)
+	log.SetOutput(out)
+	defer func() {
+		log.SetOutput(origin)
+		log.SetLevel(log.DebugLevel)
+	}()
+	util.InitLogger(false)
 	if !svr.IsSudo {
 		return svr.redirectToSudoDaemon(req, resp)
 	}
 
 	ctx := resp.Context()
-	out := newWarp(resp)
-	file, err := os.OpenFile(GetDaemonLog(), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
-	if err != nil {
-		log.Error(err)
-		return err
-	}
-	log.SetOutput(io.MultiWriter(out, file))
-	defer func() {
-		log.SetOutput(io.MultiWriter(file))
-		log.SetLevel(log.DebugLevel)
-	}()
 	if !svr.t.IsZero() {
 		log.Debugf("already connect to another cluster, you can disconnect this connect by command `kubevpn disconnect`")
 		// todo define already connect error?
 		return errors.New("already connected")
 	}
-	util.InitLogger(false)
 	svr.t = time.Now()
 	svr.connect = &handler.ConnectOptions{
 		Namespace:   req.Namespace,
@@ -118,7 +113,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	go util.StartupPProf(config.PProfPort)
 	defaultlog.Default().SetOutput(io.Discard)
 	if transferImage {
-		err = util.TransferImage(ctx, sshConf, config.OriginImage, req.Image, io.MultiWriter(out, file))
+		err := util.TransferImage(ctx, sshConf, config.OriginImage, req.Image, out)
 		if err != nil {
 			return err
 		}
@@ -233,8 +228,4 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	svr.t = time.Now()
 	svr.connect = connect
 	return nil
-}
-
-func GetDaemonLog() string {
-	return filepath.Join(config.DaemonPath, config.LogFile)
 }

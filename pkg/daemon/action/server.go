@@ -1,8 +1,10 @@
 package action
 
 import (
+	"path/filepath"
 	"time"
 
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 )
@@ -16,4 +18,8 @@ type Server struct {
 
 	t       time.Time
 	connect *handler.ConnectOptions
+}
+
+func GetDaemonLogPath() string {
+	return filepath.Join(config.DaemonPath, config.LogFile)
 }
