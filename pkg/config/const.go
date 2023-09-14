@@ -22,4 +22,8 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+	err = os.Chmod(DaemonPath, os.ModePerm)
+	if err != nil {
+		panic(err)
+	}
 }
