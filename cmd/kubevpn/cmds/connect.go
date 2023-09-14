@@ -9,6 +9,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -77,6 +79,8 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				recv, err := resp.Recv()
 				if err == io.EOF {
 					break
+				} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
+					return nil
 				} else if err != nil {
 					return err
 				}
@@ -98,6 +102,8 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				for {
 					resp, err = stream.Recv()
 					if err == io.EOF {
+						return nil
+					} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
 						return nil
 					} else if err != nil {
 						return err

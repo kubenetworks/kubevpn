@@ -13,7 +13,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-func Complete(route *core.Route) error {
+func RentIPIfNeeded(route *core.Route) error {
 	if v, ok := os.LookupEnv(config.EnvInboundPodTunIPv4); ok && v == "" {
 		namespace := os.Getenv(config.EnvPodNamespace)
 		if namespace == "" {
@@ -60,7 +60,7 @@ func Complete(route *core.Route) error {
 	return nil
 }
 
-func Final() error {
+func ReleaseIPIfNeeded() error {
 	namespace := os.Getenv(config.EnvPodNamespace)
 	url := fmt.Sprintf("https://%s:80%s", util.GetTlsDomain(namespace), config.APIReleaseIP)
 	req, err := http.NewRequest("DELETE", url, nil)

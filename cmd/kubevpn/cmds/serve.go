@@ -5,13 +5,15 @@ import (
 	"runtime"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"go.uber.org/automaxprocs/maxprocs"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/core"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
-	"go.uber.org/automaxprocs/maxprocs"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
 
 func CmdServe(_ cmdutil.Factory) *cobra.Command {
@@ -29,11 +31,16 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rand.Seed(time.Now().UnixNano())
 			_, _ = maxprocs.Set(maxprocs.Logger(nil))
-			err := handler.Complete(route)
+			err := handler.RentIPIfNeeded(route)
 			if err != nil {
 				return err
 			}
-			defer handler.Final()
+			defer func() {
+				err := handler.ReleaseIPIfNeeded()
+				if err != nil {
+					log.Error(err)
+				}
+			}()
 			servers, err := handler.Parse(*route)
 			if err != nil {
 				return err

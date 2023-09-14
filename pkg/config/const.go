@@ -9,8 +9,8 @@ const (
 	SockPath     = "daemon.sock"
 	SudoSockPath = "sudo_daemon.sock"
 
-	PidPath     = "daemon_pid"
-	SudoPidPath = "sudo_daemon_pid"
+	PidPath     = "daemon.pid"
+	SudoPidPath = "sudo_daemon.pid"
 
 	LogFile = "daemon.log"
 

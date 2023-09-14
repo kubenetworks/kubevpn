@@ -7,7 +7,11 @@ import (
 )
 
 func (svr *Server) Status(ctx context.Context, request *rpc.StatusRequest) (*rpc.StatusResponse, error) {
+	status := "None"
+	if svr.connect != nil {
+		status = "Connected"
+	}
 	return &rpc.StatusResponse{
-		Message: "i am fine",
+		Message: status,
 	}, nil
 }

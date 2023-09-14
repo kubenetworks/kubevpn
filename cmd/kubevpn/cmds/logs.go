@@ -1,13 +1,13 @@
 package cmds
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -39,7 +39,7 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
 					break
 				} else if err == nil {
 					fmt.Fprintln(os.Stdout, resp.Message)
-				} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
 					return nil
 				} else {
 					return err

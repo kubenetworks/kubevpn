@@ -74,12 +74,12 @@ func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 
 func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) error {
 	origin := log.StandardLogger().Out
-	out := io.MultiWriter(newWarp(resp), origin)
-	log.SetOutput(out)
 	defer func() {
 		log.SetOutput(origin)
 		log.SetLevel(log.DebugLevel)
 	}()
+	out := io.MultiWriter(newWarp(resp), origin)
+	log.SetOutput(out)
 	util.InitLogger(false)
 	if !svr.IsSudo {
 		return svr.redirectToSudoDaemon(req, resp)

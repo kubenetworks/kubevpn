@@ -27,6 +27,7 @@ const (
 	Daemon_Quit_FullMethodName       = "/rpc.Daemon/Quit"
 	Daemon_List_FullMethodName       = "/rpc.Daemon/List"
 	Daemon_Leave_FullMethodName      = "/rpc.Daemon/Leave"
+	Daemon_Upgrade_FullMethodName    = "/rpc.Daemon/Upgrade"
 )
 
 // DaemonClient is the client API for Daemon service.
@@ -41,6 +42,7 @@ type DaemonClient interface {
 	Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error)
 	List(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error)
 	Leave(ctx context.Context, in *LeaveRequest, opts ...grpc.CallOption) (Daemon_LeaveClient, error)
+	Upgrade(ctx context.Context, in *UpgradeRequest, opts ...grpc.CallOption) (Daemon_UpgradeClient, error)
 }
 
 type daemonClient struct {
@@ -261,6 +263,38 @@ func (x *daemonLeaveClient) Recv() (*LeaveResponse, error) {
 	return m, nil
 }
 
+func (c *daemonClient) Upgrade(ctx context.Context, in *UpgradeRequest, opts ...grpc.CallOption) (Daemon_UpgradeClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[6], Daemon_Upgrade_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &daemonUpgradeClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Daemon_UpgradeClient interface {
+	Recv() (*UpgradeResponse, error)
+	grpc.ClientStream
+}
+
+type daemonUpgradeClient struct {
+	grpc.ClientStream
+}
+
+func (x *daemonUpgradeClient) Recv() (*UpgradeResponse, error) {
+	m := new(UpgradeResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // DaemonServer is the server API for Daemon service.
 // All implementations must embed UnimplementedDaemonServer
 // for forward compatibility
@@ -273,6 +307,7 @@ type DaemonServer interface {
 	Quit(*QuitRequest, Daemon_QuitServer) error
 	List(context.Context, *ListRequest) (*ListResponse, error)
 	Leave(*LeaveRequest, Daemon_LeaveServer) error
+	Upgrade(*UpgradeRequest, Daemon_UpgradeServer) error
 	mustEmbedUnimplementedDaemonServer()
 }
 
@@ -303,6 +338,9 @@ func (UnimplementedDaemonServer) List(context.Context, *ListRequest) (*ListRespo
 }
 func (UnimplementedDaemonServer) Leave(*LeaveRequest, Daemon_LeaveServer) error {
 	return status.Errorf(codes.Unimplemented, "method Leave not implemented")
+}
+func (UnimplementedDaemonServer) Upgrade(*UpgradeRequest, Daemon_UpgradeServer) error {
+	return status.Errorf(codes.Unimplemented, "method Upgrade not implemented")
 }
 func (UnimplementedDaemonServer) mustEmbedUnimplementedDaemonServer() {}
 
@@ -479,6 +517,27 @@ func (x *daemonLeaveServer) Send(m *LeaveResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Daemon_Upgrade_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(UpgradeRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DaemonServer).Upgrade(m, &daemonUpgradeServer{stream})
+}
+
+type Daemon_UpgradeServer interface {
+	Send(*UpgradeResponse) error
+	grpc.ServerStream
+}
+
+type daemonUpgradeServer struct {
+	grpc.ServerStream
+}
+
+func (x *daemonUpgradeServer) Send(m *UpgradeResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // Daemon_ServiceDesc is the grpc.ServiceDesc for Daemon service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -524,6 +583,11 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Leave",
 			Handler:       _Daemon_Leave_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Upgrade",
+			Handler:       _Daemon_Upgrade_Handler,
 			ServerStreams: true,
 		},
 	},
