@@ -20,6 +20,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
 var daemonClient, sudoDaemonClient rpc.DaemonClient
@@ -87,11 +88,27 @@ func GetPidPath(isSudo bool) string {
 	return filepath.Join(config.DaemonPath, name)
 }
 
-func GetDaemonCommand(isSudo bool) *exec.Cmd {
-	if isSudo {
-		return exec.Command("sudo", "--preserve-env", os.Args[0], "daemon", "--sudo")
+func GetDaemonCommand(isSudo bool) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
 	}
-	return exec.Command(os.Args[0], "daemon")
+	fmt.Println(exe)
+	if isSudo {
+		return util.RunCmdWithElevated([]string{"daemon", "--sudo"})
+	}
+	cmd := exec.Command(exe, "daemon")
+	err = cmd.Start()
+	if err != nil {
+		return err
+	}
+	go func() {
+		err := cmd.Wait()
+		if err != nil {
+			log.Error(err)
+		}
+	}()
+	return nil
 }
 
 func StartupDaemon(ctx context.Context) error {
@@ -127,33 +144,38 @@ func runDaemon(ctx context.Context, isSudo bool) error {
 				if err = p.Kill(); err != nil && err != os.ErrProcessDone {
 					log.Error(err)
 				}
+				p.Wait()
 			}
 		}
 	}
-	cmd := GetDaemonCommand(isSudo)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err = cmd.Start(); err != nil {
-		return err
-	}
-	err = os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), os.ModePerm)
+	err = GetDaemonCommand(isSudo)
 	if err != nil {
 		return err
 	}
-	err = os.Chmod(GetPidPath(false), os.ModePerm)
-	if err != nil {
-		return err
-	}
-	go func() {
-		cmd.Wait()
-	}()
+	//cmd.Stdin = os.Stdin
+	//cmd.Stdout = os.Stdout
+	//cmd.Stderr = os.Stderr
+	//if err = cmd.Start(); err != nil {
+	//	return err
+	//}
+	//err = os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), os.ModePerm)
+	//if err != nil {
+	//	return err
+	//}
+	//go func() {
+	//	cmd.Wait()
+	//}()
 
 	for ctx.Err() == nil {
 		time.Sleep(time.Millisecond * 50)
 		if _, err = os.Stat(portPath); err == nil {
 			break
 		}
+	}
+
+	err = os.Chmod(GetPidPath(false), os.ModePerm)
+	if err != nil {
+		return err
 	}
 
 	client := GetClient(isSudo)

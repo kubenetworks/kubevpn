@@ -35,6 +35,7 @@ func CmdVersion(cmdutil.Factory) *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Printf("KubeVPN: CLI\n")
 			fmt.Printf("    Version: %s\n", config.Version)
+			fmt.Printf("    DaemonVersion: %s\n", config.Version)
 			fmt.Printf("    Image: %s\n", config.Image)
 			fmt.Printf("    Branch: %s\n", Branch)
 			fmt.Printf("    Git commit: %s\n", config.GitCommit)

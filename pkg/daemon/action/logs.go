@@ -17,6 +17,7 @@ func (svr *Server) Logs(req *rpc.LogRequest, resp rpc.Daemon_LogsServer) error {
 	if err != nil {
 		return err
 	}
+	defer file.Stop()
 	for {
 		select {
 		case <-resp.Context().Done():

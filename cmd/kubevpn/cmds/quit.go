@@ -7,6 +7,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -49,6 +51,8 @@ func quit(ctx context.Context, isSudo bool) error {
 			break
 		} else if err == nil {
 			fmt.Fprint(os.Stdout, resp.Message)
+		} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
+			return nil
 		} else {
 			return err
 		}
