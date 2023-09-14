@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"golang.org/x/sys/windows"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -41,7 +43,7 @@ func GetClient(isSudo bool) rpc.DaemonClient {
 		sudo = "sudo"
 	}
 	ctx := context.Background()
-	conn, err := grpc.DialContext(ctx, "passthrough:///unix://"+GetSockPath(isSudo), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.DialContext(ctx, "unix:"+GetSockPath(isSudo), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Errorf("cannot connect to %s server: %v", sudo, err)
 		fmt.Println(fmt.Errorf("cannot connect to %s server: %v", sudo, err))
@@ -50,7 +52,15 @@ func GetClient(isSudo bool) rpc.DaemonClient {
 	c := rpc.NewDaemonClient(conn)
 	now := time.Now()
 	healthClient := grpc_health_v1.NewHealthClient(conn)
-	response, err := healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
+	var response *grpc_health_v1.HealthCheckResponse
+	for i := 0; i < 10; i++ {
+		response, err = healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
+		if err != nil {
+			time.Sleep(time.Millisecond * 50)
+			continue
+		}
+		break
+	}
 	if err != nil {
 		log.Printf("%v", err)
 		return nil
@@ -98,6 +108,12 @@ func GetDaemonCommand(isSudo bool) error {
 		return util.RunCmdWithElevated([]string{"daemon", "--sudo"})
 	}
 	cmd := exec.Command(exe, "daemon")
+	cmd.Stdout = os.Stdout
+	cmd.Stdin = os.Stdin
+	cmd.Stderr = os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow: true,
+	}
 	err = cmd.Start()
 	if err != nil {
 		return err
@@ -129,8 +145,8 @@ func StartupDaemon(ctx context.Context) error {
 }
 
 func runDaemon(ctx context.Context, isSudo bool) error {
-	portPath := GetSockPath(isSudo)
-	err := os.Remove(portPath)
+	sockPath := GetSockPath(isSudo)
+	err := os.Remove(sockPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -168,12 +184,12 @@ func runDaemon(ctx context.Context, isSudo bool) error {
 
 	for ctx.Err() == nil {
 		time.Sleep(time.Millisecond * 50)
-		if _, err = os.Stat(portPath); err == nil {
+		//_ = os.Chmod(sockPath, os.ModeSocket)
+		if _, err = os.Stat(sockPath); err == nil || errors.Is(err, windows.ERROR_CANT_ACCESS_FILE) {
 			break
 		}
 	}
-
-	err = os.Chmod(GetPidPath(false), os.ModePerm)
+	err = os.Chmod(GetPidPath(isSudo), os.ModePerm)
 	if err != nil {
 		return err
 	}

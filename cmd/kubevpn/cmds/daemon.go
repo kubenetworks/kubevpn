@@ -19,8 +19,8 @@ func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 		Short: i18n.T("Startup GRPC server"),
 		Long:  i18n.T(`Startup GRPC server`),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			portPath := daemon.GetSockPath(opt.IsSudo)
-			err := os.Remove(portPath)
+			sockPath := daemon.GetSockPath(opt.IsSudo)
+			err := os.Remove(sockPath)
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
@@ -40,6 +40,12 @@ func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer opt.Stop()
 			return opt.Start(cmd.Context())
+		},
+		PostRun: func(cmd *cobra.Command, args []string) {
+			sockPath := daemon.GetSockPath(opt.IsSudo)
+			_ = os.Remove(sockPath)
+			pidPath := daemon.GetPidPath(opt.IsSudo)
+			_ = os.Remove(pidPath)
 		},
 		Hidden:                true,
 		DisableFlagsInUseLine: true,
