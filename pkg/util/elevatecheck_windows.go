@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-//	ref https://stackoverflow.com/questions/31558066/how-to-ask-for-administer-privileges-on-windows-with-go
+// ref https://stackoverflow.com/questions/31558066/how-to-ask-for-administer-privileges-on-windows-with-go
 func RunWithElevated() {
 	verb := "runas"
 	exe, _ := os.Executable()
@@ -58,6 +58,10 @@ func RunWithElevatedInnerExec() error {
 	return err
 }
 
+// elevated := windows.GetCurrentProcessToken().IsElevated()
+//
+//	fmt.Printf("admin %v\n", elevated)
+//	return elevated
 func IsAdmin() bool {
 	_, err := os.Open("\\\\.\\PHYSICALDRIVE0")
 	if err != nil {
