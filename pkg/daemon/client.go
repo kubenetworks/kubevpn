@@ -124,6 +124,10 @@ func runDaemon(ctx context.Context, isSudo bool) error {
 				_, _ = p.Wait()
 			}
 		}
+		err = os.Remove(pidPath)
+		if err != nil {
+			return err
+		}
 	}
 	if isSudo {
 		err = util.RunCmdWithElevated([]string{"daemon", "--sudo"})
@@ -139,10 +143,6 @@ func runDaemon(ctx context.Context, isSudo bool) error {
 		if _, err = os.Stat(sockPath); !errors.Is(err, os.ErrNotExist) {
 			break
 		}
-	}
-	err = os.Chmod(GetPidPath(isSudo), os.ModePerm)
-	if err != nil {
-		return err
 	}
 
 	client := GetClient(isSudo)

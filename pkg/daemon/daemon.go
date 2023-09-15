@@ -46,10 +46,10 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	}
 	defer lis.Close()
 
-	//err = os.Chmod(GetSockPath(o.IsSudo), 0666)
-	//if err != nil {
-	//	return err
-	//}
+	err = os.Chmod(GetSockPath(o.IsSudo), 0666)
+	if err != nil {
+		return err
+	}
 
 	o.svr = grpc.NewServer()
 	cleanup, err := admin.Register(o.svr)
