@@ -5,11 +5,12 @@ package util
 
 import (
 	"flag"
-	log "github.com/sirupsen/logrus"
-	"k8s.io/client-go/tools/clientcmd"
 	"os"
 	"os/exec"
 	"runtime"
+
+	log "github.com/sirupsen/logrus"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 func RunCmdWithElevated(args []string) error {
@@ -30,13 +31,6 @@ func RunCmdWithElevated(args []string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	cmd.Env = append(os.Environ(), envStartSudoKubeVPNByKubeVPN+"=1")
-	//// while send single CTRL+C, command will quit immediately, but output will cut off and print util quit final
-	//// so, mute single CTRL+C, let inner command handle single only
-	//go func() {
-	//	signals := make(chan os.Signal)
-	//	signal.Notify(signals, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGSTOP)
-	//	<-signals
-	//}()
 	err = cmd.Start()
 	if err != nil {
 		return err
@@ -68,13 +62,6 @@ func RunCmd(args []string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	cmd.Env = append(os.Environ(), envStartSudoKubeVPNByKubeVPN+"=1")
-	//// while send single CTRL+C, command will quit immediately, but output will cut off and print util quit final
-	//// so, mute single CTRL+C, let inner command handle single only
-	//go func() {
-	//	signals := make(chan os.Signal)
-	//	signal.Notify(signals, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGSTOP)
-	//	<-signals
-	//}()
 	err = cmd.Start()
 	if err != nil {
 		return err

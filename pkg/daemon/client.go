@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"golang.org/x/sys/windows"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -89,36 +88,6 @@ func GetPidPath(isSudo bool) string {
 	return filepath.Join(config.DaemonPath, name)
 }
 
-func GetDaemonCommand(isSudo bool) error {
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	fmt.Println(exe)
-	if isSudo {
-		return util.RunCmdWithElevated([]string{"daemon", "--sudo"})
-	}
-	err = util.RunCmd([]string{"daemon"})
-	//cmd := exec.Command(exe, "daemon")
-	//cmd.Stdout = os.Stdout
-	//cmd.Stdin = os.Stdin
-	//cmd.Stderr = os.Stderr
-	//cmd.SysProcAttr = &syscall.SysProcAttr{
-	//	HideWindow: true,
-	//}
-	//err = cmd.Start()
-	//if err != nil {
-	//	return err
-	//}
-	//go func() {
-	//	err := cmd.Wait()
-	//	if err != nil {
-	//		log.Error(err)
-	//	}
-	//}()
-	return err
-}
-
 func StartupDaemon(ctx context.Context) error {
 	// normal daemon
 	if daemonClient = GetClient(false); daemonClient == nil {
@@ -152,32 +121,22 @@ func runDaemon(ctx context.Context, isSudo bool) error {
 				if err = p.Kill(); err != nil && err != os.ErrProcessDone {
 					log.Error(err)
 				}
-				p.Wait()
+				_, _ = p.Wait()
 			}
 		}
 	}
-	err = GetDaemonCommand(isSudo)
+	if isSudo {
+		err = util.RunCmdWithElevated([]string{"daemon", "--sudo"})
+	} else {
+		err = util.RunCmd([]string{"daemon"})
+	}
 	if err != nil {
 		return err
 	}
-	//cmd.Stdin = os.Stdin
-	//cmd.Stdout = os.Stdout
-	//cmd.Stderr = os.Stderr
-	//if err = cmd.Start(); err != nil {
-	//	return err
-	//}
-	//err = os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), os.ModePerm)
-	//if err != nil {
-	//	return err
-	//}
-	//go func() {
-	//	cmd.Wait()
-	//}()
-
 	for ctx.Err() == nil {
 		time.Sleep(time.Millisecond * 50)
 		//_ = os.Chmod(sockPath, os.ModeSocket)
-		if _, err = os.Stat(sockPath); err == nil || errors.Is(err, windows.ERROR_CANT_ACCESS_FILE) {
+		if _, err = os.Stat(sockPath); !errors.Is(err, os.ErrNotExist) {
 			break
 		}
 	}
