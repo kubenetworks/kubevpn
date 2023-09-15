@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"golang.org/x/sys/windows"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -53,14 +51,7 @@ func GetClient(isSudo bool) rpc.DaemonClient {
 	now := time.Now()
 	healthClient := grpc_health_v1.NewHealthClient(conn)
 	var response *grpc_health_v1.HealthCheckResponse
-	for i := 0; i < 10; i++ {
-		response, err = healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
-		if err != nil {
-			time.Sleep(time.Millisecond * 50)
-			continue
-		}
-		break
-	}
+	response, err = healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
 	if err != nil {
 		log.Printf("%v", err)
 		return nil
@@ -107,24 +98,25 @@ func GetDaemonCommand(isSudo bool) error {
 	if isSudo {
 		return util.RunCmdWithElevated([]string{"daemon", "--sudo"})
 	}
-	cmd := exec.Command(exe, "daemon")
-	cmd.Stdout = os.Stdout
-	cmd.Stdin = os.Stdin
-	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow: true,
-	}
-	err = cmd.Start()
-	if err != nil {
-		return err
-	}
-	go func() {
-		err := cmd.Wait()
-		if err != nil {
-			log.Error(err)
-		}
-	}()
-	return nil
+	err = util.RunCmd([]string{"daemon"})
+	//cmd := exec.Command(exe, "daemon")
+	//cmd.Stdout = os.Stdout
+	//cmd.Stdin = os.Stdin
+	//cmd.Stderr = os.Stderr
+	//cmd.SysProcAttr = &syscall.SysProcAttr{
+	//	HideWindow: true,
+	//}
+	//err = cmd.Start()
+	//if err != nil {
+	//	return err
+	//}
+	//go func() {
+	//	err := cmd.Wait()
+	//	if err != nil {
+	//		log.Error(err)
+	//	}
+	//}()
+	return err
 }
 
 func StartupDaemon(ctx context.Context) error {
