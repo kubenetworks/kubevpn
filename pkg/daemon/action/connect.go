@@ -101,14 +101,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		UseLocalDNS: req.UseLocalDNS,
 		Engine:      config.Engine(req.Engine),
 	}
-	var sshConf = &util.SshConfig{
-		Addr:             req.Addr,
-		User:             req.User,
-		Password:         req.Password,
-		Keyfile:          req.Keyfile,
-		ConfigAlias:      req.ConfigAlias,
-		RemoteKubeconfig: req.RemoteKubeconfig,
-	}
+	var sshConf = util.ParseSshFromRPC(req.SshJump)
 	var transferImage = req.TransferImage
 
 	go util.StartupPProf(config.PProfPort)
@@ -131,7 +124,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 
 	sshCtx, sshCancel := context.WithCancel(context.Background())
 	handler.RollbackFuncList = append(handler.RollbackFuncList, sshCancel)
-	err = handler.SshJump(sshCtx, sshConf, flags)
+	err = handler.SshJump(sshCtx, sshConf, flags, false)
 	if err != nil {
 		return err
 	}
@@ -172,14 +165,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		UseLocalDNS: req.UseLocalDNS,
 		Engine:      config.Engine(req.Engine),
 	}
-	var sshConf = &util.SshConfig{
-		Addr:             req.Addr,
-		User:             req.User,
-		Password:         req.Password,
-		Keyfile:          req.Keyfile,
-		ConfigAlias:      req.ConfigAlias,
-		RemoteKubeconfig: req.RemoteKubeconfig,
-	}
+	var sshConf = util.ParseSshFromRPC(req.SshJump)
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
 		return err
@@ -191,7 +177,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	})
 	sshCtx, sshCancel := context.WithCancel(context.Background())
 	handler.RollbackFuncList = append(handler.RollbackFuncList, sshCancel)
-	err = handler.SshJump(sshCtx, sshConf, flags)
+	err = handler.SshJump(sshCtx, sshConf, flags, true)
 	if err != nil {
 		return err
 	}

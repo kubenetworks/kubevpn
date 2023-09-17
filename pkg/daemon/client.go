@@ -130,7 +130,11 @@ func runDaemon(ctx context.Context, isSudo bool) error {
 		}
 	}
 	if isSudo {
-		err = util.RunCmdWithElevated([]string{"daemon", "--sudo"})
+		if !util.IsAdmin() {
+			err = util.RunCmdWithElevated([]string{"daemon", "--sudo"})
+		} else {
+			err = util.RunCmd([]string{"daemon", "--sudo"})
+		}
 	} else {
 		err = util.RunCmd([]string{"daemon"})
 	}

@@ -686,7 +686,7 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory) (err error) {
 	return
 }
 
-func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet) (err error) {
+func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, print bool) (err error) {
 	if conf.Addr == "" && conf.ConfigAlias == "" {
 		return
 	}
@@ -806,7 +806,9 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet) (e
 			}
 		}
 	}()
-	log.Infof("wait jump to bastion host...")
+	if print {
+		log.Infof("wait jump to bastion host...")
+	}
 	select {
 	case <-readyChan:
 	case err = <-errChan:
@@ -838,7 +840,9 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet) (e
 	if err = os.Chmod(temp.Name(), 0644); err != nil {
 		return err
 	}
-	log.Infof("using temp kubeconfig %s", temp.Name())
+	if print {
+		log.Infof("using temp kubeconfig %s", temp.Name())
+	}
 	err = os.Setenv(clientcmd.RecommendedConfigPathEnvVar, temp.Name())
 	if err != nil {
 		return err

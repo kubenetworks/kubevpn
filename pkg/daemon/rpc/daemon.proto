@@ -6,14 +6,17 @@ package rpc;
 
 service Daemon {
   rpc Connect (ConnectRequest) returns (stream ConnectResponse) {}
-  rpc Proxy (ConnectRequest) returns (stream ConnectResponse) {}
   rpc Disconnect (DisconnectRequest) returns (stream DisconnectResponse) {}
+  rpc Proxy (ConnectRequest) returns (stream ConnectResponse) {}
+  rpc Leave (LeaveRequest) returns (stream LeaveResponse) {}
+  rpc Clone (CloneRequest) returns (stream CloneResponse) {}
+  rpc Remove (RemoveRequest) returns (stream RemoveResponse) {}
+
   rpc Logs (LogRequest) returns (stream LogResponse) {}
+  rpc List (ListRequest) returns (ListResponse) {}
+  rpc Upgrade (UpgradeRequest) returns (stream UpgradeResponse) {}
   rpc Status (StatusRequest) returns (StatusResponse) {}
   rpc Quit (QuitRequest) returns (stream QuitResponse) {}
-  rpc List (ListRequest) returns (ListResponse) {}
-  rpc Leave (LeaveRequest) returns (stream LeaveResponse) {}
-  rpc Upgrade (UpgradeRequest) returns (stream UpgradeResponse) {}
 }
 
 message ConnectRequest {
@@ -26,22 +29,73 @@ message ConnectRequest {
   bool UseLocalDNS = 7;
   string Engine = 8;
   // ssh jump
-  string Addr = 9;
-  string User = 10;
-  string Password = 11;
-  string Keyfile = 12;
-  string ConfigAlias = 13;
-  string RemoteKubeconfig = 14;
+  SshJump SshJump = 9;
 
   // transfer image
-  bool TransferImage = 15;
-  string Image = 16;
+  bool TransferImage = 10;
+  string Image = 11;
 
   // log level
-  int32 Level = 17;
+  int32 Level = 12;
 }
 
 message ConnectResponse {
+  string message = 1;
+}
+
+message DisconnectRequest {
+}
+
+message DisconnectResponse {
+  string message = 1;
+}
+
+message LeaveRequest {
+  repeated string Workloads = 1;
+}
+
+message LeaveResponse {
+  string message = 1;
+}
+
+message CloneRequest {
+  string KubeconfigBytes = 1;
+  string Namespace = 2;
+  map<string, string> Headers = 3;
+  repeated string Workloads = 4;
+  repeated string ExtraCIDR = 5;
+  repeated string ExtraDomain = 6;
+  bool UseLocalDNS = 7;
+  string Engine = 8;
+
+  // ssh jump
+  SshJump SshJump = 9;
+
+  // target cluster info
+  string TargetKubeconfig = 10;
+  string TargetNamespace = 11;
+  string TargetContainer = 12;
+  string TargetImage = 13;
+  string TargetRegistry = 14;
+  bool IsChangeTargetRegistry = 15;
+
+  // transfer image
+  bool TransferImage = 16;
+  string Image = 17;
+
+  // log level
+  int32 Level = 18;
+}
+
+message CloneResponse {
+  string message = 1;
+}
+
+message RemoveRequest {
+  repeated string Workloads = 1;
+}
+
+message RemoveResponse {
   string message = 1;
 }
 
@@ -68,25 +122,10 @@ message LogResponse {
   string message = 1;
 }
 
-message DisconnectRequest {
-}
-
-message DisconnectResponse {
-  string message = 1;
-}
-
 message ListRequest {
 }
 
 message ListResponse {
-  string message = 1;
-}
-
-message LeaveRequest {
-  repeated string Workloads = 1;
-}
-
-message LeaveResponse {
   string message = 1;
 }
 
@@ -97,4 +136,13 @@ message UpgradeRequest {
 
 message UpgradeResponse {
   string message = 1;
+}
+
+message SshJump {
+  string Addr = 1;
+  string User = 2;
+  string Password = 3;
+  string Keyfile = 4;
+  string ConfigAlias = 5;
+  string RemoteKubeconfig = 6;
 }
