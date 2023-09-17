@@ -1,9 +1,11 @@
 package cmds
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -24,7 +26,7 @@ import (
 func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	var connect = handler.ConnectOptions{}
 	var sshConf = &util.SshConfig{}
-	var transferImage bool
+	var transferImage, foreground bool
 	cmd := &cobra.Command{
 		Use:   "proxy",
 		Short: i18n.T("Proxy kubernetes workloads inbound traffic into local PC"),
@@ -81,26 +83,22 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			// todo 将 doConnect 方法封装？内部使用 client 发送到daemon？
-			client, err := daemon.GetClient(false).Proxy(
+			cli := daemon.GetClient(false)
+			client, err := cli.Proxy(
 				cmd.Context(),
 				&rpc.ConnectRequest{
-					KubeconfigBytes:  string(bytes),
-					Namespace:        ns,
-					Headers:          connect.Headers,
-					Workloads:        args,
-					ExtraCIDR:        connect.ExtraCIDR,
-					ExtraDomain:      connect.ExtraDomain,
-					UseLocalDNS:      connect.UseLocalDNS,
-					Engine:           string(connect.Engine),
-					Addr:             sshConf.Addr,
-					User:             sshConf.User,
-					Password:         sshConf.Password,
-					Keyfile:          sshConf.Keyfile,
-					ConfigAlias:      sshConf.ConfigAlias,
-					RemoteKubeconfig: sshConf.RemoteKubeconfig,
-					TransferImage:    transferImage,
-					Image:            config.Image,
-					Level:            int32(log.DebugLevel),
+					KubeconfigBytes: string(bytes),
+					Namespace:       ns,
+					Headers:         connect.Headers,
+					Workloads:       args,
+					ExtraCIDR:       connect.ExtraCIDR,
+					ExtraDomain:     connect.ExtraDomain,
+					UseLocalDNS:     connect.UseLocalDNS,
+					Engine:          string(connect.Engine),
+					SshJump:         sshConf.ToRPC(),
+					TransferImage:   transferImage,
+					Image:           config.Image,
+					Level:           int32(log.DebugLevel),
 				},
 			)
 			if err != nil {
@@ -119,6 +117,32 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 					return err
 				}
 			}
+			// hangup
+			if foreground {
+				// leave from cluster resources
+				<-cmd.Context().Done()
+
+				now := time.Now()
+				stream, err := cli.Leave(context.Background(), &rpc.LeaveRequest{
+					Workloads: args,
+				})
+				fmt.Printf("call api leave use %s\n", time.Now().Sub(now).String())
+				if err != nil {
+					return err
+				}
+				var resp *rpc.LeaveResponse
+				for {
+					resp, err = stream.Recv()
+					if err == io.EOF {
+						return nil
+					} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
+						return nil
+					} else if err != nil {
+						return err
+					}
+					fmt.Fprint(os.Stdout, resp.Message)
+				}
+			}
 			return nil
 		},
 	}
@@ -129,6 +153,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringArrayVar(&connect.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
 	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
 	cmd.Flags().StringVar((*string)(&connect.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
+	cmd.Flags().BoolVar(&foreground, "foreground", false, "foreground hang up")
 
 	addSshFlags(cmd, sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)

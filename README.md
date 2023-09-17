@@ -357,8 +357,7 @@ kubevpn --headers user=naison dev deployment/authors
 Example：
 
 ```shell
-root@27b74bde78b6:/app# kubevpn --headers user=naison dev deployment/authors
-hostname 27b74bde78b6
+➜  ~ kubevpn --headers user=naison dev deployment/authors
 got cidr from cache
 update ref count successfully
 traffic manager already exist, reuse it

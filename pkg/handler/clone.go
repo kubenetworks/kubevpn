@@ -39,13 +39,14 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-type DuplicateOptions struct {
+type CloneOptions struct {
 	Namespace   string
 	Headers     map[string]string
 	Workloads   []string
 	ExtraCIDR   []string
 	ExtraDomain []string
 	Engine      config.Engine
+	UseLocalDNS bool
 
 	TargetKubeconfig       string
 	TargetNamespace        string
@@ -67,7 +68,7 @@ type DuplicateOptions struct {
 	factory    cmdutil.Factory
 }
 
-func (d *DuplicateOptions) InitClient(f cmdutil.Factory) (err error) {
+func (d *CloneOptions) InitClient(f cmdutil.Factory) (err error) {
 	d.factory = f
 	if d.config, err = d.factory.ToRESTConfig(); err != nil {
 		return
@@ -99,9 +100,8 @@ func (d *DuplicateOptions) InitClient(f cmdutil.Factory) (err error) {
 	configFlags.Namespace = pointer.String(d.TargetNamespace)
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
 	d.targetFactory = cmdutil.NewFactory(matchVersionFlags)
-	loader := d.targetFactory.ToRawKubeConfigLoader()
 	var found bool
-	d.TargetNamespace, found, err = loader.Namespace()
+	d.TargetNamespace, found, err = d.targetFactory.ToRawKubeConfigLoader().Namespace()
 	if err != nil || !found {
 		d.TargetNamespace = d.Namespace
 	}
@@ -109,14 +109,14 @@ func (d *DuplicateOptions) InitClient(f cmdutil.Factory) (err error) {
 	return
 }
 
-// DoDuplicate
+// DoClone
 /*
 * 1) download mount path use empty-dir but skip empty-dir in init-containers
 * 2) get env from containers
 * 3) create serviceAccount as needed
 * 4) modify podTempSpec inject kubevpn container
  */
-func (d *DuplicateOptions) DoDuplicate(ctx context.Context) error {
+func (d *CloneOptions) DoClone(ctx context.Context) error {
 	rawConfig, err := d.targetFactory.ToRawKubeConfigLoader().RawConfig()
 	if err != nil {
 		return err
@@ -151,7 +151,7 @@ func (d *DuplicateOptions) DoDuplicate(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		u.SetName(fmt.Sprintf("%s-dup-%s", u.GetName(), newUUID.String()[:5]))
+		u.SetName(fmt.Sprintf("%s-clone-%s", u.GetName(), newUUID.String()[:5]))
 
 		// if is another cluster, needs to set volume and set env
 		if !d.isSame {
@@ -263,19 +263,26 @@ func (d *DuplicateOptions) DoDuplicate(ctx context.Context) error {
 					return err
 				}
 			}
+			i := []string{
+				"kubevpn",
+				"proxy",
+				workload,
+				"--kubeconfig", "/tmp/.kube/" + config.KUBECONFIG,
+				"--namespace", d.Namespace,
+				"--headers", labels.Set(d.Headers).String(),
+				"--image", config.Image,
+				"--foreground",
+			}
 			container := &v1.Container{
 				Name:  config.ContainerSidecarVPN,
 				Image: config.Image,
-				Command: []string{
-					"kubevpn",
-					"proxy",
-					workload,
-					"--kubeconfig", "/tmp/.kube/" + config.KUBECONFIG,
-					"--namespace", d.Namespace,
-					"--headers", labels.Set(d.Headers).String(),
-					"--image", config.Image,
-				},
-				Args: nil,
+				Args: []string{fmt.Sprintf(`
+sysctl -w net.ipv4.ip_forward=1
+sysctl -w net.ipv6.conf.all.disable_ipv6=0
+sysctl -w net.ipv6.conf.all.forwarding=1
+sysctl -w net.ipv4.conf.all.route_localnet=1
+%s`, strings.Join(i, " "))},
+				Command: []string{"/bin/sh", "-c"},
 				Resources: v1.ResourceRequirements{
 					Requests: map[v1.ResourceName]resource.Quantity{
 						v1.ResourceCPU:    resource.MustParse("1000m"),
@@ -317,7 +324,7 @@ func (d *DuplicateOptions) DoDuplicate(ctx context.Context) error {
 			return createErr
 		})
 		if retryErr != nil {
-			return fmt.Errorf("create duplidate for resource %s failed: %v", workload, retryErr)
+			return fmt.Errorf("create clone for resource %s failed: %v", workload, retryErr)
 		}
 		err = util.WaitPodToBeReady(ctx, d.targetClientset.CoreV1().Pods(d.TargetNamespace), metav1.LabelSelector{MatchLabels: labelsMap})
 		if err != nil {
@@ -353,7 +360,7 @@ func RemoveUselessInfo(u *unstructured.Unstructured) {
 /*
 1) calculate volume content, and download it into emptyDir
 */
-func (d *DuplicateOptions) setVolume(u *unstructured.Unstructured) error {
+func (d *CloneOptions) setVolume(u *unstructured.Unstructured) error {
 
 	const TokenVolumeMountPath = "/var/run/secrets/kubernetes.io/serviceaccount"
 
@@ -520,7 +527,7 @@ func (d *DuplicateOptions) setVolume(u *unstructured.Unstructured) error {
 	return nil
 }
 
-func (d *DuplicateOptions) setEnv(u *unstructured.Unstructured) error {
+func (d *CloneOptions) setEnv(u *unstructured.Unstructured) error {
 	temp, path, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
 		return err
@@ -654,7 +661,7 @@ func (d *DuplicateOptions) setEnv(u *unstructured.Unstructured) error {
 }
 
 // replace origin registry with special registry for pulling image
-func (d *DuplicateOptions) replaceRegistry(u *unstructured.Unstructured) error {
+func (d *CloneOptions) replaceRegistry(u *unstructured.Unstructured) error {
 	// not pass this options, do nothing
 	if !d.IsChangeTargetRegistry {
 		return nil

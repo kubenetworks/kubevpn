@@ -39,14 +39,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		UseLocalDNS: req.UseLocalDNS,
 		Engine:      config.Engine(req.Engine),
 	}
-	var sshConf = &util.SshConfig{
-		Addr:             req.Addr,
-		User:             req.User,
-		Password:         req.Password,
-		Keyfile:          req.Keyfile,
-		ConfigAlias:      req.ConfigAlias,
-		RemoteKubeconfig: req.RemoteKubeconfig,
-	}
+	var sshConf = util.ParseSshFromRPC(req.SshJump)
 
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
@@ -57,7 +50,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		Name:     "kubeconfig",
 		DefValue: file,
 	})
-	err = handler.SshJump(ctx, sshConf, flags)
+	err = handler.SshJump(ctx, sshConf, flags, false)
 	if err != nil {
 		return err
 	}

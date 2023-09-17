@@ -18,6 +18,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 	"k8s.io/client-go/util/homedir"
+
+	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 )
 
 type SshConfig struct {
@@ -27,6 +29,31 @@ type SshConfig struct {
 	Keyfile          string
 	ConfigAlias      string
 	RemoteKubeconfig string
+}
+
+func ParseSshFromRPC(sshJump *rpc.SshJump) *SshConfig {
+	if sshJump == nil {
+		return &SshConfig{}
+	}
+	return &SshConfig{
+		Addr:             sshJump.Addr,
+		User:             sshJump.User,
+		Password:         sshJump.Password,
+		Keyfile:          sshJump.Keyfile,
+		ConfigAlias:      sshJump.ConfigAlias,
+		RemoteKubeconfig: sshJump.RemoteKubeconfig,
+	}
+}
+
+func (s *SshConfig) ToRPC() *rpc.SshJump {
+	return &rpc.SshJump{
+		Addr:             s.Addr,
+		User:             s.User,
+		Password:         s.Password,
+		Keyfile:          s.Keyfile,
+		ConfigAlias:      s.ConfigAlias,
+		RemoteKubeconfig: s.RemoteKubeconfig,
+	}
 }
 
 func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, conf *SshConfig, done chan struct{}) error {
