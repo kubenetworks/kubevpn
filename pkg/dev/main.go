@@ -569,10 +569,10 @@ func disconnect(ctx context.Context, daemonClient rpc.DaemonClient) func() {
 	}
 }
 
-func createConnectContainer(devOptions bool, connect handler.ConnectOptions, path string, cli *client.Client, platform *specs.Platform) (*RunConfig, error) {
+func createConnectContainer(noProxy bool, connect handler.ConnectOptions, path string, cli *client.Client, platform *specs.Platform) (*RunConfig, error) {
 	var entrypoint []string
-	if devOptions {
-		entrypoint = []string{"kubevpn", "connect", "--foreground", "-n", connect.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image}
+	if noProxy {
+		entrypoint = []string{"kubevpn", "connect", "--foreground", "-n", connect.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image, "--engine", string(connect.Engine)}
 		for _, v := range connect.ExtraCIDR {
 			entrypoint = append(entrypoint, "--extra-cidr", v)
 		}
@@ -580,7 +580,7 @@ func createConnectContainer(devOptions bool, connect handler.ConnectOptions, pat
 			entrypoint = append(entrypoint, "--extra-domain", v)
 		}
 	} else {
-		entrypoint = []string{"kubevpn", "proxy", connect.Workloads[0], "--foreground", "-n", connect.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image}
+		entrypoint = []string{"kubevpn", "proxy", connect.Workloads[0], "--foreground", "-n", connect.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image, "--engine", string(connect.Engine)}
 		for k, v := range connect.Headers {
 			entrypoint = append(entrypoint, "--headers", fmt.Sprintf("%s=%s", k, v))
 		}

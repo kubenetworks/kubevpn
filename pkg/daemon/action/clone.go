@@ -3,7 +3,6 @@ package action
 import (
 	"fmt"
 	"io"
-	"os"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -49,7 +48,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 		if err == io.EOF {
 			break
 		} else if err == nil {
-			fmt.Fprint(os.Stdout, msg.Message)
+			fmt.Fprint(out, msg.Message)
 		} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
 			return nil
 		} else {
@@ -96,6 +95,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 	if err != nil {
 		return err
 	}
+	svr.clone = options
 	return nil
 }
 
