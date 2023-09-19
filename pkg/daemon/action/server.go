@@ -18,6 +18,7 @@ type Server struct {
 
 	t       time.Time
 	connect *handler.ConnectOptions
+	clone   *handler.CloneOptions
 }
 
 func GetDaemonLogPath() string {

@@ -14,7 +14,7 @@ import (
 )
 
 func CmdRemove(f cmdutil.Factory) *cobra.Command {
-	var leaveCmd = &cobra.Command{
+	var cmd = &cobra.Command{
 		Use:   "remove",
 		Short: "Remove reverse remote resource traffic to local machine",
 		Long:  `Remove remote traffic to local machine`,
@@ -41,5 +41,5 @@ func CmdRemove(f cmdutil.Factory) *cobra.Command {
 			}
 		},
 	}
-	return leaveCmd
+	return cmd
 }

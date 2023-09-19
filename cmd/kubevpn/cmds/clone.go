@@ -134,8 +134,8 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar((*string)(&options.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
 	cmd.Flags().BoolVar(&options.UseLocalDNS, "use-localdns", false, "if use-lcoaldns is true, kubevpn will start coredns listen at 53 to forward your dns queries. only support on linux now")
 
-	cmd.Flags().StringVar(&options.TargetImage, "target-image", "", "Clone container use this image to startup container, if not special, use origin origin image")
-	cmd.Flags().StringVar(&options.TargetContainer, "target-container", "", "Clone container use special image to startup this container, if not special, use origin origin image")
+	cmd.Flags().StringVar(&options.TargetImage, "target-image", "", "Clone container use this image to startup container, if not special, use origin image")
+	cmd.Flags().StringVar(&options.TargetContainer, "target-container", "", "Clone container use special image to startup this container, if not special, use origin image")
 	cmd.Flags().StringVar(&options.TargetNamespace, "target-namespace", "", "Clone workloads in this namespace, if not special, use origin namespace")
 	cmd.Flags().StringVar(&options.TargetKubeconfig, "target-kubeconfig", "", "Clone workloads will create in this cluster, if not special, use origin cluster")
 	cmd.Flags().StringVar(&options.TargetRegistry, "target-registry", "", "Clone workloads will create this registry domain to replace origin registry, if not special, use origin registry")

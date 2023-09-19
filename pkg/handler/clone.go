@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -117,7 +118,7 @@ func (d *CloneOptions) InitClient(f cmdutil.Factory) (err error) {
 * 4) modify podTempSpec inject kubevpn container
  */
 func (d *CloneOptions) DoClone(ctx context.Context) error {
-	rawConfig, err := d.targetFactory.ToRawKubeConfigLoader().RawConfig()
+	rawConfig, err := d.factory.ToRawKubeConfigLoader().RawConfig()
 	if err != nil {
 		return err
 	}
@@ -152,7 +153,6 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 			return err
 		}
 		u.SetName(fmt.Sprintf("%s-clone-%s", u.GetName(), newUUID.String()[:5]))
-
 		// if is another cluster, needs to set volume and set env
 		if !d.isSame {
 			if err = d.setVolume(u); err != nil {
@@ -168,7 +168,8 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 			"owner-ref":     u.GetName(),
 		}
 		var path []string
-		_, path, err = util.GetPodTemplateSpecPath(u)
+		var spec *v1.PodTemplateSpec
+		spec, path, err = util.GetPodTemplateSpecPath(u)
 		if err != nil {
 			return err
 		}
@@ -186,38 +187,19 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 			_ = client.Resource(object.Mapping.Resource).Namespace(d.TargetNamespace).Delete(context.Background(), u.GetName(), metav1.DeleteOptions{})
 		})
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			var volumesPath = append(path, "spec", "volumes")
-			var containersPath = append(path, "spec", "containers")
-			var annotationPath = append(path, "metadata", "annotations")
-			var labelsPath = append(path, "metadata", "labels")
-
 			// (1) add annotation KUBECONFIG
-			stringMap, found, err := unstructured.NestedStringMap(u.Object, annotationPath...)
-			if err != nil {
-				return err
+			anno := spec.GetAnnotations()
+			if anno == nil {
+				anno = map[string]string{}
 			}
-			if !found {
-				stringMap = map[string]string{}
-			}
-			stringMap[config.KUBECONFIG] = string(kubeconfigJsonBytes)
-			if err = unstructured.SetNestedStringMap(u.Object, stringMap, annotationPath...); err != nil {
-				return err
-			}
+			anno[config.KUBECONFIG] = string(kubeconfigJsonBytes)
+			spec.SetAnnotations(anno)
 
 			// (2) modify labels
-			if err = unstructured.SetNestedStringMap(u.Object, labelsMap, labelsPath...); err != nil {
-				return err
-			}
+			spec.SetLabels(labelsMap)
 
 			// (3) add volumes KUBECONFIG
-			volumes, found, err := unstructured.NestedSlice(u.Object, volumesPath...)
-			if err != nil {
-				return err
-			}
-			if !found {
-				volumes = []interface{}{}
-			}
-			volume := &v1.Volume{
+			spec.Spec.Volumes = append(spec.Spec.Volumes, v1.Volume{
 				Name: config.KUBECONFIG,
 				VolumeSource: v1.VolumeSource{
 					DownwardAPI: &v1.DownwardAPIVolumeSource{
@@ -229,24 +211,23 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 						}},
 					},
 				},
-			}
-			marshal, err := json.Marshal(volume)
-			v := unstructured.Unstructured{}
-			err = v.UnmarshalJSON(marshal)
-			if err = unstructured.SetNestedSlice(u.Object, append(volumes, v.Object), volumesPath...); err != nil {
-				return err
-			}
+			})
 
 			// (4) add kubevpn containers
-			containers, found, err := unstructured.NestedSlice(u.Object, containersPath...)
-			if err != nil || !found || containers == nil {
-				return fmt.Errorf("deployment containers not found or error in spec: %v", err)
+			containers := spec.Spec.Containers
+			// remove vpn sidecar
+			for i := 0; i < len(containers); i++ {
+				containerName := containers[i].Name
+				if err == nil && (containerName == config.ContainerSidecarVPN || containerName == config.ContainerSidecarEnvoyProxy) {
+					containers = append(containers[:i], containers[i+1:]...)
+					i--
+				}
 			}
 			if d.TargetImage != "" {
 				var index = -1
 				if d.TargetContainer != "" {
 					for i, container := range containers {
-						nestedString, _, err := unstructured.NestedString(container.(map[string]interface{}), "name")
+						nestedString := container.Name
 						if err == nil && nestedString == d.TargetContainer {
 							index = i
 							break
@@ -259,30 +240,45 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 					return fmt.Errorf("can not found container %s in pod template", d.TargetContainer)
 				}
 				// update container[index] image
-				if err = unstructured.SetNestedField(containers[index].(map[string]interface{}), d.TargetImage, "image"); err != nil {
-					return err
-				}
+				containers[index].Image = d.TargetImage
 			}
-			i := []string{
-				"kubevpn",
-				"proxy",
-				workload,
-				"--kubeconfig", "/tmp/.kube/" + config.KUBECONFIG,
-				"--namespace", d.Namespace,
-				"--headers", labels.Set(d.Headers).String(),
-				"--image", config.Image,
-				"--foreground",
+			// https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/
+			if spec.Spec.SecurityContext == nil {
+				spec.Spec.SecurityContext = &v1.PodSecurityContext{}
 			}
+			spec.Spec.SecurityContext.Sysctls = append(spec.Spec.SecurityContext.Sysctls, []v1.Sysctl{
+				{
+					Name:  "net.ipv4.ip_forward",
+					Value: "1",
+				},
+				{
+					Name:  "net.ipv6.conf.all.disable_ipv6",
+					Value: "0",
+				},
+				{
+					Name:  "net.ipv6.conf.all.forwarding",
+					Value: "1",
+				},
+				{
+					Name:  "net.ipv4.conf.all.route_localnet",
+					Value: "1",
+				},
+			}...)
 			container := &v1.Container{
 				Name:  config.ContainerSidecarVPN,
 				Image: config.Image,
-				Args: []string{fmt.Sprintf(`
-sysctl -w net.ipv4.ip_forward=1
-sysctl -w net.ipv6.conf.all.disable_ipv6=0
-sysctl -w net.ipv6.conf.all.forwarding=1
-sysctl -w net.ipv4.conf.all.route_localnet=1
-%s`, strings.Join(i, " "))},
-				Command: []string{"/bin/sh", "-c"},
+				// https://stackoverflow.com/questions/32918849/what-process-signal-does-pod-receive-when-executing-kubectl-rolling-update
+				Command: []string{
+					"kubevpn",
+					"proxy",
+					workload,
+					"--kubeconfig", "/tmp/.kube/" + config.KUBECONFIG,
+					"--namespace", d.Namespace,
+					"--headers", labels.Set(d.Headers).String(),
+					"--image", config.Image,
+					"--engine", string(d.Engine),
+					"--foreground",
+				},
 				Resources: v1.ResourceRequirements{
 					Requests: map[v1.ResourceName]resource.Quantity{
 						v1.ResourceCPU:    resource.MustParse("1000m"),
@@ -309,10 +305,21 @@ sysctl -w net.ipv4.conf.all.route_localnet=1
 					Privileged: pointer.Bool(true),
 				},
 			}
-			marshal, err = json.Marshal(container)
-			v = unstructured.Unstructured{}
-			err = v.UnmarshalJSON(marshal)
-			if err = unstructured.SetNestedField(u.Object, append(containers, v.Object), containersPath...); err != nil {
+			spec.Spec.Containers = append(containers, *container)
+			//set spec
+			marshal, err := json.Marshal(spec)
+			if err != nil {
+				return err
+			}
+			m := make(map[string]interface{})
+			err = json.Unmarshal(marshal, &m)
+			if err != nil {
+				return err
+			}
+			//v := unstructured.Unstructured{}
+			//_, _, err = clientgoscheme.Codecs.UniversalDecoder(object.Mapping.GroupVersionKind.GroupVersion()).Decode(marshal, nil, &v)
+			//_, _, err = unstructured.UnstructuredJSONScheme.Decode(marshal, &object.Mapping.GroupVersionKind, &v)
+			if err = unstructured.SetNestedField(u.Object, m, path...); err != nil {
 				return err
 			}
 			if err = d.replaceRegistry(u); err != nil {
@@ -708,5 +715,40 @@ func (d *CloneOptions) replaceRegistry(u *unstructured.Unstructured) error {
 		return err
 	}
 
+	return nil
+}
+
+func (d *CloneOptions) Cleanup(workloads []string) error {
+	if len(workloads) == 0 {
+		workloads = d.Workloads
+	}
+	for _, workload := range workloads {
+		object, err := util.GetUnstructuredObject(d.factory, d.Namespace, workload)
+		if err != nil {
+			return err
+		}
+		labelsMap := map[string]string{
+			config.ManageBy: config.ConfigMapPodTrafficManager,
+			"owner-ref":     object.Name,
+		}
+		selector := labels.SelectorFromSet(labelsMap)
+		controller, err := util.GetTopOwnerReferenceBySelector(d.targetFactory, d.TargetNamespace, selector.String())
+		if err != nil {
+			log.Errorf("get controller error: %s", err.Error())
+			return err
+		}
+		var client dynamic.Interface
+		client, err = d.targetFactory.DynamicClient()
+		if err != nil {
+			return err
+		}
+		for _, cloneName := range controller.UnsortedList() {
+			err = client.Resource(object.Mapping.Resource).Namespace(d.TargetNamespace).Delete(context.Background(), cloneName, metav1.DeleteOptions{})
+			if !apierrors.IsNotFound(err) {
+				return err
+			}
+			log.Infof("delete clone object: %s", cloneName)
+		}
+	}
 	return nil
 }

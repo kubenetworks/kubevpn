@@ -89,7 +89,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if !svr.t.IsZero() {
 		log.Debugf("already connect to another cluster, you can disconnect this connect by command `kubevpn disconnect`")
 		// todo define already connect error?
-		return status.Error(codes.AlreadyExists, "")
+		return status.Error(codes.AlreadyExists, "already connect to another cluster, you can disconnect this connect by command `kubevpn disconnect`")
 	}
 	svr.t = time.Now()
 	svr.connect = &handler.ConnectOptions{
@@ -189,6 +189,20 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	if err != nil {
 		return err
 	}
+
+	if svr.connect != nil {
+		var isSameCluster bool
+		isSameCluster, err = util.IsSameCluster(
+			svr.connect.GetClientset().CoreV1().ConfigMaps(svr.connect.Namespace), svr.connect.Namespace,
+			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
+		)
+		if err == nil && isSameCluster && svr.connect.Equal(connect) {
+			// same cluster, do nothing
+			log.Debugf("already connect to cluster")
+			return nil
+		}
+	}
+
 	ctx, err := connect.RentInnerIP(resp.Context())
 	if err != nil {
 		return err

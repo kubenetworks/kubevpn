@@ -22,6 +22,12 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 	if svr.Cancel != nil {
 		svr.Cancel()
 	}
+	if svr.clone != nil {
+		err := svr.clone.Cleanup(nil)
+		if err != nil {
+			log.Errorf("quit: cleanup clone failed: %v", err)
+		}
+	}
 	return nil
 }
 
