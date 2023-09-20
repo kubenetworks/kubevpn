@@ -29,6 +29,7 @@ const (
 	Daemon_List_FullMethodName       = "/rpc.Daemon/List"
 	Daemon_Upgrade_FullMethodName    = "/rpc.Daemon/Upgrade"
 	Daemon_Status_FullMethodName     = "/rpc.Daemon/Status"
+	Daemon_Version_FullMethodName    = "/rpc.Daemon/Version"
 	Daemon_Quit_FullMethodName       = "/rpc.Daemon/Quit"
 )
 
@@ -46,6 +47,7 @@ type DaemonClient interface {
 	List(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error)
 	Upgrade(ctx context.Context, in *UpgradeRequest, opts ...grpc.CallOption) (Daemon_UpgradeClient, error)
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
+	Version(ctx context.Context, in *VersionRequest, opts ...grpc.CallOption) (*VersionResponse, error)
 	Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error)
 }
 
@@ -331,6 +333,15 @@ func (c *daemonClient) Status(ctx context.Context, in *StatusRequest, opts ...gr
 	return out, nil
 }
 
+func (c *daemonClient) Version(ctx context.Context, in *VersionRequest, opts ...grpc.CallOption) (*VersionResponse, error) {
+	out := new(VersionResponse)
+	err := c.cc.Invoke(ctx, Daemon_Version_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonClient) Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error) {
 	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[8], Daemon_Quit_FullMethodName, opts...)
 	if err != nil {
@@ -377,6 +388,7 @@ type DaemonServer interface {
 	List(context.Context, *ListRequest) (*ListResponse, error)
 	Upgrade(*UpgradeRequest, Daemon_UpgradeServer) error
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
+	Version(context.Context, *VersionRequest) (*VersionResponse, error)
 	Quit(*QuitRequest, Daemon_QuitServer) error
 	mustEmbedUnimplementedDaemonServer()
 }
@@ -414,6 +426,9 @@ func (UnimplementedDaemonServer) Upgrade(*UpgradeRequest, Daemon_UpgradeServer) 
 }
 func (UnimplementedDaemonServer) Status(context.Context, *StatusRequest) (*StatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Status not implemented")
+}
+func (UnimplementedDaemonServer) Version(context.Context, *VersionRequest) (*VersionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Version not implemented")
 }
 func (UnimplementedDaemonServer) Quit(*QuitRequest, Daemon_QuitServer) error {
 	return status.Errorf(codes.Unimplemented, "method Quit not implemented")
@@ -635,6 +650,24 @@ func _Daemon_Status_Handler(srv interface{}, ctx context.Context, dec func(inter
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Daemon_Version_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VersionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).Version(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_Version_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).Version(ctx, req.(*VersionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Daemon_Quit_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(QuitRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -670,6 +703,10 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Status",
 			Handler:    _Daemon_Status_Handler,
+		},
+		{
+			MethodName: "Version",
+			Handler:    _Daemon_Version_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

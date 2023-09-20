@@ -37,13 +37,13 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 		}
 	}
 
-	out := newDisconnectWarp(resp)
-	origin := log.StandardLogger().Out
 	defer func() {
-		log.SetOutput(origin)
+		log.SetOutput(svr.LogFile)
+		log.SetLevel(log.DebugLevel)
 	}()
-	multiWriter := io.MultiWriter(origin, out)
-	log.SetOutput(multiWriter)
+	out := io.MultiWriter(newDisconnectWarp(resp), svr.LogFile)
+	log.SetOutput(out)
+	log.SetLevel(log.InfoLevel)
 
 	if svr.connect != nil {
 		svr.connect.Cleanup()

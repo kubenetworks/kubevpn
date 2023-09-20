@@ -16,6 +16,7 @@ service Daemon {
   rpc List (ListRequest) returns (ListResponse) {}
   rpc Upgrade (UpgradeRequest) returns (stream UpgradeResponse) {}
   rpc Status (StatusRequest) returns (StatusResponse) {}
+  rpc Version (VersionRequest) returns (VersionResponse) {}
   rpc Quit (QuitRequest) returns (stream QuitResponse) {}
 }
 
@@ -112,6 +113,13 @@ message StatusRequest {
 
 message StatusResponse {
   string message = 1;
+}
+
+message VersionRequest {
+}
+
+message VersionResponse {
+  string version = 1;
 }
 
 message LogRequest {

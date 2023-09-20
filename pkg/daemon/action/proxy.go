@@ -21,14 +21,13 @@ import (
 //     2.1 disconnect from cluster
 //     2.2 same as step 1
 func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) error {
-	origin := log.StandardLogger().Out
-	out := io.MultiWriter(newProxyWarp(resp), origin)
+	out := io.MultiWriter(newProxyWarp(resp), svr.LogFile)
 	log.SetOutput(out)
 	defer func() {
-		log.SetOutput(origin)
+		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
 	}()
-	util.InitLogger(false)
+	log.SetLevel(log.InfoLevel)
 	ctx := resp.Context()
 	connect := &handler.ConnectOptions{
 		Namespace:   req.Namespace,

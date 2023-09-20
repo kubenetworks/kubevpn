@@ -9,13 +9,12 @@ import (
 )
 
 func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error {
-	origin := log.StandardLogger().Out
 	defer func() {
-		log.SetOutput(origin)
+		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
 	}()
-	log.SetOutput(io.MultiWriter(origin, newQuitWarp(resp)))
-
+	log.SetOutput(io.MultiWriter(newQuitWarp(resp), svr.LogFile))
+	log.SetLevel(log.InfoLevel)
 	if svr.connect != nil {
 		svr.connect.Cleanup()
 	}
