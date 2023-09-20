@@ -13,15 +13,14 @@ func (svr *Server) Stop(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 	if svr.connect == nil {
 		return nil
 	}
-
-	out := newStopWarp(resp)
-	origin := log.StandardLogger().Out
 	defer func() {
-		log.SetOutput(origin)
+		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
 	}()
-	multiWriter := io.MultiWriter(origin, out)
-	log.SetOutput(multiWriter)
+	out := io.MultiWriter(newStopWarp(resp), svr.LogFile)
+	log.SetOutput(out)
+	log.SetLevel(log.InfoLevel)
+
 	svr.connect.Cleanup()
 	svr.t = time.Time{}
 	svr.connect = nil

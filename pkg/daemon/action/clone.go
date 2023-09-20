@@ -16,15 +16,14 @@ import (
 )
 
 func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) error {
-	var sshConf = util.ParseSshFromRPC(req.SshJump)
-	origin := log.StandardLogger().Out
 	defer func() {
-		log.SetOutput(origin)
+		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
 	}()
-	out := io.MultiWriter(newCloneWarp(resp), origin)
+	out := io.MultiWriter(newCloneWarp(resp), svr.LogFile)
 	log.SetOutput(out)
-	util.InitLogger(false)
+	log.SetLevel(log.InfoLevel)
+	var sshConf = util.ParseSshFromRPC(req.SshJump)
 	connReq := &rpc.ConnectRequest{
 		KubeconfigBytes: req.KubeconfigBytes,
 		Namespace:       req.Namespace,

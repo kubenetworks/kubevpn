@@ -25,62 +25,14 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-type warp struct {
-	server rpc.Daemon_ConnectServer
-}
-
-func (r *warp) Write(p []byte) (n int, err error) {
-	err = r.server.Send(&rpc.ConnectResponse{
-		Message: string(p),
-	})
-	return len(p), err
-}
-
-func newWarp(server rpc.Daemon_ConnectServer) io.Writer {
-	return &warp{server: server}
-}
-
-func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
-	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-	configFlags.WrapConfigFn = func(c *rest.Config) *rest.Config {
-		if path, ok := os.LookupEnv(config.EnvSSHJump); ok {
-			bytes, err := os.ReadFile(path)
-			cmdutil.CheckErr(err)
-			var conf *restclient.Config
-			conf, err = clientcmd.RESTConfigFromKubeConfig(bytes)
-			cmdutil.CheckErr(err)
-			return conf
-		}
-		return c
-	}
-	// todo optimize here
-	temp, err := os.CreateTemp("", "*.json")
-	if err != nil {
-		return nil
-	}
-	err = temp.Close()
-	if err != nil {
-		return nil
-	}
-	err = os.WriteFile(temp.Name(), []byte(kubeconfigBytes), os.ModePerm)
-	if err != nil {
-		return nil
-	}
-	configFlags.KubeConfig = pointer.String(temp.Name())
-	configFlags.Namespace = pointer.String(ns)
-	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
-	return cmdutil.NewFactory(matchVersionFlags)
-}
-
 func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) error {
-	origin := log.StandardLogger().Out
 	defer func() {
-		log.SetOutput(origin)
+		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
 	}()
-	out := io.MultiWriter(newWarp(resp), origin)
+	out := io.MultiWriter(newWarp(resp), svr.LogFile)
 	log.SetOutput(out)
-	util.InitLogger(false)
+	log.SetLevel(log.InfoLevel)
 	if !svr.IsSudo {
 		return svr.redirectToSudoDaemon(req, resp)
 	}
@@ -228,4 +180,51 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	svr.t = time.Now()
 	svr.connect = connect
 	return nil
+}
+
+type warp struct {
+	server rpc.Daemon_ConnectServer
+}
+
+func (r *warp) Write(p []byte) (n int, err error) {
+	err = r.server.Send(&rpc.ConnectResponse{
+		Message: string(p),
+	})
+	return len(p), err
+}
+
+func newWarp(server rpc.Daemon_ConnectServer) io.Writer {
+	return &warp{server: server}
+}
+
+func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
+	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags.WrapConfigFn = func(c *rest.Config) *rest.Config {
+		if path, ok := os.LookupEnv(config.EnvSSHJump); ok {
+			bytes, err := os.ReadFile(path)
+			cmdutil.CheckErr(err)
+			var conf *restclient.Config
+			conf, err = clientcmd.RESTConfigFromKubeConfig(bytes)
+			cmdutil.CheckErr(err)
+			return conf
+		}
+		return c
+	}
+	// todo optimize here
+	temp, err := os.CreateTemp("", "*.json")
+	if err != nil {
+		return nil
+	}
+	err = temp.Close()
+	if err != nil {
+		return nil
+	}
+	err = os.WriteFile(temp.Name(), []byte(kubeconfigBytes), os.ModePerm)
+	if err != nil {
+		return nil
+	}
+	configFlags.KubeConfig = pointer.String(temp.Name())
+	configFlags.Namespace = pointer.String(ns)
+	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
+	return cmdutil.NewFactory(matchVersionFlags)
 }

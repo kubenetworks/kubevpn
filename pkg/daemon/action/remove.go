@@ -6,18 +6,16 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
 func (svr *Server) Remove(req *rpc.RemoveRequest, resp rpc.Daemon_RemoveServer) error {
-	origin := log.StandardLogger().Out
 	defer func() {
-		log.SetOutput(origin)
+		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
 	}()
-	out := io.MultiWriter(newRemoveWarp(resp), origin)
+	out := io.MultiWriter(newRemoveWarp(resp), svr.LogFile)
 	log.SetOutput(out)
-	util.InitLogger(false)
+	log.SetLevel(log.InfoLevel)
 
 	if svr.clone != nil {
 		err := svr.clone.Cleanup(req.Workloads)

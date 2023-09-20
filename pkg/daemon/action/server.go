@@ -1,6 +1,7 @@
 package action
 
 import (
+	"os"
 	"path/filepath"
 	"time"
 
@@ -15,6 +16,7 @@ type Server struct {
 	Cancel    func()
 	GetClient func(isSudo bool) rpc.DaemonClient
 	IsSudo    bool
+	LogFile   *os.File
 
 	t       time.Time
 	connect *handler.ConnectOptions

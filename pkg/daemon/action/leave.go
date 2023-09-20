@@ -11,13 +11,13 @@ import (
 )
 
 func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) error {
-	out := newLeaveWarp(resp)
-	origin := log.StandardLogger().Out
 	defer func() {
-		log.SetOutput(origin)
+		log.SetOutput(svr.LogFile)
+		log.SetLevel(log.DebugLevel)
 	}()
-	multiWriter := io.MultiWriter(origin, out)
-	log.SetOutput(multiWriter)
+	out := io.MultiWriter(newLeaveWarp(resp), svr.LogFile)
+	log.SetOutput(out)
+	log.SetLevel(log.InfoLevel)
 	if svr.connect == nil {
 		return fmt.Errorf("not proxy any resource in cluster")
 	}

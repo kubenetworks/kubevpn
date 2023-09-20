@@ -1,6 +1,7 @@
 package cmds
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"runtime/debug"
@@ -10,6 +11,8 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 )
 
 // --ldflags -X
@@ -35,7 +38,7 @@ func CmdVersion(cmdutil.Factory) *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Printf("KubeVPN: CLI\n")
 			fmt.Printf("    Version: %s\n", config.Version)
-			fmt.Printf("    DaemonVersion: %s\n", config.Version)
+			fmt.Printf("    DaemonVersion: %s\n", getDaemonVersion())
 			fmt.Printf("    Image: %s\n", config.Image)
 			fmt.Printf("    Branch: %s\n", Branch)
 			fmt.Printf("    Git commit: %s\n", config.GitCommit)
@@ -54,4 +57,15 @@ func init() {
 			config.Version = i.Main.Version
 		}
 	}
+}
+
+func getDaemonVersion() string {
+	cli := daemon.GetClient(false)
+	if cli != nil {
+		version, err := cli.Version(context.Background(), &rpc.VersionRequest{})
+		if err == nil {
+			return version.Version
+		}
+	}
+	return "unknown"
 }
