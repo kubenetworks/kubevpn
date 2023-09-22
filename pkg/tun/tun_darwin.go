@@ -67,6 +67,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	if err = addTunRoutes(name, cfg.Routes...); err != nil {
+		log.Errorf("add tun routes failed: %v", err)
 		return
 	}
 
@@ -98,7 +99,7 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 		args := strings.Split(cmd, " ")
 		err := exec.Command(args[0], args[1:]...).Run()
 		if err != nil {
-			return fmt.Errorf("%s: %v", cmd, err)
+			return fmt.Errorf("run cmd %s: %v", cmd, err)
 		}
 	}
 	return nil

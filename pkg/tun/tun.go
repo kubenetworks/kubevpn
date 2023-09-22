@@ -41,6 +41,7 @@ func Listener(config Config) (net.Listener, error) {
 
 	conn, ifce, err := createTun(config)
 	if err != nil {
+		log.Errorf("create tun device error: %v", err)
 		return nil, err
 	}
 	addrs, _ := ifce.Addrs()

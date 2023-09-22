@@ -19,6 +19,7 @@ import (
 	"github.com/moby/term"
 	"github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 func GetClient() (*client.Client, *command.DockerCli, error) {
@@ -47,18 +48,21 @@ func GetClient() (*client.Client, *command.DockerCli, error) {
 func TransferImage(ctx context.Context, conf *SshConfig, from, to string, out io.Writer) error {
 	cli, c, err := GetClient()
 	if err != nil {
-		return fmt.Errorf("failed to get docker client: %v", err)
+		log.Errorf("failed to get docker client: %v", err)
+		return err
 	}
 	// todo add flags? or detect k8s node runtime ?
 	platform := &v1.Platform{Architecture: "amd64", OS: "linux"}
 	err = PullImage(ctx, platform, cli, c, from, out)
 	if err != nil {
-		return fmt.Errorf("failed to pull image: %v", err)
+		log.Errorf("failed to pull image: %v", err)
+		return err
 	}
 
 	err = cli.ImageTag(ctx, from, to)
 	if err != nil {
-		return fmt.Errorf("failed to tag image %s to %s: %v", from, to, err)
+		log.Errorf("failed to tag image %s to %s: %v", from, to, err)
+		return err
 	}
 
 	// use it if sshConfig is not empty
@@ -66,17 +70,20 @@ func TransferImage(ctx context.Context, conf *SshConfig, from, to string, out io
 		var distributionRef reference.Named
 		distributionRef, err = reference.ParseNormalizedNamed(to)
 		if err != nil {
-			return fmt.Errorf("can not parse image name %s: %v", to, err)
+			log.Errorf("can not parse image name %s: %v", to, err)
+			return err
 		}
 		var imgRefAndAuth trust.ImageRefAndAuth
 		imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, nil, image.AuthResolver(c), distributionRef.String())
 		if err != nil {
-			return fmt.Errorf("can not get image auth: %v", err)
+			log.Errorf("can not get image auth: %v", err)
+			return err
 		}
 		var encodedAuth string
 		encodedAuth, err = command.EncodeAuthToBase64(*imgRefAndAuth.AuthConfig())
 		if err != nil {
-			return fmt.Errorf("can not encode auth config to base64: %v", err)
+			log.Errorf("can not encode auth config to base64: %v", err)
+			return err
 		}
 		requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(c, imgRefAndAuth.RepoInfo().Index, "push")
 		var readCloser io.ReadCloser
@@ -85,7 +92,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, from, to string, out io
 			PrivilegeFunc: requestPrivilege,
 		})
 		if err != nil {
-			err = fmt.Errorf("can not push image %s, err: %v", to, err)
+			log.Errorf("can not push image %s, err: %v", to, err)
 			return err
 		}
 		defer readCloser.Close()
@@ -95,7 +102,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, from, to string, out io
 		outWarp := streams.NewOut(out)
 		err = jsonmessage.DisplayJSONMessagesToStream(readCloser, outWarp, nil)
 		if err != nil {
-			err = fmt.Errorf("can not display message, err: %v", err)
+			log.Errorf("can not display message, err: %v", err)
 			return err
 		}
 		return nil
@@ -105,6 +112,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, from, to string, out io
 	var responseReader io.ReadCloser
 	responseReader, err = cli.ImageSave(ctx, []string{to})
 	if err != nil {
+		log.Errorf("can not save image %s: %v", to, err)
 		return err
 	}
 	defer responseReader.Close()
@@ -143,17 +151,20 @@ func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, c
 	}
 	distributionRef, err := reference.ParseNormalizedNamed(img)
 	if err != nil {
-		return fmt.Errorf("can not parse image name %s: %v", img, err)
+		log.Errorf("can not parse image name %s: %v", img, err)
+		return err
 	}
 	var imgRefAndAuth trust.ImageRefAndAuth
 	imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, nil, image.AuthResolver(c), distributionRef.String())
 	if err != nil {
-		return fmt.Errorf("can not get image auth: %v", err)
+		log.Errorf("can not get image auth: %v", err)
+		return err
 	}
 	var encodedAuth string
 	encodedAuth, err = command.EncodeAuthToBase64(*imgRefAndAuth.AuthConfig())
 	if err != nil {
-		return fmt.Errorf("can not encode auth config to base64:%v", err)
+		log.Errorf("can not encode auth config to base64: %v", err)
+		return err
 	}
 	requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(c, imgRefAndAuth.RepoInfo().Index, "pull")
 	readCloser, err = cli.ImagePull(ctx, img, types.ImagePullOptions{
@@ -163,7 +174,7 @@ func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, c
 		Platform:      plat,
 	})
 	if err != nil {
-		err = fmt.Errorf("can not pull image %s, err: %s, please make sure image is exist and can be pulled from local", img, err)
+		log.Errorf("can not pull image %s, err: %s, please make sure image is exist and can be pulled from local", img, err)
 		return err
 	}
 	defer readCloser.Close()
@@ -173,7 +184,7 @@ func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, c
 	outWarp := streams.NewOut(out)
 	err = jsonmessage.DisplayJSONMessagesToStream(readCloser, outWarp, nil)
 	if err != nil {
-		err = fmt.Errorf("can not display message, err: %v", err)
+		log.Errorf("can not display message, err: %v", err)
 		return err
 	}
 	return nil

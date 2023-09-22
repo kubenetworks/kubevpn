@@ -22,7 +22,7 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, _ bool) error {
 	env := os.Getenv(config.EnvTunNameOrLUID)
 	parseUint, err := strconv.ParseUint(env, 10, 64)
 	if err != nil {
-		log.Warningln(err)
+		log.Errorf("parse %s failed: %s", env, err)
 		return err
 	}
 	luid := winipcfg.LUID(parseUint)
@@ -31,18 +31,14 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, _ bool) error {
 		var addr netip.Addr
 		addr, err = netip.ParseAddr(s)
 		if err != nil {
-			log.Warningln(err)
+			log.Errorf("parse %s failed: %s", s, err)
 			return err
 		}
 		servers = append(servers, addr)
 	}
 	err = luid.SetDNS(windows.AF_INET, servers, clientConfig.Search)
 	if err != nil {
-		log.Warningln(err)
-		return err
-	}
-	if err != nil {
-		log.Warningln(err)
+		log.Errorf("set DNS failed: %s", err)
 		return err
 	}
 	//_ = updateNicMetric(tunName)
@@ -53,9 +49,12 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, _ bool) error {
 func CancelDNS() {
 	updateHosts("")
 	getenv := os.Getenv(config.EnvTunNameOrLUID)
+	if getenv == "" {
+		return
+	}
 	parseUint, err := strconv.ParseUint(getenv, 10, 64)
 	if err != nil {
-		log.Warningln(err)
+		log.Errorf("parse %s failed: %s", getenv, err)
 		return
 	}
 	luid := winipcfg.LUID(parseUint)

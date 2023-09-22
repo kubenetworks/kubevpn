@@ -255,7 +255,7 @@ func networkCancel() {
 					args := []string{"-setdnsservers", s}
 					combinedOutput, err := exec.Command("networksetup", append(args, dnsServers...)...).Output()
 					if err != nil {
-						log.Warnf("error while remove dnsserver for %s, err: %v, output: %s\n", s, err, string(combinedOutput))
+						log.Warnf("error while remove dnsserver for %s, err: %v, output: %s", s, err, string(combinedOutput))
 					}
 				}
 			}

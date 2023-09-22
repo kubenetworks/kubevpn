@@ -133,6 +133,7 @@ func GetCIDRFromResourceUgly(clientset *kubernetes.Clientset, namespace string) 
 func GetLocalTunIP() (net.IP, net.IP, error) {
 	tunIface, err := tun.GetInterface()
 	if err != nil {
+		log.Errorf("get tun interface failed: %v", err)
 		return nil, nil, err
 	}
 	addrs, err := tunIface.Addrs()

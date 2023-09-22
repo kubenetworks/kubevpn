@@ -119,22 +119,26 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 
 	env, err := util.GetEnv(ctx, d.Factory, d.Namespace, pod)
 	if err != nil {
+		log.Errorf("get env from k8s: %v", err)
 		return err
 	}
 	volume, err := GetVolume(ctx, d.Factory, d.Namespace, pod)
 	if err != nil {
+		log.Errorf("get volume from k8s: %v", err)
 		return err
 	}
 	dns, err := GetDNS(ctx, d.Factory, d.Namespace, pod)
 	if err != nil {
-		return fmt.Errorf("can not get dns conf from pod: %s, err: %v", pod, err)
+		log.Errorf("get dns from k8s: %v", err)
+		return err
 	}
 
 	mesh.RemoveContainers(templateSpec)
 	runConfigList := ConvertKubeResourceToContainer(d.Namespace, *templateSpec, env, volume, dns)
 	err = mergeDockerOptions(runConfigList, d, tempContainerConfig)
 	if err != nil {
-		return fmt.Errorf("can not fill docker options, err: %v", err)
+		log.Errorf("can not fill docker options, err: %v", err)
+		return err
 	}
 	// check resource
 	var outOfMemory bool
@@ -164,6 +168,7 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 		var networkID string
 		networkID, err = createKubevpnNetwork(ctx, d.Cli)
 		if err != nil {
+			log.Errorf("create network for %s: %v", d.Workload, err)
 			return err
 		}
 
@@ -245,6 +250,7 @@ func (l ConfigList) Run(ctx context.Context, volume map[string][]mount.Mount, cl
 		if index == 0 {
 			_, err := runFirst(ctx, runConfig, cli, dockerCli)
 			if err != nil {
+				log.Errorf("run main container container failed: %v", err)
 				return err
 			}
 		} else {
@@ -272,20 +278,23 @@ func (l ConfigList) copyToContainer(ctx context.Context, volume []mount.Mount, c
 	for _, v := range volume {
 		target, err := createFolder(ctx, cli, id, v.Source, v.Target)
 		if err != nil {
-			log.Debugf("create folder %s previoully faied, err: %v", target, err)
+			log.Debugf("create folder %s previoully failed, err: %v", target, err)
 		}
 		log.Debugf("from %s to %s", v.Source, v.Target)
 		srcInfo, err := archive.CopyInfoSourcePath(v.Source, true)
 		if err != nil {
-			return fmt.Errorf("copy info source path, err: %v", err)
+			log.Errorf("copy info source path, err: %v", err)
+			return err
 		}
 		srcArchive, err := archive.TarResource(srcInfo)
 		if err != nil {
-			return fmt.Errorf("tar resource failed, err: %v", err)
+			log.Errorf("tar resource failed, err: %v", err)
+			return err
 		}
 		dstDir, preparedArchive, err := archive.PrepareArchiveCopy(srcArchive, srcInfo, archive.CopyInfo{Path: v.Target})
 		if err != nil {
-			return fmt.Errorf("can not prepare archive copy, err: %v", err)
+			log.Errorf("can not prepare archive copy, err: %v", err)
+			return err
 		}
 
 		err = cli.CopyToContainer(ctx, id, dstDir, preparedArchive, types.CopyToContainerOptions{
@@ -293,7 +302,7 @@ func (l ConfigList) copyToContainer(ctx context.Context, volume []mount.Mount, c
 			CopyUIDGID:                true,
 		})
 		if err != nil {
-			log.Info(fmt.Errorf("can not copy %s to container %s:%s, err: %v", v.Source, id, v.Target, err))
+			log.Infof("can not copy %s to container %s:%s, err: %v", v.Source, id, v.Target, err)
 		}
 	}
 	return nil
@@ -315,16 +324,20 @@ func createFolder(ctx context.Context, cli *client.Client, id string, src string
 		Cmd:          []string{"mkdir", "-p", target},
 	})
 	if err != nil {
+		log.Errorf("create folder %s previoully failed, err: %v", target, err)
 		return "", err
 	}
 	err = cli.ContainerExecStart(ctx, create.ID, types.ExecStartCheck{})
 	if err != nil {
+		log.Errorf("create folder %s previoully failed, err: %v", target, err)
 		return "", err
 	}
+	log.Infof("wait create folder %s in container %s to be done...", target, id)
 	chanStop := make(chan struct{})
 	wait.Until(func() {
 		inspect, err := cli.ContainerExecInspect(ctx, create.ID)
 		if err != nil {
+			log.Warningf("can not inspect container %s, err: %v", id, err)
 			return
 		}
 		if !inspect.Running {
