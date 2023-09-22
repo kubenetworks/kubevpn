@@ -153,7 +153,7 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 func init() {
 	json, err := yaml.ToJSON(envoyConfig)
 	if err != nil {
-		log.Error(err)
+		log.Errorf("Error converting json to bytes: %v", err)
 		return
 	}
 	envoyConfig = json

@@ -139,6 +139,7 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 	}
 
 	for _, workload := range d.Workloads {
+		log.Infof("clone workload %s", workload)
 		var object *runtimeresource.Info
 		object, err = util.GetUnstructuredObject(d.factory, d.Namespace, workload)
 		if err != nil {
@@ -723,8 +724,10 @@ func (d *CloneOptions) Cleanup(workloads []string) error {
 		workloads = d.Workloads
 	}
 	for _, workload := range workloads {
+		log.Infof("start to clean up clone workload: %s", workload)
 		object, err := util.GetUnstructuredObject(d.factory, d.Namespace, workload)
 		if err != nil {
+			log.Errorf("get unstructured object error: %s", err.Error())
 			return err
 		}
 		labelsMap := map[string]string{
@@ -740,15 +743,18 @@ func (d *CloneOptions) Cleanup(workloads []string) error {
 		var client dynamic.Interface
 		client, err = d.targetFactory.DynamicClient()
 		if err != nil {
+			log.Errorf("get dynamic client error: %s", err.Error())
 			return err
 		}
 		for _, cloneName := range controller.UnsortedList() {
 			err = client.Resource(object.Mapping.Resource).Namespace(d.TargetNamespace).Delete(context.Background(), cloneName, metav1.DeleteOptions{})
 			if !apierrors.IsNotFound(err) {
+				log.Errorf("delete clone object error: %s", err.Error())
 				return err
 			}
 			log.Infof("delete clone object: %s", cloneName)
 		}
+		log.Infof("clean up clone workload: %s successfully", workload)
 	}
 	return nil
 }

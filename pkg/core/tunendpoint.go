@@ -104,7 +104,12 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 				bytes := config.LPool.Get().([]byte)[:]
 				read, err := e.tun.Read(bytes[:])
 				if err != nil {
-					log.Warningln(err)
+					// if context is still going
+					if e.ctx.Err() == nil {
+						log.Errorf("[TUN]: read from tun failed: %s", err.Error())
+					} else {
+						log.Info("tun device closed")
+					}
 					return
 				}
 				if read == 0 {
@@ -122,7 +127,7 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 					protocol = header.IPv4ProtocolNumber
 					ipHeader, err := ipv4.ParseHeader(bytes[:read])
 					if err != nil {
-						log.Error(err)
+						log.Errorf("parse ipv4 header failed: %s", err.Error())
 						continue
 					}
 					ipProtocol = ipHeader.Protocol
@@ -132,7 +137,7 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 					protocol = header.IPv6ProtocolNumber
 					ipHeader, err := ipv6.ParseHeader(bytes[:read])
 					if err != nil {
-						log.Error(err)
+						log.Errorf("parse ipv6 header failed: %s", err.Error())
 						continue
 					}
 					ipProtocol = ipHeader.NextHeader

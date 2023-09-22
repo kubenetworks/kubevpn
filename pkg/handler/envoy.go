@@ -56,7 +56,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 
 	err = addEnvoyConfig(clientset, nodeID, c, headers, port)
 	if err != nil {
-		log.Warnln(err)
+		log.Errorf("add envoy config error: %v", err)
 		return err
 	}
 
@@ -73,6 +73,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 		//		log.Error(err)
 		//	}
 		//})
+		log.Infof("workload %s/%s has already been injected with sidecar", namespace, workload)
 		return nil
 	}
 	// (1) add mesh container
@@ -80,6 +81,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	var b []byte
 	b, err = k8sjson.Marshal(restorePatch)
 	if err != nil {
+		log.Error("marshal patch error: %v", err)
 		return err
 	}
 
@@ -104,18 +106,10 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	}
 	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 	if err != nil {
-		log.Warnf("error while path resource: %s %s, err: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
+		log.Errorf("error while path resource: %s %s, err: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
 		return err
 	}
-
-	//RollbackFuncList = append(RollbackFuncList, func() {
-	//	if err := UnPatchContainer(factory, clientset, namespace, workload, c.LocalTunIPv4); err != nil {
-	//		log.Error(err)
-	//	}
-	//})
-	if err != nil {
-		return err
-	}
+	log.Infof("patch workload %s/%s with sidecar", namespace, workload)
 	err = util.RolloutStatus(ctx1, factory, namespace, workload, time.Minute*60)
 	return err
 }
@@ -123,12 +117,14 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, namespace, workload string, localTunIPv4 string) error {
 	object, err := util.GetUnstructuredObject(factory, namespace, workload)
 	if err != nil {
+		log.Errorf("get unstructured object error: %v", err)
 		return err
 	}
 
 	u := object.Object.(*unstructured.Unstructured)
 	templateSpec, depth, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
+		log.Errorf("get template spec path error: %v", err)
 		return err
 	}
 
@@ -137,7 +133,7 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 	var empty bool
 	empty, err = removeEnvoyConfig(mapInterface, nodeID, localTunIPv4)
 	if err != nil {
-		log.Warnln(err)
+		log.Errorf("remove envoy config error: %v", err)
 		return err
 	}
 
@@ -156,6 +152,7 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 		helper := pkgresource.NewHelper(object.Client, object.Mapping)
 		// pod without controller
 		if len(depth) == 0 {
+			log.Infof("workload %s/%s is not controlled by any controller", namespace, workload)
 			delete(templateSpec.ObjectMeta.GetAnnotations(), config.KubeVPNRestorePatchKey)
 			pod := &v1.Pod{ObjectMeta: templateSpec.ObjectMeta, Spec: templateSpec.Spec}
 			CleanupUselessInfo(pod)
@@ -163,6 +160,7 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 			return err
 		}
 
+		log.Infof("workload %s/%s is controlled by a controller", namespace, workload)
 		// resource with controller, like deployment,statefulset
 		var bytes []byte
 		bytes, err = json.Marshal([]P{

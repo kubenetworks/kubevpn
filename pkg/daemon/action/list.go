@@ -15,7 +15,7 @@ import (
 )
 
 func (svr *Server) List(ctx context.Context, req *rpc.ListRequest) (*rpc.ListResponse, error) {
-	if svr.connect == nil {
+	if svr.connect == nil || svr.connect.GetClientset() == nil {
 		return nil, fmt.Errorf("not connect to any cluster")
 	}
 	mapInterface := svr.connect.GetClientset().CoreV1().ConfigMaps(svr.connect.Namespace)

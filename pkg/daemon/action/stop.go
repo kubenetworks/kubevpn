@@ -10,9 +10,6 @@ import (
 )
 
 func (svr *Server) Stop(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error {
-	if svr.connect == nil {
-		return nil
-	}
 	defer func() {
 		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
@@ -20,6 +17,11 @@ func (svr *Server) Stop(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 	out := io.MultiWriter(newStopWarp(resp), svr.LogFile)
 	log.SetOutput(out)
 	log.SetLevel(log.InfoLevel)
+
+	if svr.connect == nil {
+		log.Info("stop: no connection")
+		return nil
+	}
 
 	svr.connect.Cleanup()
 	svr.t = time.Time{}

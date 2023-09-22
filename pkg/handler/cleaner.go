@@ -75,7 +75,7 @@ func (c *ConnectOptions) Cleanup() {
 	// leave proxy resources
 	err := c.LeaveProxyResources(context.Background())
 	if err != nil {
-		log.Error(err)
+		log.Errorf("leave proxy resources error: %v", err)
 	}
 	if c.cancel != nil {
 		c.cancel()

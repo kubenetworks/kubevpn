@@ -29,6 +29,7 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_ = quit(cmd.Context(), true)
 			_ = quit(cmd.Context(), false)
+			fmt.Fprint(os.Stdout, "quit success")
 			return nil
 		},
 	}

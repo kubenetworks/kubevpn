@@ -24,9 +24,7 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 		for {
 			recv, err = connResp.Recv()
 			if err == io.EOF {
-				svr.t = time.Time{}
-				svr.connect = nil
-				return nil
+				break
 			} else if err != nil {
 				return err
 			}

@@ -133,7 +133,7 @@ func (d *ClientDevice) Start(ctx context.Context) {
 
 	select {
 	case err := <-d.chExit:
-		log.Error(err)
+		log.Errorf("[tun-client]: %v", err)
 		return
 	case <-ctx.Done():
 		return

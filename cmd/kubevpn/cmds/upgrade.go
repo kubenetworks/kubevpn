@@ -34,7 +34,7 @@ func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				log.Fatal(err)
 			}
-			fmt.Fprint(os.Stdout, "Done")
+			fmt.Fprint(os.Stdout, "done")
 		},
 	}
 	return cmd

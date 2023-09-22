@@ -29,7 +29,7 @@ func (d *dhcpServer) rentIP(w http.ResponseWriter, r *http.Request) {
 	dhcp := handler.NewDHCPManager(cmi, namespace)
 	v4, v6, err := dhcp.RentIPRandom(ctx)
 	if err != nil {
-		log.Error(err)
+		log.Errorf("rent ip failed, err: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -37,7 +37,7 @@ func (d *dhcpServer) rentIP(w http.ResponseWriter, r *http.Request) {
 	// todo patch annotation
 	_, err = w.Write([]byte(fmt.Sprintf("%s,%s", v4.String(), v6.String())))
 	if err != nil {
-		log.Error(err)
+		log.Errorf("write response failed, err: %v", err)
 	}
 }
 
@@ -59,7 +59,7 @@ func (d *dhcpServer) releaseIP(w http.ResponseWriter, r *http.Request) {
 	cmi := d.clientset.CoreV1().ConfigMaps(namespace)
 	dhcp := handler.NewDHCPManager(cmi, namespace)
 	if err := dhcp.ReleaseIP(context.Background(), ips...); err != nil {
-		log.Error(err)
+		log.Errorf("release ip failed, err: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}

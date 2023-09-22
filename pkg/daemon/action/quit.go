@@ -16,12 +16,14 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 	log.SetOutput(io.MultiWriter(newQuitWarp(resp), svr.LogFile))
 	log.SetLevel(log.InfoLevel)
 	if svr.connect != nil {
+		log.Info("quit: cleanup connection")
 		svr.connect.Cleanup()
 	}
 	if svr.Cancel != nil {
 		svr.Cancel()
 	}
 	if svr.clone != nil {
+		log.Info("quit: cleanup clone")
 		err := svr.clone.Cleanup(nil)
 		if err != nil {
 			log.Errorf("quit: cleanup clone failed: %v", err)

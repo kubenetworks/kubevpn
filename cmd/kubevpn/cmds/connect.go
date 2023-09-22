@@ -80,7 +80,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				} else if err != nil {
 					return err
 				}
-				log.Print(recv.GetMessage())
+				fmt.Fprint(os.Stdout, recv.GetMessage())
 			}
 			util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 			// hangup

@@ -112,18 +112,18 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 		URL()
 	transport, upgrader, err := spdy.RoundTripperFor(config)
 	if err != nil {
-		log.Error(err)
+		log.Errorf("create spdy roundtripper error: %s", err.Error())
 		return err
 	}
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
 	forwarder, err := portforward.NewOnAddresses(dialer, []string{"localhost"}, portPair, stopChan, readyChan, nil, os.Stderr)
 	if err != nil {
-		log.Error(err)
+		log.Errorf("create port forward error: %s", err.Error())
 		return err
 	}
 
 	if err = forwarder.ForwardPorts(); err != nil {
-		log.Error(err)
+		log.Errorf("forward port error: %s", err.Error())
 		return err
 	}
 	return nil
@@ -354,7 +354,15 @@ func Ping(targetIP string) (bool, error) {
 	return stat.PacketsRecv == stat.PacketsSent, err
 }
 
-func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, workloads string, timeout time.Duration) error {
+func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, workloads string, timeout time.Duration) (err error) {
+	log.Infof("rollout status for %s", workloads)
+	defer func() {
+		if err != nil {
+			log.Errorf("rollout status for %s failed: %s", workloads, err.Error())
+		} else {
+			log.Infof("rollout status for %s success", workloads)
+		}
+	}()
 	client, _ := factory.DynamicClient()
 	r := factory.NewBuilder().
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
@@ -363,7 +371,7 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, wor
 		SingleResourceType().
 		Latest().
 		Do()
-	err := r.Err()
+	err = r.Err()
 	if err != nil {
 		return err
 	}
@@ -406,7 +414,7 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, wor
 				if err != nil {
 					return false, err
 				}
-				log.Infof("%s", status)
+				log.Info(strings.TrimSpace(status))
 				// Quit waiting if the rollout is done
 				if done {
 					return true, nil

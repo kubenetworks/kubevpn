@@ -38,7 +38,7 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 			defer func() {
 				err := handler.ReleaseIPIfNeeded()
 				if err != nil {
-					log.Error(err)
+					log.Errorf("release ip failed: %v", err)
 				}
 			}()
 			servers, err := handler.Parse(*route)

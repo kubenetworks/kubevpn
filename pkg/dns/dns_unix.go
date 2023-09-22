@@ -43,7 +43,7 @@ func usingResolver(clientConfig *miekgdns.ClientConfig, ns []string) {
 	var err error
 	_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
 	if err = os.MkdirAll(filepath.Join("/", "etc", "resolver"), fs.ModePerm); err != nil {
-		log.Error(err)
+		log.Errorf("create resolver error: %v", err)
 	}
 	config := miekgdns.ClientConfig{
 		Servers: clientConfig.Servers,
@@ -59,7 +59,7 @@ func usingResolver(clientConfig *miekgdns.ClientConfig, ns []string) {
 	var port int
 	port, err = util.GetAvailableUDPPortOrDie()
 	if err != nil {
-		log.Error(err)
+		log.Errorf("get available port error: %v", err)
 		return
 	}
 	go func(port int, clientConfig *miekgdns.ClientConfig) {
