@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"fmt"
 
 	log "github.com/sirupsen/logrus"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -69,7 +68,7 @@ func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 	{
 		opt := tcpip.TCPSACKEnabled(true)
 		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &opt); err != nil {
-			log.Fatal(fmt.Errorf("SetTransportProtocolOption(%d, &%T(%t)): %s", tcp.ProtocolNumber, opt, opt, err))
+			log.Fatalf("SetTransportProtocolOption(%d, &%T(%t)): %v", tcp.ProtocolNumber, opt, opt, err)
 		}
 	}
 
@@ -77,10 +76,10 @@ func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 	{
 		opt := tcpip.DefaultTTLOption(64)
 		if err := s.SetNetworkProtocolOption(ipv4.ProtocolNumber, &opt); err != nil {
-			log.Fatal(fmt.Errorf("SetNetworkProtocolOption(%d, &%T(%d)): %s", ipv4.ProtocolNumber, opt, opt, err))
+			log.Fatalf("SetNetworkProtocolOption(%d, &%T(%d)): %v", ipv4.ProtocolNumber, opt, opt, err)
 		}
 		if err := s.SetNetworkProtocolOption(ipv6.ProtocolNumber, &opt); err != nil {
-			log.Fatal(fmt.Errorf("SetNetworkProtocolOption(%d, &%T(%d)): %s", ipv6.ProtocolNumber, opt, opt, err))
+			log.Fatalf("SetNetworkProtocolOption(%d, &%T(%d)): %v", ipv6.ProtocolNumber, opt, opt, err)
 		}
 	}
 
@@ -88,23 +87,23 @@ func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 	{
 		opt := tcpip.TCPModerateReceiveBufferOption(true)
 		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &opt); err != nil {
-			log.Fatal(fmt.Errorf("SetTransportProtocolOption(%d, &%T(%t)): %s", tcp.ProtocolNumber, opt, opt, err))
+			log.Fatalf("SetTransportProtocolOption(%d, &%T(%t)): %v", tcp.ProtocolNumber, opt, opt, err)
 		}
 	}
 
 	{
 		if err := s.SetForwardingDefaultAndAllNICs(ipv4.ProtocolNumber, true); err != nil {
-			log.Fatal(fmt.Errorf("set ipv4 forwarding: %s", err))
+			log.Fatalf("set ipv4 forwarding: %v", err)
 		}
 		if err := s.SetForwardingDefaultAndAllNICs(ipv6.ProtocolNumber, true); err != nil {
-			log.Fatal(fmt.Errorf("set ipv6 forwarding: %s", err))
+			log.Fatalf("set ipv6 forwarding: %v", err)
 		}
 	}
 
 	{
 		option := tcpip.TCPModerateReceiveBufferOption(true)
 		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &option); err != nil {
-			log.Fatal(fmt.Errorf("set TCP moderate receive buffer: %s", err))
+			log.Fatalf("set TCP moderate receive buffer: %v", err)
 		}
 	}
 	return s

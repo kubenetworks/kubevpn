@@ -106,7 +106,7 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 				if err != nil {
 					// if context is still going
 					if e.ctx.Err() == nil {
-						log.Errorf("[TUN]: read from tun failed: %s", err.Error())
+						log.Fatalf("[TUN]: read from tun failed: %v", err)
 					} else {
 						log.Info("tun device closed")
 					}

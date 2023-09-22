@@ -49,6 +49,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 	if needPull {
 		err = util.PullImage(ctx, runConfig.platform, cli, c, config.Image, nil)
 		if err != nil {
+			log.Errorf("Failed to pull image: %s, err: %s", config.Image, err)
 			return
 		}
 	}
@@ -56,7 +57,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 	var create typescommand.CreateResponse
 	create, err = cli.ContainerCreate(ctx, config, hostConfig, networkConfig, platform, name)
 	if err != nil {
-		err = fmt.Errorf("failed to create container %s, err: %s", name, err)
+		log.Errorf("Failed to create container: %s, err: %s", name, err)
 		return
 	}
 	id = create.ID
@@ -69,7 +70,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 
 	err = cli.ContainerStart(ctx, create.ID, types.ContainerStartOptions{})
 	if err != nil {
-		err = fmt.Errorf("failed to startup container %s: %v", name, err)
+		log.Errorf("failed to startup container %s: %v", name, err)
 		return
 	}
 	log.Infof("Wait container %s to be running...", name)
@@ -96,7 +97,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 		}
 	}, time.Second, chanStop)
 	if err != nil {
-		err = fmt.Errorf("failed to wait container to be ready: %v", err)
+		log.Errorf("failed to wait container to be ready: %v", err)
 		return
 	}
 
@@ -167,6 +168,7 @@ func runFirst(ctx context.Context, runConfig *RunConfig, cli *apiclient.Client, 
 		NetworkingConfig: runConfig.networkingConfig,
 	}, &runConfig.Options.createOptions)
 	if err != nil {
+		log.Errorf("Failed to create container: %s", err)
 		return "", err
 	}
 	log.Infof("Created container: %s", runConfig.containerName)
@@ -251,6 +253,7 @@ func runFirst(ctx context.Context, runConfig *RunConfig, cli *apiclient.Client, 
 			return
 		}
 		if err != nil {
+			log.Errorf("Error inspect container: %s", err)
 			return
 		}
 		if inspect.State != nil && (inspect.State.Status == "exited" || inspect.State.Status == "dead" || inspect.State.Dead) {
@@ -264,6 +267,7 @@ func runFirst(ctx context.Context, runConfig *RunConfig, cli *apiclient.Client, 
 		}
 	}, time.Second, chanStop)
 	if err != nil {
+		log.Errorf("wait container to be ready: %v", err)
 		err = fmt.Errorf("failed to wait container to be ready: %v", err)
 		return
 	}

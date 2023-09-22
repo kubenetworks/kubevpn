@@ -128,6 +128,7 @@ func updateRefCount(ctx context.Context, configMapInterface v12.ConfigMapInterfa
 			return
 		})
 	if err != nil {
+		log.Errorf("update ref count error, increment: %d, error: %v", increment, err)
 		return
 	}
 	log.Info("update ref count successfully")

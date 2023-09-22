@@ -240,20 +240,20 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	core.GvisorTCPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
 	core.GvisorUDPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorUDPForwardPort)
 	if err = c.startLocalTunServe(c.ctx, forward); err != nil {
-		log.Errorf("start local tun service failed: %s", err.Error())
+		log.Errorf("start local tun service failed: %v", err)
 		return
 	}
 	if err = c.addRouteDynamic(c.ctx); err != nil {
-		log.Errorf("add route dynamic failed: %s", err.Error())
+		log.Errorf("add route dynamic failed: %v", err)
 		return
 	}
 	c.deleteFirewallRule(c.ctx)
 	if err = c.addExtraRoute(c.ctx); err != nil {
-		log.Errorf("add extra route failed: %s", err.Error())
+		log.Errorf("add extra route failed: %v", err)
 		return
 	}
 	if err = c.setupDNS(c.ctx); err != nil {
-		log.Errorf("set up dns failed: %s", err.Error())
+		log.Errorf("set up dns failed: %v", err)
 		return
 	}
 	go c.heartbeats(c.ctx)
@@ -389,7 +389,8 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 	log.Debugf("ipv4: %s, ipv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
 	servers, err := Parse(r)
 	if err != nil {
-		return errors.Wrap(err, "error while create tunnel")
+		log.Errorf("parse route error: %v", err)
+		return err
 	}
 	go func() {
 		log.Error(Run(ctx, servers))
@@ -410,6 +411,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 	var tunIface *net.Interface
 	tunIface, err = tun.GetInterface()
 	if err != nil {
+		log.Warningf("get tun interface error: %v", err)
 		return
 	}
 
@@ -672,7 +674,7 @@ func Run(ctx context.Context, servers []core.Server) error {
 func Parse(r core.Route) ([]core.Server, error) {
 	servers, err := r.GenerateServers()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	if len(servers) == 0 {
 		return nil, fmt.Errorf("server is empty, server config: %s", strings.Join(r.ServeNodes, ","))
@@ -1053,6 +1055,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 	var tunIface *net.Interface
 	tunIface, err = tun.GetInterface()
 	if err != nil {
+		log.Errorf("get tun interface failed: %s", err.Error())
 		return err
 	}
 
@@ -1379,7 +1382,8 @@ func (c *ConnectOptions) setImage(ctx context.Context) error {
 			DryRun(false).
 			Patch(p.Info.Namespace, p.Info.Name, pkgtypes.StrategicMergePatchType, p.Patch, nil)
 		if err != nil {
-			return fmt.Errorf("failed to patch image update to pod template: %v", err)
+			log.Errorf("failed to patch image update to pod template: %v", err)
+			return err
 		}
 		err = util.RolloutStatus(ctx, c.factory, c.Namespace, fmt.Sprintf("%s/%s", p.Info.Mapping.Resource.GroupResource().String(), p.Info.Name), time.Minute*60)
 		if err != nil {

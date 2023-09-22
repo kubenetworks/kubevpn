@@ -580,12 +580,13 @@ func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, 
 }
 
 func CreateAfterDeletePod(factory cmdutil.Factory, p *v1.Pod, helper *pkgresource.Helper) error {
-	if _, err := helper.DeleteWithOptions(p.Namespace, p.Name, &metav1.DeleteOptions{
+	_, err := helper.DeleteWithOptions(p.Namespace, p.Name, &metav1.DeleteOptions{
 		GracePeriodSeconds: pointer.Int64(0),
-	}); err != nil {
+	})
+	if err != nil {
 		log.Errorf("error while delete resource: %s %s, ignore, err: %v", p.Namespace, p.Name, err)
 	}
-	if err := retry.OnError(wait.Backoff{
+	err = retry.OnError(wait.Backoff{
 		Steps:    10,
 		Duration: 50 * time.Millisecond,
 		Factor:   5.0,
@@ -605,10 +606,12 @@ func CreateAfterDeletePod(factory cmdutil.Factory, p *v1.Pod, helper *pkgresourc
 			return err
 		}
 		return errors.New("")
-	}); err != nil {
+	})
+	if err != nil {
 		if k8serrors.IsAlreadyExists(err) {
 			return nil
 		}
+		log.Errorf("error while create resource: %s %s, err: %v", p.Namespace, p.Name, err)
 		return err
 	}
 	return nil

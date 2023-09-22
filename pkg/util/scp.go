@@ -50,6 +50,7 @@ func SCP(conf *SshConfig, filename string, commands ...string) error {
 	}
 	err = main(sess, filename)
 	if err != nil {
+		log.Errorf("Copy file to remote error: %s", err)
 		return err
 	}
 	sess, err = remote.NewSession()
@@ -119,10 +120,11 @@ func sCopy(dst io.Writer, src io.Reader, size int64) error {
 	buf := make([]byte, 10<<(10*2)) // 10M
 	written, err := io.CopyBuffer(io.MultiWriter(dst, bar), src, buf)
 	if err != nil {
+		log.Errorf("failed to transfer file to remote: %v", err)
 		return err
 	}
 	if written != size {
-		err = fmt.Errorf("failed to transfer file to remote: written size %d but actuall is %d", written, size)
+		log.Errorf("failed to transfer file to remote: written size %d but actuall is %d", written, size)
 		return err
 	}
 	return nil

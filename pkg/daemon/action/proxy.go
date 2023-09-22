@@ -122,6 +122,12 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		log.SetOutput(out)
 	}
 
+	// todo optimize here
+	{
+		svr.connect.Workloads = append(svr.connect.Workloads, req.Workloads...)
+		svr.connect.Headers = req.Headers
+	}
+
 	err = svr.connect.CreateRemoteInboundPod(ctx)
 	if err != nil {
 		log.Errorf("create remote inbound pod failed: %s", err.Error())
