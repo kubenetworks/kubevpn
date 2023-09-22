@@ -208,7 +208,7 @@ func fullDomain(t *testing.T) {
 }
 
 func dialUDP(t *testing.T) {
-	port := util.GetAvailableUDPPortOrDie()
+	port, _ := util.GetAvailableUDPPortOrDie()
 	go server(port)
 
 	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{

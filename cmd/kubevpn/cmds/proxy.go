@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -122,14 +121,9 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				// leave from cluster resources
 				<-cmd.Context().Done()
 
-				now := time.Now()
 				stream, err := cli.Leave(context.Background(), &rpc.LeaveRequest{
 					Workloads: args,
 				})
-				fmt.Printf("call api leave use %s\n", time.Now().Sub(now).String())
-				if err != nil {
-					return err
-				}
 				var resp *rpc.LeaveResponse
 				for {
 					resp, err = stream.Recv()

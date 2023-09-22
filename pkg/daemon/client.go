@@ -35,41 +35,39 @@ func GetClient(isSudo bool) rpc.DaemonClient {
 		return daemonClient
 	}
 
-	sudo := ""
+	name := "daemon"
 	if isSudo {
-		sudo = "sudo"
+		name = "sudo daemon"
 	}
 	ctx := context.Background()
 	conn, err := grpc.DialContext(ctx, "unix:"+GetSockPath(isSudo), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Errorf("cannot connect to %s server: %v", sudo, err)
-		fmt.Println(fmt.Errorf("cannot connect to %s server: %v", sudo, err))
+		log.Errorf("cannot connect to %s: %v", name, err)
 		return nil
 	}
-	c := rpc.NewDaemonClient(conn)
-	now := time.Now()
+	cli := rpc.NewDaemonClient(conn)
 	healthClient := grpc_health_v1.NewHealthClient(conn)
 	var response *grpc_health_v1.HealthCheckResponse
 	response, err = healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
 	if err != nil {
-		log.Printf("%v", err)
+		log.Errorf("%v", err)
 		return nil
 	}
-	fmt.Println(response.Status, sudo, time.Now().Sub(now).String())
-	now = time.Now()
-	_, err = c.Status(ctx, &rpc.StatusRequest{})
-	fmt.Printf("call %s api status use %s\n", sudo, time.Now().Sub(now))
+	if response.Status != grpc_health_v1.HealthCheckResponse_SERVING {
+		log.Error(fmt.Sprintf("%s is not health", name), "status", response.Status)
+		return nil
+	}
+	_, err = cli.Status(ctx, &rpc.StatusRequest{})
 	if err != nil {
-		fmt.Println(fmt.Errorf("cannot call %s api status: %v", sudo, err))
-		log.Error(err)
+		log.Error("cannot call api status", "err", err)
 		return nil
 	}
 	if isSudo {
-		sudoDaemonClient = c
+		sudoDaemonClient = cli
 	} else {
-		daemonClient = c
+		daemonClient = cli
 	}
-	return c
+	return cli
 }
 
 func GetSockPath(isSudo bool) string {
@@ -119,7 +117,7 @@ func runDaemon(ctx context.Context, isSudo bool) error {
 			var p *os.Process
 			if p, err = os.FindProcess(pid); err == nil {
 				if err = p.Kill(); err != nil && err != os.ErrProcessDone {
-					log.Error(err)
+					log.Error("kill process", "err", err)
 				}
 				_, _ = p.Wait()
 			}

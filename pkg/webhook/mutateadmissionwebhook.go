@@ -113,13 +113,13 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	log.Infof("sending response: %v", responseObj)
 	respBytes, err := json.Marshal(responseObj)
 	if err != nil {
-		log.Error(err)
+		log.Errorf("Unable to encode response: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write(respBytes); err != nil {
-		log.Error(err)
+		log.Errorf("Unable to write response: %v", err)
 	}
 }
 

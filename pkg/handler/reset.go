@@ -2,13 +2,12 @@ package handler
 
 import (
 	"context"
-	"fmt"
-	corev1 "k8s.io/api/core/v1"
 	"strings"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 	log "github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
@@ -23,7 +22,7 @@ import (
 func (c *ConnectOptions) Reset(ctx context.Context) error {
 	err := c.LeaveProxyResources(ctx)
 	if err != nil {
-		log.Error(err)
+		log.Errorf("leave proxy resources error: %v", err)
 	}
 
 	cleanup(ctx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, false)
@@ -55,13 +54,13 @@ func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
 		return
 	}
 	if cm == nil || cm.Data == nil || len(cm.Data[config.KeyEnvoy]) == 0 {
-		err = fmt.Errorf("can not found proxy resources")
+		log.Infof("no proxy resources found")
 		return
 	}
 	var v = make([]*controlplane.Virtual, 0)
 	str := cm.Data[config.KeyEnvoy]
 	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
-		log.Error(err)
+		log.Errorf("unmarshal envoy config error: %v", err)
 		return
 	}
 	localTunIPv4 := c.GetLocalTunIPv4()
@@ -69,11 +68,13 @@ func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
 		// deployments.apps.ry-server --> deployments.apps/ry-server
 		lastIndex := strings.LastIndex(virtual.Uid, ".")
 		uid := virtual.Uid[:lastIndex] + "/" + virtual.Uid[lastIndex+1:]
+		log.Infof("leave resource: %s", uid)
 		err = UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, uid, localTunIPv4)
 		if err != nil {
-			log.Error(err)
+			log.Errorf("unpatch container error: %v", err)
 			continue
 		}
+		log.Infof("leave resource: %s success", uid)
 	}
 	return err
 }

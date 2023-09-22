@@ -96,7 +96,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	config.Image = req.Image
 	err = svr.connect.DoConnect(sshCtx)
 	if err != nil {
-		log.Error(err)
+		log.Infof("do connect error: %v", err)
 		svr.connect.Cleanup()
 		return err
 	}
@@ -150,7 +150,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		)
 		if err == nil && isSameCluster && svr.connect.Equal(connect) {
 			// same cluster, do nothing
-			log.Debugf("already connect to cluster")
+			log.Infof("already connect to cluster")
 			return nil
 		}
 	}

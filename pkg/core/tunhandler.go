@@ -260,14 +260,14 @@ func heartbeats(in chan<- *DataElem) {
 			if bytes == nil {
 				bytes, err = genICMPPacket(srcIPv4, config.RouterIP)
 				if err != nil {
-					log.Error(err)
+					log.Errorf("generate ipv4 packet error: %s", err.Error())
 					continue
 				}
 			}
 			if bytes6 == nil {
 				bytes6, err = genICMPPacketIPv6(srcIPv6, config.RouterIP6)
 				if err != nil {
-					log.Error(err)
+					log.Errorf("generate ipv6 packet error: %s", err.Error())
 					continue
 				}
 			}
@@ -353,7 +353,7 @@ func (d *Device) Start(ctx context.Context) {
 
 	select {
 	case err := <-d.chExit:
-		log.Error(err)
+		log.Errorf("device exit: %s", err.Error())
 		return
 	case <-ctx.Done():
 		return

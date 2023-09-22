@@ -183,7 +183,7 @@ func (o *CopyOptions) copyToPod(src, dest fileSpec, options *exec.ExecOptions) e
 	go func(src localPath, dest remotePath, writer io.WriteCloser) {
 		defer writer.Close()
 		if err := makeTar(src, dest, writer); err != nil {
-			log.Error(err)
+			log.Errorf("Error making tar: %v", err)
 		}
 	}(srcFile, destFile, writer)
 	var cmdArr []string
@@ -266,7 +266,7 @@ func (t *TarPipe) initReadFrom(n uint64) {
 	go func() {
 		defer t.outStream.Close()
 		if err := t.o.execute(options); err != nil {
-			log.Error(err)
+			log.Errorf("Error executing command: %v", err)
 		}
 	}()
 }

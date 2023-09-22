@@ -19,6 +19,7 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 	log.SetOutput(out)
 	log.SetLevel(log.InfoLevel)
 	if svr.connect == nil {
+		log.Infof("not proxy any resource in cluster")
 		return fmt.Errorf("not proxy any resource in cluster")
 	}
 
@@ -27,10 +28,13 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 	maps := svr.connect.GetClientset().CoreV1().ConfigMaps(namespace)
 	for _, workload := range req.GetWorkloads() {
 		// add rollback func to remove envoy config
+		log.Infof("leave workload %s", workload)
 		err := handler.UnPatchContainer(factory, maps, namespace, workload, svr.connect.GetLocalTunIPv4())
 		if err != nil {
-			log.Error(err)
+			log.Errorf("leave workload %s failed: %v", workload, err)
+			continue
 		}
+		log.Infof("leave workload %s success", workload)
 	}
 	return nil
 }

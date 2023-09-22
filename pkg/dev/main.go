@@ -494,7 +494,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, transferImag
 			} else if err != nil {
 				return cancel, err
 			}
-			log.Print(recv.Message)
+			log.Infof(recv.Message)
 		}
 
 	case ConnectModeContainer:
@@ -553,7 +553,7 @@ func disconnect(ctx context.Context, daemonClient rpc.DaemonClient) func() {
 	return func() {
 		resp, err := daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{})
 		if err != nil {
-			log.Error(err)
+			log.Errorf("disconnect error: %v", err)
 			return
 		}
 		for {
@@ -561,10 +561,10 @@ func disconnect(ctx context.Context, daemonClient rpc.DaemonClient) func() {
 			if err == io.EOF {
 				return
 			} else if err != nil {
-				log.Error(err)
+				log.Errorf("disconnect error: %v", err)
 				return
 			}
-			log.Print(msg.Message)
+			log.Info(msg.Message)
 		}
 	}
 }

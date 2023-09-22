@@ -145,6 +145,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error)
 	}
 
 	for _, workload := range c.Workloads {
+		log.Infof("start to create remote inbound pod for %s", workload)
 		configInfo := util.PodRouteConfig{
 			LocalTunIPv4: c.localTunIPv4.IP.String(),
 			LocalTunIPv6: c.localTunIPv6.IP.String(),
@@ -156,8 +157,10 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error)
 			err = InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, configInfo)
 		}
 		if err != nil {
+			log.Errorf("create remote inbound pod for %s failed: %s", workload, err.Error())
 			return err
 		}
+		log.Infof("create remote inbound pod for %s successfully", workload)
 	}
 	return
 }
@@ -190,13 +193,17 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	_ = os.Setenv(config.EnvKubeVPNTransportEngine, string(c.Engine))
+	log.Info("start to connect")
 	if err = c.InitDHCP(c.ctx); err != nil {
+		log.Errorf("init dhcp failed: %s", err.Error())
 		return
 	}
 	c.addCleanUpResourceHandler()
 	if err = c.getCIDR(c.ctx); err != nil {
+		log.Errorf("get cidr failed: %s", err.Error())
 		return
 	}
+	log.Info("get cidr successfully")
 	if err = createOutboundPod(c.ctx, c.factory, c.clientset, c.Namespace); err != nil {
 		return
 	}
@@ -233,16 +240,20 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	core.GvisorTCPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
 	core.GvisorUDPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorUDPForwardPort)
 	if err = c.startLocalTunServe(c.ctx, forward); err != nil {
+		log.Errorf("start local tun service failed: %s", err.Error())
 		return
 	}
 	if err = c.addRouteDynamic(c.ctx); err != nil {
+		log.Errorf("add route dynamic failed: %s", err.Error())
 		return
 	}
 	c.deleteFirewallRule(c.ctx)
 	if err = c.addExtraRoute(c.ctx); err != nil {
+		log.Errorf("add extra route failed: %s", err.Error())
 		return
 	}
 	if err = c.setupDNS(c.ctx); err != nil {
+		log.Errorf("set up dns failed: %s", err.Error())
 		return
 	}
 	go c.heartbeats(c.ctx)
@@ -600,7 +611,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	const port = 53
 	pod, err := c.GetRunningPodList(ctx)
 	if err != nil {
-		log.Error(err)
+		log.Errorf("get running pod list failed, err: %v", err)
 		return err
 	}
 	relovConf, err := dns.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, pod[0].GetName(), c.Namespace)

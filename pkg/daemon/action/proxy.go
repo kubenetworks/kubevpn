@@ -74,9 +74,9 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		)
 		if err == nil && isSameCluster && svr.connect.Equal(connect) {
 			// same cluster, do nothing
-			log.Debugf("already connect to cluster")
+			log.Infof("already connect to cluster")
 		} else {
-			log.Debugf("try to disconnect from another cluster")
+			log.Infof("try to disconnect from another cluster")
 			var disconnect rpc.Daemon_DisconnectClient
 			disconnect, err = daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{})
 			if err != nil {
@@ -95,11 +95,12 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 					return err
 				}
 			}
+			log.SetOutput(out)
 		}
 	}
 
 	if svr.connect == nil {
-		log.Debugf("connectting to cluster")
+		log.Infof("connectting to cluster")
 		var connResp rpc.Daemon_ConnectClient
 		connResp, err = daemonClient.Connect(ctx, req)
 		if err != nil {
@@ -118,14 +119,14 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 				return err
 			}
 		}
+		log.SetOutput(out)
 	}
 
-	log.Debugf("proxy resource...")
 	err = svr.connect.CreateRemoteInboundPod(ctx)
 	if err != nil {
+		log.Errorf("create remote inbound pod failed: %s", err.Error())
 		return err
 	}
-	log.Debugf("proxy resource done")
 	util.Print(out, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 	return nil
 }

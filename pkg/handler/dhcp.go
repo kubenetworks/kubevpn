@@ -109,6 +109,9 @@ func (d *DHCPManager) RentIPRandom(ctx context.Context) (*net.IPNet, *net.IPNet,
 }
 
 func (d *DHCPManager) ReleaseIP(ctx context.Context, ips ...net.IP) error {
+	if len(ips) == 0 {
+		return nil
+	}
 	return d.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
 		for _, ip := range ips {
 			var use *ipallocator.Range

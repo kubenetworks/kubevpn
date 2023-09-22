@@ -29,7 +29,7 @@ func RentIPIfNeeded(route *core.Route) error {
 		var ip []byte
 		ip, err = util.DoReq(req)
 		if err != nil {
-			log.Error(err)
+			log.Errorf("can not get ip, err: %v", err)
 			return err
 		}
 		log.Infof("rent an ip %s", strings.TrimSpace(string(ip)))
@@ -38,11 +38,11 @@ func RentIPIfNeeded(route *core.Route) error {
 			return fmt.Errorf("can not get ip from %s", string(ip))
 		}
 		if err = os.Setenv(config.EnvInboundPodTunIPv4, ips[0]); err != nil {
-			log.Error(err)
+			log.Errorf("can not set ip, err: %v", err)
 			return err
 		}
 		if err = os.Setenv(config.EnvInboundPodTunIPv6, ips[1]); err != nil {
-			log.Error(err)
+			log.Errorf("can not set ip, err: %v", err)
 			return err
 		}
 		for i := 0; i < len(route.ServeNodes); i++ {

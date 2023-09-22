@@ -87,11 +87,13 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 	f := InitFactory(req.KubeconfigBytes, req.Namespace)
 	err = options.InitClient(f)
 	if err != nil {
+		log.Errorf("init client failed: %v", err)
 		return err
 	}
 	config.Image = req.Image
 	err = options.DoClone(resp.Context())
 	if err != nil {
+		log.Errorf("clone workloads failed: %v", err)
 		return err
 	}
 	svr.clone = options
@@ -112,13 +114,3 @@ func (r *cloneWarp) Write(p []byte) (n int, err error) {
 func newCloneWarp(server rpc.Daemon_CloneServer) io.Writer {
 	return &cloneWarp{server: server}
 }
-
-//type daemonConnectServer struct {
-//	out io.Writer
-//	grpc.ServerStream
-//}
-//
-//func (d *daemonConnectServer) Send(response *rpc.ConnectResponse) error {
-//	_, err := d.out.Write([]byte(response.Message))
-//	return err
-//}
