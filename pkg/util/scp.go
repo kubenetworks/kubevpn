@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/schollz/progressbar/v3"
 	log "github.com/sirupsen/logrus"
@@ -14,31 +13,7 @@ import (
 
 // SCP copy file to remote and exec command
 func SCP(conf *SshConfig, filename string, commands ...string) error {
-	var remote *ssh.Client
-	var err error
-	if conf.ConfigAlias != "" {
-		remote, err = jumpRecursion(conf.ConfigAlias)
-	} else {
-		var auth []ssh.AuthMethod
-		if conf.Keyfile != "" {
-			var file ssh.AuthMethod
-			file, err = publicKeyFile(conf.Keyfile)
-			if err != nil {
-				return err
-			}
-			auth = append(auth, file)
-		}
-		if conf.Password != "" {
-			auth = append(auth, ssh.Password(conf.Password))
-		}
-		sshConfig := &ssh.ClientConfig{
-			User:            conf.User,
-			Auth:            auth,
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-			Timeout:         time.Second * 10,
-		}
-		remote, err = ssh.Dial("tcp", conf.Addr, sshConfig)
-	}
+	remote, err := DialSshRemote(conf)
 	if err != nil {
 		log.Errorf("Dial into remote server error: %s", err)
 		return err

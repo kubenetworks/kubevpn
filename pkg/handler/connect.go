@@ -721,7 +721,7 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 			// if `--remote-kubeconfig` is parsed then Entrypoint is reset
 			conf.RemoteKubeconfig = filepath.Join("/", conf.User, clientcmd.RecommendedHomeDir, clientcmd.RecommendedFileName)
 		}
-		stdOut, errOut, err = util.Run(conf,
+		stdOut, errOut, err = util.RemoteRun(conf,
 			fmt.Sprintf("sh -c 'kubectl config view --flatten --raw --kubeconfig %s || minikube kubectl -- config view --flatten --raw --kubeconfig %s'",
 				conf.RemoteKubeconfig,
 				conf.RemoteKubeconfig),
@@ -796,6 +796,14 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 	local, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 	if err != nil {
 		return err
+	}
+
+	// pre-check network ip connect
+	cli, err := util.DialSshRemote(conf)
+	if err != nil {
+		return err
+	} else {
+		_ = cli.Close()
 	}
 	errChan := make(chan error, 1)
 	readyChan := make(chan struct{}, 1)

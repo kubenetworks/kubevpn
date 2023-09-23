@@ -2,6 +2,13 @@ package dev
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"net/netip"
+	"net/url"
+	"os"
 	"strconv"
 
 	"github.com/docker/cli/cli/command"
@@ -11,6 +18,11 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/versions"
 	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/clientcmd/api"
+	clientcmdlatest "k8s.io/client-go/tools/clientcmd/api/latest"
 )
 
 func waitExitOrRemoved(ctx context.Context, dockerCli command.Cli, containerID string, waitRemove bool) <-chan int {
@@ -159,4 +171,77 @@ func parallelOperation(ctx context.Context, containers []string, op func(ctx con
 		}
 	}()
 	return errChan
+}
+
+func ConvertHost(kubeconfigPath string) (newPath string, err error) {
+	var kubeconfigBytes []byte
+	kubeconfigBytes, err = os.ReadFile(kubeconfigPath)
+	if err != nil {
+		return
+	}
+	var conf clientcmd.ClientConfig
+	conf, err = clientcmd.NewClientConfigFromBytes(kubeconfigBytes)
+	if err != nil {
+		return
+	}
+	var rawConfig api.Config
+	rawConfig, err = conf.RawConfig()
+	if err != nil {
+		return
+	}
+	if err = api.FlattenConfig(&rawConfig); err != nil {
+		return
+	}
+	if rawConfig.Contexts == nil {
+		err = errors.New("kubeconfig is invalid")
+		return
+	}
+	kubeContext := rawConfig.Contexts[rawConfig.CurrentContext]
+	if kubeContext == nil {
+		err = errors.New("kubeconfig is invalid")
+		return
+	}
+	cluster := rawConfig.Clusters[kubeContext.Cluster]
+	if cluster == nil {
+		err = errors.New("kubeconfig is invalid")
+		return
+	}
+	var u *url.URL
+	u, err = url.Parse(cluster.Server)
+	if err != nil {
+		return
+	}
+	var remote netip.AddrPort
+	remote, err = netip.ParseAddrPort(u.Host)
+	if err != nil {
+		return
+	}
+	host := fmt.Sprintf("%s://%s", u.Scheme, net.JoinHostPort("kubernetes", strconv.Itoa(int(remote.Port()))))
+	rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].Server = host
+	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})
+
+	var convertedObj runtime.Object
+	convertedObj, err = clientcmdlatest.Scheme.ConvertToVersion(&rawConfig, clientcmdlatest.ExternalVersion)
+	if err != nil {
+		return
+	}
+	var marshal []byte
+	marshal, err = json.Marshal(convertedObj)
+	if err != nil {
+		return
+	}
+	var temp *os.File
+	temp, err = os.CreateTemp("", "*.kubeconfig")
+	if err != nil {
+		return
+	}
+	if err = temp.Close(); err != nil {
+		return
+	}
+	err = os.WriteFile(temp.Name(), marshal, 0644)
+	if err != nil {
+		return
+	}
+	newPath = temp.Name()
+	return
 }

@@ -368,7 +368,7 @@ func checkOutOfMemory(spec *v1.PodTemplateSpec, cli *client.Client) (outOfMemory
 	return
 }
 
-func DoDev(ctx context.Context, devOption *Options, flags *pflag.FlagSet, f cmdutil.Factory, transferImage bool) error {
+func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags *pflag.FlagSet, f cmdutil.Factory, transferImage bool) error {
 	cli, dockerCli, err := util.GetClient()
 	if err != nil {
 		return err
@@ -399,8 +399,9 @@ func DoDev(ctx context.Context, devOption *Options, flags *pflag.FlagSet, f cmdu
 	}
 
 	// connect to cluster, in container or host
-	cancel, err := devOption.doConnect(ctx, f, transferImage)
+	cancel, err := devOption.doConnect(ctx, f, conf, transferImage)
 	if err != nil {
+		log.Errorf("connect to cluster failed, err: %v", err)
 		return err
 	}
 	defer func() {
@@ -438,7 +439,7 @@ func DoDev(ctx context.Context, devOption *Options, flags *pflag.FlagSet, f cmdu
 }
 
 // connect to cluster network on docker container or host
-func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, transferImage bool) (cancel func(), err error) {
+func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.SshConfig, transferImage bool) (cancel func(), err error) {
 	connect := &handler.ConnectOptions{
 		Headers:     d.Headers,
 		Workloads:   []string{d.Workload},
@@ -473,6 +474,9 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, transferImag
 	switch d.ConnectMode {
 	case ConnectModeHost:
 		daemonCli := daemon.GetClient(false)
+		if daemonCli == nil {
+			return nil, fmt.Errorf("get nil daemon client")
+		}
 		var kubeconfig []byte
 		var ns string
 		kubeconfig, ns, err = util.ConvertToKubeconfigBytes(f)
@@ -493,11 +497,13 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, transferImag
 			TransferImage:   transferImage,
 			Image:           config.Image,
 			Level:           int32(log.DebugLevel),
+			SshJump:         conf.ToRPC(),
 		}
 		cancel = disconnect(ctx, daemonCli)
 		var resp rpc.Daemon_ConnectClient
 		resp, err = daemonCli.Connect(ctx, req)
 		if err != nil {
+			log.Errorf("connect to cluster error: %s", err.Error())
 			return
 		}
 		for {
@@ -507,12 +513,16 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, transferImag
 			} else if err != nil {
 				return cancel, err
 			}
-			log.Infof(recv.Message)
+			fmt.Fprint(os.Stdout, recv.Message)
 		}
 
 	case ConnectModeContainer:
-		var path string
-		path, err = connect.GetKubeconfigPath()
+		var path = os.Getenv(config.EnvSSHJump)
+		if path != "" {
+			path, err = ConvertHost(path)
+		} else {
+			path, err = connect.GetKubeconfigPath()
+		}
 		if err != nil {
 			return
 		}
@@ -541,11 +551,13 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, transferImag
 			func() {
 				cancelFunc()
 				_ = d.Cli.ContainerKill(context.Background(), id, "SIGTERM")
-				_ = runLogsSinceNow(d.DockerCli, id)
+				_ = runLogsSinceNow(d.DockerCli, id, true)
 			},
 		)
 		go h.Run(func() error { select {} })
-		defer h.Close()
+		handler.RollbackFuncList = append(handler.RollbackFuncList, func() {
+			h.Close()
+		})
 		err = runLogsWaitRunning(cancelCtx, d.DockerCli, id)
 		if err != nil {
 			// interrupt by signal KILL
@@ -577,7 +589,7 @@ func disconnect(ctx context.Context, daemonClient rpc.DaemonClient) func() {
 				log.Errorf("disconnect error: %v", err)
 				return
 			}
-			log.Info(msg.Message)
+			fmt.Fprint(os.Stdout, msg.Message)
 		}
 	}
 }
@@ -627,17 +639,19 @@ func createConnectContainer(noProxy bool, connect handler.ConnectOptions, path s
 		Shell:           nil,
 	}
 	hostConfig := &container.HostConfig{
-		Binds:           []string{fmt.Sprintf("%s:%s", path, "/root/.kube/config")},
-		LogConfig:       container.LogConfig{},
-		PortBindings:    nil,
-		RestartPolicy:   container.RestartPolicy{},
-		AutoRemove:      true,
-		VolumeDriver:    "",
-		VolumesFrom:     nil,
-		ConsoleSize:     [2]uint{},
-		CapAdd:          strslice.StrSlice{"SYS_PTRACE", "SYS_ADMIN"}, // for dlv
-		CgroupnsMode:    "",
-		ExtraHosts:      nil,
+		Binds:         []string{fmt.Sprintf("%s:%s", path, "/root/.kube/config")},
+		LogConfig:     container.LogConfig{},
+		PortBindings:  nil,
+		RestartPolicy: container.RestartPolicy{},
+		AutoRemove:    false,
+		VolumeDriver:  "",
+		VolumesFrom:   nil,
+		ConsoleSize:   [2]uint{},
+		CapAdd:        strslice.StrSlice{"SYS_PTRACE", "SYS_ADMIN"}, // for dlv
+		CgroupnsMode:  "",
+		// https://stackoverflow.com/questions/24319662/from-inside-of-a-docker-container-how-do-i-connect-to-the-localhost-of-the-mach
+		// couldn't get current server API group list: Get "https://host.docker.internal:62844/api?timeout=32s": tls: failed to verify certificate: x509: certificate is valid for kubernetes.default.svc.cluster.local, kubernetes.default.svc, kubernetes.default, kubernetes, istio-sidecar-injector.istio-system.svc, proxy-exporter.kube-system.svc, not host.docker.internal
+		ExtraHosts:      []string{"host.docker.internal:host-gateway", "kubernetes:host-gateway"},
 		GroupAdd:        nil,
 		IpcMode:         "",
 		Cgroup:          "",
@@ -741,7 +755,7 @@ func runLogsWaitRunning(ctx context.Context, dockerCli command.Cli, container st
 	}
 }
 
-func runLogsSinceNow(dockerCli command.Cli, container string) error {
+func runLogsSinceNow(dockerCli command.Cli, container string, follow bool) error {
 	ctx := context.Background()
 
 	c, err := dockerCli.Client().ContainerInspect(ctx, container)
@@ -753,7 +767,7 @@ func runLogsSinceNow(dockerCli command.Cli, container string) error {
 		ShowStdout: true,
 		ShowStderr: true,
 		Since:      "0m",
-		Follow:     true,
+		Follow:     follow,
 	}
 	responseBody, err := dockerCli.Client().ContainerLogs(ctx, c.ID, options)
 	if err != nil {
