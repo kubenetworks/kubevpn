@@ -507,7 +507,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 		}
 		cancel = disconnect(ctx, daemonCli)
 		var resp rpc.Daemon_ConnectClient
-		resp, err = daemonCli.Connect(ctx, req)
+		resp, err = daemonCli.Proxy(ctx, req)
 		if err != nil {
 			log.Errorf("connect to cluster error: %s", err.Error())
 			return

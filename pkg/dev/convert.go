@@ -48,7 +48,6 @@ type RunConfig struct {
 func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, envMap map[string][]string, mountVolume map[string][]mount.Mount, dnsConfig *miekgdns.ClientConfig) (runConfigList ConfigList) {
 	spec := temp.Spec
 	for _, c := range spec.Containers {
-		var r RunConfig
 		tmpConfig := &container.Config{
 			Hostname: func() string {
 				var hostname = spec.Hostname
@@ -139,6 +138,9 @@ func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, e
 			if port.HostPort != 0 {
 				binding := []nat.PortBinding{{HostPort: strconv.FormatInt(int64(port.HostPort), 10)}}
 				portmap[port1] = binding
+			} else {
+				binding := []nat.PortBinding{{HostPort: strconv.FormatInt(int64(port.ContainerPort), 10)}}
+				portmap[port1] = binding
 			}
 			portset[port1] = struct{}{}
 		}
@@ -153,6 +155,7 @@ func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, e
 		if err == nil {
 			suffix = strings.ReplaceAll(newUUID.String(), "-", "")[:5]
 		}
+		var r RunConfig
 		r.containerName = fmt.Sprintf("%s_%s_%s_%s", c.Name, namespace, "kubevpn", suffix)
 		r.k8sContainerName = c.Name
 		r.config = tmpConfig
