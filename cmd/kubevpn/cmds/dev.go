@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	dockercli "github.com/docker/cli/cli"
 	"github.com/docker/cli/cli/command"
 	dockercomp "github.com/docker/cli/cli/command/completion"
 	"github.com/spf13/cobra"
@@ -35,7 +34,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &util.SshConfig{}
 	var transferImage bool
 	cmd := &cobra.Command{
-		Use:   "dev [OPTIONS] RESOURCE [COMMAND] [ARG...]",
+		Use:   "dev TYPE/NAME [-c CONTAINER] [flags] -- [args...]",
 		Short: i18n.T("Startup your kubernetes workloads in local Docker container with same volume、env、and network"),
 		Long: templates.LongDesc(i18n.T(`
 Startup your kubernetes workloads in local Docker container with same volume、env、and network
@@ -49,29 +48,37 @@ Startup your kubernetes workloads in local Docker container with same volume、e
         # Develop workloads
 		- develop deployment
 		  kubevpn dev deployment/productpage
-
 		- develop service
 		  kubevpn dev service/productpage
 
 		# Develop workloads with mesh, traffic with header a=1, will hit local PC, otherwise no effect
-		kubevpn dev --headers a=1 service/productpage
+		kubevpn dev service/productpage --headers a=1
 
         # Develop workloads without proxy traffic
-		kubevpn dev --no-proxy service/productpage
+		kubevpn dev service/productpage --no-proxy
 
 		# Develop workloads which api-server behind of bastion host or ssh jump host
-		kubevpn dev --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem deployment/productpage
+		kubevpn dev deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
-		# it also support ProxyJump, like
+		# It also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
-		kubevpn dev --ssh-alias <alias> deployment/productpage
+		kubevpn dev deployment/productpage --ssh-alias <alias>
 
+		# Switch to terminal mode; send stdin to 'bash' and sends stdout/stderror from 'bash' back to the client
+        kubevpn dev deployment/authors -n default --kubeconfig ~/.kube/config --ssh-alias dev -i -t --entrypoint /bin/bash
+		  or
+        kubevpn dev deployment/authors -n default --kubeconfig ~/.kube/config --ssh-alias dev -it --entrypoint /bin/bash
 `)),
-		Args:                  dockercli.RequiresMinArgs(1),
+		ValidArgsFunction:     completion.ResourceTypeAndNameCompletionFunc(f),
+		Args:                  cobra.MatchAll(cobra.OnlyValidArgs),
 		DisableFlagsInUseLine: true,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			err = cmd.Flags().Parse(args[1:])
+			if err != nil {
+				return err
+			}
 			util.InitLogger(false)
 			// not support temporally
 			if devOptions.Engine == config.EngineGvisor {
@@ -86,16 +93,17 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			devOptions.Workload = args[0]
-			if len(args) > 1 {
-				devOptions.Copts.Args = args[1:]
+			for i, arg := range args {
+				if arg == "--" && i != len(args)-1 {
+					devOptions.Copts.Args = args[i+1:]
+					break
+				}
 			}
 
 			err = dev.DoDev(cmd.Context(), devOptions, sshConf, cmd.Flags(), f, transferImage)
-			if err == nil {
-				for _, fun := range handler.RollbackFuncList {
-					if fun != nil {
-						fun()
-					}
+			for _, fun := range handler.RollbackFuncList {
+				if fun != nil {
+					fun()
 				}
 			}
 			return err
