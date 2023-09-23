@@ -37,9 +37,12 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 	var needPull bool
 	var img types.ImageInspect
 	img, _, err = cli.ImageInspectWithRaw(ctx, config.Image)
-	if err != nil {
+	if errdefs.IsNotFound(err) {
 		needPull = true
 		err = nil
+	} else if err != nil {
+		log.Errorf("image inspect failed: %v", err)
+		return
 	}
 	if platform != nil && platform.Architecture != "" && platform.OS != "" {
 		if img.Os != platform.OS || img.Architecture != platform.Architecture {
@@ -74,30 +77,30 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 		return
 	}
 	log.Infof("Wait container %s to be running...", name)
-	chanStop := make(chan struct{})
 	var inspect types.ContainerJSON
-	var once = &sync.Once{}
-	wait.Until(func() {
-		inspect, err = cli.ContainerInspect(ctx, create.ID)
-		if err != nil && errdefs.IsNotFound(err) {
-			once.Do(func() { close(chanStop) })
+	cancel, cancelFunc := context.WithCancel(ctx)
+	wait.UntilWithContext(cancel, func(ctx2 context.Context) {
+		inspect, err = cli.ContainerInspect(ctx2, create.ID)
+		if errdefs.IsNotFound(err) {
+			cancelFunc()
 			return
-		}
-		if err != nil {
+		} else if err != nil {
+			cancelFunc()
 			return
 		}
 		if inspect.State != nil && (inspect.State.Status == "exited" || inspect.State.Status == "dead" || inspect.State.Dead) {
-			once.Do(func() { close(chanStop) })
+			cancelFunc()
 			err = errors.New(fmt.Sprintf("container status: %s", inspect.State.Status))
 			return
 		}
 		if inspect.State != nil && inspect.State.Running {
-			once.Do(func() { close(chanStop) })
+			cancelFunc()
 			return
 		}
-	}, time.Second, chanStop)
+	}, time.Second)
 	if err != nil {
 		log.Errorf("failed to wait container to be ready: %v", err)
+		_ = runLogsSinceNow(c, id, false)
 		return
 	}
 
@@ -168,10 +171,10 @@ func runFirst(ctx context.Context, runConfig *RunConfig, cli *apiclient.Client, 
 		NetworkingConfig: runConfig.networkingConfig,
 	}, &runConfig.Options.createOptions)
 	if err != nil {
-		log.Errorf("Failed to create container: %s", err)
+		log.Errorf("Failed to create main container: %s", err)
 		return "", err
 	}
-	log.Infof("Created container: %s", runConfig.containerName)
+	log.Infof("Created main container: %s", runConfig.containerName)
 
 	var (
 		waitDisplayID chan struct{}

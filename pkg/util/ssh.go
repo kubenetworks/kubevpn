@@ -60,34 +60,7 @@ func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, co
 	ctx, cancelFunc := context.WithCancel(pctx)
 	defer cancelFunc()
 
-	var remote *ssh.Client
-	var err error
-	if conf.ConfigAlias != "" {
-		remote, err = jumpRecursion(conf.ConfigAlias)
-	} else {
-		var auth []ssh.AuthMethod
-		if conf.Keyfile != "" {
-			var keyFile ssh.AuthMethod
-			keyFile, err = publicKeyFile(conf.Keyfile)
-			if err != nil {
-				return err
-			}
-			auth = append(auth, keyFile)
-		}
-		if conf.Password != "" {
-			auth = append(auth, ssh.Password(conf.Password))
-		}
-		// refer to https://godoc.org/golang.org/x/crypto/ssh for other authentication types
-		sshConfig := &ssh.ClientConfig{
-			// SSH connection username
-			User:            conf.User,
-			Auth:            auth,
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-			Timeout:         time.Second * 10,
-		}
-		// Connect to SSH remote server using serverEndpoint
-		remote, err = ssh.Dial("tcp", conf.Addr, sshConfig)
-	}
+	remote, err := DialSshRemote(conf)
 	if err != nil {
 		log.Errorf("Dial into remote server error: %s", err)
 		return err
@@ -138,8 +111,9 @@ func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, co
 	}
 }
 
-func Run(conf *SshConfig, cmd string, env []string) (output []byte, errOut []byte, err error) {
+func DialSshRemote(conf *SshConfig) (*ssh.Client, error) {
 	var remote *ssh.Client
+	var err error
 	if conf.ConfigAlias != "" {
 		remote, err = jumpRecursion(conf.ConfigAlias)
 	} else {
@@ -148,7 +122,7 @@ func Run(conf *SshConfig, cmd string, env []string) (output []byte, errOut []byt
 			var keyFile ssh.AuthMethod
 			keyFile, err = publicKeyFile(conf.Keyfile)
 			if err != nil {
-				return
+				return nil, err
 			}
 			auth = append(auth, keyFile)
 		}
@@ -166,6 +140,12 @@ func Run(conf *SshConfig, cmd string, env []string) (output []byte, errOut []byt
 		// Connect to SSH remote server using serverEndpoint
 		remote, err = ssh.Dial("tcp", conf.Addr, sshConfig)
 	}
+	return remote, err
+}
+
+func RemoteRun(conf *SshConfig, cmd string, env []string) (output []byte, errOut []byte, err error) {
+	var remote *ssh.Client
+	remote, err = DialSshRemote(conf)
 	if err != nil {
 		log.Errorf("Dial into remote server error: %s", err)
 		return
