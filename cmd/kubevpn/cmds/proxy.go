@@ -116,6 +116,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 					return err
 				}
 			}
+			util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 			// hangup
 			if foreground {
 				// leave from cluster resources

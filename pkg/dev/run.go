@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/docker/cli/cli/command"
@@ -38,6 +37,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 	var img types.ImageInspect
 	img, _, err = cli.ImageInspectWithRaw(ctx, config.Image)
 	if errdefs.IsNotFound(err) {
+		log.Infof("needs to pull image %s", config.Image)
 		needPull = true
 		err = nil
 	} else if err != nil {
@@ -122,7 +122,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 		str = fmt.Sprintf("Container %s is running on port %s now", name, strings.Join(list, " "))
 	}
 	if !empty {
-		log.Infoln(str)
+		log.Info(str)
 	} else {
 		log.Infof("Container %s is running now", name)
 	}
@@ -131,6 +131,12 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 
 func runFirst(ctx context.Context, runConfig *RunConfig, cli *apiclient.Client, dockerCli *command.DockerCli) (id string, err error) {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
+	// default add -it
+	runConfig.Options.Detach = true
+	runConfig.config.AttachStdin = true
+	runConfig.config.AttachStdout = true
+	runConfig.config.AttachStderr = true
+	runConfig.config.Tty = true
 
 	defer func() {
 		if err != nil && runConfig.hostConfig.AutoRemove {
@@ -245,7 +251,7 @@ func runFirst(ctx context.Context, runConfig *RunConfig, cli *apiclient.Client, 
 	if status != 0 {
 		return id, errors.New(strconv.Itoa(status))
 	}
-	log.Infof("Wait container %s to be running...", runConfig.containerName)
+	/*log.Infof("Wait container %s to be running...", runConfig.containerName)
 	chanStop := make(chan struct{})
 	var inspect types.ContainerJSON
 	var once = &sync.Once{}
@@ -271,32 +277,31 @@ func runFirst(ctx context.Context, runConfig *RunConfig, cli *apiclient.Client, 
 	}, time.Second, chanStop)
 	if err != nil {
 		log.Errorf("wait container to be ready: %v", err)
-		err = fmt.Errorf("failed to wait container to be ready: %v", err)
 		return
-	}
+	}*/
 
 	// print port mapping to host
-	var empty = true
-	var str string
-	if inspect.NetworkSettings != nil && inspect.NetworkSettings.Ports != nil {
-		var list []string
-		for port, bindings := range inspect.NetworkSettings.Ports {
-			var p []string
-			for _, binding := range bindings {
-				if binding.HostPort != "" {
-					p = append(p, binding.HostPort)
-					empty = false
-				}
-			}
-			list = append(list, fmt.Sprintf("%s:%s", port, strings.Join(p, ",")))
-		}
-		str = fmt.Sprintf("Container %s is running on port %s now", runConfig.containerName, strings.Join(list, " "))
-	}
-	if !empty {
-		log.Infoln(str)
-	} else {
-		log.Infof("Container %s is running now", runConfig.containerName)
-	}
+	//var empty = true
+	//var str string
+	//if inspect.NetworkSettings != nil && inspect.NetworkSettings.Ports != nil {
+	//	var list []string
+	//	for port, bindings := range inspect.NetworkSettings.Ports {
+	//		var p []string
+	//		for _, binding := range bindings {
+	//			if binding.HostPort != "" {
+	//				p = append(p, binding.HostPort)
+	//				empty = false
+	//			}
+	//		}
+	//		list = append(list, fmt.Sprintf("%s:%s", port, strings.Join(p, ",")))
+	//	}
+	//	str = fmt.Sprintf("Container %s is running on port %s now", runConfig.containerName, strings.Join(list, " "))
+	//}
+	//if !empty {
+	//	log.Infoln(str)
+	//} else {
+	//	log.Infof("Container %s is running now", runConfig.containerName)
+	//}
 
 	return
 }
