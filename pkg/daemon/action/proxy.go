@@ -129,7 +129,6 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		log.Errorf("create remote inbound pod failed: %s", err.Error())
 		return err
 	}
-	util.Print(out, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 	return nil
 }
 

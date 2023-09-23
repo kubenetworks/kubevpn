@@ -89,7 +89,16 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 			if len(args) > 1 {
 				devOptions.Copts.Args = args[1:]
 			}
-			return dev.DoDev(cmd.Context(), devOptions, sshConf, cmd.Flags(), f, transferImage)
+
+			err = dev.DoDev(cmd.Context(), devOptions, sshConf, cmd.Flags(), f, transferImage)
+			if err == nil {
+				for _, fun := range handler.RollbackFuncList {
+					if fun != nil {
+						fun()
+					}
+				}
+			}
+			return err
 		},
 	}
 	cmd.Flags().SortFlags = false

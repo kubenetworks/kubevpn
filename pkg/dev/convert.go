@@ -19,6 +19,7 @@ import (
 	miekgdns "github.com/miekg/dns"
 	"github.com/moby/term"
 	v12 "github.com/opencontainers/image-spec/specs-go/v1"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"k8s.io/api/core/v1"
 	v13 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -243,7 +244,7 @@ func GetVolume(ctx context.Context, f util.Factory, ns, pod string) (map[string]
 				Source: join,
 				Target: volumeMount.MountPath,
 			})
-			fmt.Printf("%s:%s\n", join, volumeMount.MountPath)
+			log.Infof("%s:%s", join, volumeMount.MountPath)
 		}
 		result[c.Name] = m
 	}

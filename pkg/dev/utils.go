@@ -56,7 +56,9 @@ func waitExitOrRemoved(ctx context.Context, dockerCli command.Cli, containerID s
 				statusC <- int(result.StatusCode)
 			}
 		case err := <-errC:
-			logrus.Errorf("error waiting for container: %v", err)
+			if err != nil && err.Error() != "" {
+				logrus.Errorf("error waiting for container: %v", err)
+			}
 			statusC <- 125
 		}
 	}()

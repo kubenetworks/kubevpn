@@ -84,6 +84,7 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 	rand.Seed(time.Now().UnixNano())
 	object, err := util.GetUnstructuredObject(d.Factory, d.Namespace, d.Workload)
 	if err != nil {
+		log.Errorf("get unstructured object error: %v", err)
 		return err
 	}
 
@@ -112,6 +113,7 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 	lab := labels.SelectorFromSet(templateSpec.Labels).String()
 	firstPod, _, err := polymorphichelpers.GetFirstPod(set.CoreV1(), d.Namespace, lab, time.Second*60, sortBy)
 	if err != nil {
+		log.Errorf("get first running pod from k8s: %v", err)
 		return err
 	}
 
@@ -141,13 +143,14 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 		return err
 	}
 	// check resource
-	var outOfMemory bool
-	outOfMemory, _ = checkOutOfMemory(templateSpec, d.Cli)
-	if outOfMemory {
+	var oom bool
+	oom, _ = checkOutOfMemory(templateSpec, d.Cli)
+	if oom {
 		return fmt.Errorf("your pod resource request is bigger than docker-desktop resource, please adjust your docker-desktop resource")
 	}
 	mode := container.NetworkMode(d.Copts.netMode.NetworkMode())
 	if len(d.Copts.netMode.Value()) != 0 {
+		log.Infof("network mode is %s", d.Copts.netMode.NetworkMode())
 		for _, runConfig := range runConfigList[:] {
 			// remove expose port
 			runConfig.config.ExposedPorts = nil
@@ -171,6 +174,7 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 			log.Errorf("create network for %s: %v", d.Workload, err)
 			return err
 		}
+		log.Infof("create docker network %s", networkID)
 
 		runConfigList[len(runConfigList)-1].networkingConfig.EndpointsConfig[runConfigList[len(runConfigList)-1].containerName] = &network.EndpointSettings{
 			NetworkID: networkID,
@@ -250,7 +254,6 @@ func (l ConfigList) Run(ctx context.Context, volume map[string][]mount.Mount, cl
 		if index == 0 {
 			_, err := runFirst(ctx, runConfig, cli, dockerCli)
 			if err != nil {
-				log.Errorf("run main container container failed: %v", err)
 				return err
 			}
 		} else {
@@ -375,9 +378,11 @@ func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags 
 	}
 	mode := container.NetworkMode(devOption.Copts.netMode.NetworkMode())
 	if mode.IsContainer() {
+		log.Infof("network mode container is %s", mode.ConnectedContainer())
 		var inspect types.ContainerJSON
 		inspect, err = cli.ContainerInspect(ctx, mode.ConnectedContainer())
 		if err != nil {
+			log.Errorf("can not inspect container %s, err: %v", mode.ConnectedContainer(), err)
 			return err
 		}
 		if inspect.State == nil {
@@ -386,12 +391,13 @@ func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags 
 		if !inspect.State.Running {
 			return fmt.Errorf("container %s status is %s, expect is running, please make sure your outer docker name is correct", mode.ConnectedContainer(), inspect.State.Status)
 		}
+		log.Infof("container %s is running", mode.ConnectedContainer())
 	} else if mode.IsDefault() && util.RunningInContainer() {
 		var hostname string
 		if hostname, err = os.Hostname(); err != nil {
 			return err
 		}
-		log.Infof("hostname %s", hostname)
+		log.Infof("hostname is %s", hostname)
 		err = devOption.Copts.netMode.Set(fmt.Sprintf("container:%s", hostname))
 		if err != nil {
 			return err
@@ -542,6 +548,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 		cancelCtx, cancelFunc := context.WithCancel(ctx)
 		defer cancelFunc()
 		var id string
+		log.Infof("starting container connect to cluster")
 		id, err = run(cancelCtx, connectContainer, d.Cli, d.DockerCli)
 		if err != nil {
 			return
@@ -567,6 +574,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 			}
 			return
 		}
+		log.Infof("container connect to cluster success")
 		err = d.Copts.netMode.Set(fmt.Sprintf("container:%s", id))
 		return
 	default:

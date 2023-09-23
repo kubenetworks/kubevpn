@@ -714,7 +714,6 @@ func Print(writer io.Writer, slogan string) {
 	length := len(slogan) + 4 + 4
 	var sb strings.Builder
 
-	sb.WriteByte('\n')
 	sb.WriteString("+" + strings.Repeat("-", length) + "+")
 	sb.WriteByte('\n')
 	sb.WriteString("|")
@@ -724,7 +723,6 @@ func Print(writer io.Writer, slogan string) {
 	sb.WriteString("|")
 	sb.WriteByte('\n')
 	sb.WriteString("+" + strings.Repeat("-", length) + "+")
-	sb.WriteByte('\n')
 	sb.WriteByte('\n')
 
 	_, _ = writer.Write([]byte(sb.String()))
