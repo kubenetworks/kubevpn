@@ -14,7 +14,7 @@ service Daemon {
 
   rpc Logs (LogRequest) returns (stream LogResponse) {}
   rpc List (ListRequest) returns (ListResponse) {}
-  rpc Upgrade (UpgradeRequest) returns (stream UpgradeResponse) {}
+  rpc Upgrade (UpgradeRequest) returns (UpgradeResponse) {}
   rpc Status (StatusRequest) returns (StatusResponse) {}
   rpc Version (VersionRequest) returns (VersionResponse) {}
   rpc Quit (QuitRequest) returns (stream QuitResponse) {}
@@ -143,7 +143,7 @@ message UpgradeRequest {
 }
 
 message UpgradeResponse {
-  string message = 1;
+  bool NeedUpgrade = 1;
 }
 
 message SshJump {

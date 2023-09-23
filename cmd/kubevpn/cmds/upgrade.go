@@ -30,7 +30,7 @@ func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
 			if GitHubOAuthToken != "" {
 				client = oauth2.NewClient(cmd.Context(), oauth2.StaticTokenSource(&oauth2.Token{AccessToken: GitHubOAuthToken, TokenType: "Bearer"}))
 			}
-			err := upgrade.Main(config.Version, config.GitCommit, client)
+			err := upgrade.Main(cmd.Context(), config.Version, config.GitCommit, client)
 			if err != nil {
 				log.Fatal(err)
 			}

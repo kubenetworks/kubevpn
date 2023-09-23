@@ -2,6 +2,7 @@ package upgrade
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,8 +14,14 @@ import (
 
 	goversion "github.com/hashicorp/go-version"
 	"github.com/schollz/progressbar/v3"
+	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	"github.com/wencaiwulue/kubevpn/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 )
 
 // Main
@@ -25,22 +32,22 @@ import (
 // 5) unzip to temp file
 // 6) check permission of putting new kubevpn back
 // 7) chmod +x, move old to /temp, move new to CURRENT_FOLDER
-func Main(current string, commit string, client *http.Client) error {
-	version, dcommit, url, err := getManifest(client)
+func Main(ctx context.Context, current string, commit string, client *http.Client) error {
+	latestVersion, latestCommit, url, err := getManifest(client)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("The latest version is: %s, commit: %s\n", version, dcommit)
+	fmt.Printf("The latest version is: %s, commit: %s\n", latestVersion, latestCommit)
 	var cVersion, dVersion *goversion.Version
 	cVersion, err = goversion.NewVersion(current)
 	if err != nil {
 		return err
 	}
-	dVersion, err = goversion.NewVersion(version)
+	dVersion, err = goversion.NewVersion(latestVersion)
 	if err != nil {
 		return err
 	}
-	if cVersion.GreaterThan(dVersion) || (cVersion.Equal(dVersion) && commit == dcommit) {
+	if cVersion.GreaterThan(dVersion) || (cVersion.Equal(dVersion) && commit == latestCommit) {
 		fmt.Println("Already up to date, don't needs to upgrade")
 		return nil
 	}
@@ -61,6 +68,9 @@ func Main(current string, commit string, client *http.Client) error {
 		os.Exit(0)
 	} else if err != nil {
 		return err
+	} else if !util.IsAdmin() {
+		util.RunWithElevated()
+		os.Exit(0)
 	}
 
 	fmt.Printf("Current version is: %s less than latest version: %s, needs to upgrade\n", cVersion, dVersion)
@@ -114,6 +124,26 @@ func Main(current string, commit string, client *http.Client) error {
 		return err
 	}
 	err = os.Rename(file.Name(), curFolder)
+	if err != nil {
+		return err
+	}
+	log.Infof("Upgrade daemon...")
+	for _, isSudo := range []bool{false, true} {
+		cli := daemon.GetClient(isSudo)
+		if cli != nil {
+			var response *rpc.UpgradeResponse
+			response, err = cli.Upgrade(ctx, &rpc.UpgradeRequest{
+				ClientVersion:  latestVersion,
+				ClientCommitId: latestCommit,
+			})
+			if err == nil && !response.NeedUpgrade {
+				// do nothing
+			} else {
+				_ = quit(ctx, isSudo)
+			}
+		}
+	}
+	err = daemon.StartupDaemon(ctx, curFolder)
 	return err
 }
 
@@ -248,4 +278,29 @@ func unzipKubeVPNIntoFile(zipFile, filename string) error {
 
 	_, err = io.Copy(dstFile, fileInArchive)
 	return err
+}
+
+func quit(ctx context.Context, isSudo bool) error {
+	cli := daemon.GetClient(isSudo)
+	if cli == nil {
+		return nil
+	}
+	client, err := cli.Quit(ctx, &rpc.QuitRequest{})
+	if err != nil {
+		return err
+	}
+	var resp *rpc.QuitResponse
+	for {
+		resp, err = client.Recv()
+		if err == io.EOF {
+			break
+		} else if err == nil {
+			fmt.Fprint(os.Stdout, resp.Message)
+		} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
+			return nil
+		} else {
+			return err
+		}
+	}
+	return nil
 }
