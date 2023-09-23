@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -29,7 +30,7 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Print(client.GetMessage())
+			fmt.Fprint(os.Stdout, client.GetMessage())
 			return nil
 		},
 	}

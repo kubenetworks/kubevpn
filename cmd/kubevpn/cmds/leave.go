@@ -3,6 +3,7 @@ package cmds
 import (
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
@@ -37,7 +38,7 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 				} else if err != nil {
 					return err
 				}
-				fmt.Print(recv.GetMessage())
+				fmt.Fprint(os.Stdout, recv.GetMessage())
 			}
 		},
 	}

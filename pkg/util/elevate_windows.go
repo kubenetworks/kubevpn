@@ -15,12 +15,8 @@ import (
 )
 
 // ref https://stackoverflow.com/questions/31558066/how-to-ask-for-administer-privileges-on-windows-with-go
-func RunCmdWithElevated(arg []string) error {
+func RunCmdWithElevated(exe string, arg []string) error {
 	verb := "runas"
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -54,12 +50,8 @@ func RunCmdWithElevated(arg []string) error {
 	return err
 }
 
-func RunCmd(arg []string) error {
+func RunCmd(exe string, arg []string) error {
 	verb := "open"
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err

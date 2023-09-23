@@ -13,7 +13,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-func RunCmdWithElevated(args []string) error {
+func RunCmdWithElevated(exe string, args []string) error {
 	// fix if startup with normal user, after elevated home dir will change to root user in linux
 	// but unix don't have this issue
 	if runtime.GOOS == "linux" && flag.Lookup("kubeconfig") == nil {
@@ -21,17 +21,13 @@ func RunCmdWithElevated(args []string) error {
 			os.Args = append(os.Args, "--kubeconfig", clientcmd.RecommendedHomeFile)
 		}
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
 	cmd := exec.Command("sudo", append([]string{"--preserve-env", exe}, args...)...)
 	log.Debug(cmd.Args)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	cmd.Env = append(os.Environ(), envStartSudoKubeVPNByKubeVPN+"=1")
-	err = cmd.Start()
+	err := cmd.Start()
 	if err != nil {
 		return err
 	}
@@ -44,7 +40,7 @@ func RunCmdWithElevated(args []string) error {
 	return nil
 }
 
-func RunCmd(args []string) error {
+func RunCmd(exe string, args []string) error {
 	// fix if startup with normal user, after elevated home dir will change to root user in linux
 	// but unix don't have this issue
 	if runtime.GOOS == "linux" && flag.Lookup("kubeconfig") == nil {
@@ -52,17 +48,13 @@ func RunCmd(args []string) error {
 			os.Args = append(os.Args, "--kubeconfig", clientcmd.RecommendedHomeFile)
 		}
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
 	cmd := exec.Command(exe, args...)
 	log.Debug(cmd.Args)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	cmd.Env = append(os.Environ(), envStartSudoKubeVPNByKubeVPN+"=1")
-	err = cmd.Start()
+	err := cmd.Start()
 	if err != nil {
 		return err
 	}

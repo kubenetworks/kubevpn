@@ -45,7 +45,7 @@ type DaemonClient interface {
 	Remove(ctx context.Context, in *RemoveRequest, opts ...grpc.CallOption) (Daemon_RemoveClient, error)
 	Logs(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (Daemon_LogsClient, error)
 	List(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error)
-	Upgrade(ctx context.Context, in *UpgradeRequest, opts ...grpc.CallOption) (Daemon_UpgradeClient, error)
+	Upgrade(ctx context.Context, in *UpgradeRequest, opts ...grpc.CallOption) (*UpgradeResponse, error)
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
 	Version(ctx context.Context, in *VersionRequest, opts ...grpc.CallOption) (*VersionResponse, error)
 	Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error)
@@ -292,36 +292,13 @@ func (c *daemonClient) List(ctx context.Context, in *ListRequest, opts ...grpc.C
 	return out, nil
 }
 
-func (c *daemonClient) Upgrade(ctx context.Context, in *UpgradeRequest, opts ...grpc.CallOption) (Daemon_UpgradeClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[7], Daemon_Upgrade_FullMethodName, opts...)
+func (c *daemonClient) Upgrade(ctx context.Context, in *UpgradeRequest, opts ...grpc.CallOption) (*UpgradeResponse, error) {
+	out := new(UpgradeResponse)
+	err := c.cc.Invoke(ctx, Daemon_Upgrade_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &daemonUpgradeClient{stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-type Daemon_UpgradeClient interface {
-	Recv() (*UpgradeResponse, error)
-	grpc.ClientStream
-}
-
-type daemonUpgradeClient struct {
-	grpc.ClientStream
-}
-
-func (x *daemonUpgradeClient) Recv() (*UpgradeResponse, error) {
-	m := new(UpgradeResponse)
-	if err := x.ClientStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
+	return out, nil
 }
 
 func (c *daemonClient) Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error) {
@@ -343,7 +320,7 @@ func (c *daemonClient) Version(ctx context.Context, in *VersionRequest, opts ...
 }
 
 func (c *daemonClient) Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[8], Daemon_Quit_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[7], Daemon_Quit_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -386,7 +363,7 @@ type DaemonServer interface {
 	Remove(*RemoveRequest, Daemon_RemoveServer) error
 	Logs(*LogRequest, Daemon_LogsServer) error
 	List(context.Context, *ListRequest) (*ListResponse, error)
-	Upgrade(*UpgradeRequest, Daemon_UpgradeServer) error
+	Upgrade(context.Context, *UpgradeRequest) (*UpgradeResponse, error)
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
 	Version(context.Context, *VersionRequest) (*VersionResponse, error)
 	Quit(*QuitRequest, Daemon_QuitServer) error
@@ -421,8 +398,8 @@ func (UnimplementedDaemonServer) Logs(*LogRequest, Daemon_LogsServer) error {
 func (UnimplementedDaemonServer) List(context.Context, *ListRequest) (*ListResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method List not implemented")
 }
-func (UnimplementedDaemonServer) Upgrade(*UpgradeRequest, Daemon_UpgradeServer) error {
-	return status.Errorf(codes.Unimplemented, "method Upgrade not implemented")
+func (UnimplementedDaemonServer) Upgrade(context.Context, *UpgradeRequest) (*UpgradeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Upgrade not implemented")
 }
 func (UnimplementedDaemonServer) Status(context.Context, *StatusRequest) (*StatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Status not implemented")
@@ -611,25 +588,22 @@ func _Daemon_List_Handler(srv interface{}, ctx context.Context, dec func(interfa
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Daemon_Upgrade_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(UpgradeRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
+func _Daemon_Upgrade_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpgradeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
 	}
-	return srv.(DaemonServer).Upgrade(m, &daemonUpgradeServer{stream})
-}
-
-type Daemon_UpgradeServer interface {
-	Send(*UpgradeResponse) error
-	grpc.ServerStream
-}
-
-type daemonUpgradeServer struct {
-	grpc.ServerStream
-}
-
-func (x *daemonUpgradeServer) Send(m *UpgradeResponse) error {
-	return x.ServerStream.SendMsg(m)
+	if interceptor == nil {
+		return srv.(DaemonServer).Upgrade(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_Upgrade_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).Upgrade(ctx, req.(*UpgradeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _Daemon_Status_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -701,6 +675,10 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Daemon_List_Handler,
 		},
 		{
+			MethodName: "Upgrade",
+			Handler:    _Daemon_Upgrade_Handler,
+		},
+		{
 			MethodName: "Status",
 			Handler:    _Daemon_Status_Handler,
 		},
@@ -743,11 +721,6 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Logs",
 			Handler:       _Daemon_Logs_Handler,
-			ServerStreams: true,
-		},
-		{
-			StreamName:    "Upgrade",
-			Handler:       _Daemon_Upgrade_Handler,
 			ServerStreams: true,
 		},
 		{

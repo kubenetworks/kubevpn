@@ -86,24 +86,34 @@ func GetPidPath(isSudo bool) string {
 	return filepath.Join(config.DaemonPath, name)
 }
 
-func StartupDaemon(ctx context.Context) error {
+func StartupDaemon(ctx context.Context, path ...string) error {
+	var exe string
+	var err error
+	if len(path) != 0 {
+		exe = path[0]
+	} else {
+		exe, err = os.Executable()
+	}
+	if err != nil {
+		return err
+	}
 	// normal daemon
 	if daemonClient = GetClient(false); daemonClient == nil {
-		if err := runDaemon(ctx, false); err != nil {
+		if err := runDaemon(ctx, exe, false); err != nil {
 			return err
 		}
 	}
 
 	// sudo daemon
 	if sudoDaemonClient = GetClient(true); sudoDaemonClient == nil {
-		if err := runDaemon(ctx, true); err != nil {
+		if err := runDaemon(ctx, exe, true); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func runDaemon(ctx context.Context, isSudo bool) error {
+func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 	sockPath := GetSockPath(isSudo)
 	err := os.Remove(sockPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -129,12 +139,12 @@ func runDaemon(ctx context.Context, isSudo bool) error {
 	}
 	if isSudo {
 		if !util.IsAdmin() {
-			err = util.RunCmdWithElevated([]string{"daemon", "--sudo"})
+			err = util.RunCmdWithElevated(exe, []string{"daemon", "--sudo"})
 		} else {
-			err = util.RunCmd([]string{"daemon", "--sudo"})
+			err = util.RunCmd(exe, []string{"daemon", "--sudo"})
 		}
 	} else {
-		err = util.RunCmd([]string{"daemon"})
+		err = util.RunCmd(exe, []string{"daemon"})
 	}
 	if err != nil {
 		return err
