@@ -153,6 +153,7 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		originName := u.GetName()
 		u.SetName(fmt.Sprintf("%s-clone-%s", u.GetName(), newUUID.String()[:5]))
 		// if is another cluster, needs to set volume and set env
 		if !d.isSame {
@@ -165,9 +166,11 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 		}
 
 		labelsMap := map[string]string{
-			config.ManageBy: config.ConfigMapPodTrafficManager,
-			"owner-ref":     u.GetName(),
+			config.ManageBy:   config.ConfigMapPodTrafficManager,
+			"owner-ref":       u.GetName(),
+			"origin-workload": originName,
 		}
+		u.SetLabels(labels.Merge(u.GetLabels(), labelsMap))
 		var path []string
 		var spec *v1.PodTemplateSpec
 		spec, path, err = util.GetPodTemplateSpecPath(u)
@@ -247,7 +250,10 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 			if spec.Spec.SecurityContext == nil {
 				spec.Spec.SecurityContext = &v1.PodSecurityContext{}
 			}
-			spec.Spec.SecurityContext.Sysctls = append(spec.Spec.SecurityContext.Sysctls, []v1.Sysctl{
+			// https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/#enabling-unsafe-sysctls
+			// kubelet --allowed-unsafe-sysctls \
+			//  'kernel.msg*,net.core.somaxconn' ...
+			/*spec.Spec.SecurityContext.Sysctls = append(spec.Spec.SecurityContext.Sysctls, []v1.Sysctl{
 				{
 					Name:  "net.ipv4.ip_forward",
 					Value: "1",
@@ -264,7 +270,7 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 					Name:  "net.ipv4.conf.all.route_localnet",
 					Value: "1",
 				},
-			}...)
+			}...)*/
 			container := &v1.Container{
 				Name:  config.ContainerSidecarVPN,
 				Image: config.Image,
@@ -280,6 +286,10 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 					"--engine", string(d.Engine),
 					"--foreground",
 				},
+				Env: []v1.EnvVar{{
+					Name:  config.EnvStartSudoKubeVPNByKubeVPN,
+					Value: "1",
+				}},
 				Resources: v1.ResourceRequirements{
 					Requests: map[v1.ResourceName]resource.Quantity{
 						v1.ResourceCPU:    resource.MustParse("1000m"),
@@ -295,6 +305,17 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 					ReadOnly:  false,
 					MountPath: "/tmp/.kube",
 				}},
+				Lifecycle: &v1.Lifecycle{
+					PostStart: &v1.LifecycleHandler{
+						Exec: &v1.ExecAction{
+							Command: []string{
+								"/bin/bash",
+								"-c",
+								"sysctl -w net.ipv4.ip_forward=1\nsysctl -w net.ipv6.conf.all.disable_ipv6=0\nsysctl -w net.ipv6.conf.all.forwarding=1\nsysctl -w net.ipv4.conf.all.route_localnet=1\nupdate-alternatives --set iptables /usr/sbin/iptables-legacy",
+							},
+						},
+					},
+				},
 				ImagePullPolicy: v1.PullIfNotPresent,
 				SecurityContext: &v1.SecurityContext{
 					Capabilities: &v1.Capabilities{
@@ -334,6 +355,8 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 		if retryErr != nil {
 			return fmt.Errorf("create clone for resource %s failed: %v", workload, retryErr)
 		}
+		log.Infof("create clone resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
+		log.Infof("wait for clone resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
 		err = util.WaitPodToBeReady(ctx, d.targetClientset.CoreV1().Pods(d.TargetNamespace), metav1.LabelSelector{MatchLabels: labelsMap})
 		if err != nil {
 			return err
@@ -719,7 +742,7 @@ func (d *CloneOptions) replaceRegistry(u *unstructured.Unstructured) error {
 	return nil
 }
 
-func (d *CloneOptions) Cleanup(workloads []string) error {
+func (d *CloneOptions) Cleanup(workloads ...string) error {
 	if len(workloads) == 0 {
 		workloads = d.Workloads
 	}
@@ -731,8 +754,8 @@ func (d *CloneOptions) Cleanup(workloads []string) error {
 			return err
 		}
 		labelsMap := map[string]string{
-			config.ManageBy: config.ConfigMapPodTrafficManager,
-			"owner-ref":     object.Name,
+			config.ManageBy:   config.ConfigMapPodTrafficManager,
+			"origin-workload": object.Name,
 		}
 		selector := labels.SelectorFromSet(labelsMap)
 		controller, err := util.GetTopOwnerReferenceBySelector(d.targetFactory, d.TargetNamespace, selector.String())
@@ -747,8 +770,12 @@ func (d *CloneOptions) Cleanup(workloads []string) error {
 			return err
 		}
 		for _, cloneName := range controller.UnsortedList() {
+			split := strings.Split(cloneName, "/")
+			if len(split) == 2 {
+				cloneName = split[1]
+			}
 			err = client.Resource(object.Mapping.Resource).Namespace(d.TargetNamespace).Delete(context.Background(), cloneName, metav1.DeleteOptions{})
-			if !apierrors.IsNotFound(err) {
+			if err != nil && !apierrors.IsNotFound(err) {
 				log.Errorf("delete clone object error: %s", err.Error())
 				return err
 			}

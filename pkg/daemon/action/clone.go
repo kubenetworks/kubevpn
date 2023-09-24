@@ -54,6 +54,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 			return err
 		}
 	}
+	log.SetOutput(out)
 
 	options := &handler.CloneOptions{
 		Namespace:   req.Namespace,
@@ -80,7 +81,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 		Name:     "kubeconfig",
 		DefValue: file,
 	})
-	err = handler.SshJump(resp.Context(), sshConf, flags, true)
+	err = handler.SshJump(resp.Context(), sshConf, flags, false)
 	if err != nil {
 		return err
 	}
@@ -91,9 +92,11 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 		return err
 	}
 	config.Image = req.Image
+	log.Infof("clone workloads...")
 	err = options.DoClone(resp.Context())
 	if err != nil {
 		log.Errorf("clone workloads failed: %v", err)
+		_ = options.Cleanup()
 		return err
 	}
 	svr.clone = options
