@@ -18,9 +18,11 @@ func (svr *Server) Remove(req *rpc.RemoveRequest, resp rpc.Daemon_RemoveServer) 
 	log.SetLevel(log.InfoLevel)
 
 	if svr.clone != nil {
-		err := svr.clone.Cleanup(req.Workloads)
+		err := svr.clone.Cleanup(req.Workloads...)
 		svr.clone = nil
 		return err
+	} else {
+		log.Info("remove: no clone resource found")
 	}
 	return nil
 }

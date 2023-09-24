@@ -46,8 +46,12 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 	if svr.connect != nil {
 		svr.connect.Cleanup()
 	}
+	if svr.clone != nil {
+		_ = svr.clone.Cleanup()
+	}
 	svr.t = time.Time{}
 	svr.connect = nil
+	svr.clone = nil
 	return nil
 }
 
