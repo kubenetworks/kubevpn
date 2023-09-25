@@ -93,6 +93,13 @@ type ConnectOptions struct {
 	extraHost    []dns.Entry
 }
 
+func (c *ConnectOptions) Context() context.Context {
+	if c.ctx == nil {
+		c.ctx, c.cancel = context.WithCancel(context.Background())
+	}
+	return c.ctx
+}
+
 func (c *ConnectOptions) InitDHCP(ctx context.Context) error {
 	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
 	err := c.dhcp.initDHCP(ctx)
@@ -150,6 +157,8 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error)
 			LocalTunIPv4: c.localTunIPv4.IP.String(),
 			LocalTunIPv6: c.localTunIPv6.IP.String(),
 		}
+		// todo consider to use ephemeral container
+		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
 		if len(c.Headers) != 0 {
 			err = InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers)
