@@ -27,6 +27,7 @@ const (
 	Daemon_Remove_FullMethodName     = "/rpc.Daemon/Remove"
 	Daemon_Logs_FullMethodName       = "/rpc.Daemon/Logs"
 	Daemon_List_FullMethodName       = "/rpc.Daemon/List"
+	Daemon_Get_FullMethodName        = "/rpc.Daemon/Get"
 	Daemon_Upgrade_FullMethodName    = "/rpc.Daemon/Upgrade"
 	Daemon_Status_FullMethodName     = "/rpc.Daemon/Status"
 	Daemon_Version_FullMethodName    = "/rpc.Daemon/Version"
@@ -45,6 +46,7 @@ type DaemonClient interface {
 	Remove(ctx context.Context, in *RemoveRequest, opts ...grpc.CallOption) (Daemon_RemoveClient, error)
 	Logs(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (Daemon_LogsClient, error)
 	List(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error)
+	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
 	Upgrade(ctx context.Context, in *UpgradeRequest, opts ...grpc.CallOption) (*UpgradeResponse, error)
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
 	Version(ctx context.Context, in *VersionRequest, opts ...grpc.CallOption) (*VersionResponse, error)
@@ -292,6 +294,15 @@ func (c *daemonClient) List(ctx context.Context, in *ListRequest, opts ...grpc.C
 	return out, nil
 }
 
+func (c *daemonClient) Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error) {
+	out := new(GetResponse)
+	err := c.cc.Invoke(ctx, Daemon_Get_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonClient) Upgrade(ctx context.Context, in *UpgradeRequest, opts ...grpc.CallOption) (*UpgradeResponse, error) {
 	out := new(UpgradeResponse)
 	err := c.cc.Invoke(ctx, Daemon_Upgrade_FullMethodName, in, out, opts...)
@@ -363,6 +374,7 @@ type DaemonServer interface {
 	Remove(*RemoveRequest, Daemon_RemoveServer) error
 	Logs(*LogRequest, Daemon_LogsServer) error
 	List(context.Context, *ListRequest) (*ListResponse, error)
+	Get(context.Context, *GetRequest) (*GetResponse, error)
 	Upgrade(context.Context, *UpgradeRequest) (*UpgradeResponse, error)
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
 	Version(context.Context, *VersionRequest) (*VersionResponse, error)
@@ -397,6 +409,9 @@ func (UnimplementedDaemonServer) Logs(*LogRequest, Daemon_LogsServer) error {
 }
 func (UnimplementedDaemonServer) List(context.Context, *ListRequest) (*ListResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method List not implemented")
+}
+func (UnimplementedDaemonServer) Get(context.Context, *GetRequest) (*GetResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Get not implemented")
 }
 func (UnimplementedDaemonServer) Upgrade(context.Context, *UpgradeRequest) (*UpgradeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Upgrade not implemented")
@@ -588,6 +603,24 @@ func _Daemon_List_Handler(srv interface{}, ctx context.Context, dec func(interfa
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Daemon_Get_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).Get(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_Get_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).Get(ctx, req.(*GetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Daemon_Upgrade_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UpgradeRequest)
 	if err := dec(in); err != nil {
@@ -673,6 +706,10 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "List",
 			Handler:    _Daemon_List_Handler,
+		},
+		{
+			MethodName: "Get",
+			Handler:    _Daemon_Get_Handler,
 		},
 		{
 			MethodName: "Upgrade",

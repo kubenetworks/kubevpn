@@ -1,6 +1,8 @@
 package action
 
 import (
+	"k8s.io/client-go/metadata/metadatainformer"
+	"k8s.io/client-go/restmapper"
 	"os"
 	"path/filepath"
 	"time"
@@ -21,6 +23,9 @@ type Server struct {
 	t       time.Time
 	connect *handler.ConnectOptions
 	clone   *handler.CloneOptions
+
+	gr       []*restmapper.APIGroupResources
+	informer metadatainformer.SharedInformerFactory
 }
 
 func GetDaemonLogPath() string {
