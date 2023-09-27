@@ -76,7 +76,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 
 	sshCtx, sshCancel := context.WithCancel(context.Background())
 	handler.RollbackFuncList = append(handler.RollbackFuncList, sshCancel)
-	err = handler.SshJump(sshCtx, sshConf, flags, false)
+	err = handler.SshJumpAndSetEnv(sshCtx, sshConf, flags, false)
 	if err != nil {
 		return err
 	}
@@ -129,7 +129,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	})
 	sshCtx, sshCancel := context.WithCancel(context.Background())
 	handler.RollbackFuncList = append(handler.RollbackFuncList, sshCancel)
-	err = handler.SshJump(sshCtx, sshConf, flags, true)
+	err = handler.SshJumpAndSetEnv(sshCtx, sshConf, flags, true)
 	if err != nil {
 		return err
 	}

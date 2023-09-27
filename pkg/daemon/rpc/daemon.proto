@@ -12,6 +12,9 @@ service Daemon {
   rpc Clone (CloneRequest) returns (stream CloneResponse) {}
   rpc Remove (RemoveRequest) returns (stream RemoveResponse) {}
 
+  rpc ConfigAdd (ConfigAddRequest) returns (ConfigAddResponse) {}
+  rpc ConfigRemove (ConfigRemoveRequest) returns (ConfigRemoveResponse) {}
+
   rpc Logs (LogRequest) returns (stream LogResponse) {}
   rpc List (ListRequest) returns (ListResponse) {}
   rpc Get (GetRequest) returns (GetResponse) {}
@@ -121,6 +124,24 @@ message VersionRequest {
 
 message VersionResponse {
   string version = 1;
+}
+
+message ConfigAddRequest {
+  string KubeconfigBytes = 1;
+  string Namespace = 2;
+  // ssh jump
+  SshJump SshJump = 3;
+}
+
+message ConfigAddResponse {
+  string ClusterID = 1;
+}
+
+message ConfigRemoveRequest {
+  string ClusterID = 1;
+}
+
+message ConfigRemoveResponse {
 }
 
 message LogRequest {

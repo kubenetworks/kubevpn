@@ -68,7 +68,7 @@ func CmdCp(f cmdutil.Factory) *cobra.Command {
 		Long:                  i18n.T("Copy files and directories to and from containers. Different between kubectl cp is it will de-reference symbol link."),
 		Example:               cpExample,
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			cmdutil.CheckErr(handler.SshJump(cmd.Context(), sshConf, cmd.Flags(), false))
+			cmdutil.CheckErr(handler.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false))
 
 			var comps []string
 			if len(args) == 0 {

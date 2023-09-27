@@ -81,7 +81,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 		Name:     "kubeconfig",
 		DefValue: file,
 	})
-	err = handler.SshJump(resp.Context(), sshConf, flags, false)
+	err = handler.SshJumpAndSetEnv(resp.Context(), sshConf, flags, false)
 	if err != nil {
 		return err
 	}
