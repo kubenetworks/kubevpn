@@ -27,17 +27,19 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/metadata"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	pkgtypes "k8s.io/apimachinery/pkg/types"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
-	"k8s.io/apimachinery/pkg/util/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
@@ -291,7 +293,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				}
 				podName := podList[0].GetName()
 				// if port-forward occurs error, check pod is deleted or not, speed up fail
-				runtime.ErrorHandlers = []func(error){func(err error) {
+				utilruntime.ErrorHandlers = []func(error){func(err error) {
 					if !strings.Contains(err.Error(), "an error occurred forwarding") {
 						log.Debugf("port-forward occurs error, err: %v, retrying", err)
 						cancelFunc()
@@ -708,7 +710,7 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory) (err error) {
 	return
 }
 
-func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, print bool) (err error) {
+func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, print bool) (path string, err error) {
 	if conf.Addr == "" && conf.ConfigAlias == "" {
 		return
 	}
@@ -737,24 +739,26 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 			[]string{clientcmd.RecommendedConfigPathEnvVar, conf.RemoteKubeconfig},
 		)
 		if err != nil {
-			return errors.Wrap(err, string(errOut))
+			err = errors.Wrap(err, string(errOut))
+			return
 		}
 		if len(stdOut) == 0 {
-			return errors.Errorf("can not get kubeconfig %s from remote ssh server: %s", conf.RemoteKubeconfig, string(errOut))
+			err = errors.Errorf("can not get kubeconfig %s from remote ssh server: %s", conf.RemoteKubeconfig, string(errOut))
+			return
 		}
 
 		var temp *os.File
 		if temp, err = os.CreateTemp("", "kubevpn"); err != nil {
-			return err
+			return
 		}
 		if err = temp.Close(); err != nil {
-			return err
+			return
 		}
 		if err = os.WriteFile(temp.Name(), stdOut, 0644); err != nil {
-			return err
+			return
 		}
 		if err = os.Chmod(temp.Name(), 0644); err != nil {
-			return err
+			return
 		}
 		configFlags.KubeConfig = pointer.String(temp.Name())
 	} else {
@@ -770,47 +774,54 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 		}
 	}
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
-	rawConfig, err := matchVersionFlags.ToRawKubeConfigLoader().RawConfig()
+	var rawConfig api.Config
+	rawConfig, err = matchVersionFlags.ToRawKubeConfigLoader().RawConfig()
 	if err != nil {
-		return err
+		return
 	}
 	if err = api.FlattenConfig(&rawConfig); err != nil {
-		return err
+		return
 	}
 	if rawConfig.Contexts == nil {
-		return errors.New("kubeconfig is invalid")
+		err = errors.New("kubeconfig is invalid")
+		return
 	}
 	kubeContext := rawConfig.Contexts[rawConfig.CurrentContext]
 	if kubeContext == nil {
-		return errors.New("kubeconfig is invalid")
+		err = errors.New("kubeconfig is invalid")
+		return
 	}
 	cluster := rawConfig.Clusters[kubeContext.Cluster]
 	if cluster == nil {
-		return errors.New("kubeconfig is invalid")
+		err = errors.New("kubeconfig is invalid")
+		return
 	}
-	u, err := url.Parse(cluster.Server)
+	var u *url.URL
+	u, err = url.Parse(cluster.Server)
 	if err != nil {
-		return err
+		return
 	}
-	remote, err := netip.ParseAddrPort(u.Host)
+	var remote netip.AddrPort
+	remote, err = netip.ParseAddrPort(u.Host)
 	if err != nil {
-		return err
+		return
 	}
 	var port int
 	port, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
-		return err
+		return
 	}
 	var local netip.AddrPort
 	local, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 	if err != nil {
-		return err
+		return
 	}
 
 	// pre-check network ip connect
-	cli, err := util.DialSshRemote(conf)
+	var cli *ssh.Client
+	cli, err = util.DialSshRemote(conf)
 	if err != nil {
-		return err
+		return
 	} else {
 		_ = cli.Close()
 	}
@@ -843,41 +854,53 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 	case <-readyChan:
 	case err = <-errChan:
 		log.Errorf("ssh proxy err: %v", err)
-		return err
+		return
 	}
 
 	rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].Server = fmt.Sprintf("%s://%s", u.Scheme, local.String())
 	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})
 
-	convertedObj, err := latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
+	var convertedObj runtime.Object
+	convertedObj, err = latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
 	if err != nil {
-		return err
+		return
 	}
-	marshal, err := json.Marshal(convertedObj)
+	var marshal []byte
+	marshal, err = json.Marshal(convertedObj)
 	if err != nil {
-		return err
+		return
 	}
-	temp, err := os.CreateTemp("", "*.kubeconfig")
+	var temp *os.File
+	temp, err = os.CreateTemp("", "*.kubeconfig")
 	if err != nil {
-		return err
+		return
 	}
 	if err = temp.Close(); err != nil {
-		return err
+		return
 	}
 	if err = os.WriteFile(temp.Name(), marshal, 0644); err != nil {
-		return err
+		return
 	}
 	if err = os.Chmod(temp.Name(), 0644); err != nil {
-		return err
+		return
 	}
 	if print {
 		log.Infof("using temp kubeconfig %s", temp.Name())
 	}
-	err = os.Setenv(clientcmd.RecommendedConfigPathEnvVar, temp.Name())
+	path = temp.Name()
+	return
+}
+
+func SshJumpAndSetEnv(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, print bool) error {
+	path, err := SshJump(ctx, conf, flags, print)
 	if err != nil {
 		return err
 	}
-	return os.Setenv(config.EnvSSHJump, temp.Name())
+	err = os.Setenv(clientcmd.RecommendedConfigPathEnvVar, path)
+	if err != nil {
+		return err
+	}
+	return os.Setenv(config.EnvSSHJump, path)
 }
 
 // PreCheckResource transform user parameter to normal, example:

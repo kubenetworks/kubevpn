@@ -19,19 +19,21 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	Daemon_Connect_FullMethodName    = "/rpc.Daemon/Connect"
-	Daemon_Disconnect_FullMethodName = "/rpc.Daemon/Disconnect"
-	Daemon_Proxy_FullMethodName      = "/rpc.Daemon/Proxy"
-	Daemon_Leave_FullMethodName      = "/rpc.Daemon/Leave"
-	Daemon_Clone_FullMethodName      = "/rpc.Daemon/Clone"
-	Daemon_Remove_FullMethodName     = "/rpc.Daemon/Remove"
-	Daemon_Logs_FullMethodName       = "/rpc.Daemon/Logs"
-	Daemon_List_FullMethodName       = "/rpc.Daemon/List"
-	Daemon_Get_FullMethodName        = "/rpc.Daemon/Get"
-	Daemon_Upgrade_FullMethodName    = "/rpc.Daemon/Upgrade"
-	Daemon_Status_FullMethodName     = "/rpc.Daemon/Status"
-	Daemon_Version_FullMethodName    = "/rpc.Daemon/Version"
-	Daemon_Quit_FullMethodName       = "/rpc.Daemon/Quit"
+	Daemon_Connect_FullMethodName      = "/rpc.Daemon/Connect"
+	Daemon_Disconnect_FullMethodName   = "/rpc.Daemon/Disconnect"
+	Daemon_Proxy_FullMethodName        = "/rpc.Daemon/Proxy"
+	Daemon_Leave_FullMethodName        = "/rpc.Daemon/Leave"
+	Daemon_Clone_FullMethodName        = "/rpc.Daemon/Clone"
+	Daemon_Remove_FullMethodName       = "/rpc.Daemon/Remove"
+	Daemon_ConfigAdd_FullMethodName    = "/rpc.Daemon/ConfigAdd"
+	Daemon_ConfigRemove_FullMethodName = "/rpc.Daemon/ConfigRemove"
+	Daemon_Logs_FullMethodName         = "/rpc.Daemon/Logs"
+	Daemon_List_FullMethodName         = "/rpc.Daemon/List"
+	Daemon_Get_FullMethodName          = "/rpc.Daemon/Get"
+	Daemon_Upgrade_FullMethodName      = "/rpc.Daemon/Upgrade"
+	Daemon_Status_FullMethodName       = "/rpc.Daemon/Status"
+	Daemon_Version_FullMethodName      = "/rpc.Daemon/Version"
+	Daemon_Quit_FullMethodName         = "/rpc.Daemon/Quit"
 )
 
 // DaemonClient is the client API for Daemon service.
@@ -44,6 +46,8 @@ type DaemonClient interface {
 	Leave(ctx context.Context, in *LeaveRequest, opts ...grpc.CallOption) (Daemon_LeaveClient, error)
 	Clone(ctx context.Context, in *CloneRequest, opts ...grpc.CallOption) (Daemon_CloneClient, error)
 	Remove(ctx context.Context, in *RemoveRequest, opts ...grpc.CallOption) (Daemon_RemoveClient, error)
+	ConfigAdd(ctx context.Context, in *ConfigAddRequest, opts ...grpc.CallOption) (*ConfigAddResponse, error)
+	ConfigRemove(ctx context.Context, in *ConfigRemoveRequest, opts ...grpc.CallOption) (*ConfigRemoveResponse, error)
 	Logs(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (Daemon_LogsClient, error)
 	List(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error)
 	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
@@ -253,6 +257,24 @@ func (x *daemonRemoveClient) Recv() (*RemoveResponse, error) {
 	return m, nil
 }
 
+func (c *daemonClient) ConfigAdd(ctx context.Context, in *ConfigAddRequest, opts ...grpc.CallOption) (*ConfigAddResponse, error) {
+	out := new(ConfigAddResponse)
+	err := c.cc.Invoke(ctx, Daemon_ConfigAdd_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) ConfigRemove(ctx context.Context, in *ConfigRemoveRequest, opts ...grpc.CallOption) (*ConfigRemoveResponse, error) {
+	out := new(ConfigRemoveResponse)
+	err := c.cc.Invoke(ctx, Daemon_ConfigRemove_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonClient) Logs(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (Daemon_LogsClient, error) {
 	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[6], Daemon_Logs_FullMethodName, opts...)
 	if err != nil {
@@ -372,6 +394,8 @@ type DaemonServer interface {
 	Leave(*LeaveRequest, Daemon_LeaveServer) error
 	Clone(*CloneRequest, Daemon_CloneServer) error
 	Remove(*RemoveRequest, Daemon_RemoveServer) error
+	ConfigAdd(context.Context, *ConfigAddRequest) (*ConfigAddResponse, error)
+	ConfigRemove(context.Context, *ConfigRemoveRequest) (*ConfigRemoveResponse, error)
 	Logs(*LogRequest, Daemon_LogsServer) error
 	List(context.Context, *ListRequest) (*ListResponse, error)
 	Get(context.Context, *GetRequest) (*GetResponse, error)
@@ -403,6 +427,12 @@ func (UnimplementedDaemonServer) Clone(*CloneRequest, Daemon_CloneServer) error 
 }
 func (UnimplementedDaemonServer) Remove(*RemoveRequest, Daemon_RemoveServer) error {
 	return status.Errorf(codes.Unimplemented, "method Remove not implemented")
+}
+func (UnimplementedDaemonServer) ConfigAdd(context.Context, *ConfigAddRequest) (*ConfigAddResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ConfigAdd not implemented")
+}
+func (UnimplementedDaemonServer) ConfigRemove(context.Context, *ConfigRemoveRequest) (*ConfigRemoveResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ConfigRemove not implemented")
 }
 func (UnimplementedDaemonServer) Logs(*LogRequest, Daemon_LogsServer) error {
 	return status.Errorf(codes.Unimplemented, "method Logs not implemented")
@@ -564,6 +594,42 @@ func (x *daemonRemoveServer) Send(m *RemoveResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Daemon_ConfigAdd_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfigAddRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).ConfigAdd(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_ConfigAdd_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).ConfigAdd(ctx, req.(*ConfigAddRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_ConfigRemove_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfigRemoveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).ConfigRemove(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_ConfigRemove_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).ConfigRemove(ctx, req.(*ConfigRemoveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Daemon_Logs_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(LogRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -703,6 +769,14 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "rpc.Daemon",
 	HandlerType: (*DaemonServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ConfigAdd",
+			Handler:    _Daemon_ConfigAdd_Handler,
+		},
+		{
+			MethodName: "ConfigRemove",
+			Handler:    _Daemon_ConfigRemove_Handler,
+		},
 		{
 			MethodName: "List",
 			Handler:    _Daemon_List_Handler,
