@@ -118,7 +118,12 @@ func DialSshRemote(conf *SshConfig) (*ssh.Client, error) {
 		remote, err = jumpRecursion(conf.ConfigAlias)
 	} else {
 		var auth []ssh.AuthMethod
-		if conf.Keyfile != "" {
+		if conf.Password != "" {
+			auth = append(auth, ssh.Password(conf.Password))
+		} else {
+			if conf.Keyfile == "" {
+				conf.Keyfile = filepath.Join(homedir.HomeDir(), ".ssh", "id_rsa")
+			}
 			var keyFile ssh.AuthMethod
 			keyFile, err = publicKeyFile(conf.Keyfile)
 			if err != nil {
@@ -126,9 +131,7 @@ func DialSshRemote(conf *SshConfig) (*ssh.Client, error) {
 			}
 			auth = append(auth, keyFile)
 		}
-		if conf.Password != "" {
-			auth = append(auth, ssh.Password(conf.Password))
-		}
+
 		// refer to https://godoc.org/golang.org/x/crypto/ssh for other authentication types
 		sshConfig := &ssh.ClientConfig{
 			// SSH connection username
