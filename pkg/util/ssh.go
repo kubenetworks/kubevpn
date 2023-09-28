@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,11 +61,26 @@ func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, co
 	ctx, cancelFunc := context.WithCancel(pctx)
 	defer cancelFunc()
 
-	remote, err := DialSshRemote(conf)
+	sshClient, err := DialSshRemote(conf)
 	if err != nil {
 		log.Errorf("Dial into remote server error: %s", err)
 		return err
 	}
+
+	// ref: https://github.com/golang/go/issues/21478
+	go func() {
+		ticker := time.NewTicker(time.Second * 5)
+		defer ticker.Stop()
+		select {
+		case <-ticker.C:
+			_, _, err := sshClient.SendRequest("keepalive@golang.org", true, nil)
+			if err != nil {
+				log.Errorf("failed to send keep alive error: %s", err)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}()
 
 	// Listen on remote server port
 	var lc net.ListenConfig
@@ -92,16 +108,9 @@ func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, co
 		}
 		go func(local net.Conn) {
 			defer local.Close()
-			var conn net.Conn
-			var err error
-			for i := 0; i < 5; i++ {
-				conn, err = remote.Dial("tcp", remoteEndpoint.String())
-				if err == nil {
-					break
-				}
-				time.Sleep(time.Millisecond * 200)
-			}
-			if conn == nil {
+			conn, err := sshClient.Dial("tcp", remoteEndpoint.String())
+			if err != nil {
+				log.Errorf("Failed to dial %s: %s", remoteEndpoint.String(), err)
 				cancelFunc()
 				return
 			}
@@ -111,6 +120,8 @@ func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, co
 	}
 }
 
+// todo ssh heartbeats
+// https://github.com/golang/go/issues/21478
 func DialSshRemote(conf *SshConfig) (*ssh.Client, error) {
 	var remote *ssh.Client
 	var err error
@@ -139,6 +150,10 @@ func DialSshRemote(conf *SshConfig) (*ssh.Client, error) {
 			Auth:            auth,
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 			Timeout:         time.Second * 10,
+		}
+		if strings.Index(conf.Addr, ":") < 0 {
+			// use default ssh port 22
+			conf.Addr = net.JoinHostPort(conf.Addr, "22")
 		}
 		// Connect to SSH remote server using serverEndpoint
 		remote, err = ssh.Dial("tcp", conf.Addr, sshConfig)
