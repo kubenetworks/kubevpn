@@ -29,7 +29,7 @@ func newDatagramPacket(data []byte) (r *datagramPacket) {
 }
 
 func (addr *datagramPacket) Addr() net.Addr {
-	var server8422, _ = net.ResolveUDPAddr("udp", "localhost:8422")
+	var server8422, _ = net.ResolveUDPAddr("udp", "127.0.0.1:8422")
 	return server8422
 }
 
