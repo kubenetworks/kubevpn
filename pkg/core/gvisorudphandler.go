@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"time"
 
@@ -129,28 +128,6 @@ func GvisorUDPListener(addr string) (net.Listener, error) {
 	return &tcpKeepAliveListener{ln}, nil
 }
 
-func copyPacketData(dst, src net.PacketConn, to net.Addr, timeout time.Duration) error {
-	buf := config.LPool.Get().([]byte)[:]
-	defer config.LPool.Put(buf[:])
-
-	for {
-		src.SetReadDeadline(time.Now().Add(timeout))
-		n, _, err := src.ReadFrom(buf)
-		if ne, ok := err.(net.Error); ok && ne.Timeout() {
-			return nil /* ignore I/O timeout */
-		} else if err == io.EOF {
-			return nil /* ignore EOF */
-		} else if err != nil {
-			return err
-		}
-
-		if _, err = dst.WriteTo(buf[:n], to); err != nil {
-			return err
-		}
-		dst.SetReadDeadline(time.Now().Add(timeout))
-	}
-}
-
 func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	defer udpConn.Close()
 	log.Debugf("[TUN-UDP] Debug: %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
@@ -160,6 +137,12 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 		defer config.LPool.Put(b[:])
 
 		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			dgram, err := readDatagramPacket(tcpConn, b[:])
 			if err != nil {
 				log.Debugf("[TUN-UDP] Debug: %s -> 0 : %v", tcpConn.RemoteAddr(), err)
@@ -173,11 +156,11 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 			}
 
 			if _, err = udpConn.Write(dgram.Data); err != nil {
-				log.Debugf("[TUN-UDP] Error: %s -> %s : %s", tcpConn.RemoteAddr(), Server8422, err)
+				log.Debugf("[TUN-UDP] Error: %s -> %s : %s", tcpConn.RemoteAddr(), "localhost:8422", err)
 				errChan <- err
 				return
 			}
-			log.Debugf("[TUN-UDP] Debug: %s >>> %s length: %d", tcpConn.RemoteAddr(), Server8422, dgram.DataLength)
+			log.Debugf("[TUN-UDP] Debug: %s >>> %s length: %d", tcpConn.RemoteAddr(), "localhost:8422", dgram.DataLength)
 		}
 	}()
 
@@ -186,6 +169,12 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 		defer config.LPool.Put(b[:])
 
 		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			n, _, err := udpConn.ReadFrom(b[:])
 			if err != nil {
 				log.Debugf("[TUN-UDP] Error: %s : %s", tcpConn.RemoteAddr(), err)

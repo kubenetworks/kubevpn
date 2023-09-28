@@ -52,8 +52,6 @@ func TCPHandler() Handler {
 	}
 }
 
-var Server8422, _ = net.ResolveUDPAddr("udp", "localhost:8422")
-
 func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
 	log.Debugf("[tcpserver] %s -> %s\n", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
@@ -73,6 +71,12 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	}(tcpConn.LocalAddr())
 
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		b := config.LPool.Get().([]byte)[:]
 		dgram, err := readDatagramPacketServer(tcpConn, b[:])
 		if err != nil {

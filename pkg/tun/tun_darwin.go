@@ -49,17 +49,19 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	// set ipv6 address
-	var ipv6CIDR *net.IPNet
-	if ipv6, ipv6CIDR, err = net.ParseCIDR(cfg.Addr6); err != nil {
-		return
-	}
-	ones, _ := ipv6CIDR.Mask.Size()
-	setIPv6Cmd := fmt.Sprintf("ifconfig %s inet6 %s prefixlen %d alias", name, ipv6.String(), ones)
-	log.Debugf("[tun] %s", setIPv6Cmd)
-	args = strings.Split(setIPv6Cmd, " ")
-	if err = exec.Command(args[0], args[1:]...).Run(); err != nil {
-		err = fmt.Errorf("%s: %v", setIPv6Cmd, err)
-		return
+	if cfg.Addr6 != "" {
+		var ipv6CIDR *net.IPNet
+		if ipv6, ipv6CIDR, err = net.ParseCIDR(cfg.Addr6); err != nil {
+			return
+		}
+		ones, _ := ipv6CIDR.Mask.Size()
+		setIPv6Cmd := fmt.Sprintf("ifconfig %s inet6 %s prefixlen %d alias", name, ipv6.String(), ones)
+		log.Debugf("[tun] %s", setIPv6Cmd)
+		args = strings.Split(setIPv6Cmd, " ")
+		if err = exec.Command(args[0], args[1:]...).Run(); err != nil {
+			err = fmt.Errorf("%s: %v", setIPv6Cmd, err)
+			return
+		}
 	}
 
 	if err = os.Setenv(config.EnvTunNameOrLUID, name); err != nil {
