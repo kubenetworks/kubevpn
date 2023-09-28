@@ -14,10 +14,13 @@ import (
 
 func CmdList(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "list",
-		Short:   i18n.T("Disconnect from kubernetes cluster network"),
-		Long:    templates.LongDesc(i18n.T(`Disconnect from kubernetes cluster network`)),
-		Example: templates.Examples(i18n.T(``)),
+		Use:   "list",
+		Short: i18n.T("List proxy resources"),
+		Long:  templates.LongDesc(i18n.T(`List proxy resources`)),
+		Example: templates.Examples(i18n.T(`
+	    # list proxy resources
+        kubevpn list
+`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			return daemon.StartupDaemon(cmd.Context())
 		},

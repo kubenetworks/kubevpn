@@ -16,9 +16,10 @@ import (
 
 func CmdGet(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "get",
-		Short: i18n.T("Get resource to kubernetes cluster network"),
-		Long:  templates.LongDesc(i18n.T(`Connect to kubernetes cluster network`)),
+		Use:    "get",
+		Hidden: true,
+		Short:  i18n.T("Get cluster resources which connected"),
+		Long:   templates.LongDesc(i18n.T(`Get cluster resources which connected`)),
 		Example: templates.Examples(i18n.T(`
 		# Get resource to k8s cluster network
 		kubevpn get pods
@@ -31,7 +32,6 @@ func CmdGet(f cmdutil.Factory) *cobra.Command {
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
 		kubevpn get service --ssh-alias <alias>
-
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			// startup daemon process and sudo process

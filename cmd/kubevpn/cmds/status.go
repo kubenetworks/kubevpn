@@ -15,10 +15,13 @@ import (
 
 func CmdStatus(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "status",
-		Short:   i18n.T("KubeVPN status"),
-		Long:    templates.LongDesc(i18n.T(`KubeVPN status`)),
-		Example: templates.Examples(i18n.T(``)),
+		Use:   "status",
+		Short: i18n.T("KubeVPN status"),
+		Long:  templates.LongDesc(i18n.T(`KubeVPN status`)),
+		Example: templates.Examples(i18n.T(`
+        # show status for kubevpn status
+        kubevpn status
+`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			return daemon.StartupDaemon(cmd.Context())
 		},
