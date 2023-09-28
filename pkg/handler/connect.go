@@ -892,6 +892,9 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 }
 
 func SshJumpAndSetEnv(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, print bool) error {
+	if conf.Addr == "" && conf.ConfigAlias == "" {
+		return nil
+	}
 	path, err := SshJump(ctx, conf, flags, print)
 	if err != nil {
 		return err

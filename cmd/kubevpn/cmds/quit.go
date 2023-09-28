@@ -19,10 +19,13 @@ import (
 
 func CmdQuit(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "quit",
-		Short:   i18n.T("Quit daemon"),
-		Long:    templates.LongDesc(i18n.T(`Disconnect from cluster, leave proxy resources, and quit daemon`)),
-		Example: templates.Examples(i18n.T(``)),
+		Use:   "quit",
+		Short: i18n.T("Quit kubevpn daemon server"),
+		Long:  templates.LongDesc(i18n.T(`Disconnect from cluster, leave proxy resources, and quit daemon`)),
+		Example: templates.Examples(i18n.T(`
+        # before quit kubevpn, it will leave proxy resources to origin and disconnect from cluster
+        kubevpn quit
+`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			return daemon.StartupDaemon(cmd.Context())
 		},

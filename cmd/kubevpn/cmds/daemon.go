@@ -16,8 +16,8 @@ func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 	var opt = &daemon.SvrOption{}
 	cmd := &cobra.Command{
 		Use:   "daemon",
-		Short: i18n.T("Startup GRPC server"),
-		Long:  i18n.T(`Startup GRPC server`),
+		Short: i18n.T("Startup kubevpn daemon server"),
+		Long:  i18n.T(`Startup kubevpn daemon server`),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			sockPath := daemon.GetSockPath(opt.IsSudo)
 			err := os.Remove(sockPath)

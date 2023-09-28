@@ -67,38 +67,44 @@ kubectl apply -f https://raw.githubusercontent.com/KubeNetworks/kubevpn/master/s
 ### Connect to k8s cluster network
 
 ```shell
-➜  ~ kubevpn connect
+➜  ~ kubevpn connect -n default --kubeconfig ~/.kube/config
+Password:
+start to connect
 get cidr from cluster info...
 get cidr from cluster info ok
 get cidr from cni...
+wait pod cni-net-dir-kubevpn to be running timeout, reason , ignore
 get cidr from svc...
 get cidr from svc ok
+get cidr successfully
 traffic manager not exist, try to create it...
-pod [kubevpn-traffic-manager] status is Pending
-Container Reason Message
-
-pod [kubevpn-traffic-manager] status is Pending
+label namespace default
+create serviceAccount kubevpn-traffic-manager
+create roles kubevpn-traffic-manager
+create roleBinding kubevpn-traffic-manager
+create service kubevpn-traffic-manager
+create deployment kubevpn-traffic-manager
+pod kubevpn-traffic-manager-799b5f5474-d7bp7 is Pending
 Container     Reason            Message
 control-plane ContainerCreating
 vpn           ContainerCreating
 webhook       ContainerCreating
 
-pod [kubevpn-traffic-manager] status is Running
+pod kubevpn-traffic-manager-799b5f5474-d7bp7 is Running
 Container     Reason           Message
 control-plane ContainerRunning
 vpn           ContainerRunning
 webhook       ContainerRunning
 
+Creating mutatingWebhook_configuration for kubevpn-traffic-manager
 update ref count successfully
 port forward ready
-your ip is 223.254.0.101
 tunnel connected
 dns service ok
-
----------------------------------------------------------------------------
-    Now you can access resources in the kubernetes cluster, enjoy it :)
----------------------------------------------------------------------------
-
++---------------------------------------------------------------------------+
+|    Now you can access resources in the kubernetes cluster, enjoy it :)    |
++---------------------------------------------------------------------------+
+➜  ~
 ```
 
 **after you see this prompt, then leave this terminal alone, open a new terminal, continue operation**

@@ -9,6 +9,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
@@ -17,8 +19,12 @@ import (
 func CmdRemove(f cmdutil.Factory) *cobra.Command {
 	var cmd = &cobra.Command{
 		Use:   "remove",
-		Short: "Remove reverse remote resource traffic to local machine",
-		Long:  `Remove remote traffic to local machine`,
+		Short: "Remove cloned resource",
+		Long:  `Remove cloned resource`,
+		Example: templates.Examples(i18n.T(`
+        # leave proxy resources to origin
+        kubevpn remove deployment/authors
+`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			return daemon.StartupDaemon(cmd.Context())
 		},

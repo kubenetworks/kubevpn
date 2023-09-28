@@ -9,6 +9,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
@@ -17,8 +19,12 @@ import (
 func CmdLeave(f cmdutil.Factory) *cobra.Command {
 	var leaveCmd = &cobra.Command{
 		Use:   "leave",
-		Short: "leave reverse remote resource traffic to local machine",
-		Long:  `leave remote traffic to local machine`,
+		Short: "Leave proxy resource",
+		Long:  `leave proxy resource and restore it to origin`,
+		Example: templates.Examples(i18n.T(`
+		# leave proxy resource and restore it to origin
+		kubevpn leave deployment/authors
+`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			return daemon.StartupDaemon(cmd.Context())
 		},

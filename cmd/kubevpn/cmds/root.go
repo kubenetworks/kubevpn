@@ -47,30 +47,41 @@ func NewKubeVPNCommand() *cobra.Command {
 
 	groups := templates.CommandGroups{
 		{
-			Message: "Client Commands:",
+			Message: "Develop commands:",
 			Commands: []*cobra.Command{
 				CmdConnect(factory),
 				CmdDisconnect(factory),
-				CmdQuit(factory),
-				CmdLogs(factory),
 				CmdProxy(factory),
-				CmdList(factory),
-				CmdGet(factory),
 				CmdLeave(factory),
-				CmdDev(factory),
 				CmdClone(factory),
-				CmdConfig(factory),
 				CmdRemove(factory),
-				CmdCp(factory),
-				CmdUpgrade(factory),
-				CmdReset(factory),
-				CmdVersion(factory),
-				CmdStatus(factory),
+				CmdDev(factory),
 				// Hidden, Server Commands (DO NOT USE IT !!!)
 				CmdControlPlane(factory),
 				CmdServe(factory),
 				CmdDaemon(factory),
 				CmdWebhook(factory),
+			},
+		},
+		{
+			Message: "Management commands",
+			Commands: []*cobra.Command{
+				CmdList(factory),
+				CmdGet(factory),
+				CmdConfig(factory),
+				CmdCp(factory),
+				CmdSSH(factory),
+				CmdReset(factory),
+				CmdQuit(factory),
+			},
+		},
+		{
+			Message: "Other commands",
+			Commands: []*cobra.Command{
+				CmdLogs(factory),
+				CmdStatus(factory),
+				CmdVersion(factory),
+				CmdUpgrade(factory),
 			},
 		},
 	}

@@ -16,7 +16,8 @@ import (
 
 func CmdConfig(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "config",
+		Use:   "config",
+		Short: "Proxy kubeconfig which behind of ssh jump server",
 	}
 	cmd.AddCommand(cmdConfigAdd(f))
 	cmd.AddCommand(cmdConfigRemove(f))
@@ -27,36 +28,17 @@ func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "add",
-		Short: i18n.T("Clone workloads to target-kubeconfig cluster with same volume、env、and network"),
-		Long:  templates.LongDesc(i18n.T(`Clone workloads to target-kubeconfig cluster with same volume、env、and network`)),
+		Short: "Proxy kubeconfig",
+		Long:  templates.LongDesc(i18n.T(`proxy kubeconfig which behind of ssh jump server`)),
 		Example: templates.Examples(i18n.T(`
-		# clone
-		- clone deployment in current cluster and current namespace
-		  kubevpn clone deployment/productpage
-
-		- clone deployment in current cluster with different namespace
-		  kubevpn clone deployment/productpage -n test
-        
-		- clone deployment to another cluster
-		  kubevpn clone deployment/productpage --target-kubeconfig ~/.kube/other-kubeconfig
-
-        - clone multiple workloads
-          kubevpn clone deployment/authors deployment/productpage
-          or 
-          kubevpn clone deployment authors productpage
-
-		# clone with mesh, traffic with header a=1, will hit cloned workloads, otherwise hit origin workloads
-		kubevpn clone deployment/productpage --headers a=1
-
-		# clone workloads which api-server behind of bastion host or ssh jump host
-		kubevpn clone deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem --headers a=1
+		# proxy api-server which api-server behind of bastion host or ssh jump host
+		kubevpn config add --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
 		# it also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
-		kubevpn clone service/productpage --ssh-alias <alias> --headers a=1
-
+		kubevpn config add --ssh-alias <alias>
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			// startup daemon process and sudo process
@@ -88,36 +70,11 @@ func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
 func cmdConfigRemove(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remove",
-		Short: i18n.T("Clone workloads to target-kubeconfig cluster with same volume、env、and network"),
-		Long:  templates.LongDesc(i18n.T(`Clone workloads to target-kubeconfig cluster with same volume、env、and network`)),
+		Short: "Remove proxy kubeconfig",
+		Long:  templates.LongDesc(i18n.T(`Remove proxy kubeconfig which behind of ssh jump server`)),
 		Example: templates.Examples(i18n.T(`
-		# clone
-		- clone deployment in current cluster and current namespace
-		  kubevpn clone deployment/productpage
-
-		- clone deployment in current cluster with different namespace
-		  kubevpn clone deployment/productpage -n test
-        
-		- clone deployment to another cluster
-		  kubevpn clone deployment/productpage --target-kubeconfig ~/.kube/other-kubeconfig
-
-        - clone multiple workloads
-          kubevpn clone deployment/authors deployment/productpage
-          or 
-          kubevpn clone deployment authors productpage
-
-		# clone with mesh, traffic with header a=1, will hit cloned workloads, otherwise hit origin workloads
-		kubevpn clone deployment/productpage --headers a=1
-
-		# clone workloads which api-server behind of bastion host or ssh jump host
-		kubevpn clone deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem --headers a=1
-
-		# it also support ProxyJump, like
-		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
-		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
-		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
-		kubevpn clone service/productpage --ssh-alias <alias> --headers a=1
-
+		# remove proxy api-server which api-server behind of bastion host or ssh jump host
+		kubevpn config remove --kubeconfig /var/folders/30/cmv9c_5j3mq_kthx63sb1t5c0000gn/T/947048961.kubeconfig
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			// startup daemon process and sudo process
