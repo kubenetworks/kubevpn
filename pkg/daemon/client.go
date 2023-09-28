@@ -35,14 +35,9 @@ func GetClient(isSudo bool) rpc.DaemonClient {
 		return daemonClient
 	}
 
-	name := "daemon"
-	if isSudo {
-		name = "sudo daemon"
-	}
 	ctx := context.Background()
 	conn, err := grpc.DialContext(ctx, "unix:"+GetSockPath(isSudo), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Errorf("cannot connect to %s: %v", name, err)
 		return nil
 	}
 	cli := rpc.NewDaemonClient(conn)
@@ -50,16 +45,13 @@ func GetClient(isSudo bool) rpc.DaemonClient {
 	var response *grpc_health_v1.HealthCheckResponse
 	response, err = healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
 	if err != nil {
-		log.Errorf("%v", err)
 		return nil
 	}
 	if response.Status != grpc_health_v1.HealthCheckResponse_SERVING {
-		log.Error(fmt.Sprintf("%s is not health", name), "status", response.Status)
 		return nil
 	}
 	_, err = cli.Status(ctx, &rpc.StatusRequest{})
 	if err != nil {
-		log.Error("cannot call api status", "err", err)
 		return nil
 	}
 	if isSudo {
