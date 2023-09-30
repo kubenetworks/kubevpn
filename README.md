@@ -338,7 +338,7 @@ OK: 8 MiB in 19 packages
 {"status":"Authors is healthy"}/opt/microservices # exit
 prepare to exit, cleaning up
 update ref count successfully
-clean up successful
+clean up successfully
 ```
 
 You can see that it will start up two containers with docker, mapping to pod two container, and share port with same
@@ -507,7 +507,7 @@ app
 prepare to exit, cleaning up
 update ref count successfully
 ref-count is zero, prepare to clean up resource
-clean up successful
+clean up successfully
 root@4d0c3c4eae2b:/# exit
 exit
 ```
@@ -621,7 +621,7 @@ prepare to exit, cleaning up
 port-forward occurs error, err: lost connection to pod, retrying
 update ref count successfully
 ref-count is zero, prepare to clean up resource
-clean up successful
+clean up successfully
 ```
 
 This is because of your docker-desktop required resource is less than pod running request resource, it OOM killed, so

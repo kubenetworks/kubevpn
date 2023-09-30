@@ -34,7 +34,7 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 			log.Errorf("leave workload %s failed: %v", workload, err)
 			continue
 		}
-		log.Infof("leave workload %s success", workload)
+		log.Infof("leave workload %s successfully", workload)
 	}
 	return nil
 }

@@ -574,7 +574,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 			}
 			return
 		}
-		log.Infof("container connect to cluster success")
+		log.Infof("container connect to cluster successfully")
 		err = d.Copts.netMode.Set(fmt.Sprintf("container:%s", id))
 		return
 	default:

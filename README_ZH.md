@@ -329,7 +329,7 @@ OK: 8 MiB in 19 packages
 {"status":"Authors is healthy"}/opt/microservices # exit
 prepare to exit, cleaning up
 update ref count successfully
-clean up successful
+clean up successfully
 ```
 
 此时本地会启动两个 container, 对应 pod 容器中的两个 container, 并且共享端口, 可以直接使用 localhost:port 的形式直接访问另一个 container,
@@ -493,7 +493,7 @@ app
 prepare to exit, cleaning up
 update ref count successfully
 ref-count is zero, prepare to clean up resource
-clean up successful
+clean up successfully
 root@4d0c3c4eae2b:/# exit
 exit
 ```
@@ -604,7 +604,7 @@ prepare to exit, cleaning up
 port-forward occurs error, err: lost connection to pod, retrying
 update ref count successfully
 ref-count is zero, prepare to clean up resource
-clean up successful
+clean up successfully
 ```
 
 这是因为你的 `Docker-desktop` 声明的资源, 小于 container 容器启动时所需要的资源, 因此被 OOM 杀掉了, 你可以增加 `Docker-desktop` 对于 resources
