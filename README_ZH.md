@@ -389,7 +389,7 @@ Created main container: authors_default_kubevpn_ff34b
 例如:
 
 ```shell
-docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v ~/.kube/config:/root/.kube/config --platform linux/amd64 naison/kubevpn:v1.2.0
+docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v ~/.kube/config:/root/.kube/config --platform linux/amd64 naison/kubevpn:v2.0.0
 ```
 
 ```shell
@@ -552,9 +552,9 @@ Windows
 ``` shell
 ➜  ~ kubevpn version
 KubeVPN: CLI
-    Version: v1.2.0
-    DaemonVersion: v1.2.0
-    Image: docker.io/naison/kubevpn:v1.2.0
+    Version: v2.0.0
+    DaemonVersion: v2.0.0
+    Image: docker.io/naison/kubevpn:v2.0.0
     Branch: feature/daemon
     Git commit: 7c3a87e14e05c238d8fb23548f95fa1dd6e96936
     Built time: 2023-09-30 22:01:51
@@ -562,11 +562,11 @@ KubeVPN: CLI
     Built Go version: go1.20.5
 ```
 
-镜像是 `docker.io/naison/kubevpn:v1.2.0`，将此镜像转存到自己的镜像仓库。
+镜像是 `docker.io/naison/kubevpn:v2.0.0`，将此镜像转存到自己的镜像仓库。
 
 ```text
-docker pull docker.io/naison/kubevpn:v1.2.0
-docker tag docker.io/naison/kubevpn:v1.2.0 [镜像仓库地址]/[命名空间]/[镜像仓库]:[镜像版本号]
+docker pull docker.io/naison/kubevpn:v2.0.0
+docker tag docker.io/naison/kubevpn:v2.0.0 [镜像仓库地址]/[命名空间]/[镜像仓库]:[镜像版本号]
 docker push [镜像仓库地址]/[命名空间]/[镜像仓库]:[镜像版本号]
 ```
 
@@ -584,10 +584,10 @@ pod [kubevpn-traffic-manager] status is Running
   例如：
 
 ```shell
-➜  ~ kubevpn connect --transfer-image --image nocalhost-team-docker.pkg.coding.net/nocalhost/public/kubevpn:v1.2.0
-v1.2.0: Pulling from naison/kubevpn
+➜  ~ kubevpn connect --transfer-image --image nocalhost-team-docker.pkg.coding.net/nocalhost/public/kubevpn:v2.0.0
+v2.0.0: Pulling from naison/kubevpn
 Digest: sha256:450446850891eb71925c54a2fab5edb903d71103b485d6a4a16212d25091b5f4
-Status: Image is up to date for naison/kubevpn:v1.2.0
+Status: Image is up to date for naison/kubevpn:v2.0.0
 The push refers to repository [nocalhost-team-docker.pkg.coding.net/nocalhost/public/kubevpn]
 ecc065754c15: Preparing
 f2b6c07cb397: Pushed
@@ -596,7 +596,7 @@ f5507edfc283: Pushed
 3b6ea9aa4889: Pushed
 ecc065754c15: Pushed
 feda785382bb: Pushed
-v1.2.0: digest: sha256:85d29ebb53af7d95b9137f8e743d49cbc16eff1cdb9983128ab6e46e0c25892c size: 2000
+v2.0.0: digest: sha256:85d29ebb53af7d95b9137f8e743d49cbc16eff1cdb9983128ab6e46e0c25892c size: 2000
 start to connect
 got cidr from cache
 get cidr successfully
