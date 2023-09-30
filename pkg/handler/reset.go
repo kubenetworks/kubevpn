@@ -74,7 +74,7 @@ func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
 			log.Errorf("unpatch container error: %v", err)
 			continue
 		}
-		log.Infof("leave resource: %s success", uid)
+		log.Infof("leave resource: %s successfully", uid)
 	}
 	return err
 }

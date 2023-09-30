@@ -82,7 +82,7 @@ func (c *ConnectOptions) Cleanup() {
 	}
 	RollbackFuncList = RollbackFuncList[:]
 	dns.CancelDNS()
-	log.Info("clean up successful")
+	log.Info("clean up successfully")
 	util.CleanExtensionLib()
 }
 

@@ -360,7 +360,7 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, wor
 		if err != nil {
 			log.Errorf("rollout status for %s failed: %s", workloads, err.Error())
 		} else {
-			log.Infof("rollout status for %s success", workloads)
+			log.Infof("rollout status for %s successfully", workloads)
 		}
 	}()
 	client, _ := factory.DynamicClient()
