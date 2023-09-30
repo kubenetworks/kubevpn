@@ -132,12 +132,6 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 func runFirst(ctx context.Context, runConfig *RunConfig, cli *apiclient.Client, dockerCli *command.DockerCli) (id string, err error) {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	defer func() {
-		if err != nil && runConfig.hostConfig.AutoRemove {
-			_ = cli.ContainerRemove(ctx, id, types.ContainerRemoveOptions{Force: true})
-		}
-	}()
-
 	stdout, stderr := dockerCli.Out(), dockerCli.Err()
 	client := dockerCli.Client()
 
