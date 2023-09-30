@@ -226,16 +226,24 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 type ConfigList []*RunConfig
 
 func (l ConfigList) Remove(ctx context.Context, cli *client.Client) error {
+	var remove = false
+	for _, runConfig := range l {
+		if runConfig.hostConfig.AutoRemove {
+			remove = true
+			break
+		}
+	}
+	if !remove {
+		return nil
+	}
 	for _, runConfig := range l {
 		err := cli.NetworkDisconnect(ctx, runConfig.containerName, runConfig.containerName, true)
 		if err != nil {
 			log.Debug(err)
 		}
-		if runConfig.hostConfig.AutoRemove {
-			err = cli.ContainerRemove(ctx, runConfig.containerName, types.ContainerRemoveOptions{Force: true})
-			if err != nil {
-				log.Debug(err)
-			}
+		err = cli.ContainerRemove(ctx, runConfig.containerName, types.ContainerRemoveOptions{Force: true})
+		if err != nil {
+			log.Debug(err)
 		}
 	}
 	i, err := cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{})
