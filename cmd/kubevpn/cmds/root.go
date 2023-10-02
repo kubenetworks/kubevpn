@@ -71,6 +71,7 @@ func NewKubeVPNCommand() *cobra.Command {
 				CmdConfig(factory),
 				CmdCp(factory),
 				CmdSSH(factory),
+				CmdLogs(factory),
 				CmdReset(factory),
 				CmdQuit(factory),
 			},
@@ -78,7 +79,6 @@ func NewKubeVPNCommand() *cobra.Command {
 		{
 			Message: "Other commands",
 			Commands: []*cobra.Command{
-				CmdLogs(factory),
 				CmdStatus(factory),
 				CmdVersion(factory),
 				CmdUpgrade(factory),

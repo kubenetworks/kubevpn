@@ -35,7 +35,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 	var transferImage bool
 	cmd := &cobra.Command{
 		Use:   "dev TYPE/NAME [-c CONTAINER] [flags] -- [args...]",
-		Short: i18n.T("Startup your kubernetes workloads in local Docker container with same volume、env、and network"),
+		Short: i18n.T("Startup your kubernetes workloads in local Docker container"),
 		Long: templates.LongDesc(i18n.T(`
 Startup your kubernetes workloads in local Docker container with same volume、env、and network
 
@@ -75,6 +75,15 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 		Args:                  cobra.MatchAll(cobra.OnlyValidArgs),
 		DisableFlagsInUseLine: true,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				fmt.Fprintf(os.Stdout, "You must specify the type of resource to proxy. %s\n\n", cmdutil.SuggestAPIResources("kubevpn"))
+				fullCmdName := cmd.Parent().CommandPath()
+				usageString := "Required resource not specified."
+				if len(fullCmdName) > 0 && cmdutil.IsSiblingCommandExists(cmd, "explain") {
+					usageString = fmt.Sprintf("%s\nUse \"%s explain <resource>\" for a detailed description of that resource (e.g. %[2]s explain pods).", usageString, fullCmdName)
+				}
+				return cmdutil.UsageErrorf(cmd, usageString)
+			}
 			err = cmd.Flags().Parse(args[1:])
 			if err != nil {
 				return err
