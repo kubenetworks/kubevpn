@@ -81,7 +81,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	var b []byte
 	b, err = k8sjson.Marshal(restorePatch)
 	if err != nil {
-		log.Error("marshal patch error: %v", err)
+		log.Errorf("marshal patch error: %v", err)
 		return err
 	}
 
