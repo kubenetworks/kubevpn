@@ -1,14 +1,12 @@
 package cmds
 
 import (
-	"os"
-
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
+	"os"
 
-	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -33,14 +31,13 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────┘
 		kubevpn ssh --ssh-alias <alias>
 `)),
-		PreRun: func(*cobra.Command, []string) {
+		PreRun: func(cmd *cobra.Command, args []string) {
 			if !util.IsAdmin() {
 				util.RunWithElevated()
 				os.Exit(0)
 			}
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_ = os.Setenv(config.EnvKubeVPNTransportEngine, string(config.EngineGvisor))
 			err := handler.SSH(cmd.Context(), sshConf)
 			return err
 		},

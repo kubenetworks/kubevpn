@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"golang.org/x/crypto/ssh"
 	"net"
 	"net/netip"
+	"os/exec"
 	"strconv"
+	"time"
 
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/ssh"
+
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/core"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -19,28 +23,29 @@ import (
 // 1) start remote kubevpn server
 // 2) start local tunnel
 // 3) ssh terminal
-func SSH(ctx context.Context, config *util.SshConfig) error {
+func SSH(ctx context.Context, sshConfig *util.SshConfig) error {
+	var clientIP = "223.254.0.124/32"
+
 	cancel, cancelFunc := context.WithCancel(ctx)
 	defer cancelFunc()
-	err := portMap(ctx, config)
+	local, err := portMap(ctx, sshConfig)
 	if err != nil {
 		return err
 	}
-	go func() {
-		stdout, stderr, err := util.RemoteRun(config, fmt.Sprintf(`kubevpn serve -L "tcp://:10800" -L "tun://127.0.0.1:8422?net=223.254.0.123/32"`), nil)
-		if err != nil {
-			log.Errorf("run error: %v", err)
-			log.Errorf("run stdout: %v", string(stdout))
-			log.Errorf("run stderr: %v", string(stderr))
-			cancelFunc()
-		}
-	}()
-
+	cmd := fmt.Sprintf(`export %s=%s && kubevpn ssh-daemon --client-ip %s`, config.EnvStartSudoKubeVPNByKubeVPN, "true", clientIP)
+	env := map[string]string{config.EnvStartSudoKubeVPNByKubeVPN: "true"}
+	serverIP, stderr, err := util.RemoteRun(sshConfig, cmd, env)
+	if err != nil {
+		log.Errorf("run error: %v", err)
+		log.Errorf("run stdout: %v", string(serverIP))
+		log.Errorf("run stderr: %v", string(stderr))
+		return err
+	}
 	r := core.Route{
 		ServeNodes: []string{
-			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", "223.254.0.124/32", "223.254.0.124/32"),
+			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", clientIP, string(serverIP)),
 		},
-		ChainNode: "tcp://172.17.64.35:10800",
+		ChainNode: fmt.Sprintf("tcp://127.0.0.1:%d", local),
 		Retries:   5,
 	}
 	servers, err := Parse(r)
@@ -52,19 +57,32 @@ func SSH(ctx context.Context, config *util.SshConfig) error {
 		log.Error(Run(cancel, servers))
 	}()
 	log.Info("tunnel connected")
+	go func() {
+		ticker := time.NewTicker(time.Second * 2)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = exec.CommandContext(ctx, "ping", "-c", "4", "223.254.0.124").Run()
+		}
+	}()
 	<-cancel.Done()
 	return err
 }
 
-func portMap(ctx context.Context, conf *util.SshConfig) (err error) {
-	port := 10800
+func portMap(ctx context.Context, conf *util.SshConfig) (localPort int, err error) {
+	removePort := 10800
+	localPort, err = util.GetAvailableTCPPortOrDie()
+	if err != nil {
+		return
+	}
 	var remote netip.AddrPort
-	remote, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	remote, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(removePort)))
 	if err != nil {
 		return
 	}
 	var local netip.AddrPort
-	local, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	local, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort)))
 	if err != nil {
 		return
 	}

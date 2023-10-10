@@ -1040,6 +1040,185 @@ func (x *ConfigAddRequest) GetSshJump() *SshJump {
 	return nil
 }
 
+type SshStartRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	ClientIP string `protobuf:"bytes,1,opt,name=ClientIP,proto3" json:"ClientIP,omitempty"`
+}
+
+func (x *SshStartRequest) Reset() {
+	*x = SshStartRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_daemon_proto_msgTypes[17]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SshStartRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SshStartRequest) ProtoMessage() {}
+
+func (x *SshStartRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[17]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SshStartRequest.ProtoReflect.Descriptor instead.
+func (*SshStartRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *SshStartRequest) GetClientIP() string {
+	if x != nil {
+		return x.ClientIP
+	}
+	return ""
+}
+
+type SshStartResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	ServerIP string `protobuf:"bytes,1,opt,name=ServerIP,proto3" json:"ServerIP,omitempty"`
+}
+
+func (x *SshStartResponse) Reset() {
+	*x = SshStartResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_daemon_proto_msgTypes[18]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SshStartResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SshStartResponse) ProtoMessage() {}
+
+func (x *SshStartResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[18]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SshStartResponse.ProtoReflect.Descriptor instead.
+func (*SshStartResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *SshStartResponse) GetServerIP() string {
+	if x != nil {
+		return x.ServerIP
+	}
+	return ""
+}
+
+type SshStopRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	ClientIP string `protobuf:"bytes,1,opt,name=ClientIP,proto3" json:"ClientIP,omitempty"`
+}
+
+func (x *SshStopRequest) Reset() {
+	*x = SshStopRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_daemon_proto_msgTypes[19]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SshStopRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SshStopRequest) ProtoMessage() {}
+
+func (x *SshStopRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[19]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SshStopRequest.ProtoReflect.Descriptor instead.
+func (*SshStopRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *SshStopRequest) GetClientIP() string {
+	if x != nil {
+		return x.ClientIP
+	}
+	return ""
+}
+
+type SshStopResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *SshStopResponse) Reset() {
+	*x = SshStopResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_daemon_proto_msgTypes[20]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SshStopResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SshStopResponse) ProtoMessage() {}
+
+func (x *SshStopResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[20]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SshStopResponse.ProtoReflect.Descriptor instead.
+func (*SshStopResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{20}
+}
+
 type ConfigAddResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -1051,7 +1230,7 @@ type ConfigAddResponse struct {
 func (x *ConfigAddResponse) Reset() {
 	*x = ConfigAddResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_daemon_proto_msgTypes[17]
+		mi := &file_daemon_proto_msgTypes[21]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1064,7 +1243,7 @@ func (x *ConfigAddResponse) String() string {
 func (*ConfigAddResponse) ProtoMessage() {}
 
 func (x *ConfigAddResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[17]
+	mi := &file_daemon_proto_msgTypes[21]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1077,7 +1256,7 @@ func (x *ConfigAddResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigAddResponse.ProtoReflect.Descriptor instead.
 func (*ConfigAddResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{17}
+	return file_daemon_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ConfigAddResponse) GetClusterID() string {
@@ -1098,7 +1277,7 @@ type ConfigRemoveRequest struct {
 func (x *ConfigRemoveRequest) Reset() {
 	*x = ConfigRemoveRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_daemon_proto_msgTypes[18]
+		mi := &file_daemon_proto_msgTypes[22]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1111,7 +1290,7 @@ func (x *ConfigRemoveRequest) String() string {
 func (*ConfigRemoveRequest) ProtoMessage() {}
 
 func (x *ConfigRemoveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[18]
+	mi := &file_daemon_proto_msgTypes[22]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1124,7 +1303,7 @@ func (x *ConfigRemoveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigRemoveRequest.ProtoReflect.Descriptor instead.
 func (*ConfigRemoveRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{18}
+	return file_daemon_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ConfigRemoveRequest) GetClusterID() string {
@@ -1143,7 +1322,7 @@ type ConfigRemoveResponse struct {
 func (x *ConfigRemoveResponse) Reset() {
 	*x = ConfigRemoveResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_daemon_proto_msgTypes[19]
+		mi := &file_daemon_proto_msgTypes[23]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1156,7 +1335,7 @@ func (x *ConfigRemoveResponse) String() string {
 func (*ConfigRemoveResponse) ProtoMessage() {}
 
 func (x *ConfigRemoveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[19]
+	mi := &file_daemon_proto_msgTypes[23]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1169,7 +1348,7 @@ func (x *ConfigRemoveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigRemoveResponse.ProtoReflect.Descriptor instead.
 func (*ConfigRemoveResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{19}
+	return file_daemon_proto_rawDescGZIP(), []int{23}
 }
 
 type LogRequest struct {
@@ -1183,7 +1362,7 @@ type LogRequest struct {
 func (x *LogRequest) Reset() {
 	*x = LogRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_daemon_proto_msgTypes[20]
+		mi := &file_daemon_proto_msgTypes[24]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1196,7 +1375,7 @@ func (x *LogRequest) String() string {
 func (*LogRequest) ProtoMessage() {}
 
 func (x *LogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[20]
+	mi := &file_daemon_proto_msgTypes[24]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1209,7 +1388,7 @@ func (x *LogRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogRequest.ProtoReflect.Descriptor instead.
 func (*LogRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{20}
+	return file_daemon_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *LogRequest) GetFollow() bool {
@@ -1230,7 +1409,7 @@ type LogResponse struct {
 func (x *LogResponse) Reset() {
 	*x = LogResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_daemon_proto_msgTypes[21]
+		mi := &file_daemon_proto_msgTypes[25]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1243,7 +1422,7 @@ func (x *LogResponse) String() string {
 func (*LogResponse) ProtoMessage() {}
 
 func (x *LogResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[21]
+	mi := &file_daemon_proto_msgTypes[25]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1256,7 +1435,7 @@ func (x *LogResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogResponse.ProtoReflect.Descriptor instead.
 func (*LogResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{21}
+	return file_daemon_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *LogResponse) GetMessage() string {
@@ -1275,7 +1454,7 @@ type ListRequest struct {
 func (x *ListRequest) Reset() {
 	*x = ListRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_daemon_proto_msgTypes[22]
+		mi := &file_daemon_proto_msgTypes[26]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1288,7 +1467,7 @@ func (x *ListRequest) String() string {
 func (*ListRequest) ProtoMessage() {}
 
 func (x *ListRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[22]
+	mi := &file_daemon_proto_msgTypes[26]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1301,7 +1480,7 @@ func (x *ListRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRequest.ProtoReflect.Descriptor instead.
 func (*ListRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{22}
+	return file_daemon_proto_rawDescGZIP(), []int{26}
 }
 
 type ListResponse struct {
@@ -1315,7 +1494,7 @@ type ListResponse struct {
 func (x *ListResponse) Reset() {
 	*x = ListResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_daemon_proto_msgTypes[23]
+		mi := &file_daemon_proto_msgTypes[27]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1328,7 +1507,7 @@ func (x *ListResponse) String() string {
 func (*ListResponse) ProtoMessage() {}
 
 func (x *ListResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[23]
+	mi := &file_daemon_proto_msgTypes[27]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1341,7 +1520,7 @@ func (x *ListResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListResponse.ProtoReflect.Descriptor instead.
 func (*ListResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{23}
+	return file_daemon_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ListResponse) GetMessage() string {
@@ -1363,7 +1542,7 @@ type GetRequest struct {
 func (x *GetRequest) Reset() {
 	*x = GetRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_daemon_proto_msgTypes[24]
+		mi := &file_daemon_proto_msgTypes[28]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1376,7 +1555,7 @@ func (x *GetRequest) String() string {
 func (*GetRequest) ProtoMessage() {}
 
 func (x *GetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[24]
+	mi := &file_daemon_proto_msgTypes[28]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1389,7 +1568,7 @@ func (x *GetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRequest.ProtoReflect.Descriptor instead.
 func (*GetRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{24}
+	return file_daemon_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *GetRequest) GetNamespace() string {
@@ -1417,7 +1596,7 @@ type GetResponse struct {
 func (x *GetResponse) Reset() {
 	*x = GetResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_daemon_proto_msgTypes[25]
+		mi := &file_daemon_proto_msgTypes[29]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1430,7 +1609,7 @@ func (x *GetResponse) String() string {
 func (*GetResponse) ProtoMessage() {}
 
 func (x *GetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[25]
+	mi := &file_daemon_proto_msgTypes[29]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1443,7 +1622,7 @@ func (x *GetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetResponse.ProtoReflect.Descriptor instead.
 func (*GetResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{25}
+	return file_daemon_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *GetResponse) GetMetadata() []*Metadata {
@@ -1465,7 +1644,7 @@ type Metadata struct {
 func (x *Metadata) Reset() {
 	*x = Metadata{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_daemon_proto_msgTypes[26]
+		mi := &file_daemon_proto_msgTypes[30]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1478,7 +1657,7 @@ func (x *Metadata) String() string {
 func (*Metadata) ProtoMessage() {}
 
 func (x *Metadata) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[26]
+	mi := &file_daemon_proto_msgTypes[30]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1491,7 +1670,7 @@ func (x *Metadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Metadata.ProtoReflect.Descriptor instead.
 func (*Metadata) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{26}
+	return file_daemon_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *Metadata) GetName() string {
@@ -1520,7 +1699,7 @@ type UpgradeRequest struct {
 func (x *UpgradeRequest) Reset() {
 	*x = UpgradeRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_daemon_proto_msgTypes[27]
+		mi := &file_daemon_proto_msgTypes[31]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1533,7 +1712,7 @@ func (x *UpgradeRequest) String() string {
 func (*UpgradeRequest) ProtoMessage() {}
 
 func (x *UpgradeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[27]
+	mi := &file_daemon_proto_msgTypes[31]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1546,7 +1725,7 @@ func (x *UpgradeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpgradeRequest.ProtoReflect.Descriptor instead.
 func (*UpgradeRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{27}
+	return file_daemon_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *UpgradeRequest) GetClientVersion() string {
@@ -1574,7 +1753,7 @@ type UpgradeResponse struct {
 func (x *UpgradeResponse) Reset() {
 	*x = UpgradeResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_daemon_proto_msgTypes[28]
+		mi := &file_daemon_proto_msgTypes[32]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1587,7 +1766,7 @@ func (x *UpgradeResponse) String() string {
 func (*UpgradeResponse) ProtoMessage() {}
 
 func (x *UpgradeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[28]
+	mi := &file_daemon_proto_msgTypes[32]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1600,7 +1779,7 @@ func (x *UpgradeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpgradeResponse.ProtoReflect.Descriptor instead.
 func (*UpgradeResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{28}
+	return file_daemon_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *UpgradeResponse) GetNeedUpgrade() bool {
@@ -1626,7 +1805,7 @@ type SshJump struct {
 func (x *SshJump) Reset() {
 	*x = SshJump{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_daemon_proto_msgTypes[29]
+		mi := &file_daemon_proto_msgTypes[33]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1639,7 +1818,7 @@ func (x *SshJump) String() string {
 func (*SshJump) ProtoMessage() {}
 
 func (x *SshJump) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[29]
+	mi := &file_daemon_proto_msgTypes[33]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1652,7 +1831,7 @@ func (x *SshJump) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SshJump.ProtoReflect.Descriptor instead.
 func (*SshJump) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{29}
+	return file_daemon_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *SshJump) GetAddr() string {
@@ -1819,7 +1998,17 @@ var file_daemon_proto_rawDesc = []byte{
 	0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x4e, 0x61, 0x6d, 0x65, 0x73, 0x70, 0x61,
 	0x63, 0x65, 0x12, 0x26, 0x0a, 0x07, 0x53, 0x73, 0x68, 0x4a, 0x75, 0x6d, 0x70, 0x18, 0x03, 0x20,
 	0x01, 0x28, 0x0b, 0x32, 0x0c, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x53, 0x73, 0x68, 0x4a, 0x75, 0x6d,
-	0x70, 0x52, 0x07, 0x53, 0x73, 0x68, 0x4a, 0x75, 0x6d, 0x70, 0x22, 0x31, 0x0a, 0x11, 0x43, 0x6f,
+	0x70, 0x52, 0x07, 0x53, 0x73, 0x68, 0x4a, 0x75, 0x6d, 0x70, 0x22, 0x2d, 0x0a, 0x0f, 0x53, 0x73,
+	0x68, 0x53, 0x74, 0x61, 0x72, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x1a, 0x0a,
+	0x08, 0x43, 0x6c, 0x69, 0x65, 0x6e, 0x74, 0x49, 0x50, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52,
+	0x08, 0x43, 0x6c, 0x69, 0x65, 0x6e, 0x74, 0x49, 0x50, 0x22, 0x2e, 0x0a, 0x10, 0x53, 0x73, 0x68,
+	0x53, 0x74, 0x61, 0x72, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x1a, 0x0a,
+	0x08, 0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x49, 0x50, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52,
+	0x08, 0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x49, 0x50, 0x22, 0x2c, 0x0a, 0x0e, 0x53, 0x73, 0x68,
+	0x53, 0x74, 0x6f, 0x70, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x1a, 0x0a, 0x08, 0x43,
+	0x6c, 0x69, 0x65, 0x6e, 0x74, 0x49, 0x50, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x43,
+	0x6c, 0x69, 0x65, 0x6e, 0x74, 0x49, 0x50, 0x22, 0x11, 0x0a, 0x0f, 0x53, 0x73, 0x68, 0x53, 0x74,
+	0x6f, 0x70, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x31, 0x0a, 0x11, 0x43, 0x6f,
 	0x6e, 0x66, 0x69, 0x67, 0x41, 0x64, 0x64, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12,
 	0x1c, 0x0a, 0x09, 0x43, 0x6c, 0x75, 0x73, 0x74, 0x65, 0x72, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01,
 	0x28, 0x09, 0x52, 0x09, 0x43, 0x6c, 0x75, 0x73, 0x74, 0x65, 0x72, 0x49, 0x44, 0x22, 0x33, 0x0a,
@@ -1869,7 +2058,7 @@ var file_daemon_proto_rawDesc = []byte{
 	0x69, 0x61, 0x73, 0x12, 0x2a, 0x0a, 0x10, 0x52, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x4b, 0x75, 0x62,
 	0x65, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x18, 0x06, 0x20, 0x01, 0x28, 0x09, 0x52, 0x10, 0x52,
 	0x65, 0x6d, 0x6f, 0x74, 0x65, 0x4b, 0x75, 0x62, 0x65, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x32,
-	0xc1, 0x06, 0x0a, 0x06, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x12, 0x38, 0x0a, 0x07, 0x43, 0x6f,
+	0xb4, 0x07, 0x0a, 0x06, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x12, 0x38, 0x0a, 0x07, 0x43, 0x6f,
 	0x6e, 0x6e, 0x65, 0x63, 0x74, 0x12, 0x13, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x43, 0x6f, 0x6e, 0x6e,
 	0x65, 0x63, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x14, 0x2e, 0x72, 0x70, 0x63,
 	0x2e, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
@@ -1899,30 +2088,37 @@ var file_daemon_proto_rawDesc = []byte{
 	0x70, 0x63, 0x2e, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x52, 0x65, 0x6d, 0x6f, 0x76, 0x65, 0x52,
 	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x19, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x43, 0x6f, 0x6e,
 	0x66, 0x69, 0x67, 0x52, 0x65, 0x6d, 0x6f, 0x76, 0x65, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
-	0x65, 0x22, 0x00, 0x12, 0x2d, 0x0a, 0x04, 0x4c, 0x6f, 0x67, 0x73, 0x12, 0x0f, 0x2e, 0x72, 0x70,
-	0x63, 0x2e, 0x4c, 0x6f, 0x67, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x10, 0x2e, 0x72,
-	0x70, 0x63, 0x2e, 0x4c, 0x6f, 0x67, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00,
-	0x30, 0x01, 0x12, 0x2d, 0x0a, 0x04, 0x4c, 0x69, 0x73, 0x74, 0x12, 0x10, 0x2e, 0x72, 0x70, 0x63,
-	0x2e, 0x4c, 0x69, 0x73, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x11, 0x2e, 0x72,
-	0x70, 0x63, 0x2e, 0x4c, 0x69, 0x73, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22,
-	0x00, 0x12, 0x2a, 0x0a, 0x03, 0x47, 0x65, 0x74, 0x12, 0x0f, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x47,
-	0x65, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x10, 0x2e, 0x72, 0x70, 0x63, 0x2e,
-	0x47, 0x65, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x36, 0x0a,
-	0x07, 0x55, 0x70, 0x67, 0x72, 0x61, 0x64, 0x65, 0x12, 0x13, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x55,
-	0x70, 0x67, 0x72, 0x61, 0x64, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x14, 0x2e,
-	0x72, 0x70, 0x63, 0x2e, 0x55, 0x70, 0x67, 0x72, 0x61, 0x64, 0x65, 0x52, 0x65, 0x73, 0x70, 0x6f,
-	0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x33, 0x0a, 0x06, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x12,
-	0x12, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x65, 0x71, 0x75,
-	0x65, 0x73, 0x74, 0x1a, 0x13, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73,
-	0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x36, 0x0a, 0x07, 0x56, 0x65,
-	0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x13, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x56, 0x65, 0x72, 0x73,
-	0x69, 0x6f, 0x6e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x14, 0x2e, 0x72, 0x70, 0x63,
-	0x2e, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
-	0x22, 0x00, 0x12, 0x2f, 0x0a, 0x04, 0x51, 0x75, 0x69, 0x74, 0x12, 0x10, 0x2e, 0x72, 0x70, 0x63,
-	0x2e, 0x51, 0x75, 0x69, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x11, 0x2e, 0x72,
-	0x70, 0x63, 0x2e, 0x51, 0x75, 0x69, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22,
-	0x00, 0x30, 0x01, 0x42, 0x07, 0x5a, 0x05, 0x2e, 0x3b, 0x72, 0x70, 0x63, 0x62, 0x06, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x33,
+	0x65, 0x22, 0x00, 0x12, 0x39, 0x0a, 0x08, 0x53, 0x73, 0x68, 0x53, 0x74, 0x61, 0x72, 0x74, 0x12,
+	0x14, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x53, 0x73, 0x68, 0x53, 0x74, 0x61, 0x72, 0x74, 0x52, 0x65,
+	0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x15, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x53, 0x73, 0x68, 0x53,
+	0x74, 0x61, 0x72, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x36,
+	0x0a, 0x07, 0x53, 0x73, 0x68, 0x53, 0x74, 0x6f, 0x70, 0x12, 0x13, 0x2e, 0x72, 0x70, 0x63, 0x2e,
+	0x53, 0x73, 0x68, 0x53, 0x74, 0x6f, 0x70, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x14,
+	0x2e, 0x72, 0x70, 0x63, 0x2e, 0x53, 0x73, 0x68, 0x53, 0x74, 0x6f, 0x70, 0x52, 0x65, 0x73, 0x70,
+	0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x2d, 0x0a, 0x04, 0x4c, 0x6f, 0x67, 0x73, 0x12, 0x0f,
+	0x2e, 0x72, 0x70, 0x63, 0x2e, 0x4c, 0x6f, 0x67, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
+	0x10, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x4c, 0x6f, 0x67, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
+	0x65, 0x22, 0x00, 0x30, 0x01, 0x12, 0x2d, 0x0a, 0x04, 0x4c, 0x69, 0x73, 0x74, 0x12, 0x10, 0x2e,
+	0x72, 0x70, 0x63, 0x2e, 0x4c, 0x69, 0x73, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
+	0x11, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x4c, 0x69, 0x73, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
+	0x73, 0x65, 0x22, 0x00, 0x12, 0x2a, 0x0a, 0x03, 0x47, 0x65, 0x74, 0x12, 0x0f, 0x2e, 0x72, 0x70,
+	0x63, 0x2e, 0x47, 0x65, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x10, 0x2e, 0x72,
+	0x70, 0x63, 0x2e, 0x47, 0x65, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00,
+	0x12, 0x36, 0x0a, 0x07, 0x55, 0x70, 0x67, 0x72, 0x61, 0x64, 0x65, 0x12, 0x13, 0x2e, 0x72, 0x70,
+	0x63, 0x2e, 0x55, 0x70, 0x67, 0x72, 0x61, 0x64, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
+	0x1a, 0x14, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x55, 0x70, 0x67, 0x72, 0x61, 0x64, 0x65, 0x52, 0x65,
+	0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x33, 0x0a, 0x06, 0x53, 0x74, 0x61, 0x74,
+	0x75, 0x73, 0x12, 0x12, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52,
+	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x13, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x53, 0x74, 0x61,
+	0x74, 0x75, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x36, 0x0a,
+	0x07, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x13, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x56,
+	0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x14, 0x2e,
+	0x72, 0x70, 0x63, 0x2e, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x73, 0x70, 0x6f,
+	0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x2f, 0x0a, 0x04, 0x51, 0x75, 0x69, 0x74, 0x12, 0x10, 0x2e,
+	0x72, 0x70, 0x63, 0x2e, 0x51, 0x75, 0x69, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
+	0x11, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x51, 0x75, 0x69, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
+	0x73, 0x65, 0x22, 0x00, 0x30, 0x01, 0x42, 0x07, 0x5a, 0x05, 0x2e, 0x3b, 0x72, 0x70, 0x63, 0x62,
+	0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -1937,7 +2133,7 @@ func file_daemon_proto_rawDescGZIP() []byte {
 	return file_daemon_proto_rawDescData
 }
 
-var file_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_daemon_proto_goTypes = []interface{}{
 	(*ConnectRequest)(nil),       // 0: rpc.ConnectRequest
 	(*ConnectResponse)(nil),      // 1: rpc.ConnectResponse
@@ -1956,29 +2152,33 @@ var file_daemon_proto_goTypes = []interface{}{
 	(*VersionRequest)(nil),       // 14: rpc.VersionRequest
 	(*VersionResponse)(nil),      // 15: rpc.VersionResponse
 	(*ConfigAddRequest)(nil),     // 16: rpc.ConfigAddRequest
-	(*ConfigAddResponse)(nil),    // 17: rpc.ConfigAddResponse
-	(*ConfigRemoveRequest)(nil),  // 18: rpc.ConfigRemoveRequest
-	(*ConfigRemoveResponse)(nil), // 19: rpc.ConfigRemoveResponse
-	(*LogRequest)(nil),           // 20: rpc.LogRequest
-	(*LogResponse)(nil),          // 21: rpc.LogResponse
-	(*ListRequest)(nil),          // 22: rpc.ListRequest
-	(*ListResponse)(nil),         // 23: rpc.ListResponse
-	(*GetRequest)(nil),           // 24: rpc.GetRequest
-	(*GetResponse)(nil),          // 25: rpc.GetResponse
-	(*Metadata)(nil),             // 26: rpc.metadata
-	(*UpgradeRequest)(nil),       // 27: rpc.UpgradeRequest
-	(*UpgradeResponse)(nil),      // 28: rpc.UpgradeResponse
-	(*SshJump)(nil),              // 29: rpc.SshJump
-	nil,                          // 30: rpc.ConnectRequest.HeadersEntry
-	nil,                          // 31: rpc.CloneRequest.HeadersEntry
+	(*SshStartRequest)(nil),      // 17: rpc.SshStartRequest
+	(*SshStartResponse)(nil),     // 18: rpc.SshStartResponse
+	(*SshStopRequest)(nil),       // 19: rpc.SshStopRequest
+	(*SshStopResponse)(nil),      // 20: rpc.SshStopResponse
+	(*ConfigAddResponse)(nil),    // 21: rpc.ConfigAddResponse
+	(*ConfigRemoveRequest)(nil),  // 22: rpc.ConfigRemoveRequest
+	(*ConfigRemoveResponse)(nil), // 23: rpc.ConfigRemoveResponse
+	(*LogRequest)(nil),           // 24: rpc.LogRequest
+	(*LogResponse)(nil),          // 25: rpc.LogResponse
+	(*ListRequest)(nil),          // 26: rpc.ListRequest
+	(*ListResponse)(nil),         // 27: rpc.ListResponse
+	(*GetRequest)(nil),           // 28: rpc.GetRequest
+	(*GetResponse)(nil),          // 29: rpc.GetResponse
+	(*Metadata)(nil),             // 30: rpc.metadata
+	(*UpgradeRequest)(nil),       // 31: rpc.UpgradeRequest
+	(*UpgradeResponse)(nil),      // 32: rpc.UpgradeResponse
+	(*SshJump)(nil),              // 33: rpc.SshJump
+	nil,                          // 34: rpc.ConnectRequest.HeadersEntry
+	nil,                          // 35: rpc.CloneRequest.HeadersEntry
 }
 var file_daemon_proto_depIdxs = []int32{
-	30, // 0: rpc.ConnectRequest.Headers:type_name -> rpc.ConnectRequest.HeadersEntry
-	29, // 1: rpc.ConnectRequest.SshJump:type_name -> rpc.SshJump
-	31, // 2: rpc.CloneRequest.Headers:type_name -> rpc.CloneRequest.HeadersEntry
-	29, // 3: rpc.CloneRequest.SshJump:type_name -> rpc.SshJump
-	29, // 4: rpc.ConfigAddRequest.SshJump:type_name -> rpc.SshJump
-	26, // 5: rpc.GetResponse.metadata:type_name -> rpc.metadata
+	34, // 0: rpc.ConnectRequest.Headers:type_name -> rpc.ConnectRequest.HeadersEntry
+	33, // 1: rpc.ConnectRequest.SshJump:type_name -> rpc.SshJump
+	35, // 2: rpc.CloneRequest.Headers:type_name -> rpc.CloneRequest.HeadersEntry
+	33, // 3: rpc.CloneRequest.SshJump:type_name -> rpc.SshJump
+	33, // 4: rpc.ConfigAddRequest.SshJump:type_name -> rpc.SshJump
+	30, // 5: rpc.GetResponse.metadata:type_name -> rpc.metadata
 	0,  // 6: rpc.Daemon.Connect:input_type -> rpc.ConnectRequest
 	2,  // 7: rpc.Daemon.Disconnect:input_type -> rpc.DisconnectRequest
 	0,  // 8: rpc.Daemon.Proxy:input_type -> rpc.ConnectRequest
@@ -1986,31 +2186,35 @@ var file_daemon_proto_depIdxs = []int32{
 	6,  // 10: rpc.Daemon.Clone:input_type -> rpc.CloneRequest
 	8,  // 11: rpc.Daemon.Remove:input_type -> rpc.RemoveRequest
 	16, // 12: rpc.Daemon.ConfigAdd:input_type -> rpc.ConfigAddRequest
-	18, // 13: rpc.Daemon.ConfigRemove:input_type -> rpc.ConfigRemoveRequest
-	20, // 14: rpc.Daemon.Logs:input_type -> rpc.LogRequest
-	22, // 15: rpc.Daemon.List:input_type -> rpc.ListRequest
-	24, // 16: rpc.Daemon.Get:input_type -> rpc.GetRequest
-	27, // 17: rpc.Daemon.Upgrade:input_type -> rpc.UpgradeRequest
-	12, // 18: rpc.Daemon.Status:input_type -> rpc.StatusRequest
-	14, // 19: rpc.Daemon.Version:input_type -> rpc.VersionRequest
-	10, // 20: rpc.Daemon.Quit:input_type -> rpc.QuitRequest
-	1,  // 21: rpc.Daemon.Connect:output_type -> rpc.ConnectResponse
-	3,  // 22: rpc.Daemon.Disconnect:output_type -> rpc.DisconnectResponse
-	1,  // 23: rpc.Daemon.Proxy:output_type -> rpc.ConnectResponse
-	5,  // 24: rpc.Daemon.Leave:output_type -> rpc.LeaveResponse
-	7,  // 25: rpc.Daemon.Clone:output_type -> rpc.CloneResponse
-	9,  // 26: rpc.Daemon.Remove:output_type -> rpc.RemoveResponse
-	17, // 27: rpc.Daemon.ConfigAdd:output_type -> rpc.ConfigAddResponse
-	19, // 28: rpc.Daemon.ConfigRemove:output_type -> rpc.ConfigRemoveResponse
-	21, // 29: rpc.Daemon.Logs:output_type -> rpc.LogResponse
-	23, // 30: rpc.Daemon.List:output_type -> rpc.ListResponse
-	25, // 31: rpc.Daemon.Get:output_type -> rpc.GetResponse
-	28, // 32: rpc.Daemon.Upgrade:output_type -> rpc.UpgradeResponse
-	13, // 33: rpc.Daemon.Status:output_type -> rpc.StatusResponse
-	15, // 34: rpc.Daemon.Version:output_type -> rpc.VersionResponse
-	11, // 35: rpc.Daemon.Quit:output_type -> rpc.QuitResponse
-	21, // [21:36] is the sub-list for method output_type
-	6,  // [6:21] is the sub-list for method input_type
+	22, // 13: rpc.Daemon.ConfigRemove:input_type -> rpc.ConfigRemoveRequest
+	17, // 14: rpc.Daemon.SshStart:input_type -> rpc.SshStartRequest
+	19, // 15: rpc.Daemon.SshStop:input_type -> rpc.SshStopRequest
+	24, // 16: rpc.Daemon.Logs:input_type -> rpc.LogRequest
+	26, // 17: rpc.Daemon.List:input_type -> rpc.ListRequest
+	28, // 18: rpc.Daemon.Get:input_type -> rpc.GetRequest
+	31, // 19: rpc.Daemon.Upgrade:input_type -> rpc.UpgradeRequest
+	12, // 20: rpc.Daemon.Status:input_type -> rpc.StatusRequest
+	14, // 21: rpc.Daemon.Version:input_type -> rpc.VersionRequest
+	10, // 22: rpc.Daemon.Quit:input_type -> rpc.QuitRequest
+	1,  // 23: rpc.Daemon.Connect:output_type -> rpc.ConnectResponse
+	3,  // 24: rpc.Daemon.Disconnect:output_type -> rpc.DisconnectResponse
+	1,  // 25: rpc.Daemon.Proxy:output_type -> rpc.ConnectResponse
+	5,  // 26: rpc.Daemon.Leave:output_type -> rpc.LeaveResponse
+	7,  // 27: rpc.Daemon.Clone:output_type -> rpc.CloneResponse
+	9,  // 28: rpc.Daemon.Remove:output_type -> rpc.RemoveResponse
+	21, // 29: rpc.Daemon.ConfigAdd:output_type -> rpc.ConfigAddResponse
+	23, // 30: rpc.Daemon.ConfigRemove:output_type -> rpc.ConfigRemoveResponse
+	18, // 31: rpc.Daemon.SshStart:output_type -> rpc.SshStartResponse
+	20, // 32: rpc.Daemon.SshStop:output_type -> rpc.SshStopResponse
+	25, // 33: rpc.Daemon.Logs:output_type -> rpc.LogResponse
+	27, // 34: rpc.Daemon.List:output_type -> rpc.ListResponse
+	29, // 35: rpc.Daemon.Get:output_type -> rpc.GetResponse
+	32, // 36: rpc.Daemon.Upgrade:output_type -> rpc.UpgradeResponse
+	13, // 37: rpc.Daemon.Status:output_type -> rpc.StatusResponse
+	15, // 38: rpc.Daemon.Version:output_type -> rpc.VersionResponse
+	11, // 39: rpc.Daemon.Quit:output_type -> rpc.QuitResponse
+	23, // [23:40] is the sub-list for method output_type
+	6,  // [6:23] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name
 	6,  // [6:6] is the sub-list for extension extendee
 	0,  // [0:6] is the sub-list for field type_name
@@ -2227,7 +2431,7 @@ func file_daemon_proto_init() {
 			}
 		}
 		file_daemon_proto_msgTypes[17].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ConfigAddResponse); i {
+			switch v := v.(*SshStartRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2239,7 +2443,7 @@ func file_daemon_proto_init() {
 			}
 		}
 		file_daemon_proto_msgTypes[18].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ConfigRemoveRequest); i {
+			switch v := v.(*SshStartResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2251,7 +2455,7 @@ func file_daemon_proto_init() {
 			}
 		}
 		file_daemon_proto_msgTypes[19].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ConfigRemoveResponse); i {
+			switch v := v.(*SshStopRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2263,7 +2467,7 @@ func file_daemon_proto_init() {
 			}
 		}
 		file_daemon_proto_msgTypes[20].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*LogRequest); i {
+			switch v := v.(*SshStopResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2275,7 +2479,7 @@ func file_daemon_proto_init() {
 			}
 		}
 		file_daemon_proto_msgTypes[21].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*LogResponse); i {
+			switch v := v.(*ConfigAddResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2287,7 +2491,7 @@ func file_daemon_proto_init() {
 			}
 		}
 		file_daemon_proto_msgTypes[22].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListRequest); i {
+			switch v := v.(*ConfigRemoveRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2299,7 +2503,7 @@ func file_daemon_proto_init() {
 			}
 		}
 		file_daemon_proto_msgTypes[23].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListResponse); i {
+			switch v := v.(*ConfigRemoveResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2311,7 +2515,7 @@ func file_daemon_proto_init() {
 			}
 		}
 		file_daemon_proto_msgTypes[24].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetRequest); i {
+			switch v := v.(*LogRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2323,7 +2527,7 @@ func file_daemon_proto_init() {
 			}
 		}
 		file_daemon_proto_msgTypes[25].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetResponse); i {
+			switch v := v.(*LogResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2335,7 +2539,7 @@ func file_daemon_proto_init() {
 			}
 		}
 		file_daemon_proto_msgTypes[26].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Metadata); i {
+			switch v := v.(*ListRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2347,7 +2551,7 @@ func file_daemon_proto_init() {
 			}
 		}
 		file_daemon_proto_msgTypes[27].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*UpgradeRequest); i {
+			switch v := v.(*ListResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2359,7 +2563,7 @@ func file_daemon_proto_init() {
 			}
 		}
 		file_daemon_proto_msgTypes[28].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*UpgradeResponse); i {
+			switch v := v.(*GetRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2371,6 +2575,54 @@ func file_daemon_proto_init() {
 			}
 		}
 		file_daemon_proto_msgTypes[29].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_daemon_proto_msgTypes[30].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*Metadata); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_daemon_proto_msgTypes[31].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*UpgradeRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_daemon_proto_msgTypes[32].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*UpgradeResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_daemon_proto_msgTypes[33].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*SshJump); i {
 			case 0:
 				return &v.state
@@ -2389,7 +2641,7 @@ func file_daemon_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_daemon_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   32,
+			NumMessages:   36,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

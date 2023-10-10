@@ -14,6 +14,8 @@ service Daemon {
 
   rpc ConfigAdd (ConfigAddRequest) returns (ConfigAddResponse) {}
   rpc ConfigRemove (ConfigRemoveRequest) returns (ConfigRemoveResponse) {}
+  rpc SshStart (SshStartRequest) returns (SshStartResponse) {}
+  rpc SshStop (SshStopRequest) returns (SshStopResponse) {}
 
   rpc Logs (LogRequest) returns (stream LogResponse) {}
   rpc List (ListRequest) returns (ListResponse) {}
@@ -131,6 +133,22 @@ message ConfigAddRequest {
   string Namespace = 2;
   // ssh jump
   SshJump SshJump = 3;
+}
+
+message SshStartRequest {
+  string ClientIP = 1;
+}
+
+message SshStartResponse {
+  string ServerIP = 1;
+}
+
+message SshStopRequest {
+  string ClientIP = 1;
+}
+
+message SshStopResponse {
+  string ServerIP = 1;
 }
 
 message ConfigAddResponse {
