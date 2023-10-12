@@ -6,6 +6,7 @@ package rpc;
 
 service Daemon {
   rpc Connect (ConnectRequest) returns (stream ConnectResponse) {}
+  rpc ConnectFork (ConnectRequest) returns (stream ConnectResponse) {}
   rpc Disconnect (DisconnectRequest) returns (stream DisconnectResponse) {}
   rpc Proxy (ConnectRequest) returns (stream ConnectResponse) {}
   rpc Leave (LeaveRequest) returns (stream LeaveResponse) {}
@@ -40,8 +41,11 @@ message ConnectRequest {
   bool TransferImage = 10;
   string Image = 11;
 
+  // foreground
+  bool Foreground = 12;
+
   // log level
-  int32 Level = 12;
+  int32 Level = 13;
 }
 
 message ConnectResponse {

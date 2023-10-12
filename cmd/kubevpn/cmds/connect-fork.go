@@ -2,37 +2,33 @@ package cmds
 
 import (
 	"fmt"
-	"io"
-	"os"
-
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
+	"os"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
-	"github.com/wencaiwulue/kubevpn/pkg/daemon"
-	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-func CmdConnect(f cmdutil.Factory) *cobra.Command {
+func CmdConnectFork(f cmdutil.Factory) *cobra.Command {
 	var connect = &handler.ConnectOptions{}
 	var sshConf = &util.SshConfig{}
-	var transferImage, foreground bool
+	var transferImage bool
 	cmd := &cobra.Command{
-		Use:   "connect",
-		Short: i18n.T("Connect to kubernetes cluster network"),
-		Long:  templates.LongDesc(i18n.T(`Connect to kubernetes cluster network`)),
+		Hidden: true,
+		Use:    "connect-fork",
+		Short:  i18n.T("Connect to kubernetes cluster network"),
+		Long:   templates.LongDesc(i18n.T(`Connect to kubernetes cluster network`)),
 		Example: templates.Examples(i18n.T(`
 		# Connect to k8s cluster network
 		kubevpn connect
 
 		# Connect to api-server behind of bastion host or ssh jump host
+		kubevpn connect --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile /Users/naison/.ssh/ssh.pem
 		kubevpn connect --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
 		# it also support ProxyJump, like
@@ -42,66 +38,32 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		kubevpn connect --ssh-alias <alias>
 
 `)),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			// startup daemon process and sudo process
-			return daemon.StartupDaemon(cmd.Context())
+		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
+			util.InitLogger(false)
+			if transferImage {
+				err = util.TransferImage(cmd.Context(), sshConf, config.OriginImage, config.Image, os.Stdout)
+				if err != nil {
+					return err
+				}
+			}
+			return handler.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), true)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bytes, ns, err := util.ConvertToKubeconfigBytes(f)
+			if err := connect.InitClient(f); err != nil {
+				return err
+			}
+			_, err := connect.RentInnerIP(cmd.Context())
 			if err != nil {
 				return err
 			}
-			req := &rpc.ConnectRequest{
-				KubeconfigBytes: string(bytes),
-				Namespace:       ns,
-				ExtraCIDR:       connect.ExtraCIDR,
-				ExtraDomain:     connect.ExtraDomain,
-				UseLocalDNS:     connect.UseLocalDNS,
-				Engine:          string(connect.Engine),
-
-				SshJump:       sshConf.ToRPC(),
-				TransferImage: transferImage,
-				Foreground:    foreground,
-				Image:         config.Image,
-				Level:         int32(log.DebugLevel),
-			}
-			// if is foreground, send to sudo daemon server
-			if foreground {
-				cli := daemon.GetClient(true)
-				resp, err := cli.ConnectFork(cmd.Context(), req)
-				if err != nil {
-					return err
-				}
-				for {
-					recv, err := resp.Recv()
-					if err == io.EOF {
-						break
-					} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
-						return nil
-					} else if err != nil {
-						return err
-					}
-					fmt.Fprint(os.Stdout, recv.GetMessage())
-				}
+			err = connect.DoConnect(cmd.Context())
+			if err != nil {
+				log.Errorln(err)
+				connect.Cleanup()
 			} else {
-				cli := daemon.GetClient(false)
-				resp, err := cli.Connect(cmd.Context(), req)
-				if err != nil {
-					return err
-				}
-				for {
-					recv, err := resp.Recv()
-					if err == io.EOF {
-						break
-					} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
-						return nil
-					} else if err != nil {
-						return err
-					}
-					fmt.Fprint(os.Stdout, recv.GetMessage())
-				}
 				util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 			}
+			<-cmd.Context().Done()
 			return nil
 		},
 	}
@@ -112,7 +74,6 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
 	cmd.Flags().BoolVar(&connect.UseLocalDNS, "use-localdns", false, "if use-lcoaldns is true, kubevpn will start coredns listen at 53 to forward your dns queries. only support on linux now")
 	cmd.Flags().StringVar((*string)(&connect.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
-	cmd.Flags().BoolVar(&foreground, "foreground", false, "foreground hang up")
 
 	addSshFlags(cmd, sshConf)
 	return cmd
