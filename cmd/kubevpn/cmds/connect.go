@@ -1,9 +1,11 @@
 package cmds
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -61,46 +63,49 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 
 				SshJump:       sshConf.ToRPC(),
 				TransferImage: transferImage,
-				Foreground:    foreground,
 				Image:         config.Image,
 				Level:         int32(log.DebugLevel),
 			}
-			// if is foreground, send to sudo daemon server
+			cli := daemon.GetClient(false)
+			resp, err := cli.Connect(cmd.Context(), req)
+			if err != nil {
+				return err
+			}
+			for {
+				recv, err := resp.Recv()
+				if err == io.EOF {
+					break
+				} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
+					return nil
+				} else if err != nil {
+					return err
+				}
+				fmt.Fprint(os.Stdout, recv.GetMessage())
+			}
+			util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
+			// hangup
 			if foreground {
-				cli := daemon.GetClient(true)
-				resp, err := cli.ConnectFork(cmd.Context(), req)
+				// disconnect from cluster network
+				<-cmd.Context().Done()
+
+				now := time.Now()
+				stream, err := cli.Disconnect(context.Background(), &rpc.DisconnectRequest{})
+				fmt.Printf("call api disconnect use %s\n", time.Now().Sub(now).String())
 				if err != nil {
 					return err
 				}
+				var resp *rpc.DisconnectResponse
 				for {
-					recv, err := resp.Recv()
+					resp, err = stream.Recv()
 					if err == io.EOF {
-						break
+						return nil
 					} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
 						return nil
 					} else if err != nil {
 						return err
 					}
-					fmt.Fprint(os.Stdout, recv.GetMessage())
+					fmt.Fprint(os.Stdout, resp.Message)
 				}
-			} else {
-				cli := daemon.GetClient(false)
-				resp, err := cli.Connect(cmd.Context(), req)
-				if err != nil {
-					return err
-				}
-				for {
-					recv, err := resp.Recv()
-					if err == io.EOF {
-						break
-					} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
-						return nil
-					} else if err != nil {
-						return err
-					}
-					fmt.Fprint(os.Stdout, recv.GetMessage())
-				}
-				util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 			}
 			return nil
 		},

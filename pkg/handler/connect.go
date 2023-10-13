@@ -77,7 +77,6 @@ type ConnectOptions struct {
 	ExtraDomain []string
 	UseLocalDNS bool
 	Engine      config.Engine
-	Foreground  bool
 
 	ctx    context.Context
 	cancel context.CancelFunc

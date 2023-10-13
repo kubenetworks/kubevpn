@@ -20,7 +20,6 @@ const _ = grpc.SupportPackageIsVersion7
 
 const (
 	Daemon_Connect_FullMethodName      = "/rpc.Daemon/Connect"
-	Daemon_ConnectFork_FullMethodName  = "/rpc.Daemon/ConnectFork"
 	Daemon_Disconnect_FullMethodName   = "/rpc.Daemon/Disconnect"
 	Daemon_Proxy_FullMethodName        = "/rpc.Daemon/Proxy"
 	Daemon_Leave_FullMethodName        = "/rpc.Daemon/Leave"
@@ -42,7 +41,6 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DaemonClient interface {
 	Connect(ctx context.Context, in *ConnectRequest, opts ...grpc.CallOption) (Daemon_ConnectClient, error)
-	ConnectFork(ctx context.Context, in *ConnectRequest, opts ...grpc.CallOption) (Daemon_ConnectForkClient, error)
 	Disconnect(ctx context.Context, in *DisconnectRequest, opts ...grpc.CallOption) (Daemon_DisconnectClient, error)
 	Proxy(ctx context.Context, in *ConnectRequest, opts ...grpc.CallOption) (Daemon_ProxyClient, error)
 	Leave(ctx context.Context, in *LeaveRequest, opts ...grpc.CallOption) (Daemon_LeaveClient, error)
@@ -99,40 +97,8 @@ func (x *daemonConnectClient) Recv() (*ConnectResponse, error) {
 	return m, nil
 }
 
-func (c *daemonClient) ConnectFork(ctx context.Context, in *ConnectRequest, opts ...grpc.CallOption) (Daemon_ConnectForkClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[1], Daemon_ConnectFork_FullMethodName, opts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &daemonConnectForkClient{stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-type Daemon_ConnectForkClient interface {
-	Recv() (*ConnectResponse, error)
-	grpc.ClientStream
-}
-
-type daemonConnectForkClient struct {
-	grpc.ClientStream
-}
-
-func (x *daemonConnectForkClient) Recv() (*ConnectResponse, error) {
-	m := new(ConnectResponse)
-	if err := x.ClientStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
 func (c *daemonClient) Disconnect(ctx context.Context, in *DisconnectRequest, opts ...grpc.CallOption) (Daemon_DisconnectClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[2], Daemon_Disconnect_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[1], Daemon_Disconnect_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +130,7 @@ func (x *daemonDisconnectClient) Recv() (*DisconnectResponse, error) {
 }
 
 func (c *daemonClient) Proxy(ctx context.Context, in *ConnectRequest, opts ...grpc.CallOption) (Daemon_ProxyClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[3], Daemon_Proxy_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[2], Daemon_Proxy_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +162,7 @@ func (x *daemonProxyClient) Recv() (*ConnectResponse, error) {
 }
 
 func (c *daemonClient) Leave(ctx context.Context, in *LeaveRequest, opts ...grpc.CallOption) (Daemon_LeaveClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[4], Daemon_Leave_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[3], Daemon_Leave_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +194,7 @@ func (x *daemonLeaveClient) Recv() (*LeaveResponse, error) {
 }
 
 func (c *daemonClient) Clone(ctx context.Context, in *CloneRequest, opts ...grpc.CallOption) (Daemon_CloneClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[5], Daemon_Clone_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[4], Daemon_Clone_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +226,7 @@ func (x *daemonCloneClient) Recv() (*CloneResponse, error) {
 }
 
 func (c *daemonClient) Remove(ctx context.Context, in *RemoveRequest, opts ...grpc.CallOption) (Daemon_RemoveClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[6], Daemon_Remove_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[5], Daemon_Remove_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +276,7 @@ func (c *daemonClient) ConfigRemove(ctx context.Context, in *ConfigRemoveRequest
 }
 
 func (c *daemonClient) Logs(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (Daemon_LogsClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[7], Daemon_Logs_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[6], Daemon_Logs_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -387,7 +353,7 @@ func (c *daemonClient) Version(ctx context.Context, in *VersionRequest, opts ...
 }
 
 func (c *daemonClient) Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[8], Daemon_Quit_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[7], Daemon_Quit_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -423,7 +389,6 @@ func (x *daemonQuitClient) Recv() (*QuitResponse, error) {
 // for forward compatibility
 type DaemonServer interface {
 	Connect(*ConnectRequest, Daemon_ConnectServer) error
-	ConnectFork(*ConnectRequest, Daemon_ConnectForkServer) error
 	Disconnect(*DisconnectRequest, Daemon_DisconnectServer) error
 	Proxy(*ConnectRequest, Daemon_ProxyServer) error
 	Leave(*LeaveRequest, Daemon_LeaveServer) error
@@ -447,9 +412,6 @@ type UnimplementedDaemonServer struct {
 
 func (UnimplementedDaemonServer) Connect(*ConnectRequest, Daemon_ConnectServer) error {
 	return status.Errorf(codes.Unimplemented, "method Connect not implemented")
-}
-func (UnimplementedDaemonServer) ConnectFork(*ConnectRequest, Daemon_ConnectForkServer) error {
-	return status.Errorf(codes.Unimplemented, "method ConnectFork not implemented")
 }
 func (UnimplementedDaemonServer) Disconnect(*DisconnectRequest, Daemon_DisconnectServer) error {
 	return status.Errorf(codes.Unimplemented, "method Disconnect not implemented")
@@ -524,27 +486,6 @@ type daemonConnectServer struct {
 }
 
 func (x *daemonConnectServer) Send(m *ConnectResponse) error {
-	return x.ServerStream.SendMsg(m)
-}
-
-func _Daemon_ConnectFork_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(ConnectRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(DaemonServer).ConnectFork(m, &daemonConnectForkServer{stream})
-}
-
-type Daemon_ConnectForkServer interface {
-	Send(*ConnectResponse) error
-	grpc.ServerStream
-}
-
-type daemonConnectForkServer struct {
-	grpc.ServerStream
-}
-
-func (x *daemonConnectForkServer) Send(m *ConnectResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
@@ -861,11 +802,6 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Connect",
 			Handler:       _Daemon_Connect_Handler,
-			ServerStreams: true,
-		},
-		{
-			StreamName:    "ConnectFork",
-			Handler:       _Daemon_ConnectFork_Handler,
 			ServerStreams: true,
 		},
 		{
