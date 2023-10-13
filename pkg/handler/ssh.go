@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"os"
 	"os/exec"
 	"strconv"
 	"time"
@@ -24,6 +25,14 @@ import (
 // 2) start local tunnel
 // 3) ssh terminal
 func SSH(ctx context.Context, sshConfig *util.SshConfig) error {
+	//go func() {
+	//	signals := make(chan os.Signal)
+	//	signal.Notify(signals, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGSTOP)
+	//	for {
+	//		<-signals
+	//	}
+	//}()
+
 	var clientIP = "223.254.0.124/32"
 
 	cancel, cancelFunc := context.WithCancel(ctx)
@@ -66,7 +75,7 @@ func SSH(ctx context.Context, sshConfig *util.SshConfig) error {
 			_ = exec.CommandContext(ctx, "ping", "-c", "4", "223.254.0.124").Run()
 		}
 	}()
-	<-cancel.Done()
+	err = terminal(sshConfig)
 	return err
 }
 
@@ -124,4 +133,33 @@ func portMap(ctx context.Context, conf *util.SshConfig) (localPort int, err erro
 		log.Errorf("ssh proxy err: %v", err)
 		return
 	}
+}
+
+func terminal(conf *util.SshConfig) error {
+	// pre-check network ip connect
+	cli, err := util.DialSshRemote(conf)
+	if err != nil {
+		return err
+	}
+	session, err := cli.NewSession()
+	if err != nil {
+		return err
+	}
+	defer session.Close()
+	session.Stdout = os.Stdout
+	session.Stderr = os.Stderr
+	session.Stdin = os.Stdin
+	modes := ssh.TerminalModes{
+		//ssh.ECHO: 0,
+		//ssh.ECHOCTL:       0,
+		//ssh.TTY_OP_ISPEED: 14400,
+		//ssh.TTY_OP_OSPEED: 14400,
+	}
+	if err := session.RequestPty("xterm", 80, 40, modes); err != nil {
+		return err
+	}
+	if err = session.Shell(); err != nil {
+		return err
+	}
+	return session.Wait()
 }

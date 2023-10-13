@@ -17,10 +17,9 @@ import (
 func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
-		Use:    "ssh",
-		Hidden: true,
-		Short:  "Ssh to jump server",
-		Long:   `Ssh to jump server`,
+		Use:   "ssh",
+		Short: "Ssh to jump server",
+		Long:  `Ssh to jump server`,
 		Example: templates.Examples(i18n.T(`
         # Jump to server behind of bastion host or ssh jump host
 		kubevpn ssh --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
