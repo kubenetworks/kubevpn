@@ -6,7 +6,6 @@ package main
 
 import (
 	"io"
-	"io/ioutil"
 	"math"
 	"net/http"
 	"time"
@@ -46,7 +45,7 @@ func checkRetry(resp *http.Response, err error) bool {
 
 func drainBody(b io.ReadCloser) {
 	defer b.Close()
-	io.Copy(ioutil.Discard, io.LimitReader(b, int64(4096)))
+	io.Copy(io.Discard, io.LimitReader(b, int64(4096)))
 }
 
 func backoff(min, max time.Duration, attemptNum int) time.Duration {
