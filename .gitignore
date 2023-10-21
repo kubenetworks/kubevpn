@@ -20,6 +20,5 @@
 
 # Build artifacts
 bin
-vendor/
 
 *.DS_Store
