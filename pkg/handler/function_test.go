@@ -3,15 +3,11 @@ package handler
 import (
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	json2 "k8s.io/apimachinery/pkg/util/json"
 	"net"
 	"net/http"
 	"os/exec"
 	"reflect"
 	"runtime"
-	"sigs.k8s.io/yaml"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +16,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	json2 "k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
@@ -27,6 +25,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -308,24 +307,16 @@ func server(port int) {
 
 func kubevpnConnect(t *testing.T) {
 	ctx2, timeoutFunc := context.WithTimeout(context.Background(), 2*time.Hour)
+	defer timeoutFunc()
 
-	cmd := exec.Command("kubevpn", "proxy", "--debug", "deployments/reviews")
-	go func() {
-		stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) {
-			ok := strings.Contains(log, "dns service ok")
-			if ok {
-				timeoutFunc()
-			}
-		})
-		defer timeoutFunc()
-		if err != nil {
-			t.Log(stdout, stderr)
-			t.Error(err)
-			t.Fail()
-			return
-		}
-	}()
-	<-ctx2.Done()
+	cmd := exec.CommandContext(ctx2, "kubevpn", "proxy", "--debug", "deployments/reviews")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Log(string(output))
+		t.Error(err)
+		t.Fail()
+		return
+	}
 }
 
 func init1() {
