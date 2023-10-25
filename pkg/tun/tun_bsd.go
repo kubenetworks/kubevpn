@@ -67,10 +67,6 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		}
 	}
 
-	if err = os.Setenv(config.EnvTunNameOrLUID, ifce.Name()); err != nil {
-		return nil, nil, err
-	}
-
 	if err = addTunRoutes(ifce.Name(), cfg.Routes...); err != nil {
 		return
 	}
@@ -105,8 +101,4 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 		}
 	}
 	return nil
-}
-
-func getInterface() (*net.Interface, error) {
-	return net.InterfaceByName(os.Getenv(config.EnvTunNameOrLUID))
 }

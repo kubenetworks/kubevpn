@@ -81,7 +81,11 @@ func (c *ConnectOptions) Cleanup() {
 		c.cancel()
 	}
 	RollbackFuncList = RollbackFuncList[:]
-	dns.CancelDNS()
+	name, err := c.GetTunDeviceName()
+	if err == nil {
+		log.Errorf("get tun device error: %v", err)
+	}
+	dns.CancelDNS(name)
 	log.Info("clean up successfully")
 	util.CleanExtensionLib()
 }

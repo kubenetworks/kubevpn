@@ -3,7 +3,6 @@ package tun
 import (
 	"errors"
 	"net"
-	"os"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -135,11 +134,6 @@ func (c *tunConn) SetWriteDeadline(time.Time) error {
 }
 
 // AddRoutes for outer called
-func AddRoutes(routes ...types.Route) error {
-	env := os.Getenv(config.EnvTunNameOrLUID)
-	return addTunRoutes(env, routes...)
-}
-
-func GetInterface() (*net.Interface, error) {
-	return getInterface()
+func AddRoutes(tunName string, routes ...types.Route) error {
+	return addTunRoutes(tunName, routes...)
 }

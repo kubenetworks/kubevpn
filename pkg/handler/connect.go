@@ -420,8 +420,8 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 		return
 	}
 
-	var tunIface *net.Interface
-	tunIface, err = tun.GetInterface()
+	var tunName string
+	tunName, err = c.GetTunDeviceName()
 	if err != nil {
 		log.Warningf("get tun interface error: %v", err)
 		return
@@ -441,7 +441,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 		}
 		// if route is right, not need add route
 		iface, _, _, errs := r.Route(net.ParseIP(ip))
-		if errs == nil && tunIface.Name == iface.Name {
+		if errs == nil && tunName == iface.Name {
 			return
 		}
 		var mask net.IPMask
@@ -450,7 +450,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 		} else {
 			mask = net.CIDRMask(128, 128)
 		}
-		errs = tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: mask}})
+		errs = tun.AddRoutes(tunName, types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: mask}})
 		if errs != nil {
 			log.Debugf("[route] add route failed, resource: %s, ip: %s,err: %v", resource, ip, err)
 		}
@@ -497,7 +497,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 						}
 					}()
 					w, errs := c.clientset.CoreV1().Pods(podNs).Watch(ctx, metav1.ListOptions{
-						Watch: true, TimeoutSeconds: pointer.Int64(30), ResourceVersion: podList.ResourceVersion,
+						Watch: true, ResourceVersion: podList.ResourceVersion,
 					})
 					if errs != nil {
 						if utilnet.IsConnectionRefused(errs) || apierrors.IsTooManyRequests(errs) {
@@ -573,7 +573,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 						}
 					}()
 					w, errs := c.clientset.CoreV1().Services(svcNs).Watch(ctx, metav1.ListOptions{
-						Watch: true, TimeoutSeconds: pointer.Int64(30), ResourceVersion: serviceList.ResourceVersion,
+						Watch: true, ResourceVersion: serviceList.ResourceVersion,
 					})
 					if errs != nil {
 						if utilnet.IsConnectionRefused(errs) || apierrors.IsTooManyRequests(errs) {
@@ -649,7 +649,11 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 			ns.Insert(item.Name)
 		}
 	}
-	if err = dns.SetupDNS(relovConf, ns.UnsortedList(), c.UseLocalDNS); err != nil {
+	tunName, err := c.GetTunDeviceName()
+	if err != nil {
+		return err
+	}
+	if err = dns.SetupDNS(relovConf, ns.UnsortedList(), c.UseLocalDNS, tunName); err != nil {
 		return err
 	}
 	// dump service in current namespace for support DNS resolve service:port
@@ -1096,8 +1100,8 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 		return err
 	}
 
-	var tunIface *net.Interface
-	tunIface, err = tun.GetInterface()
+	var tunName string
+	tunName, err = c.GetTunDeviceName()
 	if err != nil {
 		log.Errorf("get tun interface failed: %s", err.Error())
 		return err
@@ -1109,7 +1113,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 		}
 		// if route is right, not need add route
 		iface, _, _, errs := r.Route(net.ParseIP(ip))
-		if errs == nil && tunIface.Name == iface.Name {
+		if errs == nil && tunName == iface.Name {
 			return
 		}
 		var mask net.IPMask
@@ -1118,7 +1122,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 		} else {
 			mask = net.CIDRMask(128, 128)
 		}
-		errs = tun.AddRoutes(types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: mask}})
+		errs = tun.AddRoutes(tunName, types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: mask}})
 		if errs != nil {
 			log.Debugf("[route] add route failed, domain: %s, ip: %s,err: %v", resource, ip, err)
 		}
@@ -1285,11 +1289,7 @@ func (c *ConnectOptions) GetLocalTunIPv4() string {
 	if c.localTunIPv4 != nil {
 		return c.localTunIPv4.IP.String()
 	}
-	srcIPv4, _, err := util.GetLocalTunIP()
-	if err != nil {
-		return ""
-	}
-	return srcIPv4.String()
+	return ""
 }
 
 // update to newer image
@@ -1474,4 +1474,19 @@ func (c *ConnectOptions) Equal(a *ConnectOptions) bool {
 		c.Engine == a.Engine &&
 		reflect.DeepEqual(c.ExtraDomain, a.ExtraDomain) &&
 		reflect.DeepEqual(c.ExtraCIDR, a.ExtraCIDR)
+}
+
+func (c *ConnectOptions) GetTunDeviceName() (string, error) {
+	var ips []net.IP
+	if c.localTunIPv4 != nil {
+		ips = append(ips, c.localTunIPv4.IP)
+	}
+	if c.localTunIPv6 != nil {
+		ips = append(ips, c.localTunIPv6.IP)
+	}
+	device, err := util.GetTunDevice(ips...)
+	if err != nil {
+		return "", err
+	}
+	return device.Name, nil
 }

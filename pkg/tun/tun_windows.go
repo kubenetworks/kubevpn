@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"os"
 	"reflect"
-	"strconv"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -18,8 +16,6 @@ import (
 	wintun "golang.zx2c4.com/wintun"
 	wireguardtun "golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
-
-	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
@@ -67,15 +63,16 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		}
 	}
 
-	luid := fmt.Sprintf("%d", tunDevice.(*wireguardtun.NativeTun).LUID())
-	if err = os.Setenv(config.EnvTunNameOrLUID, luid); err != nil {
-		return
+	var tunName string
+	tunName, err = tunDevice.Name()
+	if err != nil {
+		return nil, nil, err
 	}
 
 	_ = ifName.FlushRoutes(windows.AF_INET)
 	_ = ifName.FlushRoutes(windows.AF_INET6)
 
-	if err = addTunRoutes(luid /*cfg.Gateway,*/, cfg.Routes...); err != nil {
+	if err = addTunRoutes(tunName /*cfg.Gateway,*/, cfg.Routes...); err != nil {
 		return
 	}
 	var row *winipcfg.MibIfRow2
@@ -89,12 +86,12 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	return
 }
 
-func addTunRoutes(luid string, routes ...types.Route) error {
-	parseUint, err := strconv.ParseUint(luid, 10, 64)
-	if err != nil {
-		return err
+func addTunRoutes(tunName string, routes ...types.Route) error {
+	name, err2 := net.InterfaceByName(tunName)
+	if err2 != nil {
+		return err2
 	}
-	ifName := winipcfg.LUID(parseUint)
+	ifName := winipcfg.LUIDFromIndex(name.Index)
 	for _, route := range routes {
 		if route.Dst.String() == "" {
 			continue
@@ -175,21 +172,4 @@ func (c *winTunConn) SetReadDeadline(time.Time) error {
 
 func (c *winTunConn) SetWriteDeadline(time.Time) error {
 	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
-}
-
-func getInterface() (*net.Interface, error) {
-	env := os.Getenv(config.EnvTunNameOrLUID)
-	parseUint, err := strconv.ParseUint(env, 10, 64)
-	if err != nil {
-		return nil, err
-	}
-	ifRow, err := winipcfg.LUID(parseUint).Interface()
-	if err != nil {
-		return nil, err
-	}
-	iface, err := net.InterfaceByIndex(int(ifRow.InterfaceIndex))
-	if err != nil {
-		return nil, err
-	}
-	return iface, nil
 }

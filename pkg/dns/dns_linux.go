@@ -18,11 +18,10 @@ import (
 	"github.com/coredns/caddy"
 	_ "github.com/coredns/coredns/core/dnsserver"
 	_ "github.com/coredns/coredns/core/plugin"
-	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
 // systemd-resolve --status, systemd-resolve --flush-caches
-func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, useLocalDNS bool) error {
+func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, useLocalDNS bool, tunName string) error {
 	existNameservers := make([]string, 0)
 	existSearches := make([]string, 0)
 	filename := filepath.Join("/", "etc", "resolv.conf")
@@ -46,10 +45,6 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, useLocalDNS bool)
 		clientConfig.Servers[0] = "127.0.0.1"
 	}
 
-	tunName := os.Getenv(config.EnvTunNameOrLUID)
-	if len(tunName) == 0 {
-		tunName = "tun0"
-	}
 	// TODO consider use https://wiki.debian.org/NetworkManager and nmcli to config DNS
 	// try to solve:
 	// sudo systemd-resolve --set-dns 172.28.64.10 --interface tun0 --set-domain=vke-system.svc.cluster.local --set-domain=svc.cluster.local --set-domain=cluster.local
@@ -108,7 +103,7 @@ func SetupLocalDNS(clientConfig *miekgdns.ClientConfig, existNameservers []strin
 	return nil
 }
 
-func CancelDNS() {
+func CancelDNS(tunName string) {
 	updateHosts("")
 
 	filename := filepath.Join("/", "etc", "resolv.conf")

@@ -5,27 +5,22 @@ package dns
 
 import (
 	"fmt"
+	"net"
 	"net/netip"
-	"os"
 	"os/exec"
-	"strconv"
 
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
-
-	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
-func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, _ bool) error {
-	env := os.Getenv(config.EnvTunNameOrLUID)
-	parseUint, err := strconv.ParseUint(env, 10, 64)
+func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, _ bool, tunName string) error {
+	tun, err := net.InterfaceByName(tunName)
 	if err != nil {
-		log.Errorf("parse %s failed: %s", env, err)
 		return err
 	}
-	luid := winipcfg.LUID(parseUint)
+	luid := winipcfg.LUIDFromIndex(tun.Index)
 	var servers []netip.Addr
 	for _, s := range clientConfig.Servers {
 		var addr netip.Addr
@@ -46,18 +41,13 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, _ bool) error {
 	return nil
 }
 
-func CancelDNS() {
+func CancelDNS(tunName string) {
 	updateHosts("")
-	getenv := os.Getenv(config.EnvTunNameOrLUID)
-	if getenv == "" {
-		return
-	}
-	parseUint, err := strconv.ParseUint(getenv, 10, 64)
+	tun, err := net.InterfaceByName(tunName)
 	if err != nil {
-		log.Errorf("parse %s failed: %s", getenv, err)
 		return
 	}
-	luid := winipcfg.LUID(parseUint)
+	luid := winipcfg.LUIDFromIndex(tun.Index)
 	_ = luid.FlushDNS(windows.AF_INET)
 	_ = luid.FlushRoutes(windows.AF_INET)
 }

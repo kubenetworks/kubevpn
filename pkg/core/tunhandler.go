@@ -237,8 +237,13 @@ func (d *Device) Close() {
 	d.tun.Close()
 }
 
-func heartbeats(in chan<- *DataElem) {
-	srcIPv4, srcIPv6, err := util.GetLocalTunIP()
+func heartbeats(tun net.Conn, in chan<- *DataElem) {
+	conn, err := util.GetTunDeviceByConn(tun)
+	if err != nil {
+		log.Errorf("get tun device error: %s", err.Error())
+		return
+	}
+	srcIPv4, srcIPv6, err := util.GetLocalTunIP(conn.Name)
 	if err != nil {
 		return
 	}
@@ -349,7 +354,7 @@ func (d *Device) Start(ctx context.Context) {
 	}
 	go d.tunInboundHandler(d.tunInbound, d.tunOutbound)
 	go d.writeToTun()
-	go heartbeats(d.tunInbound)
+	go heartbeats(d.tun, d.tunInbound)
 
 	select {
 	case err := <-d.chExit:
@@ -366,6 +371,7 @@ func (d *Device) SetTunInboundHandler(handler func(tunInbound <-chan *DataElem, 
 
 func (h *tunHandler) HandleServer(ctx context.Context, tun net.Conn) {
 	go h.printRoute()
+
 	device := &Device{
 		tun:           tun,
 		thread:        MaxThread,
