@@ -24,7 +24,6 @@ import (
 	v13 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/flowcontrol"
-	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -101,7 +100,7 @@ func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInte
 		default:
 			func() {
 				w, err := serviceInterface.Watch(ctx, v1.ListOptions{
-					Watch: true, TimeoutSeconds: pointer.Int64(30), ResourceVersion: serviceList.ResourceVersion,
+					Watch: true, ResourceVersion: serviceList.ResourceVersion,
 				})
 				if err != nil {
 					if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) {
@@ -142,19 +141,22 @@ func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInte
 }
 
 func updateHosts(str string) error {
-	path := GetHostFile()
+	if len(str) == 0 {
+		return nil
+	}
 
+	path := GetHostFile()
 	file, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
 	split := strings.Split(string(file), "\n")
-	for i := 0; i < len(split); i++ {
-		if strings.Contains(split[i], "KubeVPN") {
-			split = append(split[:i], split[i+1:]...)
-			i--
-		}
-	}
+	//for i := 0; i < len(split); i++ {
+	//	if strings.Contains(split[i], "KubeVPN") {
+	//		split = append(split[:i], split[i+1:]...)
+	//		i--
+	//	}
+	//}
 	var sb strings.Builder
 
 	sb.WriteString(strings.Join(split, "\n"))
@@ -211,6 +213,16 @@ func generateHostsEntry(list []v12.Service, hosts []Entry) string {
 		return entryList[i].Domain > entryList[j].Domain
 	})
 	entryList = append(entryList, hosts...)
+
+	// 判断是否是通的，或者直接用查询是否有同样条目的记录
+	for i := 0; i < len(entryList); i++ {
+		e := entryList[i]
+		host, err := net.LookupHost(e.Domain)
+		if err == nil && sets.NewString(host...).Has(e.IP) {
+			entryList = append(entryList[:i], entryList[i+1:]...)
+			i--
+		}
+	}
 
 	var sb = new(bytes.Buffer)
 	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)

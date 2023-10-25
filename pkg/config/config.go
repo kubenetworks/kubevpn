@@ -62,7 +62,6 @@ const (
 	CniNetName = "cni-net-dir-kubevpn"
 
 	// env name
-	EnvTunNameOrLUID     = "TunNameOrLUID"
 	EnvInboundPodTunIPv4 = "TunIPv4"
 	EnvInboundPodTunIPv6 = "TunIPv6"
 	EnvPodName           = "POD_NAME"

@@ -31,15 +31,15 @@ var resolv = "/etc/resolv.conf"
 // service.namespace.svc:port
 // service.namespace.svc.cluster:port
 // service.namespace.svc.cluster.local:port
-func SetupDNS(config *miekgdns.ClientConfig, ns []string, _ bool) error {
-	usingResolver(config, ns)
+func SetupDNS(config *miekgdns.ClientConfig, ns []string, _ bool, tunName string) error {
+	usingResolver(config, ns, tunName)
 	_ = exec.Command("killall", "mDNSResponderHelper").Run()
 	_ = exec.Command("killall", "-HUP", "mDNSResponder").Run()
 	_ = exec.Command("dscacheutil", "-flushcache").Run()
 	return nil
 }
 
-func usingResolver(clientConfig *miekgdns.ClientConfig, ns []string) {
+func usingResolver(clientConfig *miekgdns.ClientConfig, ns []string, tunName string) {
 	var err error
 	_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
 	if err = os.MkdirAll(filepath.Join("/", "etc", "resolver"), fs.ModePerm); err != nil {
@@ -153,13 +153,13 @@ func toString(config miekgdns.ClientConfig) string {
 	return builder.String()
 }
 
-func CancelDNS() {
+func CancelDNS(tunName string) {
 	if cancel != nil {
 		cancel()
 	}
 	_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
 	//networkCancel()
-	updateHosts("")
+	//updateHosts("")
 }
 
 /*

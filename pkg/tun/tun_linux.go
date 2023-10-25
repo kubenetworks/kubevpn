@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"syscall"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -78,10 +77,6 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		return
 	}
 
-	if err = os.Setenv(config.EnvTunNameOrLUID, name); err != nil {
-		return
-	}
-
 	if err = addTunRoutes(name, cfg.Routes...); err != nil {
 		return
 	}
@@ -111,8 +106,4 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 		}
 	}
 	return nil
-}
-
-func getInterface() (*net.Interface, error) {
-	return net.InterfaceByName(os.Getenv(config.EnvTunNameOrLUID))
 }

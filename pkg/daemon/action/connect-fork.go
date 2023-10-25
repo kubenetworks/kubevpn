@@ -83,7 +83,7 @@ func fork(ctx context.Context, req *rpc.ConnectRequest, out io.Writer) error {
 	}
 
 	env := os.Environ()
-	envKeys := sets.New[string](config.EnvInboundPodTunIPv4, config.EnvInboundPodTunIPv6, config.EnvTunNameOrLUID)
+	envKeys := sets.New[string](config.EnvInboundPodTunIPv4, config.EnvInboundPodTunIPv6)
 	for i := 0; i < len(env); i++ {
 		index := strings.Index(env[i], "=")
 		envKey := env[i][:index]

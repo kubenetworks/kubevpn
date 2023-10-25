@@ -25,6 +25,7 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	go stack.Wait()
 
 	d := &ClientDevice{
+		tun:         tun,
 		tunInbound:  in,
 		tunOutbound: out,
 		chExit:      h.chExit,
@@ -120,6 +121,7 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 }
 
 type ClientDevice struct {
+	tun         net.Conn
 	tunInbound  chan *DataElem
 	tunOutbound chan *DataElem
 	// your main logic
@@ -129,7 +131,7 @@ type ClientDevice struct {
 
 func (d *ClientDevice) Start(ctx context.Context) {
 	go d.tunInboundHandler(d.tunInbound, d.tunOutbound)
-	go heartbeats(d.tunInbound)
+	go heartbeats(d.tun, d.tunInbound)
 
 	select {
 	case err := <-d.chExit:

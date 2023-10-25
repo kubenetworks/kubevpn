@@ -58,9 +58,9 @@ func CmdConnectFork(f cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			err = connect.DoConnect(cmd.Context())
+			defer connect.Cleanup()
 			if err != nil {
 				log.Errorln(err)
-				connect.Cleanup()
 			} else {
 				util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 			}

@@ -74,13 +74,40 @@ func (d *DHCPManager) initDHCP(ctx context.Context) error {
 }
 
 func (d *DHCPManager) RentIPBaseNICAddress(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
-	var v4, v6 net.IP
-	err := d.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
-		if v4, err = ipv4.AllocateNext(); err != nil {
-			return err
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil, nil, err
+	}
+	var isAlreadyExistedFunc = func(ips ...net.IP) bool {
+		for _, addr := range addrs {
+			addrIP, ok := addr.(*net.IPNet)
+			if ok {
+				for _, ip := range ips {
+					if addrIP.IP.Equal(ip) {
+						return true
+					}
+				}
+			}
 		}
-		if v6, err = ipv6.AllocateNext(); err != nil {
-			return err
+		return false
+	}
+	var v4, v6 net.IP
+	err = d.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
+		for {
+			if v4, err = ipv4.AllocateNext(); err != nil {
+				return err
+			}
+			if !isAlreadyExistedFunc(v4) {
+				break
+			}
+		}
+		for {
+			if v6, err = ipv6.AllocateNext(); err != nil {
+				return err
+			}
+			if !isAlreadyExistedFunc(v6) {
+				break
+			}
 		}
 		return
 	})
@@ -91,13 +118,40 @@ func (d *DHCPManager) RentIPBaseNICAddress(ctx context.Context) (*net.IPNet, *ne
 }
 
 func (d *DHCPManager) RentIPRandom(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
-	var v4, v6 net.IP
-	err := d.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
-		if v4, err = ipv4.AllocateNext(); err != nil {
-			return err
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil, nil, err
+	}
+	var isAlreadyExistedFunc = func(ips ...net.IP) bool {
+		for _, addr := range addrs {
+			addrIP, ok := addr.(*net.IPNet)
+			if ok {
+				for _, ip := range ips {
+					if addrIP.IP.Equal(ip) {
+						return true
+					}
+				}
+			}
 		}
-		if v6, err = ipv6.AllocateNext(); err != nil {
-			return err
+		return false
+	}
+	var v4, v6 net.IP
+	err = d.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
+		for {
+			if v4, err = ipv4.AllocateNext(); err != nil {
+				return err
+			}
+			if !isAlreadyExistedFunc(v4) {
+				break
+			}
+		}
+		for {
+			if v6, err = ipv6.AllocateNext(); err != nil {
+				return err
+			}
+			if !isAlreadyExistedFunc(v6) {
+				break
+			}
 		}
 		return
 	})

@@ -5,7 +5,6 @@ package tun
 import (
 	"fmt"
 	"net"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -64,10 +63,6 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		}
 	}
 
-	if err = os.Setenv(config.EnvTunNameOrLUID, name); err != nil {
-		return
-	}
-
 	if err = addTunRoutes(name, cfg.Routes...); err != nil {
 		log.Errorf("add tun routes failed: %v", err)
 		return
@@ -105,8 +100,4 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 		}
 	}
 	return nil
-}
-
-func getInterface() (*net.Interface, error) {
-	return net.InterfaceByName(os.Getenv(config.EnvTunNameOrLUID))
 }
