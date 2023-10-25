@@ -25,8 +25,6 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
-var RollbackFuncList = make([]func(), 2)
-
 func (c *ConnectOptions) addCleanUpResourceHandler() {
 	var stopChan = make(chan os.Signal)
 	signal.Notify(stopChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL)
@@ -67,7 +65,7 @@ func (c *ConnectOptions) Cleanup() {
 			log.Errorf("can not update ref-count: %v", err)
 		}
 	}
-	for _, function := range RollbackFuncList {
+	for _, function := range c.RollbackFuncList {
 		if function != nil {
 			function()
 		}
@@ -80,7 +78,7 @@ func (c *ConnectOptions) Cleanup() {
 	if c.cancel != nil {
 		c.cancel()
 	}
-	RollbackFuncList = RollbackFuncList[:]
+	c.RollbackFuncList = c.RollbackFuncList[:]
 	name, err := c.GetTunDeviceName()
 	if err == nil {
 		log.Errorf("get tun device error: %v", err)

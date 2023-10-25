@@ -67,6 +67,8 @@ type CloneOptions struct {
 	restclient *rest.RESTClient
 	config     *rest.Config
 	factory    cmdutil.Factory
+
+	RollbackFuncList []func()
 }
 
 func (d *CloneOptions) InitClient(f cmdutil.Factory) (err error) {
@@ -187,7 +189,7 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		RollbackFuncList = append(RollbackFuncList, func() {
+		d.RollbackFuncList = append(d.RollbackFuncList, func() {
 			_ = client.Resource(object.Mapping.Resource).Namespace(d.TargetNamespace).Delete(context.Background(), u.GetName(), metav1.DeleteOptions{})
 		})
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {

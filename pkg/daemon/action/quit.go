@@ -29,6 +29,10 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 			log.Errorf("quit: cleanup clone failed: %v", err)
 		}
 	}
+	for _, options := range svr.secondaryConnect {
+		log.Info("quit: cleanup connection")
+		options.Cleanup()
+	}
 	return nil
 }
 

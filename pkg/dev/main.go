@@ -78,6 +78,9 @@ type Options struct {
 	// inner
 	Cli       *client.Client
 	DockerCli *command.DockerCli
+
+	// rollback
+	RollbackFuncList []func()
 }
 
 func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig) error {
@@ -124,7 +127,7 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 		log.Errorf("get env from k8s: %v", err)
 		return err
 	}
-	volume, err := GetVolume(ctx, d.Factory, d.Namespace, pod)
+	volume, err := GetVolume(ctx, d.Factory, d.Namespace, pod, d)
 	if err != nil {
 		log.Errorf("get volume from k8s: %v", err)
 		return err
@@ -213,7 +216,7 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 		}
 	}
 
-	handler.RollbackFuncList = append(handler.RollbackFuncList, func() {
+	d.RollbackFuncList = append(d.RollbackFuncList, func() {
 		_ = runConfigList.Remove(ctx, d.Cli)
 	})
 	err = runConfigList.Run(ctx, volume, d.Cli, d.DockerCli)
@@ -570,7 +573,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 			},
 		)
 		go h.Run(func() error { select {} })
-		handler.RollbackFuncList = append(handler.RollbackFuncList, func() {
+		d.RollbackFuncList = append(d.RollbackFuncList, func() {
 			h.Close()
 		})
 		err = runLogsWaitRunning(cancelCtx, d.DockerCli, id)
