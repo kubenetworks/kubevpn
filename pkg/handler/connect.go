@@ -89,8 +89,9 @@ type ConnectOptions struct {
 	cidrs      []*net.IPNet
 	dhcp       *DHCPManager
 	// needs to give it back to dhcp
-	localTunIPv4 *net.IPNet
-	localTunIPv6 *net.IPNet
+	localTunIPv4     *net.IPNet
+	localTunIPv6     *net.IPNet
+	RollbackFuncList []func()
 
 	apiServerIPs []net.IP
 	extraHost    []dns.Entry
@@ -608,7 +609,7 @@ func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
 	if !util.FindAllowFirewallRule() {
 		util.AddAllowFirewallRule()
 	}
-	RollbackFuncList = append(RollbackFuncList, util.DeleteAllowFirewallRule)
+	c.RollbackFuncList = append(c.RollbackFuncList, util.DeleteAllowFirewallRule)
 	go util.DeleteBlockFirewallRule(ctx)
 }
 

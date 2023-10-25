@@ -29,7 +29,6 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/cp"
 	"github.com/wencaiwulue/kubevpn/pkg/dns"
-	"github.com/wencaiwulue/kubevpn/pkg/handler"
 )
 
 type RunConfig struct {
@@ -195,7 +194,7 @@ func GetDNS(ctx context.Context, f util.Factory, ns, pod string) (*miekgdns.Clie
 }
 
 // GetVolume key format: [container name]-[volume mount name]
-func GetVolume(ctx context.Context, f util.Factory, ns, pod string) (map[string][]mount.Mount, error) {
+func GetVolume(ctx context.Context, f util.Factory, ns, pod string, d *Options) (map[string][]mount.Mount, error) {
 	clientSet, err := f.KubernetesClientSet()
 	if err != nil {
 		return nil, err
@@ -224,7 +223,7 @@ func GetVolume(ctx context.Context, f util.Factory, ns, pod string) (map[string]
 			if volumeMount.SubPath != "" {
 				join = filepath.Join(join, volumeMount.SubPath)
 			}
-			handler.RollbackFuncList = append(handler.RollbackFuncList, func() {
+			d.RollbackFuncList = append(d.RollbackFuncList, func() {
 				_ = os.RemoveAll(join)
 			})
 			// pod-namespace/pod-name:path
