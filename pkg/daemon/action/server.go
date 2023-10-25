@@ -1,11 +1,12 @@
 package action
 
 import (
-	"k8s.io/client-go/metadata/metadatainformer"
-	"k8s.io/client-go/restmapper"
 	"os"
 	"path/filepath"
 	"time"
+
+	"k8s.io/client-go/metadata/metadatainformer"
+	"k8s.io/client-go/restmapper"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
@@ -20,9 +21,10 @@ type Server struct {
 	IsSudo    bool
 	LogFile   *os.File
 
-	t       time.Time
-	connect *handler.ConnectOptions
-	clone   *handler.CloneOptions
+	t                time.Time
+	connect          *handler.ConnectOptions
+	clone            *handler.CloneOptions
+	secondaryConnect []*handler.ConnectOptions
 
 	gr       []*restmapper.APIGroupResources
 	informer metadatainformer.SharedInformerFactory

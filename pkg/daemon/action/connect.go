@@ -76,11 +76,12 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 
 	sshCtx, sshCancel := context.WithCancel(context.Background())
 	handler.RollbackFuncList = append(handler.RollbackFuncList, sshCancel)
-	err = handler.SshJumpAndSetEnv(sshCtx, sshConf, flags, false)
+	var path string
+	path, err = handler.SshJump(sshCtx, sshConf, flags, false)
 	if err != nil {
 		return err
 	}
-	err = svr.connect.InitClient(InitFactory(req.KubeconfigBytes, req.Namespace))
+	err = svr.connect.InitClient(InitFactoryByPath(path, req.Namespace))
 	if err != nil {
 		return err
 	}
@@ -129,11 +130,12 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	})
 	sshCtx, sshCancel := context.WithCancel(context.Background())
 	handler.RollbackFuncList = append(handler.RollbackFuncList, sshCancel)
-	err = handler.SshJumpAndSetEnv(sshCtx, sshConf, flags, true)
+	var path string
+	path, err = handler.SshJump(sshCtx, sshConf, flags, true)
 	if err != nil {
 		return err
 	}
-	err = connect.InitClient(InitFactory(req.KubeconfigBytes, req.Namespace))
+	err = connect.InitClient(InitFactoryByPath(path, req.Namespace))
 	if err != nil {
 		return err
 	}
@@ -224,6 +226,14 @@ func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 		return nil
 	}
 	configFlags.KubeConfig = pointer.String(temp.Name())
+	configFlags.Namespace = pointer.String(ns)
+	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
+	return cmdutil.NewFactory(matchVersionFlags)
+}
+
+func InitFactoryByPath(kubeconfig string, ns string) cmdutil.Factory {
+	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags.KubeConfig = pointer.String(kubeconfig)
 	configFlags.Namespace = pointer.String(ns)
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
 	return cmdutil.NewFactory(matchVersionFlags)

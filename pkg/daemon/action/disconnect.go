@@ -43,15 +43,38 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 	log.SetOutput(out)
 	log.SetLevel(log.InfoLevel)
 
-	if svr.connect != nil {
-		svr.connect.Cleanup()
+	if req.GetAll() {
+		if svr.connect != nil {
+			svr.connect.Cleanup()
+		}
+		if svr.clone != nil {
+			_ = svr.clone.Cleanup()
+		}
+		svr.t = time.Time{}
+		svr.connect = nil
+		svr.clone = nil
+
+		for _, options := range svr.secondaryConnect {
+			options.Cleanup()
+		}
+	} else if req.ID != nil && req.GetID() == 0 {
+		if svr.connect != nil {
+			svr.connect.Cleanup()
+		}
+		if svr.clone != nil {
+			_ = svr.clone.Cleanup()
+		}
+		svr.t = time.Time{}
+		svr.connect = nil
+		svr.clone = nil
+	} else if req.ID != nil {
+		index := req.GetID() - 1
+		if index < int32(len(svr.secondaryConnect)) {
+			svr.secondaryConnect[index].Cleanup()
+		} else {
+			log.Errorf("index %d out of range", req.GetID())
+		}
 	}
-	if svr.clone != nil {
-		_ = svr.clone.Cleanup()
-	}
-	svr.t = time.Time{}
-	svr.connect = nil
-	svr.clone = nil
 	return nil
 }
 

@@ -427,7 +427,6 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 	var tunName string
 	tunName, err = c.GetTunDeviceName()
 	if err != nil {
-		log.Warningf("get tun interface error: %v", err)
 		return
 	}
 
@@ -481,9 +480,6 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 		if pod.Spec.HostNetwork {
 			continue
 		}
-		if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
-			continue
-		}
 		addRouteFunc(pod.Name, pod.Status.PodIP)
 	}
 
@@ -521,18 +517,12 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 							if !ok {
 								return
 							}
-							if e.Type != watch.Added {
-								continue
-							}
 							var pod *v1.Pod
 							pod, ok = e.Object.(*v1.Pod)
 							if !ok {
 								continue
 							}
 							if pod.Spec.HostNetwork {
-								continue
-							}
-							if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
 								continue
 							}
 							addRouteFunc(pod.Name, pod.Status.PodIP)
@@ -596,9 +586,6 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 						case e, ok := <-w.ResultChan():
 							if !ok {
 								return
-							}
-							if e.Type != watch.Added {
-								continue
 							}
 							var svc *v1.Service
 							svc, ok = e.Object.(*v1.Service)
@@ -1493,4 +1480,12 @@ func (c *ConnectOptions) GetTunDeviceName() (string, error) {
 		return "", err
 	}
 	return device.Name, nil
+}
+
+func (c *ConnectOptions) GetKubeconfigContext() string {
+	rawConfig, err := c.GetFactory().ToRawKubeConfigLoader().RawConfig()
+	if err != nil {
+		return ""
+	}
+	return rawConfig.CurrentContext
 }

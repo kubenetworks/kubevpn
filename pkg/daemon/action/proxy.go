@@ -49,11 +49,12 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		Name:     "kubeconfig",
 		DefValue: file,
 	})
-	err = handler.SshJumpAndSetEnv(ctx, sshConf, flags, false)
+	var path string
+	path, err = handler.SshJump(ctx, sshConf, flags, false)
 	if err != nil {
 		return err
 	}
-	err = connect.InitClient(InitFactory(req.KubeconfigBytes, req.Namespace))
+	err = connect.InitClient(InitFactoryByPath(path, req.Namespace))
 	if err != nil {
 		return err
 	}

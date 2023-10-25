@@ -32,9 +32,11 @@ func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 	if err != nil {
 		return nil, err
 	}
-	tunIP, ok := tun.LocalAddr().(*net.IPNet)
-	if !ok {
-		return nil, fmt.Errorf("can not convert conn to ipNet, conn: %v", tun.LocalAddr())
+	var ip string
+	if tunIP, ok := tun.LocalAddr().(*net.IPNet); ok {
+		ip = tunIP.IP.String()
+	} else {
+		ip = tun.LocalAddr().String()
 	}
 	for _, i := range interfaces {
 		addrs, err := i.Addrs()
@@ -42,10 +44,10 @@ func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 			return nil, err
 		}
 		for _, addr := range addrs {
-			if strings.Contains(addr.String(), tunIP.IP.String()) {
+			if strings.Contains(addr.String(), tun.LocalAddr().String()) {
 				return &i, nil
 			}
 		}
 	}
-	return nil, fmt.Errorf("can not found any interface with ip %v", tunIP.IP.String())
+	return nil, fmt.Errorf("can not found any interface with ip %v", ip)
 }
