@@ -204,7 +204,6 @@ func Rollback(f cmdutil.Factory, ns, workload string) {
 func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
-	_ = os.Setenv(config.EnvKubeVPNTransportEngine, string(c.Engine))
 	log.Info("start to connect")
 	if err = c.InitDHCP(c.ctx); err != nil {
 		log.Errorf("init dhcp failed: %s", err.Error())
@@ -392,7 +391,12 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 
 	r := core.Route{
 		ServeNodes: []string{
-			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", c.localTunIPv4.String(), strings.Join(list.UnsortedList(), ",")),
+			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s&%s=%s",
+				c.localTunIPv4.String(),
+				strings.Join(list.UnsortedList(), ","),
+				config.ConfigKubeVPNTransportEngine,
+				string(c.Engine),
+			),
 		},
 		ChainNode: forwardAddress,
 		Retries:   5,

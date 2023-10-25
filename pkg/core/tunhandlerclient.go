@@ -20,7 +20,8 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	}
 	in := make(chan *DataElem, MaxSize)
 	out := make(chan *DataElem, MaxSize)
-	endpoint := NewTunEndpoint(ctx, tun, uint32(config.DefaultMTU), in, out)
+	engine := h.node.Get(config.ConfigKubeVPNTransportEngine)
+	endpoint := NewTunEndpoint(ctx, tun, uint32(config.DefaultMTU), config.Engine(engine), in, out)
 	stack := NewStack(ctx, endpoint)
 	go stack.Wait()
 

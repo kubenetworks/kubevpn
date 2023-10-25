@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"net"
-	"os"
 	"sync"
 
 	"github.com/google/gopacket/layers"
@@ -28,6 +27,7 @@ type tunEndpoint struct {
 	tun      net.Conn
 	once     sync.Once
 	endpoint *channel.Endpoint
+	engine   config.Engine
 
 	in  chan<- *DataElem
 	out chan *DataElem
@@ -99,7 +99,6 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 		// tun --> dispatcher
 		go func() {
 			// full(all use gvisor), mix(cluster network use gvisor), raw(not use gvisor)
-			mode := config.Engine(os.Getenv(config.EnvKubeVPNTransportEngine))
 			for {
 				bytes := config.LPool.Get().([]byte)[:]
 				read, err := e.tun.Read(bytes[:])
@@ -152,7 +151,7 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 				//   mix: cluster network use gvisor, diy network use raw
 				//   raw: all network use raw
 				if (ipProtocol == int(layers.IPProtocolUDP) || ipProtocol == int(layers.IPProtocolUDPLite) || ipProtocol == int(layers.IPProtocolTCP)) &&
-					(mode == config.EngineGvisor || (mode == config.EngineMix && (!config.CIDR.Contains(dst) && !config.CIDR6.Contains(dst)))) {
+					(e.engine == config.EngineGvisor || (e.engine == config.EngineMix && (!config.CIDR.Contains(dst) && !config.CIDR6.Contains(dst)))) {
 					pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 						ReserveHeaderBytes: 0,
 						Payload:            buffer.MakeWithData(bytes[:read]),
@@ -209,12 +208,13 @@ func (e *tunEndpoint) AddHeader(ptr stack.PacketBufferPtr) {
 	return
 }
 
-func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, in chan<- *DataElem, out chan *DataElem) stack.LinkEndpoint {
+func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, engine config.Engine, in chan<- *DataElem, out chan *DataElem) stack.LinkEndpoint {
 	addr, _ := tcpip.ParseMACAddress("02:03:03:04:05:06")
 	return &tunEndpoint{
 		ctx:      ctx,
 		tun:      tun,
 		endpoint: channel.New(tcp.DefaultReceiveBufferSize, mtu, addr),
+		engine:   engine,
 		in:       in,
 		out:      out,
 	}
