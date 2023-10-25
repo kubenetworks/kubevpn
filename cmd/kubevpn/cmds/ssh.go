@@ -8,7 +8,6 @@ import (
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
 
-	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -40,7 +39,6 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			}
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_ = os.Setenv(config.EnvKubeVPNTransportEngine, string(config.EngineGvisor))
 			err := handler.SSH(cmd.Context(), sshConf)
 			return err
 		},

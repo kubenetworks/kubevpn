@@ -90,7 +90,7 @@ const (
 	EnvSSHJump                   = "SSH_JUMP_BY_KUBEVPN"
 
 	// transport mode
-	EnvKubeVPNTransportEngine = "EnvKubeVPNTransportEngine"
+	ConfigKubeVPNTransportEngine = "transport-engine"
 )
 
 var (
