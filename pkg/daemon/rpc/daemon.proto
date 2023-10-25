@@ -53,6 +53,8 @@ message ConnectResponse {
 }
 
 message DisconnectRequest {
+  optional int32 ID = 1;
+  optional bool All = 2;
 }
 
 message DisconnectResponse {

@@ -81,11 +81,12 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 		Name:     "kubeconfig",
 		DefValue: file,
 	})
-	err = handler.SshJumpAndSetEnv(resp.Context(), sshConf, flags, false)
+	var path string
+	path, err = handler.SshJump(resp.Context(), sshConf, flags, false)
 	if err != nil {
 		return err
 	}
-	f := InitFactory(req.KubeconfigBytes, req.Namespace)
+	f := InitFactoryByPath(path, req.Namespace)
 	err = options.InitClient(f)
 	if err != nil {
 		log.Errorf("init client failed: %v", err)
