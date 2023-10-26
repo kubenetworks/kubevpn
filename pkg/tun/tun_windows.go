@@ -91,7 +91,10 @@ func addTunRoutes(tunName string, routes ...types.Route) error {
 	if err2 != nil {
 		return err2
 	}
-	ifName := winipcfg.LUIDFromIndex(name.Index)
+	ifName, err := winipcfg.LUIDFromIndex(uint32(name.Index))
+	if err != nil {
+		return err
+	}
 	for _, route := range routes {
 		if route.Dst.String() == "" {
 			continue

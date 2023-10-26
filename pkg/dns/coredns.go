@@ -9,17 +9,17 @@ type CoreFile struct {
 	Content []byte
 }
 
-// Gets the Caddyfile contents
+// Body Gets the Caddyfile contents
 func (c *CoreFile) Body() []byte {
 	return c.Content
 }
 
-// Gets the path to the origin file
+// Path Gets the path to the origin file
 func (c *CoreFile) Path() string {
 	return "CoreFile"
 }
 
-// The type of server this input is intended for
+// ServerType The type of server this input is intended for
 func (c *CoreFile) ServerType() string {
 	return "dns"
 }

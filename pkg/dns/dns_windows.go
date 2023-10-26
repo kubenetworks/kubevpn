@@ -1,5 +1,4 @@
 //go:build windows
-// +build windows
 
 package dns
 
@@ -9,18 +8,23 @@ import (
 	"net/netip"
 	"os/exec"
 
-	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
-func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, _ bool, tunName string) error {
+func (c *Config) SetupDNS() error {
+	clientConfig := c.Config
+	tunName := c.TunName
+
 	tun, err := net.InterfaceByName(tunName)
 	if err != nil {
 		return err
 	}
-	luid := winipcfg.LUIDFromIndex(tun.Index)
+	luid, err := winipcfg.LUIDFromIndex(uint32(tun.Index))
+	if err != nil {
+		return err
+	}
 	var servers []netip.Addr
 	for _, s := range clientConfig.Servers {
 		var addr netip.Addr
@@ -41,13 +45,16 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, _ bool, tunName s
 	return nil
 }
 
-func CancelDNS(tunName string) {
-	updateHosts("")
-	tun, err := net.InterfaceByName(tunName)
+func (c *Config) CancelDNS() {
+	c.updateHosts("")
+	tun, err := net.InterfaceByName(c.TunName)
 	if err != nil {
 		return
 	}
-	luid := winipcfg.LUIDFromIndex(tun.Index)
+	luid, err := winipcfg.LUIDFromIndex(uint32(tun.Index))
+	if err != nil {
+		return
+	}
 	_ = luid.FlushDNS(windows.AF_INET)
 	_ = luid.FlushRoutes(windows.AF_INET)
 }

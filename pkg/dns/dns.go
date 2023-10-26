@@ -12,85 +12,39 @@ import (
 	"time"
 
 	miekgdns "github.com/miekg/dns"
-	"github.com/pkg/errors"
 	v12 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/kubernetes"
 	v13 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/flowcontrol"
 
-	"github.com/wencaiwulue/kubevpn/pkg/util"
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
-func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) (*miekgdns.ClientConfig, error) {
-	resolvConfStr, err := util.Shell(clientset, restclient, config, podName, "", namespace, []string{"cat", "/etc/resolv.conf"})
-	if err != nil {
-		return nil, err
-	}
-	resolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(resolvConfStr))
-	if err != nil {
-		return nil, err
-	}
-	if ips, err := GetDNSIPFromDnsPod(clientset); err == nil && len(ips) != 0 {
-		resolvConf.Servers = ips
-	}
+type Config struct {
+	Config      *miekgdns.ClientConfig
+	Ns          []string
+	UseLocalDNS bool
+	TunName     string
 
-	// linux nameserver only support amount is 3, so if namespace too much, just use two, left one to system
-	if len(resolvConf.Servers) > 2 {
-		resolvConf.Servers = resolvConf.Servers[:2]
-	}
-
-	return resolvConf, nil
+	Hosts []Entry
 }
 
-func GetDNSIPFromDnsPod(clientset *kubernetes.Clientset) (ips []string, err error) {
-	var serviceList *v12.ServiceList
-	serviceList, err = clientset.CoreV1().Services(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("k8s-app", "kube-dns").String(),
-	})
-	if err != nil {
-		return
-	}
-	for _, item := range serviceList.Items {
-		if len(item.Spec.ClusterIP) != 0 {
-			ips = append(ips, item.Spec.ClusterIP)
-		}
-	}
-	var podList *v12.PodList
-	podList, err = clientset.CoreV1().Pods(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("k8s-app", "kube-dns").String(),
-	})
-	if err == nil {
-		for _, pod := range podList.Items {
-			if pod.Status.Phase == v12.PodRunning && pod.DeletionTimestamp == nil {
-				ips = append(ips, pod.Status.PodIP)
-			}
-		}
-	}
-	if len(ips) == 0 {
-		err = errors.New("can not found any dns service ip")
-		return
-	}
-	err = nil
-	return
-}
-
-func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInterface, hosts ...Entry) {
+func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInterface, hosts ...Entry) {
 	rateLimiter := flowcontrol.NewTokenBucketRateLimiter(0.2, 1)
 	defer rateLimiter.Stop()
 	var last string
 
 	serviceList, err := serviceInterface.List(ctx, v1.ListOptions{})
 	if err == nil && len(serviceList.Items) != 0 {
-		entry := generateHostsEntry(serviceList.Items, hosts)
-		if err = updateHosts(entry); err == nil {
-			last = entry
+		entry := c.generateHostsEntry(serviceList.Items, hosts)
+		if entry != "" {
+			if err = c.updateHosts(entry); err == nil {
+				last = entry
+			}
 		}
 	}
 	for {
@@ -102,6 +56,7 @@ func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInte
 				w, err := serviceInterface.Watch(ctx, v1.ListOptions{
 					Watch: true, ResourceVersion: serviceList.ResourceVersion,
 				})
+
 				if err != nil {
 					if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) {
 						time.Sleep(time.Second * 5)
@@ -111,11 +66,11 @@ func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInte
 				defer w.Stop()
 				for {
 					select {
-					case c, ok := <-w.ResultChan():
+					case event, ok := <-w.ResultChan():
 						if !ok {
 							return
 						}
-						if watch.Error == c.Type || watch.Bookmark == c.Type {
+						if watch.Error == event.Type || watch.Bookmark == event.Type {
 							continue
 						}
 						if !rateLimiter.TryAccept() {
@@ -125,11 +80,14 @@ func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInte
 						if err != nil {
 							return
 						}
-						entry := generateHostsEntry(list.Items, hosts)
+						entry := c.generateHostsEntry(list.Items, hosts)
+						if entry == "" {
+							continue
+						}
 						if entry == last {
 							continue
 						}
-						if err = updateHosts(entry); err != nil {
+						if err = c.updateHosts(entry); err != nil {
 							return
 						}
 						last = entry
@@ -140,46 +98,44 @@ func AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInte
 	}
 }
 
-func updateHosts(str string) error {
-	if len(str) == 0 {
-		return nil
-	}
-
+func (c *Config) updateHosts(str string) error {
 	path := GetHostFile()
 	file, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	split := strings.Split(string(file), "\n")
-	//for i := 0; i < len(split); i++ {
-	//	if strings.Contains(split[i], "KubeVPN") {
-	//		split = append(split[:i], split[i+1:]...)
-	//		i--
-	//	}
-	//}
-	var sb strings.Builder
+	lines := strings.Split(string(file), "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if strings.Contains(line, config.HostsKeyWord) {
+			for _, host := range c.Hosts {
+				if strings.Contains(line, host.Domain) {
+					lines = append(lines[:i], lines[i+1:]...)
+					i--
+				}
+			}
+		}
+	}
+	if len(lines) == 0 {
+		return fmt.Errorf("empty hosts file")
+	}
 
-	sb.WriteString(strings.Join(split, "\n"))
+	var sb strings.Builder
+	sb.WriteString(strings.Join(lines, "\n"))
 	if str != "" {
 		sb.WriteString("\n")
 		sb.WriteString(str)
 	}
-
 	s := sb.String()
 
 	// remove last empty line
-	strList := strings.Split(s, "\n")
-	for {
-		if len(strList) > 0 {
-			if strList[len(strList)-1] == "" {
-				strList = strList[:len(strList)-1]
-				continue
-			}
-		}
-		break
+	s = strings.TrimRight(s, "\n")
+
+	if strings.TrimSpace(s) == "" {
+		return fmt.Errorf("empty content after update")
 	}
 
-	return os.WriteFile(path, []byte(strings.Join(strList, "\n")), 0644)
+	return os.WriteFile(path, []byte(s), 0644)
 }
 
 type Entry struct {
@@ -187,10 +143,11 @@ type Entry struct {
 	Domain string
 }
 
-func generateHostsEntry(list []v12.Service, hosts []Entry) string {
+func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) string {
 	const ServiceKubernetes = "kubernetes"
 	var entryList []Entry
 
+	// get all service ip
 	for _, item := range list {
 		if strings.EqualFold(item.Name, ServiceKubernetes) {
 			continue
@@ -214,7 +171,7 @@ func generateHostsEntry(list []v12.Service, hosts []Entry) string {
 	})
 	entryList = append(entryList, hosts...)
 
-	// 判断是否是通的，或者直接用查询是否有同样条目的记录
+	// if dns already works well, not needs to add it to hosts file
 	for i := 0; i < len(entryList); i++ {
 		e := entryList[i]
 		host, err := net.LookupHost(e.Domain)
@@ -224,11 +181,53 @@ func generateHostsEntry(list []v12.Service, hosts []Entry) string {
 		}
 	}
 
+	// if hosts file already contains item, not needs to add it to hosts file
+	file, err := os.ReadFile(GetHostFile())
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(file), "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		for j := 0; j < len(entryList); j++ {
+			entry := entryList[j]
+			if strings.Contains(line, entry.Domain) && strings.Contains(line, entry.IP) {
+				entryList = append(entryList[:j], entryList[j+1:]...)
+				j--
+			}
+		}
+	}
+
+	c.Hosts = append(c.Hosts, entryList...)
 	var sb = new(bytes.Buffer)
 	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
 	for _, e := range entryList {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.IP, e.Domain, "", "# Add by KubeVPN")
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.IP, e.Domain, "", config.HostsKeyWord)
 	}
 	_ = w.Flush()
 	return sb.String()
+}
+
+func CleanupHosts() error {
+	path := GetHostFile()
+	file, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(file), "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if strings.Contains(line, config.HostsKeyWord) {
+			lines = append(lines[:i], lines[i+1:]...)
+			i--
+		}
+	}
+	if len(lines) == 0 {
+		return fmt.Errorf("empty hosts file")
+	}
+
+	var sb strings.Builder
+	sb.WriteString(strings.Join(lines, "\n"))
+
+	return os.WriteFile(path, []byte(sb.String()), 0644)
 }

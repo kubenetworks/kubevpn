@@ -92,6 +92,7 @@ type ConnectOptions struct {
 	localTunIPv4     *net.IPNet
 	localTunIPv6     *net.IPNet
 	RollbackFuncList []func()
+	dnsConfig        *dns.Config
 
 	apiServerIPs []net.IP
 	extraHost    []dns.Entry
@@ -620,7 +621,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		log.Errorf("get running pod list failed, err: %v", err)
 		return err
 	}
-	relovConf, err := dns.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, pod[0].GetName(), c.Namespace)
+	relovConf, err := util.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, pod[0].GetName(), c.Namespace)
 	if err != nil {
 		log.Errorln(err)
 		return err
@@ -645,11 +646,18 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = dns.SetupDNS(relovConf, ns.UnsortedList(), c.UseLocalDNS, tunName); err != nil {
+	c.dnsConfig = &dns.Config{
+		Config:      relovConf,
+		Ns:          ns.UnsortedList(),
+		UseLocalDNS: c.UseLocalDNS,
+		TunName:     tunName,
+		Hosts:       c.extraHost,
+	}
+	if err = c.dnsConfig.SetupDNS(); err != nil {
 		return err
 	}
 	// dump service in current namespace for support DNS resolve service:port
-	go dns.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.Namespace), c.extraHost...)
+	go c.dnsConfig.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.Namespace), c.extraHost...)
 	return nil
 }
 
@@ -1077,7 +1085,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 	if len(c.ExtraDomain) == 0 {
 		return nil
 	}
-	ips, err := dns.GetDNSIPFromDnsPod(c.clientset)
+	ips, err := util.GetDNSIPFromDnsPod(c.clientset)
 	if err != nil {
 		return err
 	}

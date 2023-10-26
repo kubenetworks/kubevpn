@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 package dns
 
@@ -21,7 +20,11 @@ import (
 )
 
 // systemd-resolve --status, systemd-resolve --flush-caches
-func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, useLocalDNS bool, tunName string) error {
+func (c *Config) SetupDNS() error {
+	clientConfig := c.Config
+	useLocalDNS := c.UseLocalDNS
+	tunName := c.TunName
+
 	existNameservers := make([]string, 0)
 	existSearches := make([]string, 0)
 	filename := filepath.Join("/", "etc", "resolv.conf")
@@ -39,7 +42,7 @@ func SetupDNS(clientConfig *miekgdns.ClientConfig, _ []string, useLocalDNS bool,
 	}
 
 	if useLocalDNS {
-		if err := SetupLocalDNS(clientConfig, existNameservers); err != nil {
+		if err = SetupLocalDNS(clientConfig, existNameservers); err != nil {
 			return err
 		}
 		clientConfig.Servers[0] = "127.0.0.1"
@@ -103,8 +106,8 @@ func SetupLocalDNS(clientConfig *miekgdns.ClientConfig, existNameservers []strin
 	return nil
 }
 
-func CancelDNS(tunName string) {
-	updateHosts("")
+func (c *Config) CancelDNS() {
+	c.updateHosts("")
 
 	filename := filepath.Join("/", "etc", "resolv.conf")
 	_ = os.Rename(getBackupFilename(filename), filename)
