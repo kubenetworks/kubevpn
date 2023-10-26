@@ -93,6 +93,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 				ExtraCIDR:              options.ExtraCIDR,
 				ExtraDomain:            options.ExtraDomain,
 				UseLocalDNS:            options.UseLocalDNS,
+				OriginKubeconfigPath:   util.GetKubeconfigPath(f),
 				Engine:                 string(options.Engine),
 				SshJump:                sshConf.ToRPC(),
 				TargetKubeconfig:       options.TargetKubeconfig,

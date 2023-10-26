@@ -46,6 +46,8 @@ message ConnectRequest {
 
   // log level
   int32 Level = 13;
+
+  string OriginKubeconfigPath = 14;
 }
 
 message ConnectResponse {
@@ -96,6 +98,8 @@ message CloneRequest {
 
   // log level
   int32 Level = 18;
+
+  string OriginKubeconfigPath = 19;
 }
 
 message CloneResponse {

@@ -52,12 +52,13 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			req := &rpc.ConnectRequest{
-				KubeconfigBytes: string(bytes),
-				Namespace:       ns,
-				ExtraCIDR:       connect.ExtraCIDR,
-				ExtraDomain:     connect.ExtraDomain,
-				UseLocalDNS:     connect.UseLocalDNS,
-				Engine:          string(connect.Engine),
+				KubeconfigBytes:      string(bytes),
+				Namespace:            ns,
+				ExtraCIDR:            connect.ExtraCIDR,
+				ExtraDomain:          connect.ExtraDomain,
+				UseLocalDNS:          connect.UseLocalDNS,
+				Engine:               string(connect.Engine),
+				OriginKubeconfigPath: util.GetKubeconfigPath(f),
 
 				SshJump:       sshConf.ToRPC(),
 				TransferImage: transferImage,

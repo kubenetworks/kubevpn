@@ -25,16 +25,17 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 	log.SetLevel(log.InfoLevel)
 	var sshConf = util.ParseSshFromRPC(req.SshJump)
 	connReq := &rpc.ConnectRequest{
-		KubeconfigBytes: req.KubeconfigBytes,
-		Namespace:       req.Namespace,
-		ExtraCIDR:       req.ExtraCIDR,
-		ExtraDomain:     req.ExtraDomain,
-		UseLocalDNS:     req.UseLocalDNS,
-		Engine:          req.Engine,
-		SshJump:         req.SshJump,
-		TransferImage:   req.TransferImage,
-		Image:           req.Image,
-		Level:           req.Level,
+		KubeconfigBytes:      req.KubeconfigBytes,
+		Namespace:            req.Namespace,
+		ExtraCIDR:            req.ExtraCIDR,
+		ExtraDomain:          req.ExtraDomain,
+		UseLocalDNS:          req.UseLocalDNS,
+		Engine:               req.Engine,
+		SshJump:              req.SshJump,
+		TransferImage:        req.TransferImage,
+		Image:                req.Image,
+		Level:                req.Level,
+		OriginKubeconfigPath: req.OriginKubeconfigPath,
 	}
 	cli := svr.GetClient(false)
 	connResp, err := cli.Connect(resp.Context(), connReq)
