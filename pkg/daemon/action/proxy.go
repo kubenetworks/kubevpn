@@ -30,13 +30,14 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 	log.SetLevel(log.InfoLevel)
 	ctx := resp.Context()
 	connect := &handler.ConnectOptions{
-		Namespace:   req.Namespace,
-		Headers:     req.Headers,
-		Workloads:   req.Workloads,
-		ExtraCIDR:   req.ExtraCIDR,
-		ExtraDomain: req.ExtraDomain,
-		UseLocalDNS: req.UseLocalDNS,
-		Engine:      config.Engine(req.Engine),
+		Namespace:            req.Namespace,
+		Headers:              req.Headers,
+		Workloads:            req.Workloads,
+		ExtraCIDR:            req.ExtraCIDR,
+		ExtraDomain:          req.ExtraDomain,
+		UseLocalDNS:          req.UseLocalDNS,
+		Engine:               config.Engine(req.Engine),
+		OriginKubeconfigPath: req.OriginKubeconfigPath,
 	}
 	var sshConf = util.ParseSshFromRPC(req.SshJump)
 

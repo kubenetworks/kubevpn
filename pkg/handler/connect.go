@@ -70,14 +70,15 @@ import (
 )
 
 type ConnectOptions struct {
-	Namespace   string
-	Headers     map[string]string
-	Workloads   []string
-	ExtraCIDR   []string
-	ExtraDomain []string
-	UseLocalDNS bool
-	Engine      config.Engine
-	Foreground  bool
+	Namespace            string
+	Headers              map[string]string
+	Workloads            []string
+	ExtraCIDR            []string
+	ExtraDomain          []string
+	UseLocalDNS          bool
+	Engine               config.Engine
+	Foreground           bool
+	OriginKubeconfigPath string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -717,6 +718,18 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory) (err error) {
 
 func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, print bool) (path string, err error) {
 	if conf.Addr == "" && conf.ConfigAlias == "" {
+		if flags != nil {
+			lookup := flags.Lookup("kubeconfig")
+			if lookup != nil {
+				if lookup.Value != nil && lookup.Value.String() != "" {
+					path = lookup.Value.String()
+				} else if lookup.DefValue != "" {
+					path = lookup.DefValue
+				} else {
+					path = lookup.NoOptDefVal
+				}
+			}
+		}
 		return
 	}
 	defer func() {
@@ -1491,10 +1504,13 @@ func (c *ConnectOptions) GetTunDeviceName() (string, error) {
 	return device.Name, nil
 }
 
-func (c *ConnectOptions) GetKubeconfigContext() string {
+func (c *ConnectOptions) GetKubeconfigCluster() string {
 	rawConfig, err := c.GetFactory().ToRawKubeConfigLoader().RawConfig()
 	if err != nil {
 		return ""
 	}
-	return rawConfig.CurrentContext
+	if rawConfig.Contexts != nil && rawConfig.Contexts[rawConfig.CurrentContext] != nil {
+		return rawConfig.Contexts[rawConfig.CurrentContext].Cluster
+	}
+	return ""
 }

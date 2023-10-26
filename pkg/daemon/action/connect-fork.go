@@ -30,13 +30,14 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 
 	ctx := resp.Context()
 	connect := &handler.ConnectOptions{
-		Namespace:   req.Namespace,
-		Headers:     req.Headers,
-		Workloads:   req.Workloads,
-		ExtraCIDR:   req.ExtraCIDR,
-		ExtraDomain: req.ExtraDomain,
-		UseLocalDNS: req.UseLocalDNS,
-		Engine:      config.Engine(req.Engine),
+		Namespace:            req.Namespace,
+		Headers:              req.Headers,
+		Workloads:            req.Workloads,
+		ExtraCIDR:            req.ExtraCIDR,
+		ExtraDomain:          req.ExtraDomain,
+		UseLocalDNS:          req.UseLocalDNS,
+		Engine:               config.Engine(req.Engine),
+		OriginKubeconfigPath: req.OriginKubeconfigPath,
 	}
 	var sshConf = util.ParseSshFromRPC(req.SshJump)
 	var transferImage = req.TransferImage
@@ -97,13 +98,14 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		return fmt.Errorf("sudo daemon not start")
 	}
 	connect := &handler.ConnectOptions{
-		Namespace:   req.Namespace,
-		Headers:     req.Headers,
-		Workloads:   req.Workloads,
-		ExtraCIDR:   req.ExtraCIDR,
-		ExtraDomain: req.ExtraDomain,
-		UseLocalDNS: req.UseLocalDNS,
-		Engine:      config.Engine(req.Engine),
+		Namespace:            req.Namespace,
+		Headers:              req.Headers,
+		Workloads:            req.Workloads,
+		ExtraCIDR:            req.ExtraCIDR,
+		ExtraDomain:          req.ExtraDomain,
+		UseLocalDNS:          req.UseLocalDNS,
+		Engine:               config.Engine(req.Engine),
+		OriginKubeconfigPath: req.OriginKubeconfigPath,
 	}
 	var sshConf = util.ParseSshFromRPC(req.SshJump)
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
