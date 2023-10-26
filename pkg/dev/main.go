@@ -42,6 +42,7 @@ import (
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/util/interrupt"
 	"k8s.io/kubectl/pkg/util/podutils"
+	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon"
@@ -458,11 +459,12 @@ func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags 
 // connect to cluster network on docker container or host
 func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.SshConfig, transferImage bool) (cancel func(), err error) {
 	connect := &handler.ConnectOptions{
-		Headers:     d.Headers,
-		Workloads:   []string{d.Workload},
-		ExtraCIDR:   d.ExtraCIDR,
-		ExtraDomain: d.ExtraDomain,
-		Engine:      d.Engine,
+		Headers:              d.Headers,
+		Workloads:            []string{d.Workload},
+		ExtraCIDR:            d.ExtraCIDR,
+		ExtraDomain:          d.ExtraDomain,
+		Engine:               d.Engine,
+		OriginKubeconfigPath: util.GetKubeconfigPath(f),
 	}
 	if err = connect.InitClient(f); err != nil {
 		return
@@ -503,18 +505,19 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 		// not needs to ssh jump in daemon, because dev mode will hang up until user exit,
 		// so just ssh jump in client is enough
 		req := &rpc.ConnectRequest{
-			KubeconfigBytes: string(kubeconfig),
-			Namespace:       ns,
-			Headers:         connect.Headers,
-			Workloads:       connect.Workloads,
-			ExtraCIDR:       connect.ExtraCIDR,
-			ExtraDomain:     connect.ExtraDomain,
-			UseLocalDNS:     connect.UseLocalDNS,
-			Engine:          string(connect.Engine),
-			TransferImage:   transferImage,
-			Image:           config.Image,
-			Level:           int32(log.DebugLevel),
-			SshJump:         conf.ToRPC(),
+			KubeconfigBytes:      string(kubeconfig),
+			Namespace:            ns,
+			Headers:              connect.Headers,
+			Workloads:            connect.Workloads,
+			ExtraCIDR:            connect.ExtraCIDR,
+			ExtraDomain:          connect.ExtraDomain,
+			UseLocalDNS:          connect.UseLocalDNS,
+			Engine:               string(connect.Engine),
+			OriginKubeconfigPath: util.GetKubeconfigPath(f),
+			TransferImage:        transferImage,
+			Image:                config.Image,
+			Level:                int32(log.DebugLevel),
+			SshJump:              conf.ToRPC(),
 		}
 		cancel = disconnect(ctx, daemonCli)
 		var resp rpc.Daemon_ConnectClient
@@ -595,7 +598,9 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 
 func disconnect(ctx context.Context, daemonClient rpc.DaemonClient) func() {
 	return func() {
-		resp, err := daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{})
+		resp, err := daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{
+			ID: pointer.Int32(0),
+		})
 		if err != nil {
 			log.Errorf("disconnect error: %v", err)
 			return

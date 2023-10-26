@@ -81,7 +81,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	}
 
 	config.Image = req.Image
-	err = connect.DoConnect(sshCtx)
+	err = connect.DoConnect(sshCtx, true)
 	if err != nil {
 		log.Errorf("do connect error: %v", err)
 		connect.Cleanup()

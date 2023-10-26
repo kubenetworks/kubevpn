@@ -47,55 +47,57 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13
 			}
 		}
 	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			func() {
-				w, err := serviceInterface.Watch(ctx, v1.ListOptions{
-					Watch: true, ResourceVersion: serviceList.ResourceVersion,
-				})
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				func() {
+					w, err := serviceInterface.Watch(ctx, v1.ListOptions{
+						Watch: true, ResourceVersion: serviceList.ResourceVersion,
+					})
 
-				if err != nil {
-					if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) {
-						time.Sleep(time.Second * 5)
+					if err != nil {
+						if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) {
+							time.Sleep(time.Second * 5)
+						}
+						return
 					}
-					return
-				}
-				defer w.Stop()
-				for {
-					select {
-					case event, ok := <-w.ResultChan():
-						if !ok {
-							return
+					defer w.Stop()
+					for {
+						select {
+						case event, ok := <-w.ResultChan():
+							if !ok {
+								return
+							}
+							if watch.Error == event.Type || watch.Bookmark == event.Type {
+								continue
+							}
+							if !rateLimiter.TryAccept() {
+								return
+							}
+							list, err := serviceInterface.List(ctx, v1.ListOptions{})
+							if err != nil {
+								return
+							}
+							entry := c.generateHostsEntry(list.Items, hosts)
+							if entry == "" {
+								continue
+							}
+							if entry == last {
+								continue
+							}
+							if err = c.updateHosts(entry); err != nil {
+								return
+							}
+							last = entry
 						}
-						if watch.Error == event.Type || watch.Bookmark == event.Type {
-							continue
-						}
-						if !rateLimiter.TryAccept() {
-							return
-						}
-						list, err := serviceInterface.List(ctx, v1.ListOptions{})
-						if err != nil {
-							return
-						}
-						entry := c.generateHostsEntry(list.Items, hosts)
-						if entry == "" {
-							continue
-						}
-						if entry == last {
-							continue
-						}
-						if err = c.updateHosts(entry); err != nil {
-							return
-						}
-						last = entry
 					}
-				}
-			}()
+				}()
+			}
 		}
-	}
+	}()
 }
 
 func (c *Config) updateHosts(str string) error {
@@ -163,13 +165,13 @@ func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) string {
 			}
 		}
 	}
+	entryList = append(entryList, hosts...)
 	sort.SliceStable(entryList, func(i, j int) bool {
 		if entryList[i].Domain == entryList[j].Domain {
 			return entryList[i].IP > entryList[j].IP
 		}
 		return entryList[i].Domain > entryList[j].Domain
 	})
-	entryList = append(entryList, hosts...)
 
 	// if dns already works well, not needs to add it to hosts file
 	for i := 0; i < len(entryList); i++ {

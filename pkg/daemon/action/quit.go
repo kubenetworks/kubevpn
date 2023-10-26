@@ -20,9 +20,6 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 		log.Info("quit: cleanup connection")
 		svr.connect.Cleanup()
 	}
-	if svr.Cancel != nil {
-		svr.Cancel()
-	}
 	if svr.clone != nil {
 		log.Info("quit: cleanup clone")
 		err := svr.clone.Cleanup()
@@ -37,6 +34,10 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 
 	dns.CleanupHosts()
 
+	// last step is to quit GRPC server
+	if svr.Cancel != nil {
+		svr.Cancel()
+	}
 	return nil
 }
 

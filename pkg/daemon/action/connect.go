@@ -96,7 +96,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	}
 
 	config.Image = req.Image
-	err = svr.connect.DoConnect(sshCtx)
+	err = svr.connect.DoConnect(sshCtx, false)
 	if err != nil {
 		log.Errorf("do connect error: %v", err)
 		svr.connect.Cleanup()

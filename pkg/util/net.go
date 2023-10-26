@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
+
+	"github.com/prometheus-community/pro-bing"
 )
 
 func GetTunDevice(ips ...net.IP) (*net.Interface, error) {
@@ -50,4 +53,29 @@ func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 		}
 	}
 	return nil, fmt.Errorf("can not found any interface with ip %v", ip)
+}
+
+func Ping(targetIP string) (bool, error) {
+	pinger, err := probing.NewPinger(targetIP)
+	if err != nil {
+		return false, err
+	}
+	pinger.SetLogger(nil)
+	pinger.SetPrivileged(true)
+	pinger.Count = 3
+	pinger.Timeout = time.Millisecond * 1500
+	err = pinger.Run() // Blocks until finished.
+	if err != nil {
+		return false, err
+	}
+	stat := pinger.Statistics()
+	return stat.PacketsRecv == stat.PacketsSent, err
+}
+
+func IsIPv4(packet []byte) bool {
+	return 4 == (packet[0] >> 4)
+}
+
+func IsIPv6(packet []byte) bool {
+	return 6 == (packet[0] >> 4)
 }
