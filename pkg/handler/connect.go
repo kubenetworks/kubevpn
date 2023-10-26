@@ -204,7 +204,7 @@ func Rollback(f cmdutil.Factory, ns, workload string) {
 	}
 }
 
-func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
+func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	log.Info("start to connect")
@@ -253,7 +253,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	forward := fmt.Sprintf("tcp://127.0.0.1:%d", rawTCPForwardPort)
 	core.GvisorTCPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
 	core.GvisorUDPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorUDPForwardPort)
-	if err = c.startLocalTunServe(c.ctx, forward); err != nil {
+	if err = c.startLocalTunServe(c.ctx, forward, isLite); err != nil {
 		log.Errorf("start local tun service failed: %v", err)
 		return
 	}
@@ -371,12 +371,15 @@ func checkPodStatus(cCtx context.Context, cFunc context.CancelFunc, podName stri
 	}
 }
 
-func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress string) (err error) {
+func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress string, lite bool) (err error) {
 	// todo figure it out why
 	if util.IsWindows() {
 		c.localTunIPv4.Mask = net.CIDRMask(0, 32)
 	}
-	var list = sets.New[string](config.CIDR.String())
+	var list = sets.New[string]()
+	if !lite {
+		list.Insert(config.CIDR.String())
+	}
 	for _, ipNet := range c.cidrs {
 		list.Insert(ipNet.String())
 	}
@@ -658,7 +661,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		return err
 	}
 	// dump service in current namespace for support DNS resolve service:port
-	go c.dnsConfig.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.Namespace), c.extraHost...)
+	c.dnsConfig.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.Namespace), c.extraHost...)
 	return nil
 }
 

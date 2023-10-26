@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -19,36 +18,22 @@ import (
 	"strings"
 	"time"
 
-	dockerterm "github.com/moby/term"
 	"github.com/pkg/errors"
-	probing "github.com/prometheus-community/pro-bing"
 	log "github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
-	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
-	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/portforward"
-	"k8s.io/client-go/tools/remotecommand"
 	watchtools "k8s.io/client-go/tools/watch"
-	"k8s.io/client-go/transport/spdy"
 	"k8s.io/client-go/util/retry"
-	"k8s.io/kubectl/pkg/cmd/exec"
-	"k8s.io/kubectl/pkg/cmd/util"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
-	"k8s.io/kubectl/pkg/util/podutils"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/driver"
@@ -80,252 +65,8 @@ func GetAvailableTCPPortOrDie() (int, error) {
 	return listener.Addr().(*net.TCPAddr).Port, nil
 }
 
-func WaitPod(podInterface v12.PodInterface, list metav1.ListOptions, checker func(*v1.Pod) bool) error {
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancelFunc()
-	w, err := podInterface.Watch(ctx, list)
-	if err != nil {
-		return err
-	}
-	defer w.Stop()
-	for {
-		select {
-		case e := <-w.ResultChan():
-			if pod, ok := e.Object.(*v1.Pod); ok {
-				if checker(pod) {
-					return nil
-				}
-			}
-		case <-ctx.Done():
-			return errors.New("wait for pod to be ready timeout")
-		}
-	}
-}
-
-func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, namespace string, portPair []string, readyChan chan struct{}, stopChan <-chan struct{}) error {
-	url := clientset.
-		Post().
-		Resource("pods").
-		Namespace(namespace).
-		Name(podName).
-		SubResource("portforward").
-		URL()
-	transport, upgrader, err := spdy.RoundTripperFor(config)
-	if err != nil {
-		log.Errorf("create spdy roundtripper error: %s", err.Error())
-		return err
-	}
-	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
-	forwarder, err := portforward.NewOnAddresses(dialer, []string{"localhost"}, portPair, stopChan, readyChan, nil, os.Stderr)
-	if err != nil {
-		log.Errorf("create port forward error: %s", err.Error())
-		return err
-	}
-
-	if err = forwarder.ForwardPorts(); err != nil {
-		log.Errorf("forward port error: %s", err.Error())
-		return err
-	}
-	return nil
-}
-
-func GetTopOwnerReference(factory cmdutil.Factory, namespace, workload string) (*runtimeresource.Info, error) {
-	for {
-		object, err := GetUnstructuredObject(factory, namespace, workload)
-		if err != nil {
-			return nil, err
-		}
-		ownerReference := metav1.GetControllerOf(object.Object.(*unstructured.Unstructured))
-		if ownerReference == nil {
-			return object, nil
-		}
-		// apiVersion format is Group/Version is like: apps/v1, apps.kruise.io/v1beta1
-		version, err := schema.ParseGroupVersion(ownerReference.APIVersion)
-		if err != nil {
-			return object, nil
-		}
-		gk := metav1.GroupKind{
-			Group: version.Group,
-			Kind:  ownerReference.Kind,
-		}
-		workload = fmt.Sprintf("%s/%s", gk.String(), ownerReference.Name)
-	}
-}
-
-// GetTopOwnerReferenceBySelector assume pods, controller has same labels
-func GetTopOwnerReferenceBySelector(factory cmdutil.Factory, namespace, selector string) (sets.Set[string], error) {
-	object, err := GetUnstructuredObjectBySelector(factory, namespace, selector)
-	if err != nil {
-		return nil, err
-	}
-	set := sets.New[string]()
-	for _, info := range object {
-		reference, err := GetTopOwnerReference(factory, namespace, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
-		if err == nil && reference.Mapping.Resource.Resource != "services" {
-			set.Insert(fmt.Sprintf("%s/%s", reference.Mapping.GroupVersionKind.GroupKind().String(), reference.Name))
-		}
-	}
-	return set, nil
-}
-
-func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, containerName, namespace string, cmd []string) (string, error) {
-	pod, err := clientset.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
-
-	if err != nil {
-		return "", err
-	}
-	if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
-		err = fmt.Errorf("cannot exec into a container in a completed pod; current phase is %s", pod.Status.Phase)
-		return "", err
-	}
-	if containerName == "" {
-		containerName = pod.Spec.Containers[0].Name
-	}
-	stdin, _, _ := dockerterm.StdStreams()
-
-	stdoutBuf := bytes.NewBuffer(nil)
-	stdout := io.MultiWriter(stdoutBuf)
-	StreamOptions := exec.StreamOptions{
-		Namespace:     namespace,
-		PodName:       podName,
-		ContainerName: containerName,
-		IOStreams:     genericclioptions.IOStreams{In: stdin, Out: stdout, ErrOut: nil},
-	}
-	Executor := &exec.DefaultRemoteExecutor{}
-	// ensure we can recover the terminal while attached
-	tt := StreamOptions.SetupTTY()
-
-	var sizeQueue remotecommand.TerminalSizeQueue
-	if tt.Raw {
-		// this call spawns a goroutine to monitor/update the terminal size
-		sizeQueue = tt.MonitorSize(tt.GetSize())
-
-		// unset p.Err if it was previously set because both stdout and stderr go over p.Out when tty is
-		// true
-		StreamOptions.ErrOut = nil
-	}
-
-	fn := func() error {
-		req := restclient.Post().
-			Resource("pods").
-			Name(pod.Name).
-			Namespace(pod.Namespace).
-			SubResource("exec")
-		req.VersionedParams(&v1.PodExecOptions{
-			Container: containerName,
-			Command:   cmd,
-			Stdin:     StreamOptions.Stdin,
-			Stdout:    StreamOptions.Out != nil,
-			Stderr:    StreamOptions.ErrOut != nil,
-			TTY:       tt.Raw,
-		}, scheme.ParameterCodec)
-		return Executor.Execute("POST", req.URL(), config, StreamOptions.In, StreamOptions.Out, StreamOptions.ErrOut, tt.Raw, sizeQueue)
-	}
-
-	err = tt.Safe(fn)
-	return strings.TrimRight(stdoutBuf.String(), "\n"), err
-}
-
 func IsWindows() bool {
 	return runtime.GOOS == "windows"
-}
-
-func GetUnstructuredObject(f cmdutil.Factory, namespace string, workloads string) (*runtimeresource.Info, error) {
-	do := f.NewBuilder().
-		Unstructured().
-		NamespaceParam(namespace).DefaultNamespace().AllNamespaces(false).
-		ResourceTypeOrNameArgs(true, workloads).
-		ContinueOnError().
-		Latest().
-		Flatten().
-		TransformRequests(func(req *rest.Request) { req.Param("includeObject", "Object") }).
-		Do()
-	if err := do.Err(); err != nil {
-		log.Warn(err)
-		return nil, err
-	}
-	infos, err := do.Infos()
-	if err != nil {
-		log.Println(err)
-		return nil, err
-	}
-	if len(infos) == 0 {
-		return nil, fmt.Errorf("not found workloads %s", workloads)
-	}
-	return infos[0], err
-}
-
-func GetUnstructuredObjectList(f cmdutil.Factory, namespace string, workloads []string) ([]*runtimeresource.Info, error) {
-	do := f.NewBuilder().
-		Unstructured().
-		NamespaceParam(namespace).DefaultNamespace().AllNamespaces(false).
-		ResourceTypeOrNameArgs(true, workloads...).
-		ContinueOnError().
-		Latest().
-		Flatten().
-		TransformRequests(func(req *rest.Request) { req.Param("includeObject", "Object") }).
-		Do()
-	if err := do.Err(); err != nil {
-		log.Warn(err)
-		return nil, err
-	}
-	infos, err := do.Infos()
-	if err != nil {
-		return nil, err
-	}
-	if len(infos) == 0 {
-		return nil, fmt.Errorf("not found resource %v", workloads)
-	}
-	return infos, err
-}
-
-func GetUnstructuredObjectBySelector(f cmdutil.Factory, namespace string, selector string) ([]*runtimeresource.Info, error) {
-	do := f.NewBuilder().
-		Unstructured().
-		NamespaceParam(namespace).DefaultNamespace().AllNamespaces(false).
-		ResourceTypeOrNameArgs(true, "all").
-		LabelSelector(selector).
-		ContinueOnError().
-		Latest().
-		Flatten().
-		TransformRequests(func(req *rest.Request) { req.Param("includeObject", "Object") }).
-		Do()
-	if err := do.Err(); err != nil {
-		log.Warn(err)
-		return nil, err
-	}
-	infos, err := do.Infos()
-	if err != nil {
-		log.Println(err)
-		return nil, err
-	}
-	if len(infos) == 0 {
-		return nil, errors.New("Not found")
-	}
-	return infos, err
-}
-
-func GetPodTemplateSpecPath(u *unstructured.Unstructured) (*v1.PodTemplateSpec, []string, error) {
-	var stringMap map[string]interface{}
-	var b bool
-	var err error
-	var path []string
-	if stringMap, b, err = unstructured.NestedMap(u.Object, "spec", "template"); b && err == nil {
-		path = []string{"spec", "template"}
-	} else if stringMap, b, err = unstructured.NestedMap(u.Object); b && err == nil {
-		path = []string{}
-	} else {
-		return nil, nil, err
-	}
-	marshal, err := json.Marshal(stringMap)
-	if err != nil {
-		return nil, nil, err
-	}
-	var p v1.PodTemplateSpec
-	if err = json.Unmarshal(marshal, &p); err != nil {
-		return nil, nil, err
-	}
-	return &p, path, nil
 }
 
 func BytesToInt(b []byte) uint32 {
@@ -335,23 +76,6 @@ func BytesToInt(b []byte) uint32 {
 		log.Warn(err)
 	}
 	return u
-}
-
-func Ping(targetIP string) (bool, error) {
-	pinger, err := probing.NewPinger(targetIP)
-	if err != nil {
-		return false, err
-	}
-	pinger.SetLogger(nil)
-	pinger.SetPrivileged(true)
-	pinger.Count = 3
-	pinger.Timeout = time.Millisecond * 1500
-	err = pinger.Run() // Blocks until finished.
-	if err != nil {
-		return false, err
-	}
-	stat := pinger.Statistics()
-	return stat.PacketsRecv == stat.PacketsSent, err
 }
 
 func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, workloads string, timeout time.Duration) (err error) {
@@ -506,22 +230,6 @@ func IsPortListening(port int) bool {
 	}
 }
 
-func GetAnnotation(f util.Factory, ns string, resources string) (map[string]string, error) {
-	ownerReference, err := GetTopOwnerReference(f, ns, resources)
-	if err != nil {
-		return nil, err
-	}
-	u, ok := ownerReference.Object.(*unstructured.Unstructured)
-	if !ok {
-		return nil, fmt.Errorf("can not convert to unstaructed")
-	}
-	annotations := u.GetAnnotations()
-	if annotations == nil {
-		annotations = map[string]string{}
-	}
-	return annotations, nil
-}
-
 func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.PolicyRule) (allowed bool, err error) {
 	var roleBindingList *rbacv1.RoleBindingList
 	roleBindingList, err = clientset.RbacV1().RoleBindings(ns).List(context.Background(), metav1.ListOptions{})
@@ -607,14 +315,6 @@ func GetTlsDomain(namespace string) string {
 	return config.ConfigMapPodTrafficManager + "." + namespace + "." + "svc"
 }
 
-func IsIPv4(packet []byte) bool {
-	return 4 == (packet[0] >> 4)
-}
-
-func IsIPv6(packet []byte) bool {
-	return 6 == (packet[0] >> 4)
-}
-
 func Deduplicate(cidr []*net.IPNet) (result []*net.IPNet) {
 	var set = sets.New[string]()
 	for _, ipNet := range cidr {
@@ -624,19 +324,6 @@ func Deduplicate(cidr []*net.IPNet) (result []*net.IPNet) {
 		set.Insert(ipNet.String())
 	}
 	return
-}
-
-func AllContainerIsRunning(pod *v1.Pod) bool {
-	isReady := podutils.IsPodReady(pod)
-	if !isReady {
-		return false
-	}
-	for _, status := range pod.Status.ContainerStatuses {
-		if !status.Ready {
-			return false
-		}
-	}
-	return true
 }
 
 func CleanExtensionLib() {
@@ -664,50 +351,6 @@ func CleanExtensionLib() {
 		return
 	}
 	MoveToTemp()
-}
-
-func WaitPodToBeReady(ctx context.Context, podInterface v12.PodInterface, selector metav1.LabelSelector) error {
-	watchStream, err := podInterface.Watch(ctx, metav1.ListOptions{
-		LabelSelector: fields.SelectorFromSet(selector.MatchLabels).String(),
-	})
-	if err != nil {
-		return err
-	}
-	defer watchStream.Stop()
-	var last string
-	for {
-		select {
-		case e, ok := <-watchStream.ResultChan():
-			if !ok {
-				return fmt.Errorf("can not wait pod to be ready because of watch chan has closed")
-			}
-			if podT, ok := e.Object.(*v1.Pod); ok {
-				if podT.DeletionTimestamp != nil {
-					continue
-				}
-				var sb = bytes.NewBuffer(nil)
-				sb.WriteString(fmt.Sprintf("pod [%s] status is %s\n", podT.Name, podT.Status.Phase))
-				PrintStatus(podT, sb)
-
-				if last != sb.String() {
-					log.Infof(sb.String())
-				}
-				if podutils.IsPodReady(podT) && func() bool {
-					for _, status := range podT.Status.ContainerStatuses {
-						if !status.Ready {
-							return false
-						}
-					}
-					return true
-				}() {
-					return nil
-				}
-				last = sb.String()
-			}
-		case <-time.Tick(time.Minute * 60):
-			return errors.New(fmt.Sprintf("wait pod to be ready timeout"))
-		}
-	}
 }
 
 func Print(writer io.Writer, slogan string) {

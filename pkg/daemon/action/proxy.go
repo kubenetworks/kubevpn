@@ -6,6 +6,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
@@ -80,7 +81,9 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		} else {
 			log.Infof("try to disconnect from another cluster")
 			var disconnect rpc.Daemon_DisconnectClient
-			disconnect, err = daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{})
+			disconnect, err = daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{
+				ID: pointer.Int32(0),
+			})
 			if err != nil {
 				return err
 			}
@@ -90,6 +93,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 				if err == io.EOF {
 					break
 				} else if err != nil {
+					log.Errorf("recv from disconnect failed, %v", err)
 					return err
 				}
 				err = resp.Send(&rpc.ConnectResponse{Message: recv.Message})
