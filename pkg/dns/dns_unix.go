@@ -1,5 +1,4 @@
 //go:build darwin
-// +build darwin
 
 package dns
 
@@ -31,15 +30,18 @@ var resolv = "/etc/resolv.conf"
 // service.namespace.svc:port
 // service.namespace.svc.cluster:port
 // service.namespace.svc.cluster.local:port
-func SetupDNS(config *miekgdns.ClientConfig, ns []string, _ bool, tunName string) error {
-	usingResolver(config, ns, tunName)
+func (c *Config) SetupDNS() error {
+	c.usingResolver()
 	_ = exec.Command("killall", "mDNSResponderHelper").Run()
 	_ = exec.Command("killall", "-HUP", "mDNSResponder").Run()
 	_ = exec.Command("dscacheutil", "-flushcache").Run()
 	return nil
 }
 
-func usingResolver(clientConfig *miekgdns.ClientConfig, ns []string, tunName string) {
+func (c *Config) usingResolver() {
+	var clientConfig = c.Config
+	var ns = c.Ns
+
 	var err error
 	_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
 	if err = os.MkdirAll(filepath.Join("/", "etc", "resolver"), fs.ModePerm); err != nil {
@@ -80,7 +82,7 @@ func usingResolver(clientConfig *miekgdns.ClientConfig, ns []string, tunName str
 	}
 }
 
-func usingNetworkSetup(ip string, namespace string) {
+func (c *Config) usingNetworkSetup(ip string, namespace string) {
 	networkSetup(ip, namespace)
 	var ctx context.Context
 	ctx, cancel = context.WithCancel(context.Background())
@@ -153,13 +155,13 @@ func toString(config miekgdns.ClientConfig) string {
 	return builder.String()
 }
 
-func CancelDNS(tunName string) {
+func (c *Config) CancelDNS() {
 	if cancel != nil {
 		cancel()
 	}
 	_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
 	//networkCancel()
-	//updateHosts("")
+	c.updateHosts("")
 }
 
 /*

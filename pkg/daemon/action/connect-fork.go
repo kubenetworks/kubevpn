@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"k8s.io/utils/pointer"
 	defaultlog "log"
 
 	log "github.com/sirupsen/logrus"
@@ -86,6 +87,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 		return err
 	}
 	svr.secondaryConnect = append(svr.secondaryConnect, connect)
+
 	return nil
 }
 
@@ -147,7 +149,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		return err
 	}
 
-	connResp, err := cli.Connect(ctx, req)
+	connResp, err := cli.ConnectFork(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -165,6 +167,36 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 	}
 
 	svr.secondaryConnect = append(svr.secondaryConnect, connect)
+
+	if req.Foreground {
+		<-resp.Context().Done()
+		for i := 0; i < len(svr.secondaryConnect); i++ {
+			if svr.secondaryConnect[i] == connect {
+				cli := svr.GetClient(false)
+				if cli == nil {
+					return fmt.Errorf("sudo daemon not start")
+				}
+				disconnect, err := cli.Disconnect(context.Background(), &rpc.DisconnectRequest{
+					ID: pointer.Int32(int32(i)),
+				})
+				if err != nil {
+					log.Errorf("disconnect error: %v", err)
+					return err
+				}
+				for {
+					recv, err := disconnect.Recv()
+					if err == io.EOF {
+						break
+					} else if err != nil {
+						return err
+					}
+					log.Info(recv.Message)
+				}
+				break
+			}
+		}
+	}
+
 	return nil
 }
 

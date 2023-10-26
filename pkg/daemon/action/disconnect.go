@@ -8,6 +8,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/dns"
 )
 
 func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_DisconnectServer) error {
@@ -76,6 +77,10 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 		} else {
 			log.Errorf("index %d out of range", req.GetID())
 		}
+	}
+
+	if svr.connect == nil && len(svr.secondaryConnect) == 0 {
+		dns.CleanupHosts()
 	}
 	return nil
 }

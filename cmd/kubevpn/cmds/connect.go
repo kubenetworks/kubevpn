@@ -23,7 +23,7 @@ import (
 func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	var connect = &handler.ConnectOptions{}
 	var sshConf = &util.SshConfig{}
-	var transferImage, foreground bool
+	var transferImage, foreground, lite bool
 	cmd := &cobra.Command{
 		Use:   "connect",
 		Short: i18n.T("Connect to kubernetes cluster network"),
@@ -66,8 +66,8 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				Level:         int32(log.DebugLevel),
 			}
 			// if is foreground, send to sudo daemon server
-			if foreground {
-				cli := daemon.GetClient(true)
+			cli := daemon.GetClient(false)
+			if lite {
 				resp, err := cli.ConnectFork(cmd.Context(), req)
 				if err != nil {
 					return err
@@ -84,7 +84,6 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 					fmt.Fprint(os.Stdout, recv.GetMessage())
 				}
 			} else {
-				cli := daemon.GetClient(false)
 				resp, err := cli.Connect(cmd.Context(), req)
 				if err != nil {
 					return err
@@ -100,6 +99,8 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 					}
 					fmt.Fprint(os.Stdout, recv.GetMessage())
 				}
+			}
+			if !req.Foreground {
 				util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 			}
 			return nil
@@ -112,7 +113,8 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
 	cmd.Flags().BoolVar(&connect.UseLocalDNS, "use-localdns", false, "if use-lcoaldns is true, kubevpn will start coredns listen at 53 to forward your dns queries. only support on linux now")
 	cmd.Flags().StringVar((*string)(&connect.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
-	cmd.Flags().BoolVar(&foreground, "foreground", false, "connect to multiple cluster, you needs to special this options")
+	cmd.Flags().BoolVar(&foreground, "foreground", false, "Hang up")
+	cmd.Flags().BoolVar(&lite, "lite", false, "connect to multiple cluster in lite mode, you needs to special this options")
 
 	addSshFlags(cmd, sshConf)
 	return cmd

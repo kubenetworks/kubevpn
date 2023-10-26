@@ -21,7 +21,6 @@ import (
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
-	"github.com/wencaiwulue/kubevpn/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -79,11 +78,10 @@ func (c *ConnectOptions) Cleanup() {
 		c.cancel()
 	}
 	c.RollbackFuncList = c.RollbackFuncList[:]
-	name, err := c.GetTunDeviceName()
-	if err == nil {
-		log.Errorf("get tun device error: %v", err)
+	if c.dnsConfig != nil {
+		log.Infof("clean up dns")
+		c.dnsConfig.CancelDNS()
 	}
-	dns.CancelDNS(name)
 	log.Info("clean up successfully")
 	util.CleanExtensionLib()
 }

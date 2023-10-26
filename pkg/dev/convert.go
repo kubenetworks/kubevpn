@@ -28,7 +28,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/cp"
-	"github.com/wencaiwulue/kubevpn/pkg/dns"
+	util2 "github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
 type RunConfig struct {
@@ -186,7 +186,7 @@ func GetDNS(ctx context.Context, f util.Factory, ns, pod string) (*miekgdns.Clie
 		return nil, err
 	}
 
-	clientConfig, err := dns.GetDNSServiceIPFromPod(clientSet, client, config, pod, ns)
+	clientConfig, err := util2.GetDNSServiceIPFromPod(clientSet, client, config, pod, ns)
 	if err != nil {
 		return nil, err
 	}

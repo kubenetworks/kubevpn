@@ -91,6 +91,8 @@ const (
 
 	// transport mode
 	ConfigKubeVPNTransportEngine = "transport-engine"
+	// hosts entry key word
+	HostsKeyWord = "# Add by KubeVPN"
 )
 
 var (
