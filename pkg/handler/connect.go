@@ -257,6 +257,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		log.Errorf("start local tun service failed: %v", err)
 		return
 	}
+	log.Infof("adding route...")
 	if err = c.addRouteDynamic(c.ctx); err != nil {
 		log.Errorf("add route dynamic failed: %v", err)
 		return
@@ -486,7 +487,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 		if pod.Spec.HostNetwork {
 			continue
 		}
-		addRouteFunc(pod.Name, pod.Status.PodIP)
+		go addRouteFunc(pod.Name, pod.Status.PodIP)
 	}
 
 	// add pod route
@@ -531,7 +532,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 							if pod.Spec.HostNetwork {
 								continue
 							}
-							addRouteFunc(pod.Name, pod.Status.PodIP)
+							go addRouteFunc(pod.Name, pod.Status.PodIP)
 						}
 					}
 				}()
@@ -556,7 +557,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 		return
 	}
 	for _, item := range serviceList.Items {
-		addRouteFunc(item.Name, item.Spec.ClusterIP)
+		go addRouteFunc(item.Name, item.Spec.ClusterIP)
 	}
 
 	// add service route
@@ -599,7 +600,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 								continue
 							}
 							ip := svc.Spec.ClusterIP
-							addRouteFunc(svc.Name, ip)
+							go addRouteFunc(svc.Name, ip)
 						}
 					}
 				}()
@@ -1146,6 +1147,11 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 		if errs != nil {
 			log.Debugf("[route] add route failed, domain: %s, ip: %s,err: %v", resource, ip, err)
 		}
+	}
+
+	// add dns pod ip to route
+	for _, ip := range ips {
+		addRouteFunc("dns-pod", ip)
 	}
 
 	// 1) use dig +short query, if ok, just return
