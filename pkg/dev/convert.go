@@ -223,8 +223,8 @@ func GetVolume(ctx context.Context, f util.Factory, ns, pod string, d *Options) 
 			if volumeMount.SubPath != "" {
 				join = filepath.Join(join, volumeMount.SubPath)
 			}
-			d.RollbackFuncList = append(d.RollbackFuncList, func() {
-				_ = os.RemoveAll(join)
+			d.AddRollbackFunc(func() error {
+				return os.RemoveAll(join)
 			})
 			// pod-namespace/pod-name:path
 			remotePath := fmt.Sprintf("%s/%s:%s", ns, pod, volumeMount.MountPath)

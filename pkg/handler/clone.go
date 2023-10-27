@@ -68,7 +68,7 @@ type CloneOptions struct {
 	config     *rest.Config
 	factory    cmdutil.Factory
 
-	RollbackFuncList []func()
+	rollbackFuncList []func() error
 }
 
 func (d *CloneOptions) InitClient(f cmdutil.Factory) (err error) {
@@ -189,8 +189,8 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		d.RollbackFuncList = append(d.RollbackFuncList, func() {
-			_ = client.Resource(object.Mapping.Resource).Namespace(d.TargetNamespace).Delete(context.Background(), u.GetName(), metav1.DeleteOptions{})
+		d.addRollbackFunc(func() error {
+			return client.Resource(object.Mapping.Resource).Namespace(d.TargetNamespace).Delete(context.Background(), u.GetName(), metav1.DeleteOptions{})
 		})
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			// (1) add annotation KUBECONFIG
@@ -785,5 +785,16 @@ func (d *CloneOptions) Cleanup(workloads ...string) error {
 		}
 		log.Infof("clean up clone workload: %s successfully", workload)
 	}
+	for _, f := range d.rollbackFuncList {
+		if f != nil {
+			if err := f(); err != nil {
+				log.Warningf("exec rollback function error: %s", err.Error())
+			}
+		}
+	}
 	return nil
+}
+
+func (d *CloneOptions) addRollbackFunc(f func() error) {
+	d.rollbackFuncList = append(d.rollbackFuncList, f)
 }

@@ -92,7 +92,7 @@ type ConnectOptions struct {
 	// needs to give it back to dhcp
 	localTunIPv4     *net.IPNet
 	localTunIPv6     *net.IPNet
-	RollbackFuncList []func()
+	rollbackFuncList []func() error
 	dnsConfig        *dns.Config
 
 	apiServerIPs []net.IP
@@ -266,7 +266,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		log.Errorf("add extra route failed: %v", err)
 		return
 	}
-	if err = c.setupDNS(c.ctx); err != nil {
+	if err = c.setupDNS(c.ctx, isLite); err != nil {
 		log.Errorf("set up dns failed: %v", err)
 		return
 	}
@@ -614,11 +614,14 @@ func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
 	if !util.FindAllowFirewallRule() {
 		util.AddAllowFirewallRule()
 	}
-	c.RollbackFuncList = append(c.RollbackFuncList, util.DeleteAllowFirewallRule)
+	c.AddRolloutFunc(func() error {
+		util.DeleteAllowFirewallRule()
+		return nil
+	})
 	go util.DeleteBlockFirewallRule(ctx)
 }
 
-func (c *ConnectOptions) setupDNS(ctx context.Context) error {
+func (c *ConnectOptions) setupDNS(ctx context.Context, lite bool) error {
 	const port = 53
 	pod, err := c.GetRunningPodList(ctx)
 	if err != nil {
@@ -655,6 +658,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		Ns:          ns.UnsortedList(),
 		UseLocalDNS: c.UseLocalDNS,
 		TunName:     tunName,
+		Lite:        lite,
 		Hosts:       c.extraHost,
 	}
 	if err = c.dnsConfig.SetupDNS(); err != nil {
@@ -1230,13 +1234,17 @@ RetryWithDNSClient:
 					for _, rr := range answer.Answer {
 						switch a := rr.(type) {
 						case *miekgdns.A:
-							addRouteFunc(domain, a.A.String())
-							c.extraHost = append(c.extraHost, dns.Entry{IP: a.A.String(), Domain: domain})
-							success = true
+							if ip := net.ParseIP(a.A.String()); ip != nil && !ip.IsLoopback() {
+								addRouteFunc(domain, a.A.String())
+								c.extraHost = append(c.extraHost, dns.Entry{IP: a.A.String(), Domain: domain})
+								success = true
+							}
 						case *miekgdns.AAAA:
-							addRouteFunc(domain, a.AAAA.String())
-							c.extraHost = append(c.extraHost, dns.Entry{IP: a.AAAA.String(), Domain: domain})
-							success = true
+							if ip := net.ParseIP(a.AAAA.String()); ip != nil && !ip.IsLoopback() {
+								addRouteFunc(domain, a.AAAA.String())
+								c.extraHost = append(c.extraHost, dns.Entry{IP: a.AAAA.String(), Domain: domain})
+								success = true
+							}
 						}
 					}
 					return nil
@@ -1516,4 +1524,12 @@ func (c *ConnectOptions) GetKubeconfigCluster() string {
 		return rawConfig.Contexts[rawConfig.CurrentContext].Cluster
 	}
 	return ""
+}
+
+func (c *ConnectOptions) AddRolloutFunc(f func() error) {
+	c.rollbackFuncList = append(c.rollbackFuncList, f)
+}
+
+func (c *ConnectOptions) getRolloutFunc() []func() error {
+	return c.rollbackFuncList
 }

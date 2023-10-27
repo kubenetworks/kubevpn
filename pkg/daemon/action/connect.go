@@ -76,7 +76,10 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	})
 
 	sshCtx, sshCancel := context.WithCancel(context.Background())
-	svr.connect.RollbackFuncList = append(svr.connect.RollbackFuncList, sshCancel)
+	svr.connect.AddRolloutFunc(func() error {
+		sshCancel()
+		return nil
+	})
 	var path string
 	path, err = handler.SshJump(sshCtx, sshConf, flags, false)
 	if err != nil {
@@ -100,6 +103,8 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if err != nil {
 		log.Errorf("do connect error: %v", err)
 		svr.connect.Cleanup()
+		svr.connect = nil
+		svr.t = time.Time{}
 		return err
 	}
 	return nil
@@ -131,7 +136,10 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		DefValue: file,
 	})
 	sshCtx, sshCancel := context.WithCancel(context.Background())
-	connect.RollbackFuncList = append(connect.RollbackFuncList, sshCancel)
+	connect.AddRolloutFunc(func() error {
+		sshCancel()
+		return nil
+	})
 	var path string
 	path, err = handler.SshJump(sshCtx, sshConf, flags, true)
 	if err != nil {

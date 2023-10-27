@@ -527,7 +527,7 @@ func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, 
 			return err
 		}
 
-		//RollbackFuncList = append(RollbackFuncList, func() {
+		//rollbackFuncList = append(rollbackFuncList, func() {
 		//	p2 := &v1.Pod{ObjectMeta: origin.ObjectMeta, Spec: origin.Spec}
 		//	CleanupUselessInfo(p2)
 		//	if err = CreateAfterDeletePod(factory, p2, helper); err != nil {
@@ -560,7 +560,7 @@ func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, 
 			return err
 		}
 
-		//RollbackFuncList = append(RollbackFuncList, func() {
+		//rollbackFuncList = append(rollbackFuncList, func() {
 		//	if err = removeInboundContainer(factory, namespace, workload); err != nil {
 		//		log.Error(err)
 		//	}

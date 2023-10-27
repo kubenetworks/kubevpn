@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"k8s.io/utils/pointer"
 	defaultlog "log"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
@@ -61,7 +61,10 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	})
 
 	sshCtx, sshCancel := context.WithCancel(context.Background())
-	connect.RollbackFuncList = append(connect.RollbackFuncList, sshCancel)
+	connect.AddRolloutFunc(func() error {
+		sshCancel()
+		return nil
+	})
 	var path string
 	path, err = handler.SshJump(sshCtx, sshConf, flags, false)
 	if err != nil {
@@ -118,7 +121,10 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		DefValue: file,
 	})
 	sshCtx, sshCancel := context.WithCancel(context.Background())
-	connect.RollbackFuncList = append(connect.RollbackFuncList, sshCancel)
+	connect.AddRolloutFunc(func() error {
+		sshCancel()
+		return nil
+	})
 	var path string
 	path, err = handler.SshJump(sshCtx, sshConf, flags, true)
 	if err != nil {
