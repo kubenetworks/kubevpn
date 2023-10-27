@@ -64,9 +64,11 @@ func (c *ConnectOptions) Cleanup() {
 			log.Errorf("can not update ref-count: %v", err)
 		}
 	}
-	for _, function := range c.RollbackFuncList {
+	for _, function := range c.getRolloutFunc() {
 		if function != nil {
-			function()
+			if err := function(); err != nil {
+				log.Warningf("rollout function error: %v", err)
+			}
 		}
 	}
 	// leave proxy resources
@@ -77,7 +79,6 @@ func (c *ConnectOptions) Cleanup() {
 	if c.cancel != nil {
 		c.cancel()
 	}
-	c.RollbackFuncList = c.RollbackFuncList[:]
 	if c.dnsConfig != nil {
 		log.Infof("clean up dns")
 		c.dnsConfig.CancelDNS()

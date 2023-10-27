@@ -29,6 +29,8 @@ type Config struct {
 	Ns          []string
 	UseLocalDNS bool
 	TunName     string
+	// lite mode means connect to another cluster
+	Lite bool
 
 	Hosts []Entry
 }

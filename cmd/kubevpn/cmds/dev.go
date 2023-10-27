@@ -6,6 +6,7 @@ import (
 
 	"github.com/docker/cli/cli/command"
 	dockercomp "github.com/docker/cli/cli/command/completion"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/completion"
@@ -110,9 +111,11 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 			}
 
 			err = dev.DoDev(cmd.Context(), devOptions, sshConf, cmd.Flags(), f, transferImage)
-			for _, fun := range devOptions.RollbackFuncList {
+			for _, fun := range devOptions.GetRollbackFuncList() {
 				if fun != nil {
-					fun()
+					if err = fun(); err != nil {
+						log.Errorf("roll back failed, error: %s", err.Error())
+					}
 				}
 			}
 			return err

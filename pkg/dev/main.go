@@ -81,7 +81,7 @@ type Options struct {
 	DockerCli *command.DockerCli
 
 	// rollback
-	RollbackFuncList []func()
+	rollbackFuncList []func() error
 }
 
 func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig) error {
@@ -217,8 +217,8 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 		}
 	}
 
-	d.RollbackFuncList = append(d.RollbackFuncList, func() {
-		_ = runConfigList.Remove(ctx, d.Cli)
+	d.AddRollbackFunc(func() error {
+		return runConfigList.Remove(ctx, d.Cli)
 	})
 	err = runConfigList.Run(ctx, volume, d.Cli, d.DockerCli)
 	if err != nil {
@@ -576,8 +576,9 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 			},
 		)
 		go h.Run(func() error { select {} })
-		d.RollbackFuncList = append(d.RollbackFuncList, func() {
+		d.AddRollbackFunc(func() error {
 			h.Close()
+			return nil
 		})
 		err = runLogsWaitRunning(cancelCtx, d.DockerCli, id)
 		if err != nil {
@@ -863,4 +864,12 @@ func createKubevpnNetwork(ctx context.Context, cli *client.Client) (string, erro
 		return "", err
 	}
 	return create.ID, nil
+}
+
+func (d *Options) AddRollbackFunc(f func() error) {
+	d.rollbackFuncList = append(d.rollbackFuncList, f)
+}
+
+func (d *Options) GetRollbackFuncList() []func() error {
+	return d.rollbackFuncList
 }

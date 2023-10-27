@@ -67,7 +67,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	}
 	if containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
 		// add rollback func to remove envoy config
-		//RollbackFuncList = append(RollbackFuncList, func() {
+		//rollbackFuncList = append(rollbackFuncList, func() {
 		//	err := UnPatchContainer(factory, clientset, namespace, workload, c.LocalTunIPv4)
 		//	if err != nil {
 		//		log.Error(err)
