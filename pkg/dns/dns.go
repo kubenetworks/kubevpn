@@ -124,6 +124,19 @@ func (c *Config) updateHosts(str string) error {
 		return fmt.Errorf("empty hosts file")
 	}
 
+	{ // todo the reason why needs to add this code is that i found delete 127.0.0.1 localhost entry
+		var localhost bool
+		for _, line := range lines {
+			if strings.Contains(line, "localhost") && strings.Contains(line, "127.0.0.1") {
+				localhost = true
+				break
+			}
+		}
+		if !localhost {
+			lines = append(lines, "127.0.0.1 localhost\n")
+		}
+	}
+
 	var sb strings.Builder
 	sb.WriteString(strings.Join(lines, "\n"))
 	if str != "" {
@@ -149,7 +162,7 @@ type Entry struct {
 
 func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) string {
 	const ServiceKubernetes = "kubernetes"
-	var entryList []Entry
+	var entryList = sets.New[Entry]().Insert(c.Hosts...).Insert(hosts...).UnsortedList()
 
 	// get all service ip
 	for _, item := range list {
@@ -167,7 +180,6 @@ func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) string {
 			}
 		}
 	}
-	entryList = append(entryList, hosts...)
 	sort.SliceStable(entryList, func(i, j int) bool {
 		if entryList[i].Domain == entryList[j].Domain {
 			return entryList[i].IP > entryList[j].IP
@@ -176,12 +188,26 @@ func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) string {
 	})
 
 	// if dns already works well, not needs to add it to hosts file
+	var alreadyCanResolveDomain []Entry
 	for i := 0; i < len(entryList); i++ {
-		e := entryList[i]
-		host, err := net.LookupHost(e.Domain)
-		if err == nil && sets.NewString(host...).Has(e.IP) {
-			entryList = append(entryList[:i], entryList[i+1:]...)
-			i--
+		go func(e Entry) {
+			timeout, cancelFunc := context.WithTimeout(context.Background(), time.Millisecond*1000)
+			defer cancelFunc()
+			// net.DefaultResolver.PreferGo = true
+			host, err := net.DefaultResolver.LookupHost(timeout, e.Domain)
+			if err == nil && sets.NewString(host...).Has(e.IP) {
+				alreadyCanResolveDomain = append(alreadyCanResolveDomain, e)
+			}
+		}(entryList[i])
+	}
+	// remove those already can resolve domain from entryList
+	for i := 0; i < len(entryList); i++ {
+		for _, entry := range alreadyCanResolveDomain {
+			if entryList[i] == entry {
+				entryList = append(entryList[:i], entryList[i+1:]...)
+				i--
+				break
+			}
 		}
 	}
 
@@ -202,7 +228,7 @@ func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) string {
 		}
 	}
 
-	c.Hosts = append(c.Hosts, entryList...)
+	c.Hosts = entryList
 	var sb = new(bytes.Buffer)
 	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
 	for _, e := range entryList {

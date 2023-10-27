@@ -81,6 +81,10 @@ func (c *Config) SetupDNS() error {
 		clientConfig.Search = append(clientConfig.Search, existSearches...)
 	}
 
+	if !c.Lite {
+		_ = os.Rename(filename, getBackupFilename(filename))
+	}
+
 	return WriteResolvConf(*clientConfig)
 }
 
@@ -109,8 +113,10 @@ func SetupLocalDNS(clientConfig *miekgdns.ClientConfig, existNameservers []strin
 func (c *Config) CancelDNS() {
 	c.updateHosts("")
 
-	filename := filepath.Join("/", "etc", "resolv.conf")
-	_ = os.Rename(getBackupFilename(filename), filename)
+	if !c.Lite {
+		filename := filepath.Join("/", "etc", "resolv.conf")
+		_ = os.Rename(getBackupFilename(filename), filename)
+	}
 }
 
 func GetHostFile() string {
@@ -130,7 +136,6 @@ func WriteResolvConf(config miekgdns.ClientConfig) error {
 	}
 
 	filename := filepath.Join("/", "etc", "resolv.conf")
-	_ = os.Rename(filename, getBackupFilename(filename))
 	_, err := resolvconf.Build(filename, config.Servers, config.Search, options)
 	return err
 }

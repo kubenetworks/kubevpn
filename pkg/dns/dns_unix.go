@@ -3,9 +3,11 @@
 package dns
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,10 +44,11 @@ func (c *Config) usingResolver() {
 	var clientConfig = c.Config
 	var ns = c.Ns
 
-	var err error
-	_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
-	if err = os.MkdirAll(filepath.Join("/", "etc", "resolver"), fs.ModePerm); err != nil {
-		log.Errorf("create resolver error: %v", err)
+	path := filepath.Join("/", "etc", "resolver")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		if err = os.MkdirAll(path, fs.ModePerm); err != nil {
+			log.Errorf("create resolver error: %v", err)
+		}
 	}
 	config := miekgdns.ClientConfig{
 		Servers: clientConfig.Servers,
@@ -54,12 +57,13 @@ func (c *Config) usingResolver() {
 		Timeout: 2,
 	}
 	// for support like: service:port, service.namespace.svc.cluster.local:port
-	filename := filepath.Join("/", "etc", "resolver", "local")
-	_ = os.WriteFile(filename, []byte(toString(config)), 0644)
+	if !c.Lite {
+		filename := filepath.Join("/", "etc", "resolver", "local")
+		_ = os.WriteFile(filename, []byte(toString(config)), 0644)
+	}
 
 	// for support like: service.namespace:port, service.namespace.svc:port, service.namespace.svc.cluster:port
-	var port int
-	port, err = util.GetAvailableUDPPortOrDie()
+	port, err := util.GetAvailableUDPPortOrDie()
 	if err != nil {
 		log.Errorf("get available port error: %v", err)
 		return
@@ -77,8 +81,35 @@ func (c *Config) usingResolver() {
 		Timeout: 2,
 	}
 	for _, s := range sets.New[string](strings.Split(clientConfig.Search[0], ".")...).Insert(ns...).UnsortedList() {
-		filename = filepath.Join("/", "etc", "resolver", s)
-		_ = os.WriteFile(filename, []byte(toString(config)), 0644)
+		filename := filepath.Join("/", "etc", "resolver", s)
+		var content []byte
+		content, err = os.ReadFile(filename)
+		if os.IsNotExist(err) {
+			_ = os.WriteFile(filename, []byte(toString(config)), 0644)
+		} else if err == nil {
+			var conf *miekgdns.ClientConfig
+			conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(content)))
+			if err != nil {
+				log.Errorf("Parse resolver %s error: %v", filename, err)
+				continue
+			}
+			// if already has this dns server, do nothing
+			if sets.New[string](conf.Servers...).Has(clientConfig.Servers[0]) {
+				continue
+			}
+			if net.ParseIP(clientConfig.Servers[0]).IsLoopback() {
+				continue
+			}
+			conf.Servers = append(conf.Servers, clientConfig.Servers[0])
+			if len(conf.Servers) <= 3 {
+				err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
+				if err != nil {
+					log.Errorf("Failed to write resovler %s error: %v", filename, err)
+				}
+			}
+		} else {
+			log.Errorf("Failed to read resovler %s error: %v", filename, err)
+		}
 	}
 }
 
@@ -159,7 +190,9 @@ func (c *Config) CancelDNS() {
 	if cancel != nil {
 		cancel()
 	}
-	_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
+	if !c.Lite {
+		_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
+	}
 	//networkCancel()
 	c.updateHosts("")
 }
