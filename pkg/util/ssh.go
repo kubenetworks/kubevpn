@@ -149,6 +149,7 @@ func DialSshRemote(conf *SshConfig) (*ssh.Client, error) {
 			User:            conf.User,
 			Auth:            auth,
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			BannerCallback:  ssh.BannerDisplayStderr(),
 			Timeout:         time.Second * 10,
 		}
 		if strings.Index(conf.Addr, ":") < 0 {
@@ -313,6 +314,7 @@ func dial(from *SshConfig) (*ssh.Client, error) {
 		User:            from.User,
 		Auth:            []ssh.AuthMethod{authMethod},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		BannerCallback:  ssh.BannerDisplayStderr(),
 		Timeout:         time.Second * 10,
 	})
 }
@@ -332,6 +334,7 @@ func jump(bClient *ssh.Client, to *SshConfig) (*ssh.Client, error) {
 		User:            to.User,
 		Auth:            []ssh.AuthMethod{authMethod},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		BannerCallback:  ssh.BannerDisplayStderr(),
 		Timeout:         time.Second * 10,
 	})
 	if err != nil {
