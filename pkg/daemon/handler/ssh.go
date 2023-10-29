@@ -21,7 +21,6 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/core"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
-	"github.com/wencaiwulue/kubevpn/pkg/upgrade"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -195,7 +194,7 @@ func enterTerminal(conf *util.SshConfig, conn *websocket.Conn) error {
 }
 
 func remoteInstallKubevpnIfCommandNotFound(ctx context.Context, sshConfig *util.SshConfig) error {
-	cmd := `hash kubevpn1 || type kubevpn1 || which kubevpn1 || command -v kubevpn1`
+	cmd := `hash kubevpn || type kubevpn || which kubevpn || command -v kubevpn`
 	_, _, err := util.RemoteRun(sshConfig, cmd, nil)
 	if err == nil {
 		return nil
@@ -205,7 +204,7 @@ func remoteInstallKubevpnIfCommandNotFound(ctx context.Context, sshConfig *util.
 	if config.GitHubOAuthToken != "" {
 		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
 	}
-	latestVersion, latestCommit, url, err := upgrade.GetManifest(client, "linux", "amd64")
+	latestVersion, latestCommit, url, err := util.GetManifest(client, "linux", "amd64")
 	if err != nil {
 		return err
 	}
@@ -219,7 +218,7 @@ func remoteInstallKubevpnIfCommandNotFound(ctx context.Context, sshConfig *util.
 	if err != nil {
 		return err
 	}
-	err = upgrade.Download(client, url, temp.Name())
+	err = util.Download(client, url, temp.Name())
 	if err != nil {
 		return err
 	}
@@ -232,7 +231,7 @@ func remoteInstallKubevpnIfCommandNotFound(ctx context.Context, sshConfig *util.
 	if err != nil {
 		return err
 	}
-	err = upgrade.UnzipKubeVPNIntoFile(temp.Name(), tempBin.Name())
+	err = util.UnzipKubeVPNIntoFile(temp.Name(), tempBin.Name())
 	if err != nil {
 		return err
 	}
