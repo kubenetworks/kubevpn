@@ -5,9 +5,12 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/admin"
 	"google.golang.org/grpc/health"
@@ -15,6 +18,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/action"
+	_ "github.com/wencaiwulue/kubevpn/pkg/daemon/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -64,8 +68,16 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	// [tun-client] 223.254.0.101 - 127.0.0.1:8422: dial tcp 127.0.0.1:55407: connect: can't assign requested address
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
 	rpc.RegisterDaemonServer(o.svr, &action.Server{Cancel: o.Stop, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: file})
+	// startup a http server
+	// With downgrading-capable gRPC server, which can also handle HTTP.
+	downgradingServer := &http.Server{}
+	var h2Server http2.Server
+	_ = http2.ConfigureServer(downgradingServer, &h2Server)
+	handler := CreateDowngradingHandler(o.svr, http.HandlerFunc(http.DefaultServeMux.ServeHTTP))
+	downgradingServer.Handler = h2c.NewHandler(handler, &h2Server)
 	o.uptime = time.Now().Unix()
-	return o.svr.Serve(lis)
+	return downgradingServer.Serve(lis)
+	//return o.svr.Serve(lis)
 }
 
 func (o *SvrOption) Stop() {
@@ -76,4 +88,23 @@ func (o *SvrOption) Stop() {
 	}
 	path := GetSockPath(o.IsSudo)
 	_ = os.Remove(path)
+}
+
+// CreateDowngradingHandler takes a gRPC server and a plain HTTP handler, and returns an HTTP handler that has the
+// capability of handling HTTP requests and gRPC requests that may require downgrading the response to gRPC-Web or gRPC-WebSocket.
+//
+//	if r.ProtoMajor == 2 && strings.HasPrefix(
+//		r.Header.Get("Content-Type"), "application/grpc") {
+//		grpcServer.ServeHTTP(w, r)
+//	} else {
+//		yourMux.ServeHTTP(w, r)
+//	}
+func CreateDowngradingHandler(grpcServer *grpc.Server, httpHandler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+			grpcServer.ServeHTTP(w, r)
+		} else {
+			httpHandler.ServeHTTP(w, r)
+		}
+	})
 }

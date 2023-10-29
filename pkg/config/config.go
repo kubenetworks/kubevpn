@@ -101,6 +101,9 @@ var (
 	Version   = "latest"
 	GitCommit = ""
 
+	// GitHubOAuthToken --ldflags -X
+	GitHubOAuthToken = ""
+
 	OriginImage = "docker.io/naison/kubevpn:" + Version
 
 	DaemonPath string

@@ -762,7 +762,7 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 			fmt.Sprintf("sh -c 'kubectl config view --flatten --raw --kubeconfig %s || minikube kubectl -- config view --flatten --raw --kubeconfig %s'",
 				conf.RemoteKubeconfig,
 				conf.RemoteKubeconfig),
-			[]string{clientcmd.RecommendedConfigPathEnvVar, conf.RemoteKubeconfig},
+			map[string]string{clientcmd.RecommendedConfigPathEnvVar: conf.RemoteKubeconfig},
 		)
 		if err != nil {
 			err = errors.Wrap(err, string(errOut))

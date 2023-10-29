@@ -14,12 +14,6 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/upgrade"
 )
 
-// GitHubOAuthToken
-// --ldflags -X
-var (
-	GitHubOAuthToken = ""
-)
-
 func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upgrade",
@@ -27,8 +21,8 @@ func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
 		Long:  `Upgrade KubeVPN version, automatically download latest KubeVPN from GitHub`,
 		Run: func(cmd *cobra.Command, args []string) {
 			var client = http.DefaultClient
-			if GitHubOAuthToken != "" {
-				client = oauth2.NewClient(cmd.Context(), oauth2.StaticTokenSource(&oauth2.Token{AccessToken: GitHubOAuthToken, TokenType: "Bearer"}))
+			if config.GitHubOAuthToken != "" {
+				client = oauth2.NewClient(cmd.Context(), oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
 			}
 			err := upgrade.Main(cmd.Context(), config.Version, config.GitCommit, client)
 			if err != nil {

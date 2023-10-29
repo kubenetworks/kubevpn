@@ -28,6 +28,9 @@ const (
 	Daemon_Remove_FullMethodName       = "/rpc.Daemon/Remove"
 	Daemon_ConfigAdd_FullMethodName    = "/rpc.Daemon/ConfigAdd"
 	Daemon_ConfigRemove_FullMethodName = "/rpc.Daemon/ConfigRemove"
+	Daemon_SshStart_FullMethodName     = "/rpc.Daemon/SshStart"
+	Daemon_SshStop_FullMethodName      = "/rpc.Daemon/SshStop"
+	Daemon_SshConnect_FullMethodName   = "/rpc.Daemon/SshConnect"
 	Daemon_Logs_FullMethodName         = "/rpc.Daemon/Logs"
 	Daemon_List_FullMethodName         = "/rpc.Daemon/List"
 	Daemon_Get_FullMethodName          = "/rpc.Daemon/Get"
@@ -50,6 +53,9 @@ type DaemonClient interface {
 	Remove(ctx context.Context, in *RemoveRequest, opts ...grpc.CallOption) (Daemon_RemoveClient, error)
 	ConfigAdd(ctx context.Context, in *ConfigAddRequest, opts ...grpc.CallOption) (*ConfigAddResponse, error)
 	ConfigRemove(ctx context.Context, in *ConfigRemoveRequest, opts ...grpc.CallOption) (*ConfigRemoveResponse, error)
+	SshStart(ctx context.Context, in *SshStartRequest, opts ...grpc.CallOption) (*SshStartResponse, error)
+	SshStop(ctx context.Context, in *SshStopRequest, opts ...grpc.CallOption) (*SshStopResponse, error)
+	SshConnect(ctx context.Context, opts ...grpc.CallOption) (Daemon_SshConnectClient, error)
 	Logs(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (Daemon_LogsClient, error)
 	List(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error)
 	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
@@ -309,8 +315,57 @@ func (c *daemonClient) ConfigRemove(ctx context.Context, in *ConfigRemoveRequest
 	return out, nil
 }
 
+func (c *daemonClient) SshStart(ctx context.Context, in *SshStartRequest, opts ...grpc.CallOption) (*SshStartResponse, error) {
+	out := new(SshStartResponse)
+	err := c.cc.Invoke(ctx, Daemon_SshStart_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) SshStop(ctx context.Context, in *SshStopRequest, opts ...grpc.CallOption) (*SshStopResponse, error) {
+	out := new(SshStopResponse)
+	err := c.cc.Invoke(ctx, Daemon_SshStop_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) SshConnect(ctx context.Context, opts ...grpc.CallOption) (Daemon_SshConnectClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[7], Daemon_SshConnect_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &daemonSshConnectClient{stream}
+	return x, nil
+}
+
+type Daemon_SshConnectClient interface {
+	Send(*SshConnectRequest) error
+	Recv() (*SshConnectResponse, error)
+	grpc.ClientStream
+}
+
+type daemonSshConnectClient struct {
+	grpc.ClientStream
+}
+
+func (x *daemonSshConnectClient) Send(m *SshConnectRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *daemonSshConnectClient) Recv() (*SshConnectResponse, error) {
+	m := new(SshConnectResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *daemonClient) Logs(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (Daemon_LogsClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[7], Daemon_Logs_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[8], Daemon_Logs_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -387,7 +442,7 @@ func (c *daemonClient) Version(ctx context.Context, in *VersionRequest, opts ...
 }
 
 func (c *daemonClient) Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[8], Daemon_Quit_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[9], Daemon_Quit_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -431,6 +486,9 @@ type DaemonServer interface {
 	Remove(*RemoveRequest, Daemon_RemoveServer) error
 	ConfigAdd(context.Context, *ConfigAddRequest) (*ConfigAddResponse, error)
 	ConfigRemove(context.Context, *ConfigRemoveRequest) (*ConfigRemoveResponse, error)
+	SshStart(context.Context, *SshStartRequest) (*SshStartResponse, error)
+	SshStop(context.Context, *SshStopRequest) (*SshStopResponse, error)
+	SshConnect(Daemon_SshConnectServer) error
 	Logs(*LogRequest, Daemon_LogsServer) error
 	List(context.Context, *ListRequest) (*ListResponse, error)
 	Get(context.Context, *GetRequest) (*GetResponse, error)
@@ -471,6 +529,15 @@ func (UnimplementedDaemonServer) ConfigAdd(context.Context, *ConfigAddRequest) (
 }
 func (UnimplementedDaemonServer) ConfigRemove(context.Context, *ConfigRemoveRequest) (*ConfigRemoveResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ConfigRemove not implemented")
+}
+func (UnimplementedDaemonServer) SshStart(context.Context, *SshStartRequest) (*SshStartResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SshStart not implemented")
+}
+func (UnimplementedDaemonServer) SshStop(context.Context, *SshStopRequest) (*SshStopResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SshStop not implemented")
+}
+func (UnimplementedDaemonServer) SshConnect(Daemon_SshConnectServer) error {
+	return status.Errorf(codes.Unimplemented, "method SshConnect not implemented")
 }
 func (UnimplementedDaemonServer) Logs(*LogRequest, Daemon_LogsServer) error {
 	return status.Errorf(codes.Unimplemented, "method Logs not implemented")
@@ -689,6 +756,68 @@ func _Daemon_ConfigRemove_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Daemon_SshStart_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SshStartRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).SshStart(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_SshStart_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).SshStart(ctx, req.(*SshStartRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_SshStop_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SshStopRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).SshStop(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_SshStop_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).SshStop(ctx, req.(*SshStopRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_SshConnect_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(DaemonServer).SshConnect(&daemonSshConnectServer{stream})
+}
+
+type Daemon_SshConnectServer interface {
+	Send(*SshConnectResponse) error
+	Recv() (*SshConnectRequest, error)
+	grpc.ServerStream
+}
+
+type daemonSshConnectServer struct {
+	grpc.ServerStream
+}
+
+func (x *daemonSshConnectServer) Send(m *SshConnectResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *daemonSshConnectServer) Recv() (*SshConnectRequest, error) {
+	m := new(SshConnectRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func _Daemon_Logs_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(LogRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -837,6 +966,14 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Daemon_ConfigRemove_Handler,
 		},
 		{
+			MethodName: "SshStart",
+			Handler:    _Daemon_SshStart_Handler,
+		},
+		{
+			MethodName: "SshStop",
+			Handler:    _Daemon_SshStop_Handler,
+		},
+		{
 			MethodName: "List",
 			Handler:    _Daemon_List_Handler,
 		},
@@ -892,6 +1029,12 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 			StreamName:    "Remove",
 			Handler:       _Daemon_Remove_Handler,
 			ServerStreams: true,
+		},
+		{
+			StreamName:    "SshConnect",
+			Handler:       _Daemon_SshConnect_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
 		},
 		{
 			StreamName:    "Logs",

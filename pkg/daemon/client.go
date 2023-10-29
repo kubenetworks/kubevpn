@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -156,4 +158,26 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 	_, err = client.Status(ctx, &rpc.StatusRequest{})
 
 	return err
+}
+
+func GetHttpClient(isSudo bool) *http.Client {
+	client := http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				var d net.Dialer
+				d.Timeout = 30 * time.Second
+				d.KeepAlive = 30 * time.Second
+				return d.DialContext(ctx, "unix", GetSockPath(isSudo))
+			},
+		},
+	}
+	return &client
+}
+
+func GetTCPClient(isSudo bool) net.Conn {
+	conn, err := net.Dial("unix", GetSockPath(isSudo))
+	if err != nil {
+		return nil
+	}
+	return conn
 }

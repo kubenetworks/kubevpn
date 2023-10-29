@@ -161,7 +161,7 @@ func DialSshRemote(conf *SshConfig) (*ssh.Client, error) {
 	return remote, err
 }
 
-func RemoteRun(conf *SshConfig, cmd string, env []string) (output []byte, errOut []byte, err error) {
+func RemoteRun(conf *SshConfig, cmd string, env map[string]string) (output []byte, errOut []byte, err error) {
 	var remote *ssh.Client
 	remote, err = DialSshRemote(conf)
 	if err != nil {
@@ -174,10 +174,10 @@ func RemoteRun(conf *SshConfig, cmd string, env []string) (output []byte, errOut
 	if err != nil {
 		return
 	}
-	if len(env) == 2 {
+	for k, v := range env {
 		// /etc/ssh/sshd_config
 		// AcceptEnv DEBIAN_FRONTEND
-		if err = session.Setenv(env[0], env[1]); err != nil {
+		if err = session.Setenv(k, v); err != nil {
 			log.Warn(err)
 			err = nil
 		}
