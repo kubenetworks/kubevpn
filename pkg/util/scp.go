@@ -12,7 +12,7 @@ import (
 )
 
 // SCP copy file to remote and exec command
-func SCP(conf *SshConfig, filename string, commands ...string) error {
+func SCP(conf *SshConfig, filename, to string, commands ...string) error {
 	remote, err := DialSshRemote(conf)
 	if err != nil {
 		log.Errorf("Dial into remote server error: %s", err)
@@ -23,7 +23,7 @@ func SCP(conf *SshConfig, filename string, commands ...string) error {
 	if err != nil {
 		return err
 	}
-	err = main(sess, filename)
+	err = main(sess, filename, to)
 	if err != nil {
 		log.Errorf("Copy file to remote error: %s", err)
 		return err
@@ -45,7 +45,7 @@ func SCP(conf *SshConfig, filename string, commands ...string) error {
 }
 
 // https://blog.neilpang.com/%E6%94%B6%E8%97%8F-scp-secure-copy%E5%8D%8F%E8%AE%AE/
-func main(sess *ssh.Session, filename string) error {
+func main(sess *ssh.Session, filename string, to string) error {
 	open, err := os.Open(filename)
 	if err != nil {
 		return err
@@ -59,7 +59,7 @@ func main(sess *ssh.Session, filename string) error {
 	go func() {
 		w, _ := sess.StdinPipe()
 		defer w.Close()
-		fmt.Fprintln(w, "D0755", 0, "kubevpndir") // mkdir
+		fmt.Fprintln(w, "D0755", 0, filepath.Dir(to)) // mkdir
 		fmt.Fprintln(w, "C0644", stat.Size(), filepath.Base(filename))
 		err := sCopy(w, open, stat.Size())
 		if err != nil {

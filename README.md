@@ -1,4 +1,4 @@
-![kubevpn](samples/flat_log.png)
+![kubevpn](https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/flat_log.png)
 
 [![GitHub Workflow][1]](https://github.com/KubeNetworks/kubevpn/actions)
 [![Go Version][2]](https://github.com/KubeNetworks/kubevpn/blob/master/go.mod)

@@ -33,7 +33,7 @@ import (
 // 6) check permission of putting new kubevpn back
 // 7) chmod +x, move old to /temp, move new to CURRENT_FOLDER
 func Main(ctx context.Context, current string, commit string, client *http.Client) error {
-	latestVersion, latestCommit, url, err := getManifest(client)
+	latestVersion, latestCommit, url, err := GetManifest(client, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func Main(ctx context.Context, current string, commit string, client *http.Clien
 	if err != nil {
 		return err
 	}
-	err = download(client, url, temp.Name())
+	err = Download(client, url, temp.Name())
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func Main(ctx context.Context, current string, commit string, client *http.Clien
 	if err != nil {
 		return err
 	}
-	err = unzipKubeVPNIntoFile(temp.Name(), file.Name())
+	err = UnzipKubeVPNIntoFile(temp.Name(), file.Name())
 	if err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func Main(ctx context.Context, current string, commit string, client *http.Clien
 	return err
 }
 
-func getManifest(httpCli *http.Client) (version string, commit string, url string, err error) {
+func GetManifest(httpCli *http.Client, os string, arch string) (version string, commit string, url string, err error) {
 	var resp *http.Response
 	resp, err = httpCli.Get("https://api.github.com/repos/KubeNetworks/kubevpn/releases/latest")
 	if err != nil {
@@ -169,7 +169,7 @@ func getManifest(httpCli *http.Client) (version string, commit string, url strin
 	version = m.TagName
 	commit = m.TargetCommitish
 	for _, asset := range m.Assets {
-		if strings.Contains(asset.Name, runtime.GOARCH) && strings.Contains(asset.Name, runtime.GOOS) {
+		if strings.Contains(asset.Name, arch) && strings.Contains(asset.Name, os) {
 			url = asset.BrowserDownloadUrl
 			break
 		}
@@ -177,9 +177,9 @@ func getManifest(httpCli *http.Client) (version string, commit string, url strin
 	if len(url) == 0 {
 		var found bool
 		// if os is not windows and darwin, default is linux
-		if !sets.New[string]("windows", "darwin").Has(runtime.GOOS) {
+		if !sets.New[string]("windows", "darwin").Has(os) {
 			for _, asset := range m.Assets {
-				if strings.Contains(asset.Name, "linux") && strings.Contains(asset.Name, runtime.GOARCH) {
+				if strings.Contains(asset.Name, "linux") && strings.Contains(asset.Name, arch) {
 					url = asset.BrowserDownloadUrl
 					found = true
 					break
@@ -201,7 +201,7 @@ func getManifest(httpCli *http.Client) (version string, commit string, url strin
 
 // https://api.github.com/repos/KubeNetworks/kubevpn/releases
 // https://github.com/KubeNetworks/kubevpn/releases/download/v1.1.13/kubevpn-windows-arm64.exe
-func download(client *http.Client, url string, filename string) error {
+func Download(client *http.Client, url string, filename string) error {
 	get, err := client.Get(url)
 	if err != nil {
 		return err
@@ -238,7 +238,7 @@ func download(client *http.Client, url string, filename string) error {
 	return err
 }
 
-func unzipKubeVPNIntoFile(zipFile, filename string) error {
+func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	archive, err := zip.OpenReader(zipFile)
 	if err != nil {
 		return err

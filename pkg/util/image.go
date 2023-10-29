@@ -45,7 +45,7 @@ func GetClient() (*client.Client, *command.DockerCli, error) {
 // TransferImage
 // 1) if not special ssh config, just pull image and tag and push
 // 2) if special ssh config, pull image, tag image, save image and scp image to remote, load image and push
-func TransferImage(ctx context.Context, conf *SshConfig, from, to string, out io.Writer) error {
+func TransferImage(ctx context.Context, conf *SshConfig, remoteTemp, to string, out io.Writer) error {
 	cli, c, err := GetClient()
 	if err != nil {
 		log.Errorf("failed to get docker client: %v", err)
@@ -53,15 +53,15 @@ func TransferImage(ctx context.Context, conf *SshConfig, from, to string, out io
 	}
 	// todo add flags? or detect k8s node runtime ?
 	platform := &v1.Platform{Architecture: "amd64", OS: "linux"}
-	err = PullImage(ctx, platform, cli, c, from, out)
+	err = PullImage(ctx, platform, cli, c, remoteTemp, out)
 	if err != nil {
 		log.Errorf("failed to pull image: %v", err)
 		return err
 	}
 
-	err = cli.ImageTag(ctx, from, to)
+	err = cli.ImageTag(ctx, remoteTemp, to)
 	if err != nil {
-		log.Errorf("failed to tag image %s to %s: %v", from, to, err)
+		log.Errorf("failed to tag image %s to %s: %v", remoteTemp, to, err)
 		return err
 	}
 
@@ -130,12 +130,13 @@ func TransferImage(ctx context.Context, conf *SshConfig, from, to string, out io
 	defer os.Remove(file.Name())
 
 	logrus.Infof("Transfering image %s", to)
+	remoteTemp = filepath.Join("/tmp", filepath.Base(file.Name()))
 	cmd := fmt.Sprintf(
-		"(docker load image -i kubevpndir/%s && docker push %s) || (nerdctl image load -i kubevpndir/%s && nerdctl image push %s)",
-		filepath.Base(file.Name()), to,
-		filepath.Base(file.Name()), to,
+		"(docker load image -i %s && docker push %s) || (nerdctl image load -i %s && nerdctl image push %s)",
+		remoteTemp, to,
+		remoteTemp, to,
 	)
-	err = SCP(conf, file.Name(), []string{cmd}...)
+	err = SCP(conf, file.Name(), remoteTemp, []string{cmd}...)
 	if err != nil {
 		return err
 	}

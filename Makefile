@@ -23,10 +23,10 @@ LDFLAGS=--ldflags "\
  -X ${BASE}/pkg/config.Image=${IMAGE} \
  -X ${BASE}/pkg/config.Version=${VERSION} \
  -X ${BASE}/pkg/config.GitCommit=${GIT_COMMIT} \
+ -X ${BASE}/pkg/config.GitHubOAuthToken=${GitHubOAuthToken} \
  -X ${FOLDER}/cmds.BuildTime=${BUILD_TIME} \
  -X ${FOLDER}/cmds.Branch=${BRANCH} \
  -X ${FOLDER}/cmds.OsArch=${OS_ARCH} \
- -X ${FOLDER}/cmds.GitHubOAuthToken=${GitHubOAuthToken} \
 "
 
 GO111MODULE=on

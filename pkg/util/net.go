@@ -6,7 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cilium/ipam/service/allocator"
+	"github.com/cilium/ipam/service/ipallocator"
 	"github.com/prometheus-community/pro-bing"
+
+	"github.com/wencaiwulue/kubevpn/pkg/config"
 )
 
 func GetTunDevice(ips ...net.IP) (*net.Interface, error) {
@@ -78,4 +82,30 @@ func IsIPv4(packet []byte) bool {
 
 func IsIPv6(packet []byte) bool {
 	return 6 == (packet[0] >> 4)
+}
+
+func GetIPBaseNic() (*net.IPNet, error) {
+	addrs, _ := net.InterfaceAddrs()
+	var sum int
+	for _, addr := range addrs {
+		ip, _, _ := net.ParseCIDR(addr.String())
+		for _, b := range ip {
+			sum = sum + int(b)
+		}
+	}
+	dhcp, err := ipallocator.NewAllocatorCIDRRange(config.DockerCIDR, func(max int, rangeSpec string) (allocator.Interface, error) {
+		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	var next net.IP
+	for i := 0; i < sum%255; i++ {
+		next, err = dhcp.AllocateNext()
+	}
+	if err != nil {
+		return nil, err
+	}
+	_, bits := config.DockerCIDR.Mask.Size()
+	return &net.IPNet{IP: next, Mask: net.CIDRMask(bits, bits)}, nil
 }

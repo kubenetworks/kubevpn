@@ -160,8 +160,8 @@ func (h tunHandler) printRoute() {
 					sb.WriteString(fmt.Sprintf("to: %s, route: %s\n", key, strings.Join(s, " ")))
 				}
 			})
-			fmt.Println(sb.String())
-			fmt.Println(i)
+			log.Debug(sb.String())
+			log.Debug(i)
 		}
 	}
 }
