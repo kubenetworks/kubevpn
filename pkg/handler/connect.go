@@ -827,11 +827,39 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 	if err != nil {
 		return
 	}
-	var remote netip.AddrPort
-	remote, err = netip.ParseAddrPort(u.Host)
+
+	serverHost := u.Hostname()
+	serverPort := u.Port()
+	if serverPort == "" {
+		if u.Scheme == "https" {
+			serverPort = "443"
+		} else if u.Scheme == "http" {
+			serverPort = "80"
+		} else {
+			// handle other schemes if necessary
+			err = errors.New("kubeconfig is invalid: wrong protocol")
+			return
+		}
+	}
+	ips, err := net.LookupHost(serverHost)
 	if err != nil {
+		// handle error
 		return
 	}
+
+	if len(ips) == 0 {
+		// handle error: no IP associated with the hostname
+		return
+	}
+
+	var remote netip.AddrPort
+	// Use the first IP address
+	remote, err = netip.ParseAddrPort(net.JoinHostPort(ips[0], serverPort))
+	if err != nil {
+		// handle error
+		return
+	}
+
 	var port int
 	port, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
