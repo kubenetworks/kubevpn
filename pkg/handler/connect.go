@@ -843,12 +843,12 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 	}
 	ips, err := net.LookupHost(serverHost)
 	if err != nil {
-		// handle error
 		return
 	}
 
 	if len(ips) == 0 {
 		// handle error: no IP associated with the hostname
+		err = fmt.Errorf("kubeconfig: no IP associated with the hostname %s", serverHost)
 		return
 	}
 
@@ -856,7 +856,6 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 	// Use the first IP address
 	remote, err = netip.ParseAddrPort(net.JoinHostPort(ips[0], serverPort))
 	if err != nil {
-		// handle error
 		return
 	}
 
