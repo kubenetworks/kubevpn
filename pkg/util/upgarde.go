@@ -84,7 +84,7 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 
 // https://api.github.com/repos/KubeNetworks/kubevpn/releases
 // https://github.com/KubeNetworks/kubevpn/releases/download/v1.1.13/kubevpn-windows-arm64.exe
-func Download(client *http.Client, url string, filename string) error {
+func Download(client *http.Client, url string, filename string, stdout, stderr io.Writer) error {
 	get, err := client.Get(url)
 	if err != nil {
 		return err
@@ -100,12 +100,12 @@ func Download(client *http.Client, url string, filename string) error {
 	}
 	defer f.Close()
 	bar := progressbar.NewOptions(int(get.ContentLength),
-		progressbar.OptionSetWriter(os.Stdout),
+		progressbar.OptionSetWriter(stdout),
 		progressbar.OptionEnableColorCodes(true),
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionSetWidth(50),
 		progressbar.OptionOnCompletion(func() {
-			_, _ = fmt.Fprint(os.Stderr, "\n")
+			_, _ = fmt.Fprint(stderr, "\n")
 		}),
 		progressbar.OptionSetRenderBlankState(true),
 		progressbar.OptionSetDescription("Writing temp file..."),

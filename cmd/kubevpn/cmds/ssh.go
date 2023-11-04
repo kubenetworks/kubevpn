@@ -3,6 +3,7 @@ package cmds
 import (
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/net/websocket"
@@ -19,6 +20,7 @@ import (
 // 这样别的路由不会走到这里来
 func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 	var sshConf = &util.SshConfig{}
+	var ExtraCIDR []string
 	cmd := &cobra.Command{
 		Use:   "ssh",
 		Short: "Ssh to jump server",
@@ -46,6 +48,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			config.Header.Set("ssh-password", sshConf.Password)
 			config.Header.Set("ssh-keyfile", sshConf.Keyfile)
 			config.Header.Set("ssh-alias", sshConf.ConfigAlias)
+			config.Header.Set("extra-cidr", strings.Join(ExtraCIDR, ","))
 			client := daemon.GetTCPClient(true)
 			conn, err := websocket.NewClient(config, client)
 			if err != nil {
@@ -57,5 +60,6 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 		},
 	}
 	addSshFlags(cmd, sshConf)
+	cmd.Flags().StringArrayVar(&ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
 	return cmd
 }

@@ -73,7 +73,7 @@ func Main(ctx context.Context, client *http.Client, latestVersion string, latest
 	if err != nil {
 		return err
 	}
-	err = util.Download(client, url, temp.Name())
+	err = util.Download(client, url, temp.Name(), os.Stdout, os.Stderr)
 	if err != nil {
 		return err
 	}
