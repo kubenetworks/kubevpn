@@ -62,6 +62,12 @@ container with same environment、volume、and network. you can develop your app
 kubectl apply -f https://raw.githubusercontent.com/KubeNetworks/kubevpn/master/samples/bookinfo.yaml
 ```
 
+For clean up after test
+
+```shell
+kubectl delete -f https://raw.githubusercontent.com/KubeNetworks/kubevpn/master/samples/bookinfo.yaml
+```
+
 ## Functions
 
 ### Connect to k8s cluster network
@@ -169,6 +175,8 @@ reviews                   ClusterIP   172.21.8.24     <none>        9080/TCP    
 
 ### Short domain resolve
 
+To access the service in the cluster, service name or you can use the short domain name, such as `productpage.default.svc.cluster.local`
+
 ```shell
 ➜  ~ curl productpage:9080
 <!DOCTYPE html>
@@ -199,21 +207,66 @@ create remote inbound pod for deployment/productpage successfully
 ➜  ~
 ```
 
+For local testing, save the following code as `hello.go`
 ```go
 package main
 
 import (
-	"io"
-	"net/http"
+    "fmt"
+    "io"
+    "net/http"
 )
 
 func main() {
-	http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
-		_, _ = io.WriteString(writer, "Hello world!")
-	})
-	_ = http.ListenAndServe(":9080", nil)
+    http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+        _, _ = io.WriteString(writer, "Hello world!")
+        fmt.Printf(">>Received request: %s %s from %s\n", request.Method, request.RequestURI, request.RemoteAddr)
+    })
+    _ = http.ListenAndServe(":9080", nil)
 }
 ```
+
+and compile it
+```
+go build hello.go
+```
+
+then run it
+```
+./hello &
+```
+
+```shell
+export selector=productpage
+export pod=`kubectl get pods -l app=${selector} -n default -o jsonpath='{.items[0].metadata.name}'`
+export pod_ip=`kubectl get pod $pod -n default -o jsonpath='{.status.podIP}'`
+curl -v -H "a: 1" http://$pod_ip:9080/health
+```
+
+response would like below
+
+```
+❯ curl -v -H "a: 1" http://$pod_ip:9080/health
+*   Trying 192.168.72.77:9080...
+* Connected to 192.168.72.77 (192.168.72.77) port 9080 (#0)
+> GET /health HTTP/1.1
+> Host: 192.168.72.77:9080
+> User-Agent: curl/7.87.0
+> Accept: */*
+> a: 1
+> 
+>>Received request: GET /health from xxx.xxx.xxx.xxx:52974
+* Mark bundle as not supporting multiuse
+< HTTP/1.1 200 OK
+< Date: Sat, 04 Nov 2023 10:19:50 GMT
+< Content-Length: 12
+< Content-Type: text/plain; charset=utf-8
+< 
+* Connection #0 to host 192.168.72.77 left intact
+Hello world!
+```
+
+also you can access via service name
 
 ```shell
 ➜  ~ curl productpage:9080
@@ -221,6 +274,8 @@ Hello world!%
 ➜  ~ curl productpage.default.svc.cluster.local:9080
 Hello world!%
 ```
+
+
 
 ### Reverse proxy with mesh
 
@@ -243,6 +298,8 @@ create remote inbound pod for deployment/productpage successfully
 ➜  ~
 ```
 
+first access without header "a: 1", it will access existing pod on kubernetes cluster.
+
 ```shell
 ➜  ~ curl productpage:9080
 <!DOCTYPE html>
@@ -255,12 +312,15 @@ create remote inbound pod for deployment/productpage successfully
 ...
 ```
 
+Now let's access local service with header `"a: 1"`
+
 ```shell
 ➜  ~ curl productpage:9080 -H "a: 1"
-Hello world!%
+>>Received request: GET / from xxx.xxx.xxx.xxx:51296
+Hello world!  
 ```
 
-### Dev mode in local 🐳
+### Dev mode in local Docker 🐳
 
 Run the Kubernetes pod in the local Docker container, and cooperate with the service mesh to intercept the traffic with
 the specified header to the local, or all the traffic to the local.
@@ -320,7 +380,9 @@ OK: 8 MiB in 19 packages
 /opt/microservices # 2023/09/30 13:41:58 Start listening http port 9080 ...
 
 /opt/microservices # curl localhost:9080/health
-{"status":"Authors is healthy"}/opt/microservices # exit
+{"status":"Authors is healthy"} /opt/microservices # echo "continue testing pod access..."
+continue testing pod access...
+/opt/microservices # exit
 prepare to exit, cleaning up
 update ref count successfully
 tun device closed
@@ -346,6 +408,20 @@ afdecf41c08d   naison/authors:latest           "sh"                     37 secon
 fc04e42799a5   nginx:latest                    "/docker-entrypoint.…"   37 seconds ago   Up 37 seconds   0.0.0.0:80->80/tcp, 0.0.0.0:8888->8888/tcp, 0.0.0.0:9080->9080/tcp   nginx_default_kubevpn_a9a22
 ➜  ~
 ```
+
+Here is how to access pod in local docker container 
+
+```shell
+export authors_pod=`kubectl get pods -l app=authors -n default -o jsonpath='{.items[0].metadata.name}'`
+export authors_pod_ip=`kubectl get pod $authors_pod -n default -o jsonpath='{.status.podIP}'`
+curl -kv -H "a: 1" http://$authors_pod_ip:80/health
+```
+
+Verify logs of nginx container
+```shell
+docker logs $(docker ps --format '{{.Names}}' | grep nginx_default_kubevpn)
+```
+
 
 If you just want to start up a docker image, you can use simple way like this:
 
@@ -464,45 +540,47 @@ PID   USER     TIME  COMMAND
 Executing busybox-1.33.1-r3.trigger
 OK: 8 MiB in 19 packagesnx: worker process
 /opt/microservices #
+
+/opt/microservices # cat > hello.go <<EOF
+package main
+
+import (
+    "fmt"
+    "io"
+    "net/http"
+)
+
+func main() {
+    http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+        _, _ = io.WriteString(writer, "Hello world!")
+        fmt.Println(">> Container Received request: %s %s from %s\n", request.Method, request.RequestURI, request.RemoteAddr)
+    })
+    fmt.Println("Start listening http port 9080 ...")
+    _ = http.ListenAndServe(":9080", nil)
+}
+EOF
+/opt/microservices # go build hello.go
+/opt/microservices # 
+//opt/microservices # ls -alh
+total 12M    
+drwxr-xr-x    1 root     root          26 Nov  4 10:29 .
+drwxr-xr-x    1 root     root          26 Oct 18  2021 ..
+-rwxr-xr-x    1 root     root        6.3M Oct 18  2021 app
+-rwxr-xr-x    1 root     root        5.8M Nov  4 10:29 hello
+-rw-r--r--    1 root     root         387 Nov  4 10:28 hello.go
+/opt/microservices # 
 /opt/microservices # apk add curl
 OK: 8 MiB in 19 packages
-/opt/microservices # curl localhost:80
-<!DOCTYPE html>
-<html>
-<head>
-<title>Welcome to nginx!</title>
-<style>
-html { color-scheme: light dark; }
-body { width: 35em; margin: 0 auto;
-font-family: Tahoma, Verdana, Arial, sans-serif; }
-</style>
-</head>
-<body>
-<h1>Welcome to nginx!</h1>
-<p>If you see this page, the nginx web server is successfully installed and
-working. Further configuration is required.</p>
+/opt/microservices # ./hello &
+/opt/microservices # Start listening http port 9080 ...
+[2]+  Done                       ./hello
+/opt/microservices # curl localhost:9080
+>> Container Received request: GET / from 127.0.0.1:41230
+Hello world!/opt/microservices # 
 
-<p>For online documentation and support please refer to
-<a href="http://nginx.org/">nginx.org</a>.<br/>
-Commercial support is available at
-<a href="http://nginx.com/">nginx.com</a>.</p>
-
-<p><em>Thank you for using nginx.</em></p>
-</body>
-</html>
-/opt/microservices # ls
-app
-/opt/microservices # ls -alh
-total 6M
-drwxr-xr-x    2 root     root        4.0K Oct 18  2021 .
-drwxr-xr-x    1 root     root        4.0K Oct 18  2021 ..
--rwxr-xr-x    1 root     root        6.3M Oct 18  2021 app
-/opt/microservices # ./app &
-/opt/microservices # 2023/09/30 14:27:32 Start listening http port 9080 ...
-
-/opt/microservices # curl authors:9080/health
-/opt/microservices # curl authors:9080/health
-{"status":"Authors is healthy"}/opt/microservices #
+/opt/microservices # curl authors:9080/health -H "a: 1"
+>>Received request: GET /health from 223.254.0.109:57930
+                                                        Hello world!/opt/microservices # 
 /opt/microservices # curl localhost:9080/health
 {"status":"Authors is healthy"}/opt/microservices # exit
 prepare to exit, cleaning up
@@ -520,6 +598,7 @@ exit
 ➜  ~
 ```
 
+during test, check what container is running
 ```text
 ➜  ~ docker ps
 CONTAINER ID   IMAGE                           COMMAND                  CREATED         STATUS         PORTS     NAMES
@@ -528,6 +607,13 @@ CONTAINER ID   IMAGE                           COMMAND                  CREATED 
 d0b3dab8912a   naison/kubevpn:v2.0.0     "/bin/bash"              5 minutes ago   Up 5 minutes             upbeat_noyce
 ➜  ~
 ```
+
+* For clean up after test
+
+```shell
+kubectl delete -f https://raw.githubusercontent.com/KubeNetworks/kubevpn/master/samples/bookinfo.yaml
+```
+
 
 ### Multiple Protocol
 
