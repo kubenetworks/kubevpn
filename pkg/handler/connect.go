@@ -942,10 +942,17 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 		return
 	}
 	if print {
-		log.Infof("using temp kubeconfig %s", temp.Name())
+		msg := fmt.Sprintf("| To use: export KUBECONFIG=%s |", temp.Name())
+		printLine(msg)
+		log.Infof(msg)
+		printLine(msg)
 	}
 	path = temp.Name()
 	return
+}
+func printLine(msg string) {
+	line := "+" + strings.Repeat("-", len(msg)-2) + "+"
+	log.Infof(line)
 }
 
 func SshJumpAndSetEnv(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, print bool) error {
