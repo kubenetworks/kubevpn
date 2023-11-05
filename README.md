@@ -114,6 +114,13 @@ dns service ok
 ```
 
 ```shell
+➜  ~ kubevpn status
+ID Mode Cluster               Kubeconfig                    Namespace  Status
+0  full ccijorbccotmqodvr189g /Users/bytedance/.kube/config default Connected
+➜  ~
+```
+
+```shell
 ➜  ~ kubectl get pods -o wide
 NAME                                       READY   STATUS             RESTARTS   AGE     IP                NODE              NOMINATED NODE   READINESS GATES
 authors-dbb57d856-mbgqk                    3/3     Running            0          7d23h   172.29.2.132      192.168.0.5       <none>           <none>
