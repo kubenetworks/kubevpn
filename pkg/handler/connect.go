@@ -287,7 +287,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 			func() {
 				podList, err := c.GetRunningPodList(ctx)
 				if err != nil {
-					time.Sleep(time.Second * 3)
+					time.Sleep(time.Second * 2)
 					return
 				}
 				childCtx, cancelFunc := context.WithCancel(ctx)
@@ -325,10 +325,10 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				if strings.Contains(err.Error(), "unable to listen on any of the requested ports") ||
 					strings.Contains(err.Error(), "address already in use") {
 					log.Errorf("port %s already in use, needs to release it manually", portPair)
-					time.Sleep(time.Second * 5)
+					time.Sleep(time.Second * 1)
 				} else {
 					log.Debugf("port-forward occurs error, err: %v, retrying", err)
-					time.Sleep(time.Second * 2)
+					time.Sleep(time.Millisecond * 500)
 				}
 			}()
 		}
