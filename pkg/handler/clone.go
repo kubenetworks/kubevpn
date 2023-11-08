@@ -123,25 +123,25 @@ func (d *CloneOptions) InitClient(f cmdutil.Factory) (err error) {
 func (d *CloneOptions) DoClone(ctx context.Context) error {
 	rawConfig, err := d.factory.ToRawKubeConfigLoader().RawConfig()
 	if err != nil {
-		err = errors.Wrap(err, "d.factory.ToRawKubeConfigLoader().RawConfig(): ")
+		err = errors.Wrap(err, "Failed to get raw KubeConfig loader")
 		return err
 	}
 	err = api.FlattenConfig(&rawConfig)
 	if err != nil {
-		err = errors.Wrap(err, "api.FlattenConfig(&rawConfig): ")
+		err = errors.Wrap(err, "Failed to flatten config")
 		return err
 	}
 	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})
 	var convertedObj runtime.Object
 	convertedObj, err = latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
 	if err != nil {
-		err = errors.Wrap(err, "latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion): ")
+		err = errors.Wrap(err, "Failed to convert to version")
 		return err
 	}
 	var kubeconfigJsonBytes []byte
 	kubeconfigJsonBytes, err = json.Marshal(convertedObj)
 	if err != nil {
-		err = errors.Wrap(err, "json.Marshal(convertedObj): ")
+		err = errors.Wrap(err, "Failed to marshal JSON object")
 		return err
 	}
 
@@ -150,7 +150,7 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 		var object *runtimeresource.Info
 		object, err = util.GetUnstructuredObject(d.factory, d.Namespace, workload)
 		if err != nil {
-			err = errors.Wrap(err, "util.GetUnstructuredObject(d.factory, d.Namespace, workload): ")
+			err = errors.Wrap(err, "Failed to get unstructured object")
 			return err
 		}
 		u := object.Object.(*unstructured.Unstructured)
@@ -159,7 +159,7 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 		var newUUID uuid.UUID
 		newUUID, err = uuid.NewUUID()
 		if err != nil {
-			err = errors.Wrap(err, "uuid.NewUUID(): ")
+			err = errors.Wrap(err, "Failed to generate UUID")
 			return err
 		}
 		originName := u.GetName()
@@ -184,19 +184,19 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 		var spec *v1.PodTemplateSpec
 		spec, path, err = util.GetPodTemplateSpecPath(u)
 		if err != nil {
-			err = errors.Wrap(err, "util.GetPodTemplateSpecPath(u): ")
+			err = errors.Wrap(err, "Failed to get pod template spec path")
 			return err
 		}
 
 		err = unstructured.SetNestedStringMap(u.Object, labelsMap, "spec", "selector", "matchLabels")
 		if err != nil {
-			err = errors.Wrap(err, "unstructured.SetNestedStringMap(u.Object, labelsMap, \"spec\", \"selector\", \"matchLabels\"): ")
+			err = errors.Wrap(err, "Failed to set nested string map")
 			return err
 		}
 		var client dynamic.Interface
 		client, err = d.targetFactory.DynamicClient()
 		if err != nil {
-			err = errors.Wrap(err, "d.targetFactory.DynamicClient(): ")
+			err = errors.Wrap(err, "Failed to get dynamic client")
 			return err
 		}
 		d.addRollbackFunc(func() error {
@@ -343,13 +343,13 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 			//set spec
 			marshal, err := json.Marshal(spec)
 			if err != nil {
-				err = errors.Wrap(err, "json.Marshal(spec): ")
+				err = errors.Wrap(err, "Failed to marshal JSON")
 				return err
 			}
 			m := make(map[string]interface{})
 			err = json.Unmarshal(marshal, &m)
 			if err != nil {
-				err = errors.Wrap(err, "json.Unmarshal(marshal, &m): ")
+				err = errors.Wrap(err, "Failed to unmarshal JSON")
 				return err
 			}
 			//v := unstructured.Unstructured{}
@@ -373,7 +373,7 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 		log.Infof("wait for clone resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
 		err = util.WaitPodToBeReady(ctx, d.targetClientset.CoreV1().Pods(d.TargetNamespace), metav1.LabelSelector{MatchLabels: labelsMap})
 		if err != nil {
-			err = errors.Wrap(err, "util.WaitPodToBeReady(ctx, d.targetClientset.CoreV1().Pods(d.TargetNamespace), metav1.LabelSelector{MatchLabels: labelsMap}): ")
+			err = errors.Wrap(err, "Failed to wait for pod to be ready")
 			return err
 		}
 		_ = util.RolloutStatus(ctx, d.factory, d.Namespace, workload, time.Minute*60)
@@ -416,7 +416,7 @@ func (d *CloneOptions) setVolume(u *unstructured.Unstructured) error {
 	}
 	temp, path, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
-		err = errors.Wrap(err, "util.GetPodTemplateSpecPath(u): ")
+		err = errors.Wrap(err, "Failed to get pod template spec path")
 		return err
 	}
 
@@ -578,7 +578,7 @@ func (d *CloneOptions) setVolume(u *unstructured.Unstructured) error {
 func (d *CloneOptions) setEnv(u *unstructured.Unstructured) error {
 	temp, path, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
-		err = errors.Wrap(err, "util.GetPodTemplateSpecPath(u): ")
+		err = errors.Wrap(err, "Failed to get pod template spec path")
 		return err
 	}
 
@@ -601,7 +601,7 @@ func (d *CloneOptions) setEnv(u *unstructured.Unstructured) error {
 	var envMap map[string][]string
 	envMap, err = util.GetEnv(context.Background(), d.factory, d.Namespace, pod.Name)
 	if err != nil {
-		err = errors.Wrap(err, "util.GetEnv(context.Background(), d.factory, d.Namespace, pod.Name): ")
+		err = errors.Wrap(err, "Failed to get environment variable")
 		return err
 	}*/
 
@@ -720,7 +720,7 @@ func (d *CloneOptions) replaceRegistry(u *unstructured.Unstructured) error {
 
 	temp, path, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
-		err = errors.Wrap(err, "util.GetPodTemplateSpecPath(u): ")
+		err = errors.Wrap(err, "Failed to get pod template spec path")
 		return err
 	}
 
@@ -728,7 +728,7 @@ func (d *CloneOptions) replaceRegistry(u *unstructured.Unstructured) error {
 		oldImage := container.Image
 		named, err := reference.ParseNormalizedNamed(oldImage)
 		if err != nil {
-			err = errors.Wrap(err, "reference.ParseNormalizedNamed(oldImage): ")
+			err = errors.Wrap(err, "Failed to parse normalized old image name")
 			return err
 		}
 		domain := reference.Domain(named)
@@ -741,7 +741,7 @@ func (d *CloneOptions) replaceRegistry(u *unstructured.Unstructured) error {
 		oldImage := container.Image
 		named, err := reference.ParseNormalizedNamed(oldImage)
 		if err != nil {
-			err = errors.Wrap(err, "reference.ParseNormalizedNamed(oldImage): ")
+			err = errors.Wrap(err, "Failed to parse normalized old image name")
 			return err
 		}
 		domain := reference.Domain(named)

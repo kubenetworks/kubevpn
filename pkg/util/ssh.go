@@ -86,7 +86,7 @@ func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, co
 	var lc net.ListenConfig
 	listen, err := lc.Listen(ctx, "tcp", localEndpoint.String())
 	if err != nil {
-		err = errors.Wrap(err, "lc.Listen(ctx, \"tcp\", localEndpoint.String()): ")
+		err = errors.Wrap(err, "Failed to listen on the local endpoint")
 		return err
 	}
 	defer listen.Close()
@@ -105,7 +105,7 @@ func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, co
 
 		local, err := listen.Accept()
 		if err != nil {
-			err = errors.Wrap(err, "listen.Accept(): ")
+			err = errors.Wrap(err, "Failed to accept the connection")
 			return err
 		}
 		go func(local net.Conn) {
@@ -140,7 +140,7 @@ func DialSshRemote(conf *SshConfig) (*ssh.Client, error) {
 			var keyFile ssh.AuthMethod
 			keyFile, err = publicKeyFile(conf.Keyfile)
 			if err != nil {
-				err = errors.Wrap(err, "publicKeyFile(conf.Keyfile): ")
+				err = errors.Wrap(err, "Failed to get the public key file")
 				return nil, err
 			}
 			auth = append(auth, keyFile)
@@ -176,7 +176,7 @@ func RemoteRun(conf *SshConfig, cmd string, env map[string]string) (output []byt
 	var session *ssh.Session
 	session, err = remote.NewSession()
 	if err != nil {
-		err = errors.Wrap(err, "remote.NewSession(): ")
+		err = errors.Wrap(err, "Failed to create a new remote session")
 		return
 	}
 	for k, v := range env {
@@ -203,18 +203,18 @@ func publicKeyFile(file string) (ssh.AuthMethod, error) {
 	}
 	file, err = filepath.Abs(file)
 	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("Cannot read SSH public key file %s", file))
+		err = errors.Wrap(err, fmt.Sprintf("Failed to read the SSH public key file", file))
 		return nil, err
 	}
 	buffer, err := os.ReadFile(file)
 	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("Cannot read SSH public key file %s", file))
+		err = errors.Wrap(err, fmt.Sprintf("Failed to read the SSH public key file", file))
 		return nil, err
 	}
 
 	key, err := ssh.ParsePrivateKey(buffer)
 	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("Cannot parse SSH public key file %s", file))
+		err = errors.Wrap(err, fmt.Sprintf("Failed to parse the SSH public key file", file))
 		return nil, err
 	}
 	return ssh.PublicKeys(key), nil
@@ -269,13 +269,13 @@ func jumpRecursion(name string) (client *ssh.Client, err error) {
 		if client == nil {
 			client, err = dial(bastionList[i])
 			if err != nil {
-				err = errors.Wrap(err, "dial(bastionList[i]): ")
+				err = errors.Wrap(err, "Failed to dial the bastion")
 				return
 			}
 		} else {
 			client, err = jump(client, bastionList[i])
 			if err != nil {
-				err = errors.Wrap(err, "jump(client, bastionList[i]): ")
+				err = errors.Wrap(err, "Failed to jump to the bastion")
 				return
 			}
 		}
@@ -314,7 +314,7 @@ func dial(from *SshConfig) (*ssh.Client, error) {
 	// connect to the bastion host
 	authMethod, err := publicKeyFile(from.Keyfile)
 	if err != nil {
-		err = errors.Wrap(err, "publicKeyFile(from.Keyfile): ")
+		err = errors.Wrap(err, "Failed to get the public key file")
 		return nil, err
 	}
 	return ssh.Dial("tcp", from.Addr, &ssh.ClientConfig{
@@ -330,13 +330,13 @@ func jump(bClient *ssh.Client, to *SshConfig) (*ssh.Client, error) {
 	// Dial a connection to the service host, from the bastion
 	conn, err := bClient.Dial("tcp", to.Addr)
 	if err != nil {
-		err = errors.Wrap(err, "bClient.Dial(\"tcp\", to.Addr): ")
+		err = errors.Wrap(err, "Failed to dial the TCP address")
 		return nil, err
 	}
 
 	authMethod, err := publicKeyFile(to.Keyfile)
 	if err != nil {
-		err = errors.Wrap(err, "publicKeyFile(to.Keyfile): ")
+		err = errors.Wrap(err, "Failed to get the public key file")
 		return nil, err
 	}
 	ncc, chans, reqs, err := ssh.NewClientConn(conn, to.Addr, &ssh.ClientConfig{

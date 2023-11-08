@@ -47,7 +47,7 @@ func GetClient(isSudo bool) rpc.DaemonClient {
 	var response *grpc_health_v1.HealthCheckResponse
 	response, err = healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
 	if err != nil {
-		err = errors.Wrap(err, "healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{}): ")
+		err = errors.Wrap(err, "Failed to check the health client.")
 		return nil
 	}
 	if response.Status != grpc_health_v1.HealthCheckResponse_SERVING {
@@ -55,7 +55,7 @@ func GetClient(isSudo bool) rpc.DaemonClient {
 	}
 	_, err = cli.Status(ctx, &rpc.StatusRequest{})
 	if err != nil {
-		err = errors.Wrap(err, "cli.Status(ctx, &rpc.StatusRequest{}): ")
+		err = errors.Wrap(err, "Failed to get the status.")
 		return nil
 	}
 	if isSudo {
@@ -130,7 +130,7 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 		}
 		err = os.Remove(pidPath)
 		if err != nil {
-			err = errors.Wrap(err, "os.Remove(pidPath): ")
+			err = errors.Wrap(err, "Failed to remove the PID path.")
 			return err
 		}
 	}
@@ -180,7 +180,7 @@ func GetHttpClient(isSudo bool) *http.Client {
 func GetTCPClient(isSudo bool) net.Conn {
 	conn, err := net.Dial("unix", GetSockPath(isSudo))
 	if err != nil {
-		err = errors.Wrap(err, "net.Dial(\"unix\", GetSockPath(isSudo)): ")
+		err = errors.Wrap(err, "Failed to dial the UNIX socket.")
 		return nil
 	}
 	return conn

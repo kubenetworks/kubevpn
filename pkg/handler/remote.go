@@ -49,7 +49,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		if err == nil {
 			_, err = updateRefCount(ctx, clientset.CoreV1().ConfigMaps(namespace), config.ConfigMapPodTrafficManager, 1)
 			if err != nil {
-				err = errors.Wrap(err, "updateRefCount(ctx, clientset.CoreV1().ConfigMaps(namespace), config.ConfigMapPodTrafficManager, 1): ")
+				err = errors.Wrap(err, "Failed to update reference count")
 				return
 			}
 			log.Infoln("traffic manager already exist, reuse it")
@@ -497,7 +497,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, workload string, c util.PodRouteConfig) error {
 	object, err := util.GetUnstructuredObject(factory, namespace, workload)
 	if err != nil {
-		err = errors.Wrap(err, "util.GetUnstructuredObject(factory, namespace, workload): ")
+		err = errors.Wrap(err, "Failed to get unstructured object")
 		return err
 	}
 
@@ -505,7 +505,7 @@ func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, 
 
 	podTempSpec, path, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
-		err = errors.Wrap(err, "util.GetPodTemplateSpecPath(u): ")
+		err = errors.Wrap(err, "Failed to get pod template spec path")
 		return err
 	}
 
@@ -623,7 +623,7 @@ func CreateAfterDeletePod(factory cmdutil.Factory, p *v1.Pod, helper *pkgresourc
 func removeInboundContainer(factory cmdutil.Factory, namespace, workloads string) error {
 	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
 	if err != nil {
-		err = errors.Wrap(err, "util.GetUnstructuredObject(factory, namespace, workloads): ")
+		err = errors.Wrap(err, "Failed to get unstructured object")
 		return err
 	}
 
@@ -631,7 +631,7 @@ func removeInboundContainer(factory cmdutil.Factory, namespace, workloads string
 
 	podTempSpec, path, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
-		err = errors.Wrap(err, "util.GetPodTemplateSpecPath(u): ")
+		err = errors.Wrap(err, "Failed to get pod template spec path")
 		return err
 	}
 

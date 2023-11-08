@@ -47,13 +47,13 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	if transferImage {
 		err := util.TransferImage(ctx, sshConf, config.OriginImage, req.Image, out)
 		if err != nil {
-			err = errors.Wrap(err, "util.TransferImage(ctx, sshConf, config.OriginImage, req.Image, out): ")
+			err = errors.Wrap(err, "Failed to transfer image.")
 			return err
 		}
 	}
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
-		err = errors.Wrap(err, "util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes)): ")
+		err = errors.Wrap(err, "Failed to convert to temporary Kubeconfig file.")
 		return err
 	}
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
@@ -70,22 +70,22 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	var path string
 	path, err = handler.SshJump(sshCtx, sshConf, flags, false)
 	if err != nil {
-		err = errors.Wrap(err, "handler.SshJump(sshCtx, sshConf, flags, false): ")
+		err = errors.Wrap(err, "Failed to perform SSH jump.")
 		return err
 	}
 	err = connect.InitClient(InitFactoryByPath(path, req.Namespace))
 	if err != nil {
-		err = errors.Wrap(err, "connect.InitClient(InitFactoryByPath(path, req.Namespace)): ")
+		err = errors.Wrap(err, "Failed to initialize the client.")
 		return err
 	}
 	err = connect.PreCheckResource()
 	if err != nil {
-		err = errors.Wrap(err, "connect.PreCheckResource(): ")
+		err = errors.Wrap(err, "Failed to pre-check the resource.")
 		return err
 	}
 	_, err = connect.RentInnerIP(ctx)
 	if err != nil {
-		err = errors.Wrap(err, "connect.RentInnerIP(ctx): ")
+		err = errors.Wrap(err, "Failed to rent the inner IP.")
 		return err
 	}
 
@@ -119,7 +119,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 	var sshConf = util.ParseSshFromRPC(req.SshJump)
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
-		err = errors.Wrap(err, "util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes)): ")
+		err = errors.Wrap(err, "Failed to convert to temporary Kubeconfig file.")
 		return err
 	}
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
@@ -135,17 +135,17 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 	var path string
 	path, err = handler.SshJump(sshCtx, sshConf, flags, true)
 	if err != nil {
-		err = errors.Wrap(err, "handler.SshJump(sshCtx, sshConf, flags, true): ")
+		err = errors.Wrap(err, "Failed to perform SSH jump.")
 		return err
 	}
 	err = connect.InitClient(InitFactoryByPath(path, req.Namespace))
 	if err != nil {
-		err = errors.Wrap(err, "connect.InitClient(InitFactoryByPath(path, req.Namespace)): ")
+		err = errors.Wrap(err, "Failed to initialize the client.")
 		return err
 	}
 	err = connect.PreCheckResource()
 	if err != nil {
-		err = errors.Wrap(err, "connect.PreCheckResource(): ")
+		err = errors.Wrap(err, "Failed to pre-check the resource.")
 		return err
 	}
 
@@ -164,13 +164,13 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 
 	ctx, err := connect.RentInnerIP(resp.Context())
 	if err != nil {
-		err = errors.Wrap(err, "connect.RentInnerIP(resp.Context()): ")
+		err = errors.Wrap(err, "Failed to rent the inner IP.")
 		return err
 	}
 
 	connResp, err := cli.ConnectFork(ctx, req)
 	if err != nil {
-		err = errors.Wrap(err, "cli.ConnectFork(ctx, req): ")
+		err = errors.Wrap(err, "Failed to establish fork connection.")
 		return err
 	}
 	for {
@@ -182,7 +182,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		}
 		err = resp.Send(recv)
 		if err != nil {
-			err = errors.Wrap(err, "resp.Send(recv): ")
+			err = errors.Wrap(err, "Failed to send response.")
 			return err
 		}
 	}

@@ -104,7 +104,7 @@ func SetupLocalDNS(clientConfig *miekgdns.ClientConfig, existNameservers []strin
 	// Start your engines
 	instance, err := caddy.Start(corefile)
 	if err != nil {
-		err = errors.Wrap(err, "caddy.Start(corefile): ")
+		err = errors.Wrap(err, "Failed to start Caddy with corefile")
 		return err
 	}
 

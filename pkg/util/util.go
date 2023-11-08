@@ -42,12 +42,12 @@ import (
 func GetAvailableUDPPortOrDie() (int, error) {
 	address, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:0", "localhost"))
 	if err != nil {
-		err = errors.Wrap(err, "net.ResolveUDPAddr(\"udp\", fmt.Sprintf(\"%s:0\", \"localhost\")): ")
+		err = errors.Wrap(err, "Error occurred while resolving UDP address")
 		return 0, err
 	}
 	listener, err := net.ListenUDP("udp", address)
 	if err != nil {
-		err = errors.Wrap(err, "net.ListenUDP(\"udp\", address): ")
+		err = errors.Wrap(err, "Error occurred while listening to UDP")
 		return 0, err
 	}
 	defer listener.Close()
@@ -57,12 +57,12 @@ func GetAvailableUDPPortOrDie() (int, error) {
 func GetAvailableTCPPortOrDie() (int, error) {
 	address, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", "localhost"))
 	if err != nil {
-		err = errors.Wrap(err, "net.ResolveTCPAddr(\"tcp\", fmt.Sprintf(\"%s:0\", \"localhost\")): ")
+		err = errors.Wrap(err, "Error occurred while resolving TCP address")
 		return 0, err
 	}
 	listener, err := net.ListenTCP("tcp", address)
 	if err != nil {
-		err = errors.Wrap(err, "net.ListenTCP(\"tcp\", address): ")
+		err = errors.Wrap(err, "Error occurred while listening to TCP")
 		return 0, err
 	}
 	defer listener.Close()
@@ -101,13 +101,13 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, wor
 		Do()
 	err = r.Err()
 	if err != nil {
-		err = errors.Wrap(err, "r.Err(): ")
+		err = errors.Wrap(err, "Error occurred while reading")
 		return err
 	}
 
 	infos, err := r.Infos()
 	if err != nil {
-		err = errors.Wrap(err, "r.Infos(): ")
+		err = errors.Wrap(err, "Error occurred while getting information")
 		return err
 	}
 	if len(infos) != 1 {
@@ -118,7 +118,7 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, wor
 
 	statusViewer, err := polymorphichelpers.StatusViewerFn(mapping)
 	if err != nil {
-		err = errors.Wrap(err, "polymorphichelpers.StatusViewerFn(mapping): ")
+		err = errors.Wrap(err, "Failed to get status viewer for the mapping")
 		return err
 	}
 
@@ -143,7 +143,7 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, wor
 			case watch.Added, watch.Modified:
 				status, done, err := statusViewer.Status(e.Object.(k8sruntime.Unstructured), 0)
 				if err != nil {
-					err = errors.Wrap(err, "statusViewer.Status(e.Object.(k8sruntime.Unstructured), 0): ")
+					err = errors.Wrap(err, "Failed to get status for the object")
 					return false, err
 				}
 				log.Info(strings.TrimSpace(status))
@@ -242,7 +242,7 @@ func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.Polic
 	var roleBindingList *rbacv1.RoleBindingList
 	roleBindingList, err = clientset.RbacV1().RoleBindings(ns).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
-		err = errors.Wrap(err, "clientset.RbacV1().RoleBindings(ns).List(context.Background(), metav1.ListOptions{}): ")
+		err = errors.Wrap(err, "Failed to list RoleBindings")
 		return false, err
 	}
 	for _, item := range roleBindingList.Items {
@@ -251,7 +251,7 @@ func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.Polic
 				var role *rbacv1.Role
 				role, err = clientset.RbacV1().Roles(ns).Get(context.Background(), item.RoleRef.Name, metav1.GetOptions{})
 				if err != nil {
-					err = errors.Wrap(err, "clientset.RbacV1().Roles(ns).Get(context.Background(), item.RoleRef.Name, metav1.GetOptions{}): ")
+					err = errors.Wrap(err, "Failed to get Roles")
 					return false, err
 				}
 				for _, rule := range role.Rules {
@@ -273,7 +273,7 @@ func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.Polic
 				var role *rbacv1.ClusterRole
 				role, err = clientset.RbacV1().ClusterRoles().Get(context.Background(), item.RoleRef.Name, metav1.GetOptions{})
 				if err != nil {
-					err = errors.Wrap(err, "clientset.RbacV1().ClusterRoles().Get(context.Background(), item.RoleRef.Name, metav1.GetOptions{}): ")
+					err = errors.Wrap(err, "Failed to get ClusterRoles")
 					return false, err
 				}
 				for _, rule := range role.Rules {
@@ -343,7 +343,7 @@ func CleanExtensionLib() {
 	}
 	path, err := os.Executable()
 	if err != nil {
-		err = errors.Wrap(err, "os.Executable(): ")
+		err = errors.Wrap(err, "Failed to get the executable path")
 		return
 	}
 	filename := filepath.Join(filepath.Dir(path), "wintun.dll")
@@ -390,7 +390,7 @@ func StartupPProf(port int) {
 func MoveToTemp() {
 	path, err := os.Executable()
 	if err != nil {
-		err = errors.Wrap(err, "os.Executable(): ")
+		err = errors.Wrap(err, "Failed to get the executable path")
 		return
 	}
 	filename := filepath.Join(filepath.Dir(path), "wintun.dll")

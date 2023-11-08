@@ -412,13 +412,13 @@ func parse(flags *pflag.FlagSet, copts *ContainerOptions, serverOS string) (*con
 
 	convertedOpts, err = convertToStandardNotation(publishOpts)
 	if err != nil {
-		err = errors.Wrap(err, "convertToStandardNotation(publishOpts): ")
+		err = errors.Wrap(err, "Failed to convert publish options to standard notation. ")
 		return nil, err
 	}
 
 	ports, portBindings, err = nat.ParsePortSpecs(convertedOpts)
 	if err != nil {
-		err = errors.Wrap(err, "nat.ParsePortSpecs(convertedOpts): ")
+		err = errors.Wrap(err, "Failed to parse port specifications. ")
 		return nil, err
 	}
 
@@ -434,13 +434,13 @@ func parse(flags *pflag.FlagSet, copts *ContainerOptions, serverOS string) (*con
 		// if expose a port, the start and end port are the same
 		start, end, err := nat.ParsePortRange(port)
 		if err != nil {
-			err = errors.Wrap(err, "nat.ParsePortRange(port): ")
+			err = errors.Wrap(err, "Failed to parse port range. ")
 			return nil, errors.Errorf("invalid range format for --expose: %s, error: %s", e, err)
 		}
 		for i := start; i <= end; i++ {
 			p, err := nat.NewPort(proto, strconv.FormatUint(i, 10))
 			if err != nil {
-				err = errors.Wrap(err, "nat.NewPort(proto, strconv.FormatUint(i, 10)): ")
+				err = errors.Wrap(err, "Failed to create new port.")
 				return nil, err
 			}
 			if _, exists := ports[p]; !exists {
@@ -462,12 +462,12 @@ func parse(flags *pflag.FlagSet, copts *ContainerOptions, serverOS string) (*con
 		)
 		validated, err = validateDevice(device, serverOS)
 		if err != nil {
-			err = errors.Wrap(err, "validateDevice(device, serverOS): ")
+			err = errors.Wrap(err, "Failed to validate device.")
 			return nil, err
 		}
 		deviceMapping, err = parseDevice(validated, serverOS)
 		if err != nil {
-			err = errors.Wrap(err, "parseDevice(validated, serverOS): ")
+			err = errors.Wrap(err, "Failed to parse validated device.")
 			return nil, err
 		}
 		deviceMappings = append(deviceMappings, deviceMapping)
@@ -476,14 +476,14 @@ func parse(flags *pflag.FlagSet, copts *ContainerOptions, serverOS string) (*con
 	// collect all the environment variables for the container
 	envVariables, err := opts.ReadKVEnvStrings(copts.envFile.GetAll(), copts.env.GetAll())
 	if err != nil {
-		err = errors.Wrap(err, "opts.ReadKVEnvStrings(copts.envFile.GetAll(), copts.env.GetAll()): ")
+		err = errors.Wrap(err, "Failed to read environment strings.")
 		return nil, err
 	}
 
 	// collect all the labels for the container
 	labels, err := opts.ReadKVStrings(copts.labelsFile.GetAll(), copts.labels.GetAll())
 	if err != nil {
-		err = errors.Wrap(err, "opts.ReadKVStrings(copts.labelsFile.GetAll(), copts.labels.GetAll()): ")
+		err = errors.Wrap(err, "Failed to read label strings.")
 		return nil, err
 	}
 
@@ -509,19 +509,19 @@ func parse(flags *pflag.FlagSet, copts *ContainerOptions, serverOS string) (*con
 
 	restartPolicy, err := opts.ParseRestartPolicy(copts.restartPolicy)
 	if err != nil {
-		err = errors.Wrap(err, "opts.ParseRestartPolicy(copts.restartPolicy): ")
+		err = errors.Wrap(err, "Failed to parse restart policy.")
 		return nil, err
 	}
 
 	loggingOpts, err := parseLoggingOpts(copts.loggingDriver, copts.loggingOpts.GetAll())
 	if err != nil {
-		err = errors.Wrap(err, "parseLoggingOpts(copts.loggingDriver, copts.loggingOpts.GetAll()): ")
+		err = errors.Wrap(err, "Failed to parse logging options.")
 		return nil, err
 	}
 
 	securityOpts, err := parseSecurityOpts(copts.securityOpt.GetAll())
 	if err != nil {
-		err = errors.Wrap(err, "parseSecurityOpts(copts.securityOpt.GetAll()): ")
+		err = errors.Wrap(err, "Failed to parse security options.")
 		return nil, err
 	}
 
@@ -529,7 +529,7 @@ func parse(flags *pflag.FlagSet, copts *ContainerOptions, serverOS string) (*con
 
 	storageOpts, err := parseStorageOpts(copts.storageOpt.GetAll())
 	if err != nil {
-		err = errors.Wrap(err, "parseStorageOpts(copts.storageOpt.GetAll()): ")
+		err = errors.Wrap(err, "Failed to parse storage options.")
 		return nil, err
 	}
 
@@ -701,7 +701,7 @@ func parse(flags *pflag.FlagSet, copts *ContainerOptions, serverOS string) (*con
 
 	networkingConfig.EndpointsConfig, err = parseNetworkOpts(copts)
 	if err != nil {
-		err = errors.Wrap(err, "parseNetworkOpts(copts): ")
+		err = errors.Wrap(err, "Failed to parse network options.")
 		return nil, err
 	}
 
@@ -744,7 +744,7 @@ func parseNetworkOpts(copts *ContainerOptions) (map[string]*networktypes.Endpoin
 		}
 		ep, err := parseNetworkAttachmentOpt(n)
 		if err != nil {
-			err = errors.Wrap(err, "parseNetworkAttachmentOpt(n): ")
+			err = errors.Wrap(err, "Failed to parse network attachment option.")
 			return nil, err
 		}
 		if _, ok := endpoints[n.Target]; ok {

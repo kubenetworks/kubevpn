@@ -54,7 +54,7 @@ func GetUnstructuredObjectList(f util.Factory, namespace string, workloads []str
 	}
 	infos, err := do.Infos()
 	if err != nil {
-		err = errors.Wrap(err, "do.Infos(): ")
+		err = errors.Wrap(err, "Error occurred while getting information")
 		return nil, err
 	}
 	if len(infos) == 0 {
@@ -103,7 +103,7 @@ func GetPodTemplateSpecPath(u *unstructured.Unstructured) (*v1.PodTemplateSpec, 
 	}
 	marshal, err := json.Marshal(stringMap)
 	if err != nil {
-		err = errors.Wrap(err, "json.Marshal(stringMap): ")
+		err = errors.Wrap(err, "Error occurred while marshalling JSON")
 		return nil, nil, err
 	}
 	var p v1.PodTemplateSpec
@@ -116,7 +116,7 @@ func GetPodTemplateSpecPath(u *unstructured.Unstructured) (*v1.PodTemplateSpec, 
 func GetAnnotation(f util.Factory, ns string, resources string) (map[string]string, error) {
 	ownerReference, err := GetTopOwnerReference(f, ns, resources)
 	if err != nil {
-		err = errors.Wrap(err, "GetTopOwnerReference(f, ns, resources): ")
+		err = errors.Wrap(err, "Error occurred while getting top owner reference")
 		return nil, err
 	}
 	u, ok := ownerReference.Object.(*unstructured.Unstructured)

@@ -44,7 +44,7 @@ func quit(ctx context.Context, isSudo bool) error {
 	}
 	client, err := cli.Quit(ctx, &rpc.QuitRequest{})
 	if err != nil {
-		err = errors.Wrap(err, "cli.Quit(ctx, &rpc.QuitRequest{}): ")
+		err = errors.Wrap(err, "Failed to quit")
 		return err
 	}
 	var resp *rpc.QuitResponse

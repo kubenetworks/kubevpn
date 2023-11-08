@@ -32,7 +32,7 @@ import (
 func getCIDRByDumpClusterInfo(clientset *kubernetes.Clientset) ([]*net.IPNet, error) {
 	podList, err := clientset.CoreV1().Pods(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{})
 	if err != nil {
-		err = errors.Wrap(err, "clientset.CoreV1().Pods(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{}): ")
+		err = errors.Wrap(err, "Failed to list the Pods")
 		return nil, err
 	}
 	var list []string
@@ -54,7 +54,7 @@ func getCIDRByDumpClusterInfo(clientset *kubernetes.Clientset) ([]*net.IPNet, er
 func getCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient, restconfig *rest.Config, namespace string) ([]*net.IPNet, error) {
 	pod, err := createCIDRPod(clientset, namespace)
 	if err != nil {
-		err = errors.Wrap(err, "createCIDRPod(clientset, namespace): ")
+		err = errors.Wrap(err, "Failed to create CIDR Pod with given clientset and namespace ")
 		return nil, err
 	}
 
@@ -266,7 +266,7 @@ func createCIDRPod(clientset *kubernetes.Clientset, namespace string) (*v12.Pod,
 		}
 		pod, err = clientset.CoreV1().Pods(namespace).Create(context.Background(), pod, v1.CreateOptions{})
 		if err != nil {
-			err = errors.Wrap(err, "clientset.CoreV1().Pods(namespace).Create(context.Background(), pod, v1.CreateOptions{}): ")
+			err = errors.Wrap(err, "Failed to create Pod in the given namespace ")
 			return nil, err
 		}
 		err = WaitPod(clientset.CoreV1().Pods(namespace), v1.ListOptions{
@@ -293,7 +293,7 @@ func createCIDRPod(clientset *kubernetes.Clientset, namespace string) (*v12.Pod,
 func getPodCIDRFromPod(clientset *kubernetes.Clientset, namespace string, svc *net.IPNet) ([]*net.IPNet, error) {
 	podList, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{})
 	if err != nil {
-		err = errors.Wrap(err, "clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{}): ")
+		err = errors.Wrap(err, "Failed to list Pods in the given namespace ")
 		return nil, err
 	}
 	for i := 0; i < len(podList.Items); i++ {

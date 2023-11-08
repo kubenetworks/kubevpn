@@ -213,7 +213,7 @@ func networkSetup(ip string, namespace string) {
 	networkCancel()
 	b, err := exec.Command("networksetup", "-listallnetworkservices").Output()
 	if err != nil {
-		err = errors.Wrap(err, "exec.Command(\"networksetup\", \"-listallnetworkservices\").Output(): ")
+		err = errors.Wrap(err, "Failed to list all network services")
 		return
 	}
 	services := strings.Split(string(b), "\n")
@@ -266,7 +266,7 @@ func networkSetup(ip string, namespace string) {
 func networkCancel() {
 	b, err := exec.Command("networksetup", "-listallnetworkservices").CombinedOutput()
 	if err != nil {
-		err = errors.Wrap(err, "exec.Command(\"networksetup\", \"-listallnetworkservices\").CombinedOutput(): ")
+		err = errors.Wrap(err, "Failed to get combined output for network services list")
 		return
 	}
 	services := strings.Split(string(b), "\n")

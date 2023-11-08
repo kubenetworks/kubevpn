@@ -132,12 +132,12 @@ func GetCIDRFromResourceUgly(clientset *kubernetes.Clientset, namespace string) 
 func GetLocalTunIP(tunName string) (net.IP, net.IP, error) {
 	tunIface, err := net.InterfaceByName(tunName)
 	if err != nil {
-		err = errors.Wrap(err, "net.InterfaceByName(tunName): ")
+		err = errors.Wrap(err, "Error occurred while getting network interface by name")
 		return nil, nil, err
 	}
 	addrs, err := tunIface.Addrs()
 	if err != nil {
-		err = errors.Wrap(err, "tunIface.Addrs(): ")
+		err = errors.Wrap(err, "Error occurred while getting addresses from tunIface")
 		return nil, nil, err
 	}
 	var srcIPv4, srcIPv6 net.IP

@@ -48,14 +48,14 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	var lc net.ListenConfig
 	lis, err := lc.Listen(o.ctx, "unix", GetSockPath(o.IsSudo))
 	if err != nil {
-		err = errors.Wrap(err, "lc.Listen(o.ctx, \"unix\", GetSockPath(o.IsSudo)): ")
+		err = errors.Wrap(err, "Failed to listen on socket path.")
 		return err
 	}
 	defer lis.Close()
 
 	err = os.Chmod(GetSockPath(o.IsSudo), 0666)
 	if err != nil {
-		err = errors.Wrap(err, "os.Chmod(GetSockPath(o.IsSudo), 0666): ")
+		err = errors.Wrap(err, "Failed to change permissions of socket path.")
 		return err
 	}
 

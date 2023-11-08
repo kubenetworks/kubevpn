@@ -40,21 +40,21 @@ type createOptions struct {
 func pullImage(ctx context.Context, dockerCli command.Cli, image string, platform string, out io.Writer) error {
 	ref, err := reference.ParseNormalizedNamed(image)
 	if err != nil {
-		err = errors.Wrap(err, "reference.ParseNormalizedNamed(image): ")
+		err = errors.Wrap(err, "Failed to parse normalized image name.")
 		return err
 	}
 
 	// Resolve the Repository name from fqn to RepositoryInfo
 	repoInfo, err := registry.ParseRepositoryInfo(ref)
 	if err != nil {
-		err = errors.Wrap(err, "registry.ParseRepositoryInfo(ref): ")
+		err = errors.Wrap(err, "Failed to parse repository information.")
 		return err
 	}
 
 	authConfig := command.ResolveAuthConfig(ctx, dockerCli, repoInfo.Index)
 	encodedAuth, err := command.EncodeAuthToBase64(authConfig)
 	if err != nil {
-		err = errors.Wrap(err, "command.EncodeAuthToBase64(authConfig): ")
+		err = errors.Wrap(err, "Failed to encode auth config to base64.")
 		return err
 	}
 
@@ -65,7 +65,7 @@ func pullImage(ctx context.Context, dockerCli command.Cli, image string, platfor
 
 	responseBody, err := dockerCli.Client().ImageCreate(ctx, image, options)
 	if err != nil {
-		err = errors.Wrap(err, "dockerCli.Client().ImageCreate(ctx, image, options): ")
+		err = errors.Wrap(err, "Failed to create image.")
 		return err
 	}
 	defer responseBody.Close()
@@ -94,7 +94,7 @@ func (cid *cidFile) Close() error {
 		return nil
 	}
 	if err := os.Remove(cid.path); err != nil {
-		return errors.Wrapf(err, "failed to remove the CID file '%s'", cid.path)
+		return errors.Wrapf(err, "Failed to remove the CID file.", cid.path)
 	}
 
 	return nil
@@ -105,7 +105,7 @@ func (cid *cidFile) Write(id string) error {
 		return nil
 	}
 	if _, err := cid.file.Write([]byte(id)); err != nil {
-		return errors.Wrap(err, "failed to write the container ID to the file")
+		return errors.Wrap(err, "Failed to write the container ID to the file.")
 	}
 	cid.written = true
 	return nil
@@ -121,8 +121,8 @@ func newCIDFile(path string) (*cidFile, error) {
 
 	f, err := os.Create(path)
 	if err != nil {
-		err = errors.Wrap(err, "os.Create(path): ")
-		return nil, errors.Wrap(err, "failed to create the container ID file")
+		err = errors.Wrap(err, "Failed to create file.")
+		return nil, errors.Wrap(err, "Failed to create the container ID file.")
 	}
 
 	return &cidFile{path: path, file: f}, nil
@@ -145,14 +145,14 @@ func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig
 
 	containerIDFile, err := newCIDFile(hostConfig.ContainerIDFile)
 	if err != nil {
-		err = errors.Wrap(err, "newCIDFile(hostConfig.ContainerIDFile): ")
+		err = errors.Wrap(err, "Failed to create new CID file.")
 		return nil, err
 	}
 	defer containerIDFile.Close()
 
 	ref, err := reference.ParseAnyReference(config.Image)
 	if err != nil {
-		err = errors.Wrap(err, "reference.ParseAnyReference(config.Image): ")
+		err = errors.Wrap(err, "Failed to parse any image reference.")
 		return nil, err
 	}
 	if named, ok := ref.(reference.Named); ok {
@@ -162,7 +162,7 @@ func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig
 			var err error
 			trustedRef, err = image.TrustedReference(ctx, dockerCli, taggedRef, nil)
 			if err != nil {
-				err = errors.Wrap(err, "image.TrustedReference(ctx, dockerCli, taggedRef, nil): ")
+				err = errors.Wrap(err, "Failed to get trusted reference of image.")
 				return nil, err
 			}
 			config.Image = reference.FamiliarString(trustedRef)
@@ -191,8 +191,8 @@ func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig
 	if opts.Platform != "" && versions.GreaterThanOrEqualTo(dockerCli.Client().ClientVersion(), "1.41") {
 		p, err := platforms.Parse(opts.Platform)
 		if err != nil {
-			err = errors.Wrap(err, "platforms.Parse(opts.Platform): ")
-			return nil, errors.Wrap(err, "error parsing specified platform")
+			err = errors.Wrap(err, "Failed to parse platform.")
+			return nil, errors.Wrap(err, "Failed to parse specified platform.")
 		}
 		platform = &p
 	}

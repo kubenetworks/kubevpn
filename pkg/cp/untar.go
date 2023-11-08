@@ -22,14 +22,14 @@ func copyFromLink(fileHeaderList []tar.Header, currFile tar.Header, genDstFilena
 	// read from origin file
 	r, err = os.OpenFile(genDstFilename(currFile.Linkname).String(), os.O_RDONLY, 0644)
 	if err != nil {
-		err = errors.Wrap(err, "os.OpenFile(genDstFilename(currFile.Linkname).String(), os.O_RDONLY, 0644): ")
+		err = errors.Wrap(err, "Failed to open file in read-only mode")
 		return err
 	}
 
 	// write to current file
 	w, err = os.OpenFile(genDstFilename(currFile.Name).String(), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
-		err = errors.Wrap(err, "os.OpenFile(genDstFilename(currFile.Name).String(), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644): ")
+		err = errors.Wrap(err, "Failed to open or create file in read-write mode")
 		return err
 	}
 	_, err = io.Copy(w, r)

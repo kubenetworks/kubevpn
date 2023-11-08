@@ -27,14 +27,14 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	var ifce tun.Device
 	ifce, err = tun.CreateTUN("utun", mtu)
 	if err != nil {
-		err = errors.Wrap(err, "tun.CreateTUN(\"utun\", mtu): ")
+		err = errors.Wrap(err, "Failed to create TUN interface ")
 		return
 	}
 
 	var name string
 	name, err = ifce.Name()
 	if err != nil {
-		err = errors.Wrap(err, "ifce.Name(): ")
+		err = errors.Wrap(err, "Failed to get interface name ")
 		return
 	}
 

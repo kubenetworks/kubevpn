@@ -87,7 +87,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 			}
 			err = cmd.Flags().Parse(args[1:])
 			if err != nil {
-				err = errors.Wrap(err, "cmd.Flags().Parse(args[1:]): ")
+				err = errors.Wrap(err, "Failed to parse command flags")
 				return err
 			}
 			util.InitLogger(false)
@@ -98,7 +98,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 
 			err = daemon.StartupDaemon(cmd.Context())
 			if err != nil {
-				err = errors.Wrap(err, "daemon.StartupDaemon(cmd.Context()): ")
+				err = errors.Wrap(err, "Failed to startup daemon")
 				return err
 			}
 			return handler.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false)

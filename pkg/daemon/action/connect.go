@@ -62,13 +62,13 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if transferImage {
 		err := util.TransferImage(ctx, sshConf, config.OriginImage, req.Image, out)
 		if err != nil {
-			err = errors.Wrap(err, "util.TransferImage(ctx, sshConf, config.OriginImage, req.Image, out): ")
+			err = errors.Wrap(err, "Failed to transfer the image.")
 			return err
 		}
 	}
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
-		err = errors.Wrap(err, "util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes)): ")
+		err = errors.Wrap(err, "Failed to convert to a temporary Kubeconfig file.")
 		return err
 	}
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
@@ -85,22 +85,22 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	var path string
 	path, err = handler.SshJump(sshCtx, sshConf, flags, false)
 	if err != nil {
-		err = errors.Wrap(err, "handler.SshJump(sshCtx, sshConf, flags, false): ")
+		err = errors.Wrap(err, "Failed to perform SSH jump.")
 		return err
 	}
 	err = svr.connect.InitClient(InitFactoryByPath(path, req.Namespace))
 	if err != nil {
-		err = errors.Wrap(err, "svr.connect.InitClient(InitFactoryByPath(path, req.Namespace)): ")
+		err = errors.Wrap(err, "Failed to initialize the client.")
 		return err
 	}
 	err = svr.connect.PreCheckResource()
 	if err != nil {
-		err = errors.Wrap(err, "svr.connect.PreCheckResource(): ")
+		err = errors.Wrap(err, "Failed to pre-check the resource.")
 		return err
 	}
 	_, err = svr.connect.RentInnerIP(ctx)
 	if err != nil {
-		err = errors.Wrap(err, "svr.connect.RentInnerIP(ctx): ")
+		err = errors.Wrap(err, "Failed to rent the inner IP.")
 		return err
 	}
 
@@ -134,7 +134,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	var sshConf = util.ParseSshFromRPC(req.SshJump)
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
-		err = errors.Wrap(err, "util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes)): ")
+		err = errors.Wrap(err, "Failed to convert to a temporary Kubeconfig file.")
 		return err
 	}
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
@@ -150,17 +150,17 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	var path string
 	path, err = handler.SshJump(sshCtx, sshConf, flags, true)
 	if err != nil {
-		err = errors.Wrap(err, "handler.SshJump(sshCtx, sshConf, flags, true): ")
+		err = errors.Wrap(err, "Failed to perform SSH jump.")
 		return err
 	}
 	err = connect.InitClient(InitFactoryByPath(path, req.Namespace))
 	if err != nil {
-		err = errors.Wrap(err, "connect.InitClient(InitFactoryByPath(path, req.Namespace)): ")
+		err = errors.Wrap(err, "Failed to initialize the client.")
 		return err
 	}
 	err = connect.PreCheckResource()
 	if err != nil {
-		err = errors.Wrap(err, "connect.PreCheckResource(): ")
+		err = errors.Wrap(err, "Failed to pre-check the resource.")
 		return err
 	}
 
@@ -179,13 +179,13 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 
 	ctx, err := connect.RentInnerIP(resp.Context())
 	if err != nil {
-		err = errors.Wrap(err, "connect.RentInnerIP(resp.Context()): ")
+		err = errors.Wrap(err, "Failed to rent the inner IP.")
 		return err
 	}
 
 	connResp, err := cli.Connect(ctx, req)
 	if err != nil {
-		err = errors.Wrap(err, "cli.Connect(ctx, req): ")
+		err = errors.Wrap(err, "Failed to establish connection.")
 		return err
 	}
 	for {
@@ -197,7 +197,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		}
 		err = resp.Send(recv)
 		if err != nil {
-			err = errors.Wrap(err, "resp.Send(recv): ")
+			err = errors.Wrap(err, "Failed to send response.")
 			return err
 		}
 	}
@@ -271,12 +271,12 @@ func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 	}
 	err = temp.Close()
 	if err != nil {
-		err = errors.Wrap(err, "temp.Close(): ")
+		err = errors.Wrap(err, "Failed to close temporary file.")
 		return nil
 	}
 	err = os.WriteFile(temp.Name(), []byte(kubeconfigBytes), os.ModePerm)
 	if err != nil {
-		err = errors.Wrap(err, "os.WriteFile(temp.Name(), []byte(kubeconfigBytes), os.ModePerm): ")
+		err = errors.Wrap(err, "Failed to write to file.")
 		return nil
 	}
 	configFlags.KubeConfig = pointer.String(temp.Name())

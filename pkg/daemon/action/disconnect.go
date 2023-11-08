@@ -19,7 +19,7 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 		}
 		connResp, err := cli.Disconnect(resp.Context(), req)
 		if err != nil {
-			err = errors.Wrap(err, "cli.Disconnect(resp.Context(), req): ")
+			err = errors.Wrap(err, "Failed to disconnect.")
 			return err
 		}
 		var recv *rpc.DisconnectResponse
@@ -32,7 +32,7 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 			}
 			err = resp.Send(recv)
 			if err != nil {
-				err = errors.Wrap(err, "resp.Send(recv): ")
+				err = errors.Wrap(err, "Failed to send response.")
 				return err
 			}
 		}

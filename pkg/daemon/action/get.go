@@ -24,27 +24,27 @@ func (svr *Server) Get(ctx context.Context, req *rpc.GetRequest) (*rpc.GetRespon
 	if svr.gr == nil {
 		restConfig, err := svr.connect.GetFactory().ToRESTConfig()
 		if err != nil {
-			err = errors.Wrap(err, "svr.connect.GetFactory().ToRESTConfig(): ")
+			err = errors.Wrap(err, "Failed to get factory REST configuration.")
 			return nil, err
 		}
 		config, err := discovery.NewDiscoveryClientForConfig(restConfig)
 		if err != nil {
-			err = errors.Wrap(err, "discovery.NewDiscoveryClientForConfig(restConfig): ")
+			err = errors.Wrap(err, "Failed to create new discovery client.")
 			return nil, err
 		}
 		svr.gr, err = restmapper.GetAPIGroupResources(config)
 		if err != nil {
-			err = errors.Wrap(err, "restmapper.GetAPIGroupResources(config): ")
+			err = errors.Wrap(err, "Failed to get API group resources.")
 			return nil, err
 		}
 		forConfig, err := metadata.NewForConfig(restConfig)
 		if err != nil {
-			err = errors.Wrap(err, "metadata.NewForConfig(restConfig): ")
+			err = errors.Wrap(err, "Failed to create new metadata for configuration.")
 			return nil, err
 		}
 		mapper, err := svr.connect.GetFactory().ToRESTMapper()
 		if err != nil {
-			err = errors.Wrap(err, "svr.connect.GetFactory().ToRESTMapper(): ")
+			err = errors.Wrap(err, "Failed to get factory REST mapper.")
 			return nil, err
 		}
 		svr.informer = metadatainformer.NewSharedInformerFactory(forConfig, time.Second*5)
@@ -70,14 +70,14 @@ func (svr *Server) Get(ctx context.Context, req *rpc.GetRequest) (*rpc.GetRespon
 	}
 	informer, err := svr.getInformer(req)
 	if err != nil {
-		err = errors.Wrap(err, "svr.getInformer(req): ")
+		err = errors.Wrap(err, "Failed to get informer.")
 		return nil, err
 	}
 	var result []*rpc.Metadata
 	for _, m := range informer.Informer().GetIndexer().List() {
 		object, err := meta.Accessor(m)
 		if err != nil {
-			err = errors.Wrap(err, "meta.Accessor(m): ")
+			err = errors.Wrap(err, "Failed to access metadata.")
 			return nil, err
 		}
 		result = append(result, &rpc.Metadata{
@@ -92,7 +92,7 @@ func (svr *Server) Get(ctx context.Context, req *rpc.GetRequest) (*rpc.GetRespon
 func (svr *Server) getInformer(req *rpc.GetRequest) (informers.GenericInformer, error) {
 	mapper, err := svr.connect.GetFactory().ToRESTMapper()
 	if err != nil {
-		err = errors.Wrap(err, "svr.connect.GetFactory().ToRESTMapper(): ")
+		err = errors.Wrap(err, "Failed to get factory REST mapper.")
 		return nil, err
 	}
 	var resourcesFor *meta.RESTMapping

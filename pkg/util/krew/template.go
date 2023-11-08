@@ -38,7 +38,7 @@ func indent(spaces int, v string) string {
 func ProcessTemplate(templateFile string, values interface{}, sha256Map map[string]string) ([]byte, error) {
 	spec, err := RenderTemplate(templateFile, values, sha256Map)
 	if err != nil {
-		err = errors.Wrap(err, "RenderTemplate(templateFile, values, sha256Map): ")
+		err = errors.Wrap(err, "Failed to render the template")
 		return nil, err
 	}
 	return spec, nil
@@ -80,14 +80,14 @@ func RenderTemplate(templateFile string, values interface{}, sha256Map map[strin
 
 	templateObject, err := t.ParseFiles(templateFile)
 	if err != nil {
-		err = errors.Wrap(err, "t.ParseFiles(templateFile): ")
+		err = errors.Wrap(err, "Failed to parse the template file")
 		return nil, err
 	}
 
 	buf := new(bytes.Buffer)
 	err = templateObject.Execute(buf, values)
 	if err != nil {
-		err = errors.Wrap(err, "templateObject.Execute(buf, values): ")
+		err = errors.Wrap(err, "Failed to execute the template object")
 		return nil, err
 	}
 

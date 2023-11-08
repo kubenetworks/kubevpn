@@ -84,7 +84,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 
 			bytes, ns, err := util.ConvertToKubeconfigBytes(f)
 			if err != nil {
-				err = errors.Wrap(err, "util.ConvertToKubeconfigBytes(f): ")
+				err = errors.Wrap(err, "Failed to convert to Kubeconfig bytes")
 				return err
 			}
 			req := &rpc.CloneRequest{
@@ -111,7 +111,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			cli := daemon.GetClient(false)
 			resp, err := cli.Clone(cmd.Context(), req)
 			if err != nil {
-				err = errors.Wrap(err, "cli.Clone(cmd.Context(), req): ")
+				err = errors.Wrap(err, "Failed to clone")
 				return err
 			}
 			for {

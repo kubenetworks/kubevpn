@@ -49,7 +49,7 @@ func RentIPIfNeeded(route *core.Route) error {
 		for i := 0; i < len(route.ServeNodes); i++ {
 			node, err := core.ParseNode(route.ServeNodes[i])
 			if err != nil {
-				err = errors.Wrap(err, "core.ParseNode(route.ServeNodes[i]): ")
+				err = errors.Wrap(err, "Failed to parse node")
 				return err
 			}
 			if node.Protocol == "tun" {

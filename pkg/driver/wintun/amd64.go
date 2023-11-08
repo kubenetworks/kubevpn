@@ -15,7 +15,7 @@ var wintunFs embed.FS
 func InstallWintunDriver() error {
 	bytes, err := wintunFs.ReadFile("bin/amd64/wintun.dll")
 	if err != nil {
-		err = errors.Wrap(err, "wintunFs.ReadFile(\"bin/amd64/wintun.dll\"): ")
+		err = errors.Wrap(err, "Failed to read wintun.dll file for amd64 ")
 		return err
 	}
 	return copyDriver(bytes)

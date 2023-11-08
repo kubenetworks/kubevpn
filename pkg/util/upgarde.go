@@ -89,7 +89,7 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 func Download(client *http.Client, url string, filename string, stdout, stderr io.Writer) error {
 	get, err := client.Get(url)
 	if err != nil {
-		err = errors.Wrap(err, "client.Get(url): ")
+		err = errors.Wrap(err, "Failed to get the client")
 		return err
 	}
 	defer get.Body.Close()
@@ -99,7 +99,7 @@ func Download(client *http.Client, url string, filename string, stdout, stderr i
 	var f *os.File
 	f, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
 	if err != nil {
-		err = errors.Wrap(err, "os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755): ")
+		err = errors.Wrap(err, "Failed to open the file with specified flags")
 		return err
 	}
 	defer f.Close()
@@ -128,7 +128,7 @@ func Download(client *http.Client, url string, filename string, stdout, stderr i
 func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	archive, err := zip.OpenReader(zipFile)
 	if err != nil {
-		err = errors.Wrap(err, "zip.OpenReader(zipFile): ")
+		err = errors.Wrap(err, "Failed to open the zip file")
 		return err
 	}
 	defer archive.Close()
@@ -147,14 +147,14 @@ func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 
 	err = os.MkdirAll(filepath.Dir(filename), os.ModePerm)
 	if err != nil {
-		err = errors.Wrap(err, "os.MkdirAll(filepath.Dir(filename), os.ModePerm): ")
+		err = errors.Wrap(err, "Failed to create directories")
 		return err
 	}
 
 	var dstFile *os.File
 	dstFile, err = os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fi.Mode())
 	if err != nil {
-		err = errors.Wrap(err, "os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fi.Mode()): ")
+		err = errors.Wrap(err, "Failed to open the file with specified flags")
 		return err
 	}
 	defer dstFile.Close()
@@ -162,7 +162,7 @@ func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	var fileInArchive io.ReadCloser
 	fileInArchive, err = fi.Open()
 	if err != nil {
-		err = errors.Wrap(err, "fi.Open(): ")
+		err = errors.Wrap(err, "Failed to open the file")
 		return err
 	}
 	defer fileInArchive.Close()

@@ -48,7 +48,7 @@ func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			bytes, ns, err := util.ConvertToKubeconfigBytes(f)
 			if err != nil {
-				err = errors.Wrap(err, "util.ConvertToKubeconfigBytes(f): ")
+				err = errors.Wrap(err, "Failed to convert to Kubeconfig bytes")
 				return err
 			}
 			req := &rpc.ConfigAddRequest{
@@ -59,7 +59,7 @@ func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
 			cli := daemon.GetClient(false)
 			resp, err := cli.ConfigAdd(cmd.Context(), req)
 			if err != nil {
-				err = errors.Wrap(err, "cli.ConfigAdd(cmd.Context(), req): ")
+				err = errors.Wrap(err, "Failed to add configuration")
 				return err
 			}
 			fmt.Fprint(os.Stdout, resp.ClusterID)
@@ -91,7 +91,7 @@ func cmdConfigRemove(f cmdutil.Factory) *cobra.Command {
 			cli := daemon.GetClient(false)
 			_, err := cli.ConfigRemove(cmd.Context(), req)
 			if err != nil {
-				err = errors.Wrap(err, "cli.ConfigRemove(cmd.Context(), req): ")
+				err = errors.Wrap(err, "Failed to remove configuration")
 				return err
 			}
 			return nil

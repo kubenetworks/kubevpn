@@ -145,7 +145,7 @@ func NewOnAddresses(dialer httpstream.Dialer, addresses []string, ports []string
 	}
 	parsedAddresses, err := parseAddresses(addresses)
 	if err != nil {
-		err = errors.Wrap(err, "parseAddresses(addresses): ")
+		err = errors.Wrap(err, "Failed to parse the addresses")
 		return nil, err
 	}
 	if len(ports) == 0 {
@@ -153,7 +153,7 @@ func NewOnAddresses(dialer httpstream.Dialer, addresses []string, ports []string
 	}
 	parsedPorts, err := parsePorts(ports)
 	if err != nil {
-		err = errors.Wrap(err, "parsePorts(ports): ")
+		err = errors.Wrap(err, "Failed to parse the ports")
 		return nil, err
 	}
 	return &PortForwarder{
@@ -256,7 +256,7 @@ func (pf *PortForwarder) listenOnPort(port *ForwardedPort) error {
 func (pf *PortForwarder) listenOnPortAndAddress(port *ForwardedPort, protocol string, address string) error {
 	listener, err := pf.getListener(protocol, address, port)
 	if err != nil {
-		err = errors.Wrap(err, "pf.getListener(protocol, address, port): ")
+		err = errors.Wrap(err, "Failed to get the listener")
 		return err
 	}
 	pf.listeners = append(pf.listeners, listener)

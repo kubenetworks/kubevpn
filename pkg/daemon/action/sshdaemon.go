@@ -75,12 +75,12 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 
 	serverip, _, err := net.ParseCIDR(serverIP)
 	if err != nil {
-		err = errors.Wrap(err, "net.ParseCIDR(serverIP): ")
+		err = errors.Wrap(err, "Failed to parse CIDR.")
 		return nil, err
 	}
 	tunDevice, err := util.GetTunDevice(serverip)
 	if err != nil {
-		err = errors.Wrap(err, "util.GetTunDevice(serverip): ")
+		err = errors.Wrap(err, "Failed to get Tun device.")
 		return nil, err
 	}
 	err = tun.AddRoutes(tunDevice.Name, types.Route{

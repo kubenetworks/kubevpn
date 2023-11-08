@@ -96,13 +96,13 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 	//var path []string
 	templateSpec, _, err = util.GetPodTemplateSpecPath(u)
 	if err != nil {
-		err = errors.Wrap(err, "util.GetPodTemplateSpecPath(u): ")
+		err = errors.Wrap(err, "Failed to get Pod Template Spec Path.")
 		return err
 	}
 
 	set, err := d.Factory.KubernetesClientSet()
 	if err != nil {
-		err = errors.Wrap(err, "d.Factory.KubernetesClientSet(): ")
+		err = errors.Wrap(err, "Failed to get Kubernetes Client Set.")
 		return err
 	}
 
@@ -223,7 +223,7 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 	})
 	err = runConfigList.Run(ctx, volume, d.Cli, d.DockerCli)
 	if err != nil {
-		err = errors.Wrap(err, "runConfigList.Run(ctx, volume, d.Cli, d.DockerCli): ")
+		err = errors.Wrap(err, "Failed to run Config List.")
 		return err
 	}
 	return terminal(runConfigList[0].containerName, d.DockerCli)
@@ -254,7 +254,7 @@ func (l ConfigList) Remove(ctx context.Context, cli *client.Client) error {
 	}
 	i, err := cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{})
 	if err != nil {
-		err = errors.Wrap(err, "cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{}): ")
+		err = errors.Wrap(err, "Failed to inspect network.")
 		return err
 	}
 	if len(i.Containers) == 0 {
@@ -269,7 +269,7 @@ func (l ConfigList) Run(ctx context.Context, volume map[string][]mount.Mount, cl
 		if index == 0 {
 			_, err := runFirst(ctx, runConfig, cli, dockerCli)
 			if err != nil {
-				err = errors.Wrap(err, "runFirst(ctx, runConfig, cli, dockerCli): ")
+				err = errors.Wrap(err, "Failed to run first command.")
 				return err
 			}
 		} else {
@@ -280,12 +280,12 @@ func (l ConfigList) Run(ctx context.Context, volume map[string][]mount.Mount, cl
 				runConfig.hostConfig.Mounts = nil
 				id, err = run(ctx, runConfig, cli, dockerCli)
 				if err != nil {
-					err = errors.Wrap(err, "run(ctx, runConfig, cli, dockerCli): ")
+					err = errors.Wrap(err, "Failed to run command.")
 					return err
 				}
 				err = l.copyToContainer(ctx, volume[runConfig.k8sContainerName], cli, id)
 				if err != nil {
-					err = errors.Wrap(err, "l.copyToContainer(ctx, volume[runConfig.k8sContainerName], cli, id): ")
+					err = errors.Wrap(err, "Failed to copy to container.")
 					return err
 				}
 			}
@@ -332,7 +332,7 @@ func (l ConfigList) copyToContainer(ctx context.Context, volume []mount.Mount, c
 func createFolder(ctx context.Context, cli *client.Client, id string, src string, target string) (string, error) {
 	lstat, err := os.Lstat(src)
 	if err != nil {
-		err = errors.Wrap(err, "os.Lstat(src): ")
+		err = errors.Wrap(err, "Failed to get file status.")
 		return "", err
 	}
 	if !lstat.IsDir() {
@@ -373,7 +373,7 @@ func checkOutOfMemory(spec *v1.PodTemplateSpec, cli *client.Client) (outOfMemory
 	var info types.Info
 	info, err = cli.Info(context.Background())
 	if err != nil {
-		err = errors.Wrap(err, "cli.Info(context.Background()): ")
+		err = errors.Wrap(err, "Failed to get CLI info.")
 		return
 	}
 	total := info.MemTotal
@@ -394,7 +394,7 @@ func checkOutOfMemory(spec *v1.PodTemplateSpec, cli *client.Client) (outOfMemory
 func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags *pflag.FlagSet, f cmdutil.Factory, transferImage bool) error {
 	cli, dockerCli, err := util.GetClient()
 	if err != nil {
-		err = errors.Wrap(err, "util.GetClient(): ")
+		err = errors.Wrap(err, "Failed to get client.")
 		return err
 	}
 	mode := container.NetworkMode(devOption.Copts.netMode.NetworkMode())
@@ -421,7 +421,7 @@ func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags 
 		log.Infof("hostname is %s", hostname)
 		err = devOption.Copts.netMode.Set(fmt.Sprintf("container:%s", hostname))
 		if err != nil {
-			err = errors.Wrap(err, "devOption.Copts.netMode.Set(fmt.Sprintf(\"container:%s\", hostname)): ")
+			err = errors.Wrap(err, "Failed to set network mode.")
 			return err
 		}
 	}
@@ -441,7 +441,7 @@ func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags 
 	var tempContainerConfig *containerConfig
 	err = validatePullOpt(devOption.Options.Pull)
 	if err != nil {
-		err = errors.Wrap(err, "validatePullOpt(devOption.Options.Pull): ")
+		err = errors.Wrap(err, "Failed to validate pull option.")
 		return err
 	}
 	proxyConfig := dockerCli.ConfigFile().ParseProxyConfig(dockerCli.Client().DaemonHost(), opts.ConvertKVStringsToMapWithNil(devOption.Copts.env.GetAll()))
@@ -461,7 +461,7 @@ func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags 
 	}
 	err = validateAPIVersion(tempContainerConfig, dockerCli.Client().ClientVersion())
 	if err != nil {
-		err = errors.Wrap(err, "validateAPIVersion(tempContainerConfig, dockerCli.Client().ClientVersion()): ")
+		err = errors.Wrap(err, "Failed to validate API version.")
 		return err
 	}
 
@@ -512,7 +512,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 		var ns string
 		kubeconfig, ns, err = util.ConvertToKubeconfigBytes(f)
 		if err != nil {
-			err = errors.Wrap(err, "util.ConvertToKubeconfigBytes(f): ")
+			err = errors.Wrap(err, "Failed to convert to Kubeconfig bytes.")
 			return
 		}
 		// not needs to ssh jump in daemon, because dev mode will hang up until user exit,
@@ -563,7 +563,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 		if d.Options.Platform != "" {
 			platform, err = platforms.Parse(d.Options.Platform)
 			if err != nil {
-				return nil, errors.Wrap(err, "error parsing specified platform")
+				return nil, errors.Wrap(err, "Failed to parse specified platform.")
 			}
 		}
 
@@ -579,7 +579,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 		log.Infof("starting container connect to cluster")
 		id, err = run(cancelCtx, connectContainer, d.Cli, d.DockerCli)
 		if err != nil {
-			err = errors.Wrap(err, "run(cancelCtx, connectContainer, d.Cli, d.DockerCli): ")
+			err = errors.Wrap(err, "Failed to run connect container.")
 			return
 		}
 		h := interrupt.New(
@@ -721,7 +721,7 @@ func createConnectContainer(noProxy bool, connect handler.ConnectOptions, path s
 	}
 	kubevpnNetwork, err := createKubevpnNetwork(context.Background(), cli)
 	if err != nil {
-		err = errors.Wrap(err, "createKubevpnNetwork(context.Background(), cli): ")
+		err = errors.Wrap(err, "Failed to create Kubevpn network.")
 		return nil, err
 	}
 	name := fmt.Sprintf("%s_%s_%s", "kubevpn", "local", suffix)
@@ -743,7 +743,7 @@ func createConnectContainer(noProxy bool, connect handler.ConnectOptions, path s
 func runLogsWaitRunning(ctx context.Context, dockerCli command.Cli, container string) error {
 	c, err := dockerCli.Client().ContainerInspect(ctx, container)
 	if err != nil {
-		err = errors.Wrap(err, "dockerCli.Client().ContainerInspect(ctx, container): ")
+		err = errors.Wrap(err, "Failed to inspect container.")
 		return err
 	}
 
@@ -754,7 +754,7 @@ func runLogsWaitRunning(ctx context.Context, dockerCli command.Cli, container st
 	}
 	logStream, err := dockerCli.Client().ContainerLogs(ctx, c.ID, options)
 	if err != nil {
-		err = errors.Wrap(err, "dockerCli.Client().ContainerLogs(ctx, c.ID, options): ")
+		err = errors.Wrap(err, "Failed to get container logs.")
 		return err
 	}
 	defer logStream.Close()
@@ -803,7 +803,7 @@ func runLogsSinceNow(dockerCli command.Cli, container string, follow bool) error
 
 	c, err := dockerCli.Client().ContainerInspect(ctx, container)
 	if err != nil {
-		err = errors.Wrap(err, "dockerCli.Client().ContainerInspect(ctx, container): ")
+		err = errors.Wrap(err, "Failed to inspect container.")
 		return err
 	}
 
@@ -815,7 +815,7 @@ func runLogsSinceNow(dockerCli command.Cli, container string, follow bool) error
 	}
 	responseBody, err := dockerCli.Client().ContainerLogs(ctx, c.ID, options)
 	if err != nil {
-		err = errors.Wrap(err, "dockerCli.Client().ContainerLogs(ctx, c.ID, options): ")
+		err = errors.Wrap(err, "Failed to get container logs.")
 		return err
 	}
 	defer responseBody.Close()

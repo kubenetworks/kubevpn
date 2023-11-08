@@ -127,7 +127,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 func Main(f cmdutil.Factory) error {
 	clientset, err := f.KubernetesClientSet()
 	if err != nil {
-		err = errors.Wrap(err, "f.KubernetesClientSet(): ")
+		err = errors.Wrap(err, "Failed to get Kubernetes client set")
 		return err
 	}
 	h := &admissionReviewHandler{f: f, clientset: clientset}
@@ -142,7 +142,7 @@ func Main(f cmdutil.Factory) error {
 	var pairs []tls.Certificate
 	pairs, err = getSSLKeyPairs()
 	if err != nil {
-		err = errors.Wrap(err, "getSSLKeyPairs(): ")
+		err = errors.Wrap(err, "Failed to get SSL key pairs")
 		return err
 	}
 	server := &http.Server{Addr: fmt.Sprintf(":%d", 80), TLSConfig: &tls.Config{Certificates: pairs}}

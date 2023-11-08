@@ -12,7 +12,7 @@ import (
 func copyDriver(b []byte) error {
 	executable, err := os.Executable()
 	if err != nil {
-		err = errors.Wrap(err, "os.Executable(): ")
+		err = errors.Wrap(err, "Failed to get executable path ")
 		return err
 	}
 	filename := filepath.Join(filepath.Dir(executable), "wintun.dll")

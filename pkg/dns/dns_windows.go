@@ -21,12 +21,12 @@ func (c *Config) SetupDNS() error {
 
 	tun, err := net.InterfaceByName(tunName)
 	if err != nil {
-		err = errors.Wrap(err, "net.InterfaceByName(tunName): ")
+		err = errors.Wrap(err, "Failed to get network interface by name")
 		return err
 	}
 	luid, err := winipcfg.LUIDFromIndex(uint32(tun.Index))
 	if err != nil {
-		err = errors.Wrap(err, "winipcfg.LUIDFromIndex(uint32(tun.Index)): ")
+		err = errors.Wrap(err, "Failed to get LUID from index")
 		return err
 	}
 	var servers []netip.Addr
@@ -53,12 +53,12 @@ func (c *Config) CancelDNS() {
 	c.updateHosts("")
 	tun, err := net.InterfaceByName(c.TunName)
 	if err != nil {
-		err = errors.Wrap(err, "net.InterfaceByName(c.TunName): ")
+		err = errors.Wrap(err, "Failed to get network interface by tunnel name")
 		return
 	}
 	luid, err := winipcfg.LUIDFromIndex(uint32(tun.Index))
 	if err != nil {
-		err = errors.Wrap(err, "winipcfg.LUIDFromIndex(uint32(tun.Index)): ")
+		err = errors.Wrap(err, "Failed to get LUID from index")
 		return
 	}
 	_ = luid.FlushDNS(windows.AF_INET)

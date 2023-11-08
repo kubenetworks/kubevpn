@@ -22,7 +22,7 @@ func SCP(stdout, stderr io.Writer, conf *SshConfig, filename, to string, command
 
 	sess, err := remote.NewSession()
 	if err != nil {
-		err = errors.Wrap(err, "remote.NewSession(): ")
+		err = errors.Wrap(err, "Failed to create a new remote session")
 		return err
 	}
 	err = main(sess, stdout, stderr, filename, to)
@@ -50,12 +50,12 @@ func SCP(stdout, stderr io.Writer, conf *SshConfig, filename, to string, command
 func main(sess *ssh.Session, stdout, stderr io.Writer, filename string, to string) error {
 	open, err := os.Open(filename)
 	if err != nil {
-		err = errors.Wrap(err, "os.Open(filename): ")
+		err = errors.Wrap(err, "Failed to open the file")
 		return err
 	}
 	stat, err := open.Stat()
 	if err != nil {
-		err = errors.Wrap(err, "open.Stat(): ")
+		err = errors.Wrap(err, "Failed to get file statistics")
 		return err
 	}
 	defer open.Close()

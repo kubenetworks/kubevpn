@@ -41,7 +41,7 @@ func CmdGet(f cmdutil.Factory) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			namespace, _, err := f.ToRawKubeConfigLoader().Namespace()
 			if err != nil {
-				err = errors.Wrap(err, "f.ToRawKubeConfigLoader().Namespace(): ")
+				err = errors.Wrap(err, "Failed to get namespace from raw KubeConfig loader")
 				return err
 			}
 			client, err := daemon.GetClient(false).Get(
@@ -56,7 +56,7 @@ func CmdGet(f cmdutil.Factory) *cobra.Command {
 			}
 			marshal, err := yaml.Marshal(client.Metadata)
 			if err != nil {
-				err = errors.Wrap(err, "yaml.Marshal(client.Metadata): ")
+				err = errors.Wrap(err, "Failed to marshal client metadata")
 				return err
 			}
 			fmt.Fprint(os.Stdout, string(marshal))

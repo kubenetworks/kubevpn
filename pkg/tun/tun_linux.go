@@ -37,7 +37,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	var name string
 	name, err = device.Name()
 	if err != nil {
-		err = errors.Wrap(err, "device.Name(): ")
+		err = errors.Wrap(err, "Failed to get device name ")
 		return
 	}
 	var ifc *net.Interface

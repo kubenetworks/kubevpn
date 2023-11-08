@@ -21,7 +21,7 @@ const retries = 4
 func DownloadFileWithName(uri, name string) (string, error) {
 	resp, err := getWithRetry(uri)
 	if err != nil {
-		err = errors.Wrap(err, "getWithRetry(uri): ")
+		err = errors.Wrap(err, "Failed to get the URI with retry")
 		return "", err
 	}
 	defer resp.Body.Close()
@@ -32,14 +32,14 @@ func DownloadFileWithName(uri, name string) (string, error) {
 
 	dir, err := os.MkdirTemp("", "")
 	if err != nil {
-		err = errors.Wrap(err, "os.MkdirTemp(\"\", \"\"): ")
+		err = errors.Wrap(err, "Failed to create a temporary directory")
 		return "", err
 	}
 
 	file := filepath.Join(dir, name)
 	out, err := os.Create(file)
 	if err != nil {
-		err = errors.Wrap(err, "os.Create(file): ")
+		err = errors.Wrap(err, "Failed to create the file")
 		return "", err
 	}
 	defer out.Close()
@@ -60,14 +60,14 @@ func downloadFile(uri string) (string, error) {
 func GetSha256ForAsset(uri string) (string, error) {
 	file, err := downloadFile(uri)
 	if err != nil {
-		err = errors.Wrap(err, "downloadFile(uri): ")
+		err = errors.Wrap(err, "Failed to download the file")
 		return "", err
 	}
 
 	defer os.Remove(file)
 	sha256, err := getSha256(file)
 	if err != nil {
-		err = errors.Wrap(err, "getSha256(file): ")
+		err = errors.Wrap(err, "Failed to get the SHA256 of the file")
 		return "", err
 	}
 
@@ -77,7 +77,7 @@ func GetSha256ForAsset(uri string) (string, error) {
 func getSha256(filename string) (string, error) {
 	f, err := os.Open(filename)
 	if err != nil {
-		err = errors.Wrap(err, "os.Open(filename): ")
+		err = errors.Wrap(err, "Failed to open the file")
 		return "", err
 	}
 	defer f.Close()

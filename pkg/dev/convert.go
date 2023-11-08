@@ -171,29 +171,29 @@ func ConvertKubeResourceToContainer(namespace string, temp v1.PodTemplateSpec, e
 func GetDNS(ctx context.Context, f util.Factory, ns, pod string) (*miekgdns.ClientConfig, error) {
 	clientSet, err := f.KubernetesClientSet()
 	if err != nil {
-		err = errors.Wrap(err, "f.KubernetesClientSet(): ")
+		err = errors.Wrap(err, "Failed to get Kubernetes client set.")
 		return nil, err
 	}
 	_, err = clientSet.CoreV1().Pods(ns).Get(ctx, pod, v13.GetOptions{})
 	if err != nil {
-		err = errors.Wrap(err, "clientSet.CoreV1().Pods(ns).Get(ctx, pod, v13.GetOptions{}): ")
+		err = errors.Wrap(err, "Failed to get pods.")
 		return nil, err
 	}
 	config, err := f.ToRESTConfig()
 	if err != nil {
-		err = errors.Wrap(err, "f.ToRESTConfig(): ")
+		err = errors.Wrap(err, "Failed to get REST configuration.")
 		return nil, err
 	}
 
 	client, err := f.RESTClient()
 	if err != nil {
-		err = errors.Wrap(err, "f.RESTClient(): ")
+		err = errors.Wrap(err, "Failed to get REST client.")
 		return nil, err
 	}
 
 	clientConfig, err := util2.GetDNSServiceIPFromPod(clientSet, client, config, pod, ns)
 	if err != nil {
-		err = errors.Wrap(err, "util2.GetDNSServiceIPFromPod(clientSet, client, config, pod, ns): ")
+		err = errors.Wrap(err, "Failed to get DNS service IP from pod.")
 		return nil, err
 	}
 	return clientConfig, nil
@@ -203,13 +203,13 @@ func GetDNS(ctx context.Context, f util.Factory, ns, pod string) (*miekgdns.Clie
 func GetVolume(ctx context.Context, f util.Factory, ns, pod string, d *Options) (map[string][]mount.Mount, error) {
 	clientSet, err := f.KubernetesClientSet()
 	if err != nil {
-		err = errors.Wrap(err, "f.KubernetesClientSet(): ")
+		err = errors.Wrap(err, "Failed to get Kubernetes client set.")
 		return nil, err
 	}
 	var get *v1.Pod
 	get, err = clientSet.CoreV1().Pods(ns).Get(ctx, pod, v13.GetOptions{})
 	if err != nil {
-		err = errors.Wrap(err, "clientSet.CoreV1().Pods(ns).Get(ctx, pod, v13.GetOptions{}): ")
+		err = errors.Wrap(err, "Failed to get pods.")
 		return nil, err
 	}
 	result := map[string][]mount.Mount{}
@@ -226,7 +226,7 @@ func GetVolume(ctx context.Context, f util.Factory, ns, pod string, d *Options) 
 			join := filepath.Join(os.TempDir(), strconv.Itoa(rand.Int()))
 			err = os.MkdirAll(join, 0755)
 			if err != nil {
-				err = errors.Wrap(err, "os.MkdirAll(join, 0755): ")
+				err = errors.Wrap(err, "Failed to create directory.")
 				return nil, err
 			}
 			if volumeMount.SubPath != "" {
@@ -243,7 +243,7 @@ func GetVolume(ctx context.Context, f util.Factory, ns, pod string, d *Options) 
 			copyOptions.MaxTries = 10
 			err = copyOptions.Complete(f, &cobra.Command{}, []string{remotePath, join})
 			if err != nil {
-				err = errors.Wrap(err, "copyOptions.Complete(f, &cobra.Command{}, []string{remotePath, join}): ")
+				err = errors.Wrap(err, "Failed to complete copy options.")
 				return nil, err
 			}
 			err = copyOptions.Run()

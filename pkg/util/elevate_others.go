@@ -31,7 +31,7 @@ func RunCmdWithElevated(exe string, args []string) error {
 	cmd.Env = append(os.Environ(), envStartSudoKubeVPNByKubeVPN+"=1")
 	err := cmd.Start()
 	if err != nil {
-		err = errors.Wrap(err, "cmd.Start(): ")
+		err = errors.Wrap(err, "Error occurred while starting the command")
 		return err
 	}
 	go func() {
@@ -59,7 +59,7 @@ func RunCmd(exe string, args []string) error {
 	cmd.Env = append(os.Environ(), envStartSudoKubeVPNByKubeVPN+"=1")
 	err := cmd.Start()
 	if err != nil {
-		err = errors.Wrap(err, "cmd.Start(): ")
+		err = errors.Wrap(err, "Error occurred while starting the command")
 		return err
 	}
 	go func() {

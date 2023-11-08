@@ -50,7 +50,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			bytes, ns, err := util.ConvertToKubeconfigBytes(f)
 			if err != nil {
-				err = errors.Wrap(err, "util.ConvertToKubeconfigBytes(f): ")
+				err = errors.Wrap(err, "Failed to convert to Kubeconfig bytes")
 				return err
 			}
 			req := &rpc.ConnectRequest{
@@ -73,7 +73,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			if lite {
 				resp, err := cli.ConnectFork(cmd.Context(), req)
 				if err != nil {
-					err = errors.Wrap(err, "cli.ConnectFork(cmd.Context(), req): ")
+					err = errors.Wrap(err, "Failed to connect .Fork.")
 					return err
 				}
 				for {
@@ -90,7 +90,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			} else {
 				resp, err := cli.Connect(cmd.Context(), req)
 				if err != nil {
-					err = errors.Wrap(err, "cli.Connect(cmd.Context(), req): ")
+					err = errors.Wrap(err, "Failed to connect")
 					return err
 				}
 				for {

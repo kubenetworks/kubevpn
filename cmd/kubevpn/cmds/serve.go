@@ -39,7 +39,7 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 			_, _ = maxprocs.Set(maxprocs.Logger(nil))
 			err := handler.RentIPIfNeeded(route)
 			if err != nil {
-				err = errors.Wrap(err, "handler.RentIPIfNeeded(route): ")
+				err = errors.Wrap(err, "Failed to rent IP if needed .route.")
 				return err
 			}
 			defer func() {

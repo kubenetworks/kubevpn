@@ -86,19 +86,19 @@ func (o *CopyOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []str
 	var err error
 	o.Namespace, _, err = f.ToRawKubeConfigLoader().Namespace()
 	if err != nil {
-		err = errors.Wrap(err, "f.ToRawKubeConfigLoader().Namespace(): ")
+		err = errors.Wrap(err, "Failed to load Kubeconfig namespace.")
 		return err
 	}
 
 	o.Clientset, err = f.KubernetesClientSet()
 	if err != nil {
-		err = errors.Wrap(err, "f.KubernetesClientSet(): ")
+		err = errors.Wrap(err, "Failed to get Kubernetes client set")
 		return err
 	}
 
 	o.ClientConfig, err = f.ToRESTConfig()
 	if err != nil {
-		err = errors.Wrap(err, "f.ToRESTConfig(): ")
+		err = errors.Wrap(err, "Failed to get REST configuration")
 		return err
 	}
 
@@ -118,12 +118,12 @@ func (o *CopyOptions) Validate() error {
 func (o *CopyOptions) Run() error {
 	srcSpec, err := extractFileSpec(o.args[0])
 	if err != nil {
-		err = errors.Wrap(err, "extractFileSpec(o.args[0]): ")
+		err = errors.Wrap(err, "Failed to extract file specification from first argument")
 		return err
 	}
 	destSpec, err := extractFileSpec(o.args[1])
 	if err != nil {
-		err = errors.Wrap(err, "extractFileSpec(o.args[1]): ")
+		err = errors.Wrap(err, "Failed to extract file specification from second argument")
 		return err
 	}
 
@@ -302,19 +302,19 @@ func makeTar(src localPath, dest remotePath, writer io.Writer) error {
 func recursiveTar(srcDir, srcFile localPath, destDir, destFile remotePath, tw *tar.Writer) error {
 	matchedPaths, err := srcDir.Join(srcFile).Glob()
 	if err != nil {
-		err = errors.Wrap(err, "srcDir.Join(srcFile).Glob(): ")
+		err = errors.Wrap(err, "Failed to perform glob operation on source directory and file")
 		return err
 	}
 	for _, fpath := range matchedPaths {
 		stat, err := os.Lstat(fpath)
 		if err != nil {
-			err = errors.Wrap(err, "os.Lstat(fpath): ")
+			err = errors.Wrap(err, "Failed to perform Lstat on file path")
 			return err
 		}
 		if stat.IsDir() {
 			files, err := os.ReadDir(fpath)
 			if err != nil {
-				err = errors.Wrap(err, "os.ReadDir(fpath): ")
+				err = errors.Wrap(err, "Failed to read directory at file path")
 				return err
 			}
 			if len(files) == 0 {
@@ -337,7 +337,7 @@ func recursiveTar(srcDir, srcFile localPath, destDir, destFile remotePath, tw *t
 			hdr, _ := tar.FileInfoHeader(stat, fpath)
 			target, err := os.Readlink(fpath)
 			if err != nil {
-				err = errors.Wrap(err, "os.Readlink(fpath): ")
+				err = errors.Wrap(err, "Failed to read link at file path")
 				return err
 			}
 
@@ -350,7 +350,7 @@ func recursiveTar(srcDir, srcFile localPath, destDir, destFile remotePath, tw *t
 			//case regular file or other file type like pipe
 			hdr, err := tar.FileInfoHeader(stat, fpath)
 			if err != nil {
-				err = errors.Wrap(err, "tar.FileInfoHeader(stat, fpath): ")
+				err = errors.Wrap(err, "Failed to get file info header for file path")
 				return err
 			}
 			hdr.Name = destFile.String()
@@ -361,7 +361,7 @@ func recursiveTar(srcDir, srcFile localPath, destDir, destFile remotePath, tw *t
 
 			f, err := os.Open(fpath)
 			if err != nil {
-				err = errors.Wrap(err, "os.Open(fpath): ")
+				err = errors.Wrap(err, "Failed to open file at path")
 				return err
 			}
 			defer f.Close()
@@ -422,7 +422,7 @@ func (o *CopyOptions) untarAll(prefix string, dest localPath, reader io.Reader) 
 
 		outFile, err := os.Create(destFileName.String())
 		if err != nil {
-			err = errors.Wrap(err, "os.Create(destFileName.String()): ")
+			err = errors.Wrap(err, "Failed to create destination file")
 			return err
 		}
 		defer outFile.Close()
@@ -443,7 +443,7 @@ func (o *CopyOptions) untarAll(prefix string, dest localPath, reader io.Reader) 
 	for _, f := range linkList {
 		err := copyFromLink(linkList, f, genDstFilename)
 		if err != nil {
-			err = errors.Wrap(err, "copyFromLink(linkList, f, genDstFilename): ")
+			err = errors.Wrap(err, "Failed to copy from link")
 			return err
 		}
 	}

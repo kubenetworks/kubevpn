@@ -48,7 +48,7 @@ func BuildCoreFile(corefileTmpl CoreFileTmpl) (*CoreFile, error) {
 
 	tpl, err := template.New("corefile").Parse(tplText)
 	if err != nil {
-		err = errors.Wrap(err, "template.New(\"corefile\").Parse(tplText): ")
+		err = errors.Wrap(err, "Failed to parse template for corefile")
 		return nil, err
 	}
 

@@ -36,7 +36,7 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := daemon.GetClient(true).Logs(cmd.Context(), req)
 			if err != nil {
-				err = errors.Wrap(err, "daemon.GetClient(true).Logs(cmd.Context(), req): ")
+				err = errors.Wrap(err, "Failed to get client logs")
 				return err
 			}
 			var resp *rpc.LogResponse

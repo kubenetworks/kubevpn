@@ -16,13 +16,13 @@ import (
 func GetTunDevice(ips ...net.IP) (*net.Interface, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		err = errors.Wrap(err, "net.Interfaces(): ")
+		err = errors.Wrap(err, "Error occurred while getting network interfaces")
 		return nil, err
 	}
 	for _, i := range interfaces {
 		addrs, err := i.Addrs()
 		if err != nil {
-			err = errors.Wrap(err, "i.Addrs(): ")
+			err = errors.Wrap(err, "Error occurred while getting addresses from interface")
 			return nil, err
 		}
 		for _, addr := range addrs {
@@ -39,7 +39,7 @@ func GetTunDevice(ips ...net.IP) (*net.Interface, error) {
 func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		err = errors.Wrap(err, "net.Interfaces(): ")
+		err = errors.Wrap(err, "Error occurred while getting network interfaces")
 		return nil, err
 	}
 	var ip string
@@ -51,7 +51,7 @@ func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 	for _, i := range interfaces {
 		addrs, err := i.Addrs()
 		if err != nil {
-			err = errors.Wrap(err, "i.Addrs(): ")
+			err = errors.Wrap(err, "Error occurred while getting addresses from interface")
 			return nil, err
 		}
 		for _, addr := range addrs {
@@ -66,7 +66,7 @@ func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 func Ping(targetIP string) (bool, error) {
 	pinger, err := probing.NewPinger(targetIP)
 	if err != nil {
-		err = errors.Wrap(err, "probing.NewPinger(targetIP): ")
+		err = errors.Wrap(err, "Error occurred while creating new pinger")
 		return false, err
 	}
 	pinger.SetLogger(nil)
@@ -75,7 +75,7 @@ func Ping(targetIP string) (bool, error) {
 	pinger.Timeout = time.Millisecond * 1500
 	err = pinger.Run() // Blocks until finished.
 	if err != nil {
-		err = errors.Wrap(err, "pinger.Run() // Blocks until finished.: ")
+		err = errors.Wrap(err, "Error occurred while running the pinger")
 		return false, err
 	}
 	stat := pinger.Statistics()

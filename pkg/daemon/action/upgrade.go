@@ -16,12 +16,12 @@ func (svr *Server) Upgrade(ctx context.Context, req *rpc.UpgradeRequest) (*rpc.U
 	var clientVersion, daemonVersion *goversion.Version
 	clientVersion, err = goversion.NewVersion(req.ClientVersion)
 	if err != nil {
-		err = errors.Wrap(err, "goversion.NewVersion(req.ClientVersion): ")
+		err = errors.Wrap(err, "Failed to get new version.")
 		return nil, err
 	}
 	daemonVersion, err = goversion.NewVersion(config.Version)
 	if err != nil {
-		err = errors.Wrap(err, "goversion.NewVersion(config.Version): ")
+		err = errors.Wrap(err, "Failed to get new version.")
 		return nil, err
 	}
 	if clientVersion.GreaterThan(daemonVersion) || (clientVersion.Equal(daemonVersion) && req.ClientCommitId != config.GitCommit) {

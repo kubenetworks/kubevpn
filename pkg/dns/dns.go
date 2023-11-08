@@ -82,7 +82,7 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13
 							}
 							list, err := serviceInterface.List(ctx, v1.ListOptions{})
 							if err != nil {
-								err = errors.Wrap(err, "serviceInterface.List(ctx, v1.ListOptions{}): ")
+								err = errors.Wrap(err, "Failed to list services")
 								return
 							}
 							entry := c.generateHostsEntry(list.Items, hosts)
@@ -108,7 +108,7 @@ func (c *Config) updateHosts(str string) error {
 	path := GetHostFile()
 	file, err := os.ReadFile(path)
 	if err != nil {
-		err = errors.Wrap(err, "os.ReadFile(path): ")
+		err = errors.Wrap(err, "Failed to read file at path")
 		return err
 	}
 	lines := strings.Split(string(file), "\n")
@@ -217,7 +217,7 @@ func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) string {
 	// if hosts file already contains item, not needs to add it to hosts file
 	file, err := os.ReadFile(GetHostFile())
 	if err != nil {
-		err = errors.Wrap(err, "os.ReadFile(GetHostFile()): ")
+		err = errors.Wrap(err, "Failed to read host file")
 		return ""
 	}
 	lines := strings.Split(string(file), "\n")
@@ -246,7 +246,7 @@ func CleanupHosts() error {
 	path := GetHostFile()
 	file, err := os.ReadFile(path)
 	if err != nil {
-		err = errors.Wrap(err, "os.ReadFile(path): ")
+		err = errors.Wrap(err, "Failed to read file at path")
 		return err
 	}
 	lines := strings.Split(string(file), "\n")

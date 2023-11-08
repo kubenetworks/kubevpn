@@ -103,7 +103,7 @@ func ParseYaml(file string) ([]*Virtual, error) {
 
 	err = yaml.Unmarshal(yamlFile, &virtualList)
 	if err != nil {
-		err = errors.Wrap(err, "yaml.Unmarshal(yamlFile, &virtualList): ")
+		err = errors.Wrap(err, "Failed to unmarshal YAML file.")
 		return nil, err
 	}
 

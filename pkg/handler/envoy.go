@@ -104,7 +104,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	var bytes []byte
 	bytes, err = k8sjson.Marshal(append(ps, removePatch...))
 	if err != nil {
-		err = errors.Wrap(err, "k8sjson.Marshal(append(ps, removePatch...)): ")
+		err = errors.Wrap(err, "Failed to marshal JSON")
 		return err
 	}
 	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
@@ -194,7 +194,7 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP util.PodRouteConfig, headers map[string]string, port []v1.ContainerPort) error {
 	configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
-		err = errors.Wrap(err, "mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{}): ")
+		err = errors.Wrap(err, "Failed to get ConfigMap")
 		return err
 	}
 	var v = make([]*controlplane.Virtual, 0)
@@ -243,7 +243,7 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP ut
 
 	marshal, err := yaml.Marshal(v)
 	if err != nil {
-		err = errors.Wrap(err, "yaml.Marshal(v): ")
+		err = errors.Wrap(err, "Failed to marshal YAML")
 		return err
 	}
 	configMap.Data[config.KeyEnvoy] = string(marshal)
@@ -289,7 +289,7 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, local
 	var bytes []byte
 	bytes, err = yaml.Marshal(v)
 	if err != nil {
-		err = errors.Wrap(err, "yaml.Marshal(v): ")
+		err = errors.Wrap(err, "Failed to marshal YAML")
 		return false, err
 	}
 	configMap.Data[config.KeyEnvoy] = string(bytes)

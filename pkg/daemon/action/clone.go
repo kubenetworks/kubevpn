@@ -41,7 +41,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 	cli := svr.GetClient(false)
 	connResp, err := cli.Connect(resp.Context(), connReq)
 	if err != nil {
-		err = errors.Wrap(err, "cli.Connect(resp.Context(), connReq): ")
+		err = errors.Wrap(err, "Failed to establish connection.")
 		return err
 	}
 	var msg *rpc.ConnectResponse
@@ -77,7 +77,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 	}
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
-		err = errors.Wrap(err, "util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes)): ")
+		err = errors.Wrap(err, "Failed to convert to temporary Kubeconfig file.")
 		return err
 	}
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
@@ -88,7 +88,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 	var path string
 	path, err = handler.SshJump(resp.Context(), sshConf, flags, false)
 	if err != nil {
-		err = errors.Wrap(err, "handler.SshJump(resp.Context(), sshConf, flags, false): ")
+		err = errors.Wrap(err, "Failed to perform SSH jump.")
 		return err
 	}
 	f := InitFactoryByPath(path, req.Namespace)

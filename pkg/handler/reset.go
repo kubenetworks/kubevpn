@@ -30,13 +30,13 @@ func (c *ConnectOptions) Reset(ctx context.Context) error {
 	var cli *client.Client
 	cli, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
-		err = errors.Wrap(err, "client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation()): ")
+		err = errors.Wrap(err, "Failed to create client with options")
 		return nil
 	}
 	var networkResource types.NetworkResource
 	networkResource, err = cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{})
 	if err != nil {
-		err = errors.Wrap(err, "cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{}): ")
+		err = errors.Wrap(err, "Failed to inspect network")
 		return nil
 	}
 	if len(networkResource.Containers) == 0 {

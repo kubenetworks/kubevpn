@@ -19,13 +19,13 @@ var fs embed.FS
 func Install() error {
 	bytes, err := fs.ReadFile("exe/tap-windows-9.21.2.exe")
 	if err != nil {
-		err = errors.Wrap(err, "fs.ReadFile(\"exe/tap-windows-9.21.2.exe\"): ")
+		err = errors.Wrap(err, "Failed to read tap-windows exe file ")
 		return err
 	}
 	tempFile, err := ioutil.TempFile("", "*.exe")
 	defer func() { _ = os.Remove(tempFile.Name()) }()
 	if err != nil {
-		err = errors.Wrap(err, "os.Remove(tempFile.Name()) }(): ")
+		err = errors.Wrap(err, "Failed to remove temporary file ")
 		return err
 	}
 	if _, err = tempFile.Write(bytes); err != nil {

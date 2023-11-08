@@ -66,7 +66,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	var tunName string
 	tunName, err = tunDevice.Name()
 	if err != nil {
-		err = errors.Wrap(err, "tunDevice.Name(): ")
+		err = errors.Wrap(err, "Failed to get TUN device name ")
 		return nil, nil, err
 	}
 
@@ -94,7 +94,7 @@ func addTunRoutes(tunName string, routes ...types.Route) error {
 	}
 	ifName, err := winipcfg.LUIDFromIndex(uint32(name.Index))
 	if err != nil {
-		err = errors.Wrap(err, "winipcfg.LUIDFromIndex(uint32(name.Index)): ")
+		err = errors.Wrap(err, "Failed to get LUID from index ")
 		return err
 	}
 	for _, route := range routes {
@@ -113,13 +113,13 @@ func addTunRoutes(tunName string, routes ...types.Route) error {
 		}
 		prefix, err := netip.ParsePrefix(route.Dst.String())
 		if err != nil {
-			err = errors.Wrap(err, "netip.ParsePrefix(route.Dst.String()): ")
+			err = errors.Wrap(err, "Failed to parse network prefix ")
 			return err
 		}
 		var addr netip.Addr
 		addr, err = netip.ParseAddr(route.GW.String())
 		if err != nil {
-			err = errors.Wrap(err, "netip.ParseAddr(route.GW.String()): ")
+			err = errors.Wrap(err, "Failed to parse gateway address ")
 			return err
 		}
 		err = ifName.AddRoute(prefix, addr, 0)

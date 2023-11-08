@@ -42,7 +42,7 @@ func RunWithElevatedInnerExec() error {
 	var pi windows.ProcessInformation
 	path, err := exec.LookPath("Powershell")
 	if err != nil {
-		err = errors.Wrap(err, "exec.LookPath(\"Powershell\"): ")
+		err = errors.Wrap(err, "Error occurred while looking for Powershell path")
 		return err
 	}
 	executable, _ := os.Executable()
@@ -51,12 +51,12 @@ func RunWithElevatedInnerExec() error {
 	c, _ := syscall.UTF16PtrFromString(fmt.Sprintf(`%s Start "%s" -Verb Runas`, path, join))
 	err = windows.CreateProcess(nil, c, nil, nil, true, windows.INHERIT_PARENT_AFFINITY, nil, nil, &si, &pi)
 	if err != nil {
-		err = errors.Wrap(err, "windows.CreateProcess(nil, c, nil, nil, true, windows.INHERIT_PARENT_AFFINITY, nil, nil, &si, &pi): ")
+		err = errors.Wrap(err, "Error occurred while creating Windows process")
 		return err
 	}
 	p, err := os.FindProcess(int(pi.ProcessId))
 	if err != nil {
-		err = errors.Wrap(err, "os.FindProcess(int(pi.ProcessId)): ")
+		err = errors.Wrap(err, "Error occurred while finding the process")
 		return err
 	}
 	_, err = p.Wait()

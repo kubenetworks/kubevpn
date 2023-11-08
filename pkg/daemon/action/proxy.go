@@ -44,7 +44,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
-		err = errors.Wrap(err, "util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes)): ")
+		err = errors.Wrap(err, "Failed to convert to temporary Kubeconfig file.")
 		return err
 	}
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
@@ -55,17 +55,17 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 	var path string
 	path, err = handler.SshJump(ctx, sshConf, flags, false)
 	if err != nil {
-		err = errors.Wrap(err, "handler.SshJump(ctx, sshConf, flags, false): ")
+		err = errors.Wrap(err, "Failed to perform SSH jump.")
 		return err
 	}
 	err = connect.InitClient(InitFactoryByPath(path, req.Namespace))
 	if err != nil {
-		err = errors.Wrap(err, "connect.InitClient(InitFactoryByPath(path, req.Namespace)): ")
+		err = errors.Wrap(err, "Failed to initialize the client.")
 		return err
 	}
 	err = connect.PreCheckResource()
 	if err != nil {
-		err = errors.Wrap(err, "connect.PreCheckResource(): ")
+		err = errors.Wrap(err, "Failed to pre-check the resource.")
 		return err
 	}
 
@@ -102,7 +102,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 				}
 				err = resp.Send(&rpc.ConnectResponse{Message: recv.Message})
 				if err != nil {
-					err = errors.Wrap(err, "resp.Send(&rpc.ConnectResponse{Message: recv.Message}): ")
+					err = errors.Wrap(err, "Failed to send response.")
 					return err
 				}
 			}
@@ -115,7 +115,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		var connResp rpc.Daemon_ConnectClient
 		connResp, err = daemonClient.Connect(ctx, req)
 		if err != nil {
-			err = errors.Wrap(err, "daemonClient.Connect(ctx, req): ")
+			err = errors.Wrap(err, "Failed to establish connection.")
 			return err
 		}
 		var recv *rpc.ConnectResponse
@@ -128,7 +128,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 			}
 			err = resp.Send(recv)
 			if err != nil {
-				err = errors.Wrap(err, "resp.Send(recv): ")
+				err = errors.Wrap(err, "Failed to send response.")
 				return err
 			}
 		}

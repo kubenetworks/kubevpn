@@ -118,14 +118,14 @@ func GetEnv(ctx context.Context, f util.Factory, ns, pod string) (map[string][]s
 	}
 	get, err := set.CoreV1().Pods(ns).Get(ctx, pod, v1.GetOptions{})
 	if err != nil {
-		err = errors.Wrap(err, "set.CoreV1().Pods(ns).Get(ctx, pod, v1.GetOptions{}): ")
+		err = errors.Wrap(err, "Error occurred while getting the pod")
 		return nil, err
 	}
 	result := map[string][]string{}
 	for _, c := range get.Spec.Containers {
 		env, err := Shell(set, client, config, pod, c.Name, ns, []string{"env"})
 		if err != nil {
-			err = errors.Wrap(err, "Shell(set, client, config, pod, c.Name, ns, []string{\"env\"}): ")
+			err = errors.Wrap(err, "Error occurred while executing shell command")
 			return nil, err
 		}
 		split := strings.Split(env, "\n")
@@ -151,7 +151,7 @@ func WaitPod(podInterface v12.PodInterface, list v1.ListOptions, checker func(*c
 	defer cancelFunc()
 	w, err := podInterface.Watch(ctx, list)
 	if err != nil {
-		err = errors.Wrap(err, "podInterface.Watch(ctx, list): ")
+		err = errors.Wrap(err, "Error occurred while watching the pod interface")
 		return err
 	}
 	defer w.Stop()
@@ -200,7 +200,7 @@ func GetTopOwnerReference(factory util.Factory, namespace, workload string) (*re
 	for {
 		object, err := GetUnstructuredObject(factory, namespace, workload)
 		if err != nil {
-			err = errors.Wrap(err, "GetUnstructuredObject(factory, namespace, workload): ")
+			err = errors.Wrap(err, "Error occurred while getting unstructured object")
 			return nil, err
 		}
 		ownerReference := v1.GetControllerOf(object.Object.(*unstructured.Unstructured))
@@ -224,7 +224,7 @@ func GetTopOwnerReference(factory util.Factory, namespace, workload string) (*re
 func GetTopOwnerReferenceBySelector(factory util.Factory, namespace, selector string) (sets.Set[string], error) {
 	object, err := GetUnstructuredObjectBySelector(factory, namespace, selector)
 	if err != nil {
-		err = errors.Wrap(err, "GetUnstructuredObjectBySelector(factory, namespace, selector): ")
+		err = errors.Wrap(err, "Error occurred while getting unstructured object by selector")
 		return nil, err
 	}
 	set := sets.New[string]()

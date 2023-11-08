@@ -80,7 +80,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 
 			bytes, ns, err := util.ConvertToKubeconfigBytes(f)
 			if err != nil {
-				err = errors.Wrap(err, "util.ConvertToKubeconfigBytes(f): ")
+				err = errors.Wrap(err, "Failed to convert to Kubeconfig bytes")
 				return err
 			}
 			// todo 将 doConnect 方法封装？内部使用 client 发送到daemon？
