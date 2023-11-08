@@ -94,7 +94,7 @@ func (cid *cidFile) Close() error {
 		return nil
 	}
 	if err := os.Remove(cid.path); err != nil {
-		return errors.Wrapf(err, "Failed to remove the CID file.", cid.path)
+		return errors.Wrapf(err, "Failed to remove the CID file.: %s", cid.path)
 	}
 
 	return nil

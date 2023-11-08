@@ -203,18 +203,18 @@ func publicKeyFile(file string) (ssh.AuthMethod, error) {
 	}
 	file, err = filepath.Abs(file)
 	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("Failed to read the SSH public key file", file))
+		err = errors.Wrap(err, fmt.Sprintf("Failed to read the SSH public key file: %s", file))
 		return nil, err
 	}
 	buffer, err := os.ReadFile(file)
 	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("Failed to read the SSH public key file", file))
+		err = errors.Wrap(err, fmt.Sprintf("Failed to read the SSH public key file: %s", file))
 		return nil, err
 	}
 
 	key, err := ssh.ParsePrivateKey(buffer)
 	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("Failed to parse the SSH public key file", file))
+		err = errors.Wrap(err, fmt.Sprintf("Failed to parse the SSH public key file: %s", file))
 		return nil, err
 	}
 	return ssh.PublicKeys(key), nil
@@ -269,13 +269,13 @@ func jumpRecursion(name string) (client *ssh.Client, err error) {
 		if client == nil {
 			client, err = dial(bastionList[i])
 			if err != nil {
-				err = errors.Wrap(err, "Failed to dial the bastion")
+				err = errors.Wrapf(err, "Failed to dial the bastion: %v", bastionList[i])
 				return
 			}
 		} else {
 			client, err = jump(client, bastionList[i])
 			if err != nil {
-				err = errors.Wrap(err, "Failed to jump to the bastion")
+				err = errors.Wrapf(err, "Failed to jump to the bastion: %v", bastionList[i])
 				return
 			}
 		}
@@ -314,7 +314,7 @@ func dial(from *SshConfig) (*ssh.Client, error) {
 	// connect to the bastion host
 	authMethod, err := publicKeyFile(from.Keyfile)
 	if err != nil {
-		err = errors.Wrap(err, "Failed to get the public key file")
+		err = errors.Wrapf(err, "Failed to get the public key file: %s", from.Keyfile)
 		return nil, err
 	}
 	return ssh.Dial("tcp", from.Addr, &ssh.ClientConfig{
