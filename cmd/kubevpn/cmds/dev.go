@@ -87,7 +87,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 			}
 			err = cmd.Flags().Parse(args[1:])
 			if err != nil {
-				err = errors.Wrap(err, "Failed to parse command flags")
+				err = errors.Wrapf(err, "Failed to parse command args: %v", args[:1])
 				return err
 			}
 			util.InitLogger(false)

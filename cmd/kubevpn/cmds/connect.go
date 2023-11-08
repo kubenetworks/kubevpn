@@ -90,7 +90,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			} else {
 				resp, err := cli.Connect(cmd.Context(), req)
 				if err != nil {
-					err = errors.Wrap(err, "Failed to connect")
+					err = errors.Wrap(err, "Failed to connect to cluster")
 					return err
 				}
 				for {
