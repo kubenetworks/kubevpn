@@ -15,12 +15,12 @@ import (
 	"time"
 
 	"github.com/kevinburke/ssh_config"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 	"k8s.io/client-go/util/homedir"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 type SshConfig struct {
@@ -63,7 +63,7 @@ func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, co
 
 	sshClient, err := DialSshRemote(conf)
 	if err != nil {
-		log.Errorf("Dial into remote server error: %s", err)
+		errors.LogErrorf("Dial into remote server error: %s", err)
 		return err
 	}
 
@@ -75,7 +75,7 @@ func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, co
 		case <-ticker.C:
 			_, _, err := sshClient.SendRequest("keepalive@golang.org", true, nil)
 			if err != nil {
-				log.Errorf("failed to send keep alive error: %s", err)
+				errors.LogErrorf("failed to send keep alive error: %s", err)
 			}
 		case <-ctx.Done():
 			return
@@ -86,6 +86,7 @@ func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, co
 	var lc net.ListenConfig
 	listen, err := lc.Listen(ctx, "tcp", localEndpoint.String())
 	if err != nil {
+		err = errors.Wrap(err, "lc.Listen(ctx, \"tcp\", localEndpoint.String()): ")
 		return err
 	}
 	defer listen.Close()
@@ -104,13 +105,14 @@ func Main(pctx context.Context, remoteEndpoint, localEndpoint netip.AddrPort, co
 
 		local, err := listen.Accept()
 		if err != nil {
+			err = errors.Wrap(err, "listen.Accept(): ")
 			return err
 		}
 		go func(local net.Conn) {
 			defer local.Close()
 			conn, err := sshClient.Dial("tcp", remoteEndpoint.String())
 			if err != nil {
-				log.Errorf("Failed to dial %s: %s", remoteEndpoint.String(), err)
+				errors.LogErrorf("Failed to dial %s: %s", remoteEndpoint.String(), err)
 				cancelFunc()
 				return
 			}
@@ -138,6 +140,7 @@ func DialSshRemote(conf *SshConfig) (*ssh.Client, error) {
 			var keyFile ssh.AuthMethod
 			keyFile, err = publicKeyFile(conf.Keyfile)
 			if err != nil {
+				err = errors.Wrap(err, "publicKeyFile(conf.Keyfile): ")
 				return nil, err
 			}
 			auth = append(auth, keyFile)
@@ -166,13 +169,14 @@ func RemoteRun(conf *SshConfig, cmd string, env map[string]string) (output []byt
 	var remote *ssh.Client
 	remote, err = DialSshRemote(conf)
 	if err != nil {
-		log.Errorf("Dial into remote server error: %s", err)
+		errors.LogErrorf("Dial into remote server error: %s", err)
 		return
 	}
 	defer remote.Close()
 	var session *ssh.Session
 	session, err = remote.NewSession()
 	if err != nil {
+		err = errors.Wrap(err, "remote.NewSession(): ")
 		return
 	}
 	for k, v := range env {
@@ -265,11 +269,13 @@ func jumpRecursion(name string) (client *ssh.Client, err error) {
 		if client == nil {
 			client, err = dial(bastionList[i])
 			if err != nil {
+				err = errors.Wrap(err, "dial(bastionList[i]): ")
 				return
 			}
 		} else {
 			client, err = jump(client, bastionList[i])
 			if err != nil {
+				err = errors.Wrap(err, "jump(client, bastionList[i]): ")
 				return
 			}
 		}
@@ -308,6 +314,7 @@ func dial(from *SshConfig) (*ssh.Client, error) {
 	// connect to the bastion host
 	authMethod, err := publicKeyFile(from.Keyfile)
 	if err != nil {
+		err = errors.Wrap(err, "publicKeyFile(from.Keyfile): ")
 		return nil, err
 	}
 	return ssh.Dial("tcp", from.Addr, &ssh.ClientConfig{
@@ -323,11 +330,13 @@ func jump(bClient *ssh.Client, to *SshConfig) (*ssh.Client, error) {
 	// Dial a connection to the service host, from the bastion
 	conn, err := bClient.Dial("tcp", to.Addr)
 	if err != nil {
+		err = errors.Wrap(err, "bClient.Dial(\"tcp\", to.Addr): ")
 		return nil, err
 	}
 
 	authMethod, err := publicKeyFile(to.Keyfile)
 	if err != nil {
+		err = errors.Wrap(err, "publicKeyFile(to.Keyfile): ")
 		return nil, err
 	}
 	ncc, chans, reqs, err := ssh.NewClientConn(conn, to.Addr, &ssh.ClientConfig{

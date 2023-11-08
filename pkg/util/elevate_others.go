@@ -11,6 +11,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func RunCmdWithElevated(exe string, args []string) error {
@@ -29,6 +31,7 @@ func RunCmdWithElevated(exe string, args []string) error {
 	cmd.Env = append(os.Environ(), envStartSudoKubeVPNByKubeVPN+"=1")
 	err := cmd.Start()
 	if err != nil {
+		err = errors.Wrap(err, "cmd.Start(): ")
 		return err
 	}
 	go func() {
@@ -56,6 +59,7 @@ func RunCmd(exe string, args []string) error {
 	cmd.Env = append(os.Environ(), envStartSudoKubeVPNByKubeVPN+"=1")
 	err := cmd.Start()
 	if err != nil {
+		err = errors.Wrap(err, "cmd.Start(): ")
 		return err
 	}
 	go func() {

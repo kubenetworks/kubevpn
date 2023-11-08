@@ -17,6 +17,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -63,7 +64,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			// not support temporally
 			if options.Engine == config.EngineGvisor {
-				return fmt.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
+				return errors.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
 			}
 			// startup daemon process and sudo process
 			return daemon.StartupDaemon(cmd.Context())
@@ -83,6 +84,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 
 			bytes, ns, err := util.ConvertToKubeconfigBytes(f)
 			if err != nil {
+				err = errors.Wrap(err, "util.ConvertToKubeconfigBytes(f): ")
 				return err
 			}
 			req := &rpc.CloneRequest{
@@ -109,6 +111,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			cli := daemon.GetClient(false)
 			resp, err := cli.Clone(cmd.Context(), req)
 			if err != nil {
+				err = errors.Wrap(err, "cli.Clone(cmd.Context(), req): ")
 				return err
 			}
 			for {

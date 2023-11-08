@@ -15,6 +15,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func CmdQuit(f cmdutil.Factory) *cobra.Command {
@@ -43,6 +44,7 @@ func quit(ctx context.Context, isSudo bool) error {
 	}
 	client, err := cli.Quit(ctx, &rpc.QuitRequest{})
 	if err != nil {
+		err = errors.Wrap(err, "cli.Quit(ctx, &rpc.QuitRequest{}): ")
 		return err
 	}
 	var resp *rpc.QuitResponse

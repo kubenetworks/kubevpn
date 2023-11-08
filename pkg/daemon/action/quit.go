@@ -7,6 +7,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/pkg/dns"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error {
@@ -24,7 +25,7 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 		log.Info("quit: cleanup clone")
 		err := svr.clone.Cleanup()
 		if err != nil {
-			log.Errorf("quit: cleanup clone failed: %v", err)
+			errors.LogErrorf("quit: cleanup clone failed: %v", err)
 		}
 	}
 	for _, options := range svr.secondaryConnect {

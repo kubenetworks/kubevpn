@@ -5,7 +5,6 @@ import (
 	"runtime"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"go.uber.org/automaxprocs/maxprocs"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/core"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -39,17 +39,18 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 			_, _ = maxprocs.Set(maxprocs.Logger(nil))
 			err := handler.RentIPIfNeeded(route)
 			if err != nil {
+				err = errors.Wrap(err, "handler.RentIPIfNeeded(route): ")
 				return err
 			}
 			defer func() {
 				err := handler.ReleaseIPIfNeeded()
 				if err != nil {
-					log.Errorf("release ip failed: %v", err)
+					errors.LogErrorf("release ip failed: %v", err)
 				}
 			}()
 			servers, err := handler.Parse(*route)
 			if err != nil {
-				log.Errorf("parse server failed: %v", err)
+				errors.LogErrorf("parse server failed: %v", err)
 				return err
 			}
 			ctx := cmd.Context()

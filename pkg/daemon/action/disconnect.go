@@ -1,7 +1,6 @@
 package action
 
 import (
-	"fmt"
 	"io"
 	"time"
 
@@ -9,16 +8,18 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/pkg/dns"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_DisconnectServer) error {
 	if !svr.IsSudo {
 		cli := svr.GetClient(true)
 		if cli == nil {
-			return fmt.Errorf("sudo daemon not start")
+			return errors.Errorf("sudo daemon not start")
 		}
 		connResp, err := cli.Disconnect(resp.Context(), req)
 		if err != nil {
+			err = errors.Wrap(err, "cli.Disconnect(resp.Context(), req): ")
 			return err
 		}
 		var recv *rpc.DisconnectResponse
@@ -31,6 +32,7 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 			}
 			err = resp.Send(recv)
 			if err != nil {
+				err = errors.Wrap(err, "resp.Send(recv): ")
 				return err
 			}
 		}
@@ -75,7 +77,7 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 			svr.secondaryConnect[index].Cleanup()
 			svr.secondaryConnect = append(svr.secondaryConnect[:index], svr.secondaryConnect[index+1:]...)
 		} else {
-			log.Errorf("index %d out of range", req.GetID())
+			errors.LogErrorf("index %d out of range", req.GetID())
 		}
 	}
 

@@ -3,24 +3,24 @@
 package tun
 
 import (
-	"fmt"
 	"net"
 	"net/netip"
 	"reflect"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
 	wintun "golang.zx2c4.com/wintun"
 	wireguardtun "golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if cfg.Addr == "" && cfg.Addr6 == "" {
-		err = fmt.Errorf("ipv4 address and ipv6 address can not be empty at same time")
+		err = errors.Errorf("ipv4 address and ipv6 address can not be empty at same time")
 		return
 	}
 
@@ -30,7 +30,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 	tunDevice, err := wireguardtun.CreateTUN(interfaceName, cfg.MTU)
 	if err != nil {
-		err = fmt.Errorf("failed to create TUN device: %w", err)
+		err = errors.Errorf("failed to create TUN device: %w", err)
 		return
 	}
 
@@ -66,6 +66,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	var tunName string
 	tunName, err = tunDevice.Name()
 	if err != nil {
+		err = errors.Wrap(err, "tunDevice.Name(): ")
 		return nil, nil, err
 	}
 
@@ -93,6 +94,7 @@ func addTunRoutes(tunName string, routes ...types.Route) error {
 	}
 	ifName, err := winipcfg.LUIDFromIndex(uint32(name.Index))
 	if err != nil {
+		err = errors.Wrap(err, "winipcfg.LUIDFromIndex(uint32(name.Index)): ")
 		return err
 	}
 	for _, route := range routes {
@@ -111,11 +113,13 @@ func addTunRoutes(tunName string, routes ...types.Route) error {
 		}
 		prefix, err := netip.ParsePrefix(route.Dst.String())
 		if err != nil {
+			err = errors.Wrap(err, "netip.ParsePrefix(route.Dst.String()): ")
 			return err
 		}
 		var addr netip.Addr
 		addr, err = netip.ParseAddr(route.GW.String())
 		if err != nil {
+			err = errors.Wrap(err, "netip.ParseAddr(route.GW.String()): ")
 			return err
 		}
 		err = ifName.AddRoute(prefix, addr, 0)

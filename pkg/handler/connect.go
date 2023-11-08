@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+
 	"fmt"
 	"io"
 	"math"
@@ -24,7 +25,6 @@ import (
 	goversion "github.com/hashicorp/go-version"
 	netroute "github.com/libp2p/go-netroute"
 	miekgdns "github.com/miekg/dns"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"golang.org/x/crypto/ssh"
@@ -65,6 +65,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/core"
 	"github.com/wencaiwulue/kubevpn/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/pkg/driver"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -142,6 +143,7 @@ func (c *ConnectOptions) RentInnerIP(ctx context.Context) (context.Context, erro
 	if c.localTunIPv4 == nil || c.localTunIPv6 == nil {
 		c.localTunIPv4, c.localTunIPv6, err = c.dhcp.RentIPBaseNICAddress(ctx)
 		if err != nil {
+			err = errors.Wrap(err, "c.dhcp.RentIPBaseNICAddress(ctx): ")
 			return nil, err
 		}
 		ctx = metadata.AppendToOutgoingContext(ctx,
@@ -154,7 +156,7 @@ func (c *ConnectOptions) RentInnerIP(ctx context.Context) (context.Context, erro
 
 func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error) {
 	if c.localTunIPv4 == nil || c.localTunIPv6 == nil {
-		return fmt.Errorf("local tun ip is invalid")
+		return errors.Errorf("local tun ip is invalid")
 	}
 
 	for _, workload := range c.Workloads {
@@ -172,7 +174,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error)
 			err = InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, configInfo)
 		}
 		if err != nil {
-			log.Errorf("create remote inbound pod for %s failed: %s", workload, err.Error())
+			errors.LogErrorf("create remote inbound pod for %s failed: %s", workload, err.Error())
 			return err
 		}
 		log.Infof("create remote inbound pod for %s successfully", workload)
@@ -192,10 +194,12 @@ func Rollback(f cmdutil.Factory, ns, workload string) {
 	if r.Err() == nil {
 		_ = r.Visit(func(info *resource.Info, err error) error {
 			if err != nil {
+				err = errors.Wrap(err, "r.Visit(func(info *resource.Info, err error) error {: ")
 				return err
 			}
 			rollbacker, err := polymorphichelpers.RollbackerFn(f, info.ResourceMapping())
 			if err != nil {
+				err = errors.Wrap(err, "polymorphichelpers.RollbackerFn(f, info.ResourceMapping()): ")
 				return err
 			}
 			_, err = rollbacker.Rollback(info.Object, nil, 0, cmdutil.DryRunNone)
@@ -209,12 +213,12 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 
 	log.Info("start to connect")
 	if err = c.InitDHCP(c.ctx); err != nil {
-		log.Errorf("init dhcp failed: %s", err.Error())
+		errors.LogErrorf("init dhcp failed: %s", err.Error())
 		return
 	}
 	c.addCleanUpResourceHandler()
 	if err = c.getCIDR(c.ctx); err != nil {
-		log.Errorf("get cidr failed: %s", err.Error())
+		errors.LogErrorf("get cidr failed: %s", err.Error())
 		return
 	}
 	log.Info("get cidr successfully")
@@ -230,14 +234,17 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 	var rawTCPForwardPort, gvisorTCPForwardPort, gvisorUDPForwardPort int
 	rawTCPForwardPort, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
+		err = errors.Wrap(err, "util.GetAvailableTCPPortOrDie(): ")
 		return err
 	}
 	gvisorTCPForwardPort, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
+		err = errors.Wrap(err, "util.GetAvailableTCPPortOrDie(): ")
 		return err
 	}
 	gvisorUDPForwardPort, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
+		err = errors.Wrap(err, "util.GetAvailableTCPPortOrDie(): ")
 		return err
 	}
 	if err = c.portForward(c.ctx, []string{
@@ -254,21 +261,21 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 	core.GvisorTCPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
 	core.GvisorUDPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorUDPForwardPort)
 	if err = c.startLocalTunServe(c.ctx, forward, isLite); err != nil {
-		log.Errorf("start local tun service failed: %v", err)
+		errors.LogErrorf("start local tun service failed: %v", err)
 		return
 	}
 	log.Infof("adding route...")
 	if err = c.addRouteDynamic(c.ctx); err != nil {
-		log.Errorf("add route dynamic failed: %v", err)
+		errors.LogErrorf("add route dynamic failed: %v", err)
 		return
 	}
 	c.deleteFirewallRule(c.ctx)
 	if err = c.addExtraRoute(c.ctx); err != nil {
-		log.Errorf("add extra route failed: %v", err)
+		errors.LogErrorf("add extra route failed: %v", err)
 		return
 	}
 	if err = c.setupDNS(c.ctx, isLite); err != nil {
-		log.Errorf("set up dns failed: %v", err)
+		errors.LogErrorf("set up dns failed: %v", err)
 		return
 	}
 	go c.heartbeats(c.ctx)
@@ -324,7 +331,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				}
 				if strings.Contains(err.Error(), "unable to listen on any of the requested ports") ||
 					strings.Contains(err.Error(), "address already in use") {
-					log.Errorf("port %s already in use, needs to release it manually", portPair)
+					errors.LogErrorf("port %s already in use, needs to release it manually", portPair)
 					time.Sleep(time.Second * 1)
 				} else {
 					log.Debugf("port-forward occurs error, err: %v, retrying", err)
@@ -388,7 +395,7 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 	for _, s := range c.ExtraCIDR {
 		_, _, err = net.ParseCIDR(s)
 		if err != nil {
-			return fmt.Errorf("invalid extra-cidr %s, err: %v", s, err)
+			return errors.Errorf("invalid extra-cidr %s, err: %v", s, err)
 		}
 		list.Insert(s)
 	}
@@ -412,7 +419,7 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 	log.Debugf("ipv4: %s, ipv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
 	servers, err := Parse(r)
 	if err != nil {
-		log.Errorf("parse route error: %v", err)
+		errors.LogErrorf("parse route error: %v", err)
 		return err
 	}
 	go func() {
@@ -428,12 +435,14 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 	var r routing.Router
 	r, err = netroute.New()
 	if err != nil {
+		err = errors.Wrap(err, "netroute.New(): ")
 		return
 	}
 
 	var tunName string
 	tunName, err = c.GetTunDeviceName()
 	if err != nil {
+		err = errors.Wrap(err, "c.GetTunDeviceName(): ")
 		return
 	}
 
@@ -553,7 +562,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 		break
 	}
 	if err != nil {
-		err = fmt.Errorf("can not list service to add it to route table, err: %v", err)
+		err = errors.Errorf("can not list service to add it to route table, err: %v", err)
 		return
 	}
 	for _, item := range serviceList.Items {
@@ -626,7 +635,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context, lite bool) error {
 	const port = 53
 	pod, err := c.GetRunningPodList(ctx)
 	if err != nil {
-		log.Errorf("get running pod list failed, err: %v", err)
+		errors.LogErrorf("get running pod list failed, err: %v", err)
 		return err
 	}
 	relovConf, err := util.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, pod[0].GetName(), c.Namespace)
@@ -652,6 +661,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context, lite bool) error {
 	}
 	tunName, err := c.GetTunDeviceName()
 	if err != nil {
+		err = errors.Wrap(err, "c.GetTunDeviceName(): ")
 		return err
 	}
 	c.dnsConfig = &dns.Config{
@@ -699,10 +709,11 @@ func Run(ctx context.Context, servers []core.Server) error {
 func Parse(r core.Route) ([]core.Server, error) {
 	servers, err := r.GenerateServers()
 	if err != nil {
+		err = errors.Wrap(err, "r.GenerateServers(): ")
 		return nil, err
 	}
 	if len(servers) == 0 {
-		return nil, fmt.Errorf("server is empty, server config: %s", strings.Join(r.ServeNodes, ","))
+		return nil, errors.Errorf("server is empty, server config: %s", strings.Join(r.ServeNodes, ","))
 	}
 	return servers, nil
 }
@@ -803,6 +814,7 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 	var rawConfig api.Config
 	rawConfig, err = matchVersionFlags.ToRawKubeConfigLoader().RawConfig()
 	if err != nil {
+		err = errors.Wrap(err, "matchVersionFlags.ToRawKubeConfigLoader().RawConfig(): ")
 		return
 	}
 	if err = api.FlattenConfig(&rawConfig); err != nil {
@@ -825,6 +837,7 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 	var u *url.URL
 	u, err = url.Parse(cluster.Server)
 	if err != nil {
+		err = errors.Wrap(err, "url.Parse(cluster.Server): ")
 		return
 	}
 
@@ -843,30 +856,35 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 	}
 	ips, err := net.LookupHost(serverHost)
 	if err != nil {
+		err = errors.Wrap(err, "net.LookupHost(serverHost): ")
 		return
 	}
 
 	if len(ips) == 0 {
 		// handle error: no IP associated with the hostname
-		err = fmt.Errorf("kubeconfig: no IP associated with the hostname %s", serverHost)
+		err = errors.Errorf("kubeconfig: no IP associated with the hostname %s", serverHost)
 		return
 	}
 
 	var remote netip.AddrPort
 	// Use the first IP address
-	remote, err = netip.ParseAddrPort(net.JoinHostPort(ips[0], serverPort))
+	remoteTlsServerIp := ips[0]
+	remote, err = netip.ParseAddrPort(net.JoinHostPort(remoteTlsServerIp, serverPort))
 	if err != nil {
+		err = errors.Wrap(err, "netip.ParseAddrPort(net.JoinHostPort(remoteTlsServerIp, serverPort)): ")
 		return
 	}
 
 	var port int
 	port, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
+		err = errors.Wrap(err, "util.GetAvailableTCPPortOrDie(): ")
 		return
 	}
 	var local netip.AddrPort
 	local, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 	if err != nil {
+		err = errors.Wrap(err, "netip.ParseAddrPort(net.JoinHostPort(\"127.0.0.1\", strconv.Itoa(port))): ")
 		return
 	}
 
@@ -874,6 +892,7 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 	var cli *ssh.Client
 	cli, err = util.DialSshRemote(conf)
 	if err != nil {
+		err = errors.Wrap(err, "util.DialSshRemote(conf): ")
 		return
 	} else {
 		_ = cli.Close()
@@ -891,7 +910,7 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 			err := util.Main(ctx, remote, local, conf, readyChan)
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
-					log.Errorf("ssh forward failed err: %v", err)
+					errors.LogErrorf("ssh forward failed err: %v", err)
 				}
 				select {
 				case errChan <- err:
@@ -906,7 +925,7 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 	select {
 	case <-readyChan:
 	case err = <-errChan:
-		log.Errorf("ssh proxy err: %v", err)
+		errors.LogErrorf("ssh proxy err: %v", err)
 		return
 	}
 
@@ -920,16 +939,19 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 	var convertedObj runtime.Object
 	convertedObj, err = latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
 	if err != nil {
+		err = errors.Wrap(err, "latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion): ")
 		return
 	}
 	var marshal []byte
 	marshal, err = json.Marshal(convertedObj)
 	if err != nil {
+		err = errors.Wrap(err, "json.Marshal(convertedObj): ")
 		return
 	}
 	var temp *os.File
 	temp, err = os.CreateTemp("", "*.kubeconfig")
 	if err != nil {
+		err = errors.Wrap(err, "os.CreateTemp(\"\", \"*.kubeconfig\"): ")
 		return
 	}
 	if err = temp.Close(); err != nil {
@@ -961,10 +983,12 @@ func SshJumpAndSetEnv(ctx context.Context, conf *util.SshConfig, flags *pflag.Fl
 	}
 	path, err := SshJump(ctx, conf, flags, print)
 	if err != nil {
+		err = errors.Wrap(err, "SshJump(ctx, conf, flags, print): ")
 		return err
 	}
 	err = os.Setenv(clientcmd.RecommendedConfigPathEnvVar, path)
 	if err != nil {
+		err = errors.Wrap(err, "os.Setenv(clientcmd.RecommendedConfigPathEnvVar, path): ")
 		return err
 	}
 	return os.Setenv(config.EnvSSHJump, path)
@@ -989,6 +1013,7 @@ func (c *ConnectOptions) PreCheckResource() error {
 
 	list, err := util.GetUnstructuredObjectList(c.factory, c.Namespace, c.Workloads)
 	if err != nil {
+		err = errors.Wrap(err, "util.GetUnstructuredObjectList(c.factory, c.Namespace, c.Workloads): ")
 		return err
 	}
 	var resources []string
@@ -1008,6 +1033,7 @@ func (c *ConnectOptions) PreCheckResource() error {
 	for i, workload := range c.Workloads {
 		object, err := util.GetUnstructuredObject(c.factory, c.Namespace, workload)
 		if err != nil {
+			err = errors.Wrap(err, "util.GetUnstructuredObject(c.factory, c.Namespace, workload): ")
 			return err
 		}
 		if object.Mapping.Resource.Resource != "services" {
@@ -1038,7 +1064,7 @@ func (c *ConnectOptions) PreCheckResource() error {
 				}
 				// only a single service, not support it yet
 				if controller.Len() == 0 {
-					return fmt.Errorf("not support resources: %s", workload)
+					return errors.Errorf("not support resources: %s", workload)
 				}
 			}
 		}
@@ -1146,23 +1172,25 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 	}
 	ips, err := util.GetDNSIPFromDnsPod(c.clientset)
 	if err != nil {
+		err = errors.Wrap(err, "util.GetDNSIPFromDnsPod(c.clientset): ")
 		return err
 	}
 	if len(ips) == 0 {
-		err = fmt.Errorf("can't found any dns server")
+		err = errors.Errorf("can't found any dns server")
 		return err
 	}
 
 	var r routing.Router
 	r, err = netroute.New()
 	if err != nil {
+		err = errors.Wrap(err, "netroute.New(): ")
 		return err
 	}
 
 	var tunName string
 	tunName, err = c.GetTunDeviceName()
 	if err != nil {
-		log.Errorf("get tun interface failed: %s", err.Error())
+		errors.LogErrorf("get tun interface failed: %s", err.Error())
 		return err
 	}
 
@@ -1195,6 +1223,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 	// 1) use dig +short query, if ok, just return
 	podList, err := c.GetRunningPodList(ctx)
 	if err != nil {
+		err = errors.Wrap(err, "c.GetRunningPodList(ctx): ")
 		return err
 	}
 	for _, domain := range c.ExtraDomain {
@@ -1301,7 +1330,7 @@ RetryWithDNSClient:
 			}
 		}
 		if !success {
-			return fmt.Errorf("failed to resolve dns for domain %s", domain)
+			return errors.Errorf("failed to resolve dns for domain %s", domain)
 		}
 	}
 	return nil
@@ -1310,35 +1339,42 @@ RetryWithDNSClient:
 func (c *ConnectOptions) GetKubeconfigPath() (string, error) {
 	rawConfig, err := c.factory.ToRawKubeConfigLoader().RawConfig()
 	if err != nil {
+		err = errors.Wrap(err, "c.factory.ToRawKubeConfigLoader().RawConfig(): ")
 		return "", err
 	}
 	err = api.FlattenConfig(&rawConfig)
 	if err != nil {
+		err = errors.Wrap(err, "api.FlattenConfig(&rawConfig): ")
 		return "", err
 	}
 	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})
 	var convertedObj pkgruntime.Object
 	convertedObj, err = latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
 	if err != nil {
+		err = errors.Wrap(err, "latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion): ")
 		return "", err
 	}
 	var kubeconfigJsonBytes []byte
 	kubeconfigJsonBytes, err = json.Marshal(convertedObj)
 	if err != nil {
+		err = errors.Wrap(err, "json.Marshal(convertedObj): ")
 		return "", err
 	}
 
 	temp, err := os.CreateTemp("", "*.kubeconfig")
 	if err != nil {
+		err = errors.Wrap(err, "os.CreateTemp(\"\", \"*.kubeconfig\"): ")
 		return "", err
 	}
 	temp.Close()
 	err = os.WriteFile(temp.Name(), kubeconfigJsonBytes, 0644)
 	if err != nil {
+		err = errors.Wrap(err, "os.WriteFile(temp.Name(), kubeconfigJsonBytes, 0644): ")
 		return "", err
 	}
 	err = os.Chmod(temp.Name(), 0644)
 	if err != nil {
+		err = errors.Wrap(err, "os.Chmod(temp.Name(), 0644): ")
 		return "", err
 	}
 
@@ -1364,11 +1400,13 @@ func (c *ConnectOptions) GetLocalTunIPv4() string {
 func (c *ConnectOptions) UpdateImage(ctx context.Context) error {
 	deployment, err := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
+		err = errors.Wrap(err, "c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{}): ")
 		return err
 	}
 	origin := deployment.DeepCopy()
 	newImg, err := reference.ParseNormalizedNamed(config.Image)
 	if err != nil {
+		err = errors.Wrap(err, "reference.ParseNormalizedNamed(config.Image): ")
 		return err
 	}
 	newTag, ok := newImg.(reference.NamedTagged)
@@ -1377,6 +1415,7 @@ func (c *ConnectOptions) UpdateImage(ctx context.Context) error {
 	}
 	oldImg, err := reference.ParseNormalizedNamed(deployment.Spec.Template.Spec.Containers[0].Image)
 	if err != nil {
+		err = errors.Wrap(err, "reference.ParseNormalizedNamed(deployment.Spec.Template.Spec.Containers[0].Image): ")
 		return err
 	}
 	var oldTag reference.NamedTagged
@@ -1390,10 +1429,12 @@ func (c *ConnectOptions) UpdateImage(ctx context.Context) error {
 	var oldVersion, newVersion *goversion.Version
 	oldVersion, err = goversion.NewVersion(oldTag.Tag())
 	if err != nil {
+		err = errors.Wrap(err, "goversion.NewVersion(oldTag.Tag()): ")
 		return nil
 	}
 	newVersion, err = goversion.NewVersion(newTag.Tag())
 	if err != nil {
+		err = errors.Wrap(err, "goversion.NewVersion(newTag.Tag()): ")
 		return nil
 	}
 	if oldVersion.GreaterThanOrEqual(newVersion) {
@@ -1407,10 +1448,12 @@ func (c *ConnectOptions) UpdateImage(ctx context.Context) error {
 	p := pkgclient.MergeFrom(deployment)
 	data, err := pkgclient.MergeFrom(origin).Data(deployment)
 	if err != nil {
+		err = errors.Wrap(err, "pkgclient.MergeFrom(origin).Data(deployment): ")
 		return err
 	}
 	_, err = c.clientset.AppsV1().Deployments(c.Namespace).Patch(ctx, config.ConfigMapPodTrafficManager, p.Type(), data, metav1.PatchOptions{})
 	if err != nil {
+		err = errors.Wrap(err, "c.clientset.AppsV1().Deployments(c.Namespace).Patch(ctx, config.ConfigMapPodTrafficManager, p.Type(), data, metav1.PatchOptions{}): ")
 		return err
 	}
 	err = util.RolloutStatus(ctx, c.factory, c.Namespace, fmt.Sprintf("deployments/%s", config.ConfigMapPodTrafficManager), time.Minute*60)
@@ -1420,10 +1463,12 @@ func (c *ConnectOptions) UpdateImage(ctx context.Context) error {
 func (c *ConnectOptions) setImage(ctx context.Context) error {
 	deployment, err := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
+		err = errors.Wrap(err, "c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{}): ")
 		return err
 	}
 	newImg, err := reference.ParseNormalizedNamed(config.Image)
 	if err != nil {
+		err = errors.Wrap(err, "reference.ParseNormalizedNamed(config.Image): ")
 		return err
 	}
 	newTag, ok := newImg.(reference.NamedTagged)
@@ -1433,6 +1478,7 @@ func (c *ConnectOptions) setImage(ctx context.Context) error {
 
 	oldImg, err := reference.ParseNormalizedNamed(deployment.Spec.Template.Spec.Containers[0].Image)
 	if err != nil {
+		err = errors.Wrap(err, "reference.ParseNormalizedNamed(deployment.Spec.Template.Spec.Containers[0].Image): ")
 		return err
 	}
 	var oldTag reference.NamedTagged
@@ -1446,10 +1492,12 @@ func (c *ConnectOptions) setImage(ctx context.Context) error {
 	var oldVersion, newVersion *goversion.Version
 	oldVersion, err = goversion.NewVersion(oldTag.Tag())
 	if err != nil {
+		err = errors.Wrap(err, "goversion.NewVersion(oldTag.Tag()): ")
 		return nil
 	}
 	newVersion, err = goversion.NewVersion(newTag.Tag())
 	if err != nil {
+		err = errors.Wrap(err, "goversion.NewVersion(newTag.Tag()): ")
 		return nil
 	}
 	if oldVersion.GreaterThanOrEqual(newVersion) {
@@ -1470,6 +1518,7 @@ func (c *ConnectOptions) setImage(ctx context.Context) error {
 	}
 	infos, err := r.Infos()
 	if err != nil {
+		err = errors.Wrap(err, "r.Infos(): ")
 		return err
 	}
 	patches := set.CalculatePatches(infos, scheme.DefaultJSONEncoder(), func(obj pkgruntime.Object) ([]byte, error) {
@@ -1494,11 +1543,12 @@ func (c *ConnectOptions) setImage(ctx context.Context) error {
 			DryRun(false).
 			Patch(p.Info.Namespace, p.Info.Name, pkgtypes.StrategicMergePatchType, p.Patch, nil)
 		if err != nil {
-			log.Errorf("failed to patch image update to pod template: %v", err)
+			errors.LogErrorf("failed to patch image update to pod template: %v", err)
 			return err
 		}
 		err = util.RolloutStatus(ctx, c.factory, c.Namespace, fmt.Sprintf("%s/%s", p.Info.Mapping.Resource.GroupResource().String(), p.Info.Name), time.Minute*60)
 		if err != nil {
+			err = errors.Wrap(err, "util.RolloutStatus(ctx, c.factory, c.Namespace, fmt.Sprintf(\"%s/%s\", p.Info.Mapping.Resource.GroupResource().String(), p.Info.Name), time.Minute*60): ")
 			return err
 		}
 	}
@@ -1554,6 +1604,7 @@ func (c *ConnectOptions) GetTunDeviceName() (string, error) {
 	}
 	device, err := util.GetTunDevice(ips...)
 	if err != nil {
+		err = errors.Wrap(err, "util.GetTunDevice(ips...): ")
 		return "", err
 	}
 	return device.Name, nil
@@ -1562,6 +1613,7 @@ func (c *ConnectOptions) GetTunDeviceName() (string, error) {
 func (c *ConnectOptions) GetKubeconfigCluster() string {
 	rawConfig, err := c.GetFactory().ToRawKubeConfigLoader().RawConfig()
 	if err != nil {
+		err = errors.Wrap(err, "c.GetFactory().ToRawKubeConfigLoader().RawConfig(): ")
 		return ""
 	}
 	if rawConfig.Contexts != nil && rawConfig.Contexts[rawConfig.CurrentContext] != nil {

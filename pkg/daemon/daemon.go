@@ -20,6 +20,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/action"
 	_ "github.com/wencaiwulue/kubevpn/pkg/daemon/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -36,7 +37,7 @@ type SvrOption struct {
 func (o *SvrOption) Start(ctx context.Context) error {
 	file, err := os.OpenFile(action.GetDaemonLogPath(), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
 	if err != nil {
-		log.Errorf("open log file error: %v", err)
+		errors.LogErrorf("open log file error: %v", err)
 		return err
 	}
 	defer file.Close()
@@ -47,19 +48,21 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	var lc net.ListenConfig
 	lis, err := lc.Listen(o.ctx, "unix", GetSockPath(o.IsSudo))
 	if err != nil {
+		err = errors.Wrap(err, "lc.Listen(o.ctx, \"unix\", GetSockPath(o.IsSudo)): ")
 		return err
 	}
 	defer lis.Close()
 
 	err = os.Chmod(GetSockPath(o.IsSudo), 0666)
 	if err != nil {
+		err = errors.Wrap(err, "os.Chmod(GetSockPath(o.IsSudo), 0666): ")
 		return err
 	}
 
 	o.svr = grpc.NewServer()
 	cleanup, err := admin.Register(o.svr)
 	if err != nil {
-		log.Errorf("failed to register admin: %v", err)
+		errors.LogErrorf("failed to register admin: %v", err)
 		return err
 	}
 	grpc_health_v1.RegisterHealthServer(o.svr, health.NewServer())

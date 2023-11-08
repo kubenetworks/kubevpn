@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 const retries = 4
@@ -19,29 +21,32 @@ const retries = 4
 func DownloadFileWithName(uri, name string) (string, error) {
 	resp, err := getWithRetry(uri)
 	if err != nil {
+		err = errors.Wrap(err, "getWithRetry(uri): ")
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("downloading file %s failed. status code: %d, expected: %d", uri, resp.StatusCode, http.StatusOK)
+		return "", errors.Errorf("downloading file %s failed. status code: %d, expected: %d", uri, resp.StatusCode, http.StatusOK)
 	}
 
 	dir, err := os.MkdirTemp("", "")
 	if err != nil {
+		err = errors.Wrap(err, "os.MkdirTemp(\"\", \"\"): ")
 		return "", err
 	}
 
 	file := filepath.Join(dir, name)
 	out, err := os.Create(file)
 	if err != nil {
+		err = errors.Wrap(err, "os.Create(file): ")
 		return "", err
 	}
 	defer out.Close()
 
 	_, err = io.Copy(out, resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to save file %s. error: %v", file, err)
+		return "", errors.Errorf("failed to save file %s. error: %v", file, err)
 	}
 
 	logrus.Infof("downloaded file %s", file)
@@ -55,12 +60,14 @@ func downloadFile(uri string) (string, error) {
 func GetSha256ForAsset(uri string) (string, error) {
 	file, err := downloadFile(uri)
 	if err != nil {
+		err = errors.Wrap(err, "downloadFile(uri): ")
 		return "", err
 	}
 
 	defer os.Remove(file)
 	sha256, err := getSha256(file)
 	if err != nil {
+		err = errors.Wrap(err, "getSha256(file): ")
 		return "", err
 	}
 
@@ -70,6 +77,7 @@ func GetSha256ForAsset(uri string) (string, error) {
 func getSha256(filename string) (string, error) {
 	f, err := os.Open(filename)
 	if err != nil {
+		err = errors.Wrap(err, "os.Open(filename): ")
 		return "", err
 	}
 	defer f.Close()

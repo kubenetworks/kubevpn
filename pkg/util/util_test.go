@@ -11,10 +11,11 @@ import (
 	"github.com/google/gopacket/examples/util"
 	"github.com/google/gopacket/layers"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func TestName(t *testing.T) {
+func ConfigCNI(t *testing.T) {
 	var s = `
 {
   "name": "cni0",
@@ -90,7 +91,7 @@ func TestPing(t *testing.T) {
 	buf := gopacket.NewSerializeBuffer()
 	err := gopacket.SerializeLayers(buf, opts, &icmpLayer, &ipLayer)
 	if err != nil {
-		log.Errorf("failed to serialize icmp packet, err: %v", err)
+		errors.LogErrorf("failed to serialize icmp packet, err: %v", err)
 		return
 	}
 	ipConn, err := net.ListenPacket("ip4:icmp", "localhost")

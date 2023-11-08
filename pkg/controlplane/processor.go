@@ -3,7 +3,6 @@ package controlplane
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math"
 	"math/rand"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	utilcache "k8s.io/apimachinery/pkg/util/cache"
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
@@ -98,11 +98,12 @@ func ParseYaml(file string) ([]*Virtual, error) {
 
 	yamlFile, err := os.ReadFile(file)
 	if err != nil {
-		return nil, fmt.Errorf("Error reading YAML file: %s\n", err)
+		return nil, errors.Errorf("Error reading YAML file: %s\n", err)
 	}
 
 	err = yaml.Unmarshal(yamlFile, &virtualList)
 	if err != nil {
+		err = errors.Wrap(err, "yaml.Unmarshal(yamlFile, &virtualList): ")
 		return nil, err
 	}
 

@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -224,7 +225,7 @@ func (d *Device) parseIPHeader() {
 			e.src = e.data[:e.length][8:24]
 			e.dst = e.data[:e.length][24:40]
 		} else {
-			log.Errorf("[tun-packet] unknown packet")
+			errors.LogErrorf("[tun-packet] unknown packet")
 			continue
 		}
 
@@ -240,11 +241,12 @@ func (d *Device) Close() {
 func heartbeats(tun net.Conn, in chan<- *DataElem) {
 	conn, err := util.GetTunDeviceByConn(tun)
 	if err != nil {
-		log.Errorf("get tun device error: %s", err.Error())
+		errors.LogErrorf("get tun device error: %s", err.Error())
 		return
 	}
 	srcIPv4, srcIPv6, err := util.GetLocalTunIP(conn.Name)
 	if err != nil {
+		err = errors.Wrap(err, "util.GetLocalTunIP(conn.Name): ")
 		return
 	}
 	if config.RouterIP.To4().Equal(srcIPv4) {
@@ -265,14 +267,14 @@ func heartbeats(tun net.Conn, in chan<- *DataElem) {
 			if bytes == nil {
 				bytes, err = genICMPPacket(srcIPv4, config.RouterIP)
 				if err != nil {
-					log.Errorf("generate ipv4 packet error: %s", err.Error())
+					errors.LogErrorf("generate ipv4 packet error: %s", err.Error())
 					continue
 				}
 			}
 			if bytes6 == nil {
 				bytes6, err = genICMPPacketIPv6(srcIPv6, config.RouterIP6)
 				if err != nil {
-					log.Errorf("generate ipv6 packet error: %s", err.Error())
+					errors.LogErrorf("generate ipv6 packet error: %s", err.Error())
 					continue
 				}
 			}
@@ -320,7 +322,7 @@ func genICMPPacket(src net.IP, dst net.IP) ([]byte, error) {
 	}
 	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize icmp packet, err: %v", err)
+		return nil, errors.Errorf("failed to serialize icmp packet, err: %v", err)
 	}
 	return buf.Bytes(), nil
 }
@@ -342,7 +344,7 @@ func genICMPPacketIPv6(src net.IP, dst net.IP) ([]byte, error) {
 	}
 	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize icmp6 packet, err: %v", err)
+		return nil, errors.Errorf("failed to serialize icmp6 packet, err: %v", err)
 	}
 	return buf.Bytes(), nil
 }
@@ -358,7 +360,7 @@ func (d *Device) Start(ctx context.Context) {
 
 	select {
 	case err := <-d.chExit:
-		log.Errorf("device exit: %s", err.Error())
+		errors.LogErrorf("device exit: %s", err.Error())
 		return
 	case <-ctx.Done():
 		return
@@ -487,7 +489,7 @@ func (p *Peer) readFromTCPConn() {
 			u.src = b[8:24]
 			u.dst = b[24:40]
 		} else {
-			log.Errorf("[tun-conn] unknown packet")
+			errors.LogErrorf("[tun-conn] unknown packet")
 			continue
 		}
 		log.Debugf("[tcpserver] udp-tun %s >>> %s length: %d", u.src, u.dst, u.length)
@@ -508,7 +510,7 @@ func (p *Peer) parseHeader() {
 			e.src = b[:e.length][8:24]
 			e.dst = b[:e.length][24:40]
 		} else {
-			log.Errorf("[tun] unknown packet")
+			errors.LogErrorf("[tun] unknown packet")
 			continue
 		}
 
@@ -579,7 +581,7 @@ func (p *Peer) routeTUN() {
 			}
 		} else {
 			config.LPool.Put(e.data[:])
-			log.Debug(fmt.Errorf("[tun] no route for %s -> %s", e.src, e.dst))
+			log.Debug(errors.Errorf("[tun] no route for %s -> %s", e.src, e.dst))
 		}
 	}
 }

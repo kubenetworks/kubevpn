@@ -5,21 +5,24 @@ import (
 	"context"
 
 	"github.com/miekg/dns"
-	"github.com/pkg/errors"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	v12 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) (*dns.ClientConfig, error) {
 	resolvConfStr, err := Shell(clientset, restclient, config, podName, "", namespace, []string{"cat", "/etc/resolv.conf"})
 	if err != nil {
+		err = errors.Wrap(err, "Shell(clientset, restclient, config, podName, \"\", namespace, []string{\"cat\", \"/etc/resolv.conf\"}): ")
 		return nil, err
 	}
 	resolvConf, err := dns.ClientConfigFromReader(bytes.NewBufferString(resolvConfStr))
 	if err != nil {
+		err = errors.Wrap(err, "dns.ClientConfigFromReader(bytes.NewBufferString(resolvConfStr)): ")
 		return nil, err
 	}
 	if ips, err := GetDNSIPFromDnsPod(clientset); err == nil && len(ips) != 0 {

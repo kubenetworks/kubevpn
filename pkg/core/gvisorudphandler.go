@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"time"
 
@@ -10,6 +9,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 type gvisorUDPOverTCPTunnelConnector struct {
@@ -27,14 +27,17 @@ func (c *gvisorUDPOverTCPTunnelConnector) ConnectContext(ctx context.Context, co
 	case *net.TCPConn:
 		err := con.SetNoDelay(true)
 		if err != nil {
+			err = errors.Wrap(err, "con.SetNoDelay(true): ")
 			return nil, err
 		}
 		err = con.SetKeepAlive(true)
 		if err != nil {
+			err = errors.Wrap(err, "con.SetKeepAlive(true): ")
 			return nil, err
 		}
 		err = con.SetKeepAlivePeriod(15 * time.Second)
 		if err != nil {
+			err = errors.Wrap(err, "con.SetKeepAlivePeriod(15 * time.Second): ")
 			return nil, err
 		}
 	}
@@ -91,6 +94,7 @@ func (c *gvisorFakeUDPTunnelConn) Read(b []byte) (int, error) {
 	default:
 		dgram, err := readDatagramPacket(c.Conn, b)
 		if err != nil {
+			err = errors.Wrap(err, "readDatagramPacket(c.Conn, b): ")
 			return 0, err
 		}
 		return int(dgram.DataLength), nil
@@ -119,10 +123,12 @@ func GvisorUDPListener(addr string) (net.Listener, error) {
 	log.Debug("gvisor UDP over TCP listen addr", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
+		err = errors.Wrap(err, "net.ResolveTCPAddr(\"tcp\", addr): ")
 		return nil, err
 	}
 	ln, err := net.ListenTCP("tcp", laddr)
 	if err != nil {
+		err = errors.Wrap(err, "net.ListenTCP(\"tcp\", laddr): ")
 		return nil, err
 	}
 	return &tcpKeepAliveListener{ln}, nil
@@ -151,7 +157,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 			}
 			if dgram.DataLength == 0 {
 				log.Debugf("[TUN-UDP] Error: length is zero")
-				errChan <- fmt.Errorf("length of read packet is zero")
+				errChan <- errors.Errorf("length of read packet is zero")
 				return
 			}
 
@@ -183,7 +189,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 			}
 			if n == 0 {
 				log.Debugf("[TUN-UDP] Error: length is zero")
-				errChan <- fmt.Errorf("length of read packet is zero")
+				errChan <- errors.Errorf("length of read packet is zero")
 				return
 			}
 

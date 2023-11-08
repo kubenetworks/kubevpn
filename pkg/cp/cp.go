@@ -3,20 +3,20 @@ package cp
 import (
 	"archive/tar"
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/cmd/exec"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 // CopyOptions have the data required to perform the copy operation
@@ -42,16 +42,12 @@ func NewCopyOptions(ioStreams genericclioptions.IOStreams) *CopyOptions {
 	}
 }
 
-var (
-	errFileSpecDoesntMatchFormat = errors.New("filespec must match the canonical format: [[namespace/]pod:]file/path")
-)
-
 func extractFileSpec(arg string) (fileSpec, error) {
 	i := strings.Index(arg, ":")
 
 	// filespec starting with a semicolon is invalid
 	if i == 0 {
-		return fileSpec{}, errFileSpecDoesntMatchFormat
+		return fileSpec{}, errors.New("filespec must match the canonical format: [[namespace/]pod:]file/path")
 	}
 
 	// C:\Users\ADMINI~1\AppData\Local\Temp\849198392506502457
@@ -77,7 +73,7 @@ func extractFileSpec(arg string) (fileSpec, error) {
 			File:         newRemotePath(file),
 		}, nil
 	default:
-		return fileSpec{}, errFileSpecDoesntMatchFormat
+		return fileSpec{}, errors.New("filespec must match the canonical format: [[namespace/]pod:]file/path")
 	}
 }
 
@@ -90,16 +86,19 @@ func (o *CopyOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []str
 	var err error
 	o.Namespace, _, err = f.ToRawKubeConfigLoader().Namespace()
 	if err != nil {
+		err = errors.Wrap(err, "f.ToRawKubeConfigLoader().Namespace(): ")
 		return err
 	}
 
 	o.Clientset, err = f.KubernetesClientSet()
 	if err != nil {
+		err = errors.Wrap(err, "f.KubernetesClientSet(): ")
 		return err
 	}
 
 	o.ClientConfig, err = f.ToRESTConfig()
 	if err != nil {
+		err = errors.Wrap(err, "f.ToRESTConfig(): ")
 		return err
 	}
 
@@ -110,7 +109,7 @@ func (o *CopyOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []str
 // Validate makes sure provided values for CopyOptions are valid
 func (o *CopyOptions) Validate() error {
 	if len(o.args) != 2 {
-		return fmt.Errorf("source and destination are required")
+		return errors.Errorf("source and destination are required")
 	}
 	return nil
 }
@@ -119,15 +118,17 @@ func (o *CopyOptions) Validate() error {
 func (o *CopyOptions) Run() error {
 	srcSpec, err := extractFileSpec(o.args[0])
 	if err != nil {
+		err = errors.Wrap(err, "extractFileSpec(o.args[0]): ")
 		return err
 	}
 	destSpec, err := extractFileSpec(o.args[1])
 	if err != nil {
+		err = errors.Wrap(err, "extractFileSpec(o.args[1]): ")
 		return err
 	}
 
 	if len(srcSpec.PodName) != 0 && len(destSpec.PodName) != 0 {
-		return fmt.Errorf("one of src or dest must be a local file specification")
+		return errors.Errorf("one of src or dest must be a local file specification")
 	}
 	if len(srcSpec.File.String()) == 0 || len(destSpec.File.String()) == 0 {
 		return errors.New("filepath can not be empty")
@@ -139,7 +140,7 @@ func (o *CopyOptions) Run() error {
 	if len(destSpec.PodName) != 0 {
 		return o.copyToPod(srcSpec, destSpec, &exec.ExecOptions{})
 	}
-	return fmt.Errorf("one of src or dest must be a remote file specification")
+	return errors.Errorf("one of src or dest must be a remote file specification")
 }
 
 // checkDestinationIsDir receives a destination fileSpec and
@@ -167,7 +168,7 @@ func (o *CopyOptions) checkDestinationIsDir(dest fileSpec) error {
 
 func (o *CopyOptions) copyToPod(src, dest fileSpec, options *exec.ExecOptions) error {
 	if _, err := os.Stat(src.File.String()); err != nil {
-		return fmt.Errorf("%s doesn't exist in local filesystem", src.File)
+		return errors.Errorf("%s doesn't exist in local filesystem", src.File)
 	}
 	reader, writer := io.Pipe()
 
@@ -183,7 +184,7 @@ func (o *CopyOptions) copyToPod(src, dest fileSpec, options *exec.ExecOptions) e
 	go func(src localPath, dest remotePath, writer io.WriteCloser) {
 		defer writer.Close()
 		if err := makeTar(src, dest, writer); err != nil {
-			log.Errorf("Error making tar: %v", err)
+			errors.LogErrorf("Error making tar: %v", err)
 		}
 	}(srcFile, destFile, writer)
 	var cmdArr []string
@@ -266,7 +267,7 @@ func (t *TarPipe) initReadFrom(n uint64) {
 	go func() {
 		defer t.outStream.Close()
 		if err := t.o.execute(options); err != nil {
-			log.Errorf("Error executing command: %v", err)
+			errors.LogErrorf("Error executing command: %v", err)
 		}
 	}()
 }
@@ -301,16 +302,19 @@ func makeTar(src localPath, dest remotePath, writer io.Writer) error {
 func recursiveTar(srcDir, srcFile localPath, destDir, destFile remotePath, tw *tar.Writer) error {
 	matchedPaths, err := srcDir.Join(srcFile).Glob()
 	if err != nil {
+		err = errors.Wrap(err, "srcDir.Join(srcFile).Glob(): ")
 		return err
 	}
 	for _, fpath := range matchedPaths {
 		stat, err := os.Lstat(fpath)
 		if err != nil {
+			err = errors.Wrap(err, "os.Lstat(fpath): ")
 			return err
 		}
 		if stat.IsDir() {
 			files, err := os.ReadDir(fpath)
 			if err != nil {
+				err = errors.Wrap(err, "os.ReadDir(fpath): ")
 				return err
 			}
 			if len(files) == 0 {
@@ -333,6 +337,7 @@ func recursiveTar(srcDir, srcFile localPath, destDir, destFile remotePath, tw *t
 			hdr, _ := tar.FileInfoHeader(stat, fpath)
 			target, err := os.Readlink(fpath)
 			if err != nil {
+				err = errors.Wrap(err, "os.Readlink(fpath): ")
 				return err
 			}
 
@@ -345,6 +350,7 @@ func recursiveTar(srcDir, srcFile localPath, destDir, destFile remotePath, tw *t
 			//case regular file or other file type like pipe
 			hdr, err := tar.FileInfoHeader(stat, fpath)
 			if err != nil {
+				err = errors.Wrap(err, "tar.FileInfoHeader(stat, fpath): ")
 				return err
 			}
 			hdr.Name = destFile.String()
@@ -355,6 +361,7 @@ func recursiveTar(srcDir, srcFile localPath, destDir, destFile remotePath, tw *t
 
 			f, err := os.Open(fpath)
 			if err != nil {
+				err = errors.Wrap(err, "os.Open(fpath): ")
 				return err
 			}
 			defer f.Close()
@@ -390,7 +397,7 @@ func (o *CopyOptions) untarAll(prefix string, dest localPath, reader io.Reader) 
 		// For the case where prefix is empty we need to ensure that the path
 		// is not absolute, which also indicates the tar file was tempered with.
 		if !strings.HasPrefix(header.Name, prefix) {
-			return fmt.Errorf("tar contents corrupted")
+			return errors.Errorf("tar contents corrupted")
 		}
 
 		// header.Name is a name of the REMOTE file, so we need to create
@@ -415,6 +422,7 @@ func (o *CopyOptions) untarAll(prefix string, dest localPath, reader io.Reader) 
 
 		outFile, err := os.Create(destFileName.String())
 		if err != nil {
+			err = errors.Wrap(err, "os.Create(destFileName.String()): ")
 			return err
 		}
 		defer outFile.Close()
@@ -435,6 +443,7 @@ func (o *CopyOptions) untarAll(prefix string, dest localPath, reader io.Reader) 
 	for _, f := range linkList {
 		err := copyFromLink(linkList, f, genDstFilename)
 		if err != nil {
+			err = errors.Wrap(err, "copyFromLink(linkList, f, genDstFilename): ")
 			return err
 		}
 	}

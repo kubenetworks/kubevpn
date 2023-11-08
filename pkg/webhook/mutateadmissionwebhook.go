@@ -16,6 +16,7 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 // admissionReviewHandler is a handler to handle business logic, holding an util.Factory
@@ -64,7 +65,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	// verify the content type is accurate
 	contentType := r.Header.Get("Content-Type")
 	if contentType != "application/json" {
-		log.Errorf("contentType=%s, expect application/json", contentType)
+		errors.LogErrorf("contentType=%s, expect application/json", contentType)
 		return
 	}
 
@@ -84,7 +85,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	case v1beta1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*v1beta1.AdmissionReview)
 		if !ok {
-			log.Errorf("Expected v1beta1.AdmissionReview but got: %T", obj)
+			errors.LogErrorf("Expected v1beta1.AdmissionReview but got: %T", obj)
 			return
 		}
 		responseAdmissionReview := &v1beta1.AdmissionReview{}
@@ -95,7 +96,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	case v1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*v1.AdmissionReview)
 		if !ok {
-			log.Errorf("Expected v1.AdmissionReview but got: %T", obj)
+			errors.LogErrorf("Expected v1.AdmissionReview but got: %T", obj)
 			return
 		}
 		responseAdmissionReview := &v1.AdmissionReview{}
@@ -113,19 +114,20 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	log.Infof("sending response: %v", responseObj)
 	respBytes, err := json.Marshal(responseObj)
 	if err != nil {
-		log.Errorf("Unable to encode response: %v", err)
+		errors.LogErrorf("Unable to encode response: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write(respBytes); err != nil {
-		log.Errorf("Unable to write response: %v", err)
+		errors.LogErrorf("Unable to write response: %v", err)
 	}
 }
 
 func Main(f cmdutil.Factory) error {
 	clientset, err := f.KubernetesClientSet()
 	if err != nil {
+		err = errors.Wrap(err, "f.KubernetesClientSet(): ")
 		return err
 	}
 	h := &admissionReviewHandler{f: f, clientset: clientset}
@@ -140,6 +142,7 @@ func Main(f cmdutil.Factory) error {
 	var pairs []tls.Certificate
 	pairs, err = getSSLKeyPairs()
 	if err != nil {
+		err = errors.Wrap(err, "getSSLKeyPairs(): ")
 		return err
 	}
 	server := &http.Server{Addr: fmt.Sprintf(":%d", 80), TLSConfig: &tls.Config{Certificates: pairs}}
@@ -149,16 +152,16 @@ func Main(f cmdutil.Factory) error {
 func getSSLKeyPairs() ([]tls.Certificate, error) {
 	cert, ok := os.LookupEnv(config.TLSCertKey)
 	if !ok {
-		return nil, fmt.Errorf("can not get %s from env", config.TLSCertKey)
+		return nil, errors.Errorf("can not get %s from env", config.TLSCertKey)
 	}
 	var key string
 	key, ok = os.LookupEnv(config.TLSPrivateKeyKey)
 	if !ok {
-		return nil, fmt.Errorf("can not get %s from env", config.TLSPrivateKeyKey)
+		return nil, errors.Errorf("can not get %s from env", config.TLSPrivateKeyKey)
 	}
 	pair, err := tls.X509KeyPair([]byte(cert), []byte(key))
 	if err != nil {
-		return nil, fmt.Errorf("failed to load certificate and key ,err: %v", err)
+		return nil, errors.Errorf("failed to load certificate and key ,err: %v", err)
 	}
 	return []tls.Certificate{pair}, nil
 }

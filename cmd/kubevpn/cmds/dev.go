@@ -6,7 +6,6 @@ import (
 
 	"github.com/docker/cli/cli/command"
 	dockercomp "github.com/docker/cli/cli/command/completion"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/completion"
@@ -16,6 +15,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/pkg/dev"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -87,16 +87,18 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 			}
 			err = cmd.Flags().Parse(args[1:])
 			if err != nil {
+				err = errors.Wrap(err, "cmd.Flags().Parse(args[1:]): ")
 				return err
 			}
 			util.InitLogger(false)
 			// not support temporally
 			if devOptions.Engine == config.EngineGvisor {
-				return fmt.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
+				return errors.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
 			}
 
 			err = daemon.StartupDaemon(cmd.Context())
 			if err != nil {
+				err = errors.Wrap(err, "daemon.StartupDaemon(cmd.Context()): ")
 				return err
 			}
 			return handler.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false)
@@ -114,7 +116,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 			for _, fun := range devOptions.GetRollbackFuncList() {
 				if fun != nil {
 					if err = fun(); err != nil {
-						log.Errorf("roll back failed, error: %s", err.Error())
+						errors.LogErrorf("roll back failed, error: %s", err.Error())
 					}
 				}
 			}

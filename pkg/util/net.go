@@ -1,26 +1,28 @@
 package util
 
 import (
-	"fmt"
 	"net"
 	"strings"
 	"time"
 
 	"github.com/cilium/ipam/service/allocator"
 	"github.com/cilium/ipam/service/ipallocator"
-	"github.com/prometheus-community/pro-bing"
+	probing "github.com/prometheus-community/pro-bing"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func GetTunDevice(ips ...net.IP) (*net.Interface, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
+		err = errors.Wrap(err, "net.Interfaces(): ")
 		return nil, err
 	}
 	for _, i := range interfaces {
 		addrs, err := i.Addrs()
 		if err != nil {
+			err = errors.Wrap(err, "i.Addrs(): ")
 			return nil, err
 		}
 		for _, addr := range addrs {
@@ -31,12 +33,13 @@ func GetTunDevice(ips ...net.IP) (*net.Interface, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("can not found any interface with ip %v", ips)
+	return nil, errors.Errorf("can not found any interface with ip %v", ips)
 }
 
 func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
+		err = errors.Wrap(err, "net.Interfaces(): ")
 		return nil, err
 	}
 	var ip string
@@ -48,6 +51,7 @@ func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 	for _, i := range interfaces {
 		addrs, err := i.Addrs()
 		if err != nil {
+			err = errors.Wrap(err, "i.Addrs(): ")
 			return nil, err
 		}
 		for _, addr := range addrs {
@@ -56,12 +60,13 @@ func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("can not found any interface with ip %v", ip)
+	return nil, errors.Errorf("can not found any interface with ip %v", ip)
 }
 
 func Ping(targetIP string) (bool, error) {
 	pinger, err := probing.NewPinger(targetIP)
 	if err != nil {
+		err = errors.Wrap(err, "probing.NewPinger(targetIP): ")
 		return false, err
 	}
 	pinger.SetLogger(nil)
@@ -70,6 +75,7 @@ func Ping(targetIP string) (bool, error) {
 	pinger.Timeout = time.Millisecond * 1500
 	err = pinger.Run() // Blocks until finished.
 	if err != nil {
+		err = errors.Wrap(err, "pinger.Run() // Blocks until finished.: ")
 		return false, err
 	}
 	stat := pinger.Statistics()

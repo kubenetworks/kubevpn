@@ -18,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,15 +36,18 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/driver"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func GetAvailableUDPPortOrDie() (int, error) {
 	address, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:0", "localhost"))
 	if err != nil {
+		err = errors.Wrap(err, "net.ResolveUDPAddr(\"udp\", fmt.Sprintf(\"%s:0\", \"localhost\")): ")
 		return 0, err
 	}
 	listener, err := net.ListenUDP("udp", address)
 	if err != nil {
+		err = errors.Wrap(err, "net.ListenUDP(\"udp\", address): ")
 		return 0, err
 	}
 	defer listener.Close()
@@ -55,10 +57,12 @@ func GetAvailableUDPPortOrDie() (int, error) {
 func GetAvailableTCPPortOrDie() (int, error) {
 	address, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", "localhost"))
 	if err != nil {
+		err = errors.Wrap(err, "net.ResolveTCPAddr(\"tcp\", fmt.Sprintf(\"%s:0\", \"localhost\")): ")
 		return 0, err
 	}
 	listener, err := net.ListenTCP("tcp", address)
 	if err != nil {
+		err = errors.Wrap(err, "net.ListenTCP(\"tcp\", address): ")
 		return 0, err
 	}
 	defer listener.Close()
@@ -82,7 +86,7 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, wor
 	log.Infof("rollout status for %s", workloads)
 	defer func() {
 		if err != nil {
-			log.Errorf("rollout status for %s failed: %s", workloads, err.Error())
+			errors.LogErrorf("rollout status for %s failed: %s", workloads, err.Error())
 		} else {
 			log.Infof("rollout status for %s successfully", workloads)
 		}
@@ -97,21 +101,24 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, wor
 		Do()
 	err = r.Err()
 	if err != nil {
+		err = errors.Wrap(err, "r.Err(): ")
 		return err
 	}
 
 	infos, err := r.Infos()
 	if err != nil {
+		err = errors.Wrap(err, "r.Infos(): ")
 		return err
 	}
 	if len(infos) != 1 {
-		return fmt.Errorf("rollout status is only supported on individual resources and resource collections - %d resources were found", len(infos))
+		return errors.Errorf("rollout status is only supported on individual resources and resource collections - %d resources were found", len(infos))
 	}
 	info := infos[0]
 	mapping := info.ResourceMapping()
 
 	statusViewer, err := polymorphichelpers.StatusViewerFn(mapping)
 	if err != nil {
+		err = errors.Wrap(err, "polymorphichelpers.StatusViewerFn(mapping): ")
 		return err
 	}
 
@@ -136,6 +143,7 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, wor
 			case watch.Added, watch.Modified:
 				status, done, err := statusViewer.Status(e.Object.(k8sruntime.Unstructured), 0)
 				if err != nil {
+					err = errors.Wrap(err, "statusViewer.Status(e.Object.(k8sruntime.Unstructured), 0): ")
 					return false, err
 				}
 				log.Info(strings.TrimSpace(status))
@@ -148,10 +156,10 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, wor
 
 			case watch.Deleted:
 				// We need to abort to avoid cases of recreation and not to silently watch the wrong (new) object
-				return true, fmt.Errorf("object has been deleted")
+				return true, errors.Errorf("object has been deleted")
 
 			default:
-				return true, fmt.Errorf("internal error: unexpected event %#v", e)
+				return true, errors.Errorf("internal error: unexpected event %#v", e)
 			}
 		})
 		return err
@@ -210,7 +218,7 @@ func WaitPortToBeFree(ctx context.Context, port int) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("wait port %v to be free timeout", port)
+			return errors.Errorf("wait port %v to be free timeout", port)
 		case <-time.Tick(time.Second * 2):
 			if !IsPortListening(port) {
 				log.Infoln(fmt.Sprintf("port %v are free", port))
@@ -234,6 +242,7 @@ func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.Polic
 	var roleBindingList *rbacv1.RoleBindingList
 	roleBindingList, err = clientset.RbacV1().RoleBindings(ns).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
+		err = errors.Wrap(err, "clientset.RbacV1().RoleBindings(ns).List(context.Background(), metav1.ListOptions{}): ")
 		return false, err
 	}
 	for _, item := range roleBindingList.Items {
@@ -242,6 +251,7 @@ func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.Polic
 				var role *rbacv1.Role
 				role, err = clientset.RbacV1().Roles(ns).Get(context.Background(), item.RoleRef.Name, metav1.GetOptions{})
 				if err != nil {
+					err = errors.Wrap(err, "clientset.RbacV1().Roles(ns).Get(context.Background(), item.RoleRef.Name, metav1.GetOptions{}): ")
 					return false, err
 				}
 				for _, rule := range role.Rules {
@@ -263,6 +273,7 @@ func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.Polic
 				var role *rbacv1.ClusterRole
 				role, err = clientset.RbacV1().ClusterRoles().Get(context.Background(), item.RoleRef.Name, metav1.GetOptions{})
 				if err != nil {
+					err = errors.Wrap(err, "clientset.RbacV1().ClusterRoles().Get(context.Background(), item.RoleRef.Name, metav1.GetOptions{}): ")
 					return false, err
 				}
 				for _, rule := range role.Rules {
@@ -282,7 +293,7 @@ func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.Polic
 func DoReq(request *http.Request) (body []byte, err error) {
 	cert, ok := os.LookupEnv(config.TLSCertKey)
 	if !ok {
-		return nil, fmt.Errorf("can not get %s from env", config.TLSCertKey)
+		return nil, errors.Errorf("can not get %s from env", config.TLSCertKey)
 	}
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM([]byte(cert))
@@ -298,17 +309,17 @@ func DoReq(request *http.Request) (body []byte, err error) {
 	var resp *http.Response
 	resp, err = client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("err: %v", err)
+		return nil, errors.Errorf("err: %v", err)
 	}
 	defer resp.Body.Close()
 	body, err = io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("can not read body, err: %v", err)
+		return nil, errors.Errorf("can not read body, err: %v", err)
 	}
 	if resp.StatusCode == http.StatusOK {
 		return body, nil
 	}
-	return body, fmt.Errorf("http status is %d", resp.StatusCode)
+	return body, errors.Errorf("http status is %d", resp.StatusCode)
 }
 
 func GetTlsDomain(namespace string) string {
@@ -332,6 +343,7 @@ func CleanExtensionLib() {
 	}
 	path, err := os.Executable()
 	if err != nil {
+		err = errors.Wrap(err, "os.Executable(): ")
 		return
 	}
 	filename := filepath.Join(filepath.Dir(path), "wintun.dll")
@@ -343,7 +355,7 @@ func CleanExtensionLib() {
 		},
 		func() error {
 			err = driver.UninstallWireGuardTunDriver()
-			return fmt.Errorf("%v", err)
+			return errors.Errorf("%v", err)
 		},
 	)
 	_, err = os.Lstat(filename)
@@ -378,6 +390,7 @@ func StartupPProf(port int) {
 func MoveToTemp() {
 	path, err := os.Executable()
 	if err != nil {
+		err = errors.Wrap(err, "os.Executable(): ")
 		return
 	}
 	filename := filepath.Join(filepath.Dir(path), "wintun.dll")

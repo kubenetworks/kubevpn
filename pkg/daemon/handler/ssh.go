@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/core"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -45,32 +45,36 @@ func (w *wsHandler) handle(ctx context.Context) {
 
 	err := w.remoteInstallKubevpnIfCommandNotFound(ctx, sshConfig)
 	if err != nil {
+		err = errors.Wrap(err, "remoteInstallKubevpnIfCommandNotFound(ctx, sshConfig): ")
 		w.Log("Install kubevpn error: %v", err)
 		return
 	}
 
 	clientIP, err := util.GetIPBaseNic()
 	if err != nil {
+		err = errors.Wrap(err, "util.GetIPBaseNic(): ")
 		w.Log("Get client ip error: %v", err)
 		return
 	}
 
 	local, err := w.portMap(cancel, sshConfig)
 	if err != nil {
+		err = errors.Wrap(err, "portMap(cancel, sshConfig): ")
 		w.Log("Port map error: %v", err)
 		return
 	}
 	cmd := fmt.Sprintf(`export %s=%s && kubevpn ssh-daemon --client-ip %s`, config.EnvStartSudoKubeVPNByKubeVPN, "true", clientIP.String())
 	serverIP, stderr, err := util.RemoteRun(sshConfig, cmd, nil)
 	if err != nil {
-		log.Errorf("run error: %v", err)
-		log.Errorf("run stdout: %v", string(serverIP))
-		log.Errorf("run stderr: %v", string(stderr))
+		errors.LogErrorf("run error: %v", err)
+		errors.LogErrorf("run stdout: %v", string(serverIP))
+		errors.LogErrorf("run stderr: %v", string(stderr))
 		w.Log("Start kubevpn server error: %v", err)
 		return
 	}
 	ip, _, err := net.ParseCIDR(string(serverIP))
 	if err != nil {
+		err = errors.Wrap(err, "net.ParseCIDR(string(serverIP)): ")
 		w.Log("Parse server ip error: %v", err)
 		return
 	}
@@ -86,7 +90,7 @@ func (w *wsHandler) handle(ctx context.Context) {
 	}
 	servers, err := handler.Parse(r)
 	if err != nil {
-		log.Errorf("parse route error: %v", err)
+		errors.LogErrorf("parse route error: %v", err)
 		w.Log("Parse route error: %v", err)
 		return
 	}
@@ -95,6 +99,7 @@ func (w *wsHandler) handle(ctx context.Context) {
 	}()
 	tun, err := util.GetTunDevice(clientIP.IP)
 	if err != nil {
+		err = errors.Wrap(err, "util.GetTunDevice(clientIP.IP): ")
 		w.Log("Get tun device error: %v", err)
 		return
 	}
@@ -120,16 +125,19 @@ func (w *wsHandler) portMap(ctx context.Context, conf *util.SshConfig) (localPor
 	removePort := 10800
 	localPort, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
+		err = errors.Wrap(err, "util.GetAvailableTCPPortOrDie(): ")
 		return
 	}
 	var remote netip.AddrPort
 	remote, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(removePort)))
 	if err != nil {
+		err = errors.Wrap(err, "netip.ParseAddrPort(net.JoinHostPort(\"127.0.0.1\", strconv.Itoa(removePort))): ")
 		return
 	}
 	var local netip.AddrPort
 	local, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort)))
 	if err != nil {
+		err = errors.Wrap(err, "netip.ParseAddrPort(net.JoinHostPort(\"127.0.0.1\", strconv.Itoa(localPort))): ")
 		return
 	}
 
@@ -137,6 +145,7 @@ func (w *wsHandler) portMap(ctx context.Context, conf *util.SshConfig) (localPor
 	var cli *ssh.Client
 	cli, err = util.DialSshRemote(conf)
 	if err != nil {
+		err = errors.Wrap(err, "util.DialSshRemote(conf): ")
 		return
 	} else {
 		_ = cli.Close()
@@ -154,7 +163,7 @@ func (w *wsHandler) portMap(ctx context.Context, conf *util.SshConfig) (localPor
 			err := util.Main(ctx, remote, local, conf, readyChan)
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
-					log.Errorf("ssh forward failed err: %v", err)
+					errors.LogErrorf("ssh forward failed err: %v", err)
 					w.Log("Ssh forward failed err: %v", err)
 				}
 				select {
@@ -168,8 +177,8 @@ func (w *wsHandler) portMap(ctx context.Context, conf *util.SshConfig) (localPor
 	case <-readyChan:
 		return
 	case err = <-errChan:
+		errors.LogErrorf("ssh proxy err: %v", err)
 		w.Log("Ssh forward failed err: %v", err)
-		log.Errorf("ssh proxy err: %v", err)
 		return
 	}
 }
@@ -177,11 +186,13 @@ func (w *wsHandler) portMap(ctx context.Context, conf *util.SshConfig) (localPor
 func (w *wsHandler) enterTerminal(conf *util.SshConfig, conn *websocket.Conn) error {
 	cli, err := util.DialSshRemote(conf)
 	if err != nil {
+		err = errors.Wrap(err, "util.DialSshRemote(conf): ")
 		w.Log("Dial remote error: %v", err)
 		return err
 	}
 	session, err := cli.NewSession()
 	if err != nil {
+		err = errors.Wrap(err, "cli.NewSession(): ")
 		return err
 	}
 	defer session.Close()
@@ -192,14 +203,14 @@ func (w *wsHandler) enterTerminal(conf *util.SshConfig, conn *websocket.Conn) er
 	fd := int(os.Stdin.Fd())
 	state, err := terminal.MakeRaw(fd)
 	if err != nil {
-		return fmt.Errorf("terminal make raw: %s", err)
+		return errors.Errorf("terminal make raw: %s", err)
 	}
 	defer terminal.Restore(fd, state)
 
 	width, height, err := terminal.GetSize(fd)
 	if err != nil {
 		w.Log("Terminal get size: %s", err)
-		return fmt.Errorf("terminal get size: %s", err)
+		return errors.Errorf("terminal get size: %s", err)
 	}
 	modes := ssh.TerminalModes{
 		ssh.ECHO:          1,
@@ -231,6 +242,7 @@ func (w *wsHandler) remoteInstallKubevpnIfCommandNotFound(ctx context.Context, s
 	}
 	latestVersion, latestCommit, url, err := util.GetManifest(client, "linux", "amd64")
 	if err != nil {
+		err = errors.Wrap(err, "util.GetManifest(client, \"linux\", \"amd64\"): ")
 		w.Log("Get latest kubevpn version failed: %v", err)
 		return err
 	}
@@ -238,37 +250,45 @@ func (w *wsHandler) remoteInstallKubevpnIfCommandNotFound(ctx context.Context, s
 	var temp *os.File
 	temp, err = os.CreateTemp("", "")
 	if err != nil {
+		err = errors.Wrap(err, "os.CreateTemp(\"\", \"\"): ")
 		return err
 	}
 	err = temp.Close()
 	if err != nil {
+		err = errors.Wrap(err, "temp.Close(): ")
 		return err
 	}
 	w.Log("Downloading kubevpn...")
 	err = util.Download(client, url, temp.Name(), w.conn, w.conn)
 	if err != nil {
+		err = errors.Wrap(err, "util.Download(client, url, temp.Name()): ")
 		return err
 	}
 	var tempBin *os.File
 	tempBin, err = os.CreateTemp("", "kubevpn")
 	if err != nil {
+		err = errors.Wrap(err, "os.CreateTemp(\"\", \"kubevpn\"): ")
 		return err
 	}
 	err = tempBin.Close()
 	if err != nil {
+		err = errors.Wrap(err, "tempBin.Close(): ")
 		return err
 	}
 	err = util.UnzipKubeVPNIntoFile(temp.Name(), tempBin.Name())
 	if err != nil {
+		err = errors.Wrap(err, "util.UnzipKubeVPNIntoFile(temp.Name(), tempBin.Name()): ")
 		return err
 	}
 	// scp kubevpn to remote ssh server and run daemon
 	err = os.Chmod(tempBin.Name(), 0755)
 	if err != nil {
+		err = errors.Wrap(err, "os.Chmod(tempBin.Name(), 0755): ")
 		return err
 	}
 	err = os.Remove(temp.Name())
 	if err != nil {
+		err = errors.Wrap(err, "os.Remove(temp.Name()): ")
 		return err
 	}
 	log.Infof("Upgrade daemon...")
@@ -279,6 +299,7 @@ func (w *wsHandler) remoteInstallKubevpnIfCommandNotFound(ctx context.Context, s
 	}
 	err = util.SCP(w.conn, w.conn, sshConfig, tempBin.Name(), "kubevpn", cmds...)
 	if err != nil {
+		err = errors.Wrap(err, "util.SCP(sshConfig, tempBin.Name(), \"/usr/local/bin/kubevpn\"): ")
 		return err
 	}
 	// try to startup daemon process

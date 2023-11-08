@@ -2,15 +2,16 @@ package core
 
 import (
 	"context"
-	"errors"
 	"math"
 	"net"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
-var (
-	// ErrorEmptyChain is an error that implies the chain is empty.
-	ErrorEmptyChain = errors.New("empty chain")
-)
+// var (
+// 	// errors.New("empty chain") is an error that implies the chain is empty.
+// 	errors.New("empty chain") = errors.New("empty chain")
+// )
 
 type Chain struct {
 	Retries int
@@ -41,11 +42,12 @@ func (c *Chain) DialContext(ctx context.Context) (conn net.Conn, err error) {
 
 func (c *Chain) dial(ctx context.Context) (net.Conn, error) {
 	if c.IsEmpty() {
-		return nil, ErrorEmptyChain
+		return nil, errors.New("empty chain")
 	}
 
 	conn, err := c.getConn(ctx)
 	if err != nil {
+		err = errors.Wrap(err, "c.getConn(ctx): ")
 		return nil, err
 	}
 
@@ -69,7 +71,7 @@ func (*Chain) resolve(addr string) string {
 
 func (c *Chain) getConn(ctx context.Context) (net.Conn, error) {
 	if c.IsEmpty() {
-		return nil, ErrorEmptyChain
+		return nil, errors.New("empty chain")
 	}
 	return c.Node().Client.Dial(ctx, c.resolve(c.Node().Addr))
 }

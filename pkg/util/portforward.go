@@ -1,7 +1,6 @@
 package util
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,11 +12,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/portforward"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 // PortForwarder knows how to listen for local connections and forward them to
@@ -76,20 +77,20 @@ func parsePorts(ports []string) ([]ForwardedPort, error) {
 			}
 			remoteString = parts[1]
 		} else {
-			return nil, fmt.Errorf("invalid port format '%s'", portString)
+			return nil, errors.Errorf("invalid port format '%s'", portString)
 		}
 
 		localPort, err := strconv.ParseUint(localString, 10, 16)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing local port '%s': %s", localString, err)
+			return nil, errors.Errorf("error parsing local port '%s': %s", localString, err)
 		}
 
 		remotePort, err := strconv.ParseUint(remoteString, 10, 16)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing remote port '%s': %s", remoteString, err)
+			return nil, errors.Errorf("error parsing remote port '%s': %s", remoteString, err)
 		}
 		if remotePort == 0 {
-			return nil, fmt.Errorf("remote port must be > 0")
+			return nil, errors.Errorf("remote port must be > 0")
 		}
 
 		forwards = append(forwards, ForwardedPort{uint16(localPort), uint16(remotePort)})
@@ -122,7 +123,7 @@ func parseAddresses(addressesToParse []string) ([]listenAddress, error) {
 		} else if net.ParseIP(address) != nil {
 			parsed[address] = listenAddress{address: address, protocol: "tcp6", failureMode: "any"}
 		} else {
-			return nil, fmt.Errorf("%s is not a valid IP", address)
+			return nil, errors.Errorf("%s is not a valid IP", address)
 		}
 	}
 	addresses = make([]listenAddress, len(parsed))
@@ -144,6 +145,7 @@ func NewOnAddresses(dialer httpstream.Dialer, addresses []string, ports []string
 	}
 	parsedAddresses, err := parseAddresses(addresses)
 	if err != nil {
+		err = errors.Wrap(err, "parseAddresses(addresses): ")
 		return nil, err
 	}
 	if len(ports) == 0 {
@@ -151,6 +153,7 @@ func NewOnAddresses(dialer httpstream.Dialer, addresses []string, ports []string
 	}
 	parsedPorts, err := parsePorts(ports)
 	if err != nil {
+		err = errors.Wrap(err, "parsePorts(ports): ")
 		return nil, err
 	}
 	return &PortForwarder{
@@ -173,7 +176,7 @@ func (pf *PortForwarder) ForwardPorts() error {
 	var err error
 	pf.streamConn, _, err = pf.dialer.Dial(portforward.PortForwardProtocolV1Name)
 	if err != nil {
-		return fmt.Errorf("error upgrading connection: %s", err)
+		return errors.Errorf("error upgrading connection: %s", err)
 	}
 	defer pf.streamConn.Close()
 
@@ -201,7 +204,7 @@ func (pf *PortForwarder) forward() error {
 	}
 
 	if !listenSuccess {
-		return fmt.Errorf("unable to listen on any of the requested ports: %v", pf.ports)
+		return errors.Errorf("unable to listen on any of the requested ports: %v", pf.ports)
 	}
 
 	if pf.Ready != nil {
@@ -227,23 +230,23 @@ func (pf *PortForwarder) forward() error {
 // listenOnPort delegates listener creation and waits for connections on requested bind addresses.
 // An error is raised based on address groups (default and localhost) and their failure modes
 func (pf *PortForwarder) listenOnPort(port *ForwardedPort) error {
-	var errors []error
+	var localErrors []error
 	failCounters := make(map[string]int, 2)
 	successCounters := make(map[string]int, 2)
 	for _, addr := range pf.addresses {
 		err := pf.listenOnPortAndAddress(port, addr.protocol, addr.address)
 		if err != nil {
-			errors = append(errors, err)
+			localErrors = append(localErrors, err)
 			failCounters[addr.failureMode]++
 		} else {
 			successCounters[addr.failureMode]++
 		}
 	}
 	if successCounters["all"] == 0 && failCounters["all"] > 0 {
-		return fmt.Errorf("%s: %v", "Listeners failed to create with the following errors", errors)
+		return errors.Errorf("%s: %v", "Listeners failed to create with the following errors", localErrors)
 	}
 	if failCounters["any"] > 0 {
-		return fmt.Errorf("%s: %v", "Listeners failed to create with the following errors", errors)
+		return errors.Errorf("%s: %v", "Listeners failed to create with the following errors", localErrors)
 	}
 	return nil
 }
@@ -253,6 +256,7 @@ func (pf *PortForwarder) listenOnPort(port *ForwardedPort) error {
 func (pf *PortForwarder) listenOnPortAndAddress(port *ForwardedPort, protocol string, address string) error {
 	listener, err := pf.getListener(protocol, address, port)
 	if err != nil {
+		err = errors.Wrap(err, "pf.getListener(protocol, address, port): ")
 		return err
 	}
 	pf.listeners = append(pf.listeners, listener)
@@ -265,7 +269,7 @@ func (pf *PortForwarder) listenOnPortAndAddress(port *ForwardedPort, protocol st
 func (pf *PortForwarder) getListener(protocol string, hostname string, port *ForwardedPort) (net.Listener, error) {
 	listener, err := net.Listen(protocol, net.JoinHostPort(hostname, strconv.Itoa(int(port.Local))))
 	if err != nil {
-		return nil, fmt.Errorf("unable to create listener: Error %s", err)
+		return nil, errors.Errorf("unable to create listener: Error %s", err)
 	}
 	listenerAddress := listener.Addr().String()
 	host, localPort, _ := net.SplitHostPort(listenerAddress)
@@ -273,7 +277,7 @@ func (pf *PortForwarder) getListener(protocol string, hostname string, port *For
 
 	if err != nil {
 		fmt.Fprintf(pf.out, "Failed to forward from %s:%d -> %d\n", hostname, localPortUInt, port.Remote)
-		return nil, fmt.Errorf("error parsing local port: %s from %s (%s)", err, listenerAddress, host)
+		return nil, errors.Errorf("error parsing local port: %s from %s (%s)", err, listenerAddress, host)
 	}
 	port.Local = uint16(localPortUInt)
 	if pf.out != nil {
@@ -291,7 +295,7 @@ func (pf *PortForwarder) waitForConnection(listener net.Listener, port Forwarded
 		if err != nil {
 			// TODO consider using something like https://github.com/hydrogen18/stoppableListener?
 			if !strings.Contains(strings.ToLower(err.Error()), "use of closed network connection") {
-				runtime.HandleError(fmt.Errorf("error accepting connection on port %d: %v", port.Local, err))
+				runtime.HandleError(errors.Errorf("error accepting connection on port %d: %v", port.Local, err))
 			}
 			return
 		}
@@ -325,7 +329,7 @@ func (pf *PortForwarder) handleConnection(conn net.Conn, port ForwardedPort) {
 	var err error
 	errorStream, err := pf.streamConn.CreateStream(headers)
 	if err != nil {
-		runtime.HandleError(fmt.Errorf("error creating error stream for port %d -> %d: %v", port.Local, port.Remote, err))
+		runtime.HandleError(errors.Errorf("error creating error stream for port %d -> %d: %v", port.Local, port.Remote, err))
 		return
 	}
 	// we're not writing to this stream
@@ -336,9 +340,9 @@ func (pf *PortForwarder) handleConnection(conn net.Conn, port ForwardedPort) {
 		message, err := io.ReadAll(errorStream)
 		switch {
 		case err != nil:
-			errorChan <- fmt.Errorf("error reading from error stream for port %d -> %d: %v", port.Local, port.Remote, err)
+			errorChan <- errors.Errorf("error reading from error stream for port %d -> %d: %v", port.Local, port.Remote, err)
 		case len(message) > 0:
-			errorChan <- fmt.Errorf("an error occurred forwarding %d -> %d: %v", port.Local, port.Remote, string(message))
+			errorChan <- errors.Errorf("an error occurred forwarding %d -> %d: %v", port.Local, port.Remote, string(message))
 		}
 		close(errorChan)
 	}()
@@ -347,7 +351,7 @@ func (pf *PortForwarder) handleConnection(conn net.Conn, port ForwardedPort) {
 	headers.Set(v1.StreamType, v1.StreamTypeData)
 	dataStream, err := pf.streamConn.CreateStream(headers)
 	if err != nil {
-		runtime.HandleError(fmt.Errorf("error creating forwarding stream for port %d -> %d: %v", port.Local, port.Remote, err))
+		runtime.HandleError(errors.Errorf("error creating forwarding stream for port %d -> %d: %v", port.Local, port.Remote, err))
 		return
 	}
 
@@ -357,7 +361,7 @@ func (pf *PortForwarder) handleConnection(conn net.Conn, port ForwardedPort) {
 	go func() {
 		// Copy from the remote side to the local port.
 		if _, err := io.Copy(conn, dataStream); err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
-			runtime.HandleError(fmt.Errorf("error copying from remote stream to local connection: %v", err))
+			runtime.HandleError(errors.Errorf("error copying from remote stream to local connection: %v", err))
 		}
 
 		// inform the select below that the remote copy is done
@@ -370,7 +374,7 @@ func (pf *PortForwarder) handleConnection(conn net.Conn, port ForwardedPort) {
 
 		// Copy from the local port to the remote side.
 		if _, err := io.Copy(dataStream, conn); err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
-			runtime.HandleError(fmt.Errorf("error copying from local connection to remote stream: %v", err))
+			runtime.HandleError(errors.Errorf("error copying from local connection to remote stream: %v", err))
 			// break out of the select below without waiting for the other copy to finish
 			close(localError)
 		}
@@ -406,7 +410,7 @@ func (pf *PortForwarder) Close() {
 	// stop all listeners
 	for _, l := range pf.listeners {
 		if err := l.Close(); err != nil {
-			runtime.HandleError(fmt.Errorf("error closing listener: %v", err))
+			runtime.HandleError(errors.Errorf("error closing listener: %v", err))
 		}
 	}
 }
@@ -418,13 +422,13 @@ func (pf *PortForwarder) Close() {
 // channel has been closed.
 func (pf *PortForwarder) GetPorts() ([]ForwardedPort, error) {
 	if pf.Ready == nil {
-		return nil, fmt.Errorf("no Ready channel provided")
+		return nil, errors.Errorf("no Ready channel provided")
 	}
 	select {
 	case <-pf.Ready:
 		return pf.ports, nil
 	default:
-		return nil, fmt.Errorf("listeners not ready")
+		return nil, errors.Errorf("listeners not ready")
 	}
 }
 
@@ -455,13 +459,13 @@ func (pf *PortForwarder) tryToCreateStream(header *http.Header) (httpstream.Stre
 	pf.streamConn, _, err = pf.dialer.Dial(portforward.PortForwardProtocolV1Name)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
-			runtime.HandleError(fmt.Errorf("pod not found: %s", err))
+			runtime.HandleError(errors.Errorf("pod not found: %s", err))
 			select {
 			case pf.errChan <- err:
 			default:
 			}
 		} else {
-			runtime.HandleError(fmt.Errorf("error upgrading connection: %s", err))
+			runtime.HandleError(errors.Errorf("error upgrading connection: %s", err))
 		}
 		return nil, err
 	}

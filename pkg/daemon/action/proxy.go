@@ -1,7 +1,6 @@
 package action
 
 import (
-	"fmt"
 	"io"
 
 	log "github.com/sirupsen/logrus"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -44,6 +44,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
+		err = errors.Wrap(err, "util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes)): ")
 		return err
 	}
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
@@ -54,20 +55,23 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 	var path string
 	path, err = handler.SshJump(ctx, sshConf, flags, false)
 	if err != nil {
+		err = errors.Wrap(err, "handler.SshJump(ctx, sshConf, flags, false): ")
 		return err
 	}
 	err = connect.InitClient(InitFactoryByPath(path, req.Namespace))
 	if err != nil {
+		err = errors.Wrap(err, "connect.InitClient(InitFactoryByPath(path, req.Namespace)): ")
 		return err
 	}
 	err = connect.PreCheckResource()
 	if err != nil {
+		err = errors.Wrap(err, "connect.PreCheckResource(): ")
 		return err
 	}
 
 	daemonClient := svr.GetClient(false)
 	if daemonClient == nil {
-		return fmt.Errorf("daemon is not avaliable")
+		return errors.Errorf("daemon is not avaliable")
 	}
 	if svr.connect != nil {
 		var isSameCluster bool
@@ -93,11 +97,12 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 				if err == io.EOF {
 					break
 				} else if err != nil {
-					log.Errorf("recv from disconnect failed, %v", err)
+					errors.LogErrorf("recv from disconnect failed, %v", err)
 					return err
 				}
 				err = resp.Send(&rpc.ConnectResponse{Message: recv.Message})
 				if err != nil {
+					err = errors.Wrap(err, "resp.Send(&rpc.ConnectResponse{Message: recv.Message}): ")
 					return err
 				}
 			}
@@ -110,6 +115,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		var connResp rpc.Daemon_ConnectClient
 		connResp, err = daemonClient.Connect(ctx, req)
 		if err != nil {
+			err = errors.Wrap(err, "daemonClient.Connect(ctx, req): ")
 			return err
 		}
 		var recv *rpc.ConnectResponse
@@ -122,6 +128,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 			}
 			err = resp.Send(recv)
 			if err != nil {
+				err = errors.Wrap(err, "resp.Send(recv): ")
 				return err
 			}
 		}
@@ -132,7 +139,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 	svr.connect.Headers = req.Headers
 	err = svr.connect.CreateRemoteInboundPod(ctx)
 	if err != nil {
-		log.Errorf("create remote inbound pod failed: %s", err.Error())
+		errors.LogErrorf("create remote inbound pod failed: %s", err.Error())
 		return err
 	}
 	return nil

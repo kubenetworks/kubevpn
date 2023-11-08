@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"errors"
 	"io"
 
 	log "github.com/sirupsen/logrus"
@@ -12,6 +11,7 @@ import (
 	"gvisor.dev/gvisor/pkg/waiter"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 var GvisorUDPForwardAddr string

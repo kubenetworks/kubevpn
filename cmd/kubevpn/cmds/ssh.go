@@ -12,6 +12,7 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -41,6 +42,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			config, err := websocket.NewConfig("ws://test/ws", "http://test")
 			if err != nil {
+				err = errors.Wrap(err, "websocket.NewConfig(\"ws://test/ws\", \"http://test\"): ")
 				return err
 			}
 			config.Header.Set("ssh-addr", sshConf.Addr)
@@ -52,6 +54,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			client := daemon.GetTCPClient(true)
 			conn, err := websocket.NewClient(config, client)
 			if err != nil {
+				err = errors.Wrap(err, "websocket.NewClient(config, client): ")
 				return err
 			}
 			go io.Copy(conn, os.Stdin)

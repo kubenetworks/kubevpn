@@ -11,6 +11,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func (c *Config) SetupDNS() error {
@@ -19,10 +21,12 @@ func (c *Config) SetupDNS() error {
 
 	tun, err := net.InterfaceByName(tunName)
 	if err != nil {
+		err = errors.Wrap(err, "net.InterfaceByName(tunName): ")
 		return err
 	}
 	luid, err := winipcfg.LUIDFromIndex(uint32(tun.Index))
 	if err != nil {
+		err = errors.Wrap(err, "winipcfg.LUIDFromIndex(uint32(tun.Index)): ")
 		return err
 	}
 	var servers []netip.Addr
@@ -30,14 +34,14 @@ func (c *Config) SetupDNS() error {
 		var addr netip.Addr
 		addr, err = netip.ParseAddr(s)
 		if err != nil {
-			log.Errorf("parse %s failed: %s", s, err)
+			errors.LogErrorf("parse %s failed: %s", s, err)
 			return err
 		}
 		servers = append(servers, addr)
 	}
 	err = luid.SetDNS(windows.AF_INET, servers, clientConfig.Search)
 	if err != nil {
-		log.Errorf("set DNS failed: %s", err)
+		errors.LogErrorf("set DNS failed: %s", err)
 		return err
 	}
 	//_ = updateNicMetric(tunName)
@@ -49,10 +53,12 @@ func (c *Config) CancelDNS() {
 	c.updateHosts("")
 	tun, err := net.InterfaceByName(c.TunName)
 	if err != nil {
+		err = errors.Wrap(err, "net.InterfaceByName(c.TunName): ")
 		return
 	}
 	luid, err := winipcfg.LUIDFromIndex(uint32(tun.Index))
 	if err != nil {
+		err = errors.Wrap(err, "winipcfg.LUIDFromIndex(uint32(tun.Index)): ")
 		return
 	}
 	_ = luid.FlushDNS(windows.AF_INET)

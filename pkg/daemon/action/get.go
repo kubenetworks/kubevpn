@@ -2,7 +2,6 @@ package action
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -15,6 +14,7 @@ import (
 	"k8s.io/client-go/restmapper"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func (svr *Server) Get(ctx context.Context, req *rpc.GetRequest) (*rpc.GetResponse, error) {
@@ -24,22 +24,27 @@ func (svr *Server) Get(ctx context.Context, req *rpc.GetRequest) (*rpc.GetRespon
 	if svr.gr == nil {
 		restConfig, err := svr.connect.GetFactory().ToRESTConfig()
 		if err != nil {
+			err = errors.Wrap(err, "svr.connect.GetFactory().ToRESTConfig(): ")
 			return nil, err
 		}
 		config, err := discovery.NewDiscoveryClientForConfig(restConfig)
 		if err != nil {
+			err = errors.Wrap(err, "discovery.NewDiscoveryClientForConfig(restConfig): ")
 			return nil, err
 		}
 		svr.gr, err = restmapper.GetAPIGroupResources(config)
 		if err != nil {
+			err = errors.Wrap(err, "restmapper.GetAPIGroupResources(config): ")
 			return nil, err
 		}
 		forConfig, err := metadata.NewForConfig(restConfig)
 		if err != nil {
+			err = errors.Wrap(err, "metadata.NewForConfig(restConfig): ")
 			return nil, err
 		}
 		mapper, err := svr.connect.GetFactory().ToRESTMapper()
 		if err != nil {
+			err = errors.Wrap(err, "svr.connect.GetFactory().ToRESTMapper(): ")
 			return nil, err
 		}
 		svr.informer = metadatainformer.NewSharedInformerFactory(forConfig, time.Second*5)
@@ -65,12 +70,14 @@ func (svr *Server) Get(ctx context.Context, req *rpc.GetRequest) (*rpc.GetRespon
 	}
 	informer, err := svr.getInformer(req)
 	if err != nil {
+		err = errors.Wrap(err, "svr.getInformer(req): ")
 		return nil, err
 	}
 	var result []*rpc.Metadata
 	for _, m := range informer.Informer().GetIndexer().List() {
 		object, err := meta.Accessor(m)
 		if err != nil {
+			err = errors.Wrap(err, "meta.Accessor(m): ")
 			return nil, err
 		}
 		result = append(result, &rpc.Metadata{
@@ -85,6 +92,7 @@ func (svr *Server) Get(ctx context.Context, req *rpc.GetRequest) (*rpc.GetRespon
 func (svr *Server) getInformer(req *rpc.GetRequest) (informers.GenericInformer, error) {
 	mapper, err := svr.connect.GetFactory().ToRESTMapper()
 	if err != nil {
+		err = errors.Wrap(err, "svr.connect.GetFactory().ToRESTMapper(): ")
 		return nil, err
 	}
 	var resourcesFor *meta.RESTMapping

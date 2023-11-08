@@ -20,6 +20,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -47,7 +48,7 @@ func (c *Config) usingResolver() {
 	path := filepath.Join("/", "etc", "resolver")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err = os.MkdirAll(path, fs.ModePerm); err != nil {
-			log.Errorf("create resolver error: %v", err)
+			errors.LogErrorf("create resolver error: %v", err)
 		}
 	}
 	config := miekgdns.ClientConfig{
@@ -65,7 +66,7 @@ func (c *Config) usingResolver() {
 	// for support like: service.namespace:port, service.namespace.svc:port, service.namespace.svc.cluster:port
 	port, err := util.GetAvailableUDPPortOrDie()
 	if err != nil {
-		log.Errorf("get available port error: %v", err)
+		errors.LogErrorf("get available port error: %v", err)
 		return
 	}
 	go func(port int, clientConfig *miekgdns.ClientConfig) {
@@ -90,7 +91,7 @@ func (c *Config) usingResolver() {
 			var conf *miekgdns.ClientConfig
 			conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(content)))
 			if err != nil {
-				log.Errorf("Parse resolver %s error: %v", filename, err)
+				errors.LogErrorf("Parse resolver %s error: %v", filename, err)
 				continue
 			}
 			// if already has this dns server, do nothing
@@ -104,11 +105,11 @@ func (c *Config) usingResolver() {
 			if len(conf.Servers) <= 3 {
 				err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
 				if err != nil {
-					log.Errorf("Failed to write resovler %s error: %v", filename, err)
+					errors.LogErrorf("Failed to write resovler %s error: %v", filename, err)
 				}
 			}
 		} else {
-			log.Errorf("Failed to read resovler %s error: %v", filename, err)
+			errors.LogErrorf("Failed to read resovler %s error: %v", filename, err)
 		}
 	}
 }
@@ -212,6 +213,7 @@ func networkSetup(ip string, namespace string) {
 	networkCancel()
 	b, err := exec.Command("networksetup", "-listallnetworkservices").Output()
 	if err != nil {
+		err = errors.Wrap(err, "exec.Command(\"networksetup\", \"-listallnetworkservices\").Output(): ")
 		return
 	}
 	services := strings.Split(string(b), "\n")
@@ -264,6 +266,7 @@ func networkSetup(ip string, namespace string) {
 func networkCancel() {
 	b, err := exec.Command("networksetup", "-listallnetworkservices").CombinedOutput()
 	if err != nil {
+		err = errors.Wrap(err, "exec.Command(\"networksetup\", \"-listallnetworkservices\").CombinedOutput(): ")
 		return
 	}
 	services := strings.Split(string(b), "\n")

@@ -12,6 +12,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 type RunOptions struct {
@@ -32,7 +33,7 @@ func attachContainer(ctx context.Context, dockerCli command.Cli, errCh *chan err
 
 	resp, errAttach := dockerCli.Client().ContainerAttach(ctx, containerID, options)
 	if errAttach != nil {
-		return nil, fmt.Errorf("failed to attach to container: %s, err: %v", containerID, errAttach)
+		return nil, errors.Errorf("failed to attach to container: %s, err: %v", containerID, errAttach)
 	}
 
 	var (

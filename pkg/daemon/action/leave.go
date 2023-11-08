@@ -1,12 +1,12 @@
 package action
 
 import (
-	"fmt"
 	"io"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 )
 
@@ -20,7 +20,7 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 	log.SetLevel(log.InfoLevel)
 	if svr.connect == nil {
 		log.Infof("not proxy any resource in cluster")
-		return fmt.Errorf("not proxy any resource in cluster")
+		return errors.Errorf("not proxy any resource in cluster")
 	}
 
 	factory := svr.connect.GetFactory()
@@ -31,7 +31,7 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 		log.Infof("leave workload %s", workload)
 		err := handler.UnPatchContainer(factory, maps, namespace, workload, svr.connect.GetLocalTunIPv4())
 		if err != nil {
-			log.Errorf("leave workload %s failed: %v", workload, err)
+			errors.LogErrorf("leave workload %s failed: %v", workload, err)
 			continue
 		}
 		log.Infof("leave workload %s successfully", workload)

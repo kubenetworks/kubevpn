@@ -4,7 +4,7 @@
 package openvpn
 
 import (
-	"errors"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func Install() error {

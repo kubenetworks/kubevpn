@@ -8,6 +8,8 @@ import (
 	"text/template"
 
 	"github.com/sirupsen/logrus"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 // InvalidPluginSpecError is invalid plugin spec error
@@ -36,6 +38,7 @@ func indent(spaces int, v string) string {
 func ProcessTemplate(templateFile string, values interface{}, sha256Map map[string]string) ([]byte, error) {
 	spec, err := RenderTemplate(templateFile, values, sha256Map)
 	if err != nil {
+		err = errors.Wrap(err, "RenderTemplate(templateFile, values, sha256Map): ")
 		return nil, err
 	}
 	return spec, nil
@@ -67,7 +70,7 @@ func RenderTemplate(templateFile string, values interface{}, sha256Map map[strin
 			logrus.Infof("getting sha256 for %s", buf.String())
 			sha256, ok := sha256Map[buf.String()]
 			if !ok {
-				panic(fmt.Errorf("can not get sha256 for link %s", buf.String()))
+				panic(errors.Errorf("can not get sha256 for link %s", buf.String()))
 			}
 
 			return fmt.Sprintf(`uri: %s
@@ -77,12 +80,14 @@ func RenderTemplate(templateFile string, values interface{}, sha256Map map[strin
 
 	templateObject, err := t.ParseFiles(templateFile)
 	if err != nil {
+		err = errors.Wrap(err, "t.ParseFiles(templateFile): ")
 		return nil, err
 	}
 
 	buf := new(bytes.Buffer)
 	err = templateObject.Execute(buf, values)
 	if err != nil {
+		err = errors.Wrap(err, "templateObject.Execute(buf, values): ")
 		return nil, err
 	}
 

@@ -18,7 +18,8 @@ import (
 	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/docker/docker/registry"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 // Pull constants
@@ -39,18 +40,21 @@ type createOptions struct {
 func pullImage(ctx context.Context, dockerCli command.Cli, image string, platform string, out io.Writer) error {
 	ref, err := reference.ParseNormalizedNamed(image)
 	if err != nil {
+		err = errors.Wrap(err, "reference.ParseNormalizedNamed(image): ")
 		return err
 	}
 
 	// Resolve the Repository name from fqn to RepositoryInfo
 	repoInfo, err := registry.ParseRepositoryInfo(ref)
 	if err != nil {
+		err = errors.Wrap(err, "registry.ParseRepositoryInfo(ref): ")
 		return err
 	}
 
 	authConfig := command.ResolveAuthConfig(ctx, dockerCli, repoInfo.Index)
 	encodedAuth, err := command.EncodeAuthToBase64(authConfig)
 	if err != nil {
+		err = errors.Wrap(err, "command.EncodeAuthToBase64(authConfig): ")
 		return err
 	}
 
@@ -61,6 +65,7 @@ func pullImage(ctx context.Context, dockerCli command.Cli, image string, platfor
 
 	responseBody, err := dockerCli.Client().ImageCreate(ctx, image, options)
 	if err != nil {
+		err = errors.Wrap(err, "dockerCli.Client().ImageCreate(ctx, image, options): ")
 		return err
 	}
 	defer responseBody.Close()
@@ -116,6 +121,7 @@ func newCIDFile(path string) (*cidFile, error) {
 
 	f, err := os.Create(path)
 	if err != nil {
+		err = errors.Wrap(err, "os.Create(path): ")
 		return nil, errors.Wrap(err, "failed to create the container ID file")
 	}
 
@@ -139,12 +145,14 @@ func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig
 
 	containerIDFile, err := newCIDFile(hostConfig.ContainerIDFile)
 	if err != nil {
+		err = errors.Wrap(err, "newCIDFile(hostConfig.ContainerIDFile): ")
 		return nil, err
 	}
 	defer containerIDFile.Close()
 
 	ref, err := reference.ParseAnyReference(config.Image)
 	if err != nil {
+		err = errors.Wrap(err, "reference.ParseAnyReference(config.Image): ")
 		return nil, err
 	}
 	if named, ok := ref.(reference.Named); ok {
@@ -154,6 +162,7 @@ func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig
 			var err error
 			trustedRef, err = image.TrustedReference(ctx, dockerCli, taggedRef, nil)
 			if err != nil {
+				err = errors.Wrap(err, "image.TrustedReference(ctx, dockerCli, taggedRef, nil): ")
 				return nil, err
 			}
 			config.Image = reference.FamiliarString(trustedRef)
@@ -182,6 +191,7 @@ func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig
 	if opts.Platform != "" && versions.GreaterThanOrEqualTo(dockerCli.Client().ClientVersion(), "1.41") {
 		p, err := platforms.Parse(opts.Platform)
 		if err != nil {
+			err = errors.Wrap(err, "platforms.Parse(opts.Platform): ")
 			return nil, errors.Wrap(err, "error parsing specified platform")
 		}
 		platform = &p
@@ -260,7 +270,7 @@ func validatePullOpt(val string) error {
 		// valid option, but nothing to do yet
 		return nil
 	default:
-		return fmt.Errorf(
+		return errors.Errorf(
 			"invalid pull option: '%s': must be one of %q, %q or %q",
 			val,
 			PullImageAlways,

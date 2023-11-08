@@ -14,6 +14,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/controlplane"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 // Reset
@@ -22,18 +23,20 @@ import (
 func (c *ConnectOptions) Reset(ctx context.Context) error {
 	err := c.LeaveProxyResources(ctx)
 	if err != nil {
-		log.Errorf("leave proxy resources error: %v", err)
+		errors.LogErrorf("leave proxy resources error: %v", err)
 	}
 
 	cleanup(ctx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, false)
 	var cli *client.Client
 	cli, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
+		err = errors.Wrap(err, "client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation()): ")
 		return nil
 	}
 	var networkResource types.NetworkResource
 	networkResource, err = cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{})
 	if err != nil {
+		err = errors.Wrap(err, "cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{}): ")
 		return nil
 	}
 	if len(networkResource.Containers) == 0 {
@@ -60,7 +63,7 @@ func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
 	var v = make([]*controlplane.Virtual, 0)
 	str := cm.Data[config.KeyEnvoy]
 	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
-		log.Errorf("unmarshal envoy config error: %v", err)
+		errors.LogErrorf("unmarshal envoy config error: %v", err)
 		return
 	}
 	localTunIPv4 := c.GetLocalTunIPv4()
@@ -71,7 +74,7 @@ func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
 		log.Infof("leave resource: %s", uid)
 		err = UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, uid, localTunIPv4)
 		if err != nil {
-			log.Errorf("unpatch container error: %v", err)
+			errors.LogErrorf("unpatch container error: %v", err)
 			continue
 		}
 		log.Infof("leave resource: %s successfully", uid)

@@ -13,6 +13,8 @@ import (
 	"github.com/schollz/progressbar/v3"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 var (
@@ -33,20 +35,20 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 	}
 	if resp == nil {
 		aggregate := utilerrors.NewAggregate(errs)
-		err = fmt.Errorf("failed to call github api, err: %v", aggregate)
+		err = errors.Errorf("failed to call github api, err: %v", aggregate)
 		return
 	}
 
 	var all []byte
 	all, err = io.ReadAll(resp.Body)
 	if err != nil {
-		err = fmt.Errorf("failed to read all reponse from github api, err: %v", err)
+		err = errors.Errorf("failed to read all reponse from github api, err: %v", err)
 		return
 	}
 	var m RootEntity
 	err = json.Unmarshal(all, &m)
 	if err != nil {
-		err = fmt.Errorf("failed to unmarshal reponse, err: %v", err)
+		err = errors.Errorf("failed to unmarshal reponse, err: %v", err)
 		return
 	}
 	version = m.TagName
@@ -75,7 +77,7 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 			for _, asset := range m.Assets {
 				link = append(link, asset.BrowserDownloadUrl)
 			}
-			err = fmt.Errorf("Can not found latest version url of KubeVPN, you can download it manually: \n%s", strings.Join(link, "\n"))
+			err = errors.Errorf("Can not found latest version url of KubeVPN, you can download it manually: \n%s", strings.Join(link, "\n"))
 			return
 		}
 	}
@@ -87,6 +89,7 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 func Download(client *http.Client, url string, filename string, stdout, stderr io.Writer) error {
 	get, err := client.Get(url)
 	if err != nil {
+		err = errors.Wrap(err, "client.Get(url): ")
 		return err
 	}
 	defer get.Body.Close()
@@ -96,6 +99,7 @@ func Download(client *http.Client, url string, filename string, stdout, stderr i
 	var f *os.File
 	f, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
 	if err != nil {
+		err = errors.Wrap(err, "os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755): ")
 		return err
 	}
 	defer f.Close()
@@ -124,6 +128,7 @@ func Download(client *http.Client, url string, filename string, stdout, stderr i
 func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	archive, err := zip.OpenReader(zipFile)
 	if err != nil {
+		err = errors.Wrap(err, "zip.OpenReader(zipFile): ")
 		return err
 	}
 	defer archive.Close()
@@ -137,17 +142,19 @@ func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	}
 
 	if fi == nil {
-		return fmt.Errorf("can not found kubevpn")
+		return errors.Errorf("can not found kubevpn")
 	}
 
 	err = os.MkdirAll(filepath.Dir(filename), os.ModePerm)
 	if err != nil {
+		err = errors.Wrap(err, "os.MkdirAll(filepath.Dir(filename), os.ModePerm): ")
 		return err
 	}
 
 	var dstFile *os.File
 	dstFile, err = os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fi.Mode())
 	if err != nil {
+		err = errors.Wrap(err, "os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fi.Mode()): ")
 		return err
 	}
 	defer dstFile.Close()
@@ -155,6 +162,7 @@ func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	var fileInArchive io.ReadCloser
 	fileInArchive, err = fi.Open()
 	if err != nil {
+		err = errors.Wrap(err, "fi.Open(): ")
 		return err
 	}
 	defer fileInArchive.Close()

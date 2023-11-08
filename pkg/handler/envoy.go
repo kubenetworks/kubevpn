@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -24,6 +23,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/controlplane"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/mesh"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -35,6 +35,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	var object *runtimeresource.Info
 	object, err = util.GetUnstructuredObject(factory, namespace, workload)
 	if err != nil {
+		err = errors.Wrap(err, "util.GetUnstructuredObject(factory, namespace, workload): ")
 		return err
 	}
 
@@ -43,6 +44,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	var path []string
 	templateSpec, path, err = util.GetPodTemplateSpecPath(u)
 	if err != nil {
+		err = errors.Wrap(err, "util.GetPodTemplateSpecPath(u): ")
 		return err
 	}
 
@@ -56,7 +58,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 
 	err = addEnvoyConfig(clientset, nodeID, c, headers, port)
 	if err != nil {
-		log.Errorf("add envoy config error: %v", err)
+		errors.LogErrorf("add envoy config error: %v", err)
 		return err
 	}
 
@@ -81,7 +83,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	var b []byte
 	b, err = k8sjson.Marshal(restorePatch)
 	if err != nil {
-		log.Errorf("marshal patch error: %v", err)
+		errors.LogErrorf("marshal patch error: %v", err)
 		return err
 	}
 
@@ -102,11 +104,12 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	var bytes []byte
 	bytes, err = k8sjson.Marshal(append(ps, removePatch...))
 	if err != nil {
+		err = errors.Wrap(err, "k8sjson.Marshal(append(ps, removePatch...)): ")
 		return err
 	}
 	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 	if err != nil {
-		log.Errorf("error while path resource: %s %s, err: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
+		errors.LogErrorf("error while path resource: %s %s, err: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
 		return err
 	}
 	log.Infof("patch workload %s/%s with sidecar", namespace, workload)
@@ -117,14 +120,14 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, namespace, workload string, localTunIPv4 string) error {
 	object, err := util.GetUnstructuredObject(factory, namespace, workload)
 	if err != nil {
-		log.Errorf("get unstructured object error: %v", err)
+		errors.LogErrorf("get unstructured object error: %v", err)
 		return err
 	}
 
 	u := object.Object.(*unstructured.Unstructured)
 	templateSpec, depth, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
-		log.Errorf("get template spec path error: %v", err)
+		errors.LogErrorf("get template spec path error: %v", err)
 		return err
 	}
 
@@ -133,7 +136,7 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 	var empty bool
 	empty, err = removeEnvoyConfig(mapInterface, nodeID, localTunIPv4)
 	if err != nil {
-		log.Errorf("remove envoy config error: %v", err)
+		errors.LogErrorf("remove envoy config error: %v", err)
 		return err
 	}
 
@@ -143,7 +146,7 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 		var ps []P
 		err = json.Unmarshal([]byte(patchStr), &ps)
 		if err != nil {
-			return fmt.Errorf("unmarshal json patch: %s failed, err: %v", patchStr, err)
+			return errors.Errorf("unmarshal json patch: %s failed, err: %v", patchStr, err)
 		}
 		fromPatchToProbe(templateSpec, depth, ps)
 	}
@@ -176,12 +179,12 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 			},
 		})
 		if err != nil {
-			log.Errorf("error while generating json patch: %v", err)
+			errors.LogErrorf("error while generating json patch: %v", err)
 			return err
 		}
 		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 		if err != nil {
-			log.Errorf("error while patching resource: %s %s, err: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
+			errors.LogErrorf("error while patching resource: %s %s, err: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
 			return err
 		}
 	}
@@ -191,6 +194,7 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP util.PodRouteConfig, headers map[string]string, port []v1.ContainerPort) error {
 	configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
+		err = errors.Wrap(err, "mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{}): ")
 		return err
 	}
 	var v = make([]*controlplane.Virtual, 0)
@@ -239,6 +243,7 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP ut
 
 	marshal, err := yaml.Marshal(v)
 	if err != nil {
+		err = errors.Wrap(err, "yaml.Marshal(v): ")
 		return err
 	}
 	configMap.Data[config.KeyEnvoy] = string(marshal)
@@ -284,6 +289,7 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, local
 	var bytes []byte
 	bytes, err = yaml.Marshal(v)
 	if err != nil {
+		err = errors.Wrap(err, "yaml.Marshal(v): ")
 		return false, err
 	}
 	configMap.Data[config.KeyEnvoy] = string(bytes)

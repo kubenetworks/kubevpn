@@ -11,6 +11,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -47,6 +48,7 @@ func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			bytes, ns, err := util.ConvertToKubeconfigBytes(f)
 			if err != nil {
+				err = errors.Wrap(err, "util.ConvertToKubeconfigBytes(f): ")
 				return err
 			}
 			req := &rpc.ConfigAddRequest{
@@ -57,6 +59,7 @@ func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
 			cli := daemon.GetClient(false)
 			resp, err := cli.ConfigAdd(cmd.Context(), req)
 			if err != nil {
+				err = errors.Wrap(err, "cli.ConfigAdd(cmd.Context(), req): ")
 				return err
 			}
 			fmt.Fprint(os.Stdout, resp.ClusterID)
@@ -88,6 +91,7 @@ func cmdConfigRemove(f cmdutil.Factory) *cobra.Command {
 			cli := daemon.GetClient(false)
 			_, err := cli.ConfigRemove(cmd.Context(), req)
 			if err != nil {
+				err = errors.Wrap(err, "cli.ConfigRemove(cmd.Context(), req): ")
 				return err
 			}
 			return nil

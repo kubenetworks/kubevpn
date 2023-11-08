@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	"encoding/json"
+
 	"fmt"
 	"net"
 	"strings"
@@ -10,9 +11,9 @@ import (
 	"github.com/containernetworking/cni/libcni"
 	log "github.com/sirupsen/logrus"
 	v12 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -22,6 +23,7 @@ import (
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 // root     22008 21846 14 Jan18 ?        6-22:53:35 kube-apiserver --advertise-address=10.56.95.185 --allow-privileged=true --anonymous-auth=True --apiserver-count=3 --authorization-mode=Node,RBAC --bind-address=0.0.0.0 --client-ca-file=/etc/kubernetes/ssl/ca.crt --default-not-ready-toleration-seconds=300 --default-unreachable-toleration-seconds=300 --enable-admission-plugins=NodeRestriction --enable-aggregator-routing=False --enable-bootstrap-token-auth=true --endpoint-reconciler-type=lease --etcd-cafile=/etc/ssl/etcd/ssl/ca.pem --etcd-certfile=/etc/ssl/etcd/ssl/node-kube-control-1.pem --etcd-keyfile=/etc/ssl/etcd/ssl/node-kube-control-1-key.pem --etcd-servers=https://10.56.95.185:2379,https://10.56.95.186:2379,https://10.56.95.187:2379 --etcd-servers-overrides=/events#https://10.56.95.185:2381;https://10.56.95.186:2381;https://10.56.95.187:2381 --event-ttl=1h0m0s --insecure-port=0 --kubelet-certificate-authority=/etc/kubernetes/ssl/kubelet/kubelet-ca.crt --kubelet-client-certificate=/etc/kubernetes/ssl/apiserver-kubelet-client.crt --kubelet-client-key=/etc/kubernetes/ssl/apiserver-kubelet-client.key --kubelet-preferred-address-types=InternalDNS,InternalIP,Hostname,ExternalDNS,ExternalIP --profiling=False --proxy-client-cert-file=/etc/kubernetes/ssl/front-proxy-client.crt --proxy-client-key-file=/etc/kubernetes/ssl/front-proxy-client.key --request-timeout=1m0s --requestheader-allowed-names=front-proxy-client --requestheader-client-ca-file=/etc/kubernetes/ssl/front-proxy-ca.crt --requestheader-extra-headers-prefix=X-Remote-Extra- --requestheader-group-headers=X-Remote-Group --requestheader-username-headers=X-Remote-User --secure-port=6443 --service-account-issuer=https://kubernetes.default.svc.cluster.local --service-account-key-file=/etc/kubernetes/ssl/sa.pub --service-account-signing-key-file=/etc/kubernetes/ssl/sa.key --service-cluster-ip-range=10.233.0.0/18 --service-node-port-range=30000-32767 --storage-backend=etcd3 --tls-cert-file=/etc/kubernetes/ssl/apiserver.crt --tls-private-key-file=/etc/kubernetes/ssl/apiserver.key
@@ -30,6 +32,7 @@ import (
 func getCIDRByDumpClusterInfo(clientset *kubernetes.Clientset) ([]*net.IPNet, error) {
 	podList, err := clientset.CoreV1().Pods(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{})
 	if err != nil {
+		err = errors.Wrap(err, "clientset.CoreV1().Pods(v1.NamespaceSystem).List(context.Background(), v1.ListOptions{}): ")
 		return nil, err
 	}
 	var list []string
@@ -51,6 +54,7 @@ func getCIDRByDumpClusterInfo(clientset *kubernetes.Clientset) ([]*net.IPNet, er
 func getCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient, restconfig *rest.Config, namespace string) ([]*net.IPNet, error) {
 	pod, err := createCIDRPod(clientset, namespace)
 	if err != nil {
+		err = errors.Wrap(err, "createCIDRPod(clientset, namespace): ")
 		return nil, err
 	}
 
@@ -59,6 +63,7 @@ func getCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 	var result []*net.IPNet
 	content, err := Shell(clientset, restclient, restconfig, pod.Name, "", pod.Namespace, []string{"sh", "-c", cmd})
 	if err != nil {
+		err = errors.Wrap(err, "Shell(clientset, restclient, restconfig, pod.Name, \"\", pod.Namespace, []string{\"sh\", \"-c\", cmd}): ")
 		return nil, err
 	}
 
@@ -80,11 +85,12 @@ func getServiceCIDRByCreateSvc(serviceInterface corev1.ServiceInterface) (*net.I
 		if idx != -1 {
 			_, cidr, err := net.ParseCIDR(strings.TrimSpace(err.Error()[idx+len(defaultCIDRIndex):]))
 			if err != nil {
+				err = errors.Wrap(err, "net.ParseCIDR(strings.TrimSpace(err.Error()[idx+len(defaultCIDRIndex):])): ")
 				return nil, err
 			}
 			return cidr, nil
 		}
-		return nil, fmt.Errorf("can not found any keyword of service cidr info, err: %s", err.Error())
+		return nil, errors.Errorf("can not found any keyword of service cidr info, err: %s", err.Error())
 	}
 	return nil, err
 }
@@ -127,6 +133,7 @@ func getPodCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTCli
 	//var cmd = "cat /etc/cni/net.d/*.conflist"
 	content, err := Shell(clientset, restclient, restconfig, config.CniNetName, "", namespace, []string{"cat", "/etc/cni/net.d/*.conflist"})
 	if err != nil {
+		err = errors.Wrap(err, "Shell(clientset, restclient, restconfig, config.CniNetName, \"\", namespace, []string{\"cat\", \"/etc/cni/net.d/*.conflist\"}): ")
 		return nil, err
 	}
 
@@ -253,12 +260,13 @@ func createCIDRPod(clientset *kubernetes.Clientset, namespace string) (*v12.Pod,
 		},
 	}
 	get, err := clientset.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, v1.GetOptions{})
-	if errors.IsNotFound(err) || get.Status.Phase != v12.PodRunning {
+	if k8sErrors.IsNotFound(err) || get.Status.Phase != v12.PodRunning {
 		if get.Status.Phase != v12.PodRunning {
 			_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), pod.Name, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
 		}
 		pod, err = clientset.CoreV1().Pods(namespace).Create(context.Background(), pod, v1.CreateOptions{})
 		if err != nil {
+			err = errors.Wrap(err, "clientset.CoreV1().Pods(namespace).Create(context.Background(), pod, v1.CreateOptions{}): ")
 			return nil, err
 		}
 		err = WaitPod(clientset.CoreV1().Pods(namespace), v1.ListOptions{
@@ -285,6 +293,7 @@ func createCIDRPod(clientset *kubernetes.Clientset, namespace string) (*v12.Pod,
 func getPodCIDRFromPod(clientset *kubernetes.Clientset, namespace string, svc *net.IPNet) ([]*net.IPNet, error) {
 	podList, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{})
 	if err != nil {
+		err = errors.Wrap(err, "clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{}): ")
 		return nil, err
 	}
 	for i := 0; i < len(podList.Items); i++ {
@@ -313,7 +322,7 @@ func getPodCIDRFromPod(clientset *kubernetes.Clientset, namespace string, svc *n
 	}
 
 	if len(result) == 0 {
-		return nil, fmt.Errorf("can not found pod cidr from pod list")
+		return nil, errors.Errorf("can not found pod cidr from pod list")
 	}
 
 	return result, nil

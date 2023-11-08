@@ -3,7 +3,6 @@ package dev
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -31,7 +30,6 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/google/uuid"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
-	pkgerr "github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	v1 "k8s.io/api/core/v1"
@@ -47,6 +45,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/mesh"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
@@ -88,7 +87,7 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 	rand.Seed(time.Now().UnixNano())
 	object, err := util.GetUnstructuredObject(d.Factory, d.Namespace, d.Workload)
 	if err != nil {
-		log.Errorf("get unstructured object error: %v", err)
+		errors.LogErrorf("get unstructured object error: %v", err)
 		return err
 	}
 
@@ -97,11 +96,13 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 	//var path []string
 	templateSpec, _, err = util.GetPodTemplateSpecPath(u)
 	if err != nil {
+		err = errors.Wrap(err, "util.GetPodTemplateSpecPath(u): ")
 		return err
 	}
 
 	set, err := d.Factory.KubernetesClientSet()
 	if err != nil {
+		err = errors.Wrap(err, "d.Factory.KubernetesClientSet(): ")
 		return err
 	}
 
@@ -117,7 +118,7 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 	lab := labels.SelectorFromSet(templateSpec.Labels).String()
 	firstPod, _, err := polymorphichelpers.GetFirstPod(set.CoreV1(), d.Namespace, lab, time.Second*60, sortBy)
 	if err != nil {
-		log.Errorf("get first running pod from k8s: %v", err)
+		errors.LogErrorf("get first running pod from k8s: %v", err)
 		return err
 	}
 
@@ -125,17 +126,17 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 
 	env, err := util.GetEnv(ctx, d.Factory, d.Namespace, pod)
 	if err != nil {
-		log.Errorf("get env from k8s: %v", err)
+		errors.LogErrorf("get env from k8s: %v", err)
 		return err
 	}
 	volume, err := GetVolume(ctx, d.Factory, d.Namespace, pod, d)
 	if err != nil {
-		log.Errorf("get volume from k8s: %v", err)
+		errors.LogErrorf("get volume from k8s: %v", err)
 		return err
 	}
 	dns, err := GetDNS(ctx, d.Factory, d.Namespace, pod)
 	if err != nil {
-		log.Errorf("get dns from k8s: %v", err)
+		errors.LogErrorf("get dns from k8s: %v", err)
 		return err
 	}
 
@@ -143,14 +144,14 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 	runConfigList := ConvertKubeResourceToContainer(d.Namespace, *templateSpec, env, volume, dns)
 	err = mergeDockerOptions(runConfigList, d, tempContainerConfig)
 	if err != nil {
-		log.Errorf("can not fill docker options, err: %v", err)
+		errors.LogErrorf("can not fill docker options, err: %v", err)
 		return err
 	}
 	// check resource
 	var oom bool
 	oom, _ = checkOutOfMemory(templateSpec, d.Cli)
 	if oom {
-		return fmt.Errorf("your pod resource request is bigger than docker-desktop resource, please adjust your docker-desktop resource")
+		return errors.Errorf("your pod resource request is bigger than docker-desktop resource, please adjust your docker-desktop resource")
 	}
 	mode := container.NetworkMode(d.Copts.netMode.NetworkMode())
 	if len(d.Copts.netMode.Value()) != 0 {
@@ -175,7 +176,7 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 		var networkID string
 		networkID, err = createKubevpnNetwork(ctx, d.Cli)
 		if err != nil {
-			log.Errorf("create network for %s: %v", d.Workload, err)
+			errors.LogErrorf("create network for %s: %v", d.Workload, err)
 			return err
 		}
 		log.Infof("create docker network %s", networkID)
@@ -222,6 +223,7 @@ func (d *Options) Main(ctx context.Context, tempContainerConfig *containerConfig
 	})
 	err = runConfigList.Run(ctx, volume, d.Cli, d.DockerCli)
 	if err != nil {
+		err = errors.Wrap(err, "runConfigList.Run(ctx, volume, d.Cli, d.DockerCli): ")
 		return err
 	}
 	return terminal(runConfigList[0].containerName, d.DockerCli)
@@ -252,6 +254,7 @@ func (l ConfigList) Remove(ctx context.Context, cli *client.Client) error {
 	}
 	i, err := cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{})
 	if err != nil {
+		err = errors.Wrap(err, "cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{}): ")
 		return err
 	}
 	if len(i.Containers) == 0 {
@@ -266,6 +269,7 @@ func (l ConfigList) Run(ctx context.Context, volume map[string][]mount.Mount, cl
 		if index == 0 {
 			_, err := runFirst(ctx, runConfig, cli, dockerCli)
 			if err != nil {
+				err = errors.Wrap(err, "runFirst(ctx, runConfig, cli, dockerCli): ")
 				return err
 			}
 		} else {
@@ -276,10 +280,12 @@ func (l ConfigList) Run(ctx context.Context, volume map[string][]mount.Mount, cl
 				runConfig.hostConfig.Mounts = nil
 				id, err = run(ctx, runConfig, cli, dockerCli)
 				if err != nil {
+					err = errors.Wrap(err, "run(ctx, runConfig, cli, dockerCli): ")
 					return err
 				}
 				err = l.copyToContainer(ctx, volume[runConfig.k8sContainerName], cli, id)
 				if err != nil {
+					err = errors.Wrap(err, "l.copyToContainer(ctx, volume[runConfig.k8sContainerName], cli, id): ")
 					return err
 				}
 			}
@@ -298,17 +304,17 @@ func (l ConfigList) copyToContainer(ctx context.Context, volume []mount.Mount, c
 		log.Debugf("from %s to %s", v.Source, v.Target)
 		srcInfo, err := archive.CopyInfoSourcePath(v.Source, true)
 		if err != nil {
-			log.Errorf("copy info source path, err: %v", err)
+			errors.LogErrorf("copy info source path, err: %v", err)
 			return err
 		}
 		srcArchive, err := archive.TarResource(srcInfo)
 		if err != nil {
-			log.Errorf("tar resource failed, err: %v", err)
+			errors.LogErrorf("tar resource failed, err: %v", err)
 			return err
 		}
 		dstDir, preparedArchive, err := archive.PrepareArchiveCopy(srcArchive, srcInfo, archive.CopyInfo{Path: v.Target})
 		if err != nil {
-			log.Errorf("can not prepare archive copy, err: %v", err)
+			errors.LogErrorf("can not prepare archive copy, err: %v", err)
 			return err
 		}
 
@@ -326,6 +332,7 @@ func (l ConfigList) copyToContainer(ctx context.Context, volume []mount.Mount, c
 func createFolder(ctx context.Context, cli *client.Client, id string, src string, target string) (string, error) {
 	lstat, err := os.Lstat(src)
 	if err != nil {
+		err = errors.Wrap(err, "os.Lstat(src): ")
 		return "", err
 	}
 	if !lstat.IsDir() {
@@ -339,12 +346,12 @@ func createFolder(ctx context.Context, cli *client.Client, id string, src string
 		Cmd:          []string{"mkdir", "-p", target},
 	})
 	if err != nil {
-		log.Errorf("create folder %s previoully failed, err: %v", target, err)
+		errors.LogErrorf("create folder %s previoully failed, err: %v", target, err)
 		return "", err
 	}
 	err = cli.ContainerExecStart(ctx, create.ID, types.ExecStartCheck{})
 	if err != nil {
-		log.Errorf("create folder %s previoully failed, err: %v", target, err)
+		errors.LogErrorf("create folder %s previoully failed, err: %v", target, err)
 		return "", err
 	}
 	log.Infof("wait create folder %s in container %s to be done...", target, id)
@@ -366,6 +373,7 @@ func checkOutOfMemory(spec *v1.PodTemplateSpec, cli *client.Client) (outOfMemory
 	var info types.Info
 	info, err = cli.Info(context.Background())
 	if err != nil {
+		err = errors.Wrap(err, "cli.Info(context.Background()): ")
 		return
 	}
 	total := info.MemTotal
@@ -386,6 +394,7 @@ func checkOutOfMemory(spec *v1.PodTemplateSpec, cli *client.Client) (outOfMemory
 func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags *pflag.FlagSet, f cmdutil.Factory, transferImage bool) error {
 	cli, dockerCli, err := util.GetClient()
 	if err != nil {
+		err = errors.Wrap(err, "util.GetClient(): ")
 		return err
 	}
 	mode := container.NetworkMode(devOption.Copts.netMode.NetworkMode())
@@ -394,14 +403,14 @@ func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags 
 		var inspect types.ContainerJSON
 		inspect, err = cli.ContainerInspect(ctx, mode.ConnectedContainer())
 		if err != nil {
-			log.Errorf("can not inspect container %s, err: %v", mode.ConnectedContainer(), err)
+			errors.LogErrorf("can not inspect container %s, err: %v", mode.ConnectedContainer(), err)
 			return err
 		}
 		if inspect.State == nil {
-			return fmt.Errorf("can not get container status, please make contianer name is valid")
+			return errors.Errorf("can not get container status, please make contianer name is valid")
 		}
 		if !inspect.State.Running {
-			return fmt.Errorf("container %s status is %s, expect is running, please make sure your outer docker name is correct", mode.ConnectedContainer(), inspect.State.Status)
+			return errors.Errorf("container %s status is %s, expect is running, please make sure your outer docker name is correct", mode.ConnectedContainer(), inspect.State.Status)
 		}
 		log.Infof("container %s is running", mode.ConnectedContainer())
 	} else if mode.IsDefault() && util.RunningInContainer() {
@@ -412,6 +421,7 @@ func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags 
 		log.Infof("hostname is %s", hostname)
 		err = devOption.Copts.netMode.Set(fmt.Sprintf("container:%s", hostname))
 		if err != nil {
+			err = errors.Wrap(err, "devOption.Copts.netMode.Set(fmt.Sprintf(\"container:%s\", hostname)): ")
 			return err
 		}
 	}
@@ -419,7 +429,7 @@ func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags 
 	// connect to cluster, in container or host
 	cancel, err := devOption.doConnect(ctx, f, conf, transferImage)
 	if err != nil {
-		log.Errorf("connect to cluster failed, err: %v", err)
+		errors.LogErrorf("connect to cluster failed, err: %v", err)
 		return err
 	}
 	defer func() {
@@ -431,6 +441,7 @@ func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags 
 	var tempContainerConfig *containerConfig
 	err = validatePullOpt(devOption.Options.Pull)
 	if err != nil {
+		err = errors.Wrap(err, "validatePullOpt(devOption.Options.Pull): ")
 		return err
 	}
 	proxyConfig := dockerCli.ConfigFile().ParseProxyConfig(dockerCli.Client().DaemonHost(), opts.ConvertKVStringsToMapWithNil(devOption.Copts.env.GetAll()))
@@ -450,6 +461,7 @@ func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags 
 	}
 	err = validateAPIVersion(tempContainerConfig, dockerCli.Client().ClientVersion())
 	if err != nil {
+		err = errors.Wrap(err, "validateAPIVersion(tempContainerConfig, dockerCli.Client().ClientVersion()): ")
 		return err
 	}
 
@@ -475,17 +487,17 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 		return
 	}
 	if len(connect.Workloads) > 1 {
-		return nil, fmt.Errorf("can only dev one workloads at same time, workloads: %v", connect.Workloads)
+		return nil, errors.Errorf("can only dev one workloads at same time, workloads: %v", connect.Workloads)
 	}
 	if len(connect.Workloads) < 1 {
-		return nil, fmt.Errorf("you must provide resource to dev, workloads : %v is invaild", connect.Workloads)
+		return nil, errors.Errorf("you must provide resource to dev, workloads : %v is invaild", connect.Workloads)
 	}
 	d.Workload = connect.Workloads[0]
 
 	// if no-proxy is true, not needs to intercept traffic
 	if d.NoProxy {
 		if len(connect.Headers) != 0 {
-			return nil, fmt.Errorf("not needs to provide headers if is no-proxy mode")
+			return nil, errors.Errorf("not needs to provide headers if is no-proxy mode")
 		}
 		connect.Workloads = []string{}
 	}
@@ -494,12 +506,13 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 	case ConnectModeHost:
 		daemonCli := daemon.GetClient(false)
 		if daemonCli == nil {
-			return nil, fmt.Errorf("get nil daemon client")
+			return nil, errors.Errorf("get nil daemon client")
 		}
 		var kubeconfig []byte
 		var ns string
 		kubeconfig, ns, err = util.ConvertToKubeconfigBytes(f)
 		if err != nil {
+			err = errors.Wrap(err, "util.ConvertToKubeconfigBytes(f): ")
 			return
 		}
 		// not needs to ssh jump in daemon, because dev mode will hang up until user exit,
@@ -523,7 +536,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 		var resp rpc.Daemon_ConnectClient
 		resp, err = daemonCli.Proxy(ctx, req)
 		if err != nil {
-			log.Errorf("connect to cluster error: %s", err.Error())
+			errors.LogErrorf("connect to cluster error: %s", err.Error())
 			return
 		}
 		for {
@@ -550,13 +563,14 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 		if d.Options.Platform != "" {
 			platform, err = platforms.Parse(d.Options.Platform)
 			if err != nil {
-				return nil, pkgerr.Wrap(err, "error parsing specified platform")
+				return nil, errors.Wrap(err, "error parsing specified platform")
 			}
 		}
 
 		var connectContainer *RunConfig
 		connectContainer, err = createConnectContainer(d.NoProxy, *connect, path, d.Cli, &platform)
 		if err != nil {
+			err = errors.Wrap(err, "createConnectContainer(d.NoProxy, *connect, path, d.Cli, &platform): ")
 			return
 		}
 		cancelCtx, cancelFunc := context.WithCancel(ctx)
@@ -565,6 +579,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 		log.Infof("starting container connect to cluster")
 		id, err = run(cancelCtx, connectContainer, d.Cli, d.DockerCli)
 		if err != nil {
+			err = errors.Wrap(err, "run(cancelCtx, connectContainer, d.Cli, d.DockerCli): ")
 			return
 		}
 		h := interrupt.New(
@@ -593,7 +608,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 		err = d.Copts.netMode.Set(fmt.Sprintf("container:%s", id))
 		return
 	default:
-		return nil, fmt.Errorf("unsupport connect mode: %s", d.ConnectMode)
+		return nil, errors.Errorf("unsupport connect mode: %s", d.ConnectMode)
 	}
 }
 
@@ -603,7 +618,7 @@ func disconnect(ctx context.Context, daemonClient rpc.DaemonClient) func() {
 			ID: pointer.Int32(0),
 		})
 		if err != nil {
-			log.Errorf("disconnect error: %v", err)
+			errors.LogErrorf("disconnect error: %v", err)
 			return
 		}
 		for {
@@ -611,7 +626,7 @@ func disconnect(ctx context.Context, daemonClient rpc.DaemonClient) func() {
 			if err == io.EOF {
 				return
 			} else if err != nil {
-				log.Errorf("disconnect error: %v", err)
+				errors.LogErrorf("disconnect error: %v", err)
 				return
 			}
 			fmt.Fprint(os.Stdout, msg.Message)
@@ -706,6 +721,7 @@ func createConnectContainer(noProxy bool, connect handler.ConnectOptions, path s
 	}
 	kubevpnNetwork, err := createKubevpnNetwork(context.Background(), cli)
 	if err != nil {
+		err = errors.Wrap(err, "createKubevpnNetwork(context.Background(), cli): ")
 		return nil, err
 	}
 	name := fmt.Sprintf("%s_%s_%s", "kubevpn", "local", suffix)
@@ -727,6 +743,7 @@ func createConnectContainer(noProxy bool, connect handler.ConnectOptions, path s
 func runLogsWaitRunning(ctx context.Context, dockerCli command.Cli, container string) error {
 	c, err := dockerCli.Client().ContainerInspect(ctx, container)
 	if err != nil {
+		err = errors.Wrap(err, "dockerCli.Client().ContainerInspect(ctx, container): ")
 		return err
 	}
 
@@ -737,6 +754,7 @@ func runLogsWaitRunning(ctx context.Context, dockerCli command.Cli, container st
 	}
 	logStream, err := dockerCli.Client().ContainerLogs(ctx, c.ID, options)
 	if err != nil {
+		err = errors.Wrap(err, "dockerCli.Client().ContainerLogs(ctx, c.ID, options): ")
 		return err
 	}
 	defer logStream.Close()
@@ -785,6 +803,7 @@ func runLogsSinceNow(dockerCli command.Cli, container string, follow bool) error
 
 	c, err := dockerCli.Client().ContainerInspect(ctx, container)
 	if err != nil {
+		err = errors.Wrap(err, "dockerCli.Client().ContainerInspect(ctx, container): ")
 		return err
 	}
 
@@ -796,6 +815,7 @@ func runLogsSinceNow(dockerCli command.Cli, container string, follow bool) error
 	}
 	responseBody, err := dockerCli.Client().ContainerLogs(ctx, c.ID, options)
 	if err != nil {
+		err = errors.Wrap(err, "dockerCli.Client().ContainerLogs(ctx, c.ID, options): ")
 		return err
 	}
 	defer responseBody.Close()

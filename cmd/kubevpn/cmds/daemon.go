@@ -1,7 +1,6 @@
 package cmds
 
 import (
-	"errors"
 	"os"
 	"strconv"
 
@@ -10,6 +9,7 @@ import (
 	"k8s.io/kubectl/pkg/util/i18n"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
@@ -32,6 +32,7 @@ func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 			pid := os.Getpid()
 			err = os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), os.ModePerm)
 			if err != nil {
+				err = errors.Wrap(err, "os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), os.ModePerm): ")
 				return err
 			}
 			err = os.Chmod(pidPath, os.ModePerm)

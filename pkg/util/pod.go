@@ -14,11 +14,10 @@ import (
 	"time"
 
 	"github.com/moby/term"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/exp/constraints"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -37,6 +36,7 @@ import (
 	"k8s.io/kubectl/pkg/util/podutils"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 type PodRouteConfig struct {
@@ -118,12 +118,14 @@ func GetEnv(ctx context.Context, f util.Factory, ns, pod string) (map[string][]s
 	}
 	get, err := set.CoreV1().Pods(ns).Get(ctx, pod, v1.GetOptions{})
 	if err != nil {
+		err = errors.Wrap(err, "set.CoreV1().Pods(ns).Get(ctx, pod, v1.GetOptions{}): ")
 		return nil, err
 	}
 	result := map[string][]string{}
 	for _, c := range get.Spec.Containers {
 		env, err := Shell(set, client, config, pod, c.Name, ns, []string{"env"})
 		if err != nil {
+			err = errors.Wrap(err, "Shell(set, client, config, pod, c.Name, ns, []string{\"env\"}): ")
 			return nil, err
 		}
 		split := strings.Split(env, "\n")
@@ -149,6 +151,7 @@ func WaitPod(podInterface v12.PodInterface, list v1.ListOptions, checker func(*c
 	defer cancelFunc()
 	w, err := podInterface.Watch(ctx, list)
 	if err != nil {
+		err = errors.Wrap(err, "podInterface.Watch(ctx, list): ")
 		return err
 	}
 	defer w.Stop()
@@ -197,6 +200,7 @@ func GetTopOwnerReference(factory util.Factory, namespace, workload string) (*re
 	for {
 		object, err := GetUnstructuredObject(factory, namespace, workload)
 		if err != nil {
+			err = errors.Wrap(err, "GetUnstructuredObject(factory, namespace, workload): ")
 			return nil, err
 		}
 		ownerReference := v1.GetControllerOf(object.Object.(*unstructured.Unstructured))
@@ -220,6 +224,7 @@ func GetTopOwnerReference(factory util.Factory, namespace, workload string) (*re
 func GetTopOwnerReferenceBySelector(factory util.Factory, namespace, selector string) (sets.Set[string], error) {
 	object, err := GetUnstructuredObjectBySelector(factory, namespace, selector)
 	if err != nil {
+		err = errors.Wrap(err, "GetUnstructuredObjectBySelector(factory, namespace, selector): ")
 		return nil, err
 	}
 	set := sets.New[string]()
@@ -239,7 +244,7 @@ func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config 
 		return "", err
 	}
 	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-		err = fmt.Errorf("cannot exec into a container in a completed pod; current phase is %s", pod.Status.Phase)
+		err = errors.Errorf("cannot exec into a container in a completed pod; current phase is %s", pod.Status.Phase)
 		return "", err
 	}
 	if containerName == "" {
@@ -303,7 +308,7 @@ func WaitPodToBeReady(ctx context.Context, podInterface v12.PodInterface, select
 		select {
 		case e, ok := <-watchStream.ResultChan():
 			if !ok {
-				return fmt.Errorf("can not wait pod to be ready because of watch chan has closed")
+				return errors.Errorf("can not wait pod to be ready because of watch chan has closed")
 			}
 			if podT, ok := e.Object.(*corev1.Pod); ok {
 				if podT.DeletionTimestamp != nil {

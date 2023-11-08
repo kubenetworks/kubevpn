@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 // driver download from: https://www.wintun.net/builds/wintun-0.14.1.zip
 func copyDriver(b []byte) error {
 	executable, err := os.Executable()
 	if err != nil {
+		err = errors.Wrap(err, "os.Executable(): ")
 		return err
 	}
 	filename := filepath.Join(filepath.Dir(executable), "wintun.dll")

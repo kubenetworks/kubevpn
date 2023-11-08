@@ -2,15 +2,15 @@ package util
 
 import (
 	"encoding/json"
-	"fmt"
 
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/cmd/util"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func GetUnstructuredObject(f util.Factory, namespace string, workloads string) (*resource.Info, error) {
@@ -33,7 +33,7 @@ func GetUnstructuredObject(f util.Factory, namespace string, workloads string) (
 		return nil, err
 	}
 	if len(infos) == 0 {
-		return nil, fmt.Errorf("not found workloads %s", workloads)
+		return nil, errors.Errorf("not found workloads %s", workloads)
 	}
 	return infos[0], err
 }
@@ -54,10 +54,11 @@ func GetUnstructuredObjectList(f util.Factory, namespace string, workloads []str
 	}
 	infos, err := do.Infos()
 	if err != nil {
+		err = errors.Wrap(err, "do.Infos(): ")
 		return nil, err
 	}
 	if len(infos) == 0 {
-		return nil, fmt.Errorf("not found resource %v", workloads)
+		return nil, errors.Errorf("not found resource %v", workloads)
 	}
 	return infos, err
 }
@@ -102,6 +103,7 @@ func GetPodTemplateSpecPath(u *unstructured.Unstructured) (*v1.PodTemplateSpec, 
 	}
 	marshal, err := json.Marshal(stringMap)
 	if err != nil {
+		err = errors.Wrap(err, "json.Marshal(stringMap): ")
 		return nil, nil, err
 	}
 	var p v1.PodTemplateSpec
@@ -114,11 +116,12 @@ func GetPodTemplateSpecPath(u *unstructured.Unstructured) (*v1.PodTemplateSpec, 
 func GetAnnotation(f util.Factory, ns string, resources string) (map[string]string, error) {
 	ownerReference, err := GetTopOwnerReference(f, ns, resources)
 	if err != nil {
+		err = errors.Wrap(err, "GetTopOwnerReference(f, ns, resources): ")
 		return nil, err
 	}
 	u, ok := ownerReference.Object.(*unstructured.Unstructured)
 	if !ok {
-		return nil, fmt.Errorf("can not convert to unstaructed")
+		return nil, errors.Errorf("can not convert to unstaructed")
 	}
 	annotations := u.GetAnnotations()
 	if annotations == nil {

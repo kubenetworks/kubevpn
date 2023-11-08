@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
-	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/core"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
@@ -31,7 +31,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 
 	clientIP, clientCIDR, err := net.ParseCIDR(req.ClientIP)
 	if err != nil {
-		log.Errorf("parse cidr error: %v", err)
+		errors.LogErrorf("parse cidr error: %v", err)
 		return nil, err
 	}
 	if serverIP == "" {
@@ -44,14 +44,14 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 		}
 		servers, err := handler.Parse(r)
 		if err != nil {
-			log.Errorf("parse route error: %v", err)
+			errors.LogErrorf("parse route error: %v", err)
 			return nil, err
 		}
 		ctx, sshCancelFunc = context.WithCancel(context.Background())
 		go func() {
 			err := handler.Run(ctx, servers)
 			if err != nil {
-				log.Errorf("run route error: %v", err)
+				errors.LogErrorf("run route error: %v", err)
 			}
 		}()
 
@@ -75,10 +75,12 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 
 	serverip, _, err := net.ParseCIDR(serverIP)
 	if err != nil {
+		err = errors.Wrap(err, "net.ParseCIDR(serverIP): ")
 		return nil, err
 	}
 	tunDevice, err := util.GetTunDevice(serverip)
 	if err != nil {
+		err = errors.Wrap(err, "util.GetTunDevice(serverip): ")
 		return nil, err
 	}
 	err = tun.AddRoutes(tunDevice.Name, types.Route{
@@ -89,7 +91,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 		GW: nil,
 	})
 	if err != nil {
-		log.Errorf("add route error: %v", err)
+		errors.LogErrorf("add route error: %v", err)
 		return nil, err
 	}
 

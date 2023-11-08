@@ -2,12 +2,13 @@ package dev
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/cli/command/container"
@@ -41,7 +42,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 		needPull = true
 		err = nil
 	} else if err != nil {
-		log.Errorf("image inspect failed: %v", err)
+		errors.LogErrorf("image inspect failed: %v", err)
 		return
 	}
 	if platform != nil && platform.Architecture != "" && platform.OS != "" {
@@ -52,7 +53,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 	if needPull {
 		err = util.PullImage(ctx, runConfig.platform, cli, c, config.Image, nil)
 		if err != nil {
-			log.Errorf("Failed to pull image: %s, err: %s", config.Image, err)
+			errors.LogErrorf("Failed to pull image: %s, err: %s", config.Image, err)
 			return
 		}
 	}
@@ -60,7 +61,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 	var create typescommand.CreateResponse
 	create, err = cli.ContainerCreate(ctx, config, hostConfig, networkConfig, platform, name)
 	if err != nil {
-		log.Errorf("Failed to create container: %s, err: %s", name, err)
+		errors.LogErrorf("Failed to create container: %s, err: %s", name, err)
 		return
 	}
 	id = create.ID
@@ -73,7 +74,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 
 	err = cli.ContainerStart(ctx, create.ID, types.ContainerStartOptions{})
 	if err != nil {
-		log.Errorf("failed to startup container %s: %v", name, err)
+		errors.LogErrorf("failed to startup container %s: %v", name, err)
 		return
 	}
 	log.Infof("Wait container %s to be running...", name)
@@ -99,7 +100,7 @@ func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *comma
 		}
 	}, time.Second)
 	if err != nil {
-		log.Errorf("failed to wait container to be ready: %v", err)
+		errors.LogErrorf("failed to wait container to be ready: %v", err)
 		_ = runLogsSinceNow(c, id, false)
 		return
 	}
@@ -165,7 +166,7 @@ func runFirst(ctx context.Context, runConfig *RunConfig, cli *apiclient.Client, 
 		NetworkingConfig: runConfig.networkingConfig,
 	}, &runConfig.Options.createOptions)
 	if err != nil {
-		log.Errorf("Failed to create main container: %s", err)
+		errors.LogErrorf("Failed to create main container: %s", err)
 		return "", err
 	}
 	log.Infof("Created main container: %s", runConfig.containerName)
@@ -250,7 +251,7 @@ func runFirst(ctx context.Context, runConfig *RunConfig, cli *apiclient.Client, 
 			return
 		}
 		if err != nil {
-			log.Errorf("Error inspect container: %s", err)
+			errors.LogErrorf("Error inspect container: %s", err)
 			return
 		}
 		if inspect.State != nil && (inspect.State.Status == "exited" || inspect.State.Status == "dead" || inspect.State.Dead) {
@@ -264,7 +265,7 @@ func runFirst(ctx context.Context, runConfig *RunConfig, cli *apiclient.Client, 
 		}
 	}, time.Second, chanStop)
 	if err != nil {
-		log.Errorf("wait container to be ready: %v", err)
+		errors.LogErrorf("wait container to be ready: %v", err)
 		return
 	}*/
 

@@ -17,7 +17,7 @@ import (
 
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if cfg.Addr == "" && cfg.Addr6 == "" {
-		err = fmt.Errorf("ipv4 address and ipv6 address can not be empty at same time")
+		err = errors.Errorf("ipv4 address and ipv6 address can not be empty at same time")
 		return
 	}
 
@@ -31,38 +31,42 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	var ifce tun.Device
 	ifce, err = tun.CreateTUN("utun", mtu)
 	if err != nil {
+		err = errors.Wrap(err, "tun.CreateTUN("utun", mtu): ")
 		return
 	}
 
 	var name string
 	name, err = ifce.Name()
 	if err != nil {
+		err = errors.Wrap(err, "ifce.Name(): ")
 		return
 	}
 
 	if cfg.Addr != "" {
 		ipv4, _, err = net.ParseCIDR(cfg.Addr6)
 		if err != nil {
+			err = errors.Wrap(err, "net.ParseCIDR(cfg.Addr6): ")
 			return
 		}
 		cmd := fmt.Sprintf("ifconfig %s inet %s mtu %d up", ifce.Name(), cfg.Addr, mtu)
 		log.Debugf("[tun] %s", cmd)
 		args := strings.Split(cmd, " ")
 		if err = exec.Command(args[0], args[1:]...).Run(); err != nil {
-			err = fmt.Errorf("%s: %v", cmd, err)
+			err = errors.Errorf("%s: %v", cmd, err)
 			return
 		}
 	}
 	if cfg.Addr6 != "" {
 		ipv6, _, err = net.ParseCIDR(cfg.Addr6)
 		if err != nil {
+			err = errors.Wrap(err, "net.ParseCIDR(cfg.Addr6): ")
 			return
 		}
 		cmd := fmt.Sprintf("ifconfig %s add %s", ifce.Name(), cfg.Addr6)
 		log.Debugf("[tun] %s", cmd)
 		args := strings.Split(cmd, " ")
 		if err = exec.Command(args[0], args[1:]...).Run(); err != nil {
-			err = fmt.Errorf("%s: %v", cmd, err)
+			err = errors.Errorf("%s: %v", cmd, err)
 			return
 		}
 	}
@@ -73,6 +77,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 
 	itf, err = net.InterfaceByName(ifce.Name())
 	if err != nil {
+		err = errors.Wrap(err, "net.InterfaceByName(ifce.Name()): ")
 		return
 	}
 
@@ -97,7 +102,7 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 		log.Debugf("[tun] %s", cmd)
 		args := strings.Split(cmd, " ")
 		if er := exec.Command(args[0], args[1:]...).Run(); er != nil {
-			return fmt.Errorf("%s: %v", cmd, er)
+			return errors.Errorf("%s: %v", cmd, er)
 		}
 	}
 	return nil
