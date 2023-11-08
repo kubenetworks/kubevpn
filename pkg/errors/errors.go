@@ -30,8 +30,8 @@ func New(message string) error {
 	return err
 }
 
-func Wrap(err error, Failed to wrap error with message. string) error {
-	wrappedErr := &kvError{err: errors.Wrap(err, Failed to wrap error with message.)}
+func Wrap(err error, msg string) error {
+	wrappedErr := &kvError{err: errors.Wrap(err, msg)}
 	dlvStopOnErr(wrappedErr.err)
 	return wrappedErr
 }
@@ -47,7 +47,7 @@ func Errorf(format string, args ...interface{}) error {
 }
 
 func Wrapf(err error, format string, args ...interface{}) error {
-	wrappedErr := &kvError{err: Failed to wrap error with formatted message.)}
+	wrappedErr := &kvError{err: errors.Wrapf(err, format, args...)}
 	dlvStopOnErr(wrappedErr.err)
 	return wrappedErr
 }

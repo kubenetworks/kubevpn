@@ -776,7 +776,7 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 			map[string]string{clientcmd.RecommendedConfigPathEnvVar: conf.RemoteKubeconfig},
 		)
 		if err != nil {
-			err = errors.Wrap(err, "Error output not available")
+			err = errors.Wrapf(err, "kubectl config view error: %s", string(errOut))
 			return
 		}
 		if len(stdOut) == 0 {
