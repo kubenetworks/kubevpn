@@ -3,7 +3,6 @@ package mesh
 import (
 	_ "embed"
 
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -11,6 +10,7 @@ import (
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -153,7 +153,7 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 func init() {
 	json, err := yaml.ToJSON(envoyConfig)
 	if err != nil {
-		log.Errorf("Error converting json to bytes: %v", err)
+		errors.LogErrorf("Error converting json to bytes: %v", err)
 		return
 	}
 	envoyConfig = json

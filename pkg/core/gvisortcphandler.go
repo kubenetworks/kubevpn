@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 type gvisorTCPTunnelConnector struct {
@@ -25,14 +25,17 @@ func (c *gvisorTCPTunnelConnector) ConnectContext(ctx context.Context, conn net.
 	case *net.TCPConn:
 		err := con.SetNoDelay(true)
 		if err != nil {
+			err = errors.Wrap(err, "con.SetNoDelay(true): ")
 			return nil, err
 		}
 		err = con.SetKeepAlive(true)
 		if err != nil {
+			err = errors.Wrap(err, "con.SetKeepAlive(true): ")
 			return nil, err
 		}
 		err = con.SetKeepAlivePeriod(15 * time.Second)
 		if err != nil {
+			err = errors.Wrap(err, "con.SetKeepAlivePeriod(15 * time.Second): ")
 			return nil, err
 		}
 	}
@@ -92,10 +95,12 @@ func GvisorTCPListener(addr string) (net.Listener, error) {
 	log.Debug("gvisor tcp listen addr", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
+		err = errors.Wrap(err, "net.ResolveTCPAddr(\"tcp\", addr): ")
 		return nil, err
 	}
 	ln, err := net.ListenTCP("tcp", laddr)
 	if err != nil {
+		err = errors.Wrap(err, "net.ListenTCP(\"tcp\", laddr): ")
 		return nil, err
 	}
 	return &tcpKeepAliveListener{TCPListener: ln}, nil

@@ -1,17 +1,15 @@
 package core
 
 import (
-	"fmt"
 	"net"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/tun"
 )
 
@@ -42,6 +40,7 @@ func (r *Route) parseChain() (*Chain, error) {
 	// parse the base nodes
 	node, err := parseChainNode(r.ChainNode)
 	if err != nil {
+		err = errors.Wrap(err, "parseChainNode(r.ChainNode): ")
 		return nil, err
 	}
 	return NewChain(r.Retries, node), nil
@@ -50,7 +49,7 @@ func (r *Route) parseChain() (*Chain, error) {
 func parseChainNode(ns string) (*Node, error) {
 	node, err := ParseNode(ns)
 	if err != nil {
-		log.Errorf("parse node error: %v", err)
+		errors.LogErrorf("parse node error: %v", err)
 		return nil, err
 	}
 	node.Client = &Client{
@@ -62,8 +61,8 @@ func parseChainNode(ns string) (*Node, error) {
 
 func (r *Route) GenerateServers() ([]Server, error) {
 	chain, err := r.parseChain()
-	if err != nil && !errors.Is(err, ErrorInvalidNode) {
-		log.Errorf("parse chain error: %v", err)
+	if err != nil && !errors.Is(err, errors.New("invalid node")) {
+		errors.LogErrorf("parse chain error: %v", err)
 		return nil, err
 	}
 
@@ -72,7 +71,7 @@ func (r *Route) GenerateServers() ([]Server, error) {
 		var node *Node
 		node, err = ParseNode(serveNode)
 		if err != nil {
-			log.Errorf("parse node %s error: %v", serveNode, err)
+			errors.LogErrorf("parse node %s error: %v", serveNode, err)
 			return nil, err
 		}
 
@@ -91,33 +90,33 @@ func (r *Route) GenerateServers() ([]Server, error) {
 				Gateway: node.Get("gw"),
 			})
 			if err != nil {
-				log.Errorf("create tun listener error: %v", err)
+				errors.LogErrorf("create tun listener error: %v", err)
 				return nil, err
 			}
 		case "tcp":
 			handler = TCPHandler()
 			ln, err = TCPListener(node.Addr)
 			if err != nil {
-				log.Errorf("create tcp listener error: %v", err)
+				errors.LogErrorf("create tcp listener error: %v", err)
 				return nil, err
 			}
 		case "gtcp":
 			handler = GvisorTCPHandler()
 			ln, err = GvisorTCPListener(node.Addr)
 			if err != nil {
-				log.Errorf("create gvisor tcp listener error: %v", err)
+				errors.LogErrorf("create gvisor tcp listener error: %v", err)
 				return nil, err
 			}
 		case "gudp":
 			handler = GvisorUDPHandler()
 			ln, err = GvisorUDPListener(node.Addr)
 			if err != nil {
-				log.Errorf("create gvisor udp listener error: %v", err)
+				errors.LogErrorf("create gvisor udp listener error: %v", err)
 				return nil, err
 			}
 		default:
-			log.Errorf("not support protocol %s", node.Protocol)
-			return nil, fmt.Errorf("not support protocol %s", node.Protocol)
+			errors.LogErrorf("not support protocol %s", node.Protocol)
+			return nil, errors.Errorf("not support protocol %s", node.Protocol)
 		}
 		servers = append(servers, Server{Listener: ln, Handler: handler})
 	}

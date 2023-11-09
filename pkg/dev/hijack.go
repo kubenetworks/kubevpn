@@ -2,7 +2,6 @@ package dev
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"runtime"
 	"sync"
@@ -13,6 +12,7 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/moby/term"
 	"github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 // The default escape key sequence: ctrl-p, ctrl-q
@@ -40,7 +40,7 @@ type hijackedIOStreamer struct {
 func (h *hijackedIOStreamer) stream(ctx context.Context) error {
 	restoreInput, err := h.setupInput()
 	if err != nil {
-		return fmt.Errorf("unable to setup input stream: %s", err)
+		return errors.Errorf("unable to setup input stream: %s", err)
 	}
 
 	defer restoreInput()
@@ -79,7 +79,7 @@ func (h *hijackedIOStreamer) setupInput() (restore func(), err error) {
 	}
 
 	if err := setRawTerminal(h.streams); err != nil {
-		return nil, fmt.Errorf("unable to set IO streams as raw terminal: %s", err)
+		return nil, errors.Errorf("unable to set IO streams as raw terminal: %s", err)
 	}
 
 	// Use sync.Once so we may call restore multiple times but ensure we

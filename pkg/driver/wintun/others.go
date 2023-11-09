@@ -4,7 +4,7 @@
 package wintun
 
 import (
-	"github.com/pkg/errors"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func InstallWintunDriver() error {

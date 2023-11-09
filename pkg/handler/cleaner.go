@@ -13,7 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -21,6 +21,7 @@ import (
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -50,7 +51,7 @@ func (c *ConnectOptions) Cleanup() {
 	if c.dhcp != nil {
 		err := c.dhcp.ReleaseIP(ctx, ips...)
 		if err != nil {
-			log.Errorf("failed to release ip to dhcp, err: %v", err)
+			errors.LogErrorf("failed to release ip to dhcp, err: %v", err)
 		}
 	}
 	if c.clientset != nil {
@@ -64,7 +65,7 @@ func (c *ConnectOptions) Cleanup() {
 			}
 		}
 		if err != nil {
-			log.Errorf("can not update ref-count: %v", err)
+			errors.LogErrorf("can not update ref-count: %v", err)
 		}
 	}
 	for _, function := range c.getRolloutFunc() {
@@ -77,7 +78,7 @@ func (c *ConnectOptions) Cleanup() {
 	// leave proxy resources
 	err := c.LeaveProxyResources(context.Background())
 	if err != nil {
-		log.Errorf("leave proxy resources error: %v", err)
+		errors.LogErrorf("leave proxy resources error: %v", err)
 	}
 	if c.cancel != nil {
 		c.cancel()
@@ -112,7 +113,7 @@ func updateRefCount(ctx context.Context, configMapInterface v12.ConfigMapInterfa
 				if k8serrors.IsNotFound(err) {
 					return err
 				}
-				err = fmt.Errorf("update ref-count failed, increment: %d, error: %v", increment, err)
+				err = errors.Errorf("update ref-count failed, increment: %d, error: %v", increment, err)
 				return
 			}
 			curCount, _ := strconv.Atoi(cm.Data[config.KeyRefCount])
@@ -126,25 +127,25 @@ func updateRefCount(ctx context.Context, configMapInterface v12.ConfigMapInterfa
 				if k8serrors.IsNotFound(err) {
 					return err
 				}
-				err = fmt.Errorf("update ref count error, error: %v", err)
+				err = errors.Errorf("update ref count error, error: %v", err)
 				return
 			}
 			return
 		})
 	if err != nil {
-		log.Errorf("update ref count error, increment: %d, error: %v", increment, err)
+		errors.LogErrorf("update ref count error, increment: %d, error: %v", increment, err)
 		return
 	}
 	log.Info("update ref count successfully")
 	var cm *corev1.ConfigMap
 	cm, err = configMapInterface.Get(ctx, name, v1.GetOptions{})
 	if err != nil {
-		err = fmt.Errorf("failed to get cm: %s, err: %v", name, err)
+		err = errors.Errorf("failed to get cm: %s, err: %v", name, err)
 		return
 	}
 	current, err = strconv.Atoi(cm.Data[config.KeyRefCount])
 	if err != nil {
-		err = fmt.Errorf("failed to get ref-count, err: %v", err)
+		err = errors.Errorf("failed to get ref-count, err: %v", err)
 	}
 	return
 }

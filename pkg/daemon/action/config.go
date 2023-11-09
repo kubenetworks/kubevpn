@@ -8,6 +8,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 var CancelFunc = make(map[string]context.CancelFunc)
@@ -16,6 +17,7 @@ func (svr *Server) ConfigAdd(ctx context.Context, req *rpc.ConfigAddRequest) (*r
 	var sshConf = util.ParseSshFromRPC(req.SshJump)
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
+		err = errors.Wrap(err, "Failed to convert to temporary Kubeconfig file.")
 		return nil, err
 	}
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
@@ -28,6 +30,7 @@ func (svr *Server) ConfigAdd(ctx context.Context, req *rpc.ConfigAddRequest) (*r
 	path, err = handler.SshJump(sshCtx, sshConf, flags, true)
 	CancelFunc[path] = sshCancel
 	if err != nil {
+		err = errors.Wrap(err, "SSH operation cancelled.")
 		return nil, err
 	}
 

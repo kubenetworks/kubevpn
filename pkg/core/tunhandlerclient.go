@@ -2,20 +2,20 @@ package core
 
 import (
 	"context"
-	"errors"
 	"net"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	defer tun.Close()
 	remoteAddr, err := net.ResolveUDPAddr("udp", h.node.Remote)
 	if err != nil {
-		log.Errorf("[tun] %s: remote addr: %v", tun.LocalAddr(), err)
+		errors.LogErrorf("[tun] %s: remote addr: %v", tun.LocalAddr(), err)
 		return
 	}
 	in := make(chan *DataElem, MaxSize)
@@ -65,6 +65,7 @@ func getRemotePacketConn(ctx context.Context, chain *Chain) (packetConn net.Pack
 		var cc net.Conn
 		cc, err = chain.DialContext(ctx)
 		if err != nil {
+			err = errors.Wrap(err, "chain.DialContext(ctx): ")
 			return
 		}
 		var ok bool
@@ -76,6 +77,7 @@ func getRemotePacketConn(ctx context.Context, chain *Chain) (packetConn net.Pack
 		var lc net.ListenConfig
 		packetConn, err = lc.ListenPacket(ctx, "udp", "")
 		if err != nil {
+			err = errors.Wrap(err, "lc.ListenPacket(ctx, \"udp\", \"\"): ")
 			return
 		}
 	}
@@ -136,7 +138,7 @@ func (d *ClientDevice) Start(ctx context.Context) {
 
 	select {
 	case err := <-d.chExit:
-		log.Errorf("[tun-client]: %v", err)
+		errors.LogErrorf("[tun-client]: %v", err)
 		return
 	case <-ctx.Done():
 		return

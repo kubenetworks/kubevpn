@@ -1,10 +1,10 @@
 package controlplane
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 type OperationType int
@@ -27,7 +27,7 @@ func Watch(watcher *fsnotify.Watcher, filename string, notifyCh chan<- NotifyMes
 		select {
 		case event, ok := <-watcher.Events:
 			if !ok {
-				return fmt.Errorf("watcher has closed")
+				return errors.Errorf("watcher has closed")
 			}
 			if event.Op&fsnotify.Write == fsnotify.Write {
 				notifyCh <- NotifyMessage{
@@ -48,7 +48,7 @@ func Watch(watcher *fsnotify.Watcher, filename string, notifyCh chan<- NotifyMes
 
 		case err, ok := <-watcher.Errors:
 			if !ok {
-				return fmt.Errorf("watcher error closed")
+				return errors.Errorf("watcher error closed")
 			}
 			return err
 

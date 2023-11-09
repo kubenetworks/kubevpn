@@ -16,6 +16,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
@@ -35,16 +36,16 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 		Args: cobra.MatchAll(cobra.OnlyValidArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 && all {
-				return fmt.Errorf("either specify --all or specific ID, not both")
+				return errors.Errorf("either specify --all or specific ID, not both")
 			}
 			if len(args) == 0 && !all {
-				return fmt.Errorf("either specify --all or specific ID")
+				return errors.Errorf("either specify --all or specific ID")
 			}
 			var ids *int32
 			if len(args) > 0 {
 				integer, err := strconv.Atoi(args[0])
 				if err != nil {
-					return fmt.Errorf("invalid ID: %s: %v", args[0], err)
+					return errors.Errorf("invalid ID: %s: %v", args[0], err)
 				}
 				ids = pointer.Int32(int32(integer))
 			}

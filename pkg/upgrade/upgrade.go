@@ -10,6 +10,7 @@ import (
 	goversion "github.com/hashicorp/go-version"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -30,10 +31,12 @@ func Main(ctx context.Context, client *http.Client, latestVersion string, latest
 	var cVersion, dVersion *goversion.Version
 	cVersion, err = goversion.NewVersion(version)
 	if err != nil {
+		err = errors.Wrap(err, "goversion.NewVersion(version): ")
 		return err
 	}
 	dVersion, err = goversion.NewVersion(latestVersion)
 	if err != nil {
+		err = errors.Wrap(err, "goversion.NewVersion(latestVersion): ")
 		return err
 	}
 	if cVersion.GreaterThan(dVersion) || (cVersion.Equal(dVersion) && commit == latestCommit) {
@@ -44,6 +47,7 @@ func Main(ctx context.Context, client *http.Client, latestVersion string, latest
 	var executable string
 	executable, err = os.Executable()
 	if err != nil {
+		err = errors.Wrap(err, "os.Executable(): ")
 		return err
 	}
 	var tem *os.File
@@ -67,49 +71,60 @@ func Main(ctx context.Context, client *http.Client, latestVersion string, latest
 	var temp *os.File
 	temp, err = os.CreateTemp("", "")
 	if err != nil {
+		err = errors.Wrap(err, "os.CreateTemp(\"\", \"\"): ")
 		return err
 	}
 	err = temp.Close()
 	if err != nil {
+		err = errors.Wrap(err, "temp.Close(): ")
 		return err
 	}
 	err = util.Download(client, url, temp.Name(), os.Stdout, os.Stderr)
 	if err != nil {
+		err = errors.Wrap(err, "util.Download(client, url, temp.Name()): ")
 		return err
 	}
 	file, _ := os.CreateTemp("", "")
 	err = file.Close()
 	if err != nil {
+		err = errors.Wrap(err, "file.Close(): ")
 		return err
 	}
 	err = util.UnzipKubeVPNIntoFile(temp.Name(), file.Name())
 	if err != nil {
+		err = errors.Wrap(err, "util.UnzipKubeVPNIntoFile(temp.Name(), file.Name()): ")
 		return err
 	}
 	err = os.Chmod(file.Name(), 0755)
 	if err != nil {
+		err = errors.Wrap(err, "os.Chmod(file.Name(), 0755): ")
 		return err
 	}
 	var curFolder string
 	curFolder, err = os.Executable()
 	if err != nil {
+		err = errors.Wrap(err, "os.Executable(): ")
 		return err
 	}
 	var createTemp *os.File
 	createTemp, err = os.CreateTemp("", "")
 	if err != nil {
+		err = errors.Wrap(err, "os.CreateTemp(\"\", \"\"): ")
 		return err
 	}
 	err = createTemp.Close()
 	if err != nil {
+		err = errors.Wrap(err, "createTemp.Close(): ")
 		return err
 	}
 	err = os.Remove(createTemp.Name())
 	if err != nil {
+		err = errors.Wrap(err, "os.Remove(createTemp.Name()): ")
 		return err
 	}
 	err = os.Rename(curFolder, createTemp.Name())
 	if err != nil {
+		err = errors.Wrap(err, "os.Rename(curFolder, createTemp.Name()): ")
 		return err
 	}
 	err = os.Rename(file.Name(), curFolder)

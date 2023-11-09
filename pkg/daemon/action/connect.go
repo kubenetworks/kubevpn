@@ -2,7 +2,6 @@ package action
 
 import (
 	"context"
-	"fmt"
 	"io"
 	defaultlog "log"
 	"os"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
@@ -62,11 +62,13 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if transferImage {
 		err := util.TransferImage(ctx, sshConf, config.OriginImage, req.Image, out)
 		if err != nil {
+			err = errors.Wrap(err, "Failed to transfer the image.")
 			return err
 		}
 	}
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
+		err = errors.Wrap(err, "Failed to convert to a temporary Kubeconfig file.")
 		return err
 	}
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
@@ -83,25 +85,29 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	var path string
 	path, err = handler.SshJump(sshCtx, sshConf, flags, false)
 	if err != nil {
+		err = errors.Wrap(err, "Failed to perform SSH jump.")
 		return err
 	}
 	err = svr.connect.InitClient(InitFactoryByPath(path, req.Namespace))
 	if err != nil {
+		err = errors.Wrap(err, "Failed to initialize the client.")
 		return err
 	}
 	err = svr.connect.PreCheckResource()
 	if err != nil {
+		err = errors.Wrap(err, "Failed to pre-check the resource.")
 		return err
 	}
 	_, err = svr.connect.RentInnerIP(ctx)
 	if err != nil {
+		err = errors.Wrap(err, "Failed to rent the inner IP.")
 		return err
 	}
 
 	config.Image = req.Image
 	err = svr.connect.DoConnect(sshCtx, false)
 	if err != nil {
-		log.Errorf("do connect error: %v", err)
+		errors.LogErrorf("do connect error: %v", err)
 		svr.connect.Cleanup()
 		svr.connect = nil
 		svr.t = time.Time{}
@@ -113,7 +119,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) error {
 	cli := svr.GetClient(true)
 	if cli == nil {
-		return fmt.Errorf("sudo daemon not start")
+		return errors.Errorf("sudo daemon not start")
 	}
 	connect := &handler.ConnectOptions{
 		Namespace:            req.Namespace,
@@ -128,6 +134,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	var sshConf = util.ParseSshFromRPC(req.SshJump)
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
+		err = errors.Wrap(err, "Failed to convert to a temporary Kubeconfig file.")
 		return err
 	}
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
@@ -143,14 +150,17 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	var path string
 	path, err = handler.SshJump(sshCtx, sshConf, flags, true)
 	if err != nil {
+		err = errors.Wrap(err, "Failed to perform SSH jump.")
 		return err
 	}
 	err = connect.InitClient(InitFactoryByPath(path, req.Namespace))
 	if err != nil {
+		err = errors.Wrap(err, "Failed to initialize the client.")
 		return err
 	}
 	err = connect.PreCheckResource()
 	if err != nil {
+		err = errors.Wrap(err, "Failed to pre-check the resource.")
 		return err
 	}
 
@@ -169,11 +179,13 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 
 	ctx, err := connect.RentInnerIP(resp.Context())
 	if err != nil {
+		err = errors.Wrap(err, "Failed to rent the inner IP.")
 		return err
 	}
 
 	connResp, err := cli.Connect(ctx, req)
 	if err != nil {
+		err = errors.Wrap(err, "Failed to establish connection.")
 		return err
 	}
 	for {
@@ -185,6 +197,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		}
 		err = resp.Send(recv)
 		if err != nil {
+			err = errors.Wrap(err, "Failed to send response.")
 			return err
 		}
 	}
@@ -198,13 +211,13 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 
 		client := svr.GetClient(false)
 		if client == nil {
-			return fmt.Errorf("daemon not start")
+			return errors.Errorf("daemon not start")
 		}
 		disconnect, err := client.Disconnect(context.Background(), &rpc.DisconnectRequest{
 			ID: pointer.Int32(int32(0)),
 		})
 		if err != nil {
-			log.Errorf("disconnect error: %v", err)
+			errors.LogErrorf("disconnect error: %v", err)
 			return err
 		}
 		for {
@@ -253,14 +266,17 @@ func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 	// todo optimize here
 	temp, err := os.CreateTemp("", "*.json")
 	if err != nil {
+		err = errors.Wrap(err, "os.CreateTemp(\"\", \"*.json\"): ")
 		return nil
 	}
 	err = temp.Close()
 	if err != nil {
+		err = errors.Wrap(err, "Failed to close temporary file.")
 		return nil
 	}
 	err = os.WriteFile(temp.Name(), []byte(kubeconfigBytes), os.ModePerm)
 	if err != nil {
+		err = errors.Wrap(err, "Failed to write to file.")
 		return nil
 	}
 	configFlags.KubeConfig = pointer.String(temp.Name())

@@ -3,7 +3,6 @@ package dns
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"math"
 	"math/rand"
 	"net"
@@ -18,6 +17,8 @@ import (
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/util/cache"
+
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 var (
@@ -61,7 +62,7 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, r *miekgdns.Msg) {
 	err := s.fwdSem.Acquire(ctx, 1)
 	if err != nil {
 		s.logInverval.Do(func() {
-			log.Errorf("dns-server more than %v concurrent queries", maxConcurrent)
+			errors.LogErrorf("dns-server more than %v concurrent queries", maxConcurrent)
 		})
 		r.SetRcode(r, miekgdns.RcodeRefused)
 		return

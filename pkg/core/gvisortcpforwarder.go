@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"io"
 	"net"
 
@@ -16,6 +15,7 @@ import (
 	"gvisor.dev/gvisor/pkg/waiter"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 var GvisorTCPForwardAddr string

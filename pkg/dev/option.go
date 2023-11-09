@@ -3,8 +3,8 @@ package dev
 import (
 	"github.com/containerd/containerd/platforms"
 	"github.com/docker/docker/api/types/network"
-	"github.com/pkg/errors"
 
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 	"github.com/wencaiwulue/kubevpn/pkg/util"
 )
 
@@ -39,7 +39,8 @@ func mergeDockerOptions(r ConfigList, copts *Options, tempContainerConfig *conta
 	if copts.Options.Platform != "" {
 		p, err := platforms.Parse(copts.Options.Platform)
 		if err != nil {
-			return errors.Wrap(err, "error parsing specified platform")
+			err = errors.Wrap(err, "Failed to parse platform options.")
+			return errors.Wrap(err, "Failed to parse specified platform.")
 		}
 		config.platform = &p
 	}

@@ -17,6 +17,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 var _ stack.LinkEndpoint = (*tunEndpoint)(nil)
@@ -126,7 +127,7 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 					protocol = header.IPv4ProtocolNumber
 					ipHeader, err := ipv4.ParseHeader(bytes[:read])
 					if err != nil {
-						log.Errorf("parse ipv4 header failed: %s", err.Error())
+						errors.LogErrorf("parse ipv4 header failed: %s", err.Error())
 						continue
 					}
 					ipProtocol = ipHeader.Protocol
@@ -136,7 +137,7 @@ func (e *tunEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 					protocol = header.IPv6ProtocolNumber
 					ipHeader, err := ipv6.ParseHeader(bytes[:read])
 					if err != nil {
-						log.Errorf("parse ipv6 header failed: %s", err.Error())
+						errors.LogErrorf("parse ipv6 header failed: %s", err.Error())
 						continue
 					}
 					ipProtocol = ipHeader.NextHeader

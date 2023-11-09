@@ -16,6 +16,7 @@ import (
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 type DHCPManager struct {
@@ -34,12 +35,16 @@ func NewDHCPManager(client corev1.ConfigMapInterface, namespace string) *DHCPMan
 	}
 }
 
+func initDHCPBreakPoint() {
+	log.Infof("init dhcp breakpoint")
+}
+
 // initDHCP
 // TODO optimize dhcp, using mac address, ip and deadline as unit
 func (d *DHCPManager) initDHCP(ctx context.Context) error {
 	cm, err := d.client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to get configmap %s, err: %v", config.ConfigMapPodTrafficManager, err)
+		return errors.Errorf("failed to get configmap %s, err: %v", config.ConfigMapPodTrafficManager, err)
 	}
 	if err == nil {
 		// add key envoy in case of mount not exist content
@@ -51,7 +56,7 @@ func (d *DHCPManager) initDHCP(ctx context.Context) error {
 				[]byte(fmt.Sprintf(`{"data":{"%s":"%s"}}`, config.KeyEnvoy, "")),
 				metav1.PatchOptions{},
 			)
-			return fmt.Errorf("failed to patch configmap %s, err: %v", config.ConfigMapPodTrafficManager, err)
+			return errors.Errorf("failed to patch configmap %s, err: %v", config.ConfigMapPodTrafficManager, err)
 		}
 		return nil
 	}
@@ -68,7 +73,7 @@ func (d *DHCPManager) initDHCP(ctx context.Context) error {
 	}
 	_, err = d.client.Create(ctx, cm, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("create dhcp error, err: %v", err)
+		return errors.Errorf("create dhcp error, err: %v", err)
 	}
 	return nil
 }
@@ -76,6 +81,7 @@ func (d *DHCPManager) initDHCP(ctx context.Context) error {
 func (d *DHCPManager) RentIPBaseNICAddress(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
+		err = errors.Wrap(err, "net.InterfaceAddrs(): ")
 		return nil, nil, err
 	}
 	var isAlreadyExistedFunc = func(ips ...net.IP) bool {
@@ -120,6 +126,7 @@ func (d *DHCPManager) RentIPBaseNICAddress(ctx context.Context) (*net.IPNet, *ne
 func (d *DHCPManager) RentIPRandom(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
+		err = errors.Wrap(err, "net.InterfaceAddrs(): ")
 		return nil, nil, err
 	}
 	var isAlreadyExistedFunc = func(ips ...net.IP) bool {
@@ -156,7 +163,7 @@ func (d *DHCPManager) RentIPRandom(ctx context.Context) (*net.IPNet, *net.IPNet,
 		return
 	})
 	if err != nil {
-		log.Errorf("failed to rent ip from DHCP server, err: %v", err)
+		errors.LogErrorf("failed to rent ip from DHCP server, err: %v", err)
 		return nil, nil, err
 	}
 	return &net.IPNet{IP: v4, Mask: d.cidr.Mask}, &net.IPNet{IP: v6, Mask: d.cidr6.Mask}, nil
@@ -185,7 +192,7 @@ func (d *DHCPManager) ReleaseIP(ctx context.Context, ips ...net.IP) error {
 func (d *DHCPManager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error) error {
 	cm, err := d.client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to get cm DHCP server, err: %v", err)
+		return errors.Errorf("failed to get cm DHCP server, err: %v", err)
 	}
 	if cm.Data == nil {
 		cm.Data = make(map[string]string)
@@ -202,6 +209,7 @@ func (d *DHCPManager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipal
 	if err == nil {
 		err = dhcp.Restore(d.cidr, str)
 		if err != nil {
+			err = errors.Wrap(err, "dhcp.Restore(d.cidr, str): ")
 			return err
 		}
 	}
@@ -217,6 +225,7 @@ func (d *DHCPManager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipal
 	if err == nil {
 		err = dhcp6.Restore(d.cidr6, str)
 		if err != nil {
+			err = errors.Wrap(err, "dhcp6.Restore(d.cidr6, str): ")
 			return err
 		}
 	}
@@ -239,7 +248,7 @@ func (d *DHCPManager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipal
 	}
 	_, err = d.client.Update(ctx, cm, metav1.UpdateOptions{})
 	if err != nil {
-		return fmt.Errorf("update dhcp failed, err: %v", err)
+		return errors.Errorf("update dhcp failed, err: %v", err)
 	}
 	return nil
 }
@@ -247,7 +256,7 @@ func (d *DHCPManager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipal
 func (d *DHCPManager) Set(key, value string) error {
 	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
-		log.Errorf("failed to get data, err: %v", err)
+		errors.LogErrorf("failed to get data, err: %v", err)
 		return err
 	}
 	if cm.Data == nil {
@@ -256,7 +265,7 @@ func (d *DHCPManager) Set(key, value string) error {
 	cm.Data[key] = value
 	_, err = d.client.Update(context.Background(), cm, metav1.UpdateOptions{})
 	if err != nil {
-		log.Errorf("update data failed, err: %v", err)
+		errors.LogErrorf("update data failed, err: %v", err)
 		return err
 	}
 	return nil
@@ -265,6 +274,7 @@ func (d *DHCPManager) Set(key, value string) error {
 func (d *DHCPManager) Get(ctx2 context.Context, key string) (string, error) {
 	cm, err := d.client.Get(ctx2, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
+		err = errors.Wrap(err, "d.client.Get(ctx2, config.ConfigMapPodTrafficManager, metav1.GetOptions{}): ")
 		return "", err
 	}
 	if cm != nil && cm.Data != nil {
@@ -272,13 +282,13 @@ func (d *DHCPManager) Get(ctx2 context.Context, key string) (string, error) {
 			return v, nil
 		}
 	}
-	return "", fmt.Errorf("can not get data")
+	return "", errors.Errorf("can not get data")
 }
 
 func (d *DHCPManager) ForEach(fn func(net.IP)) error {
 	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
-		log.Errorf("failed to get cm DHCP server, err: %v", err)
+		errors.LogErrorf("failed to get cm DHCP server, err: %v", err)
 		return err
 	}
 	if cm.Data == nil {
@@ -292,10 +302,12 @@ func (d *DHCPManager) ForEach(fn func(net.IP)) error {
 	}
 	str, err := base64.StdEncoding.DecodeString(cm.Data[config.KeyDHCP])
 	if err != nil {
+		err = errors.Wrap(err, "base64.StdEncoding.DecodeString(cm.Data[config.KeyDHCP]): ")
 		return err
 	}
 	err = dhcp.Restore(d.cidr, str)
 	if err != nil {
+		err = errors.Wrap(err, "dhcp.Restore(d.cidr, str): ")
 		return err
 	}
 	dhcp.ForEach(fn)

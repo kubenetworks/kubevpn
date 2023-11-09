@@ -14,11 +14,13 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 func GetClusterId(client v12.ConfigMapInterface) (types.UID, error) {
 	a, err := client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
+		err = errors.Wrap(err, "Error occurred while getting the client")
 		return "", err
 	}
 	return a.UID, nil
@@ -31,11 +33,13 @@ func IsSameCluster(client v12.ConfigMapInterface, namespace string, clientB v12.
 	ctx := context.Background()
 	a, err := client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
+		err = errors.Wrap(err, "Error occurred while getting the client with context")
 		return false, err
 	}
 	var b *corev1.ConfigMap
 	b, err = clientB.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
+		err = errors.Wrap(err, "Error occurred while getting the clientB with context")
 		return false, err
 	}
 	return a.UID == b.UID, nil
@@ -45,19 +49,23 @@ func ConvertToKubeconfigBytes(factory cmdutil.Factory) ([]byte, string, error) {
 	loader := factory.ToRawKubeConfigLoader()
 	namespace, _, err := loader.Namespace()
 	if err != nil {
+		err = errors.Wrap(err, "Error occurred while loading namespace")
 		return nil, "", err
 	}
 	rawConfig, err := loader.RawConfig()
 	err = api.FlattenConfig(&rawConfig)
 	if err != nil {
+		err = errors.Wrap(err, "Error occurred while flattening the configuration")
 		return nil, "", err
 	}
 	convertedObj, err := latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
 	if err != nil {
+		err = errors.Wrap(err, "Error occurred while converting the scheme to latest version")
 		return nil, "", err
 	}
 	marshal, err := json.Marshal(convertedObj)
 	if err != nil {
+		err = errors.Wrap(err, "Error occurred while marshalling the converted object to JSON")
 		return nil, "", err
 	}
 	return marshal, namespace, nil
@@ -66,14 +74,17 @@ func ConvertToKubeconfigBytes(factory cmdutil.Factory) ([]byte, string, error) {
 func ConvertToTempKubeconfigFile(kubeconfigBytes []byte) (string, error) {
 	temp, err := os.CreateTemp("", "*.tmp.kubeconfig")
 	if err != nil {
+		err = errors.Wrap(err, "os.CreateTemp(\"\", \"*.tmp.kubeconfig\"): ")
 		return "", err
 	}
 	err = temp.Close()
 	if err != nil {
+		err = errors.Wrap(err, "Error occurred while closing the temporary file")
 		return "", err
 	}
 	err = os.WriteFile(temp.Name(), kubeconfigBytes, os.ModePerm)
 	if err != nil {
+		err = errors.Wrap(err, "Error occurred while writing to the temporary file")
 		return "", err
 	}
 	return temp.Name(), nil

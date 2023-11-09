@@ -12,6 +12,7 @@ import (
 	"golang.org/x/text/encoding/simplifiedchinese"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/pkg/errors"
 )
 
 // DeleteBlockFirewallRule Delete all action block firewall rule
@@ -77,7 +78,7 @@ func DeleteAllowFirewallRule() {
 		} else {
 			s = string(out)
 		}
-		log.Errorf("error while exec command: %s, out: %s", cmd.Args, s)
+		errors.LogErrorf("error while exec command: %s, out: %s", cmd.Args, s)
 	}
 }
 
