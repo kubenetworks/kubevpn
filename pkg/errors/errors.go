@@ -12,11 +12,11 @@ type kvError struct {
 	err error
 }
 
+// for dlv breakpoint
+// break dlvStopOnErr
 func dlvStopOnErr(err error) {
 	if err != nil {
-		// dlv stop on error
-		fmt.Printf("Error: %s\nStack trace: %+v\n", err.Error(), err)
-		// panic(err)
+		log.Debugf("Error: %s\nStack trace: %+v\n", err.Error(), err)
 	}
 }
 
@@ -55,7 +55,6 @@ func Wrapf(err error, format string, args ...interface{}) error {
 func LogErrorf(format string, args ...interface{}) error {
 	err := &kvError{err: fmt.Errorf(format, args...)}
 	log.Error(err.Error())
-	fmt.Printf("Stack trace: %+v\n", err)
-	// dlvStopOnErr(err.err)
+	log.Debugf("Stack trace: %+v\n", err)
 	return err
 }
