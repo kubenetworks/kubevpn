@@ -388,6 +388,10 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 			},
 		},
 	}
+	if _, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{}); err != nil {
+		log.Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
+		return err
+	}
 	watchStream, err := clientset.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String(),
 	})
@@ -396,10 +400,6 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 		return err
 	}
 	defer watchStream.Stop()
-	if _, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{}); err != nil {
-		log.Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
-		return err
-	}
 	var ok bool
 	ctx2, cancelFunc := context.WithTimeout(ctx, time.Minute*60)
 	defer cancelFunc()
