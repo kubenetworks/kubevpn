@@ -32,7 +32,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	tunConn, err := listener.Accept()
+	var tunConn net.Conn
+	tunConn, err = listener.Accept()
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer tunConn.Close()
 	tcpConn, err := net.Dial("tcp", ":1080")
 	if err != nil {

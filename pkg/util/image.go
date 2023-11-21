@@ -129,7 +129,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 	}
 	defer os.Remove(file.Name())
 
-	logrus.Infof("Transfering image %s", imageTarget)
+	logrus.Infof("Transferring image %s", imageTarget)
 	filename := filepath.Base(file.Name())
 	cmd := fmt.Sprintf(
 		"(docker load image -i ~/.kubevpn/%s && docker push %s) || (nerdctl image load -i ~/.kubevpn/%s && nerdctl image push %s)",

@@ -1,6 +1,4 @@
 //go:build windows && (x86 || 386)
-// +build windows
-// +build x86 386
 
 package wintun
 

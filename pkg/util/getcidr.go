@@ -56,12 +56,13 @@ func getCIDRFromCNI(clientset *kubernetes.Clientset, restclient *rest.RESTClient
 
 	var cmd = `grep -a -R "service-cluster-ip-range\|cluster-cidr" /etc/cni/proc/*/cmdline | grep -a -v grep | tr "\0" "\n"`
 
-	var result []*net.IPNet
-	content, err := Shell(clientset, restclient, restconfig, pod.Name, "", pod.Namespace, []string{"sh", "-c", cmd})
+	var content string
+	content, err = Shell(clientset, restclient, restconfig, pod.Name, "", pod.Namespace, []string{"sh", "-c", cmd})
 	if err != nil {
 		return nil, err
 	}
 
+	var result []*net.IPNet
 	for _, s := range strings.Split(content, "\n") {
 		result = Deduplicate(append(result, parseCIDRFromString(s)...))
 	}

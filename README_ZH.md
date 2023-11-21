@@ -7,6 +7,8 @@
 [![GitHub License][5]](https://github.com/KubeNetworks/kubevpn/blob/main/LICENSE)
 [![Docker Pulls][6]](https://hub.docker.com/r/naison/kubevpn)
 [![Releases][7]](https://github.com/KubeNetworks/kubevpn/releases)
+[![GoDoc](https://godoc.org/github.com/KubeNetworks/kubevpn?status.png)](https://godoc.org/github.com/KubeNetworks/kubevpn)
+[![Test coverage](http://gocover.io/_badge/github.com/KubeNetworks/kubevpn)](https://gocover.io/github.com/KubeNetworks/kubevpn)
 
 [1]: https://img.shields.io/github/actions/workflow/status/KubeNetworks/kubevpn/release.yml?logo=github
 
