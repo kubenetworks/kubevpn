@@ -167,12 +167,13 @@ jobs:
 
       - name: Build
         run: make kubevpn-windows-amd64
+
   upload-coverage-reports-to-codecov:
-    - runs-on: ubuntu-latest
-      if: ${{ always() }}
-      needs: [ "linux", "macos", "windows" ]
-      steps:
-        - name: Upload coverage reports to Codecov
-          uses: codecov/codecov-action@v3
-          env:
-            CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    needs: [ "linux", "macos", "windows" ]
+    steps:
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v3
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
