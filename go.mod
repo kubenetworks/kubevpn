@@ -57,6 +57,7 @@ require (
 	golang.org/x/text v0.8.0
 	golang.org/x/time v0.3.0
 	golang.zx2c4.com/wintun v0.0.0-20211104114900-415007cec224
+	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	gvisor.dev/gvisor v0.0.0-20230603040744-5c9219dedd33
 	k8s.io/utils v0.0.0-20230313181309-38a27ef9d749
 	sigs.k8s.io/controller-runtime v0.14.5

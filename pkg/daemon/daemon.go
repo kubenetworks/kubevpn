@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/wencaiwulue/kubevpn/pkg/daemon/action"
 	_ "github.com/wencaiwulue/kubevpn/pkg/daemon/handler"
@@ -34,14 +35,28 @@ type SvrOption struct {
 }
 
 func (o *SvrOption) Start(ctx context.Context) error {
-	file, err := os.OpenFile(action.GetDaemonLogPath(), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
-	if err != nil {
-		log.Errorf("open log file error: %v", err)
-		return err
+	l := &lumberjack.Logger{
+		Filename:   action.GetDaemonLogPath(),
+		MaxSize:    100,
+		MaxAge:     3,
+		MaxBackups: 1,
+		LocalTime:  true,
+		Compress:   false,
 	}
-	defer file.Close()
 	util.InitLogger(true)
-	log.StandardLogger().SetOutput(file)
+	log.SetOutput(l)
+	// every day 00:00:00 rotate log
+	go func() {
+		for {
+			nowTime := time.Now()
+			nowTimeStr := nowTime.Format("2006-01-02")
+			t2, _ := time.ParseInLocation("2006-01-02", nowTimeStr, time.Local)
+			next := t2.AddDate(0, 0, 1)
+			after := next.UnixNano() - nowTime.UnixNano() - 1
+			<-time.After(time.Duration(after) * time.Nanosecond)
+			_ = l.Rotate()
+		}
+	}()
 
 	o.ctx, o.cancel = context.WithCancel(ctx)
 	var lc net.ListenConfig
@@ -83,9 +98,11 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	cancel := func() {
 		_ = downgradingServer.Close()
 		o.Stop()
+		_ = l.Rotate()
+		_ = l.Close()
 	}
 	// remember to close http server, otherwise daemon will not quit successfully
-	rpc.RegisterDaemonServer(o.svr, &action.Server{Cancel: cancel, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: file})
+	rpc.RegisterDaemonServer(o.svr, &action.Server{Cancel: cancel, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: l})
 	return downgradingServer.Serve(lis)
 	//return o.svr.Serve(lis)
 }

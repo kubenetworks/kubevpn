@@ -1,10 +1,10 @@
 package action
 
 import (
-	"os"
 	"path/filepath"
 	"time"
 
+	"gopkg.in/natefinch/lumberjack.v2"
 	"k8s.io/client-go/metadata/metadatainformer"
 	"k8s.io/client-go/restmapper"
 
@@ -19,7 +19,7 @@ type Server struct {
 	Cancel    func()
 	GetClient func(isSudo bool) rpc.DaemonClient
 	IsSudo    bool
-	LogFile   *os.File
+	LogFile   *lumberjack.Logger
 
 	t                time.Time
 	connect          *handler.ConnectOptions

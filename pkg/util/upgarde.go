@@ -71,11 +71,8 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 		}
 
 		if !found {
-			var link []string
-			for _, asset := range m.Assets {
-				link = append(link, asset.BrowserDownloadUrl)
-			}
-			err = fmt.Errorf("Can not found latest version url of KubeVPN, you can download it manually: \n%s", strings.Join(link, "\n"))
+			u := "https://github.com/wencaiwulue/kubevpn/releases/latest"
+			err = fmt.Errorf("Can not found latest version url of KubeVPN, you can download it manually: \n%s\n", u)
 			return
 		}
 	}
