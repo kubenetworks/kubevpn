@@ -38,6 +38,7 @@ var (
 )
 
 func TestFunctions(t *testing.T) {
+	Init()
 	kubevpnConnect(t)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(pingPodIP).Pointer()).Name(), pingPodIP)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(dialUDP).Pointer()).Name(), dialUDP)
@@ -306,10 +307,7 @@ func server(port int) {
 }
 
 func kubevpnConnect(t *testing.T) {
-	ctx2, timeoutFunc := context.WithTimeout(context.Background(), 2*time.Hour)
-	defer timeoutFunc()
-
-	cmd := exec.CommandContext(ctx2, "kubevpn", "proxy", "--debug", "deployments/reviews")
+	cmd := exec.Command("kubevpn", "proxy", "--debug", "deployments/reviews")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Log(string(output))
@@ -319,7 +317,7 @@ func kubevpnConnect(t *testing.T) {
 	}
 }
 
-func init1() {
+func Init() {
 	var err error
 
 	configFlags := genericclioptions.NewConfigFlags(true)
