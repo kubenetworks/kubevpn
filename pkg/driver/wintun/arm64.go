@@ -1,5 +1,4 @@
 //go:build windows && arm64
-// +build windows,arm64
 
 package wintun
 

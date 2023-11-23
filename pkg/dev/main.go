@@ -398,7 +398,7 @@ func DoDev(ctx context.Context, devOption *Options, conf *util.SshConfig, flags 
 			return err
 		}
 		if inspect.State == nil {
-			return fmt.Errorf("can not get container status, please make contianer name is valid")
+			return fmt.Errorf("can not get container status, please make container name is valid")
 		}
 		if !inspect.State.Running {
 			return fmt.Errorf("container %s status is %s, expect is running, please make sure your outer docker name is correct", mode.ConnectedContainer(), inspect.State.Status)

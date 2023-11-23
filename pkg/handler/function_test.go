@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,6 +39,7 @@ var (
 )
 
 func TestFunctions(t *testing.T) {
+	Init()
 	kubevpnConnect(t)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(pingPodIP).Pointer()).Name(), pingPodIP)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(dialUDP).Pointer()).Name(), dialUDP)
@@ -306,20 +308,24 @@ func server(port int) {
 }
 
 func kubevpnConnect(t *testing.T) {
-	ctx2, timeoutFunc := context.WithTimeout(context.Background(), 2*time.Hour)
-	defer timeoutFunc()
-
-	cmd := exec.CommandContext(ctx2, "kubevpn", "proxy", "--debug", "deployments/reviews")
-	output, err := cmd.CombinedOutput()
+	cmd := exec.Command("kubevpn", "proxy", "--debug", "deployments/reviews")
+	check := func(log string) {
+		line := "+" + strings.Repeat("-", len(log)-2) + "+"
+		t.Log(line)
+		t.Log(log)
+		t.Log(line)
+		t.Log("\n")
+	}
+	stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, check)
 	if err != nil {
-		t.Log(string(output))
+		t.Log(stdout, stderr)
 		t.Error(err)
 		t.Fail()
 		return
 	}
 }
 
-func init1() {
+func Init() {
 	var err error
 
 	configFlags := genericclioptions.NewConfigFlags(true)

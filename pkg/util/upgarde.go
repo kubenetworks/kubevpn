@@ -40,13 +40,13 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 	var all []byte
 	all, err = io.ReadAll(resp.Body)
 	if err != nil {
-		err = fmt.Errorf("failed to read all reponse from github api, err: %v", err)
+		err = fmt.Errorf("failed to read all response from github api, err: %v", err)
 		return
 	}
 	var m RootEntity
 	err = json.Unmarshal(all, &m)
 	if err != nil {
-		err = fmt.Errorf("failed to unmarshal reponse, err: %v", err)
+		err = fmt.Errorf("failed to unmarshal response, err: %v", err)
 		return
 	}
 	version = m.TagName
