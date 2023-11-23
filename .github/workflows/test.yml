@@ -21,7 +21,7 @@ jobs:
           echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USER }} --password-stdin
           docker buildx create --use
           export VERSION=test
-#          make container
+          make container
   linux:
     runs-on: ubuntu-latest
     needs: [ "image" ]
