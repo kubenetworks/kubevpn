@@ -29,11 +29,16 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
         # Jump to server behind of bastion host or ssh jump host
 		kubevpn ssh --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
-		# it also support ProxyJump, like
+		# It also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────┘
 		kubevpn ssh --ssh-alias <alias>
+
+		# Support ssh auth GSSAPI
+        kubevpn ssh --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
+        kubevpn ssh --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
+        kubevpn ssh --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return daemon.StartupDaemon(cmd.Context())

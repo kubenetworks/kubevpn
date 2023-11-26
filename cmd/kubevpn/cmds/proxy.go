@@ -55,6 +55,10 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
 		kubevpn proxy service/productpage --ssh-alias <alias> --headers a=1
 
+		# Support ssh auth GSSAPI
+        kubevpn proxy service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
+        kubevpn proxy service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
+        kubevpn proxy service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			if err = daemon.StartupDaemon(cmd.Context()); err != nil {
@@ -165,8 +169,8 @@ func addSshFlags(cmd *cobra.Command, sshConf *util.SshConfig) {
 	cmd.Flags().StringVar(&sshConf.ConfigAlias, "ssh-alias", "", "Optional config alias with ~/.ssh/config for SSH authentication")
 	cmd.Flags().StringVar(&sshConf.GSSAPIPassword, "gssapi-password", "", "GSSAPI password")
 	cmd.Flags().StringVar(&sshConf.GSSAPIKeytabConf, "gssapi-keytab", "", "GSSAPI keytab file path")
-	cmd.Flags().StringVar(&sshConf.GSSAPICacheFile, "gssapi-cache", "", "GSSAPI cache file path, use command `kinit -c ~/cache-file-name USERNAME@RELAM` to generate")
-	cmd.Flags().StringVar(&sshConf.RemoteKubeconfig, "remote-kubeconfig", "", "Remote kubeconfig abstract path of ssh server, default is /$ssh-user/.kube/config")
+	cmd.Flags().StringVar(&sshConf.GSSAPICacheFile, "gssapi-cache", "", "GSSAPI cache file path, use command `kinit -c /path/to/cache USERNAME@RELAM` to generate")
+	cmd.Flags().StringVar(&sshConf.RemoteKubeconfig, "remote-kubeconfig", "", "Remote kubeconfig abstract path of ssh server, default is /home/$USERNAME/.kube/config")
 	lookup := cmd.Flags().Lookup("remote-kubeconfig")
 	lookup.NoOptDefVal = "~/.kube/config"
 }

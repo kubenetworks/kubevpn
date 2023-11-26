@@ -59,6 +59,10 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
 		kubevpn clone service/productpage --ssh-alias <alias> --headers a=1
 
+		# Support ssh auth GSSAPI
+        kubevpn clone service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
+        kubevpn clone service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
+        kubevpn clone service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			// not support temporally

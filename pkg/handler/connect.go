@@ -752,11 +752,11 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 		var stdOut []byte
 		var errOut []byte
 		if len(conf.RemoteKubeconfig) != 0 && conf.RemoteKubeconfig[0] == '~' {
-			conf.RemoteKubeconfig = filepath.Join("/", conf.User, conf.RemoteKubeconfig[1:])
+			conf.RemoteKubeconfig = filepath.Join("/home", conf.User, conf.RemoteKubeconfig[1:])
 		}
 		if conf.RemoteKubeconfig == "" {
 			// if `--remote-kubeconfig` is parsed then Entrypoint is reset
-			conf.RemoteKubeconfig = filepath.Join("/", conf.User, clientcmd.RecommendedHomeDir, clientcmd.RecommendedFileName)
+			conf.RemoteKubeconfig = filepath.Join("/home", conf.User, clientcmd.RecommendedHomeDir, clientcmd.RecommendedFileName)
 		}
 		stdOut, errOut, err = util.RemoteRun(conf,
 			fmt.Sprintf("sh -c 'kubectl config view --flatten --raw --kubeconfig %s || minikube kubectl -- config view --flatten --raw --kubeconfig %s'",
