@@ -30,6 +30,10 @@ type SshConfig struct {
 	Keyfile          string
 	ConfigAlias      string
 	RemoteKubeconfig string
+	// GSSAPI
+	GSSAPIKeytabConf string
+	GSSAPIPassword   string
+	GSSAPICacheFile  string
 }
 
 func ParseSshFromRPC(sshJump *rpc.SshJump) *SshConfig {
@@ -43,6 +47,9 @@ func ParseSshFromRPC(sshJump *rpc.SshJump) *SshConfig {
 		Keyfile:          sshJump.Keyfile,
 		ConfigAlias:      sshJump.ConfigAlias,
 		RemoteKubeconfig: sshJump.RemoteKubeconfig,
+		GSSAPIKeytabConf: sshJump.GSSAPIKeytabConf,
+		GSSAPIPassword:   sshJump.GSSAPIPassword,
+		GSSAPICacheFile:  sshJump.GSSAPICacheFile,
 	}
 }
 
@@ -54,6 +61,9 @@ func (s *SshConfig) ToRPC() *rpc.SshJump {
 		Keyfile:          s.Keyfile,
 		ConfigAlias:      s.ConfigAlias,
 		RemoteKubeconfig: s.RemoteKubeconfig,
+		GSSAPIKeytabConf: s.GSSAPIKeytabConf,
+		GSSAPIPassword:   s.GSSAPIPassword,
+		GSSAPICacheFile:  s.GSSAPICacheFile,
 	}
 }
 
@@ -128,9 +138,33 @@ func DialSshRemote(conf *SshConfig) (*ssh.Client, error) {
 	if conf.ConfigAlias != "" {
 		remote, err = jumpRecursion(conf.ConfigAlias)
 	} else {
+		if strings.Index(conf.Addr, ":") < 0 {
+			// use default ssh port 22
+			conf.Addr = net.JoinHostPort(conf.Addr, "22")
+		}
+		host, _, _ := net.SplitHostPort(conf.Addr)
 		var auth []ssh.AuthMethod
+		var c Krb5InitiatorClient
+		var krb5Conf = GetKrb5Path()
 		if conf.Password != "" {
 			auth = append(auth, ssh.Password(conf.Password))
+		} else if conf.GSSAPIPassword != "" {
+			c, err = NewKrb5InitiatorClientWithPassword(conf.User, conf.GSSAPIPassword, krb5Conf)
+			if err != nil {
+				return nil, err
+			}
+			auth = append(auth, ssh.GSSAPIWithMICAuthMethod(&c, host))
+		} else if conf.GSSAPIKeytabConf != "" {
+			c, err = NewKrb5InitiatorClientWithKeytab(conf.User, krb5Conf, conf.GSSAPIKeytabConf)
+			if err != nil {
+				return nil, err
+			}
+		} else if conf.GSSAPICacheFile != "" {
+			c, err = NewKrb5InitiatorClientWithCache(krb5Conf, conf.GSSAPICacheFile)
+			if err != nil {
+				return nil, err
+			}
+			auth = append(auth, ssh.GSSAPIWithMICAuthMethod(&c, host))
 		} else {
 			if conf.Keyfile == "" {
 				conf.Keyfile = filepath.Join(homedir.HomeDir(), ".ssh", "id_rsa")
@@ -151,10 +185,6 @@ func DialSshRemote(conf *SshConfig) (*ssh.Client, error) {
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 			BannerCallback:  ssh.BannerDisplayStderr(),
 			Timeout:         time.Second * 10,
-		}
-		if strings.Index(conf.Addr, ":") < 0 {
-			// use default ssh port 22
-			conf.Addr = net.JoinHostPort(conf.Addr, "22")
 		}
 		// Connect to SSH remote server using serverEndpoint
 		remote, err = ssh.Dial("tcp", conf.Addr, sshConfig)

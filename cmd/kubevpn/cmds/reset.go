@@ -37,6 +37,10 @@ func CmdReset(factory cmdutil.Factory) *cobra.Command {
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
 		kubevpn reset --ssh-alias <alias>
 
+		# Support ssh auth GSSAPI
+        kubevpn reset --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
+        kubevpn reset --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
+        kubevpn reset --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return handler.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false)

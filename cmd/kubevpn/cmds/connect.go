@@ -41,6 +41,10 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
 		kubevpn connect --ssh-alias <alias>
 
+		# Support ssh auth GSSAPI
+        kubevpn connect --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
+        kubevpn connect --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
+        kubevpn connect --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			// startup daemon process and sudo process

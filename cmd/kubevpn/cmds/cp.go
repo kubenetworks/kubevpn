@@ -50,7 +50,12 @@ var cpExample = templates.Examples(i18n.T(`
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
-		kubevpn cp deployment/productpage --ssh-alias <alias>
+		kubevpn cp deployment/productpage:/tmp/foo /tmp/bar --ssh-alias <alias>
+
+		# Support ssh auth GSSAPI
+        kubevpn cp deployment/productpage:/tmp/foo /tmp/bar --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
+        kubevpn cp deployment/productpage:/tmp/foo /tmp/bar --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
+        kubevpn cp deployment/productpage:/tmp/foo /tmp/bar --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 `,
 ))
 

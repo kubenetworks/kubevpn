@@ -228,4 +228,7 @@ message SshJump {
   string Keyfile = 4;
   string ConfigAlias = 5;
   string RemoteKubeconfig = 6;
+  string GSSAPIKeytabConf = 7;
+  string GSSAPIPassword = 8;
+  string GSSAPICacheFile = 9;
 }

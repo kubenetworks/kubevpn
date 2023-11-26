@@ -71,6 +71,11 @@ Startup your kubernetes workloads in local Docker container with same volume、e
         kubevpn dev deployment/authors -n default --kubeconfig ~/.kube/config --ssh-alias dev -i -t --entrypoint /bin/bash
 		  or
         kubevpn dev deployment/authors -n default --kubeconfig ~/.kube/config --ssh-alias dev -it --entrypoint /bin/bash
+
+		# Support ssh auth GSSAPI
+        kubevpn dev deployment/authors -n default --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab -it --entrypoint /bin/bash
+        kubevpn dev deployment/authors -n default --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache -it --entrypoint /bin/bash
+        kubevpn dev deployment/authors -n default --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD> -it --entrypoint /bin/bash
 `)),
 		ValidArgsFunction:     completion.ResourceTypeAndNameCompletionFunc(f),
 		Args:                  cobra.MatchAll(cobra.OnlyValidArgs),
