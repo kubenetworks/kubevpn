@@ -49,6 +49,9 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			config.Header.Set("ssh-keyfile", sshConf.Keyfile)
 			config.Header.Set("ssh-alias", sshConf.ConfigAlias)
 			config.Header.Set("extra-cidr", strings.Join(ExtraCIDR, ","))
+			config.Header.Set("gssapi-password", sshConf.GSSAPIPassword)
+			config.Header.Set("gssapi-keytab", sshConf.GSSAPIKeytabConf)
+			config.Header.Set("gssapi-cache", sshConf.GSSAPICacheFile)
 			client := daemon.GetTCPClient(true)
 			conn, err := websocket.NewClient(config, client)
 			if err != nil {

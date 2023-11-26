@@ -163,6 +163,9 @@ func addSshFlags(cmd *cobra.Command, sshConf *util.SshConfig) {
 	cmd.Flags().StringVar(&sshConf.Password, "ssh-password", "", "Optional password for ssh jump server")
 	cmd.Flags().StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "Optional file with private key for SSH authentication")
 	cmd.Flags().StringVar(&sshConf.ConfigAlias, "ssh-alias", "", "Optional config alias with ~/.ssh/config for SSH authentication")
+	cmd.Flags().StringVar(&sshConf.GSSAPIPassword, "gssapi-password", "", "GSSAPI password")
+	cmd.Flags().StringVar(&sshConf.GSSAPIKeytabConf, "gssapi-keytab", "", "GSSAPI keytab file path")
+	cmd.Flags().StringVar(&sshConf.GSSAPICacheFile, "gssapi-cache", "", "GSSAPI cache file path, use command `kinit -c ~/cache-file-name USERNAME@RELAM` to generate")
 	cmd.Flags().StringVar(&sshConf.RemoteKubeconfig, "remote-kubeconfig", "", "Remote kubeconfig abstract path of ssh server, default is /$ssh-user/.kube/config")
 	lookup := cmd.Flags().Lookup("remote-kubeconfig")
 	lookup.NoOptDefVal = "~/.kube/config"

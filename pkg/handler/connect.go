@@ -671,7 +671,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context, lite bool) error {
 }
 
 func Run(ctx context.Context, servers []core.Server) error {
-	group, _ := errgroup.WithContext(ctx)
+	group, ctx := errgroup.WithContext(ctx)
 	for i := range servers {
 		i := i
 		group.Go(func() error {

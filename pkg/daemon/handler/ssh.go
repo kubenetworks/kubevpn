@@ -36,11 +36,11 @@ type wsHandler struct {
 // 1) start remote kubevpn server
 // 2) start local tunnel
 // 3) ssh terminal
-func (w *wsHandler) handle(ctx context.Context) {
+func (w *wsHandler) handle(ctx2 context.Context) {
 	conn := w.conn
 	sshConfig := w.sshConfig
 	cidr := w.cidr
-	cancel, cancelFunc := context.WithCancel(ctx)
+	ctx, cancelFunc := context.WithCancel(ctx2)
 	defer cancelFunc()
 
 	err := w.remoteInstallKubevpnIfCommandNotFound(ctx, sshConfig)
@@ -55,7 +55,7 @@ func (w *wsHandler) handle(ctx context.Context) {
 		return
 	}
 
-	local, err := w.portMap(cancel, sshConfig)
+	local, err := w.portMap(ctx, sshConfig)
 	if err != nil {
 		w.Log("Port map error: %v", err)
 		return
@@ -91,7 +91,9 @@ func (w *wsHandler) handle(ctx context.Context) {
 		return
 	}
 	go func() {
-		log.Error(handler.Run(cancel, servers))
+		err := handler.Run(ctx, servers)
+		log.Errorf("Run error: %v", err)
+		w.Log("Run error: %v", err)
 	}()
 	tun, err := util.GetTunDevice(clientIP.IP)
 	if err != nil {
@@ -103,16 +105,19 @@ func (w *wsHandler) handle(ctx context.Context) {
 		ticker := time.NewTicker(time.Second * 2)
 		for {
 			select {
-			case <-cancel.Done():
+			case <-ctx.Done():
 				return
 			case <-ticker.C:
 				_, _ = util.Ping(clientIP.IP.String())
 				_, _ = util.Ping(ip.String())
-				_ = exec.CommandContext(cancel, "ping", "-c", "4", "-b", tun.Name, ip.String()).Run()
+				_ = exec.CommandContext(ctx, "ping", "-c", "4", "-b", tun.Name, ip.String()).Run()
 			}
 		}
 	}()
-	err = w.enterTerminal(sshConfig, conn)
+	err = w.terminal(sshConfig, conn)
+	if err != nil {
+		w.Log("Enter terminal error: %v", err)
+	}
 	return
 }
 
@@ -174,7 +179,7 @@ func (w *wsHandler) portMap(ctx context.Context, conf *util.SshConfig) (localPor
 	}
 }
 
-func (w *wsHandler) enterTerminal(conf *util.SshConfig, conn *websocket.Conn) error {
+func (w *wsHandler) terminal(conf *util.SshConfig, conn *websocket.Conn) error {
 	cli, err := util.DialSshRemote(conf)
 	if err != nil {
 		w.Log("Dial remote error: %v", err)
@@ -182,6 +187,7 @@ func (w *wsHandler) enterTerminal(conf *util.SshConfig, conn *websocket.Conn) er
 	}
 	session, err := cli.NewSession()
 	if err != nil {
+		w.Log("New session error: %v", err)
 		return err
 	}
 	defer session.Close()
@@ -190,11 +196,14 @@ func (w *wsHandler) enterTerminal(conf *util.SshConfig, conn *websocket.Conn) er
 	session.Stdin = conn
 
 	fd := int(os.Stdin.Fd())
-	state, err := terminal.MakeRaw(fd)
-	if err != nil {
-		return fmt.Errorf("terminal make raw: %s", err)
+	if !terminal.IsTerminal(fd) {
+		state, err := terminal.MakeRaw(fd)
+		if err != nil {
+			w.Log("Terminal make raw: %s", err)
+			return fmt.Errorf("terminal make raw: %s", err)
+		}
+		defer terminal.Restore(fd, state)
 	}
-	defer terminal.Restore(fd, state)
 
 	width, height, err := terminal.GetSize(fd)
 	if err != nil {
@@ -208,9 +217,11 @@ func (w *wsHandler) enterTerminal(conf *util.SshConfig, conn *websocket.Conn) er
 		ssh.TTY_OP_OSPEED: 14400,
 	}
 	if err := session.RequestPty("xterm", height, width, modes); err != nil {
+		w.Log("Request pty error: %v", err)
 		return err
 	}
 	if err = session.Shell(); err != nil {
+		w.Log("Start shell error: %v", err)
 		return err
 	}
 	return session.Wait()
@@ -275,7 +286,7 @@ func (w *wsHandler) remoteInstallKubevpnIfCommandNotFound(ctx context.Context, s
 	w.Log("Scp kubevpn to remote server ~/.kubevpn/kubevpn")
 	cmds := []string{
 		"chmod +x ~/.kubevpn/kubevpn",
-		"mv ~/.kubevpn/kubevpn /usr/local/bin/kubevpn",
+		"sudo mv ~/.kubevpn/kubevpn /usr/local/bin/kubevpn",
 	}
 	err = util.SCP(w.conn, w.conn, sshConfig, tempBin.Name(), "kubevpn", cmds...)
 	if err != nil {
@@ -304,11 +315,14 @@ func (w *wsHandler) PrintLine(msg string) {
 func init() {
 	http.Handle("/ws", websocket.Handler(func(conn *websocket.Conn) {
 		sshConfig := util.SshConfig{
-			Addr:        conn.Request().Header.Get("ssh-addr"),
-			User:        conn.Request().Header.Get("ssh-username"),
-			Password:    conn.Request().Header.Get("ssh-password"),
-			Keyfile:     conn.Request().Header.Get("ssh-keyfile"),
-			ConfigAlias: conn.Request().Header.Get("ssh-alias"),
+			Addr:             conn.Request().Header.Get("ssh-addr"),
+			User:             conn.Request().Header.Get("ssh-username"),
+			Password:         conn.Request().Header.Get("ssh-password"),
+			Keyfile:          conn.Request().Header.Get("ssh-keyfile"),
+			ConfigAlias:      conn.Request().Header.Get("ssh-alias"),
+			GSSAPIPassword:   conn.Request().Header.Get("gssapi-password"),
+			GSSAPIKeytabConf: conn.Request().Header.Get("gssapi-keytab"),
+			GSSAPICacheFile:  conn.Request().Header.Get("gssapi-cache"),
 		}
 		var extraCIDR []string
 		if v := conn.Request().Header.Get("extra-cidr"); v != "" {
