@@ -1,11 +1,13 @@
 package cmds
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/ssh/terminal"
 	"golang.org/x/net/websocket"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
@@ -62,6 +64,15 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			fd := int(os.Stdin.Fd())
+			if !terminal.IsTerminal(fd) {
+				return fmt.Errorf("stdin is not a terminal")
+			}
+			state, err := terminal.MakeRaw(fd)
+			if err != nil {
+				return fmt.Errorf("terminal make raw: %s", err)
+			}
+			defer terminal.Restore(fd, state)
 			go io.Copy(conn, os.Stdin)
 			_, err = io.Copy(os.Stdout, conn)
 			return err
