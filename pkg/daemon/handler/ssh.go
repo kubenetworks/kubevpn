@@ -196,19 +196,11 @@ func (w *wsHandler) terminal(conf *util.SshConfig, conn *websocket.Conn) error {
 	session.Stdin = conn
 
 	fd := int(os.Stdin.Fd())
-	if !terminal.IsTerminal(fd) {
-		state, err := terminal.MakeRaw(fd)
-		if err != nil {
-			w.Log("Terminal make raw: %s", err)
-			return fmt.Errorf("terminal make raw: %s", err)
-		}
-		defer terminal.Restore(fd, state)
-	}
-
 	width, height, err := terminal.GetSize(fd)
 	if err != nil {
 		w.Log("Terminal get size: %s", err)
-		return fmt.Errorf("terminal get size: %s", err)
+		width = 80
+		height = 40
 	}
 	modes := ssh.TerminalModes{
 		ssh.ECHO:          1,
@@ -302,7 +294,7 @@ func (w *wsHandler) Log(format string, a ...any) {
 	if len(a) != 0 {
 		str = fmt.Sprintf(format, a...)
 	}
-	w.conn.Write([]byte(str + "\n"))
+	w.conn.Write([]byte(str + "\r\n"))
 }
 
 func (w *wsHandler) PrintLine(msg string) {
