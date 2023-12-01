@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -15,9 +18,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/terminal"
 	"golang.org/x/net/websocket"
 	"golang.org/x/oauth2"
+	"k8s.io/client-go/tools/remotecommand"
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/core"
@@ -29,6 +32,10 @@ type wsHandler struct {
 	conn      *websocket.Conn
 	sshConfig *util.SshConfig
 	cidr      []string
+	width     int
+	height    int
+	sessionId string
+	condReady context.CancelFunc
 }
 
 // handle
@@ -114,7 +121,7 @@ func (w *wsHandler) handle(ctx2 context.Context) {
 			}
 		}
 	}()
-	err = w.terminal(sshConfig, conn)
+	err = w.terminal(ctx, sshConfig, conn)
 	if err != nil {
 		w.Log("Enter terminal error: %v", err)
 	}
@@ -179,7 +186,7 @@ func (w *wsHandler) portMap(ctx context.Context, conf *util.SshConfig) (localPor
 	}
 }
 
-func (w *wsHandler) terminal(conf *util.SshConfig, conn *websocket.Conn) error {
+func (w *wsHandler) terminal(ctx context.Context, conf *util.SshConfig, conn *websocket.Conn) error {
 	cli, err := util.DialSshRemote(conf)
 	if err != nil {
 		w.Log("Dial remote error: %v", err)
@@ -191,17 +198,19 @@ func (w *wsHandler) terminal(conf *util.SshConfig, conn *websocket.Conn) error {
 		return err
 	}
 	defer session.Close()
+	go func() {
+		<-ctx.Done()
+		session.Close()
+		cli.Close()
+	}()
 	session.Stdout = conn
 	session.Stderr = conn
 	session.Stdin = conn
 
-	fd := int(os.Stdin.Fd())
-	width, height, err := terminal.GetSize(fd)
-	if err != nil {
-		w.Log("Terminal get size: %s", err)
-		width = 80
-		height = 40
-	}
+	SessionMap[w.sessionId] = session
+	w.condReady()
+
+	width, height := w.width, w.height
 	modes := ssh.TerminalModes{
 		ssh.ECHO:          1,
 		ssh.ECHOCTL:       0,
@@ -304,6 +313,9 @@ func (w *wsHandler) PrintLine(msg string) {
 	w.Log(line)
 }
 
+var SessionMap = make(map[string]*ssh.Session)
+var CondReady = make(map[string]context.Context)
+
 func init() {
 	http.Handle("/ws", websocket.Handler(func(conn *websocket.Conn) {
 		sshConfig := util.SshConfig{
@@ -320,7 +332,62 @@ func init() {
 		if v := conn.Request().Header.Get("extra-cidr"); v != "" {
 			extraCIDR = strings.Split(v, ",")
 		}
-		h := &wsHandler{sshConfig: &sshConfig, conn: conn, cidr: extraCIDR}
-		h.handle(context.Background())
+		width, _ := strconv.Atoi(conn.Request().Header.Get("width"))
+		height, _ := strconv.Atoi(conn.Request().Header.Get("height"))
+		sessionID := conn.Request().Header.Get("session-id")
+		defer delete(SessionMap, sessionID)
+		defer delete(CondReady, sessionID)
+
+		ctx, cancelFunc := context.WithCancel(conn.Request().Context())
+		h := &wsHandler{
+			sshConfig: &sshConfig,
+			conn:      conn,
+			cidr:      extraCIDR,
+			width:     width,
+			height:    height,
+			sessionId: sessionID,
+			condReady: cancelFunc,
+		}
+		CondReady[sessionID] = ctx
+		h.handle(conn.Request().Context())
+	}))
+	http.Handle("/resize", websocket.Handler(func(conn *websocket.Conn) {
+		sessionID := conn.Request().Header.Get("session-id")
+		log.Infof("resize: %s", sessionID)
+
+		var session *ssh.Session
+		select {
+		case <-conn.Request().Context().Done():
+			return
+		case <-CondReady[sessionID].Done():
+			session = SessionMap[sessionID]
+		}
+		if session == nil {
+			return
+		}
+
+		reader := bufio.NewReader(conn)
+		for {
+			readString, err := reader.ReadString('\n')
+			if errors.Is(err, io.EOF) {
+				return
+			} else if err != nil {
+				log.Errorf("failed to read session %s window resize event: %v", sessionID, err)
+				return
+			}
+			var r remotecommand.TerminalSize
+			err = json.Unmarshal([]byte(readString), &r)
+			if err != nil {
+				log.Errorf("unmarshal into terminal size failed: %v", err)
+				continue
+			}
+			log.Debugf("session %s change termianl size to w: %d h:%d", sessionID, r.Width, r.Height)
+			err = session.WindowChange(int(r.Height), int(r.Width))
+			if errors.Is(err, io.EOF) {
+				return
+			} else if err != nil {
+				log.Errorf("session %s windos change w: %d h: %d failed: %v", sessionID, r.Width, r.Height, err)
+			}
+		}
 	}))
 }
