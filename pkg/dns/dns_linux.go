@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/docker/docker/libnetwork/resolvconf"
-	miekgdns "github.com/miekg/dns"
-	log "github.com/sirupsen/logrus"
-
 	"github.com/coredns/caddy"
 	_ "github.com/coredns/coredns/core/dnsserver"
 	_ "github.com/coredns/coredns/core/plugin"
+	"github.com/docker/docker/libnetwork/resolvconf"
+	miekgdns "github.com/miekg/dns"
+	log "github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // systemd-resolve --status, systemd-resolve --flush-caches
@@ -32,12 +32,8 @@ func (c *Config) SetupDNS() error {
 	if err == nil {
 		resolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(readFile)))
 		if err == nil {
-			if len(resolvConf.Servers) != 0 {
-				existNameservers = append(existNameservers, resolvConf.Servers...)
-			}
-			if len(resolvConf.Search) != 0 {
-				existSearches = append(existSearches, resolvConf.Search...)
-			}
+			existNameservers = resolvConf.Servers
+			existSearches = resolvConf.Search
 		}
 	}
 
@@ -72,20 +68,29 @@ func (c *Config) SetupDNS() error {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Debugf("failed to exec cmd: %s, message: %s, ignore", strings.Join(cmd.Args, " "), string(output))
+		err = nil
 	}
 
-	if len(existNameservers) != 0 {
-		clientConfig.Servers = append(clientConfig.Servers, existNameservers...)
+	// add only if not exists
+	for _, nameserver := range existNameservers {
+		if !sets.New[string](clientConfig.Servers...).Has(nameserver) {
+			clientConfig.Servers = append(clientConfig.Servers, nameserver)
+		}
 	}
-	if len(existSearches) != 0 {
-		clientConfig.Search = append(clientConfig.Search, existSearches...)
+	for _, search := range existSearches {
+		if !sets.New[string](clientConfig.Search...).Has(search) {
+			clientConfig.Search = append(clientConfig.Search, search)
+		}
 	}
 
 	if !c.Lite {
-		_ = os.Rename(filename, getBackupFilename(filename))
+		err = os.Rename(filename, getBackupFilename(filename))
+		if err != nil {
+			log.Debugf("failed to backup resolv.conf: %s", err.Error())
+		}
+		err = WriteResolvConf(*clientConfig)
 	}
-
-	return WriteResolvConf(*clientConfig)
+	return err
 }
 
 func SetupLocalDNS(clientConfig *miekgdns.ClientConfig, existNameservers []string) error {
