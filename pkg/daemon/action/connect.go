@@ -39,9 +39,10 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 
 	ctx := resp.Context()
 	if !svr.t.IsZero() {
-		log.Debugf("already connect to another cluster, you can disconnect this connect by command `kubevpn disconnect`")
+		s := "already connected to one cluster, you can use options `--lite` to connect to another cluster"
+		log.Debugf(s)
 		// todo define already connect error?
-		return status.Error(codes.AlreadyExists, "already connect to another cluster, you can disconnect this connect by command `kubevpn disconnect`")
+		return status.Error(codes.AlreadyExists, s)
 	}
 	svr.t = time.Now()
 	svr.connect = &handler.ConnectOptions{

@@ -29,8 +29,21 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		mtu = config.DefaultMTU
 	}
 
+	var interfaces []net.Interface
+	interfaces, err = net.Interfaces()
+	if err != nil {
+		return
+	}
+	maxIndex := -1
+	for _, i := range interfaces {
+		ifIndex := -1
+		_, err := fmt.Sscanf(i.Name, "utun%d", &ifIndex)
+		if err == nil && ifIndex >= 0 && maxIndex < ifIndex {
+			maxIndex = ifIndex
+		}
+	}
 	var device tun.Device
-	if device, err = tun.CreateTUN("utun", mtu); err != nil {
+	if device, err = tun.CreateTUN(fmt.Sprintf("utun%d", maxIndex+1), mtu); err != nil {
 		return
 	}
 
