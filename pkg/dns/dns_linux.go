@@ -72,6 +72,7 @@ func (c *Config) SetupDNS() error {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Debugf("failed to exec cmd: %s, message: %s, ignore", strings.Join(cmd.Args, " "), string(output))
+		err = nil
 	}
 
 	if len(existNameservers) != 0 {
@@ -83,9 +84,9 @@ func (c *Config) SetupDNS() error {
 
 	if !c.Lite {
 		_ = os.Rename(filename, getBackupFilename(filename))
+		err = WriteResolvConf(*clientConfig)
 	}
-
-	return WriteResolvConf(*clientConfig)
+	return err
 }
 
 func SetupLocalDNS(clientConfig *miekgdns.ClientConfig, existNameservers []string) error {
