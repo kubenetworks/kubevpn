@@ -2,7 +2,7 @@
 
 [![GitHub Workflow][1]](https://github.com/KubeNetworks/kubevpn/actions)
 [![Go Version][2]](https://github.com/KubeNetworks/kubevpn/blob/master/go.mod)
-[![Go Report][3]](https://goreportcard.com/badge/github.com/KubeNetworks/kubevpn)
+[![Go Report][3]](https://goreportcard.com/report/github.com/wencaiwulue/kubevpn)
 [![Maintainability][4]](https://codeclimate.com/github/KubeNetworks/kubevpn/maintainability)
 [![GitHub License][5]](https://github.com/KubeNetworks/kubevpn/blob/main/LICENSE)
 [![Docker Pulls][6]](https://hub.docker.com/r/naison/kubevpn)
@@ -13,7 +13,7 @@
 
 [2]: https://img.shields.io/github/go-mod/go-version/KubeNetworks/kubevpn?logo=go
 
-[3]: https://img.shields.io/badge/go%20report-A+-brightgreen.svg?style=flat
+[3]: https://goreportcard.com/badge/github.com/wencaiwulue/kubevpn?style=flat
 
 [4]: https://api.codeclimate.com/v1/badges/b5b30239174fc6603aca/maintainability
 
