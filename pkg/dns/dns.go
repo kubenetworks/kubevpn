@@ -124,6 +124,7 @@ func (c *Config) addHosts(entryList []Entry) error {
 	if err != nil {
 		return err
 	}
+	defer fi.Close()
 	_, err = fi.WriteString(sb.String())
 	return err
 }
