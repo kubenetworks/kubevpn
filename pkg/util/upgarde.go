@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/schollz/progressbar/v3"
+	log "github.com/sirupsen/logrus"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -88,7 +89,9 @@ func Download(client *http.Client, url string, filename string, stdout, stderr i
 	}
 	defer get.Body.Close()
 	total := float64(get.ContentLength) / 1024 / 1024
-	fmt.Printf("Length: 68276642 (%0.2fM)\n", total)
+	s := fmt.Sprintf("Length: %d (%0.2fM)\n", get.ContentLength, total)
+	log.Info(s)
+	io.WriteString(stdout, s)
 
 	var f *os.File
 	f, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)

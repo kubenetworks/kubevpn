@@ -246,7 +246,7 @@ func (w *wsHandler) remoteInstallKubevpnIfCommandNotFound(ctx context.Context, s
 		w.Log("Get latest kubevpn version failed: %v", err)
 		return err
 	}
-	fmt.Printf("The latest version is: %s, commit: %s\n", latestVersion, latestCommit)
+	w.Log("The latest version is: %s, commit: %s", latestVersion, latestCommit)
 	var temp *os.File
 	temp, err = os.CreateTemp("", "")
 	if err != nil {
@@ -304,6 +304,7 @@ func (w *wsHandler) Log(format string, a ...any) {
 		str = fmt.Sprintf(format, a...)
 	}
 	w.conn.Write([]byte(str + "\r\n"))
+	log.Infof(format, a...)
 }
 
 func (w *wsHandler) PrintLine(msg string) {

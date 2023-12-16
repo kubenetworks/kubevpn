@@ -72,7 +72,9 @@ func main(sess *ssh.Session, stdout, stderr io.Writer, filename string, to strin
 
 func sCopy(dst io.Writer, src io.Reader, size int64, stdout, stderr io.Writer) error {
 	total := float64(size) / 1024 / 1024
-	log.Printf("Length: 68276642 (%0.2fM)\n", total)
+	s := fmt.Sprintf("Length: %d (%0.2fM)\n", size, total)
+	log.Info(s)
+	io.WriteString(stdout, s)
 
 	bar := progressbar.NewOptions(int(size),
 		progressbar.OptionSetWriter(stdout),
