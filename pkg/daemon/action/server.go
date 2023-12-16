@@ -2,6 +2,7 @@ package action
 
 import (
 	"path/filepath"
+	"sync"
 	"time"
 
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -20,6 +21,7 @@ type Server struct {
 	GetClient func(isSudo bool) rpc.DaemonClient
 	IsSudo    bool
 	LogFile   *lumberjack.Logger
+	Lock      sync.Mutex
 
 	t                time.Time
 	connect          *handler.ConnectOptions

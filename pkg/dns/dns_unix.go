@@ -194,7 +194,7 @@ func (c *Config) CancelDNS() {
 		_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
 	}
 	//networkCancel()
-	c.updateHosts("")
+	c.removeHosts()
 }
 
 /*

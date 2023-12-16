@@ -1,17 +1,22 @@
 package dns
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
 	miekgdns "github.com/miekg/dns"
+	log "github.com/sirupsen/logrus"
 	v12 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,22 +38,22 @@ type Config struct {
 	Lite bool
 
 	Hosts []Entry
+	Lock  *sync.Mutex
 }
 
 func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInterface, hosts ...Entry) {
 	rateLimiter := flowcontrol.NewTokenBucketRateLimiter(0.2, 1)
 	defer rateLimiter.Stop()
-	var last string
 
 	serviceList, err := serviceInterface.List(ctx, v1.ListOptions{})
+	c.Lock.Lock()
 	if err == nil && len(serviceList.Items) != 0 {
-		entry := c.generateHostsEntry(serviceList.Items, hosts)
-		if entry != "" {
-			if err = c.updateHosts(entry); err == nil {
-				last = entry
-			}
+		hostsEntry := c.generateHostsEntry(serviceList.Items, hosts)
+		if err = c.addHosts(hostsEntry); err != nil {
+			log.Errorf("failed to add hosts(%s): %v", entryList2String(hostsEntry), err)
 		}
 	}
+	c.Lock.Unlock()
 	go func() {
 		for {
 			select {
@@ -68,33 +73,29 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13
 					}
 					defer w.Stop()
 					for {
-						select {
-						case event, ok := <-w.ResultChan():
-							if !ok {
-								return
-							}
-							if watch.Error == event.Type || watch.Bookmark == event.Type {
-								continue
-							}
-							if !rateLimiter.TryAccept() {
-								return
-							}
-							list, err := serviceInterface.List(ctx, v1.ListOptions{})
-							if err != nil {
-								return
-							}
-							entry := c.generateHostsEntry(list.Items, hosts)
-							if entry == "" {
-								continue
-							}
-							if entry == last {
-								continue
-							}
-							if err = c.updateHosts(entry); err != nil {
-								return
-							}
-							last = entry
+						event, ok := <-w.ResultChan()
+						if !ok {
+							return
 						}
+						if watch.Error == event.Type || watch.Bookmark == event.Type {
+							continue
+						}
+						if !rateLimiter.TryAccept() {
+							return
+						}
+						list, err := serviceInterface.List(ctx, v1.ListOptions{})
+						if err != nil {
+							return
+						}
+						func() {
+							c.Lock.Lock()
+							defer c.Lock.Unlock()
+							hostsEntry := c.generateHostsEntry(list.Items, hosts)
+							err := c.addHosts(hostsEntry)
+							if err != nil {
+								log.Errorf("failed to add hosts(%s) to hosts: %v", entryList2String(hostsEntry), err)
+							}
+						}()
 					}
 				}()
 			}
@@ -102,57 +103,79 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13
 	}()
 }
 
-func (c *Config) updateHosts(str string) error {
-	path := GetHostFile()
-	file, err := os.ReadFile(path)
+// param: entry list is needs to added
+// 1) check whether already exist, if exist not needs to add
+// 2) check whether already can find this host, not needs to add
+// 3) otherwise add it to hosts file
+func (c *Config) addHosts(entryList []Entry) error {
+	if len(entryList) == 0 {
+		return nil
+	}
+
+	var sb = new(bytes.Buffer)
+	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
+	for _, e := range entryList {
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.IP, e.Domain, "", config.HostsKeyWord)
+	}
+	_ = w.Flush()
+
+	hostFile := GetHostFile()
+	fi, err := os.OpenFile(hostFile, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
-	lines := strings.Split(string(file), "\n")
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
+	_, err = fi.WriteString(sb.String())
+	return err
+}
+
+func (c *Config) removeHosts() error {
+	c.Lock.Lock()
+	defer c.Lock.Unlock()
+
+	if len(c.Hosts) == 0 {
+		return nil
+	}
+
+	hostFile := GetHostFile()
+	f, err := os.OpenFile(hostFile, os.O_RDWR, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var retain []string
+	reader := bufio.NewReader(f)
+	for {
+		line, err := reader.ReadString('\n')
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		var needsRemove bool
 		if strings.Contains(line, config.HostsKeyWord) {
 			for _, host := range c.Hosts {
-				if strings.Contains(line, host.Domain) {
-					lines = append(lines[:i], lines[i+1:]...)
-					i--
+				if strings.Contains(line, host.IP) && strings.Contains(line, host.Domain) {
+					needsRemove = true
 				}
 			}
 		}
-	}
-	if len(lines) == 0 {
-		return fmt.Errorf("empty hosts file")
-	}
-
-	{ // todo the reason why needs to add this code is that i found delete 127.0.0.1 localhost entry
-		var localhost bool
-		for _, line := range lines {
-			if strings.Contains(line, "localhost") && strings.Contains(line, "127.0.0.1") {
-				localhost = true
-				break
-			}
-		}
-		if !localhost {
-			lines = append(lines, "127.0.0.1 localhost\n")
+		if !needsRemove {
+			retain = append(retain, line)
 		}
 	}
 
-	var sb strings.Builder
-	sb.WriteString(strings.Join(lines, "\n"))
-	if str != "" {
-		sb.WriteString("\n")
-		sb.WriteString(str)
-	}
-	s := sb.String()
-
-	// remove last empty line
-	s = strings.TrimRight(s, "\n")
-
-	if strings.TrimSpace(s) == "" {
-		return fmt.Errorf("empty content after update")
+	if len(retain) == 0 {
+		log.Errorf("hosts files retain line is empty, should not happened")
+		return nil
 	}
 
-	return os.WriteFile(path, []byte(s), 0644)
+	var sb = new(strings.Builder)
+	for _, s := range retain {
+		sb.WriteString(s)
+	}
+	err = f.Truncate(0)
+	_, err = f.Seek(0, 0)
+	_, err = f.WriteString(sb.String())
+	return err
 }
 
 type Entry struct {
@@ -160,7 +183,17 @@ type Entry struct {
 	Domain string
 }
 
-func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) string {
+func entryList2String(entryList []Entry) string {
+	var sb = new(bytes.Buffer)
+	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
+	for _, e := range entryList {
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.IP, e.Domain, "", config.HostsKeyWord)
+	}
+	_ = w.Flush()
+	return sb.String()
+}
+
+func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) []Entry {
 	const ServiceKubernetes = "kubernetes"
 	var entryList = sets.New[Entry]().Insert(c.Hosts...).Insert(hosts...).UnsortedList()
 
@@ -187,7 +220,7 @@ func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) string {
 		return entryList[i].Domain > entryList[j].Domain
 	})
 
-	// if dns already works well, not needs to add it to hosts file
+	// 1) if dns already works well, not needs to add it to hosts file
 	var alreadyCanResolveDomain []Entry
 	for i := 0; i < len(entryList); i++ {
 		go func(e Entry) {
@@ -211,53 +244,39 @@ func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) string {
 		}
 	}
 
-	// if hosts file already contains item, not needs to add it to hosts file
-	file, err := os.ReadFile(GetHostFile())
-	if err != nil {
-		return ""
-	}
-	lines := strings.Split(string(file), "\n")
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		for j := 0; j < len(entryList); j++ {
-			entry := entryList[j]
-			if strings.Contains(line, entry.Domain) && strings.Contains(line, entry.IP) {
-				entryList = append(entryList[:j], entryList[j+1:]...)
-				j--
-			}
-		}
-	}
-
 	c.Hosts = entryList
-	var sb = new(bytes.Buffer)
-	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
-	for _, e := range entryList {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.IP, e.Domain, "", config.HostsKeyWord)
-	}
-	_ = w.Flush()
-	return sb.String()
+	return entryList
 }
 
 func CleanupHosts() error {
 	path := GetHostFile()
-	file, err := os.ReadFile(path)
+	f, err := os.OpenFile(path, os.O_RDWR, 0644)
 	if err != nil {
 		return err
 	}
-	lines := strings.Split(string(file), "\n")
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		if strings.Contains(line, config.HostsKeyWord) {
-			lines = append(lines[:i], lines[i+1:]...)
-			i--
+	defer f.Close()
+
+	var retain []string
+	reader := bufio.NewReader(f)
+	for {
+		line, err := reader.ReadString('\n')
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if !strings.Contains(line, config.HostsKeyWord) {
+			retain = append(retain, line)
 		}
 	}
-	if len(lines) == 0 {
+	if len(retain) == 0 {
 		return fmt.Errorf("empty hosts file")
 	}
 
 	var sb strings.Builder
-	sb.WriteString(strings.Join(lines, "\n"))
-
-	return os.WriteFile(path, []byte(sb.String()), 0644)
+	for _, s := range retain {
+		sb.WriteString(s)
+	}
+	err = f.Truncate(0)
+	_, err = f.Seek(0, 0)
+	_, err = f.WriteString(sb.String())
+	return err
 }

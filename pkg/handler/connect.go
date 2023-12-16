@@ -16,6 +16,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -57,7 +58,6 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/scheme"
-	"k8s.io/utils/clock"
 	"k8s.io/utils/pointer"
 	pkgclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -79,6 +79,7 @@ type ConnectOptions struct {
 	Engine               config.Engine
 	Foreground           bool
 	OriginKubeconfigPath string
+	Lock                 *sync.Mutex
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -263,10 +264,12 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		return
 	}
 	c.deleteFirewallRule(c.ctx)
+	log.Debugf("adding extra hosts...")
 	if err = c.addExtraRoute(c.ctx); err != nil {
 		log.Errorf("add extra route failed: %v", err)
 		return
 	}
+	log.Debugf("setup dns")
 	if err = c.setupDNS(c.ctx, isLite); err != nil {
 		log.Errorf("set up dns failed: %v", err)
 		return
@@ -466,12 +469,11 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 		}
 	}
 
-	manager := wait.NewExponentialBackoffManager(800*time.Millisecond, 30*time.Second, 2*time.Minute, 2.0, 1.0, clock.RealClock{})
-
 	var podNs string
 	var podList *v1.PodList
 	for _, n := range []string{v1.NamespaceAll, c.Namespace} {
-		podList, err = c.clientset.CoreV1().Pods(n).List(ctx, metav1.ListOptions{TimeoutSeconds: pointer.Int64(30)})
+		log.Debugf("list namepsace %s pods", n)
+		podList, err = c.clientset.CoreV1().Pods(n).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			continue
 		}
@@ -508,11 +510,12 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 					})
 					if errs != nil {
 						if utilnet.IsConnectionRefused(errs) || apierrors.IsTooManyRequests(errs) {
-							<-manager.Backoff().C()
+							time.Sleep(time.Second * 10)
+							log.Debugf("watch pod failed, err: %v", errs)
 							return
 						}
 						time.Sleep(time.Second * 5)
-						log.Debugf("wait pod failed, err: %v", errs)
+						log.Debugf("watch pod failed, err: %v", errs)
 						return
 					}
 					defer w.Stop()
@@ -543,9 +546,8 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 	var svcNs string
 	var serviceList *v1.ServiceList
 	for _, n := range []string{v1.NamespaceAll, c.Namespace} {
-		serviceList, err = c.clientset.CoreV1().Services(n).List(ctx, metav1.ListOptions{
-			TimeoutSeconds: pointer.Int64(30),
-		})
+		log.Debugf("list namepsace %s services", n)
+		serviceList, err = c.clientset.CoreV1().Services(n).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			continue
 		}
@@ -578,10 +580,11 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 					})
 					if errs != nil {
 						if utilnet.IsConnectionRefused(errs) || apierrors.IsTooManyRequests(errs) {
-							<-manager.Backoff().C()
+							log.Debugf("watch service failed, err: %v", errs)
+							time.Sleep(time.Second * 10)
 							return
 						}
-						log.Debugf("wait service failed, err: %v", errs)
+						log.Debugf("watch service failed, err: %v", errs)
 						time.Sleep(time.Second * 5)
 						return
 					}
@@ -661,6 +664,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context, lite bool) error {
 		TunName:     tunName,
 		Lite:        lite,
 		Hosts:       c.extraHost,
+		Lock:        c.Lock,
 	}
 	if err = c.dnsConfig.SetupDNS(); err != nil {
 		return err

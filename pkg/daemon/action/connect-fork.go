@@ -38,6 +38,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 		UseLocalDNS:          req.UseLocalDNS,
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
+		Lock:                 &svr.Lock,
 	}
 	var sshConf = util.ParseSshFromRPC(req.SshJump)
 	var transferImage = req.TransferImage
