@@ -245,6 +245,26 @@ func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) []Entry {
 		}
 	}
 
+	// 2) if hosts file already contains item, not needs to add it to hosts file
+	hostFile := GetHostFile()
+	content, err := os.ReadFile(hostFile)
+	if err == nil {
+		reader := bufio.NewReader(strings.NewReader(string(content)))
+		for {
+			readString, err := reader.ReadString('\n')
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			for j := 0; j < len(entryList); j++ {
+				entry := entryList[j]
+				if strings.Contains(readString, entry.Domain) && strings.Contains(readString, entry.IP) {
+					entryList = append(entryList[:j], entryList[j+1:]...)
+					j--
+				}
+			}
+		}
+	}
+
 	c.Hosts = entryList
 	return entryList
 }
