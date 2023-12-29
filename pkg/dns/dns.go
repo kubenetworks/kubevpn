@@ -83,6 +83,27 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13
 						if !rateLimiter.TryAccept() {
 							return
 						}
+						if event.Type == watch.Deleted {
+							svc, ok := event.Object.(*v12.Service)
+							if !ok {
+								continue
+							}
+							var list []Entry
+							for _, p := range sets.New[string](svc.Spec.ClusterIPs...).Insert(svc.Spec.ClusterIP).UnsortedList() {
+								if net.ParseIP(p) == nil {
+									continue
+								}
+								list = append(list, Entry{
+									IP:     p,
+									Domain: svc.Name,
+								})
+							}
+							err = c.removeHosts(list)
+							if err != nil {
+								log.Errorf("failed to remove hosts(%s) to hosts: %v", entryList2String(list), err)
+							}
+							continue
+						}
 						list, err := serviceInterface.List(ctx, v1.ListOptions{})
 						if err != nil {
 							return
@@ -129,12 +150,21 @@ func (c *Config) addHosts(entryList []Entry) error {
 	return err
 }
 
-func (c *Config) removeHosts() error {
+func (c *Config) removeHosts(entryList []Entry) error {
 	c.Lock.Lock()
 	defer c.Lock.Unlock()
 
-	if len(c.Hosts) == 0 {
+	if len(entryList) == 0 {
 		return nil
+	}
+
+	for _, entry := range entryList {
+		for i := 0; i < len(c.Hosts); i++ {
+			if entry == c.Hosts[i] {
+				c.Hosts = append(c.Hosts[:i], c.Hosts[i+1:]...)
+				i--
+			}
+		}
 	}
 
 	hostFile := GetHostFile()
@@ -153,7 +183,7 @@ func (c *Config) removeHosts() error {
 		}
 		var needsRemove bool
 		if strings.Contains(line, config.HostsKeyWord) {
-			for _, host := range c.Hosts {
+			for _, host := range entryList {
 				if strings.Contains(line, host.IP) && strings.Contains(line, host.Domain) {
 					needsRemove = true
 				}

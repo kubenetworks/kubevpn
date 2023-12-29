@@ -50,6 +50,8 @@ func CmdReset(factory cmdutil.Factory) *cobra.Command {
 			if err := connect.InitClient(factory); err != nil {
 				log.Fatal(err)
 			}
+			_ = quit(cmd.Context(), true)
+			_ = quit(cmd.Context(), false)
 			err := connect.Reset(cmd.Context())
 			if err != nil {
 				log.Fatal(err)
