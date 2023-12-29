@@ -46,7 +46,7 @@ func (c *Config) SetupDNS() error {
 }
 
 func (c *Config) CancelDNS() {
-	c.removeHosts()
+	c.removeHosts(c.Hosts)
 	tun, err := net.InterfaceByName(c.TunName)
 	if err != nil {
 		return

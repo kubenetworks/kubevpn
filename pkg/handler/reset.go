@@ -14,32 +14,45 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/pkg/config"
 	"github.com/wencaiwulue/kubevpn/pkg/controlplane"
+	"github.com/wencaiwulue/kubevpn/pkg/dns"
 )
 
 // Reset
-// 1, get all proxy-resources from configmap
-// 2, cleanup all containers
+// 1) quit daemon
+// 2) get all proxy-resources from configmap
+// 3) cleanup all containers
+// 4) cleanup hosts
 func (c *ConnectOptions) Reset(ctx context.Context) error {
 	err := c.LeaveProxyResources(ctx)
 	if err != nil {
 		log.Errorf("leave proxy resources error: %v", err)
+	} else {
+		log.Infof("leave proxy resources success")
 	}
 
-	cleanup(ctx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, false)
-	var cli *client.Client
-	cli, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	log.Infof("cleanup k8s resource")
+	cleanupK8sResource(ctx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, false)
+
+	_ = c.CleanupLocalContainer(ctx)
+
+	_ = dns.CleanupHosts()
+	return err
+}
+
+func (c *ConnectOptions) CleanupLocalContainer(ctx context.Context) error {
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
-		return nil
+		return err
 	}
 	var networkResource types.NetworkResource
 	networkResource, err = cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{})
 	if err != nil {
-		return nil
+		return err
 	}
 	if len(networkResource.Containers) == 0 {
-		return cli.NetworkRemove(ctx, config.ConfigMapPodTrafficManager)
+		err = cli.NetworkRemove(ctx, config.ConfigMapPodTrafficManager)
 	}
-	return nil
+	return err
 }
 
 func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {

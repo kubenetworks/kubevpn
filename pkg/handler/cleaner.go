@@ -60,7 +60,7 @@ func (c *ConnectOptions) Cleanup() {
 		if err == nil && count <= 0 {
 			deployment, errs := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, v1.GetOptions{})
 			if errs == nil && deployment.Status.UnavailableReplicas != 0 {
-				cleanup(ctx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, true)
+				cleanupK8sResource(ctx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, true)
 			}
 		}
 		if err != nil {
@@ -149,7 +149,7 @@ func updateRefCount(ctx context.Context, configMapInterface v12.ConfigMapInterfa
 	return
 }
 
-func cleanup(ctx context.Context, clientset *kubernetes.Clientset, namespace, name string, keepCIDR bool) {
+func cleanupK8sResource(ctx context.Context, clientset *kubernetes.Clientset, namespace, name string, keepCIDR bool) {
 	options := v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)}
 
 	if keepCIDR {

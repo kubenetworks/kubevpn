@@ -116,7 +116,7 @@ func SetupLocalDNS(clientConfig *miekgdns.ClientConfig, existNameservers []strin
 }
 
 func (c *Config) CancelDNS() {
-	c.removeHosts()
+	c.removeHosts(c.Hosts)
 
 	if !c.Lite {
 		filename := filepath.Join("/", "etc", "resolv.conf")
