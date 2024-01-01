@@ -56,7 +56,7 @@ jobs:
           minikube image load --remote naison/kubevpn:test
           minikube image ls
           eval $(minikube docker-env)
-          kubectl apply -f https://raw.githubusercontent.com/KubeNetworks/kubevpn/master/samples/bookinfo.yaml
+          kubectl apply -f https://raw.githubusercontent.com/kubenetworks/kubevpn/master/samples/bookinfo.yaml
 
       - name: Build
         run: |
@@ -121,7 +121,7 @@ jobs:
           minikube image load --remote naison/kubevpn:test
           minikube image ls
           eval $(minikube docker-env)
-          kubectl apply -f https://raw.githubusercontent.com/KubeNetworks/kubevpn/master/samples/bookinfo.yaml
+          kubectl apply -f https://raw.githubusercontent.com/kubenetworks/kubevpn/master/samples/bookinfo.yaml
 
       - name: Build
         run: |

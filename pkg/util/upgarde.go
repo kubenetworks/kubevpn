@@ -18,7 +18,7 @@ import (
 
 var (
 	address = []string{
-		"https://api.github.com/repos/KubeNetworks/kubevpn/releases/latest",
+		"https://api.github.com/repos/kubenetworks/kubevpn/releases/latest",
 		"https://api.github.com/repos/wencaiwulue/kubevpn/releases/latest",
 	}
 )
@@ -80,8 +80,8 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 	return
 }
 
-// https://api.github.com/repos/KubeNetworks/kubevpn/releases
-// https://github.com/KubeNetworks/kubevpn/releases/download/v1.1.13/kubevpn-windows-arm64.exe
+// https://api.github.com/repos/kubenetworks/kubevpn/releases
+// https://github.com/kubenetworks/kubevpn/releases/download/v1.1.13/kubevpn-windows-arm64.exe
 func Download(client *http.Client, url string, filename string, stdout, stderr io.Writer) error {
 	get, err := client.Get(url)
 	if err != nil {

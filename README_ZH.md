@@ -1,46 +1,47 @@
 ![kubevpn](https://raw.githubusercontent.com/wencaiwulue/kubevpn/master/samples/flat_log.png)
 
-[![GitHub Workflow][1]](https://github.com/KubeNetworks/kubevpn/actions)
-[![Go Version][2]](https://github.com/KubeNetworks/kubevpn/blob/master/go.mod)
+[![GitHub Workflow][1]](https://github.com/kubenetworks/kubevpn/actions)
+[![Go Version][2]](https://github.com/kubenetworks/kubevpn/blob/master/go.mod)
 [![Go Report][3]](https://goreportcard.com/report/github.com/wencaiwulue/kubevpn)
-[![Maintainability][4]](https://codeclimate.com/github/KubeNetworks/kubevpn/maintainability)
-[![GitHub License][5]](https://github.com/KubeNetworks/kubevpn/blob/main/LICENSE)
+[![Maintainability][4]](https://codeclimate.com/github/kubenetworks/kubevpn/maintainability)
+[![GitHub License][5]](https://github.com/kubenetworks/kubevpn/blob/main/LICENSE)
 [![Docker Pulls][6]](https://hub.docker.com/r/naison/kubevpn)
-[![Releases][7]](https://github.com/KubeNetworks/kubevpn/releases)
-[![GoDoc](https://godoc.org/github.com/KubeNetworks/kubevpn?status.png)](https://godoc.org/github.com/KubeNetworks/kubevpn)
+[![Releases][7]](https://github.com/kubenetworks/kubevpn/releases)
+[![GoDoc](https://godoc.org/github.com/kubenetworks/kubevpn?status.png)](https://godoc.org/github.com/kubenetworks/kubevpn)
 
-[1]: https://img.shields.io/github/actions/workflow/status/KubeNetworks/kubevpn/release.yml?logo=github
+[1]: https://img.shields.io/github/actions/workflow/status/kubenetworks/kubevpn/release.yml?logo=github
 
-[2]: https://img.shields.io/github/go-mod/go-version/KubeNetworks/kubevpn?logo=go
+[2]: https://img.shields.io/github/go-mod/go-version/kubenetworks/kubevpn?logo=go
 
 [3]: https://goreportcard.com/badge/github.com/wencaiwulue/kubevpn?style=flat
 
 [4]: https://api.codeclimate.com/v1/badges/b5b30239174fc6603aca/maintainability
 
-[5]: https://img.shields.io/github/license/KubeNetworks/kubevpn
+[5]: https://img.shields.io/github/license/kubenetworks/kubevpn
 
 [6]: https://img.shields.io/docker/pulls/naison/kubevpn?logo=docker
 
-[7]: https://img.shields.io/github/v/release/KubeNetworks/kubevpn?logo=smartthings
+[7]: https://img.shields.io/github/v/release/kubenetworks/kubevpn?logo=smartthings
 
 # KubeVPN
 
-[English](README.md) | [中文](README_ZH.md) | [维基](https://github.com/KubeNetworks/kubevpn/wiki/%E6%9E%B6%E6%9E%84)
+[English](README.md) | [中文](README_ZH.md) | [维基](https://github.com/kubenetworks/kubevpn/wiki/%E6%9E%B6%E6%9E%84)
 
-KubeVPN 是一个云原生开发工具, 可以在本地连接云端 kubernetes 网络的工具，可以在本地直接访问远端集群的服务。也可以在远端集群访问到本地服务，便于调试及开发。同时还可以使用开发模式，直接在本地使用 Docker
-将远程容器运行在本地。
+KubeVPN 是一个云原生开发工具。通过连接云端 kubernetes 网络，可以在本地使用 k8s dns 或者 Pod IP / Service IP
+直接访问远端集群中的服务。拦截远端集群中的工作负载的入流量到本地电脑，配合服务网格便于调试及开发。同时还可以使用开发模式，直接在本地使用 Docker
+模拟 k8s pod runtime 将容器运行在本地 (具有相同的环境变量，磁盘和网络)。
 
 ## 快速开始
 
 #### 从 Github release 下载编译好的二进制文件
 
-[链接](https://github.com/KubeNetworks/kubevpn/releases/latest)
+[链接](https://github.com/kubenetworks/kubevpn/releases/latest)
 
 #### 从 自定义 Krew 仓库安装
 
 ```shell
 (
-  kubectl krew index add kubevpn https://github.com/KubeNetworks/kubevpn.git && \
+  kubectl krew index add kubevpn https://github.com/kubenetworks/kubevpn.git && \
   kubectl krew install kubevpn/kubevpn && kubectl kubevpn 
 ) 
 ```
@@ -49,7 +50,7 @@ KubeVPN 是一个云原生开发工具, 可以在本地连接云端 kubernetes �
 
 ```shell
 (
-  git clone https://github.com/KubeNetworks/kubevpn.git && \
+  git clone https://github.com/kubenetworks/kubevpn.git && \
   cd kubevpn && make kubevpn && ./bin/kubevpn
 )
 
@@ -58,7 +59,7 @@ KubeVPN 是一个云原生开发工具, 可以在本地连接云端 kubernetes �
 #### 安装 bookinfo 作为 demo 应用
 
 ```shell
-kubectl apply -f https://raw.githubusercontent.com/KubeNetworks/kubevpn/master/samples/bookinfo.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubenetworks/kubevpn/master/samples/bookinfo.yaml
 ```
 
 ## 功能
