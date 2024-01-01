@@ -27,8 +27,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/cli-runtime/pkg/printers"
 	"k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/client-go/tools/clientcmd"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/scheme"
@@ -47,7 +49,6 @@ type SetImageOptions struct {
 	Infos          []*resource.Info
 	Selector       string
 	DryRunStrategy cmdutil.DryRunStrategy
-	DryRunVerifier *resource.QueryParamVerifier
 	All            bool
 	Output         string
 	Local          bool
@@ -61,7 +62,7 @@ type SetImageOptions struct {
 	Resources              []string
 	ContainerImages        map[string]string
 
-	genericclioptions.IOStreams
+	genericiooptions.IOStreams
 }
 
 // ImageResolver is a func that receives an image name, and
@@ -97,7 +98,7 @@ var (
 )
 
 // NewImageOptions returns an initialized SetImageOptions instance
-func NewImageOptions(streams genericclioptions.IOStreams) *SetImageOptions {
+func NewImageOptions(streams genericiooptions.IOStreams) *SetImageOptions {
 	return &SetImageOptions{
 		PrintFlags:  genericclioptions.NewPrintFlags("image updated").WithTypeSetter(scheme.Scheme),
 		RecordFlags: genericclioptions.NewRecordFlags(),
@@ -109,7 +110,7 @@ func NewImageOptions(streams genericclioptions.IOStreams) *SetImageOptions {
 }
 
 // NewCmdImage returns an initialized Command instance for the 'set image' sub command
-func NewCmdImage(f cmdutil.Factory, streams genericclioptions.IOStreams) *cobra.Command {
+func NewCmdImage(f cmdutil.Factory, streams genericiooptions.IOStreams) *cobra.Command {
 	o := NewImageOptions(streams)
 
 	cmd := &cobra.Command{
@@ -154,11 +155,7 @@ func (o *SetImageOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args [
 	if err != nil {
 		return err
 	}
-	dynamicClient, err := f.DynamicClient()
-	if err != nil {
-		return err
-	}
-	o.DryRunVerifier = resource.NewQueryParamVerifier(dynamicClient, f.OpenAPIGetter(), resource.QueryParamDryRun)
+
 	o.Output = cmdutil.GetFlagString(cmd, "output")
 	o.ResolveImage = ImageResolver
 
@@ -171,7 +168,7 @@ func (o *SetImageOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args [
 	o.PrintObj = printer.PrintObj
 
 	cmdNamespace, enforceNamespace, err := f.ToRawKubeConfigLoader().Namespace()
-	if err != nil {
+	if err != nil && !(o.Local && clientcmd.IsEmptyConfig(err)) {
 		return err
 	}
 
@@ -284,11 +281,6 @@ func (o *SetImageOptions) Run() error {
 			continue
 		}
 
-		if o.DryRunStrategy == cmdutil.DryRunServer {
-			if err := o.DryRunVerifier.HasSupport(info.Mapping.GroupVersionKind); err != nil {
-				return err
-			}
-		}
 		// patch the change
 		actual, err := resource.
 			NewHelper(info.Client, info.Mapping).
