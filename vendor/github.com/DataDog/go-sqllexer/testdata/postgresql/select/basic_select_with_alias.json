@@ -1,0 +1,31 @@
+{
+  "input": "SELECT u.id AS user_id, u.name AS username FROM users u;",
+  "outputs": [
+    {
+      "expected": "SELECT u.id, u.name FROM users u",
+      "statement_metadata": {
+        "size": 11,
+        "tables": [
+          "users"
+        ],
+        "commands": [
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    },
+    {
+      "normalizer_config": {
+        "keep_sql_alias": true
+      },
+      "expected": "SELECT u.id AS user_id, u.name AS username FROM users u"
+    },
+    {
+      "normalizer_config": {
+        "keep_trailing_semicolon": true
+      },
+      "expected": "SELECT u.id, u.name FROM users u;"
+    }
+  ]
+}

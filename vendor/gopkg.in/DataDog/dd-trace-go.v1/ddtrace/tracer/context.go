@@ -9,16 +9,13 @@ import (
 	"context"
 
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace"
-	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/internal"
+	traceinternal "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/internal"
+	"gopkg.in/DataDog/dd-trace-go.v1/internal"
 )
-
-type contextKey struct{}
-
-var activeSpanKey = contextKey{}
 
 // ContextWithSpan returns a copy of the given context which includes the span s.
 func ContextWithSpan(ctx context.Context, s Span) context.Context {
-	return context.WithValue(ctx, activeSpanKey, s)
+	return context.WithValue(ctx, internal.ActiveSpanKey, s)
 }
 
 // SpanFromContext returns the span contained in the given context. A second return
@@ -26,13 +23,13 @@ func ContextWithSpan(ctx context.Context, s Span) context.Context {
 // span is returned.
 func SpanFromContext(ctx context.Context) (Span, bool) {
 	if ctx == nil {
-		return &internal.NoopSpan{}, false
+		return &traceinternal.NoopSpan{}, false
 	}
-	v := ctx.Value(activeSpanKey)
+	v := ctx.Value(internal.ActiveSpanKey)
 	if s, ok := v.(ddtrace.Span); ok {
 		return s, true
 	}
-	return &internal.NoopSpan{}, false
+	return &traceinternal.NoopSpan{}, false
 }
 
 // StartSpanFromContext returns a new span with the given operation name and options. If a span

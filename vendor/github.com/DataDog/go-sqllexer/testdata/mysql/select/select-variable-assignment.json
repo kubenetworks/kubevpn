@@ -1,0 +1,16 @@
+{
+    "input": "SELECT @orderCount := COUNT(*) FROM orders WHERE status = 'Completed';",
+    "outputs": [
+      {
+        "expected": "SELECT @orderCount := COUNT ( * ) FROM orders WHERE status = ?",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

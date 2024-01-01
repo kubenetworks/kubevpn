@@ -1,0 +1,16 @@
+{
+    "input": "INSERT INTO orders (customer_id, status, encrypted_note) VALUES (13, 'Pending', AES_ENCRYPT('Confidential note', 'encryption_key'));",
+    "outputs": [
+      {
+        "expected": "INSERT INTO orders ( customer_id, status, encrypted_note ) VALUES ( ?, AES_ENCRYPT ( ? ) )",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["INSERT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

@@ -1,0 +1,19 @@
+{
+  "input": "UPDATE users SET name = 'John Updated' WHERE id = 1;",
+  "outputs": [
+    {
+      "expected": "UPDATE users SET name = ? WHERE id = ?",
+      "statement_metadata": {
+        "size": 11,
+        "tables": [
+          "users"
+        ],
+        "commands": [
+          "UPDATE"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

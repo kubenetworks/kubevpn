@@ -1,0 +1,25 @@
+{
+  "input": "SELECT jsonb_extract_path_text(data, 'user', 'name') AS user_name FROM user_profiles;",
+  "outputs": [
+    {
+      "expected": "SELECT jsonb_extract_path_text ( data, ?, ? ) FROM user_profiles",
+      "statement_metadata": {
+        "size": 19,
+        "tables": [
+          "user_profiles"
+        ],
+        "commands": [
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    },
+    {
+      "expected": "SELECT jsonb_extract_path_text(data, ?, ?) FROM user_profiles",
+      "normalizer_config": {
+        "remove_space_between_parentheses": true
+      }
+    }
+  ]
+}

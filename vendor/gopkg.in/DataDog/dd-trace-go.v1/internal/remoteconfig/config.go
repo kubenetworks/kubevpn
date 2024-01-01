@@ -30,8 +30,6 @@ type ClientConfig struct {
 	Env string
 	// The time interval between two client polls to the agent for updates
 	PollInterval time.Duration
-	// A list of remote config products this client is interested in
-	Products []string
 	// The tracer's runtime id
 	RuntimeID string
 	// The name of the user's application
@@ -40,8 +38,6 @@ type ClientConfig struct {
 	TracerVersion string
 	// The base TUF root metadata file
 	TUFRoot string
-	// The capabilities of the client
-	Capabilities []Capability
 	// HTTP is the HTTP client used to receive config updates
 	HTTP *http.Client
 }

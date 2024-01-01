@@ -1,0 +1,23 @@
+{
+    "input": "UPDATE products p SET (p.price, p.stock) = (SELECT s.discounted_price, s.quantity FROM sale_items s WHERE s.product_id = p.id) WHERE EXISTS (SELECT 1 FROM sale_items s WHERE s.product_id = p.id);",
+    "outputs": [
+      {
+        "expected": "UPDATE products p SET ( p.price, p.stock ) = ( SELECT s.discounted_price, s.quantity FROM sale_items s WHERE s.product_id = p.id ) WHERE EXISTS ( SELECT ? FROM sale_items s WHERE s.product_id = p.id )",
+        "statement_metadata": {
+          "size": 30,
+          "tables": ["products", "sale_items"],
+          "commands": ["UPDATE", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      },
+      {
+        "expected": "UPDATE products p SET (p.price, p.stock) = (SELECT s.discounted_price, s.quantity FROM sale_items s WHERE s.product_id = p.id) WHERE EXISTS (SELECT ? FROM sale_items s WHERE s.product_id = p.id);",
+        "normalizer_config": {
+            "keep_trailing_semicolon": true,
+            "remove_space_between_parentheses": true
+        }
+      }
+    ]
+  }
+  

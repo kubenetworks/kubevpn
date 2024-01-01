@@ -1,0 +1,21 @@
+{
+  "input": "UPDATE \n  products p\nSET \n  price = CASE \n    WHEN p.stock < 10 THEN p.price * 1.10\n    WHEN p.stock BETWEEN 10 AND 50 THEN p.price\n    ELSE p.price * 0.90\n  END,\n  last_updated = NOW()\nFROM (\n  SELECT \n    product_id, \n    SUM(quantity) AS stock\n  FROM \n    inventory\n  GROUP BY \n    product_id\n) AS sub\nWHERE \n  sub.product_id = p.id;",
+  "outputs": [
+    {
+      "expected": "UPDATE products p SET price = CASE WHEN p.stock < ? THEN p.price * ? WHEN p.stock BETWEEN ? AND ? THEN p.price ELSE p.price * ? END, last_updated = NOW ( ) FROM ( SELECT product_id, SUM ( quantity ) FROM inventory GROUP BY product_id ) WHERE sub.product_id = p.id",
+      "statement_metadata": {
+        "size": 29,
+        "tables": [
+          "products",
+          "inventory"
+        ],
+        "commands": [
+          "UPDATE",
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

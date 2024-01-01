@@ -1,0 +1,22 @@
+{
+    "input": "SELECT id, name FROM users WHERE status = 'active'; -- Single-line comment explaining the query",
+    "outputs": [
+      {
+        "expected": "SELECT id, name FROM users WHERE status = ?",
+        "statement_metadata": {
+          "size": 54,
+          "tables": ["users"],
+          "commands": ["SELECT"],
+          "comments": ["-- Single-line comment explaining the query"],
+          "procedures": []
+        }
+      },
+      {
+        "expected": "SELECT id, name FROM users WHERE status = ?;",
+        "normalizer_config": {
+            "keep_trailing_semicolon": true
+        }
+      }
+    ]
+  }
+  

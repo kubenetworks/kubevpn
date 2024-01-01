@@ -1,0 +1,16 @@
+{
+    "input": "CREATE PROCEDURE SafeUpdate(IN order_id INT, IN new_status VARCHAR(50)) BEGIN DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN -- handle error\n SET @error = 'An error occurred'; END; UPDATE orders SET status = new_status WHERE id = order_id; END;",
+    "outputs": [
+      {
+        "expected": "CREATE PROCEDURE SafeUpdate ( IN order_id INT, IN new_status VARCHAR ( ? ) ) BEGIN DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN SET @error = ?; END; UPDATE orders SET status = new_status WHERE id = order_id; END",
+        "statement_metadata": {
+          "size": 48,
+          "tables": ["orders"],
+          "commands": ["CREATE", "BEGIN", "UPDATE"],
+          "comments": ["-- handle error"],
+          "procedures": ["SafeUpdate"]
+        }
+      }
+    ]
+  }
+  

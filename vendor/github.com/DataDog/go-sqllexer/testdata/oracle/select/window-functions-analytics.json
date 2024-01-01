@@ -1,0 +1,16 @@
+{
+    "input": "SELECT employee_id, test_amt, AVG(yoe) OVER (PARTITION BY department_id) AS avg_department_yoe FROM employees;",
+    "outputs": [
+      {
+        "expected": "SELECT employee_id, test_amt, AVG ( yoe ) OVER ( PARTITION BY department_id ) FROM employees",
+        "statement_metadata": {
+          "size": 15,
+          "tables": ["employees"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

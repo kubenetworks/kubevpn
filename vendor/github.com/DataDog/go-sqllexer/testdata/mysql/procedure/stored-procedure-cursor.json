@@ -1,0 +1,16 @@
+{
+    "input": "CREATE PROCEDURE FetchOrders() BEGIN DECLARE done INT DEFAULT FALSE; DECLARE cur CURSOR FOR SELECT id FROM orders; DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE; OPEN cur; read_loop: LOOP FETCH cur INTO order_id; IF done THEN LEAVE read_loop; END IF; /* process each order */ END LOOP; CLOSE cur; END;",
+    "outputs": [
+      {
+        "expected": "CREATE PROCEDURE FetchOrders ( ) BEGIN DECLARE done INT DEFAULT ?; DECLARE cur CURSOR FOR SELECT id FROM orders; DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = ?; OPEN cur; read_loop : LOOP FETCH cur INTO order_id; IF done THEN LEAVE read_loop; END IF; END LOOP; CLOSE cur; END",
+        "statement_metadata": {
+          "size": 66,
+          "tables": ["orders", "order_id"],
+          "commands": ["CREATE", "BEGIN", "SELECT"],
+          "comments": ["/* process each order */"],
+          "procedures": ["FetchOrders"]
+        }
+      }
+    ]
+  }
+  

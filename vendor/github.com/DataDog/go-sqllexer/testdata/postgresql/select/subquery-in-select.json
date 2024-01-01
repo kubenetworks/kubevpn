@@ -1,0 +1,20 @@
+{
+  "input": "SELECT name, (SELECT COUNT(*) FROM orders WHERE orders.user_id = users.id) AS order_count FROM users;",
+  "outputs": [
+    {
+      "expected": "SELECT name, ( SELECT COUNT ( * ) FROM orders WHERE orders.user_id = users.id ) FROM users",
+      "statement_metadata": {
+        "size": 17,
+        "tables": [
+          "orders",
+          "users"
+        ],
+        "commands": [
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

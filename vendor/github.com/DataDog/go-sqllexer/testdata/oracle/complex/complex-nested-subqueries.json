@@ -1,0 +1,16 @@
+{
+    "input": "SELECT e.employee_id, (SELECT MAX(s.yoe) FROM employees s WHERE s.department_id = e.department_id) AS max_dept_yoe FROM employees e WHERE EXISTS (SELECT 1 FROM departments d WHERE d.id = e.department_id AND d.budget > (SELECT AVG(budget) FROM departments)) ORDER BY e.department_id, e.employee_id;",
+    "outputs": [
+      {
+        "expected": "SELECT e.employee_id, ( SELECT MAX ( s.yoe ) FROM employees s WHERE s.department_id = e.department_id ) FROM employees e WHERE EXISTS ( SELECT ? FROM departments d WHERE d.id = e.department_id AND d.budget > ( SELECT AVG ( budget ) FROM departments ) ) ORDER BY e.department_id, e.employee_id",
+        "statement_metadata": {
+          "size": 26,
+          "tables": ["employees", "departments"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

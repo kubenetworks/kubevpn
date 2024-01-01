@@ -5,7 +5,10 @@
 
 package stat
 
-import "math"
+import (
+	"fmt"
+	"math"
+)
 
 // SummaryStatistics keeps track of the count, the sum, the min and the max of
 // recorded values. We use a compensated sum to avoid accumulating rounding
@@ -28,6 +31,27 @@ func NewSummaryStatistics() *SummaryStatistics {
 		min:             math.Inf(1),
 		max:             math.Inf(-1),
 	}
+}
+
+// NewSummaryStatisticsFromData constructs SummaryStatistics from the provided data.
+func NewSummaryStatisticsFromData(count, sum, min, max float64) (*SummaryStatistics, error) {
+	if !(count >= 0) {
+		return nil, fmt.Errorf("count (%g) must be positive or zero", count)
+	}
+	if count > 0 && min > max {
+		return nil, fmt.Errorf("min (%g) cannot be greater than max (%g) if count (%g) is positive", min, max, count)
+	}
+	if count == 0 && (min != math.Inf(1) || max != math.Inf(-1)) {
+		return nil, fmt.Errorf("empty summary statistics must have min (%g) and max (%g) equal to positive and negative infinities respectively", min, max)
+	}
+	return &SummaryStatistics{
+		count:           count,
+		sum:             sum,
+		sumCompensation: 0,
+		simpleSum:       sum,
+		min:             min,
+		max:             max,
+	}, nil
 }
 
 func (s *SummaryStatistics) Count() float64 {

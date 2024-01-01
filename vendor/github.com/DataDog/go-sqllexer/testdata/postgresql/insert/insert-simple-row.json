@@ -1,0 +1,19 @@
+{
+  "input": "INSERT INTO users (name, email) VALUES ('John Doe', 'john@example.com');",
+  "outputs": [
+    {
+      "expected": "INSERT INTO users ( name, email ) VALUES ( ? )",
+      "statement_metadata": {
+        "size": 11,
+        "tables": [
+          "users"
+        ],
+        "commands": [
+          "INSERT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "input": "SELECT * FROM users TABLESAMPLE BERNOULLI (10);",
+  "outputs": [
+    {
+      "expected": "SELECT * FROM users TABLESAMPLE BERNOULLI ( ? )",
+      "statement_metadata": {
+        "size": 11,
+        "tables": [
+          "users"
+        ],
+        "commands": [
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

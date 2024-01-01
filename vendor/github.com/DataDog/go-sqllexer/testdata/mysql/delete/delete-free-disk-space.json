@@ -1,0 +1,16 @@
+{
+    "input": "DELETE FROM orders WHERE order_date < '2020-01-01'; OPTIMIZE TABLE orders;",
+    "outputs": [
+      {
+        "expected": "DELETE FROM orders WHERE order_date < ?; OPTIMIZE TABLE orders",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["DELETE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

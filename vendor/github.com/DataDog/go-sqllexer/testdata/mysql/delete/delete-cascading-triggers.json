@@ -1,0 +1,16 @@
+{
+    "input": "DELETE FROM customers WHERE id = 1; -- Assumes a trigger exists for cascading delete to orders",
+    "outputs": [
+      {
+        "expected": "DELETE FROM customers WHERE id = ?",
+        "statement_metadata": {
+          "size": 73,
+          "tables": ["customers"],
+          "commands": ["DELETE"],
+          "comments": ["-- Assumes a trigger exists for cascading delete to orders"],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

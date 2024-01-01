@@ -1,0 +1,21 @@
+{
+  "input": "SELECT * FROM customers FULL OUTER JOIN orders ON customers.id = orders.customer_id;",
+  "outputs": [
+    {
+      "expected": "SELECT * FROM customers FULL OUTER JOIN orders ON customers.id = orders.customer_id",
+      "statement_metadata": {
+        "size": 25,
+        "tables": [
+          "customers",
+          "orders"
+        ],
+        "commands": [
+          "SELECT",
+          "JOIN"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

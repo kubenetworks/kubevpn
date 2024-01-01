@@ -1,0 +1,19 @@
+{
+  "input": "SELECT * FROM users ORDER BY created_at DESC FETCH FIRST 10 ROWS ONLY;",
+  "outputs": [
+    {
+      "expected": "SELECT * FROM users ORDER BY created_at DESC FETCH FIRST ? ROWS ONLY",
+      "statement_metadata": {
+        "size": 11,
+        "tables": [
+          "users"
+        ],
+        "commands": [
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

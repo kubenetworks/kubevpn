@@ -1,0 +1,16 @@
+{
+    "input": "CREATE PARTITION FUNCTION myRangePF1 (INT) AS RANGE LEFT FOR VALUES (1, 100, 1000); CREATE PARTITION SCHEME myScheme AS PARTITION myRangePF1 TO ([PRIMARY], [SECONDARY], [TERTIARY]); CREATE TABLE partitionedTable (id INT) ON myScheme(id);",
+    "outputs": [
+      {
+        "expected": "CREATE PARTITION FUNCTION myRangePF? ( INT ) LEFT FOR VALUES ( ? ); CREATE PARTITION SCHEME myScheme myRangePF? TO ( PRIMARY, SECONDARY, TERTIARY ); CREATE TABLE partitionedTable ( id INT ) ON myScheme ( id )",
+        "statement_metadata": {
+          "size": 22,
+          "tables": ["partitionedTable"],
+          "commands": ["CREATE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

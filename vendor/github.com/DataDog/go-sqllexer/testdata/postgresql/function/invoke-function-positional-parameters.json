@@ -1,0 +1,17 @@
+{
+  "input": "SELECT calculate_discount($1, $2);",
+  "outputs": [
+    {
+      "expected": "SELECT calculate_discount ( ? )"
+    },
+    {
+      "obfuscator_config": {
+        "replace_positional_parameter": false
+      },
+      "normalizer_config": {
+        "remove_space_between_parentheses": true
+      },
+      "expected": "SELECT calculate_discount($1, $2)"
+    }
+  ]
+}

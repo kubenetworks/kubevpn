@@ -162,7 +162,7 @@ func (w *weightedRR) topAddressIndex(address []dns.RR) int {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
-	// Dertermine the weight value for each address in the answer
+	// Determine the weight value for each address in the answer
 	var wsum uint
 	type waddress struct {
 		index  int
@@ -199,12 +199,12 @@ func (w *weightedRR) topAddressIndex(address []dns.RR) int {
 	for _, wa := range weightedAddr {
 		psum += uint(wa.weight)
 		if v < psum {
-			return int(wa.index)
+			return wa.index
 		}
 	}
 
 	// we should never reach this
-	log.Errorf("Internal error: cannot find top addres (randv:%v wsum:%v)", v, wsum)
+	log.Errorf("Internal error: cannot find top address (randv:%v wsum:%v)", v, wsum)
 	return -1
 }
 
@@ -254,26 +254,26 @@ func (w *weightedRR) updateWeights() error {
 	scanner := bufio.NewScanner(&buf)
 
 	// Parse the weight file contents
-	err = w.parseWeights(scanner)
+	domains, err := w.parseWeights(scanner)
 	if err != nil {
 		return err
 	}
+
+	// access to weights must be protected
+	w.mutex.Lock()
+	w.domains = domains
+	w.mutex.Unlock()
 
 	log.Infof("Successfully reloaded weight file %s", w.fileName)
 	return nil
 }
 
 // Parse the weight file contents
-func (w *weightedRR) parseWeights(scanner *bufio.Scanner) error {
-	// access to weights must be protected
-	w.mutex.Lock()
-	defer w.mutex.Unlock()
-
-	// Reset domains
-	w.domains = make(map[string]weights)
-
+func (w *weightedRR) parseWeights(scanner *bufio.Scanner) (map[string]weights, error) {
 	var dname string
 	var ws weights
+	domains := make(map[string]weights)
+
 	for scanner.Scan() {
 		nextLine := strings.TrimSpace(scanner.Text())
 		if len(nextLine) == 0 || nextLine[0:1] == "#" {
@@ -285,7 +285,7 @@ func (w *weightedRR) parseWeights(scanner *bufio.Scanner) error {
 		case 1:
 			// (domain) name sanity check
 			if net.ParseIP(fields[0]) != nil {
-				return fmt.Errorf("Wrong domain name:\"%s\" in weight file %s. (Maybe a missing weight value?)",
+				return nil, fmt.Errorf("Wrong domain name:\"%s\" in weight file %s. (Maybe a missing weight value?)",
 					fields[0], w.fileName)
 			}
 			dname = fields[0]
@@ -295,35 +295,35 @@ func (w *weightedRR) parseWeights(scanner *bufio.Scanner) error {
 				dname += "."
 			}
 			var ok bool
-			ws, ok = w.domains[dname]
+			ws, ok = domains[dname]
 			if !ok {
 				ws = make(weights, 0)
-				w.domains[dname] = ws
+				domains[dname] = ws
 			}
 		case 2:
 			// IP address and weight value
 			ip := net.ParseIP(fields[0])
 			if ip == nil {
-				return fmt.Errorf("Wrong IP address:\"%s\" in weight file %s", fields[0], w.fileName)
+				return nil, fmt.Errorf("Wrong IP address:\"%s\" in weight file %s", fields[0], w.fileName)
 			}
 			weight, err := strconv.ParseUint(fields[1], 10, 8)
-			if err != nil {
-				return fmt.Errorf("Wrong weight value:\"%s\" in weight file %s", fields[1], w.fileName)
+			if err != nil || weight == 0 {
+				return nil, fmt.Errorf("Wrong weight value:\"%s\" in weight file %s", fields[1], w.fileName)
 			}
 			witem := &weightItem{address: ip, value: uint8(weight)}
 			if dname == "" {
-				return fmt.Errorf("Missing domain name in weight file %s", w.fileName)
+				return nil, fmt.Errorf("Missing domain name in weight file %s", w.fileName)
 			}
 			ws = append(ws, witem)
-			w.domains[dname] = ws
+			domains[dname] = ws
 		default:
-			return fmt.Errorf("Could not parse weight line:\"%s\" in weight file %s", nextLine, w.fileName)
+			return nil, fmt.Errorf("Could not parse weight line:\"%s\" in weight file %s", nextLine, w.fileName)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("Weight file %s parsing error:%s", w.fileName, err)
+		return nil, fmt.Errorf("Weight file %s parsing error:%s", w.fileName, err)
 	}
 
-	return nil
+	return domains, nil
 }

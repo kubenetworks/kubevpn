@@ -1,0 +1,16 @@
+{
+    "input": "SELECT * FROM customers TABLESAMPLE (10 PERCENT);",
+    "outputs": [
+      {
+        "expected": "SELECT * FROM customers TABLESAMPLE ( ? PERCENT )",
+        "statement_metadata": {
+          "size": 15,
+          "tables": ["customers"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

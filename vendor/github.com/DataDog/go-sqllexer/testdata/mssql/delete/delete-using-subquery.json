@@ -1,0 +1,16 @@
+{
+    "input": "DELETE FROM orders WHERE customer_id IN (SELECT id FROM customers WHERE region = 'West');",
+    "outputs": [
+      {
+        "expected": "DELETE FROM orders WHERE customer_id IN ( SELECT id FROM customers WHERE region = ? )",
+        "statement_metadata": {
+          "size": 27,
+          "tables": ["orders", "customers"],
+          "commands": ["DELETE", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

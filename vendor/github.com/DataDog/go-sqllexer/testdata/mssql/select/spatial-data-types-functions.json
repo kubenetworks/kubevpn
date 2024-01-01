@@ -1,0 +1,16 @@
+{
+    "input": "SELECT geography::Point(latitude, longitude, 4326).ToString() FROM locations;",
+    "outputs": [
+      {
+        "expected": "SELECT geography :: Point ( latitude, longitude, ? ) . ToString ( ) FROM locations",
+        "statement_metadata": {
+          "size": 15,
+          "tables": ["locations"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

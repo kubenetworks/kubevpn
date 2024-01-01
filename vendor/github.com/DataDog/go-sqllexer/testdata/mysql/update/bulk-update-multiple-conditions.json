@@ -1,0 +1,16 @@
+{
+    "input": "UPDATE orders SET status = IF(amount > 1000, 'High Value', 'Regular'), order_date = IF(status = 'Pending', CURDATE(), order_date);",
+    "outputs": [
+      {
+        "expected": "UPDATE orders SET status = IF ( amount > ?, ?, ? ), order_date = IF ( status = ?, CURDATE ( ), order_date )",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["UPDATE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

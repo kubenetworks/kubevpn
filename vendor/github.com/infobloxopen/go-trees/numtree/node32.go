@@ -126,12 +126,26 @@ func (n *Node32) Match(key uint32, bits int) (interface{}, bool) {
 	return r.Value, true
 }
 
+func (n *Node32) Children() (*Node32, *Node32) {
+	return n.chld[0], n.chld[1]
+}
+
 // ExactMatch locates node which exactly matches given key.
 func (n *Node32) ExactMatch(key uint32, bits int) (interface{}, bool) {
+	r := n.FindNode(key, bits)
+
+	if r == nil {
+		return nil, false
+	}
+
+	return r.Value, true
+}
+
+func (n *Node32) FindNode(key uint32, bits int) *Node32 {
 	// If tree is empty -
 	if n == nil {
 		// report nothing.
-		return n, false
+		return nil
 	}
 
 	// Adjust bits.
@@ -143,10 +157,10 @@ func (n *Node32) ExactMatch(key uint32, bits int) (interface{}, bool) {
 
 	r := n.exactMatch(key, uint8(bits))
 	if r == nil {
-		return nil, false
+		return nil
 	}
 
-	return r.Value, true
+	return r
 }
 
 // Delete removes subtree which is contained by given key. The method uses copy on write strategy.

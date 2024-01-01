@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -99,9 +100,18 @@ var (
 
 func init() {
 	if v := os.Getenv("DD_LOGGING_RATE"); v != "" {
-		if sec, err := strconv.ParseUint(v, 10, 64); err != nil {
-			Warn("Invalid value for DD_LOGGING_RATE: %v", err)
+		setLoggingRate(v)
+	}
+}
+
+func setLoggingRate(v string) {
+	if sec, err := strconv.ParseInt(v, 10, 64); err != nil {
+		Warn("Invalid value for DD_LOGGING_RATE: %v", err)
+	} else {
+		if sec < 0 {
+			Warn("Invalid value for DD_LOGGING_RATE: negative value")
 		} else {
+			// DD_LOGGING_RATE = 0 allows to log errors immediately.
 			errrate = time.Duration(sec) * time.Second
 		}
 	}
@@ -195,18 +205,32 @@ func (p *defaultLogger) Log(msg string) { p.l.Print(msg) }
 type DiscardLogger struct{}
 
 // Log implements Logger.
-func (d DiscardLogger) Log(msg string) {}
+func (d DiscardLogger) Log(_ string) {}
 
 // RecordLogger records every call to Log() and makes it available via Logs().
 type RecordLogger struct {
-	m    sync.Mutex
-	logs []string
+	m      sync.Mutex
+	logs   []string
+	ignore []string // a log is ignored if it contains a string in ignored
+}
+
+// Ignore adds substrings to the ignore field of RecordLogger, allowing
+// the RecordLogger to ignore attempts to log strings with certain substrings.
+func (r *RecordLogger) Ignore(substrings ...string) {
+	r.m.Lock()
+	defer r.m.Unlock()
+	r.ignore = append(r.ignore, substrings...)
 }
 
 // Log implements Logger.
 func (r *RecordLogger) Log(msg string) {
 	r.m.Lock()
 	defer r.m.Unlock()
+	for _, ignored := range r.ignore {
+		if strings.Contains(msg, ignored) {
+			return
+		}
+	}
 	r.logs = append(r.logs, msg)
 }
 
@@ -224,4 +248,5 @@ func (r *RecordLogger) Reset() {
 	r.m.Lock()
 	defer r.m.Unlock()
 	r.logs = r.logs[:0]
+	r.ignore = r.ignore[:0]
 }

@@ -1,0 +1,19 @@
+{
+  "input": "DELETE FROM temp_table;",
+  "outputs": [
+    {
+      "expected": "DELETE FROM temp_table",
+      "statement_metadata": {
+        "size": 16,
+        "tables": [
+          "temp_table"
+        ],
+        "commands": [
+          "DELETE"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

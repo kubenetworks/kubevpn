@@ -1,0 +1,16 @@
+{
+    "input": "CREATE TABLE orders_with_virtual (id INT, amount DECIMAL(10, 2), total_incl_tax DECIMAL(10, 2) GENERATED ALWAYS AS (amount * 1.1) STORED);",
+    "outputs": [
+      {
+        "expected": "CREATE TABLE orders_with_virtual ( id INT, amount DECIMAL ( ? ), total_incl_tax DECIMAL ( ? ) GENERATED ALWAYS AS ( amount * ? ) STORED )",
+        "statement_metadata": {
+          "size": 25,
+          "tables": ["orders_with_virtual"],
+          "commands": ["CREATE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

@@ -1,0 +1,19 @@
+{
+  "input": "DELETE FROM user_logins USING users WHERE user_logins.user_id = users.id AND users.status = 'inactive';",
+  "outputs": [
+    {
+      "expected": "DELETE FROM user_logins USING users WHERE user_logins.user_id = users.id AND users.status = ?",
+      "statement_metadata": {
+        "size": 17,
+        "tables": [
+          "user_logins"
+        ],
+        "commands": [
+          "DELETE"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

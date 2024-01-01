@@ -82,6 +82,8 @@ func (h *dnsContext) InspectServerBlocks(sourceFile string, serverBlocks []caddy
 					port = Port
 				case transport.TLS:
 					port = transport.TLSPort
+				case transport.QUIC:
+					port = transport.QUICPort
 				case transport.GRPC:
 					port = transport.GRPCPort
 				case transport.HTTPS:
@@ -169,6 +171,13 @@ func (h *dnsContext) MakeServers() ([]caddy.Server, error) {
 
 		case transport.TLS:
 			s, err := NewServerTLS(addr, group)
+			if err != nil {
+				return nil, err
+			}
+			servers = append(servers, s)
+
+		case transport.QUIC:
+			s, err := NewServerQUIC(addr, group)
 			if err != nil {
 				return nil, err
 			}
@@ -287,7 +296,7 @@ func (h *dnsContext) validateZonesAndListeningAddresses() error {
 	return nil
 }
 
-// groupSiteConfigsByListenAddr groups site configs by their listen
+// groupConfigsByListenAddr groups site configs by their listen
 // (bind) address, so sites that use the same listener can be served
 // on the same server instance. The return value maps the listen
 // address (what you pass into net.Listen) to the list of site configs.

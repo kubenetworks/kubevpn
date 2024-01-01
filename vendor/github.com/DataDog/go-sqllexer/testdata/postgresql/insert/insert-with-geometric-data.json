@@ -1,0 +1,19 @@
+{
+  "input": "INSERT INTO places (name, location) VALUES ('Point Place', point '(10, 20)');",
+  "outputs": [
+    {
+      "expected": "INSERT INTO places ( name, location ) VALUES ( ?, point ? )",
+      "statement_metadata": {
+        "size": 12,
+        "tables": [
+          "places"
+        ],
+        "commands": [
+          "INSERT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

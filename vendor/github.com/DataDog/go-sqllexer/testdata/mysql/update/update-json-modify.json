@@ -1,0 +1,16 @@
+{
+    "input": "UPDATE orders SET details = JSON_SET(details, '$.status', 'Updated') WHERE JSON_EXTRACT(details, '$.priority') = 'High';",
+    "outputs": [
+      {
+        "expected": "UPDATE orders SET details = JSON_SET ( details, ?, ? ) WHERE JSON_EXTRACT ( details, ? ) = ?",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["UPDATE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

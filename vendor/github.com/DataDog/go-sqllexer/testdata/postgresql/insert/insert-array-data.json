@@ -1,0 +1,25 @@
+{
+  "input": "INSERT INTO users (name, favorite_numbers) VALUES ('Array User', ARRAY[3, 6, 9]);",
+  "outputs": [
+    {
+      "expected": "INSERT INTO users ( name, favorite_numbers ) VALUES ( ?, ARRAY [ ? ] )",
+      "statement_metadata": {
+        "size": 11,
+        "tables": [
+          "users"
+        ],
+        "commands": [
+          "INSERT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    },
+    {
+      "expected": "INSERT INTO users (name, favorite_numbers) VALUES (?, ARRAY [?])",
+      "normalizer_config": {
+        "remove_space_between_parentheses": true
+      }
+    }
+  ]
+}

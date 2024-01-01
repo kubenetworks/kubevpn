@@ -21,36 +21,48 @@ const (
 	C = 10.0 / 7.0
 )
 
-// A fast IndexMapping that approximates the memory-optimal LogarithmicMapping by extracting the floor value
-// of the logarithm to the base 2 from the binary representations of floating-point values and cubically
-// interpolating the logarithm in-between.
-// More detailed documentation of this method can be found in:
-// <a href="https://github.com/DataDog/sketches-java/">sketches-java</a>
+// CubicallyInterpolatedMapping is a fast IndexMapping that approximates the
+// memory-optimal LogarithmicMapping by extracting the floor value of the
+// logarithm to the base 2 from the binary representations of floating-point
+// values and cubically interpolating the logarithm in-between. More detailed
+// documentation of this method can be found in: <a
+// href="https://github.com/DataDog/sketches-java/">sketches-java</a>
 type CubicallyInterpolatedMapping struct {
-	relativeAccuracy      float64
-	multiplier            float64
-	normalizedIndexOffset float64
+	gamma             float64 // base
+	indexOffset       float64
+	multiplier        float64 // precomputed for performance
+	minIndexableValue float64
+	maxIndexableValue float64
 }
 
 func NewCubicallyInterpolatedMapping(relativeAccuracy float64) (*CubicallyInterpolatedMapping, error) {
 	if relativeAccuracy <= 0 || relativeAccuracy >= 1 {
 		return nil, errors.New("The relative accuracy must be between 0 and 1.")
 	}
-	return &CubicallyInterpolatedMapping{
-		relativeAccuracy: relativeAccuracy,
-		multiplier:       7.0 / (10 * math.Log1p(2*relativeAccuracy/(1-relativeAccuracy))),
-	}, nil
+	gamma := math.Pow((1+relativeAccuracy)/(1-relativeAccuracy), 10*math.Ln2/7) // > 1
+	m, _ := NewCubicallyInterpolatedMappingWithGamma(gamma, 0)
+	return m, nil
 }
 
 func NewCubicallyInterpolatedMappingWithGamma(gamma, indexOffset float64) (*CubicallyInterpolatedMapping, error) {
 	if gamma <= 1 {
 		return nil, errors.New("Gamma must be greater than 1.")
 	}
+	multiplier := 1 / math.Log2(gamma)
+	adjustedGamma := math.Pow(gamma, 7/(10*math.Ln2))
 	m := CubicallyInterpolatedMapping{
-		relativeAccuracy: 1 - 2/(1+math.Exp(7.0/10*math.Log2(gamma))),
-		multiplier:       1 / math.Log2(gamma),
+		gamma:       gamma,
+		indexOffset: indexOffset,
+		multiplier:  multiplier,
+		minIndexableValue: math.Max(
+			math.Exp2((math.MinInt32-indexOffset)/multiplier+1), // so that index >= MinInt32
+			minNormalFloat64*adjustedGamma,
+		),
+		maxIndexableValue: math.Min(
+			math.Exp2((math.MaxInt32-indexOffset)/multiplier-1),       // so that index <= MaxInt32
+			math.Exp(expOverflow)/(2*adjustedGamma)*(adjustedGamma+1), // so that math.Exp does not overflow
+		),
 	}
-	m.normalizedIndexOffset = indexOffset - m.approximateLog(1)*m.multiplier
 	return &m, nil
 }
 
@@ -60,11 +72,11 @@ func (m *CubicallyInterpolatedMapping) Equals(other IndexMapping) bool {
 		return false
 	}
 	tol := 1e-12
-	return (withinTolerance(m.multiplier, o.multiplier, tol) && withinTolerance(m.normalizedIndexOffset, o.normalizedIndexOffset, tol))
+	return withinTolerance(m.gamma, o.gamma, tol) && withinTolerance(m.indexOffset, o.indexOffset, tol)
 }
 
 func (m *CubicallyInterpolatedMapping) Index(value float64) int {
-	index := m.approximateLog(value)*m.multiplier + m.normalizedIndexOffset
+	index := m.approximateLog(value)*m.multiplier + m.indexOffset
 	if index >= 0 {
 		return int(index)
 	} else {
@@ -73,14 +85,14 @@ func (m *CubicallyInterpolatedMapping) Index(value float64) int {
 }
 
 func (m *CubicallyInterpolatedMapping) Value(index int) float64 {
-	return m.LowerBound(index) * (1 + m.relativeAccuracy)
+	return m.LowerBound(index) * (1 + m.RelativeAccuracy())
 }
 
 func (m *CubicallyInterpolatedMapping) LowerBound(index int) float64 {
-	return m.approximateInverseLog((float64(index) - m.normalizedIndexOffset) / m.multiplier)
+	return m.approximateInverseLog((float64(index) - m.indexOffset) / m.multiplier)
 }
 
-// Return an approximation of log(1) + Math.log(x) / Math.log(base(2)).
+// Return an approximation of Math.log(x) / Math.log(base(2)).
 func (m *CubicallyInterpolatedMapping) approximateLog(x float64) float64 {
 	bits := math.Float64bits(x)
 	e := getExponent(bits)
@@ -100,44 +112,34 @@ func (m *CubicallyInterpolatedMapping) approximateInverseLog(x float64) float64 
 }
 
 func (m *CubicallyInterpolatedMapping) MinIndexableValue() float64 {
-	return math.Max(
-		math.Exp2((math.MinInt32-m.normalizedIndexOffset)/m.multiplier-m.approximateLog(1)+1), // so that index >= MinInt32:w
-		minNormalFloat64*(1+m.relativeAccuracy)/(1-m.relativeAccuracy),
-	)
+	return m.minIndexableValue
 }
 
 func (m *CubicallyInterpolatedMapping) MaxIndexableValue() float64 {
-	return math.Min(
-		math.Exp2((math.MaxInt32-m.normalizedIndexOffset)/m.multiplier-m.approximateLog(float64(1))-1), // so that index <= MaxInt32
-		math.Exp(expOverflow)/(1+m.relativeAccuracy),                                                   // so that math.Exp does not overflow
-	)
+	return m.maxIndexableValue
 }
 
 func (m *CubicallyInterpolatedMapping) RelativeAccuracy() float64 {
-	return m.relativeAccuracy
-}
-
-func (m *CubicallyInterpolatedMapping) gamma() float64 {
-	return math.Exp2(1 / m.multiplier)
+	return 1 - 2/(1+math.Exp(7.0/10*math.Log2(m.gamma)))
 }
 
 func (m *CubicallyInterpolatedMapping) ToProto() *sketchpb.IndexMapping {
 	return &sketchpb.IndexMapping{
-		Gamma:         m.gamma(),
-		IndexOffset:   m.normalizedIndexOffset + m.approximateLog(1)*m.multiplier,
+		Gamma:         m.gamma,
+		IndexOffset:   m.indexOffset,
 		Interpolation: sketchpb.IndexMapping_CUBIC,
 	}
 }
 
 func (m *CubicallyInterpolatedMapping) Encode(b *[]byte) {
 	enc.EncodeFlag(b, enc.FlagIndexMappingBaseCubic)
-	enc.EncodeFloat64LE(b, m.gamma())
-	enc.EncodeFloat64LE(b, m.normalizedIndexOffset)
+	enc.EncodeFloat64LE(b, m.gamma)
+	enc.EncodeFloat64LE(b, m.indexOffset)
 }
 
 func (m *CubicallyInterpolatedMapping) string() string {
 	var buffer bytes.Buffer
-	buffer.WriteString(fmt.Sprintf("relativeAccuracy: %v, multiplier: %v, normalizedIndexOffset: %v\n", m.relativeAccuracy, m.multiplier, m.normalizedIndexOffset))
+	buffer.WriteString(fmt.Sprintf("gamma: %v, indexOffset: %v\n", m.gamma, m.indexOffset))
 	return buffer.String()
 }
 

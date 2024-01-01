@@ -1,0 +1,16 @@
+{
+    "input": "SELECT name, IIF(gender = 'M', 'Male', 'Female') AS GenderDescription FROM employees;",
+    "outputs": [
+      {
+        "expected": "SELECT name, IIF ( gender = ?, ?, ? ) FROM employees",
+        "statement_metadata": {
+          "size": 15,
+          "tables": ["employees"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

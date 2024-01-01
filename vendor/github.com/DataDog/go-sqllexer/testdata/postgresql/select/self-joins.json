@@ -1,0 +1,19 @@
+{
+  "input": "SELECT a.name, b.name FROM employees a, employees b WHERE a.manager_id = b.id;",
+  "outputs": [
+    {
+      "expected": "SELECT a.name, b.name FROM employees a, employees b WHERE a.manager_id = b.id",
+      "statement_metadata": {
+        "size": 15,
+        "tables": [
+          "employees"
+        ],
+        "commands": [
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

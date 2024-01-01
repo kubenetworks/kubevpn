@@ -1,0 +1,27 @@
+{
+    "input": "CREATE OR ALTER PROCEDURE ValidateOrderDetails AS\nBEGIN\n/*\n   Procedure Name: ValidateOrderDetails\n   Purpose: To validate the details of orders before processing.\n   Detailed Description:\n   This procedure runs through each order in the 'orders' table\n   and checks if all required details are present.\n   It updates the 'order_status' table with 'Valid' or 'Invalid'.\n   It's a critical part of the order processing pipeline to ensure data integrity.\n*/\n-- Validation logic\nUPDATE orders SET status = CASE WHEN customer_id IS NOT NULL AND total_amount IS NOT NULL THEN 'Valid' ELSE 'Invalid' END;\nEND;",
+    "outputs": [
+      {
+        "expected": "CREATE OR ALTER PROCEDURE ValidateOrderDetails AS BEGIN UPDATE orders SET status = CASE WHEN customer_id IS NOT NULL AND total_amount IS NOT NULL THEN ? ELSE ? END; END;",
+        "statement_metadata": {
+          "size": 466,
+          "tables": ["orders"],
+          "commands": ["CREATE", "ALTER", "BEGIN", "UPDATE"],
+          "comments": ["/*\n   Procedure Name: ValidateOrderDetails\n   Purpose: To validate the details of orders before processing.\n   Detailed Description:\n   This procedure runs through each order in the 'orders' table\n   and checks if all required details are present.\n   It updates the 'order_status' table with 'Valid' or 'Invalid'.\n   It's a critical part of the order processing pipeline to ensure data integrity.\n*/", "-- Validation logic"],
+          "procedures": ["ValidateOrderDetails"]
+        },
+        "obfuscator_config": {
+            "replace_digits": true
+        },
+        "normalizer_config": {
+            "collect_tables": true,
+            "collect_commands": true,
+            "collect_comments": true,
+            "collect_procedure": true,
+            "keep_trailing_semicolon": true,
+            "remove_space_between_parentheses": true
+        }
+      }
+    ]
+  }
+  

@@ -1,0 +1,24 @@
+{
+    "input": "SELECT /*+ FULL(e) */ employee_id, first_name, last_name FROM employees e WHERE department_id = 10;",
+    "outputs": [
+      {
+        "expected": "SELECT employee_id, first_name, last_name FROM employees e WHERE department_id = ?;",
+        "statement_metadata": {
+          "size": 29,
+          "tables": ["employees"],
+          "commands": ["SELECT"],
+          "comments": ["/*+ FULL(e) */"],
+          "procedures": []
+        },
+        "normalizer_config": {
+            "collect_tables": true,
+            "collect_commands": true,
+            "collect_comments": true,
+            "collect_procedure": true,
+            "keep_trailing_semicolon": true,
+            "remove_space_between_parentheses": true
+        }
+      }
+    ]
+  }
+  

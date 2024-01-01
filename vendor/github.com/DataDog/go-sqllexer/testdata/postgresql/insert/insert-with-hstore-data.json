@@ -1,0 +1,19 @@
+{
+  "input": "INSERT INTO user_profiles (profile) VALUES ('\"height\"=>\"2m\", \"weight\"=>\"70kg\"');",
+  "outputs": [
+    {
+      "expected": "INSERT INTO user_profiles ( profile ) VALUES ( ? )",
+      "statement_metadata": {
+        "size": 19,
+        "tables": [
+          "user_profiles"
+        ],
+        "commands": [
+          "INSERT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+    "input": "SELECT c.name, o.order_date FROM customers c FULL OUTER JOIN orders o ON c.id = o.customer_id WHERE c.region = 'West' OR o.amount > 500;",
+    "outputs": [
+      {
+        "expected": "SELECT c.name, o.order_date FROM customers c FULL OUTER JOIN orders o ON c.id = o.customer_id WHERE c.region = ? OR o.amount > ?",
+        "statement_metadata": {
+          "size": 25,
+          "tables": ["customers", "orders"],
+          "commands": ["SELECT", "JOIN"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

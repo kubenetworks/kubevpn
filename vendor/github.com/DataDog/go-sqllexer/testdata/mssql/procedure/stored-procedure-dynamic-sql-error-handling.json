@@ -1,0 +1,27 @@
+{
+    "input": "CREATE OR ALTER PROCEDURE UpdateOrderStatus @orderId INT, @newStatus NVARCHAR(50) AS BEGIN SET NOCOUNT ON; BEGIN TRY BEGIN TRANSACTION; DECLARE @sql NVARCHAR(MAX) = N'UPDATE orders SET status = ''' + @newStatus + ''' WHERE id = ' + CAST(@orderId AS NVARCHAR(10)) + ';'; EXEC sp_executesql @sql; COMMIT TRANSACTION; END TRY BEGIN CATCH ROLLBACK TRANSACTION; THROW; END CATCH; END;",
+    "outputs": [
+      {
+        "expected": "CREATE OR ALTER PROCEDURE UpdateOrderStatus @orderId INT, @newStatus NVARCHAR(?) AS BEGIN SET NOCOUNT ON; BEGIN TRY BEGIN TRANSACTION; DECLARE @sql NVARCHAR(MAX) = N ? ? + @newStatus + ? ? + CAST(@orderId AS NVARCHAR(?)) + ?; EXEC sp_executesql @sql; COMMIT TRANSACTION; END TRY BEGIN CATCH ROLLBACK TRANSACTION; THROW; END CATCH; END;",
+        "statement_metadata": {
+          "size": 43,
+          "tables": [],
+          "commands": ["CREATE", "ALTER", "BEGIN", "EXEC", "COMMIT"],
+          "comments": [],
+          "procedures": ["UpdateOrderStatus"]
+        },
+        "obfuscator_config": {
+            "replace_digits": true
+        },
+        "normalizer_config": {
+            "collect_tables": true,
+            "collect_commands": true,
+            "collect_comments": true,
+            "collect_procedure": true,
+            "keep_trailing_semicolon": true,
+            "remove_space_between_parentheses": true
+        }
+      }
+    ]
+  }
+  

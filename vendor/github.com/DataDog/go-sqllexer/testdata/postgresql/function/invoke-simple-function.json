@@ -1,0 +1,8 @@
+{
+  "input": "SELECT get_user_count();",
+  "outputs": [
+    {
+      "expected": "SELECT get_user_count ( )"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+    "input": "UPDATE orders SET status = CASE WHEN amount >= 1000 THEN 'High Value' ELSE 'Regular' END;",
+    "outputs": [
+      {
+        "expected": "UPDATE orders SET status = CASE WHEN amount >= ? THEN ? ELSE ? END",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["UPDATE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

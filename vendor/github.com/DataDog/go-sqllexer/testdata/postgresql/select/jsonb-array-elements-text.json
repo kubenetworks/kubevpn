@@ -1,0 +1,25 @@
+{
+  "input": "SELECT jsonb_array_elements_text(data->'tags') AS tag FROM products;",
+  "outputs": [
+    {
+      "expected": "SELECT jsonb_array_elements_text ( data -> ? ) FROM products",
+      "statement_metadata": {
+        "size": 14,
+        "tables": [
+          "products"
+        ],
+        "commands": [
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    },
+    {
+      "expected": "SELECT jsonb_array_elements_text(data -> ?) FROM products",
+      "normalizer_config": {
+        "remove_space_between_parentheses": true
+      }
+    }
+  ]
+}

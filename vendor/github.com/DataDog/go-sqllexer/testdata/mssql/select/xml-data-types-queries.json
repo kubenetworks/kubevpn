@@ -1,0 +1,16 @@
+{
+    "input": "SELECT xmlData.value('(/Customer/Name)[1]', 'nvarchar(100)') AS CustomerName FROM customerRecords;",
+    "outputs": [
+      {
+        "expected": "SELECT xmlData.value ( ? ) FROM customerRecords",
+        "statement_metadata": {
+          "size": 21,
+          "tables": ["customerRecords"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

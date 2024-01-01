@@ -1,0 +1,26 @@
+{
+  "input": "CREATE OR ALTER PROCEDURE UpdateCustomerStatus @customerId INT, @newStatus NVARCHAR(50) AS\nBEGIN\n-- This procedure updates the status of a customer.\n-- It takes the customer ID and the new status as parameters.\nSET NOCOUNT ON;\nUPDATE customers SET status = @newStatus WHERE id = @customerId;\nEND;\nEXEC UpdateCustomerStatus 123, 'Active';",
+  "outputs": [
+    {
+      "expected": "CREATE OR ALTER PROCEDURE UpdateCustomerStatus @customerId INT, @newStatus NVARCHAR(?) AS BEGIN SET NOCOUNT ON; UPDATE customers SET status = @newStatus WHERE id = @customerId; END; EXEC UpdateCustomerStatus ?, ?;",
+      "statement_metadata": {
+        "size": 167,
+        "tables": ["customers"],
+        "commands": ["CREATE", "ALTER", "BEGIN", "UPDATE", "EXEC"],
+        "comments": ["-- This procedure updates the status of a customer.", "-- It takes the customer ID and the new status as parameters."],
+        "procedures": ["UpdateCustomerStatus"]
+      },
+      "obfuscator_config": {
+          "replace_digits": true
+      },
+      "normalizer_config": {
+          "collect_tables": true,
+          "collect_commands": true,
+          "collect_comments": true,
+          "collect_procedure": true,
+          "keep_trailing_semicolon": true,
+          "remove_space_between_parentheses": true
+      }
+    }
+  ]
+}

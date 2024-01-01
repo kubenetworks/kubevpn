@@ -1,0 +1,19 @@
+{
+  "input": "SELECT data->'customer'->>'name' AS customer_name FROM orders;",
+  "outputs": [
+    {
+      "expected": "SELECT data -> ? ->> ? FROM orders",
+      "statement_metadata": {
+        "size": 12,
+        "tables": [
+          "orders"
+        ],
+        "commands": [
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

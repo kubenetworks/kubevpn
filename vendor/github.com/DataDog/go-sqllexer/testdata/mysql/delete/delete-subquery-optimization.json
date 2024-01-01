@@ -1,0 +1,16 @@
+{
+    "input": "DELETE FROM orders WHERE id IN (SELECT id FROM orders WHERE status = 'Failed' LIMIT 10);",
+    "outputs": [
+      {
+        "expected": "DELETE FROM orders WHERE id IN ( SELECT id FROM orders WHERE status = ? LIMIT ? )",
+        "statement_metadata": {
+          "size": 18,
+          "tables": ["orders"],
+          "commands": ["DELETE", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

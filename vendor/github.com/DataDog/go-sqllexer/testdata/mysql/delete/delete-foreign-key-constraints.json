@@ -1,0 +1,16 @@
+{
+    "input": "DELETE FROM orders WHERE id IN (SELECT order_id FROM order_details WHERE quantity = 0);",
+    "outputs": [
+      {
+        "expected": "DELETE FROM orders WHERE id IN ( SELECT order_id FROM order_details WHERE quantity = ? )",
+        "statement_metadata": {
+          "size": 31,
+          "tables": ["orders", "order_details"],
+          "commands": ["DELETE", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

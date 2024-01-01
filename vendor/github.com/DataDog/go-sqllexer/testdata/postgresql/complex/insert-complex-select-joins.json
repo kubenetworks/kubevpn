@@ -1,0 +1,24 @@
+{
+  "input": "INSERT INTO order_summaries (order_id, product_count, total_amount, average_product_price)\nSELECT \n  o.id,\n  COUNT(p.id),\n  SUM(oi.amount),\n  AVG(p.price)\nFROM \n  orders o\nJOIN order_items oi ON o.id = oi.order_id\nJOIN products p ON oi.product_id = p.id\nGROUP BY \n  o.id\nHAVING \n  SUM(oi.amount) > 1000;",
+  "outputs": [
+    {
+      "expected": "INSERT INTO order_summaries ( order_id, product_count, total_amount, average_product_price ) SELECT o.id, COUNT ( p.id ), SUM ( oi.amount ), AVG ( p.price ) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id GROUP BY o.id HAVING SUM ( oi.amount ) > ?",
+      "statement_metadata": {
+        "size": 56,
+        "tables": [
+          "order_summaries",
+          "orders",
+          "order_items",
+          "products"
+        ],
+        "commands": [
+          "INSERT",
+          "SELECT",
+          "JOIN"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

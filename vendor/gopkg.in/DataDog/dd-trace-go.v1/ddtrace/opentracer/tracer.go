@@ -16,7 +16,8 @@
 // Opentracing operation name is what is called resource in Datadog's terms and the Opentracing "component"
 // tag is Datadog's operation name. Meaning that in order to define (in Opentracing terms) a span that
 // has the operation name "/user/profile" and the component "http.request", one would do:
-//  opentracing.StartSpan("http.request", opentracer.ResourceName("/user/profile"))
+//
+//	opentracing.StartSpan("http.request", opentracer.ResourceName("/user/profile"))
 //
 // Some libraries and frameworks are supported out-of-the-box by using our integrations. You can see a list
 // of supported integrations here: https://godoc.org/gopkg.in/DataDog/dd-trace-go.v1/contrib. They are fully
@@ -29,6 +30,7 @@ import (
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/internal"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
+	"gopkg.in/DataDog/dd-trace-go.v1/internal/telemetry"
 
 	opentracing "github.com/opentracing/opentracing-go"
 )
@@ -41,6 +43,8 @@ func New(opts ...tracer.StartOption) opentracing.Tracer {
 }
 
 var _ opentracing.Tracer = (*opentracer)(nil)
+
+var telemetryTags = []string{"integration_name:opentracing"}
 
 // opentracer implements opentracing.Tracer on top of ddtrace.Tracer.
 type opentracer struct{ ddtrace.Tracer }
@@ -63,6 +67,7 @@ func (t *opentracer) StartSpan(operationName string, options ...opentracing.Star
 	for k, v := range sso.Tags {
 		opts = append(opts, tracer.Tag(k, v))
 	}
+	telemetry.GlobalClient.Count(telemetry.NamespaceTracers, "spans_created", 1.0, telemetryTags, true)
 	return &span{
 		Span:       t.Tracer.StartSpan(operationName, opts...),
 		opentracer: t,

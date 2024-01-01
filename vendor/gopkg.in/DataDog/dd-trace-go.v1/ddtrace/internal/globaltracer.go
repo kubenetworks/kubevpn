@@ -45,20 +45,20 @@ var _ ddtrace.Tracer = (*NoopTracer)(nil)
 type NoopTracer struct{}
 
 // StartSpan implements ddtrace.Tracer.
-func (NoopTracer) StartSpan(operationName string, opts ...ddtrace.StartSpanOption) ddtrace.Span {
+func (NoopTracer) StartSpan(_ string, _ ...ddtrace.StartSpanOption) ddtrace.Span {
 	return NoopSpan{}
 }
 
 // SetServiceInfo implements ddtrace.Tracer.
-func (NoopTracer) SetServiceInfo(name, app, appType string) {}
+func (NoopTracer) SetServiceInfo(_, _, _ string) {}
 
 // Extract implements ddtrace.Tracer.
-func (NoopTracer) Extract(carrier interface{}) (ddtrace.SpanContext, error) {
+func (NoopTracer) Extract(_ interface{}) (ddtrace.SpanContext, error) {
 	return NoopSpanContext{}, nil
 }
 
 // Inject implements ddtrace.Tracer.
-func (NoopTracer) Inject(context ddtrace.SpanContext, carrier interface{}) error { return nil }
+func (NoopTracer) Inject(_ ddtrace.SpanContext, _ interface{}) error { return nil }
 
 // Stop implements ddtrace.Tracer.
 func (NoopTracer) Stop() {}
@@ -69,19 +69,19 @@ var _ ddtrace.Span = (*NoopSpan)(nil)
 type NoopSpan struct{}
 
 // SetTag implements ddtrace.Span.
-func (NoopSpan) SetTag(key string, value interface{}) {}
+func (NoopSpan) SetTag(_ string, _ interface{}) {}
 
 // SetOperationName implements ddtrace.Span.
-func (NoopSpan) SetOperationName(operationName string) {}
+func (NoopSpan) SetOperationName(_ string) {}
 
 // BaggageItem implements ddtrace.Span.
-func (NoopSpan) BaggageItem(key string) string { return "" }
+func (NoopSpan) BaggageItem(_ string) string { return "" }
 
 // SetBaggageItem implements ddtrace.Span.
-func (NoopSpan) SetBaggageItem(key, val string) {}
+func (NoopSpan) SetBaggageItem(_, _ string) {}
 
 // Finish implements ddtrace.Span.
-func (NoopSpan) Finish(opts ...ddtrace.FinishOption) {}
+func (NoopSpan) Finish(_ ...ddtrace.FinishOption) {}
 
 // Tracer implements ddtrace.Span.
 func (NoopSpan) Tracer() ddtrace.Tracer { return NoopTracer{} }
@@ -101,4 +101,4 @@ func (NoopSpanContext) SpanID() uint64 { return 0 }
 func (NoopSpanContext) TraceID() uint64 { return 0 }
 
 // ForeachBaggageItem implements ddtrace.SpanContext.
-func (NoopSpanContext) ForeachBaggageItem(handler func(k, v string) bool) {}
+func (NoopSpanContext) ForeachBaggageItem(_ func(k, v string) bool) {}

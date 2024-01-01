@@ -1,0 +1,16 @@
+{
+    "input": "DELETE FROM orders WHERE status = 'Completed' ORDER BY order_date DESC LIMIT 5;",
+    "outputs": [
+      {
+        "expected": "DELETE FROM orders WHERE status = ? ORDER BY order_date DESC LIMIT ?",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["DELETE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

@@ -1,0 +1,16 @@
+{
+    "input": "SELECT * FROM (SELECT customer_id, product_id, amount FROM order_details) AS SourceTable PIVOT (SUM(amount) FOR product_id IN ([1], [2], [3])) AS PivotTable;",
+    "outputs": [
+      {
+        "expected": "SELECT * FROM ( SELECT customer_id, product_id, amount FROM order_details ) PIVOT ( SUM ( amount ) FOR product_id IN ( ? ) )",
+        "statement_metadata": {
+          "size": 19,
+          "tables": ["order_details"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

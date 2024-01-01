@@ -1,0 +1,22 @@
+{
+    "input": "SELECT id, name FROM users WHERE age > 30 AND status = 'active';",
+    "outputs": [
+      {
+        "expected": "SELECT id, name FROM users WHERE age > ? AND status = ?",
+        "statement_metadata": {
+          "size": 11,
+          "tables": ["users"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      },
+      {
+        "expected": "SELECT id, name FROM users WHERE age > ? AND status = ?;",
+        "normalizer_config": {
+            "keep_trailing_semicolon": true
+        }
+      }
+    ]
+  }
+  

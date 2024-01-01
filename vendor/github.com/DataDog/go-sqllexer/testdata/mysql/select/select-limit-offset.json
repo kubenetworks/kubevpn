@@ -1,0 +1,16 @@
+{
+    "input": "SELECT * FROM orders ORDER BY order_date DESC LIMIT 10 OFFSET 5;",
+    "outputs": [
+      {
+        "expected": "SELECT * FROM orders ORDER BY order_date DESC LIMIT ? OFFSET ?",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

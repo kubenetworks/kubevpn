@@ -19,5 +19,14 @@ func shouldSample(rate float64, r *rand.Rand, lock *sync.Mutex) bool {
 	}
 	lock.Unlock()
 	return true
+}
 
+func copySlice(src []string) []string {
+	if src == nil {
+		return nil
+	}
+
+	c := make([]string, len(src))
+	copy(c, src)
+	return c
 }

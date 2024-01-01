@@ -1,0 +1,16 @@
+{
+    "input": "INSERT INTO orders (customer_id, order_date, status) OUTPUT INSERTED.id VALUES (3, GETDATE(), 'Processing');",
+    "outputs": [
+      {
+        "expected": "INSERT INTO orders ( customer_id, order_date, status ) OUTPUT INSERTED.id VALUES ( ?, GETDATE ( ), ? )",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["INSERT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

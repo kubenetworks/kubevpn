@@ -31,4 +31,7 @@ const (
 	// RemoteUserRate specifies that the span was sampled
 	// with a user specified remote rate.
 	RemoteUserRate SamplerName = 6
+	// SingleSpan specifies that the span was sampled by single
+	// span sampling rules.
+	SingleSpan SamplerName = 8
 )

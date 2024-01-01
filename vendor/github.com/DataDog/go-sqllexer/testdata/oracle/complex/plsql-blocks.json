@@ -1,0 +1,16 @@
+{
+    "input": "DECLARE x NUMBER; BEGIN SELECT COUNT(*) INTO x FROM employees; DBMS_OUTPUT.PUT_LINE('Count: ' || x); END;",
+    "outputs": [
+      {
+        "expected": "DECLARE x NUMBER; BEGIN SELECT COUNT ( * ) INTO x FROM employees; DBMS_OUTPUT.PUT_LINE ( ? || x ); END",
+        "statement_metadata": {
+          "size": 21,
+          "tables": ["x", "employees"],
+          "commands": ["BEGIN", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

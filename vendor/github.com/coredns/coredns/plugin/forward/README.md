@@ -97,7 +97,7 @@ forward FROM TO... {
   As an upper bound for **MAX**, consider that each concurrent query will use about 2kb of memory.
 
 Also note the TLS config is "global" for the whole forwarding proxy if you need a different
-`tls-name` for different upstreams you're out of luck.
+`tls_servername` for different upstreams you're out of luck.
 
 On each endpoint, the timeouts for communication are set as follows:
 
@@ -115,19 +115,27 @@ plugin is also enabled:
 
 If monitoring is enabled (via the *prometheus* plugin) then the following metric are exported:
 
-* `coredns_forward_requests_total{to}` - query count per upstream.
-* `coredns_forward_responses_total{to}` - Counter of responses received per upstream.
-* `coredns_forward_request_duration_seconds{to, rcode, type}` - duration per upstream, RCODE, type
-* `coredns_forward_responses_total{to, rcode}` - count of RCODEs per upstream.
-* `coredns_forward_healthcheck_failures_total{to}` - number of failed health checks per upstream.
-* `coredns_forward_healthcheck_broken_total{}` - counter of when all upstreams are unhealthy,
+* `coredns_forward_healthcheck_broken_total{}` - count of when all upstreams are unhealthy,
   and we are randomly (this always uses the `random` policy) spraying to an upstream.
-* `coredns_forward_max_concurrent_rejects_total{}` - counter of the number of queries rejected because the
+* `coredns_forward_max_concurrent_rejects_total{}` - count of queries rejected because the
   number of concurrent queries were at maximum.
-* `coredns_forward_conn_cache_hits_total{to, proto}` - counter of connection cache hits per upstream and protocol.
-* `coredns_forward_conn_cache_misses_total{to, proto}` - counter of connection cache misses per upstream and protocol.
+* `coredns_proxy_request_duration_seconds{proxy_name="forward", to, rcode}` - histogram per upstream, RCODE
+* `coredns_proxy_healthcheck_failures_total{proxy_name="forward", to, rcode}`- count of failed health checks per upstream.
+* `coredns_proxy_conn_cache_hits_total{proxy_name="forward", to, proto}`- count of connection cache hits per upstream and protocol.
+* `coredns_proxy_conn_cache_misses_total{proxy_name="forward", to, proto}` - count of connection cache misses per upstream and protocol.
+
 Where `to` is one of the upstream servers (**TO** from the config), `rcode` is the returned RCODE
 from the upstream, `proto` is the transport protocol like `udp`, `tcp`, `tcp-tls`.
+
+The following metrics have recently been deprecated:
+* `coredns_forward_healthcheck_failures_total{to, rcode}`
+  * Can be replaced with `coredns_proxy_healthcheck_failures_total{proxy_name="forward", to, rcode}`
+* `coredns_forward_requests_total{to}`
+  * Can be replaced with `sum(coredns_proxy_request_duration_seconds_count{proxy_name="forward", to})`
+* `coredns_forward_responses_total{to, rcode}`
+  * Can be replaced with `coredns_proxy_request_duration_seconds_count{proxy_name="forward", to, rcode}`
+* `coredns_forward_request_duration_seconds{to, rcode}`
+  * Can be replaced with `coredns_proxy_request_duration_seconds{proxy_name="forward", to, rcode}`
 
 ## Examples
 
@@ -248,13 +256,13 @@ Or when you have multiple DoT upstreams with different `tls_servername`s, you ca
 }
 
 .:5301 {
-    forward . 8.8.8.8 8.8.4.4 {
+    forward . tls://8.8.8.8 tls://8.8.4.4 {
         tls_servername dns.google
     }
 }
 
 .:5302 {
-    forward . 1.1.1.1 1.0.0.1 {
+    forward . tls://1.1.1.1 tls://1.0.0.1 {
         tls_servername cloudflare-dns.com
     }
 }

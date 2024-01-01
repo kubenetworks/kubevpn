@@ -32,3 +32,8 @@ func (w *udpWriter) Write(data []byte) (int, error) {
 func (w *udpWriter) Close() error {
 	return w.conn.Close()
 }
+
+// GetTransportName returns the transport used by the sender
+func (w *udpWriter) GetTransportName() string {
+	return writerNameUDP
+}

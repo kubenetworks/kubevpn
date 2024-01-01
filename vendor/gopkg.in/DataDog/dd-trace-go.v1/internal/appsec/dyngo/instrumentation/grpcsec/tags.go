@@ -6,30 +6,29 @@
 package grpcsec
 
 import (
-	"encoding/json"
-
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/appsec/dyngo/instrumentation"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/appsec/dyngo/instrumentation/httpsec"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/log"
 )
 
-// SetSecurityEventTags sets the AppSec-specific span tags when a security event
-// occurred into the service entry span.
-func SetSecurityEventTags(span ddtrace.Span, events []json.RawMessage, md map[string][]string) {
-	if err := setSecurityEventTags(span, events, md); err != nil {
-		log.Error("appsec: %v", err)
+// SetSecurityEventsTags sets the AppSec events span tags.
+func SetSecurityEventsTags(span ddtrace.Span, events []any) {
+	if err := setSecurityEventsTags(span, events); err != nil {
+		log.Error("appsec: unexpected error while creating the appsec events tags: %v", err)
 	}
 }
 
-func setSecurityEventTags(span ddtrace.Span, events []json.RawMessage, md map[string][]string) error {
-	if err := instrumentation.SetEventSpanTags(span, events); err != nil {
-		return err
+func setSecurityEventsTags(span ddtrace.Span, events []any) error {
+	if events == nil {
+		return nil
 	}
+	return instrumentation.SetEventSpanTags(span, events)
+}
 
+// SetRequestMetadataTags sets the gRPC request metadata span tags.
+func SetRequestMetadataTags(span ddtrace.Span, md map[string][]string) {
 	for h, v := range httpsec.NormalizeHTTPHeaders(md) {
 		span.SetTag("grpc.metadata."+h, v)
 	}
-
-	return nil
 }

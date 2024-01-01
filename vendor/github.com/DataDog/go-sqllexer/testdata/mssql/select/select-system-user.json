@@ -1,0 +1,16 @@
+{
+    "input": "SELECT SYSTEM_USER AS CurrentSystemUser, USER_NAME() AS CurrentDatabaseUser, NEWID() AS UniqueIdentifier;",
+    "outputs": [
+      {
+        "expected": "SELECT SYSTEM_USER, USER_NAME ( ), NEWID ( )",
+        "statement_metadata": {
+          "size": 6,
+          "tables": [],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

@@ -1,0 +1,16 @@
+{
+    "input": "DELETE FROM orders OUTPUT DELETED.* WHERE status = 'Shipped';",
+    "outputs": [
+      {
+        "expected": "DELETE FROM orders OUTPUT DELETED. * WHERE status = ?",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["DELETE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

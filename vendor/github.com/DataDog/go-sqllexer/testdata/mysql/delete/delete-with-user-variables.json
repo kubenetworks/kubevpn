@@ -1,0 +1,16 @@
+{
+    "input": "SET @max_id = (SELECT MAX(id) FROM orders); DELETE FROM orders WHERE id = @max_id;",
+    "outputs": [
+      {
+        "expected": "SET @max_id = ( SELECT MAX ( id ) FROM orders ); DELETE FROM orders WHERE id = @max_id",
+        "statement_metadata": {
+          "size": 18,
+          "tables": ["orders"],
+          "commands": ["SELECT", "DELETE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

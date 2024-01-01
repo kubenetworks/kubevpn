@@ -1,0 +1,26 @@
+{
+  "input": "UPDATE products SET price = (SELECT MAX(price) FROM products) * 0.9 WHERE name = 'Old Product';",
+  "outputs": [
+    {
+      "expected": "UPDATE products SET price = ( SELECT MAX ( price ) FROM products ) * ? WHERE name = ?",
+      "statement_metadata": {
+        "size": 20,
+        "tables": [
+          "products"
+        ],
+        "commands": [
+          "UPDATE",
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    },
+    {
+      "expected": "UPDATE products SET price = (SELECT MAX(price) FROM products) * ? WHERE name = ?",
+      "normalizer_config": {
+        "remove_space_between_parentheses": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+    "input": "SELECT * FROM (SELECT year, product, amount FROM sales) MODEL DIMENSION BY (year) MEASURES (product, amount) RULES (amount['2023'] = amount['2022'] * 1.1);",
+    "outputs": [
+      {
+        "expected": "SELECT * FROM ( SELECT year, product, amount FROM sales ) MODEL DIMENSION BY ( year ) MEASURES ( product, amount ) RULES ( amount [ ? ] = amount [ ? ] * ? )",
+        "statement_metadata": {
+          "size": 11,
+          "tables": ["sales"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      },
+      {
+        "expected": "SELECT * FROM (SELECT year, product, amount FROM sales) MODEL DIMENSION BY (year) MEASURES (product, amount) RULES (amount [?] = amount [?] * ?);",
+        "normalizer_config": {
+            "keep_trailing_semicolon": true,
+            "remove_space_between_parentheses": true
+        }
+      }
+    ]
+  }
+  

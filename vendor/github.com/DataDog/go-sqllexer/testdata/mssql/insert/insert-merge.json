@@ -1,0 +1,16 @@
+{
+    "input": "MERGE INTO orders AS target USING (SELECT customer_id, order_date, status FROM incoming_orders) AS source ON target.id = source.id WHEN NOT MATCHED THEN INSERT (customer_id, order_date, status) VALUES (source.customer_id, source.order_date, source.status);",
+    "outputs": [
+      {
+        "expected": "MERGE INTO orders USING ( SELECT customer_id, order_date, status FROM incoming_orders ) ON target.id = source.id WHEN NOT MATCHED THEN INSERT ( customer_id, order_date, status ) VALUES ( source.customer_id, source.order_date, source.status )",
+        "statement_metadata": {
+          "size": 38,
+          "tables": ["orders", "incoming_orders"],
+          "commands": ["MERGE", "SELECT", "INSERT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

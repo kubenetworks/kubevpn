@@ -1,0 +1,14 @@
+{
+  "input": "SELECT * FROM orders WHERE status IN ($1, $2, $3);",
+  "outputs": [
+    {
+      "expected": "SELECT * FROM orders WHERE status IN ( ? )"
+    },
+    {
+      "obfuscator_config": {
+        "replace_positional_parameter": false
+      },
+      "expected": "SELECT * FROM orders WHERE status IN ( $1, $2, $3 )"
+    }
+  ]
+}

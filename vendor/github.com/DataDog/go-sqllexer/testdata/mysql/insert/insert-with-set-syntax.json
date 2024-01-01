@@ -1,0 +1,16 @@
+{
+    "input": "INSERT INTO orders SET customer_id = 8, status = 'Processing', order_date = CURDATE();",
+    "outputs": [
+      {
+        "expected": "INSERT INTO orders SET customer_id = ?, status = ?, order_date = CURDATE ( )",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["INSERT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

@@ -1,0 +1,14 @@
+{
+  "input": "INSERT INTO orders (product_id, quantity, total) VALUES ($1, $2, $3) RETURNING id;",
+  "outputs": [
+    {
+      "expected": "INSERT INTO orders ( product_id, quantity, total ) VALUES ( ? ) RETURNING id"
+    },
+    {
+      "obfuscator_config": {
+        "replace_positional_parameter": false
+      },
+      "expected": "INSERT INTO orders ( product_id, quantity, total ) VALUES ( $1, $2, $3 ) RETURNING id"
+    }
+  ]
+}

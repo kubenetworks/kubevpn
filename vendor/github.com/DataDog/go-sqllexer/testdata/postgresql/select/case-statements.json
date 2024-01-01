@@ -1,0 +1,19 @@
+{
+  "input": "SELECT name, CASE WHEN age < 18 THEN 'minor' ELSE 'adult' END FROM users;",
+  "outputs": [
+    {
+      "expected": "SELECT name, CASE WHEN age < ? THEN ? ELSE ? END FROM users",
+      "statement_metadata": {
+        "size": 11,
+        "tables": [
+          "users"
+        ],
+        "commands": [
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

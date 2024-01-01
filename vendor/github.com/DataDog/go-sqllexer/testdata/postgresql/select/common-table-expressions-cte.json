@@ -1,0 +1,21 @@
+{
+  "input": "WITH recursive_subordinates AS (\n    SELECT id, manager_id FROM employees WHERE id = 1\n    UNION ALL\n    SELECT e.id, e.manager_id FROM employees e INNER JOIN recursive_subordinates rs ON rs.id = e.manager_id\n)\nSELECT * FROM recursive_subordinates;",
+  "outputs": [
+    {
+      "expected": "WITH recursive_subordinates AS ( SELECT id, manager_id FROM employees WHERE id = ? UNION ALL SELECT e.id, e.manager_id FROM employees e INNER JOIN recursive_subordinates rs ON rs.id = e.manager_id ) SELECT * FROM recursive_subordinates",
+      "statement_metadata": {
+        "size": 41,
+        "tables": [
+          "employees",
+          "recursive_subordinates"
+        ],
+        "commands": [
+          "SELECT",
+          "JOIN"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

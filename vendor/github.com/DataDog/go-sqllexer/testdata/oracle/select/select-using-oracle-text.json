@@ -1,0 +1,23 @@
+{
+    "input": "SELECT id, title FROM articles WHERE CONTAINS(text, 'Oracle', 1) > 0;",
+    "outputs": [
+      {
+        "expected": "SELECT id, title FROM articles WHERE CONTAINS ( text, ?, ? ) > ?",
+        "statement_metadata": {
+          "size": 14,
+          "tables": ["articles"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      },
+      {
+        "expected": "SELECT id, title FROM articles WHERE CONTAINS(text, ?, ?) > ?;",
+        "normalizer_config": {
+            "keep_trailing_semicolon": true,
+            "remove_space_between_parentheses": true
+        }
+      }
+    ]
+  }
+  

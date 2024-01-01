@@ -1,0 +1,21 @@
+{
+  "input": "WITH updated AS (\n  UPDATE users SET name = 'CTE Updated' WHERE id = 6 RETURNING *\n)\nSELECT * FROM updated;",
+  "outputs": [
+    {
+      "expected": "WITH updated AS ( UPDATE users SET name = ? WHERE id = ? RETURNING * ) SELECT * FROM updated",
+      "statement_metadata": {
+        "size": 24,
+        "tables": [
+          "users",
+          "updated"
+        ],
+        "commands": [
+          "UPDATE",
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

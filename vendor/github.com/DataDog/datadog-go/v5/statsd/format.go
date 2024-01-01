@@ -6,13 +6,14 @@ import (
 )
 
 var (
-	gaugeSymbol        = []byte("g")
-	countSymbol        = []byte("c")
-	histogramSymbol    = []byte("h")
-	distributionSymbol = []byte("d")
-	setSymbol          = []byte("s")
-	timingSymbol       = []byte("ms")
-	tagSeparatorSymbol = ","
+	gaugeSymbol         = []byte("g")
+	countSymbol         = []byte("c")
+	histogramSymbol     = []byte("h")
+	distributionSymbol  = []byte("d")
+	setSymbol           = []byte("s")
+	timingSymbol        = []byte("ms")
+	tagSeparatorSymbol  = ","
+	nameSeparatorSymbol = ":"
 )
 
 func appendHeader(buffer []byte, namespace string, name string) []byte {
@@ -101,6 +102,7 @@ func appendFloatMetric(buffer []byte, typeSymbol []byte, namespace string, globa
 	buffer = append(buffer, typeSymbol...)
 	buffer = appendRate(buffer, rate)
 	buffer = appendTags(buffer, globalTags, tags)
+	buffer = appendContainerID(buffer)
 	return buffer
 }
 
@@ -111,6 +113,7 @@ func appendIntegerMetric(buffer []byte, typeSymbol []byte, namespace string, glo
 	buffer = append(buffer, typeSymbol...)
 	buffer = appendRate(buffer, rate)
 	buffer = appendTags(buffer, globalTags, tags)
+	buffer = appendContainerID(buffer)
 	return buffer
 }
 
@@ -121,6 +124,7 @@ func appendStringMetric(buffer []byte, typeSymbol []byte, namespace string, glob
 	buffer = append(buffer, typeSymbol...)
 	buffer = appendRate(buffer, rate)
 	buffer = appendTags(buffer, globalTags, tags)
+	buffer = appendContainerID(buffer)
 	return buffer
 }
 
@@ -210,6 +214,7 @@ func appendEvent(buffer []byte, event *Event, globalTags []string) []byte {
 	}
 
 	buffer = appendTags(buffer, globalTags, event.Tags)
+	buffer = appendContainerID(buffer)
 	return buffer
 }
 
@@ -249,9 +254,27 @@ func appendServiceCheck(buffer []byte, serviceCheck *ServiceCheck, globalTags []
 		buffer = append(buffer, "|m:"...)
 		buffer = appendEscapedServiceCheckText(buffer, serviceCheck.Message)
 	}
+
+	buffer = appendContainerID(buffer)
 	return buffer
 }
 
 func appendSeparator(buffer []byte) []byte {
 	return append(buffer, '\n')
+}
+
+func appendContainerID(buffer []byte) []byte {
+	if containerID := getContainerID(); len(containerID) > 0 {
+		buffer = append(buffer, "|c:"...)
+		buffer = append(buffer, containerID...)
+	}
+	return buffer
+}
+
+func appendTimestamp(buffer []byte, timestamp int64) []byte {
+	if timestamp > noTimestamp {
+		buffer = append(buffer, "|T"...)
+		buffer = strconv.AppendInt(buffer, timestamp, 10)
+	}
+	return buffer
 }

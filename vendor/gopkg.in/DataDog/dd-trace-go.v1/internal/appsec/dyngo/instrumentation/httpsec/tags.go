@@ -6,46 +6,41 @@
 package httpsec
 
 import (
-	"encoding/json"
-	"net"
 	"os"
 	"sort"
 	"strings"
 
-	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/appsec/dyngo/instrumentation"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/log"
+
+	"github.com/DataDog/appsec-internal-go/httpsec"
+	"github.com/DataDog/appsec-internal-go/netip"
 )
 
 const (
 	// envClientIPHeader is the name of the env var used to specify the IP header to be used for client IP collection.
 	envClientIPHeader = "DD_TRACE_CLIENT_IP_HEADER"
-
-	// multipleIPHeadersTag sets the multiple ip header tag used internally to tell the backend an error occurred when
-	// retrieving an HTTP request client IP.
-	multipleIPHeadersTag = "_dd.multiple-ip-headers"
-
-	// BlockedRequestTag used to convey whether a request is blocked
-	BlockedRequestTag = "appsec.blocked"
 )
 
 var (
-	ipv6SpecialNetworks = []*instrumentation.NetaddrIPPrefix{
-		ippref("fec0::/10"), // site local
-	}
-
-	// List of IP-related headers leveraged to retrieve the public client IP address.
+	// Default list of IP-related headers leveraged to retrieve the public
+	// client IP address.
 	defaultIPHeaders = []string{
 		"x-forwarded-for",
 		"x-real-ip",
+		"true-client-ip",
 		"x-client-ip",
 		"x-forwarded",
-		"x-cluster-client-ip",
 		"forwarded-for",
-		"forwarded",
-		"via",
-		"true-client-ip",
+		"x-cluster-client-ip",
+		"fastly-client-ip",
+		"cf-connecting-ip",
+		"cf-connecting-ip6",
 	}
+
+	// Configured list of IP-related headers leveraged to retrieve the public
+	// client IP address. Defined at init-time in the init() function below.
+	monitoredClientIPHeadersCfg []string
 
 	// List of HTTP headers we collect and send.
 	collectedHTTPHeaders = append(defaultIPHeaders,
@@ -55,31 +50,55 @@ var (
 		"content-encoding",
 		"content-language",
 		"forwarded",
+		"via",
 		"user-agent",
 		"accept",
 		"accept-encoding",
 		"accept-language")
-
-	clientIPHeaderCfg string
 )
 
 func init() {
-	// Required by sort.SearchStrings
-	sort.Strings(defaultIPHeaders[:])
+	if cfg := os.Getenv(envClientIPHeader); cfg != "" {
+		// Collect this header value too
+		collectedHTTPHeaders = append(collectedHTTPHeaders, cfg)
+		// Set this IP header as the only one to consider for ClientIP()
+		monitoredClientIPHeadersCfg = []string{cfg}
+	} else {
+		monitoredClientIPHeadersCfg = defaultIPHeaders
+	}
+
+	// Ensure the list of headers are sorted for sort.SearchStrings()
 	sort.Strings(collectedHTTPHeaders[:])
-	clientIPHeaderCfg = os.Getenv(envClientIPHeader)
 }
 
-// SetSecurityEventTags sets the AppSec-specific span tags when a security event occurred into the service entry span.
-func SetSecurityEventTags(span instrumentation.TagSetter, events []json.RawMessage, headers, respHeaders map[string][]string) {
+// SetSecurityEventsTags sets the AppSec-specific span tags when a security event occurred into the service entry span.
+func SetSecurityEventsTags(span instrumentation.TagSetter, events []any) {
 	if err := instrumentation.SetEventSpanTags(span, events); err != nil {
-		log.Error("appsec: unexpected error while creating the appsec event tags: %v", err)
+		log.Error("appsec: unexpected error while creating the appsec events tags: %v", err)
 	}
+}
+
+func setSecurityEventsTags(span instrumentation.TagSetter, events []any) error {
+	if len(events) == 0 {
+		return nil
+	}
+	return instrumentation.SetEventSpanTags(span, events)
+}
+
+// setRequestHeadersTags sets the AppSec-specific request headers span tags.
+func setRequestHeadersTags(span instrumentation.TagSetter, headers map[string][]string) {
+	setHeadersTags(span, "http.request.headers.", headers)
+}
+
+// setResponseHeadersTags sets the AppSec-specific response headers span tags.
+func setResponseHeadersTags(span instrumentation.TagSetter, headers map[string][]string) {
+	setHeadersTags(span, "http.response.headers.", headers)
+}
+
+// setHeadersTags sets the AppSec-specific headers span tags.
+func setHeadersTags(span instrumentation.TagSetter, tagPrefix string, headers map[string][]string) {
 	for h, v := range NormalizeHTTPHeaders(headers) {
-		span.SetTag("http.request.headers."+h, v)
-	}
-	for h, v := range NormalizeHTTPHeaders(respHeaders) {
-		span.SetTag("http.response.headers."+h, v)
+		span.SetTag(tagPrefix+h, v)
 	}
 }
 
@@ -102,114 +121,12 @@ func NormalizeHTTPHeaders(headers map[string][]string) (normalized map[string]st
 	return normalized
 }
 
-// ippref returns the IP network from an IP address string s. If not possible, it returns nil.
-func ippref(s string) *instrumentation.NetaddrIPPrefix {
-	if prefix, err := instrumentation.NetaddrParseIPPrefix(s); err == nil {
-		return &prefix
-	}
-	return nil
-}
-
-// ClientIPTags generates the IP related span tags for a given request headers
-func ClientIPTags(hdrs map[string][]string, remoteAddr string) (tags map[string]string, clientIP instrumentation.NetaddrIP) {
-	tags = map[string]string{}
-	monitoredHeaders := defaultIPHeaders
-	if clientIPHeaderCfg != "" {
-		monitoredHeaders = []string{clientIPHeaderCfg}
-	}
-
-	// Filter the list of headers
-	foundHeaders := map[string][]string{}
-	for k, v := range hdrs {
-		k = strings.ToLower(k)
-		if i := sort.SearchStrings(monitoredHeaders, k); i < len(monitoredHeaders) && monitoredHeaders[i] == k {
-			if len(v) >= 1 && v[0] != "" {
-				foundHeaders[k] = v
-			}
-		}
-	}
-
-	// If more than one IP header is present, report them and don't return any client ip
-	if len(foundHeaders) > 1 {
-		var headers []string
-		for header, ips := range foundHeaders {
-			tags[ext.HTTPRequestHeaders+"."+header] = strings.Join(ips, ",")
-			headers = append(headers, header)
-		}
-		sort.Strings(headers) // produce a predictable value
-		tags[multipleIPHeadersTag] = strings.Join(headers, ",")
-		return tags, instrumentation.NetaddrIP{}
-	}
-
-	// Walk IP-related headers
-	var foundIP instrumentation.NetaddrIP
-	for _, v := range foundHeaders {
-		// Handle multi-value headers by flattening the list of values
-		var ips []string
-		for _, ip := range v {
-			ips = append(ips, strings.Split(ip, ",")...)
-		}
-
-		// Look for the first valid or global IP address in the comma-separated list
-		for _, ipstr := range ips {
-			ip := parseIP(strings.TrimSpace(ipstr))
-			if !ip.IsValid() {
-				continue
-			}
-			// Replace foundIP if still not valid in order to keep the oldest
-			if !foundIP.IsValid() {
-				foundIP = ip
-			}
-			if isGlobal(ip) {
-				foundIP = ip
-				break
-			}
-		}
-	}
-
-	// Decide which IP address is the client one by starting with the remote IP
-	remoteIP := parseIP(remoteAddr)
-	if remoteIP.IsValid() {
-		tags["network.client.ip"] = remoteIP.String()
-		clientIP = remoteIP
-	}
-
-	// The IP address found in the headers supersedes a private remote IP address.
-	if foundIP.IsValid() && !isGlobal(remoteIP) || isGlobal(foundIP) {
-		clientIP = foundIP
-	}
-
-	if clientIP.IsValid() {
-		tags[ext.HTTPClientIP] = clientIP.String()
-	}
-
+// ClientIPTags returns the resulting Datadog span tags `http.client_ip`
+// containing the client IP and `network.client.ip` containing the remote IP.
+// The tags are present only if a valid ip address has been returned by
+// ClientIP().
+func ClientIPTags(headers map[string][]string, hasCanonicalHeaders bool, remoteAddr string) (tags map[string]string, clientIP netip.Addr) {
+	remoteIP, clientIP := httpsec.ClientIP(headers, hasCanonicalHeaders, remoteAddr, monitoredClientIPHeadersCfg)
+	tags = httpsec.ClientIPTags(remoteIP, clientIP)
 	return tags, clientIP
-}
-
-func parseIP(s string) instrumentation.NetaddrIP {
-	if ip, err := instrumentation.NetaddrParseIP(s); err == nil {
-		return ip
-	}
-	if h, _, err := net.SplitHostPort(s); err == nil {
-		if ip, err := instrumentation.NetaddrParseIP(h); err == nil {
-			return ip
-		}
-	}
-	return instrumentation.NetaddrIP{}
-}
-
-func isGlobal(ip instrumentation.NetaddrIP) bool {
-	// IsPrivate also checks for ipv6 ULA.
-	// We care to check for these addresses are not considered public, hence not global.
-	// See https://www.rfc-editor.org/rfc/rfc4193.txt for more details.
-	isGlobal := ip.IsValid() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast()
-	if !isGlobal || !ip.Is6() {
-		return isGlobal
-	}
-	for _, n := range ipv6SpecialNetworks {
-		if n.Contains(ip) {
-			return false
-		}
-	}
-	return isGlobal
 }

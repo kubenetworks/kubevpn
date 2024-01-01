@@ -1,0 +1,17 @@
+{
+    "input": "CREATE VIEW dbo.OrderSummary WITH SCHEMABINDING AS SELECT customer_id, COUNT_BIG(*) AS TotalOrders, SUM(amount) AS TotalAmount FROM dbo.orders GROUP BY customer_id; CREATE UNIQUE CLUSTERED INDEX IDX_V1 ON dbo.OrderSummary(customer_id);",
+    "outputs": [
+      {
+        "expected": "CREATE VIEW dbo.OrderSummary WITH SCHEMABINDING AS SELECT customer_id, COUNT_BIG ( * ), SUM ( amount ) FROM dbo.orders GROUP BY customer_id; CREATE UNIQUE CLUSTERED INDEX IDX_V? ON dbo.OrderSummary ( customer_id )",
+        "statement_metadata": {
+          "size": 22,
+          "tables": ["dbo.orders"],
+          "commands": ["CREATE", "SELECT"],
+          "comments": [],
+          "procedures": [],
+          "views": ["dbo.OrderSummary"]
+        }
+      }
+    ]
+  }
+  

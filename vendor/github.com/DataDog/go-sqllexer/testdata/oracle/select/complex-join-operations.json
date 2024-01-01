@@ -1,0 +1,16 @@
+{
+    "input": "SELECT e.employee_id, e.last_name, d.department_name FROM employees e JOIN departments d ON e.department_id = d.department_id WHERE e.test_amt > (SELECT AVG(test_amt) FROM employees WHERE department_id = e.department_id);",
+    "outputs": [
+      {
+        "expected": "SELECT e.employee_id, e.last_name, d.department_name FROM employees e JOIN departments d ON e.department_id = d.department_id WHERE e.test_amt > ( SELECT AVG ( test_amt ) FROM employees WHERE department_id = e.department_id )",
+        "statement_metadata": {
+          "size": 30,
+          "tables": ["employees", "departments"],
+          "commands": ["SELECT", "JOIN"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

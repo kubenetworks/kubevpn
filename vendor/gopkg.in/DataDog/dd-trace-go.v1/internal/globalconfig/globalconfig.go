@@ -11,12 +11,15 @@ import (
 	"math"
 	"sync"
 
+	"gopkg.in/DataDog/dd-trace-go.v1/internal"
+
 	"github.com/google/uuid"
 )
 
 var cfg = &config{
 	analyticsRate: math.NaN(),
 	runtimeID:     uuid.New().String(),
+	headersAsTags: internal.NewLockMap(map[string]string{}),
 }
 
 type config struct {
@@ -24,6 +27,7 @@ type config struct {
 	analyticsRate float64
 	serviceName   string
 	runtimeID     string
+	headersAsTags *internal.LockMap
 }
 
 // AnalyticsRate returns the sampling rate at which events should be marked. It uses
@@ -38,8 +42,8 @@ func AnalyticsRate() float64 {
 // SetAnalyticsRate sets the given event sampling rate globally.
 func SetAnalyticsRate(rate float64) {
 	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
 	cfg.analyticsRate = rate
-	cfg.mu.Unlock()
 }
 
 // ServiceName returns the default service name used by non-client integrations such as servers and frameworks.
@@ -61,4 +65,31 @@ func RuntimeID() string {
 	cfg.mu.RLock()
 	defer cfg.mu.RUnlock()
 	return cfg.runtimeID
+}
+
+// HeaderTagMap returns the mappings of headers to their tag values
+func HeaderTagMap() *internal.LockMap {
+	return cfg.headersAsTags
+}
+
+// HeaderTag returns the configured tag for a given header.
+// This function exists for testing purposes, for performance you may want to use `HeaderTagMap`
+func HeaderTag(header string) string {
+	return cfg.headersAsTags.Get(header)
+}
+
+// SetHeaderTag adds config for header `from` with tag value `to`
+func SetHeaderTag(from, to string) {
+	cfg.headersAsTags.Set(from, to)
+}
+
+// HeaderTagsLen returns the length of globalconfig's headersAsTags map, 0 for empty map
+func HeaderTagsLen() int {
+	return cfg.headersAsTags.Len()
+}
+
+// ClearHeaderTags assigns headersAsTags to a new, empty map
+// It is invoked when WithHeaderTags is called, in order to overwrite the config
+func ClearHeaderTags() {
+	cfg.headersAsTags.Clear()
 }

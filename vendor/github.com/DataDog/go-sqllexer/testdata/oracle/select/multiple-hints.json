@@ -1,0 +1,24 @@
+{
+    "input": "SELECT /*+ LEADING(e) USE_HASH(d) */ e.employee_id, e.first_name, d.department_name FROM employees e, departments d WHERE e.department_id = d.department_id;",
+    "outputs": [
+      {
+        "expected": "SELECT e.employee_id, e.first_name, d.department_name FROM employees e, departments d WHERE e.department_id = d.department_id;",
+        "statement_metadata": {
+          "size": 44,
+          "tables": ["employees"],
+          "commands": ["SELECT"],
+          "comments": ["/*+ LEADING(e) USE_HASH(d) */"],
+          "procedures": []
+        },
+        "normalizer_config": {
+            "collect_tables": true,
+            "collect_commands": true,
+            "collect_comments": true,
+            "collect_procedure": true,
+            "keep_trailing_semicolon": true,
+            "remove_space_between_parentheses": true
+        }
+      }
+    ]
+  }
+  

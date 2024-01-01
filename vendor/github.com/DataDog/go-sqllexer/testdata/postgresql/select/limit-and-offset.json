@@ -1,0 +1,19 @@
+{
+  "input": "SELECT * FROM users ORDER BY created_at DESC LIMIT 10 OFFSET 20;",
+  "outputs": [
+    {
+      "expected": "SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?",
+      "statement_metadata": {
+        "size": 11,
+        "tables": [
+          "users"
+        ],
+        "commands": [
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

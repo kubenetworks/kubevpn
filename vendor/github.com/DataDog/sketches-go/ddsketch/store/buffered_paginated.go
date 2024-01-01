@@ -177,7 +177,7 @@ func (s *BufferedPaginatedStore) compact() {
 }
 
 func (s *BufferedPaginatedStore) sortBuffer() {
-	sort.Slice(s.buffer, func(i, j int) bool { return s.buffer[i] < s.buffer[j] })
+	sort.Ints(s.buffer)
 }
 
 func (s *BufferedPaginatedStore) Add(index int) {
@@ -376,24 +376,29 @@ func (s *BufferedPaginatedStore) minIndexWithCumulCount(predicate func(float64) 
 
 func (s *BufferedPaginatedStore) MergeWith(other Store) {
 	o, ok := other.(*BufferedPaginatedStore)
-	if ok && len(o.pages) == 0 {
-		// Optimized merging if the other store only has buffered data.
-		oBufferOffset := 0
-		for {
-			bufferCapOverhead := max(cap(s.buffer), s.bufferCompactionTriggerLen) - len(s.buffer)
-			if bufferCapOverhead >= len(o.buffer)-oBufferOffset {
-				s.buffer = append(s.buffer, o.buffer[oBufferOffset:]...)
-				return
+	if ok && s.pageLenLog2 == o.pageLenLog2 {
+		// Merge pages.
+		for oPageOffset, oPage := range o.pages {
+			if len(oPage) == 0 {
+				continue
 			}
-			s.buffer = append(s.buffer, o.buffer[oBufferOffset:oBufferOffset+bufferCapOverhead]...)
-			oBufferOffset += bufferCapOverhead
-			s.compact()
+			oPageIndex := o.minPageIndex + oPageOffset
+			page := s.page(oPageIndex, true)
+			for i, oCount := range oPage {
+				page[i] += oCount
+			}
 		}
-	}
 
-	// Fallback merging.
-	for bin := range other.Bins() {
-		s.AddBin(bin)
+		// Merge buffers.
+		for _, index := range o.buffer {
+			s.Add(index)
+		}
+	} else {
+		// Fallback merging.
+		other.ForEach(func(index int, count float64) (stop bool) {
+			s.AddWithCount(index, count)
+			return false
+		})
 	}
 }
 
@@ -541,9 +546,10 @@ func (s *BufferedPaginatedStore) ToProto() *sketchpb.Store {
 	}
 	// FIXME: add heuristic to use contiguousBinCounts when cheaper.
 	binCounts := make(map[int32]float64)
-	for bin := range s.Bins() {
-		binCounts[int32(bin.index)] = bin.count
-	}
+	s.ForEach(func(index int, count float64) (stop bool) {
+		binCounts[int32(index)] = count
+		return false
+	})
 	return &sketchpb.Store{
 		BinCounts: binCounts,
 	}
@@ -570,6 +576,7 @@ func (s *BufferedPaginatedStore) Reweight(w float64) error {
 }
 
 func (s *BufferedPaginatedStore) Encode(b *[]byte, t enc.FlagType) {
+	s.compact()
 	if len(s.buffer) > 0 {
 		enc.EncodeFlag(b, enc.NewFlag(t, enc.BinEncodingIndexDeltas))
 		enc.EncodeUvarint64(b, uint64(len(s.buffer)))

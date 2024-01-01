@@ -1,0 +1,16 @@
+{
+    "input": "SET IDENTITY_INSERT orders ON; INSERT INTO orders (id, customer_id, order_date, status) VALUES (100, 3, GETDATE(), 'Pending'); SET IDENTITY_INSERT orders OFF;",
+    "outputs": [
+      {
+        "expected": "SET IDENTITY_INSERT orders ON; INSERT INTO orders ( id, customer_id, order_date, status ) VALUES ( ?, GETDATE ( ), ? ); SET IDENTITY_INSERT orders OFF",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["INSERT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

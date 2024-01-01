@@ -1,0 +1,16 @@
+{
+    "input": "SELECT * INTO new_orders FROM orders WHERE status = 'Pending';",
+    "outputs": [
+      {
+        "expected": "SELECT * INTO new_orders FROM orders WHERE status = ?",
+        "statement_metadata": {
+          "size": 22,
+          "tables": ["new_orders", "orders"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  
