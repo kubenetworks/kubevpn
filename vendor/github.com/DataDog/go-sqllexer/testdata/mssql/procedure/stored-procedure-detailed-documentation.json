@@ -1,0 +1,27 @@
+{
+    "input": "CREATE OR ALTER PROCEDURE AuditOrderProcessing AS\nBEGIN\n/*\n   Procedure: AuditOrderProcessing\n   Author: Jane Doe\n   Created: 2023-04-15\n   Description: This procedure is designed to audit order processing steps.\n   It checks each step of the order processing workflow and logs it into the audit_log table.\n   Modifications:\n   - 2023-04-20: Added additional logging for failed orders.\n   - 2023-05-01: Updated logic to include new order status.\n*/\nSET NOCOUNT ON;\n-- Insert audit records\nINSERT INTO audit_log (description) SELECT 'Order processed: ' + CAST(id AS NVARCHAR(10)) FROM orders WHERE status = 'Processed';\nEND;",
+    "outputs": [
+      {
+        "expected": "CREATE OR ALTER PROCEDURE AuditOrderProcessing AS BEGIN SET NOCOUNT ON; INSERT INTO audit_log (description) SELECT ? + CAST(id AS NVARCHAR(?)) FROM orders WHERE status = ?; END;",
+        "statement_metadata": {
+          "size": 478,
+          "tables": ["audit_log", "orders"],
+          "commands": ["CREATE", "ALTER", "BEGIN", "INSERT", "SELECT"],
+          "comments": ["/*\n   Procedure: AuditOrderProcessing\n   Author: Jane Doe\n   Created: 2023-04-15\n   Description: This procedure is designed to audit order processing steps.\n   It checks each step of the order processing workflow and logs it into the audit_log table.\n   Modifications:\n   - 2023-04-20: Added additional logging for failed orders.\n   - 2023-05-01: Updated logic to include new order status.\n*/", "-- Insert audit records"],
+          "procedures": ["AuditOrderProcessing"]
+        },
+        "obfuscator_config": {
+            "replace_digits": true
+        },
+        "normalizer_config": {
+            "collect_tables": true,
+            "collect_commands": true,
+            "collect_comments": true,
+            "collect_procedure": true,
+            "keep_trailing_semicolon": true,
+            "remove_space_between_parentheses": true
+        }
+      }
+    ]
+  }
+  

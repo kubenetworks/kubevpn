@@ -1,0 +1,16 @@
+{
+    "input": "SELECT id, name, email FROM customers WHERE active = 1;",
+    "outputs": [
+      {
+        "expected": "SELECT id, name, email FROM customers WHERE active = ?",
+        "statement_metadata": {
+          "size": 15,
+          "tables": ["customers"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

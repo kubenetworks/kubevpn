@@ -1,10 +1,15 @@
+// Unless explicitly stated otherwise all files in this repository are licensed
+// under the Apache License Version 2.0.
+// This product includes software developed at Datadog (https://www.datadoghq.com/).
+// Copyright 2016-present Datadog, Inc.
+
 package obfuscate
 
 import (
 	"fmt"
 	"time"
 
-	"github.com/dgraph-io/ristretto"
+	"github.com/outcaste-io/ristretto"
 )
 
 // measuredCache is a wrapper on top of *ristretto.Cache which additionally
@@ -36,8 +41,8 @@ func (c *measuredCache) statsLoop() {
 	for {
 		select {
 		case <-tick.C:
-			c.statsd.Gauge("datadog.trace_agent.ofuscation.sql_cache.hits", float64(mx.Hits()), nil, 1)     //nolint:errcheck
-			c.statsd.Gauge("datadog.trace_agent.ofuscation.sql_cache.misses", float64(mx.Misses()), nil, 1) //nolint:errcheck
+			c.statsd.Gauge("datadog.trace_agent.obfuscation.sql_cache.hits", float64(mx.Hits()), nil, 1)     //nolint:errcheck
+			c.statsd.Gauge("datadog.trace_agent.obfuscation.sql_cache.misses", float64(mx.Misses()), nil, 1) //nolint:errcheck
 		case <-c.close:
 			c.Cache.Close()
 			return

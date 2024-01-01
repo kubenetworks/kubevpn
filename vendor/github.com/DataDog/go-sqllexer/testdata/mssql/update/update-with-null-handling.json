@@ -1,0 +1,16 @@
+{
+    "input": "UPDATE orders SET delivery_date = NULLIF(order_date, due_date) WHERE status = 'Cancelled';",
+    "outputs": [
+      {
+        "expected": "UPDATE orders SET delivery_date = NULLIF ( order_date, due_date ) WHERE status = ?",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["UPDATE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

@@ -1,0 +1,16 @@
+{
+    "input": "UPDATE TOP (10) orders SET status = 'Reviewed' WHERE status = 'Pending';",
+    "outputs": [
+      {
+        "expected": "UPDATE TOP ( ? ) orders SET status = ? WHERE status = ?",
+        "statement_metadata": {
+          "size": 6,
+          "tables": [],
+          "commands": ["UPDATE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

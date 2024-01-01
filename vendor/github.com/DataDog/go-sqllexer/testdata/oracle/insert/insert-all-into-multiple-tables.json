@@ -1,0 +1,16 @@
+{
+    "input": "INSERT ALL INTO sales (product_id, amount) VALUES (product_id, amount) INTO audit_log (action_type, message) VALUES ('INSERT', 'Inserted into sales') SELECT product_id, amount FROM temp_sales WHERE amount > 1000;",
+    "outputs": [
+      {
+        "expected": "INSERT ALL INTO sales ( product_id, amount ) VALUES ( product_id, amount ) INTO audit_log ( action_type, message ) VALUES ( ? ) SELECT product_id, amount FROM temp_sales WHERE amount > ?",
+        "statement_metadata": {
+          "size": 36,
+          "tables": ["sales", "audit_log", "temp_sales"],
+          "commands": ["INSERT", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

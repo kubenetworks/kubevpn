@@ -1,0 +1,16 @@
+{
+    "input": "SELECT customer_id, COUNT(*) AS total_orders FROM orders GROUP BY customer_id HAVING COUNT(*) > 5;",
+    "outputs": [
+      {
+        "expected": "SELECT customer_id, COUNT ( * ) FROM orders GROUP BY customer_id HAVING COUNT ( * ) > ?",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

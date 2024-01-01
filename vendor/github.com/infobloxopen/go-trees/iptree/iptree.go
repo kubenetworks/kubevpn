@@ -91,6 +91,97 @@ func (t *Tree) InsertNet(n *net.IPNet, value interface{}) *Tree {
 	return t
 }
 
+type UpdateDescendantsCallback func(Pair) (interface{}, bool)
+
+func updateNode64(MSIP net.IP, n *numtree.Node64, callback UpdateDescendantsCallback) {
+	var key *net.IPNet
+	var ip net.IP
+	var mask net.IPMask
+
+	if MSIP == nil {
+		ip = append(unpackUint64ToIP(n.Key), make(net.IP, 8)...)
+		mask = net.CIDRMask(int(n.Bits), iPv6Bits)
+	} else {
+		LSIP := unpackUint64ToIP(n.Key)
+		ip = append(MSIP[0:8], LSIP...)
+		mask = net.CIDRMask(numtree.Key64BitSize+int(n.Bits), iPv6Bits)
+	}
+
+	key = &net.IPNet{IP: ip.Mask(mask), Mask: mask}
+
+	newValue, shouldUpdate := callback(Pair{Key: key, Value: n.Value})
+	if shouldUpdate {
+		n.Value = newValue
+	}
+}
+
+// UpdateDescendants accepts a target network (node) and a callback, and updates all the descendants of the target node if the callback returns true as its second return value
+func (t *Tree) UpdateDescendants(n *net.IPNet, callback UpdateDescendantsCallback) {
+	if key, bits := iPv4NetToUint32(n); bits >= 0 {
+		target := t.root32.FindNode(key, bits)
+		if target == nil {
+			return
+		}
+		nodesCh := target.Enumerate()
+		if target.Leaf {
+			<-nodesCh
+		}
+		for n := range nodesCh {
+			mask := net.CIDRMask(int(n.Bits), iPv4Bits)
+			key := &net.IPNet{IP: unpackUint32ToIP(n.Key).Mask(mask), Mask: mask}
+
+			newValue, shouldUpdate := callback(Pair{Key: key, Value: n.Value})
+			if shouldUpdate {
+				n.Value = newValue
+			}
+		}
+	}
+
+	if MSKey, MSBits, LSKey, LSBits := iPv6NetToUint64Pair(n); MSBits >= 0 {
+		target := t.root64.FindNode(MSKey, MSBits)
+		if target == nil {
+			return
+		}
+		s, ok := target.Value.(subTree64)
+		if ok {
+			s2 := (*numtree.Node64)(s)
+			if s2.Key == LSKey && int(s2.Bits) == LSBits {
+				target = s2
+			} else {
+				target = s2.FindNode(LSKey, LSBits)
+			}
+			if target == nil {
+				return
+			}
+
+			nodesCh := target.Enumerate()
+			if target.Leaf {
+				<-nodesCh
+			}
+			for n := range nodesCh {
+				MSIP := append(unpackUint64ToIP(MSKey), make(net.IP, 8)...)
+				updateNode64(MSIP, n, callback)
+			}
+			return
+		}
+
+		nodesCh := target.Enumerate()
+		if target.Leaf {
+			<-nodesCh
+		}
+		for n := range nodesCh {
+			if s, ok := n.Value.(subTree64); ok {
+				MSIP := append(unpackUint64ToIP(n.Key), make(net.IP, 8)...)
+				for n := range (*numtree.Node64)(s).Enumerate() {
+					updateNode64(MSIP, n, callback)
+				}
+			} else {
+				updateNode64(nil, n, callback)
+			}
+		}
+	}
+}
+
 // InplaceInsertNet inserts (or replaces) value using given network as a key in current tree.
 func (t *Tree) InplaceInsertNet(n *net.IPNet, value interface{}) {
 	if n == nil {

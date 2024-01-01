@@ -283,7 +283,7 @@ func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config 
 			Stderr:    StreamOptions.ErrOut != nil,
 			TTY:       tt.Raw,
 		}, scheme.ParameterCodec)
-		return Executor.Execute("POST", req.URL(), config, StreamOptions.In, StreamOptions.Out, StreamOptions.ErrOut, tt.Raw, sizeQueue)
+		return Executor.Execute(req.URL(), config, StreamOptions.In, StreamOptions.Out, StreamOptions.ErrOut, tt.Raw, sizeQueue)
 	}
 
 	err = tt.Safe(fn)

@@ -1,0 +1,16 @@
+{
+    "input": "SELECT a.*, b.totalAmount, CASE WHEN c.id IS NOT NULL THEN d.description ELSE 'N/A' END AS description FROM (SELECT id, name, status, customer_id FROM orders WHERE order_date > DATEADD(month, -6, GETDATE()) AND status IN ('Pending', 'Completed') AND customer_id IN (SELECT customer_id FROM customers WHERE region IN ('East', 'West') AND last_order_date > DATEADD(year, -1, GETDATE())) ORDER BY name DESC) a INNER JOIN (SELECT order_id, SUM(amount) AS totalAmount FROM order_details GROUP BY order_id) b ON a.id = b.order_id LEFT JOIN audit_log c ON a.id = c.order_id LEFT JOIN (SELECT DISTINCT status, description FROM status_descriptions) d ON a.status = d.status WHERE a.name LIKE '%test%' AND (b.totalAmount > 1000 OR b.totalAmount IS NULL) ORDER BY a.order_date DESC, a.name;",
+    "outputs": [
+      {
+        "expected": "SELECT a. *, b.totalAmount, CASE WHEN c.id IS NOT ? THEN d.description ELSE ? END FROM ( SELECT id, name, status, customer_id FROM orders WHERE order_date > DATEADD ( month, ?, GETDATE ( ) ) AND status IN ( ? ) AND customer_id IN ( SELECT customer_id FROM customers WHERE region IN ( ? ) AND last_order_date > DATEADD ( year, ?, GETDATE ( ) ) ) ORDER BY name DESC ) a INNER JOIN ( SELECT order_id, SUM ( amount ) FROM order_details GROUP BY order_id ) b ON a.id = b.order_id LEFT JOIN audit_log c ON a.id = c.order_id LEFT JOIN ( SELECT DISTINCT status, description FROM status_descriptions ) d ON a.status = d.status WHERE a.name LIKE ? AND ( b.totalAmount > ? OR b.totalAmount IS ? ) ORDER BY a.order_date DESC, a.name",
+        "statement_metadata": {
+          "size": 66,
+          "tables": ["orders", "customers", "order_details", "audit_log", "status_descriptions"],
+          "commands": ["SELECT", "JOIN"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

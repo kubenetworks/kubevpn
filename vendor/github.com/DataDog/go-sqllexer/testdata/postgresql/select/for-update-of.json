@@ -1,0 +1,20 @@
+{
+  "input": "SELECT * FROM users WHERE last_login < NOW() - INTERVAL '1 year' FOR UPDATE OF users;",
+  "outputs": [
+    {
+      "expected": "SELECT * FROM users WHERE last_login < NOW ( ) - INTERVAL ? FOR UPDATE OF users",
+      "statement_metadata": {
+        "size": 17,
+        "tables": [
+          "users"
+        ],
+        "commands": [
+          "SELECT",
+          "UPDATE"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

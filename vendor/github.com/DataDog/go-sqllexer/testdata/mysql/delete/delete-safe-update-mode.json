@@ -1,0 +1,16 @@
+{
+    "input": "SET SQL_SAFE_UPDATES = 0; DELETE FROM orders WHERE customer_id = 1; SET SQL_SAFE_UPDATES = 1;",
+    "outputs": [
+      {
+        "expected": "SET SQL_SAFE_UPDATES = ?; DELETE FROM orders WHERE customer_id = ?; SET SQL_SAFE_UPDATES = ?",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["DELETE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

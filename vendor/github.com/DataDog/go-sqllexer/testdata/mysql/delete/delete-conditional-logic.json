@@ -1,0 +1,16 @@
+{
+    "input": "DELETE FROM orders WHERE status = IF(DAYOFWEEK(CURDATE()) = 1, 'Pending', 'Completed');",
+    "outputs": [
+      {
+        "expected": "DELETE FROM orders WHERE status = IF ( DAYOFWEEK ( CURDATE ( ) ) = ?, ?, ? )",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["DELETE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

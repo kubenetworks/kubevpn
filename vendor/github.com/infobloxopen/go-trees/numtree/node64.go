@@ -65,6 +65,10 @@ func (n *Node64) Dot() string {
 	return "digraph d {\n" + body + "}\n"
 }
 
+func (n *Node64) Children() (*Node64, *Node64) {
+	return n.chld[0], n.chld[1]
+}
+
 // Insert puts new leaf to radix tree and returns pointer to new root. The method uses copy on write strategy so old root doesn't see the change.
 func (n *Node64) Insert(key uint64, bits int, value interface{}) *Node64 {
 	if bits < 0 {
@@ -127,8 +131,16 @@ func (n *Node64) Match(key uint64, bits int) (interface{}, bool) {
 
 // ExactMatch locates node which exactly matches given key.
 func (n *Node64) ExactMatch(key uint64, bits int) (interface{}, bool) {
+	r := n.FindNode(key, bits)
+	if r == nil {
+		return nil, false
+	}
+	return r.Value, true
+}
+
+func (n *Node64) FindNode(key uint64, bits int) *Node64 {
 	if n == nil {
-		return n, false
+		return nil
 	}
 
 	if bits < 0 {
@@ -139,10 +151,10 @@ func (n *Node64) ExactMatch(key uint64, bits int) (interface{}, bool) {
 
 	r := n.exactMatch(key, uint8(bits))
 	if r == nil {
-		return nil, false
+		return nil
 	}
 
-	return r.Value, true
+	return r
 }
 
 // Delete removes subtree which is contained by given key. The method uses copy on write strategy.

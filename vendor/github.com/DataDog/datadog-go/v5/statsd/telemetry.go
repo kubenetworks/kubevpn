@@ -19,7 +19,7 @@ var clientTelemetryTag = "client:go"
 /*
 clientVersionTelemetryTag is a tag identifying this specific client version.
 */
-var clientVersionTelemetryTag = "client_version:5.0.2"
+var clientVersionTelemetryTag = "client_version:5.4.0"
 
 // Telemetry represents internal metrics about the client behavior since it started.
 type Telemetry struct {
@@ -113,45 +113,44 @@ type Telemetry struct {
 }
 
 type telemetryClient struct {
-	c          *Client
-	tags       []string
-	aggEnabled bool // is aggregation enabled and should we sent aggregation telemetry.
-	tagsByType map[metricType][]string
-	sender     *sender
-	worker     *worker
-	lastSample Telemetry // The previous sample of telemetry sent
+	sync.RWMutex // used mostly to change the transport tag.
+
+	c                 *Client
+	aggEnabled        bool // is aggregation enabled and should we sent aggregation telemetry.
+	transport         string
+	tags              []string
+	tagsByType        map[metricType][]string
+	transportTagKnown bool
+	sender            *sender
+	worker            *worker
+	lastSample        Telemetry // The previous sample of telemetry sent
 }
 
-func newTelemetryClient(c *Client, transport string, aggregationEnabled bool) *telemetryClient {
+func newTelemetryClient(c *Client, aggregationEnabled bool) *telemetryClient {
 	t := &telemetryClient{
 		c:          c,
-		tags:       append(c.tags, clientTelemetryTag, clientVersionTelemetryTag, "client_transport:"+transport),
 		aggEnabled: aggregationEnabled,
+		tags:       []string{},
 		tagsByType: map[metricType][]string{},
 	}
 
-	t.tagsByType[gauge] = append(append([]string{}, t.tags...), "metrics_type:gauge")
-	t.tagsByType[count] = append(append([]string{}, t.tags...), "metrics_type:count")
-	t.tagsByType[set] = append(append([]string{}, t.tags...), "metrics_type:set")
-	t.tagsByType[timing] = append(append([]string{}, t.tags...), "metrics_type:timing")
-	t.tagsByType[histogram] = append(append([]string{}, t.tags...), "metrics_type:histogram")
-	t.tagsByType[distribution] = append(append([]string{}, t.tags...), "metrics_type:distribution")
+	t.setTags()
 	return t
 }
 
-func newTelemetryClientWithCustomAddr(c *Client, transport string, telemetryAddr string, aggregationEnabled bool, pool *bufferPool, writeTimeout time.Duration) (*telemetryClient, error) {
+func newTelemetryClientWithCustomAddr(c *Client, telemetryAddr string, aggregationEnabled bool, pool *bufferPool, writeTimeout time.Duration) (*telemetryClient, error) {
 	telemetryWriter, _, err := createWriter(telemetryAddr, writeTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("Could not resolve telemetry address: %v", err)
 	}
 
-	t := newTelemetryClient(c, transport, aggregationEnabled)
+	t := newTelemetryClient(c, aggregationEnabled)
 
 	// Creating a custom sender/worker with 1 worker in mutex mode for the
 	// telemetry that share the same bufferPool.
 	// FIXME due to performance pitfall, we're always using UDP defaults
 	// even for UDS.
-	t.sender = newSender(telemetryWriter, DefaultUDPBufferPoolSize, pool)
+	t.sender = newSender(telemetryWriter, DefaultUDPBufferPoolSize, pool, c.errorHandler)
 	t.worker = newWorker(pool, t.sender)
 	return t, nil
 }
@@ -222,6 +221,36 @@ func (t *telemetryClient) getTelemetry() Telemetry {
 	return tlm
 }
 
+// setTransportTag if it was never set and is now known.
+func (t *telemetryClient) setTags() {
+	transport := t.c.GetTransport()
+	t.RLock()
+	// We need to refresh if we never set the tags or if the transport changed.
+	// For example when `unix://` is used we might return `uds` until we actually connect and detect that
+	// this is a UDS Stream socket and then return `uds-stream`.
+	needsRefresh := len(t.tags) == len(t.c.tags) || t.transport != transport
+	t.RUnlock()
+
+	if !needsRefresh {
+		return
+	}
+
+	t.Lock()
+	defer t.Unlock()
+
+	t.transport = transport
+	t.tags = append(t.c.tags, clientTelemetryTag, clientVersionTelemetryTag)
+	if transport != "" {
+		t.tags = append(t.tags, "client_transport:"+transport)
+	}
+	t.tagsByType[gauge] = append(append([]string{}, t.tags...), "metrics_type:gauge")
+	t.tagsByType[count] = append(append([]string{}, t.tags...), "metrics_type:count")
+	t.tagsByType[set] = append(append([]string{}, t.tags...), "metrics_type:set")
+	t.tagsByType[timing] = append(append([]string{}, t.tags...), "metrics_type:timing")
+	t.tagsByType[histogram] = append(append([]string{}, t.tags...), "metrics_type:histogram")
+	t.tagsByType[distribution] = append(append([]string{}, t.tags...), "metrics_type:distribution")
+}
+
 // flushTelemetry returns Telemetry metrics to be flushed. It's its own function to ease testing.
 func (t *telemetryClient) flush() []metric {
 	m := []metric{}
@@ -232,6 +261,7 @@ func (t *telemetryClient) flush() []metric {
 	}
 
 	tlm := t.getTelemetry()
+	t.setTags()
 
 	// We send the diff between now and the previous telemetry flush. This keep the same telemetry behavior from V4
 	// so users dashboard's aren't broken when upgrading to V5. It also allow to graph on the same dashboard a mix

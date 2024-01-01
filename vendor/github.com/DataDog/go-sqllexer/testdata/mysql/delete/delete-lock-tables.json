@@ -1,0 +1,16 @@
+{
+    "input": "LOCK TABLES orders WRITE; DELETE FROM orders WHERE status = 'Failed'; UNLOCK TABLES;",
+    "outputs": [
+      {
+        "expected": "LOCK TABLES orders WRITE; DELETE FROM orders WHERE status = ?; UNLOCK TABLES",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["DELETE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

@@ -1,0 +1,16 @@
+{
+    "input": "INSERT INTO employees (name, department) VALUES ('John Doe', 'Sales'); SELECT @@IDENTITY AS LastInsertedIdentity;",
+    "outputs": [
+      {
+        "expected": "INSERT INTO employees ( name, department ) VALUES ( ? ); SELECT @@IDENTITY",
+        "statement_metadata": {
+          "size": 21,
+          "tables": ["employees"],
+          "commands": ["INSERT", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

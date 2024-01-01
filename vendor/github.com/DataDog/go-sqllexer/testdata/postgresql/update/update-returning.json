@@ -1,0 +1,25 @@
+{
+  "input": "UPDATE users SET last_login = NOW() WHERE id = 3 RETURNING last_login;",
+  "outputs": [
+    {
+      "expected": "UPDATE users SET last_login = NOW ( ) WHERE id = ? RETURNING last_login",
+      "statement_metadata": {
+        "size": 11,
+        "tables": [
+          "users"
+        ],
+        "commands": [
+          "UPDATE"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    },
+    {
+      "expected": "UPDATE users SET last_login = NOW() WHERE id = ? RETURNING last_login",
+      "normalizer_config": {
+        "remove_space_between_parentheses": true
+      }
+    }
+  ]
+}

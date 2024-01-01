@@ -1,0 +1,28 @@
+{
+  "input": "SELECT jsonb_set(data, '{info,address}', NULL) AS removed_address FROM users;",
+  "outputs": [
+    {
+      "expected": "SELECT jsonb_set ( data, ?, ? ) FROM users",
+      "statement_metadata": {
+        "size": 11,
+        "tables": [
+          "users"
+        ],
+        "commands": [
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    },
+    {
+      "expected": "SELECT jsonb_set(data, ?, NULL) FROM users",
+      "obfuscator_config": {
+        "replace_null": false
+      },
+      "normalizer_config": {
+        "remove_space_between_parentheses": true
+      }
+    }
+  ]
+}

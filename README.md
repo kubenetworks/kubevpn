@@ -116,8 +116,8 @@ dns service ok
 
 ```shell
 ➜  ~ kubevpn status
-ID Mode Cluster               Kubeconfig                    Namespace  Status
-0  full ccijorbccotmqodvr189g /Users/bytedance/.kube/config default Connected
+ID Mode Cluster               Kubeconfig                 Namespace Status
+0  full ccijorbccotmqodvr189g /Users/naison/.kube/config default   Connected
 ➜  ~
 ```
 
@@ -183,7 +183,8 @@ reviews                   ClusterIP   172.21.8.24     <none>        9080/TCP    
 
 ### Short domain resolve
 
-To access the service in the cluster, service name or you can use the short domain name, such as `productpage.default.svc.cluster.local`
+To access the service in the cluster, service name or you can use the short domain name, such
+as `productpage.default.svc.cluster.local`
 
 ```shell
 ➜  ~ curl productpage:9080
@@ -194,6 +195,38 @@ To access the service in the cluster, service name or you can use the short doma
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 ...
+```
+
+### Connect to multiple kubernetes cluster network
+
+```shell
+➜  ~ kubevpn status
+ID Mode Cluster               Kubeconfig                 Namespace Status
+0  full ccijorbccotmqodvr189g /Users/naison/.kube/config default   Connected
+```
+
+```shell
+➜  ~ kubevpn connect -n default --kubeconfig ~/.kube/dev_config --lite
+start to connect
+got cidr from cache
+get cidr successfully
+update ref count successfully
+traffic manager already exist, reuse it
+port forward ready
+tunnel connected
+adding route...
+dns service ok
++---------------------------------------------------------------------------+
+|    Now you can access resources in the kubernetes cluster, enjoy it :)    |
++---------------------------------------------------------------------------+
+```
+
+```shell
+➜  ~ kubevpn status
+ID Mode Cluster               Kubeconfig                     Namespace Status
+0  full ccijorbccotmqodvr189g /Users/naison/.kube/config     default   Connected
+1  lite ccidd77aam2dtnc3qnddg /Users/naison/.kube/dev_config default   Connected
+➜  ~
 ```
 
 ### Reverse proxy
@@ -216,30 +249,33 @@ create remote inbound pod for deployment/productpage successfully
 ```
 
 For local testing, save the following code as `hello.go`
+
 ```go
 package main
 
 import (
-    "fmt"
-    "io"
-    "net/http"
+	"fmt"
+	"io"
+	"net/http"
 )
 
 func main() {
-    http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
-        _, _ = io.WriteString(writer, "Hello world!")
-        fmt.Printf(">>Received request: %s %s from %s\n", request.Method, request.RequestURI, request.RemoteAddr)
-    })
-    _ = http.ListenAndServe(":9080", nil)
+	http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = io.WriteString(writer, "Hello world!")
+		fmt.Printf(">>Received request: %s %s from %s\n", request.Method, request.RequestURI, request.RemoteAddr)
+	})
+	_ = http.ListenAndServe(":9080", nil)
 }
 ```
 
 and compile it
+
 ```
 go build hello.go
 ```
 
 then run it
+
 ```
 ./hello &
 ```
@@ -282,8 +318,6 @@ Hello world!%
 ➜  ~ curl productpage.default.svc.cluster.local:9080
 Hello world!%
 ```
-
-
 
 ### Reverse proxy with mesh
 
@@ -417,7 +451,7 @@ fc04e42799a5   nginx:latest                    "/docker-entrypoint.…"   37 sec
 ➜  ~
 ```
 
-Here is how to access pod in local docker container 
+Here is how to access pod in local docker container
 
 ```shell
 export authors_pod=`kubectl get pods -l app=authors -n default -o jsonpath='{.items[0].metadata.name}'`
@@ -426,10 +460,10 @@ curl -kv -H "a: 1" http://$authors_pod_ip:80/health
 ```
 
 Verify logs of nginx container
+
 ```shell
 docker logs $(docker ps --format '{{.Names}}' | grep nginx_default_kubevpn)
 ```
-
 
 If you just want to start up a docker image, you can use simple way like this:
 
@@ -607,6 +641,7 @@ exit
 ```
 
 during test, check what container is running
+
 ```text
 ➜  ~ docker ps
 CONTAINER ID   IMAGE                           COMMAND                  CREATED         STATUS         PORTS     NAMES
@@ -621,7 +656,6 @@ d0b3dab8912a   naison/kubevpn:v2.0.0     "/bin/bash"              5 minutes ago 
 ```shell
 kubectl delete -f https://raw.githubusercontent.com/KubeNetworks/kubevpn/master/samples/bookinfo.yaml
 ```
-
 
 ### Multiple Protocol
 

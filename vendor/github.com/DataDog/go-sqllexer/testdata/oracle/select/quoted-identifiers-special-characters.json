@@ -1,0 +1,22 @@
+{
+    "input": "SELECT * FROM \"Sales\".\"Order-Details\" WHERE \"Product#Name\" LIKE '%Gadget%';",
+    "outputs": [
+      {
+        "expected": "SELECT * FROM Sales.Order-Details WHERE Product#Name LIKE ?",
+        "statement_metadata": {
+          "size": 25,
+          "tables": ["Sales.Order-Details"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      },
+      {
+        "normalizer_config": {
+          "keep_identifier_quotation": true,
+          "Keep_trailing_semicolon": true
+        },
+        "expected": "SELECT * FROM \"Sales\".\"Order-Details\" WHERE \"Product#Name\" LIKE ?;"
+      }
+    ]
+  }

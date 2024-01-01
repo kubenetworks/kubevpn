@@ -1,0 +1,16 @@
+{
+    "input": "DELETE FROM orders WHERE status = CASE WHEN order_date < GETDATE() - 90 THEN 'Expired' ELSE 'Active' END;",
+    "outputs": [
+      {
+        "expected": "DELETE FROM orders WHERE status = CASE WHEN order_date < GETDATE ( ) - ? THEN ? ELSE ? END",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["DELETE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

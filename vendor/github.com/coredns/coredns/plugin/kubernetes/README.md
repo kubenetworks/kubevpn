@@ -114,9 +114,7 @@ that has not yet been synchronized.
 
 ## Monitoring Kubernetes Endpoints
 
-By default the *kubernetes* plugin watches Endpoints via the `discovery.EndpointSlices` API.  However the
-`api.Endpoints` API is used instead if the Kubernetes version does not support the `EndpointSliceProxying`
-feature gate by default (i.e. Kubernetes version < 1.19).
+The *kubernetes* plugin watches Endpoints via the `discovery.EndpointSlices` API.
 
 ## Ready
 
@@ -228,6 +226,11 @@ If monitoring is enabled (via the *prometheus* plugin) then the following metric
     * `cluster_ip`
     * `headless_with_selector`
     * `headless_without_selector`
+
+The following are client level metrics to monitor apiserver request latency & status codes. `verb` identifies the apiserver [request type](https://kubernetes.io/docs/reference/using-api/api-concepts/#single-resource-api) and `host` denotes the apiserver endpoint.
+* `coredns_kubernetes_rest_client_request_duration_seconds{verb, host}` - captures apiserver request latency perceived by client grouped by `verb` and `host`.
+* `coredns_kubernetes_rest_client_rate_limiter_duration_seconds{verb, host}` - captures apiserver request latency contributed by client side rate limiter grouped by `verb` & `host`.
+* `coredns_kubernetes_rest_client_requests_total{method, code, host}` - captures total apiserver requests grouped by `method`, `status_code` & `host`.
 
 ## Bugs
 

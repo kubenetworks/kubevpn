@@ -1,0 +1,14 @@
+{
+  "input": "CREATE OR REPLACE FUNCTION get_user_count() RETURNS integer AS $func$\nBEGIN\n  RETURN (SELECT COUNT(*) FROM users);\nEND;\n$func$ LANGUAGE plpgsql;",
+  "outputs": [
+    {
+      "expected": "CREATE OR REPLACE FUNCTION get_user_count ( ) RETURNS integer AS $func$BEGIN RETURN ( SELECT COUNT ( * ) FROM users ); END$func$ LANGUAGE plpgsql"
+    },
+    {
+      "obfuscator_config": {
+        "dollar_quoted_func": false
+      },
+      "expected": "CREATE OR REPLACE FUNCTION get_user_count ( ) RETURNS integer AS ? LANGUAGE plpgsql"
+    }
+  ]
+}

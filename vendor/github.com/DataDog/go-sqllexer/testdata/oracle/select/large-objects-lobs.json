@@ -1,0 +1,16 @@
+{
+    "input": "SELECT id, DBMS_LOB.SUBSTR(blob_data, 2000, 1) as blob_content, DBMS_LOB.SUBSTR(clob_data, 2000, 1) as clob_content FROM lob_test WHERE id = 1;",
+    "outputs": [
+      {
+        "expected": "SELECT id, DBMS_LOB.SUBSTR ( blob_data, ?, ? ), DBMS_LOB.SUBSTR ( clob_data, ?, ? ) FROM lob_test WHERE id = ?",
+        "statement_metadata": {
+          "size": 14,
+          "tables": ["lob_test"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

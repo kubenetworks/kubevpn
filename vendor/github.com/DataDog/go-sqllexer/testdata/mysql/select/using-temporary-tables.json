@@ -1,0 +1,16 @@
+{
+    "input": "CREATE TEMPORARY TABLE temp_orders SELECT * FROM orders; SELECT * FROM temp_orders WHERE status = 'Pending'; DROP TEMPORARY TABLE temp_orders;",
+    "outputs": [
+      {
+        "expected": "CREATE TEMPORARY TABLE temp_orders SELECT * FROM orders; SELECT * FROM temp_orders WHERE status = ?; DROP TEMPORARY TABLE temp_orders",
+        "statement_metadata": {
+          "size": 33,
+          "tables": ["temp_orders", "orders"],
+          "commands": ["CREATE", "SELECT", "DROP"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

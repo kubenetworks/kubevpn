@@ -28,8 +28,10 @@ import (
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/cli-runtime/pkg/printers"
 	"k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/client-go/tools/clientcmd"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/scheme"
 	"k8s.io/kubectl/pkg/util/i18n"
@@ -66,7 +68,6 @@ type SubjectOptions struct {
 	Output            string
 	All               bool
 	DryRunStrategy    cmdutil.DryRunStrategy
-	DryRunVerifier    *resource.QueryParamVerifier
 	Local             bool
 	fieldManager      string
 
@@ -78,11 +79,11 @@ type SubjectOptions struct {
 
 	PrintObj printers.ResourcePrinterFunc
 
-	genericclioptions.IOStreams
+	genericiooptions.IOStreams
 }
 
 // NewSubjectOptions returns an initialized SubjectOptions instance
-func NewSubjectOptions(streams genericclioptions.IOStreams) *SubjectOptions {
+func NewSubjectOptions(streams genericiooptions.IOStreams) *SubjectOptions {
 	return &SubjectOptions{
 		PrintFlags: genericclioptions.NewPrintFlags("subjects updated").WithTypeSetter(scheme.Scheme),
 
@@ -91,7 +92,7 @@ func NewSubjectOptions(streams genericclioptions.IOStreams) *SubjectOptions {
 }
 
 // NewCmdSubject returns the "new subject" sub command
-func NewCmdSubject(f cmdutil.Factory, streams genericclioptions.IOStreams) *cobra.Command {
+func NewCmdSubject(f cmdutil.Factory, streams genericiooptions.IOStreams) *cobra.Command {
 	o := NewSubjectOptions(streams)
 	cmd := &cobra.Command{
 		Use:                   "subject (-f FILENAME | TYPE NAME) [--user=username] [--group=groupname] [--serviceaccount=namespace:serviceaccountname] [--dry-run=server|client|none]",
@@ -128,11 +129,6 @@ func (o *SubjectOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []
 	if err != nil {
 		return err
 	}
-	dynamicClient, err := f.DynamicClient()
-	if err != nil {
-		return err
-	}
-	o.DryRunVerifier = resource.NewQueryParamVerifier(dynamicClient, f.OpenAPIGetter(), resource.QueryParamDryRun)
 
 	cmdutil.PrintFlagsWithDryRunStrategy(o.PrintFlags, o.DryRunStrategy)
 	printer, err := o.PrintFlags.ToPrinter()
@@ -143,7 +139,7 @@ func (o *SubjectOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []
 
 	var enforceNamespace bool
 	o.namespace, enforceNamespace, err = f.ToRawKubeConfigLoader().Namespace()
-	if err != nil {
+	if err != nil && !(o.Local && clientcmd.IsEmptyConfig(err)) {
 		return err
 	}
 
@@ -270,12 +266,6 @@ func (o *SubjectOptions) Run(fn updateSubjects) error {
 			continue
 		}
 
-		if o.DryRunStrategy == cmdutil.DryRunServer {
-			if err := o.DryRunVerifier.HasSupport(info.Mapping.GroupVersionKind); err != nil {
-				allErrs = append(allErrs, err)
-				continue
-			}
-		}
 		actual, err := resource.
 			NewHelper(info.Client, info.Mapping).
 			DryRun(o.DryRunStrategy == cmdutil.DryRunServer).

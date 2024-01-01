@@ -9,6 +9,7 @@ import (
 	"github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/plugin"
 	clog "github.com/coredns/coredns/plugin/pkg/log"
+	"github.com/coredns/coredns/plugin/pkg/replacer"
 )
 
 var log = clog.NewWithPlugin("dnstap")
@@ -21,6 +22,7 @@ func parseConfig(c *caddy.Controller) ([]*Dnstap, error) {
 	for c.Next() { // directive name
 		d := Dnstap{}
 		endpoint := ""
+		d.repl = replacer.New()
 
 		args := c.RemainingArgs()
 
@@ -30,17 +32,26 @@ func parseConfig(c *caddy.Controller) ([]*Dnstap, error) {
 
 		endpoint = args[0]
 
-		if strings.HasPrefix(endpoint, "tcp://") {
+		var dio *dio
+		if strings.HasPrefix(endpoint, "tls://") {
 			// remote network endpoint
 			endpointURL, err := url.Parse(endpoint)
 			if err != nil {
 				return nil, c.ArgErr()
 			}
-			dio := newIO("tcp", endpointURL.Host)
+			dio = newIO("tls", endpointURL.Host)
+			d = Dnstap{io: dio}
+		} else if strings.HasPrefix(endpoint, "tcp://") {
+			// remote network endpoint
+			endpointURL, err := url.Parse(endpoint)
+			if err != nil {
+				return nil, c.ArgErr()
+			}
+			dio = newIO("tcp", endpointURL.Host)
 			d = Dnstap{io: dio}
 		} else {
 			endpoint = strings.TrimPrefix(endpoint, "unix://")
-			dio := newIO("unix", endpoint)
+			dio = newIO("unix", endpoint)
 			d = Dnstap{io: dio}
 		}
 
@@ -52,6 +63,10 @@ func parseConfig(c *caddy.Controller) ([]*Dnstap, error) {
 
 		for c.NextBlock() {
 			switch c.Val() {
+			case "skipverify":
+				{
+					dio.skipVerify = true
+				}
 			case "identity":
 				{
 					if !c.NextArg() {
@@ -65,6 +80,13 @@ func parseConfig(c *caddy.Controller) ([]*Dnstap, error) {
 						return nil, c.ArgErr()
 					}
 					d.Version = []byte(c.Val())
+				}
+			case "extra":
+				{
+					if !c.NextArg() {
+						return nil, c.ArgErr()
+					}
+					d.ExtraFormat = c.Val()
 				}
 			}
 		}

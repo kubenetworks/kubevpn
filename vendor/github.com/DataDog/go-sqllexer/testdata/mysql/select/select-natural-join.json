@@ -1,0 +1,16 @@
+{
+    "input": "SELECT * FROM orders NATURAL JOIN customers;",
+    "outputs": [
+      {
+        "expected": "SELECT * FROM orders NATURAL JOIN customers",
+        "statement_metadata": {
+          "size": 25,
+          "tables": ["orders", "customers"],
+          "commands": ["SELECT", "JOIN"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

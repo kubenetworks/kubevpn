@@ -1,0 +1,16 @@
+{
+    "input": "CREATE PROCEDURE GetTotalOrders(OUT total INT) BEGIN SELECT COUNT(*) INTO total FROM orders; END;",
+    "outputs": [
+      {
+        "expected": "CREATE PROCEDURE GetTotalOrders ( OUT total INT ) BEGIN SELECT COUNT ( * ) INTO total FROM orders; END",
+        "statement_metadata": {
+          "size": 42,
+          "tables": ["total", "orders"],
+          "commands": ["CREATE", "BEGIN", "SELECT"],
+          "comments": [],
+          "procedures": ["GetTotalOrders"]
+        }
+      }
+    ]
+  }
+  

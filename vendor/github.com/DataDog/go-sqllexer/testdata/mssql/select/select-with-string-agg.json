@@ -1,0 +1,16 @@
+{
+    "input": "SELECT STRING_AGG(name, ', ') AS names FROM customers WHERE region = 'East';",
+    "outputs": [
+      {
+        "expected": "SELECT STRING_AGG ( name, ? ) FROM customers WHERE region = ?",
+        "statement_metadata": {
+          "size": 15,
+          "tables": ["customers"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

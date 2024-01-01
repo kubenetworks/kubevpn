@@ -1,0 +1,26 @@
+{
+  "input": "SELECT u.name, json_agg(l) FROM users u, LATERAL (SELECT id, text FROM logs WHERE logs.user_id = u.id) AS l GROUP BY u.name;",
+  "outputs": [
+    {
+      "expected": "SELECT u.name, json_agg ( l ) FROM users u, LATERAL ( SELECT id, text FROM logs WHERE logs.user_id = u.id ) GROUP BY u.name",
+      "statement_metadata": {
+        "size": 15,
+        "tables": [
+          "users",
+          "logs"
+        ],
+        "commands": [
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    },
+    {
+      "expected": "SELECT u.name, json_agg(l) FROM users u, LATERAL (SELECT id, text FROM logs WHERE logs.user_id = u.id) GROUP BY u.name",
+      "normalizer_config": {
+        "remove_space_between_parentheses": true
+      }
+    }
+  ]
+}

@@ -10,23 +10,26 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"net/http"
+	"reflect"
 	"strings"
+	"sync"
 	"time"
 
-	rc "github.com/DataDog/datadog-agent/pkg/remoteconfig/state"
-
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/log"
+
+	rc "github.com/DataDog/datadog-agent/pkg/remoteconfig/state"
 )
 
 // Callback represents a function that can process a remote config update.
 // A Callback function can be registered to a remote config client to automatically
 // react upon receiving updates. This function returns the configuration processing status
 // for each config file received through the update.
-type Callback func(u ProductUpdate) map[string]rc.ApplyStatus
+type Callback func(updates map[string]ProductUpdate) map[string]rc.ApplyStatus
 
 // Capability represents a bit index to be set in clientData.Capabilites in order to register a client
 // for a specific capability
@@ -40,7 +43,22 @@ const (
 	ASMIPBlocking
 	// ASMDDRules represents the capability to update the rules used by the ASM WAF for threat detection
 	ASMDDRules
+	// ASMExclusions represents the capability for ASM to exclude traffic from its protections
+	ASMExclusions
+	// ASMRequestBlocking represents the capability for ASM to block requests based on the HTTP request related WAF addresses
+	ASMRequestBlocking
+	// ASMResponseBlocking represents the capability for ASM to block requests based on the HTTP response related WAF addresses
+	ASMResponseBlocking
+	// ASMUserBlocking represents the capability for ASM to block requests based on user ID
+	ASMUserBlocking
+	// ASMCustomRules represents the capability for ASM to receive and use user-defined security rules
+	ASMCustomRules
+	// ASMCustomRules represents the capability for ASM to receive and use user-defined blocking responses
+	ASMCustomBlockingResponse
 )
+
+// ErrClientNotStarted is returned when the remote config client is not started.
+var ErrClientNotStarted = errors.New("remote config client not started")
 
 // ProductUpdate represents an update for a specific product.
 // It is a map of file path to raw file content
@@ -49,6 +67,7 @@ type ProductUpdate map[string][]byte
 // A Client interacts with an Agent to update and track the state of remote
 // configuration
 type Client struct {
+	sync.RWMutex
 	ClientConfig
 
 	clientID   string
@@ -56,13 +75,24 @@ type Client struct {
 	repository *rc.Repository
 	stop       chan struct{}
 
-	callbacks map[string][]Callback
+	callbacks    []Callback
+	products     map[string]struct{}
+	capabilities map[Capability]struct{}
 
 	lastError error
 }
 
-// NewClient creates a new remoteconfig Client
-func NewClient(config ClientConfig) (*Client, error) {
+// client is a RC client singleton that can be accessed by multiple products (tracing, ASM, profiling etc.).
+// Using a single RC client instance in the tracer is a requirement for remote configuration.
+var client *Client
+
+var (
+	startOnce sync.Once
+	stopOnce  sync.Once
+)
+
+// newClient creates a new remoteconfig Client
+func newClient(config ClientConfig) (*Client, error) {
 	repo, err := rc.NewUnverifiedRepository()
 	if err != nil {
 		return nil, err
@@ -78,30 +108,68 @@ func NewClient(config ClientConfig) (*Client, error) {
 		repository:   repo,
 		stop:         make(chan struct{}),
 		lastError:    nil,
-		callbacks:    map[string][]Callback{},
+		callbacks:    []Callback{},
+		capabilities: map[Capability]struct{}{},
+		products:     map[string]struct{}{},
 	}, nil
 }
 
-// Start starts the client's update poll loop in a fresh goroutine
-func (c *Client) Start() {
-	go func() {
-		ticker := time.NewTicker(c.PollInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-c.stop:
-				return
-			case <-ticker.C:
-				c.updateState()
-			}
+// Start starts the client's update poll loop in a fresh goroutine.
+// Noop if the client has already started.
+func Start(config ClientConfig) error {
+	var err error
+	startOnce.Do(func() {
+		client, err = newClient(config)
+		if err != nil {
+			return
 		}
-	}()
+		go func() {
+			ticker := time.NewTicker(client.PollInterval)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-client.stop:
+					close(client.stop)
+					return
+				case <-ticker.C:
+					client.Lock()
+					client.updateState()
+					client.Unlock()
+				}
+			}
+		}()
+	})
+	return err
 }
 
-// Stop stops the client's update poll loop
-func (c *Client) Stop() {
-	close(c.stop)
+// Stop stops the client's update poll loop.
+// Noop if the client has already been stopped.
+// The remote config client is supposed to have the same lifecycle as the tracer.
+// It can't be restarted after a call to Stop() unless explicitly calling Reset().
+func Stop() {
+	if client == nil {
+		// In case Stop() is called before Start()
+		return
+	}
+	stopOnce.Do(func() {
+		log.Debug("remoteconfig: gracefully stopping the client")
+		client.stop <- struct{}{}
+		select {
+		case <-client.stop:
+			log.Debug("remoteconfig: client stopped successfully")
+		case <-time.After(time.Second):
+			log.Debug("remoteconfig: client stopping timeout")
+		}
+	})
+}
+
+// Reset destroys the client instance.
+// To be used only in tests to reset the state of the client.
+func Reset() {
+	client = nil
+	startOnce = sync.Once{}
+	stopOnce = sync.Once{}
 }
 
 func (c *Client) updateState() {
@@ -153,19 +221,114 @@ func (c *Client) updateState() {
 }
 
 // RegisterCallback allows registering a callback that will be invoked when the client
-// receives a configuration update for the specified product.
-func (c *Client) RegisterCallback(f Callback, product string) {
-	c.callbacks[product] = append(c.callbacks[product], f)
+// receives configuration updates. It is up to that callback to then decide what to do
+// depending on the product related to the configuration update.
+func RegisterCallback(f Callback) error {
+	if client == nil {
+		return ErrClientNotStarted
+	}
+	client.Lock()
+	defer client.Unlock()
+	client.callbacks = append(client.callbacks, f)
+	return nil
+}
+
+// UnregisterCallback removes a previously registered callback from the active callbacks list
+// This remove operation preserves ordering
+func UnregisterCallback(f Callback) error {
+	if client == nil {
+		return ErrClientNotStarted
+	}
+	client.Lock()
+	defer client.Unlock()
+	fValue := reflect.ValueOf(f)
+	for i, callback := range client.callbacks {
+		if reflect.ValueOf(callback) == fValue {
+			client.callbacks = append(client.callbacks[:i], client.callbacks[i+1:]...)
+		}
+	}
+	return nil
+}
+
+// RegisterProduct adds a product to the list of products listened by the client
+func RegisterProduct(p string) error {
+	if client == nil {
+		return ErrClientNotStarted
+	}
+	client.Lock()
+	defer client.Unlock()
+	client.products[p] = struct{}{}
+	return nil
+}
+
+// UnregisterProduct removes a product from the list of products listened by the client
+func UnregisterProduct(p string) error {
+	if client == nil {
+		return ErrClientNotStarted
+	}
+	client.Lock()
+	defer client.Unlock()
+	delete(client.products, p)
+	return nil
+}
+
+// HasProduct returns whether a given product was registered
+func HasProduct(p string) (bool, error) {
+	if client == nil {
+		return false, ErrClientNotStarted
+	}
+	client.RLock()
+	defer client.RUnlock()
+	_, found := client.products[p]
+	return found, nil
+}
+
+// RegisterCapability adds a capability to the list of capabilities exposed by the client when requesting
+// configuration updates
+func RegisterCapability(cap Capability) error {
+	if client == nil {
+		return ErrClientNotStarted
+	}
+	client.Lock()
+	defer client.Unlock()
+	client.capabilities[cap] = struct{}{}
+	return nil
+}
+
+// UnregisterCapability removes a capability from the list of capabilities exposed by the client when requesting
+// configuration updates
+func UnregisterCapability(cap Capability) error {
+	if client == nil {
+		return ErrClientNotStarted
+	}
+	client.Lock()
+	defer client.Unlock()
+	delete(client.capabilities, cap)
+	return nil
+}
+
+// HasCapability returns whether a given capability was registered
+func HasCapability(cap Capability) (bool, error) {
+	if client == nil {
+		return false, ErrClientNotStarted
+	}
+	client.RLock()
+	defer client.RUnlock()
+	_, found := client.capabilities[cap]
+	return found, nil
 }
 
 func (c *Client) applyUpdate(pbUpdate *clientGetConfigsResponse) error {
 	fileMap := make(map[string][]byte, len(pbUpdate.TargetFiles))
-	productUpdates := make(map[string]ProductUpdate, len(c.Products))
+	productUpdates := make(map[string]ProductUpdate, len(c.products))
+	for p := range c.products {
+		productUpdates[p] = make(ProductUpdate)
+	}
 	for _, f := range pbUpdate.TargetFiles {
 		fileMap[f.Path] = f.Raw
-		for _, p := range c.Products {
-			productUpdates[p] = make(ProductUpdate)
-			if strings.Contains(f.Path, p) {
+		for p := range c.products {
+			// Check the config file path to make sure it belongs to the right product
+			if strings.Contains(f.Path, "/"+p+"/") {
 				productUpdates[p][f.Path] = f.Raw
 			}
 		}
@@ -223,14 +386,26 @@ func (c *Client) applyUpdate(pbUpdate *clientGetConfigsResponse) error {
 		updatedProducts[p] = struct{}{}
 	}
 
-	// Performs the callbacks registered for all updated products and update the application status in the repository
-	// (RCTE2)
-	for p := range updatedProducts {
-		for _, fn := range c.callbacks[p] {
-			for path, status := range fn(productUpdates[p]) {
-				c.repository.UpdateApplyStatus(path, status)
+	if len(updatedProducts) == 0 {
+		return nil
+	}
+	// Performs the callbacks registered and update the application status in the repository (RCTE2)
+	// In case of several callbacks handling the same config, statuses take precedence in this order:
+	// 1 - ApplyStateError
+	// 2 - ApplyStateUnacknowledged
+	// 3 - ApplyStateAcknowledged
+	// This makes sure that any product that would need to re-receive the config in a subsequent update will be allowed to
+	statuses := make(map[string]rc.ApplyStatus)
+	for _, fn := range c.callbacks {
+		for path, status := range fn(productUpdates) {
+			if s, ok := statuses[path]; !ok || status.State == rc.ApplyStateError ||
+				s.State == rc.ApplyStateAcknowledged && status.State == rc.ApplyStateUnacknowledged {
+				statuses[path] = status
 			}
 		}
+	}
+	for p, s := range statuses {
+		c.repository.UpdateApplyStatus(p, s)
 	}
 
 	return nil
@@ -282,9 +457,13 @@ func (c *Client) newUpdateRequest() (bytes.Buffer, error) {
 		}
 	}
 
-	cap := big.NewInt(0)
-	for _, i := range c.Capabilities {
-		cap.SetBit(cap, int(i), 1)
+	capa := big.NewInt(0)
+	for i := range c.capabilities {
+		capa.SetBit(capa, int(i), 1)
+	}
+	products := make([]string, 0, len(c.products))
+	for p := range c.products {
+		products = append(products, p)
 	}
 	req := clientGetConfigsRequest{
 		Client: &clientData{
@@ -296,7 +475,7 @@ func (c *Client) newUpdateRequest() (bytes.Buffer, error) {
 				Error:          errMsg,
 			},
 			ID:       c.clientID,
-			Products: c.Products,
+			Products: products,
 			IsTracer: true,
 			ClientTracer: &clientTracer{
 				RuntimeID:     c.RuntimeID,
@@ -306,7 +485,7 @@ func (c *Client) newUpdateRequest() (bytes.Buffer, error) {
 				Env:           c.Env,
 				AppVersion:    c.AppVersion,
 			},
-			Capabilities: cap.Bytes(),
+			Capabilities: capa.Bytes(),
 		},
 		CachedTargetFiles: pbCachedFiles,
 	}

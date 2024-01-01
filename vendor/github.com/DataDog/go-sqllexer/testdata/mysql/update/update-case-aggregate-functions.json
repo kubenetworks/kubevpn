@@ -1,0 +1,16 @@
+{
+    "input": "UPDATE orders o SET o.status = CASE WHEN avg_amount > 500 THEN 'High' ELSE 'Low' END FROM (SELECT customer_id, AVG(amount) as avg_amount FROM orders GROUP BY customer_id) a WHERE o.customer_id = a.customer_id;",
+    "outputs": [
+      {
+        "expected": "UPDATE orders o SET o.status = CASE WHEN avg_amount > ? THEN ? ELSE ? END FROM ( SELECT customer_id, AVG ( amount ) FROM orders GROUP BY customer_id ) a WHERE o.customer_id = a.customer_id",
+        "statement_metadata": {
+          "size": 18,
+          "tables": ["orders"],
+          "commands": ["UPDATE", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

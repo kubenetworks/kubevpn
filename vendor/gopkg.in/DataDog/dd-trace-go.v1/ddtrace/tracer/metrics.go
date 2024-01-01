@@ -18,15 +18,6 @@ import (
 // be reported.
 const defaultMetricsReportInterval = 10 * time.Second
 
-type statsdClient interface {
-	Incr(name string, tags []string, rate float64) error
-	Count(name string, value int64, tags []string, rate float64) error
-	Gauge(name string, value float64, tags []string, rate float64) error
-	Timing(name string, value time.Duration, tags []string, rate float64) error
-	Flush() error
-	Close() error
-}
-
 // reportRuntimeMetrics periodically reports go runtime metrics at
 // the given interval.
 func (t *tracer) reportRuntimeMetrics(interval time.Duration) {

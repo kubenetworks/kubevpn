@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 package statsd
@@ -63,6 +64,11 @@ func (p *pipeWriter) ensureConnection() (net.Conn, error) {
 
 func (p *pipeWriter) Close() error {
 	return p.conn.Close()
+}
+
+// GetTransportName returns the name of the transport
+func (p *pipeWriter) GetTransportName() string {
+	return writerWindowsPipe
 }
 
 func newWindowsPipeWriter(pipepath string, writeTimeout time.Duration) (*pipeWriter, error) {

@@ -1,0 +1,15 @@
+{
+  "input": "CREATE PROCEDURE ProcessOrders() BEGIN DECLARE done INT DEFAULT FALSE; DECLARE cur CURSOR FOR SELECT id FROM orders; DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE; OPEN cur; read_loop: LOOP FETCH cur INTO order_id; IF done THEN LEAVE read_loop; END IF; UPDATE orders SET status = 'Processed' WHERE id = order_id; END LOOP; CLOSE cur; END;",
+  "outputs": [
+    {
+      "expected": "CREATE PROCEDURE ProcessOrders ( ) BEGIN DECLARE done INT DEFAULT ?; DECLARE cur CURSOR FOR SELECT id FROM orders; DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = ?; OPEN cur; read_loop : LOOP FETCH cur INTO order_id; IF done THEN LEAVE read_loop; END IF; UPDATE orders SET status = ? WHERE id = order_id; END LOOP; CLOSE cur; END",
+      "statement_metadata": {
+        "size": 50,
+        "tables": ["orders", "order_id"],
+        "commands": ["CREATE", "BEGIN", "SELECT", "UPDATE"],
+        "comments": [],
+        "procedures": ["ProcessOrders"]
+      }
+    }
+  ]
+}

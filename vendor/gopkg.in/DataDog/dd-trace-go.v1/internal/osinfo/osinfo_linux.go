@@ -22,7 +22,7 @@ func osName() string {
 	for s.Scan() {
 		parts := strings.SplitN(s.Text(), "=", 2)
 		switch parts[0] {
-		case "Name":
+		case "NAME":
 			name = strings.Trim(parts[1], "\"")
 		}
 	}

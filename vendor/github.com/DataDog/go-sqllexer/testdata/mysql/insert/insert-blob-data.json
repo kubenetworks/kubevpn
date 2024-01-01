@@ -1,0 +1,16 @@
+{
+    "input": "INSERT INTO orders (customer_id, status, document) VALUES (5, 'Pending', LOAD_FILE('/path/to/file'));",
+    "outputs": [
+      {
+        "expected": "INSERT INTO orders ( customer_id, status, document ) VALUES ( ?, LOAD_FILE ( ? ) )",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["INSERT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

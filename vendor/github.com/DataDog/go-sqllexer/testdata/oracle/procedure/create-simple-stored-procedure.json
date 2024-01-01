@@ -1,0 +1,27 @@
+{
+    "input": "CREATE OR REPLACE PROCEDURE UpdateOrderStatus(p_order_id IN NUMBER, p_status IN VARCHAR2) AS BEGIN UPDATE orders SET status = p_status WHERE order_id = p_order_id; END UpdateOrderStatus;",
+    "outputs": [
+      {
+        "expected": "CREATE OR REPLACE PROCEDURE UpdateOrderStatus(p_order_id IN NUMBER, p_status IN VARCHAR?) AS BEGIN UPDATE orders SET status = p_status WHERE order_id = p_order_id; END UpdateOrderStatus;",
+        "statement_metadata": {
+          "size": 40,
+          "tables": ["orders"],
+          "commands": ["CREATE", "BEGIN", "UPDATE"],
+          "comments": [],
+          "procedures": ["UpdateOrderStatus"]
+        },
+        "obfuscator_config": {
+            "replace_digits": true
+        },
+        "normalizer_config": {
+            "collect_tables": true,
+            "collect_commands": true,
+            "collect_comments": true,
+            "collect_procedure": true,
+            "keep_trailing_semicolon": true,
+            "remove_space_between_parentheses": true
+        }
+      }
+    ]
+  }
+  

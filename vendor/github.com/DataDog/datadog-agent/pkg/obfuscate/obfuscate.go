@@ -14,12 +14,10 @@ package obfuscate
 
 import (
 	"bytes"
-	"sync/atomic"
 
-	"github.com/DataDog/datadog-go/statsd"
+	"github.com/DataDog/datadog-go/v5/statsd"
+	"go.uber.org/atomic"
 )
-
-//go:generate easyjson -no_std_marshalers $GOFILE
 
 // Obfuscator quantizes and obfuscates spans. The obfuscator is not safe for
 // concurrent use.
@@ -30,10 +28,8 @@ type Obfuscator struct {
 	sqlExecPlan          *jsonObfuscator // nil if disabled
 	sqlExecPlanNormalize *jsonObfuscator // nil if disabled
 	// sqlLiteralEscapes reports whether we should treat escape characters literally or as escape characters.
-	// A non-zero value means 'yes'. Different SQL engines behave in different ways and the tokenizer needs
-	// to be generic.
-	// Not safe for concurrent use.
-	sqlLiteralEscapes int32
+	// Different SQL engines behave in different ways and the tokenizer needs to be generic.
+	sqlLiteralEscapes *atomic.Bool
 	// queryCache keeps a cache of already obfuscated queries.
 	queryCache *measuredCache
 	log        Logger
@@ -52,9 +48,9 @@ func (noopLogger) Debugf(_ string, _ ...interface{}) {}
 // setSQLLiteralEscapes sets whether or not escape characters should be treated literally by the SQL obfuscator.
 func (o *Obfuscator) setSQLLiteralEscapes(ok bool) {
 	if ok {
-		atomic.StoreInt32(&o.sqlLiteralEscapes, 1)
+		o.sqlLiteralEscapes.Store(true)
 	} else {
-		atomic.StoreInt32(&o.sqlLiteralEscapes, 0)
+		o.sqlLiteralEscapes.Store(false)
 	}
 }
 
@@ -62,7 +58,7 @@ func (o *Obfuscator) setSQLLiteralEscapes(ok bool) {
 // Some SQL engines require it and others don't. It will be detected as SQL queries are being obfuscated
 // through calls to ObfuscateSQLString and automatically set for future.
 func (o *Obfuscator) useSQLLiteralEscapes() bool {
-	return atomic.LoadInt32(&o.sqlLiteralEscapes) == 1
+	return o.sqlLiteralEscapes.Load()
 }
 
 // Config holds the configuration for obfuscating sensitive data for various span types.
@@ -86,6 +82,12 @@ type Config struct {
 	// HTTP holds the obfuscation settings for HTTP URLs.
 	HTTP HTTPConfig
 
+	// Redis holds the obfuscation settings for Redis commands.
+	Redis RedisConfig
+
+	// Memcached holds the obfuscation settings for Memcached commands.
+	Memcached MemcachedConfig
+
 	// Statsd specifies the statsd client to use for reporting metrics.
 	Statsd StatsClient
 
@@ -100,52 +102,131 @@ type StatsClient interface {
 	Gauge(name string, value float64, tags []string, rate float64) error
 }
 
+// ObfuscationMode specifies the obfuscation mode to use for go-sqllexer pkg.
+type ObfuscationMode string
+
+// ObfuscationMode valid values
+const (
+	ObfuscateOnly         = ObfuscationMode("obfuscate_only")
+	ObfuscateAndNormalize = ObfuscationMode("obfuscate_and_normalize")
+)
+
 // SQLConfig holds the config for obfuscating SQL.
-// easyjson:json
 type SQLConfig struct {
+	// DBMS identifies the type of database management system (e.g. MySQL, Postgres, and SQL Server).
+	// Valid values for this can be found at https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/database.md#connection-level-attributes
+	DBMS string `json:"dbms"`
+
 	// TableNames specifies whether the obfuscator should also extract the table names that a query addresses,
 	// in addition to obfuscating.
-	TableNames bool
+	TableNames bool `json:"table_names" yaml:"table_names"`
+
+	// CollectCommands specifies whether the obfuscator should extract and return commands as SQL metadata when obfuscating.
+	CollectCommands bool `json:"collect_commands" yaml:"collect_commands"`
+
+	// CollectComments specifies whether the obfuscator should extract and return comments as SQL metadata when obfuscating.
+	CollectComments bool `json:"collect_comments" yaml:"collect_comments"`
+
+	// CollectProcedures specifies whether the obfuscator should extract and return procedure names as SQL metadata when obfuscating.
+	CollectProcedures bool `json:"collect_procedures" yaml:"collect_procedures"`
 
 	// ReplaceDigits specifies whether digits in table names and identifiers should be obfuscated.
-	ReplaceDigits bool `json:"replace_digits"`
+	ReplaceDigits bool `json:"replace_digits" yaml:"replace_digits"`
 
 	// KeepSQLAlias reports whether SQL aliases ("AS") should be truncated.
-	KeepSQLAlias bool
+	KeepSQLAlias bool `json:"keep_sql_alias"`
 
 	// DollarQuotedFunc reports whether to treat "$func$" delimited dollar-quoted strings
 	// differently and not obfuscate them as a string. To read more about dollar quoted
 	// strings see:
 	//
 	// https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-DOLLAR-QUOTING
-	DollarQuotedFunc bool
+	DollarQuotedFunc bool `json:"dollar_quoted_func"`
+
+	// ObfuscationMode specifies the obfuscation mode to use for go-sqllexer pkg.
+	// When specified, obfuscator will attempt to use go-sqllexer pkg to obfuscate (and normalize) SQL queries.
+	// Valid values are "obfuscate_only", "obfuscate_and_normalize"
+	ObfuscationMode ObfuscationMode `json:"obfuscation_mode" yaml:"obfuscation_mode"`
+
+	// RemoveSpaceBetweenParentheses specifies whether to remove spaces between parentheses.
+	// By default, spaces are inserted between parentheses during normalization.
+	// This option is only valid when ObfuscationMode is "obfuscate_and_normalize".
+	RemoveSpaceBetweenParentheses bool `json:"remove_space_between_parentheses" yaml:"remove_space_between_parentheses"`
+
+	// KeepNull specifies whether to disable obfuscate NULL value with ?.
+	// This option is only valid when ObfuscationMode is "obfuscate_only" or "obfuscate_and_normalize".
+	KeepNull bool `json:"keep_null" yaml:"keep_null"`
+
+	// KeepBoolean specifies whether to disable obfuscate boolean value with ?.
+	// This option is only valid when ObfuscationMode is "obfuscate_only" or "obfuscate_and_normalize".
+	KeepBoolean bool `json:"keep_boolean" yaml:"keep_boolean"`
+
+	// KeepPositionalParameter specifies whether to disable obfuscate positional parameter with ?.
+	// This option is only valid when ObfuscationMode is "obfuscate_only" or "obfuscate_and_normalize".
+	KeepPositionalParameter bool `json:"keep_positional_parameter" yaml:"keep_positional_parameter"`
 
 	// Cache reports whether the obfuscator should use a LRU look-up cache for SQL obfuscations.
 	Cache bool
 }
 
+// SQLMetadata holds metadata collected throughout the obfuscation of an SQL statement. It is only
+// collected when enabled via SQLConfig.
+type SQLMetadata struct {
+	// Size holds the byte size of the metadata collected.
+	Size int64
+	// TablesCSV is a comma-separated list of tables that the query addresses.
+	TablesCSV string `json:"tables_csv"`
+	// Commands holds commands executed in an SQL statement.
+	// e.g. SELECT, UPDATE, INSERT, DELETE, etc.
+	Commands []string `json:"commands"`
+	// Comments holds comments in an SQL statement.
+	Comments []string `json:"comments"`
+	// Procedures holds procedure names in an SQL statement.
+	Procedures []string `json:"procedures"`
+}
+
 // HTTPConfig holds the configuration settings for HTTP obfuscation.
 type HTTPConfig struct {
 	// RemoveQueryStrings determines query strings to be removed from HTTP URLs.
-	RemoveQueryString bool
+	RemoveQueryString bool `mapstructure:"remove_query_string" json:"remove_query_string"`
 
 	// RemovePathDigits determines digits in path segments to be obfuscated.
-	RemovePathDigits bool
+	RemovePathDigits bool `mapstructure:"remove_paths_with_digits" json:"remove_path_digits"`
+}
+
+// RedisConfig holds the configuration settings for Redis obfuscation
+type RedisConfig struct {
+	// Enabled specifies whether this feature should be enabled.
+	Enabled bool `mapstructure:"enabled"`
+
+	// RemoveAllArgs specifies whether all arguments to a given Redis
+	// command should be obfuscated.
+	RemoveAllArgs bool `mapstructure:"remove_all_args"`
+}
+
+// MemcachedConfig holds the configuration settings for Memcached obfuscation
+type MemcachedConfig struct {
+	// Enabled specifies whether this feature should be enabled.
+	Enabled bool `mapstructure:"enabled"`
+
+	// KeepCommand specifies whether the command of a given Memcached
+	// query should be kept. If false, the entire tag is removed.
+	KeepCommand bool `mapstructure:"keep_command"`
 }
 
 // JSONConfig holds the obfuscation configuration for sensitive
 // data found in JSON objects.
 type JSONConfig struct {
 	// Enabled will specify whether obfuscation should be enabled.
-	Enabled bool
+	Enabled bool `mapstructure:"enabled"`
 
 	// KeepValues will specify a set of keys for which their values will
 	// not be obfuscated.
-	KeepValues []string
+	KeepValues []string `mapstructure:"keep_values"`
 
 	// ObfuscateSQLValues will specify a set of keys for which their values
 	// will be passed through SQL obfuscation
-	ObfuscateSQLValues []string
+	ObfuscateSQLValues []string `mapstructure:"obfuscate_sql_values"`
 }
 
 // NewObfuscator creates a new obfuscator
@@ -154,8 +235,10 @@ func NewObfuscator(cfg Config) *Obfuscator {
 		cfg.Logger = noopLogger{}
 	}
 	o := Obfuscator{
-		opts:       &cfg,
-		queryCache: newMeasuredCache(cacheOptions{On: cfg.SQL.Cache, Statsd: cfg.Statsd}),
+		opts:              &cfg,
+		queryCache:        newMeasuredCache(cacheOptions{On: cfg.SQL.Cache, Statsd: cfg.Statsd}),
+		sqlLiteralEscapes: atomic.NewBool(false),
+		log:               cfg.Logger,
 	}
 	if cfg.ES.Enabled {
 		o.es = newJSONObfuscator(&cfg.ES, &o)

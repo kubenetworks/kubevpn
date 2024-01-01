@@ -1,0 +1,16 @@
+{
+    "input": "SELECT id, ST_AsText(location) AS location FROM orders WHERE ST_Distance_Sphere(location, ST_GeomFromText('POINT(10 20)')) < 10000;",
+    "outputs": [
+      {
+        "expected": "SELECT id, ST_AsText ( location ) FROM orders WHERE ST_Distance_Sphere ( location, ST_GeomFromText ( ? ) ) < ?",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

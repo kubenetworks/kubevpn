@@ -1,0 +1,19 @@
+{
+  "input": "SELECT * FROM events WHERE payload @> '{\"type\": \"user_event\"}';",
+  "outputs": [
+    {
+      "expected": "SELECT * FROM events WHERE payload @> ?",
+      "statement_metadata": {
+        "size": 12,
+        "tables": [
+          "events"
+        ],
+        "commands": [
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

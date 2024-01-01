@@ -1,0 +1,16 @@
+{
+    "input": "INSERT INTO customers (name) VALUES ('John Doe'); INSERT INTO orders (customer_id, status) VALUES (LAST_INSERT_ID(), 'Pending');",
+    "outputs": [
+      {
+        "expected": "INSERT INTO customers ( name ) VALUES ( ? ); INSERT INTO orders ( customer_id, status ) VALUES ( LAST_INSERT_ID ( ), ? )",
+        "statement_metadata": {
+          "size": 21,
+          "tables": ["customers", "orders"],
+          "commands": ["INSERT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

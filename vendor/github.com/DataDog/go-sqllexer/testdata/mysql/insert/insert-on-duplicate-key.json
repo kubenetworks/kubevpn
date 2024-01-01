@@ -1,0 +1,16 @@
+{
+    "input": "INSERT INTO orders (id, customer_id, status) VALUES (100, 2, 'Pending') ON DUPLICATE KEY UPDATE status = 'Pending';",
+    "outputs": [
+      {
+        "expected": "INSERT INTO orders ( id, customer_id, status ) VALUES ( ? ) ON DUPLICATE KEY UPDATE status = ?",
+        "statement_metadata": {
+          "size": 24,
+          "tables": ["orders", "status"],
+          "commands": ["INSERT", "UPDATE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

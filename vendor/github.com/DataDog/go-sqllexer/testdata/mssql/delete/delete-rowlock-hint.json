@@ -1,0 +1,16 @@
+{
+    "input": "DELETE FROM orders WITH (ROWLOCK) WHERE status = 'Pending';",
+    "outputs": [
+      {
+        "expected": "DELETE FROM orders WITH ( ROWLOCK ) WHERE status = ?",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["DELETE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

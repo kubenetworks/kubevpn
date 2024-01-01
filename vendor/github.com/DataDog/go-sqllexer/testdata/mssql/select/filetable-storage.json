@@ -1,0 +1,16 @@
+{
+    "input": "CREATE TABLE DocumentStore AS FileTable;",
+    "outputs": [
+      {
+        "expected": "CREATE TABLE DocumentStore",
+        "statement_metadata": {
+          "size": 19,
+          "tables": ["DocumentStore"],
+          "commands": ["CREATE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

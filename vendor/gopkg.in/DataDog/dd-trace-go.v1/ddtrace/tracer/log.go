@@ -23,50 +23,55 @@ import (
 
 // startupInfo contains various information about the status of the tracer on startup.
 type startupInfo struct {
-	Date                        string            `json:"date"`                           // ISO 8601 date and time of start
-	OSName                      string            `json:"os_name"`                        // Windows, Darwin, Debian, etc.
-	OSVersion                   string            `json:"os_version"`                     // Version of the OS
-	Version                     string            `json:"version"`                        // Tracer version
-	Lang                        string            `json:"lang"`                           // "Go"
-	LangVersion                 string            `json:"lang_version"`                   // Go version, e.g. go1.13
-	Env                         string            `json:"env"`                            // Tracer env
-	Service                     string            `json:"service"`                        // Tracer Service
-	AgentURL                    string            `json:"agent_url"`                      // The address of the agent
-	AgentError                  string            `json:"agent_error"`                    // Any error that occurred trying to connect to agent
-	Debug                       bool              `json:"debug"`                          // Whether debug mode is enabled
-	AnalyticsEnabled            bool              `json:"analytics_enabled"`              // True if there is a global analytics rate set
-	SampleRate                  string            `json:"sample_rate"`                    // The default sampling rate for the rules sampler
-	SampleRateLimit             string            `json:"sample_rate_limit"`              // The rate limit configured with the rules sampler
-	SamplingRules               []SamplingRule    `json:"sampling_rules"`                 // Rules used by the rules sampler
-	SamplingRulesError          string            `json:"sampling_rules_error"`           // Any errors that occurred while parsing sampling rules
-	ServiceMappings             map[string]string `json:"service_mappings"`               // Service Mappings
-	Tags                        map[string]string `json:"tags"`                           // Global tags
-	RuntimeMetricsEnabled       bool              `json:"runtime_metrics_enabled"`        // Whether or not runtime metrics are enabled
-	HealthMetricsEnabled        bool              `json:"health_metrics_enabled"`         // Whether or not health metrics are enabled
-	ProfilerCodeHotspotsEnabled bool              `json:"profiler_code_hotspots_enabled"` // Whether or not profiler code hotspots are enabled
-	ProfilerEndpointsEnabled    bool              `json:"profiler_endpoints_enabled"`     // Whether or not profiler endpoints are enabled
-	ApplicationVersion          string            `json:"dd_version"`                     // Version of the user's application
-	Architecture                string            `json:"architecture"`                   // Architecture of host machine
-	GlobalService               string            `json:"global_service"`                 // Global service string. If not-nil should be same as Service. (#614)
-	LambdaMode                  string            `json:"lambda_mode"`                    // Whether or not the client has enabled lambda mode
-	AppSec                      bool              `json:"appsec"`                         // AppSec status: true when started, false otherwise.
-	AgentFeatures               agentFeatures     `json:"agent_features"`                 // Lists the capabilities of the agent.
+	Date                        string                       `json:"date"`                           // ISO 8601 date and time of start
+	OSName                      string                       `json:"os_name"`                        // Windows, Darwin, Debian, etc.
+	OSVersion                   string                       `json:"os_version"`                     // Version of the OS
+	Version                     string                       `json:"version"`                        // Tracer version
+	Lang                        string                       `json:"lang"`                           // "Go"
+	LangVersion                 string                       `json:"lang_version"`                   // Go version, e.g. go1.13
+	Env                         string                       `json:"env"`                            // Tracer env
+	Service                     string                       `json:"service"`                        // Tracer Service
+	AgentURL                    string                       `json:"agent_url"`                      // The address of the agent
+	AgentError                  string                       `json:"agent_error"`                    // Any error that occurred trying to connect to agent
+	Debug                       bool                         `json:"debug"`                          // Whether debug mode is enabled
+	AnalyticsEnabled            bool                         `json:"analytics_enabled"`              // True if there is a global analytics rate set
+	SampleRate                  string                       `json:"sample_rate"`                    // The default sampling rate for the rules sampler
+	SampleRateLimit             string                       `json:"sample_rate_limit"`              // The rate limit configured with the rules sampler
+	SamplingRules               []SamplingRule               `json:"sampling_rules"`                 // Rules used by the rules sampler
+	SamplingRulesError          string                       `json:"sampling_rules_error"`           // Any errors that occurred while parsing sampling rules
+	ServiceMappings             map[string]string            `json:"service_mappings"`               // Service Mappings
+	Tags                        map[string]string            `json:"tags"`                           // Global tags
+	RuntimeMetricsEnabled       bool                         `json:"runtime_metrics_enabled"`        // Whether runtime metrics are enabled
+	HealthMetricsEnabled        bool                         `json:"health_metrics_enabled"`         // Whether health metrics are enabled
+	ProfilerCodeHotspotsEnabled bool                         `json:"profiler_code_hotspots_enabled"` // Whether profiler code hotspots are enabled
+	ProfilerEndpointsEnabled    bool                         `json:"profiler_endpoints_enabled"`     // Whether profiler endpoints are enabled
+	ApplicationVersion          string                       `json:"dd_version"`                     // Version of the user's application
+	Architecture                string                       `json:"architecture"`                   // Architecture of host machine
+	GlobalService               string                       `json:"global_service"`                 // Global service string. If not-nil should be same as Service. (#614)
+	LambdaMode                  string                       `json:"lambda_mode"`                    // Whether the client has enabled lambda mode
+	AppSec                      bool                         `json:"appsec"`                         // AppSec status: true when started, false otherwise.
+	AgentFeatures               agentFeatures                `json:"agent_features"`                 // Lists the capabilities of the agent.
+	Integrations                map[string]integrationConfig `json:"integrations"`                   // Available tracer integrations
+	PartialFlushEnabled         bool                         `json:"partial_flush_enabled"`          // Whether Partial Flushing is enabled
+	PartialFlushMinSpans        int                          `json:"partial_flush_min_spans"`        // The min number of spans to trigger a partial flush
+	Orchestrion                 orchestrionConfig            `json:"orchestrion"`                    // Orchestrion (auto-instrumentation) configuration.
 }
 
 // checkEndpoint tries to connect to the URL specified by endpoint.
 // If the endpoint is not reachable, checkEndpoint returns an error
 // explaining why.
-func checkEndpoint(endpoint string) error {
+func checkEndpoint(c *http.Client, endpoint string) error {
 	req, err := http.NewRequest("POST", endpoint, bytes.NewReader([]byte{0x90}))
 	if err != nil {
 		return fmt.Errorf("cannot create http request: %v", err)
 	}
 	req.Header.Set(traceCountHeader, "0")
 	req.Header.Set("Content-Type", "application/msgpack")
-	_, err = defaultClient.Do(req)
+	res, err := c.Do(req)
 	if err != nil {
 		return err
 	}
+	defer res.Body.Close()
 	return nil
 }
 
@@ -104,7 +109,11 @@ func logStartup(t *tracer) {
 		GlobalService:               globalconfig.ServiceName(),
 		LambdaMode:                  fmt.Sprintf("%t", t.config.logToStdout),
 		AgentFeatures:               t.config.agent,
+		Integrations:                t.config.integrations,
 		AppSec:                      appsec.Enabled(),
+		PartialFlushEnabled:         t.config.partialFlushEnabled,
+		PartialFlushMinSpans:        t.config.partialFlushMinSpans,
+		Orchestrion:                 t.config.orchestrionCfg,
 	}
 	if _, _, err := samplingRulesFromEnv(); err != nil {
 		info.SamplingRulesError = fmt.Sprintf("%s", err)
@@ -113,7 +122,7 @@ func logStartup(t *tracer) {
 		info.SampleRateLimit = fmt.Sprintf("%v", limit)
 	}
 	if !t.config.logToStdout {
-		if err := checkEndpoint(t.config.transport.endpoint()); err != nil {
+		if err := checkEndpoint(t.config.httpClient, t.config.transport.endpoint()); err != nil {
 			info.AgentError = fmt.Sprintf("%s", err)
 			log.Warn("DIAGNOSTICS Unable to reach agent intake: %s", err)
 		}

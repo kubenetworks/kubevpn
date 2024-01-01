@@ -8,6 +8,7 @@ package internal
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/log"
@@ -56,4 +57,38 @@ func DurationEnv(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return v
+}
+
+// ForEachStringTag runs fn on every key:val pair encountered in str.
+// str may contain multiple key:val pairs separated by either space
+// or comma (but not a mixture of both).
+func ForEachStringTag(str string, fn func(key string, val string)) {
+	sep := " "
+	if strings.Index(str, ",") > -1 {
+		// falling back to comma as separator
+		sep = ","
+	}
+	for _, tag := range strings.Split(str, sep) {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		kv := strings.SplitN(tag, ":", 2)
+		key := strings.TrimSpace(kv[0])
+		if key == "" {
+			continue
+		}
+		var val string
+		if len(kv) == 2 {
+			val = strings.TrimSpace(kv[1])
+		}
+		fn(key, val)
+	}
+}
+
+// ParseTagString returns tags parsed from string as map
+func ParseTagString(str string) map[string]string {
+	res := make(map[string]string)
+	ForEachStringTag(str, func(key, val string) { res[key] = val })
+	return res
 }

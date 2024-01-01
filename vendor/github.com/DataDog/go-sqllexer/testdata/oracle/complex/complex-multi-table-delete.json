@@ -1,0 +1,16 @@
+{
+    "input": "DELETE FROM orders o WHERE o.customer_id IN (SELECT c.id FROM customers c WHERE NOT EXISTS (SELECT 1 FROM customer_orders co WHERE co.customer_id = c.id AND co.order_date > SYSDATE - 365)) AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND oi.product_id IN (SELECT p.id FROM products p WHERE p.category = 'Obsolete'));",
+    "outputs": [
+      {
+        "expected": "DELETE FROM orders o WHERE o.customer_id IN ( SELECT c.id FROM customers c WHERE NOT EXISTS ( SELECT ? FROM customer_orders co WHERE co.customer_id = c.id AND co.order_date > SYSDATE - ? ) ) AND EXISTS ( SELECT ? FROM order_items oi WHERE oi.order_id = o.id AND oi.product_id IN ( SELECT p.id FROM products p WHERE p.category = ? ) )",
+        "statement_metadata": {
+          "size": 61,
+          "tables": ["orders", "customers", "customer_orders", "order_items", "products"],
+          "commands": ["DELETE", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

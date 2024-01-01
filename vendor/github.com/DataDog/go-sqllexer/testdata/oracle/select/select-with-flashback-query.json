@@ -1,0 +1,23 @@
+{
+    "input": "SELECT * FROM employees AS OF TIMESTAMP TO_TIMESTAMP('2023-03-15 08:30:00', 'YYYY-MM-DD HH24:MI:SS') WHERE department_id = 10;",
+    "outputs": [
+      {
+        "expected": "SELECT * FROM employees AS OF TIMESTAMP TO_TIMESTAMP ( ? ) WHERE department_id = ?",
+        "statement_metadata": {
+          "size": 15,
+          "tables": ["employees"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      },
+      {
+        "expected": "SELECT * FROM employees AS OF TIMESTAMP TO_TIMESTAMP(?) WHERE department_id = ?;",
+        "normalizer_config": {
+            "keep_trailing_semicolon": true,
+            "remove_space_between_parentheses": true
+        }
+      }
+    ]
+  }
+  

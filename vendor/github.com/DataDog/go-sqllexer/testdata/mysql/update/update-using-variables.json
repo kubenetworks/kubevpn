@@ -1,0 +1,16 @@
+{
+    "input": "SET @new_status = 'Shipped'; UPDATE orders SET status = @new_status WHERE status = 'Processing';",
+    "outputs": [
+      {
+        "expected": "SET @new_status = ?; UPDATE orders SET status = @new_status WHERE status = ?",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["UPDATE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

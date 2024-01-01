@@ -4,11 +4,15 @@ import (
 	"strconv"
 )
 
-type bufferFullError string
+// MessageTooLongError is an error returned when a sample, event or service check is too large once serialized. See
+// WithMaxBytesPerPayload option for more details.
+type MessageTooLongError struct{}
 
-func (e bufferFullError) Error() string { return string(e) }
+func (e MessageTooLongError) Error() string {
+	return "message too long. See 'WithMaxBytesPerPayload' documentation."
+}
 
-const errBufferFull = bufferFullError("statsd buffer is full")
+var errBufferFull = MessageTooLongError{}
 
 type partialWriteError string
 
@@ -19,7 +23,7 @@ const errPartialWrite = partialWriteError("value partially written")
 const metricOverhead = 512
 
 // statsdBuffer is a buffer containing statsd messages
-// this struct methods are NOT safe for concurent use
+// this struct methods are NOT safe for concurrent use
 type statsdBuffer struct {
 	buffer       []byte
 	maxSize      int
@@ -35,22 +39,24 @@ func newStatsdBuffer(maxSize, maxElements int) *statsdBuffer {
 	}
 }
 
-func (b *statsdBuffer) writeGauge(namespace string, globalTags []string, name string, value float64, tags []string, rate float64) error {
+func (b *statsdBuffer) writeGauge(namespace string, globalTags []string, name string, value float64, tags []string, rate float64, timestamp int64) error {
 	if b.elementCount >= b.maxElements {
 		return errBufferFull
 	}
 	originalBuffer := b.buffer
 	b.buffer = appendGauge(b.buffer, namespace, globalTags, name, value, tags, rate)
+	b.buffer = appendTimestamp(b.buffer, timestamp)
 	b.writeSeparator()
 	return b.validateNewElement(originalBuffer)
 }
 
-func (b *statsdBuffer) writeCount(namespace string, globalTags []string, name string, value int64, tags []string, rate float64) error {
+func (b *statsdBuffer) writeCount(namespace string, globalTags []string, name string, value int64, tags []string, rate float64, timestamp int64) error {
 	if b.elementCount >= b.maxElements {
 		return errBufferFull
 	}
 	originalBuffer := b.buffer
 	b.buffer = appendCount(b.buffer, namespace, globalTags, name, value, tags, rate)
+	b.buffer = appendTimestamp(b.buffer, timestamp)
 	b.writeSeparator()
 	return b.validateNewElement(originalBuffer)
 }
@@ -66,7 +72,7 @@ func (b *statsdBuffer) writeHistogram(namespace string, globalTags []string, nam
 }
 
 // writeAggregated serialized as many values as possible in the current buffer and return the position in values where it stopped.
-func (b *statsdBuffer) writeAggregated(metricSymbol []byte, namespace string, globalTags []string, name string, values []float64, tags string, tagSize int, precision int) (int, error) {
+func (b *statsdBuffer) writeAggregated(metricSymbol []byte, namespace string, globalTags []string, name string, values []float64, tags string, tagSize int, precision int, rate float64) (int, error) {
 	if b.elementCount >= b.maxElements {
 		return 0, errBufferFull
 	}
@@ -106,7 +112,9 @@ func (b *statsdBuffer) writeAggregated(metricSymbol []byte, namespace string, gl
 
 	b.buffer = append(b.buffer, '|')
 	b.buffer = append(b.buffer, metricSymbol...)
+	b.buffer = appendRate(b.buffer, rate)
 	b.buffer = appendTagsAggregated(b.buffer, globalTags, tags)
+	b.buffer = appendContainerID(b.buffer)
 	b.writeSeparator()
 	b.elementCount++
 

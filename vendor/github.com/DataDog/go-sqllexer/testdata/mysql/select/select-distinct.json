@@ -1,0 +1,16 @@
+{
+    "input": "SELECT DISTINCT status FROM orders;",
+    "outputs": [
+      {
+        "expected": "SELECT DISTINCT status FROM orders",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

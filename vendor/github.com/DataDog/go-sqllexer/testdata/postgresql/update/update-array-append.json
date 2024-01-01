@@ -1,0 +1,19 @@
+{
+  "input": "UPDATE users SET favorite_numbers = array_append(favorite_numbers, 42) WHERE id = 5;",
+  "outputs": [
+    {
+      "expected": "UPDATE users SET favorite_numbers = array_append ( favorite_numbers, ? ) WHERE id = ?",
+      "statement_metadata": {
+        "size": 11,
+        "tables": [
+          "users"
+        ],
+        "commands": [
+          "UPDATE"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

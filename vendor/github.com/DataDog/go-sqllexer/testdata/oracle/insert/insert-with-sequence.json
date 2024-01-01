@@ -1,0 +1,16 @@
+{
+    "input": "INSERT INTO products (id, name, price) VALUES (product_seq.NEXTVAL, 'New Product', 99.99);",
+    "outputs": [
+      {
+        "expected": "INSERT INTO products ( id, name, price ) VALUES ( product_seq.NEXTVAL, ?, ? )",
+        "statement_metadata": {
+          "size": 14,
+          "tables": ["products"],
+          "commands": ["INSERT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

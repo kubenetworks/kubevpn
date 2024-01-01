@@ -1,0 +1,27 @@
+{
+    "input": "BEGIN UpdateOrderStatus(123, 'Shipped'); END;",
+    "outputs": [
+      {
+        "expected": "BEGIN UpdateOrderStatus(?); END;",
+        "statement_metadata": {
+          "size": 5,
+          "tables": [],
+          "commands": ["BEGIN"],
+          "comments": [],
+          "procedures": []
+        },
+        "obfuscator_config": {
+            "replace_digits": true
+        },
+        "normalizer_config": {
+            "collect_tables": true,
+            "collect_commands": true,
+            "collect_comments": true,
+            "collect_procedure": true,
+            "keep_trailing_semicolon": true,
+            "remove_space_between_parentheses": true
+        }
+      }
+    ]
+  }
+  

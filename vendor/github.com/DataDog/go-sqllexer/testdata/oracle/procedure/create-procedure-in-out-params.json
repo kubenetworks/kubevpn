@@ -1,0 +1,27 @@
+{
+    "input": "CREATE OR REPLACE PROCEDURE CalculateDiscount(p_order_id IN NUMBER, p_discount OUT NUMBER) AS total_amount NUMBER; BEGIN SELECT SUM(price * quantity) INTO total_amount FROM order_items WHERE order_id = p_order_id; p_discount := total_amount * 0.1; END CalculateDiscount;",
+    "outputs": [
+      {
+        "expected": "CREATE OR REPLACE PROCEDURE CalculateDiscount(p_order_id IN NUMBER, p_discount OUT NUMBER) NUMBER; BEGIN SELECT SUM(price * quantity) INTO total_amount FROM order_items WHERE order_id = p_order_id; p_discount := total_amount * ?; END CalculateDiscount;",
+        "statement_metadata": {
+          "size": 57,
+          "tables": ["total_amount", "order_items"],
+          "commands": ["CREATE", "BEGIN", "SELECT"],
+          "comments": [],
+          "procedures": ["CalculateDiscount"]
+        },
+        "obfuscator_config": {
+            "replace_digits": true
+        },
+        "normalizer_config": {
+            "collect_tables": true,
+            "collect_commands": true,
+            "collect_comments": true,
+            "collect_procedure": true,
+            "keep_trailing_semicolon": true,
+            "remove_space_between_parentheses": true
+        }
+      }
+    ]
+  }
+  

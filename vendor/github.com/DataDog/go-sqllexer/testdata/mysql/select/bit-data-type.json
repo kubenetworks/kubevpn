@@ -1,0 +1,16 @@
+{
+    "input": "SELECT id, status, (is_paid & 1) AS isPaidFlag FROM orders;",
+    "outputs": [
+      {
+        "expected": "SELECT id, status, ( is_paid & ? ) FROM orders",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

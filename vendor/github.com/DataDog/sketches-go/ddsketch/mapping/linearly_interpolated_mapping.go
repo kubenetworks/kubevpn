@@ -15,34 +15,47 @@ import (
 	"github.com/DataDog/sketches-go/ddsketch/pb/sketchpb"
 )
 
-// A fast IndexMapping that approximates the memory-optimal LogarithmicMapping by extracting the floor value
-// of the logarithm to the base 2 from the binary representations of floating-point values and linearly
-// interpolating the logarithm in-between.
+// LinearlyInterpolatedMapping is a fast IndexMapping that approximates the
+// memory-optimal LogarithmicMapping by extracting the floor value of the
+// logarithm to the base 2 from the binary representations of floating-point
+// values and linearly interpolating the logarithm in-between.
 type LinearlyInterpolatedMapping struct {
-	relativeAccuracy      float64
-	multiplier            float64
-	normalizedIndexOffset float64
+	gamma             float64 // base
+	indexOffset       float64
+	multiplier        float64 // precomputed for performance
+	minIndexableValue float64
+	maxIndexableValue float64
 }
 
 func NewLinearlyInterpolatedMapping(relativeAccuracy float64) (*LinearlyInterpolatedMapping, error) {
 	if relativeAccuracy <= 0 || relativeAccuracy >= 1 {
 		return nil, errors.New("The relative accuracy must be between 0 and 1.")
 	}
-	return &LinearlyInterpolatedMapping{
-		relativeAccuracy: relativeAccuracy,
-		multiplier:       1.0 / math.Log1p(2*relativeAccuracy/(1-relativeAccuracy)),
-	}, nil
+	gamma := math.Pow((1+relativeAccuracy)/(1-relativeAccuracy), math.Ln2) // > 1
+	indexOffset := 1 / math.Log2(gamma)                                    // for backward compatibility
+	m, _ := NewLinearlyInterpolatedMappingWithGamma(gamma, indexOffset)
+	return m, nil
 }
 
 func NewLinearlyInterpolatedMappingWithGamma(gamma, indexOffset float64) (*LinearlyInterpolatedMapping, error) {
 	if gamma <= 1 {
 		return nil, errors.New("Gamma must be greater than 1.")
 	}
+	multiplier := 1 / math.Log2(gamma)
+	adjustedGamma := math.Pow(gamma, 1/math.Ln2)
 	m := LinearlyInterpolatedMapping{
-		relativeAccuracy: 1 - 2/(1+math.Exp(math.Log2(gamma))),
-		multiplier:       1 / math.Log2(gamma),
+		gamma:       gamma,
+		indexOffset: indexOffset,
+		multiplier:  multiplier,
+		minIndexableValue: math.Max(
+			math.Exp2((math.MinInt32-indexOffset)/multiplier+1), // so that index >= MinInt32
+			minNormalFloat64*adjustedGamma,
+		),
+		maxIndexableValue: math.Min(
+			math.Exp2((math.MaxInt32-indexOffset)/multiplier-1),       // so that index <= MaxInt32
+			math.Exp(expOverflow)/(2*adjustedGamma)*(adjustedGamma+1), // so that math.Exp does not overflow
+		),
 	}
-	m.normalizedIndexOffset = indexOffset - m.approximateLog(1)*m.multiplier
 	return &m, nil
 }
 
@@ -52,11 +65,11 @@ func (m *LinearlyInterpolatedMapping) Equals(other IndexMapping) bool {
 		return false
 	}
 	tol := 1e-12
-	return (withinTolerance(m.multiplier, o.multiplier, tol) && withinTolerance(m.normalizedIndexOffset, o.normalizedIndexOffset, tol))
+	return withinTolerance(m.gamma, o.gamma, tol) && withinTolerance(m.indexOffset, o.indexOffset, tol)
 }
 
 func (m *LinearlyInterpolatedMapping) Index(value float64) int {
-	index := m.approximateLog(value)*m.multiplier + m.normalizedIndexOffset
+	index := m.approximateLog(value)*m.multiplier + m.indexOffset
 	if index >= 0 {
 		return int(index)
 	} else {
@@ -65,66 +78,56 @@ func (m *LinearlyInterpolatedMapping) Index(value float64) int {
 }
 
 func (m *LinearlyInterpolatedMapping) Value(index int) float64 {
-	return m.LowerBound(index) * (1 + m.relativeAccuracy)
+	return m.LowerBound(index) * (1 + m.RelativeAccuracy())
 }
 
 func (m *LinearlyInterpolatedMapping) LowerBound(index int) float64 {
-	return m.approximateInverseLog((float64(index) - m.normalizedIndexOffset) / m.multiplier)
+	return m.approximateInverseLog((float64(index) - m.indexOffset) / m.multiplier)
 }
 
-// Return an approximation of log(1) + Math.log(x) / Math.log(2)}
+// Return an approximation of Math.log(x) / Math.log(2)
 func (m *LinearlyInterpolatedMapping) approximateLog(x float64) float64 {
 	bits := math.Float64bits(x)
-	return getExponent(bits) + getSignificandPlusOne(bits)
+	return getExponent(bits) + getSignificandPlusOne(bits) - 1
 }
 
 // The exact inverse of approximateLog.
 func (m *LinearlyInterpolatedMapping) approximateInverseLog(x float64) float64 {
-	exponent := math.Floor(x - 1)
-	significandPlusOne := x - exponent
+	exponent := math.Floor(x)
+	significandPlusOne := x - exponent + 1
 	return buildFloat64(int(exponent), significandPlusOne)
 }
 
 func (m *LinearlyInterpolatedMapping) MinIndexableValue() float64 {
-	return math.Max(
-		math.Exp2((math.MinInt32-m.normalizedIndexOffset)/m.multiplier-m.approximateLog(1)+1), // so that index >= MinInt32
-		minNormalFloat64*(1+m.relativeAccuracy)/(1-m.relativeAccuracy),
-	)
+	return m.minIndexableValue
 }
 
 func (m *LinearlyInterpolatedMapping) MaxIndexableValue() float64 {
-	return math.Min(
-		math.Exp2((math.MaxInt32-m.normalizedIndexOffset)/m.multiplier-m.approximateLog(float64(1))-1), // so that index <= MaxInt32
-		math.Exp(expOverflow)/(1+m.relativeAccuracy),                                                   // so that math.Exp does not overflow
-	)
+	return m.maxIndexableValue
 }
 
 func (m *LinearlyInterpolatedMapping) RelativeAccuracy() float64 {
-	return m.relativeAccuracy
-}
-
-func (m *LinearlyInterpolatedMapping) gamma() float64 {
-	return math.Exp2(1 / m.multiplier)
+	return 1 - 2/(1+math.Exp(math.Log2(m.gamma)))
 }
 
 // Generates a protobuf representation of this LinearlyInterpolatedMapping.
 func (m *LinearlyInterpolatedMapping) ToProto() *sketchpb.IndexMapping {
 	return &sketchpb.IndexMapping{
-		Gamma:         m.gamma(),
-		IndexOffset:   m.normalizedIndexOffset + m.approximateLog(1)*m.multiplier,
+		Gamma:         m.gamma,
+		IndexOffset:   m.indexOffset,
 		Interpolation: sketchpb.IndexMapping_LINEAR,
 	}
 }
 
 func (m *LinearlyInterpolatedMapping) Encode(b *[]byte) {
 	enc.EncodeFlag(b, enc.FlagIndexMappingBaseLinear)
-	enc.EncodeFloat64LE(b, m.gamma())
-	enc.EncodeFloat64LE(b, m.normalizedIndexOffset+m.approximateLog(1)*m.multiplier)
+	enc.EncodeFloat64LE(b, m.gamma)
+	enc.EncodeFloat64LE(b, m.indexOffset)
 }
 
 func (m *LinearlyInterpolatedMapping) string() string {
 	var buffer bytes.Buffer
-	buffer.WriteString(fmt.Sprintf("relativeAccuracy: %v, multiplier: %v, normalizedIndexOffset: %v\n", m.relativeAccuracy, m.multiplier, m.normalizedIndexOffset))
+	buffer.WriteString(fmt.Sprintf("gamma: %v, indexOffset: %v\n", m.gamma, m.indexOffset))
 	return buffer.String()
 }
 

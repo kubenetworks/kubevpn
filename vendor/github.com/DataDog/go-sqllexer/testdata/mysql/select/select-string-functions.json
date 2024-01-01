@@ -1,0 +1,16 @@
+{
+    "input": "SELECT id, UPPER(status) AS status_upper FROM orders;",
+    "outputs": [
+      {
+        "expected": "SELECT id, UPPER ( status ) FROM orders",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

@@ -1,0 +1,25 @@
+{
+  "input": "SELECT user_data.name FROM (SELECT name FROM users WHERE active = true) AS user_data;",
+  "outputs": [
+    {
+      "expected": "SELECT user_data.name FROM ( SELECT name FROM users WHERE active = ? )",
+      "statement_metadata": {
+        "size": 11,
+        "tables": [
+          "users"
+        ],
+        "commands": [
+          "SELECT"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    },
+    {
+      "expected": "SELECT user_data.name FROM ( SELECT name FROM users WHERE active = true )",
+      "obfuscator_config": {
+        "replace_boolean": false
+      }
+    }
+  ]
+}

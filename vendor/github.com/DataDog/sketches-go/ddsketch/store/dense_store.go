@@ -170,9 +170,10 @@ func (s *DenseStore) MergeWith(other Store) {
 	}
 	o, ok := other.(*DenseStore)
 	if !ok {
-		for bin := range other.Bins() {
-			s.AddBin(bin)
-		}
+		other.ForEach(func(index int, count float64) (stop bool) {
+			s.AddWithCount(index, count)
+			return false
+		})
 		return
 	}
 	if o.minIndex < s.minIndex || o.maxIndex > s.maxIndex {

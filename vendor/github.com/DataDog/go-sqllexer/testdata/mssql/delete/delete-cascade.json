@@ -1,0 +1,16 @@
+{
+    "input": "DELETE FROM customers WHERE region = 'North'; -- Assuming CASCADE DELETE is set up on the foreign key in the orders table",
+    "outputs": [
+      {
+        "expected": "DELETE FROM customers WHERE region = ?",
+        "statement_metadata": {
+          "size": 90,
+          "tables": ["customers"],
+          "commands": ["DELETE"],
+          "comments": ["-- Assuming CASCADE DELETE is set up on the foreign key in the orders table"],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

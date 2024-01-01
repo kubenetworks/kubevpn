@@ -1,0 +1,16 @@
+{
+    "input": "UPDATE orders SET due_date = DATEADD(day, 10, order_date) WHERE status = 'Pending';",
+    "outputs": [
+      {
+        "expected": "UPDATE orders SET due_date = DATEADD ( day, ?, order_date ) WHERE status = ?",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["UPDATE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

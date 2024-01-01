@@ -18,6 +18,7 @@ type delegationsIterator struct {
 	stack        []Delegation
 	target       string
 	visitedRoles map[string]struct{}
+	parents      map[string]string
 }
 
 var ErrTopLevelTargetsRoleMissing = errors.New("tuf: top level targets role missing from top level keys DB")
@@ -43,6 +44,7 @@ func NewDelegationsIterator(target string, topLevelKeysDB *verify.DB) (*delegati
 			},
 		},
 		visitedRoles: make(map[string]struct{}),
+		parents:      make(map[string]string),
 	}
 	return i, nil
 }
@@ -64,7 +66,7 @@ func (d *delegationsIterator) Next() (value Delegation, ok bool) {
 
 	// 5.6.7.2 trim delegations to visit, only the current role and its delegations
 	// will be considered
-	// https://github.com/DataDog/specification/issues/168
+	// https://github.com/theupdateframework/specification/issues/168
 	if delegation.Delegatee.Terminating {
 		// Empty the stack.
 		d.stack = d.stack[0:0]
@@ -88,8 +90,13 @@ func (d *delegationsIterator) Add(roles []data.DelegatedRole, delegator string, 
 				DB:        db,
 			}
 			d.stack = append(d.stack, delegation)
+			d.parents[r.Name] = delegator
 		}
 	}
 
 	return nil
+}
+
+func (d *delegationsIterator) Parent(role string) string {
+	return d.parents[role]
 }

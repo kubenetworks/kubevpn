@@ -1,0 +1,16 @@
+{
+    "input": "DELETE FROM orders WHERE status = 'Completed' AND order_date < DATE_SUB(NOW(), INTERVAL 1 YEAR);",
+    "outputs": [
+      {
+        "expected": "DELETE FROM orders WHERE status = ? AND order_date < DATE_SUB ( NOW ( ), INTERVAL ? YEAR )",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["DELETE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

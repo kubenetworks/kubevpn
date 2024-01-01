@@ -85,7 +85,8 @@
 // with our propagation algorithm as long as they implement the TextMapReader and TextMapWriter
 // interfaces. An example alternate implementation is the MDCarrier in our gRPC integration.
 //
-// As an example, injecting a span's context into an HTTP request would look like this:
+// As an example, injecting a span's context into an HTTP request would look like this.
+// (See the net/http contrib package for more examples https://pkg.go.dev/gopkg.in/DataDog/dd-trace-go.v1/contrib/net/http):
 //
 //	req, err := http.NewRequest("GET", "http://example.com", nil)
 //	// ...

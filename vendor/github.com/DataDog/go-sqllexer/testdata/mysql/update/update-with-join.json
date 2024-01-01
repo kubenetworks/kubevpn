@@ -1,0 +1,16 @@
+{
+    "input": "UPDATE orders o JOIN customers c ON o.customer_id = c.id SET o.status = 'Processing' WHERE c.region = 'East';",
+    "outputs": [
+      {
+        "expected": "UPDATE orders o JOIN customers c ON o.customer_id = c.id SET o.status = ? WHERE c.region = ?",
+        "statement_metadata": {
+          "size": 25,
+          "tables": ["orders", "customers"],
+          "commands": ["UPDATE", "JOIN"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

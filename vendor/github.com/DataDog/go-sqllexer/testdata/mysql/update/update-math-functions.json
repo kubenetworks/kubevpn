@@ -1,0 +1,16 @@
+{
+    "input": "UPDATE orders SET amount = amount * 1.1 WHERE status = 'Completed';",
+    "outputs": [
+      {
+        "expected": "UPDATE orders SET amount = amount * ? WHERE status = ?",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["UPDATE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

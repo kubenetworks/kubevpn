@@ -37,7 +37,7 @@ const (
 type Event struct {
 	// Title of the event.  Required.
 	Title string
-	// Text is the description of the event.  Required.
+	// Text is the description of the event.
 	Text string
 	// Timestamp is a timestamp for the event.  If not provided, the dogstatsd
 	// server will set this to the current time.

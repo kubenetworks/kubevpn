@@ -1,0 +1,16 @@
+{
+    "input": "INSERT INTO customers (id, name, address) VALUES (101, 'John Doe', '123 Oracle Ln');",
+    "outputs": [
+      {
+        "expected": "INSERT INTO customers ( id, name, address ) VALUES ( ? )",
+        "statement_metadata": {
+          "size": 15,
+          "tables": ["customers"],
+          "commands": ["INSERT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

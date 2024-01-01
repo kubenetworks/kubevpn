@@ -136,9 +136,10 @@ func (s *SparseStore) KeyAtRank(rank float64) int {
 }
 
 func (s *SparseStore) MergeWith(store Store) {
-	for bin := range store.Bins() {
-		s.AddBin(bin)
-	}
+	store.ForEach(func(index int, count float64) (stop bool) {
+		s.AddWithCount(index, count)
+		return false
+	})
 }
 
 func (s *SparseStore) ToProto() *sketchpb.Store {

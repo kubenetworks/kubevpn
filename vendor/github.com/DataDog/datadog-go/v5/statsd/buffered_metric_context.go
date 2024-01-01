@@ -14,7 +14,7 @@ type bufferedMetricContexts struct {
 	nbContext uint64
 	mutex     sync.RWMutex
 	values    bufferedMetricMap
-	newMetric func(string, float64, string) *bufferedMetric
+	newMetric func(string, float64, string, float64) *bufferedMetric
 
 	// Each bufferedMetricContexts uses its own random source and random
 	// lock to prevent goroutines from contending for the lock on the
@@ -25,10 +25,12 @@ type bufferedMetricContexts struct {
 	randomLock sync.Mutex
 }
 
-func newBufferedContexts(newMetric func(string, float64, string) *bufferedMetric) bufferedMetricContexts {
+func newBufferedContexts(newMetric func(string, float64, string, int64, float64) *bufferedMetric, maxSamples int64) bufferedMetricContexts {
 	return bufferedMetricContexts{
-		values:    bufferedMetricMap{},
-		newMetric: newMetric,
+		values: bufferedMetricMap{},
+		newMetric: func(name string, value float64, stringTags string, rate float64) *bufferedMetric {
+			return newMetric(name, value, stringTags, maxSamples, rate)
+		},
 		// Note that calling "time.Now().UnixNano()" repeatedly quickly may return
 		// very similar values. That's fine for seeding the worker-specific random
 		// source because we just need an evenly distributed stream of float values.
@@ -44,36 +46,56 @@ func (bc *bufferedMetricContexts) flush(metrics []metric) []metric {
 	bc.mutex.Unlock()
 
 	for _, d := range values {
+		d.Lock()
 		metrics = append(metrics, d.flushUnsafe())
+		d.Unlock()
 	}
 	atomic.AddUint64(&bc.nbContext, uint64(len(values)))
 	return metrics
 }
 
 func (bc *bufferedMetricContexts) sample(name string, value float64, tags []string, rate float64) error {
-	if !shouldSample(rate, bc.random, &bc.randomLock) {
+	keepingSample := shouldSample(rate, bc.random, &bc.randomLock)
+
+	// If we don't keep the sample, return early. If we do keep the sample
+	// we end up storing the *first* observed sampling rate in the metric.
+	// This is the *wrong* behavior but it's the one we had before and the alternative would increase lock contention too
+	// much with the current code.
+	// TODO: change this behavior in the future, probably by introducing thread-local storage and lockless stuctures.
+	// If this code is removed, also remove the observed sampling rate in the metric and fix `bufferedMetric.flushUnsafe()`
+	if !keepingSample {
 		return nil
 	}
 
 	context, stringTags := getContextAndTags(name, tags)
+	var v *bufferedMetric = nil
 
 	bc.mutex.RLock()
-	if v, found := bc.values[context]; found {
-		v.sample(value)
-		bc.mutex.RUnlock()
-		return nil
-	}
+	v, _ = bc.values[context]
 	bc.mutex.RUnlock()
 
-	bc.mutex.Lock()
-	// Check if another goroutines hasn't created the value betwen the 'RUnlock' and 'Lock'
-	if v, found := bc.values[context]; found {
-		v.sample(value)
+	// Create it if it wasn't found
+	if v == nil {
+		bc.mutex.Lock()
+		// It might have been created by another goroutine since last call
+		v, _ = bc.values[context]
+		if v == nil {
+			// If we might keep a sample that we should have skipped, but that should not drastically affect performances.
+			bc.values[context] = bc.newMetric(name, value, stringTags, rate)
+			// We added a new value, we need to unlock the mutex and quit
+			bc.mutex.Unlock()
+			return nil
+		}
 		bc.mutex.Unlock()
-		return nil
 	}
-	bc.values[context] = bc.newMetric(name, value, stringTags)
-	bc.mutex.Unlock()
+
+	// Now we can keep the sample or skip it
+	if keepingSample {
+		v.maybeKeepSample(value, bc.random, &bc.randomLock)
+	} else {
+		v.skipSample()
+	}
+
 	return nil
 }
 

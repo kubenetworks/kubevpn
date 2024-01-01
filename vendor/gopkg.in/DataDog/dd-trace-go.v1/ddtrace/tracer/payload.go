@@ -24,8 +24,22 @@ import (
 // payload implements io.Reader and can be used with the decoder directly. To create
 // a new payload use the newPayload method.
 //
-// payload is not safe for concurrent use, is meant to be used only once and eventually
-// dismissed.
+// payload is not safe for concurrent use.
+//
+// payload is meant to be used only once and eventually dismissed with the
+// single exception of retrying failed flush attempts.
+//
+// ⚠️  Warning!
+//
+// The payload should not be reused for multiple sets of traces.  Resetting the
+// payload for re-use requires the transport to wait for the HTTP package to
+// Close the request body before attempting to re-use it again! This requires
+// additional logic to be in place. See:
+//
+// • https://github.com/golang/go/blob/go1.16/src/net/http/client.go#L136-L138
+// • https://github.com/DataDog/dd-trace-go/pull/475
+// • https://github.com/DataDog/dd-trace-go/pull/549
+// • https://github.com/DataDog/dd-trace-go/pull/976
 type payload struct {
 	// header specifies the first few bytes in the msgpack stream
 	// indicating the type of array (fixarray, array16 or array32)
@@ -40,6 +54,9 @@ type payload struct {
 
 	// buf holds the sequence of msgpack-encoded items.
 	buf bytes.Buffer
+
+	// reader is used for reading the contents of buf.
+	reader *bytes.Reader
 }
 
 var _ io.Reader = (*payload)(nil)
@@ -55,6 +72,7 @@ func newPayload() *payload {
 
 // push pushes a new item into the stream.
 func (p *payload) push(t spanList) error {
+	p.buf.Grow(t.Msgsize())
 	if err := msgp.Encode(&p.buf, t); err != nil {
 		return err
 	}
@@ -74,22 +92,20 @@ func (p *payload) size() int {
 	return p.buf.Len() + len(p.header) - p.off
 }
 
-// reset should *not* be used. It is not implemented and is only here to serve
-// as information on how to implement it in case the same payload object ever
-// needs to be reused.
+// reset sets up the payload to be read a second time. It maintains the
+// underlying byte contents of the buffer. reset should not be used in order to
+// reuse the payload for another set of traces.
 func (p *payload) reset() {
-	// ⚠️  Warning!
-	//
-	// Resetting the payload for re-use requires the transport to wait for the
-	// HTTP package to Close the request body before attempting to re-use it
-	// again! This requires additional logic to be in place. See:
-	//
-	// • https://github.com/golang/go/blob/go1.16/src/net/http/client.go#L136-L138
-	// • https://github.com/DataDog/dd-trace-go/pull/475
-	// • https://github.com/DataDog/dd-trace-go/pull/549
-	// • https://github.com/DataDog/dd-trace-go/pull/976
-	//
-	panic("not implemented")
+	p.updateHeader()
+	if p.reader != nil {
+		p.reader.Seek(0, 0)
+	}
+}
+
+// clear empties the payload buffers.
+func (p *payload) clear() {
+	p.buf = bytes.Buffer{}
+	p.reader = nil
 }
 
 // https://github.com/msgpack/msgpack/blob/master/spec.md#array-format-family
@@ -120,10 +136,6 @@ func (p *payload) updateHeader() {
 
 // Close implements io.Closer
 func (p *payload) Close() error {
-	// Once the payload has been read, clear the buffer for garbage collection to avoid
-	// a memory leak when references to this object may still be kept by faulty transport
-	// implementations or the standard library. See dd-trace-go#976
-	p.buf = bytes.Buffer{}
 	return nil
 }
 
@@ -135,5 +147,8 @@ func (p *payload) Read(b []byte) (n int, err error) {
 		p.off += n
 		return n, nil
 	}
-	return p.buf.Read(b)
+	if p.reader == nil {
+		p.reader = bytes.NewReader(p.buf.Bytes())
+	}
+	return p.reader.Read(b)
 }

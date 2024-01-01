@@ -1,0 +1,16 @@
+{
+    "input": "SELECT customer_id, GROUP_CONCAT(status ORDER BY order_date DESC SEPARATOR ', ') AS order_statuses FROM orders GROUP BY customer_id;",
+    "outputs": [
+      {
+        "expected": "SELECT customer_id, GROUP_CONCAT ( status ORDER BY order_date DESC SEPARATOR ? ) FROM orders GROUP BY customer_id",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

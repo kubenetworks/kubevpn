@@ -1,0 +1,16 @@
+{
+    "input": "SELECT id, (SELECT name FROM customers WHERE id = orders.customer_id) AS customer_name FROM orders;",
+    "outputs": [
+      {
+        "expected": "SELECT id, ( SELECT name FROM customers WHERE id = orders.customer_id ) FROM orders",
+        "statement_metadata": {
+          "size": 21,
+          "tables": ["customers", "orders"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

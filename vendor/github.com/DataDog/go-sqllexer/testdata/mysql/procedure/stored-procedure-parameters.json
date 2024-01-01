@@ -1,0 +1,15 @@
+{
+    "input": "CREATE PROCEDURE GetOrdersByStatus(IN status VARCHAR(20)) BEGIN SELECT * FROM orders WHERE orders.status = status; END;",
+    "outputs": [
+      {
+        "expected": "CREATE PROCEDURE GetOrdersByStatus ( IN status VARCHAR ( ? ) ) BEGIN SELECT * FROM orders WHERE orders.status = status; END",
+        "statement_metadata": {
+          "size": 40,
+          "tables": ["orders"],
+          "commands": ["CREATE", "BEGIN", "SELECT"],
+          "comments": [],
+          "procedures": ["GetOrdersByStatus"]
+        }
+      }
+    ]
+  }

@@ -1,0 +1,16 @@
+{
+    "input": "CREATE FULLTEXT INDEX ft_index ON orders (description); SELECT * FROM orders WHERE MATCH(description) AGAINST ('+delivery -return' IN BOOLEAN MODE);",
+    "outputs": [
+      {
+        "expected": "CREATE FULLTEXT INDEX ft_index ON orders ( description ); SELECT * FROM orders WHERE MATCH ( description ) AGAINST ( ? IN BOOLEAN MODE )",
+        "statement_metadata": {
+          "size": 18,
+          "tables": ["orders"],
+          "commands": ["CREATE", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

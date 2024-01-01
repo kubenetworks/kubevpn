@@ -1,0 +1,16 @@
+{
+    "input": "UPDATE orders SET status = 'Query' WHERE status REGEXP '^Q.*';",
+    "outputs": [
+      {
+        "expected": "UPDATE orders SET status = ? WHERE status REGEXP ?",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["UPDATE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

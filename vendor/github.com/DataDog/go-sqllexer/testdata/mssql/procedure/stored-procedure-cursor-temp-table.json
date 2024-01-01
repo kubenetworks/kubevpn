@@ -1,0 +1,27 @@
+{
+    "input": "CREATE OR ALTER PROCEDURE ArchiveOldOrders AS BEGIN SET NOCOUNT ON; DECLARE @orderId INT; DECLARE orderCursor CURSOR FOR SELECT id FROM orders WHERE order_date < GETDATE() - 365; OPEN orderCursor; FETCH NEXT FROM orderCursor INTO @orderId; WHILE @@FETCH_STATUS = 0 BEGIN INSERT INTO orders_archive (id, status) SELECT id, status FROM orders WHERE id = @orderId; FETCH NEXT FROM orderCursor INTO @orderId; END; CLOSE orderCursor; DEALLOCATE orderCursor; END;",
+    "outputs": [
+      {
+        "expected": "CREATE OR ALTER PROCEDURE ArchiveOldOrders AS BEGIN SET NOCOUNT ON; DECLARE @orderId INT; DECLARE orderCursor CURSOR FOR SELECT id FROM orders WHERE order_date < GETDATE() - ?; OPEN orderCursor; FETCH NEXT FROM orderCursor INTO @orderId; WHILE @@FETCH_STATUS = ? BEGIN INSERT INTO orders_archive (id, status) SELECT id, status FROM orders WHERE id = @orderId; FETCH NEXT FROM orderCursor INTO @orderId; END; CLOSE orderCursor; DEALLOCATE orderCursor; END;",
+        "statement_metadata": {
+          "size": 75,
+          "tables": ["orders", "orderCursor", "orders_archive"],
+          "commands": ["CREATE", "ALTER", "BEGIN", "SELECT", "INSERT"],
+          "comments": [],
+          "procedures": ["ArchiveOldOrders"]
+        },
+        "obfuscator_config": {
+            "replace_digits": true
+        },
+        "normalizer_config": {
+            "collect_tables": true,
+            "collect_commands": true,
+            "collect_comments": true,
+            "collect_procedure": true,
+            "keep_trailing_semicolon": true,
+            "remove_space_between_parentheses": true
+        }
+      }
+    ]
+  }
+  

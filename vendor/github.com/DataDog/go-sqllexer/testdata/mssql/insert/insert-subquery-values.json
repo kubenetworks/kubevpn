@@ -1,0 +1,16 @@
+{
+    "input": "INSERT INTO order_totals (order_id, total_amount) VALUES ((SELECT MAX(id) FROM orders), 500);",
+    "outputs": [
+      {
+        "expected": "INSERT INTO order_totals ( order_id, total_amount ) VALUES ( ( SELECT MAX ( id ) FROM orders ), ? )",
+        "statement_metadata": {
+          "size": 30,
+          "tables": ["order_totals", "orders"],
+          "commands": ["INSERT", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

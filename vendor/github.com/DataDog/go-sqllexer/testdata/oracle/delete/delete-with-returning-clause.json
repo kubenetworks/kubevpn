@@ -1,0 +1,16 @@
+{
+    "input": "DELETE FROM logs WHERE entry_date < SYSDATE RETURNING id INTO :deleted_ids;",
+    "outputs": [
+      {
+        "expected": "DELETE FROM logs WHERE entry_date < SYSDATE RETURNING id INTO :deleted_ids",
+        "statement_metadata": {
+          "size": 10,
+          "tables": ["logs"],
+          "commands": ["DELETE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

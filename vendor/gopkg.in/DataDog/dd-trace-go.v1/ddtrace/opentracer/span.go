@@ -24,12 +24,12 @@ type span struct {
 	*opentracer
 }
 
-func (s *span) Context() opentracing.SpanContext                      { return s.Span.Context() }
-func (s *span) Finish()                                               { s.Span.Finish() }
-func (s *span) Tracer() opentracing.Tracer                            { return s.opentracer }
-func (s *span) LogEvent(event string)                                 { /* deprecated */ }
-func (s *span) LogEventWithPayload(event string, payload interface{}) { /* deprecated */ }
-func (s *span) Log(data opentracing.LogData)                          { /* deprecated */ }
+func (s *span) Context() opentracing.SpanContext            { return s.Span.Context() }
+func (s *span) Finish()                                     { s.Span.Finish() }
+func (s *span) Tracer() opentracing.Tracer                  { return s.opentracer }
+func (s *span) LogEvent(_ string)                           { /* deprecated */ }
+func (s *span) LogEventWithPayload(_ string, _ interface{}) { /* deprecated */ }
+func (s *span) Log(_ opentracing.LogData)                   { /* deprecated */ }
 
 func (s *span) FinishWithOptions(opts opentracing.FinishOptions) {
 	for _, lr := range opts.LogRecords {

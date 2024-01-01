@@ -1,0 +1,16 @@
+{
+    "input": "INSERT INTO orders (customer_id, status, amount) SELECT id, 'New', IF(region = 'West', 100, 50) FROM customers;",
+    "outputs": [
+      {
+        "expected": "INSERT INTO orders ( customer_id, status, amount ) SELECT id, ?, IF ( region = ?, ?, ? ) FROM customers",
+        "statement_metadata": {
+          "size": 27,
+          "tables": ["orders", "customers"],
+          "commands": ["INSERT", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

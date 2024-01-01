@@ -1,0 +1,14 @@
+{
+  "input": "CREATE OR REPLACE FUNCTION dynamic_query(sql_query text) RETURNS SETOF RECORD AS $func$\nBEGIN\n  RETURN QUERY EXECUTE sql_query;\nEND;\n$func$ LANGUAGE plpgsql;",
+  "outputs": [
+    {
+      "expected": "CREATE OR REPLACE FUNCTION dynamic_query ( sql_query text ) RETURNS SETOF RECORD AS $func$BEGIN RETURN QUERY EXECUTE sql_query; END$func$ LANGUAGE plpgsql"
+    },
+    {
+      "obfuscator_config": {
+        "dollar_quoted_func": false
+      },
+      "expected": "CREATE OR REPLACE FUNCTION dynamic_query ( sql_query text ) RETURNS SETOF RECORD AS ? LANGUAGE plpgsql"
+    }
+  ]
+}

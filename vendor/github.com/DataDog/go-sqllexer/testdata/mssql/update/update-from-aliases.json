@@ -1,0 +1,16 @@
+{
+    "input": "UPDATE o SET o.status = 'Completed' FROM orders o WHERE o.order_date > '2023-01-01' AND o.amount > 500;",
+    "outputs": [
+      {
+        "expected": "UPDATE o SET o.status = ? FROM orders o WHERE o.order_date > ? AND o.amount > ?",
+        "statement_metadata": {
+          "size": 13,
+          "tables": ["o", "orders"],
+          "commands": ["UPDATE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

@@ -1,0 +1,21 @@
+{
+  "input": "SELECT * FROM users NATURAL JOIN user_profiles;",
+  "outputs": [
+    {
+      "expected": "SELECT * FROM users NATURAL JOIN user_profiles",
+      "statement_metadata": {
+        "size": 28,
+        "tables": [
+          "users",
+          "user_profiles"
+        ],
+        "commands": [
+          "SELECT",
+          "JOIN"
+        ],
+        "comments": [],
+        "procedures": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+    "input": "INSERT INTO orders (customer_id, order_date, status) VALUES (1, NOW(), 'Pending');",
+    "outputs": [
+      {
+        "expected": "INSERT INTO orders ( customer_id, order_date, status ) VALUES ( ?, NOW ( ), ? )",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["INSERT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

@@ -1,0 +1,8 @@
+{
+  "input": "SELECT log_activity('User logged in');",
+  "outputs": [
+    {
+      "expected": "SELECT log_activity ( ? )"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+    "input": "UPDATE orders SET status = 'Archived' WHERE id IN (SELECT id FROM orders WHERE order_date < '2020-01-01');",
+    "outputs": [
+      {
+        "expected": "UPDATE orders SET status = ? WHERE id IN ( SELECT id FROM orders WHERE order_date < ? )",
+        "statement_metadata": {
+          "size": 18,
+          "tables": ["orders"],
+          "commands": ["UPDATE", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

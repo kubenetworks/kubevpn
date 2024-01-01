@@ -1,0 +1,16 @@
+{
+    "input": "INSERT INTO orders (customer_id, status) SELECT customer_id, status FROM archived_orders UNION ALL SELECT customer_id, status FROM special_orders;",
+    "outputs": [
+      {
+        "expected": "INSERT INTO orders ( customer_id, status ) SELECT customer_id, status FROM archived_orders UNION ALL SELECT customer_id, status FROM special_orders",
+        "statement_metadata": {
+          "size": 47,
+          "tables": ["orders", "archived_orders", "special_orders"],
+          "commands": ["INSERT", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

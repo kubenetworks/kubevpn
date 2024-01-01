@@ -43,15 +43,15 @@ type aggregator struct {
 	wg              sync.WaitGroup
 }
 
-func newAggregator(c *Client) *aggregator {
+func newAggregator(c *Client, maxSamplesPerContext int64) *aggregator {
 	return &aggregator{
 		client:          c,
 		counts:          countsMap{},
 		gauges:          gaugesMap{},
 		sets:            setsMap{},
-		histograms:      newBufferedContexts(newHistogramMetric),
-		distributions:   newBufferedContexts(newDistributionMetric),
-		timings:         newBufferedContexts(newTimingMetric),
+		histograms:      newBufferedContexts(newHistogramMetric, maxSamplesPerContext),
+		distributions:   newBufferedContexts(newDistributionMetric, maxSamplesPerContext),
+		timings:         newBufferedContexts(newTimingMetric, maxSamplesPerContext),
 		closed:          make(chan struct{}),
 		stopChannelMode: make(chan struct{}),
 	}
@@ -66,6 +66,7 @@ func (a *aggregator) start(flushInterval time.Duration) {
 			case <-ticker.C:
 				a.flush()
 			case <-a.closed:
+				ticker.Stop()
 				return
 			}
 		}
@@ -172,12 +173,32 @@ func (a *aggregator) flushMetrics() []metric {
 }
 
 func getContext(name string, tags []string) string {
-	return name + ":" + strings.Join(tags, tagSeparatorSymbol)
+	c, _ := getContextAndTags(name, tags)
+	return c
 }
 
 func getContextAndTags(name string, tags []string) (string, string) {
-	stringTags := strings.Join(tags, tagSeparatorSymbol)
-	return name + ":" + stringTags, stringTags
+	if len(tags) == 0 {
+		return name + nameSeparatorSymbol, ""
+	}
+	n := len(name) + len(nameSeparatorSymbol) + len(tagSeparatorSymbol)*(len(tags)-1)
+	for _, s := range tags {
+		n += len(s)
+	}
+
+	var sb strings.Builder
+	sb.Grow(n)
+	sb.WriteString(name)
+	sb.WriteString(nameSeparatorSymbol)
+	sb.WriteString(tags[0])
+	for _, s := range tags[1:] {
+		sb.WriteString(tagSeparatorSymbol)
+		sb.WriteString(s)
+	}
+
+	s := sb.String()
+
+	return s, s[len(name)+len(nameSeparatorSymbol):]
 }
 
 func (a *aggregator) count(name string, value int64, tags []string) error {

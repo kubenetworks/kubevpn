@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/time/rate"
-
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/log"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/samplernames"
+
+	"golang.org/x/time/rate"
 )
 
 // rulesSampler holds instances of trace sampler and single span sampler, that are configured with the given set of rules.
@@ -37,9 +37,9 @@ type rulesSampler struct {
 // Rules are split between trace and single span sampling rules according to their type.
 // Such rules are user-defined through environment variable or WithSamplingRules option.
 // Invalid rules or environment variable values are tolerated, by logging warnings and then ignoring them.
-func newRulesSampler(traceRules, spanRules []SamplingRule) *rulesSampler {
+func newRulesSampler(traceRules, spanRules []SamplingRule, traceSampleRate float64) *rulesSampler {
 	return &rulesSampler{
-		traces: newTraceRulesSampler(traceRules),
+		traces: newTraceRulesSampler(traceRules, traceSampleRate),
 		spans:  newSingleSpanRulesSampler(spanRules),
 	}
 }
@@ -199,6 +199,7 @@ func SpanNameServiceMPSRule(name, service string, rate, limit float64) SamplingR
 // Its value is the number of spans to sample per second.
 // Spans that matched the rules but exceeded the rate limit are not sampled.
 type traceRulesSampler struct {
+	m          sync.RWMutex
 	rules      []SamplingRule // the rules to match spans with
 	globalRate float64        // a rate to apply when no rules match a span
 	limiter    *rateLimiter   // used to limit the volume of spans sampled
@@ -206,10 +207,10 @@ type traceRulesSampler struct {
 
 // newTraceRulesSampler configures a *traceRulesSampler instance using the given set of rules.
 // Invalid rules or environment variable values are tolerated, by logging warnings and then ignoring them.
-func newTraceRulesSampler(rules []SamplingRule) *traceRulesSampler {
+func newTraceRulesSampler(rules []SamplingRule, traceSampleRate float64) *traceRulesSampler {
 	return &traceRulesSampler{
 		rules:      rules,
-		globalRate: globalSampleRate(),
+		globalRate: traceSampleRate,
 		limiter:    newRateLimiter(),
 	}
 }
@@ -235,7 +236,19 @@ func globalSampleRate() float64 {
 }
 
 func (rs *traceRulesSampler) enabled() bool {
+	rs.m.RLock()
+	defer rs.m.RUnlock()
 	return len(rs.rules) > 0 || !math.IsNaN(rs.globalRate)
+}
+
+func (rs *traceRulesSampler) setGlobalSampleRate(rate float64) {
+	if rate < 0.0 || rate > 1.0 {
+		log.Warn("Ignoring trace sample rate %f: value out of range [0,1]", rate)
+		return
+	}
+	rs.m.Lock()
+	defer rs.m.Unlock()
+	rs.globalRate = rate
 }
 
 // apply uses the sampling rules to determine the sampling rate for the
@@ -249,7 +262,9 @@ func (rs *traceRulesSampler) apply(span *span) bool {
 	}
 
 	var matched bool
+	rs.m.RLock()
 	rate := rs.globalRate
+	rs.m.RUnlock()
 	for _, rule := range rs.rules {
 		if rule.match(span) {
 			matched = true
@@ -364,7 +379,7 @@ func (rs *singleSpanRulesSampler) apply(span *span) bool {
 					return false
 				}
 			}
-			span.setMetric(keySpanSamplingMechanism, samplingMechanismSingleSpan)
+			span.setMetric(keySpanSamplingMechanism, float64(samplernames.SingleSpan))
 			span.setMetric(keySingleSpanSamplingRuleRate, rate)
 			if rule.MaxPerSecond != 0 {
 				span.setMetric(keySingleSpanSamplingMPS, rule.MaxPerSecond)

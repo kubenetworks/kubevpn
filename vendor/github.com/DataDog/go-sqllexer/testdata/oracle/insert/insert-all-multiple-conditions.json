@@ -1,0 +1,16 @@
+{
+    "input": "INSERT ALL WHEN amount <= 100 THEN INTO small_orders (order_id, amount) VALUES (order_id, amount) WHEN amount BETWEEN 101 AND 500 THEN INTO medium_orders (order_id, amount) VALUES (order_id, amount) ELSE INTO large_orders (order_id, amount) VALUES (order_id, amount) SELECT order_id, amount FROM orders;",
+    "outputs": [
+      {
+        "expected": "INSERT ALL WHEN amount <= ? THEN INTO small_orders ( order_id, amount ) VALUES ( order_id, amount ) WHEN amount BETWEEN ? AND ? THEN INTO medium_orders ( order_id, amount ) VALUES ( order_id, amount ) ELSE INTO large_orders ( order_id, amount ) VALUES ( order_id, amount ) SELECT order_id, amount FROM orders",
+        "statement_metadata": {
+          "size": 55,
+          "tables": ["small_orders", "medium_orders", "large_orders", "orders"],
+          "commands": ["INSERT", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

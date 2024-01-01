@@ -1,0 +1,14 @@
+{
+  "input": "UPDATE users SET email = $1 WHERE id = $2;",
+  "outputs": [
+    {
+      "expected": "UPDATE users SET email = ? WHERE id = ?"
+    },
+    {
+      "obfuscator_config": {
+        "replace_positional_parameter": false
+      },
+      "expected": "UPDATE users SET email = $1 WHERE id = $2"
+    }
+  ]
+}

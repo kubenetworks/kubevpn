@@ -1,0 +1,23 @@
+{
+    "input": "UPDATE products SET price = price * 0.9 WHERE id IN (SELECT product_id FROM inventory WHERE quantity > 100);",
+    "outputs": [
+      {
+        "expected": "UPDATE products SET price = price * ? WHERE id IN ( SELECT product_id FROM inventory WHERE quantity > ? )",
+        "statement_metadata": {
+          "size": 29,
+          "tables": ["products", "inventory"],
+          "commands": ["UPDATE", "SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      },
+      {
+        "expected": "UPDATE products SET price = price * ? WHERE id IN (SELECT product_id FROM inventory WHERE quantity > ?);",
+        "normalizer_config": {
+            "keep_trailing_semicolon": true,
+            "remove_space_between_parentheses": true
+        }
+      }
+    ]
+  }
+  

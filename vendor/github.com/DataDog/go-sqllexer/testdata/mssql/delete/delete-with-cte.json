@@ -1,0 +1,16 @@
+{
+    "input": "WITH OldOrders AS (SELECT id FROM orders WHERE order_date < '2022-01-01') DELETE FROM orders WHERE id IN (SELECT id FROM OldOrders);",
+    "outputs": [
+      {
+        "expected": "WITH OldOrders AS ( SELECT id FROM orders WHERE order_date < ? ) DELETE FROM orders WHERE id IN ( SELECT id FROM OldOrders )",
+        "statement_metadata": {
+          "size": 27,
+          "tables": ["orders", "OldOrders"],
+          "commands": ["SELECT", "DELETE"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  

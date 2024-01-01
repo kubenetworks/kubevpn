@@ -1,0 +1,16 @@
+{
+    "input": "SELECT id, COALESCE(comments, 'No comments') AS order_comments FROM orders;",
+    "outputs": [
+      {
+        "expected": "SELECT id, COALESCE ( comments, ? ) FROM orders",
+        "statement_metadata": {
+          "size": 12,
+          "tables": ["orders"],
+          "commands": ["SELECT"],
+          "comments": [],
+          "procedures": []
+        }
+      }
+    ]
+  }
+  
