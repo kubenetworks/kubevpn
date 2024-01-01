@@ -27,10 +27,10 @@
 
 [中文](README_ZH.md) | [English](README.md) | [Wiki](https://github.com/KubeNetworks/kubevpn/wiki/Architecture)
 
-KubeVPN is Cloud Native Dev Environment, connect to kubernetes cluster network, you can access remote kubernetes
-cluster network, remote
-kubernetes cluster service can also access your local service. and more, you can run your kubernetes pod on local Docker
-container with same environment、volume、and network. you can develop your application on local PC totally.
+KubeVPN is Cloud Native Dev Environment. Connect to kubernetes cluster network, you can access remote kubernetes
+cluster network via service name or Pod IP / Service IP. Intercept remote
+kubernetes cluster service inbound traffic to local PC with service mesh. and more, you can run your kubernetes pod on
+local Docker container with same environment、volume、and network. Develop application on local PC totally.
 
 ## QuickStart
 
