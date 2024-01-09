@@ -60,6 +60,8 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13
 			case <-ctx.Done():
 				return
 			default:
+				time.Sleep(time.Second * 5)
+
 				func() {
 					w, err := serviceInterface.Watch(ctx, v1.ListOptions{
 						Watch: true, ResourceVersion: serviceList.ResourceVersion,

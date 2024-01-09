@@ -286,8 +286,10 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 	podInterface := c.clientset.CoreV1().Pods(c.Namespace)
 	go func() {
 		var first = pointer.Bool(true)
-		for {
+		for c.ctx.Err() == nil {
 			func() {
+				defer time.Sleep(time.Second * 2)
+
 				podList, err := c.GetRunningPodList(ctx)
 				if err != nil {
 					time.Sleep(time.Second * 2)
@@ -357,7 +359,10 @@ func checkPodStatus(cCtx context.Context, cFunc context.CancelFunc, podName stri
 	defer w.Stop()
 	for {
 		select {
-		case e := <-w.ResultChan():
+		case e, ok := <-w.ResultChan():
+			if !ok {
+				return
+			}
 			switch e.Type {
 			case watch.Deleted:
 				cFunc()
@@ -499,6 +504,8 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 			case <-ctx.Done():
 				return
 			default:
+				time.Sleep(time.Second * 5)
+
 				func() {
 					defer func() {
 						if er := recover(); er != nil {
@@ -569,6 +576,8 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 			case <-ctx.Done():
 				return
 			default:
+				time.Sleep(time.Second * 5)
+
 				func() {
 					defer func() {
 						if er := recover(); er != nil {
@@ -902,6 +911,7 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 				default:
 				}
 			}
+			time.Sleep(time.Second * 2)
 		}
 	}()
 	if print {

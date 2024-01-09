@@ -71,6 +71,7 @@ func (c *Config) usingResolver() {
 	go func(port int, clientConfig *miekgdns.ClientConfig) {
 		for {
 			log.Errorln(NewDNSServer("udp", "127.0.0.1:"+strconv.Itoa(port), clientConfig))
+			time.Sleep(time.Second * 3)
 		}
 	}(port, clientConfig)
 	config = miekgdns.ClientConfig{

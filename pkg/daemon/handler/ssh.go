@@ -174,6 +174,7 @@ func (w *wsHandler) portMap(ctx context.Context, conf *util.SshConfig) (localPor
 				default:
 				}
 			}
+			time.Sleep(time.Second * 2)
 		}
 	}()
 	select {
