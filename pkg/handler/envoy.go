@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -199,43 +200,8 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP ut
 			return err
 		}
 	}
-	var index = -1
-	for i, virtual := range v {
-		if nodeID == virtual.Uid {
-			index = i
-			break
-		}
-	}
-	if index < 0 {
-		v = append(v, &controlplane.Virtual{
-			Uid:   nodeID,
-			Ports: port,
-			Rules: []*controlplane.Rule{{
-				Headers:      headers,
-				LocalTunIPv4: tunIP.LocalTunIPv4,
-				LocalTunIPv6: tunIP.LocalTunIPv6,
-			}},
-		})
-	} else {
-		var found bool
-		for j, rule := range v[index].Rules {
-			if rule.LocalTunIPv4 == tunIP.LocalTunIPv4 &&
-				rule.LocalTunIPv6 == tunIP.LocalTunIPv6 {
-				found = true
-				v[index].Rules[j].Headers = util.Merge[string, string](v[index].Rules[j].Headers, headers)
-			}
-		}
-		if !found {
-			v[index].Rules = append(v[index].Rules, &controlplane.Rule{
-				Headers:      headers,
-				LocalTunIPv4: tunIP.LocalTunIPv4,
-				LocalTunIPv6: tunIP.LocalTunIPv6,
-			})
-			if v[index].Ports == nil {
-				v[index].Ports = port
-			}
-		}
-	}
+
+	v = addVirtualRule(v, nodeID, port, headers, tunIP)
 
 	marshal, err := yaml.Marshal(v)
 	if err != nil {
@@ -244,6 +210,57 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP ut
 	configMap.Data[config.KeyEnvoy] = string(marshal)
 	_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
 	return err
+}
+
+func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []v1.ContainerPort, headers map[string]string, tunIP util.PodRouteConfig) []*controlplane.Virtual {
+	var index = -1
+	for i, virtual := range v {
+		if nodeID == virtual.Uid {
+			index = i
+			break
+		}
+	}
+	// 1) if not found uid, means nobody proxying it, just add it
+	if index < 0 {
+		return append(v, &controlplane.Virtual{
+			Uid:   nodeID,
+			Ports: port,
+			Rules: []*controlplane.Rule{{
+				Headers:      headers,
+				LocalTunIPv4: tunIP.LocalTunIPv4,
+				LocalTunIPv6: tunIP.LocalTunIPv6,
+			}},
+		})
+	}
+
+	// 2) if already proxy deployment/xxx with header a=1. also want to add b=2
+	for j, rule := range v[index].Rules {
+		if rule.LocalTunIPv4 == tunIP.LocalTunIPv4 &&
+			rule.LocalTunIPv6 == tunIP.LocalTunIPv6 {
+			v[index].Rules[j].Headers = util.Merge[string, string](v[index].Rules[j].Headers, headers)
+			return v
+		}
+	}
+
+	// 3) if already proxy deployment/xxx with header a=1, other user can replace it to self
+	for j, rule := range v[index].Rules {
+		if reflect.DeepEqual(rule.Headers, headers) {
+			v[index].Rules[j].LocalTunIPv6 = tunIP.LocalTunIPv6
+			v[index].Rules[j].LocalTunIPv4 = tunIP.LocalTunIPv4
+			return v
+		}
+	}
+
+	// 4) if header is not same and tunIP is not same, means another users, just add it
+	v[index].Rules = append(v[index].Rules, &controlplane.Rule{
+		Headers:      headers,
+		LocalTunIPv4: tunIP.LocalTunIPv4,
+		LocalTunIPv6: tunIP.LocalTunIPv6,
+	})
+	if v[index].Ports == nil {
+		v[index].Ports = port
+	}
+	return v
 }
 
 func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTunIPv4 string) (bool, error) {

@@ -362,6 +362,15 @@ Now let's access local service with header `"a: 1"`
 Hello world!  
 ```
 
+If you want cancel proxy, just run command:
+
+```shell
+➜  ~ kubevpn leave deployments/productpage
+leave workload deployments/productpage
+workload default/deployments/productpage is controlled by a controller
+leave workload deployments/productpage successfully
+```
+
 ### Dev mode in local Docker 🐳
 
 Run the Kubernetes pod in the local Docker container, and cooperate with the service mesh to intercept the traffic with

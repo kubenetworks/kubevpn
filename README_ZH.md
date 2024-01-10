@@ -292,6 +292,15 @@ create remote inbound pod for deployment/productpage successfully
 Hello world!%
 ```
 
+如果你需要取消代理流量，可以执行如下命令：
+
+```shell
+➜  ~ kubevpn leave deployments/productpage
+leave workload deployments/productpage
+workload default/deployments/productpage is controlled by a controller
+leave workload deployments/productpage successfully
+```
+
 ### 本地进入开发模式 🐳
 
 将 Kubernetes pod 运行在本地的 Docker 容器中，同时配合 service mesh, 拦截带有指定 header 的流量到本地，或者所有的流量到本地。这个开发模式依赖于本地 Docker。

@@ -45,6 +45,9 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 
 		# Reverse proxy with mesh, traffic with header a=1, will hit local PC, otherwise no effect
 		kubevpn proxy service/productpage --headers a=1
+		
+		# Reverse proxy with mesh, traffic with header a=1 and b=2, will hit local PC, otherwise no effect
+		kubevpn proxy service/productpage --headers a=1 --headers b=2
 
 		# Connect to api-server behind of bastion host or ssh jump host and proxy kubernetes resource traffic into local PC
 		kubevpn proxy deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem --headers a=1
@@ -146,7 +149,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "Traffic with special headers with reverse it to local PC, you should startup your service after reverse workloads successfully, If not special, redirect all traffic to local PC, format is k=v, like: k1=v1,k2=v2")
+	cmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to local PC, If not special, redirect all traffic to local PC. eg: --headers a=1 --headers b=2")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
 	cmd.Flags().StringArrayVar(&connect.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
