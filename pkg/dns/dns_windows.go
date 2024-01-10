@@ -33,15 +33,20 @@ func (c *Config) SetupDNS() error {
 			log.Errorf("parse %s failed: %s", s, err)
 			return err
 		}
-		servers = append(servers, addr)
+		servers = append(servers, addr.Unmap())
 	}
 	err = luid.SetDNS(windows.AF_INET, servers, clientConfig.Search)
 	if err != nil {
 		log.Errorf("set DNS failed: %s", err)
 		return err
 	}
+	err = luid.SetDNS(windows.AF_INET6, servers, clientConfig.Search)
+	if err != nil {
+		log.Errorf("set DNS failed: %s", err)
+		return err
+	}
 	//_ = updateNicMetric(tunName)
-	_ = addNicSuffixSearchList(clientConfig.Search)
+	//_ = addNicSuffixSearchList(clientConfig.Search)
 	return nil
 }
 
@@ -56,7 +61,9 @@ func (c *Config) CancelDNS() {
 		return
 	}
 	_ = luid.FlushDNS(windows.AF_INET)
+	_ = luid.FlushDNS(windows.AF_INET6)
 	_ = luid.FlushRoutes(windows.AF_INET)
+	_ = luid.FlushRoutes(windows.AF_INET6)
 }
 
 func updateNicMetric(name string) error {

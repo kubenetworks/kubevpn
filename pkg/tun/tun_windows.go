@@ -109,7 +109,8 @@ func addTunRoutes(tunName string, routes ...types.Route) error {
 				route.GW = net.IPv6zero
 			}
 		}
-		prefix, err := netip.ParsePrefix(route.Dst.String())
+		var prefix netip.Prefix
+		prefix, err = netip.ParsePrefix(route.Dst.String())
 		if err != nil {
 			return err
 		}
@@ -118,7 +119,7 @@ func addTunRoutes(tunName string, routes ...types.Route) error {
 		if err != nil {
 			return err
 		}
-		err = ifName.AddRoute(prefix, addr, 0)
+		err = ifName.AddRoute(prefix, addr.Unmap(), 0)
 		if err != nil && err != windows.ERROR_OBJECT_ALREADY_EXISTS {
 			return err
 		}
