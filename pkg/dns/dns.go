@@ -235,7 +235,7 @@ func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) []Entry {
 		if strings.EqualFold(item.Name, ServiceKubernetes) {
 			continue
 		}
-		ipList := sets.New[string](item.Spec.ClusterIPs...).Insert(item.Spec.ExternalIPs...).UnsortedList()
+		ipList := sets.New[string](item.Spec.ClusterIPs...).Insert(item.Spec.ClusterIP).Insert(item.Spec.ExternalIPs...).UnsortedList()
 		domainList := sets.New[string](item.Name).Insert(item.Spec.ExternalName).UnsortedList()
 		for _, ip := range ipList {
 			for _, domain := range domainList {
