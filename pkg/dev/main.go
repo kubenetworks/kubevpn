@@ -502,6 +502,10 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 		if err != nil {
 			return
 		}
+		logLevel := log.ErrorLevel
+		if config.Debug {
+			logLevel = log.DebugLevel
+		}
 		// not needs to ssh jump in daemon, because dev mode will hang up until user exit,
 		// so just ssh jump in client is enough
 		req := &rpc.ConnectRequest{
@@ -516,7 +520,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 			OriginKubeconfigPath: util.GetKubeconfigPath(f),
 			TransferImage:        transferImage,
 			Image:                config.Image,
-			Level:                int32(log.DebugLevel),
+			Level:                int32(logLevel),
 			SshJump:              conf.ToRPC(),
 		}
 		cancel = disconnect(ctx, daemonCli)

@@ -89,6 +89,10 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			logLevel := log.ErrorLevel
+			if config.Debug {
+				logLevel = log.DebugLevel
+			}
 			req := &rpc.CloneRequest{
 				KubeconfigBytes:        string(bytes),
 				Namespace:              ns,
@@ -108,7 +112,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 				IsChangeTargetRegistry: options.IsChangeTargetRegistry,
 				TransferImage:          transferImage,
 				Image:                  config.Image,
-				Level:                  int32(log.DebugLevel),
+				Level:                  int32(logLevel),
 			}
 			cli := daemon.GetClient(false)
 			resp, err := cli.Clone(cmd.Context(), req)

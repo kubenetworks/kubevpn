@@ -55,6 +55,10 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			logLevel := log.ErrorLevel
+			if config.Debug {
+				logLevel = log.DebugLevel
+			}
 			req := &rpc.ConnectRequest{
 				KubeconfigBytes:      string(bytes),
 				Namespace:            ns,
@@ -68,7 +72,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				TransferImage: transferImage,
 				Foreground:    foreground,
 				Image:         config.Image,
-				Level:         int32(log.DebugLevel),
+				Level:         int32(logLevel),
 			}
 			// if is foreground, send to sudo daemon server
 			cli := daemon.GetClient(false)
