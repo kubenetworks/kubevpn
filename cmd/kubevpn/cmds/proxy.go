@@ -90,6 +90,10 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			}
 			// todo 将 doConnect 方法封装？内部使用 client 发送到daemon？
 			cli := daemon.GetClient(false)
+			logLevel := log.ErrorLevel
+			if config.Debug {
+				logLevel = log.DebugLevel
+			}
 			client, err := cli.Proxy(
 				cmd.Context(),
 				&rpc.ConnectRequest{
@@ -104,7 +108,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 					SshJump:              sshConf.ToRPC(),
 					TransferImage:        transferImage,
 					Image:                config.Image,
-					Level:                int32(log.DebugLevel),
+					Level:                int32(logLevel),
 					OriginKubeconfigPath: util.GetKubeconfigPath(f),
 				},
 			)
