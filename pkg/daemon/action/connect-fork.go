@@ -21,6 +21,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
 	}()
+	config.Debug = req.Level == int32(log.DebugLevel)
 	out := io.MultiWriter(newConnectForkWarp(resp), svr.LogFile)
 	log.SetOutput(out)
 	log.SetLevel(log.InfoLevel)

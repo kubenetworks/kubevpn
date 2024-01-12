@@ -30,6 +30,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
 	}()
+	config.Debug = req.Level == int32(log.DebugLevel)
 	out := io.MultiWriter(newWarp(resp), svr.LogFile)
 	log.SetOutput(out)
 	log.SetLevel(log.InfoLevel)
