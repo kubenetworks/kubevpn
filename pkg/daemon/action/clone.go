@@ -20,6 +20,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
 	}()
+	config.Debug = req.Level == int32(log.DebugLevel)
 	out := io.MultiWriter(newCloneWarp(resp), svr.LogFile)
 	log.SetOutput(out)
 	log.SetLevel(log.InfoLevel)

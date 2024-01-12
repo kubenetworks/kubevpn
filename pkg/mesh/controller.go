@@ -30,6 +30,11 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteConfig) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
+
+	envoyLogLevel := "error"
+	if config.Debug {
+		envoyLogLevel = "debug"
+	}
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarVPN,
 		Image:   config.Image,
@@ -124,7 +129,7 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 		Command: []string{
 			"envoy",
 			"-l",
-			"error",
+			envoyLogLevel,
 			"--base-id",
 			"1",
 			"--service-node",
