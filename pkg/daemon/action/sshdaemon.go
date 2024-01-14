@@ -10,12 +10,12 @@ import (
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	"github.com/wencaiwulue/kubevpn/pkg/config"
-	"github.com/wencaiwulue/kubevpn/pkg/core"
-	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/pkg/handler"
-	"github.com/wencaiwulue/kubevpn/pkg/tun"
-	"github.com/wencaiwulue/kubevpn/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 var _, bits = config.DockerCIDR.Mask.Size()

@@ -23,6 +23,10 @@ var (
 	}
 )
 
+const (
+	addr = "https://github.com/wencaiwulue/kubevpn/releases/latest"
+)
+
 func GetManifest(httpCli *http.Client, os string, arch string) (version string, commit string, url string, err error) {
 	var resp *http.Response
 	var errs []error
@@ -72,8 +76,7 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 		}
 
 		if !found {
-			u := "https://github.com/wencaiwulue/kubevpn/releases/latest"
-			err = fmt.Errorf("Can not found latest version url of KubeVPN, you can download it manually: \n%s\n", u)
+			err = fmt.Errorf("Can not found latest version url of KubeVPN, you can download it manually: \n%s\n", addr)
 			return
 		}
 	}

@@ -20,7 +20,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/wencaiwulue/kubevpn/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 var cancel context.CancelFunc

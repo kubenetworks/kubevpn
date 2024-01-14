@@ -5,7 +5,7 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/pkg/errors"
 
-	"github.com/wencaiwulue/kubevpn/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // 这里的逻辑是找到指定的容器。然后以传入的参数 tempContainerConfig 为准。即也就是用户命令行指定的参数为准。

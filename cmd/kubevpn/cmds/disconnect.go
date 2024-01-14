@@ -14,8 +14,8 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 	"k8s.io/utils/pointer"
 
-	"github.com/wencaiwulue/kubevpn/pkg/daemon"
-	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
 func CmdDisconnect(f cmdutil.Factory) *cobra.Command {

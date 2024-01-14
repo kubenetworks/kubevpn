@@ -18,10 +18,10 @@ import (
 	"google.golang.org/grpc/reflection"
 	"gopkg.in/natefinch/lumberjack.v2"
 
-	"github.com/wencaiwulue/kubevpn/pkg/daemon/action"
-	_ "github.com/wencaiwulue/kubevpn/pkg/daemon/handler"
-	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/action"
+	_ "github.com/wencaiwulue/kubevpn/v2/pkg/daemon/handler"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 type SvrOption struct {

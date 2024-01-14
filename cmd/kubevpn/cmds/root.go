@@ -12,7 +12,7 @@ import (
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
 
-	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 func NewKubeVPNCommand() *cobra.Command {

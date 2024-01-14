@@ -8,7 +8,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {

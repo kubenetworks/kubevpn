@@ -6,7 +6,7 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	_ "net/http/pprof"
 
-	"github.com/wencaiwulue/kubevpn/cmd/kubevpn/cmds"
+	"github.com/wencaiwulue/kubevpn/v2/cmd/kubevpn/cmds"
 )
 
 func main() {

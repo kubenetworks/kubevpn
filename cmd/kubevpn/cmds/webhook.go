@@ -4,8 +4,8 @@ import (
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
-	"github.com/wencaiwulue/kubevpn/pkg/util"
-	"github.com/wencaiwulue/kubevpn/pkg/webhook"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/webhook"
 )
 
 func CmdWebhook(f cmdutil.Factory) *cobra.Command {

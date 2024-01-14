@@ -61,12 +61,12 @@ import (
 	"k8s.io/utils/pointer"
 	pkgclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/wencaiwulue/kubevpn/pkg/config"
-	"github.com/wencaiwulue/kubevpn/pkg/core"
-	"github.com/wencaiwulue/kubevpn/pkg/dns"
-	"github.com/wencaiwulue/kubevpn/pkg/driver"
-	"github.com/wencaiwulue/kubevpn/pkg/tun"
-	"github.com/wencaiwulue/kubevpn/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 type ConnectOptions struct {
