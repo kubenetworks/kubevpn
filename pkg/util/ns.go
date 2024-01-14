@@ -13,7 +13,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd/api/latest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
-	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 func GetClusterId(client v12.ConfigMapInterface) (types.UID, error) {

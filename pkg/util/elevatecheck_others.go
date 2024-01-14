@@ -15,7 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 const envStartSudoKubeVPNByKubeVPN = config.EnvStartSudoKubeVPNByKubeVPN

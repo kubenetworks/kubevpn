@@ -10,7 +10,7 @@ import (
 	"github.com/cilium/ipam/service/ipallocator"
 	"github.com/prometheus-community/pro-bing"
 
-	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 func GetTunDevice(ips ...net.IP) (*net.Interface, error) {

@@ -8,7 +8,7 @@ GOARCH := $(shell go env GOHOSTARCH)
 TARGET := kubevpn-${GOOS}-${GOARCH}
 OS_ARCH := ${GOOS}/${GOARCH}
 
-BASE := github.com/wencaiwulue/kubevpn
+BASE := github.com/wencaiwulue/kubevpn/v2
 FOLDER := ${BASE}/cmd/kubevpn
 BUILD_DIR := ./build
 OUTPUT_DIR := ./bin
@@ -97,7 +97,7 @@ container-test: kubevpn-linux-amd64
 
 .PHONY: version
 version:
-	go run github.com/wencaiwulue/kubevpn/pkg/util/krew
+	go run ${BASE}/pkg/util/krew
 
 .PHONY: gen
 gen:

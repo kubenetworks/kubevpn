@@ -19,9 +19,9 @@ import (
 	_ "google.golang.org/grpc/resolver/dns"
 	_ "google.golang.org/grpc/resolver/passthrough"
 
-	"github.com/wencaiwulue/kubevpn/pkg/config"
-	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 var daemonClient, sudoDaemonClient rpc.DaemonClient

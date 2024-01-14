@@ -9,7 +9,7 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 
-	"github.com/wencaiwulue/kubevpn/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 )
 
 func CmdDaemon(_ cmdutil.Factory) *cobra.Command {

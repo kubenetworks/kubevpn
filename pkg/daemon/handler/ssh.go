@@ -22,10 +22,10 @@ import (
 	"golang.org/x/oauth2"
 	"k8s.io/client-go/tools/remotecommand"
 
-	"github.com/wencaiwulue/kubevpn/pkg/config"
-	"github.com/wencaiwulue/kubevpn/pkg/core"
-	"github.com/wencaiwulue/kubevpn/pkg/handler"
-	"github.com/wencaiwulue/kubevpn/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 type wsHandler struct {
@@ -129,13 +129,13 @@ func (w *wsHandler) handle(ctx2 context.Context) {
 }
 
 func (w *wsHandler) portMap(ctx context.Context, conf *util.SshConfig) (localPort int, err error) {
-	removePort := 10800
+	remotePort := 10800
 	localPort, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
 		return
 	}
 	var remote netip.AddrPort
-	remote, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(removePort)))
+	remote, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(remotePort)))
 	if err != nil {
 		return
 	}

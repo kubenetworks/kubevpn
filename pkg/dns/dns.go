@@ -26,7 +26,7 @@ import (
 	v13 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/util/flowcontrol"
 
-	"github.com/wencaiwulue/kubevpn/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 type Config struct {

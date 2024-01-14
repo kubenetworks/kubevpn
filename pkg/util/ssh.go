@@ -20,7 +20,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"k8s.io/client-go/util/homedir"
 
-	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
 type SshConfig struct {

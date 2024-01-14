@@ -3,7 +3,7 @@ package action
 import (
 	"github.com/hpcloud/tail"
 
-	"github.com/wencaiwulue/kubevpn/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
 func (svr *Server) Logs(req *rpc.LogRequest, resp rpc.Daemon_LogsServer) error {
