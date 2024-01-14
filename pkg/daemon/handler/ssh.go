@@ -129,13 +129,13 @@ func (w *wsHandler) handle(ctx2 context.Context) {
 }
 
 func (w *wsHandler) portMap(ctx context.Context, conf *util.SshConfig) (localPort int, err error) {
-	removePort := 10800
+	remotePort := 10800
 	localPort, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
 		return
 	}
 	var remote netip.AddrPort
-	remote, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(removePort)))
+	remote, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(remotePort)))
 	if err != nil {
 		return
 	}
