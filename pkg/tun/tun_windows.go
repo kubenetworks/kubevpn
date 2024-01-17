@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 	wintun "golang.zx2c4.com/wintun"
 	wireguardtun "golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
@@ -50,7 +51,8 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		}
 	}
 
-	if cfg.Addr6 != "" {
+	isIPv6Enable, _ := isIPv6Enabled()
+	if cfg.Addr6 != "" && isIPv6Enable {
 		if ipv6, _, err = net.ParseCIDR(cfg.Addr6); err != nil {
 			return
 		}
@@ -176,4 +178,44 @@ func (c *winTunConn) SetReadDeadline(time.Time) error {
 
 func (c *winTunConn) SetWriteDeadline(time.Time) error {
 	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
+}
+
+/*
+*
+Enable IPv6:
+
+	  Default Value 		Hexadecimal 0x00
+							Decimal 0
+	  Prefer IPv4 over IPv6	Hexadecimal 0x20
+	  						Decimal 32
+	  Prefer IPv6 over IPv4	Binary xx0x xxxx
+*/
+func isIPv6Enabled() (bool, error) {
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters`, registry.QUERY_VALUE)
+	if err != nil {
+		return false, err
+	}
+	defer key.Close()
+
+	val, valtype, err := key.GetIntegerValue("DisabledComponents")
+	if errors.Is(err, registry.ErrNotExist) {
+		return true, nil
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	if valtype != registry.DWORD {
+		return false, nil
+	}
+
+	switch val {
+	case 0x00:
+		return true, nil
+	case 0x20:
+		return true, nil
+	default:
+		return false, nil
+	}
 }
