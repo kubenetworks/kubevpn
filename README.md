@@ -34,6 +34,13 @@ Gain access to the Kubernetes cluster network effortlessly using service names o
 For instance, you have the flexibility to run your Kubernetes pod within a local Docker container, ensuring an identical environment, volume, and network setup. 
 With KubeVPN, empower yourself to develop applications entirely on your local PC!
 
+## Content
+
+1. [QuickStart](./README.md#quickstart)
+2. [Functions](./README.md#functions)
+3. [FAQ](./README.md#faq)
+4. [Architecture](./README.md#architecture)
+
 ## QuickStart
 
 #### Install from GitHub release
@@ -848,3 +855,7 @@ add subnet not conflict, eg: 172.15.0.1/24
 ```
 
 restart docker and retry
+
+## Architecture
+
+Architecture can be found [here](/docs/en/Architecture.md).
