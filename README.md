@@ -27,10 +27,19 @@
 
 [中文](README_ZH.md) | [English](README.md) | [Wiki](https://github.com/kubenetworks/kubevpn/wiki/Architecture)
 
-KubeVPN is Cloud Native Dev Environment. Connect to kubernetes cluster network, you can access remote kubernetes
-cluster network via service name or Pod IP / Service IP. Intercept remote
-kubernetes cluster service inbound traffic to local PC with service mesh. and more, you can run your kubernetes pod on
-local Docker container with same environment、volume、and network. Develop application on local PC totally.
+KubeVPN offers a Cloud-Native Dev Environment that seamlessly connects to your Kubernetes cluster network. 
+
+Gain access to the Kubernetes cluster network effortlessly using service names or Pod IP/Service IP. Facilitate the interception of inbound traffic from remote Kubernetes cluster services to your local PC through a service mesh and more. 
+
+For instance, you have the flexibility to run your Kubernetes pod within a local Docker container, ensuring an identical environment, volume, and network setup. 
+With KubeVPN, empower yourself to develop applications entirely on your local PC!
+
+## Content
+
+1. [QuickStart](./README.md#quickstart)
+2. [Functions](./README.md#functions)
+3. [FAQ](./README.md#faq)
+4. [Architecture](./README.md#architecture)
 
 ## QuickStart
 
@@ -184,7 +193,7 @@ reviews                   ClusterIP   172.21.8.24     <none>        9080/TCP    
 ### Short domain resolve
 
 To access the service in the cluster, service name or you can use the short domain name, such
-as `productpage.default.svc.cluster.local`
+as `productpage`
 
 ```shell
 ➜  ~ curl productpage:9080
@@ -196,6 +205,7 @@ as `productpage.default.svc.cluster.local`
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 ...
 ```
+***Disclaimer:*** This only works on the namespace where kubevpn-traffic-manager is deployed. Otherwise use [Domain resolve](./README.md#domain-resolve)
 
 ### Connect to multiple kubernetes cluster network
 
@@ -845,3 +855,7 @@ add subnet not conflict, eg: 172.15.0.1/24
 ```
 
 restart docker and retry
+
+## Architecture
+
+Architecture can be found [here](/docs/en/Architecture.md).
