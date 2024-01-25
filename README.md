@@ -184,7 +184,7 @@ reviews                   ClusterIP   172.21.8.24     <none>        9080/TCP    
 ### Short domain resolve
 
 To access the service in the cluster, service name or you can use the short domain name, such
-as `productpage.default.svc.cluster.local`
+as `productpage`
 
 ```shell
 ➜  ~ curl productpage:9080
@@ -196,6 +196,7 @@ as `productpage.default.svc.cluster.local`
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 ...
 ```
+***Disclaimer:*** This only works on the namespace where kubevpn-traffic-manager is deployed. Otherwise use [Domain resolve](./README.md#domain-resolve)
 
 ### Connect to multiple kubernetes cluster network
 
