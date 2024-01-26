@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
@@ -15,11 +16,15 @@ import (
 )
 
 type dhcpServer struct {
+	sync.Mutex
 	f         util.Factory
 	clientset *kubernetes.Clientset
 }
 
 func (d *dhcpServer) rentIP(w http.ResponseWriter, r *http.Request) {
+	d.Lock()
+	defer d.Unlock()
+
 	podName := r.Header.Get(config.HeaderPodName)
 	namespace := r.Header.Get(config.HeaderPodNamespace)
 	ctx := context.Background()
@@ -42,6 +47,9 @@ func (d *dhcpServer) rentIP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *dhcpServer) releaseIP(w http.ResponseWriter, r *http.Request) {
+	d.Lock()
+	defer d.Unlock()
+
 	podName := r.Header.Get(config.HeaderPodName)
 	namespace := r.Header.Get(config.HeaderPodNamespace)
 
