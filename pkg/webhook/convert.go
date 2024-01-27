@@ -45,6 +45,7 @@ func convertAdmissionResponseToV1beta1(r *v1.AdmissionResponse) *v1beta1.Admissi
 
 func toV1AdmissionResponse(err error) *v1.AdmissionResponse {
 	return &v1.AdmissionResponse{
+		Allowed: false,
 		Result: &metav1.Status{
 			Message: err.Error(),
 		},

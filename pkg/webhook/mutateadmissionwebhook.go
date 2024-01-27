@@ -7,19 +7,23 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/admission/v1"
 	"k8s.io/api/admission/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 // admissionReviewHandler is a handler to handle business logic, holding an util.Factory
 type admissionReviewHandler struct {
+	sync.Mutex
 	f         cmdutil.Factory
 	clientset *kubernetes.Clientset
 }
@@ -87,22 +91,50 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 			log.Errorf("Expected v1beta1.AdmissionReview but got: %T", obj)
 			return
 		}
-		responseAdmissionReview := &v1beta1.AdmissionReview{}
-		responseAdmissionReview.SetGroupVersionKind(*gvk)
-		responseAdmissionReview.Response = admit.v1beta1(*requestedAdmissionReview)
-		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
-		responseObj = responseAdmissionReview
+		if ptr.Deref(requestedAdmissionReview.Request.DryRun, false) {
+			log.Info("Ignore dryrun")
+			responseObj = &v1beta1.AdmissionReview{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: gvk.GroupVersion().String(),
+					Kind:       gvk.Kind,
+				},
+				Response: &v1beta1.AdmissionResponse{
+					Allowed: true,
+					UID:     requestedAdmissionReview.Request.UID,
+				},
+			}
+		} else {
+			responseAdmissionReview := &v1beta1.AdmissionReview{}
+			responseAdmissionReview.SetGroupVersionKind(*gvk)
+			responseAdmissionReview.Response = admit.v1beta1(*requestedAdmissionReview)
+			responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
+			responseObj = responseAdmissionReview
+		}
 	case v1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*v1.AdmissionReview)
 		if !ok {
 			log.Errorf("Expected v1.AdmissionReview but got: %T", obj)
 			return
 		}
-		responseAdmissionReview := &v1.AdmissionReview{}
-		responseAdmissionReview.SetGroupVersionKind(*gvk)
-		responseAdmissionReview.Response = admit.v1(*requestedAdmissionReview)
-		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
-		responseObj = responseAdmissionReview
+		if ptr.Deref(requestedAdmissionReview.Request.DryRun, false) {
+			log.Info("Ignore dryrun")
+			responseObj = &v1.AdmissionReview{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: gvk.GroupVersion().String(),
+					Kind:       gvk.Kind,
+				},
+				Response: &v1.AdmissionResponse{
+					Allowed: true,
+					UID:     requestedAdmissionReview.Request.UID,
+				},
+			}
+		} else {
+			responseAdmissionReview := &v1.AdmissionReview{}
+			responseAdmissionReview.SetGroupVersionKind(*gvk)
+			responseAdmissionReview.Response = admit.v1(*requestedAdmissionReview)
+			responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
+			responseObj = responseAdmissionReview
+		}
 	default:
 		msg := fmt.Sprintf("Unsupported group version kind: %v", gvk)
 		log.Error(msg)
@@ -128,21 +160,28 @@ func Main(f cmdutil.Factory) error {
 	if err != nil {
 		return err
 	}
+
 	h := &admissionReviewHandler{f: f, clientset: clientset}
+	http.HandleFunc("/pods", func(w http.ResponseWriter, r *http.Request) {
+		serve(w, r, newDelegateToV1AdmitHandler(h.admitPods))
+	})
+	http.HandleFunc("/readyz", func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	})
 
-	http.HandleFunc("/pods", func(w http.ResponseWriter, r *http.Request) { serve(w, r, newDelegateToV1AdmitHandler(h.admitPods)) })
-	http.HandleFunc("/readyz", func(w http.ResponseWriter, req *http.Request) { _, _ = w.Write([]byte("ok")) })
-
-	s := &dhcpServer{f: f, clientset: clientset}
-	http.HandleFunc(config.APIRentIP, s.rentIP)
-	http.HandleFunc(config.APIReleaseIP, s.releaseIP)
+	svr := &dhcpServer{f: f, clientset: clientset}
+	http.HandleFunc(config.APIRentIP, svr.rentIP)
+	http.HandleFunc(config.APIReleaseIP, svr.releaseIP)
 
 	var pairs []tls.Certificate
 	pairs, err = getSSLKeyPairs()
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Addr: fmt.Sprintf(":%d", 80), TLSConfig: &tls.Config{Certificates: pairs}}
+	server := &http.Server{
+		Addr:      fmt.Sprintf(":%d", 80),
+		TLSConfig: &tls.Config{Certificates: pairs},
+	}
 	return server.ListenAndServeTLS("", "")
 }
 
