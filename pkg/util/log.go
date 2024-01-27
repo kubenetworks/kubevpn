@@ -14,6 +14,13 @@ func InitLogger(debug bool) {
 	log.SetFormatter(&Format{})
 }
 
+func InitLoggerForServer(debug bool) {
+	if debug {
+		log.SetLevel(log.DebugLevel)
+	}
+	log.SetReportCaller(true)
+}
+
 type Format struct {
 	log.Formatter
 }

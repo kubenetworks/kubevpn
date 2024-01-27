@@ -18,7 +18,7 @@ After deploying it to Kubernetes cluster, the Administrator needs to create a Mu
 in the Kubernetes cluster to register remote webhook admission controllers.`,
 		Args: cobra.MaximumNArgs(0),
 		PreRun: func(cmd *cobra.Command, args []string) {
-			util.InitLogger(true)
+			util.InitLoggerForServer(true)
 			go util.StartupPProf(0)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {

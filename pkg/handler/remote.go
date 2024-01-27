@@ -33,6 +33,7 @@ import (
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/exchange"
@@ -470,16 +471,26 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 					APIGroups:   []string{""},
 					APIVersions: []string{"v1"},
 					Resources:   []string{"pods"},
-					Scope:       (*admissionv1.ScopeType)(pointer.String(string(admissionv1.NamespacedScope))),
+					Scope:       ptr.To(admissionv1.NamespacedScope),
 				},
 			}},
-			FailurePolicy: (*admissionv1.FailurePolicyType)(pointer.String(string(admissionv1.Ignore))),
+			FailurePolicy: ptr.To(admissionv1.Ignore),
 			// same as above label ns
 			NamespaceSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"ns": namespace}},
-			SideEffects:             (*admissionv1.SideEffectClass)(pointer.String(string(admissionv1.SideEffectClassNone))),
-			TimeoutSeconds:          nil,
+			SideEffects:             ptr.To(admissionv1.SideEffectClassNone),
+			TimeoutSeconds:          ptr.To[int32](15),
 			AdmissionReviewVersions: []string{"v1", "v1beta1"},
-			ReinvocationPolicy:      (*admissionv1.ReinvocationPolicyType)(pointer.String(string(admissionv1.NeverReinvocationPolicy))),
+			ReinvocationPolicy:      ptr.To(admissionv1.NeverReinvocationPolicy),
+			/*// needs to enable featureGate=AdmissionWebhookMatchConditions
+			MatchConditions: []admissionv1.MatchCondition{
+				{
+					Name: "",
+					Expression: fmt.Sprintf(
+						"container_name.exists(c, c == '%s') && environment_variable.find(e, e == '%s').exists()",
+						config.ContainerSidecarVPN, config.EnvInboundPodTunIPv4,
+					),
+				},
+			},*/
 		}},
 	}, metav1.CreateOptions{})
 	if err != nil && !k8serrors.IsForbidden(err) && !k8serrors.IsAlreadyExists(err) {

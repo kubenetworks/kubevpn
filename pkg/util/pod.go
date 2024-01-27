@@ -346,3 +346,26 @@ func AllContainerIsRunning(pod *corev1.Pod) bool {
 	}
 	return true
 }
+
+func FindContainerEnv(container *corev1.Container, key string) (value string, found bool) {
+	if container == nil {
+		return
+	}
+	for _, envVar := range container.Env {
+		if envVar.Name == key {
+			value = envVar.Value
+			found = true
+			return
+		}
+	}
+	return
+}
+
+func FindContainerByName(pod *corev1.Pod, name string) (*corev1.Container, int) {
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == name {
+			return &pod.Spec.Containers[i], i
+		}
+	}
+	return nil, -1
+}

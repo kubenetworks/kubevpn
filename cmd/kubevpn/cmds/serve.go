@@ -30,7 +30,7 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
         kubevpn serve -L "tcp://:10800" -L "tun://127.0.0.1:8422?net=223.254.0.123/32"
 `)),
 		PreRun: func(*cobra.Command, []string) {
-			util.InitLogger(config.Debug)
+			util.InitLoggerForServer(config.Debug)
 			runtime.GOMAXPROCS(0)
 			go util.StartupPProf(0)
 		},

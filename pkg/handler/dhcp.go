@@ -118,14 +118,13 @@ func (d *DHCPManager) RentIPBaseNICAddress(ctx context.Context) (*net.IPNet, *ne
 }
 
 func (d *DHCPManager) RentIPRandom(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return nil, nil, err
-	}
+	addrs, _ := net.InterfaceAddrs()
 	var isAlreadyExistedFunc = func(ips ...net.IP) bool {
 		for _, addr := range addrs {
-			addrIP, ok := addr.(*net.IPNet)
-			if ok {
+			if addr == nil {
+				continue
+			}
+			if addrIP, ok := addr.(*net.IPNet); ok {
 				for _, ip := range ips {
 					if addrIP.IP.Equal(ip) {
 						return true
@@ -136,7 +135,7 @@ func (d *DHCPManager) RentIPRandom(ctx context.Context) (*net.IPNet, *net.IPNet,
 		return false
 	}
 	var v4, v6 net.IP
-	err = d.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
+	err := d.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
 		for {
 			if v4, err = ipv4.AllocateNext(); err != nil {
 				return err
