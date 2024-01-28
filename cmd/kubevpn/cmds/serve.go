@@ -37,22 +37,16 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rand.Seed(time.Now().UnixNano())
 			_, _ = maxprocs.Set(maxprocs.Logger(nil))
-			err := handler.RentIPIfNeeded(route)
+			ctx := cmd.Context()
+			err := handler.Complete(ctx, route)
 			if err != nil {
 				return err
 			}
-			defer func() {
-				err := handler.ReleaseIPIfNeeded()
-				if err != nil {
-					log.Errorf("release ip failed: %v", err)
-				}
-			}()
 			servers, err := handler.Parse(*route)
 			if err != nil {
 				log.Errorf("parse server failed: %v", err)
 				return err
 			}
-			ctx := cmd.Context()
 			return handler.Run(ctx, servers)
 		},
 	}

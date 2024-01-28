@@ -60,6 +60,22 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig) {
 				Name:  "TrafficManagerService",
 				Value: config.ConfigMapPodTrafficManager,
 			},
+			{
+				Name: config.EnvPodNamespace,
+				ValueFrom: &corev1.EnvVarSource{
+					FieldRef: &corev1.ObjectFieldSelector{
+						FieldPath: "metadata.namespace",
+					},
+				},
+			},
+			{
+				Name: config.EnvPodName,
+				ValueFrom: &corev1.EnvVarSource{
+					FieldRef: &corev1.ObjectFieldSelector{
+						FieldPath: "metadata.name",
+					},
+				},
+			},
 		},
 		Command: []string{"/bin/sh", "-c"},
 		// https://www.netfilter.org/documentation/HOWTO/NAT-HOWTO-6.html#ss6.2

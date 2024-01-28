@@ -1,12 +1,10 @@
 package webhook
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
@@ -17,8 +15,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/utils/ptr"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 // admissionReviewHandler is a handler to handle business logic, holding an util.Factory
@@ -142,62 +138,15 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		return
 	}
 
-	log.Infof("sending response: %v", responseObj)
 	respBytes, err := json.Marshal(responseObj)
 	if err != nil {
 		log.Errorf("Unable to encode response: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	log.Infof("sending response: %v", string(respBytes))
 	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write(respBytes); err != nil {
+	if _, err = w.Write(respBytes); err != nil {
 		log.Errorf("Unable to write response: %v", err)
 	}
-}
-
-func Main(f cmdutil.Factory) error {
-	clientset, err := f.KubernetesClientSet()
-	if err != nil {
-		return err
-	}
-
-	h := &admissionReviewHandler{f: f, clientset: clientset}
-	http.HandleFunc("/pods", func(w http.ResponseWriter, r *http.Request) {
-		serve(w, r, newDelegateToV1AdmitHandler(h.admitPods))
-	})
-	http.HandleFunc("/readyz", func(w http.ResponseWriter, req *http.Request) {
-		_, _ = w.Write([]byte("ok"))
-	})
-
-	svr := &dhcpServer{f: f, clientset: clientset}
-	http.HandleFunc(config.APIRentIP, svr.rentIP)
-	http.HandleFunc(config.APIReleaseIP, svr.releaseIP)
-
-	var pairs []tls.Certificate
-	pairs, err = getSSLKeyPairs()
-	if err != nil {
-		return err
-	}
-	server := &http.Server{
-		Addr:      fmt.Sprintf(":%d", 80),
-		TLSConfig: &tls.Config{Certificates: pairs},
-	}
-	return server.ListenAndServeTLS("", "")
-}
-
-func getSSLKeyPairs() ([]tls.Certificate, error) {
-	cert, ok := os.LookupEnv(config.TLSCertKey)
-	if !ok {
-		return nil, fmt.Errorf("can not get %s from env", config.TLSCertKey)
-	}
-	var key string
-	key, ok = os.LookupEnv(config.TLSPrivateKeyKey)
-	if !ok {
-		return nil, fmt.Errorf("can not get %s from env", config.TLSPrivateKeyKey)
-	}
-	pair, err := tls.X509KeyPair([]byte(cert), []byte(key))
-	if err != nil {
-		return nil, fmt.Errorf("failed to load certificate and key ,err: %v", err)
-	}
-	return []tls.Certificate{pair}, nil
 }
