@@ -185,7 +185,7 @@ func (h *admissionReviewHandler) handleDelete(ar v1.AdmissionReview) *v1.Admissi
 		if err != nil {
 			log.Errorf("release ip to dhcp err: %v, ips: %v", err, ips)
 		} else {
-			log.Errorf("release ip to dhcp ok, ip: %v", ips)
+			log.Debugf("release ip to dhcp ok, ip: %v", ips)
 		}
 	}
 	return &v1.AdmissionResponse{Allowed: true}
