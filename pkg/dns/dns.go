@@ -135,20 +135,14 @@ func (c *Config) addHosts(entryList []Entry) error {
 		return nil
 	}
 
-	var sb = new(bytes.Buffer)
-	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
-	for _, e := range entryList {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.IP, e.Domain, "", config.HostsKeyWord)
-	}
-	_ = w.Flush()
-
 	hostFile := GetHostFile()
 	fi, err := os.OpenFile(hostFile, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
 	defer fi.Close()
-	_, err = fi.WriteString(sb.String())
+	str := entryList2String(entryList)
+	_, err = fi.WriteString(str)
 	return err
 }
 
@@ -205,9 +199,10 @@ func (c *Config) removeHosts(entryList []Entry) error {
 	for _, s := range retain {
 		sb.WriteString(s)
 	}
+	str := strings.TrimSuffix(sb.String(), "\n")
 	err = f.Truncate(0)
 	_, err = f.Seek(0, 0)
-	_, err = f.WriteString(sb.String())
+	_, err = f.WriteString(str)
 	return err
 }
 
@@ -220,7 +215,7 @@ func entryList2String(entryList []Entry) string {
 	var sb = new(bytes.Buffer)
 	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
 	for _, e := range entryList {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.IP, e.Domain, "", config.HostsKeyWord)
+		_, _ = fmt.Fprintf(w, "\n%s\t%s\t%s\t%s", e.IP, e.Domain, "", config.HostsKeyWord)
 	}
 	_ = w.Flush()
 	return sb.String()
@@ -328,8 +323,9 @@ func CleanupHosts() error {
 	for _, s := range retain {
 		sb.WriteString(s)
 	}
+	str := strings.TrimSuffix(sb.String(), "\n")
 	err = f.Truncate(0)
 	_, err = f.Seek(0, 0)
-	_, err = f.WriteString(sb.String())
+	_, err = f.WriteString(str)
 	return err
 }
