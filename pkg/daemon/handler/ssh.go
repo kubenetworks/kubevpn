@@ -67,6 +67,9 @@ func (w *wsHandler) handle(ctx2 context.Context) {
 		w.Log("Port map error: %v", err)
 		return
 	}
+	// startup daemon process if daemon process not start
+	startDaemonCmd := fmt.Sprintf(`export %s=%s && kubevpn get service > /dev/null 2>&1 &`, config.EnvStartSudoKubeVPNByKubeVPN, "true")
+	_, _, _ = util.RemoteRun(sshConfig, startDaemonCmd, nil)
 	cmd := fmt.Sprintf(`export %s=%s && kubevpn ssh-daemon --client-ip %s`, config.EnvStartSudoKubeVPNByKubeVPN, "true", clientIP.String())
 	serverIP, stderr, err := util.RemoteRun(sshConfig, cmd, nil)
 	if err != nil {
