@@ -13,7 +13,6 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/upgrade"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -37,21 +36,6 @@ func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
 				log.Fatal(err)
 			}
 			fmt.Fprint(os.Stdout, "Upgrade daemon...")
-			for _, isSudo := range []bool{false, true} {
-				cli := daemon.GetClient(isSudo)
-				if cli != nil {
-					var response *rpc.UpgradeResponse
-					response, err = cli.Upgrade(cmd.Context(), &rpc.UpgradeRequest{
-						ClientVersion:  latestVersion,
-						ClientCommitId: latestCommit,
-					})
-					if err == nil && !response.NeedUpgrade {
-						// do nothing
-					} else {
-						_ = quit(cmd.Context(), isSudo)
-					}
-				}
-			}
 			err = daemon.StartupDaemon(cmd.Context())
 			fmt.Fprint(os.Stdout, "done")
 		},
