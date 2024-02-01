@@ -39,25 +39,26 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		Filename:   action.GetDaemonLogPath(),
 		MaxSize:    100,
 		MaxAge:     3,
-		MaxBackups: 1,
+		MaxBackups: 3,
 		LocalTime:  true,
 		Compress:   false,
 	}
 	util.InitLogger(true)
 	log.SetOutput(l)
 	// every day 00:00:00 rotate log
-	go func() {
-		for {
-			nowTime := time.Now()
-			nowTimeStr := nowTime.Format("2006-01-02")
-			t2, _ := time.ParseInLocation("2006-01-02", nowTimeStr, time.Local)
-			next := t2.AddDate(0, 0, 1)
-			after := next.UnixNano() - nowTime.UnixNano() - 1
-			<-time.After(time.Duration(after) * time.Nanosecond)
-			_ = l.Rotate()
-		}
-	}()
-
+	if !o.IsSudo {
+		go func() {
+			for {
+				nowTime := time.Now()
+				nowTimeStr := nowTime.Format("2006-01-02")
+				t2, _ := time.ParseInLocation("2006-01-02", nowTimeStr, time.Local)
+				next := t2.AddDate(0, 0, 1)
+				after := next.UnixNano() - nowTime.UnixNano() - 1
+				<-time.After(time.Duration(after) * time.Nanosecond)
+				_ = l.Rotate()
+			}
+		}()
+	}
 	o.ctx, o.cancel = context.WithCancel(ctx)
 	var lc net.ListenConfig
 	lis, err := lc.Listen(o.ctx, "unix", GetSockPath(o.IsSudo))
