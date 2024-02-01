@@ -38,14 +38,14 @@ func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 			return err
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			defer func() {
+				sockPath := daemon.GetSockPath(opt.IsSudo)
+				_ = os.Remove(sockPath)
+				pidPath := daemon.GetPidPath(opt.IsSudo)
+				_ = os.Remove(pidPath)
+			}()
 			defer opt.Stop()
 			return opt.Start(cmd.Context())
-		},
-		PostRun: func(cmd *cobra.Command, args []string) {
-			sockPath := daemon.GetSockPath(opt.IsSudo)
-			_ = os.Remove(sockPath)
-			pidPath := daemon.GetPidPath(opt.IsSudo)
-			_ = os.Remove(pidPath)
 		},
 		Hidden:                true,
 		DisableFlagsInUseLine: true,
