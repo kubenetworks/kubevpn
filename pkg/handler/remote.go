@@ -53,7 +53,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 				return
 			}
 			log.Infoln("traffic manager already exist, reuse it")
-			return nil
+			return
 		}
 	}
 	var deleteResource = func(ctx context.Context) {
@@ -163,22 +163,22 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 				Name:       udp8422,
 				Protocol:   v1.ProtocolUDP,
 				Port:       8422,
-				TargetPort: intstr.FromInt(8422),
+				TargetPort: intstr.FromInt32(8422),
 			}, {
 				Name:       tcp10800,
 				Protocol:   v1.ProtocolTCP,
 				Port:       10800,
-				TargetPort: intstr.FromInt(10800),
+				TargetPort: intstr.FromInt32(10800),
 			}, {
 				Name:       tcp9002,
 				Protocol:   v1.ProtocolTCP,
 				Port:       9002,
-				TargetPort: intstr.FromInt(9002),
+				TargetPort: intstr.FromInt32(9002),
 			}, {
 				Name:       tcp80,
 				Protocol:   v1.ProtocolTCP,
 				Port:       80,
-				TargetPort: intstr.FromInt(80),
+				TargetPort: intstr.FromInt32(80),
 			}},
 			Selector: map[string]string{"app": config.ConfigMapPodTrafficManager},
 			Type:     v1.ServiceTypeClusterIP,
