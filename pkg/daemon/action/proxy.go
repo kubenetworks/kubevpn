@@ -28,6 +28,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
 	}()
+	config.Image = req.Image
 	config.Debug = req.Level == int32(log.DebugLevel)
 	log.SetLevel(log.InfoLevel)
 	ctx := resp.Context()
