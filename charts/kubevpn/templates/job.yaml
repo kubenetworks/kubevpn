@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "kubevpn.fullname" . }}
+  labels:
+    {{- include "kubevpn.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "kubevpn.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "kubevpn.serviceAccountName" . }}
+      containers:
+        - name: label-ns
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |2-
+
+              echo "Label namespace {{ .Release.Namespace }}"
+              kubectl label ns {{ .Release.Namespace }} ns={{ .Release.Namespace }}
+
+              echo "Generating https certificate"
+              openssl req -x509 -nodes -days 36500 -newkey rsa:2048 -subj "/CN=*.{{ .Release.Namespace }}.svc.cluster.local" -addext "subjectAltName=DNS:{{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }}.svc" -keyout server.key -out server.crt
+
+              export TLS_CRT=$(cat server.crt | base64 | tr -d '\n')
+              echo "Patch mutatingwebhookconfigurations {{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }}"
+              kubectl patch mutatingwebhookconfigurations {{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }} -p "{\"webhooks\":[{\"name\":\"{{ include "kubevpn.fullname" . }}.naison.io\",\"sideEffects\":\"None\",\"admissionReviewVersions\":[\"v1\", \"v1beta1\"],\"clientConfig\":{\"service\":{\"namespace\":\"{{ .Release.Namespace }}\",\"name\":\"{{ include "kubevpn.fullname" . }}\"},\"caBundle\":\"$TLS_CRT\"}}]}"
+
+
+              export TLS_KEY=$(cat server.key | base64 | tr -d '\n')
+              echo "Patch secret {{ include "kubevpn.fullname" . }}"
+              kubectl patch secret {{ include "kubevpn.fullname" . }} -n {{ .Release.Namespace }} -p "{\"data\":{\"tls_key\":\"$TLS_KEY\",\"tls_crt\":\"$TLS_CRT\"}}"
+
+              echo "Restart the pods..."
+              kubectl scale -n {{ .Release.Namespace }} --replicas=0 deployment/{{ include "kubevpn.fullname" . }}
+              kubectl scale -n {{ .Release.Namespace }} --replicas=1 deployment/{{ include "kubevpn.fullname" . }}
+              exit 0

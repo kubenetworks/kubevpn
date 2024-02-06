@@ -1,0 +1,51 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "kubevpn.fullname" . }}
+rules:
+  - apiGroups:
+      - ""
+    resourceNames:
+      - {{ include "kubevpn.fullname" . }}
+    resources:
+      - configmaps
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups: [ "" ]
+    resources: [ "namespaces" ]
+    resourceNames: [{{ .Release.Namespace }}]
+    verbs:
+      - get
+      - patch
+  - apiGroups: [ "apps" ]
+    resources: [ "deployments/scale" ]
+    resourceNames:
+      - {{ include "kubevpn.fullname" . }}
+    verbs:
+      - get
+      - update
+      - patch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }}
+rules:
+  - apiGroups:
+      - admissionregistration.k8s.io
+    resources:
+      - mutatingwebhookconfigurations
+    resourceNames:
+      - {{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }}
+    verbs:
+      - get
+      - list
+      - patch

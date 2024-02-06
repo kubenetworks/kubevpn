@@ -1,0 +1,36 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }}
+webhooks:
+  - admissionReviewVersions:
+      - v1
+      - v1beta1
+    clientConfig:
+      caBundle: {{ .Values.tls.crt }}
+      service:
+        name: {{ include "kubevpn.fullname" . }}
+        namespace: {{ .Release.Namespace }}
+        path: /pods
+        port: 80
+    failurePolicy: Ignore
+    matchPolicy: Equivalent
+    name: {{ include "kubevpn.fullname" . }}.naison.io
+    namespaceSelector:
+      matchLabels:
+        ns: {{ .Release.Namespace }}
+    objectSelector: { }
+    reinvocationPolicy: Never
+    rules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - DELETE
+        resources:
+          - pods
+        scope: Namespaced
+    sideEffects: None
+    timeoutSeconds: 15
