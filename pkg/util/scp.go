@@ -10,29 +10,20 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// SCP copy file to remote and exec command
-func SCP(stdout, stderr io.Writer, conf *SshConfig, filename, to string, commands ...string) error {
-	remote, err := DialSshRemote(conf)
-	if err != nil {
-		log.Errorf("Dial into remote server error: %s", err)
-		return err
-	}
-
-	sess, err := remote.NewSession()
-	if err != nil {
-		return err
-	}
-	err = main(sess, stdout, stderr, filename, to)
+// SCPAndExec copy file to remote and exec command
+func SCPAndExec(stdout, stderr io.Writer, client *ssh.Client, filename, to string, commands ...string) error {
+	err := SCP(client, stdout, stderr, filename, to)
 	if err != nil {
 		log.Errorf("Copy file to remote error: %s", err)
 		return err
 	}
 	for _, command := range commands {
-		sess, err = remote.NewSession()
+		var session *ssh.Session
+		session, err = client.NewSession()
 		if err != nil {
 			return err
 		}
-		output, err := sess.CombinedOutput(command)
+		output, err := session.CombinedOutput(command)
 		if err != nil {
 			log.Error(string(output))
 			return err
@@ -43,24 +34,28 @@ func SCP(stdout, stderr io.Writer, conf *SshConfig, filename, to string, command
 	return nil
 }
 
-// https://blog.neilpang.com/%E6%94%B6%E8%97%8F-scp-secure-copy%E5%8D%8F%E8%AE%AE/
-func main(sess *ssh.Session, stdout, stderr io.Writer, filename string, to string) error {
-	open, err := os.Open(filename)
+// SCP https://blog.neilpang.com/%E6%94%B6%E8%97%8F-scp-secure-copy%E5%8D%8F%E8%AE%AE/
+func SCP(client *ssh.Client, stdout, stderr io.Writer, filename, to string) error {
+	file, err := os.Open(filename)
 	if err != nil {
 		return err
 	}
-	stat, err := open.Stat()
+	defer file.Close()
+	stat, err := file.Stat()
 	if err != nil {
 		return err
 	}
-	defer open.Close()
+	sess, err := client.NewSession()
+	if err != nil {
+		return err
+	}
 	defer sess.Close()
 	go func() {
 		w, _ := sess.StdinPipe()
 		defer w.Close()
 		fmt.Fprintln(w, "D0755", 0, ".kubevpn") // mkdir
 		fmt.Fprintln(w, "C0644", stat.Size(), to)
-		err := sCopy(w, open, stat.Size(), stdout, stderr)
+		err := sCopy(w, file, stat.Size(), stdout, stderr)
 		if err != nil {
 			log.Errorf("failed to transfer file to remote: %v", err)
 			return
@@ -72,9 +67,9 @@ func main(sess *ssh.Session, stdout, stderr io.Writer, filename string, to strin
 
 func sCopy(dst io.Writer, src io.Reader, size int64, stdout, stderr io.Writer) error {
 	total := float64(size) / 1024 / 1024
-	s := fmt.Sprintf("Length: %d (%0.2fM)\n", size, total)
+	s := fmt.Sprintf("Length: %d (%0.2fM)", size, total)
 	log.Info(s)
-	io.WriteString(stdout, s)
+	io.WriteString(stdout, s+"\n")
 
 	bar := progressbar.NewOptions(int(size),
 		progressbar.OptionSetWriter(stdout),

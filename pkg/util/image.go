@@ -20,6 +20,7 @@ import (
 	"github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/ssh"
 )
 
 func GetClient() (*client.Client, *command.DockerCli, error) {
@@ -109,6 +110,11 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 	}
 
 	// transfer image to remote
+	var sshClient *ssh.Client
+	sshClient, err = DialSshRemote(ctx, conf)
+	if err != nil {
+		return err
+	}
 	var responseReader io.ReadCloser
 	responseReader, err = cli.ImageSave(ctx, []string{imageTarget})
 	if err != nil {
@@ -132,12 +138,12 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 	logrus.Infof("Transferring image %s", imageTarget)
 	filename := filepath.Base(file.Name())
 	cmd := fmt.Sprintf(
-		"(docker load image -i ~/.kubevpn/%s && docker push %s) || (nerdctl image load -i ~/.kubevpn/%s && nerdctl image push %s)",
+		"(docker load -i ~/.kubevpn/%s && docker push %s) || (nerdctl image load -i ~/.kubevpn/%s && nerdctl image push %s)",
 		filename, imageTarget,
 		filename, imageTarget,
 	)
 	stdout := log.StandardLogger().Out
-	err = SCP(stdout, stdout, conf, file.Name(), filename, []string{cmd}...)
+	err = SCPAndExec(stdout, stdout, sshClient, file.Name(), filename, []string{cmd}...)
 	if err != nil {
 		return err
 	}

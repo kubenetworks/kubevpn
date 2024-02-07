@@ -202,6 +202,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 					}
 					log.Info(recv.Message)
 				}
+				svr.secondaryConnect = append(svr.secondaryConnect[:i], svr.secondaryConnect[i+1:]...)
 				break
 			}
 		}
