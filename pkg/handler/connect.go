@@ -759,11 +759,18 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 		}
 	}()
 
+	// pre-check network ip connect
+	var cli *ssh.Client
+	cli, err = util.DialSshRemote(ctx, conf)
+	if err != nil {
+		return
+	}
+
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
 
 	if conf.RemoteKubeconfig != "" || (flags != nil && flags.Changed("remote-kubeconfig")) {
-		var stdOut []byte
-		var errOut []byte
+		var stdout []byte
+		var stderr []byte
 		if len(conf.RemoteKubeconfig) != 0 && conf.RemoteKubeconfig[0] == '~' {
 			conf.RemoteKubeconfig = filepath.Join("/home", conf.User, conf.RemoteKubeconfig[1:])
 		}
@@ -771,18 +778,18 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 			// if `--remote-kubeconfig` is parsed then Entrypoint is reset
 			conf.RemoteKubeconfig = filepath.Join("/home", conf.User, clientcmd.RecommendedHomeDir, clientcmd.RecommendedFileName)
 		}
-		stdOut, errOut, err = util.RemoteRun(conf,
+		stdout, stderr, err = util.RemoteRun(cli,
 			fmt.Sprintf("sh -c 'kubectl config view --flatten --raw --kubeconfig %s || minikube kubectl -- config view --flatten --raw --kubeconfig %s'",
 				conf.RemoteKubeconfig,
 				conf.RemoteKubeconfig),
 			map[string]string{clientcmd.RecommendedConfigPathEnvVar: conf.RemoteKubeconfig},
 		)
 		if err != nil {
-			err = errors.Wrap(err, string(errOut))
+			err = errors.Wrap(err, string(stderr))
 			return
 		}
-		if len(stdOut) == 0 {
-			err = errors.Errorf("can not get kubeconfig %s from remote ssh server: %s", conf.RemoteKubeconfig, string(errOut))
+		if len(stdout) == 0 {
+			err = errors.Errorf("can not get kubeconfig %s from remote ssh server: %s", conf.RemoteKubeconfig, string(stderr))
 			return
 		}
 
@@ -793,7 +800,7 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 		if err = temp.Close(); err != nil {
 			return
 		}
-		if err = os.WriteFile(temp.Name(), stdOut, 0644); err != nil {
+		if err = os.WriteFile(temp.Name(), stdout, 0644); err != nil {
 			return
 		}
 		if err = os.Chmod(temp.Name(), 0644); err != nil {
@@ -871,7 +878,6 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 	if err != nil {
 		return
 	}
-
 	var port int
 	port, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
@@ -883,43 +889,11 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 		return
 	}
 
-	// pre-check network ip connect
-	var cli *ssh.Client
-	cli, err = util.DialSshRemote(conf)
-	if err != nil {
-		return
-	} else {
-		_ = cli.Close()
-	}
-	errChan := make(chan error, 1)
-	readyChan := make(chan struct{}, 1)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			err := util.Main(ctx, remote, local, conf, readyChan)
-			if err != nil {
-				if !errors.Is(err, context.Canceled) {
-					log.Errorf("ssh forward failed err: %v", err)
-				}
-				select {
-				case errChan <- err:
-				default:
-				}
-			}
-			time.Sleep(time.Second * 2)
-		}
-	}()
 	if print {
 		log.Infof("wait jump to bastion host...")
 	}
-	select {
-	case <-readyChan:
-	case err = <-errChan:
+	err = util.PortMapUntil(ctx, cli, remote, local)
+	if err != nil {
 		log.Errorf("ssh proxy err: %v", err)
 		return
 	}

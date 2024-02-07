@@ -43,14 +43,18 @@ type wsHandler struct {
 // 1) start remote kubevpn server
 // 2) start local tunnel
 // 3) ssh terminal
-func (w *wsHandler) handle(ctx2 context.Context) {
-	conn := w.conn
-	sshConfig := w.sshConfig
-	cidr := w.cidr
-	ctx, cancelFunc := context.WithCancel(ctx2)
-	defer cancelFunc()
+func (w *wsHandler) handle(ctx context.Context) {
+	ctx, f := context.WithCancel(ctx)
+	defer f()
 
-	err := w.remoteInstallKubevpnIfCommandNotFound(ctx, sshConfig)
+	cli, err := util.DialSshRemote(ctx, w.sshConfig)
+	if err != nil {
+		w.Log("Dial ssh remote error: %v", err)
+		return
+	}
+	defer cli.Close()
+
+	err = w.installKubevpnOnRemote(ctx, cli)
 	if err != nil {
 		w.Log("Install kubevpn error: %v", err)
 		return
@@ -62,16 +66,32 @@ func (w *wsHandler) handle(ctx2 context.Context) {
 		return
 	}
 
-	local, err := w.portMap(ctx, sshConfig)
+	remotePort := 10800
+	var localPort int
+	localPort, err = util.GetAvailableTCPPortOrDie()
+	if err != nil {
+		return
+	}
+	var remote netip.AddrPort
+	remote, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(remotePort)))
+	if err != nil {
+		return
+	}
+	var local netip.AddrPort
+	local, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort)))
+	if err != nil {
+		return
+	}
+	err = util.PortMapUntil(ctx, cli, remote, local)
 	if err != nil {
 		w.Log("Port map error: %v", err)
 		return
 	}
 	// startup daemon process if daemon process not start
 	startDaemonCmd := fmt.Sprintf(`export %s=%s && kubevpn get service > /dev/null 2>&1 &`, config.EnvStartSudoKubeVPNByKubeVPN, "true")
-	_, _, _ = util.RemoteRun(sshConfig, startDaemonCmd, nil)
+	util.RemoteRun(cli, startDaemonCmd, nil)
 	cmd := fmt.Sprintf(`export %s=%s && kubevpn ssh-daemon --client-ip %s`, config.EnvStartSudoKubeVPNByKubeVPN, "true", clientIP.String())
-	serverIP, stderr, err := util.RemoteRun(sshConfig, cmd, nil)
+	serverIP, stderr, err := util.RemoteRun(cli, cmd, nil)
 	if err != nil {
 		log.Errorf("run error: %v", err)
 		log.Errorf("run stdout: %v", string(serverIP))
@@ -86,12 +106,12 @@ func (w *wsHandler) handle(ctx2 context.Context) {
 	}
 	msg := fmt.Sprintf("| You can use client: %s to communicate with server: %s |", clientIP.IP.String(), ip.String())
 	w.PrintLine(msg)
-	cidr = append(cidr, string(serverIP))
+	w.cidr = append(w.cidr, string(serverIP))
 	r := core.Route{
 		ServeNodes: []string{
-			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", clientIP, strings.Join(cidr, ",")),
+			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", clientIP, strings.Join(w.cidr, ",")),
 		},
-		ChainNode: fmt.Sprintf("tcp://127.0.0.1:%d", local),
+		ChainNode: fmt.Sprintf("tcp://127.0.0.1:%d", localPort),
 		Retries:   5,
 	}
 	servers, err := handler.Parse(r)
@@ -124,78 +144,14 @@ func (w *wsHandler) handle(ctx2 context.Context) {
 			}
 		}
 	}()
-	err = w.terminal(ctx, sshConfig, conn)
+	err = w.terminal(ctx, cli, w.conn)
 	if err != nil {
 		w.Log("Enter terminal error: %v", err)
 	}
 	return
 }
 
-func (w *wsHandler) portMap(ctx context.Context, conf *util.SshConfig) (localPort int, err error) {
-	remotePort := 10800
-	localPort, err = util.GetAvailableTCPPortOrDie()
-	if err != nil {
-		return
-	}
-	var remote netip.AddrPort
-	remote, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(remotePort)))
-	if err != nil {
-		return
-	}
-	var local netip.AddrPort
-	local, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort)))
-	if err != nil {
-		return
-	}
-
-	// pre-check network ip connect
-	var cli *ssh.Client
-	cli, err = util.DialSshRemote(conf)
-	if err != nil {
-		return
-	} else {
-		_ = cli.Close()
-	}
-	errChan := make(chan error, 1)
-	readyChan := make(chan struct{}, 1)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			err := util.Main(ctx, remote, local, conf, readyChan)
-			if err != nil {
-				if !errors.Is(err, context.Canceled) {
-					log.Errorf("ssh forward failed err: %v", err)
-					w.Log("Ssh forward failed err: %v", err)
-				}
-				select {
-				case errChan <- err:
-				default:
-				}
-			}
-			time.Sleep(time.Second * 2)
-		}
-	}()
-	select {
-	case <-readyChan:
-		return
-	case err = <-errChan:
-		w.Log("Ssh forward failed err: %v", err)
-		log.Errorf("ssh proxy err: %v", err)
-		return
-	}
-}
-
-func (w *wsHandler) terminal(ctx context.Context, conf *util.SshConfig, conn *websocket.Conn) error {
-	cli, err := util.DialSshRemote(conf)
-	if err != nil {
-		w.Log("Dial remote error: %v", err)
-		return err
-	}
+func (w *wsHandler) terminal(ctx context.Context, cli *ssh.Client, conn *websocket.Conn) error {
 	session, err := cli.NewSession()
 	if err != nil {
 		w.Log("New session error: %v", err)
@@ -205,7 +161,6 @@ func (w *wsHandler) terminal(ctx context.Context, conf *util.SshConfig, conn *we
 	go func() {
 		<-ctx.Done()
 		session.Close()
-		cli.Close()
 	}()
 	session.Stdout = conn
 	session.Stderr = conn
@@ -232,11 +187,11 @@ func (w *wsHandler) terminal(ctx context.Context, conf *util.SshConfig, conn *we
 	return session.Wait()
 }
 
-func (w *wsHandler) remoteInstallKubevpnIfCommandNotFound(ctx context.Context, sshConfig *util.SshConfig) error {
+func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.Client) error {
 	cmd := `hash kubevpn || type kubevpn || which kubevpn || command -v kubevpn`
-	_, _, err := util.RemoteRun(sshConfig, cmd, nil)
+	_, _, err := util.RemoteRun(sshClient, cmd, nil)
 	if err == nil {
-		w.Log("Remote kubevpn command found, not needs to install")
+		w.Log("Remote kubevpn command found, use it")
 		return nil
 	}
 	log.Infof("remote kubevpn command not found, try to install it...")
@@ -293,12 +248,12 @@ func (w *wsHandler) remoteInstallKubevpnIfCommandNotFound(ctx context.Context, s
 		"chmod +x ~/.kubevpn/kubevpn",
 		"sudo mv ~/.kubevpn/kubevpn /usr/local/bin/kubevpn",
 	}
-	err = util.SCP(w.conn, w.conn, sshConfig, tempBin.Name(), "kubevpn", cmds...)
+	err = util.SCPAndExec(w.conn, w.conn, sshClient, tempBin.Name(), "kubevpn", cmds...)
 	if err != nil {
 		return err
 	}
 	// try to startup daemon process
-	go util.RemoteRun(sshConfig, "kubevpn get pods", nil)
+	go util.RemoteRun(sshClient, "kubevpn get pods", nil)
 	return nil
 }
 
@@ -354,11 +309,14 @@ func init() {
 			condReady: cancelFunc,
 		}
 		CondReady[sessionID] = ctx
+		defer conn.Close()
 		h.handle(conn.Request().Context())
 	}))
 	http.Handle("/resize", websocket.Handler(func(conn *websocket.Conn) {
 		sessionID := conn.Request().Header.Get("session-id")
 		log.Infof("resize: %s", sessionID)
+
+		defer conn.Close()
 
 		var session *ssh.Session
 		select {

@@ -25,7 +25,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) error {
+func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) (e error) {
 	defer func() {
 		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
@@ -45,6 +45,15 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		// todo define already connect error?
 		return status.Error(codes.AlreadyExists, s)
 	}
+	defer func() {
+		if e != nil {
+			if svr.connect != nil {
+				svr.connect.Cleanup()
+				svr.connect = nil
+			}
+			svr.t = time.Time{}
+		}
+	}()
 	svr.t = time.Now()
 	svr.connect = &handler.ConnectOptions{
 		Namespace:            req.Namespace,

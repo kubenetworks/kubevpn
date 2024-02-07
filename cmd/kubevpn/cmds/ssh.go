@@ -1,6 +1,7 @@
 package cmds
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -87,10 +88,27 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			defer conn.Close()
-			go moniteSize(sessionID)
-			go io.Copy(conn, os.Stdin)
-			_, err = io.Copy(os.Stdout, conn)
-			return err
+
+			errChan := make(chan error, 3)
+			go func() {
+				err := monitorSize(cmd.Context(), sessionID)
+				errChan <- err
+			}()
+			go func() {
+				_, err := io.Copy(conn, os.Stdin)
+				errChan <- err
+			}()
+			go func() {
+				_, err := io.Copy(os.Stdout, conn)
+				errChan <- err
+			}()
+
+			select {
+			case err = <-errChan:
+				return err
+			case <-cmd.Context().Done():
+				return cmd.Context().Err()
+			}
 		},
 	}
 	addSshFlags(cmd, sshConf)
@@ -98,7 +116,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 	return cmd
 }
 
-func moniteSize(sessionID string) error {
+func monitorSize(ctx context.Context, sessionID string) error {
 	conn := daemon.GetTCPClient(true)
 	if conn == nil {
 		return fmt.Errorf("conn is nil")
@@ -125,14 +143,15 @@ func moniteSize(sessionID string) error {
 		return err
 	}
 	encoder := json.NewEncoder(client)
-	for {
+	for ctx.Err() == nil {
 		size := sizeQueue.Next()
 		if size == nil {
 			return nil
 		}
 		if err = encoder.Encode(&size); err != nil {
 			log.Errorf("Encode resize: %s", err)
-			continue
+			return err
 		}
 	}
+	return nil
 }
