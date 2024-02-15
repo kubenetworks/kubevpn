@@ -102,6 +102,15 @@ jobs:
     needs: [ build ]
     runs-on: ubuntu-latest
     steps:
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.20'
+          check-latest: true
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
       - name: Helm tool installer
         uses: Azure/setup-helm@v1
         with:
@@ -114,8 +123,10 @@ jobs:
           sed -i "s/tag:.*$/tag: \"${VERSION}\"/" charts/kubevpn/values.yaml
       - name: Tar chart
         run: |
-          tar --transform 's/^charts\/kubevpn/kubevpn/' -zcf kubevpn-chart.tar.gz charts/kubevpn
-          shasum -a 256 kubevpn-chart.tar.gz | awk '{print $1}' > kubevpn-chart.tar.gz-SHA256
+          VERSION=${GITHUB_REF#refs/*/}
+          CHART_VERSION=${VERSION/#v/}
+          tar --transform 's/^charts\/kubevpn/kubevpn/' -zcf kubevpn-${CHART_VERSION}.tgz charts/kubevpn
+          shasum -a 256 kubevpn-${CHART_VERSION}.tgz | awk '{print $1}' > kubevpn-${CHART_VERSION}.tgz-SHA256
       - name: Download UPLOAD_URL
         uses: actions/download-artifact@v2
         with:
@@ -125,14 +136,28 @@ jobs:
         run: |
           UploadUrl=$(cat ./UPLOAD_URL)
           echo "::set-output name=upload_url::$UploadUrl"
+      - name: Get assert name
+        id: get_assert_info
+        run: |
+          VERSION=${GITHUB_REF#refs/*/}
+          CHART_VERSION=${VERSION/#v/}
+          AssertName=kubevpn-${CHART_VERSION}.tgz
+          echo "::set-output name=assert_name::$AssertName"
+      - name: Get assert SHA256 name
+        id: get_assert_info_sha256
+        run: |
+          VERSION=${GITHUB_REF#refs/*/}
+          CHART_VERSION=${VERSION/#v/}
+          AssertName=kubevpn-${CHART_VERSION}.tgz-SHA256
+          echo "::set-output name=assert_name::$AssertName"
       - name: Upload Release Asset KubeVPN Server Chart
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.get_release_info.outputs.upload_url }}
-          asset_path: kubevpn-chart.tar.gz
-          asset_name: kubevpn-chart.tar.gz
+          asset_path: ${{ steps.get_assert_info.outputs.assert_name }}
+          asset_name: ${{ steps.get_assert_info.outputs.assert_name }}
           asset_content_type: application/octet-stream
       - name: Upload Release Asset KubeVPN Chart SHA256
         uses: actions/upload-release-asset@v1
@@ -140,6 +165,58 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.get_release_info.outputs.upload_url }}
-          asset_path: kubevpn-chart.tar.gz-SHA256
-          asset_name: kubevpn-chart.tar.gz-SHA256
+          asset_path: ${{ steps.get_assert_info_sha256.outputs.assert_name }}
+          asset_name: ${{ steps.get_assert_info_sha256.outputs.assert_name }}
           asset_content_type: application/octet-stream
+
+  github-pages-deploy:
+    name: Release Helm Chart To branch master
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    needs: release-helm-chart
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.20'
+          check-latest: true
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+      - name: Change chart version
+        run: |
+          VERSION=${GITHUB_REF#refs/*/}
+          CHART_VERSION=${VERSION/#v/}
+          sed -i "s/^appVersion:.*$/appVersion: \"${VERSION}\"/;s/^version:.*$/version: ${CHART_VERSION}/" charts/kubevpn/Chart.yaml
+          sed -i "s/tag:.*$/tag: \"${VERSION}\"/" charts/kubevpn/values.yaml
+      - name: Package and upload helm chart
+        run: |
+          # download helm chart releaser
+          curl -sSLo cr.tar.gz "https://github.com/helm/chart-releaser/releases/download/v1.6.1/chart-releaser_1.6.1_linux_amd64.tar.gz"
+          tar -xzf cr.tar.gz
+          rm -f cr.tar.gz
+          owner=$(cut -d '/' -f 1 <<< "$GITHUB_REPOSITORY")
+          repo=$(cut -d '/' -f 2 <<< "$GITHUB_REPOSITORY")
+          # package chart
+          ./cr package charts/$repo
+          # update index and push to github pages
+          git config user.email "$owner@users.noreply.github.com"
+          git config user.name "$owner"
+          ./cr index \
+              --owner "$owner" \
+              --git-repo "$repo" \
+              --token "${{ secrets.CREATE_HELM_PR }}" \
+              --release-name-template "v{{ .Version }}" \
+              --index-path ./index.yaml \
+              --charts-repo https://github.com/$owner/$repo \
+              --pages-branch master \
+              --pages-index-path charts/index.yaml \
+              --push
