@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubevpn.fullname" . }}
+  labels:
+    {{- include "kubevpn.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "kubevpn.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "kubevpn.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "kubevpn.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - args:
+            - |2-
+
+              sysctl -w net.ipv4.ip_forward=1
+              sysctl -w net.ipv6.conf.all.disable_ipv6=0
+              sysctl -w net.ipv6.conf.all.forwarding=1
+              update-alternatives --set iptables /usr/sbin/iptables-legacy
+              iptables -F
+              ip6tables -F
+              iptables -P INPUT ACCEPT
+              ip6tables -P INPUT ACCEPT
+              iptables -P FORWARD ACCEPT
+              ip6tables -P FORWARD ACCEPT
+              iptables -t nat -A POSTROUTING -s ${CIDR4} -o eth0 -j MASQUERADE
+              ip6tables -t nat -A POSTROUTING -s ${CIDR6} -o eth0 -j MASQUERADE
+              kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:10801" -L "gudp://:10802" --debug=true
+          command:
+            - /bin/sh
+            - -c
+          env:
+            - name: CIDR4
+              value: 223.254.0.0/16
+            - name: CIDR6
+              value: efff:ffff:ffff:ffff::/64
+            - name: TunIPv4
+              value: 223.254.0.100/16
+            - name: TunIPv6
+              value: efff:ffff:ffff:ffff:ffff:ffff:ffff:9999/64
+          envFrom:
+            - secretRef:
+                name: {{ include "kubevpn.fullname" . }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          name: vpn
+          ports:
+            - containerPort: {{ .Values.service.port8422 }}
+              name: 8422-for-udp
+              protocol: UDP
+            - containerPort: {{ .Values.service.port10800 }}
+              name: 10800-for-tcp
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+            privileged: true
+            runAsUser: 0
+        - args:
+            - control-plane
+            - --watchDirectoryFilename
+            - /etc/envoy/envoy-config.yaml
+          command:
+            - kubevpn
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          name: control-plane
+          ports:
+            - containerPort: {{ .Values.service.port9002 }}
+              name: 9002-for-envoy
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.resourcesSmall | nindent 12 }}
+          volumeMounts:
+            - mountPath: /etc/envoy
+              name: envoy-config
+              readOnly: true
+        - args:
+            - webhook
+          command:
+            - kubevpn
+          envFrom:
+            - secretRef:
+                name: {{ include "kubevpn.fullname" . }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          name: webhook
+          ports:
+            - containerPort: 80
+              name: 80-for-webhook
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.resourcesSmall | nindent 12 }}
+      {{- with .Values.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

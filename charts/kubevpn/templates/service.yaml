@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubevpn.fullname" . }}
+  labels:
+    {{- include "kubevpn.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: 8422-for-udp
+      port: {{ .Values.service.port8422 }}
+      protocol: UDP
+      targetPort: 8422
+    - name: 10800-for-tcp
+      port: {{ .Values.service.port10800 }}
+      protocol: TCP
+      targetPort: 10800
+    - name: 9002-for-envoy
+      port: {{ .Values.service.port9002 }}
+      protocol: TCP
+      targetPort: 9002
+    - name: 80-for-webhook
+      port: {{ .Values.service.port80 }}
+      protocol: TCP
+      targetPort: 80
+  selector:
+    {{- include "kubevpn.selectorLabels" . | nindent 4 }}

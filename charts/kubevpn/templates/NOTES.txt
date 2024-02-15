@@ -1,0 +1,4 @@
+1. Connect to cluster network by running these commands:
+  kubevpn connect --namespace {{ .Release.Namespace }}
+  export POD_IP=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "kubevpn.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].status.podIP}")
+  ping $POD_IP
