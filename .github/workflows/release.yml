@@ -193,6 +193,12 @@ jobs:
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
       - name: Install Helm
         uses: azure/setup-helm@v3
+      - name: Change chart version
+        run: |
+          VERSION=${GITHUB_REF#refs/*/}
+          CHART_VERSION=${VERSION/#v/}
+          sed -i "s/^appVersion:.*$/appVersion: \"${VERSION}\"/;s/^version:.*$/version: ${CHART_VERSION}/" charts/kubevpn/Chart.yaml
+          sed -i "s/tag:.*$/tag: \"${VERSION}\"/" charts/kubevpn/values.yaml
       - name: Package and upload helm chart
         run: |
           # download helm chart releaser
