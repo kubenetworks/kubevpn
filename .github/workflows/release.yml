@@ -134,20 +134,19 @@ jobs:
         run: |
           UploadUrl=$(cat ./UPLOAD_URL)
           echo "::set-output name=upload_url::$UploadUrl"
-      - name: Change chart version
-        id: change_chart_version
-        run: |
-          VERSION=${GITHUB_REF#refs/*/}
-          CHART_VERSION=${VERSION/#v/}
       - name: Get assert name
         id: get_assert_info
         run: |
-          AssertName=kubevpn-${{ steps.change_chart_version.outputs.CHART_VERSION }}.tgz
+          VERSION=${GITHUB_REF#refs/*/}
+          CHART_VERSION=${VERSION/#v/}
+          AssertName=kubevpn-${CHART_VERSION}.tgz
           echo "::set-output name=assert_name::$AssertName"
       - name: Get assert SHA256 name
         id: get_assert_info_sha256
         run: |
-          AssertName=kubevpn-${{ steps.change_chart_version.outputs.CHART_VERSION }}.tgz-SHA256
+          VERSION=${GITHUB_REF#refs/*/}
+          CHART_VERSION=${VERSION/#v/}
+          AssertName=kubevpn-${CHART_VERSION}.tgz-SHA256
           echo "::set-output name=assert_name::$AssertName"
       - name: Upload Release Asset KubeVPN Server Chart
         uses: actions/upload-release-asset@v1
