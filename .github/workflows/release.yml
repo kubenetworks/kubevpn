@@ -154,9 +154,11 @@ jobs:
           asset_content_type: application/octet-stream
 
   github-pages-deploy:
+    name: Release KubeVPN Helm Chart To Github branch
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     needs: build
     steps:
