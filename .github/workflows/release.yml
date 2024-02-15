@@ -143,3 +143,17 @@ jobs:
           asset_path: kubevpn-chart.tar.gz-SHA256
           asset_name: kubevpn-chart.tar.gz-SHA256
           asset_content_type: application/octet-stream
+
+  github-pages-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1.6.0
+        with:
+          charts_dir: charts
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
