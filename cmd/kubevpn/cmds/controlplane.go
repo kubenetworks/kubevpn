@@ -20,10 +20,11 @@ func CmdControlPlane(_ cmdutil.Factory) *cobra.Command {
 		Hidden: true,
 		Short:  "Control-plane is a envoy xds server",
 		Long:   `Control-plane is a envoy xds server, distribute envoy route configuration`,
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			util.InitLoggerForServer(config.Debug)
 			go util.StartupPProf(0)
-			controlplane.Main(watchDirectoryFilename, port, log.StandardLogger())
+			err := controlplane.Main(cmd.Context(), watchDirectoryFilename, port, log.StandardLogger())
+			return err
 		},
 	}
 	cmd.Flags().StringVarP(&watchDirectoryFilename, "watchDirectoryFilename", "w", "/etc/envoy/envoy-config.yaml", "full path to directory to watch for files")

@@ -44,11 +44,11 @@ func (p *Processor) newVersion() string {
 	return strconv.FormatInt(p.version, 10)
 }
 
-func (p *Processor) ProcessFile(file NotifyMessage) {
+func (p *Processor) ProcessFile(file NotifyMessage) error {
 	configList, err := ParseYaml(file.FilePath)
 	if err != nil {
 		p.logger.Errorf("error parsing yaml file: %+v", err)
-		return
+		return err
 	}
 	for _, config := range configList {
 		if len(config.Uid) == 0 {
@@ -76,21 +76,22 @@ func (p *Processor) ProcessFile(file NotifyMessage) {
 
 		if err != nil {
 			p.logger.Errorf("snapshot inconsistency: %v, err: %v", snapshot, err)
-			return
+			return err
 		}
 
 		if err = snapshot.Consistent(); err != nil {
 			p.logger.Errorf("snapshot inconsistency: %v, err: %v", snapshot, err)
-			return
+			return err
 		}
 		p.logger.Debugf("will serve snapshot %+v, nodeID: %s", snapshot, config.Uid)
 		if err = p.cache.SetSnapshot(context.Background(), config.Uid, snapshot); err != nil {
 			p.logger.Errorf("snapshot error %q for %v", err, snapshot)
-			p.logger.Fatal(err)
+			return err
 		}
 
 		p.expireCache.Set(config.Uid, config, time.Minute*5)
 	}
+	return nil
 }
 
 func ParseYaml(file string) ([]*Virtual, error) {

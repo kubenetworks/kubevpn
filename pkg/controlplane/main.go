@@ -10,14 +10,15 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func Main(filename string, port uint, logger *log.Logger) {
+func Main(ctx context.Context, filename string, port uint, logger *log.Logger) error {
 	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, logger)
 	proc := NewProcessor(snapshotCache, logger)
 
+	errChan := make(chan error, 2)
+
 	go func() {
-		ctx := context.Background()
 		server := serverv3.NewServer(ctx, snapshotCache, nil)
-		RunServer(ctx, server, port)
+		errChan <- RunServer(ctx, server, port)
 	}()
 
 	notifyCh := make(chan NotifyMessage, 100)
@@ -29,20 +30,29 @@ func Main(filename string, port uint, logger *log.Logger) {
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		log.Fatal(fmt.Errorf("failed to create file watcher, err: %v", err))
+		return fmt.Errorf("failed to create file watcher: %v", err)
 	}
 	defer watcher.Close()
-	if err = watcher.Add(filename); err != nil {
-		log.Fatal(fmt.Errorf("failed to add file: %s to wather, err: %v", filename, err))
+	err = watcher.Add(filename)
+	if err != nil {
+		return fmt.Errorf("failed to add file: %s to wather: %v", filename, err)
 	}
 	go func() {
-		log.Fatal(Watch(watcher, filename, notifyCh))
+		errChan <- Watch(watcher, filename, notifyCh)
 	}()
 
 	for {
 		select {
 		case msg := <-notifyCh:
-			proc.ProcessFile(msg)
+			err = proc.ProcessFile(msg)
+			if err != nil {
+				log.Errorf("failed to process file: %v", err)
+				return err
+			}
+		case err = <-errChan:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }

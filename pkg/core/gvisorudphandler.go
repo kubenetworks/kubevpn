@@ -125,7 +125,7 @@ func GvisorUDPListener(addr string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &tcpKeepAliveListener{ln}, nil
+	return &tcpKeepAliveListener{TCPListener: ln}, nil
 }
 
 func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {

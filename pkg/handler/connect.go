@@ -29,7 +29,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/metadata"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -684,29 +683,31 @@ func (c *ConnectOptions) setupDNS(ctx context.Context, lite bool) error {
 }
 
 func Run(ctx context.Context, servers []core.Server) error {
-	group, ctx := errgroup.WithContext(ctx)
+	errChan := make(chan error, len(servers))
 	for i := range servers {
-		i := i
-		group.Go(func() error {
-			l := servers[i].Listener
-			defer l.Close()
-			for {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
+		go func(i int) {
+			errChan <- func() error {
+				svr := servers[i]
+				defer svr.Listener.Close()
+				for ctx.Err() == nil {
+					conn, err := svr.Listener.Accept()
+					if err != nil {
+						log.Debugf("server accept connect error: %v", err)
+						return err
+					}
+					go svr.Handler.Handle(ctx, conn)
 				}
-
-				conn, errs := l.Accept()
-				if errs != nil {
-					log.Debugf("server accept connect error: %v", errs)
-					continue
-				}
-				go servers[i].Handler.Handle(ctx, conn)
-			}
-		})
+				return ctx.Err()
+			}()
+		}(i)
 	}
-	return group.Wait()
+
+	select {
+	case err := <-errChan:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func Parse(r core.Route) ([]core.Server, error) {

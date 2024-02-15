@@ -27,7 +27,7 @@ func TCPListener(addr string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &tcpKeepAliveListener{ln}, nil
+	return &tcpKeepAliveListener{TCPListener: ln}, nil
 }
 
 type tcpKeepAliveListener struct {
