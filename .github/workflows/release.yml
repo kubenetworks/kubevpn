@@ -215,10 +215,10 @@ jobs:
           ./cr index \
               --owner "$owner" \
               --git-repo "$repo" \
-              --token "${{ secrets.GITHUB_TOKEN }}" \
+              --token "${{ secrets.CREATE_HELM_PR }}" \
               --release-name-template "v{{ .Version }}" \
               --index-path ./index.yaml \
               --charts-repo https://github.com/$owner/$repo \
-              --pages-branch gh-pages \
+              --pages-branch master \
               --pages-index-path charts/index.yaml \
               --push
