@@ -156,7 +156,7 @@ jobs:
   github-pages-deploy:
     name: Release KubeVPN Helm Chart To Github branch
     environment:
-      name: github-pages
+      name: gh-pages
     permissions:
       contents: write
     runs-on: ubuntu-latest
