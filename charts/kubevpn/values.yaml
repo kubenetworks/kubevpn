@@ -8,7 +8,7 @@ image:
   repository: naison/kubevpn
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: v2.2.1
+  tag: ""
 
 imagePullSecrets: [ ]
 nameOverride: ""
