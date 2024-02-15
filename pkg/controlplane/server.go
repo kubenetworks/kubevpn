@@ -21,13 +21,13 @@ const (
 	grpcMaxConcurrentStreams = 1000000
 )
 
-func RunServer(ctx context.Context, server serverv3.Server, port uint) {
+func RunServer(ctx context.Context, server serverv3.Server, port uint) error {
 	grpcServer := grpc.NewServer(grpc.MaxConcurrentStreams(grpcMaxConcurrentStreams))
 
 	var lc net.ListenConfig
 	listener, err := lc.Listen(ctx, "tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	discoverygrpc.RegisterAggregatedDiscoveryServiceServer(grpcServer, server)
@@ -39,7 +39,5 @@ func RunServer(ctx context.Context, server serverv3.Server, port uint) {
 	runtimeservice.RegisterRuntimeDiscoveryServiceServer(grpcServer, server)
 
 	log.Infof("management server listening on %d", port)
-	if err = grpcServer.Serve(listener); err != nil {
-		log.Fatal(err)
-	}
+	return grpcServer.Serve(listener)
 }

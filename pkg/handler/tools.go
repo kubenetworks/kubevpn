@@ -31,7 +31,8 @@ func Complete(ctx context.Context, route *core.Route) error {
 	if err != nil {
 		return err
 	}
-	resp, err := client.RentIP(context.Background(), &rpc.RentIPRequest{
+	var resp *rpc.RentIPResponse
+	resp, err = client.RentIP(context.Background(), &rpc.RentIPRequest{
 		PodName:      os.Getenv(config.EnvPodName),
 		PodNamespace: ns,
 	})
@@ -44,6 +45,8 @@ func Complete(ctx context.Context, route *core.Route) error {
 		err := release(context.Background(), client)
 		if err != nil {
 			log.Errorf("release ip failed: %v", err)
+		} else {
+			log.Errorf("release ip secuess")
 		}
 	}()
 
@@ -57,7 +60,8 @@ func Complete(ctx context.Context, route *core.Route) error {
 		return err
 	}
 	for i := 0; i < len(route.ServeNodes); i++ {
-		node, err := core.ParseNode(route.ServeNodes[i])
+		var node *core.Node
+		node, err = core.ParseNode(route.ServeNodes[i])
 		if err != nil {
 			return err
 		}

@@ -142,8 +142,8 @@ func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
 	}
 }
 
-func (h tunHandler) printRoute() {
-	for {
+func (h *tunHandler) printRoute(ctx context.Context) {
+	for ctx.Err() == nil {
 		select {
 		case <-time.Tick(time.Second * 5):
 			var i int
@@ -370,7 +370,7 @@ func (d *Device) SetTunInboundHandler(handler func(tunInbound <-chan *DataElem, 
 }
 
 func (h *tunHandler) HandleServer(ctx context.Context, tun net.Conn) {
-	go h.printRoute()
+	go h.printRoute(ctx)
 
 	device := &Device{
 		tun:           tun,
