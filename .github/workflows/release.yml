@@ -219,6 +219,6 @@ jobs:
               --release-name-template "v{{ .Version }}" \
               --index-path ./index.yaml \
               --charts-repo https://github.com/$owner/$repo \
-              --pages-branch master \
+              --pages-branch gh-pages \
               --pages-index-path charts/index.yaml \
-              --pr \
+              --push
