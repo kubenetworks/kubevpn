@@ -6,7 +6,7 @@ metadata:
     {{- include "kubevpn.labels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": post-install
-    "helm.sh/hook-delete-policy": hook-succeeded
+    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   template:
     metadata:
@@ -36,12 +36,11 @@ spec:
               kubectl label ns {{ .Release.Namespace }} ns={{ .Release.Namespace }}
 
               echo "Generating https certificate"
-              openssl req -x509 -nodes -days 36500 -newkey rsa:2048 -subj "/CN=*.{{ .Release.Namespace }}.svc.cluster.local" -addext "subjectAltName=DNS:{{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }}.svc" -keyout server.key -out server.crt
+              openssl req -x509 -nodes -days 36500 -newkey rsa:2048 -subj "/CN={{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }}.svc" -addext "subjectAltName=DNS:{{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local,DNS:{{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }}.svc" -keyout server.key -out server.crt
 
               export TLS_CRT=$(cat server.crt | base64 | tr -d '\n')
               echo "Patch mutatingwebhookconfigurations {{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }}"
               kubectl patch mutatingwebhookconfigurations {{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }} -p "{\"webhooks\":[{\"name\":\"{{ include "kubevpn.fullname" . }}.naison.io\",\"sideEffects\":\"None\",\"admissionReviewVersions\":[\"v1\", \"v1beta1\"],\"clientConfig\":{\"service\":{\"namespace\":\"{{ .Release.Namespace }}\",\"name\":\"{{ include "kubevpn.fullname" . }}\"},\"caBundle\":\"$TLS_CRT\"}}]}"
-
 
               export TLS_KEY=$(cat server.key | base64 | tr -d '\n')
               echo "Patch secret {{ include "kubevpn.fullname" . }}"
