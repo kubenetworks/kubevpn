@@ -134,6 +134,10 @@ jobs:
         run: |
           UploadUrl=$(cat ./UPLOAD_URL)
           echo "::set-output name=upload_url::$UploadUrl"
+      - name: Change chart version
+        run: |
+          VERSION=${GITHUB_REF#refs/*/}
+          CHART_VERSION=${VERSION/#v/}
       - name: Get assert name
         id: get_assert_info
         run: |
@@ -190,7 +194,7 @@ jobs:
       - name: Package and upload helm chart
         run: |
           # download helm chart releaser
-          curl -sSLo cr.tar.gz "https://github.com/helm/chart-releaser/releases/download/v1.2.1/chart-releaser_1.2.1_linux_amd64.tar.gz"
+          curl -sSLo cr.tar.gz "https://github.com/helm/chart-releaser/releases/download/v1.6.1/chart-releaser_1.6.1_linux_amd64.tar.gz"
           tar -xzf cr.tar.gz
           rm -f cr.tar.gz
           owner=$(cut -d '/' -f 1 <<< "$GITHUB_REPOSITORY")
