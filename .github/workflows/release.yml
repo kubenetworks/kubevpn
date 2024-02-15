@@ -95,13 +95,51 @@ jobs:
           labels: |
             report
             automated pr
-#          team-reviewers: |
-#            owners
-#            maintainers
           draft: false
 
-#      - name: Update new version in krew-index
-#        uses: rajatjindal/krew-release-bot@v0.0.43
-#        with:
-#          krew_template_file: .github/krew.yaml
-#          debug: true
+  release-helm-chart:
+    name: Release KubeVPN Helm Chart
+    needs: [ build ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Helm tool installer
+        uses: Azure/setup-helm@v1
+        with:
+          version: "v3.6.3"
+      - name: Change chart version
+        run: |
+          VERSION=${GITHUB_REF#refs/*/}
+          CHART_VERSION=${VERSION/#v/}
+          sed -i "s/^appVersion:.*$/appVersion: \"${VERSION}\"/;s/^version:.*$/version: ${CHART_VERSION}/" charts/kubevpn/Chart.yaml
+          sed -i "s/tag:.*$/tag: \"${VERSION}\"/" charts/kubevpn/values.yaml
+      - name: Tar chart
+        run: |
+          tar --transform 's/^charts\/kubevpn/kubevpn/' -zcf kubevpn-chart.tar.gz charts/kubevpn
+          shasum -a 256 kubevpn-chart.tar.gz | awk '{print $1}' > kubevpn-chart.tar.gz-SHA256
+      - name: Download UPLOAD_URL
+        uses: actions/download-artifact@v2
+        with:
+          name: UPLOAD_URL
+      - name: Get Release UPLOAD_URL
+        id: get_release_info
+        run: |
+          UploadUrl=$(cat ./UPLOAD_URL)
+          echo "::set-output name=upload_url::$UploadUrl"
+      - name: Upload Release Asset KubeVPN Server Chart
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.get_release_info.outputs.upload_url }}
+          asset_path: kubevpn-chart.tar.gz
+          asset_name: kubevpn-chart.tar.gz
+          asset_content_type: application/octet-stream
+      - name: Upload Release Asset KubeVPN Chart SHA256
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.get_release_info.outputs.upload_url }}
+          asset_path: kubevpn-chart.tar.gz-SHA256
+          asset_name: kubevpn-chart.tar.gz-SHA256
+          asset_content_type: application/octet-stream
