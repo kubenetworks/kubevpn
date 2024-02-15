@@ -170,9 +170,7 @@ jobs:
           asset_content_type: application/octet-stream
 
   github-pages-deploy:
-    name: Release Helm Chart To branch gh-pages
-    environment:
-      name: gh-pages
+    name: Release Helm Chart To branch master
     permissions:
       contents: write
     runs-on: ubuntu-latest
