@@ -123,6 +123,8 @@ jobs:
           sed -i "s/tag:.*$/tag: \"${VERSION}\"/" charts/kubevpn/values.yaml
       - name: Tar chart
         run: |
+          VERSION=${GITHUB_REF#refs/*/}
+          CHART_VERSION=${VERSION/#v/}
           tar --transform 's/^charts\/kubevpn/kubevpn/' -zcf kubevpn-${CHART_VERSION}.tgz charts/kubevpn
           shasum -a 256 kubevpn-${CHART_VERSION}.tgz | awk '{print $1}' > kubevpn-${CHART_VERSION}.tgz-SHA256
       - name: Download UPLOAD_URL
