@@ -3,7 +3,7 @@ kind: Plugin
 metadata:
   name: kubevpn
 spec:
-  version: v2.2.1
+  version: v2.2.2
   homepage: https://github.com/kubenetworks/kubevpn
   shortDescription: "A vpn tunnel tools which can connect to kubernetes cluster network"
   description: |
@@ -17,8 +17,8 @@ spec:
       matchLabels:
         os: windows
         arch: amd64
-    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.1/kubevpn_v2.2.1_windows_amd64.zip
-    sha256: 5b0b8cb653c83646b660f8a3bca33b75df0873962cf5ea4da992dc3d7fcacf2c
+    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.2/kubevpn_v2.2.2_windows_amd64.zip
+    sha256: d8fabdde30ba2f7a0fc3c232804f7a6b50e4424e40583165bf1e4a07606c1d8e
     files:
       - from: ./bin/kubevpn.exe
         to: .
@@ -29,8 +29,8 @@ spec:
       matchLabels:
         os: windows
         arch: arm64
-    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.1/kubevpn_v2.2.1_windows_arm64.zip
-    sha256: 84a87d341a92afe76e3cab8e2cdbb4aafcaeb5594df00bceda8ae3f895939db4
+    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.2/kubevpn_v2.2.2_windows_arm64.zip
+    sha256: 76e8e2ab7aae615752dcb227ca60101823aa90837b32e146f58248ffcd0e701f
     files:
       - from: ./bin/kubevpn.exe
         to: .
@@ -41,8 +41,8 @@ spec:
       matchLabels:
         os: windows
         arch: 386
-    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.1/kubevpn_v2.2.1_windows_386.zip
-    sha256: a6cc3b3c520679d2da5e486504485dcd7a1cf25f04b3f71b569f3b288037f2b7
+    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.2/kubevpn_v2.2.2_windows_386.zip
+    sha256: 266e763cafbd121072c4a53c5d1f823e2ceedd6683066d2d885a1af5e517cbdb
     files:
       - from: ./bin/kubevpn.exe
         to: .
@@ -53,8 +53,8 @@ spec:
       matchLabels:
         os: linux
         arch: amd64
-    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.1/kubevpn_v2.2.1_linux_amd64.zip
-    sha256: 6406bf5a902ffb76873d0f04998b3424f23a3dcc455cfd156900e674535b262a
+    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.2/kubevpn_v2.2.2_linux_amd64.zip
+    sha256: 556ca0def290a6bc8d042e9b5c61f81b767e0399939f96c014bbc3d5217a3ce6
     files:
       - from: ./bin/kubevpn
         to: .
@@ -65,8 +65,8 @@ spec:
       matchLabels:
         os: linux
         arch: arm64
-    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.1/kubevpn_v2.2.1_linux_arm64.zip
-    sha256: f7ad48ee32b3432d708c046020c302a638b196aad2acd5270f7cf2c9f6922203
+    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.2/kubevpn_v2.2.2_linux_arm64.zip
+    sha256: fd50293501e648b4a250acb889017bb63dc63cc8550449b7644958ca461c23ce
     files:
       - from: ./bin/kubevpn
         to: .
@@ -77,8 +77,8 @@ spec:
       matchLabels:
         os: linux
         arch: 386
-    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.1/kubevpn_v2.2.1_linux_386.zip
-    sha256: fd8e9861c054626e631e1fa6c82a6776c5a7729d99a536f7d14c5b322e67e5be
+    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.2/kubevpn_v2.2.2_linux_386.zip
+    sha256: 5fa978f60fcf5dba3d238cace70f3ae1cc0ea65c43c221fa934958c6d7313c96
     files:
       - from: ./bin/kubevpn
         to: .
@@ -89,8 +89,8 @@ spec:
       matchLabels:
         os: darwin
         arch: amd64
-    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.1/kubevpn_v2.2.1_darwin_amd64.zip
-    sha256: 8bd2825664be8fa9b1ce3ceb244c24003c2ce7fbe9dd953a5715f6eb030990e6
+    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.2/kubevpn_v2.2.2_darwin_amd64.zip
+    sha256: 04b3d75e7fe0a7e5deeff33bddc90c243e003f853a495a3dac12919d8410a98c
     files:
       - from: ./bin/kubevpn
         to: .
@@ -101,8 +101,8 @@ spec:
       matchLabels:
         os: darwin
         arch: arm64
-    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.1/kubevpn_v2.2.1_darwin_arm64.zip
-    sha256: b2a5e16af2538a29122540dae7ebb2bc2b082f7d746f555ed2ce9962afd8d6c2
+    uri: https://github.com/kubenetworks/kubevpn/releases/download/v2.2.2/kubevpn_v2.2.2_darwin_arm64.zip
+    sha256: 7bfe06b51be92f8ad85bb6eb3c689957257ed8c482a42dab0c0bc5d7edc6d528
     files:
       - from: ./bin/kubevpn
         to: .
