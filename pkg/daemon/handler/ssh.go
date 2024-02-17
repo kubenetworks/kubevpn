@@ -82,7 +82,7 @@ func (w *wsHandler) handle(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	err = util.PortMapUntil(ctx, cli, remote, local)
+	err = util.PortMapUntil(ctx, w.sshConfig, remote, local)
 	if err != nil {
 		w.Log("Port map error: %v", err)
 		return
