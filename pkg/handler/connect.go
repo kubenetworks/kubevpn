@@ -893,7 +893,7 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 	if print {
 		log.Infof("wait jump to bastion host...")
 	}
-	err = util.PortMapUntil(ctx, cli, remote, local)
+	err = util.PortMapUntil(ctx, conf, remote, local)
 	if err != nil {
 		log.Errorf("ssh proxy err: %v", err)
 		return
