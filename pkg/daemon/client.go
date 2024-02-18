@@ -139,14 +139,14 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 		if pid, err = strconv.Atoi(strings.TrimSpace(string(file))); err == nil {
 			var p *os.Process
 			if p, err = os.FindProcess(pid); err == nil {
-				if err = p.Kill(); err != nil && err != os.ErrProcessDone {
+				if err = p.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 					log.Error("kill process", "err", err)
 				}
 				_, _ = p.Wait()
 			}
 		}
 		err = os.Remove(pidPath)
-		if err != nil {
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
