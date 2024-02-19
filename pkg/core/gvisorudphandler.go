@@ -143,6 +143,12 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 			default:
 			}
 
+			err := tcpConn.SetReadDeadline(time.Now().Add(time.Second * 30))
+			if err != nil {
+				log.Debugf("[TUN-UDP] Error: set read deadline failed: %v", err)
+				errChan <- err
+				return
+			}
 			dgram, err := readDatagramPacket(tcpConn, b[:])
 			if err != nil {
 				log.Debugf("[TUN-UDP] Debug: %s -> 0 : %v", tcpConn.RemoteAddr(), err)
@@ -155,6 +161,12 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				return
 			}
 
+			err = udpConn.SetWriteDeadline(time.Now().Add(time.Second * 30))
+			if err != nil {
+				log.Debugf("[TUN-UDP] Error: set write deadline failed: %v", err)
+				errChan <- err
+				return
+			}
 			if _, err = udpConn.Write(dgram.Data); err != nil {
 				log.Debugf("[TUN-UDP] Error: %s -> %s : %s", tcpConn.RemoteAddr(), "localhost:8422", err)
 				errChan <- err
@@ -175,6 +187,12 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 			default:
 			}
 
+			err := udpConn.SetReadDeadline(time.Now().Add(time.Second * 30))
+			if err != nil {
+				log.Debugf("[TUN-UDP] Error: set read deadline failed: %v", err)
+				errChan <- err
+				return
+			}
 			n, _, err := udpConn.ReadFrom(b[:])
 			if err != nil {
 				log.Debugf("[TUN-UDP] Error: %s : %s", tcpConn.RemoteAddr(), err)
@@ -188,6 +206,12 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 			}
 
 			// pipe from peer to tunnel
+			err = tcpConn.SetWriteDeadline(time.Now().Add(time.Second * 30))
+			if err != nil {
+				log.Debugf("[TUN-UDP] Error: set write deadline failed: %v", err)
+				errChan <- err
+				return
+			}
 			dgram := newDatagramPacket(b[:n])
 			if err = dgram.Write(tcpConn); err != nil {
 				log.Debugf("[TUN-UDP] Error: %s <- %s : %s", tcpConn.RemoteAddr(), dgram.Addr(), err)
