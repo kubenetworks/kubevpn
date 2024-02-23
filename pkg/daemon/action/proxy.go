@@ -35,6 +35,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 	connect := &handler.ConnectOptions{
 		Namespace:            req.Namespace,
 		Headers:              req.Headers,
+		PortMap:              req.PortMap,
 		Workloads:            req.Workloads,
 		ExtraCIDR:            req.ExtraCIDR,
 		ExtraDomain:          req.ExtraDomain,

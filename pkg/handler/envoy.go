@@ -32,7 +32,7 @@ import (
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
 
 // InjectVPNAndEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
-func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workload string, c util.PodRouteConfig, headers map[string]string) (err error) {
+func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workload string, c util.PodRouteConfig, headers map[string]string, portMaps []string) (err error) {
 	var object *runtimeresource.Info
 	object, err = util.GetUnstructuredObject(factory, namespace, workload)
 	if err != nil {
@@ -49,13 +49,35 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 
 	origin := templateSpec.DeepCopy()
 
-	var port []v1.ContainerPort
+	var ports []v1.ContainerPort
 	for _, container := range templateSpec.Spec.Containers {
-		port = append(port, container.Ports...)
+		ports = append(ports, container.Ports...)
 	}
+	var findFunc = func(ports []v1.ContainerPort, port int32) int {
+		for i, p := range ports {
+			if p.ContainerPort == port {
+				return i
+			}
+		}
+		return -1
+	}
+	for _, portMap := range portMaps {
+		port := util.ParsePort(portMap)
+		if index := findFunc(ports, port.ContainerPort); index != -1 {
+			ports[index].HostPort = port.HostPort
+		} else {
+			ports = append(ports, port)
+		}
+	}
+	for i := 0; i < len(ports); i++ {
+		if ports[i].HostPort == 0 {
+			ports[i].HostPort = ports[i].ContainerPort
+		}
+	}
+
 	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 
-	err = addEnvoyConfig(clientset, nodeID, c, headers, port)
+	err = addEnvoyConfig(clientset, nodeID, c, headers, ports)
 	if err != nil {
 		log.Errorf("add envoy config error: %v", err)
 		return err

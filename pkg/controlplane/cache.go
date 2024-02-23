@@ -57,7 +57,7 @@ func (a *Virtual) To() (
 			for _, ip := range []string{rule.LocalTunIPv4, rule.LocalTunIPv6} {
 				clusterName := fmt.Sprintf("%s_%v", ip, port.ContainerPort)
 				clusters = append(clusters, ToCluster(clusterName))
-				endpoints = append(endpoints, ToEndPoint(clusterName, ip, port.ContainerPort))
+				endpoints = append(endpoints, ToEndPoint(clusterName, ip, port.HostPort))
 				rr = append(rr, ToRoute(clusterName, rule.Headers))
 			}
 		}

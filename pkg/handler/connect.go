@@ -71,6 +71,7 @@ import (
 type ConnectOptions struct {
 	Namespace            string
 	Headers              map[string]string
+	PortMap              []string
 	Workloads            []string
 	ExtraCIDR            []string
 	ExtraDomain          []string
@@ -167,7 +168,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error)
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
 		if len(c.Headers) != 0 {
-			err = InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers)
+			err = InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers, c.PortMap)
 		} else {
 			err = InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, configInfo)
 		}

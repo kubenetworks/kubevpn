@@ -62,6 +62,18 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
         kubevpn proxy service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
         kubevpn proxy service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
         kubevpn proxy service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
+
+		# Support port map, you can proxy container port to local port by command:
+		kubevpn proxy deployment/productpage --portmap 80:8080
+		
+		# Proxy container port 9080 to local port 8080 of TCP protocol
+		kubevpn proxy deployment/productpage --portmap 9080:8080
+
+		# Proxy container port 9080 to local port 5000 of UDP protocol
+		kubevpn proxy deployment/productpage --portmap udp/9080:5000
+
+		# Auto proxy container port to same local port, and auto detect protocol
+		kubevpn proxy deployment/productpage
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			if err = daemon.StartupDaemon(cmd.Context()); err != nil {
@@ -100,6 +112,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 					KubeconfigBytes:      string(bytes),
 					Namespace:            ns,
 					Headers:              connect.Headers,
+					PortMap:              connect.PortMap,
 					Workloads:            args,
 					ExtraCIDR:            connect.ExtraCIDR,
 					ExtraDomain:          connect.ExtraDomain,
@@ -154,6 +167,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to local PC, If not special, redirect all traffic to local PC. eg: --headers a=1 --headers b=2")
+	cmd.Flags().StringArrayVar(&connect.PortMap, "portmap", []string{}, "Port map, map container port to local port, format: [tcp/udp]/containerPort:localPort, If not special, localPort will use containerPort. eg: tcp/80:8080 or udp/5000:5001 or 80 or 80:8080")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
 	cmd.Flags().StringArrayVar(&connect.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")

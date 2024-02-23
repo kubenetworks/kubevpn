@@ -58,6 +58,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	svr.connect = &handler.ConnectOptions{
 		Namespace:            req.Namespace,
 		Headers:              req.Headers,
+		PortMap:              req.PortMap,
 		Workloads:            req.Workloads,
 		ExtraCIDR:            req.ExtraCIDR,
 		ExtraDomain:          req.ExtraDomain,
@@ -130,6 +131,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	connect := &handler.ConnectOptions{
 		Namespace:            req.Namespace,
 		Headers:              req.Headers,
+		PortMap:              req.PortMap,
 		Workloads:            req.Workloads,
 		ExtraCIDR:            req.ExtraCIDR,
 		ExtraDomain:          req.ExtraDomain,
