@@ -20,6 +20,10 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       restartPolicy: Never
       serviceAccountName: {{ include "kubevpn.serviceAccountName" . }}
       containers:
@@ -27,7 +31,7 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
-            - /bin/sh
+            - /bin/bash
             - -c
           args:
             - |2-
@@ -49,4 +53,20 @@ spec:
               echo "Restart the pods..."
               kubectl scale -n {{ .Release.Namespace }} --replicas=0 deployment/{{ include "kubevpn.fullname" . }}
               kubectl scale -n {{ .Release.Namespace }} --replicas=1 deployment/{{ include "kubevpn.fullname" . }}
+
+              export POOLS=$(kubectl get cm {{ include "kubevpn.fullname" . }} -n {{ .Release.Namespace }} -o jsonpath='{.data.IPv4_POOLS}')
+              if [[ -z "${POOLS// }" ]];then
+                echo "Cidr is empty"
+                echo "Get pod cidr..."
+                export POD_CIDR=$(kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}' | tr -s '\n' ' ')
+                echo "Get service cidr..."
+                export SVC_CIDR=$(echo '{"apiVersion":"v1","kind":"Service","metadata":{"name":"kubevpn-get-svc-cidr-{{ .Release.Namespace }}", "namespace": "{{ .Release.Namespace }}"},"spec":{"clusterIP":"1.1.1.1","ports":[{"port":443}]}}' | kubectl apply -f - 2>&1 | sed 's/.*valid IPs is //')
+                echo "Pod cidr: $POD_CIDR, service cidr: $SVC_CIDR"
+                echo "Patch configmap {{ include "kubevpn.fullname" . }}"
+                kubectl patch configmap {{ include "kubevpn.fullname" . }} -n {{ .Release.Namespace }} -p "{\"data\":{\"IPv4_POOLS\":\"$POD_CIDR $SVC_CIDR\"}}"
+              else
+                echo "Cidr is NOT empty"
+              fi
+
+              echo "Done~"
               exit 0
