@@ -2,20 +2,22 @@ package cmds
 
 import (
 	"fmt"
+	"io"
 	"os"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func CmdReset(factory cmdutil.Factory) *cobra.Command {
-	var connect = handler.ConnectOptions{}
+func CmdReset(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "reset",
@@ -43,28 +45,38 @@ func CmdReset(factory cmdutil.Factory) *cobra.Command {
         kubevpn reset --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return handler.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false)
+			return daemon.StartupDaemon(cmd.Context())
 		},
-		Run: func(cmd *cobra.Command, args []string) {
-			util.InitLogger(false)
-			if err := connect.InitClient(factory); err != nil {
-				log.Fatal(err)
-			}
-			_ = quit(cmd.Context(), true)
-			_ = quit(cmd.Context(), false)
-			err := connect.Reset(cmd.Context())
+		RunE: func(cmd *cobra.Command, args []string) error {
+			bytes, ns, err := util.ConvertToKubeconfigBytes(f)
 			if err != nil {
-				log.Fatal(err)
+				return err
 			}
-			fmt.Fprint(os.Stdout, "done")
+			req := &rpc.ResetRequest{
+				KubeconfigBytes: string(bytes),
+				Namespace:       ns,
+				SshJump:         sshConf.ToRPC(),
+			}
+			cli := daemon.GetClient(false)
+			resp, err := cli.Reset(cmd.Context(), req)
+			if err != nil {
+				return err
+			}
+			for {
+				recv, err := resp.Recv()
+				if err == io.EOF {
+					break
+				} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
+					return nil
+				} else if err != nil {
+					return err
+				}
+				fmt.Fprint(os.Stdout, recv.GetMessage())
+			}
+			return nil
 		},
 	}
 
-	// for ssh jumper host
-	cmd.Flags().StringVar(&sshConf.Addr, "ssh-addr", "", "Optional ssh jump server address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
-	cmd.Flags().StringVar(&sshConf.User, "ssh-username", "", "Optional username for ssh jump server")
-	cmd.Flags().StringVar(&sshConf.Password, "ssh-password", "", "Optional password for ssh jump server")
-	cmd.Flags().StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "Optional file with private key for SSH authentication")
-	cmd.Flags().StringVar(&sshConf.ConfigAlias, "ssh-alias", "", "Optional config alias with ~/.ssh/config for SSH authentication")
+	addSshFlags(cmd, sshConf)
 	return cmd
 }

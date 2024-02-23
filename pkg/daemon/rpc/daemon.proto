@@ -25,6 +25,7 @@ service Daemon {
   rpc Upgrade (UpgradeRequest) returns (UpgradeResponse) {}
   rpc Status (StatusRequest) returns (StatusResponse) {}
   rpc Version (VersionRequest) returns (VersionResponse) {}
+  rpc Reset (ResetRequest) returns (stream ResetResponse) {}
   rpc Quit (QuitRequest) returns (stream QuitResponse) {}
 }
 
@@ -220,6 +221,17 @@ message UpgradeRequest {
 
 message UpgradeResponse {
   bool NeedUpgrade = 1;
+}
+
+message ResetRequest {
+  string KubeconfigBytes = 1;
+  string Namespace = 2;
+  // ssh jump
+  SshJump SshJump = 3;
+}
+
+message ResetResponse {
+  string message = 1;
 }
 
 message SshJump {
