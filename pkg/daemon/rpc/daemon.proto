@@ -32,25 +32,26 @@ message ConnectRequest {
   string KubeconfigBytes = 1;
   string Namespace = 2;
   map<string, string> Headers = 3;
-  repeated string Workloads = 4;
-  repeated string ExtraCIDR = 5;
-  repeated string ExtraDomain = 6;
-  bool UseLocalDNS = 7;
-  string Engine = 8;
+  repeated string PortMap = 4;
+  repeated string Workloads = 5;
+  repeated string ExtraCIDR = 6;
+  repeated string ExtraDomain = 7;
+  bool UseLocalDNS = 8;
+  string Engine = 9;
   // ssh jump
-  SshJump SshJump = 9;
+  SshJump SshJump = 10;
 
   // transfer image
-  bool TransferImage = 10;
-  string Image = 11;
+  bool TransferImage = 11;
+  string Image = 12;
 
   // foreground
-  bool Foreground = 12;
+  bool Foreground = 13;
 
   // log level
-  int32 Level = 13;
+  int32 Level = 14;
 
-  string OriginKubeconfigPath = 14;
+  string OriginKubeconfigPath = 15;
 }
 
 message ConnectResponse {
