@@ -21,7 +21,6 @@ import (
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (c *ConnectOptions) addCleanUpResourceHandler() {
@@ -87,7 +86,6 @@ func (c *ConnectOptions) Cleanup() {
 		c.dnsConfig.CancelDNS()
 	}
 	log.Info("clean up successfully")
-	util.CleanExtensionLib()
 }
 
 // vendor/k8s.io/kubectl/pkg/polymorphichelpers/rollback.go:99

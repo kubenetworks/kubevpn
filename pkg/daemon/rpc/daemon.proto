@@ -60,8 +60,14 @@ message ConnectResponse {
 }
 
 message DisconnectRequest {
+  // 1) disconnect by id
   optional int32 ID = 1;
+  // 2) disconnect all
   optional bool All = 2;
+  // 3) disconnect by kubeConfig
+  optional string KubeconfigBytes = 3;
+  optional string Namespace = 4;
+  SshJump SshJump = 10;
 }
 
 message DisconnectResponse {
