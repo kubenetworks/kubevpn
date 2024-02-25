@@ -205,7 +205,7 @@ as `productpage`
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 ...
 ```
-***Disclaimer:*** This only works on the namespace where kubevpn-traffic-manager is deployed. Otherwise use [Domain resolve](./README.md#domain-resolve)
+***Disclaimer:*** This only works on the namespace where kubevpn-traffic-manager is deployed. Otherwise, use [Domain resolve](./README.md#domain-resolve)
 
 ### Connect to multiple kubernetes cluster network
 
@@ -372,7 +372,7 @@ Now let's access local service with header `"a: 1"`
 Hello world!  
 ```
 
-If you want cancel proxy, just run command:
+If you want to cancel proxy, just run command:
 
 ```shell
 ➜  ~ kubevpn leave deployments/productpage
@@ -460,7 +460,7 @@ clean up successfully
 You can see that it will start up two containers with docker, mapping to pod two container, and share port with same
 network, you can use `localhost:port`
 to access another container. And more, all environment、volume and network are the same as remote kubernetes pod, it is
-truly consistent with the kubernetes runtime. Makes develop on local PC comes true.
+truly consistent with the kubernetes runtime. Makes develop on local PC come true.
 
 ```shell
 ➜  ~ docker ps
@@ -484,7 +484,7 @@ Verify logs of nginx container
 docker logs $(docker ps --format '{{.Names}}' | grep nginx_default_kubevpn)
 ```
 
-If you just want to start up a docker image, you can use simple way like this:
+If you just want to start up a docker image, you can use a simple way like this:
 
 ```shell
 kubevpn dev deployment/authors --no-proxy -it --rm
@@ -528,7 +528,7 @@ as `--entrypoint /bin/bash`, for more parameters, see `kubevpn dev --help`.
 ### DinD ( Docker in Docker ) use kubevpn in Docker
 
 If you want to start the development mode locally using Docker in Docker (DinD), because the program will read and
-write the `/tmp` directory, you need to manually add the parameter `-v /tmp:/tmp` (outer docker) and other thing is you
+write the `/tmp` directory, you need to manually add the parameter `-v /tmp:/tmp` (outer docker) and another thing is you
 need to special parameter `--network` (inner docker) for sharing network and pid
 
 Example:
@@ -700,7 +700,7 @@ in advance
 
 ### 1, What should I do if the dependent image cannot be pulled, or the inner environment cannot access docker.io?
 
-Answer: here are two solution to solve this problem
+Answer: here are two solutions to solve this problem
 
 - Solution 1: In the network that can access docker.io, transfer the image in the command `kubevpn version` to your own
   private image registry, and then add option `--image` to special image when starting the command.
@@ -769,7 +769,7 @@ dns service ok
 ➜  ~
 ```
 
-### 2, When use `kubevpn dev`, but got error code 137, how to resolve ?
+### 2, When use `kubevpn dev`, but got error code 137, how to resolve?
 
 ```text
 dns service ok
