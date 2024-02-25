@@ -37,6 +37,7 @@ const (
 	Daemon_Upgrade_FullMethodName      = "/rpc.Daemon/Upgrade"
 	Daemon_Status_FullMethodName       = "/rpc.Daemon/Status"
 	Daemon_Version_FullMethodName      = "/rpc.Daemon/Version"
+	Daemon_Reset_FullMethodName        = "/rpc.Daemon/Reset"
 	Daemon_Quit_FullMethodName         = "/rpc.Daemon/Quit"
 )
 
@@ -62,6 +63,7 @@ type DaemonClient interface {
 	Upgrade(ctx context.Context, in *UpgradeRequest, opts ...grpc.CallOption) (*UpgradeResponse, error)
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
 	Version(ctx context.Context, in *VersionRequest, opts ...grpc.CallOption) (*VersionResponse, error)
+	Reset(ctx context.Context, in *ResetRequest, opts ...grpc.CallOption) (Daemon_ResetClient, error)
 	Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error)
 }
 
@@ -441,8 +443,40 @@ func (c *daemonClient) Version(ctx context.Context, in *VersionRequest, opts ...
 	return out, nil
 }
 
+func (c *daemonClient) Reset(ctx context.Context, in *ResetRequest, opts ...grpc.CallOption) (Daemon_ResetClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[9], Daemon_Reset_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &daemonResetClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Daemon_ResetClient interface {
+	Recv() (*ResetResponse, error)
+	grpc.ClientStream
+}
+
+type daemonResetClient struct {
+	grpc.ClientStream
+}
+
+func (x *daemonResetClient) Recv() (*ResetResponse, error) {
+	m := new(ResetResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *daemonClient) Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[9], Daemon_Quit_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[10], Daemon_Quit_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -495,6 +529,7 @@ type DaemonServer interface {
 	Upgrade(context.Context, *UpgradeRequest) (*UpgradeResponse, error)
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
 	Version(context.Context, *VersionRequest) (*VersionResponse, error)
+	Reset(*ResetRequest, Daemon_ResetServer) error
 	Quit(*QuitRequest, Daemon_QuitServer) error
 	mustEmbedUnimplementedDaemonServer()
 }
@@ -556,6 +591,9 @@ func (UnimplementedDaemonServer) Status(context.Context, *StatusRequest) (*Statu
 }
 func (UnimplementedDaemonServer) Version(context.Context, *VersionRequest) (*VersionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Version not implemented")
+}
+func (UnimplementedDaemonServer) Reset(*ResetRequest, Daemon_ResetServer) error {
+	return status.Errorf(codes.Unimplemented, "method Reset not implemented")
 }
 func (UnimplementedDaemonServer) Quit(*QuitRequest, Daemon_QuitServer) error {
 	return status.Errorf(codes.Unimplemented, "method Quit not implemented")
@@ -929,6 +967,27 @@ func _Daemon_Version_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Daemon_Reset_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ResetRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DaemonServer).Reset(m, &daemonResetServer{stream})
+}
+
+type Daemon_ResetServer interface {
+	Send(*ResetResponse) error
+	grpc.ServerStream
+}
+
+type daemonResetServer struct {
+	grpc.ServerStream
+}
+
+func (x *daemonResetServer) Send(m *ResetResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 func _Daemon_Quit_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(QuitRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -1039,6 +1098,11 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Logs",
 			Handler:       _Daemon_Logs_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Reset",
+			Handler:       _Daemon_Reset_Handler,
 			ServerStreams: true,
 		},
 		{

@@ -15,6 +15,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func CmdQuit(f cmdutil.Factory) *cobra.Command {
@@ -29,6 +30,7 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_ = quit(cmd.Context(), true)
 			_ = quit(cmd.Context(), false)
+			util.CleanExtensionLib()
 			fmt.Fprint(os.Stdout, "quit successfully")
 			return nil
 		},

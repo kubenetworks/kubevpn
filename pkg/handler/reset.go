@@ -14,7 +14,6 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 )
 
 // Reset
@@ -34,9 +33,7 @@ func (c *ConnectOptions) Reset(ctx context.Context) error {
 	cleanupK8sResource(ctx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, false)
 
 	_ = c.CleanupLocalContainer(ctx)
-
-	_ = dns.CleanupHosts()
-	return err
+	return nil
 }
 
 func (c *ConnectOptions) CleanupLocalContainer(ctx context.Context) error {
