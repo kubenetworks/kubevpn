@@ -24,6 +24,7 @@ import (
 
 func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	var connect = handler.ConnectOptions{}
+	var extraRoute = &handler.ExtraRouteInfo{}
 	var sshConf = &util.SshConfig{}
 	var transferImage, foreground bool
 	cmd := &cobra.Command{
@@ -114,9 +115,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 					Headers:              connect.Headers,
 					PortMap:              connect.PortMap,
 					Workloads:            args,
-					ExtraCIDR:            connect.ExtraCIDR,
-					ExtraDomain:          connect.ExtraDomain,
-					ExtraNodeIP:          connect.ExtraNodeIP,
+					ExtraRoute:           extraRoute.ToRPC(),
 					UseLocalDNS:          connect.UseLocalDNS,
 					Engine:               string(connect.Engine),
 					SshJump:              sshConf.ToRPC(),
@@ -175,7 +174,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar((*string)(&connect.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "foreground hang up")
 
-	addExtraRoute(cmd, &connect.ExtraCIDR, &connect.ExtraDomain, &connect.ExtraNodeIP)
+	addExtraRoute(cmd, extraRoute)
 	addSshFlags(cmd, sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd
@@ -196,8 +195,8 @@ func addSshFlags(cmd *cobra.Command, sshConf *util.SshConfig) {
 	lookup.NoOptDefVal = "~/.kube/config"
 }
 
-func addExtraRoute(cmd *cobra.Command, cidr, domain *[]string, nodeIP *bool) {
-	cmd.Flags().StringArrayVar(cidr, "extra-cidr", []string{}, "Extra cidr string, add those cidr network to route table, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
-	cmd.Flags().StringArrayVar(domain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
-	cmd.Flags().BoolVar(nodeIP, "extra-node-ip", false, "Extra node ip, add cluster node ip to route table.")
+func addExtraRoute(cmd *cobra.Command, route *handler.ExtraRouteInfo) {
+	cmd.Flags().StringArrayVar(&route.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, add those cidr network to route table, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
+	cmd.Flags().StringArrayVar(&route.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
+	cmd.Flags().BoolVar(&route.ExtraNodeIP, "extra-node-ip", false, "Extra node ip, add cluster node ip to route table.")
 }

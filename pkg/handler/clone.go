@@ -41,14 +41,12 @@ import (
 )
 
 type CloneOptions struct {
-	Namespace   string
-	Headers     map[string]string
-	Workloads   []string
-	ExtraCIDR   []string
-	ExtraDomain []string
-	ExtraNodeIP bool
-	Engine      config.Engine
-	UseLocalDNS bool
+	Namespace      string
+	Headers        map[string]string
+	Workloads      []string
+	ExtraRouteInfo ExtraRouteInfo
+	Engine         config.Engine
+	UseLocalDNS    bool
 
 	TargetKubeconfig       string
 	TargetNamespace        string

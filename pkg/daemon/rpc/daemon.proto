@@ -35,25 +35,26 @@ message ConnectRequest {
   map<string, string> Headers = 3;
   repeated string PortMap = 4;
   repeated string Workloads = 5;
-  repeated string ExtraCIDR = 6;
-  repeated string ExtraDomain = 7;
-  bool ExtraNodeIP = 8;
-  bool UseLocalDNS = 9;
-  string Engine = 10;
+  bool UseLocalDNS = 6;
+  string Engine = 7;
+
+  // extra route table info
+  ExtraRoute ExtraRoute = 8;
+
   // ssh jump
-  SshJump SshJump = 11;
+  SshJump SshJump = 9;
 
   // transfer image
-  bool TransferImage = 12;
-  string Image = 13;
+  bool TransferImage = 10;
+  string Image = 11;
 
   // foreground
-  bool Foreground = 14;
+  bool Foreground = 12;
 
   // log level
-  int32 Level = 15;
+  int32 Level = 13;
 
-  string OriginKubeconfigPath = 16;
+  string OriginKubeconfigPath = 14;
 }
 
 message ConnectResponse {
@@ -88,31 +89,31 @@ message CloneRequest {
   string Namespace = 2;
   map<string, string> Headers = 3;
   repeated string Workloads = 4;
-  repeated string ExtraCIDR = 5;
-  repeated string ExtraDomain = 6;
-  bool ExtraNodeIP = 7;
-  bool UseLocalDNS = 8;
-  string Engine = 9;
+  bool UseLocalDNS = 5;
+  string Engine = 6;
+
+  // extra route table info
+  ExtraRoute ExtraRoute = 7;
 
   // ssh jump
-  SshJump SshJump = 10;
+  SshJump SshJump = 8;
 
   // target cluster info
-  string TargetKubeconfig = 11;
-  string TargetNamespace = 12;
-  string TargetContainer = 13;
-  string TargetImage = 14;
-  string TargetRegistry = 15;
-  bool IsChangeTargetRegistry = 16;
+  string TargetKubeconfig = 9;
+  string TargetNamespace = 10;
+  string TargetContainer = 11;
+  string TargetImage = 12;
+  string TargetRegistry = 13;
+  bool IsChangeTargetRegistry = 14;
 
   // transfer image
-  bool TransferImage = 17;
-  string Image = 18;
+  bool TransferImage = 15;
+  string Image = 16;
 
   // log level
-  int32 Level = 19;
+  int32 Level = 17;
 
-  string OriginKubeconfigPath = 20;
+  string OriginKubeconfigPath = 18;
 }
 
 message CloneResponse {
@@ -252,4 +253,10 @@ message SshJump {
   string GSSAPIKeytabConf = 7;
   string GSSAPIPassword = 8;
   string GSSAPICacheFile = 9;
+}
+
+message ExtraRoute {
+  repeated string ExtraCIDR = 1;
+  repeated string ExtraDomain = 2;
+  bool ExtraNodeIP = 3;
 }

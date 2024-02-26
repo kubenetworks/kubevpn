@@ -26,6 +26,7 @@ import (
 func CmdClone(f cmdutil.Factory) *cobra.Command {
 	var options = handler.CloneOptions{}
 	var sshConf = &util.SshConfig{}
+	var extraRoute = &handler.ExtraRouteInfo{}
 	var transferImage bool
 	cmd := &cobra.Command{
 		Use:   "clone",
@@ -98,9 +99,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 				Namespace:              ns,
 				Headers:                options.Headers,
 				Workloads:              args,
-				ExtraCIDR:              options.ExtraCIDR,
-				ExtraDomain:            options.ExtraDomain,
-				ExtraNodeIP:            options.ExtraNodeIP,
+				ExtraRoute:             extraRoute.ToRPC(),
 				UseLocalDNS:            options.UseLocalDNS,
 				OriginKubeconfigPath:   util.GetKubeconfigPath(f),
 				Engine:                 string(options.Engine),
@@ -148,7 +147,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&options.TargetKubeconfig, "target-kubeconfig", "", "Clone workloads will create in this cluster, if not special, use origin cluster")
 	cmd.Flags().StringVar(&options.TargetRegistry, "target-registry", "", "Clone workloads will create this registry domain to replace origin registry, if not special, use origin registry")
 
-	addExtraRoute(cmd, &options.ExtraCIDR, &options.ExtraDomain, &options.ExtraNodeIP)
+	addExtraRoute(cmd, extraRoute)
 	addSshFlags(cmd, sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd

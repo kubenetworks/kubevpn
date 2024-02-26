@@ -22,6 +22,7 @@ import (
 
 func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	var connect = &handler.ConnectOptions{}
+	var extraRoute = &handler.ExtraRouteInfo{}
 	var sshConf = &util.SshConfig{}
 	var transferImage, foreground, lite bool
 	cmd := &cobra.Command{
@@ -62,9 +63,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			req := &rpc.ConnectRequest{
 				KubeconfigBytes:      string(bytes),
 				Namespace:            ns,
-				ExtraCIDR:            connect.ExtraCIDR,
-				ExtraDomain:          connect.ExtraDomain,
-				ExtraNodeIP:          connect.ExtraNodeIP,
+				ExtraRoute:           extraRoute.ToRPC(),
 				UseLocalDNS:          connect.UseLocalDNS,
 				Engine:               string(connect.Engine),
 				OriginKubeconfigPath: util.GetKubeconfigPath(f),
@@ -124,7 +123,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "Hang up")
 	cmd.Flags().BoolVar(&lite, "lite", false, "connect to multiple cluster in lite mode, you needs to special this options")
 
-	addExtraRoute(cmd, &connect.ExtraCIDR, &connect.ExtraDomain, &connect.ExtraNodeIP)
+	addExtraRoute(cmd, extraRoute)
 	addSshFlags(cmd, sshConf)
 	return cmd
 }

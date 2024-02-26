@@ -26,11 +26,11 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		panic(err)
 	}
 	var devOptions = &dev.Options{
-		Factory:   f,
-		NoProxy:   false,
-		ExtraCIDR: []string{},
-		Cli:       cli,
-		DockerCli: dockerCli,
+		Factory:        f,
+		NoProxy:        false,
+		Cli:            cli,
+		DockerCli:      dockerCli,
+		ExtraRouteInfo: handler.ExtraRouteInfo{},
 	}
 	var sshConf = &util.SshConfig{}
 	var transferImage bool
@@ -174,7 +174,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 		dockercomp.NetworkNames(nil),
 	)
 
-	addExtraRoute(cmd, &devOptions.ExtraCIDR, &devOptions.ExtraDomain, &devOptions.ExtraNodeIP)
+	addExtraRoute(cmd, &devOptions.ExtraRouteInfo)
 	addSshFlags(cmd, sshConf)
 	return cmd
 }
