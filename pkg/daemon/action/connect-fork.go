@@ -36,6 +36,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 		Workloads:            req.Workloads,
 		ExtraCIDR:            req.ExtraCIDR,
 		ExtraDomain:          req.ExtraDomain,
+		ExtraNodeIP:          req.ExtraNodeIP,
 		UseLocalDNS:          req.UseLocalDNS,
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,

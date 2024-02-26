@@ -75,6 +75,7 @@ type ConnectOptions struct {
 	Workloads            []string
 	ExtraCIDR            []string
 	ExtraDomain          []string
+	ExtraNodeIP          bool
 	UseLocalDNS          bool
 	Engine               config.Engine
 	Foreground           bool
@@ -228,6 +229,10 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 	//if err = c.CreateRemoteInboundPod(c.ctx); err != nil {
 	//	return
 	//}
+	if err = c.addExtraNodeIP(c.ctx); err != nil {
+		log.Errorf("add extra node ip failed: %v", err)
+		return
+	}
 	var rawTCPForwardPort, gvisorTCPForwardPort, gvisorUDPForwardPort int
 	rawTCPForwardPort, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
@@ -1292,6 +1297,34 @@ RetryWithDNSClient:
 		}
 		if !success {
 			return fmt.Errorf("failed to resolve dns for domain %s", domain)
+		}
+	}
+	return nil
+}
+
+func (c *ConnectOptions) addExtraNodeIP(ctx context.Context) error {
+	if !c.ExtraNodeIP {
+		return nil
+	}
+	list, err := c.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, item := range list.Items {
+		for _, address := range item.Status.Addresses {
+			ip := net.ParseIP(address.Address)
+			if ip != nil {
+				var mask net.IPMask
+				if ip.To4() != nil {
+					mask = net.CIDRMask(32, 32)
+				} else {
+					mask = net.CIDRMask(128, 128)
+				}
+				c.ExtraCIDR = append(c.ExtraCIDR, (&net.IPNet{
+					IP:   ip,
+					Mask: mask,
+				}).String())
+			}
 		}
 	}
 	return nil

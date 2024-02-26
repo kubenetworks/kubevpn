@@ -46,6 +46,7 @@ type CloneOptions struct {
 	Workloads   []string
 	ExtraCIDR   []string
 	ExtraDomain []string
+	ExtraNodeIP bool
 	Engine      config.Engine
 	UseLocalDNS bool
 

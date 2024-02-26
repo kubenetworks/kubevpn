@@ -37,22 +37,23 @@ message ConnectRequest {
   repeated string Workloads = 5;
   repeated string ExtraCIDR = 6;
   repeated string ExtraDomain = 7;
-  bool UseLocalDNS = 8;
-  string Engine = 9;
+  bool ExtraNodeIP = 8;
+  bool UseLocalDNS = 9;
+  string Engine = 10;
   // ssh jump
-  SshJump SshJump = 10;
+  SshJump SshJump = 11;
 
   // transfer image
-  bool TransferImage = 11;
-  string Image = 12;
+  bool TransferImage = 12;
+  string Image = 13;
 
   // foreground
-  bool Foreground = 13;
+  bool Foreground = 14;
 
   // log level
-  int32 Level = 14;
+  int32 Level = 15;
 
-  string OriginKubeconfigPath = 15;
+  string OriginKubeconfigPath = 16;
 }
 
 message ConnectResponse {
@@ -89,28 +90,29 @@ message CloneRequest {
   repeated string Workloads = 4;
   repeated string ExtraCIDR = 5;
   repeated string ExtraDomain = 6;
-  bool UseLocalDNS = 7;
-  string Engine = 8;
+  bool ExtraNodeIP = 7;
+  bool UseLocalDNS = 8;
+  string Engine = 9;
 
   // ssh jump
-  SshJump SshJump = 9;
+  SshJump SshJump = 10;
 
   // target cluster info
-  string TargetKubeconfig = 10;
-  string TargetNamespace = 11;
-  string TargetContainer = 12;
-  string TargetImage = 13;
-  string TargetRegistry = 14;
-  bool IsChangeTargetRegistry = 15;
+  string TargetKubeconfig = 11;
+  string TargetNamespace = 12;
+  string TargetContainer = 13;
+  string TargetImage = 14;
+  string TargetRegistry = 15;
+  bool IsChangeTargetRegistry = 16;
 
   // transfer image
-  bool TransferImage = 16;
-  string Image = 17;
+  bool TransferImage = 17;
+  string Image = 18;
 
   // log level
-  int32 Level = 18;
+  int32 Level = 19;
 
-  string OriginKubeconfigPath = 19;
+  string OriginKubeconfigPath = 20;
 }
 
 message CloneResponse {

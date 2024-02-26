@@ -30,6 +30,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 		Namespace:            req.Namespace,
 		ExtraCIDR:            req.ExtraCIDR,
 		ExtraDomain:          req.ExtraDomain,
+		ExtraNodeIP:          req.ExtraNodeIP,
 		UseLocalDNS:          req.UseLocalDNS,
 		Engine:               req.Engine,
 		SshJump:              req.SshJump,
@@ -64,6 +65,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 		Workloads:   req.Workloads,
 		ExtraCIDR:   req.ExtraCIDR,
 		ExtraDomain: req.ExtraDomain,
+		ExtraNodeIP: req.ExtraNodeIP,
 		UseLocalDNS: req.UseLocalDNS,
 		Engine:      config.Engine(req.Engine),
 

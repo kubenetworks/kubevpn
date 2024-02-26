@@ -100,6 +100,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 				Workloads:              args,
 				ExtraCIDR:              options.ExtraCIDR,
 				ExtraDomain:            options.ExtraDomain,
+				ExtraNodeIP:            options.ExtraNodeIP,
 				UseLocalDNS:            options.UseLocalDNS,
 				OriginKubeconfigPath:   util.GetKubeconfigPath(f),
 				Engine:                 string(options.Engine),
@@ -137,8 +138,6 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringToStringVarP(&options.Headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to local PC, If not special, redirect all traffic to local PC. eg: --headers a=1 --headers b=2")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
-	cmd.Flags().StringArrayVar(&options.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
-	cmd.Flags().StringArrayVar(&options.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
 	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
 	cmd.Flags().StringVar((*string)(&options.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
 	cmd.Flags().BoolVar(&options.UseLocalDNS, "use-localdns", false, "if use-lcoaldns is true, kubevpn will start coredns listen at 53 to forward your dns queries. only support on linux now")
@@ -149,6 +148,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&options.TargetKubeconfig, "target-kubeconfig", "", "Clone workloads will create in this cluster, if not special, use origin cluster")
 	cmd.Flags().StringVar(&options.TargetRegistry, "target-registry", "", "Clone workloads will create this registry domain to replace origin registry, if not special, use origin registry")
 
+	addExtraRoute(cmd, &options.ExtraCIDR, &options.ExtraDomain, &options.ExtraNodeIP)
 	addSshFlags(cmd, sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd

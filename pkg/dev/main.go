@@ -68,6 +68,7 @@ type Options struct {
 	NoProxy       bool
 	ExtraCIDR     []string
 	ExtraDomain   []string
+	ExtraNodeIP   bool
 	ConnectMode   ConnectMode
 	Engine        config.Engine
 
@@ -463,6 +464,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 		Workloads:            []string{d.Workload},
 		ExtraCIDR:            d.ExtraCIDR,
 		ExtraDomain:          d.ExtraDomain,
+		ExtraNodeIP:          d.ExtraNodeIP,
 		Engine:               d.Engine,
 		OriginKubeconfigPath: util.GetKubeconfigPath(f),
 	}
@@ -515,6 +517,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 			Workloads:            connect.Workloads,
 			ExtraCIDR:            connect.ExtraCIDR,
 			ExtraDomain:          connect.ExtraDomain,
+			ExtraNodeIP:          connect.ExtraNodeIP,
 			UseLocalDNS:          connect.UseLocalDNS,
 			Engine:               string(connect.Engine),
 			OriginKubeconfigPath: util.GetKubeconfigPath(f),
@@ -633,6 +636,9 @@ func createConnectContainer(noProxy bool, connect handler.ConnectOptions, path s
 		for _, v := range connect.ExtraDomain {
 			entrypoint = append(entrypoint, "--extra-domain", v)
 		}
+		if connect.ExtraNodeIP {
+			entrypoint = append(entrypoint, "--extra-node-ip")
+		}
 	} else {
 		entrypoint = []string{"kubevpn", "proxy", connect.Workloads[0], "--foreground", "-n", connect.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image, "--engine", string(connect.Engine)}
 		for k, v := range connect.Headers {
@@ -643,6 +649,9 @@ func createConnectContainer(noProxy bool, connect handler.ConnectOptions, path s
 		}
 		for _, v := range connect.ExtraDomain {
 			entrypoint = append(entrypoint, "--extra-domain", v)
+		}
+		if connect.ExtraNodeIP {
+			entrypoint = append(entrypoint, "--extra-node-ip")
 		}
 	}
 
