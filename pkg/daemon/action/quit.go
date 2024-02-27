@@ -16,6 +16,12 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 	}()
 	log.SetOutput(io.MultiWriter(newQuitWarp(resp), svr.LogFile))
 	log.SetLevel(log.InfoLevel)
+
+	for i := len(svr.secondaryConnect) - 1; i >= 0; i-- {
+		log.Info("quit: cleanup connection")
+		svr.secondaryConnect[i].Cleanup()
+	}
+
 	if svr.connect != nil {
 		log.Info("quit: cleanup connection")
 		svr.connect.Cleanup()
@@ -26,10 +32,6 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 		if err != nil {
 			log.Errorf("quit: cleanup clone failed: %v", err)
 		}
-	}
-	for _, options := range svr.secondaryConnect {
-		log.Info("quit: cleanup connection")
-		options.Cleanup()
 	}
 
 	dns.CleanupHosts()

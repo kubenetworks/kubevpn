@@ -16,30 +16,6 @@ import (
 )
 
 func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_DisconnectServer) error {
-	if !svr.IsSudo {
-		cli := svr.GetClient(true)
-		if cli == nil {
-			return fmt.Errorf("sudo daemon not start")
-		}
-		connResp, err := cli.Disconnect(resp.Context(), req)
-		if err != nil {
-			return err
-		}
-		var recv *rpc.DisconnectResponse
-		for {
-			recv, err = connResp.Recv()
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				return err
-			}
-			err = resp.Send(recv)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
 	defer func() {
 		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
@@ -49,29 +25,31 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 	log.SetLevel(log.InfoLevel)
 	switch {
 	case req.GetAll():
+		for i := len(svr.secondaryConnect) - 1; i >= 0; i-- {
+			svr.secondaryConnect[i].Cleanup()
+		}
+		svr.secondaryConnect = nil
+
 		if svr.connect != nil {
 			svr.connect.Cleanup()
 		}
+		svr.connect = nil
+		svr.t = time.Time{}
+
 		if svr.clone != nil {
 			_ = svr.clone.Cleanup()
 		}
-		svr.t = time.Time{}
-		svr.connect = nil
 		svr.clone = nil
-
-		for _, options := range svr.secondaryConnect {
-			options.Cleanup()
-		}
-		svr.secondaryConnect = nil
 	case req.ID != nil && req.GetID() == 0:
 		if svr.connect != nil {
 			svr.connect.Cleanup()
 		}
+		svr.connect = nil
+		svr.t = time.Time{}
+
 		if svr.clone != nil {
 			_ = svr.clone.Cleanup()
 		}
-		svr.t = time.Time{}
-		svr.connect = nil
 		svr.clone = nil
 	case req.ID != nil:
 		index := req.GetID() - 1
@@ -97,6 +75,31 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 	if svr.connect == nil && len(svr.secondaryConnect) == 0 {
 		dns.CleanupHosts()
 	}
+
+	if !svr.IsSudo {
+		cli := svr.GetClient(true)
+		if cli == nil {
+			return fmt.Errorf("sudo daemon not start")
+		}
+		connResp, err := cli.Disconnect(resp.Context(), req)
+		if err != nil {
+			return err
+		}
+		var recv *rpc.DisconnectResponse
+		for {
+			recv, err = connResp.Recv()
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				return err
+			}
+			err = resp.Send(recv)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
