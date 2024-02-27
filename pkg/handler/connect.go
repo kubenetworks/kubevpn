@@ -62,6 +62,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
@@ -73,8 +74,7 @@ type ConnectOptions struct {
 	Headers              map[string]string
 	PortMap              []string
 	Workloads            []string
-	ExtraCIDR            []string
-	ExtraDomain          []string
+	ExtraRouteInfo       ExtraRouteInfo
 	UseLocalDNS          bool
 	Engine               config.Engine
 	Foreground           bool
@@ -228,6 +228,10 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 	//if err = c.CreateRemoteInboundPod(c.ctx); err != nil {
 	//	return
 	//}
+	if err = c.addExtraNodeIP(c.ctx); err != nil {
+		log.Errorf("add extra node ip failed: %v", err)
+		return
+	}
 	var rawTCPForwardPort, gvisorTCPForwardPort, gvisorUDPForwardPort int
 	rawTCPForwardPort, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
@@ -393,7 +397,7 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 		list.Insert(ipNet.String())
 	}
 	// add extra-cidr
-	for _, s := range c.ExtraCIDR {
+	for _, s := range c.ExtraRouteInfo.ExtraCIDR {
 		_, _, err = net.ParseCIDR(s)
 		if err != nil {
 			return fmt.Errorf("invalid extra-cidr %s, err: %v", s, err)
@@ -1131,7 +1135,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) (err error) {
 }
 
 func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
-	if len(c.ExtraDomain) == 0 {
+	if len(c.ExtraRouteInfo.ExtraDomain) == 0 {
 		return nil
 	}
 	ips, err := util.GetDNSIPFromDnsPod(c.clientset)
@@ -1187,7 +1191,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, domain := range c.ExtraDomain {
+	for _, domain := range c.ExtraRouteInfo.ExtraDomain {
 		ip, err := util.Shell(c.clientset, c.restclient, c.config, podList[0].Name, config.ContainerSidecarVPN, c.Namespace, []string{"dig", "+short", domain})
 		if err != nil || net.ParseIP(ip) == nil {
 			goto RetryWithDNSClient
@@ -1215,7 +1219,7 @@ RetryWithDNSClient:
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	go func() {
-		for _, domain := range c.ExtraDomain {
+		for _, domain := range c.ExtraRouteInfo.ExtraDomain {
 			go func(domain string) {
 				for ; true; <-ticker.C {
 					func() {
@@ -1234,7 +1238,7 @@ RetryWithDNSClient:
 
 	// 4) query with dns client
 	client := &miekgdns.Client{Net: "udp", Timeout: time.Second * 2, SingleInflight: true}
-	for _, domain := range c.ExtraDomain {
+	for _, domain := range c.ExtraRouteInfo.ExtraDomain {
 		var success = false
 		for _, qType := range []uint16{miekgdns.TypeA /*, miekgdns.TypeAAAA*/} {
 			var iErr = errors.New("No retry")
@@ -1292,6 +1296,34 @@ RetryWithDNSClient:
 		}
 		if !success {
 			return fmt.Errorf("failed to resolve dns for domain %s", domain)
+		}
+	}
+	return nil
+}
+
+func (c *ConnectOptions) addExtraNodeIP(ctx context.Context) error {
+	if !c.ExtraRouteInfo.ExtraNodeIP {
+		return nil
+	}
+	list, err := c.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, item := range list.Items {
+		for _, address := range item.Status.Addresses {
+			ip := net.ParseIP(address.Address)
+			if ip != nil {
+				var mask net.IPMask
+				if ip.To4() != nil {
+					mask = net.CIDRMask(32, 32)
+				} else {
+					mask = net.CIDRMask(128, 128)
+				}
+				c.ExtraRouteInfo.ExtraCIDR = append(c.ExtraRouteInfo.ExtraCIDR, (&net.IPNet{
+					IP:   ip,
+					Mask: mask,
+				}).String())
+			}
 		}
 	}
 	return nil
@@ -1530,8 +1562,9 @@ func (c *ConnectOptions) heartbeats(ctx context.Context) {
 func (c *ConnectOptions) Equal(a *ConnectOptions) bool {
 	return c.UseLocalDNS == a.UseLocalDNS &&
 		c.Engine == a.Engine &&
-		reflect.DeepEqual(c.ExtraDomain, a.ExtraDomain) &&
-		reflect.DeepEqual(c.ExtraCIDR, a.ExtraCIDR)
+		reflect.DeepEqual(c.ExtraRouteInfo.ExtraDomain, a.ExtraRouteInfo.ExtraDomain) &&
+		reflect.DeepEqual(c.ExtraRouteInfo.ExtraCIDR, a.ExtraRouteInfo.ExtraCIDR) &&
+		reflect.DeepEqual(c.ExtraRouteInfo.ExtraNodeIP, a.ExtraRouteInfo.ExtraNodeIP)
 }
 
 func (c *ConnectOptions) GetTunDeviceName() (string, error) {
@@ -1566,4 +1599,29 @@ func (c *ConnectOptions) AddRolloutFunc(f func() error) {
 
 func (c *ConnectOptions) getRolloutFunc() []func() error {
 	return c.rollbackFuncList
+}
+
+type ExtraRouteInfo struct {
+	ExtraCIDR   []string
+	ExtraDomain []string
+	ExtraNodeIP bool
+}
+
+func ParseExtraRouteFromRPC(route *rpc.ExtraRoute) *ExtraRouteInfo {
+	if route == nil {
+		return &ExtraRouteInfo{}
+	}
+	return &ExtraRouteInfo{
+		ExtraCIDR:   route.ExtraCIDR,
+		ExtraDomain: route.ExtraDomain,
+		ExtraNodeIP: route.ExtraNodeIP,
+	}
+}
+
+func (e ExtraRouteInfo) ToRPC() *rpc.ExtraRoute {
+	return &rpc.ExtraRoute{
+		ExtraCIDR:   e.ExtraCIDR,
+		ExtraDomain: e.ExtraDomain,
+		ExtraNodeIP: e.ExtraNodeIP,
+	}
 }

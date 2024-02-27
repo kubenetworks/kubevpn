@@ -26,11 +26,11 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		panic(err)
 	}
 	var devOptions = &dev.Options{
-		Factory:   f,
-		NoProxy:   false,
-		ExtraCIDR: []string{},
-		Cli:       cli,
-		DockerCli: dockerCli,
+		Factory:        f,
+		NoProxy:        false,
+		Cli:            cli,
+		DockerCli:      dockerCli,
+		ExtraRouteInfo: handler.ExtraRouteInfo{},
 	}
 	var sshConf = &util.SshConfig{}
 	var transferImage bool
@@ -133,8 +133,6 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 	cmd.Flags().BoolVar(&devOptions.NoProxy, "no-proxy", false, "Whether proxy remote workloads traffic into local or not, true: just startup container on local without inject containers to intercept traffic, false: intercept traffic and forward to local")
 	cmdutil.AddContainerVarFlags(cmd, &devOptions.ContainerName, devOptions.ContainerName)
 	cmdutil.CheckErr(cmd.RegisterFlagCompletionFunc("container", completion.ContainerCompletionFunc(f)))
-	cmd.Flags().StringArrayVar(&devOptions.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
-	cmd.Flags().StringArrayVar(&devOptions.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
 	cmd.Flags().StringVar((*string)(&devOptions.ConnectMode), "connect-mode", string(dev.ConnectModeHost), "Connect to kubernetes network in container or in host, eg: ["+string(dev.ConnectModeContainer)+"|"+string(dev.ConnectModeHost)+"]")
 	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
 	cmd.Flags().StringVar((*string)(&devOptions.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
@@ -176,6 +174,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 		dockercomp.NetworkNames(nil),
 	)
 
+	addExtraRoute(cmd, &devOptions.ExtraRouteInfo)
 	addSshFlags(cmd, sshConf)
 	return cmd
 }

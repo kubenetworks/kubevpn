@@ -60,16 +60,15 @@ const (
 )
 
 type Options struct {
-	Headers       map[string]string
-	Namespace     string
-	Workload      string
-	Factory       cmdutil.Factory
-	ContainerName string
-	NoProxy       bool
-	ExtraCIDR     []string
-	ExtraDomain   []string
-	ConnectMode   ConnectMode
-	Engine        config.Engine
+	Headers        map[string]string
+	Namespace      string
+	Workload       string
+	Factory        cmdutil.Factory
+	ContainerName  string
+	NoProxy        bool
+	ExtraRouteInfo handler.ExtraRouteInfo
+	ConnectMode    ConnectMode
+	Engine         config.Engine
 
 	// docker options
 	DockerImage string
@@ -461,8 +460,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 	connect := &handler.ConnectOptions{
 		Headers:              d.Headers,
 		Workloads:            []string{d.Workload},
-		ExtraCIDR:            d.ExtraCIDR,
-		ExtraDomain:          d.ExtraDomain,
+		ExtraRouteInfo:       d.ExtraRouteInfo,
 		Engine:               d.Engine,
 		OriginKubeconfigPath: util.GetKubeconfigPath(f),
 	}
@@ -513,8 +511,7 @@ func (d *Options) doConnect(ctx context.Context, f cmdutil.Factory, conf *util.S
 			Namespace:            ns,
 			Headers:              connect.Headers,
 			Workloads:            connect.Workloads,
-			ExtraCIDR:            connect.ExtraCIDR,
-			ExtraDomain:          connect.ExtraDomain,
+			ExtraRoute:           connect.ExtraRouteInfo.ToRPC(),
 			UseLocalDNS:          connect.UseLocalDNS,
 			Engine:               string(connect.Engine),
 			OriginKubeconfigPath: util.GetKubeconfigPath(f),
@@ -627,22 +624,28 @@ func createConnectContainer(noProxy bool, connect handler.ConnectOptions, path s
 	var entrypoint []string
 	if noProxy {
 		entrypoint = []string{"kubevpn", "connect", "--foreground", "-n", connect.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image, "--engine", string(connect.Engine)}
-		for _, v := range connect.ExtraCIDR {
+		for _, v := range connect.ExtraRouteInfo.ExtraCIDR {
 			entrypoint = append(entrypoint, "--extra-cidr", v)
 		}
-		for _, v := range connect.ExtraDomain {
+		for _, v := range connect.ExtraRouteInfo.ExtraDomain {
 			entrypoint = append(entrypoint, "--extra-domain", v)
+		}
+		if connect.ExtraRouteInfo.ExtraNodeIP {
+			entrypoint = append(entrypoint, "--extra-node-ip")
 		}
 	} else {
 		entrypoint = []string{"kubevpn", "proxy", connect.Workloads[0], "--foreground", "-n", connect.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image, "--engine", string(connect.Engine)}
 		for k, v := range connect.Headers {
 			entrypoint = append(entrypoint, "--headers", fmt.Sprintf("%s=%s", k, v))
 		}
-		for _, v := range connect.ExtraCIDR {
+		for _, v := range connect.ExtraRouteInfo.ExtraCIDR {
 			entrypoint = append(entrypoint, "--extra-cidr", v)
 		}
-		for _, v := range connect.ExtraDomain {
+		for _, v := range connect.ExtraRouteInfo.ExtraDomain {
 			entrypoint = append(entrypoint, "--extra-domain", v)
+		}
+		if connect.ExtraRouteInfo.ExtraNodeIP {
+			entrypoint = append(entrypoint, "--extra-node-ip")
 		}
 	}
 

@@ -24,6 +24,7 @@ import (
 
 func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	var connect = handler.ConnectOptions{}
+	var extraRoute = &handler.ExtraRouteInfo{}
 	var sshConf = &util.SshConfig{}
 	var transferImage, foreground bool
 	cmd := &cobra.Command{
@@ -114,8 +115,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 					Headers:              connect.Headers,
 					PortMap:              connect.PortMap,
 					Workloads:            args,
-					ExtraCIDR:            connect.ExtraCIDR,
-					ExtraDomain:          connect.ExtraDomain,
+					ExtraRoute:           extraRoute.ToRPC(),
 					UseLocalDNS:          connect.UseLocalDNS,
 					Engine:               string(connect.Engine),
 					SshJump:              sshConf.ToRPC(),
@@ -170,12 +170,11 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringArrayVar(&connect.PortMap, "portmap", []string{}, "Port map, map container port to local port, format: [tcp/udp]/containerPort:localPort, If not special, localPort will use containerPort. eg: tcp/80:8080 or udp/5000:5001 or 80 or 80:8080")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
-	cmd.Flags().StringArrayVar(&connect.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
-	cmd.Flags().StringArrayVar(&connect.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
 	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
 	cmd.Flags().StringVar((*string)(&connect.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "foreground hang up")
 
+	addExtraRoute(cmd, extraRoute)
 	addSshFlags(cmd, sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd
@@ -194,4 +193,10 @@ func addSshFlags(cmd *cobra.Command, sshConf *util.SshConfig) {
 	cmd.Flags().StringVar(&sshConf.RemoteKubeconfig, "remote-kubeconfig", "", "Remote kubeconfig abstract path of ssh server, default is /home/$USERNAME/.kube/config")
 	lookup := cmd.Flags().Lookup("remote-kubeconfig")
 	lookup.NoOptDefVal = "~/.kube/config"
+}
+
+func addExtraRoute(cmd *cobra.Command, route *handler.ExtraRouteInfo) {
+	cmd.Flags().StringArrayVar(&route.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, add those cidr network to route table, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
+	cmd.Flags().StringArrayVar(&route.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
+	cmd.Flags().BoolVar(&route.ExtraNodeIP, "extra-node-ip", false, "Extra node ip, add cluster node ip to route table.")
 }
