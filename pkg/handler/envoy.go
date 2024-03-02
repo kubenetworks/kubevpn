@@ -53,31 +53,20 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	for _, container := range templateSpec.Spec.Containers {
 		ports = append(ports, container.Ports...)
 	}
-	var findFunc = func(ports []v1.ContainerPort, port int32) int {
-		for i, p := range ports {
-			if p.ContainerPort == port {
-				return i
-			}
-		}
-		return -1
+	var portmap = make(map[int32]int32)
+	for _, port := range ports {
+		portmap[port.ContainerPort] = port.ContainerPort
 	}
 	for _, portMap := range portMaps {
 		port := util.ParsePort(portMap)
-		if index := findFunc(ports, port.ContainerPort); index != -1 {
-			ports[index].HostPort = port.HostPort
-		} else {
-			ports = append(ports, port)
-		}
-	}
-	for i := 0; i < len(ports); i++ {
-		if ports[i].HostPort == 0 {
-			ports[i].HostPort = ports[i].ContainerPort
+		if port.ContainerPort != 0 {
+			portmap[port.ContainerPort] = port.HostPort
 		}
 	}
 
 	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 
-	err = addEnvoyConfig(clientset, nodeID, c, headers, ports)
+	err = addEnvoyConfig(clientset, nodeID, c, headers, ports, portmap)
 	if err != nil {
 		log.Errorf("add envoy config error: %v", err)
 		return err
@@ -211,7 +200,7 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 	return err
 }
 
-func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP util.PodRouteConfig, headers map[string]string, port []v1.ContainerPort) error {
+func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP util.PodRouteConfig, headers map[string]string, port []v1.ContainerPort, portmap map[int32]int32) error {
 	configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err
@@ -223,8 +212,7 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP ut
 		}
 	}
 
-	v = addVirtualRule(v, nodeID, port, headers, tunIP)
-
+	v = addVirtualRule(v, nodeID, port, headers, tunIP, portmap)
 	marshal, err := yaml.Marshal(v)
 	if err != nil {
 		return err
@@ -234,7 +222,7 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP ut
 	return err
 }
 
-func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []v1.ContainerPort, headers map[string]string, tunIP util.PodRouteConfig) []*controlplane.Virtual {
+func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []v1.ContainerPort, headers map[string]string, tunIP util.PodRouteConfig, portmap map[int32]int32) []*controlplane.Virtual {
 	var index = -1
 	for i, virtual := range v {
 		if nodeID == virtual.Uid {
@@ -251,6 +239,7 @@ func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []v1.Containe
 				Headers:      headers,
 				LocalTunIPv4: tunIP.LocalTunIPv4,
 				LocalTunIPv6: tunIP.LocalTunIPv6,
+				PortMap:      portmap,
 			}},
 		})
 	}
@@ -260,6 +249,7 @@ func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []v1.Containe
 		if rule.LocalTunIPv4 == tunIP.LocalTunIPv4 &&
 			rule.LocalTunIPv6 == tunIP.LocalTunIPv6 {
 			v[index].Rules[j].Headers = util.Merge[string, string](v[index].Rules[j].Headers, headers)
+			v[index].Rules[j].PortMap = util.Merge[int32, int32](v[index].Rules[j].PortMap, portmap)
 			return v
 		}
 	}
@@ -269,6 +259,7 @@ func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []v1.Containe
 		if reflect.DeepEqual(rule.Headers, headers) {
 			v[index].Rules[j].LocalTunIPv6 = tunIP.LocalTunIPv6
 			v[index].Rules[j].LocalTunIPv4 = tunIP.LocalTunIPv4
+			v[index].Rules[j].PortMap = portmap
 			return v
 		}
 	}
@@ -278,6 +269,7 @@ func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []v1.Containe
 		Headers:      headers,
 		LocalTunIPv4: tunIP.LocalTunIPv4,
 		LocalTunIPv6: tunIP.LocalTunIPv6,
+		PortMap:      portmap,
 	})
 	if v[index].Ports == nil {
 		v[index].Ports = port

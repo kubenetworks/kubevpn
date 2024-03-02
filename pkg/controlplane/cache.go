@@ -6,6 +6,7 @@ import (
 
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
+	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	route "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
@@ -38,6 +39,7 @@ type Rule struct {
 	Headers      map[string]string
 	LocalTunIPv4 string
 	LocalTunIPv6 string
+	PortMap      map[int32]int32
 }
 
 func (a *Virtual) To() (
@@ -55,9 +57,9 @@ func (a *Virtual) To() (
 		var rr []*route.Route
 		for _, rule := range a.Rules {
 			for _, ip := range []string{rule.LocalTunIPv4, rule.LocalTunIPv6} {
-				clusterName := fmt.Sprintf("%s_%v", ip, port.ContainerPort)
+				clusterName := fmt.Sprintf("%s_%v", ip, rule.PortMap[port.ContainerPort])
 				clusters = append(clusters, ToCluster(clusterName))
-				endpoints = append(endpoints, ToEndPoint(clusterName, ip, port.HostPort))
+				endpoints = append(endpoints, ToEndPoint(clusterName, ip, rule.PortMap[port.ContainerPort]))
 				rr = append(rr, ToRoute(clusterName, rule.Headers))
 			}
 		}
@@ -122,6 +124,9 @@ func ToCluster(clusterName string) *cluster.Cluster {
 		LbPolicy:       cluster.Cluster_ROUND_ROBIN,
 		TypedExtensionProtocolOptions: map[string]*anypb.Any{
 			"envoy.extensions.upstreams.http.v3.HttpProtocolOptions": anyFunc(&httpv3.HttpProtocolOptions{
+				CommonHttpProtocolOptions: &corev3.HttpProtocolOptions{
+					IdleTimeout: durationpb.New(time.Second * 10),
+				},
 				UpstreamProtocolOptions: &httpv3.HttpProtocolOptions_UseDownstreamProtocolConfig{
 					UseDownstreamProtocolConfig: &httpv3.HttpProtocolOptions_UseDownstreamHttpConfig{},
 				},
