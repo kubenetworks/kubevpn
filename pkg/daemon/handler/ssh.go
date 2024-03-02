@@ -47,7 +47,7 @@ func (w *wsHandler) handle(ctx context.Context) {
 	ctx, f := context.WithCancel(ctx)
 	defer f()
 
-	cli, err := util.DialSshRemote(ctx, w.sshConfig)
+	cli, err := util.DialSshRemote(w.sshConfig)
 	if err != nil {
 		w.Log("Dial ssh remote error: %v", err)
 		return

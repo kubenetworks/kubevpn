@@ -111,10 +111,11 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 
 	// transfer image to remote
 	var sshClient *ssh.Client
-	sshClient, err = DialSshRemote(ctx, conf)
+	sshClient, err = DialSshRemote(conf)
 	if err != nil {
 		return err
 	}
+	defer sshClient.Close()
 	var responseReader io.ReadCloser
 	responseReader, err = cli.ImageSave(ctx, []string{imageTarget})
 	if err != nil {

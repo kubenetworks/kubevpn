@@ -401,12 +401,12 @@ func MoveToTemp() {
 }
 
 func Merge[K comparable, V any](fromMap, ToMap map[K]V) map[K]V {
+	if fromMap == nil {
+		return ToMap
+	}
+
 	for k, v := range ToMap {
 		fromMap[k] = v
-	}
-	if fromMap == nil {
-		// merge(nil, map[string]interface{...}) -> map[string]interface{...}
-		return ToMap
 	}
 
 	return fromMap

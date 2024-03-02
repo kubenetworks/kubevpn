@@ -653,17 +653,17 @@ func (c *ConnectOptions) setupDNS(ctx context.Context, lite bool) error {
 	if relovConf.Port == "" {
 		relovConf.Port = strconv.Itoa(port)
 	}
-	ns := sets.New[string]()
+	if len(relovConf.Servers) == 0 {
+		err = errors.New("can not found any nameserver from pod")
+		return err
+	}
+	ns := []string{c.Namespace}
 	list, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err == nil {
 		for _, item := range list.Items {
-			ns.Insert(item.Name)
-		}
-	}
-	svc, err := c.clientset.CoreV1().Services(c.Namespace).List(ctx, metav1.ListOptions{})
-	if err == nil {
-		for _, item := range svc.Items {
-			ns.Insert(item.Name)
+			if !sets.New[string](ns...).Has(item.Name) {
+				ns = append(ns, item.Name)
+			}
 		}
 	}
 	tunName, err := c.GetTunDeviceName()
@@ -672,7 +672,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context, lite bool) error {
 	}
 	c.dnsConfig = &dns.Config{
 		Config:      relovConf,
-		Ns:          ns.UnsortedList(),
+		Ns:          ns,
 		UseLocalDNS: c.UseLocalDNS,
 		TunName:     tunName,
 		Lite:        lite,
@@ -767,10 +767,11 @@ func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, pr
 
 	// pre-check network ip connect
 	var cli *ssh.Client
-	cli, err = util.DialSshRemote(ctx, conf)
+	cli, err = util.DialSshRemote(conf)
 	if err != nil {
 		return
 	}
+	defer cli.Close()
 
 	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
 

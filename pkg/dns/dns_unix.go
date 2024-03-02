@@ -81,7 +81,15 @@ func (c *Config) usingResolver() {
 		Ndots:   clientConfig.Ndots,
 		Timeout: 2,
 	}
-	for _, s := range sets.New[string](strings.Split(clientConfig.Search[0], ".")...).Insert(ns...).UnsortedList() {
+	var searchList []string
+	for _, search := range clientConfig.Search {
+		for _, s := range strings.Split(search, ".") {
+			if s != "" {
+				searchList = append(searchList, s)
+			}
+		}
+	}
+	for _, s := range sets.New[string](searchList...).Insert(ns...).UnsortedList() {
 		filename := filepath.Join("/", "etc", "resolver", s)
 		var content []byte
 		content, err = os.ReadFile(filename)

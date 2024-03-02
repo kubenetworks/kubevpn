@@ -20,6 +20,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"k8s.io/client-go/util/homedir"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
@@ -68,7 +69,7 @@ func (s *SshConfig) ToRPC() *rpc.SshJump {
 }
 
 // DialSshRemote https://github.com/golang/go/issues/21478
-func DialSshRemote(ctx context.Context, conf *SshConfig) (*ssh.Client, error) {
+func DialSshRemote(conf *SshConfig) (*ssh.Client, error) {
 	var remote *ssh.Client
 	var err error
 	if conf.ConfigAlias != "" {
@@ -131,14 +132,11 @@ func DialSshRemote(ctx context.Context, conf *SshConfig) (*ssh.Client, error) {
 		go func() {
 			ticker := time.NewTicker(time.Second * 5)
 			defer ticker.Stop()
-			for ctx.Err() == nil {
-				select {
-				case <-ticker.C:
-					_, _, er := remote.SendRequest("keepalive@golang.org", true, nil)
-					if er != nil {
-						log.Errorf("failed to send keep alive error: %s", er)
-						return
-					}
+			defer remote.Close()
+			for range ticker.C {
+				_, _, err := remote.SendRequest("keepalive@golang.org", true, nil)
+				if err != nil {
+					return
 				}
 			}
 		}()
@@ -198,7 +196,9 @@ func copyStream(local net.Conn, remote net.Conn) {
 
 	// start remote -> local data transfer
 	go func() {
-		_, err := io.Copy(local, remote)
+		buf := config.LPool.Get().([]byte)[:]
+		defer config.LPool.Put(buf[:])
+		_, err := io.CopyBuffer(local, remote, buf)
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			log.Debugf("error while copy remote->local: %s", err)
 		}
@@ -210,7 +210,9 @@ func copyStream(local net.Conn, remote net.Conn) {
 
 	// start local -> remote data transfer
 	go func() {
-		_, err := io.Copy(remote, local)
+		buf := config.LPool.Get().([]byte)[:]
+		defer config.LPool.Put(buf[:])
+		_, err := io.CopyBuffer(remote, local, buf)
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			log.Debugf("error while copy local->remote: %s", err)
 		}
@@ -365,7 +367,6 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 	}
 
 	var lock sync.Mutex
-	var cancelFunc context.CancelFunc
 	var sshClient *ssh.Client
 
 	var getRemoteConnFunc = func() (net.Conn, error) {
@@ -378,16 +379,9 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 				return remoteConn, nil
 			}
 			sshClient.Close()
-			if cancelFunc != nil {
-				cancelFunc()
-			}
 		}
-		var ctx2 context.Context
-		ctx2, cancelFunc = context.WithCancel(ctx)
-		sshClient, err = DialSshRemote(ctx2, conf)
+		sshClient, err = DialSshRemote(conf)
 		if err != nil {
-			cancelFunc()
-			cancelFunc = nil
 			log.Errorf("failed to dial remote ssh server: %v", err)
 			return nil, err
 		}
