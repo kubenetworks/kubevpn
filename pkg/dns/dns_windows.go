@@ -3,6 +3,7 @@
 package dns
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/netip"
@@ -13,7 +14,7 @@ import (
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
-func (c *Config) SetupDNS() error {
+func (c *Config) SetupDNS(ctx context.Context) error {
 	clientConfig := c.Config
 	tunName := c.TunName
 

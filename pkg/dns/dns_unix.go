@@ -32,15 +32,15 @@ var resolv = "/etc/resolv.conf"
 // service.namespace.svc:port
 // service.namespace.svc.cluster:port
 // service.namespace.svc.cluster.local:port
-func (c *Config) SetupDNS() error {
-	c.usingResolver()
+func (c *Config) SetupDNS(ctx context.Context) error {
+	c.usingResolver(ctx)
 	_ = exec.Command("killall", "mDNSResponderHelper").Run()
 	_ = exec.Command("killall", "-HUP", "mDNSResponder").Run()
 	_ = exec.Command("dscacheutil", "-flushcache").Run()
 	return nil
 }
 
-func (c *Config) usingResolver() {
+func (c *Config) usingResolver(ctx context.Context) {
 	var clientConfig = c.Config
 	var ns = c.Ns
 
@@ -69,7 +69,7 @@ func (c *Config) usingResolver() {
 		return
 	}
 	go func(port int, clientConfig *miekgdns.ClientConfig) {
-		for {
+		for ctx.Err() == nil {
 			log.Errorln(NewDNSServer("udp", "127.0.0.1:"+strconv.Itoa(port), clientConfig))
 			time.Sleep(time.Second * 3)
 		}

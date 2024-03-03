@@ -100,6 +100,11 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13
 									Domain: svc.Name,
 								})
 							}
+							select {
+							case <-ctx.Done():
+								return
+							default:
+							}
 							err = c.removeHosts(list)
 							if err != nil {
 								log.Errorf("failed to remove hosts(%s) to hosts: %v", entryList2String(list), err)
@@ -114,6 +119,11 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13
 							c.Lock.Lock()
 							defer c.Lock.Unlock()
 							hostsEntry := c.generateHostsEntry(list.Items, hosts)
+							select {
+							case <-ctx.Done():
+								return
+							default:
+							}
 							err := c.addHosts(hostsEntry)
 							if err != nil {
 								log.Errorf("failed to add hosts(%s) to hosts: %v", entryList2String(hostsEntry), err)
@@ -136,13 +146,13 @@ func (c *Config) addHosts(entryList []Entry) error {
 	}
 
 	hostFile := GetHostFile()
-	fi, err := os.OpenFile(hostFile, os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(hostFile, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
-	defer fi.Close()
+	defer f.Close()
 	str := entryList2String(entryList)
-	_, err = fi.WriteString(str)
+	_, err = f.WriteString(str)
 	return err
 }
 
@@ -164,18 +174,19 @@ func (c *Config) removeHosts(entryList []Entry) error {
 	}
 
 	hostFile := GetHostFile()
-	f, err := os.OpenFile(hostFile, os.O_RDWR, 0644)
+	content, err := os.ReadFile(hostFile)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
 	var retain []string
-	reader := bufio.NewReader(f)
+	reader := bufio.NewReader(bytes.NewReader(content))
 	for {
 		line, err := reader.ReadString('\n')
 		if errors.Is(err, io.EOF) {
 			break
+		} else if err != nil {
+			return err
 		}
 		var needsRemove bool
 		if strings.Contains(line, config.HostsKeyWord) {
@@ -200,9 +211,7 @@ func (c *Config) removeHosts(entryList []Entry) error {
 		sb.WriteString(s)
 	}
 	str := strings.TrimSuffix(sb.String(), "\n")
-	err = f.Truncate(0)
-	_, err = f.Seek(0, 0)
-	_, err = f.WriteString(str)
+	err = os.WriteFile(hostFile, []byte(str), 0644)
 	return err
 }
 
@@ -278,13 +287,15 @@ func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) []Entry {
 	if err == nil {
 		reader := bufio.NewReader(strings.NewReader(string(content)))
 		for {
-			readString, err := reader.ReadString('\n')
+			line, err := reader.ReadString('\n')
 			if errors.Is(err, io.EOF) {
+				break
+			} else if err != nil {
 				break
 			}
 			for j := 0; j < len(entryList); j++ {
 				entry := entryList[j]
-				if strings.Contains(readString, entry.Domain) && strings.Contains(readString, entry.IP) {
+				if strings.Contains(line, entry.Domain) && strings.Contains(line, entry.IP) {
 					entryList = append(entryList[:j], entryList[j+1:]...)
 					j--
 				}
@@ -298,18 +309,19 @@ func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) []Entry {
 
 func CleanupHosts() error {
 	path := GetHostFile()
-	f, err := os.OpenFile(path, os.O_RDWR, 0644)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
 	var retain []string
-	reader := bufio.NewReader(f)
+	reader := bufio.NewReader(bytes.NewReader(content))
 	for {
 		line, err := reader.ReadString('\n')
 		if errors.Is(err, io.EOF) {
 			break
+		} else if err != nil {
+			return err
 		}
 		if !strings.Contains(line, config.HostsKeyWord) {
 			retain = append(retain, line)
@@ -324,8 +336,6 @@ func CleanupHosts() error {
 		sb.WriteString(s)
 	}
 	str := strings.TrimSuffix(sb.String(), "\n")
-	err = f.Truncate(0)
-	_, err = f.Seek(0, 0)
-	_, err = f.WriteString(str)
+	err = os.WriteFile(path, []byte(str), 0644)
 	return err
 }

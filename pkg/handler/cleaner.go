@@ -27,8 +27,11 @@ func (c *ConnectOptions) addCleanUpResourceHandler() {
 	var stopChan = make(chan os.Signal)
 	signal.Notify(stopChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL)
 	go func() {
-		<-stopChan
-		c.Cleanup()
+		select {
+		case <-stopChan:
+			c.Cleanup()
+		case <-c.ctx.Done():
+		}
 	}()
 }
 

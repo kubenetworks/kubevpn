@@ -72,7 +72,9 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 	}
 
 	if svr.connect == nil && len(svr.secondaryConnect) == 0 {
-		dns.CleanupHosts()
+		if svr.IsSudo {
+			dns.CleanupHosts()
+		}
 	}
 
 	if !svr.IsSudo {
