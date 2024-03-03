@@ -54,7 +54,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		DefValue: file,
 	})
 	var path string
-	path, err = handler.SshJump(ctx, sshConf, flags, false)
+	path, err = util.SshJump(ctx, sshConf, flags, false)
 	if err != nil {
 		return err
 	}

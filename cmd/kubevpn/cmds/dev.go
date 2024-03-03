@@ -104,7 +104,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 			if err != nil {
 				return err
 			}
-			return handler.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false)
+			return util.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			devOptions.Workload = args[0]

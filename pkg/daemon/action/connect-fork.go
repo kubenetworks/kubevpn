@@ -67,7 +67,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 		return nil
 	})
 	var path string
-	path, err = handler.SshJump(sshCtx, sshConf, flags, false)
+	path, err = util.SshJump(sshCtx, sshConf, flags, false)
 	if err != nil {
 		return err
 	}
@@ -126,7 +126,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		return nil
 	})
 	var path string
-	path, err = handler.SshJump(sshCtx, sshConf, flags, true)
+	path, err = util.SshJump(sshCtx, sshConf, flags, true)
 	if err != nil {
 		return err
 	}

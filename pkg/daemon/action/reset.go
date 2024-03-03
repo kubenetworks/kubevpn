@@ -37,7 +37,7 @@ func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) err
 	var sshConf = util.ParseSshFromRPC(req.SshJump)
 	var ctx = resp.Context()
 	var path string
-	path, err = handler.SshJump(ctx, sshConf, flags, false)
+	path, err = util.SshJump(ctx, sshConf, flags, false)
 	if err != nil {
 		return err
 	}

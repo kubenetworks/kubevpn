@@ -82,7 +82,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 		DefValue: file,
 	})
 	var path string
-	path, err = handler.SshJump(resp.Context(), sshConf, flags, false)
+	path, err = util.SshJump(resp.Context(), sshConf, flags, false)
 	if err != nil {
 		return err
 	}

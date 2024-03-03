@@ -8,11 +8,9 @@ import (
 	"math"
 	"math/rand"
 	"net"
-	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -27,14 +25,11 @@ import (
 	miekgdns "github.com/miekg/dns"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/pflag"
-	"golang.org/x/crypto/ssh"
 	"google.golang.org/grpc/metadata"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/runtime"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	pkgtypes "k8s.io/apimachinery/pkg/types"
@@ -43,12 +38,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/tools/clientcmd/api/latest"
 	clientcmdlatest "k8s.io/client-go/tools/clientcmd/api/latest"
@@ -62,7 +55,6 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
@@ -743,228 +735,6 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory) (err error) {
 	return
 }
 
-func SshJump(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, print bool) (path string, err error) {
-	if conf.Addr == "" && conf.ConfigAlias == "" {
-		if flags != nil {
-			lookup := flags.Lookup("kubeconfig")
-			if lookup != nil {
-				if lookup.Value != nil && lookup.Value.String() != "" {
-					path = lookup.Value.String()
-				} else if lookup.DefValue != "" {
-					path = lookup.DefValue
-				} else {
-					path = lookup.NoOptDefVal
-				}
-			}
-		}
-		return
-	}
-	defer func() {
-		if er := recover(); er != nil {
-			err = er.(error)
-		}
-	}()
-
-	// pre-check network ip connect
-	var cli *ssh.Client
-	cli, err = util.DialSshRemote(conf)
-	if err != nil {
-		return
-	}
-	defer cli.Close()
-
-	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-
-	if conf.RemoteKubeconfig != "" || (flags != nil && flags.Changed("remote-kubeconfig")) {
-		var stdout []byte
-		var stderr []byte
-		if len(conf.RemoteKubeconfig) != 0 && conf.RemoteKubeconfig[0] == '~' {
-			conf.RemoteKubeconfig = filepath.Join("/home", conf.User, conf.RemoteKubeconfig[1:])
-		}
-		if conf.RemoteKubeconfig == "" {
-			// if `--remote-kubeconfig` is parsed then Entrypoint is reset
-			conf.RemoteKubeconfig = filepath.Join("/home", conf.User, clientcmd.RecommendedHomeDir, clientcmd.RecommendedFileName)
-		}
-		stdout, stderr, err = util.RemoteRun(cli,
-			fmt.Sprintf("sh -c 'kubectl config view --flatten --raw --kubeconfig %s || minikube kubectl -- config view --flatten --raw --kubeconfig %s'",
-				conf.RemoteKubeconfig,
-				conf.RemoteKubeconfig),
-			map[string]string{clientcmd.RecommendedConfigPathEnvVar: conf.RemoteKubeconfig},
-		)
-		if err != nil {
-			err = errors.Wrap(err, string(stderr))
-			return
-		}
-		if len(stdout) == 0 {
-			err = errors.Errorf("can not get kubeconfig %s from remote ssh server: %s", conf.RemoteKubeconfig, string(stderr))
-			return
-		}
-
-		var temp *os.File
-		if temp, err = os.CreateTemp("", "kubevpn"); err != nil {
-			return
-		}
-		if err = temp.Close(); err != nil {
-			return
-		}
-		if err = os.WriteFile(temp.Name(), stdout, 0644); err != nil {
-			return
-		}
-		if err = os.Chmod(temp.Name(), 0644); err != nil {
-			return
-		}
-		configFlags.KubeConfig = pointer.String(temp.Name())
-	} else {
-		if flags != nil {
-			lookup := flags.Lookup("kubeconfig")
-			if lookup != nil {
-				if lookup.Value != nil && lookup.Value.String() != "" {
-					configFlags.KubeConfig = pointer.String(lookup.Value.String())
-				} else if lookup.DefValue != "" {
-					configFlags.KubeConfig = pointer.String(lookup.DefValue)
-				}
-			}
-		}
-	}
-	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
-	var rawConfig api.Config
-	rawConfig, err = matchVersionFlags.ToRawKubeConfigLoader().RawConfig()
-	if err != nil {
-		return
-	}
-	if err = api.FlattenConfig(&rawConfig); err != nil {
-		return
-	}
-	if rawConfig.Contexts == nil {
-		err = errors.New("kubeconfig is invalid")
-		return
-	}
-	kubeContext := rawConfig.Contexts[rawConfig.CurrentContext]
-	if kubeContext == nil {
-		err = errors.New("kubeconfig is invalid")
-		return
-	}
-	cluster := rawConfig.Clusters[kubeContext.Cluster]
-	if cluster == nil {
-		err = errors.New("kubeconfig is invalid")
-		return
-	}
-	var u *url.URL
-	u, err = url.Parse(cluster.Server)
-	if err != nil {
-		return
-	}
-
-	serverHost := u.Hostname()
-	serverPort := u.Port()
-	if serverPort == "" {
-		if u.Scheme == "https" {
-			serverPort = "443"
-		} else if u.Scheme == "http" {
-			serverPort = "80"
-		} else {
-			// handle other schemes if necessary
-			err = errors.New("kubeconfig is invalid: wrong protocol")
-			return
-		}
-	}
-	ips, err := net.LookupHost(serverHost)
-	if err != nil {
-		return
-	}
-
-	if len(ips) == 0 {
-		// handle error: no IP associated with the hostname
-		err = fmt.Errorf("kubeconfig: no IP associated with the hostname %s", serverHost)
-		return
-	}
-
-	var remote netip.AddrPort
-	// Use the first IP address
-	remote, err = netip.ParseAddrPort(net.JoinHostPort(ips[0], serverPort))
-	if err != nil {
-		return
-	}
-	var port int
-	port, err = util.GetAvailableTCPPortOrDie()
-	if err != nil {
-		return
-	}
-	var local netip.AddrPort
-	local, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
-	if err != nil {
-		return
-	}
-
-	if print {
-		log.Infof("wait jump to bastion host...")
-	}
-	err = util.PortMapUntil(ctx, conf, remote, local)
-	if err != nil {
-		log.Errorf("ssh proxy err: %v", err)
-		return
-	}
-
-	rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].Server = fmt.Sprintf("%s://%s", u.Scheme, local.String())
-	rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].TLSServerName = serverHost
-	// To Do: add cli option to skip tls verify
-	// rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].CertificateAuthorityData = nil
-	// rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].InsecureSkipTLSVerify = true
-	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})
-
-	var convertedObj runtime.Object
-	convertedObj, err = latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
-	if err != nil {
-		return
-	}
-	var marshal []byte
-	marshal, err = json.Marshal(convertedObj)
-	if err != nil {
-		return
-	}
-	var temp *os.File
-	temp, err = os.CreateTemp("", "*.kubeconfig")
-	if err != nil {
-		return
-	}
-	if err = temp.Close(); err != nil {
-		return
-	}
-	if err = os.WriteFile(temp.Name(), marshal, 0644); err != nil {
-		return
-	}
-	if err = os.Chmod(temp.Name(), 0644); err != nil {
-		return
-	}
-	if print {
-		msg := fmt.Sprintf("| To use: export KUBECONFIG=%s |", temp.Name())
-		printLine(msg)
-		log.Infof(msg)
-		printLine(msg)
-	}
-	path = temp.Name()
-	return
-}
-func printLine(msg string) {
-	line := "+" + strings.Repeat("-", len(msg)-2) + "+"
-	log.Infof(line)
-}
-
-func SshJumpAndSetEnv(ctx context.Context, conf *util.SshConfig, flags *pflag.FlagSet, print bool) error {
-	if conf.Addr == "" && conf.ConfigAlias == "" {
-		return nil
-	}
-	path, err := SshJump(ctx, conf, flags, print)
-	if err != nil {
-		return err
-	}
-	err = os.Setenv(clientcmd.RecommendedConfigPathEnvVar, path)
-	if err != nil {
-		return err
-	}
-	return os.Setenv(config.EnvSSHJump, path)
-}
-
 // PreCheckResource transform user parameter to normal, example:
 // pod: productpage-7667dfcddb-cbsn5
 // replicast: productpage-7667dfcddb
@@ -1600,29 +1370,4 @@ func (c *ConnectOptions) AddRolloutFunc(f func() error) {
 
 func (c *ConnectOptions) getRolloutFunc() []func() error {
 	return c.rollbackFuncList
-}
-
-type ExtraRouteInfo struct {
-	ExtraCIDR   []string
-	ExtraDomain []string
-	ExtraNodeIP bool
-}
-
-func ParseExtraRouteFromRPC(route *rpc.ExtraRoute) *ExtraRouteInfo {
-	if route == nil {
-		return &ExtraRouteInfo{}
-	}
-	return &ExtraRouteInfo{
-		ExtraCIDR:   route.ExtraCIDR,
-		ExtraDomain: route.ExtraDomain,
-		ExtraNodeIP: route.ExtraNodeIP,
-	}
-}
-
-func (e ExtraRouteInfo) ToRPC() *rpc.ExtraRoute {
-	return &rpc.ExtraRoute{
-		ExtraCIDR:   e.ExtraCIDR,
-		ExtraDomain: e.ExtraDomain,
-		ExtraNodeIP: e.ExtraNodeIP,
-	}
 }
