@@ -6,7 +6,6 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -25,7 +24,7 @@ func (svr *Server) ConfigAdd(ctx context.Context, req *rpc.ConfigAddRequest) (*r
 	})
 	sshCtx, sshCancel := context.WithCancel(context.Background())
 	var path string
-	path, err = handler.SshJump(sshCtx, sshConf, flags, true)
+	path, err = util.SshJump(sshCtx, sshConf, flags, true)
 	CancelFunc[path] = sshCancel
 	if err != nil {
 		return nil, err

@@ -115,7 +115,7 @@ func disconnectByKubeConfig(ctx context.Context, svr *Server, kubeconfigBytes st
 	})
 	var sshConf = util.ParseSshFromRPC(jump)
 	var path string
-	path, err = handler.SshJump(ctx, sshConf, flags, false)
+	path, err = util.SshJump(ctx, sshConf, flags, false)
 	if err != nil {
 		return err
 	}
