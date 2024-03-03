@@ -183,11 +183,6 @@ func (c *Config) removeHosts(entryList []Entry) error {
 	reader := bufio.NewReader(bytes.NewReader(content))
 	for {
 		line, err := reader.ReadString('\n')
-		if errors.Is(err, io.EOF) {
-			break
-		} else if err != nil {
-			return err
-		}
 		var needsRemove bool
 		if strings.Contains(line, config.HostsKeyWord) {
 			for _, host := range entryList {
@@ -198,6 +193,11 @@ func (c *Config) removeHosts(entryList []Entry) error {
 		}
 		if !needsRemove {
 			retain = append(retain, line)
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return err
 		}
 	}
 
@@ -288,17 +288,17 @@ func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) []Entry {
 		reader := bufio.NewReader(strings.NewReader(string(content)))
 		for {
 			line, err := reader.ReadString('\n')
-			if errors.Is(err, io.EOF) {
-				break
-			} else if err != nil {
-				break
-			}
 			for j := 0; j < len(entryList); j++ {
 				entry := entryList[j]
 				if strings.Contains(line, entry.Domain) && strings.Contains(line, entry.IP) {
 					entryList = append(entryList[:j], entryList[j+1:]...)
 					j--
 				}
+			}
+			if errors.Is(err, io.EOF) {
+				break
+			} else if err != nil {
+				break
 			}
 		}
 	}
@@ -318,13 +318,13 @@ func CleanupHosts() error {
 	reader := bufio.NewReader(bytes.NewReader(content))
 	for {
 		line, err := reader.ReadString('\n')
+		if !strings.Contains(line, config.HostsKeyWord) {
+			retain = append(retain, line)
+		}
 		if errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
 			return err
-		}
-		if !strings.Contains(line, config.HostsKeyWord) {
-			retain = append(retain, line)
 		}
 	}
 	if len(retain) == 0 {
