@@ -25,21 +25,20 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 	log.SetLevel(log.InfoLevel)
 	switch {
 	case req.GetAll():
-		for i := len(svr.secondaryConnect) - 1; i >= 0; i-- {
-			svr.secondaryConnect[i].Cleanup()
-		}
-		svr.secondaryConnect = nil
-
-		if svr.connect != nil {
-			svr.connect.Cleanup()
-		}
-		svr.connect = nil
-		svr.t = time.Time{}
-
 		if svr.clone != nil {
 			_ = svr.clone.Cleanup()
 		}
 		svr.clone = nil
+
+		connects := handler.Connects(svr.secondaryConnect).Append(svr.connect)
+		for _, connect := range connects.Sort() {
+			if connect != nil {
+				connect.Cleanup()
+			}
+		}
+		svr.secondaryConnect = nil
+		svr.connect = nil
+		svr.t = time.Time{}
 	case req.ID != nil && req.GetID() == 0:
 		if svr.connect != nil {
 			svr.connect.Cleanup()

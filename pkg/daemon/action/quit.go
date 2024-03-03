@@ -7,6 +7,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 )
 
 func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error {
@@ -17,20 +18,19 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 	log.SetOutput(io.MultiWriter(newQuitWarp(resp), svr.LogFile))
 	log.SetLevel(log.InfoLevel)
 
-	for i := len(svr.secondaryConnect) - 1; i >= 0; i-- {
-		log.Info("quit: cleanup connection")
-		svr.secondaryConnect[i].Cleanup()
-	}
-
-	if svr.connect != nil {
-		log.Info("quit: cleanup connection")
-		svr.connect.Cleanup()
-	}
 	if svr.clone != nil {
 		log.Info("quit: cleanup clone")
 		err := svr.clone.Cleanup()
 		if err != nil {
 			log.Errorf("quit: cleanup clone failed: %v", err)
+		}
+	}
+
+	connects := handler.Connects(svr.secondaryConnect).Append(svr.connect)
+	for _, conn := range connects.Sort() {
+		log.Info("quit: cleanup connection")
+		if conn != nil {
+			conn.Cleanup()
 		}
 	}
 
