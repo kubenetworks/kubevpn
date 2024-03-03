@@ -34,7 +34,9 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 		}
 	}
 
-	dns.CleanupHosts()
+	if svr.IsSudo {
+		dns.CleanupHosts()
+	}
 
 	// last step is to quit GRPC server
 	if svr.Cancel != nil {

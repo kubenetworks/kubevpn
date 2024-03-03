@@ -4,6 +4,7 @@ package dns
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,7 +21,7 @@ import (
 )
 
 // systemd-resolve --status, systemd-resolve --flush-caches
-func (c *Config) SetupDNS() error {
+func (c *Config) SetupDNS(ctx context.Context) error {
 	clientConfig := c.Config
 	useLocalDNS := c.UseLocalDNS
 	tunName := c.TunName
@@ -38,7 +39,7 @@ func (c *Config) SetupDNS() error {
 	}
 
 	if useLocalDNS {
-		if err = SetupLocalDNS(clientConfig, existNameservers); err != nil {
+		if err = SetupLocalDNS(ctx, clientConfig, existNameservers); err != nil {
 			return err
 		}
 		clientConfig.Servers[0] = "127.0.0.1"
@@ -93,7 +94,7 @@ func (c *Config) SetupDNS() error {
 	return err
 }
 
-func SetupLocalDNS(clientConfig *miekgdns.ClientConfig, existNameservers []string) error {
+func SetupLocalDNS(ctx context.Context, clientConfig *miekgdns.ClientConfig, existNameservers []string) error {
 	corefile, err := BuildCoreFile(CoreFileTmpl{
 		UpstreamDNS: clientConfig.Servers[0],
 		Nameservers: strings.Join(existNameservers, " "),
@@ -112,6 +113,10 @@ func SetupLocalDNS(clientConfig *miekgdns.ClientConfig, existNameservers []strin
 
 	// Twiddle your thumbs
 	go instance.Wait()
+	go func() {
+		<-ctx.Done()
+		instance.Stop()
+	}()
 	return nil
 }
 

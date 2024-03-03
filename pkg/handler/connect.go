@@ -419,10 +419,12 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 		log.Errorf("parse route error: %v", err)
 		return err
 	}
-	go func() {
-		log.Error(Run(ctx, servers))
-		c.Cleanup()
-	}()
+	go func(ctx context.Context) {
+		for ctx.Err() == nil {
+			log.Error(Run(ctx, servers))
+			time.Sleep(time.Second * 5)
+		}
+	}(ctx)
 	log.Info("tunnel connected")
 	return
 }
@@ -671,7 +673,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context, lite bool) error {
 		Hosts:       c.extraHost,
 		Lock:        c.Lock,
 	}
-	if err = c.dnsConfig.SetupDNS(); err != nil {
+	if err = c.dnsConfig.SetupDNS(ctx); err != nil {
 		return err
 	}
 	// dump service in current namespace for support DNS resolve service:port
