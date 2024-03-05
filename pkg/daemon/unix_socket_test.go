@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -16,7 +15,11 @@ import (
 )
 
 func TestHttpOverUnix(t *testing.T) {
-	file := filepath.Join(os.TempDir(), "kubevpn.socks")
+	temp, err2 := os.CreateTemp("", "kubevpn.socks")
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	os.Remove(temp.Name())
 	client := http.Client{
 		Transport: &http.Transport{
 			Proxy:               http.ProxyFromEnvironment,
@@ -25,13 +28,13 @@ func TestHttpOverUnix(t *testing.T) {
 				var d net.Dialer
 				d.Timeout = 30 * time.Second
 				d.KeepAlive = 30 * time.Second
-				return d.DialContext(ctx, "unix", file)
+				return d.DialContext(ctx, "unix", temp.Name())
 			},
 		},
 	}
 
 	go func() {
-		listener, err := net.Listen("unix", file)
+		listener, err := net.Listen("unix", temp.Name())
 		if err != nil {
 			t.Fatal(err)
 		}

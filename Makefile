@@ -102,3 +102,11 @@ version:
 .PHONY: gen
 gen:
 	go generate ./...
+
+.PHONY: ut
+ut:
+	go test -coverprofile=coverage.txt -coverpkg=./... -v ./... -timeout=60m
+
+.PHONY: cover
+cover: ut
+	go tool cover -html=coverage.txt
