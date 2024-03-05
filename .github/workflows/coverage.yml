@@ -1,0 +1,79 @@
+name: Coverage
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.20'
+          check-latest: true
+      - name: Set up Docker
+        uses: crazy-max/ghaction-setup-docker@v3
+
+      - name: Install minikube
+        run: |
+          set -x
+          docker version
+          brew install minikube
+          minikube start --driver=docker
+          kubectl get pod -A -o wide
+          minikube kubectl -- get pod -A -o wide
+
+      - name: Kubernetes info
+        run: |
+          kubectl cluster-info
+          cat ~/.kube/config
+          kubectl get pods -n kube-system -o wide
+
+      - name: Install demo bookinfo
+        run: |
+          minikube image load --remote istio/examples-bookinfo-details-v1:1.16.2
+          minikube image load --remote istio/examples-bookinfo-ratings-v1:1.16.2
+          minikube image load --remote istio/examples-bookinfo-reviews-v1:1.16.2
+          minikube image load --remote istio/examples-bookinfo-productpage-v1:1.16.2
+          minikube image load --remote naison/authors:latest
+          minikube image load --remote nginx:latest
+          minikube image load --remote naison/kubevpn:test
+          minikube image ls
+          eval $(minikube docker-env)
+          kubectl apply -f https://raw.githubusercontent.com/kubenetworks/kubevpn/master/samples/bookinfo.yaml
+
+      - name: Build
+        run: |
+          export VERSION=test
+          make kubevpn-darwin-amd64
+          chmod +x ./bin/kubevpn
+          cp ./bin/kubevpn /usr/local/bin/kubevpn
+          kubevpn version
+
+      - name: Wait for pods reviews to be ready
+        run: |
+          kubectl wait pods -l app=reviews --for=condition=Ready --timeout=3600s
+          kubectl wait pods -l app=productpage --for=condition=Ready --timeout=3600s
+          kubectl get svc -A -o wide || true
+          kubectl get pod -A -o wide || true
+          kubectl get all -o wide || true
+          kubectl get nodes -o yaml || true
+          ifconfig
+          netstat -anr
+
+      - name: Test
+        run: make ut
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@0cfda1dd0a4ad9efc75517f399d859cd1ea4ced1 # v4.0.2
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          verbose: true
+          slug: wencaiwulue/kubevpn

@@ -79,7 +79,7 @@ jobs:
           sudo ln /usr/bin/resolvectl /usr/bin/systemd-resolve
 
       - name: Test
-        run: go test -v -failfast ./... -timeout=60m
+        run: make ut
 
   macos:
     runs-on: macos-latest
@@ -143,7 +143,7 @@ jobs:
           netstat -anr
 
       - name: Test
-        run: go test -v -failfast ./... -timeout=60m
+        run: make ut
 
   windows:
     runs-on: windows-latest
@@ -167,13 +167,3 @@ jobs:
 
       - name: Build
         run: make kubevpn-windows-amd64
-
-  upload-coverage-reports-to-codecov:
-    runs-on: ubuntu-latest
-    if: ${{ always() }}
-    needs: [ "linux", "macos", "windows" ]
-    steps:
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v3
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
