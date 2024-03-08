@@ -101,7 +101,7 @@ func (w *wsHandler) handle(ctx context.Context) {
 	}
 	ip, _, err := net.ParseCIDR(string(serverIP))
 	if err != nil {
-		w.Log("Parse server ip error: %v", err)
+		w.Log("Parse server ip %s, stderr: %s: %v", string(serverIP), string(stderr), err)
 		return
 	}
 	msg := fmt.Sprintf("| You can use client: %s to communicate with server: %s |", clientIP.IP.String(), ip.String())
