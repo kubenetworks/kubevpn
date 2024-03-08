@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,7 @@ import (
 	"golang.org/x/net/websocket"
 	"golang.org/x/oauth2"
 	"k8s.io/client-go/tools/remotecommand"
+	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
@@ -87,9 +89,6 @@ func (w *wsHandler) handle(ctx context.Context) {
 		w.Log("Port map error: %v", err)
 		return
 	}
-	// startup daemon process if daemon process not start
-	startDaemonCmd := fmt.Sprintf(`export %s=%s && kubevpn get service > /dev/null 2>&1 &`, config.EnvStartSudoKubeVPNByKubeVPN, "true")
-	util.RemoteRun(cli, startDaemonCmd, nil)
 	cmd := fmt.Sprintf(`export %s=%s && kubevpn ssh-daemon --client-ip %s`, config.EnvStartSudoKubeVPNByKubeVPN, "true", clientIP.String())
 	serverIP, stderr, err := util.RemoteRun(cli, cmd, nil)
 	if err != nil {
@@ -151,6 +150,47 @@ func (w *wsHandler) handle(ctx context.Context) {
 	return
 }
 
+// startup daemon process if daemon process not start
+func startDaemonProcess(cli *ssh.Client) {
+	startDaemonCmd := fmt.Sprintf(`export %s=%s && kubevpn get service > /dev/null 2>&1 &`, config.EnvStartSudoKubeVPNByKubeVPN, "true")
+	_, _, _ = util.RemoteRun(cli, startDaemonCmd, nil)
+	ticker := time.NewTicker(time.Millisecond * 50)
+	defer ticker.Stop()
+	for range ticker.C {
+		output, _, err := util.RemoteRun(cli, "kubevpn version", nil)
+		if err != nil {
+			continue
+		}
+		version := getDaemonVersionFromOutput(output)
+		if version != "" && version != "unknown" {
+			break
+		}
+	}
+}
+
+func getDaemonVersionFromOutput(output []byte) (version string) {
+	type Data struct {
+		DaemonVersion string `json:"DaemonVersion"`
+	}
+	// remove first line
+	buf := bufio.NewReader(bytes.NewReader(output))
+	_, _, _ = buf.ReadLine()
+	restBytes, err := io.ReadAll(buf)
+	if err != nil {
+		return
+	}
+	jsonBytes, err := yaml.YAMLToJSON(restBytes)
+	if err != nil {
+		return
+	}
+	var data Data
+	err = json.Unmarshal(jsonBytes, &data)
+	if err != nil {
+		return
+	}
+	return data.DaemonVersion
+}
+
 func (w *wsHandler) terminal(ctx context.Context, cli *ssh.Client, conn *websocket.Conn) error {
 	session, err := cli.NewSession()
 	if err != nil {
@@ -187,11 +227,17 @@ func (w *wsHandler) terminal(ctx context.Context, cli *ssh.Client, conn *websock
 	return session.Wait()
 }
 
-func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.Client) error {
-	cmd := `hash kubevpn || type kubevpn || which kubevpn || command -v kubevpn`
-	_, _, err := util.RemoteRun(sshClient, cmd, nil)
+func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.Client) (err error) {
+	defer func() {
+		if err == nil {
+			startDaemonProcess(sshClient)
+		}
+	}()
+
+	cmd := "kubevpn version"
+	_, _, err = util.RemoteRun(sshClient, cmd, nil)
 	if err == nil {
-		w.Log("Remote kubevpn command found, use it")
+		w.Log("Found command kubevpn command on remote")
 		return nil
 	}
 	log.Infof("remote kubevpn command not found, try to install it...")
@@ -249,12 +295,7 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 		"sudo mv ~/.kubevpn/kubevpn /usr/local/bin/kubevpn",
 	}
 	err = util.SCPAndExec(w.conn, w.conn, sshClient, tempBin.Name(), "kubevpn", cmds...)
-	if err != nil {
-		return err
-	}
-	// try to startup daemon process
-	go util.RemoteRun(sshClient, "kubevpn get pods", nil)
-	return nil
+	return err
 }
 
 func (w *wsHandler) Log(format string, a ...any) {
