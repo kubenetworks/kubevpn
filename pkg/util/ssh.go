@@ -80,9 +80,15 @@ func (s *SshConfig) ToRPC() *rpc.SshJump {
 }
 
 // DialSshRemote https://github.com/golang/go/issues/21478
-func DialSshRemote(conf *SshConfig) (*ssh.Client, error) {
-	var remote *ssh.Client
-	var err error
+func DialSshRemote(conf *SshConfig) (remote *ssh.Client, err error) {
+	defer func() {
+		if err != nil {
+			if remote != nil {
+				remote.Close()
+			}
+		}
+	}()
+
 	if conf.ConfigAlias != "" {
 		remote, err = jumpRecursion(conf.ConfigAlias)
 	} else {
@@ -141,7 +147,7 @@ func DialSshRemote(conf *SshConfig) (*ssh.Client, error) {
 	// ref: https://github.com/golang/go/issues/21478
 	if err == nil {
 		go func() {
-			ticker := time.NewTicker(time.Second * 5)
+			ticker := time.NewTicker(time.Second * 15)
 			defer ticker.Stop()
 			defer remote.Close()
 			for range ticker.C {
@@ -237,6 +243,13 @@ func copyStream(local net.Conn, remote net.Conn) {
 }
 
 func jumpRecursion(name string) (client *ssh.Client, err error) {
+	defer func() {
+		if err != nil {
+			if client != nil {
+				client.Close()
+			}
+		}
+	}()
 	var jumper = "ProxyJump"
 	var bastionList = []*SshConfig{getBastion(name)}
 	for {
@@ -309,18 +322,32 @@ func dial(from *SshConfig) (*ssh.Client, error) {
 	})
 }
 
-func jump(bClient *ssh.Client, to *SshConfig) (*ssh.Client, error) {
+func jump(bClient *ssh.Client, to *SshConfig) (client *ssh.Client, err error) {
+	var authMethod ssh.AuthMethod
+	authMethod, err = publicKeyFile(to.Keyfile)
+	if err != nil {
+		return
+	}
 	// Dial a connection to the service host, from the bastion
-	conn, err := bClient.Dial("tcp", to.Addr)
+	var conn net.Conn
+	conn, err = bClient.Dial("tcp", to.Addr)
 	if err != nil {
-		return nil, err
+		return
 	}
-
-	authMethod, err := publicKeyFile(to.Keyfile)
-	if err != nil {
-		return nil, err
-	}
-	ncc, chans, reqs, err := ssh.NewClientConn(conn, to.Addr, &ssh.ClientConfig{
+	defer func() {
+		if err != nil {
+			if client != nil {
+				client.Close()
+			}
+			if conn != nil {
+				conn.Close()
+			}
+		}
+	}()
+	var ncc ssh.Conn
+	var chans <-chan ssh.NewChannel
+	var reqs <-chan *ssh.Request
+	ncc, chans, reqs, err = ssh.NewClientConn(conn, to.Addr, &ssh.ClientConfig{
 		User:            to.User,
 		Auth:            []ssh.AuthMethod{authMethod},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
@@ -328,11 +355,11 @@ func jump(bClient *ssh.Client, to *SshConfig) (*ssh.Client, error) {
 		Timeout:         time.Second * 10,
 	})
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	sClient := ssh.NewClient(ncc, chans, reqs)
-	return sClient, nil
+	client = ssh.NewClient(ncc, chans, reqs)
+	return
 }
 
 type conf []*ssh_config.Config

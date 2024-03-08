@@ -14,8 +14,7 @@ import (
 )
 
 // CmdSSHDaemon
-// 设置本地的IP是223.254.0.1/32 ，记得一定是掩码 32位，
-// 这样别的路由不会走到这里来
+// set local tun ip 223.254.0.1/32, remember to use mask 32
 func CmdSSHDaemon(_ cmdutil.Factory) *cobra.Command {
 	var clientIP string
 	cmd := &cobra.Command{
@@ -41,8 +40,8 @@ func CmdSSHDaemon(_ cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprint(os.Stdout, client.ServerIP)
-			return nil
+			_, err = fmt.Fprint(os.Stdout, client.ServerIP)
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&clientIP, "client-ip", "", "Client cidr")
