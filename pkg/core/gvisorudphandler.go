@@ -2,24 +2,20 @@ package core
 
 import (
 	"context"
-	"fmt"
+	"io"
 	"net"
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-type gvisorUDPOverTCPTunnelConnector struct {
-	Id stack.TransportEndpointID
-}
+type gvisorUDPOverTCPTunnelConnector struct{}
 
-func GvisorUDPOverTCPTunnelConnector(endpointID stack.TransportEndpointID) Connector {
-	return &gvisorUDPOverTCPTunnelConnector{
-		Id: endpointID,
-	}
+func GvisorUDPOverTCPTunnelConnector() Connector {
+	return &gvisorUDPOverTCPTunnelConnector{}
 }
 
 func (c *gvisorUDPOverTCPTunnelConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
@@ -38,7 +34,7 @@ func (c *gvisorUDPOverTCPTunnelConnector) ConnectContext(ctx context.Context, co
 			return nil, err
 		}
 	}
-	return newGvisorFakeUDPTunnelConnOverTCP(ctx, conn)
+	return conn, nil
 }
 
 type gvisorUDPHandler struct{}
@@ -73,50 +69,8 @@ func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	handle(ctx, tcpConn, remote)
 }
 
-// fake udp connect over tcp
-type gvisorFakeUDPTunnelConn struct {
-	// tcp connection
-	net.Conn
-	ctx context.Context
-}
-
-func newGvisorFakeUDPTunnelConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, error) {
-	return &gvisorFakeUDPTunnelConn{ctx: ctx, Conn: conn}, nil
-}
-
-func (c *gvisorFakeUDPTunnelConn) Read(b []byte) (int, error) {
-	select {
-	case <-c.ctx.Done():
-		return 0, c.ctx.Err()
-	default:
-		dgram, err := readDatagramPacket(c.Conn, b)
-		if err != nil {
-			return 0, err
-		}
-		return int(dgram.DataLength), nil
-	}
-}
-
-func (c *gvisorFakeUDPTunnelConn) Write(b []byte) (int, error) {
-	dgram := newDatagramPacket(b)
-	if err := dgram.Write(c.Conn); err != nil {
-		return 0, err
-	}
-	return len(b), nil
-}
-
-func (c *gvisorFakeUDPTunnelConn) Close() error {
-	if cc, ok := c.Conn.(interface{ CloseRead() error }); ok {
-		_ = cc.CloseRead()
-	}
-	if cc, ok := c.Conn.(interface{ CloseWrite() error }); ok {
-		_ = cc.CloseWrite()
-	}
-	return c.Conn.Close()
-}
-
 func GvisorUDPListener(addr string) (net.Listener, error) {
-	log.Debug("gvisor UDP over TCP listen addr", addr)
+	log.Debugf("gvisor UDP over TCP listen addr: %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -130,96 +84,24 @@ func GvisorUDPListener(addr string) (net.Listener, error) {
 
 func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	defer udpConn.Close()
-	log.Debugf("[TUN-UDP] Debug: %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
+	log.Debugf("[TUN-UDP] Debug: %s <-> %s", tcpConn.RemoteAddr(), udpConn.RemoteAddr())
 	errChan := make(chan error, 2)
+	tcpC := util.NewReadWriter(tcpConn, time.Second*30)
+	udpC := util.NewReadWriter(udpConn, time.Second*30)
 	go func() {
-		b := config.LPool.Get().([]byte)[:]
-		defer config.LPool.Put(b[:])
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			err := tcpConn.SetReadDeadline(time.Now().Add(time.Second * 30))
-			if err != nil {
-				log.Debugf("[TUN-UDP] Error: set read deadline failed: %v", err)
-				errChan <- err
-				return
-			}
-			dgram, err := readDatagramPacket(tcpConn, b[:])
-			if err != nil {
-				log.Debugf("[TUN-UDP] Debug: %s -> 0 : %v", tcpConn.RemoteAddr(), err)
-				errChan <- err
-				return
-			}
-			if dgram.DataLength == 0 {
-				log.Debugf("[TUN-UDP] Error: length is zero")
-				errChan <- fmt.Errorf("length of read packet is zero")
-				return
-			}
-
-			err = udpConn.SetWriteDeadline(time.Now().Add(time.Second * 30))
-			if err != nil {
-				log.Debugf("[TUN-UDP] Error: set write deadline failed: %v", err)
-				errChan <- err
-				return
-			}
-			if _, err = udpConn.Write(dgram.Data); err != nil {
-				log.Debugf("[TUN-UDP] Error: %s -> %s : %s", tcpConn.RemoteAddr(), "localhost:8422", err)
-				errChan <- err
-				return
-			}
-			log.Debugf("[TUN-UDP] Debug: %s >>> %s length: %d", tcpConn.RemoteAddr(), "localhost:8422", dgram.DataLength)
-		}
+		buf := config.LPool.Get().([]byte)[:]
+		defer config.LPool.Put(buf[:])
+		written, err := io.CopyBuffer(udpC, tcpC, buf[:])
+		errChan <- err
+		log.Debugf("[TUN-UDP] Debug: %s >>> %s length: %d", tcpConn.RemoteAddr(), udpConn.RemoteAddr(), written)
 	}()
 
 	go func() {
-		b := config.LPool.Get().([]byte)[:]
-		defer config.LPool.Put(b[:])
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			err := udpConn.SetReadDeadline(time.Now().Add(time.Second * 30))
-			if err != nil {
-				log.Debugf("[TUN-UDP] Error: set read deadline failed: %v", err)
-				errChan <- err
-				return
-			}
-			n, _, err := udpConn.ReadFrom(b[:])
-			if err != nil {
-				log.Debugf("[TUN-UDP] Error: %s : %s", tcpConn.RemoteAddr(), err)
-				errChan <- err
-				return
-			}
-			if n == 0 {
-				log.Debugf("[TUN-UDP] Error: length is zero")
-				errChan <- fmt.Errorf("length of read packet is zero")
-				return
-			}
-
-			// pipe from peer to tunnel
-			err = tcpConn.SetWriteDeadline(time.Now().Add(time.Second * 30))
-			if err != nil {
-				log.Debugf("[TUN-UDP] Error: set write deadline failed: %v", err)
-				errChan <- err
-				return
-			}
-			dgram := newDatagramPacket(b[:n])
-			if err = dgram.Write(tcpConn); err != nil {
-				log.Debugf("[TUN-UDP] Error: %s <- %s : %s", tcpConn.RemoteAddr(), dgram.Addr(), err)
-				errChan <- err
-				return
-			}
-			log.Debugf("[TUN-UDP] Debug: %s <<< %s length: %d", tcpConn.RemoteAddr(), dgram.Addr(), len(dgram.Data))
-		}
+		buf := config.LPool.Get().([]byte)[:]
+		defer config.LPool.Put(buf[:])
+		written, err := io.CopyBuffer(tcpC, udpC, buf[:])
+		errChan <- err
+		log.Debugf("[TUN-UDP] Debug: %s <<< %s length: %d", tcpConn.RemoteAddr(), udpConn.RemoteAddr(), written)
 	}()
 	err := <-errChan
 	if err != nil {

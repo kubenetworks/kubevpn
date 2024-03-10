@@ -89,7 +89,7 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 }
 
 func GvisorTCPListener(addr string) (net.Listener, error) {
-	log.Debug("gvisor tcp listen addr", addr)
+	log.Debugf("gvisor tcp listen addr: %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err
