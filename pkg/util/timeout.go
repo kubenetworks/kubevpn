@@ -1,6 +1,7 @@
 package util
 
 import (
+	"errors"
 	"io"
 	"net"
 	"time"
@@ -19,7 +20,14 @@ func (c *timeoutConn) Write(b []byte) (int, error) {
 			return 0, err
 		}
 	}
-	return c.conn.Write(b)
+	n, err := c.conn.Write(b)
+	if err != nil {
+		return 0, err
+	}
+	if n == 0 {
+		return 0, errors.New("write packet length is zero")
+	}
+	return n, nil
 }
 
 func (c *timeoutConn) Read(b []byte) (int, error) {
@@ -29,7 +37,14 @@ func (c *timeoutConn) Read(b []byte) (int, error) {
 			return 0, err
 		}
 	}
-	return c.conn.Read(b)
+	n, err := c.conn.Read(b)
+	if err != nil {
+		return 0, err
+	}
+	if n == 0 {
+		return 0, errors.New("read packet length is zero")
+	}
+	return n, nil
 }
 
 func NewTimeoutWriter(w io.Writer, duration time.Duration) io.Writer {
