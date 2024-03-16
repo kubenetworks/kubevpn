@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"io"
 	"net"
 	"testing"
@@ -17,7 +18,7 @@ func TestTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	udpC := NewReadWriter(remote, time.Second*1)
+	udpC := NewReadWriter(context.Background(), remote, time.Second*1)
 	_, err = io.Copy(udpC, udpC)
 	if err != nil {
 		t.Fatal(err)

@@ -1,7 +1,7 @@
 package util
 
 import (
-	"errors"
+	"context"
 	"io"
 	"net"
 	"os"
@@ -9,52 +9,53 @@ import (
 )
 
 type timeoutConn struct {
-	conn         net.Conn
+	ctx context.Context
+	net.Conn
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 }
 
 func (c *timeoutConn) Write(b []byte) (int, error) {
+	select {
+	case <-c.ctx.Done():
+		return 0, c.ctx.Err()
+	default:
+	}
+
 	if c.writeTimeout != 0 {
-		err := c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
+		err := c.Conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 		if err != nil {
-			return 0, io.EOF
+			return 0, err
 		}
 	}
-	n, err := c.conn.Write(b)
+	n, err := c.Conn.Write(b)
 	if os.IsTimeout(err) {
 		return n, io.EOF
 	}
-	if err != nil {
-		return n, err
-	}
-	if n == 0 {
-		return 0, errors.New("write packet length is zero")
-	}
-	return n, nil
+	return n, err
 }
 
 func (c *timeoutConn) Read(b []byte) (int, error) {
+	select {
+	case <-c.ctx.Done():
+		return 0, c.ctx.Err()
+	default:
+	}
+
 	if c.readTimeout != 0 {
-		err := c.conn.SetReadDeadline(time.Now().Add(c.readTimeout))
+		err := c.Conn.SetReadDeadline(time.Now().Add(c.readTimeout))
 		if err != nil {
-			return 0, io.EOF
+			return 0, err
 		}
 	}
-	n, err := c.conn.Read(b)
+	n, err := c.Conn.Read(b)
 	if os.IsTimeout(err) {
 		return n, io.EOF
 	}
-	if err != nil {
-		return n, err
-	}
-	if n == 0 {
-		return 0, errors.New("read packet length is zero")
-	}
-	return n, nil
+	return n, err
 }
 
-func NewTimeoutWriter(w io.Writer, duration time.Duration) io.Writer {
+func NewTimeoutWriter(ctx context.Context, w io.Writer, duration time.Duration) io.Writer {
 	if duration == 0 {
 		return w
 	}
@@ -63,13 +64,14 @@ func NewTimeoutWriter(w io.Writer, duration time.Duration) io.Writer {
 		return w
 	}
 	return &timeoutConn{
-		conn:         c,
+		ctx:          ctx,
+		Conn:         c,
 		readTimeout:  duration,
 		writeTimeout: duration,
 	}
 }
 
-func NewTimeoutReader(r io.Reader, duration time.Duration) io.Reader {
+func NewTimeoutReader(ctx context.Context, r io.Reader, duration time.Duration) io.Reader {
 	if duration == 0 {
 		return r
 	}
@@ -78,13 +80,14 @@ func NewTimeoutReader(r io.Reader, duration time.Duration) io.Reader {
 		return r
 	}
 	return &timeoutConn{
-		conn:         c,
+		ctx:          ctx,
+		Conn:         c,
 		readTimeout:  duration,
 		writeTimeout: duration,
 	}
 }
 
-func NewReadWriter(rw io.ReadWriter, duration time.Duration) io.ReadWriter {
+func NewReadWriter(ctx context.Context, rw io.ReadWriter, duration time.Duration) io.ReadWriter {
 	if duration == 0 {
 		return rw
 	}
@@ -93,7 +96,8 @@ func NewReadWriter(rw io.ReadWriter, duration time.Duration) io.ReadWriter {
 		return rw
 	}
 	return &timeoutConn{
-		conn:         c,
+		ctx:          ctx,
+		Conn:         c,
 		readTimeout:  duration,
 		writeTimeout: duration,
 	}
@@ -103,8 +107,8 @@ func DisableTimeout(r io.Reader) error {
 	if c, ok := r.(*timeoutConn); ok {
 		c.readTimeout = 0
 		c.writeTimeout = 0
-		err := c.conn.SetReadDeadline(time.Time{})
-		err1 := c.conn.SetWriteDeadline(time.Time{})
+		err := c.Conn.SetReadDeadline(time.Time{})
+		err1 := c.Conn.SetWriteDeadline(time.Time{})
 		if err != nil {
 			return err
 		}
