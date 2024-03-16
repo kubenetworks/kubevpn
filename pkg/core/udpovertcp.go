@@ -2,7 +2,6 @@ package core
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 	"net"
 
@@ -12,13 +11,6 @@ import (
 type datagramPacket struct {
 	DataLength uint16 // [2]byte
 	Data       []byte // []byte
-}
-
-func (addr *datagramPacket) String() string {
-	if addr == nil {
-		return ""
-	}
-	return fmt.Sprintf("DataLength: %d, Data: %v\n", addr.DataLength, addr.Data)
 }
 
 func newDatagramPacket(data []byte) (r *datagramPacket) {

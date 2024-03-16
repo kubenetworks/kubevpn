@@ -47,7 +47,6 @@ func GvisorTCPHandler() Handler {
 
 func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
-	log.Debugf("[TUN-TCP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 	// 1, get proxy info
 	endpointID, err := ParseProxyInfo(tcpConn)
 	if err != nil {
@@ -67,6 +66,7 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		return
 	}
 
+	log.Debugf("[TUN-TCP] %s <-> %s", tcpConn.RemoteAddr(), remote.RemoteAddr())
 	errChan := make(chan error, 2)
 	go func() {
 		i := config.LPool.Get().([]byte)[:]
@@ -84,12 +84,12 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	}()
 	err = <-errChan
 	if err != nil && !errors.Is(err, io.EOF) {
-		log.Debugf("[TUN-TCP] Error: dsiconnect: %s >-<: %s: %v", tcpConn.LocalAddr(), remote.RemoteAddr(), err)
+		log.Debugf("[TUN-TCP] Error: dsiconnect: %s >-<: %s: %v", tcpConn.RemoteAddr(), remote.RemoteAddr(), err)
 	}
 }
 
 func GvisorTCPListener(addr string) (net.Listener, error) {
-	log.Debug("gvisor tcp listen addr", addr)
+	log.Debugf("gvisor tcp listen addr: %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err

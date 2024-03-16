@@ -7,19 +7,14 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-type gvisorUDPOverTCPTunnelConnector struct {
-	Id stack.TransportEndpointID
-}
+type gvisorUDPOverTCPTunnelConnector struct{}
 
-func GvisorUDPOverTCPTunnelConnector(endpointID stack.TransportEndpointID) Connector {
-	return &gvisorUDPOverTCPTunnelConnector{
-		Id: endpointID,
-	}
+func GvisorUDPOverTCPTunnelConnector() Connector {
+	return &gvisorUDPOverTCPTunnelConnector{}
 }
 
 func (c *gvisorUDPOverTCPTunnelConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
@@ -49,20 +44,19 @@ func GvisorUDPHandler() Handler {
 
 func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
-	log.Debugf("[TUN-UDP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 	// 1, get proxy info
-	endpointID, err := ParseProxyInfo(tcpConn)
+	info, err := ParseProxyInfo(tcpConn)
 	if err != nil {
 		log.Warningf("[TUN-UDP] Error: Failed to parse proxy info: %v", err)
 		return
 	}
 	log.Debugf("[TUN-UDP] Debug: LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
-		endpointID.LocalPort, endpointID.LocalAddress.String(), endpointID.RemotePort, endpointID.RemoteAddress.String(),
+		info.LocalPort, info.LocalAddress.String(), info.RemotePort, info.RemoteAddress.String(),
 	)
 	// 2, dial proxy
 	addr := &net.UDPAddr{
-		IP:   endpointID.LocalAddress.AsSlice(),
-		Port: int(endpointID.LocalPort),
+		IP:   info.LocalAddress.AsSlice(),
+		Port: int(info.LocalPort),
 	}
 	var remote *net.UDPConn
 	remote, err = net.DialUDP("udp", nil, addr)
@@ -116,7 +110,7 @@ func (c *gvisorFakeUDPTunnelConn) Close() error {
 }
 
 func GvisorUDPListener(addr string) (net.Listener, error) {
-	log.Debug("gvisor UDP over TCP listen addr", addr)
+	log.Debugf("gvisor UDP over TCP listen addr: %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -130,7 +124,7 @@ func GvisorUDPListener(addr string) (net.Listener, error) {
 
 func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	defer udpConn.Close()
-	log.Debugf("[TUN-UDP] Debug: %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
+	log.Debugf("[TUN-UDP] Debug: %s <-> %s", tcpConn.RemoteAddr(), udpConn.RemoteAddr())
 	errChan := make(chan error, 2)
 	go func() {
 		b := config.LPool.Get().([]byte)[:]
@@ -225,6 +219,6 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	if err != nil {
 		log.Debugf("[TUN-UDP] Error: %v", err)
 	}
-	log.Debugf("[TUN-UDP] Debug: %s >-< %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
+	log.Debugf("[TUN-UDP] Debug: %s >-< %s", tcpConn.RemoteAddr(), udpConn.RemoteAddr())
 	return
 }

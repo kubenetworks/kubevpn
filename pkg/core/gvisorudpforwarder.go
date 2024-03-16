@@ -35,7 +35,7 @@ func UDPForwarder(s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.
 			return
 		}
 		node.Client = &Client{
-			Connector:   GvisorUDPOverTCPTunnelConnector(endpointID),
+			Connector:   GvisorUDPOverTCPTunnelConnector(),
 			Transporter: TCPTransporter(),
 		}
 		forwardChain := NewChain(5, node)
@@ -76,7 +76,7 @@ func UDPForwarder(s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.
 			}()
 			err = <-errChan
 			if err != nil && !errors.Is(err, io.EOF) {
-				log.Debugf("[TUN-UDP] Error: dsiconnect: %s >-<: %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
+				log.Debugf("[TUN-UDP] Error: dsiconnect: %s >-<: %s: %v", conn.RemoteAddr(), remote.RemoteAddr(), err)
 			}
 		}()
 	}).HandlePacket

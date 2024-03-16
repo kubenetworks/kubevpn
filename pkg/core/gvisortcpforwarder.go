@@ -76,7 +76,7 @@ func TCPForwarder(s *stack.Stack) func(stack.TransportEndpointID, *stack.PacketB
 		}()
 		err = <-errChan
 		if err != nil && !errors.Is(err, io.EOF) {
-			log.Debugf("[TUN-TCP] Error: dsiconnect: %s >-<: %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
+			log.Debugf("[TUN-TCP] Error: dsiconnect: %s >-<: %s: %v", conn.RemoteAddr(), remote.RemoteAddr(), err)
 		}
 	}).HandlePacket
 }

@@ -39,22 +39,22 @@ func (c *fakeUDPTunnelConnector) ConnectContext(ctx context.Context, conn net.Co
 	return newFakeUDPTunnelConnOverTCP(ctx, conn)
 }
 
-type fakeUdpHandler struct {
+type fakeUDPHandler struct {
 	// map[srcIP]net.Conn
 	connNAT *sync.Map
 	ch      chan *datagramPacket
 }
 
 func TCPHandler() Handler {
-	return &fakeUdpHandler{
+	return &fakeUDPHandler{
 		connNAT: RouteConnNAT,
 		ch:      Chan,
 	}
 }
 
-func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
+func (h *fakeUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
-	log.Debugf("[tcpserver] %s -> %s\n", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
+	log.Debugf("[tcpserver] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 
 	defer func(addr net.Addr) {
 		var keys []string
