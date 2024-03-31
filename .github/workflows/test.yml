@@ -14,7 +14,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: '1.20'
+          go-version: '1.22'
           check-latest: true
       - name: Push image to docker hub
         run: |
@@ -31,7 +31,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: '1.20'
+          go-version: '1.22'
           check-latest: true
       - name: Setup Minikube
         id: minikube
@@ -90,7 +90,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: '1.20'
+          go-version: '1.22'
           check-latest: true
       - name: Set up Docker
         uses: crazy-max/ghaction-setup-docker@v3
@@ -154,7 +154,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: '1.20'
+          go-version: '1.22'
 
       - name: Set up Docker
         uses: crazy-max/ghaction-setup-docker@v3

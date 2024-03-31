@@ -3,16 +3,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.18 && !go1.22
-// +build go1.18,!go1.22
-
-// //go:linkname directives type-checked by checklinkname. Any other
-// non-linkname assumptions outside the Go 1 compatibility guarantee should
-// have an accompanied vet check or version guard build tag.
-
-// Check type definitions and constants when updating Go version.
-//
-// TODO(b/165820485): add these checks to checklinkname.
+// //go:linkname directives type-checked by checklinkname.
+// Runtime type copies checked by checkoffset.
 
 package sync
 
@@ -37,12 +29,15 @@ func Goyield() {
 // splitting and race context are not available where it is called.
 //
 //go:nosplit
-func Gopark(unlockf func(uintptr, unsafe.Pointer) bool, lock unsafe.Pointer, reason uint8, traceEv byte, traceskip int) {
-	gopark(unlockf, lock, reason, traceEv, traceskip)
+func Gopark(unlockf func(uintptr, unsafe.Pointer) bool, lock unsafe.Pointer, reason uint8, traceReason TraceBlockReason, traceskip int) {
+	gopark(unlockf, lock, reason, traceReason, traceskip)
 }
 
 //go:linkname gopark runtime.gopark
-func gopark(unlockf func(uintptr, unsafe.Pointer) bool, lock unsafe.Pointer, reason uint8, traceEv byte, traceskip int)
+func gopark(unlockf func(uintptr, unsafe.Pointer) bool, lock unsafe.Pointer, reason uint8, traceReason TraceBlockReason, traceskip int)
+
+// TraceBlockReason is equivalent to runtime.traceBlockReason.
+type TraceBlockReason uint8
 
 //go:linkname wakep runtime.wakep
 func wakep()
@@ -107,10 +102,10 @@ func MapKeyHasher(m any) func(unsafe.Pointer, uintptr) uintptr {
 		panic(fmt.Sprintf("sync.MapKeyHasher: m is %v, not map", rtyp))
 	}
 	mtyp := *(**maptype)(unsafe.Pointer(&m))
-	return mtyp.hasher
+	return mtyp.Hasher
 }
 
-// maptype is equivalent to the beginning of runtime.maptype.
+// maptype is equivalent to the beginning of internal/abi.MapType.
 type maptype struct {
 	size       uintptr
 	ptrdata    uintptr
@@ -126,7 +121,7 @@ type maptype struct {
 	key        unsafe.Pointer
 	elem       unsafe.Pointer
 	bucket     unsafe.Pointer
-	hasher     func(unsafe.Pointer, uintptr) uintptr
+	Hasher     func(unsafe.Pointer, uintptr) uintptr
 	// more fields
 }
 

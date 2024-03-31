@@ -49,7 +49,15 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 `)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			// startup daemon process and sudo process
-			return daemon.StartupDaemon(cmd.Context())
+			err := daemon.StartupDaemon(cmd.Context())
+			if err != nil {
+				return err
+			}
+			// not support temporally
+			if connect.Engine == config.EngineGvisor {
+				return fmt.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
+			}
+			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			bytes, ns, err := util.ConvertToKubeconfigBytes(f)

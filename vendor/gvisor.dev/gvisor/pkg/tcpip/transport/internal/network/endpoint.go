@@ -265,7 +265,7 @@ func (c *WriteContext) PacketInfo() WritePacketInfo {
 //
 // If this method returns nil, the caller should wait for the endpoint to become
 // writable.
-func (c *WriteContext) TryNewPacketBuffer(reserveHdrBytes int, data buffer.Buffer) stack.PacketBufferPtr {
+func (c *WriteContext) TryNewPacketBuffer(reserveHdrBytes int, data buffer.Buffer) *stack.PacketBuffer {
 	e := c.e
 
 	e.sendBufferSizeInUseMu.Lock()
@@ -308,7 +308,7 @@ func (c *WriteContext) TryNewPacketBuffer(reserveHdrBytes int, data buffer.Buffe
 }
 
 // WritePacket attempts to write the packet.
-func (c *WriteContext) WritePacket(pkt stack.PacketBufferPtr, headerIncluded bool) tcpip.Error {
+func (c *WriteContext) WritePacket(pkt *stack.PacketBuffer, headerIncluded bool) tcpip.Error {
 	c.e.mu.RLock()
 	pkt.Owner = c.e.owner
 	c.e.mu.RUnlock()
@@ -411,7 +411,7 @@ func (e *Endpoint) AcquireContextForWrite(opts tcpip.WriteOptions) (WriteContext
 		// interface/address used to send the packet so we need to construct
 		// a new route instead of using the connected route.
 		//
-		// Contruct a destination matching the remote the endpoint is connected
+		// Construct a destination matching the remote the endpoint is connected
 		// to.
 		to = &tcpip.FullAddress{
 			// RegisterNICID is set when the endpoint is connected. It is usually

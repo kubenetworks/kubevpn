@@ -1,8 +1,0 @@
-{
-  "input": "SELECT get_user_email(1);",
-  "outputs": [
-    {
-      "expected": "SELECT get_user_email ( ? )"
-    }
-  ]
-}

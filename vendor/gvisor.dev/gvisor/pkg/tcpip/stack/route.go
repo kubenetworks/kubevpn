@@ -101,6 +101,11 @@ func (r *Route) Loop() PacketLooping {
 	return r.routeInfo.Loop
 }
 
+// OutgoingNIC returns the route's outgoing NIC.
+func (r *Route) OutgoingNIC() tcpip.NICID {
+	return r.outgoingNIC.id
+}
+
 // RouteInfo contains all of Route's exported fields.
 //
 // +stateify savable
@@ -487,7 +492,7 @@ func (r *Route) isValidForOutgoingRLocked() bool {
 }
 
 // WritePacket writes the packet through the given route.
-func (r *Route) WritePacket(params NetworkHeaderParams, pkt PacketBufferPtr) tcpip.Error {
+func (r *Route) WritePacket(params NetworkHeaderParams, pkt *PacketBuffer) tcpip.Error {
 	if !r.isValidForOutgoing() {
 		return &tcpip.ErrInvalidEndpointState{}
 	}
@@ -497,7 +502,7 @@ func (r *Route) WritePacket(params NetworkHeaderParams, pkt PacketBufferPtr) tcp
 
 // WriteHeaderIncludedPacket writes a packet already containing a network
 // header through the given route.
-func (r *Route) WriteHeaderIncludedPacket(pkt PacketBufferPtr) tcpip.Error {
+func (r *Route) WriteHeaderIncludedPacket(pkt *PacketBuffer) tcpip.Error {
 	if !r.isValidForOutgoing() {
 		return &tcpip.ErrInvalidEndpointState{}
 	}
@@ -537,7 +542,7 @@ func (r *Route) Acquire() {
 // +checklocksread:r.mu
 func (r *Route) acquireLocked() {
 	if ep := r.localAddressEndpoint; ep != nil {
-		if !ep.IncRef() {
+		if !ep.TryIncRef() {
 			panic(fmt.Sprintf("failed to increment reference count for local address endpoint = %s", r.LocalAddress()))
 		}
 	}
