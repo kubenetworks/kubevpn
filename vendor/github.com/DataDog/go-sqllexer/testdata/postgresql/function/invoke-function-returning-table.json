@@ -1,8 +1,0 @@
-{
-  "input": "SELECT * FROM get_users();",
-  "outputs": [
-    {
-      "expected": "SELECT * FROM get_users ( )"
-    }
-  ]
-}

@@ -55,7 +55,7 @@ func UDPForwarder(s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.
 			log.Debugf("[TUN-UDP] Error: can not connect: %v", err)
 			return
 		}
-		conn := gonet.NewUDPConn(s, w, endpoint)
+		conn := gonet.NewUDPConn(w, endpoint)
 		go func() {
 			defer conn.Close()
 			defer remote.Close()

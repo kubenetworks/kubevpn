@@ -45,16 +45,22 @@ const (
 
 type transportProtocolState struct {
 	proto          TransportProtocol
-	defaultHandler func(id TransportEndpointID, pkt PacketBufferPtr) bool
+	defaultHandler func(id TransportEndpointID, pkt *PacketBuffer) bool
 }
 
-// ResumableEndpoint is an endpoint that needs to be resumed after restore.
-type ResumableEndpoint interface {
-	// Resume resumes an endpoint after restore. This can be used to restart
-	// background workers such as protocol goroutines. This must be called after
-	// all indirect dependencies of the endpoint has been restored, which
+// RestoredEndpoint is an endpoint that needs to be restored.
+type RestoredEndpoint interface {
+	// Restore restores an endpoint. This can be used to restart background
+	// workers such as protocol goroutines. This must be called after all
+	// indirect dependencies of the endpoint has been restored, which
 	// generally implies at the end of the restore process.
-	Resume(*Stack)
+	Restore(*Stack)
+}
+
+// ResumableEndpoint is an endpoint that needs to be resumed after save.
+type ResumableEndpoint interface {
+	// Resume resumes an endpoint.
+	Resume()
 }
 
 // uniqueIDGenerator is a default unique ID generator.
@@ -115,8 +121,12 @@ type Stack struct {
 	// TODO(gvisor.dev/issue/4595): S/R this field.
 	tables *IPTables
 
-	// resumableEndpoints is a list of endpoints that need to be resumed if the
+	// restoredEndpoints is a list of endpoints that need to be restored if the
 	// stack is being restored.
+	restoredEndpoints []RestoredEndpoint
+
+	// resumableEndpoints is a list of endpoints that need to be resumed
+	// after save.
 	resumableEndpoints []ResumableEndpoint
 
 	// icmpRateLimiter is a global rate limiter for all ICMP messages generated
@@ -139,11 +149,12 @@ type Stack struct {
 	uniqueIDGenerator UniqueID
 
 	// randomGenerator is an injectable pseudo random generator that can be
-	// used when a random number is required.
-	randomGenerator *rand.Rand
+	// used when a random number is required. It must not be used in
+	// security-sensitive contexts.
+	insecureRNG *rand.Rand
 
 	// secureRNG is a cryptographically secure random number generator.
-	secureRNG io.Reader
+	secureRNG cryptorand.RNG
 
 	// sendBufferSize holds the min/default/max send buffer sizes for
 	// endpoints other than TCP.
@@ -343,6 +354,7 @@ func New(opts Options) *Stack {
 	if opts.SecureRNG == nil {
 		opts.SecureRNG = cryptorand.Reader
 	}
+	secureRNG := cryptorand.RNGFrom(opts.SecureRNG)
 
 	randSrc := opts.RandSource
 	if randSrc == nil {
@@ -354,13 +366,13 @@ func New(opts Options) *Stack {
 		// we wrap it in a simple thread-safe version.
 		randSrc = &lockedRandomSource{src: rand.NewSource(v)}
 	}
-	randomGenerator := rand.New(randSrc)
+	insecureRNG := rand.New(randSrc)
 
 	if opts.IPTables == nil {
 		if opts.DefaultIPTables == nil {
 			opts.DefaultIPTables = DefaultTables
 		}
-		opts.IPTables = opts.DefaultIPTables(clock, randomGenerator)
+		opts.IPTables = opts.DefaultIPTables(clock, insecureRNG)
 	}
 
 	opts.NUDConfigs.resetInvalidFields()
@@ -378,12 +390,12 @@ func New(opts Options) *Stack {
 		handleLocal:                  opts.HandleLocal,
 		tables:                       opts.IPTables,
 		icmpRateLimiter:              NewICMPRateLimiter(clock),
-		seed:                         randomGenerator.Uint32(),
+		seed:                         secureRNG.Uint32(),
 		nudConfigs:                   opts.NUDConfigs,
 		uniqueIDGenerator:            opts.UniqueID,
 		nudDisp:                      opts.NUDDisp,
-		randomGenerator:              randomGenerator,
-		secureRNG:                    opts.SecureRNG,
+		insecureRNG:                  insecureRNG,
+		secureRNG:                    secureRNG,
 		sendBufferSize: tcpip.SendBufferSizeOption{
 			Min:     MinBufferSize,
 			Default: DefaultBufferSize,
@@ -395,7 +407,7 @@ func New(opts Options) *Stack {
 			Max:     DefaultMaxBufferSize,
 		},
 		tcpInvalidRateLimit: defaultTCPInvalidRateLimit,
-		tsOffsetSecret:      randomGenerator.Uint32(),
+		tsOffsetSecret:      secureRNG.Uint32(),
 	}
 
 	// Add specified network protocols.
@@ -483,12 +495,22 @@ func (s *Stack) TransportProtocolOption(transport tcpip.TransportProtocolNumber,
 	return transProtoState.proto.Option(option)
 }
 
+// SendBufSizeProto is a protocol that can return its send buffer size.
+type SendBufSizeProto interface {
+	SendBufferSize() tcpip.TCPSendBufferSizeRangeOption
+}
+
+// TCPSendBufferLimits returns the TCP send buffer size limit.
+func (s *Stack) TCPSendBufferLimits() tcpip.TCPSendBufferSizeRangeOption {
+	return s.transportProtocols[header.TCPProtocolNumber].proto.(SendBufSizeProto).SendBufferSize()
+}
+
 // SetTransportProtocolHandler sets the per-stack default handler for the given
 // protocol.
 //
 // It must be called only during initialization of the stack. Changing it as the
 // stack is operating is not supported.
-func (s *Stack) SetTransportProtocolHandler(p tcpip.TransportProtocolNumber, h func(TransportEndpointID, PacketBufferPtr) bool) {
+func (s *Stack) SetTransportProtocolHandler(p tcpip.TransportProtocolNumber, h func(TransportEndpointID, *PacketBuffer) bool) {
 	state := s.transportProtocols[p]
 	if state != nil {
 		state.defaultHandler = h
@@ -839,6 +861,10 @@ type NICOptions struct {
 
 	// GROTimeout specifies the GRO timeout. Zero bypasses GRO.
 	GROTimeout time.Duration
+
+	// DeliverLinkPackets specifies whether the NIC is responsible for
+	// delivering raw packets to packet sockets.
+	DeliverLinkPackets bool
 }
 
 // CreateNICWithOptions creates a NIC with the provided id, LinkEndpoint, and
@@ -962,14 +988,14 @@ func (s *Stack) removeNICLocked(id tcpip.NICID) tcpip.Error {
 	// Remove routes in-place. n tracks the number of routes written.
 	s.routeMu.Lock()
 	n := 0
-	for i, r := range s.routeTable {
-		s.routeTable[i] = tcpip.Route{}
+	for _, r := range s.routeTable {
 		if r.NIC != id {
 			// Keep this route.
 			s.routeTable[n] = r
 			n++
 		}
 	}
+	clear(s.routeTable[n:])
 	s.routeTable = s.routeTable[:n]
 	s.routeMu.Unlock()
 
@@ -1166,9 +1192,9 @@ func (s *Stack) GetMainNICAddress(id tcpip.NICID, protocol tcpip.NetworkProtocol
 	return nic.PrimaryAddress(protocol)
 }
 
-func (s *Stack) getAddressEP(nic *nic, localAddr, remoteAddr tcpip.Address, netProto tcpip.NetworkProtocolNumber) AssignableAddressEndpoint {
+func (s *Stack) getAddressEP(nic *nic, localAddr, remoteAddr, srcHint tcpip.Address, netProto tcpip.NetworkProtocolNumber) AssignableAddressEndpoint {
 	if localAddr.BitLen() == 0 {
-		return nic.primaryEndpoint(netProto, remoteAddr)
+		return nic.primaryEndpoint(netProto, remoteAddr, srcHint)
 	}
 	return nic.findEndpoint(netProto, localAddr, CanBePrimaryEndpoint)
 }
@@ -1186,7 +1212,7 @@ func (s *Stack) NewRouteForMulticast(nicID tcpip.NICID, remoteAddr tcpip.Address
 		return nil
 	}
 
-	if addressEndpoint := s.getAddressEP(nic, tcpip.Address{} /* localAddr */, remoteAddr, netProto); addressEndpoint != nil {
+	if addressEndpoint := s.getAddressEP(nic, tcpip.Address{} /* localAddr */, remoteAddr, tcpip.Address{} /* srcHint */, netProto); addressEndpoint != nil {
 		return constructAndValidateRoute(netProto, addressEndpoint, nic, nic, tcpip.Address{} /* gateway */, tcpip.Address{} /* localAddr */, remoteAddr, s.handleLocal, false /* multicastLoop */)
 	}
 	return nil
@@ -1290,6 +1316,28 @@ func isNICForwarding(nic *nic, proto tcpip.NetworkProtocolNumber) bool {
 	}
 }
 
+// findRouteWithLocalAddrFromAnyInterfaceRLocked returns a route to the given
+// destination address, leaving through the given NIC.
+//
+// Rather than preferring to find a route that uses a local address assigned to
+// the outgoing interface, it finds any NIC that holds a matching local address
+// endpoint.
+//
+// +checklocksread:s.mu
+func (s *Stack) findRouteWithLocalAddrFromAnyInterfaceRLocked(outgoingNIC *nic, localAddr, remoteAddr, srcHint, gateway tcpip.Address, netProto tcpip.NetworkProtocolNumber, multicastLoop bool) *Route {
+	for _, aNIC := range s.nics {
+		addressEndpoint := s.getAddressEP(aNIC, localAddr, remoteAddr, srcHint, netProto)
+		if addressEndpoint == nil {
+			continue
+		}
+
+		if r := constructAndValidateRoute(netProto, addressEndpoint, aNIC /* localAddressNIC */, outgoingNIC, gateway, localAddr, remoteAddr, s.handleLocal, multicastLoop); r != nil {
+			return r
+		}
+	}
+	return nil
+}
+
 // FindRoute creates a route to the given destination address, leaving through
 // the given NIC and local address (if provided).
 //
@@ -1299,11 +1347,16 @@ func isNICForwarding(nic *nic, proto tcpip.NetworkProtocolNumber) bool {
 // leave through any interface unless the route is link-local.
 //
 // If no local address is provided, the stack will select a local address. If no
-// remote address is provided, the stack wil use a remote address equal to the
+// remote address is provided, the stack will use a remote address equal to the
 // local address.
 func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, netProto tcpip.NetworkProtocolNumber, multicastLoop bool) (*Route, tcpip.Error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	// Reject attempts to use unsupported protocols.
+	if !s.CheckNetworkProtocol(netProto) {
+		return nil, &tcpip.ErrUnknownProtocol{}
+	}
 
 	isLinkLocal := header.IsV6LinkLocalUnicastAddress(remoteAddr) || header.IsV6LinkLocalMulticastAddress(remoteAddr)
 	isLocalBroadcast := remoteAddr == header.IPv4Broadcast
@@ -1321,7 +1374,7 @@ func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, n
 	// through the interface if the interface is valid and enabled.
 	if id != 0 && !needRoute {
 		if nic, ok := s.nics[id]; ok && nic.Enabled() {
-			if addressEndpoint := s.getAddressEP(nic, localAddr, remoteAddr, netProto); addressEndpoint != nil {
+			if addressEndpoint := s.getAddressEP(nic, localAddr, remoteAddr, tcpip.Address{} /* srcHint */, netProto); addressEndpoint != nil {
 				return makeRoute(
 					netProto,
 					tcpip.Address{}, /* gateway */
@@ -1361,7 +1414,7 @@ func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, n
 			}
 
 			if id == 0 || id == route.NIC {
-				if addressEndpoint := s.getAddressEP(nic, localAddr, remoteAddr, netProto); addressEndpoint != nil {
+				if addressEndpoint := s.getAddressEP(nic, localAddr, remoteAddr, route.SourceHint, netProto); addressEndpoint != nil {
 					var gateway tcpip.Address
 					if needRoute {
 						gateway = route.Gateway
@@ -1374,15 +1427,27 @@ func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, n
 				}
 			}
 
-			// If the stack has forwarding enabled and we haven't found a valid route
-			// to the remote address yet, keep track of the first valid route. We
-			// keep iterating because we prefer routes that let us use a local
-			// address that is assigned to the outgoing interface. There is no
-			// requirement to do this from any RFC but simply a choice made to better
-			// follow a strong host model which the netstack follows at the time of
-			// writing.
+			// If the stack has forwarding enabled, we haven't found a valid route to
+			// the remote address yet, and we are routing locally generated traffic,
+			// keep track of the first valid route. We keep iterating because we
+			// prefer routes that let us use a local address that is assigned to the
+			// outgoing interface. There is no requirement to do this from any RFC
+			// but simply a choice made to better follow a strong host model which
+			// the netstack follows at the time of writing.
+			//
+			// Note that for incoming traffic that we are forwarding (for which the
+			// NIC and local address are unspecified), we do not keep iterating, as
+			// there is no reason to prefer routes that let us use a local address
+			// when routing forwarded (as opposed to locally-generated) traffic.
+			locallyGenerated := (id != 0 || localAddr != tcpip.Address{})
 			if onlyGlobalAddresses && chosenRoute.Equal(tcpip.Route{}) && isNICForwarding(nic, netProto) {
-				chosenRoute = route
+				if locallyGenerated {
+					chosenRoute = route
+					continue
+				}
+				if r := s.findRouteWithLocalAddrFromAnyInterfaceRLocked(nic, localAddr, remoteAddr, route.SourceHint, route.Gateway, netProto, multicastLoop); r != nil {
+					return r
+				}
 			}
 		}
 
@@ -1408,7 +1473,7 @@ func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, n
 		// Use the specified NIC to get the local address endpoint.
 		if id != 0 {
 			if aNIC, ok := s.nics[id]; ok {
-				if addressEndpoint := s.getAddressEP(aNIC, localAddr, remoteAddr, netProto); addressEndpoint != nil {
+				if addressEndpoint := s.getAddressEP(aNIC, localAddr, remoteAddr, chosenRoute.SourceHint, netProto); addressEndpoint != nil {
 					if r := constructAndValidateRoute(netProto, addressEndpoint, aNIC /* localAddressNIC */, nic /* outgoingNIC */, gateway, localAddr, remoteAddr, s.handleLocal, multicastLoop); r != nil {
 						return r, nil
 					}
@@ -1422,15 +1487,8 @@ func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, n
 		if id == 0 {
 			// If an interface is not specified, try to find a NIC that holds the local
 			// address endpoint to construct a route.
-			for _, aNIC := range s.nics {
-				addressEndpoint := s.getAddressEP(aNIC, localAddr, remoteAddr, netProto)
-				if addressEndpoint == nil {
-					continue
-				}
-
-				if r := constructAndValidateRoute(netProto, addressEndpoint, aNIC /* localAddressNIC */, nic /* outgoingNIC */, gateway, localAddr, remoteAddr, s.handleLocal, multicastLoop); r != nil {
-					return r, nil
-				}
+			if r := s.findRouteWithLocalAddrFromAnyInterfaceRLocked(nic, localAddr, remoteAddr, chosenRoute.SourceHint, gateway, netProto, multicastLoop); r != nil {
+				return r, nil
 			}
 		}
 	}
@@ -1593,7 +1651,7 @@ func (s *Stack) AddStaticNeighbor(nicID tcpip.NICID, protocol tcpip.NetworkProto
 }
 
 // RemoveNeighbor removes an IP to MAC address association previously created
-// either automically or by AddStaticNeighbor. Returns ErrBadAddress if there
+// either automatically or by AddStaticNeighbor. Returns ErrBadAddress if there
 // is no association with the provided address.
 func (s *Stack) RemoveNeighbor(nicID tcpip.NICID, protocol tcpip.NetworkProtocolNumber, addr tcpip.Address) tcpip.Error {
 	s.mu.RLock()
@@ -1679,16 +1737,26 @@ func (s *Stack) UnregisterRawTransportEndpoint(netProto tcpip.NetworkProtocolNum
 
 // RegisterRestoredEndpoint records e as an endpoint that has been restored on
 // this stack.
-func (s *Stack) RegisterRestoredEndpoint(e ResumableEndpoint) {
+func (s *Stack) RegisterRestoredEndpoint(e RestoredEndpoint) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.restoredEndpoints = append(s.restoredEndpoints, e)
+}
+
+// RegisterResumableEndpoint records e as an endpoint that has to be resumed.
+func (s *Stack) RegisterResumableEndpoint(e ResumableEndpoint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.resumableEndpoints = append(s.resumableEndpoints, e)
-	s.mu.Unlock()
 }
 
 // RegisteredEndpoints returns all endpoints which are currently registered.
 func (s *Stack) RegisteredEndpoints() []TransportEndpoint {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	var es []TransportEndpoint
 	for _, e := range s.demux.protocol {
 		es = append(es, e.transportEndpoints()...)
@@ -1699,11 +1767,12 @@ func (s *Stack) RegisteredEndpoints() []TransportEndpoint {
 // CleanupEndpoints returns endpoints currently in the cleanup state.
 func (s *Stack) CleanupEndpoints() []TransportEndpoint {
 	s.cleanupEndpointsMu.Lock()
+	defer s.cleanupEndpointsMu.Unlock()
+
 	es := make([]TransportEndpoint, 0, len(s.cleanupEndpoints))
 	for e := range s.cleanupEndpoints {
 		es = append(es, e)
 	}
-	s.cleanupEndpointsMu.Unlock()
 	return es
 }
 
@@ -1711,10 +1780,11 @@ func (s *Stack) CleanupEndpoints() []TransportEndpoint {
 // for restoring a stack after a save.
 func (s *Stack) RestoreCleanupEndpoints(es []TransportEndpoint) {
 	s.cleanupEndpointsMu.Lock()
+	defer s.cleanupEndpointsMu.Unlock()
+
 	for _, e := range es {
 		s.cleanupEndpoints[e] = struct{}{}
 	}
-	s.cleanupEndpointsMu.Unlock()
 }
 
 // Close closes all currently registered transport endpoints.
@@ -1777,17 +1847,32 @@ func (s *Stack) Pause() {
 	}
 }
 
-// Resume restarts the stack after a restore. This must be called after the
+// Restore restarts the stack after a restore. This must be called after the
 // entire system has been restored.
+func (s *Stack) Restore() {
+	// RestoredEndpoint.Restore() may call other methods on s, so we can't hold
+	// s.mu while restoring the endpoints.
+	s.mu.Lock()
+	eps := s.restoredEndpoints
+	s.restoredEndpoints = nil
+	s.mu.Unlock()
+	for _, e := range eps {
+		e.Restore(s)
+	}
+	// Now resume any protocol level background workers.
+	for _, p := range s.transportProtocols {
+		p.proto.Resume()
+	}
+}
+
+// Resume resumes the stack after a save.
 func (s *Stack) Resume() {
-	// ResumableEndpoint.Resume() may call other methods on s, so we can't hold
-	// s.mu while resuming the endpoints.
 	s.mu.Lock()
 	eps := s.resumableEndpoints
 	s.resumableEndpoints = nil
 	s.mu.Unlock()
 	for _, e := range eps {
-		e.Resume(s)
+		e.Resume()
 	}
 	// Now resume any protocol level background workers.
 	for _, p := range s.transportProtocols {
@@ -1806,10 +1891,7 @@ func (s *Stack) RegisterPacketEndpoint(nicID tcpip.NICID, netProto tcpip.Network
 	if nicID == 0 {
 		// Register with each NIC.
 		for _, nic := range s.nics {
-			if err := nic.registerPacketEndpoint(netProto, ep); err != nil {
-				s.unregisterPacketEndpointLocked(0, netProto, ep)
-				return err
-			}
+			nic.registerPacketEndpoint(netProto, ep)
 		}
 		return nil
 	}
@@ -1819,9 +1901,7 @@ func (s *Stack) RegisterPacketEndpoint(nicID tcpip.NICID, netProto tcpip.Network
 	if !ok {
 		return &tcpip.ErrUnknownNICID{}
 	}
-	if err := nic.registerPacketEndpoint(netProto, ep); err != nil {
-		return err
-	}
+	nic.registerPacketEndpoint(netProto, ep)
 
 	return nil
 }
@@ -1887,7 +1967,7 @@ func (s *Stack) WriteRawPacket(nicID tcpip.NICID, proto tcpip.NetworkProtocolNum
 	})
 	defer pkt.DecRef()
 	pkt.NetworkProtocolNumber = proto
-	return nic.writeRawPacket(pkt)
+	return nic.writeRawPacketWithLinkHeaderInPayload(pkt)
 }
 
 // NetworkProtocolInstance returns the protocol instance in the stack for the
@@ -2064,15 +2144,16 @@ func (s *Stack) Seed() uint32 {
 	return s.seed
 }
 
-// Rand returns a reference to a pseudo random generator that can be used
-// to generate random numbers as required.
-func (s *Stack) Rand() *rand.Rand {
-	return s.randomGenerator
+// InsecureRNG returns a reference to a pseudo random generator that can be used
+// to generate random numbers as required. It is not cryptographically secure
+// and should not be used for security sensitive work.
+func (s *Stack) InsecureRNG() *rand.Rand {
+	return s.insecureRNG
 }
 
 // SecureRNG returns the stack's cryptographically secure random number
 // generator.
-func (s *Stack) SecureRNG() io.Reader {
+func (s *Stack) SecureRNG() cryptorand.RNG {
 	return s.secureRNG
 }
 
@@ -2106,7 +2187,7 @@ const (
 
 // ParsePacketBufferTransport parses the provided packet buffer's transport
 // header.
-func (s *Stack) ParsePacketBufferTransport(protocol tcpip.TransportProtocolNumber, pkt PacketBufferPtr) ParseResult {
+func (s *Stack) ParsePacketBufferTransport(protocol tcpip.TransportProtocolNumber, pkt *PacketBuffer) ParseResult {
 	pkt.TransportProtocolNumber = protocol
 	// Parse the transport header if present.
 	state, ok := s.transportProtocols[protocol]

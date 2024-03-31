@@ -40,7 +40,7 @@ type udpPacket struct {
 	senderAddress      tcpip.FullAddress
 	destinationAddress tcpip.FullAddress
 	packetInfo         tcpip.IPPacketInfo
-	pkt                stack.PacketBufferPtr
+	pkt                *stack.PacketBuffer
 	receivedAt         time.Time `state:".(int64)"`
 	// tosOrTClass stores either the Type of Service for IPv4 or the Traffic Class
 	// for IPv6.
@@ -476,7 +476,7 @@ func (e *endpoint) write(p tcpip.Payloader, opts tcpip.WriteOptions) (int64, tcp
 	dataSz := udpInfo.data.Size()
 	pktInfo := udpInfo.ctx.PacketInfo()
 	pkt := udpInfo.ctx.TryNewPacketBuffer(header.UDPMinimumSize+int(pktInfo.MaxHeaderLength), udpInfo.data)
-	if pkt.IsNil() {
+	if pkt == nil {
 		return 0, &tcpip.ErrWouldBlock{}
 	}
 	defer pkt.DecRef()
@@ -679,16 +679,16 @@ func (e *endpoint) Connect(addr tcpip.FullAddress) tcpip.Error {
 
 		oldPortFlags := e.boundPortFlags
 
-		nextID, btd, err := e.registerWithStack(netProtos, nextID)
-		if err != nil {
-			return err
-		}
-
 		// Remove the old registration.
 		if e.localPort != 0 {
 			previousID.LocalPort = e.localPort
 			previousID.RemotePort = e.remotePort
 			e.stack.UnregisterTransportEndpoint(e.effectiveNetProtos, ProtocolNumber, previousID, e, oldPortFlags, e.boundBindToDevice)
+		}
+
+		nextID, btd, err := e.registerWithStack(netProtos, nextID)
+		if err != nil {
+			return err
 		}
 
 		e.localPort = nextID.LocalPort
@@ -745,6 +745,9 @@ func (e *endpoint) Shutdown(flags tcpip.ShutdownFlags) tcpip.Error {
 		}
 	}
 
+	if e.net.State() == transport.DatagramEndpointStateBound {
+		return &tcpip.ErrNotConnected{}
+	}
 	return nil
 }
 
@@ -770,7 +773,7 @@ func (e *endpoint) registerWithStack(netProtos []tcpip.NetworkProtocolNumber, id
 			BindToDevice: bindToDevice,
 			Dest:         tcpip.FullAddress{},
 		}
-		port, err := e.stack.ReservePort(e.stack.Rand(), portRes, nil /* testPort */)
+		port, err := e.stack.ReservePort(e.stack.SecureRNG(), portRes, nil /* testPort */)
 		if err != nil {
 			return id, bindToDevice, err
 		}
@@ -905,7 +908,7 @@ func (e *endpoint) Readiness(mask waiter.EventMask) waiter.EventMask {
 
 // HandlePacket is called by the stack when new packets arrive to this transport
 // endpoint.
-func (e *endpoint) HandlePacket(id stack.TransportEndpointID, pkt stack.PacketBufferPtr) {
+func (e *endpoint) HandlePacket(id stack.TransportEndpointID, pkt *stack.PacketBuffer) {
 	// Get the header then trim it from the view.
 	hdr := header.UDP(pkt.TransportHeader().Slice())
 	netHdr := pkt.Network()
@@ -997,7 +1000,7 @@ func (e *endpoint) HandlePacket(id stack.TransportEndpointID, pkt stack.PacketBu
 	}
 }
 
-func (e *endpoint) onICMPError(err tcpip.Error, transErr stack.TransportError, pkt stack.PacketBufferPtr) {
+func (e *endpoint) onICMPError(err tcpip.Error, transErr stack.TransportError, pkt *stack.PacketBuffer) {
 	// Update last error first.
 	e.lastErrorMu.Lock()
 	e.lastError = err
@@ -1022,6 +1025,7 @@ func (e *endpoint) onICMPError(err tcpip.Error, transErr stack.TransportError, p
 		}
 
 		id := e.net.Info().ID
+		e.mu.RLock()
 		e.SocketOptions().QueueErr(&tcpip.SockError{
 			Err:     err,
 			Cause:   transErr,
@@ -1038,6 +1042,7 @@ func (e *endpoint) onICMPError(err tcpip.Error, transErr stack.TransportError, p
 			},
 			NetProto: pkt.NetworkProtocolNumber,
 		})
+		e.mu.RUnlock()
 	}
 
 	// Notify of the error.
@@ -1045,7 +1050,7 @@ func (e *endpoint) onICMPError(err tcpip.Error, transErr stack.TransportError, p
 }
 
 // HandleError implements stack.TransportEndpoint.
-func (e *endpoint) HandleError(transErr stack.TransportError, pkt stack.PacketBufferPtr) {
+func (e *endpoint) HandleError(transErr stack.TransportError, pkt *stack.PacketBuffer) {
 	// TODO(gvisor.dev/issues/5270): Handle all transport errors.
 	switch transErr.Kind() {
 	case stack.DestinationPortUnreachableTransportError:
