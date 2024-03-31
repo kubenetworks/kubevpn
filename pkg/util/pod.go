@@ -299,6 +299,8 @@ func WaitPodToBeReady(ctx context.Context, podInterface v12.PodInterface, select
 	}
 	defer watchStream.Stop()
 	var last string
+	ticker := time.NewTicker(time.Minute * 60)
+	defer ticker.Stop()
 	for {
 		select {
 		case e, ok := <-watchStream.ResultChan():
@@ -328,7 +330,7 @@ func WaitPodToBeReady(ctx context.Context, podInterface v12.PodInterface, select
 				}
 				last = sb.String()
 			}
-		case <-time.Tick(time.Minute * 60):
+		case <-ticker.C:
 			return errors.New(fmt.Sprintf("wait pod to be ready timeout"))
 		}
 	}

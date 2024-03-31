@@ -16,11 +16,13 @@ import (
 
 // DeleteBlockFirewallRule Delete all action block firewall rule
 func DeleteBlockFirewallRule(ctx context.Context) {
+	ticker := time.NewTicker(time.Second * 10)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.Tick(time.Second * 10):
+		case <-ticker.C:
 			// PowerShell Remove-NetFirewallRule -Action Block
 			cmd := exec.Command("PowerShell", []string{
 				"Remove-NetFirewallRule",
