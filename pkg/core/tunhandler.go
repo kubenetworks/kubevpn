@@ -143,11 +143,15 @@ func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
 }
 
 func (h *tunHandler) printRoute(ctx context.Context) {
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
+	var sb strings.Builder
+	var i int
 	for ctx.Err() == nil {
 		select {
-		case <-time.Tick(time.Second * 5):
-			var i int
-			var sb strings.Builder
+		case <-ticker.C:
+			i = 0
+			sb.Reset()
 			h.routeNAT.Range(func(key string, value []net.Addr) {
 				i++
 				var s []string

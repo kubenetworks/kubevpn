@@ -334,8 +334,10 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 			}()
 		}
 	}()
+	ticker := time.NewTicker(time.Second * 60)
+	defer ticker.Stop()
 	select {
-	case <-time.Tick(time.Second * 60):
+	case <-ticker.C:
 		return errors.New("port forward timeout")
 	case err := <-errChan:
 		return err

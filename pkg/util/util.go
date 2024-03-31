@@ -207,11 +207,13 @@ func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string)) (st
 
 func WaitPortToBeFree(ctx context.Context, port int) error {
 	log.Infoln(fmt.Sprintf("wait port %v to be free...", port))
+	ticker := time.NewTicker(time.Second * 2)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("wait port %v to be free timeout", port)
-		case <-time.Tick(time.Second * 2):
+		case <-ticker.C:
 			if !IsPortListening(port) {
 				log.Infoln(fmt.Sprintf("port %v are free", port))
 				return nil
