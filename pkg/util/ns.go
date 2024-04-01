@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"reflect"
+	"unsafe"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/tools/clientcmd/api/latest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -47,7 +50,28 @@ func ConvertToKubeconfigBytes(factory cmdutil.Factory) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	rawConfig, err := loader.RawConfig()
+	// todo: use more elegant way to get MergedRawConfig
+	var useReflectToGetRawConfigFunc = func() (c api.Config, err error) {
+		defer func() {
+			if er := recover(); er != nil {
+				err = er.(error)
+			}
+		}()
+		value := reflect.ValueOf(loader).Elem().Field(0)
+		value = reflect.NewAt(value.Type(), unsafe.Pointer(value.UnsafeAddr())).Elem()
+		loadingClientConfig := value.Interface().(*clientcmd.DeferredLoadingClientConfig)
+		value = reflect.ValueOf(loadingClientConfig).Elem().Field(3)
+		value = reflect.NewAt(value.Type(), unsafe.Pointer(value.UnsafeAddr())).Elem()
+		clientConfig := value.Interface().(*clientcmd.DirectClientConfig)
+		return clientConfig.MergedRawConfig()
+	}
+	rawConfig, err := useReflectToGetRawConfigFunc()
+	if err != nil {
+		rawConfig, err = loader.RawConfig()
+	}
+	if err != nil {
+		return nil, "", err
+	}
 	err = api.FlattenConfig(&rawConfig)
 	if err != nil {
 		return nil, "", err
