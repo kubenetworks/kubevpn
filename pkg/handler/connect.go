@@ -159,7 +159,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error)
 		// todo consider to use ephemeral container
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
-		if len(c.Headers) != 0 {
+		if len(c.Headers) != 0 || len(c.PortMap) != 0 {
 			err = InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers, c.PortMap)
 		} else {
 			err = InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, configInfo)
