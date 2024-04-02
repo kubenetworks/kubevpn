@@ -517,12 +517,29 @@ func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, 
 		return err
 	}
 
+	clientset, err := factory.KubernetesClientSet()
+	if err != nil {
+		return err
+	}
+	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
+	var ports []v1.ContainerPort
+	for _, container := range podTempSpec.Spec.Containers {
+		ports = append(ports, container.Ports...)
+	}
+	var portmap = make(map[int32]int32)
+	for _, port := range ports {
+		portmap[port.ContainerPort] = port.ContainerPort
+	}
+	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(namespace), nodeID, c, nil, ports, portmap)
+	if err != nil {
+		log.Errorf("add envoy config error: %v", err)
+		return err
+	}
+
 	origin := *podTempSpec
-
-	helper := pkgresource.NewHelper(object.Client, object.Mapping)
-
 	exchange.AddContainer(&podTempSpec.Spec, c)
 
+	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	// pods without controller
 	if len(path) == 0 {
 		log.Infof("workload %s/%s is not controlled by any controller", namespace, workload)
@@ -561,7 +578,7 @@ func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, 
 			{
 				Op:    "replace",
 				Path:  "/metadata/annotations/" + config.KubeVPNRestorePatchKey,
-				Value: b,
+				Value: string(b),
 			},
 		}
 		marshal, _ := json.Marshal(append(p, removePatch...))
