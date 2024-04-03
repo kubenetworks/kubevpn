@@ -39,7 +39,7 @@ func NewDNSServer(network, address string, forwardDNS *miekgdns.ClientConfig) er
 	return miekgdns.ListenAndServe(address, network, &server{
 		dnsCache:    cache.NewLRUExpireCache(1000),
 		forwardDNS:  forwardDNS,
-		client:      &miekgdns.Client{Net: "udp", SingleInflight: true, Timeout: time.Second * 30},
+		client:      &miekgdns.Client{Net: "udp", Timeout: time.Second * 30},
 		fwdSem:      semaphore.NewWeighted(maxConcurrent),
 		logInverval: rate.Sometimes{Interval: logInterval},
 	})

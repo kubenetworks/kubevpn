@@ -373,7 +373,7 @@ func TestPatch(t *testing.T) {
 	var p = corev1.Probe{
 		ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
 			Path:   "/health",
-			Port:   intstr.FromInt(9080),
+			Port:   intstr.FromInt32(9080),
 			Scheme: "HTTP",
 		}},
 	}

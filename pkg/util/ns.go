@@ -44,7 +44,7 @@ func IsSameCluster(client v12.ConfigMapInterface, namespace string, clientB v12.
 	return a.UID == b.UID, nil
 }
 
-func ConvertToKubeconfigBytes(factory cmdutil.Factory) ([]byte, string, error) {
+func ConvertToKubeConfigBytes(factory cmdutil.Factory) ([]byte, string, error) {
 	loader := factory.ToRawKubeConfigLoader()
 	namespace, _, err := loader.Namespace()
 	if err != nil {

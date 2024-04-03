@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/docker/distribution/reference"
+	"github.com/distribution/reference"
 	"github.com/google/gopacket/routing"
 	goversion "github.com/hashicorp/go-version"
 	netroute "github.com/libp2p/go-netroute"
@@ -1012,7 +1012,7 @@ RetryWithDNSClient:
 	}()
 
 	// 4) query with dns client
-	client := &miekgdns.Client{Net: "udp", Timeout: time.Second * 2, SingleInflight: true}
+	client := &miekgdns.Client{Net: "udp", Timeout: time.Second * 2}
 	for _, domain := range c.ExtraRouteInfo.ExtraDomain {
 		var success = false
 		for _, qType := range []uint16{miekgdns.TypeA /*, miekgdns.TypeAAAA*/} {

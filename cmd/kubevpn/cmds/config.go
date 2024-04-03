@@ -45,7 +45,7 @@ func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bytes, ns, err := util.ConvertToKubeconfigBytes(f)
+			bytes, ns, err := util.ConvertToKubeConfigBytes(f)
 			if err != nil {
 				return err
 			}

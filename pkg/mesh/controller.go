@@ -26,7 +26,7 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 	}
 }
 
-// todo envoy support ipv6
+// AddMeshContainer todo envoy support ipv6
 func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteConfig) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)

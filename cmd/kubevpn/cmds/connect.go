@@ -60,7 +60,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bytes, ns, err := util.ConvertToKubeconfigBytes(f)
+			bytes, ns, err := util.ConvertToKubeConfigBytes(f)
 			if err != nil {
 				return err
 			}
@@ -74,7 +74,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				ExtraRoute:           extraRoute.ToRPC(),
 				UseLocalDNS:          connect.UseLocalDNS,
 				Engine:               string(connect.Engine),
-				OriginKubeconfigPath: util.GetKubeconfigPath(f),
+				OriginKubeconfigPath: util.GetKubeConfigPath(f),
 
 				SshJump:       sshConf.ToRPC(),
 				TransferImage: transferImage,

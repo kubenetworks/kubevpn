@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/distribution/reference"
+	"github.com/distribution/reference"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
@@ -422,7 +422,6 @@ func (d *CloneOptions) setVolume(u *unstructured.Unstructured) error {
 
 	// remove serviceAccount info
 	temp.Spec.ServiceAccountName = ""
-	temp.Spec.DeprecatedServiceAccount = ""
 	temp.Spec.AutomountServiceAccountToken = pointer.Bool(false)
 
 	var volumeMap = make(map[string]v1.Volume)

@@ -153,11 +153,11 @@ func (c *winTunConn) Close() error {
 }
 
 func (c *winTunConn) Read(b []byte) (n int, err error) {
-	return c.ifce.Read(b, 0)
+	return c.ifce.Read([][]byte{b}, []int{1}, 0)
 }
 
 func (c *winTunConn) Write(b []byte) (n int, err error) {
-	return c.ifce.Write(b, 0)
+	return c.ifce.Write([][]byte{b}, 0)
 }
 
 func (c *winTunConn) LocalAddr() net.Addr {

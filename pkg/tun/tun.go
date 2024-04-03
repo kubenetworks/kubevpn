@@ -86,11 +86,13 @@ func (c *tunConn) Read(b []byte) (n int, err error) {
 	bytes := config.LPool.Get().([]byte)[:]
 	defer config.LPool.Put(bytes[:])
 
-	var size int
-	size, err = c.ifce.Read(bytes[:], offset)
-	if err != nil {
+	var num int
+	sizes := []int{1}
+	num, err = c.ifce.Read([][]byte{bytes[:]}, sizes, offset)
+	if err != nil || num == 0 {
 		return 0, err
 	}
+	var size = sizes[0]
 	if size == 0 || size > device.MaxSegmentSize-device.MessageTransportHeaderSize {
 		return 0, nil
 	}
@@ -106,7 +108,7 @@ func (c *tunConn) Write(b []byte) (n int, err error) {
 
 	copy(bytes[device.MessageTransportOffsetContent:], b)
 
-	return c.ifce.Write(bytes[:device.MessageTransportOffsetContent+len(b)], device.MessageTransportOffsetContent)
+	return c.ifce.Write([][]byte{bytes[:device.MessageTransportOffsetContent+len(b)]}, device.MessageTransportOffsetContent)
 }
 
 func (c *tunConn) Close() (err error) {

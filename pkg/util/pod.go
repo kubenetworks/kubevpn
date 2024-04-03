@@ -23,7 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -253,7 +253,7 @@ func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config 
 		Namespace:     namespace,
 		PodName:       podName,
 		ContainerName: containerName,
-		IOStreams:     genericclioptions.IOStreams{In: stdin, Out: stdout, ErrOut: nil},
+		IOStreams:     genericiooptions.IOStreams{In: stdin, Out: stdout, ErrOut: nil},
 	}
 	Executor := &exec.DefaultRemoteExecutor{}
 	// ensure we can recover the terminal while attached

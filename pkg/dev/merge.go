@@ -3,14 +3,12 @@ package dev
 import (
 	"github.com/containerd/containerd/platforms"
 	"github.com/docker/docker/api/types/network"
-	"github.com/pkg/errors"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // 这里的逻辑是找到指定的容器。然后以传入的参数 tempContainerConfig 为准。即也就是用户命令行指定的参数为准。
 // 然后附加上 deployment 中原本的声明
-func mergeDockerOptions(r ConfigList, copts *Options, tempContainerConfig *containerConfig) error {
+func mergeDockerOptions(r ConfigList, copts *Options, tempContainerConfig *containerConfig) {
 	if copts.ContainerName != "" {
 		var index = -1
 		for i, config := range r {
@@ -28,19 +26,16 @@ func mergeDockerOptions(r ConfigList, copts *Options, tempContainerConfig *conta
 	config.Options = copts.Options
 	config.Copts = copts.Copts
 
-	if copts.DockerImage != "" {
-		config.config.Image = copts.DockerImage
+	if copts.DevImage != "" {
+		config.config.Image = copts.DevImage
 	}
-	if copts.Options.Name != "" {
-		config.containerName = copts.Options.Name
+	if copts.Options.name != "" {
+		config.containerName = copts.Options.name
 	} else {
-		config.Options.Name = config.containerName
+		config.Options.name = config.containerName
 	}
-	if copts.Options.Platform != "" {
-		p, err := platforms.Parse(copts.Options.Platform)
-		if err != nil {
-			return errors.Wrap(err, "error parsing specified platform")
-		}
+	if copts.Options.platform != "" {
+		p, _ := platforms.Parse(copts.Options.platform)
 		config.platform = &p
 	}
 
@@ -92,6 +87,4 @@ func mergeDockerOptions(r ConfigList, copts *Options, tempContainerConfig *conta
 	}
 
 	config.config = c
-
-	return nil
 }
