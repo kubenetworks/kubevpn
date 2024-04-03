@@ -6,7 +6,9 @@ import (
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/cli/command/formatter"
 	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/volume"
 	"github.com/spf13/cobra"
 )
 
@@ -16,7 +18,7 @@ type ValidArgsFn func(cmd *cobra.Command, args []string, toComplete string) ([]s
 // ImageNames offers completion for images present within the local store
 func ImageNames(dockerCli command.Cli) ValidArgsFn {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		list, err := dockerCli.Client().ImageList(cmd.Context(), types.ImageListOptions{})
+		list, err := dockerCli.Client().ImageList(cmd.Context(), image.ListOptions{})
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveError
 		}
@@ -33,7 +35,7 @@ func ImageNames(dockerCli command.Cli) ValidArgsFn {
 // Set DOCKER_COMPLETION_SHOW_CONTAINER_IDS=yes to also complete IDs.
 func ContainerNames(dockerCli command.Cli, all bool, filters ...func(types.Container) bool) ValidArgsFn {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		list, err := dockerCli.Client().ContainerList(cmd.Context(), types.ContainerListOptions{
+		list, err := dockerCli.Client().ContainerList(cmd.Context(), container.ListOptions{
 			All: all,
 		})
 		if err != nil {
@@ -66,13 +68,13 @@ func ContainerNames(dockerCli command.Cli, all bool, filters ...func(types.Conta
 // VolumeNames offers completion for volumes
 func VolumeNames(dockerCli command.Cli) ValidArgsFn {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		list, err := dockerCli.Client().VolumeList(cmd.Context(), filters.Args{})
+		list, err := dockerCli.Client().VolumeList(cmd.Context(), volume.ListOptions{})
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveError
 		}
 		var names []string
-		for _, volume := range list.Volumes {
-			names = append(names, volume.Name)
+		for _, vol := range list.Volumes {
+			names = append(names, vol.Name)
 		}
 		return names, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -94,6 +96,6 @@ func NetworkNames(dockerCli command.Cli) ValidArgsFn {
 }
 
 // NoComplete is used for commands where there's no relevant completion
-func NoComplete(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+func NoComplete(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return nil, cobra.ShellCompDirectiveNoFileComp
 }

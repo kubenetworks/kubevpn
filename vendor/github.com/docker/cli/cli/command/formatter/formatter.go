@@ -1,3 +1,6 @@
+// FIXME(thaJeztah): remove once we are a module; the go:build directive prevents go from downgrading language version to go1.16:
+//go:build go1.19
+
 package formatter
 
 import (
@@ -19,7 +22,7 @@ const (
 	JSONFormatKey   = "json"
 
 	DefaultQuietFormat = "{{.ID}}"
-	jsonFormat         = "{{json .}}"
+	JSONFormat         = "{{json .}}"
 )
 
 // Format is the format string rendered using the Context
@@ -51,7 +54,7 @@ type Context struct {
 
 	// internal element
 	finalFormat string
-	header      interface{}
+	header      any
 	buffer      *bytes.Buffer
 }
 
@@ -62,7 +65,7 @@ func (c *Context) preFormat() {
 	case c.Format.IsTable():
 		c.finalFormat = c.finalFormat[len(TableFormatKey):]
 	case c.Format.IsJSON():
-		c.finalFormat = jsonFormat
+		c.finalFormat = JSONFormat
 	}
 
 	c.finalFormat = strings.Trim(c.finalFormat, " ")

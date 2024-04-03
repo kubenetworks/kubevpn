@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"gopkg.in/DataDog/dd-trace-go.v1/internal"
-	"gopkg.in/DataDog/dd-trace-go.v1/internal/appsec"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/globalconfig"
 	logger "gopkg.in/DataDog/dd-trace-go.v1/internal/log"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/osinfo"
@@ -31,7 +30,8 @@ import (
 // Client buffers and sends telemetry messages to Datadog (possibly through an
 // agent).
 type Client interface {
-	ProductStart(namespace Namespace, configuration []Configuration)
+	ProductChange(namespace Namespace, enabled bool, configuration []Configuration)
+	ConfigChange(configuration []Configuration)
 	Record(namespace Namespace, metric MetricKind, name string, value float64, tags []string, common bool)
 	Count(namespace Namespace, name string, value float64, tags []string, common bool)
 	ApplyOps(opts ...Option)
@@ -75,7 +75,7 @@ var (
 	// also the default URL in case connecting to the agent URL fails.
 	agentlessURL = "https://instrumentation-telemetry-intake.datadoghq.com/api/v2/apmtelemetry"
 
-	defaultHeartbeatInterval = 60 // seconds
+	defaultHeartbeatInterval = 60.0 // seconds
 
 	// LogPrefix specifies the prefix for all telemetry logging
 	LogPrefix = "Instrumentation telemetry: "
@@ -180,14 +180,16 @@ func (c *client) start(configuration []Configuration, namespace Namespace) {
 	productInfo := Products{
 		AppSec: ProductDetails{
 			Version: version.Tag,
-			Enabled: appsec.Enabled(),
+			// if appsec is the one starting the telemetry client,
+			// then AppSec is enabled
+			Enabled: namespace == NamespaceAppSec,
 		},
-	}
-	productInfo.Profiler = ProductDetails{
-		Version: version.Tag,
-		// if the profiler is the one starting the telemetry client,
-		// then profiling is enabled
-		Enabled: namespace == NamespaceProfilers,
+		Profiler: ProductDetails{
+			Version: version.Tag,
+			// if the profiler is the one starting the telemetry client,
+			// then profiling is enabled.
+			Enabled: namespace == NamespaceProfilers,
+		},
 	}
 	payload := &AppStarted{
 		Configuration: configuration,
@@ -221,14 +223,17 @@ func (c *client) start(configuration []Configuration, namespace Namespace) {
 	}
 
 	c.flush()
+	c.heartbeatInterval = heartbeatInterval()
+	c.heartbeatT = time.AfterFunc(c.heartbeatInterval, c.backgroundHeartbeat)
+}
 
-	heartbeat := internal.IntEnv("DD_TELEMETRY_HEARTBEAT_INTERVAL", defaultHeartbeatInterval)
-	if heartbeat < 1 || heartbeat > 3600 {
-		log("DD_TELEMETRY_HEARTBEAT_INTERVAL=%d not in [1,3600] range, setting to default of %d", heartbeat, defaultHeartbeatInterval)
+func heartbeatInterval() time.Duration {
+	heartbeat := internal.FloatEnv("DD_TELEMETRY_HEARTBEAT_INTERVAL", defaultHeartbeatInterval)
+	if heartbeat <= 0 || heartbeat > 3600 {
+		log("DD_TELEMETRY_HEARTBEAT_INTERVAL=%d not in [1,3600] range, setting to default of %f", heartbeat, defaultHeartbeatInterval)
 		heartbeat = defaultHeartbeatInterval
 	}
-	c.heartbeatInterval = time.Duration(heartbeat) * time.Second
-	c.heartbeatT = time.AfterFunc(c.heartbeatInterval, c.backgroundHeartbeat)
+	return time.Duration(heartbeat * float64(time.Second))
 }
 
 // Stop notifies the telemetry endpoint that the app is closing. All outstanding
@@ -467,7 +472,12 @@ func (c *client) newRequest(t RequestType) *Request {
 		"DD-Client-Library-Version":  {version.Tag},
 		"DD-Agent-Env":               {c.Env},
 		"DD-Agent-Hostname":          {hostname},
-		"Datadog-Container-ID":       {internal.ContainerID()},
+	}
+	if cid := internal.ContainerID(); cid != "" {
+		header.Set("Datadog-Container-ID", cid)
+	}
+	if eid := internal.EntityID(); eid != "" {
+		header.Set("Datadog-Entity-ID", eid)
 	}
 	if c.URL == getAgentlessURL() {
 		header.Set("DD-API-KEY", c.APIKey)

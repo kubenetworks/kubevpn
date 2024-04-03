@@ -21,7 +21,6 @@
 package dyngo
 
 import (
-	"reflect"
 	"sync"
 
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/log"
@@ -34,50 +33,33 @@ import (
 // operation once it finishes so that it no longer can be called on finished
 // operations.
 type Operation interface {
-	// On allows to register an event listener to the operation. The event
-	// listener will be removed from the operation once it finishes.
-	On(EventListener)
-
-	// OnData allows to register a data listener to the operation
-	OnData(DataListener)
-
-	// EmitData sends data to the data listeners of the operation
-	EmitData(any)
-
-	// Parent return the parent operation. It returns nil for the root
-	// operation.
+	// Parent returns the parent operation, or nil for the root operation.
 	Parent() Operation
 
-	// emitEvent emits the event to listeners of the given argsType and calls
-	// them with the given op and v values.
-	// emitEvent is a private method implemented by the operation struct type so
-	// that no other package can define it.
-	emitEvent(argsType reflect.Type, op Operation, v interface{})
+	// unwrap is an internal method guaranteeing only *operation implements Operation.
+	unwrap() *operation
+}
 
-	emitData(argsType reflect.Type, v any)
+// ArgOf marks a particular type as being the argument type of a given operation
+// type. This allows this type to be listened to by an operation start listener.
+// This removes the possibility of incorrectly pairing an operation and payload
+// when setting up listeners, as it allows compiler-assisted coherence checks.
+type ArgOf[O Operation] interface {
+	IsArgOf(O)
+}
 
-	// add the given event listeners to the operation.
-	// add is a private method implemented by the operation struct type so
-	// that no other package can define it.
-	add(...EventListener)
-
-	// finish the operation. This method allows to pass the operation value to
-	// use to emit the finish event.
-	// finish is a private method implemented by the operation struct type so
-	// that no other package can define it.
-	finish(op Operation, results interface{})
+// ResultOf marks a particular type as being the result type of a given
+// operation. This allows this type to be listened to by an operation finish
+// listener.
+// This removes the possibility of incorrectly pairing an operation and payload
+// when setting up listeners, as it allows compiler-assisted coherence checks.
+type ResultOf[O Operation] interface {
+	IsResultOf(O)
 }
 
 // EventListener interface allowing to identify the Go type listened to and
 // dispatch calls to the underlying event listener function.
-type EventListener interface {
-	// ListenedType returns the Go type the event listener listens to.
-	ListenedType() reflect.Type
-	// Call the underlying event listener function. The type of the value v
-	// is the type the event listener listens to, according to the type
-	// returned by ListenedType().
-	Call(op Operation, v interface{})
-}
+type EventListener[O Operation, T any] func(O, T)
 
 // Atomic *Operation so we can atomically read or swap it.
 var rootOperation atomic.Pointer[Operation]
@@ -87,9 +69,9 @@ var rootOperation atomic.Pointer[Operation]
 // existing and running operation are still valid.
 func SwapRootOperation(new Operation) {
 	rootOperation.Swap(&new)
-	// Note: calling FinishOperation(old) could result into mem leaks because
+	// Note: calling Finish(old, ...) could result into mem leaks because
 	// some finish event listeners, possibly releasing memory and resources,
-	// wouldn't be called anymore (because finish() disables the operation and
+	// wouldn't be called anymore (because Finish() disables the operation and
 	// removes the event listeners).
 }
 
@@ -98,7 +80,7 @@ func SwapRootOperation(new Operation) {
 // bubble-up the operation stack, which allows listening to future events that
 // might happen in the operation lifetime.
 type operation struct {
-	parent Operation
+	parent *operation
 	eventRegister
 	dataBroadcaster
 
@@ -106,21 +88,27 @@ type operation struct {
 	mu       sync.RWMutex
 }
 
+func (o *operation) Parent() Operation {
+	return o.parent
+}
+
+// This is the one true Operation implementation!
+func (o *operation) unwrap() *operation { return o }
+
 // NewRootOperation creates and returns a new root operation, with no parent
 // operation. Root operations are meant to be the top-level operation of an
 // operation stack, therefore receiving all the operation events. It allows to
 // prepare a new set of event listeners, to then atomically swap it with the
 // current one.
 func NewRootOperation() Operation {
-	return newOperation(nil)
+	return &operation{parent: nil}
 }
 
 // NewOperation creates and returns a new operation. It must be started by calling
-// StartOperation, and finished by calling FinishOperation. The returned
-// operation should be used in wrapper types to provide statically typed start
-// and finish functions. The following example shows how to wrap an operation
-// so that its functions are statically typed (instead of dyngo's interface{}
-// values):
+// StartOperation, and finished by calling Finish. The returned operation should
+// be used in wrapper types to provide statically typed start and finish
+// functions. The following example shows how to wrap an operation so that its
+// functions are statically typed (instead of dyngo's interface{} values):
 //
 //	package mypackage
 //	import "dyngo"
@@ -141,51 +129,43 @@ func NewRootOperation() Operation {
 //	  }
 func NewOperation(parent Operation) Operation {
 	if parent == nil {
-		if root := rootOperation.Load(); root != nil {
-			parent = *root
+		if ptr := rootOperation.Load(); ptr != nil {
+			parent = *ptr
 		}
 	}
-	return newOperation(parent)
+	var parentOp *operation
+	if parent != nil {
+		parentOp = parent.unwrap()
+	}
+	return &operation{parent: parentOp}
 }
 
 // StartOperation starts a new operation along with its arguments and emits a
 // start event with the operation arguments.
-func StartOperation(op Operation, args interface{}) {
-	argsType := reflect.TypeOf(args)
+func StartOperation[O Operation, E ArgOf[O]](op O, args E) {
 	// Bubble-up the start event starting from the parent operation as you can't
 	// listen for your own start event
-	for current := op.Parent(); current != nil; current = current.Parent() {
-		current.emitEvent(argsType, op, args)
+	for current := op.unwrap().parent; current != nil; current = current.parent {
+		emitEvent(&current.eventRegister, op, args)
 	}
-}
-
-func newOperation(parent Operation) *operation {
-	return &operation{parent: parent}
-}
-
-// Parent return the parent operation. It returns nil for the root operation.
-func (o *operation) Parent() Operation {
-	return o.parent
 }
 
 // FinishOperation finishes the operation along with its results and emits a
 // finish event with the operation results.
 // The operation is then disabled and its event listeners removed.
-func FinishOperation(op Operation, results interface{}) {
-	op.finish(op, results)
-}
+func FinishOperation[O Operation, E ResultOf[O]](op O, results E) {
+	o := op.unwrap()
+	defer o.disable() // This will need the RLock below to be released...
 
-func (o *operation) finish(op Operation, results interface{}) {
-	// Defer the call to o.disable() first so that the RWMutex gets unlocked first
-	defer o.disable()
 	o.mu.RLock()
 	defer o.mu.RUnlock() // Deferred and stacked on top of the previously deferred call to o.disable()
+
 	if o.disabled {
 		return
 	}
-	resType := reflect.TypeOf(results)
-	for current := op; current != nil; current = current.Parent() {
-		current.emitEvent(resType, op, results)
+
+	for current := o; current != nil; current = current.parent {
+		emitEvent(&current.eventRegister, op, results)
 	}
 }
 
@@ -193,55 +173,58 @@ func (o *operation) finish(op Operation, results interface{}) {
 func (o *operation) disable() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+
 	if o.disabled {
 		return
 	}
+
 	o.disabled = true
 	o.eventRegister.clear()
 }
 
-// Add the given event listeners to the operation.
-func (o *operation) add(l ...EventListener) {
+// On registers and event listener that will be called when the operation
+// begins.
+func On[O Operation, E ArgOf[O]](op Operation, l EventListener[O, E]) {
+	o := op.unwrap()
+
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if o.disabled {
 		return
 	}
-	for _, l := range l {
-		if l == nil {
-			continue
-		}
-		key := l.ListenedType()
-		o.eventRegister.add(key, l)
-	}
+	addEventListener(&o.eventRegister, l)
 }
 
-// On registers the event listener. The difference with the Register() is that
-// it doesn't return a function closure, which avoids unnecessary allocations
-// For example:
-//
-//	op.On(MyOperationStart(func (op MyOperation, args MyOperationArgs) {
-//	    // ...
-//	}))
-func (o *operation) On(l EventListener) {
+// OnFinish registers an event listener that will be called when the operation
+// finishes.
+func OnFinish[O Operation, E ResultOf[O]](op Operation, l EventListener[O, E]) {
+	o := op.unwrap()
+
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if o.disabled {
 		return
 	}
-	o.eventRegister.add(l.ListenedType(), l)
+	addEventListener(&o.eventRegister, l)
 }
 
-func (o *operation) OnData(l DataListener) {
+func OnData[T any](op Operation, l DataListener[T]) {
+	o := op.unwrap()
+
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if o.disabled {
 		return
 	}
-	o.dataBroadcaster.add(l.ListenedType(), l)
+	addDataListener(&o.dataBroadcaster, l)
 }
 
-func (o *operation) EmitData(data any) {
+// EmitData sends a data event up the operation stack. Listeners will be matched
+// based on `T`. Callers may need to manually specify T when the static type of
+// the value is more specific that the intended data event type.
+func EmitData[T any](op Operation, data T) {
+	o := op.unwrap()
+
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if o.disabled {
@@ -250,55 +233,43 @@ func (o *operation) EmitData(data any) {
 	// Bubble up the data to the stack of operations. Contrary to events,
 	// we also send the data to ourselves since SDK operations are leaf operations
 	// that both emit and listen for data (errors).
-	for current := Operation(o); current != nil; current = current.Parent() {
-		current.emitData(reflect.TypeOf(data), data)
+	for current := o; current != nil; current = current.parent {
+		emitData(&current.dataBroadcaster, data)
 	}
 }
 
 type (
 	// eventRegister implements a thread-safe list of event listeners.
 	eventRegister struct {
-		mu        sync.RWMutex
 		listeners eventListenerMap
+		mu        sync.RWMutex
 	}
 
 	// eventListenerMap is the map of event listeners. The list of listeners are
 	// indexed by the operation argument or result type the event listener
 	// expects.
-	eventListenerMap map[reflect.Type][]EventListener
+	eventListenerMap map[any][]any
+
+	typeID[T any] struct{}
 
 	dataBroadcaster struct {
-		mu        sync.RWMutex
 		listeners dataListenerMap
+		mu        sync.RWMutex
 	}
 
-	dataListenerSpec[T any] func(data T)
-	DataListener            EventListener
-	dataListenerMap         map[reflect.Type][]DataListener
+	DataListener[T any] func(T)
+	dataListenerMap     map[any][]any
 )
 
-func (l dataListenerSpec[T]) Call(_ Operation, v interface{}) {
-	l(v.(T))
-}
-
-func (l dataListenerSpec[T]) ListenedType() reflect.Type {
-	return reflect.TypeOf((*T)(nil)).Elem()
-}
-
-// NewDataListener creates a specialized generic data listener, wrapped under a DataListener interface
-func NewDataListener[T any](f func(data T)) DataListener {
-	return dataListenerSpec[T](f)
-}
-
-func (b *dataBroadcaster) add(key reflect.Type, l DataListener) {
+func addDataListener[T any](b *dataBroadcaster, l DataListener[T]) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if b.listeners == nil {
 		b.listeners = make(dataListenerMap)
 	}
+	key := typeID[DataListener[T]]{}
 	b.listeners[key] = append(b.listeners[key], l)
-
 }
 
 func (b *dataBroadcaster) clear() {
@@ -307,7 +278,7 @@ func (b *dataBroadcaster) clear() {
 	b.listeners = nil
 }
 
-func (b *dataBroadcaster) emitData(key reflect.Type, v any) {
+func emitData[T any](b *dataBroadcaster, v T) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("appsec: recovered from an unexpected panic from an event listener: %+v", r)
@@ -315,21 +286,20 @@ func (b *dataBroadcaster) emitData(key reflect.Type, v any) {
 	}()
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	for t := range b.listeners {
-		if key == t || key.Implements(t) {
-			for _, listener := range b.listeners[t] {
-				listener.Call(nil, v)
-			}
-		}
+
+	for _, listener := range b.listeners[typeID[DataListener[T]]{}] {
+		listener.(DataListener[T])(v)
 	}
 }
 
-func (r *eventRegister) add(key reflect.Type, l EventListener) {
+func addEventListener[O Operation, T any](r *eventRegister, l EventListener[O, T]) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	if r.listeners == nil {
-		r.listeners = make(eventListenerMap)
+		r.listeners = make(eventListenerMap, 2)
 	}
+	key := typeID[EventListener[O, T]]{}
 	r.listeners[key] = append(r.listeners[key], l)
 }
 
@@ -339,7 +309,7 @@ func (r *eventRegister) clear() {
 	r.listeners = nil
 }
 
-func (r *eventRegister) emitEvent(key reflect.Type, op Operation, v interface{}) {
+func emitEvent[O Operation, T any](r *eventRegister, op O, v T) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("appsec: recovered from an unexpected panic from an event listener: %+v", r)
@@ -347,7 +317,8 @@ func (r *eventRegister) emitEvent(key reflect.Type, op Operation, v interface{})
 	}()
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for _, listener := range r.listeners[key] {
-		listener.Call(op, v)
+
+	for _, listener := range r.listeners[typeID[EventListener[O, T]]{}] {
+		listener.(EventListener[O, T])(op, v)
 	}
 }

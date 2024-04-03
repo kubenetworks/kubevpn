@@ -44,10 +44,10 @@ pinger.OnRecv = func(pkt *probing.Packet) {
 
 pinger.OnDuplicateRecv = func(pkt *probing.Packet) {
 	fmt.Printf("%d bytes from %s: icmp_seq=%d time=%v ttl=%v (DUP!)\n",
-		pkt.Nbytes, pkt.IPAddr, pkt.Seq, pkt.Rtt, pkt.Ttl)
+		pkt.Nbytes, pkt.IPAddr, pkt.Seq, pkt.Rtt, pkt.TTL)
 }
 
-pinger.OnFinish = func(stats *ping.Statistics) {
+pinger.OnFinish = func(stats *probing.Statistics) {
 	fmt.Printf("\n--- %s ping statistics ---\n", stats.Addr)
 	fmt.Printf("%d packets transmitted, %d packets received, %v%% packet loss\n",
 		stats.PacketsSent, stats.PacketsRecv, stats.PacketLoss)
@@ -106,6 +106,13 @@ See [this blog](https://sturmflut.github.io/linux/ubuntu/2015/01/17/unprivileged
 and the Go [x/net/icmp](https://godoc.org/golang.org/x/net/icmp) package
 for more details.
 
+This library supports setting the `SO_MARK` socket option which is equivalent to the `-m mark`
+flag in standard ping binaries on linux. Setting this option requires the `CAP_NET_ADMIN` capability
+(via `setcap` or elevated privileges). You can set a mark (ex: 100) with `pinger.SetMark(100)` in your code.
+
+Setting the "Don't Fragment" bit is supported under Linux which is equivalent to `ping -Mdo`.
+You can enable this with `pinger.SetDoNotFragment(true)`.
+
 ### Windows
 
 You must use `pinger.SetPrivileged(true)`, otherwise you will receive
@@ -125,6 +132,53 @@ x/net/ipv4 and x/net/ipv6 packages.
 There is no support for Plan 9. This is because the entire `x/net/ipv4`
 and `x/net/ipv6` packages are not implemented by the Go programming
 language.
+
+## HTTP
+
+This library also provides support for HTTP probing.
+Here is a trivial example:
+
+```go
+httpCaller := probing.NewHttpCaller("https://www.google.com",
+    probing.WithHTTPCallerCallFrequency(time.Second),
+    probing.WithHTTPCallerOnResp(func(suite *probing.TraceSuite, info *probing.HTTPCallInfo) {
+        fmt.Printf("got resp, status code: %d, latency: %s\n",
+            info.StatusCode,
+            suite.GetGeneralEnd().Sub(suite.GetGeneralStart()),
+        )
+    }),
+)
+
+// Listen for Ctrl-C.
+c := make(chan os.Signal, 1)
+signal.Notify(c, os.Interrupt)
+go func() {
+    <-c
+    httpCaller.Stop()
+}()
+httpCaller.Run()
+```
+
+Library provides a rich list of options available for a probing. You can check the full list of available
+options in a generated doc.
+
+### Callbacks
+
+HTTPCaller uses `net/http/httptrace` pkg to provide an API to track specific request event, e.g. tls handshake start.
+It is highly recommended to check the httptrace library [doc](https://pkg.go.dev/net/http/httptrace) to understand
+the purpose of provided callbacks. Nevertheless, httptrace callbacks are concurrent-unsafe, our implementation provides
+a concurrent-safe API. In addition to that, each callback contains a TraceSuite object which provides an Extra field
+which you can use to propagate your data across them and a number of timer fields, which are set prior to the execution of a
+corresponding callback.
+
+### Target RPS & performance
+
+Library provides two options, allowing to manipulate your call load: `callFrequency` & `maxConcurrentCalls`.
+In case you set `callFrequency` to a value X, but it can't be achieved during the execution - you will need to
+try increasing a number of `maxConcurrentCalls`. Moreover, your callbacks might directly influence an execution
+performance.
+
+For a full documentation, please refer to the generated [doc](https://pkg.go.dev/github.com/prometheus-community/pro-bing).
 
 ## Maintainers and Getting Help:
 

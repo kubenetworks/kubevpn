@@ -62,3 +62,13 @@ func TrackKafkaProduceOffset(topic string, partition int32, offset int64) {
 		}
 	}
 }
+
+// TrackKafkaHighWatermarkOffset should be used in the producer, to track when it produces a message.
+// if used together with TrackKafkaCommitOffset it can generate a Kafka lag in seconds metric.
+func TrackKafkaHighWatermarkOffset(cluster string, topic string, partition int32, offset int64) {
+	if t, ok := internal.GetGlobalTracer().(dataStreamsContainer); ok {
+		if p := t.GetDataStreamsProcessor(); p != nil {
+			p.TrackKafkaHighWatermarkOffset(cluster, topic, partition, offset)
+		}
+	}
+}

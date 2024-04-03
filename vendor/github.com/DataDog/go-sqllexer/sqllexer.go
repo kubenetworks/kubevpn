@@ -153,6 +153,9 @@ func (s *Lexer) Scan() Token {
 		fallthrough
 	case ch == '@':
 		if isAlphaNumeric(s.lookAhead(1)) {
+			if s.config.DBMS == DBMSSnowflake {
+				return s.scanIdentifier(ch)
+			}
 			return s.scanBindParameter()
 		} else if s.lookAhead(1) == '@' {
 			return s.scanSystemVariable()
@@ -314,7 +317,7 @@ func (s *Lexer) scanIdentifier(ch rune) Token {
 	// NOTE: this func does not distinguish between SQL keywords and identifiers
 	s.start = s.cursor
 	ch = s.nextBy(utf8.RuneLen(ch))
-	for isLetter(ch) || isDigit(ch) || ch == '.' || ch == '?' || ch == '$' || ch == '#' {
+	for isLetter(ch) || isDigit(ch) || ch == '.' || ch == '?' || ch == '$' || ch == '#' || ch == '/' {
 		ch = s.nextBy(utf8.RuneLen(ch))
 	}
 	if ch == '(' {

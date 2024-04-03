@@ -21,13 +21,15 @@ type udsWriter struct {
 	conn net.Conn
 	// write timeout
 	writeTimeout time.Duration
-	sync.RWMutex // used to lock conn / writer can replace it
+	// connect timeout
+	connectTimeout time.Duration
+	sync.RWMutex   // used to lock conn / writer can replace it
 }
 
 // newUDSWriter returns a pointer to a new udsWriter given a socket file path as addr.
-func newUDSWriter(addr string, writeTimeout time.Duration, transport string) (*udsWriter, error) {
+func newUDSWriter(addr string, writeTimeout time.Duration, connectTimeout time.Duration, transport string) (*udsWriter, error) {
 	// Defer connection to first Write
-	writer := &udsWriter{addr: addr, transport: transport, conn: nil, writeTimeout: writeTimeout}
+	writer := &udsWriter{addr: addr, transport: transport, conn: nil, writeTimeout: writeTimeout, connectTimeout: connectTimeout}
 	return writer, nil
 }
 
@@ -43,20 +45,11 @@ func (w *udsWriter) GetTransportName() string {
 	}
 }
 
-// retryOnWriteErr returns true if we should retry writing after a write error
-func (w *udsWriter) retryOnWriteErr(err error, stream bool) bool {
-	// Never retry when using unixgram (to preserve the historical behavior)
-	if !stream {
-		return false
-	}
-	// Otherwise we retry on timeout because we might have written a partial packet
-	if networkError, ok := err.(net.Error); ok && networkError.Timeout() {
+func (w *udsWriter) shouldCloseConnection(err error, partialWrite bool) bool {
+	if err != nil && partialWrite {
+		// We can't recover from a partial write
 		return true
 	}
-	return false
-}
-
-func (w *udsWriter) shouldCloseConnection(err error) bool {
 	if err, isNetworkErr := err.(net.Error); err != nil && (!isNetworkErr || !err.Timeout()) {
 		// Statsd server disconnected, retry connecting at next packet
 		return true
@@ -64,35 +57,11 @@ func (w *udsWriter) shouldCloseConnection(err error) bool {
 	return false
 }
 
-// writeFull writes the whole data to the UDS connection
-func (w *udsWriter) writeFull(data []byte, stopIfNoneWritten bool, stream bool) (int, error) {
-	written := 0
-	for written < len(data) {
-		n, e := w.conn.Write(data[written:])
-		written += n
-
-		// If we haven't written anything, and we're supposed to stop if we can't write anything, return the error
-		if written == 0 && stopIfNoneWritten {
-			return written, e
-		}
-
-		// If there's an error, check if it is retryable
-		if e != nil && !w.retryOnWriteErr(e, stream) {
-			return written, e
-		}
-
-		// When using "unix" we need to be able to finish to write partially written packets once we have started.
-		if stream {
-			w.conn.SetWriteDeadline(time.Time{})
-		}
-	}
-	return written, nil
-}
-
 // Write data to the UDS connection with write timeout and minimal error handling:
 // create the connection if nil, and destroy it if the statsd server has disconnected
 func (w *udsWriter) Write(data []byte) (int, error) {
 	var n int
+	partialWrite := false
 	conn, err := w.ensureConnection()
 	if err != nil {
 		return 0, err
@@ -107,15 +76,26 @@ func (w *udsWriter) Write(data []byte) (int, error) {
 	if stream {
 		bs := []byte{0, 0, 0, 0}
 		binary.LittleEndian.PutUint32(bs, uint32(len(data)))
-		_, err = w.writeFull(bs, true, true)
+		_, err = w.conn.Write(bs)
+
+		partialWrite = true
+
+		// W need to be able to finish to write partially written packets once we have started.
+		// But we will reset the connection if we can't write anything at all for a long time.
+		w.conn.SetWriteDeadline(time.Now().Add(w.connectTimeout))
+
+		// Continue writing only if we've written the length of the packet
 		if err == nil {
-			n, err = w.writeFull(data, false, true)
+			n, err = w.conn.Write(data)
+			if err == nil {
+				partialWrite = false
+			}
 		}
 	} else {
-		n, err = w.writeFull(data, true, false)
+		n, err = w.conn.Write(data)
 	}
 
-	if w.shouldCloseConnection(err) {
+	if w.shouldCloseConnection(err, partialWrite) {
 		w.unsetConnection()
 	}
 	return n, err
@@ -133,7 +113,7 @@ func (w *udsWriter) tryToDial(network string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	newConn, err := net.Dial(udsAddr.Network(), udsAddr.String())
+	newConn, err := net.DialTimeout(udsAddr.Network(), udsAddr.String(), w.connectTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -182,5 +162,6 @@ func (w *udsWriter) ensureConnection() (net.Conn, error) {
 func (w *udsWriter) unsetConnection() {
 	w.Lock()
 	defer w.Unlock()
+	_ = w.conn.Close()
 	w.conn = nil
 }

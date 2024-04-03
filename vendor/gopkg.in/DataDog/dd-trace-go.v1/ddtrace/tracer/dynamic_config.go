@@ -7,6 +7,8 @@ package tracer
 
 import (
 	"sync"
+
+	"gopkg.in/DataDog/dd-trace-go.v1/internal/telemetry"
 )
 
 // dynamicConfig is a thread-safe generic data structure to represent configuration fields.
@@ -14,47 +16,102 @@ import (
 // This structure will be extended to track the origin of configuration values as well (e.g remote_config, env_var).
 type dynamicConfig[T any] struct {
 	sync.RWMutex
-	current T       // holds the current configuration value
-	startup T       // holds the startup configuration value
-	apply   func(T) // applies a configuration value
-	isReset bool    // internal boolean to avoid unnecessary resets
+	current   T                 // holds the current configuration value
+	startup   T                 // holds the startup configuration value
+	cfgName   string            // holds the name of the configuration, has to be compatible with telemetry.Configuration.Name
+	cfgOrigin string            // holds the origin of the current configuration value (currently only supports remote_config, empty otherwise)
+	apply     func(T) bool      // executes any config-specific operations to propagate the update properly, returns whether the update was applied
+	equal     func(x, y T) bool // compares two configuration values, this is used to avoid unnecessary config and telemetry updates
 }
 
-func newDynamicConfig[T any](val T, apply func(T)) dynamicConfig[T] {
+func newDynamicConfig[T any](name string, val T, apply func(T) bool, equal func(x, y T) bool) dynamicConfig[T] {
 	return dynamicConfig[T]{
+		cfgName: name,
 		current: val,
 		startup: val,
 		apply:   apply,
-		isReset: true,
+		equal:   equal,
 	}
+}
+
+// get returns the current configuration value
+func (dc *dynamicConfig[T]) get() T {
+	dc.RLock()
+	defer dc.RUnlock()
+	return dc.current
 }
 
 // update applies a new configuration value
-func (dc *dynamicConfig[T]) update(val T) {
+func (dc *dynamicConfig[T]) update(val T, origin string) bool {
 	dc.Lock()
 	defer dc.Unlock()
+	if dc.equal(dc.current, val) {
+		return false
+	}
 	dc.current = val
-	dc.apply(val)
-	dc.isReset = false
+	dc.cfgOrigin = origin
+	return dc.apply(val)
 }
 
 // reset re-applies the startup configuration value
-func (dc *dynamicConfig[T]) reset() {
+func (dc *dynamicConfig[T]) reset() bool {
 	dc.Lock()
 	defer dc.Unlock()
-	if dc.isReset {
-		return
+	if dc.equal(dc.current, dc.startup) {
+		return false
 	}
 	dc.current = dc.startup
-	dc.apply(dc.startup)
-	dc.isReset = true
+	dc.cfgOrigin = ""
+	return dc.apply(dc.startup)
 }
 
 // handleRC processes a new configuration value from remote config
-func (dc *dynamicConfig[T]) handleRC(val *T) {
+// Returns whether the configuration value has been updated or not
+func (dc *dynamicConfig[T]) handleRC(val *T) bool {
 	if val != nil {
-		dc.update(*val)
-		return
+		return dc.update(*val, "remote_config")
 	}
-	dc.reset()
+	return dc.reset()
+}
+
+// toTelemetry returns the current configuration value as telemetry.Configuration
+func (dc *dynamicConfig[T]) toTelemetry() telemetry.Configuration {
+	dc.RLock()
+	defer dc.RUnlock()
+	return telemetry.Sanitize(telemetry.Configuration{
+		Name:   dc.cfgName,
+		Value:  dc.current,
+		Origin: dc.cfgOrigin,
+	})
+}
+
+func equal[T comparable](x, y T) bool {
+	return x == y
+}
+
+// equalSlice compares two slices of comparable values
+// The comparison takes into account the order of the elements
+func equalSlice[T comparable](x, y []T) bool {
+	if len(x) != len(y) {
+		return false
+	}
+	for i, v := range x {
+		if v != y[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// equalMap compares two maps of comparable keys and values
+func equalMap[T comparable](x, y map[T]interface{}) bool {
+	if len(x) != len(y) {
+		return false
+	}
+	for k, v := range x {
+		if yv, ok := y[k]; !ok || yv != v {
+			return false
+		}
+	}
+	return true
 }

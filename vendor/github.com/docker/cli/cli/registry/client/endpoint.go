@@ -6,10 +6,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/docker/distribution/reference"
+	"github.com/distribution/reference"
+	"github.com/docker/cli/cli/trust"
 	"github.com/docker/distribution/registry/client/auth"
 	"github.com/docker/distribution/registry/client/transport"
-	authtypes "github.com/docker/docker/api/types"
+	registrytypes "github.com/docker/docker/api/types/registry"
 	"github.com/docker/docker/registry"
 	"github.com/pkg/errors"
 )
@@ -17,6 +18,7 @@ import (
 type repositoryEndpoint struct {
 	info     *registry.RepositoryInfo
 	endpoint registry.APIEndpoint
+	actions  []string
 }
 
 // Name returns the repository name
@@ -74,7 +76,7 @@ func getDefaultEndpointFromRepoInfo(repoInfo *registry.RepositoryInfo) (registry
 }
 
 // getHTTPTransport builds a transport for use in communicating with a registry
-func getHTTPTransport(authConfig authtypes.AuthConfig, endpoint registry.APIEndpoint, repoName string, userAgent string) (http.RoundTripper, error) {
+func getHTTPTransport(authConfig registrytypes.AuthConfig, endpoint registry.APIEndpoint, repoName, userAgent string, actions []string) (http.RoundTripper, error) {
 	// get the http transport, this will be used in a client to upload manifest
 	base := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
@@ -98,8 +100,11 @@ func getHTTPTransport(authConfig authtypes.AuthConfig, endpoint registry.APIEndp
 		passThruTokenHandler := &existingTokenHandler{token: authConfig.RegistryToken}
 		modifiers = append(modifiers, auth.NewAuthorizer(challengeManager, passThruTokenHandler))
 	} else {
+		if len(actions) == 0 {
+			actions = trust.ActionsPullOnly
+		}
 		creds := registry.NewStaticCredentialStore(&authConfig)
-		tokenHandler := auth.NewTokenHandler(authTransport, creds, repoName, "push", "pull")
+		tokenHandler := auth.NewTokenHandler(authTransport, creds, repoName, actions...)
 		basicHandler := auth.NewBasicHandler(creds)
 		modifiers = append(modifiers, auth.NewAuthorizer(challengeManager, tokenHandler, basicHandler))
 	}
@@ -120,7 +125,7 @@ type existingTokenHandler struct {
 	token string
 }
 
-func (th *existingTokenHandler) AuthorizeRequest(req *http.Request, params map[string]string) error {
+func (th *existingTokenHandler) AuthorizeRequest(req *http.Request, _ map[string]string) error {
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", th.token))
 	return nil
 }

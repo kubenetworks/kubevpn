@@ -215,6 +215,9 @@ type ClientInterface interface {
 	Histogram(name string, value float64, tags []string, rate float64) error
 
 	// Distribution tracks the statistical distribution of a set of values across your infrastructure.
+	//
+	// It is recommended to use `WithMaxBufferedMetricsPerContext` to avoid dropping metrics at high throughput, `rate` can
+	// also be used to limit the load. Both options can *not* be used together.
 	Distribution(name string, value float64, tags []string, rate float64) error
 
 	// Decr is just Count of -1
@@ -365,7 +368,7 @@ func parseAgentURL(agentURL string) string {
 	return ""
 }
 
-func createWriter(addr string, writeTimeout time.Duration) (Transport, string, error) {
+func createWriter(addr string, writeTimeout time.Duration, connectTimeout time.Duration) (Transport, string, error) {
 	addr = resolveAddr(addr)
 	if addr == "" {
 		return nil, "", errors.New("No address passed and autodetection from environment failed")
@@ -376,13 +379,13 @@ func createWriter(addr string, writeTimeout time.Duration) (Transport, string, e
 		w, err := newWindowsPipeWriter(addr, writeTimeout)
 		return w, writerWindowsPipe, err
 	case strings.HasPrefix(addr, UnixAddressPrefix):
-		w, err := newUDSWriter(addr[len(UnixAddressPrefix):], writeTimeout, "")
+		w, err := newUDSWriter(addr[len(UnixAddressPrefix):], writeTimeout, connectTimeout, "")
 		return w, writerNameUDS, err
 	case strings.HasPrefix(addr, UnixAddressDatagramPrefix):
-		w, err := newUDSWriter(addr[len(UnixAddressDatagramPrefix):], writeTimeout, "unixgram")
+		w, err := newUDSWriter(addr[len(UnixAddressDatagramPrefix):], writeTimeout, connectTimeout, "unixgram")
 		return w, writerNameUDS, err
 	case strings.HasPrefix(addr, UnixAddressStreamPrefix):
-		w, err := newUDSWriter(addr[len(UnixAddressStreamPrefix):], writeTimeout, "unix")
+		w, err := newUDSWriter(addr[len(UnixAddressStreamPrefix):], writeTimeout, connectTimeout, "unix")
 		return w, writerNameUDS, err
 	default:
 		w, err := newUDPWriter(addr, writeTimeout)
@@ -398,7 +401,7 @@ func New(addr string, options ...Option) (*Client, error) {
 		return nil, err
 	}
 
-	w, writerType, err := createWriter(addr, o.writeTimeout)
+	w, writerType, err := createWriter(addr, o.writeTimeout, o.connectTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -539,7 +542,7 @@ func newWithWriter(w Transport, o *Options, writerName string) (*Client, error) 
 			c.telemetryClient = newTelemetryClient(&c, c.agg != nil)
 		} else {
 			var err error
-			c.telemetryClient, err = newTelemetryClientWithCustomAddr(&c, o.telemetryAddr, c.agg != nil, bufferPool, o.writeTimeout)
+			c.telemetryClient, err = newTelemetryClientWithCustomAddr(&c, o.telemetryAddr, c.agg != nil, bufferPool, o.writeTimeout, o.connectTimeout)
 			if err != nil {
 				return nil, err
 			}
