@@ -23,7 +23,8 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -34,6 +35,8 @@ import (
 	"k8s.io/client-go/transport/spdy"
 	"k8s.io/kubectl/pkg/cmd/exec"
 	"k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/polymorphichelpers"
+	scheme2 "k8s.io/kubectl/pkg/scheme"
 	"k8s.io/kubectl/pkg/util/podutils"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -253,7 +256,7 @@ func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config 
 		Namespace:     namespace,
 		PodName:       podName,
 		ContainerName: containerName,
-		IOStreams:     genericclioptions.IOStreams{In: stdin, Out: stdout, ErrOut: nil},
+		IOStreams:     genericiooptions.IOStreams{In: stdin, Out: stdout, ErrOut: nil},
 	}
 	Executor := &exec.DefaultRemoteExecutor{}
 	// ensure we can recover the terminal while attached
@@ -370,4 +373,78 @@ func FindContainerByName(pod *corev1.Pod, name string) (*corev1.Container, int) 
 		}
 	}
 	return nil, -1
+}
+
+func CheckPodStatus(cCtx context.Context, cFunc context.CancelFunc, podName string, podInterface v12.PodInterface) {
+	w, err := podInterface.Watch(cCtx, v1.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
+	})
+	if err != nil {
+		return
+	}
+	defer w.Stop()
+	for {
+		select {
+		case e, ok := <-w.ResultChan():
+			if !ok {
+				return
+			}
+			switch e.Type {
+			case watch.Deleted:
+				cFunc()
+				return
+			case watch.Error:
+				return
+			case watch.Added, watch.Modified, watch.Bookmark:
+				// do nothing
+			default:
+				return
+			}
+		case <-cCtx.Done():
+			return
+		}
+	}
+}
+
+func Rollback(f util.Factory, ns, workload string) {
+	r := f.NewBuilder().
+		WithScheme(scheme2.Scheme, scheme2.Scheme.PrioritizedVersionsAllGroups()...).
+		NamespaceParam(ns).DefaultNamespace().
+		ResourceTypeOrNameArgs(true, workload).
+		ContinueOnError().
+		Latest().
+		Flatten().
+		Do()
+	if r.Err() == nil {
+		_ = r.Visit(func(info *resource.Info, err error) error {
+			if err != nil {
+				return err
+			}
+			rollbacker, err := polymorphichelpers.RollbackerFn(f, info.ResourceMapping())
+			if err != nil {
+				return err
+			}
+			_, err = rollbacker.Rollback(info.Object, nil, 0, util.DryRunNone)
+			return err
+		})
+	}
+}
+
+func GetRunningPodList(ctx context.Context, clientset *kubernetes.Clientset, ns string, labelSelector string) ([]corev1.Pod, error) {
+	list, err := clientset.CoreV1().Pods(ns).List(ctx, v1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < len(list.Items); i++ {
+		if list.Items[i].GetDeletionTimestamp() != nil || !AllContainerIsRunning(&list.Items[i]) {
+			list.Items = append(list.Items[:i], list.Items[i+1:]...)
+			i--
+		}
+	}
+	if len(list.Items) == 0 {
+		return nil, errors.New("can not found any running pod")
+	}
+	return list.Items, nil
 }

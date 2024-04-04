@@ -41,7 +41,7 @@ func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) err
 	if err != nil {
 		return err
 	}
-	err = connect.InitClient(InitFactoryByPath(path, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
 	if err != nil {
 		return err
 	}

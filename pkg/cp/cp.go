@@ -12,7 +12,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/cmd/exec"
@@ -32,11 +32,11 @@ type CopyOptions struct {
 
 	args []string
 
-	genericclioptions.IOStreams
+	genericiooptions.IOStreams
 }
 
 // NewCopyOptions creates the options for copy
-func NewCopyOptions(ioStreams genericclioptions.IOStreams) *CopyOptions {
+func NewCopyOptions(ioStreams genericiooptions.IOStreams) *CopyOptions {
 	return &CopyOptions{
 		IOStreams: ioStreams,
 	}
@@ -149,7 +149,7 @@ func (o *CopyOptions) Run() error {
 func (o *CopyOptions) checkDestinationIsDir(dest fileSpec) error {
 	options := &exec.ExecOptions{
 		StreamOptions: exec.StreamOptions{
-			IOStreams: genericclioptions.IOStreams{
+			IOStreams: genericiooptions.IOStreams{
 				Out:    bytes.NewBuffer([]byte{}),
 				ErrOut: bytes.NewBuffer([]byte{}),
 			},
@@ -199,7 +199,7 @@ func (o *CopyOptions) copyToPod(src, dest fileSpec, options *exec.ExecOptions) e
 	}
 
 	options.StreamOptions = exec.StreamOptions{
-		IOStreams: genericclioptions.IOStreams{
+		IOStreams: genericiooptions.IOStreams{
 			In:     reader,
 			Out:    o.Out,
 			ErrOut: o.ErrOut,
@@ -246,7 +246,7 @@ func (t *TarPipe) initReadFrom(n uint64) {
 	t.reader, t.outStream = io.Pipe()
 	options := &exec.ExecOptions{
 		StreamOptions: exec.StreamOptions{
-			IOStreams: genericclioptions.IOStreams{
+			IOStreams: genericiooptions.IOStreams{
 				In:     nil,
 				Out:    t.outStream,
 				ErrOut: t.o.Out,

@@ -56,14 +56,13 @@ func DefaultClientConfig() ClientConfig {
 }
 
 func pollIntervalFromEnv() time.Duration {
-	interval := internal.IntEnv(envPollIntervalSec, 5)
+	interval := internal.FloatEnv(envPollIntervalSec, 5.0)
 	if interval < 0 {
-		log.Debug("Remote config: cannot use a negative poll interval: %s = %d. Defaulting to 5s.", envPollIntervalSec, interval)
-		return 5 * time.Second
+		log.Debug("Remote config: cannot use a negative poll interval: %s = %f. Defaulting to 5s.", envPollIntervalSec, interval)
+		interval = 5.0
 	} else if interval == 0 {
 		log.Debug("Remote config: poll interval set to 0. Polling will be continuous.")
 		return time.Nanosecond
 	}
-
-	return time.Duration(interval) * time.Second
+	return time.Duration(interval * float64(time.Second))
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 
 	"github.com/DataDog/go-tuf/data"
@@ -446,55 +445,6 @@ func (c *Client) getLocalMeta() error {
 	return nil
 }
 
-// getDelegationPathFromRaw verifies a delegated targets against
-// a given snapshot and returns an error if it's invalid
-//
-// Delegation must have targets to get a path, else an empty list
-// will be returned: this is because the delegation iterator is leveraged.
-//
-// Concrete example:
-// targets
-// └── a.json
-//   └── b.json
-//      └── c.json
-//        └── target_file.txt
-//
-// If you try to use that function on "a.json" or "b.json", it'll return an empty list
-// with no error, as neither of them declare a target file
-// On the other hand, if you use that function on "c.json", it'll return & verify
-// [c.json, b.json, a.json]. Running that function on every delegated targets
-// guarantees that if a delegated targets is in the path of a target file, then it will
-// appear at least once in the result
-func (c *Client) getDelegationPathFromRaw(snapshot *data.Snapshot, delegatedTargetsJSON json.RawMessage) ([]string, error) {
-	// unmarshal the delegated targets first without verifying as
-	// we need at least one targets file name to leverage the
-	// getTargetFileMetaDelegationPath method
-	s := &data.Signed{}
-	if err := json.Unmarshal(delegatedTargetsJSON, s); err != nil {
-		return nil, err
-	}
-	targets := &data.Targets{}
-	if err := json.Unmarshal(s.Signed, targets); err != nil {
-		return nil, err
-	}
-	for targetPath := range targets.Targets {
-		// Gets target file from remote store
-		_, resp, err := c.getTargetFileMetaDelegationPath(targetPath, snapshot)
-		// We only need to test one targets file:
-		// - If it is valid, it means the delegated targets has been validated
-		// - If it is not, the delegated targets isn't valid
-		if errors.As(err, &ErrMissingRemoteMetadata{}) {
-			// As this function is used to fill the local store cache, the targets
-			// will be downloaded from the remote store as the local store cache is
-			// empty, meaning that the delegated targets may not exist anymore. In
-			// that case, ignore it.
-			return nil, nil
-		}
-		return resp, err
-	}
-	return nil, nil
-}
-
 // loadAndVerifyLocalRootMeta decodes and verifies root metadata from
 // local storage and loads the top-level keys. This method first clears
 // the DB for top-level keys and then loads the new keys.
@@ -875,10 +825,17 @@ type Destination interface {
 //   - Size of the download does not match if the reported size is known and
 //     incorrect
 func (c *Client) Download(name string, dest Destination) (err error) {
+	return c.DownloadBatch(map[string]Destination{name: dest})
+}
+
+// DownloadBatch is a batched version of Download.
+func (c *Client) DownloadBatch(targetFiles map[string]Destination) (err error) {
 	// delete dest if there is an error
 	defer func() {
 		if err != nil {
-			dest.Delete()
+			for _, dest := range targetFiles {
+				dest.Delete()
+			}
 		}
 	}()
 
@@ -889,17 +846,27 @@ func (c *Client) Download(name string, dest Destination) (err error) {
 		}
 	}
 
-	normalizedName := util.NormalizeTarget(name)
-	localMeta, ok := c.targets[normalizedName]
-	if !ok {
-		// search in delegations
-		localMeta, err = c.getTargetFileMeta(normalizedName)
+	var names []string
+	for name := range targetFiles {
+		names = append(names, name)
+	}
+	targets, err := c.getTargetFileMetas(names)
+	if err != nil {
+		return err
+	}
+
+	for name, dest := range targetFiles {
+		err := c.download(name, targets[name], dest)
 		if err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
+func (c *Client) download(name string, localMeta data.TargetFileMeta, dest Destination) error {
 	// get the data from remote storage
+	normalizedName := util.NormalizeTarget(name)
 	r, size, err := c.downloadTarget(normalizedName, c.remote.GetTarget, localMeta.Hashes)
 	if err != nil {
 		return err
@@ -927,7 +894,6 @@ func (c *Client) Download(name string, dest Destination) (err error) {
 		}
 		return ErrDownloadFailed{name, err}
 	}
-
 	return nil
 }
 
@@ -958,16 +924,23 @@ func (c *Client) VerifyDigest(digest string, digestAlg string, length int64, pat
 // exists, searching from top-level level targets then through
 // all delegations. If it does not, ErrNotFound will be returned.
 func (c *Client) Target(name string) (data.TargetFileMeta, error) {
-	target, err := c.getTargetFileMeta(util.NormalizeTarget(name))
+	targets, err := c.TargetBatch([]string{name})
+	if err != nil {
+		return data.TargetFileMeta{}, err
+	}
+	return targets[name], nil
+}
+
+// TargetBatch is a batched version of Target.
+func (c *Client) TargetBatch(names []string) (data.TargetFiles, error) {
+	targets, err := c.getTargetFileMetas(names)
 	if err == nil {
-		return target, nil
+		return targets, nil
 	}
-
 	if _, ok := err.(ErrUnknownTarget); ok {
-		return data.TargetFileMeta{}, ErrNotFound{name}
+		return nil, ErrNotFound{err.(ErrUnknownTarget).Name}
 	}
-
-	return data.TargetFileMeta{}, err
+	return nil, err
 }
 
 // Targets returns the complete list of available top-level targets.

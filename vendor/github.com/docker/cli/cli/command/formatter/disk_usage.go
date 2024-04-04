@@ -7,14 +7,15 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/docker/distribution/reference"
+	"github.com/distribution/reference"
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/volume"
 	units "github.com/docker/go-units"
 )
 
 const (
-	defaultDiskUsageImageTableFormat      = "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedSince}}\t{{.VirtualSize}}\t{{.SharedSize}}\t{{.UniqueSize}}\t{{.Containers}}"
+	defaultDiskUsageImageTableFormat      = "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedSince}}\t{{.Size}}\t{{.SharedSize}}\t{{.UniqueSize}}\t{{.Containers}}"
 	defaultDiskUsageContainerTableFormat  = "table {{.ID}}\t{{.Image}}\t{{.Command}}\t{{.LocalVolumes}}\t{{.Size}}\t{{.RunningFor}}\t{{.Status}}\t{{.Names}}"
 	defaultDiskUsageVolumeTableFormat     = "table {{.Name}}\t{{.Links}}\t{{.Size}}"
 	defaultDiskUsageBuildCacheTableFormat = "table {{.ID}}\t{{.CacheType}}\t{{.Size}}\t{{.CreatedSince}}\t{{.LastUsedSince}}\t{{.UsageCount}}\t{{.Shared}}"
@@ -34,7 +35,7 @@ type DiskUsageContext struct {
 	Context
 	Verbose     bool
 	LayersSize  int64
-	Images      []*types.ImageSummary
+	Images      []*image.Summary
 	Containers  []*types.Container
 	Volumes     []*volume.Volume
 	BuildCache  []*types.BuildCache
@@ -261,7 +262,7 @@ func (ctx *DiskUsageContext) verboseWriteTable(duc *diskUsageContext) error {
 type diskUsageImagesContext struct {
 	HeaderContext
 	totalSize int64
-	images    []*types.ImageSummary
+	images    []*image.Summary
 }
 
 func (c *diskUsageImagesContext) MarshalJSON() ([]byte, error) {
@@ -296,10 +297,10 @@ func (c *diskUsageImagesContext) Reclaimable() string {
 
 	for _, i := range c.images {
 		if i.Containers != 0 {
-			if i.VirtualSize == -1 || i.SharedSize == -1 {
+			if i.Size == -1 || i.SharedSize == -1 {
 				continue
 			}
-			used += i.VirtualSize - i.SharedSize
+			used += i.Size - i.SharedSize
 		}
 	}
 

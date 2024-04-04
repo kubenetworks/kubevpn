@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -22,7 +23,6 @@ import (
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/moby/patternmatcher"
 	"github.com/pkg/errors"
-	exec "golang.org/x/sys/execabs"
 )
 
 const (
@@ -155,19 +155,22 @@ func GetContextFromReader(rc io.ReadCloser, dockerfileName string) (out io.ReadC
 	if dockerfileName == "-" {
 		return nil, "", errors.New("build context is not an archive")
 	}
+	if dockerfileName != "" {
+		return nil, "", errors.New("ambiguous Dockerfile source: both stdin and flag correspond to Dockerfiles")
+	}
 
 	dockerfileDir, err := WriteTempDockerfile(rc)
 	if err != nil {
 		return nil, "", err
 	}
 
-	tar, err := archive.Tar(dockerfileDir, archive.Uncompressed)
+	tarArchive, err := archive.Tar(dockerfileDir, archive.Uncompressed)
 	if err != nil {
 		return nil, "", err
 	}
 
-	return ioutils.NewReadCloserWrapper(tar, func() error {
-		err := tar.Close()
+	return ioutils.NewReadCloserWrapper(tarArchive, func() error {
+		err := tarArchive.Close()
 		os.RemoveAll(dockerfileDir)
 		return err
 	}), DefaultDockerfileName, nil
@@ -231,7 +234,7 @@ func GetContextFromURL(out io.Writer, remoteURL, dockerfileName string) (io.Read
 // getWithStatusError does an http.Get() and returns an error if the
 // status code is 4xx or 5xx.
 func getWithStatusError(url string) (resp *http.Response, err error) {
-	// #nosec G107
+	//#nosec G107 -- Ignore G107: Potential HTTP request made with variable url
 	if resp, err = http.Get(url); err != nil {
 		return nil, err
 	}
@@ -432,8 +435,7 @@ func Compress(buildCtx io.ReadCloser) (io.ReadCloser, error) {
 		defer buildCtx.Close()
 
 		if _, err := pools.Copy(compressWriter, buildCtx); err != nil {
-			pipeWriter.CloseWithError(
-				errors.Wrap(err, "failed to compress context"))
+			pipeWriter.CloseWithError(errors.Wrap(err, "failed to compress context"))
 			compressWriter.Close()
 			return
 		}

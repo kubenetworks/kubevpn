@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/kubectl/pkg/cmd/util"
 )
 
 func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) (*dns.ClientConfig, error) {
@@ -64,4 +65,30 @@ func GetDNSIPFromDnsPod(clientset *kubernetes.Clientset) (ips []string, err erro
 	}
 	err = nil
 	return
+}
+
+func GetDNS(ctx context.Context, f util.Factory, ns, pod string) (*dns.ClientConfig, error) {
+	clientSet, err := f.KubernetesClientSet()
+	if err != nil {
+		return nil, err
+	}
+	_, err = clientSet.CoreV1().Pods(ns).Get(ctx, pod, v12.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	config, err := f.ToRESTConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := f.RESTClient()
+	if err != nil {
+		return nil, err
+	}
+
+	clientConfig, err := GetDNSServiceIPFromPod(clientSet, client, config, pod, ns)
+	if err != nil {
+		return nil, err
+	}
+	return clientConfig, nil
 }

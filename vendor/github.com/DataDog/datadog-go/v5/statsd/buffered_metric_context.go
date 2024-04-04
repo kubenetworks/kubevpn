@@ -68,7 +68,7 @@ func (bc *bufferedMetricContexts) sample(name string, value float64, tags []stri
 	}
 
 	context, stringTags := getContextAndTags(name, tags)
-	var v *bufferedMetric = nil
+	var v *bufferedMetric
 
 	bc.mutex.RLock()
 	v, _ = bc.values[context]

@@ -156,6 +156,9 @@ func (c *spanContext) TraceID() uint64 { return c.traceID.Lower() }
 
 // TraceID128 implements ddtrace.SpanContextW3C.
 func (c *spanContext) TraceID128() string {
+	if c == nil {
+		return ""
+	}
 	return c.traceID.HexEncoded()
 }
 
@@ -340,6 +343,18 @@ func (t *trace) setSamplingPriorityLocked(p int, sampler samplernames.SamplerNam
 	}
 
 	return updatedPriority
+}
+
+func (t *trace) isLocked() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.locked
+}
+
+func (t *trace) setLocked(locked bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.locked = locked
 }
 
 // push pushes a new span into the trace. If the buffer is full, it returns

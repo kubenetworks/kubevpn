@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/docker/cli/cli/command"
 	dockercomp "github.com/docker/cli/cli/command/completion"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -21,15 +20,15 @@ import (
 )
 
 func CmdDev(f cmdutil.Factory) *cobra.Command {
-	cli, dockerCli, err := util.GetClient()
+	client, cli, err := util.GetClient()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
-	var devOptions = &dev.Options{
+	var options = &dev.Options{
 		Factory:        f,
 		NoProxy:        false,
-		Cli:            cli,
-		DockerCli:      dockerCli,
+		Cli:            client,
+		DockerCli:      cli,
 		ExtraRouteInfo: handler.ExtraRouteInfo{},
 	}
 	var sshConf = &util.SshConfig{}
@@ -96,7 +95,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 			}
 			util.InitLogger(false)
 			// not support temporally
-			if devOptions.Engine == config.EngineGvisor {
+			if options.Engine == config.EngineGvisor {
 				return fmt.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
 			}
 
@@ -107,55 +106,42 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 			return util.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			devOptions.Workload = args[0]
+			options.Workload = args[0]
 			for i, arg := range args {
 				if arg == "--" && i != len(args)-1 {
-					devOptions.Copts.Args = args[i+1:]
+					options.Copts.Args = args[i+1:]
 					break
 				}
 			}
 
-			err = dev.DoDev(cmd.Context(), devOptions, sshConf, cmd.Flags(), f, transferImage)
-			for _, fun := range devOptions.GetRollbackFuncList() {
-				if fun != nil {
-					if err = fun(); err != nil {
-						log.Errorf("roll back failed, error: %s", err.Error())
+			defer func() {
+				for _, function := range options.GetRollbackFuncList() {
+					if function != nil {
+						if er := function(); er != nil {
+							log.Errorf("roll back failed, error: %s", er.Error())
+						}
 					}
 				}
-			}
+			}()
+			err = dev.DoDev(cmd.Context(), options, sshConf, cmd.Flags(), f, transferImage)
 			return err
 		},
 	}
 	cmd.Flags().SortFlags = false
-	cmd.Flags().StringToStringVarP(&devOptions.Headers, "headers", "H", map[string]string{}, "Traffic with special headers with reverse it to local PC, you should startup your service after reverse workloads successfully, If not special, redirect all traffic to local PC, format is k=v, like: k1=v1,k2=v2")
+	cmd.Flags().StringToStringVarP(&options.Headers, "headers", "H", map[string]string{}, "Traffic with special headers with reverse it to local PC, you should startup your service after reverse workloads successfully, If not special, redirect all traffic to local PC, format is k=v, like: k1=v1,k2=v2")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "use this image to startup container")
-	cmd.Flags().BoolVar(&devOptions.NoProxy, "no-proxy", false, "Whether proxy remote workloads traffic into local or not, true: just startup container on local without inject containers to intercept traffic, false: intercept traffic and forward to local")
-	cmdutil.AddContainerVarFlags(cmd, &devOptions.ContainerName, devOptions.ContainerName)
+	cmd.Flags().BoolVar(&options.NoProxy, "no-proxy", false, "Whether proxy remote workloads traffic into local or not, true: just startup container on local without inject containers to intercept traffic, false: intercept traffic and forward to local")
+	cmdutil.AddContainerVarFlags(cmd, &options.ContainerName, options.ContainerName)
 	cmdutil.CheckErr(cmd.RegisterFlagCompletionFunc("container", completion.ContainerCompletionFunc(f)))
-	cmd.Flags().StringVar((*string)(&devOptions.ConnectMode), "connect-mode", string(dev.ConnectModeHost), "Connect to kubernetes network in container or in host, eg: ["+string(dev.ConnectModeContainer)+"|"+string(dev.ConnectModeHost)+"]")
+	cmd.Flags().StringVar((*string)(&options.ConnectMode), "connect-mode", string(dev.ConnectModeHost), "Connect to kubernetes network in container or in host, eg: ["+string(dev.ConnectModeContainer)+"|"+string(dev.ConnectModeHost)+"]")
 	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
-	cmd.Flags().StringVar((*string)(&devOptions.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
+	cmd.Flags().StringVar((*string)(&options.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
 
 	// diy docker options
-	cmd.Flags().StringVar(&devOptions.DockerImage, "docker-image", "", "Overwrite the default K8s pod of the image")
+	cmd.Flags().StringVar(&options.DevImage, "dev-image", "", "Use to startup docker container, Default is pod image")
 	// origin docker options
-	flags := cmd.Flags()
-	flags.SetInterspersed(false)
-
-	// These are flags not stored in Config/HostConfig
-	flags.BoolVarP(&devOptions.Options.Detach, "detach", "d", false, "Run container in background and print container ID")
-	flags.StringVar(&devOptions.Options.Name, "name", "", "Assign a name to the container")
-	flags.StringVar(&devOptions.Options.Pull, "pull", dev.PullImageMissing, `Pull image before running ("`+dev.PullImageAlways+`"|"`+dev.PullImageMissing+`"|"`+dev.PullImageNever+`")`)
-	flags.BoolVarP(&devOptions.Options.Quiet, "quiet", "q", false, "Suppress the pull output")
-
-	// Add an explicit help that doesn't have a `-h` to prevent the conflict
-	// with hostname
-	flags.Bool("help", false, "Print usage")
-
-	command.AddPlatformFlag(flags, &devOptions.Options.Platform)
-	command.AddTrustVerificationFlags(flags, &devOptions.Options.Untrusted, dockerCli.ContentTrustEnabled())
-	devOptions.Copts = dev.AddFlags(flags)
+	dev.AddDockerFlags(options, cmd.Flags(), cli)
 
 	_ = cmd.RegisterFlagCompletionFunc(
 		"env",
@@ -171,10 +157,10 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 	)
 	_ = cmd.RegisterFlagCompletionFunc(
 		"network",
-		dockercomp.NetworkNames(nil),
+		dockercomp.NetworkNames(cli),
 	)
 
-	addExtraRoute(cmd, &devOptions.ExtraRouteInfo)
+	addExtraRoute(cmd, &options.ExtraRouteInfo)
 	addSshFlags(cmd, sshConf)
 	return cmd
 }

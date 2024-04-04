@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext"
+	"gopkg.in/DataDog/dd-trace-go.v1/internal/log"
 )
 
 // headerTagRegexp is used to replace all invalid characters in the config. Only alphanumerics, whitespaces and dashes allowed.
@@ -44,6 +45,11 @@ func HeaderTagSlice(headers []string) map[string]string {
 			continue
 		}
 		header, tag := HeaderTag(h)
+		// If `header` or `tag` is just the empty string, we don't want to set it.
+		if len(header) == 0 || len(tag) == 0 {
+			log.Debug("Header-tag input is in unsupported format; dropping input value %v", h)
+			continue
+		}
 		headerTagsMap[header] = tag
 	}
 	return headerTagsMap

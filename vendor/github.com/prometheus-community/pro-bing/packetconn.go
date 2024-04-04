@@ -18,6 +18,9 @@ type packetConn interface {
 	SetReadDeadline(t time.Time) error
 	WriteTo(b []byte, dst net.Addr) (int, error)
 	SetTTL(ttl int)
+	SetMark(m uint) error
+	SetDoNotFragment() error
+	SetBroadcastFlag() error
 }
 
 type icmpConn struct {

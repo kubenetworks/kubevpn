@@ -3,7 +3,7 @@
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
 // Copyright 2016-present Datadog, Inc.
 
-//go:build linux && arm64 && !go1.22 && !datadog.no_waf && (cgo || appsec)
+//go:build linux && arm64 && !go1.23 && !datadog.no_waf && (cgo || appsec)
 
 package lib
 

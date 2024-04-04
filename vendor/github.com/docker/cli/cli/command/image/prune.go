@@ -3,6 +3,7 @@ package image
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/docker/cli/cli"
@@ -28,7 +29,7 @@ func NewPruneCommand(dockerCli command.Cli) *cobra.Command {
 		Short: "Remove unused images",
 		Args:  cli.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			spaceReclaimed, output, err := runPrune(dockerCli, options)
+			spaceReclaimed, output, err := runPrune(cmd.Context(), dockerCli, options)
 			if err != nil {
 				return err
 			}
@@ -57,20 +58,22 @@ Are you sure you want to continue?`
 Are you sure you want to continue?`
 )
 
-func runPrune(dockerCli command.Cli, options pruneOptions) (spaceReclaimed uint64, output string, err error) {
+func runPrune(ctx context.Context, dockerCli command.Cli, options pruneOptions) (spaceReclaimed uint64, output string, err error) {
 	pruneFilters := options.filter.Value().Clone()
-	pruneFilters.Add("dangling", fmt.Sprintf("%v", !options.all))
+	pruneFilters.Add("dangling", strconv.FormatBool(!options.all))
 	pruneFilters = command.PruneFilters(dockerCli, pruneFilters)
 
 	warning := danglingWarning
 	if options.all {
 		warning = allImageWarning
 	}
-	if !options.force && !command.PromptForConfirmation(dockerCli.In(), dockerCli.Out(), warning) {
-		return 0, "", nil
+	if !options.force {
+		if r, err := command.PromptForConfirmation(ctx, dockerCli.In(), dockerCli.Out(), warning); !r || err != nil {
+			return 0, "", err
+		}
 	}
 
-	report, err := dockerCli.Client().ImagesPrune(context.Background(), pruneFilters)
+	report, err := dockerCli.Client().ImagesPrune(ctx, pruneFilters)
 	if err != nil {
 		return 0, "", err
 	}
@@ -98,6 +101,6 @@ func runPrune(dockerCli command.Cli, options pruneOptions) (spaceReclaimed uint6
 
 // RunPrune calls the Image Prune API
 // This returns the amount of space reclaimed and a detailed output string
-func RunPrune(dockerCli command.Cli, all bool, filter opts.FilterOpt) (uint64, string, error) {
-	return runPrune(dockerCli, pruneOptions{force: true, all: all, filter: filter})
+func RunPrune(ctx context.Context, dockerCli command.Cli, all bool, filter opts.FilterOpt) (uint64, string, error) {
+	return runPrune(ctx, dockerCli, pruneOptions{force: true, all: all, filter: filter})
 }

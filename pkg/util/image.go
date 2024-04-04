@@ -6,61 +6,68 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/distribution/reference"
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/cli/command/image"
 	"github.com/docker/cli/cli/flags"
 	"github.com/docker/cli/cli/streams"
 	"github.com/docker/cli/cli/trust"
-	"github.com/docker/distribution/reference"
 	"github.com/docker/docker/api/types"
+	typesimage "github.com/docker/docker/api/types/image"
+	registrytypes "github.com/docker/docker/api/types/registry"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
+	"github.com/hashicorp/go-version"
 	"github.com/moby/term"
 	"github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
+	v12 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/kubectl/pkg/cmd/util"
+	client2 "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func GetClient() (*client.Client, *command.DockerCli, error) {
-	cli, err := client.NewClientWithOpts(
+	client, err := client.NewClientWithOpts(
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("can not create docker client from env, err: %v", err)
 	}
-	var dockerCli *command.DockerCli
-	dockerCli, err = command.NewDockerCli(command.WithAPIClient(cli))
+	var cli *command.DockerCli
+	cli, err = command.NewDockerCli(command.WithAPIClient(client))
 	if err != nil {
 		return nil, nil, fmt.Errorf("can not create docker client from env, err: %v", err)
 	}
-	err = dockerCli.Initialize(flags.NewClientOptions())
+	err = cli.Initialize(flags.NewClientOptions())
 	if err != nil {
 		return nil, nil, fmt.Errorf("can not init docker client, err: %v", err)
 	}
-	return cli, dockerCli, nil
+	return client, cli, nil
 }
 
 // TransferImage
 // 1) if not special ssh config, just pull image and tag and push
 // 2) if special ssh config, pull image, tag image, save image and scp image to remote, load image and push
 func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarget string, out io.Writer) error {
-	cli, dockerCmdCli, err := GetClient()
+	client, cli, err := GetClient()
 	if err != nil {
 		log.Errorf("failed to get docker client: %v", err)
 		return err
 	}
 	// todo add flags? or detect k8s node runtime ?
 	platform := &v1.Platform{Architecture: "amd64", OS: "linux"}
-	err = PullImage(ctx, platform, cli, dockerCmdCli, imageSource, out)
+	err = PullImage(ctx, platform, client, cli, imageSource, out)
 	if err != nil {
 		log.Errorf("failed to pull image: %v", err)
 		return err
 	}
 
-	err = cli.ImageTag(ctx, imageSource, imageTarget)
+	err = client.ImageTag(ctx, imageSource, imageTarget)
 	if err != nil {
 		log.Errorf("failed to tag image %s to %s: %v", imageSource, imageTarget, err)
 		return err
@@ -75,20 +82,20 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 			return err
 		}
 		var imgRefAndAuth trust.ImageRefAndAuth
-		imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, nil, image.AuthResolver(dockerCmdCli), distributionRef.String())
+		imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, image.AuthResolver(cli), distributionRef.String())
 		if err != nil {
 			log.Errorf("can not get image auth: %v", err)
 			return err
 		}
 		var encodedAuth string
-		encodedAuth, err = command.EncodeAuthToBase64(*imgRefAndAuth.AuthConfig())
+		encodedAuth, err = registrytypes.EncodeAuthConfig(*imgRefAndAuth.AuthConfig())
 		if err != nil {
 			log.Errorf("can not encode auth config to base64: %v", err)
 			return err
 		}
-		requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(dockerCmdCli, imgRefAndAuth.RepoInfo().Index, "push")
+		requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(cli, imgRefAndAuth.RepoInfo().Index, "push")
 		var readCloser io.ReadCloser
-		readCloser, err = cli.ImagePush(ctx, imageTarget, types.ImagePushOptions{
+		readCloser, err = client.ImagePush(ctx, imageTarget, types.ImagePushOptions{
 			RegistryAuth:  encodedAuth,
 			PrivilegeFunc: requestPrivilege,
 		})
@@ -117,7 +124,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 	}
 	defer sshClient.Close()
 	var responseReader io.ReadCloser
-	responseReader, err = cli.ImageSave(ctx, []string{imageTarget})
+	responseReader, err = client.ImageSave(ctx, []string{imageTarget})
 	if err != nil {
 		log.Errorf("can not save image %s: %v", imageTarget, err)
 		return err
@@ -152,6 +159,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 	return nil
 }
 
+// PullImage image.RunPull(ctx, c, image.PullOptions{})
 func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, c *command.DockerCli, img string, out io.Writer) error {
 	var readCloser io.ReadCloser
 	var plat string
@@ -164,19 +172,19 @@ func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, c
 		return err
 	}
 	var imgRefAndAuth trust.ImageRefAndAuth
-	imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, nil, image.AuthResolver(c), distributionRef.String())
+	imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, image.AuthResolver(c), distributionRef.String())
 	if err != nil {
 		log.Errorf("can not get image auth: %v", err)
 		return err
 	}
 	var encodedAuth string
-	encodedAuth, err = command.EncodeAuthToBase64(*imgRefAndAuth.AuthConfig())
+	encodedAuth, err = registrytypes.EncodeAuthConfig(*imgRefAndAuth.AuthConfig())
 	if err != nil {
 		log.Errorf("can not encode auth config to base64: %v", err)
 		return err
 	}
 	requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(c, imgRefAndAuth.RepoInfo().Index, "pull")
-	readCloser, err = cli.ImagePull(ctx, img, types.ImagePullOptions{
+	readCloser, err = cli.ImagePull(ctx, img, typesimage.PullOptions{
 		All:           false,
 		RegistryAuth:  encodedAuth,
 		PrivilegeFunc: requestPrivilege,
@@ -197,4 +205,65 @@ func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, c
 		return err
 	}
 	return nil
+}
+
+// UpdateImage update to newer image
+func UpdateImage(ctx context.Context, factory util.Factory, ns string, deployName string, image string) error {
+	clientSet, err2 := factory.KubernetesClientSet()
+	if err2 != nil {
+		return err2
+	}
+	deployment, err := clientSet.AppsV1().Deployments(ns).Get(ctx, deployName, v12.GetOptions{})
+	if err != nil {
+		return err
+	}
+	origin := deployment.DeepCopy()
+	newImg, err := reference.ParseNormalizedNamed(image)
+	if err != nil {
+		return err
+	}
+	newTag, ok := newImg.(reference.NamedTagged)
+	if !ok {
+		return nil
+	}
+	oldImg, err := reference.ParseNormalizedNamed(deployment.Spec.Template.Spec.Containers[0].Image)
+	if err != nil {
+		return err
+	}
+	var oldTag reference.NamedTagged
+	oldTag, ok = oldImg.(reference.NamedTagged)
+	if !ok {
+		return nil
+	}
+	if reference.Domain(newImg) != reference.Domain(oldImg) {
+		return nil
+	}
+	var oldVersion, newVersion *version.Version
+	oldVersion, err = version.NewVersion(oldTag.Tag())
+	if err != nil {
+		return nil
+	}
+	newVersion, err = version.NewVersion(newTag.Tag())
+	if err != nil {
+		return nil
+	}
+	if oldVersion.GreaterThanOrEqual(newVersion) {
+		return nil
+	}
+
+	log.Infof("found newer image %s, set image from %s to it...", image, deployment.Spec.Template.Spec.Containers[0].Image)
+	for i := range deployment.Spec.Template.Spec.Containers {
+		deployment.Spec.Template.Spec.Containers[i].Image = image
+	}
+	p := client2.MergeFrom(deployment)
+	data, err := client2.MergeFrom(origin).Data(deployment)
+	if err != nil {
+		return err
+	}
+	_, err = clientSet.AppsV1().Deployments(ns).Patch(ctx, deployName, p.Type(), data, v12.PatchOptions{})
+	if err != nil {
+		return err
+	}
+	err = RolloutStatus(ctx, factory, ns, fmt.Sprintf("deployments/%s", deployName), time.Minute*60)
+	return err
 }

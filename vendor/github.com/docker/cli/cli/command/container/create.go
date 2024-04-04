@@ -8,18 +8,18 @@ import (
 	"regexp"
 
 	"github.com/containerd/containerd/platforms"
+	"github.com/distribution/reference"
 	"github.com/docker/cli/cli"
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/cli/command/completion"
 	"github.com/docker/cli/cli/command/image"
+	"github.com/docker/cli/cli/streams"
 	"github.com/docker/cli/opts"
-	"github.com/docker/distribution/reference"
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	imagetypes "github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/versions"
-	apiclient "github.com/docker/docker/client"
+	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/jsonmessage"
-	"github.com/docker/docker/registry"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -55,7 +55,7 @@ func NewCreateCommand(dockerCli command.Cli) *cobra.Command {
 			if len(args) > 1 {
 				copts.Args = args[1:]
 			}
-			return runCreate(dockerCli, cmd.Flags(), &options, copts)
+			return runCreate(cmd.Context(), dockerCli, cmd.Flags(), &options, copts)
 		},
 		Annotations: map[string]string{
 			"aliases": "docker container create, docker create",
@@ -80,7 +80,7 @@ func NewCreateCommand(dockerCli command.Cli) *cobra.Command {
 	return cmd
 }
 
-func runCreate(dockerCli command.Cli, flags *pflag.FlagSet, options *createOptions, copts *containerOptions) error {
+func runCreate(ctx context.Context, dockerCli command.Cli, flags *pflag.FlagSet, options *createOptions, copts *containerOptions) error {
 	if err := validatePullOpt(options.pull); err != nil {
 		reportError(dockerCli.Err(), "create", err.Error(), true)
 		return cli.StatusError{StatusCode: 125}
@@ -91,62 +91,48 @@ func runCreate(dockerCli command.Cli, flags *pflag.FlagSet, options *createOptio
 		if v == nil {
 			newEnv = append(newEnv, k)
 		} else {
-			newEnv = append(newEnv, fmt.Sprintf("%s=%s", k, *v))
+			newEnv = append(newEnv, k+"="+*v)
 		}
 	}
 	copts.env = *opts.NewListOptsRef(&newEnv, nil)
-	containerConfig, err := parse(flags, copts, dockerCli.ServerInfo().OSType)
+	containerCfg, err := parse(flags, copts, dockerCli.ServerInfo().OSType)
 	if err != nil {
 		reportError(dockerCli.Err(), "create", err.Error(), true)
 		return cli.StatusError{StatusCode: 125}
 	}
-	if err = validateAPIVersion(containerConfig, dockerCli.Client().ClientVersion()); err != nil {
+	if err = validateAPIVersion(containerCfg, dockerCli.Client().ClientVersion()); err != nil {
 		reportError(dockerCli.Err(), "create", err.Error(), true)
 		return cli.StatusError{StatusCode: 125}
 	}
-	response, err := createContainer(context.Background(), dockerCli, containerConfig, options)
+	id, err := createContainer(ctx, dockerCli, containerCfg, options)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(dockerCli.Out(), response.ID)
+	_, _ = fmt.Fprintln(dockerCli.Out(), id)
 	return nil
 }
 
-func pullImage(ctx context.Context, dockerCli command.Cli, image string, platform string, out io.Writer) error {
-	ref, err := reference.ParseNormalizedNamed(image)
+// FIXME(thaJeztah): this is the only code-path that uses APIClient.ImageCreate. Rewrite this to use the regular "pull" code (or vice-versa).
+func pullImage(ctx context.Context, dockerCli command.Cli, img string, options *createOptions) error {
+	encodedAuth, err := command.RetrieveAuthTokenFromImage(dockerCli.ConfigFile(), img)
 	if err != nil {
 		return err
 	}
 
-	// Resolve the Repository name from fqn to RepositoryInfo
-	repoInfo, err := registry.ParseRepositoryInfo(ref)
-	if err != nil {
-		return err
-	}
-
-	authConfig := command.ResolveAuthConfig(ctx, dockerCli, repoInfo.Index)
-	encodedAuth, err := command.EncodeAuthToBase64(authConfig)
-	if err != nil {
-		return err
-	}
-
-	options := types.ImageCreateOptions{
+	responseBody, err := dockerCli.Client().ImageCreate(ctx, img, imagetypes.CreateOptions{
 		RegistryAuth: encodedAuth,
-		Platform:     platform,
-	}
-
-	responseBody, err := dockerCli.Client().ImageCreate(ctx, image, options)
+		Platform:     options.platform,
+	})
 	if err != nil {
 		return err
 	}
 	defer responseBody.Close()
 
-	return jsonmessage.DisplayJSONMessagesStream(
-		responseBody,
-		out,
-		dockerCli.Out().FD(),
-		dockerCli.Out().IsTerminal(),
-		nil)
+	out := dockerCli.Err()
+	if options.quiet {
+		out = io.Discard
+	}
+	return jsonmessage.DisplayJSONMessagesToStream(responseBody, streams.NewOut(out), nil)
 }
 
 type cidFile struct {
@@ -199,10 +185,10 @@ func newCIDFile(path string) (*cidFile, error) {
 }
 
 //nolint:gocyclo
-func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig *containerConfig, opts *createOptions) (*container.CreateResponse, error) {
-	config := containerConfig.Config
-	hostConfig := containerConfig.HostConfig
-	networkingConfig := containerConfig.NetworkingConfig
+func createContainer(ctx context.Context, dockerCli command.Cli, containerCfg *containerConfig, options *createOptions) (containerID string, err error) {
+	config := containerCfg.Config
+	hostConfig := containerCfg.HostConfig
+	networkingConfig := containerCfg.NetworkingConfig
 
 	warnOnOomKillDisable(*hostConfig, dockerCli.Err())
 	warnOnLocalhostDNS(*hostConfig, dockerCli.Err())
@@ -214,33 +200,29 @@ func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig
 
 	containerIDFile, err := newCIDFile(hostConfig.ContainerIDFile)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer containerIDFile.Close()
 
 	ref, err := reference.ParseAnyReference(config.Image)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if named, ok := ref.(reference.Named); ok {
 		namedRef = reference.TagNameOnly(named)
 
-		if taggedRef, ok := namedRef.(reference.NamedTagged); ok && !opts.untrusted {
+		if taggedRef, ok := namedRef.(reference.NamedTagged); ok && !options.untrusted {
 			var err error
-			trustedRef, err = image.TrustedReference(ctx, dockerCli, taggedRef, nil)
+			trustedRef, err = image.TrustedReference(ctx, dockerCli, taggedRef)
 			if err != nil {
-				return nil, err
+				return "", err
 			}
 			config.Image = reference.FamiliarString(trustedRef)
 		}
 	}
 
 	pullAndTagImage := func() error {
-		pullOut := dockerCli.Err()
-		if opts.quiet {
-			pullOut = io.Discard
-		}
-		if err := pullImage(ctx, dockerCli, config.Image, opts.platform, pullOut); err != nil {
+		if err := pullImage(ctx, dockerCli, config.Image, options); err != nil {
 			return err
 		}
 		if taggedRef, ok := namedRef.(reference.NamedTagged); ok && trustedRef != nil {
@@ -254,50 +236,50 @@ func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig
 	// create. It will produce an error if you try to set a platform on older API
 	// versions, so check the API version here to maintain backwards
 	// compatibility for CLI users.
-	if opts.platform != "" && versions.GreaterThanOrEqualTo(dockerCli.Client().ClientVersion(), "1.41") {
-		p, err := platforms.Parse(opts.platform)
+	if options.platform != "" && versions.GreaterThanOrEqualTo(dockerCli.Client().ClientVersion(), "1.41") {
+		p, err := platforms.Parse(options.platform)
 		if err != nil {
-			return nil, errors.Wrap(err, "error parsing specified platform")
+			return "", errors.Wrap(err, "error parsing specified platform")
 		}
 		platform = &p
 	}
 
-	if opts.pull == PullImageAlways {
+	if options.pull == PullImageAlways {
 		if err := pullAndTagImage(); err != nil {
-			return nil, err
+			return "", err
 		}
 	}
 
 	hostConfig.ConsoleSize[0], hostConfig.ConsoleSize[1] = dockerCli.Out().GetTtySize()
 
-	response, err := dockerCli.Client().ContainerCreate(ctx, config, hostConfig, networkingConfig, platform, opts.name)
+	response, err := dockerCli.Client().ContainerCreate(ctx, config, hostConfig, networkingConfig, platform, options.name)
 	if err != nil {
 		// Pull image if it does not exist locally and we have the PullImageMissing option. Default behavior.
-		if apiclient.IsErrNotFound(err) && namedRef != nil && opts.pull == PullImageMissing {
-			if !opts.quiet {
+		if errdefs.IsNotFound(err) && namedRef != nil && options.pull == PullImageMissing {
+			if !options.quiet {
 				// we don't want to write to stdout anything apart from container.ID
 				fmt.Fprintf(dockerCli.Err(), "Unable to find image '%s' locally\n", reference.FamiliarString(namedRef))
 			}
 
 			if err := pullAndTagImage(); err != nil {
-				return nil, err
+				return "", err
 			}
 
 			var retryErr error
-			response, retryErr = dockerCli.Client().ContainerCreate(ctx, config, hostConfig, networkingConfig, platform, opts.name)
+			response, retryErr = dockerCli.Client().ContainerCreate(ctx, config, hostConfig, networkingConfig, platform, options.name)
 			if retryErr != nil {
-				return nil, retryErr
+				return "", retryErr
 			}
 		} else {
-			return nil, err
+			return "", err
 		}
 	}
 
-	for _, warning := range response.Warnings {
-		fmt.Fprintf(dockerCli.Err(), "WARNING: %s\n", warning)
+	for _, w := range response.Warnings {
+		_, _ = fmt.Fprintf(dockerCli.Err(), "WARNING: %s\n", w)
 	}
 	err = containerIDFile.Write(response.ID)
-	return &response, err
+	return response.ID, err
 }
 
 func warnOnOomKillDisable(hostConfig container.HostConfig, stderr io.Writer) {
