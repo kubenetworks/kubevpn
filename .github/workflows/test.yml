@@ -25,10 +25,6 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     needs: [ "image" ]
-    strategy:
-      matrix:
-        os: [ linux ]
-        arch: [ amd64, arm64, 386 ]
     steps:
       - uses: actions/checkout@v2
 
@@ -88,10 +84,6 @@ jobs:
   macos:
     runs-on: macos-latest
     needs: [ "image" ]
-    strategy:
-      matrix:
-        os: [ darwin ]
-        arch: [ amd64, arm64 ]
     steps:
       - uses: actions/checkout@v2
 
@@ -156,10 +148,6 @@ jobs:
   windows:
     runs-on: windows-latest
     needs: [ "image" ]
-    strategy:
-      matrix:
-        os: [ windows ]
-        arch: [ amd64, arm64, 386 ]
     steps:
       - uses: actions/checkout@v2
 
@@ -182,4 +170,4 @@ jobs:
 
       - name: Test
         run: |
-          go test -coverpkg=./... -coverprofile=coverage.txt $(shell go list ./... | grep -v /pkg/handler)
+          go test -coverpkg=./... -coverprofile=coverage.txt $(go list ./... | grep -v /pkg/handler)
