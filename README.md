@@ -693,10 +693,6 @@ kubectl delete -f https://raw.githubusercontent.com/kubenetworks/kubevpn/master/
 - Linux
 - Windows
 
-on Windows platform, you need to
-install [PowerShell](https://docs.microsoft.com/en-us/powershell/scripting/install/installing-powershell-on-windows?view=powershell-7.2)
-in advance
-
 ## FAQ
 
 ### 1, What should I do if the dependent image cannot be pulled, or the inner environment cannot access docker.io?
