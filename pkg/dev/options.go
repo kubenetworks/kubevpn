@@ -300,7 +300,7 @@ func (option *Options) connect(ctx context.Context, f cmdutil.Factory, conf *uti
 		if path != "" {
 			path, err = util.ConvertK8sApiServerToDomain(path)
 		} else {
-			path, err = connect.GetKubeconfigPath()
+			path, err = util.GetKubeconfigPath(connect.GetFactory())
 		}
 		if err != nil {
 			return nil, err

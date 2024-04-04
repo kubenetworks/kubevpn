@@ -71,7 +71,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	if err != nil {
 		return err
 	}
-	err = connect.InitClient(InitFactoryByPath(path, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
 	if err != nil {
 		return err
 	}
@@ -130,7 +130,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 	if err != nil {
 		return err
 	}
-	err = connect.InitClient(InitFactoryByPath(path, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
 	if err != nil {
 		return err
 	}

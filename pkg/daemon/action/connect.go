@@ -5,18 +5,12 @@ import (
 	"fmt"
 	"io"
 	defaultlog "log"
-	"os"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/client-go/rest"
-	restclient "k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -97,7 +91,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if err != nil {
 		return err
 	}
-	err = svr.connect.InitClient(InitFactoryByPath(path, req.Namespace))
+	err = svr.connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
 	if err != nil {
 		return err
 	}
@@ -157,7 +151,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	if err != nil {
 		return err
 	}
-	err = connect.InitClient(InitFactoryByPath(path, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
 	if err != nil {
 		return err
 	}
@@ -247,44 +241,4 @@ func (r *warp) Write(p []byte) (n int, err error) {
 
 func newWarp(server rpc.Daemon_ConnectServer) io.Writer {
 	return &warp{server: server}
-}
-
-func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
-	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-	configFlags.WrapConfigFn = func(c *rest.Config) *rest.Config {
-		if path, ok := os.LookupEnv(config.EnvSSHJump); ok {
-			bytes, err := os.ReadFile(path)
-			cmdutil.CheckErr(err)
-			var conf *restclient.Config
-			conf, err = clientcmd.RESTConfigFromKubeConfig(bytes)
-			cmdutil.CheckErr(err)
-			return conf
-		}
-		return c
-	}
-	// todo optimize here
-	temp, err := os.CreateTemp("", "*.json")
-	if err != nil {
-		return nil
-	}
-	err = temp.Close()
-	if err != nil {
-		return nil
-	}
-	err = os.WriteFile(temp.Name(), []byte(kubeconfigBytes), os.ModePerm)
-	if err != nil {
-		return nil
-	}
-	configFlags.KubeConfig = pointer.String(temp.Name())
-	configFlags.Namespace = pointer.String(ns)
-	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
-	return cmdutil.NewFactory(matchVersionFlags)
-}
-
-func InitFactoryByPath(kubeconfig string, ns string) cmdutil.Factory {
-	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
-	configFlags.KubeConfig = pointer.String(kubeconfig)
-	configFlags.Namespace = pointer.String(ns)
-	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
-	return cmdutil.NewFactory(matchVersionFlags)
 }

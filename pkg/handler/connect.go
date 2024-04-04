@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -31,27 +30,20 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	pkgtypes "k8s.io/apimachinery/pkg/types"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
-	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd/api"
-	"k8s.io/client-go/tools/clientcmd/api/latest"
-	clientcmdlatest "k8s.io/client-go/tools/clientcmd/api/latest"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/cmd/set"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/scheme"
 	"k8s.io/utils/pointer"
-	pkgclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
@@ -173,30 +165,6 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error)
 	return
 }
 
-func Rollback(f cmdutil.Factory, ns, workload string) {
-	r := f.NewBuilder().
-		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
-		NamespaceParam(ns).DefaultNamespace().
-		ResourceTypeOrNameArgs(true, workload).
-		ContinueOnError().
-		Latest().
-		Flatten().
-		Do()
-	if r.Err() == nil {
-		_ = r.Visit(func(info *resource.Info, err error) error {
-			if err != nil {
-				return err
-			}
-			rollbacker, err := polymorphichelpers.RollbackerFn(f, info.ResourceMapping())
-			if err != nil {
-				return err
-			}
-			_, err = rollbacker.Rollback(info.Object, nil, 0, cmdutil.DryRunNone)
-			return err
-		})
-	}
-}
-
 func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
@@ -305,7 +273,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 					}
 				}}
 				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
-				go checkPodStatus(childCtx, cancelFunc, podName, podInterface)
+				go util.CheckPodStatus(childCtx, cancelFunc, podName, podInterface)
 				err = util.PortForwardPod(
 					c.config,
 					c.restclient,
@@ -344,37 +312,6 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 	case <-readyChan:
 		log.Info("port forward ready")
 		return nil
-	}
-}
-
-func checkPodStatus(cCtx context.Context, cFunc context.CancelFunc, podName string, podInterface v12.PodInterface) {
-	w, err := podInterface.Watch(cCtx, metav1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
-	})
-	if err != nil {
-		return
-	}
-	defer w.Stop()
-	for {
-		select {
-		case e, ok := <-w.ResultChan():
-			if !ok {
-				return
-			}
-			switch e.Type {
-			case watch.Deleted:
-				cFunc()
-				return
-			case watch.Error:
-				return
-			case watch.Added, watch.Modified, watch.Bookmark:
-				// do nothing
-			default:
-				return
-			}
-		case <-cCtx.Done():
-			return
-		}
 	}
 }
 
@@ -816,22 +753,8 @@ func (c *ConnectOptions) PreCheckResource() error {
 }
 
 func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error) {
-	list, err := c.clientset.CoreV1().Pods(c.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String(),
-	})
-	if err != nil {
-		return nil, err
-	}
-	for i := 0; i < len(list.Items); i++ {
-		if list.Items[i].GetDeletionTimestamp() != nil || !util.AllContainerIsRunning(&list.Items[i]) {
-			list.Items = append(list.Items[:i], list.Items[i+1:]...)
-			i--
-		}
-	}
-	if len(list.Items) == 0 {
-		return nil, errors.New("can not found any running pod")
-	}
-	return list.Items, nil
+	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
+	return util.GetRunningPodList(ctx, c.clientset, c.Namespace, label)
 }
 
 // getCIDR
@@ -1104,44 +1027,6 @@ func (c *ConnectOptions) addExtraNodeIP(ctx context.Context) error {
 	return nil
 }
 
-func (c *ConnectOptions) GetKubeconfigPath() (string, error) {
-	rawConfig, err := c.factory.ToRawKubeConfigLoader().RawConfig()
-	if err != nil {
-		return "", err
-	}
-	err = api.FlattenConfig(&rawConfig)
-	if err != nil {
-		return "", err
-	}
-	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})
-	var convertedObj pkgruntime.Object
-	convertedObj, err = latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
-	if err != nil {
-		return "", err
-	}
-	var kubeconfigJsonBytes []byte
-	kubeconfigJsonBytes, err = json.Marshal(convertedObj)
-	if err != nil {
-		return "", err
-	}
-
-	temp, err := os.CreateTemp("", "*.kubeconfig")
-	if err != nil {
-		return "", err
-	}
-	temp.Close()
-	err = os.WriteFile(temp.Name(), kubeconfigJsonBytes, 0644)
-	if err != nil {
-		return "", err
-	}
-	err = os.Chmod(temp.Name(), 0644)
-	if err != nil {
-		return "", err
-	}
-
-	return temp.Name(), nil
-}
-
 func (c *ConnectOptions) GetClientset() *kubernetes.Clientset {
 	return c.clientset
 }
@@ -1155,63 +1040,6 @@ func (c *ConnectOptions) GetLocalTunIPv4() string {
 		return c.localTunIPv4.IP.String()
 	}
 	return ""
-}
-
-// update to newer image
-func (c *ConnectOptions) UpdateImage(ctx context.Context) error {
-	deployment, err := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	origin := deployment.DeepCopy()
-	newImg, err := reference.ParseNormalizedNamed(config.Image)
-	if err != nil {
-		return err
-	}
-	newTag, ok := newImg.(reference.NamedTagged)
-	if !ok {
-		return nil
-	}
-	oldImg, err := reference.ParseNormalizedNamed(deployment.Spec.Template.Spec.Containers[0].Image)
-	if err != nil {
-		return err
-	}
-	var oldTag reference.NamedTagged
-	oldTag, ok = oldImg.(reference.NamedTagged)
-	if !ok {
-		return nil
-	}
-	if reference.Domain(newImg) != reference.Domain(oldImg) {
-		return nil
-	}
-	var oldVersion, newVersion *goversion.Version
-	oldVersion, err = goversion.NewVersion(oldTag.Tag())
-	if err != nil {
-		return nil
-	}
-	newVersion, err = goversion.NewVersion(newTag.Tag())
-	if err != nil {
-		return nil
-	}
-	if oldVersion.GreaterThanOrEqual(newVersion) {
-		return nil
-	}
-
-	log.Infof("found newer image %s, set image from %s to it...", config.Image, deployment.Spec.Template.Spec.Containers[0].Image)
-	for i := range deployment.Spec.Template.Spec.Containers {
-		deployment.Spec.Template.Spec.Containers[i].Image = config.Image
-	}
-	p := pkgclient.MergeFrom(deployment)
-	data, err := pkgclient.MergeFrom(origin).Data(deployment)
-	if err != nil {
-		return err
-	}
-	_, err = c.clientset.AppsV1().Deployments(c.Namespace).Patch(ctx, config.ConfigMapPodTrafficManager, p.Type(), data, metav1.PatchOptions{})
-	if err != nil {
-		return err
-	}
-	err = util.RolloutStatus(ctx, c.factory, c.Namespace, fmt.Sprintf("deployments/%s", config.ConfigMapPodTrafficManager), time.Minute*60)
-	return err
 }
 
 func (c *ConnectOptions) setImage(ctx context.Context) error {
@@ -1355,17 +1183,6 @@ func (c *ConnectOptions) GetTunDeviceName() (string, error) {
 		return "", err
 	}
 	return device.Name, nil
-}
-
-func (c *ConnectOptions) GetKubeconfigCluster() string {
-	rawConfig, err := c.GetFactory().ToRawKubeConfigLoader().RawConfig()
-	if err != nil {
-		return ""
-	}
-	if rawConfig.Contexts != nil && rawConfig.Contexts[rawConfig.CurrentContext] != nil {
-		return rawConfig.Contexts[rawConfig.CurrentContext].Cluster
-	}
-	return ""
 }
 
 func (c *ConnectOptions) AddRolloutFunc(f func() error) {
