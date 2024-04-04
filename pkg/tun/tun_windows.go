@@ -152,12 +152,24 @@ func (c *winTunConn) Close() error {
 	return err
 }
 
-func (c *winTunConn) Read(b []byte) (n int, err error) {
-	return c.ifce.Read([][]byte{b}, []int{1}, 0)
+func (c *winTunConn) Read(b []byte) (int, error) {
+	sizes := []int{1}
+	num, err := c.ifce.Read([][]byte{b}, sizes, 0)
+	if err != nil || num == 0 {
+		return 0, err
+	}
+	return sizes[0], nil
 }
 
-func (c *winTunConn) Write(b []byte) (n int, err error) {
-	return c.ifce.Write([][]byte{b}, 0)
+func (c *winTunConn) Write(b []byte) (int, error) {
+	n, err := c.ifce.Write([][]byte{b}, 0)
+	if err != nil {
+		return 0, err
+	}
+	if n == 0 {
+		return 0, nil
+	}
+	return len(b), nil
 }
 
 func (c *winTunConn) LocalAddr() net.Addr {

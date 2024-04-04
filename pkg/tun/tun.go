@@ -93,25 +93,32 @@ func (c *tunConn) Read(b []byte) (n int, err error) {
 		return 0, err
 	}
 	var size = sizes[0]
-	if size == 0 || size > device.MaxSegmentSize-device.MessageTransportHeaderSize {
-		return 0, nil
+	if size == 0 {
+		return 0, errors.New("tun packet is zero")
+	}
+	if size > device.MaxSegmentSize-device.MessageTransportHeaderSize {
+		return 0, errors.New("tun packet is too large")
 	}
 	return copy(b, bytes[offset:offset+size]), nil
 }
 
-func (c *tunConn) Write(b []byte) (n int, err error) {
+func (c *tunConn) Write(b []byte) (int, error) {
 	if len(b) < device.MessageTransportHeaderSize {
-		return 0, err
+		return 0, errors.New("tun packet is too short")
 	}
 	bytes := config.LPool.Get().([]byte)[:]
 	defer config.LPool.Put(bytes[:])
 
 	copy(bytes[device.MessageTransportOffsetContent:], b)
 
-	return c.ifce.Write([][]byte{bytes[:device.MessageTransportOffsetContent+len(b)]}, device.MessageTransportOffsetContent)
+	_, err := c.ifce.Write([][]byte{bytes[:device.MessageTransportOffsetContent+len(b)]}, device.MessageTransportOffsetContent)
+	if err != nil {
+		return 0, err
+	}
+	return len(b), nil
 }
 
-func (c *tunConn) Close() (err error) {
+func (c *tunConn) Close() error {
 	return c.ifce.Close()
 }
 
