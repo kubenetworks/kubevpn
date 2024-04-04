@@ -581,9 +581,6 @@ d0b3dab8912a   naison/kubevpn:v2.0.0     "/bin/bash"              5 minutes ago 
 - Linux
 - Windows
 
-Windows
-下需要安装 [PowerShell](https://docs.microsoft.com/zh-cn/powershell/scripting/install/installing-powershell-on-windows?view=powershell-7.2)
-
 ## 问答
 
 ### 1，依赖的镜像拉不下来，或者内网环境无法访问 docker.io 怎么办？
