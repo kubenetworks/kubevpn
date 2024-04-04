@@ -9,37 +9,42 @@ package telemetry
 
 import (
 	"time"
-
-	"gopkg.in/DataDog/dd-trace-go.v1/internal/appsec"
 )
 
-// ProductStart signals that the product has started with some configuration
-// information. It will start the telemetry client if it is not already started.
-// ProductStart assumes that the telemetry client has been configured already by the caller using the ApplyOps method.
-// If the client is already started, it will send any necessary app-product-change
-// events to indicate whether the product is enabled, as well as an app-client-configuration-change
-// event in case any new configuration information is available.
-func (c *client) ProductStart(namespace Namespace, configuration []Configuration) {
+// ProductChange signals that the product has changed with some configuration
+// information. It will start the telemetry client if it is not already started,
+// unless enabled is false (in which case the call does nothing). ProductChange
+// assumes that the telemetry client has been configured already by the caller
+// using the ApplyOps method.
+// If the client is already started, it will send any necessary
+// app-product-change events to indicate whether the product is enabled, as well
+// as an app-client-configuration-change event in case any new configuration
+// information is available.
+func (c *client) ProductChange(namespace Namespace, enabled bool, configuration []Configuration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.started {
+		if !enabled {
+			// Namespace is not enabled & telemetry isn't started, won't start it now.
+			return
+		}
 		c.start(configuration, namespace)
 		return
 	}
 	c.configChange(configuration)
 	switch namespace {
-	case NamespaceProfilers, NamespaceASM:
-		c.productEnabled(namespace)
-	case NamespaceTracers:
-		// Since appsec is integrated with the tracer, we sent an app-product-change
-		// update about appsec when the tracer starts. Any tracer-related configuration
-		// information can be passed along here as well.
-		if appsec.Enabled() {
-			c.productEnabled(NamespaceASM)
-		}
+	case NamespaceTracers, NamespaceProfilers, NamespaceAppSec:
+		c.productChange(namespace, enabled)
 	default:
-		log("unknown product namespace provided to ProductStart")
+		log("unknown product namespace %q provided to ProductChange", namespace)
 	}
+}
+
+// ConfigChange is a thread-safe method to enqueue an app-client-configuration-change event.
+func (c *client) ConfigChange(configuration []Configuration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.configChange(configuration)
 }
 
 // configChange enqueues an app-client-configuration-change event to be flushed.
@@ -58,22 +63,24 @@ func (c *client) configChange(configuration []Configuration) {
 	}
 }
 
-// productEnabled enqueues an app-product-change event that signals a product has been turned on.
+// productChange enqueues an app-product-change event that signals a product has been `enabled`.
 // Must be called with c.mu locked. An app-product-change event with enabled=true indicates
 // that a certain product has been used for this application.
-func (c *client) productEnabled(namespace Namespace) {
+func (c *client) productChange(namespace Namespace, enabled bool) {
 	if !c.started {
 		log("attempted to send product change event, but telemetry client has not started")
 		return
 	}
-	products := new(Products)
+	products := new(ProductsPayload)
 	switch namespace {
+	case NamespaceAppSec:
+		products.Products.AppSec = ProductDetails{Enabled: enabled}
 	case NamespaceProfilers:
-		products.Profiler = ProductDetails{Enabled: true}
-	case NamespaceASM:
-		products.AppSec = ProductDetails{Enabled: true}
+		products.Products.Profiler = ProductDetails{Enabled: enabled}
+	case NamespaceTracers:
+		// Nothing to do
 	default:
-		log("unknown product namespace, app-product-change telemetry event will not send")
+		log("unknown product namespace: %q. The app-product-change telemetry event will not send", namespace)
 		return
 	}
 	productReq := c.newRequest(RequestTypeAppProductChange)

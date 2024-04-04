@@ -86,7 +86,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 	if err != nil {
 		return err
 	}
-	f := InitFactoryByPath(path, req.Namespace)
+	f := util.InitFactoryByPath(path, req.Namespace)
 	err = options.InitClient(f)
 	if err != nil {
 		log.Errorf("init client failed: %v", err)

@@ -14,14 +14,15 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/distribution/reference"
 	"github.com/docker/cli/cli"
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/cli/command/image/build"
 	"github.com/docker/cli/opts"
-	"github.com/docker/distribution/reference"
 	"github.com/docker/docker/api"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	registrytypes "github.com/docker/docker/api/types/registry"
 	"github.com/docker/docker/builder/remotecontext/urlutil"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/idtools"
@@ -32,8 +33,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
-
-var errStdinConflict = errors.New("invalid argument: can't use stdin for both build context and dockerfile")
 
 type buildOptions struct {
 	context        string
@@ -102,7 +101,7 @@ func NewBuildCommand(dockerCli command.Cli) *cobra.Command {
 		Args:  cli.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.context = args[0]
-			return runBuild(dockerCli, options)
+			return runBuild(cmd.Context(), dockerCli, options)
 		},
 		Annotations: map[string]string{
 			"category-top": "4",
@@ -127,7 +126,7 @@ func NewBuildCommand(dockerCli command.Cli) *cobra.Command {
 	flags.Int64Var(&options.cpuQuota, "cpu-quota", 0, "Limit the CPU CFS (Completely Fair Scheduler) quota")
 	flags.StringVar(&options.cpuSetCpus, "cpuset-cpus", "", "CPUs in which to allow execution (0-3, 0,1)")
 	flags.StringVar(&options.cpuSetMems, "cpuset-mems", "", "MEMs in which to allow execution (0-3, 0,1)")
-	flags.StringVar(&options.cgroupParent, "cgroup-parent", "", "Optional parent cgroup for the container")
+	flags.StringVar(&options.cgroupParent, "cgroup-parent", "", `Set the parent cgroup for the "RUN" instructions during build`)
 	flags.StringVar(&options.isolation, "isolation", "", "Container isolation technology")
 	flags.Var(&options.labels, "label", "Set metadata for an image")
 	flags.BoolVar(&options.noCache, "no-cache", false, "Do not use cache when building the image")
@@ -173,7 +172,7 @@ func (out *lastProgressOutput) WriteProgress(prog progress.Progress) error {
 }
 
 //nolint:gocyclo
-func runBuild(dockerCli command.Cli, options buildOptions) error {
+func runBuild(ctx context.Context, dockerCli command.Cli, options buildOptions) error {
 	var (
 		err           error
 		buildCtx      io.ReadCloser
@@ -188,7 +187,7 @@ func runBuild(dockerCli command.Cli, options buildOptions) error {
 
 	if options.dockerfileFromStdin() {
 		if options.contextFromStdin() {
-			return errStdinConflict
+			return errors.New("invalid argument: can't use stdin for both build context and dockerfile")
 		}
 		dockerfileCtx = dockerCli.In()
 	}
@@ -273,13 +272,13 @@ func runBuild(dockerCli command.Cli, options buildOptions) error {
 		}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	var resolvedTags []*resolvedTag
 	if !options.untrusted {
 		translator := func(ctx context.Context, ref reference.NamedTagged) (reference.Canonical, error) {
-			return TrustedReference(ctx, dockerCli, ref, nil)
+			return TrustedReference(ctx, dockerCli, ref)
 		}
 		// if there is a tar wrapper, the dockerfile needs to be replaced inside it
 		if buildCtx != nil {
@@ -322,9 +321,9 @@ func runBuild(dockerCli command.Cli, options buildOptions) error {
 
 	configFile := dockerCli.ConfigFile()
 	creds, _ := configFile.GetAllCredentials()
-	authConfigs := make(map[string]types.AuthConfig, len(creds))
+	authConfigs := make(map[string]registrytypes.AuthConfig, len(creds))
 	for k, auth := range creds {
-		authConfigs[k] = types.AuthConfig(auth)
+		authConfigs[k] = registrytypes.AuthConfig(auth)
 	}
 	buildOptions := imageBuildOptions(dockerCli, options)
 	buildOptions.Version = types.BuilderV1

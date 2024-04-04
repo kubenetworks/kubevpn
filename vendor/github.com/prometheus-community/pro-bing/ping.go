@@ -49,17 +49,18 @@
 // it calls the OnFinish callback.
 //
 // For a full ping example, see "cmd/ping/ping.go".
-//
 package probing
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"math"
 	"math/rand"
 	"net"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -77,11 +78,18 @@ const (
 	trackerLength    = len(uuid.UUID{})
 	protocolICMP     = 1
 	protocolIPv6ICMP = 58
+
+	networkIP   = "ip"
+	networkIPv4 = "ip4"
+	networkIPv6 = "ip6"
 )
 
 var (
 	ipv4Proto = map[string]string{"icmp": "ip4:icmp", "udp": "udp4"}
 	ipv6Proto = map[string]string{"icmp": "ip6:ipv6-icmp", "udp": "udp6"}
+
+	ErrMarkNotSupported = errors.New("setting SO_MARK socket option is not supported on this platform")
+	ErrDFNotSupported   = errors.New("setting do-not-fragment bit is not supported on this platform")
 )
 
 // New returns a new Pinger struct pointer.
@@ -103,7 +111,7 @@ func New(addr string) *Pinger {
 		trackerUUIDs:      []uuid.UUID{firstUUID},
 		ipaddr:            nil,
 		ipv4:              false,
-		network:           "ip",
+		network:           networkIP,
 		protocol:          "udp",
 		awaitingSequences: firstSequence,
 		TTL:               64,
@@ -125,6 +133,9 @@ type Pinger struct {
 	// Timeout specifies a timeout before ping exits, regardless of how many
 	// packets have been received.
 	Timeout time.Duration
+
+	// ResolveTimeout specifies a timeout to resolve an IP address or domain name
+	ResolveTimeout time.Duration
 
 	// Count tells pinger to stop after sending (and receiving) Count echo
 	// packets. If this option is not specified, pinger will operate until
@@ -173,6 +184,12 @@ type Pinger struct {
 	// OnDuplicateRecv is called when a packet is received that has already been received.
 	OnDuplicateRecv func(*Packet)
 
+	// OnSendError is called when an error occurs while Pinger attempts to send a packet
+	OnSendError func(*Packet, error)
+
+	// OnRecvError is called when an error occurs while Pinger attempts to receive a packet
+	OnRecvError func(error)
+
 	// Size of packet being sent
 	Size int
 
@@ -188,6 +205,12 @@ type Pinger struct {
 
 	ipaddr *net.IPAddr
 	addr   string
+
+	// mark is a SO_MARK (fwmark) set on outgoing icmp packets
+	mark uint
+
+	// df when true sets the do-not-fragment bit in the outer IP or IPv6 header
+	df bool
 
 	// trackerUUIDs is the list of UUIDs being used for sending packets.
 	trackerUUIDs []uuid.UUID
@@ -211,6 +234,7 @@ type packet struct {
 	bytes  []byte
 	nbytes int
 	ttl    int
+	addr   net.Addr
 }
 
 // Packet represents a received and processed ICMP echo packet.
@@ -321,9 +345,42 @@ func (p *Pinger) Resolve() error {
 	if len(p.addr) == 0 {
 		return errors.New("addr cannot be empty")
 	}
-	ipaddr, err := net.ResolveIPAddr(p.network, p.addr)
-	if err != nil {
-		return err
+	var (
+		ipaddr *net.IPAddr
+		err    error
+	)
+	if p.ResolveTimeout > time.Duration(0) {
+		var (
+			ctx = context.Background()
+			ips []net.IP
+		)
+		ctx, cancel := context.WithTimeout(ctx, p.ResolveTimeout)
+		defer cancel()
+		ips, err = net.DefaultResolver.LookupIP(ctx, p.network, p.addr)
+		if err != nil {
+			return err
+		}
+		if len(ips) == 0 {
+			return fmt.Errorf("lookup %s failed: no addresses found", p.addr)
+		}
+		ipaddr = &net.IPAddr{IP: ips[0]}
+		for _, ip := range ips {
+			if p.network == networkIPv6 {
+				if ip.To4() == nil && ip.To16() != nil {
+					ipaddr = &net.IPAddr{IP: ip}
+					break
+				}
+				continue
+			}
+			if ip.To4() != nil {
+				ipaddr = &net.IPAddr{IP: ip}
+			}
+		}
+	} else {
+		ipaddr, err = net.ResolveIPAddr(p.network, p.addr)
+		if err != nil {
+			return err
+		}
 	}
 
 	p.ipv4 = isIPv4(ipaddr.IP)
@@ -357,12 +414,12 @@ func (p *Pinger) Addr() string {
 // * "ip6" will select IPv6.
 func (p *Pinger) SetNetwork(n string) {
 	switch n {
-	case "ip4":
-		p.network = "ip4"
-	case "ip6":
-		p.network = "ip6"
+	case networkIPv4:
+		p.network = networkIPv4
+	case networkIPv6:
+		p.network = networkIPv6
 	default:
-		p.network = "ip"
+		p.network = networkIP
 	}
 }
 
@@ -398,10 +455,32 @@ func (p *Pinger) ID() int {
 	return p.id
 }
 
+// SetMark sets a mark intended to be set on outgoing ICMP packets.
+func (p *Pinger) SetMark(m uint) {
+	p.mark = m
+}
+
+// Mark returns the mark to be set on outgoing ICMP packets.
+func (p *Pinger) Mark() uint {
+	return p.mark
+}
+
+// SetDoNotFragment sets the do-not-fragment bit in the outer IP header to the desired value.
+func (p *Pinger) SetDoNotFragment(df bool) {
+	p.df = df
+}
+
 // Run runs the pinger. This is a blocking function that will exit when it's
 // done. If Count or Interval are not specified, it will run continuously until
 // it is interrupted.
 func (p *Pinger) Run() error {
+	return p.RunWithContext(context.Background())
+}
+
+// RunWithContext runs the pinger with a context. This is a blocking function that will exit when it's
+// done or if the context is canceled. If Count or Interval are not specified, it will run continuously until
+// it is interrupted.
+func (p *Pinger) RunWithContext(ctx context.Context) error {
 	var conn packetConn
 	var err error
 	if p.Size < timeSliceLength+trackerLength {
@@ -418,11 +497,23 @@ func (p *Pinger) Run() error {
 	}
 	defer conn.Close()
 
+	if p.mark != 0 {
+		if err := conn.SetMark(p.mark); err != nil {
+			return fmt.Errorf("error setting mark: %v", err)
+		}
+	}
+
+	if p.df {
+		if err := conn.SetDoNotFragment(); err != nil {
+			return fmt.Errorf("error setting do-not-fragment: %v", err)
+		}
+	}
+
 	conn.SetTTL(p.TTL)
-	return p.run(conn)
+	return p.run(ctx, conn)
 }
 
-func (p *Pinger) run(conn packetConn) error {
+func (p *Pinger) run(ctx context.Context, conn packetConn) error {
 	if err := conn.SetFlagTTL(); err != nil {
 		return err
 	}
@@ -431,11 +522,21 @@ func (p *Pinger) run(conn packetConn) error {
 	recv := make(chan *packet, 5)
 	defer close(recv)
 
-	if handler := p.OnSetup; handler != nil {
-		handler()
+	if p.OnSetup != nil {
+		p.OnSetup()
 	}
 
-	var g errgroup.Group
+	g, ctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		select {
+		case <-ctx.Done():
+			p.Stop()
+			return ctx.Err()
+		case <-p.done:
+		}
+		return nil
+	})
 
 	g.Go(func() error {
 		defer p.Stop()
@@ -518,10 +619,8 @@ func (p *Pinger) Stop() {
 }
 
 func (p *Pinger) finish() {
-	handler := p.OnFinish
-	if handler != nil {
-		s := p.Statistics()
-		handler(s)
+	if p.OnFinish != nil {
+		p.OnFinish(p.Statistics())
 	}
 }
 
@@ -532,7 +631,12 @@ func (p *Pinger) Statistics() *Statistics {
 	p.statsMu.RLock()
 	defer p.statsMu.RUnlock()
 	sent := p.PacketsSent
-	loss := float64(sent-p.PacketsRecv) / float64(sent) * 100
+
+	var loss float64
+	if sent > 0 {
+		loss = float64(sent-p.PacketsRecv) / float64(sent) * 100
+	}
+
 	s := Statistics{
 		PacketsSent:           sent,
 		PacketsRecv:           p.PacketsRecv,
@@ -575,19 +679,26 @@ func (p *Pinger) recvICMP(
 	expBackoff := newExpBackoff(50*time.Microsecond, 11)
 	delay := expBackoff.Get()
 
+	// Workaround for https://github.com/golang/go/issues/47369
+	offset := 0
+	if p.ipv4 && !p.Privileged() && runtime.GOOS == "darwin" {
+		offset = 20
+	}
+
 	for {
 		select {
 		case <-p.done:
 			return nil
 		default:
-			bytes := make([]byte, p.getMessageLength())
+			bytes := make([]byte, p.getMessageLength()+offset)
 			if err := conn.SetReadDeadline(time.Now().Add(delay)); err != nil {
 				return err
 			}
-			var n, ttl int
-			var err error
-			n, ttl, _, err = conn.ReadFrom(bytes)
+			n, ttl, addr, err := conn.ReadFrom(bytes)
 			if err != nil {
+				if p.OnRecvError != nil {
+					p.OnRecvError(err)
+				}
 				if neterr, ok := err.(*net.OpError); ok {
 					if neterr.Timeout() {
 						// Read timeout
@@ -601,7 +712,7 @@ func (p *Pinger) recvICMP(
 			select {
 			case <-p.done:
 				return nil
-			case recv <- &packet{bytes: bytes, nbytes: n, ttl: ttl}:
+			case recv <- &packet{bytes: bytes, nbytes: n, ttl: ttl, addr: addr}:
 			}
 		}
 	}
@@ -633,6 +744,8 @@ func (p *Pinger) processPacket(recv *packet) error {
 	var proto int
 	if p.ipv4 {
 		proto = protocolICMP
+		// Workaround for https://github.com/golang/go/issues/47369
+		recv.nbytes = stripIPv4Header(recv.nbytes, recv.bytes)
 	} else {
 		proto = protocolIPv6ICMP
 	}
@@ -648,10 +761,24 @@ func (p *Pinger) processPacket(recv *packet) error {
 		return nil
 	}
 
+	// If initial ip is a broadcast ip, ping responses will come from machines' in the
+	// subnet, thus ip will differ. Below gets real ip from received package.
+	var realIP *net.IPAddr
+
+	switch v := recv.addr.(type) {
+	case *net.IPAddr: // For ICMP
+		realIP = v
+	case *net.UDPAddr:
+		realIP = &net.IPAddr{IP: v.IP}
+	default:
+		p.logger.Infof("received address: %s it neither an Ip address (ICMP) nor UDP address, shouldn't happen. using initial address", recv.addr)
+		realIP = p.ipaddr
+	}
+
 	inPkt := &Packet{
 		Nbytes: recv.nbytes,
-		IPAddr: p.ipaddr,
-		Addr:   p.addr,
+		IPAddr: realIP,
+		Addr:   realIP.String(),
 		TTL:    recv.ttl,
 		ID:     p.id,
 	}
@@ -691,9 +818,8 @@ func (p *Pinger) processPacket(recv *packet) error {
 		return fmt.Errorf("invalid ICMP echo reply; type: '%T', '%v'", pkt, pkt)
 	}
 
-	handler := p.OnRecv
-	if handler != nil {
-		handler(inPkt)
+	if p.OnRecv != nil {
+		p.OnRecv(inPkt)
 	}
 
 	return nil
@@ -734,6 +860,24 @@ func (p *Pinger) sendICMP(conn packetConn) error {
 
 	for {
 		if _, err := conn.WriteTo(msgBytes, dst); err != nil {
+			// Try to set broadcast flag
+			if errors.Is(err, syscall.EACCES) && runtime.GOOS == "linux" {
+				if e := conn.SetBroadcastFlag(); e != nil {
+					p.logger.Warnf("had EACCES syscall error, check your local firewall")
+				}
+				p.logger.Infof("Pinging a broadcast address")
+				continue
+			}
+			if p.OnSendError != nil {
+				outPkt := &Packet{
+					Nbytes: len(msgBytes),
+					IPAddr: p.ipaddr,
+					Addr:   p.addr,
+					Seq:    p.sequence,
+					ID:     p.id,
+				}
+				p.OnSendError(outPkt, err)
+			}
 			if neterr, ok := err.(*net.OpError); ok {
 				if neterr.Err == syscall.ENOBUFS {
 					continue
@@ -741,8 +885,7 @@ func (p *Pinger) sendICMP(conn packetConn) error {
 			}
 			return err
 		}
-		handler := p.OnSend
-		if handler != nil {
+		if p.OnSend != nil {
 			outPkt := &Packet{
 				Nbytes: len(msgBytes),
 				IPAddr: p.ipaddr,
@@ -750,7 +893,7 @@ func (p *Pinger) sendICMP(conn packetConn) error {
 				Seq:    p.sequence,
 				ID:     p.id,
 			}
-			handler(outPkt)
+			p.OnSend(outPkt)
 		}
 		// mark this sequence as in-flight
 		p.awaitingSequences[currentUUID][p.sequence] = struct{}{}
@@ -817,4 +960,21 @@ var seed = time.Now().UnixNano()
 // getSeed returns a goroutine-safe unique seed
 func getSeed() int64 {
 	return atomic.AddInt64(&seed, 1)
+}
+
+// stripIPv4Header strips IPv4 header bytes if present
+// https://github.com/golang/go/commit/3b5be4522a21df8ce52a06a0c4ba005c89a8590f
+func stripIPv4Header(n int, b []byte) int {
+	if len(b) < 20 {
+		return n
+	}
+	l := int(b[0]&0x0f) << 2
+	if 20 > l || l > len(b) {
+		return n
+	}
+	if b[0]>>4 != 4 {
+		return n
+	}
+	copy(b, b[l:])
+	return n - l
 }

@@ -92,3 +92,18 @@ func ParseTagString(str string) map[string]string {
 	ForEachStringTag(str, func(key, val string) { res[key] = val })
 	return res
 }
+
+// FloatEnv returns the parsed float64 value of an environment variable,
+// or def otherwise.
+func FloatEnv(key string, def float64) float64 {
+	env, ok := os.LookupEnv(key)
+	if !ok {
+		return def
+	}
+	v, err := strconv.ParseFloat(env, 64)
+	if err != nil {
+		log.Warn("Non-float value for env var %s, defaulting to %f. Parse failed with error: %v", key, def, err)
+		return def
+	}
+	return v
+}

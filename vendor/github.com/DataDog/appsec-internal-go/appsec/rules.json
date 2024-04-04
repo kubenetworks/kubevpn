@@ -1,7 +1,7 @@
 {
   "version": "2.2",
   "metadata": {
-    "rules_version": "1.10.0"
+    "rules_version": "1.11.0"
   },
   "rules": [
     {
@@ -141,7 +141,10 @@
               "appscan_fingerprint",
               "w00tw00t.at.isc.sans.dfind",
               "w00tw00t.at.blackhats.romanian.anti-sec"
-            ]
+            ],
+            "options": {
+              "enforce_word_boundary": true
+            }
           },
           "operator": "phrase_match"
         }
@@ -1778,7 +1781,10 @@
               "windows\\win.ini",
               "default\\ntuser.dat",
               "/var/run/secrets/kubernetes.io/serviceaccount"
-            ]
+            ],
+            "options": {
+              "enforce_word_boundary": true
+            }
           },
           "operator": "phrase_match"
         }
@@ -1895,6 +1901,9 @@
                 "address": "graphql.server.resolver"
               }
             ],
+            "options": {
+              "enforce_word_boundary": true
+            },
             "list": [
               "${cdpath}",
               "${dirstack}",
@@ -2471,7 +2480,10 @@
               "settings.local.php",
               "local.xml",
               ".env"
-            ]
+            ],
+            "options": {
+              "enforce_word_boundary": true
+            }
           },
           "operator": "phrase_match"
         }
@@ -2567,6 +2579,9 @@
                 "address": "graphql.server.resolver"
               }
             ],
+            "options": {
+              "enforce_word_boundary": true
+            },
             "list": [
               "$globals",
               "$_cookie",
@@ -2765,7 +2780,10 @@
               "wp_safe_remote_post",
               "wp_safe_remote_request",
               "zlib_decode"
-            ]
+            ],
+            "options": {
+              "enforce_word_boundary": true
+            }
           },
           "operator": "phrase_match"
         }
@@ -2981,9 +2999,6 @@
                 "address": "server.request.path_params"
               },
               {
-                "address": "grpc.server.request.message"
-              },
-              {
                 "address": "graphql.server.all_resolvers"
               },
               {
@@ -3036,9 +3051,6 @@
               },
               {
                 "address": "server.request.path_params"
-              },
-              {
-                "address": "grpc.server.request.message"
               },
               {
                 "address": "graphql.server.all_resolvers"
@@ -3271,6 +3283,9 @@
                 "address": "graphql.server.resolver"
               }
             ],
+            "options": {
+              "enforce_word_boundary": true
+            },
             "list": [
               "document.cookie",
               "document.write",
@@ -3545,9 +3560,6 @@
               },
               {
                 "address": "server.request.path_params"
-              },
-              {
-                "address": "grpc.server.request.message"
               },
               {
                 "address": "graphql.server.all_resolvers"
@@ -3862,9 +3874,6 @@
               },
               {
                 "address": "server.request.path_params"
-              },
-              {
-                "address": "grpc.server.request.message"
               },
               {
                 "address": "graphql.server.all_resolvers"
@@ -4454,7 +4463,10 @@
               "org.apache.struts2",
               "org.omg.corba",
               "java.beans.xmldecode"
-            ]
+            ],
+            "options": {
+              "enforce_word_boundary": true
+            }
           },
           "operator": "phrase_match"
         }
@@ -4580,9 +4592,6 @@
               },
               {
                 "address": "server.request.path_params"
-              },
-              {
-                "address": "grpc.server.request.message"
               },
               {
                 "address": "graphql.server.all_resolvers"
@@ -5343,6 +5352,40 @@
       "transformers": []
     },
     {
+      "id": "dog-920-001",
+      "name": "JWT authentication bypass",
+      "tags": {
+        "type": "http_protocol_violation",
+        "category": "attack_attempt",
+        "cwe": "287",
+        "capec": "1000/225/115",
+        "confidence": "0"
+      },
+      "conditions": [
+        {
+          "parameters": {
+            "inputs": [
+              {
+                "address": "server.request.cookies"
+              },
+              {
+                "address": "server.request.headers.no_cookies",
+                "key_path": [
+                  "authorization"
+                ]
+              }
+            ],
+            "regex": "^(?:Bearer )?ey[A-Za-z0-9+_\\-/]*([QY][UW]x[Hn]Ij([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gOiAi[Tb][km]9[Ou][RZ][Q-Za-f]|[QY][UW]x[Hn]Ij([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ciID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]IDogI[km]5[Pv][Tb][km][U-X]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[QY][UW]x[Hn]IiA6ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]IDoi[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]Ij([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gOiAi[Tb][km]9[Ou][RZ][Q-Za-f]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ciOiAi[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*IDogI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]IDogI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]yIgO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ciIDoi[Tb][km]9[Ou][RZ][Q-Za-f]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*IDogI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]yIgOiJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ciO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]IDoi[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ciID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]IDogI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]yI6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]yI6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]IiA6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*IDogI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]yIgO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]Ij([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6ICJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ciOiJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*IDoi[Tb][km]9[Ou][RZ][Q-Za-f]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gOiJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ciO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]yIgOiAi[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]IDoi[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ciID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6ICJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]IjogI[km]5[Pv][Tb][km][U-X]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ciO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[QY][UW]x[Hn]IiA6I[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ciID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6I[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]yI6I[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]yI6ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ciIDogI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[QY][UW]x[Hn]IiA6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]IiA6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*IDoi[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ciO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6I[km]5[Pv][Tb][km][U-X]|[QY][UW]x[Hn]IiA6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]yI6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]yIgO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gOiJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ID([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gI[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]yIgO([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[\\x2b\\x2f-9A-Za-z]ICJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*ICJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]I([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*IDoi[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]A6I[km]5[Pv][Tb][km][U-X]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]y([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gOiJ[Ou][Tb][02]5[Fl]|[QY][UW]x[Hn]Ijoi[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z]{2}[159BFJNRVZdhlptx][Bh][Tb][EG]ci([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[048AEIMQUYcgkosw]gOiAi[Tb][km]9[Ou][RZ][Q-Za-f]|[\\x2b\\x2f-9A-Za-z][02EGUWkm]F[Ms][RZ]yI6([048ACEIMQSUYcgikoswy]|[\\x2b\\x2f-9A-Za-z]I)*[CSiy]Ai[Tb][km]9[Ou][RZ][Q-Za-f])[A-Za-z0-9+-/]*\\.[A-Za-z0-9+_\\-/]+\\.(?:[A-Za-z0-9+_\\-/]+)?$",
+            "options": {
+              "case_sensitive": true
+            }
+          },
+          "operator": "match_regex"
+        }
+      ],
+      "transformers": []
+    },
+    {
       "id": "dog-931-001",
       "name": "RFI: URL Payload to well known RFI target",
       "tags": {
@@ -5603,6 +5646,9 @@
         {
           "operator": "phrase_match",
           "parameters": {
+            "options": {
+              "enforce_word_boundary": true
+            },
             "inputs": [
               {
                 "address": "server.request.uri.raw"
@@ -6607,9 +6653,6 @@
                 "address": "server.request.headers.no_cookies"
               },
               {
-                "address": "grpc.server.request.message"
-              },
-              {
                 "address": "graphql.server.all_resolvers"
               },
               {
@@ -6653,9 +6696,6 @@
               },
               {
                 "address": "server.request.headers.no_cookies"
-              },
-              {
-                "address": "grpc.server.request.message"
               },
               {
                 "address": "graphql.server.all_resolvers"

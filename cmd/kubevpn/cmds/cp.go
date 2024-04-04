@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/completion"
 	"k8s.io/kubectl/pkg/util/i18n"
@@ -59,7 +59,7 @@ var cpExample = templates.Examples(i18n.T(`
 ))
 
 func CmdCp(f cmdutil.Factory) *cobra.Command {
-	o := cp.NewCopyOptions(genericclioptions.IOStreams{
+	o := cp.NewCopyOptions(genericiooptions.IOStreams{
 		In:     os.Stdin,
 		Out:    os.Stdout,
 		ErrOut: os.Stderr,

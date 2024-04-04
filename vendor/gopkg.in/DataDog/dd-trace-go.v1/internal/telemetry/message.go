@@ -70,8 +70,8 @@ const (
 	NamespaceTracers Namespace = "tracers"
 	// NamespaceProfilers is for continuous profiling
 	NamespaceProfilers Namespace = "profilers"
-	// NamespaceASM is for application security monitoring
-	NamespaceASM Namespace = "appsec" // This was defined before the appsec -> ASM change
+	// NamespaceAppSec is for application security management
+	NamespaceAppSec Namespace = "appsec"
 )
 
 // Application is identifying information about the app itself
@@ -164,6 +164,11 @@ func FloatConfig(key string, val float64) Configuration {
 // BoolConfig returns a Configuration struct with a bool value
 func BoolConfig(key string, val bool) Configuration {
 	return Configuration{Name: key, Value: val}
+}
+
+// ProductsPayload is the top-level key for the app-product-change payload.
+type ProductsPayload struct {
+	Products Products `json:"products"`
 }
 
 // Products specifies information about available products.

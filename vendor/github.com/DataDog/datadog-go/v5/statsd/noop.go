@@ -104,3 +104,15 @@ func (n *NoOpClient) GetTelemetry() Telemetry {
 // Verify that NoOpClient implements the ClientInterface.
 // https://golang.org/doc/faq#guarantee_satisfies_interface
 var _ ClientInterface = &NoOpClient{}
+
+// NoOpClientDirect implements ClientDirectInterface and does nothing.
+type NoOpClientDirect struct {
+	NoOpClient
+}
+
+// DistributionSamples does nothing and returns nil
+func (n *NoOpClientDirect) DistributionSamples(name string, values []float64, tags []string, rate float64) error {
+	return nil
+}
+
+var _ ClientDirectInterface = &NoOpClientDirect{}

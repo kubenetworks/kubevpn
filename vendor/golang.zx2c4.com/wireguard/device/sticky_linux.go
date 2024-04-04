@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
  *
- * Copyright (C) 2017-2022 WireGuard LLC. All Rights Reserved.
+ * Copyright (C) 2017-2023 WireGuard LLC. All Rights Reserved.
  *
  * This implements userspace semantics of "sticky sockets", modeled after
  * WireGuard's kernelspace implementation. This is more or less a straight port
@@ -25,7 +25,10 @@ import (
 )
 
 func (device *Device) startRouteListener(bind conn.Bind) (*rwcancel.RWCancel, error) {
-	if _, ok := bind.(*conn.LinuxSocketBind); !ok {
+	if !conn.StdNetSupportsStickySockets {
+		return nil, nil
+	}
+	if _, ok := bind.(*conn.StdNetBind); !ok {
 		return nil, nil
 	}
 
@@ -107,17 +110,17 @@ func (device *Device) routineRouteListener(bind conn.Bind, netlinkSock int, netl
 								if !ok {
 									break
 								}
-								pePtr.peer.Lock()
-								if &pePtr.peer.endpoint != pePtr.endpoint {
-									pePtr.peer.Unlock()
+								pePtr.peer.endpoint.Lock()
+								if &pePtr.peer.endpoint.val != pePtr.endpoint {
+									pePtr.peer.endpoint.Unlock()
 									break
 								}
-								if uint32(pePtr.peer.endpoint.(*conn.LinuxSocketEndpoint).Src4().Ifindex) == ifidx {
-									pePtr.peer.Unlock()
+								if uint32(pePtr.peer.endpoint.val.(*conn.StdNetEndpoint).SrcIfidx()) == ifidx {
+									pePtr.peer.endpoint.Unlock()
 									break
 								}
-								pePtr.peer.endpoint.(*conn.LinuxSocketEndpoint).ClearSrc()
-								pePtr.peer.Unlock()
+								pePtr.peer.endpoint.clearSrcOnTx = true
+								pePtr.peer.endpoint.Unlock()
 							}
 							attr = attr[attrhdr.Len:]
 						}
@@ -131,18 +134,18 @@ func (device *Device) routineRouteListener(bind conn.Bind, netlinkSock int, netl
 					device.peers.RLock()
 					i := uint32(1)
 					for _, peer := range device.peers.keyMap {
-						peer.RLock()
-						if peer.endpoint == nil {
-							peer.RUnlock()
+						peer.endpoint.Lock()
+						if peer.endpoint.val == nil {
+							peer.endpoint.Unlock()
 							continue
 						}
-						nativeEP, _ := peer.endpoint.(*conn.LinuxSocketEndpoint)
+						nativeEP, _ := peer.endpoint.val.(*conn.StdNetEndpoint)
 						if nativeEP == nil {
-							peer.RUnlock()
+							peer.endpoint.Unlock()
 							continue
 						}
-						if nativeEP.IsV6() || nativeEP.Src4().Ifindex == 0 {
-							peer.RUnlock()
+						if nativeEP.DstIP().Is6() || nativeEP.SrcIfidx() == 0 {
+							peer.endpoint.Unlock()
 							break
 						}
 						nlmsg := struct {
@@ -169,12 +172,12 @@ func (device *Device) routineRouteListener(bind conn.Bind, netlinkSock int, netl
 								Len:  8,
 								Type: unix.RTA_DST,
 							},
-							nativeEP.Dst4().Addr,
+							nativeEP.DstIP().As4(),
 							unix.RtAttr{
 								Len:  8,
 								Type: unix.RTA_SRC,
 							},
-							nativeEP.Src4().Src,
+							nativeEP.SrcIP().As4(),
 							unix.RtAttr{
 								Len:  8,
 								Type: unix.RTA_MARK,
@@ -185,10 +188,10 @@ func (device *Device) routineRouteListener(bind conn.Bind, netlinkSock int, netl
 						reqPeerLock.Lock()
 						reqPeer[i] = peerEndpointPtr{
 							peer:     peer,
-							endpoint: &peer.endpoint,
+							endpoint: &peer.endpoint.val,
 						}
 						reqPeerLock.Unlock()
-						peer.RUnlock()
+						peer.endpoint.Unlock()
 						i++
 						_, err := netlinkCancel.Write((*[unsafe.Sizeof(nlmsg)]byte)(unsafe.Pointer(&nlmsg))[:])
 						if err != nil {

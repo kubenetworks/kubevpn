@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
  *
- * Copyright (C) 2017-2022 WireGuard LLC. All Rights Reserved.
+ * Copyright (C) 2017-2023 WireGuard LLC. All Rights Reserved.
  */
 
 package tun
@@ -15,7 +15,6 @@ import (
 	_ "unsafe"
 
 	"golang.org/x/sys/windows"
-
 	"golang.zx2c4.com/wintun"
 )
 
@@ -44,6 +43,7 @@ type NativeTun struct {
 	closeOnce sync.Once
 	close     atomic.Bool
 	forcedMTU int
+	outSizes  []int
 }
 
 var (
@@ -102,7 +102,7 @@ func (tun *NativeTun) File() *os.File {
 	return nil
 }
 
-func (tun *NativeTun) Events() chan Event {
+func (tun *NativeTun) Events() <-chan Event {
 	return tun.events
 }
 
@@ -127,6 +127,9 @@ func (tun *NativeTun) MTU() (int, error) {
 
 // TODO: This is a temporary hack. We really need to be monitoring the interface in real time and adapting to MTU changes.
 func (tun *NativeTun) ForceMTU(mtu int) {
+	if tun.close.Load() {
+		return
+	}
 	update := tun.forcedMTU != mtu
 	tun.forcedMTU = mtu
 	if update {
@@ -134,9 +137,14 @@ func (tun *NativeTun) ForceMTU(mtu int) {
 	}
 }
 
+func (tun *NativeTun) BatchSize() int {
+	// TODO: implement batching with wintun
+	return 1
+}
+
 // Note: Read() and Write() assume the caller comes only from a single thread; there's no locking.
 
-func (tun *NativeTun) Read(buff []byte, offset int) (int, error) {
+func (tun *NativeTun) Read(bufs [][]byte, sizes []int, offset int) (int, error) {
 	tun.running.Add(1)
 	defer tun.running.Done()
 retry:
@@ -152,11 +160,11 @@ retry:
 		packet, err := tun.session.ReceivePacket()
 		switch err {
 		case nil:
-			packetSize := len(packet)
-			copy(buff[offset:], packet)
+			n := copy(bufs[0][offset:], packet)
+			sizes[0] = n
 			tun.session.ReleaseReceivePacket(packet)
-			tun.rate.update(uint64(packetSize))
-			return packetSize, nil
+			tun.rate.update(uint64(n))
+			return 1, nil
 		case windows.ERROR_NO_MORE_ITEMS:
 			if !shouldSpin || uint64(nanotime()-start) >= spinloopDuration {
 				windows.WaitForSingleObject(tun.readWait, windows.INFINITE)
@@ -173,33 +181,33 @@ retry:
 	}
 }
 
-func (tun *NativeTun) Flush() error {
-	return nil
-}
-
-func (tun *NativeTun) Write(buff []byte, offset int) (int, error) {
+func (tun *NativeTun) Write(bufs [][]byte, offset int) (int, error) {
 	tun.running.Add(1)
 	defer tun.running.Done()
 	if tun.close.Load() {
 		return 0, os.ErrClosed
 	}
 
-	packetSize := len(buff) - offset
-	tun.rate.update(uint64(packetSize))
+	for i, buf := range bufs {
+		packetSize := len(buf) - offset
+		tun.rate.update(uint64(packetSize))
 
-	packet, err := tun.session.AllocateSendPacket(packetSize)
-	if err == nil {
-		copy(packet, buff[offset:])
-		tun.session.SendPacket(packet)
-		return packetSize, nil
+		packet, err := tun.session.AllocateSendPacket(packetSize)
+		switch err {
+		case nil:
+			// TODO: Explore options to eliminate this copy.
+			copy(packet, buf[offset:])
+			tun.session.SendPacket(packet)
+			continue
+		case windows.ERROR_HANDLE_EOF:
+			return i, os.ErrClosed
+		case windows.ERROR_BUFFER_OVERFLOW:
+			continue // Dropping when ring is full.
+		default:
+			return i, fmt.Errorf("Write failed: %w", err)
+		}
 	}
-	switch err {
-	case windows.ERROR_HANDLE_EOF:
-		return 0, os.ErrClosed
-	case windows.ERROR_BUFFER_OVERFLOW:
-		return 0, nil // Dropping when ring is full.
-	}
-	return 0, fmt.Errorf("Write failed: %w", err)
+	return len(bufs), nil
 }
 
 // LUID returns Windows interface instance ID.

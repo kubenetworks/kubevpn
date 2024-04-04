@@ -19,7 +19,7 @@ import (
 // Configuration environment variables
 const (
 	// EnvAPISecEnabled is the env var used to enable API Security
-	EnvAPISecEnabled = "DD_EXPERIMENTAL_API_SECURITY_ENABLED"
+	EnvAPISecEnabled = "DD_API_SECURITY_ENABLED"
 	// EnvAPISecSampleRate is the env var used to set the sampling rate of API Security schema extraction
 	EnvAPISecSampleRate = "DD_API_SECURITY_REQUEST_SAMPLE_RATE"
 	// EnvObfuscatorKey is the env var used to provide the WAF key obfuscation regexp
@@ -42,8 +42,8 @@ const (
 	DefaultObfuscatorKeyRegex = `(?i)(?:p(?:ass)?w(?:or)?d|pass(?:_?phrase)?|secret|(?:api_?|private_?|public_?)key)|token|consumer_?(?:id|key|secret)|sign(?:ed|ature)|bearer|authorization`
 	// DefaultObfuscatorValueRegex is the default regexp used to obfuscate values
 	DefaultObfuscatorValueRegex = `(?i)(?:p(?:ass)?w(?:or)?d|pass(?:_?phrase)?|secret|(?:api_?|private_?|public_?|access_?|secret_?)key(?:_?id)?|token|consumer_?(?:id|key|secret)|sign(?:ed|ature)?|auth(?:entication|orization)?)(?:\s*=[^;]|"\s*:\s*"[^"]+")|bearer\s+[a-z0-9\._\-]+|token:[a-z0-9]{13}|gh[opsu]_[0-9a-zA-Z]{36}|ey[I-L][\w=-]+\.ey[I-L][\w=-]+(?:\.[\w.+\/=-]+)?|[\-]{5}BEGIN[a-z\s]+PRIVATE\sKEY[\-]{5}[^\-]+[\-]{5}END[a-z\s]+PRIVATE\sKEY|ssh-rsa\s*[a-z0-9\/\.+]{100,}`
-	// DefaultWAFTimeout is the default time limit (ms) past which a WAF run will timeout
-	DefaultWAFTimeout = 4 * time.Millisecond
+	// DefaultWAFTimeout is the default time limit past which a WAF run will timeout
+	DefaultWAFTimeout = time.Millisecond
 	// DefaultTraceRate is the default limit (trace/sec) past which ASM traces are sampled out
 	DefaultTraceRate uint = 100 // up to 100 appsec traces/s
 )
@@ -71,7 +71,15 @@ func NewAPISecConfig() APISecConfig {
 }
 
 func apiSecurityEnabled() bool {
-	enabled, _ := strconv.ParseBool(os.Getenv(EnvAPISecEnabled))
+	enabled := true
+	str, set := os.LookupEnv(EnvAPISecEnabled)
+	if set {
+		var err error
+		enabled, err = strconv.ParseBool(str)
+		if err != nil {
+			logEnvVarParsingError(EnvAPISecEnabled, str, err, enabled)
+		}
+	}
 	return enabled
 }
 

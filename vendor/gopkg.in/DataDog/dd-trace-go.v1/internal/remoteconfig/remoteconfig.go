@@ -31,6 +31,9 @@ import (
 // for each config file received through the update.
 type Callback func(updates map[string]ProductUpdate) map[string]rc.ApplyStatus
 
+// ProductCallback is like Callback but for a specific product.
+type ProductCallback func(update ProductUpdate) map[string]rc.ApplyStatus
+
 // Capability represents a bit index to be set in clientData.Capabilites in order to register a client
 // for a specific capability
 type Capability uint
@@ -53,9 +56,24 @@ const (
 	ASMUserBlocking
 	// ASMCustomRules represents the capability for ASM to receive and use user-defined security rules
 	ASMCustomRules
-	// ASMCustomRules represents the capability for ASM to receive and use user-defined blocking responses
+	// ASMCustomBlockingResponse represents the capability for ASM to receive and use user-defined blocking responses
 	ASMCustomBlockingResponse
+	// ASMTrustedIPs represents Trusted IPs through the ASM product
+	ASMTrustedIPs
+	// ASMApiSecuritySampleRate represents API Security sampling rate
+	ASMApiSecuritySampleRate
+	// APMTracingSampleRate represents the rate at which to sample traces from APM client libraries
+	APMTracingSampleRate
+	// APMTracingLogsInjection enables APM client libraries to inject trace ids into log records
+	APMTracingLogsInjection
+	// APMTracingHTTPHeaderTags enables APM client libraries to tag http header values to http server or client spans
+	APMTracingHTTPHeaderTags
+	// APMTracingCustomTags enables APM client to set custom tags on all spans
+	APMTracingCustomTags
 )
+
+// APMTracingEnabled enables APM tracing
+const APMTracingEnabled Capability = 19
 
 // ErrClientNotStarted is returned when the remote config client is not started.
 var ErrClientNotStarted = errors.New("remote config client not started")
@@ -75,9 +93,15 @@ type Client struct {
 	repository *rc.Repository
 	stop       chan struct{}
 
-	callbacks    []Callback
-	products     map[string]struct{}
-	capabilities map[Capability]struct{}
+	// When acquiring several locks and using defer to release them, make sure to acquire the locks in the following order:
+	callbacks               []Callback
+	_callbacksMu            sync.RWMutex
+	products                map[string]struct{}
+	productsMu              sync.RWMutex
+	productsWithCallbacks   map[string]ProductCallback
+	productsWithCallbacksMu sync.RWMutex
+	capabilities            map[Capability]struct{}
+	capabilitiesMu          sync.RWMutex
 
 	lastError error
 }
@@ -102,15 +126,16 @@ func newClient(config ClientConfig) (*Client, error) {
 	}
 
 	return &Client{
-		ClientConfig: config,
-		clientID:     generateID(),
-		endpoint:     fmt.Sprintf("%s/v0.7/config", config.AgentURL),
-		repository:   repo,
-		stop:         make(chan struct{}),
-		lastError:    nil,
-		callbacks:    []Callback{},
-		capabilities: map[Capability]struct{}{},
-		products:     map[string]struct{}{},
+		ClientConfig:          config,
+		clientID:              generateID(),
+		endpoint:              fmt.Sprintf("%s/v0.7/config", config.AgentURL),
+		repository:            repo,
+		stop:                  make(chan struct{}),
+		lastError:             nil,
+		callbacks:             []Callback{},
+		capabilities:          map[Capability]struct{}{},
+		products:              map[string]struct{}{},
+		productsWithCallbacks: make(map[string]ProductCallback),
 	}, nil
 }
 
@@ -220,6 +245,30 @@ func (c *Client) updateState() {
 	c.lastError = c.applyUpdate(&update)
 }
 
+// Subscribe registers a product and its callback to be invoked when the client receives configuration updates.
+// Subscribe should be preferred over RegisterProduct and RegisterCallback if your callback only handles a single product.
+func Subscribe(product string, callback ProductCallback, capabilities ...Capability) error {
+	if client == nil {
+		return ErrClientNotStarted
+	}
+	client.productsMu.RLock()
+	defer client.productsMu.RUnlock()
+	if _, found := client.products[product]; found {
+		return fmt.Errorf("product %s already registered via RegisterProduct", product)
+	}
+
+	client.productsWithCallbacksMu.Lock()
+	defer client.productsWithCallbacksMu.Unlock()
+	client.productsWithCallbacks[product] = callback
+
+	client.capabilitiesMu.Lock()
+	defer client.capabilitiesMu.Unlock()
+	for _, cap := range capabilities {
+		client.capabilities[cap] = struct{}{}
+	}
+	return nil
+}
+
 // RegisterCallback allows registering a callback that will be invoked when the client
 // receives configuration updates. It is up to that callback to then decide what to do
 // depending on the product related to the configuration update.
@@ -227,8 +276,8 @@ func RegisterCallback(f Callback) error {
 	if client == nil {
 		return ErrClientNotStarted
 	}
-	client.Lock()
-	defer client.Unlock()
+	client._callbacksMu.Lock()
+	defer client._callbacksMu.Unlock()
 	client.callbacks = append(client.callbacks, f)
 	return nil
 }
@@ -239,12 +288,13 @@ func UnregisterCallback(f Callback) error {
 	if client == nil {
 		return ErrClientNotStarted
 	}
-	client.Lock()
-	defer client.Unlock()
+	client._callbacksMu.Lock()
+	defer client._callbacksMu.Unlock()
 	fValue := reflect.ValueOf(f)
 	for i, callback := range client.callbacks {
 		if reflect.ValueOf(callback) == fValue {
 			client.callbacks = append(client.callbacks[:i], client.callbacks[i+1:]...)
+			break
 		}
 	}
 	return nil
@@ -255,8 +305,13 @@ func RegisterProduct(p string) error {
 	if client == nil {
 		return ErrClientNotStarted
 	}
-	client.Lock()
-	defer client.Unlock()
+	client.productsMu.Lock()
+	defer client.productsMu.Unlock()
+	client.productsWithCallbacksMu.RLock()
+	defer client.productsWithCallbacksMu.RUnlock()
+	if _, found := client.productsWithCallbacks[p]; found {
+		return fmt.Errorf("product %s already registered via Subscribe", p)
+	}
 	client.products[p] = struct{}{}
 	return nil
 }
@@ -266,8 +321,8 @@ func UnregisterProduct(p string) error {
 	if client == nil {
 		return ErrClientNotStarted
 	}
-	client.Lock()
-	defer client.Unlock()
+	client.productsMu.Lock()
+	defer client.productsMu.Unlock()
 	delete(client.products, p)
 	return nil
 }
@@ -277,10 +332,13 @@ func HasProduct(p string) (bool, error) {
 	if client == nil {
 		return false, ErrClientNotStarted
 	}
-	client.RLock()
-	defer client.RUnlock()
+	client.productsMu.RLock()
+	defer client.productsMu.RUnlock()
+	client.productsWithCallbacksMu.RLock()
+	defer client.productsWithCallbacksMu.RUnlock()
 	_, found := client.products[p]
-	return found, nil
+	_, foundWithCallback := client.productsWithCallbacks[p]
+	return found || foundWithCallback, nil
 }
 
 // RegisterCapability adds a capability to the list of capabilities exposed by the client when requesting
@@ -289,8 +347,8 @@ func RegisterCapability(cap Capability) error {
 	if client == nil {
 		return ErrClientNotStarted
 	}
-	client.Lock()
-	defer client.Unlock()
+	client.capabilitiesMu.Lock()
+	defer client.capabilitiesMu.Unlock()
 	client.capabilities[cap] = struct{}{}
 	return nil
 }
@@ -301,8 +359,8 @@ func UnregisterCapability(cap Capability) error {
 	if client == nil {
 		return ErrClientNotStarted
 	}
-	client.Lock()
-	defer client.Unlock()
+	client.capabilitiesMu.Lock()
+	defer client.capabilitiesMu.Unlock()
 	delete(client.capabilities, cap)
 	return nil
 }
@@ -312,21 +370,55 @@ func HasCapability(cap Capability) (bool, error) {
 	if client == nil {
 		return false, ErrClientNotStarted
 	}
-	client.RLock()
-	defer client.RUnlock()
+	client.capabilitiesMu.RLock()
+	defer client.capabilitiesMu.RUnlock()
 	_, found := client.capabilities[cap]
 	return found, nil
 }
 
+func (c *Client) globalCallbacks() []Callback {
+	c._callbacksMu.RLock()
+	defer c._callbacksMu.RUnlock()
+	callbacks := make([]Callback, len(c.callbacks))
+	copy(callbacks, c.callbacks)
+	return callbacks
+}
+
+func (c *Client) productCallbacks() map[string]ProductCallback {
+	c.productsWithCallbacksMu.RLock()
+	defer c.productsWithCallbacksMu.RUnlock()
+	callbacks := make(map[string]ProductCallback, len(c.productsWithCallbacks))
+	for k, v := range c.productsWithCallbacks {
+		callbacks[k] = v
+	}
+	return callbacks
+}
+
+func (c *Client) allProducts() []string {
+	c.productsMu.RLock()
+	defer c.productsMu.RUnlock()
+	c.productsWithCallbacksMu.RLock()
+	defer c.productsWithCallbacksMu.RUnlock()
+	products := make([]string, 0, len(c.products)+len(c.productsWithCallbacks))
+	for p := range c.products {
+		products = append(products, p)
+	}
+	for p := range c.productsWithCallbacks {
+		products = append(products, p)
+	}
+	return products
+}
+
 func (c *Client) applyUpdate(pbUpdate *clientGetConfigsResponse) error {
 	fileMap := make(map[string][]byte, len(pbUpdate.TargetFiles))
-	productUpdates := make(map[string]ProductUpdate, len(c.products))
-	for p := range c.products {
+	allProducts := c.allProducts()
+	productUpdates := make(map[string]ProductUpdate, len(allProducts))
+	for _, p := range allProducts {
 		productUpdates[p] = make(ProductUpdate)
 	}
 	for _, f := range pbUpdate.TargetFiles {
 		fileMap[f.Path] = f.Raw
-		for p := range c.products {
+		for _, p := range allProducts {
 			// Check the config file path to make sure it belongs to the right product
 			if strings.Contains(f.Path, "/"+p+"/") {
 				productUpdates[p][f.Path] = f.Raw
@@ -396,10 +488,19 @@ func (c *Client) applyUpdate(pbUpdate *clientGetConfigsResponse) error {
 	// 3 - ApplyStateAcknowledged
 	// This makes sure that any product that would need to re-receive the config in a subsequent update will be allowed to
 	statuses := make(map[string]rc.ApplyStatus)
-	for _, fn := range c.callbacks {
+	for _, fn := range c.globalCallbacks() {
 		for path, status := range fn(productUpdates) {
 			if s, ok := statuses[path]; !ok || status.State == rc.ApplyStateError ||
 				s.State == rc.ApplyStateAcknowledged && status.State == rc.ApplyStateUnacknowledged {
+				statuses[path] = status
+			}
+		}
+	}
+	// Call the product-specific callbacks registered via Subscribe
+	productCallbacks := c.productCallbacks()
+	for product, update := range productUpdates {
+		if fn, ok := productCallbacks[product]; ok {
+			for path, status := range fn(update) {
 				statuses[path] = status
 			}
 		}
@@ -461,10 +562,6 @@ func (c *Client) newUpdateRequest() (bytes.Buffer, error) {
 	for i := range c.capabilities {
 		capa.SetBit(capa, int(i), 1)
 	}
-	products := make([]string, 0, len(c.products))
-	for p := range c.products {
-		products = append(products, p)
-	}
 	req := clientGetConfigsRequest{
 		Client: &clientData{
 			State: &clientState{
@@ -475,7 +572,7 @@ func (c *Client) newUpdateRequest() (bytes.Buffer, error) {
 				Error:          errMsg,
 			},
 			ID:       c.clientID,
-			Products: products,
+			Products: c.allProducts(),
 			IsTracer: true,
 			ClientTracer: &clientTracer{
 				RuntimeID:     c.RuntimeID,

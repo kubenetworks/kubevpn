@@ -172,14 +172,22 @@ func (a *aggregator) flushMetrics() []metric {
 	return metrics
 }
 
+// getContext returns the context for a metric name and tags.
+//
+// The context is the metric name and tags separated by a separator symbol.
+// It is not intended to be used as a metric name but as a unique key to aggregate
 func getContext(name string, tags []string) string {
 	c, _ := getContextAndTags(name, tags)
 	return c
 }
 
+// getContextAndTags returns the context and tags for a metric name and tags.
+//
+// See getContext for usage for context
+// The tags are the tags separated by a separator symbol and can be re-used to pass down to the writer
 func getContextAndTags(name string, tags []string) (string, string) {
 	if len(tags) == 0 {
-		return name + nameSeparatorSymbol, ""
+		return name, ""
 	}
 	n := len(name) + len(nameSeparatorSymbol) + len(tagSeparatorSymbol)*(len(tags)-1)
 	for _, s := range tags {

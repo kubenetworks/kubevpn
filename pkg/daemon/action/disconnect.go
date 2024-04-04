@@ -123,7 +123,7 @@ func disconnectByKubeConfig(ctx context.Context, svr *Server, kubeconfigBytes st
 	connect := &handler.ConnectOptions{
 		Namespace: ns,
 	}
-	err = connect.InitClient(InitFactoryByPath(path, ns))
+	err = connect.InitClient(util.InitFactoryByPath(path, ns))
 	if err != nil {
 		return err
 	}

@@ -99,6 +99,9 @@ func newHTTPTransport(url string, client *http.Client) *httpTransport {
 	if cid := internal.ContainerID(); cid != "" {
 		defaultHeaders["Datadog-Container-ID"] = cid
 	}
+	if eid := internal.EntityID(); eid != "" {
+		defaultHeaders["Datadog-Entity-ID"] = eid
+	}
 	return &httpTransport{
 		traceURL: fmt.Sprintf("%s/v0.4/traces", url),
 		statsURL: fmt.Sprintf("%s/v0.6/stats", url),

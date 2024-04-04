@@ -6,14 +6,14 @@ Remember that this is open source software so please consider the other people w
 Make it look nice for them, document your logic in comments and add or update the unit test cases.
 
 This library is used by various other projects, companies and individuals in live production environments so please discuss any breaking changes with us before making them.
-Feel free to join us in the #go-ping channel of the [Gophers Slack](https://invite.slack.golangbridge.org/).
+Feel free to join us in the [#pro-bing](https://gophers.slack.com/archives/C019J5E26U8/p1673599762771949) channel of the [Gophers Slack](https://invite.slack.golangbridge.org/).
 
 ## Pull Requests
 
-[Fork the repo on GitHub](https://github.com/go-ping/ping/fork) and clone it to your local machine.
+[Fork the repo on GitHub](https://github.com/prometheus-community/pro-bing/fork) and clone it to your local machine.
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/ping.git && cd ping
+git clone https://github.com/YOUR_USERNAME/pro-bing.git && cd pro-bing
 ```
 
 Here is a guide on [how to configure a remote repository](https://docs.github.com/en/free-pro-team@latest/github/collaborating-with-issues-and-pull-requests/configuring-a-remote-for-a-fork).
@@ -29,7 +29,7 @@ $ git commit -s
 $ git push <FORK> <BRANCH_NAME>
 ```
 
-Open a [new pull request](https://github.com/go-ping/ping/compare) in the main `go-ping/ping` repository.
+Open a [new pull request](https://github.com/prometheus-community/pro-bing/compare) in the main `prometheus-community/pro-bing` repository.
 Please describe the purpose of your PR and remember link it to any related issues.
 
 *We may ask you to rebase your feature branch or squash the commits in order to keep the history clean.*

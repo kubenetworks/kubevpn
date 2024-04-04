@@ -86,7 +86,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			// special empty string, eg: --target-registry ""
 			options.IsChangeTargetRegistry = cmd.Flags().Changed("target-registry")
 
-			bytes, ns, err := util.ConvertToKubeconfigBytes(f)
+			bytes, ns, err := util.ConvertToKubeConfigBytes(f)
 			if err != nil {
 				return err
 			}
@@ -101,7 +101,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 				Workloads:              args,
 				ExtraRoute:             extraRoute.ToRPC(),
 				UseLocalDNS:            options.UseLocalDNS,
-				OriginKubeconfigPath:   util.GetKubeconfigPath(f),
+				OriginKubeconfigPath:   util.GetKubeConfigPath(f),
 				Engine:                 string(options.Engine),
 				SshJump:                sshConf.ToRPC(),
 				TargetKubeconfig:       options.TargetKubeconfig,

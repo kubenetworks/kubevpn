@@ -6,7 +6,7 @@ It consists of 2 separate entities: the bindings for the calls to libddwaf, and 
 An example usage would be:
 
 ```go
-import waf "github.com/DataDog/go-libddwaf"
+import waf "github.com/DataDog/go-libddwaf/v2"
 
 //go:embed
 var ruleset []byte
@@ -28,13 +28,15 @@ func main() {
     wafCtx := wafHandle.NewContext()
     defer wafCtx.Close()
 
-    matches, actions := wafCtx.Run(map[string]any{
-        "server.request.path_params": "/rfiinc.txt",
+    matches, actions := wafCtx.Run(RunAddressData{
+        Persistent: map[string]any{
+            "server.request.path_params": "/rfiinc.txt",
+        },
     }, time.Minute)
 }
 ```
 
-The API documentation details can be found on [pkg.go.dev](https://pkg.go.dev/github.com/DataDog/go-libddwaf).
+The API documentation details can be found on [pkg.go.dev](https://pkg.go.dev/github.com/DataDog/go-libddwaf/v2).
 
 Originally this project was only here to provide CGO Wrappers to the calls to libddwaf.
 But with the appearance of `ddwaf_object` tree like structure,
@@ -99,17 +101,17 @@ flowchart LR
 
 The cgoRefPool type is a pure Go pointer pool of `ddwaf_object` C values on the Go memory heap.
 the `cgoRefPool` go type is a way to make sure we can safely send Go allocated data to the C side of the WAF
-The main issue is the following: the `wafObject` uses a C union to store the tree structure of the full object,
+The main issue is the following: the `WafObject` uses a C union to store the tree structure of the full object,
 union equivalent in go are interfaces and they are not compatible with C unions. The only way to be 100% sure
-that the Go `wafObject` struct has the same layout as the C one is to only use primitive types. So the only way to
+that the Go `WafObject` struct has the same layout as the C one is to only use primitive types. So the only way to
 store a raw pointer is to use the `uintptr` type. But since `uintptr` do not have pointer semantics (and are just
 basically integers), we need another method to store the value as Go pointer because the GC will delete our data if it
 is not referenced by Go pointers.
 
-That's where the `cgoRefPool` object comes into play: all new `wafObject` elements are created via this API which is especially
+That's where the `cgoRefPool` object comes into play: all new `WafObject` elements are created via this API which is especially
 built to make sure there is no gap for the Garbage Collector to exploit. From there, since underlying values of the
-`wafObject` are either arrays of wafObjects (for maps, structs and arrays) or string (for all ints, booleans and strings),
-we can store 2 slices of arrays and use `runtime.KeepAlive` in each code path to protect them from the GC.
+`wafObject` are either arrays of WafObjects (for maps, structs and arrays) or string (for all ints, booleans and strings),
+we can store 2 slices of arrays and use `unsafe.KeepAlive` in each code path to protect them from the GC.
 
 All these objects stored in the reference pool need to live throughout the use of the associated Waf Context.
 
@@ -132,7 +134,7 @@ symbols using `dlsym`, and finally call them.
 > :warning: Keep in mind that **purego only works on linux/darwin for amd64/arm64 and so does go-libddwaf.**
 
 Another requirement of `libddwaf` is to have a FHS filesystem on your machine and, for linux, to provide `libc.so.6`,
-`libpthread.so.0`, `libm.so.6` and `libdl.so.2` as dynamic libraries.
+`libpthread.so.0`, and `libdl.so.2` as dynamic libraries.
 
 ## Contributing pitfalls
 

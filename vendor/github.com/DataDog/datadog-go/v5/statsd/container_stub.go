@@ -3,7 +3,7 @@
 
 package statsd
 
-func initContainerID(userProvidedID string, cgroupFallback bool) {
+var initContainerID = func(userProvidedID string, cgroupFallback bool) {
 	initOnce.Do(func() {
 		if userProvidedID != "" {
 			containerID = userProvidedID

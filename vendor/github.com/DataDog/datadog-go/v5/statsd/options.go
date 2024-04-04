@@ -17,6 +17,7 @@ var (
 	defaultWorkerCount                  = 32
 	defaultSenderQueueSize              = 0
 	defaultWriteTimeout                 = 100 * time.Millisecond
+	defaultConnectTimeout               = 1000 * time.Millisecond
 	defaultTelemetry                    = true
 	defaultReceivingMode                = mutexMode
 	defaultChannelModeBufferSize        = 4096
@@ -40,6 +41,7 @@ type Options struct {
 	workersCount                 int
 	senderQueueSize              int
 	writeTimeout                 time.Duration
+	connectTimeout               time.Duration
 	telemetry                    bool
 	receiveMode                  receivingMode
 	channelModeBufferSize        int
@@ -65,6 +67,7 @@ func resolveOptions(options []Option) (*Options, error) {
 		workersCount:                 defaultWorkerCount,
 		senderQueueSize:              defaultSenderQueueSize,
 		writeTimeout:                 defaultWriteTimeout,
+		connectTimeout:               defaultConnectTimeout,
 		telemetry:                    defaultTelemetry,
 		receiveMode:                  defaultReceivingMode,
 		channelModeBufferSize:        defaultChannelModeBufferSize,
@@ -202,6 +205,16 @@ func WithSenderQueueSize(senderQueueSize int) Option {
 func WithWriteTimeout(writeTimeout time.Duration) Option {
 	return func(o *Options) error {
 		o.writeTimeout = writeTimeout
+		return nil
+	}
+}
+
+// WithConnectTimeout sets the timeout for network connection with the Agent, after this interval the connection
+// attempt is aborted. This is only used for UDS connection. This will also reset the connection if nothing can be
+// written to it for this duration.
+func WithConnectTimeout(connectTimeout time.Duration) Option {
+	return func(o *Options) error {
+		o.connectTimeout = connectTimeout
 		return nil
 	}
 }

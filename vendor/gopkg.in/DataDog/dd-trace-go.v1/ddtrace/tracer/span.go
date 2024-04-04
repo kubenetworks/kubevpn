@@ -64,18 +64,19 @@ type errorConfig struct {
 type span struct {
 	sync.RWMutex `msg:"-"` // all fields are protected by this RWMutex
 
-	Name     string             `msg:"name"`              // operation name
-	Service  string             `msg:"service"`           // service name (i.e. "grpc.server", "http.request")
-	Resource string             `msg:"resource"`          // resource name (i.e. "/user?id=123", "SELECT * FROM users")
-	Type     string             `msg:"type"`              // protocol associated with the span (i.e. "web", "db", "cache")
-	Start    int64              `msg:"start"`             // span start time expressed in nanoseconds since epoch
-	Duration int64              `msg:"duration"`          // duration of the span expressed in nanoseconds
-	Meta     map[string]string  `msg:"meta,omitempty"`    // arbitrary map of metadata
-	Metrics  map[string]float64 `msg:"metrics,omitempty"` // arbitrary map of numeric metrics
-	SpanID   uint64             `msg:"span_id"`           // identifier of this span
-	TraceID  uint64             `msg:"trace_id"`          // lower 64-bits of the root span identifier
-	ParentID uint64             `msg:"parent_id"`         // identifier of the span's direct parent
-	Error    int32              `msg:"error"`             // error status of the span; 0 means no errors
+	Name      string             `msg:"name"`              // operation name
+	Service   string             `msg:"service"`           // service name (i.e. "grpc.server", "http.request")
+	Resource  string             `msg:"resource"`          // resource name (i.e. "/user?id=123", "SELECT * FROM users")
+	Type      string             `msg:"type"`              // protocol associated with the span (i.e. "web", "db", "cache")
+	Start     int64              `msg:"start"`             // span start time expressed in nanoseconds since epoch
+	Duration  int64              `msg:"duration"`          // duration of the span expressed in nanoseconds
+	Meta      map[string]string  `msg:"meta,omitempty"`    // arbitrary map of metadata
+	Metrics   map[string]float64 `msg:"metrics,omitempty"` // arbitrary map of numeric metrics
+	SpanID    uint64             `msg:"span_id"`           // identifier of this span
+	TraceID   uint64             `msg:"trace_id"`          // lower 64-bits of the root span identifier
+	ParentID  uint64             `msg:"parent_id"`         // identifier of the span's direct parent
+	Error     int32              `msg:"error"`             // error status of the span; 0 means no errors
+	SpanLinks []ddtrace.SpanLink `msg:"span_links"`        // links to other spans
 
 	goExecTraced bool         `msg:"-"`
 	noDebugStack bool         `msg:"-"` // disables debug stack traces
@@ -160,6 +161,25 @@ func (s *span) SetTag(key string, value interface{}) {
 		}()
 		s.setMeta(key, v.String())
 		return
+	}
+	if value != nil {
+		// Arrays will be translated to dot notation. e.g.
+		// {"myarr.0": "foo", "myarr.1": "bar"}
+		// which will be displayed as an array in the UI.
+		switch reflect.TypeOf(value).Kind() {
+		case reflect.Slice:
+			slice := reflect.ValueOf(value)
+			for i := 0; i < slice.Len(); i++ {
+				key := fmt.Sprintf("%s.%d", key, i)
+				v := slice.Index(i)
+				if num, ok := toFloat64(v.Interface()); ok {
+					s.setMetric(key, num)
+				} else {
+					s.setMeta(key, fmt.Sprintf("%v", v))
+				}
+			}
+			return
+		}
 	}
 	// not numeric, not a string, not a fmt.Stringer, not a bool, and not an error
 	s.setMeta(key, fmt.Sprint(value))
@@ -460,6 +480,13 @@ func (s *span) Finish(opts ...ddtrace.FinishOption) {
 		// there's nothign we can show.
 		s.SetTag("go_execution_traced", "partial")
 	}
+
+	if tr, ok := internal.GetGlobalTracer().(*tracer); ok && tr.rulesSampling.traces.enabled() {
+		if !s.context.trace.isLocked() {
+			tr.rulesSampling.SampleTrace(s)
+		}
+	}
+
 	s.finish(t)
 
 	if s.pprofCtxRestore != nil {
@@ -502,6 +529,9 @@ func (s *span) finish(finishTime int64) {
 
 	keep := true
 	if t, ok := internal.GetGlobalTracer().(*tracer); ok {
+		if !t.config.enabled.current {
+			return
+		}
 		// we have an active tracer
 		if t.config.canComputeStats() && shouldComputeStats(s) {
 			// the agent supports computed stats

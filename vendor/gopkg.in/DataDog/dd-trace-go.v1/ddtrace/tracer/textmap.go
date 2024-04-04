@@ -197,8 +197,8 @@ type chainedPropagator struct {
 // a warning and be ignored.
 func getPropagators(cfg *PropagatorConfig, ps string) ([]Propagator, string) {
 	dd := &propagator{cfg}
-	defaultPs := []Propagator{&propagatorW3c{}, dd}
-	defaultPsName := "tracecontext,datadog"
+	defaultPs := []Propagator{dd, &propagatorW3c{}}
+	defaultPsName := "datadog,tracecontext"
 	if cfg.B3 {
 		defaultPs = append(defaultPs, &propagatorB3{})
 		defaultPsName += ",b3"
@@ -363,10 +363,11 @@ func (p *propagator) injectTextMap(spanCtx ddtrace.SpanContext, writer TextMapWr
 	if ctx.origin != "" {
 		writer.Set(originHeader, ctx.origin)
 	}
-	// propagate OpenTracing baggage
-	for k, v := range ctx.baggage {
+	ctx.ForeachBaggageItem(func(k, v string) bool {
+		// Propagate OpenTracing baggage.
 		writer.Set(p.cfg.BaggagePrefix+k, v)
-	}
+		return true
+	})
 	if p.cfg.MaxTagsHeaderLen <= 0 {
 		return nil
 	}
@@ -393,9 +394,9 @@ func (p *propagator) marshalPropagatingTags(ctx *spanContext) string {
 			properr = "encoding_error"
 			return true
 		}
-		if sb.Len()+len(k)+len(v) > p.cfg.MaxTagsHeaderLen {
+		if tagLen := sb.Len() + len(k) + len(v); tagLen > p.cfg.MaxTagsHeaderLen {
 			sb.Reset()
-			log.Warn("Won't propagate tag: maximum trace tags header len (%d) reached.", p.cfg.MaxTagsHeaderLen)
+			log.Warn("Won't propagate tag: length is (%d) which exceeds the maximum len of (%d).", tagLen, p.cfg.MaxTagsHeaderLen)
 			properr = "inject_max_size"
 			return false
 		}
