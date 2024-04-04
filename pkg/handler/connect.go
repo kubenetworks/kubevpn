@@ -578,7 +578,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context, lite bool) error {
 		log.Errorf("get running pod list failed, err: %v", err)
 		return err
 	}
-	relovConf, err := util.GetDNSServiceIPFromPod(c.clientset, c.restclient, c.config, pod[0].GetName(), c.Namespace)
+	relovConf, err := util.GetDNSServiceIPFromPod(ctx, c.clientset, c.restclient, c.config, pod[0].GetName(), c.Namespace)
 	if err != nil {
 		log.Errorln(err)
 		return err
@@ -805,20 +805,20 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) (err error) {
 				c.cidrs = util.Deduplicate(append(c.cidrs, cidr))
 			}
 		}
-	}
-	if len(c.cidrs) != 0 {
-		log.Infoln("got cidr from cache")
-		return
+		if len(c.cidrs) != 0 {
+			log.Infoln("got cidr from cache")
+			return
+		}
 	}
 
 	// (2) get cidr from cni
-	c.cidrs, err = util.GetCIDRElegant(c.clientset, c.restclient, c.config, c.Namespace)
+	c.cidrs, err = util.GetCIDRElegant(ctx, c.clientset, c.restclient, c.config, c.Namespace)
 	if err == nil {
 		s := sets.New[string]()
 		for _, cidr := range c.cidrs {
 			s.Insert(cidr.String())
 		}
-		cidrs, _ := util.GetCIDRFromResourceUgly(c.clientset, c.Namespace)
+		cidrs := util.GetCIDRFromResourceUgly(ctx, c.clientset, c.Namespace)
 		for _, cidr := range cidrs {
 			s.Insert(cidr.String())
 		}
@@ -828,7 +828,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) (err error) {
 	}
 
 	// (3) fallback to get cidr from node/pod/service
-	c.cidrs, err = util.GetCIDRFromResourceUgly(c.clientset, c.Namespace)
+	c.cidrs = util.GetCIDRFromResourceUgly(ctx, c.clientset, c.Namespace)
 	return
 }
 
@@ -836,7 +836,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 	if len(c.ExtraRouteInfo.ExtraDomain) == 0 {
 		return nil
 	}
-	ips, err := util.GetDNSIPFromDnsPod(c.clientset)
+	ips, err := util.GetDNSIPFromDnsPod(ctx, c.clientset)
 	if err != nil {
 		return err
 	}
@@ -890,7 +890,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 		return err
 	}
 	for _, domain := range c.ExtraRouteInfo.ExtraDomain {
-		ip, err := util.Shell(c.clientset, c.restclient, c.config, podList[0].Name, config.ContainerSidecarVPN, c.Namespace, []string{"dig", "+short", domain})
+		ip, err := util.Shell(ctx, c.clientset, c.restclient, c.config, podList[0].Name, config.ContainerSidecarVPN, c.Namespace, []string{"dig", "+short", domain})
 		if err != nil || net.ParseIP(ip) == nil {
 			goto RetryWithDNSClient
 		}

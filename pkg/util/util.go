@@ -320,6 +320,9 @@ func GetTlsDomain(namespace string) string {
 func Deduplicate(cidr []*net.IPNet) (result []*net.IPNet) {
 	var set = sets.New[string]()
 	for _, ipNet := range cidr {
+		if ipNet == nil {
+			continue
+		}
 		if !set.Has(ipNet.String()) {
 			result = append(result, ipNet)
 		}
