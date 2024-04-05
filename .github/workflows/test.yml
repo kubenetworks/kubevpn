@@ -61,7 +61,7 @@ jobs:
       - name: Build
         run: |
           export VERSION=test
-          make kubevpn-linux-amd64
+          make kubevpn
           chmod +x ./bin/kubevpn
           cp ./bin/kubevpn /usr/local/bin/kubevpn
           kubevpn version
@@ -126,7 +126,7 @@ jobs:
       - name: Build
         run: |
           export VERSION=test
-          make kubevpn-darwin-amd64
+          make kubevpn
           chmod +x ./bin/kubevpn
           cp ./bin/kubevpn /usr/local/bin/kubevpn
           kubevpn version
@@ -166,8 +166,9 @@ jobs:
           choco install make
 
       - name: Build
-        run: make kubevpn-windows-amd64
+        run: make kubevpn
 
       - name: Test
         run: |
+          go list ./... | grep -v /pkg/test
           go test -coverpkg=./... -coverprofile=coverage.txt $(go list ./... | grep -v /pkg/test)
