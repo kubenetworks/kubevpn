@@ -147,7 +147,7 @@ jobs:
 
   windows:
     runs-on: windows-latest
-    needs: [ "image" ]
+#    needs: [ "image" ]
     steps:
       - uses: actions/checkout@v2
 
