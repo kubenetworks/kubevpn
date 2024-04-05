@@ -170,4 +170,4 @@ jobs:
 
       - name: Test
         run: |
-          go test -coverpkg=./... -coverprofile=coverage.txt $(go list ./... | grep -v /pkg/handler)
+          go test -coverpkg=./... -coverprofile=coverage.txt $(go list ./... | grep -v /pkg/test)

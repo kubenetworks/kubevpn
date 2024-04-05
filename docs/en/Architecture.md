@@ -1,10 +1,10 @@
 ## Architecture
 ### Connect mode
-create a tunnel with port-forward, add route to virtual interface, like tun0, forward taffic thougth tunnel to remote traffic manager.  
+create a tunnel with port-forward, add route to virtual interface, like tun0, forward traffic through tunnel to remote traffic manager.  
 ![connect-mode](/docs/en/images/connect-mode.drawio.svg)
 
 ### Reverse mode
-base on connect mode, inject a container to controller, use iptables to block all inbound traffic and forward to local thougth tunnel.
+base on connect mode, inject a container to controller, use iptables to block all inbound traffic and forward to local through tunnel.
 
 ```text
 ┌──────────┐    ┌─────────┌──────────┐    ┌──────────┐

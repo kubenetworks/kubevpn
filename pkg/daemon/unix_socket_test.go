@@ -19,7 +19,14 @@ func TestHttpOverUnix(t *testing.T) {
 	if err2 != nil {
 		t.Fatal(err2)
 	}
-	os.Remove(temp.Name())
+	err2 = temp.Close()
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	err2 = os.Remove(temp.Name())
+	if err2 != nil {
+		t.Fatal(err2)
+	}
 	client := http.Client{
 		Transport: &http.Transport{
 			Proxy:               http.ProxyFromEnvironment,
@@ -36,7 +43,8 @@ func TestHttpOverUnix(t *testing.T) {
 	go func() {
 		listener, err := net.Listen("unix", temp.Name())
 		if err != nil {
-			t.Fatal(err)
+			t.Error(err)
+			return
 		}
 		defer listener.Close()
 		downgradingServer := &http.Server{}
@@ -44,7 +52,8 @@ func TestHttpOverUnix(t *testing.T) {
 		var h2Server http2.Server
 		err = http2.ConfigureServer(downgradingServer, &h2Server)
 		if err != nil {
-			t.Fatal(err)
+			t.Error(err)
+			return
 		}
 		downgradingServer.Handler = h2c.NewHandler(http.HandlerFunc(http.DefaultServeMux.ServeHTTP), &h2Server)
 		downgradingServer.Serve(listener)
