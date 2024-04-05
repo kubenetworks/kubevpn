@@ -14,8 +14,8 @@ import (
 	"k8s.io/kubectl/pkg/cmd/util"
 )
 
-func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) (*dns.ClientConfig, error) {
-	resolvConfStr, err := Shell(clientset, restclient, config, podName, "", namespace, []string{"cat", "/etc/resolv.conf"})
+func GetDNSServiceIPFromPod(ctx context.Context, clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) (*dns.ClientConfig, error) {
+	resolvConfStr, err := Shell(ctx, clientset, restclient, config, podName, "", namespace, []string{"cat", "/etc/resolv.conf"})
 	if err != nil {
 		return nil, err
 	}
@@ -23,7 +23,7 @@ func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RE
 	if err != nil {
 		return nil, err
 	}
-	if ips, err := GetDNSIPFromDnsPod(clientset); err == nil && len(ips) != 0 {
+	if ips, err := GetDNSIPFromDnsPod(ctx, clientset); err == nil && len(ips) != 0 {
 		resolvConf.Servers = ips
 	}
 
@@ -35,9 +35,9 @@ func GetDNSServiceIPFromPod(clientset *kubernetes.Clientset, restclient *rest.RE
 	return resolvConf, nil
 }
 
-func GetDNSIPFromDnsPod(clientset *kubernetes.Clientset) (ips []string, err error) {
+func GetDNSIPFromDnsPod(ctx context.Context, clientset *kubernetes.Clientset) (ips []string, err error) {
 	var serviceList *v1.ServiceList
-	serviceList, err = clientset.CoreV1().Services(v12.NamespaceSystem).List(context.Background(), v12.ListOptions{
+	serviceList, err = clientset.CoreV1().Services(v12.NamespaceSystem).List(ctx, v12.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("k8s-app", "kube-dns").String(),
 	})
 	if err != nil {
@@ -49,7 +49,7 @@ func GetDNSIPFromDnsPod(clientset *kubernetes.Clientset) (ips []string, err erro
 		}
 	}
 	var podList *v1.PodList
-	podList, err = clientset.CoreV1().Pods(v12.NamespaceSystem).List(context.Background(), v12.ListOptions{
+	podList, err = clientset.CoreV1().Pods(v12.NamespaceSystem).List(ctx, v12.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("k8s-app", "kube-dns").String(),
 	})
 	if err == nil {
@@ -86,7 +86,7 @@ func GetDNS(ctx context.Context, f util.Factory, ns, pod string) (*dns.ClientCon
 		return nil, err
 	}
 
-	clientConfig, err := GetDNSServiceIPFromPod(clientSet, client, config, pod, ns)
+	clientConfig, err := GetDNSServiceIPFromPod(ctx, clientSet, client, config, pod, ns)
 	if err != nil {
 		return nil, err
 	}

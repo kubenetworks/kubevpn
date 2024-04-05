@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -40,7 +41,7 @@ func before() {
 
 func TestByDumpClusterInfo(t *testing.T) {
 	before()
-	info, err := getCIDRByDumpClusterInfo(clientset)
+	info, err := GetCIDRByDumpClusterInfo(context.Background(), clientset)
 	if err != nil {
 		t.Error(err)
 	}
@@ -51,7 +52,7 @@ func TestByDumpClusterInfo(t *testing.T) {
 
 func TestByCreateSvc(t *testing.T) {
 	before()
-	info, err := getServiceCIDRByCreateSvc(clientset.CoreV1().Services("default"))
+	info, err := GetServiceCIDRByCreateService(context.Background(), clientset.CoreV1().Services("default"))
 	if err != nil {
 		t.Error(err)
 	}
@@ -60,7 +61,7 @@ func TestByCreateSvc(t *testing.T) {
 
 func TestElegant(t *testing.T) {
 	before()
-	elegant, err := GetCIDRElegant(clientset, restclient, restconfig, namespace)
+	elegant, err := GetCIDRElegant(context.Background(), clientset, restclient, restconfig, namespace)
 	if err != nil {
 		t.Error(err)
 	}

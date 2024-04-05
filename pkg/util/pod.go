@@ -125,7 +125,7 @@ func GetEnv(ctx context.Context, f util.Factory, ns, pod string) (map[string][]s
 	}
 	result := map[string][]string{}
 	for _, c := range get.Spec.Containers {
-		env, err := Shell(set, client, config, pod, c.Name, ns, []string{"env"})
+		env, err := Shell(ctx, set, client, config, pod, c.Name, ns, []string{"env"})
 		if err != nil {
 			return nil, err
 		}
@@ -147,10 +147,10 @@ func Heartbeats() {
 	}
 }
 
-func WaitPod(podInterface v12.PodInterface, list v1.ListOptions, checker func(*corev1.Pod) bool) error {
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*30)
+func WaitPod(ctx context.Context, podInterface v12.PodInterface, list v1.ListOptions, checker func(*corev1.Pod) bool) error {
+	ctx2, cancelFunc := context.WithTimeout(ctx, time.Second*30)
 	defer cancelFunc()
-	w, err := podInterface.Watch(ctx, list)
+	w, err := podInterface.Watch(ctx2, list)
 	if err != nil {
 		return err
 	}
@@ -235,8 +235,8 @@ func GetTopOwnerReferenceBySelector(factory util.Factory, namespace, selector st
 	return set, nil
 }
 
-func Shell(clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, containerName, namespace string, cmd []string) (string, error) {
-	pod, err := clientset.CoreV1().Pods(namespace).Get(context.Background(), podName, v1.GetOptions{})
+func Shell(ctx context.Context, clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, containerName, namespace string, cmd []string) (string, error) {
+	pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, v1.GetOptions{})
 
 	if err != nil {
 		return "", err
