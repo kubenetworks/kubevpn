@@ -171,4 +171,4 @@ jobs:
       - name: Test
         run: |
           go list ./... | grep -v /pkg/test
-          go test -coverpkg=./... -coverprofile=coverage.txt $(go list ./... | grep -v /pkg/test)
+          go test -coverpkg=./... -coverprofile=coverage.txt $($(go list ./... | Select-String -Pattern '/pkg/test' -NotMatch) -join ' ')
