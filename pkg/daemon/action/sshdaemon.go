@@ -58,7 +58,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 		ctx2, cancelF := context.WithCancel(ctx)
 		wait.UntilWithContext(ctx2, func(ctx context.Context) {
 			ip, _, _ := net.ParseCIDR(DefaultServerIP)
-			ok, err := util.Ping(ip.String())
+			ok, err := util.Ping(ctx2, ip.String())
 			if err != nil {
 			} else if ok {
 				cancelF()

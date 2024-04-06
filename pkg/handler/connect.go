@@ -904,7 +904,7 @@ RetryWithDNSClient:
 	ctx2, cancelFunc := context.WithTimeout(ctx, time.Second*10)
 	wait.UntilWithContext(ctx2, func(context.Context) {
 		for _, ip := range ips {
-			pong, err2 := util.Ping(ip)
+			pong, err2 := util.Ping(ctx2, ip)
 			if err2 == nil && pong {
 				ips = []string{ip}
 				cancelFunc()
@@ -1152,7 +1152,7 @@ func (c *ConnectOptions) heartbeats(ctx context.Context) {
 
 			err := c.dhcp.ForEach(func(ip net.IP) {
 				go func() {
-					_, _ = util.Ping(ip.String())
+					_, _ = util.Ping(ctx, ip.String())
 				}()
 			})
 			if err != nil {
