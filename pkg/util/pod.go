@@ -142,7 +142,7 @@ func Heartbeats() {
 	for ; true; <-ticker.C {
 		for _, ip := range []net.IP{config.RouterIP, config.RouterIP6} {
 			time.Sleep(time.Millisecond * time.Duration(rand.Intn(1000)))
-			_, _ = Ping(ip.String())
+			_, _ = Ping(context.Background(), ip.String())
 		}
 	}
 }

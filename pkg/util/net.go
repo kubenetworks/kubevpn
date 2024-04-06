@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -59,7 +60,7 @@ func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 	return nil, fmt.Errorf("can not found any interface with ip %v", ip)
 }
 
-func Ping(targetIP string) (bool, error) {
+func Ping(ctx context.Context, targetIP string) (bool, error) {
 	pinger, err := probing.NewPinger(targetIP)
 	if err != nil {
 		return false, err
@@ -68,7 +69,7 @@ func Ping(targetIP string) (bool, error) {
 	pinger.SetPrivileged(true)
 	pinger.Count = 3
 	pinger.Timeout = time.Millisecond * 1500
-	err = pinger.Run() // Blocks until finished.
+	err = pinger.RunWithContext(ctx) // Blocks until finished.
 	if err != nil {
 		return false, err
 	}

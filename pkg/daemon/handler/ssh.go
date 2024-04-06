@@ -131,15 +131,17 @@ func (w *wsHandler) handle(ctx context.Context) {
 	}
 	log.Info("tunnel connected")
 	go func() {
-		ticker := time.NewTicker(time.Second * 2)
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				_, _ = util.Ping(clientIP.IP.String())
-				_, _ = util.Ping(ip.String())
-				_ = exec.CommandContext(ctx, "ping", "-c", "4", "-b", tun.Name, ip.String()).Run()
+			default:
+				_, _ = util.Ping(ctx, clientIP.IP.String())
+				_, _ = util.Ping(ctx, ip.String())
+				ctx2, cancelFunc := context.WithTimeout(ctx, time.Second*5)
+				_ = exec.CommandContext(ctx2, "ping", "-c", "4", "-b", tun.Name, ip.String()).Run()
+				cancelFunc()
+				time.Sleep(time.Second * 5)
 			}
 		}
 	}()
