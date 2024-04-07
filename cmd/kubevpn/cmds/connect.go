@@ -135,7 +135,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 					if err == io.EOF {
 						break
 					} else if err != nil {
-						log.Error("receive disconnect error: %v", err)
+						log.Errorf("receive disconnect error: %v", err)
 						return err
 					}
 					log.Info(recv.Message)
