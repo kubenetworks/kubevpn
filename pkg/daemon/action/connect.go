@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -197,33 +196,6 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 
 	svr.t = time.Now()
 	svr.connect = connect
-
-	// hangup
-	if req.Foreground {
-		<-resp.Context().Done()
-
-		client := svr.GetClient(false)
-		if client == nil {
-			return fmt.Errorf("daemon not start")
-		}
-		disconnect, err := client.Disconnect(context.Background(), &rpc.DisconnectRequest{
-			ID: pointer.Int32(int32(0)),
-		})
-		if err != nil {
-			log.Errorf("disconnect error: %v", err)
-			return err
-		}
-		for {
-			recv, err := disconnect.Recv()
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				log.Error(err)
-				return err
-			}
-			log.Info(recv.Message)
-		}
-	}
 
 	return nil
 }
