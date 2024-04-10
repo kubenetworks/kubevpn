@@ -211,7 +211,7 @@ func (option *Options) Main(ctx context.Context, c *containerConfig) error {
 }
 
 // connect to cluster network on docker container or host
-func (option *Options) connect(ctx context.Context, f cmdutil.Factory, conf *util.SshConfig, transferImage bool) (func(), error) {
+func (option *Options) connect(ctx context.Context, f cmdutil.Factory, conf *util.SshConfig, transferImage bool, c *containerConfig) (func(), error) {
 	connect := &handler.ConnectOptions{
 		Headers:              option.Headers,
 		Workloads:            []string{option.Workload},
@@ -295,8 +295,11 @@ func (option *Options) connect(ctx context.Context, f cmdutil.Factory, conf *uti
 		}
 
 	case ConnectModeContainer:
+		port, set, err := option.GetExposePort(c)
+		if err != nil {
+			return nil, err
+		}
 		var path = os.Getenv(config.EnvSSHJump)
-		var err error
 		if path != "" {
 			path, err = util.ConvertK8sApiServerToDomain(path)
 		} else {
@@ -314,7 +317,7 @@ func (option *Options) connect(ctx context.Context, f cmdutil.Factory, conf *uti
 		}
 
 		var connectContainer *RunConfig
-		connectContainer, err = createConnectContainer(option.NoProxy, *connect, path, option.Cli, &platform)
+		connectContainer, err = createConnectContainer(option.NoProxy, *connect, path, option.Cli, &platform, port, set)
 		if err != nil {
 			return nil, err
 		}
@@ -375,33 +378,24 @@ func disconnect(ctx context.Context, daemonClient rpc.DaemonClient, req *rpc.Dis
 	}
 }
 
-func createConnectContainer(noProxy bool, connect handler.ConnectOptions, path string, cli *client.Client, platform *specs.Platform) (*RunConfig, error) {
+func createConnectContainer(noProxy bool, connect handler.ConnectOptions, path string, cli *client.Client, platform *specs.Platform, port nat.PortMap, set nat.PortSet) (*RunConfig, error) {
 	var entrypoint []string
 	if noProxy {
 		entrypoint = []string{"kubevpn", "connect", "--foreground", "-n", connect.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image, "--engine", string(connect.Engine)}
-		for _, v := range connect.ExtraRouteInfo.ExtraCIDR {
-			entrypoint = append(entrypoint, "--extra-cidr", v)
-		}
-		for _, v := range connect.ExtraRouteInfo.ExtraDomain {
-			entrypoint = append(entrypoint, "--extra-domain", v)
-		}
-		if connect.ExtraRouteInfo.ExtraNodeIP {
-			entrypoint = append(entrypoint, "--extra-node-ip")
-		}
 	} else {
 		entrypoint = []string{"kubevpn", "proxy", connect.Workloads[0], "--foreground", "-n", connect.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image, "--engine", string(connect.Engine)}
 		for k, v := range connect.Headers {
 			entrypoint = append(entrypoint, "--headers", fmt.Sprintf("%s=%s", k, v))
 		}
-		for _, v := range connect.ExtraRouteInfo.ExtraCIDR {
-			entrypoint = append(entrypoint, "--extra-cidr", v)
-		}
-		for _, v := range connect.ExtraRouteInfo.ExtraDomain {
-			entrypoint = append(entrypoint, "--extra-domain", v)
-		}
-		if connect.ExtraRouteInfo.ExtraNodeIP {
-			entrypoint = append(entrypoint, "--extra-node-ip")
-		}
+	}
+	for _, v := range connect.ExtraRouteInfo.ExtraCIDR {
+		entrypoint = append(entrypoint, "--extra-cidr", v)
+	}
+	for _, v := range connect.ExtraRouteInfo.ExtraDomain {
+		entrypoint = append(entrypoint, "--extra-domain", v)
+	}
+	if connect.ExtraRouteInfo.ExtraNodeIP {
+		entrypoint = append(entrypoint, "--extra-node-ip")
 	}
 
 	runConfig := &container.Config{
@@ -409,7 +403,7 @@ func createConnectContainer(noProxy bool, connect handler.ConnectOptions, path s
 		AttachStdin:     false,
 		AttachStdout:    false,
 		AttachStderr:    false,
-		ExposedPorts:    nil,
+		ExposedPorts:    set,
 		StdinOnce:       false,
 		Env:             []string{fmt.Sprintf("%s=1", config.EnvStartSudoKubeVPNByKubeVPN)},
 		Cmd:             []string{},
@@ -428,7 +422,7 @@ func createConnectContainer(noProxy bool, connect handler.ConnectOptions, path s
 	hostConfig := &container.HostConfig{
 		Binds:         []string{fmt.Sprintf("%s:%s", path, "/root/.kube/config")},
 		LogConfig:     container.LogConfig{},
-		PortBindings:  nil,
+		PortBindings:  port,
 		RestartPolicy: container.RestartPolicy{},
 		AutoRemove:    false,
 		VolumeDriver:  "",
@@ -653,4 +647,42 @@ func AddDockerFlags(options *Options, p *pflag.FlagSet, cli *command.DockerCli) 
 	command.AddTrustVerificationFlags(p, &options.Options.untrusted, cli.ContentTrustEnabled())
 
 	options.Copts = addFlags(p)
+}
+
+func (option *Options) GetExposePort(containerCfg *containerConfig) (nat.PortMap, nat.PortSet, error) {
+	object, err := util.GetUnstructuredObject(option.Factory, option.Namespace, option.Workload)
+	if err != nil {
+		log.Errorf("get unstructured object error: %v", err)
+		return nil, nil, err
+	}
+
+	u := object.Object.(*unstructured.Unstructured)
+	var templateSpec *v1.PodTemplateSpec
+	templateSpec, _, err = util.GetPodTemplateSpecPath(u)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var portMap = nat.PortMap{}
+	var portSet = nat.PortSet{}
+	for _, c := range templateSpec.Spec.Containers {
+		for _, port := range c.Ports {
+			p := nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, strings.ToLower(string(port.Protocol))))
+			if port.HostPort != 0 {
+				binding := []nat.PortBinding{{HostPort: strconv.FormatInt(int64(port.HostPort), 10)}}
+				portMap[p] = binding
+			} else {
+				binding := []nat.PortBinding{{HostPort: strconv.FormatInt(int64(port.ContainerPort), 10)}}
+				portMap[p] = binding
+			}
+			portSet[p] = struct{}{}
+		}
+	}
+
+	for port, bindings := range containerCfg.HostConfig.PortBindings {
+		portMap[port] = bindings
+		portSet[port] = struct{}{}
+	}
+
+	return portMap, portSet, nil
 }
