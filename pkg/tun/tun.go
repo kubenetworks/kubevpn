@@ -3,6 +3,7 @@ package tun
 import (
 	"errors"
 	"net"
+	"os"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -87,18 +88,29 @@ func (c *tunConn) Read(b []byte) (n int, err error) {
 	defer config.LPool.Put(bytes[:])
 
 	var num int
-	sizes := []int{1}
+	sizes := make([]int, 1)
 	num, err = c.ifce.Read([][]byte{bytes[:]}, sizes, offset)
-	if err != nil || num == 0 {
+	if err != nil {
+		if errors.Is(err, tun.ErrTooManySegments) {
+			log.Errorf("Dropped some packets from multi-segment read: %v", err)
+			return 0, nil
+		}
+		if !errors.Is(err, os.ErrClosed) {
+			log.Errorf("Failed to read packet from TUN device: %v", err)
+			return 0, nil
+		}
 		return 0, err
+	}
+	if num == 0 {
+		return 0, nil
 	}
 	var size = sizes[0]
 	if size == 0 {
-		return 0, errors.New("tun packet is zero")
+		return 0, nil
 	}
-	if size > device.MaxSegmentSize-device.MessageTransportHeaderSize {
-		return 0, errors.New("tun packet is too large")
-	}
+	//if size > device.MaxSegmentSize-device.MessageTransportHeaderSize {
+	//	return 0, errors.New("tun packet is too large")
+	//}
 	return copy(b, bytes[offset:offset+size]), nil
 }
 
