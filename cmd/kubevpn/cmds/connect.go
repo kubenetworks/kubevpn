@@ -1,6 +1,7 @@
 package cmds
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
+	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
@@ -119,6 +121,28 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			}
 			if !req.Foreground {
 				util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
+			} else {
+				<-cmd.Context().Done()
+				disconnect, err := cli.Disconnect(context.Background(), &rpc.DisconnectRequest{
+					KubeconfigBytes: ptr.To(string(bytes)),
+					Namespace:       ptr.To(ns),
+					SshJump:         sshConf.ToRPC(),
+				})
+				if err != nil {
+					log.Errorf("disconnect error: %v", err)
+					return err
+				}
+				for {
+					recv, err := disconnect.Recv()
+					if err == io.EOF {
+						break
+					} else if err != nil {
+						log.Errorf("receive disconnect error: %v", err)
+						return err
+					}
+					log.Info(recv.Message)
+				}
+				log.Info("disconnect successfully")
 			}
 			return nil
 		},
