@@ -18,9 +18,7 @@ import (
 )
 
 const (
-	MaxSize   = 1000
-	MaxThread = 10
-	MaxConn   = 1
+	MaxSize = 1000
 )
 
 type tunHandler struct {
@@ -171,8 +169,7 @@ func (h *tunHandler) printRoute(ctx context.Context) {
 }
 
 type Device struct {
-	tun    net.Conn
-	thread int
+	tun net.Conn
 
 	tunInboundRaw chan *DataElem
 	tunInbound    chan *DataElem
@@ -195,9 +192,11 @@ func (d *Device) readFromTun() {
 			}
 			return
 		}
-		d.tunInboundRaw <- &DataElem{
-			data:   b[:],
-			length: n,
+		if n != 0 {
+			d.tunInboundRaw <- &DataElem{
+				data:   b[:],
+				length: n,
+			}
 		}
 	}
 }
@@ -353,9 +352,7 @@ func genICMPPacketIPv6(src net.IP, dst net.IP) ([]byte, error) {
 
 func (d *Device) Start(ctx context.Context) {
 	go d.readFromTun()
-	for i := 0; i < d.thread; i++ {
-		go d.parseIPHeader()
-	}
+	go d.parseIPHeader()
 	go d.tunInboundHandler(d.tunInbound, d.tunOutbound)
 	go d.writeToTun()
 	go heartbeats(d.tun, d.tunInbound)
@@ -378,7 +375,6 @@ func (h *tunHandler) HandleServer(ctx context.Context, tun net.Conn) {
 
 	device := &Device{
 		tun:           tun,
-		thread:        MaxThread,
 		tunInboundRaw: make(chan *DataElem, MaxSize),
 		tunInbound:    make(chan *DataElem, MaxSize),
 		tunOutbound:   make(chan *DataElem, MaxSize),
@@ -435,8 +431,7 @@ type udpElem struct {
 }
 
 type Peer struct {
-	conn   net.PacketConn
-	thread int
+	conn net.PacketConn
 
 	connInbound    chan *udpElem
 	parsedConnInfo chan *udpElem
@@ -591,9 +586,7 @@ func (p *Peer) routeTUN() {
 func (p *Peer) Start() {
 	go p.readFromConn()
 	go p.readFromTCPConn()
-	for i := 0; i < p.thread; i++ {
-		go p.parseHeader()
-	}
+	go p.parseHeader()
 	go p.routePeer()
 	go p.routeTUN()
 }
@@ -605,7 +598,6 @@ func (p *Peer) Close() {
 func transportTun(ctx context.Context, tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem, packetConn net.PacketConn, nat *NAT, connNAT *sync.Map) error {
 	p := &Peer{
 		conn:           packetConn,
-		thread:         MaxThread,
 		connInbound:    make(chan *udpElem, MaxSize),
 		parsedConnInfo: make(chan *udpElem, MaxSize),
 		tunInbound:     tunInbound,
