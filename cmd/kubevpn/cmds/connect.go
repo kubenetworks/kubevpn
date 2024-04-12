@@ -13,7 +13,7 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
@@ -124,7 +124,9 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			} else {
 				<-cmd.Context().Done()
 				disconnect, err := cli.Disconnect(context.Background(), &rpc.DisconnectRequest{
-					ID: pointer.Int32(int32(0)),
+					KubeconfigBytes: ptr.To(string(bytes)),
+					Namespace:       ptr.To(ns),
+					SshJump:         sshConf.ToRPC(),
 				})
 				if err != nil {
 					log.Errorf("disconnect error: %v", err)
