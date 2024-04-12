@@ -55,17 +55,6 @@ func DoDev(ctx context.Context, option *Options, conf *util.SshConfig, flags *pf
 		}
 	}
 
-	// connect to cluster, in container or host
-	cancel, err := option.connect(ctx, f, conf, transferImage)
-	defer func() {
-		if cancel != nil {
-			cancel()
-		}
-	}()
-	if err != nil {
-		logrus.Errorf("connect to cluster failed, err: %v", err)
-		return err
-	}
 	err = validatePullOpt(option.Options.pull)
 	if err != nil {
 		return err
@@ -88,6 +77,18 @@ func DoDev(ctx context.Context, option *Options, conf *util.SshConfig, flags *pf
 	}
 	err = validateAPIVersion(c, cli.Client().ClientVersion())
 	if err != nil {
+		return err
+	}
+
+	// connect to cluster, in container or host
+	cancel, err := option.connect(ctx, f, conf, transferImage, c)
+	defer func() {
+		if cancel != nil {
+			cancel()
+		}
+	}()
+	if err != nil {
+		logrus.Errorf("connect to cluster failed, err: %v", err)
 		return err
 	}
 
