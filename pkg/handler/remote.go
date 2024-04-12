@@ -153,6 +153,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	tcp10800 := "10800-for-tcp"
 	tcp9002 := "9002-for-envoy"
 	tcp80 := "80-for-webhook"
+	udp53 := "53-for-dns"
 	_, err = clientset.CoreV1().Services(namespace).Create(ctx, &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
@@ -179,6 +180,11 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 				Protocol:   v1.ProtocolTCP,
 				Port:       80,
 				TargetPort: intstr.FromInt32(80),
+			}, {
+				Name:       udp53,
+				Protocol:   v1.ProtocolUDP,
+				Port:       53,
+				TargetPort: intstr.FromInt32(53),
 			}},
 			Selector: map[string]string{"app": config.ConfigMapPodTrafficManager},
 			Type:     v1.ServiceTypeClusterIP,
@@ -346,11 +352,18 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 							Image:   config.Image,
 							Command: []string{"kubevpn"},
 							Args:    []string{"control-plane", "--watchDirectoryFilename", "/etc/envoy/envoy-config.yaml"},
-							Ports: []v1.ContainerPort{{
-								Name:          tcp9002,
-								ContainerPort: 9002,
-								Protocol:      v1.ProtocolTCP,
-							}},
+							Ports: []v1.ContainerPort{
+								{
+									Name:          tcp9002,
+									ContainerPort: 9002,
+									Protocol:      v1.ProtocolTCP,
+								},
+								{
+									Name:          udp53,
+									ContainerPort: 53,
+									Protocol:      v1.ProtocolUDP,
+								},
+							},
 							VolumeMounts: []v1.VolumeMount{
 								{
 									Name:      config.VolumeEnvoyConfig,
@@ -389,12 +402,18 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 			},
 		},
 	}
-	if _, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{}); err != nil {
+	deployment, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{})
+	if err != nil {
 		log.Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
 		return err
 	}
+	str := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
+	_, selector, err := polymorphichelpers.SelectorsForObject(deployment)
+	if err == nil {
+		str = selector.String()
+	}
 	watchStream, err := clientset.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String(),
+		LabelSelector: str,
 	})
 	if err != nil {
 		log.Errorf("Failed to create watch for %s: %v", config.ConfigMapPodTrafficManager, err)

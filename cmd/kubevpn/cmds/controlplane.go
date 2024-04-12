@@ -1,12 +1,18 @@
 package cmds
 
 import (
+	"context"
+	"time"
+
+	"github.com/docker/docker/libnetwork/resolvconf"
+	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -23,6 +29,16 @@ func CmdControlPlane(_ cmdutil.Factory) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			util.InitLoggerForServer(config.Debug)
 			go util.StartupPProf(0)
+			go func(ctx context.Context) {
+				conf, err := miekgdns.ClientConfigFromFile(resolvconf.Path())
+				if err != nil {
+					return
+				}
+				for ctx.Err() == nil {
+					dns.ListenAndServe("udp", ":53", conf)
+					time.Sleep(time.Second * 5)
+				}
+			}(cmd.Context())
 			err := controlplane.Main(cmd.Context(), watchDirectoryFilename, port, log.StandardLogger())
 			return err
 		},

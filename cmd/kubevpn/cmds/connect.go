@@ -72,7 +72,6 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				KubeconfigBytes:      string(bytes),
 				Namespace:            ns,
 				ExtraRoute:           extraRoute.ToRPC(),
-				UseLocalDNS:          connect.UseLocalDNS,
 				Engine:               string(connect.Engine),
 				OriginKubeconfigPath: util.GetKubeConfigPath(f),
 
@@ -126,7 +125,6 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "use this image to startup container")
 	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
-	cmd.Flags().BoolVar(&connect.UseLocalDNS, "use-localdns", false, "if use-lcoaldns is true, kubevpn will start coredns listen at 53 to forward your dns queries. only support on linux now")
 	cmd.Flags().StringVar((*string)(&connect.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "Hang up")
 	cmd.Flags().BoolVar(&lite, "lite", false, "connect to multiple cluster in lite mode, you needs to special this options")

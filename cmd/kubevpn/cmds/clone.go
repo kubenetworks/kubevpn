@@ -100,7 +100,6 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 				Headers:                options.Headers,
 				Workloads:              args,
 				ExtraRoute:             extraRoute.ToRPC(),
-				UseLocalDNS:            options.UseLocalDNS,
 				OriginKubeconfigPath:   util.GetKubeConfigPath(f),
 				Engine:                 string(options.Engine),
 				SshJump:                sshConf.ToRPC(),
@@ -139,7 +138,6 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
 	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
 	cmd.Flags().StringVar((*string)(&options.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
-	cmd.Flags().BoolVar(&options.UseLocalDNS, "use-localdns", false, "if use-lcoaldns is true, kubevpn will start coredns listen at 53 to forward your dns queries. only support on linux now")
 
 	cmd.Flags().StringVar(&options.TargetImage, "target-image", "", "Clone container use this image to startup container, if not special, use origin image")
 	cmd.Flags().StringVar(&options.TargetContainer, "target-container", "", "Clone container use special image to startup this container, if not special, use origin image")

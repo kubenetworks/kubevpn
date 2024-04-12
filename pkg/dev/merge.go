@@ -1,8 +1,12 @@
 package dev
 
 import (
+	"fmt"
+	"net"
+
 	"github.com/containerd/containerd/platforms"
 	"github.com/docker/docker/api/types/network"
+
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -85,6 +89,21 @@ func mergeDockerOptions(r ConfigList, copts *Options, tempContainerConfig *conta
 			c.ExposedPorts[k] = v
 		}
 	}
+
+	var hosts []string
+	for _, domain := range copts.ExtraRouteInfo.ExtraDomain {
+		ips, err := net.LookupIP(domain)
+		if err != nil {
+			continue
+		}
+		for _, ip := range ips {
+			if ip.To4() != nil {
+				hosts = append(hosts, fmt.Sprintf("%s:%s", domain, ip.To4().String()))
+				break
+			}
+		}
+	}
+	config.hostConfig.ExtraHosts = hosts
 
 	config.config = c
 }

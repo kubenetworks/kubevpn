@@ -30,12 +30,9 @@ import (
 )
 
 type Config struct {
-	Config      *miekgdns.ClientConfig
-	Ns          []string
-	UseLocalDNS bool
-	TunName     string
-	// lite mode means connect to another cluster
-	Lite bool
+	Config  *miekgdns.ClientConfig
+	Ns      []string
+	TunName string
 
 	Hosts []Entry
 	Lock  *sync.Mutex

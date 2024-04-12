@@ -35,7 +35,6 @@ message ConnectRequest {
   map<string, string> Headers = 3;
   repeated string PortMap = 4;
   repeated string Workloads = 5;
-  bool UseLocalDNS = 6;
   string Engine = 7;
 
   // extra route table info
@@ -89,7 +88,6 @@ message CloneRequest {
   string Namespace = 2;
   map<string, string> Headers = 3;
   repeated string Workloads = 4;
-  bool UseLocalDNS = 5;
   string Engine = 6;
 
   // extra route table info

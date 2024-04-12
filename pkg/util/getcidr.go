@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/containernetworking/cni/libcni"
 	log "github.com/sirupsen/logrus"
@@ -276,7 +277,9 @@ func CreateCIDRPod(ctx context.Context, clientset *kubernetes.Clientset, namespa
 			return isRunning
 		}
 		field := fields.OneTermEqualSelector("metadata.name", pod.Name).String()
-		err = WaitPod(ctx, clientset.CoreV1().Pods(namespace), v1.ListOptions{FieldSelector: field}, checker)
+		ctx2, cancelFunc := context.WithTimeout(ctx, time.Second*30)
+		defer cancelFunc()
+		err = WaitPod(ctx2, clientset.CoreV1().Pods(namespace), v1.ListOptions{FieldSelector: field}, checker)
 		if err != nil {
 			fmt.Printf("wait pod %s to be running timeout, reason %s, ignore\r\n", pod.Name, pod.Status.Reason)
 			return nil, err

@@ -6,7 +6,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -38,7 +38,6 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 		PortMap:              req.PortMap,
 		Workloads:            req.Workloads,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
-		UseLocalDNS:          req.UseLocalDNS,
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 	}
@@ -84,7 +83,9 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 			log.Infof("try to disconnect from another cluster")
 			var disconnect rpc.Daemon_DisconnectClient
 			disconnect, err = daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{
-				ID: pointer.Int32(0),
+				KubeconfigBytes: ptr.To(req.KubeconfigBytes),
+				Namespace:       ptr.To(connect.Namespace),
+				SshJump:         sshConf.ToRPC(),
 			})
 			if err != nil {
 				return err

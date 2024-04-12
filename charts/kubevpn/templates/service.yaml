@@ -23,5 +23,9 @@ spec:
       port: {{ .Values.service.port80 }}
       protocol: TCP
       targetPort: 80
+    - name: 53-for-dns
+      port: {{ .Values.service.port53 }}
+      protocol: UDP
+      targetPort: 53
   selector:
     {{- include "kubevpn.selectorLabels" . | nindent 4 }}

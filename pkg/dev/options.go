@@ -265,7 +265,6 @@ func (option *Options) connect(ctx context.Context, f cmdutil.Factory, conf *uti
 			Headers:              connect.Headers,
 			Workloads:            connect.Workloads,
 			ExtraRoute:           connect.ExtraRouteInfo.ToRPC(),
-			UseLocalDNS:          connect.UseLocalDNS,
 			Engine:               string(connect.Engine),
 			OriginKubeconfigPath: util.GetKubeConfigPath(f),
 			TransferImage:        transferImage,
@@ -273,7 +272,7 @@ func (option *Options) connect(ctx context.Context, f cmdutil.Factory, conf *uti
 			Level:                int32(logLevel),
 			SshJump:              conf.ToRPC(),
 		}
-		cancel := disconnect(ctx, daemonCli, &rpc.DisconnectRequest{
+		cancel := disconnect(ctx, daemonCli, &rpc.LeaveRequest{Workloads: connect.Workloads}, &rpc.DisconnectRequest{
 			KubeconfigBytes: ptr.To(string(kubeConfigBytes)),
 			Namespace:       ptr.To(ns),
 			SshJump:         conf.ToRPC(),
@@ -358,15 +357,28 @@ func (option *Options) connect(ctx context.Context, f cmdutil.Factory, conf *uti
 	}
 }
 
-func disconnect(ctx context.Context, daemonClient rpc.DaemonClient, req *rpc.DisconnectRequest) func() {
+func disconnect(ctx context.Context, daemonClient rpc.DaemonClient, leaveReq *rpc.LeaveRequest, req *rpc.DisconnectRequest) func() {
 	return func() {
-		resp, err := daemonClient.Disconnect(ctx, req)
+		resp, err := daemonClient.Leave(ctx, leaveReq)
+		if err == nil {
+			for {
+				msg, err := resp.Recv()
+				if err == io.EOF {
+					break
+				} else if err != nil {
+					log.Errorf("leave resource %s error: %v", strings.Join(leaveReq.Workloads, " "), err)
+					break
+				}
+				fmt.Fprint(os.Stdout, msg.Message)
+			}
+		}
+		resp1, err := daemonClient.Disconnect(ctx, req)
 		if err != nil {
 			log.Errorf("disconnect error: %v", err)
 			return
 		}
 		for {
-			msg, err := resp.Recv()
+			msg, err := resp1.Recv()
 			if err == io.EOF {
 				return
 			} else if err != nil {
