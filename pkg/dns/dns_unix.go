@@ -167,7 +167,7 @@ func (c *Config) CancelDNS() {
 	dir := filepath.Join("/", "etc", "resolver")
 	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if d.IsDir() {
-			return fs.SkipDir
+			return nil
 		}
 		content, err := os.ReadFile(path)
 		if err != nil {

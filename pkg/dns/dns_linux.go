@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/coredns/caddy"
@@ -132,7 +131,7 @@ func WriteResolvConf(config miekgdns.ClientConfig) error {
 		options = append(options, fmt.Sprintf("timeout:%d", config.Timeout))
 	}
 
-	filename := filepath.Join("/", "etc", "resolv.conf")
+	filename := resolvconf.Path()
 	_, err := resolvconf.Build(filename, config.Servers, config.Search, options)
 	return err
 }
