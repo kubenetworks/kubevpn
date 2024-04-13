@@ -181,30 +181,43 @@ func fullDomain(t *testing.T) {
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	if len(serviceList.Items) == 0 {
-		t.Errorf("can not found pods of %s", app)
+		t.Fatalf("can not found pods of %s", app)
 	}
-	endpoint := fmt.Sprintf("http://%s:%v/health", fmt.Sprintf("%s.%s.svc.cluster.local", app, namespace), serviceList.Items[0].Spec.Ports[0].Port)
-	req, _ := http.NewRequest("GET", endpoint, nil)
-	var res *http.Response
-	err = retry.OnError(
-		wait.Backoff{Duration: time.Second, Factor: 2, Jitter: 0.2, Steps: 5},
-		func(err error) bool {
-			return err != nil
-		},
-		func() error {
-			res, err = http.DefaultClient.Do(req)
-			return err
-		},
-	)
-	if err != nil {
-		t.Error(err)
+
+	domains := []string{
+		fmt.Sprintf("%s.%s.svc.cluster.local", app, namespace),
+		fmt.Sprintf("%s.%s.svc", app, namespace),
+		fmt.Sprintf("%s.%s", app, namespace),
 	}
-	if res == nil || res.StatusCode != 200 {
-		t.Errorf("health check not pass")
-		return
+
+	for _, domain := range domains {
+		port := serviceList.Items[0].Spec.Ports[0].Port
+		endpoint := fmt.Sprintf("http://%s:%v/health", domain, port)
+		var req *http.Request
+		req, err = http.NewRequest("GET", endpoint, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var res *http.Response
+		err = retry.OnError(
+			wait.Backoff{Duration: time.Second, Factor: 2, Jitter: 0.2, Steps: 5},
+			func(err error) bool {
+				return err != nil
+			},
+			func() error {
+				res, err = http.DefaultClient.Do(req)
+				return err
+			},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res == nil || res.StatusCode != 200 {
+			t.Fatal("health check not pass")
+		}
 	}
 }
 
