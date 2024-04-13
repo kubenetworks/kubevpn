@@ -7,11 +7,9 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,9 +17,10 @@ import (
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
+
+// https://github.com/golang/go/issues/12524
+// man 5 resolver
 
 var cancel context.CancelFunc
 var resolv = "/etc/resolv.conf"
@@ -50,51 +49,26 @@ func (c *Config) usingResolver(ctx context.Context) {
 			log.Errorf("create resolver error: %v", err)
 		}
 	}
-	config := miekgdns.ClientConfig{
+	newConfig := miekgdns.ClientConfig{
 		Servers: clientConfig.Servers,
-		Search:  clientConfig.Search,
-		Ndots:   5,
-		Timeout: 2,
-	}
-	// for support like: service:port, service.namespace.svc.cluster.local:port
-	if !c.Lite {
-		filename := filepath.Join("/", "etc", "resolver", "local")
-		_ = os.WriteFile(filename, []byte(toString(config)), 0644)
-	}
-
-	// for support like: service.namespace:port, service.namespace.svc:port, service.namespace.svc.cluster:port
-	port, err := util.GetAvailableUDPPortOrDie()
-	if err != nil {
-		log.Errorf("get available port error: %v", err)
-		return
-	}
-	go func(port int, clientConfig *miekgdns.ClientConfig) {
-		for ctx.Err() == nil {
-			log.Errorln(NewDNSServer("udp", "127.0.0.1:"+strconv.Itoa(port), clientConfig))
-			time.Sleep(time.Second * 3)
-		}
-	}(port, clientConfig)
-	config = miekgdns.ClientConfig{
-		Servers: []string{"127.0.0.1"},
-		Search:  clientConfig.Search,
-		Port:    strconv.Itoa(port),
+		Search:  []string{},
+		Port:    clientConfig.Port,
 		Ndots:   clientConfig.Ndots,
-		Timeout: 2,
+		Timeout: clientConfig.Timeout,
 	}
-	var searchList []string
+	var searchDomain []string
 	for _, search := range clientConfig.Search {
 		for _, s := range strings.Split(search, ".") {
 			if s != "" {
-				searchList = append(searchList, s)
+				searchDomain = append(searchDomain, s)
 			}
 		}
 	}
-	for _, s := range sets.New[string](searchList...).Insert(ns...).UnsortedList() {
+	for _, s := range sets.New[string](searchDomain...).Insert(ns...).UnsortedList() {
 		filename := filepath.Join("/", "etc", "resolver", s)
-		var content []byte
-		content, err = os.ReadFile(filename)
+		content, err := os.ReadFile(filename)
 		if os.IsNotExist(err) {
-			_ = os.WriteFile(filename, []byte(toString(config)), 0644)
+			_ = os.WriteFile(filename, []byte(toString(newConfig)), 0644)
 		} else if err == nil {
 			var conf *miekgdns.ClientConfig
 			conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(content)))
@@ -102,19 +76,10 @@ func (c *Config) usingResolver(ctx context.Context) {
 				log.Errorf("Parse resolver %s error: %v", filename, err)
 				continue
 			}
-			// if already has this dns server, do nothing
-			if sets.New[string](conf.Servers...).Has(clientConfig.Servers[0]) {
-				continue
-			}
-			if net.ParseIP(clientConfig.Servers[0]).IsLoopback() {
-				continue
-			}
-			conf.Servers = append(conf.Servers, clientConfig.Servers[0])
-			if len(conf.Servers) <= 3 {
-				err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
-				if err != nil {
-					log.Errorf("Failed to write resovler %s error: %v", filename, err)
-				}
+			conf.Servers = append([]string{clientConfig.Servers[0]}, conf.Servers...)
+			err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
+			if err != nil {
+				log.Errorf("Failed to write resovler %s error: %v", filename, err)
 			}
 		} else {
 			log.Errorf("Failed to read resovler %s error: %v", filename, err)
@@ -199,9 +164,43 @@ func (c *Config) CancelDNS() {
 	if cancel != nil {
 		cancel()
 	}
-	if !c.Lite {
-		_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
-	}
+	dir := filepath.Join("/", "etc", "resolver")
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if d.IsDir() {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		var conf *miekgdns.ClientConfig
+		conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(content)))
+		if err != nil {
+			return nil
+		}
+		// if not has this dns server, do nothing
+		if !sets.New[string](conf.Servers...).Has(c.Config.Servers[0]) {
+			return nil
+		}
+		for i := 0; i < len(conf.Servers); i++ {
+			if conf.Servers[i] == c.Config.Servers[0] {
+				conf.Servers = append(conf.Servers[:i], conf.Servers[i+1:]...)
+				i--
+				// remove once is enough, because if same cluster connect to different namespace
+				// dns service ip is same
+				break
+			}
+		}
+		if len(conf.Servers) == 0 {
+			os.Remove(path)
+			return nil
+		}
+		err = os.WriteFile(path, []byte(toString(*conf)), 0644)
+		if err != nil {
+			log.Errorf("Failed to write resovler %s error: %v", path, err)
+		}
+		return nil
+	})
 	//networkCancel()
 	c.removeHosts(c.Hosts)
 }

@@ -55,6 +55,7 @@ service:
   port9002: 9002
   port10800: 10800
   port80: 80
+  port53: 53
 
 resources:
   limits:

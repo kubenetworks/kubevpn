@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/coredns/caddy"
@@ -17,33 +16,12 @@ import (
 	"github.com/docker/docker/libnetwork/resolvconf"
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // systemd-resolve --status, systemd-resolve --flush-caches
 func (c *Config) SetupDNS(ctx context.Context) error {
 	clientConfig := c.Config
-	useLocalDNS := c.UseLocalDNS
 	tunName := c.TunName
-
-	existNameservers := make([]string, 0)
-	existSearches := make([]string, 0)
-	filename := filepath.Join("/", "etc", "resolv.conf")
-	readFile, err := os.ReadFile(filename)
-	if err == nil {
-		resolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(readFile)))
-		if err == nil {
-			existNameservers = resolvConf.Servers
-			existSearches = resolvConf.Search
-		}
-	}
-
-	if useLocalDNS {
-		if err = SetupLocalDNS(ctx, clientConfig, existNameservers); err != nil {
-			return err
-		}
-		clientConfig.Servers[0] = "127.0.0.1"
-	}
 
 	// TODO consider use https://wiki.debian.org/NetworkManager and nmcli to config DNS
 	// try to solve:
@@ -72,25 +50,17 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 		err = nil
 	}
 
-	// add only if not exists
-	for _, nameserver := range existNameservers {
-		if !sets.New[string](clientConfig.Servers...).Has(nameserver) {
-			clientConfig.Servers = append(clientConfig.Servers, nameserver)
-		}
+	filename := resolvconf.Path()
+	readFile, err := os.ReadFile(filename)
+	if err != nil {
+		return err
 	}
-	for _, search := range existSearches {
-		if !sets.New[string](clientConfig.Search...).Has(search) {
-			clientConfig.Search = append(clientConfig.Search, search)
-		}
+	localResolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(readFile)))
+	if err != nil {
+		return err
 	}
-
-	if !c.Lite {
-		err = os.Rename(filename, getBackupFilename(filename))
-		if err != nil {
-			log.Debugf("failed to backup resolv.conf: %s", err.Error())
-		}
-		err = WriteResolvConf(*clientConfig)
-	}
+	localResolvConf.Servers = append([]string{clientConfig.Servers[0]}, localResolvConf.Servers...)
+	err = WriteResolvConf(*localResolvConf)
 	return err
 }
 
@@ -123,9 +93,25 @@ func SetupLocalDNS(ctx context.Context, clientConfig *miekgdns.ClientConfig, exi
 func (c *Config) CancelDNS() {
 	c.removeHosts(c.Hosts)
 
-	if !c.Lite {
-		filename := filepath.Join("/", "etc", "resolv.conf")
-		_ = os.Rename(getBackupFilename(filename), filename)
+	filename := resolvconf.Path()
+	readFile, err := os.ReadFile(filename)
+	if err != nil {
+		return
+	}
+	resolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(readFile)))
+	if err != nil {
+		return
+	}
+	for i := 0; i < len(resolvConf.Servers); i++ {
+		if resolvConf.Servers[i] == c.Config.Servers[0] {
+			resolvConf.Servers = append(resolvConf.Servers[:i], resolvConf.Servers[i+1:]...)
+			i--
+			break
+		}
+	}
+	err = WriteResolvConf(*resolvConf)
+	if err != nil {
+		log.Warnf("failed to remove dns from resolv conf file: %v", err)
 	}
 }
 
@@ -145,11 +131,7 @@ func WriteResolvConf(config miekgdns.ClientConfig) error {
 		options = append(options, fmt.Sprintf("timeout:%d", config.Timeout))
 	}
 
-	filename := filepath.Join("/", "etc", "resolv.conf")
+	filename := resolvconf.Path()
 	_, err := resolvconf.Build(filename, config.Servers, config.Search, options)
 	return err
-}
-
-func getBackupFilename(filename string) string {
-	return filename + ".kubevpn_backup"
 }

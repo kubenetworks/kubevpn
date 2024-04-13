@@ -3,6 +3,7 @@ package util
 import (
 	"bytes"
 	"context"
+	"fmt"
 
 	"github.com/miekg/dns"
 	"github.com/pkg/errors"
@@ -12,27 +13,34 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/cmd/util"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 func GetDNSServiceIPFromPod(ctx context.Context, clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) (*dns.ClientConfig, error) {
-	resolvConfStr, err := Shell(ctx, clientset, restclient, config, podName, "", namespace, []string{"cat", "/etc/resolv.conf"})
+	str, err := Shell(ctx, clientset, restclient, config, podName, "", namespace, []string{"cat", "/etc/resolv.conf"})
 	if err != nil {
 		return nil, err
 	}
-	resolvConf, err := dns.ClientConfigFromReader(bytes.NewBufferString(resolvConfStr))
+	resolvConf, err := dns.ClientConfigFromReader(bytes.NewBufferString(str))
+	if err == nil {
+		return resolvConf, nil
+	}
+
+	ips, err := GetDNSIPFromDnsPod(ctx, clientset)
 	if err != nil {
 		return nil, err
 	}
-	if ips, err := GetDNSIPFromDnsPod(ctx, clientset); err == nil && len(ips) != 0 {
-		resolvConf.Servers = ips
+	clientConfig := dns.ClientConfig{
+		Servers: ips,
+		Search: []string{
+			fmt.Sprintf("%s.svc.cluster.local", namespace),
+			"svc.cluster.local",
+			"cluster.local",
+		},
+		Ndots: 5,
 	}
-
-	// linux nameserver only support amount is 3, so if namespace too much, just use two, left one to system
-	if len(resolvConf.Servers) > 2 {
-		resolvConf.Servers = resolvConf.Servers[:2]
-	}
-
-	return resolvConf, nil
+	return &clientConfig, nil
 }
 
 func GetDNSIPFromDnsPod(ctx context.Context, clientset *kubernetes.Clientset) (ips []string, err error) {
@@ -76,7 +84,7 @@ func GetDNS(ctx context.Context, f util.Factory, ns, pod string) (*dns.ClientCon
 	if err != nil {
 		return nil, err
 	}
-	config, err := f.ToRESTConfig()
+	restConfig, err := f.ToRESTConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -86,9 +94,14 @@ func GetDNS(ctx context.Context, f util.Factory, ns, pod string) (*dns.ClientCon
 		return nil, err
 	}
 
-	clientConfig, err := GetDNSServiceIPFromPod(ctx, clientSet, client, config, pod, ns)
+	clientConfig, err := GetDNSServiceIPFromPod(ctx, clientSet, client, restConfig, pod, ns)
 	if err != nil {
 		return nil, err
 	}
+	svc, err := clientSet.CoreV1().Services(ns).Get(ctx, config.ConfigMapPodTrafficManager, v12.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	clientConfig.Servers = []string{svc.Spec.ClusterIP}
 	return clientConfig, nil
 }

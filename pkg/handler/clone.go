@@ -46,7 +46,6 @@ type CloneOptions struct {
 	Workloads      []string
 	ExtraRouteInfo ExtraRouteInfo
 	Engine         config.Engine
-	UseLocalDNS    bool
 
 	TargetKubeconfig       string
 	TargetNamespace        string

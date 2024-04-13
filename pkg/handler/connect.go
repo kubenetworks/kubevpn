@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
 	pkgtypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -59,7 +60,6 @@ type ConnectOptions struct {
 	PortMap              []string
 	Workloads            []string
 	ExtraRouteInfo       ExtraRouteInfo
-	UseLocalDNS          bool
 	Engine               config.Engine
 	Foreground           bool
 	OriginKubeconfigPath string
@@ -182,7 +182,10 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 	if err = createOutboundPod(c.ctx, c.factory, c.clientset, c.Namespace); err != nil {
 		return
 	}
-	if err = c.setImage(c.ctx); err != nil {
+	if err = c.upgradeDeploy(c.ctx); err != nil {
+		return
+	}
+	if err = c.upgradeService(c.ctx); err != nil {
 		return
 	}
 	//if err = c.CreateRemoteInboundPod(c.ctx); err != nil {
@@ -228,13 +231,8 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		return
 	}
 	c.deleteFirewallRule(c.ctx)
-	log.Debugf("adding extra hosts...")
-	if err = c.addExtraRoute(c.ctx); err != nil {
-		log.Errorf("add extra route failed: %v", err)
-		return
-	}
 	log.Debugf("setup dns")
-	if err = c.setupDNS(c.ctx, isLite); err != nil {
+	if err = c.setupDNS(c.ctx); err != nil {
 		log.Errorf("set up dns failed: %v", err)
 		return
 	}
@@ -571,7 +569,7 @@ func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
 	go util.DeleteBlockFirewallRule(ctx)
 }
 
-func (c *ConnectOptions) setupDNS(ctx context.Context, lite bool) error {
+func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	const port = 53
 	pod, err := c.GetRunningPodList(ctx)
 	if err != nil {
@@ -586,10 +584,18 @@ func (c *ConnectOptions) setupDNS(ctx context.Context, lite bool) error {
 	if relovConf.Port == "" {
 		relovConf.Port = strconv.Itoa(port)
 	}
-	if len(relovConf.Servers) == 0 {
-		err = errors.New("can not found any nameserver from pod")
+	svc, err := c.clientset.CoreV1().Services(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
 		return err
 	}
+	relovConf.Servers = []string{svc.Spec.ClusterIP}
+
+	log.Debugf("adding extra hosts...")
+	if err = c.addExtraRoute(c.ctx, relovConf.Servers[0]); err != nil {
+		log.Errorf("add extra route failed: %v", err)
+		return err
+	}
+
 	ns := []string{c.Namespace}
 	list, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err == nil {
@@ -604,13 +610,11 @@ func (c *ConnectOptions) setupDNS(ctx context.Context, lite bool) error {
 		return err
 	}
 	c.dnsConfig = &dns.Config{
-		Config:      relovConf,
-		Ns:          ns,
-		UseLocalDNS: c.UseLocalDNS,
-		TunName:     tunName,
-		Lite:        lite,
-		Hosts:       c.extraHost,
-		Lock:        c.Lock,
+		Config:  relovConf,
+		Ns:      ns,
+		TunName: tunName,
+		Hosts:   c.extraHost,
+		Lock:    c.Lock,
 	}
 	if err = c.dnsConfig.SetupDNS(ctx); err != nil {
 		return err
@@ -832,21 +836,11 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) (err error) {
 	return
 }
 
-func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
+func (c *ConnectOptions) addExtraRoute(ctx context.Context, nameserver string) error {
 	if len(c.ExtraRouteInfo.ExtraDomain) == 0 {
 		return nil
 	}
-	ips, err := util.GetDNSIPFromDnsPod(ctx, c.clientset)
-	if err != nil {
-		return err
-	}
-	if len(ips) == 0 {
-		err = fmt.Errorf("can't found any dns server")
-		return err
-	}
-
-	var r routing.Router
-	r, err = netroute.New()
+	r, err := netroute.New()
 	if err != nil {
 		return err
 	}
@@ -879,40 +873,26 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context) error {
 		}
 	}
 
-	// add dns pod ip to route
-	for _, ip := range ips {
-		addRouteFunc("dns-pod", ip)
-	}
-
 	// 1) use dig +short query, if ok, just return
 	podList, err := c.GetRunningPodList(ctx)
 	if err != nil {
 		return err
 	}
+	var ok = true
 	for _, domain := range c.ExtraRouteInfo.ExtraDomain {
 		ip, err := util.Shell(ctx, c.clientset, c.restclient, c.config, podList[0].Name, config.ContainerSidecarVPN, c.Namespace, []string{"dig", "+short", domain})
-		if err != nil || net.ParseIP(ip) == nil {
-			goto RetryWithDNSClient
+		if err == nil || net.ParseIP(ip) != nil {
+			addRouteFunc(domain, ip)
+			c.extraHost = append(c.extraHost, dns.Entry{IP: net.ParseIP(ip).String(), Domain: domain})
+		} else {
+			ok = false
 		}
-		addRouteFunc(domain, ip)
-		c.extraHost = append(c.extraHost, dns.Entry{IP: net.ParseIP(ip).String(), Domain: domain})
 	}
-	return nil
+	if ok {
+		return nil
+	}
 
-RetryWithDNSClient:
 	// 2) wait until can ping dns server ip ok
-	ctx2, cancelFunc := context.WithTimeout(ctx, time.Second*10)
-	wait.UntilWithContext(ctx2, func(context.Context) {
-		for _, ip := range ips {
-			pong, err2 := util.Ping(ctx2, ip)
-			if err2 == nil && pong {
-				ips = []string{ip}
-				cancelFunc()
-				return
-			}
-		}
-	}, time.Millisecond*50)
-
 	// 3) use nslookup to query dns at first, it will speed up mikdns query process
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -923,7 +903,7 @@ RetryWithDNSClient:
 					func() {
 						subCtx, c2 := context.WithTimeout(ctx, time.Second*2)
 						defer c2()
-						cmd := exec.CommandContext(subCtx, "nslookup", domain, ips[0])
+						cmd := exec.CommandContext(subCtx, "nslookup", domain, nameserver)
 						cmd.Stderr = io.Discard
 						cmd.Stdout = io.Discard
 						_ = cmd.Start()
@@ -960,7 +940,7 @@ RetryWithDNSClient:
 								Qtype: qType,
 							},
 						},
-					}, fmt.Sprintf("%s:%d", ips[0], 53))
+					}, fmt.Sprintf("%s:%d", nameserver, 53))
 					if err != nil {
 						return err
 					}
@@ -1042,7 +1022,7 @@ func (c *ConnectOptions) GetLocalTunIPv4() string {
 	return ""
 }
 
-func (c *ConnectOptions) setImage(ctx context.Context) error {
+func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 	deployment, err := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err
@@ -1130,6 +1110,61 @@ func (c *ConnectOptions) setImage(ctx context.Context) error {
 	return nil
 }
 
+// update service spec, just for migrate
+func (c *ConnectOptions) upgradeService(ctx context.Context) error {
+	service, err := c.clientset.CoreV1().Services(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	for _, port := range service.Spec.Ports {
+		if port.Port == 53 {
+			return nil
+		}
+	}
+	r := c.factory.NewBuilder().
+		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
+		NamespaceParam(c.Namespace).DefaultNamespace().
+		ResourceNames("services", service.Name).
+		ContinueOnError().
+		Latest().
+		Flatten().
+		Do()
+	if err = r.Err(); err != nil {
+		return err
+	}
+	infos, err := r.Infos()
+	if err != nil {
+		return err
+	}
+	patches := set.CalculatePatches(infos, scheme.DefaultJSONEncoder(), func(obj pkgruntime.Object) ([]byte, error) {
+		v, ok := obj.(*v1.Service)
+		if ok {
+			v.Spec.Ports = append(v.Spec.Ports, v1.ServicePort{
+				Name:       "53-for-dns",
+				Protocol:   v1.ProtocolUDP,
+				Port:       53,
+				TargetPort: intstr.FromInt32(53),
+			})
+		}
+		return pkgruntime.Encode(scheme.DefaultJSONEncoder(), obj)
+	})
+
+	if err != nil {
+		return err
+	}
+	for _, p := range patches {
+		_, err = resource.
+			NewHelper(p.Info.Client, p.Info.Mapping).
+			DryRun(false).
+			Patch(p.Info.Namespace, p.Info.Name, pkgtypes.StrategicMergePatchType, p.Patch, nil)
+		if err != nil {
+			log.Errorf("failed to patch image update to pod template: %v", err)
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *ConnectOptions) heartbeats(ctx context.Context) {
 	if !util.IsWindows() {
 		return
@@ -1163,8 +1198,7 @@ func (c *ConnectOptions) heartbeats(ctx context.Context) {
 }
 
 func (c *ConnectOptions) Equal(a *ConnectOptions) bool {
-	return c.UseLocalDNS == a.UseLocalDNS &&
-		c.Engine == a.Engine &&
+	return c.Engine == a.Engine &&
 		reflect.DeepEqual(c.ExtraRouteInfo.ExtraDomain, a.ExtraRouteInfo.ExtraDomain) &&
 		reflect.DeepEqual(c.ExtraRouteInfo.ExtraCIDR, a.ExtraRouteInfo.ExtraCIDR) &&
 		reflect.DeepEqual(c.ExtraRouteInfo.ExtraNodeIP, a.ExtraRouteInfo.ExtraNodeIP)

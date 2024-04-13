@@ -2,6 +2,8 @@ package action
 
 import (
 	"io"
+	"os"
+	"path/filepath"
 
 	log "github.com/sirupsen/logrus"
 
@@ -36,6 +38,7 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 
 	if svr.IsSudo {
 		dns.CleanupHosts()
+		os.RemoveAll(filepath.Join("/", "etc", "resolver"))
 	}
 
 	// last step is to quit GRPC server

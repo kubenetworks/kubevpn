@@ -29,7 +29,6 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 		KubeconfigBytes:      req.KubeconfigBytes,
 		Namespace:            req.Namespace,
 		ExtraRoute:           req.ExtraRoute,
-		UseLocalDNS:          req.UseLocalDNS,
 		Engine:               req.Engine,
 		SshJump:              req.SshJump,
 		TransferImage:        req.TransferImage,
@@ -62,7 +61,6 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 		Headers:        req.Headers,
 		Workloads:      req.Workloads,
 		ExtraRouteInfo: *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
-		UseLocalDNS:    req.UseLocalDNS,
 		Engine:         config.Engine(req.Engine),
 
 		TargetKubeconfig:       req.TargetKubeconfig,
