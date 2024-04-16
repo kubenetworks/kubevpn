@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"os"
 	"reflect"
 	"time"
 
@@ -153,35 +152,12 @@ func (c *winTunConn) Close() error {
 	return err
 }
 
-func (c *winTunConn) Read(b []byte) (int, error) {
-	sizes := make([]int, 1)
-	num, err := c.ifce.Read([][]byte{b}, sizes, 0)
-	if err != nil {
-		if errors.Is(err, wireguardtun.ErrTooManySegments) {
-			log.Errorf("Dropped some packets from multi-segment read: %v", err)
-			return 0, nil
-		}
-		if !errors.Is(err, os.ErrClosed) {
-			log.Errorf("Failed to read packet from TUN device: %v", err)
-			return 0, nil
-		}
-		return 0, err
-	}
-	if num == 0 {
-		return 0, nil
-	}
-	return sizes[0], nil
+func (c *winTunConn) Read(b []byte) (n int, err error) {
+	return c.ifce.Read(b, 0)
 }
 
-func (c *winTunConn) Write(b []byte) (int, error) {
-	n, err := c.ifce.Write([][]byte{b}, 0)
-	if err != nil {
-		return 0, err
-	}
-	if n == 0 {
-		return 0, nil
-	}
-	return len(b), nil
+func (c *winTunConn) Write(b []byte) (n int, err error) {
+	return c.ifce.Write(b, 0)
 }
 
 func (c *winTunConn) LocalAddr() net.Addr {
