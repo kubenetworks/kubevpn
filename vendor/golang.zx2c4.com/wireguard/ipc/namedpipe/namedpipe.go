@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 //go:build windows
+// +build windows
 
 // Package namedpipe implements a net.Conn and net.Listener around Windows named pipes.
 package namedpipe

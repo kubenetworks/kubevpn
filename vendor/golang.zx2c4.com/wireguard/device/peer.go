@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
  *
- * Copyright (C) 2017-2023 WireGuard LLC. All Rights Reserved.
+ * Copyright (C) 2017-2022 WireGuard LLC. All Rights Reserved.
  */
 
 package device
@@ -17,20 +17,17 @@ import (
 
 type Peer struct {
 	isRunning         atomic.Bool
+	sync.RWMutex      // Mostly protects endpoint, but is generally taken whenever we modify peer
 	keypairs          Keypairs
 	handshake         Handshake
 	device            *Device
+	endpoint          conn.Endpoint
 	stopping          sync.WaitGroup // routines pending stop
 	txBytes           atomic.Uint64  // bytes send to peer (endpoint)
 	rxBytes           atomic.Uint64  // bytes received from peer
 	lastHandshakeNano atomic.Int64   // nano seconds since epoch
 
-	endpoint struct {
-		sync.Mutex
-		val            conn.Endpoint
-		clearSrcOnTx   bool // signal to val.ClearSrc() prior to next packet transmission
-		disableRoaming bool
-	}
+	disableRoaming bool
 
 	timers struct {
 		retransmitHandshake     *Timer
@@ -48,9 +45,9 @@ type Peer struct {
 	}
 
 	queue struct {
-		staged   chan *QueueOutboundElementsContainer // staged packets before a handshake is available
-		outbound *autodrainingOutboundQueue           // sequential ordering of udp transmission
-		inbound  *autodrainingInboundQueue            // sequential ordering of tun writing
+		staged   chan *QueueOutboundElement // staged packets before a handshake is available
+		outbound *autodrainingOutboundQueue // sequential ordering of udp transmission
+		inbound  *autodrainingInboundQueue  // sequential ordering of tun writing
 	}
 
 	cookieGenerator             CookieGenerator
@@ -77,12 +74,14 @@ func (device *Device) NewPeer(pk NoisePublicKey) (*Peer, error) {
 
 	// create peer
 	peer := new(Peer)
+	peer.Lock()
+	defer peer.Unlock()
 
 	peer.cookieGenerator.Init(pk)
 	peer.device = device
 	peer.queue.outbound = newAutodrainingOutboundQueue(device)
 	peer.queue.inbound = newAutodrainingInboundQueue(device)
-	peer.queue.staged = make(chan *QueueOutboundElementsContainer, QueueStagedSize)
+	peer.queue.staged = make(chan *QueueOutboundElement, QueueStagedSize)
 
 	// map public key
 	_, ok := device.peers.keyMap[pk]
@@ -93,16 +92,12 @@ func (device *Device) NewPeer(pk NoisePublicKey) (*Peer, error) {
 	// pre-compute DH
 	handshake := &peer.handshake
 	handshake.mutex.Lock()
-	handshake.precomputedStaticStatic, _ = device.staticIdentity.privateKey.sharedSecret(pk)
+	handshake.precomputedStaticStatic = device.staticIdentity.privateKey.sharedSecret(pk)
 	handshake.remoteStatic = pk
 	handshake.mutex.Unlock()
 
 	// reset endpoint
-	peer.endpoint.Lock()
-	peer.endpoint.val = nil
-	peer.endpoint.disableRoaming = false
-	peer.endpoint.clearSrcOnTx = false
-	peer.endpoint.Unlock()
+	peer.endpoint = nil
 
 	// init timers
 	peer.timersInit()
@@ -113,7 +108,7 @@ func (device *Device) NewPeer(pk NoisePublicKey) (*Peer, error) {
 	return peer, nil
 }
 
-func (peer *Peer) SendBuffers(buffers [][]byte) error {
+func (peer *Peer) SendBuffer(buffer []byte) error {
 	peer.device.net.RLock()
 	defer peer.device.net.RUnlock()
 
@@ -121,25 +116,16 @@ func (peer *Peer) SendBuffers(buffers [][]byte) error {
 		return nil
 	}
 
-	peer.endpoint.Lock()
-	endpoint := peer.endpoint.val
-	if endpoint == nil {
-		peer.endpoint.Unlock()
+	peer.RLock()
+	defer peer.RUnlock()
+
+	if peer.endpoint == nil {
 		return errors.New("no known endpoint for peer")
 	}
-	if peer.endpoint.clearSrcOnTx {
-		endpoint.ClearSrc()
-		peer.endpoint.clearSrcOnTx = false
-	}
-	peer.endpoint.Unlock()
 
-	err := peer.device.net.bind.Send(buffers, endpoint)
+	err := peer.device.net.bind.Send(buffer, peer.endpoint)
 	if err == nil {
-		var totalLen uint64
-		for _, b := range buffers {
-			totalLen += uint64(len(b))
-		}
-		peer.txBytes.Add(totalLen)
+		peer.txBytes.Add(uint64(len(buffer)))
 	}
 	return err
 }
@@ -201,12 +187,8 @@ func (peer *Peer) Start() {
 
 	device.flushInboundQueue(peer.queue.inbound)
 	device.flushOutboundQueue(peer.queue.outbound)
-
-	// Use the device batch size, not the bind batch size, as the device size is
-	// the size of the batch pools.
-	batchSize := peer.device.BatchSize()
-	go peer.RoutineSequentialSender(batchSize)
-	go peer.RoutineSequentialReceiver(batchSize)
+	go peer.RoutineSequentialSender()
+	go peer.RoutineSequentialReceiver()
 
 	peer.isRunning.Store(true)
 }
@@ -277,20 +259,10 @@ func (peer *Peer) Stop() {
 }
 
 func (peer *Peer) SetEndpointFromPacket(endpoint conn.Endpoint) {
-	peer.endpoint.Lock()
-	defer peer.endpoint.Unlock()
-	if peer.endpoint.disableRoaming {
+	if peer.disableRoaming {
 		return
 	}
-	peer.endpoint.clearSrcOnTx = false
-	peer.endpoint.val = endpoint
-}
-
-func (peer *Peer) markEndpointSrcForClearing() {
-	peer.endpoint.Lock()
-	defer peer.endpoint.Unlock()
-	if peer.endpoint.val == nil {
-		return
-	}
-	peer.endpoint.clearSrcOnTx = true
+	peer.Lock()
+	peer.endpoint = endpoint
+	peer.Unlock()
 }
