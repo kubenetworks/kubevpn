@@ -1,6 +1,12 @@
 package config
 
-import "os"
+import (
+	_ "embed"
+	"os"
+	"path/filepath"
+
+	"github.com/pkg/errors"
+)
 
 const (
 	HOME   = ".kubevpn"
@@ -15,7 +21,12 @@ const (
 	LogFile = "daemon.log"
 
 	KubeVPNRestorePatchKey = "kubevpn-probe-restore-patch"
+
+	ConfigFile = "config.yaml"
 )
+
+//go:embed config.yaml
+var config []byte
 
 func init() {
 	err := os.MkdirAll(DaemonPath, os.ModePerm)
@@ -23,6 +34,15 @@ func init() {
 		panic(err)
 	}
 	err = os.Chmod(DaemonPath, os.ModePerm)
+	if err != nil {
+		panic(err)
+	}
+
+	path := filepath.Join(HomePath, ConfigFile)
+	_, err = os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		err = os.WriteFile(path, config, 0644)
+	}
 	if err != nil {
 		panic(err)
 	}

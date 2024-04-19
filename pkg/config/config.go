@@ -107,6 +107,7 @@ var (
 	OriginImage = "docker.io/naison/kubevpn:" + Version
 
 	DaemonPath string
+	HomePath   string
 )
 
 var (
@@ -126,6 +127,7 @@ func init() {
 	DockerRouterIP, DockerCIDR, _ = net.ParseCIDR(dockerInnerIPv4Pool)
 	dir, _ := os.UserHomeDir()
 	DaemonPath = filepath.Join(dir, HOME, Daemon)
+	HomePath = filepath.Join(dir, HOME)
 }
 
 var Debug bool

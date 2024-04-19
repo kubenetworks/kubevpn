@@ -83,6 +83,7 @@ func NewKubeVPNCommand() *cobra.Command {
 				CmdStatus(factory),
 				CmdVersion(factory),
 				CmdUpgrade(factory),
+				CmdAlias(factory),
 			},
 		},
 	}
