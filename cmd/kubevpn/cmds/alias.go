@@ -23,7 +23,7 @@ Name: test
 Needs: test1
 Flags:
   - connect
-  - --kubeconfig /Users/bytedance/.kube/config
+  - --kubeconfig ~/.kube/config
   - --namespace test
   - --lite
 ---
@@ -31,7 +31,7 @@ Flags:
 Name: test1
 Flags:
   - connect
-  - --kubeconfig ~/.kube/config
+  - --kubeconfig ~/.kube/jumper_config
   - --namespace test
   - --extra-hosts xxx.com
 */
@@ -47,7 +47,7 @@ Name: dev
 Needs: jumper
 Flags:
   - connect
-  - --kubeconfig /Users/naison/.kube/config
+  - --kubeconfig ~/.kube/config
   - --namespace default
   - --lite
 ---
@@ -55,7 +55,7 @@ Flags:
 Name: jumper
 Flags:
   - connect
-  - --kubeconfig /Users/naison/.kube/jumper_config
+  - --kubeconfig ~/.kube/jumper_config
   - --namespace test
   - --extra-hosts xxx.com
 

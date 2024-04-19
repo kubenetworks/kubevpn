@@ -2,15 +2,18 @@ package cmds
 
 import (
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/rest"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/homedir"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
+	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
@@ -41,7 +44,7 @@ func NewKubeVPNCommand() *cobra.Command {
 		return c
 	}
 	configFlags.AddFlags(flags)
-	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
+	matchVersionFlags := cmdutil.NewMatchVersionFlags(&warp{ConfigFlags: configFlags})
 	matchVersionFlags.AddFlags(flags)
 	factory := cmdutil.NewFactory(matchVersionFlags)
 
@@ -91,4 +94,16 @@ func NewKubeVPNCommand() *cobra.Command {
 	templates.ActsAsRootCommand(cmd, []string{"options"}, groups...)
 	cmd.AddCommand(CmdOptions(factory))
 	return cmd
+}
+
+type warp struct {
+	*genericclioptions.ConfigFlags
+}
+
+func (f *warp) ToRawKubeConfigLoader() clientcmd.ClientConfig {
+	if strings.HasPrefix(ptr.Deref[string](f.KubeConfig, ""), "~") {
+		home := homedir.HomeDir()
+		f.KubeConfig = ptr.To(strings.Replace(*f.KubeConfig, "~", home, 1))
+	}
+	return f.ConfigFlags.ToRawKubeConfigLoader()
 }

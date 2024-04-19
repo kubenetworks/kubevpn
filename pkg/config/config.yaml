@@ -1,13 +1,13 @@
 # Here is an example config kubevpn config file, please change it into your custom config.
 # Support three filed: Name,Needs,Flags
-# Exec command: kubevpn alias qa === kubevpn connect --kubeconfig /Users/naison/.kube/jumper_config --namespace default
+# Exec command: kubevpn alias qa === kubevpn connect --kubeconfig ~/.kube/jumper_config --namespace default
 # Simple is Good ~
 
 Name: dev
 Needs: qa
 Flags:
   - connect
-  - --kubeconfig /Users/naison/.kube/config
+  - --kubeconfig ~/.kube/config
   - --namespace default
   - --lite
 
@@ -16,5 +16,5 @@ Flags:
 Name: qa
 Flags:
   - connect
-  - --kubeconfig /Users/naison/.kube/jumper_config
+  - --kubeconfig ~/.kube/jumper_config
   - --namespace default
