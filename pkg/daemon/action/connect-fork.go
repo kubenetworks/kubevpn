@@ -8,7 +8,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
-	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -173,37 +172,6 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 	}
 
 	svr.secondaryConnect = append(svr.secondaryConnect, connect)
-
-	if req.Foreground {
-		<-resp.Context().Done()
-		for i := 0; i < len(svr.secondaryConnect); i++ {
-			if svr.secondaryConnect[i] == connect {
-				cli := svr.GetClient(false)
-				if cli == nil {
-					return fmt.Errorf("sudo daemon not start")
-				}
-				disconnect, err := cli.Disconnect(context.Background(), &rpc.DisconnectRequest{
-					ID: pointer.Int32(int32(i)),
-				})
-				if err != nil {
-					log.Errorf("disconnect error: %v", err)
-					return err
-				}
-				for {
-					recv, err := disconnect.Recv()
-					if err == io.EOF {
-						break
-					} else if err != nil {
-						return err
-					}
-					log.Info(recv.Message)
-				}
-				svr.secondaryConnect = append(svr.secondaryConnect[:i], svr.secondaryConnect[i+1:]...)
-				break
-			}
-		}
-	}
-
 	return nil
 }
 
