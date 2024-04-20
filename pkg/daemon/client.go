@@ -99,6 +99,10 @@ func GetPidPath(isSudo bool) string {
 	return filepath.Join(config.DaemonPath, name)
 }
 
+func GetConfigFilePath() string {
+	return filepath.Join(config.HomePath, config.ConfigFile)
+}
+
 func StartupDaemon(ctx context.Context, path ...string) error {
 	var exe string
 	var err error
