@@ -79,7 +79,6 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 
 				SshJump:       sshConf.ToRPC(),
 				TransferImage: transferImage,
-				Foreground:    foreground,
 				Image:         config.Image,
 				Level:         int32(logLevel),
 			}
@@ -118,7 +117,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 					fmt.Fprint(os.Stdout, recv.GetMessage())
 				}
 			}
-			if !req.Foreground {
+			if !foreground {
 				util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
 			} else {
 				<-cmd.Context().Done()
