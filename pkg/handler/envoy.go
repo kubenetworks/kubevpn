@@ -53,6 +53,21 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 	for _, container := range templateSpec.Spec.Containers {
 		ports = append(ports, container.Ports...)
 	}
+	for _, portMap := range portMaps {
+		var found = func(containerPort int32) bool {
+			for _, port := range ports {
+				if port.ContainerPort == containerPort {
+					return true
+				}
+			}
+			return false
+		}
+		port := util.ParsePort(portMap)
+		port.HostPort = 0
+		if port.ContainerPort != 0 && !found(port.ContainerPort) {
+			ports = append(ports, port)
+		}
+	}
 	var portmap = make(map[int32]int32)
 	for _, port := range ports {
 		portmap[port.ContainerPort] = port.ContainerPort
