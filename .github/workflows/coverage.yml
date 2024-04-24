@@ -7,8 +7,8 @@ on:
     branches: [ master ]
 
 jobs:
-  macos:
-    runs-on: macos-latest
+  linux:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
 
@@ -17,17 +17,13 @@ jobs:
         with:
           go-version: '1.22'
           check-latest: true
-      - name: Set up Docker
-        uses: crazy-max/ghaction-setup-docker@v3
-
-      - name: Install minikube
-        run: |
-          set -x
-          docker version
-          brew install minikube
-          minikube start --driver=docker
-          kubectl get pod -A -o wide
-          minikube kubectl -- get pod -A -o wide
+          
+      - name: Setup Minikube
+        id: minikube
+        timeout-minutes: 30
+        uses: medyagh/setup-minikube@latest
+        with:
+          cache: true
 
       - name: Kubernetes info
         run: |
@@ -51,7 +47,7 @@ jobs:
       - name: Build
         run: |
           export VERSION=test
-          make kubevpn-darwin-amd64
+          make kubevpn-linux-amd64
           chmod +x ./bin/kubevpn
           cp ./bin/kubevpn /usr/local/bin/kubevpn
           kubevpn version
@@ -60,12 +56,13 @@ jobs:
         run: |
           kubectl wait pods -l app=reviews --for=condition=Ready --timeout=3600s
           kubectl wait pods -l app=productpage --for=condition=Ready --timeout=3600s
-          kubectl get svc -A -o wide || true
-          kubectl get pod -A -o wide || true
-          kubectl get all -o wide || true
-          kubectl get nodes -o yaml || true
+          kubectl get svc -A -o wide
+          kubectl get pod -A -o wide
+          kubectl get all -o wide
+          kubectl get nodes -o yaml
           ifconfig
-          netstat -anr
+          route -n
+          sudo ln /usr/bin/resolvectl /usr/bin/systemd-resolve
 
       - name: Test
         run: make ut
