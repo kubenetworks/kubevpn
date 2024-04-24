@@ -256,17 +256,24 @@ func (c *Config) generateHostsEntry(list []v12.Service, hosts []Entry) []Entry {
 
 	// 1) if dns already works well, not needs to add it to hosts file
 	var alreadyCanResolveDomain []Entry
+	var lock = &sync.Mutex{}
+	var wg = &sync.WaitGroup{}
 	for i := 0; i < len(entryList); i++ {
+		wg.Add(1)
 		go func(e Entry) {
+			defer wg.Done()
 			timeout, cancelFunc := context.WithTimeout(context.Background(), time.Millisecond*1000)
 			defer cancelFunc()
 			// net.DefaultResolver.PreferGo = true
 			host, err := net.DefaultResolver.LookupHost(timeout, e.Domain)
 			if err == nil && sets.NewString(host...).Has(e.IP) {
+				lock.Lock()
 				alreadyCanResolveDomain = append(alreadyCanResolveDomain, e)
+				lock.Unlock()
 			}
 		}(entryList[i])
 	}
+	wg.Wait()
 	// remove those already can resolve domain from entryList
 	for i := 0; i < len(entryList); i++ {
 		for _, entry := range alreadyCanResolveDomain {
