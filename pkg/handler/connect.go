@@ -18,9 +18,7 @@ import (
 
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/distribution/reference"
-	"github.com/google/gopacket/routing"
 	goversion "github.com/hashicorp/go-version"
-	netroute "github.com/libp2p/go-netroute"
 	miekgdns "github.com/miekg/dns"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -368,12 +366,6 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 
 // Listen all pod, add route if needed
 func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
-	var r routing.Router
-	r, err = netroute.New()
-	if err != nil {
-		return
-	}
-
 	var tunName string
 	tunName, err = c.GetTunDeviceName()
 	if err != nil {
@@ -392,18 +384,13 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 		if apiServer.Has(ip) {
 			return
 		}
-		// if route is right, not need add route
-		iface, _, _, errs := r.Route(net.ParseIP(ip))
-		if errs == nil && tunName == iface.Name {
-			return
-		}
 		var mask net.IPMask
 		if net.ParseIP(ip).To4() != nil {
 			mask = net.CIDRMask(32, 32)
 		} else {
 			mask = net.CIDRMask(128, 128)
 		}
-		errs = tun.AddRoutes(tunName, types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: mask}})
+		errs := tun.AddRoutes(tunName, types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: mask}})
 		if errs != nil {
 			log.Debugf("[route] add route failed, resource: %s, ip: %s,err: %v", resource, ip, err)
 		}
@@ -840,13 +827,8 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context, nameserver string) e
 	if len(c.ExtraRouteInfo.ExtraDomain) == 0 {
 		return nil
 	}
-	r, err := netroute.New()
-	if err != nil {
-		return err
-	}
 
-	var tunName string
-	tunName, err = c.GetTunDeviceName()
+	tunName, err := c.GetTunDeviceName()
 	if err != nil {
 		log.Errorf("get tun interface failed: %s", err.Error())
 		return err
@@ -856,18 +838,13 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context, nameserver string) e
 		if net.ParseIP(ip) == nil {
 			return
 		}
-		// if route is right, not need add route
-		iface, _, _, errs := r.Route(net.ParseIP(ip))
-		if errs == nil && tunName == iface.Name {
-			return
-		}
 		var mask net.IPMask
 		if net.ParseIP(ip).To4() != nil {
 			mask = net.CIDRMask(32, 32)
 		} else {
 			mask = net.CIDRMask(128, 128)
 		}
-		errs = tun.AddRoutes(tunName, types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: mask}})
+		errs := tun.AddRoutes(tunName, types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: mask}})
 		if errs != nil {
 			log.Debugf("[route] add route failed, domain: %s, ip: %s,err: %v", resource, ip, err)
 		}
