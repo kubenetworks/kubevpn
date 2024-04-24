@@ -356,12 +356,12 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 		log.Errorf("parse route error: %v", err)
 		return err
 	}
-	go func(ctx context.Context) {
-		for ctx.Err() == nil {
-			log.Error(Run(ctx, servers))
-			time.Sleep(time.Second * 5)
+	go func() {
+		err = Run(ctx, servers)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			log.Errorf("failed to run local tun service: %v", err)
 		}
-	}(ctx)
+	}()
 	log.Info("tunnel connected")
 	return
 }

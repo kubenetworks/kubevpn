@@ -2,10 +2,11 @@ package core
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"net"
 	"time"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -32,16 +33,10 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 		chExit:      h.chExit,
 	}
 	d.SetTunInboundHandler(func(tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem) {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
+		for ctx.Err() == nil {
 			packetConn, err := getRemotePacketConn(ctx, h.chain)
 			if err != nil {
-				log.Debugf("[tun-client] %s - %s: %s", tun.LocalAddr(), remoteAddr, err)
+				log.Debugf("[tun-client] failed to get remote conn from %s -> %s: %s", tun.LocalAddr(), remoteAddr, err)
 				time.Sleep(time.Second * 2)
 				continue
 			}
@@ -95,7 +90,7 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 			_, err := packetConn.WriteTo(e.data[:e.length], remoteAddr)
 			config.LPool.Put(e.data[:])
 			if err != nil {
-				errChan <- err
+				errChan <- errors.Wrap(err, fmt.Sprintf("failed to write packet to remote %s", remoteAddr))
 				return
 			}
 		}
@@ -106,7 +101,7 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 			b := config.LPool.Get().([]byte)[:]
 			n, _, err := packetConn.ReadFrom(b[:])
 			if err != nil {
-				errChan <- err
+				errChan <- errors.Wrap(err, fmt.Sprintf("failed to read packet from remote %s", remoteAddr))
 				return
 			}
 			tunOutbound <- &DataElem{data: b[:], length: n}

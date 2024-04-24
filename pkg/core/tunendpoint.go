@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"errors"
 	"net"
+	"os"
 
 	"github.com/google/gopacket/layers"
 	log "github.com/sirupsen/logrus"
@@ -46,13 +48,17 @@ func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, engine config
 			bytes := config.LPool.Get().([]byte)[:]
 			read, err := tun.Read(bytes[:])
 			if err != nil {
-				// if context is still going
-				if ctx.Err() == nil {
-					log.Fatalf("[TUN]: read from tun failed: %v", err)
-				} else {
-					log.Info("tun device closed")
+				if errors.Is(err, os.ErrClosed) {
+					log.Errorf("[TUN] Error: tun device closed")
+					return
 				}
-				return
+				// if context is done
+				if ctx.Err() != nil {
+					log.Errorf("[TUN]: read from tun error: %v, context is done: %v", err, ctx.Err())
+					return
+				}
+				log.Errorf("[TUN]: read from tun failed: %v", err)
+				continue
 			}
 			if read == 0 {
 				log.Warnf("[TUN]: read from tun length is %d", read)
@@ -114,7 +120,12 @@ func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, engine config
 			_, err := tun.Write(elem.Data()[:elem.Length()])
 			config.LPool.Put(elem.Data()[:])
 			if err != nil {
-				log.Fatalf("[TUN] Fatal: failed to write data to tun device: %v", err)
+				if errors.Is(err, os.ErrClosed) {
+					log.Errorf("[TUN] Error: tun device closed")
+					return
+				}
+				log.Errorf("[TUN] Error: failed to write data to tun device: %v", err)
+				continue
 			}
 		}
 	}()
