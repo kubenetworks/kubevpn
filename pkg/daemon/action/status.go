@@ -18,7 +18,7 @@ const (
 func (svr *Server) Status(ctx context.Context, request *rpc.StatusRequest) (*rpc.StatusResponse, error) {
 	var sb = new(bytes.Buffer)
 	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
-	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Mode", "Cluster", "Kubeconfig", "Namespace", "Status")
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Mode", "Cluster", "Kubeconfig", "Namespace", "Status", "Netif")
 	if svr.connect != nil {
 		cluster := util.GetKubeconfigCluster(svr.connect.GetFactory())
 		namespace := svr.connect.Namespace
