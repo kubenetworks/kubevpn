@@ -82,7 +82,7 @@ jobs:
         run: make ut
 
   macos:
-    runs-on: macos-latest
+    runs-on: macos-12
     needs: [ "image" ]
     steps:
       - uses: actions/checkout@v2
