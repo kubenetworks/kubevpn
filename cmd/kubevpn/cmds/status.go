@@ -90,6 +90,9 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 func genOutput(status *rpc.StatusResponse, format string) (string, error) {
 	switch format {
 	case FormatJson:
+		if len(status.List) == 0 {
+			return "", nil
+		}
 		marshal, err := json.Marshal(status.List)
 		if err != nil {
 			return "", err
@@ -97,6 +100,9 @@ func genOutput(status *rpc.StatusResponse, format string) (string, error) {
 		return string(marshal), nil
 
 	case FormatYaml:
+		if len(status.List) == 0 {
+			return "", nil
+		}
 		marshal, err := yaml.Marshal(status.List)
 		if err != nil {
 			return "", err

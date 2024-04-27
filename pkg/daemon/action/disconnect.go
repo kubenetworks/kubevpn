@@ -78,9 +78,11 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 			connects = connects.Append(svr.connect)
 			foundModeFull = true
 		}
-		for _, options := range svr.secondaryConnect {
-			if s.Has(options.GetClusterID()) {
-				connects = connects.Append(options)
+		for i := 0; i < len(svr.secondaryConnect); i++ {
+			if s.Has(svr.secondaryConnect[i].GetClusterID()) {
+				connects = connects.Append(svr.secondaryConnect[i])
+				svr.secondaryConnect = append(svr.secondaryConnect[:i], svr.secondaryConnect[i+1:]...)
+				i--
 			}
 		}
 		for _, connect := range connects.Sort() {
