@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"unsafe"
 
-	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -24,12 +24,16 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-func GetClusterId(client v12.ConfigMapInterface) (types.UID, error) {
-	a, err := client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+func GetClusterID(ctx context.Context, client v12.ConfigMapInterface) (types.UID, error) {
+	configMap, err := client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
-	return a.UID, nil
+	return configMap.UID, nil
+}
+
+func GetClusterIDByCM(cm *v1.ConfigMap) types.UID {
+	return cm.UID
 }
 
 func IsSameCluster(client v12.ConfigMapInterface, namespace string, clientB v12.ConfigMapInterface, namespaceB string) (bool, error) {
@@ -37,16 +41,16 @@ func IsSameCluster(client v12.ConfigMapInterface, namespace string, clientB v12.
 		return false, nil
 	}
 	ctx := context.Background()
-	a, err := client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	clusterIDA, err := GetClusterID(ctx, client)
 	if err != nil {
 		return false, err
 	}
-	var b *corev1.ConfigMap
-	b, err = clientB.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	var clusterIDB types.UID
+	clusterIDB, err = GetClusterID(ctx, clientB)
 	if err != nil {
 		return false, err
 	}
-	return a.UID == b.UID, nil
+	return clusterIDA == clusterIDB, nil
 }
 
 func ConvertToKubeConfigBytes(factory cmdutil.Factory) ([]byte, string, error) {

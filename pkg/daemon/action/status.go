@@ -1,47 +1,62 @@
 package action
 
 import (
-	"bytes"
 	"context"
-	"fmt"
-	"text/tabwriter"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 const (
 	StatusOk     = "Connected"
 	StatusFailed = "Disconnected"
+
+	ModeFull = "full"
+	ModeLite = "lite"
 )
 
-func (svr *Server) Status(ctx context.Context, request *rpc.StatusRequest) (*rpc.StatusResponse, error) {
-	var sb = new(bytes.Buffer)
-	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
-	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Mode", "Cluster", "Kubeconfig", "Namespace", "Status", "Netif")
-	if svr.connect != nil {
-		cluster := util.GetKubeconfigCluster(svr.connect.GetFactory())
-		namespace := svr.connect.Namespace
-		kubeconfig := svr.connect.OriginKubeconfigPath
-		name, _ := svr.connect.GetTunDeviceName()
-		status := StatusOk
-		if name == "" {
-			status = StatusFailed
-		}
-		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			0, "full", cluster, kubeconfig, namespace, status, name)
-	}
+func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.StatusResponse, error) {
+	var list []*rpc.Status
 
-	for i, options := range svr.secondaryConnect {
-		cluster := util.GetKubeconfigCluster(options.GetFactory())
-		name, _ := options.GetTunDeviceName()
-		status := StatusOk
-		if name == "" {
-			status = StatusFailed
+	if len(req.ClusterIDs) != 0 {
+		for _, clusterID := range req.ClusterIDs {
+			if svr.connect.GetClusterID() == clusterID {
+				list = append(list, genStatus(svr.connect, ModeFull, 0))
+			}
+			for i, options := range svr.secondaryConnect {
+				if options.GetClusterID() == clusterID {
+					list = append(list, genStatus(options, ModeLite, int32(i+1)))
+				}
+			}
 		}
-		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			i+1, "lite", cluster, options.OriginKubeconfigPath, options.Namespace, status, name)
+	} else {
+		if svr.connect != nil {
+			list = append(list, genStatus(svr.connect, ModeFull, 0))
+		}
+
+		for i, options := range svr.secondaryConnect {
+			list = append(list, genStatus(options, ModeLite, int32(i+1)))
+		}
 	}
-	_ = w.Flush()
-	return &rpc.StatusResponse{Message: sb.String()}, nil
+	return &rpc.StatusResponse{List: list}, nil
+}
+
+func genStatus(connect *handler.ConnectOptions, mode string, index int32) *rpc.Status {
+	status := StatusOk
+	tunName, _ := connect.GetTunDeviceName()
+	if tunName == "" {
+		status = StatusFailed
+	}
+	info := rpc.Status{
+		ID:         index,
+		ClusterID:  connect.GetClusterID(),
+		Cluster:    util.GetKubeconfigCluster(connect.GetFactory()),
+		Mode:       mode,
+		Kubeconfig: connect.OriginKubeconfigPath,
+		Namespace:  connect.Namespace,
+		Status:     status,
+		Netif:      tunName,
+	}
+	return &info
 }

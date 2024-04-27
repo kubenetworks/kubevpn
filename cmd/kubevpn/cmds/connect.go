@@ -152,7 +152,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "Hang up")
 	cmd.Flags().BoolVar(&lite, "lite", false, "connect to multiple cluster in lite mode, you needs to special this options")
 
-	addExtraRoute(cmd, extraRoute)
-	addSshFlags(cmd, sshConf)
+	addExtraRoute(cmd.Flags(), extraRoute)
+	addSshFlags(cmd.Flags(), sshConf)
 	return cmd
 }

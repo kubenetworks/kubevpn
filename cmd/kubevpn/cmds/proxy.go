@@ -8,6 +8,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	flag "github.com/spf13/pflag"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -173,29 +174,29 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar((*string)(&connect.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "foreground hang up")
 
-	addExtraRoute(cmd, extraRoute)
-	addSshFlags(cmd, sshConf)
+	addExtraRoute(cmd.Flags(), extraRoute)
+	addSshFlags(cmd.Flags(), sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd
 }
 
-func addSshFlags(cmd *cobra.Command, sshConf *util.SshConfig) {
+func addSshFlags(flags *flag.FlagSet, sshConf *util.SshConfig) {
 	// for ssh jumper host
-	cmd.Flags().StringVar(&sshConf.Addr, "ssh-addr", "", "Optional ssh jump server address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
-	cmd.Flags().StringVar(&sshConf.User, "ssh-username", "", "Optional username for ssh jump server")
-	cmd.Flags().StringVar(&sshConf.Password, "ssh-password", "", "Optional password for ssh jump server")
-	cmd.Flags().StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "Optional file with private key for SSH authentication")
-	cmd.Flags().StringVar(&sshConf.ConfigAlias, "ssh-alias", "", "Optional config alias with ~/.ssh/config for SSH authentication")
-	cmd.Flags().StringVar(&sshConf.GSSAPIPassword, "gssapi-password", "", "GSSAPI password")
-	cmd.Flags().StringVar(&sshConf.GSSAPIKeytabConf, "gssapi-keytab", "", "GSSAPI keytab file path")
-	cmd.Flags().StringVar(&sshConf.GSSAPICacheFile, "gssapi-cache", "", "GSSAPI cache file path, use command `kinit -c /path/to/cache USERNAME@RELAM` to generate")
-	cmd.Flags().StringVar(&sshConf.RemoteKubeconfig, "remote-kubeconfig", "", "Remote kubeconfig abstract path of ssh server, default is /home/$USERNAME/.kube/config")
-	lookup := cmd.Flags().Lookup("remote-kubeconfig")
+	flags.StringVar(&sshConf.Addr, "ssh-addr", "", "Optional ssh jump server address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
+	flags.StringVar(&sshConf.User, "ssh-username", "", "Optional username for ssh jump server")
+	flags.StringVar(&sshConf.Password, "ssh-password", "", "Optional password for ssh jump server")
+	flags.StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "Optional file with private key for SSH authentication")
+	flags.StringVar(&sshConf.ConfigAlias, "ssh-alias", "", "Optional config alias with ~/.ssh/config for SSH authentication")
+	flags.StringVar(&sshConf.GSSAPIPassword, "gssapi-password", "", "GSSAPI password")
+	flags.StringVar(&sshConf.GSSAPIKeytabConf, "gssapi-keytab", "", "GSSAPI keytab file path")
+	flags.StringVar(&sshConf.GSSAPICacheFile, "gssapi-cache", "", "GSSAPI cache file path, use command `kinit -c /path/to/cache USERNAME@RELAM` to generate")
+	flags.StringVar(&sshConf.RemoteKubeconfig, "remote-kubeconfig", "", "Remote kubeconfig abstract path of ssh server, default is /home/$USERNAME/.kube/config")
+	lookup := flags.Lookup("remote-kubeconfig")
 	lookup.NoOptDefVal = "~/.kube/config"
 }
 
-func addExtraRoute(cmd *cobra.Command, route *handler.ExtraRouteInfo) {
-	cmd.Flags().StringArrayVar(&route.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, add those cidr network to route table, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
-	cmd.Flags().StringArrayVar(&route.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
-	cmd.Flags().BoolVar(&route.ExtraNodeIP, "extra-node-ip", false, "Extra node ip, add cluster node ip to route table.")
+func addExtraRoute(flags *flag.FlagSet, route *handler.ExtraRouteInfo) {
+	flags.StringArrayVar(&route.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, add those cidr network to route table, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
+	flags.StringArrayVar(&route.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
+	flags.BoolVar(&route.ExtraNodeIP, "extra-node-ip", false, "Extra node ip, add cluster node ip to route table.")
 }

@@ -16,6 +16,7 @@ import (
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 type DHCPManager struct {
@@ -23,6 +24,7 @@ type DHCPManager struct {
 	cidr      *net.IPNet
 	cidr6     *net.IPNet
 	namespace string
+	clusterID types.UID
 }
 
 func NewDHCPManager(client corev1.ConfigMapInterface, namespace string) *DHCPManager {
@@ -41,6 +43,7 @@ func (d *DHCPManager) initDHCP(ctx context.Context) error {
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get configmap %s, err: %v", config.ConfigMapPodTrafficManager, err)
 	}
+	d.clusterID = util.GetClusterIDByCM(cm)
 	if err == nil {
 		// add key envoy in case of mount not exist content
 		if _, found := cm.Data[config.KeyEnvoy]; !found {
@@ -51,6 +54,8 @@ func (d *DHCPManager) initDHCP(ctx context.Context) error {
 				[]byte(fmt.Sprintf(`{"data":{"%s":"%s"}}`, config.KeyEnvoy, "")),
 				metav1.PatchOptions{},
 			)
+		}
+		if err != nil {
 			return fmt.Errorf("failed to patch configmap %s, err: %v", config.ConfigMapPodTrafficManager, err)
 		}
 		return nil
@@ -66,10 +71,11 @@ func (d *DHCPManager) initDHCP(ctx context.Context) error {
 			config.KeyRefCount: "0",
 		},
 	}
-	_, err = d.client.Create(ctx, cm, metav1.CreateOptions{})
+	cm, err = d.client.Create(ctx, cm, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("create dhcp error, err: %v", err)
 	}
+	d.clusterID = util.GetClusterIDByCM(cm)
 	return nil
 }
 

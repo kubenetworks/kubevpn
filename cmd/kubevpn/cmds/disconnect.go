@@ -20,6 +20,7 @@ import (
 
 func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 	var all = false
+	var clusterIDs []string
 	cmd := &cobra.Command{
 		Use:   "disconnect",
 		Short: i18n.T("Disconnect from kubernetes cluster network"),
@@ -35,10 +36,13 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 		Args: cobra.MatchAll(cobra.OnlyValidArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 && all {
-				return fmt.Errorf("either specify --all or specific ID, not both")
+				return fmt.Errorf("either specify --all or ID, not both")
 			}
-			if len(args) == 0 && !all {
-				return fmt.Errorf("either specify --all or specific ID")
+			if len(clusterIDs) > 0 && all {
+				return fmt.Errorf("either specify --all or cluster-id, not both")
+			}
+			if len(args) == 0 && !all && len(clusterIDs) == 0 {
+				return fmt.Errorf("either specify --all or ID or cluster-id")
 			}
 			var ids *int32
 			if len(args) > 0 {
@@ -51,8 +55,9 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 			client, err := daemon.GetClient(false).Disconnect(
 				cmd.Context(),
 				&rpc.DisconnectRequest{
-					ID:  ids,
-					All: pointer.Bool(all),
+					ID:         ids,
+					ClusterIDs: clusterIDs,
+					All:        pointer.Bool(all),
 				},
 			)
 			var resp *rpc.DisconnectResponse
@@ -72,6 +77,7 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&all, "all", all, "Select all, disconnect from all cluster network")
+	cmd.Flags().BoolVar(&all, "all", all, "Disconnect all cluster, disconnect from all cluster network")
+	cmd.Flags().StringArrayVar(&clusterIDs, "cluster-id", []string{}, "Cluster id, command status -o yaml/json will show cluster-id")
 	return cmd
 }
