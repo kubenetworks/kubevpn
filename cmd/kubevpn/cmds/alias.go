@@ -77,29 +77,9 @@ Config file support three field: Name,Needs,Flags
 		},
 		Args: cobra.MatchAll(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var content []byte
-			var err error
-			var path string
-			if localFile != "" {
-				path = localFile
-				content, err = os.ReadFile(path)
-			} else if remoteAddr != "" {
-				path = remoteAddr
-				content, err = util.DownloadFileStream(path)
-			} else {
-				path = daemon.GetConfigFilePath()
-				content, err = os.ReadFile(path)
-			}
+			configs, err := ParseAndGet(localFile, remoteAddr, args[0])
 			if err != nil {
 				return err
-			}
-			configList, err := ParseConfig(content)
-			if err != nil {
-				return err
-			}
-			configs, err := GetConfigs(configList, args[0])
-			if len(configs) == 0 {
-				return fmt.Errorf("can not found any alias for name %s, please check your config file %s", args[0], path)
 			}
 			name, err := os.Executable()
 			if err != nil {
@@ -122,6 +102,38 @@ Config file support three field: Name,Needs,Flags
 	cmd.Flags().StringVarP(&localFile, "file", "f", daemon.GetConfigFilePath(), "Config file location")
 	cmd.Flags().StringVarP(&remoteAddr, "remote", "r", "", "Remote config file, eg: https://raw.githubusercontent.com/kubenetworks/kubevpn/master/pkg/config/config.yaml")
 	return cmd
+}
+
+func ParseAndGet(localFile, remoteAddr string, aliasName string) ([]Config, error) {
+	var content []byte
+	var err error
+	var path string
+	if localFile != "" {
+		path = localFile
+		content, err = os.ReadFile(path)
+	} else if remoteAddr != "" {
+		path = remoteAddr
+		content, err = util.DownloadFileStream(path)
+	} else {
+		path = daemon.GetConfigFilePath()
+		content, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	list, err := ParseConfig(content)
+	if err != nil {
+		return nil, err
+	}
+	configs, err := GetConfigs(list, aliasName)
+	if err != nil {
+		return nil, err
+	}
+	if len(configs) == 0 {
+		err = fmt.Errorf("can not found any alias for name %s, please check your config file %s", aliasName, path)
+		return nil, err
+	}
+	return configs, nil
 }
 
 func ParseConfig(file []byte) ([]Config, error) {

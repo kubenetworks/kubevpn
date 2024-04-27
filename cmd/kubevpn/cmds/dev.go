@@ -160,7 +160,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
 		dockercomp.NetworkNames(cli),
 	)
 
-	addExtraRoute(cmd, &options.ExtraRouteInfo)
-	addSshFlags(cmd, sshConf)
+	addExtraRoute(cmd.Flags(), &options.ExtraRouteInfo)
+	addSshFlags(cmd.Flags(), sshConf)
 	return cmd
 }

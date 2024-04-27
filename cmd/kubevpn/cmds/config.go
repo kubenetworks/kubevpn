@@ -63,7 +63,7 @@ func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
-	addSshFlags(cmd, sshConf)
+	addSshFlags(cmd.Flags(), sshConf)
 	return cmd
 }
 

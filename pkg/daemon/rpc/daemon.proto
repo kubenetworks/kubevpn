@@ -68,7 +68,9 @@ message DisconnectRequest {
   // 3) disconnect by kubeConfig
   optional string KubeconfigBytes = 3;
   optional string Namespace = 4;
-  SshJump SshJump = 10;
+  SshJump SshJump = 5;
+  // 4) disconnect by cluster ids
+  repeated string ClusterIDs = 6;
 }
 
 message DisconnectResponse {
@@ -134,11 +136,22 @@ message QuitResponse {
 }
 
 message StatusRequest {
-  string name = 1;
+  repeated string ClusterIDs = 1;
 }
 
 message StatusResponse {
-  string message = 1;
+  repeated Status List = 1;
+}
+
+message Status {
+  int32 ID = 1;
+  string ClusterID = 2;
+  string Cluster = 3;
+  string Mode = 4;
+  string Kubeconfig = 5;
+  string Namespace = 6;
+  string Status = 7;
+  string Netif = 8;
 }
 
 message VersionRequest {

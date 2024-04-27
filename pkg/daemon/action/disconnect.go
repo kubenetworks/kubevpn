@@ -8,6 +8,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
@@ -68,6 +69,32 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 		)
 		if err != nil {
 			return err
+		}
+	case len(req.ClusterIDs) != 0:
+		s := sets.New(req.ClusterIDs...)
+		var connects = *new(handler.Connects)
+		var foundModeFull bool
+		if s.Has(svr.connect.GetClusterID()) {
+			connects = connects.Append(svr.connect)
+			foundModeFull = true
+		}
+		for _, options := range svr.secondaryConnect {
+			if s.Has(options.GetClusterID()) {
+				connects = connects.Append(options)
+			}
+		}
+		for _, connect := range connects.Sort() {
+			if connect != nil {
+				connect.Cleanup()
+			}
+		}
+		if foundModeFull {
+			svr.connect = nil
+			svr.t = time.Time{}
+			if svr.clone != nil {
+				_ = svr.clone.Cleanup()
+			}
+			svr.clone = nil
 		}
 	}
 

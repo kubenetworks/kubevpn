@@ -999,6 +999,13 @@ func (c *ConnectOptions) GetLocalTunIPv4() string {
 	return ""
 }
 
+func (c *ConnectOptions) GetClusterID() string {
+	if c != nil && c.dhcp != nil {
+		return string(c.dhcp.clusterID)
+	}
+	return ""
+}
+
 func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 	deployment, err := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {

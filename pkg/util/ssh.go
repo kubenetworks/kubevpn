@@ -524,14 +524,7 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 		configFlags.KubeConfig = pointer.String(temp.Name())
 	} else {
 		if flags != nil {
-			lookup := flags.Lookup("kubeconfig")
-			if lookup != nil {
-				if lookup.Value != nil && lookup.Value.String() != "" {
-					configFlags.KubeConfig = pointer.String(lookup.Value.String())
-				} else if lookup.DefValue != "" {
-					configFlags.KubeConfig = pointer.String(lookup.DefValue)
-				}
-			}
+			configFlags.AddFlags(flags)
 		}
 	}
 	matchVersionFlags := util.NewMatchVersionFlags(configFlags)
