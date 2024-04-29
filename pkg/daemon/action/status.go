@@ -2,7 +2,13 @@ package action
 
 import (
 	"context"
+	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -22,7 +28,13 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 	if len(req.ClusterIDs) != 0 {
 		for _, clusterID := range req.ClusterIDs {
 			if svr.connect.GetClusterID() == clusterID {
-				list = append(list, genStatus(svr.connect, ModeFull, 0))
+				status := genStatus(svr.connect, ModeFull, 0)
+				var err error
+				status.ProxyList, status.CloneList, err = gen(svr.connect, svr.clone)
+				if err != nil {
+					return nil, err
+				}
+				list = append(list, status)
 			}
 			for i, options := range svr.secondaryConnect {
 				if options.GetClusterID() == clusterID {
@@ -32,7 +44,13 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 		}
 	} else {
 		if svr.connect != nil {
-			list = append(list, genStatus(svr.connect, ModeFull, 0))
+			status := genStatus(svr.connect, ModeFull, 0)
+			var err error
+			status.ProxyList, status.CloneList, err = gen(svr.connect, svr.clone)
+			if err != nil {
+				return nil, err
+			}
+			list = append(list, status)
 		}
 
 		for i, options := range svr.secondaryConnect {
@@ -59,4 +77,74 @@ func genStatus(connect *handler.ConnectOptions, mode string, index int32) *rpc.S
 		Netif:      tunName,
 	}
 	return &info
+}
+
+func gen(connect *handler.ConnectOptions, clone *handler.CloneOptions) ([]*rpc.Proxy, []*rpc.Clone, error) {
+	var proxyList []*rpc.Proxy
+	if connect != nil && connect.GetClientset() != nil {
+		mapInterface := connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace)
+		configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if err != nil {
+			return nil, nil, err
+		}
+		var v = make([]*controlplane.Virtual, 0)
+		if str, ok := configMap.Data[config.KeyEnvoy]; ok {
+			if err = yaml.Unmarshal([]byte(str), &v); err != nil {
+				return nil, nil, err
+			}
+		}
+		for _, virtual := range v {
+			// deployments.apps.ry-server --> deployments.apps/ry-server
+			lastIndex := strings.LastIndex(virtual.Uid, ".")
+			virtual.Uid = virtual.Uid[:lastIndex] + "/" + virtual.Uid[lastIndex+1:]
+
+			var proxyRule []*rpc.ProxyRule
+			for _, rule := range virtual.Rules {
+				proxyRule = append(proxyRule, &rpc.ProxyRule{
+					Headers:       rule.Headers,
+					LocalTunIPv4:  rule.LocalTunIPv4,
+					LocalTunIPv6:  rule.LocalTunIPv6,
+					CurrentDevice: connect.GetLocalTunIPv4() == rule.LocalTunIPv4,
+					PortMap:       rule.PortMap,
+				})
+			}
+			proxyList = append(proxyList, &rpc.Proxy{
+				ClusterID:  connect.GetClusterID(),
+				Cluster:    util.GetKubeconfigCluster(connect.GetFactory()),
+				Kubeconfig: connect.OriginKubeconfigPath,
+				Namespace:  connect.Namespace,
+				Workload:   virtual.Uid,
+				RuleList:   proxyRule,
+			})
+		}
+	}
+	var cloneList []*rpc.Clone
+	if clone != nil {
+		for _, workload := range clone.Workloads {
+			var clusterID, cluster, kubeconfig, namespace string
+			if connect != nil {
+				clusterID = connect.GetClusterID()
+				cluster = util.GetKubeconfigCluster(connect.GetFactory())
+				kubeconfig = connect.OriginKubeconfigPath
+				namespace = connect.Namespace
+			}
+			cloneList = append(cloneList, &rpc.Clone{
+				ClusterID:  clusterID,
+				Cluster:    cluster,
+				Kubeconfig: kubeconfig,
+				Namespace:  namespace,
+				Workload:   workload,
+				RuleList: []*rpc.CloneRule{
+					{
+						DstCluster:    util.GetKubeconfigCluster(clone.GetFactory()),
+						Headers:       clone.Headers,
+						DstWorkload:   clone.TargetWorkloadNames[workload],
+						DstKubeconfig: clone.TargetKubeconfig,
+						DstNamespace:  clone.TargetNamespace,
+					},
+				},
+			})
+		}
+	}
+	return proxyList, cloneList, nil
 }

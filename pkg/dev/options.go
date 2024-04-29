@@ -109,7 +109,7 @@ func (option *Options) Main(ctx context.Context, c *containerConfig) error {
 		return sort.Reverse(podutils.ActivePods(pods))
 	}
 	label := labels.SelectorFromSet(templateSpec.Labels).String()
-	firstPod, _, err := polymorphichelpers.GetFirstPod(clientSet.CoreV1(), option.Namespace, label, time.Second*60, sortBy)
+	firstPod, _, err := polymorphichelpers.GetFirstPod(clientSet.CoreV1(), option.Namespace, label, time.Second*5, sortBy)
 	if err != nil {
 		log.Errorf("get first running pod from k8s: %v", err)
 		return err

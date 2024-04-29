@@ -53,8 +53,11 @@ type CloneOptions struct {
 	TargetImage            string
 	TargetRegistry         string
 	IsChangeTargetRegistry bool
+	TargetWorkloadNames    map[string]string
 
 	isSame bool
+
+	OriginKubeconfigPath string
 
 	targetClientset  *kubernetes.Clientset
 	targetRestclient *rest.RESTClient
@@ -86,6 +89,7 @@ func (d *CloneOptions) InitClient(f cmdutil.Factory) (err error) {
 
 	// init target info
 	if len(d.TargetKubeconfig) == 0 {
+		d.TargetKubeconfig = d.OriginKubeconfigPath
 		d.targetFactory = d.factory
 		d.targetClientset = d.clientset
 		d.targetConfig = d.config
@@ -155,6 +159,7 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 		}
 		originName := u.GetName()
 		u.SetName(fmt.Sprintf("%s-clone-%s", u.GetName(), newUUID.String()[:5]))
+		d.TargetWorkloadNames[workload] = u.GetName()
 		// if is another cluster, needs to set volume and set env
 		if !d.isSame {
 			if err = d.setVolume(u); err != nil {
@@ -794,4 +799,8 @@ func (d *CloneOptions) Cleanup(workloads ...string) error {
 
 func (d *CloneOptions) addRollbackFunc(f func() error) {
 	d.rollbackFuncList = append(d.rollbackFuncList, f)
+}
+
+func (d *CloneOptions) GetFactory() cmdutil.Factory {
+	return d.factory
 }

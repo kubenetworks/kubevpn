@@ -35,6 +35,7 @@ func CmdList(f cmdutil.Factory) *cobra.Command {
 			fmt.Println(client.GetMessage())
 			return nil
 		},
+		Hidden: true,
 	}
 	return cmd
 }

@@ -40,7 +40,7 @@ func (c *ConnectOptions) Cleanup() {
 		return
 	}
 	log.Info("prepare to exit, cleaning up")
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
 	var ips []net.IP
 	if c.localTunIPv4 != nil && c.localTunIPv4.IP != nil {
@@ -77,7 +77,7 @@ func (c *ConnectOptions) Cleanup() {
 		}
 	}
 	// leave proxy resources
-	err := c.LeaveProxyResources(context.Background())
+	err := c.LeaveProxyResources(ctx)
 	if err != nil {
 		log.Errorf("leave proxy resources error: %v", err)
 	}

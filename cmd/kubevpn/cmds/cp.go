@@ -68,6 +68,7 @@ func CmdCp(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:                   "cp <file-spec-src> <file-spec-dest>",
 		DisableFlagsInUseLine: true,
+		Hidden:                true,
 		Short:                 i18n.T("Copy files and directories to and from containers"),
 		Long:                  i18n.T("Copy files and directories to and from containers. Different between kubectl cp is it will de-reference symbol link."),
 		Example:               cpExample,
