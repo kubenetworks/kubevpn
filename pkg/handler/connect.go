@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +43,7 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/scheme"
+	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -250,6 +252,9 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 			func() {
 				defer time.Sleep(time.Second * 2)
 
+				sortBy := func(pods []*v1.Pod) sort.Interface { return sort.Reverse(podutils.ActivePods(pods)) }
+				label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
+				_, _, _ = polymorphichelpers.GetFirstPod(c.clientset.CoreV1(), c.Namespace, label, time.Second*30, sortBy)
 				podList, err := c.GetRunningPodList(ctx)
 				if err != nil {
 					time.Sleep(time.Second * 2)
@@ -1183,9 +1188,9 @@ func (c *ConnectOptions) heartbeats(ctx context.Context) {
 
 func (c *ConnectOptions) Equal(a *ConnectOptions) bool {
 	return c.Engine == a.Engine &&
-		reflect.DeepEqual(c.ExtraRouteInfo.ExtraDomain, a.ExtraRouteInfo.ExtraDomain) &&
-		reflect.DeepEqual(c.ExtraRouteInfo.ExtraCIDR, a.ExtraRouteInfo.ExtraCIDR) &&
-		reflect.DeepEqual(c.ExtraRouteInfo.ExtraNodeIP, a.ExtraRouteInfo.ExtraNodeIP)
+		sets.New[string](c.ExtraRouteInfo.ExtraDomain...).HasAll(a.ExtraRouteInfo.ExtraDomain...) &&
+		sets.New[string](c.ExtraRouteInfo.ExtraCIDR...).HasAll(c.ExtraRouteInfo.ExtraCIDR...) &&
+		(reflect.DeepEqual(c.ExtraRouteInfo.ExtraNodeIP, a.ExtraRouteInfo.ExtraNodeIP) || c.ExtraRouteInfo.ExtraNodeIP == true)
 }
 
 func (c *ConnectOptions) GetTunDeviceName() (string, error) {

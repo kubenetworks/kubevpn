@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 
+	"github.com/liggitt/tabwriter"
 	"github.com/spf13/cobra"
 	flag "github.com/spf13/pflag"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/cli-runtime/pkg/printers"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -110,15 +111,100 @@ func genOutput(status *rpc.StatusResponse, format string) (string, error) {
 		return string(marshal), nil
 	default:
 		var sb = new(bytes.Buffer)
-		w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Mode", "Cluster", "Kubeconfig", "Namespace", "Status", "Netif")
-
-		for _, s := range status.List {
-			_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				s.ID, s.Mode, s.Cluster, s.Kubeconfig, s.Namespace, s.Status, s.Netif)
-		}
+		w := printers.GetNewTabWriter(sb)
+		genConnectMsg(w, status.List)
+		genProxyMsg(w, status.List)
+		genCloneMsg(w, status.List)
 		_ = w.Flush()
 		return sb.String(), nil
+	}
+}
+
+func genConnectMsg(w *tabwriter.Writer, status []*rpc.Status) {
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Mode", "Cluster", "Kubeconfig", "Namespace", "Status", "Netif")
+	for _, c := range status {
+		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", c.ID, c.Mode, c.Cluster, c.Kubeconfig, c.Namespace, c.Status, c.Netif)
+	}
+}
+
+func genProxyMsg(w *tabwriter.Writer, list []*rpc.Status) {
+	var needsPrint bool
+	for _, status := range list {
+		if len(status.ProxyList) != 0 {
+			needsPrint = true
+			break
+		}
+	}
+	if !needsPrint {
+		return
+	}
+
+	_, _ = fmt.Fprintf(w, "\n")
+	w.SetRememberedWidths(nil)
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Name", "Headers", "IP", "PortMap", "CurrentPC")
+	for _, c := range list {
+		for _, proxy := range c.ProxyList {
+			for _, rule := range proxy.RuleList {
+				var headers []string
+				for k, v := range rule.Headers {
+					headers = append(headers, fmt.Sprintf("%s=%s", k, v))
+				}
+				if len(headers) == 0 {
+					headers = []string{"*"}
+				}
+				var portmap []string
+				for k, v := range rule.PortMap {
+					portmap = append(portmap, fmt.Sprintf("%d->%d", k, v))
+				}
+				_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%v\n",
+					c.ID,
+					proxy.Workload,
+					strings.Join(headers, ","),
+					rule.LocalTunIPv4,
+					strings.Join(portmap, ","),
+					rule.CurrentDevice,
+				)
+			}
+		}
+	}
+}
+
+func genCloneMsg(w *tabwriter.Writer, list []*rpc.Status) {
+	var needsPrint bool
+	for _, status := range list {
+		if len(status.CloneList) != 0 {
+			needsPrint = true
+			break
+		}
+	}
+	if !needsPrint {
+		return
+	}
+
+	_, _ = fmt.Fprintf(w, "\n")
+	w.SetRememberedWidths(nil)
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Name", "Headers", "ToName", "ToKubeconfig", "ToNamespace")
+	for _, c := range list {
+		for _, clone := range c.CloneList {
+			//_, _ = fmt.Fprintf(w, "%s\n", clone.Workload)
+			for _, rule := range clone.RuleList {
+				var headers []string
+				for k, v := range rule.Headers {
+					headers = append(headers, fmt.Sprintf("%s=%s", k, v))
+				}
+				if len(headers) == 0 {
+					headers = []string{"*"}
+				}
+				_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
+					c.ID,
+					clone.Workload,
+					strings.Join(headers, ","),
+					rule.DstWorkload,
+					rule.DstKubeconfig,
+					rule.DstNamespace,
+				)
+			}
+		}
 	}
 }
 

@@ -152,6 +152,43 @@ message Status {
   string Namespace = 6;
   string Status = 7;
   string Netif = 8;
+  repeated Proxy ProxyList = 9;
+  repeated Clone CloneList = 10;
+}
+
+message Proxy {
+  string ClusterID = 1;
+  string Cluster = 2;
+  string Kubeconfig = 3;
+  string Namespace = 4;
+  string Workload = 5;
+  repeated ProxyRule RuleList = 6;
+}
+
+message ProxyRule {
+  map<string, string>  Headers = 1;
+  string LocalTunIPv4 = 2;
+  string LocalTunIPv6 = 3;
+  bool CurrentDevice = 4;
+  map<int32, int32>  PortMap = 5;
+}
+
+message Clone {
+  string ClusterID = 1;
+  string Cluster = 2;
+  string Kubeconfig = 3;
+  string Namespace = 4;
+  string Workload = 5;
+  repeated CloneRule RuleList = 6;
+}
+
+message CloneRule {
+  map<string, string> Headers = 6;
+  string DstClusterID = 9;
+  string DstCluster = 10;
+  string DstKubeconfig = 11;
+  string DstNamespace = 12;
+  string DstWorkload = 13;
 }
 
 message VersionRequest {

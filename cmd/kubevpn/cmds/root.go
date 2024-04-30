@@ -69,24 +69,24 @@ func NewKubeVPNCommand() *cobra.Command {
 		{
 			Message: "Management commands",
 			Commands: []*cobra.Command{
+				CmdStatus(factory),
 				CmdList(factory),
+				CmdAlias(factory),
+				CmdReset(factory),
+				CmdQuit(factory),
 				CmdGet(factory),
 				CmdConfig(factory),
-				CmdCp(factory),
 				CmdSSH(factory),
 				CmdSSHDaemon(factory),
 				CmdLogs(factory),
-				CmdReset(factory),
-				CmdQuit(factory),
+				CmdCp(factory),
 			},
 		},
 		{
 			Message: "Other commands",
 			Commands: []*cobra.Command{
-				CmdStatus(factory),
-				CmdVersion(factory),
 				CmdUpgrade(factory),
-				CmdAlias(factory),
+				CmdVersion(factory),
 			},
 		},
 	}

@@ -50,6 +50,8 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 			fmt.Fprint(out, msg.Message)
 		} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
 			return nil
+		} else if code := status.Code(err); code == codes.AlreadyExists {
+			return fmt.Errorf("already connect to cluster, needs to disconnect it first")
 		} else {
 			return err
 		}
@@ -57,11 +59,12 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 	log.SetOutput(out)
 
 	options := &handler.CloneOptions{
-		Namespace:      req.Namespace,
-		Headers:        req.Headers,
-		Workloads:      req.Workloads,
-		ExtraRouteInfo: *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
-		Engine:         config.Engine(req.Engine),
+		Namespace:            req.Namespace,
+		Headers:              req.Headers,
+		Workloads:            req.Workloads,
+		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
+		Engine:               config.Engine(req.Engine),
+		OriginKubeconfigPath: req.OriginKubeconfigPath,
 
 		TargetKubeconfig:       req.TargetKubeconfig,
 		TargetNamespace:        req.TargetNamespace,
@@ -69,6 +72,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 		TargetImage:            req.TargetImage,
 		TargetRegistry:         req.TargetRegistry,
 		IsChangeTargetRegistry: req.IsChangeTargetRegistry,
+		TargetWorkloadNames:    map[string]string{},
 	}
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
