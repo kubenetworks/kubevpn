@@ -65,17 +65,17 @@ func ParseSshFromRPC(sshJump *rpc.SshJump) *SshConfig {
 	}
 }
 
-func (s *SshConfig) ToRPC() *rpc.SshJump {
+func (config *SshConfig) ToRPC() *rpc.SshJump {
 	return &rpc.SshJump{
-		Addr:             s.Addr,
-		User:             s.User,
-		Password:         s.Password,
-		Keyfile:          s.Keyfile,
-		ConfigAlias:      s.ConfigAlias,
-		RemoteKubeconfig: s.RemoteKubeconfig,
-		GSSAPIKeytabConf: s.GSSAPIKeytabConf,
-		GSSAPIPassword:   s.GSSAPIPassword,
-		GSSAPICacheFile:  s.GSSAPICacheFile,
+		Addr:             config.Addr,
+		User:             config.User,
+		Password:         config.Password,
+		Keyfile:          config.Keyfile,
+		ConfigAlias:      config.ConfigAlias,
+		RemoteKubeconfig: config.RemoteKubeconfig,
+		GSSAPIKeytabConf: config.GSSAPIKeytabConf,
+		GSSAPIPassword:   config.GSSAPIPassword,
+		GSSAPICacheFile:  config.GSSAPICacheFile,
 	}
 }
 
@@ -90,45 +90,16 @@ func DialSshRemote(conf *SshConfig) (remote *ssh.Client, err error) {
 	}()
 
 	if conf.ConfigAlias != "" {
-		remote, err = jumpRecursion(conf.ConfigAlias)
+		remote, err = conf.JumpRecursion()
 	} else {
 		if strings.Index(conf.Addr, ":") < 0 {
 			// use default ssh port 22
 			conf.Addr = net.JoinHostPort(conf.Addr, "22")
 		}
-		host, _, _ := net.SplitHostPort(conf.Addr)
 		var auth []ssh.AuthMethod
-		var c Krb5InitiatorClient
-		var krb5Conf = GetKrb5Path()
-		if conf.Password != "" {
-			auth = append(auth, ssh.Password(conf.Password))
-		} else if conf.GSSAPIPassword != "" {
-			c, err = NewKrb5InitiatorClientWithPassword(conf.User, conf.GSSAPIPassword, krb5Conf)
-			if err != nil {
-				return nil, err
-			}
-			auth = append(auth, ssh.GSSAPIWithMICAuthMethod(&c, host))
-		} else if conf.GSSAPIKeytabConf != "" {
-			c, err = NewKrb5InitiatorClientWithKeytab(conf.User, krb5Conf, conf.GSSAPIKeytabConf)
-			if err != nil {
-				return nil, err
-			}
-		} else if conf.GSSAPICacheFile != "" {
-			c, err = NewKrb5InitiatorClientWithCache(krb5Conf, conf.GSSAPICacheFile)
-			if err != nil {
-				return nil, err
-			}
-			auth = append(auth, ssh.GSSAPIWithMICAuthMethod(&c, host))
-		} else {
-			if conf.Keyfile == "" {
-				conf.Keyfile = filepath.Join(homedir.HomeDir(), ".ssh", "id_rsa")
-			}
-			var keyFile ssh.AuthMethod
-			keyFile, err = publicKeyFile(conf.Keyfile)
-			if err != nil {
-				return nil, err
-			}
-			auth = append(auth, keyFile)
+		auth, err = conf.GetAuth()
+		if err != nil {
+			return nil, err
 		}
 
 		// refer to https://godoc.org/golang.org/x/crypto/ssh for other authentication types
@@ -159,6 +130,45 @@ func DialSshRemote(conf *SshConfig) (remote *ssh.Client, err error) {
 		}()
 	}
 	return remote, err
+}
+
+func (config SshConfig) GetAuth() ([]ssh.AuthMethod, error) {
+	host, _, _ := net.SplitHostPort(config.Addr)
+	var auth []ssh.AuthMethod
+	var c Krb5InitiatorClient
+	var err error
+	var krb5Conf = GetKrb5Path()
+	if config.Password != "" {
+		auth = append(auth, ssh.Password(config.Password))
+	} else if config.GSSAPIPassword != "" {
+		c, err = NewKrb5InitiatorClientWithPassword(config.User, config.GSSAPIPassword, krb5Conf)
+		if err != nil {
+			return nil, err
+		}
+		auth = append(auth, ssh.GSSAPIWithMICAuthMethod(&c, host))
+	} else if config.GSSAPIKeytabConf != "" {
+		c, err = NewKrb5InitiatorClientWithKeytab(config.User, krb5Conf, config.GSSAPIKeytabConf)
+		if err != nil {
+			return nil, err
+		}
+	} else if config.GSSAPICacheFile != "" {
+		c, err = NewKrb5InitiatorClientWithCache(krb5Conf, config.GSSAPICacheFile)
+		if err != nil {
+			return nil, err
+		}
+		auth = append(auth, ssh.GSSAPIWithMICAuthMethod(&c, host))
+	} else {
+		if config.Keyfile == "" {
+			config.Keyfile = filepath.Join(homedir.HomeDir(), ".ssh", "id_rsa")
+		}
+		var keyFile ssh.AuthMethod
+		keyFile, err = publicKeyFile(config.Keyfile)
+		if err != nil {
+			return nil, err
+		}
+		auth = append(auth, keyFile)
+	}
+	return auth, nil
 }
 
 func RemoteRun(client *ssh.Client, cmd string, env map[string]string) (output []byte, errOut []byte, err error) {
@@ -242,7 +252,7 @@ func copyStream(local net.Conn, remote net.Conn) {
 	<-chDone
 }
 
-func jumpRecursion(name string) (client *ssh.Client, err error) {
+func (config SshConfig) JumpRecursion() (client *ssh.Client, err error) {
 	defer func() {
 		if err != nil {
 			if client != nil {
@@ -250,28 +260,26 @@ func jumpRecursion(name string) (client *ssh.Client, err error) {
 			}
 		}
 	}()
+	var name = config.ConfigAlias
 	var jumper = "ProxyJump"
-	var bastionList = []*SshConfig{getBastion(name)}
+	var bastionList = []SshConfig{GetBastion(name, config)}
 	for {
 		value := confList.Get(name, jumper)
 		if value != "" {
-			bastionList = append(bastionList, getBastion(value))
+			bastionList = append(bastionList, GetBastion(value, config))
 			name = value
 			continue
 		}
 		break
 	}
 	for i := len(bastionList) - 1; i >= 0; i-- {
-		if bastionList[i] == nil {
-			return nil, errors.New("config is nil")
-		}
 		if client == nil {
-			client, err = dial(bastionList[i])
+			client, err = bastionList[i].Dial()
 			if err != nil {
 				return
 			}
 		} else {
-			client, err = jump(client, bastionList[i])
+			client, err = JumpTo(client, bastionList[i])
 			if err != nil {
 				return
 			}
@@ -280,7 +288,7 @@ func jumpRecursion(name string) (client *ssh.Client, err error) {
 	return
 }
 
-func getBastion(name string) *SshConfig {
+func GetBastion(name string, defaultValue SshConfig) SshConfig {
 	var host, port string
 	config := SshConfig{
 		ConfigAlias: name,
@@ -300,33 +308,41 @@ func getBastion(name string) *SshConfig {
 				port = strconv.Itoa(22)
 			}
 		case 4:
-			config.Keyfile = value
+			if value == "" {
+				config.Keyfile = defaultValue.Keyfile
+				config.Password = defaultValue.Password
+				config.GSSAPIKeytabConf = defaultValue.GSSAPIKeytabConf
+				config.GSSAPIPassword = defaultValue.GSSAPIPassword
+				config.GSSAPICacheFile = defaultValue.GSSAPICacheFile
+			} else {
+				config.Keyfile = value
+			}
 		}
 	}
 	config.Addr = net.JoinHostPort(host, port)
-	return &config
+	return config
 }
 
-func dial(from *SshConfig) (*ssh.Client, error) {
+func (config SshConfig) Dial() (*ssh.Client, error) {
 	// connect to the bastion host
-	authMethod, err := publicKeyFile(from.Keyfile)
+	authMethod, err := config.GetAuth()
 	if err != nil {
 		return nil, err
 	}
-	return ssh.Dial("tcp", from.Addr, &ssh.ClientConfig{
-		User:            from.User,
-		Auth:            []ssh.AuthMethod{authMethod},
+	return ssh.Dial("tcp", config.Addr, &ssh.ClientConfig{
+		User:            config.User,
+		Auth:            authMethod,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		BannerCallback:  ssh.BannerDisplayStderr(),
 		Timeout:         time.Second * 10,
 	})
 }
 
-func jump(bClient *ssh.Client, to *SshConfig) (client *ssh.Client, err error) {
-	var authMethod ssh.AuthMethod
-	authMethod, err = publicKeyFile(to.Keyfile)
+func JumpTo(bClient *ssh.Client, to SshConfig) (client *ssh.Client, err error) {
+	var authMethod []ssh.AuthMethod
+	authMethod, err = to.GetAuth()
 	if err != nil {
-		return
+		return nil, err
 	}
 	// Dial a connection to the service host, from the bastion
 	var conn net.Conn
@@ -349,7 +365,7 @@ func jump(bClient *ssh.Client, to *SshConfig) (client *ssh.Client, err error) {
 	var reqs <-chan *ssh.Request
 	ncc, chans, reqs, err = ssh.NewClientConn(conn, to.Addr, &ssh.ClientConfig{
 		User:            to.User,
-		Auth:            []ssh.AuthMethod{authMethod},
+		Auth:            authMethod,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		BannerCallback:  ssh.BannerDisplayStderr(),
 		Timeout:         time.Second * 10,
@@ -524,7 +540,14 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 		configFlags.KubeConfig = pointer.String(temp.Name())
 	} else {
 		if flags != nil {
-			configFlags.AddFlags(flags)
+			lookup := flags.Lookup("kubeconfig")
+			if lookup != nil {
+				if lookup.Value != nil && lookup.Value.String() != "" {
+					configFlags.KubeConfig = pointer.String(lookup.Value.String())
+				} else if lookup.DefValue != "" {
+					configFlags.KubeConfig = pointer.String(lookup.DefValue)
+				}
+			}
 		}
 	}
 	matchVersionFlags := util.NewMatchVersionFlags(configFlags)
