@@ -296,11 +296,12 @@ message SshJump {
   string User = 2;
   string Password = 3;
   string Keyfile = 4;
-  string ConfigAlias = 5;
-  string RemoteKubeconfig = 6;
-  string GSSAPIKeytabConf = 7;
-  string GSSAPIPassword = 8;
-  string GSSAPICacheFile = 9;
+  string Jump = 5;
+  string ConfigAlias = 6;
+  string RemoteKubeconfig = 7;
+  string GSSAPIKeytabConf = 8;
+  string GSSAPIPassword = 9;
+  string GSSAPICacheFile = 10;
 }
 
 message ExtraRoute {

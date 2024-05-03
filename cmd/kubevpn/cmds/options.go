@@ -12,14 +12,17 @@ import (
 var (
 	optionsExample = templates.Examples(i18n.T(`
 		# Print flags inherited by all commands
-		kubevpn options`))
+		kubevpn options
+		`))
 )
 
 func CmdOptions(cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "options",
-		Short:   i18n.T("Print the list of flags inherited by all commands"),
-		Long:    i18n.T("Print the list of flags inherited by all commands"),
+		Use:   "options",
+		Short: i18n.T("Print the list of flags inherited by all commands"),
+		Long: templates.LongDesc(i18n.T(`
+		Print the list of flags inherited by all commands
+		`)),
 		Example: optionsExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			cmd.Usage()

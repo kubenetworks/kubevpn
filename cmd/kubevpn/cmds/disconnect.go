@@ -24,11 +24,18 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "disconnect",
 		Short: i18n.T("Disconnect from kubernetes cluster network"),
-		Long:  templates.LongDesc(i18n.T(`Disconnect from kubernetes cluster network`)),
+		Long: templates.LongDesc(i18n.T(`
+		Disconnect from kubernetes cluster network
+		
+		This command is to disconnect from cluster. after use command 'kubevpn connect',
+		you can use this command to disconnect from a specific cluster. 
+		before disconnect, it will leave proxy resource and clone resource if resource depends on this cluster 
+		after disconnect it will also cleanup dns and host
+		`)),
 		Example: templates.Examples(i18n.T(`
 		# disconnect from cluster network and restore proxy resource
         kubevpn disconnect
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			err = daemon.StartupDaemon(cmd.Context())
 			return err

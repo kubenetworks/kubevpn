@@ -40,12 +40,28 @@ type SshConfig struct {
 	User             string
 	Password         string
 	Keyfile          string
+	Jump             string
 	ConfigAlias      string
 	RemoteKubeconfig string
 	// GSSAPI
 	GSSAPIKeytabConf string
 	GSSAPIPassword   string
 	GSSAPICacheFile  string
+}
+
+func (s SshConfig) Clone() SshConfig {
+	return SshConfig{
+		Addr:             s.Addr,
+		User:             s.User,
+		Password:         s.Password,
+		Keyfile:          s.Keyfile,
+		Jump:             s.Jump,
+		ConfigAlias:      s.ConfigAlias,
+		RemoteKubeconfig: s.RemoteKubeconfig,
+		GSSAPIKeytabConf: s.GSSAPIKeytabConf,
+		GSSAPIPassword:   s.GSSAPIPassword,
+		GSSAPICacheFile:  s.GSSAPICacheFile,
+	}
 }
 
 func ParseSshFromRPC(sshJump *rpc.SshJump) *SshConfig {
@@ -57,6 +73,7 @@ func ParseSshFromRPC(sshJump *rpc.SshJump) *SshConfig {
 		User:             sshJump.User,
 		Password:         sshJump.Password,
 		Keyfile:          sshJump.Keyfile,
+		Jump:             sshJump.Jump,
 		ConfigAlias:      sshJump.ConfigAlias,
 		RemoteKubeconfig: sshJump.RemoteKubeconfig,
 		GSSAPIKeytabConf: sshJump.GSSAPIKeytabConf,
@@ -71,12 +88,29 @@ func (config *SshConfig) ToRPC() *rpc.SshJump {
 		User:             config.User,
 		Password:         config.Password,
 		Keyfile:          config.Keyfile,
+		Jump:             config.Jump,
 		ConfigAlias:      config.ConfigAlias,
 		RemoteKubeconfig: config.RemoteKubeconfig,
 		GSSAPIKeytabConf: config.GSSAPIKeytabConf,
 		GSSAPIPassword:   config.GSSAPIPassword,
 		GSSAPICacheFile:  config.GSSAPICacheFile,
 	}
+}
+
+func AddSshFlags(flags *pflag.FlagSet, sshConf *SshConfig) {
+	// for ssh jumper host
+	flags.StringVar(&sshConf.Addr, "ssh-addr", "", "Optional ssh jump server address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
+	flags.StringVar(&sshConf.User, "ssh-username", "", "Optional username for ssh jump server")
+	flags.StringVar(&sshConf.Password, "ssh-password", "", "Optional password for ssh jump server")
+	flags.StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "Optional file with private key for SSH authentication")
+	flags.StringVar(&sshConf.ConfigAlias, "ssh-alias", "", "Optional config alias with ~/.ssh/config for SSH authentication")
+	flags.StringVar(&sshConf.Jump, "ssh-jump", "", "Optional bastion jump config string, eg: '--ssh-addr jumpe.naison.org --ssh-username naison --gssapi-password xxx'")
+	flags.StringVar(&sshConf.GSSAPIPassword, "gssapi-password", "", "GSSAPI password")
+	flags.StringVar(&sshConf.GSSAPIKeytabConf, "gssapi-keytab", "", "GSSAPI keytab file path")
+	flags.StringVar(&sshConf.GSSAPICacheFile, "gssapi-cache", "", "GSSAPI cache file path, use command `kinit -c /path/to/cache USERNAME@RELAM` to generate")
+	flags.StringVar(&sshConf.RemoteKubeconfig, "remote-kubeconfig", "", "Remote kubeconfig abstract path of ssh server, default is /home/$USERNAME/.kube/config")
+	lookup := flags.Lookup("remote-kubeconfig")
+	lookup.NoOptDefVal = "~/.kube/config"
 }
 
 // DialSshRemote https://github.com/golang/go/issues/21478
@@ -90,29 +124,11 @@ func DialSshRemote(conf *SshConfig) (remote *ssh.Client, err error) {
 	}()
 
 	if conf.ConfigAlias != "" {
+		remote, err = conf.AliasRecursion()
+	} else if conf.Jump != "" {
 		remote, err = conf.JumpRecursion()
 	} else {
-		if strings.Index(conf.Addr, ":") < 0 {
-			// use default ssh port 22
-			conf.Addr = net.JoinHostPort(conf.Addr, "22")
-		}
-		var auth []ssh.AuthMethod
-		auth, err = conf.GetAuth()
-		if err != nil {
-			return nil, err
-		}
-
-		// refer to https://godoc.org/golang.org/x/crypto/ssh for other authentication types
-		sshConfig := &ssh.ClientConfig{
-			// SSH connection username
-			User:            conf.User,
-			Auth:            auth,
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-			BannerCallback:  ssh.BannerDisplayStderr(),
-			Timeout:         time.Second * 10,
-		}
-		// Connect to SSH remote server using serverEndpoint
-		remote, err = ssh.Dial("tcp", conf.Addr, sshConfig)
+		remote, err = conf.Dial()
 	}
 
 	// ref: https://github.com/golang/go/issues/21478
@@ -252,14 +268,7 @@ func copyStream(local net.Conn, remote net.Conn) {
 	<-chDone
 }
 
-func (config SshConfig) JumpRecursion() (client *ssh.Client, err error) {
-	defer func() {
-		if err != nil {
-			if client != nil {
-				client.Close()
-			}
-		}
-	}()
+func (config SshConfig) AliasRecursion() (client *ssh.Client, err error) {
 	var name = config.ConfigAlias
 	var jumper = "ProxyJump"
 	var bastionList = []SshConfig{GetBastion(name, config)}
@@ -283,6 +292,48 @@ func (config SshConfig) JumpRecursion() (client *ssh.Client, err error) {
 			if err != nil {
 				return
 			}
+		}
+	}
+	return
+}
+
+func (config SshConfig) JumpRecursion() (client *ssh.Client, err error) {
+	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
+	var sshConf = &SshConfig{}
+	AddSshFlags(flags, sshConf)
+	err = flags.Parse(strings.Split(config.Jump, " "))
+	if err != nil {
+		return nil, err
+	}
+	var baseClient *ssh.Client
+	baseClient, err = DialSshRemote(sshConf)
+	if err != nil {
+		return nil, err
+	}
+
+	var bastionList []SshConfig
+	if config.ConfigAlias != "" {
+		var name = config.ConfigAlias
+		var jumper = "ProxyJump"
+		bastionList = append(bastionList, GetBastion(name, config))
+		for {
+			value := confList.Get(name, jumper)
+			if value != "" {
+				bastionList = append(bastionList, GetBastion(value, config))
+				name = value
+				continue
+			}
+			break
+		}
+	}
+	if config.Addr != "" {
+		bastionList = append(bastionList, config)
+	}
+
+	for _, sshConfig := range bastionList {
+		client, err = JumpTo(baseClient, sshConfig)
+		if err != nil {
+			return
 		}
 	}
 	return
@@ -324,6 +375,10 @@ func GetBastion(name string, defaultValue SshConfig) SshConfig {
 }
 
 func (config SshConfig) Dial() (*ssh.Client, error) {
+	if strings.Index(config.Addr, ":") < 0 {
+		// use default ssh port 22
+		config.Addr = net.JoinHostPort(config.Addr, "22")
+	}
 	// connect to the bastion host
 	authMethod, err := config.GetAuth()
 	if err != nil {
@@ -339,6 +394,11 @@ func (config SshConfig) Dial() (*ssh.Client, error) {
 }
 
 func JumpTo(bClient *ssh.Client, to SshConfig) (client *ssh.Client, err error) {
+	if strings.Index(to.Addr, ":") < 0 {
+		// use default ssh port 22
+		to.Addr = net.JoinHostPort(to.Addr, "22")
+	}
+
 	var authMethod []ssh.AuthMethod
 	authMethod, err = to.GetAuth()
 	if err != nil {
@@ -390,6 +450,7 @@ func (c conf) Get(alias string, key string) string {
 }
 
 var once sync.Once
+
 var confList conf
 
 func init() {
@@ -466,7 +527,6 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 	}()
 	return nil
 }
-
 func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print bool) (path string, err error) {
 	if conf.Addr == "" && conf.ConfigAlias == "" {
 		if flags != nil {

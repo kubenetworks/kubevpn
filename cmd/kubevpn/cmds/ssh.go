@@ -32,7 +32,9 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ssh",
 		Short: "Ssh to jump server",
-		Long:  `Ssh to jump server`,
+		Long: templates.LongDesc(i18n.T(`
+		Ssh to jump server
+		`)),
 		Example: templates.Examples(i18n.T(`
         # Jump to server behind of bastion host or ssh jump host
 		kubevpn ssh --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
@@ -47,7 +49,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
         kubevpn ssh --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
         kubevpn ssh --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
         kubevpn ssh --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return daemon.StartupDaemon(cmd.Context())
 		},
@@ -111,7 +113,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			}
 		},
 	}
-	addSshFlags(cmd.Flags(), sshConf)
+	util.AddSshFlags(cmd.Flags(), sshConf)
 	cmd.Flags().StringArrayVar(&ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
 	return cmd
 }

@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
@@ -20,8 +22,12 @@ import (
 func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upgrade",
-		Short: "Upgrade KubeVPN version",
-		Long:  `Upgrade KubeVPN version, automatically download latest KubeVPN from GitHub`,
+		Short: i18n.T("Upgrade kubevpn client to latest version"),
+		Long: templates.LongDesc(i18n.T(`
+		Upgrade kubevpn client to latest version, automatically download and install latest kubevpn from GitHub.
+		disconnect all from k8s cluster, leave all resources, remove all clone resource, and then,  
+		upgrade local daemon grpc server to latest version.
+		`)),
 		Run: func(cmd *cobra.Command, args []string) {
 			var client = http.DefaultClient
 			if config.GitHubOAuthToken != "" {

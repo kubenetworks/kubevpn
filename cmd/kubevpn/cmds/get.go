@@ -27,12 +27,12 @@ func CmdGet(f cmdutil.Factory) *cobra.Command {
 		# Get api-server behind of bastion host or ssh jump host
 		kubevpn get deployment --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
-		# it also support ProxyJump, like
+		# It also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
 		kubevpn get service --ssh-alias <alias>
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			// startup daemon process and sudo process
 			return daemon.StartupDaemon(cmd.Context())

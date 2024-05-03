@@ -24,11 +24,13 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 		Use:    "serve",
 		Hidden: true,
 		Short:  "Server side, startup traffic manager, forward inbound and outbound traffic",
-		Long:   templates.LongDesc(`Server side, startup traffic manager, forward inbound and outbound traffic.`),
+		Long: templates.LongDesc(i18n.T(`
+		Server side, startup traffic manager, forward inbound and outbound traffic.
+		`)),
 		Example: templates.Examples(i18n.T(`
         # serve node
         kubevpn serve -L "tcp://:10800" -L "tun://127.0.0.1:8422?net=223.254.0.123/32"
-`)),
+		`)),
 		PreRun: func(*cobra.Command, []string) {
 			util.InitLoggerForServer(config.Debug)
 			runtime.GOMAXPROCS(0)

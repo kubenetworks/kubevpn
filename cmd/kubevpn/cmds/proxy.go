@@ -8,7 +8,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	flag "github.com/spf13/pflag"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -31,7 +30,16 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "proxy",
 		Short: i18n.T("Proxy kubernetes workloads inbound traffic into local PC"),
-		Long:  templates.LongDesc(i18n.T(`Proxy kubernetes workloads inbound traffic into local PC`)),
+		Long: templates.LongDesc(i18n.T(`
+		Proxy kubernetes workloads inbound traffic into local PC
+
+		Proxy k8s workloads inbound traffic into local PC with/without service mesh. 
+		Without service mesh, it will proxy all inbound traffic into local PC, even traffic protocol is layer 4(Transport layer).
+		With service mesh, it will proxy traffic which has special header to local PC, support protocol HTTP,GRPC,THRIFT, WebSocket...
+		After proxy resource, it also connected to cluster network automatically. so just startup your app in local PC
+		and waiting for inbound traffic, make debug more easier.
+		
+		`)),
 		Example: templates.Examples(i18n.T(`
 		# Reverse proxy
 		- proxy deployment
@@ -54,7 +62,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 		# Connect to api-server behind of bastion host or ssh jump host and proxy kubernetes resource traffic into local PC
 		kubevpn proxy deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem --headers a=1
 
-		# it also support ProxyJump, like
+		# It also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
@@ -76,7 +84,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 
 		# Auto proxy container port to same local port, and auto detect protocol
 		kubevpn proxy deployment/productpage
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			if err = daemon.StartupDaemon(cmd.Context()); err != nil {
 				return err
@@ -174,29 +182,8 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar((*string)(&connect.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "foreground hang up")
 
-	addExtraRoute(cmd.Flags(), extraRoute)
-	addSshFlags(cmd.Flags(), sshConf)
+	handler.AddExtraRoute(cmd.Flags(), extraRoute)
+	util.AddSshFlags(cmd.Flags(), sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd
-}
-
-func addSshFlags(flags *flag.FlagSet, sshConf *util.SshConfig) {
-	// for ssh jumper host
-	flags.StringVar(&sshConf.Addr, "ssh-addr", "", "Optional ssh jump server address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
-	flags.StringVar(&sshConf.User, "ssh-username", "", "Optional username for ssh jump server")
-	flags.StringVar(&sshConf.Password, "ssh-password", "", "Optional password for ssh jump server")
-	flags.StringVar(&sshConf.Keyfile, "ssh-keyfile", "", "Optional file with private key for SSH authentication")
-	flags.StringVar(&sshConf.ConfigAlias, "ssh-alias", "", "Optional config alias with ~/.ssh/config for SSH authentication")
-	flags.StringVar(&sshConf.GSSAPIPassword, "gssapi-password", "", "GSSAPI password")
-	flags.StringVar(&sshConf.GSSAPIKeytabConf, "gssapi-keytab", "", "GSSAPI keytab file path")
-	flags.StringVar(&sshConf.GSSAPICacheFile, "gssapi-cache", "", "GSSAPI cache file path, use command `kinit -c /path/to/cache USERNAME@RELAM` to generate")
-	flags.StringVar(&sshConf.RemoteKubeconfig, "remote-kubeconfig", "", "Remote kubeconfig abstract path of ssh server, default is /home/$USERNAME/.kube/config")
-	lookup := flags.Lookup("remote-kubeconfig")
-	lookup.NoOptDefVal = "~/.kube/config"
-}
-
-func addExtraRoute(flags *flag.FlagSet, route *handler.ExtraRouteInfo) {
-	flags.StringArrayVar(&route.ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, add those cidr network to route table, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
-	flags.StringArrayVar(&route.ExtraDomain, "extra-domain", []string{}, "Extra domain string, the resolved ip will add to route table, eg: --extra-domain test.abc.com --extra-domain foo.test.com")
-	flags.BoolVar(&route.ExtraNodeIP, "extra-node-ip", false, "Extra node ip, add cluster node ip to route table.")
 }

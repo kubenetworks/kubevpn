@@ -30,7 +30,15 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "connect",
 		Short: i18n.T("Connect to kubernetes cluster network"),
-		Long:  templates.LongDesc(i18n.T(`Connect to kubernetes cluster network`)),
+		Long: templates.LongDesc(i18n.T(`
+		Connect to kubernetes cluster network
+		
+		After connect to kubernetes cluster network, you can ping PodIP or
+		curl ServiceIP in local PC, it also support k8s dns resolve. 
+		Like: curl authors/authors.default/authors.default.svc/authors.default.svc.cluster.local.
+		So you can startup your application in local PC. depends on anything in
+		k8s cluster is ok, connect to them just like in k8s cluster.
+		`)),
 		Example: templates.Examples(i18n.T(`
 		# Connect to k8s cluster network
 		kubevpn connect
@@ -38,7 +46,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		# Connect to api-server behind of bastion host or ssh jump host
 		kubevpn connect --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
-		# it also support ProxyJump, like
+		# It also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
@@ -48,7 +56,10 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
         kubevpn connect --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
         kubevpn connect --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
         kubevpn connect --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
-`)),
+
+		# Support ssh jump inline
+		kubevpn connect --ssh-jump "--ssh-addr jump.naison.org --ssh-username naison --gssapi-password xxx" --ssh-username root --ssh-addr 127.0.0.1:22 --ssh-keyfile ~/.ssh/dst.pem
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			// startup daemon process and sudo process
 			err := daemon.StartupDaemon(cmd.Context())
@@ -152,7 +163,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "Hang up")
 	cmd.Flags().BoolVar(&lite, "lite", false, "connect to multiple cluster in lite mode, you needs to special this options")
 
-	addExtraRoute(cmd.Flags(), extraRoute)
-	addSshFlags(cmd.Flags(), sshConf)
+	handler.AddExtraRoute(cmd.Flags(), extraRoute)
+	util.AddSshFlags(cmd.Flags(), sshConf)
 	return cmd
 }

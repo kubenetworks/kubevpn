@@ -3,6 +3,8 @@ package cmds
 import (
 	"context"
 	"fmt"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 	"runtime"
 	"runtime/debug"
 	"time"
@@ -33,8 +35,10 @@ func reformatDate(buildTime string) string {
 func CmdVersion(cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "version",
-		Short: "Print the client version information",
-		Long:  `Print the client version information`,
+		Short: i18n.T("Print the client version information"),
+		Long: templates.LongDesc(i18n.T(`
+		Print the client version information
+		`)),
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Printf("KubeVPN: CLI\n")
 			fmt.Printf("    Version: %s\n", config.Version)
