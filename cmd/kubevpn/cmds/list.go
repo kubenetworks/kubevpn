@@ -20,7 +20,7 @@ func CmdList(f cmdutil.Factory) *cobra.Command {
 		Example: templates.Examples(i18n.T(`
 	    # list proxy resources
         kubevpn list
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			return daemon.StartupDaemon(cmd.Context())
 		},

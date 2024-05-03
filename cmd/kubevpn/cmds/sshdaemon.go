@@ -21,11 +21,11 @@ func CmdSSHDaemon(_ cmdutil.Factory) *cobra.Command {
 		Use:    "ssh-daemon",
 		Hidden: true,
 		Short:  "Ssh daemon server",
-		Long:   `Ssh daemon server`,
+		Long:   templates.LongDesc(i18n.T(`Ssh daemon server`)),
 		Example: templates.Examples(i18n.T(`
         # SSH daemon server
         kubevpn ssh-daemon --client-ip 223.254.0.123/32
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			err := daemon.StartupDaemon(cmd.Context())
 			return err

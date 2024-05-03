@@ -20,14 +20,16 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
 	req := &rpc.LogRequest{}
 	cmd := &cobra.Command{
 		Use:   "logs",
-		Short: i18n.T("Log kubevpn daemon server"),
-		Long:  templates.LongDesc(i18n.T(`Log kubevpn daemon server`)),
+		Short: i18n.T("Log kubevpn daemon grpc server"),
+		Long: templates.LongDesc(i18n.T(`
+		Print the logs for kubevpn daemon grpc server. it will show sudo daemon and daemon grpc server log in both
+		`)),
 		Example: templates.Examples(i18n.T(`
         # show log for kubevpn daemon server
         kubevpn logs
         # follow more log
         kubevpn logs -f
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			// startup daemon process and sudo process
 			return daemon.StartupDaemon(cmd.Context())

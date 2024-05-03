@@ -40,35 +40,42 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 	var localFile, remoteAddr string
 	cmd := &cobra.Command{
 		Use:   "alias",
-		Short: "Config file alias to execute command simply",
-		Long:  templates.LongDesc(i18n.T(`Config file alias to execute command simply, just like ssh alias config`)),
+		Short: i18n.T("Config file alias to execute command simply"),
+		Long: templates.LongDesc(i18n.T(`
+		Config file alias to execute command simply, just like ssh alias config
+		
+		It will read ~/.kubevpn/config.yaml file as config, also support special file path
+		by flag -f. It also support depends relationship, like one cluster api server needs to 
+		access via another cluster, you can use syntax needs. it will do action to needs cluster first
+ 		and then do action to target cluster
+		`)),
 		Example: templates.Examples(i18n.T(`
 		If you have following config in your ~/.kubevpn/config.yaml
 
-Name: dev
-Needs: jumper
-Flags:
-  - connect
-  - --kubeconfig ~/.kube/config
-  - --namespace default
-  - --lite
----
-
-Name: jumper
-Flags:
-  - connect
-  - --kubeconfig ~/.kube/jumper_config
-  - --namespace test
-  - --extra-hosts xxx.com
-
-Config file support three field: Name,Needs,Flags
+		Name: dev
+		Needs: jumper
+		Flags:
+		  - connect
+		  - --kubeconfig ~/.kube/config
+		  - --namespace default
+		  - --lite
+		---
+		
+		Name: jumper
+		Flags:
+		  - connect
+		  - --kubeconfig ~/.kube/jumper_config
+		  - --namespace test
+		  - --extra-hosts xxx.com
+		
+		Config file support three field: Name,Needs,Flags
 
 		# Use kubevpn alias config to simply execute command, connect to cluster network by order: jumper --> dev
 		kubevpn alias dev
 		
 		# kubevpn alias jumper, just connect to cluster jumper
 		kubevpn alias jumper
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			if localFile != "" {
 				_, err = os.Stat(localFile)

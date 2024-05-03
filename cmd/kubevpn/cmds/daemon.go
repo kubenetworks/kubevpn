@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 )
@@ -17,7 +18,7 @@ func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: i18n.T("Startup kubevpn daemon server"),
-		Long:  i18n.T(`Startup kubevpn daemon server`),
+		Long:  templates.LongDesc(i18n.T(`Startup kubevpn daemon server`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			sockPath := daemon.GetSockPath(opt.IsSudo)
 			err := os.Remove(sockPath)

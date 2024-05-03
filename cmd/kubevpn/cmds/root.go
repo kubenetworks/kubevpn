@@ -23,8 +23,8 @@ func NewKubeVPNCommand() *cobra.Command {
 		Use:   "kubevpn",
 		Short: i18n.T("kubevpn connect to Kubernetes cluster network"),
 		Long: templates.LongDesc(`
-      kubevpn connect to Kubernetes cluster network.
-      `),
+        kubevpn connect to Kubernetes cluster network.
+        `),
 		Run: func(cmd *cobra.Command, args []string) {
 			cmd.Help()
 		},
@@ -72,14 +72,14 @@ func NewKubeVPNCommand() *cobra.Command {
 				CmdStatus(factory),
 				CmdList(factory),
 				CmdAlias(factory),
-				CmdReset(factory),
-				CmdQuit(factory),
 				CmdGet(factory),
 				CmdConfig(factory),
 				CmdSSH(factory),
 				CmdSSHDaemon(factory),
 				CmdLogs(factory),
 				CmdCp(factory),
+				CmdReset(factory),
+				CmdQuit(factory),
 			},
 		},
 		{

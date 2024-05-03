@@ -9,6 +9,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
@@ -24,8 +26,10 @@ func CmdControlPlane(_ cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "control-plane",
 		Hidden: true,
-		Short:  "Control-plane is a envoy xds server",
-		Long:   `Control-plane is a envoy xds server, distribute envoy route configuration`,
+		Short:  i18n.T("Control-plane is a envoy xds server"),
+		Long: templates.LongDesc(i18n.T(`
+		Control-plane is a envoy xds server, distribute envoy route configuration
+		`)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			util.InitLoggerForServer(config.Debug)
 			go util.StartupPProf(0)

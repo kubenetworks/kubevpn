@@ -19,12 +19,20 @@ import (
 func CmdLeave(f cmdutil.Factory) *cobra.Command {
 	var leaveCmd = &cobra.Command{
 		Use:   "leave",
-		Short: "Leave proxy resource",
-		Long:  `leave proxy resource and restore it to origin`,
+		Short: i18n.T("Leave proxy resource"),
+		Long: templates.LongDesc(i18n.T(`
+		Leave proxy resource and restore it to origin
+	
+		This command is used to leave proxy resources. after use command 'kubevpn proxy xxx',
+		you can use this command to leave proxy resources.
+		you can just leave proxy resources which do proxy by yourself.
+		and the last one leave proxy resource, it will also restore workloads container.
+		otherwise it will keep containers [vpn, envoy-proxy] until last one to leave.
+		`)),
 		Example: templates.Examples(i18n.T(`
 		# leave proxy resource and restore it to origin
 		kubevpn leave deployment/authors
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			return daemon.StartupDaemon(cmd.Context())
 		},

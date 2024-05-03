@@ -30,7 +30,16 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "proxy",
 		Short: i18n.T("Proxy kubernetes workloads inbound traffic into local PC"),
-		Long:  templates.LongDesc(i18n.T(`Proxy kubernetes workloads inbound traffic into local PC`)),
+		Long: templates.LongDesc(i18n.T(`
+		Proxy kubernetes workloads inbound traffic into local PC
+
+		Proxy k8s workloads inbound traffic into local PC with/without service mesh. 
+		Without service mesh, it will proxy all inbound traffic into local PC, even traffic protocol is layer 4(Transport layer).
+		With service mesh, it will proxy traffic which has special header to local PC, support protocol HTTP,GRPC,THRIFT, WebSocket...
+		After proxy resource, it also connected to cluster network automatically. so just startup your app in local PC
+		and waiting for inbound traffic, make debug more easier.
+		
+		`)),
 		Example: templates.Examples(i18n.T(`
 		# Reverse proxy
 		- proxy deployment
@@ -53,7 +62,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 		# Connect to api-server behind of bastion host or ssh jump host and proxy kubernetes resource traffic into local PC
 		kubevpn proxy deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem --headers a=1
 
-		# it also support ProxyJump, like
+		# It also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
@@ -75,7 +84,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 
 		# Auto proxy container port to same local port, and auto detect protocol
 		kubevpn proxy deployment/productpage
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			if err = daemon.StartupDaemon(cmd.Context()); err != nil {
 				return err

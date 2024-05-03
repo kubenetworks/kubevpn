@@ -23,8 +23,14 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "reset",
-		Short: "Reset all changes made by KubeVPN",
-		Long:  `Reset all changes made by KubeVPN`,
+		Short: "Reset all resource create by kubevpn in k8s cluster",
+		Long: templates.LongDesc(i18n.T(`
+		Reset all resource create by kubevpn in k8s cluster
+		
+		Reset will delete all resoucres create by kubevpn in k8s cluster, like deployment, service, serviceAccount...
+		and it will also delete local develop docker containers, docker networks. delete hosts entry added by kubevpn,
+		cleanup dns.
+		`)),
 		Example: templates.Examples(i18n.T(`
         # Reset default namespace
 		  kubevpn reset
@@ -35,7 +41,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 		# Reset cluster api-server behind of bastion host or ssh jump host
 		kubevpn reset --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
-		# it also support ProxyJump, like
+		# It also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
@@ -45,7 +51,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
         kubevpn reset --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
         kubevpn reset --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
         kubevpn reset --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return daemon.StartupDaemon(cmd.Context())
 		},

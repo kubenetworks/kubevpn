@@ -37,13 +37,13 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		Use:   "dev TYPE/NAME [-c CONTAINER] [flags] -- [args...]",
 		Short: i18n.T("Startup your kubernetes workloads in local Docker container"),
 		Long: templates.LongDesc(i18n.T(`
-Startup your kubernetes workloads in local Docker container with same volume、env、and network
+		Startup your kubernetes workloads in local Docker container with same volume、env、and network
 
-## What did i do:
-- Download volume which MountPath point to, mount to docker container
-- Connect to cluster network, set network to docker container
-- Get all environment with command (env), set env to docker container
-`)),
+		## What did i do:
+		- Download volume which MountPath point to, mount to docker container
+		- Connect to cluster network, set network to docker container
+		- Get all environment with command (env), set env to docker container
+		`)),
 		Example: templates.Examples(i18n.T(`
         # Develop workloads
 		- develop deployment
@@ -75,7 +75,7 @@ Startup your kubernetes workloads in local Docker container with same volume、e
         kubevpn dev deployment/authors -n default --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab -it --entrypoint /bin/bash
         kubevpn dev deployment/authors -n default --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache -it --entrypoint /bin/bash
         kubevpn dev deployment/authors -n default --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD> -it --entrypoint /bin/bash
-`)),
+		`)),
 		ValidArgsFunction:     completion.ResourceTypeAndNameCompletionFunc(f),
 		Args:                  cobra.MatchAll(cobra.OnlyValidArgs),
 		DisableFlagsInUseLine: true,

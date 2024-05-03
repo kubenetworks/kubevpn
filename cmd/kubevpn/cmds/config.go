@@ -28,18 +28,18 @@ func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &util.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "add",
-		Short: "Proxy kubeconfig",
+		Short: i18n.T("Proxy kubeconfig"),
 		Long:  templates.LongDesc(i18n.T(`proxy kubeconfig which behind of ssh jump server`)),
 		Example: templates.Examples(i18n.T(`
 		# proxy api-server which api-server behind of bastion host or ssh jump host
 		kubevpn config add --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
-		# it also support ProxyJump, like
+		# It also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
 		kubevpn config add --ssh-alias <alias>
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			// startup daemon process and sudo process
 			return daemon.StartupDaemon(cmd.Context())
@@ -70,12 +70,14 @@ func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
 func cmdConfigRemove(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remove",
-		Short: "Remove proxy kubeconfig",
-		Long:  templates.LongDesc(i18n.T(`Remove proxy kubeconfig which behind of ssh jump server`)),
+		Short: i18n.T("Remove proxy kubeconfig"),
+		Long: templates.LongDesc(i18n.T(`
+		Remove proxy kubeconfig which behind of ssh jump server
+		`)),
 		Example: templates.Examples(i18n.T(`
 		# remove proxy api-server which api-server behind of bastion host or ssh jump host
 		kubevpn config remove --kubeconfig /var/folders/30/cmv9c_5j3mq_kthx63sb1t5c0000gn/T/947048961.kubeconfig
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			// startup daemon process and sudo process
 			return daemon.StartupDaemon(cmd.Context())

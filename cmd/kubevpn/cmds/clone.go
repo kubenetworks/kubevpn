@@ -31,7 +31,12 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "clone",
 		Short: i18n.T("Clone workloads to target-kubeconfig cluster with same volume、env、and network"),
-		Long:  templates.LongDesc(i18n.T(`Clone workloads to target-kubeconfig cluster with same volume、env、and network`)),
+		Long: templates.LongDesc(i18n.T(`
+		Clone workloads to target-kubeconfig cluster with same volume、env、and network
+
+		In this way, you can startup another deployment in same cluster or not, but with different image version,
+		it also support service mesh proxy. only traffic with special header will hit to cloned_resource.
+		`)),
 		Example: templates.Examples(i18n.T(`
 		# clone
 		- clone deployment in current cluster and current namespace
@@ -54,7 +59,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 		# clone workloads which api-server behind of bastion host or ssh jump host
 		kubevpn clone deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem --headers a=1
 
-		# it also support ProxyJump, like
+		# It also support ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
@@ -64,7 +69,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
         kubevpn clone service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
         kubevpn clone service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
         kubevpn clone service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			// not support temporally
 			if options.Engine == config.EngineGvisor {

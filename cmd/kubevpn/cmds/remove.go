@@ -19,12 +19,18 @@ import (
 func CmdRemove(f cmdutil.Factory) *cobra.Command {
 	var cmd = &cobra.Command{
 		Use:   "remove",
-		Short: "Remove cloned resource",
-		Long:  `Remove cloned resource`,
+		Short: "Remove clone resource",
+		Long: templates.LongDesc(i18n.T(`
+		Remove clone resource
+
+		This command is design to remove clone resources, after use command 'kubevpn clone xxx', 
+		it will generate and create a new resource in target k8s cluster with format [resource_name]_clone_xxxxx,
+		use this command to remove this created resources.
+		`)),
 		Example: templates.Examples(i18n.T(`
         # leave proxy resources to origin
         kubevpn remove deployment/authors
-`)),
+		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			return daemon.StartupDaemon(cmd.Context())
 		},
