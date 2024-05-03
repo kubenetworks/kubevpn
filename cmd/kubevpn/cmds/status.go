@@ -211,7 +211,7 @@ func genCloneMsg(w *tabwriter.Writer, list []*rpc.Status) {
 func GetClusterIDByConfig(cmd *cobra.Command, config Config) (string, error) {
 	flags := flag.NewFlagSet("", flag.ContinueOnError)
 	var sshConf = &util.SshConfig{}
-	addSshFlags(flags, sshConf)
+	util.AddSshFlags(flags, sshConf)
 	configFlags := genericclioptions.NewConfigFlags(false).WithDeprecatedPasswordFlag()
 	configFlags.AddFlags(flags)
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(&warp{ConfigFlags: configFlags})

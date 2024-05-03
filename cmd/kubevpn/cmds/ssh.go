@@ -111,7 +111,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			}
 		},
 	}
-	addSshFlags(cmd.Flags(), sshConf)
+	util.AddSshFlags(cmd.Flags(), sshConf)
 	cmd.Flags().StringArrayVar(&ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
 	return cmd
 }

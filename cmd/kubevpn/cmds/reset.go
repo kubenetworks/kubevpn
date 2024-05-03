@@ -80,7 +80,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 		},
 	}
 
-	addSshFlags(cmd.Flags(), sshConf)
+	util.AddSshFlags(cmd.Flags(), sshConf)
 	return cmd
 }
 

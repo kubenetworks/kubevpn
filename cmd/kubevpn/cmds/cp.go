@@ -135,6 +135,6 @@ func CmdCp(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVarP(&o.NoPreserve, "no-preserve", "", false, "The copied file/directory's ownership and permissions will not be preserved in the container")
 	cmd.Flags().IntVarP(&o.MaxTries, "retries", "", 0, "Set number of retries to complete a copy operation from a container. Specify 0 to disable or any negative value for infinite retrying. The default is 0 (no retry).")
 
-	addSshFlags(cmd.Flags(), sshConf)
+	util.AddSshFlags(cmd.Flags(), sshConf)
 	return cmd
 }
