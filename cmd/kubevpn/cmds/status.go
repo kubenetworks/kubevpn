@@ -224,6 +224,7 @@ func GetClusterIDByConfig(cmd *cobra.Command, config Config) (string, error) {
 	flags := flag.NewFlagSet("", flag.ContinueOnError)
 	var sshConf = &util.SshConfig{}
 	util.AddSshFlags(flags, sshConf)
+	handler.AddExtraRoute(flags, &handler.ExtraRouteInfo{})
 	configFlags := genericclioptions.NewConfigFlags(false).WithDeprecatedPasswordFlag()
 	configFlags.AddFlags(flags)
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(&warp{ConfigFlags: configFlags})
@@ -238,8 +239,7 @@ func GetClusterIDByConfig(cmd *cobra.Command, config Config) (string, error) {
 		})
 	}
 
-	split := strings.Split(strings.Join(config.Flags, " "), " ")
-	err := flags.ParseAll(split[:], func(flag *flag.Flag, value string) error {
+	err := flags.ParseAll(config.Flags, func(flag *flag.Flag, value string) error {
 		_ = flags.Set(flag.Name, value)
 		return nil
 	})

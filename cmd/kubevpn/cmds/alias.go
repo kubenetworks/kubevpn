@@ -24,17 +24,17 @@ Name: test
 Needs: test1
 Flags:
   - connect
-  - --kubeconfig ~/.kube/config
-  - --namespace test
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
   - --lite
 ---
 
 Name: test1
 Flags:
   - connect
-  - --kubeconfig ~/.kube/jumper_config
-  - --namespace test
-  - --extra-hosts xxx.com
+  - --kubeconfig=~/.kube/jumper_config
+  - --namespace=test
+  - --extra-hosts=xxx.com
 */
 func CmdAlias(f cmdutil.Factory) *cobra.Command {
 	var localFile, remoteAddr string
@@ -56,17 +56,17 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 		Needs: jumper
 		Flags:
 		  - connect
-		  - --kubeconfig ~/.kube/config
-		  - --namespace default
+		  - --kubeconfig=~/.kube/config
+		  - --namespace=default
 		  - --lite
 		---
 		
 		Name: jumper
 		Flags:
 		  - connect
-		  - --kubeconfig ~/.kube/jumper_config
-		  - --namespace test
-		  - --extra-hosts xxx.com
+		  - --kubeconfig=~/.kube/jumper_config
+		  - --namespace=test
+		  - --extra-hosts=xxx.com
 		
 		Config file support three field: Name,Needs,Flags
 
@@ -93,7 +93,7 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			for _, config := range configs {
-				c := exec.Command(name, strings.Split(strings.Join(config.Flags, " "), " ")...)
+				c := exec.Command(name, config.Flags...)
 				c.Stdout = os.Stdout
 				c.Stdin = os.Stdin
 				c.Stderr = os.Stderr
