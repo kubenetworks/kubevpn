@@ -7,8 +7,8 @@ Name: dev
 Needs: qa
 Flags:
   - connect
-  - --kubeconfig ~/.kube/config
-  - --namespace default
+  - --kubeconfig=~/.kube/config
+  - --namespace=default
   - --lite
 
 ---
@@ -17,4 +17,4 @@ Name: qa
 Flags:
   - connect
   - --kubeconfig ~/.kube/jumper_config
-  - --namespace default
+  - --namespace=default

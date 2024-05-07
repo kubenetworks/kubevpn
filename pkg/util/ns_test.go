@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/rest"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/utils/ptr"
 )
@@ -81,12 +83,24 @@ current-context: localhost`
 			t.Fatalf("not equal")
 		}
 		newFactory := InitFactory(string(bytes), ns)
-		config, err := newFactory.ToRESTConfig()
+		var config *rest.Config
+		config, err = newFactory.ToRESTConfig()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rawConfig clientcmdapi.Config
+		rawConfig, err = newFactory.ToRawKubeConfigLoader().RawConfig()
 		if err != nil {
 			t.Fatal(err)
 		}
 		if config.Host != data.ApiServer {
-			t.Fatalf("not equal")
+			t.Fatalf("apiserver not match. current: %s, expect: %s", config.Host, data.ApiServer)
+		}
+		if data.Context == "" {
+			continue
+		}
+		if rawConfig.CurrentContext != data.Context {
+			t.Fatalf("context not match. current: %s, expect: %s", rawConfig.CurrentContext, data.Context)
 		}
 	}
 }

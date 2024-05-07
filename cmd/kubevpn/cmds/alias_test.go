@@ -10,16 +10,16 @@ func TestAlias(t *testing.T) {
 	str := `Name: test
 Needs: test1
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
 
 ---
 
 Name: test1
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
-  - --extra-hosts xxx.com`
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
+  - --extra-hosts=xxx.com`
 	_, err := ParseConfig([]byte(str))
 	if err != nil {
 		log.Fatal(err)
@@ -30,16 +30,16 @@ func TestCheckLoop(t *testing.T) {
 	str := `Name: test
 Needs: test1
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
 
 ---
 
 Name: test1
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
-  - --extra-hosts xxx.com`
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
+  - --extra-hosts=xxx.com`
 	_, err := ParseConfig([]byte(str))
 	if err != nil {
 		log.Fatal(err)
@@ -58,17 +58,17 @@ func TestLoop(t *testing.T) {
 Name: test
 Needs: test1
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
 
 ---
 
 Name: test1
 Needs: test
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
-  - --extra-hosts xxx.com
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
+  - --extra-hosts=xxx.com
 `,
 			Run:         "test",
 			ExpectError: true,
@@ -79,16 +79,16 @@ Flags:
 Name: test
 Needs: test1
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
 
 ---
 
 Name: test1
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
-  - --extra-hosts xxx.com
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
+  - --extra-hosts=xxx.com
 `,
 			Run:         "test",
 			ExpectError: false,
@@ -99,17 +99,17 @@ Flags:
 Name: test
 Needs: test1
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
 
 ---
 
 Name: test1
 Needs: test2
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
-  - --extra-hosts xxx.com
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
+  - --extra-hosts=xxx.com
 `,
 			Run:         "test",
 			ExpectError: false,
@@ -120,25 +120,25 @@ Flags:
 Name: test
 Needs: test1
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
 
 ---
 
 Name: test1
 Needs: test2
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
-  - --extra-hosts xxx.com
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
+  - --extra-hosts=xxx.com
 
 ---
 
 Name: test2
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
-  - --extra-hosts xxx.com
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
+  - --extra-hosts=xxx.com
 `,
 			Run:         "test",
 			ExpectError: false,
@@ -149,25 +149,25 @@ Flags:
 Name: test
 Needs: test1
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
 
 ---
 
 Name: test1
 Needs: test2
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
-  - --extra-hosts xxx.com
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
+  - --extra-hosts=xxx.com
 
 ---
 
 Name: test2
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
-  - --extra-hosts xxx.com
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
+  - --extra-hosts=xxx.com
 `,
 			Run:         "test2",
 			ExpectError: false,
@@ -178,25 +178,25 @@ Flags:
 Name: test
 Needs: test1
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
 
 ---
 
 Name: test1
 Needs: test2
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
-  - --extra-hosts xxx.com
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
+  - --extra-hosts=xxx.com
 
 ---
 
 Name: test2
 Flags:
-  - --kubeconfig ~/.kube/config
-  - --namespace test
-  - --extra-hosts xxx.com
+  - --kubeconfig=~/.kube/config
+  - --namespace=test
+  - --extra-hosts=xxx.com
 `,
 			Run:         "test1",
 			ExpectError: false,
