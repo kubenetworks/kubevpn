@@ -997,11 +997,14 @@ func (c *ConnectOptions) GetFactory() cmdutil.Factory {
 	return c.factory
 }
 
-func (c *ConnectOptions) GetLocalTunIPv4() string {
+func (c *ConnectOptions) GetLocalTunIP() (v4 string, v6 string) {
 	if c.localTunIPv4 != nil {
-		return c.localTunIPv4.IP.String()
+		v4 = c.localTunIPv4.IP.String()
 	}
-	return ""
+	if c.localTunIPv6 != nil {
+		v6 = c.localTunIPv6.IP.String()
+	}
+	return
 }
 
 func (c *ConnectOptions) GetClusterID() string {
@@ -1138,9 +1141,6 @@ func (c *ConnectOptions) upgradeService(ctx context.Context) error {
 		return pkgruntime.Encode(scheme.DefaultJSONEncoder(), obj)
 	})
 
-	if err != nil {
-		return err
-	}
 	for _, p := range patches {
 		_, err = resource.
 			NewHelper(p.Info.Client, p.Info.Mapping).
@@ -1158,15 +1158,8 @@ func (c *ConnectOptions) heartbeats(ctx context.Context) {
 	if !util.IsWindows() {
 		return
 	}
-	ticker := time.NewTicker(time.Second * 15)
-	defer ticker.Stop()
-
-	for ; true; <-ticker.C {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
+	v4, v6 := c.GetLocalTunIP()
+	for ctx.Err() == nil {
 		func() {
 			defer func() {
 				if err := recover(); err != nil {
@@ -1174,15 +1167,23 @@ func (c *ConnectOptions) heartbeats(ctx context.Context) {
 				}
 			}()
 
-			err := c.dhcp.ForEach(func(ip net.IP) {
+			var wg = &sync.WaitGroup{}
+			_ = c.dhcp.ForEach(ctx, func(ip net.IP) {
+				wg.Add(1)
 				go func() {
-					_, _ = util.Ping(ctx, ip.String())
+					defer wg.Done()
+					_, _ = util.Ping(ctx, v4, ip.String())
+				}()
+			}, func(ip net.IP) {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					_, _ = util.Ping(ctx, v6, ip.String())
 				}()
 			})
-			if err != nil {
-				log.Debug(err)
-			}
+			wg.Wait()
 		}()
+		time.Sleep(time.Second * 15)
 	}
 }
 

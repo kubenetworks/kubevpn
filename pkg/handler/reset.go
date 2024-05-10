@@ -73,13 +73,13 @@ func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
 		log.Errorf("unmarshal envoy config error: %v", err)
 		return
 	}
-	localTunIPv4 := c.GetLocalTunIPv4()
+	v4, _ := c.GetLocalTunIP()
 	for _, virtual := range v {
 		// deployments.apps.ry-server --> deployments.apps/ry-server
 		lastIndex := strings.LastIndex(virtual.Uid, ".")
 		uid := virtual.Uid[:lastIndex] + "/" + virtual.Uid[lastIndex+1:]
 		log.Infof("leave resource: %s", uid)
-		err = UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, uid, localTunIPv4)
+		err = UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, uid, v4)
 		if err != nil {
 			log.Errorf("unpatch container error: %v", err)
 			continue

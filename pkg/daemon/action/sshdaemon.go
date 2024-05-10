@@ -4,11 +4,9 @@ import (
 	"context"
 	"net"
 	"sync"
-	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
 	log "github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
@@ -54,22 +52,6 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 				log.Errorf("run route error: %v", err)
 			}
 		}()
-
-		ctx2, cancelF := context.WithCancel(ctx)
-		wait.UntilWithContext(ctx2, func(ctx context.Context) {
-			ip, _, _ := net.ParseCIDR(DefaultServerIP)
-			ok, err := util.Ping(ctx2, ip.String())
-			if err != nil {
-			} else if ok {
-				cancelF()
-			} else {
-				// todo
-				cancelF()
-			}
-		}, time.Millisecond*20)
-		if err != nil {
-			return nil, err
-		}
 		serverIP = DefaultServerIP
 	}
 

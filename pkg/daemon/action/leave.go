@@ -26,10 +26,11 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 	factory := svr.connect.GetFactory()
 	namespace := svr.connect.Namespace
 	maps := svr.connect.GetClientset().CoreV1().ConfigMaps(namespace)
+	v4, _ := svr.connect.GetLocalTunIP()
 	for _, workload := range req.GetWorkloads() {
 		// add rollback func to remove envoy config
 		log.Infof("leave workload %s", workload)
-		err := handler.UnPatchContainer(factory, maps, namespace, workload, svr.connect.GetLocalTunIPv4())
+		err := handler.UnPatchContainer(factory, maps, namespace, workload, v4)
 		if err != nil {
 			log.Errorf("leave workload %s failed: %v", workload, err)
 			continue

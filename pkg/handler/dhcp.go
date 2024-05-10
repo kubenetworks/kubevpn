@@ -280,29 +280,45 @@ func (d *DHCPManager) Get(ctx2 context.Context, key string) (string, error) {
 	return "", fmt.Errorf("can not get data")
 }
 
-func (d *DHCPManager) ForEach(fn func(net.IP)) error {
-	cm, err := d.client.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+func (d *DHCPManager) ForEach(ctx context.Context, fnv4 func(net.IP), fnv6 func(net.IP)) error {
+	cm, err := d.client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
-		log.Errorf("failed to get cm DHCP server, err: %v", err)
-		return err
+		return fmt.Errorf("failed to get cm DHCP server, err: %v", err)
 	}
 	if cm.Data == nil {
 		cm.Data = make(map[string]string)
 	}
-	dhcp, err := ipallocator.NewAllocatorCIDRRange(d.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
+	var dhcp *ipallocator.Range
+	dhcp, err = ipallocator.NewAllocatorCIDRRange(d.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
 		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
 	})
 	if err != nil {
 		return err
 	}
-	str, err := base64.StdEncoding.DecodeString(cm.Data[config.KeyDHCP])
+	var str []byte
+	str, err = base64.StdEncoding.DecodeString(cm.Data[config.KeyDHCP])
+	if err == nil {
+		err = dhcp.Restore(d.cidr, str)
+		if err != nil {
+			return err
+		}
+	}
+	dhcp.ForEach(fnv4)
+
+	var dhcp6 *ipallocator.Range
+	dhcp6, err = ipallocator.NewAllocatorCIDRRange(d.cidr6, func(max int, rangeSpec string) (allocator.Interface, error) {
+		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
+	})
 	if err != nil {
 		return err
 	}
-	err = dhcp.Restore(d.cidr, str)
-	if err != nil {
-		return err
+	str, err = base64.StdEncoding.DecodeString(cm.Data[config.KeyDHCP6])
+	if err == nil {
+		err = dhcp6.Restore(d.cidr6, str)
+		if err != nil {
+			return err
+		}
 	}
-	dhcp.ForEach(fn)
+	dhcp6.ForEach(fnv6)
 	return nil
 }

@@ -5,9 +5,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -29,9 +31,10 @@ type SvrOption struct {
 	cancel context.CancelFunc
 
 	uptime int64
-	svr    *grpc.Server
+	svr    *action.Server
 
 	IsSudo bool
+	ID     string
 }
 
 func (o *SvrOption) Start(ctx context.Context) error {
@@ -59,28 +62,41 @@ func (o *SvrOption) Start(ctx context.Context) error {
 			}
 		}()
 	}
+
+	sockPath := GetSockPath(o.IsSudo)
+	err := os.Remove(sockPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	o.ctx, o.cancel = context.WithCancel(ctx)
 	var lc net.ListenConfig
-	lis, err := lc.Listen(o.ctx, "unix", GetSockPath(o.IsSudo))
+	lis, err := lc.Listen(o.ctx, "unix", sockPath)
 	if err != nil {
 		return err
 	}
 	defer lis.Close()
+	lis.(*net.UnixListener).SetUnlinkOnClose(false)
+	go o.detectUnixSocksFile(o.ctx)
 
-	err = os.Chmod(GetSockPath(o.IsSudo), 0666)
+	err = os.Chmod(sockPath, 0666)
 	if err != nil {
 		return err
 	}
 
-	o.svr = grpc.NewServer()
-	cleanup, err := admin.Register(o.svr)
+	err = writePIDToFile(o.IsSudo)
+	if err != nil {
+		return err
+	}
+
+	svr := grpc.NewServer()
+	cleanup, err := admin.Register(svr)
 	if err != nil {
 		log.Errorf("failed to register admin: %v", err)
 		return err
 	}
-	grpc_health_v1.RegisterHealthServer(o.svr, health.NewServer())
+	grpc_health_v1.RegisterHealthServer(svr, health.NewServer())
 	defer cleanup()
-	reflection.Register(o.svr)
+	reflection.Register(svr)
 	// [tun-client] 223.254.0.101 - 127.0.0.1:8422: dial tcp 127.0.0.1:55407: connect: can't assign requested address
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
 	// startup a http server
@@ -93,29 +109,29 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		log.Errorf("failed to configure http2 server: %v", err)
 		return err
 	}
-	handler := CreateDowngradingHandler(o.svr, http.HandlerFunc(http.DefaultServeMux.ServeHTTP))
+	handler := CreateDowngradingHandler(svr, http.HandlerFunc(http.DefaultServeMux.ServeHTTP))
 	downgradingServer.Handler = h2c.NewHandler(handler, &h2Server)
 	o.uptime = time.Now().Unix()
+	// remember to close http server, otherwise daemon will not quit successfully
 	cancel := func() {
+		o.svr.Cancel = nil
+		_ = o.svr.Quit(&rpc.QuitRequest{}, nil)
 		_ = downgradingServer.Close()
-		o.Stop()
 		_ = l.Rotate()
 		_ = l.Close()
 	}
-	// remember to close http server, otherwise daemon will not quit successfully
-	rpc.RegisterDaemonServer(o.svr, &action.Server{Cancel: cancel, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: l})
+	o.svr = &action.Server{Cancel: cancel, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: l, ID: o.ID}
+	rpc.RegisterDaemonServer(svr, o.svr)
 	return downgradingServer.Serve(lis)
 	//return o.svr.Serve(lis)
 }
 
 func (o *SvrOption) Stop() {
 	o.cancel()
-	if o.svr != nil {
+	if o.svr != nil && o.svr.Cancel != nil {
 		//o.svr.GracefulStop()
-		o.svr.Stop()
+		o.svr.Cancel()
 	}
-	path := GetSockPath(o.IsSudo)
-	_ = os.Remove(path)
 }
 
 // CreateDowngradingHandler takes a gRPC server and a plain HTTP handler, and returns an HTTP handler that has the
@@ -135,4 +151,51 @@ func CreateDowngradingHandler(grpcServer *grpc.Server, httpHandler http.Handler)
 			httpHandler.ServeHTTP(w, r)
 		}
 	})
+}
+
+func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			func() {
+				_, err := os.Stat(GetSockPath(o.IsSudo))
+				if errors.Is(err, os.ErrNotExist) {
+					o.Stop()
+					return
+				}
+				client, conn, err := GetClientWithoutCache(ctx, o.IsSudo)
+				if conn != nil {
+					defer conn.Close()
+				}
+				if err != nil {
+					return
+				}
+
+				var identify *rpc.IdentifyResponse
+				identify, err = client.Identify(ctx, &rpc.IdentifyRequest{})
+				if err != nil {
+					return
+				}
+				if identify.ID != o.ID {
+					o.Stop()
+					return
+				}
+			}()
+		}
+	}
+}
+
+func writePIDToFile(isSudo bool) error {
+	pidPath := GetPidPath(isSudo)
+	pid := os.Getpid()
+	err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), os.ModePerm)
+	if err != nil {
+		return err
+	}
+	err = os.Chmod(pidPath, os.ModePerm)
+	return err
 }

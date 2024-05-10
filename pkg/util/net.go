@@ -60,11 +60,12 @@ func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 	return nil, fmt.Errorf("can not found any interface with ip %v", ip)
 }
 
-func Ping(ctx context.Context, targetIP string) (bool, error) {
-	pinger, err := probing.NewPinger(targetIP)
+func Ping(ctx context.Context, srcIP, dstIP string) (bool, error) {
+	pinger, err := probing.NewPinger(dstIP)
 	if err != nil {
 		return false, err
 	}
+	pinger.Source = srcIP
 	pinger.SetLogger(nil)
 	pinger.SetPrivileged(true)
 	pinger.Count = 3

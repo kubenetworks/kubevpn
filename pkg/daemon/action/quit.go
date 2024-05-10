@@ -37,8 +37,8 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 	}
 
 	if svr.IsSudo {
-		dns.CleanupHosts()
-		os.RemoveAll(filepath.Join("/", "etc", "resolver"))
+		_ = dns.CleanupHosts()
+		_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
 	}
 
 	// last step is to quit GRPC server
@@ -53,6 +53,9 @@ type quitWarp struct {
 }
 
 func (r *quitWarp) Write(p []byte) (n int, err error) {
+	if r.server == nil {
+		return len(p), nil
+	}
 	err = r.server.Send(&rpc.QuitResponse{
 		Message: string(p),
 	})

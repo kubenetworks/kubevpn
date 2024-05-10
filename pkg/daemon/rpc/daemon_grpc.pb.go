@@ -39,6 +39,7 @@ const (
 	Daemon_Version_FullMethodName      = "/rpc.Daemon/Version"
 	Daemon_Reset_FullMethodName        = "/rpc.Daemon/Reset"
 	Daemon_Quit_FullMethodName         = "/rpc.Daemon/Quit"
+	Daemon_Identify_FullMethodName     = "/rpc.Daemon/Identify"
 )
 
 // DaemonClient is the client API for Daemon service.
@@ -65,6 +66,7 @@ type DaemonClient interface {
 	Version(ctx context.Context, in *VersionRequest, opts ...grpc.CallOption) (*VersionResponse, error)
 	Reset(ctx context.Context, in *ResetRequest, opts ...grpc.CallOption) (Daemon_ResetClient, error)
 	Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error)
+	Identify(ctx context.Context, in *IdentifyRequest, opts ...grpc.CallOption) (*IdentifyResponse, error)
 }
 
 type daemonClient struct {
@@ -507,6 +509,15 @@ func (x *daemonQuitClient) Recv() (*QuitResponse, error) {
 	return m, nil
 }
 
+func (c *daemonClient) Identify(ctx context.Context, in *IdentifyRequest, opts ...grpc.CallOption) (*IdentifyResponse, error) {
+	out := new(IdentifyResponse)
+	err := c.cc.Invoke(ctx, Daemon_Identify_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonServer is the server API for Daemon service.
 // All implementations must embed UnimplementedDaemonServer
 // for forward compatibility
@@ -531,6 +542,7 @@ type DaemonServer interface {
 	Version(context.Context, *VersionRequest) (*VersionResponse, error)
 	Reset(*ResetRequest, Daemon_ResetServer) error
 	Quit(*QuitRequest, Daemon_QuitServer) error
+	Identify(context.Context, *IdentifyRequest) (*IdentifyResponse, error)
 	mustEmbedUnimplementedDaemonServer()
 }
 
@@ -597,6 +609,9 @@ func (UnimplementedDaemonServer) Reset(*ResetRequest, Daemon_ResetServer) error 
 }
 func (UnimplementedDaemonServer) Quit(*QuitRequest, Daemon_QuitServer) error {
 	return status.Errorf(codes.Unimplemented, "method Quit not implemented")
+}
+func (UnimplementedDaemonServer) Identify(context.Context, *IdentifyRequest) (*IdentifyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Identify not implemented")
 }
 func (UnimplementedDaemonServer) mustEmbedUnimplementedDaemonServer() {}
 
@@ -1009,6 +1024,24 @@ func (x *daemonQuitServer) Send(m *QuitResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Daemon_Identify_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IdentifyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).Identify(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_Identify_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).Identify(ctx, req.(*IdentifyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Daemon_ServiceDesc is the grpc.ServiceDesc for Daemon service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1051,6 +1084,10 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Version",
 			Handler:    _Daemon_Version_Handler,
+		},
+		{
+			MethodName: "Identify",
+			Handler:    _Daemon_Identify_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
