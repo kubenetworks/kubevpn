@@ -5,8 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math/rand"
-	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -38,8 +36,6 @@ import (
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	scheme2 "k8s.io/kubectl/pkg/scheme"
 	"k8s.io/kubectl/pkg/util/podutils"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 type PodRouteConfig struct {
@@ -133,18 +129,6 @@ func GetEnv(ctx context.Context, f util.Factory, ns, pod string) (map[string][]s
 		result[c.Name] = split
 	}
 	return result, nil
-}
-
-func Heartbeats() {
-	ticker := time.NewTicker(time.Second * 5)
-	defer ticker.Stop()
-
-	for ; true; <-ticker.C {
-		for _, ip := range []net.IP{config.RouterIP, config.RouterIP6} {
-			time.Sleep(time.Millisecond * time.Duration(rand.Intn(1000)))
-			_, _ = Ping(context.Background(), ip.String())
-		}
-	}
 }
 
 func WaitPod(ctx context.Context, podInterface v12.PodInterface, list v1.ListOptions, checker func(*corev1.Pod) bool) error {

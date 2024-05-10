@@ -27,6 +27,8 @@ service Daemon {
   rpc Version (VersionRequest) returns (VersionResponse) {}
   rpc Reset (ResetRequest) returns (stream ResetResponse) {}
   rpc Quit (QuitRequest) returns (stream QuitResponse) {}
+
+  rpc Identify (IdentifyRequest) returns (IdentifyResponse) {}
 }
 
 message ConnectRequest {
@@ -308,4 +310,10 @@ message ExtraRoute {
   repeated string ExtraCIDR = 1;
   repeated string ExtraDomain = 2;
   bool ExtraNodeIP = 3;
+}
+
+message IdentifyRequest {}
+
+message IdentifyResponse {
+  string ID = 1;
 }

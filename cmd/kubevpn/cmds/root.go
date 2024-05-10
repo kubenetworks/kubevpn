@@ -21,9 +21,9 @@ import (
 func NewKubeVPNCommand() *cobra.Command {
 	var cmd = &cobra.Command{
 		Use:   "kubevpn",
-		Short: i18n.T("kubevpn connect to Kubernetes cluster network"),
+		Short: i18n.T("KubeVPN offers a Cloud-Native Dev Environment that seamlessly connects to your Kubernetes cluster network."),
 		Long: templates.LongDesc(`
-        kubevpn connect to Kubernetes cluster network.
+        KubeVPN offers a Cloud-Native Dev Environment that seamlessly connects to your Kubernetes cluster network.
         `),
 		Run: func(cmd *cobra.Command, args []string) {
 			cmd.Help()
@@ -67,7 +67,7 @@ func NewKubeVPNCommand() *cobra.Command {
 			},
 		},
 		{
-			Message: "Management commands",
+			Message: "Management commands:",
 			Commands: []*cobra.Command{
 				CmdStatus(factory),
 				CmdList(factory),
@@ -83,7 +83,7 @@ func NewKubeVPNCommand() *cobra.Command {
 			},
 		},
 		{
-			Message: "Other commands",
+			Message: "Other commands:",
 			Commands: []*cobra.Command{
 				CmdUpgrade(factory),
 				CmdVersion(factory),

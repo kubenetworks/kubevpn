@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -124,25 +123,11 @@ func (w *wsHandler) handle(ctx context.Context) {
 		log.Errorf("Run error: %v", err)
 		w.Log("Run error: %v", err)
 	}()
-	tun, err := util.GetTunDevice(clientIP.IP)
-	if err != nil {
-		w.Log("Get tun device error: %v", err)
-		return
-	}
 	log.Info("tunnel connected")
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				_, _ = util.Ping(ctx, clientIP.IP.String())
-				_, _ = util.Ping(ctx, ip.String())
-				ctx2, cancelFunc := context.WithTimeout(ctx, time.Second*5)
-				_ = exec.CommandContext(ctx2, "ping", "-c", "4", "-b", tun.Name, ip.String()).Run()
-				cancelFunc()
-				time.Sleep(time.Second * 5)
-			}
+		for ctx.Err() == nil {
+			_, _ = util.Ping(ctx, clientIP.IP.String(), ip.String())
+			time.Sleep(time.Second * 5)
 		}
 	}()
 	err = w.terminal(ctx, cli, w.conn)
@@ -154,7 +139,7 @@ func (w *wsHandler) handle(ctx context.Context) {
 
 // startup daemon process if daemon process not start
 func startDaemonProcess(cli *ssh.Client) {
-	startDaemonCmd := fmt.Sprintf(`export %s=%s && kubevpn get service > /dev/null 2>&1 &`, config.EnvStartSudoKubeVPNByKubeVPN, "true")
+	startDaemonCmd := fmt.Sprintf(`export %s=%s && kubevpn status > /dev/null 2>&1 &`, config.EnvStartSudoKubeVPNByKubeVPN, "true")
 	_, _, _ = util.RemoteRun(cli, startDaemonCmd, nil)
 	ticker := time.NewTicker(time.Millisecond * 50)
 	defer ticker.Stop()

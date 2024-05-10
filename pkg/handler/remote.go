@@ -260,6 +260,9 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{"app": config.ConfigMapPodTrafficManager},
+					Annotations: map[string]string{
+						"sidecar.istio.io/inject": "false",
+					},
 				},
 				Spec: v1.PodSpec{
 					ServiceAccountName: config.ConfigMapPodTrafficManager,

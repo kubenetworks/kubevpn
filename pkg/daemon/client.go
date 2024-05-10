@@ -8,11 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -26,8 +23,9 @@ import (
 
 var daemonClient, sudoDaemonClient rpc.DaemonClient
 
-func GetClient(isSudo bool) rpc.DaemonClient {
-	if _, err := os.Stat(GetSockPath(isSudo)); errors.Is(err, os.ErrNotExist) {
+func GetClient(isSudo bool) (cli rpc.DaemonClient) {
+	sockPath := GetSockPath(isSudo)
+	if _, err := os.Stat(sockPath); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if isSudo && sudoDaemonClient != nil {
@@ -38,11 +36,16 @@ func GetClient(isSudo bool) rpc.DaemonClient {
 	}
 
 	ctx := context.Background()
-	conn, err := grpc.DialContext(ctx, "unix:"+GetSockPath(isSudo), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.DialContext(ctx, "unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil
 	}
-	cli := rpc.NewDaemonClient(conn)
+	defer func() {
+		if cli == nil {
+			_ = conn.Close()
+		}
+	}()
+
 	healthClient := grpc_health_v1.NewHealthClient(conn)
 	var response *grpc_health_v1.HealthCheckResponse
 	response, err = healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
@@ -52,11 +55,8 @@ func GetClient(isSudo bool) rpc.DaemonClient {
 	if response.Status != grpc_health_v1.HealthCheckResponse_SERVING {
 		return nil
 	}
-	_, err = cli.Status(ctx, &rpc.StatusRequest{})
-	if err != nil {
-		return nil
-	}
 
+	cli = rpc.NewDaemonClient(conn)
 	var resp *rpc.UpgradeResponse
 	resp, err = cli.Upgrade(ctx, &rpc.UpgradeRequest{
 		ClientVersion:  config.Version,
@@ -64,7 +64,8 @@ func GetClient(isSudo bool) rpc.DaemonClient {
 	})
 	if err == nil && resp.NeedUpgrade {
 		// quit daemon
-		quitStream, err := cli.Quit(ctx, &rpc.QuitRequest{})
+		var quitStream rpc.Daemon_QuitClient
+		quitStream, err = cli.Quit(ctx, &rpc.QuitRequest{})
 		if err != nil {
 			return nil
 		}
@@ -81,6 +82,34 @@ func GetClient(isSudo bool) rpc.DaemonClient {
 		daemonClient = cli
 	}
 	return cli
+}
+
+func GetClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClient, conn *grpc.ClientConn, err error) {
+	sockPath := GetSockPath(isSudo)
+	_, err = os.Stat(sockPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	conn, err = grpc.DialContext(ctx, "unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return
+	}
+	defer func() {
+		if err != nil {
+			_ = conn.Close()
+		}
+	}()
+	healthClient := grpc_health_v1.NewHealthClient(conn)
+	var response *grpc_health_v1.HealthCheckResponse
+	response, err = healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
+	if err != nil {
+		return
+	}
+	if response.Status != grpc_health_v1.HealthCheckResponse_SERVING {
+		return
+	}
+	cli = rpc.NewDaemonClient(conn)
+	return cli, conn, nil
 }
 
 func GetSockPath(isSudo bool) string {
@@ -116,14 +145,14 @@ func StartupDaemon(ctx context.Context, path ...string) error {
 	}
 	// normal daemon
 	if daemonClient = GetClient(false); daemonClient == nil {
-		if err := runDaemon(ctx, exe, false); err != nil {
+		if err = runDaemon(ctx, exe, false); err != nil {
 			return err
 		}
 	}
 
 	// sudo daemon
 	if sudoDaemonClient = GetClient(true); sudoDaemonClient == nil {
-		if err := runDaemon(ctx, exe, true); err != nil {
+		if err = runDaemon(ctx, exe, true); err != nil {
 			return err
 		}
 	}
@@ -131,28 +160,15 @@ func StartupDaemon(ctx context.Context, path ...string) error {
 }
 
 func runDaemon(ctx context.Context, exe string, isSudo bool) error {
-	sockPath := GetSockPath(isSudo)
-	err := os.Remove(sockPath)
+	cli := GetClient(isSudo)
+	if cli != nil {
+		return nil
+	}
+
+	pidPath := GetPidPath(isSudo)
+	err := os.Remove(pidPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
-	}
-	pidPath := GetPidPath(isSudo)
-	var file []byte
-	if file, err = os.ReadFile(pidPath); err == nil {
-		var pid int
-		if pid, err = strconv.Atoi(strings.TrimSpace(string(file))); err == nil {
-			var p *os.Process
-			if p, err = os.FindProcess(pid); err == nil {
-				if err = p.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-					log.Error("kill process", "err", err)
-				}
-				_, _ = p.Wait()
-			}
-		}
-		err = os.Remove(pidPath)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
 	}
 	if isSudo {
 		if !util.IsAdmin() {
@@ -169,7 +185,7 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 	for ctx.Err() == nil {
 		time.Sleep(time.Millisecond * 50)
 		//_ = os.Chmod(sockPath, os.ModeSocket)
-		if _, err = os.Stat(sockPath); !errors.Is(err, os.ErrNotExist) {
+		if _, err = os.Stat(pidPath); !errors.Is(err, os.ErrNotExist) {
 			break
 		}
 	}
@@ -178,9 +194,7 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 	if client == nil {
 		return fmt.Errorf("can not get daemon server client")
 	}
-	_, err = client.Status(ctx, &rpc.StatusRequest{})
-
-	return err
+	return nil
 }
 
 func GetHttpClient(isSudo bool) *http.Client {

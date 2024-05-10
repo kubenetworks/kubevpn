@@ -30,6 +30,8 @@ type Server struct {
 
 	gr       []*restmapper.APIGroupResources
 	informer metadatainformer.SharedInformerFactory
+
+	ID string
 }
 
 func GetDaemonLogPath() string {

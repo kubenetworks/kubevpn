@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -12,14 +11,21 @@ import (
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 )
 
 func TestHttpOverUnix(t *testing.T) {
-	temp, err2 := os.CreateTemp("", "kubevpn.socks")
-	if err2 != nil {
-		t.Fatal(err2)
+	temp, err := os.CreateTemp("", "kubevpn.socks")
+	if err != nil {
+		t.Fatal(err)
 	}
-	os.Remove(temp.Name())
+	err = os.Remove(temp.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
 	client := http.Client{
 		Transport: &http.Transport{
 			Proxy:               http.ProxyFromEnvironment,
@@ -58,5 +64,68 @@ func TestHttpOverUnix(t *testing.T) {
 		t.Fatal(err)
 	}
 	all, _ := io.ReadAll(resp.Body)
-	fmt.Println(string(all))
+	t.Log(string(all))
+}
+
+func TestConnectionRefuse(t *testing.T) {
+	ctx := context.Background()
+	temp, err := os.CreateTemp("", "*.sock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = temp.Close()
+	_ = os.Remove(temp.Name())
+
+	socketPath := temp.Name()
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Failed to listen on unix socket %s: %v", socketPath, err)
+	}
+	listener.(*net.UnixListener).SetUnlinkOnClose(false)
+	defer listener.Close()
+
+	// 1) normal
+	conn, err := grpc.Dial("unix:"+socketPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthClient := grpc_health_v1.NewHealthClient(conn)
+	_, err = healthClient.Check(context.Background(), &grpc_health_v1.HealthCheckRequest{})
+	if err == nil {
+		t.Fatal("impossible")
+	}
+	t.Log(status.Code(err).String())
+	t.Log(status.Convert(err).Message())
+
+	// 2) close listener
+	_ = conn.Close()
+	_ = listener.Close()
+	conn, err = grpc.Dial("unix:"+socketPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthClient = grpc_health_v1.NewHealthClient(conn)
+	_, err = healthClient.Check(context.Background(), &grpc_health_v1.HealthCheckRequest{})
+	if err == nil {
+		t.Fatal("impossible")
+	}
+	t.Log(status.Code(err).String())
+	t.Log(status.Convert(err).Message())
+
+	// 3) remove unix socket file
+	err = os.Remove(socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err = grpc.Dial("unix:"+socketPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthClient = grpc_health_v1.NewHealthClient(conn)
+	_, err = healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
+	if err == nil {
+		t.Fatal("impossible")
+	}
+	t.Log(status.Code(err).String())
+	t.Log(status.Convert(err).Message())
 }

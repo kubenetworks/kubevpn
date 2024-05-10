@@ -175,6 +175,9 @@ func (c *Config) removeHosts(entryList []Entry) error {
 	if err != nil {
 		return err
 	}
+	if !strings.Contains(string(content), config.HostsKeyWord) {
+		return nil
+	}
 
 	var retain []string
 	reader := bufio.NewReader(bytes.NewReader(content))
@@ -316,6 +319,9 @@ func CleanupHosts() error {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
+	}
+	if !strings.Contains(string(content), config.HostsKeyWord) {
+		return nil
 	}
 
 	var retain []string
