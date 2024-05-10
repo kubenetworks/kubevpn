@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/http2"
@@ -154,37 +155,60 @@ func CreateDowngradingHandler(grpcServer *grpc.Server, httpHandler http.Handler)
 }
 
 func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
-	ticker := time.NewTicker(time.Second * 5)
+	var f = func() {
+		_, err := os.Stat(GetSockPath(o.IsSudo))
+		if errors.Is(err, os.ErrNotExist) {
+			o.Stop()
+			return
+		}
+		client, conn, err := GetClientWithoutCache(ctx, o.IsSudo)
+		if conn != nil {
+			defer conn.Close()
+		}
+		if err != nil {
+			return
+		}
+
+		var identify *rpc.IdentifyResponse
+		identify, err = client.Identify(ctx, &rpc.IdentifyRequest{})
+		if err != nil {
+			return
+		}
+		if identify.ID != o.ID {
+			o.Stop()
+			return
+		}
+	}
+	go func() {
+		watcher, err := fsnotify.NewWatcher()
+		if err != nil {
+			return
+		}
+		defer watcher.Close()
+		err = watcher.Add(GetPidPath(o.IsSudo))
+		if err != nil {
+			return
+		}
+		for {
+			select {
+			case <-watcher.Events:
+				f()
+			case <-ctx.Done():
+				return
+			case <-watcher.Errors:
+				return
+			}
+		}
+	}()
+
+	ticker := time.NewTicker(time.Second * 2)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			func() {
-				_, err := os.Stat(GetSockPath(o.IsSudo))
-				if errors.Is(err, os.ErrNotExist) {
-					o.Stop()
-					return
-				}
-				client, conn, err := GetClientWithoutCache(ctx, o.IsSudo)
-				if conn != nil {
-					defer conn.Close()
-				}
-				if err != nil {
-					return
-				}
-
-				var identify *rpc.IdentifyResponse
-				identify, err = client.Identify(ctx, &rpc.IdentifyRequest{})
-				if err != nil {
-					return
-				}
-				if identify.ID != o.ID {
-					o.Stop()
-					return
-				}
-			}()
+			f()
 		}
 	}
 }
