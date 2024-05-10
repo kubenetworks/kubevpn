@@ -201,14 +201,13 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 		}
 	}()
 
-	ticker := time.NewTicker(time.Second * 2)
-	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		default:
 			f()
+			time.Sleep(time.Second * 2)
 		}
 	}
 }
