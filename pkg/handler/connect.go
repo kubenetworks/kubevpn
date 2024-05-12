@@ -85,9 +85,6 @@ type ConnectOptions struct {
 }
 
 func (c *ConnectOptions) Context() context.Context {
-	if c.ctx == nil {
-		c.ctx, c.cancel = context.WithCancel(context.Background())
-	}
 	return c.ctx
 }
 

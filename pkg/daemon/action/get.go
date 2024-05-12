@@ -18,7 +18,7 @@ import (
 )
 
 func (svr *Server) Get(ctx context.Context, req *rpc.GetRequest) (*rpc.GetResponse, error) {
-	if svr.connect == nil {
+	if svr.connect == nil || svr.connect.Context() == nil {
 		return nil, errors.New("not connected")
 	}
 	if svr.gr == nil {

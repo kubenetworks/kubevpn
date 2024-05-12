@@ -127,7 +127,7 @@ type ClientDevice struct {
 
 func (d *ClientDevice) Start(ctx context.Context) {
 	go d.tunInboundHandler(d.tunInbound, d.tunOutbound)
-	go heartbeats(d.tun, d.tunInbound)
+	go heartbeats(ctx, d.tun, d.tunInbound)
 
 	select {
 	case err := <-d.chExit:

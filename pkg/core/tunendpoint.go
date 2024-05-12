@@ -124,6 +124,11 @@ func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, engine config
 					log.Errorf("[TUN] Error: tun device closed")
 					return
 				}
+				// if context is done
+				if ctx.Err() != nil {
+					log.Errorf("[TUN]: write to tun error: %v, context is done: %v", err, ctx.Err())
+					return
+				}
 				log.Errorf("[TUN] Error: failed to write data to tun device: %v", err)
 				continue
 			}
