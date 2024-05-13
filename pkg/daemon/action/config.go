@@ -11,9 +11,9 @@ import (
 
 var CancelFunc = make(map[string]context.CancelFunc)
 
-func (svr *Server) ConfigAdd(ctx context.Context, req *rpc.ConfigAddRequest) (*rpc.ConfigAddResponse, error) {
-	var sshConf = util.ParseSshFromRPC(req.SshJump)
-	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
+func (svr *Server) ConfigAdd(ctx context.Context, req *rpc.ConfigAddRequest) (resp *rpc.ConfigAddResponse, err error) {
+	var file string
+	file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -23,13 +23,19 @@ func (svr *Server) ConfigAdd(ctx context.Context, req *rpc.ConfigAddRequest) (*r
 		DefValue: file,
 	})
 	sshCtx, sshCancel := context.WithCancel(context.Background())
+	defer func() {
+		if err != nil {
+			sshCancel()
+		}
+	}()
 	var path string
+	var sshConf = util.ParseSshFromRPC(req.SshJump)
 	path, err = util.SshJump(sshCtx, sshConf, flags, true)
-	CancelFunc[path] = sshCancel
 	if err != nil {
 		return nil, err
 	}
 
+	CancelFunc[path] = sshCancel
 	return &rpc.ConfigAddResponse{ClusterID: path}, nil
 }
 

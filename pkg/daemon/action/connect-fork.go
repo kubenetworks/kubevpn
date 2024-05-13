@@ -66,6 +66,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	defer func() {
 		if err != nil {
 			connect.Cleanup()
+			sshCancel()
 		}
 	}()
 
@@ -98,7 +99,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	return nil
 }
 
-func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) error {
+func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) (err error) {
 	cli := svr.GetClient(true)
 	if cli == nil {
 		return fmt.Errorf("sudo daemon not start")
@@ -126,6 +127,11 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		sshCancel()
 		return nil
 	})
+	defer func() {
+		if err != nil {
+			sshCancel()
+		}
+	}()
 	var path string
 	path, err = util.SshJump(sshCtx, sshConf, flags, true)
 	if err != nil {
