@@ -104,7 +104,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		} else {
 			log.Debugf("[tcpserver] new routeConnNAT: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 		}
-		h.ch <- dgram
+		util.SafeWrite(h.ch, dgram)
 	}
 }
 

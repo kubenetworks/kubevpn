@@ -10,6 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
@@ -24,7 +25,9 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	engine := h.node.Get(config.ConfigKubeVPNTransportEngine)
 	endpoint := NewTunEndpoint(ctx, tun, uint32(config.DefaultMTU), config.Engine(engine), in, out)
 	stack := NewStack(ctx, endpoint)
-	go stack.Wait()
+	defer stack.Destroy()
+	defer util.SafeClose(in)
+	defer util.SafeClose(out)
 
 	d := &ClientDevice{
 		tun:         tun,
@@ -84,7 +87,7 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 	go func() {
 		for e := range tunInbound {
 			if e.src.Equal(e.dst) {
-				tunOutbound <- e
+				util.SafeWrite(tunOutbound, e)
 				continue
 			}
 			_, err := packetConn.WriteTo(e.data[:e.length], remoteAddr)
@@ -104,7 +107,7 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 				errChan <- errors.Wrap(err, fmt.Sprintf("failed to read packet from remote %s", remoteAddr))
 				return
 			}
-			tunOutbound <- &DataElem{data: b[:], length: n}
+			util.SafeWrite(tunOutbound, &DataElem{data: b[:], length: n})
 		}
 	}()
 

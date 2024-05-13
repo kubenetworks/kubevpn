@@ -620,6 +620,10 @@ func Run(ctx context.Context, servers []core.Server) error {
 			errChan <- func() error {
 				svr := servers[i]
 				defer svr.Listener.Close()
+				go func() {
+					<-ctx.Done()
+					svr.Listener.Close()
+				}()
 				for ctx.Err() == nil {
 					conn, err := svr.Listener.Accept()
 					if err != nil {

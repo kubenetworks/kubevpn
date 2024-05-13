@@ -41,7 +41,6 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	var sshConf = util.ParseSshFromRPC(req.SshJump)
 	var transferImage = req.TransferImage
 
-	go util.StartupPProf(config.PProfPort)
 	defaultlog.Default().SetOutput(io.Discard)
 	if transferImage {
 		err = util.TransferImage(ctx, sshConf, config.OriginImage, req.Image, out)

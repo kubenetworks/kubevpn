@@ -69,17 +69,18 @@ func (c *ConnectOptions) Cleanup() {
 			log.Errorf("can not update ref-count: %v", err)
 		}
 	}
+	// leave proxy resources
+	err := c.LeaveProxyResources(ctx)
+	if err != nil {
+		log.Errorf("leave proxy resources error: %v", err)
+	}
+
 	for _, function := range c.getRolloutFunc() {
 		if function != nil {
 			if err := function(); err != nil {
 				log.Warningf("rollout function error: %v", err)
 			}
 		}
-	}
-	// leave proxy resources
-	err := c.LeaveProxyResources(ctx)
-	if err != nil {
-		log.Errorf("leave proxy resources error: %v", err)
 	}
 	if c.cancel != nil {
 		c.cancel()

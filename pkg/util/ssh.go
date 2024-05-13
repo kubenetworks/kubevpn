@@ -114,7 +114,7 @@ func AddSshFlags(flags *pflag.FlagSet, sshConf *SshConfig) {
 }
 
 // DialSshRemote https://github.com/golang/go/issues/21478
-func DialSshRemote(conf *SshConfig) (remote *ssh.Client, err error) {
+func DialSshRemote(ctx context.Context, conf *SshConfig) (remote *ssh.Client, err error) {
 	defer func() {
 		if err != nil {
 			if remote != nil {
@@ -124,21 +124,24 @@ func DialSshRemote(conf *SshConfig) (remote *ssh.Client, err error) {
 	}()
 
 	if conf.ConfigAlias != "" {
-		remote, err = conf.AliasRecursion()
+		remote, err = conf.AliasRecursion(ctx)
 	} else if conf.Jump != "" {
-		remote, err = conf.JumpRecursion()
+		remote, err = conf.JumpRecursion(ctx)
 	} else {
-		remote, err = conf.Dial()
+		remote, err = conf.Dial(ctx)
 	}
 
 	// ref: https://github.com/golang/go/issues/21478
 	if err == nil {
 		go func() {
-			ticker := time.NewTicker(time.Second * 15)
-			defer ticker.Stop()
 			defer remote.Close()
-			for range ticker.C {
+			for ctx.Err() == nil {
+				time.Sleep(time.Second * 15)
 				_, _, err := remote.SendRequest("keepalive@golang.org", true, nil)
+				if err == nil || err.Error() == "request failed" {
+					// Any response is a success.
+					continue
+				}
 				if err != nil {
 					return
 				}
@@ -234,7 +237,7 @@ func publicKeyFile(file string) (ssh.AuthMethod, error) {
 	return ssh.PublicKeys(key), nil
 }
 
-func copyStream(local net.Conn, remote net.Conn) {
+func copyStream(ctx context.Context, local net.Conn, remote net.Conn) {
 	chDone := make(chan bool, 2)
 
 	// start remote -> local data transfer
@@ -265,10 +268,15 @@ func copyStream(local net.Conn, remote net.Conn) {
 		}
 	}()
 
-	<-chDone
+	select {
+	case <-chDone:
+		return
+	case <-ctx.Done():
+		return
+	}
 }
 
-func (config SshConfig) AliasRecursion() (client *ssh.Client, err error) {
+func (config SshConfig) AliasRecursion(ctx context.Context) (client *ssh.Client, err error) {
 	var name = config.ConfigAlias
 	var jumper = "ProxyJump"
 	var bastionList = []SshConfig{GetBastion(name, config)}
@@ -283,12 +291,12 @@ func (config SshConfig) AliasRecursion() (client *ssh.Client, err error) {
 	}
 	for i := len(bastionList) - 1; i >= 0; i-- {
 		if client == nil {
-			client, err = bastionList[i].Dial()
+			client, err = bastionList[i].Dial(ctx)
 			if err != nil {
 				return
 			}
 		} else {
-			client, err = JumpTo(client, bastionList[i])
+			client, err = JumpTo(ctx, client, bastionList[i])
 			if err != nil {
 				return
 			}
@@ -297,7 +305,7 @@ func (config SshConfig) AliasRecursion() (client *ssh.Client, err error) {
 	return
 }
 
-func (config SshConfig) JumpRecursion() (client *ssh.Client, err error) {
+func (config SshConfig) JumpRecursion(ctx context.Context) (client *ssh.Client, err error) {
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
 	var sshConf = &SshConfig{}
 	AddSshFlags(flags, sshConf)
@@ -306,7 +314,7 @@ func (config SshConfig) JumpRecursion() (client *ssh.Client, err error) {
 		return nil, err
 	}
 	var baseClient *ssh.Client
-	baseClient, err = DialSshRemote(sshConf)
+	baseClient, err = DialSshRemote(ctx, sshConf)
 	if err != nil {
 		return nil, err
 	}
@@ -331,7 +339,7 @@ func (config SshConfig) JumpRecursion() (client *ssh.Client, err error) {
 	}
 
 	for _, sshConfig := range bastionList {
-		client, err = JumpTo(baseClient, sshConfig)
+		client, err = JumpTo(ctx, baseClient, sshConfig)
 		if err != nil {
 			return
 		}
@@ -374,7 +382,7 @@ func GetBastion(name string, defaultValue SshConfig) SshConfig {
 	return config
 }
 
-func (config SshConfig) Dial() (*ssh.Client, error) {
+func (config SshConfig) Dial(ctx context.Context) (client *ssh.Client, err error) {
 	if strings.Index(config.Addr, ":") < 0 {
 		// use default ssh port 22
 		config.Addr = net.JoinHostPort(config.Addr, "22")
@@ -384,16 +392,31 @@ func (config SshConfig) Dial() (*ssh.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ssh.Dial("tcp", config.Addr, &ssh.ClientConfig{
+	conn, err := net.DialTimeout("tcp", config.Addr, time.Second*10)
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		<-ctx.Done()
+		conn.Close()
+		if client != nil {
+			client.Close()
+		}
+	}()
+	c, chans, reqs, err := ssh.NewClientConn(conn, config.Addr, &ssh.ClientConfig{
 		User:            config.User,
 		Auth:            authMethod,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		BannerCallback:  ssh.BannerDisplayStderr(),
 		Timeout:         time.Second * 10,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return ssh.NewClient(c, chans, reqs), nil
 }
 
-func JumpTo(bClient *ssh.Client, to SshConfig) (client *ssh.Client, err error) {
+func JumpTo(ctx context.Context, bClient *ssh.Client, to SshConfig) (client *ssh.Client, err error) {
 	if strings.Index(to.Addr, ":") < 0 {
 		// use default ssh port 22
 		to.Addr = net.JoinHostPort(to.Addr, "22")
@@ -410,6 +433,14 @@ func JumpTo(bClient *ssh.Client, to SshConfig) (client *ssh.Client, err error) {
 	if err != nil {
 		return
 	}
+	go func() {
+		<-ctx.Done()
+		conn.Close()
+		if client != nil {
+			client.Close()
+		}
+		bClient.Close()
+	}()
 	defer func() {
 		if err != nil {
 			if client != nil {
@@ -495,7 +526,7 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 			}
 			sshClient.Close()
 		}
-		sshClient, err = DialSshRemote(conf)
+		sshClient, err = DialSshRemote(ctx, conf)
 		if err != nil {
 			log.Errorf("failed to dial remote ssh server: %v", err)
 			return nil, err
@@ -505,11 +536,20 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 
 	go func() {
 		defer localListen.Close()
+		go func() {
+			<-ctx.Done()
+			localListen.Close()
+			if sshClient != nil {
+				sshClient.Close()
+			}
+		}()
 
 		for ctx.Err() == nil {
 			localConn, err := localListen.Accept()
 			if err != nil {
-				log.Errorf("failed to accept conn: %v", err)
+				if !errors.Is(err, net.ErrClosed) {
+					log.Errorf("failed to accept conn: %v", err)
+				}
 				return
 			}
 			go func() {
@@ -521,7 +561,7 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 					return
 				}
 				defer remoteConn.Close()
-				copyStream(localConn, remoteConn)
+				copyStream(ctx, localConn, remoteConn)
 			}()
 		}
 	}()
@@ -551,7 +591,7 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 
 	// pre-check network ip connect
 	var cli *ssh.Client
-	cli, err = DialSshRemote(conf)
+	cli, err = DialSshRemote(ctx, conf)
 	if err != nil {
 		return
 	}
