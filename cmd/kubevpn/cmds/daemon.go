@@ -3,13 +3,17 @@ package cmds
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
+	"net/http"
 
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
@@ -24,10 +28,21 @@ func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			opt.ID = base64.URLEncoding.EncodeToString(b)
+
+			if opt.IsSudo {
+				go util.StartupPProf(config.SudoPProfPort)
+			} else {
+				go util.StartupPProf(config.PProfPort)
+			}
 			return nil
 		},
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			defer opt.Stop()
+			defer func() {
+				if errors.Is(err, http.ErrServerClosed) {
+					err = nil
+				}
+			}()
 			return opt.Start(cmd.Context())
 		},
 		Hidden:                true,

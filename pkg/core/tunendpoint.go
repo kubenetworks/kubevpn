@@ -18,6 +18,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, engine config.Engine, in chan<- *DataElem, out chan *DataElem) stack.LinkEndpoint {
@@ -37,7 +38,7 @@ func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, engine config
 				i := config.LPool.Get().([]byte)[:]
 				n := copy(i, bb)
 				bb = nil
-				out <- NewDataElem(i[:], n, nil, nil)
+				util.SafeWrite(out, NewDataElem(i[:], n, nil, nil))
 			}
 		}
 	}()
@@ -49,7 +50,6 @@ func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, engine config
 			read, err := tun.Read(bytes[:])
 			if err != nil {
 				if errors.Is(err, os.ErrClosed) {
-					log.Errorf("[TUN] Error: tun device closed")
 					return
 				}
 				// if context is done
@@ -111,7 +111,7 @@ func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, engine config
 				log.Debugf("[TUN-%s] IP-Protocol: %s, SRC: %s, DST: %s, Length: %d", layers.IPProtocol(ipProtocol).String(), layers.IPProtocol(ipProtocol).String(), src.String(), dst, read)
 			} else {
 				log.Debugf("[TUN-RAW] IP-Protocol: %s, SRC: %s, DST: %s, Length: %d", layers.IPProtocol(ipProtocol).String(), src.String(), dst, read)
-				in <- NewDataElem(bytes[:], read, src, dst)
+				util.SafeWrite(in, NewDataElem(bytes[:], read, src, dst))
 			}
 		}
 	}()
@@ -121,7 +121,6 @@ func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, engine config
 			config.LPool.Put(elem.Data()[:])
 			if err != nil {
 				if errors.Is(err, os.ErrClosed) {
-					log.Errorf("[TUN] Error: tun device closed")
 					return
 				}
 				// if context is done

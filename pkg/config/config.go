@@ -83,7 +83,8 @@ const (
 	ManageBy = konfig.ManagedbyLabelKey
 
 	// pprof port
-	PProfPort = 32345
+	PProfPort     = 32345
+	SudoPProfPort = 33345
 
 	// startup by KubeVPN
 	EnvStartSudoKubeVPNByKubeVPN = "DEPTH_SIGNED_BY_NAISON"

@@ -193,10 +193,10 @@ func (d *Device) readFromTun() {
 			return
 		}
 		if n != 0 {
-			d.tunInboundRaw <- &DataElem{
+			util.SafeWrite(d.tunInboundRaw, &DataElem{
 				data:   b[:],
 				length: n,
-			}
+			})
 		}
 	}
 }
@@ -238,12 +238,16 @@ func (d *Device) parseIPHeader(ctx context.Context) {
 		}
 
 		log.Debugf("[tun] %s --> %s, length: %d", e.src, e.dst, e.length)
-		d.tunInbound <- e
+		util.SafeWrite(d.tunInbound, e)
 	}
 }
 
 func (d *Device) Close() {
 	d.tun.Close()
+	util.SafeClose(d.tunInbound)
+	util.SafeClose(d.tunOutbound)
+	util.SafeClose(d.tunInboundRaw)
+	util.SafeClose(Chan)
 }
 
 func heartbeats(ctx context.Context, tun net.Conn, in chan<- *DataElem) {
@@ -300,12 +304,12 @@ func heartbeats(ctx context.Context, tun net.Conn, in chan<- *DataElem) {
 				} else {
 					src, dst = srcIPv6, config.RouterIP6
 				}
-				in <- &DataElem{
+				util.SafeWrite(in, &DataElem{
 					data:   data[:],
 					length: length,
 					src:    src,
 					dst:    dst,
-				}
+				})
 			}
 			time.Sleep(time.Second)
 		}

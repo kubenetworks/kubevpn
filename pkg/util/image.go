@@ -118,7 +118,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 
 	// transfer image to remote
 	var sshClient *ssh.Client
-	sshClient, err = DialSshRemote(conf)
+	sshClient, err = DialSshRemote(ctx, conf)
 	if err != nil {
 		return err
 	}
