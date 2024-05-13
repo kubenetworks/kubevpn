@@ -15,7 +15,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectForkServer) error {
+func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectForkServer) (err error) {
 	defer func() {
 		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
@@ -44,7 +44,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	go util.StartupPProf(config.PProfPort)
 	defaultlog.Default().SetOutput(io.Discard)
 	if transferImage {
-		err := util.TransferImage(ctx, sshConf, config.OriginImage, req.Image, out)
+		err = util.TransferImage(ctx, sshConf, config.OriginImage, req.Image, out)
 		if err != nil {
 			return err
 		}
@@ -64,6 +64,12 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 		sshCancel()
 		return nil
 	})
+	defer func() {
+		if err != nil {
+			connect.Cleanup()
+		}
+	}()
+
 	var path string
 	path, err = util.SshJump(sshCtx, sshConf, flags, false)
 	if err != nil {
@@ -86,11 +92,10 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	err = connect.DoConnect(sshCtx, true)
 	if err != nil {
 		log.Errorf("do connect error: %v", err)
-		connect.Cleanup()
 		return err
 	}
-	svr.secondaryConnect = append(svr.secondaryConnect, connect)
 
+	svr.secondaryConnect = append(svr.secondaryConnect, connect)
 	return nil
 }
 

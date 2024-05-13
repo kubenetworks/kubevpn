@@ -215,8 +215,14 @@ func (d *Device) writeToTun() {
 	}
 }
 
-func (d *Device) parseIPHeader() {
+func (d *Device) parseIPHeader(ctx context.Context) {
 	for e := range d.tunInboundRaw {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		if util.IsIPv4(e.data[:e.length]) {
 			// ipv4.ParseHeader
 			b := e.data[:e.length]
@@ -240,7 +246,7 @@ func (d *Device) Close() {
 	d.tun.Close()
 }
 
-func heartbeats(tun net.Conn, in chan<- *DataElem) {
+func heartbeats(ctx context.Context, tun net.Conn, in chan<- *DataElem) {
 	conn, err := util.GetTunDeviceByConn(tun)
 	if err != nil {
 		log.Errorf("get tun device error: %s", err.Error())
@@ -264,6 +270,12 @@ func heartbeats(tun net.Conn, in chan<- *DataElem) {
 	defer ticker.Stop()
 
 	for ; true; <-ticker.C {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		for i := 0; i < 4; i++ {
 			if bytes == nil {
 				bytes, err = genICMPPacket(srcIPv4, config.RouterIP)
@@ -352,10 +364,10 @@ func genICMPPacketIPv6(src net.IP, dst net.IP) ([]byte, error) {
 
 func (d *Device) Start(ctx context.Context) {
 	go d.readFromTun()
-	go d.parseIPHeader()
+	go d.parseIPHeader(ctx)
 	go d.tunInboundHandler(d.tunInbound, d.tunOutbound)
 	go d.writeToTun()
-	go heartbeats(d.tun, d.tunInbound)
+	go heartbeats(ctx, d.tun, d.tunInbound)
 
 	select {
 	case err := <-d.chExit:
@@ -381,7 +393,7 @@ func (h *tunHandler) HandleServer(ctx context.Context, tun net.Conn) {
 		chExit:        h.chExit,
 	}
 	device.SetTunInboundHandler(func(tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem) {
-		for {
+		for ctx.Err() == nil {
 			packetConn, err := (&net.ListenConfig{}).ListenPacket(ctx, "udp", h.node.Addr)
 			if err != nil {
 				log.Debugf("[udp] can not listen %s, err: %v", h.node.Addr, err)
