@@ -55,7 +55,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	if cfg.Addr != "" {
-		ipv4, _, err = net.ParseCIDR(cfg.Addr6)
+		ipv4, _, err = net.ParseCIDR(cfg.Addr)
 		if err != nil {
 			return
 		}
