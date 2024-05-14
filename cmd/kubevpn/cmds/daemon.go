@@ -5,6 +5,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
+	"runtime/pprof"
 
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -41,6 +44,21 @@ func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 			defer func() {
 				if errors.Is(err, http.ErrServerClosed) {
 					err = nil
+				}
+				if opt.IsSudo {
+					for _, profile := range pprof.Profiles() {
+						func() {
+							file, e := os.Create(filepath.Join(config.PprofPath, profile.Name()))
+							if e != nil {
+								return
+							}
+							defer file.Close()
+							e = profile.WriteTo(file, 1)
+							if e != nil {
+								return
+							}
+						}()
+					}
 				}
 			}()
 			return opt.Start(cmd.Context())
