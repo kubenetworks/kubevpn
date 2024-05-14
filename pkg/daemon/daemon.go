@@ -215,10 +215,10 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 func writePIDToFile(isSudo bool) error {
 	pidPath := GetPidPath(isSudo)
 	pid := os.Getpid()
-	err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), os.ModePerm)
+	err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0644)
 	if err != nil {
 		return err
 	}
-	err = os.Chmod(pidPath, os.ModePerm)
+	err = os.Chmod(pidPath, 0644)
 	return err
 }

@@ -29,11 +29,19 @@ const (
 var config []byte
 
 func init() {
-	err := os.MkdirAll(DaemonPath, os.ModePerm)
+	err := os.MkdirAll(DaemonPath, 0755)
 	if err != nil {
 		panic(err)
 	}
-	err = os.Chmod(DaemonPath, os.ModePerm)
+	err = os.Chmod(DaemonPath, 0755)
+	if err != nil {
+		panic(err)
+	}
+	err = os.MkdirAll(PprofPath, 0755)
+	if err != nil {
+		panic(err)
+	}
+	err = os.Chmod(PprofPath, 0755)
 	if err != nil {
 		panic(err)
 	}

@@ -85,6 +85,7 @@ const (
 	// pprof port
 	PProfPort     = 32345
 	SudoPProfPort = 33345
+	PProfDir      = "pprof"
 
 	// startup by KubeVPN
 	EnvStartSudoKubeVPNByKubeVPN = "DEPTH_SIGNED_BY_NAISON"
@@ -109,6 +110,7 @@ var (
 
 	DaemonPath string
 	HomePath   string
+	PprofPath  string
 )
 
 var (
@@ -129,6 +131,7 @@ func init() {
 	dir, _ := os.UserHomeDir()
 	DaemonPath = filepath.Join(dir, HOME, Daemon)
 	HomePath = filepath.Join(dir, HOME)
+	PprofPath = filepath.Join(dir, HOME, Daemon, PProfDir)
 }
 
 var Debug bool
