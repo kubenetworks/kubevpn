@@ -74,8 +74,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		}
 	}
 
-	isIPv6Enable, _ := isIPv6Enabled()
-	if cfg.Addr6 != "" && isIPv6Enable {
+	if cfg.Addr6 != "" {
 		var ipv6CIDR *net.IPNet
 		if ipv6, ipv6CIDR, err = net.ParseCIDR(cfg.Addr6); err != nil {
 			return
@@ -120,24 +119,4 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 		}
 	}
 	return nil
-}
-
-func isIPv6Enabled() (bool, error) {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return false, err
-	}
-
-	ipv6Enabled := false
-	for _, addr := range addrs {
-		// Type assertion to net.IPNet to get the IP address without the mask.
-		if ipNet, ok := addr.(*net.IPNet); ok && ipNet.IP.To16() != nil {
-			if ipNet.IP.To4() == nil { // This is an IPv6 address
-				ipv6Enabled = true
-				break
-			}
-		}
-	}
-
-	return ipv6Enabled, nil
 }
