@@ -333,8 +333,10 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 		}
 		list.Insert(s)
 	}
-	if err = os.Setenv(config.EnvInboundPodTunIPv6, c.localTunIPv6.String()); err != nil {
-		return err
+	if enable, _ := util.IsIPv6Enabled(); enable {
+		if err = os.Setenv(config.EnvInboundPodTunIPv6, c.localTunIPv6.String()); err != nil {
+			return err
+		}
 	}
 
 	r := core.Route{
