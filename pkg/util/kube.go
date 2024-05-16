@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/tools/clientcmd/api/latest"
+	clientcmdlatest "k8s.io/client-go/tools/clientcmd/api/latest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
 
@@ -98,4 +99,22 @@ func ConvertK8sApiServerToDomain(kubeConfigPath string) (newPath string, err err
 	}
 	newPath = temp.Name()
 	return
+}
+
+func ConvertConfig(factory cmdutil.Factory) ([]byte, error) {
+	rawConfig, err := factory.ToRawKubeConfigLoader().RawConfig()
+	if err != nil {
+		return nil, err
+	}
+	err = api.FlattenConfig(&rawConfig)
+	if err != nil {
+		return nil, err
+	}
+	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})
+	var convertedObj runtime.Object
+	convertedObj, err = latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(convertedObj)
 }

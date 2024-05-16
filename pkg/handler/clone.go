@@ -18,17 +18,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/tools/clientcmd/api"
-	"k8s.io/client-go/tools/clientcmd/api/latest"
-	clientcmdlatest "k8s.io/client-go/tools/clientcmd/api/latest"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
@@ -121,35 +115,17 @@ func (d *CloneOptions) InitClient(f cmdutil.Factory) (err error) {
 * 3) create serviceAccount as needed
 * 4) modify podTempSpec inject kubevpn container
  */
-func (d *CloneOptions) DoClone(ctx context.Context) error {
-	rawConfig, err := d.factory.ToRawKubeConfigLoader().RawConfig()
-	if err != nil {
-		return err
-	}
-	err = api.FlattenConfig(&rawConfig)
-	if err != nil {
-		return err
-	}
-	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})
-	var convertedObj runtime.Object
-	convertedObj, err = latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
-	if err != nil {
-		return err
-	}
-	var kubeconfigJsonBytes []byte
-	kubeconfigJsonBytes, err = json.Marshal(convertedObj)
-	if err != nil {
-		return err
-	}
-
+func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) error {
 	for _, workload := range d.Workloads {
 		log.Infof("clone workload %s", workload)
-		var object *runtimeresource.Info
-		object, err = util.GetUnstructuredObject(d.factory, d.Namespace, workload)
+		object, err := util.GetUnstructuredObject(d.factory, d.Namespace, workload)
 		if err != nil {
 			return err
 		}
 		u := object.Object.(*unstructured.Unstructured)
+		if err = unstructured.SetNestedField(u.UnstructuredContent(), int64(1), "spec", "replicas"); err != nil {
+			log.Warnf("failed to set repilcaset to 1: %v", err)
+		}
 		u.SetNamespace(d.TargetNamespace)
 		RemoveUselessInfo(u)
 		var newUUID uuid.UUID
@@ -192,9 +168,6 @@ func (d *CloneOptions) DoClone(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		d.addRollbackFunc(func() error {
-			return client.Resource(object.Mapping.Resource).Namespace(d.TargetNamespace).Delete(context.Background(), u.GetName(), metav1.DeleteOptions{})
-		})
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			// (1) add annotation KUBECONFIG
 			anno := spec.GetAnnotations()
@@ -797,7 +770,7 @@ func (d *CloneOptions) Cleanup(workloads ...string) error {
 	return nil
 }
 
-func (d *CloneOptions) addRollbackFunc(f func() error) {
+func (d *CloneOptions) AddRollbackFunc(f func() error) {
 	d.rollbackFuncList = append(d.rollbackFuncList, f)
 }
 
