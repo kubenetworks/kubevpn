@@ -1,6 +1,7 @@
 package action
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -15,7 +16,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) error {
+func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (err error) {
 	defer func() {
 		log.SetOutput(svr.LogFile)
 		log.SetLevel(log.DebugLevel)
@@ -83,8 +84,19 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 		Name:     "kubeconfig",
 		DefValue: file,
 	})
+	sshCtx, sshFunc := context.WithCancel(context.Background())
+	defer func() {
+		if err != nil {
+			_ = options.Cleanup()
+			sshFunc()
+		}
+	}()
+	options.AddRollbackFunc(func() error {
+		sshFunc()
+		return nil
+	})
 	var path string
-	path, err = util.SshJump(resp.Context(), sshConf, flags, false)
+	path, err = util.SshJump(sshCtx, sshConf, flags, false)
 	if err != nil {
 		return err
 	}
@@ -96,10 +108,9 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) err
 	}
 	config.Image = req.Image
 	log.Infof("clone workloads...")
-	err = options.DoClone(resp.Context())
+	err = options.DoClone(resp.Context(), []byte(req.KubeconfigBytes))
 	if err != nil {
 		log.Errorf("clone workloads failed: %v", err)
-		_ = options.Cleanup()
 		return err
 	}
 	svr.clone = options
