@@ -137,9 +137,10 @@ func GetPodCIDRFromCNI(ctx context.Context, clientset *kubernetes.Clientset, res
 	}
 
 	configList, err := libcni.ConfListFromBytes([]byte(content))
-	if err == nil {
-		log.Infoln("get cni config", configList.Name)
+	if err != nil {
+		return nil, err
 	}
+	log.Infoln("get cni config", configList.Name)
 	var cidr []*net.IPNet
 	for _, plugin := range configList.Plugins {
 		switch plugin.Network.Type {
