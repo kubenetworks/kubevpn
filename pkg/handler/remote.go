@@ -399,8 +399,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 							Resources:       Resources,
 						},
 					},
-					RestartPolicy:     v1.RestartPolicyAlways,
-					PriorityClassName: "system-cluster-critical",
+					RestartPolicy: v1.RestartPolicyAlways,
 				},
 			},
 		},
@@ -565,7 +564,6 @@ func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, 
 	// pods without controller
 	if len(path) == 0 {
 		log.Infof("workload %s/%s is not controlled by any controller", namespace, workload)
-		podTempSpec.Spec.PriorityClassName = ""
 		for _, container := range podTempSpec.Spec.Containers {
 			container.LivenessProbe = nil
 			container.StartupProbe = nil

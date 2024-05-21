@@ -123,7 +123,4 @@ kubevpn serve -L "tun:/127.0.0.1:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 		},
 		ImagePullPolicy: corev1.PullIfNotPresent,
 	})
-	if len(spec.PriorityClassName) == 0 {
-		spec.PriorityClassName = "system-cluster-critical"
-	}
 }
