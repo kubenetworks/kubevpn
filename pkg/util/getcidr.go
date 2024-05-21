@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -256,6 +257,7 @@ func CreateCIDRPod(ctx context.Context, clientset *kubernetes.Clientset, namespa
 					MaxSkew:           1,
 					TopologyKey:       "kubernetes.io/hostname",
 					WhenUnsatisfiable: v12.ScheduleAnyway,
+					LabelSelector:     metav1.SetAsLabelSelector(map[string]string{"app": config.ConfigMapPodTrafficManager}),
 				},
 			},
 		},
