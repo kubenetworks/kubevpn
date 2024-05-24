@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/schollz/progressbar/v3"
-	log "github.com/sirupsen/logrus"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -92,9 +91,7 @@ func Download(client *http.Client, url string, filename string, stdout, stderr i
 	}
 	defer get.Body.Close()
 	total := float64(get.ContentLength) / 1024 / 1024
-	s := fmt.Sprintf("Length: %d (%0.2fM)\n", get.ContentLength, total)
-	log.Info(s)
-	io.WriteString(stdout, s)
+	fmt.Fprintf(stdout, "Length: %d (%0.2fM)\n", get.ContentLength, total)
 
 	var f *os.File
 	f, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
@@ -106,7 +103,7 @@ func Download(client *http.Client, url string, filename string, stdout, stderr i
 		progressbar.OptionSetWriter(stdout),
 		progressbar.OptionEnableColorCodes(true),
 		progressbar.OptionShowBytes(true),
-		progressbar.OptionSetWidth(50),
+		progressbar.OptionSetWidth(25),
 		progressbar.OptionOnCompletion(func() {
 			_, _ = fmt.Fprint(stderr, "\n")
 		}),

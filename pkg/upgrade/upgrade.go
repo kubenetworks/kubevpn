@@ -6,10 +6,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	goversion "github.com/hashicorp/go-version"
+	"golang.org/x/oauth2"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -21,51 +25,33 @@ import (
 // 5) unzip to temp file
 // 6) check permission of putting new kubevpn back
 // 7) chmod +x, move old to /temp, move new to CURRENT_FOLDER
-func Main(ctx context.Context, client *http.Client, latestVersion string, latestCommit string, url string) error {
-	fmt.Printf("The latest version is: %s, commit: %s\n", latestVersion, latestCommit)
-
-	commit := config.GitCommit
-	version := config.Version
-	var err error
-	var cVersion, dVersion *goversion.Version
-	cVersion, err = goversion.NewVersion(version)
+func Main(ctx context.Context) error {
+	client, url, up, err := needsUpgrade(ctx, config.Version, config.GitCommit)
 	if err != nil {
 		return err
 	}
-	dVersion, err = goversion.NewVersion(latestVersion)
-	if err != nil {
-		return err
-	}
-	if cVersion.GreaterThan(dVersion) || (cVersion.Equal(dVersion) && commit == latestCommit) {
-		fmt.Println("Already up to date, don't needs to upgrade")
+	if !up {
 		return nil
 	}
 
-	var executable string
-	executable, err = os.Executable()
+	err = elevate()
 	if err != nil {
 		return err
 	}
-	var tem *os.File
-	tem, err = os.Create(filepath.Join(filepath.Dir(executable), ".test"))
-	if tem != nil {
-		_ = tem.Close()
-		_ = os.Remove(tem.Name())
-	}
-	if os.IsPermission(err) {
-		util.RunWithElevated()
-		os.Exit(0)
-	} else if err != nil {
+
+	err = downloadAndInstall(client, url)
+	if err != nil {
 		return err
-	} else if !util.IsAdmin() {
-		util.RunWithElevated()
-		os.Exit(0)
 	}
 
-	fmt.Printf("Current version is: %s less than latest version: %s, needs to upgrade\n", cVersion, dVersion)
+	fmt.Fprint(os.Stdout, "Upgrade daemon...\n")
+	err = daemon.StartupDaemon(ctx)
+	fmt.Fprint(os.Stdout, "Done\n")
+	return err
+}
 
-	var temp *os.File
-	temp, err = os.CreateTemp("", "")
+func downloadAndInstall(client *http.Client, url string) error {
+	temp, err := os.CreateTemp("", "")
 	if err != nil {
 		return err
 	}
@@ -114,4 +100,62 @@ func Main(ctx context.Context, client *http.Client, latestVersion string, latest
 	}
 	err = os.Rename(file.Name(), curFolder)
 	return err
+}
+
+func elevate() error {
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	var tem *os.File
+	tem, err = os.Create(filepath.Join(filepath.Dir(executable), ".test"))
+	if tem != nil {
+		_ = tem.Close()
+		_ = os.Remove(tem.Name())
+	}
+	if os.IsPermission(err) {
+		util.RunWithElevated()
+		os.Exit(0)
+	} else if err != nil {
+		return err
+	} else if !util.IsAdmin() {
+		util.RunWithElevated()
+		os.Exit(0)
+	}
+	return nil
+}
+
+func needsUpgrade(ctx context.Context, version string, commit string) (client *http.Client, url string, upgrade bool, err error) {
+	var latestVersion, latestCommit string
+	if config.GitHubOAuthToken != "" {
+		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
+		latestVersion, latestCommit, url, err = util.GetManifest(client, runtime.GOOS, runtime.GOARCH)
+	} else {
+		client = http.DefaultClient
+		v := "https://github.com/kubenetworks/kubevpn/raw/master/plugins/stable.txt"
+		var stream []byte
+		stream, err = util.DownloadFileStream(v)
+		latestVersion = strings.TrimSpace(string(stream))
+		url = fmt.Sprintf("https://github.com/kubenetworks/kubevpn/releases/download/%s/kubevpn_%s_%s_%s.zip", latestVersion, latestVersion, runtime.GOOS, runtime.GOARCH)
+	}
+	if err != nil {
+		return
+	}
+
+	var currV, latestV *goversion.Version
+	currV, err = goversion.NewVersion(version)
+	if err != nil {
+		return
+	}
+	latestV, err = goversion.NewVersion(latestVersion)
+	if err != nil {
+		return
+	}
+	if currV.GreaterThan(latestV) || (currV.Equal(latestV) && commit == latestCommit) {
+		fmt.Fprintf(os.Stdout, "Already up to date, don't needs to upgrade, version: %s\n", latestV)
+		return
+	}
+	fmt.Fprintf(os.Stdout, "Current version is: %s less than latest version: %s, needs to upgrade\n", currV, latestV)
+	upgrade = true
+	return
 }
