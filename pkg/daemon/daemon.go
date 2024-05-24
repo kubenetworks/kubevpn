@@ -20,6 +20,8 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"gopkg.in/natefinch/lumberjack.v2"
+	"k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/action"
 	_ "github.com/wencaiwulue/kubevpn/v2/pkg/daemon/handler"
@@ -49,6 +51,9 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	}
 	util.InitLogger(true)
 	log.SetOutput(l)
+	klog.SetOutput(l)
+	klog.LogToStderr(false)
+	rest.SetDefaultWarningHandler(rest.NoWarnings{})
 	// every day 00:00:00 rotate log
 	if !o.IsSudo {
 		go func() {

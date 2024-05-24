@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"gopkg.in/natefinch/lumberjack.v2"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/metadata/metadatainformer"
-	"k8s.io/client-go/restmapper"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -28,8 +28,8 @@ type Server struct {
 	clone            *handler.CloneOptions
 	secondaryConnect []*handler.ConnectOptions
 
-	gr       []*restmapper.APIGroupResources
-	informer metadatainformer.SharedInformerFactory
+	resourceLists []*metav1.APIResourceList
+	informer      metadatainformer.SharedInformerFactory
 
 	ID string
 }
