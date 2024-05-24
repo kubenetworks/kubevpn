@@ -265,12 +265,7 @@ message GetRequest {
 }
 
 message GetResponse {
-  repeated metadata metadata = 1;
-}
-
-message metadata {
-  string name = 1;
-  string namespace = 2;
+  repeated string metadata = 1;
 }
 
 message UpgradeRequest {
