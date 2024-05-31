@@ -28,9 +28,18 @@
 
 [English](README.md) | [中文](README_ZH.md) | [维基](https://github.com/kubenetworks/kubevpn/wiki/%E6%9E%B6%E6%9E%84)
 
-KubeVPN 是一个云原生开发工具。通过连接云端 kubernetes 网络，可以在本地使用 k8s dns 或者 Pod IP / Service IP
-直接访问远端集群中的服务。拦截远端集群中的工作负载的入流量到本地电脑，配合服务网格便于调试及开发。同时还可以使用开发模式，直接在本地使用 Docker
+KubeVPN 提供一个云原生开发环境。通过连接云端 kubernetes 网络，可以在本地使用 k8s dns 或者 Pod IP / Service IP
+直接访问远端集群中的服务。拦截远端集群中的工作负载的入流量到本地电脑，配合服务网格便于调试及开发。同时还可以使用开发模式，直接在本地使用
+Docker
 模拟 k8s pod runtime 将容器运行在本地 (具有相同的环境变量，磁盘和网络)。
+
+## 内容
+
+1. [快速开始](./README_ZH.md#快速开始)
+2. [功能](./README_ZH.md#功能)
+3. [问答](./README_ZH.md#问答)
+4. [架构](./README_ZH.md#架构)
+5. [贡献代码](./README_ZH.md#贡献代码)
 
 ## 快速开始
 
@@ -304,7 +313,8 @@ leave workload deployments/productpage successfully
 
 ### 本地进入开发模式 🐳
 
-将 Kubernetes pod 运行在本地的 Docker 容器中，同时配合 service mesh, 拦截带有指定 header 的流量到本地，或者所有的流量到本地。这个开发模式依赖于本地 Docker。
+将 Kubernetes pod 运行在本地的 Docker 容器中，同时配合 service mesh, 拦截带有指定 header 的流量到本地，或者所有的流量到本地。这个开发模式依赖于本地
+Docker。
 
 ```shell
 ➜  ~ kubevpn dev deployment/authors --headers a=1 -it --rm --entrypoint sh
@@ -375,7 +385,8 @@ clean up successfully
 ➜  ~
 ```
 
-此时本地会启动两个 container, 对应 pod 容器中的两个 container, 并且共享端口, 可以直接使用 localhost:port 的形式直接访问另一个 container,
+此时本地会启动两个 container, 对应 pod 容器中的两个 container, 并且共享端口, 可以直接使用 localhost:port 的形式直接访问另一个
+container,
 并且, 所有的环境变量、挂载卷、网络条件都和 pod 一样, 真正做到与 kubernetes 运行环境一致。
 
 ```shell
@@ -422,12 +433,14 @@ Created main container: authors_default_kubevpn_ff34b
 
 此时程序会挂起，默认为显示日志
 
-如果你想指定在本地启动容器的镜像, 可以使用参数 `--docker-image`, 当本地不存在该镜像时, 会从对应的镜像仓库拉取。如果你想指定启动参数，可以使用 `--entrypoint`
+如果你想指定在本地启动容器的镜像, 可以使用参数 `--docker-image`, 当本地不存在该镜像时,
+会从对应的镜像仓库拉取。如果你想指定启动参数，可以使用 `--entrypoint`
 参数，替换为你想要执行的命令，比如 `--entrypoint /bin/bash`, 更多使用参数，请参见 `kubevpn dev --help`.
 
 ### DinD ( Docker in Docker ) 在 Docker 中使用 kubevpn
 
-如果你想在本地使用 Docker in Docker (DinD) 的方式启动开发模式, 由于程序会读写 `/tmp` 目录，您需要手动添加参数 `-v /tmp:/tmp`, 还有一点需要注意, 如果使用 DinD
+如果你想在本地使用 Docker in Docker (DinD) 的方式启动开发模式, 由于程序会读写 `/tmp`
+目录，您需要手动添加参数 `-v /tmp:/tmp`, 还有一点需要注意, 如果使用 DinD
 模式，为了共享容器网络和 pid, 还需要指定参数 `--network`
 
 例如:
@@ -587,7 +600,8 @@ d0b3dab8912a   naison/kubevpn:v2.0.0     "/bin/bash"              5 minutes ago 
 
 答：有两种方法可以解决
 
-- 第一种，在可以访问 docker.io 的网络中，将命令 `kubevpn version` 中的 image 镜像， 转存到自己的私有镜像仓库，然后启动命令的时候，加上 `--image 新镜像` 即可。
+- 第一种，在可以访问 docker.io 的网络中，将命令 `kubevpn version` 中的 image 镜像，
+  转存到自己的私有镜像仓库，然后启动命令的时候，加上 `--image 新镜像` 即可。
   例如:
 
 ``` shell
@@ -670,12 +684,14 @@ ref-count is zero, prepare to clean up resource
 clean up successfully
 ```
 
-这是因为你的 `Docker-desktop` 声明的资源, 小于 container 容器启动时所需要的资源, 因此被 OOM 杀掉了, 你可以增加 `Docker-desktop` 对于 resources
+这是因为你的 `Docker-desktop` 声明的资源, 小于 container 容器启动时所需要的资源, 因此被 OOM 杀掉了,
+你可以增加 `Docker-desktop` 对于 resources
 的设置, 目录是：`Preferences --> Resources --> Memory`
 
 ### 3，使用 WSL( Windows Sub Linux ) Docker, 用命令 `kubevpn dev` 进入开发模式的时候, 在 terminal 中无法提示链接集群网络, 这是为什么, 如何解决?
 
-答案: 这是因为 WSL 的 Docker 使用的是 主机 Windows 的网络, 所以即便在 WSL 中启动 container, 这个 container 不会使用 WSL 的网络，而是使用 Windows 的网络。
+答案: 这是因为 WSL 的 Docker 使用的是 主机 Windows 的网络, 所以即便在 WSL 中启动 container, 这个 container 不会使用 WSL
+的网络，而是使用 Windows 的网络。
 解决方案:
 
 - 1): 在 WSL 中安装 Docker, 不要使用 Windows 版本的 Docker-desktop
@@ -732,3 +748,18 @@ clean up successfully
 ```
 
 重启 docker，重新操作即可
+
+## 架构
+
+架构信息可以从这里找到 [这里](/docs/en/Architecture.md).
+
+## 贡献代码
+
+所有都是欢迎的，只是打开一个问题也是受欢迎的～
+
+如果你想在本地电脑上调试项目，可以按照这样的步骤：
+
+- 使用喜欢的 IDE Debug 启动 daemon 和 sudo daemon 两个后台进程。（本质上是两个 GRPC server）
+- 添加断点给文件 `pkg/daemon/action/connect.go:21`
+- 新开个终端，执行命令 `make kubevpn`
+- 然后运行命令 `./bin/kubevpn connect` 这样将会击中断点

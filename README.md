@@ -28,11 +28,14 @@
 
 [中文](README_ZH.md) | [English](README.md) | [Wiki](https://github.com/kubenetworks/kubevpn/wiki/Architecture)
 
-KubeVPN offers a Cloud-Native Dev Environment that seamlessly connects to your Kubernetes cluster network. 
+KubeVPN offers a Cloud-Native Dev Environment that seamlessly connects to your Kubernetes cluster network.
 
-Gain access to the Kubernetes cluster network effortlessly using service names or Pod IP/Service IP. Facilitate the interception of inbound traffic from remote Kubernetes cluster services to your local PC through a service mesh and more. 
+Gain access to the Kubernetes cluster network effortlessly using service names or Pod IP/Service IP. Facilitate the
+interception of inbound traffic from remote Kubernetes cluster services to your local PC through a service mesh and
+more.
 
-For instance, you have the flexibility to run your Kubernetes pod within a local Docker container, ensuring an identical environment, volume, and network setup. 
+For instance, you have the flexibility to run your Kubernetes pod within a local Docker container, ensuring an identical
+environment, volume, and network setup.
 With KubeVPN, empower yourself to develop applications entirely on your local PC!
 
 ## Content
@@ -41,6 +44,7 @@ With KubeVPN, empower yourself to develop applications entirely on your local PC
 2. [Functions](./README.md#functions)
 3. [FAQ](./README.md#faq)
 4. [Architecture](./README.md#architecture)
+5. [Contributions](./README.md#Contributions)
 
 ## QuickStart
 
@@ -206,7 +210,9 @@ as `productpage`
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 ...
 ```
-***Disclaimer:*** This only works on the namespace where kubevpn-traffic-manager is deployed. Otherwise, use [Domain resolve](./README.md#domain-resolve)
+
+***Disclaimer:*** This only works on the namespace where kubevpn-traffic-manager is deployed. Otherwise,
+use [Domain resolve](./README.md#domain-resolve)
 
 ### Connect to multiple kubernetes cluster network
 
@@ -529,7 +535,8 @@ as `--entrypoint /bin/bash`, for more parameters, see `kubevpn dev --help`.
 ### DinD ( Docker in Docker ) use kubevpn in Docker
 
 If you want to start the development mode locally using Docker in Docker (DinD), because the program will read and
-write the `/tmp` directory, you need to manually add the parameter `-v /tmp:/tmp` (outer docker) and another thing is you
+write the `/tmp` directory, you need to manually add the parameter `-v /tmp:/tmp` (outer docker) and another thing is
+you
 need to special parameter `--network` (inner docker) for sharing network and pid
 
 Example:
@@ -856,3 +863,14 @@ restart docker and retry
 ## Architecture
 
 Architecture can be found [here](/docs/en/Architecture.md).
+
+## Contributions
+
+Always welcome. Just opening an issue should be also grateful.
+
+If you want to debug this project on local PC. Please follow the steps bellow:
+
+- Startup daemon and sudo daemon process with IDE debug mode. (Essentially two GRPC server)
+- Add breakpoint to file `pkg/daemon/action/connect.go:21`.
+- Open another terminal run `make kubevpn`.
+- Then run `./bin/kubevpn connect` and it will hit breakpoint.
