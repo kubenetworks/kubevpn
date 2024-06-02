@@ -1,0 +1,10 @@
+# https://github.com/vektra/mockery
+with-expecter: true
+packages:
+  github.com/jackpal/gateway:
+    interfaces:
+      interfaceGetter:
+        config:
+          mockName: "{{.Mock}}{{.InterfaceName}}"
+          inpackage: true
+          dir: "{{.InterfaceDir}}"

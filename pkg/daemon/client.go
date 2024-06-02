@@ -128,6 +128,13 @@ func GetPidPath(isSudo bool) string {
 	return filepath.Join(config.DaemonPath, name)
 }
 
+func GetSyncPath() string {
+	return filepath.Join(config.DaemonPath, "sync")
+}
+func GetHomePath() string {
+	return filepath.Join(config.HomePath)
+}
+
 func GetConfigFilePath() string {
 	return filepath.Join(config.HomePath, config.ConfigFile)
 }
