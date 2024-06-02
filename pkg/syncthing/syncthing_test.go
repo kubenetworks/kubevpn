@@ -29,7 +29,7 @@ func TestSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	//err = locations.Set(locations.GUIAssets, "/Users/fengcaiwen/GolandProjects/syncthing/gui/default")
+	//err = locations.Set(locations.GUIAssets, "~/GolandProjects/syncthing/gui/default")
 	if err != nil {
 		t.Fatal(err)
 	}
