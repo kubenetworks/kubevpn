@@ -23,6 +23,12 @@ const (
 	KubeVPNRestorePatchKey = "kubevpn-probe-restore-patch"
 
 	ConfigFile = "config.yaml"
+
+	Syncthing = "syncthing"
+
+	SyncthingGUI = "gui"
+
+	SyncthingRemoteDeviceID = "NV72NE7-OPOUTTL-M3XV5MD-PMTWT6X-GRUE3WF-Z34YYHX-2YAOZTK-GYYDNQN"
 )
 
 //go:embed config.yaml

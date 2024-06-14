@@ -64,6 +64,7 @@ func NewKubeVPNCommand() *cobra.Command {
 				CmdServe(factory),
 				CmdDaemon(factory),
 				CmdWebhook(factory),
+				CmdSyncthing(factory),
 			},
 		},
 		{

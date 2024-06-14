@@ -255,6 +255,9 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 				// https://stackoverflow.com/questions/32918849/what-process-signal-does-pod-receive-when-executing-kubectl-rolling-update
 				Command: []string{
 					"kubevpn",
+					"syncthing",
+					"&&",
+					"kubevpn",
 					"proxy",
 					workload,
 					"--kubeconfig", "/tmp/.kube/" + config.KUBECONFIG,
