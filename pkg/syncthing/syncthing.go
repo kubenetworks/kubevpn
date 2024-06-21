@@ -222,6 +222,10 @@ func StartServer(ctx context.Context, detach bool, remoteDir string) error {
 	if err = app.Start(); err != nil {
 		return err
 	}
+	go func() {
+		<-ctx.Done()
+		app.Stop(svcutil.ExitSuccess)
+	}()
 	if detach {
 		go app.Wait()
 	} else {
