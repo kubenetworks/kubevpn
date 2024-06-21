@@ -45,7 +45,7 @@ func Main(ctx context.Context) error {
 	}
 
 	fmt.Fprint(os.Stdout, "Upgrade daemon...\n")
-	err = daemon.StartupDaemon(ctx)
+	err = daemon.StartupDaemon(context.Background())
 	fmt.Fprint(os.Stdout, "Done\n")
 	return err
 }

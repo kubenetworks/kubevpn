@@ -347,6 +347,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 									},
 								},
 								RunAsUser:  pointer.Int64(0),
+								RunAsGroup: pointer.Int64(0),
 								Privileged: pointer.Bool(true),
 							},
 						},

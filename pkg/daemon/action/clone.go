@@ -74,6 +74,8 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 		TargetRegistry:         req.TargetRegistry,
 		IsChangeTargetRegistry: req.IsChangeTargetRegistry,
 		TargetWorkloadNames:    map[string]string{},
+		LocalDir:               req.LocalDir,
+		RemoteDir:              req.RemoteDir,
 	}
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
@@ -108,6 +110,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 	}
 	config.Image = req.Image
 	log.Infof("clone workloads...")
+	options.SetContext(sshCtx)
 	err = options.DoClone(resp.Context(), []byte(req.KubeconfigBytes))
 	if err != nil {
 		log.Errorf("clone workloads failed: %v", err)

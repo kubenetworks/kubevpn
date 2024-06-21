@@ -31,8 +31,10 @@ const (
 	ContainerSidecarEnvoyProxy   = "envoy-proxy"
 	ContainerSidecarControlPlane = "control-plane"
 	ContainerSidecarVPN          = "vpn"
+	ContainerSidecarSyncthing    = "syncthing"
 
 	VolumeEnvoyConfig = "envoy-config"
+	VolumeSyncthing   = "syncthing"
 
 	innerIPv4Pool = "223.254.0.100/16"
 	// 原因：在docker环境中，设置docker的 gateway 和 subnet，不能 inner 的冲突，也不能和 docker的 172.17 冲突

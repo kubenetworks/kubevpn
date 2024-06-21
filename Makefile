@@ -19,6 +19,7 @@ IMAGE ?= $(REGISTRY)/$(NAMESPACE)/$(REPOSITORY):$(VERSION)
 IMAGE_DEFAULT = docker.io/naison/kubevpn:latest
 
 # Setup the -ldflags option for go build here, interpolate the variable values
+# add '-tag noassets' for syncthing gui
 LDFLAGS=-tags noassets --ldflags "-s -w\
  -X ${BASE}/pkg/config.Image=${IMAGE} \
  -X ${BASE}/pkg/config.Version=${VERSION} \
@@ -93,7 +94,7 @@ container-local: kubevpn-linux-amd64
 
 .PHONY: container-test
 container-test: kubevpn-linux-amd64
-	docker buildx build --platform linux/amd64,linux/arm64 -t docker.io/naison/kubevpn:sync0604 -f $(BUILD_DIR)/test.Dockerfile --push .
+	docker buildx build --platform linux/amd64,linux/arm64 -t docker.io/naison/kubevpn:test -f $(BUILD_DIR)/test.Dockerfile --push .
 
 .PHONY: version
 version:

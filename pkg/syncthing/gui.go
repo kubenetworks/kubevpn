@@ -8,14 +8,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 //go:embed gui.zip
 var assetsZip embed.FS
 
 func MakeSureGui() error {
-	return ExtractSyncthingGUIZipToDir(assetsZip, "gui.zip", daemon.GetSyncthingPath())
+	return ExtractSyncthingGUIZipToDir(assetsZip, "gui.zip", config.GetSyncthingPath())
 }
 
 func ExtractSyncthingGUIZipToDir(fs embed.FS, zipPath, targetDir string) error {

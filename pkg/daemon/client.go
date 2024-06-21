@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"google.golang.org/grpc"
@@ -24,7 +23,7 @@ import (
 var daemonClient, sudoDaemonClient rpc.DaemonClient
 
 func GetClient(isSudo bool) (cli rpc.DaemonClient) {
-	sockPath := GetSockPath(isSudo)
+	sockPath := config.GetSockPath(isSudo)
 	if _, err := os.Stat(sockPath); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -85,7 +84,7 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient) {
 }
 
 func GetClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClient, conn *grpc.ClientConn, err error) {
-	sockPath := GetSockPath(isSudo)
+	sockPath := config.GetSockPath(isSudo)
 	_, err = os.Stat(sockPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return
@@ -110,34 +109,6 @@ func GetClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClie
 	}
 	cli = rpc.NewDaemonClient(conn)
 	return cli, conn, nil
-}
-
-func GetSockPath(isSudo bool) string {
-	name := config.SockPath
-	if isSudo {
-		name = config.SudoSockPath
-	}
-	return filepath.Join(config.DaemonPath, name)
-}
-
-func GetPidPath(isSudo bool) string {
-	name := config.PidPath
-	if isSudo {
-		name = config.SudoPidPath
-	}
-	return filepath.Join(config.DaemonPath, name)
-}
-
-func GetSyncthingPath() string {
-	return filepath.Join(config.DaemonPath, config.Syncthing)
-}
-
-func GetSyncthingGUIPath() string {
-	return filepath.Join(config.DaemonPath, config.Syncthing, config.SyncthingGUI)
-}
-
-func GetConfigFilePath() string {
-	return filepath.Join(config.HomePath, config.ConfigFile)
 }
 
 func StartupDaemon(ctx context.Context, path ...string) error {
@@ -173,7 +144,7 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 		return nil
 	}
 
-	pidPath := GetPidPath(isSudo)
+	pidPath := config.GetPidPath(isSudo)
 	err := os.Remove(pidPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -212,7 +183,7 @@ func GetHttpClient(isSudo bool) *http.Client {
 				var d net.Dialer
 				d.Timeout = 30 * time.Second
 				d.KeepAlive = 30 * time.Second
-				return d.DialContext(ctx, "unix", GetSockPath(isSudo))
+				return d.DialContext(ctx, "unix", config.GetSockPath(isSudo))
 			},
 		},
 	}
@@ -220,7 +191,7 @@ func GetHttpClient(isSudo bool) *http.Client {
 }
 
 func GetTCPClient(isSudo bool) net.Conn {
-	conn, err := net.Dial("unix", GetSockPath(isSudo))
+	conn, err := net.Dial("unix", config.GetSockPath(isSudo))
 	if err != nil {
 		return nil
 	}

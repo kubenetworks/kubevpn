@@ -3,99 +3,123 @@ package syncthing
 import (
 	"context"
 	"net"
+	"path/filepath"
 	"strconv"
 
 	"github.com/syncthing/syncthing/cmd/syncthing/cmdutil"
 	"github.com/syncthing/syncthing/lib/config"
 	"github.com/syncthing/syncthing/lib/db/backend"
 	"github.com/syncthing/syncthing/lib/events"
+	"github.com/syncthing/syncthing/lib/fs"
 	"github.com/syncthing/syncthing/lib/locations"
+	"github.com/syncthing/syncthing/lib/logger"
+	"github.com/syncthing/syncthing/lib/netutil"
 	"github.com/syncthing/syncthing/lib/protocol"
 	"github.com/syncthing/syncthing/lib/svcutil"
 	"github.com/syncthing/syncthing/lib/syncthing"
-	"github.com/syncthing/syncthing/lib/tlsutil"
 	"github.com/thejerf/suture/v4"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	pkgconfig "github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-func StartClient(ctx context.Context, localDir, remoteDir string, localDeviceID, remoteDeviceID string) error {
+const (
+	dir     = "dir"
+	local   = "local"
+	remote  = "remote"
+	label   = "kubevpn"
+	guiPort = 8384
+)
+
+var (
+	conf = filepath.Join(pkgconfig.GetSyncthingPath(), "config.xml")
+)
+
+func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr string) error {
 	if err := MakeSureGui(); err != nil {
 		return err
 	}
-
-	cert, err := tlsutil.NewCertificateInMemory("syncthing", 36500)
+	err := cmdutil.SetConfigDataLocationsFromFlags(pkgconfig.GetSyncthingPath(), "", "")
 	if err != nil {
 		return err
 	}
-	localDeviceID = protocol.NewDeviceID(cert.Certificate[0]).String()
+	err = locations.Set(locations.GUIAssets, pkgconfig.GetSyncthingGUIPath())
+	if err != nil {
+		return err
+	}
+	var l = logger.New().NewFacility("main", "Main package")
+	spec := svcutil.SpecWithDebugLogger(l)
+	earlyService := suture.New("early", spec)
+	earlyService.ServeBackground(ctx)
 
-	localID, _ := protocol.DeviceIDFromString(localDeviceID)
-	remoteID, _ := protocol.DeviceIDFromString(remoteDeviceID)
-	localPort, _ := util.GetAvailableTCPPortOrDie()
+	evLogger := events.NewLogger()
+	earlyService.Add(evLogger)
 
-	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort))
+	var localID = pkgconfig.LocalDeviceID
+	var remoteID = pkgconfig.RemoteDeviceID
 	var devices []config.DeviceConfiguration
 	devices = append(devices, config.DeviceConfiguration{
-		DeviceID: localID, Addresses: []string{addr}, Name: "kubevpn client", Untrusted: false, AutoAcceptFolders: true,
+		DeviceID:          localID,
+		Compression:       protocol.CompressionAlways,
+		Addresses:         []string{localAddr},
+		Name:              local,
+		Untrusted:         false,
+		AutoAcceptFolders: true,
+		Paused:            false,
 	})
 	devices = append(devices, config.DeviceConfiguration{
-		DeviceID: remoteID, Addresses: []string{net.JoinHostPort("172.16.48.110", "8384")}, Name: "kubevpn server", Untrusted: false, AutoAcceptFolders: true,
+		DeviceID:          remoteID,
+		Compression:       protocol.CompressionAlways,
+		Addresses:         []string{remoteAddr},
+		Name:              remote,
+		Untrusted:         false,
+		AutoAcceptFolders: true,
+		Paused:            false,
 	})
 
 	var folder []config.FolderConfiguration
 	folder = append(folder, config.FolderConfiguration{
-		ID:      localDir,
-		Path:    localDir,
-		Type:    config.FolderTypeSendReceive,
-		Devices: []config.FolderDeviceConfiguration{{DeviceID: localID, IntroducedBy: remoteID}},
+		ID:             dir,
+		Label:          label,
+		FilesystemType: fs.FilesystemTypeBasic,
+		Path:           localDir,
+		Type:           config.FolderTypeSendReceive,
+		Paused:         false,
+		Devices: []config.FolderDeviceConfiguration{
+			{DeviceID: localID},
+			{DeviceID: remoteID},
+		},
 	})
-	folder = append(folder, config.FolderConfiguration{
-		ID:      remoteDir,
-		Path:    remoteDir,
-		Devices: []config.FolderDeviceConfiguration{{DeviceID: remoteID, IntroducedBy: localID}},
-		Type:    config.FolderTypeSendReceive,
-	})
-
-	err = cmdutil.SetConfigDataLocationsFromFlags(daemon.GetSyncthingPath(), "", "")
-	if err != nil {
-		return err
-	}
-	err = locations.Set(locations.GUIAssets, daemon.GetSyncthingGUIPath())
-	if err != nil {
-		return err
-	}
-	cfg := config.Wrap("configs.xml", config.Configuration{
+	cfgWrapper := config.Wrap(conf, config.Configuration{
 		Devices: devices,
 		Folders: folder,
 		GUI: config.GUIConfiguration{
 			Enabled:    true,
-			RawAddress: addr,
+			RawAddress: localAddr,
 		},
 		Options: config.OptionsConfiguration{
-			CREnabled:            false,
 			AutoUpgradeIntervalH: 0,
 			UpgradeToPreReleases: false,
-			GlobalAnnEnabled:     false,
+			CREnabled:            false,
 		},
 	}, localID, events.NoopLogger)
+	earlyService.Add(cfgWrapper)
 
-	db := backend.OpenMemory()
-	app, err := syncthing.New(cfg, db, events.NoopLogger, cert, syncthing.Options{
-		NoUpgrade: true,
-		Verbose:   true,
-	})
+	ldb := backend.OpenMemory()
+	appOpts := syncthing.Options{
+		NoUpgrade:            true,
+		ProfilerAddr:         "",
+		ResetDeltaIdxs:       false,
+		Verbose:              false,
+		DBRecheckInterval:    0,
+		DBIndirectGCInterval: 0,
+	}
+
+	app, err := syncthing.New(cfgWrapper, ldb, evLogger, pkgconfig.LocalCert, appOpts)
 	if err != nil {
 		return err
 	}
 
-	sup := suture.New("test", svcutil.SpecWithDebugLogger(nil))
-	sup.Add(cfg)
-	sup.ServeBackground(ctx)
-
-	err = app.Start()
-	if err != nil {
+	if err = app.Start(); err != nil {
 		return err
 	}
 	go func() {
@@ -103,78 +127,105 @@ func StartClient(ctx context.Context, localDir, remoteDir string, localDeviceID,
 		app.Stop(svcutil.ExitSuccess)
 	}()
 	go app.Wait()
-	return nil
+	return app.Error()
 }
 
-func StartServer(ctx context.Context, detach bool, deviceID string) error {
+func StartServer(ctx context.Context, detach bool, remoteDir string) error {
 	if err := MakeSureGui(); err != nil {
 		return err
 	}
 
-	cert, err := tlsutil.NewCertificateInMemory("syncthing", 36500)
+	err := cmdutil.SetConfigDataLocationsFromFlags(pkgconfig.GetSyncthingPath(), "", "")
 	if err != nil {
 		return err
 	}
+	err = locations.Set(locations.GUIAssets, pkgconfig.GetSyncthingGUIPath())
+	if err != nil {
+		return err
+	}
+	spec := svcutil.SpecWithDebugLogger(logger.New().NewFacility("", ""))
+	earlyService := suture.New("early", spec)
+	earlyService.ServeBackground(ctx)
 
-	var id protocol.DeviceID
-	id, err = protocol.DeviceIDFromString(deviceID)
-	if err != nil {
-		return err
-	}
-	err = cmdutil.SetConfigDataLocationsFromFlags(daemon.GetSyncthingPath(), "", "")
-	if err != nil {
-		return err
-	}
-	err = locations.Set(locations.GUIAssets, daemon.GetSyncthingGUIPath())
-	if err != nil {
-		return err
-	}
-	addr := "0.0.0.0:8384"
-	device := config.DeviceConfiguration{
-		DeviceID: id, Addresses: []string{addr}, Name: "kubevpn server", AutoAcceptFolders: true, Untrusted: false,
-	}
-	cfg := config.Wrap("configs.xml", config.Configuration{
-		Defaults: config.Defaults{
-			Device: device,
+	evLogger := events.NewLogger()
+	earlyService.Add(evLogger)
+
+	var localID = pkgconfig.LocalDeviceID
+	var remoteID = pkgconfig.RemoteDeviceID
+	addr := net.JoinHostPort("0.0.0.0", strconv.Itoa(guiPort))
+	var devices []config.DeviceConfiguration
+	devices = append(devices, config.DeviceConfiguration{
+		DeviceID:          remoteID,
+		Compression:       protocol.CompressionAlways,
+		Addresses:         []string{addr},
+		Name:              remote,
+		Untrusted:         false,
+		AutoAcceptFolders: true,
+		Paused:            false,
+	})
+	devices = append(devices, config.DeviceConfiguration{
+		DeviceID:          localID,
+		Compression:       protocol.CompressionAlways,
+		Addresses:         []string{"dynamic"},
+		Name:              local,
+		Untrusted:         false,
+		AutoAcceptFolders: true,
+		Paused:            false,
+	})
+
+	var folder []config.FolderConfiguration
+	folder = append(folder, config.FolderConfiguration{
+		ID:             dir,
+		Label:          label,
+		FilesystemType: fs.FilesystemTypeBasic,
+		Path:           remoteDir,
+		Type:           config.FolderTypeSendReceive,
+		Paused:         false,
+		Devices: []config.FolderDeviceConfiguration{
+			{DeviceID: remoteID},
+			{DeviceID: localID},
 		},
-		//Devices: []config.DeviceConfiguration{device},
+	})
+	cfgWrapper := config.Wrap(conf, config.Configuration{
+		Devices: devices,
+		Folders: folder,
 		GUI: config.GUIConfiguration{
 			Enabled:    true,
 			RawAddress: addr,
 		},
 		Options: config.OptionsConfiguration{
+			RawListenAddresses:   []string{netutil.AddressURL("tcp", net.JoinHostPort("0.0.0.0", strconv.Itoa(config.DefaultTCPPort)))},
+			CRURL:                "",
 			CREnabled:            false,
 			AutoUpgradeIntervalH: 0,
 			UpgradeToPreReleases: false,
 			GlobalAnnEnabled:     false,
 		},
-	}, id, events.NoopLogger)
+	}, remoteID, events.NoopLogger)
+	earlyService.Add(cfgWrapper)
 
-	db := backend.OpenMemory()
-	app, err := syncthing.New(cfg, db, events.NoopLogger, cert, syncthing.Options{
-		NoUpgrade: true,
-		Verbose:   true,
-	})
+	ldb := backend.OpenMemory()
+	appOpts := syncthing.Options{
+		NoUpgrade:            true,
+		ProfilerAddr:         "",
+		ResetDeltaIdxs:       false,
+		Verbose:              false,
+		DBRecheckInterval:    0,
+		DBIndirectGCInterval: 0,
+	}
+
+	app, err := syncthing.New(cfgWrapper, ldb, evLogger, pkgconfig.RemoteCert, appOpts)
 	if err != nil {
 		return err
 	}
 
-	sup := suture.New("test", svcutil.SpecWithDebugLogger(nil))
-	sup.Add(cfg)
-	sup.ServeBackground(ctx)
-
-	err = app.Start()
-	if err != nil {
+	if err = app.Start(); err != nil {
 		return err
 	}
-	go func() {
-		<-ctx.Done()
-		app.Stop(svcutil.ExitSuccess)
-	}()
 	if detach {
 		go app.Wait()
 	} else {
 		app.Wait()
 	}
-	return nil
+	return app.Error()
 }

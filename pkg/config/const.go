@@ -23,12 +23,6 @@ const (
 	KubeVPNRestorePatchKey = "kubevpn-probe-restore-patch"
 
 	ConfigFile = "config.yaml"
-
-	Syncthing = "syncthing"
-
-	SyncthingGUI = "gui"
-
-	SyncthingRemoteDeviceID = "NV72NE7-OPOUTTL-M3XV5MD-PMTWT6X-GRUE3WF-Z34YYHX-2YAOZTK-GYYDNQN"
 )
 
 //go:embed config.yaml
@@ -60,4 +54,32 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func GetSockPath(isSudo bool) string {
+	name := SockPath
+	if isSudo {
+		name = SudoSockPath
+	}
+	return filepath.Join(DaemonPath, name)
+}
+
+func GetPidPath(isSudo bool) string {
+	name := PidPath
+	if isSudo {
+		name = SudoPidPath
+	}
+	return filepath.Join(DaemonPath, name)
+}
+
+func GetSyncthingPath() string {
+	return filepath.Join(DaemonPath, SyncthingDir)
+}
+
+func GetSyncthingGUIPath() string {
+	return filepath.Join(DaemonPath, SyncthingDir, SyncthingGUIDir)
+}
+
+func GetConfigFilePath() string {
+	return filepath.Join(HomePath, ConfigFile)
 }
