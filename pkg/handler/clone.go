@@ -4,19 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/distribution/reference"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
+	libconfig "github.com/syncthing/syncthing/lib/config"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/dynamic"
@@ -25,12 +31,14 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/cmd/util/podcmd"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/mesh"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/syncthing"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -52,6 +60,8 @@ type CloneOptions struct {
 	isSame bool
 
 	OriginKubeconfigPath string
+	LocalDir             string
+	RemoteDir            string
 
 	targetClientset  *kubernetes.Clientset
 	targetRestclient *rest.RESTClient
@@ -64,6 +74,8 @@ type CloneOptions struct {
 	factory    cmdutil.Factory
 
 	rollbackFuncList []func() error
+	ctx              context.Context
+	syncthingGUIAddr string
 }
 
 func (d *CloneOptions) InitClient(f cmdutil.Factory) (err error) {
@@ -106,6 +118,10 @@ func (d *CloneOptions) InitClient(f cmdutil.Factory) (err error) {
 	}
 	d.targetClientset, err = d.targetFactory.KubernetesClientSet()
 	return
+}
+
+func (d *CloneOptions) SetContext(ctx context.Context) {
+	d.ctx = ctx
 }
 
 // DoClone
@@ -180,49 +196,61 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 			// (2) modify labels
 			spec.SetLabels(labelsMap)
 
-			// (3) add volumes KUBECONFIG
-			spec.Spec.Volumes = append(spec.Spec.Volumes, v1.Volume{
-				Name: config.KUBECONFIG,
-				VolumeSource: v1.VolumeSource{
-					DownwardAPI: &v1.DownwardAPIVolumeSource{
-						Items: []v1.DownwardAPIVolumeFile{{
-							Path: config.KUBECONFIG,
-							FieldRef: &v1.ObjectFieldSelector{
-								FieldPath: fmt.Sprintf("metadata.annotations['%s']", config.KUBECONFIG),
-							},
-						}},
+			// (3) add volumes KUBECONFIG and syncDir
+			syncDataDirName := config.VolumeSyncthing
+			spec.Spec.Volumes = append(spec.Spec.Volumes,
+				v1.Volume{
+					Name: config.KUBECONFIG,
+					VolumeSource: v1.VolumeSource{
+						DownwardAPI: &v1.DownwardAPIVolumeSource{
+							Items: []v1.DownwardAPIVolumeFile{{
+								Path: config.KUBECONFIG,
+								FieldRef: &v1.ObjectFieldSelector{
+									FieldPath: fmt.Sprintf("metadata.annotations['%s']", config.KUBECONFIG),
+								},
+							}},
+						},
 					},
 				},
-			})
+				v1.Volume{
+					Name: syncDataDirName,
+					VolumeSource: v1.VolumeSource{
+						EmptyDir: &v1.EmptyDirVolumeSource{},
+					},
+				},
+			)
 
 			// (4) add kubevpn containers
 			containers := spec.Spec.Containers
 			// remove vpn sidecar
 			for i := 0; i < len(containers); i++ {
+				containers[i].ReadinessProbe = nil
+				containers[i].LivenessProbe = nil
+				containers[i].StartupProbe = nil
 				containerName := containers[i].Name
 				if err == nil && (containerName == config.ContainerSidecarVPN || containerName == config.ContainerSidecarEnvoyProxy) {
 					containers = append(containers[:i], containers[i+1:]...)
 					i--
 				}
 			}
-			if d.TargetImage != "" {
-				var index = -1
-				if d.TargetContainer != "" {
-					for i, container := range containers {
-						nestedString := container.Name
-						if err == nil && nestedString == d.TargetContainer {
-							index = i
-							break
-						}
-					}
-				} else {
-					index = 0
+			{
+				container, err := podcmd.FindOrDefaultContainerByName(&v1.Pod{Spec: v1.PodSpec{Containers: containers}}, d.TargetContainer, false, log.StandardLogger().Out)
+				if err != nil {
+					return err
 				}
-				if index < 0 {
-					return fmt.Errorf("can not found container %s in pod template", d.TargetContainer)
+				if d.TargetImage != "" {
+					// update container[index] image
+					container.Image = d.TargetImage
 				}
-				// update container[index] image
-				containers[index].Image = d.TargetImage
+				if d.LocalDir != "" {
+					container.Command = []string{"tail", "-f", "/dev/null"}
+					container.Args = []string{}
+					container.VolumeMounts = append(container.VolumeMounts, v1.VolumeMount{
+						Name:      syncDataDirName,
+						ReadOnly:  false,
+						MountPath: d.RemoteDir,
+					})
+				}
 			}
 			// https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/
 			if spec.Spec.SecurityContext == nil {
@@ -278,11 +306,13 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 						v1.ResourceMemory: resource.MustParse("2048Mi"),
 					},
 				},
-				VolumeMounts: []v1.VolumeMount{{
-					Name:      config.KUBECONFIG,
-					ReadOnly:  false,
-					MountPath: "/tmp/.kube",
-				}},
+				VolumeMounts: []v1.VolumeMount{
+					{
+						Name:      config.KUBECONFIG,
+						ReadOnly:  false,
+						MountPath: "/tmp/.kube",
+					},
+				},
 				Lifecycle: &v1.Lifecycle{
 					PostStart: &v1.LifecycleHandler{
 						Exec: &v1.ExecAction{
@@ -302,10 +332,39 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 						},
 					},
 					RunAsUser:  pointer.Int64(0),
+					RunAsGroup: pointer.Int64(0),
 					Privileged: pointer.Bool(true),
 				},
 			}
-			spec.Spec.Containers = append(containers, *container)
+			containerSync := &v1.Container{
+				Name:  config.ContainerSidecarSyncthing,
+				Image: config.Image,
+				// https://stackoverflow.com/questions/32918849/what-process-signal-does-pod-receive-when-executing-kubectl-rolling-update
+				Command: []string{
+					"kubevpn",
+					"syncthing",
+					"--dir",
+					d.RemoteDir,
+				},
+				Resources: v1.ResourceRequirements{
+					Requests: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:    resource.MustParse("500m"),
+						v1.ResourceMemory: resource.MustParse("512Mi"),
+					},
+					Limits: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:    resource.MustParse("1000m"),
+						v1.ResourceMemory: resource.MustParse("1024Mi"),
+					},
+				},
+				VolumeMounts: []v1.VolumeMount{
+					{
+						Name:      syncDataDirName,
+						ReadOnly:  false,
+						MountPath: d.RemoteDir,
+					},
+				},
+			}
+			spec.Spec.Containers = append(containers, *container, *containerSync)
 			//set spec
 			marshal, err := json.Marshal(spec)
 			if err != nil {
@@ -340,6 +399,26 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 			return err
 		}
 		_ = util.RolloutStatus(ctx, d.factory, d.Namespace, workload, time.Minute*60)
+
+		if d.LocalDir == "" {
+			continue
+		}
+
+		list, err := util.GetRunningPodList(ctx, d.targetClientset, d.TargetNamespace, fields.SelectorFromSet(labelsMap).String())
+		if err != nil {
+			return err
+		}
+		remoteAddr := net.JoinHostPort(list[0].Status.PodIP, strconv.Itoa(libconfig.DefaultTCPPort))
+		localPort, _ := util.GetAvailableTCPPortOrDie()
+		localAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort))
+		// disable synchting log, because it can not set output writer, only write std.Out or discard
+		_ = os.Setenv("LOGGER_DISCARD", "1")
+		err = syncthing.StartClient(d.ctx, d.LocalDir, localAddr, remoteAddr)
+		if err != nil {
+			return err
+		}
+		d.syncthingGUIAddr = (&url.URL{Scheme: "http", Host: localAddr}).String()
+		log.Infof("access the syncthing GUI via the following URL: %s", d.syncthingGUIAddr)
 	}
 	return nil
 }
@@ -776,4 +855,8 @@ func (d *CloneOptions) AddRollbackFunc(f func() error) {
 
 func (d *CloneOptions) GetFactory() cmdutil.Factory {
 	return d.factory
+}
+
+func (d *CloneOptions) GetSyncthingGUIAddr() string {
+	return d.syncthingGUIAddr
 }

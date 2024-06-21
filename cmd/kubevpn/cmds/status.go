@@ -17,6 +17,7 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 	"sigs.k8s.io/yaml"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -94,7 +95,7 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&aliasName, "alias", "", "Alias name, query connect status by alias config name")
-	cmd.Flags().StringVarP(&localFile, "file", "f", daemon.GetConfigFilePath(), "Config file location")
+	cmd.Flags().StringVarP(&localFile, "file", "f", config.GetConfigFilePath(), "Config file location")
 	cmd.Flags().StringVarP(&remoteAddr, "remote", "r", "", "Remote config file, eg: https://raw.githubusercontent.com/kubenetworks/kubevpn/master/pkg/config/config.yaml")
 	cmd.Flags().StringVarP(&format, "output", "o", FormatTable, fmt.Sprintf("Output format. One of: (%s, %s, %s)", FormatJson, FormatYaml, FormatTable))
 	return cmd
@@ -195,7 +196,7 @@ func genCloneMsg(w *tabwriter.Writer, list []*rpc.Status) {
 
 	_, _ = fmt.Fprintf(w, "\n")
 	w.SetRememberedWidths(nil)
-	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Name", "Headers", "ToName", "ToKubeconfig", "ToNamespace")
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Name", "Headers", "ToName", "ToKubeconfig", "ToNamespace", "SyncthingGUI")
 	for _, c := range list {
 		for _, clone := range c.CloneList {
 			//_, _ = fmt.Fprintf(w, "%s\n", clone.Workload)
@@ -207,13 +208,14 @@ func genCloneMsg(w *tabwriter.Writer, list []*rpc.Status) {
 				if len(headers) == 0 {
 					headers = []string{"*"}
 				}
-				_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
+				_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					c.ID,
 					clone.Workload,
 					strings.Join(headers, ","),
 					rule.DstWorkload,
 					rule.DstKubeconfig,
 					rule.DstNamespace,
+					clone.SyncthingGUIAddr,
 				)
 			}
 		}

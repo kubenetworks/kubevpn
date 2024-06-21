@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 
+	pkgerr "github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
@@ -28,6 +29,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &util.SshConfig{}
 	var extraRoute = &handler.ExtraRouteInfo{}
 	var transferImage bool
+	var syncDir string
 	cmd := &cobra.Command{
 		Use:   "clone",
 		Short: i18n.T("Clone workloads to target-kubeconfig cluster with same volume、env、and network"),
@@ -91,6 +93,17 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			// special empty string, eg: --target-registry ""
 			options.IsChangeTargetRegistry = cmd.Flags().Changed("target-registry")
 
+			if syncDir != "" {
+				local, remote, err := util.ParseDirMapping(syncDir)
+				if err != nil {
+					return pkgerr.Wrapf(err, "options 'sync' is invalid, %s", syncDir)
+				}
+				options.LocalDir = local
+				options.RemoteDir = remote
+			} else {
+				options.RemoteDir = config.DefaultRemoteDir
+			}
+
 			bytes, ns, err := util.ConvertToKubeConfigBytes(f)
 			if err != nil {
 				return err
@@ -117,6 +130,8 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 				TransferImage:          transferImage,
 				Image:                  config.Image,
 				Level:                  int32(logLevel),
+				LocalDir:               options.LocalDir,
+				RemoteDir:              options.RemoteDir,
 			}
 			cli := daemon.GetClient(false)
 			resp, err := cli.Clone(cmd.Context(), req)
@@ -149,6 +164,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&options.TargetNamespace, "target-namespace", "", "Clone workloads in this namespace, if not special, use origin namespace")
 	cmd.Flags().StringVar(&options.TargetKubeconfig, "target-kubeconfig", "", "Clone workloads will create in this cluster, if not special, use origin cluster")
 	cmd.Flags().StringVar(&options.TargetRegistry, "target-registry", "", "Clone workloads will create this registry domain to replace origin registry, if not special, use origin registry")
+	cmd.Flags().StringVar(&syncDir, "sync", "", "Sync local dir to remote pod dir. format: LOCAL_DIR:REMOTE_DIR, eg: ~/code:/app/code")
 
 	handler.AddExtraRoute(cmd.Flags(), extraRoute)
 	util.AddSshFlags(cmd.Flags(), sshConf)

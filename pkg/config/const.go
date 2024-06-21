@@ -55,3 +55,31 @@ func init() {
 		panic(err)
 	}
 }
+
+func GetSockPath(isSudo bool) string {
+	name := SockPath
+	if isSudo {
+		name = SudoSockPath
+	}
+	return filepath.Join(DaemonPath, name)
+}
+
+func GetPidPath(isSudo bool) string {
+	name := PidPath
+	if isSudo {
+		name = SudoPidPath
+	}
+	return filepath.Join(DaemonPath, name)
+}
+
+func GetSyncthingPath() string {
+	return filepath.Join(DaemonPath, SyncthingDir)
+}
+
+func GetSyncthingGUIPath() string {
+	return filepath.Join(DaemonPath, SyncthingDir, SyncthingGUIDir)
+}
+
+func GetConfigFilePath() string {
+	return filepath.Join(HomePath, ConfigFile)
+}

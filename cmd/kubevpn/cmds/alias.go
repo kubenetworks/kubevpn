@@ -14,7 +14,7 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 	yaml "sigs.k8s.io/yaml/goyaml.v3"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -106,7 +106,7 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&localFile, "file", "f", daemon.GetConfigFilePath(), "Config file location")
+	cmd.Flags().StringVarP(&localFile, "file", "f", config.GetConfigFilePath(), "Config file location")
 	cmd.Flags().StringVarP(&remoteAddr, "remote", "r", "", "Remote config file, eg: https://raw.githubusercontent.com/kubenetworks/kubevpn/master/pkg/config/config.yaml")
 	return cmd
 }
@@ -122,7 +122,7 @@ func ParseAndGet(localFile, remoteAddr string, aliasName string) ([]Config, erro
 		path = remoteAddr
 		content, err = util.DownloadFileStream(path)
 	} else {
-		path = daemon.GetConfigFilePath()
+		path = config.GetConfigFilePath()
 		content, err = os.ReadFile(path)
 	}
 	if err != nil {

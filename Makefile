@@ -21,7 +21,8 @@ IMAGE_TEST = docker.io/naison/kubevpn:test
 IMAGE_GH = ghcr.io/kubenetworks/kubevpn:$(VERSION)
 
 # Setup the -ldflags option for go build here, interpolate the variable values
-LDFLAGS=--ldflags "\
+# add '-tag noassets' for syncthing gui
+LDFLAGS=-tags noassets --ldflags "-s -w\
  -X ${BASE}/pkg/config.Image=${IMAGE} \
  -X ${BASE}/pkg/config.Version=${VERSION} \
  -X ${BASE}/pkg/config.GitCommit=${GIT_COMMIT} \
@@ -107,7 +108,7 @@ gen:
 
 .PHONY: ut
 ut:
-	go test -coverprofile=coverage.txt -coverpkg=./... -v ./... -timeout=60m
+	go test -tags=noassets -coverprofile=coverage.txt -coverpkg=./... -v ./... -timeout=60m
 
 .PHONY: cover
 cover: ut

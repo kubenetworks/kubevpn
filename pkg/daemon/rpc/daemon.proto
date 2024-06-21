@@ -116,6 +116,9 @@ message CloneRequest {
   int32 Level = 17;
 
   string OriginKubeconfigPath = 18;
+
+  string LocalDir = 19;
+  string RemoteDir = 20;
 }
 
 message CloneResponse {
@@ -181,7 +184,8 @@ message Clone {
   string Kubeconfig = 3;
   string Namespace = 4;
   string Workload = 5;
-  repeated CloneRule RuleList = 6;
+  string SyncthingGUIAddr = 6;
+  repeated CloneRule RuleList = 7;
 }
 
 message CloneRule {

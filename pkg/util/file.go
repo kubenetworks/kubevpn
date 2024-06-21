@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -103,4 +104,19 @@ func backoff(min, max time.Duration, attemptNum int) time.Duration {
 		sleep = max
 	}
 	return sleep
+}
+
+func ParseDirMapping(dir string) (local, remote string, err error) {
+	index := strings.LastIndex(dir, ":")
+	if index < 0 {
+		err = fmt.Errorf("directory mapping is invaild: %s", dir)
+		return
+	}
+	local = dir[:index]
+	_, err = os.Stat(local)
+	if err != nil {
+		return
+	}
+	remote = dir[index+1:]
+	return
 }

@@ -130,11 +130,12 @@ func gen(connect *handler.ConnectOptions, clone *handler.CloneOptions) ([]*rpc.P
 				namespace = connect.Namespace
 			}
 			cloneList = append(cloneList, &rpc.Clone{
-				ClusterID:  clusterID,
-				Cluster:    cluster,
-				Kubeconfig: kubeconfig,
-				Namespace:  namespace,
-				Workload:   workload,
+				ClusterID:        clusterID,
+				Cluster:          cluster,
+				Kubeconfig:       kubeconfig,
+				Namespace:        namespace,
+				Workload:         workload,
+				SyncthingGUIAddr: clone.GetSyncthingGUIAddr(),
 				RuleList: []*rpc.CloneRule{
 					{
 						DstCluster:    util.GetKubeconfigCluster(clone.GetFactory()),

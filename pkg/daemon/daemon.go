@@ -23,6 +23,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/action"
 	_ "github.com/wencaiwulue/kubevpn/v2/pkg/daemon/handler"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -69,7 +70,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		}()
 	}
 
-	sockPath := GetSockPath(o.IsSudo)
+	sockPath := config.GetSockPath(o.IsSudo)
 	err := os.Remove(sockPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -161,7 +162,7 @@ func CreateDowngradingHandler(grpcServer *grpc.Server, httpHandler http.Handler)
 
 func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 	var f = func() {
-		_, err := os.Stat(GetSockPath(o.IsSudo))
+		_, err := os.Stat(config.GetSockPath(o.IsSudo))
 		if errors.Is(err, os.ErrNotExist) {
 			o.Stop()
 			return
@@ -190,7 +191,7 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 			return
 		}
 		defer watcher.Close()
-		err = watcher.Add(GetPidPath(o.IsSudo))
+		err = watcher.Add(config.GetPidPath(o.IsSudo))
 		if err != nil {
 			return
 		}
@@ -218,7 +219,7 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 }
 
 func writePIDToFile(isSudo bool) error {
-	pidPath := GetPidPath(isSudo)
+	pidPath := config.GetPidPath(isSudo)
 	pid := os.Getpid()
 	err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0644)
 	if err != nil {
