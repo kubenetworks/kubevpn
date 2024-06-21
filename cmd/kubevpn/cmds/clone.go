@@ -1,12 +1,11 @@
 package cmds
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
+	pkgerr "github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
@@ -95,14 +94,14 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			options.IsChangeTargetRegistry = cmd.Flags().Changed("target-registry")
 
 			if syncDir != "" {
-				dir := strings.Split(syncDir, ":")
-				if len(dir) != 2 {
-					return errors.New("options 'sync' is invalid")
+				local, remote, err := util.ParseDirMapping(syncDir)
+				if err != nil {
+					return pkgerr.Wrapf(err, "options 'sync' is invalid, %s", syncDir)
 				}
-				options.LocalDir = dir[0]
-				options.RemoteDir = dir[1]
+				options.LocalDir = local
+				options.RemoteDir = remote
 			} else {
-				options.RemoteDir = "/kubevpn-data"
+				options.RemoteDir = config.DefaultRemoteDir
 			}
 
 			bytes, ns, err := util.ConvertToKubeConfigBytes(f)

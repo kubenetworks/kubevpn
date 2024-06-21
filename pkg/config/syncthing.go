@@ -10,6 +10,8 @@ const (
 	SyncthingDir = "syncthing"
 
 	SyncthingGUIDir = "gui"
+
+	DefaultRemoteDir = "/kubevpn-data"
 )
 
 var LocalCert tls.Certificate
