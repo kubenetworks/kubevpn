@@ -11,6 +11,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 // ref https://stackoverflow.com/questions/31558066/how-to-ask-for-administer-privileges-on-windows-with-go
@@ -27,6 +29,7 @@ func RunWithElevated() {
 
 	var showCmd int32 = 1 //SW_NORMAL
 
+	os.Setenv(config.EnvDisableSyncthingLog, "1")
 	err := windows.ShellExecute(0, verbPtr, exePtr, argPtr, cwdPtr, showCmd)
 	if err != nil {
 		logrus.Warn(err)
@@ -45,7 +48,8 @@ func RunWithElevatedInnerExec() error {
 	join := strings.Join(append([]string{executable}, os.Args[1:]...), " ")
 	// Powershell Start C:\Users\naison\Desktop\kubevpn-windows-amd64.exe  -Verb Runas -Wait -WindowStyle Hidden
 	c, _ := syscall.UTF16PtrFromString(fmt.Sprintf(`%s Start "%s" -Verb Runas`, path, join))
-	err = windows.CreateProcess(nil, c, nil, nil, true, windows.INHERIT_PARENT_AFFINITY, nil, nil, &si, &pi)
+	env, _ := syscall.UTF16PtrFromString(config.EnvDisableSyncthingLog + "=1")
+	err = windows.CreateProcess(nil, c, nil, nil, true, windows.INHERIT_PARENT_AFFINITY, env, nil, &si, &pi)
 	if err != nil {
 		return err
 	}
