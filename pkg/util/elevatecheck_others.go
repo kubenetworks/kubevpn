@@ -33,7 +33,7 @@ func RunWithElevated() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	cmd.Env = append(os.Environ(), envStartSudoKubeVPNByKubeVPN+"=1")
+	cmd.Env = append(os.Environ(), envStartSudoKubeVPNByKubeVPN+"=1", config.EnvDisableSyncthingLog+"=1")
 	// while send single CTRL+C, command will quit immediately, but output will cut off and print util quit final
 	// so, mute single CTRL+C, let inner command handle single only
 	go func() {

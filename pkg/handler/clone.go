@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -132,6 +131,10 @@ func (d *CloneOptions) SetContext(ctx context.Context) {
 * 4) modify podTempSpec inject kubevpn container
  */
 func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) error {
+	var args []string
+	if len(d.Headers) != 0 {
+		args = append(args, "--headers", labels.Set(d.Headers).String())
+	}
 	for _, workload := range d.Workloads {
 		log.Infof("clone workload %s", workload)
 		object, err := util.GetUnstructuredObject(d.factory, d.Namespace, workload)
@@ -281,17 +284,16 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 				Name:  config.ContainerSidecarVPN,
 				Image: config.Image,
 				// https://stackoverflow.com/questions/32918849/what-process-signal-does-pod-receive-when-executing-kubectl-rolling-update
-				Command: []string{
+				Command: append([]string{
 					"kubevpn",
 					"proxy",
 					workload,
 					"--kubeconfig", "/tmp/.kube/" + config.KUBECONFIG,
 					"--namespace", d.Namespace,
-					"--headers", labels.Set(d.Headers).String(),
 					"--image", config.Image,
 					"--engine", string(d.Engine),
 					"--foreground",
-				},
+				}, args...),
 				Env: []v1.EnvVar{{
 					Name:  config.EnvStartSudoKubeVPNByKubeVPN,
 					Value: "1",
@@ -411,8 +413,6 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 		remoteAddr := net.JoinHostPort(list[0].Status.PodIP, strconv.Itoa(libconfig.DefaultTCPPort))
 		localPort, _ := util.GetAvailableTCPPortOrDie()
 		localAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort))
-		// disable synchting log, because it can not set output writer, only write std.Out or discard
-		_ = os.Setenv("LOGGER_DISCARD", "1")
 		err = syncthing.StartClient(d.ctx, d.LocalDir, localAddr, remoteAddr)
 		if err != nil {
 			return err
