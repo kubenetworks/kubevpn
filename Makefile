@@ -1,7 +1,7 @@
 VERSION ?= $(shell git tag -l --sort=v:refname | tail -1)
-GIT_COMMIT := $(shell git describe --match=NeVeRmAtCh --always --abbrev=40)
-BUILD_TIME := $(shell date +"%Y-%m-%dT%H:%M:%SZ")
-BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
+GIT_COMMIT ?= $(shell git describe --match=NeVeRmAtCh --always --abbrev=40)
+BUILD_TIME ?= $(shell date +"%Y-%m-%dT%H:%M:%SZ")
+BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 
 GOOS := $(shell go env GOHOSTOS)
 GOARCH := $(shell go env GOHOSTARCH)
@@ -10,15 +10,15 @@ OS_ARCH := ${GOOS}/${GOARCH}
 
 BASE := github.com/wencaiwulue/kubevpn/v2
 FOLDER := ${BASE}/cmd/kubevpn
-BUILD_DIR := ./build
-OUTPUT_DIR := ./bin
+BUILD_DIR ?= ./build
+OUTPUT_DIR ?= ./bin
 REGISTRY ?= docker.io
 NAMESPACE ?= naison
 REPOSITORY ?= kubevpn
 IMAGE ?= $(REGISTRY)/$(NAMESPACE)/$(REPOSITORY):$(VERSION)
-IMAGE_LATEST = docker.io/naison/kubevpn:latest
-IMAGE_TEST = docker.io/naison/kubevpn:test
-IMAGE_GH = ghcr.io/kubenetworks/kubevpn:$(VERSION)
+IMAGE_LATEST ?= docker.io/naison/kubevpn:latest
+IMAGE_TEST ?= docker.io/naison/kubevpn:test
+IMAGE_GH ?= ghcr.io/kubenetworks/kubevpn:$(VERSION)
 
 # Setup the -ldflags option for go build here, interpolate the variable values
 # add '-tag noassets' for syncthing gui
