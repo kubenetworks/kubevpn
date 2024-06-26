@@ -21,7 +21,7 @@ func (svr *Server) Upgrade(ctx context.Context, req *rpc.UpgradeRequest) (*rpc.U
 	if err != nil {
 		return nil, err
 	}
-	if clientVersion.GreaterThan(daemonVersion) || (clientVersion.Equal(daemonVersion) && req.ClientCommitId != config.GitCommit) {
+	if clientVersion.GreaterThan(daemonVersion) {
 		log.Info("daemon version is less than client, needs to upgrade")
 		return &rpc.UpgradeResponse{NeedUpgrade: true}, nil
 	}
