@@ -233,12 +233,12 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 	if config.GitHubOAuthToken != "" {
 		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
 	}
-	latestVersion, latestCommit, url, err := util.GetManifest(client, "linux", "amd64")
+	latestVersion, url, err := util.GetManifest(client, "linux", "amd64")
 	if err != nil {
 		w.Log("Get latest kubevpn version failed: %v", err)
 		return err
 	}
-	w.Log("The latest version is: %s, commit: %s", latestVersion, latestCommit)
+	w.Log("The latest version is: %s", latestVersion)
 	var temp *os.File
 	temp, err = os.CreateTemp("", "")
 	if err != nil {

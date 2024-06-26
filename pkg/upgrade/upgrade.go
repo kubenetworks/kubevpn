@@ -26,7 +26,7 @@ import (
 // 6) check permission of putting new kubevpn back
 // 7) chmod +x, move old to /temp, move new to CURRENT_FOLDER
 func Main(ctx context.Context) error {
-	client, url, up, err := needsUpgrade(ctx, config.Version, config.GitCommit)
+	client, url, up, err := needsUpgrade(ctx, config.Version)
 	if err != nil {
 		return err
 	}
@@ -125,11 +125,11 @@ func elevate() error {
 	return nil
 }
 
-func needsUpgrade(ctx context.Context, version string, commit string) (client *http.Client, url string, upgrade bool, err error) {
-	var latestVersion, latestCommit string
+func needsUpgrade(ctx context.Context, version string) (client *http.Client, url string, upgrade bool, err error) {
+	var latestVersion string
 	if config.GitHubOAuthToken != "" {
 		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
-		latestVersion, latestCommit, url, err = util.GetManifest(client, runtime.GOOS, runtime.GOARCH)
+		latestVersion, url, err = util.GetManifest(client, runtime.GOOS, runtime.GOARCH)
 	} else {
 		client = http.DefaultClient
 		v := "https://github.com/kubenetworks/kubevpn/raw/master/plugins/stable.txt"
@@ -151,7 +151,7 @@ func needsUpgrade(ctx context.Context, version string, commit string) (client *h
 	if err != nil {
 		return
 	}
-	if currV.GreaterThan(latestV) || (currV.Equal(latestV) && commit == latestCommit) {
+	if currV.GreaterThan(latestV) {
 		fmt.Fprintf(os.Stdout, "Already up to date, don't needs to upgrade, version: %s\n", latestV)
 		return
 	}

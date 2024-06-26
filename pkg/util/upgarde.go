@@ -26,7 +26,7 @@ const (
 	addr = "https://github.com/wencaiwulue/kubevpn/releases/latest"
 )
 
-func GetManifest(httpCli *http.Client, os string, arch string) (version string, commit string, url string, err error) {
+func GetManifest(httpCli *http.Client, os string, arch string) (version string, url string, err error) {
 	var resp *http.Response
 	var errs []error
 	for _, addr := range address {
@@ -54,7 +54,6 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 		return
 	}
 	version = m.TagName
-	commit = m.TargetCommitish
 	for _, asset := range m.Assets {
 		if strings.Contains(asset.Name, arch) && strings.Contains(asset.Name, os) {
 			url = asset.BrowserDownloadUrl

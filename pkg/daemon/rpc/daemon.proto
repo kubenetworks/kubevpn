@@ -274,7 +274,6 @@ message GetResponse {
 
 message UpgradeRequest {
   string ClientVersion = 1;
-  string ClientCommitId = 2;
 }
 
 message UpgradeResponse {

@@ -58,8 +58,7 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient) {
 	cli = rpc.NewDaemonClient(conn)
 	var resp *rpc.UpgradeResponse
 	resp, err = cli.Upgrade(ctx, &rpc.UpgradeRequest{
-		ClientVersion:  config.Version,
-		ClientCommitId: config.GitCommit,
+		ClientVersion: config.Version,
 	})
 	if err == nil && resp.NeedUpgrade {
 		// quit daemon
