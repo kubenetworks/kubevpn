@@ -198,10 +198,10 @@ type disconnectWarp struct {
 }
 
 func (r *disconnectWarp) Write(p []byte) (n int, err error) {
-	err = r.server.Send(&rpc.DisconnectResponse{
+	_ = r.server.Send(&rpc.DisconnectResponse{
 		Message: string(p),
 	})
-	return len(p), err
+	return len(p), nil
 }
 
 func newDisconnectWarp(server rpc.Daemon_DisconnectServer) io.Writer {

@@ -29,13 +29,11 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 	v4, _ := svr.connect.GetLocalTunIP()
 	for _, workload := range req.GetWorkloads() {
 		// add rollback func to remove envoy config
-		log.Infof("leave workload %s", workload)
 		err := handler.UnPatchContainer(factory, maps, namespace, workload, v4)
 		if err != nil {
 			log.Errorf("leave workload %s failed: %v", workload, err)
 			continue
 		}
-		log.Infof("leave workload %s successfully", workload)
 	}
 	return nil
 }
@@ -45,10 +43,10 @@ type leaveWarp struct {
 }
 
 func (r *leaveWarp) Write(p []byte) (n int, err error) {
-	err = r.server.Send(&rpc.LeaveResponse{
+	_ = r.server.Send(&rpc.LeaveResponse{
 		Message: string(p),
 	})
-	return len(p), err
+	return len(p), nil
 }
 
 func newLeaveWarp(server rpc.Daemon_LeaveServer) io.Writer {

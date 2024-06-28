@@ -157,12 +157,18 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 
 	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 
-	var empty bool
-	empty, err = removeEnvoyConfig(mapInterface, nodeID, localTunIPv4)
+	var empty, found bool
+	empty, found, err = removeEnvoyConfig(mapInterface, nodeID, localTunIPv4)
 	if err != nil {
 		log.Errorf("remove envoy config error: %v", err)
 		return err
 	}
+	if !found {
+		log.Infof("not proxy resource %s", workload)
+		return nil
+	}
+
+	log.Infof("leave workload %s", workload)
 
 	mesh.RemoveContainers(templateSpec)
 	if u.GetAnnotations() != nil && u.GetAnnotations()[config.KubeVPNRestorePatchKey] != "" {
@@ -292,33 +298,37 @@ func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []v1.Containe
 	return v
 }
 
-func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTunIPv4 string) (bool, error) {
+func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTunIPv4 string) (empty bool, found bool, err error) {
 	configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
-		return true, nil
+		return true, false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	str, ok := configMap.Data[config.KeyEnvoy]
 	if !ok {
-		return false, errors.New("can not found value for key: envoy-config.yaml")
+		return false, false, errors.New("can not found value for key: envoy-config.yaml")
 	}
 	var v []*controlplane.Virtual
 	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
-		return false, err
+		return false, false, err
 	}
 	for _, virtual := range v {
 		if nodeID == virtual.Uid {
 			for i := 0; i < len(virtual.Rules); i++ {
 				if virtual.Rules[i].LocalTunIPv4 == localTunIPv4 {
+					found = true
 					virtual.Rules = append(virtual.Rules[:i], virtual.Rules[i+1:]...)
 					i--
 				}
 			}
 		}
 	}
-	var empty bool
+	if !found {
+		return false, false, nil
+	}
+
 	// remove default
 	for i := 0; i < len(v); i++ {
 		if nodeID == v[i].Uid && len(v[i].Rules) == 0 {
@@ -330,11 +340,11 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, local
 	var bytes []byte
 	bytes, err = yaml.Marshal(v)
 	if err != nil {
-		return false, err
+		return false, found, err
 	}
 	configMap.Data[config.KeyEnvoy] = string(bytes)
 	_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
-	return empty, err
+	return empty, found, err
 }
 
 func contains(a map[string]string, sub map[string]string) bool {

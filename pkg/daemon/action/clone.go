@@ -125,10 +125,10 @@ type cloneWarp struct {
 }
 
 func (r *cloneWarp) Write(p []byte) (n int, err error) {
-	err = r.server.Send(&rpc.CloneResponse{
+	_ = r.server.Send(&rpc.CloneResponse{
 		Message: string(p),
 	})
-	return len(p), err
+	return len(p), nil
 }
 
 func newCloneWarp(server rpc.Daemon_CloneServer) io.Writer {

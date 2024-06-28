@@ -58,10 +58,10 @@ type resetWarp struct {
 }
 
 func (r *resetWarp) Write(p []byte) (n int, err error) {
-	err = r.server.Send(&rpc.ResetResponse{
+	_ = r.server.Send(&rpc.ResetResponse{
 		Message: string(p),
 	})
-	return len(p), err
+	return len(p), nil
 }
 
 func newResetWarp(server rpc.Daemon_ResetServer) io.Writer {

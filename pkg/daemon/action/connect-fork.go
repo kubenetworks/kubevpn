@@ -95,6 +95,9 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 		return err
 	}
 
+	if resp.Context().Err() != nil {
+		return resp.Context().Err()
+	}
 	svr.secondaryConnect = append(svr.secondaryConnect, connect)
 	return nil
 }
@@ -181,6 +184,9 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		}
 	}
 
+	if resp.Context().Err() != nil {
+		return resp.Context().Err()
+	}
 	svr.secondaryConnect = append(svr.secondaryConnect, connect)
 	return nil
 }
@@ -190,10 +196,10 @@ type connectForkWarp struct {
 }
 
 func (r *connectForkWarp) Write(p []byte) (n int, err error) {
-	err = r.server.Send(&rpc.ConnectResponse{
+	_ = r.server.Send(&rpc.ConnectResponse{
 		Message: string(p),
 	})
-	return len(p), err
+	return len(p), nil
 }
 
 func newConnectForkWarp(server rpc.Daemon_ConnectForkServer) io.Writer {

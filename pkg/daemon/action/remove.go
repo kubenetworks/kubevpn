@@ -32,10 +32,10 @@ type removeWarp struct {
 }
 
 func (r *removeWarp) Write(p []byte) (n int, err error) {
-	err = r.server.Send(&rpc.RemoveResponse{
+	_ = r.server.Send(&rpc.RemoveResponse{
 		Message: string(p),
 	})
-	return len(p), err
+	return len(p), nil
 }
 
 func newRemoveWarp(server rpc.Daemon_RemoveServer) io.Writer {
