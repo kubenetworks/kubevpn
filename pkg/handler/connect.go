@@ -404,7 +404,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 	var podList *v1.PodList
 	for _, n := range []string{v1.NamespaceAll, c.Namespace} {
 		log.Debugf("list namepsace %s pods", n)
-		podList, err = c.clientset.CoreV1().Pods(n).List(ctx, metav1.ListOptions{})
+		podList, err = c.clientset.CoreV1().Pods(n).List(ctx, metav1.ListOptions{Limit: 100})
 		if err != nil {
 			continue
 		}
@@ -439,7 +439,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 						}
 					}()
 					w, errs := c.clientset.CoreV1().Pods(podNs).Watch(ctx, metav1.ListOptions{
-						Watch: true, ResourceVersion: podList.ResourceVersion,
+						Watch: true, ResourceVersion: podList.ResourceVersion, ResourceVersionMatch: metav1.ResourceVersionMatchNotOlderThan,
 					})
 					if errs != nil {
 						if utilnet.IsConnectionRefused(errs) || apierrors.IsTooManyRequests(errs) {
@@ -465,6 +465,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 							if !ok {
 								continue
 							}
+							podList.ResourceVersion = pod.ResourceVersion
 							if pod.Spec.HostNetwork {
 								continue
 							}
@@ -480,7 +481,9 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 	var serviceList *v1.ServiceList
 	for _, n := range []string{v1.NamespaceAll, c.Namespace} {
 		log.Debugf("list namepsace %s services", n)
-		serviceList, err = c.clientset.CoreV1().Services(n).List(ctx, metav1.ListOptions{})
+		serviceList, err = c.clientset.CoreV1().Services(n).List(ctx, metav1.ListOptions{
+			Limit: 100,
+		})
 		if err != nil {
 			continue
 		}
@@ -511,7 +514,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 						}
 					}()
 					w, errs := c.clientset.CoreV1().Services(svcNs).Watch(ctx, metav1.ListOptions{
-						Watch: true, ResourceVersion: serviceList.ResourceVersion,
+						Watch: true, ResourceVersion: serviceList.ResourceVersion, ResourceVersionMatch: metav1.ResourceVersionMatchNotOlderThan,
 					})
 					if errs != nil {
 						if utilnet.IsConnectionRefused(errs) || apierrors.IsTooManyRequests(errs) {
@@ -537,6 +540,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
 							if !ok {
 								continue
 							}
+							serviceList.ResourceVersion = svc.ResourceVersion
 							ip := svc.Spec.ClusterIP
 							go addRouteFunc(svc.Name, ip)
 						}
