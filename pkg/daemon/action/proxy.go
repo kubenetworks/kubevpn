@@ -1,6 +1,7 @@
 package action
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -21,7 +22,7 @@ import (
 //  2. if already connect to cluster
 //     2.1 disconnect from cluster
 //     2.2 same as step 1
-func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) error {
+func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (e error) {
 	out := io.MultiWriter(newProxyWarp(resp), svr.LogFile)
 	log.SetOutput(out)
 	defer func() {
@@ -65,6 +66,12 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) e
 	if err != nil {
 		return err
 	}
+
+	defer func() {
+		if e != nil && svr.connect != nil {
+			_ = svr.connect.LeaveProxyResources(context.Background())
+		}
+	}()
 
 	daemonClient := svr.GetClient(false)
 	if daemonClient == nil {
@@ -147,10 +154,10 @@ type proxyWarp struct {
 }
 
 func (r *proxyWarp) Write(p []byte) (n int, err error) {
-	err = r.server.Send(&rpc.ConnectResponse{
+	_ = r.server.Send(&rpc.ConnectResponse{
 		Message: string(p),
 	})
-	return len(p), err
+	return len(p), nil
 }
 
 func newProxyWarp(server rpc.Daemon_ProxyServer) io.Writer {

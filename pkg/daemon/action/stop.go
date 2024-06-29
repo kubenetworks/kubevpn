@@ -34,10 +34,10 @@ type stopWarp struct {
 }
 
 func (r *stopWarp) Write(p []byte) (n int, err error) {
-	err = r.server.Send(&rpc.QuitResponse{
+	_ = r.server.Send(&rpc.QuitResponse{
 		Message: string(p),
 	})
-	return len(p), err
+	return len(p), nil
 }
 
 func newStopWarp(server rpc.Daemon_QuitServer) io.Writer {

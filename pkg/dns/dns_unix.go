@@ -45,8 +45,11 @@ func (c *Config) usingResolver(ctx context.Context) {
 
 	path := filepath.Join("/", "etc", "resolver")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err = os.MkdirAll(path, fs.ModePerm); err != nil {
+		if err = os.MkdirAll(path, 0755); err != nil {
 			log.Errorf("create resolver error: %v", err)
+		}
+		if err = os.Chmod(path, 0755); err != nil {
+			log.Errorf("chmod resolver error: %v", err)
 		}
 	}
 	newConfig := miekgdns.ClientConfig{

@@ -56,10 +56,10 @@ func (r *quitWarp) Write(p []byte) (n int, err error) {
 	if r.server == nil {
 		return len(p), nil
 	}
-	err = r.server.Send(&rpc.QuitResponse{
+	_ = r.server.Send(&rpc.QuitResponse{
 		Message: string(p),
 	})
-	return len(p), err
+	return len(p), nil
 }
 
 func newQuitWarp(server rpc.Daemon_QuitServer) io.Writer {

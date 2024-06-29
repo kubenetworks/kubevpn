@@ -39,7 +39,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		return status.Error(codes.AlreadyExists, s)
 	}
 	defer func() {
-		if e != nil {
+		if e != nil || ctx.Err() != nil {
 			if svr.connect != nil {
 				svr.connect.Cleanup()
 				svr.connect = nil
@@ -201,6 +201,9 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		}
 	}
 
+	if resp.Context().Err() != nil {
+		return resp.Context().Err()
+	}
 	svr.t = time.Now()
 	svr.connect = connect
 
@@ -212,10 +215,10 @@ type warp struct {
 }
 
 func (r *warp) Write(p []byte) (n int, err error) {
-	err = r.server.Send(&rpc.ConnectResponse{
+	_ = r.server.Send(&rpc.ConnectResponse{
 		Message: string(p),
 	})
-	return len(p), err
+	return len(p), nil
 }
 
 func newWarp(server rpc.Daemon_ConnectServer) io.Writer {

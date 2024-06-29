@@ -75,16 +75,25 @@ func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
 	}
 	v4, _ := c.GetLocalTunIP()
 	for _, virtual := range v {
+		var found bool
+		for _, rule := range virtual.Rules {
+			if rule.LocalTunIPv4 == v4 {
+				found = true
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+
 		// deployments.apps.ry-server --> deployments.apps/ry-server
 		lastIndex := strings.LastIndex(virtual.Uid, ".")
 		uid := virtual.Uid[:lastIndex] + "/" + virtual.Uid[lastIndex+1:]
-		log.Infof("leave resource: %s", uid)
 		err = UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, uid, v4)
 		if err != nil {
-			log.Errorf("unpatch container error: %v", err)
+			log.Errorf("leave workload %s failed: %v", uid, err)
 			continue
 		}
-		log.Infof("leave resource: %s successfully", uid)
 	}
 	return err
 }
