@@ -48,9 +48,11 @@ With KubeVPN, empower yourself to develop applications entirely on your local PC
 
 ## QuickStart
 
-#### Install from GitHub release
+#### Install from brew
 
-[LINK](https://github.com/kubenetworks/kubevpn/releases/latest)
+```shell
+brew install kubevpn
+```
 
 #### Install from custom krew index
 
@@ -60,6 +62,10 @@ With KubeVPN, empower yourself to develop applications entirely on your local PC
   kubectl krew install kubevpn/kubevpn && kubectl kubevpn 
 ) 
 ```
+
+#### Install from GitHub release
+
+[LINK](https://github.com/kubenetworks/kubevpn/releases/latest)
 
 #### Install from build it manually
 

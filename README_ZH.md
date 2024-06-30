@@ -43,9 +43,11 @@ Docker
 
 ## 快速开始
 
-#### 从 Github release 下载编译好的二进制文件
+## 使用 brew 安装
 
-[链接](https://github.com/kubenetworks/kubevpn/releases/latest)
+```shell
+brew install kubevpn
+```
 
 #### 从 自定义 Krew 仓库安装
 
@@ -55,6 +57,10 @@ Docker
   kubectl krew install kubevpn/kubevpn && kubectl kubevpn 
 ) 
 ```
+
+#### 从 Github release 下载编译好的二进制文件
+
+[链接](https://github.com/kubenetworks/kubevpn/releases/latest)
 
 #### 自己构建二进制文件
 
