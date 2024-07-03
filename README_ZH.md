@@ -43,7 +43,7 @@ Docker
 
 ## 快速开始
 
-## 使用 brew 安装
+#### 使用 brew 安装
 
 ```shell
 brew install kubevpn
