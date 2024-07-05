@@ -56,19 +56,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	klog.LogToStderr(false)
 	rest.SetDefaultWarningHandler(rest.NoWarnings{})
 	// every day 00:00:00 rotate log
-	if !o.IsSudo {
-		go func() {
-			for {
-				nowTime := time.Now()
-				nowTimeStr := nowTime.Format("2006-01-02")
-				t2, _ := time.ParseInLocation("2006-01-02", nowTimeStr, time.Local)
-				next := t2.AddDate(0, 0, 1)
-				after := next.UnixNano() - nowTime.UnixNano() - 1
-				<-time.After(time.Duration(after) * time.Nanosecond)
-				_ = l.Rotate()
-			}
-		}()
-	}
+	go rotateLog(l, o.IsSudo)
 
 	sockPath := config.GetSockPath(o.IsSudo)
 	err := os.Remove(sockPath)
@@ -124,7 +112,6 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		o.svr.Cancel = nil
 		_ = o.svr.Quit(&rpc.QuitRequest{}, nil)
 		_ = downgradingServer.Close()
-		_ = l.Rotate()
 		_ = l.Close()
 	}
 	o.svr = &action.Server{Cancel: cancel, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: l, ID: o.ID}
@@ -227,4 +214,26 @@ func writePIDToFile(isSudo bool) error {
 	}
 	err = os.Chmod(pidPath, 0644)
 	return err
+}
+
+// let daemon process to Rotate log. create new log file
+// sudo daemon process then use new log file
+func rotateLog(l *lumberjack.Logger, isSudo bool) {
+	sec := time.Duration(0)
+	if isSudo {
+		sec = time.Second
+	}
+	for {
+		nowTime := time.Now()
+		nowTimeStr := nowTime.Format("2006-01-02")
+		t2, _ := time.ParseInLocation("2006-01-02", nowTimeStr, time.Local)
+		next := t2.AddDate(0, 0, 1).Add(sec)
+		after := next.UnixNano() - nowTime.UnixNano()
+		<-time.After(time.Duration(after) * time.Nanosecond)
+		if isSudo {
+			_ = l.Close()
+		} else {
+			_ = l.Rotate()
+		}
+	}
 }
