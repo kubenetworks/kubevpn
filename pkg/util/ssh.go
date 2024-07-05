@@ -520,11 +520,14 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 		defer lock.Unlock()
 
 		if sshClient != nil {
-			remoteConn, err := sshClient.Dial("tcp", remote.String())
+			ctx1, cancelFunc := context.WithTimeout(ctx, time.Second*10)
+			defer cancelFunc()
+			remoteConn, err := sshClient.DialContext(ctx1, "tcp", remote.String())
 			if err == nil {
 				return remoteConn, nil
 			}
 			sshClient.Close()
+			sshClient = nil
 		}
 		sshClient, err = DialSshRemote(ctx, conf)
 		if err != nil {
