@@ -2,8 +2,10 @@ package action
 
 import (
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 
@@ -21,30 +23,34 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 	log.SetLevel(log.InfoLevel)
 
 	if svr.clone != nil {
-		log.Info("quit: cleanup clone")
 		err := svr.clone.Cleanup()
 		if err != nil {
 			log.Errorf("quit: cleanup clone failed: %v", err)
 		}
+		svr.clone = nil
 	}
 
 	connects := handler.Connects(svr.secondaryConnect).Append(svr.connect)
 	for _, conn := range connects.Sort() {
-		log.Info("quit: cleanup connection")
 		if conn != nil {
 			conn.Cleanup()
 		}
 	}
+	svr.secondaryConnect = nil
+	svr.connect = nil
 
 	if svr.IsSudo {
 		_ = dns.CleanupHosts()
-		_ = os.RemoveAll(filepath.Join("/", "etc", "resolver"))
+		_ = os.RemoveAll("/etc/resolver")
 	}
 
 	// last step is to quit GRPC server
 	if svr.Cancel != nil {
 		svr.Cancel()
+		svr.Cancel = nil
 	}
+
+	_ = cleanupTempKubeConfigFile()
 	return nil
 }
 
@@ -64,4 +70,13 @@ func (r *quitWarp) Write(p []byte) (n int, err error) {
 
 func newQuitWarp(server rpc.Daemon_QuitServer) io.Writer {
 	return &quitWarp{server: server}
+}
+
+func cleanupTempKubeConfigFile() error {
+	return filepath.Walk(os.TempDir(), func(path string, info fs.FileInfo, err error) error {
+		if strings.HasSuffix(path, ".kubeconfig") {
+			return os.Remove(path)
+		}
+		return err
+	})
 }
