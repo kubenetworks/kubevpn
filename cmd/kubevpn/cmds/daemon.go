@@ -16,6 +16,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/action"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -37,7 +38,7 @@ func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 			} else {
 				go util.StartupPProf(config.PProfPort)
 			}
-			return nil
+			return initLogfile(action.GetDaemonLogPath())
 		},
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			defer opt.Stop()
@@ -68,4 +69,18 @@ func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&opt.IsSudo, "sudo", false, "is sudo or not")
 	return cmd
+}
+
+func initLogfile(path string) error {
+	_, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		var f *os.File
+		f, err = os.Create(path)
+		if err != nil {
+			return err
+		}
+		_ = f.Close()
+		return os.Chmod(path, 0644)
+	}
+	return nil
 }
