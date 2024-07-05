@@ -89,7 +89,6 @@ func (c *ConnectOptions) Cleanup() {
 		log.Infof("cleanup dns")
 		c.dnsConfig.CancelDNS()
 	}
-	log.Info("cleanup successfully")
 }
 
 // vendor/k8s.io/kubectl/pkg/polymorphichelpers/rollback.go:99
