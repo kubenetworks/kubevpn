@@ -1,5 +1,5 @@
 VERSION ?= $(shell git tag -l --sort=v:refname | tail -1)
-GIT_COMMIT ?= $(shell git describe --match=NeVeRmAtCh --always --abbrev=40)
+GIT_COMMIT ?= $(shell git describe --match=NeVeRmAtCh --always --abbrev=7)
 BUILD_TIME ?= $(shell date +"%Y-%m-%dT%H:%M:%SZ")
 BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 
