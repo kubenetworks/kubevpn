@@ -369,188 +369,86 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 }
 
 // Listen all pod, add route if needed
-func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (err error) {
-	var tunName string
-	tunName, err = c.GetTunDeviceName()
-	if err != nil {
-		return
+func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
+	tunName, e := c.GetTunDeviceName()
+	if e != nil {
+		return e
 	}
 
-	addRouteFunc := func(resource, ip string) {
-		if net.ParseIP(ip) == nil {
+	podNs, svcNs, err1 := util.GetNsForListPodAndSvc(ctx, c.clientset, []string{v1.NamespaceAll, c.Namespace})
+	if err1 != nil {
+		return err1
+	}
+
+	var addRouteFunc = func(resource, ipStr string) {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
 			return
 		}
-		apiServer := sets.New[string]()
 		for _, p := range c.apiServerIPs {
-			apiServer.Insert(p.String())
+			// if pod ip or service ip is equal to apiServer ip, can not add it to route table
+			if p.Equal(ip) {
+				return
+			}
 		}
-		// if pod ip or service ip is equal to apiServer ip, can not add it to route table
-		if apiServer.Has(ip) {
-			return
-		}
+
 		var mask net.IPMask
-		if net.ParseIP(ip).To4() != nil {
+		if ip.To4() != nil {
 			mask = net.CIDRMask(32, 32)
 		} else {
 			mask = net.CIDRMask(128, 128)
 		}
-		errs := tun.AddRoutes(tunName, types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: mask}})
+		errs := tun.AddRoutes(tunName, types.Route{Dst: net.IPNet{IP: ip, Mask: mask}})
 		if errs != nil {
-			log.Debugf("[route] add route failed, resource: %s, ip: %s,err: %v", resource, ip, err)
+			log.Debugf("[route] add route failed, resource: %s, ip: %s, err: %v", resource, ip, errs)
 		}
 	}
 
-	var podNs string
-	var podList *v1.PodList
-	for _, n := range []string{v1.NamespaceAll, c.Namespace} {
-		log.Debugf("list namepsace %s pods", n)
-		podList, err = c.clientset.CoreV1().Pods(n).List(ctx, metav1.ListOptions{Limit: 100})
-		if err != nil {
-			continue
-		}
-		podNs = n
-		break
-	}
-	if err != nil {
-		log.Debugf("list pod failed, err: %v", err)
-		return
-	}
-
-	for _, pod := range podList.Items {
-		if pod.Spec.HostNetwork {
-			continue
-		}
-		go addRouteFunc(pod.Name, pod.Status.PodIP)
-	}
-
-	// add pod route
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
+		var listDone bool
+		for ctx.Err() == nil {
+			err := func() error {
+				if !listDone {
+					err := util.ListService(ctx, c.clientset.CoreV1().Services(svcNs), addRouteFunc)
+					if err != nil {
+						return err
+					}
+					listDone = true
+				}
+				err := util.WatchServiceToAddRoute(ctx, c.clientset.CoreV1().Services(svcNs), addRouteFunc)
+				return err
+			}()
+			if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {
 				time.Sleep(time.Second * 5)
-
-				func() {
-					defer func() {
-						if er := recover(); er != nil {
-							log.Error(er)
-						}
-					}()
-					w, errs := c.clientset.CoreV1().Pods(podNs).Watch(ctx, metav1.ListOptions{
-						Watch: true, ResourceVersion: podList.ResourceVersion, ResourceVersionMatch: metav1.ResourceVersionMatchNotOlderThan,
-					})
-					if errs != nil {
-						if utilnet.IsConnectionRefused(errs) || apierrors.IsTooManyRequests(errs) {
-							time.Sleep(time.Second * 10)
-							log.Debugf("watch pod failed, err: %v", errs)
-							return
-						}
-						time.Sleep(time.Second * 5)
-						log.Debugf("watch pod failed, err: %v", errs)
-						return
-					}
-					defer w.Stop()
-					for {
-						select {
-						case <-ctx.Done():
-							return
-						case e, ok := <-w.ResultChan():
-							if !ok {
-								return
-							}
-							var pod *v1.Pod
-							pod, ok = e.Object.(*v1.Pod)
-							if !ok {
-								continue
-							}
-							podList.ResourceVersion = pod.ResourceVersion
-							if pod.Spec.HostNetwork {
-								continue
-							}
-							go addRouteFunc(pod.Name, pod.Status.PodIP)
-						}
-					}
-				}()
+			} else {
+				time.Sleep(time.Second * 2)
 			}
 		}
 	}()
 
-	var svcNs string
-	var serviceList *v1.ServiceList
-	for _, n := range []string{v1.NamespaceAll, c.Namespace} {
-		log.Debugf("list namepsace %s services", n)
-		serviceList, err = c.clientset.CoreV1().Services(n).List(ctx, metav1.ListOptions{
-			Limit: 100,
-		})
-		if err != nil {
-			continue
-		}
-		svcNs = n
-		break
-	}
-	if err != nil {
-		err = fmt.Errorf("can not list service to add it to route table, err: %v", err)
-		return
-	}
-	for _, item := range serviceList.Items {
-		go addRouteFunc(item.Name, item.Spec.ClusterIP)
-	}
-
-	// add service route
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
+		var listDone bool
+		for ctx.Err() == nil {
+			err := func() error {
+				if !listDone {
+					err := util.ListPod(ctx, c.clientset.CoreV1().Pods(podNs), addRouteFunc)
+					if err != nil {
+						return err
+					}
+					listDone = true
+				}
+				err := util.WatchPodToAddRoute(ctx, c.clientset.CoreV1().Pods(podNs), addRouteFunc)
+				return err
+			}()
+			if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {
 				time.Sleep(time.Second * 5)
-
-				func() {
-					defer func() {
-						if er := recover(); er != nil {
-							log.Errorln(er)
-						}
-					}()
-					w, errs := c.clientset.CoreV1().Services(svcNs).Watch(ctx, metav1.ListOptions{
-						Watch: true, ResourceVersion: serviceList.ResourceVersion, ResourceVersionMatch: metav1.ResourceVersionMatchNotOlderThan,
-					})
-					if errs != nil {
-						if utilnet.IsConnectionRefused(errs) || apierrors.IsTooManyRequests(errs) {
-							log.Debugf("watch service failed, err: %v", errs)
-							time.Sleep(time.Second * 10)
-							return
-						}
-						log.Debugf("watch service failed, err: %v", errs)
-						time.Sleep(time.Second * 5)
-						return
-					}
-					defer w.Stop()
-					for {
-						select {
-						case <-ctx.Done():
-							return
-						case e, ok := <-w.ResultChan():
-							if !ok {
-								return
-							}
-							var svc *v1.Service
-							svc, ok = e.Object.(*v1.Service)
-							if !ok {
-								continue
-							}
-							serviceList.ResourceVersion = svc.ResourceVersion
-							ip := svc.Spec.ClusterIP
-							go addRouteFunc(svc.Name, ip)
-						}
-					}
-				}()
+			} else {
+				time.Sleep(time.Second * 2)
 			}
 		}
 	}()
 
-	return
+	return nil
 }
 
 func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
@@ -615,8 +513,8 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		return err
 	}
 	// dump service in current namespace for support DNS resolve service:port
-	c.dnsConfig.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.Namespace), c.extraHost...)
-	return nil
+	err = c.dnsConfig.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.Namespace), c.extraHost...)
+	return err
 }
 
 func Run(ctx context.Context, servers []core.Server) error {
