@@ -16,6 +16,7 @@ import (
 	"github.com/docker/docker/libnetwork/resolvconf"
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // systemd-resolve --status, systemd-resolve --flush-caches
@@ -91,7 +92,7 @@ func SetupLocalDNS(ctx context.Context, clientConfig *miekgdns.ClientConfig, exi
 }
 
 func (c *Config) CancelDNS() {
-	c.removeHosts(c.Hosts)
+	c.removeHosts(sets.New[Entry]().Insert(c.Hosts...).UnsortedList())
 
 	filename := resolvconf.Path()
 	readFile, err := os.ReadFile(filename)

@@ -43,7 +43,7 @@ func (c *Config) usingResolver(ctx context.Context) {
 	var clientConfig = c.Config
 	var ns = c.Ns
 
-	path := filepath.Join("/", "etc", "resolver")
+	path := "/etc/resolver"
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err = os.MkdirAll(path, 0755); err != nil {
 			log.Errorf("create resolver error: %v", err)
@@ -68,7 +68,7 @@ func (c *Config) usingResolver(ctx context.Context) {
 		}
 	}
 	for _, s := range sets.New[string](searchDomain...).Insert(ns...).UnsortedList() {
-		filename := filepath.Join("/", "etc", "resolver", s)
+		filename := "/etc/resolver/" + s
 		content, err := os.ReadFile(filename)
 		if os.IsNotExist(err) {
 			_ = os.WriteFile(filename, []byte(toString(newConfig)), 0644)
@@ -167,7 +167,7 @@ func (c *Config) CancelDNS() {
 	if cancel != nil {
 		cancel()
 	}
-	dir := filepath.Join("/", "etc", "resolver")
+	dir := "/etc/resolver"
 	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -208,7 +208,7 @@ func (c *Config) CancelDNS() {
 		return nil
 	})
 	//networkCancel()
-	c.removeHosts(c.Hosts)
+	c.removeHosts(sets.New[Entry]().Insert(c.Hosts...).UnsortedList())
 }
 
 /*

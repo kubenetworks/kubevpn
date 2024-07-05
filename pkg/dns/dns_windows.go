@@ -12,6 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 func (c *Config) SetupDNS(ctx context.Context) error {
@@ -52,7 +53,7 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 }
 
 func (c *Config) CancelDNS() {
-	c.removeHosts(c.Hosts)
+	c.removeHosts(sets.New[Entry]().Insert(c.Hosts...).UnsortedList())
 	tun, err := net.InterfaceByName(c.TunName)
 	if err != nil {
 		return
