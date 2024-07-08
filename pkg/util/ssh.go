@@ -628,7 +628,7 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 		}
 
 		var temp *os.File
-		if temp, err = os.CreateTemp("", "kubevpn"); err != nil {
+		if temp, err = os.CreateTemp("", "*.kubeconfig"); err != nil {
 			return
 		}
 		if err = temp.Close(); err != nil {
