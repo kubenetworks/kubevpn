@@ -157,7 +157,7 @@ func startDaemonProcess(cli *ssh.Client) {
 
 func getDaemonVersionFromOutput(output []byte) (version string) {
 	type Data struct {
-		DaemonVersion string `json:"DaemonVersion"`
+		DaemonVersion string `json:"Daemon"`
 	}
 	// remove first line
 	buf := bufio.NewReader(bytes.NewReader(output))
