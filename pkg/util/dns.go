@@ -17,8 +17,8 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-func GetDNSServiceIPFromPod(ctx context.Context, clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, namespace string) (*dns.ClientConfig, error) {
-	str, err := Shell(ctx, clientset, restclient, config, podName, "", namespace, []string{"cat", "/etc/resolv.conf"})
+func GetDNSServiceIPFromPod(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Config, podName, namespace string) (*dns.ClientConfig, error) {
+	str, err := Shell(ctx, clientset, config, podName, "", namespace, []string{"cat", "/etc/resolv.conf"})
 	if err != nil {
 		return nil, err
 	}
@@ -88,13 +88,7 @@ func GetDNS(ctx context.Context, f util.Factory, ns, pod string) (*dns.ClientCon
 	if err != nil {
 		return nil, err
 	}
-
-	client, err := f.RESTClient()
-	if err != nil {
-		return nil, err
-	}
-
-	clientConfig, err := GetDNSServiceIPFromPod(ctx, clientSet, client, restConfig, pod, ns)
+	clientConfig, err := GetDNSServiceIPFromPod(ctx, clientSet, restConfig, pod, ns)
 	if err != nil {
 		return nil, err
 	}

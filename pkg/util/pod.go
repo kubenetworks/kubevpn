@@ -20,16 +20,15 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/portforward"
-	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/client-go/transport/spdy"
 	"k8s.io/kubectl/pkg/cmd/exec"
 	"k8s.io/kubectl/pkg/cmd/util"
@@ -107,10 +106,6 @@ func GetEnv(ctx context.Context, f util.Factory, ns, pod string) (map[string][]s
 	if err2 != nil {
 		return nil, err2
 	}
-	client, err2 := f.RESTClient()
-	if err2 != nil {
-		return nil, err2
-	}
 	config, err2 := f.ToRESTConfig()
 	if err2 != nil {
 		return nil, err2
@@ -121,7 +116,7 @@ func GetEnv(ctx context.Context, f util.Factory, ns, pod string) (map[string][]s
 	}
 	result := map[string][]string{}
 	for _, c := range get.Spec.Containers {
-		env, err := Shell(ctx, set, client, config, pod, c.Name, ns, []string{"env"})
+		env, err := Shell(ctx, set, config, pod, c.Name, ns, []string{"env"})
 		if err != nil {
 			return nil, err
 		}
@@ -152,6 +147,10 @@ func WaitPod(ctx context.Context, podInterface v12.PodInterface, list v1.ListOpt
 }
 
 func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, namespace string, portPair []string, readyChan chan struct{}, stopChan <-chan struct{}) error {
+	err := os.Setenv(string(util.RemoteCommandWebsockets), "true")
+	if err != nil {
+		return err
+	}
 	url := clientset.
 		Post().
 		Resource("pods").
@@ -165,7 +164,17 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 		return err
 	}
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
-	forwarder, err := portforward.NewOnAddresses(dialer, []string{"localhost"}, portPair, stopChan, readyChan, nil, os.Stderr)
+	// Legacy SPDY executor is default. If feature gate enabled, fallback
+	// executor attempts websockets first--then SPDY.
+	if util.RemoteCommandWebsockets.IsEnabled() {
+		// WebSocketExecutor must be "GET" method as described in RFC 6455 Sec. 4.1 (page 17).
+		websocketDialer, err := portforward.NewSPDYOverWebsocketDialer(url, config)
+		if err != nil {
+			return err
+		}
+		dialer = portforward.NewFallbackDialer(websocketDialer, dialer, httpstream.IsUpgradeFailure)
+	}
+	forwarder, err := portforward.New(dialer, portPair, stopChan, readyChan, nil, os.Stderr)
 	if err != nil {
 		logrus.Errorf("create port forward error: %s", err.Error())
 		return err
@@ -217,62 +226,32 @@ func GetTopOwnerReferenceBySelector(factory util.Factory, namespace, selector st
 	return set, nil
 }
 
-func Shell(ctx context.Context, clientset *kubernetes.Clientset, restclient *rest.RESTClient, config *rest.Config, podName, containerName, namespace string, cmd []string) (string, error) {
-	pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, v1.GetOptions{})
-
+func Shell(_ context.Context, clientset *kubernetes.Clientset, config *rest.Config, podName, containerName, namespace string, cmd []string) (string, error) {
+	err := os.Setenv(string(util.RemoteCommandWebsockets), "true")
 	if err != nil {
 		return "", err
 	}
-	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-		err = fmt.Errorf("cannot exec into a container in a completed pod; current phase is %s", pod.Status.Phase)
+	stdin, _, _ := term.StdStreams()
+	buf := bytes.NewBuffer(nil)
+	options := exec.ExecOptions{
+		StreamOptions: exec.StreamOptions{
+			Namespace:     namespace,
+			PodName:       podName,
+			ContainerName: containerName,
+			Stdin:         false,
+			TTY:           false,
+			Quiet:         true,
+			IOStreams:     genericiooptions.IOStreams{In: stdin, Out: buf, ErrOut: io.Discard},
+		},
+		Command:   cmd,
+		Executor:  &exec.DefaultRemoteExecutor{},
+		PodClient: clientset.CoreV1(),
+		Config:    config,
+	}
+	if err = options.Run(); err != nil {
 		return "", err
 	}
-	if containerName == "" {
-		containerName = pod.Spec.Containers[0].Name
-	}
-	stdin, _, _ := term.StdStreams()
-
-	stdoutBuf := bytes.NewBuffer(nil)
-	stdout := io.MultiWriter(stdoutBuf)
-	StreamOptions := exec.StreamOptions{
-		Namespace:     namespace,
-		PodName:       podName,
-		ContainerName: containerName,
-		IOStreams:     genericiooptions.IOStreams{In: stdin, Out: stdout, ErrOut: nil},
-	}
-	Executor := &exec.DefaultRemoteExecutor{}
-	// ensure we can recover the terminal while attached
-	tt := StreamOptions.SetupTTY()
-
-	var sizeQueue remotecommand.TerminalSizeQueue
-	if tt.Raw {
-		// this call spawns a goroutine to monitor/update the terminal size
-		sizeQueue = tt.MonitorSize(tt.GetSize())
-
-		// unset p.Err if it was previously set because both stdout and stderr go over p.Out when tty is
-		// true
-		StreamOptions.ErrOut = nil
-	}
-
-	fn := func() error {
-		req := restclient.Post().
-			Resource("pods").
-			Name(pod.Name).
-			Namespace(pod.Namespace).
-			SubResource("exec")
-		req.VersionedParams(&corev1.PodExecOptions{
-			Container: containerName,
-			Command:   cmd,
-			Stdin:     StreamOptions.Stdin,
-			Stdout:    StreamOptions.Out != nil,
-			Stderr:    StreamOptions.ErrOut != nil,
-			TTY:       tt.Raw,
-		}, scheme.ParameterCodec)
-		return Executor.Execute(req.URL(), config, StreamOptions.In, StreamOptions.Out, StreamOptions.ErrOut, tt.Raw, sizeQueue)
-	}
-
-	err = tt.Safe(fn)
-	return strings.TrimRight(stdoutBuf.String(), "\n"), err
+	return strings.TrimRight(buf.String(), "\n"), err
 }
 
 func WaitPodToBeReady(ctx context.Context, podInterface v12.PodInterface, selector v1.LabelSelector) error {

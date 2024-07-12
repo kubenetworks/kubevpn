@@ -452,6 +452,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
 }
 
 func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
+	// Found those code looks like not works
 	if !util.FindAllowFirewallRule() {
 		util.AddAllowFirewallRule()
 	}
@@ -459,6 +460,11 @@ func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
 		util.DeleteAllowFirewallRule()
 		return nil
 	})
+
+	// The reason why delete firewall rule is:
+	// On windows use 'kubevpn proxy deploy/authors -H user=windows'
+	// Open terminal 'curl localhost:9080' ok
+	// Open terminal 'curl localTunIP:9080' not ok
 	go util.DeleteBlockFirewallRule(ctx)
 }
 
@@ -469,7 +475,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		log.Errorf("get running pod list failed, err: %v", err)
 		return err
 	}
-	relovConf, err := util.GetDNSServiceIPFromPod(ctx, c.clientset, c.restclient, c.config, pod[0].GetName(), c.Namespace)
+	relovConf, err := util.GetDNSServiceIPFromPod(ctx, c.clientset, c.config, pod[0].GetName(), c.Namespace)
 	if err != nil {
 		log.Errorln(err)
 		return err
@@ -713,7 +719,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) (err error) {
 	}
 
 	// (2) get cidr from cni
-	c.cidrs, err = util.GetCIDRElegant(ctx, c.clientset, c.restclient, c.config, c.Namespace)
+	c.cidrs, err = util.GetCIDRElegant(ctx, c.clientset, c.config, c.Namespace)
 	if err == nil {
 		s := sets.New[string]()
 		for _, cidr := range c.cidrs {
@@ -767,7 +773,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context, nameserver string) e
 	}
 	var ok = true
 	for _, domain := range c.ExtraRouteInfo.ExtraDomain {
-		ip, err := util.Shell(ctx, c.clientset, c.restclient, c.config, podList[0].Name, config.ContainerSidecarVPN, c.Namespace, []string{"dig", "+short", domain})
+		ip, err := util.Shell(ctx, c.clientset, c.config, podList[0].Name, config.ContainerSidecarVPN, c.Namespace, []string{"dig", "+short", domain})
 		if err == nil || net.ParseIP(ip) != nil {
 			addRouteFunc(domain, ip)
 			c.extraHost = append(c.extraHost, dns.Entry{IP: net.ParseIP(ip).String(), Domain: domain})
@@ -1059,6 +1065,15 @@ func (c *ConnectOptions) upgradeService(ctx context.Context) error {
 	return nil
 }
 
+// The reason why only Ping each other inner ip on Windows:
+// On macOS use 'kubevpn proxy deploy/authors -H user=macos'
+// On Windows use 'kubevpn proxy deploy/authors -H user=windows'
+// On macOS/Windows:
+// 'curl authors:9080/health -H "user: macos"' --> ok
+// 'curl authors:9080/health -H "user: windows"' --> failed
+// On Windows 'ping authors's inner tunIP' then
+// 'curl authors:9080/health -H "user: macos"' --> ok
+// 'curl authors:9080/health -H "user: windows"' --> ok
 func (c *ConnectOptions) heartbeats(ctx context.Context) {
 	if !util.IsWindows() {
 		return

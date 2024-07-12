@@ -4,21 +4,17 @@ package util
 
 import (
 	"flag"
-	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
 	"runtime"
 	"syscall"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
-
-const envStartSudoKubeVPNByKubeVPN = config.EnvStartSudoKubeVPNByKubeVPN
 
 func RunWithElevated() {
 	// fix if startup with normal user, after elevated home dir will change to root user in linux
@@ -33,7 +29,7 @@ func RunWithElevated() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	cmd.Env = append(os.Environ(), envStartSudoKubeVPNByKubeVPN+"=1", config.EnvDisableSyncthingLog+"=1")
+	cmd.Env = append(os.Environ(), config.EnvStartSudoKubeVPNByKubeVPN+"=1", config.EnvDisableSyncthingLog+"=1")
 	// while send single CTRL+C, command will quit immediately, but output will cut off and print util quit final
 	// so, mute single CTRL+C, let inner command handle single only
 	go func() {
@@ -48,22 +44,21 @@ func RunWithElevated() {
 }
 
 func IsAdmin() bool {
-	_, ok := os.LookupEnv(envStartSudoKubeVPNByKubeVPN)
+	/*_, ok := os.LookupEnv(config.EnvStartSudoKubeVPNByKubeVPN)
 	if os.Getuid() == 0 {
 		if !ok {
-			fmt.Println()
-			fmt.Println(`----------------------------------------------------------------------------------`)
-			fmt.Println(`    Warn: Use sudo to execute command kubevpn can not use user env KUBECONFIG.    `)
-			fmt.Println(`    Because of sudo user env and user env are different.    `)
-			fmt.Println(`    Current env KUBECONFIG value: ` + os.Getenv(clientcmd.RecommendedConfigPathEnvVar))
-			fmt.Println(`----------------------------------------------------------------------------------`)
-			fmt.Println()
+			strings := []string{
+				"Warn: Use sudo to execute command kubevpn can not use user env KUBECONFIG.",
+				"Because of sudo user env and user env are different.",
+				"Current env KUBECONFIG value: " + os.Getenv(clientcmd.RecommendedConfigPathEnvVar),
+			}
+			PrintLine(nil, strings...)
 			for i := 0; i >= 0; i-- {
 				_, _ = fmt.Printf("\r %ds", i)
 				time.Sleep(time.Second * 1)
 			}
 			_, _ = fmt.Printf("\r")
 		}
-	}
+	}*/
 	return os.Getuid() == 0
 }

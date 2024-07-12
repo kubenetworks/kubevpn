@@ -61,7 +61,7 @@ func TestByCreateSvc(t *testing.T) {
 
 func TestElegant(t *testing.T) {
 	before()
-	elegant, err := GetCIDRElegant(context.Background(), clientset, restclient, restconfig, namespace)
+	elegant, err := GetCIDRElegant(context.Background(), clientset, restconfig, namespace)
 	if err != nil {
 		t.Error(err)
 	}
