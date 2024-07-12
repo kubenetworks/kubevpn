@@ -720,7 +720,7 @@ Answer: here are two solutions to solve this problem
 ➜  ~ kubevpn version
 KubeVPN: CLI
     Version: v2.0.0
-    DaemonVersion: v2.0.0
+    Daemon: v2.0.0
     Image: docker.io/naison/kubevpn:v2.0.0
     Branch: feature/daemon
     Git commit: 7c3a87e14e05c238d8fb23548f95fa1dd6e96936

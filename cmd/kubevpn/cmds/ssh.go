@@ -24,8 +24,7 @@ import (
 )
 
 // CmdSSH
-// 设置本地的IP是223.254.0.1/32 ，记得一定是掩码 32位，
-// 这样别的路由不会走到这里来
+// Remember to use network mask 32, because ssh using unique network cidr 223.255.0.0/16
 func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 	var sshConf = &util.SshConfig{}
 	var ExtraCIDR []string
@@ -71,16 +70,13 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("terminal get size: %s", err)
 			}
+			marshal, err := json.Marshal(sshConf)
+			if err != nil {
+				return err
+			}
 			sessionID := uuid.NewString()
-			config.Header.Set("ssh-addr", sshConf.Addr)
-			config.Header.Set("ssh-username", sshConf.User)
-			config.Header.Set("ssh-password", sshConf.Password)
-			config.Header.Set("ssh-keyfile", sshConf.Keyfile)
-			config.Header.Set("ssh-alias", sshConf.ConfigAlias)
+			config.Header.Set("ssh", string(marshal))
 			config.Header.Set("extra-cidr", strings.Join(ExtraCIDR, ","))
-			config.Header.Set("gssapi-password", sshConf.GSSAPIPassword)
-			config.Header.Set("gssapi-keytab", sshConf.GSSAPIKeytabConf)
-			config.Header.Set("gssapi-cache", sshConf.GSSAPICacheFile)
 			config.Header.Set("terminal-width", strconv.Itoa(width))
 			config.Header.Set("terminal-height", strconv.Itoa(height))
 			config.Header.Set("session-id", sessionID)
@@ -93,8 +89,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 
 			errChan := make(chan error, 3)
 			go func() {
-				err := monitorSize(cmd.Context(), sessionID)
-				errChan <- err
+				errChan <- monitorSize(cmd.Context(), sessionID)
 			}()
 			go func() {
 				_, err := io.Copy(conn, os.Stdin)

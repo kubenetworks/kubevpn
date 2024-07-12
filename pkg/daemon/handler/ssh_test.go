@@ -10,7 +10,7 @@ func TestGetVersionFromOutput(t *testing.T) {
 		{
 			output: `KubeVPN: CLI
     Version: v2.2.3
-    DaemonVersion: v2.2.3
+    Daemon: v2.2.3
     Image: docker.io/naison/kubevpn:v2.2.3
     Branch: feat/ssh-heartbeat
     Git commit: 1272e86a337d3075427ee3a1c3681d378558d133
@@ -22,7 +22,7 @@ func TestGetVersionFromOutput(t *testing.T) {
 		{
 			output: `KubeVPN: CLI
     Version: v2.2.3
-    DaemonVersion: unknown
+    Daemon: unknown
     Image: docker.io/naison/kubevpn:v2.2.3
     Branch: feat/ssh-heartbeat
     Git commit: 1272e86a337d3075427ee3a1c3681d378558d133

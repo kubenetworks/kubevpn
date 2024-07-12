@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/pkg/errors"
 	"github.com/schollz/progressbar/v3"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -29,27 +30,25 @@ const (
 func GetManifest(httpCli *http.Client, os string, arch string) (version string, url string, err error) {
 	var resp *http.Response
 	var errs []error
-	for _, addr := range address {
-		resp, err = httpCli.Get(addr)
-		if err != nil {
-			errs = append(errs, err)
+	for _, a := range address {
+		resp, err = httpCli.Get(a)
+		if err == nil {
+			break
 		}
+		errs = append(errs, err)
 	}
 	if resp == nil {
-		aggregate := utilerrors.NewAggregate(errs)
-		err = fmt.Errorf("failed to call github api, err: %v", aggregate)
+		err = errors.Wrap(utilerrors.NewAggregate(errs), "failed to call github api")
 		return
 	}
 
 	var all []byte
-	all, err = io.ReadAll(resp.Body)
-	if err != nil {
-		err = fmt.Errorf("failed to read all response from github api, err: %v", err)
+	if all, err = io.ReadAll(resp.Body); err != nil {
+		err = errors.Wrap(err, "failed to read all response from github api")
 		return
 	}
 	var m RootEntity
-	err = json.Unmarshal(all, &m)
-	if err != nil {
+	if err = json.Unmarshal(all, &m); err != nil {
 		err = fmt.Errorf("failed to unmarshal response, err: %v", err)
 		return
 	}
@@ -57,30 +56,25 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 	for _, asset := range m.Assets {
 		if strings.Contains(asset.Name, arch) && strings.Contains(asset.Name, os) {
 			url = asset.BrowserDownloadUrl
-			break
-		}
-	}
-	if len(url) == 0 {
-		var found bool
-		// if os is not windows and darwin, default is linux
-		if !sets.New[string]("windows", "darwin").Has(os) {
-			for _, asset := range m.Assets {
-				if strings.Contains(asset.Name, "linux") && strings.Contains(asset.Name, arch) {
-					url = asset.BrowserDownloadUrl
-					found = true
-					break
-				}
-			}
-		}
-
-		if !found {
-			err = fmt.Errorf("Can not found latest version url of KubeVPN, you can download it manually: \n%s\n", addr)
 			return
 		}
 	}
+
+	// if os is not windows and darwin, default is linux
+	if !sets.New[string]("windows", "darwin").Has(strings.ToLower(os)) {
+		for _, asset := range m.Assets {
+			if strings.Contains(asset.Name, "linux") && strings.Contains(asset.Name, arch) {
+				url = asset.BrowserDownloadUrl
+				return
+			}
+		}
+	}
+
+	err = fmt.Errorf("can not found latest version url of KubeVPN, you can download it manually: %s", addr)
 	return
 }
 
+// Download
 // https://api.github.com/repos/kubenetworks/kubevpn/releases
 // https://github.com/kubenetworks/kubevpn/releases/download/v1.1.13/kubevpn-windows-arm64.exe
 func Download(client *http.Client, url string, filename string, stdout, stderr io.Writer) error {
@@ -104,7 +98,7 @@ func Download(client *http.Client, url string, filename string, stdout, stderr i
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionSetWidth(25),
 		progressbar.OptionOnCompletion(func() {
-			_, _ = fmt.Fprint(stderr, "\n")
+			_, _ = fmt.Fprint(stderr, "\n\r")
 		}),
 		progressbar.OptionSetRenderBlankState(true),
 		progressbar.OptionSetDescription("Writing temp file..."),
