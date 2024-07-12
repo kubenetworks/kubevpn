@@ -20,7 +20,7 @@ import (
 // 2) grep cmdline
 // 3) create svc + cat *.conflist
 // 4) create svc + get pod ip with svc mask
-func GetCIDRElegant(ctx context.Context, clientset *kubernetes.Clientset, restclient *rest.RESTClient, restconfig *rest.Config, namespace string) ([]*net.IPNet, error) {
+func GetCIDRElegant(ctx context.Context, clientset *kubernetes.Clientset, restconfig *rest.Config, namespace string) ([]*net.IPNet, error) {
 	defer func() {
 		_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
 	}()
@@ -34,13 +34,13 @@ func GetCIDRElegant(ctx context.Context, clientset *kubernetes.Clientset, restcl
 	}
 
 	log.Infoln("get cidr from cni...")
-	cni, err := GetCIDRFromCNI(ctx, clientset, restclient, restconfig, namespace)
+	cni, err := GetCIDRFromCNI(ctx, clientset, restconfig, namespace)
 	if err == nil {
 		log.Infoln("get cidr from cni ok")
 		result = append(result, cni...)
 	}
 
-	pod, err := GetPodCIDRFromCNI(ctx, clientset, restclient, restconfig, namespace)
+	pod, err := GetPodCIDRFromCNI(ctx, clientset, restconfig, namespace)
 	if err == nil {
 		result = append(result, pod...)
 	}
