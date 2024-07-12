@@ -764,17 +764,33 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 		return
 	}
 	if print {
-		msg := fmt.Sprintf("| To use: export KUBECONFIG=%s |", temp.Name())
-		printLine(msg)
-		log.Infof(msg)
-		printLine(msg)
+		msg := fmt.Sprintf("To use: export KUBECONFIG=%s", temp.Name())
+		PrintLine(log.Info, msg)
 	}
 	path = temp.Name()
 	return
 }
-func printLine(msg string) {
-	line := "+" + strings.Repeat("-", len(msg)-2) + "+"
-	log.Infof(line)
+
+func PrintLine(f func(...any), msg ...string) {
+	var length = -1
+	for _, s := range msg {
+		length = max(len(s), length)
+	}
+	if f == nil {
+		f = func(a ...any) {
+			fmt.Println(a...)
+		}
+	}
+	line := "+" + strings.Repeat("-", length+2) + "+"
+	f(line)
+	for _, s := range msg {
+		var padding string
+		if length != len(s) {
+			padding = strings.Repeat(" ", length-len(s))
+		}
+		f(fmt.Sprintf("| %s%s |", s, padding))
+	}
+	f(line)
 }
 
 func SshJumpAndSetEnv(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print bool) error {

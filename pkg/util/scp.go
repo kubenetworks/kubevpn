@@ -68,16 +68,15 @@ func SCP(client *ssh.Client, stdout, stderr io.Writer, filename, to string) erro
 func sCopy(dst io.Writer, src io.Reader, size int64, stdout, stderr io.Writer) error {
 	total := float64(size) / 1024 / 1024
 	s := fmt.Sprintf("Length: %d (%0.2fM)", size, total)
-	log.Info(s)
 	io.WriteString(stdout, s+"\n")
 
 	bar := progressbar.NewOptions(int(size),
 		progressbar.OptionSetWriter(stdout),
 		progressbar.OptionEnableColorCodes(true),
 		progressbar.OptionShowBytes(true),
-		progressbar.OptionSetWidth(50),
+		progressbar.OptionSetWidth(25),
 		progressbar.OptionOnCompletion(func() {
-			_, _ = fmt.Fprint(stderr, "\n")
+			_, _ = fmt.Fprint(stderr, "\n\r")
 		}),
 		progressbar.OptionSetRenderBlankState(true),
 		progressbar.OptionSetDescription("Transferring file..."),

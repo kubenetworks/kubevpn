@@ -45,9 +45,10 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 			log.Errorf("parse route error: %v", err)
 			return nil, err
 		}
-		ctx, sshCancelFunc = context.WithCancel(context.Background())
+		var ctx1 context.Context
+		ctx1, sshCancelFunc = context.WithCancel(context.Background())
 		go func() {
-			err := handler.Run(ctx, servers)
+			err := handler.Run(ctx1, servers)
 			if err != nil {
 				log.Errorf("run route error: %v", err)
 			}

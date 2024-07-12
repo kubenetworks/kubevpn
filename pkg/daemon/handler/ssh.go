@@ -14,6 +14,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -44,8 +45,8 @@ type wsHandler struct {
 // 1) start remote kubevpn server
 // 2) start local tunnel
 // 3) ssh terminal
-func (w *wsHandler) handle(ctx context.Context) {
-	ctx, f := context.WithCancel(ctx)
+func (w *wsHandler) handle(c context.Context) {
+	ctx, f := context.WithCancel(c)
 	defer f()
 
 	cli, err := util.DialSshRemote(ctx, w.sshConfig)
@@ -57,7 +58,7 @@ func (w *wsHandler) handle(ctx context.Context) {
 
 	err = w.installKubevpnOnRemote(ctx, cli)
 	if err != nil {
-		w.Log("Install kubevpn error: %v", err)
+		//w.Log("Install kubevpn error: %v", err)
 		return
 	}
 
@@ -130,7 +131,12 @@ func (w *wsHandler) handle(ctx context.Context) {
 			time.Sleep(time.Second * 5)
 		}
 	}()
-	err = w.terminal(ctx, cli, w.conn)
+	rw := NewReadWriteWrapper(w.conn)
+	go func() {
+		<-rw.IsClosed()
+		f()
+	}()
+	err = w.terminal(ctx, cli, rw)
 	if err != nil {
 		w.Log("Enter terminal error: %v", err)
 	}
@@ -138,21 +144,15 @@ func (w *wsHandler) handle(ctx context.Context) {
 }
 
 // startup daemon process if daemon process not start
-func startDaemonProcess(cli *ssh.Client) {
+func startDaemonProcess(cli *ssh.Client) string {
 	startDaemonCmd := fmt.Sprintf(`export %s=%s && kubevpn status > /dev/null 2>&1 &`, config.EnvStartSudoKubeVPNByKubeVPN, "true")
 	_, _, _ = util.RemoteRun(cli, startDaemonCmd, nil)
-	ticker := time.NewTicker(time.Millisecond * 50)
-	defer ticker.Stop()
-	for range ticker.C {
-		output, _, err := util.RemoteRun(cli, "kubevpn version", nil)
-		if err != nil {
-			continue
-		}
-		version := getDaemonVersionFromOutput(output)
-		if version != "" && version != "unknown" {
-			break
-		}
+	output, _, err := util.RemoteRun(cli, "kubevpn version", nil)
+	if err != nil {
+		return ""
 	}
+	version := getDaemonVersionFromOutput(output)
+	return version
 }
 
 func getDaemonVersionFromOutput(output []byte) (version string) {
@@ -178,7 +178,45 @@ func getDaemonVersionFromOutput(output []byte) (version string) {
 	return data.DaemonVersion
 }
 
-func (w *wsHandler) terminal(ctx context.Context, cli *ssh.Client, conn *websocket.Conn) error {
+type ReadWriteWrapper struct {
+	closed chan any
+	sync.Once
+	net.Conn
+}
+
+func NewReadWriteWrapper(conn net.Conn) *ReadWriteWrapper {
+	return &ReadWriteWrapper{
+		closed: make(chan any),
+		Once:   sync.Once{},
+		Conn:   conn,
+	}
+}
+
+func (rw *ReadWriteWrapper) Read(b []byte) (int, error) {
+	n, err := rw.Conn.Read(b)
+	if err != nil {
+		rw.Do(func() {
+			close(rw.closed)
+		})
+	}
+	return n, err
+}
+
+func (rw *ReadWriteWrapper) Write(p []byte) (int, error) {
+	n, err := rw.Conn.Write(p)
+	if err != nil {
+		rw.Do(func() {
+			close(rw.closed)
+		})
+	}
+	return n, err
+}
+
+func (rw *ReadWriteWrapper) IsClosed() chan any {
+	return rw.closed
+}
+
+func (w *wsHandler) terminal(ctx context.Context, cli *ssh.Client, conn io.ReadWriter) error {
 	session, err := cli.NewSession()
 	if err != nil {
 		w.Log("New session error: %v", err)
@@ -203,7 +241,7 @@ func (w *wsHandler) terminal(ctx context.Context, cli *ssh.Client, conn *websock
 		ssh.TTY_OP_ISPEED: 14400,
 		ssh.TTY_OP_OSPEED: 14400,
 	}
-	if err := session.RequestPty("xterm", height, width, modes); err != nil {
+	if err = session.RequestPty("xterm", height, width, modes); err != nil {
 		w.Log("Request pty error: %v", err)
 		return err
 	}
@@ -217,7 +255,7 @@ func (w *wsHandler) terminal(ctx context.Context, cli *ssh.Client, conn *websock
 func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.Client) (err error) {
 	defer func() {
 		if err == nil {
-			startDaemonProcess(sshClient)
+			w.Log("Remote daemon server version: %s", startDaemonProcess(sshClient))
 		}
 	}()
 
@@ -306,15 +344,12 @@ var CondReady = make(map[string]context.Context)
 
 func init() {
 	http.Handle("/ws", websocket.Handler(func(conn *websocket.Conn) {
-		sshConfig := util.SshConfig{
-			Addr:             conn.Request().Header.Get("ssh-addr"),
-			User:             conn.Request().Header.Get("ssh-username"),
-			Password:         conn.Request().Header.Get("ssh-password"),
-			Keyfile:          conn.Request().Header.Get("ssh-keyfile"),
-			ConfigAlias:      conn.Request().Header.Get("ssh-alias"),
-			GSSAPIPassword:   conn.Request().Header.Get("gssapi-password"),
-			GSSAPIKeytabConf: conn.Request().Header.Get("gssapi-keytab"),
-			GSSAPICacheFile:  conn.Request().Header.Get("gssapi-cache"),
+		var sshConfig util.SshConfig
+		b := conn.Request().Header.Get("ssh")
+		if err := json.Unmarshal([]byte(b), &sshConfig); err != nil {
+			_, _ = conn.Write([]byte(err.Error()))
+			_ = conn.Close()
+			return
 		}
 		var extraCIDR []string
 		if v := conn.Request().Header.Get("extra-cidr"); v != "" {
