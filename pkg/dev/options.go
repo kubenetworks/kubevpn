@@ -43,7 +43,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/mesh"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -136,7 +136,7 @@ func (option *Options) Main(ctx context.Context, c *containerConfig) error {
 		return err
 	}
 
-	mesh.RemoveContainers(templateSpec)
+	inject.RemoveContainers(templateSpec)
 	list := convertKubeResourceToContainer(option.Namespace, *templateSpec, env, volume, dns)
 	mergeDockerOptions(list, option, c)
 	mode := container.NetworkMode(option.Copts.netMode.NetworkMode())

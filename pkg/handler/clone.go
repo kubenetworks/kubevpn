@@ -36,7 +36,7 @@ import (
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/mesh"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/syncthing"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -578,7 +578,7 @@ func (d *CloneOptions) setVolume(u *unstructured.Unstructured) error {
 	// replace old one
 	temp.Spec.Volumes = volumeList
 	// remove containers vpn and envoy-proxy
-	mesh.RemoveContainers(temp)
+	inject.RemoveContainers(temp)
 	// add each container service account token
 	if tokenVolume != "" {
 		for i := 0; i < len(temp.Spec.Containers); i++ {
