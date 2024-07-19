@@ -3,12 +3,9 @@ package handler
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
-	"strconv"
-	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -19,16 +16,11 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	k8sjson "k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/wait"
-	pkgresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/cert"
-	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/util/podutils"
@@ -36,7 +28,6 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/exchange"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -46,12 +37,9 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 
 	service, err := clientset.CoreV1().Services(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err == nil {
-		_, err = polymorphichelpers.AttachablePodForObjectFn(factory, service, 2*time.Second)
-		if err == nil {
-			_, err = updateRefCount(ctx, clientset.CoreV1().ConfigMaps(namespace), config.ConfigMapPodTrafficManager, 1)
-			if err != nil {
-				return
-			}
+		var pod *v1.Pod
+		pod, err = polymorphichelpers.AttachablePodForObjectFn(factory, service, 2*time.Second)
+		if err == nil && pod.DeletionTimestamp.IsZero() && podutils.IsPodReady(pod) {
 			log.Infoln("traffic manager already exist, reuse it")
 			return
 		}
@@ -70,7 +58,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 			deleteResource(context.Background())
 		}
 	}()
-	deleteResource(context.Background())
+	deleteResource(ctx)
 	log.Infoln("traffic manager not exist, try to create it...")
 
 	// 1) label namespace
@@ -195,7 +183,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		return err
 	}
 
-	var Resources = v1.ResourceRequirements{
+	var resourcesSmall = v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
 			v1.ResourceCPU:    resource.MustParse("100m"),
 			v1.ResourceMemory: resource.MustParse("128Mi"),
@@ -205,7 +193,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 			v1.ResourceMemory: resource.MustParse("256Mi"),
 		},
 	}
-	var ResourcesContainerVPN = v1.ResourceRequirements{
+	var resourcesLarge = v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
 			v1.ResourceCPU:    resource.MustParse("500m"),
 			v1.ResourceMemory: resource.MustParse("512Mi"),
@@ -223,7 +211,6 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		log.Errorf("generate self signed cert and key error: %s", err.Error())
 		return err
 	}
-
 	// reason why not use v1.SecretTypeTls is because it needs key called tls.crt and tls.key, but tls.key can not as env variable
 	// ➜  ~ export tls.key=a
 	//export: not valid in this context: tls.key
@@ -239,7 +226,6 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		Type: v1.SecretTypeOpaque,
 	}
 	_, err = clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
-
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
 		log.Errorf("create secret error: %s", err.Error())
 		return err
@@ -247,7 +233,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 
 	// 6) create deployment
 	log.Infof("create deployment %s", config.ConfigMapPodTrafficManager)
-	deployment := &appsv1.Deployment{
+	deploy := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
 			Namespace: namespace,
@@ -337,7 +323,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 								ContainerPort: 10800,
 								Protocol:      v1.ProtocolTCP,
 							}},
-							Resources:       ResourcesContainerVPN,
+							Resources:       resourcesLarge,
 							ImagePullPolicy: v1.PullIfNotPresent,
 							SecurityContext: &v1.SecurityContext{
 								Capabilities: &v1.Capabilities{
@@ -376,7 +362,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 								},
 							},
 							ImagePullPolicy: v1.PullIfNotPresent,
-							Resources:       Resources,
+							Resources:       resourcesSmall,
 						},
 						{
 							Name:    "webhook",
@@ -397,7 +383,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 							}},
 							Env:             []v1.EnvVar{},
 							ImagePullPolicy: v1.PullIfNotPresent,
-							Resources:       Resources,
+							Resources:       resourcesSmall,
 						},
 					},
 					RestartPolicy: v1.RestartPolicyAlways,
@@ -405,13 +391,13 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 			},
 		},
 	}
-	deployment, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{})
+	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
 		log.Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
 		return err
 	}
 	str := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
-	_, selector, err := polymorphichelpers.SelectorsForObject(deployment)
+	_, selector, err := polymorphichelpers.SelectorsForObject(deploy)
 	if err == nil {
 		str = selector.String()
 	}
@@ -427,7 +413,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 	ctx2, cancelFunc := context.WithTimeout(ctx, time.Minute*60)
 	defer cancelFunc()
 	wait.UntilWithContext(ctx2, func(ctx context.Context) {
-		podList, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		podList, err := clientset.CoreV1().Pods(namespace).List(ctx2, metav1.ListOptions{
 			LabelSelector: fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String(),
 		})
 		if err != nil {
@@ -518,307 +504,6 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 	if err != nil && !k8serrors.IsForbidden(err) && !k8serrors.IsAlreadyExists(err) {
 		return fmt.Errorf("failed to create MutatingWebhookConfigurations, err: %v", err)
 	}
-	_, err = updateRefCount(ctx, clientset.CoreV1().ConfigMaps(namespace), config.ConfigMapPodTrafficManager, 1)
-	if err != nil {
-		log.Errorf("Failed to update ref count for %s: %v", config.ConfigMapPodTrafficManager, err)
-		return
-	}
-	return
-}
 
-func InjectVPNSidecar(ctx1 context.Context, factory cmdutil.Factory, namespace, workload string, c util.PodRouteConfig) error {
-	object, err := util.GetUnstructuredObject(factory, namespace, workload)
-	if err != nil {
-		return err
-	}
-
-	u := object.Object.(*unstructured.Unstructured)
-
-	podTempSpec, path, err := util.GetPodTemplateSpecPath(u)
-	if err != nil {
-		return err
-	}
-
-	clientset, err := factory.KubernetesClientSet()
-	if err != nil {
-		return err
-	}
-	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
-	var ports []v1.ContainerPort
-	for _, container := range podTempSpec.Spec.Containers {
-		ports = append(ports, container.Ports...)
-	}
-	var portmap = make(map[int32]int32)
-	for _, port := range ports {
-		portmap[port.ContainerPort] = port.ContainerPort
-	}
-	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(namespace), nodeID, c, nil, ports, portmap)
-	if err != nil {
-		log.Errorf("add envoy config error: %v", err)
-		return err
-	}
-
-	origin := *podTempSpec
-	exchange.AddContainer(&podTempSpec.Spec, c)
-
-	helper := pkgresource.NewHelper(object.Client, object.Mapping)
-	// pods without controller
-	if len(path) == 0 {
-		log.Infof("workload %s/%s is not controlled by any controller", namespace, workload)
-		for _, container := range podTempSpec.Spec.Containers {
-			container.LivenessProbe = nil
-			container.StartupProbe = nil
-			container.ReadinessProbe = nil
-		}
-		p := &v1.Pod{ObjectMeta: podTempSpec.ObjectMeta, Spec: podTempSpec.Spec}
-		CleanupUselessInfo(p)
-		if err = CreateAfterDeletePod(factory, p, helper); err != nil {
-			return err
-		}
-
-		//rollbackFuncList = append(rollbackFuncList, func() {
-		//	p2 := &v1.Pod{ObjectMeta: origin.ObjectMeta, Spec: origin.Spec}
-		//	CleanupUselessInfo(p2)
-		//	if err = CreateAfterDeletePod(factory, p2, helper); err != nil {
-		//		log.Error(err)
-		//	}
-		//})
-	} else
-	// controllers
-	{
-		log.Infof("workload %s/%s is controlled by a controller", namespace, workload)
-		// remove probe
-		removePatch, restorePatch := patch(origin, path)
-		b, _ := json.Marshal(restorePatch)
-		p := []P{
-			{
-				Op:    "replace",
-				Path:  "/" + strings.Join(append(path, "spec"), "/"),
-				Value: podTempSpec.Spec,
-			},
-			{
-				Op:    "replace",
-				Path:  "/metadata/annotations/" + config.KubeVPNRestorePatchKey,
-				Value: string(b),
-			},
-		}
-		marshal, _ := json.Marshal(append(p, removePatch...))
-		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, marshal, &metav1.PatchOptions{})
-		if err != nil {
-			log.Errorf("error while inject proxy container, err: %v, exiting...", err)
-			return err
-		}
-
-		//rollbackFuncList = append(rollbackFuncList, func() {
-		//	if err = removeInboundContainer(factory, namespace, workload); err != nil {
-		//		log.Error(err)
-		//	}
-		//	//b, _ := json.Marshal(restorePatch)
-		//	if _, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, b, &metav1.PatchOptions{}); err != nil {
-		//		log.Warnf("error while restore probe of resource: %s %s, ignore, err: %v",
-		//			object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
-		//	}
-		//})
-	}
-	if err != nil {
-		return err
-	}
-	// todo not work?
-	err = util.RolloutStatus(ctx1, factory, namespace, workload, time.Minute*60)
-	return err
-}
-
-func CreateAfterDeletePod(factory cmdutil.Factory, p *v1.Pod, helper *pkgresource.Helper) error {
-	_, err := helper.DeleteWithOptions(p.Namespace, p.Name, &metav1.DeleteOptions{
-		GracePeriodSeconds: pointer.Int64(0),
-	})
-	if err != nil {
-		log.Errorf("error while delete resource: %s %s, ignore, err: %v", p.Namespace, p.Name, err)
-	}
-	err = retry.OnError(wait.Backoff{
-		Steps:    10,
-		Duration: 50 * time.Millisecond,
-		Factor:   5.0,
-		Jitter:   1,
-	}, func(err error) bool {
-		if !k8serrors.IsAlreadyExists(err) {
-			return true
-		}
-		clientset, err := factory.KubernetesClientSet()
-		get, err := clientset.CoreV1().Pods(p.Namespace).Get(context.Background(), p.Name, metav1.GetOptions{})
-		if err != nil || get.Status.Phase != v1.PodRunning {
-			return true
-		}
-		return false
-	}, func() error {
-		if _, err := helper.Create(p.Namespace, true, p); err != nil {
-			return err
-		}
-		return errors.New("")
-	})
-	if err != nil {
-		if k8serrors.IsAlreadyExists(err) {
-			return nil
-		}
-		log.Errorf("error while create resource: %s %s, err: %v", p.Namespace, p.Name, err)
-		return err
-	}
 	return nil
-}
-
-func removeInboundContainer(factory cmdutil.Factory, namespace, workloads string) error {
-	object, err := util.GetUnstructuredObject(factory, namespace, workloads)
-	if err != nil {
-		return err
-	}
-
-	u := object.Object.(*unstructured.Unstructured)
-
-	podTempSpec, path, err := util.GetPodTemplateSpecPath(u)
-	if err != nil {
-		return err
-	}
-
-	helper := pkgresource.NewHelper(object.Client, object.Mapping)
-
-	// pods
-	if len(path) == 0 {
-		_, err = helper.DeleteWithOptions(object.Namespace, object.Name, &metav1.DeleteOptions{
-			GracePeriodSeconds: pointer.Int64(0),
-		})
-		if err != nil {
-			return err
-		}
-	}
-	// how to scale to one
-	exchange.RemoveContainer(&podTempSpec.Spec)
-
-	bytes, err := json.Marshal([]struct {
-		Op    string      `json:"op"`
-		Path  string      `json:"path"`
-		Value interface{} `json:"value"`
-	}{{
-		Op:    "replace",
-		Path:  "/" + strings.Join(append(path, "spec"), "/"),
-		Value: podTempSpec.Spec,
-	}})
-	if err != nil {
-		return err
-	}
-	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{
-		//Force: &t,
-	})
-	return err
-}
-
-func CleanupUselessInfo(pod *v1.Pod) {
-	pod.SetSelfLink("")
-	pod.SetGeneration(0)
-	pod.SetResourceVersion("")
-	pod.SetUID("")
-	pod.SetDeletionTimestamp(nil)
-	pod.SetSelfLink("")
-	pod.SetManagedFields(nil)
-	pod.SetOwnerReferences(nil)
-}
-
-type P struct {
-	Op    string      `json:"op,omitempty"`
-	Path  string      `json:"path,omitempty"`
-	Value interface{} `json:"value,omitempty"`
-}
-
-func patch(spec v1.PodTemplateSpec, path []string) (remove []P, restore []P) {
-	for i := range spec.Spec.Containers {
-		index := strconv.Itoa(i)
-		readinessPath := "/" + strings.Join(append(path, "spec", "containers", index, "readinessProbe"), "/")
-		livenessPath := "/" + strings.Join(append(path, "spec", "containers", index, "livenessProbe"), "/")
-		startupPath := "/" + strings.Join(append(path, "spec", "containers", index, "startupProbe"), "/")
-		f := func(p *v1.Probe) string {
-			if p == nil {
-				return ""
-			}
-			marshal, err := k8sjson.Marshal(p)
-			if err != nil {
-				log.Errorf("error while json marshal: %v", err)
-				return ""
-			}
-			return string(marshal)
-		}
-		remove = append(remove, P{
-			Op:    "replace",
-			Path:  readinessPath,
-			Value: nil,
-		}, P{
-			Op:    "replace",
-			Path:  livenessPath,
-			Value: nil,
-		}, P{
-			Op:    "replace",
-			Path:  startupPath,
-			Value: nil,
-		})
-		restore = append(restore, P{
-			Op:    "replace",
-			Path:  readinessPath,
-			Value: f(spec.Spec.Containers[i].ReadinessProbe),
-		}, P{
-			Op:    "replace",
-			Path:  livenessPath,
-			Value: f(spec.Spec.Containers[i].LivenessProbe),
-		}, P{
-			Op:    "replace",
-			Path:  startupPath,
-			Value: f(spec.Spec.Containers[i].StartupProbe),
-		})
-	}
-	return
-}
-
-func fromPatchToProbe(spec *v1.PodTemplateSpec, path []string, patch []P) {
-	// 3 = readiness + liveness + startup
-	if len(patch) != 3*len(spec.Spec.Containers) {
-		log.Debugf("patch not match container num, not restore")
-		return
-	}
-	for i := range spec.Spec.Containers {
-		index := strconv.Itoa(i)
-		readinessPath := "/" + strings.Join(append(path, "spec", "containers", index, "readinessProbe"), "/")
-		livenessPath := "/" + strings.Join(append(path, "spec", "containers", index, "livenessProbe"), "/")
-		startupPath := "/" + strings.Join(append(path, "spec", "containers", index, "startupProbe"), "/")
-		var f = func(value any) *v1.Probe {
-			if value == nil {
-				return nil
-			}
-			str, ok := value.(string)
-			if ok && str == "" {
-				return nil
-			}
-			if !ok {
-				marshal, err := k8sjson.Marshal(value)
-				if err != nil {
-					log.Errorf("error while json marshal: %v", err)
-					return nil
-				}
-				str = string(marshal)
-			}
-			var probe v1.Probe
-			err := k8sjson.Unmarshal([]byte(str), &probe)
-			if err != nil {
-				log.Errorf("error while json unmarsh: %v", err)
-				return nil
-			}
-			return &probe
-		}
-		for _, p := range patch {
-			switch p.Path {
-			case readinessPath:
-				spec.Spec.Containers[i].ReadinessProbe = f(p.Value)
-			case livenessPath:
-				spec.Spec.Containers[i].LivenessProbe = f(p.Value)
-			case startupPath:
-				spec.Spec.Containers[i].StartupProbe = f(p.Value)
-			}
-		}
-	}
 }

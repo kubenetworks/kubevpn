@@ -17,7 +17,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -81,7 +81,7 @@ func (h *admissionReviewHandler) handleCreate(ar v1.AdmissionReview) *v1.Admissi
 	h.Lock()
 	defer h.Unlock()
 	cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
-	dhcp := handler.NewDHCPManager(cmi, ar.Request.Namespace)
+	manager := dhcp.NewDHCPManager(cmi, ar.Request.Namespace)
 	var ips []net.IP
 	for k := 0; k < len(container.Env); k++ {
 		envVar := container.Env[k]
@@ -91,11 +91,11 @@ func (h *admissionReviewHandler) handleCreate(ar v1.AdmissionReview) *v1.Admissi
 			}
 		}
 	}
-	_ = dhcp.ReleaseIP(context.Background(), ips...)
+	_ = manager.ReleaseIP(context.Background(), ips...)
 
 	// 3) rent new ip
 	var v4, v6 *net.IPNet
-	v4, v6, err = dhcp.RentIPRandom(context.Background())
+	v4, v6, err = manager.RentIP(context.Background())
 	if err != nil {
 		log.Errorf("rent ip random failed, err: %v", err)
 		return toV1AdmissionResponse(err)
@@ -181,7 +181,7 @@ func (h *admissionReviewHandler) handleDelete(ar v1.AdmissionReview) *v1.Admissi
 		h.Lock()
 		defer h.Unlock()
 		cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
-		err := handler.NewDHCPManager(cmi, ar.Request.Namespace).ReleaseIP(context.Background(), ips...)
+		err := dhcp.NewDHCPManager(cmi, ar.Request.Namespace).ReleaseIP(context.Background(), ips...)
 		if err != nil {
 			log.Errorf("release ip to dhcp err: %v, ips: %v", err, ips)
 		} else {

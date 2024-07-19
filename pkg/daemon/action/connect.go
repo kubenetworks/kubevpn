@@ -101,7 +101,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if err != nil {
 		return err
 	}
-	_, err = svr.connect.RentInnerIP(ctx)
+	err = svr.connect.GetIPFromContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -179,7 +179,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		}
 	}
 
-	ctx, err := connect.RentInnerIP(resp.Context())
+	ctx, err := connect.RentIP(resp.Context())
 	if err != nil {
 		return err
 	}

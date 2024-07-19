@@ -27,7 +27,7 @@ func RunCmdWithElevated(exe string, args []string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	cmd.Env = append(os.Environ(), config.EnvStartSudoKubeVPNByKubeVPN+"=1", config.EnvDisableSyncthingLog+"=1")
+	cmd.Env = append(os.Environ(), config.EnvDisableSyncthingLog+"=1")
 	err := cmd.Start()
 	if err != nil {
 		return err
@@ -54,7 +54,7 @@ func RunCmd(exe string, args []string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	cmd.Env = append(os.Environ(), config.EnvStartSudoKubeVPNByKubeVPN+"=1", config.EnvDisableSyncthingLog+"=1")
+	cmd.Env = append(os.Environ(), config.EnvDisableSyncthingLog+"=1")
 	err := cmd.Start()
 	if err != nil {
 		return err

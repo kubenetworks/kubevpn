@@ -14,6 +14,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 )
 
 // Reset
@@ -89,7 +90,7 @@ func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
 		// deployments.apps.ry-server --> deployments.apps/ry-server
 		lastIndex := strings.LastIndex(virtual.Uid, ".")
 		uid := virtual.Uid[:lastIndex] + "/" + virtual.Uid[lastIndex+1:]
-		err = UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, uid, v4)
+		err = inject.UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, uid, v4)
 		if err != nil {
 			log.Errorf("leave workload %s failed: %v", uid, err)
 			continue

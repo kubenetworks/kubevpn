@@ -417,7 +417,7 @@ func createConnectContainer(noProxy bool, connect handler.ConnectOptions, path s
 		AttachStderr:    false,
 		ExposedPorts:    set,
 		StdinOnce:       false,
-		Env:             []string{fmt.Sprintf("%s=1", config.EnvStartSudoKubeVPNByKubeVPN)},
+		Env:             []string{},
 		Cmd:             []string{},
 		Healthcheck:     nil,
 		ArgsEscaped:     false,

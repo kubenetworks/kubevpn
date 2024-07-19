@@ -125,8 +125,7 @@ func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 		}
 		return c
 	}
-	// todo optimize here
-	temp, err := os.CreateTemp("", "*.json")
+	temp, err := os.CreateTemp("", "*.kubeconfig")
 	if err != nil {
 		return nil
 	}

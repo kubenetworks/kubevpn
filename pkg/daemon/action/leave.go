@@ -7,7 +7,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 )
 
 func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) error {
@@ -29,7 +29,7 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 	v4, _ := svr.connect.GetLocalTunIP()
 	for _, workload := range req.GetWorkloads() {
 		// add rollback func to remove envoy config
-		err := handler.UnPatchContainer(factory, maps, namespace, workload, v4)
+		err := inject.UnPatchContainer(factory, maps, namespace, workload, v4)
 		if err != nil {
 			log.Errorf("leave workload %s failed: %v", workload, err)
 			continue

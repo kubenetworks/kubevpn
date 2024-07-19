@@ -18,7 +18,8 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/webhook/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp/rpc"
 )
 
 func Main(f util.Factory) error {
@@ -67,7 +68,7 @@ func Main(f util.Factory) error {
 	handler := daemon.CreateDowngradingHandler(grpcServer, http.HandlerFunc(http.DefaultServeMux.ServeHTTP))
 	downgradingServer.Handler = h2c.NewHandler(handler, &h2Server)
 	defer downgradingServer.Close()
-	rpc.RegisterDHCPServer(grpcServer, &dhcpServer{f: f, clientset: clientset})
+	rpc.RegisterDHCPServer(grpcServer, dhcp.NewServer(clientset))
 	return downgradingServer.ListenAndServeTLS("", "")
 }
 

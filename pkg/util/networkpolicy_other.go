@@ -6,15 +6,4 @@ import (
 	"context"
 )
 
-func DeleteBlockFirewallRule(_ context.Context) {
-}
-
-func AddAllowFirewallRule() {
-}
-
-func DeleteAllowFirewallRule() {
-}
-
-func FindAllowFirewallRule() bool {
-	return false
-}
+func DeleteBlockFirewallRule(ctx context.Context) {}
