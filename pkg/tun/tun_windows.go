@@ -24,10 +24,11 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		return
 	}
 
-	interfaceName := "kubevpn"
+	interfaceName := "KubeVPN"
 	if len(cfg.Name) != 0 {
 		interfaceName = cfg.Name
 	}
+	wireguardtun.WintunTunnelType = "KubeVPN"
 	tunDevice, err := wireguardtun.CreateTUN(interfaceName, cfg.MTU)
 	if err != nil {
 		err = fmt.Errorf("failed to create TUN device: %w", err)
@@ -82,6 +83,19 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if itf, err = net.InterfaceByIndex(int(row.InterfaceIndex)); err != nil {
 		return
 	}
+
+	// windows,macOS,linux connect to same cluster
+	// macOS and linux can ping each other, but macOS and linux can not ping windows
+	var ipInterface *winipcfg.MibIPInterfaceRow
+	ipInterface, err = ifName.IPInterface(windows.AF_INET)
+	if err != nil {
+		return
+	}
+	ipInterface.ForwardingEnabled = true
+	if err = ipInterface.Set(); err != nil {
+		return
+	}
+
 	conn = &winTunConn{ifce: tunDevice, addr: &net.IPAddr{IP: ipv4}, addr6: &net.IPAddr{IP: ipv6}}
 	return
 }
