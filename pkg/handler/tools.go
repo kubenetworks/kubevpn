@@ -80,16 +80,6 @@ func Complete(ctx context.Context, route *core.Route) error {
 	return nil
 }
 
-func release(ctx context.Context, client rpc.DHCPClient) error {
-	_, err := client.ReleaseIP(ctx, &rpc.ReleaseIPRequest{
-		PodName:      os.Getenv(config.EnvPodName),
-		PodNamespace: os.Getenv(config.EnvPodNamespace),
-		IPv4CIDR:     os.Getenv(config.EnvInboundPodTunIPv4),
-		IPv6CIDR:     os.Getenv(config.EnvInboundPodTunIPv6),
-	})
-	return err
-}
-
 func getDHCPServerClient(ctx context.Context, namespace string) (rpc.DHCPClient, error) {
 	cert, ok := os.LookupEnv(config.TLSCertKey)
 	if !ok {
