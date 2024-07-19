@@ -25,7 +25,6 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/mesh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -112,7 +111,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 		return err
 	}
 
-	mesh.AddMeshContainer(templateSpec, nodeID, c)
+	AddMeshContainer(templateSpec, nodeID, c)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	ps := []P{
 		{
@@ -170,7 +169,7 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 
 	log.Infof("leave workload %s", workload)
 
-	mesh.RemoveContainers(templateSpec)
+	RemoveContainers(templateSpec)
 	if u.GetAnnotations() != nil && u.GetAnnotations()[config.KubeVPNRestorePatchKey] != "" {
 		patchStr := u.GetAnnotations()[config.KubeVPNRestorePatchKey]
 		var ps []P

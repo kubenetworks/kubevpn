@@ -1,4 +1,4 @@
-package mesh
+package inject
 
 import (
 	_ "embed"
