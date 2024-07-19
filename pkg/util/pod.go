@@ -296,6 +296,8 @@ func WaitPodToBeReady(ctx context.Context, podInterface v12.PodInterface, select
 			}
 		case <-ticker.C:
 			return errors.New(fmt.Sprintf("wait pod to be ready timeout"))
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }

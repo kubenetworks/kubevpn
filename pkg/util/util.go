@@ -119,11 +119,11 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, wor
 	lw := &cache.ListWatch{
 		ListFunc: func(options metav1.ListOptions) (k8sruntime.Object, error) {
 			options.FieldSelector = fieldSelector
-			return client.Resource(info.Mapping.Resource).Namespace(info.Namespace).List(context.Background(), options)
+			return client.Resource(info.Mapping.Resource).Namespace(info.Namespace).List(ctx1, options)
 		},
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			options.FieldSelector = fieldSelector
-			return client.Resource(info.Mapping.Resource).Namespace(info.Namespace).Watch(context.Background(), options)
+			return client.Resource(info.Mapping.Resource).Namespace(info.Namespace).Watch(ctx1, options)
 		},
 	}
 

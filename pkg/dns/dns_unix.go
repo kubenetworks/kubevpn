@@ -33,9 +33,6 @@ var resolv = "/etc/resolv.conf"
 // service.namespace.svc.cluster.local:port
 func (c *Config) SetupDNS(ctx context.Context) error {
 	c.usingResolver(ctx)
-	_ = exec.Command("killall", "mDNSResponderHelper").Run()
-	_ = exec.Command("killall", "-HUP", "mDNSResponder").Run()
-	_ = exec.Command("dscacheutil", "-flushcache").Run()
 	return nil
 }
 

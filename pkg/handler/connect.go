@@ -30,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
 	pkgtypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -48,8 +47,10 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -73,7 +74,7 @@ type ConnectOptions struct {
 	config     *rest.Config
 	factory    cmdutil.Factory
 	cidrs      []*net.IPNet
-	dhcp       *DHCPManager
+	dhcp       *dhcp.Manager
 	// needs to give it back to dhcp
 	localTunIPv4     *net.IPNet
 	localTunIPv6     *net.IPNet
@@ -82,6 +83,7 @@ type ConnectOptions struct {
 
 	apiServerIPs []net.IP
 	extraHost    []dns.Entry
+	once         sync.Once
 }
 
 func (c *ConnectOptions) Context() context.Context {
@@ -89,49 +91,58 @@ func (c *ConnectOptions) Context() context.Context {
 }
 
 func (c *ConnectOptions) InitDHCP(ctx context.Context) error {
-	c.dhcp = NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
-	err := c.dhcp.initDHCP(ctx)
-	return err
+	if c.dhcp == nil {
+		c.dhcp = dhcp.NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
+		return c.dhcp.InitDHCP(ctx)
+	}
+	return nil
 }
 
-func (c *ConnectOptions) RentInnerIP(ctx context.Context) (context.Context, error) {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if ok {
-		ipv4s := md.Get(config.HeaderIPv4)
-		if len(ipv4s) != 0 {
-			ip, ipNet, err := net.ParseCIDR(ipv4s[0])
-			if err == nil {
-				c.localTunIPv4 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
-				log.Debugf("get ipv4 %s from context", c.localTunIPv4.String())
-			}
-		}
-		ipv6s := md.Get(config.HeaderIPv6)
-		if len(ipv6s) != 0 {
-			ip, ipNet, err := net.ParseCIDR(ipv6s[0])
-			if err == nil {
-				c.localTunIPv6 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
-				log.Debugf("get ipv6 %s from context", c.localTunIPv6.String())
-			}
-		}
+func (c *ConnectOptions) RentIP(ctx context.Context) (context.Context, error) {
+	if err := c.InitDHCP(ctx); err != nil {
+		return nil, err
 	}
-	if c.dhcp == nil {
-		if err := c.InitDHCP(ctx); err != nil {
-			return nil, err
-		}
+	var err error
+	c.localTunIPv4, c.localTunIPv6, err = c.dhcp.RentIP(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx1 := metadata.AppendToOutgoingContext(
+		ctx,
+		config.HeaderIPv4, c.localTunIPv4.String(),
+		config.HeaderIPv6, c.localTunIPv6.String(),
+	)
+	return ctx1, nil
+}
+
+func (c *ConnectOptions) GetIPFromContext(ctx context.Context) error {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return fmt.Errorf("can not get ip from context")
 	}
 
-	var err error
-	if c.localTunIPv4 == nil || c.localTunIPv6 == nil {
-		c.localTunIPv4, c.localTunIPv6, err = c.dhcp.RentIPBaseNICAddress(ctx)
-		if err != nil {
-			return nil, err
-		}
-		ctx = metadata.AppendToOutgoingContext(ctx,
-			config.HeaderIPv4, c.localTunIPv4.String(),
-			config.HeaderIPv6, c.localTunIPv6.String(),
-		)
+	ipv4 := md.Get(config.HeaderIPv4)
+	if len(ipv4) == 0 {
+		return fmt.Errorf("can not found ipv4 from header: %v", md)
 	}
-	return ctx, nil
+	ip, ipNet, err := net.ParseCIDR(ipv4[0])
+	if err != nil {
+		return fmt.Errorf("cat not convert ipv4 string: %s: %v", ipv4[0], err)
+	}
+	c.localTunIPv4 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
+	log.Debugf("get ipv4 %s from context", c.localTunIPv4.String())
+
+	ipv6 := md.Get(config.HeaderIPv6)
+	if len(ipv6) == 0 {
+		return fmt.Errorf("can not found ipv6 from header: %v", md)
+	}
+	ip, ipNet, err = net.ParseCIDR(ipv6[0])
+	if err != nil {
+		return fmt.Errorf("cat not convert ipv6 string: %s: %v", ipv6[0], err)
+	}
+	c.localTunIPv6 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
+	log.Debugf("get ipv6 %s from context", c.localTunIPv6.String())
+	return nil
 }
 
 func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error) {
@@ -149,9 +160,9 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error)
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
 		if len(c.Headers) != 0 || len(c.PortMap) != 0 {
-			err = InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers, c.PortMap)
+			err = inject.InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers, c.PortMap)
 		} else {
-			err = InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, configInfo)
+			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, configInfo)
 		}
 		if err != nil {
 			log.Errorf("create remote inbound pod for %s failed: %s", workload, err.Error())
@@ -166,12 +177,13 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	log.Info("start to connect")
-	if err = c.InitDHCP(c.ctx); err != nil {
+	m := dhcp.NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
+	if err = m.InitDHCP(c.ctx); err != nil {
 		log.Errorf("init dhcp failed: %s", err.Error())
 		return
 	}
 	c.addCleanUpResourceHandler()
-	if err = c.getCIDR(c.ctx); err != nil {
+	if err = c.getCIDR(c.ctx, m); err != nil {
 		log.Errorf("get cidr failed: %s", err.Error())
 		return
 	}
@@ -180,9 +192,6 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		return
 	}
 	if err = c.upgradeDeploy(c.ctx); err != nil {
-		return
-	}
-	if err = c.upgradeService(c.ctx); err != nil {
 		return
 	}
 	//if err = c.CreateRemoteInboundPod(c.ctx); err != nil {
@@ -227,13 +236,12 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		log.Errorf("add route dynamic failed: %v", err)
 		return
 	}
-	c.deleteFirewallRule(c.ctx)
+	go c.deleteFirewallRule(c.ctx)
 	log.Debugf("setup dns")
 	if err = c.setupDNS(c.ctx); err != nil {
 		log.Errorf("set up dns failed: %v", err)
 		return
 	}
-	go c.heartbeats(c.ctx)
 	log.Info("dns service ok")
 	return
 }
@@ -314,10 +322,6 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 }
 
 func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress string, lite bool) (err error) {
-	// todo figure it out why
-	if util.IsWindows() {
-		c.localTunIPv4.Mask = net.CIDRMask(0, 32)
-	}
 	var list = sets.New[string]()
 	if !lite {
 		list.Insert(config.CIDR.String())
@@ -452,20 +456,11 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
 }
 
 func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
-	// Found those code looks like not works
-	if !util.FindAllowFirewallRule() {
-		util.AddAllowFirewallRule()
-	}
-	c.AddRolloutFunc(func() error {
-		util.DeleteAllowFirewallRule()
-		return nil
-	})
-
 	// The reason why delete firewall rule is:
 	// On windows use 'kubevpn proxy deploy/authors -H user=windows'
 	// Open terminal 'curl localhost:9080' ok
 	// Open terminal 'curl localTunIP:9080' not ok
-	go util.DeleteBlockFirewallRule(ctx)
+	util.DeleteBlockFirewallRule(ctx)
 }
 
 func (c *ConnectOptions) setupDNS(ctx context.Context) error {
@@ -671,7 +666,7 @@ func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error
 // https://stackoverflow.com/questions/45903123/kubernetes-set-service-cidr-and-pod-cidr-the-same
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster/54183373#54183373
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster
-func (c *ConnectOptions) getCIDR(ctx context.Context) (err error) {
+func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) (err error) {
 	defer func() {
 		if err == nil {
 			u, err2 := url.Parse(c.config.Host)
@@ -704,7 +699,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) (err error) {
 
 	// (1) get cidr from cache
 	var value string
-	value, err = c.dhcp.Get(ctx, config.KeyClusterIPv4POOLS)
+	value, err = m.Get(ctx, config.KeyClusterIPv4POOLS)
 	if err == nil {
 		for _, s := range strings.Split(value, " ") {
 			_, cidr, _ := net.ParseCIDR(s)
@@ -713,7 +708,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) (err error) {
 			}
 		}
 		if len(c.cidrs) != 0 {
-			log.Infoln("got cidr from cache")
+			log.Infoln("get cidr from cache")
 			return
 		}
 	}
@@ -730,7 +725,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) (err error) {
 			s.Insert(cidr.String())
 		}
 		c.cidrs = util.Deduplicate(append(c.cidrs, cidrs...))
-		_ = c.dhcp.Set(config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
+		_ = m.Set(ctx, config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
 		return
 	}
 
@@ -920,55 +915,38 @@ func (c *ConnectOptions) GetLocalTunIP() (v4 string, v6 string) {
 
 func (c *ConnectOptions) GetClusterID() string {
 	if c != nil && c.dhcp != nil {
-		return string(c.dhcp.clusterID)
+		return string(c.dhcp.GetClusterID())
 	}
 	return ""
 }
 
 func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
-	deployment, err := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	deploy, err := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
-	newImg, err := reference.ParseNormalizedNamed(config.Image)
-	if err != nil {
-		return err
+	if len(deploy.Spec.Template.Spec.Containers) == 0 {
+		return fmt.Errorf("can not found any container in deploy %s", deploy.Name)
 	}
-	newTag, ok := newImg.(reference.NamedTagged)
-	if !ok {
+
+	clientImg := config.Image
+	serverImg := deploy.Spec.Template.Spec.Containers[0].Image
+
+	if clientImg == serverImg {
 		return nil
 	}
 
-	oldImg, err := reference.ParseNormalizedNamed(deployment.Spec.Template.Spec.Containers[0].Image)
-	if err != nil {
-		return err
-	}
-	var oldTag reference.NamedTagged
-	oldTag, ok = oldImg.(reference.NamedTagged)
-	if !ok {
+	isNewer, _ := newer(clientImg, serverImg)
+	if deploy.Status.ReadyReplicas > 0 && !isNewer {
 		return nil
 	}
-	if reference.Domain(newImg) != reference.Domain(oldImg) {
-		return nil
-	}
-	var oldVersion, newVersion *goversion.Version
-	oldVersion, err = goversion.NewVersion(oldTag.Tag())
-	if err != nil {
-		return nil
-	}
-	newVersion, err = goversion.NewVersion(newTag.Tag())
-	if err != nil {
-		return nil
-	}
-	if oldVersion.GreaterThanOrEqual(newVersion) {
-		return nil
-	}
-	log.Infof("found newer image %s, set image from %s to it...", config.Image, deployment.Spec.Template.Spec.Containers[0].Image)
+
+	log.Infof("set image %s --> %s...", serverImg, clientImg)
 
 	r := c.factory.NewBuilder().
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
 		NamespaceParam(c.Namespace).DefaultNamespace().
-		ResourceNames("deployments", deployment.Name).
+		ResourceNames("deployments", deploy.Name).
 		ContinueOnError().
 		Latest().
 		Flatten().
@@ -983,7 +961,7 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 	patches := set.CalculatePatches(infos, scheme.DefaultJSONEncoder(), func(obj pkgruntime.Object) ([]byte, error) {
 		_, err = polymorphichelpers.UpdatePodSpecForObjectFn(obj, func(spec *v1.PodSpec) error {
 			for i := range spec.Containers {
-				spec.Containers[i].Image = config.Image
+				spec.Containers[i].Image = clientImg
 			}
 			return nil
 		})
@@ -992,9 +970,10 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 		}
 		return pkgruntime.Encode(scheme.DefaultJSONEncoder(), obj)
 	})
-
-	if err != nil {
-		return err
+	for _, p := range patches {
+		if p.Err != nil {
+			return p.Err
+		}
 	}
 	for _, p := range patches {
 		_, err = resource.
@@ -1013,56 +992,36 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 	return nil
 }
 
-// update service spec, just for migrate
-func (c *ConnectOptions) upgradeService(ctx context.Context) error {
-	service, err := c.clientset.CoreV1().Services(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+func newer(clientImgStr, serverImgStr string) (bool, error) {
+	clientImg, err := reference.ParseNormalizedNamed(clientImgStr)
 	if err != nil {
-		return err
+		return false, err
 	}
-	for _, port := range service.Spec.Ports {
-		if port.Port == 53 {
-			return nil
-		}
-	}
-	r := c.factory.NewBuilder().
-		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
-		NamespaceParam(c.Namespace).DefaultNamespace().
-		ResourceNames("services", service.Name).
-		ContinueOnError().
-		Latest().
-		Flatten().
-		Do()
-	if err = r.Err(); err != nil {
-		return err
-	}
-	infos, err := r.Infos()
+	serverImg, err := reference.ParseNormalizedNamed(serverImgStr)
 	if err != nil {
-		return err
+		return false, err
 	}
-	patches := set.CalculatePatches(infos, scheme.DefaultJSONEncoder(), func(obj pkgruntime.Object) ([]byte, error) {
-		v, ok := obj.(*v1.Service)
-		if ok {
-			v.Spec.Ports = append(v.Spec.Ports, v1.ServicePort{
-				Name:       "53-for-dns",
-				Protocol:   v1.ProtocolUDP,
-				Port:       53,
-				TargetPort: intstr.FromInt32(53),
-			})
-		}
-		return pkgruntime.Encode(scheme.DefaultJSONEncoder(), obj)
-	})
+	if reference.Domain(clientImg) != reference.Domain(serverImg) {
+		return false, nil
+	}
 
-	for _, p := range patches {
-		_, err = resource.
-			NewHelper(p.Info.Client, p.Info.Mapping).
-			DryRun(false).
-			Patch(p.Info.Namespace, p.Info.Name, pkgtypes.StrategicMergePatchType, p.Patch, nil)
-		if err != nil {
-			log.Errorf("failed to patch image update to pod template: %v", err)
-			return err
-		}
+	serverTag, ok := serverImg.(reference.NamedTagged)
+	if !ok {
+		return false, fmt.Errorf("can not convert server image")
 	}
-	return nil
+	serverVersion, err := goversion.NewVersion(serverTag.Tag())
+	if err != nil {
+		return false, err
+	}
+	clientTag, ok := clientImg.(reference.NamedTagged)
+	if !ok {
+		return false, fmt.Errorf("can not convert client image")
+	}
+	clientVersion, err := goversion.NewVersion(clientTag.Tag())
+	if err != nil {
+		return false, err
+	}
+	return clientVersion.GreaterThan(serverVersion), nil
 }
 
 // The reason why only Ping each other inner ip on Windows:

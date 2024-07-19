@@ -34,7 +34,6 @@ import (
 var (
 	namespace  string
 	clientset  *kubernetes.Clientset
-	restclient *rest.RESTClient
 	restconfig *rest.Config
 )
 
@@ -346,9 +345,6 @@ func Init() {
 	f := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 
 	if restconfig, err = f.ToRESTConfig(); err != nil {
-		log.Fatal(err)
-	}
-	if restclient, err = rest.RESTClientFor(restconfig); err != nil {
 		log.Fatal(err)
 	}
 	if clientset, err = kubernetes.NewForConfig(restconfig); err != nil {

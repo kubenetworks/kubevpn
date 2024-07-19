@@ -294,10 +294,7 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 					"--engine", string(d.Engine),
 					"--foreground",
 				}, args...),
-				Env: []v1.EnvVar{{
-					Name:  config.EnvStartSudoKubeVPNByKubeVPN,
-					Value: "1",
-				}},
+				Env: []v1.EnvVar{},
 				Resources: v1.ResourceRequirements{
 					Requests: map[v1.ResourceName]resource.Quantity{
 						v1.ResourceCPU:    resource.MustParse("1000m"),

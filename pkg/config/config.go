@@ -19,7 +19,6 @@ const (
 	KeyDHCP6            = "DHCP6"
 	KeyEnvoy            = "ENVOY_CONFIG"
 	KeyClusterIPv4POOLS = "IPv4_POOLS"
-	KeyRefCount         = "REF_COUNT"
 
 	// secret keys
 	// TLSCertKey is the key for tls certificates in a TLS secret.
@@ -70,14 +69,8 @@ const (
 	EnvPodNamespace      = "POD_NAMESPACE"
 
 	// header name
-	HeaderPodName      = "POD_NAME"
-	HeaderPodNamespace = "POD_NAMESPACE"
-	HeaderIPv4         = "IPv4"
-	HeaderIPv6         = "IPv6"
-
-	// api
-	APIRentIP    = "/rent/ip"
-	APIReleaseIP = "/release/ip"
+	HeaderIPv4 = "IPv4"
+	HeaderIPv6 = "IPv6"
 
 	KUBECONFIG = "kubeconfig"
 
@@ -89,9 +82,7 @@ const (
 	SudoPProfPort = 33345
 	PProfDir      = "pprof"
 
-	// startup by KubeVPN
-	EnvStartSudoKubeVPNByKubeVPN = "DEPTH_SIGNED_BY_NAISON"
-	EnvSSHJump                   = "SSH_JUMP_BY_KUBEVPN"
+	EnvSSHJump = "SSH_JUMP_BY_KUBEVPN"
 
 	// transport mode
 	ConfigKubeVPNTransportEngine = "transport-engine"

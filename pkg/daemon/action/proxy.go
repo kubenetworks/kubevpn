@@ -88,8 +88,8 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 			log.Infof("already connect to cluster")
 		} else {
 			log.Infof("try to disconnect from another cluster")
-			var disconnect rpc.Daemon_DisconnectClient
-			disconnect, err = daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{
+			var disconnectResp rpc.Daemon_DisconnectClient
+			disconnectResp, err = daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{
 				KubeconfigBytes: ptr.To(req.KubeconfigBytes),
 				Namespace:       ptr.To(connect.Namespace),
 				SshJump:         sshConf.ToRPC(),
@@ -99,7 +99,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 			}
 			var recv *rpc.DisconnectResponse
 			for {
-				recv, err = disconnect.Recv()
+				recv, err = disconnectResp.Recv()
 				if err == io.EOF {
 					break
 				} else if err != nil {

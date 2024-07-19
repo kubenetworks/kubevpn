@@ -14,8 +14,8 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/webhook/rpc"
 )
 
 func Complete(ctx context.Context, route *core.Route) error {
@@ -32,7 +32,7 @@ func Complete(ctx context.Context, route *core.Route) error {
 		return err
 	}
 	var resp *rpc.RentIPResponse
-	resp, err = client.RentIP(context.Background(), &rpc.RentIPRequest{
+	resp, err = client.RentIP(ctx, &rpc.RentIPRequest{
 		PodName:      os.Getenv(config.EnvPodName),
 		PodNamespace: ns,
 	})
@@ -42,11 +42,16 @@ func Complete(ctx context.Context, route *core.Route) error {
 
 	go func() {
 		<-ctx.Done()
-		err := release(context.Background(), client)
-		if err != nil {
-			log.Errorf("release ip failed: %v", err)
+		_, err2 := client.ReleaseIP(context.Background(), &rpc.ReleaseIPRequest{
+			PodName:      os.Getenv(config.EnvPodName),
+			PodNamespace: os.Getenv(config.EnvPodNamespace),
+			IPv4CIDR:     os.Getenv(config.EnvInboundPodTunIPv4),
+			IPv6CIDR:     os.Getenv(config.EnvInboundPodTunIPv6),
+		})
+		if err2 != nil {
+			log.Errorf("release ip %s and %s failed: %v", resp.IPv4CIDR, resp.IPv6CIDR, err2)
 		} else {
-			log.Errorf("release ip secuess")
+			log.Errorf("release ip %s and %s secuess", resp.IPv4CIDR, resp.IPv6CIDR)
 		}
 	}()
 
