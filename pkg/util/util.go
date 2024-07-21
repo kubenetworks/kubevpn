@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -16,9 +17,9 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -355,7 +356,8 @@ func CleanExtensionLib() {
 	if errors.Is(err, os.ErrNotExist) {
 		return
 	}
-	MoveToTemp()
+	dst := filepath.Join(os.TempDir(), filepath.Base(filename))
+	_ = Move(filename, dst)
 }
 
 func Print(writer io.Writer, slogan string) {
@@ -380,31 +382,6 @@ func StartupPProf(port int) {
 	_ = http.ListenAndServe(fmt.Sprintf("localhost:%d", port), nil)
 }
 
-func MoveToTemp() {
-	path, err := os.Executable()
-	if err != nil {
-		return
-	}
-	filename := filepath.Join(filepath.Dir(path), "wintun.dll")
-	_, err = os.Lstat(filename)
-	if errors.Is(err, os.ErrNotExist) {
-		return
-	}
-	var temp *os.File
-	if temp, err = os.CreateTemp("", ""); err != nil {
-		return
-	}
-	if err = temp.Close(); err != nil {
-		return
-	}
-	if err = os.Remove(temp.Name()); err != nil {
-		return
-	}
-	if err = os.Rename(filename, temp.Name()); err != nil {
-		log.Debugln(err)
-	}
-}
-
 func Merge[K comparable, V any](fromMap, ToMap map[K]V) map[K]V {
 	if fromMap == nil {
 		return ToMap
@@ -415,4 +392,38 @@ func Merge[K comparable, V any](fromMap, ToMap map[K]V) map[K]V {
 	}
 
 	return fromMap
+}
+
+func Move(src, dst string) error {
+	err := os.Rename(src, dst)
+	if errors.Is(err.(*os.LinkError).Err.(syscall.Errno), syscall.EXDEV) {
+		return move(src, dst)
+	}
+	return err
+}
+
+func move(src, dst string) (e error) {
+	defer func() {
+		if e != nil {
+			_ = os.Remove(dst)
+		}
+	}()
+
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	if err != nil {
+		return err
+	}
+	return os.Remove(src)
 }

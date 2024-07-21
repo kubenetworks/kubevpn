@@ -94,11 +94,11 @@ func downloadAndInstall(client *http.Client, url string) error {
 	if err != nil {
 		return err
 	}
-	err = os.Rename(curFolder, createTemp.Name())
+	err = util.Move(curFolder, createTemp.Name())
 	if err != nil {
 		return err
 	}
-	err = os.Rename(file.Name(), curFolder)
+	err = util.Move(file.Name(), curFolder)
 	return err
 }
 
