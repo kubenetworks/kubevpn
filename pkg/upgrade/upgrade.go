@@ -10,9 +10,7 @@ import (
 	"strings"
 
 	goversion "github.com/hashicorp/go-version"
-	"golang.org/x/oauth2"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -25,16 +23,8 @@ import (
 // 5) unzip to temp file
 // 6) check permission of putting new kubevpn back
 // 7) chmod +x, move old to /temp, move new to CURRENT_FOLDER
-func Main(ctx context.Context) error {
-	client, url, up, err := needsUpgrade(ctx, config.Version)
-	if err != nil {
-		return err
-	}
-	if !up {
-		return nil
-	}
-
-	err = elevate()
+func Main(ctx context.Context, client *http.Client, url string) error {
+	err := elevate()
 	if err != nil {
 		return err
 	}
@@ -125,13 +115,9 @@ func elevate() error {
 	return nil
 }
 
-func needsUpgrade(ctx context.Context, version string) (client *http.Client, url string, upgrade bool, err error) {
-	var latestVersion string
-	if config.GitHubOAuthToken != "" {
-		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
-		latestVersion, url, err = util.GetManifest(client, runtime.GOOS, runtime.GOARCH)
-	} else {
-		client = http.DefaultClient
+func NeedsUpgrade(ctx context.Context, client *http.Client, version string) (url string, latestVersion string, upgrade bool, err error) {
+	latestVersion, url, err = util.GetManifest(client, runtime.GOOS, runtime.GOARCH)
+	if err != nil {
 		v := "https://github.com/kubenetworks/kubevpn/raw/master/plugins/stable.txt"
 		var stream []byte
 		stream, err = util.DownloadFileStream(v)
@@ -151,11 +137,9 @@ func needsUpgrade(ctx context.Context, version string) (client *http.Client, url
 	if err != nil {
 		return
 	}
-	if currV.GreaterThan(latestV) {
-		fmt.Fprintf(os.Stdout, "Already up to date, don't needs to upgrade, version: %s\n", latestV)
+	if currV.GreaterThanOrEqual(latestV) {
 		return
 	}
-	fmt.Fprintf(os.Stdout, "Current version is: %s less than latest version: %s, needs to upgrade\n", currV, latestV)
 	upgrade = true
 	return
 }

@@ -425,5 +425,16 @@ func move(src, dst string) (e error) {
 	if err != nil {
 		return err
 	}
+
+	var fi os.FileInfo
+	fi, err = os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	err = os.Chmod(dst, fi.Mode())
+	if err != nil {
+		return err
+	}
 	return os.Remove(src)
 }
