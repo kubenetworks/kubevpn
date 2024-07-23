@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,33 +42,33 @@ func (c *fakeUDPTunnelConnector) ConnectContext(ctx context.Context, conn net.Co
 
 type fakeUdpHandler struct {
 	// map[srcIP]net.Conn
-	connNAT *sync.Map
-	ch      chan *datagramPacket
+	routeMapTCP *sync.Map
+	packetChan  chan *datagramPacket
 }
 
 func TCPHandler() Handler {
 	return &fakeUdpHandler{
-		connNAT: RouteConnNAT,
-		ch:      Chan,
+		routeMapTCP: RouteMapTCP,
+		packetChan:  TCPPacketChan,
 	}
 }
 
 func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
-	log.Debugf("[tcpserver] %s -> %s\n", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
+	log.Debugf("[tcpserver] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 
 	defer func(addr net.Addr) {
 		var keys []string
-		h.connNAT.Range(func(key, value any) bool {
+		h.routeMapTCP.Range(func(key, value any) bool {
 			if value.(net.Conn) == tcpConn {
 				keys = append(keys, key.(string))
 			}
 			return true
 		})
 		for _, key := range keys {
-			h.connNAT.Delete(key)
+			h.routeMapTCP.Delete(key)
 		}
-		log.Debugf("[tcpserver] delete conn %s from globle routeConnNAT, deleted count %d", addr, len(keys))
+		log.Debugf("[tcpserver] to %s by conn %s from globle route map TCP", strings.Join(keys, " "), addr)
 	}(tcpConn.LocalAddr())
 
 	for {
@@ -80,7 +81,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		b := config.LPool.Get().([]byte)[:]
 		dgram, err := readDatagramPacketServer(tcpConn, b[:])
 		if err != nil {
-			log.Debugf("[tcpserver] %s -> 0 : %v", tcpConn.RemoteAddr(), err)
+			log.Debugf("[tcpserver] %s -> %s : %v", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
 			return
 		}
 
@@ -94,17 +95,17 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 			log.Errorf("[tcpserver] unknown packet")
 			continue
 		}
-		value, loaded := h.connNAT.LoadOrStore(src.String(), tcpConn)
+		value, loaded := h.routeMapTCP.LoadOrStore(src.String(), tcpConn)
 		if loaded {
 			if tcpConn != value.(net.Conn) {
-				h.connNAT.Store(src.String(), tcpConn)
-				log.Debugf("[tcpserver] replace routeConnNAT: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+				h.routeMapTCP.Store(src.String(), tcpConn)
+				log.Debugf("[tcpserver] replace route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 			}
-			log.Debugf("[tcpserver] find routeConnNAT: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+			log.Debugf("[tcpserver] find route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 		} else {
-			log.Debugf("[tcpserver] new routeConnNAT: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+			log.Debugf("[tcpserver] new route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 		}
-		util.SafeWrite(h.ch, dgram)
+		util.SafeWrite(h.packetChan, dgram)
 	}
 }
 
