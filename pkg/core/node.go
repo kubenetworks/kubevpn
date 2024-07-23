@@ -7,9 +7,7 @@ import (
 	"strings"
 )
 
-var (
-	ErrorInvalidNode = errors.New("invalid node")
-)
+var ErrorInvalidNode = errors.New("invalid node")
 
 type Node struct {
 	Addr     string
@@ -29,12 +27,13 @@ func ParseNode(s string) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Node{
+	node := &Node{
 		Addr:     u.Host,
 		Remote:   strings.Trim(u.EscapedPath(), "/"),
 		Values:   u.Query(),
 		Protocol: u.Scheme,
-	}, nil
+	}
+	return node, nil
 }
 
 // Get returns node parameter specified by key.

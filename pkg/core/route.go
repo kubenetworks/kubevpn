@@ -16,12 +16,10 @@ import (
 )
 
 var (
-	// RouteNAT Globe route table for inner ip
-	RouteNAT = NewNAT()
-	// RouteConnNAT map[srcIP]net.Conn
-	RouteConnNAT = &sync.Map{}
-	// Chan tcp connects
-	Chan = make(chan *datagramPacket, MaxSize)
+	// RouteMapTCP map[srcIP]net.Conn Globe route table for inner ip
+	RouteMapTCP = &sync.Map{}
+	// TCPPacketChan tcp connects
+	TCPPacketChan = make(chan *datagramPacket, MaxSize)
 )
 
 type TCPUDPacket struct {
@@ -39,7 +37,6 @@ type Route struct {
 }
 
 func (r *Route) parseChain() (*Chain, error) {
-	// parse the base nodes
 	node, err := parseChainNode(r.ChainNode)
 	if err != nil {
 		return nil, err
@@ -50,7 +47,6 @@ func (r *Route) parseChain() (*Chain, error) {
 func parseChainNode(ns string) (*Node, error) {
 	node, err := ParseNode(ns)
 	if err != nil {
-		log.Errorf("parse node error: %v", err)
 		return nil, err
 	}
 	node.Client = &Client{
