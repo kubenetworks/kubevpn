@@ -78,12 +78,15 @@ func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr str
 
 	var folder []config.FolderConfiguration
 	folder = append(folder, config.FolderConfiguration{
-		ID:             dir,
-		Label:          label,
-		FilesystemType: fs.FilesystemTypeBasic,
-		Path:           localDir,
-		Type:           config.FolderTypeSendReceive,
-		Paused:         false,
+		ID:               dir,
+		Label:            label,
+		FilesystemType:   fs.FilesystemTypeBasic,
+		Path:             localDir,
+		Type:             config.FolderTypeSendReceive,
+		Paused:           false,
+		FSWatcherEnabled: true,
+		FSWatcherDelayS:  0.01,
+		RescanIntervalS:  2,
 		Devices: []config.FolderDeviceConfiguration{
 			{DeviceID: localID},
 			{DeviceID: remoteID},

@@ -221,7 +221,7 @@ func writePIDToFile(isSudo bool) error {
 func rotateLog(l *lumberjack.Logger, isSudo bool) {
 	sec := time.Duration(0)
 	if isSudo {
-		sec = time.Second
+		sec = 2 * time.Second
 	}
 	for {
 		nowTime := time.Now()

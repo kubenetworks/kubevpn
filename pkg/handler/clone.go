@@ -34,6 +34,7 @@ import (
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
@@ -361,6 +362,16 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 						ReadOnly:  false,
 						MountPath: d.RemoteDir,
 					},
+				},
+				// only for:
+				// panic: mkdir /.kubevpn: permission denied                                                                                                                                │
+				//                                                                                                                                                                          │
+				// goroutine 1 [running]:                                                                                                                                                   │
+				// github.com/wencaiwulue/kubevpn/v2/pkg/config.init.1()                                                                                                                    │
+				//     /go/src/github.com/wencaiwulue/kubevpn/pkg/config/const.go:34 +0x1ae
+				SecurityContext: &v1.SecurityContext{
+					RunAsUser:  ptr.To[int64](0),
+					RunAsGroup: ptr.To[int64](0),
 				},
 			}
 			spec.Spec.Containers = append(containers, *container, *containerSync)
