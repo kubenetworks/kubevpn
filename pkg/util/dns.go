@@ -12,7 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
@@ -75,16 +74,8 @@ func GetDNSIPFromDnsPod(ctx context.Context, clientset *kubernetes.Clientset) (i
 	return
 }
 
-func GetDNS(ctx context.Context, f util.Factory, ns, pod string) (*dns.ClientConfig, error) {
-	clientSet, err := f.KubernetesClientSet()
-	if err != nil {
-		return nil, err
-	}
-	_, err = clientSet.CoreV1().Pods(ns).Get(ctx, pod, v12.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	restConfig, err := f.ToRESTConfig()
+func GetDNS(ctx context.Context, clientSet *kubernetes.Clientset, restConfig *rest.Config, ns, pod string) (*dns.ClientConfig, error) {
+	_, err := clientSet.CoreV1().Pods(ns).Get(ctx, pod, v12.GetOptions{})
 	if err != nil {
 		return nil, err
 	}

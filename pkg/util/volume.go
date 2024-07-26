@@ -79,7 +79,7 @@ func GetVolume(ctx context.Context, f util.Factory, ns, podName string) (map[str
 			})
 			logrus.Infof("%s:%s", localPath, volumeMount.MountPath)
 		}
-		result[container.Name] = m
+		result[Join(ns, container.Name)] = m
 	}
 	return result, nil
 }

@@ -2,46 +2,41 @@ package dev
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"math/rand"
+	"net"
 	"strconv"
 	"strings"
-	"time"
 	"unsafe"
 
+	"github.com/containerd/containerd/platforms"
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/docker/api/types"
-	typescommand "github.com/docker/docker/api/types/container"
 	typescontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/strslice"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/errdefs"
 	"github.com/docker/go-connections/nat"
-	"github.com/google/uuid"
 	"github.com/miekg/dns"
 	"github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
 	v12 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 type RunConfig struct {
-	containerName    string
-	k8sContainerName string
+	name string
 
 	config           *typescontainer.Config
 	hostConfig       *typescontainer.HostConfig
 	networkingConfig *network.NetworkingConfig
 	platform         *v1.Platform
 
-	Options runOptions
-	Copts   *containerOptions
+	Options RunOptions
+	Copts   ContainerOptions
 }
 
 type ConfigList []*RunConfig
@@ -58,11 +53,11 @@ func (c ConfigList) Remove(ctx context.Context, cli *client.Client) error {
 		return nil
 	}
 	for _, runConfig := range c {
-		err := cli.NetworkDisconnect(ctx, runConfig.containerName, runConfig.containerName, true)
+		err := cli.NetworkDisconnect(ctx, runConfig.name, runConfig.name, true)
 		if err != nil {
 			log.Debug(err)
 		}
-		err = cli.ContainerRemove(ctx, runConfig.containerName, typescontainer.RemoveOptions{Force: true})
+		err = cli.ContainerRemove(ctx, runConfig.name, typescontainer.RemoveOptions{Force: true})
 		if err != nil {
 			log.Debug(err)
 		}
@@ -81,31 +76,30 @@ func (c ConfigList) Run(ctx context.Context, volume map[string][]mount.Mount, cl
 	for index := len(c) - 1; index >= 0; index-- {
 		runConfig := c[index]
 		if index == 0 {
-			err := runAndAttach(ctx, runConfig, dockerCli)
+			err := runContainer(ctx, dockerCli, runConfig)
 			if err != nil {
 				return err
 			}
-		} else {
-			id, err := run(ctx, runConfig, cli, dockerCli)
+		}
+		_, err := run(ctx, cli, dockerCli, runConfig)
+		if err != nil {
+			// try to copy volume into container, why?
+			runConfig.hostConfig.Mounts = nil
+			id, err1 := run(ctx, cli, dockerCli, runConfig)
+			if err1 != nil {
+				// return first error
+				return err
+			}
+			err = util.CopyVolumeIntoContainer(ctx, volume[runConfig.name], cli, id)
 			if err != nil {
-				// try another way to startup container
-				log.Infof("occur err: %v, try to use copy to startup container...", err)
-				runConfig.hostConfig.Mounts = nil
-				id, err = run(ctx, runConfig, cli, dockerCli)
-				if err != nil {
-					return err
-				}
-				err = util.CopyVolumeIntoContainer(ctx, volume[runConfig.k8sContainerName], cli, id)
-				if err != nil {
-					return err
-				}
+				return err
 			}
 		}
 	}
 	return nil
 }
 
-func convertKubeResourceToContainer(ns string, temp v12.PodTemplateSpec, envMap map[string][]string, mountVolume map[string][]mount.Mount, dnsConfig *dns.ClientConfig) (list ConfigList) {
+func ConvertPodToContainer(ns string, temp v12.PodTemplateSpec, envMap map[string][]string, mountVolume map[string][]mount.Mount, dnsConfig *dns.ClientConfig) (list ConfigList) {
 	getHostname := func(containerName string) string {
 		for _, envEntry := range envMap[containerName] {
 			env := strings.Split(envEntry, "=")
@@ -118,17 +112,17 @@ func convertKubeResourceToContainer(ns string, temp v12.PodTemplateSpec, envMap 
 
 	for _, c := range temp.Spec.Containers {
 		containerConf := &typescontainer.Config{
-			Hostname:        getHostname(c.Name),
+			Hostname:        getHostname(util.Join(ns, c.Name)),
 			Domainname:      temp.Spec.Subdomain,
 			User:            "root",
-			AttachStdin:     false,
+			AttachStdin:     c.Stdin,
 			AttachStdout:    false,
 			AttachStderr:    false,
 			ExposedPorts:    nil,
 			Tty:             c.TTY,
 			OpenStdin:       c.Stdin,
-			StdinOnce:       false,
-			Env:             envMap[c.Name],
+			StdinOnce:       c.StdinOnce,
+			Env:             envMap[util.Join(ns, c.Name)],
 			Cmd:             c.Args,
 			Healthcheck:     nil,
 			ArgsEscaped:     false,
@@ -169,7 +163,7 @@ func convertKubeResourceToContainer(ns string, temp v12.PodTemplateSpec, envMap 
 			Links:           nil,
 			OomScoreAdj:     0,
 			PidMode:         "",
-			Privileged:      true,
+			Privileged:      ptr.Deref(ptr.Deref(c.SecurityContext, v12.SecurityContext{}).Privileged, false),
 			PublishAllPorts: false,
 			ReadonlyRootfs:  false,
 			SecurityOpt:     []string{"apparmor=unconfined", "seccomp=unconfined"},
@@ -182,7 +176,7 @@ func convertKubeResourceToContainer(ns string, temp v12.PodTemplateSpec, envMap 
 			Runtime:         "",
 			Isolation:       "",
 			Resources:       typescontainer.Resources{},
-			Mounts:          mountVolume[c.Name],
+			Mounts:          mountVolume[util.Join(ns, c.Name)],
 			MaskedPaths:     nil,
 			ReadonlyPaths:   nil,
 			Init:            nil,
@@ -206,113 +200,86 @@ func convertKubeResourceToContainer(ns string, temp v12.PodTemplateSpec, envMap 
 			hostConfig.CapAdd = append(hostConfig.CapAdd, *(*strslice.StrSlice)(unsafe.Pointer(&c.SecurityContext.Capabilities.Add))...)
 			hostConfig.CapDrop = *(*strslice.StrSlice)(unsafe.Pointer(&c.SecurityContext.Capabilities.Drop))
 		}
-		var suffix string
-		newUUID, err := uuid.NewUUID()
-		if err == nil {
-			suffix = strings.ReplaceAll(newUUID.String(), "-", "")[:5]
+
+		var r = RunConfig{
+			name:             util.Join(ns, c.Name),
+			config:           containerConf,
+			hostConfig:       hostConfig,
+			networkingConfig: &network.NetworkingConfig{EndpointsConfig: make(map[string]*network.EndpointSettings)},
+			platform:         nil,
+			Options:          RunOptions{Pull: PullImageMissing},
 		}
 
-		var r RunConfig
-		r.containerName = fmt.Sprintf("%s_%s_%s_%s", c.Name, ns, "kubevpn", suffix)
-		r.k8sContainerName = c.Name
-		r.config = containerConf
-		r.hostConfig = hostConfig
-		r.networkingConfig = &network.NetworkingConfig{EndpointsConfig: make(map[string]*network.EndpointSettings)}
-		r.platform = nil
 		list = append(list, &r)
 	}
+
 	return list
 }
 
-func run(ctx context.Context, runConfig *RunConfig, cli *client.Client, c *command.DockerCli) (id string, err error) {
-	rand.New(rand.NewSource(time.Now().UnixNano()))
+func MergeDockerOptions(list ConfigList, options *Options, config *Config, hostConfig *HostConfig) {
+	conf := list[0]
+	conf.Options = options.RunOptions
+	conf.Copts = *options.ContainerOptions
 
-	var config = runConfig.config
-	var hostConfig = runConfig.hostConfig
-	var platform = runConfig.platform
-	var networkConfig = runConfig.networkingConfig
-	var name = runConfig.containerName
-
-	var needPull bool
-	var img types.ImageInspect
-	img, _, err = cli.ImageInspectWithRaw(ctx, config.Image)
-	if errdefs.IsNotFound(err) {
-		log.Infof("needs to pull image %s", config.Image)
-		needPull = true
-		err = nil
-	} else if err != nil {
-		log.Errorf("image inspect failed: %v", err)
-		return
+	if options.RunOptions.Platform != "" {
+		p, _ := platforms.Parse(options.RunOptions.Platform)
+		conf.platform = &p
 	}
-	if platform != nil && platform.Architecture != "" && platform.OS != "" {
-		if img.Os != platform.OS || img.Architecture != platform.Architecture {
-			needPull = true
+
+	// container config
+	var entrypoint = conf.config.Entrypoint
+	var args = conf.config.Cmd
+	// if special --entrypoint, then use it
+	if len(config.Entrypoint) != 0 {
+		entrypoint = config.Entrypoint
+		args = config.Cmd
+	}
+	if len(config.Cmd) != 0 {
+		args = config.Cmd
+	}
+	conf.config.Entrypoint = entrypoint
+	conf.config.Cmd = args
+	if options.DevImage != "" {
+		conf.config.Image = options.DevImage
+	}
+	conf.config.Volumes = util.Merge[string, struct{}](conf.config.Volumes, config.Volumes)
+	for k, v := range config.ExposedPorts {
+		if _, found := conf.config.ExposedPorts[k]; !found {
+			conf.config.ExposedPorts[k] = v
 		}
 	}
-	if needPull {
-		err = util.PullImage(ctx, runConfig.platform, cli, c, config.Image, nil)
+	conf.config.StdinOnce = config.StdinOnce
+	conf.config.AttachStdin = config.AttachStdin
+	conf.config.AttachStdout = config.AttachStdout
+	conf.config.AttachStderr = config.AttachStderr
+	conf.config.Tty = config.Tty
+	conf.config.OpenStdin = config.OpenStdin
+
+	// host config
+	var hosts []string
+	for _, domain := range options.ExtraRouteInfo.ExtraDomain {
+		ips, err := net.LookupIP(domain)
 		if err != nil {
-			log.Errorf("Failed to pull image: %s, err: %s", config.Image, err)
-			return
+			continue
+		}
+		for _, ip := range ips {
+			if ip.To4() != nil {
+				hosts = append(hosts, fmt.Sprintf("%s:%s", domain, ip.To4().String()))
+				break
+			}
 		}
 	}
-
-	var create typescommand.CreateResponse
-	create, err = cli.ContainerCreate(ctx, config, hostConfig, networkConfig, platform, name)
-	if err != nil {
-		log.Errorf("Failed to create container: %s, err: %s", name, err)
-		return
-	}
-	id = create.ID
-	log.Infof("Created container: %s", name)
-	defer func() {
-		if err != nil && runConfig.hostConfig.AutoRemove {
-			_ = cli.ContainerRemove(ctx, id, typescontainer.RemoveOptions{Force: true})
+	conf.hostConfig.ExtraHosts = hosts
+	conf.hostConfig.AutoRemove = hostConfig.AutoRemove
+	conf.hostConfig.Privileged = hostConfig.Privileged
+	conf.hostConfig.PublishAllPorts = hostConfig.PublishAllPorts
+	conf.hostConfig.Mounts = append(conf.hostConfig.Mounts, hostConfig.Mounts...)
+	conf.hostConfig.Binds = append(conf.hostConfig.Binds, hostConfig.Binds...)
+	for port, bindings := range hostConfig.PortBindings {
+		if v, ok := conf.hostConfig.PortBindings[port]; ok {
+			conf.hostConfig.PortBindings[port] = append(v, bindings...)
+		} else {
+			conf.hostConfig.PortBindings[port] = bindings
 		}
-	}()
-
-	err = cli.ContainerStart(ctx, create.ID, typescontainer.StartOptions{})
-	if err != nil {
-		log.Errorf("failed to startup container %s: %v", name, err)
-		return
 	}
-	log.Infof("Wait container %s to be running...", name)
-	var inspect types.ContainerJSON
-	ctx2, cancelFunc := context.WithTimeout(ctx, time.Minute*5)
-	wait.UntilWithContext(ctx2, func(ctx context.Context) {
-		inspect, err = cli.ContainerInspect(ctx, create.ID)
-		if errdefs.IsNotFound(err) {
-			cancelFunc()
-			return
-		} else if err != nil {
-			cancelFunc()
-			return
-		}
-		if inspect.State != nil && (inspect.State.Status == "exited" || inspect.State.Status == "dead" || inspect.State.Dead) {
-			cancelFunc()
-			err = errors.New(fmt.Sprintf("container status: %s", inspect.State.Status))
-			return
-		}
-		if inspect.State != nil && inspect.State.Running {
-			cancelFunc()
-			return
-		}
-	}, time.Second)
-	if err != nil {
-		log.Errorf("failed to wait container to be ready: %v", err)
-		_ = runLogsSinceNow(c, id, false)
-		return
-	}
-
-	log.Infof("Container %s is running now", name)
-	return
-}
-
-func runAndAttach(ctx context.Context, runConfig *RunConfig, cli *command.DockerCli) error {
-	c := &containerConfig{
-		Config:           runConfig.config,
-		HostConfig:       runConfig.hostConfig,
-		NetworkingConfig: runConfig.networkingConfig,
-	}
-	return runContainer(ctx, cli, &runConfig.Options, runConfig.Copts, c)
 }

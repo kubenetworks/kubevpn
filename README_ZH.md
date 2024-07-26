@@ -323,7 +323,7 @@ leave workload deployments/productpage successfully
 Docker。
 
 ```shell
-➜  ~ kubevpn dev deployment/authors --headers a=1 -it --rm --entrypoint sh
+➜  ~ kubevpn dev deployment/authors --headers a=1 --entrypoint sh
 connectting to cluster
 start to connect
 got cidr from cache
@@ -406,13 +406,13 @@ fc04e42799a5   nginx:latest                    "/docker-entrypoint.…"   37 sec
 如果你只是想在本地启动镜像，可以用一种简单的方式：
 
 ```shell
-kubevpn dev deployment/authors --no-proxy -it --rm
+kubevpn dev deployment/authors --no-proxy
 ```
 
 例如：
 
 ```shell
-➜  ~ kubevpn dev deployment/authors --no-proxy -it --rm
+➜  ~ kubevpn dev deployment/authors --no-proxy
 connectting to cluster
 start to connect
 got cidr from cache
@@ -471,14 +471,7 @@ e008f553422a: Pull complete
 33f0298d1d4f: Pull complete
 Digest: sha256:115b975a97edd0b41ce7a0bc1d8428e6b8569c91a72fe31ea0bada63c685742e
 Status: Downloaded newer image for naison/kubevpn:v2.0.0
-root@d0b3dab8912a:/app# kubevpn dev deployment/authors --headers user=naison -it --entrypoint sh
-
-----------------------------------------------------------------------------------
-    Warn: Use sudo to execute command kubevpn can not use user env KUBECONFIG.
-    Because of sudo user env and user env are different.
-    Current env KUBECONFIG value:
-----------------------------------------------------------------------------------
-
+root@d0b3dab8912a:/app# kubevpn dev deployment/authors --headers user=naison --entrypoint sh
 hostname is d0b3dab8912a
 connectting to cluster
 start to connect

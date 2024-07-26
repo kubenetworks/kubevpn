@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	dockercomp "github.com/docker/cli/cli/command/completion"
+	"github.com/containerd/containerd/platforms"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -20,15 +20,8 @@ import (
 )
 
 func CmdDev(f cmdutil.Factory) *cobra.Command {
-	client, cli, err := util.GetClient()
-	if err != nil {
-		log.Fatal(err)
-	}
 	var options = &dev.Options{
-		Factory:        f,
 		NoProxy:        false,
-		Cli:            client,
-		DockerCli:      cli,
 		ExtraRouteInfo: handler.ExtraRouteInfo{},
 	}
 	var sshConf = &util.SshConfig{}
@@ -67,21 +60,21 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		kubevpn dev deployment/productpage --ssh-alias <alias>
 
 		# Switch to terminal mode; send stdin to 'bash' and sends stdout/stderror from 'bash' back to the client
-        kubevpn dev deployment/authors -n default --kubeconfig ~/.kube/config --ssh-alias dev -i -t --entrypoint /bin/bash
+        kubevpn dev deployment/authors -n default --kubeconfig ~/.kube/config --ssh-alias dev --entrypoint /bin/bash
 		  or
-        kubevpn dev deployment/authors -n default --kubeconfig ~/.kube/config --ssh-alias dev -it --entrypoint /bin/bash
+        kubevpn dev deployment/authors -n default --kubeconfig ~/.kube/config --ssh-alias dev --entrypoint /bin/bash
 
 		# Support ssh auth GSSAPI
-        kubevpn dev deployment/authors -n default --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab -it --entrypoint /bin/bash
-        kubevpn dev deployment/authors -n default --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache -it --entrypoint /bin/bash
-        kubevpn dev deployment/authors -n default --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD> -it --entrypoint /bin/bash
+        kubevpn dev deployment/authors -n default --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab --entrypoint /bin/bash
+        kubevpn dev deployment/authors -n default --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache --entrypoint /bin/bash
+        kubevpn dev deployment/authors -n default --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD> --entrypoint /bin/bash
 		`)),
 		ValidArgsFunction:     completion.ResourceTypeAndNameCompletionFunc(f),
 		Args:                  cobra.MatchAll(cobra.OnlyValidArgs),
 		DisableFlagsInUseLine: true,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintf(os.Stdout, "You must specify the type of resource to proxy. %s\n\n", cmdutil.SuggestAPIResources("kubevpn"))
+				_, _ = fmt.Fprintf(os.Stdout, "You must specify the type of resource to proxy. %s\n\n", cmdutil.SuggestAPIResources("kubevpn"))
 				fullCmdName := cmd.Parent().CommandPath()
 				usageString := "Required resource not specified."
 				if len(fullCmdName) > 0 && cmdutil.IsSiblingCommandExists(cmd, "explain") {
@@ -89,7 +82,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 				}
 				return cmdutil.UsageErrorf(cmd, usageString)
 			}
-			err = cmd.Flags().Parse(args[1:])
+			err := cmd.Flags().Parse(args[1:])
 			if err != nil {
 				return err
 			}
@@ -97,6 +90,15 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 			// not support temporally
 			if options.Engine == config.EngineGvisor {
 				return fmt.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
+			}
+
+			if p := options.RunOptions.Platform; p != "" {
+				if _, err = platforms.Parse(p); err != nil {
+					return fmt.Errorf("error parsing specified platform: %v", err)
+				}
+			}
+			if err = validatePullOpt(options.RunOptions.Pull); err != nil {
+				return err
 			}
 
 			err = daemon.StartupDaemon(cmd.Context())
@@ -109,7 +111,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 			options.Workload = args[0]
 			for i, arg := range args {
 				if arg == "--" && i != len(args)-1 {
-					options.Copts.Args = args[i+1:]
+					options.ContainerOptions.Args = args[i+1:]
 					break
 				}
 			}
@@ -123,7 +125,12 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 					}
 				}
 			}()
-			err = dev.DoDev(cmd.Context(), options, sshConf, cmd.Flags(), f, transferImage)
+
+			if err := options.InitClient(f); err != nil {
+				return err
+			}
+
+			err := options.Main(cmd.Context(), sshConf, cmd.Flags(), transferImage)
 			return err
 		},
 	}
@@ -141,26 +148,25 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 	// diy docker options
 	cmd.Flags().StringVar(&options.DevImage, "dev-image", "", "Use to startup docker container, Default is pod image")
 	// origin docker options
-	dev.AddDockerFlags(options, cmd.Flags(), cli)
-
-	_ = cmd.RegisterFlagCompletionFunc(
-		"env",
-		func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			return os.Environ(), cobra.ShellCompDirectiveNoFileComp
-		},
-	)
-	_ = cmd.RegisterFlagCompletionFunc(
-		"env-file",
-		func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			return nil, cobra.ShellCompDirectiveDefault
-		},
-	)
-	_ = cmd.RegisterFlagCompletionFunc(
-		"network",
-		dockercomp.NetworkNames(cli),
-	)
+	dev.AddDockerFlags(options, cmd.Flags())
 
 	handler.AddExtraRoute(cmd.Flags(), &options.ExtraRouteInfo)
 	util.AddSshFlags(cmd.Flags(), sshConf)
 	return cmd
+}
+
+func validatePullOpt(val string) error {
+	switch val {
+	case dev.PullImageAlways, dev.PullImageMissing, dev.PullImageNever, "":
+		// valid option, but nothing to do yet
+		return nil
+	default:
+		return fmt.Errorf(
+			"invalid pull option: '%s': must be one of %q, %q or %q",
+			val,
+			dev.PullImageAlways,
+			dev.PullImageMissing,
+			dev.PullImageNever,
+		)
+	}
 }
