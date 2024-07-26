@@ -101,27 +101,19 @@ func max[T constraints.Ordered](a T, b T) T {
 	return b
 }
 
-func GetEnv(ctx context.Context, f util.Factory, ns, pod string) (map[string][]string, error) {
-	set, err2 := f.KubernetesClientSet()
-	if err2 != nil {
-		return nil, err2
-	}
-	config, err2 := f.ToRESTConfig()
-	if err2 != nil {
-		return nil, err2
-	}
-	get, err := set.CoreV1().Pods(ns).Get(ctx, pod, v1.GetOptions{})
+func GetEnv(ctx context.Context, set *kubernetes.Clientset, config *rest.Config, ns, podName string) (map[string][]string, error) {
+	pod, err := set.CoreV1().Pods(ns).Get(ctx, podName, v1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
 	result := map[string][]string{}
-	for _, c := range get.Spec.Containers {
-		env, err := Shell(ctx, set, config, pod, c.Name, ns, []string{"env"})
+	for _, c := range pod.Spec.Containers {
+		env, err := Shell(ctx, set, config, podName, c.Name, ns, []string{"env"})
 		if err != nil {
 			return nil, err
 		}
 		split := strings.Split(env, "\n")
-		result[c.Name] = split
+		result[Join(ns, c.Name)] = split
 	}
 	return result, nil
 }

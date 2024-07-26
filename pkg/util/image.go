@@ -31,23 +31,23 @@ import (
 )
 
 func GetClient() (*client.Client, *command.DockerCli, error) {
-	client, err := client.NewClientWithOpts(
+	cli, err := client.NewClientWithOpts(
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("can not create docker client from env, err: %v", err)
+		return nil, nil, err
 	}
-	var cli *command.DockerCli
-	cli, err = command.NewDockerCli(command.WithAPIClient(client))
+	var dockerCli *command.DockerCli
+	dockerCli, err = command.NewDockerCli(command.WithAPIClient(cli))
 	if err != nil {
-		return nil, nil, fmt.Errorf("can not create docker client from env, err: %v", err)
+		return nil, nil, err
 	}
-	err = cli.Initialize(flags.NewClientOptions())
+	err = dockerCli.Initialize(flags.NewClientOptions())
 	if err != nil {
-		return nil, nil, fmt.Errorf("can not init docker client, err: %v", err)
+		return nil, nil, err
 	}
-	return client, cli, nil
+	return cli, dockerCli, nil
 }
 
 // TransferImage
@@ -160,7 +160,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 }
 
 // PullImage image.RunPull(ctx, c, image.PullOptions{})
-func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, c *command.DockerCli, img string, out io.Writer) error {
+func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, dockerCli *command.DockerCli, img string, out io.Writer) error {
 	var readCloser io.ReadCloser
 	var plat string
 	if platform != nil && platform.Architecture != "" && platform.OS != "" {
@@ -172,7 +172,7 @@ func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, c
 		return err
 	}
 	var imgRefAndAuth trust.ImageRefAndAuth
-	imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, image.AuthResolver(c), distributionRef.String())
+	imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, image.AuthResolver(dockerCli), distributionRef.String())
 	if err != nil {
 		log.Errorf("can not get image auth: %v", err)
 		return err
@@ -183,7 +183,7 @@ func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, c
 		log.Errorf("can not encode auth config to base64: %v", err)
 		return err
 	}
-	requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(c, imgRefAndAuth.RepoInfo().Index, "pull")
+	requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(dockerCli, imgRefAndAuth.RepoInfo().Index, "pull")
 	readCloser, err = cli.ImagePull(ctx, img, typesimage.PullOptions{
 		All:           false,
 		RegistryAuth:  encodedAuth,
