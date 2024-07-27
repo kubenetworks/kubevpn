@@ -11,6 +11,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/distribution/reference"
+	"github.com/hashicorp/go-version"
 	"github.com/moby/term"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -35,6 +37,7 @@ import (
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	scheme2 "k8s.io/kubectl/pkg/scheme"
 	"k8s.io/kubectl/pkg/util/podutils"
+	pkgclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type PodRouteConfig struct {
@@ -402,4 +405,65 @@ func GetRunningPodList(ctx context.Context, clientset *kubernetes.Clientset, ns 
 		return nil, errors.New("can not found any running pod")
 	}
 	return list.Items, nil
+}
+
+// UpdateImage update to newer image
+func UpdateImage(ctx context.Context, factory util.Factory, ns string, deployName string, image string) error {
+	clientSet, err2 := factory.KubernetesClientSet()
+	if err2 != nil {
+		return err2
+	}
+	deployment, err := clientSet.AppsV1().Deployments(ns).Get(ctx, deployName, v1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	origin := deployment.DeepCopy()
+	newImg, err := reference.ParseNormalizedNamed(image)
+	if err != nil {
+		return err
+	}
+	newTag, ok := newImg.(reference.NamedTagged)
+	if !ok {
+		return nil
+	}
+	oldImg, err := reference.ParseNormalizedNamed(deployment.Spec.Template.Spec.Containers[0].Image)
+	if err != nil {
+		return err
+	}
+	var oldTag reference.NamedTagged
+	oldTag, ok = oldImg.(reference.NamedTagged)
+	if !ok {
+		return nil
+	}
+	if reference.Domain(newImg) != reference.Domain(oldImg) {
+		return nil
+	}
+	var oldVersion, newVersion *version.Version
+	oldVersion, err = version.NewVersion(oldTag.Tag())
+	if err != nil {
+		return nil
+	}
+	newVersion, err = version.NewVersion(newTag.Tag())
+	if err != nil {
+		return nil
+	}
+	if oldVersion.GreaterThanOrEqual(newVersion) {
+		return nil
+	}
+
+	logrus.Infof("found newer image %s, set image from %s to it...", image, deployment.Spec.Template.Spec.Containers[0].Image)
+	for i := range deployment.Spec.Template.Spec.Containers {
+		deployment.Spec.Template.Spec.Containers[i].Image = image
+	}
+	p := pkgclient.MergeFrom(deployment)
+	data, err := pkgclient.MergeFrom(origin).Data(deployment)
+	if err != nil {
+		return err
+	}
+	_, err = clientSet.AppsV1().Deployments(ns).Patch(ctx, deployName, p.Type(), data, v1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+	err = RolloutStatus(ctx, factory, ns, fmt.Sprintf("deployments/%s", deployName), time.Minute*60)
+	return err
 }

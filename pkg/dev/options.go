@@ -38,6 +38,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
+	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -77,7 +78,7 @@ type Options struct {
 	rollbackFuncList []func() error
 }
 
-func (option *Options) Main(ctx context.Context, sshConfig *util.SshConfig, flags *pflag.FlagSet, transferImage bool) error {
+func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, flags *pflag.FlagSet, transferImage bool) error {
 	mode := typescontainer.NetworkMode(option.ContainerOptions.netMode.NetworkMode())
 	if mode.IsContainer() {
 		log.Infof("network mode container is %s", mode.ConnectedContainer())
@@ -122,7 +123,7 @@ func (option *Options) Main(ctx context.Context, sshConfig *util.SshConfig, flag
 }
 
 // Connect to cluster network on docker container or host
-func (option *Options) Connect(ctx context.Context, sshConfig *util.SshConfig, transferImage bool, portBindings nat.PortMap) error {
+func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig, transferImage bool, portBindings nat.PortMap) error {
 	switch option.ConnectMode {
 	case ConnectModeHost:
 		daemonCli := daemon.GetClient(false)
@@ -507,7 +508,7 @@ func (option *Options) InitClient(f cmdutil.Factory) (err error) {
 	if option.Namespace, _, err = option.factory.ToRawKubeConfigLoader().Namespace(); err != nil {
 		return
 	}
-	if option.cli, option.dockerCli, err = util.GetClient(); err != nil {
+	if option.cli, option.dockerCli, err = pkgssh.GetClient(); err != nil {
 		return err
 	}
 	return

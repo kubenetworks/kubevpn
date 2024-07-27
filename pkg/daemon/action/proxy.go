@@ -12,6 +12,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -42,7 +43,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 	}
-	var sshConf = util.ParseSshFromRPC(req.SshJump)
+	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
@@ -54,7 +55,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 		DefValue: file,
 	})
 	var path string
-	path, err = util.SshJump(ctx, sshConf, flags, false)
+	path, err = ssh.SshJump(ctx, sshConf, flags, false)
 	if err != nil {
 		return err
 	}

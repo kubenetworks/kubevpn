@@ -13,6 +13,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -143,9 +144,9 @@ func disconnectByKubeConfig(ctx context.Context, svr *Server, kubeconfigBytes st
 		Name:     "kubeconfig",
 		DefValue: file,
 	})
-	var sshConf = util.ParseSshFromRPC(jump)
+	var sshConf = ssh.ParseSshFromRPC(jump)
 	var path string
-	path, err = util.SshJump(ctx, sshConf, flags, false)
+	path, err = ssh.SshJump(ctx, sshConf, flags, false)
 	if err != nil {
 		return err
 	}

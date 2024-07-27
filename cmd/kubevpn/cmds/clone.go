@@ -19,6 +19,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -26,7 +27,7 @@ import (
 // kubectl exec POD_NAME -c CONTAINER_NAME /sbin/killall5 or ephemeralcontainers
 func CmdClone(f cmdutil.Factory) *cobra.Command {
 	var options = handler.CloneOptions{}
-	var sshConf = &util.SshConfig{}
+	var sshConf = &pkgssh.SshConfig{}
 	var extraRoute = &handler.ExtraRouteInfo{}
 	var transferImage bool
 	var syncDir string
@@ -167,7 +168,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&syncDir, "sync", "", "Sync local dir to remote pod dir. format: LOCAL_DIR:REMOTE_DIR, eg: ~/code:/app/code")
 
 	handler.AddExtraRoute(cmd.Flags(), extraRoute)
-	util.AddSshFlags(cmd.Flags(), sshConf)
+	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd
 }

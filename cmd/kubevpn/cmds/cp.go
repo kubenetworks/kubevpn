@@ -13,7 +13,7 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/cp"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 )
 
 var cpExample = templates.Examples(i18n.T(`
@@ -64,7 +64,7 @@ func CmdCp(f cmdutil.Factory) *cobra.Command {
 		Out:    os.Stdout,
 		ErrOut: os.Stderr,
 	})
-	var sshConf = &util.SshConfig{}
+	var sshConf = &pkgssh.SshConfig{}
 	cmd := &cobra.Command{
 		Use:                   "cp <file-spec-src> <file-spec-dest>",
 		DisableFlagsInUseLine: true,
@@ -73,7 +73,7 @@ func CmdCp(f cmdutil.Factory) *cobra.Command {
 		Long:                  i18n.T("Copy files and directories to and from containers. Different between kubectl cp is it will de-reference symbol link."),
 		Example:               cpExample,
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			cmdutil.CheckErr(util.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false))
+			cmdutil.CheckErr(pkgssh.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false))
 
 			var comps []string
 			if len(args) == 0 {
@@ -135,6 +135,6 @@ func CmdCp(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVarP(&o.NoPreserve, "no-preserve", "", false, "The copied file/directory's ownership and permissions will not be preserved in the container")
 	cmd.Flags().IntVarP(&o.MaxTries, "retries", "", 0, "Set number of retries to complete a copy operation from a container. Specify 0 to disable or any negative value for infinite retrying. The default is 0 (no retry).")
 
-	util.AddSshFlags(cmd.Flags(), sshConf)
+	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	return cmd
 }
