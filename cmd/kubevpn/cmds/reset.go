@@ -16,11 +16,12 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func CmdReset(f cmdutil.Factory) *cobra.Command {
-	var sshConf = &util.SshConfig{}
+	var sshConf = &pkgssh.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "reset",
 		Short: "Reset all resource create by kubevpn in k8s cluster",
@@ -86,7 +87,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 		},
 	}
 
-	util.AddSshFlags(cmd.Flags(), sshConf)
+	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	return cmd
 }
 

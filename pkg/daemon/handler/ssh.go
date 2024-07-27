@@ -27,12 +27,13 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 type wsHandler struct {
 	conn      *websocket.Conn
-	sshConfig *util.SshConfig
+	sshConfig *pkgssh.SshConfig
 	cidr      []string
 	width     int
 	height    int
@@ -49,7 +50,7 @@ func (w *wsHandler) handle(c context.Context) {
 	ctx, f := context.WithCancel(c)
 	defer f()
 
-	cli, err := util.DialSshRemote(ctx, w.sshConfig)
+	cli, err := pkgssh.DialSshRemote(ctx, w.sshConfig)
 	if err != nil {
 		w.Log("Dial ssh remote error: %v", err)
 		return
@@ -84,13 +85,13 @@ func (w *wsHandler) handle(c context.Context) {
 	if err != nil {
 		return
 	}
-	err = util.PortMapUntil(ctx, w.sshConfig, remote, local)
+	err = pkgssh.PortMapUntil(ctx, w.sshConfig, remote, local)
 	if err != nil {
 		w.Log("Port map error: %v", err)
 		return
 	}
 	cmd := fmt.Sprintf(`kubevpn ssh-daemon --client-ip %s`, clientIP.String())
-	serverIP, stderr, err := util.RemoteRun(cli, cmd, nil)
+	serverIP, stderr, err := pkgssh.RemoteRun(cli, cmd, nil)
 	if err != nil {
 		log.Errorf("run error: %v", err)
 		log.Errorf("run stdout: %v", string(serverIP))
@@ -146,8 +147,8 @@ func (w *wsHandler) handle(c context.Context) {
 // startup daemon process if daemon process not start
 func startDaemonProcess(cli *ssh.Client) string {
 	startDaemonCmd := fmt.Sprintf(`kubevpn status > /dev/null 2>&1 &`)
-	_, _, _ = util.RemoteRun(cli, startDaemonCmd, nil)
-	output, _, err := util.RemoteRun(cli, "kubevpn version", nil)
+	_, _, _ = pkgssh.RemoteRun(cli, startDaemonCmd, nil)
+	output, _, err := pkgssh.RemoteRun(cli, "kubevpn version", nil)
 	if err != nil {
 		return ""
 	}
@@ -260,7 +261,7 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 	}()
 
 	cmd := "kubevpn version"
-	_, _, err = util.RemoteRun(sshClient, cmd, nil)
+	_, _, err = pkgssh.RemoteRun(sshClient, cmd, nil)
 	if err == nil {
 		w.Log("Found command kubevpn command on remote")
 		return nil
@@ -319,7 +320,7 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 		"chmod +x ~/.kubevpn/kubevpn",
 		"sudo mv ~/.kubevpn/kubevpn /usr/local/bin/kubevpn",
 	}
-	err = util.SCPAndExec(w.conn, w.conn, sshClient, tempBin.Name(), "kubevpn", cmds...)
+	err = pkgssh.SCPAndExec(w.conn, w.conn, sshClient, tempBin.Name(), "kubevpn", cmds...)
 	return err
 }
 
@@ -344,7 +345,7 @@ var CondReady = make(map[string]context.Context)
 
 func init() {
 	http.Handle("/ws", websocket.Handler(func(conn *websocket.Conn) {
-		var sshConfig util.SshConfig
+		var sshConfig pkgssh.SshConfig
 		b := conn.Request().Header.Get("ssh")
 		if err := json.Unmarshal([]byte(b), &sshConfig); err != nil {
 			_, _ = conn.Write([]byte(err.Error()))

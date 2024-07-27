@@ -19,13 +19,14 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	var connect = &handler.ConnectOptions{}
 	var extraRoute = &handler.ExtraRouteInfo{}
-	var sshConf = &util.SshConfig{}
+	var sshConf = &pkgssh.SshConfig{}
 	var transferImage, foreground, lite bool
 	cmd := &cobra.Command{
 		Use:   "connect",
@@ -164,6 +165,6 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&lite, "lite", false, "connect to multiple cluster in lite mode, you needs to special this options")
 
 	handler.AddExtraRoute(cmd.Flags(), extraRoute)
-	util.AddSshFlags(cmd.Flags(), sshConf)
+	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	return cmd
 }

@@ -12,6 +12,7 @@ import (
 	goversion "github.com/hashicorp/go-version"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/elevate"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -24,7 +25,7 @@ import (
 // 6) check permission of putting new kubevpn back
 // 7) chmod +x, move old to /temp, move new to CURRENT_FOLDER
 func Main(ctx context.Context, client *http.Client, url string) error {
-	err := elevate()
+	err := elevatePermission()
 	if err != nil {
 		return err
 	}
@@ -92,7 +93,7 @@ func downloadAndInstall(client *http.Client, url string) error {
 	return err
 }
 
-func elevate() error {
+func elevatePermission() error {
 	executable, err := os.Executable()
 	if err != nil {
 		return err
@@ -104,12 +105,12 @@ func elevate() error {
 		_ = os.Remove(tem.Name())
 	}
 	if os.IsPermission(err) {
-		util.RunWithElevated()
+		elevate.RunWithElevated()
 		os.Exit(0)
 	} else if err != nil {
 		return err
-	} else if !util.IsAdmin() {
-		util.RunWithElevated()
+	} else if !elevate.IsAdmin() {
+		elevate.RunWithElevated()
 		os.Exit(0)
 	}
 	return nil

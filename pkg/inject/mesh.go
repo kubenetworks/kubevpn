@@ -3,299 +3,354 @@ package inject
 import (
 	"context"
 	"encoding/json"
-	errors2 "errors"
 	"fmt"
-	"strconv"
+	"reflect"
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	v12 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	v1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
-	json2 "k8s.io/apimachinery/pkg/util/json"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/cli-runtime/pkg/resource"
-	"k8s.io/client-go/util/retry"
-	"k8s.io/kubectl/pkg/cmd/util"
-	"k8s.io/utils/pointer"
+	k8sjson "k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/apimachinery/pkg/util/sets"
+	pkgresource "k8s.io/cli-runtime/pkg/resource"
+	runtimeresource "k8s.io/cli-runtime/pkg/resource"
+	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	util2 "github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func InjectVPNSidecar(ctx1 context.Context, factory util.Factory, namespace, workload string, c util2.PodRouteConfig) error {
-	object, err := util2.GetUnstructuredObject(factory, namespace, workload)
+// https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
+
+// InjectVPNAndEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
+func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workload string, c util.PodRouteConfig, headers map[string]string, portMaps []string) (err error) {
+	var object *runtimeresource.Info
+	object, err = util.GetUnstructuredObject(factory, namespace, workload)
 	if err != nil {
 		return err
 	}
 
 	u := object.Object.(*unstructured.Unstructured)
-
-	podTempSpec, path, err := util2.GetPodTemplateSpecPath(u)
+	var templateSpec *v1.PodTemplateSpec
+	var path []string
+	templateSpec, path, err = util.GetPodTemplateSpecPath(u)
 	if err != nil {
 		return err
 	}
 
-	clientset, err := factory.KubernetesClientSet()
-	if err != nil {
-		return err
-	}
-	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
+	origin := templateSpec.DeepCopy()
+
 	var ports []v1.ContainerPort
-	for _, container := range podTempSpec.Spec.Containers {
+	for _, container := range templateSpec.Spec.Containers {
 		ports = append(ports, container.Ports...)
+	}
+	for _, portMap := range portMaps {
+		var found = func(containerPort int32) bool {
+			for _, port := range ports {
+				if port.ContainerPort == containerPort {
+					return true
+				}
+			}
+			return false
+		}
+		port := util.ParsePort(portMap)
+		port.HostPort = 0
+		if port.ContainerPort != 0 && !found(port.ContainerPort) {
+			ports = append(ports, port)
+		}
 	}
 	var portmap = make(map[int32]int32)
 	for _, port := range ports {
 		portmap[port.ContainerPort] = port.ContainerPort
 	}
-	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(namespace), nodeID, c, nil, ports, portmap)
+	for _, portMap := range portMaps {
+		port := util.ParsePort(portMap)
+		if port.ContainerPort != 0 {
+			portmap[port.ContainerPort] = port.HostPort
+		}
+	}
+
+	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
+
+	err = addEnvoyConfig(clientset, nodeID, c, headers, ports, portmap)
 	if err != nil {
-		logrus.Errorf("add envoy config error: %v", err)
+		log.Errorf("add envoy config error: %v", err)
 		return err
 	}
 
-	origin := *podTempSpec
-	AddContainer(&podTempSpec.Spec, c)
-
-	helper := resource.NewHelper(object.Client, object.Mapping)
-	// pods without controller
-	if len(path) == 0 {
-		logrus.Infof("workload %s/%s is not controlled by any controller", namespace, workload)
-		for _, container := range podTempSpec.Spec.Containers {
-			container.LivenessProbe = nil
-			container.StartupProbe = nil
-			container.ReadinessProbe = nil
-		}
-		p := &v1.Pod{ObjectMeta: podTempSpec.ObjectMeta, Spec: podTempSpec.Spec}
-		CleanupUselessInfo(p)
-		if err = CreateAfterDeletePod(factory, p, helper); err != nil {
-			return err
-		}
-	} else
-	// controllers
-	{
-		logrus.Infof("workload %s/%s is controlled by a controller", namespace, workload)
-		// remove probe
-		removePatch, restorePatch := patch(origin, path)
-		b, _ := json.Marshal(restorePatch)
-		p := []P{
-			{
-				Op:    "replace",
-				Path:  "/" + strings.Join(append(path, "spec"), "/"),
-				Value: podTempSpec.Spec,
-			},
-			{
-				Op:    "replace",
-				Path:  "/metadata/annotations/" + config.KubeVPNRestorePatchKey,
-				Value: string(b),
-			},
-		}
-		marshal, _ := json.Marshal(append(p, removePatch...))
-		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, marshal, &v12.PatchOptions{})
-		if err != nil {
-			logrus.Errorf("error while inject proxy container, err: %v, exiting...", err)
-			return err
-		}
+	// already inject container vpn and envoy-proxy, do nothing
+	containerNames := sets.New[string]()
+	for _, container := range templateSpec.Spec.Containers {
+		containerNames.Insert(container.Name)
 	}
-	err = util2.RolloutStatus(ctx1, factory, namespace, workload, time.Minute*60)
+	if containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
+		// add rollback func to remove envoy config
+		//rollbackFuncList = append(rollbackFuncList, func() {
+		//	err := UnPatchContainer(factory, clientset, namespace, workload, c.LocalTunIPv4)
+		//	if err != nil {
+		//		log.Error(err)
+		//	}
+		//})
+		log.Infof("workload %s/%s has already been injected with sidecar", namespace, workload)
+		return nil
+	}
+	// (1) add mesh container
+	removePatch, restorePatch := patch(*origin, path)
+	var b []byte
+	b, err = k8sjson.Marshal(restorePatch)
+	if err != nil {
+		log.Errorf("marshal patch error: %v", err)
+		return err
+	}
+
+	AddMeshContainer(templateSpec, nodeID, c)
+	helper := pkgresource.NewHelper(object.Client, object.Mapping)
+	ps := []P{
+		{
+			Op:    "replace",
+			Path:  "/" + strings.Join(append(path, "spec"), "/"),
+			Value: templateSpec.Spec,
+		},
+		{
+			Op:    "replace",
+			Path:  "/metadata/annotations/" + config.KubeVPNRestorePatchKey,
+			Value: string(b),
+		},
+	}
+	var bytes []byte
+	bytes, err = k8sjson.Marshal(append(ps, removePatch...))
+	if err != nil {
+		return err
+	}
+	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
+	if err != nil {
+		log.Errorf("error while path resource: %s %s, err: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
+		return err
+	}
+	log.Infof("patch workload %s/%s with sidecar", namespace, workload)
+	err = util.RolloutStatus(ctx1, factory, namespace, workload, time.Minute*60)
 	return err
 }
 
-func CreateAfterDeletePod(factory util.Factory, p *v1.Pod, helper *resource.Helper) error {
-	_, err := helper.DeleteWithOptions(p.Namespace, p.Name, &v12.DeleteOptions{
-		GracePeriodSeconds: pointer.Int64(0),
-	})
+func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, namespace, workload string, localTunIPv4 string) error {
+	object, err := util.GetUnstructuredObject(factory, namespace, workload)
 	if err != nil {
-		logrus.Errorf("error while delete resource: %s %s, ignore, err: %v", p.Namespace, p.Name, err)
-	}
-	err = retry.OnError(wait.Backoff{
-		Steps:    10,
-		Duration: 50 * time.Millisecond,
-		Factor:   5.0,
-		Jitter:   1,
-	}, func(err error) bool {
-		if !errors.IsAlreadyExists(err) {
-			return true
-		}
-		clientset, err := factory.KubernetesClientSet()
-		get, err := clientset.CoreV1().Pods(p.Namespace).Get(context.Background(), p.Name, v12.GetOptions{})
-		if err != nil || get.Status.Phase != v1.PodRunning {
-			return true
-		}
-		return false
-	}, func() error {
-		if _, err := helper.Create(p.Namespace, true, p); err != nil {
-			return err
-		}
-		return errors2.New("")
-	})
-	if err != nil {
-		if errors.IsAlreadyExists(err) {
-			return nil
-		}
-		logrus.Errorf("error while create resource: %s %s, err: %v", p.Namespace, p.Name, err)
-		return err
-	}
-	return nil
-}
-
-func removeInboundContainer(factory util.Factory, namespace, workloads string) error {
-	object, err := util2.GetUnstructuredObject(factory, namespace, workloads)
-	if err != nil {
+		log.Errorf("get unstructured object error: %v", err)
 		return err
 	}
 
 	u := object.Object.(*unstructured.Unstructured)
-
-	podTempSpec, path, err := util2.GetPodTemplateSpecPath(u)
+	templateSpec, depth, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
+		log.Errorf("get template spec path error: %v", err)
 		return err
 	}
 
-	helper := resource.NewHelper(object.Client, object.Mapping)
+	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 
-	// pods
-	if len(path) == 0 {
-		_, err = helper.DeleteWithOptions(object.Namespace, object.Name, &v12.DeleteOptions{
-			GracePeriodSeconds: pointer.Int64(0),
+	var empty, found bool
+	empty, found, err = removeEnvoyConfig(mapInterface, nodeID, localTunIPv4)
+	if err != nil {
+		log.Errorf("remove envoy config error: %v", err)
+		return err
+	}
+	if !found {
+		log.Infof("not proxy resource %s", workload)
+		return nil
+	}
+
+	log.Infof("leave workload %s", workload)
+
+	RemoveContainers(templateSpec)
+	if u.GetAnnotations() != nil && u.GetAnnotations()[config.KubeVPNRestorePatchKey] != "" {
+		patchStr := u.GetAnnotations()[config.KubeVPNRestorePatchKey]
+		var ps []P
+		err = json.Unmarshal([]byte(patchStr), &ps)
+		if err != nil {
+			return fmt.Errorf("unmarshal json patch: %s failed, err: %v", patchStr, err)
+		}
+		fromPatchToProbe(templateSpec, depth, ps)
+	}
+
+	if empty {
+		helper := pkgresource.NewHelper(object.Client, object.Mapping)
+		// pod without controller
+		if len(depth) == 0 {
+			log.Infof("workload %s/%s is not controlled by any controller", namespace, workload)
+			delete(templateSpec.ObjectMeta.GetAnnotations(), config.KubeVPNRestorePatchKey)
+			pod := &v1.Pod{ObjectMeta: templateSpec.ObjectMeta, Spec: templateSpec.Spec}
+			CleanupUselessInfo(pod)
+			err = CreateAfterDeletePod(factory, pod, helper)
+			return err
+		}
+
+		log.Infof("workload %s/%s is controlled by a controller", namespace, workload)
+		// resource with controller, like deployment,statefulset
+		var bytes []byte
+		bytes, err = json.Marshal([]P{
+			{
+				Op:    "replace",
+				Path:  "/" + strings.Join(append(depth, "spec"), "/"),
+				Value: templateSpec.Spec,
+			},
+			{
+				Op:    "replace",
+				Path:  "/metadata/annotations/" + config.KubeVPNRestorePatchKey,
+				Value: "",
+			},
 		})
 		if err != nil {
+			log.Errorf("error while generating json patch: %v", err)
+			return err
+		}
+		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
+		if err != nil {
+			log.Errorf("error while patching resource: %s %s, err: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
 			return err
 		}
 	}
-	// how to scale to one
-	RemoveContainer(&podTempSpec.Spec)
-
-	bytes, err := json.Marshal([]struct {
-		Op    string      `json:"op"`
-		Path  string      `json:"path"`
-		Value interface{} `json:"value"`
-	}{{
-		Op:    "replace",
-		Path:  "/" + strings.Join(append(path, "spec"), "/"),
-		Value: podTempSpec.Spec,
-	}})
-	if err != nil {
-		return err
-	}
-	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &v12.PatchOptions{
-		//Force: &t,
-	})
 	return err
 }
 
-func CleanupUselessInfo(pod *v1.Pod) {
-	pod.SetSelfLink("")
-	pod.SetGeneration(0)
-	pod.SetResourceVersion("")
-	pod.SetUID("")
-	pod.SetDeletionTimestamp(nil)
-	pod.SetSelfLink("")
-	pod.SetManagedFields(nil)
-	pod.SetOwnerReferences(nil)
-}
-
-type P struct {
-	Op    string      `json:"op,omitempty"`
-	Path  string      `json:"path,omitempty"`
-	Value interface{} `json:"value,omitempty"`
-}
-
-func patch(spec v1.PodTemplateSpec, path []string) (remove []P, restore []P) {
-	for i := range spec.Spec.Containers {
-		index := strconv.Itoa(i)
-		readinessPath := "/" + strings.Join(append(path, "spec", "containers", index, "readinessProbe"), "/")
-		livenessPath := "/" + strings.Join(append(path, "spec", "containers", index, "livenessProbe"), "/")
-		startupPath := "/" + strings.Join(append(path, "spec", "containers", index, "startupProbe"), "/")
-		f := func(p *v1.Probe) string {
-			if p == nil {
-				return ""
-			}
-			marshal, err := json2.Marshal(p)
-			if err != nil {
-				logrus.Errorf("error while json marshal: %v", err)
-				return ""
-			}
-			return string(marshal)
+func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP util.PodRouteConfig, headers map[string]string, port []v1.ContainerPort, portmap map[int32]int32) error {
+	configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	var v = make([]*controlplane.Virtual, 0)
+	if str, ok := configMap.Data[config.KeyEnvoy]; ok {
+		if err = yaml.Unmarshal([]byte(str), &v); err != nil {
+			return err
 		}
-		remove = append(remove, P{
-			Op:    "replace",
-			Path:  readinessPath,
-			Value: nil,
-		}, P{
-			Op:    "replace",
-			Path:  livenessPath,
-			Value: nil,
-		}, P{
-			Op:    "replace",
-			Path:  startupPath,
-			Value: nil,
-		})
-		restore = append(restore, P{
-			Op:    "replace",
-			Path:  readinessPath,
-			Value: f(spec.Spec.Containers[i].ReadinessProbe),
-		}, P{
-			Op:    "replace",
-			Path:  livenessPath,
-			Value: f(spec.Spec.Containers[i].LivenessProbe),
-		}, P{
-			Op:    "replace",
-			Path:  startupPath,
-			Value: f(spec.Spec.Containers[i].StartupProbe),
-		})
 	}
-	return
+
+	v = addVirtualRule(v, nodeID, port, headers, tunIP, portmap)
+	marshal, err := yaml.Marshal(v)
+	if err != nil {
+		return err
+	}
+	configMap.Data[config.KeyEnvoy] = string(marshal)
+	_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
+	return err
 }
 
-func fromPatchToProbe(spec *v1.PodTemplateSpec, path []string, patch []P) {
-	// 3 = readiness + liveness + startup
-	if len(patch) != 3*len(spec.Spec.Containers) {
-		logrus.Debugf("patch not match container num, not restore")
-		return
+func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []v1.ContainerPort, headers map[string]string, tunIP util.PodRouteConfig, portmap map[int32]int32) []*controlplane.Virtual {
+	var index = -1
+	for i, virtual := range v {
+		if nodeID == virtual.Uid {
+			index = i
+			break
+		}
 	}
-	for i := range spec.Spec.Containers {
-		index := strconv.Itoa(i)
-		readinessPath := "/" + strings.Join(append(path, "spec", "containers", index, "readinessProbe"), "/")
-		livenessPath := "/" + strings.Join(append(path, "spec", "containers", index, "livenessProbe"), "/")
-		startupPath := "/" + strings.Join(append(path, "spec", "containers", index, "startupProbe"), "/")
-		var f = func(value any) *v1.Probe {
-			if value == nil {
-				return nil
-			}
-			str, ok := value.(string)
-			if ok && str == "" {
-				return nil
-			}
-			if !ok {
-				marshal, err := json2.Marshal(value)
-				if err != nil {
-					logrus.Errorf("error while json marshal: %v", err)
-					return nil
+	// 1) if not found uid, means nobody proxying it, just add it
+	if index < 0 {
+		return append(v, &controlplane.Virtual{
+			Uid:   nodeID,
+			Ports: port,
+			Rules: []*controlplane.Rule{{
+				Headers:      headers,
+				LocalTunIPv4: tunIP.LocalTunIPv4,
+				LocalTunIPv6: tunIP.LocalTunIPv6,
+				PortMap:      portmap,
+			}},
+		})
+	}
+
+	// 2) if already proxy deployment/xxx with header a=1. also want to add b=2
+	for j, rule := range v[index].Rules {
+		if rule.LocalTunIPv4 == tunIP.LocalTunIPv4 &&
+			rule.LocalTunIPv6 == tunIP.LocalTunIPv6 {
+			v[index].Rules[j].Headers = util.Merge[string, string](v[index].Rules[j].Headers, headers)
+			v[index].Rules[j].PortMap = util.Merge[int32, int32](v[index].Rules[j].PortMap, portmap)
+			return v
+		}
+	}
+
+	// 3) if already proxy deployment/xxx with header a=1, other user can replace it to self
+	for j, rule := range v[index].Rules {
+		if reflect.DeepEqual(rule.Headers, headers) {
+			v[index].Rules[j].LocalTunIPv6 = tunIP.LocalTunIPv6
+			v[index].Rules[j].LocalTunIPv4 = tunIP.LocalTunIPv4
+			v[index].Rules[j].PortMap = portmap
+			return v
+		}
+	}
+
+	// 4) if header is not same and tunIP is not same, means another users, just add it
+	v[index].Rules = append(v[index].Rules, &controlplane.Rule{
+		Headers:      headers,
+		LocalTunIPv4: tunIP.LocalTunIPv4,
+		LocalTunIPv6: tunIP.LocalTunIPv6,
+		PortMap:      portmap,
+	})
+	if v[index].Ports == nil {
+		v[index].Ports = port
+	}
+	return v
+}
+
+func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTunIPv4 string) (empty bool, found bool, err error) {
+	configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if k8serrors.IsNotFound(err) {
+		return true, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	str, ok := configMap.Data[config.KeyEnvoy]
+	if !ok {
+		return false, false, errors.New("can not found value for key: envoy-config.yaml")
+	}
+	var v []*controlplane.Virtual
+	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
+		return false, false, err
+	}
+	for _, virtual := range v {
+		if nodeID == virtual.Uid {
+			for i := 0; i < len(virtual.Rules); i++ {
+				if virtual.Rules[i].LocalTunIPv4 == localTunIPv4 {
+					found = true
+					virtual.Rules = append(virtual.Rules[:i], virtual.Rules[i+1:]...)
+					i--
 				}
-				str = string(marshal)
-			}
-			var probe v1.Probe
-			err := json2.Unmarshal([]byte(str), &probe)
-			if err != nil {
-				logrus.Errorf("error while json unmarsh: %v", err)
-				return nil
-			}
-			return &probe
-		}
-		for _, p := range patch {
-			switch p.Path {
-			case readinessPath:
-				spec.Spec.Containers[i].ReadinessProbe = f(p.Value)
-			case livenessPath:
-				spec.Spec.Containers[i].LivenessProbe = f(p.Value)
-			case startupPath:
-				spec.Spec.Containers[i].StartupProbe = f(p.Value)
 			}
 		}
 	}
+	if !found {
+		return false, false, nil
+	}
+
+	// remove default
+	for i := 0; i < len(v); i++ {
+		if nodeID == v[i].Uid && len(v[i].Rules) == 0 {
+			v = append(v[:i], v[i+1:]...)
+			i--
+			empty = true
+		}
+	}
+	var bytes []byte
+	bytes, err = yaml.Marshal(v)
+	if err != nil {
+		return false, found, err
+	}
+	configMap.Data[config.KeyEnvoy] = string(bytes)
+	_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
+	return empty, found, err
+}
+
+func contains(a map[string]string, sub map[string]string) bool {
+	for k, v := range sub {
+		if a[k] != v {
+			return false
+		}
+	}
+	return true
 }

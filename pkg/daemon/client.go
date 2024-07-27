@@ -16,8 +16,8 @@ import (
 	_ "google.golang.org/grpc/resolver/passthrough"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/elevate"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 var daemonClient, sudoDaemonClient rpc.DaemonClient
@@ -149,13 +149,13 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 		return err
 	}
 	if isSudo {
-		if !util.IsAdmin() {
-			err = util.RunCmdWithElevated(exe, []string{"daemon", "--sudo"})
+		if !elevate.IsAdmin() {
+			err = elevate.RunCmdWithElevated(exe, []string{"daemon", "--sudo"})
 		} else {
-			err = util.RunCmd(exe, []string{"daemon", "--sudo"})
+			err = elevate.RunCmd(exe, []string{"daemon", "--sudo"})
 		}
 	} else {
-		err = util.RunCmd(exe, []string{"daemon"})
+		err = elevate.RunCmd(exe, []string{"daemon"})
 	}
 	if err != nil {
 		return err

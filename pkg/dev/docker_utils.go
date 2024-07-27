@@ -35,7 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 )
 
 func waitExitOrRemoved(ctx context.Context, apiClient client.APIClient, containerID string, waitRemove bool) <-chan int {
@@ -576,7 +576,7 @@ func run(ctx context.Context, cli *client.Client, dockerCli *command.DockerCli, 
 		}
 	}
 	if needPull {
-		err = util.PullImage(ctx, runConfig.platform, cli, dockerCli, config.Image, nil)
+		err = pkgssh.PullImage(ctx, runConfig.platform, cli, dockerCli, config.Image, nil)
 		if err != nil {
 			logrus.Errorf("Failed to pull image: %s, err: %s", config.Image, err)
 			return

@@ -16,6 +16,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dev"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -24,7 +25,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		NoProxy:        false,
 		ExtraRouteInfo: handler.ExtraRouteInfo{},
 	}
-	var sshConf = &util.SshConfig{}
+	var sshConf = &pkgssh.SshConfig{}
 	var transferImage bool
 	cmd := &cobra.Command{
 		Use:   "dev TYPE/NAME [-c CONTAINER] [flags] -- [args...]",
@@ -105,7 +106,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return util.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false)
+			return pkgssh.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.Workload = args[0]
@@ -151,7 +152,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 	dev.AddDockerFlags(options, cmd.Flags())
 
 	handler.AddExtraRoute(cmd.Flags(), &options.ExtraRouteInfo)
-	util.AddSshFlags(cmd.Flags(), sshConf)
+	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	return cmd
 }
 

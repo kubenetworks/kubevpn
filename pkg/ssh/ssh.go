@@ -1,4 +1,4 @@
-package util
+package ssh
 
 import (
 	"bytes"
@@ -33,6 +33,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	pkgutil "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 type SshConfig struct {
@@ -713,7 +714,7 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 		return
 	}
 	var port int
-	port, err = GetAvailableTCPPortOrDie()
+	port, err = pkgutil.GetAvailableTCPPortOrDie()
 	if err != nil {
 		return
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -224,8 +225,8 @@ func genCloneMsg(w *tabwriter.Writer, list []*rpc.Status) {
 
 func GetClusterIDByConfig(cmd *cobra.Command, config Config) (string, error) {
 	flags := flag.NewFlagSet("", flag.ContinueOnError)
-	var sshConf = &util.SshConfig{}
-	util.AddSshFlags(flags, sshConf)
+	var sshConf = &pkgssh.SshConfig{}
+	pkgssh.AddSshFlags(flags, sshConf)
 	handler.AddExtraRoute(flags, &handler.ExtraRouteInfo{})
 	configFlags := genericclioptions.NewConfigFlags(false).WithDeprecatedPasswordFlag()
 	configFlags.AddFlags(flags)
@@ -263,7 +264,7 @@ func GetClusterIDByConfig(cmd *cobra.Command, config Config) (string, error) {
 		DefValue: ns,
 	})
 	var path string
-	path, err = util.SshJump(cmd.Context(), sshConf, flags, false)
+	path, err = pkgssh.SshJump(cmd.Context(), sshConf, flags, false)
 	if err != nil {
 		return "", err
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -25,7 +26,7 @@ func CmdConfig(f cmdutil.Factory) *cobra.Command {
 }
 
 func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
-	var sshConf = &util.SshConfig{}
+	var sshConf = &pkgssh.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "add",
 		Short: i18n.T("Proxy kubeconfig"),
@@ -63,7 +64,7 @@ func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
-	util.AddSshFlags(cmd.Flags(), sshConf)
+	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	return cmd
 }
 

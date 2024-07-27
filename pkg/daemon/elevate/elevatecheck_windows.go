@@ -1,6 +1,6 @@
 //go:build windows
 
-package util
+package elevate
 
 import (
 	"fmt"

@@ -13,6 +13,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -25,7 +26,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 	out := io.MultiWriter(newCloneWarp(resp), svr.LogFile)
 	log.SetOutput(out)
 	log.SetLevel(log.InfoLevel)
-	var sshConf = util.ParseSshFromRPC(req.SshJump)
+	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	connReq := &rpc.ConnectRequest{
 		KubeconfigBytes:      req.KubeconfigBytes,
 		Namespace:            req.Namespace,
@@ -98,7 +99,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 		return nil
 	})
 	var path string
-	path, err = util.SshJump(sshCtx, sshConf, flags, false)
+	path, err = ssh.SshJump(sshCtx, sshConf, flags, false)
 	if err != nil {
 		return err
 	}

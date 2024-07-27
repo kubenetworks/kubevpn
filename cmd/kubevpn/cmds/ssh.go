@@ -20,13 +20,13 @@ import (
 	"k8s.io/kubectl/pkg/util/term"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 )
 
 // CmdSSH
 // Remember to use network mask 32, because ssh using unique network cidr 223.255.0.0/16
 func CmdSSH(_ cmdutil.Factory) *cobra.Command {
-	var sshConf = &util.SshConfig{}
+	var sshConf = &pkgssh.SshConfig{}
 	var ExtraCIDR []string
 	cmd := &cobra.Command{
 		Use:   "ssh",
@@ -108,7 +108,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			}
 		},
 	}
-	util.AddSshFlags(cmd.Flags(), sshConf)
+	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	cmd.Flags().StringArrayVar(&ExtraCIDR, "extra-cidr", []string{}, "Extra cidr string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
 	return cmd
 }

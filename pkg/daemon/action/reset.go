@@ -8,6 +8,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -34,10 +35,10 @@ func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) err
 		Name:     "kubeconfig",
 		DefValue: file,
 	})
-	var sshConf = util.ParseSshFromRPC(req.SshJump)
+	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	var ctx = resp.Context()
 	var path string
-	path, err = util.SshJump(ctx, sshConf, flags, false)
+	path, err = ssh.SshJump(ctx, sshConf, flags, false)
 	if err != nil {
 		return err
 	}

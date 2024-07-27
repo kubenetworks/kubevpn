@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -29,8 +30,8 @@ func (svr *Server) ConfigAdd(ctx context.Context, req *rpc.ConfigAddRequest) (re
 		}
 	}()
 	var path string
-	var sshConf = util.ParseSshFromRPC(req.SshJump)
-	path, err = util.SshJump(sshCtx, sshConf, flags, true)
+	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
+	path, err = ssh.SshJump(sshCtx, sshConf, flags, true)
 	if err != nil {
 		return nil, err
 	}

@@ -19,13 +19,14 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	var connect = handler.ConnectOptions{}
 	var extraRoute = &handler.ExtraRouteInfo{}
-	var sshConf = &util.SshConfig{}
+	var sshConf = &pkgssh.SshConfig{}
 	var transferImage, foreground bool
 	cmd := &cobra.Command{
 		Use:   "proxy",
@@ -183,7 +184,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "foreground hang up")
 
 	handler.AddExtraRoute(cmd.Flags(), extraRoute)
-	util.AddSshFlags(cmd.Flags(), sshConf)
+	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd
 }
