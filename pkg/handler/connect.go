@@ -465,6 +465,7 @@ func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
 
 func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	const port = 53
+	const portTCP = 10800
 	pod, err := c.GetRunningPodList(ctx)
 	if err != nil {
 		log.Errorf("get running pod list failed, err: %v", err)
@@ -482,7 +483,19 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	relovConf.Servers = []string{svc.Spec.ClusterIP}
+	
+	var conn net.Conn
+	d := net.Dialer{Timeout: time.Duration(max(2, relovConf.Timeout)) * time.Second}
+	conn, err = d.DialContext(ctx, "tcp", net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(portTCP)))
+	if err != nil {
+		relovConf.Servers = []string{pod[0].Status.PodIP}
+		err = nil
+		log.Debugf("DNS service use pod IP %s", pod[0].Status.PodIP)
+	} else {
+		relovConf.Servers = []string{svc.Spec.ClusterIP}
+		_ = conn.Close()
+		log.Debugf("DNS service use service IP %s", svc.Spec.ClusterIP)
+	}
 
 	log.Debugf("adding extra hosts...")
 	if err = c.addExtraRoute(c.ctx, relovConf.Servers[0]); err != nil {
