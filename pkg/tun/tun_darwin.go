@@ -16,6 +16,11 @@ import (
 )
 
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
+	if cfg.Addr == "" && cfg.Addr6 == "" {
+		err = fmt.Errorf("IPv4 address and IPv6 address can not be empty at same time")
+		return
+	}
+
 	var ipv4, ipv6 net.IP
 
 	mtu := cfg.MTU
@@ -36,15 +41,17 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	// set ipv4 address
-	if ipv4, _, err = net.ParseCIDR(cfg.Addr); err != nil {
-		return
-	}
-	setIPv4Cmd := fmt.Sprintf("ifconfig %s inet %s %s mtu %d up", name, cfg.Addr, ipv4.String(), mtu)
-	log.Debugf("[tun] %s", setIPv4Cmd)
-	args := strings.Split(setIPv4Cmd, " ")
-	if err = exec.Command(args[0], args[1:]...).Run(); err != nil {
-		err = fmt.Errorf("%s: %v", setIPv4Cmd, err)
-		return
+	if cfg.Addr != "" {
+		if ipv4, _, err = net.ParseCIDR(cfg.Addr); err != nil {
+			return
+		}
+		setIPv4Cmd := fmt.Sprintf("ifconfig %s inet %s %s mtu %d up", name, cfg.Addr, ipv4.String(), mtu)
+		log.Debugf("[TUN] %s", setIPv4Cmd)
+		args := strings.Split(setIPv4Cmd, " ")
+		if err = exec.Command(args[0], args[1:]...).Run(); err != nil {
+			err = fmt.Errorf("%s: %v", setIPv4Cmd, err)
+			return
+		}
 	}
 
 	// set ipv6 address
@@ -55,8 +62,8 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		}
 		ones, _ := ipv6CIDR.Mask.Size()
 		setIPv6Cmd := fmt.Sprintf("ifconfig %s inet6 %s prefixlen %d alias", name, ipv6.String(), ones)
-		log.Debugf("[tun] %s", setIPv6Cmd)
-		args = strings.Split(setIPv6Cmd, " ")
+		log.Debugf("[TUN] %s", setIPv6Cmd)
+		args := strings.Split(setIPv6Cmd, " ")
 		if err = exec.Command(args[0], args[1:]...).Run(); err != nil {
 			err = fmt.Errorf("%s: %v", setIPv6Cmd, err)
 			return
@@ -64,7 +71,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	if err = addTunRoutes(name, cfg.Routes...); err != nil {
-		log.Errorf("add tun routes failed: %v", err)
+		log.Errorf("Add tun routes failed: %v", err)
 		return
 	}
 
@@ -92,7 +99,7 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 		} else { // ipv6
 			cmd = fmt.Sprintf("route add -inet6 %s -interface %s", route.Dst.String(), ifName)
 		}
-		log.Debugf("[tun] %s", cmd)
+		log.Debugf("[TUN] %s", cmd)
 		args := strings.Split(cmd, " ")
 		err := exec.Command(args[0], args[1:]...).Run()
 		if err != nil {

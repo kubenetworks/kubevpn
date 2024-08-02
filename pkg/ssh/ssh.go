@@ -246,8 +246,8 @@ func copyStream(ctx context.Context, local net.Conn, remote net.Conn) {
 		buf := config.LPool.Get().([]byte)[:]
 		defer config.LPool.Put(buf[:])
 		_, err := io.CopyBuffer(local, remote, buf)
-		if err != nil && !errors.Is(err, net.ErrClosed) {
-			log.Debugf("error while copy remote->local: %s", err)
+		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
+			log.Errorf("Failed to copy remote -> local: %s", err)
 		}
 		select {
 		case chDone <- true:
@@ -260,8 +260,8 @@ func copyStream(ctx context.Context, local net.Conn, remote net.Conn) {
 		buf := config.LPool.Get().([]byte)[:]
 		defer config.LPool.Put(buf[:])
 		_, err := io.CopyBuffer(remote, local, buf)
-		if err != nil && !errors.Is(err, net.ErrClosed) {
-			log.Debugf("error while copy local->remote: %s", err)
+		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
+			log.Errorf("Failed to copy local -> remote: %s", err)
 		}
 		select {
 		case chDone <- true:
@@ -552,7 +552,7 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 			localConn, err := localListen.Accept()
 			if err != nil {
 				if !errors.Is(err, net.ErrClosed) {
-					log.Errorf("failed to accept conn: %v", err)
+					log.Errorf("Failed to accept conn: %v", err)
 				}
 				return
 			}
@@ -571,6 +571,7 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 	}()
 	return nil
 }
+
 func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print bool) (path string, err error) {
 	if conf.Addr == "" && conf.ConfigAlias == "" {
 		if flags != nil {
@@ -725,11 +726,11 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 	}
 
 	if print {
-		log.Infof("wait jump to bastion host...")
+		log.Infof("Waiting jump to bastion host...")
 	}
 	err = PortMapUntil(ctx, conf, remote, local)
 	if err != nil {
-		log.Errorf("ssh proxy err: %v", err)
+		log.Errorf("SSH port map error: %v", err)
 		return
 	}
 

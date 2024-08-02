@@ -170,7 +170,7 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 
 	client := GetClient(isSudo)
 	if client == nil {
-		return fmt.Errorf("can not get daemon server client")
+		return fmt.Errorf("failed to get daemon server client")
 	}
 	return nil
 }

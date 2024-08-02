@@ -40,7 +40,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		var pod *v1.Pod
 		pod, err = polymorphichelpers.AttachablePodForObjectFn(factory, service, 2*time.Second)
 		if err == nil && pod.DeletionTimestamp.IsZero() && podutils.IsPodReady(pod) {
-			log.Infoln("traffic manager already exist, reuse it")
+			log.Infoln("Use exist traffic manager")
 			return
 		}
 	}
@@ -59,13 +59,12 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		}
 	}()
 	deleteResource(ctx)
-	log.Infoln("traffic manager not exist, try to create it...")
 
 	// 1) label namespace
-	log.Infof("label namespace %s", namespace)
+	log.Infof("Labeling Namespace %s", namespace)
 	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 	if err != nil {
-		log.Errorf("get namespace error: %s", err.Error())
+		log.Errorf("Get Namespace error: %s", err.Error())
 		return err
 	}
 	if ns.Labels == nil {
@@ -74,12 +73,12 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	ns.Labels["ns"] = namespace
 	_, err = clientset.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{})
 	if err != nil {
-		log.Infof("label namespace error: %s", err.Error())
+		log.Infof("Labeling Namespace error: %s", err.Error())
 		return err
 	}
 
 	// 2) create serviceAccount
-	log.Infof("create serviceAccount %s", config.ConfigMapPodTrafficManager)
+	log.Infof("Creating ServiceAccount %s", config.ConfigMapPodTrafficManager)
 	_, err = clientset.CoreV1().ServiceAccounts(namespace).Create(ctx, &v1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
@@ -88,12 +87,12 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		AutomountServiceAccountToken: pointer.Bool(true),
 	}, metav1.CreateOptions{})
 	if err != nil {
-		log.Infof("create serviceAccount error: %s", err.Error())
+		log.Infof("Creating ServiceAccount error: %s", err.Error())
 		return err
 	}
 
 	// 3) create roles
-	log.Infof("create roles %s", config.ConfigMapPodTrafficManager)
+	log.Infof("Creating Roles %s", config.ConfigMapPodTrafficManager)
 	_, err = clientset.RbacV1().Roles(namespace).Create(ctx, &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
@@ -107,12 +106,12 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		}},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		log.Errorf("create roles error: %s", err.Error())
+		log.Errorf("Creating Roles error: %s", err.Error())
 		return err
 	}
 
 	// 4) create roleBinding
-	log.Infof("create roleBinding %s", config.ConfigMapPodTrafficManager)
+	log.Infof("Creating RoleBinding %s", config.ConfigMapPodTrafficManager)
 	_, err = clientset.RbacV1().RoleBindings(namespace).Create(ctx, &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
@@ -131,12 +130,12 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		log.Errorf("create roleBinding error: %s", err.Error())
+		log.Errorf("Creating RoleBinding error: %s", err.Error())
 		return err
 	}
 
 	// 5) create service
-	log.Infof("create service %s", config.ConfigMapPodTrafficManager)
+	log.Infof("Creating Service %s", config.ConfigMapPodTrafficManager)
 	udp8422 := "8422-for-udp"
 	tcp10800 := "10800-for-tcp"
 	tcp9002 := "9002-for-envoy"
@@ -179,7 +178,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		log.Errorf("create service error: %s", err.Error())
+		log.Errorf("Creating Service error: %s", err.Error())
 		return err
 	}
 
@@ -208,7 +207,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	var crt, key []byte
 	crt, key, err = cert.GenerateSelfSignedCertKey(domain, nil, nil)
 	if err != nil {
-		log.Errorf("generate self signed cert and key error: %s", err.Error())
+		log.Errorf("Generate self signed cert and key error: %s", err.Error())
 		return err
 	}
 	// reason why not use v1.SecretTypeTls is because it needs key called tls.crt and tls.key, but tls.key can not as env variable
@@ -227,12 +226,62 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	}
 	_, err = clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
-		log.Errorf("create secret error: %s", err.Error())
+		log.Errorf("Creating secret error: %s", err.Error())
 		return err
 	}
 
-	// 6) create deployment
-	log.Infof("create deployment %s", config.ConfigMapPodTrafficManager)
+	// 6) create mutatingWebhookConfigurations
+	log.Infof("Creating MutatingWebhookConfiguration %s", config.ConfigMapPodTrafficManager)
+	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, &admissionv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.ConfigMapPodTrafficManager + "." + namespace,
+			Namespace: namespace,
+		},
+		Webhooks: []admissionv1.MutatingWebhook{{
+			Name: config.ConfigMapPodTrafficManager + ".naison.io", // no sense
+			ClientConfig: admissionv1.WebhookClientConfig{
+				Service: &admissionv1.ServiceReference{
+					Namespace: namespace,
+					Name:      config.ConfigMapPodTrafficManager,
+					Path:      pointer.String("/pods"),
+					Port:      pointer.Int32(80),
+				},
+				CABundle: crt,
+			},
+			Rules: []admissionv1.RuleWithOperations{{
+				Operations: []admissionv1.OperationType{admissionv1.Create, admissionv1.Delete},
+				Rule: admissionv1.Rule{
+					APIGroups:   []string{""},
+					APIVersions: []string{"v1"},
+					Resources:   []string{"pods"},
+					Scope:       ptr.To(admissionv1.NamespacedScope),
+				},
+			}},
+			FailurePolicy: ptr.To(admissionv1.Ignore),
+			// same as above label ns
+			NamespaceSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"ns": namespace}},
+			SideEffects:             ptr.To(admissionv1.SideEffectClassNone),
+			TimeoutSeconds:          ptr.To[int32](15),
+			AdmissionReviewVersions: []string{"v1", "v1beta1"},
+			ReinvocationPolicy:      ptr.To(admissionv1.NeverReinvocationPolicy),
+			/*// needs to enable featureGate=AdmissionWebhookMatchConditions
+			MatchConditions: []admissionv1.MatchCondition{
+				{
+					Name: "",
+					Expression: fmt.Sprintf(
+						"container_name.exists(c, c == '%s') && environment_variable.find(e, e == '%s').exists()",
+						config.ContainerSidecarVPN, config.EnvInboundPodTunIPv4,
+					),
+				},
+			},*/
+		}},
+	}, metav1.CreateOptions{})
+	if err != nil && !k8serrors.IsForbidden(err) && !k8serrors.IsAlreadyExists(err) {
+		return fmt.Errorf("failed to create MutatingWebhookConfigurations: %v", err)
+	}
+
+	// 7) create deployment
+	log.Infof("Creating Deployment %s", config.ConfigMapPodTrafficManager)
 	deploy := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
@@ -410,8 +459,10 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 	}
 	defer watchStream.Stop()
 	var ok bool
+	var last string
 	ctx2, cancelFunc := context.WithTimeout(ctx, time.Minute*60)
 	defer cancelFunc()
+	log.Infoln()
 	wait.UntilWithContext(ctx2, func(ctx context.Context) {
 		podList, err := clientset.CoreV1().Pods(namespace).List(ctx2, metav1.ListOptions{
 			LabelSelector: fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String(),
@@ -427,7 +478,7 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 				continue
 			}
 			var sb = bytes.NewBuffer(nil)
-			sb.WriteString(fmt.Sprintf("pod %s is %s\n", podT.Name, podT.Status.Phase))
+			sb.WriteString(fmt.Sprintf("Pod %s is %s...\n", podT.Name, podT.Status.Phase))
 			if podT.Status.Reason != "" {
 				sb.WriteString(fmt.Sprintf(" reason %s", podT.Status.Reason))
 			}
@@ -435,7 +486,10 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 				sb.WriteString(fmt.Sprintf(" message %s", podT.Status.Message))
 			}
 			util.PrintStatus(podT, sb)
-			log.Infof(sb.String())
+			if last != sb.String() {
+				log.Infof(sb.String())
+			}
+			last = sb.String()
 
 			if podutils.IsPodReady(podT) && func() bool {
 				for _, status := range podT.Status.ContainerStatuses {
@@ -451,58 +505,8 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 		}
 	}, time.Second*3)
 	if !ok {
-		log.Errorf("wait pod %s to be ready timeout", config.ConfigMapPodTrafficManager)
+		log.Errorf("Wait pod %s to be ready timeout", config.ConfigMapPodTrafficManager)
 		return errors.New(fmt.Sprintf("wait pod %s to be ready timeout", config.ConfigMapPodTrafficManager))
-	}
-
-	// 7) create mutatingWebhookConfigurations
-	log.Infof("Creating mutatingWebhook_configuration for %s", config.ConfigMapPodTrafficManager)
-	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, &admissionv1.MutatingWebhookConfiguration{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      config.ConfigMapPodTrafficManager + "." + namespace,
-			Namespace: namespace,
-		},
-		Webhooks: []admissionv1.MutatingWebhook{{
-			Name: config.ConfigMapPodTrafficManager + ".naison.io", // no sense
-			ClientConfig: admissionv1.WebhookClientConfig{
-				Service: &admissionv1.ServiceReference{
-					Namespace: namespace,
-					Name:      config.ConfigMapPodTrafficManager,
-					Path:      pointer.String("/pods"),
-					Port:      pointer.Int32(80),
-				},
-				CABundle: crt,
-			},
-			Rules: []admissionv1.RuleWithOperations{{
-				Operations: []admissionv1.OperationType{admissionv1.Create, admissionv1.Delete},
-				Rule: admissionv1.Rule{
-					APIGroups:   []string{""},
-					APIVersions: []string{"v1"},
-					Resources:   []string{"pods"},
-					Scope:       ptr.To(admissionv1.NamespacedScope),
-				},
-			}},
-			FailurePolicy: ptr.To(admissionv1.Ignore),
-			// same as above label ns
-			NamespaceSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"ns": namespace}},
-			SideEffects:             ptr.To(admissionv1.SideEffectClassNone),
-			TimeoutSeconds:          ptr.To[int32](15),
-			AdmissionReviewVersions: []string{"v1", "v1beta1"},
-			ReinvocationPolicy:      ptr.To(admissionv1.NeverReinvocationPolicy),
-			/*// needs to enable featureGate=AdmissionWebhookMatchConditions
-			MatchConditions: []admissionv1.MatchCondition{
-				{
-					Name: "",
-					Expression: fmt.Sprintf(
-						"container_name.exists(c, c == '%s') && environment_variable.find(e, e == '%s').exists()",
-						config.ContainerSidecarVPN, config.EnvInboundPodTunIPv4,
-					),
-				},
-			},*/
-		}},
-	}, metav1.CreateOptions{})
-	if err != nil && !k8serrors.IsForbidden(err) && !k8serrors.IsAlreadyExists(err) {
-		return fmt.Errorf("failed to create MutatingWebhookConfigurations, err: %v", err)
 	}
 
 	return nil

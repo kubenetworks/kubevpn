@@ -46,7 +46,7 @@ func Main(ctx context.Context, filename string, port uint, logger *log.Logger) e
 		case msg := <-notifyCh:
 			err = proc.ProcessFile(msg)
 			if err != nil {
-				log.Errorf("failed to process file: %v", err)
+				log.Errorf("Failed to process file: %v", err)
 				return err
 			}
 		case err = <-errChan:

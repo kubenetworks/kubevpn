@@ -118,40 +118,40 @@ func (c *ConnectOptions) RentIP(ctx context.Context) (context.Context, error) {
 func (c *ConnectOptions) GetIPFromContext(ctx context.Context) error {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return fmt.Errorf("can not get ip from context")
+		return fmt.Errorf("can not get IOP from context")
 	}
 
 	ipv4 := md.Get(config.HeaderIPv4)
 	if len(ipv4) == 0 {
-		return fmt.Errorf("can not found ipv4 from header: %v", md)
+		return fmt.Errorf("can not found IPv4 from header: %v", md)
 	}
 	ip, ipNet, err := net.ParseCIDR(ipv4[0])
 	if err != nil {
-		return fmt.Errorf("cat not convert ipv4 string: %s: %v", ipv4[0], err)
+		return fmt.Errorf("cat not convert IPv4 string: %s: %v", ipv4[0], err)
 	}
 	c.localTunIPv4 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
-	log.Debugf("get ipv4 %s from context", c.localTunIPv4.String())
+	log.Debugf("Get IPv4 %s from context", c.localTunIPv4.String())
 
 	ipv6 := md.Get(config.HeaderIPv6)
 	if len(ipv6) == 0 {
-		return fmt.Errorf("can not found ipv6 from header: %v", md)
+		return fmt.Errorf("can not found IPv6 from header: %v", md)
 	}
 	ip, ipNet, err = net.ParseCIDR(ipv6[0])
 	if err != nil {
-		return fmt.Errorf("cat not convert ipv6 string: %s: %v", ipv6[0], err)
+		return fmt.Errorf("cat not convert IPv6 string: %s: %v", ipv6[0], err)
 	}
 	c.localTunIPv6 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
-	log.Debugf("get ipv6 %s from context", c.localTunIPv6.String())
+	log.Debugf("Get IPv6 %s from context", c.localTunIPv6.String())
 	return nil
 }
 
 func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error) {
 	if c.localTunIPv4 == nil || c.localTunIPv6 == nil {
-		return fmt.Errorf("local tun ip is invalid")
+		return fmt.Errorf("local tun IP is invalid")
 	}
 
 	for _, workload := range c.Workloads {
-		log.Infof("start to create remote inbound pod for %s", workload)
+		log.Infof("Injecting inbound sidecar for %s", workload)
 		configInfo := util.PodRouteConfig{
 			LocalTunIPv4: c.localTunIPv4.IP.String(),
 			LocalTunIPv6: c.localTunIPv6.IP.String(),
@@ -165,10 +165,9 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error)
 			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, configInfo)
 		}
 		if err != nil {
-			log.Errorf("create remote inbound pod for %s failed: %s", workload, err.Error())
+			log.Errorf("Injecting inbound sidecar for %s failed: %s", workload, err.Error())
 			return err
 		}
-		log.Infof("create remote inbound pod for %s successfully", workload)
 	}
 	return
 }
@@ -176,18 +175,17 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error)
 func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
-	log.Info("start to connect")
+	log.Info("Starting connect")
 	m := dhcp.NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
 	if err = m.InitDHCP(c.ctx); err != nil {
-		log.Errorf("init dhcp failed: %s", err.Error())
+		log.Errorf("Init DHCP failed: %v", err)
 		return
 	}
-	c.addCleanUpResourceHandler()
+	go c.setupSignalHandler()
 	if err = c.getCIDR(c.ctx, m); err != nil {
-		log.Errorf("get cidr failed: %s", err.Error())
+		log.Errorf("Failed to get network CIDR: %v", err)
 		return
 	}
-	log.Info("get cidr successfully")
 	if err = createOutboundPod(c.ctx, c.factory, c.clientset, c.Namespace); err != nil {
 		return
 	}
@@ -198,7 +196,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 	//	return
 	//}
 	if err = c.addExtraNodeIP(c.ctx); err != nil {
-		log.Errorf("add extra node ip failed: %v", err)
+		log.Errorf("Add extra node IP failed: %v", err)
 		return
 	}
 	var rawTCPForwardPort, gvisorTCPForwardPort, gvisorUDPForwardPort int
@@ -214,6 +212,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 	if err != nil {
 		return err
 	}
+	log.Info("Forwarding port...")
 	if err = c.portForward(c.ctx, []string{
 		fmt.Sprintf("%d:10800", rawTCPForwardPort),
 		fmt.Sprintf("%d:10801", gvisorTCPForwardPort),
@@ -228,21 +227,22 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 	core.GvisorTCPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
 	core.GvisorUDPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorUDPForwardPort)
 	if err = c.startLocalTunServe(c.ctx, forward, isLite); err != nil {
-		log.Errorf("start local tun service failed: %v", err)
+		log.Errorf("Start local tun service failed: %v", err)
 		return
 	}
-	log.Infof("adding route...")
+	log.Infof("Adding route...")
 	if err = c.addRouteDynamic(c.ctx); err != nil {
-		log.Errorf("add route dynamic failed: %v", err)
+		log.Errorf("Add route dynamic failed: %v", err)
 		return
 	}
 	go c.deleteFirewallRule(c.ctx)
-	log.Debugf("setup dns")
+	log.Debug("Configuring DNS service...")
 	if err = c.setupDNS(c.ctx); err != nil {
-		log.Errorf("set up dns failed: %v", err)
+		log.Errorf("Configure DNS failed: %v", err)
 		return
 	}
-	log.Info("dns service ok")
+	go c.heartbeats(c.ctx)
+	log.Info("Configured DNS service")
 	return
 }
 
@@ -274,7 +274,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				// if port-forward occurs error, check pod is deleted or not, speed up fail
 				utilruntime.ErrorHandlers = []func(error){func(err error) {
 					if !strings.Contains(err.Error(), "an error occurred forwarding") {
-						log.Debugf("port-forward occurs error, err: %v, retrying", err)
+						log.Debugf("Port-forward occurs error, err: %v, retrying", err)
 						cancelFunc()
 					}
 				}}
@@ -299,10 +299,10 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				}
 				if strings.Contains(err.Error(), "unable to listen on any of the requested ports") ||
 					strings.Contains(err.Error(), "address already in use") {
-					log.Errorf("port %s already in use, needs to release it manually", portPair)
+					log.Errorf("Port %s already in use, needs to release it manually", portPair)
 					time.Sleep(time.Second * 1)
 				} else {
-					log.Debugf("port-forward occurs error, err: %v, retrying", err)
+					log.Debugf("Port-forward occurs error, err: %v, retrying", err)
 					time.Sleep(time.Millisecond * 500)
 				}
 			}()
@@ -316,7 +316,6 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 	case err := <-errChan:
 		return err
 	case <-readyChan:
-		log.Info("port forward ready")
 		return nil
 	}
 }
@@ -356,19 +355,19 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 		Retries:   5,
 	}
 
-	log.Debugf("ipv4: %s, ipv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
+	log.Debugf("IPv4: %s, IPv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
 	servers, err := Parse(r)
 	if err != nil {
-		log.Errorf("parse route error: %v", err)
+		log.Errorf("Parse route error: %v", err)
 		return err
 	}
 	go func() {
 		err = Run(ctx, servers)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			log.Errorf("failed to run local tun service: %v", err)
+			log.Errorf("Failed to run local tun service: %v", err)
 		}
 	}()
-	log.Info("tunnel connected")
+	log.Info("Connected tunnel")
 	return
 }
 
@@ -404,7 +403,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
 		}
 		errs := tun.AddRoutes(tunName, types.Route{Dst: net.IPNet{IP: ip, Mask: mask}})
 		if errs != nil {
-			log.Debugf("[route] add route failed, resource: %s, ip: %s, err: %v", resource, ip, errs)
+			log.Errorf("Failed to add route, resource: %s, IP: %s, err: %v", resource, ip, errs)
 		}
 	}
 
@@ -468,7 +467,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	const portTCP = 10800
 	pod, err := c.GetRunningPodList(ctx)
 	if err != nil {
-		log.Errorf("get running pod list failed, err: %v", err)
+		log.Errorf("Get running pod list failed, err: %v", err)
 		return err
 	}
 	relovConf, err := util.GetDNSServiceIPFromPod(ctx, c.clientset, c.config, pod[0].GetName(), c.Namespace)
@@ -497,9 +496,9 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		log.Debugf("DNS service use service IP %s", svc.Spec.ClusterIP)
 	}
 
-	log.Debugf("adding extra hosts...")
+	log.Debugf("Adding extra hosts...")
 	if err = c.addExtraRoute(c.ctx, relovConf.Servers[0]); err != nil {
-		log.Errorf("add extra route failed: %v", err)
+		log.Errorf("Add extra route failed: %v", err)
 		return err
 	}
 
@@ -545,7 +544,6 @@ func Run(ctx context.Context, servers []core.Server) error {
 				for ctx.Err() == nil {
 					conn, err := svr.Listener.Accept()
 					if err != nil {
-						log.Debugf("server accept connect error: %v", err)
 						return err
 					}
 					go svr.Handler.Handle(ctx, conn)
@@ -675,7 +673,7 @@ func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error
 // getCIDR
 // 1: get pod cidr
 // 2: get service cidr
-// todo optimize code should distinguish service cidr and pod cidr
+// distinguish service cidr and pod cidr
 // https://stackoverflow.com/questions/45903123/kubernetes-set-service-cidr-and-pod-cidr-the-same
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster/54183373#54183373
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster
@@ -710,7 +708,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) (err erro
 		}
 	}()
 
-	// (1) get cidr from cache
+	// (1) get CIDR from cache
 	var value string
 	value, err = m.Get(ctx, config.KeyClusterIPv4POOLS)
 	if err == nil {
@@ -721,12 +719,12 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) (err erro
 			}
 		}
 		if len(c.cidrs) != 0 {
-			log.Infoln("get cidr from cache")
+			log.Infoln("Got network CIDR from cache")
 			return
 		}
 	}
 
-	// (2) get cidr from cni
+	// (2) get CIDR from cni
 	c.cidrs, err = util.GetCIDRElegant(ctx, c.clientset, c.config, c.Namespace)
 	if err == nil {
 		s := sets.New[string]()
@@ -754,7 +752,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context, nameserver string) e
 
 	tunName, err := c.GetTunDeviceName()
 	if err != nil {
-		log.Errorf("get tun interface failed: %s", err.Error())
+		log.Errorf("Get tun interface failed: %s", err.Error())
 		return err
 	}
 
@@ -770,7 +768,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context, nameserver string) e
 		}
 		errs := tun.AddRoutes(tunName, types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: mask}})
 		if errs != nil {
-			log.Debugf("[route] add route failed, domain: %s, ip: %s,err: %v", resource, ip, err)
+			log.Errorf("Failed to add route, domain: %s, IP: %s, err: %v", resource, ip, err)
 		}
 	}
 
@@ -874,7 +872,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context, nameserver string) e
 			}
 		}
 		if !success {
-			return fmt.Errorf("failed to resolve dns for domain %s", domain)
+			return fmt.Errorf("failed to resolve DNS for domain %s", domain)
 		}
 	}
 	return nil
@@ -954,7 +952,7 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 		return nil
 	}
 
-	log.Infof("set image %s --> %s...", serverImg, clientImg)
+	log.Infof("Set image %s --> %s...", serverImg, clientImg)
 
 	r := c.factory.NewBuilder().
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
@@ -994,7 +992,7 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 			DryRun(false).
 			Patch(p.Info.Namespace, p.Info.Name, pkgtypes.StrategicMergePatchType, p.Patch, nil)
 		if err != nil {
-			log.Errorf("failed to patch image update to pod template: %v", err)
+			log.Errorf("Failed to patch image update to pod template: %v", err)
 			return err
 		}
 		err = util.RolloutStatus(ctx, c.factory, c.Namespace, fmt.Sprintf("%s/%s", p.Info.Mapping.Resource.GroupResource().String(), p.Info.Name), time.Minute*60)

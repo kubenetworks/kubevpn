@@ -22,7 +22,7 @@ func (svr *Server) Upgrade(ctx context.Context, req *rpc.UpgradeRequest) (*rpc.U
 		return nil, err
 	}
 	if clientVersion.GreaterThan(daemonVersion) {
-		log.Info("daemon version is less than client, needs to upgrade")
+		log.Info("Daemon version is less than client, needs to upgrade")
 		return &rpc.UpgradeResponse{NeedUpgrade: true}, nil
 	}
 	return &rpc.UpgradeResponse{NeedUpgrade: false}, nil

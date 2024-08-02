@@ -137,7 +137,7 @@ func ParseAndGet(localFile, remoteAddr string, aliasName string) ([]Config, erro
 		return nil, err
 	}
 	if len(configs) == 0 {
-		err = fmt.Errorf("can not found any alias for name %s, please check your config file %s", aliasName, path)
+		err = fmt.Errorf("failed to find any aliases for the name %s, please verify your configuration file %s", aliasName, path)
 		return nil, err
 	}
 	return configs, nil
@@ -180,7 +180,7 @@ func GetConfigs(configs []Config, name string) ([]Config, error) {
 			return result, nil
 		}
 	}
-	return nil, fmt.Errorf("detect loop jump: %s, please check your config", strings.Join(append(set, name), " -> "))
+	return nil, fmt.Errorf("loop jump detected: %s. verify your configuration", strings.Join(append(set, name), " -> "))
 }
 
 type Config struct {

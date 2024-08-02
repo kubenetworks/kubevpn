@@ -60,6 +60,33 @@ func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 	return nil, fmt.Errorf("can not found any interface with ip %v", ip)
 }
 
+func GetLocalTunIP(tunName string) (net.IP, net.IP, error) {
+	tunIface, err := net.InterfaceByName(tunName)
+	if err != nil {
+		return nil, nil, err
+	}
+	addrs, err := tunIface.Addrs()
+	if err != nil {
+		return nil, nil, err
+	}
+	var srcIPv4, srcIPv6 net.IP
+	for _, addr := range addrs {
+		ip, _, err := net.ParseCIDR(addr.String())
+		if err != nil {
+			continue
+		}
+		if ip.To4() != nil {
+			srcIPv4 = ip
+		} else {
+			srcIPv6 = ip
+		}
+	}
+	if srcIPv4 == nil || srcIPv6 == nil {
+		return srcIPv4, srcIPv6, fmt.Errorf("not found all ip")
+	}
+	return srcIPv4, srcIPv6, nil
+}
+
 func Ping(ctx context.Context, srcIP, dstIP string) (bool, error) {
 	pinger, err := probing.NewPinger(dstIP)
 	if err != nil {
@@ -90,8 +117,7 @@ func GetIPBaseNic() (*net.IPNet, error) {
 	addrs, _ := net.InterfaceAddrs()
 	var sum int
 	for _, addr := range addrs {
-		ip, _, _ := net.ParseCIDR(addr.String())
-		for _, b := range ip {
+		for _, b := range getIP(addr) {
 			sum = sum + int(b)
 		}
 	}
@@ -110,4 +136,21 @@ func GetIPBaseNic() (*net.IPNet, error) {
 	}
 	_, bits := config.DockerCIDR.Mask.Size()
 	return &net.IPNet{IP: next, Mask: net.CIDRMask(bits, bits)}, nil
+}
+
+func getIP(addr net.Addr) net.IP {
+	if addr == nil {
+		return nil
+	}
+
+	var ip net.IP
+	switch addr.(type) {
+	case *net.IPAddr:
+		ip = addr.(*net.IPAddr).IP
+	case *net.IPNet:
+		ip = addr.(*net.IPNet).IP
+	default:
+		ip = net.ParseIP(addr.String())
+	}
+	return ip
 }

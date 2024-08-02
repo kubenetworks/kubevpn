@@ -13,6 +13,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/upgrade"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
@@ -28,7 +29,7 @@ func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
 			const (
 				envLatestUrl = "KUBEVPN_LATEST_VERSION_URL"
 			)
-
+			util.InitLoggerForClient(false)
 			var client = http.DefaultClient
 			if config.GitHubOAuthToken != "" {
 				client = oauth2.NewClient(cmd.Context(), oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
@@ -43,10 +44,10 @@ func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
 					return err
 				}
 				if !needsUpgrade {
-					_, _ = fmt.Fprintf(os.Stdout, "Already up to date, don't needs to upgrade, version: %s\n", latestVersion)
+					_, _ = fmt.Fprintf(os.Stdout, "Already up to date, don't needs to upgrade, version: %s", latestVersion)
 					return nil
 				}
-				_, _ = fmt.Fprintf(os.Stdout, "Current version is: %s less than latest version: %s, needs to upgrade\n", config.Version, latestVersion)
+				_, _ = fmt.Fprintf(os.Stdout, "Current version is: %s less than latest version: %s, needs to upgrade", config.Version, latestVersion)
 				_ = os.Setenv(envLatestUrl, url)
 				_ = quit(cmd.Context(), false)
 				_ = quit(cmd.Context(), true)

@@ -87,6 +87,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 		kubevpn proxy deployment/productpage
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
+			util.InitLoggerForClient(false)
 			if err = daemon.StartupDaemon(cmd.Context()); err != nil {
 				return err
 			}
@@ -113,7 +114,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			}
 			// todo 将 doConnect 方法封装？内部使用 client 发送到daemon？
 			cli := daemon.GetClient(false)
-			logLevel := log.ErrorLevel
+			logLevel := log.InfoLevel
 			if config.Debug {
 				logLevel = log.DebugLevel
 			}
@@ -143,14 +144,14 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				if err == io.EOF {
 					break
 				} else if err == nil {
-					fmt.Fprint(os.Stdout, resp.Message)
+					_, _ = fmt.Fprint(os.Stdout, resp.Message)
 				} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
 					return nil
 				} else {
 					return err
 				}
 			}
-			util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
+			util.Print(os.Stdout, config.Slogan)
 			// hangup
 			if foreground {
 				// leave from cluster resources
@@ -169,7 +170,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 					} else if err != nil {
 						return err
 					}
-					fmt.Fprint(os.Stdout, resp.Message)
+					_, _ = fmt.Fprint(os.Stdout, resp.Message)
 				}
 			}
 			return nil

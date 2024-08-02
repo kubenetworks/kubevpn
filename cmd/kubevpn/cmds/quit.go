@@ -33,7 +33,7 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
 			_ = quit(cmd.Context(), false)
 			_ = quit(cmd.Context(), true)
 			util.CleanExtensionLib()
-			fmt.Fprint(os.Stdout, "quit successfully")
+			_, _ = fmt.Fprint(os.Stdout, "Exited")
 			return nil
 		},
 	}
@@ -55,7 +55,7 @@ func quit(ctx context.Context, isSudo bool) error {
 		if err == io.EOF {
 			break
 		} else if err == nil {
-			fmt.Fprint(os.Stdout, resp.Message)
+			_, _ = fmt.Fprint(os.Stdout, resp.Message)
 		} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
 			return nil
 		} else {

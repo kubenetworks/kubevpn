@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/cli-runtime/pkg/resource"
@@ -13,10 +12,10 @@ import (
 	"k8s.io/kubectl/pkg/cmd/util"
 )
 
-func GetUnstructuredObject(f util.Factory, namespace string, workloads string) (*resource.Info, error) {
+func GetUnstructuredObject(f util.Factory, ns string, workloads string) (*resource.Info, error) {
 	do := f.NewBuilder().
 		Unstructured().
-		NamespaceParam(namespace).DefaultNamespace().AllNamespaces(false).
+		NamespaceParam(ns).DefaultNamespace().AllNamespaces(false).
 		ResourceTypeOrNameArgs(true, workloads).
 		ContinueOnError().
 		Latest().
@@ -24,12 +23,10 @@ func GetUnstructuredObject(f util.Factory, namespace string, workloads string) (
 		TransformRequests(func(req *rest.Request) { req.Param("includeObject", "Object") }).
 		Do()
 	if err := do.Err(); err != nil {
-		logrus.Warn(err)
 		return nil, err
 	}
 	infos, err := do.Infos()
 	if err != nil {
-		logrus.Println(err)
 		return nil, err
 	}
 	if len(infos) == 0 {
@@ -38,10 +35,10 @@ func GetUnstructuredObject(f util.Factory, namespace string, workloads string) (
 	return infos[0], err
 }
 
-func GetUnstructuredObjectList(f util.Factory, namespace string, workloads []string) ([]*resource.Info, error) {
+func GetUnstructuredObjectList(f util.Factory, ns string, workloads []string) ([]*resource.Info, error) {
 	do := f.NewBuilder().
 		Unstructured().
-		NamespaceParam(namespace).DefaultNamespace().AllNamespaces(false).
+		NamespaceParam(ns).DefaultNamespace().AllNamespaces(false).
 		ResourceTypeOrNameArgs(true, workloads...).
 		ContinueOnError().
 		Latest().
@@ -49,7 +46,6 @@ func GetUnstructuredObjectList(f util.Factory, namespace string, workloads []str
 		TransformRequests(func(req *rest.Request) { req.Param("includeObject", "Object") }).
 		Do()
 	if err := do.Err(); err != nil {
-		logrus.Warn(err)
 		return nil, err
 	}
 	infos, err := do.Infos()
@@ -57,15 +53,15 @@ func GetUnstructuredObjectList(f util.Factory, namespace string, workloads []str
 		return nil, err
 	}
 	if len(infos) == 0 {
-		return nil, fmt.Errorf("not found resource %v", workloads)
+		return nil, errors.New(fmt.Sprintf("Not found resource %v", workloads))
 	}
 	return infos, err
 }
 
-func GetUnstructuredObjectBySelector(f util.Factory, namespace string, selector string) ([]*resource.Info, error) {
+func GetUnstructuredObjectBySelector(f util.Factory, ns string, selector string) ([]*resource.Info, error) {
 	do := f.NewBuilder().
 		Unstructured().
-		NamespaceParam(namespace).DefaultNamespace().AllNamespaces(false).
+		NamespaceParam(ns).DefaultNamespace().AllNamespaces(false).
 		ResourceTypeOrNameArgs(true, "all").
 		LabelSelector(selector).
 		ContinueOnError().
@@ -74,12 +70,10 @@ func GetUnstructuredObjectBySelector(f util.Factory, namespace string, selector 
 		TransformRequests(func(req *rest.Request) { req.Param("includeObject", "Object") }).
 		Do()
 	if err := do.Err(); err != nil {
-		logrus.Warn(err)
 		return nil, err
 	}
 	infos, err := do.Infos()
 	if err != nil {
-		logrus.Println(err)
 		return nil, err
 	}
 	if len(infos) == 0 {

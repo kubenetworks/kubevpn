@@ -38,6 +38,6 @@ func RunServer(ctx context.Context, server serverv3.Server, port uint) error {
 	secretservice.RegisterSecretDiscoveryServiceServer(grpcServer, server)
 	runtimeservice.RegisterRuntimeDiscoveryServiceServer(grpcServer, server)
 
-	log.Infof("management server listening on %d", port)
+	log.Infof("Management server listening on %d", port)
 	return grpcServer.Serve(listener)
 }

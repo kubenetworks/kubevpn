@@ -20,7 +20,7 @@ import (
 
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if cfg.Addr == "" && cfg.Addr6 == "" {
-		err = fmt.Errorf("ipv4 address and ipv6 address can not be empty at same time")
+		err = fmt.Errorf("IPv4 address and IPv6 address can not be empty at same time")
 		return
 	}
 
@@ -153,7 +153,7 @@ func (c *winTunConn) Close() error {
 	defer func() {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Debug(err)
+				log.Error(err)
 			}
 		}()
 		tun := c.ifce.(*wireguardtun.NativeTun)

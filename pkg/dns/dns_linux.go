@@ -47,7 +47,7 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 	}...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Debugf("failed to exec cmd: %s, message: %s, ignore", strings.Join(cmd.Args, " "), string(output))
+		log.Debugf("Failed to exec cmd: %s, message: %s, ignore", strings.Join(cmd.Args, " "), string(output))
 		err = nil
 	}
 
@@ -74,7 +74,7 @@ func SetupLocalDNS(ctx context.Context, clientConfig *miekgdns.ClientConfig, exi
 		return err
 	}
 
-	log.Debugf("corefile content: %s", string(corefile.Body()))
+	log.Debugf("Corefile content: %s", string(corefile.Body()))
 
 	// Start your engines
 	instance, err := caddy.Start(corefile)
@@ -112,7 +112,7 @@ func (c *Config) CancelDNS() {
 	}
 	err = WriteResolvConf(*resolvConf)
 	if err != nil {
-		log.Warnf("failed to remove dns from resolv conf file: %v", err)
+		log.Warnf("Failed to remove DNS from resolv conf file: %v", err)
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v12 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -54,7 +54,7 @@ func InjectVPNSidecar(ctx1 context.Context, factory util.Factory, namespace, wor
 	}
 	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(namespace), nodeID, c, nil, ports, portmap)
 	if err != nil {
-		logrus.Errorf("add envoy config error: %v", err)
+		log.Errorf("Failed to add envoy config: %v", err)
 		return err
 	}
 
@@ -64,7 +64,7 @@ func InjectVPNSidecar(ctx1 context.Context, factory util.Factory, namespace, wor
 	helper := resource.NewHelper(object.Client, object.Mapping)
 	// pods without controller
 	if len(path) == 0 {
-		logrus.Infof("workload %s/%s is not controlled by any controller", namespace, workload)
+		log.Infof("Workload %s/%s is not controlled by any controller", namespace, workload)
 		for _, container := range podTempSpec.Spec.Containers {
 			container.LivenessProbe = nil
 			container.StartupProbe = nil
@@ -78,7 +78,7 @@ func InjectVPNSidecar(ctx1 context.Context, factory util.Factory, namespace, wor
 	} else
 	// controllers
 	{
-		logrus.Infof("workload %s/%s is controlled by a controller", namespace, workload)
+		log.Debugf("The %s is under controller management", workload)
 		// remove probe
 		removePatch, restorePatch := patch(origin, path)
 		b, _ := json.Marshal(restorePatch)
@@ -97,7 +97,7 @@ func InjectVPNSidecar(ctx1 context.Context, factory util.Factory, namespace, wor
 		marshal, _ := json.Marshal(append(p, removePatch...))
 		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, marshal, &v12.PatchOptions{})
 		if err != nil {
-			logrus.Errorf("error while inject proxy container, err: %v, exiting...", err)
+			log.Errorf("Failed to inject proxy container: %v, exiting...", err)
 			return err
 		}
 	}
@@ -110,7 +110,7 @@ func CreateAfterDeletePod(factory util.Factory, p *v1.Pod, helper *resource.Help
 		GracePeriodSeconds: pointer.Int64(0),
 	})
 	if err != nil {
-		logrus.Errorf("error while delete resource: %s %s, ignore, err: %v", p.Namespace, p.Name, err)
+		log.Errorf("Failed to delete resource: %s %s, ignore, err: %v", p.Namespace, p.Name, err)
 	}
 	err = retry.OnError(wait.Backoff{
 		Steps:    10,
@@ -137,7 +137,7 @@ func CreateAfterDeletePod(factory util.Factory, p *v1.Pod, helper *resource.Help
 		if errors.IsAlreadyExists(err) {
 			return nil
 		}
-		logrus.Errorf("error while create resource: %s %s, err: %v", p.Namespace, p.Name, err)
+		log.Errorf("Failed to create resource: %s %s, err: %v", p.Namespace, p.Name, err)
 		return err
 	}
 	return nil
@@ -217,7 +217,7 @@ func patch(spec v1.PodTemplateSpec, path []string) (remove []P, restore []P) {
 			}
 			marshal, err := json2.Marshal(p)
 			if err != nil {
-				logrus.Errorf("error while json marshal: %v", err)
+				log.Errorf("Failed to marshal json: %v", err)
 				return ""
 			}
 			return string(marshal)
@@ -255,7 +255,7 @@ func patch(spec v1.PodTemplateSpec, path []string) (remove []P, restore []P) {
 func fromPatchToProbe(spec *v1.PodTemplateSpec, path []string, patch []P) {
 	// 3 = readiness + liveness + startup
 	if len(patch) != 3*len(spec.Spec.Containers) {
-		logrus.Debugf("patch not match container num, not restore")
+		log.Debugf("patch not match container num, not restore")
 		return
 	}
 	for i := range spec.Spec.Containers {
@@ -274,7 +274,7 @@ func fromPatchToProbe(spec *v1.PodTemplateSpec, path []string, patch []P) {
 			if !ok {
 				marshal, err := json2.Marshal(value)
 				if err != nil {
-					logrus.Errorf("error while json marshal: %v", err)
+					log.Errorf("Failed to marshal json: %v", err)
 					return nil
 				}
 				str = string(marshal)
@@ -282,7 +282,7 @@ func fromPatchToProbe(spec *v1.PodTemplateSpec, path []string, patch []P) {
 			var probe v1.Probe
 			err := json2.Unmarshal([]byte(str), &probe)
 			if err != nil {
-				logrus.Errorf("error while json unmarsh: %v", err)
+				log.Errorf("error while json unmarsh: %v", err)
 				return nil
 			}
 			return &probe

@@ -18,13 +18,14 @@ import (
 
 func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectForkServer) (err error) {
 	defer func() {
+		util.InitLoggerForServer(true)
 		log.SetOutput(svr.LogFile)
-		log.SetLevel(log.DebugLevel)
+		config.Debug = false
 	}()
 	config.Debug = req.Level == int32(log.DebugLevel)
 	out := io.MultiWriter(newConnectForkWarp(resp), svr.LogFile)
+	util.InitLoggerForClient(config.Debug)
 	log.SetOutput(out)
-	log.SetLevel(log.InfoLevel)
 	if !svr.IsSudo {
 		return svr.redirectConnectForkToSudoDaemon(req, resp)
 	}
@@ -92,7 +93,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	config.Image = req.Image
 	err = connect.DoConnect(sshCtx, true)
 	if err != nil {
-		log.Errorf("do connect error: %v", err)
+		log.Errorf("Do connect error: %v", err)
 		return err
 	}
 
@@ -158,7 +159,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		)
 		if err == nil && isSameCluster && options.Equal(connect) {
 			// same cluster, do nothing
-			log.Infof("already connect to cluster")
+			log.Infof("Connected with cluster")
 			return nil
 		}
 	}

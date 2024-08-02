@@ -55,11 +55,11 @@ func (c ConfigList) Remove(ctx context.Context, cli *client.Client) error {
 	for _, runConfig := range c {
 		err := cli.NetworkDisconnect(ctx, runConfig.name, runConfig.name, true)
 		if err != nil {
-			log.Debug(err)
+			log.Warnf("Failed to disconnect container network: %v", err)
 		}
 		err = cli.ContainerRemove(ctx, runConfig.name, typescontainer.RemoveOptions{Force: true})
 		if err != nil {
-			log.Debug(err)
+			log.Warnf("Failed to remove container: %v", err)
 		}
 	}
 	inspect, err := cli.NetworkInspect(ctx, config.ConfigMapPodTrafficManager, types.NetworkInspectOptions{})

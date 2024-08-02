@@ -50,7 +50,7 @@ func CmdRemove(f cmdutil.Factory) *cobra.Command {
 				} else if err != nil {
 					return err
 				}
-				fmt.Fprint(os.Stdout, recv.GetMessage())
+				_, _ = fmt.Fprint(os.Stdout, recv.GetMessage())
 			}
 		},
 	}

@@ -418,7 +418,7 @@ func (pf *PortForwarder) Close() {
 // channel has been closed.
 func (pf *PortForwarder) GetPorts() ([]ForwardedPort, error) {
 	if pf.Ready == nil {
-		return nil, fmt.Errorf("no Ready channel provided")
+		return nil, fmt.Errorf("no ready channel provided")
 	}
 	select {
 	case <-pf.Ready:

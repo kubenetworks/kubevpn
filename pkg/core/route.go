@@ -59,7 +59,7 @@ func parseChainNode(ns string) (*Node, error) {
 func (r *Route) GenerateServers() ([]Server, error) {
 	chain, err := r.parseChain()
 	if err != nil && !errors.Is(err, ErrorInvalidNode) {
-		log.Errorf("parse chain error: %v", err)
+		log.Errorf("Failed to parse chain: %v", err)
 		return nil, err
 	}
 
@@ -68,7 +68,7 @@ func (r *Route) GenerateServers() ([]Server, error) {
 		var node *Node
 		node, err = ParseNode(serveNode)
 		if err != nil {
-			log.Errorf("parse node %s error: %v", serveNode, err)
+			log.Errorf("Failed to parse node %s: %v", serveNode, err)
 			return nil, err
 		}
 
@@ -87,32 +87,32 @@ func (r *Route) GenerateServers() ([]Server, error) {
 				Gateway: node.Get("gw"),
 			})
 			if err != nil {
-				log.Errorf("create tun listener error: %v", err)
+				log.Errorf("Failed to create tun listener: %v", err)
 				return nil, err
 			}
 		case "tcp":
 			handler = TCPHandler()
 			ln, err = TCPListener(node.Addr)
 			if err != nil {
-				log.Errorf("create tcp listener error: %v", err)
+				log.Errorf("Failed to create tcp listener: %v", err)
 				return nil, err
 			}
 		case "gtcp":
 			handler = GvisorTCPHandler()
 			ln, err = GvisorTCPListener(node.Addr)
 			if err != nil {
-				log.Errorf("create gvisor tcp listener error: %v", err)
+				log.Errorf("Failed to create gvisor tcp listener: %v", err)
 				return nil, err
 			}
 		case "gudp":
 			handler = GvisorUDPHandler()
 			ln, err = GvisorUDPListener(node.Addr)
 			if err != nil {
-				log.Errorf("create gvisor udp listener error: %v", err)
+				log.Errorf("Failed to create gvisor udp listener: %v", err)
 				return nil, err
 			}
 		default:
-			log.Errorf("not support protocol %s", node.Protocol)
+			log.Errorf("Not support protocol %s", node.Protocol)
 			return nil, fmt.Errorf("not support protocol %s", node.Protocol)
 		}
 		servers = append(servers, Server{Listener: ln, Handler: handler})

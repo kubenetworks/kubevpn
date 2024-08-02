@@ -9,23 +9,26 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error {
 	defer func() {
+		util.InitLoggerForServer(true)
 		log.SetOutput(svr.LogFile)
-		log.SetLevel(log.DebugLevel)
+		config.Debug = false
 	}()
+	util.InitLoggerForClient(config.Debug)
 	log.SetOutput(io.MultiWriter(newQuitWarp(resp), svr.LogFile))
-	log.SetLevel(log.InfoLevel)
 
 	if svr.clone != nil {
 		err := svr.clone.Cleanup()
 		if err != nil {
-			log.Errorf("quit: cleanup clone failed: %v", err)
+			log.Errorf("Cleanup clone failed: %v", err)
 		}
 		svr.clone = nil
 	}

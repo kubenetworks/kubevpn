@@ -51,7 +51,7 @@ func TestName(t *testing.T) {
 	// IPv6 with CIDR
 	configList, err := libcni.ConfListFromBytes([]byte(s))
 	if err == nil {
-		log.Infoln("get cni config", configList.Name)
+		log.Infoln("Get CNI config", configList.Name)
 	}
 	for _, plugin := range configList.Plugins {
 		var m map[string]interface{}
@@ -90,7 +90,7 @@ func TestPing(t *testing.T) {
 	buf := gopacket.NewSerializeBuffer()
 	err := gopacket.SerializeLayers(buf, opts, &icmpLayer, &ipLayer)
 	if err != nil {
-		log.Errorf("failed to serialize icmp packet, err: %v", err)
+		log.Errorf("Failed to serialize icmp packet, err: %v", err)
 		return
 	}
 	ipConn, err := net.ListenPacket("ip4:icmp", "localhost")
@@ -106,5 +106,5 @@ func TestPing(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	log.Print("packet sent!")
+	log.Print("Packet sent!")
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/moby/sys/signal"
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 // resizeTtyTo resizes tty to specific height and width
@@ -34,7 +34,7 @@ func resizeTtyTo(ctx context.Context, apiClient client.ContainerAPIClient, id st
 	}
 
 	if err != nil {
-		logrus.Debugf("Error resize: %s\r", err)
+		log.Debugf("Error resize: %s\r", err)
 	}
 	return err
 }
@@ -61,7 +61,7 @@ func initTtySize(ctx context.Context, cli command.Cli, id string, isExec bool, r
 				}
 			}
 			if err != nil {
-				fmt.Fprintln(cli.Err(), "failed to resize tty, using default size")
+				fmt.Fprintln(cli.Err(), "Failed to resize tty, using default size")
 			}
 		}()
 	}

@@ -21,20 +21,21 @@ import (
 
 func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) (e error) {
 	defer func() {
+		util.InitLoggerForServer(true)
 		log.SetOutput(svr.LogFile)
-		log.SetLevel(log.DebugLevel)
+		config.Debug = false
 	}()
 	config.Debug = req.Level == int32(log.DebugLevel)
 	out := io.MultiWriter(newWarp(resp), svr.LogFile)
+	util.InitLoggerForClient(config.Debug)
 	log.SetOutput(out)
-	log.SetLevel(log.InfoLevel)
 	if !svr.IsSudo {
 		return svr.redirectToSudoDaemon(req, resp)
 	}
 
 	ctx := resp.Context()
 	if !svr.t.IsZero() {
-		s := "already connected to one cluster, you can use options `--lite` to connect to another cluster"
+		s := "Already connected to cluster in full mode, you can use options `--lite` to connect to another cluster"
 		log.Debugf(s)
 		// todo define already connect error?
 		return status.Error(codes.AlreadyExists, s)
@@ -110,7 +111,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	config.Image = req.Image
 	err = svr.connect.DoConnect(sshCtx, false)
 	if err != nil {
-		log.Errorf("do connect error: %v", err)
+		log.Errorf("Failed to connect: %v", err)
 		svr.connect.Cleanup()
 		svr.connect = nil
 		svr.t = time.Time{}
@@ -175,7 +176,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		)
 		if err == nil && isSameCluster && svr.connect.Equal(connect) {
 			// same cluster, do nothing
-			log.Infof("already connect to cluster")
+			log.Infof("Connected to cluster")
 			return nil
 		}
 	}

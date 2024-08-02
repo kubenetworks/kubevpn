@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 // InvalidPluginSpecError is invalid plugin spec error
@@ -43,7 +43,7 @@ func ProcessTemplate(templateFile string, values interface{}, sha256Map map[stri
 
 // RenderTemplate process the .krew.yaml template for the release request
 func RenderTemplate(templateFile string, values interface{}, sha256Map map[string]string) ([]byte, error) {
-	logrus.Debugf("started processing of template %s", templateFile)
+	log.Debugf("Started processing of template %s", templateFile)
 	name := path.Base(templateFile)
 	t := template.New(name).Funcs(map[string]interface{}{
 		"indent": indent,
@@ -64,7 +64,7 @@ func RenderTemplate(templateFile string, values interface{}, sha256Map map[strin
 				panic(err)
 			}
 
-			logrus.Infof("getting sha256 for %s", buf.String())
+			log.Infof("Getting sha256 for %s", buf.String())
 			sha256, ok := sha256Map[buf.String()]
 			if !ok {
 				panic(fmt.Errorf("can not get sha256 for link %s", buf.String()))
@@ -86,6 +86,6 @@ func RenderTemplate(templateFile string, values interface{}, sha256Map map[strin
 		return nil, err
 	}
 
-	logrus.Debugf("completed processing of template")
+	log.Debugf("Completed processing of template")
 	return buf.Bytes(), nil
 }

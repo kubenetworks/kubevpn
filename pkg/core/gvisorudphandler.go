@@ -53,10 +53,10 @@ func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	// 1, get proxy info
 	endpointID, err := ParseProxyInfo(tcpConn)
 	if err != nil {
-		log.Warningf("[TUN-UDP] Error: Failed to parse proxy info: %v", err)
+		log.Errorf("[TUN-UDP] Failed to parse proxy info: %v", err)
 		return
 	}
-	log.Debugf("[TUN-UDP] Debug: LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
+	log.Debugf("[TUN-UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
 		endpointID.LocalPort, endpointID.LocalAddress.String(), endpointID.RemotePort, endpointID.RemoteAddress.String(),
 	)
 	// 2, dial proxy
@@ -67,7 +67,7 @@ func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	var remote *net.UDPConn
 	remote, err = net.DialUDP("udp", nil, addr)
 	if err != nil {
-		log.Debugf("[TUN-UDP] Error: failed to connect addr %s: %v", addr.String(), err)
+		log.Errorf("[TUN-UDP] Failed to connect addr %s: %v", addr.String(), err)
 		return
 	}
 	handle(ctx, tcpConn, remote)
@@ -116,7 +116,7 @@ func (c *gvisorFakeUDPTunnelConn) Close() error {
 }
 
 func GvisorUDPListener(addr string) (net.Listener, error) {
-	log.Debug("gvisor UDP over TCP listen addr", addr)
+	log.Debugf("Gvisor UDP over TCP listen addr %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -130,7 +130,7 @@ func GvisorUDPListener(addr string) (net.Listener, error) {
 
 func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	defer udpConn.Close()
-	log.Debugf("[TUN-UDP] Debug: %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
+	log.Debugf("[TUN-UDP] %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 	errChan := make(chan error, 2)
 	go func() {
 		b := config.LPool.Get().([]byte)[:]
@@ -145,34 +145,34 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 
 			err := tcpConn.SetReadDeadline(time.Now().Add(time.Second * 30))
 			if err != nil {
-				log.Debugf("[TUN-UDP] Error: set read deadline failed: %v", err)
+				log.Errorf("[TUN-UDP] Failed to set read deadline: %v", err)
 				errChan <- err
 				return
 			}
 			dgram, err := readDatagramPacket(tcpConn, b[:])
 			if err != nil {
-				log.Debugf("[TUN-UDP] Debug: %s -> 0 : %v", tcpConn.RemoteAddr(), err)
+				log.Errorf("[TUN-UDP] %s -> %s: %v", tcpConn.RemoteAddr(), udpConn.LocalAddr(), err)
 				errChan <- err
 				return
 			}
 			if dgram.DataLength == 0 {
-				log.Debugf("[TUN-UDP] Error: length is zero")
+				log.Errorf("[TUN-UDP] Length is zero")
 				errChan <- fmt.Errorf("length of read packet is zero")
 				return
 			}
 
 			err = udpConn.SetWriteDeadline(time.Now().Add(time.Second * 30))
 			if err != nil {
-				log.Debugf("[TUN-UDP] Error: set write deadline failed: %v", err)
+				log.Errorf("[TUN-UDP] Failed to set write deadline: %v", err)
 				errChan <- err
 				return
 			}
 			if _, err = udpConn.Write(dgram.Data); err != nil {
-				log.Debugf("[TUN-UDP] Error: %s -> %s : %s", tcpConn.RemoteAddr(), "localhost:8422", err)
+				log.Errorf("[TUN-UDP] %s -> %s : %s", tcpConn.RemoteAddr(), "localhost:8422", err)
 				errChan <- err
 				return
 			}
-			log.Debugf("[TUN-UDP] Debug: %s >>> %s length: %d", tcpConn.RemoteAddr(), "localhost:8422", dgram.DataLength)
+			log.Debugf("[TUN-UDP] %s >>> %s length: %d", tcpConn.RemoteAddr(), "localhost:8422", dgram.DataLength)
 		}
 	}()
 
@@ -189,18 +189,18 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 
 			err := udpConn.SetReadDeadline(time.Now().Add(time.Second * 30))
 			if err != nil {
-				log.Debugf("[TUN-UDP] Error: set read deadline failed: %v", err)
+				log.Errorf("[TUN-UDP] Failed to set read deadline failed: %v", err)
 				errChan <- err
 				return
 			}
 			n, _, err := udpConn.ReadFrom(b[:])
 			if err != nil {
-				log.Debugf("[TUN-UDP] Error: %s : %s", tcpConn.RemoteAddr(), err)
+				log.Errorf("[TUN-UDP] %s : %s", tcpConn.RemoteAddr(), err)
 				errChan <- err
 				return
 			}
 			if n == 0 {
-				log.Debugf("[TUN-UDP] Error: length is zero")
+				log.Errorf("[TUN-UDP] Length is zero")
 				errChan <- fmt.Errorf("length of read packet is zero")
 				return
 			}
@@ -208,23 +208,23 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 			// pipe from peer to tunnel
 			err = tcpConn.SetWriteDeadline(time.Now().Add(time.Second * 30))
 			if err != nil {
-				log.Debugf("[TUN-UDP] Error: set write deadline failed: %v", err)
+				log.Errorf("[TUN-UDP] Error: set write deadline failed: %v", err)
 				errChan <- err
 				return
 			}
 			dgram := newDatagramPacket(b[:n])
 			if err = dgram.Write(tcpConn); err != nil {
-				log.Debugf("[TUN-UDP] Error: %s <- %s : %s", tcpConn.RemoteAddr(), dgram.Addr(), err)
+				log.Errorf("[TUN-UDP] Error: %s <- %s : %s", tcpConn.RemoteAddr(), dgram.Addr(), err)
 				errChan <- err
 				return
 			}
-			log.Debugf("[TUN-UDP] Debug: %s <<< %s length: %d", tcpConn.RemoteAddr(), dgram.Addr(), len(dgram.Data))
+			log.Debugf("[TUN-UDP] %s <<< %s length: %d", tcpConn.RemoteAddr(), dgram.Addr(), len(dgram.Data))
 		}
 	}()
 	err := <-errChan
 	if err != nil {
-		log.Debugf("[TUN-UDP] Error: %v", err)
+		log.Errorf("[TUN-UDP] %v", err)
 	}
-	log.Debugf("[TUN-UDP] Debug: %s >-< %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
+	log.Debugf("[TUN-UDP] %s >-< %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 	return
 }

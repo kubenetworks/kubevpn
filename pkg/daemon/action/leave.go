@@ -3,23 +3,27 @@ package action
 import (
 	"fmt"
 	"io"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) error {
 	defer func() {
+		util.InitLoggerForServer(true)
 		log.SetOutput(svr.LogFile)
-		log.SetLevel(log.DebugLevel)
+		config.Debug = false
 	}()
 	out := io.MultiWriter(newLeaveWarp(resp), svr.LogFile)
+	util.InitLoggerForClient(config.Debug)
 	log.SetOutput(out)
-	log.SetLevel(log.InfoLevel)
 	if svr.connect == nil {
-		log.Infof("not proxy any resource in cluster")
+		log.Infof("Not proxy any resource in cluster")
 		return fmt.Errorf("not proxy any resource in cluster")
 	}
 
@@ -31,9 +35,10 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 		// add rollback func to remove envoy config
 		err := inject.UnPatchContainer(factory, maps, namespace, workload, v4)
 		if err != nil {
-			log.Errorf("leave workload %s failed: %v", workload, err)
+			log.Errorf("Leaving workload %s failed: %v", workload, err)
 			continue
 		}
+		err = util.RolloutStatus(resp.Context(), factory, namespace, workload, time.Minute*60)
 	}
 	return nil
 }

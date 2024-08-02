@@ -78,6 +78,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			if options.Engine == config.EngineGvisor {
 				return fmt.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
 			}
+			util.InitLoggerForClient(false)
 			// startup daemon process and sudo process
 			return daemon.StartupDaemon(cmd.Context())
 		},
@@ -109,7 +110,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			logLevel := log.ErrorLevel
+			logLevel := log.InfoLevel
 			if config.Debug {
 				logLevel = log.DebugLevel
 			}
@@ -148,9 +149,9 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 				} else if err != nil {
 					return err
 				}
-				fmt.Fprint(os.Stdout, recv.GetMessage())
+				_, _ = fmt.Fprint(os.Stdout, recv.GetMessage())
 			}
-			util.Print(os.Stdout, "Now clone workloads running successfully on other cluster, enjoy it :)")
+			util.Print(os.Stdout, config.Slogan)
 			return nil
 		},
 	}

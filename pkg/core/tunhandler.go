@@ -94,7 +94,7 @@ func (h *tunHandler) printRoute(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			h.routeMapUDP.Range(func(key string, value net.Addr) {
-				log.Debugf("to: %s, route: %s", key, value.String())
+				log.Debugf("To: %s, route: %s", key, value.String())
 			})
 		}
 	}
@@ -165,11 +165,11 @@ func (d *Device) parseIPHeader(ctx context.Context) {
 			e.src = e.data[:e.length][8:24]
 			e.dst = e.data[:e.length][24:40]
 		} else {
-			log.Errorf("[tun-packet] unknown packet")
+			log.Errorf("[TUN] Unknown packet")
 			continue
 		}
 
-		log.Debugf("[tun] %s --> %s, length: %d", e.src, e.dst, e.length)
+		log.Debugf("[TUN] %s --> %s, length: %d", e.src, e.dst, e.length)
 		util.SafeWrite(d.tunInbound, e)
 	}
 }
@@ -185,7 +185,7 @@ func (d *Device) Close() {
 func heartbeats(ctx context.Context, tun net.Conn, in chan<- *DataElem) {
 	conn, err := util.GetTunDeviceByConn(tun)
 	if err != nil {
-		log.Errorf("get tun device error: %s", err.Error())
+		log.Errorf("Failed to get tun device: %s", err.Error())
 		return
 	}
 	srcIPv4, srcIPv6, err := util.GetLocalTunIP(conn.Name)
@@ -222,20 +222,18 @@ func heartbeats(ctx context.Context, tun net.Conn, in chan<- *DataElem) {
 			if bytes == nil {
 				bytes, err = genICMPPacket(srcIPv4, dstIPv4)
 				if err != nil {
-					log.Errorf("generate ipv4 packet error: %s", err.Error())
+					log.Errorf("Failed to generate IPv4 packet: %s", err.Error())
 					continue
 				}
 			}
 			if bytes6 == nil {
 				bytes6, err = genICMPPacketIPv6(srcIPv6, dstIPv6)
 				if err != nil {
-					log.Errorf("generate ipv6 packet error: %s", err.Error())
+					log.Errorf("Failed to generate IPv6 packet: %s", err.Error())
 					continue
 				}
 			}
 			for index, i2 := range [][]byte{bytes, bytes6} {
-				data := config.LPool.Get().([]byte)[:]
-				length := copy(data, i2)
 				var src, dst net.IP
 				if index == 0 {
 					src, dst = srcIPv4, dstIPv4
@@ -245,6 +243,8 @@ func heartbeats(ctx context.Context, tun net.Conn, in chan<- *DataElem) {
 				if dst.IsUnspecified() {
 					continue
 				}
+				data := config.LPool.Get().([]byte)[:]
+				length := copy(data, i2)
 				util.SafeWrite(in, &DataElem{
 					data:   data[:],
 					length: length,
@@ -316,7 +316,7 @@ func (d *Device) Start(ctx context.Context) {
 
 	select {
 	case err := <-d.chExit:
-		log.Errorf("device exit: %s", err.Error())
+		log.Errorf("Device exit: %v", err)
 		return
 	case <-ctx.Done():
 		return
@@ -341,12 +341,12 @@ func (h *tunHandler) HandleServer(ctx context.Context, tun net.Conn) {
 		for ctx.Err() == nil {
 			packetConn, err := (&net.ListenConfig{}).ListenPacket(ctx, "udp", h.node.Addr)
 			if err != nil {
-				log.Debugf("[udp] can not listen %s, err: %v", h.node.Addr, err)
+				log.Errorf("[UDP] Failed to listen %s: %v", h.node.Addr, err)
 				return
 			}
 			err = transportTun(ctx, tunInbound, tunOutbound, packetConn, h.routeMapUDP, h.routeMapTCP)
 			if err != nil {
-				log.Debugf("[tun] %s: %v", tun.LocalAddr(), err)
+				log.Errorf("[TUN] %s: %v", tun.LocalAddr(), err)
 			}
 		}
 	})
@@ -443,10 +443,10 @@ func (p *Peer) readFromTCPConn() {
 			u.src = b[8:24]
 			u.dst = b[24:40]
 		} else {
-			log.Errorf("[tun-conn] unknown packet")
+			log.Errorf("[TUN] Unknown packet")
 			continue
 		}
-		log.Debugf("[tcpserver] udp-tun %s >>> %s length: %d", u.src, u.dst, u.length)
+		log.Debugf("[TCP] udp-tun %s >>> %s length: %d", u.src, u.dst, u.length)
 		p.parsedConnInfo <- u
 	}
 }
@@ -464,7 +464,7 @@ func (p *Peer) parseHeader() {
 			e.src = b[:e.length][8:24]
 			e.dst = b[:e.length][24:40]
 		} else {
-			log.Errorf("[tun] unknown packet")
+			log.Errorf("[TUN] Unknown packet")
 			continue
 		}
 
@@ -475,9 +475,9 @@ func (p *Peer) parseHeader() {
 				firstIPv6 = false
 			}
 			if _, loaded := p.routeMapUDP.LoadOrStore(e.src, e.from); loaded {
-				log.Debugf("[tun] find route: %s -> %s", e.src, e.from)
+				log.Debugf("[TUN] Find route: %s -> %s", e.src, e.from)
 			} else {
-				log.Debugf("[tun] new route: %s -> %s", e.src, e.from)
+				log.Debugf("[TUN] Add new route: %s -> %s", e.src, e.from)
 			}
 		}
 		p.parsedConnInfo <- e
@@ -487,7 +487,7 @@ func (p *Peer) parseHeader() {
 func (p *Peer) routePeer() {
 	for e := range p.parsedConnInfo {
 		if routeToAddr := p.routeMapUDP.RouteTo(e.dst); routeToAddr != nil {
-			log.Debugf("[tun] find route: %s -> %s", e.dst, routeToAddr)
+			log.Debugf("[TUN] Find route: %s -> %s", e.dst, routeToAddr)
 			_, err := p.conn.WriteTo(e.data[:e.length], routeToAddr)
 			config.LPool.Put(e.data[:])
 			if err != nil {
@@ -497,7 +497,7 @@ func (p *Peer) routePeer() {
 		} else if conn, ok := p.routeMapTCP.Load(e.dst.String()); ok {
 			dgram := newDatagramPacket(e.data[:e.length])
 			if err := dgram.Write(conn.(net.Conn)); err != nil {
-				log.Debugf("[tcpserver] udp-tun %s <- %s : %s", conn.(net.Conn).RemoteAddr(), dgram.Addr(), err)
+				log.Errorf("[TCP] udp-tun %s <- %s : %s", conn.(net.Conn).RemoteAddr(), dgram.Addr(), err)
 				p.sendErr(err)
 				return
 			}
@@ -516,11 +516,11 @@ func (p *Peer) routePeer() {
 func (p *Peer) routeTUN() {
 	for e := range p.tunInbound {
 		if addr := p.routeMapUDP.RouteTo(e.dst); addr != nil {
-			log.Debugf("[tun] find route: %s -> %s", e.dst, addr)
+			log.Debugf("[TUN] Find route: %s -> %s", e.dst, addr)
 			_, err := p.conn.WriteTo(e.data[:e.length], addr)
 			config.LPool.Put(e.data[:])
 			if err != nil {
-				log.Debugf("[tun] can not route: %s -> %s", e.dst, addr)
+				log.Debugf("[TUN] Failed to route: %s -> %s", e.dst, addr)
 				p.sendErr(err)
 				return
 			}
@@ -529,13 +529,13 @@ func (p *Peer) routeTUN() {
 			err := dgram.Write(conn.(net.Conn))
 			config.LPool.Put(e.data[:])
 			if err != nil {
-				log.Debugf("[tcpserver] udp-tun %s <- %s : %s", conn.(net.Conn).RemoteAddr(), dgram.Addr(), err)
+				log.Errorf("[TCP] udp-tun %s <- %s : %s", conn.(net.Conn).RemoteAddr(), dgram.Addr(), err)
 				p.sendErr(err)
 				return
 			}
 		} else {
 			config.LPool.Put(e.data[:])
-			log.Debug(fmt.Errorf("[tun] no route for %s -> %s", e.src, e.dst))
+			log.Errorf("[TUN] No route for %s -> %s", e.src, e.dst)
 		}
 	}
 }

@@ -60,6 +60,7 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 		kubevpn status -o yaml
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
+			util.InitLoggerForClient(false)
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -91,7 +92,7 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprint(os.Stdout, output)
+			_, _ = fmt.Fprint(os.Stdout, output)
 			return nil
 		},
 	}

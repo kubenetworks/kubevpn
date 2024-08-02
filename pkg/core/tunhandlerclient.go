@@ -17,7 +17,7 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	defer tun.Close()
 	remoteAddr, err := net.ResolveUDPAddr("udp", h.node.Remote)
 	if err != nil {
-		log.Errorf("[tun] %s: remote addr: %v", tun.LocalAddr(), err)
+		log.Errorf("[TUN-CLIENT] Failed to resolve udp addr %s: %v", h.node.Remote, err)
 		return
 	}
 	in := make(chan *DataElem, MaxSize)
@@ -39,13 +39,13 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 		for ctx.Err() == nil {
 			packetConn, err := getRemotePacketConn(ctx, h.chain)
 			if err != nil {
-				log.Debugf("[tun-client] failed to get remote conn from %s -> %s: %s", tun.LocalAddr(), remoteAddr, err)
+				log.Errorf("[TUN-CLIENT] Failed to get remote conn from %s -> %s: %s", tun.LocalAddr(), remoteAddr, err)
 				time.Sleep(time.Second * 2)
 				continue
 			}
 			err = transportTunClient(ctx, tunInbound, tunOutbound, packetConn, remoteAddr)
 			if err != nil {
-				log.Debugf("[tun-client] %s: %v", tun.LocalAddr(), err)
+				log.Errorf("[TUN-CLIENT] %s: %v", tun.LocalAddr(), err)
 			}
 		}
 	})
@@ -134,7 +134,7 @@ func (d *ClientDevice) Start(ctx context.Context) {
 
 	select {
 	case err := <-d.chExit:
-		log.Errorf("[tun-client]: %v", err)
+		log.Errorf("[TUN-CLIENT]: %v", err)
 		return
 	case <-ctx.Done():
 		return

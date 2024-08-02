@@ -54,14 +54,14 @@ func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, engine config
 				}
 				// if context is done
 				if ctx.Err() != nil {
-					log.Errorf("[TUN]: read from tun error: %v, context is done: %v", err, ctx.Err())
+					log.Errorf("[TUN] Failed to read from tun: %v, context is done", err)
 					return
 				}
-				log.Errorf("[TUN]: read from tun failed: %v", err)
+				log.Errorf("[TUN] Failed to read from tun: %v", err)
 				continue
 			}
 			if read == 0 {
-				log.Warnf("[TUN]: read from tun length is %d", read)
+				log.Warnf("[TUN] Read from tun length is %d", read)
 				continue
 			}
 			// Try to determine network protocol number, default zero.
@@ -75,7 +75,7 @@ func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, engine config
 				protocol = header.IPv4ProtocolNumber
 				ipHeader, err := ipv4.ParseHeader(bytes[:read])
 				if err != nil {
-					log.Errorf("parse ipv4 header failed: %s", err.Error())
+					log.Errorf("Failed to parse IPv4 header: %v", err)
 					continue
 				}
 				ipProtocol = ipHeader.Protocol
@@ -85,14 +85,14 @@ func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, engine config
 				protocol = header.IPv6ProtocolNumber
 				ipHeader, err := ipv6.ParseHeader(bytes[:read])
 				if err != nil {
-					log.Errorf("parse ipv6 header failed: %s", err.Error())
+					log.Errorf("Failed to parse IPv6 header: %s", err.Error())
 					continue
 				}
 				ipProtocol = ipHeader.NextHeader
 				src = ipHeader.Src
 				dst = ipHeader.Dst
 			} else {
-				log.Debugf("[TUN-gvisor] unknown packet version %d", version)
+				log.Debugf("[TUN-GVISOR] Unknown packet version %d", version)
 				continue
 			}
 			// only tcp and udp needs to distinguish transport engine
@@ -125,10 +125,10 @@ func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, engine config
 				}
 				// if context is done
 				if ctx.Err() != nil {
-					log.Errorf("[TUN]: write to tun error: %v, context is done: %v", err, ctx.Err())
+					log.Errorf("[TUN] Failed to write to tun: %v, context is done: %v", err, ctx.Err())
 					return
 				}
-				log.Errorf("[TUN] Error: failed to write data to tun device: %v", err)
+				log.Errorf("[TUN] Failed to write data to tun device: %v", err)
 				continue
 			}
 		}

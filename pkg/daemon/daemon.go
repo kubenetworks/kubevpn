@@ -50,7 +50,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		LocalTime:  true,
 		Compress:   false,
 	}
-	util.InitLogger(true)
+	util.InitLoggerForServer(true)
 	log.SetOutput(l)
 	klog.SetOutput(l)
 	klog.LogToStderr(false)
@@ -86,7 +86,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	svr := grpc.NewServer()
 	cleanup, err := admin.Register(svr)
 	if err != nil {
-		log.Errorf("failed to register admin: %v", err)
+		log.Errorf("Failed to register admin: %v", err)
 		return err
 	}
 	grpc_health_v1.RegisterHealthServer(svr, health.NewServer())
@@ -101,7 +101,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	var h2Server http2.Server
 	err = http2.ConfigureServer(downgradingServer, &h2Server)
 	if err != nil {
-		log.Errorf("failed to configure http2 server: %v", err)
+		log.Errorf("Failed to configure http2: %v", err)
 		return err
 	}
 	handler := CreateDowngradingHandler(svr, http.HandlerFunc(http.DefaultServeMux.ServeHTTP))

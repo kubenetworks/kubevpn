@@ -93,17 +93,17 @@ func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 
 	{
 		if err := s.SetForwardingDefaultAndAllNICs(ipv4.ProtocolNumber, true); err != nil {
-			log.Fatalf("set ipv4 forwarding: %v", err)
+			log.Fatalf("Set IPv4 forwarding: %v", err)
 		}
 		if err := s.SetForwardingDefaultAndAllNICs(ipv6.ProtocolNumber, true); err != nil {
-			log.Fatalf("set ipv6 forwarding: %v", err)
+			log.Fatalf("Set IPv6 forwarding: %v", err)
 		}
 	}
 
 	{
 		option := tcpip.TCPModerateReceiveBufferOption(true)
 		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &option); err != nil {
-			log.Fatalf("set TCP moderate receive buffer: %v", err)
+			log.Fatalf("Set TCP moderate receive buffer: %v", err)
 		}
 	}
 	return s

@@ -29,7 +29,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 
 	clientIP, clientCIDR, err := net.ParseCIDR(req.ClientIP)
 	if err != nil {
-		log.Errorf("parse cidr error: %v", err)
+		log.Errorf("Failed to parse network CIDR: %v", err)
 		return nil, err
 	}
 	if serverIP == "" {
@@ -42,7 +42,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 		}
 		servers, err := handler.Parse(r)
 		if err != nil {
-			log.Errorf("parse route error: %v", err)
+			log.Errorf("Failed to parse route: %v", err)
 			return nil, err
 		}
 		var ctx1 context.Context
@@ -50,7 +50,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 		go func() {
 			err := handler.Run(ctx1, servers)
 			if err != nil {
-				log.Errorf("run route error: %v", err)
+				log.Errorf("Failed to run route: %v", err)
 			}
 		}()
 		serverIP = DefaultServerIP
@@ -72,7 +72,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 		GW: nil,
 	})
 	if err != nil {
-		log.Errorf("add route error: %v", err)
+		log.Errorf("Failed to add route: %v", err)
 		return nil, err
 	}
 

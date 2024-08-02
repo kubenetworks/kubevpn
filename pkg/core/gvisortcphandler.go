@@ -51,10 +51,10 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	// 1, get proxy info
 	endpointID, err := ParseProxyInfo(tcpConn)
 	if err != nil {
-		log.Debugf("[TUN-TCP] Error: failed to parse proxy info: %v", err)
+		log.Errorf("[TUN-TCP] Failed to parse proxy info: %v", err)
 		return
 	}
-	log.Debugf("[TUN-TCP] Debug: LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
+	log.Debugf("[TUN-TCP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
 		endpointID.LocalPort, endpointID.LocalAddress.String(), endpointID.RemotePort, endpointID.RemoteAddress.String(),
 	)
 	// 2, dial proxy
@@ -63,7 +63,7 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	var remote net.Conn
 	remote, err = net.DialTimeout("tcp", net.JoinHostPort(host, port), time.Second*5)
 	if err != nil {
-		log.Debugf("[TUN-TCP] Error: failed to connect addr %s: %v", net.JoinHostPort(host, port), err)
+		log.Errorf("[TUN-TCP] Failed to connect addr %s: %v", net.JoinHostPort(host, port), err)
 		return
 	}
 
@@ -72,24 +72,24 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		i := config.LPool.Get().([]byte)[:]
 		defer config.LPool.Put(i[:])
 		written, err2 := io.CopyBuffer(remote, tcpConn, i)
-		log.Debugf("[TUN-TCP] Debug: write length %d data to remote", written)
+		log.Debugf("[TUN-TCP] Write length %d data to remote", written)
 		errChan <- err2
 	}()
 	go func() {
 		i := config.LPool.Get().([]byte)[:]
 		defer config.LPool.Put(i[:])
 		written, err2 := io.CopyBuffer(tcpConn, remote, i)
-		log.Debugf("[TUN-TCP] Debug: read length %d data from remote", written)
+		log.Debugf("[TUN-TCP] Read length %d data from remote", written)
 		errChan <- err2
 	}()
 	err = <-errChan
 	if err != nil && !errors.Is(err, io.EOF) {
-		log.Debugf("[TUN-TCP] Error: dsiconnect: %s >-<: %s: %v", tcpConn.LocalAddr(), remote.RemoteAddr(), err)
+		log.Errorf("[TUN-TCP] Disconnect: %s >-<: %s: %v", tcpConn.LocalAddr(), remote.RemoteAddr(), err)
 	}
 }
 
 func GvisorTCPListener(addr string) (net.Listener, error) {
-	log.Debug("gvisor tcp listen addr", addr)
+	log.Debugf("Gvisor tcp listen addr %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err

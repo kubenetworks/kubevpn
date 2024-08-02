@@ -19,13 +19,14 @@ import (
 
 func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (err error) {
 	defer func() {
+		util.InitLoggerForServer(true)
 		log.SetOutput(svr.LogFile)
-		log.SetLevel(log.DebugLevel)
+		config.Debug = false
 	}()
 	config.Debug = req.Level == int32(log.DebugLevel)
 	out := io.MultiWriter(newCloneWarp(resp), svr.LogFile)
+	util.InitLoggerForClient(config.Debug)
 	log.SetOutput(out)
-	log.SetLevel(log.InfoLevel)
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	connReq := &rpc.ConnectRequest{
 		KubeconfigBytes:      req.KubeconfigBytes,
@@ -53,11 +54,12 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 		} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
 			return nil
 		} else if code := status.Code(err); code == codes.AlreadyExists {
-			return fmt.Errorf("already connect to cluster, needs to disconnect it first")
+			return fmt.Errorf("connect with cluster already established, disconnect required before proceeding")
 		} else {
 			return err
 		}
 	}
+	util.InitLoggerForClient(config.Debug)
 	log.SetOutput(out)
 
 	options := &handler.CloneOptions{
@@ -106,15 +108,15 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 	f := util.InitFactoryByPath(path, req.Namespace)
 	err = options.InitClient(f)
 	if err != nil {
-		log.Errorf("init client failed: %v", err)
+		log.Errorf("Failed to init client: %v", err)
 		return err
 	}
 	config.Image = req.Image
-	log.Infof("clone workloads...")
+	log.Infof("Clone workloads...")
 	options.SetContext(sshCtx)
 	err = options.DoClone(resp.Context(), []byte(req.KubeconfigBytes))
 	if err != nil {
-		log.Errorf("clone workloads failed: %v", err)
+		log.Errorf("Clone workloads failed: %v", err)
 		return err
 	}
 	svr.clone = options

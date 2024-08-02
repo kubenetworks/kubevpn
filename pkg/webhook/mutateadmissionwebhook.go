@@ -64,11 +64,11 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	// verify the content type is accurate
 	contentType := r.Header.Get("Content-Type")
 	if contentType != "application/json" {
-		log.Errorf("contentType=%s, expect application/json", contentType)
+		log.Errorf("ContentType=%s, expect application/json", contentType)
 		return
 	}
 
-	log.Infof("handling request: %s", body)
+	log.Infof("Handling request: %s", body)
 
 	deserializer := codecs.UniversalDeserializer()
 	obj, gvk, err := deserializer.Decode(body, nil, nil)
@@ -113,7 +113,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 			return
 		}
 		if ptr.Deref(requestedAdmissionReview.Request.DryRun, false) {
-			log.Info("Ignore dryrun")
+			log.Info("Ignore dry-run")
 			responseObj = &v1.AdmissionReview{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: gvk.GroupVersion().String(),
@@ -144,7 +144,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Infof("sending response: %v", string(respBytes))
+	log.Infof("Sending response: %v", string(respBytes))
 	w.Header().Set("Content-Type", "application/json")
 	if _, err = w.Write(respBytes); err != nil {
 		log.Errorf("Unable to write response: %v", err)

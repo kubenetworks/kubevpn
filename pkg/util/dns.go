@@ -67,7 +67,7 @@ func GetDNSIPFromDnsPod(ctx context.Context, clientset *kubernetes.Clientset) (i
 		}
 	}
 	if len(ips) == 0 {
-		err = errors.New("can not found any dns service ip")
+		err = errors.New("can not found any DNS service IP")
 		return
 	}
 	err = nil

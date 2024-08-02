@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,8 +30,6 @@ import (
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/cmd/util/podcmd"
-	"k8s.io/kubectl/pkg/polymorphichelpers"
-	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/utils/pointer"
 	"k8s.io/utils/ptr"
 
@@ -137,14 +134,14 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 		args = append(args, "--headers", labels.Set(d.Headers).String())
 	}
 	for _, workload := range d.Workloads {
-		log.Infof("clone workload %s", workload)
+		log.Infof("Clone workload %s", workload)
 		object, err := util.GetUnstructuredObject(d.factory, d.Namespace, workload)
 		if err != nil {
 			return err
 		}
 		u := object.Object.(*unstructured.Unstructured)
 		if err = unstructured.SetNestedField(u.UnstructuredContent(), int64(1), "spec", "replicas"); err != nil {
-			log.Warnf("failed to set repilcaset to 1: %v", err)
+			log.Warnf("Failed to set repilcaset to 1: %v", err)
 		}
 		u.SetNamespace(d.TargetNamespace)
 		RemoveUselessInfo(u)
@@ -402,8 +399,8 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 		if retryErr != nil {
 			return fmt.Errorf("create clone for resource %s failed: %v", workload, retryErr)
 		}
-		log.Infof("create clone resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
-		log.Infof("wait for clone resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
+		log.Infof("Create clone resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
+		log.Infof("Wait for clone resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
 		err = util.WaitPodToBeReady(ctx, d.targetClientset.CoreV1().Pods(d.TargetNamespace), metav1.LabelSelector{MatchLabels: labelsMap})
 		if err != nil {
 			return err
@@ -426,7 +423,7 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 			return err
 		}
 		d.syncthingGUIAddr = (&url.URL{Scheme: "http", Host: localAddr}).String()
-		log.Infof("access the syncthing GUI via the following URL: %s", d.syncthingGUIAddr)
+		log.Infof("Access the syncthing GUI via the following URL: %s", d.syncthingGUIAddr)
 	}
 	return nil
 }
@@ -469,20 +466,13 @@ func (d *CloneOptions) setVolume(u *unstructured.Unstructured) error {
 		return err
 	}
 
-	sortBy := func(pods []*v1.Pod) sort.Interface {
-		for i := 0; i < len(pods); i++ {
-			if pods[i].DeletionTimestamp != nil {
-				pods = append(pods[:i], pods[i+1:]...)
-				i--
-			}
-		}
-		return sort.Reverse(podutils.ActivePods(pods))
-	}
 	lab := labels.SelectorFromSet(temp.Labels).String()
-	pod, _, err := polymorphichelpers.GetFirstPod(d.clientset.CoreV1(), d.Namespace, lab, time.Second*60, sortBy)
+	var list []v1.Pod
+	list, err = util.GetRunningPodList(context.Background(), d.clientset, d.Namespace, lab)
 	if err != nil {
 		return err
 	}
+	pod := list[0]
 
 	// remove serviceAccount info
 	temp.Spec.ServiceAccountName = ""
@@ -776,7 +766,7 @@ func (d *CloneOptions) replaceRegistry(u *unstructured.Unstructured) error {
 		domain := reference.Domain(named)
 		newImage := strings.TrimPrefix(strings.ReplaceAll(oldImage, domain, d.TargetRegistry), "/")
 		temp.Spec.InitContainers[i].Image = newImage
-		log.Debugf("update init container: %s image: %s --> %s", container.Name, oldImage, newImage)
+		log.Debugf("Update init container: %s image: %s --> %s", container.Name, oldImage, newImage)
 	}
 
 	for i, container := range temp.Spec.Containers {
@@ -788,7 +778,7 @@ func (d *CloneOptions) replaceRegistry(u *unstructured.Unstructured) error {
 		domain := reference.Domain(named)
 		newImage := strings.TrimPrefix(strings.ReplaceAll(oldImage, domain, d.TargetRegistry), "/")
 		temp.Spec.Containers[i].Image = newImage
-		log.Debugf("update container: %s image: %s --> %s", container.Name, oldImage, newImage)
+		log.Debugf("Update container: %s image: %s --> %s", container.Name, oldImage, newImage)
 	}
 
 	var marshal []byte
@@ -811,10 +801,10 @@ func (d *CloneOptions) Cleanup(workloads ...string) error {
 		workloads = d.Workloads
 	}
 	for _, workload := range workloads {
-		log.Infof("start to clean up clone workload: %s", workload)
+		log.Infof("Cleaning up clone workload: %s", workload)
 		object, err := util.GetUnstructuredObject(d.factory, d.Namespace, workload)
 		if err != nil {
-			log.Errorf("get unstructured object error: %s", err.Error())
+			log.Errorf("Failed to get unstructured object error: %s", err.Error())
 			return err
 		}
 		labelsMap := map[string]string{
@@ -824,13 +814,13 @@ func (d *CloneOptions) Cleanup(workloads ...string) error {
 		selector := labels.SelectorFromSet(labelsMap)
 		controller, err := util.GetTopOwnerReferenceBySelector(d.targetFactory, d.TargetNamespace, selector.String())
 		if err != nil {
-			log.Errorf("get controller error: %s", err.Error())
+			log.Errorf("Failed to get controller error: %s", err.Error())
 			return err
 		}
 		var client dynamic.Interface
 		client, err = d.targetFactory.DynamicClient()
 		if err != nil {
-			log.Errorf("get dynamic client error: %s", err.Error())
+			log.Errorf("Failed to get dynamic client error: %s", err.Error())
 			return err
 		}
 		for _, cloneName := range controller.UnsortedList() {
@@ -840,17 +830,17 @@ func (d *CloneOptions) Cleanup(workloads ...string) error {
 			}
 			err = client.Resource(object.Mapping.Resource).Namespace(d.TargetNamespace).Delete(context.Background(), cloneName, metav1.DeleteOptions{})
 			if err != nil && !apierrors.IsNotFound(err) {
-				log.Errorf("delete clone object error: %s", err.Error())
+				log.Errorf("Failed to delete clone object: %v", err)
 				return err
 			}
-			log.Infof("delete clone object: %s", cloneName)
+			log.Infof("Deleted clone object: %s", cloneName)
 		}
-		log.Infof("clean up clone workload: %s successfully", workload)
+		log.Debugf("Cleanup clone workload: %s successfully", workload)
 	}
 	for _, f := range d.rollbackFuncList {
 		if f != nil {
 			if err := f(); err != nil {
-				log.Warningf("exec rollback function error: %s", err.Error())
+				log.Warnf("Failed to exec rollback function: %s", err)
 			}
 		}
 	}

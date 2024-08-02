@@ -17,21 +17,22 @@ import (
 var GvisorUDPForwardAddr string
 
 func UDPForwarder(s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
+	GvisorUDPForwardAddr := GvisorUDPForwardAddr
 	return udp.NewForwarder(s, func(request *udp.ForwarderRequest) {
 		endpointID := request.ID()
-		log.Debugf("[TUN-UDP] Debug: LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
+		log.Debugf("[TUN-UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
 			endpointID.LocalPort, endpointID.LocalAddress.String(), endpointID.RemotePort, endpointID.RemoteAddress.String(),
 		)
 		w := &waiter.Queue{}
 		endpoint, tErr := request.CreateEndpoint(w)
 		if tErr != nil {
-			log.Debugf("[TUN-UDP] Error: can not create endpoint: %v", tErr)
+			log.Errorf("[TUN-UDP] Failed to create endpoint: %v", tErr)
 			return
 		}
 
 		node, err := ParseNode(GvisorUDPForwardAddr)
 		if err != nil {
-			log.Debugf("[TUN-UDP] Error: parse gviosr udp forward addr %s: %v", GvisorUDPForwardAddr, err)
+			log.Errorf("[TUN-UDP] Failed to parse gviosr udp forward addr %s: %v", GvisorUDPForwardAddr, err)
 			return
 		}
 		node.Client = &Client{
@@ -43,16 +44,16 @@ func UDPForwarder(s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.
 		ctx := context.Background()
 		c, err := forwardChain.getConn(ctx)
 		if err != nil {
-			log.Debugf("[TUN-UDP] Error: can not get conn: %v", err)
+			log.Errorf("[TUN-UDP] Failed to get conn: %v", err)
 			return
 		}
 		if err = WriteProxyInfo(c, endpointID); err != nil {
-			log.Debugf("[TUN-UDP] Error: can not write proxy info: %v", err)
+			log.Errorf("[TUN-UDP] Failed to write proxy info: %v", err)
 			return
 		}
 		remote, err := node.Client.ConnectContext(ctx, c)
 		if err != nil {
-			log.Debugf("[TUN-UDP] Error: can not connect: %v", err)
+			log.Errorf("[TUN-UDP] Failed to connect: %v", err)
 			return
 		}
 		conn := gonet.NewUDPConn(w, endpoint)
@@ -64,19 +65,19 @@ func UDPForwarder(s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.
 				i := config.LPool.Get().([]byte)[:]
 				defer config.LPool.Put(i[:])
 				written, err2 := io.CopyBuffer(remote, conn, i)
-				log.Debugf("[TUN-UDP] Debug: write length %d data to remote", written)
+				log.Debugf("[TUN-UDP] Write length %d data to remote", written)
 				errChan <- err2
 			}()
 			go func() {
 				i := config.LPool.Get().([]byte)[:]
 				defer config.LPool.Put(i[:])
 				written, err2 := io.CopyBuffer(conn, remote, i)
-				log.Debugf("[TUN-UDP] Debug: read length %d data from remote", written)
+				log.Debugf("[TUN-UDP] Read length %d data from remote", written)
 				errChan <- err2
 			}()
 			err = <-errChan
 			if err != nil && !errors.Is(err, io.EOF) {
-				log.Debugf("[TUN-UDP] Error: dsiconnect: %s >-<: %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
+				log.Errorf("[TUN-UDP] Disconnect: %s >-<: %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
 			}
 		}()
 	}).HandlePacket
