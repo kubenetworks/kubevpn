@@ -23,11 +23,12 @@ import (
 )
 
 const (
-	dir     = "dir"
-	local   = "local"
-	remote  = "remote"
-	label   = "kubevpn"
-	guiPort = 8384
+	dir            = "dir"
+	local          = "local"
+	remote         = "remote"
+	label          = "kubevpn"
+	guiPort        = 8384
+	rescanInterval = 3
 )
 
 var (
@@ -86,7 +87,7 @@ func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr str
 		Paused:           false,
 		FSWatcherEnabled: true,
 		FSWatcherDelayS:  0.01,
-		RescanIntervalS:  2,
+		RescanIntervalS:  rescanInterval,
 		Devices: []config.FolderDeviceConfiguration{
 			{DeviceID: localID},
 			{DeviceID: remoteID},
@@ -98,6 +99,7 @@ func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr str
 		GUI: config.GUIConfiguration{
 			Enabled:    true,
 			RawAddress: localAddr,
+			APIKey:     pkgconfig.SyncthingAPIKey,
 		},
 		Options: config.OptionsConfiguration{
 			AutoUpgradeIntervalH: 0,

@@ -15,6 +15,8 @@ const (
 
 	// EnvDisableSyncthingLog disable syncthing log, because it can not set output writer, only write os.Stdout or io.Discard
 	EnvDisableSyncthingLog = "LOGGER_DISCARD"
+
+	SyncthingAPIKey = "kubevpn"
 )
 
 var LocalCert tls.Certificate
