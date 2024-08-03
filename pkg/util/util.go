@@ -297,7 +297,7 @@ func Merge[K comparable, V any](fromMap, ToMap map[K]V) map[K]V {
 
 func Move(src, dst string) error {
 	err := os.Rename(src, dst)
-	if errors.Is(err.(*os.LinkError).Err.(syscall.Errno), syscall.EXDEV) {
+	if err != nil && errors.Is(err.(*os.LinkError).Err.(syscall.Errno), syscall.EXDEV) {
 		return move(src, dst)
 	}
 	return err
