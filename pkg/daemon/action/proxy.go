@@ -24,15 +24,16 @@ import (
 //     2.1 disconnect from cluster
 //     2.2 same as step 1
 func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (e error) {
-	out := io.MultiWriter(newProxyWarp(resp), svr.LogFile)
-	log.SetOutput(out)
 	defer func() {
+		util.InitLoggerForServer(true)
 		log.SetOutput(svr.LogFile)
-		log.SetLevel(log.DebugLevel)
+		config.Debug = false
 	}()
+	out := io.MultiWriter(newProxyWarp(resp), svr.LogFile)
 	config.Image = req.Image
 	config.Debug = req.Level == int32(log.DebugLevel)
-	log.SetLevel(log.InfoLevel)
+	util.InitLoggerForClient(config.Debug)
+	log.SetOutput(out)
 	ctx := resp.Context()
 	connect := &handler.ConnectOptions{
 		Namespace:            req.Namespace,
@@ -86,9 +87,9 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 		)
 		if err == nil && isSameCluster && svr.connect.Equal(connect) {
 			// same cluster, do nothing
-			log.Infof("already connect to cluster")
+			log.Infof("Connected to cluster")
 		} else {
-			log.Infof("try to disconnect from another cluster")
+			log.Infof("Disconnecting from another cluster...")
 			var disconnectResp rpc.Daemon_DisconnectClient
 			disconnectResp, err = daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{
 				KubeconfigBytes: ptr.To(req.KubeconfigBytes),
@@ -104,7 +105,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 				if err == io.EOF {
 					break
 				} else if err != nil {
-					log.Errorf("recv from disconnect failed, %v", err)
+					log.Errorf("Receive from disconnect failed: %v", err)
 					return err
 				}
 				err = resp.Send(&rpc.ConnectResponse{Message: recv.Message})
@@ -112,12 +113,13 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 					return err
 				}
 			}
+			util.InitLoggerForClient(config.Debug)
 			log.SetOutput(out)
 		}
 	}
 
 	if svr.connect == nil {
-		log.Infof("connectting to cluster")
+		log.Debugf("Connectting to cluster")
 		var connResp rpc.Daemon_ConnectClient
 		connResp, err = daemonClient.Connect(ctx, req)
 		if err != nil {
@@ -136,6 +138,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 				return err
 			}
 		}
+		util.InitLoggerForClient(config.Debug)
 		log.SetOutput(out)
 	}
 
@@ -144,7 +147,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 	svr.connect.PortMap = req.PortMap
 	err = svr.connect.CreateRemoteInboundPod(ctx)
 	if err != nil {
-		log.Errorf("create remote inbound pod failed: %s", err.Error())
+		log.Errorf("Failed to inject inbound sidecar: %v", err)
 		return err
 	}
 	return nil

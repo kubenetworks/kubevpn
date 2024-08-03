@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -32,7 +32,7 @@ func RunWithElevated() {
 	os.Setenv(config.EnvDisableSyncthingLog, "1")
 	err := windows.ShellExecute(0, verbPtr, exePtr, argPtr, cwdPtr, showCmd)
 	if err != nil {
-		logrus.Warn(err)
+		log.Warn(err)
 	}
 }
 

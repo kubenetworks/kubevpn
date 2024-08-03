@@ -55,7 +55,7 @@ func TCPHandler() Handler {
 
 func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
-	log.Debugf("[tcpserver] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
+	log.Debugf("[TCP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 
 	defer func(addr net.Addr) {
 		var keys []string
@@ -68,7 +68,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		for _, key := range keys {
 			h.routeMapTCP.Delete(key)
 		}
-		log.Debugf("[tcpserver] to %s by conn %s from globle route map TCP", strings.Join(keys, " "), addr)
+		log.Debugf("[TCP] To %s by conn %s from globle route map TCP", strings.Join(keys, " "), addr)
 	}(tcpConn.LocalAddr())
 
 	for {
@@ -81,7 +81,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		b := config.LPool.Get().([]byte)[:]
 		dgram, err := readDatagramPacketServer(tcpConn, b[:])
 		if err != nil {
-			log.Debugf("[tcpserver] %s -> %s : %v", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
+			log.Errorf("[TCP] %s -> %s : %v", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
 			return
 		}
 
@@ -92,18 +92,18 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		} else if util.IsIPv6(bb) {
 			src = bb[8:24]
 		} else {
-			log.Errorf("[tcpserver] unknown packet")
+			log.Errorf("[TCP] Unknown packet")
 			continue
 		}
 		value, loaded := h.routeMapTCP.LoadOrStore(src.String(), tcpConn)
 		if loaded {
 			if tcpConn != value.(net.Conn) {
 				h.routeMapTCP.Store(src.String(), tcpConn)
-				log.Debugf("[tcpserver] replace route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+				log.Debugf("[TCP] Replace route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 			}
-			log.Debugf("[tcpserver] find route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+			log.Debugf("[TCP] Find route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 		} else {
-			log.Debugf("[tcpserver] new route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+			log.Debugf("[TCP] Add new route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 		}
 		util.SafeWrite(h.packetChan, dgram)
 	}

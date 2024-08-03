@@ -60,7 +60,7 @@ func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprint(os.Stdout, resp.ClusterID)
+			_, _ = fmt.Fprint(os.Stdout, resp.ClusterID)
 			return nil
 		},
 	}

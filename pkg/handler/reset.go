@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -25,15 +26,27 @@ import (
 func (c *ConnectOptions) Reset(ctx context.Context) error {
 	err := c.LeaveProxyResources(ctx)
 	if err != nil {
-		log.Errorf("leave proxy resources error: %v", err)
+		log.Errorf("Leave proxy resources error: %v", err)
 	} else {
-		log.Infof("leave proxy resources success")
+		log.Debugf("Leave proxy resources successfully")
 	}
 
-	log.Infof("cleanup k8s resource")
-	cleanupK8sResource(ctx, c.clientset, c.Namespace, config.ConfigMapPodTrafficManager, false)
+	log.Infof("Cleaning up resources")
+	ns := c.Namespace
+	name := config.ConfigMapPodTrafficManager
+	options := metav1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)}
+	_ = c.clientset.CoreV1().ConfigMaps(ns).Delete(ctx, name, options)
+	_ = c.clientset.CoreV1().Pods(ns).Delete(ctx, config.CniNetName, options)
+	_ = c.clientset.CoreV1().Secrets(ns).Delete(ctx, name, options)
+	_ = c.clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, name+"."+ns, options)
+	_ = c.clientset.RbacV1().RoleBindings(ns).Delete(ctx, name, options)
+	_ = c.clientset.CoreV1().ServiceAccounts(ns).Delete(ctx, name, options)
+	_ = c.clientset.RbacV1().Roles(ns).Delete(ctx, name, options)
+	_ = c.clientset.CoreV1().Services(ns).Delete(ctx, name, options)
+	_ = c.clientset.AppsV1().Deployments(ns).Delete(ctx, name, options)
 
 	_ = c.CleanupLocalContainer(ctx)
+	log.Info("Done")
 	return nil
 }
 
@@ -65,13 +78,13 @@ func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
 		return
 	}
 	if cm == nil || cm.Data == nil || len(cm.Data[config.KeyEnvoy]) == 0 {
-		log.Infof("no proxy resources found")
-		return
+		log.Infof("No proxy resources found")
+		return nil
 	}
 	var v = make([]*controlplane.Virtual, 0)
 	str := cm.Data[config.KeyEnvoy]
 	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
-		log.Errorf("unmarshal envoy config error: %v", err)
+		log.Errorf("Unmarshal envoy config error: %v", err)
 		return
 	}
 	v4, _ := c.GetLocalTunIP()
@@ -92,7 +105,7 @@ func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
 		uid := virtual.Uid[:lastIndex] + "/" + virtual.Uid[lastIndex+1:]
 		err = inject.UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, uid, v4)
 		if err != nil {
-			log.Errorf("leave workload %s failed: %v", uid, err)
+			log.Errorf("Failed to leave workload %s: %v", uid, err)
 			continue
 		}
 	}

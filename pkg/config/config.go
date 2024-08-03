@@ -172,3 +172,5 @@ const (
 	EngineMix    Engine = "mix"
 	EngineRaw    Engine = "raw"
 )
+
+const Slogan = "Now you can access resources in the kubernetes cluster !"

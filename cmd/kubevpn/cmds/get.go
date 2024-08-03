@@ -45,14 +45,14 @@ func CmdGet(f cmdutil.Factory) *cobra.Command {
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			namespace, _, err := f.ToRawKubeConfigLoader().Namespace()
+			ns, _, err := f.ToRawKubeConfigLoader().Namespace()
 			if err != nil {
 				return err
 			}
 			client, err := daemon.GetClient(true).Get(
 				cmd.Context(),
 				&rpc.GetRequest{
-					Namespace: namespace,
+					Namespace: ns,
 					Resource:  args[0],
 				},
 			)

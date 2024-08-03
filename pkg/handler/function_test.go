@@ -62,7 +62,7 @@ func pingPodIP(t *testing.T) {
 				command := exec.Command("ping", "-c", "4", item.Status.PodIP)
 				if err = command.Run(); err == nil {
 					if !command.ProcessState.Success() {
-						t.Errorf("can not ping ip: %s of pod: %s", item.Status.PodIP, item.Name)
+						t.Errorf("Failed to ping IP: %s of pod: %s", item.Status.PodIP, item.Name)
 					}
 				}
 			}()
@@ -80,7 +80,7 @@ func healthCheckPod(t *testing.T) {
 		t.Error(err)
 	}
 	if len(podList.Items) == 0 {
-		t.Error("can not found pods of authors")
+		t.Error("Failed to found pods of authors")
 	}
 	for _, pod := range podList.Items {
 		pod := pod
@@ -118,7 +118,7 @@ func healthCheckService(t *testing.T) {
 		t.Error(err)
 	}
 	if len(serviceList.Items) == 0 {
-		t.Error("can not found pods of authors")
+		t.Error("Failed to found pods of authors")
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", serviceList.Items[0].Spec.ClusterIP, serviceList.Items[0].Spec.Ports[0].Port)
 	req, _ := http.NewRequest("GET", endpoint, nil)
@@ -151,7 +151,7 @@ func shortDomain(t *testing.T) {
 		t.Error(err)
 	}
 	if len(serviceList.Items) == 0 {
-		t.Errorf("can not found pods of %s", app)
+		t.Errorf("Failed to found pods of %s", app)
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", app, serviceList.Items[0].Spec.Ports[0].Port)
 	req, _ := http.NewRequest("GET", endpoint, nil)
@@ -183,7 +183,7 @@ func fullDomain(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(serviceList.Items) == 0 {
-		t.Fatalf("can not found pods of %s", app)
+		t.Fatalf("Failed to found pods of %s", app)
 	}
 
 	domains := []string{
@@ -238,10 +238,10 @@ func dialUDP(t *testing.T) {
 		}
 	}
 	if len(ip) == 0 {
-		t.Errorf("can not found pods for service reviews")
+		t.Errorf("Failed to found pods for service reviews")
 		return
 	}
-	log.Printf("dail udp to ip: %s", ip)
+	log.Printf("Dail udp to IP: %s", ip)
 	if err = retry.OnError(
 		wait.Backoff{Duration: time.Second, Factor: 2, Jitter: 0.2, Steps: 5},
 		func(err error) bool {
@@ -249,7 +249,7 @@ func dialUDP(t *testing.T) {
 		}, func() error {
 			return udpclient(ip, port)
 		}); err != nil {
-		t.Errorf("can not access pod ip: %s, port: %v", ip, port)
+		t.Errorf("Failed to access pod IP: %s, port: %v", ip, port)
 	}
 }
 

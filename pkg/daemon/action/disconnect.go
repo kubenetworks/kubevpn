@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -19,12 +20,13 @@ import (
 
 func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_DisconnectServer) error {
 	defer func() {
+		util.InitLoggerForServer(true)
 		log.SetOutput(svr.LogFile)
-		log.SetLevel(log.DebugLevel)
+		config.Debug = false
 	}()
 	out := io.MultiWriter(newDisconnectWarp(resp), svr.LogFile)
+	util.InitLoggerForClient(config.Debug)
 	log.SetOutput(out)
-	log.SetLevel(log.InfoLevel)
 	switch {
 	case req.GetAll():
 		if svr.clone != nil {
@@ -58,7 +60,7 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 			svr.secondaryConnect[index].Cleanup()
 			svr.secondaryConnect = append(svr.secondaryConnect[:index], svr.secondaryConnect[index+1:]...)
 		} else {
-			log.Errorf("index %d out of range", req.GetID())
+			log.Errorf("Index %d out of range", req.GetID())
 		}
 	case req.KubeconfigBytes != nil && req.Namespace != nil:
 		err := disconnectByKubeConfig(
@@ -172,7 +174,7 @@ func disconnect(svr *Server, connect *handler.ConnectOptions) {
 			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
 		)
 		if err == nil && isSameCluster {
-			log.Infof("disconnect from cluster")
+			log.Infof("Disconnecting from the cluster...")
 			svr.connect.Cleanup()
 			svr.connect = nil
 			svr.t = time.Time{}
@@ -185,7 +187,7 @@ func disconnect(svr *Server, connect *handler.ConnectOptions) {
 			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
 		)
 		if err == nil && isSameCluster {
-			log.Infof("disconnect from cluster")
+			log.Infof("Disconnecting from the cluster...")
 			options.Cleanup()
 			svr.secondaryConnect = append(svr.secondaryConnect[:i], svr.secondaryConnect[i+1:]...)
 			i--

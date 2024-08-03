@@ -15,7 +15,7 @@ import (
 
 func GetNsForListPodAndSvc(ctx context.Context, clientset *kubernetes.Clientset, nsList []string) (podNs string, svcNs string, err error) {
 	for _, ns := range nsList {
-		log.Debugf("list namepsace %s pods", ns)
+		log.Debugf("List namepsace %s pods", ns)
 		_, err = clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{Limit: 1})
 		if apierrors.IsForbidden(err) {
 			continue
@@ -32,7 +32,7 @@ func GetNsForListPodAndSvc(ctx context.Context, clientset *kubernetes.Clientset,
 	}
 
 	for _, ns := range nsList {
-		log.Debugf("list namepsace %s services", ns)
+		log.Debugf("List namepsace %s services", ns)
 		_, err = clientset.CoreV1().Services(ns).List(ctx, metav1.ListOptions{Limit: 1})
 		if apierrors.IsForbidden(err) {
 			continue

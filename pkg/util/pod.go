@@ -15,8 +15,7 @@ import (
 	"github.com/hashicorp/go-version"
 	"github.com/moby/term"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
-	"golang.org/x/exp/constraints"
+	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -52,10 +51,10 @@ func PrintStatus(pod *corev1.Pod, writer io.Writer) {
 		_, _ = fmt.Fprintf(w, "%s\t%v\t%v\n", name, v1, v2)
 	}
 
-	if len(pod.Status.ContainerStatuses) == 0 {
+	if len(pod.Status.ContainerStatuses) == 0 && len(pod.Status.Conditions) != 0 {
 		show("Type", "Reason", "Message")
 		for _, condition := range pod.Status.Conditions {
-			if condition.Status == corev1.ConditionFalse {
+			if condition.Status != corev1.ConditionTrue {
 				show(string(condition.Type), condition.Reason, condition.Message)
 			}
 		}
@@ -95,13 +94,6 @@ func PrintStatusInline(pod *corev1.Pod) string {
 	}
 	_ = w.Flush()
 	return sb.String()
-}
-
-func max[T constraints.Ordered](a T, b T) T {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func GetEnv(ctx context.Context, set *kubernetes.Clientset, config *rest.Config, ns, podName string) (map[string][]string, error) {
@@ -155,7 +147,7 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 		URL()
 	transport, upgrader, err := spdy.RoundTripperFor(config)
 	if err != nil {
-		logrus.Errorf("create spdy roundtripper error: %s", err.Error())
+		log.Errorf("Create spdy roundtripper error: %s", err.Error())
 		return err
 	}
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
@@ -171,20 +163,20 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 	}
 	forwarder, err := portforward.New(dialer, portPair, stopChan, readyChan, nil, os.Stderr)
 	if err != nil {
-		logrus.Errorf("create port forward error: %s", err.Error())
+		log.Errorf("Create port forward error: %s", err.Error())
 		return err
 	}
 
 	if err = forwarder.ForwardPorts(); err != nil {
-		logrus.Errorf("forward port error: %s", err.Error())
+		log.Errorf("Forward port error: %s", err.Error())
 		return err
 	}
 	return nil
 }
 
-func GetTopOwnerReference(factory util.Factory, namespace, workload string) (*resource.Info, error) {
+func GetTopOwnerReference(factory util.Factory, ns, workload string) (*resource.Info, error) {
 	for {
-		object, err := GetUnstructuredObject(factory, namespace, workload)
+		object, err := GetUnstructuredObject(factory, ns, workload)
 		if err != nil {
 			return nil, err
 		}
@@ -193,12 +185,12 @@ func GetTopOwnerReference(factory util.Factory, namespace, workload string) (*re
 			return object, nil
 		}
 		// apiVersion format is Group/Version is like: apps/v1, apps.kruise.io/v1beta1
-		version, err := schema.ParseGroupVersion(ownerReference.APIVersion)
+		groupVersion, err := schema.ParseGroupVersion(ownerReference.APIVersion)
 		if err != nil {
 			return object, nil
 		}
 		gk := v1.GroupKind{
-			Group: version.Group,
+			Group: groupVersion.Group,
 			Kind:  ownerReference.Kind,
 		}
 		workload = fmt.Sprintf("%s/%s", gk.String(), ownerReference.Name)
@@ -206,22 +198,22 @@ func GetTopOwnerReference(factory util.Factory, namespace, workload string) (*re
 }
 
 // GetTopOwnerReferenceBySelector assume pods, controller has same labels
-func GetTopOwnerReferenceBySelector(factory util.Factory, namespace, selector string) (sets.Set[string], error) {
-	object, err := GetUnstructuredObjectBySelector(factory, namespace, selector)
+func GetTopOwnerReferenceBySelector(factory util.Factory, ns, selector string) (sets.Set[string], error) {
+	object, err := GetUnstructuredObjectBySelector(factory, ns, selector)
 	if err != nil {
 		return nil, err
 	}
 	set := sets.New[string]()
 	for _, info := range object {
-		reference, err := GetTopOwnerReference(factory, namespace, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
-		if err == nil && reference.Mapping.Resource.Resource != "services" {
-			set.Insert(fmt.Sprintf("%s/%s", reference.Mapping.GroupVersionKind.GroupKind().String(), reference.Name))
+		ownerReference, err := GetTopOwnerReference(factory, ns, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
+		if err == nil && ownerReference.Mapping.Resource.Resource != "services" {
+			set.Insert(fmt.Sprintf("%s/%s", ownerReference.Mapping.GroupVersionKind.GroupKind().String(), ownerReference.Name))
 		}
 	}
 	return set, nil
 }
 
-func Shell(_ context.Context, clientset *kubernetes.Clientset, config *rest.Config, podName, containerName, namespace string, cmd []string) (string, error) {
+func Shell(_ context.Context, clientset *kubernetes.Clientset, config *rest.Config, podName, containerName, ns string, cmd []string) (string, error) {
 	err := os.Setenv(string(util.RemoteCommandWebsockets), "true")
 	if err != nil {
 		return "", err
@@ -230,7 +222,7 @@ func Shell(_ context.Context, clientset *kubernetes.Clientset, config *rest.Conf
 	buf := bytes.NewBuffer(nil)
 	options := exec.ExecOptions{
 		StreamOptions: exec.StreamOptions{
-			Namespace:     namespace,
+			Namespace:     ns,
 			PodName:       podName,
 			ContainerName: containerName,
 			Stdin:         false,
@@ -271,12 +263,13 @@ func WaitPodToBeReady(ctx context.Context, podInterface v12.PodInterface, select
 					continue
 				}
 				var sb = bytes.NewBuffer(nil)
-				sb.WriteString(fmt.Sprintf("pod [%s] status is %s\n", podT.Name, podT.Status.Phase))
+				sb.WriteString(fmt.Sprintf("Pod %s is %s...\n", podT.Name, podT.Status.Phase))
 				PrintStatus(podT, sb)
 
 				if last != sb.String() {
-					logrus.Infof(sb.String())
+					log.Infof(sb.String())
 				}
+				last = sb.String()
 				if podutils.IsPodReady(podT) && func() bool {
 					for _, status := range podT.Status.ContainerStatuses {
 						if !status.Ready {
@@ -287,7 +280,6 @@ func WaitPodToBeReady(ctx context.Context, podInterface v12.PodInterface, select
 				}() {
 					return nil
 				}
-				last = sb.String()
 			}
 		case <-ticker.C:
 			return errors.New(fmt.Sprintf("wait pod to be ready timeout"))
@@ -341,6 +333,11 @@ func CheckPodStatus(cCtx context.Context, cFunc context.CancelFunc, podName stri
 		return
 	}
 	defer w.Stop()
+
+	_, err = podInterface.Get(cCtx, podName, v1.GetOptions{})
+	if err != nil {
+		return
+	}
 	for {
 		select {
 		case e, ok := <-w.ResultChan():
@@ -451,7 +448,7 @@ func UpdateImage(ctx context.Context, factory util.Factory, ns string, deployNam
 		return nil
 	}
 
-	logrus.Infof("found newer image %s, set image from %s to it...", image, deployment.Spec.Template.Spec.Containers[0].Image)
+	log.Infof("Found newer image %s, set image from %s to it...", image, deployment.Spec.Template.Spec.Containers[0].Image)
 	for i := range deployment.Spec.Template.Spec.Containers {
 		deployment.Spec.Template.Spec.Containers[i].Image = image
 	}

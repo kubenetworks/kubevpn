@@ -65,7 +65,7 @@ func (w *wsHandler) handle(c context.Context) {
 
 	clientIP, err := util.GetIPBaseNic()
 	if err != nil {
-		w.Log("Get client ip error: %v", err)
+		w.Log("Get client IP error: %v", err)
 		return
 	}
 
@@ -93,15 +93,13 @@ func (w *wsHandler) handle(c context.Context) {
 	cmd := fmt.Sprintf(`kubevpn ssh-daemon --client-ip %s`, clientIP.String())
 	serverIP, stderr, err := pkgssh.RemoteRun(cli, cmd, nil)
 	if err != nil {
-		log.Errorf("run error: %v", err)
-		log.Errorf("run stdout: %v", string(serverIP))
-		log.Errorf("run stderr: %v", string(stderr))
+		log.Errorf("Failed to run remote command: %v, stdout: %s, stderr: %s", err, string(serverIP), string(stderr))
 		w.Log("Start kubevpn server error: %v", err)
 		return
 	}
 	ip, _, err := net.ParseCIDR(string(serverIP))
 	if err != nil {
-		w.Log("Parse server ip %s, stderr: %s: %v", string(serverIP), string(stderr), err)
+		w.Log("Failed to parse server IP %s, stderr: %s: %v", string(serverIP), string(stderr), err)
 		return
 	}
 	msg := fmt.Sprintf("| You can use client: %s to communicate with server: %s |", clientIP.IP.String(), ip.String())
@@ -116,16 +114,16 @@ func (w *wsHandler) handle(c context.Context) {
 	}
 	servers, err := handler.Parse(r)
 	if err != nil {
-		log.Errorf("parse route error: %v", err)
-		w.Log("Parse route error: %v", err)
+		log.Errorf("Failed to parse route: %v", err)
+		w.Log("Failed to parse route: %v", err)
 		return
 	}
 	go func() {
 		err := handler.Run(ctx, servers)
-		log.Errorf("Run error: %v", err)
-		w.Log("Run error: %v", err)
+		log.Errorf("Failed to run: %v", err)
+		w.Log("Failed to run: %v", err)
 	}()
-	log.Info("tunnel connected")
+	log.Info("Connected tunnel")
 	go func() {
 		for ctx.Err() == nil {
 			_, _ = util.Ping(ctx, clientIP.IP.String(), ip.String())
@@ -266,8 +264,8 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 		w.Log("Found command kubevpn command on remote")
 		return nil
 	}
-	log.Infof("remote kubevpn command not found, try to install it...")
-	w.Log("Try to install kubevpn on remote server")
+	log.Infof("Install command kubevpn...")
+	w.Log("Install kubevpn on remote server...")
 	var client = http.DefaultClient
 	if config.GitHubOAuthToken != "" {
 		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
@@ -378,7 +376,7 @@ func init() {
 	}))
 	http.Handle("/resize", websocket.Handler(func(conn *websocket.Conn) {
 		sessionID := conn.Request().Header.Get("session-id")
-		log.Infof("resize: %s", sessionID)
+		log.Infof("Resize: %s", sessionID)
 
 		defer conn.Close()
 
@@ -399,21 +397,21 @@ func init() {
 			if errors.Is(err, io.EOF) {
 				return
 			} else if err != nil {
-				log.Errorf("failed to read session %s window resize event: %v", sessionID, err)
+				log.Errorf("Failed to read session %s window resize event: %v", sessionID, err)
 				return
 			}
 			var r remotecommand.TerminalSize
 			err = json.Unmarshal([]byte(readString), &r)
 			if err != nil {
-				log.Errorf("unmarshal into terminal size failed: %v", err)
+				log.Errorf("Unmarshal into terminal size failed: %v", err)
 				continue
 			}
-			log.Debugf("session %s change termianl size to w: %d h:%d", sessionID, r.Width, r.Height)
+			log.Debugf("Session %s change termianl size to w: %d h:%d", sessionID, r.Width, r.Height)
 			err = session.WindowChange(int(r.Height), int(r.Width))
 			if errors.Is(err, io.EOF) {
 				return
 			} else if err != nil {
-				log.Errorf("session %s windos change w: %d h: %d failed: %v", sessionID, r.Width, r.Height, err)
+				log.Errorf("Session %s windos change w: %d h: %d failed: %v", sessionID, r.Width, r.Height, err)
 			}
 		}
 	}))

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	goversion "github.com/hashicorp/go-version"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/elevate"
@@ -35,9 +36,9 @@ func Main(ctx context.Context, client *http.Client, url string) error {
 		return err
 	}
 
-	fmt.Fprint(os.Stdout, "Upgrade daemon...\n")
+	log.Infof("Upgrade daemon...")
 	err = daemon.StartupDaemon(context.Background())
-	fmt.Fprint(os.Stdout, "Done\n")
+	log.Info("Done")
 	return err
 }
 

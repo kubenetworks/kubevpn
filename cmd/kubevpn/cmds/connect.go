@@ -35,7 +35,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		Connect to kubernetes cluster network
 		
 		After connect to kubernetes cluster network, you can ping PodIP or
-		curl ServiceIP in local PC, it also support k8s dns resolve. 
+		curl ServiceIP in local PC, it also support k8s DNS resolve. 
 		Like: curl authors/authors.default/authors.default.svc/authors.default.svc.cluster.local.
 		So you can startup your application in local PC. depends on anything in
 		k8s cluster is ok, connect to them just like in k8s cluster.
@@ -62,6 +62,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		kubevpn connect --ssh-jump "--ssh-addr jump.naison.org --ssh-username naison --gssapi-password xxx" --ssh-username root --ssh-addr 127.0.0.1:22 --ssh-keyfile ~/.ssh/dst.pem
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			util.InitLoggerForClient(false)
 			// startup daemon process and sudo process
 			err := daemon.StartupDaemon(cmd.Context())
 			if err != nil {
@@ -78,7 +79,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			logLevel := log.ErrorLevel
+			logLevel := log.InfoLevel
 			if config.Debug {
 				logLevel = log.DebugLevel
 			}
@@ -110,7 +111,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 					} else if err != nil {
 						return err
 					}
-					fmt.Fprint(os.Stdout, recv.GetMessage())
+					_, _ = fmt.Fprint(os.Stdout, recv.GetMessage())
 				}
 			} else {
 				resp, err := cli.Connect(cmd.Context(), req)
@@ -126,11 +127,11 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 					} else if err != nil {
 						return err
 					}
-					fmt.Fprint(os.Stdout, recv.GetMessage())
+					_, _ = fmt.Fprint(os.Stdout, recv.GetMessage())
 				}
 			}
 			if !foreground {
-				util.Print(os.Stdout, "Now you can access resources in the kubernetes cluster, enjoy it :)")
+				util.Print(os.Stdout, config.Slogan)
 			} else {
 				<-cmd.Context().Done()
 				disconnect, err := cli.Disconnect(context.Background(), &rpc.DisconnectRequest{
@@ -139,7 +140,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 					SshJump:         sshConf.ToRPC(),
 				})
 				if err != nil {
-					log.Errorf("disconnect error: %v", err)
+					log.Errorf("Disconnect error: %v", err)
 					return err
 				}
 				for {
@@ -147,12 +148,12 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 					if err == io.EOF {
 						break
 					} else if err != nil {
-						log.Errorf("receive disconnect error: %v", err)
+						log.Errorf("Receive disconnect message error: %v", err)
 						return err
 					}
-					log.Info(recv.Message)
+					_, _ = fmt.Fprint(os.Stdout, recv.Message)
 				}
-				log.Info("disconnect successfully")
+				_, _ = fmt.Fprint(os.Stdout, "Disconnect completed")
 			}
 			return nil
 		},

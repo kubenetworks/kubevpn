@@ -14,7 +14,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/moby/term"
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"k8s.io/api/core/v1"
 	v12 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -69,7 +69,7 @@ func GetVolume(ctx context.Context, f util.Factory, ns, podName string) (map[str
 			}
 			err = copyOptions.Run()
 			if err != nil {
-				_, _ = fmt.Fprintf(os.Stderr, "failed to download volume %s path %s to %s, err: %v, ignore...\n", volumeMount.Name, remotePath, localPath, err)
+				_, _ = fmt.Fprintf(os.Stderr, "Failed to download volume %s path %s to %s, err: %v, ignore...\n", volumeMount.Name, remotePath, localPath, err)
 				continue
 			}
 			m = append(m, mount.Mount{
@@ -77,7 +77,7 @@ func GetVolume(ctx context.Context, f util.Factory, ns, podName string) (map[str
 				Source: localPath,
 				Target: volumeMount.MountPath,
 			})
-			logrus.Infof("%s:%s", localPath, volumeMount.MountPath)
+			log.Infof("%s:%s", localPath, volumeMount.MountPath)
 		}
 		result[Join(ns, container.Name)] = m
 	}
@@ -102,22 +102,22 @@ func CopyVolumeIntoContainer(ctx context.Context, volume []mount.Mount, cli *cli
 	for _, v := range volume {
 		target, err := CreateFolder(ctx, cli, id, v.Source, v.Target)
 		if err != nil {
-			logrus.Debugf("create folder %s previoully failed, err: %v", target, err)
+			log.Errorf("Create folder %s previoully failed: %v", target, err)
 		}
-		logrus.Debugf("from %s to %s", v.Source, v.Target)
+		log.Debugf("From %s to %s", v.Source, v.Target)
 		srcInfo, err := archive.CopyInfoSourcePath(v.Source, true)
 		if err != nil {
-			logrus.Errorf("copy info source path, err: %v", err)
+			log.Errorf("Copy info source path, err: %v", err)
 			return err
 		}
 		srcArchive, err := archive.TarResource(srcInfo)
 		if err != nil {
-			logrus.Errorf("tar resource failed, err: %v", err)
+			log.Errorf("Tar resource failed, err: %v", err)
 			return err
 		}
 		dstDir, preparedArchive, err := archive.PrepareArchiveCopy(srcArchive, srcInfo, archive.CopyInfo{Path: v.Target})
 		if err != nil {
-			logrus.Errorf("can not prepare archive copy, err: %v", err)
+			log.Errorf("Failed to prepare archive copy, err: %v", err)
 			return err
 		}
 
@@ -126,7 +126,7 @@ func CopyVolumeIntoContainer(ctx context.Context, volume []mount.Mount, cli *cli
 			CopyUIDGID:                true,
 		})
 		if err != nil {
-			logrus.Infof("can not copy %s to container %s:%s, err: %v", v.Source, id, v.Target, err)
+			log.Infof("Failed to copy %s to container %s:%s, err: %v", v.Source, id, v.Target, err)
 			return err
 		}
 	}
@@ -149,20 +149,20 @@ func CreateFolder(ctx context.Context, cli *client.Client, id string, src string
 		Cmd:          []string{"mkdir", "-p", target},
 	})
 	if err != nil {
-		logrus.Errorf("create folder %s previoully failed, err: %v", target, err)
+		log.Errorf("Create folder %s previoully failed, err: %v", target, err)
 		return "", err
 	}
 	err = cli.ContainerExecStart(ctx, create.ID, types.ExecStartCheck{})
 	if err != nil {
-		logrus.Errorf("create folder %s previoully failed, err: %v", target, err)
+		log.Errorf("Create folder %s previoully failed, err: %v", target, err)
 		return "", err
 	}
-	logrus.Infof("wait create folder %s in container %s to be done...", target, id)
+	log.Infof("Wait create folder %s in container %s to be done...", target, id)
 	chanStop := make(chan struct{})
 	wait.Until(func() {
 		inspect, err := cli.ContainerExecInspect(ctx, create.ID)
 		if err != nil {
-			logrus.Warningf("can not inspect container %s, err: %v", id, err)
+			log.Warnf("Failed to inspect container %s: %v", id, err)
 			return
 		}
 		if !inspect.Running {

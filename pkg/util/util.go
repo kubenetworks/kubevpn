@@ -3,9 +3,6 @@ package util
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -15,7 +12,6 @@ import (
 	osexec "os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -40,58 +36,23 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
 )
 
-func GetAvailableUDPPortOrDie() (int, error) {
-	address, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:0", "localhost"))
-	if err != nil {
-		return 0, err
-	}
-	listener, err := net.ListenUDP("udp", address)
-	if err != nil {
-		return 0, err
-	}
-	defer listener.Close()
-	return listener.LocalAddr().(*net.UDPAddr).Port, nil
-}
-
-func GetAvailableTCPPortOrDie() (int, error) {
-	address, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", "localhost"))
-	if err != nil {
-		return 0, err
-	}
-	listener, err := net.ListenTCP("tcp", address)
-	if err != nil {
-		return 0, err
-	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port, nil
-}
-
 func IsWindows() bool {
 	return runtime.GOOS == "windows"
 }
 
-func BytesToInt(b []byte) uint32 {
-	buffer := bytes.NewBuffer(b)
-	var u uint32
-	if err := binary.Read(buffer, binary.BigEndian, &u); err != nil {
-		log.Warn(err)
-	}
-	return u
-}
-
-func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, workloads string, timeout time.Duration) (err error) {
-	log.Infof("rollout status for %s", workloads)
+func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, ns, workloads string, timeout time.Duration) (err error) {
+	log.Infof("Checking rollout status for %s", workloads)
 	defer func() {
 		if err != nil {
-			log.Errorf("rollout status for %s failed: %s", workloads, err.Error())
+			log.Errorf("Rollout status for %s failed: %s", workloads, err.Error())
 		} else {
-			log.Infof("rollout status for %s successfully", workloads)
+			log.Infof("Rollout successfully for %s", workloads)
 		}
 	}()
 	client, _ := factory.DynamicClient()
 	r := factory.NewBuilder().
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
-		NamespaceParam(namespace).DefaultNamespace().
+		NamespaceParam(ns).DefaultNamespace().
 		ResourceTypeOrNameArgs(true, workloads).
 		SingleResourceType().
 		Latest().
@@ -139,12 +100,11 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, namespace, wor
 				if err != nil {
 					return false, err
 				}
-				log.Info(strings.TrimSpace(status))
 				// Quit waiting if the rollout is done
 				if done {
 					return true, nil
 				}
-
+				log.Info(strings.TrimSpace(status))
 				return false, nil
 
 			case watch.Deleted:
@@ -206,33 +166,6 @@ func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string)) (st
 	return stdoutStr, stderrStr, err
 }
 
-func WaitPortToBeFree(ctx context.Context, port int) error {
-	log.Infoln(fmt.Sprintf("wait port %v to be free...", port))
-	ticker := time.NewTicker(time.Second * 2)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("wait port %v to be free timeout", port)
-		case <-ticker.C:
-			if !IsPortListening(port) {
-				log.Infoln(fmt.Sprintf("port %v are free", port))
-				return nil
-			}
-		}
-	}
-}
-
-func IsPortListening(port int) bool {
-	listener, err := net.Listen("tcp4", net.JoinHostPort("localhost", strconv.Itoa(port)))
-	if err != nil {
-		return true
-	} else {
-		_ = listener.Close()
-		return false
-	}
-}
-
 func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.PolicyRule) (allowed bool, err error) {
 	var roleBindingList *rbacv1.RoleBindingList
 	roleBindingList, err = clientset.RbacV1().RoleBindings(ns).List(context.Background(), metav1.ListOptions{})
@@ -282,40 +215,8 @@ func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.Polic
 	return false, nil
 }
 
-func DoReq(request *http.Request) (body []byte, err error) {
-	cert, ok := os.LookupEnv(config.TLSCertKey)
-	if !ok {
-		return nil, fmt.Errorf("can not get %s from env", config.TLSCertKey)
-	}
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM([]byte(cert))
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs: caCertPool,
-			},
-		},
-	}
-
-	var resp *http.Response
-	resp, err = client.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("err: %v", err)
-	}
-	defer resp.Body.Close()
-	body, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("can not read body, err: %v", err)
-	}
-	if resp.StatusCode == http.StatusOK {
-		return body, nil
-	}
-	return body, fmt.Errorf("http status is %d", resp.StatusCode)
-}
-
-func GetTlsDomain(namespace string) string {
-	return config.ConfigMapPodTrafficManager + "." + namespace + "." + "svc"
+func GetTlsDomain(ns string) string {
+	return config.ConfigMapPodTrafficManager + "." + ns + "." + "svc"
 }
 
 func Deduplicate(cidr []*net.IPNet) (result []*net.IPNet) {
@@ -348,8 +249,8 @@ func CleanExtensionLib() {
 			return !errors.Is(err, os.ErrNotExist)
 		},
 		func() error {
-			err = driver.UninstallWireGuardTunDriver()
-			return fmt.Errorf("%v", err)
+			err := driver.UninstallWireGuardTunDriver()
+			return err
 		},
 	)
 	_, err = os.Lstat(filename)
@@ -361,15 +262,15 @@ func CleanExtensionLib() {
 }
 
 func Print(writer io.Writer, slogan string) {
-	length := len(slogan) + 4 + 4
+	length := len(slogan) + 1 + 1
 	var sb strings.Builder
 
 	sb.WriteString("+" + strings.Repeat("-", length) + "+")
 	sb.WriteByte('\n')
 	sb.WriteString("|")
-	sb.WriteString(strings.Repeat(" ", 4))
+	sb.WriteString(strings.Repeat(" ", 1))
 	sb.WriteString(slogan)
-	sb.WriteString(strings.Repeat(" ", 4))
+	sb.WriteString(strings.Repeat(" ", 1))
 	sb.WriteString("|")
 	sb.WriteByte('\n')
 	sb.WriteString("+" + strings.Repeat("-", length) + "+")

@@ -221,7 +221,7 @@ Flags:
 			c = append(c, config.Name)
 		}
 		if !reflect.DeepEqual(c, datum.ExpectOrder) {
-			log.Fatalf("not match, expect: %v, real: %v", datum.ExpectOrder, c)
+			log.Fatalf("Not match, expect: %v, real: %v", datum.ExpectOrder, c)
 		}
 	}
 }

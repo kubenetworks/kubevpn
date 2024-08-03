@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 const retries = 4
@@ -44,7 +44,7 @@ func DownloadFileWithName(uri, name string) (string, error) {
 		return "", fmt.Errorf("failed to save file %s. error: %v", file, err)
 	}
 
-	logrus.Infof("downloaded file %s", file)
+	log.Infof("Downloaded file %s", file)
 	return file, nil
 }
 

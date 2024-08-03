@@ -49,7 +49,7 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13
 	appendHosts := c.generateAppendHosts(list.Items, hosts)
 	err = c.appendHosts(appendHosts)
 	if err != nil {
-		log.Errorf("failed to add hosts(%s): %v", entryList2String(appendHosts), err)
+		log.Errorf("Failed to add hosts(%s): %v", entryList2String(appendHosts), err)
 		return err
 	}
 
@@ -93,7 +93,7 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 						}}
 						err = c.removeHosts(list)
 						if err != nil {
-							log.Errorf("failed to remove hosts(%s) to hosts: %v", entryList2String(list), err)
+							log.Errorf("Failed to remove hosts(%s) to hosts: %v", entryList2String(list), err)
 						}
 					}
 					if event.Type == watch.Added {
@@ -102,7 +102,7 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 						err = c.appendHosts(appendHosts)
 						c.Lock.Unlock()
 						if err != nil {
-							log.Errorf("failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
+							log.Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
 						}
 					}
 				case <-ticker.C:
@@ -116,7 +116,7 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 					err = c.appendHosts(appendHosts)
 					c.Lock.Unlock()
 					if err != nil {
-						log.Errorf("failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
+						log.Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
 					}
 				}
 			}
@@ -209,7 +209,7 @@ func (c *Config) removeHosts(hosts []Entry) error {
 	}
 
 	if len(retain) == 0 {
-		log.Errorf("hosts files retain line is empty, should not happened")
+		log.Errorf("Hosts files retain line is empty, should not happened")
 		return nil
 	}
 

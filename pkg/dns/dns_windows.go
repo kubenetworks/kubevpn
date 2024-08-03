@@ -32,19 +32,19 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 		var addr netip.Addr
 		addr, err = netip.ParseAddr(s)
 		if err != nil {
-			log.Errorf("parse %s failed: %s", s, err)
+			log.Errorf("Parse %s failed: %s", s, err)
 			return err
 		}
 		servers = append(servers, addr.Unmap())
 	}
 	err = luid.SetDNS(windows.AF_INET, servers, clientConfig.Search)
 	if err != nil {
-		log.Errorf("set DNS failed: %s", err)
+		log.Errorf("Set DNS failed: %s", err)
 		return err
 	}
 	err = luid.SetDNS(windows.AF_INET6, servers, clientConfig.Search)
 	if err != nil {
-		log.Errorf("set DNS failed: %s", err)
+		log.Errorf("Set DNS failed: %s", err)
 		return err
 	}
 	//_ = updateNicMetric(tunName)
@@ -78,7 +78,7 @@ func updateNicMetric(name string) error {
 	}...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Warnf("error while update nic metrics, error: %v, output: %s, command: %v", err, string(out), cmd.Args)
+		log.Warnf("Failed to update nic metrics, error: %v, output: %s, command: %v", err, string(out), cmd.Args)
 	}
 	return err
 }
@@ -93,7 +93,7 @@ func addNicSuffixSearchList(search []string) error {
 	output, err := cmd.CombinedOutput()
 	log.Debugln(cmd.Args)
 	if err != nil {
-		log.Warnf("error while set dns suffix search list, err: %v, output: %s, command: %v", err, string(output), cmd.Args)
+		log.Warnf("Failed to set DNS suffix search list, err: %v, output: %s, command: %v", err, string(output), cmd.Args)
 	}
 	return err
 }

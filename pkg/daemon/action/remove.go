@@ -5,24 +5,27 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (svr *Server) Remove(req *rpc.RemoveRequest, resp rpc.Daemon_RemoveServer) error {
 	defer func() {
+		util.InitLoggerForServer(true)
 		log.SetOutput(svr.LogFile)
-		log.SetLevel(log.DebugLevel)
+		config.Debug = false
 	}()
 	out := io.MultiWriter(newRemoveWarp(resp), svr.LogFile)
+	util.InitLoggerForClient(config.Debug)
 	log.SetOutput(out)
-	log.SetLevel(log.InfoLevel)
 
 	if svr.clone != nil {
 		err := svr.clone.Cleanup(req.Workloads...)
 		svr.clone = nil
 		return err
 	} else {
-		log.Info("remove: no clone resource found")
+		log.Info("No clone resource found")
 	}
 	return nil
 }

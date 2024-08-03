@@ -31,7 +31,7 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/moby/sys/signal"
 	"github.com/moby/term"
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -63,13 +63,13 @@ func waitExitOrRemoved(ctx context.Context, apiClient client.APIClient, containe
 		select {
 		case result := <-resultC:
 			if result.Error != nil {
-				logrus.Errorf("Error waiting for container: %v", result.Error.Message)
+				log.Errorf("Error waiting for container: %v", result.Error.Message)
 				statusC <- 125
 			} else {
 				statusC <- int(result.StatusCode)
 			}
 		case err := <-errC:
-			logrus.Errorf("error waiting for container: %v", err)
+			log.Errorf("Error waiting for container: %v", err)
 			statusC <- 125
 		}
 	}()
@@ -99,7 +99,7 @@ func legacyWaitExitOrRemoved(ctx context.Context, apiClient client.APIClient, co
 			if v, ok := e.Actor.Attributes["exitCode"]; ok {
 				code, cerr := strconv.Atoi(v)
 				if cerr != nil {
-					logrus.Errorf("failed to convert exitcode '%q' to int: %v", v, cerr)
+					log.Errorf("Failed to convert exitcode '%q' to int: %v", v, cerr)
 				} else {
 					exitCode = code
 				}
@@ -112,7 +112,7 @@ func legacyWaitExitOrRemoved(ctx context.Context, apiClient client.APIClient, co
 				go func() {
 					removeErr = apiClient.ContainerRemove(ctx, containerID, container.RemoveOptions{RemoveVolumes: true})
 					if removeErr != nil {
-						logrus.Errorf("error removing container: %v", removeErr)
+						log.Errorf("Error removing container: %v", removeErr)
 						cancel() // cancel the event Q
 					}
 				}()
@@ -143,7 +143,7 @@ func legacyWaitExitOrRemoved(ctx context.Context, apiClient client.APIClient, co
 					return
 				}
 			case err := <-errq:
-				logrus.Errorf("error getting events from daemon: %v", err)
+				log.Errorf("Error getting events from daemon: %v", err)
 				return
 			}
 		}
@@ -180,7 +180,7 @@ func runLogsWaitRunning(ctx context.Context, dockerCli command.Cli, id string) e
 		defer t.Stop()
 		for range t.C {
 			// keyword, maybe can find another way more elegant
-			if strings.Contains(buf.String(), "Now you can access resources in the kubernetes cluster, enjoy it :)") {
+			if strings.Contains(buf.String(), config.Slogan) {
 				cancelFunc()
 				return
 			}
@@ -458,7 +458,7 @@ func runContainer(ctx context.Context, dockerCli command.Cli, runConfig *RunConf
 				return nil
 			}
 
-			logrus.Debugf("Error hijack: %s", err)
+			log.Debugf("Error hijack: %s", err)
 			return err
 		}
 	}
@@ -563,11 +563,11 @@ func run(ctx context.Context, cli *client.Client, dockerCli *command.DockerCli, 
 	var img types.ImageInspect
 	img, _, err = cli.ImageInspectWithRaw(ctx, config.Image)
 	if errdefs.IsNotFound(err) {
-		logrus.Infof("needs to pull image %s", config.Image)
+		log.Infof("Needs to pull image %s", config.Image)
 		needPull = true
 		err = nil
 	} else if err != nil {
-		logrus.Errorf("image inspect failed: %v", err)
+		log.Errorf("Image inspect failed: %v", err)
 		return
 	}
 	if platform != nil && platform.Architecture != "" && platform.OS != "" {
@@ -578,7 +578,7 @@ func run(ctx context.Context, cli *client.Client, dockerCli *command.DockerCli, 
 	if needPull {
 		err = pkgssh.PullImage(ctx, runConfig.platform, cli, dockerCli, config.Image, nil)
 		if err != nil {
-			logrus.Errorf("Failed to pull image: %s, err: %s", config.Image, err)
+			log.Errorf("Failed to pull image: %s, err: %s", config.Image, err)
 			return
 		}
 	}
@@ -586,17 +586,17 @@ func run(ctx context.Context, cli *client.Client, dockerCli *command.DockerCli, 
 	var create container.CreateResponse
 	create, err = cli.ContainerCreate(ctx, config, hostConfig, networkConfig, platform, name)
 	if err != nil {
-		logrus.Errorf("Failed to create container: %s, err: %s", name, err)
+		log.Errorf("Failed to create container: %s, err: %s", name, err)
 		return
 	}
 	id = create.ID
-	logrus.Infof("Created container: %s", name)
+	log.Infof("Created container: %s", name)
 	err = cli.ContainerStart(ctx, create.ID, container.StartOptions{})
 	if err != nil {
-		logrus.Errorf("failed to startup container %s: %v", name, err)
+		log.Errorf("Failed to startup container %s: %v", name, err)
 		return
 	}
-	logrus.Infof("Wait container %s to be running...", name)
+	log.Infof("Wait container %s to be running...", name)
 	var inspect types.ContainerJSON
 	ctx2, cancelFunc := context.WithCancel(ctx)
 	wait.UntilWithContext(ctx2, func(ctx context.Context) {
@@ -619,11 +619,11 @@ func run(ctx context.Context, cli *client.Client, dockerCli *command.DockerCli, 
 		}
 	}, time.Second)
 	if err != nil {
-		logrus.Errorf("failed to wait container to be ready: %v", err)
+		log.Errorf("Failed to wait container to be ready: %v", err)
 		_ = runLogsSinceNow(dockerCli, id, false)
 		return
 	}
 
-	logrus.Infof("Container %s is running now", name)
+	log.Infof("Container %s is running now", name)
 	return
 }

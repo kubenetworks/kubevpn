@@ -28,9 +28,9 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 		Long: templates.LongDesc(i18n.T(`
 		Reset all resource create by kubevpn in k8s cluster
 		
-		Reset will delete all resoucres create by kubevpn in k8s cluster, like deployment, service, serviceAccount...
+		Reset will delete all resources create by kubevpn in k8s cluster, like deployment, service, serviceAccount...
 		and it will also delete local develop docker containers, docker networks. delete hosts entry added by kubevpn,
-		cleanup dns.
+		cleanup DNS settings.
 		`)),
 		Example: templates.Examples(i18n.T(`
         # Reset default namespace
@@ -54,6 +54,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
         kubevpn reset --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			util.InitLoggerForClient(false)
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -68,7 +69,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 				SshJump:         sshConf.ToRPC(),
 			})
 			if err != nil {
-				log.Warnf("failed to disconnect from cluter: %v", err)
+				log.Warnf("Failed to disconnect from cluter: %v", err)
 			} else {
 				_ = printDisconnectResp(disconnect)
 			}
@@ -101,7 +102,7 @@ func printResetResp(resp rpc.Daemon_ResetClient) error {
 		} else if err != nil {
 			return err
 		}
-		fmt.Fprint(os.Stdout, recv.GetMessage())
+		_, _ = fmt.Fprintf(os.Stdout, recv.GetMessage())
 	}
 }
 
@@ -115,6 +116,6 @@ func printDisconnectResp(disconnect rpc.Daemon_DisconnectClient) error {
 		} else if err != nil {
 			return err
 		}
-		fmt.Fprint(os.Stdout, recv.GetMessage())
+		_, _ = fmt.Fprintf(os.Stdout, recv.GetMessage())
 	}
 }

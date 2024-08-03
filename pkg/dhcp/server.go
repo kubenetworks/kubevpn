@@ -28,12 +28,12 @@ func (s *Server) RentIP(ctx context.Context, req *rpc.RentIPRequest) (*rpc.RentI
 	s.Lock()
 	defer s.Unlock()
 
-	log.Infof("handling rent ip request, pod name: %s, ns: %s", req.PodName, req.PodNamespace)
+	log.Infof("Handling rent IP request, pod name: %s, ns: %s", req.PodName, req.PodNamespace)
 	cmi := s.clientset.CoreV1().ConfigMaps(req.PodNamespace)
 	manager := NewDHCPManager(cmi, req.PodNamespace)
 	v4, v6, err := manager.RentIP(ctx)
 	if err != nil {
-		log.Errorf("rent ip failed, err: %v", err)
+		log.Errorf("Failed to rent IP: %v", err)
 		return nil, err
 	}
 	// todo patch annotation
@@ -48,12 +48,12 @@ func (s *Server) ReleaseIP(ctx context.Context, req *rpc.ReleaseIPRequest) (*rpc
 	s.Lock()
 	defer s.Unlock()
 
-	log.Infof("handling release ip request, pod name: %s, ns: %s, ipv4: %s, ipv6: %s", req.PodName, req.PodNamespace, req.IPv4CIDR, req.IPv6CIDR)
+	log.Infof("Handling release IP request, pod name: %s, ns: %s, IPv4: %s, IPv6: %s", req.PodName, req.PodNamespace, req.IPv4CIDR, req.IPv6CIDR)
 	var ips []net.IP
 	for _, ipStr := range []string{req.IPv4CIDR, req.IPv6CIDR} {
 		ip, _, err := net.ParseCIDR(ipStr)
 		if err != nil {
-			log.Errorf("ip is invailed, ip: %s, err: %v", ipStr, err)
+			log.Errorf("IP %s is invailed, err: %v", ipStr, err)
 			continue
 		}
 		ips = append(ips, ip)
@@ -62,7 +62,7 @@ func (s *Server) ReleaseIP(ctx context.Context, req *rpc.ReleaseIPRequest) (*rpc
 	cmi := s.clientset.CoreV1().ConfigMaps(req.PodNamespace)
 	manager := NewDHCPManager(cmi, req.PodNamespace)
 	if err := manager.ReleaseIP(ctx, ips...); err != nil {
-		log.Errorf("release ip failed, err: %v", err)
+		log.Errorf("Failed to release IP: %v", err)
 		return nil, err
 	}
 	return &rpc.ReleaseIPResponse{}, nil

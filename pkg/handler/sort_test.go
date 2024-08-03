@@ -139,7 +139,7 @@ func TestSortConnect(t *testing.T) {
 		order := test.howToGetOrder(test.connects.Sort())
 		equal := reflect.DeepEqual(order, test.expectedOrder)
 		if !equal {
-			t.Fatalf("failed to sort conntions round %d, expected: %v, real: %v", i+1, test.expectedOrder, order)
+			t.Fatalf("Failed to sort conntions round %d, expected: %v, real: %v", i+1, test.expectedOrder, order)
 		}
 	}
 }

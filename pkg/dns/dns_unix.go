@@ -43,10 +43,10 @@ func (c *Config) usingResolver(ctx context.Context) {
 	path := "/etc/resolver"
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err = os.MkdirAll(path, 0755); err != nil {
-			log.Errorf("create resolver error: %v", err)
+			log.Errorf("Create resolver error: %v", err)
 		}
 		if err = os.Chmod(path, 0755); err != nil {
-			log.Errorf("chmod resolver error: %v", err)
+			log.Errorf("Chmod resolver error: %v", err)
 		}
 	}
 	newConfig := miekgdns.ClientConfig{
@@ -87,8 +87,8 @@ func (c *Config) usingResolver(ctx context.Context) {
 	}
 }
 
-func (c *Config) usingNetworkSetup(ip string, namespace string) {
-	networkSetup(ip, namespace)
+func (c *Config) usingNetworkSetup(ip string, ns string) {
+	networkSetup(ip, ns)
 	var ctx context.Context
 	ctx, cancel = context.WithCancel(context.Background())
 	go func() {
@@ -111,7 +111,7 @@ func (c *Config) usingNetworkSetup(ip string, namespace string) {
 				if rc, err := miekgdns.ClientConfigFromFile(resolv); err == nil && rc.Timeout != 1 {
 					if !sets.New[string](rc.Servers...).Has(ip) {
 						rc.Servers = append(rc.Servers, ip)
-						for _, s := range []string{namespace + ".svc.cluster.local", "svc.cluster.local", "cluster.local"} {
+						for _, s := range []string{ns + ".svc.cluster.local", "svc.cluster.local", "cluster.local"} {
 							rc.Search = append(rc.Search, s)
 						}
 						//rc.Ndots = 5
@@ -181,7 +181,7 @@ func (c *Config) CancelDNS() {
 		if err != nil {
 			return nil
 		}
-		// if not has this dns server, do nothing
+		// if not has this DNS server, do nothing
 		if !sets.New[string](conf.Servers...).Has(c.Config.Servers[0]) {
 			return nil
 		}
@@ -246,7 +246,7 @@ func networkSetup(ip string, namespace string) {
 			args := []string{"-setdnsservers", s}
 			output, err = exec.Command("networksetup", append(args, nameservers...)...).Output()
 			if err != nil {
-				log.Warnf("error while set dnsserver for %s, err: %v, output: %s\n", s, err, string(output))
+				log.Warnf("Failed to set DNS server for %s, err: %v, output: %s\n", s, err, string(output))
 			}
 		}
 		output, err = exec.Command("networksetup", "-getsearchdomains", s).Output()
@@ -266,7 +266,7 @@ func networkSetup(ip string, namespace string) {
 			args := []string{"-setsearchdomains", s}
 			bytes, err := exec.Command("networksetup", append(args, newSearchDomains...)...).Output()
 			if err != nil {
-				log.Warnf("error while set search domain for %s, err: %v, output: %s\n", s, err, string(bytes))
+				log.Warnf("Failed to set search domain for %s, err: %v, output: %s\n", s, err, string(bytes))
 			}
 		}
 	}
@@ -285,7 +285,7 @@ func networkCancel() {
 			if i[1] == "svc.cluster.local" && i[2] == "cluster.local" {
 				bytes, err := exec.Command("networksetup", "-setsearchdomains", s, strings.Join(i[3:], " ")).Output()
 				if err != nil {
-					log.Warnf("error while remove search domain for %s, err: %v, output: %s\n", s, err, string(bytes))
+					log.Warnf("Failed to remove search domain for %s, err: %v, output: %s\n", s, err, string(bytes))
 				}
 
 				output, err := exec.Command("networksetup", "-getdnsservers", s).Output()
@@ -301,7 +301,7 @@ func networkCancel() {
 					args := []string{"-setdnsservers", s}
 					combinedOutput, err := exec.Command("networksetup", append(args, dnsServers...)...).Output()
 					if err != nil {
-						log.Warnf("error while remove dnsserver for %s, err: %v, output: %s", s, err, string(combinedOutput))
+						log.Warnf("Failed to remove DNS server for %s, err: %v, output: %s", s, err, string(combinedOutput))
 					}
 				}
 			}

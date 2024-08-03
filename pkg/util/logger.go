@@ -7,17 +7,21 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func InitLogger(debug bool) {
+func InitLoggerForClient(debug bool) {
 	if debug {
 		log.SetLevel(log.DebugLevel)
+	} else {
+		log.SetLevel(log.InfoLevel)
 	}
-	log.SetReportCaller(true)
+	log.SetReportCaller(false)
 	log.SetFormatter(&format{})
 }
 
 func InitLoggerForServer(debug bool) {
 	if debug {
 		log.SetLevel(log.DebugLevel)
+	} else {
+		log.SetLevel(log.InfoLevel)
 	}
 	log.SetReportCaller(true)
 	log.SetFormatter(&serverFormat{})
@@ -42,10 +46,11 @@ type serverFormat struct {
 // 2009/01/23 01:23:23 d.go:23: message
 func (*serverFormat) Format(e *log.Entry) ([]byte, error) {
 	return []byte(
-		fmt.Sprintf("%s %s:%d: %s\n",
-			e.Time.Format("2006/01/02 15:04:05"),
+		fmt.Sprintf("%s %s:%d %s: %s\n",
+			e.Time.Format("2006-01-02 15:04:05"),
 			filepath.Base(e.Caller.File),
 			e.Caller.Line,
+			e.Level.String(),
 			e.Message,
 		)), nil
 }

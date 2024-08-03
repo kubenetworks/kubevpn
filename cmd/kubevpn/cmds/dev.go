@@ -87,7 +87,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			util.InitLogger(false)
+			util.InitLoggerForClient(config.Debug)
 			// not support temporally
 			if options.Engine == config.EngineGvisor {
 				return fmt.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
@@ -121,7 +121,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 				for _, function := range options.GetRollbackFuncList() {
 					if function != nil {
 						if er := function(); er != nil {
-							log.Errorf("roll back failed, error: %s", er.Error())
+							log.Errorf("Rollback failed, error: %s", er.Error())
 						}
 					}
 				}

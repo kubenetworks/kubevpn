@@ -46,7 +46,7 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 			}
 			servers, err := handler.Parse(*route)
 			if err != nil {
-				log.Errorf("parse server failed: %v", err)
+				log.Errorf("Parse server failed: %v", err)
 				return err
 			}
 			return handler.Run(ctx, servers)

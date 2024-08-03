@@ -6,6 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
@@ -14,12 +15,13 @@ import (
 
 func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) error {
 	defer func() {
+		util.InitLoggerForServer(true)
 		log.SetOutput(svr.LogFile)
-		log.SetLevel(log.DebugLevel)
+		config.Debug = false
 	}()
 	out := io.MultiWriter(newResetWarp(resp), svr.LogFile)
+	util.InitLoggerForClient(config.Debug)
 	log.SetOutput(out)
-	log.SetLevel(log.InfoLevel)
 
 	connect := &handler.ConnectOptions{
 		Namespace: req.Namespace,
@@ -50,7 +52,6 @@ func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) err
 	if err != nil {
 		return err
 	}
-	log.Debugf("Done")
 	return nil
 }
 

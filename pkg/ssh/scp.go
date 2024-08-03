@@ -57,7 +57,7 @@ func SCP(client *ssh.Client, stdout, stderr io.Writer, filename, to string) erro
 		fmt.Fprintln(w, "C0644", stat.Size(), to)
 		err := sCopy(w, file, stat.Size(), stdout, stderr)
 		if err != nil {
-			log.Errorf("failed to transfer file to remote: %v", err)
+			log.Errorf("Failed to transfer file to remote: %v", err)
 			return
 		}
 		fmt.Fprint(w, "\x00") // transfer end with \x00
@@ -90,11 +90,11 @@ func sCopy(dst io.Writer, src io.Reader, size int64, stdout, stderr io.Writer) e
 	buf := make([]byte, 10<<(10*2)) // 10M
 	written, err := io.CopyBuffer(io.MultiWriter(dst, bar), src, buf)
 	if err != nil {
-		log.Errorf("failed to transfer file to remote: %v", err)
+		log.Errorf("Failed to transfer file to remote: %v", err)
 		return err
 	}
 	if written != size {
-		log.Errorf("failed to transfer file to remote: written size %d but actuall is %d", written, size)
+		log.Errorf("Failed to transfer file to remote: written size %d but actuall is %d", written, size)
 		return err
 	}
 	return nil

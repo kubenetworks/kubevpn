@@ -12,7 +12,7 @@ import (
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/moby/term"
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 // The default escape key sequence: ctrl-p, ctrl-q
@@ -97,7 +97,7 @@ func (h *hijackedIOStreamer) setupInput() (restore func(), err error) {
 	if h.detachKeys != "" {
 		customEscapeKeys, err := term.ToBytes(h.detachKeys)
 		if err != nil {
-			logrus.Warnf("invalid detach escape keys, using default: %s", err)
+			log.Warnf("Invalid detach escape keys, using default: %s", err)
 		} else {
 			escapeKeys = customEscapeKeys
 		}
@@ -129,10 +129,10 @@ func (h *hijackedIOStreamer) beginOutputStream(restoreInput func()) <-chan error
 			_, err = stdcopy.StdCopy(h.outputStream, h.errorStream, h.resp.Reader)
 		}
 
-		logrus.Debug("[hijack] End of stdout")
+		log.Debug("[hijack] End of stdout")
 
 		if err != nil {
-			logrus.Debugf("Error receiveStdout: %s", err)
+			log.Debugf("Error receive stdout: %s", err)
 		}
 
 		outputDone <- err
@@ -153,7 +153,7 @@ func (h *hijackedIOStreamer) beginInputStream(restoreInput func()) (doneC <-chan
 			// messages will be in normal type.
 			restoreInput()
 
-			logrus.Debug("[hijack] End of stdin")
+			log.Debug("[hijack] End of stdin")
 
 			if _, ok := err.(term.EscapeError); ok {
 				detached <- err
@@ -164,12 +164,12 @@ func (h *hijackedIOStreamer) beginInputStream(restoreInput func()) (doneC <-chan
 				// This error will also occur on the receive
 				// side (from stdout) where it will be
 				// propagated back to the caller.
-				logrus.Debugf("Error sendStdin: %s", err)
+				log.Debugf("Error send stdin: %s", err)
 			}
 		}
 
 		if err := h.resp.CloseWrite(); err != nil {
-			logrus.Debugf("Couldn't send EOF: %s", err)
+			log.Debugf("Couldn't send EOF: %s", err)
 		}
 
 		close(inputDone)

@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/containerd/containerd/platforms"
 	"github.com/docker/cli/cli/command"
@@ -29,8 +27,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	"k8s.io/kubectl/pkg/polymorphichelpers"
-	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -81,10 +77,10 @@ type Options struct {
 func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, flags *pflag.FlagSet, transferImage bool) error {
 	mode := typescontainer.NetworkMode(option.ContainerOptions.netMode.NetworkMode())
 	if mode.IsContainer() {
-		log.Infof("network mode container is %s", mode.ConnectedContainer())
+		log.Infof("Network mode container is %s", mode.ConnectedContainer())
 		inspect, err := option.cli.ContainerInspect(ctx, mode.ConnectedContainer())
 		if err != nil {
-			log.Errorf("can not inspect container %s, err: %v", mode.ConnectedContainer(), err)
+			log.Errorf("Failed to inspect container %s, err: %v", mode.ConnectedContainer(), err)
 			return err
 		}
 		if inspect.State == nil {
@@ -93,13 +89,13 @@ func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, fl
 		if !inspect.State.Running {
 			return fmt.Errorf("container %s status is %s, expect is running, please make sure your outer docker name is correct", mode.ConnectedContainer(), inspect.State.Status)
 		}
-		log.Infof("container %s is running", mode.ConnectedContainer())
+		log.Infof("Container %s is running", mode.ConnectedContainer())
 	} else if mode.IsDefault() && util.RunningInContainer() {
 		hostname, err := os.Hostname()
 		if err != nil {
 			return err
 		}
-		log.Infof("hostname is %s", hostname)
+		log.Infof("Hostname is %s", hostname)
 		err = option.ContainerOptions.netMode.Set(fmt.Sprintf("container:%s", hostname))
 		if err != nil {
 			return err
@@ -134,7 +130,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 		if err != nil {
 			return err
 		}
-		logLevel := log.ErrorLevel
+		logLevel := log.InfoLevel
 		if config.Debug {
 			logLevel = log.DebugLevel
 		}
@@ -186,7 +182,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			return err
 		}
 		var id string
-		log.Infof("starting container connect to cluster")
+		log.Infof("Starting connect to cluster in container")
 		id, err = run(ctx, option.cli, option.dockerCli, runConfig)
 		if err != nil {
 			return err
@@ -204,7 +200,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			}
 			return err
 		}
-		log.Infof("container connect to cluster successfully")
+		log.Infof("Connected to cluster in container")
 		err = option.ContainerOptions.netMode.Set(fmt.Sprintf("container:%s", id))
 		return err
 	default:
@@ -218,38 +214,30 @@ func (option *Options) Dev(ctx context.Context, cConfig *Config, hostConfig *Hos
 		return err
 	}
 
-	sortBy := func(pods []*v1.Pod) sort.Interface {
-		for i := 0; i < len(pods); i++ {
-			if pods[i].DeletionTimestamp != nil {
-				pods = append(pods[:i], pods[i+1:]...)
-				i--
-			}
-		}
-		return sort.Reverse(podutils.ActivePods(pods))
-	}
 	label := labels.SelectorFromSet(templateSpec.Labels).String()
-	firstPod, _, err := polymorphichelpers.GetFirstPod(option.clientset.CoreV1(), option.Namespace, label, time.Second*5, sortBy)
+	var list []v1.Pod
+	list, err = util.GetRunningPodList(ctx, option.clientset, option.Namespace, label)
 	if err != nil {
-		log.Errorf("get first running pod from k8s: %v", err)
+		log.Errorf("Failed to get first running pod from k8s: %v", err)
 		return err
 	}
 
-	env, err := util.GetEnv(ctx, option.clientset, option.config, option.Namespace, firstPod.Name)
+	env, err := util.GetEnv(ctx, option.clientset, option.config, option.Namespace, list[0].Name)
 	if err != nil {
-		log.Errorf("get env from k8s: %v", err)
+		log.Errorf("Failed to get env from k8s: %v", err)
 		return err
 	}
-	volume, err := util.GetVolume(ctx, option.factory, option.Namespace, firstPod.Name)
+	volume, err := util.GetVolume(ctx, option.factory, option.Namespace, list[0].Name)
 	if err != nil {
-		log.Errorf("get volume from k8s: %v", err)
+		log.Errorf("Failed to get volume from k8s: %v", err)
 		return err
 	}
 	option.AddRollbackFunc(func() error {
 		return util.RemoveDir(volume)
 	})
-	dns, err := util.GetDNS(ctx, option.clientset, option.config, option.Namespace, firstPod.Name)
+	dns, err := util.GetDNS(ctx, option.clientset, option.config, option.Namespace, list[0].Name)
 	if err != nil {
-		log.Errorf("get dns from k8s: %v", err)
+		log.Errorf("Failed to get DNS from k8s: %v", err)
 		return err
 	}
 
@@ -271,7 +259,7 @@ func (option *Options) Dev(ctx context.Context, cConfig *Config, hostConfig *Hos
 
 	mode := container.NetworkMode(option.ContainerOptions.netMode.NetworkMode())
 	if len(option.ContainerOptions.netMode.Value()) != 0 {
-		log.Infof("network mode is %s", option.ContainerOptions.netMode.NetworkMode())
+		log.Infof("Network mode is %s", option.ContainerOptions.netMode.NetworkMode())
 		for _, runConfig := range configList[:] {
 			// remove expose port
 			runConfig.config.ExposedPorts = nil
@@ -292,10 +280,10 @@ func (option *Options) Dev(ctx context.Context, cConfig *Config, hostConfig *Hos
 		var networkID string
 		networkID, err = createNetwork(ctx, option.cli)
 		if err != nil {
-			log.Errorf("create network for %s: %v", option.Workload, err)
+			log.Errorf("Failed to create network for %s: %v", option.Workload, err)
 			return err
 		}
-		log.Infof("create docker network %s", networkID)
+		log.Infof("Create docker network %s", networkID)
 
 		configList[len(configList)-1].networkingConfig.EndpointsConfig = map[string]*network.EndpointSettings{
 			configList[len(configList)-1].name: {NetworkID: networkID},
@@ -335,7 +323,8 @@ func (option *Options) Dev(ctx context.Context, cConfig *Config, hostConfig *Hos
 	}
 
 	option.AddRollbackFunc(func() error {
-		return configList.Remove(ctx, option.cli)
+		_ = configList.Remove(ctx, option.cli)
+		return nil
 	})
 	return configList.Run(ctx, volume, option.cli, option.dockerCli)
 }
@@ -517,7 +506,7 @@ func (option *Options) InitClient(f cmdutil.Factory) (err error) {
 func (option *Options) GetPodTemplateSpec() (*v1.PodTemplateSpec, error) {
 	object, err := util.GetUnstructuredObject(option.factory, option.Namespace, option.Workload)
 	if err != nil {
-		log.Errorf("get unstructured object error: %v", err)
+		log.Errorf("Failed to get unstructured object error: %v", err)
 		return nil, err
 	}
 

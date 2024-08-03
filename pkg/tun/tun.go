@@ -40,11 +40,11 @@ func Listener(config Config) (net.Listener, error) {
 
 	conn, ifce, err := createTun(config)
 	if err != nil {
-		log.Errorf("create tun device error: %v", err)
+		log.Errorf("Create tun device error: %v", err)
 		return nil, err
 	}
 	addrs, _ := ifce.Addrs()
-	log.Debugf("[tun] %s: name: %s, mtu: %d, addrs: %s", conn.LocalAddr(), ifce.Name, ifce.MTU, addrs)
+	log.Debugf("[TUN] %s: name: %s, mtu: %d, addrs: %s", conn.LocalAddr(), ifce.Name, ifce.MTU, addrs)
 
 	ln.addr = conn.LocalAddr()
 	ln.conns <- conn

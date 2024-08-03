@@ -13,12 +13,12 @@ var (
 )
 
 type Chain struct {
-	Retries int
+	retries int
 	node    *Node
 }
 
 func NewChain(retry int, node *Node) *Chain {
-	return &Chain{Retries: retry, node: node}
+	return &Chain{retries: retry, node: node}
 }
 
 func (c *Chain) Node() *Node {
@@ -30,7 +30,7 @@ func (c *Chain) IsEmpty() bool {
 }
 
 func (c *Chain) DialContext(ctx context.Context) (conn net.Conn, err error) {
-	for i := 0; i < int(math.Max(float64(1), float64(c.Retries))); i++ {
+	for i := 0; i < int(math.Max(float64(1), float64(c.retries))); i++ {
 		conn, err = c.dial(ctx)
 		if err == nil {
 			break

@@ -45,7 +45,7 @@ func Main(f util.Factory) error {
 	grpcServer := grpc.NewServer()
 	cleanup, err := admin.Register(grpcServer)
 	if err != nil {
-		log.Errorf("failed to register admin: %v", err)
+		log.Errorf("Failed to register admin: %v", err)
 		return err
 	}
 	grpc_health_v1.RegisterHealthServer(grpcServer, health.NewServer())
@@ -62,7 +62,7 @@ func Main(f util.Factory) error {
 	var h2Server http2.Server
 	err = http2.ConfigureServer(downgradingServer, &h2Server)
 	if err != nil {
-		log.Errorf("failed to configure http2 server: %v", err)
+		log.Errorf("Failed to configure http2 server: %v", err)
 		return err
 	}
 	handler := daemon.CreateDowngradingHandler(grpcServer, http.HandlerFunc(http.DefaultServeMux.ServeHTTP))

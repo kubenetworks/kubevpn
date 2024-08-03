@@ -16,6 +16,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
@@ -30,13 +31,14 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 		This command is to disconnect from cluster. after use command 'kubevpn connect',
 		you can use this command to disconnect from a specific cluster. 
 		before disconnect, it will leave proxy resource and clone resource if resource depends on this cluster 
-		after disconnect it will also cleanup dns and host
+		after disconnect it will also cleanup DNS and host
 		`)),
 		Example: templates.Examples(i18n.T(`
 		# disconnect from cluster network and restore proxy resource
         kubevpn disconnect
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
+			util.InitLoggerForClient(false)
 			err = daemon.StartupDaemon(cmd.Context())
 			return err
 		},
@@ -73,14 +75,14 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 				if err == io.EOF {
 					break
 				} else if err == nil {
-					fmt.Fprint(os.Stdout, resp.Message)
+					_, _ = fmt.Fprint(os.Stdout, resp.Message)
 				} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
 					break
 				} else {
 					return err
 				}
 			}
-			fmt.Fprint(os.Stdout, "disconnect successfully")
+			_, _ = fmt.Fprint(os.Stdout, "Disconnect completed")
 			return nil
 		},
 	}

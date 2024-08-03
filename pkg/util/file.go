@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 func DownloadFileWithName(uri, name string) (string, error) {
@@ -41,7 +41,7 @@ func DownloadFileWithName(uri, name string) (string, error) {
 		return "", fmt.Errorf("failed to save file %s. error: %v", file, err)
 	}
 
-	logrus.Infof("downloaded file %s", file)
+	log.Infof("Downloaded file %s", file)
 	return file, nil
 }
 
