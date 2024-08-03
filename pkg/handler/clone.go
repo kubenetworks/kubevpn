@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	libconfig "github.com/syncthing/syncthing/lib/config"
+	"github.com/syncthing/syncthing/lib/netutil"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -30,6 +32,8 @@ import (
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/cmd/util/podcmd"
+	"k8s.io/kubectl/pkg/polymorphichelpers"
+	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/utils/pointer"
 	"k8s.io/utils/ptr"
 
@@ -401,30 +405,78 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 		}
 		log.Infof("Create clone resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
 		log.Infof("Wait for clone resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
+		log.Infoln()
 		err = util.WaitPodToBeReady(ctx, d.targetClientset.CoreV1().Pods(d.TargetNamespace), metav1.LabelSelector{MatchLabels: labelsMap})
 		if err != nil {
 			return err
 		}
 		_ = util.RolloutStatus(ctx, d.factory, d.Namespace, workload, time.Minute*60)
 
-		if d.LocalDir == "" {
-			continue
+		if d.LocalDir != "" {
+			err = d.SyncDir(ctx, fields.SelectorFromSet(labelsMap).String())
+			if err != nil {
+				return err
+			}
 		}
-
-		list, err := util.GetRunningPodList(ctx, d.targetClientset, d.TargetNamespace, fields.SelectorFromSet(labelsMap).String())
-		if err != nil {
-			return err
-		}
-		remoteAddr := net.JoinHostPort(list[0].Status.PodIP, strconv.Itoa(libconfig.DefaultTCPPort))
-		localPort, _ := util.GetAvailableTCPPortOrDie()
-		localAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort))
-		err = syncthing.StartClient(d.ctx, d.LocalDir, localAddr, remoteAddr)
-		if err != nil {
-			return err
-		}
-		d.syncthingGUIAddr = (&url.URL{Scheme: "http", Host: localAddr}).String()
-		log.Infof("Access the syncthing GUI via the following URL: %s", d.syncthingGUIAddr)
 	}
+	return nil
+}
+
+func (d *CloneOptions) SyncDir(ctx context.Context, labels string) error {
+	list, err := util.GetRunningPodList(ctx, d.targetClientset, d.TargetNamespace, labels)
+	if err != nil {
+		return err
+	}
+	remoteAddr := net.JoinHostPort(list[0].Status.PodIP, strconv.Itoa(libconfig.DefaultTCPPort))
+	localPort, _ := util.GetAvailableTCPPortOrDie()
+	localAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort))
+	err = syncthing.StartClient(d.ctx, d.LocalDir, localAddr, remoteAddr)
+	if err != nil {
+		return err
+	}
+	d.syncthingGUIAddr = (&url.URL{Scheme: "http", Host: localAddr}).String()
+	log.Infof("Access the syncthing GUI via the following URL: %s", d.syncthingGUIAddr)
+	go func() {
+		client := syncthing.NewClient(localAddr)
+		podName := list[0].Name
+		for d.ctx.Err() == nil {
+			func() {
+				defer time.Sleep(time.Second * 2)
+
+				util.CheckPodStatus(d.ctx, func() {}, podName, d.targetClientset.CoreV1().Pods(d.TargetNamespace))
+				sortBy := func(pods []*v1.Pod) sort.Interface { return sort.Reverse(podutils.ActivePods(pods)) }
+				_, _, _ = polymorphichelpers.GetFirstPod(d.targetClientset.CoreV1(), d.TargetNamespace, labels, time.Second*30, sortBy)
+				list, err := util.GetRunningPodList(d.ctx, d.targetClientset, d.TargetNamespace, labels)
+				if err != nil {
+					log.Error(err)
+					return
+				}
+				if podName == list[0].Name {
+					return
+				}
+
+				podName = list[0].Name
+				log.Debugf("Detect newer pod %s", podName)
+				var conf *libconfig.Configuration
+				conf, err = client.GetConfig(d.ctx)
+				if err != nil {
+					log.Errorf("Failed to get config from syncthing: %v", err)
+					return
+				}
+				for i := range conf.Devices {
+					if config.RemoteDeviceID.Equals(conf.Devices[i].DeviceID) {
+						addr := netutil.AddressURL("tcp", net.JoinHostPort(list[0].Status.PodIP, strconv.Itoa(libconfig.DefaultTCPPort)))
+						conf.Devices[i].Addresses = []string{addr}
+						log.Debugf("Use newer remote syncthing endpoint: %s", addr)
+					}
+				}
+				err = client.PutConfig(d.ctx, conf)
+				if err != nil {
+					log.Errorf("Failed to set config to syncthing: %v", err)
+				}
+			}()
+		}
+	}()
 	return nil
 }
 
