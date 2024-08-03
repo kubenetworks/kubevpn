@@ -241,7 +241,6 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		log.Errorf("Configure DNS failed: %v", err)
 		return
 	}
-	go c.heartbeats(c.ctx)
 	log.Info("Configured DNS service")
 	return
 }
@@ -482,7 +481,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	
+
 	var conn net.Conn
 	d := net.Dialer{Timeout: time.Duration(max(2, relovConf.Timeout)) * time.Second}
 	conn, err = d.DialContext(ctx, "tcp", net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(portTCP)))
@@ -1033,48 +1032,6 @@ func newer(clientImgStr, serverImgStr string) (bool, error) {
 		return false, err
 	}
 	return clientVersion.GreaterThan(serverVersion), nil
-}
-
-// The reason why only Ping each other inner ip on Windows:
-// On macOS use 'kubevpn proxy deploy/authors -H user=macos'
-// On Windows use 'kubevpn proxy deploy/authors -H user=windows'
-// On macOS/Windows:
-// 'curl authors:9080/health -H "user: macos"' --> ok
-// 'curl authors:9080/health -H "user: windows"' --> failed
-// On Windows 'ping authors's inner tunIP' then
-// 'curl authors:9080/health -H "user: macos"' --> ok
-// 'curl authors:9080/health -H "user: windows"' --> ok
-func (c *ConnectOptions) heartbeats(ctx context.Context) {
-	if !util.IsWindows() {
-		return
-	}
-	v4, v6 := c.GetLocalTunIP()
-	for ctx.Err() == nil {
-		func() {
-			defer func() {
-				if err := recover(); err != nil {
-					log.Debug(err)
-				}
-			}()
-
-			var wg = &sync.WaitGroup{}
-			_ = c.dhcp.ForEach(ctx, func(ip net.IP) {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					_, _ = util.Ping(ctx, v4, ip.String())
-				}()
-			}, func(ip net.IP) {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					_, _ = util.Ping(ctx, v6, ip.String())
-				}()
-			})
-			wg.Wait()
-		}()
-		time.Sleep(time.Second * 15)
-	}
 }
 
 func (c *ConnectOptions) Equal(a *ConnectOptions) bool {
