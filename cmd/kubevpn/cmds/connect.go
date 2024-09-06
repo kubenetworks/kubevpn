@@ -35,9 +35,9 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		Connect to kubernetes cluster network
 		
 		After connect to kubernetes cluster network, you can ping PodIP or
-		curl ServiceIP in local PC, it also support k8s DNS resolve. 
+		curl ServiceIP in local PC, it also supports k8s DNS resolve. 
 		Like: curl authors/authors.default/authors.default.svc/authors.default.svc.cluster.local.
-		So you can startup your application in local PC. depends on anything in
+		So you can start up your application in local PC. depends on anything in
 		k8s cluster is ok, connect to them just like in k8s cluster.
 		`)),
 		Example: templates.Examples(i18n.T(`
@@ -47,7 +47,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		# Connect to api-server behind of bastion host or ssh jump host
 		kubevpn connect --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
-		# It also support ProxyJump, like
+		# It also supports ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘

@@ -45,7 +45,7 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 		Config file alias to execute command simply, just like ssh alias config
 		
 		It will read ~/.kubevpn/config.yaml file as config, also support special file path
-		by flag -f. It also support depends relationship, like one cluster api server needs to 
+		by flag -f. It also supports depends relationship, like one cluster api server needs to 
 		access via another cluster, you can use syntax needs. it will do action to needs cluster first
  		and then do action to target cluster
 		`)),

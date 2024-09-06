@@ -39,7 +39,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
         # Jump to server behind of bastion host or ssh jump host
 		kubevpn ssh --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
-		# It also support ProxyJump, like
+		# It also supports ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────┘

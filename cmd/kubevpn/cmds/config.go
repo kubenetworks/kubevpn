@@ -35,7 +35,7 @@ func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
 		# proxy api-server which api-server behind of bastion host or ssh jump host
 		kubevpn config add --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
-		# It also support ProxyJump, like
+		# It also supports ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
