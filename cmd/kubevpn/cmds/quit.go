@@ -23,7 +23,7 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
 		Use:   "quit",
 		Short: i18n.T("Quit kubevpn daemon grpc server"),
 		Long: templates.LongDesc(i18n.T(`
-		Disconnect from cluster, leave proxy resources, quit daemon grpc server and cleanup dns/host
+		Disconnect from cluster, leave proxy resources, quit daemon grpc server and cleanup dns/hosts
 		`)),
 		Example: templates.Examples(i18n.T(`
         # before quit kubevpn, it will leave proxy resources to origin and disconnect from cluster

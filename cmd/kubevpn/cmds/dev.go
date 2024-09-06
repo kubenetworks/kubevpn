@@ -33,7 +33,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		Long: templates.LongDesc(i18n.T(`
 		Startup your kubernetes workloads in local Docker container with same volume、env、and network
 
-		## What did i do:
+		## What did it do:
 		- Download volume which MountPath point to, mount to docker container
 		- Connect to cluster network, set network to docker container
 		- Get all environment with command (env), set env to docker container
@@ -54,7 +54,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		# Develop workloads which api-server behind of bastion host or ssh jump host
 		kubevpn dev deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
 
-		# It also support ProxyJump, like
+		# It also supports ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘

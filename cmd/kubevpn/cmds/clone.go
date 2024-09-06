@@ -33,25 +33,25 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	var syncDir string
 	cmd := &cobra.Command{
 		Use:   "clone",
-		Short: i18n.T("Clone workloads to target-kubeconfig cluster with same volume、env、and network"),
+		Short: i18n.T("Clone workloads to run in target-kubeconfig cluster with same volume、env、and network"),
 		Long: templates.LongDesc(i18n.T(`
-		Clone workloads to target-kubeconfig cluster with same volume、env、and network
+		Clone workloads to run into target-kubeconfig cluster with same volume、env、and network
 
 		In this way, you can startup another deployment in same cluster or not, but with different image version,
-		it also support service mesh proxy. only traffic with special header will hit to cloned_resource.
+		it also supports service mesh proxy. only traffic with special header will hit to cloned_resource.
 		`)),
 		Example: templates.Examples(i18n.T(`
 		# clone
-		- clone deployment in current cluster and current namespace
+		- clone deployment run into current cluster and current namespace
 		  kubevpn clone deployment/productpage
 
-		- clone deployment in current cluster with different namespace
+		- clone deployment run into current cluster with different namespace
 		  kubevpn clone deployment/productpage -n test
         
-		- clone deployment to another cluster
+		- clone deployment run into another cluster
 		  kubevpn clone deployment/productpage --target-kubeconfig ~/.kube/other-kubeconfig
 
-        - clone multiple workloads
+        - clone multiple workloads run into current cluster and current namespace
           kubevpn clone deployment/authors deployment/productpage
           or 
           kubevpn clone deployment authors productpage
@@ -62,7 +62,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 		# clone workloads which api-server behind of bastion host or ssh jump host
 		kubevpn clone deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem --headers a=1
 
-		# It also support ProxyJump, like
+		# It also supports ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
@@ -155,7 +155,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringToStringVarP(&options.Headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to local PC, If not special, redirect all traffic to local PC. eg: --headers a=1 --headers b=2")
+	cmd.Flags().StringToStringVarP(&options.Headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to target cluster cloned workloads, If not special, redirect all traffic to target cluster cloned workloads. eg: --headers a=1 --headers b=2")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
 	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)

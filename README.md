@@ -48,34 +48,23 @@ With KubeVPN, empower yourself to develop applications entirely on your local PC
 
 ## QuickStart
 
-#### Install from brew
+### Install from brew (macOS / Linux)
 
 ```shell
 brew install kubevpn
 ```
 
-#### Install from custom krew index
+### Install from custom krew index ( Windows / macOS / Linux)
 
 ```shell
-(
-  kubectl krew index add kubevpn https://github.com/kubenetworks/kubevpn.git && \
-  kubectl krew install kubevpn/kubevpn && kubectl kubevpn 
-) 
+kubectl krew index add kubevpn https://github.com/kubenetworks/kubevpn.git
+kubectl krew install kubevpn/kubevpn 
+kubectl kubevpn 
 ```
 
-#### Install from GitHub release
+### Install from GitHub release ( Windows / macOS / Linux)
 
-[LINK](https://github.com/kubenetworks/kubevpn/releases/latest)
-
-#### Install from build it manually
-
-```shell
-(
-  git clone https://github.com/kubenetworks/kubevpn.git && \
-  cd kubevpn && make kubevpn && ./bin/kubevpn
-)
-
-```
+[https://github.com/kubenetworks/kubevpn/releases/latest](https://github.com/kubenetworks/kubevpn/releases/latest)
 
 ### Install bookinfo as demo application
 
