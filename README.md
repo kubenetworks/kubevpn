@@ -48,7 +48,7 @@ With KubeVPN, empower yourself to develop applications entirely on your local PC
 
 ## QuickStart
 
-### Install from brew (macOS / Linux)
+### Install from [brew](https://brew.sh/) (macOS / Linux)
 
 ```shell
 brew install kubevpn
@@ -61,7 +61,7 @@ scoop bucket add extras
 scoop install kubevpn
 ```
 
-### Install from custom krew index ( Windows / macOS / Linux)
+### Install from [krew](https://krew.sigs.k8s.io/) (Windows / macOS / Linux)
 
 ```shell
 kubectl krew index add kubevpn https://github.com/kubenetworks/kubevpn.git
@@ -69,7 +69,7 @@ kubectl krew install kubevpn/kubevpn
 kubectl kubevpn 
 ```
 
-### Install from GitHub release ( Windows / macOS / Linux)
+### Install from GitHub release (Windows / macOS / Linux)
 
 [https://github.com/kubenetworks/kubevpn/releases/latest](https://github.com/kubenetworks/kubevpn/releases/latest)
 
@@ -662,7 +662,8 @@ kubectl delete -f https://raw.githubusercontent.com/kubenetworks/kubevpn/master/
 - TCP
 - UDP
 - ICMP
-- GRPC
+- gRPC
+- Thrift
 - WebSocket
 - HTTP
 - ...
