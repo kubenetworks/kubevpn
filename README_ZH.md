@@ -43,7 +43,7 @@ Docker
 
 ## 快速开始
 
-### 使用 brew 安装 (macOS / Linux)
+### 使用 [brew](https://brew.sh/) 安装 (macOS / Linux)
 
 ```shell
 brew install kubevpn
@@ -56,7 +56,7 @@ scoop bucket add extras
 scoop install kubevpn
 ```
 
-### 从 自定义 Krew 仓库安装 (Windows / macOS / Linux)
+### 使用 [krew](https://krew.sigs.k8s.io/) (Windows / macOS / Linux)
 
 ```shell
 kubectl krew index add kubevpn https://github.com/kubenetworks/kubevpn.git
@@ -64,7 +64,7 @@ kubectl krew install kubevpn/kubevpn
 kubectl kubevpn 
 ```
 
-### 从 Github release 下载编译好的二进制文件 ( Windows / macOS / Linux)
+### 从 Github release 下载 (Windows / macOS / Linux)
 
 [https://github.com/kubenetworks/kubevpn/releases/latest](https://github.com/kubenetworks/kubevpn/releases/latest)
 
@@ -560,7 +560,8 @@ d0b3dab8912a   naison/kubevpn:v2.0.0           "/bin/bash"              5 minute
 - TCP
 - UDP
 - ICMP
-- GRPC
+- gRPC
+- Thrift
 - WebSocket
 - HTTP
 - ...
