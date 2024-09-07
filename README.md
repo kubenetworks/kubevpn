@@ -54,6 +54,13 @@ With KubeVPN, empower yourself to develop applications entirely on your local PC
 brew install kubevpn
 ```
 
+### Install from [scoop](https://scoop.sh/) (Windows)
+
+```shell
+scoop bucket add extras
+scoop install kubevpn
+```
+
 ### Install from custom krew index ( Windows / macOS / Linux)
 
 ```shell
