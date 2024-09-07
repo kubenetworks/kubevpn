@@ -49,6 +49,13 @@ Docker
 brew install kubevpn
 ```
 
+### 使用 [scoop](https://scoop.sh/) (Windows)
+
+```shell
+scoop bucket add extras
+scoop install kubevpn
+```
+
 ### 从 自定义 Krew 仓库安装 (Windows / macOS / Linux)
 
 ```shell
