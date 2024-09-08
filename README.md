@@ -833,7 +833,7 @@ restart docker and retry
 
 ## Architecture
 
-Architecture can be found [here](/docs/en/Architecture.md).
+Architecture can be found [here](/docs/en/Architecture.md) and [website](https://www.kubevpn.cn/docs/architecture/connect).
 
 ## Contributions
 

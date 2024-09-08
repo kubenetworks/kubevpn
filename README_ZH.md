@@ -727,7 +727,7 @@ Clearing DNS settings
 
 ## 架构
 
-架构信息可以从这里找到 [这里](/docs/en/Architecture.md).
+架构信息可以从[这里](/docs/en/Architecture.md) 和 [网站](https://www.kubevpn.cn/docs/architecture/connect) 找到.
 
 ## 贡献代码
 
