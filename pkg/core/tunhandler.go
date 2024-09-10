@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"fmt"
+	"math"
+	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -182,7 +184,7 @@ func (d *Device) Close() {
 	util.SafeClose(TCPPacketChan)
 }
 
-func heartbeats(ctx context.Context, tun net.Conn, in chan<- *DataElem) {
+func heartbeats(ctx context.Context, tun net.Conn) {
 	conn, err := util.GetTunDeviceByConn(tun)
 	if err != nil {
 		log.Errorf("Failed to get tun device: %s", err.Error())
@@ -205,9 +207,6 @@ func heartbeats(ctx context.Context, tun net.Conn, in chan<- *DataElem) {
 		dstIPv4 = config.DockerRouterIP
 	}
 
-	var bytes []byte
-	var bytes6 []byte
-
 	ticker := time.NewTicker(time.Second * 5)
 	defer ticker.Stop()
 
@@ -218,51 +217,28 @@ func heartbeats(ctx context.Context, tun net.Conn, in chan<- *DataElem) {
 		default:
 		}
 
-		for i := 0; i < 4; i++ {
-			if bytes == nil {
-				bytes, err = genICMPPacket(srcIPv4, dstIPv4)
-				if err != nil {
-					log.Errorf("Failed to generate IPv4 packet: %s", err.Error())
-					continue
-				}
-			}
-			if bytes6 == nil {
-				bytes6, err = genICMPPacketIPv6(srcIPv6, dstIPv6)
-				if err != nil {
-					log.Errorf("Failed to generate IPv6 packet: %s", err.Error())
-					continue
-				}
-			}
-			for index, i2 := range [][]byte{bytes, bytes6} {
-				var src, dst net.IP
-				if index == 0 {
-					src, dst = srcIPv4, dstIPv4
-				} else {
-					src, dst = srcIPv6, dstIPv6
-				}
-				if dst.IsUnspecified() {
-					continue
-				}
-				data := config.LPool.Get().([]byte)[:]
-				length := copy(data, i2)
-				util.SafeWrite(in, &DataElem{
-					data:   data[:],
-					length: length,
-					src:    src,
-					dst:    dst,
-				})
-			}
-			time.Sleep(time.Second)
+		var src, dst net.IP
+		src, dst = srcIPv4, dstIPv4
+		if !dst.IsUnspecified() {
+			_, _ = util.Ping(ctx, src.String(), dst.String())
+		}
+		src, dst = srcIPv6, dstIPv6
+		if !dst.IsUnspecified() {
+			_, _ = util.Ping(ctx, src.String(), dst.String())
 		}
 	}
 }
 
 func genICMPPacket(src net.IP, dst net.IP) ([]byte, error) {
 	buf := gopacket.NewSerializeBuffer()
+	var id uint16
+	for _, b := range src {
+		id += uint16(b)
+	}
 	icmpLayer := layers.ICMPv4{
 		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
-		Id:       3842,
-		Seq:      1,
+		Id:       id,
+		Seq:      uint16(rand.Intn(math.MaxUint16 + 1)),
 	}
 	ipLayer := layers.IPv4{
 		Version:  4,
@@ -272,7 +248,7 @@ func genICMPPacket(src net.IP, dst net.IP) ([]byte, error) {
 		Flags:    layers.IPv4DontFragment,
 		TTL:      64,
 		IHL:      5,
-		Id:       55664,
+		Id:       uint16(rand.Intn(math.MaxUint16 + 1)),
 	}
 	opts := gopacket.SerializeOptions{
 		FixLengths:       true,
@@ -312,7 +288,7 @@ func (d *Device) Start(ctx context.Context) {
 	go d.parseIPHeader(ctx)
 	go d.tunInboundHandler(d.tunInbound, d.tunOutbound)
 	go d.writeToTun()
-	go heartbeats(ctx, d.tun, d.tunInbound)
+	go heartbeats(ctx, d.tun)
 
 	select {
 	case err := <-d.chExit:
