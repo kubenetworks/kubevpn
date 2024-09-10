@@ -15,12 +15,12 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 )
 
-var _ stack.UniqueID = (*id)(nil)
+var _ stack.UniqueID = (*ID)(nil)
 
-type id struct {
+type ID struct {
 }
 
-func (i id) UniqueID() uint64 {
+func (i ID) UniqueID() uint64 {
 	return 1
 }
 
@@ -40,7 +40,7 @@ func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 		// Enable raw sockets for users with sufficient
 		// privileges.
 		RawFactory: raw.EndpointFactory{},
-		UniqueID:   id{},
+		UniqueID:   ID{},
 	})
 	// set handler for TCP UDP ICMP
 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, TCPForwarder(s))
