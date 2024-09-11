@@ -105,6 +105,9 @@ func elevatePermission() error {
 		_ = tem.Close()
 		_ = os.Remove(tem.Name())
 	}
+	if err == nil {
+		return nil
+	}
 	if os.IsPermission(err) {
 		elevate.RunWithElevated()
 		os.Exit(0)
