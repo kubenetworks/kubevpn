@@ -43,10 +43,11 @@ func Main(ctx context.Context, client *http.Client, url string) error {
 }
 
 func downloadAndInstall(client *http.Client, url string) error {
-	temp, err := os.CreateTemp("", "")
+	temp, err := os.CreateTemp("", "*.zip")
 	if err != nil {
 		return err
 	}
+	defer os.Remove(temp.Name())
 	err = temp.Close()
 	if err != nil {
 		return err
@@ -55,7 +56,18 @@ func downloadAndInstall(client *http.Client, url string) error {
 	if err != nil {
 		return err
 	}
-	file, _ := os.CreateTemp("", "")
+
+	var curFolder string
+	curFolder, err = os.Executable()
+	if err != nil {
+		return err
+	}
+	var file *os.File
+	file, err = os.CreateTemp(filepath.Dir(curFolder), "")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
 	err = file.Close()
 	if err != nil {
 		return err
@@ -68,16 +80,13 @@ func downloadAndInstall(client *http.Client, url string) error {
 	if err != nil {
 		return err
 	}
-	var curFolder string
-	curFolder, err = os.Executable()
-	if err != nil {
-		return err
-	}
+
 	var createTemp *os.File
-	createTemp, err = os.CreateTemp("", "")
+	createTemp, err = os.CreateTemp(filepath.Dir(curFolder), "")
 	if err != nil {
 		return err
 	}
+	defer os.Remove(createTemp.Name())
 	err = createTemp.Close()
 	if err != nil {
 		return err
@@ -104,6 +113,9 @@ func elevatePermission() error {
 	if tem != nil {
 		_ = tem.Close()
 		_ = os.Remove(tem.Name())
+	}
+	if err == nil {
+		return nil
 	}
 	if os.IsPermission(err) {
 		elevate.RunWithElevated()
