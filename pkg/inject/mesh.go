@@ -264,7 +264,7 @@ func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []v1.Containe
 		})
 	}
 
-	// 2) if already proxy deployment/xxx with header a=1. also want to add b=2
+	// 2) if already proxy deployment/xxx with header foo=bar. also want to add env=dev
 	for j, rule := range v[index].Rules {
 		if rule.LocalTunIPv4 == tunIP.LocalTunIPv4 &&
 			rule.LocalTunIPv6 == tunIP.LocalTunIPv6 {
@@ -274,7 +274,7 @@ func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []v1.Containe
 		}
 	}
 
-	// 3) if already proxy deployment/xxx with header a=1, other user can replace it to self
+	// 3) if already proxy deployment/xxx with header foo=bar, other user can replace it to self
 	for j, rule := range v[index].Rules {
 		if reflect.DeepEqual(rule.Headers, headers) {
 			v[index].Rules[j].LocalTunIPv6 = tunIP.LocalTunIPv6
