@@ -78,6 +78,8 @@ kubectl apply -f https://raw.githubusercontent.com/kubenetworks/kubevpn/master/s
 
 ### 链接到集群网络
 
+使用命令 `kubevpn connect` 链接到集群，请注意这里需要输入电脑密码。因为需要 `root` 权限。(创建虚拟网卡)
+
 ```shell
 ➜  ~ kubevpn connect
 Password:
@@ -115,6 +117,8 @@ Configured DNS service
 ➜  ~
 ```
 
+提示已经链接到集群了。使用命令 `kubevpn status` 检查一下状态。
+
 ```shell
 ➜  ~ kubectl get pods -o wide
 NAME                                       READY   STATUS             RESTARTS   AGE     IP                NODE              NOMINATED NODE   READINESS GATES
@@ -125,6 +129,8 @@ productpage-788df7ff7f-jpkcs               1/1     Running            0         
 ratings-77b6cd4499-zvl6c                   1/1     Running            0          61d     172.29.0.86       192.168.104.255   <none>           <none>
 reviews-85c88894d9-vgkxd                   1/1     Running            0          24d     172.29.2.249      192.168.0.5       <none>           <none>
 ```
+
+找一个 pod 的 IP，比如 `productpage-788df7ff7f-jpkcs` 的 IP `172.29.2.134`
 
 ```shell
 ➜  ~ ping 172.29.2.134
@@ -139,6 +145,8 @@ PING 172.29.2.134 (172.29.2.134): 56 data bytes
 round-trip min/avg/max/stddev = 54.293/55.380/56.270/0.728 ms
 ```
 
+测试应该可以直接 Ping 通，说明本地可以正常访问到集群网络了。
+
 ```shell
 ➜  ~ kubectl get services -o wide
 NAME                      TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)                              AGE     SELECTOR
@@ -151,6 +159,8 @@ ratings                   ClusterIP   172.21.3.247    <none>        9080/TCP    
 reviews                   ClusterIP   172.21.8.24     <none>        9080/TCP                             114d    app=reviews
 ```
 
+找一个 service 的 IP，比如 `productpage` 的 IP `172.21.10.49`，试着访问一下服务 `productpage`
+
 ```shell
 ➜  ~ curl 172.21.10.49:9080
 <!DOCTYPE html>
@@ -162,7 +172,15 @@ reviews                   ClusterIP   172.21.8.24     <none>        9080/TCP    
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ```
 
+可以看到也可以正常访问，也就是可以在本地访问到集群的 pod 和 service 了～
+
 ### 域名解析功能
+
+支持 k8s dns 解析。比如一个名为 `productpage` 的 Pod 或者 Service 处于 `default` 命名空间下可以被如下域名正常解析到：
+
+- `productpage`
+- `productpage.default`
+- `productpage.default.svc.cluster.local`
 
 ```shell
 ➜  ~ curl productpage.default.svc.cluster.local:9080
@@ -175,7 +193,14 @@ reviews                   ClusterIP   172.21.8.24     <none>        9080/TCP    
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ```
 
+可以看到能够被正常解析，并且返回相应内容。
+
 ### 短域名解析功能
+
+连接到此命名空间下，可以直接使用 `service` name 的方式访问，否则访问其它命令空间下的服务，需要带上命令空间作为域名的一部分，使用如下的域名即可。
+
+- `productpage.default`
+- `productpage.default.svc.cluster.local`
 
 ```shell
 ➜  ~ curl productpage:9080
@@ -188,13 +213,24 @@ reviews                   ClusterIP   172.21.8.24     <none>        9080/TCP    
 ...
 ```
 
+可以看到直接使用 service name 的方式，可以正常访问到集群资源。
+
 ### 链接到多集群网络
+
+有个两个模式
+
+- 模式 `lite`: 可以链接到多个集群网络，但是仅支持链接到多集群。
+- 模式 `full`: 不仅支持链接到单个集群网络，还可以拦截工作负载流量到本地电脑。
+
+可以看到已经链接到了一个集群 `ccijorbccotmqodvr189g`，是 `full` 模式
 
 ```shell
 ➜  ~ kubevpn status
 ID Mode Cluster               Kubeconfig                 Namespace Status
 0  full ccijorbccotmqodvr189g /Users/naison/.kube/config default   Connected
 ```
+
+此时还可以使用 `lite` 模式链接到其它集群
 
 ```shell
 ➜  ~ kubevpn connect -n default --kubeconfig ~/.kube/dev_config --lite
@@ -210,6 +246,8 @@ Configured DNS service
 +----------------------------------------------------------+
 ```
 
+使用命令 `kubevpn status` 查看当前链接状态。
+
 ```shell
 ➜  ~ kubevpn status
 ID Mode Cluster               Kubeconfig                     Namespace Status
@@ -218,7 +256,11 @@ ID Mode Cluster               Kubeconfig                     Namespace Status
 ➜  ~
 ```
 
+可以看到连接到了多个集群。
+
 ### 反向代理
+
+使用命令 `kubevpn proxy` 代理所有的入站流量到本地电脑。
 
 ```shell
 ➜  ~ kubevpn proxy deployment/productpage
@@ -233,6 +275,8 @@ Rollout successfully for deployment/productpage
 +----------------------------------------------------------+
 ➜  ~
 ```
+
+此时在本地使用 `go` 启动一个服务，用于承接流量。
 
 ```go
 package main
@@ -250,6 +294,8 @@ func main() {
 }
 ```
 
+使用 `service` name 的方式，直接访问集群中的 `productpage` 服务。
+
 ```shell
 ➜  ~ curl productpage:9080
 Hello world!%
@@ -257,12 +303,14 @@ Hello world!%
 Hello world!%
 ```
 
+可以看到直接击中了本地电脑的服务。
+
 ### 反向代理支持 service mesh
 
-支持 HTTP, GRPC 和 WebSocket 等, 携带了指定 header `"a: 1"` 的流量，将会路由到本地
+支持 HTTP, GRPC 和 WebSocket 等, 携带了指定 header `"foo: bar"` 的流量，将会路由到本地
 
 ```shell
-➜  ~ kubevpn proxy deployment/productpage --headers a=1
+➜  ~ kubevpn proxy deployment/productpage --headers foo=bar
 Connected to cluster
 Injecting inbound sidecar for deployment/productpage
 Checking rollout status for deployment/productpage
@@ -274,6 +322,8 @@ Rollout successfully for deployment/productpage
 +----------------------------------------------------------+
 ➜  ~
 ```
+
+不带 header 直接访问集群资源，可以看到返回的是集群中的服务内容。
 
 ```shell
 ➜  ~ curl productpage:9080
@@ -287,8 +337,10 @@ Rollout successfully for deployment/productpage
 ...
 ```
 
+带上特定 header 访问集群资源，可以看到返回了本地服务的内容。
+
 ```shell
-➜  ~ curl productpage:9080 -H "a: 1"
+➜  ~ curl productpage:9080 -H "foo: bar"
 Hello world!%
 ```
 
@@ -310,7 +362,7 @@ Rollout successfully for deployments/productpage
 Docker。
 
 ```shell
-➜  ~ kubevpn dev deployment/authors --headers a=1 --entrypoint sh
+➜  ~ kubevpn dev deployment/authors --headers foo=bar --entrypoint sh
 Starting connect
 Got network CIDR from cache
 Use exist traffic manager
@@ -528,7 +580,7 @@ OK: 8 MiB in 19 packages
 >> Container Received request: GET / from 127.0.0.1:41230
 Hello world!/opt/microservices # 
 
-/opt/microservices # curl authors:9080/health -H "a: 1"
+/opt/microservices # curl authors:9080/health -H "foo: bar"
 >>Received request: GET /health from 223.254.0.109:57930
                                                         Hello world!/opt/microservices # 
 /opt/microservices # curl localhost:9080/health
@@ -546,6 +598,8 @@ exit
 ➜  ~
 ```
 
+可以看到实际上是在本地使用 `Docker` 启动了三个容器。
+
 ```text
 ➜  ~ docker ps
 CONTAINER ID   IMAGE                           COMMAND                  CREATED         STATUS         PORTS     NAMES
@@ -556,6 +610,8 @@ d0b3dab8912a   naison/kubevpn:v2.0.0           "/bin/bash"              5 minute
 ```
 
 ### 支持多种协议
+
+支持 OSI 模型三层及三层以上的协议，例如：
 
 - TCP
 - UDP

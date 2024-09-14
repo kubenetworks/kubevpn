@@ -45,8 +45,8 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 		- develop service
 		  kubevpn dev service/productpage
 
-		# Develop workloads with mesh, traffic with header a=1, will hit local PC, otherwise no effect
-		kubevpn dev service/productpage --headers a=1
+		# Develop workloads with mesh, traffic with header foo=bar, will hit local PC, otherwise no effect
+		kubevpn dev service/productpage --headers foo=bar
 
         # Develop workloads without proxy traffic
 		kubevpn dev service/productpage --no-proxy

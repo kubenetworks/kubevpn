@@ -28,7 +28,7 @@ base on reverse mode, using envoy as proxy, if headers have special key-value pa
                      │                    │                     cloud
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┘─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
                      │                    │                     local
-                header: a=1               │
+                header: foo=bar           │
                  ┌───┘──────┐             │
                  │ ServiceB'├─────────────┘
                  └──────────┘

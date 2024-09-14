@@ -89,6 +89,9 @@ kubectl delete -f https://raw.githubusercontent.com/kubenetworks/kubevpn/master/
 
 ### Connect to k8s cluster network
 
+use command `kubevpn connect` connect to k8s cluster network, prompt `Password:` need to input computer
+password. to enable root operation (create a tun device).
+
 ```shell
 ➜  ~ kubevpn connect
 Password:
@@ -126,12 +129,16 @@ Configured DNS service
 ➜  ~
 ```
 
+already connected to cluster network, use command `kubevpn status` to check status
+
 ```shell
 ➜  ~ kubevpn status
 ID Mode Cluster               Kubeconfig                 Namespace Status
 0  full ccijorbccotmqodvr189g /Users/naison/.kube/config default   Connected
 ➜  ~
 ```
+
+use pod `productpage-788df7ff7f-jpkcs` IP `172.29.2.134`
 
 ```shell
 ➜  ~ kubectl get pods -o wide
@@ -143,6 +150,8 @@ productpage-788df7ff7f-jpkcs               1/1     Running            0         
 ratings-77b6cd4499-zvl6c                   1/1     Running            0          61d     172.29.0.86       192.168.104.255   <none>           <none>
 reviews-85c88894d9-vgkxd                   1/1     Running            0          24d     172.29.2.249      192.168.0.5       <none>           <none>
 ```
+
+use `ping` to test connection, seems good
 
 ```shell
 ➜  ~ ping 172.29.2.134
@@ -157,6 +166,8 @@ PING 172.29.2.134 (172.29.2.134): 56 data bytes
 round-trip min/avg/max/stddev = 54.293/55.380/56.270/0.728 ms
 ```
 
+use service `productpage` IP `172.21.10.49`
+
 ```shell
 ➜  ~ kubectl get services -o wide
 NAME                      TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)                              AGE     SELECTOR
@@ -169,6 +180,8 @@ ratings                   ClusterIP   172.21.3.247    <none>        9080/TCP    
 reviews                   ClusterIP   172.21.8.24     <none>        9080/TCP                             114d    app=reviews
 ```
 
+use command `curl` to test service connection
+
 ```shell
 ➜  ~ curl 172.21.10.49:9080
 <!DOCTYPE html>
@@ -180,7 +193,17 @@ reviews                   ClusterIP   172.21.8.24     <none>        9080/TCP    
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ```
 
+seems good too~
+
 ### Domain resolve
+
+support k8s dns name resolve.
+
+a Pod/Service named `productpage` in the `default` namespace can successfully resolve by following name:
+
+- `productpage`
+- `productpage.default`
+- `productpage.default.svc.cluster.local`
 
 ```shell
 ➜  ~ curl productpage.default.svc.cluster.local:9080
@@ -214,11 +237,18 @@ use [Domain resolve](./README.md#domain-resolve)
 
 ### Connect to multiple kubernetes cluster network
 
+- Mode `lite`: can connect to multiple cluster network, design for only connecting to multiple cluster network.
+- Mode `Full`: not only connect to cluster network, it also supports proxy workloads inbound traffic to local PC.
+
+already connected cluster `ccijorbccotmqodvr189g` with mode `full`
+
 ```shell
 ➜  ~ kubevpn status
 ID Mode Cluster               Kubeconfig                 Namespace Status
 0  full ccijorbccotmqodvr189g /Users/naison/.kube/config default   Connected
 ```
+
+then connect to another cluster `ccidd77aam2dtnc3qnddg` with mode `lite`
 
 ```shell
 ➜  ~ kubevpn connect -n default --kubeconfig ~/.kube/dev_config --lite
@@ -234,6 +264,8 @@ Configured DNS service
 +----------------------------------------------------------+
 ```
 
+use command `kubevpn status` to check connection status
+
 ```shell
 ➜  ~ kubevpn status
 ID Mode Cluster               Kubeconfig                     Namespace Status
@@ -243,6 +275,8 @@ ID Mode Cluster               Kubeconfig                     Namespace Status
 ```
 
 ### Reverse proxy
+
+use command `kubevpn proxy` to proxy all inbound traffic to local computer.
 
 ```shell
 ➜  ~ kubevpn proxy deployment/productpage
@@ -294,20 +328,20 @@ then run it
 export selector=productpage
 export pod=`kubectl get pods -l app=${selector} -n default -o jsonpath='{.items[0].metadata.name}'`
 export pod_ip=`kubectl get pod $pod -n default -o jsonpath='{.status.podIP}'`
-curl -v -H "a: 1" http://$pod_ip:9080/health
+curl -v -H "foo: bar" http://$pod_ip:9080/health
 ```
 
 response would like below
 
 ```
-❯ curl -v -H "a: 1" http://$pod_ip:9080/health
+❯ curl -v -H "foo: bar" http://$pod_ip:9080/health
 *   Trying 192.168.72.77:9080...
 * Connected to 192.168.72.77 (192.168.72.77) port 9080 (#0)
 > GET /health HTTP/1.1
 > Host: 192.168.72.77:9080
 > User-Agent: curl/7.87.0
 > Accept: */*
-> a: 1
+> foo: bar
 > 
 >>Received request: GET /health from xxx.xxx.xxx.xxx:52974
 * Mark bundle as not supporting multiuse
@@ -331,10 +365,10 @@ Hello world!%
 
 ### Reverse proxy with mesh
 
-Support HTTP, GRPC and WebSocket etc. with specific header `"a: 1"` will route to your local machine
+Support HTTP, GRPC and WebSocket etc. with specific header `"foo: bar"` will route to your local machine
 
 ```shell
-➜  ~ kubevpn proxy deployment/productpage --headers a=1
+➜  ~ kubevpn proxy deployment/productpage --headers foo=bar
 Connected to cluster
 Injecting inbound sidecar for deployment/productpage
 Checking rollout status for deployment/productpage
@@ -347,7 +381,7 @@ Rollout successfully for deployment/productpage
 ➜  ~
 ```
 
-first access without header "a: 1", it will access existing pod on kubernetes cluster.
+first access without header "foo: bar", it will access existing pod on kubernetes cluster.
 
 ```shell
 ➜  ~ curl productpage:9080
@@ -361,10 +395,10 @@ first access without header "a: 1", it will access existing pod on kubernetes cl
 ...
 ```
 
-Now let's access local service with header `"a: 1"`
+Now let's access local service with header `"foo: bar"`
 
 ```shell
-➜  ~ curl productpage:9080 -H "a: 1"
+➜  ~ curl productpage:9080 -H "foo: bar"
 >>Received request: GET / from xxx.xxx.xxx.xxx:51296
 Hello world!  
 ```
@@ -387,7 +421,7 @@ Run the Kubernetes pod in the local Docker container, and cooperate with the ser
 the specified header to the local, or all the traffic to the local.
 
 ```shell
-➜  ~ kubevpn dev deployment/authors --headers a=1 --entrypoint sh
+➜  ~ kubevpn dev deployment/authors --headers foo=bar --entrypoint sh
 Starting connect
 Got network CIDR from cache
 Use exist traffic manager
@@ -470,7 +504,7 @@ Here is how to access pod in local docker container
 ```shell
 export authors_pod=`kubectl get pods -l app=authors -n default -o jsonpath='{.items[0].metadata.name}'`
 export authors_pod_ip=`kubectl get pod $authors_pod -n default -o jsonpath='{.status.podIP}'`
-curl -kv -H "a: 1" http://$authors_pod_ip:80/health
+curl -kv -H "foo: bar" http://$authors_pod_ip:80/health
 ```
 
 Verify logs of nginx container
@@ -622,7 +656,7 @@ OK: 8 MiB in 19 packages
 >> Container Received request: GET / from 127.0.0.1:41230
 Hello world!/opt/microservices # 
 
-/opt/microservices # curl authors:9080/health -H "a: 1"
+/opt/microservices # curl authors:9080/health -H "foo: bar"
 >>Received request: GET /health from 223.254.0.109:57930
                                                         Hello world!/opt/microservices # 
 /opt/microservices # curl localhost:9080/health
@@ -658,6 +692,8 @@ kubectl delete -f https://raw.githubusercontent.com/kubenetworks/kubevpn/master/
 ```
 
 ### Multiple Protocol
+
+support OSI model layers 3 and above, protocols like `ICMP`, `TCP`, and `UDP`...
 
 - TCP
 - UDP
@@ -833,7 +869,8 @@ restart docker and retry
 
 ## Architecture
 
-Architecture can be found [here](/docs/en/Architecture.md) and [website](https://www.kubevpn.cn/docs/architecture/connect).
+Architecture can be found [here](/docs/en/Architecture.md)
+and [website](https://www.kubevpn.cn/docs/architecture/connect).
 
 ## Contributions
 

@@ -54,20 +54,20 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
           or 
           kubevpn proxy deployment authors productpage
 
-		# Reverse proxy with mesh, traffic with header a=1, will hit local PC, otherwise no effect
-		kubevpn proxy service/productpage --headers a=1
+		# Reverse proxy with mesh, traffic with header foo=bar, will hit local PC, otherwise no effect
+		kubevpn proxy service/productpage --headers foo=bar
 		
-		# Reverse proxy with mesh, traffic with header a=1 and b=2, will hit local PC, otherwise no effect
-		kubevpn proxy service/productpage --headers a=1 --headers b=2
+		# Reverse proxy with mesh, traffic with header foo=bar and env=dev, will hit local PC, otherwise no effect
+		kubevpn proxy service/productpage --headers foo=bar --headers env=dev
 
 		# Connect to api-server behind of bastion host or ssh jump host and proxy kubernetes resource traffic into local PC
-		kubevpn proxy deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem --headers a=1
+		kubevpn proxy deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem --headers foo=bar
 
 		# It also supports ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
-		kubevpn proxy service/productpage --ssh-alias <alias> --headers a=1
+		kubevpn proxy service/productpage --ssh-alias <alias> --headers foo=bar
 
 		# Support ssh auth GSSAPI
         kubevpn proxy service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
@@ -176,7 +176,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to local PC, If not special, redirect all traffic to local PC. eg: --headers a=1 --headers b=2")
+	cmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to local PC, If not special, redirect all traffic to local PC. format: <KEY>=<VALUE> eg: --headers foo=bar --headers env=dev")
 	cmd.Flags().StringArrayVar(&connect.PortMap, "portmap", []string{}, "Port map, map container port to local port, format: [tcp/udp]/containerPort:localPort, If not special, localPort will use containerPort. eg: tcp/80:8080 or udp/5000:5001 or 80 or 80:8080")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
