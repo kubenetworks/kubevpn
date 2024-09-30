@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
 	v13 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"tailscale.com/net/dns"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
@@ -35,6 +36,9 @@ type Config struct {
 
 	Hosts []Entry
 	Lock  *sync.Mutex
+
+	// only set it on linux
+	OSConfigurator dns.OSConfigurator
 }
 
 func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInterface, hosts ...Entry) error {
