@@ -83,7 +83,7 @@ jobs:
         run: make ut
 
   macos:
-    runs-on: macos-12
+    runs-on: macos-13
     needs: [ "image" ]
     steps:
       - uses: actions/checkout@v2
@@ -93,6 +93,11 @@ jobs:
         with:
           go-version: '1.22'
           check-latest: true
+
+      # https://github.com/crazy-max/ghaction-setup-docker/issues/108
+      - name: Set up QEMU
+        uses: docker/actions-toolkit/.github/actions/macos-setup-qemu@19ca9ade20f5da695f76a10988d6532058575f82
+
       - name: Set up Docker
         uses: crazy-max/ghaction-setup-docker@v3
 
