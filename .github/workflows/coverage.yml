@@ -47,6 +47,9 @@ jobs:
       - name: Build
         run: |
           export VERSION=${{github.event.pull_request.head.sha}}
+          if [[ -z "$VERSION" ]]; then
+            export VERSION=${{ github.sha }}
+          fi
           make kubevpn-linux-amd64
           chmod +x ./bin/kubevpn
           cp ./bin/kubevpn /usr/local/bin/kubevpn
