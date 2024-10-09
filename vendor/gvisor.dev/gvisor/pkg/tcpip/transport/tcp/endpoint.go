@@ -367,7 +367,6 @@ type Endpoint struct {
 	stack       *stack.Stack  `state:"manual"`
 	protocol    *protocol     `state:"manual"`
 	waiterQueue *waiter.Queue `state:"wait"`
-	uniqueID    uint64
 
 	// hardError is meaningful only when state is stateError. It stores the
 	// error to be returned when read/write syscalls are called and the
@@ -600,11 +599,11 @@ type Endpoint struct {
 	//
 	// +checklocks:mu
 	limRdr *io.LimitedReader `state:"nosave"`
-}
 
-// UniqueID implements stack.TransportEndpoint.UniqueID.
-func (e *Endpoint) UniqueID() uint64 {
-	return e.uniqueID
+	// pmtud is the PMTUD strategy to use.
+	//
+	// +checklocks:mu
+	pmtud tcpip.PMTUDStrategy
 }
 
 // calculateAdvertisedMSS calculates the MSS to advertise.
@@ -861,7 +860,6 @@ func newEndpoint(s *stack.Stack, protocol *protocol, netProto tcpip.NetworkProto
 			interval: DefaultKeepaliveInterval,
 			count:    DefaultKeepaliveCount,
 		},
-		uniqueID:     s.UniqueID(),
 		ipv4TTL:      tcpip.UseDefaultIPv4TTL,
 		ipv6HopLimit: tcpip.UseDefaultIPv6HopLimit,
 		// txHash only determines which outgoing queue to use, so
@@ -1890,9 +1888,16 @@ func (e *Endpoint) SetSockOptInt(opt tcpip.SockOptInt, v int) tcpip.Error {
 		e.UnlockUser()
 
 	case tcpip.MTUDiscoverOption:
-		// Return not supported if attempting to set this option to
-		// anything other than path MTU discovery disabled.
-		if v != tcpip.PMTUDiscoveryDont {
+		switch v := tcpip.PMTUDStrategy(v); v {
+		case tcpip.PMTUDiscoveryWant, tcpip.PMTUDiscoveryDont, tcpip.PMTUDiscoveryDo:
+			e.LockUser()
+			e.pmtud = v
+			e.UnlockUser()
+		case tcpip.PMTUDiscoveryProbe:
+			// We don't support a way to ignore MTU updates; it's
+			// either on or it's off.
+			return &tcpip.ErrNotSupported{}
+		default:
 			return &tcpip.ErrNotSupported{}
 		}
 
@@ -2089,9 +2094,10 @@ func (e *Endpoint) GetSockOptInt(opt tcpip.SockOptInt) (int, tcpip.Error) {
 		return v, nil
 
 	case tcpip.MTUDiscoverOption:
-		// Always return the path MTU discovery disabled setting since
-		// it's the only one supported.
-		return tcpip.PMTUDiscoveryDont, nil
+		e.LockUser()
+		v := e.pmtud
+		e.UnlockUser()
+		return int(v), nil
 
 	case tcpip.ReceiveQueueSizeOption:
 		return e.readyReceiveSize()
@@ -2214,8 +2220,8 @@ func (e *Endpoint) GetSockOpt(opt tcpip.GettableSocketOption) tcpip.Error {
 // checkV4MappedLocked determines the effective network protocol and converts
 // addr to its canonical form.
 // +checklocks:e.mu
-func (e *Endpoint) checkV4MappedLocked(addr tcpip.FullAddress) (tcpip.FullAddress, tcpip.NetworkProtocolNumber, tcpip.Error) {
-	unwrapped, netProto, err := e.TransportEndpointInfo.AddrNetProtoLocked(addr, e.ops.GetV6Only())
+func (e *Endpoint) checkV4MappedLocked(addr tcpip.FullAddress, bind bool) (tcpip.FullAddress, tcpip.NetworkProtocolNumber, tcpip.Error) {
+	unwrapped, netProto, err := e.TransportEndpointInfo.AddrNetProtoLocked(addr, e.ops.GetV6Only(), bind)
 	if err != nil {
 		return tcpip.FullAddress{}, 0, err
 	}
@@ -2382,7 +2388,7 @@ func (e *Endpoint) registerEndpoint(addr tcpip.FullAddress, netProto tcpip.Netwo
 func (e *Endpoint) connect(addr tcpip.FullAddress, handshake bool) tcpip.Error {
 	connectingAddr := addr.Addr
 
-	addr, netProto, err := e.checkV4MappedLocked(addr)
+	addr, netProto, err := e.checkV4MappedLocked(addr, false /* bind */)
 	if err != nil {
 		return err
 	}
@@ -2734,7 +2740,7 @@ func (e *Endpoint) bindLocked(addr tcpip.FullAddress) (err tcpip.Error) {
 	}
 
 	e.BindAddr = addr.Addr
-	addr, netProto, err := e.checkV4MappedLocked(addr)
+	addr, netProto, err := e.checkV4MappedLocked(addr, true /* bind */)
 	if err != nil {
 		return err
 	}
@@ -3197,7 +3203,7 @@ func (e *Endpoint) initHostGSO() {
 func (e *Endpoint) initGSO() {
 	if e.route.HasHostGSOCapability() {
 		e.initHostGSO()
-	} else if e.route.HasGvisorGSOCapability() {
+	} else if e.route.HasGVisorGSOCapability() {
 		e.gso = stack.GSO{
 			MaxSize:   e.route.GSOMaxSize(),
 			Type:      stack.GSOGvisor,
