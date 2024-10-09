@@ -158,6 +158,20 @@ func (f *Filter) Empty() bool {
 	return true
 }
 
+// Equals returns true if f and g contain the same keys (in terms of Has)
+// when used with the same hash function.
+func (f *Filter) Equals(g *Filter) bool {
+	if g.k != f.k || len(g.b) != len(f.b) {
+		return false
+	}
+	for i := range g.b {
+		if f.b[i] != g.b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // Fill set f to a completely full filter.
 // After Fill, Has returns true for any key.
 func (f *Filter) Fill() {

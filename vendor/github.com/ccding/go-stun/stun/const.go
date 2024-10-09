@@ -28,9 +28,10 @@ const (
 // NATType is the type of NAT described by int.
 type NATType int
 
-// NAT behavior type
+// BehaviorType is NAT behavior type.
 type BehaviorType int
 
+// NATBehavior is NAT behavior type of MappingType and FilteringType.
 type NATBehavior struct {
 	MappingType   BehaviorType
 	FilteringType BehaviorType
@@ -54,6 +55,7 @@ const (
 	NATSymmetricUDPFirewall = SymmetricUDPFirewall
 )
 
+// Behavior types.
 const (
 	BehaviorTypeUnknown BehaviorType = iota
 	BehaviorTypeEndpoint
@@ -86,10 +88,10 @@ func init() {
 
 	// Defined in RFC 3489
 	natNormalTypeStr = map[NATBehavior]string{
-		NATBehavior{BehaviorTypeEndpoint, BehaviorTypeEndpoint}:       "Full cone NAT",
-		NATBehavior{BehaviorTypeEndpoint, BehaviorTypeAddr}:           "Restricted cone NAT",
-		NATBehavior{BehaviorTypeEndpoint, BehaviorTypeAddrAndPort}:    "Port Restricted cone NAT",
-		NATBehavior{BehaviorTypeAddrAndPort, BehaviorTypeAddrAndPort}: "Symmetric NAT",
+		{BehaviorTypeEndpoint, BehaviorTypeEndpoint}:       "Full cone NAT",
+		{BehaviorTypeEndpoint, BehaviorTypeAddr}:           "Restricted cone NAT",
+		{BehaviorTypeEndpoint, BehaviorTypeAddrAndPort}:    "Port Restricted cone NAT",
+		{BehaviorTypeAddrAndPort, BehaviorTypeAddrAndPort}: "Symmetric NAT",
 	}
 }
 
@@ -107,6 +109,7 @@ func (natBhType BehaviorType) String() string {
 	return "Unknown"
 }
 
+// NormalType returns the normal NAT type of the NatBehavior.
 func (natBehavior NATBehavior) NormalType() string {
 	if s, ok := natNormalTypeStr[natBehavior]; ok {
 		return s

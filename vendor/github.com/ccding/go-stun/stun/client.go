@@ -16,6 +16,7 @@ package stun
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"strconv"
 )
@@ -24,6 +25,8 @@ import (
 // to discover NAT type.
 type Client struct {
 	serverAddr   string
+	localIP      string
+	localPort    int
 	softwareName string
 	conn         net.PacketConn
 	logger       *Logger
@@ -70,6 +73,16 @@ func (c *Client) SetServerAddr(address string) {
 	c.serverAddr = address
 }
 
+// SetLocalPort allows user to set the local port to send request.
+func (c *Client) SetLocalPort(port int) {
+	c.localPort = port
+}
+
+// SetLocalIP allows user to set the local ip address to send request.
+func (c *Client) SetLocalIP(ip string) {
+	c.localIP = ip
+}
+
 // SetSoftwareName allows user to set the name of the software, which is used
 // for logging purpose (NOT used in the current implementation).
 func (c *Client) SetSoftwareName(name string) {
@@ -90,7 +103,20 @@ func (c *Client) Discover() (NATType, *Host, error) {
 	// create a connection and close it at the end.
 	conn := c.conn
 	if conn == nil {
-		conn, err = net.ListenUDP("udp", nil)
+		var laddr *net.UDPAddr
+
+		if c.localPort != 0  || c.localIP != "" {
+			var address = fmt.Sprintf("%s:%d", c.localIP, c.localPort)
+
+			laddr, err = net.ResolveUDPAddr("udp", address)
+			if err != nil {
+				return NATError, nil, err
+			}
+
+			c.logger.Debugln("Local listen address: " + address)
+		}
+
+		conn, err = net.ListenUDP("udp", laddr)
 		if err != nil {
 			return NATError, nil, err
 		}
@@ -99,6 +125,7 @@ func (c *Client) Discover() (NATType, *Host, error) {
 	return c.discover(conn, serverUDPAddr)
 }
 
+// BehaviorTest performs STUN behavior tests.
 func (c *Client) BehaviorTest() (*NATBehavior, error) {
 	if c.serverAddr == "" {
 		c.SetServerAddr(DefaultServerAddr)
@@ -111,7 +138,18 @@ func (c *Client) BehaviorTest() (*NATBehavior, error) {
 	// create a connection and close it at the end.
 	conn := c.conn
 	if conn == nil {
-		conn, err = net.ListenUDP("udp", nil)
+		var laddr *net.UDPAddr
+		if c.localPort != 0  || c.localIP != "" {
+			var address = fmt.Sprintf("%s:%d", c.localIP, c.localPort)
+
+			laddr, err = net.ResolveUDPAddr("udp", address)
+			if err != nil {
+				return nil, err
+			}
+
+			c.logger.Debugln("Local listen address: " + address)
+		}
+		conn, err = net.ListenUDP("udp", laddr)
 		if err != nil {
 			return nil, err
 		}

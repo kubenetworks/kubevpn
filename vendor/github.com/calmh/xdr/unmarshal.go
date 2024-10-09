@@ -62,7 +62,7 @@ func (u *Unmarshaller) UnmarshalBytesMax(max int) []byte {
 		u.Error = ElementSizeExceeded("bytes field", l, max)
 		return nil
 	}
-	if len(u.Data) < l+4 {
+	if len(u.Data) < 4+l+Padding(l) {
 		u.Error = io.ErrUnexpectedEOF
 		return nil
 	}
