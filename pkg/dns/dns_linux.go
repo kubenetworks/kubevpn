@@ -29,7 +29,7 @@ import (
 func (c *Config) SetupDNS(ctx context.Context) error {
 	config := c.Config
 	tunName := c.TunName
-
+	log.Debugf("Setting up DNS...")
 	// TODO consider use https://wiki.debian.org/NetworkManager and nmcli to config DNS
 	// try to solve:
 	// sudo systemd-resolve --set-dns 172.28.64.10 --interface tun0 --set-domain=vke-system.svc.cluster.local --set-domain=svc.cluster.local --set-domain=cluster.local
@@ -41,19 +41,35 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 	_ = exec.Command("systemctl", "start", "systemd-resolved.service").Run()
 	//systemctl status systemd-resolved.service
 	_ = exec.Command("systemctl", "status", "systemd-resolved.service").Run()
-
+	log.Debugf("Enable service systemd resolved...")
 	var exists = func(cmd string) bool {
 		_, err := exec.LookPath(cmd)
 		return err == nil
 	}
-
+	log.Debugf("Try to setup DNS by resolvectl or systemd-resolve...")
 	if exists("resolvectl") {
 		_ = GetResolveCtlCmd(ctx, tunName, config)
 	}
 	if exists("systemd-resolve") {
 		_ = GetSystemdResolveCmd(ctx, tunName, config)
 	}
-	_ = c.UseLibraryDNS(tunName, config)
+
+	log.Debugf("Use library to setup DNS...")
+	// https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables#default-environment-variables
+	if _, found := os.LookupEnv("GITHUB_ACTIONS"); !found {
+		err := c.UseLibraryDNS(tunName, config)
+		if err == nil {
+			log.Debugf("Use library to setup DNS done")
+			return nil
+		} else if errors.Is(err, ErrorNotSupportSplitDNS) {
+			log.Debugf("Library not support on current OS")
+			err = nil
+		} else {
+			log.Errorf("Setup DNS by library failed: %v", err)
+			err = nil
+		}
+	}
+
 
 	filename := resolvconf.Path()
 	readFile, err := os.ReadFile(filename)
@@ -65,7 +81,6 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 		return err
 	}
 	localResolvConf.Servers = append([]string{config.Servers[0]}, localResolvConf.Servers...)
-
 	err = WriteResolvConf(resolvconf.Path(), *localResolvConf)
 	return err
 }
@@ -132,6 +147,7 @@ func (c *Config) UseLibraryDNS(tunName string, clientConfig *miekgdns.ClientConf
 		}
 		config.SearchDomains = append(config.SearchDomains, fqdn)
 	}
+	log.Debugf("Setting up DNS...")
 	return c.OSConfigurator.SetDNS(config)
 }
 
@@ -163,7 +179,7 @@ func SetupLocalDNS(ctx context.Context, clientConfig *miekgdns.ClientConfig, exi
 
 func (c *Config) CancelDNS() {
 	c.removeHosts(sets.New[Entry]().Insert(c.Hosts...).UnsortedList())
-	if c.OSConfigurator != nil && c.OSConfigurator.SupportsSplitDNS() {
+	if c.OSConfigurator != nil {
 		_ = c.OSConfigurator.Close()
 	}
 
