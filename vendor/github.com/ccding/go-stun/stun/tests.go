@@ -26,8 +26,8 @@ func (c *Client) sendWithLog(conn net.PacketConn, addr *net.UDPAddr, changeIP bo
 		return nil, err
 	}
 	c.logger.Debugln("Received:", resp)
-	if resp == nil && changeIP == false && changePort == false {
-		return nil, errors.New("NAT blocked.")
+	if resp == nil && !changeIP && !changePort {
+		return nil, errors.New("NAT blocked")
 	}
 	if resp != nil && !addrCompare(resp.serverAddr, addr, changeIP, changePort) {
 		return nil, errors.New("Server error: response IP/port")

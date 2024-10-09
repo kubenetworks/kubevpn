@@ -71,7 +71,7 @@ So does passing integer keys in without running them through a mixing function.
 License
 -------
 
-Copyright © 2020-2022 the Blobloom authors
+Copyright © 2020-2023 the Blobloom authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

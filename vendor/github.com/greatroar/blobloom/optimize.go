@@ -18,6 +18,10 @@ import "math"
 
 // A Config holds parameters for Optimize or NewOptimized.
 type Config struct {
+	// Trigger the "contains filtered or unexported fields" message for
+	// forward compatibility and force the caller to use named fields.
+	_ struct{}
+
 	// Capacity is the expected number of distinct keys to be added.
 	// More keys can always be added, but the false positive rate can be
 	// expected to drop below FPRate if their number exceeds the Capacity.
@@ -31,10 +35,6 @@ type Config struct {
 	// Maximum size of the Bloom filter in bits. Zero means the global
 	// MaxBits constant. A value less than BlockBits means BlockBits.
 	MaxBits uint64
-
-	// Trigger the "contains filtered or unexported fields" message for
-	// forward compatibility and force the caller to use named fields.
-	_ struct{}
 }
 
 // NewOptimized is shorthand for New(Optimize(config)).
