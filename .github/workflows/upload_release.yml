@@ -23,12 +23,12 @@ jobs:
             arch: 386
     steps:
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.23'
           check-latest: true
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Build kubevpn
         run: |

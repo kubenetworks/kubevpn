@@ -1,6 +1,7 @@
 package gonotify
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 )
@@ -9,20 +10,21 @@ import (
 // Events can be masked by providing fileMask. DirWatcher does not generate events for
 // folders or subfolders.
 type DirWatcher struct {
-	stopC chan struct{}
-	C     chan FileEvent
+	C chan FileEvent
 }
 
 // NewDirWatcher creates DirWatcher recursively waiting for events in the given root folder and
 // emitting FileEvents in channel C, that correspond to fileMask. Folder events are ignored (having IN_ISDIR set to 1)
-func NewDirWatcher(fileMask uint32, root string) (*DirWatcher, error) {
+func NewDirWatcher(ctx context.Context, fileMask uint32, root string) (*DirWatcher, error) {
 	dw := &DirWatcher{
-		stopC: make(chan struct{}),
-		C:     make(chan FileEvent),
+		C: make(chan FileEvent),
 	}
 
-	i, err := NewInotify()
+	ctx, cancel := context.WithCancel(ctx)
+
+	i, err := NewInotify(ctx)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
@@ -50,7 +52,7 @@ func NewDirWatcher(fileMask uint32, root string) (*DirWatcher, error) {
 	})
 
 	if err != nil {
-		i.Close()
+		cancel()
 		return nil, err
 	}
 
@@ -128,13 +130,14 @@ func NewDirWatcher(fileMask uint32, root string) (*DirWatcher, error) {
 	go func() {
 		for {
 			select {
-			case <-dw.stopC:
-				i.Close()
+			case <-ctx.Done():
+				return
 			case event, ok := <-events:
 				if !ok {
 					dw.C <- FileEvent{
 						Eof: true,
 					}
+					cancel()
 					return
 				}
 
@@ -150,11 +153,4 @@ func NewDirWatcher(fileMask uint32, root string) (*DirWatcher, error) {
 
 	return dw, nil
 
-}
-
-func (d *DirWatcher) Close() {
-	select {
-	case d.stopC <- struct{}{}:
-	default:
-	}
 }
