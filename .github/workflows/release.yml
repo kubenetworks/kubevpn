@@ -53,13 +53,13 @@ jobs:
           git reset --hard
 
       - name: Upload RELEASE_VERSION
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: RELEASE_VERSION
           path: RELEASE_VERSION
 
       - name: Upload UPLOAD_URL
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: UPLOAD_URL
           path: UPLOAD_URL
