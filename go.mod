@@ -1,6 +1,6 @@
 module github.com/wencaiwulue/kubevpn/v2
 
-go 1.22.1
+go 1.23.2
 
 require (
 	github.com/cilium/ipam v0.0.0-20230509084518-fd66eae7909b
@@ -62,7 +62,7 @@ require (
 	sigs.k8s.io/controller-runtime v0.18.4
 	sigs.k8s.io/kustomize/api v0.16.0
 	sigs.k8s.io/yaml v1.4.0
-	tailscale.com v1.72.1
+	tailscale.com v1.74.1
 )
 
 require (
@@ -173,7 +173,7 @@ require (
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
-	github.com/illarion/gonotify v1.0.1 // indirect
+	github.com/illarion/gonotify/v2 v2.0.3 // indirect
 	github.com/imdario/mergo v0.3.16 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/infobloxopen/go-trees v0.0.0-20221216143356-66ceba885ebc // indirect
@@ -244,10 +244,9 @@ require (
 	github.com/stretchr/testify v1.9.0 // indirect
 	github.com/syncthing/notify v0.0.0-20210616190510-c6b7342338d2 // indirect
 	github.com/syndtr/goleveldb v1.0.1-0.20220721030215-126854af5e6d // indirect
-	github.com/tailscale/netlink v1.1.1-0.20211101221916-cabfb018fe85 // indirect
+	github.com/tailscale/netlink v1.1.1-0.20240822203006-4d49adab4de7 // indirect
 	github.com/theupdateframework/notary v0.7.0 // indirect
 	github.com/tinylib/msgp v1.1.9 // indirect
-	github.com/vishvananda/netlink v1.2.1-beta.2 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
 	github.com/vitrun/qart v0.0.0-20160531060029-bf64b92db6b0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect

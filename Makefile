@@ -17,7 +17,6 @@ NAMESPACE ?= naison
 REPOSITORY ?= kubevpn
 IMAGE ?= $(REGISTRY)/$(NAMESPACE)/$(REPOSITORY):$(VERSION)
 IMAGE_LATEST ?= docker.io/naison/kubevpn:latest
-IMAGE_TEST ?= docker.io/naison/kubevpn:test
 IMAGE_GH ?= ghcr.io/kubenetworks/kubevpn:$(VERSION)
 
 # Setup the -ldflags option for go build here, interpolate the variable values
@@ -96,7 +95,7 @@ container-local: kubevpn-linux-amd64
 
 .PHONY: container-test
 container-test: kubevpn-linux-amd64
-	docker buildx build --platform linux/amd64,linux/arm64 -t ${IMAGE_TEST} -f $(BUILD_DIR)/test.Dockerfile --push .
+	docker buildx build --platform linux/amd64,linux/arm64 -t ${IMAGE} -t ${IMAGE_GH} -f $(BUILD_DIR)/test.Dockerfile --push .
 
 .PHONY: version
 version:

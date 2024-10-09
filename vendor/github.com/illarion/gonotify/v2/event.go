@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package gonotify
@@ -90,11 +91,35 @@ type InotifyEvent struct {
 }
 
 func (i InotifyEvent) GoString() string {
-	return fmt.Sprintf("gonotify.InotifyEvent{Wd=%#v, Name=%s, Cookie=%#v, Mask=%#v=%s", i.Wd, i.Name, i.Cookie, i.Mask, InMaskToString(i.Mask))
+	return fmt.Sprintf("gonotify.InotifyEvent{Wd=%#v, Name=%s, Cookie=%#v, Mask=%#v=%s}", i.Wd, i.Name, i.Cookie, i.Mask, InMaskToString(i.Mask))
 }
 
 func (i InotifyEvent) String() string {
-	return fmt.Sprintf("{Wd=%d, Name=%s, Cookie=%d, Mask=%s", i.Wd, i.Name, i.Cookie, InMaskToString(i.Mask))
+	return fmt.Sprintf("{Wd=%d, Name=%s, Cookie=%d, Mask=%s}", i.Wd, i.Name, i.Cookie, InMaskToString(i.Mask))
+}
+
+// IsAny returns true if any of the in_mask is set in the event
+func (i InotifyEvent) IsAny(in_mask ...uint32) bool {
+	for _, mask := range in_mask {
+		if i.Mask&mask == mask {
+			return true
+		}
+	}
+	return false
+}
+
+// IsAll returns true if all the in_masks is set in the event
+func (i InotifyEvent) IsAll(in_mask ...uint32) bool {
+	for _, mask := range in_mask {
+		if i.Mask&mask != mask {
+			return false
+		}
+	}
+	return true
+}
+
+func (i InotifyEvent) Is(in_mask uint32) bool {
+	return i.Mask&in_mask == in_mask
 }
 
 // FileEvent is the wrapper around InotifyEvent with additional Eof marker. Reading from
@@ -102,4 +127,12 @@ func (i InotifyEvent) String() string {
 type FileEvent struct {
 	InotifyEvent
 	Eof bool
+}
+
+func (f FileEvent) GoString() string {
+	return fmt.Sprintf("gonotify.FileEvent{InotifyEvent=%#v, Eof=%#v}", f.InotifyEvent, f.Eof)
+}
+
+func (f FileEvent) String() string {
+	return fmt.Sprintf("{InotifyEvent=%s, Eof=%v}", f.InotifyEvent, f.Eof)
 }

@@ -2,8 +2,7 @@
 
 Simple Golang inotify wrapper.
 
-[![Build Status](https://travis-ci.org/illarion/gonotify.svg?branch=master)](https://travis-ci.org/illarion/gonotify)
-[![GoDoc](https://godoc.org/github.com/illarion/gonotify?status.svg)](https://godoc.org/github.com/illarion/gonotify)
+[![GoDoc](https://godoc.org/github.com/illarion/gonotify/v2?status.svg)](https://godoc.org/github.com/illarion/gonotify/v2)
 
 ### Provides following primitives:
 
@@ -17,6 +16,51 @@ Simple Golang inotify wrapper.
   * `FileEvent` - embeds `InotifyEvent` and keeps additional field `Eof` to notify user that there will be no more events.
 
 Use `FileWatcher` and `DirWatcher` as an example and build your own utility classes.
+
+
+### Usage
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/illarion/gonotify/v2"
+	"time"
+	"context"
+)
+
+func main() {
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	watcher, err := gonotify.NewDirWatcher(ctx, gonotify.IN_CREATE|gonotify.IN_CLOSE, "/tmp")
+	if err != nil {
+		panic(err)
+	}
+
+	for {
+		select {
+		case event := <-watcher.C:
+			fmt.Printf("Event: %s\n", event)
+
+			if event.Mask&gonotify.IN_CREATE != 0 {
+				fmt.Printf("File created: %s\n", event.Name)
+			}
+
+			if event.Mask&gonotify.IN_CLOSE != 0 {
+				fmt.Printf("File closed: %s\n", event.Name)
+			}
+
+		case <-time.After(5 * time.Second):
+			fmt.Println("Timeout")
+			cancel()
+			return
+		}
+	}
+}
+
+```
 
 ## License
 MIT. See LICENSE file for more details.

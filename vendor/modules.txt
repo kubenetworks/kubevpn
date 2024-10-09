@@ -780,9 +780,9 @@ github.com/hpcloud/tail/ratelimiter
 github.com/hpcloud/tail/util
 github.com/hpcloud/tail/watch
 github.com/hpcloud/tail/winfile
-# github.com/illarion/gonotify v1.0.1
+# github.com/illarion/gonotify/v2 v2.0.3
 ## explicit; go 1.12
-github.com/illarion/gonotify
+github.com/illarion/gonotify/v2
 # github.com/imdario/mergo v0.3.16
 ## explicit; go 1.13
 github.com/imdario/mergo
@@ -1209,9 +1209,10 @@ github.com/syndtr/goleveldb/leveldb/opt
 github.com/syndtr/goleveldb/leveldb/storage
 github.com/syndtr/goleveldb/leveldb/table
 github.com/syndtr/goleveldb/leveldb/util
-# github.com/tailscale/netlink v1.1.1-0.20211101221916-cabfb018fe85
+# github.com/tailscale/netlink v1.1.1-0.20240822203006-4d49adab4de7
 ## explicit; go 1.12
 github.com/tailscale/netlink
+github.com/tailscale/netlink/nl
 # github.com/thejerf/suture/v4 v4.0.5
 ## explicit; go 1.9
 github.com/thejerf/suture/v4
@@ -1234,9 +1235,6 @@ github.com/theupdateframework/notary/tuf/validation
 # github.com/tinylib/msgp v1.1.9
 ## explicit; go 1.18
 github.com/tinylib/msgp/msgp
-# github.com/vishvananda/netlink v1.2.1-beta.2
-## explicit; go 1.12
-github.com/vishvananda/netlink/nl
 # github.com/vishvananda/netns v0.0.4
 ## explicit; go 1.17
 github.com/vishvananda/netns
@@ -2392,15 +2390,17 @@ sigs.k8s.io/structured-merge-diff/v4/value
 sigs.k8s.io/yaml
 sigs.k8s.io/yaml/goyaml.v2
 sigs.k8s.io/yaml/goyaml.v3
-# tailscale.com v1.72.1
-## explicit; go 1.22.0
+# tailscale.com v1.74.1
+## explicit; go 1.23
 tailscale.com
 tailscale.com/atomicfile
 tailscale.com/control/controlknobs
 tailscale.com/envknob
 tailscale.com/health
 tailscale.com/hostinfo
+tailscale.com/kube/kubetypes
 tailscale.com/logtail/backoff
+tailscale.com/metrics
 tailscale.com/net/dns
 tailscale.com/net/dns/publicdns
 tailscale.com/net/dns/resolvconffile
@@ -2422,6 +2422,7 @@ tailscale.com/tsconst
 tailscale.com/tstime
 tailscale.com/tstime/mono
 tailscale.com/tstime/rate
+tailscale.com/tsweb/varz
 tailscale.com/types/dnstype
 tailscale.com/types/ipproto
 tailscale.com/types/key
@@ -2439,6 +2440,7 @@ tailscale.com/util/clientmetric
 tailscale.com/util/cloudenv
 tailscale.com/util/cmpver
 tailscale.com/util/ctxkey
+tailscale.com/util/dirwalk
 tailscale.com/util/dnsname
 tailscale.com/util/lineread
 tailscale.com/util/linuxfw
@@ -2450,6 +2452,7 @@ tailscale.com/util/set
 tailscale.com/util/singleflight
 tailscale.com/util/slicesx
 tailscale.com/util/testenv
+tailscale.com/util/usermetric
 tailscale.com/util/vizerror
 tailscale.com/util/winutil
 tailscale.com/util/winutil/gp
