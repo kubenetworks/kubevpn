@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -39,13 +38,12 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 		for ctx.Err() == nil {
 			packetConn, err := getRemotePacketConn(ctx, h.chain)
 			if err != nil {
-				log.Errorf("[TUN-CLIENT] Failed to get remote conn from %s -> %s: %s", tun.LocalAddr(), remoteAddr, err)
-				time.Sleep(time.Second * 2)
+				log.Debugf("[TUN-CLIENT] Failed to get remote conn from %s -> %s: %s", tun.LocalAddr(), remoteAddr, err)
 				continue
 			}
 			err = transportTunClient(ctx, tunInbound, tunOutbound, packetConn, remoteAddr)
 			if err != nil {
-				log.Errorf("[TUN-CLIENT] %s: %v", tun.LocalAddr(), err)
+				log.Debugf("[TUN-CLIENT] %s: %v", tun.LocalAddr(), err)
 			}
 		}
 	})

@@ -247,7 +247,7 @@ func copyStream(ctx context.Context, local net.Conn, remote net.Conn) {
 		defer config.LPool.Put(buf[:])
 		_, err := io.CopyBuffer(local, remote, buf)
 		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
-			log.Errorf("Failed to copy remote -> local: %s", err)
+			log.Debugf("Failed to copy remote -> local: %s", err)
 		}
 		select {
 		case chDone <- true:
@@ -261,7 +261,7 @@ func copyStream(ctx context.Context, local net.Conn, remote net.Conn) {
 		defer config.LPool.Put(buf[:])
 		_, err := io.CopyBuffer(remote, local, buf)
 		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
-			log.Errorf("Failed to copy local -> remote: %s", err)
+			log.Debugf("Failed to copy local -> remote: %s", err)
 		}
 		select {
 		case chDone <- true:
@@ -513,39 +513,11 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 		return err
 	}
 
-	var lock sync.Mutex
-	var sshClient *ssh.Client
-
-	var getRemoteConnFunc = func() (net.Conn, error) {
-		lock.Lock()
-		defer lock.Unlock()
-
-		if sshClient != nil {
-			ctx1, cancelFunc := context.WithTimeout(ctx, time.Second*10)
-			defer cancelFunc()
-			remoteConn, err := sshClient.DialContext(ctx1, "tcp", remote.String())
-			if err == nil {
-				return remoteConn, nil
-			}
-			sshClient.Close()
-			sshClient = nil
-		}
-		sshClient, err = DialSshRemote(ctx, conf)
-		if err != nil {
-			log.Errorf("failed to dial remote ssh server: %v", err)
-			return nil, err
-		}
-		return sshClient.Dial("tcp", remote.String())
-	}
-
 	go func() {
 		defer localListen.Close()
 		go func() {
 			<-ctx.Done()
 			localListen.Close()
-			if sshClient != nil {
-				sshClient.Close()
-			}
 		}()
 
 		for ctx.Err() == nil {
@@ -559,9 +531,16 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 			go func() {
 				defer localConn.Close()
 
-				remoteConn, err := getRemoteConnFunc()
+				sshClient, err := DialSshRemote(ctx, conf)
 				if err != nil {
-					log.Errorf("Failed to dial %s: %s", remote.String(), err)
+					marshal, _ := json.Marshal(conf)
+					log.Debugf("Failed to dial remote ssh server %v : %v", string(marshal), err)
+					return
+				}
+				defer sshClient.Close()
+				remoteConn, err := sshClient.DialContext(ctx, "tcp", remote.String())
+				if err != nil {
+					log.Debugf("Failed to dial %s: %s", remote.String(), err)
 					return
 				}
 				defer remoteConn.Close()
