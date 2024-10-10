@@ -129,7 +129,7 @@ jobs:
           tar --transform 's/^charts\/kubevpn/kubevpn/' -zcf kubevpn-${CHART_VERSION}.tgz charts/kubevpn
           shasum -a 256 kubevpn-${CHART_VERSION}.tgz | awk '{print $1}' > kubevpn-${CHART_VERSION}.tgz-SHA256
       - name: Download UPLOAD_URL
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: UPLOAD_URL
       - name: Get Release UPLOAD_URL
