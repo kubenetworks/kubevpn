@@ -23,16 +23,27 @@ var serverIP string
 var mux sync.Mutex
 var sshCancelFunc context.CancelFunc
 
-func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc.SshStartResponse, error) {
+func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp *rpc.SshStartResponse, err error) {
 	mux.Lock()
 	defer mux.Unlock()
 
-	clientIP, clientCIDR, err := net.ParseCIDR(req.ClientIP)
+	var clientIP net.IP
+	var clientCIDR *net.IPNet
+	clientIP, clientCIDR, err = net.ParseCIDR(req.ClientIP)
 	if err != nil {
 		log.Errorf("Failed to parse network CIDR: %v", err)
-		return nil, err
+		return
 	}
 	if serverIP == "" {
+		defer func() {
+			if err != nil {
+				if sshCancelFunc != nil {
+					sshCancelFunc()
+				}
+				serverIP = ""
+			}
+		}()
+
 		r := core.Route{
 			ServeNodes: []string{
 				"tun://127.0.0.1:8422?net=" + DefaultServerIP,
@@ -40,10 +51,11 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 			},
 			Retries: 5,
 		}
-		servers, err := handler.Parse(r)
+		var servers []core.Server
+		servers, err = handler.Parse(r)
 		if err != nil {
 			log.Errorf("Failed to parse route: %v", err)
-			return nil, err
+			return
 		}
 		var ctx1 context.Context
 		ctx1, sshCancelFunc = context.WithCancel(context.Background())
@@ -56,13 +68,15 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 		serverIP = DefaultServerIP
 	}
 
-	serverip, _, err := net.ParseCIDR(serverIP)
+	var serverip net.IP
+	serverip, _, err = net.ParseCIDR(serverIP)
 	if err != nil {
-		return nil, err
+		return
 	}
-	tunDevice, err := util.GetTunDevice(serverip)
+	var tunDevice *net.Interface
+	tunDevice, err = util.GetTunDevice(serverip)
 	if err != nil {
-		return nil, err
+		return
 	}
 	err = tun.AddRoutes(tunDevice.Name, types.Route{
 		Dst: net.IPNet{
@@ -73,10 +87,11 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (*rpc
 	})
 	if err != nil {
 		log.Errorf("Failed to add route: %v", err)
-		return nil, err
+		return
 	}
 
-	return &rpc.SshStartResponse{ServerIP: serverIP}, nil
+	resp = &rpc.SshStartResponse{ServerIP: serverIP}
+	return
 }
 
 func (svr *Server) SshStop(ctx context.Context, req *rpc.SshStopRequest) (*rpc.SshStopResponse, error) {
