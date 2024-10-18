@@ -108,9 +108,9 @@ func NewTunEndpoint(ctx context.Context, tun net.Conn, mtu uint32, engine config
 				//defer pkt.DecRef()
 				config.LPool.Put(bytes[:])
 				endpoint.InjectInbound(protocol, pkt)
-				log.Debugf("[TUN-%s] IP-Protocol: %s, SRC: %s, DST: %s, Length: %d", layers.IPProtocol(ipProtocol).String(), layers.IPProtocol(ipProtocol).String(), src.String(), dst, read)
+				log.Tracef("[TUN-%s] IP-Protocol: %s, SRC: %s, DST: %s, Length: %d", layers.IPProtocol(ipProtocol).String(), layers.IPProtocol(ipProtocol).String(), src.String(), dst, read)
 			} else {
-				log.Debugf("[TUN-RAW] IP-Protocol: %s, SRC: %s, DST: %s, Length: %d", layers.IPProtocol(ipProtocol).String(), src.String(), dst, read)
+				log.Tracef("[TUN-RAW] IP-Protocol: %s, SRC: %s, DST: %s, Length: %d", layers.IPProtocol(ipProtocol).String(), src.String(), dst, read)
 				util.SafeWrite(in, NewDataElem(bytes[:], read, src, dst))
 			}
 		}
