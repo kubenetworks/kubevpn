@@ -68,7 +68,7 @@ func GetCIDRElegant(ctx context.Context, clientset *kubernetes.Clientset, restco
 		result = append(result, pod...)
 	}
 
-	result = Deduplicate(result)
+	result = RemoveLargerOverlappingCIDRs(result)
 	if len(result) == 0 {
 		err = fmt.Errorf("failed to get any network CIDR, please verify that you have the necessary permissions")
 		return nil, err
@@ -201,7 +201,7 @@ func GetCIDRByDumpClusterInfo(ctx context.Context, clientset *kubernetes.Clients
 	for _, s := range list {
 		result = append(result, ParseCIDRFromString(s)...)
 	}
-	return Deduplicate(result), nil
+	return RemoveLargerOverlappingCIDRs(result), nil
 }
 
 // GetCIDRFromCNI kube-controller-manager--allocate-node-cidrs=true--authentication-kubeconfig=/etc/kubernetes/controller-manager.conf--authorization-kubeconfig=/etc/kubernetes/controller-manager.conf--bind-address=0.0.0.0--client-ca-file=/etc/kubernetes/ssl/ca.crt--cluster-cidr=10.233.64.0/18--cluster-name=cluster.local--cluster-signing-cert-file=/etc/kubernetes/ssl/ca.crt--cluster-signing-key-file=/etc/kubernetes/ssl/ca.key--configure-cloud-routes=false--controllers=*,bootstrapsigner,tokencleaner--kubeconfig=/etc/kubernetes/controller-manager.conf--leader-elect=true--leader-elect-lease-duration=15s--leader-elect-renew-deadline=10s--node-cidr-mask-size=24--node-monitor-grace-period=40s--node-monitor-period=5s--port=0--profiling=False--requestheader-client-ca-file=/etc/kubernetes/ssl/front-proxy-ca.crt--root-ca-file=/etc/kubernetes/ssl/ca.crt--service-account-private-key-file=/etc/kubernetes/ssl/sa.key--service-cluster-ip-range=10.233.0.0/18--terminated-pod-gc-threshold=12500--use-service-account-credentials=true
@@ -221,7 +221,7 @@ func GetCIDRFromCNI(ctx context.Context, clientset *kubernetes.Clientset, restco
 
 	var result []*net.IPNet
 	for _, s := range strings.Split(content, "\n") {
-		result = Deduplicate(append(result, ParseCIDRFromString(s)...))
+		result = RemoveLargerOverlappingCIDRs(append(result, ParseCIDRFromString(s)...))
 	}
 
 	return result, nil

@@ -13,6 +13,8 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+var ClosedErr = errors.New("accept on closed listener")
+
 // Config is the config for TUN device.
 type Config struct {
 	Name    string
@@ -56,9 +58,8 @@ func (l *tunListener) Accept() (net.Conn, error) {
 	case conn := <-l.conns:
 		return conn, nil
 	case <-l.closed:
+		return nil, ClosedErr
 	}
-
-	return nil, errors.New("accept on closed listener")
 }
 
 func (l *tunListener) Addr() net.Addr {
