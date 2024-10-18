@@ -137,7 +137,13 @@ func ParseAndGet(localFile, remoteAddr string, aliasName string) ([]Config, erro
 		return nil, err
 	}
 	if len(configs) == 0 {
-		err = fmt.Errorf("failed to find any aliases for the name %s, please verify your configuration file %s", aliasName, path)
+		var names []string
+		for _, c := range list {
+			if c.Name != "" {
+				names = append(names, c.Name)
+			}
+		}
+		err = fmt.Errorf("failed to find any aliases for the name: '%s', avaliable: [%s], please verify your configuration file %s", aliasName, strings.Join(names, ", "), path)
 		return nil, err
 	}
 	return configs, nil
