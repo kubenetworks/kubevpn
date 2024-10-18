@@ -2,13 +2,13 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"math/rand"
 	"net"
 	"net/url"
-	"os"
 	"os/exec"
 	"reflect"
 	"sort"
@@ -31,7 +31,6 @@ import (
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
 	pkgtypes "k8s.io/apimachinery/pkg/types"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/resource"
@@ -236,7 +235,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		return
 	}
 	go c.deleteFirewallRule(c.ctx)
-	log.Debug("Configuring DNS service...")
+	log.Infof("Configuring DNS service...")
 	if err = c.setupDNS(c.ctx); err != nil {
 		log.Errorf("Configure DNS failed: %v", err)
 		return
@@ -254,14 +253,17 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 		var first = pointer.Bool(true)
 		for c.ctx.Err() == nil {
 			func() {
-				defer time.Sleep(time.Second * 2)
+				defer time.Sleep(time.Millisecond * 200)
 
 				sortBy := func(pods []*v1.Pod) sort.Interface { return sort.Reverse(podutils.ActivePods(pods)) }
 				label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
-				_, _, _ = polymorphichelpers.GetFirstPod(c.clientset.CoreV1(), c.Namespace, label, time.Second*30, sortBy)
+				_, _, _ = polymorphichelpers.GetFirstPod(c.clientset.CoreV1(), c.Namespace, label, time.Second*5, sortBy)
 				podList, err := c.GetRunningPodList(ctx)
 				if err != nil {
-					time.Sleep(time.Second * 2)
+					log.Errorf("Failed to get running pod: %v", err)
+					if *first {
+						errChan <- err
+					}
 					return
 				}
 				childCtx, cancelFunc := context.WithCancel(ctx)
@@ -270,13 +272,6 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 					readyChan = nil
 				}
 				podName := podList[0].GetName()
-				// if port-forward occurs error, check pod is deleted or not, speed up fail
-				utilruntime.ErrorHandlers = []func(error){func(err error) {
-					if !strings.Contains(err.Error(), "an error occurred forwarding") {
-						log.Debugf("Port-forward occurs error, err: %v, retrying", err)
-						cancelFunc()
-					}
-				}}
 				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
 				go util.CheckPodStatus(childCtx, cancelFunc, podName, podInterface)
 				err = util.PortForwardPod(
@@ -294,15 +289,14 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				first = pointer.Bool(false)
 				// exit normal, let context.err to judge to exit or not
 				if err == nil {
+					log.Errorf("Port forward retrying")
 					return
 				}
 				if strings.Contains(err.Error(), "unable to listen on any of the requested ports") ||
 					strings.Contains(err.Error(), "address already in use") {
 					log.Errorf("Port %s already in use, needs to release it manually", portPair)
-					time.Sleep(time.Second * 1)
 				} else {
-					log.Debugf("Port-forward occurs error, err: %v, retrying", err)
-					time.Sleep(time.Millisecond * 500)
+					log.Errorf("Port-forward occurs error: %v", err)
 				}
 			}()
 		}
@@ -311,7 +305,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 	defer ticker.Stop()
 	select {
 	case <-ticker.C:
-		return errors.New("port forward timeout")
+		return errors.New("wait port forward to be ready timeout")
 	case err := <-errChan:
 		return err
 	case <-readyChan:
@@ -320,50 +314,80 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 }
 
 func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress string, lite bool) (err error) {
-	var list = sets.New[string]()
+	log.Debugf("IPv4: %s, IPv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
+
+	var routes []types.Route
 	if !lite {
-		list.Insert(config.CIDR.String())
+		routes = append(routes, types.Route{Dst: *config.CIDR})
 	}
 	for _, ipNet := range c.cidrs {
-		list.Insert(ipNet.String())
+		routes = append(routes, types.Route{Dst: *ipNet})
 	}
 	// add extra-cidr
 	for _, s := range c.ExtraRouteInfo.ExtraCIDR {
-		_, _, err = net.ParseCIDR(s)
+		var ipnet *net.IPNet
+		_, ipnet, err = net.ParseCIDR(s)
 		if err != nil {
 			return fmt.Errorf("invalid extra-cidr %s, err: %v", s, err)
 		}
-		list.Insert(s)
+		routes = append(routes, types.Route{Dst: *ipnet})
+	}
+
+	tunConfig := tun.Config{
+		Addr:   c.localTunIPv4.String(),
+		Routes: routes,
 	}
 	if enable, _ := util.IsIPv6Enabled(); enable {
-		if err = os.Setenv(config.EnvInboundPodTunIPv6, c.localTunIPv6.String()); err != nil {
-			return err
-		}
+		tunConfig.Addr6 = c.localTunIPv6.String()
 	}
 
-	r := core.Route{
-		ServeNodes: []string{
-			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s&%s=%s",
-				c.localTunIPv4.String(),
-				strings.Join(list.UnsortedList(), ","),
-				config.ConfigKubeVPNTransportEngine,
-				string(c.Engine),
-			),
-		},
-		ChainNode: forwardAddress,
-		Retries:   5,
-	}
-
-	log.Debugf("IPv4: %s, IPv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
-	servers, err := Parse(r)
+	localNode := fmt.Sprintf("tun:/127.0.0.1:8422")
+	node, err := core.ParseNode(localNode)
 	if err != nil {
-		log.Errorf("Parse route error: %v", err)
+		log.Errorf("Failed to parse local node %s: %v", localNode, err)
 		return err
 	}
+	node.Values.Add(config.ConfigKubeVPNTransportEngine, string(c.Engine))
+
+	chainNode, err := core.ParseNode(forwardAddress)
+	if err != nil {
+		log.Errorf("Failed to parse forward node %s: %v", forwardAddress, err)
+		return err
+	}
+	chainNode.Client = &core.Client{
+		Connector:   core.UDPOverTCPTunnelConnector(),
+		Transporter: core.TCPTransporter(),
+	}
+	chain := core.NewChain(5, chainNode)
+
+	handler := core.TunHandler(chain, node)
+	listener, err := tun.Listener(tunConfig)
+	if err != nil {
+		log.Errorf("Failed to create tun listener: %v", err)
+		return err
+	}
+
+	server := core.Server{
+		Listener: listener,
+		Handler:  handler,
+	}
+
 	go func() {
-		err = Run(ctx, servers)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			log.Errorf("Failed to run local tun service: %v", err)
+		defer server.Listener.Close()
+		go func() {
+			<-ctx.Done()
+			server.Listener.Close()
+		}()
+
+		for ctx.Err() == nil {
+			conn, err := server.Listener.Accept()
+			if err != nil {
+				if !errors.Is(err, tun.ClosedErr) {
+					log.Errorf("Failed to accept local tun conn: %v", err)
+				}
+				return
+			}
+			go server.Handler.Handle(ctx, conn)
 		}
 	}()
 	log.Info("Connected tunnel")
@@ -421,9 +445,9 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
 				return err
 			}()
 			if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {
-				time.Sleep(time.Second * 5)
+				time.Sleep(time.Second * 1)
 			} else {
-				time.Sleep(time.Second * 2)
+				time.Sleep(time.Millisecond * 200)
 			}
 		}
 	}()
@@ -443,9 +467,9 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
 				return err
 			}()
 			if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {
-				time.Sleep(time.Second * 5)
+				time.Sleep(time.Second * 1)
 			} else {
-				time.Sleep(time.Second * 2)
+				time.Sleep(time.Millisecond * 200)
 			}
 		}
 	}()
@@ -469,6 +493,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		log.Errorf("Get running pod list failed, err: %v", err)
 		return err
 	}
+	log.Debugf("Get DNS service IP from pod...")
 	relovConf, err := util.GetDNSServiceIPFromPod(ctx, c.clientset, c.config, pod[0].GetName(), c.Namespace)
 	if err != nil {
 		log.Errorln(err)
@@ -477,6 +502,9 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	if relovConf.Port == "" {
 		relovConf.Port = strconv.Itoa(port)
 	}
+
+	marshal, _ := json.Marshal(relovConf)
+	log.Debugf("Get DNS service config: %v", string(marshal))
 	svc, err := c.clientset.CoreV1().Services(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err
@@ -521,9 +549,11 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		Hosts:   c.extraHost,
 		Lock:    c.Lock,
 	}
+	log.Debugf("Setup DNS...")
 	if err = c.dnsConfig.SetupDNS(ctx); err != nil {
 		return err
 	}
+	log.Debugf("Dump service in namespace %s into hosts...", c.Namespace)
 	// dump service in current namespace for support DNS resolve service:port
 	err = c.dnsConfig.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.Namespace), c.extraHost...)
 	return err

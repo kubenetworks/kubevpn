@@ -42,16 +42,26 @@ type Config struct {
 }
 
 func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInterface, hosts ...Entry) error {
-	list, err := serviceInterface.List(ctx, v1.ListOptions{})
-	if err != nil {
-		return err
-	}
+	var serviceList []v12.Service
+	//listOptions := v1.ListOptions{Limit: 100}
+	//for {
+	//	services, err := serviceInterface.List(ctx, listOptions)
+	//	if err != nil {
+	//		break
+	//	}
+	//	serviceList = append(serviceList, services.Items...)
+	//	if services.Continue != "" {
+	//		listOptions.Continue = services.Continue
+	//	} else {
+	//		break
+	//	}
+	//}
 
 	c.Lock.Lock()
 	defer c.Lock.Unlock()
 
-	appendHosts := c.generateAppendHosts(list.Items, hosts)
-	err = c.appendHosts(appendHosts)
+	appendHosts := c.generateAppendHosts(serviceList, hosts)
+	err := c.appendHosts(appendHosts)
 	if err != nil {
 		log.Errorf("Failed to add hosts(%s): %v", entryList2String(appendHosts), err)
 		return err
@@ -64,6 +74,8 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13
 func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v13.ServiceInterface, hosts []Entry) {
 	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
+	immediate := make(chan struct{}, 1)
+	immediate <- struct{}{}
 
 	for ctx.Err() == nil {
 		err := func() error {
@@ -122,6 +134,19 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 					if err != nil {
 						log.Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
 					}
+				case <-immediate:
+					var list *v12.ServiceList
+					list, err = serviceInterface.List(ctx, v1.ListOptions{})
+					if err != nil {
+						continue
+					}
+					c.Lock.Lock()
+					appendHosts := c.generateAppendHosts(list.Items, hosts)
+					err = c.appendHosts(appendHosts)
+					c.Lock.Unlock()
+					if err != nil {
+						log.Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
+					}
 				}
 			}
 		}()
@@ -132,9 +157,9 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 			log.Error(err)
 		}
 		if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {
-			time.Sleep(time.Second * 5)
+			time.Sleep(time.Second * 1)
 		} else {
-			time.Sleep(time.Second * 2)
+			time.Sleep(time.Millisecond * 200)
 		}
 	}
 }

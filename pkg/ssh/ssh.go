@@ -134,22 +134,31 @@ func DialSshRemote(ctx context.Context, conf *SshConfig) (remote *ssh.Client, er
 
 	// ref: https://github.com/golang/go/issues/21478
 	if err == nil {
-		go func() {
-			defer remote.Close()
-			for ctx.Err() == nil {
-				time.Sleep(time.Second * 15)
-				_, _, err := remote.SendRequest("keepalive@golang.org", true, nil)
-				if err == nil || err.Error() == "request failed" {
-					// Any response is a success.
-					continue
-				}
-				if err != nil {
-					return
-				}
-			}
-		}()
+		//go func() {
+		//	err2 := keepAlive(remote, conn, ctx.Done())
+		//	if err2 != nil {
+		//		log.Debugf("Failed to send keep-alive request: %v", err2)
+		//	}
+		//}()
 	}
 	return remote, err
+}
+
+func keepAlive(cl *ssh.Client, conn net.Conn, done <-chan struct{}) error {
+	const keepAliveInterval = time.Second * 10
+	t := time.NewTicker(keepAliveInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			_, _, err := cl.SendRequest("keepalive@golang.org", true, nil)
+			if err != nil && err != io.EOF {
+				return errors.Wrap(err, "failed to send keep alive")
+			}
+		case <-done:
+			return nil
+		}
+	}
 }
 
 func (config SshConfig) GetAuth() ([]ssh.AuthMethod, error) {
@@ -384,9 +393,10 @@ func GetBastion(name string, defaultValue SshConfig) SshConfig {
 }
 
 func (config SshConfig) Dial(ctx context.Context) (client *ssh.Client, err error) {
-	if strings.Index(config.Addr, ":") < 0 {
+	if _, _, err = net.SplitHostPort(config.Addr); err != nil {
 		// use default ssh port 22
 		config.Addr = net.JoinHostPort(config.Addr, "22")
+		err = nil
 	}
 	// connect to the bastion host
 	authMethod, err := config.GetAuth()
@@ -418,9 +428,10 @@ func (config SshConfig) Dial(ctx context.Context) (client *ssh.Client, err error
 }
 
 func JumpTo(ctx context.Context, bClient *ssh.Client, to SshConfig) (client *ssh.Client, err error) {
-	if strings.Index(to.Addr, ":") < 0 {
+	if _, _, err = net.SplitHostPort(to.Addr); err != nil {
 		// use default ssh port 22
 		to.Addr = net.JoinHostPort(to.Addr, "22")
+		err = nil
 	}
 
 	var authMethod []ssh.AuthMethod
@@ -508,25 +519,19 @@ func init() {
 func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.AddrPort) error {
 	// Listen on remote server port
 	var lc net.ListenConfig
-	localListen, err := lc.Listen(ctx, "tcp", local.String())
-	if err != nil {
-		return err
+	localListen, e := lc.Listen(ctx, "tcp", local.String())
+	if e != nil {
+		return e
 	}
 
 	go func() {
 		defer localListen.Close()
-		go func() {
-			<-ctx.Done()
-			localListen.Close()
-		}()
 
 		for ctx.Err() == nil {
-			localConn, err := localListen.Accept()
-			if err != nil {
-				if !errors.Is(err, net.ErrClosed) {
-					log.Errorf("Failed to accept conn: %v", err)
-				}
-				return
+			localConn, err1 := localListen.Accept()
+			if err1 != nil {
+				log.Debugf("Failed to accept ssh conn: %v", err1)
+				continue
 			}
 			go func() {
 				defer localConn.Close()
@@ -534,7 +539,7 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 				sshClient, err := DialSshRemote(ctx, conf)
 				if err != nil {
 					marshal, _ := json.Marshal(conf)
-					log.Debugf("Failed to dial remote ssh server %v : %v", string(marshal), err)
+					log.Debugf("Failed to dial remote ssh server %v: %v", string(marshal), err)
 					return
 				}
 				defer sshClient.Close()

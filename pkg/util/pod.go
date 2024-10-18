@@ -17,6 +17,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
@@ -325,39 +326,58 @@ func FindContainerByName(pod *corev1.Pod, name string) (*corev1.Container, int) 
 	return nil, -1
 }
 
-func CheckPodStatus(cCtx context.Context, cFunc context.CancelFunc, podName string, podInterface v12.PodInterface) {
-	w, err := podInterface.Watch(cCtx, v1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
-	})
-	if err != nil {
-		return
-	}
-	defer w.Stop()
+func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName string, podInterface v12.PodInterface) {
+	for ctx.Err() == nil {
+		func() {
+			defer time.Sleep(time.Millisecond * 200)
 
-	_, err = podInterface.Get(cCtx, podName, v1.GetOptions{})
-	if err != nil {
-		return
-	}
-	for {
-		select {
-		case e, ok := <-w.ResultChan():
-			if !ok {
+			w, err := podInterface.Watch(ctx, v1.ListOptions{
+				FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
+			})
+			if err != nil {
+				if k8serrors.IsNotFound(err) {
+					log.Errorf("Watch Pod %s is gone, cancel port-forward", podName)
+					cancelFunc()
+				}
 				return
 			}
-			switch e.Type {
-			case watch.Deleted:
-				cFunc()
-				return
-			case watch.Error:
-				return
-			case watch.Added, watch.Modified, watch.Bookmark:
-				// do nothing
-			default:
+			defer w.Stop()
+
+			_, err = podInterface.Get(ctx, podName, v1.GetOptions{})
+			if err != nil {
+				if k8serrors.IsNotFound(err) {
+					log.Errorf("Get Pod %s is gone, cancel port-forward", podName)
+					cancelFunc()
+				}
 				return
 			}
-		case <-cCtx.Done():
-			return
-		}
+			select {
+			case e, ok := <-w.ResultChan():
+				if !ok {
+					_, err = podInterface.Get(ctx, podName, v1.GetOptions{})
+					if err != nil {
+						log.Errorf("Failed to get Pod %s: %v", podName, err)
+						cancelFunc()
+					}
+					return
+				}
+				switch e.Type {
+				case watch.Deleted:
+					log.Errorf("Pod %s is deleted, cancel port-forward", podName)
+					cancelFunc()
+					return
+				case watch.Error:
+					_, err = podInterface.Get(ctx, podName, v1.GetOptions{})
+					if err != nil {
+						log.Errorf("Watch Pod %s occours error: %v", podName, err)
+						cancelFunc()
+					}
+					return
+				case watch.Added, watch.Modified, watch.Bookmark:
+					// do nothing
+				}
+			}
+		}()
 	}
 }
 

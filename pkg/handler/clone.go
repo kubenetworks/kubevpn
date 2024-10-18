@@ -443,7 +443,6 @@ func (d *CloneOptions) SyncDir(ctx context.Context, labels string) error {
 			func() {
 				defer time.Sleep(time.Second * 2)
 
-				util.CheckPodStatus(d.ctx, func() {}, podName, d.targetClientset.CoreV1().Pods(d.TargetNamespace))
 				sortBy := func(pods []*v1.Pod) sort.Interface { return sort.Reverse(podutils.ActivePods(pods)) }
 				_, _, _ = polymorphichelpers.GetFirstPod(d.targetClientset.CoreV1(), d.TargetNamespace, labels, time.Second*30, sortBy)
 				list, err := util.GetRunningPodList(d.ctx, d.targetClientset, d.TargetNamespace, labels)
