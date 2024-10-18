@@ -316,12 +316,12 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress string, lite bool) (err error) {
 	log.Debugf("IPv4: %s, IPv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
 
-	var routes []types.Route
+	var cidrList []*net.IPNet
 	if !lite {
-		routes = append(routes, types.Route{Dst: *config.CIDR})
+		cidrList = append(cidrList, config.CIDR)
 	}
 	for _, ipNet := range c.cidrs {
-		routes = append(routes, types.Route{Dst: *ipNet})
+		cidrList = append(cidrList, ipNet)
 	}
 	// add extra-cidr
 	for _, s := range c.ExtraRouteInfo.ExtraCIDR {
@@ -330,7 +330,12 @@ func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress 
 		if err != nil {
 			return fmt.Errorf("invalid extra-cidr %s, err: %v", s, err)
 		}
-		routes = append(routes, types.Route{Dst: *ipnet})
+		cidrList = append(cidrList, ipnet)
+	}
+
+	var routes []types.Route
+	for _, ipNet := range util.RemoveLargerOverlappingCIDRs(cidrList) {
+		routes = append(routes, types.Route{Dst: *ipNet})
 	}
 
 	tunConfig := tun.Config{
@@ -744,7 +749,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) (err erro
 		for _, s := range strings.Split(value, " ") {
 			_, cidr, _ := net.ParseCIDR(s)
 			if cidr != nil {
-				c.cidrs = util.Deduplicate(append(c.cidrs, cidr))
+				c.cidrs = util.RemoveLargerOverlappingCIDRs(append(c.cidrs, cidr))
 			}
 		}
 		if len(c.cidrs) != 0 {
@@ -764,7 +769,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) (err erro
 		for _, cidr := range cidrs {
 			s.Insert(cidr.String())
 		}
-		c.cidrs = util.Deduplicate(append(c.cidrs, cidrs...))
+		c.cidrs = util.RemoveLargerOverlappingCIDRs(append(c.cidrs, cidrs...))
 		_ = m.Set(ctx, config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
 		return
 	}
