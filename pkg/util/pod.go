@@ -335,8 +335,8 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
 			})
 			if err != nil {
-				if k8serrors.IsNotFound(err) {
-					log.Errorf("Watch Pod %s is gone, cancel port-forward", podName)
+				if !k8serrors.IsForbidden(err) {
+					log.Errorf("Failed to watch Pod %s: %v", podName, err)
 					cancelFunc()
 				}
 				return
@@ -345,8 +345,8 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 
 			_, err = podInterface.Get(ctx, podName, v1.GetOptions{})
 			if err != nil {
-				if k8serrors.IsNotFound(err) {
-					log.Errorf("Get Pod %s is gone, cancel port-forward", podName)
+				if !k8serrors.IsForbidden(err) {
+					log.Errorf("Failed to get Pod %s: %v", podName, err)
 					cancelFunc()
 				}
 				return
@@ -363,13 +363,13 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				}
 				switch e.Type {
 				case watch.Deleted:
-					log.Errorf("Pod %s is deleted, cancel port-forward", podName)
+					log.Errorf("Pod %s is deleted", podName)
 					cancelFunc()
 					return
 				case watch.Error:
 					_, err = podInterface.Get(ctx, podName, v1.GetOptions{})
 					if err != nil {
-						log.Errorf("Watch Pod %s occours error: %v", podName, err)
+						log.Errorf("Failed to get Pod %s: %v", podName, err)
 						cancelFunc()
 					}
 					return
