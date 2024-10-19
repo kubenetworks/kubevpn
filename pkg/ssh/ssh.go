@@ -30,6 +30,7 @@ import (
 	"k8s.io/client-go/util/homedir"
 	"k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -714,9 +715,9 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 
 	if print {
 		log.Infof("Waiting jump to bastion host...")
-		log.Debugf("Root daemon jumping to ssh host...")
+		log.Debugf("Root daemon jumping to ssh host for kubeconfig %s ...", ptr.Deref(configFlags.KubeConfig, ""))
 	} else {
-		log.Debugf("User daemon jumping to ssh host")
+		log.Debugf("User daemon jumping to ssh host for kubeconfig %s ...", ptr.Deref(configFlags.KubeConfig, ""))
 	}
 	err = PortMapUntil(ctx, conf, remote, local)
 	if err != nil {
