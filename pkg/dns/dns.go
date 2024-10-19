@@ -153,7 +153,7 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 		if ctx.Err() != nil {
 			return
 		}
-		if err != nil {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			log.Error(err)
 		}
 		if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {

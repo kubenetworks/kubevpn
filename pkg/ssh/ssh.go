@@ -523,6 +523,7 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 	if e != nil {
 		return e
 	}
+	log.Debugf("SSH listening on local %s forward to %s", local.String(), remote.String())
 
 	go func() {
 		defer localListen.Close()
@@ -535,21 +536,23 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 			}
 			go func() {
 				defer localConn.Close()
+				cCtx, cancelFunc := context.WithCancel(ctx)
+				defer cancelFunc()
 
-				sshClient, err := DialSshRemote(ctx, conf)
+				sshClient, err := DialSshRemote(cCtx, conf)
 				if err != nil {
 					marshal, _ := json.Marshal(conf)
 					log.Debugf("Failed to dial remote ssh server %v: %v", string(marshal), err)
 					return
 				}
 				defer sshClient.Close()
-				remoteConn, err := sshClient.DialContext(ctx, "tcp", remote.String())
+				remoteConn, err := sshClient.DialContext(cCtx, "tcp", remote.String())
 				if err != nil {
 					log.Debugf("Failed to dial %s: %s", remote.String(), err)
 					return
 				}
 				defer remoteConn.Close()
-				copyStream(ctx, localConn, remoteConn)
+				copyStream(cCtx, localConn, remoteConn)
 			}()
 		}
 	}()
@@ -711,6 +714,9 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 
 	if print {
 		log.Infof("Waiting jump to bastion host...")
+		log.Debugf("Root daemon jumping to ssh host...")
+	} else {
+		log.Debugf("User daemon jumping to ssh host")
 	}
 	err = PortMapUntil(ctx, conf, remote, local)
 	if err != nil {
@@ -752,6 +758,9 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 	if print {
 		msg := fmt.Sprintf("To use: export KUBECONFIG=%s", temp.Name())
 		PrintLine(log.Info, msg)
+		log.Debugf("Root daemon jump ssh bastion host with kubeconfig: %s", temp.Name())
+	} else {
+		log.Debugf("User daemon jump ssh bastion host with kubeconfig: %s", temp.Name())
 	}
 	path = temp.Name()
 	return

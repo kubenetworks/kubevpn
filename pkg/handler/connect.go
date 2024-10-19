@@ -249,7 +249,9 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 	var readyChan = make(chan struct{}, 1)
 	var errChan = make(chan error, 1)
 	podInterface := c.clientset.CoreV1().Pods(c.Namespace)
+	var out = log.StandardLogger().WriterLevel(log.DebugLevel)
 	go func() {
+		defer out.Close()
 		var first = pointer.Bool(true)
 		for c.ctx.Err() == nil {
 			func() {
@@ -282,6 +284,8 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 					portPair,
 					readyChan,
 					childCtx.Done(),
+					out,
+					out,
 				)
 				if *first {
 					errChan <- err
