@@ -50,6 +50,12 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		LocalTime:  true,
 		Compress:   false,
 	}
+	
+	// for gssapi to lookup KDCs in DNS
+	// c.LibDefaults.DNSLookupKDC = true
+	// c.LibDefaults.DNSLookupRealm = true
+	net.DefaultResolver.PreferGo = true
+	
 	util.InitLoggerForServer(true)
 	log.SetOutput(l)
 	klog.SetOutput(l)
