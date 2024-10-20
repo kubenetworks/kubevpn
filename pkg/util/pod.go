@@ -17,6 +17,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
@@ -133,7 +134,7 @@ func WaitPod(ctx context.Context, podInterface v12.PodInterface, list v1.ListOpt
 	}
 }
 
-func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, namespace string, portPair []string, readyChan chan struct{}, stopChan <-chan struct{}) error {
+func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, namespace string, portPair []string, readyChan chan struct{}, stopChan <-chan struct{}, out, errOut io.Writer) error {
 	err := os.Setenv(string(util.RemoteCommandWebsockets), "true")
 	if err != nil {
 		return err
@@ -161,7 +162,7 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 		}
 		dialer = portforward.NewFallbackDialer(websocketDialer, dialer, httpstream.IsUpgradeFailure)
 	}
-	forwarder, err := portforward.New(dialer, portPair, stopChan, readyChan, nil, os.Stderr)
+	forwarder, err := portforward.New(dialer, portPair, stopChan, readyChan, out, errOut)
 	if err != nil {
 		log.Errorf("Create port forward error: %s", err.Error())
 		return err
@@ -325,39 +326,58 @@ func FindContainerByName(pod *corev1.Pod, name string) (*corev1.Container, int) 
 	return nil, -1
 }
 
-func CheckPodStatus(cCtx context.Context, cFunc context.CancelFunc, podName string, podInterface v12.PodInterface) {
-	w, err := podInterface.Watch(cCtx, v1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
-	})
-	if err != nil {
-		return
-	}
-	defer w.Stop()
+func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName string, podInterface v12.PodInterface) {
+	for ctx.Err() == nil {
+		func() {
+			defer time.Sleep(time.Millisecond * 200)
 
-	_, err = podInterface.Get(cCtx, podName, v1.GetOptions{})
-	if err != nil {
-		return
-	}
-	for {
-		select {
-		case e, ok := <-w.ResultChan():
-			if !ok {
+			w, err := podInterface.Watch(ctx, v1.ListOptions{
+				FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
+			})
+			if err != nil {
+				if !k8serrors.IsForbidden(err) && !errors.Is(err, context.Canceled) {
+					log.Errorf("Failed to watch Pod %s: %v", podName, err)
+					cancelFunc()
+				}
 				return
 			}
-			switch e.Type {
-			case watch.Deleted:
-				cFunc()
-				return
-			case watch.Error:
-				return
-			case watch.Added, watch.Modified, watch.Bookmark:
-				// do nothing
-			default:
+			defer w.Stop()
+
+			_, err = podInterface.Get(ctx, podName, v1.GetOptions{})
+			if err != nil {
+				if !k8serrors.IsForbidden(err) && !errors.Is(err, context.Canceled) {
+					log.Errorf("Failed to get Pod %s: %v", podName, err)
+					cancelFunc()
+				}
 				return
 			}
-		case <-cCtx.Done():
-			return
-		}
+			select {
+			case e, ok := <-w.ResultChan():
+				if !ok {
+					_, err = podInterface.Get(ctx, podName, v1.GetOptions{})
+					if err != nil && !errors.Is(err, context.Canceled) {
+						log.Errorf("Failed to get Pod %s: %v", podName, err)
+						cancelFunc()
+					}
+					return
+				}
+				switch e.Type {
+				case watch.Deleted:
+					log.Errorf("Pod %s is deleted", podName)
+					cancelFunc()
+					return
+				case watch.Error:
+					_, err = podInterface.Get(ctx, podName, v1.GetOptions{})
+					if err != nil && !errors.Is(err, context.Canceled) {
+						log.Errorf("Failed to get Pod %s: %v", podName, err)
+						cancelFunc()
+					}
+					return
+				case watch.Added, watch.Modified, watch.Bookmark:
+					// do nothing
+				}
+			}
+		}()
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	osexec "os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -219,18 +220,32 @@ func GetTlsDomain(ns string) string {
 	return config.ConfigMapPodTrafficManager + "." + ns + "." + "svc"
 }
 
-func Deduplicate(cidr []*net.IPNet) (result []*net.IPNet) {
-	var set = sets.New[string]()
-	for _, ipNet := range cidr {
-		if ipNet == nil {
+func RemoveLargerOverlappingCIDRs(cidrNets []*net.IPNet) []*net.IPNet {
+	sort.Slice(cidrNets, func(i, j int) bool {
+		onesI, _ := cidrNets[i].Mask.Size()
+		onesJ, _ := cidrNets[j].Mask.Size()
+		return onesI > onesJ
+	})
+
+	var cidrsOverlap = func(cidr1, cidr2 *net.IPNet) bool {
+		return cidr1.Contains(cidr2.IP) || cidr2.Contains(cidr1.IP)
+	}
+
+	var result []*net.IPNet
+	skipped := make(map[int]bool)
+
+	for i := range cidrNets {
+		if skipped[i] {
 			continue
 		}
-		if !set.Has(ipNet.String()) {
-			result = append(result, ipNet)
+		for j := i + 1; j < len(cidrNets); j++ {
+			if cidrsOverlap(cidrNets[i], cidrNets[j]) {
+				skipped[j] = true
+			}
 		}
-		set.Insert(ipNet.String())
+		result = append(result, cidrNets[i])
 	}
-	return
+	return result
 }
 
 func CleanExtensionLib() {
