@@ -154,7 +154,7 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 			return
 		}
 		if err != nil && !errors.Is(err, context.Canceled) {
-			log.Error(err)
+			log.Debugf("Failed to watch service to add route table: %v", err)
 		}
 		if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {
 			time.Sleep(time.Second * 1)

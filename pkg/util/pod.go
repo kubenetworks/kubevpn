@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/cli-runtime/pkg/resource"
@@ -32,6 +34,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/cmd/exec"
 	"k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
@@ -169,7 +172,7 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 	}
 
 	if err = forwarder.ForwardPorts(); err != nil {
-		log.Errorf("Forward port error: %s", err.Error())
+		log.Debugf("Forward port error: %s", err.Error())
 		return err
 	}
 	return nil
@@ -336,8 +339,7 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 			})
 			if err != nil {
 				if !k8serrors.IsForbidden(err) && !errors.Is(err, context.Canceled) {
-					log.Errorf("Failed to watch Pod %s: %v", podName, err)
-					cancelFunc()
+					log.Debugf("Failed to watch Pod %s: %v", podName, err)
 				}
 				return
 			}
@@ -346,8 +348,7 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 			_, err = podInterface.Get(ctx, podName, v1.GetOptions{})
 			if err != nil {
 				if !k8serrors.IsForbidden(err) && !errors.Is(err, context.Canceled) {
-					log.Errorf("Failed to get Pod %s: %v", podName, err)
-					cancelFunc()
+					log.Debugf("Failed to get Pod %s: %v", podName, err)
 				}
 				return
 			}
@@ -356,20 +357,20 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				if !ok {
 					_, err = podInterface.Get(ctx, podName, v1.GetOptions{})
 					if err != nil && !errors.Is(err, context.Canceled) {
-						log.Errorf("Failed to get Pod %s: %v", podName, err)
+						log.Debugf("Failed to get Pod %s: %v", podName, err)
 						cancelFunc()
 					}
 					return
 				}
 				switch e.Type {
 				case watch.Deleted:
-					log.Errorf("Pod %s is deleted", podName)
+					log.Debugf("Pod %s is deleted", podName)
 					cancelFunc()
 					return
 				case watch.Error:
 					_, err = podInterface.Get(ctx, podName, v1.GetOptions{})
 					if err != nil && !errors.Is(err, context.Canceled) {
-						log.Errorf("Failed to get Pod %s: %v", podName, err)
+						log.Debugf("Failed to get Pod %s: %v", podName, err)
 						cancelFunc()
 					}
 					return
@@ -378,6 +379,43 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				}
 			}
 		}()
+	}
+}
+
+func CheckPortStatus(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, localGvisorTCPPort string) {
+	defer cancelFunc()
+	ticker := time.NewTicker(time.Second * 60)
+	defer ticker.Stop()
+
+	select {
+	case <-readyChan:
+	case <-ticker.C:
+		log.Debugf("Wait port-forward to be ready timeout")
+		return
+	case <-ctx.Done():
+		return
+	}
+
+	for ctx.Err() == nil {
+		err := retry.OnError(wait.Backoff{
+			Steps:    6,
+			Duration: time.Second,
+		}, func(err error) bool {
+			return err != nil
+		}, func() error {
+			var lc net.ListenConfig
+			conn, err := lc.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", localGvisorTCPPort))
+			if err == nil {
+				_ = conn.Close()
+				return errors.New("port is free")
+			}
+			return nil
+		})
+		if err != nil {
+			log.Debugf("Can not dial local port: %s: %v", localGvisorTCPPort, err)
+			return
+		}
+		time.Sleep(time.Second * 5)
 	}
 }
 

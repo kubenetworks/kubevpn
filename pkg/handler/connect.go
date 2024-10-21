@@ -20,6 +20,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/distribution/reference"
 	goversion "github.com/hashicorp/go-version"
+	"github.com/libp2p/go-netroute"
 	miekgdns "github.com/miekg/dns"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -31,6 +32,7 @@ import (
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
 	pkgtypes "k8s.io/apimachinery/pkg/types"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
+	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/resource"
@@ -246,36 +248,47 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 
 // detect pod is delete event, if pod is deleted, needs to redo port-forward immediately
 func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) error {
-	var readyChan = make(chan struct{}, 1)
+	firstCtx, firstCancelFunc := context.WithCancel(ctx)
+	defer firstCancelFunc()
 	var errChan = make(chan error, 1)
-	podInterface := c.clientset.CoreV1().Pods(c.Namespace)
-	var out = log.StandardLogger().WriterLevel(log.DebugLevel)
 	go func() {
-		defer out.Close()
+		runtime.ErrorHandlers = []func(error){}
 		var first = pointer.Bool(true)
-		for c.ctx.Err() == nil {
+		for ctx.Err() == nil {
 			func() {
 				defer time.Sleep(time.Millisecond * 200)
 
 				sortBy := func(pods []*v1.Pod) sort.Interface { return sort.Reverse(podutils.ActivePods(pods)) }
 				label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
-				_, _, _ = polymorphichelpers.GetFirstPod(c.clientset.CoreV1(), c.Namespace, label, time.Second*5, sortBy)
-				podList, err := c.GetRunningPodList(ctx)
+				_, _, _ = polymorphichelpers.GetFirstPod(c.clientset.CoreV1(), c.Namespace, label, time.Second*10, sortBy)
+				ctx2, cancelFunc2 := context.WithTimeout(ctx, time.Second*10)
+				defer cancelFunc2()
+				podList, err := c.GetRunningPodList(ctx2)
 				if err != nil {
-					log.Errorf("Failed to get running pod: %v", err)
+					log.Debugf("Failed to get running pod: %v", err)
 					if *first {
-						errChan <- err
+						util.SafeWrite(errChan, err)
 					}
 					return
 				}
 				childCtx, cancelFunc := context.WithCancel(ctx)
 				defer cancelFunc()
-				if !*first {
-					readyChan = nil
-				}
+				var readyChan = make(chan struct{})
 				podName := podList[0].GetName()
 				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
-				go util.CheckPodStatus(childCtx, cancelFunc, podName, podInterface)
+				//go util.CheckPodStatus(childCtx, cancelFunc, podName, c.clientset.CoreV1().Pods(c.Namespace))
+				go util.CheckPortStatus(childCtx, cancelFunc, readyChan, strings.Split(portPair[1], ":")[0])
+				if *first {
+					go func() {
+						select {
+						case <-readyChan:
+							firstCancelFunc()
+						case <-childCtx.Done():
+						}
+					}()
+				}
+				var out = log.StandardLogger().WriterLevel(log.DebugLevel)
+				defer out.Close()
 				err = util.PortForwardPod(
 					c.config,
 					c.restclient,
@@ -288,19 +301,19 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 					out,
 				)
 				if *first {
-					errChan <- err
+					util.SafeWrite(errChan, err)
 				}
 				first = pointer.Bool(false)
 				// exit normal, let context.err to judge to exit or not
 				if err == nil {
-					log.Errorf("Port forward retrying")
+					log.Debugf("Port forward retrying")
 					return
 				}
 				if strings.Contains(err.Error(), "unable to listen on any of the requested ports") ||
 					strings.Contains(err.Error(), "address already in use") {
-					log.Errorf("Port %s already in use, needs to release it manually", portPair)
+					log.Debugf("Port %s already in use, needs to release it manually", portPair)
 				} else {
-					log.Errorf("Port-forward occurs error: %v", err)
+					log.Debugf("Port-forward occurs error: %v", err)
 				}
 			}()
 		}
@@ -312,7 +325,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 		return errors.New("wait port forward to be ready timeout")
 	case err := <-errChan:
 		return err
-	case <-readyChan:
+	case <-firstCtx.Done():
 		return nil
 	}
 }
@@ -432,6 +445,12 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
 			mask = net.CIDRMask(32, 32)
 		} else {
 			mask = net.CIDRMask(128, 128)
+		}
+		if r, err := netroute.New(); err == nil {
+			iface, _, _, err := r.Route(ip)
+			if err == nil && iface.Name == tunName {
+				return
+			}
 		}
 		errs := tun.AddRoutes(tunName, types.Route{Dst: net.IPNet{IP: ip, Mask: mask}})
 		if errs != nil {

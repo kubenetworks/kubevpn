@@ -26,13 +26,13 @@ func UDPForwarder(s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.
 		w := &waiter.Queue{}
 		endpoint, tErr := request.CreateEndpoint(w)
 		if tErr != nil {
-			log.Errorf("[TUN-UDP] Failed to create endpoint: %v", tErr)
+			log.Debugf("[TUN-UDP] Failed to create endpoint: %v", tErr)
 			return
 		}
 
 		node, err := ParseNode(GvisorUDPForwardAddr)
 		if err != nil {
-			log.Errorf("[TUN-UDP] Failed to parse gviosr udp forward addr %s: %v", GvisorUDPForwardAddr, err)
+			log.Debugf("[TUN-UDP] Failed to parse gviosr udp forward addr %s: %v", GvisorUDPForwardAddr, err)
 			return
 		}
 		node.Client = &Client{
@@ -44,16 +44,16 @@ func UDPForwarder(s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.
 		ctx := context.Background()
 		c, err := forwardChain.getConn(ctx)
 		if err != nil {
-			log.Errorf("[TUN-UDP] Failed to get conn: %v", err)
+			log.Debugf("[TUN-UDP] Failed to get conn: %v", err)
 			return
 		}
 		if err = WriteProxyInfo(c, endpointID); err != nil {
-			log.Errorf("[TUN-UDP] Failed to write proxy info: %v", err)
+			log.Debugf("[TUN-UDP] Failed to write proxy info: %v", err)
 			return
 		}
 		remote, err := node.Client.ConnectContext(ctx, c)
 		if err != nil {
-			log.Errorf("[TUN-UDP] Failed to connect: %v", err)
+			log.Debugf("[TUN-UDP] Failed to connect: %v", err)
 			return
 		}
 		conn := gonet.NewUDPConn(w, endpoint)
@@ -77,7 +77,7 @@ func UDPForwarder(s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.
 			}()
 			err = <-errChan
 			if err != nil && !errors.Is(err, io.EOF) {
-				log.Errorf("[TUN-UDP] Disconnect: %s >-<: %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
+				log.Debugf("[TUN-UDP] Disconnect: %s >-<: %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
 			}
 		}()
 	}).HandlePacket
