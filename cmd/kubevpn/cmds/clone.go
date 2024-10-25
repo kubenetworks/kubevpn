@@ -110,6 +110,11 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if !sshConf.IsEmpty() {
+				if ip := util.GetAPIServerFromKubeConfigBytes(bytes); ip != nil {
+					extraRoute.ExtraCIDR = append(extraRoute.ExtraCIDR, ip.String())
+				}
+			}
 			logLevel := log.InfoLevel
 			if config.Debug {
 				logLevel = log.DebugLevel

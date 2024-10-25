@@ -3,6 +3,8 @@ package util
 import (
 	"context"
 	"encoding/json"
+	"net"
+	"net/url"
 	"os"
 	"reflect"
 	"unsafe"
@@ -94,6 +96,36 @@ func ConvertToKubeConfigBytes(factory cmdutil.Factory) ([]byte, string, error) {
 		return nil, "", err
 	}
 	return marshal, namespace, nil
+}
+
+func GetAPIServerFromKubeConfigBytes(kubeconfigBytes []byte) *net.IPNet {
+	kubeConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+	if err != nil {
+		return nil
+	}
+	var host string
+	host, _, err = net.SplitHostPort(kubeConfig.Host)
+	if err != nil {
+		u, err2 := url.Parse(kubeConfig.Host)
+		if err2 != nil {
+			return nil
+		}
+		host, _, err = net.SplitHostPort(u.Host)
+		if err != nil {
+			return nil
+		}
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return nil
+	}
+	var mask net.IPMask
+	if ip.To4() != nil {
+		mask = net.CIDRMask(32, 32)
+	} else {
+		mask = net.CIDRMask(128, 128)
+	}
+	return &net.IPNet{IP: ip, Mask: mask}
 }
 
 func ConvertToTempKubeconfigFile(kubeconfigBytes []byte) (string, error) {
