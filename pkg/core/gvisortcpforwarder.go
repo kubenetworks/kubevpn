@@ -42,18 +42,18 @@ func TCPForwarder(s *stack.Stack) func(stack.TransportEndpointID, *stack.PacketB
 
 		remote, err := forwardChain.dial(context.Background())
 		if err != nil {
-			log.Errorf("[TUN-TCP] Failed to dial remote conn: %v", err)
+			log.Debugf("[TUN-TCP] Failed to dial remote conn: %v", err)
 			return
 		}
 		if err = WriteProxyInfo(remote, id); err != nil {
-			log.Errorf("[TUN-TCP] Failed to write proxy info: %v", err)
+			log.Debugf("[TUN-TCP] Failed to write proxy info: %v", err)
 			return
 		}
 
 		w := &waiter.Queue{}
 		endpoint, tErr := request.CreateEndpoint(w)
 		if tErr != nil {
-			log.Errorf("[TUN-TCP] Failed to create endpoint: %v", tErr)
+			log.Debugf("[TUN-TCP] Failed to create endpoint: %v", tErr)
 			return
 		}
 		conn := gonet.NewTCPConn(w, endpoint)
@@ -77,7 +77,7 @@ func TCPForwarder(s *stack.Stack) func(stack.TransportEndpointID, *stack.PacketB
 		}()
 		err = <-errChan
 		if err != nil && !errors.Is(err, io.EOF) {
-			log.Errorf("[TUN-TCP] Disconnect: %s >-<: %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
+			log.Debugf("[TUN-TCP] Disconnect: %s >-<: %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
 		}
 	}).HandlePacket
 }

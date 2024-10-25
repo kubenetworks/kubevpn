@@ -9,14 +9,16 @@ func SafeRead[T any](c chan T) (T, bool) {
 	return tt, ok
 }
 
-func SafeWrite[T any](c chan<- T, value T) {
+func SafeWrite[T any](c chan<- T, value T) bool {
 	defer func() {
 		if r := recover(); r != nil {
 		}
 	}()
 	select {
 	case c <- value:
+		return true
 	default:
+		return false
 	}
 }
 
