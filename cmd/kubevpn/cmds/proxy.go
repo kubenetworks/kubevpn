@@ -112,6 +112,11 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if !sshConf.IsEmpty() {
+				if ip := util.GetAPIServerFromKubeConfigBytes(bytes); ip != nil {
+					extraRoute.ExtraCIDR = append(extraRoute.ExtraCIDR, ip.String())
+				}
+			}
 			// todo 将 doConnect 方法封装？内部使用 client 发送到daemon？
 			cli := daemon.GetClient(false)
 			logLevel := log.InfoLevel

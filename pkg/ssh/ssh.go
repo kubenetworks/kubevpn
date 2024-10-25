@@ -99,6 +99,10 @@ func (config *SshConfig) ToRPC() *rpc.SshJump {
 	}
 }
 
+func (config *SshConfig) IsEmpty() bool {
+	return config.ConfigAlias == "" && config.Addr == "" && config.Jump == ""
+}
+
 func AddSshFlags(flags *pflag.FlagSet, sshConf *SshConfig) {
 	// for ssh jumper host
 	flags.StringVar(&sshConf.Addr, "ssh-addr", "", "Optional ssh jump server address to dial as <hostname>:<port>, eg: 127.0.0.1:22")

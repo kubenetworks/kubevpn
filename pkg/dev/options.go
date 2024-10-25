@@ -130,6 +130,11 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 		if err != nil {
 			return err
 		}
+		if !sshConfig.IsEmpty() {
+			if ip := util.GetAPIServerFromKubeConfigBytes(kubeConfigBytes); ip != nil {
+				option.ExtraRouteInfo.ExtraCIDR = append(option.ExtraRouteInfo.ExtraCIDR, ip.String())
+			}
+		}
 		logLevel := log.InfoLevel
 		if config.Debug {
 			logLevel = log.DebugLevel
