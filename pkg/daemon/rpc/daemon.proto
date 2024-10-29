@@ -250,6 +250,7 @@ message ConfigRemoveResponse {
 
 message LogRequest {
   bool Follow = 1;
+  int32 Lines = 2;
 }
 
 message LogResponse {
