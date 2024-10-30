@@ -20,7 +20,11 @@ func (svr *Server) Logs(req *rpc.LogRequest, resp rpc.Daemon_LogsServer) error {
 	}
 
 	// only show latest N lines
-	lines -= req.Lines
+	if req.Lines < 0 {
+		lines = -req.Lines
+	} else {
+		lines -= req.Lines
+	}
 
 	config := tail.Config{Follow: req.Follow, ReOpen: false, MustExist: true, Logger: log.New(io.Discard, "", log.LstdFlags)}
 	if !req.Follow {
