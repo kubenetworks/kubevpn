@@ -276,7 +276,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				var readyChan = make(chan struct{})
 				podName := podList[0].GetName()
 				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
-				//go util.CheckPodStatus(childCtx, cancelFunc, podName, c.clientset.CoreV1().Pods(c.Namespace))
+				go util.CheckPodStatus(childCtx, cancelFunc, podName, c.clientset.CoreV1().Pods(c.Namespace))
 				go util.CheckPortStatus(childCtx, cancelFunc, readyChan, strings.Split(portPair[1], ":")[0])
 				if *first {
 					go func() {
