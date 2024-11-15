@@ -2,94 +2,62 @@ package core
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"io"
 	"net"
-	"time"
+	"sync"
 
 	log "github.com/sirupsen/logrus"
+	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
+	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-type gvisorTCPTunnelConnector struct {
+type gvisorTCPHandler struct {
+	// map[srcIP]net.Conn
+	routeMapTCP *sync.Map
+	packetChan  chan *datagramPacket
 }
-
-func GvisorTCPTunnelConnector() Connector {
-	return &gvisorTCPTunnelConnector{}
-}
-
-func (c *gvisorTCPTunnelConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
-	switch con := conn.(type) {
-	case *net.TCPConn:
-		err := con.SetNoDelay(true)
-		if err != nil {
-			return nil, err
-		}
-		err = con.SetKeepAlive(true)
-		if err != nil {
-			return nil, err
-		}
-		err = con.SetKeepAlivePeriod(15 * time.Second)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return conn, nil
-}
-
-type gvisorTCPHandler struct{}
 
 func GvisorTCPHandler() Handler {
-	return &gvisorTCPHandler{}
+	return &gvisorTCPHandler{
+		routeMapTCP: RouteMapTCP,
+		packetChan:  TCPPacketChan,
+	}
 }
 
 func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
-	log.Debugf("[TUN-TCP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
-	// 1, get proxy info
-	endpointID, err := ParseProxyInfo(tcpConn)
-	if err != nil {
-		log.Errorf("[TUN-TCP] Failed to parse proxy info: %v", err)
-		return
-	}
-	log.Debugf("[TUN-TCP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
-		endpointID.LocalPort, endpointID.LocalAddress.String(), endpointID.RemotePort, endpointID.RemoteAddress.String(),
-	)
-	// 2, dial proxy
-	host := endpointID.LocalAddress.String()
-	port := fmt.Sprintf("%d", endpointID.LocalPort)
-	var remote net.Conn
-	remote, err = net.DialTimeout("tcp", net.JoinHostPort(host, port), time.Second*5)
-	if err != nil {
-		log.Errorf("[TUN-TCP] Failed to connect addr %s: %v", net.JoinHostPort(host, port), err)
-		return
-	}
+	cancel, cancelFunc := context.WithCancel(ctx)
+	defer cancelFunc()
+	log.Debugf("[TCP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
+	h.handle(cancel, tcpConn)
+}
 
+func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {
+	endpoint := channel.New(tcp.DefaultReceiveBufferSize, uint32(config.DefaultMTU), tcpip.GetRandMacAddr())
 	errChan := make(chan error, 2)
 	go func() {
-		i := config.LPool.Get().([]byte)[:]
-		defer config.LPool.Put(i[:])
-		written, err2 := io.CopyBuffer(remote, tcpConn, i)
-		log.Debugf("[TUN-TCP] Write length %d data to remote", written)
-		errChan <- err2
+		h.readFromTCPConnWriteToEndpoint(ctx, tcpConn, endpoint)
+		util.SafeClose(errChan)
 	}()
 	go func() {
-		i := config.LPool.Get().([]byte)[:]
-		defer config.LPool.Put(i[:])
-		written, err2 := io.CopyBuffer(tcpConn, remote, i)
-		log.Debugf("[TUN-TCP] Read length %d data from remote", written)
-		errChan <- err2
+		h.readFromEndpointWriteToTCPConn(ctx, tcpConn, endpoint)
+		util.SafeClose(errChan)
 	}()
-	err = <-errChan
-	if err != nil && !errors.Is(err, io.EOF) {
-		log.Debugf("[TUN-TCP] Disconnect: %s >-<: %s: %v", tcpConn.LocalAddr(), remote.RemoteAddr(), err)
+	stack := NewStack(ctx, endpoint)
+	defer stack.Destroy()
+	select {
+	case <-errChan:
+		return
+	case <-ctx.Done():
+		return
 	}
 }
 
 func GvisorTCPListener(addr string) (net.Listener, error) {
-	log.Debugf("Gvisor tcp listen addr %s", addr)
+	log.Debugf("Gvisor TCP listening addr: %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err

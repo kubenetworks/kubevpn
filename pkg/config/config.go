@@ -169,8 +169,7 @@ type Engine string
 
 const (
 	EngineGvisor Engine = "gvisor"
-	EngineMix    Engine = "mix"
-	EngineRaw    Engine = "raw"
+	EngineSystem Engine = "system"
 )
 
 const Slogan = "Now you can access resources in the kubernetes cluster !"

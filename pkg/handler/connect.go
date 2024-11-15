@@ -225,9 +225,10 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		driver.InstallWireGuardTunDriver()
 	}
 	forward := fmt.Sprintf("tcp://127.0.0.1:%d", rawTCPForwardPort)
-	core.GvisorTCPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
-	core.GvisorUDPForwardAddr = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorUDPForwardPort)
-	if err = c.startLocalTunServe(c.ctx, forward, isLite); err != nil {
+	if c.Engine == config.EngineGvisor {
+		forward = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
+	}
+	if err = c.startLocalTunServer(c.ctx, forward, isLite); err != nil {
 		log.Errorf("Start local tun service failed: %v", err)
 		return
 	}
@@ -330,7 +331,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 	}
 }
 
-func (c *ConnectOptions) startLocalTunServe(ctx context.Context, forwardAddress string, lite bool) (err error) {
+func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress string, lite bool) (err error) {
 	log.Debugf("IPv4: %s, IPv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
 
 	var cidrList []*net.IPNet

@@ -16,6 +16,7 @@ import (
 )
 
 func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
+	nicID := tcpip.NICID(1)
 	s := stack.New(stack.Options{
 		NetworkProtocols: []stack.NetworkProtocolFactory{
 			ipv4.NewProtocol,
@@ -33,26 +34,28 @@ func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 		RawFactory: raw.EndpointFactory{},
 	})
 	// set handler for TCP UDP ICMP
-	s.SetTransportProtocolHandler(tcp.ProtocolNumber, TCPForwarder(s))
-	s.SetTransportProtocolHandler(udp.ProtocolNumber, UDPForwarder(s))
+	s.SetTransportProtocolHandler(tcp.ProtocolNumber, TCPForwarder(s, ctx))
+	s.SetTransportProtocolHandler(udp.ProtocolNumber, UDPForwarder(s, ctx))
+	s.SetTransportProtocolHandler(header.ICMPv4ProtocolNumber, ICMPForwarder(s, ctx))
+	s.SetTransportProtocolHandler(header.ICMPv6ProtocolNumber, ICMPForwarder(s, ctx))
 
 	s.SetRouteTable([]tcpip.Route{
 		{
 			Destination: header.IPv4EmptySubnet,
-			NIC:         1,
+			NIC:         nicID,
 		},
 		{
 			Destination: header.IPv6EmptySubnet,
-			NIC:         1,
+			NIC:         nicID,
 		},
 	})
 
-	s.CreateNICWithOptions(1, packetsocket.New(tun), stack.NICOptions{
+	s.CreateNICWithOptions(nicID, packetsocket.New(tun), stack.NICOptions{
 		Disabled: false,
 		Context:  ctx,
 	})
-	s.SetPromiscuousMode(1, true)
-	s.SetSpoofing(1, true)
+	s.SetPromiscuousMode(nicID, true)
+	s.SetSpoofing(nicID, true)
 
 	// Enable SACK Recovery.
 	{

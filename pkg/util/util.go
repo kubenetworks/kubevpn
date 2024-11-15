@@ -298,6 +298,10 @@ func StartupPProf(port int) {
 	_ = http.ListenAndServe(fmt.Sprintf("localhost:%d", port), nil)
 }
 
+func StartupPProfForServer(port int) {
+	_ = http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
+}
+
 func Merge[K comparable, V any](fromMap, ToMap map[K]V) map[K]V {
 	if fromMap == nil {
 		return ToMap

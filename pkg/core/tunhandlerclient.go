@@ -22,10 +22,6 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	}
 	in := make(chan *DataElem, MaxSize)
 	out := make(chan *DataElem, MaxSize)
-	engine := h.node.Get(config.ConfigKubeVPNTransportEngine)
-	endpoint := NewTunEndpoint(ctx, tun, uint32(config.DefaultMTU), config.Engine(engine), in, out)
-	stack := NewStack(ctx, endpoint)
-	defer stack.Destroy()
 	defer util.SafeClose(in)
 	defer util.SafeClose(out)
 
@@ -131,6 +127,8 @@ type ClientDevice struct {
 func (d *ClientDevice) Start(ctx context.Context) {
 	go d.tunInboundHandler(d.tunInbound, d.tunOutbound)
 	go heartbeats(ctx, d.tun)
+	go d.readFromTun()
+	go d.writeToTun()
 
 	select {
 	case err := <-d.chExit:
@@ -143,4 +141,37 @@ func (d *ClientDevice) Start(ctx context.Context) {
 
 func (d *ClientDevice) SetTunInboundHandler(handler func(tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem)) {
 	d.tunInboundHandler = handler
+}
+
+func (d *ClientDevice) readFromTun() {
+	for {
+		b := config.LPool.Get().([]byte)[:]
+		n, err := d.tun.Read(b[:])
+		if err != nil {
+			util.SafeWrite(d.chExit, err)
+			return
+		}
+		if n != 0 {
+			// Try to determine network protocol number, default zero.
+			var src, dst net.IP
+			src, dst, err = util.ParseIP(b[:n])
+			if err != nil {
+				log.Debugf("[TUN-GVISOR] Unknown packet: %v", err)
+				continue
+			}
+			log.Tracef("[TUN-RAW] SRC: %s, DST: %s, Length: %d", src.String(), dst, n)
+			util.SafeWrite(d.tunInbound, NewDataElem(b[:], n, src, dst))
+		}
+	}
+}
+
+func (d *ClientDevice) writeToTun() {
+	for e := range d.tunOutbound {
+		_, err := d.tun.Write(e.data[:e.length])
+		config.LPool.Put(e.data[:])
+		if err != nil {
+			util.SafeWrite(d.chExit, err)
+			return
+		}
+	}
 }

@@ -18,7 +18,7 @@ func CmdSyncthing(_ cmdutil.Factory) *cobra.Command {
 		Short: i18n.T("Syncthing"),
 		Long:  templates.LongDesc(i18n.T(`Syncthing`)),
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
-			go util.StartupPProf(0)
+			go util.StartupPProfForServer(0)
 			return syncthing.StartServer(cmd.Context(), detach, dir)
 		},
 		Hidden:                true,

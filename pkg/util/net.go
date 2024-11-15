@@ -2,6 +2,7 @@ package util
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"github.com/cilium/ipam/service/allocator"
 	"github.com/cilium/ipam/service/ipallocator"
 	"github.com/prometheus-community/pro-bing"
+	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
@@ -87,6 +90,24 @@ func GetLocalTunIP(tunName string) (net.IP, net.IP, error) {
 	return srcIPv4, srcIPv6, nil
 }
 
+func PingOnce(ctx context.Context, srcIP, dstIP string) (bool, error) {
+	pinger, err := probing.NewPinger(dstIP)
+	if err != nil {
+		return false, err
+	}
+	pinger.Source = srcIP
+	pinger.SetLogger(nil)
+	pinger.SetPrivileged(true)
+	pinger.Count = 1
+	pinger.Timeout = time.Millisecond * 1000
+	err = pinger.RunWithContext(ctx) // Blocks until finished.
+	if err != nil {
+		return false, err
+	}
+	stat := pinger.Statistics()
+	return stat.PacketsRecv == stat.PacketsSent, err
+}
+
 func Ping(ctx context.Context, srcIP, dstIP string) (bool, error) {
 	pinger, err := probing.NewPinger(dstIP)
 	if err != nil {
@@ -111,6 +132,24 @@ func IsIPv4(packet []byte) bool {
 
 func IsIPv6(packet []byte) bool {
 	return 6 == (packet[0] >> 4)
+}
+
+func ParseIP(packet []byte) (src net.IP, dst net.IP, err error) {
+	if IsIPv4(packet) {
+		header, err := ipv4.ParseHeader(packet)
+		if err != nil {
+			return nil, nil, err
+		}
+		return header.Src, header.Dst, nil
+	}
+	if IsIPv6(packet) {
+		header, err := ipv6.ParseHeader(packet)
+		if err != nil {
+			return nil, nil, err
+		}
+		return header.Src, header.Dst, nil
+	}
+	return nil, nil, errors.New("packet is invalid")
 }
 
 func GetIPBaseNic() (*net.IPNet, error) {

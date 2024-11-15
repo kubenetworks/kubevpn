@@ -34,7 +34,7 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 		PreRun: func(*cobra.Command, []string) {
 			util.InitLoggerForServer(config.Debug)
 			runtime.GOMAXPROCS(0)
-			go util.StartupPProf(0)
+			go util.StartupPProfForServer(6060)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rand.Seed(time.Now().UnixNano())

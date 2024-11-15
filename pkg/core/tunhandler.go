@@ -105,9 +105,8 @@ func (h *tunHandler) printRoute(ctx context.Context) {
 type Device struct {
 	tun net.Conn
 
-	tunInboundRaw chan *DataElem
-	tunInbound    chan *DataElem
-	tunOutbound   chan *DataElem
+	tunInbound  chan *DataElem
+	tunOutbound chan *DataElem
 
 	// your main logic
 	tunInboundHandler func(tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem)
@@ -120,18 +119,28 @@ func (d *Device) readFromTun() {
 		b := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(b[:])
 		if err != nil {
-			select {
-			case d.chExit <- err:
-			default:
-			}
+			log.Errorf("[TUN] Failed to read from tun: %v", err)
+			util.SafeWrite(d.chExit, err)
 			return
 		}
-		if n != 0 {
-			util.SafeWrite(d.tunInboundRaw, &DataElem{
-				data:   b[:],
-				length: n,
-			})
+		if n == 0 {
+			log.Errorf("[TUN] Read packet length 0")
+			continue
 		}
+
+		src, dst, err := util.ParseIP(b[:n])
+		if err != nil {
+			log.Errorf("[TUN] Unknown packet")
+			continue
+		}
+
+		log.Debugf("[TUN] SRC: %s --> DST: %s, length: %d", src, dst, n)
+		util.SafeWrite(d.tunInbound, &DataElem{
+			data:   b[:],
+			length: n,
+			src:    src,
+			dst:    dst,
+		})
 	}
 }
 
@@ -140,39 +149,9 @@ func (d *Device) writeToTun() {
 		_, err := d.tun.Write(e.data[:e.length])
 		config.LPool.Put(e.data[:])
 		if err != nil {
-			select {
-			case d.chExit <- err:
-			default:
-			}
+			util.SafeWrite(d.chExit, err)
 			return
 		}
-	}
-}
-
-func (d *Device) parseIPHeader(ctx context.Context) {
-	for e := range d.tunInboundRaw {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		if util.IsIPv4(e.data[:e.length]) {
-			// ipv4.ParseHeader
-			b := e.data[:e.length]
-			e.src = net.IPv4(b[12], b[13], b[14], b[15])
-			e.dst = net.IPv4(b[16], b[17], b[18], b[19])
-		} else if util.IsIPv6(e.data[:e.length]) {
-			// ipv6.ParseHeader
-			e.src = e.data[:e.length][8:24]
-			e.dst = e.data[:e.length][24:40]
-		} else {
-			log.Errorf("[TUN] Unknown packet")
-			continue
-		}
-
-		log.Debugf("[TUN] %s --> %s, length: %d", e.src, e.dst, e.length)
-		util.SafeWrite(d.tunInbound, e)
 	}
 }
 
@@ -180,7 +159,6 @@ func (d *Device) Close() {
 	d.tun.Close()
 	util.SafeClose(d.tunInbound)
 	util.SafeClose(d.tunOutbound)
-	util.SafeClose(d.tunInboundRaw)
 	util.SafeClose(TCPPacketChan)
 }
 
@@ -285,7 +263,6 @@ func genICMPPacketIPv6(src net.IP, dst net.IP) ([]byte, error) {
 
 func (d *Device) Start(ctx context.Context) {
 	go d.readFromTun()
-	go d.parseIPHeader(ctx)
 	go d.tunInboundHandler(d.tunInbound, d.tunOutbound)
 	go d.writeToTun()
 	go heartbeats(ctx, d.tun)
@@ -307,11 +284,10 @@ func (h *tunHandler) HandleServer(ctx context.Context, tun net.Conn) {
 	go h.printRoute(ctx)
 
 	device := &Device{
-		tun:           tun,
-		tunInboundRaw: make(chan *DataElem, MaxSize),
-		tunInbound:    make(chan *DataElem, MaxSize),
-		tunOutbound:   make(chan *DataElem, MaxSize),
-		chExit:        h.chExit,
+		tun:         tun,
+		tunInbound:  make(chan *DataElem, MaxSize),
+		tunOutbound: make(chan *DataElem, MaxSize),
+		chExit:      h.chExit,
 	}
 	device.SetTunInboundHandler(func(tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem) {
 		for ctx.Err() == nil {
@@ -366,8 +342,7 @@ type udpElem struct {
 type Peer struct {
 	conn net.PacketConn
 
-	connInbound    chan *udpElem
-	parsedConnInfo chan *udpElem
+	connInbound chan *udpElem
 
 	tunInbound  <-chan *DataElem
 	tunOutbound chan<- *DataElem
@@ -390,80 +365,55 @@ func (p *Peer) sendErr(err error) {
 func (p *Peer) readFromConn() {
 	for {
 		b := config.LPool.Get().([]byte)[:]
-		n, srcAddr, err := p.conn.ReadFrom(b[:])
+		n, from, err := p.conn.ReadFrom(b[:])
 		if err != nil {
 			p.sendErr(err)
 			return
 		}
+
+		src, dst, err := util.ParseIP(b[:n])
+		if err != nil {
+			log.Errorf("[TUN] Unknown packet: %v", err)
+			continue
+		}
+		if _, loaded := p.routeMapUDP.LoadOrStore(src, from); loaded {
+			log.Debugf("[TUN] Find route: %s -> %s", src, from)
+		} else {
+			log.Debugf("[TUN] Add new route: %s -> %s", src, from)
+		}
+
 		p.connInbound <- &udpElem{
-			from:   srcAddr,
+			from:   from,
 			data:   b[:],
 			length: n,
+			src:    src,
+			dst:    dst,
 		}
 	}
 }
 
 func (p *Peer) readFromTCPConn() {
 	for packet := range TCPPacketChan {
+		src, dst, err := util.ParseIP(packet.Data)
+		if err != nil {
+			log.Errorf("[TUN] Unknown packet")
+			continue
+		}
 		u := &udpElem{
 			data:   packet.Data[:],
 			length: int(packet.DataLength),
-		}
-		b := packet.Data
-		if util.IsIPv4(packet.Data) {
-			// ipv4.ParseHeader
-			u.src = net.IPv4(b[12], b[13], b[14], b[15])
-			u.dst = net.IPv4(b[16], b[17], b[18], b[19])
-		} else if util.IsIPv6(packet.Data) {
-			// ipv6.ParseHeader
-			u.src = b[8:24]
-			u.dst = b[24:40]
-		} else {
-			log.Errorf("[TUN] Unknown packet")
-			continue
+			src:    src,
+			dst:    dst,
 		}
 		log.Debugf("[TCP] udp-tun %s >>> %s length: %d", u.src, u.dst, u.length)
-		p.parsedConnInfo <- u
-	}
-}
-
-func (p *Peer) parseHeader() {
-	var firstIPv4, firstIPv6 = true, true
-	for e := range p.connInbound {
-		b := e.data[:e.length]
-		if util.IsIPv4(e.data[:e.length]) {
-			// ipv4.ParseHeader
-			e.src = net.IPv4(b[12], b[13], b[14], b[15])
-			e.dst = net.IPv4(b[16], b[17], b[18], b[19])
-		} else if util.IsIPv6(e.data[:e.length]) {
-			// ipv6.ParseHeader
-			e.src = b[:e.length][8:24]
-			e.dst = b[:e.length][24:40]
-		} else {
-			log.Errorf("[TUN] Unknown packet")
-			continue
-		}
-
-		if firstIPv4 || firstIPv6 {
-			if util.IsIPv4(e.data[:e.length]) {
-				firstIPv4 = false
-			} else {
-				firstIPv6 = false
-			}
-			if _, loaded := p.routeMapUDP.LoadOrStore(e.src, e.from); loaded {
-				log.Debugf("[TUN] Find route: %s -> %s", e.src, e.from)
-			} else {
-				log.Debugf("[TUN] Add new route: %s -> %s", e.src, e.from)
-			}
-		}
-		p.parsedConnInfo <- e
+		p.connInbound <- u
 	}
 }
 
 func (p *Peer) routePeer() {
-	for e := range p.parsedConnInfo {
+	for e := range p.connInbound {
 		if routeToAddr := p.routeMapUDP.RouteTo(e.dst); routeToAddr != nil {
-			log.Debugf("[TUN] Find route: %s -> %s", e.dst, routeToAddr)
+			log.Debugf("[TCP] Find route: %s -> %s", e.dst, routeToAddr)
 			_, err := p.conn.WriteTo(e.data[:e.length], routeToAddr)
 			config.LPool.Put(e.data[:])
 			if err != nil {
@@ -471,6 +421,7 @@ func (p *Peer) routePeer() {
 				return
 			}
 		} else if conn, ok := p.routeMapTCP.Load(e.dst.String()); ok {
+			log.Debugf("[TCP] Find TCP route to dst: %s -> %s", e.dst.String(), conn.(net.Conn).RemoteAddr())
 			dgram := newDatagramPacket(e.data[:e.length])
 			if err := dgram.Write(conn.(net.Conn)); err != nil {
 				log.Errorf("[TCP] udp-tun %s <- %s : %s", conn.(net.Conn).RemoteAddr(), dgram.Addr(), err)
@@ -479,6 +430,7 @@ func (p *Peer) routePeer() {
 			}
 			config.LPool.Put(e.data[:])
 		} else {
+			log.Debugf("[TCP] Not found route to dst: %s, write to TUN device", e.dst.String())
 			p.tunOutbound <- &DataElem{
 				data:   e.data,
 				length: e.length,
@@ -501,17 +453,18 @@ func (p *Peer) routeTUN() {
 				return
 			}
 		} else if conn, ok := p.routeMapTCP.Load(e.dst.String()); ok {
+			log.Debugf("[TUN] Find TCP route to dst: %s -> %s", e.dst.String(), conn.(net.Conn).RemoteAddr())
 			dgram := newDatagramPacket(e.data[:e.length])
 			err := dgram.Write(conn.(net.Conn))
 			config.LPool.Put(e.data[:])
 			if err != nil {
-				log.Errorf("[TCP] udp-tun %s <- %s : %s", conn.(net.Conn).RemoteAddr(), dgram.Addr(), err)
+				log.Errorf("[TUN] udp-tun %s <- %s : %s", conn.(net.Conn).RemoteAddr(), dgram.Addr(), err)
 				p.sendErr(err)
 				return
 			}
 		} else {
+			log.Errorf("[TUN] No route for %s -> %s, drop it", e.src, e.dst)
 			config.LPool.Put(e.data[:])
-			log.Errorf("[TUN] No route for %s -> %s", e.src, e.dst)
 		}
 	}
 }
@@ -519,7 +472,6 @@ func (p *Peer) routeTUN() {
 func (p *Peer) Start() {
 	go p.readFromConn()
 	go p.readFromTCPConn()
-	go p.parseHeader()
 	go p.routePeer()
 	go p.routeTUN()
 }
@@ -530,14 +482,13 @@ func (p *Peer) Close() {
 
 func transportTun(ctx context.Context, tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem, packetConn net.PacketConn, routeMapUDP *RouteMap, routeMapTCP *sync.Map) error {
 	p := &Peer{
-		conn:           packetConn,
-		connInbound:    make(chan *udpElem, MaxSize),
-		parsedConnInfo: make(chan *udpElem, MaxSize),
-		tunInbound:     tunInbound,
-		tunOutbound:    tunOutbound,
-		routeMapUDP:    routeMapUDP,
-		routeMapTCP:    routeMapTCP,
-		errChan:        make(chan error, 2),
+		conn:        packetConn,
+		connInbound: make(chan *udpElem, MaxSize),
+		tunInbound:  tunInbound,
+		tunOutbound: tunOutbound,
+		routeMapUDP: routeMapUDP,
+		routeMapTCP: routeMapTCP,
+		errChan:     make(chan error, 2),
 	}
 
 	defer p.Close()

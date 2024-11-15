@@ -368,9 +368,9 @@ func (option *Options) CreateConnectContainer(portBindings nat.PortMap) (*RunCon
 
 	var entrypoint []string
 	if option.NoProxy {
-		entrypoint = []string{"kubevpn", "connect", "--foreground", "-n", option.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image, "--engine", string(option.Engine)}
+		entrypoint = []string{"kubevpn", "connect", "--foreground", "-n", option.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image, "--netstack", string(option.Engine)}
 	} else {
-		entrypoint = []string{"kubevpn", "proxy", option.Workload, "--foreground", "-n", option.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image, "--engine", string(option.Engine)}
+		entrypoint = []string{"kubevpn", "proxy", option.Workload, "--foreground", "-n", option.Namespace, "--kubeconfig", "/root/.kube/config", "--image", config.Image, "--netstack", string(option.Engine)}
 		for k, v := range option.Headers {
 			entrypoint = append(entrypoint, "--headers", fmt.Sprintf("%s=%s", k, v))
 		}

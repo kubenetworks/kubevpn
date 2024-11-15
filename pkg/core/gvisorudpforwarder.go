@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 
 	log "github.com/sirupsen/logrus"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
@@ -14,10 +15,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-var GvisorUDPForwardAddr string
-
-func UDPForwarder(s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
-	GvisorUDPForwardAddr := GvisorUDPForwardAddr
+func UDPForwarder(s *stack.Stack, ctx context.Context) func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
 	return udp.NewForwarder(s, func(request *udp.ForwarderRequest) {
 		endpointID := request.ID()
 		log.Debugf("[TUN-UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
@@ -30,30 +28,14 @@ func UDPForwarder(s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.
 			return
 		}
 
-		node, err := ParseNode(GvisorUDPForwardAddr)
+		// 2, dial proxy
+		addr := &net.UDPAddr{
+			IP:   endpointID.LocalAddress.AsSlice(),
+			Port: int(endpointID.LocalPort),
+		}
+		remote, err := net.DialUDP("udp", nil, addr)
 		if err != nil {
-			log.Debugf("[TUN-UDP] Failed to parse gviosr udp forward addr %s: %v", GvisorUDPForwardAddr, err)
-			return
-		}
-		node.Client = &Client{
-			Connector:   GvisorUDPOverTCPTunnelConnector(endpointID),
-			Transporter: TCPTransporter(),
-		}
-		forwardChain := NewChain(5, node)
-
-		ctx := context.Background()
-		c, err := forwardChain.getConn(ctx)
-		if err != nil {
-			log.Debugf("[TUN-UDP] Failed to get conn: %v", err)
-			return
-		}
-		if err = WriteProxyInfo(c, endpointID); err != nil {
-			log.Debugf("[TUN-UDP] Failed to write proxy info: %v", err)
-			return
-		}
-		remote, err := node.Client.ConnectContext(ctx, c)
-		if err != nil {
-			log.Debugf("[TUN-UDP] Failed to connect: %v", err)
+			log.Errorf("[TUN-UDP] Failed to connect addr %s: %v", addr.String(), err)
 			return
 		}
 		conn := gonet.NewUDPConn(w, endpoint)
