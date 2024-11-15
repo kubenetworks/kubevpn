@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -18,10 +20,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-var GvisorTCPForwardAddr string
-
-func TCPForwarder(s *stack.Stack) func(stack.TransportEndpointID, *stack.PacketBuffer) bool {
-	GvisorTCPForwardAddr := GvisorTCPForwardAddr
+func TCPForwarder(s *stack.Stack, ctx context.Context) func(stack.TransportEndpointID, *stack.PacketBuffer) bool {
 	return tcp.NewForwarder(s, 0, 100000, func(request *tcp.ForwarderRequest) {
 		defer request.Complete(false)
 		id := request.ID()
@@ -29,24 +28,14 @@ func TCPForwarder(s *stack.Stack) func(stack.TransportEndpointID, *stack.PacketB
 			id.LocalPort, id.LocalAddress.String(), id.RemotePort, id.RemoteAddress.String(),
 		)
 
-		node, err := ParseNode(GvisorTCPForwardAddr)
+		// 2, dial proxy
+		host := id.LocalAddress.String()
+		port := fmt.Sprintf("%d", id.LocalPort)
+		var remote net.Conn
+		var d = net.Dialer{Timeout: time.Second * 5}
+		remote, err := d.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
 		if err != nil {
-			log.Errorf("[TUN-TCP] Failed to parse gvisor tcp forward addr %s: %v", GvisorTCPForwardAddr, err)
-			return
-		}
-		node.Client = &Client{
-			Connector:   GvisorTCPTunnelConnector(),
-			Transporter: TCPTransporter(),
-		}
-		forwardChain := NewChain(5, node)
-
-		remote, err := forwardChain.dial(context.Background())
-		if err != nil {
-			log.Debugf("[TUN-TCP] Failed to dial remote conn: %v", err)
-			return
-		}
-		if err = WriteProxyInfo(remote, id); err != nil {
-			log.Debugf("[TUN-TCP] Failed to write proxy info: %v", err)
+			log.Errorf("[TUN-TCP] Failed to connect addr %s: %v", net.JoinHostPort(host, port), err)
 			return
 		}
 

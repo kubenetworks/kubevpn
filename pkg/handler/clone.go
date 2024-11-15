@@ -293,7 +293,7 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 					"--kubeconfig", "/tmp/.kube/" + config.KUBECONFIG,
 					"--namespace", d.Namespace,
 					"--image", config.Image,
-					"--engine", string(d.Engine),
+					"--netstack", string(d.Engine),
 					"--foreground",
 				}, args...),
 				Env: []v1.EnvVar{},

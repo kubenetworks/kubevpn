@@ -86,12 +86,8 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		}
 
 		var src net.IP
-		bb := dgram.Data[:dgram.DataLength]
-		if util.IsIPv4(bb) {
-			src = net.IPv4(bb[12], bb[13], bb[14], bb[15])
-		} else if util.IsIPv6(bb) {
-			src = bb[8:24]
-		} else {
+		src, _, err = util.ParseIP(dgram.Data[:dgram.DataLength])
+		if err != nil {
 			log.Errorf("[TCP] Unknown packet")
 			continue
 		}

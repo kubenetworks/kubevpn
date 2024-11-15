@@ -32,7 +32,7 @@ func CmdControlPlane(_ cmdutil.Factory) *cobra.Command {
 		`)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			util.InitLoggerForServer(config.Debug)
-			go util.StartupPProf(0)
+			go util.StartupPProfForServer(0)
 			go func(ctx context.Context) {
 				conf, err := miekgdns.ClientConfigFromFile(resolvconf.Path())
 				if err != nil {

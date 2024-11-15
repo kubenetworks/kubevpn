@@ -7,39 +7,8 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
-
-type gvisorUDPOverTCPTunnelConnector struct {
-	Id stack.TransportEndpointID
-}
-
-func GvisorUDPOverTCPTunnelConnector(endpointID stack.TransportEndpointID) Connector {
-	return &gvisorUDPOverTCPTunnelConnector{
-		Id: endpointID,
-	}
-}
-
-func (c *gvisorUDPOverTCPTunnelConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
-	switch con := conn.(type) {
-	case *net.TCPConn:
-		err := con.SetNoDelay(true)
-		if err != nil {
-			return nil, err
-		}
-		err = con.SetKeepAlive(true)
-		if err != nil {
-			return nil, err
-		}
-		err = con.SetKeepAlivePeriod(15 * time.Second)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return newGvisorFakeUDPTunnelConnOverTCP(ctx, conn)
-}
 
 type gvisorUDPHandler struct{}
 
@@ -116,7 +85,7 @@ func (c *gvisorFakeUDPTunnelConn) Close() error {
 }
 
 func GvisorUDPListener(addr string) (net.Listener, error) {
-	log.Debugf("Gvisor UDP over TCP listen addr %s", addr)
+	log.Debugf("Gvisor UDP over TCP listening addr: %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err

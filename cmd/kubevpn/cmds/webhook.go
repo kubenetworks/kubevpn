@@ -23,7 +23,7 @@ func CmdWebhook(f cmdutil.Factory) *cobra.Command {
 		Args: cobra.MaximumNArgs(0),
 		PreRun: func(cmd *cobra.Command, args []string) {
 			util.InitLoggerForServer(true)
-			go util.StartupPProf(0)
+			go util.StartupPProfForServer(0)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return webhook.Main(f)

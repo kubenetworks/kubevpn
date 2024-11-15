@@ -68,10 +68,6 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// not support temporally
-			if connect.Engine == config.EngineGvisor {
-				return fmt.Errorf(`not support type engine: %s, support ("%s"|"%s")`, config.EngineGvisor, config.EngineMix, config.EngineRaw)
-			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -166,7 +162,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "use this image to startup container")
 	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
-	cmd.Flags().StringVar((*string)(&connect.Engine), "engine", string(config.EngineRaw), fmt.Sprintf(`transport engine ("%s"|"%s") %s: use gvisor and raw both (both performance and stable), %s: use raw mode (best stable)`, config.EngineMix, config.EngineRaw, config.EngineMix, config.EngineRaw))
+	cmd.Flags().StringVar((*string)(&connect.Engine), "netstack", string(config.EngineSystem), fmt.Sprintf(`network stack ("%s"|"%s") %s: use gvisor (both performance and stable), %s: use raw mode (best stable)`, config.EngineGvisor, config.EngineSystem, config.EngineGvisor, config.EngineSystem))
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "Hang up")
 	cmd.Flags().BoolVar(&lite, "lite", false, "connect to multiple cluster in lite mode. mode \"lite\": design for only connecting to multiple cluster network. mode \"full\": not only connect to cluster network, it also supports proxy workloads inbound traffic to local PC.")
 
