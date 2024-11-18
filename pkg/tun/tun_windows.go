@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"reflect"
+	"syscall"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -24,18 +25,18 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		return
 	}
 
-	interfaceName := "KubeVPN"
+	tunName := "KubeVPN"
 	if len(cfg.Name) != 0 {
-		interfaceName = cfg.Name
+		tunName = cfg.Name
 	}
 	wireguardtun.WintunTunnelType = "KubeVPN"
-	tunDevice, err := wireguardtun.CreateTUN(interfaceName, cfg.MTU)
+	tunDevice, err := wireguardtun.CreateTUN(tunName, cfg.MTU)
 	if err != nil {
 		err = fmt.Errorf("failed to create TUN device: %w", err)
 		return
 	}
 
-	ifName := winipcfg.LUID(tunDevice.(*wireguardtun.NativeTun).LUID())
+	ifUID := winipcfg.LUID(tunDevice.(*wireguardtun.NativeTun).LUID())
 
 	var ipv4, ipv6 net.IP
 	if cfg.Addr != "" {
@@ -46,7 +47,8 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		if prefix, err = netip.ParsePrefix(cfg.Addr); err != nil {
 			return
 		}
-		if err = ifName.AddIPAddress(prefix); err != nil {
+		if err = ifUID.AddIPAddress(prefix); err != nil {
+			err = fmt.Errorf("can not setup IPv4 address %s to device %s : %v", prefix.String(), tunName, err)
 			return
 		}
 	}
@@ -59,25 +61,25 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		if prefix, err = netip.ParsePrefix(cfg.Addr6); err != nil {
 			return
 		}
-		if err = ifName.AddIPAddress(prefix); err != nil {
+		if err = ifUID.AddIPAddress(prefix); err != nil && !errors.Is(err, syscall.ERROR_NOT_FOUND) {
+			err = fmt.Errorf("can not setup IPv6 address %s to device %s : %v", prefix.String(), tunName, err)
 			return
 		}
 	}
 
-	var tunName string
 	tunName, err = tunDevice.Name()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	_ = ifName.FlushRoutes(windows.AF_INET)
-	_ = ifName.FlushRoutes(windows.AF_INET6)
+	_ = ifUID.FlushRoutes(windows.AF_INET)
+	_ = ifUID.FlushRoutes(windows.AF_INET6)
 
 	if err = addTunRoutes(tunName /*cfg.Gateway,*/, cfg.Routes...); err != nil {
 		return
 	}
 	var row *winipcfg.MibIfRow2
-	if row, err = ifName.Interface(); err != nil {
+	if row, err = ifUID.Interface(); err != nil {
 		return
 	}
 	if itf, err = net.InterfaceByIndex(int(row.InterfaceIndex)); err != nil {
@@ -87,7 +89,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	// windows,macOS,linux connect to same cluster
 	// macOS and linux can ping each other, but macOS and linux can not ping windows
 	var ipInterface *winipcfg.MibIPInterfaceRow
-	ipInterface, err = ifName.IPInterface(windows.AF_INET)
+	ipInterface, err = ifUID.IPInterface(windows.AF_INET)
 	if err != nil {
 		return
 	}
@@ -105,7 +107,7 @@ func addTunRoutes(tunName string, routes ...types.Route) error {
 	if err2 != nil {
 		return err2
 	}
-	ifName, err := winipcfg.LUIDFromIndex(uint32(name.Index))
+	ifUID, err := winipcfg.LUIDFromIndex(uint32(name.Index))
 	if err != nil {
 		return err
 	}
@@ -113,10 +115,7 @@ func addTunRoutes(tunName string, routes ...types.Route) error {
 		if route.Dst.String() == "" {
 			continue
 		}
-		var gw string
-		if gw != "" {
-			route.GW = net.ParseIP(gw)
-		} else {
+		if route.GW == nil {
 			if route.Dst.IP.To4() != nil {
 				route.GW = net.IPv4zero
 			} else {
@@ -133,8 +132,8 @@ func addTunRoutes(tunName string, routes ...types.Route) error {
 		if err != nil {
 			return err
 		}
-		err = ifName.AddRoute(prefix, addr.Unmap(), 0)
-		if err != nil && err != windows.ERROR_OBJECT_ALREADY_EXISTS {
+		err = ifUID.AddRoute(prefix, addr.Unmap(), 0)
+		if err != nil && !errors.Is(err, windows.ERROR_OBJECT_ALREADY_EXISTS) && !errors.Is(err, syscall.ERROR_NOT_FOUND) {
 			return err
 		}
 	}

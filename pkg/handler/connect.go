@@ -336,7 +336,15 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 
 	var cidrList []*net.IPNet
 	if !lite {
-		cidrList = append(cidrList, config.CIDR)
+		cidrList = append(cidrList, config.CIDR, config.CIDR6)
+	} else {
+		// windows needs to add tun IP self to route table, but linux and macOS not need
+		if util.IsWindows() {
+			cidrList = append(cidrList,
+				&net.IPNet{IP: c.localTunIPv4.IP, Mask: net.CIDRMask(32, 32)},
+				&net.IPNet{IP: c.localTunIPv6.IP, Mask: net.CIDRMask(128, 128)},
+			)
+		}
 	}
 	for _, ipNet := range c.cidrs {
 		cidrList = append(cidrList, ipNet)
@@ -357,11 +365,11 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 	}
 
 	tunConfig := tun.Config{
-		Addr:   c.localTunIPv4.String(),
+		Addr:   (&net.IPNet{IP: c.localTunIPv4.IP, Mask: net.CIDRMask(32, 32)}).String(),
 		Routes: routes,
 	}
 	if enable, _ := util.IsIPv6Enabled(); enable {
-		tunConfig.Addr6 = c.localTunIPv6.String()
+		tunConfig.Addr6 = (&net.IPNet{IP: c.localTunIPv6.IP, Mask: net.CIDRMask(128, 128)}).String()
 	}
 
 	localNode := fmt.Sprintf("tun:/127.0.0.1:8422")
@@ -507,6 +515,16 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
 }
 
 func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
+	if !util.IsWindows() {
+		return
+	}
+	// The reason why delete firewall rule is:
+	// On windows ping local tun IPv4/v6 not works
+	// so needs to add firewall rule to allow this
+	if !util.FindAllowFirewallRule(ctx) {
+		util.AddAllowFirewallRule(ctx)
+	}
+
 	// The reason why delete firewall rule is:
 	// On windows use 'kubevpn proxy deploy/authors -H user=windows'
 	// Open terminal 'curl localhost:9080' ok

@@ -5,10 +5,14 @@ package util
 import (
 	"context"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/text/encoding/simplifiedchinese"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 /**
@@ -87,4 +91,78 @@ func decode(in []byte) ([]byte, error) {
 		return out, err
 	}
 	return nil, err
+}
+
+// AddAllowFirewallRule
+// for ping local tun device ip, if not add this firewall, can not ping local tun IP on windows
+func AddAllowFirewallRule(ctx context.Context) {
+	// netsh advfirewall firewall add rule name=kubevpn-traffic-manager dir=in action=allow enable=yes remoteip=223.254.0.100/16,efff:ffff:ffff:ffff:ffff:ffff:ffff:9999/64,LocalSubnet
+	cmd := exec.CommandContext(ctx, "netsh", []string{
+		"advfirewall",
+		"firewall",
+		"add",
+		"rule",
+		"name=" + config.ConfigMapPodTrafficManager,
+		"dir=in",
+		"action=allow",
+		"enable=yes",
+		"remoteip=" + strings.Join([]string{config.CIDR.String(), config.CIDR6.String(), config.DockerCIDR.String(), "LocalSubnet"}, ","),
+	}...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		var s string
+		var b []byte
+		if b, err = decode(out); err == nil {
+			s = string(b)
+		} else {
+			s = string(out)
+		}
+		log.Infof("Failed to exec command: %s, output: %s", cmd.Args, s)
+	}
+}
+
+func DeleteAllowFirewallRule(ctx context.Context) {
+	// netsh advfirewall firewall delete rule name=kubevpn-traffic-manager
+	cmd := exec.CommandContext(ctx, "netsh", []string{
+		"advfirewall",
+		"firewall",
+		"delete",
+		"rule",
+		"name=" + config.ConfigMapPodTrafficManager,
+	}...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		var s string
+		var b []byte
+		if b, err = decode(out); err == nil {
+			s = string(b)
+		} else {
+			s = string(out)
+		}
+		log.Errorf("Failed to exec command: %s, output: %s", cmd.Args, s)
+	}
+}
+
+func FindAllowFirewallRule(ctx context.Context) bool {
+	// netsh advfirewall firewall show rule name=kubevpn-traffic-manager
+	cmd := exec.CommandContext(ctx, "netsh", []string{
+		"advfirewall",
+		"firewall",
+		"show",
+		"rule",
+		"name=" + config.ConfigMapPodTrafficManager,
+	}...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		s := string(out)
+		var b []byte
+		if b, err = decode(out); err == nil {
+			s = string(b)
+		}
+		log.Debugf("Find firewall %s, output: %s", config.ConfigMapPodTrafficManager, s)
+		return false
+	} else {
+		return true
+	}
 }

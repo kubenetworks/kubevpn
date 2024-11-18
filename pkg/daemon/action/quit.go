@@ -1,6 +1,7 @@
 package action
 
 import (
+	"context"
 	"io"
 	"io/fs"
 	"os"
@@ -45,6 +46,9 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 	if svr.IsSudo {
 		_ = dns.CleanupHosts()
 		_ = os.RemoveAll("/etc/resolver")
+		if util.FindAllowFirewallRule(context.Background()) {
+			util.DeleteAllowFirewallRule(context.Background())
+		}
 	}
 
 	// last step is to quit GRPC server
