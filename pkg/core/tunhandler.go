@@ -2,15 +2,10 @@ package core
 
 import (
 	"context"
-	"fmt"
-	"math"
-	"math/rand"
 	"net"
 	"sync"
 	"time"
 
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -62,14 +57,6 @@ func (n *RouteMap) RouteTo(ip net.IP) net.Addr {
 	return n.routes[ip.String()]
 }
 
-func (n *RouteMap) Range(f func(key string, value net.Addr)) {
-	n.lock.RLock()
-	defer n.lock.RUnlock()
-	for k, v := range n.routes {
-		f(k, v)
-	}
-}
-
 // TunHandler creates a handler for tun tunnel.
 func TunHandler(chain *Chain, node *Node) Handler {
 	return &tunHandler{
@@ -86,19 +73,6 @@ func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
 		h.HandleClient(ctx, tun)
 	} else {
 		h.HandleServer(ctx, tun)
-	}
-}
-
-func (h *tunHandler) printRoute(ctx context.Context) {
-	ticker := time.NewTicker(time.Second * 5)
-	defer ticker.Stop()
-	for ctx.Err() == nil {
-		select {
-		case <-ticker.C:
-			h.routeMapUDP.Range(func(key string, value net.Addr) {
-				log.Debugf("To: %s, route: %s", key, value.String())
-			})
-		}
 	}
 }
 
@@ -163,12 +137,12 @@ func (d *Device) Close() {
 }
 
 func heartbeats(ctx context.Context, tun net.Conn) {
-	conn, err := util.GetTunDeviceByConn(tun)
+	tunIfi, err := util.GetTunDeviceByConn(tun)
 	if err != nil {
 		log.Errorf("Failed to get tun device: %s", err.Error())
 		return
 	}
-	srcIPv4, srcIPv6, err := util.GetLocalTunIP(conn.Name)
+	srcIPv4, srcIPv6, err := util.GetTunDeviceIP(tunIfi.Name)
 	if err != nil {
 		return
 	}
@@ -178,10 +152,17 @@ func heartbeats(ctx context.Context, tun net.Conn) {
 	if config.RouterIP6.To4().Equal(srcIPv6) {
 		return
 	}
+	if config.DockerRouterIP.To4().Equal(srcIPv4) {
+		return
+	}
 	var dstIPv4, dstIPv6 = net.IPv4zero, net.IPv6zero
 	if config.CIDR.Contains(srcIPv4) {
-		dstIPv4, dstIPv6 = config.RouterIP, config.RouterIP6
-	} else if config.DockerCIDR.Contains(srcIPv4) {
+		dstIPv4 = config.RouterIP
+	}
+	if config.CIDR6.Contains(srcIPv6) {
+		dstIPv6 = config.RouterIP6
+	}
+	if config.DockerCIDR.Contains(srcIPv4) {
 		dstIPv4 = config.DockerRouterIP
 	}
 
@@ -198,67 +179,13 @@ func heartbeats(ctx context.Context, tun net.Conn) {
 		var src, dst net.IP
 		src, dst = srcIPv4, dstIPv4
 		if !dst.IsUnspecified() {
-			_, _ = util.Ping(ctx, src.String(), dst.String())
+			go util.Ping(ctx, src.String(), dst.String())
 		}
 		src, dst = srcIPv6, dstIPv6
 		if !dst.IsUnspecified() {
-			_, _ = util.Ping(ctx, src.String(), dst.String())
+			go util.Ping(ctx, src.String(), dst.String())
 		}
 	}
-}
-
-func genICMPPacket(src net.IP, dst net.IP) ([]byte, error) {
-	buf := gopacket.NewSerializeBuffer()
-	var id uint16
-	for _, b := range src {
-		id += uint16(b)
-	}
-	icmpLayer := layers.ICMPv4{
-		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
-		Id:       id,
-		Seq:      uint16(rand.Intn(math.MaxUint16 + 1)),
-	}
-	ipLayer := layers.IPv4{
-		Version:  4,
-		SrcIP:    src,
-		DstIP:    dst,
-		Protocol: layers.IPProtocolICMPv4,
-		Flags:    layers.IPv4DontFragment,
-		TTL:      64,
-		IHL:      5,
-		Id:       uint16(rand.Intn(math.MaxUint16 + 1)),
-	}
-	opts := gopacket.SerializeOptions{
-		FixLengths:       true,
-		ComputeChecksums: true,
-	}
-	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize icmp packet, err: %v", err)
-	}
-	return buf.Bytes(), nil
-}
-
-func genICMPPacketIPv6(src net.IP, dst net.IP) ([]byte, error) {
-	buf := gopacket.NewSerializeBuffer()
-	icmpLayer := layers.ICMPv6{
-		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
-	}
-	ipLayer := layers.IPv6{
-		Version:    6,
-		SrcIP:      src,
-		DstIP:      dst,
-		NextHeader: layers.IPProtocolICMPv6,
-		HopLimit:   255,
-	}
-	opts := gopacket.SerializeOptions{
-		FixLengths: true,
-	}
-	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize icmp6 packet, err: %v", err)
-	}
-	return buf.Bytes(), nil
 }
 
 func (d *Device) Start(ctx context.Context) {
@@ -281,8 +208,6 @@ func (d *Device) SetTunInboundHandler(handler func(tunInbound <-chan *DataElem, 
 }
 
 func (h *tunHandler) HandleServer(ctx context.Context, tun net.Conn) {
-	go h.printRoute(ctx)
-
 	device := &Device{
 		tun:         tun,
 		tunInbound:  make(chan *DataElem, MaxSize),
@@ -296,7 +221,7 @@ func (h *tunHandler) HandleServer(ctx context.Context, tun net.Conn) {
 				log.Errorf("[UDP] Failed to listen %s: %v", h.node.Addr, err)
 				return
 			}
-			err = transportTun(ctx, tunInbound, tunOutbound, packetConn, h.routeMapUDP, h.routeMapTCP)
+			err = transportTunServer(ctx, tunInbound, tunOutbound, packetConn, h.routeMapUDP, h.routeMapTCP)
 			if err != nil {
 				log.Errorf("[TUN] %s: %v", tun.LocalAddr(), err)
 			}
@@ -480,7 +405,7 @@ func (p *Peer) Close() {
 	p.conn.Close()
 }
 
-func transportTun(ctx context.Context, tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem, packetConn net.PacketConn, routeMapUDP *RouteMap, routeMapTCP *sync.Map) error {
+func transportTunServer(ctx context.Context, tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem, packetConn net.PacketConn, routeMapUDP *RouteMap, routeMapTCP *sync.Map) error {
 	p := &Peer{
 		conn:        packetConn,
 		connInbound: make(chan *udpElem, MaxSize),
