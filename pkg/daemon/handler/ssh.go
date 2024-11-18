@@ -126,7 +126,7 @@ func (w *wsHandler) handle(c context.Context) {
 	log.Info("Connected tunnel")
 	go func() {
 		for ctx.Err() == nil {
-			_, _ = util.Ping(ctx, clientIP.IP.String(), ip.String())
+			util.Ping(ctx, clientIP.IP.String(), ip.String())
 			time.Sleep(time.Second * 5)
 		}
 	}()

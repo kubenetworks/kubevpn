@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"math/rand"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/cilium/ipam/service/allocator"
 	"github.com/cilium/ipam/service/ipallocator"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/prometheus-community/pro-bing"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -23,14 +26,16 @@ func GetTunDevice(ips ...net.IP) (*net.Interface, error) {
 		return nil, err
 	}
 	for _, i := range interfaces {
-		addrs, err := i.Addrs()
+		addrList, err := i.Addrs()
 		if err != nil {
 			return nil, err
 		}
-		for _, addr := range addrs {
-			for _, ip := range ips {
-				if strings.Contains(addr.String(), ip.String()) {
-					return &i, nil
+		for _, addr := range addrList {
+			if ipNet, ok := addr.(*net.IPNet); ok {
+				for _, ip := range ips {
+					if ipNet.IP.Equal(ip) {
+						return &i, nil
+					}
 				}
 			}
 		}
@@ -39,53 +44,39 @@ func GetTunDevice(ips ...net.IP) (*net.Interface, error) {
 }
 
 func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return nil, err
+	var ip net.IP
+	switch tun.LocalAddr().(type) {
+	case *net.IPNet:
+		ip = tun.LocalAddr().(*net.IPNet).IP
+	case *net.IPAddr:
+		ip = tun.LocalAddr().(*net.IPAddr).IP
 	}
-	var ip string
-	if tunIP, ok := tun.LocalAddr().(*net.IPNet); ok {
-		ip = tunIP.IP.String()
-	} else {
-		ip = tun.LocalAddr().String()
-	}
-	for _, i := range interfaces {
-		addrs, err := i.Addrs()
-		if err != nil {
-			return nil, err
-		}
-		for _, addr := range addrs {
-			if strings.Contains(addr.String(), tun.LocalAddr().String()) {
-				return &i, nil
-			}
-		}
-	}
-	return nil, fmt.Errorf("can not found any interface with ip %v", ip)
+	return GetTunDevice(ip)
 }
 
-func GetLocalTunIP(tunName string) (net.IP, net.IP, error) {
-	tunIface, err := net.InterfaceByName(tunName)
+func GetTunDeviceIP(tunName string) (net.IP, net.IP, error) {
+	tunIfi, err := net.InterfaceByName(tunName)
 	if err != nil {
 		return nil, nil, err
 	}
-	addrs, err := tunIface.Addrs()
+	addrList, err := tunIfi.Addrs()
 	if err != nil {
 		return nil, nil, err
 	}
 	var srcIPv4, srcIPv6 net.IP
-	for _, addr := range addrs {
-		ip, _, err := net.ParseCIDR(addr.String())
-		if err != nil {
-			continue
-		}
-		if ip.To4() != nil {
-			srcIPv4 = ip
-		} else {
-			srcIPv6 = ip
+	for _, addr := range addrList {
+		if ipNet, ok := addr.(*net.IPNet); ok {
+			if config.CIDR.Contains(ipNet.IP) || config.CIDR6.Contains(ipNet.IP) || config.DockerCIDR.Contains(ipNet.IP) {
+				if ipNet.IP.To4() != nil {
+					srcIPv4 = ipNet.IP
+				} else {
+					srcIPv6 = ipNet.IP
+				}
+			}
 		}
 	}
-	if srcIPv4 == nil || srcIPv6 == nil {
-		return srcIPv4, srcIPv6, fmt.Errorf("not found all ip")
+	if srcIPv4 == nil && srcIPv6 == nil {
+		return srcIPv4, srcIPv6, fmt.Errorf("can not found any ip")
 	}
 	return srcIPv4, srcIPv6, nil
 }
@@ -99,7 +90,8 @@ func PingOnce(ctx context.Context, srcIP, dstIP string) (bool, error) {
 	pinger.SetLogger(nil)
 	pinger.SetPrivileged(true)
 	pinger.Count = 1
-	pinger.Timeout = time.Millisecond * 1000
+	pinger.Timeout = time.Second * 1
+	pinger.ResolveTimeout = time.Second * 1
 	err = pinger.RunWithContext(ctx) // Blocks until finished.
 	if err != nil {
 		return false, err
@@ -116,8 +108,9 @@ func Ping(ctx context.Context, srcIP, dstIP string) (bool, error) {
 	pinger.Source = srcIP
 	pinger.SetLogger(nil)
 	pinger.SetPrivileged(true)
-	pinger.Count = 3
-	pinger.Timeout = time.Millisecond * 1500
+	pinger.Count = 4
+	pinger.Timeout = time.Second * 4
+	pinger.ResolveTimeout = time.Second * 1
 	err = pinger.RunWithContext(ctx) // Blocks until finished.
 	if err != nil {
 		return false, err
@@ -192,4 +185,58 @@ func getIP(addr net.Addr) net.IP {
 		ip = net.ParseIP(addr.String())
 	}
 	return ip
+}
+
+func GenICMPPacket(src net.IP, dst net.IP) ([]byte, error) {
+	buf := gopacket.NewSerializeBuffer()
+	var id uint16
+	for _, b := range src {
+		id += uint16(b)
+	}
+	icmpLayer := layers.ICMPv4{
+		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+		Id:       id,
+		Seq:      uint16(rand.Intn(math.MaxUint16 + 1)),
+	}
+	ipLayer := layers.IPv4{
+		Version:  4,
+		SrcIP:    src,
+		DstIP:    dst,
+		Protocol: layers.IPProtocolICMPv4,
+		Flags:    layers.IPv4DontFragment,
+		TTL:      64,
+		IHL:      5,
+		Id:       uint16(rand.Intn(math.MaxUint16 + 1)),
+	}
+	opts := gopacket.SerializeOptions{
+		FixLengths:       true,
+		ComputeChecksums: true,
+	}
+	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize icmp packet, err: %v", err)
+	}
+	return buf.Bytes(), nil
+}
+
+func GenICMPPacketIPv6(src net.IP, dst net.IP) ([]byte, error) {
+	buf := gopacket.NewSerializeBuffer()
+	icmpLayer := layers.ICMPv6{
+		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
+	}
+	ipLayer := layers.IPv6{
+		Version:    6,
+		SrcIP:      src,
+		DstIP:      dst,
+		NextHeader: layers.IPProtocolICMPv6,
+		HopLimit:   255,
+	}
+	opts := gopacket.SerializeOptions{
+		FixLengths: true,
+	}
+	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize icmp6 packet, err: %v", err)
+	}
+	return buf.Bytes(), nil
 }

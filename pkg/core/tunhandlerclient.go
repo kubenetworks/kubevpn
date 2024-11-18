@@ -89,7 +89,7 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 			_, err := packetConn.WriteTo(e.data[:e.length], remoteAddr)
 			config.LPool.Put(e.data[:])
 			if err != nil {
-				errChan <- errors.Wrap(err, fmt.Sprintf("failed to write packet to remote %s", remoteAddr))
+				util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to write packet to remote %s", remoteAddr)))
 				return
 			}
 		}
@@ -100,7 +100,7 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 			b := config.LPool.Get().([]byte)[:]
 			n, _, err := packetConn.ReadFrom(b[:])
 			if err != nil {
-				errChan <- errors.Wrap(err, fmt.Sprintf("failed to read packet from remote %s", remoteAddr))
+				util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to read packet from remote %s", remoteAddr)))
 				return
 			}
 			util.SafeWrite(tunOutbound, &DataElem{data: b[:], length: n})
