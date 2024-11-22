@@ -2,12 +2,14 @@ package cmds
 
 import (
 	"math/rand"
+	"os"
 	"runtime"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"go.uber.org/automaxprocs/maxprocs"
+	glog "gvisor.dev/gvisor/pkg/log"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -35,6 +37,7 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 			util.InitLoggerForServer(config.Debug)
 			runtime.GOMAXPROCS(0)
 			go util.StartupPProfForServer(config.PProfPort)
+			glog.SetTarget(util.ServerEmitter{Writer: &glog.Writer{Next: os.Stderr}})
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rand.Seed(time.Now().UnixNano())

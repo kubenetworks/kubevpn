@@ -8,6 +8,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
+	"gvisor.dev/gvisor/pkg/tcpip/link/sniffer"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -46,7 +47,7 @@ func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {
 		h.readFromEndpointWriteToTCPConn(ctx, tcpConn, endpoint)
 		util.SafeClose(errChan)
 	}()
-	stack := NewStack(ctx, endpoint)
+	stack := NewStack(ctx, sniffer.NewWithPrefix(endpoint, "[gVISOR] "))
 	defer stack.Destroy()
 	select {
 	case <-errChan:
