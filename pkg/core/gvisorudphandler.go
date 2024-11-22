@@ -102,8 +102,8 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	log.Debugf("[TUN-UDP] %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 	errChan := make(chan error, 2)
 	go func() {
-		b := config.LPool.Get().([]byte)[:]
-		defer config.LPool.Put(b[:])
+		buf := config.LPool.Get().([]byte)[:]
+		defer config.LPool.Put(buf[:])
 
 		for {
 			select {
@@ -118,7 +118,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				errChan <- err
 				return
 			}
-			dgram, err := readDatagramPacket(tcpConn, b[:])
+			dgram, err := readDatagramPacket(tcpConn, buf[:])
 			if err != nil {
 				log.Errorf("[TUN-UDP] %s -> %s: %v", tcpConn.RemoteAddr(), udpConn.LocalAddr(), err)
 				errChan <- err
@@ -146,8 +146,8 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	}()
 
 	go func() {
-		b := config.LPool.Get().([]byte)[:]
-		defer config.LPool.Put(b[:])
+		buf := config.LPool.Get().([]byte)[:]
+		defer config.LPool.Put(buf[:])
 
 		for {
 			select {
@@ -162,7 +162,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				errChan <- err
 				return
 			}
-			n, _, err := udpConn.ReadFrom(b[:])
+			n, _, err := udpConn.ReadFrom(buf[:])
 			if err != nil {
 				log.Errorf("[TUN-UDP] %s : %s", tcpConn.RemoteAddr(), err)
 				errChan <- err
@@ -181,7 +181,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				errChan <- err
 				return
 			}
-			dgram := newDatagramPacket(b[:n])
+			dgram := newDatagramPacket(buf[:n])
 			if err = dgram.Write(tcpConn); err != nil {
 				log.Errorf("[TUN-UDP] Error: %s <- %s : %s", tcpConn.RemoteAddr(), dgram.Addr(), err)
 				errChan <- err

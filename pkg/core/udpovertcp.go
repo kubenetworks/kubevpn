@@ -61,10 +61,10 @@ func readDatagramPacketServer(r io.Reader, b []byte) (*datagramPacket, error) {
 }
 
 func (addr *datagramPacket) Write(w io.Writer) error {
-	b := config.LPool.Get().([]byte)[:]
-	defer config.LPool.Put(b[:])
-	binary.BigEndian.PutUint16(b[:2], uint16(len(addr.Data)))
-	n := copy(b[2:], addr.Data)
-	_, err := w.Write(b[:n+2])
+	buf := config.MPool.Get().([]byte)[:]
+	defer config.MPool.Put(buf[:])
+	binary.BigEndian.PutUint16(buf[:2], uint16(len(addr.Data)))
+	n := copy(buf[2:], addr.Data)
+	_, err := w.Write(buf[:n+2])
 	return err
 }

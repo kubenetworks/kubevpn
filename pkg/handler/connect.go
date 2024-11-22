@@ -367,6 +367,7 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 	tunConfig := tun.Config{
 		Addr:   (&net.IPNet{IP: c.localTunIPv4.IP, Mask: net.CIDRMask(32, 32)}).String(),
 		Routes: routes,
+		MTU:    config.DefaultMTU,
 	}
 	if enable, _ := util.IsIPv6Enabled(); enable {
 		tunConfig.Addr6 = (&net.IPNet{IP: c.localTunIPv6.IP, Mask: net.CIDRMask(128, 128)}).String()
@@ -378,7 +379,6 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 		log.Errorf("Failed to parse local node %s: %v", localNode, err)
 		return err
 	}
-	node.Values.Add(config.ConfigKubeVPNTransportEngine, string(c.Engine))
 
 	chainNode, err := core.ParseNode(forwardAddress)
 	if err != nil {

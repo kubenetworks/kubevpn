@@ -182,7 +182,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug mode or not, true or false")
 	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
 	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
-	cmd.Flags().StringVar((*string)(&connect.Engine), "netstack", string(config.EngineSystem), fmt.Sprintf(`network stack ("%s"|"%s") %s: use gvisor (both performance and stable), %s: use raw mode (best stable)`, config.EngineGvisor, config.EngineSystem, config.EngineGvisor, config.EngineSystem))
+	cmd.Flags().StringVar((*string)(&connect.Engine), "netstack", string(config.EngineSystem), fmt.Sprintf(`network stack ("%s"|"%s") %s: use gvisor (good compatibility), %s: use raw mode (best performance, relays on iptables SNAT)`, config.EngineGvisor, config.EngineSystem, config.EngineGvisor, config.EngineSystem))
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "foreground hang up")
 
 	handler.AddExtraRoute(cmd.Flags(), extraRoute)

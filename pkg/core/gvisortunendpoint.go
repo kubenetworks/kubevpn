@@ -2,10 +2,7 @@ package core
 
 import (
 	"context"
-	"errors"
-	"io"
 	"net"
-	"os"
 
 	"github.com/google/gopacket/layers"
 	log "github.com/sirupsen/logrus"
@@ -35,14 +32,6 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, c
 			buf := pktBuffer.ToView().AsSlice()
 			_, err := tcpConn.Write(buf)
 			if err != nil {
-				if errors.Is(err, os.ErrClosed) || errors.Is(err, io.EOF) {
-					return
-				}
-				// if context is done
-				if ctx.Err() != nil {
-					log.Errorf("[TUN] Failed to write to tun: %v, context is done: %v", err, ctx.Err())
-					return
-				}
 				log.Errorf("[TUN] Failed to write data to tun device: %v", err)
 			}
 		}
@@ -53,24 +42,22 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, c
 func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, conn net.Conn, endpoint *channel.Endpoint) {
 	tcpConn, _ := newGvisorFakeUDPTunnelConnOverTCP(ctx, conn)
 	for {
-		bytes := config.LPool.Get().([]byte)[:]
-		read, err := tcpConn.Read(bytes[:])
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		buf := config.SPool.Get().([]byte)[:]
+		read, err := tcpConn.Read(buf[:])
 		if err != nil {
-			if errors.Is(err, os.ErrClosed) || errors.Is(err, io.EOF) {
-				return
-			}
-			// if context is done
-			if ctx.Err() != nil {
-				log.Errorf("[TUN] Failed to read from tun: %v, context is done", err)
-				return
-			}
 			log.Errorf("[TUN] Failed to read from tcp conn: %v", err)
-			config.LPool.Put(bytes[:])
+			config.SPool.Put(buf[:])
 			continue
 		}
 		if read == 0 {
 			log.Warnf("[TUN] Read from tcp conn length is %d", read)
-			config.LPool.Put(bytes[:])
+			config.SPool.Put(buf[:])
 			continue
 		}
 		// Try to determine network protocol number, default zero.
@@ -79,23 +66,23 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		var src, dst net.IP
 		// TUN interface with IFF_NO_PI enabled, thus
 		// we need to determine protocol from version field
-		if util.IsIPv4(bytes) {
+		if util.IsIPv4(buf) {
 			protocol = header.IPv4ProtocolNumber
-			ipHeader, err := ipv4.ParseHeader(bytes[:read])
+			ipHeader, err := ipv4.ParseHeader(buf[:read])
 			if err != nil {
 				log.Errorf("Failed to parse IPv4 header: %v", err)
-				config.LPool.Put(bytes[:])
+				config.SPool.Put(buf[:])
 				continue
 			}
 			ipProtocol = ipHeader.Protocol
 			src = ipHeader.Src
 			dst = ipHeader.Dst
-		} else if util.IsIPv6(bytes) {
+		} else if util.IsIPv6(buf) {
 			protocol = header.IPv6ProtocolNumber
-			ipHeader, err := ipv6.ParseHeader(bytes[:read])
+			ipHeader, err := ipv6.ParseHeader(buf[:read])
 			if err != nil {
 				log.Errorf("Failed to parse IPv6 header: %s", err.Error())
-				config.LPool.Put(bytes[:])
+				config.SPool.Put(buf[:])
 				continue
 			}
 			ipProtocol = ipHeader.NextHeader
@@ -103,7 +90,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			dst = ipHeader.Dst
 		} else {
 			log.Debugf("[TUN-GVISOR] Unknown packet")
-			config.LPool.Put(bytes[:])
+			config.SPool.Put(buf[:])
 			continue
 		}
 
@@ -113,18 +100,18 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			log.Tracef("[TUN-RAW] Forward to TUN device, SRC: %s, DST: %s, Length: %d", src.String(), dst.String(), read)
 			util.SafeWrite(h.packetChan, &datagramPacket{
 				DataLength: uint16(read),
-				Data:       bytes[:],
+				Data:       buf[:],
 			})
 			continue
 		}
 
 		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 			ReserveHeaderBytes: 0,
-			Payload:            buffer.MakeWithData(bytes[:read]),
+			Payload:            buffer.MakeWithData(buf[:read]),
 		})
-		//defer pkt.DecRef()
-		config.LPool.Put(bytes[:])
+		config.SPool.Put(buf[:])
 		endpoint.InjectInbound(protocol, pkt)
+		pkt.DecRef()
 		log.Tracef("[TUN-%s] Write to Gvisor IP-Protocol: %s, SRC: %s, DST: %s, Length: %d", layers.IPProtocol(ipProtocol).String(), layers.IPProtocol(ipProtocol).String(), src.String(), dst, read)
 	}
 }

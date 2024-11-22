@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"net"
 	"time"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
@@ -51,16 +51,16 @@ func TCPForwarder(s *stack.Stack, ctx context.Context) func(stack.TransportEndpo
 		defer remote.Close()
 		errChan := make(chan error, 2)
 		go func() {
-			i := config.LPool.Get().([]byte)[:]
-			defer config.LPool.Put(i[:])
-			written, err2 := io.CopyBuffer(remote, conn, i)
+			buf := config.LPool.Get().([]byte)[:]
+			defer config.LPool.Put(buf[:])
+			written, err2 := io.CopyBuffer(remote, conn, buf)
 			log.Debugf("[TUN-TCP] Write length %d data to remote", written)
 			errChan <- err2
 		}()
 		go func() {
-			i := config.LPool.Get().([]byte)[:]
-			defer config.LPool.Put(i[:])
-			written, err2 := io.CopyBuffer(conn, remote, i)
+			buf := config.LPool.Get().([]byte)[:]
+			defer config.LPool.Put(buf[:])
+			written, err2 := io.CopyBuffer(conn, remote, buf)
 			log.Debugf("[TUN-TCP] Read length %d data from remote", written)
 			errChan <- err2
 		}()
@@ -73,8 +73,8 @@ func TCPForwarder(s *stack.Stack, ctx context.Context) func(stack.TransportEndpo
 
 func WriteProxyInfo(conn net.Conn, id stack.TransportEndpointID) error {
 	var b bytes.Buffer
-	i := config.SPool.Get().([]byte)[:]
-	defer config.SPool.Put(i[:])
+	i := config.MPool.Get().([]byte)[:]
+	defer config.MPool.Put(i[:])
 	binary.BigEndian.PutUint16(i, id.LocalPort)
 	b.Write(i)
 	binary.BigEndian.PutUint16(i, id.RemotePort)
