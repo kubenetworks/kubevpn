@@ -1,9 +1,6 @@
 package cmds
 
 import (
-	"context"
-	"time"
-
 	"github.com/docker/docker/libnetwork/resolvconf"
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
@@ -33,16 +30,13 @@ func CmdControlPlane(_ cmdutil.Factory) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			util.InitLoggerForServer(config.Debug)
 			go util.StartupPProfForServer(0)
-			go func(ctx context.Context) {
+			go func() {
 				conf, err := miekgdns.ClientConfigFromFile(resolvconf.Path())
 				if err != nil {
-					return
+					log.Fatal(err)
 				}
-				for ctx.Err() == nil {
-					dns.ListenAndServe("udp", ":53", conf)
-					time.Sleep(time.Second * 5)
-				}
-			}(cmd.Context())
+				log.Fatal(dns.ListenAndServe("udp", ":53", conf))
+			}()
 			err := controlplane.Main(cmd.Context(), watchDirectoryFilename, port, log.StandardLogger())
 			return err
 		},

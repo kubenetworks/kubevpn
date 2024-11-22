@@ -87,7 +87,7 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 				continue
 			}
 			_, err := packetConn.WriteTo(e.data[:e.length], remoteAddr)
-			config.LPool.Put(e.data[:])
+			config.SPool.Put(e.data[:])
 			if err != nil {
 				util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to write packet to remote %s", remoteAddr)))
 				return
@@ -97,13 +97,14 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 
 	go func() {
 		for {
-			b := config.LPool.Get().([]byte)[:]
-			n, _, err := packetConn.ReadFrom(b[:])
+			buf := config.SPool.Get().([]byte)[:]
+			n, _, err := packetConn.ReadFrom(buf[:])
 			if err != nil {
+				config.SPool.Put(buf[:])
 				util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to read packet from remote %s", remoteAddr)))
 				return
 			}
-			util.SafeWrite(tunOutbound, &DataElem{data: b[:], length: n})
+			util.SafeWrite(tunOutbound, &DataElem{data: buf[:], length: n})
 		}
 	}()
 
@@ -145,30 +146,35 @@ func (d *ClientDevice) SetTunInboundHandler(handler func(tunInbound <-chan *Data
 
 func (d *ClientDevice) readFromTun() {
 	for {
-		b := config.LPool.Get().([]byte)[:]
-		n, err := d.tun.Read(b[:])
+		buf := config.SPool.Get().([]byte)[:]
+		n, err := d.tun.Read(buf[:])
 		if err != nil {
 			util.SafeWrite(d.chExit, err)
+			config.SPool.Put(buf[:])
 			return
 		}
-		if n != 0 {
-			// Try to determine network protocol number, default zero.
-			var src, dst net.IP
-			src, dst, err = util.ParseIP(b[:n])
-			if err != nil {
-				log.Debugf("[TUN-GVISOR] Unknown packet: %v", err)
-				continue
-			}
-			log.Tracef("[TUN-RAW] SRC: %s, DST: %s, Length: %d", src.String(), dst, n)
-			util.SafeWrite(d.tunInbound, NewDataElem(b[:], n, src, dst))
+		if n == 0 {
+			config.SPool.Put(buf[:])
+			continue
 		}
+
+		// Try to determine network protocol number, default zero.
+		var src, dst net.IP
+		src, dst, err = util.ParseIP(buf[:n])
+		if err != nil {
+			log.Debugf("[TUN-GVISOR] Unknown packet: %v", err)
+			config.SPool.Put(buf[:])
+			continue
+		}
+		log.Tracef("[TUN-RAW] SRC: %s, DST: %s, Length: %d", src.String(), dst, n)
+		util.SafeWrite(d.tunInbound, NewDataElem(buf[:], n, src, dst))
 	}
 }
 
 func (d *ClientDevice) writeToTun() {
 	for e := range d.tunOutbound {
 		_, err := d.tun.Write(e.data[:e.length])
-		config.LPool.Put(e.data[:])
+		config.SPool.Put(e.data[:])
 		if err != nil {
 			util.SafeWrite(d.chExit, err)
 			return

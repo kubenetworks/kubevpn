@@ -84,30 +84,30 @@ type tunConn struct {
 
 func (c *tunConn) Read(b []byte) (n int, err error) {
 	offset := device.MessageTransportHeaderSize
-	bytes := config.LPool.Get().([]byte)[:]
-	defer config.LPool.Put(bytes[:])
+	buf := config.MPool.Get().([]byte)[:]
+	defer config.MPool.Put(buf[:])
 
 	var size int
-	size, err = c.ifce.Read(bytes[:], offset)
+	size, err = c.ifce.Read(buf[:], offset)
 	if err != nil {
 		return 0, err
 	}
 	if size == 0 || size > device.MaxSegmentSize-device.MessageTransportHeaderSize {
 		return 0, nil
 	}
-	return copy(b, bytes[offset:offset+size]), nil
+	return copy(b, buf[offset:offset+size]), nil
 }
 
 func (c *tunConn) Write(b []byte) (n int, err error) {
 	if len(b) < device.MessageTransportHeaderSize {
 		return 0, err
 	}
-	bytes := config.LPool.Get().([]byte)[:]
-	defer config.LPool.Put(bytes[:])
+	buf := config.MPool.Get().([]byte)[:]
+	defer config.MPool.Put(buf[:])
 
-	copy(bytes[device.MessageTransportOffsetContent:], b)
+	copy(buf[device.MessageTransportOffsetContent:], b)
 
-	return c.ifce.Write(bytes[:device.MessageTransportOffsetContent+len(b)], device.MessageTransportOffsetContent)
+	return c.ifce.Write(buf[:device.MessageTransportOffsetContent+len(b)], device.MessageTransportOffsetContent)
 }
 
 func (c *tunConn) Close() (err error) {

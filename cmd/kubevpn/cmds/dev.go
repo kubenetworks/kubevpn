@@ -140,7 +140,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 	cmdutil.CheckErr(cmd.RegisterFlagCompletionFunc("container", completion.ContainerCompletionFunc(f)))
 	cmd.Flags().StringVar((*string)(&options.ConnectMode), "connect-mode", string(dev.ConnectModeHost), "Connect to kubernetes network in container or in host, eg: ["+string(dev.ConnectModeContainer)+"|"+string(dev.ConnectModeHost)+"]")
 	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
-	cmd.Flags().StringVar((*string)(&options.Engine), "netstack", string(config.EngineSystem), fmt.Sprintf(`network stack ("%s"|"%s") %s: use gvisor (both performance and stable), %s: use raw mode (best stable)`, config.EngineGvisor, config.EngineSystem, config.EngineGvisor, config.EngineSystem))
+	cmd.Flags().StringVar((*string)(&options.Engine), "netstack", string(config.EngineSystem), fmt.Sprintf(`network stack ("%s"|"%s") %s: use gvisor (good compatibility), %s: use raw mode (best performance, relays on iptables SNAT)`, config.EngineGvisor, config.EngineSystem, config.EngineGvisor, config.EngineSystem))
 
 	// diy docker options
 	cmd.Flags().StringVar(&options.DevImage, "dev-image", "", "Use to startup docker container, Default is pod image")

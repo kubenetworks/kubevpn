@@ -84,8 +84,6 @@ const (
 
 	EnvSSHJump = "SSH_JUMP_BY_KUBEVPN"
 
-	// transport mode
-	ConfigKubeVPNTransportEngine = "transport-engine"
 	// hosts entry key word
 	HostsKeyWord = "# Add by KubeVPN"
 )
@@ -130,9 +128,9 @@ func init() {
 var Debug bool
 
 var (
-	SmallBufferSize  = (1 << 13) - 1 // 8KB small buffer
-	MediumBufferSize = (1 << 15) - 1 // 32KB medium buffer
-	LargeBufferSize  = (1 << 16) - 1 // 64KB large buffer
+	SmallBufferSize  = 2 * 1024  // 2KB small buffer
+	MediumBufferSize = 8 * 1024  // 8KB medium buffer
+	LargeBufferSize  = 32 * 1024 // 32KB large buffer
 )
 
 var (
@@ -152,18 +150,22 @@ var (
 )
 
 var (
-	LPool = &sync.Pool{
+	SPool = &sync.Pool{
 		New: func() interface{} {
+			return make([]byte, SmallBufferSize)
+		},
+	}
+	MPool = sync.Pool{
+		New: func() any {
+			return make([]byte, MediumBufferSize)
+		},
+	}
+	LPool = sync.Pool{
+		New: func() any {
 			return make([]byte, LargeBufferSize)
 		},
 	}
 )
-
-var SPool = sync.Pool{
-	New: func() any {
-		return make([]byte, 2)
-	},
-}
 
 type Engine string
 

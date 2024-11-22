@@ -78,10 +78,11 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		default:
 		}
 
-		b := config.LPool.Get().([]byte)[:]
-		dgram, err := readDatagramPacketServer(tcpConn, b[:])
+		buf := config.SPool.Get().([]byte)[:]
+		dgram, err := readDatagramPacketServer(tcpConn, buf[:])
 		if err != nil {
 			log.Errorf("[TCP] %s -> %s : %v", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
+			config.SPool.Put(buf[:])
 			return
 		}
 
@@ -89,6 +90,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		src, _, err = util.ParseIP(dgram.Data[:dgram.DataLength])
 		if err != nil {
 			log.Errorf("[TCP] Unknown packet")
+			config.SPool.Put(buf[:])
 			continue
 		}
 		value, loaded := h.routeMapTCP.LoadOrStore(src.String(), tcpConn)
@@ -97,7 +99,6 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 				h.routeMapTCP.Store(src.String(), tcpConn)
 				log.Debugf("[TCP] Replace route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 			}
-			log.Debugf("[TCP] Find route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 		} else {
 			log.Debugf("[TCP] Add new route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 		}
