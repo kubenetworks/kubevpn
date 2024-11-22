@@ -21,6 +21,7 @@ import (
 // CmdAlias
 /**
 Name: test
+Description: this is a test environment
 Needs: test1
 Flags:
   - connect
@@ -30,6 +31,7 @@ Flags:
 ---
 
 Name: test1
+Description: this is another test environment
 Flags:
   - connect
   - --kubeconfig=~/.kube/jumper_config
@@ -97,7 +99,11 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 				c.Stdout = os.Stdout
 				c.Stdin = os.Stdin
 				c.Stderr = os.Stderr
-				fmt.Println(c.Args)
+				fmt.Printf("Alias: %s\n", config.Name)
+				if config.Description != "" {
+					fmt.Printf("Description: %s\n", config.Description)
+				}
+				fmt.Printf("Command: %v\n", c.Args)
 				err = c.Run()
 				if err != nil {
 					return err
@@ -190,7 +196,8 @@ func GetConfigs(configs []Config, name string) ([]Config, error) {
 }
 
 type Config struct {
-	Name  string   `yaml:"Name"`
-	Needs string   `yaml:"Needs,omitempty"`
-	Flags []string `yaml:"Flags,omitempty"`
+	Name        string   `yaml:"Name"`
+	Description string   `yaml:"Description"`
+	Needs       string   `yaml:"Needs,omitempty"`
+	Flags       []string `yaml:"Flags,omitempty"`
 }
