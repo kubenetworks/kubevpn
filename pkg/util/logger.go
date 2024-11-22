@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
+	glog "gvisor.dev/gvisor/pkg/log"
 	"k8s.io/utils/ptr"
 )
 
@@ -56,4 +59,36 @@ func (*serverFormat) Format(e *log.Entry) ([]byte, error) {
 			e.Level.String(),
 			e.Message,
 		)), nil
+}
+
+type ServerEmitter struct {
+	*glog.Writer
+}
+
+func (g ServerEmitter) Emit(depth int, level glog.Level, timestamp time.Time, format string, args ...any) {
+	// 0 = this frame.
+	_, file, line, ok := runtime.Caller(depth + 2)
+	if ok {
+		// Trim any directory path from the file.
+		slash := strings.LastIndexByte(file, byte('/'))
+		if slash >= 0 {
+			file = file[slash+1:]
+		}
+	} else {
+		// We don't have a filename.
+		file = "???"
+		line = 0
+	}
+
+	// Generate the message.
+	message := fmt.Sprintf(format, args...)
+
+	// Emit the formatted result.
+	fmt.Fprintf(g.Writer, "%s %s:%d %s: %s\n",
+		timestamp.Format("2006-01-02 15:04:05"),
+		file,
+		line,
+		level.String(),
+		message,
+	)
 }
