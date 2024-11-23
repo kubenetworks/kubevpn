@@ -55,7 +55,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		if err != nil {
 			log.Errorf("[TUN] Failed to read from tcp conn: %v", err)
 			config.SPool.Put(buf[:])
-			continue
+			return
 		}
 		if read == 0 {
 			log.Warnf("[TUN] Read from tcp conn length is %d", read)
