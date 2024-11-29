@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
+	v12 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
@@ -38,7 +38,6 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 
 func (c *Config) usingResolver(ctx context.Context) {
 	var clientConfig = c.Config
-	var ns = c.Ns
 
 	path := "/etc/resolver"
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -56,33 +55,28 @@ func (c *Config) usingResolver(ctx context.Context) {
 		Ndots:   clientConfig.Ndots,
 		Timeout: clientConfig.Timeout,
 	}
-	var searchDomain []string
-	for _, search := range clientConfig.Search {
-		for _, s := range strings.Split(search, ".") {
-			if s != "" {
-				searchDomain = append(searchDomain, s)
-			}
-		}
-	}
-	for _, s := range sets.New[string](searchDomain...).Insert(ns...).UnsortedList() {
-		filename := "/etc/resolver/" + s
+	for _, filename := range GetResolvers(c.Config.Search, c.Ns, c.Services) {
 		content, err := os.ReadFile(filename)
 		if os.IsNotExist(err) {
 			_ = os.WriteFile(filename, []byte(toString(newConfig)), 0644)
-		} else if err == nil {
-			var conf *miekgdns.ClientConfig
-			conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(content)))
-			if err != nil {
-				log.Errorf("Parse resolver %s error: %v", filename, err)
-				continue
-			}
-			conf.Servers = append([]string{clientConfig.Servers[0]}, conf.Servers...)
-			err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
-			if err != nil {
-				log.Errorf("Failed to write resovler %s error: %v", filename, err)
-			}
-		} else {
+			continue
+		}
+		if err != nil {
 			log.Errorf("Failed to read resovler %s error: %v", filename, err)
+			continue
+		}
+
+		var conf *miekgdns.ClientConfig
+		conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(content)))
+		if err != nil {
+			log.Errorf("Parse resolver %s error: %v", filename, err)
+			continue
+		}
+		// insert current name server to first location
+		conf.Servers = append([]string{clientConfig.Servers[0]}, conf.Servers...)
+		err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
+		if err != nil {
+			log.Errorf("Failed to write resovler %s error: %v", filename, err)
 		}
 	}
 }
@@ -164,28 +158,22 @@ func (c *Config) CancelDNS() {
 	if cancel != nil {
 		cancel()
 	}
-	dir := "/etc/resolver"
-	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	for _, filename := range GetResolvers(c.Config.Search, c.Ns, c.Services) {
+		content, err := os.ReadFile(filename)
 		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return nil
+			continue
 		}
 		var conf *miekgdns.ClientConfig
-		conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(content)))
+		conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(strings.TrimSpace(string(content))))
 		if err != nil {
-			return nil
+			continue
 		}
 		// if not has this DNS server, do nothing
 		if !sets.New[string](conf.Servers...).Has(c.Config.Servers[0]) {
-			return nil
+			continue
 		}
-		for i := 0; i < len(conf.Servers); i++ {
+		// reverse delete
+		for i := len(conf.Servers) - 1; i >= 0; i-- {
 			if conf.Servers[i] == c.Config.Servers[0] {
 				conf.Servers = append(conf.Servers[:i], conf.Servers[i+1:]...)
 				i--
@@ -195,17 +183,50 @@ func (c *Config) CancelDNS() {
 			}
 		}
 		if len(conf.Servers) == 0 {
-			os.Remove(path)
-			return nil
+			_ = os.Remove(filename)
+			continue
 		}
-		err = os.WriteFile(path, []byte(toString(*conf)), 0644)
+		err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
 		if err != nil {
-			log.Errorf("Failed to write resovler %s error: %v", path, err)
+			log.Errorf("Failed to write resovler %s error: %v", filename, err)
 		}
-		return nil
-	})
+	}
 	//networkCancel()
-	c.removeHosts(sets.New[Entry]().Insert(c.Hosts...).UnsortedList())
+	_ = c.removeHosts(sets.New[Entry]().Insert(c.Hosts...).UnsortedList())
+}
+
+// GetResolvers
+// service name: authors
+// namespace: test
+// create resolvers suffix:
+// [authors.test.svc.cluster.local]
+// local
+// cluster
+// cluster.local
+// svc.cluster
+// test.svc
+func GetResolvers(searchList []string, nsList []string, serviceName []v12.Service) []string {
+	result := sets.New[string]().Insert(searchList...).Insert(nsList...)
+
+	const splitter = "."
+	// support default.svc, cluster.local
+	for _, s := range searchList {
+		split := strings.Split(s, splitter)
+		for i := range len(split) - 1 {
+			result.Insert(fmt.Sprintf("%s.%s", split[i], split[i+1]))
+		}
+		result.Insert(split...)
+	}
+	// authors.default
+	for _, service := range serviceName {
+		result.Insert(fmt.Sprintf("%s.%s", service.Name, service.Namespace))
+	}
+
+	var resolvers []string
+	for _, s := range sets.List(result) {
+		resolvers = append(resolvers, filepath.Join("/etc/resolver/", s))
+	}
+	return resolvers
 }
 
 /*

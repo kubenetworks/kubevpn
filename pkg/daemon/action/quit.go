@@ -3,10 +3,7 @@ package action
 import (
 	"context"
 	"io"
-	"io/fs"
 	"os"
-	"path/filepath"
-	"strings"
 
 	log "github.com/sirupsen/logrus"
 
@@ -57,7 +54,7 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 		svr.Cancel = nil
 	}
 
-	_ = cleanupTempKubeConfigFile()
+	_ = util.CleanupTempKubeConfigFile()
 	return nil
 }
 
@@ -77,13 +74,4 @@ func (r *quitWarp) Write(p []byte) (n int, err error) {
 
 func newQuitWarp(server rpc.Daemon_QuitServer) io.Writer {
 	return &quitWarp{server: server}
-}
-
-func cleanupTempKubeConfigFile() error {
-	return filepath.Walk(os.TempDir(), func(path string, info fs.FileInfo, err error) error {
-		if strings.HasSuffix(path, ".kubeconfig") {
-			return os.Remove(path)
-		}
-		return err
-	})
 }

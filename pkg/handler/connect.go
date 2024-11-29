@@ -533,7 +533,6 @@ func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
 }
 
 func (c *ConnectOptions) setupDNS(ctx context.Context) error {
-	const port = 53
 	const portTCP = 10800
 	pod, err := c.GetRunningPodList(ctx)
 	if err != nil {
@@ -545,9 +544,6 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	if err != nil {
 		log.Errorln(err)
 		return err
-	}
-	if relovConf.Port == "" {
-		relovConf.Port = strconv.Itoa(port)
 	}
 
 	marshal, _ := json.Marshal(relovConf)
@@ -585,16 +581,24 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 			}
 		}
 	}
+
+	var serviceList []v1.Service
+	services, err := c.clientset.CoreV1().Services(c.Namespace).List(ctx, metav1.ListOptions{})
+	if err == nil {
+		serviceList = append(serviceList, services.Items...)
+	}
+
 	tunName, err := c.GetTunDeviceName()
 	if err != nil {
 		return err
 	}
 	c.dnsConfig = &dns.Config{
-		Config:  relovConf,
-		Ns:      ns,
-		TunName: tunName,
-		Hosts:   c.extraHost,
-		Lock:    c.Lock,
+		Config:   relovConf,
+		Ns:       ns,
+		Services: serviceList,
+		TunName:  tunName,
+		Hosts:    c.extraHost,
+		Lock:     c.Lock,
 	}
 	log.Debugf("Setup DNS...")
 	if err = c.dnsConfig.SetupDNS(ctx); err != nil {
