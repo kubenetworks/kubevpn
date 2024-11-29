@@ -17,6 +17,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/action"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -35,6 +36,9 @@ func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 
 			if opt.IsSudo {
 				go util.StartupPProf(config.SudoPProfPort)
+				_ = os.RemoveAll("/etc/resolver")
+				_ = dns.CleanupHosts()
+				_ = util.CleanupTempKubeConfigFile()
 			} else {
 				go util.StartupPProf(config.PProfPort)
 			}

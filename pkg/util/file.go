@@ -3,6 +3,7 @@ package util
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"net/http"
 	"os"
@@ -119,4 +120,13 @@ func ParseDirMapping(dir string) (local, remote string, err error) {
 	}
 	remote = dir[index+1:]
 	return
+}
+
+func CleanupTempKubeConfigFile() error {
+	return filepath.Walk(os.TempDir(), func(path string, info fs.FileInfo, err error) error {
+		if strings.HasSuffix(path, ".kubeconfig") {
+			return os.Remove(path)
+		}
+		return err
+	})
 }

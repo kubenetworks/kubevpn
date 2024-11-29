@@ -3,7 +3,8 @@ package util
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/miekg/dns"
 	"github.com/pkg/errors"
@@ -16,30 +17,19 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-func GetDNSServiceIPFromPod(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Config, podName, namespace string) (*dns.ClientConfig, error) {
-	str, err := Shell(ctx, clientset, config, podName, "", namespace, []string{"cat", "/etc/resolv.conf"})
+func GetDNSServiceIPFromPod(ctx context.Context, clientset *kubernetes.Clientset, conf *rest.Config, podName, namespace string) (*dns.ClientConfig, error) {
+	str, err := Shell(ctx, clientset, conf, podName, config.ContainerSidecarVPN, namespace, []string{"cat", "/etc/resolv.conf"})
 	if err != nil {
 		return nil, err
 	}
-	resolvConf, err := dns.ClientConfigFromReader(bytes.NewBufferString(str))
-	if err == nil {
-		return resolvConf, nil
-	}
-
-	ips, err := GetDNSIPFromDnsPod(ctx, clientset)
+	resolvConf, err := dns.ClientConfigFromReader(bytes.NewBufferString(strings.TrimSpace(str)))
 	if err != nil {
 		return nil, err
 	}
-	clientConfig := dns.ClientConfig{
-		Servers: ips,
-		Search: []string{
-			fmt.Sprintf("%s.svc.cluster.local", namespace),
-			"svc.cluster.local",
-			"cluster.local",
-		},
-		Ndots: 5,
+	if resolvConf.Port == "" {
+		resolvConf.Port = strconv.Itoa(53)
 	}
-	return &clientConfig, nil
+	return resolvConf, nil
 }
 
 func GetDNSIPFromDnsPod(ctx context.Context, clientset *kubernetes.Clientset) (ips []string, err error) {

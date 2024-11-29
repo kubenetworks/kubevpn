@@ -30,9 +30,10 @@ import (
 )
 
 type Config struct {
-	Config  *miekgdns.ClientConfig
-	Ns      []string
-	TunName string
+	Config   *miekgdns.ClientConfig
+	Ns       []string
+	Services []v12.Service
+	TunName  string
 
 	Hosts []Entry
 	Lock  *sync.Mutex
