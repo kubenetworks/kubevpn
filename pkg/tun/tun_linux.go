@@ -79,7 +79,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		if ipv6, ipv6CIDR, err = net.ParseCIDR(cfg.Addr6); err != nil {
 			return
 		}
-		if err = netlink.NetworkLinkAddIp(ifc, ipv6, ipv6CIDR); err != nil {
+		if err = netlink.NetworkLinkAddIp(ifc, ipv6, ipv6CIDR); err != nil && !errors.Is(err, syscall.ENOTSUP) {
 			err = fmt.Errorf("can not setup IPv6 address %s to device %s : %v", ipv6.String(), name, err)
 			return
 		}
