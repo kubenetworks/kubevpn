@@ -99,19 +99,15 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 			if err != nil {
 				return err
 			}
-			var recv *rpc.DisconnectResponse
-			for {
-				recv, err = disconnectResp.Recv()
-				if err == io.EOF {
-					break
-				} else if err != nil {
-					log.Errorf("Receive from disconnect failed: %v", err)
-					return err
-				}
-				err = resp.Send(&rpc.ConnectResponse{Message: recv.Message})
-				if err != nil {
-					return err
-				}
+			err = util.CopyAndConvertGRPCStream[rpc.DisconnectResponse, rpc.ConnectResponse](
+				disconnectResp,
+				resp,
+				func(response *rpc.DisconnectResponse) *rpc.ConnectResponse {
+					return &rpc.ConnectResponse{Message: response.Message}
+				},
+			)
+			if err != nil {
+				return err
 			}
 			util.InitLoggerForClient(config.Debug)
 			log.SetOutput(out)
@@ -125,18 +121,9 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 		if err != nil {
 			return err
 		}
-		var recv *rpc.ConnectResponse
-		for {
-			recv, err = connResp.Recv()
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				return err
-			}
-			err = resp.Send(recv)
-			if err != nil {
-				return err
-			}
+		err = util.CopyGRPCStream[rpc.ConnectResponse](connResp, resp)
+		if err != nil {
+			return err
 		}
 		util.InitLoggerForClient(config.Debug)
 		log.SetOutput(out)

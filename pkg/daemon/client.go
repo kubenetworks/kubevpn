@@ -18,6 +18,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/elevate"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 var daemonClient, sudoDaemonClient rpc.DaemonClient
@@ -67,11 +68,8 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient) {
 		if err != nil {
 			return nil
 		}
-		for {
-			if _, err = quitStream.Recv(); err != nil {
-				return nil
-			}
-		}
+		err = util.PrintGRPCStream[rpc.QuitResponse](quitStream, nil)
+		return
 	}
 
 	if isSudo {

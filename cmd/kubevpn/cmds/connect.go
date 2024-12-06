@@ -3,13 +3,11 @@ package cmds
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	"google.golang.org/grpc"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -98,38 +96,18 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			}
 			// if is foreground, send to sudo daemon server
 			cli := daemon.GetClient(false)
+			var resp grpc.ClientStream
 			if lite {
-				resp, err := cli.ConnectFork(cmd.Context(), req)
-				if err != nil {
-					return err
-				}
-				for {
-					recv, err := resp.Recv()
-					if err == io.EOF {
-						break
-					} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
-						return nil
-					} else if err != nil {
-						return err
-					}
-					_, _ = fmt.Fprint(os.Stdout, recv.GetMessage())
-				}
+				resp, err = cli.ConnectFork(cmd.Context(), req)
 			} else {
-				resp, err := cli.Connect(cmd.Context(), req)
-				if err != nil {
-					return err
-				}
-				for {
-					recv, err := resp.Recv()
-					if err == io.EOF {
-						break
-					} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
-						return nil
-					} else if err != nil {
-						return err
-					}
-					_, _ = fmt.Fprint(os.Stdout, recv.GetMessage())
-				}
+				resp, err = cli.Connect(cmd.Context(), req)
+			}
+			if err != nil {
+				return err
+			}
+			err = util.PrintGRPCStream[rpc.ConnectResponse](resp)
+			if err != nil {
+				return err
 			}
 			if !foreground {
 				util.Print(os.Stdout, config.Slogan)
@@ -144,15 +122,9 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 					log.Errorf("Disconnect error: %v", err)
 					return err
 				}
-				for {
-					recv, err := disconnect.Recv()
-					if err == io.EOF {
-						break
-					} else if err != nil {
-						log.Errorf("Receive disconnect message error: %v", err)
-						return err
-					}
-					_, _ = fmt.Fprint(os.Stdout, recv.Message)
+				err = util.PrintGRPCStream[rpc.DisconnectResponse](disconnect)
+				if err != nil {
+					return err
 				}
 				_, _ = fmt.Fprint(os.Stdout, "Disconnect completed")
 			}

@@ -1,19 +1,14 @@
 package cmds
 
 import (
-	"fmt"
-	"io"
-	"os"
-
 	"github.com/spf13/cobra"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func CmdLeave(f cmdutil.Factory) *cobra.Command {
@@ -43,17 +38,8 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			for {
-				recv, err := leave.Recv()
-				if err == io.EOF {
-					return nil
-				} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
-					return nil
-				} else if err != nil {
-					return err
-				}
-				_, _ = fmt.Fprint(os.Stdout, recv.GetMessage())
-			}
+			err = util.PrintGRPCStream[rpc.LeaveResponse](leave)
+			return err
 		},
 	}
 	return leaveCmd

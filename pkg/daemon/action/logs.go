@@ -52,7 +52,7 @@ func (svr *Server) Logs(req *rpc.LogRequest, resp rpc.Daemon_LogsServer) error {
 				continue
 			}
 
-			err = resp.Send(&rpc.LogResponse{Message: line.Text})
+			err = resp.Send(&rpc.LogResponse{Message: line.Text + "\n"})
 			if err != nil {
 				return err
 			}

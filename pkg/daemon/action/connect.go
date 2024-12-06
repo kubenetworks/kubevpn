@@ -190,17 +190,9 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	if err != nil {
 		return err
 	}
-	for {
-		recv, err := connResp.Recv()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return err
-		}
-		err = resp.Send(recv)
-		if err != nil {
-			return err
-		}
+	err = util.CopyGRPCStream[rpc.ConnectResponse](connResp, resp)
+	if err != nil {
+		return err
 	}
 
 	if resp.Context().Err() != nil {

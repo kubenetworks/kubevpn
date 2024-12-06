@@ -3,12 +3,9 @@ package cmds
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/spf13/cobra"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -49,18 +46,9 @@ func quit(ctx context.Context, isSudo bool) error {
 	if err != nil {
 		return err
 	}
-	var resp *rpc.QuitResponse
-	for {
-		resp, err = client.Recv()
-		if err == io.EOF {
-			break
-		} else if err == nil {
-			_, _ = fmt.Fprint(os.Stdout, resp.Message)
-		} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
-			return nil
-		} else {
-			return err
-		}
+	err = util.PrintGRPCStream[rpc.QuitResponse](client)
+	if err != nil {
+		return err
 	}
 	return nil
 }
