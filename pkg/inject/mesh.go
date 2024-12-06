@@ -103,12 +103,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 		return nil
 	}
 
-	var ipv6 bool
-	enableIPv6, err := util.DetectPodSupportIPv6OrNot(ctx1, factory, namespace)
-	if err == nil && enableIPv6 {
-		err = nil
-		ipv6 = true
-	}
+	enableIPv6, _ := util.DetectPodSupportIPv6(ctx1, factory, namespace)
 	// (1) add mesh container
 	removePatch, restorePatch := patch(*origin, path)
 	var b []byte
@@ -118,7 +113,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 		return err
 	}
 
-	AddMeshContainer(templateSpec, nodeID, c, ipv6)
+	AddMeshContainer(templateSpec, nodeID, c, enableIPv6)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	ps := []P{
 		{

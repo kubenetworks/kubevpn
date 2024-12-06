@@ -524,7 +524,7 @@ func UpdateImage(ctx context.Context, factory util.Factory, ns string, deployNam
 	return err
 }
 
-func DetectPodSupportIPv6OrNot(ctx context.Context, factory util.Factory, namespace string) (bool, error) {
+func DetectPodSupportIPv6(ctx context.Context, factory util.Factory, namespace string) (bool, error) {
 	clientSet, err := factory.KubernetesClientSet()
 	if err != nil {
 		return false, err
