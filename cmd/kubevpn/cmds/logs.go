@@ -1,13 +1,7 @@
 package cmds
 
 import (
-	"fmt"
-	"io"
-	"os"
-
 	"github.com/spf13/cobra"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -41,20 +35,8 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var resp *rpc.LogResponse
-			for {
-				resp, err = client.Recv()
-				if err == io.EOF {
-					break
-				} else if err == nil {
-					fmt.Fprintln(os.Stdout, resp.Message)
-				} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
-					return nil
-				} else {
-					return err
-				}
-			}
-			return nil
+			err = util.PrintGRPCStream[rpc.LogResponse](client)
+			return err
 		},
 	}
 	cmd.Flags().BoolVarP(&req.Follow, "follow", "f", false, "Specify if the logs should be streamed.")

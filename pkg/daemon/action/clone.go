@@ -2,13 +2,10 @@ package action
 
 import (
 	"context"
-	"fmt"
 	"io"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -44,20 +41,9 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 	if err != nil {
 		return err
 	}
-	var msg *rpc.ConnectResponse
-	for {
-		msg, err = connResp.Recv()
-		if err == io.EOF {
-			break
-		} else if err == nil {
-			fmt.Fprint(out, msg.Message)
-		} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
-			return nil
-		} else if code := status.Code(err); code == codes.AlreadyExists {
-			return fmt.Errorf("connect with cluster already established, disconnect required before proceeding")
-		} else {
-			return err
-		}
+	err = util.PrintGRPCStream[rpc.ConnectResponse](connResp, out)
+	if err != nil {
+		return err
 	}
 	util.InitLoggerForClient(config.Debug)
 	log.SetOutput(out)

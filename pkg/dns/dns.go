@@ -77,7 +77,7 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 	defer ticker.Stop()
 	immediate := make(chan struct{}, 1)
 	immediate <- struct{}{}
-
+	var ErrChanDone = errors.New("watch service chan done")
 	for ctx.Err() == nil {
 		err := func() error {
 			w, err := serviceInterface.Watch(ctx, v1.ListOptions{Watch: true})
@@ -91,7 +91,7 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 					return ctx.Err()
 				case event, ok := <-w.ResultChan():
 					if !ok {
-						return errors.New("watch service chan done")
+						return ErrChanDone
 					}
 					svc, ok := event.Object.(*v12.Service)
 					if !ok {
@@ -154,7 +154,7 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 		if ctx.Err() != nil {
 			return
 		}
-		if err != nil && !errors.Is(err, context.Canceled) {
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, ErrChanDone) {
 			log.Debugf("Failed to watch service to add route table: %v", err)
 		}
 		if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {

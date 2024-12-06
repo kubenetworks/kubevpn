@@ -2,14 +2,11 @@ package cmds
 
 import (
 	"fmt"
-	"io"
 	"os"
 
 	pkgerr "github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	utilcomp "k8s.io/kubectl/pkg/util/completion"
 	"k8s.io/kubectl/pkg/util/i18n"
@@ -141,16 +138,9 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			for {
-				recv, err := resp.Recv()
-				if err == io.EOF {
-					break
-				} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
-					return nil
-				} else if err != nil {
-					return err
-				}
-				_, _ = fmt.Fprint(os.Stdout, recv.GetMessage())
+			err = util.PrintGRPCStream[rpc.CloneResponse](resp)
+			if err != nil {
+				return err
 			}
 			util.Print(os.Stdout, config.Slogan)
 			return nil

@@ -118,18 +118,9 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 		if err != nil {
 			return err
 		}
-		var recv *rpc.DisconnectResponse
-		for {
-			recv, err = connResp.Recv()
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				return err
-			}
-			err = resp.Send(recv)
-			if err != nil {
-				return err
-			}
+		err = util.CopyGRPCStream[rpc.DisconnectResponse](connResp, resp)
+		if err != nil {
+			return err
 		}
 	}
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -158,11 +157,15 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			req.Workloads = nil
 		}
 		option.AddRollbackFunc(func() error {
-			_ = disconnect(ctx, daemonCli, &rpc.DisconnectRequest{
+			resp, err := daemonCli.Disconnect(ctx, &rpc.DisconnectRequest{
 				KubeconfigBytes: ptr.To(string(kubeConfigBytes)),
 				Namespace:       ptr.To(ns),
 				SshJump:         sshConfig.ToRPC(),
 			})
+			if err != nil {
+				return err
+			}
+			_ = util.PrintGRPCStream[rpc.DisconnectResponse](resp)
 			return nil
 		})
 		var resp rpc.Daemon_ConnectClient
@@ -171,15 +174,8 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			log.Errorf("Connect to cluster error: %s", err.Error())
 			return err
 		}
-		for {
-			resp, err := resp.Recv()
-			if err == io.EOF {
-				return nil
-			} else if err != nil {
-				return err
-			}
-			_, _ = fmt.Fprint(os.Stdout, resp.Message)
-		}
+		err = util.PrintGRPCStream[rpc.CloneResponse](resp)
+		return err
 
 	case ConnectModeContainer:
 		runConfig, err := option.CreateConnectContainer(portBindings)
@@ -339,15 +335,8 @@ func disconnect(ctx context.Context, daemonClient rpc.DaemonClient, req *rpc.Dis
 	if err != nil {
 		return err
 	}
-	for {
-		recv, err := resp.Recv()
-		if err == io.EOF {
-			return nil
-		} else if err != nil {
-			return err
-		}
-		_, _ = fmt.Fprint(os.Stdout, recv.Message)
-	}
+	err = util.PrintGRPCStream[rpc.DisconnectResponse](resp)
+	return err
 }
 
 func (option *Options) CreateConnectContainer(portBindings nat.PortMap) (*RunConfig, error) {

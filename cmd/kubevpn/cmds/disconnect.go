@@ -2,13 +2,10 @@ package cmds
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"strconv"
 
 	"github.com/spf13/cobra"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -69,18 +66,12 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 					All:        pointer.Bool(all),
 				},
 			)
-			var resp *rpc.DisconnectResponse
-			for {
-				resp, err = client.Recv()
-				if err == io.EOF {
-					break
-				} else if err == nil {
-					_, _ = fmt.Fprint(os.Stdout, resp.Message)
-				} else if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
-					break
-				} else {
-					return err
-				}
+			if err != nil {
+				return err
+			}
+			err = util.PrintGRPCStream[rpc.DisconnectResponse](client)
+			if err != nil {
+				return err
 			}
 			_, _ = fmt.Fprint(os.Stdout, "Disconnect completed")
 			return nil
