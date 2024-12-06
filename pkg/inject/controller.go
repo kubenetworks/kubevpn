@@ -17,6 +17,9 @@ import (
 //go:embed envoy.yaml
 var envoyConfig []byte
 
+//go:embed envoy_ipv4.yaml
+var envoyConfigIPv4 []byte
+
 func RemoveContainers(spec *v1.PodTemplateSpec) {
 	for i := 0; i < len(spec.Spec.Containers); i++ {
 		if sets.New[string](config.ContainerSidecarEnvoyProxy, config.ContainerSidecarVPN).Has(spec.Spec.Containers[i].Name) {
@@ -27,7 +30,7 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 }
 
 // AddMeshContainer todo envoy support ipv6
-func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteConfig) {
+func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteConfig, ipv6 bool) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 
@@ -140,7 +143,12 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 			"--config-yaml",
 		},
 		Args: []string{
-			string(envoyConfig),
+			func() string {
+				if ipv6 {
+					return string(envoyConfig)
+				}
+				return string(envoyConfigIPv4)
+			}(),
 		},
 		Resources: v1.ResourceRequirements{
 			Requests: map[v1.ResourceName]resource.Quantity{

@@ -102,6 +102,8 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 		log.Infof("Workload %s/%s has already been injected with sidecar", namespace, workload)
 		return nil
 	}
+
+	enableIPv6, _ := util.DetectPodSupportIPv6(ctx1, factory, namespace)
 	// (1) add mesh container
 	removePatch, restorePatch := patch(*origin, path)
 	var b []byte
@@ -111,7 +113,7 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 		return err
 	}
 
-	AddMeshContainer(templateSpec, nodeID, c)
+	AddMeshContainer(templateSpec, nodeID, c, enableIPv6)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	ps := []P{
 		{
