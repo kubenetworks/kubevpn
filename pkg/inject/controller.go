@@ -30,7 +30,7 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 }
 
 // AddMeshContainer todo envoy support ipv6
-func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteConfig) {
+func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteConfig, ipv6 bool) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 
@@ -144,7 +144,7 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 		},
 		Args: []string{
 			func() string {
-				if enable, err := util.IsIPv6Enabled(); err == nil && enable {
+				if ipv6 {
 					return string(envoyConfig)
 				}
 				return string(envoyConfigIPv4)

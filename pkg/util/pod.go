@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -39,6 +40,8 @@ import (
 	scheme2 "k8s.io/kubectl/pkg/scheme"
 	"k8s.io/kubectl/pkg/util/podutils"
 	pkgclient "sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 type PodRouteConfig struct {
@@ -519,4 +522,30 @@ func UpdateImage(ctx context.Context, factory util.Factory, ns string, deployNam
 	}
 	err = RolloutStatus(ctx, factory, ns, fmt.Sprintf("deployments/%s", deployName), time.Minute*60)
 	return err
+}
+
+func DetectPodSupportIPv6OrNot(ctx context.Context, factory util.Factory, namespace string) (bool, error) {
+	clientSet, err := factory.KubernetesClientSet()
+	if err != nil {
+		return false, err
+	}
+	restConfig, err := factory.ToRESTConfig()
+	if err != nil {
+		return false, err
+	}
+	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
+	list, err := GetRunningPodList(ctx, clientSet, namespace, label)
+	if err != nil {
+		return false, err
+	}
+	cmd := []string{"cat", "/proc/sys/net/ipv6/conf/all/disable_ipv6"}
+	shell, err := Shell(ctx, clientSet, restConfig, list[0].Name, config.ContainerSidecarVPN, namespace, cmd)
+	if err != nil {
+		return false, err
+	}
+	disableIPv6, err := strconv.Atoi(shell)
+	if err != nil {
+		return false, err
+	}
+	return disableIPv6 == 0, nil
 }
