@@ -50,12 +50,12 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		LocalTime:  true,
 		Compress:   false,
 	}
-	
+
 	// for gssapi to lookup KDCs in DNS
 	// c.LibDefaults.DNSLookupKDC = true
 	// c.LibDefaults.DNSLookupRealm = true
 	net.DefaultResolver.PreferGo = true
-	
+
 	util.InitLoggerForServer(true)
 	log.SetOutput(l)
 	klog.SetOutput(l)
@@ -102,7 +102,11 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
 	// startup a http server
 	// With downgrading-capable gRPC server, which can also handle HTTP.
-	downgradingServer := &http.Server{}
+	downgradingServer := &http.Server{
+		BaseContext: func(listener net.Listener) context.Context {
+			return o.ctx
+		},
+	}
 	defer downgradingServer.Close()
 	var h2Server http2.Server
 	err = http2.ConfigureServer(downgradingServer, &h2Server)
@@ -122,7 +126,16 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	}
 	o.svr = &action.Server{Cancel: cancel, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: l, ID: o.ID}
 	rpc.RegisterDaemonServer(svr, o.svr)
-	return downgradingServer.Serve(lis)
+	var errChan = make(chan error)
+	go func() {
+		errChan <- downgradingServer.Serve(lis)
+	}()
+	select {
+	case err = <-errChan:
+		return err
+	case <-o.ctx.Done():
+		return nil
+	}
 	//return o.svr.Serve(lis)
 }
 

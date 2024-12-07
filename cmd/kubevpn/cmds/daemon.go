@@ -1,6 +1,7 @@
 package cmds
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/action"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -45,6 +47,22 @@ func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
 			return initLogfile(action.GetDaemonLogPath())
 		},
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
+			defer func() {
+				var cli rpc.DaemonClient
+				if !opt.IsSudo {
+					cli = daemon.GetClient(true)
+				} else {
+					cli = daemon.GetClient(false)
+				}
+				if cli == nil {
+					return
+				}
+				resp, err := cli.Quit(context.Background(), &rpc.QuitRequest{})
+				if err != nil {
+					return
+				}
+				_ = util.PrintGRPCStream[rpc.QuitResponse](resp, nil)
+			}()
 			defer opt.Stop()
 			defer func() {
 				if errors.Is(err, http.ErrServerClosed) {
