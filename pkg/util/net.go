@@ -7,6 +7,9 @@ import (
 	"math"
 	"math/rand"
 	"net"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cilium/ipam/service/allocator"
@@ -239,4 +242,16 @@ func GenICMPPacketIPv6(src net.IP, dst net.IP) ([]byte, error) {
 		return nil, fmt.Errorf("failed to serialize icmp6 packet, err: %v", err)
 	}
 	return buf.Bytes(), nil
+}
+
+func DetectSupportIPv6() (bool, error) {
+	content, err := os.ReadFile("/proc/sys/net/ipv6/conf/all/disable_ipv6")
+	if err != nil {
+		return false, err
+	}
+	disableIPv6, err := strconv.Atoi(strings.TrimSpace(string(content)))
+	if err != nil {
+		return false, err
+	}
+	return disableIPv6 == 0, nil
 }

@@ -17,6 +17,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	utilcache "k8s.io/apimachinery/pkg/util/cache"
 	"sigs.k8s.io/yaml"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 type Processor struct {
@@ -50,6 +52,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 		p.logger.Errorf("error parsing yaml file: %+v", err)
 		return err
 	}
+	enableIPv6, _ := util.DetectSupportIPv6()
 	for _, config := range configList {
 		if len(config.Uid) == 0 {
 			continue
@@ -62,7 +65,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 		}
 		p.logger.Debugf("update config, version %d, config %v", p.version, config)
 
-		listeners, clusters, routes, endpoints := config.To()
+		listeners, clusters, routes, endpoints := config.To(enableIPv6)
 		resources := map[resource.Type][]types.Resource{
 			resource.ListenerType: listeners, // listeners
 			resource.RouteType:    routes,    // routes

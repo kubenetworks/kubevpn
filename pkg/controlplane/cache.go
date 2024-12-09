@@ -42,7 +42,7 @@ type Rule struct {
 	PortMap      map[int32]int32
 }
 
-func (a *Virtual) To() (
+func (a *Virtual) To(enableIPv6 bool) (
 	listeners []types.Resource,
 	clusters []types.Resource,
 	routes []types.Resource,
@@ -56,7 +56,13 @@ func (a *Virtual) To() (
 
 		var rr []*route.Route
 		for _, rule := range a.Rules {
-			for _, ip := range []string{rule.LocalTunIPv4, rule.LocalTunIPv6} {
+			var ips []string
+			if enableIPv6 {
+				ips = []string{rule.LocalTunIPv4, rule.LocalTunIPv6}
+			} else {
+				ips = []string{rule.LocalTunIPv4}
+			}
+			for _, ip := range ips {
 				clusterName := fmt.Sprintf("%s_%v", ip, rule.PortMap[port.ContainerPort])
 				clusters = append(clusters, ToCluster(clusterName))
 				endpoints = append(endpoints, ToEndPoint(clusterName, ip, rule.PortMap[port.ContainerPort]))
