@@ -229,9 +229,6 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 			containers := spec.Spec.Containers
 			// remove vpn sidecar
 			for i := 0; i < len(containers); i++ {
-				containers[i].ReadinessProbe = nil
-				containers[i].LivenessProbe = nil
-				containers[i].StartupProbe = nil
 				containerName := containers[i].Name
 				if err == nil && (containerName == config.ContainerSidecarVPN || containerName == config.ContainerSidecarEnvoyProxy) {
 					containers = append(containers[:i], containers[i+1:]...)

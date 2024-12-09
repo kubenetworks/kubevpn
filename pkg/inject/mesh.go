@@ -46,8 +46,6 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 		return err
 	}
 
-	origin := templateSpec.DeepCopy()
-
 	var ports []v1.ContainerPort
 	for _, container := range templateSpec.Spec.Containers {
 		ports = append(ports, container.Ports...)
@@ -105,14 +103,6 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 
 	enableIPv6, _ := util.DetectPodSupportIPv6(ctx1, factory, namespace)
 	// (1) add mesh container
-	removePatch, restorePatch := patch(*origin, path)
-	var b []byte
-	b, err = k8sjson.Marshal(restorePatch)
-	if err != nil {
-		log.Errorf("Marshal patch error: %v", err)
-		return err
-	}
-
 	AddMeshContainer(templateSpec, nodeID, c, enableIPv6)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	ps := []P{
@@ -121,14 +111,9 @@ func InjectVPNAndEnvoySidecar(ctx1 context.Context, factory cmdutil.Factory, cli
 			Path:  "/" + strings.Join(append(path, "spec"), "/"),
 			Value: templateSpec.Spec,
 		},
-		{
-			Op:    "replace",
-			Path:  "/metadata/annotations/" + config.KubeVPNRestorePatchKey,
-			Value: string(b),
-		},
 	}
 	var bytes []byte
-	bytes, err = k8sjson.Marshal(append(ps, removePatch...))
+	bytes, err = k8sjson.Marshal(append(ps))
 	if err != nil {
 		return err
 	}
@@ -172,22 +157,12 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 	log.Infof("Leaving workload %s", workload)
 
 	RemoveContainers(templateSpec)
-	if u.GetAnnotations() != nil && u.GetAnnotations()[config.KubeVPNRestorePatchKey] != "" {
-		patchStr := u.GetAnnotations()[config.KubeVPNRestorePatchKey]
-		var ps []P
-		err = json.Unmarshal([]byte(patchStr), &ps)
-		if err != nil {
-			return fmt.Errorf("unmarshal json patch: %s failed, err: %v", patchStr, err)
-		}
-		fromPatchToProbe(templateSpec, depth, ps)
-	}
 
 	if empty {
 		helper := pkgresource.NewHelper(object.Client, object.Mapping)
 		// pod without controller
 		if len(depth) == 0 {
 			log.Debugf("Workload %s is not under controller management", workload)
-			delete(templateSpec.ObjectMeta.GetAnnotations(), config.KubeVPNRestorePatchKey)
 			pod := &v1.Pod{ObjectMeta: templateSpec.ObjectMeta, Spec: templateSpec.Spec}
 			CleanupUselessInfo(pod)
 			err = CreateAfterDeletePod(factory, pod, helper)
@@ -202,11 +177,6 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 				Op:    "replace",
 				Path:  "/" + strings.Join(append(depth, "spec"), "/"),
 				Value: templateSpec.Spec,
-			},
-			{
-				Op:    "replace",
-				Path:  "/metadata/annotations/" + config.KubeVPNRestorePatchKey,
-				Value: "",
 			},
 		})
 		if err != nil {

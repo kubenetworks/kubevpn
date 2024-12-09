@@ -20,8 +20,6 @@ const (
 
 	LogFile = "daemon.log"
 
-	KubeVPNRestorePatchKey = "kubevpn-probe-restore-patch"
-
 	ConfigFile = "config.yaml"
 )
 

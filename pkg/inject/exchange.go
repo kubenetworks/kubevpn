@@ -81,6 +81,8 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig) {
 		// https://www.netfilter.org/documentation/HOWTO/NAT-HOWTO-6.html#ss6.2
 		// for curl -g -6 [efff:ffff:ffff:ffff:ffff:ffff:ffff:999a]:9080/health or curl 127.0.0.1:9080/health hit local PC
 		// output chain
+		// iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIPv4}
+		// ip6tables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIPv6}
 		Args: []string{`
 sysctl -w net.ipv4.ip_forward=1
 sysctl -w net.ipv6.conf.all.disable_ipv6=0
@@ -97,8 +99,6 @@ iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIPv4}
 ip6tables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIPv6}
 iptables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
 ip6tables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
-iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIPv4}
-ip6tables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIPv6}
 kubevpn serve -L "tun:/127.0.0.1:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://${TrafficManagerService}:10800"`,
 		},
 		SecurityContext: &corev1.SecurityContext{
