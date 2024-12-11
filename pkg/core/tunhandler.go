@@ -151,28 +151,9 @@ func heartbeats(ctx context.Context, tun net.Conn) {
 		log.Errorf("Failed to get tun device: %s", err.Error())
 		return
 	}
-	srcIPv4, srcIPv6, err := util.GetTunDeviceIP(tunIfi.Name)
+	srcIPv4, srcIPv6, dockerSrcIPv4, err := util.GetTunDeviceIP(tunIfi.Name)
 	if err != nil {
 		return
-	}
-	if config.RouterIP.To4().Equal(srcIPv4) {
-		return
-	}
-	if config.RouterIP6.To4().Equal(srcIPv6) {
-		return
-	}
-	if config.DockerRouterIP.To4().Equal(srcIPv4) {
-		return
-	}
-	var dstIPv4, dstIPv6 = net.IPv4zero, net.IPv6zero
-	if config.CIDR.Contains(srcIPv4) {
-		dstIPv4 = config.RouterIP
-	}
-	if config.CIDR6.Contains(srcIPv6) {
-		dstIPv6 = config.RouterIP6
-	}
-	if config.DockerCIDR.Contains(srcIPv4) {
-		dstIPv4 = config.DockerRouterIP
 	}
 
 	ticker := time.NewTicker(time.Second * 5)
@@ -185,14 +166,14 @@ func heartbeats(ctx context.Context, tun net.Conn) {
 		default:
 		}
 
-		var src, dst net.IP
-		src, dst = srcIPv4, dstIPv4
-		if !dst.IsUnspecified() {
-			go util.Ping(ctx, src.String(), dst.String())
+		if srcIPv4 != nil {
+			go util.Ping(ctx, srcIPv4.String(), config.RouterIP.String())
 		}
-		src, dst = srcIPv6, dstIPv6
-		if !dst.IsUnspecified() {
-			go util.Ping(ctx, src.String(), dst.String())
+		if srcIPv6 != nil {
+			go util.Ping(ctx, srcIPv6.String(), config.RouterIP6.String())
+		}
+		if dockerSrcIPv4 != nil {
+			go util.Ping(ctx, dockerSrcIPv4.String(), config.DockerRouterIP.String())
 		}
 	}
 }
@@ -201,7 +182,6 @@ func (d *Device) Start(ctx context.Context) {
 	go d.readFromTun()
 	go d.tunInboundHandler(d.tunInbound, d.tunOutbound)
 	go d.writeToTun()
-	go heartbeats(ctx, d.tun)
 
 	select {
 	case err := <-d.chExit:
