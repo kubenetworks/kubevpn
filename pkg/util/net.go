@@ -57,31 +57,30 @@ func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 	return GetTunDevice(ip)
 }
 
-func GetTunDeviceIP(tunName string) (net.IP, net.IP, error) {
+func GetTunDeviceIP(tunName string) (net.IP, net.IP, net.IP, error) {
 	tunIfi, err := net.InterfaceByName(tunName)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	addrList, err := tunIfi.Addrs()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	var srcIPv4, srcIPv6 net.IP
+	var srcIPv4, srcIPv6, dockerSrcIPv4 net.IP
 	for _, addr := range addrList {
 		if ipNet, ok := addr.(*net.IPNet); ok {
-			if config.CIDR.Contains(ipNet.IP) || config.CIDR6.Contains(ipNet.IP) || config.DockerCIDR.Contains(ipNet.IP) {
-				if ipNet.IP.To4() != nil {
-					srcIPv4 = ipNet.IP
-				} else {
-					srcIPv6 = ipNet.IP
-				}
+			if config.CIDR.Contains(ipNet.IP) {
+				srcIPv4 = ipNet.IP
+			}
+			if config.CIDR6.Contains(ipNet.IP) {
+				srcIPv6 = ipNet.IP
+			}
+			if config.DockerCIDR.Contains(ipNet.IP) {
+				dockerSrcIPv4 = ipNet.IP
 			}
 		}
 	}
-	if srcIPv4 == nil && srcIPv6 == nil {
-		return srcIPv4, srcIPv6, fmt.Errorf("can not found any ip")
-	}
-	return srcIPv4, srcIPv6, nil
+	return srcIPv4, srcIPv6, dockerSrcIPv4, nil
 }
 
 func PingOnce(ctx context.Context, srcIP, dstIP string) (bool, error) {
