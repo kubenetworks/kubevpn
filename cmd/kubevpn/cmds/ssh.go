@@ -83,6 +83,9 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			config.Header.Set("terminal-height", strconv.Itoa(height))
 			config.Header.Set("session-id", sessionID)
 			client := daemon.GetTCPClient(true)
+			if client == nil {
+				return fmt.Errorf("client is nil")
+			}
 			conn, err := websocket.NewClient(config, client)
 			if err != nil {
 				return err
