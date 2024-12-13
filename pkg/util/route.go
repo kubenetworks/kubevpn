@@ -50,7 +50,7 @@ func GetNsForListPodAndSvc(ctx context.Context, clientset *kubernetes.Clientset,
 	return
 }
 
-func ListService(ctx context.Context, lister v12.ServiceInterface, addRouteFunc func(resource string, ipStr string)) error {
+func ListService(ctx context.Context, lister v12.ServiceInterface, addRouteFunc func(ipStr string) error) error {
 	opts := metav1.ListOptions{Limit: 100, Continue: ""}
 	for {
 		serviceList, err := lister.List(ctx, opts)
@@ -58,7 +58,10 @@ func ListService(ctx context.Context, lister v12.ServiceInterface, addRouteFunc 
 			return err
 		}
 		for _, service := range serviceList.Items {
-			addRouteFunc(service.Name, service.Spec.ClusterIP)
+			err = addRouteFunc(service.Spec.ClusterIP)
+			if err != nil {
+				log.Errorf("Failed to add route, resource: %s, IP: %s, err: %v", service.Name, service.Spec.ClusterIP, err)
+			}
 		}
 		if serviceList.Continue == "" {
 			return nil
@@ -67,7 +70,7 @@ func ListService(ctx context.Context, lister v12.ServiceInterface, addRouteFunc 
 	}
 }
 
-func WatchServiceToAddRoute(ctx context.Context, watcher v12.ServiceInterface, routeFunc func(resource string, ipStr string)) error {
+func WatchServiceToAddRoute(ctx context.Context, watcher v12.ServiceInterface, routeFunc func(ipStr string) error) error {
 	defer func() {
 		if er := recover(); er != nil {
 			log.Error(er)
@@ -91,12 +94,12 @@ func WatchServiceToAddRoute(ctx context.Context, watcher v12.ServiceInterface, r
 			if !ok {
 				continue
 			}
-			routeFunc(svc.Name, svc.Spec.ClusterIP)
+			_ = routeFunc(svc.Spec.ClusterIP)
 		}
 	}
 }
 
-func ListPod(ctx context.Context, lister v12.PodInterface, addRouteFunc func(resource string, ipStr string)) error {
+func ListPod(ctx context.Context, lister v12.PodInterface, addRouteFunc func(ipStr string) error) error {
 	opts := metav1.ListOptions{Limit: 100, Continue: ""}
 	for {
 		podList, err := lister.List(ctx, opts)
@@ -107,7 +110,10 @@ func ListPod(ctx context.Context, lister v12.PodInterface, addRouteFunc func(res
 			if pod.Spec.HostNetwork {
 				continue
 			}
-			addRouteFunc(pod.Name, pod.Status.PodIP)
+			err = addRouteFunc(pod.Status.PodIP)
+			if err != nil {
+				log.Errorf("Failed to add route, resource: %s, IP: %s, err: %v", pod.Name, pod.Status.PodIP, err)
+			}
 		}
 		if podList.Continue == "" {
 			return nil
@@ -116,7 +122,7 @@ func ListPod(ctx context.Context, lister v12.PodInterface, addRouteFunc func(res
 	}
 }
 
-func WatchPodToAddRoute(ctx context.Context, watcher v12.PodInterface, addRouteFunc func(resource string, ipStr string)) error {
+func WatchPodToAddRoute(ctx context.Context, watcher v12.PodInterface, addRouteFunc func(ipStr string) error) error {
 	defer func() {
 		if er := recover(); er != nil {
 			log.Errorln(er)
@@ -144,7 +150,7 @@ func WatchPodToAddRoute(ctx context.Context, watcher v12.PodInterface, addRouteF
 				continue
 			}
 			ip := pod.Status.PodIP
-			addRouteFunc(pod.Name, ip)
+			_ = addRouteFunc(ip)
 		}
 	}
 }
