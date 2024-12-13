@@ -330,15 +330,6 @@ func (option *Options) Dev(ctx context.Context, cConfig *Config, hostConfig *Hos
 	return configList.Run(ctx, volume, option.cli, option.dockerCli)
 }
 
-func disconnect(ctx context.Context, daemonClient rpc.DaemonClient, req *rpc.DisconnectRequest) error {
-	resp, err := daemonClient.Disconnect(ctx, req)
-	if err != nil {
-		return err
-	}
-	err = util.PrintGRPCStream[rpc.DisconnectResponse](resp)
-	return err
-}
-
 func (option *Options) CreateConnectContainer(portBindings nat.PortMap) (*RunConfig, error) {
 	portMap, portSet, err := option.GetExposePort(portBindings)
 	if err != nil {

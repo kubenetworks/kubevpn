@@ -8,8 +8,6 @@ import (
 	"os"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type Printable interface {
@@ -27,9 +25,6 @@ func PrintGRPCStream[T any](clientStream grpc.ClientStream, writers ...io.Writer
 		var t = new(T)
 		err := clientStream.RecvMsg(t)
 		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if status.Code(err) == codes.Canceled {
 			return nil
 		}
 		if err != nil {
