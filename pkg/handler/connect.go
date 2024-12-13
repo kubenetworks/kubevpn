@@ -4,12 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"math"
-	"math/rand"
 	"net"
 	"net/url"
-	"os/exec"
 	"reflect"
 	"sort"
 	"strconv"
@@ -21,7 +17,6 @@ import (
 	"github.com/distribution/reference"
 	goversion "github.com/hashicorp/go-version"
 	"github.com/libp2p/go-netroute"
-	miekgdns "github.com/miekg/dns"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/metadata"
@@ -34,11 +29,9 @@ import (
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/cmd/set"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
@@ -427,17 +420,13 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 		}
 	}()
 	log.Info("Connected tunnel")
-	return
+
+	c.tunName, err = c.GetTunDeviceName()
+	return err
 }
 
 // Listen all pod, add route if needed
 func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
-	var err error
-	c.tunName, err = c.GetTunDeviceName()
-	if err != nil {
-		return err
-	}
-
 	podNs, svcNs, err1 := util.GetNsForListPodAndSvc(ctx, c.clientset, []string{v1.NamespaceAll, c.Namespace})
 	if err1 != nil {
 		return err1
@@ -542,13 +531,14 @@ func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
 
 func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	const portTCP = 10800
-	pod, err := c.GetRunningPodList(ctx)
+	podList, err := c.GetRunningPodList(ctx)
 	if err != nil {
 		log.Errorf("Get running pod list failed, err: %v", err)
 		return err
 	}
+	pod := podList[0]
 	log.Debugf("Get DNS service IP from pod...")
-	relovConf, err := util.GetDNSServiceIPFromPod(ctx, c.clientset, c.config, pod[0].GetName(), c.Namespace)
+	relovConf, err := util.GetDNSServiceIPFromPod(ctx, c.clientset, c.config, pod.GetName(), c.Namespace)
 	if err != nil {
 		log.Errorln(err)
 		return err
@@ -565,9 +555,9 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	d := net.Dialer{Timeout: time.Duration(max(2, relovConf.Timeout)) * time.Second}
 	conn, err = d.DialContext(ctx, "tcp", net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(portTCP)))
 	if err != nil {
-		relovConf.Servers = []string{pod[0].Status.PodIP}
+		relovConf.Servers = []string{pod.Status.PodIP}
 		err = nil
-		log.Debugf("DNS service use pod IP %s", pod[0].Status.PodIP)
+		log.Debugf("DNS service use pod IP %s", pod.Status.PodIP)
 	} else {
 		relovConf.Servers = []string{svc.Spec.ClusterIP}
 		_ = conn.Close()
@@ -575,7 +565,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	}
 
 	log.Debugf("Adding extra hosts...")
-	if err = c.addExtraRoute(c.ctx, relovConf.Servers[0]); err != nil {
+	if err = c.addExtraRoute(c.ctx, pod.GetName()); err != nil {
 		log.Errorf("Add extra route failed: %v", err)
 		return err
 	}
@@ -596,15 +586,11 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		serviceList = append(serviceList, services.Items...)
 	}
 
-	tunName, err := c.GetTunDeviceName()
-	if err != nil {
-		return err
-	}
 	c.dnsConfig = &dns.Config{
 		Config:   relovConf,
 		Ns:       ns,
 		Services: serviceList,
-		TunName:  tunName,
+		TunName:  c.tunName,
 		Hosts:    c.extraHost,
 		Lock:     c.Lock,
 	}
@@ -833,135 +819,26 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) (err erro
 	return
 }
 
-func (c *ConnectOptions) addExtraRoute(ctx context.Context, nameserver string) error {
+func (c *ConnectOptions) addExtraRoute(ctx context.Context, name string) error {
 	if len(c.ExtraRouteInfo.ExtraDomain) == 0 {
 		return nil
 	}
 
-	tunName, err := c.GetTunDeviceName()
-	if err != nil {
-		log.Errorf("Get tun interface failed: %s", err.Error())
-		return err
-	}
-
-	addRouteFunc := func(resource, ip string) {
-		if net.ParseIP(ip) == nil {
-			return
-		}
-		var mask net.IPMask
-		if net.ParseIP(ip).To4() != nil {
-			mask = net.CIDRMask(32, 32)
-		} else {
-			mask = net.CIDRMask(128, 128)
-		}
-		errs := tun.AddRoutes(tunName, types.Route{Dst: net.IPNet{IP: net.ParseIP(ip), Mask: mask}})
-		if errs != nil {
-			log.Errorf("Failed to add route, domain: %s, IP: %s, err: %v", resource, ip, err)
-		}
-	}
-
 	// 1) use dig +short query, if ok, just return
-	podList, err := c.GetRunningPodList(ctx)
-	if err != nil {
-		return err
-	}
-	var ok = true
 	for _, domain := range c.ExtraRouteInfo.ExtraDomain {
-		ip, err := util.Shell(ctx, c.clientset, c.config, podList[0].Name, config.ContainerSidecarVPN, c.Namespace, []string{"dig", "+short", domain})
-		if err == nil || net.ParseIP(ip) != nil {
-			addRouteFunc(domain, ip)
-			c.extraHost = append(c.extraHost, dns.Entry{IP: net.ParseIP(ip).String(), Domain: domain})
-		} else {
-			ok = false
+		ip, err := util.Shell(ctx, c.clientset, c.config, name, config.ContainerSidecarVPN, c.Namespace, []string{"dig", "+short", domain})
+		if err != nil {
+			return errors.WithMessage(err, "failed to resolve DNS for domain by command dig")
 		}
-	}
-	if ok {
-		return nil
-	}
-
-	// 2) wait until can ping dns server ip ok
-	// 3) use nslookup to query dns at first, it will speed up mikdns query process
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	go func() {
-		for _, domain := range c.ExtraRouteInfo.ExtraDomain {
-			go func(domain string) {
-				for ; true; <-ticker.C {
-					func() {
-						subCtx, c2 := context.WithTimeout(ctx, time.Second*2)
-						defer c2()
-						cmd := exec.CommandContext(subCtx, "nslookup", domain, nameserver)
-						cmd.Stderr = io.Discard
-						cmd.Stdout = io.Discard
-						_ = cmd.Start()
-						_ = cmd.Wait()
-					}()
-				}
-			}(domain)
+		if net.ParseIP(ip) == nil {
+			return fmt.Errorf("failed to resolve DNS for domain %s by command dig", domain)
 		}
-	}()
-
-	// 4) query with dns client
-	client := &miekgdns.Client{Net: "udp", Timeout: time.Second * 2}
-	for _, domain := range c.ExtraRouteInfo.ExtraDomain {
-		var success = false
-		for _, qType := range []uint16{miekgdns.TypeA /*, miekgdns.TypeAAAA*/} {
-			var iErr = errors.New("No retry")
-			err = retry.OnError(
-				wait.Backoff{
-					Steps:    1000,
-					Duration: time.Millisecond * 30,
-				},
-				func(err error) bool {
-					return err != nil
-				},
-				func() error {
-					var answer *miekgdns.Msg
-					answer, _, err = client.ExchangeContext(ctx, &miekgdns.Msg{
-						MsgHdr: miekgdns.MsgHdr{
-							Id: uint16(rand.Intn(math.MaxUint16 + 1)),
-						},
-						Question: []miekgdns.Question{
-							{
-								Name:  domain + ".",
-								Qtype: qType,
-							},
-						},
-					}, fmt.Sprintf("%s:%d", nameserver, 53))
-					if err != nil {
-						return err
-					}
-					if len(answer.Answer) == 0 {
-						return iErr
-					}
-					for _, rr := range answer.Answer {
-						switch a := rr.(type) {
-						case *miekgdns.A:
-							if ip := net.ParseIP(a.A.String()); ip != nil && !ip.IsLoopback() {
-								addRouteFunc(domain, a.A.String())
-								c.extraHost = append(c.extraHost, dns.Entry{IP: a.A.String(), Domain: domain})
-								success = true
-							}
-						case *miekgdns.AAAA:
-							if ip := net.ParseIP(a.AAAA.String()); ip != nil && !ip.IsLoopback() {
-								addRouteFunc(domain, a.AAAA.String())
-								c.extraHost = append(c.extraHost, dns.Entry{IP: a.AAAA.String(), Domain: domain})
-								success = true
-							}
-						}
-					}
-					return nil
-				})
-			if err != nil && err != iErr {
-				return err
-			}
-			if success {
-				break
-			}
+		err = c.addRoute(ip)
+		if err != nil {
+			log.Errorf("Failed to add IP: %s to route table: %v", ip, err)
+			return err
 		}
-		if !success {
-			return fmt.Errorf("failed to resolve DNS for domain %s", domain)
-		}
+		c.extraHost = append(c.extraHost, dns.Entry{IP: net.ParseIP(ip).String(), Domain: domain})
 	}
 	return nil
 }

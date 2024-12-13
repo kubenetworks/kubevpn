@@ -60,7 +60,7 @@ func ListService(ctx context.Context, lister v12.ServiceInterface, addRouteFunc 
 		for _, service := range serviceList.Items {
 			err = addRouteFunc(service.Spec.ClusterIP)
 			if err != nil {
-				log.Errorf("Failed to add route, resource: %s, IP: %s, err: %v", service.Name, service.Spec.ClusterIP, err)
+				log.Errorf("Failed to add service: %s IP: %s to route table: %v", service.Name, service.Spec.ClusterIP, err)
 			}
 		}
 		if serviceList.Continue == "" {
@@ -112,7 +112,7 @@ func ListPod(ctx context.Context, lister v12.PodInterface, addRouteFunc func(ipS
 			}
 			err = addRouteFunc(pod.Status.PodIP)
 			if err != nil {
-				log.Errorf("Failed to add route, resource: %s, IP: %s, err: %v", pod.Name, pod.Status.PodIP, err)
+				log.Errorf("Failed to add pod: %s IP: %s to route table: %v", pod.Name, pod.Status.PodIP, err)
 			}
 		}
 		if podList.Continue == "" {

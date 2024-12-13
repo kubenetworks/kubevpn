@@ -43,7 +43,7 @@ func GetTunDevice(ips ...net.IP) (*net.Interface, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("can not found any interface with ip %v", ips)
+	return nil, fmt.Errorf("can not found any interface with IP %v", ips)
 }
 
 func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
