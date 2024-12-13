@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -48,6 +50,9 @@ func quit(ctx context.Context, isSudo bool) error {
 	}
 	err = util.PrintGRPCStream[rpc.QuitResponse](client)
 	if err != nil {
+		if status.Code(err) == codes.Canceled {
+			return nil
+		}
 		return err
 	}
 	return nil

@@ -7,6 +7,8 @@ import (
 	pkgerr "github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	utilcomp "k8s.io/kubectl/pkg/util/completion"
 	"k8s.io/kubectl/pkg/util/i18n"
@@ -140,6 +142,9 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			}
 			err = util.PrintGRPCStream[rpc.CloneResponse](resp)
 			if err != nil {
+				if status.Code(err) == codes.Canceled {
+					return nil
+				}
 				return err
 			}
 			util.Print(os.Stdout, config.Slogan)

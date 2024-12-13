@@ -8,6 +8,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -107,6 +109,9 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			}
 			err = util.PrintGRPCStream[rpc.ConnectResponse](resp)
 			if err != nil {
+				if status.Code(err) == codes.Canceled {
+					return nil
+				}
 				return err
 			}
 			if !foreground {
@@ -124,6 +129,9 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				}
 				err = util.PrintGRPCStream[rpc.DisconnectResponse](disconnect)
 				if err != nil {
+					if status.Code(err) == codes.Canceled {
+						return nil
+					}
 					return err
 				}
 				_, _ = fmt.Fprint(os.Stdout, "Disconnect completed")
