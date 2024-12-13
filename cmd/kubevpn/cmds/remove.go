@@ -2,6 +2,8 @@ package cmds
 
 import (
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -37,7 +39,13 @@ func CmdRemove(f cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			err = util.PrintGRPCStream[rpc.RemoveResponse](leave)
-			return err
+			if err != nil {
+				if status.Code(err) == codes.Canceled {
+					return nil
+				}
+				return err
+			}
+			return nil
 		},
 	}
 	return cmd
