@@ -116,7 +116,7 @@ func TestRemoveCIDRsContainingIPs(t *testing.T) {
 				_, ipNet, err := net.ParseCIDR(cidr)
 				if err != nil {
 					if test.expectPanic {
-						panic(err) // Имитация ситуации паники
+						panic(err)
 					}
 					t.Fatalf("failed to parse CIDR %s: %v", cidr, err)
 				}
