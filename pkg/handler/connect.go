@@ -771,14 +771,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) (err erro
 				ipList = append(ipList, ips...)
 			}
 			c.apiServerIPs = ipList
-			for i := 0; i < len(c.cidrs); i++ {
-				for _, ip := range ipList {
-					if c.cidrs[i].Contains(ip) {
-						c.cidrs = append(c.cidrs[:i], c.cidrs[i+1:]...)
-						i--
-					}
-				}
-			}
+			c.removeCIDRsContainingIPs(ipList)
 		}
 	}()
 
@@ -817,6 +810,17 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) (err erro
 	// (3) fallback to get cidr from node/pod/service
 	c.cidrs = util.GetCIDRFromResourceUgly(ctx, c.clientset, c.Namespace)
 	return
+}
+
+func (c *ConnectOptions) removeCIDRsContainingIPs(ipList []net.IP) {
+	for i := len(c.cidrs) - 1; i >= 0; i-- {
+		for _, ip := range ipList {
+			if c.cidrs[i].Contains(ip) {
+				c.cidrs = append(c.cidrs[:i], c.cidrs[i+1:]...)
+				break
+			}
+		}
+	}
 }
 
 func (c *ConnectOptions) addExtraRoute(ctx context.Context, name string) error {
