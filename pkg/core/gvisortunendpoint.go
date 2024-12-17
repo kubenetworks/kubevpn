@@ -50,16 +50,16 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		default:
 		}
 
-		buf := config.SPool.Get().([]byte)[:]
+		buf := config.LPool.Get().([]byte)[:]
 		read, err := tcpConn.Read(buf[:])
 		if err != nil {
 			log.Errorf("[TUN] Failed to read from tcp conn: %v", err)
-			config.SPool.Put(buf[:])
+			config.LPool.Put(buf[:])
 			return
 		}
 		if read == 0 {
 			log.Warnf("[TUN] Read from tcp conn length is %d", read)
-			config.SPool.Put(buf[:])
+			config.LPool.Put(buf[:])
 			continue
 		}
 		// Try to determine network protocol number, default zero.
@@ -73,7 +73,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			ipHeader, err := ipv4.ParseHeader(buf[:read])
 			if err != nil {
 				log.Errorf("Failed to parse IPv4 header: %v", err)
-				config.SPool.Put(buf[:])
+				config.LPool.Put(buf[:])
 				continue
 			}
 			ipProtocol = ipHeader.Protocol
@@ -84,7 +84,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			ipHeader, err := ipv6.ParseHeader(buf[:read])
 			if err != nil {
 				log.Errorf("Failed to parse IPv6 header: %s", err.Error())
-				config.SPool.Put(buf[:])
+				config.LPool.Put(buf[:])
 				continue
 			}
 			ipProtocol = ipHeader.NextHeader
@@ -92,7 +92,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			dst = ipHeader.Dst
 		} else {
 			log.Debugf("[TUN-GVISOR] Unknown packet")
-			config.SPool.Put(buf[:])
+			config.LPool.Put(buf[:])
 			continue
 		}
 
@@ -111,7 +111,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			ReserveHeaderBytes: 0,
 			Payload:            buffer.MakeWithData(buf[:read]),
 		})
-		config.SPool.Put(buf[:])
+		config.LPool.Put(buf[:])
 		sniffer.LogPacket("[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
 		endpoint.InjectInbound(protocol, pkt)
 		pkt.DecRef()

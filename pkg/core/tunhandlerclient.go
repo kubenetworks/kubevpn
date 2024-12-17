@@ -87,7 +87,7 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 				continue
 			}
 			_, err := packetConn.WriteTo(e.data[:e.length], remoteAddr)
-			config.SPool.Put(e.data[:])
+			config.LPool.Put(e.data[:])
 			if err != nil {
 				util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to write packet to remote %s", remoteAddr)))
 				return
@@ -97,10 +97,10 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 
 	go func() {
 		for {
-			buf := config.SPool.Get().([]byte)[:]
+			buf := config.LPool.Get().([]byte)[:]
 			n, _, err := packetConn.ReadFrom(buf[:])
 			if err != nil {
-				config.SPool.Put(buf[:])
+				config.LPool.Put(buf[:])
 				util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to read packet from remote %s", remoteAddr)))
 				return
 			}
@@ -146,15 +146,15 @@ func (d *ClientDevice) SetTunInboundHandler(handler func(tunInbound <-chan *Data
 
 func (d *ClientDevice) readFromTun() {
 	for {
-		buf := config.SPool.Get().([]byte)[:]
+		buf := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(buf[:])
 		if err != nil {
 			util.SafeWrite(d.chExit, err)
-			config.SPool.Put(buf[:])
+			config.LPool.Put(buf[:])
 			return
 		}
 		if n == 0 {
-			config.SPool.Put(buf[:])
+			config.LPool.Put(buf[:])
 			continue
 		}
 
@@ -163,7 +163,7 @@ func (d *ClientDevice) readFromTun() {
 		src, dst, err = util.ParseIP(buf[:n])
 		if err != nil {
 			log.Debugf("[TUN-GVISOR] Unknown packet: %v", err)
-			config.SPool.Put(buf[:])
+			config.LPool.Put(buf[:])
 			continue
 		}
 		log.Tracef("[TUN-RAW] SRC: %s, DST: %s, Length: %d", src.String(), dst, n)
@@ -174,7 +174,7 @@ func (d *ClientDevice) readFromTun() {
 func (d *ClientDevice) writeToTun() {
 	for e := range d.tunOutbound {
 		_, err := d.tun.Write(e.data[:e.length])
-		config.SPool.Put(e.data[:])
+		config.LPool.Put(e.data[:])
 		if err != nil {
 			util.SafeWrite(d.chExit, err)
 			return

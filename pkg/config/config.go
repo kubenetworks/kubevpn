@@ -128,9 +128,9 @@ func init() {
 var Debug bool
 
 var (
-	SmallBufferSize  = 2 * 1024  // 2KB small buffer
-	MediumBufferSize = 8 * 1024  // 8KB medium buffer
-	LargeBufferSize  = 32 * 1024 // 32KB large buffer
+	SmallBufferSize  = 8 * 1024  // 8KB small buffer
+	MediumBufferSize = 32 * 1024 // 32KB medium buffer
+	LargeBufferSize  = 64 * 1024 // 64KB large buffer
 )
 
 var (

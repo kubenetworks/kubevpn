@@ -96,24 +96,24 @@ type Device struct {
 
 func (d *Device) readFromTun() {
 	for {
-		buf := config.SPool.Get().([]byte)[:]
+		buf := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(buf[:])
 		if err != nil {
-			config.SPool.Put(buf[:])
+			config.LPool.Put(buf[:])
 			log.Errorf("[TUN] Failed to read from tun: %v", err)
 			util.SafeWrite(d.chExit, err)
 			return
 		}
 		if n == 0 {
 			log.Errorf("[TUN] Read packet length 0")
-			config.SPool.Put(buf[:])
+			config.LPool.Put(buf[:])
 			continue
 		}
 
 		src, dst, err := util.ParseIP(buf[:n])
 		if err != nil {
 			log.Errorf("[TUN] Unknown packet")
-			config.SPool.Put(buf[:])
+			config.LPool.Put(buf[:])
 			continue
 		}
 
@@ -130,7 +130,7 @@ func (d *Device) readFromTun() {
 func (d *Device) writeToTun() {
 	for e := range d.tunOutbound {
 		_, err := d.tun.Write(e.data[:e.length])
-		config.SPool.Put(e.data[:])
+		config.LPool.Put(e.data[:])
 		if err != nil {
 			util.SafeWrite(d.chExit, err)
 			return
@@ -278,17 +278,17 @@ func (p *Peer) sendErr(err error) {
 
 func (p *Peer) readFromConn() {
 	for {
-		buf := config.SPool.Get().([]byte)[:]
+		buf := config.LPool.Get().([]byte)[:]
 		n, from, err := p.conn.ReadFrom(buf[:])
 		if err != nil {
-			config.SPool.Put(buf[:])
+			config.LPool.Put(buf[:])
 			p.sendErr(err)
 			return
 		}
 
 		src, dst, err := util.ParseIP(buf[:n])
 		if err != nil {
-			config.SPool.Put(buf[:])
+			config.LPool.Put(buf[:])
 			log.Errorf("[TUN] Unknown packet: %v", err)
 			continue
 		}
@@ -316,7 +316,7 @@ func (p *Peer) readFromTCPConn() {
 		src, dst, err := util.ParseIP(packet.Data)
 		if err != nil {
 			log.Errorf("[TUN] Unknown packet")
-			config.SPool.Put(packet.Data[:])
+			config.LPool.Put(packet.Data[:])
 			continue
 		}
 		u := &udpElem{
@@ -335,7 +335,7 @@ func (p *Peer) routePeer() {
 		if routeToAddr := p.routeMapUDP.RouteTo(e.dst); routeToAddr != nil {
 			log.Debugf("[UDP] Find UDP route to dst: %s -> %s", e.dst, routeToAddr)
 			_, err := p.conn.WriteTo(e.data[:e.length], routeToAddr)
-			config.SPool.Put(e.data[:])
+			config.LPool.Put(e.data[:])
 			if err != nil {
 				p.sendErr(err)
 				return
@@ -344,7 +344,7 @@ func (p *Peer) routePeer() {
 			log.Debugf("[TCP] Find TCP route to dst: %s -> %s", e.dst.String(), conn.(net.Conn).RemoteAddr())
 			dgram := newDatagramPacket(e.data[:e.length])
 			err := dgram.Write(conn.(net.Conn))
-			config.SPool.Put(e.data[:])
+			config.LPool.Put(e.data[:])
 			if err != nil {
 				log.Errorf("[TCP] udp-tun %s <- %s : %s", conn.(net.Conn).RemoteAddr(), dgram.Addr(), err)
 				p.sendErr(err)
@@ -367,7 +367,7 @@ func (p *Peer) routeTUN() {
 		if addr := p.routeMapUDP.RouteTo(e.dst); addr != nil {
 			log.Debugf("[TUN] Find UDP route to dst: %s -> %s", e.dst, addr)
 			_, err := p.conn.WriteTo(e.data[:e.length], addr)
-			config.SPool.Put(e.data[:])
+			config.LPool.Put(e.data[:])
 			if err != nil {
 				log.Debugf("[TUN] Failed wirte to route dst: %s -> %s", e.dst, addr)
 				p.sendErr(err)
@@ -377,7 +377,7 @@ func (p *Peer) routeTUN() {
 			log.Debugf("[TUN] Find TCP route to dst: %s -> %s", e.dst.String(), conn.(net.Conn).RemoteAddr())
 			dgram := newDatagramPacket(e.data[:e.length])
 			err := dgram.Write(conn.(net.Conn))
-			config.SPool.Put(e.data[:])
+			config.LPool.Put(e.data[:])
 			if err != nil {
 				log.Errorf("[TUN] Failed to write TCP %s <- %s : %s", conn.(net.Conn).RemoteAddr(), dgram.Addr(), err)
 				p.sendErr(err)
@@ -385,7 +385,7 @@ func (p *Peer) routeTUN() {
 			}
 		} else {
 			log.Errorf("[TUN] No route for src: %s -> dst: %s, drop it", e.src, e.dst)
-			config.SPool.Put(e.data[:])
+			config.LPool.Put(e.data[:])
 		}
 	}
 }
