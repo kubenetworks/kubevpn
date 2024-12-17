@@ -78,11 +78,11 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		default:
 		}
 
-		buf := config.SPool.Get().([]byte)[:]
+		buf := config.LPool.Get().([]byte)[:]
 		dgram, err := readDatagramPacketServer(tcpConn, buf[:])
 		if err != nil {
 			log.Errorf("[TCP] %s -> %s : %v", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
-			config.SPool.Put(buf[:])
+			config.LPool.Put(buf[:])
 			return
 		}
 
@@ -90,7 +90,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		src, _, err = util.ParseIP(dgram.Data[:dgram.DataLength])
 		if err != nil {
 			log.Errorf("[TCP] Unknown packet")
-			config.SPool.Put(buf[:])
+			config.LPool.Put(buf[:])
 			continue
 		}
 		value, loaded := h.routeMapTCP.LoadOrStore(src.String(), tcpConn)
