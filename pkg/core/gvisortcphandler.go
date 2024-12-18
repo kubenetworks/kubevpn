@@ -40,10 +40,12 @@ func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {
 	endpoint := channel.New(tcp.DefaultReceiveBufferSize, uint32(config.DefaultMTU), tcpip.GetRandMacAddr())
 	errChan := make(chan error, 2)
 	go func() {
+		defer util.HandleCrash()
 		h.readFromTCPConnWriteToEndpoint(ctx, tcpConn, endpoint)
 		util.SafeClose(errChan)
 	}()
 	go func() {
+		defer util.HandleCrash()
 		h.readFromEndpointWriteToTCPConn(ctx, tcpConn, endpoint)
 		util.SafeClose(errChan)
 	}()

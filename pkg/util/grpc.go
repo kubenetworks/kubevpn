@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-
+	"runtime/debug"
+	
+	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
 
@@ -74,5 +76,12 @@ func CopyAndConvertGRPCStream[I any, O any](r grpc.ClientStream, w grpc.ServerSt
 		if err != nil {
 			return err
 		}
+	}
+}
+
+func HandleCrash() {
+	if r := recover(); r != nil {
+		logrus.Panic(fmt.Sprintf("Panic: %s", string(debug.Stack())))
+		panic(r)
 	}
 }

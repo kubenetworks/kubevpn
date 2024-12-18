@@ -27,6 +27,7 @@ import (
 	"tailscale.com/net/dns"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 type Config struct {
@@ -73,6 +74,7 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13
 }
 
 func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v13.ServiceInterface, hosts []Entry) {
+	defer util.HandleCrash()
 	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
 	immediate := make(chan struct{}, 1)

@@ -95,6 +95,7 @@ type Device struct {
 }
 
 func (d *Device) readFromTun() {
+	defer util.HandleCrash()
 	for {
 		buf := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(buf[:])
@@ -128,6 +129,7 @@ func (d *Device) readFromTun() {
 }
 
 func (d *Device) writeToTun() {
+	defer util.HandleCrash()
 	for e := range d.tunOutbound {
 		_, err := d.tun.Write(e.data[:e.length])
 		config.LPool.Put(e.data[:])
@@ -277,6 +279,7 @@ func (p *Peer) sendErr(err error) {
 }
 
 func (p *Peer) readFromConn() {
+	defer util.HandleCrash()
 	for {
 		buf := config.LPool.Get().([]byte)[:]
 		n, from, err := p.conn.ReadFrom(buf[:])
@@ -312,6 +315,7 @@ func (p *Peer) readFromConn() {
 }
 
 func (p *Peer) readFromTCPConn() {
+	defer util.HandleCrash()
 	for packet := range TCPPacketChan {
 		src, dst, err := util.ParseIP(packet.Data)
 		if err != nil {
@@ -331,6 +335,7 @@ func (p *Peer) readFromTCPConn() {
 }
 
 func (p *Peer) routePeer() {
+	defer util.HandleCrash()
 	for e := range p.connInbound {
 		if routeToAddr := p.routeMapUDP.RouteTo(e.dst); routeToAddr != nil {
 			log.Debugf("[UDP] Find UDP route to dst: %s -> %s", e.dst, routeToAddr)
@@ -363,6 +368,7 @@ func (p *Peer) routePeer() {
 }
 
 func (p *Peer) routeTUN() {
+	defer util.HandleCrash()
 	for e := range p.tunInbound {
 		if addr := p.routeMapUDP.RouteTo(e.dst); addr != nil {
 			log.Debugf("[TUN] Find UDP route to dst: %s -> %s", e.dst, addr)

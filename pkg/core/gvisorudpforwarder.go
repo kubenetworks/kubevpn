@@ -14,6 +14,7 @@ import (
 	"gvisor.dev/gvisor/pkg/waiter"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func UDPForwarder(s *stack.Stack, ctx context.Context) func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
@@ -51,6 +52,7 @@ func UDPForwarder(s *stack.Stack, ctx context.Context) func(id stack.TransportEn
 			defer remote.Close()
 			errChan := make(chan error, 2)
 			go func() {
+				defer util.HandleCrash()
 				buf := config.LPool.Get().([]byte)[:]
 				defer config.LPool.Put(buf[:])
 
@@ -80,6 +82,7 @@ func UDPForwarder(s *stack.Stack, ctx context.Context) func(id stack.TransportEn
 				errChan <- err
 			}()
 			go func() {
+				defer util.HandleCrash()
 				buf := config.LPool.Get().([]byte)[:]
 				defer config.LPool.Put(buf[:])
 
