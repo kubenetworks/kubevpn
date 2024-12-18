@@ -50,12 +50,12 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		LocalTime:  true,
 		Compress:   false,
 	}
-	
+
 	// for gssapi to lookup KDCs in DNS
 	// c.LibDefaults.DNSLookupKDC = true
 	// c.LibDefaults.DNSLookupRealm = true
 	net.DefaultResolver.PreferGo = true
-	
+
 	util.InitLoggerForServer(true)
 	log.SetOutput(l)
 	klog.SetOutput(l)
@@ -89,7 +89,9 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		return err
 	}
 
-	svr := grpc.NewServer()
+	unaryPanicInterceptor := grpc.UnaryInterceptor(rpc.UnaryPanicHandler)
+	streamPanicInterceptor := grpc.StreamInterceptor(rpc.StreamPanicHandler)
+	svr := grpc.NewServer(unaryPanicInterceptor, streamPanicInterceptor)
 	cleanup, err := admin.Register(svr)
 	if err != nil {
 		log.Errorf("Failed to register admin: %v", err)

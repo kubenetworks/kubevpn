@@ -81,6 +81,7 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 	defer packetConn.Close()
 
 	go func() {
+		defer util.HandleCrash()
 		for e := range tunInbound {
 			if e.src.Equal(e.dst) {
 				util.SafeWrite(tunOutbound, e)
@@ -96,6 +97,7 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 	}()
 
 	go func() {
+		defer util.HandleCrash()
 		for {
 			buf := config.LPool.Get().([]byte)[:]
 			n, _, err := packetConn.ReadFrom(buf[:])
@@ -145,6 +147,7 @@ func (d *ClientDevice) SetTunInboundHandler(handler func(tunInbound <-chan *Data
 }
 
 func (d *ClientDevice) readFromTun() {
+	defer util.HandleCrash()
 	for {
 		buf := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(buf[:])
@@ -172,6 +175,7 @@ func (d *ClientDevice) readFromTun() {
 }
 
 func (d *ClientDevice) writeToTun() {
+	defer util.HandleCrash()
 	for e := range d.tunOutbound {
 		_, err := d.tun.Write(e.data[:e.length])
 		config.LPool.Put(e.data[:])

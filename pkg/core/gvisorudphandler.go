@@ -8,6 +8,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 type gvisorUDPHandler struct{}
@@ -102,6 +103,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	log.Debugf("[TUN-UDP] %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 	errChan := make(chan error, 2)
 	go func() {
+		defer util.HandleCrash()
 		buf := config.LPool.Get().([]byte)[:]
 		defer config.LPool.Put(buf[:])
 
@@ -146,6 +148,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	}()
 
 	go func() {
+		defer util.HandleCrash()
 		buf := config.LPool.Get().([]byte)[:]
 		defer config.LPool.Put(buf[:])
 
