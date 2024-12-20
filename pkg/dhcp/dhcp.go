@@ -40,6 +40,8 @@ func NewDHCPManager(client corev1.ConfigMapInterface, namespace string) *Manager
 // InitDHCP
 // TODO optimize dhcp, using mac address, ip and deadline as unit
 func (m *Manager) InitDHCP(ctx context.Context) error {
+	net.DefaultResolver.PreferGo = false
+
 	cm, err := m.client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get configmap %s, err: %v", config.ConfigMapPodTrafficManager, err)
