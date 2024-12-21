@@ -1,6 +1,7 @@
 package cmds
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -94,14 +95,14 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			for _, config := range configs {
-				c := exec.Command(name, config.Flags...)
+			for _, conf := range configs {
+				c := exec.Command(name, conf.Flags...)
 				c.Stdout = os.Stdout
 				c.Stdin = os.Stdin
 				c.Stderr = os.Stderr
-				fmt.Printf("Alias: %s\n", config.Name)
-				if config.Description != "" {
-					fmt.Printf("Description: %s\n", config.Description)
+				fmt.Printf("Name: %s\n", conf.Name)
+				if conf.Description != "" {
+					fmt.Printf("Description: %s\n", conf.Description)
 				}
 				fmt.Printf("Command: %v\n", c.Args)
 				err = c.Run()
@@ -149,7 +150,7 @@ func ParseAndGet(localFile, remoteAddr string, aliasName string) ([]Config, erro
 				names = append(names, c.Name)
 			}
 		}
-		err = fmt.Errorf("failed to find any aliases for the name: '%s', avaliable: [%s], please verify your configuration file %s", aliasName, strings.Join(names, ", "), path)
+		err = errors.New(fmt.Sprintf("Can't find any alias for the name: '%s', avaliable: \n[\"%s\"]\nPlease check config file: %s", aliasName, strings.Join(names, "\", \""), path))
 		return nil, err
 	}
 	return configs, nil
