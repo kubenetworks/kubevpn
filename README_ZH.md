@@ -795,3 +795,7 @@ Clearing DNS settings
 - 添加断点给文件 `pkg/daemon/action/connect.go:21`
 - 新开个终端，执行命令 `make kubevpn`
 - 然后运行命令 `./bin/kubevpn connect` 这样将会击中断点
+
+### 支持者
+
+[![JetBrains logo.](https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg)](https://jb.gg/OpenSourceSupport)

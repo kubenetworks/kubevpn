@@ -882,3 +882,7 @@ If you want to debug this project on local PC. Please follow the steps bellow:
 - Add breakpoint to file `pkg/daemon/action/connect.go:21`.
 - Open another terminal run `make kubevpn`.
 - Then run `./bin/kubevpn connect` and it will hit breakpoint.
+
+### Supported by
+
+[![JetBrains logo.](https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg)](https://jb.gg/OpenSourceSupport)
