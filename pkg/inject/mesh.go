@@ -31,13 +31,7 @@ import (
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
 
 // InjectVPNAndEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
-func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workload string, c util.PodRouteConfig, headers map[string]string, portMaps []string) (err error) {
-	var object *runtimeresource.Info
-	object, err = util.GetUnstructuredObject(f, namespace, workload)
-	if err != nil {
-		return err
-	}
-
+func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workload string, object *runtimeresource.Info, c util.PodRouteConfig, headers map[string]string, portMaps []string) (err error) {
 	u := object.Object.(*unstructured.Unstructured)
 	var templateSpec *v1.PodTemplateSpec
 	var path []string
@@ -112,7 +106,7 @@ func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset 
 	}
 	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 	if err != nil {
-		log.Errorf("Failed to patch resource: %s %s, err: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
+		log.Errorf("Failed to patch resource: %s %s, err: %v", object.Mapping.Resource.Resource, object.Name, err)
 		return err
 	}
 	log.Infof("Patching workload %s", workload)
@@ -120,13 +114,7 @@ func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset 
 	return err
 }
 
-func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, namespace, workload string, localTunIPv4 string) error {
-	object, err := util.GetUnstructuredObject(factory, namespace, workload)
-	if err != nil {
-		log.Errorf("Failed to get unstructured object: %v", err)
-		return err
-	}
-
+func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, object *runtimeresource.Info, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) error {
 	u := object.Object.(*unstructured.Unstructured)
 	templateSpec, depth, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
@@ -135,9 +123,9 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 	}
 
 	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
-
+	workload := util.ConvertUidToWorkload(nodeID)
 	var empty, found bool
-	empty, found, err = removeEnvoyConfig(mapInterface, nodeID, localTunIPv4)
+	empty, found, err = removeEnvoyConfig(mapInterface, nodeID, isMeFunc)
 	if err != nil {
 		log.Errorf("Failed to remove envoy config: %v", err)
 		return err
@@ -178,7 +166,7 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 		}
 		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 		if err != nil {
-			log.Errorf("Failed to patch resource: %s %s: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
+			log.Errorf("Failed to patch resource: %s %s: %v", object.Mapping.Resource.Resource, object.Name, err)
 			return err
 		}
 	}
@@ -229,13 +217,21 @@ func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []controlplan
 		})
 	}
 
+	var isFargateMode bool
+	for _, containerPort := range v[index].Ports {
+		if containerPort.EnvoyListenerPort != 0 {
+			isFargateMode = true
+		}
+	}
 	// 2) if already proxy deployment/xxx with header foo=bar. also want to add env=dev
-	for j, rule := range v[index].Rules {
-		if rule.LocalTunIPv4 == tunIP.LocalTunIPv4 &&
-			rule.LocalTunIPv6 == tunIP.LocalTunIPv6 {
-			v[index].Rules[j].Headers = util.Merge[string, string](v[index].Rules[j].Headers, headers)
-			v[index].Rules[j].PortMap = util.Merge[int32, string](v[index].Rules[j].PortMap, portmap)
-			return v
+	if !isFargateMode {
+		for j, rule := range v[index].Rules {
+			if rule.LocalTunIPv4 == tunIP.LocalTunIPv4 &&
+				rule.LocalTunIPv6 == tunIP.LocalTunIPv6 {
+				v[index].Rules[j].Headers = util.Merge[string, string](v[index].Rules[j].Headers, headers)
+				v[index].Rules[j].PortMap = util.Merge[int32, string](v[index].Rules[j].PortMap, portmap)
+				return v
+			}
 		}
 	}
 
@@ -262,7 +258,7 @@ func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []controlplan
 	return v
 }
 
-func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, localTunIPv4 string) (empty bool, found bool, err error) {
+func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) (empty bool, found bool, err error) {
 	configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return true, false, nil
@@ -280,8 +276,14 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, local
 	}
 	for _, virtual := range v {
 		if nodeID == virtual.Uid {
+			var isFargateMode bool
+			for _, port := range virtual.Ports {
+				if port.EnvoyListenerPort != 0 {
+					isFargateMode = true
+				}
+			}
 			for i := 0; i < len(virtual.Rules); i++ {
-				if virtual.Rules[i].LocalTunIPv4 == localTunIPv4 {
+				if isMeFunc(isFargateMode, virtual.Rules[i]) {
 					found = true
 					virtual.Rules = append(virtual.Rules[:i], virtual.Rules[i+1:]...)
 					i--

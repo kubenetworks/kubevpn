@@ -24,12 +24,7 @@ import (
 	util2 "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func InjectVPNSidecar(ctx context.Context, f util.Factory, namespace, workload string, c util2.PodRouteConfig) error {
-	object, err := util2.GetUnstructuredObject(f, namespace, workload)
-	if err != nil {
-		return err
-	}
-
+func InjectVPNSidecar(ctx context.Context, f util.Factory, namespace, workload string, object *resource.Info, c util2.PodRouteConfig) error {
 	u := object.Object.(*unstructured.Unstructured)
 
 	podTempSpec, path, err := util2.GetPodTemplateSpecPath(u)

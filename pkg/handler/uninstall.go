@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"strings"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
@@ -16,6 +15,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // Uninstall
@@ -101,11 +101,21 @@ func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
 		}
 
 		// deployments.apps.ry-server --> deployments.apps/ry-server
-		lastIndex := strings.LastIndex(virtual.Uid, ".")
-		uid := virtual.Uid[:lastIndex] + "/" + virtual.Uid[lastIndex+1:]
-		err = inject.UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, uid, v4)
+		workload := util.ConvertUidToWorkload(virtual.Uid)
+		object, err := util.GetUnstructuredObject(c.factory, c.Namespace, workload)
 		if err != nil {
-			log.Errorf("Failed to leave workload %s: %v", uid, err)
+			log.Errorf("Failed to get unstructured object: %v", err)
+			return err
+		}
+		c.PortMapper.Stop(workload)
+		err = inject.UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), object, func(isFargateMode bool, rule *controlplane.Rule) bool {
+			if isFargateMode {
+				return c.PortMapper.IsMe(virtual.Uid, rule.Headers)
+			}
+			return rule.LocalTunIPv4 == v4
+		})
+		if err != nil {
+			log.Errorf("Failed to leave workload %s: %v", workload, err)
 			continue
 		}
 	}

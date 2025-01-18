@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -50,10 +51,9 @@ type ContainerPort struct {
 	Name string `json:"name,omitempty"`
 	// Number of port to expose on the host.
 	// If specified, this must be a valid port number, 0 < x < 65536.
-	// If HostNetwork is specified, this must match ContainerPort.
-	// Most containers do not need this.
+	// envoy listener port, if is not 0, means fargate mode
 	// +optional
-	InnerPort int32 `json:"hostPort,omitempty"`
+	EnvoyListenerPort int32 `json:"envoyListenerPort,omitempty"`
 	// Number of port to expose on the pod's IP address.
 	// This must be a valid port number, 0 < x < 65536.
 	ContainerPort int32 `json:"containerPort"`
@@ -68,10 +68,10 @@ func ConvertContainerPort(ports ...corev1.ContainerPort) []ContainerPort {
 	var result []ContainerPort
 	for _, port := range ports {
 		result = append(result, ContainerPort{
-			Name:          port.Name,
-			InnerPort:     0,
-			ContainerPort: port.ContainerPort,
-			Protocol:      port.Protocol,
+			Name:              port.Name,
+			EnvoyListenerPort: 0,
+			ContainerPort:     port.ContainerPort,
+			Protocol:          port.Protocol,
 		})
 	}
 	return result
@@ -81,12 +81,12 @@ type Rule struct {
 	Headers      map[string]string
 	LocalTunIPv4 string
 	LocalTunIPv6 string
-	// for no privileged mode, don't have cap NET_ADMIN and privileged: true. so we can not use OSI layer 3 proxy
-	// port -> port1:port2
-	// port1 for envoy forward to localhost:port1
-	// port2 for local pc listen localhost:port2
-	// use ssh reverse tunnel, envoy rule endpoint localhost:port1 will forward to local pc localhost:port2
-	// port1 is required and port2 is optional
+	// for no privileged mode (AWS Fargate mode), don't have cap NET_ADMIN and privileged: true. so we can not use OSI layer 3 proxy
+	// containerPort -> envoyRulePort:localPort
+	// envoyRulePort for envoy forward to localhost:envoyRulePort
+	// localPort for local pc listen localhost:localPort
+	// use ssh reverse tunnel, envoy rule endpoint localhost:envoyRulePort will forward to local pc localhost:localPort
+	// localPort is required and envoyRulePort is optional
 	PortMap map[int32]string
 }
 
@@ -98,11 +98,11 @@ func (a *Virtual) To(enableIPv6 bool) (
 ) {
 	//clusters = append(clusters, OriginCluster())
 	for _, port := range a.Ports {
-		isFargateMode := port.InnerPort != 0
+		isFargateMode := port.EnvoyListenerPort != 0
 
-		listenerName := fmt.Sprintf("%s_%v_%s", a.Uid, util.If(isFargateMode, port.InnerPort, port.ContainerPort), port.Protocol)
+		listenerName := fmt.Sprintf("%s_%v_%s", a.Uid, util.If(isFargateMode, port.EnvoyListenerPort, port.ContainerPort), port.Protocol)
 		routeName := listenerName
-		listeners = append(listeners, ToListener(listenerName, routeName, util.If(isFargateMode, port.InnerPort, port.ContainerPort), port.Protocol, isFargateMode))
+		listeners = append(listeners, ToListener(listenerName, routeName, util.If(isFargateMode, port.EnvoyListenerPort, port.ContainerPort), port.Protocol, isFargateMode))
 
 		var rr []*route.Route
 		for _, rule := range a.Rules {
@@ -120,23 +120,32 @@ func (a *Virtual) To(enableIPv6 bool) (
 					logrus.Errorf("fargate mode port should have two pair")
 				}
 			}
-			p, _ := strconv.Atoi(ports)
+			envoyRulePort, _ := strconv.Atoi(ports)
 			for _, ip := range ips {
-				clusterName := fmt.Sprintf("%s_%v", ip, p)
+				clusterName := fmt.Sprintf("%s_%v", ip, envoyRulePort)
 				clusters = append(clusters, ToCluster(clusterName))
-				endpoints = append(endpoints, ToEndPoint(clusterName, ip, int32(p)))
+				endpoints = append(endpoints, ToEndPoint(clusterName, ip, int32(envoyRulePort)))
 				rr = append(rr, ToRoute(clusterName, rule.Headers))
-
-				if isFargateMode {
-					defaultClusterName := fmt.Sprintf("%s_%v", ip, port.ContainerPort)
-					clusters = append(clusters, ToCluster(defaultClusterName))
-					endpoints = append(endpoints, ToEndPoint(defaultClusterName, ip, port.ContainerPort))
-					rr = append(rr, DefaultRouteToCluster(defaultClusterName))
-				}
 			}
 		}
-		// if isFargateMode is true, already add default route, no long to add it
-		if !isFargateMode {
+		// if isFargateMode is true, needs to add default route to container port, because use_original_dst not work
+		if isFargateMode {
+			// all ips should is IPv4 127.0.0.1 and ::1
+			var ips = sets.New[string]()
+			for _, rule := range a.Rules {
+				if enableIPv6 {
+					ips.Insert(rule.LocalTunIPv4, rule.LocalTunIPv6)
+				} else {
+					ips.Insert(rule.LocalTunIPv4)
+				}
+			}
+			for _, ip := range ips.UnsortedList() {
+				defaultClusterName := fmt.Sprintf("%s_%v", ip, port.ContainerPort)
+				clusters = append(clusters, ToCluster(defaultClusterName))
+				endpoints = append(endpoints, ToEndPoint(defaultClusterName, ip, port.ContainerPort))
+				rr = append(rr, DefaultRouteToCluster(defaultClusterName))
+			}
+		} else {
 			rr = append(rr, DefaultRoute())
 			clusters = append(clusters, OriginCluster())
 		}

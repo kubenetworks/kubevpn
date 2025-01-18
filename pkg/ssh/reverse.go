@@ -52,13 +52,16 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 			log.Errorf("Accept on remote service error: %s", err)
 			return err
 		}
-		// Open a (local) connection to localEndpoint whose content will be forwarded so serverEndpoint
-		local, err := net.Dial("tcp", localPort.String())
-		if err != nil {
-			log.Errorf("Dial INTO local service error: %s", err)
-			continue
-		}
-		copyStream(ctx, client, local)
+		go func(client net.Conn) {
+			defer client.Close()
+			// Open a (local) connection to localEndpoint whose content will be forwarded so serverEndpoint
+			local, err := net.Dial("tcp", localPort.String())
+			if err != nil {
+				log.Errorf("Dial INTO local service error: %s", err)
+				return
+			}
+			defer local.Close()
+			copyStream(ctx, client, local)
+		}(client)
 	}
-	return nil
 }

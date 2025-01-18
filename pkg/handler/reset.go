@@ -72,7 +72,7 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, wor
 	}
 	ws := sets.New[string]()
 	for _, workload := range workloads {
-		ws.Insert(ConvertWorkloadToUid(workload))
+		ws.Insert(util.ConvertWorkloadToUid(workload))
 	}
 
 	for i := 0; i < len(v); i++ {
@@ -89,22 +89,6 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, wor
 	cm.Data[config.KeyEnvoy] = string(marshal)
 	_, err = mapInterface.Update(ctx, cm, metav1.UpdateOptions{})
 	return err
-}
-
-// ConvertUidToWorkload
-// deployments.apps.ry-server --> deployments.apps/ry-server
-func ConvertUidToWorkload(uid string) string {
-	lastIndex := strings.LastIndex(uid, ".")
-	workload := uid[:lastIndex] + "/" + uid[lastIndex+1:]
-	return workload
-}
-
-// ConvertWorkloadToUid
-// deployments.apps/ry-server --> deployments.apps.ry-server
-func ConvertWorkloadToUid(workload string) string {
-	lastIndex := strings.LastIndex(workload, "/")
-	uid := workload[:lastIndex] + "." + workload[lastIndex+1:]
-	return uid
 }
 
 func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workload string) error {
@@ -142,7 +126,7 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 	}
 	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 	if err != nil {
-		log.Errorf("Failed to patch resource: %s %s: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
+		log.Errorf("Failed to patch resource: %s %s: %v", object.Mapping.Resource.Resource, object.Name, err)
 		return err
 	}
 

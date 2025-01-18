@@ -23,13 +23,16 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
 	pkgtypes "k8s.io/apimachinery/pkg/types"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/cli-runtime/pkg/resource"
+	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/cmd/set"
@@ -79,6 +82,7 @@ type ConnectOptions struct {
 	extraHost    []dns.Entry
 	once         sync.Once
 	tunName      string
+	PortMapper   *inject.Mapper
 }
 
 func (c *ConnectOptions) Context() context.Context {
@@ -151,15 +155,31 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error)
 			LocalTunIPv4: c.localTunIPv4.IP.String(),
 			LocalTunIPv6: c.localTunIPv6.IP.String(),
 		}
+		var object *runtimeresource.Info
+		object, err = util.GetUnstructuredObject(c.factory, c.Namespace, workload)
+		if err != nil {
+			return err
+		}
+		var templateSpec *v1.PodTemplateSpec
+		templateSpec, _, err = util.GetPodTemplateSpecPath(object.Object.(*unstructured.Unstructured))
+		if err != nil {
+			return
+		}
 		// todo consider to use ephemeral container
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
 		if c.Engine == config.EngineGvisor {
-			err = inject.InjectEnvoySidecar(ctx, c.factory, c.clientset, c.Namespace, workload, c.Headers, c.PortMap)
+			err = inject.InjectEnvoySidecar(ctx, c.factory, c.clientset, c.Namespace, workload, object, c.Headers, c.PortMap)
+			if err != nil {
+				return err
+			}
+			// 3) ssh reverse tunnel eg: "ssh -o StrictHostKeychecking=no -fNR remote:33333:localhost:44444 root@127.0.0.1 -p 2222"
+			c.PortMapper = inject.NewMapper(c.clientset, c.Namespace, labels.SelectorFromSet(templateSpec.Labels).String(), c.Headers, c.Workloads)
+			go c.PortMapper.Run()
 		} else if len(c.Headers) != 0 || len(c.PortMap) != 0 {
-			err = inject.InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers, c.PortMap)
+			err = inject.InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, object, configInfo, c.Headers, c.PortMap)
 		} else {
-			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, configInfo)
+			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, object, configInfo)
 		}
 		if err != nil {
 			log.Errorf("Injecting inbound sidecar for %s failed: %s", workload, err.Error())
@@ -688,7 +708,7 @@ func (c *ConnectOptions) PreCheckResource() error {
 	}
 	var resources []string
 	for _, info := range list {
-		resources = append(resources, fmt.Sprintf("%s/%s", info.Mapping.GroupVersionKind.GroupKind().String(), info.Name))
+		resources = append(resources, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
 	}
 	c.Workloads = resources
 
@@ -696,7 +716,7 @@ func (c *ConnectOptions) PreCheckResource() error {
 	for i, workload := range c.Workloads {
 		ownerReference, err := util.GetTopOwnerReference(c.factory, c.Namespace, workload)
 		if err == nil {
-			c.Workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.GroupVersionKind.GroupKind().String(), ownerReference.Name)
+			c.Workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.Resource.GroupResource().String(), ownerReference.Name)
 		}
 	}
 	// service which associate with pod
@@ -720,7 +740,7 @@ func (c *ConnectOptions) PreCheckResource() error {
 			if err == nil && list != nil && len(list.Items) != 0 {
 				ownerReference, err := util.GetTopOwnerReference(c.factory, c.Namespace, fmt.Sprintf("%s/%s", "pods", list.Items[0].Name))
 				if err == nil {
-					c.Workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.GroupVersionKind.GroupKind().String(), ownerReference.Name)
+					c.Workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.Resource.GroupResource().String(), ownerReference.Name)
 				}
 			} else
 			// if list is empty, means not create pods, just controllers

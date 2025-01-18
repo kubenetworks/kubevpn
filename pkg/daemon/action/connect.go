@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	defaultlog "log"
+	golog "log"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -63,7 +63,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	var transferImage = req.TransferImage
 
-	defaultlog.Default().SetOutput(io.Discard)
+	golog.Default().SetOutput(io.Discard)
 	if transferImage {
 		err := ssh.TransferImage(ctx, sshConf, config.OriginImage, req.Image, out)
 		if err != nil {

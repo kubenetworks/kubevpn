@@ -129,7 +129,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 		log.SetOutput(out)
 	}
 
-	svr.connect.Workloads = req.Workloads
+	svr.connect.Workloads = connect.Workloads
 	svr.connect.Headers = req.Headers
 	svr.connect.PortMap = req.PortMap
 	err = svr.connect.CreateRemoteInboundPod(ctx)

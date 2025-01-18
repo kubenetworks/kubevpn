@@ -3,8 +3,9 @@ package inject
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/netip"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,8 +22,8 @@ import (
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
@@ -32,13 +33,7 @@ import (
 
 // InjectEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
-func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workload string, headers map[string]string, portMaps []string) (err error) {
-	var object *runtimeresource.Info
-	object, err = util.GetUnstructuredObject(f, namespace, workload)
-	if err != nil {
-		return err
-	}
-
+func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workload string, object *runtimeresource.Info, headers map[string]string, portMap []string) (err error) {
 	u := object.Object.(*unstructured.Unstructured)
 	var templateSpec *v1.PodTemplateSpec
 	var path []string
@@ -50,12 +45,12 @@ func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kuber
 	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 
 	c := util.PodRouteConfig{LocalTunIPv4: "127.0.0.1", LocalTunIPv6: netip.IPv6Loopback().String()}
-	ports, portmap, containerPort2EnvoyRulePort := getPort(templateSpec, portMaps)
+	ports, portmap := GetPort(templateSpec, portMap)
 	port := controlplane.ConvertContainerPort(ports...)
 	var containerPort2EnvoyListenerPort = make(map[int32]int32)
 	for i := range len(port) {
 		randomPort, _ := util.GetAvailableTCPPortOrDie()
-		port[i].InnerPort = int32(randomPort)
+		port[i].EnvoyListenerPort = int32(randomPort)
 		containerPort2EnvoyListenerPort[port[i].ContainerPort] = int32(randomPort)
 	}
 	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(namespace), nodeID, c, headers, port, portmap)
@@ -71,7 +66,7 @@ func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kuber
 	}
 	if containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
 		log.Infof("Workload %s/%s has already been injected with sidecar", namespace, workload)
-		//return nil
+		return
 	}
 
 	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, f, namespace)
@@ -92,7 +87,7 @@ func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kuber
 	}
 	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 	if err != nil {
-		log.Errorf("Failed to patch resource: %s %s, err: %v", object.Mapping.GroupVersionKind.GroupKind().String(), object.Name, err)
+		log.Errorf("Failed to patch resource: %s %s, err: %v", object.Mapping.Resource.Resource, object.Name, err)
 		return err
 	}
 	log.Infof("Patching workload %s", workload)
@@ -106,9 +101,7 @@ func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kuber
 	if err != nil {
 		return err
 	}
-	// 3) ssh reverse tunnel eg: "ssh -o StrictHostKeychecking=no -fNR remote:33333:localhost:44444 root@127.0.0.1 -p 2222"
-	err = exposeLocalPortToRemote(ctx, clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), containerPort2EnvoyRulePort, containerPort2EnvoyListenerPort)
-	return err
+	return nil
 }
 
 func ModifyServiceTargetPort(ctx context.Context, clientset *kubernetes.Clientset, namespace string, labels string, m map[int32]int32) error {
@@ -126,7 +119,7 @@ func ModifyServiceTargetPort(ctx context.Context, clientset *kubernetes.Clientse
 	return err
 }
 
-func getPort(templateSpec *v1.PodTemplateSpec, portMaps []string) ([]v1.ContainerPort, map[int32]string, map[int32]int32) {
+func GetPort(templateSpec *v1.PodTemplateSpec, portMaps []string) ([]v1.ContainerPort, map[int32]string) {
 	var ports []v1.ContainerPort
 	for _, container := range templateSpec.Spec.Containers {
 		ports = append(ports, container.Ports...)
@@ -148,21 +141,18 @@ func getPort(templateSpec *v1.PodTemplateSpec, portMaps []string) ([]v1.Containe
 	}
 
 	var portmap = make(map[int32]string)
-	var m = make(map[int32]int32)
 	for _, port := range ports {
 		randomPort, _ := util.GetAvailableTCPPortOrDie()
 		portmap[port.ContainerPort] = fmt.Sprintf("%d:%d", randomPort, port.ContainerPort)
-		m[port.ContainerPort] = int32(randomPort)
 	}
 	for _, portMap := range portMaps {
 		port := util.ParsePort(portMap)
 		if port.ContainerPort != 0 {
 			randomPort, _ := util.GetAvailableTCPPortOrDie()
 			portmap[port.ContainerPort] = fmt.Sprintf("%d:%d", randomPort, port.HostPort)
-			m[port.ContainerPort] = int32(randomPort)
 		}
 	}
-	return ports, portmap, m
+	return ports, portmap
 }
 
 var _ = `function EPHEMERAL_PORT() {
@@ -178,50 +168,172 @@ var _ = `function EPHEMERAL_PORT() {
     done
 }`
 
-func exposeLocalPortToRemote(ctx context.Context, clientset *kubernetes.Clientset, ns string, labels string, containerPort2EnvoyRulePort map[int32]int32, containerPort2EnvoyListenerPort map[int32]int32) error {
-	list, err := util.GetRunningPodList(ctx, clientset, ns, labels)
-	if err != nil {
-		return err
+func NewMapper(clientset *kubernetes.Clientset, ns string, labels string, headers map[string]string, workloads []string) *Mapper {
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	return &Mapper{
+		ns:        ns,
+		headers:   headers,
+		workloads: workloads,
+		labels:    labels,
+		ctx:       ctx,
+		cancel:    cancelFunc,
+		clientset: clientset,
 	}
-	for _, pod := range list {
-		addr, err := netip.ParseAddr(pod.Status.PodIP)
-		if err != nil {
-			return err
-		}
-		go func(addrPort netip.AddrPort) {
-			for containerPort, envoyRulePort := range containerPort2EnvoyRulePort {
-				go func(containerPort, envoyRulePort int32) {
-					for {
-						local := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(containerPort))
-						remote := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(envoyRulePort))
-
-						_ = ssh.ExposeLocalPortToRemote(ctx, addrPort, remote, local)
-						time.Sleep(time.Second * 1)
-					}
-				}(containerPort, envoyRulePort)
-			}
-		}(netip.AddrPortFrom(addr, 2222))
-	}
-	return nil
 }
 
-type Injector struct {
-	Namespace string
-	Headers   map[string]string
-	PortMap   []string
-	Workloads []string
-	Engine    config.Engine
-	Lock      *sync.Mutex
+type Mapper struct {
+	ns        string
+	headers   map[string]string
+	workloads []string
+	labels    string
 
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	clientset  *kubernetes.Clientset
-	restclient *rest.RESTClient
-	config     *rest.Config
-	factory    cmdutil.Factory
-	// needs to give it back to dhcp
-	localTunIPv4 *net.IPNet
-	localTunIPv6 *net.IPNet
-	tunName      string
+	clientset *kubernetes.Clientset
+}
+
+func (m *Mapper) Run() {
+	var podNameCtx = &sync.Map{}
+	defer func() {
+		podNameCtx.Range(func(key, value any) bool {
+			value.(context.CancelFunc)()
+			return true
+		})
+		podNameCtx.Clear()
+	}()
+
+	var lastLocalPort2EnvoyRulePort map[int32]int32
+	for m.ctx.Err() == nil {
+		localPort2EnvoyRulePort, err := m.getLocalPort2EnvoyRulePort()
+		if err != nil {
+			log.Errorf("failed to get local port to envoy rule port: %v", err)
+			time.Sleep(time.Second * 2)
+			continue
+		}
+		if !reflect.DeepEqual(localPort2EnvoyRulePort, lastLocalPort2EnvoyRulePort) {
+			podNameCtx.Range(func(key, value any) bool {
+				value.(context.CancelFunc)()
+				return true
+			})
+			podNameCtx.Clear()
+		}
+		lastLocalPort2EnvoyRulePort = localPort2EnvoyRulePort
+
+		list, err := util.GetRunningPodList(m.ctx, m.clientset, m.ns, m.labels)
+		if err != nil {
+			log.Errorf("failed to list running pod: %v", err)
+			time.Sleep(time.Second * 2)
+			continue
+		}
+		podNames := sets.New[string]()
+		for _, pod := range list {
+			podNames.Insert(pod.Name)
+			if _, ok := podNameCtx.Load(pod.Name); ok {
+				continue
+			}
+
+			containerNames := sets.New[string]()
+			for _, container := range pod.Spec.Containers {
+				containerNames.Insert(container.Name)
+			}
+			if !containerNames.HasAny(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
+				log.Infof("Labels with pod have been reset")
+				return
+			}
+
+			podIP, err := netip.ParseAddr(pod.Status.PodIP)
+			if err != nil {
+				continue
+			}
+
+			ctx, cancel := context.WithCancel(m.ctx)
+			podNameCtx.Store(pod.Name, cancel)
+
+			go func(remoteSSHServer netip.AddrPort, podName string) {
+				for containerPort, envoyRulePort := range localPort2EnvoyRulePort {
+					go func(containerPort, envoyRulePort int32) {
+						local := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(containerPort))
+						remote := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(envoyRulePort))
+						for ctx.Err() == nil {
+							_ = ssh.ExposeLocalPortToRemote(ctx, remoteSSHServer, remote, local)
+							time.Sleep(time.Second * 1)
+						}
+					}(containerPort, envoyRulePort)
+				}
+			}(netip.AddrPortFrom(podIP, 2222), pod.Name)
+		}
+		podNameCtx.Range(func(key, value any) bool {
+			if !podNames.Has(key.(string)) {
+				value.(context.CancelFunc)()
+				podNameCtx.Delete(key.(string))
+			}
+			return true
+		})
+		time.Sleep(time.Second * 2)
+	}
+}
+
+func (m *Mapper) getLocalPort2EnvoyRulePort() (map[int32]int32, error) {
+	configMap, err := m.clientset.CoreV1().ConfigMaps(m.ns).Get(m.ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	var v = make([]*controlplane.Virtual, 0)
+	if str, ok := configMap.Data[config.KeyEnvoy]; ok {
+		if err = yaml.Unmarshal([]byte(str), &v); err != nil {
+			return nil, err
+		}
+	}
+
+	uidList := sets.New[string]()
+	for _, workload := range m.workloads {
+		uidList.Insert(util.ConvertWorkloadToUid(workload))
+	}
+	var localPort2EnvoyRulePort = make(map[int32]int32)
+	for _, virtual := range v {
+		if uidList.Has(virtual.Uid) {
+			for _, rule := range virtual.Rules {
+				if reflect.DeepEqual(m.headers, rule.Headers) {
+					for containerPort, portPair := range rule.PortMap {
+						if strings.Index(portPair, ":") > 0 {
+							split := strings.Split(portPair, ":")
+							if len(split) == 2 {
+								envoyRulePort, _ := strconv.Atoi(split[0])
+								localPort, _ := strconv.Atoi(split[1])
+								localPort2EnvoyRulePort[int32(localPort)] = int32(envoyRulePort)
+							}
+						} else {
+							envoyRulePort, _ := strconv.Atoi(portPair)
+							localPort2EnvoyRulePort[containerPort] = int32(envoyRulePort)
+						}
+					}
+				}
+			}
+		}
+	}
+	return localPort2EnvoyRulePort, nil
+}
+
+func (m *Mapper) Stop(workload string) {
+	if m == nil {
+		return
+	}
+	if !sets.New[string]().Insert(m.workloads...).Has(workload) {
+		return
+	}
+	m.cancel()
+}
+
+func (m *Mapper) IsMe(uid string, headers map[string]string) bool {
+	if m == nil {
+		return false
+	}
+	if !sets.New[string]().Insert(m.workloads...).Has(util.ConvertUidToWorkload(uid)) {
+		return false
+	}
+	if !reflect.DeepEqual(m.headers, headers) {
+		return false
+	}
+	return true
 }

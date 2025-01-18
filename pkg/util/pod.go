@@ -22,7 +22,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
@@ -198,16 +197,7 @@ func GetTopOwnerReference(factory util.Factory, ns, workload string) (*resource.
 		if ownerReference == nil {
 			return object, nil
 		}
-		// apiVersion format is Group/Version is like: apps/v1, apps.kruise.io/v1beta1
-		groupVersion, err := schema.ParseGroupVersion(ownerReference.APIVersion)
-		if err != nil {
-			return object, nil
-		}
-		gk := v1.GroupKind{
-			Group: groupVersion.Group,
-			Kind:  ownerReference.Kind,
-		}
-		workload = fmt.Sprintf("%s/%s", gk.String(), ownerReference.Name)
+		workload = fmt.Sprintf("%s/%s", ownerReference.Kind, ownerReference.Name)
 	}
 }
 
@@ -221,7 +211,7 @@ func GetTopOwnerReferenceBySelector(factory util.Factory, ns, selector string) (
 	for _, info := range object {
 		ownerReference, err := GetTopOwnerReference(factory, ns, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
 		if err == nil && ownerReference.Mapping.Resource.Resource != "services" {
-			set.Insert(fmt.Sprintf("%s/%s", ownerReference.Mapping.GroupVersionKind.GroupKind().String(), ownerReference.Name))
+			set.Insert(fmt.Sprintf("%s/%s", ownerReference.Mapping.Resource.GroupResource().String(), ownerReference.Name))
 		}
 	}
 	return set, nil

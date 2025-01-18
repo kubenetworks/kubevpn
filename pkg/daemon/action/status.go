@@ -97,8 +97,13 @@ func gen(connect *handler.ConnectOptions, clone *handler.CloneOptions) ([]*rpc.P
 		v4, v6 := connect.GetLocalTunIP()
 		for _, virtual := range v {
 			// deployments.apps.ry-server --> deployments.apps/ry-server
-			lastIndex := strings.LastIndex(virtual.Uid, ".")
-			virtual.Uid = virtual.Uid[:lastIndex] + "/" + virtual.Uid[lastIndex+1:]
+			virtual.Uid = util.ConvertUidToWorkload(virtual.Uid)
+			var isFargateMode bool
+			for _, port := range virtual.Ports {
+				if port.EnvoyListenerPort != 0 {
+					isFargateMode = true
+				}
+			}
 
 			var proxyRule []*rpc.ProxyRule
 			for _, rule := range virtual.Rules {
@@ -106,7 +111,7 @@ func gen(connect *handler.ConnectOptions, clone *handler.CloneOptions) ([]*rpc.P
 					Headers:       rule.Headers,
 					LocalTunIPv4:  rule.LocalTunIPv4,
 					LocalTunIPv6:  rule.LocalTunIPv6,
-					CurrentDevice: v4 == rule.LocalTunIPv4 && v6 == rule.LocalTunIPv6,
+					CurrentDevice: util.If(isFargateMode, connect.PortMapper.IsMe(util.ConvertWorkloadToUid(virtual.Uid), rule.Headers), v4 == rule.LocalTunIPv4 && v6 == rule.LocalTunIPv6),
 					PortMap:       useSecondPort(rule.PortMap),
 				})
 			}
