@@ -23,13 +23,16 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
 	pkgtypes "k8s.io/apimachinery/pkg/types"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/cli-runtime/pkg/resource"
+	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/cmd/set"
@@ -75,10 +78,11 @@ type ConnectOptions struct {
 	rollbackFuncList []func() error
 	dnsConfig        *dns.Config
 
-	apiServerIPs []net.IP
-	extraHost    []dns.Entry
-	once         sync.Once
-	tunName      string
+	apiServerIPs   []net.IP
+	extraHost      []dns.Entry
+	once           sync.Once
+	tunName        string
+	proxyWorkloads ProxyList
 }
 
 func (c *ConnectOptions) Context() context.Context {
@@ -140,29 +144,50 @@ func (c *ConnectOptions) GetIPFromContext(ctx context.Context) error {
 	return nil
 }
 
-func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error) {
+func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, workloads []string, headers map[string]string, portMap []string) (err error) {
 	if c.localTunIPv4 == nil || c.localTunIPv6 == nil {
 		return fmt.Errorf("local tun IP is invalid")
 	}
+	if c.proxyWorkloads == nil {
+		c.proxyWorkloads = make(ProxyList, 0)
+	}
 
-	for _, workload := range c.Workloads {
+	for _, workload := range workloads {
 		log.Infof("Injecting inbound sidecar for %s", workload)
 		configInfo := util.PodRouteConfig{
 			LocalTunIPv4: c.localTunIPv4.IP.String(),
 			LocalTunIPv6: c.localTunIPv6.IP.String(),
 		}
+		var object *runtimeresource.Info
+		object, err = util.GetUnstructuredObject(c.factory, c.Namespace, workload)
+		if err != nil {
+			return err
+		}
+		var templateSpec *v1.PodTemplateSpec
+		templateSpec, _, err = util.GetPodTemplateSpecPath(object.Object.(*unstructured.Unstructured))
+		if err != nil {
+			return
+		}
 		// todo consider to use ephemeral container
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
-		if len(c.Headers) != 0 || len(c.PortMap) != 0 {
-			err = inject.InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers, c.PortMap)
+		if c.Engine == config.EngineGvisor {
+			err = inject.InjectEnvoySidecar(ctx, c.factory, c.clientset, c.Namespace, workload, object, headers, portMap)
+		} else if len(headers) != 0 || len(portMap) != 0 {
+			err = inject.InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, object, configInfo, headers, portMap)
 		} else {
-			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, configInfo)
+			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, object, configInfo)
 		}
 		if err != nil {
 			log.Errorf("Injecting inbound sidecar for %s failed: %s", workload, err.Error())
 			return err
 		}
+		c.proxyWorkloads.Add(&Proxy{
+			headers:    headers,
+			portMap:    portMap,
+			workload:   workload,
+			portMapper: util.If(c.Engine == config.EngineGvisor, NewMapper(c.clientset, c.Namespace, labels.SelectorFromSet(templateSpec.Labels).String(), headers, workload), nil),
+		})
 	}
 	return
 }
@@ -181,7 +206,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		log.Errorf("Failed to get network CIDR: %v", err)
 		return
 	}
-	if err = createOutboundPod(c.ctx, c.factory, c.clientset, c.Namespace); err != nil {
+	if err = createOutboundPod(c.ctx, c.factory, c.clientset, c.Namespace, c.Engine == config.EngineGvisor); err != nil {
 		return
 	}
 	if err = c.upgradeDeploy(c.ctx); err != nil {
@@ -663,82 +688,6 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory) (err error) {
 	return
 }
 
-// PreCheckResource transform user parameter to normal, example:
-// pod: productpage-7667dfcddb-cbsn5
-// replicast: productpage-7667dfcddb
-// deployment: productpage
-// transform:
-// pod/productpage-7667dfcddb-cbsn5 --> deployment/productpage
-// service/productpage --> deployment/productpage
-// replicaset/productpage-7667dfcddb --> deployment/productpage
-//
-// pods without controller
-// pod/productpage-without-controller --> pod/productpage-without-controller
-// service/productpage-without-pod --> controller/controllerName
-func (c *ConnectOptions) PreCheckResource() error {
-	if len(c.Workloads) == 0 {
-		return nil
-	}
-
-	list, err := util.GetUnstructuredObjectList(c.factory, c.Namespace, c.Workloads)
-	if err != nil {
-		return err
-	}
-	var resources []string
-	for _, info := range list {
-		resources = append(resources, fmt.Sprintf("%s/%s", info.Mapping.GroupVersionKind.GroupKind().String(), info.Name))
-	}
-	c.Workloads = resources
-
-	// normal workloads, like pod with controller, deployments, statefulset, replicaset etc...
-	for i, workload := range c.Workloads {
-		ownerReference, err := util.GetTopOwnerReference(c.factory, c.Namespace, workload)
-		if err == nil {
-			c.Workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.GroupVersionKind.GroupKind().String(), ownerReference.Name)
-		}
-	}
-	// service which associate with pod
-	for i, workload := range c.Workloads {
-		object, err := util.GetUnstructuredObject(c.factory, c.Namespace, workload)
-		if err != nil {
-			return err
-		}
-		if object.Mapping.Resource.Resource != "services" {
-			continue
-		}
-		get, err := c.clientset.CoreV1().Services(c.Namespace).Get(context.Background(), object.Name, metav1.GetOptions{})
-		if err != nil {
-			continue
-		}
-		if ns, selector, err := polymorphichelpers.SelectorsForObject(get); err == nil {
-			list, err := c.clientset.CoreV1().Pods(ns).List(context.Background(), metav1.ListOptions{
-				LabelSelector: selector.String(),
-			})
-			// if pod is not empty, using pods to find top controller
-			if err == nil && list != nil && len(list.Items) != 0 {
-				ownerReference, err := util.GetTopOwnerReference(c.factory, c.Namespace, fmt.Sprintf("%s/%s", "pods", list.Items[0].Name))
-				if err == nil {
-					c.Workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.GroupVersionKind.GroupKind().String(), ownerReference.Name)
-				}
-			} else
-			// if list is empty, means not create pods, just controllers
-			{
-				controller, err := util.GetTopOwnerReferenceBySelector(c.factory, c.Namespace, selector.String())
-				if err == nil {
-					if len(controller) > 0 {
-						c.Workloads[i] = controller.UnsortedList()[0]
-					}
-				}
-				// only a single service, not support it yet
-				if controller.Len() == 0 {
-					return fmt.Errorf("not support resources: %s", workload)
-				}
-			}
-		}
-	}
-	return nil
-}
-
 func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error) {
 	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
 	return util.GetRunningPodList(ctx, c.clientset, c.Namespace, label)
@@ -1032,4 +981,20 @@ func (c *ConnectOptions) AddRolloutFunc(f func() error) {
 
 func (c *ConnectOptions) getRolloutFunc() []func() error {
 	return c.rollbackFuncList
+}
+
+func (c *ConnectOptions) LeavePortMap(workload string) {
+	c.proxyWorkloads.Remove(workload)
+}
+
+func (c *ConnectOptions) IsMe(uid string, headers map[string]string) bool {
+	return c.proxyWorkloads.IsMe(uid, headers)
+}
+
+func (c *ConnectOptions) ProxyResources() []string {
+	var resources []string
+	for _, workload := range c.proxyWorkloads {
+		resources = append(resources, workload.workload)
+	}
+	return resources
 }

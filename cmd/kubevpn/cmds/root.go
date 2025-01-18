@@ -80,6 +80,7 @@ func NewKubeVPNCommand() *cobra.Command {
 				CmdLogs(factory),
 				CmdCp(factory),
 				CmdReset(factory),
+				CmdUninstall(factory),
 				CmdQuit(factory),
 			},
 		},

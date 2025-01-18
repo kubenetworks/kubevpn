@@ -58,7 +58,7 @@ func (c *ConnectOptions) Cleanup() {
 			_ = c.clientset.CoreV1().Pods(c.Namespace).Delete(ctx, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
 		}
 		// leave proxy resources
-		err := c.LeaveProxyResources(ctx)
+		err := c.LeaveAllProxyResources(ctx)
 		if err != nil {
 			log.Errorf("Leave proxy resources error: %v", err)
 		}

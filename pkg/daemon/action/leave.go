@@ -8,6 +8,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -32,12 +33,23 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 	maps := svr.connect.GetClientset().CoreV1().ConfigMaps(namespace)
 	v4, _ := svr.connect.GetLocalTunIP()
 	for _, workload := range req.GetWorkloads() {
+		object, err := util.GetUnstructuredObject(factory, namespace, workload)
+		if err != nil {
+			log.Errorf("Failed to get unstructured object: %v", err)
+			return err
+		}
 		// add rollback func to remove envoy config
-		err := inject.UnPatchContainer(factory, maps, namespace, workload, v4)
+		err = inject.UnPatchContainer(factory, maps, object, func(isFargateMode bool, rule *controlplane.Rule) bool {
+			if isFargateMode {
+				return svr.connect.IsMe(util.ConvertWorkloadToUid(workload), rule.Headers)
+			}
+			return rule.LocalTunIPv4 == v4
+		})
 		if err != nil {
 			log.Errorf("Leaving workload %s failed: %v", workload, err)
 			continue
 		}
+		svr.connect.LeavePortMap(workload)
 		err = util.RolloutStatus(resp.Context(), factory, namespace, workload, time.Minute*60)
 	}
 	return nil

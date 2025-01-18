@@ -3,7 +3,6 @@ package action
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -12,6 +11,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (svr *Server) List(ctx context.Context, req *rpc.ListRequest) (*rpc.ListResponse, error) {
@@ -30,9 +30,8 @@ func (svr *Server) List(ctx context.Context, req *rpc.ListRequest) (*rpc.ListRes
 		}
 	}
 	for _, virtual := range v {
-		// deployments.apps.ry-server --> deployments.apps/ry-server
-		lastIndex := strings.LastIndex(virtual.Uid, ".")
-		virtual.Uid = virtual.Uid[:lastIndex] + "/" + virtual.Uid[lastIndex+1:]
+		// deployments.apps.productpage --> deployments.apps/productpage
+		virtual.Uid = util.ConvertUidToWorkload(virtual.Uid)
 	}
 	bytes, err := k8syaml.Marshal(v)
 	if err != nil {

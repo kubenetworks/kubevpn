@@ -64,14 +64,15 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 	if err != nil {
 		return err
 	}
-	err = connect.PreCheckResource()
+	var workloads []string
+	workloads, err = util.NormalizedResource(ctx, connect.GetFactory(), connect.GetClientset(), connect.Namespace, connect.Workloads)
 	if err != nil {
 		return err
 	}
 
 	defer func() {
 		if e != nil && svr.connect != nil {
-			_ = svr.connect.LeaveProxyResources(context.Background())
+			_ = svr.connect.LeaveAllProxyResources(context.Background())
 		}
 	}()
 
@@ -80,12 +81,12 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 		return fmt.Errorf("daemon is not avaliable")
 	}
 	if svr.connect != nil {
-		var isSameCluster bool
-		isSameCluster, err = util.IsSameCluster(
+		isSameCluster, _ := util.IsSameCluster(
+			ctx,
 			svr.connect.GetClientset().CoreV1().ConfigMaps(svr.connect.Namespace), svr.connect.Namespace,
 			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
 		)
-		if err == nil && isSameCluster && svr.connect.Equal(connect) {
+		if isSameCluster {
 			// same cluster, do nothing
 			log.Infof("Connected to cluster")
 		} else {
@@ -129,10 +130,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 		log.SetOutput(out)
 	}
 
-	svr.connect.Workloads = req.Workloads
-	svr.connect.Headers = req.Headers
-	svr.connect.PortMap = req.PortMap
-	err = svr.connect.CreateRemoteInboundPod(ctx)
+	err = svr.connect.CreateRemoteInboundPod(ctx, workloads, req.Headers, req.PortMap)
 	if err != nil {
 		log.Errorf("Failed to inject inbound sidecar: %v", err)
 		return err

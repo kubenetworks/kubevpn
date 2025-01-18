@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	defaultlog "log"
+	golog "log"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -63,7 +63,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	var transferImage = req.TransferImage
 
-	defaultlog.Default().SetOutput(io.Discard)
+	golog.Default().SetOutput(io.Discard)
 	if transferImage {
 		err := ssh.TransferImage(ctx, sshConf, config.OriginImage, req.Image, out)
 		if err != nil {
@@ -96,10 +96,6 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		return err
 	}
 	err = svr.connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
-	if err != nil {
-		return err
-	}
-	err = svr.connect.PreCheckResource()
 	if err != nil {
 		return err
 	}
@@ -163,18 +159,14 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	if err != nil {
 		return err
 	}
-	err = connect.PreCheckResource()
-	if err != nil {
-		return err
-	}
 
 	if svr.connect != nil {
-		var isSameCluster bool
-		isSameCluster, err = util.IsSameCluster(
+		isSameCluster, _ := util.IsSameCluster(
+			sshCtx,
 			svr.connect.GetClientset().CoreV1().ConfigMaps(svr.connect.Namespace), svr.connect.Namespace,
 			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
 		)
-		if err == nil && isSameCluster && svr.connect.Equal(connect) {
+		if isSameCluster {
 			// same cluster, do nothing
 			log.Infof("Connected to cluster")
 			return nil

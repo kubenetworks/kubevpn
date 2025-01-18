@@ -116,6 +116,9 @@ github.com/Microsoft/hcsshim/osversion
 github.com/alexbrainman/sspi
 github.com/alexbrainman/sspi/internal/common
 github.com/alexbrainman/sspi/negotiate
+# github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be
+## explicit; go 1.13
+github.com/anmitsu/go-shlex
 # github.com/antonmedv/expr v1.15.5
 ## explicit; go 1.18
 github.com/antonmedv/expr
@@ -508,6 +511,7 @@ github.com/envoyproxy/go-control-plane/envoy/config/listener/v3
 github.com/envoyproxy/go-control-plane/envoy/config/route/v3
 github.com/envoyproxy/go-control-plane/envoy/config/trace/v3
 github.com/envoyproxy/go-control-plane/envoy/data/accesslog/v3
+github.com/envoyproxy/go-control-plane/envoy/extensions/access_loggers/file/v3
 github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/cors/v3
 github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/grpc_web/v3
 github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/router/v3
@@ -578,6 +582,9 @@ github.com/fxamacker/cbor/v2
 # github.com/gaissmai/bart v0.11.1
 ## explicit; go 1.21
 github.com/gaissmai/bart
+# github.com/gliderlabs/ssh v0.3.8
+## explicit; go 1.17
+github.com/gliderlabs/ssh
 # github.com/go-asn1-ber/asn1-ber v1.5.7
 ## explicit; go 1.13
 github.com/go-asn1-ber/asn1-ber
@@ -1372,7 +1379,7 @@ go4.org/mem
 # go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
 ## explicit; go 1.18
 go4.org/netipx
-# golang.org/x/crypto v0.28.0
+# golang.org/x/crypto v0.32.0
 ## explicit; go 1.20
 golang.org/x/crypto/argon2
 golang.org/x/crypto/bcrypt
@@ -1447,11 +1454,11 @@ golang.org/x/oauth2/google/internal/stsexchange
 golang.org/x/oauth2/internal
 golang.org/x/oauth2/jws
 golang.org/x/oauth2/jwt
-# golang.org/x/sync v0.8.0
+# golang.org/x/sync v0.10.0
 ## explicit; go 1.18
 golang.org/x/sync/errgroup
 golang.org/x/sync/semaphore
-# golang.org/x/sys v0.26.0
+# golang.org/x/sys v0.29.0
 ## explicit; go 1.18
 golang.org/x/sys/cpu
 golang.org/x/sys/plan9
@@ -1460,10 +1467,10 @@ golang.org/x/sys/windows
 golang.org/x/sys/windows/registry
 golang.org/x/sys/windows/svc
 golang.org/x/sys/windows/svc/mgr
-# golang.org/x/term v0.25.0
+# golang.org/x/term v0.28.0
 ## explicit; go 1.18
 golang.org/x/term
-# golang.org/x/text v0.19.0
+# golang.org/x/text v0.21.0
 ## explicit; go 1.18
 golang.org/x/text/encoding
 golang.org/x/text/encoding/internal

@@ -20,15 +20,11 @@ import (
 	"k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/utils/pointer"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	util2 "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func InjectVPNSidecar(ctx1 context.Context, factory util.Factory, namespace, workload string, c util2.PodRouteConfig) error {
-	object, err := util2.GetUnstructuredObject(factory, namespace, workload)
-	if err != nil {
-		return err
-	}
-
+func InjectVPNSidecar(ctx context.Context, f util.Factory, namespace, workload string, object *resource.Info, c util2.PodRouteConfig) error {
 	u := object.Object.(*unstructured.Unstructured)
 
 	podTempSpec, path, err := util2.GetPodTemplateSpecPath(u)
@@ -36,7 +32,7 @@ func InjectVPNSidecar(ctx1 context.Context, factory util.Factory, namespace, wor
 		return err
 	}
 
-	clientset, err := factory.KubernetesClientSet()
+	clientset, err := f.KubernetesClientSet()
 	if err != nil {
 		return err
 	}
@@ -45,11 +41,11 @@ func InjectVPNSidecar(ctx1 context.Context, factory util.Factory, namespace, wor
 	for _, container := range podTempSpec.Spec.Containers {
 		ports = append(ports, container.Ports...)
 	}
-	var portmap = make(map[int32]int32)
+	var portmap = make(map[int32]string)
 	for _, port := range ports {
-		portmap[port.ContainerPort] = port.ContainerPort
+		portmap[port.ContainerPort] = fmt.Sprintf("%d", port.ContainerPort)
 	}
-	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(namespace), nodeID, c, nil, ports, portmap)
+	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(namespace), nodeID, c, nil, controlplane.ConvertContainerPort(ports...), portmap)
 	if err != nil {
 		log.Errorf("Failed to add envoy config: %v", err)
 		return err
@@ -63,7 +59,7 @@ func InjectVPNSidecar(ctx1 context.Context, factory util.Factory, namespace, wor
 		log.Infof("Workload %s/%s is not controlled by any controller", namespace, workload)
 		p := &v1.Pod{ObjectMeta: podTempSpec.ObjectMeta, Spec: podTempSpec.Spec}
 		CleanupUselessInfo(p)
-		if err = CreateAfterDeletePod(factory, p, helper); err != nil {
+		if err = CreateAfterDeletePod(f, p, helper); err != nil {
 			return err
 		}
 	} else
@@ -84,7 +80,7 @@ func InjectVPNSidecar(ctx1 context.Context, factory util.Factory, namespace, wor
 			return err
 		}
 	}
-	err = util2.RolloutStatus(ctx1, factory, namespace, workload, time.Minute*60)
+	err = util2.RolloutStatus(ctx, f, namespace, workload, time.Minute*60)
 	return err
 }
 

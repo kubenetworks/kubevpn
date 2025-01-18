@@ -358,3 +358,23 @@ func move(src, dst string) (e error) {
 	}
 	return os.Remove(src)
 }
+
+func If[T any](b bool, t1, t2 T) T {
+	if b {
+		return t1
+	}
+	return t2
+}
+
+// ConvertUidToWorkload
+// deployments.apps.productpage --> deployments.apps/productpage
+func ConvertUidToWorkload(uid string) string {
+	index := strings.LastIndex(uid, ".")
+	return uid[:index] + "/" + uid[index+1:]
+}
+
+// ConvertWorkloadToUid
+// deployments.apps/productpage --> deployments.apps.productpage
+func ConvertWorkloadToUid(workload string) string {
+	return strings.ReplaceAll(workload, "/", ".")
+}

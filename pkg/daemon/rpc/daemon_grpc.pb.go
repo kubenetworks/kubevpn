@@ -38,6 +38,7 @@ const (
 	Daemon_Status_FullMethodName       = "/rpc.Daemon/Status"
 	Daemon_Version_FullMethodName      = "/rpc.Daemon/Version"
 	Daemon_Reset_FullMethodName        = "/rpc.Daemon/Reset"
+	Daemon_Uninstall_FullMethodName    = "/rpc.Daemon/Uninstall"
 	Daemon_Quit_FullMethodName         = "/rpc.Daemon/Quit"
 	Daemon_Identify_FullMethodName     = "/rpc.Daemon/Identify"
 )
@@ -65,6 +66,7 @@ type DaemonClient interface {
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
 	Version(ctx context.Context, in *VersionRequest, opts ...grpc.CallOption) (*VersionResponse, error)
 	Reset(ctx context.Context, in *ResetRequest, opts ...grpc.CallOption) (Daemon_ResetClient, error)
+	Uninstall(ctx context.Context, in *UninstallRequest, opts ...grpc.CallOption) (Daemon_UninstallClient, error)
 	Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error)
 	Identify(ctx context.Context, in *IdentifyRequest, opts ...grpc.CallOption) (*IdentifyResponse, error)
 }
@@ -477,8 +479,40 @@ func (x *daemonResetClient) Recv() (*ResetResponse, error) {
 	return m, nil
 }
 
+func (c *daemonClient) Uninstall(ctx context.Context, in *UninstallRequest, opts ...grpc.CallOption) (Daemon_UninstallClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[10], Daemon_Uninstall_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &daemonUninstallClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Daemon_UninstallClient interface {
+	Recv() (*UninstallResponse, error)
+	grpc.ClientStream
+}
+
+type daemonUninstallClient struct {
+	grpc.ClientStream
+}
+
+func (x *daemonUninstallClient) Recv() (*UninstallResponse, error) {
+	m := new(UninstallResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *daemonClient) Quit(ctx context.Context, in *QuitRequest, opts ...grpc.CallOption) (Daemon_QuitClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[10], Daemon_Quit_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[11], Daemon_Quit_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -541,6 +575,7 @@ type DaemonServer interface {
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
 	Version(context.Context, *VersionRequest) (*VersionResponse, error)
 	Reset(*ResetRequest, Daemon_ResetServer) error
+	Uninstall(*UninstallRequest, Daemon_UninstallServer) error
 	Quit(*QuitRequest, Daemon_QuitServer) error
 	Identify(context.Context, *IdentifyRequest) (*IdentifyResponse, error)
 	mustEmbedUnimplementedDaemonServer()
@@ -606,6 +641,9 @@ func (UnimplementedDaemonServer) Version(context.Context, *VersionRequest) (*Ver
 }
 func (UnimplementedDaemonServer) Reset(*ResetRequest, Daemon_ResetServer) error {
 	return status.Errorf(codes.Unimplemented, "method Reset not implemented")
+}
+func (UnimplementedDaemonServer) Uninstall(*UninstallRequest, Daemon_UninstallServer) error {
+	return status.Errorf(codes.Unimplemented, "method Uninstall not implemented")
 }
 func (UnimplementedDaemonServer) Quit(*QuitRequest, Daemon_QuitServer) error {
 	return status.Errorf(codes.Unimplemented, "method Quit not implemented")
@@ -1003,6 +1041,27 @@ func (x *daemonResetServer) Send(m *ResetResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Daemon_Uninstall_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(UninstallRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DaemonServer).Uninstall(m, &daemonUninstallServer{stream})
+}
+
+type Daemon_UninstallServer interface {
+	Send(*UninstallResponse) error
+	grpc.ServerStream
+}
+
+type daemonUninstallServer struct {
+	grpc.ServerStream
+}
+
+func (x *daemonUninstallServer) Send(m *UninstallResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 func _Daemon_Quit_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(QuitRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -1140,6 +1199,11 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Reset",
 			Handler:       _Daemon_Reset_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Uninstall",
+			Handler:       _Daemon_Uninstall_Handler,
 			ServerStreams: true,
 		},
 		{

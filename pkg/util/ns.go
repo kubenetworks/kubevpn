@@ -38,11 +38,10 @@ func GetClusterIDByCM(cm *v1.ConfigMap) types.UID {
 	return cm.UID
 }
 
-func IsSameCluster(client v12.ConfigMapInterface, namespace string, clientB v12.ConfigMapInterface, namespaceB string) (bool, error) {
+func IsSameCluster(ctx context.Context, client v12.ConfigMapInterface, namespace string, clientB v12.ConfigMapInterface, namespaceB string) (bool, error) {
 	if namespace != namespaceB {
 		return false, nil
 	}
-	ctx := context.Background()
 	clusterIDA, err := GetClusterID(ctx, client)
 	if err != nil {
 		return false, err

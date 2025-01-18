@@ -25,7 +25,6 @@ func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) err
 
 	connect := &handler.ConnectOptions{
 		Namespace: req.Namespace,
-		Lock:      &svr.Lock,
 	}
 
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
@@ -48,7 +47,7 @@ func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) err
 	if err != nil {
 		return err
 	}
-	err = connect.Reset(ctx)
+	err = connect.Reset(ctx, req.Workloads)
 	if err != nil {
 		return err
 	}

@@ -108,3 +108,25 @@ func TestPing(t *testing.T) {
 	}
 	log.Print("Packet sent!")
 }
+
+func TestConvertUidToWorkload(t *testing.T) {
+	testDatas := []struct {
+		uid    string
+		expect string
+	}{
+		{
+			uid:    "deployments.apps.productpage",
+			expect: "deployments.apps/productpage",
+		},
+		{
+			uid:    "deployments..productpage",
+			expect: "deployments./productpage",
+		},
+	}
+	for _, data := range testDatas {
+		workload := ConvertUidToWorkload(data.uid)
+		if workload != data.expect {
+			t.FailNow()
+		}
+	}
+}

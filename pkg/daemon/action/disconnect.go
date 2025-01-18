@@ -150,21 +150,22 @@ func disconnectByKubeConfig(ctx context.Context, svr *Server, kubeconfigBytes st
 	if err != nil {
 		return err
 	}
-	disconnect(svr, connect)
+	disconnect(ctx, svr, connect)
 	return nil
 }
 
-func disconnect(svr *Server, connect *handler.ConnectOptions) {
+func disconnect(ctx context.Context, svr *Server, connect *handler.ConnectOptions) {
 	client := svr.GetClient(false)
 	if client == nil {
 		return
 	}
 	if svr.connect != nil {
-		isSameCluster, err := util.IsSameCluster(
+		isSameCluster, _ := util.IsSameCluster(
+			ctx,
 			svr.connect.GetClientset().CoreV1().ConfigMaps(svr.connect.Namespace), svr.connect.Namespace,
 			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
 		)
-		if err == nil && isSameCluster {
+		if isSameCluster {
 			log.Infof("Disconnecting from the cluster...")
 			svr.connect.Cleanup()
 			svr.connect = nil
@@ -173,11 +174,12 @@ func disconnect(svr *Server, connect *handler.ConnectOptions) {
 	}
 	for i := 0; i < len(svr.secondaryConnect); i++ {
 		options := svr.secondaryConnect[i]
-		isSameCluster, err := util.IsSameCluster(
+		isSameCluster, _ := util.IsSameCluster(
+			ctx,
 			options.GetClientset().CoreV1().ConfigMaps(options.Namespace), options.Namespace,
 			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
 		)
-		if err == nil && isSameCluster {
+		if isSameCluster {
 			log.Infof("Disconnecting from the cluster...")
 			options.Cleanup()
 			svr.secondaryConnect = append(svr.secondaryConnect[:i], svr.secondaryConnect[i+1:]...)

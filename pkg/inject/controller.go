@@ -3,11 +3,9 @@ package inject
 import (
 	_ "embed"
 
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -19,6 +17,12 @@ var envoyConfig []byte
 
 //go:embed envoy_ipv4.yaml
 var envoyConfigIPv4 []byte
+
+//go:embed fargate_envoy.yaml
+var envoyConfigFargate []byte
+
+//go:embed fargate_envoy_ipv4.yaml
+var envoyConfigIPv4Fargate []byte
 
 func RemoveContainers(spec *v1.PodTemplateSpec) {
 	for i := 0; i < len(spec.Spec.Containers); i++ {
@@ -34,7 +38,7 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteCo
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 
-	envoyLogLevel := "error"
+	envoyLogLevel := "info"
 	if config.Debug {
 		envoyLogLevel = "debug"
 	}
@@ -164,11 +168,70 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 	})
 }
 
-func init() {
-	json, err := yaml.ToJSON(envoyConfig)
-	if err != nil {
-		log.Errorf("Error converting json to bytes: %v", err)
-		return
+func AddEnvoyContainer(spec *v1.PodTemplateSpec, nodeId string, ipv6 bool) {
+	// remove envoy proxy containers if already exist
+	RemoveContainers(spec)
+
+	envoyLogLevel := "info"
+	if config.Debug {
+		envoyLogLevel = "debug"
 	}
-	envoyConfig = json
+	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
+		Name:    config.ContainerSidecarVPN,
+		Image:   config.Image,
+		Command: []string{"/bin/sh", "-c"},
+		Args: []string{`
+kubevpn serve -L "ssh://:2222"`,
+		},
+		Resources: v1.ResourceRequirements{
+			Requests: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:    resource.MustParse("128m"),
+				v1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+			Limits: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:    resource.MustParse("256m"),
+				v1.ResourceMemory: resource.MustParse("256Mi"),
+			},
+		},
+		ImagePullPolicy: v1.PullIfNotPresent,
+		SecurityContext: &v1.SecurityContext{
+			RunAsUser:  pointer.Int64(0),
+			RunAsGroup: pointer.Int64(0),
+		},
+	})
+	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
+		Name:  config.ContainerSidecarEnvoyProxy,
+		Image: config.Image,
+		Command: []string{
+			"envoy",
+			"-l",
+			envoyLogLevel,
+			"--base-id",
+			"1",
+			"--service-node",
+			nodeId,
+			"--service-cluster",
+			nodeId,
+			"--config-yaml",
+		},
+		Args: []string{
+			func() string {
+				if ipv6 {
+					return string(envoyConfigFargate)
+				}
+				return string(envoyConfigIPv4Fargate)
+			}(),
+		},
+		Resources: v1.ResourceRequirements{
+			Requests: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:    resource.MustParse("128m"),
+				v1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+			Limits: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:    resource.MustParse("256m"),
+				v1.ResourceMemory: resource.MustParse("256Mi"),
+			},
+		},
+		ImagePullPolicy: v1.PullIfNotPresent,
+	})
 }
