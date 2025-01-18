@@ -99,10 +99,6 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if err != nil {
 		return err
 	}
-	err = svr.connect.PreCheckResource()
-	if err != nil {
-		return err
-	}
 	err = svr.connect.GetIPFromContext(ctx)
 	if err != nil {
 		return err
@@ -163,18 +159,14 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	if err != nil {
 		return err
 	}
-	err = connect.PreCheckResource()
-	if err != nil {
-		return err
-	}
 
 	if svr.connect != nil {
-		var isSameCluster bool
-		isSameCluster, err = util.IsSameCluster(
+		isSameCluster, _ := util.IsSameCluster(
+			sshCtx,
 			svr.connect.GetClientset().CoreV1().ConfigMaps(svr.connect.Namespace), svr.connect.Namespace,
 			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
 		)
-		if err == nil && isSameCluster && svr.connect.Equal(connect) {
+		if isSameCluster {
 			// same cluster, do nothing
 			log.Infof("Connected to cluster")
 			return nil

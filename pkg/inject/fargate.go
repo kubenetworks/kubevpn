@@ -4,10 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
-	"reflect"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -23,11 +20,9 @@ import (
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -167,173 +162,3 @@ var _ = `function EPHEMERAL_PORT() {
         fi
     done
 }`
-
-func NewMapper(clientset *kubernetes.Clientset, ns string, labels string, headers map[string]string, workloads []string) *Mapper {
-	ctx, cancelFunc := context.WithCancel(context.Background())
-	return &Mapper{
-		ns:        ns,
-		headers:   headers,
-		workloads: workloads,
-		labels:    labels,
-		ctx:       ctx,
-		cancel:    cancelFunc,
-		clientset: clientset,
-	}
-}
-
-type Mapper struct {
-	ns        string
-	headers   map[string]string
-	workloads []string
-	labels    string
-
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	clientset *kubernetes.Clientset
-}
-
-func (m *Mapper) Run() {
-	var podNameCtx = &sync.Map{}
-	defer func() {
-		podNameCtx.Range(func(key, value any) bool {
-			value.(context.CancelFunc)()
-			return true
-		})
-		podNameCtx.Clear()
-	}()
-
-	var lastLocalPort2EnvoyRulePort map[int32]int32
-	for m.ctx.Err() == nil {
-		localPort2EnvoyRulePort, err := m.getLocalPort2EnvoyRulePort()
-		if err != nil {
-			log.Errorf("failed to get local port to envoy rule port: %v", err)
-			time.Sleep(time.Second * 2)
-			continue
-		}
-		if !reflect.DeepEqual(localPort2EnvoyRulePort, lastLocalPort2EnvoyRulePort) {
-			podNameCtx.Range(func(key, value any) bool {
-				value.(context.CancelFunc)()
-				return true
-			})
-			podNameCtx.Clear()
-		}
-		lastLocalPort2EnvoyRulePort = localPort2EnvoyRulePort
-
-		list, err := util.GetRunningPodList(m.ctx, m.clientset, m.ns, m.labels)
-		if err != nil {
-			log.Errorf("failed to list running pod: %v", err)
-			time.Sleep(time.Second * 2)
-			continue
-		}
-		podNames := sets.New[string]()
-		for _, pod := range list {
-			podNames.Insert(pod.Name)
-			if _, ok := podNameCtx.Load(pod.Name); ok {
-				continue
-			}
-
-			containerNames := sets.New[string]()
-			for _, container := range pod.Spec.Containers {
-				containerNames.Insert(container.Name)
-			}
-			if !containerNames.HasAny(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
-				log.Infof("Labels with pod have been reset")
-				return
-			}
-
-			podIP, err := netip.ParseAddr(pod.Status.PodIP)
-			if err != nil {
-				continue
-			}
-
-			ctx, cancel := context.WithCancel(m.ctx)
-			podNameCtx.Store(pod.Name, cancel)
-
-			go func(remoteSSHServer netip.AddrPort, podName string) {
-				for containerPort, envoyRulePort := range localPort2EnvoyRulePort {
-					go func(containerPort, envoyRulePort int32) {
-						local := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(containerPort))
-						remote := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(envoyRulePort))
-						for ctx.Err() == nil {
-							_ = ssh.ExposeLocalPortToRemote(ctx, remoteSSHServer, remote, local)
-							time.Sleep(time.Second * 1)
-						}
-					}(containerPort, envoyRulePort)
-				}
-			}(netip.AddrPortFrom(podIP, 2222), pod.Name)
-		}
-		podNameCtx.Range(func(key, value any) bool {
-			if !podNames.Has(key.(string)) {
-				value.(context.CancelFunc)()
-				podNameCtx.Delete(key.(string))
-			}
-			return true
-		})
-		time.Sleep(time.Second * 2)
-	}
-}
-
-func (m *Mapper) getLocalPort2EnvoyRulePort() (map[int32]int32, error) {
-	configMap, err := m.clientset.CoreV1().ConfigMaps(m.ns).Get(m.ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	var v = make([]*controlplane.Virtual, 0)
-	if str, ok := configMap.Data[config.KeyEnvoy]; ok {
-		if err = yaml.Unmarshal([]byte(str), &v); err != nil {
-			return nil, err
-		}
-	}
-
-	uidList := sets.New[string]()
-	for _, workload := range m.workloads {
-		uidList.Insert(util.ConvertWorkloadToUid(workload))
-	}
-	var localPort2EnvoyRulePort = make(map[int32]int32)
-	for _, virtual := range v {
-		if uidList.Has(virtual.Uid) {
-			for _, rule := range virtual.Rules {
-				if reflect.DeepEqual(m.headers, rule.Headers) {
-					for containerPort, portPair := range rule.PortMap {
-						if strings.Index(portPair, ":") > 0 {
-							split := strings.Split(portPair, ":")
-							if len(split) == 2 {
-								envoyRulePort, _ := strconv.Atoi(split[0])
-								localPort, _ := strconv.Atoi(split[1])
-								localPort2EnvoyRulePort[int32(localPort)] = int32(envoyRulePort)
-							}
-						} else {
-							envoyRulePort, _ := strconv.Atoi(portPair)
-							localPort2EnvoyRulePort[containerPort] = int32(envoyRulePort)
-						}
-					}
-				}
-			}
-		}
-	}
-	return localPort2EnvoyRulePort, nil
-}
-
-func (m *Mapper) Stop(workload string) {
-	if m == nil {
-		return
-	}
-	if !sets.New[string]().Insert(m.workloads...).Has(workload) {
-		return
-	}
-	m.cancel()
-}
-
-func (m *Mapper) IsMe(uid string, headers map[string]string) bool {
-	if m == nil {
-		return false
-	}
-	if !sets.New[string]().Insert(m.workloads...).Has(util.ConvertUidToWorkload(uid)) {
-		return false
-	}
-	if !reflect.DeepEqual(m.headers, headers) {
-		return false
-	}
-	return true
-}

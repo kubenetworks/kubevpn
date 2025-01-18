@@ -24,7 +24,7 @@ import (
 // 3) cleanup all containers
 // 4) cleanup hosts
 func (c *ConnectOptions) Uninstall(ctx context.Context) error {
-	err := c.LeaveProxyResources(ctx)
+	err := c.LeaveAllProxyResources(ctx)
 	if err != nil {
 		log.Errorf("Leave proxy resources error: %v", err)
 	} else {
@@ -66,7 +66,7 @@ func (c *ConnectOptions) CleanupLocalContainer(ctx context.Context) error {
 	return err
 }
 
-func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
+func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error) {
 	if c == nil || c.clientset == nil {
 		return
 	}
@@ -88,29 +88,16 @@ func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
 		return
 	}
 	v4, _ := c.GetLocalTunIP()
-	for _, virtual := range v {
-		var found bool
-		for _, rule := range virtual.Rules {
-			if rule.LocalTunIPv4 == v4 {
-				found = true
-				break
-			}
-		}
-		if !found {
-			continue
-		}
-
+	for _, workload := range c.ProxyResources() {
 		// deployments.apps.ry-server --> deployments.apps/ry-server
-		workload := util.ConvertUidToWorkload(virtual.Uid)
 		object, err := util.GetUnstructuredObject(c.factory, c.Namespace, workload)
 		if err != nil {
 			log.Errorf("Failed to get unstructured object: %v", err)
 			return err
 		}
-		c.PortMapper.Stop(workload)
 		err = inject.UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), object, func(isFargateMode bool, rule *controlplane.Rule) bool {
 			if isFargateMode {
-				return c.PortMapper.IsMe(virtual.Uid, rule.Headers)
+				return c.IsMe(util.ConvertWorkloadToUid(workload), rule.Headers)
 			}
 			return rule.LocalTunIPv4 == v4
 		})
@@ -118,6 +105,7 @@ func (c *ConnectOptions) LeaveProxyResources(ctx context.Context) (err error) {
 			log.Errorf("Failed to leave workload %s: %v", workload, err)
 			continue
 		}
+		c.LeavePortMap(workload)
 	}
 	return err
 }

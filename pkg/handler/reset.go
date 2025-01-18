@@ -28,21 +28,23 @@ import (
 // 1) reset configmap
 // 2) remove inject containers envoy and vpn
 // 3) restore service targetPort to containerPort
-func (c *ConnectOptions) Reset(ctx context.Context) error {
+func (c *ConnectOptions) Reset(ctx context.Context, workloads []string) error {
 	if c == nil || c.clientset == nil {
 		return nil
 	}
-	err := c.PreCheckResource()
+
+	var err error
+	workloads, err = util.NormalizedResource(ctx, c.factory, c.clientset, c.Namespace, workloads)
 	if err != nil {
 		return err
 	}
 
-	err = resetConfigMap(ctx, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Workloads)
+	err = resetConfigMap(ctx, c.clientset.CoreV1().ConfigMaps(c.Namespace), workloads)
 	if err != nil {
 		log.Error(err)
 	}
 
-	for _, workload := range c.Workloads {
+	for _, workload := range workloads {
 		err = removeInjectContainer(ctx, c.factory, c.clientset, c.Namespace, workload)
 		if err != nil {
 			log.Error(err)

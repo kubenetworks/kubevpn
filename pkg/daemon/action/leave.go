@@ -38,11 +38,10 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 			log.Errorf("Failed to get unstructured object: %v", err)
 			return err
 		}
-		svr.connect.PortMapper.Stop(workload)
 		// add rollback func to remove envoy config
 		err = inject.UnPatchContainer(factory, maps, object, func(isFargateMode bool, rule *controlplane.Rule) bool {
 			if isFargateMode {
-				return svr.connect.PortMapper.IsMe(util.ConvertWorkloadToUid(workload), rule.Headers)
+				return svr.connect.IsMe(util.ConvertWorkloadToUid(workload), rule.Headers)
 			}
 			return rule.LocalTunIPv4 == v4
 		})
@@ -50,6 +49,7 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 			log.Errorf("Leaving workload %s failed: %v", workload, err)
 			continue
 		}
+		svr.connect.LeavePortMap(workload)
 		err = util.RolloutStatus(resp.Context(), factory, namespace, workload, time.Minute*60)
 	}
 	return nil

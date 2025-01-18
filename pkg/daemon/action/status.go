@@ -31,7 +31,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 			if svr.connect.GetClusterID() == clusterID {
 				status := genStatus(svr.connect, ModeFull, 0)
 				var err error
-				status.ProxyList, status.CloneList, err = gen(svr.connect, svr.clone)
+				status.ProxyList, status.CloneList, err = gen(ctx, svr.connect, svr.clone)
 				if err != nil {
 					return nil, err
 				}
@@ -47,7 +47,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 		if svr.connect != nil {
 			status := genStatus(svr.connect, ModeFull, 0)
 			var err error
-			status.ProxyList, status.CloneList, err = gen(svr.connect, svr.clone)
+			status.ProxyList, status.CloneList, err = gen(ctx, svr.connect, svr.clone)
 			if err != nil {
 				return nil, err
 			}
@@ -80,11 +80,11 @@ func genStatus(connect *handler.ConnectOptions, mode string, index int32) *rpc.S
 	return &info
 }
 
-func gen(connect *handler.ConnectOptions, clone *handler.CloneOptions) ([]*rpc.Proxy, []*rpc.Clone, error) {
+func gen(ctx context.Context, connect *handler.ConnectOptions, clone *handler.CloneOptions) ([]*rpc.Proxy, []*rpc.Clone, error) {
 	var proxyList []*rpc.Proxy
 	if connect != nil && connect.GetClientset() != nil {
 		mapInterface := connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace)
-		configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		configMap, err := mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -111,7 +111,7 @@ func gen(connect *handler.ConnectOptions, clone *handler.CloneOptions) ([]*rpc.P
 					Headers:       rule.Headers,
 					LocalTunIPv4:  rule.LocalTunIPv4,
 					LocalTunIPv6:  rule.LocalTunIPv6,
-					CurrentDevice: util.If(isFargateMode, connect.PortMapper.IsMe(util.ConvertWorkloadToUid(virtual.Uid), rule.Headers), v4 == rule.LocalTunIPv4 && v6 == rule.LocalTunIPv6),
+					CurrentDevice: util.If(isFargateMode, connect.IsMe(util.ConvertWorkloadToUid(virtual.Uid), rule.Headers), v4 == rule.LocalTunIPv4 && v6 == rule.LocalTunIPv6),
 					PortMap:       useSecondPort(rule.PortMap),
 				})
 			}
