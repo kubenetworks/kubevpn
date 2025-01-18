@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"reflect"
 	"strings"
 	"time"
 
@@ -11,7 +12,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	k8sjson "k8s.io/apimachinery/pkg/util/json"
@@ -92,25 +92,34 @@ func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kuber
 	}
 
 	// 2) modify service containerPort to envoy listener port
-	err = ModifyServiceTargetPort(ctx, clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), containerPort2EnvoyListenerPort)
+	err = ModifyServiceTargetPort(ctx, clientset, namespace, templateSpec.Labels, containerPort2EnvoyListenerPort)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func ModifyServiceTargetPort(ctx context.Context, clientset *kubernetes.Clientset, namespace string, labels string, m map[int32]int32) error {
-	list, err := clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{LabelSelector: labels})
+func ModifyServiceTargetPort(ctx context.Context, clientset *kubernetes.Clientset, namespace string, podLabels map[string]string, m map[int32]int32) error {
+	// service selector == pod labels
+	list, err := clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
-	if len(list.Items) == 0 {
-		return fmt.Errorf("can not found service with label: %v", labels)
+
+	var svc *v1.Service
+	for _, item := range list.Items {
+		if reflect.DeepEqual(item.Spec.Selector, podLabels) {
+			svc = &item
+			break
+		}
 	}
-	for i := range len(list.Items[0].Spec.Ports) {
-		list.Items[0].Spec.Ports[i].TargetPort = intstr.FromInt32(m[list.Items[0].Spec.Ports[i].Port])
+	if svc == nil {
+		return fmt.Errorf("can not found service with selector: %v", podLabels)
 	}
-	_, err = clientset.CoreV1().Services(namespace).Update(ctx, &list.Items[0], metav1.UpdateOptions{})
+	for i := range len(svc.Spec.Ports) {
+		svc.Spec.Ports[i].TargetPort = intstr.FromInt32(m[svc.Spec.Ports[i].Port])
+	}
+	_, err = clientset.CoreV1().Services(namespace).Update(ctx, svc, metav1.UpdateOptions{})
 	return err
 }
 

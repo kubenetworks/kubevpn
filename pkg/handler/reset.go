@@ -9,7 +9,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
@@ -138,6 +137,6 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 			portmap[port.ContainerPort] = port.ContainerPort
 		}
 	}
-	err = inject.ModifyServiceTargetPort(ctx, clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), portmap)
+	err = inject.ModifyServiceTargetPort(ctx, clientset, namespace, templateSpec.Labels, portmap)
 	return err
 }
