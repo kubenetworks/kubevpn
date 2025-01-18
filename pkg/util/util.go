@@ -358,3 +358,10 @@ func move(src, dst string) (e error) {
 	}
 	return os.Remove(src)
 }
+
+func If[T any](b bool, t1, t2 T) T {
+	if b {
+		return t1
+	}
+	return t2
+}

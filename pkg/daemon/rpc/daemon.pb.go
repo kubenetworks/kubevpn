@@ -2399,6 +2399,8 @@ type ResetRequest struct {
 
 	KubeconfigBytes string `protobuf:"bytes,1,opt,name=KubeconfigBytes,proto3" json:"KubeconfigBytes,omitempty"`
 	Namespace       string `protobuf:"bytes,2,opt,name=Namespace,proto3" json:"Namespace,omitempty"`
+	//	repeated string Workloads = 3;
+	//
 	// ssh jump
 	SshJump *SshJump `protobuf:"bytes,3,opt,name=SshJump,proto3" json:"SshJump,omitempty"`
 }

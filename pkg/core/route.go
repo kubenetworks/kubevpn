@@ -111,6 +111,13 @@ func (r *Route) GenerateServers() ([]Server, error) {
 				log.Errorf("Failed to create gvisor udp listener: %v", err)
 				return nil, err
 			}
+		case "ssh":
+			handler = SSHHandler()
+			ln, err = SSHListener(node.Addr)
+			if err != nil {
+				log.Errorf("Failed to create ssh listener: %v", err)
+				return nil, err
+			}
 		default:
 			log.Errorf("Not support protocol %s", node.Protocol)
 			return nil, fmt.Errorf("not support protocol %s", node.Protocol)

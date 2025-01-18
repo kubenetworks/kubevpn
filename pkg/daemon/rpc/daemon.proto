@@ -284,6 +284,7 @@ message UpgradeResponse {
 message ResetRequest {
   string KubeconfigBytes = 1;
   string Namespace = 2;
+//  repeated string Workloads = 3;
   // ssh jump
   SshJump SshJump = 3;
 }

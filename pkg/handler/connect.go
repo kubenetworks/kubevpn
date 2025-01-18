@@ -154,7 +154,9 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context) (err error)
 		// todo consider to use ephemeral container
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
-		if len(c.Headers) != 0 || len(c.PortMap) != 0 {
+		if c.Engine == config.EngineGvisor {
+			err = inject.InjectEnvoySidecar(ctx, c.factory, c.clientset, c.Namespace, workload, c.Headers, c.PortMap)
+		} else if len(c.Headers) != 0 || len(c.PortMap) != 0 {
 			err = inject.InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, configInfo, c.Headers, c.PortMap)
 		} else {
 			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, configInfo)
@@ -181,7 +183,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		log.Errorf("Failed to get network CIDR: %v", err)
 		return
 	}
-	if err = createOutboundPod(c.ctx, c.factory, c.clientset, c.Namespace); err != nil {
+	if err = createOutboundPod(c.ctx, c.factory, c.clientset, c.Namespace, c.Engine == config.EngineGvisor); err != nil {
 		return
 	}
 	if err = c.upgradeDeploy(c.ctx); err != nil {

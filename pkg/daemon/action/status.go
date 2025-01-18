@@ -2,6 +2,7 @@ package action
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -106,7 +107,7 @@ func gen(connect *handler.ConnectOptions, clone *handler.CloneOptions) ([]*rpc.P
 					LocalTunIPv4:  rule.LocalTunIPv4,
 					LocalTunIPv6:  rule.LocalTunIPv6,
 					CurrentDevice: v4 == rule.LocalTunIPv4 && v6 == rule.LocalTunIPv6,
-					PortMap:       rule.PortMap,
+					PortMap:       useSecondPort(rule.PortMap),
 				})
 			}
 			proxyList = append(proxyList, &rpc.Proxy{
@@ -149,4 +150,16 @@ func gen(connect *handler.ConnectOptions, clone *handler.CloneOptions) ([]*rpc.P
 		}
 	}
 	return proxyList, cloneList, nil
+}
+
+func useSecondPort(m map[int32]string) map[int32]int32 {
+	var result = make(map[int32]int32)
+	for k, v := range m {
+		if strings.Index(v, ":") > 0 {
+			v = strings.Split(v, ":")[1]
+		}
+		port, _ := strconv.Atoi(v)
+		result[k] = int32(port)
+	}
+	return result
 }

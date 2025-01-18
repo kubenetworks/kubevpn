@@ -31,7 +31,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace string) (err error) {
+func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace string, gvisor bool) (err error) {
 	innerIpv4CIDR := net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}
 	innerIpv6CIDR := net.IPNet{IP: config.RouterIP6, Mask: config.CIDR6.Mask}
 
@@ -182,27 +182,6 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		return err
 	}
 
-	var resourcesSmall = v1.ResourceRequirements{
-		Requests: map[v1.ResourceName]resource.Quantity{
-			v1.ResourceCPU:    resource.MustParse("100m"),
-			v1.ResourceMemory: resource.MustParse("128Mi"),
-		},
-		Limits: map[v1.ResourceName]resource.Quantity{
-			v1.ResourceCPU:    resource.MustParse("200m"),
-			v1.ResourceMemory: resource.MustParse("256Mi"),
-		},
-	}
-	var resourcesLarge = v1.ResourceRequirements{
-		Requests: map[v1.ResourceName]resource.Quantity{
-			v1.ResourceCPU:    resource.MustParse("500m"),
-			v1.ResourceMemory: resource.MustParse("512Mi"),
-		},
-		Limits: map[v1.ResourceName]resource.Quantity{
-			v1.ResourceCPU:    resource.MustParse("2000m"),
-			v1.ResourceMemory: resource.MustParse("2048Mi"),
-		},
-	}
-
 	domain := util.GetTlsDomain(namespace)
 	var crt, key []byte
 	crt, key, err = cert.GenerateSelfSignedCertKey(domain, nil, nil)
@@ -282,164 +261,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 
 	// 7) create deployment
 	log.Infof("Creating Deployment %s", config.ConfigMapPodTrafficManager)
-	deploy := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      config.ConfigMapPodTrafficManager,
-			Namespace: namespace,
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: pointer.Int32(1),
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": config.ConfigMapPodTrafficManager},
-			},
-			Template: v1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"app": config.ConfigMapPodTrafficManager},
-					Annotations: map[string]string{
-						"sidecar.istio.io/inject": "false",
-					},
-				},
-				Spec: v1.PodSpec{
-					ServiceAccountName: config.ConfigMapPodTrafficManager,
-					Volumes: []v1.Volume{{
-						Name: config.VolumeEnvoyConfig,
-						VolumeSource: v1.VolumeSource{
-							ConfigMap: &v1.ConfigMapVolumeSource{
-								LocalObjectReference: v1.LocalObjectReference{
-									Name: config.ConfigMapPodTrafficManager,
-								},
-								Items: []v1.KeyToPath{
-									{
-										Key:  config.KeyEnvoy,
-										Path: "envoy-config.yaml",
-									},
-								},
-								Optional: pointer.Bool(false),
-							},
-						},
-					}},
-					Containers: []v1.Container{
-						{
-							Name:    config.ContainerSidecarVPN,
-							Image:   config.Image,
-							Command: []string{"/bin/sh", "-c"},
-							Args: []string{`
-sysctl -w net.ipv4.ip_forward=1
-sysctl -w net.ipv6.conf.all.disable_ipv6=0
-sysctl -w net.ipv6.conf.all.forwarding=1
-update-alternatives --set iptables /usr/sbin/iptables-legacy
-iptables -F
-ip6tables -F
-iptables -P INPUT ACCEPT
-ip6tables -P INPUT ACCEPT
-iptables -P FORWARD ACCEPT
-ip6tables -P FORWARD ACCEPT
-iptables -t nat -A POSTROUTING -s ${CIDR4} -o eth0 -j MASQUERADE
-ip6tables -t nat -A POSTROUTING -s ${CIDR6} -o eth0 -j MASQUERADE
-kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:10801" -L "gudp://:10802" --debug=true`,
-							},
-							EnvFrom: []v1.EnvFromSource{{
-								SecretRef: &v1.SecretEnvSource{
-									LocalObjectReference: v1.LocalObjectReference{
-										Name: config.ConfigMapPodTrafficManager,
-									},
-								},
-							}},
-							Env: []v1.EnvVar{
-								{
-									Name:  "CIDR4",
-									Value: config.CIDR.String(),
-								},
-								{
-									Name:  "CIDR6",
-									Value: config.CIDR6.String(),
-								},
-								{
-									Name:  config.EnvInboundPodTunIPv4,
-									Value: innerIpv4CIDR.String(),
-								},
-								{
-									Name:  config.EnvInboundPodTunIPv6,
-									Value: innerIpv6CIDR.String(),
-								},
-							},
-							Ports: []v1.ContainerPort{{
-								Name:          udp8422,
-								ContainerPort: 8422,
-								Protocol:      v1.ProtocolUDP,
-							}, {
-								Name:          tcp10800,
-								ContainerPort: 10800,
-								Protocol:      v1.ProtocolTCP,
-							}},
-							Resources:       resourcesLarge,
-							ImagePullPolicy: v1.PullIfNotPresent,
-							SecurityContext: &v1.SecurityContext{
-								Capabilities: &v1.Capabilities{
-									Add: []v1.Capability{
-										"NET_ADMIN",
-										//"SYS_MODULE",
-									},
-								},
-								RunAsUser:  pointer.Int64(0),
-								RunAsGroup: pointer.Int64(0),
-								Privileged: pointer.Bool(true),
-							},
-						},
-						{
-							Name:    config.ContainerSidecarControlPlane,
-							Image:   config.Image,
-							Command: []string{"kubevpn"},
-							Args:    []string{"control-plane", "--watchDirectoryFilename", "/etc/envoy/envoy-config.yaml"},
-							Ports: []v1.ContainerPort{
-								{
-									Name:          tcp9002,
-									ContainerPort: 9002,
-									Protocol:      v1.ProtocolTCP,
-								},
-								{
-									Name:          udp53,
-									ContainerPort: 53,
-									Protocol:      v1.ProtocolUDP,
-								},
-							},
-							VolumeMounts: []v1.VolumeMount{
-								{
-									Name:      config.VolumeEnvoyConfig,
-									ReadOnly:  true,
-									MountPath: "/etc/envoy",
-								},
-							},
-							ImagePullPolicy: v1.PullIfNotPresent,
-							Resources:       resourcesSmall,
-						},
-						{
-							Name:    "webhook",
-							Image:   config.Image,
-							Command: []string{"kubevpn"},
-							Args:    []string{"webhook"},
-							Ports: []v1.ContainerPort{{
-								Name:          tcp80,
-								ContainerPort: 80,
-								Protocol:      v1.ProtocolTCP,
-							}},
-							EnvFrom: []v1.EnvFromSource{{
-								SecretRef: &v1.SecretEnvSource{
-									LocalObjectReference: v1.LocalObjectReference{
-										Name: config.ConfigMapPodTrafficManager,
-									},
-								},
-							}},
-							Env:             []v1.EnvVar{},
-							ImagePullPolicy: v1.PullIfNotPresent,
-							Resources:       resourcesSmall,
-						},
-					},
-					RestartPolicy: v1.RestartPolicyAlways,
-				},
-			},
-		},
-	}
+	deploy := genDeploySpec(namespace, innerIpv4CIDR, innerIpv6CIDR, udp8422, tcp10800, tcp9002, udp53, tcp80, gvisor)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
 		log.Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
@@ -510,4 +332,194 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 	}
 
 	return nil
+}
+
+func genDeploySpec(namespace string, innerIpv4CIDR net.IPNet, innerIpv6CIDR net.IPNet, udp8422 string, tcp10800 string, tcp9002 string, udp53 string, tcp80 string, gvisor bool) *appsv1.Deployment {
+	var resourcesSmall = v1.ResourceRequirements{
+		Requests: map[v1.ResourceName]resource.Quantity{
+			v1.ResourceCPU:    resource.MustParse("100m"),
+			v1.ResourceMemory: resource.MustParse("128Mi"),
+		},
+		Limits: map[v1.ResourceName]resource.Quantity{
+			v1.ResourceCPU:    resource.MustParse("200m"),
+			v1.ResourceMemory: resource.MustParse("256Mi"),
+		},
+	}
+	var resourcesLarge = v1.ResourceRequirements{
+		Requests: map[v1.ResourceName]resource.Quantity{
+			v1.ResourceCPU:    resource.MustParse("500m"),
+			v1.ResourceMemory: resource.MustParse("512Mi"),
+		},
+		Limits: map[v1.ResourceName]resource.Quantity{
+			v1.ResourceCPU:    resource.MustParse("2000m"),
+			v1.ResourceMemory: resource.MustParse("2048Mi"),
+		},
+	}
+
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.ConfigMapPodTrafficManager,
+			Namespace: namespace,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: pointer.Int32(1),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": config.ConfigMapPodTrafficManager},
+			},
+			Template: v1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": config.ConfigMapPodTrafficManager},
+					Annotations: map[string]string{
+						"sidecar.istio.io/inject": "false",
+					},
+				},
+				Spec: v1.PodSpec{
+					ServiceAccountName: config.ConfigMapPodTrafficManager,
+					Volumes: []v1.Volume{{
+						Name: config.VolumeEnvoyConfig,
+						VolumeSource: v1.VolumeSource{
+							ConfigMap: &v1.ConfigMapVolumeSource{
+								LocalObjectReference: v1.LocalObjectReference{
+									Name: config.ConfigMapPodTrafficManager,
+								},
+								Items: []v1.KeyToPath{
+									{
+										Key:  config.KeyEnvoy,
+										Path: "envoy-config.yaml",
+									},
+								},
+								Optional: pointer.Bool(false),
+							},
+						},
+					}},
+					Containers: []v1.Container{
+						{
+							Name:    config.ContainerSidecarVPN,
+							Image:   config.Image,
+							Command: []string{"/bin/sh", "-c"},
+							Args: []string{util.If(
+								gvisor,
+								`
+kubevpn serve -L "tcp://:10800" -L "gtcp://:10801" -L "gudp://:10802" --debug=true`,
+								`
+sysctl -w net.ipv4.ip_forward=1
+sysctl -w net.ipv6.conf.all.disable_ipv6=0
+sysctl -w net.ipv6.conf.all.forwarding=1
+update-alternatives --set iptables /usr/sbin/iptables-legacy
+iptables -F
+ip6tables -F
+iptables -P INPUT ACCEPT
+ip6tables -P INPUT ACCEPT
+iptables -P FORWARD ACCEPT
+ip6tables -P FORWARD ACCEPT
+iptables -t nat -A POSTROUTING -s ${CIDR4} -o eth0 -j MASQUERADE
+ip6tables -t nat -A POSTROUTING -s ${CIDR6} -o eth0 -j MASQUERADE
+kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:10801" -L "gudp://:10802" --debug=true`,
+							)},
+							EnvFrom: []v1.EnvFromSource{{
+								SecretRef: &v1.SecretEnvSource{
+									LocalObjectReference: v1.LocalObjectReference{
+										Name: config.ConfigMapPodTrafficManager,
+									},
+								},
+							}},
+							Env: []v1.EnvVar{
+								{
+									Name:  "CIDR4",
+									Value: config.CIDR.String(),
+								},
+								{
+									Name:  "CIDR6",
+									Value: config.CIDR6.String(),
+								},
+								{
+									Name:  config.EnvInboundPodTunIPv4,
+									Value: innerIpv4CIDR.String(),
+								},
+								{
+									Name:  config.EnvInboundPodTunIPv6,
+									Value: innerIpv6CIDR.String(),
+								},
+							},
+							Ports: []v1.ContainerPort{{
+								Name:          udp8422,
+								ContainerPort: 8422,
+								Protocol:      v1.ProtocolUDP,
+							}, {
+								Name:          tcp10800,
+								ContainerPort: 10800,
+								Protocol:      v1.ProtocolTCP,
+							}},
+							Resources:       resourcesLarge,
+							ImagePullPolicy: v1.PullIfNotPresent,
+							SecurityContext: &v1.SecurityContext{
+								Capabilities: &v1.Capabilities{
+									Add: util.If(gvisor,
+										[]v1.Capability{},
+										[]v1.Capability{
+											"NET_ADMIN",
+											//"SYS_MODULE",
+										},
+									),
+								},
+								RunAsUser:  pointer.Int64(0),
+								RunAsGroup: pointer.Int64(0),
+								Privileged: util.If(gvisor, pointer.Bool(false), pointer.Bool(true)),
+							},
+						},
+						{
+							Name:    config.ContainerSidecarControlPlane,
+							Image:   config.Image,
+							Command: []string{"kubevpn"},
+							Args:    []string{"control-plane", "--watchDirectoryFilename", "/etc/envoy/envoy-config.yaml"},
+							Ports: []v1.ContainerPort{
+								{
+									Name:          tcp9002,
+									ContainerPort: 9002,
+									Protocol:      v1.ProtocolTCP,
+								},
+								{
+									Name:          udp53,
+									ContainerPort: 53,
+									Protocol:      v1.ProtocolUDP,
+								},
+							},
+							VolumeMounts: []v1.VolumeMount{
+								{
+									Name:      config.VolumeEnvoyConfig,
+									ReadOnly:  true,
+									MountPath: "/etc/envoy",
+								},
+							},
+							ImagePullPolicy: v1.PullIfNotPresent,
+							Resources:       resourcesSmall,
+						},
+						{
+							Name:    "webhook",
+							Image:   config.Image,
+							Command: []string{"kubevpn"},
+							Args:    []string{"webhook"},
+							Ports: []v1.ContainerPort{{
+								Name:          tcp80,
+								ContainerPort: 80,
+								Protocol:      v1.ProtocolTCP,
+							}},
+							EnvFrom: []v1.EnvFromSource{{
+								SecretRef: &v1.SecretEnvSource{
+									LocalObjectReference: v1.LocalObjectReference{
+										Name: config.ConfigMapPodTrafficManager,
+									},
+								},
+							}},
+							Env:             []v1.EnvVar{},
+							ImagePullPolicy: v1.PullIfNotPresent,
+							Resources:       resourcesSmall,
+						},
+					},
+					RestartPolicy: v1.RestartPolicyAlways,
+				},
+			},
+		},
+	}
+	return deploy
 }

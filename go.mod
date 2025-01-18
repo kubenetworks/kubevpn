@@ -15,6 +15,7 @@ require (
 	github.com/docker/libcontainer v2.2.1+incompatible
 	github.com/envoyproxy/go-control-plane v0.12.0
 	github.com/fsnotify/fsnotify v1.7.0
+	github.com/gliderlabs/ssh v0.3.8
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-version v1.6.0
@@ -38,12 +39,12 @@ require (
 	github.com/syncthing/syncthing v1.27.12
 	github.com/thejerf/suture/v4 v4.0.5
 	go.uber.org/automaxprocs v1.5.3
-	golang.org/x/crypto v0.28.0
+	golang.org/x/crypto v0.32.0
 	golang.org/x/net v0.30.0
 	golang.org/x/oauth2 v0.21.0
-	golang.org/x/sync v0.8.0
-	golang.org/x/sys v0.26.0
-	golang.org/x/text v0.19.0
+	golang.org/x/sync v0.10.0
+	golang.org/x/sys v0.29.0
+	golang.org/x/text v0.21.0
 	golang.org/x/time v0.6.0
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2
 	golang.zx2c4.com/wireguard v0.0.0-20220920152132-bb719d3a6e2c
@@ -94,6 +95,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/Microsoft/hcsshim v0.12.2 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
+	github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be // indirect
 	github.com/antonmedv/expr v1.15.5 // indirect
 	github.com/apparentlymart/go-cidr v1.1.0 // indirect
 	github.com/aws/aws-sdk-go v1.51.12 // indirect
@@ -275,7 +277,7 @@ require (
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/exp v0.0.0-20240808152545-0cdaa3abc0fa // indirect
 	golang.org/x/mod v0.21.0 // indirect
-	golang.org/x/term v0.25.0 // indirect
+	golang.org/x/term v0.28.0 // indirect
 	golang.org/x/tools v0.26.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240716161551-93cc26a95ae9 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
