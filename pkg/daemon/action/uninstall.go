@@ -13,19 +13,19 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) error {
+func (svr *Server) Uninstall(req *rpc.UninstallRequest, resp rpc.Daemon_UninstallServer) error {
 	defer func() {
 		util.InitLoggerForServer(true)
 		log.SetOutput(svr.LogFile)
 		config.Debug = false
 	}()
-	out := io.MultiWriter(newResetWarp(resp), svr.LogFile)
+	out := io.MultiWriter(newUninstallWarp(resp), svr.LogFile)
 	util.InitLoggerForClient(config.Debug)
 	log.SetOutput(out)
 
 	connect := &handler.ConnectOptions{
 		Namespace: req.Namespace,
-		Workloads: req.Workloads,
+		Lock:      &svr.Lock,
 	}
 
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
@@ -48,24 +48,24 @@ func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) err
 	if err != nil {
 		return err
 	}
-	err = connect.Reset(ctx)
+	err = connect.Uninstall(ctx)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-type resetWarp struct {
-	server rpc.Daemon_ResetServer
+type uninstallWarp struct {
+	server rpc.Daemon_UninstallServer
 }
 
-func (r *resetWarp) Write(p []byte) (n int, err error) {
-	_ = r.server.Send(&rpc.ResetResponse{
+func (r *uninstallWarp) Write(p []byte) (n int, err error) {
+	_ = r.server.Send(&rpc.UninstallResponse{
 		Message: string(p),
 	})
 	return len(p), nil
 }
 
-func newResetWarp(server rpc.Daemon_ResetServer) io.Writer {
-	return &resetWarp{server: server}
+func newUninstallWarp(server rpc.Daemon_UninstallServer) io.Writer {
+	return &uninstallWarp{server: server}
 }

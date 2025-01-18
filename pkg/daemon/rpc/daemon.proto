@@ -26,6 +26,7 @@ service Daemon {
   rpc Status (StatusRequest) returns (StatusResponse) {}
   rpc Version (VersionRequest) returns (VersionResponse) {}
   rpc Reset (ResetRequest) returns (stream ResetResponse) {}
+  rpc Uninstall (UninstallRequest) returns (stream UninstallResponse) {}
   rpc Quit (QuitRequest) returns (stream QuitResponse) {}
 
   rpc Identify (IdentifyRequest) returns (IdentifyResponse) {}
@@ -281,12 +282,23 @@ message UpgradeResponse {
   bool NeedUpgrade = 1;
 }
 
+message UninstallRequest {
+  string KubeconfigBytes = 1;
+  string Namespace = 2;
+  // ssh jump
+  SshJump SshJump = 3;
+}
+
+message UninstallResponse {
+  string message = 1;
+}
+
 message ResetRequest {
   string KubeconfigBytes = 1;
   string Namespace = 2;
-//  repeated string Workloads = 3;
+  repeated string Workloads = 3;
   // ssh jump
-  SshJump SshJump = 3;
+  SshJump SshJump = 4;
 }
 
 message ResetResponse {

@@ -3,8 +3,10 @@ package inject
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -19,6 +21,7 @@ import (
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -99,7 +102,7 @@ func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kuber
 	}
 
 	// 2) modify service containerPort to envoy listener port
-	err = modifyServiceTargetPort(ctx, clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), containerPort2EnvoyListenerPort)
+	err = ModifyServiceTargetPort(ctx, clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), containerPort2EnvoyListenerPort)
 	if err != nil {
 		return err
 	}
@@ -108,7 +111,7 @@ func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kuber
 	return err
 }
 
-func modifyServiceTargetPort(ctx context.Context, clientset *kubernetes.Clientset, namespace string, labels string, m map[int32]int32) error {
+func ModifyServiceTargetPort(ctx context.Context, clientset *kubernetes.Clientset, namespace string, labels string, m map[int32]int32) error {
 	list, err := clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{LabelSelector: labels})
 	if err != nil {
 		return err
@@ -200,4 +203,25 @@ func exposeLocalPortToRemote(ctx context.Context, clientset *kubernetes.Clientse
 		}(netip.AddrPortFrom(addr, 2222))
 	}
 	return nil
+}
+
+type Injector struct {
+	Namespace string
+	Headers   map[string]string
+	PortMap   []string
+	Workloads []string
+	Engine    config.Engine
+	Lock      *sync.Mutex
+
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	clientset  *kubernetes.Clientset
+	restclient *rest.RESTClient
+	config     *rest.Config
+	factory    cmdutil.Factory
+	// needs to give it back to dhcp
+	localTunIPv4 *net.IPNet
+	localTunIPv6 *net.IPNet
+	tunName      string
 }
