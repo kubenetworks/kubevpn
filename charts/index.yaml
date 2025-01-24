@@ -2,6 +2,16 @@ apiVersion: v1
 entries:
   kubevpn:
   - apiVersion: v2
+    appVersion: v2.3.10
+    created: "2025-01-24T13:36:34.489289734Z"
+    description: A Helm chart for KubeVPN
+    digest: 987b73399637eee01570492115114696fdb054074507f0d16e47d077e4ea770c
+    name: kubevpn
+    type: application
+    urls:
+    - https://github.com/kubenetworks/kubevpn/releases/download/v2.3.10/kubevpn-2.3.10.tgz
+    version: 2.3.10
+  - apiVersion: v2
     appVersion: v2.3.9
     created: "2024-12-21T15:29:42.173109915Z"
     description: A Helm chart for KubeVPN
@@ -301,4 +311,4 @@ entries:
     urls:
     - https://github.com/kubenetworks/kubevpn/releases/download/v2.2.2/kubevpn-2.2.2.tgz
     version: 2.2.2
-generated: "2024-12-21T15:29:42.173354662Z"
+generated: "2025-01-24T13:36:34.489504385Z"
