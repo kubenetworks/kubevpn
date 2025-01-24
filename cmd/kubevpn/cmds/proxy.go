@@ -27,6 +27,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	var extraRoute = &handler.ExtraRouteInfo{}
 	var sshConf = &pkgssh.SshConfig{}
 	var transferImage, foreground bool
+	var imagePullSecretName string
 	cmd := &cobra.Command{
 		Use:   "proxy",
 		Short: i18n.T("Proxy kubernetes workloads inbound traffic into local PC"),
@@ -131,6 +132,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 					SshJump:              sshConf.ToRPC(),
 					TransferImage:        transferImage,
 					Image:                config.Image,
+					ImagePullSecretName:  imagePullSecretName,
 					Level:                int32(logLevel),
 					OriginKubeconfigPath: util.GetKubeConfigPath(f),
 				},
@@ -170,10 +172,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to local PC, If not special, redirect all traffic to local PC. format: <KEY>=<VALUE> eg: --headers foo=bar --headers env=dev")
 	cmd.Flags().StringArrayVar(&connect.PortMap, "portmap", []string{}, "Port map, map container port to local port, format: [tcp/udp]/containerPort:localPort, If not special, localPort will use containerPort. eg: tcp/80:8080 or udp/5000:5001 or 80 or 80:8080")
-	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug mode or not, true or false")
-	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
-	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
-	cmd.Flags().StringVar((*string)(&connect.Engine), "netstack", string(config.EngineSystem), fmt.Sprintf(`network stack ("%s"|"%s") %s: use gvisor (good compatibility), %s: use raw mode (best performance, relays on iptables SNAT)`, config.EngineGvisor, config.EngineSystem, config.EngineGvisor, config.EngineSystem))
+	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName, &connect.Engine)
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "foreground hang up")
 
 	handler.AddExtraRoute(cmd.Flags(), extraRoute)

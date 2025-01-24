@@ -62,6 +62,7 @@ type ConnectOptions struct {
 	Foreground           bool
 	OriginKubeconfigPath string
 	Lock                 *sync.Mutex
+	ImagePullSecretName  string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -206,7 +207,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		log.Errorf("Failed to get network CIDR: %v", err)
 		return
 	}
-	if err = createOutboundPod(c.ctx, c.factory, c.clientset, c.Namespace, c.Engine == config.EngineGvisor); err != nil {
+	if err = createOutboundPod(c.ctx, c.factory, c.clientset, c.Namespace, c.Engine == config.EngineGvisor, c.ImagePullSecretName); err != nil {
 		return
 	}
 	if err = c.upgradeDeploy(c.ctx); err != nil {

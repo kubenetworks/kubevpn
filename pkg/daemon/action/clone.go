@@ -33,6 +33,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 		SshJump:              req.SshJump,
 		TransferImage:        req.TransferImage,
 		Image:                req.Image,
+		ImagePullSecretName:  req.ImagePullSecretName,
 		Level:                req.Level,
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 	}

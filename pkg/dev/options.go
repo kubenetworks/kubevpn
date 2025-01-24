@@ -73,7 +73,7 @@ type Options struct {
 	rollbackFuncList []func() error
 }
 
-func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, flags *pflag.FlagSet, transferImage bool) error {
+func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, flags *pflag.FlagSet, transferImage bool, imagePullSecretName string) error {
 	mode := typescontainer.NetworkMode(option.ContainerOptions.netMode.NetworkMode())
 	if mode.IsContainer() {
 		log.Infof("Network mode container is %s", mode.ConnectedContainer())
@@ -108,7 +108,7 @@ func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, fl
 	}
 
 	// Connect to cluster, in container or host
-	err = option.Connect(ctx, sshConfig, transferImage, hostConfig.PortBindings)
+	err = option.Connect(ctx, sshConfig, transferImage, imagePullSecretName, hostConfig.PortBindings)
 	if err != nil {
 		log.Errorf("Connect to cluster failed, err: %v", err)
 		return err
@@ -118,7 +118,7 @@ func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, fl
 }
 
 // Connect to cluster network on docker container or host
-func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig, transferImage bool, portBindings nat.PortMap) error {
+func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig, transferImage bool, imagePullSecretName string, portBindings nat.PortMap) error {
 	switch option.ConnectMode {
 	case ConnectModeHost:
 		daemonCli := daemon.GetClient(false)
@@ -150,6 +150,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			OriginKubeconfigPath: util.GetKubeConfigPath(option.factory),
 			TransferImage:        transferImage,
 			Image:                config.Image,
+			ImagePullSecretName:  imagePullSecretName,
 			Level:                int32(logLevel),
 			SshJump:              sshConfig.ToRPC(),
 		}

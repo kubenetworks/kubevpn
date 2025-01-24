@@ -49,14 +49,15 @@ message ConnectRequest {
   // transfer image
   bool TransferImage = 10;
   string Image = 11;
+  string ImagePullSecretName = 12;
 
   // foreground
-  bool Foreground = 12;
+  bool Foreground = 13;
 
   // log level
-  int32 Level = 13;
+  int32 Level = 14;
 
-  string OriginKubeconfigPath = 14;
+  string OriginKubeconfigPath = 15;
 }
 
 message ConnectResponse {
@@ -112,14 +113,15 @@ message CloneRequest {
   // transfer image
   bool TransferImage = 15;
   string Image = 16;
+  string ImagePullSecretName = 17;
 
   // log level
-  int32 Level = 17;
+  int32 Level = 18;
 
-  string OriginKubeconfigPath = 18;
+  string OriginKubeconfigPath = 19;
 
-  string LocalDir = 19;
-  string RemoteDir = 20;
+  string LocalDir = 20;
+  string RemoteDir = 21;
 }
 
 message CloneResponse {
