@@ -27,6 +27,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 	}
 	var sshConf = &pkgssh.SshConfig{}
 	var transferImage bool
+	var imagePullSecretName string
 	cmd := &cobra.Command{
 		Use:   "dev TYPE/NAME [-c CONTAINER] [flags] -- [args...]",
 		Short: i18n.T("Startup your kubernetes workloads in local Docker container"),
@@ -127,20 +128,17 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 				return err
 			}
 
-			err := options.Main(cmd.Context(), sshConf, cmd.Flags(), transferImage)
+			err := options.Main(cmd.Context(), sshConf, cmd.Flags(), transferImage, imagePullSecretName)
 			return err
 		},
 	}
 	cmd.Flags().SortFlags = false
 	cmd.Flags().StringToStringVarP(&options.Headers, "headers", "H", map[string]string{}, "Traffic with special headers with reverse it to local PC, you should startup your service after reverse workloads successfully, If not special, redirect all traffic to local PC, format is k=v, like: k1=v1,k2=v2")
-	cmd.Flags().BoolVar(&config.Debug, "debug", false, "enable debug mode or not, true or false")
-	cmd.Flags().StringVar(&config.Image, "image", config.Image, "use this image to startup container")
 	cmd.Flags().BoolVar(&options.NoProxy, "no-proxy", false, "Whether proxy remote workloads traffic into local or not, true: just startup container on local without inject containers to intercept traffic, false: intercept traffic and forward to local")
 	cmdutil.AddContainerVarFlags(cmd, &options.ContainerName, options.ContainerName)
 	cmdutil.CheckErr(cmd.RegisterFlagCompletionFunc("container", completion.ContainerCompletionFunc(f)))
 	cmd.Flags().StringVar((*string)(&options.ConnectMode), "connect-mode", string(dev.ConnectModeHost), "Connect to kubernetes network in container or in host, eg: ["+string(dev.ConnectModeContainer)+"|"+string(dev.ConnectModeHost)+"]")
-	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
-	cmd.Flags().StringVar((*string)(&options.Engine), "netstack", string(config.EngineSystem), fmt.Sprintf(`network stack ("%s"|"%s") %s: use gvisor (good compatibility), %s: use raw mode (best performance, relays on iptables SNAT)`, config.EngineGvisor, config.EngineSystem, config.EngineGvisor, config.EngineSystem))
+	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName, &options.Engine)
 
 	// diy docker options
 	cmd.Flags().StringVar(&options.DevImage, "dev-image", "", "Use to startup docker container, Default is pod image")

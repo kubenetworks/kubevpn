@@ -31,7 +31,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace string, gvisor bool) (err error) {
+func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace string, gvisor bool, imagePullSecretName string) (err error) {
 	innerIpv4CIDR := net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}
 	innerIpv6CIDR := net.IPNet{IP: config.RouterIP6, Mask: config.CIDR6.Mask}
 
@@ -261,7 +261,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 
 	// 7) create deployment
 	log.Infof("Creating Deployment %s", config.ConfigMapPodTrafficManager)
-	deploy := genDeploySpec(namespace, innerIpv4CIDR, innerIpv6CIDR, udp8422, tcp10800, tcp9002, udp53, tcp80, gvisor)
+	deploy := genDeploySpec(namespace, innerIpv4CIDR, innerIpv6CIDR, udp8422, tcp10800, tcp9002, udp53, tcp80, gvisor, imagePullSecretName)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
 		log.Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
@@ -334,7 +334,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	return nil
 }
 
-func genDeploySpec(namespace string, innerIpv4CIDR net.IPNet, innerIpv6CIDR net.IPNet, udp8422 string, tcp10800 string, tcp9002 string, udp53 string, tcp80 string, gvisor bool) *appsv1.Deployment {
+func genDeploySpec(namespace string, innerIpv4CIDR net.IPNet, innerIpv6CIDR net.IPNet, udp8422 string, tcp10800 string, tcp9002 string, udp53 string, tcp80 string, gvisor bool, imagePullSecretName string) *appsv1.Deployment {
 	var resourcesSmall = v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
 			v1.ResourceCPU:    resource.MustParse("100m"),
@@ -517,6 +517,9 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 						},
 					},
 					RestartPolicy: v1.RestartPolicyAlways,
+					ImagePullSecrets: []v1.LocalObjectReference{{
+						Name: imagePullSecretName,
+					}},
 				},
 			},
 		},

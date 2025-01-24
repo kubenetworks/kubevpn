@@ -30,6 +30,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	var extraRoute = &handler.ExtraRouteInfo{}
 	var transferImage bool
 	var syncDir string
+	var imagePullSecretName string
 	cmd := &cobra.Command{
 		Use:   "clone",
 		Short: i18n.T("Clone workloads to run in target-kubeconfig cluster with same volume、env、and network"),
@@ -131,6 +132,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 				IsChangeTargetRegistry: options.IsChangeTargetRegistry,
 				TransferImage:          transferImage,
 				Image:                  config.Image,
+				ImagePullSecretName:    imagePullSecretName,
 				Level:                  int32(logLevel),
 				LocalDir:               options.LocalDir,
 				RemoteDir:              options.RemoteDir,
@@ -152,10 +154,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringToStringVarP(&options.Headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to target cluster cloned workloads, If not special, redirect all traffic to target cluster cloned workloads. eg: --headers foo=bar --headers env=dev")
-	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug mode or not, true or false")
-	cmd.Flags().StringVar(&config.Image, "image", config.Image, "Use this image to startup container")
-	cmd.Flags().BoolVar(&transferImage, "transfer-image", false, "transfer image to remote registry, it will transfer image "+config.OriginImage+" to flags `--image` special image, default: "+config.Image)
-	cmd.Flags().StringVar((*string)(&options.Engine), "netstack", string(config.EngineSystem), fmt.Sprintf(`network stack ("%s"|"%s") %s: use gvisor (good compatibility), %s: use raw mode (best performance, relays on iptables SNAT)`, config.EngineGvisor, config.EngineSystem, config.EngineGvisor, config.EngineSystem))
+	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName, &options.Engine)
 
 	cmd.Flags().StringVar(&options.TargetImage, "target-image", "", "Clone container use this image to startup container, if not special, use origin image")
 	cmd.Flags().StringVar(&options.TargetContainer, "target-container", "", "Clone container use special image to startup this container, if not special, use origin image")

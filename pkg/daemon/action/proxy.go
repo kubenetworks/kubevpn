@@ -43,6 +43,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
+		ImagePullSecretName:  req.ImagePullSecretName,
 	}
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 

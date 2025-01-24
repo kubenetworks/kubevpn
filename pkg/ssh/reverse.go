@@ -33,14 +33,14 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 	// Connect to SSH remote server using serverEndpoint
 	serverConn, err := ssh.Dial("tcp", remoteSSHServer.String(), sshConfig)
 	if err != nil {
-		log.Errorf("Dial INTO remote server error: %s", err)
+		log.Errorf("Dial into remote server error: %s", err)
 		return err
 	}
 
 	// Listen on remote server port
 	listener, err := serverConn.Listen("tcp", remotePort.String())
 	if err != nil {
-		log.Errorf("Listen open port ON remote server error: %s", err)
+		log.Errorf("Listen open port on remote server error: %s", err)
 		return err
 	}
 	defer listener.Close()
