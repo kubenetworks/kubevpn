@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
-	"strings"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -20,6 +18,7 @@ import (
 	"k8s.io/kubectl/pkg/util/term"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/handler"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -28,7 +27,7 @@ import (
 // Remember to use network mask 32, because ssh using unique network CIDR 223.255.0.0/16
 func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 	var sshConf = &pkgssh.SshConfig{}
-	var ExtraCIDR []string
+	var extraCIDR []string
 	cmd := &cobra.Command{
 		Use:   "ssh",
 		Short: "Ssh to jump server",
@@ -72,16 +71,19 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("terminal get size: %s", err)
 			}
-			marshal, err := json.Marshal(sshConf)
+			sessionID := uuid.NewString()
+			ssh := handler.Ssh{
+				Config:    *sshConf,
+				ExtraCIDR: extraCIDR,
+				Width:     width,
+				Height:    height,
+				SessionID: sessionID,
+			}
+			bytes, err := json.Marshal(ssh)
 			if err != nil {
 				return err
 			}
-			sessionID := uuid.NewString()
-			config.Header.Set("ssh", string(marshal))
-			config.Header.Set("extra-cidr", strings.Join(ExtraCIDR, ","))
-			config.Header.Set("terminal-width", strconv.Itoa(width))
-			config.Header.Set("terminal-height", strconv.Itoa(height))
-			config.Header.Set("session-id", sessionID)
+			config.Header.Set("ssh", string(bytes))
 			client := daemon.GetTCPClient(true)
 			if client == nil {
 				return fmt.Errorf("client is nil")
@@ -114,7 +116,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 		},
 	}
 	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
-	cmd.Flags().StringArrayVar(&ExtraCIDR, "extra-cidr", []string{}, "Extra network CIDR string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
+	cmd.Flags().StringArrayVar(&extraCIDR, "extra-cidr", []string{}, "Extra network CIDR string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
 	return cmd
 }
 

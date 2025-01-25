@@ -341,36 +341,38 @@ func (w *wsHandler) PrintLine(msg string) {
 var SessionMap = make(map[string]*ssh.Session)
 var CondReady = make(map[string]context.Context)
 
+type Ssh struct {
+	Config    pkgssh.SshConfig
+	ExtraCIDR []string
+	Width     int
+	Height    int
+	SessionID string
+}
+
 func init() {
 	http.Handle("/ws", websocket.Handler(func(conn *websocket.Conn) {
-		var sshConfig pkgssh.SshConfig
 		b := conn.Request().Header.Get("ssh")
-		if err := json.Unmarshal([]byte(b), &sshConfig); err != nil {
+		var conf Ssh
+		err := json.Unmarshal([]byte(b), &conf)
+		if err != nil {
 			_, _ = conn.Write([]byte(err.Error()))
 			_ = conn.Close()
 			return
 		}
-		var extraCIDR []string
-		if v := conn.Request().Header.Get("extra-cidr"); v != "" {
-			extraCIDR = strings.Split(v, ",")
-		}
-		width, _ := strconv.Atoi(conn.Request().Header.Get("width"))
-		height, _ := strconv.Atoi(conn.Request().Header.Get("height"))
-		sessionID := conn.Request().Header.Get("session-id")
-		defer delete(SessionMap, sessionID)
-		defer delete(CondReady, sessionID)
+		defer delete(SessionMap, conf.SessionID)
+		defer delete(CondReady, conf.SessionID)
 
 		ctx, cancelFunc := context.WithCancel(conn.Request().Context())
 		h := &wsHandler{
-			sshConfig: &sshConfig,
+			sshConfig: &conf.Config,
 			conn:      conn,
-			cidr:      extraCIDR,
-			width:     width,
-			height:    height,
-			sessionId: sessionID,
+			cidr:      conf.ExtraCIDR,
+			width:     conf.Width,
+			height:    conf.Height,
+			sessionId: conf.SessionID,
 			condReady: cancelFunc,
 		}
-		CondReady[sessionID] = ctx
+		CondReady[conf.SessionID] = ctx
 		defer conn.Close()
 		h.handle(conn.Request().Context())
 	}))
