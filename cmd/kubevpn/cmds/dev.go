@@ -18,6 +18,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util/regctl"
 )
 
 func CmdDev(f cmdutil.Factory) *cobra.Command {
@@ -102,6 +103,12 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 			err = daemon.StartupDaemon(cmd.Context())
 			if err != nil {
 				return err
+			}
+			if transferImage {
+				err = regctl.TransferImageWithRegctl(cmd.Context(), config.OriginImage, config.Image)
+				if err != nil {
+					return err
+				}
 			}
 			return pkgssh.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false)
 		},

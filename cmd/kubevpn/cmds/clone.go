@@ -20,6 +20,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util/regctl"
 )
 
 // CmdClone multiple cluster operate, can start up one deployment to another cluster
@@ -76,7 +77,14 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			util.InitLoggerForClient(false)
 			// startup daemon process and sudo process
-			return daemon.StartupDaemon(cmd.Context())
+			err = daemon.StartupDaemon(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if transferImage {
+				err = regctl.TransferImageWithRegctl(cmd.Context(), config.OriginImage, config.Image)
+			}
+			return err
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {

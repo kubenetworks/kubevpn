@@ -20,6 +20,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util/regctl"
 )
 
 func CmdProxy(f cmdutil.Factory) *cobra.Command {
@@ -90,6 +91,9 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			util.InitLoggerForClient(false)
 			if err = daemon.StartupDaemon(cmd.Context()); err != nil {
 				return err
+			}
+			if transferImage {
+				err = regctl.TransferImageWithRegctl(cmd.Context(), config.OriginImage, config.Image)
 			}
 			return err
 		},
