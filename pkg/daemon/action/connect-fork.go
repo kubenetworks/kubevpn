@@ -41,16 +41,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 		Lock:                 &svr.Lock,
 		ImagePullSecretName:  req.ImagePullSecretName,
 	}
-	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
-	var transferImage = req.TransferImage
-
 	defaultlog.Default().SetOutput(io.Discard)
-	if transferImage {
-		err = ssh.TransferImage(ctx, sshConf, config.OriginImage, req.Image, out)
-		if err != nil {
-			return err
-		}
-	}
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
 		return err
@@ -74,7 +65,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	}()
 
 	var path string
-	path, err = ssh.SshJump(sshCtx, sshConf, flags, false)
+	path, err = ssh.SshJump(sshCtx, ssh.ParseSshFromRPC(req.SshJump), flags, false)
 	if err != nil {
 		return err
 	}

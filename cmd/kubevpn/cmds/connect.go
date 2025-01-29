@@ -21,6 +21,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util/regctl"
 )
 
 func CmdConnect(f cmdutil.Factory) *cobra.Command {
@@ -69,7 +70,10 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return nil
+			if transferImage {
+				err = regctl.TransferImageWithRegctl(cmd.Context(), config.OriginImage, config.Image)
+			}
+			return err
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			bytes, ns, err := util.ConvertToKubeConfigBytes(f)

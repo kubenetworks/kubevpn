@@ -185,7 +185,7 @@ func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, d
 		Platform:      plat,
 	})
 	if err != nil {
-		log.Errorf("Failed to pull image %s, err: %s, please make sure image is exist and can be pulled from local", img, err)
+		log.Errorf("Failed to pull image %s: %v", img, err)
 		return err
 	}
 	defer readCloser.Close()
