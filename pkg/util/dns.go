@@ -18,7 +18,7 @@ import (
 )
 
 func GetDNSServiceIPFromPod(ctx context.Context, clientset *kubernetes.Clientset, conf *rest.Config, podName, namespace string) (*dns.ClientConfig, error) {
-	str, err := Shell(ctx, clientset, conf, podName, config.ContainerSidecarVPN, namespace, []string{"cat", "/etc/resolv.conf"})
+	str, err := Shell(ctx, clientset, conf, podName, "", namespace, []string{"cat", "/etc/resolv.conf"})
 	if err != nil {
 		return nil, err
 	}

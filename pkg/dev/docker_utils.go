@@ -3,174 +3,49 @@ package dev
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
-	"reflect"
-	"strconv"
+	"os"
+	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 
-	"github.com/distribution/reference"
-	"github.com/docker/cli/cli"
-	"github.com/docker/cli/cli/command"
-	image2 "github.com/docker/cli/cli/command/image"
-	"github.com/docker/cli/cli/streams"
 	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/events"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/versions"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/errdefs"
-	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/docker/docker/pkg/stdcopy"
-	"github.com/moby/sys/signal"
-	"github.com/moby/term"
 	log "github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/util/wait"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 )
 
-func waitExitOrRemoved(ctx context.Context, apiClient client.APIClient, containerID string, waitRemove bool) <-chan int {
-	if len(containerID) == 0 {
-		// containerID can never be empty
-		panic("Internal Error: waitExitOrRemoved needs a containerID as parameter")
+// Pull constants
+const (
+	PullImageAlways  = "always"
+	PullImageMissing = "missing" // Default (matches previous behavior)
+	PullImageNever   = "never"
+)
+
+func ConvertK8sImagePullPolicyToDocker(policy corev1.PullPolicy) string {
+	switch policy {
+	case corev1.PullAlways:
+		return PullImageAlways
+	case corev1.PullNever:
+		return PullImageNever
+	default:
+		return PullImageMissing
 	}
-
-	// Older versions used the Events API, and even older versions did not
-	// support server-side removal. This legacyWaitExitOrRemoved method
-	// preserves that old behavior and any issues it may have.
-	if versions.LessThan(apiClient.ClientVersion(), "1.30") {
-		return legacyWaitExitOrRemoved(ctx, apiClient, containerID, waitRemove)
-	}
-
-	condition := container.WaitConditionNextExit
-	if waitRemove {
-		condition = container.WaitConditionRemoved
-	}
-
-	resultC, errC := apiClient.ContainerWait(ctx, containerID, condition)
-
-	statusC := make(chan int)
-	go func() {
-		select {
-		case result := <-resultC:
-			if result.Error != nil {
-				log.Errorf("Error waiting for container: %v", result.Error.Message)
-				statusC <- 125
-			} else {
-				statusC <- int(result.StatusCode)
-			}
-		case err := <-errC:
-			log.Errorf("Error waiting for container: %v", err)
-			statusC <- 125
-		}
-	}()
-
-	return statusC
 }
 
-func legacyWaitExitOrRemoved(ctx context.Context, apiClient client.APIClient, containerID string, waitRemove bool) <-chan int {
-	var removeErr error
-	statusChan := make(chan int)
-	exitCode := 125
-
-	// Get events via Events API
-	f := filters.NewArgs()
-	f.Add("type", "container")
-	f.Add("container", containerID)
-	options := types.EventsOptions{
-		Filters: f,
-	}
-	eventCtx, cancel := context.WithCancel(ctx)
-	eventq, errq := apiClient.Events(eventCtx, options)
-
-	eventProcessor := func(e events.Message) bool {
-		stopProcessing := false
-		switch e.Status {
-		case "die":
-			if v, ok := e.Actor.Attributes["exitCode"]; ok {
-				code, cerr := strconv.Atoi(v)
-				if cerr != nil {
-					log.Errorf("Failed to convert exitcode '%q' to int: %v", v, cerr)
-				} else {
-					exitCode = code
-				}
-			}
-			if !waitRemove {
-				stopProcessing = true
-			} else if versions.LessThan(apiClient.ClientVersion(), "1.25") {
-				// If we are talking to an older daemon, `AutoRemove` is not supported.
-				// We need to fall back to the old behavior, which is client-side removal
-				go func() {
-					removeErr = apiClient.ContainerRemove(ctx, containerID, container.RemoveOptions{RemoveVolumes: true})
-					if removeErr != nil {
-						log.Errorf("Error removing container: %v", removeErr)
-						cancel() // cancel the event Q
-					}
-				}()
-			}
-		case "detach":
-			exitCode = 0
-			stopProcessing = true
-		case "destroy":
-			stopProcessing = true
-		}
-		return stopProcessing
-	}
-
-	go func() {
-		defer func() {
-			statusChan <- exitCode // must always send an exit code or the caller will block
-			cancel()
-		}()
-
-		for {
-			select {
-			case <-eventCtx.Done():
-				if removeErr != nil {
-					return
-				}
-			case evt := <-eventq:
-				if eventProcessor(evt) {
-					return
-				}
-			case err := <-errq:
-				log.Errorf("Error getting events from daemon: %v", err)
-				return
-			}
-		}
-	}()
-
-	return statusChan
-}
-
-func runLogsWaitRunning(ctx context.Context, dockerCli command.Cli, id string) error {
-	c, err := dockerCli.Client().ContainerInspect(ctx, id)
-	if err != nil {
-		return err
-	}
-
-	options := container.LogsOptions{
-		ShowStdout: true,
-		ShowStderr: true,
-		Follow:     true,
-	}
-	logStream, err := dockerCli.Client().ContainerLogs(ctx, c.ID, options)
-	if err != nil {
-		return err
-	}
-	defer logStream.Close()
-
+func RunLogsWaitRunning(ctx context.Context, name string) error {
 	buf := bytes.NewBuffer(nil)
-	w := io.MultiWriter(buf, dockerCli.Out())
+	w := io.MultiWriter(buf, os.Stdout)
+
+	args := []string{"logs", name, "--since", "0m", "--details", "--follow"}
+	cmd := exec.Command("docker", args...)
+	cmd.Stdout = w
+	go cmd.Start()
 
 	cancel, cancelFunc := context.WithCancel(ctx)
 	defer cancelFunc()
@@ -190,440 +65,181 @@ func runLogsWaitRunning(ctx context.Context, dockerCli command.Cli, id string) e
 	var errChan = make(chan error)
 	go func() {
 		var err error
-		if c.Config.Tty {
-			_, err = io.Copy(w, logStream)
-		} else {
-			_, err = stdcopy.StdCopy(w, dockerCli.Err(), logStream)
-		}
+		_, err = stdcopy.StdCopy(w, os.Stdout, buf)
 		if err != nil {
 			errChan <- err
 		}
 	}()
 
 	select {
-	case err = <-errChan:
+	case err := <-errChan:
 		return err
 	case <-cancel.Done():
 		return nil
 	}
 }
 
-func runLogsSinceNow(dockerCli command.Cli, id string, follow bool) error {
-	ctx := context.Background()
+func RunLogsSinceNow(name string, follow bool) error {
+	args := []string{"logs", name, "--since", "0m", "--details"}
+	if follow {
+		args = append(args, "--follow")
+	}
+	output, err := exec.Command("docker", args...).CombinedOutput()
+	_, err = stdcopy.StdCopy(os.Stdout, os.Stderr, bytes.NewReader(output))
+	return err
+}
 
-	c, err := dockerCli.Client().ContainerInspect(ctx, id)
+// CreateNetwork
+// docker create kubevpn-traffic-manager --labels owner=config.ConfigMapPodTrafficManager --subnet 223.255.0.0/16 --gateway 223.255.0.100
+func CreateNetwork(ctx context.Context, name string) (string, error) {
+	args := []string{
+		"network",
+		"inspect",
+		name,
+	}
+	_, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	if err == nil {
+		return name, nil
+	}
+
+	args = []string{
+		"network",
+		"create",
+		name,
+		"--label", "owner=" + name,
+		"--subnet", config.DockerCIDR.String(),
+		"--gateway", config.DockerRouterIP.String(),
+		"--driver", "bridge",
+		"--scope", "local",
+	}
+
+	id, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	if err != nil {
+		return "", err
+	}
+
+	return string(id), nil
+}
+
+func RunContainer(ctx context.Context, runConfig *RunConfig) error {
+	var result []string
+	result = append(result, "run")
+	result = append(result, runConfig.options...)
+	if len(runConfig.command) != 0 {
+		result = append(result, "--entrypoint", strings.Join(runConfig.command, " "))
+	}
+	result = append(result, runConfig.image)
+	result = append(result, runConfig.args...)
+
+	cmd := exec.CommandContext(ctx, "docker", result...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	log.Debugf("Run container with cmd: %v", cmd.Args)
+	err := cmd.Start()
+	if err != nil {
+		log.Errorf("Failed to run container with cmd: %v: %v", cmd.Args, err)
 		return err
 	}
+	return cmd.Wait()
+}
 
-	options := container.LogsOptions{
-		ShowStdout: true,
-		ShowStderr: true,
-		Since:      "0m",
-		Follow:     follow,
+func WaitDockerContainerRunning(ctx context.Context, name string) error {
+	log.Infof("Wait container %s to be running...", name)
+
+	for ctx.Err() == nil {
+		time.Sleep(time.Second * 1)
+		inspect, err := ContainerInspect(ctx, name)
+		if err != nil {
+			return err
+		}
+		if inspect.State != nil && (inspect.State.Status == "exited" || inspect.State.Status == "dead" || inspect.State.Dead) {
+			err = errors.New(fmt.Sprintf("container status: %s", inspect.State.Status))
+			break
+		}
+		if inspect.State != nil && inspect.State.Running {
+			break
+		}
 	}
-	responseBody, err := dockerCli.Client().ContainerLogs(ctx, c.ID, options)
+
+	log.Infof("Container %s is running now", name)
+	return nil
+}
+
+func ContainerInspect(ctx context.Context, name string) (types.ContainerJSON, error) {
+	output, err := exec.CommandContext(ctx, "docker", "inspect", name).CombinedOutput()
 	if err != nil {
-		return err
+		log.Errorf("Failed to wait container to be ready output: %s: %v", string(output), err)
+		_ = RunLogsSinceNow(name, false)
+		return types.ContainerJSON{}, err
 	}
-	defer responseBody.Close()
+	var inspect []types.ContainerJSON
+	rdr := bytes.NewReader(output)
+	err = json.NewDecoder(rdr).Decode(&inspect)
+	if err != nil {
+		return types.ContainerJSON{}, err
+	}
+	if len(inspect) == 0 {
+		return types.ContainerJSON{}, err
+	}
+	return inspect[0], nil
+}
 
-	if c.Config.Tty {
-		_, err = io.Copy(dockerCli.Out(), responseBody)
-	} else {
-		_, err = stdcopy.StdCopy(dockerCli.Out(), dockerCli.Err(), responseBody)
+func NetworkInspect(ctx context.Context, name string) (types.NetworkResource, error) {
+	//var cli       *client.Client
+	//var dockerCli *command.DockerCli
+	//cli.NetworkInspect()
+	output, err := exec.CommandContext(ctx, "docker", "network", "inspect", name).CombinedOutput()
+	if err != nil {
+		log.Errorf("Failed to wait container to be ready: %v", err)
+		_ = RunLogsSinceNow(name, false)
+		return types.NetworkResource{}, err
+	}
+	var inspect []types.NetworkResource
+	rdr := bytes.NewReader(output)
+	err = json.NewDecoder(rdr).Decode(&inspect)
+	if err != nil {
+		return types.NetworkResource{}, err
+	}
+	if len(inspect) == 0 {
+		return types.NetworkResource{}, err
+	}
+	return inspect[0], nil
+}
+
+func NetworkRemove(ctx context.Context, name string) error {
+	output, err := exec.CommandContext(ctx, "docker", "network", "remove", name).CombinedOutput()
+	if err != nil && strings.Contains(string(output), "not found") {
+		return nil
 	}
 	return err
 }
 
-func createNetwork(ctx context.Context, cli *client.Client) (string, error) {
-	by := map[string]string{"owner": config.ConfigMapPodTrafficManager}
-	list, _ := cli.NetworkList(ctx, types.NetworkListOptions{})
-	for _, resource := range list {
-		if reflect.DeepEqual(resource.Labels, by) {
-			return resource.ID, nil
-		}
+// NetworkDisconnect
+// docker network disconnect --force
+func NetworkDisconnect(ctx context.Context, containerName string) ([]byte, error) {
+	output, err := exec.CommandContext(ctx, "docker", "network", "disconnect", "--force", config.ConfigMapPodTrafficManager, containerName).CombinedOutput()
+	if err != nil && strings.Contains(string(output), "not found") {
+		return output, nil
 	}
-
-	create, err := cli.NetworkCreate(ctx, config.ConfigMapPodTrafficManager, types.NetworkCreate{
-		Driver: "bridge",
-		Scope:  "local",
-		IPAM: &network.IPAM{
-			Driver:  "",
-			Options: nil,
-			Config: []network.IPAMConfig{
-				{
-					Subnet:  config.DockerCIDR.String(),
-					Gateway: config.DockerRouterIP.String(),
-				},
-			},
-		},
-		//Options: map[string]string{"--icc": "", "--ip-masq": ""},
-		Labels: by,
-	})
-	if err != nil {
-		if errdefs.IsForbidden(err) {
-			list, _ = cli.NetworkList(ctx, types.NetworkListOptions{})
-			for _, resource := range list {
-				if reflect.DeepEqual(resource.Labels, by) {
-					return resource.ID, nil
-				}
-			}
-		}
-		return "", err
-	}
-	return create.ID, nil
+	return output, err
 }
 
-// Pull constants
-const (
-	PullImageAlways  = "always"
-	PullImageMissing = "missing" // Default (matches previous behavior)
-	PullImageNever   = "never"
-)
-
-func pullImage(ctx context.Context, dockerCli command.Cli, img string, options RunOptions) error {
-	encodedAuth, err := command.RetrieveAuthTokenFromImage(dockerCli.ConfigFile(), img)
-	if err != nil {
-		return err
+// ContainerRemove
+// docker remove --force
+func ContainerRemove(ctx context.Context, containerName string) ([]byte, error) {
+	output, err := exec.CommandContext(ctx, "docker", "remove", "--force", containerName).CombinedOutput()
+	if err != nil && strings.Contains(string(output), "not found") {
+		return output, nil
 	}
-
-	responseBody, err := dockerCli.Client().ImageCreate(ctx, img, image.CreateOptions{
-		RegistryAuth: encodedAuth,
-		Platform:     options.Platform,
-	})
-	if err != nil {
-		return err
-	}
-	defer responseBody.Close()
-
-	out := dockerCli.Err()
-	return jsonmessage.DisplayJSONMessagesToStream(responseBody, streams.NewOut(out), nil)
+	return output, err
 }
 
-//nolint:gocyclo
-func createContainer(ctx context.Context, dockerCli command.Cli, runConfig *RunConfig) (string, error) {
-	config := runConfig.config
-	hostConfig := runConfig.hostConfig
-	networkingConfig := runConfig.networkingConfig
-	var (
-		trustedRef reference.Canonical
-		namedRef   reference.Named
-	)
-
-	ref, err := reference.ParseAnyReference(config.Image)
-	if err != nil {
-		return "", err
+func ContainerKill(ctx context.Context, name *string) ([]byte, error) {
+	output, err := exec.CommandContext(ctx, "docker", "kill", *name, "--signal", "SIGTERM").CombinedOutput()
+	if err != nil && strings.Contains(string(output), "not found") {
+		return output, nil
 	}
-	if named, ok := ref.(reference.Named); ok {
-		namedRef = reference.TagNameOnly(named)
-
-		if taggedRef, ok := namedRef.(reference.NamedTagged); ok && dockerCli.ContentTrustEnabled() {
-			var err error
-			trustedRef, err = image2.TrustedReference(ctx, dockerCli, taggedRef)
-			if err != nil {
-				return "", err
-			}
-			config.Image = reference.FamiliarString(trustedRef)
-		}
-	}
-
-	pullAndTagImage := func() error {
-		if err = pullImage(ctx, dockerCli, config.Image, runConfig.Options); err != nil {
-			return err
-		}
-		if taggedRef, ok := namedRef.(reference.NamedTagged); ok && trustedRef != nil {
-			return image2.TagTrusted(ctx, dockerCli, trustedRef, taggedRef)
-		}
-		return nil
-	}
-
-	if runConfig.Options.Pull == PullImageAlways {
-		if err = pullAndTagImage(); err != nil {
-			return "", err
-		}
-	}
-
-	hostConfig.ConsoleSize[0], hostConfig.ConsoleSize[1] = dockerCli.Out().GetTtySize()
-
-	response, err := dockerCli.Client().ContainerCreate(ctx, config, hostConfig, networkingConfig, runConfig.platform, runConfig.name)
-	if err != nil {
-		// Pull image if it does not exist locally and we have the PullImageMissing option. Default behavior.
-		if errdefs.IsNotFound(err) && namedRef != nil && runConfig.Options.Pull == PullImageMissing {
-			// we don't want to write to stdout anything apart from container.ID
-			_, _ = fmt.Fprintf(dockerCli.Err(), "Unable to find image '%s' locally\n", reference.FamiliarString(namedRef))
-
-			if err = pullAndTagImage(); err != nil {
-				return "", err
-			}
-
-			var retryErr error
-			response, retryErr = dockerCli.Client().ContainerCreate(ctx, config, hostConfig, networkingConfig, runConfig.platform, runConfig.name)
-			if retryErr != nil {
-				return "", retryErr
-			}
-		} else {
-			return "", err
-		}
-	}
-
-	for _, w := range response.Warnings {
-		_, _ = fmt.Fprintf(dockerCli.Err(), "WARNING: %s\n", w)
-	}
-	return response.ID, err
-}
-
-func runContainer(ctx context.Context, dockerCli command.Cli, runConfig *RunConfig) error {
-	config := runConfig.config
-	stdout, stderr := dockerCli.Out(), dockerCli.Err()
-	apiClient := dockerCli.Client()
-
-	config.ArgsEscaped = false
-
-	if err := dockerCli.In().CheckTty(config.AttachStdin, config.Tty); err != nil {
-		return err
-	}
-
-	ctx, cancelFun := context.WithCancel(ctx)
-	defer cancelFun()
-
-	containerID, err := createContainer(ctx, dockerCli, runConfig)
-	if err != nil {
-		reportError(stderr, err.Error())
-		return runStartContainerErr(err)
-	}
-	if runConfig.Options.SigProxy {
-		sigc := notifyAllSignals()
-		go ForwardAllSignals(ctx, apiClient, containerID, sigc)
-		defer signal.StopCatch(sigc)
-	}
-
-	var (
-		waitDisplayID chan struct{}
-		errCh         chan error
-	)
-	if !config.AttachStdout && !config.AttachStderr {
-		// Make this asynchronous to allow the client to write to stdin before having to read the ID
-		waitDisplayID = make(chan struct{})
-		go func() {
-			defer close(waitDisplayID)
-			_, _ = fmt.Fprintln(stdout, containerID)
-		}()
-	}
-	attach := config.AttachStdin || config.AttachStdout || config.AttachStderr
-	if attach {
-		closeFn, err := attachContainer(ctx, dockerCli, containerID, &errCh, config, container.AttachOptions{
-			Stream:     true,
-			Stdin:      config.AttachStdin,
-			Stdout:     config.AttachStdout,
-			Stderr:     config.AttachStderr,
-			DetachKeys: dockerCli.ConfigFile().DetachKeys,
-		})
-		if err != nil {
-			return err
-		}
-		defer closeFn()
-	}
-
-	statusChan := waitExitOrRemoved(ctx, apiClient, containerID, runConfig.hostConfig.AutoRemove)
-
-	// start the container
-	if err := apiClient.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
-		// If we have hijackedIOStreamer, we should notify
-		// hijackedIOStreamer we are going to exit and wait
-		// to avoid the terminal are not restored.
-		if attach {
-			cancelFun()
-			<-errCh
-		}
-
-		reportError(stderr, err.Error())
-		if runConfig.hostConfig.AutoRemove {
-			// wait container to be removed
-			<-statusChan
-		}
-		return runStartContainerErr(err)
-	}
-
-	if (config.AttachStdin || config.AttachStdout || config.AttachStderr) && config.Tty && dockerCli.Out().IsTerminal() {
-		if err := MonitorTtySize(ctx, dockerCli, containerID, false); err != nil {
-			_, _ = fmt.Fprintln(stderr, "Error monitoring TTY size:", err)
-		}
-	}
-
-	if errCh != nil {
-		if err := <-errCh; err != nil {
-			if _, ok := err.(term.EscapeError); ok {
-				// The user entered the detach escape sequence.
-				return nil
-			}
-
-			log.Debugf("Error hijack: %s", err)
-			return err
-		}
-	}
-
-	// Detached mode: wait for the id to be displayed and return.
-	if !config.AttachStdout && !config.AttachStderr {
-		// Detached mode
-		<-waitDisplayID
-		return nil
-	}
-
-	status := <-statusChan
-	if status != 0 {
-		return cli.StatusError{StatusCode: status}
-	}
-	return nil
-}
-
-func attachContainer(ctx context.Context, dockerCli command.Cli, containerID string, errCh *chan error, config *container.Config, options container.AttachOptions) (func(), error) {
-	resp, errAttach := dockerCli.Client().ContainerAttach(ctx, containerID, options)
-	if errAttach != nil {
-		return nil, errAttach
-	}
-
-	var (
-		out, cerr io.Writer
-		in        io.ReadCloser
-	)
-	if options.Stdin {
-		in = dockerCli.In()
-	}
-	if options.Stdout {
-		out = dockerCli.Out()
-	}
-	if options.Stderr {
-		if config.Tty {
-			cerr = dockerCli.Out()
-		} else {
-			cerr = dockerCli.Err()
-		}
-	}
-
-	ch := make(chan error, 1)
-	*errCh = ch
-
-	go func() {
-		ch <- func() error {
-			streamer := hijackedIOStreamer{
-				streams:      dockerCli,
-				inputStream:  in,
-				outputStream: out,
-				errorStream:  cerr,
-				resp:         resp,
-				tty:          config.Tty,
-				detachKeys:   options.DetachKeys,
-			}
-
-			if errHijack := streamer.stream(ctx); errHijack != nil {
-				return errHijack
-			}
-			return errAttach
-		}()
-	}()
-	return resp.Close, nil
-}
-
-// reportError is a utility method that prints a user-friendly message
-// containing the error that occurred during parsing and a suggestion to get help
-func reportError(stderr io.Writer, str string) {
-	str = strings.TrimSuffix(str, ".") + "."
-	_, _ = fmt.Fprintln(stderr, "docker:", str)
-}
-
-// if container start fails with 'not found'/'no such' error, return 127
-// if container start fails with 'permission denied' error, return 126
-// return 125 for generic docker daemon failures
-func runStartContainerErr(err error) error {
-	trimmedErr := strings.TrimPrefix(err.Error(), "Error response from daemon: ")
-	statusError := cli.StatusError{StatusCode: 125, Status: trimmedErr}
-	if strings.Contains(trimmedErr, "executable file not found") ||
-		strings.Contains(trimmedErr, "no such file or directory") ||
-		strings.Contains(trimmedErr, "system cannot find the file specified") {
-		statusError = cli.StatusError{StatusCode: 127, Status: trimmedErr}
-	} else if strings.Contains(trimmedErr, syscall.EACCES.Error()) ||
-		strings.Contains(trimmedErr, syscall.EISDIR.Error()) {
-		statusError = cli.StatusError{StatusCode: 126, Status: trimmedErr}
-	}
-
-	return statusError
-}
-
-func run(ctx context.Context, cli *client.Client, dockerCli *command.DockerCli, runConfig *RunConfig) (id string, err error) {
-	rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	var config = runConfig.config
-	var hostConfig = runConfig.hostConfig
-	var platform = runConfig.platform
-	var networkConfig = runConfig.networkingConfig
-	var name = runConfig.name
-
-	var needPull bool
-	var img types.ImageInspect
-	img, _, err = cli.ImageInspectWithRaw(ctx, config.Image)
-	if errdefs.IsNotFound(err) {
-		log.Infof("Needs to pull image %s", config.Image)
-		needPull = true
-		err = nil
-	} else if err != nil {
-		log.Errorf("Image inspect failed: %v", err)
-		return
-	}
-	if platform != nil && platform.Architecture != "" && platform.OS != "" {
-		if img.Os != platform.OS || img.Architecture != platform.Architecture {
-			needPull = true
-		}
-	}
-	if needPull {
-		err = pkgssh.PullImage(ctx, runConfig.platform, cli, dockerCli, config.Image, nil)
-		if err != nil {
-			log.Errorf("Failed to pull image: %s, err: %s", config.Image, err)
-			return
-		}
-	}
-
-	var create container.CreateResponse
-	create, err = cli.ContainerCreate(ctx, config, hostConfig, networkConfig, platform, name)
-	if err != nil {
-		log.Errorf("Failed to create container: %s, err: %s", name, err)
-		return
-	}
-	id = create.ID
-	log.Infof("Created container: %s", name)
-	err = cli.ContainerStart(ctx, create.ID, container.StartOptions{})
-	if err != nil {
-		log.Errorf("Failed to startup container %s: %v", name, err)
-		return
-	}
-	log.Infof("Wait container %s to be running...", name)
-	var inspect types.ContainerJSON
-	ctx2, cancelFunc := context.WithCancel(ctx)
-	wait.UntilWithContext(ctx2, func(ctx context.Context) {
-		inspect, err = cli.ContainerInspect(ctx, create.ID)
-		if errdefs.IsNotFound(err) {
-			cancelFunc()
-			return
-		} else if err != nil {
-			cancelFunc()
-			return
-		}
-		if inspect.State != nil && (inspect.State.Status == "exited" || inspect.State.Status == "dead" || inspect.State.Dead) {
-			cancelFunc()
-			err = errors.New(fmt.Sprintf("container status: %s", inspect.State.Status))
-			return
-		}
-		if inspect.State != nil && inspect.State.Running {
-			cancelFunc()
-			return
-		}
-	}, time.Second)
-	if err != nil {
-		log.Errorf("Failed to wait container to be ready: %v", err)
-		_ = runLogsSinceNow(dockerCli, id, false)
-		return
-	}
-
-	log.Infof("Container %s is running now", name)
-	return
+	return output, err
 }
