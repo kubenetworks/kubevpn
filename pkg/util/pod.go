@@ -100,19 +100,27 @@ func PrintStatusInline(pod *corev1.Pod) string {
 	return sb.String()
 }
 
-func GetEnv(ctx context.Context, set *kubernetes.Clientset, config *rest.Config, ns, podName string) (map[string][]string, error) {
+func GetEnv(ctx context.Context, set *kubernetes.Clientset, config *rest.Config, ns, podName string) (map[string]string, error) {
 	pod, err := set.CoreV1().Pods(ns).Get(ctx, podName, v1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
-	result := map[string][]string{}
+	result := map[string]string{}
 	for _, c := range pod.Spec.Containers {
 		env, err := Shell(ctx, set, config, podName, c.Name, ns, []string{"env"})
 		if err != nil {
 			return nil, err
 		}
-		split := strings.Split(env, "\n")
-		result[Join(ns, c.Name)] = split
+		temp, err := os.CreateTemp("", "*.env")
+		if err != nil {
+			return nil, err
+		}
+		_, err = temp.WriteString(env)
+		if err != nil {
+			return nil, err
+		}
+		_ = temp.Close()
+		result[Join(ns, c.Name)] = temp.Name()
 	}
 	return result, nil
 }

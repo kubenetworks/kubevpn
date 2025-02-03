@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/containerd/containerd/platforms"
+	"github.com/docker/cli/cli/command"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -90,25 +90,15 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			util.InitLoggerForClient(config.Debug)
-
-			if p := options.RunOptions.Platform; p != "" {
-				if _, err = platforms.Parse(p); err != nil {
-					return fmt.Errorf("error parsing specified platform: %v", err)
-				}
-			}
-			if err = validatePullOpt(options.RunOptions.Pull); err != nil {
-				return err
-			}
-
 			err = daemon.StartupDaemon(cmd.Context())
 			if err != nil {
 				return err
 			}
 			if transferImage {
 				err = regctl.TransferImageWithRegctl(cmd.Context(), config.OriginImage, config.Image)
-				if err != nil {
-					return err
-				}
+			}
+			if err != nil {
+				return err
 			}
 			return pkgssh.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false)
 		},
@@ -124,8 +114,8 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 			defer func() {
 				for _, function := range options.GetRollbackFuncList() {
 					if function != nil {
-						if er := function(); er != nil {
-							log.Errorf("Rollback failed, error: %s", er.Error())
+						if err := function(); err != nil {
+							log.Errorf("Rollback failed, error: %s", err.Error())
 						}
 					}
 				}
@@ -135,8 +125,12 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 				return err
 			}
 
-			err := options.Main(cmd.Context(), sshConf, cmd.Flags(), transferImage, imagePullSecretName)
-			return err
+			conf, hostConfig, err := dev.Parse(cmd.Flags(), options.ContainerOptions)
+			if err != nil {
+				return err
+			}
+
+			return options.Main(cmd.Context(), sshConf, conf, hostConfig, imagePullSecretName)
 		},
 	}
 	cmd.Flags().SortFlags = false
@@ -149,26 +143,12 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 
 	// diy docker options
 	cmd.Flags().StringVar(&options.DevImage, "dev-image", "", "Use to startup docker container, Default is pod image")
-	// origin docker options
-	dev.AddDockerFlags(options, cmd.Flags())
-
+	// -- origin docker options -- start
+	options.ContainerOptions = dev.AddFlags(cmd.Flags())
+	cmd.Flags().StringVar(&options.RunOptions.Pull, "pull", dev.PullImageMissing, `Pull image before running ("`+dev.PullImageAlways+`"|"`+dev.PullImageMissing+`"|"`+dev.PullImageNever+`")`)
+	command.AddPlatformFlag(cmd.Flags(), &options.RunOptions.Platform)
+	// -- origin docker options -- end
 	handler.AddExtraRoute(cmd.Flags(), &options.ExtraRouteInfo)
 	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	return cmd
-}
-
-func validatePullOpt(val string) error {
-	switch val {
-	case dev.PullImageAlways, dev.PullImageMissing, dev.PullImageNever, "":
-		// valid option, but nothing to do yet
-		return nil
-	default:
-		return fmt.Errorf(
-			"invalid pull option: '%s': must be one of %q, %q or %q",
-			val,
-			dev.PullImageAlways,
-			dev.PullImageMissing,
-			dev.PullImageNever,
-		)
-	}
 }

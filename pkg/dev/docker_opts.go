@@ -34,8 +34,8 @@ type ContainerOptions struct {
 	Args  []string
 }
 
-// addFlags adds all command line flags that will be used by Parse to the FlagSet
-func addFlags(flags *pflag.FlagSet) *ContainerOptions {
+// AddFlags adds all command line flags that will be used by Parse to the FlagSet
+func AddFlags(flags *pflag.FlagSet) *ContainerOptions {
 	copts := &ContainerOptions{
 		attach:  opts.NewListOpts(validateAttach),
 		expose:  opts.NewListOpts(nil),
@@ -51,8 +51,7 @@ func addFlags(flags *pflag.FlagSet) *ContainerOptions {
 	_ = flags.MarkHidden("interactive")
 	flags.BoolVarP(&copts.tty, "tty", "t", true, "Allocate a pseudo-TTY")
 	_ = flags.MarkHidden("tty")
-	flags.BoolVar(&copts.autoRemove, "rm", true, "Automatically remove the container when it exits")
-	_ = flags.MarkHidden("rm")
+	flags.BoolVar(&copts.autoRemove, "rm", false, "Automatically remove the container when it exits")
 
 	// Security
 	flags.BoolVar(&copts.privileged, "privileged", true, "Give extended privileges to this container")
@@ -257,8 +256,6 @@ type HostConfig struct {
 }
 
 type RunOptions struct {
-	SigProxy   bool
-	DetachKeys string
-	Platform   string
-	Pull       string // always, missing, never
+	Platform string
+	Pull     string // always, missing, never
 }
