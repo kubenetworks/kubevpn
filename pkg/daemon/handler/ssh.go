@@ -258,7 +258,7 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 		}
 	}()
 
-	cmd := "kubevpn version"
+	cmd := "sh -c 'kubevpn version'"
 	_, _, err = pkgssh.RemoteRun(sshClient, cmd, nil)
 	if err == nil {
 		w.Log("Found command kubevpn command on remote")
