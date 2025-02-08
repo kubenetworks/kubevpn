@@ -40,6 +40,11 @@ Pull requests for other OSs happily considered!
 
 ## Versions
 
+### v1.0.16
+
+Update x/net dependency. This was done to squelch a github security
+alert caused by depending upon an old version of x/net.
+
 ### v1.0.15
 
 Update dependencies to latest versions. This was done to squelch a github security

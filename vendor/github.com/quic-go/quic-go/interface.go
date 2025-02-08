@@ -19,10 +19,6 @@ type StreamID = protocol.StreamID
 // A Version is a QUIC version number.
 type Version = protocol.Version
 
-// A VersionNumber is a QUIC version number.
-// Deprecated: VersionNumber was renamed to Version.
-type VersionNumber = Version
-
 const (
 	// Version1 is RFC 9000
 	Version1 = protocol.Version1
@@ -102,7 +98,6 @@ type ReceiveStream interface {
 	// SetReadDeadline sets the deadline for future Read calls and
 	// any currently-blocked Read call.
 	// A zero value for t means Read will not time out.
-
 	SetReadDeadline(t time.Time) error
 }
 
@@ -361,10 +356,10 @@ type ClientHelloInfo struct {
 type ConnectionState struct {
 	// TLS contains information about the TLS connection state, incl. the tls.ConnectionState.
 	TLS tls.ConnectionState
-	// SupportsDatagrams says if support for QUIC datagrams (RFC 9221) was negotiated.
-	// This requires both nodes to support and enable the datagram extensions (via Config.EnableDatagrams).
-	// If datagram support was negotiated, datagrams can be sent and received using the
-	// SendDatagram and ReceiveDatagram methods on the Connection.
+	// SupportsDatagrams indicates whether the peer advertised support for QUIC datagrams (RFC 9221).
+	// When true, datagrams can be sent using the Connection's SendDatagram method.
+	// This is a unilateral declaration by the peer - receiving datagrams is only possible if
+	// datagram support was enabled locally via Config.EnableDatagrams.
 	SupportsDatagrams bool
 	// Used0RTT says if 0-RTT resumption was used.
 	Used0RTT bool

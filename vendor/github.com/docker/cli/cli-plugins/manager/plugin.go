@@ -1,7 +1,10 @@
 package manager
 
 import (
+	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -99,4 +102,23 @@ func newPlugin(c Candidate, cmds []*cobra.Command) (Plugin, error) {
 		return p, nil
 	}
 	return p, nil
+}
+
+// RunHook executes the plugin's hooks command
+// and returns its unprocessed output.
+func (p *Plugin) RunHook(ctx context.Context, hookData HookPluginData) ([]byte, error) {
+	hDataBytes, err := json.Marshal(hookData)
+	if err != nil {
+		return nil, wrapAsPluginError(err, "failed to marshall hook data")
+	}
+
+	pCmd := exec.CommandContext(ctx, p.Path, p.Name, HookSubcommandName, string(hDataBytes)) // #nosec G204 -- ignore "Subprocess launched with a potential tainted input or cmd arguments"
+	pCmd.Env = os.Environ()
+	pCmd.Env = append(pCmd.Env, ReexecEnvvar+"="+os.Args[0])
+	hookCmdOutput, err := pCmd.Output()
+	if err != nil {
+		return nil, wrapAsPluginError(err, "failed to execute plugin hook subcommand")
+	}
+
+	return hookCmdOutput, nil
 }
