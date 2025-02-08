@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/containerd/containerd/platforms"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -28,6 +29,7 @@ import (
 func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 	var sshConf = &pkgssh.SshConfig{}
 	var extraCIDR []string
+	var platform string
 	cmd := &cobra.Command{
 		Use:   "ssh",
 		Short: "Ssh to jump server",
@@ -54,6 +56,10 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			parse, err2 := platforms.Parse(platform)
+			if err2 != nil {
+				return err2
+			}
 			config, err := websocket.NewConfig("ws://test/ws", "http://test")
 			if err != nil {
 				return err
@@ -77,6 +83,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 				ExtraCIDR: extraCIDR,
 				Width:     width,
 				Height:    height,
+				Platform:  platforms.Format(platforms.Normalize(parse)),
 				SessionID: sessionID,
 			}
 			bytes, err := json.Marshal(ssh)
@@ -117,6 +124,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 	}
 	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	cmd.Flags().StringArrayVar(&extraCIDR, "extra-cidr", []string{}, "Extra network CIDR string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
+	cmd.Flags().StringVar(&platform, "platform", util.If(os.Getenv("KUBEVPN_DEFAULT_PLATFORM") != "", os.Getenv("KUBEVPN_DEFAULT_PLATFORM"), "linux/amd64"), "Set ssh server platform if needs to install command kubevpn")
 	return cmd
 }
 

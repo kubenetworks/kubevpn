@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/containerd/containerd/platforms"
+	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/net/websocket"
@@ -38,6 +40,7 @@ type wsHandler struct {
 	width     int
 	height    int
 	sessionId string
+	platform  specs.Platform
 	condReady context.CancelFunc
 }
 
@@ -240,7 +243,7 @@ func (w *wsHandler) terminal(ctx context.Context, cli *ssh.Client, conn io.ReadW
 		ssh.TTY_OP_ISPEED: 14400,
 		ssh.TTY_OP_OSPEED: 14400,
 	}
-	if err = session.RequestPty("xterm", height, width, modes); err != nil {
+	if err = session.RequestPty("xterm-256color", height, width, modes); err != nil {
 		w.Log("Request pty error: %v", err)
 		return err
 	}
@@ -270,7 +273,7 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 	if config.GitHubOAuthToken != "" {
 		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
 	}
-	latestVersion, url, err := util.GetManifest(client, "linux", "amd64")
+	latestVersion, url, err := util.GetManifest(client, w.platform.OS, w.platform.Architecture)
 	if err != nil {
 		w.Log("Get latest kubevpn version failed: %v", err)
 		return err
@@ -346,6 +349,7 @@ type Ssh struct {
 	ExtraCIDR []string
 	Width     int
 	Height    int
+	Platform  string
 	SessionID string
 }
 
@@ -370,6 +374,7 @@ func init() {
 			width:     conf.Width,
 			height:    conf.Height,
 			sessionId: conf.SessionID,
+			platform:  platforms.MustParse(conf.Platform),
 			condReady: cancelFunc,
 		}
 		CondReady[conf.SessionID] = ctx
