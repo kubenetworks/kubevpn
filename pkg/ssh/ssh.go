@@ -430,8 +430,8 @@ func (config SshConfig) Dial(ctx context.Context, stopChan <-chan struct{}) (cli
 		User:            config.User,
 		Auth:            authMethod,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		BannerCallback:  ssh.BannerDisplayStderr(),
-		Timeout:         time.Second * 10,
+		//BannerCallback:  ssh.BannerDisplayStderr(),
+		Timeout: time.Second * 10,
 	})
 	if err != nil {
 		return nil, err
@@ -484,8 +484,8 @@ func JumpTo(ctx context.Context, bClient *ssh.Client, to SshConfig, stopChan <-c
 		User:            to.User,
 		Auth:            authMethod,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		BannerCallback:  ssh.BannerDisplayStderr(),
-		Timeout:         time.Second * 10,
+		//BannerCallback:  ssh.BannerDisplayStderr(),
+		Timeout: time.Second * 10,
 	})
 	if err != nil {
 		return
@@ -596,6 +596,14 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 				defer cancelFunc3()
 				conn, err = client.DialContext(ctx3, "tcp", remote.String())
 				if err != nil {
+					var openChannelError *ssh.OpenChannelError
+					// if ssh server not permitted ssh port-forward, do nothing until exit
+					if errors.As(err, &openChannelError) && openChannelError.Reason == ssh.Prohibited {
+						_ = client.Close()
+						log.Debugf("Failed to open ssh port-forward: %s: %v", remote.String(), err)
+						<-connCtx.Done()
+						return nil, err
+					}
 					log.Debugf("Failed to dial remote addr: %s: %v", remote.String(), err)
 					client.Close()
 					return nil, err
