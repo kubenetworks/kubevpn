@@ -13,7 +13,6 @@ import (
 	"github.com/docker/cli/cli/flags"
 	"github.com/docker/cli/cli/streams"
 	"github.com/docker/cli/cli/trust"
-	"github.com/docker/docker/api/types"
 	typesimage "github.com/docker/docker/api/types/image"
 	registrytypes "github.com/docker/docker/api/types/registry"
 	"github.com/docker/docker/client"
@@ -89,7 +88,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 		}
 		requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(cli, imgRefAndAuth.RepoInfo().Index, "push")
 		var readCloser io.ReadCloser
-		readCloser, err = client.ImagePush(ctx, imageTarget, types.ImagePushOptions{
+		readCloser, err = client.ImagePush(ctx, imageTarget, typesimage.PushOptions{
 			RegistryAuth:  encodedAuth,
 			PrivilegeFunc: requestPrivilege,
 		})

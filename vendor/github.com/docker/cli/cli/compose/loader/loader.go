@@ -1,5 +1,5 @@
 // FIXME(thaJeztah): remove once we are a module; the go:build directive prevents go from downgrading language version to go1.16:
-//go:build go1.19
+//go:build go1.22
 
 package loader
 
@@ -21,8 +21,8 @@ import (
 	"github.com/docker/docker/api/types/versions"
 	"github.com/docker/go-connections/nat"
 	units "github.com/docker/go-units"
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/google/shlex"
-	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	yaml "gopkg.in/yaml.v2"

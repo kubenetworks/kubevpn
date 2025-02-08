@@ -10,11 +10,9 @@ import (
 	"github.com/syncthing/syncthing/lib/config"
 	"github.com/syncthing/syncthing/lib/db/backend"
 	"github.com/syncthing/syncthing/lib/events"
-	"github.com/syncthing/syncthing/lib/fs"
 	"github.com/syncthing/syncthing/lib/locations"
 	"github.com/syncthing/syncthing/lib/logger"
 	"github.com/syncthing/syncthing/lib/netutil"
-	"github.com/syncthing/syncthing/lib/protocol"
 	"github.com/syncthing/syncthing/lib/svcutil"
 	"github.com/syncthing/syncthing/lib/syncthing"
 	"github.com/thejerf/suture/v4"
@@ -60,7 +58,7 @@ func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr str
 	var devices []config.DeviceConfiguration
 	devices = append(devices, config.DeviceConfiguration{
 		DeviceID:          localID,
-		Compression:       protocol.CompressionAlways,
+		Compression:       config.CompressionAlways,
 		Addresses:         []string{localAddr},
 		Name:              local,
 		Untrusted:         false,
@@ -69,7 +67,7 @@ func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr str
 	})
 	devices = append(devices, config.DeviceConfiguration{
 		DeviceID:          remoteID,
-		Compression:       protocol.CompressionAlways,
+		Compression:       config.CompressionAlways,
 		Addresses:         []string{remoteAddr},
 		Name:              remote,
 		Untrusted:         false,
@@ -81,7 +79,7 @@ func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr str
 	folder = append(folder, config.FolderConfiguration{
 		ID:               dir,
 		Label:            label,
-		FilesystemType:   fs.FilesystemTypeBasic,
+		FilesystemType:   config.FilesystemTypeBasic,
 		Path:             localDir,
 		Type:             config.FolderTypeSendReceive,
 		Paused:           false,
@@ -161,7 +159,7 @@ func StartServer(ctx context.Context, detach bool, remoteDir string) error {
 	var devices []config.DeviceConfiguration
 	devices = append(devices, config.DeviceConfiguration{
 		DeviceID:          remoteID,
-		Compression:       protocol.CompressionAlways,
+		Compression:       config.CompressionAlways,
 		Addresses:         []string{addr},
 		Name:              remote,
 		Untrusted:         false,
@@ -170,7 +168,7 @@ func StartServer(ctx context.Context, detach bool, remoteDir string) error {
 	})
 	devices = append(devices, config.DeviceConfiguration{
 		DeviceID:          localID,
-		Compression:       protocol.CompressionAlways,
+		Compression:       config.CompressionAlways,
 		Addresses:         []string{"dynamic"},
 		Name:              local,
 		Untrusted:         false,
@@ -182,7 +180,7 @@ func StartServer(ctx context.Context, detach bool, remoteDir string) error {
 	folder = append(folder, config.FolderConfiguration{
 		ID:             dir,
 		Label:          label,
-		FilesystemType: fs.FilesystemTypeBasic,
+		FilesystemType: config.FilesystemTypeBasic,
 		Path:           remoteDir,
 		Type:           config.FolderTypeSendReceive,
 		Paused:         false,
