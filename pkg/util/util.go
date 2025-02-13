@@ -120,22 +120,40 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, ns, workloads 
 	}()
 }
 
+type WriterStringer interface {
+	io.Writer
+	fmt.Stringer
+}
+
+func NewWriter(checker func(log string) bool) WriterStringer {
+	return &proxyWriter{Buffer: bytes.NewBuffer(make([]byte, 0)), checker: checker}
+}
+
 type proxyWriter struct {
 	*bytes.Buffer
-	checker func(log string)
+	checker func(log string) bool
+	stop    bool
 }
 
 func (w *proxyWriter) Write(b []byte) (int, error) {
+	if w.stop {
+		return len(b), nil
+	}
+
 	write, err := w.Buffer.Write(b)
 	if w.checker != nil {
-		w.checker(w.Buffer.String())
+		w.stop = w.checker(w.Buffer.String())
 	}
 	return write, err
 }
 
-func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string)) (string, string, error) {
-	stdoutBuf := &proxyWriter{Buffer: bytes.NewBuffer(make([]byte, 0)), checker: checker}
-	stderrBuf := &proxyWriter{Buffer: bytes.NewBuffer(make([]byte, 0)), checker: checker}
+func (w *proxyWriter) String() string {
+	return w.Buffer.String()
+}
+
+func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string) (stop bool)) (string, string, error) {
+	stdoutBuf := NewWriter(checker)
+	stderrBuf := NewWriter(checker)
 
 	stdoutPipe, _ := cmd.StdoutPipe()
 	stderrPipe, _ := cmd.StderrPipe()

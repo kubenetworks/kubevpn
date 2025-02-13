@@ -42,13 +42,13 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 		return
 	}
 
-	var all []byte
-	if all, err = io.ReadAll(resp.Body); err != nil {
+	var content []byte
+	if content, err = io.ReadAll(resp.Body); err != nil {
 		err = errors.Wrap(err, "failed to read all response from github api")
 		return
 	}
 	var m RootEntity
-	if err = json.Unmarshal(all, &m); err != nil {
+	if err = json.Unmarshal(content, &m); err != nil {
 		err = fmt.Errorf("failed to unmarshal response, err: %v", err)
 		return
 	}
@@ -70,7 +70,7 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 		}
 	}
 
-	err = fmt.Errorf("can not found latest version url of KubeVPN, you can download it manually: %s", addr)
+	err = fmt.Errorf("%s: try download it from: %s", If(m.Message != "", m.Message, string(content)), addr)
 	return
 }
 
@@ -175,6 +175,10 @@ type RootEntity struct {
 	ZipballUrl      string          `json:"zipball_url"`
 	Body            string          `json:"body"`
 	Reactions       ReactionsEntity `json:"reactions"`
+
+	// For error msg: {"message":"API rate limit exceeded for 203.208.189.8. (But here's the good news: Authenticated requests get a higher rate limit. Check out the documentation for more details.)","documentation_url":"https://docs.github.com/rest/overview/resources-in-the-rest-api#rate-limiting"}
+	// Normal response not contains this field
+	Message string `json:"message"`
 }
 
 type AuthorEntity struct {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/containerd/containerd/platforms"
 	"github.com/google/uuid"
@@ -30,6 +31,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 	var sshConf = &pkgssh.SshConfig{}
 	var extraCIDR []string
 	var platform string
+	var lite bool
 	cmd := &cobra.Command{
 		Use:   "ssh",
 		Short: "Ssh to jump server",
@@ -56,9 +58,9 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			parse, err2 := platforms.Parse(platform)
-			if err2 != nil {
-				return err2
+			plat, err := platforms.Parse(platform)
+			if err != nil {
+				return err
 			}
 			config, err := websocket.NewConfig("ws://test/ws", "http://test")
 			if err != nil {
@@ -68,11 +70,6 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			if !terminal.IsTerminal(fd) {
 				return fmt.Errorf("stdin is not a terminal")
 			}
-			state, err := terminal.MakeRaw(fd)
-			if err != nil {
-				return fmt.Errorf("terminal make raw: %s", err)
-			}
-			defer terminal.Restore(fd, state)
 			width, height, err := terminal.GetSize(fd)
 			if err != nil {
 				return fmt.Errorf("terminal get size: %s", err)
@@ -83,14 +80,15 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 				ExtraCIDR: extraCIDR,
 				Width:     width,
 				Height:    height,
-				Platform:  platforms.Format(platforms.Normalize(parse)),
+				Platform:  platforms.Format(platforms.Normalize(plat)),
 				SessionID: sessionID,
+				Lite:      lite,
 			}
-			bytes, err := json.Marshal(ssh)
+			marshal, err := json.Marshal(ssh)
 			if err != nil {
 				return err
 			}
-			config.Header.Set("ssh", string(bytes))
+			config.Header.Set("ssh", string(marshal))
 			client := daemon.GetTCPClient(true)
 			if client == nil {
 				return fmt.Errorf("client is nil")
@@ -105,17 +103,44 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 			go func() {
 				errChan <- monitorSize(cmd.Context(), sessionID)
 			}()
+
+			readyCtx, cancelFunc := context.WithCancel(cmd.Context())
+			checker := func(log string) bool {
+				isReady := strings.Contains(log, fmt.Sprintf(handler.SshTerminalReadyFormat, sessionID))
+				if isReady {
+					cancelFunc()
+				}
+				return isReady
+			}
+			var state *terminal.State
+			go func() {
+				select {
+				case <-cmd.Context().Done():
+					return
+				case <-readyCtx.Done():
+				}
+				if state, err = terminal.MakeRaw(fd); err != nil {
+					log.Errorf("terminal make raw: %s", err)
+				}
+			}()
+
 			go func() {
 				_, err := io.Copy(conn, os.Stdin)
 				errChan <- err
 			}()
 			go func() {
-				_, err := io.Copy(os.Stdout, conn)
+				_, err := io.Copy(io.MultiWriter(os.Stdout, util.NewWriter(checker)), conn)
 				errChan <- err
 			}()
 
+			defer func() {
+				if state != nil {
+					terminal.Restore(fd, state)
+				}
+			}()
+
 			select {
-			case err = <-errChan:
+			case err := <-errChan:
 				return err
 			case <-cmd.Context().Done():
 				return cmd.Context().Err()
@@ -125,6 +150,7 @@ func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	cmd.Flags().StringArrayVar(&extraCIDR, "extra-cidr", []string{}, "Extra network CIDR string, eg: --extra-cidr 192.168.0.159/24 --extra-cidr 192.168.1.160/32")
 	cmd.Flags().StringVar(&platform, "platform", util.If(os.Getenv("KUBEVPN_DEFAULT_PLATFORM") != "", os.Getenv("KUBEVPN_DEFAULT_PLATFORM"), "linux/amd64"), "Set ssh server platform if needs to install command kubevpn")
+	cmd.Flags().BoolVar(&lite, "lite", false, "connect to ssh server in lite mode. mode \"lite\": design for only connect to ssh server. mode \"full\": not only connect to ssh server, it also create a two-way tunnel communicate with inner ip")
 	return cmd
 }
 

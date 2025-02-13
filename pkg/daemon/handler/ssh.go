@@ -33,6 +33,8 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+const SshTerminalReadyFormat = "Enter terminal %s"
+
 type wsHandler struct {
 	conn      *websocket.Conn
 	sshConfig *pkgssh.SshConfig
@@ -49,7 +51,7 @@ type wsHandler struct {
 // 1) start remote kubevpn server
 // 2) start local tunnel
 // 3) ssh terminal
-func (w *wsHandler) handle(c context.Context) {
+func (w *wsHandler) handle(c context.Context, lite bool) {
 	ctx, f := context.WithCancel(c)
 	defer f()
 
@@ -60,50 +62,69 @@ func (w *wsHandler) handle(c context.Context) {
 	}
 	defer cli.Close()
 
-	err = w.installKubevpnOnRemote(ctx, cli)
+	if !lite {
+		err = w.createTwoWayTUNTunnel(ctx, cli)
+		if err != nil {
+			return
+		}
+	}
+	rw := NewReadWriteWrapper(w.conn)
+	go func() {
+		<-rw.IsClosed()
+		f()
+	}()
+	err = w.terminal(ctx, cli, rw)
+	if err != nil {
+		w.Log("Enter terminal error: %v", err)
+	}
+	return
+}
+
+func (w *wsHandler) createTwoWayTUNTunnel(ctx context.Context, cli *ssh.Client) error {
+	err := w.installKubevpnOnRemote(ctx, cli)
 	if err != nil {
 		//w.Log("Install kubevpn error: %v", err)
-		return
+		return err
 	}
 
 	clientIP, err := util.GetIPBaseNic()
 	if err != nil {
 		w.Log("Get client IP error: %v", err)
-		return
+		return err
 	}
 
 	remotePort := 10800
 	var localPort int
 	localPort, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
-		return
+		return err
 	}
 	var remote netip.AddrPort
 	remote, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(remotePort)))
 	if err != nil {
-		return
+		return err
 	}
 	var local netip.AddrPort
 	local, err = netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort)))
 	if err != nil {
-		return
+		return err
 	}
 	err = pkgssh.PortMapUntil(ctx, w.sshConfig, remote, local)
 	if err != nil {
 		w.Log("Port map error: %v", err)
-		return
+		return err
 	}
 	cmd := fmt.Sprintf(`kubevpn ssh-daemon --client-ip %s`, clientIP.String())
 	serverIP, stderr, err := pkgssh.RemoteRun(cli, cmd, nil)
 	if err != nil {
 		log.Errorf("Failed to run remote command: %v, stdout: %s, stderr: %s", err, string(serverIP), string(stderr))
 		w.Log("Start kubevpn server error: %v", err)
-		return
+		return err
 	}
 	ip, _, err := net.ParseCIDR(string(serverIP))
 	if err != nil {
 		w.Log("Failed to parse server IP %s, stderr: %s: %v", string(serverIP), string(stderr), err)
-		return
+		return err
 	}
 	msg := fmt.Sprintf("| You can use client: %s to communicate with server: %s |", clientIP.IP.String(), ip.String())
 	w.PrintLine(msg)
@@ -119,7 +140,7 @@ func (w *wsHandler) handle(c context.Context) {
 	if err != nil {
 		log.Errorf("Failed to parse route: %v", err)
 		w.Log("Failed to parse route: %v", err)
-		return
+		return err
 	}
 	go func() {
 		err := handler.Run(ctx, servers)
@@ -133,16 +154,7 @@ func (w *wsHandler) handle(c context.Context) {
 			time.Sleep(time.Second * 5)
 		}
 	}()
-	rw := NewReadWriteWrapper(w.conn)
-	go func() {
-		<-rw.IsClosed()
-		f()
-	}()
-	err = w.terminal(ctx, cli, rw)
-	if err != nil {
-		w.Log("Enter terminal error: %v", err)
-	}
-	return
+	return nil
 }
 
 // startup daemon process if daemon process not start
@@ -251,6 +263,7 @@ func (w *wsHandler) terminal(ctx context.Context, cli *ssh.Client, conn io.ReadW
 		w.Log("Start shell error: %v", err)
 		return err
 	}
+	w.Log(SshTerminalReadyFormat, w.sessionId)
 	return session.Wait()
 }
 
@@ -351,6 +364,7 @@ type Ssh struct {
 	Height    int
 	Platform  string
 	SessionID string
+	Lite      bool
 }
 
 func init() {
@@ -379,7 +393,7 @@ func init() {
 		}
 		CondReady[conf.SessionID] = ctx
 		defer conn.Close()
-		h.handle(conn.Request().Context())
+		h.handle(conn.Request().Context(), conf.Lite)
 	}))
 	http.Handle("/resize", websocket.Handler(func(conn *websocket.Conn) {
 		sessionID := conn.Request().Header.Get("session-id")
