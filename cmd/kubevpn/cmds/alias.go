@@ -100,11 +100,11 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 				c.Stdout = os.Stdout
 				c.Stdin = os.Stdin
 				c.Stderr = os.Stderr
-				fmt.Printf("Name: %s\n", conf.Name)
+				fmt.Println(fmt.Sprintf("Name: %s", conf.Name))
 				if conf.Description != "" {
-					fmt.Printf("Description: %s\n", conf.Description)
+					fmt.Println(fmt.Sprintf("Description: %s", conf.Description))
 				}
-				fmt.Printf("Command: %v\n", c.Args)
+				fmt.Println(fmt.Sprintf("Command: %v", c.Args))
 				err = c.Run()
 				if err != nil {
 					return err
