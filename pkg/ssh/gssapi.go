@@ -35,13 +35,6 @@ func NewKrb5InitiatorClientWithPassword(username, password, krb5Conf string) (kc
 		return
 	}
 
-	// Set to lookup KDCs in DNS
-	c.LibDefaults.DNSLookupKDC = true
-	c.LibDefaults.DNSLookupRealm = true
-
-	// Blank out the KDCs to ensure they are not being used
-	c.Realms = []config.Realm{}
-
 	defaultRealm := c.LibDefaults.DefaultRealm
 
 	cl := client.NewWithPassword(username, defaultRealm, password, c)
@@ -65,12 +58,6 @@ func NewKrb5InitiatorClientWithKeytab(username string, krb5Conf, keytabConf stri
 	if err != nil {
 		return
 	}
-	// Set to lookup KDCs in DNS
-	c.LibDefaults.DNSLookupKDC = true
-	c.LibDefaults.DNSLookupRealm = true
-
-	// Blank out the KDCs to ensure they are not being used
-	c.Realms = []config.Realm{}
 
 	// Init keytab from conf
 	cache, err := keytab.Load(keytabConf)
@@ -81,9 +68,6 @@ func NewKrb5InitiatorClientWithKeytab(username string, krb5Conf, keytabConf stri
 	defaultRealm := c.LibDefaults.DefaultRealm
 
 	cl := client.NewWithKeytab(username, defaultRealm, cache, c)
-	if err != nil {
-		return
-	}
 	err = cl.Login()
 	if err != nil {
 		return
@@ -104,13 +88,6 @@ func NewKrb5InitiatorClientWithCache(krb5Conf, cacheFile string) (kcl Krb5Initia
 	if err != nil {
 		return
 	}
-
-	// Set to lookup KDCs in DNS
-	c.LibDefaults.DNSLookupKDC = true
-	c.LibDefaults.DNSLookupRealm = true
-
-	// Blank out the KDCs to ensure they are not being used
-	c.Realms = []config.Realm{}
 
 	// Init krb5 client and login
 	cache, err := credentials.LoadCCache(cacheFile)
