@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
-	"reflect"
 	"strings"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	k8sjson "k8s.io/apimachinery/pkg/util/json"
@@ -108,7 +108,7 @@ func ModifyServiceTargetPort(ctx context.Context, clientset *kubernetes.Clientse
 
 	var svc *v1.Service
 	for _, item := range list.Items {
-		if reflect.DeepEqual(item.Spec.Selector, podLabels) {
+		if labels.SelectorFromSet(item.Spec.Selector).Matches(labels.Set(podLabels)) {
 			svc = &item
 			break
 		}
