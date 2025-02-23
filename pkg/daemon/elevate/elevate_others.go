@@ -9,6 +9,7 @@ import (
 	"runtime"
 
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -22,7 +23,7 @@ func RunCmdWithElevated(exe string, args []string) error {
 			os.Args = append(os.Args, "--kubeconfig", clientcmd.RecommendedHomeFile)
 		}
 	}
-	cmd := exec.Command("sudo", append([]string{"--preserve-env", exe}, args...)...)
+	cmd := exec.Command("sudo", append([]string{"--preserve-env", "--background", exe}, args...)...)
 	log.Debug(cmd.Args)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -32,12 +33,10 @@ func RunCmdWithElevated(exe string, args []string) error {
 	if err != nil {
 		return err
 	}
-	go func() {
-		err := cmd.Wait()
-		if err != nil {
-			log.Warn(err)
-		}
-	}()
+	err = cmd.Process.Release()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -50,6 +49,9 @@ func RunCmd(exe string, args []string) error {
 		}
 	}
 	cmd := exec.Command(exe, args...)
+	cmd.SysProcAttr = &unix.SysProcAttr{
+		Setpgid: true,
+	}
 	log.Debug(cmd.Args)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -59,11 +61,9 @@ func RunCmd(exe string, args []string) error {
 	if err != nil {
 		return err
 	}
-	go func() {
-		err := cmd.Wait()
-		if err != nil {
-			log.Warn(err)
-		}
-	}()
+	err = cmd.Process.Release()
+	if err != nil {
+		return err
+	}
 	return nil
 }
