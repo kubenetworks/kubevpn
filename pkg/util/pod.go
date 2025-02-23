@@ -146,10 +146,6 @@ func WaitPod(ctx context.Context, podInterface v12.PodInterface, list v1.ListOpt
 }
 
 func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, namespace string, portPair []string, readyChan chan struct{}, stopChan <-chan struct{}, out, errOut io.Writer) error {
-	err := os.Setenv(string(util.RemoteCommandWebsockets), "true")
-	if err != nil {
-		return err
-	}
 	url := clientset.
 		Post().
 		Resource("pods").
@@ -226,10 +222,6 @@ func GetTopOwnerReferenceBySelector(factory util.Factory, ns, selector string) (
 }
 
 func Shell(_ context.Context, clientset *kubernetes.Clientset, config *rest.Config, podName, containerName, ns string, cmd []string) (string, error) {
-	err := os.Setenv(string(util.RemoteCommandWebsockets), "true")
-	if err != nil {
-		return "", err
-	}
 	stdin, _, _ := term.StdStreams()
 	buf := bytes.NewBuffer(nil)
 	options := exec.ExecOptions{
@@ -247,10 +239,10 @@ func Shell(_ context.Context, clientset *kubernetes.Clientset, config *rest.Conf
 		PodClient: clientset.CoreV1(),
 		Config:    config,
 	}
-	if err = options.Run(); err != nil {
+	if err := options.Run(); err != nil {
 		return "", err
 	}
-	return strings.TrimRight(buf.String(), "\n"), err
+	return strings.TrimRight(buf.String(), "\n"), nil
 }
 
 func WaitPodToBeReady(ctx context.Context, podInterface v12.PodInterface, selector v1.LabelSelector) error {
