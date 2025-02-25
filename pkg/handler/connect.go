@@ -888,6 +888,19 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// issue: https://github.com/kubernetes/kubernetes/issues/98963
+	for _, info := range infos {
+		_, _ = polymorphichelpers.UpdatePodSpecForObjectFn(info.Object, func(spec *v1.PodSpec) error {
+			for i := 0; i < len(spec.ImagePullSecrets); i++ {
+				if spec.ImagePullSecrets[i].Name == "" {
+					spec.ImagePullSecrets = append(spec.ImagePullSecrets[:i], spec.ImagePullSecrets[i+1:]...)
+					i--
+					continue
+				}
+			}
+			return nil
+		})
+	}
 	patches := set.CalculatePatches(infos, scheme.DefaultJSONEncoder(), func(obj pkgruntime.Object) ([]byte, error) {
 		_, err = polymorphichelpers.UpdatePodSpecForObjectFn(obj, func(spec *v1.PodSpec) error {
 			for i := range spec.Containers {
