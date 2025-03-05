@@ -52,13 +52,13 @@ spec:
             - -c
           env:
             - name: CIDR4
-              value: 223.254.0.0/16
+              value: 198.19.0.0/16
             - name: CIDR6
-              value: efff:ffff:ffff:ffff::/64
+              value: 2001:2::/64
             - name: TunIPv4
-              value: 223.254.0.100/16
+              value: 198.19.0.100/16
             - name: TunIPv6
-              value: efff:ffff:ffff:ffff:ffff:ffff:ffff:9999/64
+              value: 2001:2::9999/64
           envFrom:
             - secretRef:
                 name: {{ include "kubevpn.fullname" . }}

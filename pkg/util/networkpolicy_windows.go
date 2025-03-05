@@ -96,7 +96,7 @@ func decode(in []byte) ([]byte, error) {
 // AddAllowFirewallRule
 // for ping local tun device ip, if not add this firewall, can not ping local tun IP on windows
 func AddAllowFirewallRule(ctx context.Context) {
-	// netsh advfirewall firewall add rule name=kubevpn-traffic-manager dir=in action=allow enable=yes remoteip=223.254.0.100/16,efff:ffff:ffff:ffff:ffff:ffff:ffff:9999/64,LocalSubnet
+	// netsh advfirewall firewall add rule name=kubevpn-traffic-manager dir=in action=allow enable=yes remoteip=198.19.0.100/16,2001:2::9999/64,LocalSubnet
 	cmd := exec.CommandContext(ctx, "netsh", []string{
 		"advfirewall",
 		"firewall",

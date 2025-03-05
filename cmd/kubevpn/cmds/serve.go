@@ -31,7 +31,7 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 		`)),
 		Example: templates.Examples(i18n.T(`
         # serve node
-        kubevpn serve -L "tcp://:10800" -L "tun://127.0.0.1:8422?net=223.254.0.123/32"
+        kubevpn serve -L "tcp://:10800" -L "tun://127.0.0.1:8422?net=198.19.0.123/32"
 		`)),
 		PreRun: func(*cobra.Command, []string) {
 			util.InitLoggerForServer(config.Debug)

@@ -580,7 +580,7 @@ OK: 8 MiB in 19 packages
 Hello world!/opt/microservices # 
 
 /opt/microservices # curl authors:9080/health -H "foo: bar"
->>Received request: GET /health from 223.254.0.109:57930
+>>Received request: GET /health from 198.19.0.109:57930
                                                         Hello world!/opt/microservices # 
 /opt/microservices # curl localhost:9080/health
 {"status":"Authors is healthy"}/opt/microservices # exit

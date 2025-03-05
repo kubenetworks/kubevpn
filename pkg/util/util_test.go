@@ -65,8 +65,8 @@ func TestName(t *testing.T) {
 
 func TestPing(t *testing.T) {
 	defer util.Run()()
-	SrcIP := net.ParseIP("223.254.0.102").To4()
-	DstIP := net.ParseIP("223.254.0.100").To4()
+	SrcIP := net.ParseIP("198.19.0.102").To4()
+	DstIP := net.ParseIP("198.19.0.100").To4()
 
 	icmpLayer := layers.ICMPv4{
 		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),

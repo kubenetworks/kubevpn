@@ -79,7 +79,7 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig) {
 		},
 		Command: []string{"/bin/sh", "-c"},
 		// https://www.netfilter.org/documentation/HOWTO/NAT-HOWTO-6.html#ss6.2
-		// for curl -g -6 [efff:ffff:ffff:ffff:ffff:ffff:ffff:999a]:9080/health or curl 127.0.0.1:9080/health hit local PC
+		// for curl -g -6 [2001:2::999a]:9080/health or curl 127.0.0.1:9080/health hit local PC
 		// output chain
 		// iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIPv4}
 		// ip6tables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIPv6}

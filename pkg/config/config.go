@@ -35,7 +35,10 @@ const (
 	VolumeEnvoyConfig = "envoy-config"
 	VolumeSyncthing   = "syncthing"
 
-	innerIPv4Pool = "223.254.0.100/16"
+	// innerIPv4Pool is used as tun ip
+	// 198.19.0.0/16 network  is part of the 198.18.0.0/15 (reserved for benchmarking).
+	// https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml
+	innerIPv4Pool = "198.19.0.100/16"
 	// 原因：在docker环境中，设置docker的 gateway 和 subnet，不能 inner 的冲突，也不能和 docker的 172.17 冲突
 	// 不然的话，请求会不通的
 	// 解决的问题：在 k8s 中的  名叫 kubernetes 的 service ip 为
@@ -51,10 +54,11 @@ const (
 	//  }
 	//]
 	// 如果不创建 network，那么是无法请求到 这个 kubernetes 的 service 的
-	dockerInnerIPv4Pool = "223.255.0.100/16"
+	dockerInnerIPv4Pool = "198.18.0.100/16"
 
-	//The IPv6 address prefixes FE80::/10 and FF02::/16 are not routable
-	innerIPv6Pool = "efff:ffff:ffff:ffff:ffff:ffff:ffff:9999/64"
+	// 2001:2::/64 network is part of the 2001:2::/48 (reserved for benchmarking)
+	// https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml
+	innerIPv6Pool = "2001:2::9999/64"
 
 	DefaultNetDir = "/etc/cni/net.d"
 
