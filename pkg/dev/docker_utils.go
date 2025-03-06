@@ -90,7 +90,7 @@ func RunLogsSinceNow(name string, follow bool) error {
 }
 
 // CreateNetwork
-// docker create kubevpn-traffic-manager --labels owner=config.ConfigMapPodTrafficManager --subnet 223.255.0.0/16 --gateway 223.255.0.100
+// docker create kubevpn-traffic-manager --labels owner=config.ConfigMapPodTrafficManager --subnet 198.18.0.0/16 --gateway 198.18.0.100
 func CreateNetwork(ctx context.Context, name string) (string, error) {
 	args := []string{
 		"network",

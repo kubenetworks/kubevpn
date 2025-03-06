@@ -26,7 +26,7 @@ import (
 )
 
 // CmdSSH
-// Remember to use network mask 32, because ssh using unique network CIDR 223.255.0.0/16
+// Remember to use network mask 32, because ssh using unique network CIDR 198.18.0.0/16
 func CmdSSH(_ cmdutil.Factory) *cobra.Command {
 	var sshConf = &pkgssh.SshConfig{}
 	var extraCIDR []string

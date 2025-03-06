@@ -905,6 +905,44 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 		_, err = polymorphichelpers.UpdatePodSpecForObjectFn(obj, func(spec *v1.PodSpec) error {
 			for i := range spec.Containers {
 				spec.Containers[i].Image = clientImg
+
+				// update tun cidr for vpn
+				if spec.Containers[i].Name == config.ContainerSidecarVPN {
+					innerIpv4CIDR := net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}
+					innerIpv6CIDR := net.IPNet{IP: config.RouterIP6, Mask: config.CIDR6.Mask}
+					envVars := []v1.EnvVar{
+						{
+							Name:  "CIDR4",
+							Value: config.CIDR.String(),
+						},
+						{
+							Name:  "CIDR6",
+							Value: config.CIDR6.String(),
+						},
+						{
+							Name:  config.EnvInboundPodTunIPv4,
+							Value: innerIpv4CIDR.String(),
+						},
+						{
+							Name:  config.EnvInboundPodTunIPv6,
+							Value: innerIpv6CIDR.String(),
+						},
+					}
+
+					for _, env := range envVars {
+						found := false
+						for j, existing := range spec.Containers[i].Env {
+							if existing.Name == env.Name {
+								spec.Containers[i].Env[j].Value = env.Value
+								found = true
+								break
+							}
+						}
+						if !found {
+							spec.Containers[i].Env = append(spec.Containers[i].Env, env)
+						}
+					}
+				}
 			}
 			return nil
 		})

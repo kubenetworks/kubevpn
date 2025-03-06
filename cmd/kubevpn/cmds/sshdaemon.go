@@ -14,7 +14,7 @@ import (
 )
 
 // CmdSSHDaemon
-// set local tun ip 223.254.0.1/32, remember to use mask 32
+// set local tun ip 198.19.0.1/32, remember to use mask 32
 func CmdSSHDaemon(_ cmdutil.Factory) *cobra.Command {
 	var clientIP string
 	cmd := &cobra.Command{
@@ -24,7 +24,7 @@ func CmdSSHDaemon(_ cmdutil.Factory) *cobra.Command {
 		Long:   templates.LongDesc(i18n.T(`Ssh daemon server`)),
 		Example: templates.Examples(i18n.T(`
         # SSH daemon server
-        kubevpn ssh-daemon --client-ip 223.254.0.123/32
+        kubevpn ssh-daemon --client-ip 198.19.0.123/32
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			err := daemon.StartupDaemon(cmd.Context())

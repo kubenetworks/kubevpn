@@ -72,7 +72,7 @@ func (h *admissionReviewHandler) handleCreate(ar v1.AdmissionReview) *v1.Admissi
 		return &v1.AdmissionResponse{UID: ar.Request.UID, Allowed: true}
 	}
 	// if create pod kubevpn-traffic-manager, just ignore it
-	// because 223.254.0.100 is reserved
+	// because 198.19.0.100 is reserved
 	if x, _, _ := net.ParseCIDR(value); config.RouterIP.Equal(x) {
 		return &v1.AdmissionResponse{UID: ar.Request.UID, Allowed: true}
 	}
@@ -163,7 +163,7 @@ func (h *admissionReviewHandler) handleDelete(ar v1.AdmissionReview) *v1.Admissi
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 	// if delete pod kubevpn-traffic-manager, just ignore it
-	// because 223.254.0.100 is reserved
+	// because 198.19.0.100 is reserved
 	if x, _, _ := net.ParseCIDR(value); config.RouterIP.Equal(x) {
 		return &v1.AdmissionResponse{Allowed: true}
 	}
