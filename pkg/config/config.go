@@ -120,10 +120,23 @@ var (
 )
 
 func init() {
-	RouterIP, CIDR, _ = net.ParseCIDR(innerIPv4Pool)
-	RouterIP6, CIDR6, _ = net.ParseCIDR(innerIPv6Pool)
-	DockerRouterIP, DockerCIDR, _ = net.ParseCIDR(dockerInnerIPv4Pool)
-	dir, _ := os.UserHomeDir()
+	var err error
+	RouterIP, CIDR, err = net.ParseCIDR(innerIPv4Pool)
+	if err != nil {
+		panic(err)
+	}
+	RouterIP6, CIDR6, err = net.ParseCIDR(innerIPv6Pool)
+	if err != nil {
+		panic(err)
+	}
+	DockerRouterIP, DockerCIDR, err = net.ParseCIDR(dockerInnerIPv4Pool)
+	if err != nil {
+		panic(err)
+	}
+	dir, err := os.UserHomeDir()
+	if err != nil {
+		panic(err)
+	}
 	DaemonPath = filepath.Join(dir, HOME, Daemon)
 	HomePath = filepath.Join(dir, HOME)
 	PprofPath = filepath.Join(dir, HOME, Daemon, PProfDir)
