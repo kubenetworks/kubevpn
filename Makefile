@@ -18,6 +18,7 @@ REPOSITORY ?= kubevpn
 IMAGE ?= $(REGISTRY)/$(NAMESPACE)/$(REPOSITORY):$(VERSION)
 IMAGE_LATEST ?= docker.io/naison/kubevpn:latest
 IMAGE_GH ?= ghcr.io/kubenetworks/kubevpn:$(VERSION)
+IMAGE_GH_LATEST ?= ghcr.io/kubenetworks/kubevpn:latest
 
 # Setup the -ldflags option for go build here, interpolate the variable values
 # add '-tag noassets' for syncthing gui
@@ -86,12 +87,12 @@ kubevpn-linux-386:
 
 .PHONY: container
 container:
-	docker buildx build --platform linux/amd64,linux/arm64 -t ${IMAGE} -t ${IMAGE_LATEST} -t ${IMAGE_GH} -f $(BUILD_DIR)/Dockerfile --push .
+	docker buildx build --platform linux/amd64,linux/arm64 -t ${IMAGE} -t ${IMAGE_LATEST} -t ${IMAGE_GH} -t ${IMAGE_GH_LATEST} -f $(BUILD_DIR)/Dockerfile --push .
 
 ############################ build local
 .PHONY: container-local
 container-local: kubevpn-linux-amd64
-	docker buildx build --platform linux/amd64,linux/arm64 -t ${IMAGE_LATEST} -f $(BUILD_DIR)/local.Dockerfile --push .
+	docker buildx build --platform linux/amd64,linux/arm64 -t ${IMAGE_LATEST} -t ${IMAGE_GH_LATEST} -f $(BUILD_DIR)/local.Dockerfile --push .
 
 .PHONY: container-test
 container-test: kubevpn-linux-amd64
