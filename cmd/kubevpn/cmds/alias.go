@@ -46,7 +46,13 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 		Short: i18n.T("Config file alias to execute command simply"),
 		Long: templates.LongDesc(i18n.T(`
 		Config file alias to execute command simply, just like ssh alias config
-		
+
+		Please point to an existing, complete config file:
+
+		1. Via the command-line flag --kubevpnconfig
+		2. Via the KUBEVPNCONFIG environment variable
+		3. In your home directory as ~/.kubevpn/config.yaml
+
 		It will read ~/.kubevpn/config.yaml file as config, also support special file path
 		by flag -f. It also supports depends relationship, like one cluster api server needs to 
 		access via another cluster, you can use syntax needs. it will do action to needs cluster first
@@ -113,7 +119,7 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&localFile, "file", "f", config.GetConfigFilePath(), "Config file location")
+	cmd.Flags().StringVarP(&localFile, "kubevpnconfig", "f", util.If(os.Getenv("KUBEVPNCONFIG") != "", os.Getenv("KUBEVPNCONFIG"), config.GetConfigFilePath()), "Path to the kubevpnconfig file to use for CLI requests.")
 	cmd.Flags().StringVarP(&remoteAddr, "remote", "r", "", "Remote config file, eg: https://raw.githubusercontent.com/kubenetworks/kubevpn/master/pkg/config/config.yaml")
 	return cmd
 }
