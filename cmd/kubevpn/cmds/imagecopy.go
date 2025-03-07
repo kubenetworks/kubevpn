@@ -24,10 +24,10 @@ the layers between repositories. And within the same repository it only
 sends the manifest with the new tag.`,
 		Example: `
 # copy an image
-regctl image copy ghcr.io/kubenetworks/kubevpn:latest docker.io/naison/kubevpn:latest
+kubevpn image copy ghcr.io/kubenetworks/kubevpn:latest registry.example.org/kubevpn/kubevpn:latest
 
 # re-tag an image
-regctl image copy registry.example.org/repo:v1.2.3 registry.example.org/repo:v1`,
+kubevpn image copy ghcr.io/kubenetworks/kubevpn:latest ghcr.io/kubenetworks/kubevpn:v2.3.4`,
 		Args: cobra.MatchAll(cobra.ExactArgs(2), cobra.OnlyValidArgs),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			util.InitLoggerForClient(false)
