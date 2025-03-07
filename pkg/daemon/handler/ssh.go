@@ -401,6 +401,10 @@ func init() {
 
 		defer conn.Close()
 
+		if CondReady[sessionID] == nil {
+			return
+		}
+
 		var session *ssh.Session
 		select {
 		case <-conn.Request().Context().Done():
