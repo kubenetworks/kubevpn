@@ -44,10 +44,10 @@ func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
 					return err
 				}
 				if !needsUpgrade {
-					_, _ = fmt.Fprintf(os.Stdout, "Already up to date, don't needs to upgrade, version: %s", latestVersion)
+					_, _ = fmt.Fprintln(os.Stdout, fmt.Sprintf("Already up to date, don't needs to upgrade, version: %s", latestVersion))
 					return nil
 				}
-				_, _ = fmt.Fprintf(os.Stdout, "Current version is: %s less than latest version: %s, needs to upgrade", config.Version, latestVersion)
+				_, _ = fmt.Fprintln(os.Stdout, fmt.Sprintf("Current version is: %s less than latest version: %s, needs to upgrade", config.Version, latestVersion))
 				_ = os.Setenv(envLatestUrl, url)
 				_ = quit(cmd.Context(), false)
 				_ = quit(cmd.Context(), true)

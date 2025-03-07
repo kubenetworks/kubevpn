@@ -103,7 +103,10 @@ func (m *Mapper) Run() {
 	var lastLocalPort2EnvoyRulePort map[int32]int32
 	for m.ctx.Err() == nil {
 		localPort2EnvoyRulePort, err := m.getLocalPort2EnvoyRulePort()
-		if err != nil && errors.Is(err, context.Canceled) {
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				continue
+			}
 			logrus.Errorf("failed to get local port to envoy rule port: %v", err)
 			time.Sleep(time.Second * 2)
 			continue
@@ -119,6 +122,9 @@ func (m *Mapper) Run() {
 
 		list, err := util.GetRunningPodList(m.ctx, m.clientset, m.ns, m.labels)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				continue
+			}
 			logrus.Errorf("failed to list running pod: %v", err)
 			time.Sleep(time.Second * 2)
 			continue
