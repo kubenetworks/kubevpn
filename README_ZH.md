@@ -485,13 +485,13 @@ Created main container: authors_default_kubevpn_ff34b
 例如:
 
 ```shell
-docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v ~/.kube/config:/root/.kube/config --platform linux/amd64 naison/kubevpn:latest
+docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v ~/.kube/config:/root/.kube/config --platform linux/amd64 ghcr.io/kubenetworks/kubevpn:latest
 ```
 
 ```shell
-➜  ~ docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v ~/.kube/vke:/root/.kube/config --platform linux/amd64 naison/kubevpn:latest
-Unable to find image 'naison/kubevpn:latest' locally
-latest: Pulling from naison/kubevpn
+➜  ~ docker run -it --privileged --sysctl net.ipv6.conf.all.disable_ipv6=0 -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp -v ~/.kube/vke:/root/.kube/config --platform linux/amd64 ghcr.io/kubenetworks/kubevpn:latest
+Unable to find image 'ghcr.io/kubenetworks/kubevpn:latest' locally
+latest: Pulling from ghcr.io/kubenetworks/kubevpn
 9c704ecd0c69: Already exists
 4987d0a976b5: Pull complete
 8aa94c4fc048: Pull complete
@@ -502,8 +502,8 @@ ca82aef6a9eb: Pull complete
 1fd9534c7596: Pull complete
 588bd802eb9c: Pull complete
 Digest: sha256:368db2e0d98f6866dcefd60512960ce1310e85c24a398fea2a347905ced9507d
-Status: Downloaded newer image for naison/kubevpn:latest
-WARNING: image with reference naison/kubevpn was found but does not match the specified platform: wanted linux/amd64, actual: linux/arm64
+Status: Downloaded newer image for ghcr.io/kubenetworks/kubevpn:latest
+WARNING: image with reference ghcr.io/kubenetworks/kubevpn was found but does not match the specified platform: wanted linux/amd64, actual: linux/arm64
 root@5732124e6447:/app# kubevpn dev deployment/authors --headers user=naison --entrypoint sh
 hostname is 5732124e6447
 Starting connect
@@ -601,10 +601,10 @@ exit
 
 ```text
 ➜  ~ docker ps
-CONTAINER ID   IMAGE                           COMMAND                  CREATED         STATUS         PORTS     NAMES
-1cd576b51b66   naison/authors:latest           "sh"                     4 minutes ago   Up 4 minutes             authors_default_kubevpn_6df5f
-56a6793df82d   nginx:latest                    "/docker-entrypoint.…"   4 minutes ago   Up 4 minutes             nginx_default_kubevpn_6df63
-d0b3dab8912a   naison/kubevpn:v2.0.0           "/bin/bash"              5 minutes ago   Up 5 minutes             upbeat_noyce
+CONTAINER ID   IMAGE                                  COMMAND                  CREATED         STATUS         PORTS     NAMES
+1cd576b51b66   naison/authors:latest                  "sh"                     4 minutes ago   Up 4 minutes             authors_default_kubevpn_6df5f
+56a6793df82d   nginx:latest                           "/docker-entrypoint.…"   4 minutes ago   Up 4 minutes             nginx_default_kubevpn_6df63
+d0b3dab8912a   ghcr.io/kubenetworks/kubevpn:v2.0.0    "/bin/bash"              5 minutes ago   Up 5 minutes             upbeat_noyce
 ➜  ~
 ```
 

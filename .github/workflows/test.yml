@@ -51,13 +51,12 @@ jobs:
           kubectl get pods -n kube-system -o wide
       - name: Install demo bookinfo
         run: |
-          minikube image load --remote istio/examples-bookinfo-details-v1:1.16.2
-          minikube image load --remote istio/examples-bookinfo-ratings-v1:1.16.2
-          minikube image load --remote istio/examples-bookinfo-reviews-v1:1.16.2
-          minikube image load --remote istio/examples-bookinfo-productpage-v1:1.16.2
-          minikube image load --remote naison/authors:latest
-          minikube image load --remote nginx:latest
-          minikube image load --remote naison/kubevpn:test
+          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-details-v1:1.16.2
+          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-ratings-v1:1.16.2
+          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-reviews-v1:1.16.2
+          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-productpage-v1:1.16.2
+          minikube image load --remote ghcr.io/kubenetworks/authors:latest
+          minikube image load --remote ghcr.io/kubenetworks/nginx:latest
           minikube image ls
           eval $(minikube docker-env)
           kubectl apply -f https://raw.githubusercontent.com/kubenetworks/kubevpn/master/samples/bookinfo.yaml
@@ -124,13 +123,12 @@ jobs:
 
       - name: Install demo bookinfo
         run: |
-          minikube image load --remote istio/examples-bookinfo-details-v1:1.16.2
-          minikube image load --remote istio/examples-bookinfo-ratings-v1:1.16.2
-          minikube image load --remote istio/examples-bookinfo-reviews-v1:1.16.2
-          minikube image load --remote istio/examples-bookinfo-productpage-v1:1.16.2
-          minikube image load --remote naison/authors:latest
-          minikube image load --remote nginx:latest
-          minikube image load --remote naison/kubevpn:test
+          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-details-v1:1.16.2
+          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-ratings-v1:1.16.2
+          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-reviews-v1:1.16.2
+          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-productpage-v1:1.16.2
+          minikube image load --remote ghcr.io/kubenetworks/authors:latest
+          minikube image load --remote ghcr.io/kubenetworks/nginx:latest
           minikube image ls
           eval $(minikube docker-env)
           kubectl apply -f https://raw.githubusercontent.com/kubenetworks/kubevpn/master/samples/bookinfo.yaml

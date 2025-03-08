@@ -94,14 +94,14 @@ const (
 
 var (
 	// Image inject --ldflags -X
-	Image     = "docker.io/naison/kubevpn:latest"
+	Image     = "ghcr.io/kubenetworks/kubevpn:latest"
 	Version   = "latest"
 	GitCommit = ""
 
 	// GitHubOAuthToken --ldflags -X
 	GitHubOAuthToken = ""
 
-	OriginImage = "docker.io/naison/kubevpn:" + Version
+	OriginImage = "ghcr.io/kubenetworks/kubevpn:" + Version
 
 	DaemonPath string
 	HomePath   string

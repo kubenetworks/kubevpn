@@ -39,7 +39,7 @@ spec:
       serviceAccountName: bookinfo-details
       containers:
         - name: details
-          image: docker.io/istio/examples-bookinfo-details-v1:1.16.2
+          image: ghcr.io/kubenetworks/examples-bookinfo-details-v1:1.16.2
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 9080
@@ -95,7 +95,7 @@ spec:
       serviceAccountName: bookinfo-ratings
       containers:
         - name: ratings
-          image: docker.io/istio/examples-bookinfo-ratings-v1:1.16.2
+          image: ghcr.io/kubenetworks/examples-bookinfo-ratings-v1:1.16.2
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 9080
@@ -150,7 +150,7 @@ spec:
       serviceAccountName: bookinfo-reviews
       containers:
         - name: reviews
-          image: docker.io/istio/examples-bookinfo-reviews-v1:1.16.2
+          image: ghcr.io/kubenetworks/examples-bookinfo-reviews-v1:1.16.2
           imagePullPolicy: IfNotPresent
           env:
             - name: LOG_DIR
@@ -218,7 +218,7 @@ spec:
       serviceAccountName: bookinfo-productpage
       containers:
         - name: productpage
-          image: docker.io/istio/examples-bookinfo-productpage-v1:1.16.2
+          image: ghcr.io/kubenetworks/examples-bookinfo-productpage-v1:1.16.2
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 9080
@@ -271,7 +271,7 @@ spec:
     spec:
       containers:
         - name: authors
-          image: docker.io/naison/authors:latest
+          image: ghcr.io/kubenetworks/authors:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 9080
@@ -288,7 +288,7 @@ spec:
               cpu: 10m
               memory: 32Mi
         - name: nginx
-          image: docker.io/library/nginx:latest
+          image: ghcr.io/kubenetworks/nginx:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
