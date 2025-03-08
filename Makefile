@@ -23,7 +23,7 @@ IMAGE_GH_LATEST ?= ghcr.io/kubenetworks/kubevpn:latest
 # Setup the -ldflags option for go build here, interpolate the variable values
 # add '-tag noassets' for syncthing gui
 LDFLAGS=-tags noassets --ldflags "-s -w\
- -X ${BASE}/pkg/config.Image=${IMAGE} \
+ -X ${BASE}/pkg/config.Image=${IMAGE_GH} \
  -X ${BASE}/pkg/config.Version=${VERSION} \
  -X ${BASE}/pkg/config.GitCommit=${GIT_COMMIT} \
  -X ${BASE}/pkg/config.GitHubOAuthToken=${GitHubOAuthToken} \

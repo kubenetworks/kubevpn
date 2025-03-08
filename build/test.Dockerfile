@@ -1,4 +1,4 @@
-FROM naison/kubevpn:latest
+FROM ghcr.io/kubenetworks/kubevpn:latest
 
 WORKDIR /app
 
