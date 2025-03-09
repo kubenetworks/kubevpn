@@ -866,8 +866,8 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 		return nil
 	}
 
-	isNewer, _ := newer(clientImg, serverImg)
-	if deploy.Status.ReadyReplicas > 0 && !isNewer {
+	isNeedUpgrade, _ := newer(config.Version, clientImg, serverImg)
+	if deploy.Status.ReadyReplicas > 0 && !isNeedUpgrade {
 		return nil
 	}
 
@@ -973,7 +973,7 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 	return nil
 }
 
-func newer(clientImgStr, serverImgStr string) (bool, error) {
+func newer(clientCliVersionStr, clientImgStr, serverImgStr string) (bool, error) {
 	clientImg, err := reference.ParseNormalizedNamed(clientImgStr)
 	if err != nil {
 		return false, err
@@ -982,27 +982,55 @@ func newer(clientImgStr, serverImgStr string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if reference.Domain(clientImg) != reference.Domain(serverImg) {
-		return false, nil
-	}
-
-	serverTag, ok := serverImg.(reference.NamedTagged)
-	if !ok {
-		return false, fmt.Errorf("can not convert server image")
-	}
-	serverVersion, err := goversion.NewVersion(serverTag.Tag())
-	if err != nil {
-		return false, err
-	}
-	clientTag, ok := clientImg.(reference.NamedTagged)
+	clientImgTag, ok := clientImg.(reference.NamedTagged)
 	if !ok {
 		return false, fmt.Errorf("can not convert client image")
 	}
-	clientVersion, err := goversion.NewVersion(clientTag.Tag())
+
+	// 1. if client image version is same as client cli version, does not need to upgrade
+	// kubevpn connect --image=ghcr.io/kubenetworks/kubevpn:v2.3.0 or --kubevpnconfig
+	// the kubevpn version is v2.3.1
+	if clientImgTag.Tag() != clientCliVersionStr {
+		// TODO: is it necessary to exit the process?
+		log.Warnf("\033[33mCurrent kubevpn cli version is %s, please use the same version of kubevpn image on flag \"--image\" or \"--kubevpnconfig\"\033[0m", clientCliVersionStr)
+		return false, nil
+	}
+
+	serverImgTag, ok := serverImg.(reference.NamedTagged)
+	if !ok {
+		return false, fmt.Errorf("can not convert server image")
+	}
+
+	// 2. if server image version is same as client cli version, does not need to upgrade
+	if serverImgTag.Tag() == clientCliVersionStr {
+		return false, nil
+	}
+
+	// 3. check custom server image registry
+	// if custom server image domain is not same as config.GHCR_IMAGE_REGISTRY
+	// and not same as config.DOCKER_IMAGE_REGISTRY
+	// and not same as client images(may be used --image)
+	// does not need to upgrade
+	serverImgDomain := reference.Domain(serverImg)
+	clientImgDomain := reference.Domain(clientImg)
+	if serverImgDomain != config.GHCR_IMAGE_REGISTRY && serverImgDomain != config.DOCKER_IMAGE_REGISTRY && serverImgDomain != clientImgDomain {
+		newImageStr := fmt.Sprintf("%s:%s", serverImg.Name(), clientCliVersionStr)
+		log.Warnf("\033[33mCurrent kubevpn cli version is %s, please manually upgrade 'kubevpn-traffic-manager' control plane pod container image to %s\033[0m", clientCliVersionStr, newImageStr)
+		return false, nil
+	}
+
+	serverImgVersion, err := goversion.NewVersion(serverImgTag.Tag())
 	if err != nil {
 		return false, err
 	}
-	return clientVersion.GreaterThan(serverVersion), nil
+
+	clientImgVersion, err := goversion.NewVersion(clientImgTag.Tag())
+	if err != nil {
+		return false, err
+	}
+
+	// 4. check client image version is greater than server image version
+	return clientImgVersion.GreaterThan(serverImgVersion), nil
 }
 
 func (c *ConnectOptions) Equal(a *ConnectOptions) bool {

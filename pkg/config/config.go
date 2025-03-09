@@ -90,6 +90,9 @@ const (
 
 	// hosts entry key word
 	HostsKeyWord = "# Add by KubeVPN"
+
+	GHCR_IMAGE_REGISTRY   = "ghcr.io"
+	DOCKER_IMAGE_REGISTRY = "docker.io"
 )
 
 var (
