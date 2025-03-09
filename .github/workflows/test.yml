@@ -104,16 +104,25 @@ jobs:
         uses: docker/actions-toolkit/.github/actions/macos-setup-qemu@19ca9ade20f5da695f76a10988d6532058575f82
 
       - name: Set up Docker
-        uses: crazy-max/ghaction-setup-docker@v3
-
-      - name: Install minikube
+        uses: docker/setup-docker-action@v4
+        with:
+          daemon-config: |
+            {
+              "debug": true,
+              "features": {
+                "containerd-snapshotter": true
+              }
+            }
+      - uses: azure/setup-kubectl@v4
+      - name: Install kind
         run: |
           set -x
           docker version
-          brew install minikube
-          minikube start --driver=docker
+          brew install kind
+          kind create cluster
+          kubectl cluster-info
+          kubectl config view --flatten --raw
           kubectl get pod -A -o wide
-          minikube kubectl -- get pod -A -o wide
 
       - name: Kubernetes info
         run: |
@@ -123,14 +132,6 @@ jobs:
 
       - name: Install demo bookinfo
         run: |
-          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-details-v1:1.16.2
-          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-ratings-v1:1.16.2
-          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-reviews-v1:1.16.2
-          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-productpage-v1:1.16.2
-          minikube image load --remote ghcr.io/kubenetworks/authors:latest
-          minikube image load --remote ghcr.io/kubenetworks/nginx:latest
-          minikube image ls
-          eval $(minikube docker-env)
           kubectl apply -f https://raw.githubusercontent.com/kubenetworks/kubevpn/master/samples/bookinfo.yaml
 
       - name: Build
@@ -170,9 +171,22 @@ jobs:
           go-version: '1.23'
 
       - name: Set up Docker
-        uses: crazy-max/ghaction-setup-docker@v3
+        uses: docker/setup-docker-action@v4
+        with:
+          daemon-config: |
+            {
+              "debug": true,
+              "features": {
+                "containerd-snapshotter": true
+              }
+            }
       - run: |
           docker info --format '{{.OSType}}'
+          choco install kind
+          kind create cluster
+          kubectl cluster-info
+          kubectl config view --flatten --raw
+
       - run: |
           choco install minikube
           minikube start --driver=docker
