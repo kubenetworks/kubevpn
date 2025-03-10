@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/metadata"
 	v1 "k8s.io/api/core/v1"
+	apinetworkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -34,6 +36,7 @@ import (
 	"k8s.io/cli-runtime/pkg/resource"
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
+	v2 "k8s.io/client-go/kubernetes/typed/networking/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/cmd/set"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -784,6 +787,10 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context, name string) error {
 		if err != nil {
 			return errors.WithMessage(err, "failed to resolve DNS for domain by command dig")
 		}
+		// try to get ingress record
+		if net.ParseIP(ip) == nil {
+			ip = getIngressRecord(ctx, c.clientset.NetworkingV1(), []string{v1.NamespaceAll, c.Namespace}, domain)
+		}
 		if net.ParseIP(ip) == nil {
 			return fmt.Errorf("failed to resolve DNS for domain %s by command dig", domain)
 		}
@@ -795,6 +802,35 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context, name string) error {
 		c.extraHost = append(c.extraHost, dns.Entry{IP: net.ParseIP(ip).String(), Domain: domain})
 	}
 	return nil
+}
+
+func getIngressRecord(ctx context.Context, ingressInterface v2.NetworkingV1Interface, nsList []string, domain string) string {
+	var ingressList []apinetworkingv1.Ingress
+	for _, ns := range nsList {
+		list, _ := ingressInterface.Ingresses(ns).List(ctx, metav1.ListOptions{})
+		ingressList = append(ingressList, list.Items...)
+	}
+	for _, item := range ingressList {
+		for _, rule := range item.Spec.Rules {
+			if rule.Host == domain {
+				for _, ingress := range item.Status.LoadBalancer.Ingress {
+					if ingress.IP != "" {
+						return ingress.IP
+					}
+				}
+			}
+		}
+		for _, tl := range item.Spec.TLS {
+			if slices.Contains(tl.Hosts, domain) {
+				for _, ingress := range item.Status.LoadBalancer.Ingress {
+					if ingress.IP != "" {
+						return ingress.IP
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func (c *ConnectOptions) addExtraNodeIP(ctx context.Context) error {
@@ -992,7 +1028,7 @@ func newer(clientCliVersionStr, clientImgStr, serverImgStr string) (bool, error)
 	// the kubevpn version is v2.3.1
 	if clientImgTag.Tag() != clientCliVersionStr {
 		// TODO: is it necessary to exit the process?
-		log.Warnf("\033[33mCurrent kubevpn cli version is %s, please use the same version of kubevpn image on flag \"--image\" or \"--kubevpnconfig\"\033[0m", clientCliVersionStr)
+		log.Warnf("\033[33mCurrent kubevpn cli version is %s, please use the same version of kubevpn image with flag \"--image\"\033[0m", clientCliVersionStr)
 		return false, nil
 	}
 
