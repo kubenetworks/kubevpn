@@ -76,6 +76,7 @@ jobs:
         run: |
           kubectl wait pods -l app=reviews --for=condition=Ready --timeout=3600s
           kubectl wait pods -l app=productpage --for=condition=Ready --timeout=3600s
+          kubectl wait pods -l app=authors --for=condition=Ready --timeout=3600s
           kubectl get svc -A -o wide
           kubectl get pod -A -o wide
           kubectl get all -o wide
@@ -149,6 +150,7 @@ jobs:
         run: |
           kubectl wait pods -l app=reviews --for=condition=Ready --timeout=3600s
           kubectl wait pods -l app=productpage --for=condition=Ready --timeout=3600s
+          kubectl wait pods -l app=authors --for=condition=Ready --timeout=3600s
           kubectl get svc -A -o wide || true
           kubectl get pod -A -o wide || true
           kubectl get all -o wide || true
@@ -161,6 +163,8 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    env:
+      VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
     needs: [ "image" ]
     steps:
       - uses: actions/checkout@v4
@@ -193,4 +197,7 @@ jobs:
           choco install make
 
       - name: Build
-        run: make kubevpn-windows-amd64
+        run: |
+          make kubevpn-windows-amd64
+          ./bin/kubevpn.exe version
+          ./bin/kubevpn.exe status
