@@ -630,7 +630,7 @@ d0b3dab8912a   ghcr.io/kubenetworks/kubevpn:v2.0.0    "/bin/bash"              5
 ## 架构
 
 ![arch.svg](docs/en/images/proxy-arch.svg)
-架构信息可以从[这里](/docs/en/Architecture.md) 和 [网站](https://www.kubevpn.cn/docs/architecture/connect) 找到.
+架构信息可以从[这里](/docs/en/Architecture.md) 和 [网站](https://www.kubevpn.dev/docs/architecture/connect) 找到.
 
 ## 贡献代码
 
