@@ -713,7 +713,7 @@ support OSI model layers 3 and above, protocols like `ICMP`, `TCP`, and `UDP`...
 
 ## Architecture
 
-[architecture](https://www.kubevpn.cn/docs/architecture/connect).
+[architecture](https://www.kubevpn.dev/docs/architecture/connect).
 
 ## Contributions
 
