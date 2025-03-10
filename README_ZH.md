@@ -33,6 +33,8 @@ KubeVPN 提供一个云原生开发环境。通过连接云端 kubernetes 网络
 Docker
 模拟 k8s pod runtime 将容器运行在本地 (具有相同的环境变量，磁盘和网络)。
 
+![架构](docs/en/images/kubevpn-proxy-tun-arch.svg)
+
 ## 内容
 
 1. [快速开始](./README_ZH.md#快速开始)
@@ -629,8 +631,7 @@ d0b3dab8912a   ghcr.io/kubenetworks/kubevpn:v2.0.0    "/bin/bash"              5
 
 ## 架构
 
-![arch.svg](docs/en/images/proxy-arch.svg)
-架构信息可以从[这里](/docs/en/Architecture.md) 和 [网站](https://www.kubevpn.cn/docs/architecture/connect) 找到.
+[架构](https://kubevpn.dev/docs/architecture/connect)
 
 ## 贡献代码
 

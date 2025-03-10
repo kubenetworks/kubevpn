@@ -38,6 +38,8 @@ For instance, you have the flexibility to run your Kubernetes pod within a local
 environment, volume, and network setup.
 With KubeVPN, empower yourself to develop applications entirely on your local PC!
 
+![arch](docs/en/images/kubevpn-proxy-tun-arch.svg)
+
 ## Content
 
 1. [QuickStart](./README.md#quickstart)
@@ -711,9 +713,7 @@ support OSI model layers 3 and above, protocols like `ICMP`, `TCP`, and `UDP`...
 
 ## Architecture
 
-![arch.svg](docs/en/images/proxy-arch.svg)
-Architecture can be found [here](/docs/en/Architecture.md)
-and [website](https://www.kubevpn.cn/docs/architecture/connect).
+[architecture](https://kubevpn.dev/docs/architecture/connect).
 
 ## Contributions
 
