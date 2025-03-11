@@ -39,6 +39,8 @@ type Config struct {
 	Hosts []Entry
 	Lock  *sync.Mutex
 
+	HowToGetExternalName func(name string) (string, error)
+
 	// only set it on linux
 	OSConfigurator dns.OSConfigurator
 }
@@ -278,10 +280,19 @@ func (c *Config) generateAppendHosts(serviceList []v12.Service, hosts []Entry) [
 		if strings.EqualFold(service.Name, ServiceKubernetes) {
 			continue
 		}
-		if net.ParseIP(service.Spec.ClusterIP) == nil {
+		var ip net.IP
+		if service.Spec.ClusterIP != "" {
+			ip = net.ParseIP(service.Spec.ClusterIP)
+		}
+		if service.Spec.ExternalName != "" {
+			name, _ := c.HowToGetExternalName(service.Spec.ExternalName)
+			ip = net.ParseIP(name)
+		}
+		if ip == nil {
 			continue
 		}
-		var e = Entry{IP: service.Spec.ClusterIP, Domain: service.Name}
+
+		var e = Entry{IP: ip.String(), Domain: service.Name}
 		if !sets.New[Entry]().Insert(entryList...).Has(e) {
 			entryList = append([]Entry{e}, entryList...)
 		}
