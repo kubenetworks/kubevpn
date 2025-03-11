@@ -622,6 +622,22 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		TunName:  c.tunName,
 		Hosts:    c.extraHost,
 		Lock:     c.Lock,
+		HowToGetExternalName: func(domain string) (string, error) {
+			podList, err := c.GetRunningPodList(ctx)
+			if err != nil {
+				return "", err
+			}
+			pod := podList[0]
+			return util.Shell(
+				ctx,
+				c.clientset,
+				c.config,
+				pod.GetName(),
+				config.ContainerSidecarVPN,
+				c.Namespace,
+				[]string{"dig", "+short", domain},
+			)
+		},
 	}
 	log.Debugf("Setup DNS...")
 	if err = c.dnsConfig.SetupDNS(ctx); err != nil {
