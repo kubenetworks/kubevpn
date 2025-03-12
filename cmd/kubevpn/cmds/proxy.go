@@ -147,7 +147,8 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			err = util.PrintGRPCStream[rpc.ConnectResponse](client)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
-					return nil
+					err = leave(cli, args)
+					return err
 				}
 				return err
 			}
@@ -157,17 +158,8 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				// leave from cluster resources
 				<-cmd.Context().Done()
 
-				stream, err := cli.Leave(context.Background(), &rpc.LeaveRequest{
-					Workloads: args,
-				})
+				err = leave(cli, args)
 				if err != nil {
-					return err
-				}
-				err = util.PrintGRPCStream[rpc.LeaveResponse](stream)
-				if err != nil {
-					if status.Code(err) == codes.Canceled {
-						return nil
-					}
 					return err
 				}
 			}
@@ -183,4 +175,21 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd
+}
+
+func leave(cli rpc.DaemonClient, args []string) error {
+	stream, err := cli.Leave(context.Background(), &rpc.LeaveRequest{
+		Workloads: args,
+	})
+	if err != nil {
+		return err
+	}
+	err = util.PrintGRPCStream[rpc.LeaveResponse](stream)
+	if err != nil {
+		if status.Code(err) == codes.Canceled {
+			return nil
+		}
+		return err
+	}
+	return nil
 }

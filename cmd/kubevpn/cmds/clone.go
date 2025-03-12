@@ -1,6 +1,7 @@
 package cmds
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -153,7 +154,8 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			err = util.PrintGRPCStream[rpc.CloneResponse](resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
-					return nil
+					err = remove(cli, args)
+					return err
 				}
 				return err
 			}
@@ -175,4 +177,21 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd
+}
+
+func remove(cli rpc.DaemonClient, args []string) error {
+	resp, err := cli.Remove(context.Background(), &rpc.RemoveRequest{
+		Workloads: args,
+	})
+	if err != nil {
+		return err
+	}
+	err = util.PrintGRPCStream[rpc.DisconnectResponse](resp)
+	if err != nil {
+		if status.Code(err) == codes.Canceled {
+			return nil
+		}
+		return err
+	}
+	return nil
 }

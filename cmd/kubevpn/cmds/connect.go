@@ -116,7 +116,8 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			err = util.PrintGRPCStream[rpc.ConnectResponse](resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
-					return nil
+					err = disconnect(cli, bytes, ns, sshConf)
+					return err
 				}
 				return err
 			}
@@ -124,20 +125,8 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				util.Print(os.Stdout, config.Slogan)
 			} else {
 				<-cmd.Context().Done()
-				disconnect, err := cli.Disconnect(context.Background(), &rpc.DisconnectRequest{
-					KubeconfigBytes: ptr.To(string(bytes)),
-					Namespace:       ptr.To(ns),
-					SshJump:         sshConf.ToRPC(),
-				})
+				err = disconnect(cli, bytes, ns, sshConf)
 				if err != nil {
-					log.Errorf("Disconnect error: %v", err)
-					return err
-				}
-				err = util.PrintGRPCStream[rpc.DisconnectResponse](disconnect)
-				if err != nil {
-					if status.Code(err) == codes.Canceled {
-						return nil
-					}
 					return err
 				}
 				_, _ = fmt.Fprint(os.Stdout, "Disconnect completed")
@@ -152,4 +141,24 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	handler.AddExtraRoute(cmd.Flags(), extraRoute)
 	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	return cmd
+}
+
+func disconnect(cli rpc.DaemonClient, bytes []byte, ns string, sshConf *pkgssh.SshConfig) error {
+	resp, err := cli.Disconnect(context.Background(), &rpc.DisconnectRequest{
+		KubeconfigBytes: ptr.To(string(bytes)),
+		Namespace:       ptr.To(ns),
+		SshJump:         sshConf.ToRPC(),
+	})
+	if err != nil {
+		log.Errorf("Disconnect error: %v", err)
+		return err
+	}
+	err = util.PrintGRPCStream[rpc.DisconnectResponse](resp)
+	if err != nil {
+		if status.Code(err) == codes.Canceled {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
