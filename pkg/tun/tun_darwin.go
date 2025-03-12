@@ -99,6 +99,7 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 	}
 	gw := &route.LinkAddr{Index: tunIfi.Index}
 
+	var prefixList []netip.Prefix
 	for _, r := range routes {
 		if r.Dst.String() == "" {
 			continue
@@ -108,10 +109,14 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 		if err != nil {
 			return err
 		}
-		err = addRoute(1, prefix, gw)
-		if err != nil {
-			return fmt.Errorf("failed to add route: %v", err)
-		}
+		prefixList = append(prefixList, prefix)
+	}
+	if len(prefixList) == 0 {
+		return nil
+	}
+	err = addRoute(gw, prefixList...)
+	if err != nil {
+		return fmt.Errorf("failed to add route: %v", err)
 	}
 	return nil
 }
