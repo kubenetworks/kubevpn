@@ -1,15 +1,18 @@
-//go:build darwin
+//go:build darwin || freebsd || openbsd
 
 package tun
 
 import (
 	"fmt"
 	"net"
-	"os/exec"
-	"strings"
+	"net/netip"
+	"runtime"
+	"unsafe"
 
 	"github.com/containernetworking/cni/pkg/types"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/route"
+	"golang.org/x/sys/unix"
 	"golang.zx2c4.com/wireguard/tun"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -45,27 +48,29 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		if ipv4, _, err = net.ParseCIDR(cfg.Addr); err != nil {
 			return
 		}
-		setIPv4Cmd := fmt.Sprintf("ifconfig %s inet %s %s mtu %d up", name, cfg.Addr, ipv4.String(), mtu)
-		log.Debugf("[TUN] %s", setIPv4Cmd)
-		args := strings.Split(setIPv4Cmd, " ")
-		if err = exec.Command(args[0], args[1:]...).Run(); err != nil {
-			err = fmt.Errorf("%s: %v", setIPv4Cmd, err)
+		var prefix netip.Prefix
+		prefix, err = netip.ParsePrefix(cfg.Addr)
+		if err != nil {
+			return
+		}
+		err = setInterfaceAddress(name, prefix)
+		if err != nil {
 			return
 		}
 	}
 
 	// set ipv6 address
 	if cfg.Addr6 != "" {
-		var ipv6CIDR *net.IPNet
-		if ipv6, ipv6CIDR, err = net.ParseCIDR(cfg.Addr6); err != nil {
+		if ipv6, _, err = net.ParseCIDR(cfg.Addr6); err != nil {
 			return
 		}
-		ones, _ := ipv6CIDR.Mask.Size()
-		setIPv6Cmd := fmt.Sprintf("ifconfig %s inet6 %s prefixlen %d alias", name, ipv6.String(), ones)
-		log.Debugf("[TUN] %s", setIPv6Cmd)
-		args := strings.Split(setIPv6Cmd, " ")
-		if err = exec.Command(args[0], args[1:]...).Run(); err != nil {
-			err = fmt.Errorf("%s: %v", setIPv6Cmd, err)
+		var prefix netip.Prefix
+		prefix, err = netip.ParsePrefix(cfg.Addr6)
+		if err != nil {
+			return
+		}
+		err = setInterfaceAddress(name, prefix)
+		if err != nil {
 			return
 		}
 	}
@@ -88,23 +93,110 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 }
 
 func addTunRoutes(ifName string, routes ...types.Route) error {
-	for _, route := range routes {
-		if route.Dst.String() == "" {
+	tunIfi, err := net.InterfaceByName(ifName)
+	if err != nil {
+		return err
+	}
+	gw := &route.LinkAddr{Index: tunIfi.Index}
+
+	for _, r := range routes {
+		if r.Dst.String() == "" {
 			continue
 		}
-		var cmd string
-		// ipv4
-		if route.Dst.IP.To4() != nil {
-			cmd = fmt.Sprintf("route add -net %s -interface %s", route.Dst.String(), ifName)
-		} else { // ipv6
-			cmd = fmt.Sprintf("route add -inet6 %s -interface %s", route.Dst.String(), ifName)
-		}
-		log.Debugf("[TUN] %s", cmd)
-		args := strings.Split(cmd, " ")
-		err := exec.Command(args[0], args[1:]...).Run()
+		var prefix netip.Prefix
+		prefix, err = netip.ParsePrefix(r.Dst.String())
 		if err != nil {
-			return fmt.Errorf("run cmd %s: %v", cmd, err)
+			return err
 		}
+		err = addRoute(1, prefix, gw)
+		if err != nil {
+			return fmt.Errorf("failed to add route: %v", err)
+		}
+	}
+	return nil
+}
+
+// struct ifaliasreq
+type inet4AliasReq struct {
+	name    [unix.IFNAMSIZ]byte
+	addr    unix.RawSockaddrInet4
+	dstaddr unix.RawSockaddrInet4
+	mask    unix.RawSockaddrInet4
+}
+
+// ifaliasreq
+type inet6AliasReq struct {
+	name     [unix.IFNAMSIZ]byte
+	addr     unix.RawSockaddrInet6
+	dstaddr  unix.RawSockaddrInet6
+	mask     unix.RawSockaddrInet6
+	flags    int32
+	lifetime struct {
+		expire    float64
+		preferred float64
+		valid     uint32
+		pref      uint32
+	}
+}
+
+// IPv6 SIOCAIFADDR
+const (
+	siocAIFAddrInet6 = (unix.SIOCAIFADDR & 0xe000ffff) | (uint(unsafe.Sizeof(inet6AliasReq{})) << 16)
+	v6InfiniteLife   = 0xffffffff
+	v6IfaceFlags     = 0x0020 | 0x0400 // NODAD + SECURED
+)
+
+func setInterfaceAddress(ifName string, addr netip.Prefix) error {
+	ip := addr.Addr()
+	if ip.Is4() {
+		return setInet4Address(ifName, addr)
+	}
+	return setInet6Address(ifName, addr)
+}
+
+func setInet4Address(ifName string, prefix netip.Prefix) error {
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	ip4 := prefix.Addr().As4()
+	req := &inet4AliasReq{
+		addr:    unix.RawSockaddrInet4{Family: unix.AF_INET, Len: unix.SizeofSockaddrInet4, Addr: ip4},
+		dstaddr: unix.RawSockaddrInet4{Family: unix.AF_INET, Len: unix.SizeofSockaddrInet4, Addr: ip4},
+		mask:    unix.RawSockaddrInet4{Family: unix.AF_INET, Len: unix.SizeofSockaddrInet4, Addr: [4]byte(net.CIDRMask(prefix.Bits(), 32))},
+	}
+	copy(req.name[:], ifName)
+
+	return ioctlRequest(fd, unix.SIOCAIFADDR, unsafe.Pointer(req))
+}
+
+func setInet6Address(ifName string, prefix netip.Prefix) error {
+	fd, err := unix.Socket(unix.AF_INET6, unix.SOCK_DGRAM, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+
+	ip6 := prefix.Addr().As16()
+	req := &inet6AliasReq{
+		addr:    unix.RawSockaddrInet6{Family: unix.AF_INET6, Len: unix.SizeofSockaddrInet6, Addr: ip6},
+		dstaddr: unix.RawSockaddrInet6{Family: unix.AF_INET6, Len: unix.SizeofSockaddrInet6, Addr: ip6},
+		mask:    unix.RawSockaddrInet6{Family: unix.AF_INET6, Len: unix.SizeofSockaddrInet6, Addr: [16]byte(net.CIDRMask(prefix.Bits(), 128))},
+		flags:   v6IfaceFlags,
+	}
+	copy(req.name[:], ifName)
+	req.lifetime.valid = v6InfiniteLife
+	req.lifetime.pref = v6InfiniteLife
+
+	return ioctlRequest(fd, siocAIFAddrInet6, unsafe.Pointer(req))
+}
+
+func ioctlRequest(fd int, req uint, ptr unsafe.Pointer) error {
+	err := unix.IoctlSetInt(fd, req, int(uintptr(ptr)))
+	runtime.KeepAlive(ptr)
+	if err != nil {
+		return err
 	}
 	return nil
 }
