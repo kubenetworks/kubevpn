@@ -508,35 +508,42 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
 	return nil
 }
 
-func (c *ConnectOptions) addRoute(ipStr string) error {
+func (c *ConnectOptions) addRoute(ipStrList ...string) error {
 	if c.tunName == "" {
 		return nil
 	}
-
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return nil
-	}
-	for _, p := range c.apiServerIPs {
-		// if pod ip or service ip is equal to apiServer ip, can not add it to route table
-		if p.Equal(ip) {
-			return nil
+	var routes []types.Route
+	for _, ipStr := range ipStrList {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
 		}
-	}
-
-	var mask net.IPMask
-	if ip.To4() != nil {
-		mask = net.CIDRMask(32, 32)
-	} else {
-		mask = net.CIDRMask(128, 128)
-	}
-	if r, err := netroute.New(); err == nil {
-		ifi, _, _, err := r.Route(ip)
-		if err == nil && ifi.Name == c.tunName {
-			return nil
+		var match bool
+		for _, p := range c.apiServerIPs {
+			// if pod ip or service ip is equal to apiServer ip, can not add it to route table
+			if p.Equal(ip) {
+				match = true
+				break
+			}
 		}
+		if match {
+			continue
+		}
+		var mask net.IPMask
+		if ip.To4() != nil {
+			mask = net.CIDRMask(32, 32)
+		} else {
+			mask = net.CIDRMask(128, 128)
+		}
+		if r, err := netroute.New(); err == nil {
+			ifi, _, _, err := r.Route(ip)
+			if err == nil && ifi.Name == c.tunName {
+				continue
+			}
+		}
+		routes = append(routes, types.Route{Dst: net.IPNet{IP: ip, Mask: mask}})
 	}
-	err := tun.AddRoutes(c.tunName, types.Route{Dst: net.IPNet{IP: ip, Mask: mask}})
+	err := tun.AddRoutes(c.tunName, routes...)
 	return err
 }
 

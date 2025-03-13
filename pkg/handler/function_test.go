@@ -40,12 +40,14 @@ var (
 func TestFunctions(t *testing.T) {
 	Init()
 	kubevpnConnect(t)
+	kubevpnStatus(t)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(pingPodIP).Pointer()).Name(), pingPodIP)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(dialUDP).Pointer()).Name(), dialUDP)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(healthCheckPod).Pointer()).Name(), healthCheckPod)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(healthCheckService).Pointer()).Name(), healthCheckService)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(shortDomain).Pointer()).Name(), shortDomain)
 	t.Run(runtime.FuncForPC(reflect.ValueOf(fullDomain).Pointer()).Name(), fullDomain)
+	kubevpnStatus(t)
 }
 
 func pingPodIP(t *testing.T) {
@@ -336,6 +338,19 @@ func kubevpnConnect(t *testing.T) {
 		t.Fail()
 		return
 	}
+}
+
+func kubevpnStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status")
+	stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, nil)
+	if err != nil {
+		t.Log(stdout, stderr)
+		t.Error(err)
+		t.Fail()
+		return
+	}
+	t.Log(stdout)
+	t.Log(stderr)
 }
 
 func Init() {

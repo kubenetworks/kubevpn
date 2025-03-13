@@ -10,33 +10,49 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func addRoute(seq int, r netip.Prefix, gw route.Addr) error {
+func addRoute(gw route.Addr, r ...netip.Prefix) error {
+	if len(r) == 0 {
+		return nil
+	}
 	return withRouteSocket(func(routeSocket int) error {
-		m := newRouteMessage(unix.RTM_ADD, seq, r, gw)
-		rb, err := m.Marshal()
-		if err != nil {
-			return err
+		for i, prefix := range r {
+			m := newRouteMessage(unix.RTM_ADD, i+1, prefix, gw)
+			rb, err := m.Marshal()
+			if err != nil {
+				return err
+			}
+			_, err = unix.Write(routeSocket, rb)
+			if errors.Is(err, unix.EEXIST) {
+				err = nil
+			}
+			if err != nil {
+				return err
+			}
 		}
-		_, err = unix.Write(routeSocket, rb)
-		if errors.Is(err, unix.EEXIST) {
-			err = nil
-		}
-		return err
+		return nil
 	})
 }
 
-func deleteRoute(seq int, r netip.Prefix, gw route.Addr) error {
+func deleteRoute(gw route.Addr, r ...netip.Prefix) error {
+	if len(r) == 0 {
+		return nil
+	}
 	return withRouteSocket(func(routeSocket int) error {
-		m := newRouteMessage(unix.RTM_DELETE, seq, r, gw)
-		rb, err := m.Marshal()
-		if err != nil {
-			return err
+		for i, prefix := range r {
+			m := newRouteMessage(unix.RTM_DELETE, i+1, prefix, gw)
+			rb, err := m.Marshal()
+			if err != nil {
+				return err
+			}
+			_, err = unix.Write(routeSocket, rb)
+			if errors.Is(err, unix.ESRCH) {
+				err = nil
+			}
+			if err != nil {
+				return err
+			}
 		}
-		_, err = unix.Write(routeSocket, rb)
-		if errors.Is(err, unix.ESRCH) {
-			err = nil
-		}
-		return err
+		return nil
 	})
 }
 
@@ -45,12 +61,11 @@ func withRouteSocket(f func(routeSocket int) error) error {
 	if err != nil {
 		return err
 	}
-
+	defer unix.Close(routeSocket)
 	// Avoid the overhead of echoing messages back to sender
 	if err = unix.SetsockoptInt(routeSocket, unix.SOL_SOCKET, unix.SO_USELOOPBACK, 0); err != nil {
 		return err
 	}
-	defer unix.Close(routeSocket)
 	return f(routeSocket)
 }
 
