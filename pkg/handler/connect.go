@@ -756,7 +756,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) (err erro
 		}
 		if len(c.cidrs) != 0 {
 			log.Infoln("Got network CIDR from cache")
-			return
+			return nil
 		}
 	}
 
@@ -773,12 +773,12 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) (err erro
 		}
 		c.cidrs = util.RemoveLargerOverlappingCIDRs(append(c.cidrs, cidrs...))
 		_ = m.Set(ctx, config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
-		return
+		return nil
 	}
 
 	// (3) fallback to get cidr from node/pod/service
 	c.cidrs = util.GetCIDRFromResourceUgly(ctx, c.clientset, c.Namespace)
-	return
+	return nil
 }
 
 func (c *ConnectOptions) removeCIDRsContainingIPs(ipList []net.IP) {
@@ -949,6 +949,9 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 					i--
 					continue
 				}
+			}
+			if len(spec.ImagePullSecrets) == 0 {
+				spec.ImagePullSecrets = nil
 			}
 			return nil
 		})
