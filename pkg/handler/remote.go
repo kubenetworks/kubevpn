@@ -481,12 +481,14 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 						},
 					},
 					RestartPolicy: v1.RestartPolicyAlways,
-					ImagePullSecrets: []v1.LocalObjectReference{{
-						Name: imagePullSecretName,
-					}},
 				},
 			},
 		},
+	}
+	if imagePullSecretName != "" {
+		deploy.Spec.Template.Spec.ImagePullSecrets = []v1.LocalObjectReference{{
+			Name: imagePullSecretName,
+		}}
 	}
 	return deploy
 }
