@@ -79,9 +79,9 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	}
 
 	config.Image = req.Image
-	err = connect.DoConnect(sshCtx, true)
+	err = connect.DoConnect(sshCtx, true, ctx.Done())
 	if err != nil {
-		log.Errorf("Do connect error: %v", err)
+		log.Errorf("Failed to connect: %v", err)
 		return err
 	}
 
@@ -122,6 +122,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 	})
 	defer func() {
 		if err != nil {
+			connect.Cleanup()
 			sshCancel()
 		}
 	}()
