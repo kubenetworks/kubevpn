@@ -1,0 +1,40 @@
+name: kubevpn
+version: CRAFT_ARCH_BUILD_VERSION
+summary: Cloud Native Dev Environment
+description: KubeVPN offers a Cloud Native Dev Environment that connects to kubernetes cluster network.
+adopt-info: kubevpn
+base: core24
+
+confinement: strict
+grade: stable
+
+platforms:
+  amd64:
+    build-on: [amd64]
+    build-for: [amd64]
+  arm64:
+    build-on: [arm64]
+    build-for: [arm64]
+
+apps:
+  kubevpn:
+    command: bin/kubevpn
+    plugs:
+      - network
+      - network-bind
+
+parts:
+  kubevpn-builder:
+    plugin: make
+    source: .
+    build-packages:
+      - git
+      - golang
+      - make
+    build-environment:
+      - GOARCH: "$CRAFT_ARCH_BUILD_ON"
+    override-build: |
+      git config --global --add safe.directory $PWD
+      make kubevpn-linux-$CRAFT_ARCH_BUILD_ON
+      mkdir -p $SNAPCRAFT_PART_INSTALL/bin
+      install -m 0755 bin/kubevpn $SNAPCRAFT_PART_INSTALL/bin/kubevpn

@@ -221,3 +221,43 @@ jobs:
               --pages-branch master \
               --pages-index-path charts/index.yaml \
               --push
+  snapcraft:
+    runs-on: ubuntu-24.04
+    env:
+      SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_TOKEN }}
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+
+      - name: Install Snapcraft
+        uses: samuelmeuli/action-snapcraft@v3
+
+      - name: Setup LXD
+        uses: canonical/setup-lxd@main
+
+      - name: Use Snapcraft
+        run: |
+          RELEASE_VERSION=${GITHUB_REF#refs/*/}
+          sed -i s#CRAFT_ARCH_BUILD_VERSION#$RELEASE_VERSION#g snap/snapcraft.yaml
+          snapcraft
+          snapcraft upload --release=stable kubevpn_${RELEASE_VERSION}_amd64.snap
+  snapcraft-arm:
+    runs-on: ubuntu-24.04-arm
+    env:
+      SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_TOKEN }}
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+
+      - name: Install Snapcraft
+        uses: samuelmeuli/action-snapcraft@v3
+
+      - name: Setup LXD
+        uses: canonical/setup-lxd@main
+
+      - name: Use Snapcraft
+        run: |
+          RELEASE_VERSION=${GITHUB_REF#refs/*/}
+          sed -i s#CRAFT_ARCH_BUILD_VERSION#$RELEASE_VERSION#g snap/snapcraft.yaml
+          snapcraft
+          snapcraft upload --release=stable kubevpn_${RELEASE_VERSION}_arm64.snap
