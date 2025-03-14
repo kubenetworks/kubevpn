@@ -487,9 +487,9 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
 				return err
 			}()
 			if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {
-				time.Sleep(time.Second * 1)
+				time.Sleep(time.Second * 10)
 			} else {
-				time.Sleep(time.Millisecond * 200)
+				time.Sleep(time.Second * 2)
 			}
 		}
 	}()
@@ -509,9 +509,9 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
 				return err
 			}()
 			if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {
-				time.Sleep(time.Second * 1)
+				time.Sleep(time.Second * 10)
 			} else {
-				time.Sleep(time.Millisecond * 200)
+				time.Sleep(time.Second * 2)
 			}
 		}
 	}()

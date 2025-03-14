@@ -29,31 +29,8 @@ import (
 func (c *Config) SetupDNS(ctx context.Context) error {
 	config := c.Config
 	tunName := c.TunName
-	log.Debugf("Setting up DNS...")
-	// TODO consider use https://wiki.debian.org/NetworkManager and nmcli to config DNS
-	// try to solve:
-	// sudo systemd-resolve --set-dns 172.28.64.10 --interface tun0 --set-domain=vke-system.svc.cluster.local --set-domain=svc.cluster.local --set-domain=cluster.local
-	//Failed to set DNS configuration: Unit dbus-org.freedesktop.resolve1.service not found.
-	// ref: https://superuser.com/questions/1427311/activation-via-systemd-failed-for-unit-dbus-org-freedesktop-resolve1-service
-	// systemctl enable systemd-resolved.service
-	_ = exec.Command("systemctl", "enable", "systemd-resolved.service").Run()
-	// systemctl start systemd-resolved.service
-	_ = exec.Command("systemctl", "start", "systemd-resolved.service").Run()
-	//systemctl status systemd-resolved.service
-	_ = exec.Command("systemctl", "status", "systemd-resolved.service").Run()
-	log.Debugf("Enable service systemd resolved...")
-	var exists = func(cmd string) bool {
-		_, err := exec.LookPath(cmd)
-		return err == nil
-	}
-	log.Debugf("Try to setup DNS by resolvectl or systemd-resolve...")
-	if exists("resolvectl") {
-		_ = GetResolveCtlCmd(ctx, tunName, config)
-	}
-	if exists("systemd-resolve") {
-		_ = GetSystemdResolveCmd(ctx, tunName, config)
-	}
 
+	// 1) setup dns by magicDNS
 	log.Debugf("Use library to setup DNS...")
 	// https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables#default-environment-variables
 	if _, found := os.LookupEnv("GITHUB_ACTIONS"); !found {
@@ -70,7 +47,42 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 		}
 	}
 
+	// 2) use systemctl or resolvectl to setup dns
+	log.Debugf("Use systemd to setup DNS...")
+	// TODO consider use https://wiki.debian.org/NetworkManager and nmcli to config DNS
+	// try to solve:
+	// sudo systemd-resolve --set-dns 172.28.64.10 --interface tun0 --set-domain=vke-system.svc.cluster.local --set-domain=svc.cluster.local --set-domain=cluster.local
+	//Failed to set DNS configuration: Unit dbus-org.freedesktop.resolve1.service not found.
+	// ref: https://superuser.com/questions/1427311/activation-via-systemd-failed-for-unit-dbus-org-freedesktop-resolve1-service
+	// systemctl enable systemd-resolved.service
+	_ = exec.Command("systemctl", "enable", "systemd-resolved.service").Run()
+	// systemctl start systemd-resolved.service
+	_ = exec.Command("systemctl", "start", "systemd-resolved.service").Run()
+	//systemctl status systemd-resolved.service
+	_ = exec.Command("systemctl", "status", "systemd-resolved.service").Run()
+	log.Debugf("Enable service systemd resolved...")
+	var exists = func(cmd string) bool {
+		_, err := exec.LookPath(cmd)
+		return err == nil
+	}
+	var success bool
+	log.Debugf("Try to setup DNS by resolvectl or systemd-resolve...")
+	if exists("resolvectl") {
+		if setupDnsByCmdResolvectl(ctx, tunName, config) == nil {
+			success = true
+		}
+	}
+	if exists("systemd-resolve") {
+		if setupDNSbyCmdSystemdResolve(ctx, tunName, config) == nil {
+			success = true
+		}
+	}
+	if success {
+		return nil
+	}
 
+	// 3) write dns info to file: /etc/resolv.conf
+	log.Debugf("Use resolv.conf to setup DNS...")
 	filename := resolvconf.Path()
 	readFile, err := os.ReadFile(filename)
 	if err != nil {
@@ -85,10 +97,10 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 	return err
 }
 
-// GetResolveCtlCmd
+// setupDnsByCmdResolvectl
 // resolvectl dns utun0 10.10.129.161
 // resolvectl domain utun0 default.svc.cluster.local svc.cluster.local cluster.local
-func GetResolveCtlCmd(ctx context.Context, tunName string, config *miekgdns.ClientConfig) error {
+func setupDnsByCmdResolvectl(ctx context.Context, tunName string, config *miekgdns.ClientConfig) error {
 	cmd := exec.CommandContext(ctx, "resolvectl", "dns", tunName, config.Servers[0])
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -104,7 +116,7 @@ func GetResolveCtlCmd(ctx context.Context, tunName string, config *miekgdns.Clie
 	return nil
 }
 
-func GetSystemdResolveCmd(ctx context.Context, tunName string, config *miekgdns.ClientConfig) error {
+func setupDNSbyCmdSystemdResolve(ctx context.Context, tunName string, config *miekgdns.ClientConfig) error {
 	cmd := exec.CommandContext(ctx, "systemd-resolve", []string{
 		"--set-dns",
 		config.Servers[0],

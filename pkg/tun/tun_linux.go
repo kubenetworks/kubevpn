@@ -10,7 +10,6 @@ import (
 
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/docker/libcontainer/netlink"
-	log "github.com/sirupsen/logrus"
 	"golang.zx2c4.com/wireguard/tun"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -111,11 +110,10 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 		if route.Dst.String() == "" {
 			continue
 		}
-		cmd := fmt.Sprintf("ip route add %s dev %s", route.Dst.String(), ifName)
-		log.Debugf("[TUN] %s", cmd)
+		// ip route add 192.168.1.123/32 dev utun0
 		err := netlink.AddRoute(route.Dst.String(), "", "", ifName)
 		if err != nil && !errors.Is(err, syscall.EEXIST) {
-			return fmt.Errorf("%s: %v", cmd, err)
+			return fmt.Errorf("failed to add route: %v", err)
 		}
 	}
 	return nil
