@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"reflect"
 	"runtime"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -324,11 +323,7 @@ func server(port int) {
 func kubevpnConnect(t *testing.T) {
 	cmd := exec.Command("kubevpn", "proxy", "--debug", "deployments/reviews")
 	check := func(log string) bool {
-		line := "+" + strings.Repeat("-", len(log)-2) + "+"
-		t.Log(line)
-		t.Log(log)
-		t.Log(line)
-		t.Log("\n")
+		t.Log(util.PrintStr(log))
 		return false
 	}
 	stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, check)
