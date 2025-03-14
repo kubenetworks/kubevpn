@@ -220,7 +220,7 @@ jobs:
               --charts-repo https://github.com/$owner/$repo \
               --pages-branch master \
               --pages-index-path charts/index.yaml \
-              --push
+              --pr
   snapcraft:
     runs-on: ubuntu-24.04
     env:
