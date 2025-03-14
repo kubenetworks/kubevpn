@@ -9,6 +9,7 @@
 [![Releases][7]](https://github.com/kubenetworks/kubevpn/releases)
 [![GoDoc](https://godoc.org/github.com/kubenetworks/kubevpn?status.png)](https://pkg.go.dev/github.com/wencaiwulue/kubevpn/v2)
 [![codecov](https://codecov.io/gh/wencaiwulue/kubevpn/graph/badge.svg?token=KMDSINSDEP)](https://codecov.io/gh/wencaiwulue/kubevpn)
+[![Snapcraft](https://snapcraft.io/kubevpn/badge.svg)](https://snapcraft.io/kubevpn)
 
 [1]: https://img.shields.io/github/actions/workflow/status/kubenetworks/kubevpn/release.yml?logo=github
 
