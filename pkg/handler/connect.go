@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 
 	"net"
 	"net/url"
@@ -197,8 +198,16 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, workloads [
 	return
 }
 
-func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error) {
+func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-chan struct{}) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
+	var success atomic.Bool
+	go func() {
+		// if stop chan done before current function finished, means client ctrl+c to cancel operation
+		<-stopChan
+		if !success.Load() {
+			c.cancel()
+		}
+	}()
 
 	log.Info("Starting connect")
 	m := dhcp.NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
@@ -268,6 +277,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		log.Errorf("Configure DNS failed: %v", err)
 		return
 	}
+	success.Store(true)
 	log.Info("Configured DNS service")
 	return
 }

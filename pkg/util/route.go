@@ -63,7 +63,7 @@ func ListService(ctx context.Context, lister v12.ServiceInterface, addRouteFunc 
 		}
 		err = addRouteFunc(ips...)
 		if err != nil {
-			log.Errorf("Failed to add service IP: %s to route table: %v", ips, err)
+			log.Errorf("Failed to add service IP to route table: %v", err)
 		}
 		if serviceList.Continue == "" {
 			return nil
@@ -117,7 +117,7 @@ func ListPod(ctx context.Context, lister v12.PodInterface, addRouteFunc func(ipS
 		}
 		err = addRouteFunc(ips...)
 		if err != nil {
-			log.Errorf("Failed to add Pod IP: %v route table: %v", ips, err)
+			log.Errorf("Failed to add Pod IP to route table: %v", err)
 		}
 		if podList.Continue == "" {
 			return nil

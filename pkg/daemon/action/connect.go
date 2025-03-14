@@ -79,6 +79,9 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	})
 	defer func() {
 		if e != nil {
+			svr.connect.Cleanup()
+			svr.connect = nil
+			svr.t = time.Time{}
 			sshCancel()
 		}
 	}()
@@ -97,12 +100,9 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	}
 
 	config.Image = req.Image
-	err = svr.connect.DoConnect(sshCtx, false)
+	err = svr.connect.DoConnect(sshCtx, false, ctx.Done())
 	if err != nil {
 		log.Errorf("Failed to connect: %v", err)
-		svr.connect.Cleanup()
-		svr.connect = nil
-		svr.t = time.Time{}
 		return err
 	}
 	return nil
@@ -139,6 +139,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	})
 	defer func() {
 		if e != nil {
+			connect.Cleanup()
 			sshCancel()
 		}
 	}()
