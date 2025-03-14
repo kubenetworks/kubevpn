@@ -2358,6 +2358,7 @@ k8s.io/kubectl/pkg/generate
 k8s.io/kubectl/pkg/generate/versioned
 k8s.io/kubectl/pkg/polymorphichelpers
 k8s.io/kubectl/pkg/rawhttp
+k8s.io/kubectl/pkg/scale
 k8s.io/kubectl/pkg/scheme
 k8s.io/kubectl/pkg/util/certificate
 k8s.io/kubectl/pkg/util/completion

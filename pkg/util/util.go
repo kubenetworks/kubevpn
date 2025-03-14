@@ -1,6 +1,7 @@
 package util
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -295,21 +296,35 @@ func CleanExtensionLib() {
 }
 
 func Print(writer io.Writer, slogan string) {
-	length := len(slogan) + 1 + 1
+	str := PrintStr(slogan)
+	_, _ = writer.Write([]byte(str))
+}
+
+func PrintStr(slogan string) string {
+	scanner := bufio.NewScanner(strings.NewReader(slogan))
+	var length int
+	var lines []string
+	for scanner.Scan() {
+		line := scanner.Text()
+		length = max(length, len(line))
+		lines = append(lines, line)
+	}
+	length = length + 1 + 1
 	var sb strings.Builder
 
 	sb.WriteString("+" + strings.Repeat("-", length) + "+")
-	sb.WriteByte('\n')
-	sb.WriteString("|")
-	sb.WriteString(strings.Repeat(" ", 1))
-	sb.WriteString(slogan)
-	sb.WriteString(strings.Repeat(" ", 1))
-	sb.WriteString("|")
+	for _, line := range lines {
+		sb.WriteByte('\n')
+		sb.WriteString("|")
+		sb.WriteString(strings.Repeat(" ", 1))
+		sb.WriteString(line)
+		sb.WriteString(strings.Repeat(" ", length-1-len(line)))
+		sb.WriteString("|")
+	}
 	sb.WriteByte('\n')
 	sb.WriteString("+" + strings.Repeat("-", length) + "+")
-	sb.WriteByte('\n')
 
-	_, _ = writer.Write([]byte(sb.String()))
+	return sb.String()
 }
 
 func StartupPProf(port int) {

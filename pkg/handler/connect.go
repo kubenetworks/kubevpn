@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"net"
 	"net/url"
 	"reflect"
@@ -15,8 +16,6 @@ import (
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/distribution/reference"
-	goversion "github.com/hashicorp/go-version"
 	"github.com/libp2p/go-netroute"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -29,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	pkgtypes "k8s.io/apimachinery/pkg/types"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/runtime"
@@ -41,6 +41,7 @@ import (
 	"k8s.io/kubectl/pkg/cmd/set"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
+	"k8s.io/kubectl/pkg/scale"
 	"k8s.io/kubectl/pkg/scheme"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/utils/pointer"
@@ -918,29 +919,45 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 		return fmt.Errorf("can not found any container in deploy %s", deploy.Name)
 	}
 
+	clientVer := config.Version
 	clientImg := config.Image
 	serverImg := deploy.Spec.Template.Spec.Containers[0].Image
 
-	if clientImg == serverImg {
+	isNeedUpgrade, err := util.IsNewer(clientVer, clientImg, serverImg)
+	if !isNeedUpgrade {
 		return nil
 	}
-
-	isNeedUpgrade, _ := newer(config.Version, clientImg, serverImg)
-	if deploy.Status.ReadyReplicas > 0 && !isNeedUpgrade {
-		return nil
+	if err != nil {
+		return err
 	}
 
 	log.Infof("Set image %s --> %s...", serverImg, clientImg)
 
-	r := c.factory.NewBuilder().
+	err = upgradeDeploySpec(ctx, c.factory, c.Namespace, deploy.Name, clientImg)
+	if err != nil {
+		return err
+	}
+	// because use webhook(kubevpn-traffic-manager container webhook) to assign ip,
+	// if create new pod use old webhook, ip will still change to old CIDR.
+	// so after patched, check again if env is newer or not,
+	// if env is still old, needs to re-patch using new webhook
+	err = restartDeploy(ctx, c.factory, c.clientset, c.Namespace, deploy.Name)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name string, targetImage string) error {
+	r := f.NewBuilder().
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
-		NamespaceParam(c.Namespace).DefaultNamespace().
-		ResourceNames("deployments", deploy.Name).
+		NamespaceParam(ns).DefaultNamespace().
+		ResourceNames("deployments", name).
 		ContinueOnError().
 		Latest().
 		Flatten().
 		Do()
-	if err = r.Err(); err != nil {
+	if err := r.Err(); err != nil {
 		return err
 	}
 	infos, err := r.Infos()
@@ -966,7 +983,7 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 	patches := set.CalculatePatches(infos, scheme.DefaultJSONEncoder(), func(obj pkgruntime.Object) ([]byte, error) {
 		_, err = polymorphichelpers.UpdatePodSpecForObjectFn(obj, func(spec *v1.PodSpec) error {
 			for i := range spec.Containers {
-				spec.Containers[i].Image = clientImg
+				spec.Containers[i].Image = targetImage
 
 				// update tun cidr for vpn
 				if spec.Containers[i].Name == config.ContainerSidecarVPN {
@@ -1027,7 +1044,7 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 			log.Errorf("Failed to patch image update to pod template: %v", err)
 			return err
 		}
-		err = util.RolloutStatus(ctx, c.factory, c.Namespace, fmt.Sprintf("%s/%s", p.Info.Mapping.Resource.GroupResource().String(), p.Info.Name), time.Minute*60)
+		err = util.RolloutStatus(ctx, f, ns, fmt.Sprintf("%s/%s", p.Info.Mapping.Resource.GroupResource().String(), p.Info.Name), time.Minute*60)
 		if err != nil {
 			return err
 		}
@@ -1035,64 +1052,57 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 	return nil
 }
 
-func newer(clientCliVersionStr, clientImgStr, serverImgStr string) (bool, error) {
-	clientImg, err := reference.ParseNormalizedNamed(clientImgStr)
+func restartDeploy(ctx context.Context, f cmdutil.Factory, clientset *kubernetes.Clientset, ns, name string) error {
+	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
+	list, err := util.GetRunningPodList(ctx, clientset, ns, label)
 	if err != nil {
-		return false, err
+		return err
 	}
-	serverImg, err := reference.ParseNormalizedNamed(serverImgStr)
+	pod := list[0]
+	container, _ := util.FindContainerByName(&pod, config.ContainerSidecarVPN)
+	if container == nil {
+		return nil
+	}
+
+	envs := map[string]string{
+		"CIDR4":                     config.CIDR.String(),
+		"CIDR6":                     config.CIDR6.String(),
+		config.EnvInboundPodTunIPv4: (&net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}).String(),
+		config.EnvInboundPodTunIPv6: (&net.IPNet{IP: config.RouterIP6, Mask: config.CIDR6.Mask}).String(),
+	}
+
+	var mismatch bool
+	for _, existing := range container.Env {
+		if envs[existing.Name] != existing.Value {
+			mismatch = true
+			break
+		}
+	}
+	if !mismatch {
+		return nil
+	}
+	scalesGetter, err := cmdutil.ScaleClientFn(f)
 	if err != nil {
-		return false, err
+		return err
 	}
-	clientImgTag, ok := clientImg.(reference.NamedTagged)
-	if !ok {
-		return false, fmt.Errorf("can not convert client image")
+	scaler := scale.NewScaler(scalesGetter)
+	retry := scale.NewRetryParams(1*time.Second, 5*time.Minute)
+	waitForReplicas := scale.NewRetryParams(1*time.Second, 1)
+	gvr := schema.GroupVersionResource{
+		Group:    "apps",
+		Version:  "v1",
+		Resource: "deployments",
 	}
-
-	// 1. if client image version is same as client cli version, does not need to upgrade
-	// kubevpn connect --image=ghcr.io/kubenetworks/kubevpn:v2.3.0 or --kubevpnconfig
-	// the kubevpn version is v2.3.1
-	if clientImgTag.Tag() != clientCliVersionStr {
-		// TODO: is it necessary to exit the process?
-		log.Warnf("\033[33mCurrent kubevpn cli version is %s, please use the same version of kubevpn image with flag \"--image\"\033[0m", clientCliVersionStr)
-		return false, nil
-	}
-
-	serverImgTag, ok := serverImg.(reference.NamedTagged)
-	if !ok {
-		return false, fmt.Errorf("can not convert server image")
-	}
-
-	// 2. if server image version is same as client cli version, does not need to upgrade
-	if serverImgTag.Tag() == clientCliVersionStr {
-		return false, nil
-	}
-
-	// 3. check custom server image registry
-	// if custom server image domain is not same as config.GHCR_IMAGE_REGISTRY
-	// and not same as config.DOCKER_IMAGE_REGISTRY
-	// and not same as client images(may be used --image)
-	// does not need to upgrade
-	serverImgDomain := reference.Domain(serverImg)
-	clientImgDomain := reference.Domain(clientImg)
-	if serverImgDomain != config.GHCR_IMAGE_REGISTRY && serverImgDomain != config.DOCKER_IMAGE_REGISTRY && serverImgDomain != clientImgDomain {
-		newImageStr := fmt.Sprintf("%s:%s", serverImg.Name(), clientCliVersionStr)
-		log.Warnf("\033[33mCurrent kubevpn cli version is %s, please manually upgrade 'kubevpn-traffic-manager' control plane pod container image to %s\033[0m", clientCliVersionStr, newImageStr)
-		return false, nil
-	}
-
-	serverImgVersion, err := goversion.NewVersion(serverImgTag.Tag())
+	err = scaler.Scale(ns, name, 0, nil, retry, waitForReplicas, gvr, false)
 	if err != nil {
-		return false, err
+		return err
 	}
-
-	clientImgVersion, err := goversion.NewVersion(clientImgTag.Tag())
+	err = scaler.Scale(ns, name, 1, nil, retry, waitForReplicas, gvr, false)
 	if err != nil {
-		return false, err
+		return err
 	}
-
-	// 4. check client image version is greater than server image version
-	return clientImgVersion.GreaterThan(serverImgVersion), nil
+	err = util.RolloutStatus(ctx, f, ns, fmt.Sprintf("%s/%s", "deployments", name), time.Minute*60)
+	return err
 }
 
 func (c *ConnectOptions) Equal(a *ConnectOptions) bool {

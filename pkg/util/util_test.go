@@ -130,3 +130,34 @@ func TestConvertUidToWorkload(t *testing.T) {
 		}
 	}
 }
+
+func TestPrintStr(t *testing.T) {
+	type args struct {
+		slogan string
+	}
+	tests := []struct {
+		name       string
+		args       args
+		wantWriter string
+	}{
+		{
+			name: "",
+			args: args{
+				slogan: "ab\nabc\n\na",
+			},
+			wantWriter: `+-----+
+| ab  |
+| abc |
+|     |
+| a   |
++-----+`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if gotWriter := PrintStr(tt.args.slogan); gotWriter != tt.wantWriter {
+				t.Errorf("Print() = %v, want %v", gotWriter, tt.wantWriter)
+			}
+		})
+	}
+}
