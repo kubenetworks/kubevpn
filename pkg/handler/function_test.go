@@ -102,23 +102,12 @@ func pingPodIP(t *testing.T) {
 
 func healthCheckPodAuthors(t *testing.T) {
 	var app = "authors"
-	podList, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
-	})
+	ip, err := getPodIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(podList.Items) == 0 {
-		t.Fatal("Failed to found pods of authors")
-	}
-	for _, pod := range podList.Items {
-		pod := pod
-		if pod.Status.Phase != corev1.PodRunning {
-			continue
-		}
-		endpoint := fmt.Sprintf("http://%s:%v/health", pod.Status.PodIP, 9080)
-		healthChecker(t, endpoint, nil, "")
-	}
+	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
+	healthChecker(t, endpoint, nil, "")
 }
 
 func healthChecker(t *testing.T, endpoint string, header map[string]string, keyword string) {
@@ -171,47 +160,22 @@ func healthChecker(t *testing.T, endpoint string, header map[string]string, keyw
 
 func healthCheckServiceAuthors(t *testing.T) {
 	var app = "authors"
-	serviceList, err := clientset.CoreV1().Services(namespace).List(context.Background(), v1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
-	})
+	ip, err := getServiceIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(serviceList.Items) == 0 {
-		t.Fatal("Failed to found pods of authors")
-	}
-	ip := serviceList.Items[0].Spec.ClusterIP
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
 	healthChecker(t, endpoint, nil, "")
 }
 
 func shortDomainAuthors(t *testing.T) {
 	var app = "authors"
-	serviceList, err := clientset.CoreV1().Services(namespace).List(context.Background(), v1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(serviceList.Items) == 0 {
-		t.Fatalf("Failed to found pods of %s", app)
-	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", app, 9080)
 	healthChecker(t, endpoint, nil, "")
 }
 
 func fullDomainAuthors(t *testing.T) {
 	var app = "authors"
-	serviceList, err := clientset.CoreV1().Services(namespace).List(context.Background(), v1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(serviceList.Items) == 0 {
-		t.Fatalf("Failed to found pods of %s", app)
-	}
-
 	domains := []string{
 		fmt.Sprintf("%s.%s.svc.cluster.local", app, namespace),
 		fmt.Sprintf("%s.%s.svc", app, namespace),
@@ -226,24 +190,10 @@ func fullDomainAuthors(t *testing.T) {
 
 func serviceMeshReviewsPodIP(t *testing.T) {
 	app := "reviews"
-
 	remote := `{"status":"Reviews is healthy"}`
-
-	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
-	})
+	ip, err := getPodIP(app)
 	if err != nil {
 		t.Fatal(err)
-	}
-	var ip string
-	for _, item := range list.Items {
-		if item.DeletionTimestamp == nil && item.Status.Phase == corev1.PodRunning {
-			ip = item.Status.PodIP
-			break
-		}
-	}
-	if len(ip) == 0 {
-		t.Fatalf("Failed to found pods for service %s", app)
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
 	healthChecker(t, endpoint, nil, remote)
@@ -252,77 +202,65 @@ func serviceMeshReviewsPodIP(t *testing.T) {
 
 func serviceMeshReviewsServiceIP(t *testing.T) {
 	app := "reviews"
-
 	remote := `{"status":"Reviews is healthy"}`
-
-	serviceList, err := clientset.CoreV1().Services(namespace).List(context.Background(), v1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
-	})
+	ip, err := getServiceIP(app)
 	if err != nil {
 		t.Fatal(err)
-		return
-	}
-	var ip string
-	for _, item := range serviceList.Items {
-		ip = item.Spec.ClusterIP
-		if ip != "" {
-			break
-		}
-	}
-	if len(ip) == 0 {
-		t.Errorf("Failed to found service for service %s", app)
-		return
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
 	healthChecker(t, endpoint, nil, remote)
 	healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
-func proxyServiceReviewsPodIP(t *testing.T) {
-	app := "reviews"
-
-	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{
+func getServiceIP(app string) (string, error) {
+	serviceList, err := clientset.CoreV1().Services(namespace).List(context.Background(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
 	if err != nil {
-		t.Error(err)
-		return
+		return "", err
 	}
 	var ip string
-	for _, item := range list.Items {
-		if item.DeletionTimestamp == nil && item.Status.Phase == corev1.PodRunning {
-			ip = item.Status.PodIP
-			break
+	for _, item := range serviceList.Items {
+		ip = item.Spec.ClusterIP
+		if ip != "" {
+			return ip, nil
 		}
 	}
-	if len(ip) == 0 {
-		t.Errorf("Failed to found pods for service %s", app)
-		return
+	return "", fmt.Errorf("failed to found service ip for service %s", app)
+}
+
+func proxyServiceReviewsPodIP(t *testing.T) {
+	app := "reviews"
+	ip, err := getPodIP(app)
+	if err != nil {
+		t.Fatal(err)
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
 	healthChecker(t, endpoint, nil, local)
 	healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
-func proxyServiceReviewsServiceIP(t *testing.T) {
-	app := "reviews"
-
-	list, err := clientset.CoreV1().Services(namespace).List(context.Background(), v1.ListOptions{
+func getPodIP(app string) (string, error) {
+	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
 	if err != nil {
-		t.Fatal(err)
+		return "", err
 	}
-	var ip string
-	for _, item := range list.Items {
-		ip = item.Spec.ClusterIP
-		if ip != "" {
-			break
+	for _, pod := range list.Items {
+		if pod.DeletionTimestamp == nil &&
+			pod.Status.Phase == corev1.PodRunning && pod.Status.PodIP != "" {
+			return pod.Status.PodIP, nil
 		}
 	}
-	if len(ip) == 0 {
-		t.Errorf("Failed to found service for service %s", app)
-		return
+	return "", fmt.Errorf("failed to found pod ip for service %s", app)
+}
+
+func proxyServiceReviewsServiceIP(t *testing.T) {
+	app := "reviews"
+	ip, err := getServiceIP(app)
+	if err != nil {
+		t.Fatal(err)
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
 	healthChecker(t, endpoint, nil, local)
@@ -334,21 +272,9 @@ func testUDP(t *testing.T) {
 	port, _ := util.GetAvailableUDPPortOrDie()
 	go udpServer(port)
 
-	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
-	})
+	ip, err := getPodIP(app)
 	if err != nil {
 		t.Fatal(err)
-	}
-	var ip string
-	for _, item := range list.Items {
-		if item.DeletionTimestamp == nil && item.Status.Phase == corev1.PodRunning {
-			ip = item.Status.PodIP
-			break
-		}
-	}
-	if len(ip) == 0 {
-		t.Fatalf("Failed to found pods for service %s", app)
 	}
 	log.Printf("Dail udp to IP: %s", ip)
 	err = retry.OnError(
