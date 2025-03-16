@@ -6,6 +6,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
@@ -38,8 +39,15 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 			log.Errorf("Failed to get unstructured object: %v", err)
 			return err
 		}
+		u := object.Object.(*unstructured.Unstructured)
+		templateSpec, _, err := util.GetPodTemplateSpecPath(u)
+		if err != nil {
+			log.Errorf("Failed to get template spec path: %v", err)
+			return err
+		}
 		// add rollback func to remove envoy config
-		err = inject.UnPatchContainer(factory, maps, object, func(isFargateMode bool, rule *controlplane.Rule) bool {
+		var empty bool
+		empty, err = inject.UnPatchContainer(factory, maps, object, func(isFargateMode bool, rule *controlplane.Rule) bool {
 			if isFargateMode {
 				return svr.connect.IsMe(util.ConvertWorkloadToUid(workload), rule.Headers)
 			}
@@ -48,6 +56,9 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 		if err != nil {
 			log.Errorf("Leaving workload %s failed: %v", workload, err)
 			continue
+		}
+		if empty {
+			err = inject.ModifyServiceTargetPort(resp.Context(), svr.connect.GetClientset(), namespace, templateSpec.Labels, map[int32]int32{})
 		}
 		svr.connect.LeavePortMap(workload)
 		err = util.RolloutStatus(resp.Context(), factory, namespace, workload, time.Minute*60)

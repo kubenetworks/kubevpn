@@ -108,6 +108,9 @@ func ModifyServiceTargetPort(ctx context.Context, clientset *kubernetes.Clientse
 
 	var svc *v1.Service
 	for _, item := range list.Items {
+		if item.Spec.Selector == nil {
+			continue
+		}
 		if labels.SelectorFromSet(item.Spec.Selector).Matches(labels.Set(podLabels)) {
 			svc = &item
 			break
@@ -117,7 +120,11 @@ func ModifyServiceTargetPort(ctx context.Context, clientset *kubernetes.Clientse
 		return fmt.Errorf("can not found service with selector: %v", podLabels)
 	}
 	for i := range len(svc.Spec.Ports) {
-		svc.Spec.Ports[i].TargetPort = intstr.FromInt32(m[svc.Spec.Ports[i].Port])
+		if p, found := m[svc.Spec.Ports[i].Port]; found {
+			svc.Spec.Ports[i].TargetPort = intstr.FromInt32(p)
+		} else {
+			svc.Spec.Ports[i].TargetPort = intstr.FromInt32(svc.Spec.Ports[i].Port)
+		}
 	}
 	_, err = clientset.CoreV1().Services(namespace).Update(ctx, svc, metav1.UpdateOptions{})
 	return err
