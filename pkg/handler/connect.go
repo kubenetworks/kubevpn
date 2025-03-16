@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	pkgtypes "k8s.io/apimachinery/pkg/types"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/runtime"
@@ -42,10 +41,10 @@ import (
 	"k8s.io/kubectl/pkg/cmd/set"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
-	"k8s.io/kubectl/pkg/scale"
 	"k8s.io/kubectl/pkg/scheme"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
@@ -1091,28 +1090,33 @@ func restartDeploy(ctx context.Context, f cmdutil.Factory, clientset *kubernetes
 	if !mismatch {
 		return nil
 	}
-	scalesGetter, err := cmdutil.ScaleClientFn(f)
-	if err != nil {
-		return err
-	}
-	scaler := scale.NewScaler(scalesGetter)
-	retry := scale.NewRetryParams(1*time.Second, 5*time.Minute)
-	waitForReplicas := scale.NewRetryParams(1*time.Second, 1)
-	gvr := schema.GroupVersionResource{
-		Group:    "apps",
-		Version:  "v1",
-		Resource: "deployments",
-	}
-	err = scaler.Scale(ns, name, 0, nil, retry, waitForReplicas, gvr, false)
-	if err != nil {
-		return err
-	}
-	err = scaler.Scale(ns, name, 1, nil, retry, waitForReplicas, gvr, false)
+	err = deletePodImmediately(ctx, clientset, ns, label)
 	if err != nil {
 		return err
 	}
 	err = util.RolloutStatus(ctx, f, ns, fmt.Sprintf("%s/%s", "deployments", name), time.Minute*60)
 	return err
+}
+
+// delete old pod immediately
+func deletePodImmediately(ctx context.Context, clientset *kubernetes.Clientset, ns string, label string) error {
+	result, err := clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
+		LabelSelector: label,
+	})
+	if err != nil {
+		return err
+	}
+	for _, item := range result.Items {
+		options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
+		err = clientset.CoreV1().Pods(ns).Delete(ctx, item.Name, options)
+		if apierrors.IsNotFound(err) {
+			err = nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *ConnectOptions) Equal(a *ConnectOptions) bool {
