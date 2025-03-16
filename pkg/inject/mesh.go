@@ -114,12 +114,12 @@ func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset 
 	return err
 }
 
-func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, object *runtimeresource.Info, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) error {
+func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, object *runtimeresource.Info, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) (bool, error) {
 	u := object.Object.(*unstructured.Unstructured)
 	templateSpec, depth, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
 		log.Errorf("Failed to get template spec path: %v", err)
-		return err
+		return false, err
 	}
 
 	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
@@ -128,11 +128,11 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 	empty, found, err = removeEnvoyConfig(mapInterface, nodeID, isMeFunc)
 	if err != nil {
 		log.Errorf("Failed to remove envoy config: %v", err)
-		return err
+		return false, err
 	}
 	if !found {
 		log.Infof("Not found proxy resource %s", workload)
-		return nil
+		return false, nil
 	}
 
 	log.Infof("Leaving workload %s", workload)
@@ -147,7 +147,7 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 			pod := &v1.Pod{ObjectMeta: templateSpec.ObjectMeta, Spec: templateSpec.Spec}
 			CleanupUselessInfo(pod)
 			err = CreateAfterDeletePod(factory, pod, helper)
-			return err
+			return empty, err
 		}
 
 		log.Debugf("The %s is under controller management", workload)
@@ -162,15 +162,15 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 		})
 		if err != nil {
 			log.Errorf("Failed to generate json patch: %v", err)
-			return err
+			return empty, err
 		}
 		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 		if err != nil {
 			log.Errorf("Failed to patch resource: %s %s: %v", object.Mapping.Resource.Resource, object.Name, err)
-			return err
+			return empty, err
 		}
 	}
-	return err
+	return empty, err
 }
 
 func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP util.PodRouteConfig, headers map[string]string, port []controlplane.ContainerPort, portmap map[int32]string) error {

@@ -43,12 +43,13 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	}
 	var deleteResource = func(ctx context.Context) {
 		options := metav1.DeleteOptions{}
-		_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, config.ConfigMapPodTrafficManager+"."+namespace, options)
-		_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, config.ConfigMapPodTrafficManager, options)
-		_ = clientset.RbacV1().Roles(namespace).Delete(ctx, config.ConfigMapPodTrafficManager, options)
-		_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, config.ConfigMapPodTrafficManager, options)
-		_ = clientset.CoreV1().Services(namespace).Delete(ctx, config.ConfigMapPodTrafficManager, options)
-		_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, config.ConfigMapPodTrafficManager, options)
+		name := config.ConfigMapPodTrafficManager
+		_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, name+"."+namespace, options)
+		_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, name, options)
+		_ = clientset.RbacV1().Roles(namespace).Delete(ctx, name, options)
+		_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, name, options)
+		_ = clientset.CoreV1().Services(namespace).Delete(ctx, name, options)
+		_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, name, options)
 	}
 	defer func() {
 		if err != nil {

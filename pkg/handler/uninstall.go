@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/yaml"
 
@@ -95,7 +96,14 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 			log.Errorf("Failed to get unstructured object: %v", err)
 			return err
 		}
-		err = inject.UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), object, func(isFargateMode bool, rule *controlplane.Rule) bool {
+		u := object.Object.(*unstructured.Unstructured)
+		templateSpec, _, err := util.GetPodTemplateSpecPath(u)
+		if err != nil {
+			log.Errorf("Failed to get template spec path: %v", err)
+			return err
+		}
+		var empty bool
+		empty, err = inject.UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), object, func(isFargateMode bool, rule *controlplane.Rule) bool {
 			if isFargateMode {
 				return c.IsMe(util.ConvertWorkloadToUid(workload), rule.Headers)
 			}
@@ -104,6 +112,9 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 		if err != nil {
 			log.Errorf("Failed to leave workload %s: %v", workload, err)
 			continue
+		}
+		if empty {
+			err = inject.ModifyServiceTargetPort(ctx, c.clientset, c.Namespace, templateSpec.Labels, map[int32]int32{})
 		}
 		c.LeavePortMap(workload)
 	}
