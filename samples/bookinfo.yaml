@@ -39,7 +39,7 @@ spec:
       serviceAccountName: bookinfo-details
       containers:
         - name: details
-          image: ghcr.io/kubenetworks/examples-bookinfo-details-v1:1.16.2
+          image: ghcr.io/kubenetworks/examples-bookinfo-details-v1:1.20.2
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 9080
@@ -95,7 +95,7 @@ spec:
       serviceAccountName: bookinfo-ratings
       containers:
         - name: ratings
-          image: ghcr.io/kubenetworks/examples-bookinfo-ratings-v1:1.16.2
+          image: ghcr.io/kubenetworks/examples-bookinfo-ratings-v1:1.20.2
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 9080
@@ -150,7 +150,7 @@ spec:
       serviceAccountName: bookinfo-reviews
       containers:
         - name: reviews
-          image: ghcr.io/kubenetworks/examples-bookinfo-reviews-v1:1.16.2
+          image: ghcr.io/kubenetworks/examples-bookinfo-reviews-v1:1.20.2
           imagePullPolicy: IfNotPresent
           env:
             - name: LOG_DIR
@@ -218,7 +218,7 @@ spec:
       serviceAccountName: bookinfo-productpage
       containers:
         - name: productpage
-          image: ghcr.io/kubenetworks/examples-bookinfo-productpage-v1:1.16.2
+          image: ghcr.io/kubenetworks/examples-bookinfo-productpage-v1:1.20.2
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 9080
