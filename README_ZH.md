@@ -45,10 +45,22 @@ Docker
 
 ## 快速开始
 
+### 使用脚本安装 ( macOS / Linux)
+
+```shell
+curl -fsSL https://kubevpn.dev/install.sh | sh
+```
+
 ### 使用 [brew](https://brew.sh/) 安装 (macOS / Linux)
 
 ```shell
 brew install kubevpn
+```
+
+### 使用 [snap](https://snapcraft.io/kubevpn) 安装 (Linux)
+
+```shell
+sudo snap install kubevpn
 ```
 
 ### 使用 [scoop](https://scoop.sh/) (Windows)
