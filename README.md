@@ -50,10 +50,23 @@ With KubeVPN, empower yourself to develop applications entirely on your local PC
 
 ## QuickStart
 
+### Install from script ( macOS / Linux)
+
+```shell
+curl -fsSL https://kubevpn.dev/install.sh | sh
+```
+
+
 ### Install from [brew](https://brew.sh/) (macOS / Linux)
 
 ```shell
 brew install kubevpn
+```
+
+### Install from [snap](https://snapcraft.io/kubevpn) (Linux)
+
+```shell
+sudo snap install kubevpn
 ```
 
 ### Install from [scoop](https://scoop.sh/) (Windows)
