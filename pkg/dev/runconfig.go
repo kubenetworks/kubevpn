@@ -13,12 +13,12 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/google/uuid"
 	"github.com/miekg/dns"
-	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -42,12 +42,12 @@ func (l ConfigList) Remove(ctx context.Context, userAnotherContainerNet bool) er
 		if !userAnotherContainerNet && index == len(l)-1 {
 			output, err := NetworkDisconnect(ctx, runConfig.name)
 			if err != nil {
-				log.Warnf("Failed to disconnect container network: %s: %v", string(output), err)
+				plog.G(ctx).Warnf("Failed to disconnect container network: %s: %v", string(output), err)
 			}
 		}
 		output, err := ContainerRemove(ctx, runConfig.name)
 		if err != nil {
-			log.Warnf("Failed to remove container: %s: %v", string(output), err)
+			plog.G(ctx).Warnf("Failed to remove container: %s: %v", string(output), err)
 		}
 	}
 	name := config.ConfigMapPodTrafficManager
@@ -192,17 +192,17 @@ func (option *Options) ConvertPodToContainerConfigList(
 				}
 				_, err = CreateNetwork(ctx, config.ConfigMapPodTrafficManager)
 				if err != nil {
-					log.Errorf("Failed to create network: %v", err)
+					plog.G(ctx).Errorf("Failed to create network: %v", err)
 					return nil, err
 				}
-				log.Infof("Create docker network %s", config.ConfigMapPodTrafficManager)
+				plog.G(ctx).Infof("Create docker network %s", config.ConfigMapPodTrafficManager)
 				options = append(options, "--network", config.ConfigMapPodTrafficManager)
 			} else { // set 0 to last-1 container to use last container network
 				options = append(options, "--network", util.ContainerNet(lastContainerRandomName))
 				options = append(options, "--pid", util.ContainerNet(lastContainerRandomName))
 			}
 		} else { // set all containers to use network mode
-			log.Infof("Network mode is %s", option.ContainerOptions.netMode.NetworkMode())
+			plog.G(ctx).Infof("Network mode is %s", option.ContainerOptions.netMode.NetworkMode())
 			options = append(options, "--network", option.ContainerOptions.netMode.NetworkMode())
 			if typescontainer.NetworkMode(option.ContainerOptions.netMode.NetworkMode()).IsContainer() {
 				options = append(options, "--pid", option.ContainerOptions.netMode.NetworkMode())

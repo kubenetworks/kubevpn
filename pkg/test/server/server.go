@@ -1,11 +1,11 @@
 package main
 
 import (
+	"context"
 	"io"
 	"net"
 
-	log "github.com/sirupsen/logrus"
-
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 )
 
@@ -23,7 +23,7 @@ func main() {
 
 	tcpListener, err := net.Listen("tcp", ":1080")
 	if err != nil {
-		log.Fatal(err)
+		plog.G(context.Background()).Fatal(err)
 	}
 	for {
 		tcpConn, err := tcpListener.Accept()

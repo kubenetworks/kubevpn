@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"net"
 
 	"github.com/cilium/ipam/service/allocator"
 	"github.com/cilium/ipam/service/ipallocator"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -107,7 +107,7 @@ func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 		return
 	})
 	if err != nil {
-		log.Errorf("Failed to rent IP from DHCP server, err: %v", err)
+		plog.G(ctx).Errorf("Failed to rent IP from DHCP server, err: %v", err)
 		return nil, nil, err
 	}
 	return &net.IPNet{IP: v4, Mask: m.cidr.Mask}, &net.IPNet{IP: v6, Mask: m.cidr6.Mask}, nil
@@ -205,7 +205,7 @@ func (m *Manager) Set(ctx context.Context, key, value string) error {
 			return err
 		})
 	if err != nil {
-		log.Errorf("Failed to update configmap: %v", err)
+		plog.G(ctx).Errorf("Failed to update configmap: %v", err)
 		return err
 	}
 	return nil

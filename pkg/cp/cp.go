@@ -3,14 +3,15 @@ package cp
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"io"
 	"os"
 	"runtime"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/kubernetes"
@@ -183,7 +184,7 @@ func (o *CopyOptions) copyToPod(src, dest fileSpec, options *exec.ExecOptions) e
 	go func(src localPath, dest remotePath, writer io.WriteCloser) {
 		defer writer.Close()
 		if err := makeTar(src, dest, writer); err != nil {
-			log.Errorf("Error making tar: %v", err)
+			plog.G(context.Background()).Errorf("Error making tar: %v", err)
 		}
 	}(srcFile, destFile, writer)
 	var cmdArr []string
@@ -266,7 +267,7 @@ func (t *TarPipe) initReadFrom(n uint64) {
 	go func() {
 		defer t.outStream.Close()
 		if err := t.o.execute(options); err != nil {
-			log.Errorf("Error executing command: %v", err)
+			plog.G(context.Background()).Errorf("Error executing command: %v", err)
 		}
 	}()
 }

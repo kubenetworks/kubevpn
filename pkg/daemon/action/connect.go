@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	golog "log"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -15,35 +14,28 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) (e error) {
-	defer func() {
-		util.InitLoggerForServer(true)
-		log.SetOutput(svr.LogFile)
-		config.Debug = false
-	}()
-	config.Debug = req.Level == int32(log.DebugLevel)
-	out := io.MultiWriter(newWarp(resp), svr.LogFile)
-	util.InitLoggerForClient(config.Debug)
-	log.SetOutput(out)
+	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newWarp(resp), svr.LogFile))
 	if !svr.IsSudo {
-		return svr.redirectToSudoDaemon(req, resp)
+		return svr.redirectToSudoDaemon(req, resp, logger)
 	}
 
 	ctx := resp.Context()
 	if !svr.t.IsZero() {
 		s := "Already connected to cluster in full mode, you can use options `--lite` to connect to another cluster"
-		log.Debugf(s)
+		logger.Debugf(s)
 		// todo define already connect error?
 		return status.Error(codes.AlreadyExists, s)
 	}
 	defer func() {
 		if e != nil || ctx.Err() != nil {
 			if svr.connect != nil {
-				svr.connect.Cleanup()
+				svr.connect.Cleanup(plog.WithLogger(context.Background(), logger))
 				svr.connect = nil
 			}
 			svr.t = time.Time{}
@@ -61,7 +53,6 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		Lock:                 &svr.Lock,
 		ImagePullSecretName:  req.ImagePullSecretName,
 	}
-	golog.Default().SetOutput(io.Discard)
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
 		return err
@@ -77,9 +68,11 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		sshCancel()
 		return nil
 	})
+	sshCtx = plog.WithLogger(sshCtx, logger)
+	defer plog.WithoutLogger(sshCtx)
 	defer func() {
 		if e != nil {
-			svr.connect.Cleanup()
+			svr.connect.Cleanup(sshCtx)
 			svr.connect = nil
 			svr.t = time.Time{}
 			sshCancel()
@@ -94,7 +87,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if err != nil {
 		return err
 	}
-	err = svr.connect.GetIPFromContext(ctx)
+	err = svr.connect.GetIPFromContext(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -102,13 +95,13 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	config.Image = req.Image
 	err = svr.connect.DoConnect(sshCtx, false, ctx.Done())
 	if err != nil {
-		log.Errorf("Failed to connect: %v", err)
+		logger.Errorf("Failed to connect: %v", err)
 		return err
 	}
 	return nil
 }
 
-func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) (e error) {
+func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer, logger *log.Logger) (e error) {
 	cli := svr.GetClient(true)
 	if cli == nil {
 		return fmt.Errorf("sudo daemon not start")
@@ -139,7 +132,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	})
 	defer func() {
 		if e != nil {
-			connect.Cleanup()
+			connect.Cleanup(plog.WithLogger(context.Background(), logger))
 			sshCancel()
 		}
 	}()
@@ -161,7 +154,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		)
 		if isSameCluster {
 			// same cluster, do nothing
-			log.Infof("Connected to cluster")
+			logger.Infof("Connected to cluster")
 			return nil
 		}
 	}

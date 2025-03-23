@@ -1,20 +1,22 @@
 package ssh
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/schollz/progressbar/v3"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // SCPAndExec copy file to remote and exec command
-func SCPAndExec(stdout, stderr io.Writer, client *ssh.Client, filename, to string, commands ...string) error {
-	err := SCP(client, stdout, stderr, filename, to)
+func SCPAndExec(ctx context.Context, stdout, stderr io.Writer, client *ssh.Client, filename, to string, commands ...string) error {
+	err := SCP(ctx, client, stdout, stderr, filename, to)
 	if err != nil {
-		log.Errorf("Copy file to remote error: %s", err)
+		plog.G(ctx).Errorf("Copy file to remote error: %s", err)
 		return err
 	}
 	for _, command := range commands {
@@ -25,17 +27,17 @@ func SCPAndExec(stdout, stderr io.Writer, client *ssh.Client, filename, to strin
 		}
 		output, err := session.CombinedOutput(command)
 		if err != nil {
-			log.Error(string(output))
+			plog.G(ctx).Error(string(output))
 			return err
 		} else {
-			log.Info(string(output))
+			plog.G(ctx).Info(string(output))
 		}
 	}
 	return nil
 }
 
 // SCP https://blog.neilpang.com/%E6%94%B6%E8%97%8F-scp-secure-copy%E5%8D%8F%E8%AE%AE/
-func SCP(client *ssh.Client, stdout, stderr io.Writer, filename, to string) error {
+func SCP(ctx context.Context, client *ssh.Client, stdout, stderr io.Writer, filename, to string) error {
 	file, err := os.Open(filename)
 	if err != nil {
 		return err
@@ -55,9 +57,9 @@ func SCP(client *ssh.Client, stdout, stderr io.Writer, filename, to string) erro
 		defer w.Close()
 		fmt.Fprintln(w, "D0755", 0, ".kubevpn") // mkdir
 		fmt.Fprintln(w, "C0644", stat.Size(), to)
-		err := sCopy(w, file, stat.Size(), stdout, stderr)
+		err := sCopy(ctx, w, file, stat.Size(), stdout, stderr)
 		if err != nil {
-			log.Errorf("Failed to transfer file to remote: %v", err)
+			plog.G(ctx).Errorf("Failed to transfer file to remote: %v", err)
 			return
 		}
 		fmt.Fprint(w, "\x00") // transfer end with \x00
@@ -65,7 +67,7 @@ func SCP(client *ssh.Client, stdout, stderr io.Writer, filename, to string) erro
 	return sess.Run("scp -tr ./")
 }
 
-func sCopy(dst io.Writer, src io.Reader, size int64, stdout, stderr io.Writer) error {
+func sCopy(ctx context.Context, dst io.Writer, src io.Reader, size int64, stdout, stderr io.Writer) error {
 	total := float64(size) / 1024 / 1024
 	s := fmt.Sprintf("Length: %d (%0.2fM)", size, total)
 	io.WriteString(stdout, s+"\n")
@@ -90,11 +92,11 @@ func sCopy(dst io.Writer, src io.Reader, size int64, stdout, stderr io.Writer) e
 	buf := make([]byte, 10<<(10*2)) // 10M
 	written, err := io.CopyBuffer(io.MultiWriter(dst, bar), src, buf)
 	if err != nil {
-		log.Errorf("Failed to transfer file to remote: %v", err)
+		plog.G(ctx).Errorf("Failed to transfer file to remote: %v", err)
 		return err
 	}
 	if written != size {
-		log.Errorf("Failed to transfer file to remote: written size %d but actuall is %d", written, size)
+		plog.G(ctx).Errorf("Failed to transfer file to remote: written size %d but actuall is %d", written, size)
 		return err
 	}
 	return nil

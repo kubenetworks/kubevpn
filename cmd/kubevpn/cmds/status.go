@@ -21,6 +21,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -60,7 +61,7 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 		kubevpn status -o yaml
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			util.InitLoggerForClient(false)
+			plog.InitLoggerForClient()
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {

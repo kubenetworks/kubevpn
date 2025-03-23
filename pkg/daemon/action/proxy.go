@@ -12,6 +12,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -24,17 +25,9 @@ import (
 //     2.1 disconnect from cluster
 //     2.2 same as step 1
 func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (e error) {
-	defer func() {
-		util.InitLoggerForServer(true)
-		log.SetOutput(svr.LogFile)
-		config.Debug = false
-	}()
-	out := io.MultiWriter(newProxyWarp(resp), svr.LogFile)
+	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newProxyWarp(resp), svr.LogFile))
 	config.Image = req.Image
-	config.Debug = req.Level == int32(log.DebugLevel)
-	util.InitLoggerForClient(config.Debug)
-	log.SetOutput(out)
-	ctx := resp.Context()
+	ctx := plog.WithLogger(resp.Context(), logger)
 	connect := &handler.ConnectOptions{
 		Namespace:            req.Namespace,
 		Headers:              req.Headers,
@@ -73,7 +66,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 
 	defer func() {
 		if e != nil && svr.connect != nil {
-			_ = svr.connect.LeaveAllProxyResources(context.Background())
+			_ = svr.connect.LeaveAllProxyResources(plog.WithLogger(context.Background(), logger))
 		}
 	}()
 
@@ -89,9 +82,9 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 		)
 		if isSameCluster {
 			// same cluster, do nothing
-			log.Infof("Connected to cluster")
+			plog.G(ctx).Infof("Connected to cluster")
 		} else {
-			log.Infof("Disconnecting from another cluster...")
+			plog.G(ctx).Infof("Disconnecting from another cluster...")
 			var disconnectResp rpc.Daemon_DisconnectClient
 			disconnectResp, err = daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{
 				KubeconfigBytes: ptr.To(req.KubeconfigBytes),
@@ -111,13 +104,11 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 			if err != nil {
 				return err
 			}
-			util.InitLoggerForClient(config.Debug)
-			log.SetOutput(out)
 		}
 	}
 
 	if svr.connect == nil {
-		log.Debugf("Connectting to cluster")
+		plog.G(ctx).Debugf("Connectting to cluster")
 		var connResp rpc.Daemon_ConnectClient
 		connResp, err = daemonClient.Connect(ctx, req)
 		if err != nil {
@@ -127,13 +118,11 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 		if err != nil {
 			return err
 		}
-		util.InitLoggerForClient(config.Debug)
-		log.SetOutput(out)
 	}
 
 	err = svr.connect.CreateRemoteInboundPod(ctx, workloads, req.Headers, req.PortMap)
 	if err != nil {
-		log.Errorf("Failed to inject inbound sidecar: %v", err)
+		plog.G(ctx).Errorf("Failed to inject inbound sidecar: %v", err)
 		return err
 	}
 	return nil

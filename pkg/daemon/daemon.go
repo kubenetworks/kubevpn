@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	golog "log"
 	"net"
 	"net/http"
 	"os"
@@ -27,7 +28,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/action"
 	_ "github.com/wencaiwulue/kubevpn/v2/pkg/daemon/handler"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 type SvrOption struct {
@@ -55,10 +56,11 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	// c.LibDefaults.DNSLookupKDC = true
 	// c.LibDefaults.DNSLookupRealm = true
 
-	util.InitLoggerForServer(true)
 	log.SetOutput(l)
+	golog.Default().SetOutput(l)
 	klog.SetOutput(l)
 	klog.LogToStderr(false)
+	plog.L.SetOutput(l)
 	rest.SetDefaultWarningHandler(rest.NoWarnings{})
 	// every day 00:00:00 rotate log
 	go rotateLog(l, o.IsSudo)
@@ -93,7 +95,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	svr := grpc.NewServer(unaryPanicInterceptor, streamPanicInterceptor)
 	cleanup, err := admin.Register(svr)
 	if err != nil {
-		log.Errorf("Failed to register admin: %v", err)
+		plog.G(ctx).Errorf("Failed to register admin: %v", err)
 		return err
 	}
 	grpc_health_v1.RegisterHealthServer(svr, health.NewServer())
@@ -108,7 +110,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	var h2Server http2.Server
 	err = http2.ConfigureServer(downgradingServer, &h2Server)
 	if err != nil {
-		log.Errorf("Failed to configure http2: %v", err)
+		plog.G(ctx).Errorf("Failed to configure http2: %v", err)
 		return err
 	}
 	handler := CreateDowngradingHandler(svr, http.HandlerFunc(http.DefaultServeMux.ServeHTTP))

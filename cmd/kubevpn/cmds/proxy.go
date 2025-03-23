@@ -18,6 +18,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util/regctl"
@@ -88,7 +89,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 		kubevpn proxy deployment/productpage
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			util.InitLoggerForClient(false)
+			plog.InitLoggerForClient()
 			if err = daemon.StartupDaemon(cmd.Context()); err != nil {
 				return err
 			}
@@ -119,10 +120,6 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			}
 			// todo 将 doConnect 方法封装？内部使用 client 发送到daemon？
 			cli := daemon.GetClient(false)
-			logLevel := log.InfoLevel
-			if config.Debug {
-				logLevel = log.DebugLevel
-			}
 			client, err := cli.Proxy(
 				cmd.Context(),
 				&rpc.ConnectRequest{
@@ -137,7 +134,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 					TransferImage:        transferImage,
 					Image:                config.Image,
 					ImagePullSecretName:  imagePullSecretName,
-					Level:                int32(logLevel),
+					Level:                int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
 					OriginKubeconfigPath: util.GetKubeConfigPath(f),
 				},
 			)

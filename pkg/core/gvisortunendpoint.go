@@ -5,7 +5,6 @@ import (
 	"net"
 
 	"github.com/google/gopacket/layers"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 	"gvisor.dev/gvisor/pkg/buffer"
@@ -16,6 +15,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -34,7 +34,7 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, c
 			buf := pktBuffer.ToView().AsSlice()
 			_, err := tcpConn.Write(buf)
 			if err != nil {
-				log.Errorf("[TUN] Failed to write data to tun device: %v", err)
+				plog.G(ctx).Errorf("[TUN] Failed to write data to tun device: %v", err)
 			}
 		}
 	}
@@ -53,12 +53,12 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		buf := config.LPool.Get().([]byte)[:]
 		read, err := tcpConn.Read(buf[:])
 		if err != nil {
-			log.Errorf("[TUN] Failed to read from tcp conn: %v", err)
+			plog.G(ctx).Errorf("[TUN] Failed to read from tcp conn: %v", err)
 			config.LPool.Put(buf[:])
 			return
 		}
 		if read == 0 {
-			log.Warnf("[TUN] Read from tcp conn length is %d", read)
+			plog.G(ctx).Warnf("[TUN] Read from tcp conn length is %d", read)
 			config.LPool.Put(buf[:])
 			continue
 		}
@@ -72,7 +72,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			protocol = header.IPv4ProtocolNumber
 			ipHeader, err := ipv4.ParseHeader(buf[:read])
 			if err != nil {
-				log.Errorf("Failed to parse IPv4 header: %v", err)
+				plog.G(ctx).Errorf("Failed to parse IPv4 header: %v", err)
 				config.LPool.Put(buf[:])
 				continue
 			}
@@ -83,7 +83,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			protocol = header.IPv6ProtocolNumber
 			ipHeader, err := ipv6.ParseHeader(buf[:read])
 			if err != nil {
-				log.Errorf("Failed to parse IPv6 header: %s", err.Error())
+				plog.G(ctx).Errorf("Failed to parse IPv6 header: %s", err.Error())
 				config.LPool.Put(buf[:])
 				continue
 			}
@@ -91,15 +91,15 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			src = ipHeader.Src
 			dst = ipHeader.Dst
 		} else {
-			log.Debugf("[TUN-GVISOR] Unknown packet")
+			plog.G(ctx).Debugf("[TUN-GVISOR] Unknown packet")
 			config.LPool.Put(buf[:])
 			continue
 		}
 
-		h.addRoute(src, conn)
+		h.addRoute(ctx, src, conn)
 		// inner ip like 198.19.0.100/102/103 connect each other
 		if config.CIDR.Contains(dst) || config.CIDR6.Contains(dst) {
-			log.Tracef("[TUN-RAW] Forward to TUN device, SRC: %s, DST: %s, Length: %d", src.String(), dst.String(), read)
+			plog.G(ctx).Debugf("[TUN-RAW] Forward to TUN device, SRC: %s, DST: %s, Length: %d", src.String(), dst.String(), read)
 			util.SafeWrite(h.packetChan, &datagramPacket{
 				DataLength: uint16(read),
 				Data:       buf[:],
@@ -115,18 +115,18 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		sniffer.LogPacket("[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
 		endpoint.InjectInbound(protocol, pkt)
 		pkt.DecRef()
-		log.Tracef("[TUN-%s] Write to Gvisor IP-Protocol: %s, SRC: %s, DST: %s, Length: %d", layers.IPProtocol(ipProtocol).String(), layers.IPProtocol(ipProtocol).String(), src.String(), dst, read)
+		plog.G(ctx).Debugf("[TUN-%s] Write to Gvisor IP-Protocol: %s, SRC: %s, DST: %s, Length: %d", layers.IPProtocol(ipProtocol).String(), layers.IPProtocol(ipProtocol).String(), src.String(), dst, read)
 	}
 }
 
-func (h *gvisorTCPHandler) addRoute(src net.IP, tcpConn net.Conn) {
+func (h *gvisorTCPHandler) addRoute(ctx context.Context, src net.IP, tcpConn net.Conn) {
 	value, loaded := h.routeMapTCP.LoadOrStore(src.String(), tcpConn)
 	if loaded {
 		if tcpConn != value.(net.Conn) {
 			h.routeMapTCP.Store(src.String(), tcpConn)
-			log.Debugf("[TCP] Replace route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+			plog.G(ctx).Debugf("[TCP] Replace route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 		}
 	} else {
-		log.Debugf("[TCP] Add new route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+		plog.G(ctx).Debugf("[TCP] Add new route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 	}
 }

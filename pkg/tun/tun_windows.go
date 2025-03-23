@@ -3,6 +3,7 @@
 package tun
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/netip"
@@ -12,11 +13,12 @@ import (
 
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
 	wintun "golang.zx2c4.com/wintun"
 	wireguardtun "golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
@@ -152,7 +154,7 @@ func (c *winTunConn) Close() error {
 	defer func() {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Error(err)
+				plog.G(context.Background()).Error(err)
 			}
 		}()
 		tun := c.ifce.(*wireguardtun.NativeTun)

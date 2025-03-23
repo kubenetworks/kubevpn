@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -10,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 const retries = 4
@@ -44,7 +45,7 @@ func DownloadFileWithName(uri, name string) (string, error) {
 		return "", fmt.Errorf("failed to save file %s. error: %v", file, err)
 	}
 
-	log.Infof("Downloaded file %s", file)
+	plog.G(context.Background()).Infof("Downloaded file %s", file)
 	return file, nil
 }
 

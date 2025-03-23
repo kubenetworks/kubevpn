@@ -7,9 +7,8 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -55,7 +54,7 @@ func TCPHandler() Handler {
 
 func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
-	log.Debugf("[TCP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
+	plog.G(ctx).Debugf("[TCP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 
 	defer func(addr net.Addr) {
 		var keys []string
@@ -68,7 +67,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		for _, key := range keys {
 			h.routeMapTCP.Delete(key)
 		}
-		log.Debugf("[TCP] To %s by conn %s from globle route map TCP", strings.Join(keys, " "), addr)
+		plog.G(ctx).Debugf("[TCP] To %s by conn %s from globle route map TCP", strings.Join(keys, " "), addr)
 	}(tcpConn.LocalAddr())
 
 	for {
@@ -81,7 +80,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		buf := config.LPool.Get().([]byte)[:]
 		dgram, err := readDatagramPacketServer(tcpConn, buf[:])
 		if err != nil {
-			log.Errorf("[TCP] %s -> %s : %v", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
+			plog.G(ctx).Errorf("[TCP] %s -> %s : %v", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
 			config.LPool.Put(buf[:])
 			return
 		}
@@ -89,7 +88,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		var src net.IP
 		src, _, err = util.ParseIP(dgram.Data[:dgram.DataLength])
 		if err != nil {
-			log.Errorf("[TCP] Unknown packet")
+			plog.G(ctx).Errorf("[TCP] Unknown packet")
 			config.LPool.Put(buf[:])
 			continue
 		}
@@ -97,10 +96,10 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		if loaded {
 			if tcpConn != value.(net.Conn) {
 				h.routeMapTCP.Store(src.String(), tcpConn)
-				log.Debugf("[TCP] Replace route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+				plog.G(ctx).Debugf("[TCP] Replace route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 			}
 		} else {
-			log.Debugf("[TCP] Add new route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+			plog.G(ctx).Debugf("[TCP] Add new route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 		}
 		util.SafeWrite(h.packetChan, dgram)
 	}

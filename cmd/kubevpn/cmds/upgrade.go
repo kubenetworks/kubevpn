@@ -12,8 +12,8 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/upgrade"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
@@ -29,7 +29,7 @@ func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
 			const (
 				envLatestUrl = "KUBEVPN_LATEST_VERSION_URL"
 			)
-			util.InitLoggerForClient(false)
+			plog.InitLoggerForClient()
 			var client = http.DefaultClient
 			if config.GitHubOAuthToken != "" {
 				client = oauth2.NewClient(cmd.Context(), oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))

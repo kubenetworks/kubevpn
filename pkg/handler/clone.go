@@ -39,6 +39,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/syncthing"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -138,14 +139,14 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 		args = append(args, "--headers", labels.Set(d.Headers).String())
 	}
 	for _, workload := range d.Workloads {
-		log.Infof("Clone workload %s", workload)
+		plog.G(ctx).Infof("Clone workload %s", workload)
 		object, err := util.GetUnstructuredObject(d.factory, d.Namespace, workload)
 		if err != nil {
 			return err
 		}
 		u := object.Object.(*unstructured.Unstructured)
 		if err = unstructured.SetNestedField(u.UnstructuredContent(), int64(1), "spec", "replicas"); err != nil {
-			log.Warnf("Failed to set repilcaset to 1: %v", err)
+			plog.G(ctx).Warnf("Failed to set repilcaset to 1: %v", err)
 		}
 		u.SetNamespace(d.TargetNamespace)
 		RemoveUselessInfo(u)
@@ -389,7 +390,7 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 			if err = unstructured.SetNestedField(u.Object, m, path...); err != nil {
 				return err
 			}
-			if err = d.replaceRegistry(u); err != nil {
+			if err = d.replaceRegistry(ctx, u); err != nil {
 				return err
 			}
 
@@ -400,9 +401,9 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 		if retryErr != nil {
 			return fmt.Errorf("create clone for resource %s failed: %v", workload, retryErr)
 		}
-		log.Infof("Create clone resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
-		log.Infof("Wait for clone resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
-		log.Infoln()
+		plog.G(ctx).Infof("Create clone resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
+		plog.G(ctx).Infof("Wait for clone resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
+		plog.G(ctx).Infoln()
 		err = util.WaitPodToBeReady(ctx, d.targetClientset.CoreV1().Pods(d.TargetNamespace), metav1.LabelSelector{MatchLabels: labelsMap})
 		if err != nil {
 			return err
@@ -432,7 +433,7 @@ func (d *CloneOptions) SyncDir(ctx context.Context, labels string) error {
 		return err
 	}
 	d.syncthingGUIAddr = (&url.URL{Scheme: "http", Host: localAddr}).String()
-	log.Infof("Access the syncthing GUI via the following URL: %s", d.syncthingGUIAddr)
+	plog.G(ctx).Infof("Access the syncthing GUI via the following URL: %s", d.syncthingGUIAddr)
 	go func() {
 		client := syncthing.NewClient(localAddr)
 		podName := list[0].Name
@@ -444,7 +445,7 @@ func (d *CloneOptions) SyncDir(ctx context.Context, labels string) error {
 				_, _, _ = polymorphichelpers.GetFirstPod(d.targetClientset.CoreV1(), d.TargetNamespace, labels, time.Second*30, sortBy)
 				list, err := util.GetRunningPodList(d.ctx, d.targetClientset, d.TargetNamespace, labels)
 				if err != nil {
-					log.Error(err)
+					plog.G(ctx).Error(err)
 					return
 				}
 				if podName == list[0].Name {
@@ -452,23 +453,23 @@ func (d *CloneOptions) SyncDir(ctx context.Context, labels string) error {
 				}
 
 				podName = list[0].Name
-				log.Debugf("Detect newer pod %s", podName)
+				plog.G(ctx).Debugf("Detect newer pod %s", podName)
 				var conf *libconfig.Configuration
 				conf, err = client.GetConfig(d.ctx)
 				if err != nil {
-					log.Errorf("Failed to get config from syncthing: %v", err)
+					plog.G(ctx).Errorf("Failed to get config from syncthing: %v", err)
 					return
 				}
 				for i := range conf.Devices {
 					if config.RemoteDeviceID.Equals(conf.Devices[i].DeviceID) {
 						addr := netutil.AddressURL("tcp", net.JoinHostPort(list[0].Status.PodIP, strconv.Itoa(libconfig.DefaultTCPPort)))
 						conf.Devices[i].Addresses = []string{addr}
-						log.Debugf("Use newer remote syncthing endpoint: %s", addr)
+						plog.G(ctx).Debugf("Use newer remote syncthing endpoint: %s", addr)
 					}
 				}
 				err = client.PutConfig(d.ctx, conf)
 				if err != nil {
-					log.Errorf("Failed to set config to syncthing: %v", err)
+					plog.G(ctx).Errorf("Failed to set config to syncthing: %v", err)
 				}
 			}()
 		}
@@ -794,7 +795,7 @@ func (d *CloneOptions) setEnv(u *unstructured.Unstructured) error {
 }
 
 // replace origin registry with special registry for pulling image
-func (d *CloneOptions) replaceRegistry(u *unstructured.Unstructured) error {
+func (d *CloneOptions) replaceRegistry(ctx context.Context, u *unstructured.Unstructured) error {
 	// not pass this options, do nothing
 	if !d.IsChangeTargetRegistry {
 		return nil
@@ -814,7 +815,7 @@ func (d *CloneOptions) replaceRegistry(u *unstructured.Unstructured) error {
 		domain := reference.Domain(named)
 		newImage := strings.TrimPrefix(strings.ReplaceAll(oldImage, domain, d.TargetRegistry), "/")
 		temp.Spec.InitContainers[i].Image = newImage
-		log.Debugf("Update init container: %s image: %s --> %s", container.Name, oldImage, newImage)
+		plog.G(ctx).Debugf("Update init container: %s image: %s --> %s", container.Name, oldImage, newImage)
 	}
 
 	for i, container := range temp.Spec.Containers {
@@ -826,7 +827,7 @@ func (d *CloneOptions) replaceRegistry(u *unstructured.Unstructured) error {
 		domain := reference.Domain(named)
 		newImage := strings.TrimPrefix(strings.ReplaceAll(oldImage, domain, d.TargetRegistry), "/")
 		temp.Spec.Containers[i].Image = newImage
-		log.Debugf("Update container: %s image: %s --> %s", container.Name, oldImage, newImage)
+		plog.G(ctx).Debugf("Update container: %s image: %s --> %s", container.Name, oldImage, newImage)
 	}
 
 	var marshal []byte
@@ -844,15 +845,15 @@ func (d *CloneOptions) replaceRegistry(u *unstructured.Unstructured) error {
 	return nil
 }
 
-func (d *CloneOptions) Cleanup(workloads ...string) error {
+func (d *CloneOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	if len(workloads) == 0 {
 		workloads = d.Workloads
 	}
 	for _, workload := range workloads {
-		log.Infof("Cleaning up clone workload: %s", workload)
+		plog.G(ctx).Infof("Cleaning up clone workload: %s", workload)
 		object, err := util.GetUnstructuredObject(d.factory, d.Namespace, workload)
 		if err != nil {
-			log.Errorf("Failed to get unstructured object error: %s", err.Error())
+			plog.G(ctx).Errorf("Failed to get unstructured object error: %s", err.Error())
 			return err
 		}
 		labelsMap := map[string]string{
@@ -862,13 +863,13 @@ func (d *CloneOptions) Cleanup(workloads ...string) error {
 		selector := labels.SelectorFromSet(labelsMap)
 		controller, err := util.GetTopOwnerReferenceBySelector(d.targetFactory, d.TargetNamespace, selector.String())
 		if err != nil {
-			log.Errorf("Failed to get controller error: %s", err.Error())
+			plog.G(ctx).Errorf("Failed to get controller error: %s", err.Error())
 			return err
 		}
 		var client dynamic.Interface
 		client, err = d.targetFactory.DynamicClient()
 		if err != nil {
-			log.Errorf("Failed to get dynamic client error: %s", err.Error())
+			plog.G(ctx).Errorf("Failed to get dynamic client error: %s", err.Error())
 			return err
 		}
 		for _, cloneName := range controller.UnsortedList() {
@@ -878,17 +879,17 @@ func (d *CloneOptions) Cleanup(workloads ...string) error {
 			}
 			err = client.Resource(object.Mapping.Resource).Namespace(d.TargetNamespace).Delete(context.Background(), cloneName, metav1.DeleteOptions{})
 			if err != nil && !apierrors.IsNotFound(err) {
-				log.Errorf("Failed to delete clone object: %v", err)
+				plog.G(ctx).Errorf("Failed to delete clone object: %v", err)
 				return err
 			}
-			log.Infof("Deleted clone object: %s", cloneName)
+			plog.G(ctx).Infof("Deleted clone object: %s", cloneName)
 		}
-		log.Debugf("Cleanup clone workload: %s successfully", workload)
+		plog.G(ctx).Debugf("Cleanup clone workload: %s successfully", workload)
 	}
 	for _, f := range d.rollbackFuncList {
 		if f != nil {
 			if err := f(); err != nil {
-				log.Warnf("Failed to exec rollback function: %s", err)
+				plog.G(ctx).Warnf("Failed to exec rollback function: %s", err)
 			}
 		}
 	}

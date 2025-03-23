@@ -9,10 +9,11 @@ import (
 	"net/netip"
 	"os/exec"
 
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func (c *Config) SetupDNS(ctx context.Context) error {
@@ -32,19 +33,19 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 		var addr netip.Addr
 		addr, err = netip.ParseAddr(s)
 		if err != nil {
-			log.Errorf("Parse %s failed: %s", s, err)
+			plog.G(ctx).Errorf("Parse %s failed: %s", s, err)
 			return err
 		}
 		servers = append(servers, addr.Unmap())
 	}
 	err = luid.SetDNS(windows.AF_INET, servers, clientConfig.Search)
 	if err != nil {
-		log.Errorf("Set DNS failed: %s", err)
+		plog.G(ctx).Errorf("Set DNS failed: %s", err)
 		return err
 	}
 	err = luid.SetDNS(windows.AF_INET6, servers, clientConfig.Search)
 	if err != nil {
-		log.Errorf("Set DNS failed: %s", err)
+		plog.G(ctx).Errorf("Set DNS failed: %s", err)
 		return err
 	}
 	//_ = updateNicMetric(tunName)
@@ -78,7 +79,7 @@ func updateNicMetric(name string) error {
 	}...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Warnf("Failed to update nic metrics, error: %v, output: %s, command: %v", err, string(out), cmd.Args)
+		plog.G(context.Background()).Warnf("Failed to update nic metrics, error: %v, output: %s, command: %v", err, string(out), cmd.Args)
 	}
 	return err
 }
@@ -91,9 +92,9 @@ func addNicSuffixSearchList(search []string) error {
 		fmt.Sprintf("@(\"%s\", \"%s\", \"%s\")", search[0], search[1], search[2]),
 	}...)
 	output, err := cmd.CombinedOutput()
-	log.Debugln(cmd.Args)
+	plog.G(context.Background()).Debugln(cmd.Args)
 	if err != nil {
-		log.Warnf("Failed to set DNS suffix search list, err: %v, output: %s, command: %v", err, string(output), cmd.Args)
+		plog.G(context.Background()).Warnf("Failed to set DNS suffix search list, err: %v, output: %s, command: %v", err, string(output), cmd.Args)
 	}
 	return err
 }

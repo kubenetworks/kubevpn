@@ -1,6 +1,8 @@
 package driver
 
 import (
+	"context"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,7 +20,7 @@ func InstallTunTapDriver() {
 	}, func() error {
 		return openvpn.Install()
 	}); err != nil {
-		log.Warn(err)
+		plog.G(context.Background()).Warn(err)
 	}
 }
 
@@ -28,7 +30,7 @@ func InstallWireGuardTunDriver() {
 	}, func() error {
 		return wintun.InstallWintunDriver()
 	}); err != nil {
-		log.Warn(err)
+		plog.G(context.Background()).Warn(err)
 	}
 }
 
@@ -47,7 +49,7 @@ func UninstallTunTapDriver() {
 	cmd := exec.Command(path, "/S")
 	b, e := cmd.CombinedOutput()
 	if e != nil {
-		log.Warn(e)
+		plog.G(context.Background()).Warn(e)
 	}
 	log.Info(string(b))
 }

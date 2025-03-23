@@ -9,10 +9,11 @@ import (
 	"time"
 
 	miekgdns "github.com/miekg/dns"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/util/cache"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 var (
@@ -59,7 +60,7 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 	err := s.fwdSem.Acquire(ctx, 1)
 	if err != nil {
 		s.logInterval.Do(func() {
-			log.Errorf("DNS server more than %v concurrent queries", maxConcurrent)
+			plog.G(ctx).Errorf("DNS server more than %v concurrent queries", maxConcurrent)
 		})
 		m.SetRcode(m, miekgdns.RcodeRefused)
 		return
@@ -72,7 +73,7 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 	searchList := fix(originName, s.forwardDNS.Search)
 	if v, ok := s.dnsCache.Get(originName); ok {
 		searchList = []string{v.(string)}
-		log.Infof("Use cache name: %s --> %s", originName, v.(string))
+		plog.G(ctx).Infof("Use cache name: %s --> %s", originName, v.(string))
 	}
 
 	for _, name := range searchList {
@@ -85,16 +86,16 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 			var answer *miekgdns.Msg
 			answer, _, err = s.client.ExchangeContext(context.Background(), msg, net.JoinHostPort(dnsAddr, s.forwardDNS.Port))
 			if err != nil {
-				log.Errorf("Failed to found DNS name: %s: %v", name, err)
+				plog.G(ctx).Errorf("Failed to found DNS name: %s: %v", name, err)
 				continue
 			}
 			if len(answer.Answer) == 0 {
-				log.Infof("DNS answer is empty for name: %s", name)
+				plog.G(ctx).Infof("DNS answer is empty for name: %s", name)
 				continue
 			}
 
 			s.dnsCache.Add(originName, name, time.Minute*30)
-			log.Infof("Add cache: %s --> %s", originName, name)
+			plog.G(ctx).Infof("Add cache: %s --> %s", originName, name)
 
 			for i := 0; i < len(answer.Answer); i++ {
 				answer.Answer[i].Header().Name = originName
@@ -105,7 +106,7 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 
 			err = w.WriteMsg(answer)
 			if err != nil {
-				log.Errorf("Failed to write response for name: %s: %v", name, err.Error())
+				plog.G(ctx).Errorf("Failed to write response for name: %s: %v", name, err.Error())
 			}
 			return
 		}

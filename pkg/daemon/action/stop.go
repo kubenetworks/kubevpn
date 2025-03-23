@@ -6,27 +6,19 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func (svr *Server) Stop(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error {
-	defer func() {
-		util.InitLoggerForServer(true)
-		log.SetOutput(svr.LogFile)
-		config.Debug = false
-	}()
-	out := io.MultiWriter(newStopWarp(resp), svr.LogFile)
-	util.InitLoggerForClient(config.Debug)
-	log.SetOutput(out)
-
+	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newStopWarp(resp), svr.LogFile))
+	ctx := plog.WithLogger(resp.Context(), logger)
 	if svr.connect == nil {
-		log.Info("No connect")
+		plog.G(ctx).Info("No connect")
 		return nil
 	}
 
-	svr.connect.Cleanup()
+	svr.connect.Cleanup(ctx)
 	svr.t = time.Time{}
 	svr.connect = nil
 	return nil

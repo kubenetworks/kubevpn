@@ -1,15 +1,17 @@
 package util
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"runtime/debug"
-	
-	"github.com/sirupsen/logrus"
+
 	"google.golang.org/grpc"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 type Printable interface {
@@ -81,7 +83,7 @@ func CopyAndConvertGRPCStream[I any, O any](r grpc.ClientStream, w grpc.ServerSt
 
 func HandleCrash() {
 	if r := recover(); r != nil {
-		logrus.Panic(fmt.Sprintf("Panic: %s", string(debug.Stack())))
+		plog.GetLogger(context.Background()).Panic(fmt.Sprintf("Panic: %s", string(debug.Stack())))
 		panic(r)
 	}
 }

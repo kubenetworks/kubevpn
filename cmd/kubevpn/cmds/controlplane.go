@@ -1,6 +1,8 @@
 package cmds
 
 import (
+	"context"
+
 	"github.com/docker/docker/libnetwork/resolvconf"
 	miekgdns "github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
@@ -12,6 +14,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -28,14 +31,13 @@ func CmdControlPlane(_ cmdutil.Factory) *cobra.Command {
 		Control-plane is a envoy xds server, distribute envoy route configuration
 		`)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			util.InitLoggerForServer(config.Debug)
 			go util.StartupPProfForServer(0)
 			go func() {
 				conf, err := miekgdns.ClientConfigFromFile(resolvconf.Path())
 				if err != nil {
-					log.Fatal(err)
+					plog.G(context.Background()).Fatal(err)
 				}
-				log.Fatal(dns.ListenAndServe("udp", ":53", conf))
+				plog.G(context.Background()).Fatal(dns.ListenAndServe("udp", ":53", conf))
 			}()
 			err := controlplane.Main(cmd.Context(), watchDirectoryFilename, port, log.StandardLogger())
 			return err

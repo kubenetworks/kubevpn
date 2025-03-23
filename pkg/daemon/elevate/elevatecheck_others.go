@@ -3,7 +3,9 @@
 package elevate
 
 import (
+	"context"
 	"flag"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -39,7 +41,7 @@ func RunWithElevated() {
 	}()
 	err := cmd.Run()
 	if err != nil {
-		log.Warn(err)
+		plog.G(context.Background()).Warn(err)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	miekgdns "github.com/miekg/dns"
-	log "github.com/sirupsen/logrus"
 	v12 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -42,10 +42,10 @@ func (c *Config) usingResolver(ctx context.Context) {
 	path := "/etc/resolver"
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err = os.MkdirAll(path, 0755); err != nil {
-			log.Errorf("Create resolver error: %v", err)
+			plog.G(ctx).Errorf("Create resolver error: %v", err)
 		}
 		if err = os.Chmod(path, 0755); err != nil {
-			log.Errorf("Chmod resolver error: %v", err)
+			plog.G(ctx).Errorf("Chmod resolver error: %v", err)
 		}
 	}
 	newConfig := miekgdns.ClientConfig{
@@ -62,21 +62,21 @@ func (c *Config) usingResolver(ctx context.Context) {
 			continue
 		}
 		if err != nil {
-			log.Errorf("Failed to read resovler %s error: %v", filename, err)
+			plog.G(ctx).Errorf("Failed to read resovler %s error: %v", filename, err)
 			continue
 		}
 
 		var conf *miekgdns.ClientConfig
 		conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(content)))
 		if err != nil {
-			log.Errorf("Parse resolver %s error: %v", filename, err)
+			plog.G(ctx).Errorf("Parse resolver %s error: %v", filename, err)
 			continue
 		}
 		// insert current name server to first location
 		conf.Servers = append([]string{clientConfig.Servers[0]}, conf.Servers...)
 		err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
 		if err != nil {
-			log.Errorf("Failed to write resovler %s error: %v", filename, err)
+			plog.G(ctx).Errorf("Failed to write resovler %s error: %v", filename, err)
 		}
 	}
 }
@@ -188,7 +188,7 @@ func (c *Config) CancelDNS() {
 		}
 		err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
 		if err != nil {
-			log.Errorf("Failed to write resovler %s error: %v", filename, err)
+			plog.G(context.Background()).Errorf("Failed to write resovler %s error: %v", filename, err)
 		}
 	}
 	//networkCancel()
@@ -267,7 +267,7 @@ func networkSetup(ip string, namespace string) {
 			args := []string{"-setdnsservers", s}
 			output, err = exec.Command("networksetup", append(args, nameservers...)...).Output()
 			if err != nil {
-				log.Warnf("Failed to set DNS server for %s, err: %v, output: %s\n", s, err, string(output))
+				plog.G(context.Background()).Warnf("Failed to set DNS server for %s, err: %v, output: %s\n", s, err, string(output))
 			}
 		}
 		output, err = exec.Command("networksetup", "-getsearchdomains", s).Output()
@@ -287,7 +287,7 @@ func networkSetup(ip string, namespace string) {
 			args := []string{"-setsearchdomains", s}
 			bytes, err := exec.Command("networksetup", append(args, newSearchDomains...)...).Output()
 			if err != nil {
-				log.Warnf("Failed to set search domain for %s, err: %v, output: %s\n", s, err, string(bytes))
+				plog.G(context.Background()).Warnf("Failed to set search domain for %s, err: %v, output: %s\n", s, err, string(bytes))
 			}
 		}
 	}
@@ -306,7 +306,7 @@ func networkCancel() {
 			if i[1] == "svc.cluster.local" && i[2] == "cluster.local" {
 				bytes, err := exec.Command("networksetup", "-setsearchdomains", s, strings.Join(i[3:], " ")).Output()
 				if err != nil {
-					log.Warnf("Failed to remove search domain for %s, err: %v, output: %s\n", s, err, string(bytes))
+					plog.G(context.Background()).Warnf("Failed to remove search domain for %s, err: %v, output: %s\n", s, err, string(bytes))
 				}
 
 				output, err := exec.Command("networksetup", "-getdnsservers", s).Output()
@@ -322,7 +322,7 @@ func networkCancel() {
 					args := []string{"-setdnsservers", s}
 					combinedOutput, err := exec.Command("networksetup", append(args, dnsServers...)...).Output()
 					if err != nil {
-						log.Warnf("Failed to remove DNS server for %s, err: %v, output: %s", s, err, string(combinedOutput))
+						plog.G(context.Background()).Warnf("Failed to remove DNS server for %s, err: %v, output: %s", s, err, string(combinedOutput))
 					}
 				}
 			}

@@ -10,6 +10,8 @@ import (
 	"github.com/gliderlabs/ssh"
 	log "github.com/sirupsen/logrus"
 	gossh "golang.org/x/crypto/ssh"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func SSHListener(addr string) (net.Listener, error) {
@@ -17,7 +19,7 @@ func SSHListener(addr string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Debugf("starting ssh server on port %s...", addr)
+	plog.G(context.Background()).Debugf("starting ssh server on port %s...", addr)
 	return ln, err
 }
 

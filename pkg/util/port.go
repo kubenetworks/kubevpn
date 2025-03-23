@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // ParsePort [tcp/udp]/remote:local
@@ -67,7 +68,7 @@ func GetAvailableTCPPortOrDie() (int, error) {
 }
 
 func WaitPortToBeFree(ctx context.Context, port int) error {
-	logrus.Infoln(fmt.Sprintf("Wait port %v to be free...", port))
+	plog.G(ctx).Infoln(fmt.Sprintf("Wait port %v to be free...", port))
 	ticker := time.NewTicker(time.Second * 2)
 	defer ticker.Stop()
 	for {
@@ -76,7 +77,7 @@ func WaitPortToBeFree(ctx context.Context, port int) error {
 			return fmt.Errorf("wait port %d to be free timeout", port)
 		case <-ticker.C:
 			if !IsPortListening(port) {
-				logrus.Infof("Port %v are free", port)
+				plog.G(ctx).Infof("Port %v are free", port)
 				return nil
 			}
 		}

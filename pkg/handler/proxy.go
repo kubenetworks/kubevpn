@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -107,7 +107,7 @@ func (m *Mapper) Run() {
 			if errors.Is(err, context.Canceled) {
 				continue
 			}
-			logrus.Errorf("failed to get local port to envoy rule port: %v", err)
+			plog.G(m.ctx).Errorf("failed to get local port to envoy rule port: %v", err)
 			time.Sleep(time.Second * 2)
 			continue
 		}
@@ -125,7 +125,7 @@ func (m *Mapper) Run() {
 			if errors.Is(err, context.Canceled) {
 				continue
 			}
-			logrus.Errorf("failed to list running pod: %v", err)
+			plog.G(m.ctx).Errorf("failed to list running pod: %v", err)
 			time.Sleep(time.Second * 2)
 			continue
 		}
@@ -141,7 +141,7 @@ func (m *Mapper) Run() {
 				containerNames.Insert(container.Name)
 			}
 			if !containerNames.HasAny(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
-				logrus.Infof("Labels with pod have been reset")
+				plog.G(m.ctx).Infof("Labels with pod have been reset")
 				return
 			}
 
@@ -160,7 +160,7 @@ func (m *Mapper) Run() {
 						remote := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(envoyRulePort))
 						for ctx.Err() == nil {
 							_ = ssh.ExposeLocalPortToRemote(ctx, remoteSSHServer, remote, local)
-							time.Sleep(time.Second * 1)
+							time.Sleep(time.Second * 2)
 						}
 					}(containerPort, envoyRulePort)
 				}

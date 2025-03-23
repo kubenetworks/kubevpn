@@ -19,6 +19,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util/regctl"
@@ -64,7 +65,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		kubevpn connect --ssh-jump "--ssh-addr jump.naison.org --ssh-username naison --gssapi-password xxx" --ssh-username root --ssh-addr 127.0.0.1:22 --ssh-keyfile ~/.ssh/dst.pem
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			util.InitLoggerForClient(false)
+			plog.InitLoggerForClient()
 			// startup daemon process and sudo process
 			err := daemon.StartupDaemon(cmd.Context())
 			if err != nil {
@@ -85,10 +86,6 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 					extraRoute.ExtraCIDR = append(extraRoute.ExtraCIDR, ip.String())
 				}
 			}
-			logLevel := log.InfoLevel
-			if config.Debug {
-				logLevel = log.DebugLevel
-			}
 			req := &rpc.ConnectRequest{
 				KubeconfigBytes:      string(bytes),
 				Namespace:            ns,
@@ -100,7 +97,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				TransferImage:       transferImage,
 				Image:               config.Image,
 				ImagePullSecretName: imagePullSecretName,
-				Level:               int32(logLevel),
+				Level:               int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
 			}
 			// if is foreground, send to sudo daemon server
 			cli := daemon.GetClient(false)
@@ -150,7 +147,7 @@ func disconnect(cli rpc.DaemonClient, bytes []byte, ns string, sshConf *pkgssh.S
 		SshJump:         sshConf.ToRPC(),
 	})
 	if err != nil {
-		log.Errorf("Disconnect error: %v", err)
+		plog.G(context.Background()).Errorf("Disconnect error: %v", err)
 		return err
 	}
 	err = util.PrintGRPCStream[rpc.DisconnectResponse](resp)

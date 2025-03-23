@@ -4,26 +4,19 @@ import (
 	"context"
 	"io"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (err error) {
-	defer func() {
-		util.InitLoggerForServer(true)
-		log.SetOutput(svr.LogFile)
-		config.Debug = false
-	}()
-	config.Debug = req.Level == int32(log.DebugLevel)
-	out := io.MultiWriter(newCloneWarp(resp), svr.LogFile)
-	util.InitLoggerForClient(config.Debug)
-	log.SetOutput(out)
+	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newCloneWarp(resp), svr.LogFile))
+
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	connReq := &rpc.ConnectRequest{
 		KubeconfigBytes:      req.KubeconfigBytes,
@@ -42,12 +35,10 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 	if err != nil {
 		return err
 	}
-	err = util.PrintGRPCStream[rpc.ConnectResponse](connResp, out)
+	err = util.PrintGRPCStream[rpc.ConnectResponse](connResp, io.MultiWriter(newCloneWarp(resp), svr.LogFile))
 	if err != nil {
 		return err
 	}
-	util.InitLoggerForClient(config.Debug)
-	log.SetOutput(out)
 
 	options := &handler.CloneOptions{
 		Namespace:            req.Namespace,
@@ -79,7 +70,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 	sshCtx, sshFunc := context.WithCancel(context.Background())
 	defer func() {
 		if err != nil {
-			_ = options.Cleanup()
+			_ = options.Cleanup(sshCtx)
 			sshFunc()
 		}
 	}()
@@ -95,15 +86,15 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 	f := util.InitFactoryByPath(path, req.Namespace)
 	err = options.InitClient(f)
 	if err != nil {
-		log.Errorf("Failed to init client: %v", err)
+		plog.G(context.Background()).Errorf("Failed to init client: %v", err)
 		return err
 	}
 	config.Image = req.Image
-	log.Infof("Clone workloads...")
+	logger.Infof("Clone workloads...")
 	options.SetContext(sshCtx)
-	err = options.DoClone(resp.Context(), []byte(req.KubeconfigBytes))
+	err = options.DoClone(plog.WithLogger(resp.Context(), logger), []byte(req.KubeconfigBytes))
 	if err != nil {
-		log.Errorf("Clone workloads failed: %v", err)
+		plog.G(context.Background()).Errorf("Clone workloads failed: %v", err)
 		return err
 	}
 	svr.clone = options

@@ -5,7 +5,6 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
-	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,6 +15,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -27,12 +27,12 @@ import (
 func (c *ConnectOptions) Uninstall(ctx context.Context) error {
 	err := c.LeaveAllProxyResources(ctx)
 	if err != nil {
-		log.Errorf("Leave proxy resources error: %v", err)
+		plog.G(ctx).Errorf("Leave proxy resources error: %v", err)
 	} else {
-		log.Debugf("Leave proxy resources successfully")
+		plog.G(ctx).Debugf("Leave proxy resources successfully")
 	}
 
-	log.Infof("Cleaning up resources")
+	plog.G(ctx).Infof("Cleaning up resources")
 	ns := c.Namespace
 	name := config.ConfigMapPodTrafficManager
 	options := metav1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)}
@@ -47,7 +47,7 @@ func (c *ConnectOptions) Uninstall(ctx context.Context) error {
 	_ = c.clientset.AppsV1().Deployments(ns).Delete(ctx, name, options)
 
 	_ = c.CleanupLocalContainer(ctx)
-	log.Info("Done")
+	plog.G(ctx).Info("Done")
 	return nil
 }
 
@@ -79,13 +79,13 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 		return
 	}
 	if cm == nil || cm.Data == nil || len(cm.Data[config.KeyEnvoy]) == 0 {
-		log.Infof("No proxy resources found")
+		plog.G(ctx).Infof("No proxy resources found")
 		return nil
 	}
 	var v = make([]*controlplane.Virtual, 0)
 	str := cm.Data[config.KeyEnvoy]
 	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
-		log.Errorf("Unmarshal envoy config error: %v", err)
+		plog.G(ctx).Errorf("Unmarshal envoy config error: %v", err)
 		return
 	}
 	v4, _ := c.GetLocalTunIP()
@@ -93,24 +93,24 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 		// deployments.apps.ry-server --> deployments.apps/ry-server
 		object, err := util.GetUnstructuredObject(c.factory, c.Namespace, workload)
 		if err != nil {
-			log.Errorf("Failed to get unstructured object: %v", err)
+			plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
 			return err
 		}
 		u := object.Object.(*unstructured.Unstructured)
 		templateSpec, _, err := util.GetPodTemplateSpecPath(u)
 		if err != nil {
-			log.Errorf("Failed to get template spec path: %v", err)
+			plog.G(ctx).Errorf("Failed to get template spec path: %v", err)
 			return err
 		}
 		var empty bool
-		empty, err = inject.UnPatchContainer(c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), object, func(isFargateMode bool, rule *controlplane.Rule) bool {
+		empty, err = inject.UnPatchContainer(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), object, func(isFargateMode bool, rule *controlplane.Rule) bool {
 			if isFargateMode {
 				return c.IsMe(util.ConvertWorkloadToUid(workload), rule.Headers)
 			}
 			return rule.LocalTunIPv4 == v4
 		})
 		if err != nil {
-			log.Errorf("Failed to leave workload %s: %v", workload, err)
+			plog.G(ctx).Errorf("Failed to leave workload %s: %v", workload, err)
 			continue
 		}
 		if empty {

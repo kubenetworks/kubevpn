@@ -3,16 +3,17 @@
 package elevate
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
 
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // ref https://stackoverflow.com/questions/31558066/how-to-ask-for-administer-privileges-on-windows-with-go
@@ -47,7 +48,7 @@ func RunCmdWithElevated(exe string, arg []string) error {
 	os.Setenv(config.EnvDisableSyncthingLog, "1")
 	err = windows.ShellExecute(0, verbPtr, exePtr, argPtr, cwdPtr, showCmd)
 	if err != nil {
-		log.Warn(err)
+		plog.G(context.Background()).Warn(err)
 	}
 	return err
 }
@@ -82,7 +83,7 @@ func RunCmd(exe string, arg []string) error {
 
 	err = windows.ShellExecute(0, verbPtr, exePtr, argPtr, cwdPtr, showCmd)
 	if err != nil {
-		log.Warn(err)
+		plog.G(context.Background()).Warn(err)
 	}
 	return err
 }

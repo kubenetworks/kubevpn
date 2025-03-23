@@ -17,7 +17,6 @@ import (
 	"github.com/hashicorp/go-version"
 	"github.com/moby/term"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -41,6 +40,7 @@ import (
 	pkgclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 type PodRouteConfig struct {
@@ -155,7 +155,7 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 		URL()
 	transport, upgrader, err := spdy.RoundTripperFor(config)
 	if err != nil {
-		log.Errorf("Create spdy roundtripper error: %s", err.Error())
+		plog.G(context.Background()).Errorf("Create spdy roundtripper error: %s", err.Error())
 		return err
 	}
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
@@ -171,7 +171,6 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 	}
 	forwarder, err := portforward.New(dialer, portPair, stopChan, readyChan, out, errOut)
 	if err != nil {
-		log.Errorf("Create port forward error: %s", err.Error())
 		return err
 	}
 
@@ -184,7 +183,6 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 
 	select {
 	case err = <-errChan:
-		log.Debugf("Forward port error: %v", err)
 		return err
 	case <-stopChan:
 		return nil
@@ -271,7 +269,7 @@ func WaitPodToBeReady(ctx context.Context, podInterface v12.PodInterface, select
 				PrintStatus(podT, sb)
 
 				if last != sb.String() {
-					log.Infof(sb.String())
+					plog.G(ctx).Infof(sb.String())
 				}
 				last = sb.String()
 				if podutils.IsPodReady(podT) && func() bool {
@@ -343,7 +341,7 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				return err
 			})
 		if err != nil {
-			log.Debugf("Failed to get Pod %s: %v", podName, err)
+			plog.G(ctx).Debugf("Failed to get Pod %s: %v", podName, err)
 			cancelFunc()
 		}
 	}
@@ -356,7 +354,7 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
 			})
 			if err != nil {
-				log.Debugf("Failed to watch Pod %s: %v", podName, err)
+				plog.G(ctx).Debugf("Failed to watch Pod %s: %v", podName, err)
 				return
 			}
 			defer w.Stop()
@@ -370,7 +368,7 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				}
 				switch e.Type {
 				case watch.Deleted:
-					log.Debugf("Pod %s is deleted", podName)
+					plog.G(ctx).Debugf("Pod %s is deleted", podName)
 					cancelFunc()
 					return
 				case watch.Error:
@@ -392,7 +390,7 @@ func CheckPortStatus(ctx context.Context, cancelFunc context.CancelFunc, readyCh
 	select {
 	case <-readyChan:
 	case <-ticker.C:
-		log.Debugf("Wait port-forward to be ready timeout")
+		plog.G(ctx).Debugf("Wait port-forward to be ready timeout")
 		return
 	case <-ctx.Done():
 		return
@@ -403,7 +401,7 @@ func CheckPortStatus(ctx context.Context, cancelFunc context.CancelFunc, readyCh
 		conn, err := lc.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", localGvisorTCPPort))
 		if err == nil {
 			_ = conn.Close()
-			log.Debugf("Local port: %s is free", localGvisorTCPPort)
+			plog.G(ctx).Debugf("Local port: %s is free", localGvisorTCPPort)
 			return
 		}
 		time.Sleep(time.Second * 1)
@@ -497,7 +495,7 @@ func UpdateImage(ctx context.Context, factory util.Factory, ns string, deployNam
 		return nil
 	}
 
-	log.Infof("Found newer image %s, set image from %s to it...", image, deployment.Spec.Template.Spec.Containers[0].Image)
+	plog.G(ctx).Infof("Found newer image %s, set image from %s to it...", image, deployment.Spec.Template.Spec.Containers[0].Image)
 	for i := range deployment.Spec.Template.Spec.Containers {
 		deployment.Spec.Template.Spec.Containers[i].Image = image
 	}

@@ -72,7 +72,7 @@ func main() {
 			for k := 0; k < 10; k++ {
 				asset, err2 := GetSha256ForAsset(link)
 				if err2 != nil {
-					log.Error(err2)
+					plog.G(ctx).Error(err2)
 					continue
 				}
 				sha256Map[link] = asset

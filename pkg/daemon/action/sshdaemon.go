@@ -2,12 +2,11 @@ package action
 
 import (
 	"context"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"net"
 	"sync"
 
 	"github.com/containernetworking/cni/pkg/types"
-	log "github.com/sirupsen/logrus"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -31,7 +30,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 	var clientCIDR *net.IPNet
 	clientIP, clientCIDR, err = net.ParseCIDR(req.ClientIP)
 	if err != nil {
-		log.Errorf("Failed to parse network CIDR: %v", err)
+		plog.G(ctx).Errorf("Failed to parse network CIDR: %v", err)
 		return
 	}
 	if serverIP == "" {
@@ -54,7 +53,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 		var servers []core.Server
 		servers, err = handler.Parse(r)
 		if err != nil {
-			log.Errorf("Failed to parse route: %v", err)
+			plog.G(ctx).Errorf("Failed to parse route: %v", err)
 			return
 		}
 		var ctx1 context.Context
@@ -62,7 +61,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 		go func() {
 			err := handler.Run(ctx1, servers)
 			if err != nil {
-				log.Errorf("Failed to run route: %v", err)
+				plog.G(ctx).Errorf("Failed to run route: %v", err)
 			}
 		}()
 		serverIP = DefaultServerIP
@@ -86,7 +85,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 		GW: nil,
 	})
 	if err != nil {
-		log.Errorf("Failed to add route: %v", err)
+		plog.G(ctx).Errorf("Failed to add route: %v", err)
 		return
 	}
 

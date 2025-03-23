@@ -7,26 +7,25 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error {
-	defer func() {
-		util.InitLoggerForServer(true)
-		log.SetOutput(svr.LogFile)
-		config.Debug = false
-	}()
-	util.InitLoggerForClient(config.Debug)
-	log.SetOutput(io.MultiWriter(newQuitWarp(resp), svr.LogFile))
+	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newQuitWarp(resp), svr.LogFile))
+	ctx := context.Background()
+	if resp != nil {
+		ctx = resp.Context()
+	}
+	ctx = plog.WithLogger(ctx, logger)
 
 	if svr.clone != nil {
-		err := svr.clone.Cleanup()
+		err := svr.clone.Cleanup(ctx)
 		if err != nil {
-			log.Errorf("Cleanup clone failed: %v", err)
+			plog.G(ctx).Errorf("Cleanup clone failed: %v", err)
 		}
 		svr.clone = nil
 	}
@@ -34,7 +33,7 @@ func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error 
 	connects := handler.Connects(svr.secondaryConnect).Append(svr.connect)
 	for _, conn := range connects.Sort() {
 		if conn != nil {
-			conn.Cleanup()
+			conn.Cleanup(ctx)
 		}
 	}
 	svr.secondaryConnect = nil

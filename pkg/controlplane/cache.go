@@ -90,7 +90,7 @@ type Rule struct {
 	PortMap map[int32]string
 }
 
-func (a *Virtual) To(enableIPv6 bool) (
+func (a *Virtual) To(enableIPv6 bool, logger *logrus.Logger) (
 	listeners []types.Resource,
 	clusters []types.Resource,
 	routes []types.Resource,
@@ -117,7 +117,7 @@ func (a *Virtual) To(enableIPv6 bool) (
 				if strings.Index(ports, ":") > 0 {
 					ports = strings.Split(ports, ":")[0]
 				} else {
-					logrus.Errorf("fargate mode port should have two pair")
+					logger.Errorf("fargate mode port should have two pair: %s", ports)
 				}
 			}
 			envoyRulePort, _ := strconv.Atoi(ports)

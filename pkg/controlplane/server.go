@@ -13,8 +13,9 @@ import (
 	runtimeservice "github.com/envoyproxy/go-control-plane/envoy/service/runtime/v3"
 	secretservice "github.com/envoyproxy/go-control-plane/envoy/service/secret/v3"
 	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
-	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 const (
@@ -38,6 +39,6 @@ func RunServer(ctx context.Context, server serverv3.Server, port uint) error {
 	secretservice.RegisterSecretDiscoveryServiceServer(grpcServer, server)
 	runtimeservice.RegisterRuntimeDiscoveryServiceServer(grpcServer, server)
 
-	log.Infof("Management server listening on %d", port)
+	plog.G(ctx).Infof("Management server listening on %d", port)
 	return grpcServer.Serve(listener)
 }

@@ -1,12 +1,12 @@
 package webhook
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net/http"
 	"os"
 
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
@@ -20,6 +20,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp/rpc"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func Main(f util.Factory) error {
@@ -45,7 +46,7 @@ func Main(f util.Factory) error {
 	grpcServer := grpc.NewServer()
 	cleanup, err := admin.Register(grpcServer)
 	if err != nil {
-		log.Errorf("Failed to register admin: %v", err)
+		plog.G(context.Background()).Errorf("Failed to register admin: %v", err)
 		return err
 	}
 	grpc_health_v1.RegisterHealthServer(grpcServer, health.NewServer())
@@ -62,7 +63,7 @@ func Main(f util.Factory) error {
 	var h2Server http2.Server
 	err = http2.ConfigureServer(downgradingServer, &h2Server)
 	if err != nil {
-		log.Errorf("Failed to configure http2 server: %v", err)
+		plog.G(context.Background()).Errorf("Failed to configure http2 server: %v", err)
 		return err
 	}
 	handler := daemon.CreateDowngradingHandler(grpcServer, http.HandlerFunc(http.DefaultServeMux.ServeHTTP))

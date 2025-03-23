@@ -15,6 +15,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -37,7 +38,7 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
         kubevpn disconnect
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			util.InitLoggerForClient(false)
+			plog.InitLoggerForClient()
 			err = daemon.StartupDaemon(cmd.Context())
 			return err
 		},

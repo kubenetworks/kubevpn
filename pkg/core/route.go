@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -9,9 +10,9 @@ import (
 
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 )
 
@@ -59,7 +60,7 @@ func parseChainNode(ns string) (*Node, error) {
 func (r *Route) GenerateServers() ([]Server, error) {
 	chain, err := r.parseChain()
 	if err != nil && !errors.Is(err, ErrorInvalidNode) {
-		log.Errorf("Failed to parse chain: %v", err)
+		plog.G(context.Background()).Errorf("Failed to parse chain: %v", err)
 		return nil, err
 	}
 
@@ -68,7 +69,7 @@ func (r *Route) GenerateServers() ([]Server, error) {
 		var node *Node
 		node, err = ParseNode(serveNode)
 		if err != nil {
-			log.Errorf("Failed to parse node %s: %v", serveNode, err)
+			plog.G(context.Background()).Errorf("Failed to parse node %s: %v", serveNode, err)
 			return nil, err
 		}
 
@@ -87,39 +88,39 @@ func (r *Route) GenerateServers() ([]Server, error) {
 				Gateway: node.Get("gw"),
 			})
 			if err != nil {
-				log.Errorf("Failed to create tun listener: %v", err)
+				plog.G(context.Background()).Errorf("Failed to create tun listener: %v", err)
 				return nil, err
 			}
 		case "tcp":
 			handler = TCPHandler()
 			ln, err = TCPListener(node.Addr)
 			if err != nil {
-				log.Errorf("Failed to create tcp listener: %v", err)
+				plog.G(context.Background()).Errorf("Failed to create tcp listener: %v", err)
 				return nil, err
 			}
 		case "gtcp":
 			handler = GvisorTCPHandler()
 			ln, err = GvisorTCPListener(node.Addr)
 			if err != nil {
-				log.Errorf("Failed to create gvisor tcp listener: %v", err)
+				plog.G(context.Background()).Errorf("Failed to create gvisor tcp listener: %v", err)
 				return nil, err
 			}
 		case "gudp":
 			handler = GvisorUDPHandler()
 			ln, err = GvisorUDPListener(node.Addr)
 			if err != nil {
-				log.Errorf("Failed to create gvisor udp listener: %v", err)
+				plog.G(context.Background()).Errorf("Failed to create gvisor udp listener: %v", err)
 				return nil, err
 			}
 		case "ssh":
 			handler = SSHHandler()
 			ln, err = SSHListener(node.Addr)
 			if err != nil {
-				log.Errorf("Failed to create ssh listener: %v", err)
+				plog.G(context.Background()).Errorf("Failed to create ssh listener: %v", err)
 				return nil, err
 			}
 		default:
-			log.Errorf("Not support protocol %s", node.Protocol)
+			plog.G(context.Background()).Errorf("Not support protocol %s", node.Protocol)
 			return nil, fmt.Errorf("not support protocol %s", node.Protocol)
 		}
 		servers = append(servers, Server{Listener: ln, Handler: handler})

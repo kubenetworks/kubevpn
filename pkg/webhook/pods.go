@@ -7,7 +7,6 @@ import (
 	"net"
 
 	"github.com/mattbaird/jsonpatch"
-	log "github.com/sirupsen/logrus"
 	"k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -18,17 +17,18 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // create pod will rent ip and delete pod will release ip
 func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionResponse {
 	r, _ := json.Marshal(ar)
-	log.Infof("Admitting pods called, req: %v", string(r))
+	plog.G(context.Background()).Infof("Admitting pods called, req: %v", string(r))
 	podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 	if ar.Request.Resource != podResource {
 		err := fmt.Errorf("expect resource to be %s but real %s", podResource, ar.Request.Resource)
-		log.Error(err)
+		plog.G(context.Background()).Error(err)
 		return toV1AdmissionResponse(err)
 	}
 
@@ -41,7 +41,7 @@ func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionR
 
 	default:
 		err := fmt.Errorf("expect operation is %s or %s, not %s", v1.Create, v1.Delete, ar.Request.Operation)
-		log.Error(err)
+		plog.G(context.Background()).Error(err)
 		return toV1AdmissionResponse(err)
 	}
 }
@@ -52,13 +52,13 @@ func (h *admissionReviewHandler) handleCreate(ar v1.AdmissionReview) *v1.Admissi
 	pod := corev1.Pod{}
 	deserializer := codecs.UniversalDeserializer()
 	if _, _, err := deserializer.Decode(raw, nil, &pod); err != nil {
-		log.Errorf("Failed to decode into pod, err: %v, raw: %s", err, string(raw))
+		plog.G(context.Background()).Errorf("Failed to decode into pod, err: %v, raw: %s", err, string(raw))
 		return toV1AdmissionResponse(err)
 	}
 
 	from, err := json.Marshal(pod)
 	if err != nil {
-		log.Errorf("Failed to marshal into pod, err: %v", err)
+		plog.G(context.Background()).Errorf("Failed to marshal into pod, err: %v", err)
 		return toV1AdmissionResponse(err)
 	}
 
@@ -97,14 +97,14 @@ func (h *admissionReviewHandler) handleCreate(ar v1.AdmissionReview) *v1.Admissi
 	var v4, v6 *net.IPNet
 	v4, v6, err = manager.RentIP(context.Background())
 	if err != nil {
-		log.Errorf("Rent IP random failed, err: %v", err)
+		plog.G(context.Background()).Errorf("Rent IP random failed, err: %v", err)
 		return toV1AdmissionResponse(err)
 	}
 	var name string
 	if accessor, errT := meta.Accessor(ar.Request.Object); errT == nil {
 		name = accessor.GetName()
 	}
-	log.Infof("Rent IPv4: %s IPv6: %s for pod %s in namespace: %s", v4.String(), v6.String(), name, ar.Request.Namespace)
+	plog.G(context.Background()).Infof("Rent IPv4: %s IPv6: %s for pod %s in namespace: %s", v4.String(), v6.String(), name, ar.Request.Namespace)
 
 	//4) update spec
 	for j := 0; j < len(pod.Spec.Containers[index].Env); j++ {
@@ -121,19 +121,19 @@ func (h *admissionReviewHandler) handleCreate(ar v1.AdmissionReview) *v1.Admissi
 	var to []byte
 	to, err = json.Marshal(pod)
 	if err != nil {
-		log.Errorf("Failed to marshal pod, err: %v", err)
+		plog.G(context.Background()).Errorf("Failed to marshal pod, err: %v", err)
 		return toV1AdmissionResponse(err)
 	}
 	var patch []jsonpatch.JsonPatchOperation
 	patch, err = jsonpatch.CreatePatch(from, to)
 	if err != nil {
-		log.Errorf("Failed to create patch json, err: %v", err)
+		plog.G(context.Background()).Errorf("Failed to create patch json, err: %v", err)
 		return toV1AdmissionResponse(err)
 	}
 	var marshal []byte
 	marshal, err = json.Marshal(patch)
 	if err != nil {
-		log.Errorf("Failed to marshal json patch %v, err: %v", patch, err)
+		plog.G(context.Background()).Errorf("Failed to marshal json patch %v, err: %v", patch, err)
 		return toV1AdmissionResponse(err)
 	}
 	var shouldPatchPod = func(pod *corev1.Pod) bool {
@@ -149,7 +149,7 @@ func (h *admissionReviewHandler) handleDelete(ar v1.AdmissionReview) *v1.Admissi
 	pod := corev1.Pod{}
 	deserializer := codecs.UniversalDeserializer()
 	if _, _, err := deserializer.Decode(raw, nil, &pod); err != nil {
-		log.Errorf("Failed to decode into pod, err: %v, raw: %s", err, string(raw))
+		plog.G(context.Background()).Errorf("Failed to decode into pod, err: %v, raw: %s", err, string(raw))
 		return toV1AdmissionResponse(err)
 	}
 
@@ -183,20 +183,20 @@ func (h *admissionReviewHandler) handleDelete(ar v1.AdmissionReview) *v1.Admissi
 		cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
 		err := dhcp.NewDHCPManager(cmi, ar.Request.Namespace).ReleaseIP(context.Background(), ips...)
 		if err != nil {
-			log.Errorf("Failed to release IP %v to DHCP: %v", ips, err)
+			plog.G(context.Background()).Errorf("Failed to release IP %v to DHCP: %v", ips, err)
 		} else {
-			log.Debugf("Release IP %v to DHCP", ips)
+			plog.G(context.Background()).Debugf("Release IP %v to DHCP", ips)
 		}
 	}
 	return &v1.AdmissionResponse{Allowed: true}
 }
 
 func applyPodPatch(ar v1.AdmissionReview, shouldPatchPod func(*corev1.Pod) bool, patch string) *v1.AdmissionResponse {
-	log.Infof("Apply pod patch: %s", patch)
+	plog.G(context.Background()).Infof("Apply pod patch: %s", patch)
 	podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 	if ar.Request.Resource != podResource {
 		err := fmt.Errorf("expect resource to be %s but real %s", podResource, ar.Request.Resource)
-		log.Error(err)
+		plog.G(context.Background()).Error(err)
 		return toV1AdmissionResponse(err)
 	}
 
@@ -204,7 +204,7 @@ func applyPodPatch(ar v1.AdmissionReview, shouldPatchPod func(*corev1.Pod) bool,
 	pod := corev1.Pod{}
 	deserializer := codecs.UniversalDeserializer()
 	if _, _, err := deserializer.Decode(raw, nil, &pod); err != nil {
-		log.Errorf("Failed to decode request into pod, err: %v, req: %s", err, string(raw))
+		plog.G(context.Background()).Errorf("Failed to decode request into pod, err: %v, req: %s", err, string(raw))
 		return toV1AdmissionResponse(err)
 	}
 	reviewResponse := v1.AdmissionResponse{Allowed: true}

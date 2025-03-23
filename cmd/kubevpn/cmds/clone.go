@@ -19,6 +19,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util/regctl"
@@ -76,7 +77,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
         kubevpn clone service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			util.InitLoggerForClient(false)
+			plog.InitLoggerForClient()
 			// startup daemon process and sudo process
 			err = daemon.StartupDaemon(cmd.Context())
 			if err != nil {
@@ -120,10 +121,6 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 					extraRoute.ExtraCIDR = append(extraRoute.ExtraCIDR, ip.String())
 				}
 			}
-			logLevel := log.InfoLevel
-			if config.Debug {
-				logLevel = log.DebugLevel
-			}
 			req := &rpc.CloneRequest{
 				KubeconfigBytes:        string(bytes),
 				Namespace:              ns,
@@ -142,7 +139,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 				TransferImage:          transferImage,
 				Image:                  config.Image,
 				ImagePullSecretName:    imagePullSecretName,
-				Level:                  int32(logLevel),
+				Level:                  int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
 				LocalDir:               options.LocalDir,
 				RemoteDir:              options.RemoteDir,
 			}

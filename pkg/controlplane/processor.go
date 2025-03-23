@@ -14,7 +14,7 @@ import (
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	utilcache "k8s.io/apimachinery/pkg/util/cache"
 	"sigs.k8s.io/yaml"
 
@@ -23,13 +23,13 @@ import (
 
 type Processor struct {
 	cache   cache.SnapshotCache
-	logger  *log.Logger
+	logger  *logrus.Logger
 	version int64
 
 	expireCache *utilcache.Expiring
 }
 
-func NewProcessor(cache cache.SnapshotCache, log *log.Logger) *Processor {
+func NewProcessor(cache cache.SnapshotCache, log *logrus.Logger) *Processor {
 	return &Processor{
 		cache:       cache,
 		logger:      log,
@@ -65,7 +65,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 		}
 		p.logger.Debugf("update config, version %d, config %v", p.version, config)
 
-		listeners, clusters, routes, endpoints := config.To(enableIPv6)
+		listeners, clusters, routes, endpoints := config.To(enableIPv6, p.logger)
 		resources := map[resource.Type][]types.Resource{
 			resource.ListenerType: listeners, // listeners
 			resource.RouteType:    routes,    // routes

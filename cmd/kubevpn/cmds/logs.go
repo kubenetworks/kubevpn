@@ -10,6 +10,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -28,7 +29,7 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
         kubevpn logs -f
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			util.InitLoggerForClient(false)
+			plog.InitLoggerForClient()
 			// startup daemon process and sudo process
 			return daemon.StartupDaemon(cmd.Context())
 		},

@@ -6,23 +6,15 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) error {
-	defer func() {
-		util.InitLoggerForServer(true)
-		log.SetOutput(svr.LogFile)
-		config.Debug = false
-	}()
-	out := io.MultiWriter(newResetWarp(resp), svr.LogFile)
-	util.InitLoggerForClient(config.Debug)
-	log.SetOutput(out)
-
+	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newResetWarp(resp), svr.LogFile))
 	connect := &handler.ConnectOptions{
 		Namespace: req.Namespace,
 	}
@@ -37,7 +29,7 @@ func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) err
 		DefValue: file,
 	})
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
-	var ctx = resp.Context()
+	var ctx = plog.WithLogger(resp.Context(), logger)
 	var path string
 	path, err = ssh.SshJump(ctx, sshConf, flags, false)
 	if err != nil {

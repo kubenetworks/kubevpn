@@ -10,34 +10,28 @@ import (
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_DisconnectServer) error {
-	defer func() {
-		util.InitLoggerForServer(true)
-		log.SetOutput(svr.LogFile)
-		config.Debug = false
-	}()
-	out := io.MultiWriter(newDisconnectWarp(resp), svr.LogFile)
-	util.InitLoggerForClient(config.Debug)
-	log.SetOutput(out)
+	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newDisconnectWarp(resp), svr.LogFile))
+	ctx := plog.WithLogger(resp.Context(), logger)
 	switch {
 	case req.GetAll():
 		if svr.clone != nil {
-			_ = svr.clone.Cleanup()
+			_ = svr.clone.Cleanup(ctx)
 		}
 		svr.clone = nil
 
 		connects := handler.Connects(svr.secondaryConnect).Append(svr.connect)
 		for _, connect := range connects.Sort() {
 			if connect != nil {
-				connect.Cleanup()
+				connect.Cleanup(ctx)
 			}
 		}
 		svr.secondaryConnect = nil
@@ -45,22 +39,22 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 		svr.t = time.Time{}
 	case req.ID != nil && req.GetID() == 0:
 		if svr.connect != nil {
-			svr.connect.Cleanup()
+			svr.connect.Cleanup(ctx)
 		}
 		svr.connect = nil
 		svr.t = time.Time{}
 
 		if svr.clone != nil {
-			_ = svr.clone.Cleanup()
+			_ = svr.clone.Cleanup(ctx)
 		}
 		svr.clone = nil
 	case req.ID != nil:
 		index := req.GetID() - 1
 		if index < int32(len(svr.secondaryConnect)) {
-			svr.secondaryConnect[index].Cleanup()
+			svr.secondaryConnect[index].Cleanup(ctx)
 			svr.secondaryConnect = append(svr.secondaryConnect[:index], svr.secondaryConnect[index+1:]...)
 		} else {
-			log.Errorf("Index %d out of range", req.GetID())
+			plog.G(ctx).Errorf("Index %d out of range", req.GetID())
 		}
 	case req.KubeconfigBytes != nil && req.Namespace != nil:
 		err := disconnectByKubeConfig(
@@ -90,14 +84,14 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 		}
 		for _, connect := range connects.Sort() {
 			if connect != nil {
-				connect.Cleanup()
+				connect.Cleanup(ctx)
 			}
 		}
 		if foundModeFull {
 			svr.connect = nil
 			svr.t = time.Time{}
 			if svr.clone != nil {
-				_ = svr.clone.Cleanup()
+				_ = svr.clone.Cleanup(ctx)
 			}
 			svr.clone = nil
 		}
@@ -166,8 +160,8 @@ func disconnect(ctx context.Context, svr *Server, connect *handler.ConnectOption
 			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
 		)
 		if isSameCluster {
-			log.Infof("Disconnecting from the cluster...")
-			svr.connect.Cleanup()
+			plog.G(ctx).Infof("Disconnecting from the cluster...")
+			svr.connect.Cleanup(ctx)
 			svr.connect = nil
 			svr.t = time.Time{}
 		}
@@ -180,8 +174,8 @@ func disconnect(ctx context.Context, svr *Server, connect *handler.ConnectOption
 			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
 		)
 		if isSameCluster {
-			log.Infof("Disconnecting from the cluster...")
-			options.Cleanup()
+			plog.G(ctx).Infof("Disconnecting from the cluster...")
+			options.Cleanup(ctx)
 			svr.secondaryConnect = append(svr.secondaryConnect[:i], svr.secondaryConnect[i+1:]...)
 			i--
 		}

@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"testing"
 
-	log "github.com/sirupsen/logrus"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/cmd/util"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 var (
@@ -26,16 +27,16 @@ func before() {
 	f = util.NewFactory(util.NewMatchVersionFlags(configFlags))
 
 	if restconfig, err = f.ToRESTConfig(); err != nil {
-		log.Fatal(err)
+		plog.G(context.Background()).Fatal(err)
 	}
 	if restclient, err = rest.RESTClientFor(restconfig); err != nil {
-		log.Fatal(err)
+		plog.G(context.Background()).Fatal(err)
 	}
 	if clientset, err = kubernetes.NewForConfig(restconfig); err != nil {
-		log.Fatal(err)
+		plog.G(context.Background()).Fatal(err)
 	}
 	if namespace, _, err = f.ToRawKubeConfigLoader().Namespace(); err != nil {
-		log.Fatal(err)
+		plog.G(context.Background()).Fatal(err)
 	}
 }
 
