@@ -5,7 +5,6 @@ import (
 
 	"github.com/docker/docker/libnetwork/resolvconf"
 	miekgdns "github.com/miekg/dns"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
@@ -39,7 +38,7 @@ func CmdControlPlane(_ cmdutil.Factory) *cobra.Command {
 				}
 				plog.G(context.Background()).Fatal(dns.ListenAndServe("udp", ":53", conf))
 			}()
-			err := controlplane.Main(cmd.Context(), watchDirectoryFilename, port, log.StandardLogger())
+			err := controlplane.Main(cmd.Context(), watchDirectoryFilename, port, plog.G(context.Background()))
 			return err
 		},
 	}

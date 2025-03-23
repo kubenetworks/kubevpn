@@ -53,7 +53,7 @@ func (s *Server) ReleaseIP(ctx context.Context, req *rpc.ReleaseIPRequest) (*rpc
 	for _, ipStr := range []string{req.IPv4CIDR, req.IPv6CIDR} {
 		ip, _, err := net.ParseCIDR(ipStr)
 		if err != nil {
-			plog.G(ctx).Errorf("IP %s is invailed, err: %v", ipStr, err)
+			plog.G(ctx).Errorf("IP %s is invailed: %v", ipStr, err)
 			continue
 		}
 		ips = append(ips, ip)

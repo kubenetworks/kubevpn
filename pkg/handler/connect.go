@@ -326,8 +326,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 						}
 					}()
 				}
-				var out = log.StandardLogger().WriterLevel(log.DebugLevel)
-				defer out.Close()
+				var out = plog.G(ctx).Out
 				err = util.PortForwardPod(
 					c.config,
 					c.restclient,

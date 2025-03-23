@@ -97,7 +97,7 @@ func (h *admissionReviewHandler) handleCreate(ar v1.AdmissionReview) *v1.Admissi
 	var v4, v6 *net.IPNet
 	v4, v6, err = manager.RentIP(context.Background())
 	if err != nil {
-		plog.G(context.Background()).Errorf("Rent IP random failed, err: %v", err)
+		plog.G(context.Background()).Errorf("Rent IP random failed: %v", err)
 		return toV1AdmissionResponse(err)
 	}
 	var name string
@@ -121,13 +121,13 @@ func (h *admissionReviewHandler) handleCreate(ar v1.AdmissionReview) *v1.Admissi
 	var to []byte
 	to, err = json.Marshal(pod)
 	if err != nil {
-		plog.G(context.Background()).Errorf("Failed to marshal pod, err: %v", err)
+		plog.G(context.Background()).Errorf("Failed to marshal pod: %v", err)
 		return toV1AdmissionResponse(err)
 	}
 	var patch []jsonpatch.JsonPatchOperation
 	patch, err = jsonpatch.CreatePatch(from, to)
 	if err != nil {
-		plog.G(context.Background()).Errorf("Failed to create patch json, err: %v", err)
+		plog.G(context.Background()).Errorf("Failed to create patch json: %v", err)
 		return toV1AdmissionResponse(err)
 	}
 	var marshal []byte
@@ -183,9 +183,9 @@ func (h *admissionReviewHandler) handleDelete(ar v1.AdmissionReview) *v1.Admissi
 		cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
 		err := dhcp.NewDHCPManager(cmi, ar.Request.Namespace).ReleaseIP(context.Background(), ips...)
 		if err != nil {
-			plog.G(context.Background()).Errorf("Failed to release IP %v to DHCP: %v", ips, err)
+			plog.G(context.Background()).Errorf("Failed to release IP %v to DHCP server: %v", ips, err)
 		} else {
-			plog.G(context.Background()).Debugf("Release IP %v to DHCP", ips)
+			plog.G(context.Background()).Debugf("Release IP %v to DHCP server", ips)
 		}
 	}
 	return &v1.AdmissionResponse{Allowed: true}

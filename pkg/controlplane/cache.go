@@ -26,7 +26,7 @@ import (
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/wellknown"
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -90,7 +90,7 @@ type Rule struct {
 	PortMap map[int32]string
 }
 
-func (a *Virtual) To(enableIPv6 bool, logger *logrus.Logger) (
+func (a *Virtual) To(enableIPv6 bool, logger *log.Logger) (
 	listeners []types.Resource,
 	clusters []types.Resource,
 	routes []types.Resource,

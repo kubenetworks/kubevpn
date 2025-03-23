@@ -2,16 +2,15 @@ package driver
 
 import (
 	"context"
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"os"
 	"os/exec"
 	"path/filepath"
 
-	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/util/retry"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver/openvpn"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver/wintun"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func InstallTunTapDriver() {
@@ -51,7 +50,7 @@ func UninstallTunTapDriver() {
 	if e != nil {
 		plog.G(context.Background()).Warn(e)
 	}
-	log.Info(string(b))
+	plog.G(context.Background()).Info(string(b))
 }
 
 func getDiskName() string {

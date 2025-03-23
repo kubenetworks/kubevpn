@@ -3,16 +3,17 @@
 package elevate
 
 import (
+	"context"
 	"flag"
 	"os"
 	"os/exec"
 	"runtime"
 
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func RunCmdWithElevated(exe string, args []string) error {
@@ -24,7 +25,7 @@ func RunCmdWithElevated(exe string, args []string) error {
 		}
 	}
 	cmd := exec.Command("sudo", append([]string{"--preserve-env", "--background", exe}, args...)...)
-	log.Debug(cmd.Args)
+	plog.G(context.Background()).Debug(cmd.Args)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -52,7 +53,7 @@ func RunCmd(exe string, args []string) error {
 	cmd.SysProcAttr = &unix.SysProcAttr{
 		Setpgid: true,
 	}
-	log.Debug(cmd.Args)
+	plog.G(context.Background()).Debug(cmd.Args)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

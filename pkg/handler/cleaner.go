@@ -51,7 +51,7 @@ func (c *ConnectOptions) Cleanup(ctx context.Context) {
 		if c.dhcp != nil {
 			err := c.dhcp.ReleaseIP(ctx2, ips...)
 			if err != nil {
-				plog.G(ctx).Errorf("Failed to release IP to dhcp, err: %v", err)
+				plog.G(ctx).Errorf("Failed to release IP to DHCP server: %v", err)
 			}
 		}
 		if c.clientset != nil {

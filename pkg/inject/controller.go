@@ -3,7 +3,7 @@ package inject
 import (
 	_ "embed"
 
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -134,7 +134,7 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 		Command: []string{
 			"envoy",
 			"-l",
-			util.If(config.Debug, logrus.DebugLevel, logrus.InfoLevel).String(),
+			util.If(config.Debug, log.DebugLevel, log.InfoLevel).String(),
 			"--base-id",
 			"1",
 			"--service-node",
@@ -198,7 +198,7 @@ kubevpn serve -L "ssh://:2222"`,
 		Command: []string{
 			"envoy",
 			"-l",
-			util.If(config.Debug, logrus.DebugLevel, logrus.InfoLevel).String(),
+			util.If(config.Debug, log.DebugLevel, log.InfoLevel).String(),
 			"--base-id",
 			"1",
 			"--service-node",

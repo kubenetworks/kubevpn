@@ -65,7 +65,7 @@ func (m *Manager) InitDHCP(ctx context.Context) error {
 	}
 	cm, err = m.client.Create(ctx, cm, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("create DHCP error, err: %v", err)
+		return fmt.Errorf("failed to create configmap: %v", err)
 	}
 	m.clusterID = util.GetClusterIDByCM(cm)
 	return nil
@@ -107,7 +107,7 @@ func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 		return
 	})
 	if err != nil {
-		plog.G(ctx).Errorf("Failed to rent IP from DHCP server, err: %v", err)
+		plog.G(ctx).Errorf("Failed to rent IP from DHCP server: %v", err)
 		return nil, nil, err
 	}
 	return &net.IPNet{IP: v4, Mask: m.cidr.Mask}, &net.IPNet{IP: v6, Mask: m.cidr6.Mask}, nil
@@ -191,7 +191,7 @@ func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipalloca
 	cm.Data[config.KeyDHCP6] = base64.StdEncoding.EncodeToString(bytes)
 	_, err = m.client.Update(ctx, cm, metav1.UpdateOptions{})
 	if err != nil {
-		return fmt.Errorf("update DHCP failed, err: %v", err)
+		return fmt.Errorf("failed to update DHCP: %v", err)
 	}
 	return nil
 }

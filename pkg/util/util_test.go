@@ -93,7 +93,7 @@ func TestPing(t *testing.T) {
 	buf := gopacket.NewSerializeBuffer()
 	err := gopacket.SerializeLayers(buf, opts, &icmpLayer, &ipLayer)
 	if err != nil {
-		plog.G(ctx).Errorf("Failed to serialize icmp packet, err: %v", err)
+		plog.G(context.Background()).Errorf("Failed to serialize icmp packet, err: %v", err)
 		return
 	}
 	ipConn, err := net.ListenPacket("ip4:icmp", "localhost")

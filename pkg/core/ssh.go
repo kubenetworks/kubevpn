@@ -8,7 +8,6 @@ import (
 	"net"
 
 	"github.com/gliderlabs/ssh"
-	log "github.com/sirupsen/logrus"
 	gossh "golang.org/x/crypto/ssh"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -34,7 +33,7 @@ func (s *sshHandler) Handle(ctx context.Context, conn net.Conn) {
 	forwardHandler := &ssh.ForwardedTCPHandler{}
 	server := ssh.Server{
 		LocalPortForwardingCallback: ssh.LocalPortForwardingCallback(func(ctx ssh.Context, dhost string, dport uint32) bool {
-			log.Println("Accepted forward", dhost, dport)
+			plog.G(ctx).Infoln("Accepted forward", dhost, dport)
 			return true
 		}),
 		Handler: ssh.Handler(func(s ssh.Session) {
@@ -42,7 +41,7 @@ func (s *sshHandler) Handle(ctx context.Context, conn net.Conn) {
 			select {}
 		}),
 		ReversePortForwardingCallback: ssh.ReversePortForwardingCallback(func(ctx ssh.Context, host string, port uint32) bool {
-			log.Println("attempt to bind", host, port, "granted")
+			plog.G(ctx).Infoln("attempt to bind", host, port, "granted")
 			return true
 		}),
 		RequestHandlers: map[string]ssh.RequestHandler{

@@ -19,7 +19,6 @@ import (
 	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/moby/term"
 	"github.com/opencontainers/image-spec/specs-go/v1"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -145,7 +144,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 		filename, imageTarget,
 		filename, imageTarget,
 	)
-	stdout := log.StandardLogger().Out
+	stdout := plog.G(ctx).Out
 	err = SCPAndExec(ctx, stdout, stdout, sshClient, file.Name(), filename, []string{cmd}...)
 	if err != nil {
 		return err

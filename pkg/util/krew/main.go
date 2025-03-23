@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,7 +11,7 @@ import (
 	"sync"
 	"text/template"
 
-	log "github.com/sirupsen/logrus"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func main() {
@@ -72,7 +73,7 @@ func main() {
 			for k := 0; k < 10; k++ {
 				asset, err2 := GetSha256ForAsset(link)
 				if err2 != nil {
-					plog.G(ctx).Error(err2)
+					plog.G(context.Background()).Error(err2)
 					continue
 				}
 				sha256Map[link] = asset

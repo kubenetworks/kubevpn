@@ -14,7 +14,6 @@ import (
 
 	"github.com/distribution/reference"
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 	libconfig "github.com/syncthing/syncthing/lib/config"
 	"github.com/syncthing/syncthing/lib/netutil"
 	v1 "k8s.io/api/core/v1"
@@ -237,7 +236,7 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 				}
 			}
 			{
-				container, err := podcmd.FindOrDefaultContainerByName(&v1.Pod{Spec: v1.PodSpec{Containers: containers}}, d.TargetContainer, false, log.StandardLogger().Out)
+				container, err := podcmd.FindOrDefaultContainerByName(&v1.Pod{Spec: v1.PodSpec{Containers: containers}}, d.TargetContainer, false, plog.G(ctx).Out)
 				if err != nil {
 					return err
 				}
