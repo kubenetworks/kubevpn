@@ -18,9 +18,7 @@ jobs:
           check-latest: true
       - name: Push image to docker hub
         run: |
-          echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USER }} --password-stdin
           echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker buildx create --use
           export VERSION=${{github.event.pull_request.head.sha}}
           if [[ -z "$VERSION" ]]; then
             export VERSION=${{ github.sha }}
