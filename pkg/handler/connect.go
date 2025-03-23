@@ -1108,6 +1108,10 @@ func deletePodImmediately(ctx context.Context, clientset *kubernetes.Clientset, 
 	if err != nil {
 		return err
 	}
+	// delete old pod then delete new pod
+	sort.SliceStable(result.Items, func(i, j int) bool {
+		return result.Items[i].DeletionTimestamp != nil
+	})
 	for _, item := range result.Items {
 		options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
 		err = clientset.CoreV1().Pods(ns).Delete(ctx, item.Name, options)
