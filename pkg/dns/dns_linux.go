@@ -18,7 +18,6 @@ import (
 	_ "github.com/coredns/coredns/core/plugin"
 	"github.com/docker/docker/libnetwork/resolvconf"
 	miekgdns "github.com/miekg/dns"
-	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"tailscale.com/net/dns"
 	"tailscale.com/util/dnsname"
@@ -138,7 +137,7 @@ func setupDNSbyCmdSystemdResolve(ctx context.Context, tunName string, config *mi
 var ErrorNotSupportSplitDNS = errors.New("not support split DNS")
 
 func (c *Config) UseLibraryDNS(tunName string, clientConfig *miekgdns.ClientConfig) error {
-	configurator, err := dns.NewOSConfigurator(plog.G(ctx).Debugf, nil, nil, tunName)
+	configurator, err := dns.NewOSConfigurator(plog.G(context.Background()).Debugf, nil, nil, tunName)
 	if err != nil {
 		return err
 	}
@@ -161,7 +160,7 @@ func (c *Config) UseLibraryDNS(tunName string, clientConfig *miekgdns.ClientConf
 		}
 		config.SearchDomains = append(config.SearchDomains, fqdn)
 	}
-	plog.G(ctx).Debugf("Setting up DNS...")
+	plog.G(context.Background()).Debugf("Setting up DNS...")
 	return c.OSConfigurator.SetDNS(config)
 }
 
@@ -215,7 +214,7 @@ func (c *Config) CancelDNS() {
 	}
 	err = WriteResolvConf(resolvconf.Path(), *resolvConf)
 	if err != nil {
-		plog.G(ctx).Warnf("Failed to remove DNS from resolv conf file: %v", err)
+		plog.G(context.Background()).Warnf("Failed to remove DNS from resolv conf file: %v", err)
 	}
 }
 
