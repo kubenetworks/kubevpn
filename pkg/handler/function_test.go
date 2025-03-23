@@ -65,6 +65,7 @@ func TestFunctions(t *testing.T) {
 	kubevpnProxyWithServiceMeshAndGvisorMode(t)
 	commonTest(t)
 	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
+	kubevpnQuit(t)
 }
 
 func commonTest(t *testing.T) {
@@ -416,6 +417,16 @@ func kubevpnUninstall(t *testing.T) {
 
 func kubevpnStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func kubevpnQuit(t *testing.T) {
+	cmd := exec.Command("kubevpn", "quit")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
