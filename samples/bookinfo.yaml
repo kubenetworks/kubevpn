@@ -47,11 +47,11 @@ spec:
             runAsUser: 1000
           resources:
             requests:
-              cpu: "25m"
-              memory: "32Mi"
-            limits:
-              cpu: "50m"
+              cpu: "200m"
               memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
 
 ---
 # Ratings service
@@ -103,11 +103,11 @@ spec:
             runAsUser: 1000
           resources:
             requests:
-              cpu: "25m"
-              memory: "32Mi"
-            limits:
-              cpu: "50m"
+              cpu: "200m"
               memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
 ---
 # Reviews service
 apiVersion: v1
@@ -166,11 +166,11 @@ spec:
             runAsUser: 1000
           resources:
             requests:
-              cpu: "25m"
-              memory: "32Mi"
-            limits:
-              cpu: "50m"
+              cpu: "200m"
               memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
       volumes:
         - name: wlp-output
           emptyDir: { }
@@ -229,11 +229,11 @@ spec:
             runAsUser: 1000
           resources:
             requests:
-              cpu: "25m"
-              memory: "32Mi"
-            limits:
-              cpu: "50m"
+              cpu: "200m"
               memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
       volumes:
         - name: tmp
           emptyDir: { }
@@ -282,11 +282,11 @@ spec:
             periodSeconds: 10
           resources:
             requests:
-              cpu: "25m"
-              memory: "32Mi"
-            limits:
-              cpu: "50m"
+              cpu: "200m"
               memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
         - name: nginx
           image: ghcr.io/kubenetworks/nginx:latest
           imagePullPolicy: IfNotPresent
@@ -294,8 +294,8 @@ spec:
             - containerPort: 80
           resources:
             requests:
-              cpu: "25m"
-              memory: "32Mi"
-            limits:
-              cpu: "50m"
+              cpu: "200m"
               memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
