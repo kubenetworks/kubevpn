@@ -3,6 +3,7 @@ package inject
 import (
 	_ "embed"
 
+	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -38,10 +39,6 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteCo
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 
-	envoyLogLevel := "info"
-	if config.Debug {
-		envoyLogLevel = "debug"
-	}
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarVPN,
 		Image:   config.Image,
@@ -137,7 +134,7 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 		Command: []string{
 			"envoy",
 			"-l",
-			envoyLogLevel,
+			util.If(config.Debug, log.DebugLevel, log.InfoLevel).String(),
 			"--base-id",
 			"1",
 			"--service-node",
@@ -172,10 +169,6 @@ func AddEnvoyContainer(spec *v1.PodTemplateSpec, nodeId string, ipv6 bool) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 
-	envoyLogLevel := "info"
-	if config.Debug {
-		envoyLogLevel = "debug"
-	}
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarVPN,
 		Image:   config.Image,
@@ -205,7 +198,7 @@ kubevpn serve -L "ssh://:2222"`,
 		Command: []string{
 			"envoy",
 			"-l",
-			envoyLogLevel,
+			util.If(config.Debug, log.DebugLevel, log.InfoLevel).String(),
 			"--base-id",
 			"1",
 			"--service-node",

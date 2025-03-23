@@ -65,7 +65,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 		}
 		p.logger.Debugf("update config, version %d, config %v", p.version, config)
 
-		listeners, clusters, routes, endpoints := config.To(enableIPv6)
+		listeners, clusters, routes, endpoints := config.To(enableIPv6, p.logger)
 		resources := map[resource.Type][]types.Resource{
 			resource.ListenerType: listeners, // listeners
 			resource.RouteType:    routes,    // routes

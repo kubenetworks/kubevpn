@@ -3,6 +3,7 @@
 package elevate
 
 import (
+	"context"
 	"flag"
 	"os"
 	"os/exec"
@@ -10,10 +11,10 @@ import (
 	"runtime"
 	"syscall"
 
-	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func RunWithElevated() {
@@ -25,7 +26,7 @@ func RunWithElevated() {
 		}
 	}
 	cmd := exec.Command("sudo", append([]string{"--preserve-env"}, os.Args...)...)
-	log.Debug(cmd.Args)
+	plog.G(context.Background()).Debug(cmd.Args)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -39,7 +40,7 @@ func RunWithElevated() {
 	}()
 	err := cmd.Run()
 	if err != nil {
-		log.Warn(err)
+		plog.G(context.Background()).Warn(err)
 	}
 }
 

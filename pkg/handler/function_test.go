@@ -27,6 +27,7 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/yaml"
 
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -356,13 +357,13 @@ func Init() {
 	f := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 
 	if restconfig, err = f.ToRESTConfig(); err != nil {
-		log.Fatal(err)
+		plog.G(context.Background()).Fatal(err)
 	}
 	if clientset, err = kubernetes.NewForConfig(restconfig); err != nil {
-		log.Fatal(err)
+		plog.G(context.Background()).Fatal(err)
 	}
 	if namespace, _, err = f.ToRawKubeConfigLoader().Namespace(); err != nil {
-		log.Fatal(err)
+		plog.G(context.Background()).Fatal(err)
 	}
 }
 

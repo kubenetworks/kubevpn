@@ -14,10 +14,10 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/pkg/stdcopy"
-	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // Pull constants
@@ -136,17 +136,17 @@ func RunContainer(ctx context.Context, runConfig *RunConfig) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	log.Debugf("Run container with cmd: %v", cmd.Args)
+	plog.G(ctx).Debugf("Run container with cmd: %v", cmd.Args)
 	err := cmd.Start()
 	if err != nil {
-		log.Errorf("Failed to run container with cmd: %v: %v", cmd.Args, err)
+		plog.G(ctx).Errorf("Failed to run container with cmd: %v: %v", cmd.Args, err)
 		return err
 	}
 	return cmd.Wait()
 }
 
 func WaitDockerContainerRunning(ctx context.Context, name string) error {
-	log.Infof("Wait container %s to be running...", name)
+	plog.G(ctx).Infof("Wait container %s to be running...", name)
 
 	for ctx.Err() == nil {
 		time.Sleep(time.Second * 1)
@@ -163,14 +163,14 @@ func WaitDockerContainerRunning(ctx context.Context, name string) error {
 		}
 	}
 
-	log.Infof("Container %s is running now", name)
+	plog.G(ctx).Infof("Container %s is running now", name)
 	return nil
 }
 
 func ContainerInspect(ctx context.Context, name string) (types.ContainerJSON, error) {
 	output, err := exec.CommandContext(ctx, "docker", "inspect", name).CombinedOutput()
 	if err != nil {
-		log.Errorf("Failed to wait container to be ready output: %s: %v", string(output), err)
+		plog.G(ctx).Errorf("Failed to wait container to be ready output: %s: %v", string(output), err)
 		_ = RunLogsSinceNow(name, false)
 		return types.ContainerJSON{}, err
 	}
@@ -192,7 +192,7 @@ func NetworkInspect(ctx context.Context, name string) (types.NetworkResource, er
 	//cli.NetworkInspect()
 	output, err := exec.CommandContext(ctx, "docker", "network", "inspect", name).CombinedOutput()
 	if err != nil {
-		log.Errorf("Failed to wait container to be ready: %v", err)
+		plog.G(ctx).Errorf("Failed to wait container to be ready: %v", err)
 		_ = RunLogsSinceNow(name, false)
 		return types.NetworkResource{}, err
 	}

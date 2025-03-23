@@ -1,11 +1,11 @@
 package cmds
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/docker/cli/cli/command"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/completion"
@@ -16,8 +16,8 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dev"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util/regctl"
 )
 
@@ -89,7 +89,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			util.InitLoggerForClient(config.Debug)
+			plog.InitLoggerForClient()
 			err = daemon.StartupDaemon(cmd.Context())
 			if err != nil {
 				return err
@@ -115,7 +115,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 				for _, function := range options.GetRollbackFuncList() {
 					if function != nil {
 						if err := function(); err != nil {
-							log.Errorf("Rollback failed, error: %s", err.Error())
+							plog.G(context.Background()).Errorf("Rollback failed, error: %s", err.Error())
 						}
 					}
 				}

@@ -7,9 +7,8 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -17,7 +16,7 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	defer tun.Close()
 	remoteAddr, err := net.ResolveUDPAddr("udp", h.node.Remote)
 	if err != nil {
-		log.Errorf("[TUN-CLIENT] Failed to resolve udp addr %s: %v", h.node.Remote, err)
+		plog.G(ctx).Errorf("[TUN-CLIENT] Failed to resolve udp addr %s: %v", h.node.Remote, err)
 		return
 	}
 	in := make(chan *DataElem, MaxSize)
@@ -35,13 +34,13 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 		for ctx.Err() == nil {
 			packetConn, err := getRemotePacketConn(ctx, h.chain)
 			if err != nil {
-				log.Debugf("[TUN-CLIENT] Failed to get remote conn from %s -> %s: %s", tun.LocalAddr(), remoteAddr, err)
+				plog.G(ctx).Debugf("[TUN-CLIENT] Failed to get remote conn from %s -> %s: %s", tun.LocalAddr(), remoteAddr, err)
 				time.Sleep(time.Millisecond * 200)
 				continue
 			}
 			err = transportTunClient(ctx, tunInbound, tunOutbound, packetConn, remoteAddr)
 			if err != nil {
-				log.Debugf("[TUN-CLIENT] %s: %v", tun.LocalAddr(), err)
+				plog.G(ctx).Debugf("[TUN-CLIENT] %s: %v", tun.LocalAddr(), err)
 			}
 		}
 	})
@@ -135,7 +134,7 @@ func (d *ClientDevice) Start(ctx context.Context) {
 
 	select {
 	case err := <-d.chExit:
-		log.Errorf("[TUN-CLIENT]: %v", err)
+		plog.G(ctx).Errorf("[TUN-CLIENT]: %v", err)
 		return
 	case <-ctx.Done():
 		return
@@ -165,11 +164,11 @@ func (d *ClientDevice) readFromTun() {
 		var src, dst net.IP
 		src, dst, err = util.ParseIP(buf[:n])
 		if err != nil {
-			log.Debugf("[TUN-GVISOR] Unknown packet: %v", err)
+			plog.G(context.Background()).Debugf("[TUN-GVISOR] Unknown packet: %v", err)
 			config.LPool.Put(buf[:])
 			continue
 		}
-		log.Tracef("[TUN-RAW] SRC: %s, DST: %s, Length: %d", src.String(), dst, n)
+		plog.G(context.Background()).Debugf("[TUN-RAW] SRC: %s, DST: %s, Length: %d", src.String(), dst, n)
 		util.SafeWrite(d.tunInbound, NewDataElem(buf[:], n, src, dst))
 	}
 }

@@ -9,10 +9,10 @@ import (
 	"syscall"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/text/encoding/simplifiedchinese"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 /**
@@ -63,7 +63,7 @@ func DeleteBlockFirewallRule(ctx context.Context) {
 			if b, err = decode(out); err == nil {
 				s = string(b)
 			}
-			log.Debugf("failed to delete firewall rule: %v", s)
+			plog.G(ctx).Debugf("failed to delete firewall rule: %v", s)
 		}*/
 	}
 
@@ -117,7 +117,7 @@ func AddAllowFirewallRule(ctx context.Context) {
 		} else {
 			s = string(out)
 		}
-		log.Infof("Failed to exec command: %s, output: %s", cmd.Args, s)
+		plog.G(ctx).Infof("Failed to exec command: %s, output: %s", cmd.Args, s)
 	}
 }
 
@@ -139,7 +139,7 @@ func DeleteAllowFirewallRule(ctx context.Context) {
 		} else {
 			s = string(out)
 		}
-		log.Errorf("Failed to exec command: %s, output: %s", cmd.Args, s)
+		plog.G(ctx).Errorf("Failed to exec command: %s, output: %s", cmd.Args, s)
 	}
 }
 
@@ -160,7 +160,7 @@ func FindAllowFirewallRule(ctx context.Context) bool {
 		if b, err = decode(out); err == nil {
 			s = string(b)
 		}
-		log.Debugf("Find firewall %s, output: %s", config.ConfigMapPodTrafficManager, s)
+		plog.G(ctx).Debugf("Find firewall %s, output: %s", config.ConfigMapPodTrafficManager, s)
 		return false
 	} else {
 		return true

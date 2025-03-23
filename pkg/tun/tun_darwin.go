@@ -10,7 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/containernetworking/cni/pkg/types"
-	log "github.com/sirupsen/logrus"
+	pkgerr "github.com/pkg/errors"
 	"golang.org/x/net/route"
 	"golang.org/x/sys/unix"
 	"golang.zx2c4.com/wireguard/tun"
@@ -76,7 +76,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	if err = addTunRoutes(name, cfg.Routes...); err != nil {
-		log.Errorf("Add tun routes failed: %v", err)
+		err = pkgerr.Wrap(err, "Add tun routes failed")
 		return
 	}
 

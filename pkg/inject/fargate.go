@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -50,7 +50,7 @@ func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kuber
 	}
 	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(namespace), nodeID, c, headers, port, portmap)
 	if err != nil {
-		log.Errorf("Failed to add envoy config: %v", err)
+		plog.G(ctx).Errorf("Failed to add envoy config: %v", err)
 		return err
 	}
 
@@ -60,7 +60,7 @@ func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kuber
 		containerNames.Insert(container.Name)
 	}
 	if containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
-		log.Infof("Workload %s/%s has already been injected with sidecar", namespace, workload)
+		plog.G(ctx).Infof("Workload %s/%s has already been injected with sidecar", namespace, workload)
 		return
 	}
 
@@ -82,10 +82,10 @@ func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kuber
 	}
 	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 	if err != nil {
-		log.Errorf("Failed to patch resource: %s %s, err: %v", object.Mapping.Resource.Resource, object.Name, err)
+		plog.G(ctx).Errorf("Failed to patch resource: %s %s, err: %v", object.Mapping.Resource.Resource, object.Name, err)
 		return err
 	}
-	log.Infof("Patching workload %s", workload)
+	plog.G(ctx).Infof("Patching workload %s", workload)
 	err = util.RolloutStatus(ctx, f, namespace, workload, time.Minute*60)
 	if err != nil {
 		return err

@@ -1,9 +1,11 @@
 package cmds
 
 import (
-	"log"
+	"context"
 	"reflect"
 	"testing"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func TestAlias(t *testing.T) {
@@ -22,7 +24,7 @@ Flags:
   - --extra-hosts=xxx.com`
 	_, err := ParseConfig([]byte(str))
 	if err != nil {
-		log.Fatal(err)
+		plog.G(context.Background()).Fatal(err)
 	}
 }
 
@@ -42,7 +44,7 @@ Flags:
   - --extra-hosts=xxx.com`
 	_, err := ParseConfig([]byte(str))
 	if err != nil {
-		log.Fatal(err)
+		plog.G(context.Background()).Fatal(err)
 	}
 }
 
@@ -206,11 +208,11 @@ Flags:
 	for _, datum := range data {
 		configs, err := ParseConfig([]byte(datum.Config))
 		if err != nil {
-			log.Fatal(err)
+			plog.G(context.Background()).Fatal(err)
 		}
 		getConfigs, err := GetConfigs(configs, datum.Run)
 		if err != nil && !datum.ExpectError {
-			log.Fatal(err)
+			plog.G(context.Background()).Fatal(err)
 		} else if err != nil {
 		}
 		if datum.ExpectError {
@@ -221,7 +223,7 @@ Flags:
 			c = append(c, config.Name)
 		}
 		if !reflect.DeepEqual(c, datum.ExpectOrder) {
-			log.Fatalf("Not match, expect: %v, real: %v", datum.ExpectOrder, c)
+			plog.G(context.Background()).Fatalf("Not match, expect: %v, real: %v", datum.ExpectOrder, c)
 		}
 	}
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/moby/term"
 	pkgerr "github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	v12 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/cp"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // GetVolume key format: [container name]-[volume mount name]
@@ -68,7 +68,7 @@ func GetVolume(ctx context.Context, clientset *kubernetes.Clientset, f util.Fact
 				Source: localPath,
 				Target: volumeMount.MountPath,
 			})
-			log.Infof("%s:%s", localPath, volumeMount.MountPath)
+			plog.G(ctx).Infof("%s:%s", localPath, volumeMount.MountPath)
 		}
 		result[Join(ns, container.Name)] = m
 	}

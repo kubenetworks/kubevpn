@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v12 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,6 +20,7 @@ import (
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	util2 "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -47,7 +47,7 @@ func InjectVPNSidecar(ctx context.Context, f util.Factory, namespace, workload s
 	}
 	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(namespace), nodeID, c, nil, controlplane.ConvertContainerPort(ports...), portmap)
 	if err != nil {
-		log.Errorf("Failed to add envoy config: %v", err)
+		plog.G(ctx).Errorf("Failed to add envoy config: %v", err)
 		return err
 	}
 
@@ -56,16 +56,16 @@ func InjectVPNSidecar(ctx context.Context, f util.Factory, namespace, workload s
 	helper := resource.NewHelper(object.Client, object.Mapping)
 	// pods without controller
 	if len(path) == 0 {
-		log.Infof("Workload %s/%s is not controlled by any controller", namespace, workload)
+		plog.G(ctx).Infof("Workload %s/%s is not controlled by any controller", namespace, workload)
 		p := &v1.Pod{ObjectMeta: podTempSpec.ObjectMeta, Spec: podTempSpec.Spec}
 		CleanupUselessInfo(p)
-		if err = CreateAfterDeletePod(f, p, helper); err != nil {
+		if err = CreateAfterDeletePod(ctx, f, p, helper); err != nil {
 			return err
 		}
 	} else
 	// controllers
 	{
-		log.Debugf("The %s is under controller management", workload)
+		plog.G(ctx).Debugf("The %s is under controller management", workload)
 		p := []P{
 			{
 				Op:    "replace",
@@ -76,7 +76,7 @@ func InjectVPNSidecar(ctx context.Context, f util.Factory, namespace, workload s
 		marshal, _ := json.Marshal(append(p))
 		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, marshal, &v12.PatchOptions{})
 		if err != nil {
-			log.Errorf("Failed to inject proxy container: %v, exiting...", err)
+			plog.G(ctx).Errorf("Failed to inject proxy container: %v, exiting...", err)
 			return err
 		}
 	}
@@ -84,12 +84,12 @@ func InjectVPNSidecar(ctx context.Context, f util.Factory, namespace, workload s
 	return err
 }
 
-func CreateAfterDeletePod(factory util.Factory, p *v1.Pod, helper *resource.Helper) error {
+func CreateAfterDeletePod(ctx context.Context, factory util.Factory, p *v1.Pod, helper *resource.Helper) error {
 	_, err := helper.DeleteWithOptions(p.Namespace, p.Name, &v12.DeleteOptions{
 		GracePeriodSeconds: pointer.Int64(0),
 	})
 	if err != nil {
-		log.Errorf("Failed to delete resource: %s %s, ignore, err: %v", p.Namespace, p.Name, err)
+		plog.G(ctx).Errorf("Failed to delete resource: %s %s, ignore, err: %v", p.Namespace, p.Name, err)
 	}
 	err = retry.OnError(wait.Backoff{
 		Steps:    10,
@@ -116,7 +116,7 @@ func CreateAfterDeletePod(factory util.Factory, p *v1.Pod, helper *resource.Help
 		if errors.IsAlreadyExists(err) {
 			return nil
 		}
-		log.Errorf("Failed to create resource: %s %s, err: %v", p.Namespace, p.Name, err)
+		plog.G(ctx).Errorf("Failed to create resource: %s %s, err: %v", p.Namespace, p.Name, err)
 		return err
 	}
 	return nil

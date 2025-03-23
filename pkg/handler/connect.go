@@ -52,6 +52,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -119,7 +120,7 @@ func (c *ConnectOptions) RentIP(ctx context.Context) (context.Context, error) {
 	return ctx1, nil
 }
 
-func (c *ConnectOptions) GetIPFromContext(ctx context.Context) error {
+func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logger) error {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return fmt.Errorf("can not get IOP from context")
@@ -134,7 +135,7 @@ func (c *ConnectOptions) GetIPFromContext(ctx context.Context) error {
 		return fmt.Errorf("cat not convert IPv4 string: %s: %v", ipv4[0], err)
 	}
 	c.localTunIPv4 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
-	log.Debugf("Get IPv4 %s from context", c.localTunIPv4.String())
+	plog.G(ctx).Debugf("Get IPv4 %s from context", c.localTunIPv4.String())
 
 	ipv6 := md.Get(config.HeaderIPv6)
 	if len(ipv6) == 0 {
@@ -145,7 +146,7 @@ func (c *ConnectOptions) GetIPFromContext(ctx context.Context) error {
 		return fmt.Errorf("cat not convert IPv6 string: %s: %v", ipv6[0], err)
 	}
 	c.localTunIPv6 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
-	log.Debugf("Get IPv6 %s from context", c.localTunIPv6.String())
+	plog.G(ctx).Debugf("Get IPv6 %s from context", c.localTunIPv6.String())
 	return nil
 }
 
@@ -158,7 +159,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, workloads [
 	}
 
 	for _, workload := range workloads {
-		log.Infof("Injecting inbound sidecar for %s", workload)
+		plog.G(ctx).Infof("Injecting inbound sidecar for %s", workload)
 		configInfo := util.PodRouteConfig{
 			LocalTunIPv4: c.localTunIPv4.IP.String(),
 			LocalTunIPv6: c.localTunIPv6.IP.String(),
@@ -184,7 +185,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, workloads [
 			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, object, configInfo)
 		}
 		if err != nil {
-			log.Errorf("Injecting inbound sidecar for %s failed: %s", workload, err.Error())
+			plog.G(ctx).Errorf("Injecting inbound sidecar for %s failed: %s", workload, err.Error())
 			return err
 		}
 		c.proxyWorkloads.Add(&Proxy{
@@ -208,15 +209,15 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-
 		}
 	}()
 
-	log.Info("Starting connect")
+	plog.G(ctx).Info("Starting connect")
 	m := dhcp.NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
 	if err = m.InitDHCP(c.ctx); err != nil {
-		log.Errorf("Init DHCP failed: %v", err)
+		plog.G(ctx).Errorf("Init DHCP failed: %v", err)
 		return
 	}
 	go c.setupSignalHandler()
 	if err = c.getCIDR(c.ctx, m); err != nil {
-		log.Errorf("Failed to get network CIDR: %v", err)
+		plog.G(ctx).Errorf("Failed to get network CIDR: %v", err)
 		return
 	}
 	if err = createOutboundPod(c.ctx, c.factory, c.clientset, c.Namespace, c.Engine == config.EngineGvisor, c.ImagePullSecretName); err != nil {
@@ -229,7 +230,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-
 	//	return
 	//}
 	if err = c.addExtraNodeIP(c.ctx); err != nil {
-		log.Errorf("Add extra node IP failed: %v", err)
+		plog.G(ctx).Errorf("Add extra node IP failed: %v", err)
 		return
 	}
 	var rawTCPForwardPort, gvisorTCPForwardPort, gvisorUDPForwardPort int
@@ -245,7 +246,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-
 	if err != nil {
 		return err
 	}
-	log.Info("Forwarding port...")
+	plog.G(ctx).Info("Forwarding port...")
 	portPair := []string{
 		fmt.Sprintf("%d:10800", rawTCPForwardPort),
 		fmt.Sprintf("%d:10801", gvisorTCPForwardPort),
@@ -262,22 +263,22 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-
 		forward = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
 	}
 	if err = c.startLocalTunServer(c.ctx, forward, isLite); err != nil {
-		log.Errorf("Start local tun service failed: %v", err)
+		plog.G(ctx).Errorf("Start local tun service failed: %v", err)
 		return
 	}
-	log.Infof("Adding route...")
+	plog.G(ctx).Infof("Adding route...")
 	if err = c.addRouteDynamic(c.ctx); err != nil {
-		log.Errorf("Add route dynamic failed: %v", err)
+		plog.G(ctx).Errorf("Add route dynamic failed: %v", err)
 		return
 	}
 	go c.deleteFirewallRule(c.ctx)
-	log.Infof("Configuring DNS service...")
+	plog.G(ctx).Infof("Configuring DNS service...")
 	if err = c.setupDNS(c.ctx); err != nil {
-		log.Errorf("Configure DNS failed: %v", err)
+		plog.G(ctx).Errorf("Configure DNS failed: %v", err)
 		return
 	}
 	success.Store(true)
-	log.Info("Configured DNS service")
+	plog.G(ctx).Info("Configured DNS service")
 	return
 }
 
@@ -300,7 +301,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				defer cancelFunc2()
 				podList, err := c.GetRunningPodList(ctx2)
 				if err != nil {
-					log.Debugf("Failed to get running pod: %v", err)
+					plog.G(ctx).Debugf("Failed to get running pod: %v", err)
 					if *first {
 						util.SafeWrite(errChan, err)
 					}
@@ -325,8 +326,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 						}
 					}()
 				}
-				var out = log.StandardLogger().WriterLevel(log.DebugLevel)
-				defer out.Close()
+				var out = plog.G(ctx).Out
 				err = util.PortForwardPod(
 					c.config,
 					c.restclient,
@@ -344,14 +344,16 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				first = pointer.Bool(false)
 				// exit normal, let context.err to judge to exit or not
 				if err == nil {
-					log.Debugf("Port forward retrying")
+					plog.G(ctx).Debugf("Port forward retrying")
 					return
+				} else {
+					plog.G(ctx).Debugf("Forward port error: %v", err)
 				}
 				if strings.Contains(err.Error(), "unable to listen on any of the requested ports") ||
 					strings.Contains(err.Error(), "address already in use") {
-					log.Debugf("Port %s already in use, needs to release it manually", portPair)
+					plog.G(ctx).Debugf("Port %s already in use, needs to release it manually", portPair)
 				} else {
-					log.Debugf("Port-forward occurs error: %v", err)
+					plog.G(ctx).Debugf("Port-forward occurs error: %v", err)
 				}
 			}()
 		}
@@ -369,7 +371,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 }
 
 func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress string, lite bool) (err error) {
-	log.Debugf("IPv4: %s, IPv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
+	plog.G(ctx).Debugf("IPv4: %s, IPv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
 
 	var cidrList []*net.IPNet
 	if !lite {
@@ -413,13 +415,13 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 	localNode := fmt.Sprintf("tun:/127.0.0.1:8422")
 	node, err := core.ParseNode(localNode)
 	if err != nil {
-		log.Errorf("Failed to parse local node %s: %v", localNode, err)
+		plog.G(ctx).Errorf("Failed to parse local node %s: %v", localNode, err)
 		return err
 	}
 
 	chainNode, err := core.ParseNode(forwardAddress)
 	if err != nil {
-		log.Errorf("Failed to parse forward node %s: %v", forwardAddress, err)
+		plog.G(ctx).Errorf("Failed to parse forward node %s: %v", forwardAddress, err)
 		return err
 	}
 	chainNode.Client = &core.Client{
@@ -431,7 +433,7 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 	handler := core.TunHandler(chain, node)
 	listener, err := tun.Listener(tunConfig)
 	if err != nil {
-		log.Errorf("Failed to create tun listener: %v", err)
+		plog.G(ctx).Errorf("Failed to create tun listener: %v", err)
 		return err
 	}
 
@@ -451,14 +453,14 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 			conn, err := server.Listener.Accept()
 			if err != nil {
 				if !errors.Is(err, tun.ClosedErr) {
-					log.Errorf("Failed to accept local tun conn: %v", err)
+					plog.G(ctx).Errorf("Failed to accept local tun conn: %v", err)
 				}
 				return
 			}
 			go server.Handler.Handle(ctx, conn)
 		}
 	}()
-	log.Info("Connected tunnel")
+	plog.G(ctx).Info("Connected tunnel")
 
 	c.tunName, err = c.GetTunDeviceName()
 	return err
@@ -579,19 +581,19 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	const portTCP = 10800
 	podList, err := c.GetRunningPodList(ctx)
 	if err != nil {
-		log.Errorf("Get running pod list failed, err: %v", err)
+		plog.G(ctx).Errorf("Get running pod list failed, err: %v", err)
 		return err
 	}
 	pod := podList[0]
-	log.Debugf("Get DNS service IP from pod...")
+	plog.G(ctx).Debugf("Get DNS service IP from pod...")
 	relovConf, err := util.GetDNSServiceIPFromPod(ctx, c.clientset, c.config, pod.GetName(), c.Namespace)
 	if err != nil {
-		log.Errorln(err)
+		plog.G(ctx).Errorln(err)
 		return err
 	}
 
 	marshal, _ := json.Marshal(relovConf)
-	log.Debugf("Get DNS service config: %v", string(marshal))
+	plog.G(ctx).Debugf("Get DNS service config: %v", string(marshal))
 	svc, err := c.clientset.CoreV1().Services(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err
@@ -603,16 +605,16 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	if err != nil {
 		relovConf.Servers = []string{pod.Status.PodIP}
 		err = nil
-		log.Debugf("DNS service use pod IP %s", pod.Status.PodIP)
+		plog.G(ctx).Debugf("DNS service use pod IP %s", pod.Status.PodIP)
 	} else {
 		relovConf.Servers = []string{svc.Spec.ClusterIP}
 		_ = conn.Close()
-		log.Debugf("DNS service use service IP %s", svc.Spec.ClusterIP)
+		plog.G(ctx).Debugf("DNS service use service IP %s", svc.Spec.ClusterIP)
 	}
 
-	log.Debugf("Adding extra hosts...")
+	plog.G(ctx).Debugf("Adding extra hosts...")
 	if err = c.addExtraRoute(c.ctx, pod.GetName()); err != nil {
-		log.Errorf("Add extra route failed: %v", err)
+		plog.G(ctx).Errorf("Add extra route failed: %v", err)
 		return err
 	}
 
@@ -656,11 +658,11 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 			)
 		},
 	}
-	log.Debugf("Setup DNS...")
+	plog.G(ctx).Debugf("Setup DNS...")
 	if err = c.dnsConfig.SetupDNS(ctx); err != nil {
 		return err
 	}
-	log.Debugf("Dump service in namespace %s into hosts...", c.Namespace)
+	plog.G(ctx).Debugf("Dump service in namespace %s into hosts...", c.Namespace)
 	// dump service in current namespace for support DNS resolve service:port
 	err = c.dnsConfig.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.Namespace), c.extraHost...)
 	return err
@@ -772,7 +774,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) (err erro
 			}
 		}
 		if len(c.cidrs) != 0 {
-			log.Infoln("Got network CIDR from cache")
+			plog.G(ctx).Infoln("Got network CIDR from cache")
 			return nil
 		}
 	}
@@ -829,7 +831,7 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context, name string) error {
 		}
 		err = c.addRoute(ip)
 		if err != nil {
-			log.Errorf("Failed to add IP: %s to route table: %v", ip, err)
+			plog.G(ctx).Errorf("Failed to add IP: %s to route table: %v", ip, err)
 			return err
 		}
 		c.extraHost = append(c.extraHost, dns.Entry{IP: net.ParseIP(ip).String(), Domain: domain})
@@ -940,7 +942,7 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 		return err
 	}
 
-	log.Infof("Set image %s --> %s...", serverImg, clientImg)
+	plog.G(ctx).Infof("Set image %s --> %s...", serverImg, clientImg)
 
 	err = upgradeDeploySpec(ctx, c.factory, c.Namespace, deploy.Name, clientImg)
 	if err != nil {
@@ -1050,7 +1052,7 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name string, 
 			DryRun(false).
 			Patch(p.Info.Namespace, p.Info.Name, pkgtypes.StrategicMergePatchType, p.Patch, nil)
 		if err != nil {
-			log.Errorf("Failed to patch image update to pod template: %v", err)
+			plog.G(ctx).Errorf("Failed to patch image update to pod template: %v", err)
 			return err
 		}
 		err = util.RolloutStatus(ctx, f, ns, fmt.Sprintf("%s/%s", p.Info.Mapping.Resource.GroupResource().String(), p.Info.Name), time.Minute*60)

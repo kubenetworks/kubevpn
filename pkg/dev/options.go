@@ -25,6 +25,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -64,13 +65,13 @@ type Options struct {
 func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, config *Config, hostConfig *HostConfig, imagePullSecretName string) error {
 	mode := typescontainer.NetworkMode(option.ContainerOptions.netMode.NetworkMode())
 	if mode.IsContainer() {
-		log.Infof("Network mode container is %s", mode.ConnectedContainer())
+		plog.G(ctx).Infof("Network mode container is %s", mode.ConnectedContainer())
 	} else if mode.IsDefault() && util.RunningInContainer() {
 		hostname, err := os.Hostname()
 		if err != nil {
 			return err
 		}
-		log.Infof("Hostname is %s", hostname)
+		plog.G(ctx).Infof("Hostname is %s", hostname)
 		err = option.ContainerOptions.netMode.Set(fmt.Sprintf("container:%s", hostname))
 		if err != nil {
 			return err
@@ -80,7 +81,7 @@ func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, co
 	// Connect to cluster, in container or host
 	err := option.Connect(ctx, sshConfig, imagePullSecretName, hostConfig.PortBindings)
 	if err != nil {
-		log.Errorf("Connect to cluster failed, err: %v", err)
+		plog.G(ctx).Errorf("Connect to cluster failed, err: %v", err)
 		return err
 	}
 
@@ -103,10 +104,6 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 				option.ExtraRouteInfo.ExtraCIDR = append(option.ExtraRouteInfo.ExtraCIDR, ip.String())
 			}
 		}
-		logLevel := log.InfoLevel
-		if config.Debug {
-			logLevel = log.DebugLevel
-		}
 		// not needs to ssh jump in daemon, because dev mode will hang up until user exit,
 		// so just ssh jump in client is enough
 		req := &rpc.ConnectRequest{
@@ -119,7 +116,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			OriginKubeconfigPath: util.GetKubeConfigPath(option.factory),
 			Image:                config.Image,
 			ImagePullSecretName:  imagePullSecretName,
-			Level:                int32(logLevel),
+			Level:                int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
 			SshJump:              sshConfig.ToRPC(),
 		}
 		option.AddRollbackFunc(func() error {
@@ -137,7 +134,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 		var resp rpc.Daemon_ConnectClient
 		resp, err = daemonCli.Proxy(ctx, req)
 		if err != nil {
-			log.Errorf("Connect to cluster error: %s", err.Error())
+			plog.G(ctx).Errorf("Connect to cluster error: %s", err.Error())
 			return err
 		}
 		err = util.PrintGRPCStream[rpc.CloneResponse](resp)
@@ -149,7 +146,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 		if err != nil {
 			return err
 		}
-		log.Infof("Starting connect to cluster in container")
+		plog.G(ctx).Infof("Starting connect to cluster in container")
 		err = WaitDockerContainerRunning(ctx, *name)
 		if err != nil {
 			return err
@@ -168,7 +165,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			}
 			return err
 		}
-		log.Infof("Connected to cluster in container")
+		plog.G(ctx).Infof("Connected to cluster in container")
 		err = option.ContainerOptions.netMode.Set(fmt.Sprintf("container:%s", *name))
 		return err
 	}
@@ -179,7 +176,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 func (option *Options) Dev(ctx context.Context, config *Config, hostConfig *HostConfig) error {
 	templateSpec, err := option.GetPodTemplateSpec()
 	if err != nil {
-		log.Errorf("Failed to get unstructured object error: %v", err)
+		plog.G(ctx).Errorf("Failed to get unstructured object error: %v", err)
 		return err
 	}
 
@@ -187,13 +184,13 @@ func (option *Options) Dev(ctx context.Context, config *Config, hostConfig *Host
 	var list []v1.Pod
 	list, err = util.GetRunningPodList(ctx, option.clientset, option.Namespace, label)
 	if err != nil {
-		log.Errorf("Failed to get first running pod from k8s: %v", err)
+		plog.G(ctx).Errorf("Failed to get first running pod from k8s: %v", err)
 		return err
 	}
 
 	env, err := util.GetEnv(ctx, option.clientset, option.config, option.Namespace, list[0].Name)
 	if err != nil {
-		log.Errorf("Failed to get env from k8s: %v", err)
+		plog.G(ctx).Errorf("Failed to get env from k8s: %v", err)
 		return err
 	}
 	option.AddRollbackFunc(func() error {
@@ -204,7 +201,7 @@ func (option *Options) Dev(ctx context.Context, config *Config, hostConfig *Host
 	})
 	volume, err := util.GetVolume(ctx, option.clientset, option.factory, option.Namespace, list[0].Name)
 	if err != nil {
-		log.Errorf("Failed to get volume from k8s: %v", err)
+		plog.G(ctx).Errorf("Failed to get volume from k8s: %v", err)
 		return err
 	}
 	option.AddRollbackFunc(func() error {
@@ -212,7 +209,7 @@ func (option *Options) Dev(ctx context.Context, config *Config, hostConfig *Host
 	})
 	dns, err := util.GetDNS(ctx, option.clientset, option.config, option.Namespace, list[0].Name)
 	if err != nil {
-		log.Errorf("Failed to get DNS from k8s: %v", err)
+		plog.G(ctx).Errorf("Failed to get DNS from k8s: %v", err)
 		return err
 	}
 	configList, err := option.ConvertPodToContainerConfigList(ctx, *templateSpec, config, hostConfig, env, volume, dns)
@@ -319,7 +316,7 @@ func (option *Options) GetRollbackFuncList() []func() error {
 func (option *Options) GetExposePort(portBinds nat.PortMap) (nat.PortMap, nat.PortSet, error) {
 	templateSpec, err := option.GetPodTemplateSpec()
 	if err != nil {
-		log.Errorf("Failed to get unstructured object error: %v", err)
+		plog.G(context.Background()).Errorf("Failed to get unstructured object error: %v", err)
 		return nil, nil, err
 	}
 

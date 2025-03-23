@@ -18,7 +18,6 @@ import (
 
 	"github.com/kevinburke/ssh_config"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"golang.org/x/crypto/ssh"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -30,10 +29,10 @@ import (
 	"k8s.io/client-go/util/homedir"
 	"k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/utils/pointer"
-	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgutil "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -142,7 +141,7 @@ func DialSshRemote(ctx context.Context, conf *SshConfig, stopChan <-chan struct{
 		//go func() {
 		//	err2 := keepAlive(remote, conn, ctx.Done())
 		//	if err2 != nil {
-		//		log.Debugf("Failed to send keep-alive request: %v", err2)
+		//		plog.G(ctx).Debugf("Failed to send keep-alive request: %v", err2)
 		//	}
 		//}()
 	}
@@ -216,7 +215,7 @@ func RemoteRun(client *ssh.Client, cmd string, env map[string]string) (output []
 		// /etc/ssh/sshd_config
 		// AcceptEnv DEBIAN_FRONTEND
 		if err = session.Setenv(k, v); err != nil {
-			log.Warn(err)
+			plog.G(context.Background()).Warn(err)
 			err = nil
 		}
 	}
@@ -261,7 +260,7 @@ func copyStream(ctx context.Context, local net.Conn, remote net.Conn) {
 		defer config.LPool.Put(buf[:])
 		_, err := io.CopyBuffer(local, remote, buf)
 		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
-			log.Debugf("Failed to copy remote -> local: %s", err)
+			plog.G(ctx).Debugf("Failed to copy remote -> local: %s", err)
 		}
 		pkgutil.SafeWrite(chDone, true)
 	}()
@@ -272,7 +271,7 @@ func copyStream(ctx context.Context, local net.Conn, remote net.Conn) {
 		defer config.LPool.Put(buf[:])
 		_, err := io.CopyBuffer(remote, local, buf)
 		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
-			log.Debugf("Failed to copy local -> remote: %s", err)
+			plog.G(ctx).Debugf("Failed to copy local -> remote: %s", err)
 		}
 		pkgutil.SafeWrite(chDone, true)
 	}()
@@ -551,7 +550,7 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 	if e != nil {
 		return e
 	}
-	log.Debugf("SSH listening on local %s forward to %s", local.String(), remote.String())
+	plog.G(ctx).Debugf("SSH listening on local %s forward to %s", local.String(), remote.String())
 
 	go func() {
 		defer localListen.Close()
@@ -563,7 +562,7 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 		for ctx1.Err() == nil {
 			localConn, err1 := localListen.Accept()
 			if err1 != nil {
-				log.Debugf("Failed to accept ssh conn: %v", err1)
+				plog.G(ctx).Debugf("Failed to accept ssh conn: %v", err1)
 				continue
 			}
 			go func() {
@@ -574,10 +573,10 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 					var openChannelError *ssh.OpenChannelError
 					// if ssh server not permitted ssh port-forward, do nothing until exit
 					if errors.As(err, &openChannelError) && openChannelError.Reason == ssh.Prohibited {
-						log.Debugf("Failed to open ssh port-forward: %s: %v", remote.String(), err)
+						plog.G(ctx).Debugf("Failed to open ssh port-forward: %s: %v", remote.String(), err)
 						cancelFunc1()
 					}
-					log.Debugf("Failed to get remote conn: %v", err)
+					plog.G(ctx).Debugf("Failed to get remote conn: %v", err)
 					return
 				}
 
@@ -599,7 +598,7 @@ func getRemoteConn(ctx context.Context, sshClientChan chan *sshClient, conf *Ssh
 		defer cancelFunc1()
 		conn, err = cli.DialContext(ctx1, "tcp", remote.String())
 		if err != nil {
-			log.Debugf("Failed to dial remote address %s: %s", remote.String(), err)
+			plog.G(ctx).Debugf("Failed to dial remote address %s: %s", remote.String(), err)
 			_ = cli.Close()
 			return nil, err
 		}
@@ -617,14 +616,14 @@ func getRemoteConn(ctx context.Context, sshClientChan chan *sshClient, conf *Ssh
 		var client *ssh.Client
 		client, err = DialSshRemote(ctx2, conf, ctx1.Done())
 		if err != nil {
-			log.Debugf("Failed to dial remote ssh server: %v", err)
+			plog.G(ctx).Debugf("Failed to dial remote ssh server: %v", err)
 			return nil, err
 		}
 		ctx3, cancelFunc3 := context.WithTimeout(ctx, time.Second*10)
 		defer cancelFunc3()
 		conn, err = client.DialContext(ctx3, "tcp", remote.String())
 		if err != nil {
-			log.Debugf("Failed to dial remote addr: %s: %v", remote.String(), err)
+			plog.G(ctx).Debugf("Failed to dial remote addr: %s: %v", remote.String(), err)
 			client.Close()
 			return nil, err
 		}
@@ -798,14 +797,15 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 	}
 
 	if print {
-		log.Infof("Waiting jump to bastion host...")
-		log.Debugf("Root daemon jumping to ssh host for kubeconfig %s ...", ptr.Deref(configFlags.KubeConfig, ""))
+		plog.G(ctx).Infof("Waiting jump to bastion host...")
+		plog.G(ctx).Infof("Jump ssh bastion host to apiserver: %s", cluster.Server)
 	} else {
-		log.Debugf("User daemon jumping to ssh host for kubeconfig %s ...", ptr.Deref(configFlags.KubeConfig, ""))
+		plog.G(ctx).Debugf("Waiting jump to bastion host...")
+		plog.G(ctx).Debugf("Jump ssh bastion host to apiserver: %s", cluster.Server)
 	}
 	err = PortMapUntil(ctx, conf, remote, local)
 	if err != nil {
-		log.Errorf("SSH port map error: %v", err)
+		plog.G(ctx).Errorf("SSH port map error: %v", err)
 		return
 	}
 
@@ -842,35 +842,15 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 	}
 	if print {
 		msg := fmt.Sprintf("To use: export KUBECONFIG=%s", temp.Name())
-		PrintLine(log.Info, msg)
-		log.Debugf("Root daemon jump ssh bastion host with kubeconfig: %s", temp.Name())
+		plog.G(ctx).Info(pkgutil.PrintStr(msg))
+		plog.G(ctx).Infof("Use temporary kubeconfig: %s", temp.Name())
 	} else {
-		log.Debugf("User daemon jump ssh bastion host with kubeconfig: %s", temp.Name())
+		msg := fmt.Sprintf("To use: export KUBECONFIG=%s", temp.Name())
+		plog.G(ctx).Debugf(pkgutil.PrintStr(msg))
+		plog.G(ctx).Debugf("Use temporary kubeconfig: %s", temp.Name())
 	}
 	path = temp.Name()
 	return
-}
-
-func PrintLine(f func(...any), msg ...string) {
-	var length = -1
-	for _, s := range msg {
-		length = max(len(s), length)
-	}
-	if f == nil {
-		f = func(a ...any) {
-			fmt.Println(a...)
-		}
-	}
-	line := "+" + strings.Repeat("-", length+2) + "+"
-	f(line)
-	for _, s := range msg {
-		var padding string
-		if length != len(s) {
-			padding = strings.Repeat(" ", length-len(s))
-		}
-		f(fmt.Sprintf("| %s%s |", s, padding))
-	}
-	f(line)
 }
 
 func SshJumpAndSetEnv(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print bool) error {

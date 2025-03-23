@@ -18,7 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -36,6 +35,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func IsWindows() bool {
@@ -43,12 +43,12 @@ func IsWindows() bool {
 }
 
 func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, ns, workloads string, timeout time.Duration) (err error) {
-	log.Infof("Checking rollout status for %s", workloads)
+	plog.GetLogger(ctx1).Infof("Checking rollout status for %s", workloads)
 	defer func() {
 		if err != nil {
-			log.Errorf("Rollout status for %s failed: %s", workloads, err.Error())
+			plog.G(ctx1).Errorf("Rollout status for %s failed: %s", workloads, err.Error())
 		} else {
-			log.Infof("Rollout successfully for %s", workloads)
+			plog.G(ctx1).Infof("Rollout successfully for %s", workloads)
 		}
 	}()
 	client, _ := factory.DynamicClient()
@@ -106,7 +106,7 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, ns, workloads 
 				if done {
 					return true, nil
 				}
-				log.Info(strings.TrimSpace(status))
+				plog.G(ctx).Info(strings.TrimSpace(status))
 				return false, nil
 
 			case watch.Deleted:

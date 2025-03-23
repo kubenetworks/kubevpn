@@ -16,7 +16,6 @@ import (
 
 	miekgdns "github.com/miekg/dns"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	v12 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,6 +26,7 @@ import (
 	"tailscale.com/net/dns"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -67,7 +67,7 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13
 	appendHosts := c.generateAppendHosts(serviceList, hosts)
 	err := c.appendHosts(appendHosts)
 	if err != nil {
-		log.Errorf("Failed to add hosts(%s): %v", entryList2String(appendHosts), err)
+		plog.G(ctx).Errorf("Failed to add hosts(%s): %v", entryList2String(appendHosts), err)
 		return err
 	}
 
@@ -114,7 +114,7 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 						}}
 						err = c.removeHosts(list)
 						if err != nil {
-							log.Errorf("Failed to remove hosts(%s) to hosts: %v", entryList2String(list), err)
+							plog.G(ctx).Errorf("Failed to remove hosts(%s) to hosts: %v", entryList2String(list), err)
 						}
 					}
 					if event.Type == watch.Added {
@@ -123,7 +123,7 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 						err = c.appendHosts(appendHosts)
 						c.Lock.Unlock()
 						if err != nil {
-							log.Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
+							plog.G(ctx).Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
 						}
 					}
 				case <-ticker.C:
@@ -137,7 +137,7 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 					err = c.appendHosts(appendHosts)
 					c.Lock.Unlock()
 					if err != nil {
-						log.Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
+						plog.G(ctx).Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
 					}
 				case <-immediate:
 					var list *v12.ServiceList
@@ -150,7 +150,7 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 					err = c.appendHosts(appendHosts)
 					c.Lock.Unlock()
 					if err != nil {
-						log.Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
+						plog.G(ctx).Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
 					}
 				}
 			}
@@ -159,7 +159,7 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v1
 			return
 		}
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, ErrChanDone) {
-			log.Debugf("Failed to watch service to add route table: %v", err)
+			plog.G(ctx).Debugf("Failed to watch service to add route table: %v", err)
 		}
 		if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {
 			time.Sleep(time.Second * 1)
@@ -243,7 +243,7 @@ func (c *Config) removeHosts(hosts []Entry) error {
 	}
 
 	if len(retain) == 0 {
-		log.Errorf("Hosts files retain line is empty, should not happened")
+		plog.G(context.Background()).Errorf("Hosts files retain line is empty, should not happened")
 		return nil
 	}
 

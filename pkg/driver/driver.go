@@ -1,15 +1,16 @@
 package driver
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 
-	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/util/retry"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver/openvpn"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver/wintun"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func InstallTunTapDriver() {
@@ -18,7 +19,7 @@ func InstallTunTapDriver() {
 	}, func() error {
 		return openvpn.Install()
 	}); err != nil {
-		log.Warn(err)
+		plog.G(context.Background()).Warn(err)
 	}
 }
 
@@ -28,7 +29,7 @@ func InstallWireGuardTunDriver() {
 	}, func() error {
 		return wintun.InstallWintunDriver()
 	}); err != nil {
-		log.Warn(err)
+		plog.G(context.Background()).Warn(err)
 	}
 }
 
@@ -47,9 +48,9 @@ func UninstallTunTapDriver() {
 	cmd := exec.Command(path, "/S")
 	b, e := cmd.CombinedOutput()
 	if e != nil {
-		log.Warn(e)
+		plog.G(context.Background()).Warn(e)
 	}
-	log.Info(string(b))
+	plog.G(context.Background()).Info(string(b))
 }
 
 func getDiskName() string {

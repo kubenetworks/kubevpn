@@ -1,7 +1,6 @@
 package cmds
 
 import (
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -50,7 +50,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
         kubevpn uninstall --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			util.InitLoggerForClient(false)
+			plog.InitLoggerForClient()
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -65,7 +65,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 				SshJump:         sshConf.ToRPC(),
 			})
 			if err != nil {
-				log.Warnf("Failed to disconnect from cluter: %v", err)
+				plog.G(cmd.Context()).Warnf("Failed to disconnect from cluter: %v", err)
 			} else {
 				_ = util.PrintGRPCStream[rpc.DisconnectResponse](disconnect)
 			}

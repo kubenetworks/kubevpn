@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	defaultlog "log"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -12,22 +11,15 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectForkServer) (err error) {
-	defer func() {
-		util.InitLoggerForServer(true)
-		log.SetOutput(svr.LogFile)
-		config.Debug = false
-	}()
-	config.Debug = req.Level == int32(log.DebugLevel)
-	out := io.MultiWriter(newConnectForkWarp(resp), svr.LogFile)
-	util.InitLoggerForClient(config.Debug)
-	log.SetOutput(out)
+	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newConnectForkWarp(resp), svr.LogFile))
 	if !svr.IsSudo {
-		return svr.redirectConnectForkToSudoDaemon(req, resp)
+		return svr.redirectConnectForkToSudoDaemon(req, resp, logger)
 	}
 
 	ctx := resp.Context()
@@ -41,7 +33,6 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 		Lock:                 &svr.Lock,
 		ImagePullSecretName:  req.ImagePullSecretName,
 	}
-	defaultlog.Default().SetOutput(io.Discard)
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
 		return err
@@ -57,9 +48,11 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 		sshCancel()
 		return nil
 	})
+	sshCtx = plog.WithLogger(sshCtx, logger)
+	defer plog.WithoutLogger(sshCtx)
 	defer func() {
 		if err != nil {
-			connect.Cleanup()
+			connect.Cleanup(plog.WithLogger(context.Background(), logger))
 			sshCancel()
 		}
 	}()
@@ -73,7 +66,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	if err != nil {
 		return err
 	}
-	err = connect.GetIPFromContext(ctx)
+	err = connect.GetIPFromContext(ctx, logger)
 	if err != nil {
 		return err
 	}
@@ -81,7 +74,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	config.Image = req.Image
 	err = connect.DoConnect(sshCtx, true, ctx.Done())
 	if err != nil {
-		log.Errorf("Failed to connect: %v", err)
+		logger.Errorf("Failed to connect: %v", err)
 		return err
 	}
 
@@ -92,7 +85,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	return nil
 }
 
-func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) (err error) {
+func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer, logger *log.Logger) (err error) {
 	cli := svr.GetClient(true)
 	if cli == nil {
 		return fmt.Errorf("sudo daemon not start")
@@ -122,7 +115,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 	})
 	defer func() {
 		if err != nil {
-			connect.Cleanup()
+			connect.Cleanup(plog.WithLogger(context.Background(), logger))
 			sshCancel()
 		}
 	}()
@@ -144,7 +137,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		)
 		if isSameCluster {
 			// same cluster, do nothing
-			log.Infof("Connected with cluster")
+			logger.Infof("Connected with cluster")
 			return nil
 		}
 	}

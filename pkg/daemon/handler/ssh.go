@@ -19,7 +19,6 @@ import (
 
 	"github.com/containerd/containerd/platforms"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/net/websocket"
 	"golang.org/x/oauth2"
@@ -29,6 +28,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -117,7 +117,7 @@ func (w *wsHandler) createTwoWayTUNTunnel(ctx context.Context, cli *ssh.Client) 
 	cmd := fmt.Sprintf(`kubevpn ssh-daemon --client-ip %s`, clientIP.String())
 	serverIP, stderr, err := pkgssh.RemoteRun(cli, cmd, nil)
 	if err != nil {
-		log.Errorf("Failed to run remote command: %v, stdout: %s, stderr: %s", err, string(serverIP), string(stderr))
+		plog.G(ctx).Errorf("Failed to run remote command: %v, stdout: %s, stderr: %s", err, string(serverIP), string(stderr))
 		w.Log("Start kubevpn server error: %v", err)
 		return err
 	}
@@ -138,16 +138,16 @@ func (w *wsHandler) createTwoWayTUNTunnel(ctx context.Context, cli *ssh.Client) 
 	}
 	servers, err := handler.Parse(r)
 	if err != nil {
-		log.Errorf("Failed to parse route: %v", err)
+		plog.G(ctx).Errorf("Failed to parse route: %v", err)
 		w.Log("Failed to parse route: %v", err)
 		return err
 	}
 	go func() {
 		err := handler.Run(ctx, servers)
-		log.Errorf("Failed to run: %v", err)
+		plog.G(ctx).Errorf("Failed to run: %v", err)
 		w.Log("Failed to run: %v", err)
 	}()
-	log.Info("Connected tunnel")
+	plog.G(ctx).Info("Connected tunnel")
 	go func() {
 		for ctx.Err() == nil {
 			util.Ping(ctx, clientIP.IP.String(), ip.String())
@@ -280,7 +280,7 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 		w.Log("Found command kubevpn command on remote")
 		return nil
 	}
-	log.Infof("Install command kubevpn...")
+	plog.G(ctx).Infof("Install command kubevpn...")
 	w.Log("Install kubevpn on remote server...")
 	var client = http.DefaultClient
 	if config.GitHubOAuthToken != "" {
@@ -328,13 +328,13 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 	if err != nil {
 		return err
 	}
-	log.Infof("Upgrade daemon...")
+	plog.G(ctx).Infof("Upgrade daemon...")
 	w.Log("Scp kubevpn to remote server ~/.kubevpn/kubevpn")
 	cmds := []string{
 		"chmod +x ~/.kubevpn/kubevpn",
 		"sudo mv ~/.kubevpn/kubevpn /usr/local/bin/kubevpn",
 	}
-	err = pkgssh.SCPAndExec(w.conn, w.conn, sshClient, tempBin.Name(), "kubevpn", cmds...)
+	err = pkgssh.SCPAndExec(ctx, w.conn, w.conn, sshClient, tempBin.Name(), "kubevpn", cmds...)
 	return err
 }
 
@@ -344,7 +344,7 @@ func (w *wsHandler) Log(format string, a ...any) {
 		str = fmt.Sprintf(format, a...)
 	}
 	w.conn.Write([]byte(str + "\r\n"))
-	log.Infof(format, a...)
+	plog.G(context.Background()).Infof(format, a...)
 }
 
 func (w *wsHandler) PrintLine(msg string) {
@@ -397,7 +397,7 @@ func init() {
 	}))
 	http.Handle("/resize", websocket.Handler(func(conn *websocket.Conn) {
 		sessionID := conn.Request().Header.Get("session-id")
-		log.Infof("Resize: %s", sessionID)
+		plog.G(context.Background()).Infof("Resize: %s", sessionID)
 
 		defer conn.Close()
 
@@ -422,21 +422,21 @@ func init() {
 			if errors.Is(err, io.EOF) {
 				return
 			} else if err != nil {
-				log.Errorf("Failed to read session %s window resize event: %v", sessionID, err)
+				plog.G(context.Background()).Errorf("Failed to read session %s window resize event: %v", sessionID, err)
 				return
 			}
 			var r remotecommand.TerminalSize
 			err = json.Unmarshal([]byte(readString), &r)
 			if err != nil {
-				log.Errorf("Unmarshal into terminal size failed: %v", err)
+				plog.G(context.Background()).Errorf("Unmarshal into terminal size failed: %v", err)
 				continue
 			}
-			log.Debugf("Session %s change termianl size to w: %d h:%d", sessionID, r.Width, r.Height)
+			plog.G(context.Background()).Debugf("Session %s change termianl size to w: %d h:%d", sessionID, r.Width, r.Height)
 			err = session.WindowChange(int(r.Height), int(r.Width))
 			if errors.Is(err, io.EOF) {
 				return
 			} else if err != nil {
-				log.Errorf("Session %s windos change w: %d h: %d failed: %v", sessionID, r.Width, r.Height, err)
+				plog.G(context.Background()).Errorf("Session %s windos change w: %d h: %d failed: %v", sessionID, r.Width, r.Height, err)
 			}
 		}
 	}))

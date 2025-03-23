@@ -1,12 +1,12 @@
 package main
 
 import (
+	"context"
 	"io"
 	"net"
 
 	"github.com/containernetworking/cni/pkg/types"
-	log "github.com/sirupsen/logrus"
-
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 )
 
@@ -35,12 +35,12 @@ func main() {
 	var tunConn net.Conn
 	tunConn, err = listener.Accept()
 	if err != nil {
-		log.Fatal(err)
+		plog.G(context.Background()).Fatal(err)
 	}
 	defer tunConn.Close()
 	tcpConn, err := net.Dial("tcp", ":1080")
 	if err != nil {
-		log.Fatal(err)
+		plog.G(context.Background()).Fatal(err)
 	}
 	go io.Copy(tunConn, tcpConn)
 	io.Copy(tcpConn, tunConn)

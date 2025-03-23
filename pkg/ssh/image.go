@@ -19,8 +19,9 @@ import (
 	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/moby/term"
 	"github.com/opencontainers/image-spec/specs-go/v1"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func GetClient() (*client.Client, *command.DockerCli, error) {
@@ -49,20 +50,20 @@ func GetClient() (*client.Client, *command.DockerCli, error) {
 func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarget string, out io.Writer) error {
 	client, cli, err := GetClient()
 	if err != nil {
-		log.Errorf("Failed to get docker client: %v", err)
+		plog.G(ctx).Errorf("Failed to get docker client: %v", err)
 		return err
 	}
 	// todo add flags? or detect k8s node runtime ?
 	platform := &v1.Platform{Architecture: "amd64", OS: "linux"}
 	err = PullImage(ctx, platform, client, cli, imageSource, out)
 	if err != nil {
-		log.Errorf("Failed to pull image: %v", err)
+		plog.G(ctx).Errorf("Failed to pull image: %v", err)
 		return err
 	}
 
 	err = client.ImageTag(ctx, imageSource, imageTarget)
 	if err != nil {
-		log.Errorf("Failed to tag image %s to %s: %v", imageSource, imageTarget, err)
+		plog.G(ctx).Errorf("Failed to tag image %s to %s: %v", imageSource, imageTarget, err)
 		return err
 	}
 
@@ -71,19 +72,19 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 		var distributionRef reference.Named
 		distributionRef, err = reference.ParseNormalizedNamed(imageTarget)
 		if err != nil {
-			log.Errorf("Failed to parse image name %s: %v", imageTarget, err)
+			plog.G(ctx).Errorf("Failed to parse image name %s: %v", imageTarget, err)
 			return err
 		}
 		var imgRefAndAuth trust.ImageRefAndAuth
 		imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, image.AuthResolver(cli), distributionRef.String())
 		if err != nil {
-			log.Errorf("Failed to get image auth: %v", err)
+			plog.G(ctx).Errorf("Failed to get image auth: %v", err)
 			return err
 		}
 		var encodedAuth string
 		encodedAuth, err = registrytypes.EncodeAuthConfig(*imgRefAndAuth.AuthConfig())
 		if err != nil {
-			log.Errorf("Failed to encode auth config to base64: %v", err)
+			plog.G(ctx).Errorf("Failed to encode auth config to base64: %v", err)
 			return err
 		}
 		requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(cli, imgRefAndAuth.RepoInfo().Index, "push")
@@ -93,7 +94,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 			PrivilegeFunc: requestPrivilege,
 		})
 		if err != nil {
-			log.Errorf("Failed to push image %s, err: %v", imageTarget, err)
+			plog.G(ctx).Errorf("Failed to push image %s, err: %v", imageTarget, err)
 			return err
 		}
 		defer readCloser.Close()
@@ -103,7 +104,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 		outWarp := streams.NewOut(out)
 		err = jsonmessage.DisplayJSONMessagesToStream(readCloser, outWarp, nil)
 		if err != nil {
-			log.Errorf("Failed to display message, err: %v", err)
+			plog.G(ctx).Errorf("Failed to display message, err: %v", err)
 			return err
 		}
 		return nil
@@ -119,7 +120,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 	var responseReader io.ReadCloser
 	responseReader, err = client.ImageSave(ctx, []string{imageTarget})
 	if err != nil {
-		log.Errorf("Failed to save image %s: %v", imageTarget, err)
+		plog.G(ctx).Errorf("Failed to save image %s: %v", imageTarget, err)
 		return err
 	}
 	defer responseReader.Close()
@@ -127,7 +128,7 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 	if err != nil {
 		return err
 	}
-	log.Infof("Saving image %s to temp file %s", imageTarget, file.Name())
+	plog.G(ctx).Infof("Saving image %s to temp file %s", imageTarget, file.Name())
 	if _, err = io.Copy(file, responseReader); err != nil {
 		return err
 	}
@@ -136,19 +137,19 @@ func TransferImage(ctx context.Context, conf *SshConfig, imageSource, imageTarge
 	}
 	defer os.Remove(file.Name())
 
-	log.Infof("Transferring image %s", imageTarget)
+	plog.G(ctx).Infof("Transferring image %s", imageTarget)
 	filename := filepath.Base(file.Name())
 	cmd := fmt.Sprintf(
 		"(docker load -i ~/.kubevpn/%s && docker push %s) || (nerdctl image load -i ~/.kubevpn/%s && nerdctl image push %s)",
 		filename, imageTarget,
 		filename, imageTarget,
 	)
-	stdout := log.StandardLogger().Out
-	err = SCPAndExec(stdout, stdout, sshClient, file.Name(), filename, []string{cmd}...)
+	stdout := plog.G(ctx).Out
+	err = SCPAndExec(ctx, stdout, stdout, sshClient, file.Name(), filename, []string{cmd}...)
 	if err != nil {
 		return err
 	}
-	log.Infof("Loaded image: %s", imageTarget)
+	plog.G(ctx).Infof("Loaded image: %s", imageTarget)
 	return nil
 }
 
@@ -161,19 +162,19 @@ func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, d
 	}
 	distributionRef, err := reference.ParseNormalizedNamed(img)
 	if err != nil {
-		log.Errorf("Failed to parse image name %s: %v", img, err)
+		plog.G(ctx).Errorf("Failed to parse image name %s: %v", img, err)
 		return err
 	}
 	var imgRefAndAuth trust.ImageRefAndAuth
 	imgRefAndAuth, err = trust.GetImageReferencesAndAuth(ctx, image.AuthResolver(dockerCli), distributionRef.String())
 	if err != nil {
-		log.Errorf("Failed to get image auth: %v", err)
+		plog.G(ctx).Errorf("Failed to get image auth: %v", err)
 		return err
 	}
 	var encodedAuth string
 	encodedAuth, err = registrytypes.EncodeAuthConfig(*imgRefAndAuth.AuthConfig())
 	if err != nil {
-		log.Errorf("Failed to encode auth config to base64: %v", err)
+		plog.G(ctx).Errorf("Failed to encode auth config to base64: %v", err)
 		return err
 	}
 	requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(dockerCli, imgRefAndAuth.RepoInfo().Index, "pull")
@@ -184,7 +185,7 @@ func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, d
 		Platform:      plat,
 	})
 	if err != nil {
-		log.Errorf("Failed to pull image %s: %v", img, err)
+		plog.G(ctx).Errorf("Failed to pull image %s: %v", img, err)
 		return err
 	}
 	defer readCloser.Close()
@@ -194,7 +195,7 @@ func PullImage(ctx context.Context, platform *v1.Platform, cli *client.Client, d
 	outWarp := streams.NewOut(out)
 	err = jsonmessage.DisplayJSONMessagesToStream(readCloser, outWarp, nil)
 	if err != nil {
-		log.Errorf("Failed to display message, err: %v", err)
+		plog.G(ctx).Errorf("Failed to display message, err: %v", err)
 		return err
 	}
 	return nil

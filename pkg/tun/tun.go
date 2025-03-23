@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
-	log "github.com/sirupsen/logrus"
+	pkgerr "github.com/pkg/errors"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
 
@@ -40,13 +40,11 @@ func Listener(config Config) (net.Listener, error) {
 		config: config,
 	}
 
-	conn, ifce, err := createTun(config)
+	conn, _, err := createTun(config)
 	if err != nil {
-		log.Errorf("Create tun device error: %v", err)
+		err = pkgerr.Wrap(err, "create tun device failed")
 		return nil, err
 	}
-	addrs, _ := ifce.Addrs()
-	log.Debugf("[TUN] %s: name: %s, mtu: %d, addrs: %s", conn.LocalAddr(), ifce.Name, ifce.MTU, addrs)
 
 	ln.addr = conn.LocalAddr()
 	ln.conns <- conn

@@ -1,13 +1,13 @@
 package webhook
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"sync"
 
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/admission/v1"
 	"k8s.io/api/admission/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,6 +15,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/utils/ptr"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // admissionReviewHandler is a handler to handle business logic, holding an util.Factory
@@ -64,17 +66,17 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	// verify the content type is accurate
 	contentType := r.Header.Get("Content-Type")
 	if contentType != "application/json" {
-		log.Errorf("ContentType=%s, expect application/json", contentType)
+		plog.G(context.Background()).Errorf("ContentType=%s, expect application/json", contentType)
 		return
 	}
 
-	log.Infof("Handling request: %s", body)
+	plog.G(context.Background()).Infof("Handling request: %s", body)
 
 	deserializer := codecs.UniversalDeserializer()
 	obj, gvk, err := deserializer.Decode(body, nil, nil)
 	if err != nil {
 		msg := fmt.Sprintf("Request could not be decoded: %v", err)
-		log.Error(msg)
+		plog.G(context.Background()).Error(msg)
 		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
@@ -84,11 +86,11 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	case v1beta1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*v1beta1.AdmissionReview)
 		if !ok {
-			log.Errorf("Expected v1beta1.AdmissionReview but got: %T", obj)
+			plog.G(context.Background()).Errorf("Expected v1beta1.AdmissionReview but got: %T", obj)
 			return
 		}
 		if ptr.Deref(requestedAdmissionReview.Request.DryRun, false) {
-			log.Info("Ignore dryrun")
+			plog.G(context.Background()).Info("Ignore dryrun")
 			responseObj = &v1beta1.AdmissionReview{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: gvk.GroupVersion().String(),
@@ -109,11 +111,11 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	case v1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*v1.AdmissionReview)
 		if !ok {
-			log.Errorf("Expected v1.AdmissionReview but got: %T", obj)
+			plog.G(context.Background()).Errorf("Expected v1.AdmissionReview but got: %T", obj)
 			return
 		}
 		if ptr.Deref(requestedAdmissionReview.Request.DryRun, false) {
-			log.Info("Ignore dry-run")
+			plog.G(context.Background()).Info("Ignore dry-run")
 			responseObj = &v1.AdmissionReview{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: gvk.GroupVersion().String(),
@@ -133,20 +135,20 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		}
 	default:
 		msg := fmt.Sprintf("Unsupported group version kind: %v", gvk)
-		log.Error(msg)
+		plog.G(context.Background()).Error(msg)
 		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
 
 	respBytes, err := json.Marshal(responseObj)
 	if err != nil {
-		log.Errorf("Unable to encode response: %v", err)
+		plog.G(context.Background()).Errorf("Unable to encode response: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Infof("Sending response: %v", string(respBytes))
+	plog.G(context.Background()).Infof("Sending response: %v", string(respBytes))
 	w.Header().Set("Content-Type", "application/json")
 	if _, err = w.Write(respBytes); err != nil {
-		log.Errorf("Unable to write response: %v", err)
+		plog.G(context.Background()).Errorf("Unable to write response: %v", err)
 	}
 }

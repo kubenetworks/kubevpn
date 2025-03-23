@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 
-	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -15,6 +14,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp/rpc"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -49,19 +49,19 @@ func Complete(ctx context.Context, route *core.Route) error {
 			IPv6CIDR:     os.Getenv(config.EnvInboundPodTunIPv6),
 		})
 		if err2 != nil {
-			log.Errorf("Failed to release IP %s and %s: %v", resp.IPv4CIDR, resp.IPv6CIDR, err2)
+			plog.G(ctx).Errorf("Failed to release IP %s and %s: %v", resp.IPv4CIDR, resp.IPv6CIDR, err2)
 		} else {
-			log.Debugf("Release IP %s and %s", resp.IPv4CIDR, resp.IPv6CIDR)
+			plog.G(ctx).Debugf("Release IP %s and %s", resp.IPv4CIDR, resp.IPv6CIDR)
 		}
 	}()
 
-	log.Infof("Rent an IPv4: %s, IPv6: %s", resp.IPv4CIDR, resp.IPv6CIDR)
+	plog.G(ctx).Infof("Rent an IPv4: %s, IPv6: %s", resp.IPv4CIDR, resp.IPv6CIDR)
 	if err = os.Setenv(config.EnvInboundPodTunIPv4, resp.IPv4CIDR); err != nil {
-		log.Errorf("Failed to set IP: %v", err)
+		plog.G(ctx).Errorf("Failed to set IP: %v", err)
 		return err
 	}
 	if err = os.Setenv(config.EnvInboundPodTunIPv6, resp.IPv6CIDR); err != nil {
-		log.Errorf("Failed to set IP: %v", err)
+		plog.G(ctx).Errorf("Failed to set IP: %v", err)
 		return err
 	}
 	for i := 0; i < len(route.ServeNodes); i++ {

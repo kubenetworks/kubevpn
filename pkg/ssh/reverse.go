@@ -11,11 +11,11 @@ package ssh
 
 import (
 	"context"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"net"
 	"net/netip"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -33,14 +33,14 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 	// Connect to SSH remote server using serverEndpoint
 	serverConn, err := ssh.Dial("tcp", remoteSSHServer.String(), sshConfig)
 	if err != nil {
-		log.Errorf("Dial into remote server error: %s", err)
+		plog.G(ctx).Errorf("Dial into remote server error: %s", err)
 		return err
 	}
 
 	// Listen on remote server port
 	listener, err := serverConn.Listen("tcp", remotePort.String())
 	if err != nil {
-		log.Errorf("Listen open port on remote server error: %s", err)
+		plog.G(ctx).Errorf("Listen open port on remote server error: %s", err)
 		return err
 	}
 	defer listener.Close()
@@ -49,7 +49,7 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 	for {
 		client, err := listener.Accept()
 		if err != nil {
-			log.Errorf("Accept on remote service error: %s", err)
+			plog.G(ctx).Errorf("Accept on remote service error: %s", err)
 			return err
 		}
 		go func(client net.Conn) {
@@ -57,7 +57,7 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 			// Open a (local) connection to localEndpoint whose content will be forwarded so serverEndpoint
 			local, err := net.Dial("tcp", localPort.String())
 			if err != nil {
-				log.Errorf("Dial INTO local service error: %s", err)
+				plog.G(ctx).Errorf("Dial INTO local service error: %s", err)
 				return
 			}
 			defer local.Close()

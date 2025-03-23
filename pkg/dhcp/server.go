@@ -5,10 +5,10 @@ import (
 	"net"
 	"sync"
 
-	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp/rpc"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 type Server struct {
@@ -28,12 +28,12 @@ func (s *Server) RentIP(ctx context.Context, req *rpc.RentIPRequest) (*rpc.RentI
 	s.Lock()
 	defer s.Unlock()
 
-	log.Infof("Handling rent IP request, pod name: %s, ns: %s", req.PodName, req.PodNamespace)
+	plog.G(ctx).Infof("Handling rent IP request, pod name: %s, ns: %s", req.PodName, req.PodNamespace)
 	cmi := s.clientset.CoreV1().ConfigMaps(req.PodNamespace)
 	manager := NewDHCPManager(cmi, req.PodNamespace)
 	v4, v6, err := manager.RentIP(ctx)
 	if err != nil {
-		log.Errorf("Failed to rent IP: %v", err)
+		plog.G(ctx).Errorf("Failed to rent IP: %v", err)
 		return nil, err
 	}
 	// todo patch annotation
@@ -48,12 +48,12 @@ func (s *Server) ReleaseIP(ctx context.Context, req *rpc.ReleaseIPRequest) (*rpc
 	s.Lock()
 	defer s.Unlock()
 
-	log.Infof("Handling release IP request, pod name: %s, ns: %s, IPv4: %s, IPv6: %s", req.PodName, req.PodNamespace, req.IPv4CIDR, req.IPv6CIDR)
+	plog.G(ctx).Infof("Handling release IP request, pod name: %s, ns: %s, IPv4: %s, IPv6: %s", req.PodName, req.PodNamespace, req.IPv4CIDR, req.IPv6CIDR)
 	var ips []net.IP
 	for _, ipStr := range []string{req.IPv4CIDR, req.IPv6CIDR} {
 		ip, _, err := net.ParseCIDR(ipStr)
 		if err != nil {
-			log.Errorf("IP %s is invailed, err: %v", ipStr, err)
+			plog.G(ctx).Errorf("IP %s is invailed: %v", ipStr, err)
 			continue
 		}
 		ips = append(ips, ip)
@@ -62,7 +62,7 @@ func (s *Server) ReleaseIP(ctx context.Context, req *rpc.ReleaseIPRequest) (*rpc
 	cmi := s.clientset.CoreV1().ConfigMaps(req.PodNamespace)
 	manager := NewDHCPManager(cmi, req.PodNamespace)
 	if err := manager.ReleaseIP(ctx, ips...); err != nil {
-		log.Errorf("Failed to release IP: %v", err)
+		plog.G(ctx).Errorf("Failed to release IP: %v", err)
 		return nil, err
 	}
 	return &rpc.ReleaseIPResponse{}, nil

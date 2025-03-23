@@ -8,7 +8,6 @@ import (
 	"net"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -28,6 +27,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -37,7 +37,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 		var pod *v1.Pod
 		pod, err = polymorphichelpers.AttachablePodForObjectFn(factory, service, 2*time.Second)
 		if err == nil && pod.DeletionTimestamp.IsZero() && podutils.IsPodReady(pod) {
-			log.Infoln("Use exist traffic manager")
+			plog.G(ctx).Infoln("Use exist traffic manager")
 			return
 		}
 	}
@@ -59,10 +59,10 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	deleteResource(ctx)
 
 	// 1) label namespace
-	log.Infof("Labeling Namespace %s", namespace)
+	plog.G(ctx).Infof("Labeling Namespace %s", namespace)
 	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 	if err != nil {
-		log.Errorf("Get Namespace error: %s", err.Error())
+		plog.G(ctx).Errorf("Get Namespace error: %s", err.Error())
 		return err
 	}
 	if ns.Labels == nil {
@@ -71,36 +71,36 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	ns.Labels["ns"] = namespace
 	_, err = clientset.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{})
 	if err != nil {
-		log.Infof("Labeling Namespace error: %s", err.Error())
+		plog.G(ctx).Infof("Labeling Namespace error: %s", err.Error())
 		return err
 	}
 
 	// 2) create serviceAccount
-	log.Infof("Creating ServiceAccount %s", config.ConfigMapPodTrafficManager)
+	plog.G(ctx).Infof("Creating ServiceAccount %s", config.ConfigMapPodTrafficManager)
 	_, err = clientset.CoreV1().ServiceAccounts(namespace).Create(ctx, genServiceAccount(namespace), metav1.CreateOptions{})
 	if err != nil {
-		log.Infof("Creating ServiceAccount error: %s", err.Error())
+		plog.G(ctx).Infof("Creating ServiceAccount error: %s", err.Error())
 		return err
 	}
 
 	// 3) create roles
-	log.Infof("Creating Roles %s", config.ConfigMapPodTrafficManager)
+	plog.G(ctx).Infof("Creating Roles %s", config.ConfigMapPodTrafficManager)
 	_, err = clientset.RbacV1().Roles(namespace).Create(ctx, genRole(namespace), metav1.CreateOptions{})
 	if err != nil {
-		log.Errorf("Creating Roles error: %s", err.Error())
+		plog.G(ctx).Errorf("Creating Roles error: %s", err.Error())
 		return err
 	}
 
 	// 4) create roleBinding
-	log.Infof("Creating RoleBinding %s", config.ConfigMapPodTrafficManager)
+	plog.G(ctx).Infof("Creating RoleBinding %s", config.ConfigMapPodTrafficManager)
 	_, err = clientset.RbacV1().RoleBindings(namespace).Create(ctx, genRoleBinding(namespace), metav1.CreateOptions{})
 	if err != nil {
-		log.Errorf("Creating RoleBinding error: %s", err.Error())
+		plog.G(ctx).Errorf("Creating RoleBinding error: %s", err.Error())
 		return err
 	}
 
 	// 5) create service
-	log.Infof("Creating Service %s", config.ConfigMapPodTrafficManager)
+	plog.G(ctx).Infof("Creating Service %s", config.ConfigMapPodTrafficManager)
 	udp8422 := "8422-for-udp"
 	tcp10800 := "10800-for-tcp"
 	tcp9002 := "9002-for-envoy"
@@ -109,7 +109,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	svcSpec := genService(namespace, udp8422, tcp10800, tcp9002, tcp80, udp53)
 	_, err = clientset.CoreV1().Services(namespace).Create(ctx, svcSpec, metav1.CreateOptions{})
 	if err != nil {
-		log.Errorf("Creating Service error: %s", err.Error())
+		plog.G(ctx).Errorf("Creating Service error: %s", err.Error())
 		return err
 	}
 
@@ -117,7 +117,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	var crt, key []byte
 	crt, key, err = cert.GenerateSelfSignedCertKey(domain, nil, nil)
 	if err != nil {
-		log.Errorf("Generate self signed cert and key error: %s", err.Error())
+		plog.G(ctx).Errorf("Generate self signed cert and key error: %s", err.Error())
 		return err
 	}
 	// reason why not use v1.SecretTypeTls is because it needs key called tls.crt and tls.key, but tls.key can not as env variable
@@ -126,12 +126,12 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	secret := genSecret(namespace, crt, key)
 	_, err = clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
-		log.Errorf("Creating secret error: %s", err.Error())
+		plog.G(ctx).Errorf("Creating secret error: %s", err.Error())
 		return err
 	}
 
 	// 6) create mutatingWebhookConfigurations
-	log.Infof("Creating MutatingWebhookConfiguration %s", config.ConfigMapPodTrafficManager)
+	plog.G(ctx).Infof("Creating MutatingWebhookConfiguration %s", config.ConfigMapPodTrafficManager)
 	mutatingWebhookConfiguration := genMutatingWebhookConfiguration(namespace, crt)
 	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, mutatingWebhookConfiguration, metav1.CreateOptions{})
 	if err != nil && !k8serrors.IsForbidden(err) && !k8serrors.IsAlreadyExists(err) {
@@ -139,11 +139,11 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	}
 
 	// 7) create deployment
-	log.Infof("Creating Deployment %s", config.ConfigMapPodTrafficManager)
+	plog.G(ctx).Infof("Creating Deployment %s", config.ConfigMapPodTrafficManager)
 	deploy := genDeploySpec(namespace, udp8422, tcp10800, tcp9002, udp53, tcp80, gvisor, imagePullSecretName)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
-		log.Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
+		plog.G(ctx).Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
 		return err
 	}
 
@@ -503,13 +503,13 @@ func waitPodReady(ctx context.Context, deploy *appsv1.Deployment, clientset core
 	var lastMessage string
 	ctx2, cancelFunc := context.WithTimeout(ctx, time.Minute*60)
 	defer cancelFunc()
-	log.Infoln()
+	plog.G(ctx).Infoln()
 	wait.UntilWithContext(ctx2, func(ctx context.Context) {
 		podList, err := clientset.List(ctx2, metav1.ListOptions{
 			LabelSelector: selector.String(),
 		})
 		if err != nil {
-			log.Errorf("Failed to list pods for %s: %v", deploy.Name, err)
+			plog.G(ctx).Errorf("Failed to list pods for %s: %v", deploy.Name, err)
 			return
 		}
 
@@ -527,7 +527,7 @@ func waitPodReady(ctx context.Context, deploy *appsv1.Deployment, clientset core
 			}
 			util.PrintStatus(&pod, sb)
 			if lastMessage != sb.String() {
-				log.Infof(sb.String())
+				plog.G(ctx).Infof(sb.String())
 			}
 			lastMessage = sb.String()
 
@@ -547,7 +547,7 @@ func waitPodReady(ctx context.Context, deploy *appsv1.Deployment, clientset core
 	}, time.Second*3)
 
 	if !isPodReady {
-		log.Errorf("Wait pod %s to be ready timeout", deploy.Name)
+		plog.G(ctx).Errorf("Wait pod %s to be ready timeout", deploy.Name)
 		return errors.New(fmt.Sprintf("wait pod %s to be ready timeout", deploy.Name))
 	}
 

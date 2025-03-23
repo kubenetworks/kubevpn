@@ -5,17 +5,17 @@ import (
 	"fmt"
 
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func GetNsForListPodAndSvc(ctx context.Context, clientset *kubernetes.Clientset, nsList []string) (podNs string, svcNs string, err error) {
 	for _, ns := range nsList {
-		log.Debugf("List namepsace %s pods", ns)
 		_, err = clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{Limit: 1})
 		if apierrors.IsForbidden(err) {
 			continue
@@ -30,9 +30,13 @@ func GetNsForListPodAndSvc(ctx context.Context, clientset *kubernetes.Clientset,
 		err = errors.Wrap(err, "can not list pod to add it to route table")
 		return
 	}
+	if podNs == "" {
+		plog.G(ctx).Debugf("List all namepsace pods")
+	} else {
+		plog.G(ctx).Debugf("List namepsace %s pods", podNs)
+	}
 
 	for _, ns := range nsList {
-		log.Debugf("List namepsace %s services", ns)
 		_, err = clientset.CoreV1().Services(ns).List(ctx, metav1.ListOptions{Limit: 1})
 		if apierrors.IsForbidden(err) {
 			continue
@@ -46,6 +50,11 @@ func GetNsForListPodAndSvc(ctx context.Context, clientset *kubernetes.Clientset,
 	if err != nil {
 		err = errors.Wrap(err, "can not list service to add it to route table")
 		return
+	}
+	if svcNs == "" {
+		plog.G(ctx).Debugf("List all namepsace services")
+	} else {
+		plog.G(ctx).Debugf("List namepsace %s services", svcNs)
 	}
 	return
 }
@@ -63,7 +72,7 @@ func ListService(ctx context.Context, lister v12.ServiceInterface, addRouteFunc 
 		}
 		err = addRouteFunc(ips...)
 		if err != nil {
-			log.Errorf("Failed to add service IP to route table: %v", err)
+			plog.G(ctx).Errorf("Failed to add service IP to route table: %v", err)
 		}
 		if serviceList.Continue == "" {
 			return nil
@@ -75,7 +84,7 @@ func ListService(ctx context.Context, lister v12.ServiceInterface, addRouteFunc 
 func WatchServiceToAddRoute(ctx context.Context, watcher v12.ServiceInterface, routeFunc func(ipStr ...string) error) error {
 	defer func() {
 		if er := recover(); er != nil {
-			log.Error(er)
+			plog.G(ctx).Error(er)
 		}
 	}()
 	w, err := watcher.Watch(ctx, metav1.ListOptions{Watch: true})
@@ -117,7 +126,7 @@ func ListPod(ctx context.Context, lister v12.PodInterface, addRouteFunc func(ipS
 		}
 		err = addRouteFunc(ips...)
 		if err != nil {
-			log.Errorf("Failed to add Pod IP to route table: %v", err)
+			plog.G(ctx).Errorf("Failed to add Pod IP to route table: %v", err)
 		}
 		if podList.Continue == "" {
 			return nil
@@ -129,7 +138,7 @@ func ListPod(ctx context.Context, lister v12.PodInterface, addRouteFunc func(ipS
 func WatchPodToAddRoute(ctx context.Context, watcher v12.PodInterface, addRouteFunc func(ipStrList ...string) error) error {
 	defer func() {
 		if er := recover(); er != nil {
-			log.Errorln(er)
+			plog.G(ctx).Errorln(er)
 		}
 	}()
 	w, err := watcher.Watch(ctx, metav1.ListOptions{Watch: true})

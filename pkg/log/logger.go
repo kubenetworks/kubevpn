@@ -1,7 +1,9 @@
-package util
+package log
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -12,24 +14,30 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-func InitLoggerForClient(debug bool) {
-	if debug {
-		log.SetLevel(log.DebugLevel)
-	} else {
-		log.SetLevel(log.InfoLevel)
-	}
-	log.SetReportCaller(false)
-	log.SetFormatter(&format{})
+func InitLoggerForClient() {
+	L = GetLoggerForClient(int32(log.InfoLevel), os.Stdout)
 }
 
-func InitLoggerForServer(debug bool) {
-	if debug {
-		log.SetLevel(log.DebugLevel)
-	} else {
-		log.SetLevel(log.InfoLevel)
+func GetLoggerForClient(level int32, out io.Writer) *log.Logger {
+	return &log.Logger{
+		Out:          out,
+		Formatter:    &format{},
+		Hooks:        make(log.LevelHooks),
+		Level:        log.Level(level),
+		ExitFunc:     os.Exit,
+		ReportCaller: false,
 	}
-	log.SetReportCaller(true)
-	log.SetFormatter(&serverFormat{})
+}
+
+func InitLoggerForServer() *log.Logger {
+	return &log.Logger{
+		Out:          os.Stderr,
+		Formatter:    &format{},
+		Hooks:        make(log.LevelHooks),
+		Level:        log.DebugLevel,
+		ExitFunc:     os.Exit,
+		ReportCaller: true,
+	}
 }
 
 type format struct {
@@ -84,7 +92,7 @@ func (g ServerEmitter) Emit(depth int, level glog.Level, timestamp time.Time, fo
 	message := fmt.Sprintf(format, args...)
 
 	// Emit the formatted result.
-	fmt.Fprintf(g.Writer, "%s %s:%d %s: %s\n",
+	_, _ = fmt.Fprintf(g.Writer, "%s %s:%d %s: %s\n",
 		timestamp.Format("2006-01-02 15:04:05"),
 		file,
 		line,

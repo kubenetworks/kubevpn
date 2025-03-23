@@ -4,7 +4,7 @@ import (
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util/regctl"
 )
 
@@ -30,7 +30,7 @@ kubevpn image copy ghcr.io/kubenetworks/kubevpn:latest registry.example.org/kube
 kubevpn image copy ghcr.io/kubenetworks/kubevpn:latest ghcr.io/kubenetworks/kubevpn:v2.3.4`,
 		Args: cobra.MatchAll(cobra.ExactArgs(2), cobra.OnlyValidArgs),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			util.InitLoggerForClient(false)
+			plog.InitLoggerForClient()
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {

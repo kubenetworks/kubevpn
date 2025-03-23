@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"github.com/google/gopacket/layers"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func TestName(t *testing.T) {
@@ -51,7 +54,7 @@ func TestName(t *testing.T) {
 	// IPv6 with CIDR
 	configList, err := libcni.ConfListFromBytes([]byte(s))
 	if err == nil {
-		log.Infoln("Get CNI config", configList.Name)
+		plog.G(context.Background()).Infoln("Get CNI config", configList.Name)
 	}
 	for _, plugin := range configList.Plugins {
 		var m map[string]interface{}
@@ -90,7 +93,7 @@ func TestPing(t *testing.T) {
 	buf := gopacket.NewSerializeBuffer()
 	err := gopacket.SerializeLayers(buf, opts, &icmpLayer, &ipLayer)
 	if err != nil {
-		log.Errorf("Failed to serialize icmp packet, err: %v", err)
+		plog.G(context.Background()).Errorf("Failed to serialize icmp packet, err: %v", err)
 		return
 	}
 	ipConn, err := net.ListenPacket("ip4:icmp", "localhost")

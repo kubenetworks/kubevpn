@@ -10,6 +10,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -46,7 +47,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
         kubevpn reset deployment/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			util.InitLoggerForClient(false)
+			plog.InitLoggerForClient()
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		Args: cobra.MatchAll(cobra.ExactArgs(1)),

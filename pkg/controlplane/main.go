@@ -8,6 +8,8 @@ import (
 	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
 	"github.com/fsnotify/fsnotify"
 	log "github.com/sirupsen/logrus"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func Main(ctx context.Context, filename string, port uint, logger *log.Logger) error {
@@ -46,7 +48,7 @@ func Main(ctx context.Context, filename string, port uint, logger *log.Logger) e
 		case msg := <-notifyCh:
 			err = proc.ProcessFile(msg)
 			if err != nil {
-				log.Errorf("Failed to process file: %v", err)
+				plog.G(ctx).Errorf("Failed to process file: %v", err)
 				return err
 			}
 		case err = <-errChan:

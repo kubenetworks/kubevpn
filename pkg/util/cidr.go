@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/containernetworking/cni/libcni"
-	log "github.com/sirupsen/logrus"
 	v13 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -24,6 +23,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // GetCIDRElegant
@@ -37,17 +37,17 @@ func GetCIDRElegant(ctx context.Context, clientset *kubernetes.Clientset, restco
 	}()
 
 	var result []*net.IPNet
-	log.Infoln("Getting network CIDR from cluster info...")
+	plog.G(ctx).Infoln("Getting network CIDR from cluster info...")
 	info, err := GetCIDRByDumpClusterInfo(ctx, clientset)
 	if err == nil {
-		log.Debugf("Getting network CIDR from cluster info successfully")
+		plog.G(ctx).Debugf("Getting network CIDR from cluster info successfully")
 		result = append(result, info...)
 	}
 
-	log.Infoln("Getting network CIDR from CNI...")
+	plog.G(ctx).Infoln("Getting network CIDR from CNI...")
 	cni, err := GetCIDRFromCNI(ctx, clientset, restconfig, namespace)
 	if err == nil {
-		log.Debugf("Getting network CIDR from CNI successfully")
+		plog.G(ctx).Debugf("Getting network CIDR from CNI successfully")
 		result = append(result, cni...)
 	}
 
@@ -61,10 +61,10 @@ func GetCIDRElegant(ctx context.Context, clientset *kubernetes.Clientset, restco
 		result = append(result, svc)
 	}
 
-	log.Infoln("Getting network CIDR from services...")
+	plog.G(ctx).Infoln("Getting network CIDR from services...")
 	pod, err = GetPodCIDRFromPod(ctx, clientset, namespace, svc)
 	if err == nil {
-		log.Debugf("Getting network CIDR from services successfully")
+		plog.G(ctx).Debugf("Getting network CIDR from services successfully")
 		result = append(result, pod...)
 	}
 
@@ -294,7 +294,7 @@ func GetPodCIDRFromCNI(ctx context.Context, clientset *kubernetes.Clientset, res
 	if err != nil {
 		return nil, err
 	}
-	log.Infoln("Get CNI config", configList.Name)
+	plog.G(ctx).Infoln("Get CNI config", configList.Name)
 	var cidr []*net.IPNet
 	for _, plugin := range configList.Plugins {
 		switch plugin.Network.Type {

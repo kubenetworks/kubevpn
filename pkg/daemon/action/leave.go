@@ -8,26 +8,20 @@ import (
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) error {
-	defer func() {
-		util.InitLoggerForServer(true)
-		log.SetOutput(svr.LogFile)
-		config.Debug = false
-	}()
-	out := io.MultiWriter(newLeaveWarp(resp), svr.LogFile)
-	util.InitLoggerForClient(config.Debug)
-	log.SetOutput(out)
+	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newLeaveWarp(resp), svr.LogFile))
 	if svr.connect == nil {
-		log.Infof("Not proxy any resource in cluster")
+		logger.Infof("Not proxy any resource in cluster")
 		return fmt.Errorf("not proxy any resource in cluster")
 	}
+	ctx := plog.WithLogger(resp.Context(), logger)
 
 	factory := svr.connect.GetFactory()
 	namespace := svr.connect.Namespace
@@ -36,32 +30,32 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 	for _, workload := range req.GetWorkloads() {
 		object, err := util.GetUnstructuredObject(factory, namespace, workload)
 		if err != nil {
-			log.Errorf("Failed to get unstructured object: %v", err)
+			logger.Errorf("Failed to get unstructured object: %v", err)
 			return err
 		}
 		u := object.Object.(*unstructured.Unstructured)
 		templateSpec, _, err := util.GetPodTemplateSpecPath(u)
 		if err != nil {
-			log.Errorf("Failed to get template spec path: %v", err)
+			logger.Errorf("Failed to get template spec path: %v", err)
 			return err
 		}
 		// add rollback func to remove envoy config
 		var empty bool
-		empty, err = inject.UnPatchContainer(factory, maps, object, func(isFargateMode bool, rule *controlplane.Rule) bool {
+		empty, err = inject.UnPatchContainer(ctx, factory, maps, object, func(isFargateMode bool, rule *controlplane.Rule) bool {
 			if isFargateMode {
 				return svr.connect.IsMe(util.ConvertWorkloadToUid(workload), rule.Headers)
 			}
 			return rule.LocalTunIPv4 == v4
 		})
 		if err != nil {
-			log.Errorf("Leaving workload %s failed: %v", workload, err)
+			plog.G(ctx).Errorf("Leaving workload %s failed: %v", workload, err)
 			continue
 		}
 		if empty {
-			err = inject.ModifyServiceTargetPort(resp.Context(), svr.connect.GetClientset(), namespace, templateSpec.Labels, map[int32]int32{})
+			err = inject.ModifyServiceTargetPort(ctx, svr.connect.GetClientset(), namespace, templateSpec.Labels, map[int32]int32{})
 		}
 		svr.connect.LeavePortMap(workload)
-		err = util.RolloutStatus(resp.Context(), factory, namespace, workload, time.Minute*60)
+		err = util.RolloutStatus(ctx, factory, namespace, workload, time.Minute*60)
 	}
 	return nil
 }

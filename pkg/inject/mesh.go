@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,6 +24,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -74,7 +74,7 @@ func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset 
 
 	err = addEnvoyConfig(clientset, nodeID, c, headers, ports, portmap)
 	if err != nil {
-		log.Errorf("Failed to add envoy config: %v", err)
+		plog.G(ctx).Errorf("Failed to add envoy config: %v", err)
 		return err
 	}
 
@@ -84,7 +84,7 @@ func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset 
 		containerNames.Insert(container.Name)
 	}
 	if containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
-		log.Infof("Workload %s/%s has already been injected with sidecar", namespace, workload)
+		plog.G(ctx).Infof("Workload %s/%s has already been injected with sidecar", namespace, workload)
 		return nil
 	}
 
@@ -106,19 +106,19 @@ func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset 
 	}
 	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 	if err != nil {
-		log.Errorf("Failed to patch resource: %s %s, err: %v", object.Mapping.Resource.Resource, object.Name, err)
+		plog.G(ctx).Errorf("Failed to patch resource: %s %s, err: %v", object.Mapping.Resource.Resource, object.Name, err)
 		return err
 	}
-	log.Infof("Patching workload %s", workload)
+	plog.G(ctx).Infof("Patching workload %s", workload)
 	err = util.RolloutStatus(ctx, f, namespace, workload, time.Minute*60)
 	return err
 }
 
-func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, object *runtimeresource.Info, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) (bool, error) {
+func UnPatchContainer(ctx context.Context, factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, object *runtimeresource.Info, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) (bool, error) {
 	u := object.Object.(*unstructured.Unstructured)
 	templateSpec, depth, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
-		log.Errorf("Failed to get template spec path: %v", err)
+		plog.G(ctx).Errorf("Failed to get template spec path: %v", err)
 		return false, err
 	}
 
@@ -127,15 +127,15 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 	var empty, found bool
 	empty, found, err = removeEnvoyConfig(mapInterface, nodeID, isMeFunc)
 	if err != nil {
-		log.Errorf("Failed to remove envoy config: %v", err)
+		plog.G(ctx).Errorf("Failed to remove envoy config: %v", err)
 		return false, err
 	}
 	if !found {
-		log.Infof("Not found proxy resource %s", workload)
+		plog.G(ctx).Infof("Not found proxy resource %s", workload)
 		return false, nil
 	}
 
-	log.Infof("Leaving workload %s", workload)
+	plog.G(ctx).Infof("Leaving workload %s", workload)
 
 	RemoveContainers(templateSpec)
 
@@ -143,14 +143,14 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 		helper := pkgresource.NewHelper(object.Client, object.Mapping)
 		// pod without controller
 		if len(depth) == 0 {
-			log.Debugf("Workload %s is not under controller management", workload)
+			plog.G(ctx).Debugf("Workload %s is not under controller management", workload)
 			pod := &v1.Pod{ObjectMeta: templateSpec.ObjectMeta, Spec: templateSpec.Spec}
 			CleanupUselessInfo(pod)
-			err = CreateAfterDeletePod(factory, pod, helper)
+			err = CreateAfterDeletePod(ctx, factory, pod, helper)
 			return empty, err
 		}
 
-		log.Debugf("The %s is under controller management", workload)
+		plog.G(ctx).Debugf("The %s is under controller management", workload)
 		// resource with controller, like deployment,statefulset
 		var bytes []byte
 		bytes, err = json.Marshal([]P{
@@ -161,12 +161,12 @@ func UnPatchContainer(factory cmdutil.Factory, mapInterface v12.ConfigMapInterfa
 			},
 		})
 		if err != nil {
-			log.Errorf("Failed to generate json patch: %v", err)
+			plog.G(ctx).Errorf("Failed to generate json patch: %v", err)
 			return empty, err
 		}
 		_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 		if err != nil {
-			log.Errorf("Failed to patch resource: %s %s: %v", object.Mapping.Resource.Resource, object.Name, err)
+			plog.G(ctx).Errorf("Failed to patch resource: %s %s: %v", object.Mapping.Resource.Resource, object.Name, err)
 			return empty, err
 		}
 	}

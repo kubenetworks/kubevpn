@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -20,6 +19,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -40,13 +40,13 @@ func (c *ConnectOptions) Reset(ctx context.Context, workloads []string) error {
 
 	err = resetConfigMap(ctx, c.clientset.CoreV1().ConfigMaps(c.Namespace), workloads)
 	if err != nil {
-		log.Error(err)
+		plog.G(ctx).Error(err)
 	}
 
 	for _, workload := range workloads {
 		err = removeInjectContainer(ctx, c.factory, c.clientset, c.Namespace, workload)
 		if err != nil {
-			log.Error(err)
+			plog.G(ctx).Error(err)
 		}
 	}
 
@@ -62,13 +62,13 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, wor
 		return err
 	}
 	if cm == nil || cm.Data == nil || len(cm.Data[config.KeyEnvoy]) == 0 {
-		log.Infof("No proxy resources found")
+		plog.G(ctx).Infof("No proxy resources found")
 		return nil
 	}
 	var v = make([]*controlplane.Virtual, 0)
 	str := cm.Data[config.KeyEnvoy]
 	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
-		log.Errorf("Unmarshal envoy config error: %v", err)
+		plog.G(ctx).Errorf("Unmarshal envoy config error: %v", err)
 		return nil
 	}
 	ws := sets.New[string]()
@@ -95,23 +95,23 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, wor
 func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workload string) error {
 	object, err := util.GetUnstructuredObject(factory, namespace, workload)
 	if err != nil {
-		log.Errorf("Failed to get unstructured object: %v", err)
+		plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
 		return err
 	}
 
 	u := object.Object.(*unstructured.Unstructured)
 	templateSpec, depth, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
-		log.Errorf("Failed to get template spec path: %v", err)
+		plog.G(ctx).Errorf("Failed to get template spec path: %v", err)
 		return err
 	}
 
-	log.Infof("Leaving workload %s", workload)
+	plog.G(ctx).Infof("Leaving workload %s", workload)
 
 	inject.RemoveContainers(templateSpec)
 
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
-	log.Debugf("The %s is under controller management", workload)
+	plog.G(ctx).Debugf("The %s is under controller management", workload)
 	// resource with controller, like deployment,statefulset
 	var bytes []byte
 	bytes, err = json.Marshal([]inject.P{
@@ -122,12 +122,12 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 		},
 	})
 	if err != nil {
-		log.Errorf("Failed to generate json patch: %v", err)
+		plog.G(ctx).Errorf("Failed to generate json patch: %v", err)
 		return err
 	}
 	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 	if err != nil {
-		log.Errorf("Failed to patch resource: %s %s: %v", object.Mapping.Resource.Resource, object.Name, err)
+		plog.G(ctx).Errorf("Failed to patch resource: %s %s: %v", object.Mapping.Resource.Resource, object.Name, err)
 		return err
 	}
 
