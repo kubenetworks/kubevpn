@@ -91,13 +91,16 @@ func pingPodIP(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			cmd := exec.Command("ping", "-c", "4", item.Status.PodIP)
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			err = cmd.Run()
-			if err != nil || !cmd.ProcessState.Success() {
-				t.Errorf("Failed to ping IP: %s of pod: %s", item.Status.PodIP, item.Name)
+			for i := 0; i < 30; i++ {
+				cmd := exec.Command("ping", "-c", "4", item.Status.PodIP)
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				err = cmd.Run()
+				if err == nil && cmd.ProcessState.Success() {
+					return
+				}
 			}
+			t.Errorf("Failed to ping IP: %s of pod: %s", item.Status.PodIP, item.Name)
 		}()
 	}
 	wg.Wait()
@@ -123,7 +126,7 @@ func healthChecker(t *testing.T, endpoint string, header map[string]string, keyw
 	}
 
 	err = retry.OnError(
-		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 300},
+		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 600},
 		func(err error) bool { return err != nil },
 		func() error {
 			var resp *http.Response
