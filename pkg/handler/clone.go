@@ -252,6 +252,9 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 						ReadOnly:  false,
 						MountPath: d.RemoteDir,
 					})
+					container.LivenessProbe = nil
+					container.ReadinessProbe = nil
+					container.StartupProbe = nil
 				}
 			}
 			// https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/
