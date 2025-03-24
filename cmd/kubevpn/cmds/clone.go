@@ -163,8 +163,8 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringToStringVarP(&options.Headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to target cluster cloned workloads, If not special, redirect all traffic to target cluster cloned workloads. eg: --headers foo=bar --headers env=dev")
 	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName, &options.Engine)
 
+	cmdutil.AddContainerVarFlags(cmd, &options.TargetContainer, options.TargetContainer)
 	cmd.Flags().StringVar(&options.TargetImage, "target-image", "", "Clone container use this image to startup container, if not special, use origin image")
-	cmd.Flags().StringVar(&options.TargetContainer, "target-container", "", "Clone container use special image to startup this container, if not special, use origin image")
 	cmd.Flags().StringVar(&options.TargetNamespace, "target-namespace", "", "Clone workloads in this namespace, if not special, use origin namespace")
 	cmd.Flags().StringVar(&options.TargetKubeconfig, "target-kubeconfig", "", "Clone workloads will create in this cluster, if not special, use origin cluster")
 	cmd.Flags().StringVar(&options.TargetRegistry, "target-registry", "", "Clone workloads will create this registry domain to replace origin registry, if not special, use origin registry")
