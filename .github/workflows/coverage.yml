@@ -56,8 +56,7 @@ jobs:
 
       - name: Wait for pods reviews to be ready
         run: |
-          kubectl wait pods -l app=reviews --for=condition=Ready --timeout=3600s
-          kubectl wait pods -l app=productpage --for=condition=Ready --timeout=3600s
+          kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=3600s
           kubectl get svc -A -o wide
           kubectl get pod -A -o wide
           kubectl get all -o wide
