@@ -88,11 +88,14 @@ func pingPodIP(t *testing.T) {
 		if item.Status.Phase != corev1.PodRunning {
 			continue
 		}
+		if item.DeletionTimestamp != nil {
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for i := 0; i < 30; i++ {
-				cmd := exec.Command("ping", "-c", "4", item.Status.PodIP)
+			for i := 0; i < 60; i++ {
+				cmd := exec.Command("ping", "-c", "1", item.Status.PodIP)
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
 				err = cmd.Run()
@@ -101,6 +104,7 @@ func pingPodIP(t *testing.T) {
 				}
 			}
 			t.Errorf("Failed to ping IP: %s of pod: %s", item.Status.PodIP, item.Name)
+			kubectl(t)
 		}()
 	}
 	wg.Wait()
@@ -126,12 +130,13 @@ func healthChecker(t *testing.T, endpoint string, header map[string]string, keyw
 	}
 
 	err = retry.OnError(
-		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 600},
+		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 60},
 		func(err error) bool { return err != nil },
 		func() error {
 			var resp *http.Response
 			resp, err = http.DefaultClient.Do(req)
 			if err != nil {
+				t.Logf("failed to do health check endpoint: %s: %v", endpoint, err)
 				return err
 			}
 			if resp.StatusCode != 200 {
