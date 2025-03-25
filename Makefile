@@ -108,7 +108,7 @@ gen:
 
 .PHONY: ut
 ut:
-	go test -tags=noassets -coverprofile=coverage.txt -coverpkg=./... -test.v ./... -timeout=60m
+	go test -tags=noassets -p=1 -v -timeout=60m -coverprofile=coverage.txt -coverpkg=./... ./...
 
 .PHONY: cover
 cover: ut

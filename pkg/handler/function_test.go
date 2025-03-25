@@ -72,10 +72,10 @@ func commonTest(t *testing.T) {
 	// 1) test domain access
 	t.Run("kubevpnStatus", kubevpnStatus)
 	t.Run("pingPodIP", pingPodIP)
-	t.Run("healthCheckPodAuthors", healthCheckPodAuthors)
-	t.Run("healthCheckServiceAuthors", healthCheckServiceAuthors)
-	t.Run("shortDomainAuthors", shortDomainAuthors)
-	t.Run("fullDomainAuthors", fullDomainAuthors)
+	t.Run("healthCheckPodDetails", healthCheckPodDetails)
+	t.Run("healthCheckServiceDetails", healthCheckServiceDetails)
+	t.Run("shortDomainDetails", shortDomainDetails)
+	t.Run("fullDomainDetails", fullDomainDetails)
 }
 
 func pingPodIP(t *testing.T) {
@@ -88,23 +88,30 @@ func pingPodIP(t *testing.T) {
 		if item.Status.Phase != corev1.PodRunning {
 			continue
 		}
+		if item.DeletionTimestamp != nil {
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			cmd := exec.Command("ping", "-c", "4", item.Status.PodIP)
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			err = cmd.Run()
-			if err != nil || !cmd.ProcessState.Success() {
-				t.Errorf("Failed to ping IP: %s of pod: %s", item.Status.PodIP, item.Name)
+			for i := 0; i < 60; i++ {
+				cmd := exec.Command("ping", "-c", "1", item.Status.PodIP)
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				err = cmd.Run()
+				if err == nil && cmd.ProcessState.Success() {
+					return
+				}
 			}
+			t.Errorf("Failed to ping IP: %s of pod: %s", item.Status.PodIP, item.Name)
+			kubectl(t)
 		}()
 	}
 	wg.Wait()
 }
 
-func healthCheckPodAuthors(t *testing.T) {
-	var app = "authors"
+func healthCheckPodDetails(t *testing.T) {
+	var app = "details"
 	ip, err := getPodIP(app)
 	if err != nil {
 		t.Fatal(err)
@@ -123,12 +130,13 @@ func healthChecker(t *testing.T, endpoint string, header map[string]string, keyw
 	}
 
 	err = retry.OnError(
-		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 300},
+		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 60},
 		func(err error) bool { return err != nil },
 		func() error {
 			var resp *http.Response
 			resp, err = http.DefaultClient.Do(req)
 			if err != nil {
+				t.Logf("failed to do health check endpoint: %s: %v", endpoint, err)
 				return err
 			}
 			if resp.StatusCode != 200 {
@@ -159,8 +167,8 @@ func healthChecker(t *testing.T, endpoint string, header map[string]string, keyw
 	}
 }
 
-func healthCheckServiceAuthors(t *testing.T) {
-	var app = "authors"
+func healthCheckServiceDetails(t *testing.T) {
+	var app = "details"
 	ip, err := getServiceIP(app)
 	if err != nil {
 		t.Fatal(err)
@@ -169,14 +177,14 @@ func healthCheckServiceAuthors(t *testing.T) {
 	healthChecker(t, endpoint, nil, "")
 }
 
-func shortDomainAuthors(t *testing.T) {
-	var app = "authors"
+func shortDomainDetails(t *testing.T) {
+	var app = "details"
 	endpoint := fmt.Sprintf("http://%s:%v/health", app, 9080)
 	healthChecker(t, endpoint, nil, "")
 }
 
-func fullDomainAuthors(t *testing.T) {
-	var app = "authors"
+func fullDomainDetails(t *testing.T) {
+	var app = "details"
 	domains := []string{
 		fmt.Sprintf("%s.%s.svc.cluster.local", app, namespace),
 		fmt.Sprintf("%s.%s.svc", app, namespace),
