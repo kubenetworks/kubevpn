@@ -72,10 +72,10 @@ func commonTest(t *testing.T) {
 	// 1) test domain access
 	t.Run("kubevpnStatus", kubevpnStatus)
 	t.Run("pingPodIP", pingPodIP)
-	t.Run("healthCheckPodAuthors", healthCheckPodAuthors)
-	t.Run("healthCheckServiceAuthors", healthCheckServiceAuthors)
-	t.Run("shortDomainAuthors", shortDomainAuthors)
-	t.Run("fullDomainAuthors", fullDomainAuthors)
+	t.Run("healthCheckPodDetails", healthCheckPodDetails)
+	t.Run("healthCheckServiceDetails", healthCheckServiceDetails)
+	t.Run("shortDomainDetails", shortDomainDetails)
+	t.Run("fullDomainDetails", fullDomainDetails)
 }
 
 func pingPodIP(t *testing.T) {
@@ -106,8 +106,8 @@ func pingPodIP(t *testing.T) {
 	wg.Wait()
 }
 
-func healthCheckPodAuthors(t *testing.T) {
-	var app = "authors"
+func healthCheckPodDetails(t *testing.T) {
+	var app = "details"
 	ip, err := getPodIP(app)
 	if err != nil {
 		t.Fatal(err)
@@ -162,8 +162,8 @@ func healthChecker(t *testing.T, endpoint string, header map[string]string, keyw
 	}
 }
 
-func healthCheckServiceAuthors(t *testing.T) {
-	var app = "authors"
+func healthCheckServiceDetails(t *testing.T) {
+	var app = "details"
 	ip, err := getServiceIP(app)
 	if err != nil {
 		t.Fatal(err)
@@ -172,14 +172,14 @@ func healthCheckServiceAuthors(t *testing.T) {
 	healthChecker(t, endpoint, nil, "")
 }
 
-func shortDomainAuthors(t *testing.T) {
-	var app = "authors"
+func shortDomainDetails(t *testing.T) {
+	var app = "details"
 	endpoint := fmt.Sprintf("http://%s:%v/health", app, 9080)
 	healthChecker(t, endpoint, nil, "")
 }
 
-func fullDomainAuthors(t *testing.T) {
-	var app = "authors"
+func fullDomainDetails(t *testing.T) {
+	var app = "details"
 	domains := []string{
 		fmt.Sprintf("%s.%s.svc.cluster.local", app, namespace),
 		fmt.Sprintf("%s.%s.svc", app, namespace),
