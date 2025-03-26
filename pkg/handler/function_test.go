@@ -20,7 +20,6 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
@@ -465,7 +464,6 @@ func Init() {
 	var err error
 
 	configFlags := genericclioptions.NewConfigFlags(true)
-	configFlags.KubeConfig = &clientcmd.RecommendedHomeFile
 	f := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 
 	if restconfig, err = f.ToRESTConfig(); err != nil {
