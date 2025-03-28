@@ -11,7 +11,7 @@ RUN make kubevpn
 FROM debian:bookworm-slim
 ARG BASE=github.com/wencaiwulue/kubevpn
 
-RUN apt-get update && apt-get install -y iptables curl \
+RUN apt-get update && apt-get install -y openssl iptables curl \
     && if [ $(uname -m) = "x86_64" ]; then \
          echo "The architecture is AMD64"; \
          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"; \
