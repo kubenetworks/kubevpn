@@ -42,30 +42,30 @@ const (
 func TestFunctions(t *testing.T) {
 	// 1) test connect
 	Init()
-	kubevpnConnect(t)
-	commonTest(t)
+	t.Run("kubevpnConnect", kubevpnConnect)
+	t.Run("commonTest", commonTest)
 
 	// 2) test proxy mode
-	kubevpnProxy(t)
-	commonTest(t)
+	t.Run("kubevpnProxy", kubevpnProxy)
+	t.Run("commonTest", commonTest)
 	t.Run("testUDP", testUDP)
 	t.Run("proxyServiceReviewsServiceIP", proxyServiceReviewsServiceIP)
 	t.Run("proxyServiceReviewsPodIP", proxyServiceReviewsPodIP)
 
 	// 3) test proxy mode with service mesh
-	kubevpnLeave(t)
-	kubevpnProxyWithServiceMesh(t)
-	commonTest(t)
+	t.Run("kubevpnLeave", kubevpnLeave)
+	t.Run("kubevpnProxyWithServiceMesh", kubevpnProxyWithServiceMesh)
+	t.Run("commonTest", commonTest)
 	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
 	t.Run("serviceMeshReviewsPodIP", serviceMeshReviewsPodIP)
 
 	// 4) test proxy mode with service mesh and gvisor
-	kubevpnLeave(t)
-	kubevpnUninstall(t)
-	kubevpnProxyWithServiceMeshAndGvisorMode(t)
-	commonTest(t)
+	t.Run("kubevpnLeave", kubevpnLeave)
+	t.Run("kubevpnUninstall", kubevpnUninstall)
+	t.Run("kubevpnProxyWithServiceMeshAndGvisorMode", kubevpnProxyWithServiceMeshAndGvisorMode)
+	t.Run("commonTest", commonTest)
 	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
-	kubevpnQuit(t)
+	t.Run("kubevpnQuit", kubevpnQuit)
 }
 
 func commonTest(t *testing.T) {

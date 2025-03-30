@@ -110,7 +110,7 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 			return rule.LocalTunIPv4 == v4
 		})
 		if err != nil {
-			plog.G(ctx).Errorf("Failed to leave workload %s: %v", workload, err)
+			plog.G(ctx).Errorf("Failed to leave workload %s in namespace %s: %v", workload.workload, workload.namespace, err)
 			continue
 		}
 		if empty {

@@ -35,7 +35,7 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 }
 
 // AddMeshContainer todo envoy support ipv6
-func AddMeshContainer(spec *v1.PodTemplateSpec, nodeId string, c util.PodRouteConfig, ipv6 bool) {
+func AddMeshContainer(spec *v1.PodTemplateSpec, ns, nodeId string, c util.PodRouteConfig, ipv6 bool) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 
@@ -131,9 +131,9 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 			"--base-id",
 			"1",
 			"--service-node",
-			nodeId,
+			util.GenEnvoyUID(ns, nodeId),
 			"--service-cluster",
-			nodeId,
+			util.GenEnvoyUID(ns, nodeId),
 			"--config-yaml",
 		},
 		Args: []string{
@@ -158,7 +158,7 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 	})
 }
 
-func AddEnvoyContainer(spec *v1.PodTemplateSpec, nodeId string, ipv6 bool) {
+func AddEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeId string, ipv6 bool) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 
@@ -195,9 +195,9 @@ kubevpn serve -L "ssh://:2222"`,
 			"--base-id",
 			"1",
 			"--service-node",
-			nodeId,
+			util.GenEnvoyUID(ns, nodeId),
 			"--service-cluster",
-			nodeId,
+			util.GenEnvoyUID(ns, nodeId),
 			"--config-yaml",
 		},
 		Args: []string{

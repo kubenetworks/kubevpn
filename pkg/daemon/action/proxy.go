@@ -73,7 +73,10 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 	}
 	helmNs, _ := util.GetHelmInstalledNamespace(ctx, connect.GetFactory())
 	if helmNs != "" {
+		logger.Infof("Using helm namespace: %s", helmNs)
 		connect.Namespace = helmNs
+	} else {
+		logger.Infof("Use namespace: %s", req.Namespace)
 	}
 
 	if svr.connect != nil {

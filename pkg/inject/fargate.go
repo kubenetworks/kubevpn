@@ -66,7 +66,7 @@ func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kuber
 
 	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, f, connectNamespace)
 	// (1) add mesh container
-	AddEnvoyContainer(templateSpec, nodeID, enableIPv6)
+	AddEnvoyContainer(templateSpec, object.Namespace, nodeID, enableIPv6)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	ps := []P{
 		{

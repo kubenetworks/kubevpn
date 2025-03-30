@@ -181,7 +181,6 @@ func (m *Mapper) Run(connectNamespace string) {
 }
 
 func (m *Mapper) getLocalPort2EnvoyRulePort(connectNamespace string) (map[int32]int32, error) {
-	// todo get kubevpn-system configmap
 	configMap, err := m.clientset.CoreV1().ConfigMaps(connectNamespace).Get(m.ctx, config.ConfigMapPodTrafficManager, v1.GetOptions{})
 	if err != nil {
 		return nil, err

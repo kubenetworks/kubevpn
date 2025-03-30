@@ -103,12 +103,6 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	if cli == nil {
 		return fmt.Errorf("sudo daemon not start")
 	}
-	connect := &handler.ConnectOptions{
-		Namespace:            req.Namespace,
-		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
-		Engine:               config.Engine(req.Engine),
-		OriginKubeconfigPath: req.OriginKubeconfigPath,
-	}
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
@@ -120,6 +114,12 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		DefValue: file,
 	})
 	sshCtx, sshCancel := context.WithCancel(context.Background())
+	connect := &handler.ConnectOptions{
+		Namespace:            req.Namespace,
+		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
+		Engine:               config.Engine(req.Engine),
+		OriginKubeconfigPath: req.OriginKubeconfigPath,
+	}
 	connect.AddRolloutFunc(func() error {
 		sshCancel()
 		return nil
@@ -138,6 +138,14 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	err = connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
 	if err != nil {
 		return err
+	}
+
+	helmNs, _ := util.GetHelmInstalledNamespace(sshCtx, connect.GetFactory())
+	if helmNs != "" {
+		logger.Infof("Using helm namespace: %s", helmNs)
+		connect.Namespace = helmNs
+	} else {
+		logger.Infof("Use namespace: %s", req.Namespace)
 	}
 
 	if svr.connect != nil {
