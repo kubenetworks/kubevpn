@@ -23,6 +23,7 @@ import (
 type admissionReviewHandler struct {
 	sync.Mutex
 	f         cmdutil.Factory
+	ns        string
 	clientset *kubernetes.Clientset
 }
 

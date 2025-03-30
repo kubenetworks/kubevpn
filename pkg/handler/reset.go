@@ -27,24 +27,24 @@ import (
 // 1) reset configmap
 // 2) remove inject containers envoy and vpn
 // 3) restore service targetPort to containerPort
-func (c *ConnectOptions) Reset(ctx context.Context, workloads []string) error {
+func (c *ConnectOptions) Reset(ctx context.Context, namespace string, workloads []string) error {
 	if c == nil || c.clientset == nil {
 		return nil
 	}
 
 	var err error
-	workloads, err = util.NormalizedResource(ctx, c.factory, c.clientset, c.Namespace, workloads)
+	workloads, err = util.NormalizedResource(ctx, c.factory, c.clientset, namespace, workloads)
 	if err != nil {
 		return err
 	}
 
-	err = resetConfigMap(ctx, c.clientset.CoreV1().ConfigMaps(c.Namespace), workloads)
+	err = resetConfigMap(ctx, c.clientset.CoreV1().ConfigMaps(c.Namespace), namespace, workloads)
 	if err != nil {
 		plog.G(ctx).Error(err)
 	}
 
 	for _, workload := range workloads {
-		err = removeInjectContainer(ctx, c.factory, c.clientset, c.Namespace, workload)
+		err = removeInjectContainer(ctx, c.factory, c.clientset, namespace, workload)
 		if err != nil {
 			plog.G(ctx).Error(err)
 		}
@@ -53,7 +53,7 @@ func (c *ConnectOptions) Reset(ctx context.Context, workloads []string) error {
 	return nil
 }
 
-func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, workloads []string) error {
+func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, namespace string, workloads []string) error {
 	cm, err := mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {

@@ -29,8 +29,8 @@ func (s *Server) RentIP(ctx context.Context, req *rpc.RentIPRequest) (*rpc.RentI
 	defer s.Unlock()
 
 	plog.G(ctx).Infof("Handling rent IP request, pod name: %s, ns: %s", req.PodName, req.PodNamespace)
-	cmi := s.clientset.CoreV1().ConfigMaps(req.PodNamespace)
-	manager := NewDHCPManager(cmi, req.PodNamespace)
+	mapInterface := s.clientset.CoreV1().ConfigMaps(req.PodNamespace)
+	manager := NewDHCPManager(mapInterface, req.PodNamespace)
 	v4, v6, err := manager.RentIP(ctx)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to rent IP: %v", err)
@@ -59,8 +59,8 @@ func (s *Server) ReleaseIP(ctx context.Context, req *rpc.ReleaseIPRequest) (*rpc
 		ips = append(ips, ip)
 	}
 
-	cmi := s.clientset.CoreV1().ConfigMaps(req.PodNamespace)
-	manager := NewDHCPManager(cmi, req.PodNamespace)
+	mapInterface := s.clientset.CoreV1().ConfigMaps(req.PodNamespace)
+	manager := NewDHCPManager(mapInterface, req.PodNamespace)
 	if err := manager.ReleaseIP(ctx, ips...); err != nil {
 		plog.G(ctx).Errorf("Failed to release IP: %v", err)
 		return nil, err

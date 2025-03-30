@@ -128,8 +128,8 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 	for _, options := range svr.secondaryConnect {
 		isSameCluster, _ := util.IsSameCluster(
 			sshCtx,
-			options.GetClientset().CoreV1().ConfigMaps(options.Namespace), options.Namespace,
-			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
+			options.GetClientset().CoreV1(), options.Namespace,
+			connect.GetClientset().CoreV1(), connect.Namespace,
 		)
 		if isSameCluster {
 			// same cluster, do nothing

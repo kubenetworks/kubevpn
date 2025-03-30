@@ -38,9 +38,10 @@ import (
 )
 
 type Virtual struct {
-	Uid   string // group.resource.name
-	Ports []ContainerPort
-	Rules []*Rule
+	Namespace string
+	Uid       string // group.resource.name
+	Ports     []ContainerPort
+	Rules     []*Rule
 }
 
 type ContainerPort struct {
@@ -100,7 +101,7 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Logger) (
 	for _, port := range a.Ports {
 		isFargateMode := port.EnvoyListenerPort != 0
 
-		listenerName := fmt.Sprintf("%s_%v_%s", a.Uid, util.If(isFargateMode, port.EnvoyListenerPort, port.ContainerPort), port.Protocol)
+		listenerName := fmt.Sprintf("%s_%s_%v_%s", a.Namespace, a.Uid, util.If(isFargateMode, port.EnvoyListenerPort, port.ContainerPort), port.Protocol)
 		routeName := listenerName
 		listeners = append(listeners, ToListener(listenerName, routeName, util.If(isFargateMode, port.EnvoyListenerPort, port.ContainerPort), port.Protocol, isFargateMode))
 

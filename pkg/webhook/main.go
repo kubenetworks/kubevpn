@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"net/http"
 	"os"
 
@@ -28,8 +29,13 @@ func Main(f util.Factory) error {
 	if err != nil {
 		return err
 	}
+	var ns string
+	_, err = clientset.CoreV1().Services(config.KubevpnNamespace).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err == nil {
+		ns = config.KubevpnNamespace
+	}
 
-	h := &admissionReviewHandler{f: f, clientset: clientset}
+	h := &admissionReviewHandler{f: f, clientset: clientset, ns: ns}
 	http.HandleFunc("/pods", func(w http.ResponseWriter, r *http.Request) {
 		serve(w, r, newDelegateToV1AdmitHandler(h.admitPods))
 	})

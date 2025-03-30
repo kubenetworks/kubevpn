@@ -80,8 +80,8 @@ func (h *admissionReviewHandler) handleCreate(ar v1.AdmissionReview) *v1.Admissi
 	// 2) release old ip
 	h.Lock()
 	defer h.Unlock()
-	cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
-	manager := dhcp.NewDHCPManager(cmi, ar.Request.Namespace)
+	mapInterface := h.clientset.CoreV1().ConfigMaps(util.If(h.ns != "", h.ns, ar.Request.Namespace))
+	manager := dhcp.NewDHCPManager(mapInterface, util.If(h.ns != "", h.ns, ar.Request.Namespace))
 	var ips []net.IP
 	for k := 0; k < len(container.Env); k++ {
 		envVar := container.Env[k]
@@ -180,8 +180,8 @@ func (h *admissionReviewHandler) handleDelete(ar v1.AdmissionReview) *v1.Admissi
 	if len(ips) != 0 {
 		h.Lock()
 		defer h.Unlock()
-		cmi := h.clientset.CoreV1().ConfigMaps(ar.Request.Namespace)
-		err := dhcp.NewDHCPManager(cmi, ar.Request.Namespace).ReleaseIP(context.Background(), ips...)
+		mapInterface := h.clientset.CoreV1().ConfigMaps(util.If(h.ns != "", h.ns, ar.Request.Namespace))
+		err := dhcp.NewDHCPManager(mapInterface, util.If(h.ns != "", h.ns, ar.Request.Namespace)).ReleaseIP(context.Background(), ips...)
 		if err != nil {
 			plog.G(context.Background()).Errorf("Failed to release IP %v to DHCP server: %v", ips, err)
 		} else {

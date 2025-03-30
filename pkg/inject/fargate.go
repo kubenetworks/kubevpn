@@ -28,7 +28,7 @@ import (
 
 // InjectEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
-func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workload string, object *runtimeresource.Info, headers map[string]string, portMap []string) (err error) {
+func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kubernetes.Clientset, connectNamespace string, object *runtimeresource.Info, headers map[string]string, portMap []string) (err error) {
 	u := object.Object.(*unstructured.Unstructured)
 	var templateSpec *v1.PodTemplateSpec
 	var path []string
@@ -48,23 +48,23 @@ func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kuber
 		port[i].EnvoyListenerPort = int32(randomPort)
 		containerPort2EnvoyListenerPort[port[i].ContainerPort] = int32(randomPort)
 	}
-	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(namespace), nodeID, c, headers, port, portmap)
+	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(connectNamespace), object.Namespace, nodeID, c, headers, port, portmap)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to add envoy config: %v", err)
 		return err
 	}
-
+	workload := fmt.Sprintf("%s/%s", object.Mapping.Resource.Resource, object.Name)
 	// already inject container envoy-proxy, do nothing
 	containerNames := sets.New[string]()
 	for _, container := range templateSpec.Spec.Containers {
 		containerNames.Insert(container.Name)
 	}
 	if containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
-		plog.G(ctx).Infof("Workload %s/%s has already been injected with sidecar", namespace, workload)
+		plog.G(ctx).Infof("Workload %s/%s has already been injected with sidecar", object.Namespace, workload)
 		return
 	}
 
-	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, f, namespace)
+	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, f, connectNamespace)
 	// (1) add mesh container
 	AddEnvoyContainer(templateSpec, nodeID, enableIPv6)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
@@ -86,13 +86,13 @@ func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kuber
 		return err
 	}
 	plog.G(ctx).Infof("Patching workload %s", workload)
-	err = util.RolloutStatus(ctx, f, namespace, workload, time.Minute*60)
+	err = util.RolloutStatus(ctx, f, object.Namespace, workload, time.Minute*60)
 	if err != nil {
 		return err
 	}
 
 	// 2) modify service containerPort to envoy listener port
-	err = ModifyServiceTargetPort(ctx, clientset, namespace, templateSpec.Labels, containerPort2EnvoyListenerPort)
+	err = ModifyServiceTargetPort(ctx, clientset, object.Namespace, templateSpec.Labels, containerPort2EnvoyListenerPort)
 	if err != nil {
 		return err
 	}

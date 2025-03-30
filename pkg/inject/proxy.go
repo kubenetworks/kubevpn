@@ -24,7 +24,7 @@ import (
 	util2 "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func InjectVPNSidecar(ctx context.Context, f util.Factory, namespace, workload string, object *resource.Info, c util2.PodRouteConfig) error {
+func InjectVPNSidecar(ctx context.Context, f util.Factory, connectNamespace string, object *resource.Info, c util2.PodRouteConfig) error {
 	u := object.Object.(*unstructured.Unstructured)
 
 	podTempSpec, path, err := util2.GetPodTemplateSpecPath(u)
@@ -45,7 +45,7 @@ func InjectVPNSidecar(ctx context.Context, f util.Factory, namespace, workload s
 	for _, port := range ports {
 		portmap[port.ContainerPort] = fmt.Sprintf("%d", port.ContainerPort)
 	}
-	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(namespace), nodeID, c, nil, controlplane.ConvertContainerPort(ports...), portmap)
+	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(connectNamespace), object.Namespace, nodeID, c, nil, controlplane.ConvertContainerPort(ports...), portmap)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to add envoy config: %v", err)
 		return err
@@ -53,10 +53,11 @@ func InjectVPNSidecar(ctx context.Context, f util.Factory, namespace, workload s
 
 	AddContainer(&podTempSpec.Spec, c)
 
+	workload := fmt.Sprintf("%s/%s", object.Mapping.Resource.Resource, object.Name)
 	helper := resource.NewHelper(object.Client, object.Mapping)
 	// pods without controller
 	if len(path) == 0 {
-		plog.G(ctx).Infof("Workload %s/%s is not controlled by any controller", namespace, workload)
+		plog.G(ctx).Infof("Workload %s is not controlled by any controller", workload)
 		p := &v1.Pod{ObjectMeta: podTempSpec.ObjectMeta, Spec: podTempSpec.Spec}
 		CleanupUselessInfo(p)
 		if err = CreateAfterDeletePod(ctx, f, p, helper); err != nil {
@@ -80,7 +81,7 @@ func InjectVPNSidecar(ctx context.Context, f util.Factory, namespace, workload s
 			return err
 		}
 	}
-	err = util2.RolloutStatus(ctx, f, namespace, workload, time.Minute*60)
+	err = util2.RolloutStatus(ctx, f, object.Namespace, workload, time.Minute*60)
 	return err
 }
 

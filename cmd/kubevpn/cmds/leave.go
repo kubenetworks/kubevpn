@@ -34,13 +34,18 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			leave, err := daemon.GetClient(false).Leave(cmd.Context(), &rpc.LeaveRequest{
+			_, ns, err := util.ConvertToKubeConfigBytes(f)
+			if err != nil {
+				return err
+			}
+			resp, err := daemon.GetClient(false).Leave(cmd.Context(), &rpc.LeaveRequest{
+				Namespace: ns,
 				Workloads: args,
 			})
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.LeaveResponse](leave)
+			err = util.PrintGRPCStream[rpc.LeaveResponse](resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil

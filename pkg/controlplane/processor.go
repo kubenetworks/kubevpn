@@ -57,7 +57,8 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 		if len(config.Uid) == 0 {
 			continue
 		}
-		lastConfig, ok := p.expireCache.Get(config.Uid)
+		uid := fmt.Sprintf("%s_%s", config.Namespace, config.Uid)
+		lastConfig, ok := p.expireCache.Get(uid)
 		if ok && reflect.DeepEqual(lastConfig.(*Virtual), config) {
 			marshal, _ := json.Marshal(config)
 			p.logger.Debugf("config are same, not needs to update, config: %s", string(marshal))
@@ -86,13 +87,13 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 			p.logger.Errorf("snapshot inconsistency: %v, err: %v", snapshot, err)
 			return err
 		}
-		p.logger.Debugf("will serve snapshot %+v, nodeID: %s", snapshot, config.Uid)
-		if err = p.cache.SetSnapshot(context.Background(), config.Uid, snapshot); err != nil {
+		p.logger.Debugf("will serve snapshot %+v, nodeID: %s", snapshot, uid)
+		if err = p.cache.SetSnapshot(context.Background(), uid, snapshot); err != nil {
 			p.logger.Errorf("snapshot error %q for %v", err, snapshot)
 			return err
 		}
 
-		p.expireCache.Set(config.Uid, config, time.Minute*5)
+		p.expireCache.Set(uid, config, time.Minute*5)
 	}
 	return nil
 }

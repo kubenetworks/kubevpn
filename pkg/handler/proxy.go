@@ -23,22 +23,23 @@ import (
 )
 
 type Proxy struct {
-	headers  map[string]string
-	portMap  []string
-	workload string
+	headers   map[string]string
+	portMap   []string
+	workload  string
+	namespace string
 
 	portMapper *Mapper
 }
 
 type ProxyList []*Proxy
 
-func (l *ProxyList) Remove(workload string) {
+func (l *ProxyList) Remove(ns, workload string) {
 	if l == nil {
 		return
 	}
 	for i := 0; i < len(*l); i++ {
 		p := (*l)[i]
-		if p.workload == workload {
+		if p.workload == workload && p.namespace == ns {
 			*l = append((*l)[:i], (*l)[i+1:]...)
 			i--
 		}
@@ -46,17 +47,19 @@ func (l *ProxyList) Remove(workload string) {
 	}
 }
 
-func (l *ProxyList) Add(proxy *Proxy) {
-	go proxy.portMapper.Run()
+func (l *ProxyList) Add(connectNamespace string, proxy *Proxy) {
+	go proxy.portMapper.Run(connectNamespace)
 	*l = append(*l, proxy)
 }
 
-func (l *ProxyList) IsMe(uid string, headers map[string]string) bool {
+func (l *ProxyList) IsMe(ns, uid string, headers map[string]string) bool {
 	if l == nil {
 		return false
 	}
 	for _, proxy := range *l {
-		if proxy.workload == util.ConvertUidToWorkload(uid) && reflect.DeepEqual(proxy.headers, headers) {
+		if proxy.workload == util.ConvertUidToWorkload(uid) &&
+			proxy.namespace == ns &&
+			reflect.DeepEqual(proxy.headers, headers) {
 			return true
 		}
 	}
@@ -87,7 +90,7 @@ type Mapper struct {
 	clientset *kubernetes.Clientset
 }
 
-func (m *Mapper) Run() {
+func (m *Mapper) Run(connectNamespace string) {
 	if m == nil {
 		return
 	}
@@ -102,7 +105,7 @@ func (m *Mapper) Run() {
 
 	var lastLocalPort2EnvoyRulePort map[int32]int32
 	for m.ctx.Err() == nil {
-		localPort2EnvoyRulePort, err := m.getLocalPort2EnvoyRulePort()
+		localPort2EnvoyRulePort, err := m.getLocalPort2EnvoyRulePort(connectNamespace)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				continue
@@ -177,8 +180,9 @@ func (m *Mapper) Run() {
 	}
 }
 
-func (m *Mapper) getLocalPort2EnvoyRulePort() (map[int32]int32, error) {
-	configMap, err := m.clientset.CoreV1().ConfigMaps(m.ns).Get(m.ctx, config.ConfigMapPodTrafficManager, v1.GetOptions{})
+func (m *Mapper) getLocalPort2EnvoyRulePort(connectNamespace string) (map[int32]int32, error) {
+	// todo get kubevpn-system configmap
+	configMap, err := m.clientset.CoreV1().ConfigMaps(connectNamespace).Get(m.ctx, config.ConfigMapPodTrafficManager, v1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +195,7 @@ func (m *Mapper) getLocalPort2EnvoyRulePort() (map[int32]int32, error) {
 
 	var localPort2EnvoyRulePort = make(map[int32]int32)
 	for _, virtual := range v {
-		if util.ConvertWorkloadToUid(m.workload) == virtual.Uid {
+		if util.ConvertWorkloadToUid(m.workload) == virtual.Uid && m.ns == virtual.Namespace {
 			for _, rule := range virtual.Rules {
 				if reflect.DeepEqual(m.headers, rule.Headers) {
 					for containerPort, portPair := range rule.PortMap {

@@ -14,6 +14,9 @@ const (
 	// configmap name
 	ConfigMapPodTrafficManager = "kubevpn-traffic-manager"
 
+	// const namespace
+	KubevpnNamespace = "kubevpn-system"
+
 	// config map keys
 	KeyDHCP             = "DHCP"
 	KeyDHCP6            = "DHCP6"

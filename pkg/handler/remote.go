@@ -134,7 +134,7 @@ func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *
 	plog.G(ctx).Infof("Creating MutatingWebhookConfiguration %s", config.ConfigMapPodTrafficManager)
 	mutatingWebhookConfiguration := genMutatingWebhookConfiguration(namespace, crt)
 	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, mutatingWebhookConfiguration, metav1.CreateOptions{})
-	if err != nil && !k8serrors.IsForbidden(err) && !k8serrors.IsAlreadyExists(err) {
+	if err != nil {
 		return fmt.Errorf("failed to create MutatingWebhookConfigurations: %v", err)
 	}
 

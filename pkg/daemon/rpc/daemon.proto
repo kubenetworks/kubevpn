@@ -112,7 +112,8 @@ message ProxyResponse {
 }
 
 message LeaveRequest {
-  repeated string Workloads = 1;
+  string Namespace = 1;
+  repeated string Workloads = 2;
 }
 
 message LeaveResponse {

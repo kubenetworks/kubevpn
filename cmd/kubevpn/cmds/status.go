@@ -71,8 +71,8 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				for _, config := range configs {
-					clusterID, err := GetClusterIDByConfig(cmd, config)
+				for _, conf := range configs {
+					clusterID, err := GetClusterIDByConfig(cmd, conf)
 					if err != nil {
 						return err
 					}
@@ -157,7 +157,7 @@ func genProxyMsg(w *tabwriter.Writer, list []*rpc.Status) {
 
 	_, _ = fmt.Fprintf(w, "\n")
 	w.SetRememberedWidths(nil)
-	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Name", "Headers", "IP", "PortMap", "CurrentPC")
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Namespace", "Name", "Headers", "IP", "PortMap", "CurrentPC")
 	for _, c := range list {
 		for _, proxy := range c.ProxyList {
 			for _, rule := range proxy.RuleList {
@@ -172,8 +172,9 @@ func genProxyMsg(w *tabwriter.Writer, list []*rpc.Status) {
 				for k, v := range rule.PortMap {
 					portmap = append(portmap, fmt.Sprintf("%d->%d", k, v))
 				}
-				_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%v\n",
+				_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%v\n",
 					c.ID,
+					proxy.Namespace,
 					proxy.Workload,
 					strings.Join(headers, ","),
 					rule.LocalTunIPv4,
@@ -199,7 +200,7 @@ func genCloneMsg(w *tabwriter.Writer, list []*rpc.Status) {
 
 	_, _ = fmt.Fprintf(w, "\n")
 	w.SetRememberedWidths(nil)
-	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Name", "Headers", "ToName", "ToKubeconfig", "ToNamespace", "SyncthingGUI")
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Namespace", "Name", "Headers", "ToName", "ToKubeconfig", "ToNamespace", "SyncthingGUI")
 	for _, c := range list {
 		for _, clone := range c.CloneList {
 			//_, _ = fmt.Fprintf(w, "%s\n", clone.Workload)
@@ -211,8 +212,9 @@ func genCloneMsg(w *tabwriter.Writer, list []*rpc.Status) {
 				if len(headers) == 0 {
 					headers = []string{"*"}
 				}
-				_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					c.ID,
+					clone.Namespace,
 					clone.Workload,
 					strings.Join(headers, ","),
 					rule.DstWorkload,
