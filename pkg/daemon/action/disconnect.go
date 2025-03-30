@@ -156,8 +156,8 @@ func disconnect(ctx context.Context, svr *Server, connect *handler.ConnectOption
 	if svr.connect != nil {
 		isSameCluster, _ := util.IsSameCluster(
 			ctx,
-			svr.connect.GetClientset().CoreV1().ConfigMaps(svr.connect.Namespace), svr.connect.Namespace,
-			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
+			svr.connect.GetClientset().CoreV1(), svr.connect.Namespace,
+			connect.GetClientset().CoreV1(), connect.Namespace,
 		)
 		if isSameCluster {
 			plog.G(ctx).Infof("Disconnecting from the cluster...")
@@ -170,8 +170,8 @@ func disconnect(ctx context.Context, svr *Server, connect *handler.ConnectOption
 		options := svr.secondaryConnect[i]
 		isSameCluster, _ := util.IsSameCluster(
 			ctx,
-			options.GetClientset().CoreV1().ConfigMaps(options.Namespace), options.Namespace,
-			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
+			options.GetClientset().CoreV1(), options.Namespace,
+			connect.GetClientset().CoreV1(), connect.Namespace,
 		)
 		if isSameCluster {
 			plog.G(ctx).Infof("Disconnecting from the cluster...")

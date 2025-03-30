@@ -31,7 +31,7 @@ import (
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
 
 // InjectVPNAndEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
-func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset v12.ConfigMapInterface, namespace, workload string, object *runtimeresource.Info, c util.PodRouteConfig, headers map[string]string, portMaps []string) (err error) {
+func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, mapInterface v12.ConfigMapInterface, connectNamespace string, object *runtimeresource.Info, c util.PodRouteConfig, headers map[string]string, portMaps []string) (err error) {
 	u := object.Object.(*unstructured.Unstructured)
 	var templateSpec *v1.PodTemplateSpec
 	var path []string
@@ -72,23 +72,23 @@ func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset 
 
 	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 
-	err = addEnvoyConfig(clientset, nodeID, c, headers, ports, portmap)
+	err = addEnvoyConfig(mapInterface, object.Namespace, nodeID, c, headers, ports, portmap)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to add envoy config: %v", err)
 		return err
 	}
-
+	workload := fmt.Sprintf("%s/%s", object.Mapping.Resource.Resource, object.Name)
 	// already inject container vpn and envoy-proxy, do nothing
 	containerNames := sets.New[string]()
 	for _, container := range templateSpec.Spec.Containers {
 		containerNames.Insert(container.Name)
 	}
 	if containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
-		plog.G(ctx).Infof("Workload %s/%s has already been injected with sidecar", namespace, workload)
+		plog.G(ctx).Infof("Workload %s/%s has already been injected with sidecar", connectNamespace, workload)
 		return nil
 	}
 
-	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, f, namespace)
+	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, f, connectNamespace)
 	// (1) add mesh container
 	AddMeshContainer(templateSpec, nodeID, c, enableIPv6)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
@@ -110,7 +110,7 @@ func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset 
 		return err
 	}
 	plog.G(ctx).Infof("Patching workload %s", workload)
-	err = util.RolloutStatus(ctx, f, namespace, workload, time.Minute*60)
+	err = util.RolloutStatus(ctx, f, object.Namespace, workload, time.Minute*60)
 	return err
 }
 
@@ -125,7 +125,7 @@ func UnPatchContainer(ctx context.Context, factory cmdutil.Factory, mapInterface
 	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 	workload := util.ConvertUidToWorkload(nodeID)
 	var empty, found bool
-	empty, found, err = removeEnvoyConfig(mapInterface, nodeID, isMeFunc)
+	empty, found, err = removeEnvoyConfig(mapInterface, object.Namespace, nodeID, isMeFunc)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to remove envoy config: %v", err)
 		return false, err
@@ -173,7 +173,7 @@ func UnPatchContainer(ctx context.Context, factory cmdutil.Factory, mapInterface
 	return empty, err
 }
 
-func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP util.PodRouteConfig, headers map[string]string, port []controlplane.ContainerPort, portmap map[int32]string) error {
+func addEnvoyConfig(mapInterface v12.ConfigMapInterface, ns, nodeID string, tunIP util.PodRouteConfig, headers map[string]string, port []controlplane.ContainerPort, portmap map[int32]string) error {
 	configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err
@@ -185,7 +185,7 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP ut
 		}
 	}
 
-	v = addVirtualRule(v, nodeID, port, headers, tunIP, portmap)
+	v = addVirtualRule(v, ns, nodeID, port, headers, tunIP, portmap)
 	marshal, err := yaml.Marshal(v)
 	if err != nil {
 		return err
@@ -195,10 +195,10 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, tunIP ut
 	return err
 }
 
-func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []controlplane.ContainerPort, headers map[string]string, tunIP util.PodRouteConfig, portmap map[int32]string) []*controlplane.Virtual {
+func addVirtualRule(v []*controlplane.Virtual, ns, nodeID string, port []controlplane.ContainerPort, headers map[string]string, tunIP util.PodRouteConfig, portmap map[int32]string) []*controlplane.Virtual {
 	var index = -1
 	for i, virtual := range v {
-		if nodeID == virtual.Uid {
+		if nodeID == virtual.Uid && virtual.Namespace == ns {
 			index = i
 			break
 		}
@@ -206,8 +206,9 @@ func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []controlplan
 	// 1) if not found uid, means nobody proxying it, just add it
 	if index < 0 {
 		return append(v, &controlplane.Virtual{
-			Uid:   nodeID,
-			Ports: port,
+			Uid:       nodeID,
+			Namespace: ns,
+			Ports:     port,
 			Rules: []*controlplane.Rule{{
 				Headers:      headers,
 				LocalTunIPv4: tunIP.LocalTunIPv4,
@@ -258,7 +259,7 @@ func addVirtualRule(v []*controlplane.Virtual, nodeID string, port []controlplan
 	return v
 }
 
-func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) (empty bool, found bool, err error) {
+func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, namespace string, nodeID string, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) (empty bool, found bool, err error) {
 	configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return true, false, nil
@@ -275,7 +276,7 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, isMeF
 		return false, false, err
 	}
 	for _, virtual := range v {
-		if nodeID == virtual.Uid {
+		if nodeID == virtual.Uid && namespace == virtual.Namespace {
 			var isFargateMode bool
 			for _, port := range virtual.Ports {
 				if port.EnvoyListenerPort != 0 {
@@ -297,7 +298,7 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, nodeID string, isMeF
 
 	// remove default
 	for i := 0; i < len(v); i++ {
-		if nodeID == v[i].Uid && len(v[i].Rules) == 0 {
+		if nodeID == v[i].Uid && namespace == v[i].Namespace && len(v[i].Rules) == 0 {
 			v = append(v[:i], v[i+1:]...)
 			i--
 			empty = true

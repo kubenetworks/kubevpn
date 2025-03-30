@@ -108,18 +108,21 @@ func gen(ctx context.Context, connect *handler.ConnectOptions, clone *handler.Cl
 			var proxyRule []*rpc.ProxyRule
 			for _, rule := range virtual.Rules {
 				proxyRule = append(proxyRule, &rpc.ProxyRule{
-					Headers:       rule.Headers,
-					LocalTunIPv4:  rule.LocalTunIPv4,
-					LocalTunIPv6:  rule.LocalTunIPv6,
-					CurrentDevice: util.If(isFargateMode, connect.IsMe(util.ConvertWorkloadToUid(virtual.Uid), rule.Headers), v4 == rule.LocalTunIPv4 && v6 == rule.LocalTunIPv6),
-					PortMap:       useSecondPort(rule.PortMap),
+					Headers:      rule.Headers,
+					LocalTunIPv4: rule.LocalTunIPv4,
+					LocalTunIPv6: rule.LocalTunIPv6,
+					CurrentDevice: util.If(isFargateMode,
+						connect.IsMe(virtual.Namespace, util.ConvertWorkloadToUid(virtual.Uid), rule.Headers),
+						v4 == rule.LocalTunIPv4 && v6 == rule.LocalTunIPv6,
+					),
+					PortMap: useSecondPort(rule.PortMap),
 				})
 			}
 			proxyList = append(proxyList, &rpc.Proxy{
 				ClusterID:  connect.GetClusterID(),
 				Cluster:    util.GetKubeconfigCluster(connect.GetFactory()),
 				Kubeconfig: connect.OriginKubeconfigPath,
-				Namespace:  connect.Namespace,
+				Namespace:  virtual.Namespace,
 				Workload:   virtual.Uid,
 				RuleList:   proxyRule,
 			})

@@ -42,10 +42,6 @@ func CmdServe(_ cmdutil.Factory) *cobra.Command {
 			rand.Seed(time.Now().UnixNano())
 			_, _ = maxprocs.Set(maxprocs.Logger(nil))
 			ctx := cmd.Context()
-			err := handler.Complete(ctx, route)
-			if err != nil {
-				return err
-			}
 			servers, err := handler.Parse(*route)
 			if err != nil {
 				plog.G(ctx).Errorf("Parse server failed: %v", err)

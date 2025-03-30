@@ -146,7 +146,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			err = util.PrintGRPCStream[rpc.ConnectResponse](client)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
-					err = leave(cli, args)
+					err = leave(cli, ns, args)
 					return err
 				}
 				return err
@@ -157,7 +157,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				// leave from cluster resources
 				<-cmd.Context().Done()
 
-				err = leave(cli, args)
+				err = leave(cli, ns, args)
 				if err != nil {
 					return err
 				}
@@ -176,8 +176,9 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	return cmd
 }
 
-func leave(cli rpc.DaemonClient, args []string) error {
+func leave(cli rpc.DaemonClient, ns string, args []string) error {
 	stream, err := cli.Leave(context.Background(), &rpc.LeaveRequest{
+		Namespace: ns,
 		Workloads: args,
 	})
 	if err != nil {

@@ -147,7 +147,7 @@ func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logge
 	return nil
 }
 
-func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, workloads []string, headers map[string]string, portMap []string) (err error) {
+func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string) (err error) {
 	if c.localTunIPv4 == nil || c.localTunIPv6 == nil {
 		return fmt.Errorf("local tun IP is invalid")
 	}
@@ -162,7 +162,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, workloads [
 			LocalTunIPv6: c.localTunIPv6.IP.String(),
 		}
 		var object *runtimeresource.Info
-		object, err = util.GetUnstructuredObject(c.factory, c.Namespace, workload)
+		object, err = util.GetUnstructuredObject(c.factory, namespace, workload)
 		if err != nil {
 			return err
 		}
@@ -175,21 +175,22 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, workloads [
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
 		if c.Engine == config.EngineGvisor {
-			err = inject.InjectEnvoySidecar(ctx, c.factory, c.clientset, c.Namespace, workload, object, headers, portMap)
+			err = inject.InjectEnvoySidecar(ctx, c.factory, c.clientset, c.Namespace, object, headers, portMap)
 		} else if len(headers) != 0 || len(portMap) != 0 {
-			err = inject.InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, workload, object, configInfo, headers, portMap)
+			err = inject.InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, object, configInfo, headers, portMap)
 		} else {
-			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, workload, object, configInfo)
+			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, object, configInfo)
 		}
 		if err != nil {
 			plog.G(ctx).Errorf("Injecting inbound sidecar for %s failed: %s", workload, err.Error())
 			return err
 		}
-		c.proxyWorkloads.Add(&Proxy{
+		c.proxyWorkloads.Add(c.Namespace, &Proxy{
 			headers:    headers,
 			portMap:    portMap,
 			workload:   workload,
-			portMapper: util.If(c.Engine == config.EngineGvisor, NewMapper(c.clientset, c.Namespace, labels.SelectorFromSet(templateSpec.Labels).String(), headers, workload), nil),
+			namespace:  namespace,
+			portMapper: util.If(c.Engine == config.EngineGvisor, NewMapper(c.clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), headers, workload), nil),
 		})
 	}
 	return
@@ -1152,18 +1153,14 @@ func (c *ConnectOptions) getRolloutFunc() []func() error {
 	return c.rollbackFuncList
 }
 
-func (c *ConnectOptions) LeavePortMap(workload string) {
-	c.proxyWorkloads.Remove(workload)
+func (c *ConnectOptions) LeavePortMap(ns, workload string) {
+	c.proxyWorkloads.Remove(ns, workload)
 }
 
-func (c *ConnectOptions) IsMe(uid string, headers map[string]string) bool {
-	return c.proxyWorkloads.IsMe(uid, headers)
+func (c *ConnectOptions) IsMe(ns, uid string, headers map[string]string) bool {
+	return c.proxyWorkloads.IsMe(ns, uid, headers)
 }
 
-func (c *ConnectOptions) ProxyResources() []string {
-	var resources []string
-	for _, workload := range c.proxyWorkloads {
-		resources = append(resources, workload.workload)
-	}
-	return resources
+func (c *ConnectOptions) ProxyResources() ProxyList {
+	return c.proxyWorkloads
 }

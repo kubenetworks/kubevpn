@@ -91,7 +91,7 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 	v4, _ := c.GetLocalTunIP()
 	for _, workload := range c.ProxyResources() {
 		// deployments.apps.ry-server --> deployments.apps/ry-server
-		object, err := util.GetUnstructuredObject(c.factory, c.Namespace, workload)
+		object, err := util.GetUnstructuredObject(c.factory, workload.namespace, workload.workload)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
 			return err
@@ -105,7 +105,7 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 		var empty bool
 		empty, err = inject.UnPatchContainer(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), object, func(isFargateMode bool, rule *controlplane.Rule) bool {
 			if isFargateMode {
-				return c.IsMe(util.ConvertWorkloadToUid(workload), rule.Headers)
+				return c.IsMe(workload.namespace, util.ConvertWorkloadToUid(workload.workload), rule.Headers)
 			}
 			return rule.LocalTunIPv4 == v4
 		})
@@ -114,9 +114,9 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 			continue
 		}
 		if empty {
-			err = inject.ModifyServiceTargetPort(ctx, c.clientset, c.Namespace, templateSpec.Labels, map[int32]int32{})
+			err = inject.ModifyServiceTargetPort(ctx, c.clientset, workload.namespace, templateSpec.Labels, map[int32]int32{})
 		}
-		c.LeavePortMap(workload)
+		c.LeavePortMap(workload.namespace, workload.workload)
 	}
 	return err
 }

@@ -15,9 +15,6 @@ import (
 
 func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) error {
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newResetWarp(resp), svr.LogFile))
-	connect := &handler.ConnectOptions{
-		Namespace: req.Namespace,
-	}
 
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
@@ -35,11 +32,12 @@ func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) err
 	if err != nil {
 		return err
 	}
+	connect := &handler.ConnectOptions{}
 	err = connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
 	if err != nil {
 		return err
 	}
-	err = connect.Reset(ctx, req.Workloads)
+	err = connect.Reset(ctx, req.Namespace, req.Workloads)
 	if err != nil {
 		return err
 	}

@@ -28,13 +28,6 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newProxyWarp(resp), svr.LogFile))
 	config.Image = req.Image
 	ctx := plog.WithLogger(resp.Context(), logger)
-	connect := &handler.ConnectOptions{
-		Namespace:            req.Namespace,
-		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
-		Engine:               config.Engine(req.Engine),
-		OriginKubeconfigPath: req.OriginKubeconfigPath,
-		ImagePullSecretName:  req.ImagePullSecretName,
-	}
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
@@ -51,12 +44,19 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 	if err != nil {
 		return err
 	}
+	connect := &handler.ConnectOptions{
+		Namespace:            req.Namespace,
+		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
+		Engine:               config.Engine(req.Engine),
+		OriginKubeconfigPath: req.OriginKubeconfigPath,
+		ImagePullSecretName:  req.ImagePullSecretName,
+	}
 	err = connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
 	if err != nil {
 		return err
 	}
 	var workloads []string
-	workloads, err = util.NormalizedResource(ctx, connect.GetFactory(), connect.GetClientset(), connect.Namespace, req.Workloads)
+	workloads, err = util.NormalizedResource(ctx, connect.GetFactory(), connect.GetClientset(), req.Namespace, req.Workloads)
 	if err != nil {
 		return err
 	}
@@ -74,8 +74,8 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 	if svr.connect != nil {
 		isSameCluster, _ := util.IsSameCluster(
 			ctx,
-			svr.connect.GetClientset().CoreV1().ConfigMaps(svr.connect.Namespace), svr.connect.Namespace,
-			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
+			svr.connect.GetClientset().CoreV1(), svr.connect.Namespace,
+			connect.GetClientset().CoreV1(), connect.Namespace,
 		)
 		if isSameCluster {
 			// same cluster, do nothing
@@ -85,7 +85,7 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 			var disconnectResp rpc.Daemon_DisconnectClient
 			disconnectResp, err = daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{
 				KubeconfigBytes: ptr.To(req.KubeconfigBytes),
-				Namespace:       ptr.To(connect.Namespace),
+				Namespace:       ptr.To(req.Namespace),
 				SshJump:         sshConf.ToRPC(),
 			})
 			if err != nil {
@@ -117,7 +117,7 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 		}
 	}
 
-	err = svr.connect.CreateRemoteInboundPod(ctx, workloads, req.Headers, req.PortMap)
+	err = svr.connect.CreateRemoteInboundPod(ctx, req.Namespace, workloads, req.Headers, req.PortMap)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to inject inbound sidecar: %v", err)
 		return err

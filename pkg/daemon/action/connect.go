@@ -143,8 +143,8 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	if svr.connect != nil {
 		isSameCluster, _ := util.IsSameCluster(
 			sshCtx,
-			svr.connect.GetClientset().CoreV1().ConfigMaps(svr.connect.Namespace), svr.connect.Namespace,
-			connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace), connect.Namespace,
+			svr.connect.GetClientset().CoreV1(), svr.connect.Namespace,
+			connect.GetClientset().CoreV1(), connect.Namespace,
 		)
 		if isSameCluster {
 			// same cluster, do nothing

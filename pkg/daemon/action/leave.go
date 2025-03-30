@@ -25,10 +25,10 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 
 	factory := svr.connect.GetFactory()
 	namespace := svr.connect.Namespace
-	maps := svr.connect.GetClientset().CoreV1().ConfigMaps(namespace)
+	mapInterface := svr.connect.GetClientset().CoreV1().ConfigMaps(namespace)
 	v4, _ := svr.connect.GetLocalTunIP()
 	for _, workload := range req.GetWorkloads() {
-		object, err := util.GetUnstructuredObject(factory, namespace, workload)
+		object, err := util.GetUnstructuredObject(factory, req.Namespace, workload)
 		if err != nil {
 			logger.Errorf("Failed to get unstructured object: %v", err)
 			return err
@@ -41,9 +41,9 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 		}
 		// add rollback func to remove envoy config
 		var empty bool
-		empty, err = inject.UnPatchContainer(ctx, factory, maps, object, func(isFargateMode bool, rule *controlplane.Rule) bool {
+		empty, err = inject.UnPatchContainer(ctx, factory, mapInterface, object, func(isFargateMode bool, rule *controlplane.Rule) bool {
 			if isFargateMode {
-				return svr.connect.IsMe(util.ConvertWorkloadToUid(workload), rule.Headers)
+				return svr.connect.IsMe(req.Namespace, util.ConvertWorkloadToUid(workload), rule.Headers)
 			}
 			return rule.LocalTunIPv4 == v4
 		})
@@ -52,10 +52,10 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 			continue
 		}
 		if empty {
-			err = inject.ModifyServiceTargetPort(ctx, svr.connect.GetClientset(), namespace, templateSpec.Labels, map[int32]int32{})
+			err = inject.ModifyServiceTargetPort(ctx, svr.connect.GetClientset(), req.Namespace, templateSpec.Labels, map[int32]int32{})
 		}
-		svr.connect.LeavePortMap(workload)
-		err = util.RolloutStatus(ctx, factory, namespace, workload, time.Minute*60)
+		svr.connect.LeavePortMap(req.Namespace, workload)
+		err = util.RolloutStatus(ctx, factory, req.Namespace, workload, time.Minute*60)
 	}
 	return nil
 }
