@@ -12,3 +12,7 @@ func Join(names ...string) string {
 func ContainerNet(name string) string {
 	return fmt.Sprintf("container:%s", name)
 }
+
+func GenEnvoyUID(ns, uid string) string {
+	return fmt.Sprintf("%s.%s", ns, uid)
+}

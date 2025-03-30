@@ -57,7 +57,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 		if len(config.Uid) == 0 {
 			continue
 		}
-		uid := fmt.Sprintf("%s_%s", config.Namespace, config.Uid)
+		uid := util.GenEnvoyUID(config.Namespace, config.Uid)
 		lastConfig, ok := p.expireCache.Get(uid)
 		if ok && reflect.DeepEqual(lastConfig.(*Virtual), config) {
 			marshal, _ := json.Marshal(config)
