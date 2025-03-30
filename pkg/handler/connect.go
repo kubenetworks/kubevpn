@@ -296,8 +296,8 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 
 				sortBy := func(pods []*v1.Pod) sort.Interface { return sort.Reverse(podutils.ActivePods(pods)) }
 				label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
-				_, _, _ = polymorphichelpers.GetFirstPod(c.clientset.CoreV1(), c.Namespace, label, time.Second*10, sortBy)
-				ctx2, cancelFunc2 := context.WithTimeout(ctx, time.Second*10)
+				_, _, _ = polymorphichelpers.GetFirstPod(c.clientset.CoreV1(), c.Namespace, label, time.Second*5, sortBy)
+				ctx2, cancelFunc2 := context.WithTimeout(ctx, time.Second*5)
 				defer cancelFunc2()
 				podList, err := c.GetRunningPodList(ctx2)
 				if err != nil {
