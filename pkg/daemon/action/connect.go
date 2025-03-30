@@ -44,9 +44,6 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	svr.t = time.Now()
 	svr.connect = &handler.ConnectOptions{
 		Namespace:            req.Namespace,
-		Headers:              req.Headers,
-		PortMap:              req.PortMap,
-		Workloads:            req.Workloads,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
@@ -108,9 +105,6 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	}
 	connect := &handler.ConnectOptions{
 		Namespace:            req.Namespace,
-		Headers:              req.Headers,
-		PortMap:              req.PortMap,
-		Workloads:            req.Workloads,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,

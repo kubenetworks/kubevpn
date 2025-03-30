@@ -8,7 +8,7 @@ service Daemon {
   rpc Connect (ConnectRequest) returns (stream ConnectResponse) {}
   rpc ConnectFork (ConnectRequest) returns (stream ConnectResponse) {}
   rpc Disconnect (DisconnectRequest) returns (stream DisconnectResponse) {}
-  rpc Proxy (ConnectRequest) returns (stream ConnectResponse) {}
+  rpc Proxy (ProxyRequest) returns (stream ProxyResponse) {}
   rpc Leave (LeaveRequest) returns (stream LeaveResponse) {}
   rpc Clone (CloneRequest) returns (stream CloneResponse) {}
   rpc Remove (RemoveRequest) returns (stream RemoveResponse) {}
@@ -33,6 +33,53 @@ service Daemon {
 }
 
 message ConnectRequest {
+  string KubeconfigBytes = 1;
+  string Namespace = 2;
+  string Engine = 3;
+
+  // extra route table info
+  ExtraRoute ExtraRoute = 4;
+
+  // ssh jump
+  SshJump SshJump = 5;
+
+  // transfer image
+  bool TransferImage = 6;
+  string Image = 7;
+  string ImagePullSecretName = 8;
+
+  // foreground
+  bool Foreground = 9;
+
+  // log level
+  int32 Level = 10;
+
+  string OriginKubeconfigPath = 11;
+}
+
+message ConnectResponse {
+  string message = 1;
+}
+
+message DisconnectRequest {
+  // 1) disconnect by id
+  optional int32 ID = 1;
+  // 2) disconnect all
+  optional bool All = 2;
+  // 3) disconnect by kubeConfig
+  optional string KubeconfigBytes = 3;
+  optional string Namespace = 4;
+  SshJump SshJump = 5;
+  // 4) disconnect by cluster ids
+  repeated string ClusterIDs = 6;
+}
+
+message DisconnectResponse {
+  string message = 1;
+}
+
+
+message ProxyRequest {
   string KubeconfigBytes = 1;
   string Namespace = 2;
   map<string, string> Headers = 3;
@@ -60,24 +107,7 @@ message ConnectRequest {
   string OriginKubeconfigPath = 15;
 }
 
-message ConnectResponse {
-  string message = 1;
-}
-
-message DisconnectRequest {
-  // 1) disconnect by id
-  optional int32 ID = 1;
-  // 2) disconnect all
-  optional bool All = 2;
-  // 3) disconnect by kubeConfig
-  optional string KubeconfigBytes = 3;
-  optional string Namespace = 4;
-  SshJump SshJump = 5;
-  // 4) disconnect by cluster ids
-  repeated string ClusterIDs = 6;
-}
-
-message DisconnectResponse {
+message ProxyResponse {
   string message = 1;
 }
 

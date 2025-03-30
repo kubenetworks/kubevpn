@@ -106,7 +106,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 		}
 		// not needs to ssh jump in daemon, because dev mode will hang up until user exit,
 		// so just ssh jump in client is enough
-		req := &rpc.ConnectRequest{
+		req := &rpc.ProxyRequest{
 			KubeconfigBytes:      string(kubeConfigBytes),
 			Namespace:            ns,
 			Headers:              option.Headers,
@@ -131,7 +131,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			_ = util.PrintGRPCStream[rpc.DisconnectResponse](resp)
 			return nil
 		})
-		var resp rpc.Daemon_ConnectClient
+		var resp rpc.Daemon_ProxyClient
 		resp, err = daemonCli.Proxy(ctx, req)
 		if err != nil {
 			plog.G(ctx).Errorf("Connect to cluster error: %s", err.Error())
