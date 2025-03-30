@@ -335,7 +335,7 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				return err != nil
 			},
 			func() error {
-				ctx1, cancelFunc1 := context.WithTimeout(ctx, time.Second*10)
+				ctx1, cancelFunc1 := context.WithTimeout(ctx, time.Second*5)
 				defer cancelFunc1()
 				_, err := podInterface.Get(ctx1, podName, v1.GetOptions{})
 				return err
