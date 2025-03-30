@@ -39,11 +39,6 @@ func GetClusterIDByCM(cm *v1.ConfigMap) types.UID {
 }
 
 func IsSameCluster(ctx context.Context, client v12.CoreV1Interface, namespace string, clientB v12.CoreV1Interface, namespaceB string) (bool, error) {
-	if UseDefaultNs(ctx, client) {
-		namespace = config.KubevpnNamespace
-		namespaceB = config.KubevpnNamespace
-	}
-
 	if namespace != namespaceB {
 		return false, nil
 	}
@@ -57,11 +52,6 @@ func IsSameCluster(ctx context.Context, client v12.CoreV1Interface, namespace st
 		return false, err
 	}
 	return clusterIDA == clusterIDB, nil
-}
-
-func UseDefaultNs(ctx context.Context, client v12.CoreV1Interface) bool {
-	_, err := client.Services(config.KubevpnNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	return err == nil
 }
 
 func ConvertToKubeConfigBytes(factory cmdutil.Factory) ([]byte, string, error) {

@@ -23,8 +23,13 @@ import (
 
 // create pod will rent ip and delete pod will release ip
 func (h *admissionReviewHandler) admitPods(ar v1.AdmissionReview) *v1.AdmissionResponse {
-	r, _ := json.Marshal(ar)
-	plog.G(context.Background()).Infof("Admitting pods called, req: %v", string(r))
+	var name, ns string
+	accessor, _ := meta.Accessor(ar.Request.Object.Object)
+	if accessor != nil {
+		name = accessor.GetName()
+		ns = accessor.GetNamespace()
+	}
+	plog.G(context.Background()).Infof("Admitting %s pods called, name: %s, namespace: %s", ar.Request.Operation, name, ns)
 	podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 	if ar.Request.Resource != podResource {
 		err := fmt.Errorf("expect resource to be %s but real %s", podResource, ar.Request.Resource)

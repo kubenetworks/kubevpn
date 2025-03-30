@@ -81,6 +81,10 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			helmNs, _ := util.GetHelmInstalledNamespace(cmd.Context(), f)
+			if helmNs != "" {
+				ns = helmNs
+			}
 			if !sshConf.IsEmpty() {
 				if ip := util.GetAPIServerFromKubeConfigBytes(bytes); ip != nil {
 					extraRoute.ExtraCIDR = append(extraRoute.ExtraCIDR, ip.String())

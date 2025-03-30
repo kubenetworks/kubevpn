@@ -71,12 +71,10 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		return
 	}
 
-	plog.G(context.Background()).Infof("Handling request: %s", body)
-
 	deserializer := codecs.UniversalDeserializer()
 	obj, gvk, err := deserializer.Decode(body, nil, nil)
 	if err != nil {
-		msg := fmt.Sprintf("Request could not be decoded: %v", err)
+		msg := fmt.Sprintf("Request: %s could not be decoded: %v", string(body), err)
 		plog.G(context.Background()).Error(msg)
 		http.Error(w, msg, http.StatusBadRequest)
 		return

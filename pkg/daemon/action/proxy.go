@@ -71,6 +71,11 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 	if daemonClient == nil {
 		return fmt.Errorf("daemon is not avaliable")
 	}
+	helmNs, _ := util.GetHelmInstalledNamespace(ctx, connect.GetFactory())
+	if helmNs != "" {
+		connect.Namespace = helmNs
+	}
+
 	if svr.connect != nil {
 		isSameCluster, _ := util.IsSameCluster(
 			ctx,
@@ -107,7 +112,7 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 	if svr.connect == nil {
 		plog.G(ctx).Debugf("Connectting to cluster")
 		var connResp rpc.Daemon_ConnectClient
-		connResp, err = daemonClient.Connect(ctx, convert(req))
+		connResp, err = daemonClient.Connect(ctx, convert(req, helmNs))
 		if err != nil {
 			return err
 		}
@@ -140,10 +145,10 @@ func newProxyWarp(server rpc.Daemon_ProxyServer) io.Writer {
 	return &proxyWarp{server: server}
 }
 
-func convert(req *rpc.ProxyRequest) *rpc.ConnectRequest {
+func convert(req *rpc.ProxyRequest, ns string) *rpc.ConnectRequest {
 	return &rpc.ConnectRequest{
 		KubeconfigBytes:      req.KubeconfigBytes,
-		Namespace:            req.Namespace,
+		Namespace:            util.If(ns != "", ns, req.Namespace),
 		Engine:               req.Engine,
 		ExtraRoute:           req.ExtraRoute,
 		SshJump:              req.SshJump,

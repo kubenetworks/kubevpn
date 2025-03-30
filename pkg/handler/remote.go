@@ -476,7 +476,14 @@ kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:1080
 									},
 								},
 							}},
-							Env:             []v1.EnvVar{},
+							Env: []v1.EnvVar{{
+								Name: config.EnvPodNamespace,
+								ValueFrom: &v1.EnvVarSource{
+									FieldRef: &v1.ObjectFieldSelector{
+										FieldPath: "metadata.namespace",
+									},
+								},
+							}},
 							ImagePullPolicy: v1.PullIfNotPresent,
 							Resources:       resourcesSmall,
 						},
