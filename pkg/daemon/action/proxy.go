@@ -24,15 +24,12 @@ import (
 //  2. if already connect to cluster
 //     2.1 disconnect from cluster
 //     2.2 same as step 1
-func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (e error) {
+func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e error) {
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newProxyWarp(resp), svr.LogFile))
 	config.Image = req.Image
 	ctx := plog.WithLogger(resp.Context(), logger)
 	connect := &handler.ConnectOptions{
 		Namespace:            req.Namespace,
-		Headers:              req.Headers,
-		PortMap:              req.PortMap,
-		Workloads:            req.Workloads,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
@@ -59,7 +56,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 		return err
 	}
 	var workloads []string
-	workloads, err = util.NormalizedResource(ctx, connect.GetFactory(), connect.GetClientset(), connect.Namespace, connect.Workloads)
+	workloads, err = util.NormalizedResource(ctx, connect.GetFactory(), connect.GetClientset(), connect.Namespace, req.Workloads)
 	if err != nil {
 		return err
 	}
@@ -110,7 +107,7 @@ func (svr *Server) Proxy(req *rpc.ConnectRequest, resp rpc.Daemon_ProxyServer) (
 	if svr.connect == nil {
 		plog.G(ctx).Debugf("Connectting to cluster")
 		var connResp rpc.Daemon_ConnectClient
-		connResp, err = daemonClient.Connect(ctx, req)
+		connResp, err = daemonClient.Connect(ctx, convert(req))
 		if err != nil {
 			return err
 		}
@@ -133,7 +130,7 @@ type proxyWarp struct {
 }
 
 func (r *proxyWarp) Write(p []byte) (n int, err error) {
-	_ = r.server.Send(&rpc.ConnectResponse{
+	_ = r.server.Send(&rpc.ProxyResponse{
 		Message: string(p),
 	})
 	return len(p), nil
@@ -141,4 +138,20 @@ func (r *proxyWarp) Write(p []byte) (n int, err error) {
 
 func newProxyWarp(server rpc.Daemon_ProxyServer) io.Writer {
 	return &proxyWarp{server: server}
+}
+
+func convert(req *rpc.ProxyRequest) *rpc.ConnectRequest {
+	return &rpc.ConnectRequest{
+		KubeconfigBytes:      req.KubeconfigBytes,
+		Namespace:            req.Namespace,
+		Engine:               req.Engine,
+		ExtraRoute:           req.ExtraRoute,
+		SshJump:              req.SshJump,
+		TransferImage:        req.TransferImage,
+		Image:                req.Image,
+		ImagePullSecretName:  req.ImagePullSecretName,
+		Foreground:           req.Foreground,
+		Level:                req.Level,
+		OriginKubeconfigPath: req.OriginKubeconfigPath,
+	}
 }

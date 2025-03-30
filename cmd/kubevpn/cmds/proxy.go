@@ -25,6 +25,8 @@ import (
 )
 
 func CmdProxy(f cmdutil.Factory) *cobra.Command {
+	var headers = make(map[string]string)
+	var portmap []string
 	var connect = handler.ConnectOptions{}
 	var extraRoute = &handler.ExtraRouteInfo{}
 	var sshConf = &pkgssh.SshConfig{}
@@ -122,11 +124,11 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			cli := daemon.GetClient(false)
 			client, err := cli.Proxy(
 				cmd.Context(),
-				&rpc.ConnectRequest{
+				&rpc.ProxyRequest{
 					KubeconfigBytes:      string(bytes),
 					Namespace:            ns,
-					Headers:              connect.Headers,
-					PortMap:              connect.PortMap,
+					Headers:              headers,
+					PortMap:              portmap,
 					Workloads:            args,
 					ExtraRoute:           extraRoute.ToRPC(),
 					Engine:               string(connect.Engine),
@@ -163,8 +165,8 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringToStringVarP(&connect.Headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to local PC, If not special, redirect all traffic to local PC. format: <KEY>=<VALUE> eg: --headers foo=bar --headers env=dev")
-	cmd.Flags().StringArrayVar(&connect.PortMap, "portmap", []string{}, "Port map, map container port to local port, format: [tcp/udp]/containerPort:localPort, If not special, localPort will use containerPort. eg: tcp/80:8080 or udp/5000:5001 or 80 or 80:8080")
+	cmd.Flags().StringToStringVarP(&headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to local PC, If not special, redirect all traffic to local PC. format: <KEY>=<VALUE> eg: --headers foo=bar --headers env=dev")
+	cmd.Flags().StringArrayVar(&portmap, "portmap", []string{}, "Port map, map container port to local port, format: [tcp/udp]/containerPort:localPort, If not special, localPort will use containerPort. eg: tcp/80:8080 or udp/5000:5001 or 80 or 80:8080")
 	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName, &connect.Engine)
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "foreground hang up")
 

@@ -59,9 +59,6 @@ import (
 
 type ConnectOptions struct {
 	Namespace            string
-	Headers              map[string]string
-	PortMap              []string
-	Workloads            []string
 	ExtraRouteInfo       ExtraRouteInfo
 	Engine               config.Engine
 	Foreground           bool
