@@ -156,7 +156,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 	}
 
 	for _, workload := range workloads {
-		plog.G(ctx).Infof("Injecting inbound sidecar for %s", workload)
+		plog.G(ctx).Infof("Injecting inbound sidecar for %s in namespace %s", workload, namespace)
 		configInfo := util.PodRouteConfig{
 			LocalTunIPv4: c.localTunIPv4.IP.String(),
 			LocalTunIPv6: c.localTunIPv6.IP.String(),
@@ -182,7 +182,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, object, configInfo)
 		}
 		if err != nil {
-			plog.G(ctx).Errorf("Injecting inbound sidecar for %s failed: %s", workload, err.Error())
+			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %s", workload, namespace, err.Error())
 			return err
 		}
 		c.proxyWorkloads.Add(c.Namespace, &Proxy{
@@ -286,7 +286,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 	defer firstCancelFunc()
 	var errChan = make(chan error, 1)
 	go func() {
-		runtime.ErrorHandlers = []func(error){}
+		runtime.ErrorHandlers = runtime.ErrorHandlers[0:0]
 		var first = pointer.Bool(true)
 		for ctx.Err() == nil {
 			func() {

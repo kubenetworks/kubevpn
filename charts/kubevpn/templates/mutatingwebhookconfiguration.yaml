@@ -16,9 +16,7 @@ webhooks:
     failurePolicy: Ignore
     matchPolicy: Equivalent
     name: {{ include "kubevpn.fullname" . }}.naison.io
-    namespaceSelector:
-      matchLabels:
-        ns: {{ .Release.Namespace }}
+    namespaceSelector: { }
     objectSelector: { }
     reinvocationPolicy: Never
     rules:

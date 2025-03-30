@@ -60,13 +60,6 @@ iptables -t nat -A POSTROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR4} -j MASQUER
 ip6tables -t nat -A POSTROUTING ! -p icmp ! -s 0:0:0:0:0:0:0:1 ! -d ${CIDR6} -j MASQUERADE
 kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://${TrafficManagerService}:10800"`,
 		},
-		EnvFrom: []v1.EnvFromSource{{
-			SecretRef: &v1.SecretEnvSource{
-				LocalObjectReference: v1.LocalObjectReference{
-					Name: config.ConfigMapPodTrafficManager,
-				},
-			},
-		}},
 		Env: []v1.EnvVar{
 			{
 				Name:  "CIDR4",
