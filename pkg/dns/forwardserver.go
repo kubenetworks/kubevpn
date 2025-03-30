@@ -6,29 +6,20 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	miekgdns "github.com/miekg/dns"
-	"golang.org/x/sync/semaphore"
-	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/util/cache"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-)
-
-var (
-	maxConcurrent int64 = 1024
-	logInterval         = 2 * time.Second
 )
 
 // github.com/docker/docker@v23.0.1+incompatible/libnetwork/network_windows.go:53
 type server struct {
 	dnsCache   *cache.LRUExpireCache
 	forwardDNS *miekgdns.ClientConfig
-	client     *miekgdns.Client
-
-	fwdSem      *semaphore.Weighted // Limit the number of concurrent external DNS requests in-flight
-	logInterval rate.Sometimes      // Rate-limit logging about hitting the fwdSem limit
 }
 
 func ListenAndServe(network, address string, forwardDNS *miekgdns.ClientConfig) error {
@@ -36,11 +27,8 @@ func ListenAndServe(network, address string, forwardDNS *miekgdns.ClientConfig) 
 		forwardDNS.Port = strconv.Itoa(53)
 	}
 	return miekgdns.ListenAndServe(address, network, &server{
-		dnsCache:    cache.NewLRUExpireCache(1000),
-		forwardDNS:  forwardDNS,
-		client:      &miekgdns.Client{Net: "udp", Timeout: time.Second * 30},
-		fwdSem:      semaphore.NewWeighted(maxConcurrent),
-		logInterval: rate.Sometimes{Interval: logInterval},
+		dnsCache:   cache.NewLRUExpireCache(1000 * 1000),
+		forwardDNS: forwardDNS,
 	})
 }
 
@@ -54,21 +42,14 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 		return
 	}
 
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancelFunc()
-	// limits the number of outstanding concurrent queries
-	err := s.fwdSem.Acquire(ctx, 1)
-	if err != nil {
-		s.logInterval.Do(func() {
-			plog.G(ctx).Errorf("DNS server more than %v concurrent queries", maxConcurrent)
-		})
-		m.SetRcode(m, miekgdns.RcodeRefused)
-		return
-	}
-	defer s.fwdSem.Release(1)
-
 	var q = m.Question[0]
 	var originName = q.Name
+
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancelFunc()
+
+	var wg = &sync.WaitGroup{}
+	var isSuccess = &atomic.Bool{}
 
 	searchList := fix(originName, s.forwardDNS.Search)
 	if v, ok := s.dnsCache.Get(originName); ok {
@@ -78,42 +59,53 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 
 	for _, name := range searchList {
 		for _, dnsAddr := range s.forwardDNS.Servers {
-			var msg = m.Copy()
-			for i := 0; i < len(msg.Question); i++ {
-				msg.Question[i].Name = name
-			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var msg = m.Copy()
+				for i := 0; i < len(msg.Question); i++ {
+					msg.Question[i].Name = name
+				}
 
-			var answer *miekgdns.Msg
-			answer, _, err = s.client.ExchangeContext(context.Background(), msg, net.JoinHostPort(dnsAddr, s.forwardDNS.Port))
-			if err != nil {
-				plog.G(ctx).Errorf("Failed to found DNS name: %s: %v", name, err)
-				continue
-			}
-			if len(answer.Answer) == 0 {
-				plog.G(ctx).Infof("DNS answer is empty for name: %s", name)
-				continue
-			}
+				var answer *miekgdns.Msg
+				answer, err := miekgdns.ExchangeContext(ctx, msg, net.JoinHostPort(dnsAddr, s.forwardDNS.Port))
+				if err != nil {
+					plog.G(ctx).Errorf("Failed to found DNS name: %s: %v", name, err)
+					return
+				}
+				if len(answer.Answer) == 0 {
+					return
+				}
+				if isSuccess.Load() {
+					return
+				}
 
-			s.dnsCache.Add(originName, name, time.Minute*30)
-			plog.G(ctx).Infof("Add cache: %s --> %s", originName, name)
+				isSuccess.Store(true)
+				s.dnsCache.Add(originName, name, time.Minute*30)
+				plog.G(ctx).Infof("Resolve domain %s with full name: %s --> %s", originName, name, answer.Answer[0].String())
 
-			for i := 0; i < len(answer.Answer); i++ {
-				answer.Answer[i].Header().Name = originName
-			}
-			for i := 0; i < len(answer.Question); i++ {
-				answer.Question[i].Name = originName
-			}
+				for i := 0; i < len(answer.Answer); i++ {
+					answer.Answer[i].Header().Name = originName
+				}
+				for i := 0; i < len(answer.Question); i++ {
+					answer.Question[i].Name = originName
+				}
 
-			err = w.WriteMsg(answer)
-			if err != nil {
-				plog.G(ctx).Errorf("Failed to write response for name: %s: %v", name, err.Error())
-			}
-			return
+				err = w.WriteMsg(answer)
+				if err != nil {
+					plog.G(context.Background()).Errorf("Failed to write response for name: %s: %v", name, err.Error())
+				}
+			}()
 		}
 	}
 
-	m.Response = true
-	_ = w.WriteMsg(m)
+	wg.Wait()
+
+	if !isSuccess.Load() {
+		plog.G(ctx).Errorf("can't found domain name: %s", originName)
+		m.Response = true
+		_ = w.WriteMsg(m)
+	}
 }
 
 // productpage.default.svc.cluster.local.
