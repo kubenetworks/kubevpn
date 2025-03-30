@@ -2,12 +2,15 @@ package util
 
 import (
 	"context"
+    "fmt"
 	"os"
 
 	"github.com/pkg/errors"
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/release/v1"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 // GetHelmInstalledNamespace
@@ -28,10 +31,10 @@ func GetHelmInstalledNamespace(ctx context.Context, f cmdutil.Factory) (string, 
 		return "", err
 	}
 	for _, app := range releases {
-		if app.Name == "kubevpn" &&
+		if app.Name == config.HelmAppNameKubevpn &&
 			app.Info != nil && app.Info.Status == v1.StatusDeployed {
 			return app.Namespace, nil
 		}
 	}
-	return "", errors.New("app kubevpn not found")
+	return "", errors.New(fmt.Sprintf("app %s not found", config.HelmAppNameKubevpn))
 }

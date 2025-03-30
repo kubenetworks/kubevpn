@@ -14,6 +14,9 @@ const (
 	// configmap name
 	ConfigMapPodTrafficManager = "kubevpn-traffic-manager"
 
+	// helm app name kubevpn
+	HelmAppNameKubevpn = "kubevpn"
+
 	// config map keys
 	KeyDHCP             = "DHCP"
 	KeyDHCP6            = "DHCP6"
