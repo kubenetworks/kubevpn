@@ -942,7 +942,7 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 
 	plog.G(ctx).Infof("Set image %s --> %s...", serverImg, clientImg)
 
-	err = upgradeDeploySpec(ctx, c.factory, c.Namespace, deploy.Name, clientImg)
+	err = upgradeDeploySpec(ctx, c.factory, c.Namespace, deploy.Name, c.Engine == config.EngineGvisor)
 	if err != nil {
 		return err
 	}
@@ -957,7 +957,7 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 	return nil
 }
 
-func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name string, targetImage string) error {
+func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name string, gvisor bool) error {
 	r := f.NewBuilder().
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
 		NamespaceParam(ns).DefaultNamespace().
@@ -991,47 +991,20 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name string, 
 	}
 	patches := set.CalculatePatches(infos, scheme.DefaultJSONEncoder(), func(obj pkgruntime.Object) ([]byte, error) {
 		_, err = polymorphichelpers.UpdatePodSpecForObjectFn(obj, func(spec *v1.PodSpec) error {
-			for i := range spec.Containers {
-				spec.Containers[i].Image = targetImage
-
-				// update tun cidr for vpn
-				if spec.Containers[i].Name == config.ContainerSidecarVPN {
-					innerIpv4CIDR := net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}
-					innerIpv6CIDR := net.IPNet{IP: config.RouterIP6, Mask: config.CIDR6.Mask}
-					envVars := []v1.EnvVar{
-						{
-							Name:  "CIDR4",
-							Value: config.CIDR.String(),
-						},
-						{
-							Name:  "CIDR6",
-							Value: config.CIDR6.String(),
-						},
-						{
-							Name:  config.EnvInboundPodTunIPv4,
-							Value: innerIpv4CIDR.String(),
-						},
-						{
-							Name:  config.EnvInboundPodTunIPv6,
-							Value: innerIpv6CIDR.String(),
-						},
-					}
-
-					for _, env := range envVars {
-						found := false
-						for j, existing := range spec.Containers[i].Env {
-							if existing.Name == env.Name {
-								spec.Containers[i].Env[j].Value = env.Value
-								found = true
-								break
-							}
-						}
-						if !found {
-							spec.Containers[i].Env = append(spec.Containers[i].Env, env)
-						}
-					}
+			udp8422 := "8422-for-udp"
+			tcp10800 := "10800-for-tcp"
+			tcp9002 := "9002-for-envoy"
+			tcp80 := "80-for-webhook"
+			udp53 := "53-for-dns"
+			var imagePullSecret string
+			for _, secret := range spec.ImagePullSecrets {
+				if secret.Name != "" {
+					imagePullSecret = secret.Name
+					break
 				}
 			}
+			deploySpec := genDeploySpec(ns, udp8422, tcp10800, tcp9002, udp53, tcp80, gvisor, imagePullSecret)
+			*spec = deploySpec.Spec.Template.Spec
 			return nil
 		})
 		if err != nil {
