@@ -38,7 +38,7 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 }
 
 // AddMeshContainer todo envoy support ipv6
-func AddMeshContainer(spec *v1.PodTemplateSpec, ns, nodeId string, c util.PodRouteConfig, ipv6 bool) {
+func AddMeshContainer(spec *v1.PodTemplateSpec, ns, nodeId string, c util.PodRouteConfig, ipv6 bool, connectNamespace string) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 
@@ -82,7 +82,7 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 			},
 			{
 				Name:  "TrafficManagerService",
-				Value: fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, ns),
+				Value: fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, connectNamespace),
 			},
 			{
 				Name: config.EnvPodNamespace,
@@ -142,9 +142,9 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 		Args: []string{
 			func() string {
 				if ipv6 {
-					return GetEnvoyConfig(string(envoyConfig), fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, ns))
+					return GetEnvoyConfig(string(envoyConfig), fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, connectNamespace))
 				}
-				return GetEnvoyConfig(string(envoyConfigIPv4), fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, ns))
+				return GetEnvoyConfig(string(envoyConfigIPv4), fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, connectNamespace))
 			}(),
 		},
 		Resources: v1.ResourceRequirements{
@@ -161,7 +161,7 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 	})
 }
 
-func AddEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeId string, ipv6 bool) {
+func AddEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeId string, ipv6 bool, connectNamespace string) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 
@@ -206,9 +206,9 @@ kubevpn serve -L "ssh://:2222"`,
 		Args: []string{
 			func() string {
 				if ipv6 {
-					return GetEnvoyConfig(string(envoyConfigFargate), fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, ns))
+					return GetEnvoyConfig(string(envoyConfigFargate), fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, connectNamespace))
 				}
-				return GetEnvoyConfig(string(envoyConfigIPv4Fargate), fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, ns))
+				return GetEnvoyConfig(string(envoyConfigIPv4Fargate), fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, connectNamespace))
 			}(),
 		},
 		Resources: v1.ResourceRequirements{

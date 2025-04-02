@@ -1,6 +1,8 @@
 package inject
 
 import (
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/pointer"
@@ -18,7 +20,7 @@ func RemoveContainer(spec *corev1.PodSpec) {
 	}
 }
 
-func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig) {
+func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig, connectNamespace string) {
 	// remove vpn container if already exist
 	RemoveContainer(spec)
 	spec.Containers = append(spec.Containers, corev1.Container{
@@ -51,7 +53,7 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig) {
 			},
 			{
 				Name:  "TrafficManagerService",
-				Value: config.ConfigMapPodTrafficManager,
+				Value: fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, connectNamespace),
 			},
 			{
 				Name: config.EnvPodNamespace,
