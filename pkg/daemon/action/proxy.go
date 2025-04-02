@@ -92,9 +92,7 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 			plog.G(ctx).Infof("Disconnecting from another cluster...")
 			var disconnectResp rpc.Daemon_DisconnectClient
 			disconnectResp, err = daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{
-				KubeconfigBytes: ptr.To(req.KubeconfigBytes),
-				Namespace:       ptr.To(req.Namespace),
-				SshJump:         sshConf.ToRPC(),
+				ID: ptr.To[int32](0),
 			})
 			if err != nil {
 				return err
@@ -115,7 +113,7 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 	if svr.connect == nil {
 		plog.G(ctx).Debugf("Connectting to cluster")
 		var connResp rpc.Daemon_ConnectClient
-		connResp, err = daemonClient.Connect(ctx, convert(req, helmNs))
+		connResp, err = daemonClient.Connect(ctx, convert(req))
 		if err != nil {
 			return err
 		}
@@ -148,10 +146,10 @@ func newProxyWarp(server rpc.Daemon_ProxyServer) io.Writer {
 	return &proxyWarp{server: server}
 }
 
-func convert(req *rpc.ProxyRequest, ns string) *rpc.ConnectRequest {
+func convert(req *rpc.ProxyRequest) *rpc.ConnectRequest {
 	return &rpc.ConnectRequest{
 		KubeconfigBytes:      req.KubeconfigBytes,
-		Namespace:            util.If(ns != "", ns, req.Namespace),
+		Namespace:            req.Namespace,
 		Engine:               req.Engine,
 		ExtraRoute:           req.ExtraRoute,
 		SshJump:              req.SshJump,

@@ -51,7 +51,7 @@ func InjectVPNSidecar(ctx context.Context, f util.Factory, connectNamespace stri
 		return err
 	}
 
-	AddContainer(&podTempSpec.Spec, c)
+	AddContainer(&podTempSpec.Spec, c, connectNamespace)
 
 	workload := fmt.Sprintf("%s/%s", object.Mapping.Resource.Resource, object.Name)
 	helper := resource.NewHelper(object.Client, object.Mapping)

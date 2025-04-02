@@ -90,7 +90,7 @@ func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, mapInterfa
 
 	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, f, connectNamespace)
 	// (1) add mesh container
-	AddMeshContainer(templateSpec, object.Namespace, nodeID, c, enableIPv6)
+	AddMeshContainer(templateSpec, object.Namespace, nodeID, c, enableIPv6, connectNamespace)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	ps := []P{
 		{

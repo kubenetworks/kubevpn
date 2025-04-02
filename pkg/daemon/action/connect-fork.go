@@ -129,6 +129,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 	if helmNs != "" {
 		logger.Infof("Using helm namespace: %s", helmNs)
 		connect.Namespace = helmNs
+		req.Namespace = helmNs
 	} else {
 		logger.Infof("Use namespace: %s", req.Namespace)
 	}
