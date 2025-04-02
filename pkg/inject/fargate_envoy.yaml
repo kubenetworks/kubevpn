@@ -34,5 +34,5 @@ static_resources:
               - endpoint:
                   address:
                     socket_address:
-                      address: kubevpn-traffic-manager
+                      address: {{.}}
                       port_value: 9002

@@ -1,7 +1,10 @@
 package inject
 
 import (
+	"bytes"
 	_ "embed"
+	"fmt"
+	"text/template"
 
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
@@ -79,7 +82,7 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 			},
 			{
 				Name:  "TrafficManagerService",
-				Value: config.ConfigMapPodTrafficManager,
+				Value: fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, ns),
 			},
 			{
 				Name: config.EnvPodNamespace,
@@ -139,9 +142,9 @@ kubevpn serve -L "tun:/localhost:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://$
 		Args: []string{
 			func() string {
 				if ipv6 {
-					return string(envoyConfig)
+					return GetEnvoyConfig(string(envoyConfig), fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, ns))
 				}
-				return string(envoyConfigIPv4)
+				return GetEnvoyConfig(string(envoyConfigIPv4), fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, ns))
 			}(),
 		},
 		Resources: v1.ResourceRequirements{
@@ -203,9 +206,9 @@ kubevpn serve -L "ssh://:2222"`,
 		Args: []string{
 			func() string {
 				if ipv6 {
-					return string(envoyConfigFargate)
+					return GetEnvoyConfig(string(envoyConfigFargate), fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, ns))
 				}
-				return string(envoyConfigIPv4Fargate)
+				return GetEnvoyConfig(string(envoyConfigIPv4Fargate), fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, ns))
 			}(),
 		},
 		Resources: v1.ResourceRequirements{
@@ -220,4 +223,17 @@ kubevpn serve -L "ssh://:2222"`,
 		},
 		ImagePullPolicy: v1.PullIfNotPresent,
 	})
+}
+
+func GetEnvoyConfig(tmplStr string, value string) string {
+	tmpl, err := template.New("").Parse(tmplStr)
+	if err != nil {
+		return ""
+	}
+	buf := new(bytes.Buffer)
+	err = tmpl.Execute(buf, value)
+	if err != nil {
+		return ""
+	}
+	return buf.String()
 }
