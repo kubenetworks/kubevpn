@@ -446,7 +446,7 @@ func GetRunningPodList(ctx context.Context, clientset *kubernetes.Clientset, ns 
 		}
 	}
 	if len(list.Items) == 0 {
-		return nil, errors.New("can not found any running pod")
+		return nil, fmt.Errorf("no running pod with label: %s", labelSelector)
 	}
 	return list.Items, nil
 }

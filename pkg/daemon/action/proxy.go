@@ -45,7 +45,7 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 		return err
 	}
 	connect := &handler.ConnectOptions{
-		Namespace:            req.Namespace,
+		Namespace:            req.ConnectNamespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
@@ -71,12 +71,13 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 	if daemonClient == nil {
 		return fmt.Errorf("daemon is not avaliable")
 	}
-	helmNs, _ := util.GetHelmInstalledNamespace(ctx, connect.GetFactory())
-	if helmNs != "" {
-		logger.Infof("Using helm namespace: %s", helmNs)
-		connect.Namespace = helmNs
-	} else {
-		logger.Infof("Use namespace: %s", req.Namespace)
+
+	connectNs, err := util.DetectConnectNamespace(ctx, connect.GetFactory(), req.ConnectNamespace)
+	if err != nil {
+		return err
+	}
+	if connectNs != "" {
+		connect.Namespace = connectNs
 	}
 
 	if svr.connect != nil {

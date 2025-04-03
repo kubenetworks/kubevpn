@@ -20,7 +20,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/util/cert"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/utils/pointer"
@@ -31,16 +30,17 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func createOutboundPod(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace string, gvisor bool, imagePullSecretName string) (err error) {
-	service, err := clientset.CoreV1().Services(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err == nil {
-		var pod *v1.Pod
-		pod, err = polymorphichelpers.AttachablePodForObjectFn(factory, service, 2*time.Second)
-		if err == nil && pod.DeletionTimestamp.IsZero() && podutils.IsPodReady(pod) {
-			plog.G(ctx).Infoln("Use exist traffic manager")
-			return
-		}
+func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, namespace string, gvisor bool, imagePullSecretName string) (err error) {
+	var exists bool
+	exists, err = util.DetectPodExists(ctx, clientset, namespace)
+	if err != nil {
+		return err
 	}
+	if exists {
+		plog.G(ctx).Infof("Use exist traffic manager in namespace %s", namespace)
+		return nil
+	}
+
 	var deleteResource = func(ctx context.Context) {
 		options := metav1.DeleteOptions{}
 		name := config.ConfigMapPodTrafficManager

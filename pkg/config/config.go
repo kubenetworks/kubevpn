@@ -17,6 +17,9 @@ const (
 	// helm app name kubevpn
 	HelmAppNameKubevpn = "kubevpn"
 
+	// default installed namespace
+	DefaultNamespaceKubevpn = "kubevpn"
+
 	// config map keys
 	KeyDHCP             = "DHCP"
 	KeyDHCP6            = "DHCP6"
