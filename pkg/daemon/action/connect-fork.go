@@ -125,13 +125,16 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		return err
 	}
 
-	helmNs, _ := util.GetHelmInstalledNamespace(sshCtx, connect.GetFactory())
-	if helmNs != "" {
-		logger.Infof("Using helm namespace: %s", helmNs)
-		connect.Namespace = helmNs
-		req.Namespace = helmNs
+	connectNs, err := util.DetectConnectNamespace(sshCtx, connect.GetFactory(), req.Namespace)
+	if err != nil {
+		return err
+	}
+	if connectNs != "" {
+		logger.Infof("Use connect namespace %s", connectNs)
+		connect.Namespace = connectNs
+		req.Namespace = connectNs
 	} else {
-		logger.Infof("Use namespace: %s", req.Namespace)
+		logger.Infof("Use special namespace %s", req.Namespace)
 	}
 
 	for _, options := range svr.secondaryConnect {

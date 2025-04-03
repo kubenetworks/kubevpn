@@ -207,10 +207,10 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-
 		}
 	}()
 
-	plog.G(ctx).Info("Starting connect")
+	plog.G(ctx).Info("Starting connect to cluster")
 	m := dhcp.NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
 	if err = m.InitDHCP(c.ctx); err != nil {
-		plog.G(ctx).Errorf("Init DHCP failed: %v", err)
+		plog.G(ctx).Errorf("Init DHCP server failed: %v", err)
 		return
 	}
 	go c.setupSignalHandler()
@@ -218,7 +218,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-
 		plog.G(ctx).Errorf("Failed to get network CIDR: %v", err)
 		return
 	}
-	if err = createOutboundPod(c.ctx, c.factory, c.clientset, c.Namespace, c.Engine == config.EngineGvisor, c.ImagePullSecretName); err != nil {
+	if err = createOutboundPod(c.ctx, c.clientset, c.Namespace, c.Engine == config.EngineGvisor, c.ImagePullSecretName); err != nil {
 		return
 	}
 	if err = c.upgradeDeploy(c.ctx); err != nil {
@@ -264,7 +264,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-
 		plog.G(ctx).Errorf("Start local tun service failed: %v", err)
 		return
 	}
-	plog.G(ctx).Infof("Adding route...")
+	plog.G(ctx).Infof("Adding Pod IP and Service IP to route table...")
 	if err = c.addRouteDynamic(c.ctx); err != nil {
 		plog.G(ctx).Errorf("Add route dynamic failed: %v", err)
 		return
@@ -276,7 +276,6 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-
 		return
 	}
 	success.Store(true)
-	plog.G(ctx).Info("Configured DNS service")
 	return
 }
 
@@ -583,7 +582,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		return err
 	}
 	pod := podList[0]
-	plog.G(ctx).Debugf("Get DNS service IP from pod...")
+	plog.G(ctx).Infof("Get DNS service IP from Pod...")
 	relovConf, err := util.GetDNSServiceIPFromPod(ctx, c.clientset, c.config, pod.GetName(), c.Namespace)
 	if err != nil {
 		plog.G(ctx).Errorln(err)
@@ -610,7 +609,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		plog.G(ctx).Debugf("DNS service use service IP %s", svc.Spec.ClusterIP)
 	}
 
-	plog.G(ctx).Debugf("Adding extra hosts...")
+	plog.G(ctx).Infof("Adding extra domain to hosts...")
 	if err = c.addExtraRoute(c.ctx, pod.GetName()); err != nil {
 		plog.G(ctx).Errorf("Add extra route failed: %v", err)
 		return err
@@ -626,6 +625,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		}
 	}
 
+	plog.G(ctx).Infof("Listing namespace %s services...", c.Namespace)
 	var serviceList []v1.Service
 	services, err := c.clientset.CoreV1().Services(c.Namespace).List(ctx, metav1.ListOptions{})
 	if err == nil {
@@ -656,11 +656,11 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 			)
 		},
 	}
-	plog.G(ctx).Debugf("Setup DNS...")
+	plog.G(ctx).Infof("Setup DNS server for device %s...", c.tunName)
 	if err = c.dnsConfig.SetupDNS(ctx); err != nil {
 		return err
 	}
-	plog.G(ctx).Debugf("Dump service in namespace %s into hosts...", c.Namespace)
+	plog.G(ctx).Infof("Dump service in namespace %s into hosts...", c.Namespace)
 	// dump service in current namespace for support DNS resolve service:port
 	err = c.dnsConfig.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.Namespace), c.extraHost...)
 	return err

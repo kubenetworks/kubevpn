@@ -29,6 +29,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &pkgssh.SshConfig{}
 	var transferImage bool
 	var imagePullSecretName string
+	var connectNamespace string
 	cmd := &cobra.Command{
 		Use:   "dev TYPE/NAME [-c CONTAINER] [flags] -- [args...]",
 		Short: i18n.T("Startup your kubernetes workloads in local Docker container"),
@@ -130,7 +131,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 				return err
 			}
 
-			return options.Main(cmd.Context(), sshConf, conf, hostConfig, imagePullSecretName)
+			return options.Main(cmd.Context(), sshConf, conf, hostConfig, imagePullSecretName, connectNamespace)
 		},
 	}
 	cmd.Flags().SortFlags = false
@@ -140,6 +141,7 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 	cmdutil.CheckErr(cmd.RegisterFlagCompletionFunc("container", completion.ContainerCompletionFunc(f)))
 	cmd.Flags().StringVar((*string)(&options.ConnectMode), "connect-mode", string(dev.ConnectModeHost), "Connect to kubernetes network in container or in host, eg: ["+string(dev.ConnectModeContainer)+"|"+string(dev.ConnectModeHost)+"]")
 	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName, &options.Engine)
+	cmd.Flags().StringVarP(&connectNamespace, "connect-namespace", "C", config.DefaultNamespaceKubevpn, "Connect to special namespace which kubevpn server installed by helm in cluster mode")
 
 	// diy docker options
 	cmd.Flags().StringVar(&options.DevImage, "dev-image", "", "Use to startup docker container, Default is pod image")
