@@ -147,7 +147,7 @@ func (w *wsHandler) createTwoWayTUNTunnel(ctx context.Context, cli *ssh.Client) 
 		plog.G(ctx).Errorf("Failed to run: %v", err)
 		w.Log("Failed to run: %v", err)
 	}()
-	plog.G(ctx).Info("Connected tunnel")
+	plog.G(ctx).Info("Connected private safe tunnel")
 	go func() {
 		for ctx.Err() == nil {
 			util.Ping(ctx, clientIP.IP.String(), ip.String())
