@@ -72,7 +72,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	config.Image = req.Image
 	err = connect.DoConnect(sshCtx, true, ctx.Done())
 	if err != nil {
-		logger.Errorf("Failed to connect: %v", err)
+		logger.Errorf("Failed to connect...")
 		return err
 	}
 

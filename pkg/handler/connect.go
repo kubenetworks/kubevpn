@@ -457,7 +457,7 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 			go server.Handler.Handle(ctx, conn)
 		}
 	}()
-	plog.G(ctx).Info("Connected tunnel")
+	plog.G(ctx).Info("Connected private safe tunnel")
 
 	c.tunName, err = c.GetTunDeviceName()
 	return err

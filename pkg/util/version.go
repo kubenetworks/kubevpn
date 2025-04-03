@@ -72,9 +72,9 @@ func CmpVersionMajorOrMinor(v1 string, v2 string) int {
 	} else if version1.Segments64()[0] < version2.Segments64()[0] {
 		return -1
 	}
-	if version1.Segments64()[1] != version2.Segments64()[1] {
+	if version1.Segments64()[1] > version2.Segments64()[1] {
 		return 1
-	} else if version1.Segments64()[1] != version2.Segments64()[1] {
+	} else if version1.Segments64()[1] < version2.Segments64()[1] {
 		return -1
 	}
 	return 0
@@ -105,14 +105,14 @@ MAJOR and MINOR different should be same, otherwise needs upgrade
 func IsNewer(clientVer string, clientImg string, serverImg string) (bool, error) {
 	isNeedUpgrade, _ := CmpClientVersionAndClientImage(clientVer, clientImg)
 	if isNeedUpgrade != 0 {
-		err := errors.New("\n" + PrintStr(fmt.Sprintf("Current kubevpn cli version is %s, image is: %s, please use the same version of kubevpn image with flag \"--image\"", clientVer, clientImg)))
+		err := errors.New("\n" + PrintStr(fmt.Sprintf("Client version and image tag not compatible. client version: %s, image: %s", clientVer, clientImg)))
 		return true, err
 	}
 	cmp := CmpClientVersionAndPodImageTag(clientVer, serverImg)
 	if cmp > 0 {
 		return true, nil
 	} else if cmp < 0 {
-		err := errors.New("\n" + PrintStr(fmt.Sprintf("Current kubevpn cli version is %s, image is: %s, please use the same version of kubevpn image with flag \"--image\"", clientVer, clientImg)))
+		err := errors.New("\n" + PrintStr(fmt.Sprintf("Client version too old. client version: %s, server version: %s", clientVer, serverImg)))
 		return true, err
 	}
 	return false, nil
