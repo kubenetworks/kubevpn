@@ -77,7 +77,7 @@ func Test_newer(t *testing.T) {
 				serverImgStr:     "docker.io/naison/kubevpn:v1.3.1",
 			},
 			want:    true,
-			wantErr: false,
+			wantErr: true,
 		},
 		// client version: v1.3.1
 		// client image: ghcr.io/kubenetworks/kubevpn:v1.2.1 (not same as client version, --image=xxx)
@@ -129,7 +129,7 @@ func Test_newer(t *testing.T) {
 				serverImgStr:     "ghcr.io/kubenetworks/kubevpn:v1.3.1",
 			},
 			want:    true,
-			wantErr: false,
+			wantErr: true,
 		},
 
 		// custom server image registry, but client image is not same as client version, does not upgrade
