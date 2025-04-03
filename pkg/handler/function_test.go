@@ -133,7 +133,7 @@ func healthChecker(t *testing.T, endpoint string, header map[string]string, keyw
 		func(err error) bool { return err != nil },
 		func() error {
 			var resp *http.Response
-			resp, err = http.DefaultClient.Do(req)
+			resp, err = (&http.Client{Timeout: time.Second * 5}).Do(req)
 			if err != nil {
 				t.Logf("failed to do health check endpoint: %s: %v", endpoint, err)
 				return err
