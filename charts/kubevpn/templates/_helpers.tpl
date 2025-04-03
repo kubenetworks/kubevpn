@@ -61,3 +61,22 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Namespace
+1. special by -n
+2. use default namespace kubevpn
+*/}}
+{{- define "kubevpn.namespace" -}}
+{{- if .Release.Namespace }}
+  {{- if eq .Release.Namespace "default" }}
+{{- .Values.namespace }}
+  {{- else }}
+{{- .Release.Namespace }}
+  {{- end }}
+{{- else if .Values.namespace }}
+{{- .Values.namespace }}
+{{- else }}
+{{- .Values.namespace }}
+{{- end }}
+{{- end }}

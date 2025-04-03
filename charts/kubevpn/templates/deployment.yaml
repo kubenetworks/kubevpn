@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "kubevpn.fullname" . }}
+  namespace: {{ include "kubevpn.namespace" . }}
   labels:
     {{- include "kubevpn.labels" . | nindent 4 }}
 spec:
@@ -32,8 +33,8 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - args:
-            - |2-
-
+            {{- if eq .Values.netstack "system" }}
+            - |
               sysctl -w net.ipv4.ip_forward=1
               sysctl -w net.ipv6.conf.all.disable_ipv6=0
               sysctl -w net.ipv6.conf.all.forwarding=1
@@ -47,6 +48,9 @@ spec:
               iptables -t nat -A POSTROUTING -s ${CIDR4} -o eth0 -j MASQUERADE
               ip6tables -t nat -A POSTROUTING -s ${CIDR6} -o eth0 -j MASQUERADE
               kubevpn serve -L "tcp://:10800" -L "tun://:8422?net=${TunIPv4}" -L "gtcp://:10801" -L "gudp://:10802" --debug=true
+            {{- else }}
+            - kubevpn serve -L "tcp://:10800" -L "gtcp://:10801" -L "gudp://:10802" --debug=true
+            {{- end }}
           command:
             - /bin/sh
             - -c
@@ -74,12 +78,10 @@ spec:
               protocol: TCP
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if eq .Values.netstack "system" }}
           securityContext:
-            capabilities:
-              add:
-                - NET_ADMIN
-            privileged: true
-            runAsUser: 0
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- end }}
         - args:
             - control-plane
             - --watchDirectoryFilename

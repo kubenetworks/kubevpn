@@ -2,6 +2,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ include "kubevpn.fullname" . }}
+  namespace: {{ include "kubevpn.namespace" . }}
 rules:
   - apiGroups:
       - ""
@@ -20,7 +21,7 @@ rules:
       - delete
   - apiGroups: [ "" ]
     resources: [ "namespaces" ]
-    resourceNames: [{{ .Release.Namespace }}]
+    resourceNames: ["{{ include "kubevpn.namespace" . }}"]
     verbs:
       - get
       - patch
@@ -47,14 +48,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }}
+  name: {{ include "kubevpn.fullname" . }}.{{ include "kubevpn.namespace" . }}
 rules:
   - apiGroups:
       - admissionregistration.k8s.io
     resources:
       - mutatingwebhookconfigurations
     resourceNames:
-      - {{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }}
+      - {{ include "kubevpn.fullname" . }}.{{ include "kubevpn.namespace" . }}
     verbs:
       - get
       - list
