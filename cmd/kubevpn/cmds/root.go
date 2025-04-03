@@ -61,7 +61,7 @@ func NewKubeVPNCommand() *cobra.Command {
 				CmdDev(factory),
 				// Hidden, Server Commands (DO NOT USE IT !!!)
 				CmdControlPlane(factory),
-				CmdServe(factory),
+				CmdServer(factory),
 				CmdDaemon(factory),
 				CmdWebhook(factory),
 				CmdSyncthing(factory),

@@ -20,7 +20,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func CmdServe(_ cmdutil.Factory) *cobra.Command {
+func CmdServer(_ cmdutil.Factory) *cobra.Command {
 	var route = &core.Route{}
 	cmd := &cobra.Command{
 		Use:    "server",
