@@ -94,7 +94,7 @@ iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIPv4}
 ip6tables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIPv6}
 iptables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
 ip6tables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
-kubevpn serve -L "tun:/127.0.0.1:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://${TrafficManagerService}:10800"`,
+kubevpn server -L "tun:/127.0.0.1:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://${TrafficManagerService}:10800"`,
 		},
 		SecurityContext: &corev1.SecurityContext{
 			Capabilities: &corev1.Capabilities{
