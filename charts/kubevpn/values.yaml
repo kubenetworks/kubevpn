@@ -2,6 +2,13 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
+# default namespace
+namespace: kubevpn
+# default is system mode, available ["system", "gvisor"]
+# system: needs privilege permission and cap NET_ADMIN (Best experience)
+# gvisor: no needs any additional permission (Best compatibility)
+netstack: system
+
 replicaCount: 1
 
 image:
@@ -40,14 +47,13 @@ podLabels:
 
 podSecurityContext: { }
 # fsGroup: 2000
-
-securityContext: { }
-# capabilities:
-#   drop:
-#   - ALL
-# readOnlyRootFilesystem: true
-# runAsNonRoot: true
-# runAsUser: 1000
+securityContext:
+  capabilities:
+    add:
+      - NET_ADMIN
+  privileged: true
+  runAsUser: 0
+  runAsGroup: 0
 
 service:
   type: ClusterIP

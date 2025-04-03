@@ -1,7 +1,8 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: {{ include "kubevpn.fullname" . }}.{{ .Release.Namespace }}
+  name: {{ include "kubevpn.fullname" . }}.{{ include "kubevpn.namespace" . }}
+  namespace: {{ include "kubevpn.namespace" . }}
 webhooks:
   - admissionReviewVersions:
       - v1
@@ -10,7 +11,7 @@ webhooks:
       caBundle: {{ .Values.tls.crt }}
       service:
         name: {{ include "kubevpn.fullname" . }}
-        namespace: {{ .Release.Namespace }}
+        namespace: {{ include "kubevpn.namespace" . }}
         path: /pods
         port: 80
     failurePolicy: Ignore
