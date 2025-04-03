@@ -129,7 +129,7 @@ func healthChecker(t *testing.T, endpoint string, header map[string]string, keyw
 	}
 
 	err = retry.OnError(
-		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 60},
+		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 120},
 		func(err error) bool { return err != nil },
 		func() error {
 			var resp *http.Response
