@@ -772,7 +772,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) (err erro
 			}
 		}
 		if len(c.cidrs) != 0 {
-			plog.G(ctx).Infoln("Got network CIDR from cache")
+			plog.G(ctx).Infoln("Get network CIDR from cache")
 			return nil
 		}
 	}

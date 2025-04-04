@@ -51,7 +51,7 @@ func CmdServer(_ cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringArrayVarP(&route.ServeNodes, "node", "L", []string{}, "Startup node server. eg: tcp://localhost:1080")
-	cmd.Flags().StringVarP(&route.ChainNode, "chain", "F", "", "Forward chain. eg: tcp://192.168.1.100:2345")
+	cmd.Flags().StringVarP(&route.ForwardNode, "chain", "F", "", "Forward chain. eg: tcp://192.168.1.100:2345")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug log or not")
 	return cmd
 }

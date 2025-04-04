@@ -32,13 +32,13 @@ type TCPUDPacket struct {
 // -L "tun:/10.233.24.133:8422?net=198.19.0.102/16&route=198.19.0.0/16"
 // -L "tun:/127.0.0.1:8422?net=198.19.0.102/16&route=198.19.0.0/16,10.233.0.0/16" -F "tcp://127.0.0.1:10800"
 type Route struct {
-	ServeNodes []string // -L tun
-	ChainNode  string   // -F tcp
-	Retries    int
+	ServeNodes  []string // -L tun
+	ForwardNode string   // -F tcp
+	Retries     int
 }
 
 func (r *Route) parseChain() (*Chain, error) {
-	node, err := parseChainNode(r.ChainNode)
+	node, err := parseChainNode(r.ForwardNode)
 	if err != nil {
 		return nil, err
 	}
