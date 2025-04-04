@@ -100,7 +100,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		// inner ip like 198.19.0.100/102/103 connect each other
 		if config.CIDR.Contains(dst) || config.CIDR6.Contains(dst) {
 			plog.G(ctx).Debugf("[TUN-RAW] Forward to TUN device, SRC: %s, DST: %s, Length: %d", src.String(), dst.String(), read)
-			util.SafeWrite(h.packetChan, &datagramPacket{
+			util.SafeWrite(h.packetChan, &DatagramPacket{
 				DataLength: uint16(read),
 				Data:       buf[:],
 			})

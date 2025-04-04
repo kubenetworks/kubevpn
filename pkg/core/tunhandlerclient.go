@@ -20,8 +20,8 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 		plog.G(ctx).Errorf("[TUN-CLIENT] Failed to resolve udp addr %s: %v", h.node.Remote, err)
 		return
 	}
-	in := make(chan *DataElem, MaxSize)
-	out := make(chan *DataElem, MaxSize)
+	in := make(chan *Packet, MaxSize)
+	out := make(chan *Packet, MaxSize)
 	defer util.SafeClose(in)
 	defer util.SafeClose(out)
 
@@ -31,7 +31,7 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 		tunOutbound: out,
 		chExit:      h.chExit,
 	}
-	d.SetTunInboundHandler(func(tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem) {
+	d.SetTunInboundHandler(func(tunInbound <-chan *Packet, tunOutbound chan<- *Packet) {
 		for ctx.Err() == nil {
 			packetConn, err := getRemotePacketConn(ctx, h.chain)
 			if err != nil {
@@ -76,7 +76,7 @@ func getRemotePacketConn(ctx context.Context, chain *Chain) (packetConn net.Pack
 	return
 }
 
-func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem, packetConn net.PacketConn, remoteAddr net.Addr) error {
+func transportTunClient(ctx context.Context, tunInbound <-chan *Packet, tunOutbound chan<- *Packet, packetConn net.PacketConn, remoteAddr net.Addr) error {
 	errChan := make(chan error, 2)
 	defer packetConn.Close()
 
@@ -106,7 +106,7 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 				util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to read packet from remote %s", remoteAddr)))
 				return
 			}
-			util.SafeWrite(tunOutbound, &DataElem{data: buf[:], length: n})
+			util.SafeWrite(tunOutbound, &Packet{data: buf[:], length: n})
 		}
 	}()
 
@@ -120,10 +120,10 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *DataElem, tunOut
 
 type ClientDevice struct {
 	tun         net.Conn
-	tunInbound  chan *DataElem
-	tunOutbound chan *DataElem
+	tunInbound  chan *Packet
+	tunOutbound chan *Packet
 	// your main logic
-	tunInboundHandler func(tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem)
+	tunInboundHandler func(tunInbound <-chan *Packet, tunOutbound chan<- *Packet)
 	chExit            chan error
 }
 
@@ -142,7 +142,7 @@ func (d *ClientDevice) Start(ctx context.Context) {
 	}
 }
 
-func (d *ClientDevice) SetTunInboundHandler(handler func(tunInbound <-chan *DataElem, tunOutbound chan<- *DataElem)) {
+func (d *ClientDevice) SetTunInboundHandler(handler func(tunInbound <-chan *Packet, tunOutbound chan<- *Packet)) {
 	d.tunInboundHandler = handler
 }
 

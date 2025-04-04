@@ -42,7 +42,7 @@ func (c *fakeUDPTunnelConnector) ConnectContext(ctx context.Context, conn net.Co
 type fakeUdpHandler struct {
 	// map[srcIP]net.Conn
 	routeMapTCP *sync.Map
-	packetChan  chan *datagramPacket
+	packetChan  chan *DatagramPacket
 }
 
 func TCPHandler() Handler {

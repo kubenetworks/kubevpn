@@ -18,7 +18,7 @@ import (
 type gvisorTCPHandler struct {
 	// map[srcIP]net.Conn
 	routeMapTCP *sync.Map
-	packetChan  chan *datagramPacket
+	packetChan  chan *DatagramPacket
 }
 
 func GvisorTCPHandler() Handler {
