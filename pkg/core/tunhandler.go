@@ -16,7 +16,7 @@ const (
 )
 
 type tunHandler struct {
-	forward     *Forward
+	forward     *Forwarder
 	node        *Node
 	routeMapUDP *RouteMap
 	// map[srcIP]net.Conn
@@ -63,7 +63,7 @@ func (n *RouteMap) RouteTo(ip net.IP) net.Addr {
 }
 
 // TunHandler creates a handler for tun tunnel.
-func TunHandler(forward *Forward, node *Node) Handler {
+func TunHandler(forward *Forwarder, node *Node) Handler {
 	return &tunHandler{
 		forward:     forward,
 		node:        node,

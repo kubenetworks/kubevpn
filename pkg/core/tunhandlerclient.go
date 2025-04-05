@@ -49,15 +49,15 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	d.Start(ctx)
 }
 
-func getRemotePacketConn(ctx context.Context, forward *Forward) (packetConn net.PacketConn, err error) {
+func getRemotePacketConn(ctx context.Context, forwarder *Forwarder) (packetConn net.PacketConn, err error) {
 	defer func() {
 		if err != nil && packetConn != nil {
 			_ = packetConn.Close()
 		}
 	}()
-	if !forward.IsEmpty() {
+	if !forwarder.IsEmpty() {
 		var cc net.Conn
-		cc, err = forward.DialContext(ctx)
+		cc, err = forwarder.DialContext(ctx)
 		if err != nil {
 			return
 		}

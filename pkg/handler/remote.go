@@ -377,7 +377,7 @@ iptables -P FORWARD ACCEPT
 ip6tables -P FORWARD ACCEPT
 iptables -t nat -A POSTROUTING -s ${CIDR4} -o eth0 -j MASQUERADE
 ip6tables -t nat -A POSTROUTING -s ${CIDR6} -o eth0 -j MASQUERADE
-kubevpn server -l "tcp://:10800" -l "tun://:8422?net=${TunIPv4}" -l "gtcp://:10801" -l "gudp://:10802" --debug=true`,
+kubevpn server -l "tcp://:10800" -l "tun://:8422?net=${TunIPv4}&net6=${TunIPv6}" -l "gtcp://:10801" -l "gudp://:10802" --debug=true`,
 							)},
 							EnvFrom: []v1.EnvFromSource{{
 								SecretRef: &v1.SecretEnvSource{

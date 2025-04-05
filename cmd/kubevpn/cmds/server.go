@@ -51,7 +51,7 @@ func CmdServer(cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringArrayVarP(&route.Listeners, "listener", "l", []string{}, "Startup listener server. eg: tcp://localhost:1080")
-	cmd.Flags().StringVarP(&route.Forward, "forwarder", "f", "", "Special forwarder. eg: tcp://192.168.1.100:2345")
+	cmd.Flags().StringVarP(&route.Forwarder, "forwarder", "f", "", "Special forwarder. eg: tcp://192.168.1.100:2345")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug log or not")
 	return cmd
 }

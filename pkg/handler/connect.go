@@ -425,7 +425,7 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 		Connector:   core.NewUDPOverTCPConnector(),
 		Transporter: core.TCPTransporter(),
 	}
-	forwarder := core.NewForward(5, forward)
+	forwarder := core.NewForwarder(5, forward)
 
 	handler := core.TunHandler(forwarder, node)
 	listener, err := tun.Listener(tunConfig)

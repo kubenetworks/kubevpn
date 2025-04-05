@@ -4,14 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
 	"strings"
 	"sync"
 
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/pkg/errors"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 )
@@ -33,48 +31,48 @@ type TCPUDPacket struct {
 // -l "tun:/127.0.0.1:8422?net=198.19.0.102/16&route=198.19.0.0/16,10.233.0.0/16" -f "tcp://127.0.0.1:10800"
 type Route struct {
 	Listeners []string // -l tun
-	Forward   string   // -f tcp
+	Forwarder string   // -f tcp
 	Retries   int
 }
 
-func (r *Route) parseForward() (*Forward, error) {
-	node, err := ParseNode(r.Forward)
+func (r *Route) ParseForwarder() (*Forwarder, error) {
+	forwarder, err := ParseNode(r.Forwarder)
 	if err != nil {
 		return nil, err
 	}
-	node.Client = &Client{
+	forwarder.Client = &Client{
 		Connector:   NewUDPOverTCPConnector(),
 		Transporter: TCPTransporter(),
 	}
-	return NewForward(r.Retries, node), nil
+	return NewForwarder(r.Retries, forwarder), nil
 }
 
 func (r *Route) GenerateServers() ([]Server, error) {
-	forward, err := r.parseForward()
+	forwarder, err := r.ParseForwarder()
 	if err != nil && !errors.Is(err, ErrorInvalidNode) {
-		plog.G(context.Background()).Errorf("Failed to parse forward: %v", err)
+		plog.G(context.Background()).Errorf("Failed to parse forwarder: %v", err)
 		return nil, err
 	}
 
 	servers := make([]Server, 0, len(r.Listeners))
-	for _, serveNode := range r.Listeners {
+	for _, l := range r.Listeners {
 		var node *Node
-		node, err = ParseNode(serveNode)
+		node, err = ParseNode(l)
 		if err != nil {
-			plog.G(context.Background()).Errorf("Failed to parse node %s: %v", serveNode, err)
+			plog.G(context.Background()).Errorf("Failed to parse node %s: %v", l, err)
 			return nil, err
 		}
 
-		var ln net.Listener
+		var listener net.Listener
 		var handler Handler
 
 		switch node.Protocol {
 		case "tun":
-			handler = TunHandler(forward, node)
-			ln, err = tun.Listener(tun.Config{
+			handler = TunHandler(forwarder, node)
+			listener, err = tun.Listener(tun.Config{
 				Name:    node.Get("name"),
 				Addr:    node.Get("net"),
-				Addr6:   os.Getenv(config.EnvInboundPodTunIPv6),
+				Addr6:   node.Get("net6"),
 				MTU:     node.GetInt("mtu"),
 				Routes:  parseIPRoutes(node.Get("route")),
 				Gateway: node.Get("gw"),
@@ -85,28 +83,28 @@ func (r *Route) GenerateServers() ([]Server, error) {
 			}
 		case "tcp":
 			handler = TCPHandler()
-			ln, err = TCPListener(node.Addr)
+			listener, err = TCPListener(node.Addr)
 			if err != nil {
 				plog.G(context.Background()).Errorf("Failed to create tcp listener: %v", err)
 				return nil, err
 			}
 		case "gtcp":
 			handler = GvisorTCPHandler()
-			ln, err = GvisorTCPListener(node.Addr)
+			listener, err = GvisorTCPListener(node.Addr)
 			if err != nil {
 				plog.G(context.Background()).Errorf("Failed to create gvisor tcp listener: %v", err)
 				return nil, err
 			}
 		case "gudp":
 			handler = GvisorUDPHandler()
-			ln, err = GvisorUDPListener(node.Addr)
+			listener, err = GvisorUDPListener(node.Addr)
 			if err != nil {
 				plog.G(context.Background()).Errorf("Failed to create gvisor udp listener: %v", err)
 				return nil, err
 			}
 		case "ssh":
 			handler = SSHHandler()
-			ln, err = SSHListener(node.Addr)
+			listener, err = SSHListener(node.Addr)
 			if err != nil {
 				plog.G(context.Background()).Errorf("Failed to create ssh listener: %v", err)
 				return nil, err
@@ -115,7 +113,7 @@ func (r *Route) GenerateServers() ([]Server, error) {
 			plog.G(context.Background()).Errorf("Not support protocol %s", node.Protocol)
 			return nil, fmt.Errorf("not support protocol %s", node.Protocol)
 		}
-		servers = append(servers, Server{Listener: ln, Handler: handler})
+		servers = append(servers, Server{Listener: listener, Handler: handler})
 	}
 	return servers, nil
 }

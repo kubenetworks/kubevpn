@@ -8,28 +8,28 @@ import (
 )
 
 var (
-	// ErrorEmptyForward is an error that implies the forward is empty.
-	ErrorEmptyForward = errors.New("empty forward")
+	// ErrorEmptyForwarder is an error that implies the forward is empty.
+	ErrorEmptyForwarder = errors.New("empty forwarder")
 )
 
-type Forward struct {
+type Forwarder struct {
 	retries int
 	node    *Node
 }
 
-func NewForward(retry int, node *Node) *Forward {
-	return &Forward{retries: retry, node: node}
+func NewForwarder(retry int, node *Node) *Forwarder {
+	return &Forwarder{retries: retry, node: node}
 }
 
-func (c *Forward) Node() *Node {
+func (c *Forwarder) Node() *Node {
 	return c.node
 }
 
-func (c *Forward) IsEmpty() bool {
+func (c *Forwarder) IsEmpty() bool {
 	return c == nil || c.node == nil
 }
 
-func (c *Forward) DialContext(ctx context.Context) (conn net.Conn, err error) {
+func (c *Forwarder) DialContext(ctx context.Context) (conn net.Conn, err error) {
 	for i := 0; i < int(math.Max(float64(1), float64(c.retries))); i++ {
 		conn, err = c.dial(ctx)
 		if err == nil {
@@ -39,9 +39,9 @@ func (c *Forward) DialContext(ctx context.Context) (conn net.Conn, err error) {
 	return
 }
 
-func (c *Forward) dial(ctx context.Context) (net.Conn, error) {
+func (c *Forwarder) dial(ctx context.Context) (net.Conn, error) {
 	if c.IsEmpty() {
-		return nil, ErrorEmptyForward
+		return nil, ErrorEmptyForwarder
 	}
 
 	conn, err := c.getConn(ctx)
@@ -58,7 +58,7 @@ func (c *Forward) dial(ctx context.Context) (net.Conn, error) {
 	return cc, nil
 }
 
-func (*Forward) resolve(addr string) string {
+func (*Forwarder) resolve(addr string) string {
 	if host, port, err := net.SplitHostPort(addr); err == nil {
 		if ips, err := net.LookupIP(host); err == nil && len(ips) > 0 {
 			return net.JoinHostPort(ips[0].String(), port)
@@ -67,9 +67,9 @@ func (*Forward) resolve(addr string) string {
 	return addr
 }
 
-func (c *Forward) getConn(ctx context.Context) (net.Conn, error) {
+func (c *Forwarder) getConn(ctx context.Context) (net.Conn, error) {
 	if c.IsEmpty() {
-		return nil, ErrorEmptyForward
+		return nil, ErrorEmptyForwarder
 	}
 	return c.Node().Client.Dial(ctx, c.resolve(c.Node().Addr))
 }
