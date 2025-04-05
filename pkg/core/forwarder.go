@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"errors"
-	"math"
 	"net"
 )
 
@@ -30,7 +29,7 @@ func (c *Forwarder) IsEmpty() bool {
 }
 
 func (c *Forwarder) DialContext(ctx context.Context) (conn net.Conn, err error) {
-	for i := 0; i < int(math.Max(float64(1), float64(c.retries))); i++ {
+	for i := 0; i < max(1, c.retries); i++ {
 		conn, err = c.dial(ctx)
 		if err == nil {
 			break
