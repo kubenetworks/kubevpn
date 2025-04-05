@@ -267,7 +267,6 @@ func (p *Peer) routeTCP() {
 	defer util.HandleCrash()
 	for packet := range p.tcpInbound {
 		if conn, ok := p.routeMapTCP.Load(packet.dst.String()); ok {
-			panic("this should not happen")
 			plog.G(context.Background()).Debugf("[TCP] Find TCP route SRC: %s to DST: %s -> %s", packet.src.String(), packet.dst.String(), conn.(net.Conn).RemoteAddr())
 			dgram := newDatagramPacket(packet.data[:packet.length])
 			err := dgram.Write(conn.(net.Conn))

@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"net"
-	"strings"
 	"sync"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -55,19 +54,7 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
 	plog.G(ctx).Debugf("[TCP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 
-	defer func(addr net.Addr) {
-		var keys []string
-		h.routeMapTCP.Range(func(key, value any) bool {
-			if value.(net.Conn) == tcpConn {
-				keys = append(keys, key.(string))
-			}
-			return true
-		})
-		for _, key := range keys {
-			h.routeMapTCP.Delete(key)
-		}
-		plog.G(ctx).Debugf("[TCP] To %s by conn %s from globle route map TCP", strings.Join(keys, ","), addr)
-	}(tcpConn.LocalAddr())
+	defer h.removeFromRouteMapTCP(ctx, tcpConn)
 
 	for {
 		select {
@@ -102,6 +89,15 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		}
 		util.SafeWrite(h.packetChan, packet)
 	}
+}
+
+func (h *UDPOverTCPHandler) removeFromRouteMapTCP(ctx context.Context, tcpConn net.Conn) {
+	h.routeMapTCP.Range(func(key, value any) bool {
+		if value.(net.Conn) == tcpConn {
+			plog.G(ctx).Debugf("[TCP] Delete to DST: %s by conn %s from globle route map TCP", key, tcpConn.LocalAddr())
+		}
+		return true
+	})
 }
 
 var _ net.PacketConn = (*UDPConnOverTCP)(nil)

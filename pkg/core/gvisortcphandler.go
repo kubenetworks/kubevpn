@@ -32,7 +32,7 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
 	cancel, cancelFunc := context.WithCancel(ctx)
 	defer cancelFunc()
-	plog.G(ctx).Debugf("[TCP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
+	plog.G(ctx).Debugf("[TUN-GVISOR] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 	h.handle(cancel, tcpConn)
 }
 
