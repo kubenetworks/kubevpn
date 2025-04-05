@@ -96,7 +96,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			continue
 		}
 
-		h.addRoute(ctx, src, conn)
+		h.addToRouteMapTCP(ctx, src, conn)
 		// inner ip like 198.19.0.100/102/103 connect each other
 		if config.CIDR.Contains(dst) || config.CIDR6.Contains(dst) {
 			plog.G(ctx).Debugf("[TUN-RAW] Forward to TUN device, SRC: %s, DST: %s, Length: %d", src.String(), dst.String(), read)
@@ -119,7 +119,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 	}
 }
 
-func (h *gvisorTCPHandler) addRoute(ctx context.Context, src net.IP, tcpConn net.Conn) {
+func (h *gvisorTCPHandler) addToRouteMapTCP(ctx context.Context, src net.IP, tcpConn net.Conn) {
 	value, loaded := h.routeMapTCP.LoadOrStore(src.String(), tcpConn)
 	if loaded {
 		if tcpConn != value.(net.Conn) {
