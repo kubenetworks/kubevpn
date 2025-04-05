@@ -16,7 +16,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/upgrade"
 )
 
-func CmdUpgrade(_ cmdutil.Factory) *cobra.Command {
+func CmdUpgrade(cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upgrade",
 		Short: i18n.T("Upgrade kubevpn client to latest version"),
