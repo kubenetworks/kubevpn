@@ -5,7 +5,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -31,7 +30,7 @@ func (c *UDPOverTCPConnector) ConnectContext(ctx context.Context, conn net.Conn)
 		if err != nil {
 			return nil, err
 		}
-		err = con.SetKeepAlivePeriod(15 * time.Second)
+		err = con.SetKeepAlivePeriod(config.KeepAliveTime)
 		if err != nil {
 			return nil, err
 		}

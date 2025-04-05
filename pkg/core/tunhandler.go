@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	MaxSize = 1000
+	MaxSize = 100
 )
 
 type tunHandler struct {
