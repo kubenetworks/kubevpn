@@ -20,7 +20,7 @@ import (
 )
 
 func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, conn net.Conn, endpoint *channel.Endpoint) {
-	tcpConn, _ := newGvisorFakeUDPTunnelConnOverTCP(ctx, conn)
+	tcpConn, _ := newGvisorUDPConnOverTCP(ctx, conn)
 	for {
 		select {
 		case <-ctx.Done():
@@ -42,7 +42,7 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, c
 
 // tun --> dispatcher
 func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, conn net.Conn, endpoint *channel.Endpoint) {
-	tcpConn, _ := newGvisorFakeUDPTunnelConnOverTCP(ctx, conn)
+	tcpConn, _ := newGvisorUDPConnOverTCP(ctx, conn)
 	for {
 		select {
 		case <-ctx.Done():

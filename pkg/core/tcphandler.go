@@ -104,6 +104,8 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	}
 }
 
+var _ net.PacketConn = (*UDPConnOverTCP)(nil)
+
 // UDPConnOverTCP fake udp connection over tcp connection
 type UDPConnOverTCP struct {
 	// tcp connection
@@ -124,7 +126,7 @@ func (c *UDPConnOverTCP) ReadFrom(b []byte) (int, net.Addr, error) {
 		if err != nil {
 			return 0, nil, err
 		}
-		return int(packet.DataLength), packet.Addr(), nil
+		return int(packet.DataLength), nil, nil
 	}
 }
 

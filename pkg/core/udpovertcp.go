@@ -2,9 +2,7 @@ package core
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
-	"net"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
@@ -14,23 +12,11 @@ type DatagramPacket struct {
 	Data       []byte // []byte
 }
 
-func (addr *DatagramPacket) String() string {
-	if addr == nil {
-		return ""
-	}
-	return fmt.Sprintf("DataLength: %d, Data: %v\n", addr.DataLength, addr.Data)
-}
-
 func newDatagramPacket(data []byte) (r *DatagramPacket) {
 	return &DatagramPacket{
 		DataLength: uint16(len(data)),
 		Data:       data,
 	}
-}
-
-func (addr *DatagramPacket) Addr() net.Addr {
-	var server8422, _ = net.ResolveUDPAddr("udp", "127.0.0.1:8422")
-	return server8422
 }
 
 func readDatagramPacket(r io.Reader, b []byte) (*DatagramPacket, error) {
@@ -40,7 +26,7 @@ func readDatagramPacket(r io.Reader, b []byte) (*DatagramPacket, error) {
 	}
 	dataLength := binary.BigEndian.Uint16(b[:2])
 	_, err = io.ReadFull(r, b[:dataLength])
-	if err != nil /*&& (err != io.ErrUnexpectedEOF || err != io.EOF)*/ {
+	if err != nil {
 		return nil, err
 	}
 	return &DatagramPacket{DataLength: dataLength, Data: b[:dataLength]}, nil
@@ -54,7 +40,7 @@ func readDatagramPacketServer(r io.Reader, b []byte) (*DatagramPacket, error) {
 	}
 	dataLength := binary.BigEndian.Uint16(b[:2])
 	_, err = io.ReadFull(r, b[:dataLength])
-	if err != nil /*&& (err != io.ErrUnexpectedEOF || err != io.EOF)*/ {
+	if err != nil {
 		return nil, err
 	}
 	return &DatagramPacket{DataLength: dataLength, Data: b[:]}, nil

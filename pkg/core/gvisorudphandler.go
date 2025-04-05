@@ -44,17 +44,17 @@ func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 }
 
 // fake udp connect over tcp
-type gvisorFakeUDPTunnelConn struct {
+type gvisorUDPConnOverTCP struct {
 	// tcp connection
 	net.Conn
 	ctx context.Context
 }
 
-func newGvisorFakeUDPTunnelConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, error) {
-	return &gvisorFakeUDPTunnelConn{ctx: ctx, Conn: conn}, nil
+func newGvisorUDPConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, error) {
+	return &gvisorUDPConnOverTCP{ctx: ctx, Conn: conn}, nil
 }
 
-func (c *gvisorFakeUDPTunnelConn) Read(b []byte) (int, error) {
+func (c *gvisorUDPConnOverTCP) Read(b []byte) (int, error) {
 	select {
 	case <-c.ctx.Done():
 		return 0, c.ctx.Err()
@@ -67,15 +67,15 @@ func (c *gvisorFakeUDPTunnelConn) Read(b []byte) (int, error) {
 	}
 }
 
-func (c *gvisorFakeUDPTunnelConn) Write(b []byte) (int, error) {
-	dgram := newDatagramPacket(b)
-	if err := dgram.Write(c.Conn); err != nil {
+func (c *gvisorUDPConnOverTCP) Write(b []byte) (int, error) {
+	packet := newDatagramPacket(b)
+	if err := packet.Write(c.Conn); err != nil {
 		return 0, err
 	}
 	return len(b), nil
 }
 
-func (c *gvisorFakeUDPTunnelConn) Close() error {
+func (c *gvisorUDPConnOverTCP) Close() error {
 	if cc, ok := c.Conn.(interface{ CloseRead() error }); ok {
 		_ = cc.CloseRead()
 	}
@@ -184,13 +184,13 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				errChan <- err
 				return
 			}
-			dgram := newDatagramPacket(buf[:n])
-			if err = dgram.Write(tcpConn); err != nil {
-				plog.G(ctx).Errorf("[TUN-UDP] Error: %s <- %s : %s", tcpConn.RemoteAddr(), dgram.Addr(), err)
+			packet := newDatagramPacket(buf[:n])
+			if err = packet.Write(tcpConn); err != nil {
+				plog.G(ctx).Errorf("[TUN-UDP] Error: %s <- %s : %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
 				errChan <- err
 				return
 			}
-			plog.G(ctx).Debugf("[TUN-UDP] %s <<< %s length: %d", tcpConn.RemoteAddr(), dgram.Addr(), len(dgram.Data))
+			plog.G(ctx).Debugf("[TUN-UDP] %s <<< %s length: %d", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), len(packet.Data))
 		}
 	}()
 	err := <-errChan

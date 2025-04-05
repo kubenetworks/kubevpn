@@ -17,7 +17,7 @@ const (
 type tunHandler struct {
 	forward     *Forwarder
 	node        *Node
-	routeMapUDP *RouteMap
+	routeMapUDP *sync.Map
 	routeMapTCP *sync.Map
 	errChan     chan error
 }
@@ -27,7 +27,7 @@ func TunHandler(forward *Forwarder, node *Node) Handler {
 	return &tunHandler{
 		forward:     forward,
 		node:        node,
-		routeMapUDP: NewRouteMap(),
+		routeMapUDP: &sync.Map{},
 		routeMapTCP: RouteMapTCP,
 		errChan:     make(chan error, 1),
 	}
@@ -126,7 +126,7 @@ func (d *Device) Close() {
 	util.SafeClose(TCPPacketChan)
 }
 
-func (d *Device) transport(ctx context.Context, addr string, routeMapUDP *RouteMap, routeMapTCP *sync.Map) {
+func (d *Device) transport(ctx context.Context, addr string, routeMapUDP *sync.Map, routeMapTCP *sync.Map) {
 	for ctx.Err() == nil {
 		func() {
 			packetConn, err := (&net.ListenConfig{}).ListenPacket(ctx, "udp", addr)
@@ -195,7 +195,7 @@ type Peer struct {
 	tunOutbound chan<- *Packet
 
 	// map[srcIP.String()]net.Addr for udp
-	routeMapUDP *RouteMap
+	routeMapUDP *sync.Map
 	// map[srcIP.String()]net.Conn for tcp
 	routeMapTCP *sync.Map
 
@@ -226,9 +226,9 @@ func (p *Peer) readFromConn() {
 			plog.G(context.Background()).Errorf("[TUN] Unknown packet: %v", err)
 			continue
 		}
-		if addr, loaded := p.routeMapUDP.LoadOrStore(src, from); loaded {
-			if addr.String() != from.String() {
-				p.routeMapUDP.Store(src, from)
+		if addr, loaded := p.routeMapUDP.LoadOrStore(src.String(), from); loaded {
+			if addr.(net.Addr).String() != from.String() {
+				p.routeMapUDP.Store(src.String(), from)
 				plog.G(context.Background()).Debugf("[TUN] Replace route map UDP: %s -> %s", src, from)
 			}
 		} else {
@@ -272,7 +272,7 @@ func (p *Peer) routeTCP() {
 			err := dgram.Write(conn.(net.Conn))
 			config.LPool.Put(packet.data[:])
 			if err != nil {
-				plog.G(context.Background()).Errorf("[TCP] Failed to write to %s <- %s : %s", conn.(net.Conn).RemoteAddr(), dgram.Addr(), err)
+				plog.G(context.Background()).Errorf("[TCP] Failed to write to %s <- %s : %s", conn.(net.Conn).RemoteAddr(), conn.(net.Conn).LocalAddr(), err)
 				p.sendErr(err)
 				return
 			}
@@ -291,9 +291,9 @@ func (p *Peer) routeTCP() {
 func (p *Peer) routeTUN() {
 	defer util.HandleCrash()
 	for packet := range p.tunInbound {
-		if addr := p.routeMapUDP.RouteTo(packet.dst); addr != nil {
+		if addr, ok := p.routeMapUDP.Load(packet.dst.String()); ok {
 			plog.G(context.Background()).Debugf("[TUN] Find UDP route to DST: %s -> %s, SRC: %s, DST: %s", packet.dst, addr, packet.src.String(), packet.dst.String())
-			_, err := p.conn.WriteTo(packet.data[:packet.length], addr)
+			_, err := p.conn.WriteTo(packet.data[:packet.length], addr.(net.Addr))
 			config.LPool.Put(packet.data[:])
 			if err != nil {
 				plog.G(context.Background()).Debugf("[TUN] Failed wirte to route dst: %s -> %s", packet.dst, addr)
@@ -306,7 +306,7 @@ func (p *Peer) routeTUN() {
 			err := dgram.Write(conn.(net.Conn))
 			config.LPool.Put(packet.data[:])
 			if err != nil {
-				plog.G(context.Background()).Errorf("[TUN] Failed to write TCP %s <- %s : %s", conn.(net.Conn).RemoteAddr(), dgram.Addr(), err)
+				plog.G(context.Background()).Errorf("[TUN] Failed to write TCP %s <- %s : %s", conn.(net.Conn).RemoteAddr(), conn.(net.Conn).LocalAddr(), err)
 				p.sendErr(err)
 				return
 			}
@@ -323,42 +323,4 @@ func (p *Peer) Start() {
 
 func (p *Peer) Close() {
 	p.conn.Close()
-}
-
-type RouteMap struct {
-	lock   *sync.RWMutex
-	routes map[string]net.Addr
-}
-
-func NewRouteMap() *RouteMap {
-	return &RouteMap{
-		lock:   &sync.RWMutex{},
-		routes: map[string]net.Addr{},
-	}
-}
-
-func (n *RouteMap) LoadOrStore(to net.IP, addr net.Addr) (net.Addr, bool) {
-	n.lock.RLock()
-	route, load := n.routes[to.String()]
-	n.lock.RUnlock()
-	if load {
-		return route, true
-	}
-
-	n.lock.Lock()
-	defer n.lock.Unlock()
-	n.routes[to.String()] = addr
-	return addr, false
-}
-
-func (n *RouteMap) Store(to net.IP, addr net.Addr) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-	n.routes[to.String()] = addr
-}
-
-func (n *RouteMap) RouteTo(ip net.IP) net.Addr {
-	n.lock.RLock()
-	defer n.lock.RUnlock()
-	return n.routes[ip.String()]
 }
