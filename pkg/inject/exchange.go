@@ -84,8 +84,6 @@ sysctl -w net.ipv6.conf.all.disable_ipv6=0
 sysctl -w net.ipv6.conf.all.forwarding=1
 sysctl -w net.ipv4.conf.all.route_localnet=1
 update-alternatives --set iptables /usr/sbin/iptables-legacy
-iptables -F
-ip6tables -F
 iptables -P INPUT ACCEPT
 ip6tables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
@@ -94,7 +92,7 @@ iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIPv4}
 ip6tables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIPv6}
 iptables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
 ip6tables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
-kubevpn server -L "tun:/127.0.0.1:8422?net=${TunIPv4}&route=${CIDR4}" -F "tcp://${TrafficManagerService}:10800"`,
+kubevpn server -l "tun:/127.0.0.1:8422?net=${TunIPv4}&route=${CIDR4}" -f "tcp://${TrafficManagerService}:10800"`,
 		},
 		SecurityContext: &corev1.SecurityContext{
 			Capabilities: &corev1.Capabilities{

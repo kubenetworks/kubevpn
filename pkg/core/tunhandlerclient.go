@@ -33,7 +33,7 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	}
 	d.SetTunInboundHandler(func(tunInbound <-chan *Packet, tunOutbound chan<- *Packet) {
 		for ctx.Err() == nil {
-			packetConn, err := getRemotePacketConn(ctx, h.chain)
+			packetConn, err := getRemotePacketConn(ctx, h.forward)
 			if err != nil {
 				plog.G(ctx).Debugf("[TUN-CLIENT] Failed to get remote conn from %s -> %s: %s", tun.LocalAddr(), remoteAddr, err)
 				time.Sleep(time.Millisecond * 200)
@@ -49,15 +49,15 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	d.Start(ctx)
 }
 
-func getRemotePacketConn(ctx context.Context, chain *Chain) (packetConn net.PacketConn, err error) {
+func getRemotePacketConn(ctx context.Context, forward *Forward) (packetConn net.PacketConn, err error) {
 	defer func() {
 		if err != nil && packetConn != nil {
 			_ = packetConn.Close()
 		}
 	}()
-	if !chain.IsEmpty() {
+	if !forward.IsEmpty() {
 		var cc net.Conn
-		cc, err = chain.DialContext(ctx)
+		cc, err = forward.DialContext(ctx)
 		if err != nil {
 			return
 		}

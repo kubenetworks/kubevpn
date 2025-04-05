@@ -28,25 +28,17 @@ type TCPUDPacket struct {
 }
 
 // Route example:
-// -L "tcp://:10800" -L "tun://:8422?net=198.19.0.100/16"
-// -L "tun:/10.233.24.133:8422?net=198.19.0.102/16&route=198.19.0.0/16"
-// -L "tun:/127.0.0.1:8422?net=198.19.0.102/16&route=198.19.0.0/16,10.233.0.0/16" -F "tcp://127.0.0.1:10800"
+// -l "tcp://:10800" -l "tun://:8422?net=198.19.0.100/16"
+// -l "tun:/10.233.24.133:8422?net=198.19.0.102/16&route=198.19.0.0/16"
+// -l "tun:/127.0.0.1:8422?net=198.19.0.102/16&route=198.19.0.0/16,10.233.0.0/16" -f "tcp://127.0.0.1:10800"
 type Route struct {
-	ServeNodes  []string // -L tun
-	ForwardNode string   // -F tcp
-	Retries     int
+	Listeners []string // -l tun
+	Forward   string   // -f tcp
+	Retries   int
 }
 
-func (r *Route) parseChain() (*Chain, error) {
-	node, err := parseChainNode(r.ForwardNode)
-	if err != nil {
-		return nil, err
-	}
-	return NewChain(r.Retries, node), nil
-}
-
-func parseChainNode(ns string) (*Node, error) {
-	node, err := ParseNode(ns)
+func (r *Route) parseForward() (*Forward, error) {
+	node, err := ParseNode(r.Forward)
 	if err != nil {
 		return nil, err
 	}
@@ -54,18 +46,18 @@ func parseChainNode(ns string) (*Node, error) {
 		Connector:   UDPOverTCPTunnelConnector(),
 		Transporter: TCPTransporter(),
 	}
-	return node, nil
+	return NewForward(r.Retries, node), nil
 }
 
 func (r *Route) GenerateServers() ([]Server, error) {
-	chain, err := r.parseChain()
+	forward, err := r.parseForward()
 	if err != nil && !errors.Is(err, ErrorInvalidNode) {
-		plog.G(context.Background()).Errorf("Failed to parse chain: %v", err)
+		plog.G(context.Background()).Errorf("Failed to parse forward: %v", err)
 		return nil, err
 	}
 
-	servers := make([]Server, 0, len(r.ServeNodes))
-	for _, serveNode := range r.ServeNodes {
+	servers := make([]Server, 0, len(r.Listeners))
+	for _, serveNode := range r.Listeners {
 		var node *Node
 		node, err = ParseNode(serveNode)
 		if err != nil {
@@ -78,7 +70,7 @@ func (r *Route) GenerateServers() ([]Server, error) {
 
 		switch node.Protocol {
 		case "tun":
-			handler = TunHandler(chain, node)
+			handler = TunHandler(forward, node)
 			ln, err = tun.Listener(tun.Config{
 				Name:    node.Get("name"),
 				Addr:    node.Get("net"),

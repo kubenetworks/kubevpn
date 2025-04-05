@@ -8,28 +8,28 @@ import (
 )
 
 var (
-	// ErrorEmptyChain is an error that implies the chain is empty.
-	ErrorEmptyChain = errors.New("empty chain")
+	// ErrorEmptyForward is an error that implies the forward is empty.
+	ErrorEmptyForward = errors.New("empty forward")
 )
 
-type Chain struct {
+type Forward struct {
 	retries int
 	node    *Node
 }
 
-func NewChain(retry int, node *Node) *Chain {
-	return &Chain{retries: retry, node: node}
+func NewForward(retry int, node *Node) *Forward {
+	return &Forward{retries: retry, node: node}
 }
 
-func (c *Chain) Node() *Node {
+func (c *Forward) Node() *Node {
 	return c.node
 }
 
-func (c *Chain) IsEmpty() bool {
+func (c *Forward) IsEmpty() bool {
 	return c == nil || c.node == nil
 }
 
-func (c *Chain) DialContext(ctx context.Context) (conn net.Conn, err error) {
+func (c *Forward) DialContext(ctx context.Context) (conn net.Conn, err error) {
 	for i := 0; i < int(math.Max(float64(1), float64(c.retries))); i++ {
 		conn, err = c.dial(ctx)
 		if err == nil {
@@ -39,9 +39,9 @@ func (c *Chain) DialContext(ctx context.Context) (conn net.Conn, err error) {
 	return
 }
 
-func (c *Chain) dial(ctx context.Context) (net.Conn, error) {
+func (c *Forward) dial(ctx context.Context) (net.Conn, error) {
 	if c.IsEmpty() {
-		return nil, ErrorEmptyChain
+		return nil, ErrorEmptyForward
 	}
 
 	conn, err := c.getConn(ctx)
@@ -58,7 +58,7 @@ func (c *Chain) dial(ctx context.Context) (net.Conn, error) {
 	return cc, nil
 }
 
-func (*Chain) resolve(addr string) string {
+func (*Forward) resolve(addr string) string {
 	if host, port, err := net.SplitHostPort(addr); err == nil {
 		if ips, err := net.LookupIP(host); err == nil && len(ips) > 0 {
 			return net.JoinHostPort(ips[0].String(), port)
@@ -67,9 +67,9 @@ func (*Chain) resolve(addr string) string {
 	return addr
 }
 
-func (c *Chain) getConn(ctx context.Context) (net.Conn, error) {
+func (c *Forward) getConn(ctx context.Context) (net.Conn, error) {
 	if c.IsEmpty() {
-		return nil, ErrorEmptyChain
+		return nil, ErrorEmptyForward
 	}
 	return c.Node().Client.Dial(ctx, c.resolve(c.Node().Addr))
 }

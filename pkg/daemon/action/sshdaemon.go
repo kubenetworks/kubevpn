@@ -45,7 +45,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 		}()
 
 		r := core.Route{
-			ServeNodes: []string{
+			Listeners: []string{
 				"tun://127.0.0.1:8422?net=" + DefaultServerIP,
 				"tcp://:10800",
 			},

@@ -130,11 +130,11 @@ func (w *wsHandler) createTwoWayTUNTunnel(ctx context.Context, cli *ssh.Client) 
 	w.PrintLine(msg)
 	w.cidr = append(w.cidr, string(serverIP))
 	r := core.Route{
-		ServeNodes: []string{
+		Listeners: []string{
 			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", clientIP, strings.Join(w.cidr, ",")),
 		},
-		ForwardNode: fmt.Sprintf("tcp://127.0.0.1:%d", localPort),
-		Retries:     5,
+		Forward: fmt.Sprintf("tcp://127.0.0.1:%d", localPort),
+		Retries: 5,
 	}
 	servers, err := handler.Parse(r)
 	if err != nil {
