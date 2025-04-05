@@ -13,40 +13,50 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
-	defer tun.Close()
-	remoteAddr, err := net.ResolveUDPAddr("udp", h.node.Remote)
-	if err != nil {
-		plog.G(ctx).Errorf("[TUN-CLIENT] Failed to resolve udp addr %s: %v", h.node.Remote, err)
-		return
-	}
-	in := make(chan *Packet, MaxSize)
-	out := make(chan *Packet, MaxSize)
-	defer util.SafeClose(in)
-	defer util.SafeClose(out)
-
-	d := &ClientDevice{
+func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn, remoteAddr *net.UDPAddr) {
+	device := &ClientDevice{
 		tun:         tun,
-		tunInbound:  in,
-		tunOutbound: out,
-		chExit:      h.chExit,
+		tunInbound:  make(chan *Packet, MaxSize),
+		tunOutbound: make(chan *Packet, MaxSize),
+		errChan:     h.errChan,
 	}
-	d.SetTunInboundHandler(func(tunInbound <-chan *Packet, tunOutbound chan<- *Packet) {
-		for ctx.Err() == nil {
-			packetConn, err := getRemotePacketConn(ctx, h.forward)
-			if err != nil {
-				plog.G(ctx).Debugf("[TUN-CLIENT] Failed to get remote conn from %s -> %s: %s", tun.LocalAddr(), remoteAddr, err)
-				time.Sleep(time.Millisecond * 200)
-				continue
-			}
-			err = transportTunClient(ctx, tunInbound, tunOutbound, packetConn, remoteAddr)
-			if err != nil {
-				plog.G(ctx).Debugf("[TUN-CLIENT] %s: %v", tun.LocalAddr(), err)
-			}
-		}
-	})
 
-	d.Start(ctx)
+	defer device.Close()
+	go device.forwardPacketToRemote(ctx, remoteAddr, h.forward)
+	go device.readFromTun()
+	go device.writeToTun()
+	go heartbeats(ctx, device.tun)
+	select {
+	case <-device.errChan:
+	case <-ctx.Done():
+	}
+}
+
+type ClientDevice struct {
+	tun         net.Conn
+	tunInbound  chan *Packet
+	tunOutbound chan *Packet
+	errChan     chan error
+
+	remote  *net.UDPAddr
+	forward *Forwarder
+}
+
+func (d *ClientDevice) forwardPacketToRemote(ctx context.Context, remoteAddr *net.UDPAddr, forward *Forwarder) {
+	for ctx.Err() == nil {
+		func() {
+			packetConn, err := getRemotePacketConn(ctx, forward)
+			if err != nil {
+				plog.G(ctx).Debugf("[TUN-CLIENT] Failed to get remote conn from %s -> %s: %s", d.tun.LocalAddr(), remoteAddr, err)
+				time.Sleep(time.Millisecond * 200)
+				return
+			}
+			err = transportTunPacketClient(ctx, d.tunInbound, d.tunOutbound, packetConn, remoteAddr)
+			if err != nil {
+				plog.G(ctx).Debugf("[TUN-CLIENT] %s: %v", d.tun.LocalAddr(), err)
+			}
+		}()
+	}
 }
 
 func getRemotePacketConn(ctx context.Context, forwarder *Forwarder) (packetConn net.PacketConn, err error) {
@@ -56,13 +66,13 @@ func getRemotePacketConn(ctx context.Context, forwarder *Forwarder) (packetConn 
 		}
 	}()
 	if !forwarder.IsEmpty() {
-		var cc net.Conn
-		cc, err = forwarder.DialContext(ctx)
+		var conn net.Conn
+		conn, err = forwarder.DialContext(ctx)
 		if err != nil {
 			return
 		}
 		var ok bool
-		if packetConn, ok = cc.(net.PacketConn); !ok {
+		if packetConn, ok = conn.(net.PacketConn); !ok {
 			err = errors.New("not a packet connection")
 			return
 		}
@@ -76,20 +86,21 @@ func getRemotePacketConn(ctx context.Context, forwarder *Forwarder) (packetConn 
 	return
 }
 
-func transportTunClient(ctx context.Context, tunInbound <-chan *Packet, tunOutbound chan<- *Packet, packetConn net.PacketConn, remoteAddr net.Addr) error {
+func transportTunPacketClient(ctx context.Context, tunInbound <-chan *Packet, tunOutbound chan<- *Packet, packetConn net.PacketConn, remoteAddr net.Addr) error {
 	errChan := make(chan error, 2)
 	defer packetConn.Close()
 
 	go func() {
 		defer util.HandleCrash()
-		for e := range tunInbound {
-			if e.src.Equal(e.dst) {
-				util.SafeWrite(tunOutbound, e)
+		for packet := range tunInbound {
+			if packet.src.Equal(packet.dst) {
+				util.SafeWrite(tunOutbound, packet)
 				continue
 			}
-			_, err := packetConn.WriteTo(e.data[:e.length], remoteAddr)
-			config.LPool.Put(e.data[:])
+			_, err := packetConn.WriteTo(packet.data[:packet.length], remoteAddr)
+			config.LPool.Put(packet.data[:])
 			if err != nil {
+				plog.G(ctx).Errorf("failed to write packet to remote %s: %v", remoteAddr, err)
 				util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to write packet to remote %s", remoteAddr)))
 				return
 			}
@@ -118,54 +129,22 @@ func transportTunClient(ctx context.Context, tunInbound <-chan *Packet, tunOutbo
 	}
 }
 
-type ClientDevice struct {
-	tun         net.Conn
-	tunInbound  chan *Packet
-	tunOutbound chan *Packet
-	// your main logic
-	tunInboundHandler func(tunInbound <-chan *Packet, tunOutbound chan<- *Packet)
-	chExit            chan error
-}
-
-func (d *ClientDevice) Start(ctx context.Context) {
-	go d.tunInboundHandler(d.tunInbound, d.tunOutbound)
-	go heartbeats(ctx, d.tun)
-	go d.readFromTun()
-	go d.writeToTun()
-
-	select {
-	case err := <-d.chExit:
-		plog.G(ctx).Errorf("[TUN-CLIENT]: %v", err)
-		return
-	case <-ctx.Done():
-		return
-	}
-}
-
-func (d *ClientDevice) SetTunInboundHandler(handler func(tunInbound <-chan *Packet, tunOutbound chan<- *Packet)) {
-	d.tunInboundHandler = handler
-}
-
 func (d *ClientDevice) readFromTun() {
 	defer util.HandleCrash()
 	for {
 		buf := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(buf[:])
 		if err != nil {
-			util.SafeWrite(d.chExit, err)
+			util.SafeWrite(d.errChan, err)
 			config.LPool.Put(buf[:])
 			return
-		}
-		if n == 0 {
-			config.LPool.Put(buf[:])
-			continue
 		}
 
 		// Try to determine network protocol number, default zero.
 		var src, dst net.IP
 		src, dst, err = util.ParseIP(buf[:n])
 		if err != nil {
-			plog.G(context.Background()).Debugf("[TUN-GVISOR] Unknown packet: %v", err)
+			plog.G(context.Background()).Errorf("[TUN-RAW] Unknown packet: %v", err)
 			config.LPool.Put(buf[:])
 			continue
 		}
@@ -180,8 +159,47 @@ func (d *ClientDevice) writeToTun() {
 		_, err := d.tun.Write(e.data[:e.length])
 		config.LPool.Put(e.data[:])
 		if err != nil {
-			util.SafeWrite(d.chExit, err)
+			util.SafeWrite(d.errChan, err)
 			return
+		}
+	}
+}
+
+func (d *ClientDevice) Close() {
+	d.tun.Close()
+	util.SafeClose(d.tunInbound)
+	util.SafeClose(d.tunOutbound)
+}
+
+func heartbeats(ctx context.Context, tun net.Conn) {
+	tunIfi, err := util.GetTunDeviceByConn(tun)
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to get tun device: %s", err.Error())
+		return
+	}
+	srcIPv4, srcIPv6, dockerSrcIPv4, err := util.GetTunDeviceIP(tunIfi.Name)
+	if err != nil {
+		return
+	}
+
+	ticker := time.NewTicker(time.Second * 60)
+	defer ticker.Stop()
+
+	for ; true; <-ticker.C {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if srcIPv4 != nil {
+			util.Ping(ctx, srcIPv4.String(), config.RouterIP.String())
+		}
+		if srcIPv6 != nil {
+			util.Ping(ctx, srcIPv6.String(), config.RouterIP6.String())
+		}
+		if dockerSrcIPv4 != nil {
+			util.Ping(ctx, dockerSrcIPv4.String(), config.DockerRouterIP.String())
 		}
 	}
 }
