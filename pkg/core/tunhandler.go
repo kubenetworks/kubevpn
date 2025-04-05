@@ -317,10 +317,6 @@ func (p *Peer) routeTUN() {
 	}
 }
 
-func (p *Peer) Start() {
-
-}
-
 func (p *Peer) Close() {
 	p.conn.Close()
 }

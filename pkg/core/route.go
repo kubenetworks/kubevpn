@@ -74,7 +74,7 @@ func (r *Route) GenerateServers() ([]Server, error) {
 				Addr:    node.Get("net"),
 				Addr6:   node.Get("net6"),
 				MTU:     node.GetInt("mtu"),
-				Routes:  parseIPRoutes(node.Get("route")),
+				Routes:  parseRoutes(node.Get("route")),
 				Gateway: node.Get("gw"),
 			})
 			if err != nil {
@@ -118,16 +118,13 @@ func (r *Route) GenerateServers() ([]Server, error) {
 	return servers, nil
 }
 
-func parseIPRoutes(routeStringList string) (routes []types.Route) {
-	if len(routeStringList) == 0 {
-		return
-	}
-
-	routeList := strings.Split(routeStringList, ",")
-	for _, route := range routeList {
+func parseRoutes(str string) []types.Route {
+	var routes []types.Route
+	list := strings.Split(str, ",")
+	for _, route := range list {
 		if _, ipNet, _ := net.ParseCIDR(strings.TrimSpace(route)); ipNet != nil {
 			routes = append(routes, types.Route{Dst: *ipNet})
 		}
 	}
-	return
+	return routes
 }
