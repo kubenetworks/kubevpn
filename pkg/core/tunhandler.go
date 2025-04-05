@@ -322,15 +322,7 @@ func (p *Peer) readFromTCPConn() {
 func (p *Peer) routeTCP() {
 	defer util.HandleCrash()
 	for packet := range p.tcpInbound {
-		/*if routeToAddr := p.routeMapUDP.RouteTo(packet.dst); routeToAddr != nil {
-			plog.G(context.Background()).Debugf("[TCP] Find UDP route to dst: %s -> %s", packet.dst, routeToAddr)
-			_, err := p.conn.WriteTo(packet.data[:packet.length], routeToAddr)
-			config.LPool.Put(packet.data[:])
-			if err != nil {
-				p.sendErr(err)
-				return
-			}
-		} else*/if conn, ok := p.routeMapTCP.Load(packet.dst.String()); ok {
+		if conn, ok := p.routeMapTCP.Load(packet.dst.String()); ok {
 			plog.G(context.Background()).Debugf("[TCP] Find TCP route SRC: %s to DST: %s -> %s", packet.src.String(), packet.dst.String(), conn.(net.Conn).RemoteAddr())
 			dgram := newDatagramPacket(packet.data[:packet.length])
 			err := dgram.Write(conn.(net.Conn))

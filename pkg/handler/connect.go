@@ -422,7 +422,7 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 		return err
 	}
 	forward.Client = &core.Client{
-		Connector:   core.UDPOverTCPTunnelConnector(),
+		Connector:   core.NewUDPOverTCPConnector(),
 		Transporter: core.TCPTransporter(),
 	}
 	forwarder := core.NewForward(5, forward)

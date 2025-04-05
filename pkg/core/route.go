@@ -43,7 +43,7 @@ func (r *Route) parseForward() (*Forward, error) {
 		return nil, err
 	}
 	node.Client = &Client{
-		Connector:   UDPOverTCPTunnelConnector(),
+		Connector:   NewUDPOverTCPConnector(),
 		Transporter: TCPTransporter(),
 	}
 	return NewForward(r.Retries, node), nil

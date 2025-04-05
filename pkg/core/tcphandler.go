@@ -12,14 +12,14 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-type fakeUDPTunnelConnector struct {
+type UDPOverTCPConnector struct {
 }
 
-func UDPOverTCPTunnelConnector() Connector {
-	return &fakeUDPTunnelConnector{}
+func NewUDPOverTCPConnector() Connector {
+	return &UDPOverTCPConnector{}
 }
 
-func (c *fakeUDPTunnelConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
+func (c *UDPOverTCPConnector) ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error) {
 	//defer conn.SetDeadline(time.Time{})
 	switch con := conn.(type) {
 	case *net.TCPConn:
@@ -36,23 +36,23 @@ func (c *fakeUDPTunnelConnector) ConnectContext(ctx context.Context, conn net.Co
 			return nil, err
 		}
 	}
-	return newFakeUDPTunnelConnOverTCP(ctx, conn)
+	return newUDPConnOverTCP(ctx, conn)
 }
 
-type fakeUdpHandler struct {
+type UDPOverTCPHandler struct {
 	// map[srcIP]net.Conn
 	routeMapTCP *sync.Map
 	packetChan  chan *DatagramPacket
 }
 
 func TCPHandler() Handler {
-	return &fakeUdpHandler{
+	return &UDPOverTCPHandler{
 		routeMapTCP: RouteMapTCP,
 		packetChan:  TCPPacketChan,
 	}
 }
 
-func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
+func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
 	plog.G(ctx).Debugf("[TCP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 
@@ -67,7 +67,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		for _, key := range keys {
 			h.routeMapTCP.Delete(key)
 		}
-		plog.G(ctx).Debugf("[TCP] To %s by conn %s from globle route map TCP", strings.Join(keys, " "), addr)
+		plog.G(ctx).Debugf("[TCP] To %s by conn %s from globle route map TCP", strings.Join(keys, ","), addr)
 	}(tcpConn.LocalAddr())
 
 	for {
@@ -78,7 +78,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		}
 
 		buf := config.LPool.Get().([]byte)[:]
-		dgram, err := readDatagramPacketServer(tcpConn, buf[:])
+		packet, err := readDatagramPacketServer(tcpConn, buf[:])
 		if err != nil {
 			plog.G(ctx).Errorf("[TCP] %s -> %s : %v", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
 			config.LPool.Put(buf[:])
@@ -86,7 +86,7 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		}
 
 		var src net.IP
-		src, _, err = util.ParseIP(dgram.Data[:dgram.DataLength])
+		src, _, err = util.ParseIP(packet.Data[:packet.DataLength])
 		if err != nil {
 			plog.G(ctx).Errorf("[TCP] Unknown packet")
 			config.LPool.Put(buf[:])
@@ -101,43 +101,43 @@ func (h *fakeUdpHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		} else {
 			plog.G(ctx).Debugf("[TCP] Add new route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 		}
-		util.SafeWrite(h.packetChan, dgram)
+		util.SafeWrite(h.packetChan, packet)
 	}
 }
 
-// fake udp connect over tcp
-type fakeUDPTunnelConn struct {
+// UDPConnOverTCP fake udp connection over tcp connection
+type UDPConnOverTCP struct {
 	// tcp connection
 	net.Conn
 	ctx context.Context
 }
 
-func newFakeUDPTunnelConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, error) {
-	return &fakeUDPTunnelConn{ctx: ctx, Conn: conn}, nil
+func newUDPConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, error) {
+	return &UDPConnOverTCP{ctx: ctx, Conn: conn}, nil
 }
 
-func (c *fakeUDPTunnelConn) ReadFrom(b []byte) (int, net.Addr, error) {
+func (c *UDPConnOverTCP) ReadFrom(b []byte) (int, net.Addr, error) {
 	select {
 	case <-c.ctx.Done():
 		return 0, nil, c.ctx.Err()
 	default:
-		dgram, err := readDatagramPacket(c.Conn, b)
+		packet, err := readDatagramPacket(c.Conn, b)
 		if err != nil {
 			return 0, nil, err
 		}
-		return int(dgram.DataLength), dgram.Addr(), nil
+		return int(packet.DataLength), packet.Addr(), nil
 	}
 }
 
-func (c *fakeUDPTunnelConn) WriteTo(b []byte, _ net.Addr) (int, error) {
-	dgram := newDatagramPacket(b)
-	if err := dgram.Write(c.Conn); err != nil {
+func (c *UDPConnOverTCP) WriteTo(b []byte, _ net.Addr) (int, error) {
+	packet := newDatagramPacket(b)
+	if err := packet.Write(c.Conn); err != nil {
 		return 0, err
 	}
 	return len(b), nil
 }
 
-func (c *fakeUDPTunnelConn) Close() error {
+func (c *UDPConnOverTCP) Close() error {
 	if cc, ok := c.Conn.(interface{ CloseRead() error }); ok {
 		_ = cc.CloseRead()
 	}
