@@ -15,7 +15,7 @@ import (
 
 // CmdSSHDaemon
 // set local tun ip 198.19.0.1/32, remember to use mask 32
-func CmdSSHDaemon(_ cmdutil.Factory) *cobra.Command {
+func CmdSSHDaemon(cmdutil.Factory) *cobra.Command {
 	var clientIP string
 	cmd := &cobra.Command{
 		Use:    "ssh-daemon",

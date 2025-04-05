@@ -8,7 +8,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util/regctl"
 )
 
-func CmdImageCopy(_ cmdutil.Factory) *cobra.Command {
+func CmdImageCopy(cmdutil.Factory) *cobra.Command {
 	var imageCmd = &cobra.Command{
 		Use:   "image <cmd>",
 		Short: "copy images",

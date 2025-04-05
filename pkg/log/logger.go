@@ -32,7 +32,7 @@ func GetLoggerForClient(level int32, out io.Writer) *log.Logger {
 func InitLoggerForServer() *log.Logger {
 	return &log.Logger{
 		Out:          os.Stderr,
-		Formatter:    &format{},
+		Formatter:    &serverFormat{},
 		Hooks:        make(log.LevelHooks),
 		Level:        log.DebugLevel,
 		ExitFunc:     os.Exit,

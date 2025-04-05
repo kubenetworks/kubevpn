@@ -10,7 +10,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func CmdSyncthing(_ cmdutil.Factory) *cobra.Command {
+func CmdSyncthing(cmdutil.Factory) *cobra.Command {
 	var detach bool
 	var dir string
 	cmd := &cobra.Command{

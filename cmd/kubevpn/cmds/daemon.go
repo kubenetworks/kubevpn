@@ -21,7 +21,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func CmdDaemon(_ cmdutil.Factory) *cobra.Command {
+func CmdDaemon(cmdutil.Factory) *cobra.Command {
 	var opt = &daemon.SvrOption{}
 	cmd := &cobra.Command{
 		Use:   "daemon",

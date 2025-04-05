@@ -2,15 +2,16 @@ package action
 
 import (
 	"context"
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"net"
 	"sync"
 
 	"github.com/containernetworking/cni/pkg/types"
+
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -44,7 +45,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 		}()
 
 		r := core.Route{
-			ServeNodes: []string{
+			Listeners: []string{
 				"tun://127.0.0.1:8422?net=" + DefaultServerIP,
 				"tcp://:10800",
 			},

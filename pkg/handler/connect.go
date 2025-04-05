@@ -416,18 +416,18 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 		return err
 	}
 
-	chainNode, err := core.ParseNode(forwardAddress)
+	forward, err := core.ParseNode(forwardAddress)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to parse forward node %s: %v", forwardAddress, err)
 		return err
 	}
-	chainNode.Client = &core.Client{
-		Connector:   core.UDPOverTCPTunnelConnector(),
+	forward.Client = &core.Client{
+		Connector:   core.NewUDPOverTCPConnector(),
 		Transporter: core.TCPTransporter(),
 	}
-	chain := core.NewChain(5, chainNode)
+	forwarder := core.NewForwarder(5, forward)
 
-	handler := core.TunHandler(chain, node)
+	handler := core.TunHandler(forwarder, node)
 	listener, err := tun.Listener(tunConfig)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to create tun listener: %v", err)
@@ -703,7 +703,7 @@ func Parse(r core.Route) ([]core.Server, error) {
 		return nil, err
 	}
 	if len(servers) == 0 {
-		return nil, fmt.Errorf("server is empty, server config: %s", strings.Join(r.ServeNodes, ","))
+		return nil, fmt.Errorf("server is empty, server config: %s", strings.Join(r.Listeners, ","))
 	}
 	return servers, nil
 }
@@ -772,7 +772,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) (err erro
 			}
 		}
 		if len(c.cidrs) != 0 {
-			plog.G(ctx).Infoln("Got network CIDR from cache")
+			plog.G(ctx).Infoln("Get network CIDR from cache")
 			return nil
 		}
 	}

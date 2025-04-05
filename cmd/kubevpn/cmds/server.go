@@ -20,7 +20,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func CmdServer(_ cmdutil.Factory) *cobra.Command {
+func CmdServer(cmdutil.Factory) *cobra.Command {
 	var route = &core.Route{}
 	cmd := &cobra.Command{
 		Use:    "server",
@@ -30,8 +30,8 @@ func CmdServer(_ cmdutil.Factory) *cobra.Command {
 		Server side, startup traffic manager, forward inbound and outbound traffic.
 		`)),
 		Example: templates.Examples(i18n.T(`
-        # server node
-        kubevpn server -L "tcp://:10800" -L "tun://127.0.0.1:8422?net=198.19.0.123/32"
+        # server listener
+        kubevpn server -l "tcp://:10800" -l "tun://127.0.0.1:8422?net=198.19.0.123/32"
 		`)),
 		PreRun: func(*cobra.Command, []string) {
 			runtime.GOMAXPROCS(0)
@@ -50,8 +50,8 @@ func CmdServer(_ cmdutil.Factory) *cobra.Command {
 			return handler.Run(ctx, servers)
 		},
 	}
-	cmd.Flags().StringArrayVarP(&route.ServeNodes, "node", "L", []string{}, "Startup node server. eg: tcp://localhost:1080")
-	cmd.Flags().StringVarP(&route.ChainNode, "chain", "F", "", "Forward chain. eg: tcp://192.168.1.100:2345")
+	cmd.Flags().StringArrayVarP(&route.Listeners, "listener", "l", []string{}, "Startup listener server. eg: tcp://localhost:1080")
+	cmd.Flags().StringVarP(&route.Forwarder, "forwarder", "f", "", "Special forwarder. eg: tcp://192.168.1.100:2345")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug log or not")
 	return cmd
 }

@@ -160,7 +160,7 @@ var (
 )
 
 var (
-	KeepAliveTime    = 180 * time.Second
+	KeepAliveTime    = 60 * time.Second
 	DialTimeout      = 15 * time.Second
 	HandshakeTimeout = 5 * time.Second
 	ConnectTimeout   = 5 * time.Second

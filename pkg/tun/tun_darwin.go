@@ -76,7 +76,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	if err = addTunRoutes(name, cfg.Routes...); err != nil {
-		err = pkgerr.Wrap(err, "Add tun routes failed")
+		err = pkgerr.Wrap(err, "Add tun device routes failed")
 		return
 	}
 

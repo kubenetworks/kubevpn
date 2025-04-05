@@ -17,7 +17,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func CmdControlPlane(_ cmdutil.Factory) *cobra.Command {
+func CmdControlPlane(cmdutil.Factory) *cobra.Command {
 	var (
 		watchDirectoryFilename string
 		port                   uint = 9002

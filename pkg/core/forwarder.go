@@ -3,34 +3,33 @@ package core
 import (
 	"context"
 	"errors"
-	"math"
 	"net"
 )
 
 var (
-	// ErrorEmptyChain is an error that implies the chain is empty.
-	ErrorEmptyChain = errors.New("empty chain")
+	// ErrorEmptyForwarder is an error that implies the forward is empty.
+	ErrorEmptyForwarder = errors.New("empty forwarder")
 )
 
-type Chain struct {
+type Forwarder struct {
 	retries int
 	node    *Node
 }
 
-func NewChain(retry int, node *Node) *Chain {
-	return &Chain{retries: retry, node: node}
+func NewForwarder(retry int, node *Node) *Forwarder {
+	return &Forwarder{retries: retry, node: node}
 }
 
-func (c *Chain) Node() *Node {
+func (c *Forwarder) Node() *Node {
 	return c.node
 }
 
-func (c *Chain) IsEmpty() bool {
+func (c *Forwarder) IsEmpty() bool {
 	return c == nil || c.node == nil
 }
 
-func (c *Chain) DialContext(ctx context.Context) (conn net.Conn, err error) {
-	for i := 0; i < int(math.Max(float64(1), float64(c.retries))); i++ {
+func (c *Forwarder) DialContext(ctx context.Context) (conn net.Conn, err error) {
+	for i := 0; i < max(1, c.retries); i++ {
 		conn, err = c.dial(ctx)
 		if err == nil {
 			break
@@ -39,9 +38,9 @@ func (c *Chain) DialContext(ctx context.Context) (conn net.Conn, err error) {
 	return
 }
 
-func (c *Chain) dial(ctx context.Context) (net.Conn, error) {
+func (c *Forwarder) dial(ctx context.Context) (net.Conn, error) {
 	if c.IsEmpty() {
-		return nil, ErrorEmptyChain
+		return nil, ErrorEmptyForwarder
 	}
 
 	conn, err := c.getConn(ctx)
@@ -58,7 +57,7 @@ func (c *Chain) dial(ctx context.Context) (net.Conn, error) {
 	return cc, nil
 }
 
-func (*Chain) resolve(addr string) string {
+func (*Forwarder) resolve(addr string) string {
 	if host, port, err := net.SplitHostPort(addr); err == nil {
 		if ips, err := net.LookupIP(host); err == nil && len(ips) > 0 {
 			return net.JoinHostPort(ips[0].String(), port)
@@ -67,9 +66,9 @@ func (*Chain) resolve(addr string) string {
 	return addr
 }
 
-func (c *Chain) getConn(ctx context.Context) (net.Conn, error) {
+func (c *Forwarder) getConn(ctx context.Context) (net.Conn, error) {
 	if c.IsEmpty() {
-		return nil, ErrorEmptyChain
+		return nil, ErrorEmptyForwarder
 	}
 	return c.Node().Client.Dial(ctx, c.resolve(c.Node().Addr))
 }
