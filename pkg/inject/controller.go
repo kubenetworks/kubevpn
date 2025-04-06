@@ -47,9 +47,9 @@ func AddMeshContainer(spec *v1.PodTemplateSpec, ns, nodeId string, c util.PodRou
 		Image:   config.Image,
 		Command: []string{"/bin/sh", "-c"},
 		Args: []string{`
-sysctl -w net.ipv4.ip_forward=1
-sysctl -w net.ipv6.conf.all.disable_ipv6=0
-sysctl -w net.ipv6.conf.all.forwarding=1
+echo 1 > /proc/sys/net/ipv4/ip_forward
+echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
+echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
 update-alternatives --set iptables /usr/sbin/iptables-legacy
 iptables -P INPUT ACCEPT
 ip6tables -P INPUT ACCEPT

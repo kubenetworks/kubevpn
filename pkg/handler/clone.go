@@ -320,7 +320,12 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 							Command: []string{
 								"/bin/bash",
 								"-c",
-								"sysctl -w net.ipv4.ip_forward=1\nsysctl -w net.ipv6.conf.all.disable_ipv6=0\nsysctl -w net.ipv6.conf.all.forwarding=1\nsysctl -w net.ipv4.conf.all.route_localnet=1\nupdate-alternatives --set iptables /usr/sbin/iptables-legacy",
+								`
+echo 1 > /proc/sys/net/ipv4/ip_forward
+echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
+echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
+echo 1 > /proc/sys/net/ipv4/conf/all/route_localnet
+update-alternatives --set iptables /usr/sbin/iptables-legacy`,
 							},
 						},
 					},

@@ -367,9 +367,9 @@ func genDeploySpec(namespace string, udp8422 string, tcp10800 string, tcp9002 st
 								`
 kubevpn server -l "tcp://:10800" -l "gtcp://:10801" -l "gudp://:10802" --debug=true`,
 								`
-sysctl -w net.ipv4.ip_forward=1
-sysctl -w net.ipv6.conf.all.disable_ipv6=0
-sysctl -w net.ipv6.conf.all.forwarding=1
+echo 1 > /proc/sys/net/ipv4/ip_forward
+echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
+echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
 update-alternatives --set iptables /usr/sbin/iptables-legacy
 iptables -P INPUT ACCEPT
 ip6tables -P INPUT ACCEPT
