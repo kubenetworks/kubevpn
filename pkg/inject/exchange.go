@@ -79,10 +79,10 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig, connectNamespace 
 		// iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIPv4}
 		// ip6tables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIPv6}
 		Args: []string{`
-sysctl -w net.ipv4.ip_forward=1
-sysctl -w net.ipv6.conf.all.disable_ipv6=0
-sysctl -w net.ipv6.conf.all.forwarding=1
-sysctl -w net.ipv4.conf.all.route_localnet=1
+echo 1 > /proc/sys/net/ipv4/ip_forward
+echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
+echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
+echo 1 > /proc/sys/net/ipv4/conf/all/route_localnet
 update-alternatives --set iptables /usr/sbin/iptables-legacy
 iptables -P INPUT ACCEPT
 ip6tables -P INPUT ACCEPT
