@@ -6,6 +6,7 @@ import (
 	"net"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -16,6 +17,7 @@ type tcpTransporter struct {
 func TCPTransporter(tlsInfo map[string][]byte) Transporter {
 	tlsConfig, err := util.GetTlsClientConfig(tlsInfo)
 	if err != nil {
+		plog.G(context.Background()).Errorf("failed to get tls client config: %v", err)
 		return &tcpTransporter{}
 	}
 	return &tcpTransporter{tlsConfig: tlsConfig}
