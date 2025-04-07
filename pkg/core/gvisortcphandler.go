@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"sync"
 
@@ -65,9 +66,14 @@ func GvisorTCPListener(addr string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	ln, err := net.ListenTCP("tcp", laddr)
+	listener, err := net.ListenTCP("tcp", laddr)
 	if err != nil {
 		return nil, err
 	}
-	return &tcpKeepAliveListener{TCPListener: ln}, nil
+	serverConfig, err := util.GetTlsServerConfig(nil)
+	if err != nil {
+		_ = listener.Close()
+		return nil, err
+	}
+	return tls.NewListener(&tcpKeepAliveListener{TCPListener: listener}, serverConfig), nil
 }
