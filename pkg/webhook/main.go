@@ -41,7 +41,7 @@ func Main(f util.Factory) error {
 
 	tlsConfig, err := putil.GetTlsClientConfig(nil)
 	if err != nil {
-		return fmt.Errorf("failed to load certificate and key: %v", err)
+		return fmt.Errorf("failed to load tls certificate: %v", err)
 	}
 
 	grpcServer := grpc.NewServer()
