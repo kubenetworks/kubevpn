@@ -21,6 +21,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	putil "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func Main(f util.Factory) error {
@@ -38,10 +39,9 @@ func Main(f util.Factory) error {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	var pairs []tls.Certificate
-	pairs, err = getSSLKeyPairs()
+	tlsConfig, err := putil.GetTlsClientConfig(nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load certificate and key: %v", err)
 	}
 
 	grpcServer := grpc.NewServer()
@@ -58,7 +58,7 @@ func Main(f util.Factory) error {
 	// With downgrading-capable gRPC server, which can also handle HTTP.
 	downgradingServer := &http.Server{
 		Addr:      fmt.Sprintf(":%d", 80),
-		TLSConfig: &tls.Config{Certificates: pairs},
+		TLSConfig: &tls.Config{Certificates: tlsConfig.Certificates},
 	}
 	defer downgradingServer.Close()
 	var h2Server http2.Server
@@ -72,21 +72,4 @@ func Main(f util.Factory) error {
 	defer downgradingServer.Close()
 	rpc.RegisterDHCPServer(grpcServer, dhcp.NewServer(clientset))
 	return downgradingServer.ListenAndServeTLS("", "")
-}
-
-func getSSLKeyPairs() ([]tls.Certificate, error) {
-	cert, ok := os.LookupEnv(config.TLSCertKey)
-	if !ok {
-		return nil, fmt.Errorf("can not get %s from env", config.TLSCertKey)
-	}
-	var key string
-	key, ok = os.LookupEnv(config.TLSPrivateKeyKey)
-	if !ok {
-		return nil, fmt.Errorf("can not get %s from env", config.TLSPrivateKeyKey)
-	}
-	pair, err := tls.X509KeyPair([]byte(cert), []byte(key))
-	if err != nil {
-		return nil, fmt.Errorf("failed to load certificate and key ,err: %v", err)
-	}
-	return []tls.Certificate{pair}, nil
 }

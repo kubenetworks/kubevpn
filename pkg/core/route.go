@@ -42,7 +42,7 @@ func (r *Route) ParseForwarder() (*Forwarder, error) {
 	}
 	forwarder.Client = &Client{
 		Connector:   NewUDPOverTCPConnector(),
-		Transporter: TCPTransporter(),
+		Transporter: TCPTransporter(nil),
 	}
 	return NewForwarder(r.Retries, forwarder), nil
 }

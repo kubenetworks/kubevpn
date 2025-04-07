@@ -20,7 +20,7 @@ func RemoveContainer(spec *corev1.PodSpec) {
 	}
 }
 
-func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig, connectNamespace string) {
+func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig, connectNamespace string, secret *corev1.Secret) {
 	// remove vpn container if already exist
 	RemoveContainer(spec)
 	spec.Containers = append(spec.Containers, corev1.Container{
@@ -70,6 +70,18 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig, connectNamespace 
 						FieldPath: "metadata.name",
 					},
 				},
+			},
+			{
+				Name:  config.TLSServerName,
+				Value: util.Base64DecodeToString(secret.Data[config.TLSServerName]),
+			},
+			{
+				Name:  config.TLSCertKey,
+				Value: util.Base64DecodeToString(secret.Data[config.TLSCertKey]),
+			},
+			{
+				Name:  config.TLSPrivateKeyKey,
+				Value: util.Base64DecodeToString(secret.Data[config.TLSPrivateKeyKey]),
 			},
 		},
 		Command: []string{"/bin/sh", "-c"},

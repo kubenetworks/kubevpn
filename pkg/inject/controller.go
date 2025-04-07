@@ -38,7 +38,7 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 }
 
 // AddMeshContainer todo envoy support ipv6
-func AddMeshContainer(spec *v1.PodTemplateSpec, ns, nodeId string, c util.PodRouteConfig, ipv6 bool, connectNamespace string) {
+func AddMeshContainer(spec *v1.PodTemplateSpec, ns, nodeId string, c util.PodRouteConfig, ipv6 bool, connectNamespace string, secret *v1.Secret) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 
@@ -97,6 +97,18 @@ kubevpn server -l "tun:/localhost:8422?net=${TunIPv4}&net6=${TunIPv6}&route=${CI
 						FieldPath: "metadata.name",
 					},
 				},
+			},
+			{
+				Name:  config.TLSServerName,
+				Value: util.Base64DecodeToString(secret.Data[config.TLSServerName]),
+			},
+			{
+				Name:  config.TLSCertKey,
+				Value: util.Base64DecodeToString(secret.Data[config.TLSCertKey]),
+			},
+			{
+				Name:  config.TLSPrivateKeyKey,
+				Value: util.Base64DecodeToString(secret.Data[config.TLSPrivateKeyKey]),
 			},
 		},
 		Resources: v1.ResourceRequirements{
@@ -159,7 +171,7 @@ kubevpn server -l "tun:/localhost:8422?net=${TunIPv4}&net6=${TunIPv6}&route=${CI
 	})
 }
 
-func AddEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeId string, ipv6 bool, connectNamespace string) {
+func AddEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeId string, ipv6 bool, connectNamespace string, secret *v1.Secret) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 
