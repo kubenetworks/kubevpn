@@ -39,7 +39,7 @@ func Main(f util.Factory) error {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	tlsConfig, err := putil.GetTlsClientConfig(nil)
+	tlsConfig, err := putil.GetTlsServerConfig(nil)
 	if err != nil {
 		return fmt.Errorf("failed to load tls certificate: %v", err)
 	}
