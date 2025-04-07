@@ -155,6 +155,11 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		c.proxyWorkloads = make(ProxyList, 0)
 	}
 
+	tlsSecret, err := c.clientset.CoreV1().Secrets(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
 	for _, workload := range workloads {
 		plog.G(ctx).Infof("Injecting inbound sidecar for %s in namespace %s", workload, namespace)
 		configInfo := util.PodRouteConfig{
@@ -175,11 +180,11 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
 		if c.Engine == config.EngineGvisor {
-			err = inject.InjectEnvoySidecar(ctx, c.factory, c.clientset, c.Namespace, object, headers, portMap)
+			err = inject.InjectEnvoySidecar(ctx, c.factory, c.clientset, c.Namespace, object, headers, portMap, tlsSecret)
 		} else if len(headers) != 0 || len(portMap) != 0 {
-			err = inject.InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, object, configInfo, headers, portMap)
+			err = inject.InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, object, configInfo, headers, portMap, tlsSecret)
 		} else {
-			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, object, configInfo)
+			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, object, configInfo, tlsSecret)
 		}
 		if err != nil {
 			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %s", workload, namespace, err.Error())
@@ -370,6 +375,11 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress string, lite bool) (err error) {
 	plog.G(ctx).Debugf("IPv4: %s, IPv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
 
+	tlsSecret, err := c.clientset.CoreV1().Secrets(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
 	var cidrList []*net.IPNet
 	if !lite {
 		cidrList = append(cidrList, config.CIDR, config.CIDR6)
@@ -423,7 +433,7 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 	}
 	forward.Client = &core.Client{
 		Connector:   core.NewUDPOverTCPConnector(),
-		Transporter: core.TCPTransporter(),
+		Transporter: core.TCPTransporter(tlsSecret.Data),
 	}
 	forwarder := core.NewForwarder(5, forward)
 

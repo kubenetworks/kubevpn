@@ -31,7 +31,7 @@ import (
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
 
 // InjectVPNAndEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
-func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, mapInterface v12.ConfigMapInterface, connectNamespace string, object *runtimeresource.Info, c util.PodRouteConfig, headers map[string]string, portMaps []string) (err error) {
+func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, mapInterface v12.ConfigMapInterface, connectNamespace string, object *runtimeresource.Info, c util.PodRouteConfig, headers map[string]string, portMaps []string, secret *v1.Secret) (err error) {
 	u := object.Object.(*unstructured.Unstructured)
 	var templateSpec *v1.PodTemplateSpec
 	var path []string
@@ -90,7 +90,7 @@ func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, mapInterfa
 
 	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, f, connectNamespace)
 	// (1) add mesh container
-	AddMeshContainer(templateSpec, object.Namespace, nodeID, c, enableIPv6, connectNamespace)
+	AddMeshContainer(templateSpec, object.Namespace, nodeID, c, enableIPv6, connectNamespace, secret)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	ps := []P{
 		{

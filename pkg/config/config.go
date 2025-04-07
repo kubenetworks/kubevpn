@@ -31,6 +31,8 @@ const (
 	TLSCertKey = "tls_crt"
 	// TLSPrivateKeyKey is the key for the private key field in a TLS secret.
 	TLSPrivateKeyKey = "tls_key"
+	// TLSServerName for tls config server name
+	TLSServerName = "tls_server_name"
 
 	// container name
 	ContainerSidecarEnvoyProxy   = "envoy-proxy"
