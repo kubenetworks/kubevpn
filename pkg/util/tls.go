@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -56,12 +57,20 @@ func GetTlsServerConfig(tlsInfo map[string][]byte) (*tls.Config, error) {
 	return client, nil
 }
 
+var ErrNoTLSConfig = errors.New("no TLS configuration found")
+
 func getTls(tlsSecret map[string][]byte) (crtBytes []byte, keyBytes []byte, serverName []byte, err error) {
 	if tlsSecret != nil {
 		crtBytes = tlsSecret[config.TLSCertKey]
 		keyBytes = tlsSecret[config.TLSPrivateKeyKey]
 		serverName = tlsSecret[config.TLSServerName]
 		return
+	}
+
+	if os.Getenv(config.TLSCertKey) == "" ||
+		os.Getenv(config.TLSPrivateKeyKey) == "" ||
+		os.Getenv(config.TLSServerName) == "" {
+		return nil, nil, nil, ErrNoTLSConfig
 	}
 
 	crtBytes = []byte(os.Getenv(config.TLSCertKey))
@@ -79,7 +88,7 @@ func GenTLSCert(ctx context.Context, ns string) ([]byte, []byte, []byte, error) 
 	alternateIPs := []net.IP{net.IPv4(127, 0, 0, 1)}
 	alternateDNS := []string{"localhost"}
 	// for Mutatingwebhookconfigurations will use domain: kubevpn-traffic-manager.xxx.svc
-	alternateDNS = append(alternateDNS, fmt.Sprintf("%s.%s.svc", config.ConfigMapPodTrafficManager, ns))
+	alternateDNS = append(alternateDNS, fmt.Sprintf("%s.svc", host))
 	crt, key, err := cert.GenerateSelfSignedCertKeyWithFixtures(host, alternateIPs, alternateDNS, ".")
 	if err != nil {
 		log.G(ctx).Errorf("Generate self signed cert and key error: %s", err.Error())
