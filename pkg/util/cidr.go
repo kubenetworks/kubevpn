@@ -320,7 +320,6 @@ func CreateCIDRPod(ctx context.Context, clientset *kubernetes.Clientset, namespa
 		ObjectMeta: v1.ObjectMeta{
 			Name:      config.CniNetName,
 			Namespace: namespace,
-			Labels:    map[string]string{"app": config.ConfigMapPodTrafficManager},
 		},
 		Spec: v13.PodSpec{
 			Volumes: []v13.Volume{
