@@ -1,13 +1,10 @@
 package util
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"fmt"
-	"io"
 	"net"
 	"os"
 
@@ -63,18 +60,6 @@ func getTls(tlsSecret map[string][]byte) (crtBytes []byte, keyBytes []byte, serv
 		crtBytes = tlsSecret[config.TLSCertKey]
 		keyBytes = tlsSecret[config.TLSPrivateKeyKey]
 		serverName = tlsSecret[config.TLSServerName]
-		crtBytes, err = io.ReadAll(base64.NewDecoder(base64.StdEncoding, bytes.NewReader(crtBytes)))
-		if err != nil {
-			return
-		}
-		keyBytes, err = io.ReadAll(base64.NewDecoder(base64.StdEncoding, bytes.NewReader(keyBytes)))
-		if err != nil {
-			return
-		}
-		serverName, err = io.ReadAll(base64.NewDecoder(base64.StdEncoding, bytes.NewReader(serverName)))
-		if err != nil {
-			return
-		}
 		return
 	}
 
@@ -102,12 +87,4 @@ func GenTLSCert(ctx context.Context, host string) ([]byte, []byte, []byte, error
 	_ = os.Remove(fmt.Sprintf("%s_%s_%s.key", host, ip, alternateDNS))
 	// ref --end
 	return crt, key, []byte(host), nil
-}
-
-func Base64DecodeToString(base64Data []byte) string {
-	crtBytes, err := io.ReadAll(base64.NewDecoder(base64.StdEncoding, bytes.NewReader(base64Data)))
-	if err != nil {
-		return ""
-	}
-	return string(crtBytes)
 }

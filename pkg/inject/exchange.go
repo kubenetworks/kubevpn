@@ -73,15 +73,15 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig, connectNamespace 
 			},
 			{
 				Name:  config.TLSServerName,
-				Value: util.Base64DecodeToString(secret.Data[config.TLSServerName]),
+				Value: string(secret.Data[config.TLSServerName]),
 			},
 			{
 				Name:  config.TLSCertKey,
-				Value: util.Base64DecodeToString(secret.Data[config.TLSCertKey]),
+				Value: string(secret.Data[config.TLSCertKey]),
 			},
 			{
 				Name:  config.TLSPrivateKeyKey,
-				Value: util.Base64DecodeToString(secret.Data[config.TLSPrivateKeyKey]),
+				Value: string(secret.Data[config.TLSPrivateKeyKey]),
 			},
 		},
 		Command: []string{"/bin/sh", "-c"},
