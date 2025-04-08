@@ -49,7 +49,7 @@ func (p *Processor) newVersion() string {
 func (p *Processor) ProcessFile(file NotifyMessage) error {
 	configList, err := ParseYaml(file.FilePath)
 	if err != nil {
-		p.logger.Errorf("error parsing yaml file: %+v", err)
+		p.logger.Errorf("error parsing yaml file: %v", err)
 		return err
 	}
 	enableIPv6, _ := util.DetectSupportIPv6()
@@ -61,10 +61,10 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 		lastConfig, ok := p.expireCache.Get(uid)
 		if ok && reflect.DeepEqual(lastConfig.(*Virtual), config) {
 			marshal, _ := json.Marshal(config)
-			p.logger.Debugf("config are same, not needs to update, config: %s", string(marshal))
+			p.logger.Infof("config are same, not needs to update, config: %s", string(marshal))
 			continue
 		}
-		p.logger.Debugf("update config, version %d, config %v", p.version, config)
+		p.logger.Infof("update config, version %d, config %v", p.version, config)
 
 		listeners, clusters, routes, endpoints := config.To(enableIPv6, p.logger)
 		resources := map[resource.Type][]types.Resource{
@@ -87,7 +87,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 			p.logger.Errorf("snapshot inconsistency: %v, err: %v", snapshot, err)
 			return err
 		}
-		p.logger.Debugf("will serve snapshot %+v, nodeID: %s", snapshot, uid)
+		p.logger.Infof("will serve snapshot %+v, nodeID: %s", snapshot, uid)
 		if err = p.cache.SetSnapshot(context.Background(), uid, snapshot); err != nil {
 			p.logger.Errorf("snapshot error %q for %v", err, snapshot)
 			return err

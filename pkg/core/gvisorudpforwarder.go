@@ -17,10 +17,10 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func UDPForwarder(s *stack.Stack, ctx context.Context) func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
+func UDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
 	return udp.NewForwarder(s, func(request *udp.ForwarderRequest) {
 		id := request.ID()
-		plog.G(ctx).Debugf("[TUN-UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
+		plog.G(ctx).Infof("[TUN-UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
 			id.LocalPort, id.LocalAddress.String(), id.RemotePort, id.RemoteAddress.String(),
 		)
 		src := &net.UDPAddr{
@@ -35,7 +35,7 @@ func UDPForwarder(s *stack.Stack, ctx context.Context) func(id stack.TransportEn
 		w := &waiter.Queue{}
 		endpoint, tErr := request.CreateEndpoint(w)
 		if tErr != nil {
-			plog.G(ctx).Debugf("[TUN-UDP] Failed to create endpoint to dst: %s: %v", dst.String(), tErr)
+			plog.G(ctx).Errorf("[TUN-UDP] Failed to create endpoint to dst: %s: %v", dst.String(), tErr)
 			return
 		}
 
@@ -78,7 +78,7 @@ func UDPForwarder(s *stack.Stack, ctx context.Context) func(id stack.TransportEn
 						break
 					}
 				}
-				plog.G(ctx).Debugf("[TUN-UDP] Write length %d data from src: %s -> dst: %s", written, src.String(), dst.String())
+				plog.G(ctx).Infof("[TUN-UDP] Write length %d data from src: %s -> dst: %s", written, src.String(), dst.String())
 				errChan <- err
 			}()
 			go func() {
@@ -108,12 +108,12 @@ func UDPForwarder(s *stack.Stack, ctx context.Context) func(id stack.TransportEn
 						break
 					}
 				}
-				plog.G(ctx).Debugf("[TUN-UDP] Read length %d data from dst: %s -> src: %s", written, dst.String(), src.String())
+				plog.G(ctx).Infof("[TUN-UDP] Read length %d data from dst: %s -> src: %s", written, dst.String(), src.String())
 				errChan <- err
 			}()
 			err1 = <-errChan
 			if err1 != nil && !errors.Is(err1, io.EOF) {
-				plog.G(ctx).Debugf("[TUN-UDP] Disconnect: %s >-<: %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err1)
+				plog.G(ctx).Errorf("[TUN-UDP] Disconnect: %s >-<: %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err1)
 			}
 		}()
 	}).HandlePacket

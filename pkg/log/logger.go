@@ -61,7 +61,7 @@ func (*serverFormat) Format(e *log.Entry) ([]byte, error) {
 	// e.Caller maybe is nil, because pkg/handler/connect.go:252
 	return []byte(
 		fmt.Sprintf("%s %s:%d %s: %s\n",
-			e.Time.Format("2006-01-02 15:04:05"),
+			e.Time.Format("2006-01-02 15:04:05.000"),
 			filepath.Base(ptr.Deref(e.Caller, runtime.Frame{}).File),
 			ptr.Deref(e.Caller, runtime.Frame{}).Line,
 			e.Level.String(),
@@ -93,7 +93,7 @@ func (g ServerEmitter) Emit(depth int, level glog.Level, timestamp time.Time, fo
 
 	// Emit the formatted result.
 	_, _ = fmt.Fprintf(g.Writer, "%s %s:%d %s: %s\n",
-		timestamp.Format("2006-01-02 15:04:05"),
+		timestamp.Format("2006-01-02 15:04:05.000"),
 		file,
 		line,
 		level.String(),

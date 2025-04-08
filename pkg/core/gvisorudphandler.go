@@ -19,14 +19,14 @@ func GvisorUDPHandler() Handler {
 
 func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
-	plog.G(ctx).Debugf("[TUN-UDP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
+	plog.G(ctx).Infof("[TUN-UDP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 	// 1, get proxy info
 	endpointID, err := ParseProxyInfo(tcpConn)
 	if err != nil {
 		plog.G(ctx).Errorf("[TUN-UDP] Failed to parse proxy info: %v", err)
 		return
 	}
-	plog.G(ctx).Debugf("[TUN-UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
+	plog.G(ctx).Infof("[TUN-UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
 		endpointID.LocalPort, endpointID.LocalAddress.String(), endpointID.RemotePort, endpointID.RemoteAddress.String(),
 	)
 	// 2, dial proxy
@@ -86,7 +86,7 @@ func (c *gvisorUDPConnOverTCP) Close() error {
 }
 
 func GvisorUDPListener(addr string) (net.Listener, error) {
-	plog.G(context.Background()).Debugf("Gvisor UDP over TCP listening addr: %s", addr)
+	plog.G(context.Background()).Infof("Gvisor UDP over TCP listening addr: %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -100,7 +100,7 @@ func GvisorUDPListener(addr string) (net.Listener, error) {
 
 func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	defer udpConn.Close()
-	plog.G(ctx).Debugf("[TUN-UDP] %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
+	plog.G(ctx).Infof("[TUN-UDP] %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 	errChan := make(chan error, 2)
 	go func() {
 		defer util.HandleCrash()
@@ -143,7 +143,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				errChan <- err
 				return
 			}
-			plog.G(ctx).Debugf("[TUN-UDP] %s >>> %s length: %d", tcpConn.RemoteAddr(), "localhost:8422", dgram.DataLength)
+			plog.G(ctx).Infof("[TUN-UDP] %s >>> %s length: %d", tcpConn.RemoteAddr(), "localhost:8422", dgram.DataLength)
 		}
 	}()
 
@@ -190,13 +190,13 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				errChan <- err
 				return
 			}
-			plog.G(ctx).Debugf("[TUN-UDP] %s <<< %s length: %d", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), len(packet.Data))
+			plog.G(ctx).Infof("[TUN-UDP] %s <<< %s length: %d", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), len(packet.Data))
 		}
 	}()
 	err := <-errChan
 	if err != nil {
 		plog.G(ctx).Errorf("[TUN-UDP] %v", err)
 	}
-	plog.G(ctx).Debugf("[TUN-UDP] %s >-< %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
+	plog.G(ctx).Infof("[TUN-UDP] %s >-< %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 	return
 }

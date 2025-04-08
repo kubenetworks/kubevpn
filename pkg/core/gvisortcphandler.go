@@ -32,7 +32,7 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
 	cancel, cancelFunc := context.WithCancel(ctx)
 	defer cancelFunc()
-	plog.G(ctx).Debugf("[TUN-GVISOR] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
+	plog.G(ctx).Infof("[TUN-GVISOR] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 	h.handle(cancel, tcpConn)
 }
 
@@ -60,7 +60,7 @@ func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {
 }
 
 func GvisorTCPListener(addr string) (net.Listener, error) {
-	plog.G(context.Background()).Debugf("Gvisor TCP listening addr: %s", addr)
+	plog.G(context.Background()).Infof("Gvisor TCP listening addr: %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err

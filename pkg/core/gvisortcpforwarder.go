@@ -20,11 +20,11 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-func TCPForwarder(s *stack.Stack, ctx context.Context) func(stack.TransportEndpointID, *stack.PacketBuffer) bool {
+func TCPForwarder(ctx context.Context, s *stack.Stack) func(stack.TransportEndpointID, *stack.PacketBuffer) bool {
 	return tcp.NewForwarder(s, 0, 100000, func(request *tcp.ForwarderRequest) {
 		defer request.Complete(false)
 		id := request.ID()
-		plog.G(ctx).Debugf("[TUN-TCP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
+		plog.G(ctx).Infof("[TUN-TCP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
 			id.LocalPort, id.LocalAddress.String(), id.RemotePort, id.RemoteAddress.String(),
 		)
 
@@ -42,7 +42,7 @@ func TCPForwarder(s *stack.Stack, ctx context.Context) func(stack.TransportEndpo
 		w := &waiter.Queue{}
 		endpoint, tErr := request.CreateEndpoint(w)
 		if tErr != nil {
-			plog.G(ctx).Debugf("[TUN-TCP] Failed to create endpoint: %v", tErr)
+			plog.G(ctx).Errorf("[TUN-TCP] Failed to create endpoint: %v", tErr)
 			return
 		}
 		conn := gonet.NewTCPConn(w, endpoint)
@@ -54,19 +54,19 @@ func TCPForwarder(s *stack.Stack, ctx context.Context) func(stack.TransportEndpo
 			buf := config.LPool.Get().([]byte)[:]
 			defer config.LPool.Put(buf[:])
 			written, err2 := io.CopyBuffer(remote, conn, buf)
-			plog.G(ctx).Debugf("[TUN-TCP] Write length %d data to remote", written)
+			plog.G(ctx).Infof("[TUN-TCP] Write length %d data to remote", written)
 			errChan <- err2
 		}()
 		go func() {
 			buf := config.LPool.Get().([]byte)[:]
 			defer config.LPool.Put(buf[:])
 			written, err2 := io.CopyBuffer(conn, remote, buf)
-			plog.G(ctx).Debugf("[TUN-TCP] Read length %d data from remote", written)
+			plog.G(ctx).Infof("[TUN-TCP] Read length %d data from remote", written)
 			errChan <- err2
 		}()
 		err = <-errChan
 		if err != nil && !errors.Is(err, io.EOF) {
-			plog.G(ctx).Debugf("[TUN-TCP] Disconnect: %s >-<: %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
+			plog.G(ctx).Errorf("[TUN-TCP] Disconnect: %s >-<: %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
 		}
 	}).HandlePacket
 }

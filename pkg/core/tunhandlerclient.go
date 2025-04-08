@@ -23,8 +23,8 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn, remoteAddr 
 
 	defer device.Close()
 	go device.forwardPacketToRemote(ctx, remoteAddr, h.forward)
-	go device.readFromTun()
-	go device.writeToTun()
+	go device.readFromTun(ctx)
+	go device.writeToTun(ctx)
 	go heartbeats(ctx, device.tun)
 	select {
 	case <-device.errChan:
@@ -47,13 +47,13 @@ func (d *ClientDevice) forwardPacketToRemote(ctx context.Context, remoteAddr *ne
 		func() {
 			packetConn, err := getRemotePacketConn(ctx, forward)
 			if err != nil {
-				plog.G(ctx).Debugf("[TUN-CLIENT] Failed to get remote conn from %s -> %s: %s", d.tun.LocalAddr(), remoteAddr, err)
-				time.Sleep(time.Millisecond * 200)
+				plog.G(ctx).Errorf("[TUN-CLIENT] Failed to get remote conn from %s -> %s: %s", d.tun.LocalAddr(), remoteAddr, err)
+				time.Sleep(time.Second * 1)
 				return
 			}
 			err = transportTunPacketClient(ctx, d.tunInbound, d.tunOutbound, packetConn, remoteAddr)
 			if err != nil {
-				plog.G(ctx).Debugf("[TUN-CLIENT] %s: %v", d.tun.LocalAddr(), err)
+				plog.G(ctx).Errorf("[TUN-CLIENT] Failed to transport data to remote %s: %v", remoteAddr, err)
 			}
 		}()
 	}
@@ -100,7 +100,6 @@ func transportTunPacketClient(ctx context.Context, tunInbound <-chan *Packet, tu
 			_, err := packetConn.WriteTo(packet.data[:packet.length], remoteAddr)
 			config.LPool.Put(packet.data[:])
 			if err != nil {
-				plog.G(ctx).Errorf("failed to write packet to remote %s: %v", remoteAddr, err)
 				util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to write packet to remote %s", remoteAddr)))
 				return
 			}
@@ -129,12 +128,13 @@ func transportTunPacketClient(ctx context.Context, tunInbound <-chan *Packet, tu
 	}
 }
 
-func (d *ClientDevice) readFromTun() {
+func (d *ClientDevice) readFromTun(ctx context.Context) {
 	defer util.HandleCrash()
 	for {
 		buf := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(buf[:])
 		if err != nil {
+			plog.G(ctx).Errorf("[TUN-RAW] Failed to read packet from tun device: %s", err)
 			util.SafeWrite(d.errChan, err)
 			config.LPool.Put(buf[:])
 			return
@@ -144,21 +144,22 @@ func (d *ClientDevice) readFromTun() {
 		var src, dst net.IP
 		src, dst, err = util.ParseIP(buf[:n])
 		if err != nil {
-			plog.G(context.Background()).Errorf("[TUN-RAW] Unknown packet: %v", err)
+			plog.G(ctx).Errorf("[TUN-RAW] Unknown packet: %v", err)
 			config.LPool.Put(buf[:])
 			continue
 		}
-		plog.G(context.Background()).Debugf("[TUN-RAW] SRC: %s, DST: %s, Length: %d", src.String(), dst, n)
+		plog.G(ctx).Debugf("[TUN-RAW] SRC: %s, DST: %s, Length: %d", src.String(), dst, n)
 		util.SafeWrite(d.tunInbound, NewDataElem(buf[:], n, src, dst))
 	}
 }
 
-func (d *ClientDevice) writeToTun() {
+func (d *ClientDevice) writeToTun(ctx context.Context) {
 	defer util.HandleCrash()
 	for e := range d.tunOutbound {
 		_, err := d.tun.Write(e.data[:e.length])
 		config.LPool.Put(e.data[:])
 		if err != nil {
+			plog.G(ctx).Errorf("[TUN-RAW] Failed to write packet to tun device: %v", err)
 			util.SafeWrite(d.errChan, err)
 			return
 		}
@@ -174,11 +175,12 @@ func (d *ClientDevice) Close() {
 func heartbeats(ctx context.Context, tun net.Conn) {
 	tunIfi, err := util.GetTunDeviceByConn(tun)
 	if err != nil {
-		plog.G(ctx).Errorf("Failed to get tun device: %s", err.Error())
+		plog.G(ctx).Errorf("Failed to get tun device: %v", err)
 		return
 	}
 	srcIPv4, srcIPv6, dockerSrcIPv4, err := util.GetTunDeviceIP(tunIfi.Name)
 	if err != nil {
+		plog.G(ctx).Errorf("Failed to get tun device %s IP: %v", tunIfi.Name, err)
 		return
 	}
 

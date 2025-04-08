@@ -35,6 +35,7 @@ const (
 	// container name
 	ContainerSidecarEnvoyProxy   = "envoy-proxy"
 	ContainerSidecarControlPlane = "control-plane"
+	ContainerSidecarWebhook      = "webhook"
 	ContainerSidecarVPN          = "vpn"
 	ContainerSidecarSyncthing    = "syncthing"
 

@@ -18,7 +18,7 @@ func SSHListener(addr string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	plog.G(context.Background()).Debugf("starting ssh server on port %s...", addr)
+	plog.G(context.Background()).Infof("starting ssh server on port %s...", addr)
 	return ln, err
 }
 

@@ -458,7 +458,7 @@ kubevpn server -l "tcp://:10800" -l "tun://:8422?net=${TunIPv4}&net6=${TunIPv6}"
 							Resources:       resourcesSmall,
 						},
 						{
-							Name:    "webhook",
+							Name:    config.ContainerSidecarWebhook,
 							Image:   config.Image,
 							Command: []string{"kubevpn"},
 							Args:    []string{"webhook"},

@@ -35,10 +35,10 @@ func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 		RawFactory: raw.EndpointFactory{},
 	})
 	// set handler for TCP UDP ICMP
-	s.SetTransportProtocolHandler(tcp.ProtocolNumber, TCPForwarder(s, ctx))
-	s.SetTransportProtocolHandler(udp.ProtocolNumber, UDPForwarder(s, ctx))
-	s.SetTransportProtocolHandler(header.ICMPv4ProtocolNumber, ICMPForwarder(s, ctx))
-	s.SetTransportProtocolHandler(header.ICMPv6ProtocolNumber, ICMPForwarder(s, ctx))
+	s.SetTransportProtocolHandler(tcp.ProtocolNumber, TCPForwarder(ctx, s))
+	s.SetTransportProtocolHandler(udp.ProtocolNumber, UDPForwarder(ctx, s))
+	s.SetTransportProtocolHandler(header.ICMPv4ProtocolNumber, ICMPForwarder(ctx, s))
+	s.SetTransportProtocolHandler(header.ICMPv6ProtocolNumber, ICMPForwarder(ctx, s))
 
 	s.SetRouteTable([]tcpip.Route{
 		{

@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"go.uber.org/automaxprocs/maxprocs"
 	glog "gvisor.dev/gvisor/pkg/log"
@@ -42,12 +43,14 @@ func CmdServer(cmdutil.Factory) *cobra.Command {
 			rand.Seed(time.Now().UnixNano())
 			_, _ = maxprocs.Set(maxprocs.Logger(nil))
 			ctx := cmd.Context()
+			logger := plog.InitLoggerForServer()
+			logger.SetLevel(util.If(config.Debug, log.DebugLevel, log.InfoLevel))
 			servers, err := handler.Parse(*route)
 			if err != nil {
 				plog.G(ctx).Errorf("Parse server failed: %v", err)
 				return err
 			}
-			return handler.Run(ctx, servers)
+			return handler.Run(plog.WithLogger(ctx, logger), servers)
 		},
 	}
 	cmd.Flags().StringArrayVarP(&route.Listeners, "listener", "l", []string{}, "Startup listener server. eg: tcp://localhost:1080")

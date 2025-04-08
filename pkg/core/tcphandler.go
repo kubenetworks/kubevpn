@@ -52,7 +52,7 @@ func TCPHandler() Handler {
 
 func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
-	plog.G(ctx).Debugf("[TCP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
+	plog.G(ctx).Infof("[TCP] Handle connection %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 
 	defer h.removeFromRouteMapTCP(ctx, tcpConn)
 
@@ -66,7 +66,7 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		buf := config.LPool.Get().([]byte)[:]
 		packet, err := readDatagramPacketServer(tcpConn, buf[:])
 		if err != nil {
-			plog.G(ctx).Errorf("[TCP] %s -> %s : %v", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
+			plog.G(ctx).Errorf("[TCP] Failed to read from %s -> %s: %v", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
 			config.LPool.Put(buf[:])
 			return
 		}
@@ -82,10 +82,10 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		if loaded {
 			if tcpConn != value.(net.Conn) {
 				h.routeMapTCP.Store(src.String(), tcpConn)
-				plog.G(ctx).Debugf("[TCP] Replace route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+				plog.G(ctx).Infof("[TCP] Replace route map TCP to DST %s by connation %s -> %s", src, tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 			}
 		} else {
-			plog.G(ctx).Debugf("[TCP] Add new route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+			plog.G(ctx).Infof("[TCP] Add new route map TCP to DST %s by connation %s -> %s", src, tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 		}
 		util.SafeWrite(h.packetChan, packet)
 	}
@@ -94,7 +94,7 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 func (h *UDPOverTCPHandler) removeFromRouteMapTCP(ctx context.Context, tcpConn net.Conn) {
 	h.routeMapTCP.Range(func(key, value any) bool {
 		if value.(net.Conn) == tcpConn {
-			plog.G(ctx).Debugf("[TCP] Delete to DST: %s by conn %s from globle route map TCP", key, tcpConn.LocalAddr())
+			plog.G(ctx).Infof("[TCP] Delete to DST: %s by conn %s -> %s from globle route map TCP", key, tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 		}
 		return true
 	})
