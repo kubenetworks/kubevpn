@@ -100,15 +100,15 @@ kubevpn server -l "tun:/localhost:8422?net=${TunIPv4}&net6=${TunIPv6}&route=${CI
 			},
 			{
 				Name:  config.TLSServerName,
-				Value: util.Base64DecodeToString(secret.Data[config.TLSServerName]),
+				Value: string(secret.Data[config.TLSServerName]),
 			},
 			{
 				Name:  config.TLSCertKey,
-				Value: util.Base64DecodeToString(secret.Data[config.TLSCertKey]),
+				Value: string(secret.Data[config.TLSCertKey]),
 			},
 			{
 				Name:  config.TLSPrivateKeyKey,
-				Value: util.Base64DecodeToString(secret.Data[config.TLSPrivateKeyKey]),
+				Value: string(secret.Data[config.TLSPrivateKeyKey]),
 			},
 		},
 		Resources: v1.ResourceRequirements{
