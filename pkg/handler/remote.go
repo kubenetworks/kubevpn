@@ -113,7 +113,7 @@ func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, nam
 		return err
 	}
 
-	crt, key, host, err := util.GenTLSCert(ctx, util.GetTLSHost(namespace))
+	crt, key, host, err := util.GenTLSCert(ctx, namespace)
 	if err != nil {
 		return err
 	}

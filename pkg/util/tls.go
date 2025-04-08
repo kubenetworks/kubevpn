@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	"k8s.io/client-go/util/cert"
 
@@ -73,18 +74,30 @@ func GetTLSHost(ns string) string {
 	return fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, ns)
 }
 
-func GenTLSCert(ctx context.Context, host string) ([]byte, []byte, []byte, error) {
-	ip := net.IPv4(127, 0, 0, 1)
-	alternateDNS := "localhost"
-	crt, key, err := cert.GenerateSelfSignedCertKeyWithFixtures(host, []net.IP{ip}, []string{alternateDNS}, ".")
+func GenTLSCert(ctx context.Context, ns string) ([]byte, []byte, []byte, error) {
+	host := GetTLSHost(ns)
+	alternateIPs := []net.IP{net.IPv4(127, 0, 0, 1)}
+	alternateDNS := []string{"localhost"}
+	// for Mutatingwebhookconfigurations will use domain: kubevpn-traffic-manager.xxx.svc
+	alternateDNS = append(alternateDNS, fmt.Sprintf("%s.%s.svc", config.ConfigMapPodTrafficManager, ns))
+	crt, key, err := cert.GenerateSelfSignedCertKeyWithFixtures(host, alternateIPs, alternateDNS, ".")
 	if err != nil {
 		log.G(ctx).Errorf("Generate self signed cert and key error: %s", err.Error())
 		return nil, nil, nil, err
 	}
 
 	// ref --start vendor/k8s.io/client-go/util/cert/cert.go:113
-	_ = os.Remove(fmt.Sprintf("%s_%s_%s.crt", host, ip, alternateDNS))
-	_ = os.Remove(fmt.Sprintf("%s_%s_%s.key", host, ip, alternateDNS))
+	baseName := fmt.Sprintf("%s_%s_%s", host, strings.Join(ipsToStrings(alternateIPs), "-"), strings.Join(alternateDNS, "-"))
+	_ = os.Remove(baseName + ".crt")
+	_ = os.Remove(baseName + ".key")
 	// ref --end
 	return crt, key, []byte(host), nil
+}
+
+func ipsToStrings(ips []net.IP) []string {
+	ss := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		ss = append(ss, ip.String())
+	}
+	return ss
 }
