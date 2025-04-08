@@ -22,4 +22,5 @@ func TestGetLoggerFromContext(t *testing.T) {
 	if defaultLogger != L {
 		panic("not same")
 	}
+	logger.Debug("debug")
 }

@@ -341,7 +341,7 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				return err
 			})
 		if err != nil {
-			plog.G(ctx).Debugf("Failed to get Pod %s: %v", podName, err)
+			plog.G(ctx).Errorf("Failed to get Pod %s: %v", podName, err)
 			cancelFunc()
 		}
 	}
@@ -354,7 +354,7 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
 			})
 			if err != nil {
-				plog.G(ctx).Debugf("Failed to watch Pod %s: %v", podName, err)
+				plog.G(ctx).Errorf("Failed to watch Pod %s: %v", podName, err)
 				return
 			}
 			defer w.Stop()
@@ -368,7 +368,7 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				}
 				switch e.Type {
 				case watch.Deleted:
-					plog.G(ctx).Debugf("Pod %s is deleted", podName)
+					plog.G(ctx).Errorf("Pod %s is deleted", podName)
 					cancelFunc()
 					return
 				case watch.Error:

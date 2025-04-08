@@ -93,7 +93,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			src = ipHeader.Src
 			dst = ipHeader.Dst
 		} else {
-			plog.G(ctx).Debugf("[TUN-GVISOR] Unknown packet")
+			plog.G(ctx).Errorf("[TUN-GVISOR] Unknown packet")
 			config.LPool.Put(buf[:])
 			continue
 		}
@@ -126,10 +126,10 @@ func (h *gvisorTCPHandler) addToRouteMapTCP(ctx context.Context, src net.IP, tcp
 	if loaded {
 		if tcpConn != value.(net.Conn) {
 			h.routeMapTCP.Store(src.String(), tcpConn)
-			plog.G(ctx).Debugf("[TUN-GVISOR] Replace route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+			plog.G(ctx).Infof("[TUN-GVISOR] Replace route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 		}
 	} else {
-		plog.G(ctx).Debugf("[TUN-GVISOR] Add new route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
+		plog.G(ctx).Infof("[TUN-GVISOR] Add new route map TCP: %s -> %s-%s", src, tcpConn.LocalAddr(), tcpConn.RemoteAddr())
 	}
 }
 
@@ -137,7 +137,7 @@ func (h *gvisorTCPHandler) removeFromRouteMapTCP(ctx context.Context, tcpConn ne
 	h.routeMapTCP.Range(func(key, value any) bool {
 		if value.(net.Conn) == tcpConn {
 			h.routeMapTCP.Delete(key)
-			plog.G(ctx).Debugf("[TCP-GVISOR] Delete to DST %s by conn %s from globle route map TCP", key, tcpConn.LocalAddr())
+			plog.G(ctx).Infof("[TCP-GVISOR] Delete to DST %s by conn %s from globle route map TCP", key, tcpConn.LocalAddr())
 		}
 		return true
 	})
