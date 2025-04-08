@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -17,6 +18,10 @@ type tcpTransporter struct {
 func TCPTransporter(tlsInfo map[string][]byte) Transporter {
 	tlsConfig, err := util.GetTlsClientConfig(tlsInfo)
 	if err != nil {
+		if errors.Is(err, util.ErrNoTLSConfig) {
+			plog.G(context.Background()).Warn("tls config not found in config, use raw tcp mode")
+			return &tcpTransporter{}
+		}
 		plog.G(context.Background()).Errorf("failed to get tls client config: %v", err)
 		return &tcpTransporter{}
 	}
@@ -29,6 +34,11 @@ func (tr *tcpTransporter) Dial(ctx context.Context, addr string) (net.Conn, erro
 	if err != nil {
 		return nil, err
 	}
+	if tr.tlsConfig == nil {
+		plog.G(ctx).Debugf("tls config not found in config, use raw tcp mode")
+		return conn, nil
+	}
+	plog.G(ctx).Debugf("use tls mode")
 	return tls.Client(conn, tr.tlsConfig), nil
 }
 
@@ -43,7 +53,11 @@ func TCPListener(addr string) (net.Listener, error) {
 	}
 	serverConfig, err := util.GetTlsServerConfig(nil)
 	if err != nil {
-		_ = listener.Close()
+		if errors.Is(err, util.ErrNoTLSConfig) {
+			plog.G(context.Background()).Warn("tls config not found in config, use raw tcp mode")
+			return &tcpKeepAliveListener{TCPListener: listener}, nil
+		}
+		plog.G(context.Background()).Errorf("failed to get tls server config: %v", err)
 		return nil, err
 	}
 	return tls.NewListener(&tcpKeepAliveListener{TCPListener: listener}, serverConfig), nil
