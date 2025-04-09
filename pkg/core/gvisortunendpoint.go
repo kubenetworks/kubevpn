@@ -107,6 +107,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 				Data:       buf[:],
 			}, func(v *DatagramPacket) {
 				config.LPool.Put(v.Data[:])
+				plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Length: %d", src, dst, v.DataLength)
 			})
 			continue
 		}
