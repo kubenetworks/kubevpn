@@ -96,6 +96,7 @@ func transportTunPacketClient(ctx context.Context, tunInbound <-chan *Packet, tu
 			if packet.src.Equal(packet.dst) {
 				util.SafeWrite(tunOutbound, packet, func(v *Packet) {
 					config.LPool.Put(v.data[:])
+					plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Length: %d", v.src, v.dst, v.length)
 				})
 				continue
 			}
@@ -155,6 +156,7 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 		plog.G(context.Background()).Debugf("[TUN-CLIENT] SRC: %s, DST: %s, Length: %d", src.String(), dst, n)
 		util.SafeWrite(d.tunInbound, NewPacket(buf[:], n, src, dst), func(v *Packet) {
 			config.LPool.Put(v.data[:])
+			plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Length: %d", v.src, v.dst, v.length)
 		})
 	}
 }

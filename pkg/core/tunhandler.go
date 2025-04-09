@@ -104,6 +104,7 @@ func (d *Device) readFromTUN(ctx context.Context) {
 			dst:    dst,
 		}, func(v *Packet) {
 			config.LPool.Put(v.data[:])
+			plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Length: %d", v.src, v.dst, v.length)
 		})
 	}
 }

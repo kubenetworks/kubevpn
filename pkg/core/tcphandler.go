@@ -71,8 +71,8 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 			return
 		}
 
-		var src net.IP
-		src, _, err = util.ParseIP(packet.Data[:packet.DataLength])
+		var src, dst net.IP
+		src, dst, err = util.ParseIP(packet.Data[:packet.DataLength])
 		if err != nil {
 			plog.G(ctx).Errorf("[TCP] Unknown packet")
 			config.LPool.Put(buf[:])
@@ -89,6 +89,7 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		}
 		util.SafeWrite(h.packetChan, packet, func(v *DatagramPacket) {
 			config.LPool.Put(v.Data[:])
+			plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Length: %d", src, dst, v.DataLength)
 		})
 	}
 }
