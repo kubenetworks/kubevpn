@@ -967,8 +967,14 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 		return err
 	}
 
-	plog.G(ctx).Infof("Set image %s --> %s...", serverImg, clientImg)
+	// 1) update secret
+	err = upgradeSecretSpec(ctx, c.factory, c.Namespace)
+	if err != nil {
+		return err
+	}
 
+	// 2) update deploy
+	plog.G(ctx).Infof("Set image %s --> %s...", serverImg, clientImg)
 	err = upgradeDeploySpec(ctx, c.factory, c.Namespace, deploy.Name, c.Engine == config.EngineGvisor)
 	if err != nil {
 		return err
@@ -1057,6 +1063,41 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name string, 
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func upgradeSecretSpec(ctx context.Context, f cmdutil.Factory, ns string) error {
+	crt, key, host, err := util.GenTLSCert(ctx, ns)
+	if err != nil {
+		return err
+	}
+	secret := genSecret(ns, crt, key, host)
+
+	clientset, err := f.KubernetesClientSet()
+	if err != nil {
+		return err
+	}
+	currentSecret, err := clientset.CoreV1().Secrets(ns).Get(ctx, secret.Name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	// already have three keys
+	if currentSecret.Data[config.TLSServerName] != nil &&
+		currentSecret.Data[config.TLSPrivateKeyKey] != nil &&
+		currentSecret.Data[config.TLSCertKey] != nil {
+		return nil
+	}
+
+	_, err = clientset.CoreV1().Secrets(ns).Update(ctx, secret, metav1.UpdateOptions{})
+	if err != nil {
+		return err
+	}
+	mutatingWebhookConfig := genMutatingWebhookConfiguration(ns, crt)
+	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Update(ctx, mutatingWebhookConfig, metav1.UpdateOptions{})
+	if err != nil {
+		return err
 	}
 	return nil
 }
