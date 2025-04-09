@@ -94,7 +94,9 @@ func transportTunPacketClient(ctx context.Context, tunInbound <-chan *Packet, tu
 		defer util.HandleCrash()
 		for packet := range tunInbound {
 			if packet.src.Equal(packet.dst) {
-				util.SafeWrite(tunOutbound, packet)
+				util.SafeWrite(tunOutbound, packet, func(v *Packet) {
+					config.LPool.Put(v.data[:])
+				})
 				continue
 			}
 			_, err := packetConn.WriteTo(packet.data[:packet.length], remoteAddr)
@@ -116,7 +118,9 @@ func transportTunPacketClient(ctx context.Context, tunInbound <-chan *Packet, tu
 				util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to read packet from remote %s", remoteAddr)))
 				return
 			}
-			util.SafeWrite(tunOutbound, &Packet{data: buf[:], length: n})
+			util.SafeWrite(tunOutbound, &Packet{data: buf[:], length: n}, func(v *Packet) {
+				config.LPool.Put(v.data[:])
+			})
 		}
 	}()
 
@@ -134,7 +138,7 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 		buf := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(buf[:])
 		if err != nil {
-			plog.G(ctx).Errorf("[TUN-RAW] Failed to read packet from tun device: %s", err)
+			plog.G(ctx).Errorf("[TUN-CLIENT] Failed to read packet from tun device: %s", err)
 			util.SafeWrite(d.errChan, err)
 			config.LPool.Put(buf[:])
 			return
@@ -144,12 +148,14 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 		var src, dst net.IP
 		src, dst, err = util.ParseIP(buf[:n])
 		if err != nil {
-			plog.G(ctx).Errorf("[TUN-RAW] Unknown packet: %v", err)
+			plog.G(ctx).Errorf("[TUN-CLIENT] Unknown packet: %v", err)
 			config.LPool.Put(buf[:])
 			continue
 		}
-		plog.G(ctx).Debugf("[TUN-RAW] SRC: %s, DST: %s, Length: %d", src.String(), dst, n)
-		util.SafeWrite(d.tunInbound, NewDataElem(buf[:], n, src, dst))
+		plog.G(context.Background()).Debugf("[TUN-CLIENT] SRC: %s, DST: %s, Length: %d", src.String(), dst, n)
+		util.SafeWrite(d.tunInbound, NewPacket(buf[:], n, src, dst), func(v *Packet) {
+			config.LPool.Put(v.data[:])
+		})
 	}
 }
 
@@ -159,7 +165,7 @@ func (d *ClientDevice) writeToTun(ctx context.Context) {
 		_, err := d.tun.Write(e.data[:e.length])
 		config.LPool.Put(e.data[:])
 		if err != nil {
-			plog.G(ctx).Errorf("[TUN-RAW] Failed to write packet to tun device: %v", err)
+			plog.G(ctx).Errorf("[TUN-CLIENT] Failed to write packet to tun device: %v", err)
 			util.SafeWrite(d.errChan, err)
 			return
 		}

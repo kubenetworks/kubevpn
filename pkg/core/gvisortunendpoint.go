@@ -105,6 +105,8 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			util.SafeWrite(h.packetChan, &DatagramPacket{
 				DataLength: uint16(read),
 				Data:       buf[:],
+			}, func(v *DatagramPacket) {
+				config.LPool.Put(v.Data[:])
 			})
 			continue
 		}

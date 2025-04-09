@@ -75,12 +75,19 @@ func WriteProxyInfo(conn net.Conn, id stack.TransportEndpointID) error {
 	var b bytes.Buffer
 	i := config.LPool.Get().([]byte)[:]
 	defer config.LPool.Put(i[:])
+	// local port
 	binary.BigEndian.PutUint16(i, id.LocalPort)
 	b.Write(i)
+
+	// remote port
 	binary.BigEndian.PutUint16(i, id.RemotePort)
 	b.Write(i)
+
+	// local address
 	b.WriteByte(byte(id.LocalAddress.Len()))
 	b.Write(id.LocalAddress.AsSlice())
+
+	// remote address
 	b.WriteByte(byte(id.RemoteAddress.Len()))
 	b.Write(id.RemoteAddress.AsSlice())
 	_, err := b.WriteTo(conn)

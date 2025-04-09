@@ -9,7 +9,7 @@ func SafeRead[T any](c chan T) (T, bool) {
 	return tt, ok
 }
 
-func SafeWrite[T any](c chan<- T, value T) bool {
+func SafeWrite[T any](c chan<- T, value T, fallback ...func(v T)) bool {
 	defer func() {
 		if r := recover(); r != nil {
 		}
@@ -18,6 +18,9 @@ func SafeWrite[T any](c chan<- T, value T) bool {
 	case c <- value:
 		return true
 	default:
+		for _, f := range fallback {
+			f(value)
+		}
 		return false
 	}
 }
