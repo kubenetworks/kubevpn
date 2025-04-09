@@ -1,6 +1,6 @@
 module github.com/wencaiwulue/kubevpn/v2
 
-go 1.23.2
+go 1.24.2
 
 require (
 	github.com/cilium/ipam v0.0.0-20230509084518-fd66eae7909b
