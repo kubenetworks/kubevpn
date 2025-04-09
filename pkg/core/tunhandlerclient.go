@@ -121,6 +121,7 @@ func transportTunPacketClient(ctx context.Context, tunInbound <-chan *Packet, tu
 			}
 			util.SafeWrite(tunOutbound, &Packet{data: buf[:], length: n}, func(v *Packet) {
 				config.LPool.Put(v.data[:])
+				plog.G(context.Background()).Errorf("Drop packet, LocalAddr: %s, Remote: %s, Length: %d", packetConn.LocalAddr(), remoteAddr, v.length)
 			})
 		}
 	}()
