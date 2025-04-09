@@ -87,7 +87,9 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		} else {
 			plog.G(ctx).Infof("[TCP] Add new route map TCP to DST %s by connation %s -> %s", src, tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 		}
-		util.SafeWrite(h.packetChan, packet)
+		util.SafeWrite(h.packetChan, packet, func(v *DatagramPacket) {
+			config.LPool.Put(v.Data[:])
+		})
 	}
 }
 

@@ -102,6 +102,8 @@ func (d *Device) readFromTUN(ctx context.Context) {
 			length: n,
 			src:    src,
 			dst:    dst,
+		}, func(v *Packet) {
+			config.LPool.Put(v.data[:])
 		})
 	}
 }
@@ -169,7 +171,7 @@ type Packet struct {
 	dst    net.IP
 }
 
-func NewDataElem(data []byte, length int, src net.IP, dst net.IP) *Packet {
+func NewPacket(data []byte, length int, src net.IP, dst net.IP) *Packet {
 	return &Packet{
 		data:   data,
 		length: length,
