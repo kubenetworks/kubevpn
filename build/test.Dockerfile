@@ -27,8 +27,11 @@ RUN apt-get update && apt-get install -y openssl iptables curl dnsutils \
     && apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
+FROM ghcr.io/kubenetworks/kubevpn:latest
 
 WORKDIR /app
 
 COPY --from=builder /go/src/$BASE/bin/kubevpn /usr/local/bin/kubevpn
 COPY --from=envoy /usr/local/bin/envoy /usr/local/bin/envoy
+
+COPY bin/kubevpn /usr/local/bin/kubevpn
