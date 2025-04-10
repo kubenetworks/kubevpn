@@ -129,22 +129,22 @@ func IsIPv6(packet []byte) bool {
 	return 6 == (packet[0] >> 4)
 }
 
-func ParseIP(packet []byte) (src net.IP, dst net.IP, err error) {
+func ParseIP(packet []byte) (src net.IP, dst net.IP, protocol int, err error) {
 	if IsIPv4(packet) {
 		header, err := ipv4.ParseHeader(packet)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, -1, err
 		}
-		return header.Src, header.Dst, nil
+		return header.Src, header.Dst, header.Protocol, nil
 	}
 	if IsIPv6(packet) {
 		header, err := ipv6.ParseHeader(packet)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, -1, err
 		}
-		return header.Src, header.Dst, nil
+		return header.Src, header.Dst, header.NextHeader, nil
 	}
-	return nil, nil, errors.New("packet is invalid")
+	return nil, nil, -1, errors.New("packet is invalid")
 }
 
 func GetIPBaseNic() (*net.IPNet, error) {

@@ -6,6 +6,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/google/gopacket/layers"
 	"github.com/pkg/errors"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -47,13 +48,13 @@ func (d *ClientDevice) forwardPacketToRemote(ctx context.Context, remoteAddr *ne
 		func() {
 			packetConn, err := getRemotePacketConn(ctx, forward)
 			if err != nil {
-				plog.G(ctx).Errorf("[TUN-CLIENT] Failed to get remote conn from %s -> %s: %s", d.tun.LocalAddr(), remoteAddr, err)
+				plog.G(ctx).Errorf("Failed to get remote conn from %s -> %s: %s", d.tun.LocalAddr(), remoteAddr, err)
 				time.Sleep(time.Second * 1)
 				return
 			}
 			err = transportTunPacketClient(ctx, d.tunInbound, d.tunOutbound, packetConn, remoteAddr)
 			if err != nil {
-				plog.G(ctx).Errorf("[TUN-CLIENT] Failed to transport data to remote %s: %v", remoteAddr, err)
+				plog.G(ctx).Errorf("Failed to transport data to remote %s: %v", remoteAddr, err)
 			}
 		}()
 	}
@@ -95,8 +96,12 @@ func transportTunPacketClient(ctx context.Context, tunInbound <-chan *Packet, tu
 		for packet := range tunInbound {
 			if packet.src.Equal(packet.dst) {
 				util.SafeWrite(tunOutbound, packet, func(v *Packet) {
+					var p = "unknown"
+					if _, _, protocol, err := util.ParseIP(v.data[:v.length]); err == nil {
+						p = layers.IPProtocol(protocol).String()
+					}
 					config.LPool.Put(v.data[:])
-					plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Length: %d", v.src, v.dst, v.length)
+					plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", v.src, v.dst, p, v.length)
 				})
 				continue
 			}
@@ -140,7 +145,7 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 		buf := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(buf[:])
 		if err != nil {
-			plog.G(ctx).Errorf("[TUN-CLIENT] Failed to read packet from tun device: %s", err)
+			plog.G(ctx).Errorf("Failed to read packet from tun device: %s", err)
 			util.SafeWrite(d.errChan, err)
 			config.LPool.Put(buf[:])
 			return
@@ -148,16 +153,17 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 
 		// Try to determine network protocol number, default zero.
 		var src, dst net.IP
-		src, dst, err = util.ParseIP(buf[:n])
+		var protocol int
+		src, dst, protocol, err = util.ParseIP(buf[:n])
 		if err != nil {
-			plog.G(ctx).Errorf("[TUN-CLIENT] Unknown packet: %v", err)
+			plog.G(ctx).Errorf("Unknown packet: %v", err)
 			config.LPool.Put(buf[:])
 			continue
 		}
-		plog.G(context.Background()).Debugf("[TUN-CLIENT] SRC: %s, DST: %s, Length: %d", src.String(), dst, n)
+		plog.G(context.Background()).Debugf("SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
 		util.SafeWrite(d.tunInbound, NewPacket(buf[:], n, src, dst), func(v *Packet) {
 			config.LPool.Put(v.data[:])
-			plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Length: %d", v.src, v.dst, v.length)
+			plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", v.src, v.dst, layers.IPProtocol(protocol).String(), v.length)
 		})
 	}
 }
@@ -168,7 +174,7 @@ func (d *ClientDevice) writeToTun(ctx context.Context) {
 		_, err := d.tun.Write(e.data[:e.length])
 		config.LPool.Put(e.data[:])
 		if err != nil {
-			plog.G(ctx).Errorf("[TUN-CLIENT] Failed to write packet to tun device: %v", err)
+			plog.G(ctx).Errorf("Failed to write packet to tun device: %v", err)
 			util.SafeWrite(d.errChan, err)
 			return
 		}

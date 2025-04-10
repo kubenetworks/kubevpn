@@ -78,7 +78,7 @@ func UDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.TransportEn
 						break
 					}
 				}
-				plog.G(ctx).Infof("[TUN-UDP] Write length %d data from src: %s -> dst: %s", written, src.String(), dst.String())
+				plog.G(ctx).Infof("[TUN-UDP] Write length %d data from src: %s -> dst: %s", written, src, dst)
 				errChan <- err
 			}()
 			go func() {
@@ -108,7 +108,7 @@ func UDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.TransportEn
 						break
 					}
 				}
-				plog.G(ctx).Infof("[TUN-UDP] Read length %d data from dst: %s -> src: %s", written, dst.String(), src.String())
+				plog.G(ctx).Infof("[TUN-UDP] Read length %d data from dst: %s -> src: %s", written, dst, src)
 				errChan <- err
 			}()
 			err1 = <-errChan

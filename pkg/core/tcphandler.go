@@ -5,7 +5,9 @@ import (
 	"net"
 	"sync"
 
+	"github.com/google/gopacket/layers"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -72,7 +74,8 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		}
 
 		var src, dst net.IP
-		src, dst, err = util.ParseIP(packet.Data[:packet.DataLength])
+		var protocol int
+		src, dst, protocol, err = util.ParseIP(packet.Data[:packet.DataLength])
 		if err != nil {
 			plog.G(ctx).Errorf("[TCP] Unknown packet")
 			config.LPool.Put(buf[:])
@@ -87,9 +90,10 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		} else {
 			plog.G(ctx).Infof("[TCP] Add new route map TCP to DST %s by connation %s -> %s", src, tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 		}
+		// here receive too many packet
 		util.SafeWrite(h.packetChan, packet, func(v *DatagramPacket) {
-			config.LPool.Put(v.Data[:])
-			plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Length: %d", src, dst, v.DataLength)
+			plog.G(context.Background()).Errorf("Stuck packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), v.DataLength)
+			h.packetChan <- v
 		})
 	}
 }
