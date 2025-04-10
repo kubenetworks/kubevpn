@@ -340,5 +340,4 @@ func (p *Peer) routeTUN(ctx context.Context) {
 
 func (p *Peer) Close() {
 	p.conn.Close()
-	util.SafeClose(p.tcpInbound)
 }
