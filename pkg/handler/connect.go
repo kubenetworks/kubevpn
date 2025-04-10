@@ -21,6 +21,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/metadata"
+	admissionv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
 	apinetworkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1094,7 +1095,15 @@ func upgradeSecretSpec(ctx context.Context, f cmdutil.Factory, ns string) error 
 	if err != nil {
 		return err
 	}
+
 	mutatingWebhookConfig := genMutatingWebhookConfiguration(ns, crt)
+	var current *admissionv1.MutatingWebhookConfiguration
+	current, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Get(ctx, mutatingWebhookConfig.Name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	mutatingWebhookConfig.ResourceVersion = current.ResourceVersion
 	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Update(ctx, mutatingWebhookConfig, metav1.UpdateOptions{})
 	if err != nil {
 		return err
