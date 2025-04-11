@@ -148,7 +148,7 @@ func (d *Device) transport(ctx1 context.Context, addr string, routeMapUDP *sync.
 				tunOutbound: d.tunOutbound,
 				routeMapUDP: routeMapUDP,
 				routeMapTCP: routeMapTCP,
-				errChan:     d.errChan,
+				errChan:     make(chan error, 1),
 			}
 
 			defer p.Close()
