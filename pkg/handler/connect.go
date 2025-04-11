@@ -814,18 +814,35 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context, name string) error {
 		return nil
 	}
 
+	// parse cname
+	//dig +short db-name.postgres.database.azure.com
+	//1234567.privatelink.db-name.postgres.database.azure.com.
+	//10.0.100.1
+	var parseIP = func(cmdDigOutput string) net.IP {
+		for _, s := range strings.Split(cmdDigOutput, "\n") {
+			ip := net.ParseIP(strings.TrimSpace(s))
+			if ip != nil {
+				return ip
+			}
+		}
+		return nil
+	}
+
 	// 1) use dig +short query, if ok, just return
 	for _, domain := range c.ExtraRouteInfo.ExtraDomain {
-		ip, err := util.Shell(ctx, c.clientset, c.config, name, config.ContainerSidecarVPN, c.Namespace, []string{"dig", "+short", domain})
+		output, err := util.Shell(ctx, c.clientset, c.config, name, config.ContainerSidecarVPN, c.Namespace, []string{"dig", "+short", domain})
 		if err != nil {
 			return errors.WithMessage(err, "failed to resolve DNS for domain by command dig")
 		}
-		// try to get ingress record
-		if net.ParseIP(ip) == nil {
+		var ip string
+		if parseIP(output) == nil {
+			// try to get ingress record
 			ip = getIngressRecord(ctx, c.clientset.NetworkingV1(), []string{v1.NamespaceAll, c.Namespace}, domain)
+		} else {
+			ip = parseIP(output).String()
 		}
 		if net.ParseIP(ip) == nil {
-			return fmt.Errorf("failed to resolve DNS for domain %s by command dig", domain)
+			return fmt.Errorf("failed to resolve DNS for domain %s by command dig, output: %s", domain, output)
 		}
 		err = c.addRoute(ip)
 		if err != nil {
