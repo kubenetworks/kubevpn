@@ -603,7 +603,7 @@ func (d *CloneOptions) setVolume(u *unstructured.Unstructured) error {
 			continue
 		}
 		newContainer := v1.Container{
-			Name:       fmt.Sprintf("download-" + volume.Name),
+			Name:       fmt.Sprintf("download-%s", volume.Name),
 			Image:      config.Image,
 			Command:    []string{"sh", "-c"},
 			Args:       []string{strings.Join(args, "&&")},

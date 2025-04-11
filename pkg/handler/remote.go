@@ -12,7 +12,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -42,13 +41,15 @@ func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, nam
 	}
 
 	var deleteResource = func(ctx context.Context) {
-		options := metav1.DeleteOptions{}
+		options := metav1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)}
 		name := config.ConfigMapPodTrafficManager
 		_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, name+"."+namespace, options)
 		_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, name, options)
 		_ = clientset.RbacV1().Roles(namespace).Delete(ctx, name, options)
 		_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, name, options)
 		_ = clientset.CoreV1().Services(namespace).Delete(ctx, name, options)
+		_ = clientset.CoreV1().Secrets(namespace).Delete(ctx, name, options)
+		_ = clientset.CoreV1().Pods(namespace).Delete(ctx, config.CniNetName, options)
 		_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, name, options)
 	}
 	defer func() {
@@ -125,7 +126,7 @@ func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, nam
 	//export: not valid in this context: tls.key
 	secret := genSecret(namespace, crt, key)
 	_, err = clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
-	if err != nil && !k8serrors.IsAlreadyExists(err) {
+	if err != nil {
 		plog.G(ctx).Errorf("Creating secret error: %s", err.Error())
 		return err
 	}
@@ -532,7 +533,7 @@ func waitPodReady(ctx context.Context, deploy *appsv1.Deployment, clientset core
 			}
 			util.PrintStatus(&pod, sb)
 			if lastMessage != sb.String() {
-				plog.G(ctx).Infof(sb.String())
+				plog.G(ctx).Info(sb.String())
 			}
 			lastMessage = sb.String()
 
