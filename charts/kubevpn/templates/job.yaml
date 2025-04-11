@@ -41,7 +41,7 @@ spec:
               kubectl label ns {{ include "kubevpn.namespace" . }} ns={{ include "kubevpn.namespace" . }}
 
               echo "Generating https certificate"
-              openssl req -x509 -nodes -days 36500 -newkey rsa:2048 -subj "/CN={{ include "kubevpn.fullname" . }}.{{ include "kubevpn.namespace" . }}.svc" -addext "subjectAltName=DNS:{{ include "kubevpn.fullname" . }}.{{ include "kubevpn.namespace" . }}.svc.cluster.local,DNS:{{ include "kubevpn.fullname" . }}.{{ include "kubevpn.namespace" . }}.svc" -keyout server.key -out server.crt
+              openssl req -x509 -nodes -days 36500 -newkey rsa:2048 -subj "/CN={{ include "kubevpn.fullname" . }}.{{ include "kubevpn.namespace" . }}" -addext "subjectAltName=DNS:{{ include "kubevpn.fullname" . }}.{{ include "kubevpn.namespace" . }}.svc.cluster.local,DNS:{{ include "kubevpn.fullname" . }}.{{ include "kubevpn.namespace" . }}.svc,DNS:{{ include "kubevpn.fullname" . }}.{{ include "kubevpn.namespace" . }},DNS:localhost,IP:127.0.0.1" -keyout server.key -out server.crt
 
               export TLS_CRT=$(cat server.crt | base64 | tr -d '\n')
               echo "Patch mutatingwebhookconfigurations {{ include "kubevpn.fullname" . }}.{{ include "kubevpn.namespace" . }}"

@@ -31,6 +31,8 @@ const (
 	TLSCertKey = "tls_crt"
 	// TLSPrivateKeyKey is the key for the private key field in a TLS secret.
 	TLSPrivateKeyKey = "tls_key"
+	// TLSServerName for tls config server name
+	TLSServerName = "tls_server_name"
 
 	// container name
 	ContainerSidecarEnvoyProxy   = "envoy-proxy"
@@ -170,10 +172,47 @@ var (
 )
 
 var (
-	//	network layer ip needs 20 bytes
-	//	transport layer UDP header needs 8 bytes
-	//	UDP over TCP header needs 22 bytes
-	DefaultMTU = 1500 - 20 - 8 - 21
+	// DefaultMTU
+	/**
+	  +--------------------------------------------------------------------+
+	  |                     Original IP Packet from TUN                    |
+	  +-------------------+------------------------------------------------+
+	  |  IP Header (20B)  |               Payload (MTU size)               |
+	  +-------------------+------------------------------------------------+
+
+
+	  After adding custom 2-byte header:
+	  +----+-------------------+-------------------------------------------+
+	  | LH |  IP Header (20B)  |               Payload                     |
+	  +----+-------------------+-------------------------------------------+
+	  | 2B |        20B        |          1453 - 20 = 1433B                |
+	  +----+-------------------+-------------------------------------------+
+
+	  TLS 1.3 Record Structure Breakdown:
+	  +---------------------+--------------------------+-------------------+
+	  | TLS Header (5B)     | Encrypted Data (N)       | Auth Tag (16B)    |
+	  +---------------------+--------------------------+-------------------+
+	  |  Content Type (1)   |          ↑               | AEAD Authentication
+	  |   Version (2)       |   Encrypted Payload      | (e.g. AES-GCM)    |
+	  |   Length (2)        |  (Original Data + LH2)   |                   |
+	  +---------------------+--------------------------+-------------------+
+	  |←------- 5B --------→|←---- Length Field ------→|←----- 16B -------→|
+
+
+	  Final Ethernet Frame:
+	  +--------+----------------+----------------+-----------------------+--------+
+	  | EthHdr | IP Header      | TCP Header     | TLS Components                 |
+	  | (14B)  | (20B)          | (20B)          +---------+-------------+--------+
+	  |        |                |                | Hdr(5B) | Data+LH2    | Tag(16)|
+	  +--------+----------------+----------------+---------+-------------+--------+
+	  |←------------------- Total 1500B Ethernet Frame --------------------------→|
+
+	  ipv4: 20
+	  ipv6: 40
+
+	mtu: 1417
+	*/
+	DefaultMTU = 1500 - max(20, 40) - 20 - 5 - 2 - 16
 )
 
 var (
