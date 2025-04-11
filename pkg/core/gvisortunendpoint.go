@@ -101,13 +101,13 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		h.addToRouteMapTCP(ctx, src, conn)
 		// inner ip like 198.19.0.100/102/103 connect each other
 		if config.CIDR.Contains(dst) || config.CIDR6.Contains(dst) {
-			plog.G(ctx).Debugf("[TUN-GVISOR] Forward to TUN device, SRC: %s, DST: %s, Length: %d", src.String(), dst.String(), read)
+			plog.G(ctx).Debugf("[TUN-GVISOR] Forward to TUN device, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
 			util.SafeWrite(h.packetChan, &DatagramPacket{
 				DataLength: uint16(read),
 				Data:       buf[:],
 			}, func(v *DatagramPacket) {
 				config.LPool.Put(v.Data[:])
-				plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Length: %d", src, dst, v.DataLength)
+				plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(ipProtocol).String(), v.DataLength)
 			})
 			continue
 		}
@@ -120,7 +120,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		sniffer.LogPacket("[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
 		endpoint.InjectInbound(protocol, pkt)
 		pkt.DecRef()
-		plog.G(ctx).Debugf("[TUN-GVISOR] Write to Gvisor IP-Protocol: %s, SRC: %s, DST: %s, Length: %d", layers.IPProtocol(ipProtocol).String(), src.String(), dst, read)
+		plog.G(ctx).Debugf("[TUN-GVISOR] Write to Gvisor. SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
 	}
 }
 
