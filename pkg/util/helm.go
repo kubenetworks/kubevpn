@@ -13,6 +13,7 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // DetectConnectNamespace
@@ -29,27 +30,32 @@ func DetectConnectNamespace(ctx context.Context, f cmdutil.Factory, connectNames
 	exists, err = DetectPodExists(ctx, clientSet, connectNamespace)
 	if err != nil && !k8serrors.IsNotFound(err) && !k8serrors.IsForbidden(err) {
 		return "", err
+	} else if err != nil {
+		plog.G(ctx).Debugf("Failed to detect if kubevpn exists in namespace %s: %v", connectNamespace, err)
 	}
 	if exists {
+		plog.G(ctx).Debugf("Find exists kubevpn in namespace %s", connectNamespace)
 		return connectNamespace, nil
 	}
 
 	exists, err = DetectPodExists(ctx, clientSet, config.DefaultNamespaceKubevpn)
 	if err != nil && !k8serrors.IsNotFound(err) && !k8serrors.IsForbidden(err) {
 		return "", err
+	} else if err != nil {
+		plog.G(ctx).Debugf("Failed to detect if kubevpn exists in namespace %s: %v", config.DefaultNamespaceKubevpn, err)
 	}
 	if exists {
+		plog.G(ctx).Debugf("Find exists kubevpn in namespace %s", config.DefaultNamespaceKubevpn)
 		return config.DefaultNamespaceKubevpn, nil
 	}
 
-	return GetHelmInstalledNamespace(f)
+	return GetHelmInstalledNamespace(ctx, f)
 }
 
-func GetHelmInstalledNamespace(f cmdutil.Factory) (string, error) {
+func GetHelmInstalledNamespace(ctx context.Context, f cmdutil.Factory) (string, error) {
 	cfg := new(action.Configuration)
 	client := action.NewList(cfg)
-	var nothing = func(format string, v ...interface{}) {}
-	err := cfg.Init(f, "", os.Getenv("HELM_DRIVER"), nothing)
+	err := cfg.Init(f, "", os.Getenv("HELM_DRIVER"), plog.G(ctx).Debugf)
 	if err != nil {
 		return "", err
 	}
@@ -57,6 +63,7 @@ func GetHelmInstalledNamespace(f cmdutil.Factory) (string, error) {
 	releases, err := client.Run()
 	if err != nil {
 		if k8serrors.IsForbidden(err) {
+			plog.G(ctx).Debugf("Failed to list helm apps in all namespace: %v", err)
 			return "", nil
 		}
 		return "", err
@@ -64,9 +71,11 @@ func GetHelmInstalledNamespace(f cmdutil.Factory) (string, error) {
 	for _, app := range releases {
 		if app.Name == config.HelmAppNameKubevpn &&
 			app.Info != nil && app.Info.Status == v1.StatusDeployed {
+			plog.G(ctx).Debugf("Find exists helm app kubevpn in namespace %s", app.Namespace)
 			return app.Namespace, nil
 		}
 	}
+	plog.G(ctx).Debugf("Not found helm apps kubevpn in all namespace")
 	return "", nil
 }
 
