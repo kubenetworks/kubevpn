@@ -33,7 +33,6 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
@@ -233,10 +232,6 @@ func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.Polic
 	}
 
 	return false, nil
-}
-
-func GetTlsDomain(ns string) string {
-	return config.ConfigMapPodTrafficManager + "." + ns + "." + "svc"
 }
 
 func RemoveLargerOverlappingCIDRs(cidrNets []*net.IPNet) []*net.IPNet {

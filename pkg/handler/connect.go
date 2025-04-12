@@ -21,6 +21,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/metadata"
+	admissionv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
 	apinetworkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -155,6 +156,11 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		c.proxyWorkloads = make(ProxyList, 0)
 	}
 
+	tlsSecret, err := c.clientset.CoreV1().Secrets(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
 	for _, workload := range workloads {
 		plog.G(ctx).Infof("Injecting inbound sidecar for %s in namespace %s", workload, namespace)
 		configInfo := util.PodRouteConfig{
@@ -175,11 +181,11 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
 		if c.Engine == config.EngineGvisor {
-			err = inject.InjectEnvoySidecar(ctx, c.factory, c.clientset, c.Namespace, object, headers, portMap)
+			err = inject.InjectEnvoySidecar(ctx, c.factory, c.clientset, c.Namespace, object, headers, portMap, tlsSecret)
 		} else if len(headers) != 0 || len(portMap) != 0 {
-			err = inject.InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, object, configInfo, headers, portMap)
+			err = inject.InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, object, configInfo, headers, portMap, tlsSecret)
 		} else {
-			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, object, configInfo)
+			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, object, configInfo, tlsSecret)
 		}
 		if err != nil {
 			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %s", workload, namespace, err.Error())
@@ -370,6 +376,11 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress string, lite bool) (err error) {
 	plog.G(ctx).Debugf("IPv4: %s, IPv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
 
+	tlsSecret, err := c.clientset.CoreV1().Secrets(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
 	var cidrList []*net.IPNet
 	if !lite {
 		cidrList = append(cidrList, config.CIDR, config.CIDR6)
@@ -423,7 +434,7 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 	}
 	forward.Client = &core.Client{
 		Connector:   core.NewUDPOverTCPConnector(),
-		Transporter: core.TCPTransporter(),
+		Transporter: core.TCPTransporter(tlsSecret.Data),
 	}
 	forwarder := core.NewForwarder(5, forward)
 
@@ -957,8 +968,14 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 		return err
 	}
 
-	plog.G(ctx).Infof("Set image %s --> %s...", serverImg, clientImg)
+	// 1) update secret
+	err = upgradeSecretSpec(ctx, c.factory, c.Namespace)
+	if err != nil {
+		return err
+	}
 
+	// 2) update deploy
+	plog.G(ctx).Infof("Set image %s --> %s...", serverImg, clientImg)
 	err = upgradeDeploySpec(ctx, c.factory, c.Namespace, deploy.Name, c.Engine == config.EngineGvisor)
 	if err != nil {
 		return err
@@ -1047,6 +1064,49 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name string, 
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func upgradeSecretSpec(ctx context.Context, f cmdutil.Factory, ns string) error {
+	crt, key, host, err := util.GenTLSCert(ctx, ns)
+	if err != nil {
+		return err
+	}
+	secret := genSecret(ns, crt, key, host)
+
+	clientset, err := f.KubernetesClientSet()
+	if err != nil {
+		return err
+	}
+	currentSecret, err := clientset.CoreV1().Secrets(ns).Get(ctx, secret.Name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	// already have three keys
+	if currentSecret.Data[config.TLSServerName] != nil &&
+		currentSecret.Data[config.TLSPrivateKeyKey] != nil &&
+		currentSecret.Data[config.TLSCertKey] != nil {
+		return nil
+	}
+
+	_, err = clientset.CoreV1().Secrets(ns).Update(ctx, secret, metav1.UpdateOptions{})
+	if err != nil {
+		return err
+	}
+
+	mutatingWebhookConfig := genMutatingWebhookConfiguration(ns, crt)
+	var current *admissionv1.MutatingWebhookConfiguration
+	current, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Get(ctx, mutatingWebhookConfig.Name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	mutatingWebhookConfig.ResourceVersion = current.ResourceVersion
+	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Update(ctx, mutatingWebhookConfig, metav1.UpdateOptions{})
+	if err != nil {
+		return err
 	}
 	return nil
 }

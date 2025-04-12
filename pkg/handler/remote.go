@@ -18,7 +18,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/util/cert"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/utils/pointer"
@@ -114,17 +113,14 @@ func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, nam
 		return err
 	}
 
-	domain := util.GetTlsDomain(namespace)
-	var crt, key []byte
-	crt, key, err = cert.GenerateSelfSignedCertKey(domain, nil, nil)
+	crt, key, host, err := util.GenTLSCert(ctx, namespace)
 	if err != nil {
-		plog.G(ctx).Errorf("Generate self signed cert and key error: %s", err.Error())
 		return err
 	}
 	// reason why not use v1.SecretTypeTls is because it needs key called tls.crt and tls.key, but tls.key can not as env variable
 	// ➜  ~ export tls.key=a
 	//export: not valid in this context: tls.key
-	secret := genSecret(namespace, crt, key)
+	secret := genSecret(namespace, crt, key, host)
 	_, err = clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
 	if err != nil {
 		plog.G(ctx).Errorf("Creating secret error: %s", err.Error())
@@ -282,7 +278,7 @@ func genService(namespace string, udp8422 string, tcp10800 string, tcp9002 strin
 	}
 }
 
-func genSecret(namespace string, crt []byte, key []byte) *v1.Secret {
+func genSecret(namespace string, crt []byte, key []byte, host []byte) *v1.Secret {
 	secret := &v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
@@ -291,6 +287,7 @@ func genSecret(namespace string, crt []byte, key []byte) *v1.Secret {
 		Data: map[string][]byte{
 			config.TLSCertKey:       crt,
 			config.TLSPrivateKeyKey: key,
+			config.TLSServerName:    host,
 		},
 		Type: v1.SecretTypeOpaque,
 	}
