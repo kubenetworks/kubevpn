@@ -140,7 +140,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		return err
 	}
 
-	connectNs, err := util.DetectConnectNamespace(sshCtx, connect.GetFactory(), req.Namespace)
+	connectNs, err := util.DetectConnectNamespace(plog.WithLogger(sshCtx, logger), connect.GetFactory(), req.Namespace)
 	if err != nil {
 		return err
 	}
