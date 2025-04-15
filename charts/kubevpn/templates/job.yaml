@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "kubevpn.fullname" . }}
+  name: {{ include "kubevpn.fullname" . }}-{{ randAlphaNum 8 | lower }}
   namespace: {{ include "kubevpn.namespace" . }}
   labels:
     {{- include "kubevpn.labels" . | nindent 4 }}

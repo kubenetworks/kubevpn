@@ -124,6 +124,10 @@ func transportTunPacketClient(ctx context.Context, tunInbound <-chan *Packet, tu
 				util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to read packet from remote %s", remoteAddr)))
 				return
 			}
+			if n == 0 {
+				plog.G(ctx).Warnf("Packet length 0")
+				continue
+			}
 			util.SafeWrite(tunOutbound, &Packet{data: buf[:], length: n}, func(v *Packet) {
 				config.LPool.Put(v.data[:])
 				plog.G(context.Background()).Errorf("Drop packet, LocalAddr: %s, Remote: %s, Length: %d", packetConn.LocalAddr(), remoteAddr, v.length)
@@ -202,13 +206,7 @@ func heartbeats(ctx context.Context, tun net.Conn) {
 	ticker := time.NewTicker(time.Second * 60)
 	defer ticker.Stop()
 
-	for ; true; <-ticker.C {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
+	for ; ctx.Err() == nil; <-ticker.C {
 		if srcIPv4 != nil {
 			util.Ping(ctx, srcIPv4.String(), config.RouterIP.String())
 		}

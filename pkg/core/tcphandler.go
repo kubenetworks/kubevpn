@@ -6,8 +6,8 @@ import (
 	"sync"
 
 	"github.com/google/gopacket/layers"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -42,7 +42,7 @@ func (c *UDPOverTCPConnector) ConnectContext(ctx context.Context, conn net.Conn)
 type UDPOverTCPHandler struct {
 	// map[srcIP]net.Conn
 	routeMapTCP *sync.Map
-	packetChan  chan *DatagramPacket
+	packetChan  chan *Packet
 }
 
 func TCPHandler() Handler {
@@ -53,48 +53,70 @@ func TCPHandler() Handler {
 }
 
 func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
+	tcpConn = NewTCPChan(tcpConn)
 	defer tcpConn.Close()
 	plog.G(ctx).Infof("[TCP] Handle connection %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 
 	defer h.removeFromRouteMapTCP(ctx, tcpConn)
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
+	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
-		packet, err := readDatagramPacketServer(tcpConn, buf[:])
+		datagram, err := readDatagramPacketServer(tcpConn, buf[:])
 		if err != nil {
 			plog.G(ctx).Errorf("[TCP] Failed to read from %s -> %s: %v", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
 			config.LPool.Put(buf[:])
 			return
 		}
 
-		var src, dst net.IP
-		var protocol int
-		src, dst, protocol, err = util.ParseIP(packet.Data[:packet.DataLength])
+		err = h.handlePacket(ctx, tcpConn, datagram)
 		if err != nil {
-			plog.G(ctx).Errorf("[TCP] Unknown packet")
-			config.LPool.Put(buf[:])
-			continue
+			return
 		}
-		value, loaded := h.routeMapTCP.LoadOrStore(src.String(), tcpConn)
-		if loaded {
-			if tcpConn != value.(net.Conn) {
-				h.routeMapTCP.Store(src.String(), tcpConn)
-				plog.G(ctx).Infof("[TCP] Replace route map TCP to DST %s by connation %s -> %s", src, tcpConn.RemoteAddr(), tcpConn.LocalAddr())
-			}
-		} else {
-			plog.G(ctx).Infof("[TCP] Add new route map TCP to DST %s by connation %s -> %s", src, tcpConn.RemoteAddr(), tcpConn.LocalAddr())
+	}
+}
+
+func (h *UDPOverTCPHandler) handlePacket(ctx context.Context, tcpConn net.Conn, datagram *DatagramPacket) error {
+	src, dst, protocol, err := util.ParseIP(datagram.Data[:datagram.DataLength])
+	if err != nil {
+		plog.G(ctx).Errorf("[TCP] Unknown packet")
+		config.LPool.Put(datagram.Data[:])
+		return err
+	}
+
+	h.addToRouteMapTCP(ctx, src, tcpConn)
+
+	if conn, ok := h.routeMapTCP.Load(dst.String()); ok {
+		plog.G(ctx).Debugf("[TCP] Find TCP route SRC: %s to DST: %s -> %s", src, dst, conn.(net.Conn).RemoteAddr())
+		err = datagram.Write(conn.(net.Conn))
+		config.LPool.Put(datagram.Data[:])
+		if err != nil {
+			plog.G(ctx).Errorf("[TCP] Failed to write to %s <- %s : %s", conn.(net.Conn).RemoteAddr(), conn.(net.Conn).LocalAddr(), err)
+			return err
 		}
-		// here receive too many packet
-		util.SafeWrite(h.packetChan, packet, func(v *DatagramPacket) {
-			plog.G(context.Background()).Errorf("Stuck packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), v.DataLength)
+	} else {
+		plog.G(ctx).Debugf("[TCP] Forward to TUN device, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), datagram.DataLength)
+		util.SafeWrite(h.packetChan, &Packet{
+			data:   datagram.Data,
+			length: int(datagram.DataLength),
+			src:    src,
+			dst:    dst,
+		}, func(v *Packet) {
+			plog.G(context.Background()).Errorf("Stuck packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), v.length)
 			h.packetChan <- v
 		})
+	}
+	return nil
+}
+
+func (h *UDPOverTCPHandler) addToRouteMapTCP(ctx context.Context, src net.IP, tcpConn net.Conn) {
+	value, loaded := h.routeMapTCP.LoadOrStore(src.String(), tcpConn)
+	if loaded {
+		if value.(net.Conn).LocalAddr() != tcpConn.LocalAddr() {
+			h.routeMapTCP.Store(src.String(), tcpConn)
+			plog.G(ctx).Infof("[TCP] Replace route map TCP to DST %s by connation %s -> %s", src, tcpConn.RemoteAddr(), tcpConn.LocalAddr())
+		}
+	} else {
+		plog.G(ctx).Infof("[TCP] Add new route map TCP to DST %s by connation %s -> %s", src, tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 	}
 }
 
@@ -126,11 +148,11 @@ func (c *UDPConnOverTCP) ReadFrom(b []byte) (int, net.Addr, error) {
 	case <-c.ctx.Done():
 		return 0, nil, c.ctx.Err()
 	default:
-		packet, err := readDatagramPacket(c.Conn, b)
+		datagram, err := readDatagramPacket(c.Conn, b)
 		if err != nil {
 			return 0, nil, err
 		}
-		return int(packet.DataLength), nil, nil
+		return int(datagram.DataLength), nil, nil
 	}
 }
 

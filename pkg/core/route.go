@@ -18,7 +18,7 @@ var (
 	// RouteMapTCP map[srcIP]net.Conn Globe route table for inner ip
 	RouteMapTCP = &sync.Map{}
 	// TCPPacketChan tcp connects
-	TCPPacketChan = make(chan *DatagramPacket, MaxSize)
+	TCPPacketChan = make(chan *Packet, MaxSize)
 )
 
 type TCPUDPacket struct {
