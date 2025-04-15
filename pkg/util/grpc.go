@@ -83,7 +83,8 @@ func CopyAndConvertGRPCStream[I any, O any](r grpc.ClientStream, w grpc.ServerSt
 
 func HandleCrash() {
 	if r := recover(); r != nil {
-		plog.GetLogger(context.Background()).Panic(fmt.Sprintf("Panic: %s", string(debug.Stack())))
+		plog.GetLogger(context.Background()).Error(r)
+		plog.GetLogger(context.Background()).Panicf("Panic: %s", string(debug.Stack()))
 		panic(r)
 	}
 }

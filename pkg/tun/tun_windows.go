@@ -18,6 +18,7 @@ import (
 	wireguardtun "golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -31,8 +32,13 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if len(cfg.Name) != 0 {
 		tunName = cfg.Name
 	}
+	mtu := cfg.MTU
+	if mtu <= 0 {
+		mtu = config.DefaultMTU
+	}
+
 	wireguardtun.WintunTunnelType = "KubeVPN"
-	tunDevice, err := wireguardtun.CreateTUN(tunName, cfg.MTU)
+	tunDevice, err := wireguardtun.CreateTUN(tunName, mtu)
 	if err != nil {
 		err = fmt.Errorf("failed to create TUN device: %w", err)
 		return
@@ -90,14 +96,29 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 
 	// windows,macOS,linux connect to same cluster
 	// macOS and linux can ping each other, but macOS and linux can not ping windows
-	var ipInterface *winipcfg.MibIPInterfaceRow
-	ipInterface, err = ifUID.IPInterface(windows.AF_INET)
-	if err != nil {
-		return
+	if cfg.Addr != "" {
+		var ipInterface *winipcfg.MibIPInterfaceRow
+		ipInterface, err = ifUID.IPInterface(windows.AF_INET)
+		if err != nil {
+			return
+		}
+		ipInterface.ForwardingEnabled = true
+		ipInterface.NLMTU = uint32(mtu)
+		if err = ipInterface.Set(); err != nil {
+			return
+		}
 	}
-	ipInterface.ForwardingEnabled = true
-	if err = ipInterface.Set(); err != nil {
-		return
+	if cfg.Addr6 != "" {
+		var ipInterface *winipcfg.MibIPInterfaceRow
+		ipInterface, err = ifUID.IPInterface(windows.AF_INET6)
+		if err != nil {
+			return
+		}
+		ipInterface.ForwardingEnabled = true
+		ipInterface.NLMTU = uint32(mtu)
+		if err = ipInterface.Set(); err != nil {
+			return
+		}
 	}
 
 	conn = &winTunConn{ifce: tunDevice, addr: &net.IPAddr{IP: ipv4}, addr6: &net.IPAddr{IP: ipv6}}
@@ -170,6 +191,9 @@ func (c *winTunConn) Read(b []byte) (n int, err error) {
 }
 
 func (c *winTunConn) Write(b []byte) (n int, err error) {
+	if len(b) == 0 {
+		return 0 /*errors.New("can not write empty buffer")*/, nil
+	}
 	return c.ifce.Write(b, 0)
 }
 
