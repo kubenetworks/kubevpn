@@ -101,6 +101,7 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 func (h *UDPOverTCPHandler) removeFromRouteMapTCP(ctx context.Context, tcpConn net.Conn) {
 	h.routeMapTCP.Range(func(key, value any) bool {
 		if value.(net.Conn) == tcpConn {
+			h.routeMapTCP.Delete(key)
 			plog.G(ctx).Infof("[TCP] Delete to DST: %s by conn %s -> %s from globle route map TCP", key, tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 		}
 		return true
