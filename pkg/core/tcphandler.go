@@ -111,7 +111,7 @@ func (h *UDPOverTCPHandler) handlePacket(ctx context.Context, tcpConn net.Conn, 
 func (h *UDPOverTCPHandler) addToRouteMapTCP(ctx context.Context, src net.IP, tcpConn net.Conn) {
 	value, loaded := h.routeMapTCP.LoadOrStore(src.String(), tcpConn)
 	if loaded {
-		if value.(net.Conn).LocalAddr() != tcpConn.LocalAddr() {
+		if value.(net.Conn) != tcpConn {
 			h.routeMapTCP.Store(src.String(), tcpConn)
 			plog.G(ctx).Infof("[TCP] Replace route map TCP to DST %s by connation %s -> %s", src, tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 		}
