@@ -10,15 +10,15 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-type tcpChan struct {
+type bufferedTCP struct {
 	net.Conn
 	Chan   chan *DatagramPacket
 	once   sync.Once
 	closed bool
 }
 
-func NewTCPChan(conn net.Conn) net.Conn {
-	c := &tcpChan{
+func NewBufferedTCP(conn net.Conn) net.Conn {
+	c := &bufferedTCP{
 		Conn: conn,
 		Chan: make(chan *DatagramPacket, MaxSize),
 	}
@@ -26,7 +26,7 @@ func NewTCPChan(conn net.Conn) net.Conn {
 	return c
 }
 
-func (c *tcpChan) Write(b []byte) (n int, err error) {
+func (c *bufferedTCP) Write(b []byte) (n int, err error) {
 	if len(b) == 0 {
 		return 0, err
 	}
@@ -43,7 +43,7 @@ func (c *tcpChan) Write(b []byte) (n int, err error) {
 	return n, nil
 }
 
-func (c *tcpChan) Run() {
+func (c *bufferedTCP) Run() {
 	for buf := range c.Chan {
 		_, err := c.Conn.Write(buf.Data[:buf.DataLength])
 		config.LPool.Put(buf.Data[:])

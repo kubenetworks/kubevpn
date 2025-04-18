@@ -118,7 +118,7 @@ func (h *gvisorTCPHandler) handlePacket(ctx context.Context, buf []byte, length 
 			plog.G(ctx).Errorf("[TCP-GVISOR] Failed to write to %s <- %s : %s", conn.(net.Conn).RemoteAddr(), conn.(net.Conn).LocalAddr(), err)
 			return err
 		}
-	} else {
+	} else if config.RouterIP.Equal(dst) || config.RouterIP6.Equal(dst) {
 		plog.G(ctx).Debugf("[TCP-GVISOR] Forward to TUN device, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, protocol, length)
 		util.SafeWrite(h.packetChan, &Packet{
 			length: length,
@@ -129,6 +129,9 @@ func (h *gvisorTCPHandler) handlePacket(ctx context.Context, buf []byte, length 
 			config.LPool.Put(v.data[:])
 			plog.G(context.Background()).Errorf("[TCP-GVISOR] Drop packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, protocol, v.length)
 		})
+	} else {
+		plog.G(ctx).Warnf("[TCP-GVISOR] No route for src: %s -> dst: %s, drop it", src, dst)
+		config.LPool.Put(buf[:])
 	}
 	return nil
 }
