@@ -66,6 +66,14 @@ func withRouteSocket(f func(routeSocket int) error) error {
 	if err = unix.SetsockoptInt(routeSocket, unix.SOL_SOCKET, unix.SO_USELOOPBACK, 0); err != nil {
 		return err
 	}
+	// Set receive buffer size 1024k
+	if err = unix.SetsockoptInt(routeSocket, unix.SOL_SOCKET, unix.SO_RCVBUF, 1024*1024); err != nil {
+		return err
+	}
+	// Set send buffer size 1024k
+	if err = unix.SetsockoptInt(routeSocket, unix.SOL_SOCKET, unix.SO_SNDBUF, 1024*1024); err != nil {
+		return err
+	}
 	return f(routeSocket)
 }
 
