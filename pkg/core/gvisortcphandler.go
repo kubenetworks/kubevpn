@@ -20,7 +20,7 @@ import (
 type gvisorTCPHandler struct {
 	// map[srcIP]net.Conn
 	routeMapTCP *sync.Map
-	packetChan  chan *DatagramPacket
+	packetChan  chan *Packet
 }
 
 func GvisorTCPHandler() Handler {
@@ -43,7 +43,7 @@ func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {
 	errChan := make(chan error, 2)
 	go func() {
 		defer util.HandleCrash()
-		h.readFromTCPConnWriteToEndpoint(ctx, tcpConn, endpoint)
+		h.readFromTCPConnWriteToEndpoint(ctx, NewBufferedTCP(tcpConn), endpoint)
 		util.SafeClose(errChan)
 	}()
 	go func() {

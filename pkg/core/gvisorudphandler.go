@@ -59,11 +59,11 @@ func (c *gvisorUDPConnOverTCP) Read(b []byte) (int, error) {
 	case <-c.ctx.Done():
 		return 0, c.ctx.Err()
 	default:
-		dgram, err := readDatagramPacket(c.Conn, b)
+		datagram, err := readDatagramPacket(c.Conn, b)
 		if err != nil {
 			return 0, err
 		}
-		return int(dgram.DataLength), nil
+		return int(datagram.DataLength), nil
 	}
 }
 
@@ -107,26 +107,20 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 		buf := config.LPool.Get().([]byte)[:]
 		defer config.LPool.Put(buf[:])
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
+		for ctx.Err() == nil {
 			err := tcpConn.SetReadDeadline(time.Now().Add(time.Second * 30))
 			if err != nil {
 				plog.G(ctx).Errorf("[TUN-UDP] Failed to set read deadline: %v", err)
 				errChan <- err
 				return
 			}
-			dgram, err := readDatagramPacket(tcpConn, buf[:])
+			datagram, err := readDatagramPacket(tcpConn, buf[:])
 			if err != nil {
 				plog.G(ctx).Errorf("[TUN-UDP] %s -> %s: %v", tcpConn.RemoteAddr(), udpConn.LocalAddr(), err)
 				errChan <- err
 				return
 			}
-			if dgram.DataLength == 0 {
+			if datagram.DataLength == 0 {
 				plog.G(ctx).Errorf("[TUN-UDP] Length is zero")
 				errChan <- fmt.Errorf("length of read packet is zero")
 				return
@@ -138,12 +132,12 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				errChan <- err
 				return
 			}
-			if _, err = udpConn.Write(dgram.Data); err != nil {
+			if _, err = udpConn.Write(datagram.Data[:datagram.DataLength]); err != nil {
 				plog.G(ctx).Errorf("[TUN-UDP] %s -> %s : %s", tcpConn.RemoteAddr(), "localhost:8422", err)
 				errChan <- err
 				return
 			}
-			plog.G(ctx).Infof("[TUN-UDP] %s >>> %s length: %d", tcpConn.RemoteAddr(), "localhost:8422", dgram.DataLength)
+			plog.G(ctx).Infof("[TUN-UDP] %s >>> %s length: %d", tcpConn.RemoteAddr(), "localhost:8422", datagram.DataLength)
 		}
 	}()
 
@@ -152,13 +146,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 		buf := config.LPool.Get().([]byte)[:]
 		defer config.LPool.Put(buf[:])
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
+		for ctx.Err() == nil {
 			err := udpConn.SetReadDeadline(time.Now().Add(time.Second * 30))
 			if err != nil {
 				plog.G(ctx).Errorf("[TUN-UDP] Failed to set read deadline failed: %v", err)

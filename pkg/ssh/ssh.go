@@ -841,12 +841,8 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 		return
 	}
 	if print {
-		msg := fmt.Sprintf("To use: export KUBECONFIG=%s", temp.Name())
-		plog.G(ctx).Info(pkgutil.PrintStr(msg))
 		plog.G(ctx).Infof("Use temporary kubeconfig: %s", temp.Name())
 	} else {
-		msg := fmt.Sprintf("To use: export KUBECONFIG=%s", temp.Name())
-		plog.G(ctx).Debugf(pkgutil.PrintStr(msg))
 		plog.G(ctx).Debugf("Use temporary kubeconfig: %s", temp.Name())
 	}
 	path = temp.Name()
