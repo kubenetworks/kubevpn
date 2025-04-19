@@ -3,9 +3,7 @@ package main
 import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	_ "k8s.io/client-go/plugin/pkg/client/auth/exec"
-	_ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
-	_ "k8s.io/cloud-provider-gcp/pkg/clientauthplugin/gcp"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	_ "net/http/pprof"
 
 	"github.com/wencaiwulue/kubevpn/v2/cmd/kubevpn/cmds"

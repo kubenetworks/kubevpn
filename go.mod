@@ -59,7 +59,6 @@ require (
 	k8s.io/apimachinery v0.32.3
 	k8s.io/cli-runtime v0.32.3
 	k8s.io/client-go v0.32.3
-	k8s.io/cloud-provider-gcp v0.0.0-20250403100842-c5803e83ee74
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kubectl v0.32.3
 	k8s.io/utils v0.0.0-20250321185631-1f6e0b77f77e
