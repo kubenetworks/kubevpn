@@ -91,6 +91,17 @@ type spanContext struct {
 	span   *span  // reference to the span that hosts this context
 	errors int32  // number of spans with errors in this trace
 
+	// The 16-character hex string of the last seen Datadog Span ID
+	// this value will be added as the _dd.parent_id tag to spans
+	// created from this spanContext.
+	// This value is extracted from the `p` sub-key within the tracestate.
+	// The backend will use the _dd.parent_id tag to reparent spans in
+	// distributed traces if they were missing their parent span.
+	// Missing parent span could occur when a W3C-compliant tracer
+	// propagated this context, but didn't send any spans to Datadog.
+	reparentID string
+	isRemote   bool
+
 	// the below group should propagate cross-process
 
 	traceID traceID
@@ -100,6 +111,8 @@ type spanContext struct {
 	baggage    map[string]string
 	hasBaggage uint32 // atomic int for quick checking presence of baggage. 0 indicates no baggage, otherwise baggage exists.
 	origin     string // e.g. "synthetics"
+
+	spanLinks []ddtrace.SpanLink // links to related spans in separate|external|disconnected traces
 }
 
 // newSpanContext creates a new SpanContext to serve as context for the given
@@ -112,6 +125,7 @@ func newSpanContext(span *span, parent *spanContext) *spanContext {
 		spanID: span.SpanID,
 		span:   span,
 	}
+
 	context.traceID.SetLower(span.TraceID)
 	if parent != nil {
 		context.traceID.SetUpper(parent.traceID.Upper())
@@ -154,6 +168,8 @@ func (c *spanContext) SpanID() uint64 { return c.spanID }
 // TraceID implements ddtrace.SpanContext.
 func (c *spanContext) TraceID() uint64 { return c.traceID.Lower() }
 
+func (c *spanContext) TraceIDUpper() uint64 { return c.traceID.Upper() }
+
 // TraceID128 implements ddtrace.SpanContextW3C.
 func (c *spanContext) TraceID128() string {
 	if c == nil {
@@ -165,6 +181,13 @@ func (c *spanContext) TraceID128() string {
 // TraceID128Bytes implements ddtrace.SpanContextW3C.
 func (c *spanContext) TraceID128Bytes() [16]byte {
 	return c.traceID
+}
+
+// SpanLinks implements ddtrace.SpanContextWithLinks
+func (c *spanContext) SpanLinks() []ddtrace.SpanLink {
+	cp := make([]ddtrace.SpanLink, len(c.spanLinks))
+	copy(cp, c.spanLinks)
+	return cp
 }
 
 // ForeachBaggageItem implements ddtrace.SpanContext.
@@ -181,12 +204,13 @@ func (c *spanContext) ForeachBaggageItem(handler func(k, v string) bool) {
 	}
 }
 
+// sets the sampling priority and decision maker (based on `sampler`).
 func (c *spanContext) setSamplingPriority(p int, sampler samplernames.SamplerName) {
 	if c.trace == nil {
 		c.trace = newTrace()
 	}
 	if c.trace.setSamplingPriority(p, sampler) {
-		// the trace's sampling priority was updated: mark this as updated
+		// the trace's sampling priority or sampler was updated: mark this as updated
 		c.updated = true
 	}
 }
@@ -215,13 +239,6 @@ func (c *spanContext) baggageItem(key string) string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.baggage[key]
-}
-
-func (c *spanContext) meta(key string) (val string, ok bool) {
-	c.span.RLock()
-	defer c.span.RUnlock()
-	val, ok = c.span.Meta[key]
-	return val, ok
 }
 
 // finish marks this span as finished in the trace.
@@ -293,7 +310,8 @@ func (t *trace) samplingPriority() (p int, ok bool) {
 	return t.samplingPriorityLocked()
 }
 
-// setSamplingPriority sets the sampling priority and returns true if it was modified.
+// setSamplingPriority sets the sampling priority and the decision maker
+// and returns true if it was modified.
 func (t *trace) setSamplingPriority(p int, sampler samplernames.SamplerName) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -321,6 +339,10 @@ func (t *trace) setTagLocked(key, value string) {
 	t.tags[key] = value
 }
 
+func samplerToDM(sampler samplernames.SamplerName) string {
+	return "-" + strconv.Itoa(int(sampler))
+}
+
 func (t *trace) setSamplingPriorityLocked(p int, sampler samplernames.SamplerName) bool {
 	if t.locked {
 		return false
@@ -332,13 +354,23 @@ func (t *trace) setSamplingPriorityLocked(p int, sampler samplernames.SamplerNam
 		t.priority = new(float64)
 	}
 	*t.priority = float64(p)
-	_, ok := t.propagatingTags[keyDecisionMaker]
-	if p > 0 && !ok && sampler != samplernames.Unknown {
+	curDM, existed := t.propagatingTags[keyDecisionMaker]
+	if p > 0 && sampler != samplernames.Unknown {
 		// We have a positive priority and the sampling mechanism isn't set.
 		// Send nothing when sampler is `Unknown` for RFC compliance.
-		t.setPropagatingTagLocked(keyDecisionMaker, "-"+strconv.Itoa(int(sampler)))
+		// If a global sampling rate is set, it was always applied first. And this call can be
+		// triggered again by applying a rule sampler. The sampling priority will be the same, but
+		// the decision maker will be different. So we compare the decision makers as well.
+		// Note that once global rate sampling is deprecated, we no longer need to compare
+		// the DMs. Sampling priority is sufficient to distinguish a change in DM.
+		dm := samplerToDM(sampler)
+		updatedDM := !existed || dm != curDM
+		if updatedDM {
+			t.setPropagatingTagLocked(keyDecisionMaker, dm)
+			return true
+		}
 	}
-	if p <= 0 && ok {
+	if p <= 0 && existed {
 		delete(t.propagatingTags, keyDecisionMaker)
 	}
 
@@ -577,4 +609,34 @@ func setPeerServiceFromSource(s *span) string {
 		}
 	}
 	return ""
+}
+
+const hexEncodingDigits = "0123456789abcdef"
+
+// spanIDHexEncoded returns the hex encoded string of the given span ID `u`
+// with the given padding.
+//
+// Code is borrowed from `fmt.fmtInteger` in the standard library.
+func spanIDHexEncoded(u uint64, padding int) string {
+	// The allocated intbuf with a capacity of 68 bytes
+	// is large enough for integer formatting.
+	var intbuf [68]byte
+	buf := intbuf[0:]
+	if padding > 68 {
+		buf = make([]byte, padding)
+	}
+	// Because printing is easier right-to-left: format u into buf, ending at buf[i].
+	i := len(buf)
+	for u >= 16 {
+		i--
+		buf[i] = hexEncodingDigits[u&0xF]
+		u >>= 4
+	}
+	i--
+	buf[i] = hexEncodingDigits[u]
+	for i > 0 && padding > len(buf)-i {
+		i--
+		buf[i] = '0'
+	}
+	return string(buf[i:])
 }

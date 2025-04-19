@@ -32,6 +32,8 @@ const (
 	EnvTraceRateLimit = "DD_APPSEC_TRACE_RATE_LIMIT"
 	// EnvRules is the env var used to provide a path to a local security rule file
 	EnvRules = "DD_APPSEC_RULES"
+	// EnvRASPEnabled is the env var used to enable/disable RASP functionalities for ASM
+	EnvRASPEnabled = "DD_APPSEC_RASP_ENABLED"
 )
 
 // Configuration constants and default values
@@ -39,9 +41,9 @@ const (
 	// DefaultAPISecSampleRate is the default rate at which API Security schemas are extracted from requests
 	DefaultAPISecSampleRate = .1
 	// DefaultObfuscatorKeyRegex is the default regexp used to obfuscate keys
-	DefaultObfuscatorKeyRegex = `(?i)(?:p(?:ass)?w(?:or)?d|pass(?:_?phrase)?|secret|(?:api_?|private_?|public_?)key)|token|consumer_?(?:id|key|secret)|sign(?:ed|ature)|bearer|authorization`
+	DefaultObfuscatorKeyRegex = `(?i)pass|pw(?:or)?d|secret|(?:api|private|public|access)[_-]?key|token|consumer[_-]?(?:id|key|secret)|sign(?:ed|ature)|bearer|authorization|jsessionid|phpsessid|asp\.net[_-]sessionid|sid|jwt`
 	// DefaultObfuscatorValueRegex is the default regexp used to obfuscate values
-	DefaultObfuscatorValueRegex = `(?i)(?:p(?:ass)?w(?:or)?d|pass(?:_?phrase)?|secret|(?:api_?|private_?|public_?|access_?|secret_?)key(?:_?id)?|token|consumer_?(?:id|key|secret)|sign(?:ed|ature)?|auth(?:entication|orization)?)(?:\s*=[^;]|"\s*:\s*"[^"]+")|bearer\s+[a-z0-9\._\-]+|token:[a-z0-9]{13}|gh[opsu]_[0-9a-zA-Z]{36}|ey[I-L][\w=-]+\.ey[I-L][\w=-]+(?:\.[\w.+\/=-]+)?|[\-]{5}BEGIN[a-z\s]+PRIVATE\sKEY[\-]{5}[^\-]+[\-]{5}END[a-z\s]+PRIVATE\sKEY|ssh-rsa\s*[a-z0-9\/\.+]{100,}`
+	DefaultObfuscatorValueRegex = `(?i)(?:p(?:ass)?w(?:or)?d|pass(?:[_-]?phrase)?|secret(?:[_-]?key)?|(?:(?:api|private|public|access)[_-]?)key(?:[_-]?id)?|(?:(?:auth|access|id|refresh)[_-]?)?token|consumer[_-]?(?:id|key|secret)|sign(?:ed|ature)?|auth(?:entication|orization)?|jsessionid|phpsessid|asp\.net(?:[_-]|-)sessionid|sid|jwt)(?:\s*=[^;]|"\s*:\s*"[^"]+")|bearer\s+[a-z0-9\._\-]+|token:[a-z0-9]{13}|gh[opsu]_[0-9a-zA-Z]{36}|ey[I-L][\w=-]+\.ey[I-L][\w=-]+(?:\.[\w.+\/=-]+)?|[\-]{5}BEGIN[a-z\s]+PRIVATE\sKEY[\-]{5}[^\-]+[\-]{5}END[a-z\s]+PRIVATE\sKEY|ssh-rsa\s*[a-z0-9\/\.+]{100,}`
 	// DefaultWAFTimeout is the default time limit past which a WAF run will timeout
 	DefaultWAFTimeout = time.Millisecond
 	// DefaultTraceRate is the default limit (trace/sec) past which ASM traces are sampled out
@@ -65,24 +67,10 @@ type ObfuscatorConfig struct {
 // NewAPISecConfig creates and returns a new API Security configuration by reading the env
 func NewAPISecConfig() APISecConfig {
 	return APISecConfig{
-		Enabled:    apiSecurityEnabled(),
+		Enabled:    boolEnv(EnvAPISecEnabled, true),
 		SampleRate: readAPISecuritySampleRate(),
 	}
 }
-
-func apiSecurityEnabled() bool {
-	enabled := true
-	str, set := os.LookupEnv(EnvAPISecEnabled)
-	if set {
-		var err error
-		enabled, err = strconv.ParseBool(str)
-		if err != nil {
-			logEnvVarParsingError(EnvAPISecEnabled, str, err, enabled)
-		}
-	}
-	return enabled
-}
-
 func readAPISecuritySampleRate() float64 {
 	value := os.Getenv(EnvAPISecSampleRate)
 	rate, err := strconv.ParseFloat(value, 64)
@@ -97,6 +85,12 @@ func readAPISecuritySampleRate() float64 {
 		rate = 1.
 	}
 	return rate
+}
+
+// RASPEnabled returns true if RASP functionalities are enabled through the env, or if DD_APPSEC_RASP_ENABLED
+// is not set
+func RASPEnabled() bool {
+	return boolEnv(EnvRASPEnabled, true)
 }
 
 // NewObfuscatorConfig creates and returns a new WAF obfuscator configuration by reading the env
@@ -193,4 +187,17 @@ func logEnvVarParsingError(name, value string, err error, defaultValue any) {
 
 func logUnexpectedEnvVarValue(name string, value any, reason string, defaultValue any) {
 	log.Debug("appsec: unexpected configuration value of %s=%v: %s. Using default value %v.", name, value, reason, defaultValue)
+}
+
+func boolEnv(key string, def bool) bool {
+	strVal, ok := os.LookupEnv(key)
+	if !ok {
+		return def
+	}
+	v, err := strconv.ParseBool(strVal)
+	if err != nil {
+		logEnvVarParsingError(key, strVal, err, def)
+		return def
+	}
+	return v
 }

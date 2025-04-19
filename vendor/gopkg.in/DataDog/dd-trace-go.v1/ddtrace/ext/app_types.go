@@ -51,6 +51,9 @@ const (
 	// also have a "redis.raw_command" tag.
 	SpanTypeRedis = "redis"
 
+	// SpanTypeRedis marks a span as a Valkey operation.
+	SpanTypeValkey = "valkey"
+
 	// SpanTypeMemcached marks a span as a memcached operation.
 	SpanTypeMemcached = "memcached"
 

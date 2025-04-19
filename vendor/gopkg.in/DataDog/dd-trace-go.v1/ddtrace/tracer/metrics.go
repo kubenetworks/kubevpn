@@ -85,7 +85,9 @@ func (t *tracer) reportRuntimeMetrics(interval time.Duration) {
 	}
 }
 
-func (t *tracer) reportHealthMetrics(interval time.Duration) {
+// reportHealthMetricsAtInterval reports noisy health metrics at the specified interval.
+// The periodic reporting ensures metrics are delivered without overwhelming the system or logs.
+func (t *tracer) reportHealthMetricsAtInterval(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {

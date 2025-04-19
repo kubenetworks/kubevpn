@@ -8,6 +8,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/log"
 
@@ -28,36 +29,21 @@ type (
 	}
 	// RulesFragment can represent a full ruleset or a fragment of it.
 	RulesFragment struct {
-		Version     string          `json:"version,omitempty"`
-		Metadata    interface{}     `json:"metadata,omitempty"`
-		Rules       []interface{}   `json:"rules,omitempty"`
-		Overrides   []interface{}   `json:"rules_override,omitempty"`
-		Exclusions  []interface{}   `json:"exclusions,omitempty"`
-		RulesData   []RuleDataEntry `json:"rules_data,omitempty"`
-		Actions     []ActionEntry   `json:"actions,omitempty"`
-		CustomRules []interface{}   `json:"custom_rules,omitempty"`
-		Processors  []interface{}   `json:"processors,omitempty"`
-		Scanners    []interface{}   `json:"scanners,omitempty"`
+		Version       string      `json:"version,omitempty"`
+		Metadata      any         `json:"metadata,omitempty"`
+		Rules         []any       `json:"rules,omitempty"`
+		Overrides     []any       `json:"rules_override,omitempty"`
+		Exclusions    []any       `json:"exclusions,omitempty"`
+		ExclusionData []DataEntry `json:"exclusion_data,omitempty"`
+		RulesData     []DataEntry `json:"rules_data,omitempty"`
+		Actions       []any       `json:"actions,omitempty"`
+		CustomRules   []any       `json:"custom_rules,omitempty"`
+		Processors    []any       `json:"processors,omitempty"`
+		Scanners      []any       `json:"scanners,omitempty"`
 	}
 
-	// RuleDataEntry represents an entry in the "rules_data" top level field of a rules file
-	RuleDataEntry rc.ASMDataRuleData
-	// RulesData is a slice of RulesDataEntry
-	RulesData struct {
-		RulesData []RuleDataEntry `json:"rules_data"`
-	}
-
-	// ActionEntry represents an entry in the "actions" top level field of a rules file
-	ActionEntry struct {
-		ID         string `json:"id"`
-		Type       string `json:"type"`
-		Parameters struct {
-			StatusCode     int    `json:"status_code"`
-			GRPCStatusCode *int   `json:"grpc_status_code,omitempty"`
-			Type           string `json:"type,omitempty"`
-			Location       string `json:"location,omitempty"`
-		} `json:"parameters,omitempty"`
-	}
+	// DataEntry represents an entry in the "rules_data" top level field of a rules file
+	DataEntry rc.ASMDataRuleData
 )
 
 // DefaultRulesFragment returns a RulesFragment created using the default static recommended rules
@@ -72,27 +58,20 @@ func DefaultRulesFragment() RulesFragment {
 func (f *RulesFragment) clone() (clone RulesFragment) {
 	clone.Version = f.Version
 	clone.Metadata = f.Metadata
-	clone.Overrides = cloneSlice(f.Overrides)
-	clone.Exclusions = cloneSlice(f.Exclusions)
-	clone.RulesData = cloneSlice(f.RulesData)
-	clone.CustomRules = cloneSlice(f.CustomRules)
-	clone.Processors = cloneSlice(f.Processors)
-	clone.Scanners = cloneSlice(f.Scanners)
-	// TODO (Francois Mazeau): copy more fields once we handle them
+	clone.Overrides = slices.Clone(f.Overrides)
+	clone.Exclusions = slices.Clone(f.Exclusions)
+	clone.ExclusionData = slices.Clone(f.ExclusionData)
+	clone.RulesData = slices.Clone(f.RulesData)
+	clone.CustomRules = slices.Clone(f.CustomRules)
+	clone.Processors = slices.Clone(f.Processors)
+	clone.Scanners = slices.Clone(f.Scanners)
 	return
 }
 
-func cloneSlice[T any](slice []T) []T {
-	// TODO: use slices.Clone once go1.21 is the min supported go runtime.
-	clone := make([]T, len(slice), cap(slice))
-	copy(clone, slice)
-	return clone
-}
-
-// NewRulesManeger initializes and returns a new RulesManager using the provided rules.
+// NewRulesManager initializes and returns a new RulesManager using the provided rules.
 // If no rules are provided (nil), the default rules are used instead.
 // If the provided rules are invalid, an error is returned
-func NewRulesManeger(rules []byte) (*RulesManager, error) {
+func NewRulesManager(rules []byte) (*RulesManager, error) {
 	var f RulesFragment
 	if rules == nil {
 		f = DefaultRulesFragment()
@@ -147,6 +126,7 @@ func (r *RulesManager) Compile() {
 	for _, v := range r.Edits {
 		r.Latest.Overrides = append(r.Latest.Overrides, v.Overrides...)
 		r.Latest.Exclusions = append(r.Latest.Exclusions, v.Exclusions...)
+		r.Latest.ExclusionData = append(r.Latest.ExclusionData, v.ExclusionData...)
 		r.Latest.Actions = append(r.Latest.Actions, v.Actions...)
 		r.Latest.RulesData = append(r.Latest.RulesData, v.RulesData...)
 		r.Latest.CustomRules = append(r.Latest.CustomRules, v.CustomRules...)

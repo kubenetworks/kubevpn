@@ -121,6 +121,11 @@ The *kubernetes* plugin watches Endpoints via the `discovery.EndpointSlices` API
 This plugin reports readiness to the ready plugin. This will happen after it has synced to the
 Kubernetes API.
 
+## PTR Records
+
+This plugin creates PTR records for every Pod selected by a Service. If a given Pod is selected by more than
+one Service a separate PTR record will exist for each Service selecting it.
+
 ## Examples
 
 Handle all queries in the `cluster.local` zone. Connect to Kubernetes in-cluster. Also handle all
@@ -207,9 +212,11 @@ plugin is also enabled:
  * `kubernetes/service`: the service name in the query
  * `kubernetes/client-namespace`: the client pod's namespace (see requirements below)
  * `kubernetes/client-pod-name`: the client pod's name (see requirements below)
+ * `kubernetes/client-label/<label key>`: a label on the client pod (see requirements below)
 
-The `kubernetes/client-namespace` and `kubernetes/client-pod-name` metadata work by reconciling the
-client IP address in the DNS request packet to a known pod IP address. Therefore the following is required:
+The `kubernetes/client-namespace`, `kubernetes/client-pod-name`, and `kubernetes/client-label/<label key>`
+metadata work by reconciling the client IP address in the DNS request packet to a known pod IP address.
+Therefore the following is required:
  * `pods verified` mode must be enabled
  * the remote IP address in the DNS packet received by CoreDNS must be the IP address
    of the Pod that sent the request.

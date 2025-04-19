@@ -48,7 +48,7 @@ var (
 	// containerID is the containerID read at init from /proc/self/cgroup
 	containerID string
 
-	// entityID is the entityID to use for the container. It is the `cid-<containerID>` if the container id available,
+	// entityID is the entityID to use for the container. It is the `ci-<containerID>` if the container id available,
 	// otherwise the cgroup node controller's inode prefixed with `in-` or an empty string on incompatible OS.
 	// We use the memory controller on cgroupv1 and the root cgroup on cgroupv2.
 	entityID string
@@ -151,7 +151,7 @@ func readEntityID(mountPath, cgroupPath string, isHostCgroupNamespace bool) stri
 	// First try to emit the containerID if available. It will be retrieved if the container is
 	// running in the host cgroup namespace, independently of the cgroup version.
 	if containerID != "" {
-		return "cid-" + containerID
+		return "ci-" + containerID
 	}
 	// Rely on the inode if we're not running in the host cgroup namespace.
 	if isHostCgroupNamespace {
@@ -161,7 +161,7 @@ func readEntityID(mountPath, cgroupPath string, isHostCgroupNamespace bool) stri
 }
 
 // EntityID attempts to return the container ID or the cgroup node controller's inode if the container ID
-// is not available. The cid is prefixed with `cid-` and the inode with `in-`.
+// is not available. The cid is prefixed with `ci-` and the inode with `in-`.
 func EntityID() string {
 	return entityID
 }

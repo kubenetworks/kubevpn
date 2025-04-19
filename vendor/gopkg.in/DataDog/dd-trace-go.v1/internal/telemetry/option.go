@@ -63,6 +63,13 @@ func WithHTTPClient(httpClient *http.Client) Option {
 	}
 }
 
+// SyncFlushOnStop forces a sync flush on client stop
+func SyncFlushOnStop() Option {
+	return func(client *client) {
+		client.syncFlushOnStop = true
+	}
+}
+
 func defaultAPIKey() string {
 	return os.Getenv("DD_API_KEY")
 }

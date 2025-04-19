@@ -9,12 +9,13 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/DataDog/appsec-internal-go/limiter"
-	appsecLog "github.com/DataDog/appsec-internal-go/log"
-	waf "github.com/DataDog/go-libddwaf/v2"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/appsec/config"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/appsec/dyngo"
+	"gopkg.in/DataDog/dd-trace-go.v1/internal/appsec/listener"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/log"
+
+	appsecLog "github.com/DataDog/appsec-internal-go/log"
+	waf "github.com/DataDog/go-libddwaf/v3"
 )
 
 // Enabled returns true when AppSec is up and running. Meaning that the appsec build tag is enabled, the env var
@@ -25,38 +26,54 @@ func Enabled() bool {
 	return activeAppSec != nil && activeAppSec.started
 }
 
+// RASPEnabled returns true when DD_APPSEC_RASP_ENABLED=true or is unset. Granted that AppSec is enabled.
+func RASPEnabled() bool {
+	mu.RLock()
+	defer mu.RUnlock()
+	return activeAppSec != nil && activeAppSec.started && activeAppSec.cfg.RASP
+}
+
 // Start AppSec when enabled is enabled by both using the appsec build tag and
 // setting the environment variable DD_APPSEC_ENABLED to true.
 func Start(opts ...config.StartOption) {
 	telemetry := newAppsecTelemetry()
 	defer telemetry.emit()
 
+	startConfig := config.NewStartConfig(opts...)
+
 	// AppSec can start either:
-	// 1. Manually thanks to DD_APPSEC_ENABLED
+	// 1. Manually thanks to DD_APPSEC_ENABLED (or via [config.WithEnablementMode])
 	// 2. Remotely when DD_APPSEC_ENABLED is undefined
 	// Note: DD_APPSEC_ENABLED=false takes precedence over remote configuration
 	// and enforces to have AppSec disabled.
-	enabled, set, err := config.IsEnabled()
+	mode, modeOrigin, err := startConfig.EnablementMode()
 	if err != nil {
 		logUnexpectedStartError(err)
 		return
 	}
-	if set {
-		telemetry.addEnvConfig("DD_APPSEC_ENABLED", enabled)
+
+	switch modeOrigin {
+	case config.OriginEnvVar:
+		telemetry.addEnvConfig("DD_APPSEC_ENABLED", mode == config.ForcedOn)
+		if mode == config.ForcedOff {
+			log.Debug("appsec: disabled by the configuration: set the environment variable DD_APPSEC_ENABLED to true to enable it")
+			return
+		}
+	case config.OriginExplicitOption:
+		telemetry.addCodeConfig("WithEnablementMode", mode)
 	}
 
-	// Check if AppSec is explicitly disabled
-	if set && !enabled {
-		log.Debug("appsec: disabled by the configuration: set the environment variable DD_APPSEC_ENABLED to true to enable it")
+	// In any case, if we're forced off, we no longer have any business here...
+	if mode == config.ForcedOff {
 		return
 	}
 
 	// Check whether libddwaf - required for Threats Detection - is ok or not
 	if ok, err := waf.Health(); !ok {
 		// We need to avoid logging an error to APM tracing users who don't necessarily intend to enable appsec
-		if set {
+		if mode == config.ForcedOn {
 			// DD_APPSEC_ENABLED is explicitly set so we log an error
-			log.Error("appsec: threats detection cannot be enabled for the following reasons: %vappsec: no security activities will be collected. Please contact support at https://docs.datadoghq.com/help/ for help.", err)
+			log.Error("appsec: threats detection cannot be enabled for the following reasons: %v\nappsec: no security activities will be collected. Please contact support at https://docs.datadoghq.com/help/ for help.", err)
 		} else {
 			// DD_APPSEC_ENABLED is not set so we cannot know what the intent is here, we must log a
 			// debug message instead to avoid showing an error to APM-tracing-only users.
@@ -66,13 +83,10 @@ func Start(opts ...config.StartOption) {
 	}
 
 	// From this point we know that AppSec is either enabled or can be enabled through remote config
-	cfg, err := config.NewConfig()
+	cfg, err := startConfig.NewConfig()
 	if err != nil {
 		logUnexpectedStartError(err)
 		return
-	}
-	for _, opt := range opts {
-		opt(cfg)
 	}
 	appsec := newAppSec(cfg)
 
@@ -82,7 +96,7 @@ func Start(opts ...config.StartOption) {
 		log.Error("appsec: Remote config: disabled due to an instanciation error: %v", err)
 	}
 
-	if !set {
+	if mode == config.RCStandby {
 		// AppSec is not enforced by the env var and can be enabled through remote config
 		log.Debug("appsec: %s is not set, appsec won't start until activated through remote configuration", config.EnvEnabled)
 		if err := appsec.enableRemoteActivation(); err != nil {
@@ -126,10 +140,10 @@ func setActiveAppSec(a *appsec) {
 }
 
 type appsec struct {
-	cfg       *config.Config
-	limiter   *limiter.TokenTicker
-	wafHandle *wafHandle
-	started   bool
+	cfg        *config.Config
+	features   []listener.Feature
+	featuresMu sync.Mutex
+	started    bool
 }
 
 func newAppSec(cfg *config.Config) *appsec {
@@ -152,15 +166,13 @@ func (a *appsec) start(telemetry *appsecTelemetry) error {
 		log.Error("appsec: non-critical error while loading libddwaf: %v", err)
 	}
 
-	a.limiter = limiter.NewTokenTicker(a.cfg.TraceRateLimit, a.cfg.TraceRateLimit)
-	a.limiter.Start()
-
-	// Register the WAF operation event listener
-	if err := a.swapWAF(a.cfg.RulesManager.Latest); err != nil {
+	// Register dyngo listeners
+	if err := a.SwapRootOperation(); err != nil {
 		return err
 	}
 
 	a.enableRCBlocking()
+	a.enableRASP()
 
 	a.started = true
 	log.Info("appsec: up and running")
@@ -184,15 +196,23 @@ func (a *appsec) stop() {
 	// Disable RC blocking first so that the following is guaranteed not to be concurrent anymore.
 	a.disableRCBlocking()
 
+	a.featuresMu.Lock()
+	defer a.featuresMu.Unlock()
+
 	// Disable the currently applied instrumentation
 	dyngo.SwapRootOperation(nil)
-	if a.wafHandle != nil {
-		a.wafHandle.Close()
-		a.wafHandle = nil
-	}
+
+	// Reset rules edits received from the remote configuration
+	// We skip the error because we can't do anything about and it was already logged in config.NewRulesManager
+	a.cfg.RulesManager, _ = config.NewRulesManager(nil)
+
 	// TODO: block until no more requests are using dyngo operations
 
-	a.limiter.Stop()
+	for _, feature := range a.features {
+		feature.Stop()
+	}
+
+	a.features = nil
 }
 
 func init() {
@@ -202,7 +222,7 @@ func init() {
 		Warn:  log.Warn,
 		Errorf: func(s string, a ...any) error {
 			err := fmt.Errorf(s, a...)
-			log.Error(err.Error())
+			log.Error("%v", err)
 			return err
 		},
 	})

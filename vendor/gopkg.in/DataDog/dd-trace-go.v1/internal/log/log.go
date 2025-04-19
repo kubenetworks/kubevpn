@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"gopkg.in/DataDog/dd-trace-go.v1/internal/appsec/dyngo"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/version"
 )
 
@@ -38,6 +39,40 @@ type Logger interface {
 	Log(msg string)
 }
 
+// File name for writing tracer logs, if DD_TRACE_LOG_DIRECTORY has been configured
+const LoggerFile = "ddtrace.log"
+
+// ManagedFile functions like a *os.File but is safe for concurrent use
+type ManagedFile struct {
+	mu     sync.RWMutex
+	file   *os.File
+	closed bool
+}
+
+// Close closes the ManagedFile's *os.File in a concurrent-safe manner, ensuring the file is closed only once
+func (m *ManagedFile) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.file == nil || m.closed {
+		return nil
+	}
+	err := m.file.Close()
+	if err != nil {
+		return err
+	}
+	m.closed = true
+	return nil
+}
+
+func (m *ManagedFile) Name() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.file == nil {
+		return ""
+	}
+	return m.file.Name()
+}
+
 var (
 	mu     sync.RWMutex // guards below fields
 	level               = LevelWarn
@@ -57,11 +92,37 @@ func UseLogger(l Logger) (undo func()) {
 	}
 }
 
+// OpenFileAtPath creates a new file at the specified dirPath and configures the logger to write to this file. The dirPath must already exist on the underlying os.
+// It returns the file that was created, or nil and an error if the file creation was unsuccessful.
+// The caller of OpenFileAtPath is responsible for calling Close() on the ManagedFile
+func OpenFileAtPath(dirPath string) (*ManagedFile, error) {
+	path, err := os.Stat(dirPath)
+	if err != nil || !path.IsDir() {
+		return nil, fmt.Errorf("file path %v invalid or does not exist on the underlying os; using default logger to stderr", dirPath)
+	}
+	filepath := dirPath + "/" + LoggerFile
+	f, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		return nil, fmt.Errorf("using default logger to stderr due to error creating or opening log file: %v", err)
+	}
+	UseLogger(&defaultLogger{l: log.New(f, "", log.LstdFlags)})
+	return &ManagedFile{
+		file: f,
+	}, nil
+}
+
 // SetLevel sets the given lvl for logging.
 func SetLevel(lvl Level) {
 	mu.Lock()
 	defer mu.Unlock()
 	level = lvl
+}
+
+// GetLevel returns the currrent log level.
+func GetLevel() Level {
+	mu.Lock()
+	defer mu.Unlock()
+	return level
 }
 
 // DebugEnabled returns true if debug log messages are enabled. This can be used in extremely
@@ -102,6 +163,11 @@ func init() {
 	if v := os.Getenv("DD_LOGGING_RATE"); v != "" {
 		setLoggingRate(v)
 	}
+
+	// This is required because we really want to be able to log errors from dyngo
+	// but the log package depend on too much packages that we want to instrument.
+	// So we need to do this to avoid dependency cycles.
+	dyngo.LogError = Error
 }
 
 func setLoggingRate(v string) {
@@ -173,15 +239,15 @@ func Flush() {
 
 func flushLocked() {
 	for _, report := range erragg {
-		msg := fmt.Sprintf("%v", report.err)
+		var extra string
 		if report.count > defaultErrorLimit {
-			msg += fmt.Sprintf(", %d+ additional messages skipped (first occurrence: %s)", defaultErrorLimit, report.first.Format(time.RFC822))
+			extra = fmt.Sprintf(", %d+ additional messages skipped (first occurrence: %s)", defaultErrorLimit, report.first.Format(time.RFC822))
 		} else if report.count > 1 {
-			msg += fmt.Sprintf(", %d additional messages skipped (first occurrence: %s)", report.count-1, report.first.Format(time.RFC822))
+			extra = fmt.Sprintf(", %d additional messages skipped (first occurrence: %s)", report.count-1, report.first.Format(time.RFC822))
 		} else {
-			msg += fmt.Sprintf(" (occurred: %s)", report.first.Format(time.RFC822))
+			extra = fmt.Sprintf(" (occurred: %s)", report.first.Format(time.RFC822))
 		}
-		printMsg("ERROR", msg)
+		printMsg("ERROR", "%v%s", report.err, extra)
 	}
 	for k := range erragg {
 		// compiler-optimized map-clearing post go1.11 (golang/go#20138)

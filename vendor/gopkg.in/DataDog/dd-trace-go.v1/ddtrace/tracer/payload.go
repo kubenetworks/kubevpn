@@ -81,7 +81,7 @@ func (p *payload) push(t spanList) error {
 	return nil
 }
 
-// itemCount returns the number of items available in the srteam.
+// itemCount returns the number of items available in the stream.
 func (p *payload) itemCount() int {
 	return int(atomic.LoadUint32(&p.count))
 }
