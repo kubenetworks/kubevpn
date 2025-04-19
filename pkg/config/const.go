@@ -43,6 +43,14 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+	err = os.MkdirAll(GetSyncthingPath(), 0755)
+	if err != nil {
+		panic(err)
+	}
+	err = os.Chmod(GetSyncthingPath(), 0755)
+	if err != nil {
+		panic(err)
+	}
 
 	path := filepath.Join(HomePath, ConfigFile)
 	_, err = os.Stat(path)
