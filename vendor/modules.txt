@@ -1,3 +1,4 @@
+## workspace
 # cel.dev/expr v0.19.1
 ## explicit; go 1.21.1
 cel.dev/expr
@@ -1492,7 +1493,6 @@ github.com/syncthing/syncthing/internal/gen/dbproto
 github.com/syncthing/syncthing/internal/gen/discoproto
 github.com/syncthing/syncthing/internal/protoutil
 github.com/syncthing/syncthing/lib/api
-github.com/syncthing/syncthing/lib/api/auto
 github.com/syncthing/syncthing/lib/assets
 github.com/syncthing/syncthing/lib/beacon
 github.com/syncthing/syncthing/lib/build

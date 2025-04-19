@@ -43,6 +43,14 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+	err = os.MkdirAll(GetSyncthingPath(), 0755)
+	if err != nil {
+		panic(err)
+	}
+	err = os.Chmod(GetSyncthingPath(), 0755)
+	if err != nil {
+		panic(err)
+	}
 
 	path := filepath.Join(HomePath, ConfigFile)
 	_, err = os.Stat(path)
@@ -72,10 +80,6 @@ func GetPidPath(isSudo bool) string {
 
 func GetSyncthingPath() string {
 	return filepath.Join(DaemonPath, SyncthingDir)
-}
-
-func GetSyncthingGUIPath() string {
-	return filepath.Join(DaemonPath, SyncthingDir, SyncthingGUIDir)
 }
 
 func GetConfigFilePath() string {

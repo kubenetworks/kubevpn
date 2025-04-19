@@ -9,8 +9,6 @@ import (
 const (
 	SyncthingDir = "syncthing"
 
-	SyncthingGUIDir = "gui"
-
 	DefaultRemoteDir = "/kubevpn-data"
 
 	// EnvDisableSyncthingLog disable syncthing log, because it can not set output writer, only write os.Stdout or io.Discard
