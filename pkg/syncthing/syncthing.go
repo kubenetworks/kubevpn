@@ -10,7 +10,6 @@ import (
 	"github.com/syncthing/syncthing/lib/config"
 	"github.com/syncthing/syncthing/lib/db/backend"
 	"github.com/syncthing/syncthing/lib/events"
-	"github.com/syncthing/syncthing/lib/locations"
 	"github.com/syncthing/syncthing/lib/logger"
 	"github.com/syncthing/syncthing/lib/netutil"
 	"github.com/syncthing/syncthing/lib/svcutil"
@@ -34,14 +33,7 @@ var (
 )
 
 func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr string) error {
-	if err := MakeSureGui(); err != nil {
-		return err
-	}
 	err := cmdutil.SetConfigDataLocationsFromFlags(pkgconfig.GetSyncthingPath(), "", "")
-	if err != nil {
-		return err
-	}
-	err = locations.Set(locations.GUIAssets, pkgconfig.GetSyncthingGUIPath())
 	if err != nil {
 		return err
 	}
@@ -134,15 +126,7 @@ func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr str
 }
 
 func StartServer(ctx context.Context, detach bool, remoteDir string) error {
-	if err := MakeSureGui(); err != nil {
-		return err
-	}
-
 	err := cmdutil.SetConfigDataLocationsFromFlags(pkgconfig.GetSyncthingPath(), "", "")
-	if err != nil {
-		return err
-	}
-	err = locations.Set(locations.GUIAssets, pkgconfig.GetSyncthingGUIPath())
 	if err != nil {
 		return err
 	}

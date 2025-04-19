@@ -74,10 +74,6 @@ func GetSyncthingPath() string {
 	return filepath.Join(DaemonPath, SyncthingDir)
 }
 
-func GetSyncthingGUIPath() string {
-	return filepath.Join(DaemonPath, SyncthingDir, SyncthingGUIDir)
-}
-
 func GetConfigFilePath() string {
 	return filepath.Join(HomePath, ConfigFile)
 }
