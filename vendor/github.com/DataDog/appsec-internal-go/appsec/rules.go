@@ -18,15 +18,8 @@ func DefaultRuleset() ([]byte, error) {
 // DefaultRulesetMap returns the unmarshaled default recommended security rules for AppSec
 func DefaultRulesetMap() (map[string]any, error) {
 	var rules map[string]any
-	var processors map[string]any
 	if err := json.Unmarshal([]byte(StaticRecommendedRules), &rules); err != nil {
 		return nil, err
-	}
-	if err := json.Unmarshal([]byte(StaticProcessors), &processors); err != nil {
-		return nil, err
-	}
-	for k, v := range processors {
-		rules[k] = v
 	}
 
 	return rules, nil

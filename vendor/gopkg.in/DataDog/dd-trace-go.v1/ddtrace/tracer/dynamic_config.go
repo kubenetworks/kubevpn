@@ -19,7 +19,7 @@ type dynamicConfig[T any] struct {
 	current   T                 // holds the current configuration value
 	startup   T                 // holds the startup configuration value
 	cfgName   string            // holds the name of the configuration, has to be compatible with telemetry.Configuration.Name
-	cfgOrigin string            // holds the origin of the current configuration value (currently only supports remote_config, empty otherwise)
+	cfgOrigin telemetry.Origin  // holds the origin of the current configuration value (currently only supports remote_config, empty otherwise)
 	apply     func(T) bool      // executes any config-specific operations to propagate the update properly, returns whether the update was applied
 	equal     func(x, y T) bool // compares two configuration values, this is used to avoid unnecessary config and telemetry updates
 }
@@ -42,7 +42,7 @@ func (dc *dynamicConfig[T]) get() T {
 }
 
 // update applies a new configuration value
-func (dc *dynamicConfig[T]) update(val T, origin string) bool {
+func (dc *dynamicConfig[T]) update(val T, origin telemetry.Origin) bool {
 	dc.Lock()
 	defer dc.Unlock()
 	if dc.equal(dc.current, val) {
@@ -61,7 +61,8 @@ func (dc *dynamicConfig[T]) reset() bool {
 		return false
 	}
 	dc.current = dc.startup
-	dc.cfgOrigin = ""
+	// TODO: set the origin to the startup value's origin
+	dc.cfgOrigin = telemetry.OriginDefault
 	return dc.apply(dc.startup)
 }
 
@@ -69,7 +70,7 @@ func (dc *dynamicConfig[T]) reset() bool {
 // Returns whether the configuration value has been updated or not
 func (dc *dynamicConfig[T]) handleRC(val *T) bool {
 	if val != nil {
-		return dc.update(*val, "remote_config")
+		return dc.update(*val, telemetry.OriginRemoteConfig)
 	}
 	return dc.reset()
 }

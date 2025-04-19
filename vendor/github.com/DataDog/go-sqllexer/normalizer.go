@@ -141,12 +141,14 @@ func (n *Normalizer) Normalize(input string, lexerOpts ...lexerOption) (normaliz
 	var lastToken Token // The last token that is not whitespace or comment
 	var groupablePlaceholder groupablePlaceholder
 
+	ctes := make(map[string]bool) // Holds the CTEs that are currently being processed
+
 	for {
 		token := lexer.Scan()
 		if token.Type == EOF {
 			break
 		}
-		n.collectMetadata(&token, &lastToken, statementMetadata)
+		n.collectMetadata(&token, &lastToken, statementMetadata, ctes)
 		n.normalizeSQL(&token, &lastToken, &normalizedSQLBuilder, &groupablePlaceholder, lexerOpts...)
 	}
 
@@ -158,7 +160,7 @@ func (n *Normalizer) Normalize(input string, lexerOpts ...lexerOption) (normaliz
 	return n.trimNormalizedSQL(normalizedSQL), statementMetadata, nil
 }
 
-func (n *Normalizer) collectMetadata(token *Token, lastToken *Token, statementMetadata *StatementMetadata) {
+func (n *Normalizer) collectMetadata(token *Token, lastToken *Token, statementMetadata *StatementMetadata, ctes map[string]bool) {
 	if n.config.CollectComments && (token.Type == COMMENT || token.Type == MULTILINE_COMMENT) {
 		// Collect comments
 		statementMetadata.Comments = append(statementMetadata.Comments, token.Value)
@@ -175,9 +177,14 @@ func (n *Normalizer) collectMetadata(token *Token, lastToken *Token, statementMe
 		if n.config.CollectCommands && isCommand(strings.ToUpper(tokenVal)) {
 			// Collect commands
 			statementMetadata.Commands = append(statementMetadata.Commands, strings.ToUpper(tokenVal))
+		} else if strings.ToUpper(lastToken.Value) == "WITH" && token.Type == IDENT {
+			// Collect CTEs so we can skip them later in table collection
+			ctes[tokenVal] = true
 		} else if n.config.CollectTables && isTableIndicator(strings.ToUpper(lastToken.Value)) && !isSQLKeyword(token) {
-			// Collect table names
-			statementMetadata.Tables = append(statementMetadata.Tables, tokenVal)
+			// Collect table names the token is not a CTE
+			if _, ok := ctes[tokenVal]; !ok {
+				statementMetadata.Tables = append(statementMetadata.Tables, tokenVal)
+			}
 		} else if n.config.CollectProcedure && isProcedure(lastToken) {
 			// Collect procedure names
 			statementMetadata.Procedures = append(statementMetadata.Procedures, tokenVal)

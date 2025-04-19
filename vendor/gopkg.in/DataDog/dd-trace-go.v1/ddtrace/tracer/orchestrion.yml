@@ -1,0 +1,123 @@
+# Unless explicitly stated otherwise all files in this repository are licensed
+# under the Apache License Version 2.0.
+# This product includes software developed at Datadog (https://www.datadoghq.com/).
+# Copyright 2023-present Datadog, Inc.
+---
+# yaml-language-server: $schema=https://datadoghq.dev/orchestrion/schema.json
+meta:
+  name: gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer
+  description: |-
+    Automatically starts the gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer
+    at the start of the application, and closes it at exit of the main function.
+
+    Adding the `//dd:span` directive on functions creates custom spans
+    representing every call to that function. The default operation (span) name
+    is the name of the function, and this can be overridden using a "span.name"
+    argument to the directive:
+
+    ```go
+    //dd:span span.name:custom-operation-name other:tag
+    func myFunction() {
+      // The default operation name would have been "myFunction"
+    }
+    ```
+
+    Function literal expressions don't have a function name, and their default operation name is the value of the very
+    first directive argument (if there is one). If there are no directive arguments, the operation name will remain
+    blank.
+
+    ```go
+    //dd:span other:tag span.name:custom-operation-name
+    myOp := func() {
+      // The default operation name would have been "tag"
+    }
+    ```
+
+extends:
+  - ../../internal/orchestrion/gls.orchestrion.yml
+
+aspects:
+  # Automatically manage the tracer lifecycle
+  - id: func main()
+    join-point:
+      all-of:
+        - package-name: main
+        - test-main: false
+        - function-body:
+            function:
+              - name: main
+              - signature: {}
+    advice:
+      - inject-declarations:
+          imports:
+            tracer: gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer
+          # Note: it is valid to have multiple func init() in a single compile unit (e.g, `.go` file), in which case
+          # they get executed in declaration order. This means it's okay for us to add a new init function if there is
+          # already one in the file, but as it currently is appended AFTER all other declarations in the file, it means
+          # that it will be executed last (tracing contents of previous init functions will not be possible).
+          template: |-
+            func init() {
+              tracer.Start(tracer.WithOrchestrion(map[string]string{"version": {{printf "%q" Version}}}))
+            }
+      # We need to stop the tracer at the end of `main` to ensure all spans are properly flushed.
+      - prepend-statements:
+          imports:
+            tracer: gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer
+          template: |-
+            defer tracer.Stop()
+
+  # Create spans for each function annotated with the //dd:span directive.
+  - id: '//dd:span'
+    join-point:
+      function-body:
+        directive: 'dd:span'
+    advice:
+      - prepend-statements:
+          imports:
+            context: context
+            tracer: gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer
+          template: |-
+            {{- $ctx := .Function.ArgumentOfType "context.Context" -}}
+            {{- $req := .Function.ArgumentOfType "*net/http.Request" -}}
+            {{- if (eq $ctx "") -}}
+              {{- $ctx = "ctx" -}}
+              ctx := {{- with $req -}}
+                {{ $req }}.Context()
+              {{- else -}}
+                context.TODO()
+              {{- end }}
+            {{ end -}}
+
+            {{ $functionName := .Function.Name -}}
+            {{- $opName := $functionName -}}
+            {{- range .DirectiveArgs "dd:span" -}}
+              {{- if eq $opName "" -}}
+                {{ $opName = .Value }}
+              {{- end -}}
+              {{- if eq .Key "span.name" -}}
+                {{- $opName = .Value -}}
+                {{- break -}}
+              {{- end -}}
+            {{- end -}}
+
+            var span tracer.Span
+            span, {{ $ctx }} = tracer.StartSpanFromContext({{ $ctx }}, {{ printf "%q" $opName }},
+              {{- with $functionName }}
+                tracer.Tag("function-name", {{ printf "%q" $functionName }}),
+              {{ end -}}
+              {{- range .DirectiveArgs "dd:span" }}
+                {{ if eq .Key "span.name" -}}{{- continue -}}{{- end -}}
+                tracer.Tag({{ printf "%q" .Key }}, {{ printf "%q" .Value }}),
+              {{- end }}
+            )
+            {{- with $req }}
+              {{ $req }} = {{ $req }}.WithContext({{ $ctx }})
+            {{- end }}
+
+            {{ with .Function.ResultOfType "error" -}}
+              defer func(){
+                span.Finish(tracer.WithError({{ . }}))
+              }()
+            {{ else -}}
+              defer span.Finish()
+            {{- end -}}

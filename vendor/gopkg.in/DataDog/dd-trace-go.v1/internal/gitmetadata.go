@@ -8,7 +8,10 @@ package internal
 import (
 	"net/url"
 	"os"
+	"runtime/debug"
 	"sync"
+
+	"gopkg.in/DataDog/dd-trace-go.v1/internal/log"
 )
 
 const (
@@ -37,8 +40,7 @@ const (
 )
 
 var (
-	lock = sync.Mutex{}
-
+	initOnce        sync.Once
 	gitMetadataTags map[string]string
 )
 
@@ -73,32 +75,51 @@ func getTagsFromDDTags() map[string]string {
 	}
 }
 
-// GetGitMetadataTags returns git metadata tags
-func GetGitMetadataTags() map[string]string {
-	lock.Lock()
-	defer lock.Unlock()
-
-	if gitMetadataTags != nil {
-		return gitMetadataTags
+// getTagsFromBinary extracts git metadata from binary metadata.
+func getTagsFromBinary(readBuildInfo func() (*debug.BuildInfo, bool)) map[string]string {
+	res := make(map[string]string)
+	info, ok := readBuildInfo()
+	if !ok {
+		log.Debug("ReadBuildInfo failed, skip source code metadata extracting")
+		return res
 	}
+	goPath := info.Path
+	var vcs, commitSha string
+	for _, s := range info.Settings {
+		if s.Key == "vcs" {
+			vcs = s.Value
+		} else if s.Key == "vcs.revision" {
+			commitSha = s.Value
+		}
+	}
+	if vcs != "git" {
+		log.Debug("Unknown VCS: '%s', skip source code metadata extracting", vcs)
+		return res
+	}
+	res[TagCommitSha] = commitSha
+	res[TagGoPath] = goPath
+	return res
+}
 
+// GetGitMetadataTags returns git metadata tags. Returned map is read-only
+func GetGitMetadataTags() map[string]string {
+	initOnce.Do(initGitMetadataTags)
+	return gitMetadataTags
+}
+
+func initGitMetadataTags() {
 	gitMetadataTags = make(map[string]string)
 
 	if BoolEnv(EnvGitMetadataEnabledFlag, true) {
 		updateAllTags(gitMetadataTags, getTagsFromEnv())
 		updateAllTags(gitMetadataTags, getTagsFromDDTags())
-		updateAllTags(gitMetadataTags, getTagsFromBinary())
+		updateAllTags(gitMetadataTags, getTagsFromBinary(debug.ReadBuildInfo))
 	}
-
-	return gitMetadataTags
 }
 
-// ResetGitMetadataTags reset cashed metadata tags
-func ResetGitMetadataTags() {
-	lock.Lock()
-	defer lock.Unlock()
-
-	gitMetadataTags = nil
+// RefreshGitMetadataTags reset cached metadata tags. NOT thread-safe, use for testing only
+func RefreshGitMetadataTags() {
+	initGitMetadataTags()
 }
 
 // CleanGitMetadataTags cleans up tags from git metadata

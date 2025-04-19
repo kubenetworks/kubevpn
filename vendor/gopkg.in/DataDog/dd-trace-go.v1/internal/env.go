@@ -6,6 +6,7 @@
 package internal
 
 import (
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -59,10 +60,26 @@ func DurationEnv(key string, def time.Duration) time.Duration {
 	return v
 }
 
-// ForEachStringTag runs fn on every key:val pair encountered in str.
-// str may contain multiple key:val pairs separated by either space
-// or comma (but not a mixture of both).
-func ForEachStringTag(str string, fn func(key string, val string)) {
+// IpEnv returns the valid IP value of an environment variable, or def otherwise.
+func IpEnv(key string, def net.IP) net.IP {
+	vv, ok := os.LookupEnv(key)
+	if !ok {
+		return def
+	}
+
+	ip := net.ParseIP(vv)
+	if ip == nil {
+		log.Warn("Non-IP value for env var %s, defaulting to %s", key, def.String())
+		return def
+	}
+
+	return ip
+}
+
+// ForEachStringTag runs fn on every key val pair encountered in str.
+// str may contain multiple key val pairs separated by either space
+// or comma (but not a mixture of both), and each key val pair is separated by a delimiter.
+func ForEachStringTag(str string, delimiter string, fn func(key string, val string)) {
 	sep := " "
 	if strings.Index(str, ",") > -1 {
 		// falling back to comma as separator
@@ -73,7 +90,7 @@ func ForEachStringTag(str string, fn func(key string, val string)) {
 		if tag == "" {
 			continue
 		}
-		kv := strings.SplitN(tag, ":", 2)
+		kv := strings.SplitN(tag, delimiter, 2)
 		key := strings.TrimSpace(kv[0])
 		if key == "" {
 			continue
@@ -89,7 +106,7 @@ func ForEachStringTag(str string, fn func(key string, val string)) {
 // ParseTagString returns tags parsed from string as map
 func ParseTagString(str string) map[string]string {
 	res := make(map[string]string)
-	ForEachStringTag(str, func(key, val string) { res[key] = val })
+	ForEachStringTag(str, DDTagsDelimiter, func(key, val string) { res[key] = val })
 	return res
 }
 
@@ -106,4 +123,18 @@ func FloatEnv(key string, def float64) float64 {
 		return def
 	}
 	return v
+}
+
+// BoolVal returns the parsed boolean value of string val, or def if not parseable
+func BoolVal(val string, def bool) bool {
+	v, err := strconv.ParseBool(val)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
+// ExternalEnvironment returns the value of the DD_EXTERNAL_ENV environment variable.
+func ExternalEnvironment() string {
+	return os.Getenv("DD_EXTERNAL_ENV")
 }

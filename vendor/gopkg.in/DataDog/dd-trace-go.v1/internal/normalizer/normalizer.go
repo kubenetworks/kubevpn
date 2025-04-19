@@ -36,14 +36,10 @@ func HeaderTag(headerAsTag string) (header string, tag string) {
 }
 
 // HeaderTagSlice accepts a slice of strings that contain headers and optional mapped tag key.
-// Headers beginning with "x-datadog-" are ignored.
 // See HeaderTag for details on formatting.
 func HeaderTagSlice(headers []string) map[string]string {
 	headerTagsMap := make(map[string]string)
 	for _, h := range headers {
-		if strings.HasPrefix(h, "x-datadog-") {
-			continue
-		}
 		header, tag := HeaderTag(h)
 		// If `header` or `tag` is just the empty string, we don't want to set it.
 		if len(header) == 0 || len(tag) == 0 {

@@ -20,6 +20,8 @@ import (
 func toFloat64(value interface{}) (f float64, ok bool) {
 	const max = (int64(1) << 53) - 1
 	const min = -max
+	// If any other type is added here, remember to add it to the type switch in
+	// the `span.SetTag` function to handle pointers to these supported types.
 	switch i := value.(type) {
 	case byte:
 		return float64(i), true
@@ -121,4 +123,55 @@ func parsePropagatableTraceTags(s string) (map[string]string, error) {
 	}
 	tags[key] = s[start:]
 	return tags, nil
+}
+
+func dereference(value any) any {
+	// Falling into one of the cases will dereference the pointer and return the
+	// value of the pointer. It adds one allocation due to casting.
+	switch value.(type) {
+	case *bool:
+		return dereferenceGeneric(value.(*bool))
+	case *string:
+		return dereferenceGeneric(value.(*string))
+	// Supported type by toFloat64
+	case *byte:
+		return dereferenceGeneric(value.(*byte))
+	case *float32:
+		return dereferenceGeneric(value.(*float32))
+	case *float64:
+		return dereferenceGeneric(value.(*float64))
+	case *int:
+		return dereferenceGeneric(value.(*int))
+	case *int8:
+		return dereferenceGeneric(value.(*int8))
+	case *int16:
+		return dereferenceGeneric(value.(*int16))
+	case *int32:
+		return dereferenceGeneric(value.(*int32))
+	case *int64:
+		return dereferenceGeneric(value.(*int64))
+	case *uint:
+		return dereferenceGeneric(value.(*uint))
+	case *uint16:
+		return dereferenceGeneric(value.(*uint16))
+	case *uint32:
+		return dereferenceGeneric(value.(*uint32))
+	case *uint64:
+		return dereferenceGeneric(value.(*uint64))
+	case *samplernames.SamplerName:
+		v := value.(*samplernames.SamplerName)
+		if v == nil {
+			return samplernames.Unknown
+		}
+		return *v
+	}
+	return value
+}
+
+func dereferenceGeneric[T any](value *T) T {
+	if value == nil {
+		var v T
+		return v
+	}
+	return *value
 }

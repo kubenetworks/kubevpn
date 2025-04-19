@@ -5,7 +5,11 @@
 
 package telemetry
 
-import "net/http"
+import (
+	"bytes"
+	"fmt"
+	"net/http"
+)
 
 // Request captures all necessary information for a telemetry event submission
 type Request struct {
@@ -72,6 +76,8 @@ const (
 	NamespaceProfilers Namespace = "profilers"
 	// NamespaceAppSec is for application security management
 	NamespaceAppSec Namespace = "appsec"
+	// NamespaceCiVisibility is for CI Visibility
+	NamespaceCiVisibility Namespace = "civisibility"
 )
 
 // Application is identifying information about the app itself
@@ -90,11 +96,9 @@ type Application struct {
 // Host is identifying information about the host on which the app
 // is running
 type Host struct {
-	Hostname  string `json:"hostname"`
-	OS        string `json:"os"`
-	OSVersion string `json:"os_version,omitempty"`
-	// TODO: Do we care about the kernel stuff? internal/osinfo gets most of
-	// this information in OSName/OSVersion
+	Hostname      string `json:"hostname"`
+	OS            string `json:"os"`
+	OSVersion     string `json:"os_version,omitempty"`
 	Architecture  string `json:"architecture"`
 	KernelName    string `json:"kernel_name"`
 	KernelRelease string `json:"kernel_release"`
@@ -132,13 +136,48 @@ type ConfigurationChange struct {
 	RemoteConfig  *RemoteConfig   `json:"remote_config,omitempty"`
 }
 
+type Origin int
+
+const (
+	OriginDefault Origin = iota
+	OriginCode
+	OriginDDConfig
+	OriginEnvVar
+	OriginRemoteConfig
+)
+
+func (o Origin) String() string {
+	switch o {
+	case OriginDefault:
+		return "default"
+	case OriginCode:
+		return "code"
+	case OriginDDConfig:
+		return "dd_config"
+	case OriginEnvVar:
+		return "env_var"
+	case OriginRemoteConfig:
+		return "remote_config"
+	default:
+		return fmt.Sprintf("unknown origin %d", o)
+	}
+}
+
+func (o Origin) MarshalJSON() ([]byte, error) {
+	var b bytes.Buffer
+	b.WriteString(`"`)
+	b.WriteString(o.String())
+	b.WriteString(`"`)
+	return b.Bytes(), nil
+}
+
 // Configuration is a library-specific configuration value
 // that should be initialized through StringConfig, IntConfig, FloatConfig, or BoolConfig
 type Configuration struct {
 	Name  string      `json:"name"`
 	Value interface{} `json:"value"`
-	// origin is the source of the config. It is one of {env_var, code, dd_config, remote_config}
-	Origin      string `json:"origin"`
+	// origin is the source of the config. It is one of {default, env_var, code, dd_config, remote_config}.
+	Origin      Origin `json:"origin"`
 	Error       Error  `json:"error"`
 	IsOverriden bool   `json:"is_overridden"`
 }

@@ -37,12 +37,13 @@ type startupInfo struct {
 	AnalyticsEnabled            bool                         `json:"analytics_enabled"`              // True if there is a global analytics rate set
 	SampleRate                  string                       `json:"sample_rate"`                    // The default sampling rate for the rules sampler
 	SampleRateLimit             string                       `json:"sample_rate_limit"`              // The rate limit configured with the rules sampler
-	SamplingRules               []SamplingRule               `json:"sampling_rules"`                 // Rules used by the rules sampler
+	TraceSamplingRules          []SamplingRule               `json:"trace_sampling_rules"`           // Trace rules used by the rules sampler
+	SpanSamplingRules           []SamplingRule               `json:"span_sampling_rules"`            // Span rules used by the rules sampler
 	SamplingRulesError          string                       `json:"sampling_rules_error"`           // Any errors that occurred while parsing sampling rules
 	ServiceMappings             map[string]string            `json:"service_mappings"`               // Service Mappings
 	Tags                        map[string]string            `json:"tags"`                           // Global tags
 	RuntimeMetricsEnabled       bool                         `json:"runtime_metrics_enabled"`        // Whether runtime metrics are enabled
-	HealthMetricsEnabled        bool                         `json:"health_metrics_enabled"`         // Whether health metrics are enabled
+	RuntimeMetricsV2Enabled     bool                         `json:"runtime_metrics_v2_enabled"`     // Whether runtime metrics v2 are enabled
 	ProfilerCodeHotspotsEnabled bool                         `json:"profiler_code_hotspots_enabled"` // Whether profiler code hotspots are enabled
 	ProfilerEndpointsEnabled    bool                         `json:"profiler_endpoints_enabled"`     // Whether profiler endpoints are enabled
 	ApplicationVersion          string                       `json:"dd_version"`                     // Version of the user's application
@@ -56,6 +57,10 @@ type startupInfo struct {
 	PartialFlushMinSpans        int                          `json:"partial_flush_min_spans"`        // The min number of spans to trigger a partial flush
 	Orchestrion                 orchestrionConfig            `json:"orchestrion"`                    // Orchestrion (auto-instrumentation) configuration.
 	FeatureFlags                []string                     `json:"feature_flags"`
+	PropagationStyleInject      string                       `json:"propagation_style_inject"`  // Propagation style for inject
+	PropagationStyleExtract     string                       `json:"propagation_style_extract"` // Propagation style for extract
+	TracingAsTransport          bool                         `json:"tracing_as_transport"`      // Whether the tracer is disabled and other products are using it as a transport
+	DogstatsdAddr               string                       `json:"dogstatsd_address"`         // Destination of statsd payloads
 }
 
 // checkEndpoint tries to connect to the URL specified by endpoint.
@@ -89,6 +94,26 @@ func logStartup(t *tracer) {
 		featureFlags = append(featureFlags, f)
 	}
 
+	var injectorNames, extractorNames string
+	switch v := t.config.propagator.(type) {
+	case *chainedPropagator:
+		injectorNames = v.injectorNames
+		extractorNames = v.extractorsNames
+	case nil:
+		injectorNames = ""
+		extractorNames = ""
+	default:
+		injectorNames = "custom"
+		extractorNames = "custom"
+	}
+	// Determine the agent URL to use in the logs
+	var agentURL string
+	if t.config.originalAgentURL != nil && t.config.originalAgentURL.Scheme == "unix" {
+		agentURL = t.config.originalAgentURL.String()
+	} else {
+		agentURL = t.config.transport.endpoint()
+	}
+
 	info := startupInfo{
 		Date:                        time.Now().Format(time.RFC3339),
 		OSName:                      osinfo.OSName(),
@@ -98,16 +123,17 @@ func logStartup(t *tracer) {
 		LangVersion:                 runtime.Version(),
 		Env:                         t.config.env,
 		Service:                     t.config.serviceName,
-		AgentURL:                    t.config.transport.endpoint(),
+		AgentURL:                    agentURL,
 		Debug:                       t.config.debug,
 		AnalyticsEnabled:            !math.IsNaN(globalconfig.AnalyticsRate()),
 		SampleRate:                  fmt.Sprintf("%f", t.rulesSampling.traces.globalRate),
 		SampleRateLimit:             "disabled",
-		SamplingRules:               append(t.config.traceRules, t.config.spanRules...),
+		TraceSamplingRules:          t.config.traceRules,
+		SpanSamplingRules:           t.config.spanRules,
 		ServiceMappings:             t.config.serviceMappings,
 		Tags:                        tags,
 		RuntimeMetricsEnabled:       t.config.runtimeMetrics,
-		HealthMetricsEnabled:        t.config.runtimeMetrics,
+		RuntimeMetricsV2Enabled:     t.config.runtimeMetricsV2,
 		ApplicationVersion:          t.config.version,
 		ProfilerCodeHotspotsEnabled: t.config.profilerHotspots,
 		ProfilerEndpointsEnabled:    t.config.profilerEndpoints,
@@ -121,6 +147,10 @@ func logStartup(t *tracer) {
 		PartialFlushMinSpans:        t.config.partialFlushMinSpans,
 		Orchestrion:                 t.config.orchestrionCfg,
 		FeatureFlags:                featureFlags,
+		PropagationStyleInject:      injectorNames,
+		PropagationStyleExtract:     extractorNames,
+		TracingAsTransport:          t.config.tracingAsTransport,
+		DogstatsdAddr:               t.config.dogstatsdAddr,
 	}
 	if _, _, err := samplingRulesFromEnv(); err != nil {
 		info.SamplingRulesError = fmt.Sprintf("%s", err)

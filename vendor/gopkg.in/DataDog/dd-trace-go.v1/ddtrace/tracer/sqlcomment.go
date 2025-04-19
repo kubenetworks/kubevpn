@@ -61,6 +61,8 @@ const (
 	// "Peer" is the OpenTelemetry nomenclature for "thing I am talking to"
 	sqlCommentPeerHostname = "ddh"
 	sqlCommentPeerDBName   = "dddb"
+	// This is for when peer.service is explicitly set as a tag
+	sqlCommentPeerService = "ddprs"
 )
 
 // Current trace context version (see https://www.w3.org/TR/trace-context/#version)
@@ -76,6 +78,7 @@ type SQLCommentCarrier struct {
 	SpanID         uint64
 	PeerDBHostname string
 	PeerDBName     string
+	PeerService    string
 }
 
 // Inject injects a span context in the carrier's Query field as a comment.
@@ -105,17 +108,25 @@ func (c *SQLCommentCarrier) Inject(spanCtx ddtrace.SpanContext) error {
 		fallthrough
 	case DBMPropagationModeService:
 		if ctx, ok := spanCtx.(*spanContext); ok {
-			if e, ok := ctx.meta(ext.Environment); ok && e != "" {
-				tags[sqlCommentEnv] = e
-			}
-			if v, ok := ctx.meta(ext.Version); ok && v != "" {
-				tags[sqlCommentParentVersion] = v
+			if ctx.span != nil {
+				if e, ok := getMeta(ctx.span, ext.Environment); ok && e != "" {
+					tags[sqlCommentEnv] = e
+				}
+				if v, ok := getMeta(ctx.span, ext.Version); ok && v != "" {
+					tags[sqlCommentParentVersion] = v
+				}
+				if v, ok := getMeta(ctx.span, ext.PeerService); ok && v != "" {
+					tags[sqlCommentPeerService] = v
+				}
 			}
 			if c.PeerDBName != "" {
 				tags[sqlCommentPeerDBName] = c.PeerDBName
 			}
 			if c.PeerDBHostname != "" {
 				tags[sqlCommentPeerHostname] = c.PeerDBHostname
+			}
+			if tags[sqlCommentPeerService] == "" && c.PeerService != "" {
+				tags[sqlCommentPeerService] = c.PeerService
 			}
 		}
 		if globalconfig.ServiceName() != "" {
@@ -167,7 +178,7 @@ func commentQuery(query string, tags map[string]string) string {
 	var b strings.Builder
 	// the sqlcommenter specification dictates that tags should be sorted. Since we know all injected keys,
 	// we skip a sorting operation by specifying the order of keys statically
-	orderedKeys := []string{sqlCommentDBService, sqlCommentEnv, sqlCommentParentService, sqlCommentParentVersion, sqlCommentTraceParent, sqlCommentPeerHostname, sqlCommentPeerDBName}
+	orderedKeys := []string{sqlCommentDBService, sqlCommentEnv, sqlCommentParentService, sqlCommentParentVersion, sqlCommentTraceParent, sqlCommentPeerHostname, sqlCommentPeerDBName, sqlCommentPeerService}
 	first := true
 	for _, k := range orderedKeys {
 		if v, ok := tags[k]; ok {

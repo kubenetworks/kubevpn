@@ -21,12 +21,18 @@
 package dyngo
 
 import (
+	"context"
 	"sync"
+	"sync/atomic"
 
-	"gopkg.in/DataDog/dd-trace-go.v1/internal/log"
-
-	"go.uber.org/atomic"
+	"gopkg.in/DataDog/dd-trace-go.v1/internal/orchestrion"
 )
+
+// LogError is the function used to log errors in the dyngo package.
+// This is required because we really want to be able to log errors from dyngo
+// but the log package depend on too much packages that we want to instrument.
+// So we need to do this to avoid dependency cycles.
+var LogError = func(string, ...any) {}
 
 // Operation interface type allowing to register event listeners to the
 // operation. The event listeners will be automatically removed from the
@@ -61,6 +67,9 @@ type ResultOf[O Operation] interface {
 // dispatch calls to the underlying event listener function.
 type EventListener[O Operation, T any] func(O, T)
 
+// contextKey is used to store in a context.Context the ongoing Operation
+type contextKey struct{}
+
 // Atomic *Operation so we can atomically read or swap it.
 var rootOperation atomic.Pointer[Operation]
 
@@ -80,12 +89,16 @@ func SwapRootOperation(new Operation) {
 // bubble-up the operation stack, which allows listening to future events that
 // might happen in the operation lifetime.
 type operation struct {
-	parent *operation
+	parent Operation
 	eventRegister
 	dataBroadcaster
 
 	disabled bool
 	mu       sync.RWMutex
+
+	// inContext is used to determine if RegisterOperation was called to put the Operation in the context tree.
+	// If so we need to remove it from the context tree when the Operation is finished.
+	inContext bool
 }
 
 func (o *operation) Parent() Operation {
@@ -133,11 +146,39 @@ func NewOperation(parent Operation) Operation {
 			parent = *ptr
 		}
 	}
-	var parentOp *operation
-	if parent != nil {
-		parentOp = parent.unwrap()
+
+	return &operation{parent: parent}
+}
+
+// FromContext looks into the given context (or the GLS if orchestrion is enabled) for a parent Operation and returns it.
+func FromContext(ctx context.Context) (Operation, bool) {
+	ctx = orchestrion.WrapContext(ctx)
+	if ctx == nil {
+		return nil, false
 	}
-	return &operation{parent: parentOp}
+
+	op, ok := ctx.Value(contextKey{}).(Operation)
+	return op, ok
+}
+
+// FindOperation looks into the current operation tree for the first operation matching the given type.
+// It has a hardcoded limit of 32 levels of depth even looking for the operation in the parent tree
+func FindOperation[T any, O interface {
+	Operation
+	*T
+}](ctx context.Context) (*T, bool) {
+	op, found := FromContext(ctx)
+	if !found {
+		return nil, false
+	}
+
+	for current := op; current != nil; current = current.unwrap().parent {
+		if o, ok := current.(O); ok {
+			return o, true
+		}
+	}
+
+	return nil, false
 }
 
 // StartOperation starts a new operation along with its arguments and emits a
@@ -145,9 +186,22 @@ func NewOperation(parent Operation) Operation {
 func StartOperation[O Operation, E ArgOf[O]](op O, args E) {
 	// Bubble-up the start event starting from the parent operation as you can't
 	// listen for your own start event
-	for current := op.unwrap().parent; current != nil; current = current.parent {
-		emitEvent(&current.eventRegister, op, args)
+	for current := op.unwrap().parent; current != nil; current = current.unwrap().parent {
+		emitEvent(&current.unwrap().eventRegister, op, args)
 	}
+}
+
+// StartAndRegisterOperation calls StartOperation and returns RegisterOperation result
+func StartAndRegisterOperation[O Operation, E ArgOf[O]](ctx context.Context, op O, args E) context.Context {
+	StartOperation(op, args)
+	return RegisterOperation(ctx, op)
+}
+
+// RegisterOperation registers the operation in the context tree. All operations that plan to have children operations
+// should call this function to ensure the operation is properly linked in the context tree.
+func RegisterOperation(ctx context.Context, op Operation) context.Context {
+	op.unwrap().inContext = true
+	return orchestrion.CtxWithValue(ctx, contextKey{}, op)
 }
 
 // FinishOperation finishes the operation along with its results and emits a
@@ -160,12 +214,17 @@ func FinishOperation[O Operation, E ResultOf[O]](op O, results E) {
 	o.mu.RLock()
 	defer o.mu.RUnlock() // Deferred and stacked on top of the previously deferred call to o.disable()
 
+	if o.inContext {
+		orchestrion.GLSPopValue(contextKey{})
+	}
+
 	if o.disabled {
 		return
 	}
 
-	for current := o; current != nil; current = current.parent {
-		emitEvent(&current.eventRegister, op, results)
+	var current Operation = op
+	for ; current != nil; current = current.unwrap().parent {
+		emitEvent(&current.unwrap().eventRegister, op, results)
 	}
 }
 
@@ -233,8 +292,8 @@ func EmitData[T any](op Operation, data T) {
 	// Bubble up the data to the stack of operations. Contrary to events,
 	// we also send the data to ourselves since SDK operations are leaf operations
 	// that both emit and listen for data (errors).
-	for current := o; current != nil; current = current.parent {
-		emitData(&current.dataBroadcaster, data)
+	for current := op; current != nil; current = current.unwrap().parent {
+		emitData(&current.unwrap().dataBroadcaster, data)
 	}
 }
 
@@ -281,7 +340,7 @@ func (b *dataBroadcaster) clear() {
 func emitData[T any](b *dataBroadcaster, v T) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error("appsec: recovered from an unexpected panic from an event listener: %+v", r)
+			LogError("appsec: recovered from an unexpected panic from an event listener: %+v", r)
 		}
 	}()
 	b.mu.RLock()
@@ -312,7 +371,7 @@ func (r *eventRegister) clear() {
 func emitEvent[O Operation, T any](r *eventRegister, op O, v T) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error("appsec: recovered from an unexpected panic from an event listener: %+v", r)
+			LogError("appsec: recovered from an unexpected panic from an event listener: %+v", r)
 		}
 	}()
 	r.mu.RLock()

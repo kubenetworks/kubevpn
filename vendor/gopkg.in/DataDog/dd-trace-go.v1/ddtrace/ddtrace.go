@@ -33,6 +33,15 @@ type SpanContextW3C interface {
 	TraceID128Bytes() [16]byte
 }
 
+// SpanContextWithLinks represents a SpanContext with additional methods for
+// access to the SpanLinks on the span context, if present.
+type SpanContextWithLinks interface {
+	SpanContext
+
+	// SpanLinks returns a copy of the span links on the SpanContext.
+	SpanLinks() []SpanLink
+}
+
 // Tracer specifies an implementation of the Datadog tracer which allows starting
 // and propagating spans. The official implementation if exposed as functions
 // within the "tracer" package.

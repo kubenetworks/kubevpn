@@ -19,10 +19,8 @@ var hashableEdgeTags = map[string]struct{}{"event_type": {}, "exchange": {}, "gr
 
 func isWellFormedEdgeTag(t string) bool {
 	if i := strings.IndexByte(t, ':'); i != -1 {
-		if j := strings.LastIndexByte(t, ':'); j == i {
-			if _, exists := hashableEdgeTags[t[:i]]; exists {
-				return true
-			}
+		if _, exists := hashableEdgeTags[t[:i]]; exists {
+			return true
 		}
 	}
 	return false

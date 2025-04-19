@@ -9,10 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/appsec/config"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/log"
+	"gopkg.in/DataDog/dd-trace-go.v1/internal/orchestrion"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/remoteconfig"
 
 	internal "github.com/DataDog/appsec-internal-go/appsec"
@@ -41,20 +43,13 @@ func statusesFromUpdate(u remoteconfig.ProductUpdate, ack bool, err error) map[s
 	return statuses
 }
 
-func mergeMaps[K comparable, V any](m1 map[K]V, m2 map[K]V) map[K]V {
-	for key, value := range m2 {
-		m1[key] = value
-	}
-	return m1
-}
-
 // combineRCRulesUpdates updates the state of the given RulesManager with the combination of all the provided rules updates
 func combineRCRulesUpdates(r *config.RulesManager, updates map[string]remoteconfig.ProductUpdate) (statuses map[string]rc.ApplyStatus, err error) {
 	// Spare some re-allocations (but there may still be some because 1 update may contain N configs)
 	statuses = make(map[string]rc.ApplyStatus, len(updates))
 	// Set the default statuses for all updates to unacknowledged
 	for _, u := range updates {
-		statuses = mergeMaps(statuses, statusesFromUpdate(u, false, nil))
+		maps.Copy(statuses, statusesFromUpdate(u, false, nil))
 	}
 
 updateLoop:
@@ -66,9 +61,9 @@ updateLoop:
 		switch p {
 		case rc.ProductASMData:
 			// Merge all rules data entries together and store them as a RulesManager edit entry
-			rulesData, status := mergeRulesData(u)
-			statuses = mergeMaps(statuses, status)
-			r.AddEdit("asmdata", config.RulesFragment{RulesData: rulesData})
+			fragment, status := mergeASMDataUpdates(u)
+			maps.Copy(statuses, status)
+			r.AddEdit("asmdata", fragment)
 		case rc.ProductASMDD:
 			var (
 				removalFound = false
@@ -83,7 +78,7 @@ updateLoop:
 				}
 				// Already seen a removal or an update, return an error
 				if err != nil {
-					statuses = mergeMaps(statuses, statusesFromUpdate(u, true, err))
+					maps.Copy(statuses, statusesFromUpdate(u, true, err))
 					break updateLoop
 				}
 
@@ -103,7 +98,7 @@ updateLoop:
 				if removalFound {
 					log.Debug("appsec: Remote config: ASM_DD config removed. Switching back to default rules")
 					r.ChangeBase(config.DefaultRulesFragment(), "")
-					statuses = mergeMaps(statuses, statusesFromUpdate(u, true, nil))
+					maps.Copy(statuses, statusesFromUpdate(u, true, nil))
 				}
 				continue
 			}
@@ -145,7 +140,7 @@ updateLoop:
 	// Set all statuses to ack if no error occured
 	if err == nil {
 		for _, u := range updates {
-			statuses = mergeMaps(statuses, statusesFromUpdate(u, true, nil))
+			maps.Copy(statuses, statusesFromUpdate(u, true, nil))
 		}
 	}
 
@@ -182,17 +177,18 @@ func (a *appsec) onRCRulesUpdate(updates map[string]remoteconfig.ProductUpdate) 
 	r.Compile()
 	log.Debug("appsec: Remote config: final compiled rules: %s", r.String())
 
+	// Replace the RulesManager with the new one holding the new state
+	a.cfg.RulesManager = &r
+
 	// If an error occurs while updating the WAF handle, don't swap the RulesManager and propagate the error
 	// to all config statuses since we can't know which config is the faulty one
-	if err = a.swapWAF(r.Latest); err != nil {
+	if err = a.SwapRootOperation(); err != nil {
 		log.Error("appsec: Remote config: could not apply the new security rules: %v", err)
 		for k := range statuses {
 			statuses[k] = genApplyStatus(true, err)
 		}
 		return statuses
 	}
-	// Replace the RulesManager with the new one holding the new state
-	a.cfg.RulesManager = &r
 
 	return statuses
 }
@@ -240,11 +236,40 @@ func (a *appsec) handleASMFeatures(u remoteconfig.ProductUpdate) map[string]rc.A
 	return statuses
 }
 
-func mergeRulesData(u remoteconfig.ProductUpdate) ([]config.RuleDataEntry, map[string]rc.ApplyStatus) {
+func mergeASMDataUpdates(u remoteconfig.ProductUpdate) (config.RulesFragment, map[string]rc.ApplyStatus) {
 	// Following the RFC, merging should only happen when two rules data with the same ID and same Type are received
-	// allRulesData[ID][Type] will return the rules data of said id and type, if it exists
-	allRulesData := make(map[string]map[string]config.RuleDataEntry)
+	type mapKey struct {
+		id  string
+		typ string
+	}
+	mergedRulesData := make(map[mapKey]config.DataEntry)
+	mergedExclusionData := make(map[mapKey]config.DataEntry)
 	statuses := statusesFromUpdate(u, true, nil)
+
+	mergeUpdateEntry := func(mergeMap map[mapKey]config.DataEntry, data []config.DataEntry) {
+		for _, ruleData := range data {
+			key := mapKey{id: ruleData.ID, typ: ruleData.Type}
+			if data, ok := mergeMap[key]; ok {
+				// Merge rules data entries with the same ID and Type
+				mergeMap[key] = config.DataEntry{
+					ID:   data.ID,
+					Type: data.Type,
+					Data: mergeRulesDataEntries(data.Data, ruleData.Data),
+				}
+				continue
+			}
+
+			mergeMap[key] = ruleData
+		}
+	}
+
+	mapValues := func(m map[mapKey]config.DataEntry) []config.DataEntry {
+		values := make([]config.DataEntry, 0, len(m))
+		for _, v := range m {
+			values = append(values, v)
+		}
+		return values
+	}
 
 	for path, raw := range u {
 		log.Debug("appsec: Remote config: processing %s", path)
@@ -257,36 +282,30 @@ func mergeRulesData(u remoteconfig.ProductUpdate) ([]config.RuleDataEntry, map[s
 			continue
 		}
 
-		var rulesData config.RulesData
-		if err := json.Unmarshal(raw, &rulesData); err != nil {
+		var asmdataUpdate struct {
+			RulesData     []config.DataEntry `json:"rules_data,omitempty"`
+			ExclusionData []config.DataEntry `json:"exclusion_data,omitempty"`
+		}
+		if err := json.Unmarshal(raw, &asmdataUpdate); err != nil {
 			log.Debug("appsec: Remote config: error while unmarshalling payload for %s: %v. Configuration won't be applied.", path, err)
 			statuses[path] = genApplyStatus(false, err)
 			continue
 		}
 
-		// Check each entry against allRulesData to see if merging is necessary
-		for _, ruleData := range rulesData.RulesData {
-			if allRulesData[ruleData.ID] == nil {
-				allRulesData[ruleData.ID] = make(map[string]config.RuleDataEntry)
-			}
-			if data, ok := allRulesData[ruleData.ID][ruleData.Type]; ok {
-				// Merge rules data entries with the same ID and Type
-				data.Data = mergeRulesDataEntries(data.Data, ruleData.Data)
-				allRulesData[ruleData.ID][ruleData.Type] = data
-			} else {
-				allRulesData[ruleData.ID][ruleData.Type] = ruleData
-			}
-		}
+		mergeUpdateEntry(mergedExclusionData, asmdataUpdate.ExclusionData)
+		mergeUpdateEntry(mergedRulesData, asmdataUpdate.RulesData)
 	}
 
-	// Aggregate all the rules data before passing it over to the WAF
-	var rulesData []config.RuleDataEntry
-	for _, m := range allRulesData {
-		for _, data := range m {
-			rulesData = append(rulesData, data)
-		}
+	var fragment config.RulesFragment
+	if len(mergedRulesData) > 0 {
+		fragment.RulesData = mapValues(mergedRulesData)
 	}
-	return rulesData, statuses
+
+	if len(mergedExclusionData) > 0 {
+		fragment.ExclusionData = mapValues(mergedExclusionData)
+	}
+
+	return fragment, statuses
 }
 
 // mergeRulesDataEntries merges two slices of rules data entries together, removing duplicates and
@@ -372,11 +391,20 @@ var blockingCapabilities = [...]remoteconfig.Capability{
 	remoteconfig.ASMCustomRules,
 	remoteconfig.ASMCustomBlockingResponse,
 	remoteconfig.ASMTrustedIPs,
+	remoteconfig.ASMExclusionData,
+	remoteconfig.ASMEndpointFingerprinting,
+	remoteconfig.ASMSessionFingerprinting,
+	remoteconfig.ASMNetworkFingerprinting,
+	remoteconfig.ASMHeaderFingerprinting,
 }
 
 func (a *appsec) enableRCBlocking() {
 	if a.cfg.RC == nil {
 		log.Debug("appsec: Remote config: no valid remote configuration client")
+		return
+	}
+	if _, isSet := os.LookupEnv(internal.EnvRules); isSet {
+		log.Debug("appsec: Remote config: using rules from %s, blocking capabilities won't be enabled", a.cfg.RulesManager.BasePath)
 		return
 	}
 
@@ -391,11 +419,26 @@ func (a *appsec) enableRCBlocking() {
 		log.Debug("appsec: Remote config: couldn't register callback: %v", err)
 	}
 
-	if _, isSet := os.LookupEnv(internal.EnvRules); !isSet {
-		for _, c := range blockingCapabilities {
-			if err := a.registerRCCapability(c); err != nil {
-				log.Debug("appsec: Remote config: couldn't register capability %v: %v", c, err)
-			}
+	for _, c := range blockingCapabilities {
+		if err := a.registerRCCapability(c); err != nil {
+			log.Debug("appsec: Remote config: couldn't register capability %v: %v", c, err)
+		}
+	}
+}
+
+func (a *appsec) enableRASP() {
+	if !a.cfg.RASP {
+		return
+	}
+	if err := remoteconfig.RegisterCapability(remoteconfig.ASMRASPSSRF); err != nil {
+		log.Debug("appsec: Remote config: couldn't register RASP SSRF: %v", err)
+	}
+	if err := remoteconfig.RegisterCapability(remoteconfig.ASMRASPSQLI); err != nil {
+		log.Debug("appsec: Remote config: couldn't register RASP SQLI: %v", err)
+	}
+	if orchestrion.Enabled() {
+		if err := remoteconfig.RegisterCapability(remoteconfig.ASMRASPLFI); err != nil {
+			log.Debug("appsec: Remote config: couldn't register RASP LFI: %v", err)
 		}
 	}
 }
