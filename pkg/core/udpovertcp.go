@@ -19,21 +19,8 @@ func newDatagramPacket(data []byte) (r *DatagramPacket) {
 	}
 }
 
-func readDatagramPacket(r io.Reader, b []byte) (*DatagramPacket, error) {
-	_, err := io.ReadFull(r, b[:2])
-	if err != nil {
-		return nil, err
-	}
-	dataLength := binary.BigEndian.Uint16(b[:2])
-	_, err = io.ReadFull(r, b[:dataLength])
-	if err != nil {
-		return nil, err
-	}
-	return &DatagramPacket{DataLength: dataLength, Data: b[:dataLength]}, nil
-}
-
 // this method will return all byte array in the way: b[:], len(DatagramPacket.Data)==64k
-func readDatagramPacketServer(r io.Reader, b []byte) (*DatagramPacket, error) {
+func readDatagramPacket(r io.Reader, b []byte) (*DatagramPacket, error) {
 	_, err := io.ReadFull(r, b[:2])
 	if err != nil {
 		return nil, err

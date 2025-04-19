@@ -61,7 +61,7 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 
 	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
-		datagram, err := readDatagramPacketServer(tcpConn, buf[:])
+		datagram, err := readDatagramPacket(tcpConn, buf[:])
 		if err != nil {
 			plog.G(ctx).Errorf("[TCP] Failed to read from %s -> %s: %v", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
 			config.LPool.Put(buf[:])
