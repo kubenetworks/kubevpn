@@ -2,9 +2,9 @@ package action
 
 import (
 	"context"
-	"fmt"
 	"io"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
@@ -84,9 +84,9 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 }
 
 func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer, logger *log.Logger) (err error) {
-	cli := svr.GetClient(true)
-	if cli == nil {
-		return fmt.Errorf("sudo daemon not start")
+	cli, err := svr.GetClient(true)
+	if err != nil {
+		return errors.Wrap(err, "sudo daemon not start")
 	}
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))

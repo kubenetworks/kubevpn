@@ -38,7 +38,11 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := daemon.GetClient(false).Leave(cmd.Context(), &rpc.LeaveRequest{
+			cli, err := daemon.GetClient(false)
+			if err != nil {
+				return err
+			}
+			resp, err := cli.Leave(cmd.Context(), &rpc.LeaveRequest{
 				Namespace: ns,
 				Workloads: args,
 			})

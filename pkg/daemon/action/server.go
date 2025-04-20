@@ -18,7 +18,7 @@ type Server struct {
 	rpc.UnimplementedDaemonServer
 
 	Cancel    func()
-	GetClient func(isSudo bool) rpc.DaemonClient
+	GetClient func(isSudo bool) (rpc.DaemonClient, error)
 	IsSudo    bool
 	LogFile   *lumberjack.Logger
 	Lock      sync.Mutex

@@ -2,9 +2,9 @@ package action
 
 import (
 	"context"
-	"fmt"
 	"io"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"k8s.io/utils/ptr"
@@ -67,9 +67,9 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 		}
 	}()
 
-	daemonClient := svr.GetClient(false)
-	if daemonClient == nil {
-		return fmt.Errorf("daemon is not avaliable")
+	cli, err := svr.GetClient(false)
+	if err != nil {
+		return errors.Wrap(err, "daemon is not available")
 	}
 
 	connectNs, err := util.DetectConnectNamespace(ctx, connect.GetFactory(), req.ConnectNamespace)
@@ -92,7 +92,7 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 		} else {
 			plog.G(ctx).Infof("Disconnecting from another cluster...")
 			var disconnectResp rpc.Daemon_DisconnectClient
-			disconnectResp, err = daemonClient.Disconnect(ctx, &rpc.DisconnectRequest{
+			disconnectResp, err = cli.Disconnect(ctx, &rpc.DisconnectRequest{
 				ID: ptr.To[int32](0),
 			})
 			if err != nil {
@@ -114,7 +114,7 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 	if svr.connect == nil {
 		plog.G(ctx).Debugf("Connectting to cluster")
 		var connResp rpc.Daemon_ConnectClient
-		connResp, err = daemonClient.Connect(ctx, convert(req))
+		connResp, err = cli.Connect(ctx, convert(req))
 		if err != nil {
 			return err
 		}

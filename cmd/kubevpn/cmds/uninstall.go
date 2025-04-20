@@ -58,8 +58,11 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			cli := daemon.GetClient(false)
-			disconnect, err := cli.Disconnect(cmd.Context(), &rpc.DisconnectRequest{
+			cli, err := daemon.GetClient(false)
+			if err != nil {
+				return err
+			}
+			disconnectResp, err := cli.Disconnect(cmd.Context(), &rpc.DisconnectRequest{
 				KubeconfigBytes: ptr.To(string(bytes)),
 				Namespace:       ptr.To(ns),
 				SshJump:         sshConf.ToRPC(),
@@ -67,7 +70,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				plog.G(cmd.Context()).Warnf("Failed to disconnect from cluter: %v", err)
 			} else {
-				_ = util.PrintGRPCStream[rpc.DisconnectResponse](disconnect)
+				_ = util.PrintGRPCStream[rpc.DisconnectResponse](disconnectResp)
 			}
 
 			req := &rpc.UninstallRequest{

@@ -2,10 +2,10 @@ package action
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"time"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -104,9 +104,9 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 	}
 
 	if !svr.IsSudo {
-		cli := svr.GetClient(true)
-		if cli == nil {
-			return fmt.Errorf("sudo daemon not start")
+		cli, err := svr.GetClient(true)
+		if err != nil {
+			return errors.Wrap(err, "sudo daemon not start")
 		}
 		connResp, err := cli.Disconnect(resp.Context(), req)
 		if err != nil {
@@ -149,8 +149,8 @@ func disconnectByKubeConfig(ctx context.Context, svr *Server, kubeconfigBytes st
 }
 
 func disconnect(ctx context.Context, svr *Server, connect *handler.ConnectOptions) {
-	client := svr.GetClient(false)
-	if client == nil {
+	_, err := svr.GetClient(false)
+	if err != nil {
 		return
 	}
 	if svr.connect != nil {

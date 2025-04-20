@@ -80,7 +80,11 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 				}
 			}
 
-			resp, err := daemon.GetClient(false).Status(
+			cli, err := daemon.GetClient(false)
+			if err != nil {
+				return err
+			}
+			resp, err := cli.Status(
 				cmd.Context(),
 				&rpc.StatusRequest{
 					ClusterIDs: clusterIDs,

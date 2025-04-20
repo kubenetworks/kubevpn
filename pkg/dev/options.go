@@ -12,6 +12,7 @@ import (
 	typescontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
 	"github.com/google/uuid"
+	pkgerr "github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -91,9 +92,9 @@ func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, co
 // Connect to cluster network on docker container or host
 func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig, imagePullSecretName string, portBindings nat.PortMap, connectNamespace string) error {
 	if option.ConnectMode == ConnectModeHost {
-		daemonCli := daemon.GetClient(false)
-		if daemonCli == nil {
-			return fmt.Errorf("get nil daemon client")
+		cli, err := daemon.GetClient(false)
+		if err != nil {
+			return pkgerr.Wrap(err, "get nil daemon client")
 		}
 		kubeConfigBytes, ns, err := util.ConvertToKubeConfigBytes(option.factory)
 		if err != nil {
@@ -121,7 +122,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			ConnectNamespace:     connectNamespace,
 		}
 		option.AddRollbackFunc(func() error {
-			resp, err := daemonCli.Disconnect(ctx, &rpc.DisconnectRequest{
+			resp, err := cli.Disconnect(ctx, &rpc.DisconnectRequest{
 				KubeconfigBytes: ptr.To(string(kubeConfigBytes)),
 				Namespace:       ptr.To(ns),
 				SshJump:         sshConfig.ToRPC(),
@@ -133,7 +134,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			return nil
 		})
 		var resp rpc.Daemon_ProxyClient
-		resp, err = daemonCli.Proxy(ctx, req)
+		resp, err = cli.Proxy(ctx, req)
 		if err != nil {
 			plog.G(ctx).Errorf("Connect to cluster error: %s", err.Error())
 			return err

@@ -32,13 +32,17 @@ func CmdRemove(f cmdutil.Factory) *cobra.Command {
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			leave, err := daemon.GetClient(false).Remove(cmd.Context(), &rpc.RemoveRequest{
+			cli, err := daemon.GetClient(false)
+			if err != nil {
+				return err
+			}
+			resp, err := cli.Remove(cmd.Context(), &rpc.RemoveRequest{
 				Workloads: args,
 			})
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.RemoveResponse](leave)
+			err = util.PrintGRPCStream[rpc.RemoveResponse](resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil

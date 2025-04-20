@@ -31,7 +31,11 @@ func CmdSSHDaemon(cmdutil.Factory) *cobra.Command {
 			return err
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := daemon.GetClient(true).SshStart(
+			cli, err := daemon.GetClient(true)
+			if err != nil {
+				return err
+			}
+			resp, err := cli.SshStart(
 				cmd.Context(),
 				&rpc.SshStartRequest{
 					ClientIP: clientIP,
@@ -40,7 +44,7 @@ func CmdSSHDaemon(cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprint(os.Stdout, client.ServerIP)
+			_, err = fmt.Fprint(os.Stdout, resp.ServerIP)
 			return err
 		},
 	}

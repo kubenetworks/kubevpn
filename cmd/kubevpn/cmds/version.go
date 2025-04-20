@@ -64,12 +64,13 @@ func init() {
 }
 
 func getDaemonVersion() string {
-	cli := daemon.GetClient(false)
-	if cli != nil {
-		version, err := cli.Version(context.Background(), &rpc.VersionRequest{})
-		if err == nil {
-			return version.Version
-		}
+	cli, err := daemon.GetClient(false)
+	if err != nil {
+		return "unknown"
 	}
-	return "unknown"
+	version, err := cli.Version(context.Background(), &rpc.VersionRequest{})
+	if err != nil {
+		return "unknown"
+	}
+	return version.Version
 }

@@ -143,7 +143,10 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 				LocalDir:               options.LocalDir,
 				RemoteDir:              options.RemoteDir,
 			}
-			cli := daemon.GetClient(false)
+			cli, err := daemon.GetClient(false)
+			if err != nil {
+				return err
+			}
 			resp, err := cli.Clone(cmd.Context(), req)
 			if err != nil {
 				return err

@@ -30,7 +30,10 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 		Level:                req.Level,
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 	}
-	cli := svr.GetClient(false)
+	cli, err := svr.GetClient(false)
+	if err != nil {
+		return err
+	}
 	connResp, err := cli.Connect(resp.Context(), connReq)
 	if err != nil {
 		return err

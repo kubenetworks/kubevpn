@@ -55,7 +55,10 @@ func cmdConfigAdd(f cmdutil.Factory) *cobra.Command {
 				Namespace:       ns,
 				SshJump:         sshConf.ToRPC(),
 			}
-			cli := daemon.GetClient(false)
+			cli, err := daemon.GetClient(false)
+			if err != nil {
+				return err
+			}
 			resp, err := cli.ConfigAdd(cmd.Context(), req)
 			if err != nil {
 				return err
@@ -88,8 +91,11 @@ func cmdConfigRemove(f cmdutil.Factory) *cobra.Command {
 			req := &rpc.ConfigRemoveRequest{
 				ClusterID: args[0],
 			}
-			cli := daemon.GetClient(false)
-			_, err := cli.ConfigRemove(cmd.Context(), req)
+			cli, err := daemon.GetClient(false)
+			if err != nil {
+				return err
+			}
+			_, err = cli.ConfigRemove(cmd.Context(), req)
 			if err != nil {
 				return err
 			}

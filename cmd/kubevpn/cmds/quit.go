@@ -40,9 +40,9 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
 }
 
 func quit(ctx context.Context, isSudo bool) error {
-	cli := daemon.GetClient(isSudo)
-	if cli == nil {
-		return nil
+	cli, err := daemon.GetClient(isSudo)
+	if err != nil {
+		return err
 	}
 	client, err := cli.Quit(ctx, &rpc.QuitRequest{})
 	if err != nil {

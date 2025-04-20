@@ -56,7 +56,10 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			cli := daemon.GetClient(false)
+			cli, err := daemon.GetClient(false)
+			if err != nil {
+				return err
+			}
 			req := &rpc.ResetRequest{
 				KubeconfigBytes: string(bytes),
 				Namespace:       ns,
