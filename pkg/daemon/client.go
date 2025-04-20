@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	pkgerr "github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -23,22 +24,22 @@ import (
 
 var daemonClient, sudoDaemonClient rpc.DaemonClient
 
-func GetClient(isSudo bool) (cli rpc.DaemonClient) {
+func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	sockPath := config.GetSockPath(isSudo)
-	if _, err := os.Stat(sockPath); errors.Is(err, os.ErrNotExist) {
-		return nil
+	if _, err = os.Stat(sockPath); errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
 	if isSudo && sudoDaemonClient != nil {
-		return sudoDaemonClient
+		return sudoDaemonClient, nil
 	}
 	if !isSudo && daemonClient != nil {
-		return daemonClient
+		return daemonClient, nil
 	}
 
 	ctx := context.Background()
-	conn, err := grpc.DialContext(ctx, "unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer func() {
 		if cli == nil {
@@ -50,10 +51,10 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient) {
 	var response *grpc_health_v1.HealthCheckResponse
 	response, err = healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	if response.Status != grpc_health_v1.HealthCheckResponse_SERVING {
-		return nil
+		return nil, fmt.Errorf("health check failed: %v", response.Status)
 	}
 
 	cli = rpc.NewDaemonClient(conn)
@@ -66,7 +67,7 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient) {
 		var quitStream rpc.Daemon_QuitClient
 		quitStream, err = cli.Quit(ctx, &rpc.QuitRequest{})
 		if err != nil {
-			return nil
+			return nil, err
 		}
 		err = util.PrintGRPCStream[rpc.QuitResponse](quitStream, nil)
 		return
@@ -77,7 +78,7 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient) {
 	} else {
 		daemonClient = cli
 	}
-	return cli
+	return cli, nil
 }
 
 func GetClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClient, conn *grpc.ClientConn, err error) {
@@ -86,7 +87,7 @@ func GetClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClie
 	if errors.Is(err, os.ErrNotExist) {
 		return
 	}
-	conn, err = grpc.DialContext(ctx, "unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err = grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return
 	}
@@ -102,6 +103,7 @@ func GetClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClie
 		return
 	}
 	if response.Status != grpc_health_v1.HealthCheckResponse_SERVING {
+		err = fmt.Errorf("health check failed: %v", response.Status)
 		return
 	}
 	cli = rpc.NewDaemonClient(conn)
@@ -120,14 +122,14 @@ func StartupDaemon(ctx context.Context, path ...string) error {
 		return err
 	}
 	// normal daemon
-	if daemonClient = GetClient(false); daemonClient == nil {
+	if daemonClient, err = GetClient(false); daemonClient == nil {
 		if err = runDaemon(ctx, exe, false); err != nil {
 			return err
 		}
 	}
 
 	// sudo daemon
-	if sudoDaemonClient = GetClient(true); sudoDaemonClient == nil {
+	if sudoDaemonClient, err = GetClient(true); sudoDaemonClient == nil {
 		if err = runDaemon(ctx, exe, true); err != nil {
 			return err
 		}
@@ -136,13 +138,13 @@ func StartupDaemon(ctx context.Context, path ...string) error {
 }
 
 func runDaemon(ctx context.Context, exe string, isSudo bool) error {
-	cli := GetClient(isSudo)
-	if cli != nil {
+	_, err := GetClient(isSudo)
+	if err == nil {
 		return nil
 	}
 
 	pidPath := config.GetPidPath(isSudo)
-	err := os.Remove(pidPath)
+	err = os.Remove(pidPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -166,9 +168,9 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 		}
 	}
 
-	client := GetClient(isSudo)
-	if client == nil {
-		return fmt.Errorf("failed to get daemon server client")
+	_, err = GetClient(isSudo)
+	if err != nil {
+		return pkgerr.Wrap(err, "failed to get daemon server client")
 	}
 	return nil
 }

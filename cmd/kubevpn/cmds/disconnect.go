@@ -61,7 +61,11 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 				}
 				ids = pointer.Int32(int32(integer))
 			}
-			client, err := daemon.GetClient(false).Disconnect(
+			cli, err := daemon.GetClient(false)
+			if err != nil {
+				return err
+			}
+			client, err := cli.Disconnect(
 				cmd.Context(),
 				&rpc.DisconnectRequest{
 					ID:         ids,

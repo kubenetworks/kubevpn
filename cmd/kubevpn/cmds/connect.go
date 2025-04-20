@@ -100,7 +100,10 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				Level:               int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
 			}
 			// if is foreground, send to sudo daemon server
-			cli := daemon.GetClient(false)
+			cli, err := daemon.GetClient(false)
+			if err != nil {
+				return err
+			}
 			var resp grpc.ClientStream
 			if lite {
 				resp, err = cli.ConnectFork(cmd.Context(), req)

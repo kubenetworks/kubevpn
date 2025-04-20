@@ -49,7 +49,11 @@ func CmdGet(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, err := daemon.GetClient(true).Get(
+			cli, err := daemon.GetClient(true)
+			if err != nil {
+				return err
+			}
+			client, err := cli.Get(
 				cmd.Context(),
 				&rpc.GetRequest{
 					Namespace: ns,

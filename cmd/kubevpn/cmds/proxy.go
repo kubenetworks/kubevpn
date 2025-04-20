@@ -122,8 +122,11 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				}
 			}
 			// todo 将 doConnect 方法封装？内部使用 client 发送到daemon？
-			cli := daemon.GetClient(false)
-			client, err := cli.Proxy(
+			cli, err := daemon.GetClient(false)
+			if err != nil {
+				return err
+			}
+			resp, err := cli.Proxy(
 				cmd.Context(),
 				&rpc.ProxyRequest{
 					KubeconfigBytes:      string(bytes),
@@ -145,7 +148,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.ConnectResponse](client)
+			err = util.PrintGRPCStream[rpc.ConnectResponse](resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					err = leave(cli, ns, args)
