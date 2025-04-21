@@ -29,7 +29,7 @@ func TCPTransporter(tlsInfo map[string][]byte) Transporter {
 }
 
 func (tr *tcpTransporter) Dial(ctx context.Context, addr string) (net.Conn, error) {
-	dialer := &net.Dialer{Timeout: config.DialTimeout}
+	dialer := &net.Dialer{Timeout: config.DialTimeout, KeepAlive: config.KeepAliveTime}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err

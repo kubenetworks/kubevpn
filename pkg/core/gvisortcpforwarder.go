@@ -73,15 +73,15 @@ func TCPForwarder(ctx context.Context, s *stack.Stack) func(stack.TransportEndpo
 
 func WriteProxyInfo(conn net.Conn, id stack.TransportEndpointID) error {
 	var b bytes.Buffer
-	i := config.LPool.Get().([]byte)[:]
-	defer config.LPool.Put(i[:])
+	buf := config.LPool.Get().([]byte)[:]
+	defer config.LPool.Put(buf[:])
 	// local port
-	binary.BigEndian.PutUint16(i, id.LocalPort)
-	b.Write(i)
+	binary.BigEndian.PutUint16(buf, id.LocalPort)
+	b.Write(buf)
 
 	// remote port
-	binary.BigEndian.PutUint16(i, id.RemotePort)
-	b.Write(i)
+	binary.BigEndian.PutUint16(buf, id.RemotePort)
+	b.Write(buf)
 
 	// local address
 	b.WriteByte(byte(id.LocalAddress.Len()))

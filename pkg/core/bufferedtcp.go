@@ -34,10 +34,7 @@ func (c *bufferedTCP) Write(b []byte) (n int, err error) {
 
 	buf := config.LPool.Get().([]byte)[:]
 	n = copy(buf, b)
-	c.Chan <- &DatagramPacket{
-		DataLength: uint16(n),
-		Data:       buf,
-	}
+	c.Chan <- newDatagramPacket(buf, n)
 	return n, nil
 }
 

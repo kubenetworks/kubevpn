@@ -3,8 +3,6 @@ package core
 import (
 	"encoding/binary"
 	"io"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 type DatagramPacket struct {
@@ -12,9 +10,9 @@ type DatagramPacket struct {
 	Data       []byte // []byte
 }
 
-func newDatagramPacket(data []byte) (r *DatagramPacket) {
+func newDatagramPacket(data []byte, length int) (r *DatagramPacket) {
 	return &DatagramPacket{
-		DataLength: uint16(len(data)),
+		DataLength: uint16(length),
 		Data:       data,
 	}
 }
@@ -34,10 +32,8 @@ func readDatagramPacket(r io.Reader, b []byte) (*DatagramPacket, error) {
 }
 
 func (d *DatagramPacket) Write(w io.Writer) error {
-	buf := config.LPool.Get().([]byte)[:]
-	defer config.LPool.Put(buf[:])
-	binary.BigEndian.PutUint16(buf[:2], d.DataLength)
-	n := copy(buf[2:], d.Data[:d.DataLength])
-	_, err := w.Write(buf[:n+2])
+	n := copy(d.Data[2:], d.Data[:d.DataLength])
+	binary.BigEndian.PutUint16(d.Data[:2], d.DataLength)
+	_, err := w.Write(d.Data[:n+2])
 	return err
 }

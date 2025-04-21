@@ -262,7 +262,7 @@ func copyStream(ctx context.Context, local net.Conn, remote net.Conn) {
 		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
 			plog.G(ctx).Debugf("Failed to copy remote -> local: %s", err)
 		}
-		pkgutil.SafeWrite(chDone, true)
+		chDone <- true
 	}()
 
 	// start local -> remote data transfer
@@ -273,7 +273,7 @@ func copyStream(ctx context.Context, local net.Conn, remote net.Conn) {
 		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
 			plog.G(ctx).Debugf("Failed to copy local -> remote: %s", err)
 		}
-		pkgutil.SafeWrite(chDone, true)
+		chDone <- true
 	}()
 
 	select {

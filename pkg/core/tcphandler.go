@@ -61,7 +61,7 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 
 	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
-		datagram, err := readDatagramPacket(tcpConn, buf[:])
+		datagram, err := readDatagramPacket(tcpConn, buf)
 		if err != nil {
 			plog.G(ctx).Errorf("[TCP] Failed to read from %s -> %s: %v", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
 			config.LPool.Put(buf[:])
@@ -160,7 +160,7 @@ func (c *UDPConnOverTCP) ReadFrom(b []byte) (int, net.Addr, error) {
 }
 
 func (c *UDPConnOverTCP) WriteTo(b []byte, _ net.Addr) (int, error) {
-	packet := newDatagramPacket(b)
+	packet := newDatagramPacket(b, len(b)-2)
 	if err := packet.Write(c.Conn); err != nil {
 		return 0, err
 	}
