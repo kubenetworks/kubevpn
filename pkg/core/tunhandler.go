@@ -59,7 +59,7 @@ func (h *tunHandler) HandleServer(ctx context.Context, tun net.Conn) {
 	defer device.Close()
 	go device.readFromTUN(ctx)
 	go device.writeToTUN(ctx)
-	go device.transport(ctx, h.node.Addr, h.routeMapUDP, h.routeMapTCP)
+	go device.handlePacket(ctx, h.node.Addr, h.routeMapUDP, h.routeMapTCP)
 
 	select {
 	case err := <-device.errChan:
@@ -131,7 +131,7 @@ func (d *Device) Close() {
 	util.SafeClose(TCPPacketChan)
 }
 
-func (d *Device) transport(ctx context.Context, addr string, routeMapUDP *sync.Map, routeMapTCP *sync.Map) {
+func (d *Device) handlePacket(ctx context.Context, addr string, routeMapUDP *sync.Map, routeMapTCP *sync.Map) {
 	packetConn, err := (&net.ListenConfig{}).ListenPacket(ctx, "udp", addr)
 	if err != nil {
 		util.SafeWrite(d.errChan, err)
@@ -268,7 +268,7 @@ func (p *Peer) routeTUN(ctx context.Context) {
 			}
 		} else if conn, ok := p.routeMapTCP.Load(packet.dst.String()); ok {
 			plog.G(ctx).Debugf("[TUN] Find TCP route to dst: %s -> %s", packet.dst.String(), conn.(net.Conn).RemoteAddr())
-			dgram := newDatagramPacket(packet.data[:packet.length])
+			dgram := newDatagramPacket(packet.data, packet.length)
 			err := dgram.Write(conn.(net.Conn))
 			config.LPool.Put(packet.data[:])
 			if err != nil {

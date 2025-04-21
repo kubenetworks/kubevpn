@@ -68,7 +68,7 @@ func (c *gvisorUDPConnOverTCP) Read(b []byte) (int, error) {
 }
 
 func (c *gvisorUDPConnOverTCP) Write(b []byte) (int, error) {
-	packet := newDatagramPacket(b)
+	packet := newDatagramPacket(b, len(b)-2)
 	if err := packet.Write(c.Conn); err != nil {
 		return 0, err
 	}
@@ -114,7 +114,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				errChan <- err
 				return
 			}
-			datagram, err := readDatagramPacket(tcpConn, buf[:])
+			datagram, err := readDatagramPacket(tcpConn, buf)
 			if err != nil {
 				plog.G(ctx).Errorf("[TUN-UDP] %s -> %s: %v", tcpConn.RemoteAddr(), udpConn.LocalAddr(), err)
 				errChan <- err
@@ -172,7 +172,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				errChan <- err
 				return
 			}
-			packet := newDatagramPacket(buf[:n])
+			packet := newDatagramPacket(buf, n)
 			if err = packet.Write(tcpConn); err != nil {
 				plog.G(ctx).Errorf("[TUN-UDP] Error: %s <- %s : %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr(), err)
 				errChan <- err
