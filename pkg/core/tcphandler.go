@@ -98,12 +98,7 @@ func (h *UDPOverTCPHandler) handlePacket(ctx context.Context, tcpConn net.Conn, 
 		config.LPool.Put(datagram.Data[:])
 	} else {
 		plog.G(ctx).Debugf("[TCP] Forward to TUN device, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), datagram.DataLength)
-		util.SafeWrite(h.packetChan, &Packet{
-			data:   datagram.Data,
-			length: int(datagram.DataLength),
-			src:    src,
-			dst:    dst,
-		}, func(v *Packet) {
+		util.SafeWrite(h.packetChan, NewPacket(datagram.Data, int(datagram.DataLength), src, dst), func(v *Packet) {
 			plog.G(context.Background()).Errorf("Stuck packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), v.length)
 			h.packetChan <- v
 		})
@@ -160,7 +155,11 @@ func (c *UDPConnOverTCP) ReadFrom(b []byte) (int, net.Addr, error) {
 }
 
 func (c *UDPConnOverTCP) WriteTo(b []byte, _ net.Addr) (int, error) {
-	packet := newDatagramPacket(b, len(b)-2)
+	buf := config.LPool.Get().([]byte)[:]
+	n := copy(buf, b)
+	defer config.LPool.Put(buf)
+
+	packet := newDatagramPacket(buf, n)
 	if err := packet.Write(c.Conn); err != nil {
 		return 0, err
 	}

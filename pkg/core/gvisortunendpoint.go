@@ -25,11 +25,8 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, c
 		pktBuffer := endpoint.ReadContext(ctx)
 		if pktBuffer != nil {
 			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionSend, pktBuffer.NetworkProtocolNumber, pktBuffer)
-			data := pktBuffer.ToView().AsSlice()
-			buf := config.LPool.Get().([]byte)[:]
-			n := copy(buf, data)
-			_, err := tcpConn.Write(buf[:n+2])
-			config.LPool.Put(buf)
+			buf := pktBuffer.ToView().AsSlice()
+			_, err := tcpConn.Write(buf)
 			if err != nil {
 				plog.G(ctx).Errorf("[TUN-GVISOR] Failed to write data to tun device: %v", err)
 			}
@@ -123,12 +120,7 @@ func (h *gvisorTCPHandler) handlePacket(ctx context.Context, buf []byte, length 
 		}
 	} else if config.RouterIP.Equal(dst) || config.RouterIP6.Equal(dst) {
 		plog.G(ctx).Debugf("[TCP-GVISOR] Forward to TUN device, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, protocol, length)
-		util.SafeWrite(h.packetChan, &Packet{
-			length: length,
-			data:   buf[:],
-			src:    src,
-			dst:    dst,
-		}, func(v *Packet) {
+		util.SafeWrite(h.packetChan, NewPacket(buf[:], length, src, dst), func(v *Packet) {
 			config.LPool.Put(v.data[:])
 			plog.G(context.Background()).Errorf("[TCP-GVISOR] Drop packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, protocol, v.length)
 		})
