@@ -99,12 +99,7 @@ func (d *Device) readFromTUN(ctx context.Context) {
 		}
 
 		plog.G(ctx).Debugf("[TUN] SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
-		util.SafeWrite(d.tunInbound, &Packet{
-			data:   buf[:],
-			length: n,
-			src:    src,
-			dst:    dst,
-		}, func(v *Packet) {
+		util.SafeWrite(d.tunInbound, NewPacket(buf[:], n, src, dst), func(v *Packet) {
 			config.LPool.Put(v.data[:])
 			plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", v.src, v.dst, layers.IPProtocol(protocol).String(), v.length)
 		})
@@ -227,12 +222,7 @@ func (p *Peer) readFromConn(ctx context.Context) {
 		}
 		p.addToRouteMapUDP(ctx, src, from)
 		plog.G(context.Background()).Errorf("[TUN] SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
-		p.tunInbound <- &Packet{
-			data:   buf[:],
-			length: n,
-			src:    src,
-			dst:    dst,
-		}
+		p.tunInbound <- NewPacket(buf[:], n, src, dst)
 	}
 }
 

@@ -89,7 +89,7 @@ func handlePacketClient(ctx context.Context, tunInbound <-chan *Packet, tunOutbo
 				})
 				continue
 			}
-			_, err := packetConn.WriteTo(packet.data[:packet.length+2], remoteAddr)
+			_, err := packetConn.WriteTo(packet.data[:packet.length], remoteAddr)
 			config.LPool.Put(packet.data[:])
 			if err != nil {
 				util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to write packet to remote %s", remoteAddr)))
@@ -113,7 +113,7 @@ func handlePacketClient(ctx context.Context, tunInbound <-chan *Packet, tunOutbo
 				config.LPool.Put(buf[:])
 				continue
 			}
-			util.SafeWrite(tunOutbound, &Packet{data: buf[:], length: n}, func(v *Packet) {
+			util.SafeWrite(tunOutbound, NewPacket(buf[:], n, nil, nil), func(v *Packet) {
 				config.LPool.Put(v.data[:])
 				plog.G(context.Background()).Errorf("Drop packet, LocalAddr: %s, Remote: %s, Length: %d", packetConn.LocalAddr(), remoteAddr, v.length)
 			})

@@ -68,7 +68,11 @@ func (c *gvisorUDPConnOverTCP) Read(b []byte) (int, error) {
 }
 
 func (c *gvisorUDPConnOverTCP) Write(b []byte) (int, error) {
-	packet := newDatagramPacket(b, len(b)-2)
+	buf := config.LPool.Get().([]byte)[:]
+	n := copy(buf, b)
+	defer config.LPool.Put(buf)
+
+	packet := newDatagramPacket(buf, n)
 	if err := packet.Write(c.Conn); err != nil {
 		return 0, err
 	}
