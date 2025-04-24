@@ -107,7 +107,7 @@ func (d *CloneOptions) InitClient(f cmdutil.Factory) (err error) {
 		}
 		return
 	}
-	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags := genericclioptions.NewConfigFlags(true)
 	configFlags.KubeConfig = pointer.String(d.TargetKubeconfig)
 	configFlags.Namespace = pointer.String(d.TargetNamespace)
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)

@@ -68,7 +68,7 @@ current-context: localhost`
 	}
 
 	for _, data := range testData {
-		configFlags := genericclioptions.NewConfigFlags(false)
+		configFlags := genericclioptions.NewConfigFlags(true)
 		configFlags.KubeConfig = ptr.To(temp.Name())
 		configFlags.Context = ptr.To(data.Context)
 		matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)

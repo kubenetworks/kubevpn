@@ -236,7 +236,7 @@ func GetClusterIDByConfig(cmd *cobra.Command, config Config) (string, error) {
 	var sshConf = &pkgssh.SshConfig{}
 	pkgssh.AddSshFlags(flags, sshConf)
 	handler.AddExtraRoute(flags, &handler.ExtraRouteInfo{})
-	configFlags := genericclioptions.NewConfigFlags(false).WithDeprecatedPasswordFlag()
+	configFlags := genericclioptions.NewConfigFlags(true)
 	configFlags.AddFlags(flags)
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(&warp{ConfigFlags: configFlags})
 	matchVersionFlags.AddFlags(flags)
