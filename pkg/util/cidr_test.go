@@ -30,7 +30,7 @@ var (
 
 func before() {
 	var err error
-	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags := genericclioptions.NewConfigFlags(true)
 	f = util.NewFactory(util.NewMatchVersionFlags(configFlags))
 
 	if restconfig, err = f.ToRESTConfig(); err != nil {

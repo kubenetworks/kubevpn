@@ -144,7 +144,7 @@ func ConvertToTempKubeconfigFile(kubeconfigBytes []byte) (string, error) {
 }
 
 func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
-	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags := genericclioptions.NewConfigFlags(true)
 	configFlags.WrapConfigFn = func(c *rest.Config) *rest.Config {
 		if path, ok := os.LookupEnv(config.EnvSSHJump); ok {
 			bytes, err := os.ReadFile(path)
@@ -175,7 +175,7 @@ func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 }
 
 func InitFactoryByPath(kubeconfig string, ns string) cmdutil.Factory {
-	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags := genericclioptions.NewConfigFlags(true)
 	configFlags.KubeConfig = pointer.String(kubeconfig)
 	configFlags.Namespace = pointer.String(ns)
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)

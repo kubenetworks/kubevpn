@@ -31,7 +31,7 @@ func NewKubeVPNCommand() *cobra.Command {
 	}
 
 	flags := cmd.PersistentFlags()
-	configFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	configFlags := genericclioptions.NewConfigFlags(true)
 	configFlags.WrapConfigFn = func(c *rest.Config) *rest.Config {
 		if path, ok := os.LookupEnv(config.EnvSSHJump); ok {
 			kubeconfigBytes, err := os.ReadFile(path)
