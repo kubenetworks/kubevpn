@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"io"
+	"os"
 	"time"
 
 	"github.com/pkg/errors"
@@ -54,12 +55,6 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if err != nil {
 		return err
 	}
-	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-	flags.AddFlag(&pflag.Flag{
-		Name:     "kubeconfig",
-		DefValue: file,
-	})
-
 	sshCtx, sshCancel := context.WithCancel(context.Background())
 	svr.connect.AddRolloutFunc(func() error {
 		sshCancel()
@@ -75,12 +70,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 			sshCancel()
 		}
 	}()
-	var path string
-	path, err = ssh.SshJump(sshCtx, ssh.ParseSshFromRPC(req.SshJump), flags, false)
-	if err != nil {
-		return err
-	}
-	err = svr.connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
+	err = svr.connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
 	if err != nil {
 		return err
 	}
@@ -114,6 +104,8 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		DefValue: file,
 	})
 	sshCtx, sshCancel := context.WithCancel(context.Background())
+	sshCtx = plog.WithLogger(sshCtx, logger)
+	defer plog.WithoutLogger(sshCtx)
 	connect := &handler.ConnectOptions{
 		Namespace:            req.Namespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
@@ -159,6 +151,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 			connect.GetClientset().CoreV1(), connect.Namespace,
 		)
 		if isSameCluster {
+			sshCancel()
 			// same cluster, do nothing
 			logger.Infof("Connected to cluster")
 			return nil
@@ -170,6 +163,13 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		return err
 	}
 
+	// only ssh jump in user daemon
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	req.KubeconfigBytes = string(content)
+	req.SshJump = ssh.SshConfig{}.ToRPC()
 	connResp, err := cli.Connect(ctx, req)
 	if err != nil {
 		return err

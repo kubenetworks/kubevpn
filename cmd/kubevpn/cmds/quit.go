@@ -29,8 +29,8 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
         kubevpn quit
 		`)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_ = quit(cmd.Context(), false)
 			_ = quit(cmd.Context(), true)
+			_ = quit(cmd.Context(), false)
 			util.CleanExtensionLib()
 			_, _ = fmt.Fprint(os.Stdout, "Exited")
 			return nil

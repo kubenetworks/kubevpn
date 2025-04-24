@@ -21,6 +21,25 @@ import (
 func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_DisconnectServer) error {
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newDisconnectWarp(resp), svr.LogFile))
 	ctx := plog.WithLogger(resp.Context(), logger)
+
+	// disconnect sudo daemon first
+	// then disconnect from user daemon
+	// because only ssh jump in user daemon
+	if !svr.IsSudo {
+		cli, err := svr.GetClient(true)
+		if err != nil {
+			return errors.Wrap(err, "sudo daemon not start")
+		}
+		connResp, err := cli.Disconnect(resp.Context(), req)
+		if err != nil {
+			return err
+		}
+		err = util.CopyGRPCStream[rpc.DisconnectResponse](connResp, resp)
+		if err != nil {
+			return err
+		}
+	}
+
 	switch {
 	case req.GetAll():
 		if svr.clone != nil {
@@ -102,22 +121,6 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 			_ = dns.CleanupHosts()
 		}
 	}
-
-	if !svr.IsSudo {
-		cli, err := svr.GetClient(true)
-		if err != nil {
-			return errors.Wrap(err, "sudo daemon not start")
-		}
-		connResp, err := cli.Disconnect(resp.Context(), req)
-		if err != nil {
-			return err
-		}
-		err = util.CopyGRPCStream[rpc.DisconnectResponse](connResp, resp)
-		if err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
