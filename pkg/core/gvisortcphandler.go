@@ -81,5 +81,6 @@ func GvisorTCPListener(addr string) (net.Listener, error) {
 		_ = listener.Close()
 		return nil, err
 	}
+	plog.G(context.Background()).Debugf("Use tls mode")
 	return tls.NewListener(&tcpKeepAliveListener{TCPListener: listener}, serverConfig), nil
 }

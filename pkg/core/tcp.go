@@ -38,7 +38,7 @@ func (tr *tcpTransporter) Dial(ctx context.Context, addr string) (net.Conn, erro
 		plog.G(ctx).Debugf("tls config not found in config, use raw tcp mode")
 		return conn, nil
 	}
-	plog.G(ctx).Debugf("use tls mode")
+	plog.G(ctx).Debugf("Use tls mode")
 	return tls.Client(conn, tr.tlsConfig), nil
 }
 

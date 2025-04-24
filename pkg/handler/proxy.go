@@ -162,7 +162,11 @@ func (m *Mapper) Run(connectNamespace string) {
 						local := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(containerPort))
 						remote := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(envoyRulePort))
 						for ctx.Err() == nil {
-							_ = ssh.ExposeLocalPortToRemote(ctx, remoteSSHServer, remote, local)
+							func() {
+								ctx2, cancelFunc := context.WithCancel(ctx)
+								defer cancelFunc()
+								_ = ssh.ExposeLocalPortToRemote(ctx2, remoteSSHServer, remote, local)
+							}()
 							time.Sleep(time.Second * 2)
 						}
 					}(containerPort, envoyRulePort)
