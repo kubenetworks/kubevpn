@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"io"
+	"os"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -35,12 +36,6 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	if err != nil {
 		return err
 	}
-	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-	flags.AddFlag(&pflag.Flag{
-		Name:     "kubeconfig",
-		DefValue: file,
-	})
-
 	sshCtx, sshCancel := context.WithCancel(context.Background())
 	connect.AddRolloutFunc(func() error {
 		sshCancel()
@@ -55,12 +50,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 		}
 	}()
 
-	var path string
-	path, err = ssh.SshJump(sshCtx, ssh.ParseSshFromRPC(req.SshJump), flags, false)
-	if err != nil {
-		return err
-	}
-	err = connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
 	if err != nil {
 		return err
 	}
@@ -99,6 +89,8 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		DefValue: file,
 	})
 	sshCtx, sshCancel := context.WithCancel(context.Background())
+	sshCtx = plog.WithLogger(sshCtx, logger)
+	defer plog.WithoutLogger(sshCtx)
 	connect := &handler.ConnectOptions{
 		Namespace:            req.Namespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
@@ -125,7 +117,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		return err
 	}
 
-	connectNs, err := util.DetectConnectNamespace(plog.WithLogger(sshCtx, logger), connect.GetFactory(), req.Namespace)
+	connectNs, err := util.DetectConnectNamespace(sshCtx, connect.GetFactory(), req.Namespace)
 	if err != nil {
 		return err
 	}
@@ -144,6 +136,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 			connect.GetClientset().CoreV1(), connect.Namespace,
 		)
 		if isSameCluster {
+			sshCancel()
 			// same cluster, do nothing
 			logger.Infof("Connected with cluster")
 			return nil
@@ -155,6 +148,13 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		return err
 	}
 
+	// only ssh jump in user daemon
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	req.KubeconfigBytes = string(content)
+	req.SshJump = ssh.SshConfig{}.ToRPC()
 	connResp, err := cli.ConnectFork(ctx, req)
 	if err != nil {
 		return err
