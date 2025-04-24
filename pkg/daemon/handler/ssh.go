@@ -150,8 +150,8 @@ func (w *wsHandler) createTwoWayTUNTunnel(ctx context.Context, cli *ssh.Client) 
 	plog.G(ctx).Info("Connected private safe tunnel")
 	go func() {
 		for ctx.Err() == nil {
-			util.Ping(ctx, clientIP.IP.String(), ip.String())
-			time.Sleep(time.Second * 5)
+			util.PingOnce(ctx, clientIP.IP.String(), ip.String())
+			time.Sleep(time.Second * 15)
 		}
 	}()
 	return nil
@@ -436,7 +436,7 @@ func init() {
 			if errors.Is(err, io.EOF) {
 				return
 			} else if err != nil {
-				plog.G(context.Background()).Errorf("Session %s windos change w: %d h: %d failed: %v", sessionID, r.Width, r.Height, err)
+				plog.G(context.Background()).Errorf("Session %s windows change w: %d h: %d failed: %v", sessionID, r.Width, r.Height, err)
 			}
 		}
 	}))

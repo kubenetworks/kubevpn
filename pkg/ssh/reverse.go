@@ -37,6 +37,7 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 		plog.G(ctx).Errorf("Dial into remote server error: %s", err)
 		return err
 	}
+	defer serverConn.Close()
 
 	// Listen on remote server port
 	listener, err := serverConn.Listen("tcp", remotePort.String())
@@ -45,6 +46,12 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 		return err
 	}
 	defer listener.Close()
+
+	go func() {
+		<-ctx.Done()
+		listener.Close()
+		serverConn.Close()
+	}()
 
 	// handle incoming connections on reverse forwarded tunnel
 	for {
