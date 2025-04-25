@@ -58,6 +58,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	sshCtx, sshCancel := context.WithCancel(context.Background())
 	svr.connect.AddRolloutFunc(func() error {
 		sshCancel()
+		os.Remove(file)
 		return nil
 	})
 	sshCtx = plog.WithLogger(sshCtx, logger)
@@ -67,6 +68,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 			svr.connect.Cleanup(sshCtx)
 			svr.connect = nil
 			svr.t = time.Time{}
+			os.Remove(file)
 			sshCancel()
 		}
 	}()
@@ -114,12 +116,14 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	}
 	connect.AddRolloutFunc(func() error {
 		sshCancel()
+		os.Remove(file)
 		return nil
 	})
 	defer func() {
 		if e != nil {
 			connect.Cleanup(plog.WithLogger(context.Background(), logger))
 			sshCancel()
+			os.Remove(file)
 		}
 	}()
 	var path string
@@ -127,6 +131,10 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	if err != nil {
 		return err
 	}
+	connect.AddRolloutFunc(func() error {
+		os.Remove(path)
+		return nil
+	})
 	err = connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
 	if err != nil {
 		return err
@@ -152,6 +160,8 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		)
 		if isSameCluster {
 			sshCancel()
+			os.Remove(path)
+			os.Remove(file)
 			// same cluster, do nothing
 			logger.Infof("Connected to cluster")
 			return nil

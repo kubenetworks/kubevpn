@@ -132,11 +132,15 @@ func ConvertToTempKubeconfigFile(kubeconfigBytes []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	err = temp.Close()
+	_, err = temp.Write(kubeconfigBytes)
 	if err != nil {
 		return "", err
 	}
-	err = os.WriteFile(temp.Name(), kubeconfigBytes, os.ModePerm)
+	err = temp.Chmod(0644)
+	if err != nil {
+		return "", err
+	}
+	err = temp.Close()
 	if err != nil {
 		return "", err
 	}
@@ -156,19 +160,11 @@ func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 		}
 		return c
 	}
-	temp, err := os.CreateTemp("", "*.kubeconfig")
+	file, err := ConvertToTempKubeconfigFile([]byte(kubeconfigBytes))
 	if err != nil {
 		return nil
 	}
-	err = temp.Close()
-	if err != nil {
-		return nil
-	}
-	err = os.WriteFile(temp.Name(), []byte(kubeconfigBytes), os.ModePerm)
-	if err != nil {
-		return nil
-	}
-	configFlags.KubeConfig = pointer.String(temp.Name())
+	configFlags.KubeConfig = pointer.String(file)
 	configFlags.Namespace = pointer.String(ns)
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
 	return cmdutil.NewFactory(matchVersionFlags)
@@ -214,19 +210,9 @@ func GetKubeconfigPath(factory cmdutil.Factory) (string, error) {
 		return "", err
 	}
 
-	temp, err := os.CreateTemp("", "*.kubeconfig")
+	file, err := ConvertToTempKubeconfigFile(kubeconfigJsonBytes)
 	if err != nil {
 		return "", err
 	}
-	temp.Close()
-	err = os.WriteFile(temp.Name(), kubeconfigJsonBytes, 0644)
-	if err != nil {
-		return "", err
-	}
-	err = os.Chmod(temp.Name(), 0644)
-	if err != nil {
-		return "", err
-	}
-
-	return temp.Name(), nil
+	return file, nil
 }

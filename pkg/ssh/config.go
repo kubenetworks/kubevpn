@@ -168,13 +168,13 @@ func (conf SshConfig) AliasRecursion(ctx context.Context, stopChan <-chan struct
 		if client == nil {
 			client, err = bastionList[i].Dial(ctx, stopChan)
 			if err != nil {
-				err = errors.Wrap(err, fmt.Sprintf("Failed to connect to %s", bastionList[i]))
+				err = errors.Wrap(err, fmt.Sprintf("Failed to connect to %v", bastionList[i]))
 				return
 			}
 		} else {
 			client, err = JumpTo(ctx, client, bastionList[i], stopChan)
 			if err != nil {
-				err = errors.Wrap(err, fmt.Sprintf("Failed to jump to %s", bastionList[i]))
+				err = errors.Wrap(err, fmt.Sprintf("Failed to jump to %v", bastionList[i]))
 				return
 			}
 		}

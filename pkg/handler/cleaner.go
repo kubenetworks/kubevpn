@@ -64,6 +64,9 @@ func (c *ConnectOptions) Cleanup(ctx context.Context) {
 		if err != nil {
 			plog.G(ctx).Errorf("Leave proxy resources error: %v", err)
 		}
+		if c.cancel != nil {
+			c.cancel()
+		}
 
 		for _, function := range c.getRolloutFunc() {
 			if function != nil {
@@ -71,9 +74,6 @@ func (c *ConnectOptions) Cleanup(ctx context.Context) {
 					plog.G(ctx).Warnf("Rollout function error: %v", err)
 				}
 			}
-		}
-		if c.cancel != nil {
-			c.cancel()
 		}
 		if c.dnsConfig != nil {
 			if inUserDaemon {
