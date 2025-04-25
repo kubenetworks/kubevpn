@@ -111,6 +111,9 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 		for ctx1.Err() == nil {
 			localConn, err1 := localListen.Accept()
 			if err1 != nil {
+				if errors.Is(err1, net.ErrClosed) {
+					return
+				}
 				plog.G(ctx).Debugf("Failed to accept ssh conn: %v", err1)
 				continue
 			}
@@ -123,14 +126,14 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 					var openChannelError *gossh.OpenChannelError
 					// if ssh server not permitted ssh port-forward, do nothing until exit
 					if errors.As(err, &openChannelError) && openChannelError.Reason == gossh.Prohibited {
-						plog.G(ctx).Debugf("Failed to open ssh port-forward: %s: %v", remote.String(), err)
-						plog.G(ctx).Errorf("Failed to open ssh port-forward: %s: %v", remote.String(), err)
+						plog.G(ctx).Debugf("Failed to open ssh port-forward to %s: %v", remote.String(), err)
+						plog.G(ctx).Errorf("Failed to open ssh port-forward to %s: %v", remote.String(), err)
 						cancelFunc1()
 					}
-					plog.G(ctx).Debugf("Failed to get remote conn: %v", err)
+					plog.G(ctx).Debugf("Failed to dial into remote %s: %v", remote.String(), err)
 					return
 				}
-				plog.G(ctx).Debugf("Opened ssh port-forward: %s", remote.String())
+				plog.G(ctx).Debugf("Opened ssh port-forward to %s", remote.String())
 
 				defer remoteConn.Close()
 				copyStream(ctx, localConn, remoteConn)
@@ -196,20 +199,12 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 			return
 		}
 
-		var temp *os.File
-		if temp, err = os.CreateTemp("", "*.kubeconfig"); err != nil {
+		var file string
+		file, err = pkgutil.ConvertToTempKubeconfigFile(bytes.TrimSpace(stdout))
+		if err != nil {
 			return
 		}
-		if err = temp.Close(); err != nil {
-			return
-		}
-		if err = os.WriteFile(temp.Name(), stdout, 0644); err != nil {
-			return
-		}
-		if err = os.Chmod(temp.Name(), 0644); err != nil {
-			return
-		}
-		configFlags.KubeConfig = pointer.String(temp.Name())
+		configFlags.KubeConfig = pointer.String(file)
 	} else {
 		if flags != nil {
 			lookup := flags.Lookup("kubeconfig")
@@ -332,26 +327,16 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 		plog.G(ctx).Errorf("failed to marshal config: %v", err)
 		return
 	}
-	var temp *os.File
-	temp, err = os.CreateTemp("", "*.kubeconfig")
+	path, err = pkgutil.ConvertToTempKubeconfigFile(marshal)
 	if err != nil {
-		return
-	}
-	if err = temp.Close(); err != nil {
-		return
-	}
-	if err = os.WriteFile(temp.Name(), marshal, 0644); err != nil {
-		return
-	}
-	if err = os.Chmod(temp.Name(), 0644); err != nil {
+		plog.G(ctx).Errorf("failed to write kubeconfig: %v", err)
 		return
 	}
 	if print {
-		plog.G(ctx).Infof("Use temporary kubeconfig: %s", temp.Name())
+		plog.G(ctx).Infof("Use temporary kubeconfig: %s", path)
 	} else {
-		plog.G(ctx).Debugf("Use temporary kubeconfig: %s", temp.Name())
+		plog.G(ctx).Debugf("Use temporary kubeconfig: %s", path)
 	}
-	path = temp.Name()
 	return
 }
 
@@ -435,7 +420,7 @@ func getRemoteConn(ctx context.Context, clientMap *sync.Map, conf *SshConfig, re
 		conn, err = cli.DialContext(ctx1, "tcp", remote.String())
 		cancelFunc1()
 		if err != nil {
-			plog.G(ctx).Debugf("Failed to dial remote address %s: %s", remote.String(), err)
+			plog.G(ctx).Debugf("Failed to dial remote address %s: %v", remote.String(), err)
 			clientMap.Delete(key)
 			plog.G(ctx).Error("Delete invalid ssh client from map")
 			_ = cli.Close()
@@ -456,16 +441,16 @@ func getRemoteConn(ctx context.Context, clientMap *sync.Map, conf *SshConfig, re
 		return nil, err
 	}
 	clientMap.Store(uuid.NewString(), newSshClientWrap(client, cancelFunc1))
-	plog.G(ctx1).Debug("Connected to remote SSH server")
+	plog.G(ctx1).Debug("Connected to remote ssh server")
 
 	ctx2, cancelFunc2 := context.WithTimeout(ctx, time.Second*10)
 	defer cancelFunc2()
 	conn, err = client.DialContext(ctx2, "tcp", remote.String())
 	if err != nil {
-		plog.G(ctx).Debugf("Failed to dial remote addr: %s: %v", remote.String(), err)
+		plog.G(ctx).Debugf("Failed to dial remote addr %s: %v", remote.String(), err)
 		return nil, err
 	}
-	plog.G(ctx).Debugf("Connected to remote addr: %s", remote.String())
+	plog.G(ctx).Debugf("Connected to remote addr %s", remote.String())
 	return conn, nil
 }
 

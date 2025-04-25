@@ -85,19 +85,10 @@ func ConvertK8sApiServerToDomain(kubeConfigPath string) (newPath string, err err
 	if err != nil {
 		return
 	}
-	var temp *os.File
-	temp, err = os.CreateTemp("", "*.kubeconfig")
+	newPath, err = ConvertToTempKubeconfigFile(marshal)
 	if err != nil {
 		return
 	}
-	if err = temp.Close(); err != nil {
-		return
-	}
-	err = os.WriteFile(temp.Name(), marshal, 0644)
-	if err != nil {
-		return
-	}
-	newPath = temp.Name()
 	return
 }
 
