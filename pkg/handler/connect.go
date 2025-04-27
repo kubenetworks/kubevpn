@@ -955,17 +955,27 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 	if len(deploy.Spec.Template.Spec.Containers) == 0 {
 		return fmt.Errorf("can not found any container in deploy %s", deploy.Name)
 	}
+	// check running pod, sometime deployment is rolling back, so need to check running pod
+	list, err := c.GetRunningPodList(ctx)
+	if err != nil {
+		return err
+	}
 
 	clientVer := config.Version
 	clientImg := config.Image
 	serverImg := deploy.Spec.Template.Spec.Containers[0].Image
+	runningPodImg := list[0].Spec.Containers[0].Image
 
 	isNeedUpgrade, err := util.IsNewer(clientVer, clientImg, serverImg)
-	if !isNeedUpgrade {
+	isPodNeedUpgrade, err1 := util.IsNewer(clientVer, clientImg, runningPodImg)
+	if !isNeedUpgrade && !isPodNeedUpgrade {
 		return nil
 	}
 	if err != nil {
 		return err
+	}
+	if err1 != nil {
+		return err1
 	}
 
 	// 1) update secret
