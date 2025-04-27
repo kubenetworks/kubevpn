@@ -37,12 +37,7 @@ func TunHandler(forward *Forwarder, node *Node) Handler {
 
 func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
 	if remote := h.node.Remote; remote != "" {
-		remoteAddr, err := net.ResolveUDPAddr("udp", remote)
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to resolve udp addr %s: %v", remote, err)
-			return
-		}
-		h.HandleClient(ctx, tun, remoteAddr)
+		h.HandleClient(ctx, tun)
 	} else {
 		h.HandleServer(ctx, tun)
 	}
