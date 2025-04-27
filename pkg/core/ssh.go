@@ -38,7 +38,7 @@ func (s *sshHandler) Handle(ctx context.Context, conn net.Conn) {
 		}),
 		Handler: ssh.Handler(func(s ssh.Session) {
 			io.WriteString(s, "Remote forwarding available...\n")
-			select {}
+			<-s.Context().Done()
 		}),
 		ReversePortForwardingCallback: ssh.ReversePortForwardingCallback(func(ctx ssh.Context, host string, port uint32) bool {
 			plog.G(ctx).Infoln("attempt to bind", host, port, "granted")

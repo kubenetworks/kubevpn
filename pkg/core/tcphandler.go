@@ -128,7 +128,7 @@ func (h *UDPOverTCPHandler) removeFromRouteMapTCP(ctx context.Context, tcpConn n
 	})
 }
 
-var _ net.PacketConn = (*UDPConnOverTCP)(nil)
+var _ net.Conn = (*UDPConnOverTCP)(nil)
 
 // UDPConnOverTCP fake udp connection over tcp connection
 type UDPConnOverTCP struct {
@@ -141,20 +141,20 @@ func newUDPConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, error) {
 	return &UDPConnOverTCP{ctx: ctx, Conn: conn}, nil
 }
 
-func (c *UDPConnOverTCP) ReadFrom(b []byte) (int, net.Addr, error) {
+func (c *UDPConnOverTCP) Read(b []byte) (int, error) {
 	select {
 	case <-c.ctx.Done():
-		return 0, nil, c.ctx.Err()
+		return 0, c.ctx.Err()
 	default:
 		datagram, err := readDatagramPacket(c.Conn, b)
 		if err != nil {
-			return 0, nil, err
+			return 0, err
 		}
-		return int(datagram.DataLength), nil, nil
+		return int(datagram.DataLength), nil
 	}
 }
 
-func (c *UDPConnOverTCP) WriteTo(b []byte, _ net.Addr) (int, error) {
+func (c *UDPConnOverTCP) Write(b []byte) (int, error) {
 	buf := config.LPool.Get().([]byte)[:]
 	n := copy(buf, b)
 	defer config.LPool.Put(buf)
