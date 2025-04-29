@@ -21,6 +21,8 @@ const (
 	LogFile = "daemon.log"
 
 	ConfigFile = "config.yaml"
+
+	TmpDir = "tmp"
 )
 
 //go:embed config.yaml
@@ -48,6 +50,14 @@ func init() {
 		panic(err)
 	}
 	err = os.Chmod(GetSyncthingPath(), 0755)
+	if err != nil {
+		panic(err)
+	}
+	err = os.MkdirAll(GetTempPath(), 0755)
+	if err != nil {
+		panic(err)
+	}
+	err = os.Chmod(GetTempPath(), 0755)
 	if err != nil {
 		panic(err)
 	}
@@ -84,4 +94,8 @@ func GetSyncthingPath() string {
 
 func GetConfigFilePath() string {
 	return filepath.Join(HomePath, ConfigFile)
+}
+
+func GetTempPath() string {
+	return filepath.Join(HomePath, TmpDir)
 }
