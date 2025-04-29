@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/url"
 	"os"
@@ -128,7 +129,12 @@ func GetAPIServerFromKubeConfigBytes(kubeconfigBytes []byte) *net.IPNet {
 }
 
 func ConvertToTempKubeconfigFile(kubeconfigBytes []byte) (string, error) {
-	temp, err := os.CreateTemp("", "*.kubeconfig")
+	pattern := "*.kubeconfig"
+	cluster, ns, _ := GetCluster(kubeconfigBytes)
+	if cluster != "" {
+		pattern = fmt.Sprintf("%s_%s_%s", cluster, ns, pattern)
+	}
+	temp, err := os.CreateTemp(config.GetTempPath(), pattern)
 	if err != nil {
 		return "", err
 	}
@@ -145,6 +151,32 @@ func ConvertToTempKubeconfigFile(kubeconfigBytes []byte) (string, error) {
 		return "", err
 	}
 	return temp.Name(), nil
+}
+
+func GetCluster(kubeConfigBytes []byte) (cluster string, ns string, err error) {
+	var clientConfig clientcmd.ClientConfig
+	clientConfig, err = clientcmd.NewClientConfigFromBytes(kubeConfigBytes)
+	if err != nil {
+		return
+	}
+	var rawConfig api.Config
+	rawConfig, err = clientConfig.RawConfig()
+	if err != nil {
+		return
+	}
+	if err = api.FlattenConfig(&rawConfig); err != nil {
+		return
+	}
+	if rawConfig.Contexts == nil {
+		return
+	}
+	kubeContext := rawConfig.Contexts[rawConfig.CurrentContext]
+	if kubeContext == nil {
+		return
+	}
+	cluster = kubeContext.Cluster
+	ns = kubeContext.Namespace
+	return
 }
 
 func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {

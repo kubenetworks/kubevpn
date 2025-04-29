@@ -42,7 +42,7 @@ func CmdDaemon(cmdutil.Factory) *cobra.Command {
 			} else {
 				go util.StartupPProf(config.PProfPort)
 			}
-			return initLogfile(action.GetDaemonLogPath())
+			return initLogfile(action.GetDaemonLogPath(opt.IsSudo))
 		},
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			defer opt.Stop()

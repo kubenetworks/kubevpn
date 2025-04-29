@@ -1,7 +1,6 @@
 package action
 
 import (
-	"bufio"
 	"io"
 	"log"
 	"os"
@@ -12,35 +11,73 @@ import (
 )
 
 func (svr *Server) Logs(req *rpc.LogRequest, resp rpc.Daemon_LogsServer) error {
-	path := GetDaemonLogPath()
-
-	lines, err2 := countLines(path)
-	if err2 != nil {
-		return err2
-	}
-
 	// only show latest N lines
-	if req.Lines < 0 {
-		lines = -req.Lines
-	} else {
-		lines -= req.Lines
-	}
-
-	config := tail.Config{Follow: req.Follow, ReOpen: false, MustExist: true, Logger: log.New(io.Discard, "", log.LstdFlags)}
-	if !req.Follow {
-		// FATAL -- cannot set ReOpen without Follow.
-		config.ReOpen = false
-	}
-	file, err := tail.TailFile(path, config)
+	line := int64(max(req.Lines, -req.Lines))
+	sudoLine, sudoSize, err := seekToLastLine(GetDaemonLogPath(true), line)
 	if err != nil {
 		return err
 	}
-	defer file.Stop()
+	userLine, userSize, err := seekToLastLine(GetDaemonLogPath(false), line)
+	if err != nil {
+		return err
+	}
+	err = recent(resp, sudoLine, userLine)
+	if err != nil {
+		return err
+	}
+
+	if req.Follow {
+		err = tee(resp, sudoSize, userSize)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func tee(resp rpc.Daemon_LogsServer, sudoLine int64, userLine int64) error {
+	// FATAL -- cannot set ReOpen without Follow.
+	sudoConfig := tail.Config{
+		Follow:    true,
+		ReOpen:    true,
+		MustExist: true,
+		Logger:    log.New(io.Discard, "", log.LstdFlags),
+		Location:  &tail.SeekInfo{Offset: sudoLine, Whence: io.SeekStart},
+	}
+	userConfig := tail.Config{
+		Follow:    true,
+		ReOpen:    true,
+		MustExist: true,
+		Logger:    log.New(io.Discard, "", log.LstdFlags),
+		Location:  &tail.SeekInfo{Offset: userLine, Whence: io.SeekStart},
+	}
+	sudoFile, err := tail.TailFile(GetDaemonLogPath(true), sudoConfig)
+	if err != nil {
+		return err
+	}
+	defer sudoFile.Stop()
+	userFile, err := tail.TailFile(GetDaemonLogPath(false), userConfig)
+	if err != nil {
+		return err
+	}
+	defer userFile.Stop()
 	for {
 		select {
 		case <-resp.Context().Done():
 			return nil
-		case line, ok := <-file.Lines:
+		case line, ok := <-userFile.Lines:
+			if !ok {
+				return nil
+			}
+			if line.Err != nil {
+				return line.Err
+			}
+
+			err = resp.Send(&rpc.LogResponse{Message: "[USER] " + line.Text + "\n"})
+			if err != nil {
+				return err
+			}
+		case line, ok := <-sudoFile.Lines:
 			if !ok {
 				return nil
 			}
@@ -48,11 +85,7 @@ func (svr *Server) Logs(req *rpc.LogRequest, resp rpc.Daemon_LogsServer) error {
 				return err
 			}
 
-			if lines--; lines >= 0 {
-				continue
-			}
-
-			err = resp.Send(&rpc.LogResponse{Message: line.Text + "\n"})
+			err = resp.Send(&rpc.LogResponse{Message: "[ROOT] " + line.Text + "\n"})
 			if err != nil {
 				return err
 			}
@@ -60,23 +93,115 @@ func (svr *Server) Logs(req *rpc.LogRequest, resp rpc.Daemon_LogsServer) error {
 	}
 }
 
-func countLines(filename string) (int32, error) {
+func recent(resp rpc.Daemon_LogsServer, sudoLine int64, userLine int64) error {
+	sudoConfig := tail.Config{
+		Follow:    false,
+		ReOpen:    false,
+		MustExist: true,
+		Logger:    log.New(io.Discard, "", log.LstdFlags),
+		Location:  &tail.SeekInfo{Offset: sudoLine, Whence: io.SeekStart},
+	}
+	userConfig := tail.Config{
+		Follow:    false,
+		ReOpen:    false,
+		MustExist: true,
+		Logger:    log.New(io.Discard, "", log.LstdFlags),
+		Location:  &tail.SeekInfo{Offset: userLine, Whence: io.SeekStart},
+	}
+	sudoFile, err := tail.TailFile(GetDaemonLogPath(true), sudoConfig)
+	if err != nil {
+		return err
+	}
+	defer sudoFile.Stop()
+	userFile, err := tail.TailFile(GetDaemonLogPath(false), userConfig)
+	if err != nil {
+		return err
+	}
+	defer userFile.Stop()
+userOut:
+	for {
+		select {
+		case <-resp.Context().Done():
+			return nil
+		case line, ok := <-userFile.Lines:
+			if !ok {
+				break userOut
+			}
+			if line.Err != nil {
+				return line.Err
+			}
+
+			err = resp.Send(&rpc.LogResponse{Message: "[USER] " + line.Text + "\n"})
+			if err != nil {
+				return err
+			}
+		}
+	}
+sudoOut:
+	for {
+		select {
+		case <-resp.Context().Done():
+			return nil
+		case line, ok := <-sudoFile.Lines:
+			if !ok {
+				break sudoOut
+			}
+			if line.Err != nil {
+				return line.Err
+			}
+
+			err = resp.Send(&rpc.LogResponse{Message: "[ROOT] " + line.Text + "\n"})
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func seekToLastLine(filename string, lines int64) (int64, int64, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	lineCount := int32(0)
-
-	for scanner.Scan() {
-		lineCount++
+	stat, err := file.Stat()
+	if err != nil {
+		return 0, 0, err
 	}
+	size := stat.Size()
+	bufSize := int64(4096)
+	lineCount := int64(0)
+	remaining := size
 
-	if err = scanner.Err(); err != nil {
-		return 0, err
+	for remaining > 0 {
+		chunkSize := bufSize
+		if remaining < bufSize {
+			chunkSize = remaining
+		}
+		pos := remaining - chunkSize
+		_, err = file.Seek(pos, io.SeekStart)
+		if err != nil {
+			return 0, 0, err
+		}
+
+		buf := make([]byte, chunkSize)
+		_, err = file.Read(buf)
+		if err != nil {
+			return 0, 0, err
+		}
+
+		for i := len(buf) - 1; i >= 0; i-- {
+			if buf[i] == '\n' {
+				lineCount++
+				if lineCount > lines {
+					targetPos := pos + int64(i) + 1
+					return targetPos, size, nil
+				}
+			}
+		}
+		remaining -= chunkSize
 	}
-
-	return lineCount, nil
+	return 0, 0, nil
 }

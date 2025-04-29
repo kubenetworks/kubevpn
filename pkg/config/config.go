@@ -45,24 +45,24 @@ const (
 	VolumeSyncthing   = "syncthing"
 
 	// innerIPv4Pool is used as tun ip
-	// 198.19.0.0/16 network  is part of the 198.18.0.0/15 (reserved for benchmarking).
+	// 198.19.0.0/16 network is part of the 198.18.0.0/15 (reserved for benchmarking).
 	// https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml
+	// so we split it into 2 parts: 198.18.0.0/15 --> [198.19.0.0/16, 198.19.0.0/16]
 	innerIPv4Pool = "198.19.0.100/16"
-	// 原因：在docker环境中，设置docker的 gateway 和 subnet，不能 inner 的冲突，也不能和 docker的 172.17 冲突
-	// 不然的话，请求会不通的
-	// 解决的问题：在 k8s 中的  名叫 kubernetes 的 service ip 为
-	// ➜  ~ kubectl get service kubernetes
-	//NAME         TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
-	//kubernetes   ClusterIP   172.17.0.1   <none>        443/TCP   190d
-	//
-	// ➜  ~ docker network inspect bridge | jq '.[0].IPAM.Config'
-	//[
-	//  {
-	//    "Subnet": "172.17.0.0/16",
-	//    "Gateway": "172.17.0.1"
-	//  }
-	//]
-	// 如果不创建 network，那么是无法请求到 这个 kubernetes 的 service 的
+	/*
+		reason：docker use 172.17.0.0/16 network conflict with k8s service kubernetes
+		➜  ~ kubectl get service kubernetes
+		NAME         TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
+		kubernetes   ClusterIP   172.17.0.1   <none>        443/TCP   190d
+
+		➜  ~ docker network inspect bridge | jq '.[0].IPAM.Config'
+		[
+		 {
+		   "Subnet": "172.17.0.0/16",
+		   "Gateway": "172.17.0.1"
+		 }
+		]
+	*/
 	dockerInnerIPv4Pool = "198.18.0.100/16"
 
 	// 2001:2::/64 network is part of the 2001:2::/48 (reserved for benchmarking)
@@ -99,9 +99,6 @@ const (
 
 	// hosts entry key word
 	HostsKeyWord = "# Add by KubeVPN"
-
-	GHCR_IMAGE_REGISTRY   = "ghcr.io"
-	DOCKER_IMAGE_REGISTRY = "docker.io"
 )
 
 var (

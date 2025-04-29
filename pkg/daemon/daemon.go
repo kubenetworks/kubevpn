@@ -44,7 +44,7 @@ type SvrOption struct {
 
 func (o *SvrOption) Start(ctx context.Context) error {
 	l := &lumberjack.Logger{
-		Filename:   action.GetDaemonLogPath(),
+		Filename:   action.GetDaemonLogPath(o.IsSudo),
 		MaxSize:    100,
 		MaxAge:     3,
 		MaxBackups: 3,
@@ -63,7 +63,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	plog.L.SetOutput(l)
 	rest.SetDefaultWarningHandler(rest.NoWarnings{})
 	// every day 00:00:00 rotate log
-	go rotateLog(l, o.IsSudo)
+	go rotateLog(l)
 
 	sockPath := config.GetSockPath(o.IsSudo)
 	err := os.Remove(sockPath)
@@ -227,11 +227,8 @@ func writePIDToFile(isSudo bool) error {
 
 // let daemon process to Rotate log. create new log file
 // sudo daemon process then use new log file
-func rotateLog(l *lumberjack.Logger, isSudo bool) {
+func rotateLog(l *lumberjack.Logger) {
 	sec := time.Duration(0)
-	if isSudo {
-		sec = 2 * time.Second
-	}
 	for {
 		nowTime := time.Now()
 		nowTimeStr := nowTime.Format("2006-01-02")
@@ -239,10 +236,6 @@ func rotateLog(l *lumberjack.Logger, isSudo bool) {
 		next := t2.AddDate(0, 0, 1).Add(sec)
 		after := next.UnixNano() - nowTime.UnixNano()
 		<-time.After(time.Duration(after) * time.Nanosecond)
-		if isSudo {
-			_ = l.Close()
-		} else {
-			_ = l.Rotate()
-		}
+		_ = l.Rotate()
 	}
 }

@@ -34,6 +34,9 @@ type Server struct {
 	ID string
 }
 
-func GetDaemonLogPath() string {
-	return filepath.Join(config.DaemonPath, config.LogFile)
+func GetDaemonLogPath(isSudo bool) string {
+	if isSudo {
+		return filepath.Join(config.DaemonPath, config.SudoLogFile)
+	}
+	return filepath.Join(config.DaemonPath, config.UserLogFile)
 }

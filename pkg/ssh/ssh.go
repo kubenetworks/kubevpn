@@ -333,9 +333,9 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 		return
 	}
 	if print {
-		plog.G(ctx).Infof("Use temporary kubeconfig: %s", path)
+		plog.G(ctx).Infof("Use temp kubeconfig: %s", path)
 	} else {
-		plog.G(ctx).Debugf("Use temporary kubeconfig: %s", path)
+		plog.G(ctx).Debugf("Use temp kubeconfig: %s", path)
 	}
 	return
 }
