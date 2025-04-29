@@ -38,9 +38,6 @@ type ClientDevice struct {
 	tunInbound  chan *Packet
 	tunOutbound chan *Packet
 	errChan     chan error
-
-	remote  *net.UDPAddr
-	forward *Forwarder
 }
 
 func (d *ClientDevice) handlePacket(ctx context.Context, forward *Forwarder) {

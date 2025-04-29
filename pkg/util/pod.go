@@ -382,7 +382,7 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 	}
 }
 
-func CheckPortStatus(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, localGvisorTCPPort string) {
+func CheckPortStatus(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, localRandomTCPPort string) {
 	defer cancelFunc()
 	ticker := time.NewTicker(time.Second * 60)
 	defer ticker.Stop()
@@ -398,10 +398,10 @@ func CheckPortStatus(ctx context.Context, cancelFunc context.CancelFunc, readyCh
 
 	for ctx.Err() == nil {
 		var lc net.ListenConfig
-		conn, err := lc.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", localGvisorTCPPort))
+		conn, err := lc.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", localRandomTCPPort))
 		if err == nil {
 			_ = conn.Close()
-			plog.G(ctx).Debugf("Local port: %s is free", localGvisorTCPPort)
+			plog.G(ctx).Debugf("Local port: %s is free", localRandomTCPPort)
 			return
 		}
 		time.Sleep(time.Second * 1)

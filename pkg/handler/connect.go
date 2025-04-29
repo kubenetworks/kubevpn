@@ -237,24 +237,15 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-
 		plog.G(ctx).Errorf("Add extra node IP failed: %v", err)
 		return
 	}
-	var rawTCPForwardPort, gvisorTCPForwardPort, gvisorUDPForwardPort int
-	rawTCPForwardPort, err = util.GetAvailableTCPPortOrDie()
-	if err != nil {
-		return err
-	}
-	gvisorTCPForwardPort, err = util.GetAvailableTCPPortOrDie()
-	if err != nil {
-		return err
-	}
-	gvisorUDPForwardPort, err = util.GetAvailableTCPPortOrDie()
+	var tcpForwardPort int
+	tcpForwardPort, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
 		return err
 	}
 	plog.G(ctx).Info("Forwarding port...")
-	portPair := []string{
-		fmt.Sprintf("%d:10800", rawTCPForwardPort),
-		fmt.Sprintf("%d:10801", gvisorTCPForwardPort),
-		fmt.Sprintf("%d:10802", gvisorUDPForwardPort),
+	portPair := []string{fmt.Sprintf("%d:10800", tcpForwardPort)}
+	if c.Engine == config.EngineGvisor {
+		portPair = []string{fmt.Sprintf("%d:10801", tcpForwardPort)}
 	}
 	if err = c.portForward(c.ctx, portPair); err != nil {
 		return
@@ -262,10 +253,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-
 	if util.IsWindows() {
 		driver.InstallWireGuardTunDriver()
 	}
-	forward := fmt.Sprintf("tcp://127.0.0.1:%d", rawTCPForwardPort)
-	if c.Engine == config.EngineGvisor {
-		forward = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
-	}
+	forward := fmt.Sprintf("tcp://127.0.0.1:%d", tcpForwardPort)
 	if err = c.startLocalTunServer(c.ctx, forward, isLite); err != nil {
 		plog.G(ctx).Errorf("Start local tun service failed: %v", err)
 		return
@@ -319,7 +307,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				podName := pod.GetName()
 				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
 				go util.CheckPodStatus(childCtx, cancelFunc, podName, c.clientset.CoreV1().Pods(c.Namespace))
-				go util.CheckPortStatus(childCtx, cancelFunc, readyChan, strings.Split(portPair[1], ":")[0])
+				go util.CheckPortStatus(childCtx, cancelFunc, readyChan, strings.Split(portPair[0], ":")[0])
 				go c.heartbeats(childCtx, util.GetPodIP(pod)...)
 				if *first {
 					go func() {
@@ -1230,6 +1218,9 @@ func (c *ConnectOptions) heartbeats(ctx context.Context, ips ...string) {
 	var dstIPv4, dstIPv6 net.IP
 	for _, podIP := range ips {
 		ip := net.ParseIP(podIP)
+		if ip == nil {
+			continue
+		}
 		if ip.To4() != nil {
 			dstIPv4 = ip
 		} else {

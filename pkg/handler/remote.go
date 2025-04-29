@@ -363,7 +363,7 @@ func genDeploySpec(namespace string, udp8422 string, tcp10800 string, tcp9002 st
 							Args: []string{util.If(
 								gvisor,
 								`
-kubevpn server -l "tcp://:10800" -l "gtcp://:10801" -l "gudp://:10802" --debug=true`,
+kubevpn server -l "tcp://:10800" -l "gtcp://:10801" --debug=true`,
 								`
 echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
@@ -375,7 +375,7 @@ iptables -P FORWARD ACCEPT
 ip6tables -P FORWARD ACCEPT
 iptables -t nat -A POSTROUTING -s ${CIDR4} -o eth0 -j MASQUERADE
 ip6tables -t nat -A POSTROUTING -s ${CIDR6} -o eth0 -j MASQUERADE
-kubevpn server -l "tcp://:10800" -l "tun://:8422?net=${TunIPv4}&net6=${TunIPv6}" -l "gtcp://:10801" -l "gudp://:10802" --debug=true`,
+kubevpn server -l "tcp://:10800" -l "tun://:8422?net=${TunIPv4}&net6=${TunIPv6}" -l "gtcp://:10801" --debug=true`,
 							)},
 							EnvFrom: []v1.EnvFromSource{{
 								SecretRef: &v1.SecretEnvSource{
