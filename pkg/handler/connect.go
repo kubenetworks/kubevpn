@@ -312,7 +312,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				}
 				pod := podList[0]
 				// add route in case of don't have permission to watch pod, but pod recreated ip changed, so maybe this ip can not visit
-				_ = c.addRoute(pod.Status.PodIP)
+				_ = c.addRoute(util.GetPodIP(pod)...)
 				childCtx, cancelFunc := context.WithCancel(ctx)
 				defer cancelFunc()
 				var readyChan = make(chan struct{})
@@ -320,6 +320,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
 				go util.CheckPodStatus(childCtx, cancelFunc, podName, c.clientset.CoreV1().Pods(c.Namespace))
 				go util.CheckPortStatus(childCtx, cancelFunc, readyChan, strings.Split(portPair[1], ":")[0])
+				go c.heartbeats(childCtx, util.GetPodIP(pod)...)
 				if *first {
 					go func() {
 						select {
@@ -1223,4 +1224,28 @@ func (c *ConnectOptions) IsMe(ns, uid string, headers map[string]string) bool {
 
 func (c *ConnectOptions) ProxyResources() ProxyList {
 	return c.proxyWorkloads
+}
+
+func (c *ConnectOptions) heartbeats(ctx context.Context, ips ...string) {
+	var dstIPv4, dstIPv6 net.IP
+	for _, podIP := range ips {
+		ip := net.ParseIP(podIP)
+		if ip.To4() != nil {
+			dstIPv4 = ip
+		} else {
+			dstIPv6 = ip
+		}
+	}
+
+	ticker := time.NewTicker(config.KeepAliveTime)
+	defer ticker.Stop()
+
+	for ; ctx.Err() == nil; <-ticker.C {
+		if dstIPv4 != nil && c.localTunIPv4 != nil {
+			util.Ping(ctx, c.localTunIPv4.IP.String(), dstIPv4.String())
+		}
+		if dstIPv6 != nil && c.localTunIPv6 != nil {
+			util.Ping(ctx, c.localTunIPv6.IP.String(), dstIPv6.String())
+		}
+	}
 }

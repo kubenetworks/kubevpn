@@ -537,3 +537,16 @@ func DetectPodSupportIPv6(ctx context.Context, factory util.Factory, namespace s
 	}
 	return disableIPv6 == 0, nil
 }
+
+func GetPodIP(pod corev1.Pod) []string {
+	var result = sets.New[string]().Insert()
+	for _, p := range pod.Status.PodIPs {
+		if net.ParseIP(p.IP) != nil {
+			result.Insert(p.IP)
+		}
+	}
+	if net.ParseIP(pod.Status.PodIP) != nil {
+		result.Insert(pod.Status.PodIP)
+	}
+	return result.UnsortedList()
+}
