@@ -42,16 +42,20 @@ type ClientDevice struct {
 
 func (d *ClientDevice) handlePacket(ctx context.Context, forward *Forwarder) {
 	for ctx.Err() == nil {
-		conn, err := forwardConn(ctx, forward)
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to get remote conn from %s -> %s: %s", d.tun.LocalAddr(), forward.node.Remote, err)
-			time.Sleep(time.Second * 1)
-			continue
-		}
-		err = handlePacketClient(ctx, d.tunInbound, d.tunOutbound, conn)
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to transport data to remote %s: %v", conn.RemoteAddr(), err)
-		}
+		func() {
+			defer time.Sleep(time.Second * 2)
+			conn, err := forwardConn(ctx, forward)
+			if err != nil {
+				plog.G(ctx).Errorf("Failed to get remote conn from %s -> %s: %s", d.tun.LocalAddr(), forward.node.Remote, err)
+				return
+			}
+			defer conn.Close()
+			err = handlePacketClient(ctx, d.tunInbound, d.tunOutbound, conn)
+			if err != nil {
+				plog.G(ctx).Errorf("Failed to transport data to remote %s: %v", conn.RemoteAddr(), err)
+				return
+			}
+		}()
 	}
 }
 
@@ -65,7 +69,6 @@ func forwardConn(ctx context.Context, forwarder *Forwarder) (net.Conn, error) {
 
 func handlePacketClient(ctx context.Context, tunInbound <-chan *Packet, tunOutbound chan<- *Packet, conn net.Conn) error {
 	errChan := make(chan error, 2)
-	defer conn.Close()
 
 	go func() {
 		defer util.HandleCrash()
@@ -73,6 +76,7 @@ func handlePacketClient(ctx context.Context, tunInbound <-chan *Packet, tunOutbo
 			_, err := conn.Write(packet.data[:packet.length])
 			config.LPool.Put(packet.data[:])
 			if err != nil {
+				plog.G(ctx).Errorf("Failed to write packet to remote: %v", err)
 				util.SafeWrite(errChan, errors.Wrap(err, "failed to write packet to remote"))
 				return
 			}
@@ -86,6 +90,7 @@ func handlePacketClient(ctx context.Context, tunInbound <-chan *Packet, tunOutbo
 			n, err := conn.Read(buf[:])
 			if err != nil {
 				config.LPool.Put(buf[:])
+				plog.G(ctx).Errorf("Failed to read packet from remote: %v", err)
 				util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to read packet from remote %s", conn.RemoteAddr())))
 				return
 			}

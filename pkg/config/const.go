@@ -19,7 +19,7 @@ const (
 	SudoPidPath = "sudo_daemon.pid"
 
 	UserLogFile = "user_daemon.log"
-	SudoLogFile = "sudo_daemon.log"
+	SudoLogFile = "root_daemon.log"
 
 	ConfigFile = "config.yaml"
 
