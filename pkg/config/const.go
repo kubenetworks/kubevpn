@@ -29,7 +29,7 @@ const (
 //go:embed config.yaml
 var config []byte
 
-func init() {
+func Init() {
 	err := os.MkdirAll(DaemonPath, 0755)
 	if err != nil {
 		panic(err)
