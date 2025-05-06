@@ -335,7 +335,7 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				return err != nil
 			},
 			func() error {
-				ctx1, cancelFunc1 := context.WithTimeout(ctx, time.Second*5)
+				ctx1, cancelFunc1 := context.WithTimeout(ctx, time.Second*10)
 				defer cancelFunc1()
 				_, err := podInterface.Get(ctx1, podName, v1.GetOptions{})
 				return err
@@ -379,32 +379,6 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				}
 			}
 		}()
-	}
-}
-
-func CheckPortStatus(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, localRandomTCPPort string) {
-	defer cancelFunc()
-	ticker := time.NewTicker(time.Second * 60)
-	defer ticker.Stop()
-
-	select {
-	case <-readyChan:
-	case <-ticker.C:
-		plog.G(ctx).Debugf("Wait port-forward to be ready timeout")
-		return
-	case <-ctx.Done():
-		return
-	}
-
-	for ctx.Err() == nil {
-		var lc net.ListenConfig
-		conn, err := lc.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", localRandomTCPPort))
-		if err == nil {
-			_ = conn.Close()
-			plog.G(ctx).Debugf("Local port: %s is free", localRandomTCPPort)
-			return
-		}
-		time.Sleep(time.Second * 1)
 	}
 }
 
