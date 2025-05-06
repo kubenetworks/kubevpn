@@ -19,6 +19,8 @@ import (
 )
 
 func NewKubeVPNCommand() *cobra.Command {
+	config.Init()
+
 	var cmd = &cobra.Command{
 		Use:   "kubevpn",
 		Short: i18n.T("KubeVPN offers a Cloud-Native Dev Environment that seamlessly connects to your Kubernetes cluster network."),
