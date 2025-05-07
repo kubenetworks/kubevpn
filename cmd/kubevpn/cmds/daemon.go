@@ -41,7 +41,6 @@ func CmdDaemon(cmdutil.Factory) *cobra.Command {
 				_ = util.CleanupTempKubeConfigFile()
 			} else {
 				go util.StartupPProf(config.PProfPort)
-				config.Init()
 			}
 			return initLogfile(action.GetDaemonLogPath(opt.IsSudo))
 		},
