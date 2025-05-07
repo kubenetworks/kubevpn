@@ -12,7 +12,6 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -45,7 +44,7 @@ func RunCmdWithElevated(exe string, arg []string) error {
 	//https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindow
 	var showCmd int32 = 0 //SW_NORMAL
 
-	os.Setenv(config.EnvDisableSyncthingLog, "1")
+	os.Setenv(EnvDisableSyncthingLog, "1")
 	err = windows.ShellExecute(0, verbPtr, exePtr, argPtr, cwdPtr, showCmd)
 	if err != nil {
 		plog.G(context.Background()).Warn(err)

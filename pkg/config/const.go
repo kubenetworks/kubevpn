@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/pkg/errors"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/elevate"
 )
 
 const (
@@ -29,42 +31,25 @@ const (
 //go:embed config.yaml
 var config []byte
 
-func Init() {
-	err := os.MkdirAll(DaemonPath, 0755)
-	if err != nil {
-		panic(err)
+func init() {
+	if elevate.IsAdmin() {
+		return
 	}
-	err = os.Chmod(DaemonPath, 0755)
-	if err != nil {
-		panic(err)
-	}
-	err = os.MkdirAll(PprofPath, 0755)
-	if err != nil {
-		panic(err)
-	}
-	err = os.Chmod(PprofPath, 0755)
-	if err != nil {
-		panic(err)
-	}
-	err = os.MkdirAll(GetSyncthingPath(), 0755)
-	if err != nil {
-		panic(err)
-	}
-	err = os.Chmod(GetSyncthingPath(), 0755)
-	if err != nil {
-		panic(err)
-	}
-	err = os.MkdirAll(GetTempPath(), 0755)
-	if err != nil {
-		panic(err)
-	}
-	err = os.Chmod(GetTempPath(), 0755)
-	if err != nil {
-		panic(err)
+
+	var paths = []string{DaemonPath, PprofPath, GetSyncthingPath(), GetTempPath()}
+	for _, path := range paths {
+		err := os.MkdirAll(path, 0755)
+		if err != nil {
+			panic(err)
+		}
+		err = os.Chmod(path, 0755)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	path := filepath.Join(HomePath, ConfigFile)
-	_, err = os.Stat(path)
+	_, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		err = os.WriteFile(path, config, 0644)
 	}
