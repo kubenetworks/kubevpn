@@ -102,7 +102,7 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&aliasName, "alias", "", "Alias name, query connect status by alias config name")
-	cmd.Flags().StringVarP(&localFile, "kubevpnconfig", "f", util.If(os.Getenv("KUBEVPNCONFIG") != "", os.Getenv("KUBEVPNCONFIG"), config.GetConfigFilePath()), "Path to the kubevpnconfig file to use for CLI requests.")
+	cmd.Flags().StringVarP(&localFile, "kubevpnconfig", "f", util.If(os.Getenv("KUBEVPNCONFIG") != "", os.Getenv("KUBEVPNCONFIG"), config.GetConfigFile()), "Path to the kubevpnconfig file to use for CLI requests.")
 	cmd.Flags().StringVarP(&remoteAddr, "remote", "r", "", "Remote config file, eg: https://raw.githubusercontent.com/kubenetworks/kubevpn/master/pkg/config/config.yaml")
 	cmd.Flags().StringVarP(&format, "output", "o", FormatTable, fmt.Sprintf("Output format. One of: (%s, %s, %s)", FormatJson, FormatYaml, FormatTable))
 	return cmd

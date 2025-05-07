@@ -119,7 +119,7 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&localFile, "kubevpnconfig", "f", util.If(os.Getenv("KUBEVPNCONFIG") != "", os.Getenv("KUBEVPNCONFIG"), config.GetConfigFilePath()), "Path to the kubevpnconfig file to use for CLI requests.")
+	cmd.Flags().StringVarP(&localFile, "kubevpnconfig", "f", util.If(os.Getenv("KUBEVPNCONFIG") != "", os.Getenv("KUBEVPNCONFIG"), config.GetConfigFile()), "Path to the kubevpnconfig file to use for CLI requests.")
 	cmd.Flags().StringVarP(&remoteAddr, "remote", "r", "", "Remote config file, eg: https://raw.githubusercontent.com/kubenetworks/kubevpn/master/pkg/config/config.yaml")
 	return cmd
 }
@@ -135,7 +135,7 @@ func ParseAndGet(localFile, remoteAddr string, aliasName string) ([]Config, erro
 		path = remoteAddr
 		content, err = util.DownloadFileStream(path)
 	} else {
-		path = config.GetConfigFilePath()
+		path = config.GetConfigFile()
 		content, err = os.ReadFile(path)
 	}
 	if err != nil {
