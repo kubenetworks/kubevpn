@@ -44,7 +44,7 @@ type SvrOption struct {
 
 func (o *SvrOption) Start(ctx context.Context) error {
 	l := &lumberjack.Logger{
-		Filename:   action.GetDaemonLogPath(o.IsSudo),
+		Filename:   config.GetDaemonLogPath(o.IsSudo),
 		MaxSize:    100,
 		MaxAge:     3,
 		MaxBackups: 3,

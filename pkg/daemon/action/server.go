@@ -1,7 +1,6 @@
 package action
 
 import (
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -9,7 +8,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/metadata/metadatainformer"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 )
@@ -32,11 +30,4 @@ type Server struct {
 	informer      metadatainformer.SharedInformerFactory
 
 	ID string
-}
-
-func GetDaemonLogPath(isSudo bool) string {
-	if isSudo {
-		return filepath.Join(config.DaemonPath, config.SudoLogFile)
-	}
-	return filepath.Join(config.DaemonPath, config.UserLogFile)
 }

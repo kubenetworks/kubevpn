@@ -2,8 +2,6 @@ package config
 
 import (
 	"net"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -111,10 +109,6 @@ var (
 	GitHubOAuthToken = ""
 
 	OriginImage = "ghcr.io/kubenetworks/kubevpn:" + Version
-
-	DaemonPath string
-	HomePath   string
-	PprofPath  string
 )
 
 var (
@@ -142,13 +136,6 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	dir, err := os.UserHomeDir()
-	if err != nil {
-		panic(err)
-	}
-	DaemonPath = filepath.Join(dir, HOME, Daemon)
-	HomePath = filepath.Join(dir, HOME)
-	PprofPath = filepath.Join(dir, HOME, Daemon, PProfDir)
 }
 
 var Debug bool

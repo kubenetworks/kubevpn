@@ -7,17 +7,18 @@ import (
 
 	"github.com/hpcloud/tail"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
 func (svr *Server) Logs(req *rpc.LogRequest, resp rpc.Daemon_LogsServer) error {
 	// only show latest N lines
 	line := int64(max(req.Lines, -req.Lines))
-	sudoLine, sudoSize, err := seekToLastLine(GetDaemonLogPath(true), line)
+	sudoLine, sudoSize, err := seekToLastLine(config.GetDaemonLogPath(true), line)
 	if err != nil {
 		return err
 	}
-	userLine, userSize, err := seekToLastLine(GetDaemonLogPath(false), line)
+	userLine, userSize, err := seekToLastLine(config.GetDaemonLogPath(false), line)
 	if err != nil {
 		return err
 	}
@@ -51,12 +52,12 @@ func tee(resp rpc.Daemon_LogsServer, sudoLine int64, userLine int64) error {
 		Logger:    log.New(io.Discard, "", log.LstdFlags),
 		Location:  &tail.SeekInfo{Offset: userLine, Whence: io.SeekStart},
 	}
-	sudoFile, err := tail.TailFile(GetDaemonLogPath(true), sudoConfig)
+	sudoFile, err := tail.TailFile(config.GetDaemonLogPath(true), sudoConfig)
 	if err != nil {
 		return err
 	}
 	defer sudoFile.Stop()
-	userFile, err := tail.TailFile(GetDaemonLogPath(false), userConfig)
+	userFile, err := tail.TailFile(config.GetDaemonLogPath(false), userConfig)
 	if err != nil {
 		return err
 	}
@@ -108,12 +109,12 @@ func recent(resp rpc.Daemon_LogsServer, sudoLine int64, userLine int64) error {
 		Logger:    log.New(io.Discard, "", log.LstdFlags),
 		Location:  &tail.SeekInfo{Offset: userLine, Whence: io.SeekStart},
 	}
-	sudoFile, err := tail.TailFile(GetDaemonLogPath(true), sudoConfig)
+	sudoFile, err := tail.TailFile(config.GetDaemonLogPath(true), sudoConfig)
 	if err != nil {
 		return err
 	}
 	defer sudoFile.Stop()
-	userFile, err := tail.TailFile(GetDaemonLogPath(false), userConfig)
+	userFile, err := tail.TailFile(config.GetDaemonLogPath(false), userConfig)
 	if err != nil {
 		return err
 	}

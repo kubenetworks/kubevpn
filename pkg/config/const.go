@@ -6,19 +6,17 @@ import (
 	"path/filepath"
 
 	"github.com/pkg/errors"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/elevate"
 )
 
 const (
 	HOME   = ".kubevpn"
 	Daemon = "daemon"
 
-	SockPath     = "daemon.sock"
-	SudoSockPath = "sudo_daemon.sock"
+	SockPath     = "user_daemon.sock"
+	SudoSockPath = "root_daemon.sock"
 
-	PidPath     = "daemon.pid"
-	SudoPidPath = "sudo_daemon.pid"
+	PidPath     = "user_daemon.pid"
+	SudoPidPath = "root_daemon.pid"
 
 	UserLogFile = "user_daemon.log"
 	SudoLogFile = "root_daemon.log"
@@ -28,28 +26,41 @@ const (
 	TmpDir = "tmp"
 )
 
-//go:embed config.yaml
-var config []byte
+var (
+	daemonPath string
+	homePath   string
+
+	//go:embed config.yaml
+	config []byte
+)
 
 func init() {
-	if elevate.IsAdmin() {
-		return
+	dir, err := os.UserHomeDir()
+	if err != nil {
+		panic(err)
 	}
+	homePath = filepath.Join(dir, HOME)
+	daemonPath = filepath.Join(dir, HOME, Daemon)
 
-	var paths = []string{DaemonPath, PprofPath, GetSyncthingPath(), GetTempPath()}
+	var paths = []string{homePath, daemonPath, GetPProfPath(), GetSyncthingPath(), GetTempPath()}
 	for _, path := range paths {
-		err := os.MkdirAll(path, 0755)
-		if err != nil {
-			panic(err)
-		}
-		err = os.Chmod(path, 0755)
-		if err != nil {
+		_, err = os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			err = os.MkdirAll(path, 0755)
+			if err != nil {
+				panic(err)
+			}
+			err = os.Chmod(path, 0755)
+			if err != nil {
+				panic(err)
+			}
+		} else if err != nil {
 			panic(err)
 		}
 	}
 
-	path := filepath.Join(HomePath, ConfigFile)
-	_, err := os.Stat(path)
+	path := filepath.Join(homePath, ConfigFile)
+	_, err = os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		err = os.WriteFile(path, config, 0644)
 	}
@@ -63,7 +74,7 @@ func GetSockPath(isSudo bool) string {
 	if isSudo {
 		name = SudoSockPath
 	}
-	return filepath.Join(DaemonPath, name)
+	return filepath.Join(daemonPath, name)
 }
 
 func GetPidPath(isSudo bool) string {
@@ -71,17 +82,28 @@ func GetPidPath(isSudo bool) string {
 	if isSudo {
 		name = SudoPidPath
 	}
-	return filepath.Join(DaemonPath, name)
+	return filepath.Join(daemonPath, name)
 }
 
 func GetSyncthingPath() string {
-	return filepath.Join(DaemonPath, SyncthingDir)
+	return filepath.Join(daemonPath, SyncthingDir)
 }
 
-func GetConfigFilePath() string {
-	return filepath.Join(HomePath, ConfigFile)
+func GetConfigFile() string {
+	return filepath.Join(homePath, ConfigFile)
 }
 
 func GetTempPath() string {
-	return filepath.Join(HomePath, TmpDir)
+	return filepath.Join(homePath, TmpDir)
+}
+
+func GetDaemonLogPath(isSudo bool) string {
+	if isSudo {
+		return filepath.Join(daemonPath, SudoLogFile)
+	}
+	return filepath.Join(daemonPath, UserLogFile)
+}
+
+func GetPProfPath() string {
+	return filepath.Join(daemonPath, PProfDir)
 }
