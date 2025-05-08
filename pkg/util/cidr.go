@@ -166,7 +166,7 @@ func GetServiceCIDRByCreateService(ctx context.Context, serviceInterface v12.Ser
 		}
 		return nil, fmt.Errorf("can not found any keyword of service network CIDR info: %s", err.Error())
 	}
-	return nil, err
+	return nil, fmt.Errorf("can not found any keyword of service network CIDR info")
 }
 
 // GetPodCIDRFromCNI
