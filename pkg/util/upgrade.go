@@ -24,7 +24,7 @@ var (
 )
 
 const (
-	addr = "https://github.com/wencaiwulue/kubevpn/releases/latest"
+	downloadAddr = "https://github.com/wencaiwulue/kubevpn/releases/latest"
 )
 
 func GetManifest(httpCli *http.Client, os string, arch string) (version string, url string, err error) {
@@ -70,7 +70,7 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 		}
 	}
 
-	err = fmt.Errorf("%s: try download it from: %s", If(m.Message != "", m.Message, string(content)), addr)
+	err = fmt.Errorf("%s: try download it from: %s", If(m.Message != "", m.Message, string(content)), downloadAddr)
 	return
 }
 

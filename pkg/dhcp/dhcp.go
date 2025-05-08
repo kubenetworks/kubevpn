@@ -216,12 +216,7 @@ func (m *Manager) Get(ctx context.Context, key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if cm != nil && cm.Data != nil {
-		if v, ok := cm.Data[key]; ok {
-			return v, nil
-		}
-	}
-	return "", fmt.Errorf("can not get data")
+	return cm.Data[key], nil
 }
 
 func (m *Manager) ForEach(ctx context.Context, fnv4 func(net.IP), fnv6 func(net.IP)) error {
