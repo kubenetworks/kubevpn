@@ -135,7 +135,7 @@ func addTunRoutes(tunName string, routes ...types.Route) error {
 		return err
 	}
 	for _, route := range routes {
-		if route.Dst.String() == "" {
+		if net.ParseIP(route.Dst.IP.String()) == nil {
 			continue
 		}
 		if route.GW == nil {

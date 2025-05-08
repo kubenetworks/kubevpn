@@ -101,7 +101,7 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 
 	var prefixList []netip.Prefix
 	for _, r := range routes {
-		if r.Dst.String() == "" {
+		if net.ParseIP(r.Dst.IP.String()) == nil {
 			continue
 		}
 		var prefix netip.Prefix

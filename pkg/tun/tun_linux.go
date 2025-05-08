@@ -107,7 +107,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 
 func addTunRoutes(ifName string, routes ...types.Route) error {
 	for _, route := range routes {
-		if route.Dst.String() == "" {
+		if net.ParseIP(route.Dst.IP.String()) == nil {
 			continue
 		}
 		// ip route add 192.168.1.123/32 dev utun0
