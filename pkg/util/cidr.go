@@ -59,8 +59,8 @@ func GetCIDR(ctx context.Context, clientset *kubernetes.Clientset, restconfig *r
 	}
 
 	plog.G(ctx).Infoln("Getting network CIDR from services...")
-	svcCIDR, err := GetServiceCIDRByCreateService(ctx, clientset.CoreV1().Services(namespace))
-	if err == nil {
+	svcCIDR, _ := GetServiceCIDRByCreateService(ctx, clientset.CoreV1().Services(namespace))
+	if svcCIDR != nil {
 		plog.G(ctx).Debugf("Getting network CIDR from services successfully")
 		result = append(result, svcCIDR)
 
@@ -91,8 +91,8 @@ func ParseCIDRFromString(content string) (result []*net.IPNet) {
 		if len(split) == 2 {
 			cidrList := split[1]
 			for _, cidr := range strings.Split(cidrList, ",") {
-				_, c, err := net.ParseCIDR(cidr)
-				if err == nil {
+				_, c, _ := net.ParseCIDR(cidr)
+				if c != nil {
 					result = append(result, c)
 				}
 			}
@@ -158,11 +158,8 @@ func GetServiceCIDRByCreateService(ctx context.Context, serviceInterface v12.Ser
 	if err != nil {
 		idx := strings.LastIndex(err.Error(), defaultCIDRIndex)
 		if idx != -1 {
-			_, cidr, err := net.ParseCIDR(strings.TrimSpace(err.Error()[idx+len(defaultCIDRIndex):]))
-			if err != nil {
-				return nil, err
-			}
-			return cidr, nil
+			_, cidr, err1 := net.ParseCIDR(strings.TrimSpace(err.Error()[idx+len(defaultCIDRIndex):]))
+			return cidr, err1
 		}
 		return nil, fmt.Errorf("can not found any keyword of service network CIDR info: %s", err.Error())
 	}
@@ -216,7 +213,7 @@ func GetPodCIDRFromCNI(ctx context.Context, clientset *kubernetes.Clientset, res
 		return nil, err
 	}
 	plog.G(ctx).Infoln("Get CNI config", configList.Name)
-	var cidr []*net.IPNet
+	var cidrList []*net.IPNet
 	for _, plugin := range configList.Plugins {
 		switch plugin.Network.Type {
 		case "calico":
@@ -226,13 +223,13 @@ func GetPodCIDRFromCNI(ctx context.Context, clientset *kubernetes.Clientset, res
 			slice6, _, _ := unstructured.NestedStringSlice(m, "ipam", "ipv6_pools")
 			for _, s := range sets.New[string]().Insert(slice...).Insert(slice6...).UnsortedList() {
 				if _, ipNet, _ := net.ParseCIDR(s); ipNet != nil {
-					cidr = append(cidr, ipNet)
+					cidrList = append(cidrList, ipNet)
 				}
 			}
 		}
 	}
 
-	return cidr, nil
+	return cidrList, nil
 }
 
 func CreateCIDRPod(ctx context.Context, clientset *kubernetes.Clientset, namespace string) (*v13.Pod, error) {

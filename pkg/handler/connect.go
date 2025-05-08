@@ -410,17 +410,17 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 	}
 	// add extra-cidr
 	for _, s := range c.ExtraRouteInfo.ExtraCIDR {
-		var ipnet *net.IPNet
-		_, ipnet, err = net.ParseCIDR(s)
+		var ipNet *net.IPNet
+		_, ipNet, err = net.ParseCIDR(s)
 		if err != nil {
 			return fmt.Errorf("invalid extra-cidr %s, err: %v", s, err)
 		}
-		cidrList = append(cidrList, ipnet)
+		cidrList = append(cidrList, ipNet)
 	}
 
 	var routes []types.Route
 	for _, ipNet := range util.RemoveLargerOverlappingCIDRs(cidrList) {
-		if ipNet != nil && !ipNet.IP.IsUnspecified() && len(ipNet.IP) != 0 && len(ipNet.Mask) != 0 {
+		if ipNet != nil {
 			routes = append(routes, types.Route{Dst: *ipNet})
 		}
 	}
