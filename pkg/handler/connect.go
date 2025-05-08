@@ -420,7 +420,9 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 
 	var routes []types.Route
 	for _, ipNet := range util.RemoveLargerOverlappingCIDRs(cidrList) {
-		routes = append(routes, types.Route{Dst: *ipNet})
+		if ipNet != nil && !ipNet.IP.IsUnspecified() && len(ipNet.IP) != 0 && len(ipNet.Mask) != 0 {
+			routes = append(routes, types.Route{Dst: *ipNet})
+		}
 	}
 
 	tunConfig := tun.Config{
