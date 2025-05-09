@@ -36,7 +36,7 @@ except for float arguments and return values.
 ## Example
 
 The example below only showcases purego use for macOS and Linux. The other platforms require special handling which can
-be seen in the complete example at [examples/libc](https://github.com/ebitengine/purego/tree/main/examples/libc) which supports Windows and FreeBSD.
+be seen in the complete example at [examples/libc](https://github.com/ebitengine/purego/tree/main/examples/libc) which supports FreeBSD and Windows.
 
 ```go
 package main
@@ -92,6 +92,7 @@ This is a list of the copied files:
 * `internal/fakecgo/iscgo.go` from package `runtime/cgo`
 * `internal/fakecgo/setenv.go` from package `runtime/cgo`
 * `internal/fakecgo/freebsd.go` from package `runtime/cgo`
+* `internal/fakecgo/netbsd.go` from package `runtime/cgo`
 
 The files `abi_*.h` and `internal/fakecgo/abi_*.h` are the same because Bazel does not support cross-package use of
 `#include` so we need each one once per package. (cf. [issue](https://github.com/bazelbuild/rules_go/issues/3636))
