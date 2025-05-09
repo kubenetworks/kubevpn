@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,12 +28,12 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-// GetCIDRElegant
+// GetCIDR
 // 1) dump cluster info
 // 2) grep cmdline
 // 3) create svc + cat *.conflist
 // 4) create svc + get pod ip with svc mask
-func GetCIDRElegant(ctx context.Context, clientset *kubernetes.Clientset, restconfig *rest.Config, namespace string) ([]*net.IPNet, error) {
+func GetCIDR(ctx context.Context, clientset *kubernetes.Clientset, restconfig *rest.Config, namespace string) ([]*net.IPNet, error) {
 	defer func() {
 		_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
 	}()
@@ -51,105 +53,24 @@ func GetCIDRElegant(ctx context.Context, clientset *kubernetes.Clientset, restco
 		result = append(result, cni...)
 	}
 
-	pod, err := GetPodCIDRFromCNI(ctx, clientset, restconfig, namespace)
+	podCIDR, err := GetPodCIDRFromCNI(ctx, clientset, restconfig, namespace)
 	if err == nil {
-		result = append(result, pod...)
-	}
-
-	svc, err := GetServiceCIDRByCreateService(ctx, clientset.CoreV1().Services(namespace))
-	if err == nil {
-		result = append(result, svc)
+		result = append(result, podCIDR...)
 	}
 
 	plog.G(ctx).Infoln("Getting network CIDR from services...")
-	pod, err = GetPodCIDRFromPod(ctx, clientset, namespace, svc)
-	if err == nil {
+	svcCIDR, _ := GetServiceCIDRByCreateService(ctx, clientset.CoreV1().Services(namespace))
+	if svcCIDR != nil {
 		plog.G(ctx).Debugf("Getting network CIDR from services successfully")
-		result = append(result, pod...)
+		result = append(result, svcCIDR)
+
+		podCIDR, err = GetPodCIDRFromPod(ctx, clientset, namespace, svcCIDR)
+		if err == nil {
+			result = append(result, podCIDR...)
+		}
 	}
 
-	result = RemoveLargerOverlappingCIDRs(result)
-	if len(result) == 0 {
-		err = fmt.Errorf("failed to get any network CIDR, please verify that you have the necessary permissions")
-		return nil, err
-	}
 	return result, nil
-}
-
-// GetCIDRFromResourceUgly
-// use podIP/24 and serviceIP/24 as cidr
-func GetCIDRFromResourceUgly(ctx context.Context, clientset *kubernetes.Clientset, namespace string) []*net.IPNet {
-	var cidrs []*net.IPNet
-	// (2) get pod CIDR from pod ip, why doing this: notice that node's pod cidr is not correct in minikube
-	// ➜  ~ kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}'
-	//10.244.0.0/24%
-	// ➜  ~  kubectl get pods -o=custom-columns=podIP:.status.podIP
-	//podIP
-	//172.17.0.5
-	//172.17.0.4
-	//172.17.0.4
-	//172.17.0.3
-	//172.17.0.3
-	//172.17.0.6
-	//172.17.0.8
-	//172.17.0.3
-	//172.17.0.7
-	//172.17.0.2
-	for _, n := range []string{v1.NamespaceAll, namespace} {
-		podList, err := clientset.CoreV1().Pods(n).List(ctx, v1.ListOptions{})
-		if err != nil {
-			continue
-		}
-		for _, pod := range podList.Items {
-			if pod.Spec.HostNetwork {
-				continue
-			}
-			s := sets.Set[string]{}.Insert(pod.Status.PodIP)
-			for _, p := range pod.Status.PodIPs {
-				s.Insert(p.IP)
-			}
-			for _, t := range s.UnsortedList() {
-				if ip := net.ParseIP(t); ip != nil {
-					var mask net.IPMask
-					if ip.To4() != nil {
-						mask = net.CIDRMask(24, 32)
-					} else {
-						mask = net.CIDRMask(64, 128)
-					}
-					cidrs = append(cidrs, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
-				}
-			}
-		}
-		break
-	}
-
-	// (2) get service CIDR
-	for _, n := range []string{v1.NamespaceAll, namespace} {
-		serviceList, err := clientset.CoreV1().Services(n).List(ctx, v1.ListOptions{})
-		if err != nil {
-			continue
-		}
-		for _, service := range serviceList.Items {
-			s := sets.Set[string]{}.Insert(service.Spec.ClusterIP)
-			for _, p := range service.Spec.ClusterIPs {
-				s.Insert(p)
-			}
-			for _, t := range s.UnsortedList() {
-				if ip := net.ParseIP(t); ip != nil {
-					var mask net.IPMask
-					if ip.To4() != nil {
-						mask = net.CIDRMask(24, 32)
-					} else {
-						mask = net.CIDRMask(64, 128)
-					}
-					cidrs = append(cidrs, &net.IPNet{IP: ip.Mask(mask), Mask: mask})
-				}
-			}
-		}
-		break
-	}
-
-	return cidrs
 }
 
 // ParseCIDRFromString
@@ -170,8 +91,8 @@ func ParseCIDRFromString(content string) (result []*net.IPNet) {
 		if len(split) == 2 {
 			cidrList := split[1]
 			for _, cidr := range strings.Split(cidrList, ",") {
-				_, c, err := net.ParseCIDR(cidr)
-				if err == nil {
+				_, c, _ := net.ParseCIDR(cidr)
+				if c != nil {
 					result = append(result, c)
 				}
 			}
@@ -185,7 +106,7 @@ func ParseCIDRFromString(content string) (result []*net.IPNet) {
 // ref: https://kubernetes.io/docs/concepts/services-networking/dual-stack/#configure-ipv4-ipv6-dual-stack
 // get cidr by dump cluster info
 func GetCIDRByDumpClusterInfo(ctx context.Context, clientset *kubernetes.Clientset) ([]*net.IPNet, error) {
-	podList, err := clientset.CoreV1().Pods(v1.NamespaceSystem).List(ctx, v1.ListOptions{})
+	podList, err := clientset.CoreV1().Pods(v1.NamespaceSystem).List(ctx, v1.ListOptions{Limit: 100})
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +122,7 @@ func GetCIDRByDumpClusterInfo(ctx context.Context, clientset *kubernetes.Clients
 	for _, s := range list {
 		result = append(result, ParseCIDRFromString(s)...)
 	}
-	return RemoveLargerOverlappingCIDRs(result), nil
+	return result, nil
 }
 
 // GetCIDRFromCNI kube-controller-manager--allocate-node-cidrs=true--authentication-kubeconfig=/etc/kubernetes/controller-manager.conf--authorization-kubeconfig=/etc/kubernetes/controller-manager.conf--bind-address=0.0.0.0--client-ca-file=/etc/kubernetes/ssl/ca.crt--cluster-cidr=10.233.64.0/18--cluster-name=cluster.local--cluster-signing-cert-file=/etc/kubernetes/ssl/ca.crt--cluster-signing-key-file=/etc/kubernetes/ssl/ca.key--configure-cloud-routes=false--controllers=*,bootstrapsigner,tokencleaner--kubeconfig=/etc/kubernetes/controller-manager.conf--leader-elect=true--leader-elect-lease-duration=15s--leader-elect-renew-deadline=10s--node-cidr-mask-size=24--node-monitor-grace-period=40s--node-monitor-period=5s--port=0--profiling=False--requestheader-client-ca-file=/etc/kubernetes/ssl/front-proxy-ca.crt--root-ca-file=/etc/kubernetes/ssl/ca.crt--service-account-private-key-file=/etc/kubernetes/ssl/sa.key--service-cluster-ip-range=10.233.0.0/18--terminated-pod-gc-threshold=12500--use-service-account-credentials=true
@@ -221,7 +142,7 @@ func GetCIDRFromCNI(ctx context.Context, clientset *kubernetes.Clientset, restco
 
 	var result []*net.IPNet
 	for _, s := range strings.Split(content, "\n") {
-		result = RemoveLargerOverlappingCIDRs(append(result, ParseCIDRFromString(s)...))
+		result = append(result, ParseCIDRFromString(s)...)
 	}
 
 	return result, nil
@@ -237,15 +158,12 @@ func GetServiceCIDRByCreateService(ctx context.Context, serviceInterface v12.Ser
 	if err != nil {
 		idx := strings.LastIndex(err.Error(), defaultCIDRIndex)
 		if idx != -1 {
-			_, cidr, err := net.ParseCIDR(strings.TrimSpace(err.Error()[idx+len(defaultCIDRIndex):]))
-			if err != nil {
-				return nil, err
-			}
-			return cidr, nil
+			_, cidr, err1 := net.ParseCIDR(strings.TrimSpace(err.Error()[idx+len(defaultCIDRIndex):]))
+			return cidr, err1
 		}
-		return nil, fmt.Errorf("can not found any keyword of service network CIDR info, err: %s", err.Error())
+		return nil, fmt.Errorf("can not found any keyword of service network CIDR info: %s", err.Error())
 	}
-	return nil, err
+	return nil, fmt.Errorf("can not found any keyword of service network CIDR info")
 }
 
 // GetPodCIDRFromCNI
@@ -295,7 +213,7 @@ func GetPodCIDRFromCNI(ctx context.Context, clientset *kubernetes.Clientset, res
 		return nil, err
 	}
 	plog.G(ctx).Infoln("Get CNI config", configList.Name)
-	var cidr []*net.IPNet
+	var cidrList []*net.IPNet
 	for _, plugin := range configList.Plugins {
 		switch plugin.Network.Type {
 		case "calico":
@@ -305,13 +223,13 @@ func GetPodCIDRFromCNI(ctx context.Context, clientset *kubernetes.Clientset, res
 			slice6, _, _ := unstructured.NestedStringSlice(m, "ipam", "ipv6_pools")
 			for _, s := range sets.New[string]().Insert(slice...).Insert(slice6...).UnsortedList() {
 				if _, ipNet, _ := net.ParseCIDR(s); ipNet != nil {
-					cidr = append(cidr, ipNet)
+					cidrList = append(cidrList, ipNet)
 				}
 			}
 		}
 	}
 
-	return cidr, nil
+	return cidrList, nil
 }
 
 func CreateCIDRPod(ctx context.Context, clientset *kubernetes.Clientset, namespace string) (*v13.Pod, error) {
@@ -439,37 +357,110 @@ func CreateCIDRPod(ctx context.Context, clientset *kubernetes.Clientset, namespa
 }
 
 func GetPodCIDRFromPod(ctx context.Context, clientset *kubernetes.Clientset, namespace string, svc *net.IPNet) ([]*net.IPNet, error) {
-	podList, err := clientset.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{})
+	podList, err := clientset.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{Limit: 100})
 	if err != nil {
 		return nil, err
 	}
-	for i := 0; i < len(podList.Items); i++ {
-		if podList.Items[i].Spec.HostNetwork {
-			podList.Items = append(podList.Items[:i], podList.Items[i+1:]...)
-			i--
-		}
-	}
+
 	var result []*net.IPNet
 	for _, item := range podList.Items {
+		if item.Spec.HostNetwork {
+			continue
+		}
+
 		s := sets.New[string]().Insert(item.Status.PodIP)
 		for _, p := range item.Status.PodIPs {
 			s.Insert(p.IP)
 		}
 		for _, t := range s.UnsortedList() {
 			if ip := net.ParseIP(t); ip != nil {
-				var mask net.IPMask
-				if ip.To4() != nil {
-					mask = net.CIDRMask(24, 32)
-				} else {
-					mask = net.CIDRMask(64, 128)
+				_, ipNet, _ := net.ParseCIDR((&net.IPNet{IP: ip, Mask: svc.Mask}).String())
+				if ipNet != nil {
+					result = append(result, ipNet)
 				}
-				result = append(result, &net.IPNet{IP: ip, Mask: /*svc.Mask*/ mask})
 			}
 		}
 	}
 
-	if len(result) == 0 {
-		return nil, fmt.Errorf("can not found pod network CIDR from pod list")
-	}
 	return result, nil
+}
+
+func RemoveCIDRsContainingIPs(cidrs []*net.IPNet, ipList []net.IP) []*net.IPNet {
+	for i := len(cidrs) - 1; i >= 0; i-- {
+		for _, ip := range ipList {
+			if cidrs[i].Contains(ip) {
+				cidrs = append(cidrs[:i], cidrs[i+1:]...)
+				break
+			}
+		}
+	}
+	return cidrs
+}
+
+func GetAPIServerIP(apiServerHost string) ([]net.IP, error) {
+	u, err := url.Parse(apiServerHost)
+	if err != nil {
+		return nil, err
+	}
+
+	var host string
+	if strings.IndexByte(u.Host, ':') < 0 {
+		host = u.Host
+	} else {
+		host, _, err = net.SplitHostPort(u.Host)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var ipList []net.IP
+	var set = sets.New[string]()
+	if ip := net.ParseIP(host); ip != nil {
+		if !set.Has(ip.String()) {
+			ipList = append(ipList, ip)
+			set.Insert(ip.String())
+		}
+	}
+
+	addrs, _ := net.LookupHost(host)
+	for _, addr := range addrs {
+		ip := net.ParseIP(addr)
+		if ip == nil {
+			continue
+		}
+		if !set.Has(ip.String()) {
+			ipList = append(ipList, ip)
+			set.Insert(ip.String())
+		}
+	}
+	return ipList, nil
+}
+
+func RemoveLargerOverlappingCIDRs(cidrNets []*net.IPNet) []*net.IPNet {
+	sort.Slice(cidrNets, func(i, j int) bool {
+		onesI, _ := cidrNets[i].Mask.Size()
+		onesJ, _ := cidrNets[j].Mask.Size()
+		// mask number is smaller, means the mask is larger
+		return onesI < onesJ
+	})
+
+	var cidrsOverlap = func(cidr1, cidr2 *net.IPNet) bool {
+		return cidr1.Contains(cidr2.IP) || cidr2.Contains(cidr1.IP)
+	}
+
+	var result []*net.IPNet
+	skipped := make(map[int]bool)
+
+	for i := range cidrNets {
+		if skipped[i] {
+			continue
+		}
+		for j := i + 1; j < len(cidrNets); j++ {
+			if cidrsOverlap(cidrNets[i], cidrNets[j]) {
+				skipped[j] = true
+			}
+		}
+		result = append(result, cidrNets[i])
+	}
+	return result
 }

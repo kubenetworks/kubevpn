@@ -7,13 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -232,34 +230,6 @@ func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.Polic
 	}
 
 	return false, nil
-}
-
-func RemoveLargerOverlappingCIDRs(cidrNets []*net.IPNet) []*net.IPNet {
-	sort.Slice(cidrNets, func(i, j int) bool {
-		onesI, _ := cidrNets[i].Mask.Size()
-		onesJ, _ := cidrNets[j].Mask.Size()
-		return onesI > onesJ
-	})
-
-	var cidrsOverlap = func(cidr1, cidr2 *net.IPNet) bool {
-		return cidr1.Contains(cidr2.IP) || cidr2.Contains(cidr1.IP)
-	}
-
-	var result []*net.IPNet
-	skipped := make(map[int]bool)
-
-	for i := range cidrNets {
-		if skipped[i] {
-			continue
-		}
-		for j := i + 1; j < len(cidrNets); j++ {
-			if cidrsOverlap(cidrNets[i], cidrNets[j]) {
-				skipped[j] = true
-			}
-		}
-		result = append(result, cidrNets[i])
-	}
-	return result
 }
 
 func CleanExtensionLib() {

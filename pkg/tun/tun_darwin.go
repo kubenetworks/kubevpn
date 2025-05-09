@@ -101,7 +101,7 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 
 	var prefixList []netip.Prefix
 	for _, r := range routes {
-		if r.Dst.String() == "" {
+		if net.ParseIP(r.Dst.IP.String()) == nil {
 			continue
 		}
 		var prefix netip.Prefix
@@ -116,7 +116,7 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 	}
 	err = addRoute(gw, prefixList...)
 	if err != nil {
-		return fmt.Errorf("failed to add route: %v", err)
+		return fmt.Errorf("failed to add dst %v via %s to route table: %v", prefixList, ifName, err)
 	}
 	return nil
 }

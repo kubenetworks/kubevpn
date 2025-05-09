@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/url"
 	"reflect"
 	"slices"
 	"sort"
@@ -411,17 +410,19 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 	}
 	// add extra-cidr
 	for _, s := range c.ExtraRouteInfo.ExtraCIDR {
-		var ipnet *net.IPNet
-		_, ipnet, err = net.ParseCIDR(s)
+		var ipNet *net.IPNet
+		_, ipNet, err = net.ParseCIDR(s)
 		if err != nil {
 			return fmt.Errorf("invalid extra-cidr %s, err: %v", s, err)
 		}
-		cidrList = append(cidrList, ipnet)
+		cidrList = append(cidrList, ipNet)
 	}
 
 	var routes []types.Route
 	for _, ipNet := range util.RemoveLargerOverlappingCIDRs(cidrList) {
-		routes = append(routes, types.Route{Dst: *ipNet})
+		if ipNet != nil {
+			routes = append(routes, types.Route{Dst: *ipNet})
+		}
 	}
 
 	tunConfig := tun.Config{
@@ -761,76 +762,43 @@ func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error
 // https://stackoverflow.com/questions/45903123/kubernetes-set-service-cidr-and-pod-cidr-the-same
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster/54183373#54183373
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster
-func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) (err error) {
-	defer func() {
-		if err == nil {
-			u, err2 := url.Parse(c.config.Host)
-			if err2 != nil {
-				return
-			}
-			host, _, err3 := net.SplitHostPort(u.Host)
-			if err3 != nil {
-				return
-			}
-			var ipList []net.IP
-			if ip := net.ParseIP(host); ip != nil {
-				ipList = append(ipList, ip)
-			}
-			ips, _ := net.LookupIP(host)
-			if ips != nil {
-				ipList = append(ipList, ips...)
-			}
-			c.apiServerIPs = ipList
-			c.removeCIDRsContainingIPs(ipList)
-		}
-	}()
+func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) error {
+	var err error
+	c.apiServerIPs, err = util.GetAPIServerIP(c.config.Host)
+	if err != nil {
+		return err
+	}
 
 	// (1) get CIDR from cache
-	var value string
-	value, err = m.Get(ctx, config.KeyClusterIPv4POOLS)
-	if err == nil {
-		for _, s := range strings.Split(value, " ") {
+	var ipPoolStr string
+	ipPoolStr, err = m.Get(ctx, config.KeyClusterIPv4POOLS)
+	if err != nil {
+		return err
+	}
+	if ipPoolStr != "" {
+		for _, s := range strings.Split(ipPoolStr, " ") {
 			_, cidr, _ := net.ParseCIDR(s)
 			if cidr != nil {
-				c.cidrs = util.RemoveLargerOverlappingCIDRs(append(c.cidrs, cidr))
+				c.cidrs = util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(append(c.cidrs, cidr)), c.apiServerIPs)
 			}
 		}
-		if len(c.cidrs) != 0 {
-			plog.G(ctx).Infoln("Get network CIDR from cache")
-			return nil
-		}
+		plog.G(ctx).Infoln("Get network CIDR from cache")
+		return nil
 	}
 
 	// (2) get CIDR from cni
-	c.cidrs, err = util.GetCIDRElegant(ctx, c.clientset, c.config, c.Namespace)
+	c.cidrs, err = util.GetCIDR(ctx, c.clientset, c.config, c.Namespace)
+	c.cidrs = util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(c.cidrs), c.apiServerIPs)
 	if err == nil {
 		s := sets.New[string]()
 		for _, cidr := range c.cidrs {
 			s.Insert(cidr.String())
 		}
-		cidrs := util.GetCIDRFromResourceUgly(ctx, c.clientset, c.Namespace)
-		for _, cidr := range cidrs {
-			s.Insert(cidr.String())
-		}
-		c.cidrs = util.RemoveLargerOverlappingCIDRs(append(c.cidrs, cidrs...))
-		_ = m.Set(ctx, config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
-		return nil
+		return m.Set(ctx, config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
 	}
 
-	// (3) fallback to get cidr from node/pod/service
-	c.cidrs = util.GetCIDRFromResourceUgly(ctx, c.clientset, c.Namespace)
+	// ignore error
 	return nil
-}
-
-func (c *ConnectOptions) removeCIDRsContainingIPs(ipList []net.IP) {
-	for i := len(c.cidrs) - 1; i >= 0; i-- {
-		for _, ip := range ipList {
-			if c.cidrs[i].Contains(ip) {
-				c.cidrs = append(c.cidrs[:i], c.cidrs[i+1:]...)
-				break
-			}
-		}
-	}
 }
 
 func (c *ConnectOptions) addExtraRoute(ctx context.Context, name string) error {
