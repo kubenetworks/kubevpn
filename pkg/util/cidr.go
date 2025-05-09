@@ -374,7 +374,10 @@ func GetPodCIDRFromPod(ctx context.Context, clientset *kubernetes.Clientset, nam
 		}
 		for _, t := range s.UnsortedList() {
 			if ip := net.ParseIP(t); ip != nil {
-				result = append(result, &net.IPNet{IP: ip, Mask: svc.Mask})
+				_, ipNet, _ := net.ParseCIDR((&net.IPNet{IP: ip, Mask: svc.Mask}).String())
+				if ipNet != nil {
+					result = append(result, ipNet)
+				}
 			}
 		}
 	}
