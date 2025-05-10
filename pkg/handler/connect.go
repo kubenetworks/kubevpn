@@ -329,7 +329,9 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				podName := pod.GetName()
 				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
 				go util.CheckPodStatus(childCtx, cancelFunc, podName, c.clientset.CoreV1().Pods(c.Namespace))
-				go healthCheck(childCtx, cancelFunc, readyChan, strings.Split(portPair[1], ":")[0], fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, c.Namespace), c.localTunIPv4.IP)
+				domain := fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, c.Namespace)
+				go healthCheckPortForward(childCtx, cancelFunc, readyChan, strings.Split(portPair[1], ":")[0], domain, c.localTunIPv4.IP)
+				go healthCheckTCPConn(childCtx, cancelFunc, readyChan, domain, util.GetPodIP(pod)[0])
 				if *first {
 					go func() {
 						select {
@@ -1204,7 +1206,7 @@ func (c *ConnectOptions) ProxyResources() ProxyList {
 	return c.proxyWorkloads
 }
 
-func healthCheck(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, localGvisorUDPPort string, domain string, ipv4 net.IP) {
+func healthCheckPortForward(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, localGvisorUDPPort string, domain string, ipv4 net.IP) {
 	defer cancelFunc()
 	ticker := time.NewTicker(time.Second * 60)
 	defer ticker.Stop()
@@ -1248,6 +1250,43 @@ func healthCheck(ctx context.Context, cancelFunc context.CancelFunc, readyChan c
 	defer newTicker.Stop()
 	for ; ctx.Err() == nil; <-newTicker.C {
 		err := retry.OnError(wait.Backoff{Duration: time.Second * 5, Steps: 4}, func(err error) bool {
+			return err != nil
+		}, func() error {
+			return healthChecker()
+		})
+		if err != nil {
+			plog.G(ctx).Errorf("Failed to query DNS: %v", err)
+			return
+		}
+	}
+}
+
+func healthCheckTCPConn(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, domain string, dnsServer string) {
+	defer cancelFunc()
+	ticker := time.NewTicker(time.Second * 60)
+	defer ticker.Stop()
+
+	select {
+	case <-readyChan:
+	case <-ticker.C:
+		plog.G(ctx).Debugf("Wait port-forward to be ready timeout")
+		return
+	case <-ctx.Done():
+		return
+	}
+
+	var healthChecker = func() error {
+		msg := new(miekgdns.Msg)
+		msg.SetQuestion(miekgdns.Fqdn(domain), miekgdns.TypeA)
+		client := miekgdns.Client{Net: "udp", Timeout: time.Second * 10}
+		_, _, err := client.ExchangeContext(ctx, msg, net.JoinHostPort(dnsServer, "53"))
+		return err
+	}
+
+	newTicker := time.NewTicker(config.KeepAliveTime)
+	defer newTicker.Stop()
+	for ; ctx.Err() == nil; <-newTicker.C {
+		err := retry.OnError(wait.Backoff{Duration: time.Second * 10, Steps: 6}, func(err error) bool {
 			return err != nil
 		}, func() error {
 			return healthChecker()

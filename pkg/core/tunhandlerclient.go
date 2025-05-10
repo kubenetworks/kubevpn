@@ -26,7 +26,6 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	go device.handlePacket(ctx, h.forward)
 	go device.readFromTun(ctx)
 	go device.writeToTun(ctx)
-	go heartbeats(ctx, device.tun)
 	select {
 	case <-device.errChan:
 	case <-ctx.Done():
@@ -73,7 +72,13 @@ func handlePacketClient(ctx context.Context, tunInbound <-chan *Packet, tunOutbo
 	go func() {
 		defer util.HandleCrash()
 		for packet := range tunInbound {
-			_, err := conn.Write(packet.data[:packet.length])
+			err := conn.SetWriteDeadline(time.Now().Add(config.KeepAliveTime))
+			if err != nil {
+				plog.G(ctx).Errorf("Failed to set write deadline: %v", err)
+				util.SafeWrite(errChan, errors.Wrap(err, "failed to set write deadline"))
+				return
+			}
+			_, err = conn.Write(packet.data[:packet.length])
 			config.LPool.Put(packet.data[:])
 			if err != nil {
 				plog.G(ctx).Errorf("Failed to write packet to remote: %v", err)
@@ -87,6 +92,12 @@ func handlePacketClient(ctx context.Context, tunInbound <-chan *Packet, tunOutbo
 		defer util.HandleCrash()
 		for {
 			buf := config.LPool.Get().([]byte)[:]
+			err := conn.SetReadDeadline(time.Now().Add(config.KeepAliveTime))
+			if err != nil {
+				plog.G(ctx).Errorf("Failed to set read deadline: %v", err)
+				util.SafeWrite(errChan, errors.Wrap(err, "failed to set read deadline"))
+				return
+			}
 			n, err := conn.Read(buf[:])
 			if err != nil {
 				config.LPool.Put(buf[:])
@@ -166,32 +177,4 @@ func (d *ClientDevice) Close() {
 	d.tun.Close()
 	util.SafeClose(d.tunInbound)
 	util.SafeClose(d.tunOutbound)
-}
-
-func heartbeats(ctx context.Context, tun net.Conn) {
-	tunIfi, err := util.GetTunDeviceByConn(tun)
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to get tun device: %v", err)
-		return
-	}
-	srcIPv4, srcIPv6, dockerSrcIPv4, err := util.GetTunDeviceIP(tunIfi.Name)
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to get tun device %s IP: %v", tunIfi.Name, err)
-		return
-	}
-
-	ticker := time.NewTicker(config.KeepAliveTime)
-	defer ticker.Stop()
-
-	for ; ctx.Err() == nil; <-ticker.C {
-		if srcIPv4 != nil {
-			util.Ping(ctx, srcIPv4.String(), config.RouterIP.String())
-		}
-		if srcIPv6 != nil {
-			util.Ping(ctx, srcIPv6.String(), config.RouterIP6.String())
-		}
-		if dockerSrcIPv4 != nil {
-			util.Ping(ctx, dockerSrcIPv4.String(), config.DockerRouterIP.String())
-		}
-	}
 }
