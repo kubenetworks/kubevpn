@@ -329,19 +329,17 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				podName := pod.GetName()
 				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
 				go util.CheckPodStatus(childCtx, cancelFunc, podName, c.clientset.CoreV1().Pods(c.Namespace))
-				go healthCheck(childCtx, cancelFunc, readyChan, strings.Split(portPair[1], ":")[0], fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, c.Namespace))
-				go func() {
-					select {
-					case <-readyChan:
-						for _, pair := range portPair {
-							ports := strings.Split(pair, ":")
-							plog.G(ctx).Infof("Forwarding from %s -> %s", net.JoinHostPort("127.0.0.1", ports[0]), ports[1])
+				go healthCheck(childCtx, cancelFunc, readyChan, strings.Split(portPair[1], ":")[0], fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, c.Namespace), c.localTunIPv4.IP)
+				if *first {
+					go func() {
+						select {
+						case <-readyChan:
+							firstCancelFunc()
+						case <-childCtx.Done():
 						}
-						firstCancelFunc()
-					case <-childCtx.Done():
-					}
-				}()
-
+					}()
+				}
+				out := plog.G(ctx).Out
 				err = util.PortForwardPod(
 					c.config,
 					c.restclient,
@@ -350,8 +348,8 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 					portPair,
 					readyChan,
 					childCtx.Done(),
-					nil,
-					plog.G(ctx).Out,
+					out,
+					out,
 				)
 				if *first {
 					util.SafeWrite(errChan, err)
@@ -1206,7 +1204,7 @@ func (c *ConnectOptions) ProxyResources() ProxyList {
 	return c.proxyWorkloads
 }
 
-func healthCheck(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, localGvisorUDPPort string, domain string) {
+func healthCheck(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, localGvisorUDPPort string, domain string, ipv4 net.IP) {
 	defer cancelFunc()
 	ticker := time.NewTicker(time.Second * 60)
 	defer ticker.Stop()
@@ -1230,7 +1228,7 @@ func healthCheck(ctx context.Context, cancelFunc context.CancelFunc, readyChan c
 			LocalPort:     53,
 			LocalAddress:  tcpip.AddrFrom4Slice(net.ParseIP("127.0.0.1").To4()),
 			RemotePort:    0,
-			RemoteAddress: tcpip.AddrFrom4Slice(net.IPv4zero.To4()),
+			RemoteAddress: tcpip.AddrFrom4Slice(ipv4.To4()),
 		})
 		if err != nil {
 			return err
