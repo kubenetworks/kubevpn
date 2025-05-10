@@ -1283,7 +1283,7 @@ func healthCheckTCPConn(ctx context.Context, cancelFunc context.CancelFunc, read
 		return err
 	}
 
-	newTicker := time.NewTicker(config.KeepAliveTime)
+	newTicker := time.NewTicker(config.KeepAliveTime / 2)
 	defer newTicker.Stop()
 	for ; ctx.Err() == nil; <-newTicker.C {
 		err := retry.OnError(wait.Backoff{Duration: time.Second * 10, Steps: 6}, func(err error) bool {
