@@ -132,7 +132,7 @@ func GetAPIServerFromKubeConfigBytes(kubeconfigBytes []byte) *net.IPNet {
 func ConvertToTempKubeconfigFile(kubeconfigBytes []byte) (string, error) {
 	pattern := "*.kubeconfig"
 	cluster, ns, _ := GetCluster(kubeconfigBytes)
-	if cluster != "" {
+	if cluster != "" && !containerPathSeparator(cluster) && !containerPathSeparator(ns) {
 		pattern = fmt.Sprintf("%s_%s_%s", cluster, ns, pattern)
 		pattern = strings.ReplaceAll(pattern, string(os.PathSeparator), "-")
 	}
@@ -153,6 +153,15 @@ func ConvertToTempKubeconfigFile(kubeconfigBytes []byte) (string, error) {
 		return "", err
 	}
 	return temp.Name(), nil
+}
+
+func containerPathSeparator(pattern string) bool {
+	for i := 0; i < len(pattern); i++ {
+		if os.IsPathSeparator(pattern[i]) {
+			return true
+		}
+	}
+	return false
 }
 
 func GetCluster(kubeConfigBytes []byte) (cluster string, ns string, err error) {
