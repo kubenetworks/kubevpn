@@ -85,7 +85,7 @@ const (
 	_MEMORY   = 0b1111
 )
 
-func addStruct(v reflect.Value, numInts, numFloats, numStack *int, addInt, addFloat, addStack func(uintptr), keepAlive []any) []any {
+func addStruct(v reflect.Value, numInts, numFloats, numStack *int, addInt, addFloat, addStack func(uintptr), keepAlive []interface{}) []interface{} {
 	if v.Type().Size() == 0 {
 		return keepAlive
 	}
@@ -120,7 +120,7 @@ func postMerger(t reflect.Type) (passInMemory bool) {
 	if t.Size() <= 2*8 {
 		return false
 	}
-	return true // Go does not have an SSE/SSEUP type so this is always true
+	return true // Go does not have an SSE/SEEUP type so this is always true
 }
 
 func tryPlaceRegister(v reflect.Value, addFloat func(uintptr), addInt func(uintptr)) (ok bool) {
@@ -257,8 +257,4 @@ func placeStack(v reflect.Value, addStack func(uintptr)) {
 			panic("purego: unsupported kind " + f.Kind().String())
 		}
 	}
-}
-
-func placeRegisters(v reflect.Value, addFloat func(uintptr), addInt func(uintptr)) {
-	panic("purego: not needed on amd64")
 }

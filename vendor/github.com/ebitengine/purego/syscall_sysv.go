@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2022 The Ebitengine Authors
 
-//go:build darwin || freebsd || (linux && (amd64 || arm64)) || netbsd
+//go:build darwin || freebsd || (linux && (amd64 || arm64))
 
 package purego
 
@@ -31,7 +31,7 @@ func syscall_syscall15X(fn, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a
 // of uintptr. Only a limited number of callbacks may be created in a single Go process, and any memory allocated
 // for these callbacks is never released. At least 2000 callbacks can always be created. Although this function
 // provides similar functionality to windows.NewCallback it is distinct.
-func NewCallback(fn any) uintptr {
+func NewCallback(fn interface{}) uintptr {
 	ty := reflect.TypeOf(fn)
 	for i := 0; i < ty.NumIn(); i++ {
 		in := ty.In(i)
@@ -71,7 +71,7 @@ type callbackArgs struct {
 	result uintptr
 }
 
-func compileCallback(fn any) uintptr {
+func compileCallback(fn interface{}) uintptr {
 	val := reflect.ValueOf(fn)
 	if val.Kind() != reflect.Func {
 		panic("purego: the type must be a function but was not")
@@ -146,12 +146,12 @@ func callbackWrap(a *callbackArgs) {
 	var intsN int   // intsN represents the number of integer arguments processed
 	// stack points to the index into frame of the current stack element.
 	// The stack begins after the float and integer registers.
-	stack := numOfIntegerRegisters() + numOfFloatRegisters
+	stack := numOfIntegerRegisters() + numOfFloats
 	for i := range args {
 		var pos int
 		switch fnType.In(i).Kind() {
 		case reflect.Float32, reflect.Float64:
-			if floatsN >= numOfFloatRegisters {
+			if floatsN >= numOfFloats {
 				pos = stack
 				stack++
 			} else {
@@ -169,7 +169,7 @@ func callbackWrap(a *callbackArgs) {
 				stack++
 			} else {
 				// the integers begin after the floats in frame
-				pos = intsN + numOfFloatRegisters
+				pos = intsN + numOfFloats
 			}
 			intsN++
 		}
