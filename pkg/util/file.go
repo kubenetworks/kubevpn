@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 func DownloadFileWithName(uri, name string) (string, error) {
@@ -120,7 +122,7 @@ func ParseDirMapping(dir string) (local, remote string, err error) {
 }
 
 func CleanupTempKubeConfigFile() error {
-	return filepath.Walk(os.TempDir(), func(path string, info fs.FileInfo, err error) error {
+	return filepath.Walk(config.GetTempPath(), func(path string, info fs.FileInfo, err error) error {
 		if strings.HasSuffix(path, ".kubeconfig") {
 			return os.Remove(path)
 		}
