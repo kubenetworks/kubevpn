@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"strings"
 	"unsafe"
 
 	v1 "k8s.io/api/core/v1"
@@ -133,6 +134,7 @@ func ConvertToTempKubeconfigFile(kubeconfigBytes []byte) (string, error) {
 	cluster, ns, _ := GetCluster(kubeconfigBytes)
 	if cluster != "" {
 		pattern = fmt.Sprintf("%s_%s_%s", cluster, ns, pattern)
+		pattern = strings.ReplaceAll(pattern, string(os.PathSeparator), "-")
 	}
 	temp, err := os.CreateTemp(config.GetTempPath(), pattern)
 	if err != nil {
