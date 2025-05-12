@@ -88,7 +88,11 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 
 		h.addToRouteMapTCP(ctx, src, conn)
 		// inner ip like 198.19.0.100/102/103 connect each other
-		if config.CIDR.Contains(dst) || config.CIDR6.Contains(dst) {
+		// for issue 594, sometimes k8s service network CIDR also use CIDR 198.19.151.170
+		// if we can find dst in route map, just trade packet as inner communicate
+		// if not find dst in route map, just trade packet as k8s service/pod ip
+		_, found := h.routeMapTCP.Load(dst.String())
+		if found && (config.CIDR.Contains(dst) || config.CIDR6.Contains(dst)) {
 			err = h.handlePacket(ctx, buf, read, src, dst, layers.IPProtocol(ipProtocol).String())
 			if err != nil {
 				plog.G(ctx).Errorf("[TCP-GVISOR] Failed to handle packet: %v", err)
