@@ -26,6 +26,7 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	go device.handlePacket(ctx, h.forward)
 	go device.readFromTun(ctx)
 	go device.writeToTun(ctx)
+	go device.heartbeats(ctx)
 	select {
 	case <-device.errChan:
 	case <-ctx.Done():
@@ -177,4 +178,32 @@ func (d *ClientDevice) Close() {
 	d.tun.Close()
 	util.SafeClose(d.tunInbound)
 	util.SafeClose(d.tunOutbound)
+}
+
+func (d *ClientDevice) heartbeats(ctx context.Context) {
+	tunIfi, err := util.GetTunDeviceByConn(d.tun)
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to get tun device: %v", err)
+		return
+	}
+	srcIPv4, srcIPv6, dockerSrcIPv4, err := util.GetTunDeviceIP(tunIfi.Name)
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to get tun device %s IP: %v", tunIfi.Name, err)
+		return
+	}
+
+	ticker := time.NewTicker(config.KeepAliveTime)
+	defer ticker.Stop()
+
+	for ; ctx.Err() == nil; <-ticker.C {
+		if srcIPv4 != nil {
+			util.Ping(ctx, srcIPv4.String(), config.RouterIP.String())
+		}
+		if srcIPv6 != nil {
+			util.Ping(ctx, srcIPv6.String(), config.RouterIP6.String())
+		}
+		if dockerSrcIPv4 != nil {
+			util.Ping(ctx, dockerSrcIPv4.String(), config.DockerRouterIP.String())
+		}
+	}
 }
