@@ -28,9 +28,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 
 	ctx := resp.Context()
 	if !svr.t.IsZero() {
-		s := "Already connected to cluster in full mode, you can use options `--lite` to connect to another cluster"
-		logger.Debugf(s)
-		// todo define already connect error?
+		s := "Only support one cluster connect with full mode, you can use options `--lite` to connect to another cluster"
 		return status.Error(codes.AlreadyExists, s)
 	}
 	defer func() {
@@ -44,10 +42,11 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	}()
 	svr.t = time.Now()
 	svr.connect = &handler.ConnectOptions{
-		Namespace:            req.Namespace,
+		Namespace:            req.ManagerNamespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
+		OriginNamespace:      req.Namespace,
 		Lock:                 &svr.Lock,
 		ImagePullSecretName:  req.ImagePullSecretName,
 	}
@@ -72,7 +71,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 			sshCancel()
 		}
 	}()
-	err = svr.connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
+	err = svr.connect.InitClient(util.InitFactoryByPath(file, req.ManagerNamespace))
 	if err != nil {
 		return err
 	}
@@ -110,6 +109,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	defer plog.WithoutLogger(sshCtx)
 	connect := &handler.ConnectOptions{
 		Namespace:            req.Namespace,
+		OriginNamespace:      req.Namespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
@@ -140,16 +140,18 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		return err
 	}
 
-	connectNs, err := util.DetectConnectNamespace(plog.WithLogger(sshCtx, logger), connect.GetFactory(), req.Namespace)
-	if err != nil {
-		return err
+	if req.ManagerNamespace == "" {
+		req.ManagerNamespace, err = util.DetectManagerNamespace(plog.WithLogger(sshCtx, logger), connect.GetFactory(), req.Namespace)
+		if err != nil {
+			return err
+		}
 	}
-	if connectNs != "" {
-		logger.Infof("Use connect namespace %s", connectNs)
-		connect.Namespace = connectNs
-		req.Namespace = connectNs
+	if req.ManagerNamespace != "" {
+		logger.Infof("Use manager namespace %s", req.ManagerNamespace)
+		connect.Namespace = req.ManagerNamespace
 	} else {
 		logger.Infof("Use special namespace %s", req.Namespace)
+		req.ManagerNamespace = req.Namespace
 	}
 
 	if svr.connect != nil {
@@ -165,6 +167,9 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 			// same cluster, do nothing
 			logger.Infof("Connected to cluster")
 			return nil
+		} else {
+			s := "Only support one cluster connect with full mode, you can use options `--lite` to connect to another cluster"
+			return status.Error(codes.AlreadyExists, s)
 		}
 	}
 

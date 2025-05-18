@@ -67,6 +67,7 @@ type ConnectOptions struct {
 	Engine               config.Engine
 	Foreground           bool
 	OriginKubeconfigPath string
+	OriginNamespace      string
 	Lock                 *sync.Mutex
 	ImagePullSecretName  string
 
@@ -490,7 +491,7 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 
 // Listen all pod, add route if needed
 func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
-	podNs, svcNs, err1 := util.GetNsForListPodAndSvc(ctx, c.clientset, []string{v1.NamespaceAll, c.Namespace})
+	podNs, svcNs, err1 := util.GetNsForListPodAndSvc(ctx, c.clientset, []string{v1.NamespaceAll, c.OriginNamespace})
 	if err1 != nil {
 		return err1
 	}
@@ -640,8 +641,8 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		return err
 	}
 
-	ns := []string{c.Namespace}
-	list, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	ns := []string{c.OriginNamespace}
+	list, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{Limit: 100})
 	if err == nil {
 		for _, item := range list.Items {
 			if !sets.New[string](ns...).Has(item.Name) {
@@ -650,9 +651,9 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 		}
 	}
 
-	plog.G(ctx).Infof("Listing namespace %s services...", c.Namespace)
+	plog.G(ctx).Infof("Listing namespace %s services...", c.OriginNamespace)
 	var serviceList []v1.Service
-	services, err := c.clientset.CoreV1().Services(c.Namespace).List(ctx, metav1.ListOptions{})
+	services, err := c.clientset.CoreV1().Services(c.OriginNamespace).List(ctx, metav1.ListOptions{})
 	if err == nil {
 		serviceList = append(serviceList, services.Items...)
 	}
@@ -685,9 +686,9 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	if err = c.dnsConfig.SetupDNS(ctx); err != nil {
 		return err
 	}
-	plog.G(ctx).Infof("Dump service in namespace %s into hosts...", c.Namespace)
+	plog.G(ctx).Infof("Dump service in namespace %s into hosts...", c.OriginNamespace)
 	// dump service in current namespace for support DNS resolve service:port
-	err = c.dnsConfig.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.Namespace), c.extraHost...)
+	err = c.dnsConfig.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.OriginNamespace), c.extraHost...)
 	return err
 }
 

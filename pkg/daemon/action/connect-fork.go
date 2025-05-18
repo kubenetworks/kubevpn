@@ -25,10 +25,11 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 
 	ctx := resp.Context()
 	connect := &handler.ConnectOptions{
-		Namespace:            req.Namespace,
+		Namespace:            req.ManagerNamespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
+		OriginNamespace:      req.Namespace,
 		Lock:                 &svr.Lock,
 		ImagePullSecretName:  req.ImagePullSecretName,
 	}
@@ -51,7 +52,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 		}
 	}()
 
-	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByPath(file, req.ManagerNamespace))
 	if err != nil {
 		return err
 	}
@@ -94,6 +95,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 	defer plog.WithoutLogger(sshCtx)
 	connect := &handler.ConnectOptions{
 		Namespace:            req.Namespace,
+		OriginNamespace:      req.Namespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
@@ -123,16 +125,18 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		return err
 	}
 
-	connectNs, err := util.DetectConnectNamespace(sshCtx, connect.GetFactory(), req.Namespace)
-	if err != nil {
-		return err
+	if req.ManagerNamespace == "" {
+		req.ManagerNamespace, err = util.DetectManagerNamespace(plog.WithLogger(sshCtx, logger), connect.GetFactory(), req.Namespace)
+		if err != nil {
+			return err
+		}
 	}
-	if connectNs != "" {
-		logger.Infof("Use connect namespace %s", connectNs)
-		connect.Namespace = connectNs
-		req.Namespace = connectNs
+	if req.ManagerNamespace != "" {
+		logger.Infof("Use manager namespace %s", req.ManagerNamespace)
+		connect.Namespace = req.ManagerNamespace
 	} else {
 		logger.Infof("Use special namespace %s", req.Namespace)
+		req.ManagerNamespace = req.Namespace
 	}
 
 	for _, options := range svr.secondaryConnect {

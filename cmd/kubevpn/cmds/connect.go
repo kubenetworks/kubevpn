@@ -31,6 +31,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &pkgssh.SshConfig{}
 	var transferImage, foreground, lite bool
 	var imagePullSecretName string
+	var managerNamespace string
 	cmd := &cobra.Command{
 		Use:   "connect",
 		Short: i18n.T("Connect to kubernetes cluster network"),
@@ -98,6 +99,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				Image:               config.Image,
 				ImagePullSecretName: imagePullSecretName,
 				Level:               int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
+				ManagerNamespace:    managerNamespace,
 			}
 			// if is foreground, send to sudo daemon server
 			cli, err := daemon.GetClient(false)
@@ -137,6 +139,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName, &connect.Engine)
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "Hang up")
 	cmd.Flags().BoolVar(&lite, "lite", false, "connect to multiple cluster in lite mode. mode \"lite\": design for only connecting to multiple cluster network. mode \"full\": not only connect to cluster network, it also supports proxy workloads inbound traffic to local PC.")
+	cmd.Flags().StringVar(&managerNamespace, "manager-namespace", "", "The namespace where the traffic manager is to be found. Only works in cluster mode (install kubevpn server by helm)")
 
 	handler.AddExtraRoute(cmd.Flags(), extraRoute)
 	pkgssh.AddSshFlags(cmd.Flags(), sshConf)

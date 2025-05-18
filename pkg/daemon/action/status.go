@@ -73,7 +73,7 @@ func genStatus(connect *handler.ConnectOptions, mode string, index int32) *rpc.S
 		Cluster:    util.GetKubeconfigCluster(connect.GetFactory()),
 		Mode:       mode,
 		Kubeconfig: connect.OriginKubeconfigPath,
-		Namespace:  connect.Namespace,
+		Namespace:  connect.OriginNamespace,
 		Status:     status,
 		Netif:      tunName,
 	}
@@ -136,7 +136,7 @@ func gen(ctx context.Context, connect *handler.ConnectOptions, clone *handler.Cl
 				clusterID = connect.GetClusterID()
 				cluster = util.GetKubeconfigCluster(connect.GetFactory())
 				kubeconfig = connect.OriginKubeconfigPath
-				namespace = connect.Namespace
+				namespace = connect.OriginNamespace
 			}
 			cloneList = append(cloneList, &rpc.Clone{
 				ClusterID:        clusterID,

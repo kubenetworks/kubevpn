@@ -16,26 +16,26 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-// DetectConnectNamespace
+// DetectManagerNamespace
 //  1. use helm to install kubevpn server, means cluster mode,
 //     all kubevpn client should connect to this namespace.
 //  2. if any error occurs, just ignore and will use options `-n` or `--namespace`
-func DetectConnectNamespace(ctx context.Context, f cmdutil.Factory, connectNamespace string) (string, error) {
+func DetectManagerNamespace(ctx context.Context, f cmdutil.Factory, namespace string) (string, error) {
 	clientSet, err := f.KubernetesClientSet()
 	if err != nil {
 		return "", err
 	}
 
 	var exists bool
-	exists, err = DetectPodExists(ctx, clientSet, connectNamespace)
+	exists, err = DetectPodExists(ctx, clientSet, namespace)
 	if err != nil && !k8serrors.IsNotFound(err) && !k8serrors.IsForbidden(err) {
 		return "", err
 	} else if err != nil {
-		plog.G(ctx).Debugf("Failed to detect if kubevpn exists in namespace %s: %v", connectNamespace, err)
+		plog.G(ctx).Debugf("Failed to detect if kubevpn exists in namespace %s: %v", namespace, err)
 	}
 	if exists {
-		plog.G(ctx).Debugf("Find exists kubevpn in namespace %s", connectNamespace)
-		return connectNamespace, nil
+		plog.G(ctx).Debugf("Find exists kubevpn in namespace %s", namespace)
+		return namespace, nil
 	}
 
 	exists, err = DetectPodExists(ctx, clientSet, config.DefaultNamespaceKubevpn)
