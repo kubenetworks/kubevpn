@@ -159,7 +159,7 @@ func disconnect(ctx context.Context, svr *Server, connect *handler.ConnectOption
 	if svr.connect != nil {
 		isSameCluster, _ := util.IsSameCluster(
 			ctx,
-			svr.connect.GetClientset().CoreV1(), svr.connect.Namespace,
+			svr.connect.GetClientset().CoreV1(), svr.connect.OriginNamespace,
 			connect.GetClientset().CoreV1(), connect.Namespace,
 		)
 		if isSameCluster {
@@ -173,7 +173,7 @@ func disconnect(ctx context.Context, svr *Server, connect *handler.ConnectOption
 		options := svr.secondaryConnect[i]
 		isSameCluster, _ := util.IsSameCluster(
 			ctx,
-			options.GetClientset().CoreV1(), options.Namespace,
+			options.GetClientset().CoreV1(), options.OriginNamespace,
 			connect.GetClientset().CoreV1(), connect.Namespace,
 		)
 		if isSameCluster {
