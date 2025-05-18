@@ -45,7 +45,7 @@ func (c *ConnectOptions) Uninstall(ctx context.Context) error {
 	_ = c.clientset.RbacV1().Roles(ns).Delete(ctx, name, options)
 	_ = c.clientset.CoreV1().Services(ns).Delete(ctx, name, options)
 	_ = c.clientset.AppsV1().Deployments(ns).Delete(ctx, name, options)
-
+	_ = c.clientset.BatchV1().Jobs(ns).Delete(ctx, name, options)
 	_ = c.CleanupLocalContainer(ctx)
 	plog.G(ctx).Info("Done")
 	return nil

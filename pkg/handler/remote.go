@@ -49,6 +49,7 @@ func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, nam
 		_ = clientset.CoreV1().Services(namespace).Delete(ctx, name, options)
 		_ = clientset.CoreV1().Secrets(namespace).Delete(ctx, name, options)
 		_ = clientset.CoreV1().Pods(namespace).Delete(ctx, config.CniNetName, options)
+		_ = clientset.BatchV1().Jobs(namespace).Delete(ctx, name, options)
 		_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, name, options)
 	}
 	defer func() {
