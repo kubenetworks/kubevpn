@@ -71,7 +71,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 			sshCancel()
 		}
 	}()
-	err = svr.connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
+	err = svr.connect.InitClient(util.InitFactoryByPath(file, req.ManagerNamespace))
 	if err != nil {
 		return err
 	}
@@ -151,6 +151,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		connect.Namespace = req.ManagerNamespace
 	} else {
 		logger.Infof("Use special namespace %s", req.Namespace)
+		req.ManagerNamespace = req.Namespace
 	}
 
 	if svr.connect != nil {

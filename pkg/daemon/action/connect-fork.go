@@ -52,7 +52,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 		}
 	}()
 
-	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByPath(file, req.ManagerNamespace))
 	if err != nil {
 		return err
 	}
@@ -136,6 +136,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		connect.Namespace = req.ManagerNamespace
 	} else {
 		logger.Infof("Use special namespace %s", req.Namespace)
+		req.ManagerNamespace = req.Namespace
 	}
 
 	for _, options := range svr.secondaryConnect {
