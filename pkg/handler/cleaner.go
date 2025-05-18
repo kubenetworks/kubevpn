@@ -58,6 +58,7 @@ func (c *ConnectOptions) Cleanup(ctx context.Context) {
 		}
 		if c.clientset != nil {
 			_ = c.clientset.CoreV1().Pods(c.Namespace).Delete(ctx2, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
+			_ = c.clientset.BatchV1().Jobs(c.Namespace).Delete(ctx2, config.ConfigMapPodTrafficManager, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
 		}
 		// leave proxy resources
 		err := c.LeaveAllProxyResources(ctx2)
