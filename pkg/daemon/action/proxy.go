@@ -7,6 +7,8 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -45,7 +47,7 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 		return err
 	}
 	connect := &handler.ConnectOptions{
-		Namespace:            req.ConnectNamespace,
+		Namespace:            req.Namespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
@@ -72,48 +74,33 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 		return errors.Wrap(err, "daemon is not available")
 	}
 
-	connectNs, err := util.DetectConnectNamespace(ctx, connect.GetFactory(), req.ConnectNamespace)
+	plog.G(ctx).Debugf("Connecting to cluster")
+	var connResp rpc.Daemon_ConnectClient
+	connResp, err = cli.Connect(ctx, convert(req))
 	if err != nil {
 		return err
 	}
-	if connectNs != "" {
-		connect.Namespace = connectNs
-	}
-
-	if svr.connect != nil {
-		isSameCluster, _ := util.IsSameCluster(
-			ctx,
-			svr.connect.GetClientset().CoreV1(), svr.connect.Namespace,
-			connect.GetClientset().CoreV1(), connect.Namespace,
-		)
-		if isSameCluster {
-			// same cluster, do nothing
-			plog.G(ctx).Infof("Connected to cluster")
-		} else {
-			plog.G(ctx).Infof("Disconnecting from another cluster...")
-			var disconnectResp rpc.Daemon_DisconnectClient
-			disconnectResp, err = cli.Disconnect(ctx, &rpc.DisconnectRequest{
-				ID: ptr.To[int32](0),
-			})
-			if err != nil {
-				return err
-			}
-			err = util.CopyAndConvertGRPCStream[rpc.DisconnectResponse, rpc.ConnectResponse](
-				disconnectResp,
-				resp,
-				func(response *rpc.DisconnectResponse) *rpc.ConnectResponse {
-					return &rpc.ConnectResponse{Message: response.Message}
-				},
-			)
-			if err != nil {
-				return err
-			}
+	err = util.CopyGRPCStream[rpc.ConnectResponse](connResp, resp)
+	if err != nil {
+		if status.Code(err) != codes.AlreadyExists {
+			return err
 		}
-	}
-
-	if svr.connect == nil {
-		plog.G(ctx).Debugf("Connectting to cluster")
-		var connResp rpc.Daemon_ConnectClient
+		plog.G(ctx).Infof("Disconnecting from another cluster...")
+		var disconnectResp rpc.Daemon_DisconnectClient
+		disconnectResp, err = cli.Disconnect(ctx, &rpc.DisconnectRequest{ID: ptr.To[int32](0)})
+		if err != nil {
+			return err
+		}
+		err = util.CopyAndConvertGRPCStream[rpc.DisconnectResponse, rpc.ConnectResponse](
+			disconnectResp,
+			resp,
+			func(response *rpc.DisconnectResponse) *rpc.ConnectResponse {
+				return &rpc.ConnectResponse{Message: response.Message}
+			},
+		)
+		if err != nil {
+			return err
+		}
 		connResp, err = cli.Connect(ctx, convert(req))
 		if err != nil {
 			return err
@@ -160,5 +147,6 @@ func convert(req *rpc.ProxyRequest) *rpc.ConnectRequest {
 		Foreground:           req.Foreground,
 		Level:                req.Level,
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
+		ManagerNamespace:     req.ManagerNamespace,
 	}
 }

@@ -55,6 +55,14 @@ message ConnectRequest {
   int32 Level = 10;
 
   string OriginKubeconfigPath = 11;
+
+  // The namespace where the traffic manager is to be found. Only works in cluster mode (install kubevpn server by helm)
+  // reason: user helm install kubevpn server, and all users use this one kubevpn-traffic-manager instance
+  // but if normal user don't have list namespace permission(for: helm list -A), needs to special this options.
+  // 1. default is namespace kubevpn if kubevpn namespace is exists
+  // 2. detect which namespace helm installed by (helm list -A), match app name==kubevpn and status is deployed
+  // 3. otherwise, use options '-n' or '--namespace'
+  string ManagerNamespace = 12;
 }
 
 message ConnectResponse {
@@ -106,12 +114,13 @@ message ProxyRequest {
 
   string OriginKubeconfigPath = 15;
 
-  // connect to which namespace, reason: user helm install kubevpn server, and all users use this one instance
+  // The namespace where the traffic manager is to be found. Only works in cluster mode (install kubevpn server by helm)
+  // reason: user helm install kubevpn server, and all users use this one kubevpn-traffic-manager instance
   // but if normal user don't have list namespace permission(for: helm list -A), needs to special this options.
   // 1. default is namespace kubevpn if kubevpn namespace is exists
   // 2. detect which namespace helm installed by (helm list -A), match app name==kubevpn and status is deployed
   // 3. otherwise, use options '-n' or '--namespace'
-  string ConnectNamespace = 16;
+  string ManagerNamespace = 16;
 }
 
 message ProxyResponse {

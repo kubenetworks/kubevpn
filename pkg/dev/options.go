@@ -63,7 +63,7 @@ type Options struct {
 	rollbackFuncList []func() error
 }
 
-func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, config *Config, hostConfig *HostConfig, imagePullSecretName string, connectNamespace string) error {
+func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, config *Config, hostConfig *HostConfig, imagePullSecretName string, managerNamespace string) error {
 	mode := typescontainer.NetworkMode(option.ContainerOptions.netMode.NetworkMode())
 	if mode.IsContainer() {
 		plog.G(ctx).Infof("Network mode container is %s", mode.ConnectedContainer())
@@ -80,7 +80,7 @@ func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, co
 	}
 
 	// Connect to cluster, in container or host
-	err := option.Connect(ctx, sshConfig, imagePullSecretName, hostConfig.PortBindings, connectNamespace)
+	err := option.Connect(ctx, sshConfig, imagePullSecretName, hostConfig.PortBindings, managerNamespace)
 	if err != nil {
 		plog.G(ctx).Errorf("Connect to cluster failed, err: %v", err)
 		return err
@@ -90,7 +90,7 @@ func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, co
 }
 
 // Connect to cluster network on docker container or host
-func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig, imagePullSecretName string, portBindings nat.PortMap, connectNamespace string) error {
+func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig, imagePullSecretName string, portBindings nat.PortMap, managerNamespace string) error {
 	if option.ConnectMode == ConnectModeHost {
 		cli, err := daemon.GetClient(false)
 		if err != nil {
@@ -119,7 +119,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			ImagePullSecretName:  imagePullSecretName,
 			Level:                int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
 			SshJump:              sshConfig.ToRPC(),
-			ConnectNamespace:     connectNamespace,
+			ManagerNamespace:     managerNamespace,
 		}
 		option.AddRollbackFunc(func() error {
 			resp, err := cli.Disconnect(ctx, &rpc.DisconnectRequest{
@@ -144,7 +144,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 	}
 
 	if option.ConnectMode == ConnectModeContainer {
-		name, err := option.CreateConnectContainer(ctx, portBindings, connectNamespace)
+		name, err := option.CreateConnectContainer(ctx, portBindings, managerNamespace)
 		if err != nil {
 			return err
 		}
@@ -227,7 +227,7 @@ func (option *Options) Dev(ctx context.Context, config *Config, hostConfig *Host
 	return configList.Run(ctx)
 }
 
-func (option *Options) CreateConnectContainer(ctx context.Context, portBindings nat.PortMap, connectNamespace string) (*string, error) {
+func (option *Options) CreateConnectContainer(ctx context.Context, portBindings nat.PortMap, managerNamespace string) (*string, error) {
 	portMap, portSet, err := option.GetExposePort(portBindings)
 	if err != nil {
 		return nil, err
@@ -264,7 +264,7 @@ func (option *Options) CreateConnectContainer(ctx context.Context, portBindings 
 			"--kubeconfig", "/root/.kube/config",
 			"--image", config.Image,
 			"--netstack", string(option.Engine),
-			"--connect-namespace", connectNamespace,
+			"--manager-namespace", managerNamespace,
 		}
 		for k, v := range option.Headers {
 			entrypoint = append(entrypoint, "--headers", fmt.Sprintf("%s=%s", k, v))

@@ -32,7 +32,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &pkgssh.SshConfig{}
 	var transferImage, foreground bool
 	var imagePullSecretName string
-	var connectNamespace string
+	var managerNamespace string
 	cmd := &cobra.Command{
 		Use:   "proxy",
 		Short: i18n.T("Proxy kubernetes workloads inbound traffic into local PC"),
@@ -142,7 +142,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 					ImagePullSecretName:  imagePullSecretName,
 					Level:                int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
 					OriginKubeconfigPath: util.GetKubeConfigPath(f),
-					ConnectNamespace:     connectNamespace,
+					ManagerNamespace:     managerNamespace,
 				},
 			)
 			if err != nil {
@@ -174,7 +174,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringArrayVar(&portmap, "portmap", []string{}, "Port map, map container port to local port, format: [tcp/udp]/containerPort:localPort, If not special, localPort will use containerPort. eg: tcp/80:8080 or udp/5000:5001 or 80 or 80:8080")
 	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName, &connect.Engine)
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "foreground hang up")
-	cmd.Flags().StringVarP(&connectNamespace, "connect-namespace", "C", config.DefaultNamespaceKubevpn, "Connect to special namespace which kubevpn server installed by helm in cluster mode")
+	cmd.Flags().StringVar(&managerNamespace, "manager-namespace", "", "The namespace where the traffic manager is to be found. Only works in cluster mode (install kubevpn server by helm)")
 
 	handler.AddExtraRoute(cmd.Flags(), extraRoute)
 	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
