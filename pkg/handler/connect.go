@@ -281,13 +281,14 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-
 		return
 	}
 	plog.G(ctx).Infof("Adding Pod IP and Service IP to route table...")
-	if err = c.addRouteDynamic(c.ctx); err != nil {
+	var svcInformer cache.SharedIndexInformer
+	if svcInformer, _, err = c.addRouteDynamic(c.ctx); err != nil {
 		plog.G(ctx).Errorf("Add route dynamic failed: %v", err)
 		return
 	}
 	go c.deleteFirewallRule(c.ctx)
 	plog.G(ctx).Infof("Configuring DNS service...")
-	if err = c.setupDNS(c.ctx); err != nil {
+	if err = c.setupDNS(c.ctx, svcInformer); err != nil {
 		plog.G(ctx).Errorf("Configure DNS failed: %v", err)
 		return
 	}
@@ -491,10 +492,10 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 }
 
 // Listen all pod, add route if needed
-func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
+func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (cache.SharedIndexInformer, cache.SharedIndexInformer, error) {
 	podNs, svcNs, err := util.GetNsForListPodAndSvc(ctx, c.clientset, []string{v1.NamespaceAll, c.OriginNamespace})
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	conf := rest.CopyConfig(c.config)
@@ -503,16 +504,16 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
 	clientSet, err := kubernetes.NewForConfig(conf)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to create clientset: %v", err)
-		return err
+		return nil, nil, err
 	}
+	svcIndexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
+	svcInformer := informerv1.NewServiceInformer(clientSet, svcNs, 0, svcIndexers)
+	go svcInformer.Run(ctx.Done())
 	go func() {
-		indexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
-		informer := informerv1.NewServiceInformer(clientSet, svcNs, 0, indexers)
-		go informer.Run(ctx.Done())
 		ticker := time.NewTicker(time.Second * 15)
 		defer ticker.Stop()
 		for ; ctx.Err() == nil; <-ticker.C {
-			serviceList := informer.GetIndexer().List()
+			serviceList := svcInformer.GetIndexer().List()
 			var ips = sets.New[string]()
 			for _, service := range serviceList {
 				svc, ok := service.(*v1.Service)
@@ -529,14 +530,14 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
 		}
 	}()
 
+	podIndexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
+	podInformer := informerv1.NewPodInformer(clientSet, podNs, 0, podIndexers)
+	go podInformer.Run(ctx.Done())
 	go func() {
-		indexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
-		informer := informerv1.NewPodInformer(clientSet, podNs, 0, indexers)
-		go informer.Run(ctx.Done())
 		ticker := time.NewTicker(time.Second * 15)
 		defer ticker.Stop()
 		for ; ctx.Err() == nil; <-ticker.C {
-			podList := informer.GetIndexer().List()
+			podList := podInformer.GetIndexer().List()
 			var ips = sets.New[string]()
 			for _, pod := range podList {
 				p, ok := pod.(*v1.Pod)
@@ -555,7 +556,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
 		}
 	}()
 
-	return nil
+	return svcInformer, podInformer, nil
 }
 
 func (c *ConnectOptions) addRoute(ipStrList ...string) error {
@@ -619,7 +620,7 @@ func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
 	util.DeleteBlockFirewallRule(ctx)
 }
 
-func (c *ConnectOptions) setupDNS(ctx context.Context) error {
+func (c *ConnectOptions) setupDNS(ctx context.Context, svcInformer cache.SharedIndexInformer) error {
 	const portTCP = 10800
 	podList, err := c.GetRunningPodList(ctx)
 	if err != nil {
@@ -671,22 +672,11 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	}
 
 	plog.G(ctx).Infof("Listing namespace %s services...", c.OriginNamespace)
-	conf := rest.CopyConfig(c.config)
-	conf.QPS = 1
-	conf.Burst = 2
-	clientSet, err := kubernetes.NewForConfig(conf)
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to create clientset: %v", err)
-		return err
-	}
-	indexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
-	informer := informerv1.NewServiceInformer(clientSet, c.OriginNamespace, 0, indexers)
-	go informer.Run(ctx.Done())
 	c.dnsConfig = &dns.Config{
 		Config:      relovConf,
 		Ns:          ns,
 		Services:    []v1.Service{},
-		SvcInformer: informer,
+		SvcInformer: svcInformer,
 		TunName:     c.tunName,
 		Hosts:       c.extraHost,
 		Lock:        c.Lock,
@@ -713,7 +703,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	}
 	plog.G(ctx).Infof("Dump service in namespace %s into hosts...", c.OriginNamespace)
 	// dump service in current namespace for support DNS resolve service:port
-	err = c.dnsConfig.AddServiceNameToHosts(ctx, informer, c.extraHost...)
+	err = c.dnsConfig.AddServiceNameToHosts(ctx, c.extraHost...)
 	return err
 }
 

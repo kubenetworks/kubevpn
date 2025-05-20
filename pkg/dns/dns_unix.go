@@ -15,10 +15,12 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	miekgdns "github.com/miekg/dns"
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 	v12 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/cache"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // https://github.com/golang/go/issues/12524
@@ -40,7 +42,11 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 		ticker := time.NewTicker(time.Second * 15)
 		defer ticker.Stop()
 		for ; ctx.Err() == nil; <-ticker.C {
-			serviceList := c.SvcInformer.GetIndexer().List()
+			serviceList, err := c.SvcInformer.GetIndexer().ByIndex(cache.NamespaceIndex, c.Ns[0])
+			if err != nil {
+				plog.G(ctx).Errorf("Failed to list service by namespace %s: %v", c.Ns[0], err)
+				continue
+			}
 			var services []v12.Service
 			for _, service := range serviceList {
 				svc, ok := service.(*v12.Service)

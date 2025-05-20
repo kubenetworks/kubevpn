@@ -42,7 +42,7 @@ type Config struct {
 	OSConfigurator dns.OSConfigurator
 }
 
-func (c *Config) AddServiceNameToHosts(ctx context.Context, informer cache.SharedIndexInformer, hosts ...Entry) error {
+func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) error {
 	var serviceList []v12.Service
 	c.Lock.Lock()
 	defer c.Lock.Unlock()
@@ -54,17 +54,21 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, informer cache.Share
 		return err
 	}
 
-	go c.watchServiceToAddHosts(ctx, informer, hosts)
+	go c.watchServiceToAddHosts(ctx, hosts)
 	return nil
 }
 
-func (c *Config) watchServiceToAddHosts(ctx context.Context, informer cache.SharedIndexInformer, hosts []Entry) {
+func (c *Config) watchServiceToAddHosts(ctx context.Context, hosts []Entry) {
 	defer util.HandleCrash()
 	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
 
 	for ; ctx.Err() == nil; <-ticker.C {
-		serviceList := informer.GetIndexer().List()
+		serviceList, err := c.SvcInformer.GetIndexer().ByIndex(cache.NamespaceIndex, c.Ns[0])
+		if err != nil {
+			plog.G(ctx).Errorf("Failed to list service by namespace %s: %v", c.Ns[0], err)
+			continue
+		}
 		var services []v12.Service
 		for _, service := range serviceList {
 			svc, ok := service.(*v12.Service)
@@ -81,13 +85,12 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, informer cache.Shar
 		}
 		c.Lock.Lock()
 		appendHosts := c.generateAppendHosts(services, hosts)
-		err := c.appendHosts(appendHosts)
+		err = c.appendHosts(appendHosts)
 		c.Lock.Unlock()
 		if err != nil && !errors.Is(err, context.Canceled) {
 			plog.G(ctx).Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
 		}
 	}
-
 }
 
 // param: entry list is needs to added
