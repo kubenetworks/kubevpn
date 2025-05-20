@@ -11,12 +11,15 @@ import (
 	"strings"
 	"unsafe"
 
+	errors2 "github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -26,6 +29,7 @@ import (
 	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func GetClusterID(ctx context.Context, client v12.ConfigMapInterface) (types.UID, error) {
@@ -258,4 +262,49 @@ func GetKubeconfigPath(factory cmdutil.Factory) (string, error) {
 		return "", err
 	}
 	return file, nil
+}
+
+func GetNsForListPodAndSvc(ctx context.Context, clientset *kubernetes.Clientset, nsList []string) (podNs string, svcNs string, err error) {
+	for _, ns := range nsList {
+		_, err = clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{Limit: 1})
+		if errors.IsForbidden(err) {
+			continue
+		}
+		if err != nil {
+			return
+		}
+		podNs = ns
+		break
+	}
+	if err != nil {
+		err = errors2.Wrap(err, "can not list pod to add it to route table")
+		return
+	}
+	if podNs == "" {
+		log.G(ctx).Debugf("List all namepsace pods")
+	} else {
+		log.G(ctx).Debugf("List namepsace %s pods", podNs)
+	}
+
+	for _, ns := range nsList {
+		_, err = clientset.CoreV1().Services(ns).List(ctx, metav1.ListOptions{Limit: 1})
+		if errors.IsForbidden(err) {
+			continue
+		}
+		if err != nil {
+			return
+		}
+		svcNs = ns
+		break
+	}
+	if err != nil {
+		err = errors2.Wrap(err, "can not list service to add it to route table")
+		return
+	}
+	if svcNs == "" {
+		log.G(ctx).Debugf("List all namepsace services")
+	} else {
+		log.G(ctx).Debugf("List namepsace %s services", svcNs)
+	}
+	return
 }

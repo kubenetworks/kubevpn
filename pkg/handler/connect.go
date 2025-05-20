@@ -32,15 +32,16 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
 	pkgtypes "k8s.io/apimachinery/pkg/types"
-	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/resource"
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
+	informerv1 "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	v2 "k8s.io/client-go/kubernetes/typed/networking/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/cmd/set"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -491,51 +492,65 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 
 // Listen all pod, add route if needed
 func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
-	podNs, svcNs, err1 := util.GetNsForListPodAndSvc(ctx, c.clientset, []string{v1.NamespaceAll, c.OriginNamespace})
-	if err1 != nil {
-		return err1
+	podNs, svcNs, err := util.GetNsForListPodAndSvc(ctx, c.clientset, []string{v1.NamespaceAll, c.OriginNamespace})
+	if err != nil {
+		return err
 	}
 
+	conf := rest.CopyConfig(c.config)
+	conf.QPS = 1
+	conf.Burst = 2
+	clientSet, err := kubernetes.NewForConfig(conf)
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to create clientset: %v", err)
+		return err
+	}
 	go func() {
-		var listDone bool
-		for ctx.Err() == nil {
-			err := func() error {
-				if !listDone {
-					err := util.ListService(ctx, c.clientset.CoreV1().Services(svcNs), c.addRoute)
-					if err != nil {
-						return err
-					}
-					listDone = true
+		indexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
+		informer := informerv1.NewServiceInformer(clientSet, svcNs, 0, indexers)
+		go informer.Run(ctx.Done())
+		ticker := time.NewTicker(time.Second * 15)
+		defer ticker.Stop()
+		for ; ctx.Err() == nil; <-ticker.C {
+			serviceList := informer.GetIndexer().List()
+			var ips = sets.New[string]()
+			for _, service := range serviceList {
+				svc, ok := service.(*v1.Service)
+				if !ok {
+					continue
 				}
-				err := util.WatchServiceToAddRoute(ctx, c.clientset.CoreV1().Services(svcNs), c.addRoute)
-				return err
-			}()
-			if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {
-				time.Sleep(time.Second * 10)
-			} else {
-				time.Sleep(time.Second * 2)
+				ips.Insert(svc.Spec.ClusterIP)
+				ips.Insert(svc.Spec.ClusterIPs...)
+			}
+			err := c.addRoute(ips.UnsortedList()...)
+			if err != nil {
+				plog.G(ctx).Debugf("Add service IP to route table failed: %v", err)
 			}
 		}
 	}()
 
 	go func() {
-		var listDone bool
-		for ctx.Err() == nil {
-			err := func() error {
-				if !listDone {
-					err := util.ListPod(ctx, c.clientset.CoreV1().Pods(podNs), c.addRoute)
-					if err != nil {
-						return err
-					}
-					listDone = true
+		indexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
+		informer := informerv1.NewPodInformer(clientSet, podNs, 0, indexers)
+		go informer.Run(ctx.Done())
+		ticker := time.NewTicker(time.Second * 15)
+		defer ticker.Stop()
+		for ; ctx.Err() == nil; <-ticker.C {
+			podList := informer.GetIndexer().List()
+			var ips = sets.New[string]()
+			for _, pod := range podList {
+				p, ok := pod.(*v1.Pod)
+				if !ok {
+					continue
 				}
-				err := util.WatchPodToAddRoute(ctx, c.clientset.CoreV1().Pods(podNs), c.addRoute)
-				return err
-			}()
-			if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {
-				time.Sleep(time.Second * 10)
-			} else {
-				time.Sleep(time.Second * 2)
+				if p.Spec.HostNetwork {
+					continue
+				}
+				ips.Insert(util.GetPodIP(*p)...)
+			}
+			err := c.addRoute(ips.UnsortedList()...)
+			if err != nil {
+				plog.G(ctx).Debugf("Add pod IP to route table failed: %v", err)
 			}
 		}
 	}()
@@ -548,6 +563,7 @@ func (c *ConnectOptions) addRoute(ipStrList ...string) error {
 		return nil
 	}
 	var routes []types.Route
+	r, _ := netroute.New()
 	for _, ipStr := range ipStrList {
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
@@ -570,13 +586,16 @@ func (c *ConnectOptions) addRoute(ipStrList ...string) error {
 		} else {
 			mask = net.CIDRMask(128, 128)
 		}
-		if r, err := netroute.New(); err == nil {
+		if r != nil {
 			ifi, _, _, err := r.Route(ip)
 			if err == nil && ifi.Name == c.tunName {
 				continue
 			}
 		}
 		routes = append(routes, types.Route{Dst: net.IPNet{IP: ip, Mask: mask}})
+	}
+	if len(routes) == 0 {
+		return nil
 	}
 	err := tun.AddRoutes(c.tunName, routes...)
 	return err
