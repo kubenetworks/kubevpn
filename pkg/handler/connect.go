@@ -671,19 +671,25 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	}
 
 	plog.G(ctx).Infof("Listing namespace %s services...", c.OriginNamespace)
-	var serviceList []v1.Service
-	services, err := c.clientset.CoreV1().Services(c.OriginNamespace).List(ctx, metav1.ListOptions{})
-	if err == nil {
-		serviceList = append(serviceList, services.Items...)
+	conf := rest.CopyConfig(c.config)
+	conf.QPS = 1
+	conf.Burst = 2
+	clientSet, err := kubernetes.NewForConfig(conf)
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to create clientset: %v", err)
+		return err
 	}
-
+	indexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
+	informer := informerv1.NewServiceInformer(clientSet, c.OriginNamespace, 0, indexers)
+	go informer.Run(ctx.Done())
 	c.dnsConfig = &dns.Config{
-		Config:   relovConf,
-		Ns:       ns,
-		Services: serviceList,
-		TunName:  c.tunName,
-		Hosts:    c.extraHost,
-		Lock:     c.Lock,
+		Config:      relovConf,
+		Ns:          ns,
+		Services:    []v1.Service{},
+		SvcInformer: informer,
+		TunName:     c.tunName,
+		Hosts:       c.extraHost,
+		Lock:        c.Lock,
 		HowToGetExternalName: func(domain string) (string, error) {
 			podList, err := c.GetRunningPodList(ctx)
 			if err != nil {
@@ -707,7 +713,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	}
 	plog.G(ctx).Infof("Dump service in namespace %s into hosts...", c.OriginNamespace)
 	// dump service in current namespace for support DNS resolve service:port
-	err = c.dnsConfig.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.OriginNamespace), c.extraHost...)
+	err = c.dnsConfig.AddServiceNameToHosts(ctx, informer, c.extraHost...)
 	return err
 }
 

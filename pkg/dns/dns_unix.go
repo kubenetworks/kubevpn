@@ -6,15 +6,17 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 	miekgdns "github.com/miekg/dns"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 	v12 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -32,6 +34,31 @@ var resolv = "/etc/resolv.conf"
 // service.namespace.svc.cluster:port
 // service.namespace.svc.cluster.local:port
 func (c *Config) SetupDNS(ctx context.Context) error {
+	defer util.HandleCrash()
+
+	go func() {
+		ticker := time.NewTicker(time.Second * 15)
+		defer ticker.Stop()
+		for ; ctx.Err() == nil; <-ticker.C {
+			serviceList := c.SvcInformer.GetIndexer().List()
+			var services []v12.Service
+			for _, service := range serviceList {
+				svc, ok := service.(*v12.Service)
+				if !ok {
+					continue
+				}
+				services = append(services, *svc)
+			}
+			if len(services) == 0 {
+				continue
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			c.Services = services
+			c.usingResolver(ctx)
+		}
+	}()
 	c.usingResolver(ctx)
 	return nil
 }
@@ -70,6 +97,9 @@ func (c *Config) usingResolver(ctx context.Context) {
 		conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(content)))
 		if err != nil {
 			plog.G(ctx).Errorf("Parse resolver %s error: %v", filename, err)
+			continue
+		}
+		if slices.Contains(conf.Servers, clientConfig.Servers[0]) {
 			continue
 		}
 		// insert current name server to first location
