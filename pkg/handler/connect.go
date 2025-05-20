@@ -523,6 +523,9 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (cache.SharedIndex
 				ips.Insert(svc.Spec.ClusterIP)
 				ips.Insert(svc.Spec.ClusterIPs...)
 			}
+			if ctx.Err() != nil {
+				return
+			}
 			err := c.addRoute(ips.UnsortedList()...)
 			if err != nil {
 				plog.G(ctx).Debugf("Add service IP to route table failed: %v", err)
@@ -548,6 +551,9 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (cache.SharedIndex
 					continue
 				}
 				ips.Insert(util.GetPodIP(*p)...)
+			}
+			if ctx.Err() != nil {
+				return
 			}
 			err := c.addRoute(ips.UnsortedList()...)
 			if err != nil {
