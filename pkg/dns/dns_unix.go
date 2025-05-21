@@ -37,11 +37,35 @@ var resolv = "/etc/resolv.conf"
 // service.namespace.svc.cluster.local:port
 func (c *Config) SetupDNS(ctx context.Context) error {
 	defer util.HandleCrash()
-
+	ticker := time.NewTicker(time.Second * 15)
+	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{
+		FilterFunc: func(obj interface{}) bool {
+			if svc, ok := obj.(*v12.Service); ok && svc.Namespace == c.Ns[0] {
+				return true
+			} else {
+				return false
+			}
+		},
+		Handler: cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				ticker.Reset(time.Second * 3)
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				ticker.Reset(time.Second * 3)
+			},
+			DeleteFunc: func(obj interface{}) {
+				ticker.Reset(time.Second * 3)
+			},
+		},
+	})
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to add service event handler: %v", err)
+		return err
+	}
 	go func() {
-		ticker := time.NewTicker(time.Second * 15)
 		defer ticker.Stop()
 		for ; ctx.Err() == nil; <-ticker.C {
+			ticker.Reset(time.Second * 15)
 			serviceList, err := c.SvcInformer.GetIndexer().ByIndex(cache.NamespaceIndex, c.Ns[0])
 			if err != nil {
 				plog.G(ctx).Errorf("Failed to list service by namespace %s: %v", c.Ns[0], err)

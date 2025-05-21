@@ -62,8 +62,32 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, hosts []Entry) {
 	defer util.HandleCrash()
 	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
-
+	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{
+		FilterFunc: func(obj interface{}) bool {
+			if svc, ok := obj.(*v12.Service); ok && svc.Namespace == c.Ns[0] {
+				return true
+			} else {
+				return false
+			}
+		},
+		Handler: cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				ticker.Reset(time.Second * 3)
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				ticker.Reset(time.Second * 3)
+			},
+			DeleteFunc: func(obj interface{}) {
+				ticker.Reset(time.Second * 3)
+			},
+		},
+	})
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to add service event handler: %v", err)
+		return
+	}
 	for ; ctx.Err() == nil; <-ticker.C {
+		ticker.Reset(time.Second * 15)
 		serviceList, err := c.SvcInformer.GetIndexer().ByIndex(cache.NamespaceIndex, c.Ns[0])
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to list service by namespace %s: %v", c.Ns[0], err)
