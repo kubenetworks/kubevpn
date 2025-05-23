@@ -17,12 +17,8 @@ import (
 	miekgdns "github.com/miekg/dns"
 	"github.com/pkg/errors"
 	v12 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
-	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/watch"
-	v13 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"tailscale.com/net/dns"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -31,10 +27,11 @@ import (
 )
 
 type Config struct {
-	Config   *miekgdns.ClientConfig
-	Ns       []string
-	Services []v12.Service
-	TunName  string
+	Config      *miekgdns.ClientConfig
+	Ns          []string
+	Services    []v12.Service
+	SvcInformer cache.SharedIndexInformer
+	TunName     string
 
 	Hosts []Entry
 	Lock  *sync.Mutex
@@ -45,22 +42,8 @@ type Config struct {
 	OSConfigurator dns.OSConfigurator
 }
 
-func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13.ServiceInterface, hosts ...Entry) error {
+func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) error {
 	var serviceList []v12.Service
-	//listOptions := v1.ListOptions{Limit: 100}
-	//for {
-	//	services, err := serviceInterface.List(ctx, listOptions)
-	//	if err != nil {
-	//		break
-	//	}
-	//	serviceList = append(serviceList, services.Items...)
-	//	if services.Continue != "" {
-	//		listOptions.Continue = services.Continue
-	//	} else {
-	//		break
-	//	}
-	//}
-
 	c.Lock.Lock()
 	defer c.Lock.Unlock()
 
@@ -71,100 +54,65 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, serviceInterface v13
 		return err
 	}
 
-	go c.watchServiceToAddHosts(ctx, serviceInterface, hosts)
+	go c.watchServiceToAddHosts(ctx, hosts)
 	return nil
 }
 
-func (c *Config) watchServiceToAddHosts(ctx context.Context, serviceInterface v13.ServiceInterface, hosts []Entry) {
+func (c *Config) watchServiceToAddHosts(ctx context.Context, hosts []Entry) {
 	defer util.HandleCrash()
 	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
-	immediate := make(chan struct{}, 1)
-	immediate <- struct{}{}
-	var ErrChanDone = errors.New("watch service chan done")
-	for ctx.Err() == nil {
-		err := func() error {
-			w, err := serviceInterface.Watch(ctx, v1.ListOptions{Watch: true})
-			if err != nil {
-				return err
+	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{
+		FilterFunc: func(obj interface{}) bool {
+			if svc, ok := obj.(*v12.Service); ok && svc.Namespace == c.Ns[0] {
+				return true
+			} else {
+				return false
 			}
-			defer w.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case event, ok := <-w.ResultChan():
-					if !ok {
-						return ErrChanDone
-					}
-					svc, ok := event.Object.(*v12.Service)
-					if !ok {
-						continue
-					}
-					if ctx.Err() != nil {
-						return ctx.Err()
-					}
-					if event.Type == watch.Deleted {
-						if net.ParseIP(svc.Spec.ClusterIP) == nil {
-							continue
-						}
-						var list = []Entry{{
-							IP:     svc.Spec.ClusterIP,
-							Domain: svc.Name,
-						}}
-						err = c.removeHosts(list)
-						if err != nil {
-							plog.G(ctx).Errorf("Failed to remove hosts(%s) to hosts: %v", entryList2String(list), err)
-						}
-					}
-					if event.Type == watch.Added {
-						c.Lock.Lock()
-						appendHosts := c.generateAppendHosts([]v12.Service{*svc}, hosts)
-						err = c.appendHosts(appendHosts)
-						c.Lock.Unlock()
-						if err != nil {
-							plog.G(ctx).Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
-						}
-					}
-				case <-ticker.C:
-					var list *v12.ServiceList
-					list, err = serviceInterface.List(ctx, v1.ListOptions{})
-					if err != nil {
-						continue
-					}
-					c.Lock.Lock()
-					appendHosts := c.generateAppendHosts(list.Items, hosts)
-					err = c.appendHosts(appendHosts)
-					c.Lock.Unlock()
-					if err != nil {
-						plog.G(ctx).Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
-					}
-				case <-immediate:
-					var list *v12.ServiceList
-					list, err = serviceInterface.List(ctx, v1.ListOptions{})
-					if err != nil {
-						continue
-					}
-					c.Lock.Lock()
-					appendHosts := c.generateAppendHosts(list.Items, hosts)
-					err = c.appendHosts(appendHosts)
-					c.Lock.Unlock()
-					if err != nil {
-						plog.G(ctx).Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
-					}
-				}
+		},
+		Handler: cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				ticker.Reset(time.Second * 3)
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				ticker.Reset(time.Second * 3)
+			},
+			DeleteFunc: func(obj interface{}) {
+				ticker.Reset(time.Second * 3)
+			},
+		},
+	})
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to add service event handler: %v", err)
+		return
+	}
+	for ; ctx.Err() == nil; <-ticker.C {
+		ticker.Reset(time.Second * 15)
+		serviceList, err := c.SvcInformer.GetIndexer().ByIndex(cache.NamespaceIndex, c.Ns[0])
+		if err != nil {
+			plog.G(ctx).Errorf("Failed to list service by namespace %s: %v", c.Ns[0], err)
+			continue
+		}
+		var services []v12.Service
+		for _, service := range serviceList {
+			svc, ok := service.(*v12.Service)
+			if !ok {
+				continue
 			}
-		}()
+			services = append(services, *svc)
+		}
+		if len(services) == 0 {
+			continue
+		}
 		if ctx.Err() != nil {
 			return
 		}
-		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, ErrChanDone) {
-			plog.G(ctx).Debugf("Failed to watch service to add route table: %v", err)
-		}
-		if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {
-			time.Sleep(time.Second * 1)
-		} else {
-			time.Sleep(time.Millisecond * 200)
+		c.Lock.Lock()
+		appendHosts := c.generateAppendHosts(services, hosts)
+		err = c.appendHosts(appendHosts)
+		c.Lock.Unlock()
+		if err != nil && !errors.Is(err, context.Canceled) {
+			plog.G(ctx).Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
 		}
 	}
 }

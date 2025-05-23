@@ -6,10 +6,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +17,10 @@ import (
 	miekgdns "github.com/miekg/dns"
 	v12 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/cache"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // https://github.com/golang/go/issues/12524
@@ -32,6 +36,59 @@ var resolv = "/etc/resolv.conf"
 // service.namespace.svc.cluster:port
 // service.namespace.svc.cluster.local:port
 func (c *Config) SetupDNS(ctx context.Context) error {
+	defer util.HandleCrash()
+	ticker := time.NewTicker(time.Second * 15)
+	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{
+		FilterFunc: func(obj interface{}) bool {
+			if svc, ok := obj.(*v12.Service); ok && svc.Namespace == c.Ns[0] {
+				return true
+			} else {
+				return false
+			}
+		},
+		Handler: cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				ticker.Reset(time.Second * 3)
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				ticker.Reset(time.Second * 3)
+			},
+			DeleteFunc: func(obj interface{}) {
+				ticker.Reset(time.Second * 3)
+			},
+		},
+	})
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to add service event handler: %v", err)
+		return err
+	}
+	go func() {
+		defer ticker.Stop()
+		for ; ctx.Err() == nil; <-ticker.C {
+			ticker.Reset(time.Second * 15)
+			serviceList, err := c.SvcInformer.GetIndexer().ByIndex(cache.NamespaceIndex, c.Ns[0])
+			if err != nil {
+				plog.G(ctx).Errorf("Failed to list service by namespace %s: %v", c.Ns[0], err)
+				continue
+			}
+			var services []v12.Service
+			for _, service := range serviceList {
+				svc, ok := service.(*v12.Service)
+				if !ok {
+					continue
+				}
+				services = append(services, *svc)
+			}
+			if len(services) == 0 {
+				continue
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			c.Services = services
+			c.usingResolver(ctx)
+		}
+	}()
 	c.usingResolver(ctx)
 	return nil
 }
@@ -70,6 +127,9 @@ func (c *Config) usingResolver(ctx context.Context) {
 		conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(content)))
 		if err != nil {
 			plog.G(ctx).Errorf("Parse resolver %s error: %v", filename, err)
+			continue
+		}
+		if slices.Contains(conf.Servers, clientConfig.Servers[0]) {
 			continue
 		}
 		// insert current name server to first location

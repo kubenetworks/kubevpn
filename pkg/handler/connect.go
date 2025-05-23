@@ -32,15 +32,16 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
 	pkgtypes "k8s.io/apimachinery/pkg/types"
-	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/resource"
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
+	informerv1 "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	v2 "k8s.io/client-go/kubernetes/typed/networking/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/cmd/set"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -280,13 +281,14 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-
 		return
 	}
 	plog.G(ctx).Infof("Adding Pod IP and Service IP to route table...")
-	if err = c.addRouteDynamic(c.ctx); err != nil {
+	var svcInformer cache.SharedIndexInformer
+	if svcInformer, _, err = c.addRouteDynamic(c.ctx); err != nil {
 		plog.G(ctx).Errorf("Add route dynamic failed: %v", err)
 		return
 	}
 	go c.deleteFirewallRule(c.ctx)
 	plog.G(ctx).Infof("Configuring DNS service...")
-	if err = c.setupDNS(c.ctx); err != nil {
+	if err = c.setupDNS(c.ctx, svcInformer); err != nil {
 		plog.G(ctx).Errorf("Configure DNS failed: %v", err)
 		return
 	}
@@ -490,57 +492,116 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 }
 
 // Listen all pod, add route if needed
-func (c *ConnectOptions) addRouteDynamic(ctx context.Context) error {
-	podNs, svcNs, err1 := util.GetNsForListPodAndSvc(ctx, c.clientset, []string{v1.NamespaceAll, c.OriginNamespace})
-	if err1 != nil {
-		return err1
+func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (cache.SharedIndexInformer, cache.SharedIndexInformer, error) {
+	podNs, svcNs, err := util.GetNsForListPodAndSvc(ctx, c.clientset, []string{v1.NamespaceAll, c.OriginNamespace})
+	if err != nil {
+		return nil, nil, err
 	}
 
+	conf := rest.CopyConfig(c.config)
+	conf.QPS = 1
+	conf.Burst = 2
+	clientSet, err := kubernetes.NewForConfig(conf)
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to create clientset: %v", err)
+		return nil, nil, err
+	}
+	svcIndexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
+	svcInformer := informerv1.NewServiceInformer(clientSet, svcNs, 0, svcIndexers)
+	svcTicker := time.NewTicker(time.Second * 15)
+	_, err = svcInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			svcTicker.Reset(time.Second * 3)
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			svcTicker.Reset(time.Second * 3)
+		},
+		DeleteFunc: func(obj interface{}) {
+			svcTicker.Reset(time.Second * 3)
+		},
+	})
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to add service event handler: %v", err)
+		return nil, nil, err
+	}
+
+	go svcInformer.Run(ctx.Done())
 	go func() {
-		var listDone bool
-		for ctx.Err() == nil {
-			err := func() error {
-				if !listDone {
-					err := util.ListService(ctx, c.clientset.CoreV1().Services(svcNs), c.addRoute)
-					if err != nil {
-						return err
-					}
-					listDone = true
+		defer svcTicker.Stop()
+		for ; ctx.Err() == nil; <-svcTicker.C {
+			svcTicker.Reset(time.Second * 15)
+			serviceList := svcInformer.GetIndexer().List()
+			var ips = sets.New[string]()
+			for _, service := range serviceList {
+				svc, ok := service.(*v1.Service)
+				if !ok {
+					continue
 				}
-				err := util.WatchServiceToAddRoute(ctx, c.clientset.CoreV1().Services(svcNs), c.addRoute)
-				return err
-			}()
-			if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {
-				time.Sleep(time.Second * 10)
-			} else {
-				time.Sleep(time.Second * 2)
+				ips.Insert(svc.Spec.ClusterIP)
+				ips.Insert(svc.Spec.ClusterIPs...)
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			if ips.Len() == 0 {
+				continue
+			}
+			err := c.addRoute(ips.UnsortedList()...)
+			if err != nil {
+				plog.G(ctx).Debugf("Add service IP to route table failed: %v", err)
 			}
 		}
 	}()
 
+	podIndexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
+	podInformer := informerv1.NewPodInformer(clientSet, podNs, 0, podIndexers)
+	podTicker := time.NewTicker(time.Second * 15)
+	_, err = podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			podTicker.Reset(time.Second * 3)
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			podTicker.Reset(time.Second * 3)
+		},
+		DeleteFunc: func(obj interface{}) {
+			podTicker.Reset(time.Second * 3)
+		},
+	})
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to add service event handler: %v", err)
+		return nil, nil, err
+	}
+	go podInformer.Run(ctx.Done())
 	go func() {
-		var listDone bool
-		for ctx.Err() == nil {
-			err := func() error {
-				if !listDone {
-					err := util.ListPod(ctx, c.clientset.CoreV1().Pods(podNs), c.addRoute)
-					if err != nil {
-						return err
-					}
-					listDone = true
+		defer podTicker.Stop()
+		for ; ctx.Err() == nil; <-podTicker.C {
+			podTicker.Reset(time.Second * 15)
+			podList := podInformer.GetIndexer().List()
+			var ips = sets.New[string]()
+			for _, pod := range podList {
+				p, ok := pod.(*v1.Pod)
+				if !ok {
+					continue
 				}
-				err := util.WatchPodToAddRoute(ctx, c.clientset.CoreV1().Pods(podNs), c.addRoute)
-				return err
-			}()
-			if utilnet.IsConnectionRefused(err) || apierrors.IsTooManyRequests(err) || apierrors.IsForbidden(err) {
-				time.Sleep(time.Second * 10)
-			} else {
-				time.Sleep(time.Second * 2)
+				if p.Spec.HostNetwork {
+					continue
+				}
+				ips.Insert(util.GetPodIP(*p)...)
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			if ips.Len() == 0 {
+				continue
+			}
+			err := c.addRoute(ips.UnsortedList()...)
+			if err != nil {
+				plog.G(ctx).Debugf("Add pod IP to route table failed: %v", err)
 			}
 		}
 	}()
 
-	return nil
+	return svcInformer, podInformer, nil
 }
 
 func (c *ConnectOptions) addRoute(ipStrList ...string) error {
@@ -548,6 +609,7 @@ func (c *ConnectOptions) addRoute(ipStrList ...string) error {
 		return nil
 	}
 	var routes []types.Route
+	r, _ := netroute.New()
 	for _, ipStr := range ipStrList {
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
@@ -570,13 +632,16 @@ func (c *ConnectOptions) addRoute(ipStrList ...string) error {
 		} else {
 			mask = net.CIDRMask(128, 128)
 		}
-		if r, err := netroute.New(); err == nil {
+		if r != nil {
 			ifi, _, _, err := r.Route(ip)
 			if err == nil && ifi.Name == c.tunName {
 				continue
 			}
 		}
 		routes = append(routes, types.Route{Dst: net.IPNet{IP: ip, Mask: mask}})
+	}
+	if len(routes) == 0 {
+		return nil
 	}
 	err := tun.AddRoutes(c.tunName, routes...)
 	return err
@@ -600,7 +665,7 @@ func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
 	util.DeleteBlockFirewallRule(ctx)
 }
 
-func (c *ConnectOptions) setupDNS(ctx context.Context) error {
+func (c *ConnectOptions) setupDNS(ctx context.Context, svcInformer cache.SharedIndexInformer) error {
 	const portTCP = 10800
 	podList, err := c.GetRunningPodList(ctx)
 	if err != nil {
@@ -652,19 +717,14 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	}
 
 	plog.G(ctx).Infof("Listing namespace %s services...", c.OriginNamespace)
-	var serviceList []v1.Service
-	services, err := c.clientset.CoreV1().Services(c.OriginNamespace).List(ctx, metav1.ListOptions{})
-	if err == nil {
-		serviceList = append(serviceList, services.Items...)
-	}
-
 	c.dnsConfig = &dns.Config{
-		Config:   relovConf,
-		Ns:       ns,
-		Services: serviceList,
-		TunName:  c.tunName,
-		Hosts:    c.extraHost,
-		Lock:     c.Lock,
+		Config:      relovConf,
+		Ns:          ns,
+		Services:    []v1.Service{},
+		SvcInformer: svcInformer,
+		TunName:     c.tunName,
+		Hosts:       c.extraHost,
+		Lock:        c.Lock,
 		HowToGetExternalName: func(domain string) (string, error) {
 			podList, err := c.GetRunningPodList(ctx)
 			if err != nil {
@@ -688,7 +748,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context) error {
 	}
 	plog.G(ctx).Infof("Dump service in namespace %s into hosts...", c.OriginNamespace)
 	// dump service in current namespace for support DNS resolve service:port
-	err = c.dnsConfig.AddServiceNameToHosts(ctx, c.clientset.CoreV1().Services(c.OriginNamespace), c.extraHost...)
+	err = c.dnsConfig.AddServiceNameToHosts(ctx, c.extraHost...)
 	return err
 }
 
