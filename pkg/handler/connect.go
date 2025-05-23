@@ -848,18 +848,13 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) error {
 	}
 
 	// (2) get CIDR from cni
-	c.cidrs, err = util.GetCIDR(ctx, c.clientset, c.config, c.Namespace)
-	c.cidrs = util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(c.cidrs), c.apiServerIPs)
-	if err == nil {
-		s := sets.New[string]()
-		for _, cidr := range c.cidrs {
-			s.Insert(cidr.String())
-		}
-		return m.Set(ctx, config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
+	cidrs := util.GetCIDR(ctx, c.clientset, c.config, c.Namespace)
+	c.cidrs = util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cidrs), c.apiServerIPs)
+	s := sets.New[string]()
+	for _, cidr := range c.cidrs {
+		s.Insert(cidr.String())
 	}
-
-	// ignore error
-	return nil
+	return m.Set(ctx, config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
 }
 
 func (c *ConnectOptions) addExtraRoute(ctx context.Context, name string) error {

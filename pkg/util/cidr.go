@@ -33,7 +33,7 @@ import (
 // 2) grep cmdline
 // 3) create svc + cat *.conflist
 // 4) create svc + get pod ip with svc mask
-func GetCIDR(ctx context.Context, clientset *kubernetes.Clientset, restconfig *rest.Config, namespace string) ([]*net.IPNet, error) {
+func GetCIDR(ctx context.Context, clientset *kubernetes.Clientset, restconfig *rest.Config, namespace string) []*net.IPNet {
 	defer func() {
 		_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
 	}()
@@ -70,7 +70,7 @@ func GetCIDR(ctx context.Context, clientset *kubernetes.Clientset, restconfig *r
 		}
 	}
 
-	return result, nil
+	return result
 }
 
 // ParseCIDRFromString

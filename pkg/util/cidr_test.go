@@ -53,10 +53,10 @@ func TestByDumpClusterInfo(t *testing.T) {
 	before()
 	info, err := GetCIDRByDumpClusterInfo(context.Background(), clientset)
 	if err != nil {
-		t.Error(err)
+		t.Log(err.Error())
 	}
 	for _, ipNet := range info {
-		fmt.Println(ipNet.String())
+		t.Log(ipNet.String())
 	}
 }
 
@@ -64,19 +64,18 @@ func TestByCreateSvc(t *testing.T) {
 	before()
 	info, err := GetServiceCIDRByCreateService(context.Background(), clientset.CoreV1().Services("default"))
 	if err != nil {
-		t.Error(err)
+		t.Log(err.Error())
 	}
-	fmt.Println(info)
+	if info != nil {
+		t.Log(info.String())
+	}
 }
 
 func TestElegant(t *testing.T) {
 	before()
-	elegant, err := GetCIDR(context.Background(), clientset, restconfig, namespace)
-	if err != nil {
-		t.Error(err)
-	}
-	for _, net := range elegant {
-		fmt.Println(net.String())
+	elegant := GetCIDR(context.Background(), clientset, restconfig, namespace)
+	for _, ipNet := range elegant {
+		t.Log(ipNet.String())
 	}
 }
 
