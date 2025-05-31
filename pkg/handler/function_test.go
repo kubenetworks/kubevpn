@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -23,7 +23,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	pkgconfig "github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -40,7 +40,7 @@ const (
 
 func TestFunctions(t *testing.T) {
 	// 1) test connect
-	Init()
+	t.Run("init", Init)
 	t.Run("kubevpnConnect", kubevpnConnect)
 	t.Run("commonTest", commonTest)
 
@@ -62,6 +62,37 @@ func TestFunctions(t *testing.T) {
 	t.Run("kubevpnLeave", kubevpnLeave)
 	t.Run("kubevpnUninstall", kubevpnUninstall)
 	t.Run("kubevpnProxyWithServiceMeshAndGvisorMode", kubevpnProxyWithServiceMeshAndGvisorMode)
+	t.Run("commonTest", commonTest)
+	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
+	t.Run("kubevpnQuit", kubevpnQuit)
+
+	// 5) install centrally in ns test -- connect mode
+	t.Run("centerKubevpnUninstall", kubevpnUninstall)
+	t.Run("centerKubevpnInstallInNsKubevpn", kubevpnConnectToNsKubevpn)
+	t.Run("centerKubevpnConnect", kubevpnConnect)
+	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
+	t.Run("centerCommonTest", commonTest)
+
+	// 6) install centrally in ns test -- proxy mode
+	t.Run("centerKubevpnProxy", kubevpnProxy)
+	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
+	t.Run("centerCommonTest", commonTest)
+	t.Run("centerTestUDP", testUDP)
+	t.Run("centerProxyServiceReviewsServiceIP", proxyServiceReviewsServiceIP)
+	t.Run("centerProxyServiceReviewsPodIP", proxyServiceReviewsPodIP)
+
+	// 7) install centrally in ns test -- proxy mode with service mesh
+	t.Run("kubevpnLeave", kubevpnLeave)
+	t.Run("kubevpnProxyWithServiceMesh", kubevpnProxyWithServiceMesh)
+	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
+	t.Run("commonTest", commonTest)
+	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
+	t.Run("serviceMeshReviewsPodIP", serviceMeshReviewsPodIP)
+
+	// 8) install centrally in ns test -- proxy mode with service mesh and gvisor
+	t.Run("kubevpnQuit", kubevpnQuit)
+	t.Run("kubevpnProxyWithServiceMeshAndGvisorMode", kubevpnProxyWithServiceMeshAndGvisorMode)
+	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
 	t.Run("commonTest", commonTest)
 	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
 	t.Run("kubevpnQuit", kubevpnQuit)
@@ -275,34 +306,37 @@ func proxyServiceReviewsServiceIP(t *testing.T) {
 
 func testUDP(t *testing.T) {
 	app := "reviews"
-	port, _ := util.GetAvailableUDPPortOrDie()
-	go udpServer(port)
-
-	ip, err := getPodIP(app)
+	port, err := util.GetAvailableUDPPortOrDie()
 	if err != nil {
 		t.Fatal(err)
 	}
-	log.Printf("Dail udp to IP: %s", ip)
+	go udpServer(t, port)
+
+	var ip string
 	err = retry.OnError(
 		wait.Backoff{Duration: time.Second, Factor: 2, Jitter: 0.2, Steps: 5},
 		func(err error) bool {
 			return err != nil
 		},
 		func() error {
-			return udpClient(ip, port)
+			ip, err = getPodIP(app)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("Dail udp to IP: %s", ip)
+			return udpClient(t, ip, port)
 		})
 	if err != nil {
 		t.Fatalf("Failed to access pod IP: %s, port: %v", ip, port)
 	}
 }
 
-func udpClient(ip string, port int) error {
+func udpClient(t *testing.T, ip string, port int) error {
 	udpConn, err := net.DialUDP("udp4", nil, &net.UDPAddr{
 		IP:   net.ParseIP(ip),
 		Port: port,
 	})
 	if err != nil {
-		fmt.Println("连接失败!", err)
 		return err
 	}
 	defer udpConn.Close()
@@ -312,51 +346,48 @@ func udpClient(ip string, port int) error {
 		return err
 	}
 
-	// 发送数据
 	sendData := []byte("hello server!")
 	_, err = udpConn.Write(sendData)
 	if err != nil {
-		fmt.Println("发送数据失败!", err)
+		t.Logf("Failed to send udp packet: %v", err)
 		return err
 	}
 
-	// 接收数据
 	data := make([]byte, 4096)
 	read, remoteAddr, err := udpConn.ReadFromUDP(data)
 	if err != nil {
-		fmt.Println("读取数据失败!", err)
+		t.Logf("Failed to read udp packet: %v", err)
 		return err
 	}
-	fmt.Println(read, remoteAddr)
-	fmt.Printf("%s\n", data[0:read])
+	t.Logf("read data from %v: %v", remoteAddr, string(data[:read]))
 	return nil
 }
 
-func udpServer(port int) {
+func udpServer(t *testing.T, port int) {
 	// 创建监听
 	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
 		IP:   net.IPv4(0, 0, 0, 0),
 		Port: port,
 	})
 	if err != nil {
+		t.Fatal(err)
 		return
 	}
 	defer udpConn.Close()
 
+	data := make([]byte, 4096)
 	for {
-		data := make([]byte, 4096)
-		read, remoteAddr, err := udpConn.ReadFromUDP(data)
+		read, remoteAddr, err := udpConn.ReadFromUDP(data[:])
 		if err != nil {
-			fmt.Println("读取数据失败!", err)
+			t.Logf("failed to read udp data from %v: %v", remoteAddr, err)
 			continue
 		}
-		fmt.Println(read, remoteAddr)
-		fmt.Printf("%s\n\n", data[0:read])
+		t.Logf("read data from %v: %v", remoteAddr, string(data[:read]))
 
 		sendData := []byte("hello client!")
 		_, err = udpConn.WriteToUDP(sendData, remoteAddr)
 		if err != nil {
-			fmt.Println("发送数据失败!", err)
+			t.Logf("failed to send udp data to %v: %v", remoteAddr, err)
 			return
 		}
 	}
@@ -369,6 +400,27 @@ func kubevpnConnect(t *testing.T) {
 	err := cmd.Run()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func kubevpnConnectToNsKubevpn(t *testing.T) {
+	_, err := clientset.CoreV1().Namespaces().Create(context.Background(), &corev1.Namespace{
+		ObjectMeta: v1.ObjectMeta{
+			Name: "kubevpn",
+		},
+	}, v1.CreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmdConnect := exec.Command("kubevpn", "connect", "--namespace", "kubevpn", "--debug")
+	cmdQuit := exec.Command("kubevpn", "quit")
+	for _, cmd := range []*exec.Cmd{cmdConnect, cmdQuit} {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err = cmd.Run()
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -442,52 +494,58 @@ func kubevpnQuit(t *testing.T) {
 	}
 }
 
-func kubectl(t *testing.T) {
-	cmd := exec.Command("kubectl", "get", "pods", "-o", "wide")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cmd = exec.Command("kubectl", "get", "services", "-o", "wide")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
-	if err != nil {
+func checkServiceShouldNotInNsDefault(t *testing.T) {
+	_, err := clientset.CoreV1().Services(namespace).Get(context.Background(), pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
+	if !k8serrors.IsNotFound(err) {
 		t.Fatal(err)
 	}
 }
 
-func Init() {
+func kubectl(t *testing.T) {
+	cmdGetPod := exec.Command("kubectl", "get", "pods", "-o", "wide")
+	cmdDescribePod := exec.Command("kubectl", "describe", "pods")
+	cmdGetSvc := exec.Command("kubectl", "get", "services", "-o", "wide")
+	cmdDescribeSvc := exec.Command("kubectl", "describe", "services")
+	for _, cmd := range []*exec.Cmd{cmdGetPod, cmdDescribePod, cmdGetSvc, cmdDescribeSvc} {
+		t.Logf("exec: %v", cmd.Args)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err := cmd.Run()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func Init(t *testing.T) {
 	var err error
 
 	configFlags := genericclioptions.NewConfigFlags(true)
 	f := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 
 	if restconfig, err = f.ToRESTConfig(); err != nil {
-		plog.G(context.Background()).Fatal(err)
+		t.Fatal(err)
 	}
 	if clientset, err = kubernetes.NewForConfig(restconfig); err != nil {
-		plog.G(context.Background()).Fatal(err)
+		t.Fatal(err)
 	}
 	if namespace, _, err = f.ToRawKubeConfigLoader().Namespace(); err != nil {
-		plog.G(context.Background()).Fatal(err)
+		t.Fatal(err)
 	}
 
-	go startupHttpServer(local)
+	go startupHttpServer(t, local)
 }
 
-func startupHttpServer(str string) {
+func startupHttpServer(t *testing.T, str string) {
 	var health = func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(str))
 	}
 
 	http.HandleFunc("/", health)
 	http.HandleFunc("/health", health)
-	log.Println("Start listening http port 9080 ...")
-	if err := http.ListenAndServe(":9080", nil); err != nil {
-		panic(err)
+	t.Log("Start listening http port 9080 ...")
+	err := http.ListenAndServe(":9080", nil)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
