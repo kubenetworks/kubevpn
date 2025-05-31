@@ -24,6 +24,8 @@ jobs:
         uses: medyagh/setup-minikube@latest
         with:
           cache: true
+          cpus: 'max'
+          memory: 'max'
 
       - name: Kubernetes info
         run: |
