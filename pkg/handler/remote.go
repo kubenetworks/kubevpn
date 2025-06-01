@@ -220,8 +220,9 @@ func genMutatingWebhookConfiguration(namespace string, crt []byte) *admissionv1.
 				},
 			}},
 			FailurePolicy: ptr.To(admissionv1.Ignore),
+			// namespace kubevpn is special, if installed to this namespace, means center install mode
 			// same as above label ns
-			NamespaceSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"ns": namespace}},
+			NamespaceSelector:       util.If(namespace == config.DefaultNamespaceKubevpn, nil, &metav1.LabelSelector{MatchLabels: map[string]string{"ns": namespace}}),
 			SideEffects:             ptr.To(admissionv1.SideEffectClassNone),
 			TimeoutSeconds:          ptr.To[int32](15),
 			AdmissionReviewVersions: []string{"v1", "v1beta1"},
