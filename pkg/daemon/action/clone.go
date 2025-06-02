@@ -51,15 +51,11 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 
-		TargetKubeconfig:       req.TargetKubeconfig,
-		TargetNamespace:        req.TargetNamespace,
-		TargetContainer:        req.TargetContainer,
-		TargetImage:            req.TargetImage,
-		TargetRegistry:         req.TargetRegistry,
-		IsChangeTargetRegistry: req.IsChangeTargetRegistry,
-		TargetWorkloadNames:    map[string]string{},
-		LocalDir:               req.LocalDir,
-		RemoteDir:              req.RemoteDir,
+		TargetContainer:     req.TargetContainer,
+		TargetImage:         req.TargetImage,
+		TargetWorkloadNames: map[string]string{},
+		LocalDir:            req.LocalDir,
+		RemoteDir:           req.RemoteDir,
 	}
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {

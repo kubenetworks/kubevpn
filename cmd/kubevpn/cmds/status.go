@@ -204,7 +204,7 @@ func genCloneMsg(w *tabwriter.Writer, list []*rpc.Status) {
 
 	_, _ = fmt.Fprintf(w, "\n")
 	w.SetRememberedWidths(nil)
-	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Namespace", "Name", "Headers", "ToName", "ToKubeconfig", "ToNamespace", "SyncthingGUI")
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Namespace", "Name", "Headers", "ToName", "SyncthingGUI")
 	for _, c := range list {
 		for _, clone := range c.CloneList {
 			//_, _ = fmt.Fprintf(w, "%s\n", clone.Workload)
@@ -216,14 +216,12 @@ func genCloneMsg(w *tabwriter.Writer, list []*rpc.Status) {
 				if len(headers) == 0 {
 					headers = []string{"*"}
 				}
-				_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
 					c.ID,
 					clone.Namespace,
 					clone.Workload,
 					strings.Join(headers, ","),
 					rule.DstWorkload,
-					rule.DstKubeconfig,
-					rule.DstNamespace,
 					clone.SyncthingGUIAddr,
 				)
 			}

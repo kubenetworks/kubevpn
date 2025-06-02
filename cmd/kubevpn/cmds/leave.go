@@ -28,8 +28,9 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 		`)),
 		Example: templates.Examples(i18n.T(`
 		# leave proxy resource and restore it to origin
-		kubevpn leave deployment/authors
+		kubevpn leave deployment/authors-clone-645d7
 		`)),
+		Args: cobra.MatchAll(cobra.OnlyValidArgs, cobra.MinimumNArgs(1)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			return daemon.StartupDaemon(cmd.Context())
 		},

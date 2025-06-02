@@ -36,9 +36,9 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	var imagePullSecretName string
 	cmd := &cobra.Command{
 		Use:   "clone",
-		Short: i18n.T("Clone workloads to run in target-kubeconfig cluster with same volume、env、and network"),
+		Short: i18n.T("Clone workloads to run in same namespace with same volume、env、and network"),
 		Long: templates.LongDesc(i18n.T(`
-		Clone workloads to run into target-kubeconfig cluster with same volume、env、and network
+		Clone workloads to run in same namespace with same volume、env、and network
 
 		In this way, you can startup another deployment in same cluster or not, but with different image version,
 		it also supports service mesh proxy. only traffic with special header will hit to cloned_resource.
@@ -98,8 +98,6 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 				}
 				return cmdutil.UsageErrorf(cmd, usageString)
 			}
-			// special empty string, eg: --target-registry ""
-			options.IsChangeTargetRegistry = cmd.Flags().Changed("target-registry")
 
 			if syncDir != "" {
 				local, remote, err := util.ParseDirMapping(syncDir)
@@ -122,26 +120,22 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 				}
 			}
 			req := &rpc.CloneRequest{
-				KubeconfigBytes:        string(bytes),
-				Namespace:              ns,
-				Headers:                options.Headers,
-				Workloads:              args,
-				ExtraRoute:             extraRoute.ToRPC(),
-				OriginKubeconfigPath:   util.GetKubeConfigPath(f),
-				Engine:                 string(options.Engine),
-				SshJump:                sshConf.ToRPC(),
-				TargetKubeconfig:       options.TargetKubeconfig,
-				TargetNamespace:        options.TargetNamespace,
-				TargetContainer:        options.TargetContainer,
-				TargetImage:            options.TargetImage,
-				TargetRegistry:         options.TargetRegistry,
-				IsChangeTargetRegistry: options.IsChangeTargetRegistry,
-				TransferImage:          transferImage,
-				Image:                  config.Image,
-				ImagePullSecretName:    imagePullSecretName,
-				Level:                  int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
-				LocalDir:               options.LocalDir,
-				RemoteDir:              options.RemoteDir,
+				KubeconfigBytes:      string(bytes),
+				Namespace:            ns,
+				Headers:              options.Headers,
+				Workloads:            args,
+				ExtraRoute:           extraRoute.ToRPC(),
+				OriginKubeconfigPath: util.GetKubeConfigPath(f),
+				Engine:               string(options.Engine),
+				SshJump:              sshConf.ToRPC(),
+				TargetContainer:      options.TargetContainer,
+				TargetImage:          options.TargetImage,
+				TransferImage:        transferImage,
+				Image:                config.Image,
+				ImagePullSecretName:  imagePullSecretName,
+				Level:                int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
+				LocalDir:             options.LocalDir,
+				RemoteDir:            options.RemoteDir,
 			}
 			cli, err := daemon.GetClient(false)
 			if err != nil {
@@ -168,9 +162,6 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 
 	cmdutil.AddContainerVarFlags(cmd, &options.TargetContainer, options.TargetContainer)
 	cmd.Flags().StringVar(&options.TargetImage, "target-image", "", "Clone container use this image to startup container, if not special, use origin image")
-	cmd.Flags().StringVar(&options.TargetNamespace, "target-namespace", "", "Clone workloads in this namespace, if not special, use origin namespace")
-	cmd.Flags().StringVar(&options.TargetKubeconfig, "target-kubeconfig", "", "Clone workloads will create in this cluster, if not special, use origin cluster")
-	cmd.Flags().StringVar(&options.TargetRegistry, "target-registry", "", "Clone workloads will create this registry domain to replace origin registry, if not special, use origin registry")
 	cmd.Flags().StringVar(&syncDir, "sync", "", "Sync local dir to remote pod dir. format: LOCAL_DIR:REMOTE_DIR, eg: ~/code:/app/code")
 
 	handler.AddExtraRoute(cmd.Flags(), extraRoute)

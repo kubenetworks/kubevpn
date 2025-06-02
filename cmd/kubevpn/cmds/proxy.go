@@ -2,7 +2,6 @@ package cmds
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	log "github.com/sirupsen/logrus"
@@ -91,6 +90,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 		# Auto proxy container port to same local port, and auto detect protocol
 		kubevpn proxy deployment/productpage
 		`)),
+		Args: cobra.MatchAll(cobra.OnlyValidArgs, cobra.MinimumNArgs(1)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			plog.InitLoggerForClient()
 			if err = daemon.StartupDaemon(cmd.Context()); err != nil {
@@ -102,16 +102,6 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			return err
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				fmt.Fprintf(os.Stdout, "You must specify the type of resource to proxy. %s\n\n", cmdutil.SuggestAPIResources("kubevpn"))
-				fullCmdName := cmd.Parent().CommandPath()
-				usageString := "Required resource not specified."
-				if len(fullCmdName) > 0 && cmdutil.IsSiblingCommandExists(cmd, "explain") {
-					usageString = fmt.Sprintf("%s\nUse \"%s explain <resource>\" for a detailed description of that resource (e.g. %[2]s explain pods).", usageString, fullCmdName)
-				}
-				return cmdutil.UsageErrorf(cmd, usageString)
-			}
-
 			bytes, ns, err := util.ConvertToKubeConfigBytes(f)
 			if err != nil {
 				return err
