@@ -150,12 +150,8 @@ message CloneRequest {
   SshJump SshJump = 8;
 
   // target cluster info
-  string TargetKubeconfig = 9;
-  string TargetNamespace = 10;
   string TargetContainer = 11;
   string TargetImage = 12;
-  string TargetRegistry = 13;
-  bool IsChangeTargetRegistry = 14;
 
   // transfer image
   bool TransferImage = 15;

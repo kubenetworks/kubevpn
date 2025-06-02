@@ -147,11 +147,8 @@ func gen(ctx context.Context, connect *handler.ConnectOptions, clone *handler.Cl
 				SyncthingGUIAddr: clone.GetSyncthingGUIAddr(),
 				RuleList: []*rpc.CloneRule{
 					{
-						DstCluster:    util.GetKubeconfigCluster(clone.GetFactory()),
-						Headers:       clone.Headers,
-						DstWorkload:   clone.TargetWorkloadNames[workload],
-						DstKubeconfig: clone.TargetKubeconfig,
-						DstNamespace:  clone.TargetNamespace,
+						Headers:     clone.Headers,
+						DstWorkload: clone.TargetWorkloadNames[workload],
 					},
 				},
 			})
