@@ -6,7 +6,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -33,12 +32,6 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 			logger.Errorf("Failed to get unstructured controller: %v", err)
 			return err
 		}
-		u := controller.Object.(*unstructured.Unstructured)
-		templateSpec, _, err := util.GetPodTemplateSpecPath(u)
-		if err != nil {
-			logger.Errorf("Failed to get template spec path: %v", err)
-			return err
-		}
 		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 		// add rollback func to remove envoy config
 		var empty bool
@@ -52,8 +45,8 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 			plog.G(ctx).Errorf("Leaving workload %s failed: %v", workload, err)
 			continue
 		}
-		if empty {
-			err = inject.ModifyServiceTargetPort(ctx, svr.connect.GetClientset(), req.Namespace, templateSpec.Labels, map[int32]int32{})
+		if empty && object.Mapping.Resource.Resource == "services" {
+			err = inject.ModifyServiceTargetPort(ctx, svr.connect.GetClientset(), req.Namespace, object.Name, map[int32]int32{})
 		}
 		svr.connect.LeavePortMap(req.Namespace, workload)
 		err = util.RolloutStatus(ctx, factory, req.Namespace, workload, time.Minute*60)

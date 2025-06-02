@@ -187,7 +187,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
 		if c.Engine == config.EngineGvisor {
-			err = inject.InjectEnvoySidecar(ctx, nodeID, c.factory, c.clientset, c.Namespace, controller, headers, portMap, tlsSecret)
+			err = inject.InjectEnvoySidecar(ctx, nodeID, c.factory, c.clientset, c.Namespace, object, controller, headers, portMap, tlsSecret)
 		} else if len(headers) != 0 || len(portMap) != 0 {
 			err = inject.InjectVPNAndEnvoySidecar(ctx, nodeID, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, controller, configInfo, headers, portMap, tlsSecret)
 		} else {

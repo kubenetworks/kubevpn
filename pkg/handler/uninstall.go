@@ -9,7 +9,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/yaml"
 
@@ -97,12 +96,6 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 			plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
 			return err
 		}
-		u := controller.Object.(*unstructured.Unstructured)
-		templateSpec, _, err := util.GetPodTemplateSpecPath(u)
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to get template spec path: %v", err)
-			return err
-		}
 		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 		var empty bool
 		empty, err = inject.UnPatchContainer(ctx, nodeID, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), controller, func(isFargateMode bool, rule *controlplane.Rule) bool {
@@ -115,8 +108,8 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 			plog.G(ctx).Errorf("Failed to leave workload %s in namespace %s: %v", workload.workload, workload.namespace, err)
 			continue
 		}
-		if empty {
-			err = inject.ModifyServiceTargetPort(ctx, c.clientset, workload.namespace, templateSpec.Labels, map[int32]int32{})
+		if empty && object.Mapping.Resource.Resource == "services" {
+			err = inject.ModifyServiceTargetPort(ctx, c.clientset, workload.namespace, object.Name, map[int32]int32{})
 		}
 		c.LeavePortMap(workload.namespace, workload.workload)
 	}

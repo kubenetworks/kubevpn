@@ -10,7 +10,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	k8sjson "k8s.io/apimachinery/pkg/util/json"
@@ -28,7 +27,7 @@ import (
 
 // InjectEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
-func InjectEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Factory, clientset *kubernetes.Clientset, connectNamespace string, object *runtimeresource.Info, headers map[string]string, portMap []string, secret *v1.Secret) (err error) {
+func InjectEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Factory, clientset *kubernetes.Clientset, connectNamespace string, current, object *runtimeresource.Info, headers map[string]string, portMap []string, secret *v1.Secret) (err error) {
 	u := object.Object.(*unstructured.Unstructured)
 	var templateSpec *v1.PodTemplateSpec
 	var path []string
@@ -89,33 +88,21 @@ func InjectEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Factory, c
 		return err
 	}
 
+	if current.Mapping.Resource.Resource != "services" {
+		return nil
+	}
 	// 2) modify service containerPort to envoy listener port
-	err = ModifyServiceTargetPort(ctx, clientset, object.Namespace, templateSpec.Labels, containerPort2EnvoyListenerPort)
+	err = ModifyServiceTargetPort(ctx, clientset, object.Namespace, current.Name, containerPort2EnvoyListenerPort)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func ModifyServiceTargetPort(ctx context.Context, clientset *kubernetes.Clientset, namespace string, podLabels map[string]string, m map[int32]int32) error {
-	// service selector == pod labels
-	list, err := clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+func ModifyServiceTargetPort(ctx context.Context, clientset *kubernetes.Clientset, namespace string, name string, m map[int32]int32) error {
+	svc, err := clientset.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return err
-	}
-
-	var svc *v1.Service
-	for _, item := range list.Items {
-		if item.Spec.Selector == nil {
-			continue
-		}
-		if labels.SelectorFromSet(item.Spec.Selector).Matches(labels.Set(podLabels)) {
-			svc = &item
-			break
-		}
-	}
-	if svc == nil {
-		return fmt.Errorf("can not found service with selector: %v", podLabels)
 	}
 	for i := range len(svc.Spec.Ports) {
 		if p, found := m[svc.Spec.Ports[i].Port]; found {
