@@ -26,7 +26,7 @@ func CmdRemove(f cmdutil.Factory) *cobra.Command {
 		`)),
 		Example: templates.Examples(i18n.T(`
         # leave proxy resources to origin
-        kubevpn remove deployment/authors
+        kubevpn remove deployment/authors-clone-645d7
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			return daemon.StartupDaemon(cmd.Context())

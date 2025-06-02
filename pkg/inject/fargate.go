@@ -28,7 +28,7 @@ import (
 
 // InjectEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
-func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kubernetes.Clientset, connectNamespace string, object *runtimeresource.Info, headers map[string]string, portMap []string, secret *v1.Secret) (err error) {
+func InjectEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Factory, clientset *kubernetes.Clientset, connectNamespace string, object *runtimeresource.Info, headers map[string]string, portMap []string, secret *v1.Secret) (err error) {
 	u := object.Object.(*unstructured.Unstructured)
 	var templateSpec *v1.PodTemplateSpec
 	var path []string
@@ -36,8 +36,6 @@ func InjectEnvoySidecar(ctx context.Context, f cmdutil.Factory, clientset *kuber
 	if err != nil {
 		return err
 	}
-
-	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 
 	c := util.PodRouteConfig{LocalTunIPv4: "127.0.0.1", LocalTunIPv6: netip.IPv6Loopback().String()}
 	ports, portmap := GetPort(templateSpec, portMap)

@@ -24,7 +24,7 @@ import (
 	util2 "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func InjectVPNSidecar(ctx context.Context, f util.Factory, connectNamespace string, object *resource.Info, c util2.PodRouteConfig, secret *v1.Secret) error {
+func InjectVPNSidecar(ctx context.Context, nodeID string, f util.Factory, connectNamespace string, object *resource.Info, c util2.PodRouteConfig, secret *v1.Secret) error {
 	u := object.Object.(*unstructured.Unstructured)
 
 	podTempSpec, path, err := util2.GetPodTemplateSpecPath(u)
@@ -36,7 +36,6 @@ func InjectVPNSidecar(ctx context.Context, f util.Factory, connectNamespace stri
 	if err != nil {
 		return err
 	}
-	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 	var ports []v1.ContainerPort
 	for _, container := range podTempSpec.Spec.Containers {
 		ports = append(ports, container.Ports...)
@@ -121,51 +120,6 @@ func CreateAfterDeletePod(ctx context.Context, factory util.Factory, p *v1.Pod, 
 		return err
 	}
 	return nil
-}
-
-func removeInboundContainer(factory util.Factory, namespace, workloads string) error {
-	object, err := util2.GetUnstructuredObject(factory, namespace, workloads)
-	if err != nil {
-		return err
-	}
-
-	u := object.Object.(*unstructured.Unstructured)
-
-	podTempSpec, path, err := util2.GetPodTemplateSpecPath(u)
-	if err != nil {
-		return err
-	}
-
-	helper := resource.NewHelper(object.Client, object.Mapping)
-
-	// pods
-	if len(path) == 0 {
-		_, err = helper.DeleteWithOptions(object.Namespace, object.Name, &v12.DeleteOptions{
-			GracePeriodSeconds: pointer.Int64(0),
-		})
-		if err != nil {
-			return err
-		}
-	}
-	// how to scale to one
-	RemoveContainer(&podTempSpec.Spec)
-
-	bytes, err := json.Marshal([]struct {
-		Op    string      `json:"op"`
-		Path  string      `json:"path"`
-		Value interface{} `json:"value"`
-	}{{
-		Op:    "replace",
-		Path:  "/" + strings.Join(append(path, "spec"), "/"),
-		Value: podTempSpec.Spec,
-	}})
-	if err != nil {
-		return err
-	}
-	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &v12.PatchOptions{
-		//Force: &t,
-	})
-	return err
 }
 
 func CleanupUselessInfo(pod *v1.Pod) {

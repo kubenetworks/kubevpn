@@ -31,7 +31,7 @@ import (
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
 
 // InjectVPNAndEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
-func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, mapInterface v12.ConfigMapInterface, connectNamespace string, object *runtimeresource.Info, c util.PodRouteConfig, headers map[string]string, portMaps []string, secret *v1.Secret) (err error) {
+func InjectVPNAndEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Factory, mapInterface v12.ConfigMapInterface, connectNamespace string, object *runtimeresource.Info, c util.PodRouteConfig, headers map[string]string, portMaps []string, secret *v1.Secret) (err error) {
 	u := object.Object.(*unstructured.Unstructured)
 	var templateSpec *v1.PodTemplateSpec
 	var path []string
@@ -69,8 +69,6 @@ func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, mapInterfa
 			portmap[port.ContainerPort] = fmt.Sprintf("%d", port.HostPort)
 		}
 	}
-
-	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 
 	err = addEnvoyConfig(mapInterface, object.Namespace, nodeID, c, headers, ports, portmap)
 	if err != nil {
@@ -114,7 +112,7 @@ func InjectVPNAndEnvoySidecar(ctx context.Context, f cmdutil.Factory, mapInterfa
 	return err
 }
 
-func UnPatchContainer(ctx context.Context, factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, object *runtimeresource.Info, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) (bool, error) {
+func UnPatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, object *runtimeresource.Info, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) (bool, error) {
 	u := object.Object.(*unstructured.Unstructured)
 	templateSpec, depth, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
@@ -122,7 +120,6 @@ func UnPatchContainer(ctx context.Context, factory cmdutil.Factory, mapInterface
 		return false, err
 	}
 
-	nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 	workload := util.ConvertUidToWorkload(nodeID)
 	var empty, found bool
 	empty, found, err = removeEnvoyConfig(mapInterface, object.Namespace, nodeID, isMeFunc)

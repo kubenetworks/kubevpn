@@ -10,9 +10,7 @@ import (
 	v2 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/cli-runtime/pkg/resource"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
@@ -111,22 +109,6 @@ func GetPodTemplateSpecPath(u *unstructured.Unstructured) (*v1.PodTemplateSpec, 
 	return &p, path, nil
 }
 
-func GetAnnotation(f util.Factory, ns string, resources string) (map[string]string, error) {
-	ownerReference, err := GetTopOwnerReference(f, ns, resources)
-	if err != nil {
-		return nil, err
-	}
-	u, ok := ownerReference.Object.(*unstructured.Unstructured)
-	if !ok {
-		return nil, fmt.Errorf("can not convert to unstaructed")
-	}
-	annotations := u.GetAnnotations()
-	if annotations == nil {
-		annotations = map[string]string{}
-	}
-	return annotations, nil
-}
-
 /*
 NormalizedResource convert user parameter to standard, example:
 
@@ -139,7 +121,7 @@ NormalizedResource convert user parameter to standard, example:
 	pod/productpage-without-controller --> pod/productpage-without-controller
 	service/productpage-without-pod --> controller/controllerName
 */
-func NormalizedResource(ctx context.Context, f util.Factory, clientset *kubernetes.Clientset, ns string, workloads []string) ([]string, error) {
+func NormalizedResource(f util.Factory, ns string, workloads []string) ([]string, error) {
 	if len(workloads) == 0 {
 		return nil, nil
 	}
@@ -152,58 +134,42 @@ func NormalizedResource(ctx context.Context, f util.Factory, clientset *kubernet
 	for _, info := range objectList {
 		resources = append(resources, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
 	}
-	workloads = resources
+	return resources, nil
+}
 
-	// normal workloads, like pod with controller, deployments, statefulset, replicaset etc...
-	for i, workload := range workloads {
-		var ownerReference *resource.Info
-		ownerReference, err = GetTopOwnerReference(f, ns, workload)
-		if err == nil {
-			workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.Resource.GroupResource().String(), ownerReference.Name)
-		}
+func GetTopOwnerObject(ctx context.Context, f util.Factory, ns string, workload string) (object, controller *resource.Info, err error) {
+	// normal workload, like pod with controller, deployments, statefulset, replicaset etc...
+	object, controller, err = GetTopOwnerReference(f, ns, workload)
+	if err != nil {
+		return nil, nil, err
 	}
-	// service which associate with pod
-	for i, workload := range workloads {
-		var object *resource.Info
-		object, err = GetUnstructuredObject(f, ns, workload)
-		if err != nil {
-			return nil, err
-		}
-		if object.Mapping.Resource.Resource != "services" {
-			continue
-		}
-		var svc *v1.Service
-		svc, err = clientset.CoreV1().Services(ns).Get(ctx, object.Name, v2.GetOptions{})
-		if err != nil {
-			continue
-		}
-		var selector labels.Selector
-		_, selector, err = polymorphichelpers.SelectorsForObject(svc)
-		if err != nil {
-			continue
-		}
-		var podList *v1.PodList
-		podList, err = clientset.CoreV1().Pods(ns).List(ctx, v2.ListOptions{LabelSelector: selector.String()})
-		// if pod is not empty, using pods to find top controller
-		if err == nil && podList != nil && len(podList.Items) != 0 {
-			var ownerReference *resource.Info
-			ownerReference, err = GetTopOwnerReference(f, ns, fmt.Sprintf("%s/%s", "pods", podList.Items[0].Name))
-			if err == nil {
-				workloads[i] = fmt.Sprintf("%s/%s", ownerReference.Mapping.Resource.GroupResource().String(), ownerReference.Name)
-			}
-		} else { // if list is empty, means not create pods, just controllers
-			var controller sets.Set[string]
-			controller, err = GetTopOwnerReferenceBySelector(f, ns, selector.String())
-			if err == nil {
-				if len(controller) > 0 {
-					workloads[i] = controller.UnsortedList()[0]
-				}
-			}
-			// only a single service, not support it yet
-			if controller == nil || controller.Len() == 0 {
-				return nil, fmt.Errorf("not support resources: %s", workload)
-			}
-		}
+	if object.Mapping.Resource.Resource != "services" {
+		return object, controller, nil
 	}
-	return workloads, nil
+
+	clientset, err := f.KubernetesClientSet()
+	if err != nil {
+		return nil, nil, err
+	}
+	var svc *v1.Service
+	svc, err = clientset.CoreV1().Services(ns).Get(ctx, object.Name, v2.GetOptions{})
+	if err != nil {
+		return nil, nil, err
+	}
+	var selector labels.Selector
+	_, selector, err = polymorphichelpers.SelectorsForObject(svc)
+	if err != nil {
+		return nil, nil, err
+	}
+	var podList *v1.PodList
+	podList, err = clientset.CoreV1().Pods(ns).List(ctx, v2.ListOptions{LabelSelector: selector.String()})
+	if err != nil {
+		return nil, nil, err
+	}
+	// if pod is not empty, using pods to find top controller
+	if len(podList.Items) != 0 {
+		return GetTopOwnerReference(f, ns, fmt.Sprintf("%s/%s", "pods", podList.Items[0].Name))
+	}
+	// if list is empty, means not create pods, just controllers
+	return GetTopOwnerReferenceBySelector(f, ns, selector.String())
 }

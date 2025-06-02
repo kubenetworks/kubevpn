@@ -172,25 +172,26 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 			LocalTunIPv4: c.localTunIPv4.IP.String(),
 			LocalTunIPv6: c.localTunIPv6.IP.String(),
 		}
-		var object *runtimeresource.Info
-		object, err = util.GetUnstructuredObject(c.factory, namespace, workload)
+		var object, controller *runtimeresource.Info
+		object, controller, err = util.GetTopOwnerObject(ctx, c.factory, namespace, workload)
 		if err != nil {
 			return err
 		}
 		var templateSpec *v1.PodTemplateSpec
-		templateSpec, _, err = util.GetPodTemplateSpecPath(object.Object.(*unstructured.Unstructured))
+		templateSpec, _, err = util.GetPodTemplateSpecPath(controller.Object.(*unstructured.Unstructured))
 		if err != nil {
 			return
 		}
+		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 		// todo consider to use ephemeral container
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
 		if c.Engine == config.EngineGvisor {
-			err = inject.InjectEnvoySidecar(ctx, c.factory, c.clientset, c.Namespace, object, headers, portMap, tlsSecret)
+			err = inject.InjectEnvoySidecar(ctx, nodeID, c.factory, c.clientset, c.Namespace, controller, headers, portMap, tlsSecret)
 		} else if len(headers) != 0 || len(portMap) != 0 {
-			err = inject.InjectVPNAndEnvoySidecar(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, object, configInfo, headers, portMap, tlsSecret)
+			err = inject.InjectVPNAndEnvoySidecar(ctx, nodeID, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, controller, configInfo, headers, portMap, tlsSecret)
 		} else {
-			err = inject.InjectVPNSidecar(ctx, c.factory, c.Namespace, object, configInfo, tlsSecret)
+			err = inject.InjectVPNSidecar(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, tlsSecret)
 		}
 		if err != nil {
 			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %s", workload, namespace, err.Error())

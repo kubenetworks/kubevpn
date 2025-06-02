@@ -58,7 +58,7 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 		return err
 	}
 	var workloads []string
-	workloads, err = util.NormalizedResource(ctx, connect.GetFactory(), connect.GetClientset(), req.Namespace, req.Workloads)
+	workloads, err = util.NormalizedResource(connect.GetFactory(), req.Namespace, req.Workloads)
 	if err != nil {
 		return err
 	}

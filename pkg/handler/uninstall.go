@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
@@ -91,19 +92,20 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 	v4, _ := c.GetLocalTunIP()
 	for _, workload := range c.ProxyResources() {
 		// deployments.apps.ry-server --> deployments.apps/ry-server
-		object, err := util.GetUnstructuredObject(c.factory, workload.namespace, workload.workload)
+		object, controller, err := util.GetTopOwnerObject(ctx, c.factory, workload.namespace, workload.workload)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
 			return err
 		}
-		u := object.Object.(*unstructured.Unstructured)
+		u := controller.Object.(*unstructured.Unstructured)
 		templateSpec, _, err := util.GetPodTemplateSpecPath(u)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to get template spec path: %v", err)
 			return err
 		}
+		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 		var empty bool
-		empty, err = inject.UnPatchContainer(ctx, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), object, func(isFargateMode bool, rule *controlplane.Rule) bool {
+		empty, err = inject.UnPatchContainer(ctx, nodeID, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), controller, func(isFargateMode bool, rule *controlplane.Rule) bool {
 			if isFargateMode {
 				return c.IsMe(workload.namespace, util.ConvertWorkloadToUid(workload.workload), rule.Headers)
 			}

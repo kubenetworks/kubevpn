@@ -189,34 +189,42 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 	}
 }
 
-func GetTopOwnerReference(factory util.Factory, ns, workload string) (*resource.Info, error) {
+func GetTopOwnerReference(factory util.Factory, ns, workload string) (object, controller *resource.Info, err error) {
+	object, err = GetUnstructuredObject(factory, ns, workload)
+	if err != nil {
+		return nil, nil, err
+	}
+	ownerRef := v1.GetControllerOf(object.Object.(*unstructured.Unstructured))
+	if ownerRef == nil {
+		return object, object, err
+	}
+	var owner = fmt.Sprintf("%s/%s", ownerRef.Kind, ownerRef.Name)
 	for {
-		object, err := GetUnstructuredObject(factory, ns, workload)
+		controller, err = GetUnstructuredObject(factory, ns, owner)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		ownerReference := v1.GetControllerOf(object.Object.(*unstructured.Unstructured))
-		if ownerReference == nil {
-			return object, nil
+		ownerRef = v1.GetControllerOf(controller.Object.(*unstructured.Unstructured))
+		if ownerRef == nil {
+			return object, controller, nil
 		}
-		workload = fmt.Sprintf("%s/%s", ownerReference.Kind, ownerReference.Name)
+		owner = fmt.Sprintf("%s/%s", ownerRef.Kind, ownerRef.Name)
 	}
 }
 
 // GetTopOwnerReferenceBySelector assume pods, controller has same labels
-func GetTopOwnerReferenceBySelector(factory util.Factory, ns, selector string) (sets.Set[string], error) {
-	object, err := GetUnstructuredObjectBySelector(factory, ns, selector)
+func GetTopOwnerReferenceBySelector(factory util.Factory, ns, selector string) (object, controller *resource.Info, err error) {
+	objectList, err := GetUnstructuredObjectBySelector(factory, ns, selector)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	set := sets.New[string]()
-	for _, info := range object {
-		ownerReference, err := GetTopOwnerReference(factory, ns, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
-		if err == nil && ownerReference.Mapping.Resource.Resource != "services" {
-			set.Insert(fmt.Sprintf("%s/%s", ownerReference.Mapping.Resource.GroupResource().String(), ownerReference.Name))
+	for _, info := range objectList {
+		if info.Mapping.Resource.Resource != "services" {
+			continue
 		}
+		return GetTopOwnerReference(factory, ns, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
 	}
-	return set, nil
+	return nil, nil, fmt.Errorf("can not find controller for %s", selector)
 }
 
 func Shell(_ context.Context, clientset *kubernetes.Clientset, config *rest.Config, podName, containerName, ns string, cmd []string) (string, error) {
