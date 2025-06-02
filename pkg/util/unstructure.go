@@ -168,8 +168,10 @@ func GetTopOwnerObject(ctx context.Context, f util.Factory, ns string, workload 
 	}
 	// if pod is not empty, using pods to find top controller
 	if len(podList.Items) != 0 {
-		return GetTopOwnerReference(f, ns, fmt.Sprintf("%s/%s", "pods", podList.Items[0].Name))
+		_, controller, err = GetTopOwnerReference(f, ns, fmt.Sprintf("%s/%s", "pods", podList.Items[0].Name))
+		return object, controller, err
 	}
 	// if list is empty, means not create pods, just controllers
-	return GetTopOwnerReferenceBySelector(f, ns, selector.String())
+	_, controller, err = GetTopOwnerReferenceBySelector(f, ns, selector.String())
+	return object, controller, err
 }
