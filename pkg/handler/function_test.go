@@ -37,8 +37,9 @@ var (
 )
 
 const (
-	local  = `{"status": "Reviews is healthy on local pc"}`
-	remote = `{"status": "Reviews is healthy"}`
+	local     = `{"status": "Reviews is healthy on local pc"}`
+	local8080 = `{"status": "Reviews is healthy on local pc 8080"}`
+	remote    = `{"status": "Reviews is healthy"}`
 )
 
 func TestFunctions(t *testing.T) {
@@ -102,10 +103,10 @@ func TestFunctions(t *testing.T) {
 
 	// 8) install centrally in ns test -- proxy mode with service mesh and gvisor
 	t.Run("kubevpnQuit", kubevpnQuit)
-	t.Run("kubevpnProxyWithServiceMeshAndGvisorMode", kubevpnProxyWithServiceMeshAndGvisorMode)
+	t.Run("kubevpnProxyWithServiceMeshAndGvisorModePortMap", kubevpnProxyWithServiceMeshAndGvisorModePortMap)
 	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
 	t.Run("commonTest", commonTest)
-	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
+	t.Run("serviceMeshReviewsServiceIPPortMap", serviceMeshReviewsServiceIPPortMap)
 	t.Run("centerCheckProxyWithServiceMeshAndGvisorStatus", centerCheckProxyWithServiceMeshAndGvisorStatus)
 	t.Run("kubevpnLeaveService", kubevpnLeaveService)
 	t.Run("kubevpnQuit", kubevpnQuit)
@@ -260,6 +261,17 @@ func serviceMeshReviewsServiceIP(t *testing.T) {
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
 	healthChecker(t, endpoint, nil, remote)
 	healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+}
+
+func serviceMeshReviewsServiceIPPortMap(t *testing.T) {
+	app := "reviews"
+	ip, err := getServiceIP(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
+	healthChecker(t, endpoint, nil, remote)
+	healthChecker(t, endpoint, map[string]string{"env": "test"}, local8080)
 }
 
 func getServiceIP(app string) (string, error) {
@@ -467,6 +479,16 @@ func kubevpnProxyWithServiceMeshAndGvisorMode(t *testing.T) {
 	}
 }
 
+func kubevpnProxyWithServiceMeshAndGvisorModePortMap(t *testing.T) {
+	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--netstack", "gvisor", "--debug", "--portmap", "9080:8080")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func kubevpnLeave(t *testing.T) {
 	cmd := exec.Command("kubevpn", "leave", "deployments/reviews")
 	cmd.Stdout = os.Stdout
@@ -521,7 +543,7 @@ func centerCheckConnectStatus(t *testing.T) {
 	expect := []*status{{
 		ID:        0,
 		Mode:      "full",
-		Namespace: "kubevpn",
+		Namespace: "default",
 		Status:    "Connected",
 		ProxyList: nil,
 	}}
@@ -597,10 +619,10 @@ func centerCheckProxyStatus(t *testing.T) {
 	expect := []*status{{
 		ID:        0,
 		Mode:      "full",
-		Namespace: "kubevpn",
+		Namespace: "default",
 		Status:    "Connected",
 		ProxyList: []*proxy{{
-			Namespace: "kubevpn",
+			Namespace: "default",
 			Workload:  "deployments.apps/reviews",
 			RuleList: []*rule{{
 				Headers:       nil,
@@ -663,10 +685,10 @@ func centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 	expect := []*status{{
 		ID:        0,
 		Mode:      "full",
-		Namespace: "kubevpn",
+		Namespace: "default",
 		Status:    "Connected",
 		ProxyList: []*proxy{{
-			Namespace: "kubevpn",
+			Namespace: "default",
 			Workload:  "deployments.apps/reviews",
 			RuleList: []*rule{{
 				Headers:       map[string]string{"env": "test"},
@@ -704,6 +726,7 @@ func checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 			RuleList: []*rule{{
 				Headers:       map[string]string{"env": "test"},
 				CurrentDevice: true,
+				PortMap:       map[int32]int32{9080: 9080},
 			}},
 		}},
 	}}
@@ -735,14 +758,15 @@ func centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	expect := []*status{{
 		ID:        0,
 		Mode:      "full",
-		Namespace: "kubevpn",
+		Namespace: "default",
 		Status:    "Connected",
 		ProxyList: []*proxy{{
-			Namespace: "kubevpn",
+			Namespace: "default",
 			Workload:  "services/reviews",
 			RuleList: []*rule{{
 				Headers:       map[string]string{"env": "test"},
 				CurrentDevice: true,
+				PortMap:       map[int32]int32{9080: 8080},
 			}},
 		}},
 	}}
@@ -833,18 +857,19 @@ func Init(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	go startupHttpServer(t, local)
+	go startupHttpServer(t, "9080", local)
+	go startupHttpServer(t, "8080", local8080)
 }
 
-func startupHttpServer(t *testing.T, str string) {
+func startupHttpServer(t *testing.T, port, str string) {
 	var health = func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(str))
 	}
-
-	http.HandleFunc("/", health)
-	http.HandleFunc("/health", health)
-	t.Log("Start listening http port 9080 ...")
-	err := http.ListenAndServe(":9080", nil)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", health)
+	mux.HandleFunc("/health", health)
+	t.Logf("Start listening http port %s ...", port)
+	err := http.ListenAndServe(":"+port, mux)
 	if err != nil {
 		t.Fatal(err)
 	}
