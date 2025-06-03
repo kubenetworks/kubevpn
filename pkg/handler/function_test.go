@@ -2,16 +2,19 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,6 +46,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("init", Init)
 	t.Run("kubevpnConnect", kubevpnConnect)
 	t.Run("commonTest", commonTest)
+	t.Run("checkConnectStatus", checkConnectStatus)
 
 	// 2) test proxy mode
 	t.Run("kubevpnProxy", kubevpnProxy)
@@ -50,6 +54,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("testUDP", testUDP)
 	t.Run("proxyServiceReviewsServiceIP", proxyServiceReviewsServiceIP)
 	t.Run("proxyServiceReviewsPodIP", proxyServiceReviewsPodIP)
+	t.Run("checkProxyStatus", checkProxyStatus)
 
 	// 3) test proxy mode with service mesh
 	t.Run("kubevpnLeave", kubevpnLeave)
@@ -57,6 +62,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("commonTest", commonTest)
 	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
 	t.Run("serviceMeshReviewsPodIP", serviceMeshReviewsPodIP)
+	t.Run("checkProxyWithServiceMeshStatus", checkProxyWithServiceMeshStatus)
 
 	// 4) test proxy mode with service mesh and gvisor
 	t.Run("kubevpnLeave", kubevpnLeave)
@@ -64,6 +70,8 @@ func TestFunctions(t *testing.T) {
 	t.Run("kubevpnProxyWithServiceMeshAndGvisorMode", kubevpnProxyWithServiceMeshAndGvisorMode)
 	t.Run("commonTest", commonTest)
 	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
+	t.Run("checkProxyWithServiceMeshAndGvisorStatus", checkProxyWithServiceMeshAndGvisorStatus)
+	t.Run("kubevpnLeaveService", kubevpnLeaveService)
 	t.Run("kubevpnQuit", kubevpnQuit)
 
 	// 5) install centrally in ns test -- connect mode
@@ -71,6 +79,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("centerKubevpnInstallInNsKubevpn", kubevpnConnectToNsKubevpn)
 	t.Run("centerKubevpnConnect", kubevpnConnect)
 	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
+	t.Run("centerCheckConnectStatus", centerCheckConnectStatus)
 	t.Run("centerCommonTest", commonTest)
 
 	// 6) install centrally in ns test -- proxy mode
@@ -80,6 +89,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("centerTestUDP", testUDP)
 	t.Run("centerProxyServiceReviewsServiceIP", proxyServiceReviewsServiceIP)
 	t.Run("centerProxyServiceReviewsPodIP", proxyServiceReviewsPodIP)
+	t.Run("centerCheckProxyStatus", centerCheckProxyStatus)
 
 	// 7) install centrally in ns test -- proxy mode with service mesh
 	t.Run("kubevpnLeave", kubevpnLeave)
@@ -88,6 +98,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("commonTest", commonTest)
 	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
 	t.Run("serviceMeshReviewsPodIP", serviceMeshReviewsPodIP)
+	t.Run("centerCheckProxyWithServiceMeshStatus", centerCheckProxyWithServiceMeshStatus)
 
 	// 8) install centrally in ns test -- proxy mode with service mesh and gvisor
 	t.Run("kubevpnQuit", kubevpnQuit)
@@ -95,6 +106,8 @@ func TestFunctions(t *testing.T) {
 	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
 	t.Run("commonTest", commonTest)
 	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
+	t.Run("centerCheckProxyWithServiceMeshAndGvisorStatus", centerCheckProxyWithServiceMeshAndGvisorStatus)
+	t.Run("kubevpnLeaveService", kubevpnLeaveService)
 	t.Run("kubevpnQuit", kubevpnQuit)
 }
 
@@ -461,6 +474,293 @@ func kubevpnLeave(t *testing.T) {
 	err := cmd.Run()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func kubevpnLeaveService(t *testing.T) {
+	cmd := exec.Command("kubevpn", "leave", "services/reviews")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func checkConnectStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: namespace,
+		Status:    "Connected",
+		ProxyList: nil,
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+	}
+}
+func centerCheckConnectStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: "kubevpn",
+		Status:    "Connected",
+		ProxyList: nil,
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+	}
+}
+
+type status struct {
+	ID        int32
+	Mode      string
+	Namespace string
+	Status    string
+	ProxyList []*proxy
+}
+type proxy struct {
+	Namespace string
+	Workload  string
+	RuleList  []*rule
+}
+type rule struct {
+	Headers       map[string]string
+	CurrentDevice bool
+	PortMap       map[int32]int32
+}
+
+func checkProxyStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: namespace,
+		Status:    "Connected",
+		ProxyList: []*proxy{{
+			Namespace: namespace,
+			Workload:  "deployments.apps/reviews",
+			RuleList: []*rule{{
+				Headers:       nil,
+				CurrentDevice: true,
+				PortMap:       map[int32]int32{9080: 9080},
+			}},
+		}},
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+	}
+}
+
+func centerCheckProxyStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: "kubevpn",
+		Status:    "Connected",
+		ProxyList: []*proxy{{
+			Namespace: "kubevpn",
+			Workload:  "deployments.apps/reviews",
+			RuleList: []*rule{{
+				Headers:       nil,
+				CurrentDevice: true,
+				PortMap:       map[int32]int32{9080: 9080},
+			}},
+		}},
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+	}
+}
+
+func checkProxyWithServiceMeshStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: namespace,
+		Status:    "Connected",
+		ProxyList: []*proxy{{
+			Namespace: namespace,
+			Workload:  "deployments.apps/reviews",
+			RuleList: []*rule{{
+				Headers:       map[string]string{"env": "test"},
+				CurrentDevice: true,
+				PortMap:       map[int32]int32{9080: 9080},
+			}},
+		}},
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+	}
+}
+
+func centerCheckProxyWithServiceMeshStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: "kubevpn",
+		Status:    "Connected",
+		ProxyList: []*proxy{{
+			Namespace: "kubevpn",
+			Workload:  "deployments.apps/reviews",
+			RuleList: []*rule{{
+				Headers:       map[string]string{"env": "test"},
+				CurrentDevice: true,
+				PortMap:       map[int32]int32{9080: 9080},
+			}},
+		}},
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+	}
+}
+
+func checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: namespace,
+		Status:    "Connected",
+		ProxyList: []*proxy{{
+			Namespace: namespace,
+			Workload:  "services/reviews",
+			RuleList: []*rule{{
+				Headers:       map[string]string{"env": "test"},
+				CurrentDevice: true,
+			}},
+		}},
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	opt := cmp.FilterPath(func(p cmp.Path) bool {
+		vx := p.Last().String()
+		if vx == `["Headers"]` {
+			return true
+		}
+		return false
+	}, cmp.Ignore())
+	if !cmp.Equal(statuses, expect, opt) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+	}
+}
+
+func centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: "kubevpn",
+		Status:    "Connected",
+		ProxyList: []*proxy{{
+			Namespace: "kubevpn",
+			Workload:  "services/reviews",
+			RuleList: []*rule{{
+				Headers:       map[string]string{"env": "test"},
+				CurrentDevice: true,
+			}},
+		}},
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	opt := cmp.FilterPath(func(p cmp.Path) bool {
+		vx := p.Last().String()
+		if vx == `["Headers"]` {
+			return true
+		}
+		return false
+	}, cmp.Ignore())
+	if !cmp.Equal(statuses, expect, opt) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
 	}
 }
 
