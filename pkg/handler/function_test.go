@@ -445,7 +445,7 @@ func kubevpnProxyWithServiceMesh(t *testing.T) {
 }
 
 func kubevpnProxyWithServiceMeshAndGvisorMode(t *testing.T) {
-	cmd := exec.Command("kubevpn", "proxy", "deployments/reviews", "--headers", "env=test", "--netstack", "gvisor", "--debug")
+	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--netstack", "gvisor", "--debug")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
