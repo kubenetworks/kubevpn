@@ -108,7 +108,7 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 			plog.G(ctx).Errorf("Failed to leave workload %s in namespace %s: %v", workload.workload, workload.namespace, err)
 			continue
 		}
-		if empty && object.Mapping.Resource.Resource == "services" {
+		if empty && util.IsK8sService(object) {
 			err = inject.ModifyServiceTargetPort(ctx, c.clientset, workload.namespace, object.Name, map[int32]int32{})
 		}
 		c.LeavePortMap(workload.namespace, workload.workload)

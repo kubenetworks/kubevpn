@@ -219,7 +219,7 @@ func GetTopOwnerReferenceBySelector(factory util.Factory, ns, selector string) (
 		return nil, nil, err
 	}
 	for _, info := range objectList {
-		if info.Mapping.Resource.Resource != "services" {
+		if IsK8sService(info) {
 			continue
 		}
 		return GetTopOwnerReference(factory, ns, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))

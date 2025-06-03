@@ -45,7 +45,7 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 			plog.G(ctx).Errorf("Leaving workload %s failed: %v", workload, err)
 			continue
 		}
-		if empty && object.Mapping.Resource.Resource == "services" {
+		if empty && util.IsK8sService(object) {
 			err = inject.ModifyServiceTargetPort(ctx, svr.connect.GetClientset(), req.Namespace, object.Name, map[int32]int32{})
 		}
 		svr.connect.LeavePortMap(req.Namespace, workload)

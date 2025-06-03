@@ -130,7 +130,7 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 		plog.G(ctx).Errorf("Failed to patch resource: %s %s: %v", controller.Mapping.Resource.Resource, controller.Name, err)
 		return err
 	}
-	if object.Mapping.Resource.Resource != "services" {
+	if !util.IsK8sService(object) {
 		return nil
 	}
 

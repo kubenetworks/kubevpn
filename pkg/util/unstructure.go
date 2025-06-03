@@ -143,7 +143,7 @@ func GetTopOwnerObject(ctx context.Context, f util.Factory, ns string, workload 
 	if err != nil {
 		return nil, nil, err
 	}
-	if object.Mapping.Resource.Resource != "services" {
+	if !IsK8sService(object) {
 		return object, controller, nil
 	}
 
@@ -174,4 +174,8 @@ func GetTopOwnerObject(ctx context.Context, f util.Factory, ns string, workload 
 	// if list is empty, means not create pods, just controllers
 	_, controller, err = GetTopOwnerReferenceBySelector(f, ns, selector.String())
 	return object, controller, err
+}
+
+func IsK8sService(info *resource.Info) bool {
+	return info.Mapping.Resource.Resource == "services"
 }

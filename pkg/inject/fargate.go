@@ -88,7 +88,7 @@ func InjectEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Factory, c
 		return err
 	}
 
-	if current.Mapping.Resource.Resource != "services" {
+	if !util.IsK8sService(current) {
 		return nil
 	}
 	// 2) modify service containerPort to envoy listener port
