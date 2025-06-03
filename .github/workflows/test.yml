@@ -114,17 +114,12 @@ jobs:
             }
       - uses: azure/setup-kubectl@v4
       - name: Install minikube
-        run: |
-          set -x
-          docker version
-          brew install minikube
-          minikube start --driver=docker --memory=max --cpus=max --wait=all --wait-timeout=60m
-          kubectl cluster-info
-          kubectl config view --flatten --raw
-          kubectl get pod -A -o wide
+        uses: medyagh/setup-minikube@latest
 
       - name: Kubernetes info
         run: |
+          kubectl config view --flatten --raw
+          kubectl get pod -A -o wide
           kubectl cluster-info
           cat ~/.kube/config
           kubectl get pods -n kube-system -o wide
