@@ -115,6 +115,10 @@ jobs:
       - uses: azure/setup-kubectl@v4
       - name: Install minikube
         uses: medyagh/setup-minikube@latest
+        with:
+          cache: true
+          cpus: 'max'
+          memory: 'max'
 
       - name: Kubernetes info
         run: |
