@@ -121,20 +121,20 @@ NormalizedResource convert user parameter to standard, example:
 	pod/productpage-without-controller --> pod/productpage-without-controller
 	service/productpage-without-pod --> controller/controllerName
 */
-func NormalizedResource(f util.Factory, ns string, workloads []string) ([]string, error) {
+func NormalizedResource(f util.Factory, ns string, workloads []string) ([]string, []*resource.Info, error) {
 	if len(workloads) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	objectList, err := GetUnstructuredObjectList(f, ns, workloads)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var resources []string
 	for _, info := range objectList {
 		resources = append(resources, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
 	}
-	return resources, nil
+	return resources, objectList, nil
 }
 
 func GetTopOwnerObject(ctx context.Context, f util.Factory, ns string, workload string) (object, controller *resource.Info, err error) {

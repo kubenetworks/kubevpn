@@ -33,7 +33,7 @@ func (c *ConnectOptions) Reset(ctx context.Context, namespace string, workloads 
 	}
 
 	var err error
-	workloads, err = util.NormalizedResource(c.factory, namespace, workloads)
+	workloads, _, err = util.NormalizedResource(c.factory, namespace, workloads)
 	if err != nil {
 		return err
 	}

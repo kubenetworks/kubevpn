@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -58,9 +59,18 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 		return err
 	}
 	var workloads []string
-	workloads, err = util.NormalizedResource(connect.GetFactory(), req.Namespace, req.Workloads)
+	var objectList []*resource.Info
+	workloads, objectList, err = util.NormalizedResource(connect.GetFactory(), req.Namespace, req.Workloads)
 	if err != nil {
 		return err
+	}
+	// netstack gvisor only support k8s service
+	if config.Engine(req.Engine) == config.EngineGvisor {
+		for _, info := range objectList {
+			if !util.IsK8sService(info) {
+				return errors.Errorf("netstack gvisor mode only support k8s services, but got %s", info.Object.GetObjectKind().GroupVersionKind().Kind)
+			}
+		}
 	}
 
 	defer func() {
