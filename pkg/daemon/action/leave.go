@@ -6,7 +6,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -28,20 +27,15 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 	mapInterface := svr.connect.GetClientset().CoreV1().ConfigMaps(namespace)
 	v4, _ := svr.connect.GetLocalTunIP()
 	for _, workload := range req.GetWorkloads() {
-		object, err := util.GetUnstructuredObject(factory, req.Namespace, workload)
+		object, controller, err := util.GetTopOwnerObject(ctx, factory, req.Namespace, workload)
 		if err != nil {
-			logger.Errorf("Failed to get unstructured object: %v", err)
+			logger.Errorf("Failed to get unstructured controller: %v", err)
 			return err
 		}
-		u := object.Object.(*unstructured.Unstructured)
-		templateSpec, _, err := util.GetPodTemplateSpecPath(u)
-		if err != nil {
-			logger.Errorf("Failed to get template spec path: %v", err)
-			return err
-		}
+		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 		// add rollback func to remove envoy config
 		var empty bool
-		empty, err = inject.UnPatchContainer(ctx, factory, mapInterface, object, func(isFargateMode bool, rule *controlplane.Rule) bool {
+		empty, err = inject.UnPatchContainer(ctx, nodeID, factory, mapInterface, controller, func(isFargateMode bool, rule *controlplane.Rule) bool {
 			if isFargateMode {
 				return svr.connect.IsMe(req.Namespace, util.ConvertWorkloadToUid(workload), rule.Headers)
 			}
@@ -51,8 +45,8 @@ func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) err
 			plog.G(ctx).Errorf("Leaving workload %s failed: %v", workload, err)
 			continue
 		}
-		if empty {
-			err = inject.ModifyServiceTargetPort(ctx, svr.connect.GetClientset(), req.Namespace, templateSpec.Labels, map[int32]int32{})
+		if empty && util.IsK8sService(object) {
+			err = inject.ModifyServiceTargetPort(ctx, svr.connect.GetClientset(), req.Namespace, object.Name, map[int32]int32{})
 		}
 		svr.connect.LeavePortMap(req.Namespace, workload)
 		err = util.RolloutStatus(ctx, factory, req.Namespace, workload, time.Minute*60)

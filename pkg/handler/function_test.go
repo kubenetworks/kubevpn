@@ -2,16 +2,19 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,8 +37,9 @@ var (
 )
 
 const (
-	local  = `{"status": "Reviews is healthy on local pc"}`
-	remote = `{"status": "Reviews is healthy"}`
+	local     = `{"status": "Reviews is healthy on local pc"}`
+	local8080 = `{"status": "Reviews is healthy on local pc 8080"}`
+	remote    = `{"status": "Reviews is healthy"}`
 )
 
 func TestFunctions(t *testing.T) {
@@ -43,6 +47,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("init", Init)
 	t.Run("kubevpnConnect", kubevpnConnect)
 	t.Run("commonTest", commonTest)
+	t.Run("checkConnectStatus", checkConnectStatus)
 
 	// 2) test proxy mode
 	t.Run("kubevpnProxy", kubevpnProxy)
@@ -50,6 +55,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("testUDP", testUDP)
 	t.Run("proxyServiceReviewsServiceIP", proxyServiceReviewsServiceIP)
 	t.Run("proxyServiceReviewsPodIP", proxyServiceReviewsPodIP)
+	t.Run("checkProxyStatus", checkProxyStatus)
 
 	// 3) test proxy mode with service mesh
 	t.Run("kubevpnLeave", kubevpnLeave)
@@ -57,6 +63,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("commonTest", commonTest)
 	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
 	t.Run("serviceMeshReviewsPodIP", serviceMeshReviewsPodIP)
+	t.Run("checkProxyWithServiceMeshStatus", checkProxyWithServiceMeshStatus)
 
 	// 4) test proxy mode with service mesh and gvisor
 	t.Run("kubevpnLeave", kubevpnLeave)
@@ -64,6 +71,8 @@ func TestFunctions(t *testing.T) {
 	t.Run("kubevpnProxyWithServiceMeshAndGvisorMode", kubevpnProxyWithServiceMeshAndGvisorMode)
 	t.Run("commonTest", commonTest)
 	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
+	t.Run("checkProxyWithServiceMeshAndGvisorStatus", checkProxyWithServiceMeshAndGvisorStatus)
+	t.Run("kubevpnLeaveService", kubevpnLeaveService)
 	t.Run("kubevpnQuit", kubevpnQuit)
 
 	// 5) install centrally in ns test -- connect mode
@@ -71,6 +80,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("centerKubevpnInstallInNsKubevpn", kubevpnConnectToNsKubevpn)
 	t.Run("centerKubevpnConnect", kubevpnConnect)
 	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
+	t.Run("centerCheckConnectStatus", centerCheckConnectStatus)
 	t.Run("centerCommonTest", commonTest)
 
 	// 6) install centrally in ns test -- proxy mode
@@ -80,6 +90,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("centerTestUDP", testUDP)
 	t.Run("centerProxyServiceReviewsServiceIP", proxyServiceReviewsServiceIP)
 	t.Run("centerProxyServiceReviewsPodIP", proxyServiceReviewsPodIP)
+	t.Run("centerCheckProxyStatus", centerCheckProxyStatus)
 
 	// 7) install centrally in ns test -- proxy mode with service mesh
 	t.Run("kubevpnLeave", kubevpnLeave)
@@ -88,13 +99,17 @@ func TestFunctions(t *testing.T) {
 	t.Run("commonTest", commonTest)
 	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
 	t.Run("serviceMeshReviewsPodIP", serviceMeshReviewsPodIP)
+	t.Run("centerCheckProxyWithServiceMeshStatus", centerCheckProxyWithServiceMeshStatus)
 
 	// 8) install centrally in ns test -- proxy mode with service mesh and gvisor
 	t.Run("kubevpnQuit", kubevpnQuit)
-	t.Run("kubevpnProxyWithServiceMeshAndGvisorMode", kubevpnProxyWithServiceMeshAndGvisorMode)
+	t.Run("kubevpnProxyWithServiceMeshAndGvisorModePortMap", kubevpnProxyWithServiceMeshAndGvisorModePortMap)
 	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
 	t.Run("commonTest", commonTest)
-	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
+	t.Run("serviceMeshReviewsServiceIPPortMap", serviceMeshReviewsServiceIPPortMap)
+	t.Run("kubevpnLeave", kubevpnLeave)
+	t.Run("centerCheckProxyWithServiceMeshAndGvisorStatus", centerCheckProxyWithServiceMeshAndGvisorStatus)
+	t.Run("kubevpnLeaveService", kubevpnLeaveService)
 	t.Run("kubevpnQuit", kubevpnQuit)
 }
 
@@ -247,6 +262,17 @@ func serviceMeshReviewsServiceIP(t *testing.T) {
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
 	healthChecker(t, endpoint, nil, remote)
 	healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+}
+
+func serviceMeshReviewsServiceIPPortMap(t *testing.T) {
+	app := "reviews"
+	ip, err := getServiceIP(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
+	healthChecker(t, endpoint, nil, remote)
+	healthChecker(t, endpoint, map[string]string{"env": "test"}, local8080)
 }
 
 func getServiceIP(app string) (string, error) {
@@ -445,7 +471,17 @@ func kubevpnProxyWithServiceMesh(t *testing.T) {
 }
 
 func kubevpnProxyWithServiceMeshAndGvisorMode(t *testing.T) {
-	cmd := exec.Command("kubevpn", "proxy", "deployments/reviews", "--headers", "env=test", "--netstack", "gvisor", "--debug")
+	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--netstack", "gvisor", "--debug")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func kubevpnProxyWithServiceMeshAndGvisorModePortMap(t *testing.T) {
+	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--netstack", "gvisor", "--debug", "--portmap", "9080:8080")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
@@ -461,6 +497,295 @@ func kubevpnLeave(t *testing.T) {
 	err := cmd.Run()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func kubevpnLeaveService(t *testing.T) {
+	cmd := exec.Command("kubevpn", "leave", "services/reviews")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func checkConnectStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: namespace,
+		Status:    "Connected",
+		ProxyList: nil,
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+	}
+}
+func centerCheckConnectStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: "default",
+		Status:    "Connected",
+		ProxyList: nil,
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+	}
+}
+
+type status struct {
+	ID        int32
+	Mode      string
+	Namespace string
+	Status    string
+	ProxyList []*proxy
+}
+type proxy struct {
+	Namespace string
+	Workload  string
+	RuleList  []*rule
+}
+type rule struct {
+	Headers       map[string]string
+	CurrentDevice bool
+	PortMap       map[int32]int32
+}
+
+func checkProxyStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: namespace,
+		Status:    "Connected",
+		ProxyList: []*proxy{{
+			Namespace: namespace,
+			Workload:  "deployments.apps/reviews",
+			RuleList: []*rule{{
+				Headers:       nil,
+				CurrentDevice: true,
+				PortMap:       map[int32]int32{9080: 9080},
+			}},
+		}},
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+	}
+}
+
+func centerCheckProxyStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: "default",
+		Status:    "Connected",
+		ProxyList: []*proxy{{
+			Namespace: "default",
+			Workload:  "deployments.apps/reviews",
+			RuleList: []*rule{{
+				Headers:       nil,
+				CurrentDevice: true,
+				PortMap:       map[int32]int32{9080: 9080},
+			}},
+		}},
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+	}
+}
+
+func checkProxyWithServiceMeshStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: namespace,
+		Status:    "Connected",
+		ProxyList: []*proxy{{
+			Namespace: namespace,
+			Workload:  "deployments.apps/reviews",
+			RuleList: []*rule{{
+				Headers:       map[string]string{"env": "test"},
+				CurrentDevice: true,
+				PortMap:       map[int32]int32{9080: 9080},
+			}},
+		}},
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+	}
+}
+
+func centerCheckProxyWithServiceMeshStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: "default",
+		Status:    "Connected",
+		ProxyList: []*proxy{{
+			Namespace: "default",
+			Workload:  "deployments.apps/reviews",
+			RuleList: []*rule{{
+				Headers:       map[string]string{"env": "test"},
+				CurrentDevice: true,
+				PortMap:       map[int32]int32{9080: 9080},
+			}},
+		}},
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+	}
+}
+
+func checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: namespace,
+		Status:    "Connected",
+		ProxyList: []*proxy{{
+			Namespace: namespace,
+			Workload:  "services/reviews",
+			RuleList: []*rule{{
+				Headers:       map[string]string{"env": "test"},
+				CurrentDevice: true,
+				PortMap:       map[int32]int32{9080: 9080},
+			}},
+		}},
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	opt := cmp.FilterPath(func(p cmp.Path) bool {
+		vx := p.Last().String()
+		if vx == `["Headers"]` {
+			return true
+		}
+		return false
+	}, cmp.Ignore())
+	if !cmp.Equal(statuses, expect, opt) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+	}
+}
+
+func centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := []*status{{
+		ID:        0,
+		Mode:      "full",
+		Namespace: "default",
+		Status:    "Connected",
+		ProxyList: []*proxy{{
+			Namespace: "default",
+			Workload:  "services/reviews",
+			RuleList: []*rule{{
+				Headers:       map[string]string{"env": "test"},
+				CurrentDevice: true,
+				PortMap:       map[int32]int32{9080: 8080},
+			}},
+		}},
+	}}
+
+	var statuses []*status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	opt := cmp.FilterPath(func(p cmp.Path) bool {
+		vx := p.Last().String()
+		if vx == `["Headers"]` {
+			return true
+		}
+		return false
+	}, cmp.Ignore())
+	if !cmp.Equal(statuses, expect, opt) {
+		marshal, _ := json.Marshal(expect)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
 	}
 }
 
@@ -533,18 +858,19 @@ func Init(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	go startupHttpServer(t, local)
+	go startupHttpServer(t, "9080", local)
+	go startupHttpServer(t, "8080", local8080)
 }
 
-func startupHttpServer(t *testing.T, str string) {
+func startupHttpServer(t *testing.T, port, str string) {
 	var health = func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(str))
 	}
-
-	http.HandleFunc("/", health)
-	http.HandleFunc("/health", health)
-	t.Log("Start listening http port 9080 ...")
-	err := http.ListenAndServe(":9080", nil)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", health)
+	mux.HandleFunc("/health", health)
+	t.Logf("Start listening http port %s ...", port)
+	err := http.ListenAndServe(":"+port, mux)
 	if err != nil {
 		t.Fatal(err)
 	}

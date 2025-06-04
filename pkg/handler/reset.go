@@ -33,7 +33,7 @@ func (c *ConnectOptions) Reset(ctx context.Context, namespace string, workloads 
 	}
 
 	var err error
-	workloads, err = util.NormalizedResource(ctx, c.factory, c.clientset, namespace, workloads)
+	workloads, _, err = util.NormalizedResource(c.factory, namespace, workloads)
 	if err != nil {
 		return err
 	}
@@ -93,13 +93,13 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 }
 
 func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workload string) error {
-	object, err := util.GetUnstructuredObject(factory, namespace, workload)
+	object, controller, err := util.GetTopOwnerObject(ctx, factory, namespace, workload)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
 		return err
 	}
 
-	u := object.Object.(*unstructured.Unstructured)
+	u := controller.Object.(*unstructured.Unstructured)
 	templateSpec, depth, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get template spec path: %v", err)
@@ -110,7 +110,7 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 
 	inject.RemoveContainers(templateSpec)
 
-	helper := pkgresource.NewHelper(object.Client, object.Mapping)
+	helper := pkgresource.NewHelper(controller.Client, controller.Mapping)
 	plog.G(ctx).Debugf("The %s is under controller management", workload)
 	// resource with controller, like deployment,statefulset
 	var bytes []byte
@@ -125,10 +125,13 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 		plog.G(ctx).Errorf("Failed to generate json patch: %v", err)
 		return err
 	}
-	_, err = helper.Patch(object.Namespace, object.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
+	_, err = helper.Patch(controller.Namespace, controller.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
 	if err != nil {
-		plog.G(ctx).Errorf("Failed to patch resource: %s %s: %v", object.Mapping.Resource.Resource, object.Name, err)
+		plog.G(ctx).Errorf("Failed to patch resource: %s %s: %v", controller.Mapping.Resource.Resource, controller.Name, err)
 		return err
+	}
+	if !util.IsK8sService(object) {
+		return nil
 	}
 
 	var portmap = make(map[int32]int32)
@@ -137,6 +140,6 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 			portmap[port.ContainerPort] = port.ContainerPort
 		}
 	}
-	err = inject.ModifyServiceTargetPort(ctx, clientset, namespace, templateSpec.Labels, portmap)
+	err = inject.ModifyServiceTargetPort(ctx, clientset, namespace, object.Name, portmap)
 	return err
 }
