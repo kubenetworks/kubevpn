@@ -24,7 +24,7 @@ body:
   - type: input
     id: server
     attributes:
-      label: Kubevpn server Image tag
+      label: KubeVPN server Image tag
       description: What version of KubeVPN server image tag are you running?
       placeholder: v2.7.14
     validations:
