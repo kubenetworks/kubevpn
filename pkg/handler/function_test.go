@@ -107,6 +107,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
 	t.Run("commonTest", commonTest)
 	t.Run("serviceMeshReviewsServiceIPPortMap", serviceMeshReviewsServiceIPPortMap)
+	t.Run("kubevpnLeave", kubevpnLeave)
 	t.Run("centerCheckProxyWithServiceMeshAndGvisorStatus", centerCheckProxyWithServiceMeshAndGvisorStatus)
 	t.Run("kubevpnLeaveService", kubevpnLeaveService)
 	t.Run("kubevpnQuit", kubevpnQuit)
