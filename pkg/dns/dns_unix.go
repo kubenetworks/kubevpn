@@ -28,6 +28,7 @@ import (
 
 var cancel context.CancelFunc
 var resolv = "/etc/resolv.conf"
+var ignoreSearchSuffix = []string{"com", "io", "net", "org", "cn", "ru"}
 
 // SetupDNS support like
 // service:port
@@ -113,6 +114,10 @@ func (c *Config) usingResolver(ctx context.Context) {
 		Timeout: clientConfig.Timeout,
 	}
 	for _, filename := range GetResolvers(c.Config.Search, c.Ns, c.Services) {
+		// ignore search suffix like com, io, net, org, cn, ru, those are top dns server
+		if slices.Contains(ignoreSearchSuffix, filepath.Base(filename)) {
+			continue
+		}
 		content, err := os.ReadFile(filename)
 		if os.IsNotExist(err) {
 			_ = os.WriteFile(filename, []byte(toString(newConfig)), 0644)
