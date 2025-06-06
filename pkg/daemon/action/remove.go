@@ -9,11 +9,15 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-func (svr *Server) Remove(req *rpc.RemoveRequest, resp rpc.Daemon_RemoveServer) error {
+func (svr *Server) Remove(resp rpc.Daemon_RemoveServer) error {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newRemoveWarp(resp), svr.LogFile))
 	ctx := plog.WithLogger(resp.Context(), logger)
 	if svr.clone != nil {
-		err := svr.clone.Cleanup(ctx, req.Workloads...)
+		err = svr.clone.Cleanup(ctx, req.Workloads...)
 		svr.clone = nil
 		return err
 	} else {

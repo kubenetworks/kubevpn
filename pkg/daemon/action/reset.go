@@ -13,7 +13,11 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) error {
+func (svr *Server) Reset(resp rpc.Daemon_ResetServer) error {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newResetWarp(resp), svr.LogFile))
 
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))

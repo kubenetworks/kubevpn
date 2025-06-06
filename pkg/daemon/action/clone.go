@@ -14,7 +14,11 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (err error) {
+func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
 	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newCloneWarp(resp), svr.LogFile))
 
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
@@ -34,11 +38,15 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 	if err != nil {
 		return err
 	}
-	connResp, err := cli.Connect(resp.Context(), connReq)
+	connResp, err := cli.Connect(resp.Context())
 	if err != nil {
 		return err
 	}
-	err = util.PrintGRPCStream[rpc.ConnectResponse](connResp, io.MultiWriter(newCloneWarp(resp), svr.LogFile))
+	err = connResp.SendMsg(&connReq)
+	if err != nil {
+		return err
+	}
+	err = util.PrintGRPCStream[rpc.ConnectResponse](resp.Context(), connResp, io.MultiWriter(newCloneWarp(resp), svr.LogFile))
 	if err != nil {
 		return err
 	}

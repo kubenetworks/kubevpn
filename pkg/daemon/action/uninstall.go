@@ -13,7 +13,11 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Uninstall(req *rpc.UninstallRequest, resp rpc.Daemon_UninstallServer) error {
+func (svr *Server) Uninstall(resp rpc.Daemon_UninstallServer) error {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newUninstallWarp(resp), svr.LogFile))
 
 	connect := &handler.ConnectOptions{

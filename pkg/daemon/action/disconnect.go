@@ -18,7 +18,12 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_DisconnectServer) error {
+func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) error {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
+
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newDisconnectWarp(resp), svr.LogFile))
 	ctx := plog.WithLogger(resp.Context(), logger)
 
@@ -30,7 +35,11 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 		if err != nil {
 			return errors.Wrap(err, "sudo daemon not start")
 		}
-		connResp, err := cli.Disconnect(resp.Context(), req)
+		connResp, err := cli.Disconnect(resp.Context())
+		if err != nil {
+			return err
+		}
+		err = connResp.Send(req)
 		if err != nil {
 			return err
 		}
@@ -76,7 +85,7 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 			plog.G(ctx).Errorf("Index %d out of range", req.GetID())
 		}
 	case req.KubeconfigBytes != nil && req.Namespace != nil:
-		err := disconnectByKubeConfig(
+		err = disconnectByKubeConfig(
 			resp.Context(),
 			svr,
 			req.GetKubeconfigBytes(),

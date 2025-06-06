@@ -141,11 +141,15 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := cli.Clone(cmd.Context(), req)
+			resp, err := cli.Clone(cmd.Context())
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.CloneResponse](resp)
+			err = resp.Send(req)
+			if err != nil {
+				return err
+			}
+			err = util.PrintGRPCStream[rpc.CloneResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					err = remove(cli, args)
@@ -171,13 +175,17 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 }
 
 func remove(cli rpc.DaemonClient, args []string) error {
-	resp, err := cli.Remove(context.Background(), &rpc.RemoveRequest{
+	resp, err := cli.Remove(context.Background())
+	if err != nil {
+		return err
+	}
+	err = resp.Send(&rpc.RemoveRequest{
 		Workloads: args,
 	})
 	if err != nil {
 		return err
 	}
-	err = util.PrintGRPCStream[rpc.DisconnectResponse](resp)
+	err = util.PrintGRPCStream[rpc.DisconnectResponse](nil, resp)
 	if err != nil {
 		if status.Code(err) == codes.Canceled {
 			return nil

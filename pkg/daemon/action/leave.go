@@ -14,7 +14,12 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Leave(req *rpc.LeaveRequest, resp rpc.Daemon_LeaveServer) error {
+func (svr *Server) Leave(resp rpc.Daemon_LeaveServer) error {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
+
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newLeaveWarp(resp), svr.LogFile))
 	if svr.connect == nil {
 		logger.Infof("Not proxy any resource in cluster")

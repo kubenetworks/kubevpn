@@ -27,7 +27,12 @@ import (
 //  2. if already connect to cluster
 //     2.1 disconnect from cluster
 //     2.2 same as step 1
-func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e error) {
+func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (e error) {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
+
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newProxyWarp(resp), svr.LogFile))
 	config.Image = req.Image
 	ctx := plog.WithLogger(resp.Context(), logger)
@@ -86,7 +91,11 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 
 	plog.G(ctx).Debugf("Connecting to cluster")
 	var connResp rpc.Daemon_ConnectClient
-	connResp, err = cli.Connect(ctx, convert(req))
+	connResp, err = cli.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	err = connResp.Send(convert(req))
 	if err != nil {
 		return err
 	}
@@ -97,7 +106,11 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 		}
 		plog.G(ctx).Infof("Disconnecting from another cluster...")
 		var disconnectResp rpc.Daemon_DisconnectClient
-		disconnectResp, err = cli.Disconnect(ctx, &rpc.DisconnectRequest{ID: ptr.To[int32](0)})
+		disconnectResp, err = cli.Disconnect(ctx)
+		if err != nil {
+			return err
+		}
+		err = disconnectResp.Send(&rpc.DisconnectRequest{ID: ptr.To[int32](0)})
 		if err != nil {
 			return err
 		}
@@ -111,7 +124,11 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 		if err != nil {
 			return err
 		}
-		connResp, err = cli.Connect(ctx, convert(req))
+		connResp, err = cli.Connect(ctx)
+		if err != nil {
+			return err
+		}
+		err = connResp.Send(convert(req))
 		if err != nil {
 			return err
 		}

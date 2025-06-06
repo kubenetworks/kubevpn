@@ -38,11 +38,15 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, err := cli.Logs(cmd.Context(), req)
+			resp, err := cli.Logs(cmd.Context())
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.LogResponse](client)
+			err = resp.Send(req)
+			if err != nil {
+				return err
+			}
+			err = util.PrintGRPCStream[rpc.LogResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil

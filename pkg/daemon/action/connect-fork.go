@@ -17,7 +17,12 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectForkServer) (err error) {
+func (svr *Server) ConnectFork(resp rpc.Daemon_ConnectForkServer) (err error) {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
+
 	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newConnectForkWarp(resp), svr.LogFile))
 	if !svr.IsSudo {
 		return svr.redirectConnectForkToSudoDaemon(req, resp, logger)
@@ -43,6 +48,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 		os.Remove(file)
 		return nil
 	})
+	go util.ListenCancel(resp, sshCancel)
 	sshCtx = plog.WithLogger(sshCtx, logger)
 	defer plog.WithoutLogger(sshCtx)
 	defer func() {
@@ -62,7 +68,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	}
 
 	config.Image = req.Image
-	err = connect.DoConnect(sshCtx, true, ctx.Done())
+	err = connect.DoConnect(sshCtx, true)
 	if err != nil {
 		logger.Errorf("Failed to connect...")
 		return err
@@ -75,7 +81,7 @@ func (svr *Server) ConnectFork(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectF
 	return nil
 }
 
-func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer, logger *log.Logger) (err error) {
+func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectForkServer, logger *log.Logger) (err error) {
 	cli, err := svr.GetClient(true)
 	if err != nil {
 		return errors.Wrap(err, "sudo daemon not start")
@@ -167,7 +173,11 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 	}
 	req.KubeconfigBytes = string(content)
 	req.SshJump = ssh.SshConfig{}.ToRPC()
-	connResp, err := cli.ConnectFork(ctx, req)
+	connResp, err := cli.ConnectFork(ctx)
+	if err != nil {
+		return err
+	}
+	err = connResp.Send(req)
 	if err != nil {
 		return err
 	}

@@ -20,7 +20,12 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer) (e error) {
+func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
+
 	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newWarp(resp), svr.LogFile))
 	if !svr.IsSudo {
 		return svr.redirectToSudoDaemon(req, resp, logger)
@@ -32,7 +37,7 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		return status.Error(codes.AlreadyExists, s)
 	}
 	defer func() {
-		if e != nil || ctx.Err() != nil {
+		if err != nil || ctx.Err() != nil {
 			if svr.connect != nil {
 				svr.connect.Cleanup(plog.WithLogger(context.Background(), logger))
 				svr.connect = nil
@@ -50,7 +55,8 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		Lock:                 &svr.Lock,
 		ImagePullSecretName:  req.ImagePullSecretName,
 	}
-	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
+	var file string
+	file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
 		return err
 	}
@@ -60,10 +66,11 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 		os.Remove(file)
 		return nil
 	})
+	go util.ListenCancel(resp, sshCancel)
 	sshCtx = plog.WithLogger(sshCtx, logger)
 	defer plog.WithoutLogger(sshCtx)
 	defer func() {
-		if e != nil {
+		if err != nil {
 			svr.connect.Cleanup(sshCtx)
 			svr.connect = nil
 			svr.t = time.Time{}
@@ -75,13 +82,13 @@ func (svr *Server) Connect(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServe
 	if err != nil {
 		return err
 	}
-	err = svr.connect.GetIPFromContext(ctx, nil)
+	err = svr.connect.GetIPFromContext(ctx, logger)
 	if err != nil {
 		return err
 	}
 
 	config.Image = req.Image
-	err = svr.connect.DoConnect(sshCtx, false, ctx.Done())
+	err = svr.connect.DoConnect(sshCtx, false)
 	if err != nil {
 		logger.Errorf("Failed to connect...")
 		return err
@@ -185,7 +192,11 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	}
 	req.KubeconfigBytes = string(content)
 	req.SshJump = ssh.SshConfig{}.ToRPC()
-	connResp, err := cli.Connect(ctx, req)
+	connResp, err := cli.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	err = connResp.Send(req)
 	if err != nil {
 		return err
 	}

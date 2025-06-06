@@ -62,15 +62,19 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			disconnectResp, err := cli.Disconnect(cmd.Context(), &rpc.DisconnectRequest{
-				KubeconfigBytes: ptr.To(string(bytes)),
-				Namespace:       ptr.To(ns),
-				SshJump:         sshConf.ToRPC(),
-			})
+			disconnectResp, err := cli.Disconnect(cmd.Context())
 			if err != nil {
 				plog.G(cmd.Context()).Warnf("Failed to disconnect from cluter: %v", err)
 			} else {
-				_ = util.PrintGRPCStream[rpc.DisconnectResponse](disconnectResp)
+				err = disconnectResp.Send(&rpc.DisconnectRequest{
+					KubeconfigBytes: ptr.To(string(bytes)),
+					Namespace:       ptr.To(ns),
+					SshJump:         sshConf.ToRPC(),
+				})
+				if err != nil {
+					plog.G(cmd.Context()).Warnf("Failed to disconnect from cluter: %v", err)
+				}
+				_ = util.PrintGRPCStream[rpc.DisconnectResponse](cmd.Context(), disconnectResp)
 			}
 
 			req := &rpc.UninstallRequest{
@@ -78,11 +82,15 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 				Namespace:       ns,
 				SshJump:         sshConf.ToRPC(),
 			}
-			resp, err := cli.Uninstall(cmd.Context(), req)
+			resp, err := cli.Uninstall(cmd.Context())
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.UninstallResponse](resp)
+			err = resp.Send(req)
+			if err != nil {
+				return err
+			}
+			err = util.PrintGRPCStream[rpc.UninstallResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil

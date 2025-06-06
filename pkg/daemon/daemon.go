@@ -119,7 +119,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	// remember to close http server, otherwise daemon will not quit successfully
 	cancel := func() {
 		o.svr.Cancel = nil
-		_ = o.svr.Quit(&rpc.QuitRequest{}, nil)
+		_ = o.svr.Quit(nil)
 		_ = downgradingServer.Close()
 		_ = l.Close()
 	}

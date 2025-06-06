@@ -43,14 +43,19 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := cli.Leave(cmd.Context(), &rpc.LeaveRequest{
+			req := &rpc.LeaveRequest{
 				Namespace: ns,
 				Workloads: args,
-			})
+			}
+			resp, err := cli.Leave(cmd.Context())
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.LeaveResponse](resp)
+			err = resp.Send(req)
+			if err != nil {
+				return err
+			}
+			err = util.PrintGRPCStream[rpc.LeaveResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil

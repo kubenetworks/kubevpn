@@ -116,29 +116,31 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := cli.Proxy(
-				cmd.Context(),
-				&rpc.ProxyRequest{
-					KubeconfigBytes:      string(bytes),
-					Namespace:            ns,
-					Headers:              headers,
-					PortMap:              portmap,
-					Workloads:            args,
-					ExtraRoute:           extraRoute.ToRPC(),
-					Engine:               string(connect.Engine),
-					SshJump:              sshConf.ToRPC(),
-					TransferImage:        transferImage,
-					Image:                config.Image,
-					ImagePullSecretName:  imagePullSecretName,
-					Level:                int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
-					OriginKubeconfigPath: util.GetKubeConfigPath(f),
-					ManagerNamespace:     managerNamespace,
-				},
-			)
+			req := &rpc.ProxyRequest{
+				KubeconfigBytes:      string(bytes),
+				Namespace:            ns,
+				Headers:              headers,
+				PortMap:              portmap,
+				Workloads:            args,
+				ExtraRoute:           extraRoute.ToRPC(),
+				Engine:               string(connect.Engine),
+				SshJump:              sshConf.ToRPC(),
+				TransferImage:        transferImage,
+				Image:                config.Image,
+				ImagePullSecretName:  imagePullSecretName,
+				Level:                int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
+				OriginKubeconfigPath: util.GetKubeConfigPath(f),
+				ManagerNamespace:     managerNamespace,
+			}
+			resp, err := cli.Proxy(cmd.Context())
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.ConnectResponse](resp)
+			err = resp.Send(req)
+			if err != nil {
+				return err
+			}
+			err = util.PrintGRPCStream[rpc.ConnectResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					err = leave(cli, ns, args)
@@ -173,14 +175,19 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 }
 
 func leave(cli rpc.DaemonClient, ns string, args []string) error {
-	stream, err := cli.Leave(context.Background(), &rpc.LeaveRequest{
+	req := &rpc.LeaveRequest{
 		Namespace: ns,
 		Workloads: args,
-	})
+	}
+	resp, err := cli.Leave(context.Background())
 	if err != nil {
 		return err
 	}
-	err = util.PrintGRPCStream[rpc.LeaveResponse](stream)
+	err = resp.Send(req)
+	if err != nil {
+		return err
+	}
+	err = util.PrintGRPCStream[rpc.LeaveResponse](nil, resp)
 	if err != nil {
 		if status.Code(err) == codes.Canceled {
 			return nil
