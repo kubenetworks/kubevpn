@@ -521,7 +521,7 @@ func checkConnectStatus(t *testing.T) {
 		ID:        0,
 		Mode:      "full",
 		Namespace: namespace,
-		Status:    "Connected",
+		Status:    "connected",
 		ProxyList: nil,
 	}}
 
@@ -545,7 +545,7 @@ func centerCheckConnectStatus(t *testing.T) {
 		ID:        0,
 		Mode:      "full",
 		Namespace: "default",
-		Status:    "Connected",
+		Status:    "connected",
 		ProxyList: nil,
 	}}
 
@@ -588,7 +588,7 @@ func checkProxyStatus(t *testing.T) {
 		ID:        0,
 		Mode:      "full",
 		Namespace: namespace,
-		Status:    "Connected",
+		Status:    "connected",
 		ProxyList: []*proxy{{
 			Namespace: namespace,
 			Workload:  "deployments.apps/reviews",
@@ -621,7 +621,7 @@ func centerCheckProxyStatus(t *testing.T) {
 		ID:        0,
 		Mode:      "full",
 		Namespace: "default",
-		Status:    "Connected",
+		Status:    "connected",
 		ProxyList: []*proxy{{
 			Namespace: "default",
 			Workload:  "deployments.apps/reviews",
@@ -654,7 +654,7 @@ func checkProxyWithServiceMeshStatus(t *testing.T) {
 		ID:        0,
 		Mode:      "full",
 		Namespace: namespace,
-		Status:    "Connected",
+		Status:    "connected",
 		ProxyList: []*proxy{{
 			Namespace: namespace,
 			Workload:  "deployments.apps/reviews",
@@ -687,7 +687,7 @@ func centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 		ID:        0,
 		Mode:      "full",
 		Namespace: "default",
-		Status:    "Connected",
+		Status:    "connected",
 		ProxyList: []*proxy{{
 			Namespace: "default",
 			Workload:  "deployments.apps/reviews",
@@ -720,7 +720,7 @@ func checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		ID:        0,
 		Mode:      "full",
 		Namespace: namespace,
-		Status:    "Connected",
+		Status:    "connected",
 		ProxyList: []*proxy{{
 			Namespace: namespace,
 			Workload:  "services/reviews",
@@ -760,7 +760,7 @@ func centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		ID:        0,
 		Mode:      "full",
 		Namespace: "default",
-		Status:    "Connected",
+		Status:    "connected",
 		ProxyList: []*proxy{{
 			Namespace: "default",
 			Workload:  "services/reviews",

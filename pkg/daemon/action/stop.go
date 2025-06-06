@@ -10,7 +10,11 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-func (svr *Server) Stop(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error {
+func (svr *Server) Stop(resp rpc.Daemon_QuitServer) error {
+	_, err := resp.Recv()
+	if err != nil {
+		return err
+	}
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newStopWarp(resp), svr.LogFile))
 	ctx := plog.WithLogger(resp.Context(), logger)
 	if svr.connect == nil {

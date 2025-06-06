@@ -35,12 +35,7 @@ func CmdSSHDaemon(cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := cli.SshStart(
-				cmd.Context(),
-				&rpc.SshStartRequest{
-					ClientIP: clientIP,
-				},
-			)
+			resp, err := cli.SshStart(cmd.Context(), &rpc.SshStartRequest{ClientIP: clientIP})
 			if err != nil {
 				return err
 			}

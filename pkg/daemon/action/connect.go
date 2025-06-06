@@ -8,6 +8,7 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -125,6 +126,21 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 			sshCancel()
 		}
 	}()
+
+	var connResp grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse]
+	go func() {
+		var s rpc.Cancel
+		err = resp.RecvMsg(&s)
+		if err != nil {
+			return
+		}
+		if connResp != nil {
+			_ = connResp.SendMsg(&s)
+		} else {
+			sshCancel()
+		}
+	}()
+
 	if !sshConf.IsEmpty() {
 		file, err = ssh.SshJump(sshCtx, sshConf, file, true)
 		if err != nil {
@@ -158,6 +174,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		)
 		if isSameCluster {
 			sshCancel()
+			_ = os.Remove(file)
 			// same cluster, do nothing
 			logger.Infof("Connected to cluster")
 			return nil
@@ -179,7 +196,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	}
 	req.KubeconfigBytes = string(content)
 	req.SshJump = ssh.SshConfig{}.ToRPC()
-	connResp, err := cli.Connect(ctx)
+	connResp, err = cli.Connect(ctx)
 	if err != nil {
 		return err
 	}

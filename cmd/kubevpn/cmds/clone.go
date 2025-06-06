@@ -2,7 +2,6 @@ package cmds
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	pkgerr "github.com/pkg/errors"
@@ -76,6 +75,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
         kubevpn clone service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
         kubevpn clone service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 		`)),
+		Args: cobra.MatchAll(cobra.OnlyValidArgs, cobra.MinimumNArgs(1)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			plog.InitLoggerForClient()
 			// startup daemon process and sudo process
@@ -89,16 +89,6 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			return err
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				_, _ = fmt.Fprintf(os.Stdout, "You must specify the type of resource to proxy. %s\n\n", cmdutil.SuggestAPIResources("kubevpn"))
-				fullCmdName := cmd.Parent().CommandPath()
-				usageString := "Required resource not specified."
-				if len(fullCmdName) > 0 && cmdutil.IsSiblingCommandExists(cmd, "explain") {
-					usageString = fmt.Sprintf("%s\nUse \"%s explain <resource>\" for a detailed description of that resource (e.g. %[2]s explain pods).", usageString, fullCmdName)
-				}
-				return cmdutil.UsageErrorf(cmd, usageString)
-			}
-
 			if syncDir != "" {
 				local, remote, err := util.ParseDirMapping(syncDir)
 				if err != nil {
@@ -141,7 +131,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := cli.Clone(cmd.Context())
+			resp, err := cli.Clone(context.Background())
 			if err != nil {
 				return err
 			}
@@ -152,8 +142,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			err = util.PrintGRPCStream[rpc.CloneResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
-					err = remove(cli, args)
-					return err
+					return nil
 				}
 				return err
 			}
@@ -172,25 +161,4 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	cmd.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(f)
 	return cmd
-}
-
-func remove(cli rpc.DaemonClient, args []string) error {
-	resp, err := cli.Remove(context.Background())
-	if err != nil {
-		return err
-	}
-	err = resp.Send(&rpc.RemoveRequest{
-		Workloads: args,
-	})
-	if err != nil {
-		return err
-	}
-	err = util.PrintGRPCStream[rpc.DisconnectResponse](nil, resp)
-	if err != nil {
-		if status.Code(err) == codes.Canceled {
-			return nil
-		}
-		return err
-	}
-	return nil
 }

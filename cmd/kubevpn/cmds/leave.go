@@ -1,6 +1,8 @@
 package cmds
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -47,7 +49,7 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 				Namespace: ns,
 				Workloads: args,
 			}
-			resp, err := cli.Leave(cmd.Context())
+			resp, err := cli.Leave(context.Background())
 			if err != nil {
 				return err
 			}

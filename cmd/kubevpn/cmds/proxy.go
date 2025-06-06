@@ -132,7 +132,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				OriginKubeconfigPath: util.GetKubeConfigPath(f),
 				ManagerNamespace:     managerNamespace,
 			}
-			resp, err := cli.Proxy(cmd.Context())
+			resp, err := cli.Proxy(context.Background())
 			if err != nil {
 				return err
 			}
@@ -143,8 +143,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			err = util.PrintGRPCStream[rpc.ConnectResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
-					err = leave(cli, ns, args)
-					return err
+					return nil
 				}
 				return err
 			}

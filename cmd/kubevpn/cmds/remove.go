@@ -1,6 +1,8 @@
 package cmds
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -39,7 +41,7 @@ func CmdRemove(f cmdutil.Factory) *cobra.Command {
 			req := &rpc.RemoveRequest{
 				Workloads: args,
 			}
-			resp, err := cli.Remove(cmd.Context())
+			resp, err := cli.Remove(context.Background())
 			if err != nil {
 				return err
 			}

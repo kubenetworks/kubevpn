@@ -125,8 +125,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			err = util.PrintGRPCStream[rpc.ConnectResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
-					err = disconnect(cli, bytes, ns, sshConf)
-					return err
+					return nil
 				}
 				return err
 			}

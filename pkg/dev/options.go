@@ -122,7 +122,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			ManagerNamespace:     managerNamespace,
 		}
 		option.AddRollbackFunc(func() error {
-			resp, err := cli.Disconnect(ctx)
+			resp, err := cli.Disconnect(context.Background())
 			if err != nil {
 				return err
 			}
@@ -138,17 +138,12 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			return nil
 		})
 		var resp rpc.Daemon_ProxyClient
-		resp, err = cli.Proxy(ctx)
+		resp, err = cli.Proxy(context.Background())
 		if err != nil {
 			plog.G(ctx).Errorf("Connect to cluster error: %s", err.Error())
 			return err
 		}
 		err = resp.Send(req)
-		if err != nil {
-			plog.G(ctx).Errorf("Connect to cluster error: %s", err.Error())
-			return err
-		}
-		err = resp.CloseSend()
 		if err != nil {
 			plog.G(ctx).Errorf("Connect to cluster error: %s", err.Error())
 			return err

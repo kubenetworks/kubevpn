@@ -1,6 +1,8 @@
 package cmds
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -62,7 +64,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			disconnectResp, err := cli.Disconnect(cmd.Context())
+			disconnectResp, err := cli.Disconnect(context.Background())
 			if err != nil {
 				plog.G(cmd.Context()).Warnf("Failed to disconnect from cluter: %v", err)
 			} else {
@@ -82,7 +84,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 				Namespace:       ns,
 				SshJump:         sshConf.ToRPC(),
 			}
-			resp, err := cli.Uninstall(cmd.Context())
+			resp, err := cli.Uninstall(context.Background())
 			if err != nil {
 				return err
 			}

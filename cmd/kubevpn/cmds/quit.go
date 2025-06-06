@@ -44,7 +44,7 @@ func quit(ctx context.Context, isSudo bool) error {
 	if err != nil {
 		return err
 	}
-	resp, err := cli.Quit(ctx)
+	resp, err := cli.Quit(context.Background())
 	if err != nil {
 		return err
 	}

@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	StatusOk     = "Connected"
-	StatusFailed = "Disconnected"
+	StatusOk     = "connected"
+	StatusFailed = "disconnected"
 
 	ModeFull = "full"
 	ModeLite = "lite"

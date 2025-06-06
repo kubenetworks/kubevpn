@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/yaml"
 
@@ -25,13 +26,6 @@ import (
 // 3) cleanup all containers
 // 4) cleanup hosts
 func (c *ConnectOptions) Uninstall(ctx context.Context) error {
-	err := c.LeaveAllProxyResources(ctx)
-	if err != nil {
-		plog.G(ctx).Errorf("Leave proxy resources error: %v", err)
-	} else {
-		plog.G(ctx).Debugf("Leave proxy resources successfully")
-	}
-
 	plog.G(ctx).Infof("Cleaning up resources")
 	ns := c.Namespace
 	name := config.ConfigMapPodTrafficManager
@@ -89,29 +83,37 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 		return
 	}
 	v4, _ := c.GetLocalTunIP()
-	for _, workload := range c.ProxyResources() {
+	return c.LeaveResource(ctx, c.ProxyResources().ToResources(), v4)
+}
+
+func (c *ConnectOptions) LeaveResource(ctx context.Context, resources []Resources, v4 string) error {
+	var errs []error
+	for _, workload := range resources {
 		// deployments.apps.ry-server --> deployments.apps/ry-server
-		object, controller, err := util.GetTopOwnerObject(ctx, c.factory, workload.namespace, workload.workload)
+		object, controller, err := util.GetTopOwnerObject(ctx, c.factory, workload.Namespace, workload.Workload)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
-			return err
+			errs = append(errs, err)
+			continue
 		}
 		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 		var empty bool
 		empty, err = inject.UnPatchContainer(ctx, nodeID, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), controller, func(isFargateMode bool, rule *controlplane.Rule) bool {
 			if isFargateMode {
-				return c.IsMe(workload.namespace, util.ConvertWorkloadToUid(workload.workload), rule.Headers)
+				return c.IsMe(workload.Namespace, util.ConvertWorkloadToUid(workload.Workload), rule.Headers)
 			}
 			return rule.LocalTunIPv4 == v4
 		})
 		if err != nil {
-			plog.G(ctx).Errorf("Failed to leave workload %s in namespace %s: %v", workload.workload, workload.namespace, err)
+			plog.G(ctx).Errorf("Failed to leave workload %s in namespace %s: %v", workload.Workload, workload.Namespace, err)
+			errs = append(errs, err)
 			continue
 		}
 		if empty && util.IsK8sService(object) {
-			err = inject.ModifyServiceTargetPort(ctx, c.clientset, workload.namespace, object.Name, map[int32]int32{})
+			err = inject.ModifyServiceTargetPort(ctx, c.clientset, workload.Namespace, object.Name, map[int32]int32{})
+			errs = append(errs, err)
 		}
-		c.LeavePortMap(workload.namespace, workload.workload)
+		c.LeavePortMap(workload.Namespace, workload.Workload)
 	}
-	return err
+	return errors.NewAggregate(errs)
 }

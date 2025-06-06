@@ -7,6 +7,7 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -111,6 +112,21 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 			sshCancel()
 		}
 	}()
+
+	var connResp grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse]
+	go func() {
+		var s rpc.Cancel
+		err = resp.RecvMsg(&s)
+		if err != nil {
+			return
+		}
+		if connResp != nil {
+			_ = connResp.SendMsg(&s)
+		} else {
+			sshCancel()
+		}
+	}()
+
 	if !sshConf.IsEmpty() {
 		file, err = ssh.SshJump(sshCtx, sshConf, file, true)
 		if err != nil {
@@ -162,7 +178,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 	}
 	req.KubeconfigBytes = string(content)
 	req.SshJump = ssh.SshConfig{}.ToRPC()
-	connResp, err := cli.ConnectFork(ctx)
+	connResp, err = cli.ConnectFork(ctx)
 	if err != nil {
 		return err
 	}

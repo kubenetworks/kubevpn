@@ -55,17 +55,6 @@ func PrintGRPCStream[T any](ctx context.Context, clientStream grpc.ClientStream,
 }
 
 func CopyGRPCStream[T any](r grpc.ClientStream, w grpc.ServerStream) error {
-	go func() {
-		var s rpc.Cancel
-		err := w.RecvMsg(&s)
-		if err != nil {
-			return
-		}
-		err = r.SendMsg(&s)
-		if err != nil {
-			return
-		}
-	}()
 	for {
 		var t = new(T)
 		err := r.RecvMsg(t)
@@ -83,17 +72,6 @@ func CopyGRPCStream[T any](r grpc.ClientStream, w grpc.ServerStream) error {
 }
 
 func CopyAndConvertGRPCStream[I any, O any](r grpc.ClientStream, w grpc.ServerStream, convert func(*I) *O) error {
-	go func() {
-		var s rpc.Cancel
-		err := w.RecvMsg(&s)
-		if err != nil {
-			return
-		}
-		err = r.SendMsg(&s)
-		if err != nil {
-			return
-		}
-	}()
 	for {
 		var i = new(I)
 		err := r.RecvMsg(i)

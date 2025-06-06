@@ -84,12 +84,7 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := cli.Status(
-				cmd.Context(),
-				&rpc.StatusRequest{
-					ClusterIDs: clusterIDs,
-				},
-			)
+			resp, err := cli.Status(cmd.Context(), &rpc.StatusRequest{ClusterIDs: clusterIDs})
 			if err != nil {
 				return err
 			}

@@ -1,6 +1,7 @@
 package cmds
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -70,7 +71,7 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 				ClusterIDs: clusterIDs,
 				All:        pointer.Bool(all),
 			}
-			resp, err := cli.Disconnect(cmd.Context())
+			resp, err := cli.Disconnect(context.Background())
 			if err != nil {
 				return err
 			}

@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 
+	"google.golang.org/grpc"
+
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -37,7 +39,26 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 	if err != nil {
 		return err
 	}
-	connResp, err := cli.Connect(resp.Context())
+
+	var connResp grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse]
+	var disconnectResp rpc.Daemon_DisconnectClient
+	sshCtx, sshFunc := context.WithCancel(context.Background())
+	go func() {
+		var s rpc.Cancel
+		err = resp.RecvMsg(&s)
+		if err != nil {
+			return
+		}
+		if connResp != nil {
+			_ = connResp.SendMsg(&s)
+		}
+		if disconnectResp != nil {
+			_ = disconnectResp.SendMsg(&s)
+		}
+		sshFunc()
+	}()
+
+	connResp, err = cli.Connect(context.Background())
 	if err != nil {
 		return err
 	}
@@ -45,7 +66,13 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 	if err != nil {
 		return err
 	}
-	err = util.PrintGRPCStream[rpc.ConnectResponse](resp.Context(), connResp, io.MultiWriter(newCloneWarp(resp), svr.LogFile))
+	err = util.CopyAndConvertGRPCStream[rpc.ConnectResponse, rpc.CloneResponse](
+		connResp,
+		resp,
+		func(r *rpc.ConnectResponse) *rpc.CloneResponse {
+			_, _ = svr.LogFile.Write([]byte(r.Message))
+			return &rpc.CloneResponse{Message: r.Message}
+		})
 	if err != nil {
 		return err
 	}
@@ -68,7 +95,6 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 	if err != nil {
 		return err
 	}
-	sshCtx, sshFunc := context.WithCancel(context.Background())
 	defer func() {
 		if err != nil {
 			_ = options.Cleanup(sshCtx)
@@ -95,7 +121,7 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 	config.Image = req.Image
 	logger.Infof("Clone workloads...")
 	options.SetContext(sshCtx)
-	err = options.DoClone(plog.WithLogger(resp.Context(), logger), []byte(req.KubeconfigBytes))
+	err = options.DoClone(plog.WithLogger(sshCtx, logger), []byte(req.KubeconfigBytes))
 	if err != nil {
 		plog.G(context.Background()).Errorf("Clone workloads failed: %v", err)
 		return err

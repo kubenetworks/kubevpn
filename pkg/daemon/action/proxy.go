@@ -7,6 +7,7 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/cli-runtime/pkg/resource"
@@ -85,9 +86,30 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (e error) {
 		return errors.Wrap(err, "daemon is not available")
 	}
 
+	var connResp, reConnResp grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse]
+	var disconnectResp rpc.Daemon_DisconnectClient
+	cancel, cancelFunc := context.WithCancel(ctx)
+	defer cancelFunc()
+	go func() {
+		var s rpc.Cancel
+		err = resp.RecvMsg(&s)
+		if err != nil {
+			return
+		}
+		if connResp != nil {
+			_ = connResp.SendMsg(&s)
+		}
+		if disconnectResp != nil {
+			_ = disconnectResp.SendMsg(&s)
+		}
+		if reConnResp != nil {
+			_ = reConnResp.SendMsg(&s)
+		}
+		cancelFunc()
+	}()
+
 	plog.G(ctx).Debugf("Connecting to cluster")
-	var connResp rpc.Daemon_ConnectClient
-	connResp, err = cli.Connect(ctx)
+	connResp, err = cli.Connect(context.Background())
 	if err != nil {
 		return err
 	}
@@ -101,8 +123,7 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (e error) {
 			return err
 		}
 		plog.G(ctx).Infof("Disconnecting from another cluster...")
-		var disconnectResp rpc.Daemon_DisconnectClient
-		disconnectResp, err = cli.Disconnect(ctx)
+		disconnectResp, err = cli.Disconnect(context.Background())
 		if err != nil {
 			return err
 		}
@@ -114,27 +135,28 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (e error) {
 			disconnectResp,
 			resp,
 			func(response *rpc.DisconnectResponse) *rpc.ConnectResponse {
+				_, _ = svr.LogFile.Write([]byte(response.Message))
 				return &rpc.ConnectResponse{Message: response.Message}
 			},
 		)
 		if err != nil {
 			return err
 		}
-		connResp, err = cli.Connect(ctx)
+		reConnResp, err = cli.Connect(context.Background())
 		if err != nil {
 			return err
 		}
-		err = connResp.Send(convert(req))
+		err = reConnResp.Send(convert(req))
 		if err != nil {
 			return err
 		}
-		err = util.CopyGRPCStream[rpc.ConnectResponse](connResp, resp)
+		err = util.CopyGRPCStream[rpc.ConnectResponse](reConnResp, resp)
 		if err != nil {
 			return err
 		}
 	}
 
-	err = svr.connect.CreateRemoteInboundPod(ctx, req.Namespace, workloads, req.Headers, req.PortMap)
+	err = svr.connect.CreateRemoteInboundPod(plog.WithLogger(cancel, logger), req.Namespace, workloads, req.Headers, req.PortMap)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to inject inbound sidecar: %v", err)
 		return err
