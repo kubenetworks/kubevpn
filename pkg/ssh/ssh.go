@@ -17,7 +17,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
-	"github.com/spf13/pflag"
 	gossh "golang.org/x/crypto/ssh"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -143,39 +142,15 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 	return nil
 }
 
-func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print bool) (path string, err error) {
-	if conf.Addr == "" && conf.ConfigAlias == "" {
-		if flags != nil {
-			lookup := flags.Lookup("kubeconfig")
-			if lookup != nil {
-				if lookup.Value != nil && lookup.Value.String() != "" {
-					path = lookup.Value.String()
-				} else if lookup.DefValue != "" {
-					path = lookup.DefValue
-				} else {
-					path = lookup.NoOptDefVal
-				}
-			}
-		}
-		return
-	}
-	defer func() {
-		if er := recover(); er != nil {
-			err = er.(error)
-		}
-	}()
-
+func SshJump(ctx context.Context, conf *SshConfig, kubeconfig string, print bool) (path string, err error) {
 	configFlags := genericclioptions.NewConfigFlags(true)
+	configFlags.KubeConfig = pointer.String(kubeconfig)
 
-	if conf.RemoteKubeconfig != "" || (flags != nil && flags.Changed("remote-kubeconfig")) {
+	if len(conf.RemoteKubeconfig) != 0 {
 		var stdout []byte
 		var stderr []byte
-		if len(conf.RemoteKubeconfig) != 0 && conf.RemoteKubeconfig[0] == '~' {
+		if conf.RemoteKubeconfig[0] == '~' {
 			conf.RemoteKubeconfig = filepath.Join("/home", conf.User, conf.RemoteKubeconfig[1:])
-		}
-		if conf.RemoteKubeconfig == "" {
-			// if `--remote-kubeconfig` is parsed then Entrypoint is reset
-			conf.RemoteKubeconfig = filepath.Join("/home", conf.User, clientcmd.RecommendedHomeDir, clientcmd.RecommendedFileName)
 		}
 		// pre-check network ip connect
 		var cli *gossh.Client
@@ -205,17 +180,6 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 			return
 		}
 		configFlags.KubeConfig = pointer.String(file)
-	} else {
-		if flags != nil {
-			lookup := flags.Lookup("kubeconfig")
-			if lookup != nil {
-				if lookup.Value != nil && lookup.Value.String() != "" {
-					configFlags.KubeConfig = pointer.String(lookup.Value.String())
-				} else if lookup.DefValue != "" {
-					configFlags.KubeConfig = pointer.String(lookup.DefValue)
-				}
-			}
-		}
 	}
 	matchVersionFlags := util.NewMatchVersionFlags(configFlags)
 	var rawConfig api.Config
@@ -332,6 +296,11 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 		plog.G(ctx).Errorf("failed to write kubeconfig: %v", err)
 		return
 	}
+	go func() {
+		<-ctx.Done()
+		_ = os.Remove(path)
+		_ = os.Remove(kubeconfig)
+	}()
 	if print {
 		plog.G(ctx).Infof("Use temp kubeconfig: %s", path)
 	} else {
@@ -340,11 +309,11 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 	return
 }
 
-func SshJumpAndSetEnv(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print bool) error {
-	if conf.Addr == "" && conf.ConfigAlias == "" {
+func SshJumpAndSetEnv(ctx context.Context, conf *SshConfig, file string, print bool) error {
+	if conf.IsEmpty() {
 		return nil
 	}
-	path, err := SshJump(ctx, conf, flags, print)
+	path, err := SshJump(ctx, conf, file, print)
 	if err != nil {
 		return err
 	}

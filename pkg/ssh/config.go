@@ -368,9 +368,7 @@ func AddSshFlags(flags *pflag.FlagSet, sshConf *SshConfig) {
 	flags.StringVar(&sshConf.GSSAPIPassword, "gssapi-password", "", "GSSAPI password")
 	flags.StringVar(&sshConf.GSSAPIKeytabConf, "gssapi-keytab", "", "GSSAPI keytab file path")
 	flags.StringVar(&sshConf.GSSAPICacheFile, "gssapi-cache", "", "GSSAPI cache file path, use command `kinit -c /path/to/cache USERNAME@RELAM` to generate")
-	flags.StringVar(&sshConf.RemoteKubeconfig, "remote-kubeconfig", "", "Remote kubeconfig abstract path of ssh server, default is /home/$USERNAME/.kube/config")
-	lookup := flags.Lookup("remote-kubeconfig")
-	lookup.NoOptDefVal = "~/.kube/config"
+	flags.StringVar(&sshConf.RemoteKubeconfig, "remote-kubeconfig", "~/.kube/config", "Remote kubeconfig abstract path of ssh server, default is /home/$USERNAME/.kube/config")
 }
 
 func keepAlive(cl *ssh.Client, conn net.Conn, done <-chan struct{}) error {

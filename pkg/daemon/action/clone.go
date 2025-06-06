@@ -3,8 +3,7 @@ package action
 import (
 	"context"
 	"io"
-
-	"github.com/spf13/pflag"
+	"os"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -69,11 +68,6 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 	if err != nil {
 		return err
 	}
-	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-	flags.AddFlag(&pflag.Flag{
-		Name:     "kubeconfig",
-		DefValue: file,
-	})
 	sshCtx, sshFunc := context.WithCancel(context.Background())
 	defer func() {
 		if err != nil {
@@ -83,14 +77,16 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 	}()
 	options.AddRollbackFunc(func() error {
 		sshFunc()
+		_ = os.Remove(file)
 		return nil
 	})
-	var path string
-	path, err = ssh.SshJump(sshCtx, sshConf, flags, false)
-	if err != nil {
-		return err
+	if !sshConf.IsEmpty() {
+		file, err = ssh.SshJump(sshCtx, sshConf, file, false)
+		if err != nil {
+			return err
+		}
 	}
-	f := util.InitFactoryByPath(path, req.Namespace)
+	f := util.InitFactoryByPath(file, req.Namespace)
 	err = options.InitClient(f)
 	if err != nil {
 		plog.G(context.Background()).Errorf("Failed to init client: %v", err)

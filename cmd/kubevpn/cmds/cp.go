@@ -14,6 +14,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/cp"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 var cpExample = templates.Examples(i18n.T(`
@@ -73,7 +74,11 @@ func CmdCp(f cmdutil.Factory) *cobra.Command {
 		Long:                  i18n.T("Copy files and directories to and from containers. Different between kubectl cp is it will de-reference symbol link."),
 		Example:               cpExample,
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			cmdutil.CheckErr(pkgssh.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false))
+			bytes, _, err := util.ConvertToKubeConfigBytes(f)
+			cmdutil.CheckErr(err)
+			file, err := util.ConvertToTempKubeconfigFile(bytes)
+			cmdutil.CheckErr(err)
+			cmdutil.CheckErr(pkgssh.SshJumpAndSetEnv(cmd.Context(), sshConf, file, false))
 
 			var comps []string
 			if len(args) == 0 {

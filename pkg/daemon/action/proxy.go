@@ -3,10 +3,10 @@ package action
 import (
 	"context"
 	"io"
+	"os"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/pflag"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/cli-runtime/pkg/resource"
@@ -42,24 +42,20 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (e error) {
 	if err != nil {
 		return err
 	}
-	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-	flags.AddFlag(&pflag.Flag{
-		Name:     "kubeconfig",
-		DefValue: file,
-	})
-	var path string
-	path, err = ssh.SshJump(ctx, sshConf, flags, false)
-	if err != nil {
-		return err
+	defer os.Remove(file)
+	if !sshConf.IsEmpty() {
+		file, err = ssh.SshJump(ctx, sshConf, file, false)
+		if err != nil {
+			return err
+		}
 	}
 	connect := &handler.ConnectOptions{
-		Namespace:            req.Namespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		ImagePullSecretName:  req.ImagePullSecretName,
 	}
-	err = connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
 	if err != nil {
 		return err
 	}

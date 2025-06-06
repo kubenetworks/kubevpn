@@ -8,7 +8,6 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/pflag"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -63,7 +62,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	sshCtx, sshCancel := context.WithCancel(context.Background())
 	svr.connect.AddRolloutFunc(func() error {
 		sshCancel()
-		os.Remove(file)
+		_ = os.Remove(file)
 		return nil
 	})
 	go util.ListenCancel(resp, sshCancel)
@@ -74,7 +73,6 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 			svr.connect.Cleanup(sshCtx)
 			svr.connect = nil
 			svr.t = time.Time{}
-			os.Remove(file)
 			sshCancel()
 		}
 	}()
@@ -106,11 +104,6 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	if err != nil {
 		return err
 	}
-	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-	flags.AddFlag(&pflag.Flag{
-		Name:     "kubeconfig",
-		DefValue: file,
-	})
 	sshCtx, sshCancel := context.WithCancel(context.Background())
 	sshCtx = plog.WithLogger(sshCtx, logger)
 	defer plog.WithoutLogger(sshCtx)
@@ -123,26 +116,22 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	}
 	connect.AddRolloutFunc(func() error {
 		sshCancel()
-		os.Remove(file)
+		_ = os.Remove(file)
 		return nil
 	})
 	defer func() {
 		if e != nil {
 			connect.Cleanup(plog.WithLogger(context.Background(), logger))
 			sshCancel()
-			os.Remove(file)
 		}
 	}()
-	var path string
-	path, err = ssh.SshJump(sshCtx, sshConf, flags, true)
-	if err != nil {
-		return err
+	if !sshConf.IsEmpty() {
+		file, err = ssh.SshJump(sshCtx, sshConf, file, true)
+		if err != nil {
+			return err
+		}
 	}
-	connect.AddRolloutFunc(func() error {
-		os.Remove(path)
-		return nil
-	})
-	err = connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
 	if err != nil {
 		return err
 	}
@@ -169,8 +158,6 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		)
 		if isSameCluster {
 			sshCancel()
-			os.Remove(path)
-			os.Remove(file)
 			// same cluster, do nothing
 			logger.Infof("Connected to cluster")
 			return nil
@@ -186,7 +173,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	}
 
 	// only ssh jump in user daemon
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(file)
 	if err != nil {
 		return err
 	}

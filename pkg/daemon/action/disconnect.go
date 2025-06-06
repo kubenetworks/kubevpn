@@ -3,11 +3,11 @@ package action
 import (
 	"context"
 	"io"
+	"os"
 	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -138,21 +138,16 @@ func disconnectByKubeConfig(ctx context.Context, svr *Server, kubeconfigBytes st
 	if err != nil {
 		return err
 	}
-	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-	flags.AddFlag(&pflag.Flag{
-		Name:     "kubeconfig",
-		DefValue: file,
-	})
+	defer os.Remove(file)
 	var sshConf = ssh.ParseSshFromRPC(jump)
-	var path string
-	path, err = ssh.SshJump(ctx, sshConf, flags, false)
-	if err != nil {
-		return err
+	if !sshConf.IsEmpty() {
+		file, err = ssh.SshJump(ctx, sshConf, file, false)
+		if err != nil {
+			return err
+		}
 	}
-	connect := &handler.ConnectOptions{
-		Namespace: ns,
-	}
-	err = connect.InitClient(util.InitFactoryByPath(path, ns))
+	connect := &handler.ConnectOptions{}
+	err = connect.InitClient(util.InitFactoryByPath(file, ns))
 	if err != nil {
 		return err
 	}
