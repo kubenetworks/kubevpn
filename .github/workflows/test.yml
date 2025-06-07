@@ -114,6 +114,7 @@ jobs:
             }
       - uses: azure/setup-kubectl@v4
       - name: Install minikube
+        timeout-minutes: 30
         uses: medyagh/setup-minikube@latest
         with:
           cache: true
