@@ -115,7 +115,7 @@ func (c *ConnectOptions) RentIP(ctx context.Context) (context.Context, error) {
 		return nil, err
 	}
 	ctx1 := metadata.AppendToOutgoingContext(
-		ctx,
+		context.Background(),
 		config.HeaderIPv4, c.localTunIPv4.String(),
 		config.HeaderIPv6, c.localTunIPv6.String(),
 	)

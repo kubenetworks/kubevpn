@@ -20,12 +20,9 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/tools/clientcmd/api/latest"
-	"k8s.io/kubectl/pkg/cmd/util"
-	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -143,9 +140,7 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 }
 
 func SshJump(ctx context.Context, conf *SshConfig, kubeconfig string, print bool) (path string, err error) {
-	configFlags := genericclioptions.NewConfigFlags(true)
-	configFlags.KubeConfig = pointer.String(kubeconfig)
-
+	var kubeconfigBytes []byte
 	if len(conf.RemoteKubeconfig) != 0 {
 		var stdout []byte
 		var stderr []byte
@@ -173,17 +168,20 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfig string, print bool
 			err = errors.Errorf("can not get kubeconfig %s from remote ssh server: %s", conf.RemoteKubeconfig, string(stderr))
 			return
 		}
-
-		var file string
-		file, err = pkgutil.ConvertToTempKubeconfigFile(bytes.TrimSpace(stdout))
+		kubeconfigBytes = bytes.TrimSpace(stdout)
+	} else {
+		kubeconfigBytes, err = os.ReadFile(kubeconfig)
 		if err != nil {
 			return
 		}
-		configFlags.KubeConfig = pointer.String(file)
 	}
-	matchVersionFlags := util.NewMatchVersionFlags(configFlags)
+	var clientConfig clientcmd.ClientConfig
+	clientConfig, err = clientcmd.NewClientConfigFromBytes(kubeconfigBytes)
+	if err != nil {
+		return
+	}
 	var rawConfig api.Config
-	rawConfig, err = matchVersionFlags.ToRawKubeConfigLoader().RawConfig()
+	rawConfig, err = clientConfig.RawConfig()
 	if err != nil {
 		plog.G(ctx).WithError(err).Errorf("failed to build config: %v", err)
 		return
@@ -309,11 +307,11 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfig string, print bool
 	return
 }
 
-func SshJumpAndSetEnv(ctx context.Context, conf *SshConfig, file string, print bool) error {
-	if conf.IsEmpty() {
+func SshJumpAndSetEnv(ctx context.Context, sshConf *SshConfig, file string, print bool) error {
+	if sshConf.IsEmpty() {
 		return nil
 	}
-	path, err := SshJump(ctx, conf, file, print)
+	path, err := SshJump(ctx, sshConf, file, print)
 	if err != nil {
 		return err
 	}

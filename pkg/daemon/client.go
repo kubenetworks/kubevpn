@@ -73,7 +73,7 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 		if err != nil {
 			return nil, err
 		}
-		err = util.PrintGRPCStream[rpc.QuitResponse](ctx, quitStream, nil)
+		err = util.PrintGRPCStream[rpc.QuitResponse](nil, quitStream, nil)
 		return
 	}
 
