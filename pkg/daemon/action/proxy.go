@@ -68,7 +68,7 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 	if config.Engine(req.Engine) == config.EngineGvisor {
 		for _, info := range objectList {
 			if !util.IsK8sService(info) {
-				return errors.Errorf("netstack gvisor mode only support k8s services, but got %s", info.Object.GetObjectKind().GroupVersionKind().Kind)
+				return errors.Errorf("netstack gvisor mode only support k8s services, but got %s", info.Mapping.Resource.Resource)
 			}
 		}
 	}
