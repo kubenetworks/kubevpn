@@ -21,7 +21,7 @@ type NotifyMessage struct {
 }
 
 func Watch(watcher *fsnotify.Watcher, filename string, notifyCh chan<- NotifyMessage) error {
-	ticker := time.NewTicker(time.Second * 5)
+	ticker := time.NewTicker(time.Second * 2)
 	defer ticker.Stop()
 	for {
 		select {
