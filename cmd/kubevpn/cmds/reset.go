@@ -1,6 +1,8 @@
 package cmds
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -66,11 +68,15 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 				Workloads:       args,
 				SshJump:         sshConf.ToRPC(),
 			}
-			resp, err := cli.Reset(cmd.Context(), req)
+			resp, err := cli.Reset(context.Background())
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.ResetResponse](resp)
+			err = resp.Send(req)
+			if err != nil {
+				return err
+			}
+			err = util.PrintGRPCStream[rpc.ResetResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil

@@ -84,12 +84,7 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := cli.Status(
-				cmd.Context(),
-				&rpc.StatusRequest{
-					ClusterIDs: clusterIDs,
-				},
-			)
+			resp, err := cli.Status(cmd.Context(), &rpc.StatusRequest{ClusterIDs: clusterIDs})
 			if err != nil {
 				return err
 			}
@@ -260,22 +255,15 @@ func GetClusterIDByConfig(cmd *cobra.Command, config Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	flags = flag.NewFlagSet("", flag.ContinueOnError)
-	flags.AddFlag(&flag.Flag{
-		Name:     "kubeconfig",
-		DefValue: file,
-	})
-	flags.AddFlag(&flag.Flag{
-		Name:     "namespace",
-		DefValue: ns,
-	})
-	var path string
-	path, err = pkgssh.SshJump(cmd.Context(), sshConf, flags, false)
-	if err != nil {
-		return "", err
+	defer os.Remove(file)
+	if !sshConf.IsEmpty() {
+		file, err = pkgssh.SshJump(cmd.Context(), sshConf, file, false)
+		if err != nil {
+			return "", err
+		}
 	}
 	var c = &handler.ConnectOptions{}
-	err = c.InitClient(util.InitFactoryByPath(path, ns))
+	err = c.InitClient(util.InitFactoryByPath(file, ns))
 	if err != nil {
 		return "", err
 	}

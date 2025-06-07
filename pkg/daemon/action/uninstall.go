@@ -2,9 +2,9 @@ package action
 
 import (
 	"io"
+	"os"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/pflag"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -13,7 +13,11 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Uninstall(req *rpc.UninstallRequest, resp rpc.Daemon_UninstallServer) error {
+func (svr *Server) Uninstall(resp rpc.Daemon_UninstallServer) error {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newUninstallWarp(resp), svr.LogFile))
 
 	connect := &handler.ConnectOptions{
@@ -25,19 +29,16 @@ func (svr *Server) Uninstall(req *rpc.UninstallRequest, resp rpc.Daemon_Uninstal
 	if err != nil {
 		return err
 	}
-	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-	flags.AddFlag(&pflag.Flag{
-		Name:     "kubeconfig",
-		DefValue: file,
-	})
+	defer os.Remove(file)
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	var ctx = plog.WithLogger(resp.Context(), logger)
-	var path string
-	path, err = ssh.SshJump(ctx, sshConf, flags, false)
-	if err != nil {
-		return err
+	if !sshConf.IsEmpty() {
+		file, err = ssh.SshJump(ctx, sshConf, file, false)
+		if err != nil {
+			return err
+		}
 	}
-	err = connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
 	if err != nil {
 		return err
 	}

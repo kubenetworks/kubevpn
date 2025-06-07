@@ -29,10 +29,7 @@ func CmdList(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, err := cli.List(
-				cmd.Context(),
-				&rpc.ListRequest{},
-			)
+			client, err := cli.List(cmd.Context(), &rpc.ListRequest{})
 			if err != nil {
 				return err
 			}

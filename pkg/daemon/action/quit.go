@@ -14,7 +14,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Quit(req *rpc.QuitRequest, resp rpc.Daemon_QuitServer) error {
+func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newQuitWarp(resp), svr.LogFile))
 	ctx := context.Background()
 	if resp != nil {

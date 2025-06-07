@@ -65,11 +65,15 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	if err == nil && resp.NeedUpgrade {
 		// quit daemon
 		var quitStream rpc.Daemon_QuitClient
-		quitStream, err = cli.Quit(ctx, &rpc.QuitRequest{})
+		quitStream, err = cli.Quit(ctx)
 		if err != nil {
 			return nil, err
 		}
-		err = util.PrintGRPCStream[rpc.QuitResponse](quitStream, nil)
+		err = quitStream.Send(&rpc.QuitRequest{})
+		if err != nil {
+			return nil, err
+		}
+		err = util.PrintGRPCStream[rpc.QuitResponse](nil, quitStream, nil)
 		return
 	}
 

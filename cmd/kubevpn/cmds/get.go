@@ -53,13 +53,7 @@ func CmdGet(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, err := cli.Get(
-				cmd.Context(),
-				&rpc.GetRequest{
-					Namespace: ns,
-					Resource:  args[0],
-				},
-			)
+			client, err := cli.Get(cmd.Context(), &rpc.GetRequest{Namespace: ns, Resource: args[0]})
 			if err != nil {
 				return err
 			}

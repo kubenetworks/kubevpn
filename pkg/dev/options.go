@@ -122,7 +122,11 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			ManagerNamespace:     managerNamespace,
 		}
 		option.AddRollbackFunc(func() error {
-			resp, err := cli.Disconnect(ctx, &rpc.DisconnectRequest{
+			resp, err := cli.Disconnect(context.Background())
+			if err != nil {
+				return err
+			}
+			err = resp.Send(&rpc.DisconnectRequest{
 				KubeconfigBytes: ptr.To(string(kubeConfigBytes)),
 				Namespace:       ptr.To(ns),
 				SshJump:         sshConfig.ToRPC(),
@@ -130,16 +134,21 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			if err != nil {
 				return err
 			}
-			_ = util.PrintGRPCStream[rpc.DisconnectResponse](resp)
+			_ = util.PrintGRPCStream[rpc.DisconnectResponse](ctx, resp)
 			return nil
 		})
 		var resp rpc.Daemon_ProxyClient
-		resp, err = cli.Proxy(ctx, req)
+		resp, err = cli.Proxy(context.Background())
 		if err != nil {
 			plog.G(ctx).Errorf("Connect to cluster error: %s", err.Error())
 			return err
 		}
-		err = util.PrintGRPCStream[rpc.CloneResponse](resp)
+		err = resp.Send(req)
+		if err != nil {
+			plog.G(ctx).Errorf("Connect to cluster error: %s", err.Error())
+			return err
+		}
+		err = util.PrintGRPCStream[rpc.CloneResponse](ctx, resp)
 		return err
 	}
 

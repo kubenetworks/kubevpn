@@ -44,11 +44,15 @@ func quit(ctx context.Context, isSudo bool) error {
 	if err != nil {
 		return err
 	}
-	client, err := cli.Quit(ctx, &rpc.QuitRequest{})
+	resp, err := cli.Quit(context.Background())
 	if err != nil {
 		return err
 	}
-	err = util.PrintGRPCStream[rpc.QuitResponse](client)
+	err = resp.Send(&rpc.QuitRequest{})
+	if err != nil {
+		return err
+	}
+	err = util.PrintGRPCStream[rpc.QuitResponse](ctx, resp)
 	if err != nil {
 		if status.Code(err) == codes.Canceled {
 			return nil

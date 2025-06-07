@@ -3,10 +3,11 @@ package action
 import (
 	"context"
 	"io"
+	"os"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/pflag"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/cli-runtime/pkg/resource"
@@ -27,7 +28,12 @@ import (
 //  2. if already connect to cluster
 //     2.1 disconnect from cluster
 //     2.2 same as step 1
-func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e error) {
+func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (e error) {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
+
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newProxyWarp(resp), svr.LogFile))
 	config.Image = req.Image
 	ctx := plog.WithLogger(resp.Context(), logger)
@@ -37,24 +43,20 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 	if err != nil {
 		return err
 	}
-	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-	flags.AddFlag(&pflag.Flag{
-		Name:     "kubeconfig",
-		DefValue: file,
-	})
-	var path string
-	path, err = ssh.SshJump(ctx, sshConf, flags, false)
-	if err != nil {
-		return err
+	defer os.Remove(file)
+	if !sshConf.IsEmpty() {
+		file, err = ssh.SshJump(ctx, sshConf, file, false)
+		if err != nil {
+			return err
+		}
 	}
 	connect := &handler.ConnectOptions{
-		Namespace:            req.Namespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		ImagePullSecretName:  req.ImagePullSecretName,
 	}
-	err = connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
 	if err != nil {
 		return err
 	}
@@ -84,9 +86,34 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 		return errors.Wrap(err, "daemon is not available")
 	}
 
+	var connResp, reConnResp grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse]
+	var disconnectResp rpc.Daemon_DisconnectClient
+	cancel, cancelFunc := context.WithCancel(ctx)
+	defer cancelFunc()
+	go func() {
+		var s rpc.Cancel
+		err = resp.RecvMsg(&s)
+		if err != nil {
+			return
+		}
+		if connResp != nil {
+			_ = connResp.SendMsg(&s)
+		}
+		if disconnectResp != nil {
+			_ = disconnectResp.SendMsg(&s)
+		}
+		if reConnResp != nil {
+			_ = reConnResp.SendMsg(&s)
+		}
+		cancelFunc()
+	}()
+
 	plog.G(ctx).Debugf("Connecting to cluster")
-	var connResp rpc.Daemon_ConnectClient
-	connResp, err = cli.Connect(ctx, convert(req))
+	connResp, err = cli.Connect(context.Background())
+	if err != nil {
+		return err
+	}
+	err = connResp.Send(convert(req))
 	if err != nil {
 		return err
 	}
@@ -96,8 +123,11 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 			return err
 		}
 		plog.G(ctx).Infof("Disconnecting from another cluster...")
-		var disconnectResp rpc.Daemon_DisconnectClient
-		disconnectResp, err = cli.Disconnect(ctx, &rpc.DisconnectRequest{ID: ptr.To[int32](0)})
+		disconnectResp, err = cli.Disconnect(context.Background())
+		if err != nil {
+			return err
+		}
+		err = disconnectResp.Send(&rpc.DisconnectRequest{ID: ptr.To[int32](0)})
 		if err != nil {
 			return err
 		}
@@ -105,23 +135,28 @@ func (svr *Server) Proxy(req *rpc.ProxyRequest, resp rpc.Daemon_ProxyServer) (e 
 			disconnectResp,
 			resp,
 			func(response *rpc.DisconnectResponse) *rpc.ConnectResponse {
+				_, _ = svr.LogFile.Write([]byte(response.Message))
 				return &rpc.ConnectResponse{Message: response.Message}
 			},
 		)
 		if err != nil {
 			return err
 		}
-		connResp, err = cli.Connect(ctx, convert(req))
+		reConnResp, err = cli.Connect(context.Background())
 		if err != nil {
 			return err
 		}
-		err = util.CopyGRPCStream[rpc.ConnectResponse](connResp, resp)
+		err = reConnResp.Send(convert(req))
+		if err != nil {
+			return err
+		}
+		err = util.CopyGRPCStream[rpc.ConnectResponse](reConnResp, resp)
 		if err != nil {
 			return err
 		}
 	}
 
-	err = svr.connect.CreateRemoteInboundPod(ctx, req.Namespace, workloads, req.Headers, req.PortMap)
+	err = svr.connect.CreateRemoteInboundPod(plog.WithLogger(cancel, logger), req.Namespace, workloads, req.Headers, req.PortMap)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to inject inbound sidecar: %v", err)
 		return err

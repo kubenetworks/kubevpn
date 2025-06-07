@@ -66,6 +66,22 @@ func (l *ProxyList) IsMe(ns, uid string, headers map[string]string) bool {
 	return false
 }
 
+type Resources struct {
+	Namespace string
+	Workload  string
+}
+
+func (l ProxyList) ToResources() []Resources {
+	var resources []Resources
+	for _, proxy := range l {
+		resources = append(resources, Resources{
+			Namespace: proxy.namespace,
+			Workload:  proxy.workload,
+		})
+	}
+	return resources
+}
+
 func NewMapper(clientset *kubernetes.Clientset, ns string, labels string, headers map[string]string, workload string) *Mapper {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	return &Mapper{

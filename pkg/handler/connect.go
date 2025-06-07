@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -116,7 +115,7 @@ func (c *ConnectOptions) RentIP(ctx context.Context) (context.Context, error) {
 		return nil, err
 	}
 	ctx1 := metadata.AppendToOutgoingContext(
-		ctx,
+		context.Background(),
 		config.HeaderIPv4, c.localTunIPv4.String(),
 		config.HeaderIPv6, c.localTunIPv6.String(),
 	)
@@ -138,7 +137,7 @@ func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logge
 		return fmt.Errorf("cat not convert IPv4 string: %s: %v", ipv4[0], err)
 	}
 	c.localTunIPv4 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
-	plog.G(ctx).Debugf("Get IPv4 %s from context", c.localTunIPv4.String())
+	logger.Debugf("Get IPv4 %s from context", c.localTunIPv4.String())
 
 	ipv6 := md.Get(config.HeaderIPv6)
 	if len(ipv6) == 0 {
@@ -149,7 +148,7 @@ func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logge
 		return fmt.Errorf("cat not convert IPv6 string: %s: %v", ipv6[0], err)
 	}
 	c.localTunIPv6 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
-	plog.G(ctx).Debugf("Get IPv6 %s from context", c.localTunIPv6.String())
+	logger.Debugf("Get IPv6 %s from context", c.localTunIPv6.String())
 	return nil
 }
 
@@ -208,17 +207,8 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 	return
 }
 
-func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-chan struct{}) (err error) {
+func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
-	var success atomic.Bool
-	go func() {
-		// if stop chan done before current function finished, means client ctrl+c to cancel operation
-		<-stopChan
-		if !success.Load() {
-			c.cancel()
-		}
-	}()
-
 	plog.G(ctx).Info("Starting connect to cluster")
 	m := dhcp.NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
 	if err = m.InitDHCP(c.ctx); err != nil {
@@ -293,7 +283,6 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool, stopChan <-
 		plog.G(ctx).Errorf("Configure DNS failed: %v", err)
 		return
 	}
-	success.Store(true)
 	return
 }
 

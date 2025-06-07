@@ -18,6 +18,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util/regctl"
 )
 
@@ -101,7 +102,15 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return pkgssh.SshJumpAndSetEnv(cmd.Context(), sshConf, cmd.Flags(), false)
+			bytes, _, err := util.ConvertToKubeConfigBytes(f)
+			if err != nil {
+				return err
+			}
+			file, err := util.ConvertToTempKubeconfigFile(bytes)
+			if err != nil {
+				return err
+			}
+			return pkgssh.SshJumpAndSetEnv(cmd.Context(), sshConf, file, false)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.Workload = args[0]

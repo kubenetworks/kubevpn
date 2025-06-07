@@ -2,9 +2,9 @@ package action
 
 import (
 	"io"
+	"os"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/pflag"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -13,27 +13,28 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Reset(req *rpc.ResetRequest, resp rpc.Daemon_ResetServer) error {
+func (svr *Server) Reset(resp rpc.Daemon_ResetServer) error {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newResetWarp(resp), svr.LogFile))
 
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
 		return err
 	}
-	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-	flags.AddFlag(&pflag.Flag{
-		Name:     "kubeconfig",
-		DefValue: file,
-	})
+	defer os.Remove(file)
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	var ctx = plog.WithLogger(resp.Context(), logger)
-	var path string
-	path, err = ssh.SshJump(ctx, sshConf, flags, false)
-	if err != nil {
-		return err
+	if !sshConf.IsEmpty() {
+		file, err = ssh.SshJump(ctx, sshConf, file, false)
+		if err != nil {
+			return err
+		}
 	}
 	connect := &handler.ConnectOptions{}
-	err = connect.InitClient(util.InitFactoryByPath(path, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
 	if err != nil {
 		return err
 	}

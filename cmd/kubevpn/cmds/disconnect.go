@@ -1,6 +1,7 @@
 package cmds
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -65,18 +66,20 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, err := cli.Disconnect(
-				cmd.Context(),
-				&rpc.DisconnectRequest{
-					ID:         ids,
-					ClusterIDs: clusterIDs,
-					All:        pointer.Bool(all),
-				},
-			)
+			req := &rpc.DisconnectRequest{
+				ID:         ids,
+				ClusterIDs: clusterIDs,
+				All:        pointer.Bool(all),
+			}
+			resp, err := cli.Disconnect(context.Background())
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.DisconnectResponse](client)
+			err = resp.Send(req)
+			if err != nil {
+				return err
+			}
+			err = util.PrintGRPCStream[rpc.DisconnectResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil

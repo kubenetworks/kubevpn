@@ -11,6 +11,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -18,12 +19,19 @@ type Printable interface {
 	GetMessage() string
 }
 
-func PrintGRPCStream[T any](clientStream grpc.ClientStream, writers ...io.Writer) error {
+func PrintGRPCStream[T any](ctx context.Context, clientStream grpc.ClientStream, writers ...io.Writer) error {
 	var out io.Writer = os.Stdout
 	for _, writer := range writers {
 		out = writer
 		break
 	}
+
+	go func() {
+		if ctx != nil {
+			<-ctx.Done()
+			_ = clientStream.SendMsg(&rpc.Cancel{})
+		}
+	}()
 
 	for {
 		var t = new(T)
@@ -86,5 +94,12 @@ func HandleCrash() {
 		plog.GetLogger(context.Background()).Error(r)
 		plog.GetLogger(context.Background()).Panicf("Panic: %s", string(debug.Stack()))
 		panic(r)
+	}
+}
+
+func ListenCancel(resp grpc.ServerStream, cancelFunc context.CancelFunc) {
+	var s rpc.Cancel
+	if resp.RecvMsg(&s) == nil {
+		cancelFunc()
 	}
 }

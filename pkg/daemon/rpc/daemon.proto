@@ -5,13 +5,13 @@ option go_package = ".;rpc";
 package rpc;
 
 service Daemon {
-  rpc Connect (ConnectRequest) returns (stream ConnectResponse) {}
-  rpc ConnectFork (ConnectRequest) returns (stream ConnectResponse) {}
-  rpc Disconnect (DisconnectRequest) returns (stream DisconnectResponse) {}
-  rpc Proxy (ProxyRequest) returns (stream ProxyResponse) {}
-  rpc Leave (LeaveRequest) returns (stream LeaveResponse) {}
-  rpc Clone (CloneRequest) returns (stream CloneResponse) {}
-  rpc Remove (RemoveRequest) returns (stream RemoveResponse) {}
+  rpc Connect (stream ConnectRequest) returns (stream ConnectResponse) {}
+  rpc ConnectFork (stream ConnectRequest) returns (stream ConnectResponse) {}
+  rpc Disconnect (stream DisconnectRequest) returns (stream DisconnectResponse) {}
+  rpc Proxy (stream ProxyRequest) returns (stream ProxyResponse) {}
+  rpc Leave (stream LeaveRequest) returns (stream LeaveResponse) {}
+  rpc Clone (stream CloneRequest) returns (stream CloneResponse) {}
+  rpc Remove (stream RemoveRequest) returns (stream RemoveResponse) {}
 
   rpc ConfigAdd (ConfigAddRequest) returns (ConfigAddResponse) {}
   rpc ConfigRemove (ConfigRemoveRequest) returns (ConfigRemoveResponse) {}
@@ -19,15 +19,15 @@ service Daemon {
   rpc SshStop (SshStopRequest) returns (SshStopResponse) {}
   rpc SshConnect (stream SshConnectRequest) returns (stream SshConnectResponse) {}
 
-  rpc Logs (LogRequest) returns (stream LogResponse) {}
+  rpc Logs (stream LogRequest) returns (stream LogResponse) {}
   rpc List (ListRequest) returns (ListResponse) {}
   rpc Get (GetRequest) returns (GetResponse) {}
   rpc Upgrade (UpgradeRequest) returns (UpgradeResponse) {}
   rpc Status (StatusRequest) returns (StatusResponse) {}
   rpc Version (VersionRequest) returns (VersionResponse) {}
-  rpc Reset (ResetRequest) returns (stream ResetResponse) {}
-  rpc Uninstall (UninstallRequest) returns (stream UninstallResponse) {}
-  rpc Quit (QuitRequest) returns (stream QuitResponse) {}
+  rpc Reset (stream ResetRequest) returns (stream ResetResponse) {}
+  rpc Uninstall (stream UninstallRequest) returns (stream UninstallResponse) {}
+  rpc Quit (stream QuitRequest) returns (stream QuitResponse) {}
 
   rpc Identify (IdentifyRequest) returns (IdentifyResponse) {}
 }
@@ -374,3 +374,5 @@ message IdentifyRequest {}
 message IdentifyResponse {
   string ID = 1;
 }
+
+message Cancel {}

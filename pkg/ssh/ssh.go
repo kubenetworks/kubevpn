@@ -17,16 +17,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
-	"github.com/spf13/pflag"
 	gossh "golang.org/x/crypto/ssh"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/tools/clientcmd/api/latest"
-	"k8s.io/kubectl/pkg/cmd/util"
-	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -143,39 +139,13 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 	return nil
 }
 
-func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print bool) (path string, err error) {
-	if conf.Addr == "" && conf.ConfigAlias == "" {
-		if flags != nil {
-			lookup := flags.Lookup("kubeconfig")
-			if lookup != nil {
-				if lookup.Value != nil && lookup.Value.String() != "" {
-					path = lookup.Value.String()
-				} else if lookup.DefValue != "" {
-					path = lookup.DefValue
-				} else {
-					path = lookup.NoOptDefVal
-				}
-			}
-		}
-		return
-	}
-	defer func() {
-		if er := recover(); er != nil {
-			err = er.(error)
-		}
-	}()
-
-	configFlags := genericclioptions.NewConfigFlags(true)
-
-	if conf.RemoteKubeconfig != "" || (flags != nil && flags.Changed("remote-kubeconfig")) {
+func SshJump(ctx context.Context, conf *SshConfig, kubeconfig string, print bool) (path string, err error) {
+	var kubeconfigBytes []byte
+	if len(conf.RemoteKubeconfig) != 0 {
 		var stdout []byte
 		var stderr []byte
-		if len(conf.RemoteKubeconfig) != 0 && conf.RemoteKubeconfig[0] == '~' {
+		if conf.RemoteKubeconfig[0] == '~' {
 			conf.RemoteKubeconfig = filepath.Join("/home", conf.User, conf.RemoteKubeconfig[1:])
-		}
-		if conf.RemoteKubeconfig == "" {
-			// if `--remote-kubeconfig` is parsed then Entrypoint is reset
-			conf.RemoteKubeconfig = filepath.Join("/home", conf.User, clientcmd.RecommendedHomeDir, clientcmd.RecommendedFileName)
 		}
 		// pre-check network ip connect
 		var cli *gossh.Client
@@ -198,28 +168,20 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 			err = errors.Errorf("can not get kubeconfig %s from remote ssh server: %s", conf.RemoteKubeconfig, string(stderr))
 			return
 		}
-
-		var file string
-		file, err = pkgutil.ConvertToTempKubeconfigFile(bytes.TrimSpace(stdout))
+		kubeconfigBytes = bytes.TrimSpace(stdout)
+	} else {
+		kubeconfigBytes, err = os.ReadFile(kubeconfig)
 		if err != nil {
 			return
 		}
-		configFlags.KubeConfig = pointer.String(file)
-	} else {
-		if flags != nil {
-			lookup := flags.Lookup("kubeconfig")
-			if lookup != nil {
-				if lookup.Value != nil && lookup.Value.String() != "" {
-					configFlags.KubeConfig = pointer.String(lookup.Value.String())
-				} else if lookup.DefValue != "" {
-					configFlags.KubeConfig = pointer.String(lookup.DefValue)
-				}
-			}
-		}
 	}
-	matchVersionFlags := util.NewMatchVersionFlags(configFlags)
+	var clientConfig clientcmd.ClientConfig
+	clientConfig, err = clientcmd.NewClientConfigFromBytes(kubeconfigBytes)
+	if err != nil {
+		return
+	}
 	var rawConfig api.Config
-	rawConfig, err = matchVersionFlags.ToRawKubeConfigLoader().RawConfig()
+	rawConfig, err = clientConfig.RawConfig()
 	if err != nil {
 		plog.G(ctx).WithError(err).Errorf("failed to build config: %v", err)
 		return
@@ -332,6 +294,11 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 		plog.G(ctx).Errorf("failed to write kubeconfig: %v", err)
 		return
 	}
+	go func() {
+		<-ctx.Done()
+		_ = os.Remove(path)
+		_ = os.Remove(kubeconfig)
+	}()
 	if print {
 		plog.G(ctx).Infof("Use temp kubeconfig: %s", path)
 	} else {
@@ -340,11 +307,11 @@ func SshJump(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print b
 	return
 }
 
-func SshJumpAndSetEnv(ctx context.Context, conf *SshConfig, flags *pflag.FlagSet, print bool) error {
-	if conf.Addr == "" && conf.ConfigAlias == "" {
+func SshJumpAndSetEnv(ctx context.Context, sshConf *SshConfig, file string, print bool) error {
+	if sshConf.IsEmpty() {
 		return nil
 	}
-	path, err := SshJump(ctx, conf, flags, print)
+	path, err := SshJump(ctx, sshConf, file, print)
 	if err != nil {
 		return err
 	}

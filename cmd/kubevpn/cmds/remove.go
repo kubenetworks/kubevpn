@@ -1,6 +1,8 @@
 package cmds
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -36,13 +38,18 @@ func CmdRemove(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := cli.Remove(cmd.Context(), &rpc.RemoveRequest{
+			req := &rpc.RemoveRequest{
 				Workloads: args,
-			})
+			}
+			resp, err := cli.Remove(context.Background())
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.RemoveResponse](resp)
+			err = resp.Send(req)
+			if err != nil {
+				return err
+			}
+			err = util.PrintGRPCStream[rpc.RemoveResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil

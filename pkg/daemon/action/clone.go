@@ -3,8 +3,9 @@ package action
 import (
 	"context"
 	"io"
+	"os"
 
-	"github.com/spf13/pflag"
+	"google.golang.org/grpc"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -14,7 +15,11 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (err error) {
+func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
 	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newCloneWarp(resp), svr.LogFile))
 
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
@@ -34,11 +39,40 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 	if err != nil {
 		return err
 	}
-	connResp, err := cli.Connect(resp.Context(), connReq)
+
+	var connResp grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse]
+	var disconnectResp rpc.Daemon_DisconnectClient
+	sshCtx, sshFunc := context.WithCancel(context.Background())
+	go func() {
+		var s rpc.Cancel
+		err = resp.RecvMsg(&s)
+		if err != nil {
+			return
+		}
+		if connResp != nil {
+			_ = connResp.SendMsg(&s)
+		}
+		if disconnectResp != nil {
+			_ = disconnectResp.SendMsg(&s)
+		}
+		sshFunc()
+	}()
+
+	connResp, err = cli.Connect(context.Background())
 	if err != nil {
 		return err
 	}
-	err = util.PrintGRPCStream[rpc.ConnectResponse](connResp, io.MultiWriter(newCloneWarp(resp), svr.LogFile))
+	err = connResp.SendMsg(&connReq)
+	if err != nil {
+		return err
+	}
+	err = util.CopyAndConvertGRPCStream[rpc.ConnectResponse, rpc.CloneResponse](
+		connResp,
+		resp,
+		func(r *rpc.ConnectResponse) *rpc.CloneResponse {
+			_, _ = svr.LogFile.Write([]byte(r.Message))
+			return &rpc.CloneResponse{Message: r.Message}
+		})
 	if err != nil {
 		return err
 	}
@@ -61,12 +95,6 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 	if err != nil {
 		return err
 	}
-	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-	flags.AddFlag(&pflag.Flag{
-		Name:     "kubeconfig",
-		DefValue: file,
-	})
-	sshCtx, sshFunc := context.WithCancel(context.Background())
 	defer func() {
 		if err != nil {
 			_ = options.Cleanup(sshCtx)
@@ -75,14 +103,16 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 	}()
 	options.AddRollbackFunc(func() error {
 		sshFunc()
+		_ = os.Remove(file)
 		return nil
 	})
-	var path string
-	path, err = ssh.SshJump(sshCtx, sshConf, flags, false)
-	if err != nil {
-		return err
+	if !sshConf.IsEmpty() {
+		file, err = ssh.SshJump(sshCtx, sshConf, file, false)
+		if err != nil {
+			return err
+		}
 	}
-	f := util.InitFactoryByPath(path, req.Namespace)
+	f := util.InitFactoryByPath(file, req.Namespace)
 	err = options.InitClient(f)
 	if err != nil {
 		plog.G(context.Background()).Errorf("Failed to init client: %v", err)
@@ -91,7 +121,7 @@ func (svr *Server) Clone(req *rpc.CloneRequest, resp rpc.Daemon_CloneServer) (er
 	config.Image = req.Image
 	logger.Infof("Clone workloads...")
 	options.SetContext(sshCtx)
-	err = options.DoClone(plog.WithLogger(resp.Context(), logger), []byte(req.KubeconfigBytes))
+	err = options.DoClone(plog.WithLogger(sshCtx, logger), []byte(req.KubeconfigBytes))
 	if err != nil {
 		plog.G(context.Background()).Errorf("Clone workloads failed: %v", err)
 		return err

@@ -3,11 +3,11 @@ package action
 import (
 	"context"
 	"io"
+	"os"
 	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -18,7 +18,12 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_DisconnectServer) error {
+func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) error {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
+
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newDisconnectWarp(resp), svr.LogFile))
 	ctx := plog.WithLogger(resp.Context(), logger)
 
@@ -30,7 +35,11 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 		if err != nil {
 			return errors.Wrap(err, "sudo daemon not start")
 		}
-		connResp, err := cli.Disconnect(resp.Context(), req)
+		connResp, err := cli.Disconnect(resp.Context())
+		if err != nil {
+			return err
+		}
+		err = connResp.Send(req)
 		if err != nil {
 			return err
 		}
@@ -76,7 +85,7 @@ func (svr *Server) Disconnect(req *rpc.DisconnectRequest, resp rpc.Daemon_Discon
 			plog.G(ctx).Errorf("Index %d out of range", req.GetID())
 		}
 	case req.KubeconfigBytes != nil && req.Namespace != nil:
-		err := disconnectByKubeConfig(
+		err = disconnectByKubeConfig(
 			resp.Context(),
 			svr,
 			req.GetKubeconfigBytes(),
@@ -129,21 +138,16 @@ func disconnectByKubeConfig(ctx context.Context, svr *Server, kubeconfigBytes st
 	if err != nil {
 		return err
 	}
-	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-	flags.AddFlag(&pflag.Flag{
-		Name:     "kubeconfig",
-		DefValue: file,
-	})
+	defer os.Remove(file)
 	var sshConf = ssh.ParseSshFromRPC(jump)
-	var path string
-	path, err = ssh.SshJump(ctx, sshConf, flags, false)
-	if err != nil {
-		return err
+	if !sshConf.IsEmpty() {
+		file, err = ssh.SshJump(ctx, sshConf, file, false)
+		if err != nil {
+			return err
+		}
 	}
-	connect := &handler.ConnectOptions{
-		Namespace: ns,
-	}
-	err = connect.InitClient(util.InitFactoryByPath(path, ns))
+	connect := &handler.ConnectOptions{}
+	err = connect.InitClient(util.InitFactoryByPath(file, ns))
 	if err != nil {
 		return err
 	}

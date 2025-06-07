@@ -11,7 +11,12 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
-func (svr *Server) Logs(req *rpc.LogRequest, resp rpc.Daemon_LogsServer) error {
+func (svr *Server) Logs(resp rpc.Daemon_LogsServer) error {
+	req, err := resp.Recv()
+	if err != nil {
+		return err
+	}
+
 	// only show latest N lines
 	line := int64(max(req.Lines, -req.Lines))
 	sudoLine, sudoSize, err := seekToLastLine(config.GetDaemonLogPath(true), line)
