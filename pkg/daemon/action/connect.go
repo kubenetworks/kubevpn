@@ -53,6 +53,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		OriginNamespace:      req.Namespace,
 		Lock:                 &svr.Lock,
+		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
 	}
 	var file string
@@ -86,7 +87,6 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		return err
 	}
 
-	config.Image = req.Image
 	err = svr.connect.DoConnect(sshCtx, false)
 	if err != nil {
 		logger.Errorf("Failed to connect...")

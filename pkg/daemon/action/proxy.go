@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/utils/ptr"
 
@@ -35,7 +36,6 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (e error) {
 	}
 
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newProxyWarp(resp), svr.LogFile))
-	config.Image = req.Image
 	ctx := plog.WithLogger(resp.Context(), logger)
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 
@@ -54,6 +54,7 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (e error) {
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
+		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
 	}
 	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
@@ -156,7 +157,13 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (e error) {
 		}
 	}
 
-	err = svr.connect.CreateRemoteInboundPod(plog.WithLogger(cancel, logger), req.Namespace, workloads, req.Headers, req.PortMap)
+	var podList []v1.Pod
+	podList, err = svr.connect.GetRunningPodList(cancel)
+	if err != nil {
+		return err
+	}
+	image := podList[0].Spec.Containers[0].Image
+	err = svr.connect.CreateRemoteInboundPod(plog.WithLogger(cancel, logger), req.Namespace, workloads, req.Headers, req.PortMap, image)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to inject inbound sidecar: %v", err)
 		return err

@@ -20,12 +20,12 @@ func RemoveContainer(spec *corev1.PodSpec) {
 	}
 }
 
-func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig, connectNamespace string, secret *corev1.Secret) {
+func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig, connectNamespace string, secret *corev1.Secret, image string) {
 	// remove vpn container if already exist
 	RemoveContainer(spec)
 	spec.Containers = append(spec.Containers, corev1.Container{
 		Name:  config.ContainerSidecarVPN,
-		Image: config.Image,
+		Image: image,
 		Env: []corev1.EnvVar{
 			{
 				Name:  "LocalTunIPv4",

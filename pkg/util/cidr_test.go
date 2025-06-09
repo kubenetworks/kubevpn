@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -73,7 +74,7 @@ func TestByCreateSvc(t *testing.T) {
 
 func TestElegant(t *testing.T) {
 	before()
-	elegant := GetCIDR(context.Background(), clientset, restconfig, namespace)
+	elegant := GetCIDR(context.Background(), clientset, restconfig, namespace, config.Image)
 	for _, ipNet := range elegant {
 		t.Log(ipNet.String())
 	}

@@ -12,19 +12,16 @@ import (
 	"k8s.io/api/admission/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/utils/ptr"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // admissionReviewHandler is a handler to handle business logic, holding an util.Factory
 type admissionReviewHandler struct {
 	sync.Mutex
-	f         cmdutil.Factory
-	ns        string
-	clientset *kubernetes.Clientset
+	dhcp *dhcp.Manager
 }
 
 // admitv1beta1Func handles a v1beta1 admission

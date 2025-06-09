@@ -174,14 +174,15 @@ func healthChecker(t *testing.T, endpoint string, header map[string]string, keyw
 		req.Header.Add(k, v)
 	}
 
+	client := &http.Client{Timeout: time.Second * 1}
 	err = retry.OnError(
 		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 120},
 		func(err error) bool { return err != nil },
 		func() error {
 			var resp *http.Response
-			resp, err = (&http.Client{Timeout: time.Second * 5}).Do(req)
+			resp, err = client.Do(req)
 			if err != nil {
-				t.Logf("failed to do health check endpoint: %s: %v", endpoint, err)
+				t.Logf("%s failed to do health check endpoint: %s: %v", time.Now().Format(time.DateTime), endpoint, err)
 				return err
 			}
 			if resp.StatusCode != 200 {

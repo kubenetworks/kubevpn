@@ -24,7 +24,7 @@ import (
 	util2 "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func InjectVPNSidecar(ctx context.Context, nodeID string, f util.Factory, connectNamespace string, object *resource.Info, c util2.PodRouteConfig, secret *v1.Secret) error {
+func InjectVPNSidecar(ctx context.Context, nodeID string, f util.Factory, connectNamespace string, object *resource.Info, c util2.PodRouteConfig, secret *v1.Secret, image string) error {
 	u := object.Object.(*unstructured.Unstructured)
 
 	podTempSpec, path, err := util2.GetPodTemplateSpecPath(u)
@@ -50,7 +50,7 @@ func InjectVPNSidecar(ctx context.Context, nodeID string, f util.Factory, connec
 		return err
 	}
 
-	AddContainer(&podTempSpec.Spec, c, connectNamespace, secret)
+	AddContainer(&podTempSpec.Spec, c, connectNamespace, secret, image)
 
 	workload := fmt.Sprintf("%s/%s", object.Mapping.Resource.Resource, object.Name)
 	helper := resource.NewHelper(object.Client, object.Mapping)

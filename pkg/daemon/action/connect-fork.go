@@ -36,6 +36,7 @@ func (svr *Server) ConnectFork(resp rpc.Daemon_ConnectForkServer) (err error) {
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		OriginNamespace:      req.Namespace,
 		Lock:                 &svr.Lock,
+		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
 	}
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
@@ -67,7 +68,6 @@ func (svr *Server) ConnectFork(resp rpc.Daemon_ConnectForkServer) (err error) {
 		return err
 	}
 
-	config.Image = req.Image
 	err = connect.DoConnect(sshCtx, true)
 	if err != nil {
 		logger.Errorf("Failed to connect...")

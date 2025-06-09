@@ -118,10 +118,9 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 		plog.G(context.Background()).Errorf("Failed to init client: %v", err)
 		return err
 	}
-	config.Image = req.Image
 	logger.Infof("Clone workloads...")
 	options.SetContext(sshCtx)
-	err = options.DoClone(plog.WithLogger(sshCtx, logger), []byte(req.KubeconfigBytes))
+	err = options.DoClone(plog.WithLogger(sshCtx, logger), []byte(req.KubeconfigBytes), req.Image)
 	if err != nil {
 		plog.G(context.Background()).Errorf("Clone workloads failed: %v", err)
 		return err

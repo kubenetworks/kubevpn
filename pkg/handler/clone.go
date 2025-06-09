@@ -90,7 +90,7 @@ func (d *CloneOptions) SetContext(ctx context.Context) {
 * 3) create serviceAccount as needed
 * 4) modify podTempSpec inject kubevpn container
  */
-func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) error {
+func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte, image string) error {
 	var args []string
 	if len(d.Headers) != 0 {
 		args = append(args, "--headers", labels.Set(d.Headers).String())
@@ -229,8 +229,8 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 					Value: "1",
 				},
 			}...)*/
-			container := genVPNContainer(workload, d.Engine, d.Namespace, args)
-			containerSync := genSyncthingContainer(d.RemoteDir, syncDataDirName)
+			container := genVPNContainer(workload, d.Engine, d.Namespace, image, args)
+			containerSync := genSyncthingContainer(d.RemoteDir, syncDataDirName, image)
 			spec.Spec.Containers = append(containers, *container, *containerSync)
 			//set spec
 			marshal, err := json.Marshal(spec)
@@ -275,10 +275,10 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte) 
 	return nil
 }
 
-func genSyncthingContainer(remoteDir string, syncDataDirName string) *v1.Container {
+func genSyncthingContainer(remoteDir string, syncDataDirName string, image string) *v1.Container {
 	containerSync := &v1.Container{
 		Name:  config.ContainerSidecarSyncthing,
-		Image: config.Image,
+		Image: image,
 		// https://stackoverflow.com/questions/32918849/what-process-signal-does-pod-receive-when-executing-kubectl-rolling-update
 		Command: []string{
 			"kubevpn",
@@ -317,10 +317,10 @@ func genSyncthingContainer(remoteDir string, syncDataDirName string) *v1.Contain
 	return containerSync
 }
 
-func genVPNContainer(workload string, engine config.Engine, namespace string, args []string) *v1.Container {
+func genVPNContainer(workload string, engine config.Engine, namespace string, image string, args []string) *v1.Container {
 	container := &v1.Container{
 		Name:  config.ContainerSidecarVPN,
-		Image: config.Image,
+		Image: image,
 		// https://stackoverflow.com/questions/32918849/what-process-signal-does-pod-receive-when-executing-kubectl-rolling-update
 		Command: append([]string{
 			"kubevpn",
@@ -328,7 +328,7 @@ func genVPNContainer(workload string, engine config.Engine, namespace string, ar
 			workload,
 			"--kubeconfig", "/tmp/.kube/" + config.KUBECONFIG,
 			"--namespace", namespace,
-			"--image", config.Image,
+			"--image", image,
 			"--netstack", string(engine),
 			"--foreground",
 		}, args...),

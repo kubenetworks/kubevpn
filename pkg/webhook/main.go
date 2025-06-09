@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
-	"os"
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -14,9 +13,8 @@ import (
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
-	"k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/client-go/kubernetes"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp/rpc"
@@ -24,14 +22,8 @@ import (
 	putil "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func Main(f util.Factory) error {
-	clientset, err := f.KubernetesClientSet()
-	if err != nil {
-		return err
-	}
-
-	ns := os.Getenv(config.EnvPodNamespace)
-	h := &admissionReviewHandler{f: f, clientset: clientset, ns: ns}
+func Main(manager *dhcp.Manager, clientset *kubernetes.Clientset) error {
+	h := &admissionReviewHandler{dhcp: manager}
 	http.HandleFunc("/pods", func(w http.ResponseWriter, r *http.Request) {
 		serve(w, r, newDelegateToV1AdmitHandler(h.admitPods))
 	})

@@ -33,7 +33,7 @@ import (
 // 2) grep cmdline
 // 3) create svc + cat *.conflist
 // 4) create svc + get pod ip with svc mask
-func GetCIDR(ctx context.Context, clientset *kubernetes.Clientset, restconfig *rest.Config, namespace string) []*net.IPNet {
+func GetCIDR(ctx context.Context, clientset *kubernetes.Clientset, restconfig *rest.Config, namespace string, image string) []*net.IPNet {
 	defer func() {
 		_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
 	}()
@@ -47,7 +47,7 @@ func GetCIDR(ctx context.Context, clientset *kubernetes.Clientset, restconfig *r
 	}
 
 	plog.G(ctx).Infoln("Getting network CIDR from CNI...")
-	cni, err := GetCIDRFromCNI(ctx, clientset, restconfig, namespace)
+	cni, err := GetCIDRFromCNI(ctx, clientset, restconfig, namespace, image)
 	if err == nil {
 		plog.G(ctx).Debugf("Getting network CIDR from CNI successfully")
 		result = append(result, cni...)
@@ -126,8 +126,8 @@ func GetCIDRByDumpClusterInfo(ctx context.Context, clientset *kubernetes.Clients
 }
 
 // GetCIDRFromCNI kube-controller-manager--allocate-node-cidrs=true--authentication-kubeconfig=/etc/kubernetes/controller-manager.conf--authorization-kubeconfig=/etc/kubernetes/controller-manager.conf--bind-address=0.0.0.0--client-ca-file=/etc/kubernetes/ssl/ca.crt--cluster-cidr=10.233.64.0/18--cluster-name=cluster.local--cluster-signing-cert-file=/etc/kubernetes/ssl/ca.crt--cluster-signing-key-file=/etc/kubernetes/ssl/ca.key--configure-cloud-routes=false--controllers=*,bootstrapsigner,tokencleaner--kubeconfig=/etc/kubernetes/controller-manager.conf--leader-elect=true--leader-elect-lease-duration=15s--leader-elect-renew-deadline=10s--node-cidr-mask-size=24--node-monitor-grace-period=40s--node-monitor-period=5s--port=0--profiling=False--requestheader-client-ca-file=/etc/kubernetes/ssl/front-proxy-ca.crt--root-ca-file=/etc/kubernetes/ssl/ca.crt--service-account-private-key-file=/etc/kubernetes/ssl/sa.key--service-cluster-ip-range=10.233.0.0/18--terminated-pod-gc-threshold=12500--use-service-account-credentials=true
-func GetCIDRFromCNI(ctx context.Context, clientset *kubernetes.Clientset, restconfig *rest.Config, namespace string) ([]*net.IPNet, error) {
-	pod, err := CreateCIDRPod(ctx, clientset, namespace)
+func GetCIDRFromCNI(ctx context.Context, clientset *kubernetes.Clientset, restconfig *rest.Config, namespace string, image string) ([]*net.IPNet, error) {
+	pod, err := CreateCIDRPod(ctx, clientset, namespace, image)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +232,7 @@ func GetPodCIDRFromCNI(ctx context.Context, clientset *kubernetes.Clientset, res
 	return cidrList, nil
 }
 
-func CreateCIDRPod(ctx context.Context, clientset *kubernetes.Clientset, namespace string) (*v13.Pod, error) {
+func CreateCIDRPod(ctx context.Context, clientset *kubernetes.Clientset, namespace string, image string) (*v13.Pod, error) {
 	var procName = "proc-dir-kubevpn"
 	pod := &v13.Pod{
 		ObjectMeta: v1.ObjectMeta{
@@ -263,7 +263,7 @@ func CreateCIDRPod(ctx context.Context, clientset *kubernetes.Clientset, namespa
 			Containers: []v13.Container{
 				{
 					Name:    config.CniNetName,
-					Image:   config.Image,
+					Image:   image,
 					Command: []string{"tail", "-f", "/dev/null"},
 					Resources: v13.ResourceRequirements{
 						Requests: map[v13.ResourceName]resource.Quantity{

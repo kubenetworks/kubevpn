@@ -28,7 +28,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, namespace string, gvisor bool, imagePullSecretName string) (err error) {
+func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, namespace string, gvisor bool, image, imagePullSecretName string) (err error) {
 	var exists bool
 	exists, err = util.DetectPodExists(ctx, clientset, namespace)
 	if err != nil {
@@ -138,7 +138,7 @@ func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, nam
 
 	// 7) create deployment
 	plog.G(ctx).Infof("Creating Deployment %s", config.ConfigMapPodTrafficManager)
-	deploy := genDeploySpec(namespace, udp8422, tcp10800, tcp9002, udp53, tcp80, gvisor, imagePullSecretName)
+	deploy := genDeploySpec(namespace, udp8422, tcp10800, tcp9002, udp53, tcp80, gvisor, image, imagePullSecretName)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
@@ -296,7 +296,7 @@ func genSecret(namespace string, crt []byte, key []byte, host []byte) *v1.Secret
 	return secret
 }
 
-func genDeploySpec(namespace string, udp8422 string, tcp10800 string, tcp9002 string, udp53 string, tcp80 string, gvisor bool, imagePullSecretName string) *appsv1.Deployment {
+func genDeploySpec(namespace string, udp8422 string, tcp10800 string, tcp9002 string, udp53 string, tcp80 string, gvisor bool, image, imagePullSecretName string) *appsv1.Deployment {
 	var resourcesSmall = v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
 			v1.ResourceCPU:    resource.MustParse("100m"),
@@ -360,7 +360,7 @@ func genDeploySpec(namespace string, udp8422 string, tcp10800 string, tcp9002 st
 					Containers: []v1.Container{
 						{
 							Name:    config.ContainerSidecarVPN,
-							Image:   config.Image,
+							Image:   image,
 							Command: []string{"/bin/sh", "-c"},
 							Args: []string{util.If(
 								gvisor,
@@ -432,7 +432,7 @@ kubevpn server -l "tcp://:10800" -l "tun://:8422?net=${TunIPv4}&net6=${TunIPv6}"
 						},
 						{
 							Name:    config.ContainerSidecarControlPlane,
-							Image:   config.Image,
+							Image:   image,
 							Command: []string{"kubevpn"},
 							Args:    []string{"control-plane", "--watchDirectoryFilename", "/etc/envoy/envoy-config.yaml"},
 							Ports: []v1.ContainerPort{
@@ -459,7 +459,7 @@ kubevpn server -l "tcp://:10800" -l "tun://:8422?net=${TunIPv4}&net6=${TunIPv6}"
 						},
 						{
 							Name:    config.ContainerSidecarWebhook,
-							Image:   config.Image,
+							Image:   image,
 							Command: []string{"kubevpn"},
 							Args:    []string{"webhook"},
 							Ports: []v1.ContainerPort{{
