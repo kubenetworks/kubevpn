@@ -37,7 +37,7 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	}
 
 	ctx := context.Background()
-	conn, err := grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithNoProxy())
 	if err != nil {
 		return nil, err
 	}
