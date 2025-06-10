@@ -1,11 +1,16 @@
 package cmds
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/webhook"
 )
@@ -25,7 +30,16 @@ func CmdWebhook(f cmdutil.Factory) *cobra.Command {
 			go util.StartupPProfForServer(0)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return webhook.Main(f)
+			ns := os.Getenv(config.EnvPodNamespace)
+			if ns == "" {
+				return fmt.Errorf("failed to get pod namespace")
+			}
+			clientset, err := f.KubernetesClientSet()
+			if err != nil {
+				return err
+			}
+			manager := dhcp.NewDHCPManager(clientset.CoreV1().ConfigMaps(ns), ns)
+			return webhook.Main(manager, clientset)
 		},
 	}
 	return cmd

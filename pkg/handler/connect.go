@@ -69,6 +69,7 @@ type ConnectOptions struct {
 	OriginKubeconfigPath string
 	OriginNamespace      string
 	Lock                 *sync.Mutex
+	Image                string
 	ImagePullSecretName  string
 
 	ctx    context.Context
@@ -152,7 +153,7 @@ func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logge
 	return nil
 }
 
-func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string) (err error) {
+func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string, image string) (err error) {
 	if c.localTunIPv4 == nil || c.localTunIPv6 == nil {
 		return fmt.Errorf("local tun IP is invalid")
 	}
@@ -186,11 +187,11 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
 		if c.Engine == config.EngineGvisor {
-			err = inject.InjectEnvoySidecar(ctx, nodeID, c.factory, c.clientset, c.Namespace, object, controller, headers, portMap, tlsSecret)
+			err = inject.InjectEnvoySidecar(ctx, nodeID, c.factory, c.Namespace, object, controller, headers, portMap, image)
 		} else if len(headers) != 0 || len(portMap) != 0 {
-			err = inject.InjectVPNAndEnvoySidecar(ctx, nodeID, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace, controller, configInfo, headers, portMap, tlsSecret)
+			err = inject.InjectVPNAndEnvoySidecar(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, headers, portMap, tlsSecret, image)
 		} else {
-			err = inject.InjectVPNSidecar(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, tlsSecret)
+			err = inject.InjectVPNSidecar(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, tlsSecret, image)
 		}
 		if err != nil {
 			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %s", workload, namespace, err.Error())
@@ -220,7 +221,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		plog.G(ctx).Errorf("Failed to get network CIDR: %v", err)
 		return
 	}
-	if err = createOutboundPod(c.ctx, c.clientset, c.Namespace, c.Engine == config.EngineGvisor, c.ImagePullSecretName); err != nil {
+	if err = createOutboundPod(c.ctx, c.clientset, c.Namespace, c.Engine == config.EngineGvisor, c.Image, c.ImagePullSecretName); err != nil {
 		return
 	}
 	if err = c.upgradeDeploy(c.ctx); err != nil {
@@ -838,7 +839,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) error {
 	}
 
 	// (2) get CIDR from cni
-	cidrs := util.GetCIDR(ctx, c.clientset, c.config, c.Namespace)
+	cidrs := util.GetCIDR(ctx, c.clientset, c.config, c.Namespace, c.Image)
 	c.cidrs = util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cidrs), c.apiServerIPs)
 	s := sets.New[string]()
 	for _, cidr := range c.cidrs {
@@ -983,15 +984,15 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 		return fmt.Errorf("can not found any container in deploy %s", deploy.Name)
 	}
 	// check running pod, sometime deployment is rolling back, so need to check running pod
-	list, err := c.GetRunningPodList(ctx)
+	podList, err := c.GetRunningPodList(ctx)
 	if err != nil {
 		return err
 	}
 
 	clientVer := config.Version
-	clientImg := config.Image
+	clientImg := c.Image
 	serverImg := deploy.Spec.Template.Spec.Containers[0].Image
-	runningPodImg := list[0].Spec.Containers[0].Image
+	runningPodImg := podList[0].Spec.Containers[0].Image
 
 	isNeedUpgrade, err := util.IsNewer(clientVer, clientImg, serverImg)
 	isPodNeedUpgrade, err1 := util.IsNewer(clientVer, clientImg, runningPodImg)
@@ -1013,7 +1014,7 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 
 	// 2) update deploy
 	plog.G(ctx).Infof("Set image %s --> %s...", serverImg, clientImg)
-	err = upgradeDeploySpec(ctx, c.factory, c.Namespace, deploy.Name, c.Engine == config.EngineGvisor)
+	err = upgradeDeploySpec(ctx, c.factory, c.Namespace, deploy.Name, c.Engine == config.EngineGvisor, clientImg)
 	if err != nil {
 		return err
 	}
@@ -1028,7 +1029,7 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 	return nil
 }
 
-func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name string, gvisor bool) error {
+func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name string, gvisor bool, image string) error {
 	r := f.NewBuilder().
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
 		NamespaceParam(ns).DefaultNamespace().
@@ -1074,7 +1075,7 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name string, 
 					break
 				}
 			}
-			deploySpec := genDeploySpec(ns, udp8422, tcp10800, tcp9002, udp53, tcp80, gvisor, imagePullSecret)
+			deploySpec := genDeploySpec(ns, udp8422, tcp10800, tcp9002, udp53, tcp80, gvisor, image, imagePullSecret)
 			*spec = deploySpec.Spec.Template.Spec
 			return nil
 		})

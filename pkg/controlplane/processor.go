@@ -3,7 +3,6 @@ package controlplane
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math"
 	"math/rand"
 	"os"
@@ -49,7 +48,7 @@ func (p *Processor) newVersion() string {
 func (p *Processor) ProcessFile(file NotifyMessage) error {
 	configList, err := ParseYaml(file.FilePath)
 	if err != nil {
-		p.logger.Errorf("error parsing yaml file: %v", err)
+		p.logger.Errorf("failed to parse config file: %v", err)
 		return err
 	}
 	enableIPv6, _ := util.DetectSupportIPv6()
@@ -57,14 +56,21 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 		if len(config.Uid) == 0 {
 			continue
 		}
+
+		var marshal []byte
+		marshal, err = json.Marshal(config)
+		if err != nil {
+			p.logger.Errorf("failed to marshal config: %v", err)
+			return err
+		}
 		uid := util.GenEnvoyUID(config.Namespace, config.Uid)
 		lastConfig, ok := p.expireCache.Get(uid)
 		if ok && reflect.DeepEqual(lastConfig.(*Virtual), config) {
-			marshal, _ := json.Marshal(config)
-			p.logger.Infof("config are same, not needs to update, config: %s", string(marshal))
+			p.logger.Infof("not needs to update, config: %s", string(marshal))
 			continue
 		}
-		p.logger.Infof("update config, version %d, config %v", p.version, config)
+
+		p.logger.Infof("update config, version: %d, config: %s", p.version, marshal)
 
 		listeners, clusters, routes, endpoints := config.To(enableIPv6, p.logger)
 		resources := map[resource.Type][]types.Resource{
@@ -75,20 +81,20 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 			resource.RuntimeType:  {},        // runtimes
 			resource.SecretType:   {},        // secrets
 		}
+
 		var snapshot *cache.Snapshot
 		snapshot, err = cache.NewSnapshot(p.newVersion(), resources)
-
 		if err != nil {
-			p.logger.Errorf("snapshot inconsistency: %v, err: %v", snapshot, err)
+			p.logger.Errorf("failed to snapshot inconsistency: %v", err)
 			return err
 		}
-
 		if err = snapshot.Consistent(); err != nil {
-			p.logger.Errorf("snapshot inconsistency: %v, err: %v", snapshot, err)
+			p.logger.Errorf("failed to snapshot inconsistency: %v", err)
 			return err
 		}
 		p.logger.Infof("will serve snapshot %+v, nodeID: %s", snapshot, uid)
-		if err = p.cache.SetSnapshot(context.Background(), uid, snapshot); err != nil {
+		err = p.cache.SetSnapshot(context.Background(), uid, snapshot)
+		if err != nil {
 			p.logger.Errorf("snapshot error %q for %v", err, snapshot)
 			return err
 		}
@@ -103,7 +109,7 @@ func ParseYaml(file string) ([]*Virtual, error) {
 
 	yamlFile, err := os.ReadFile(file)
 	if err != nil {
-		return nil, fmt.Errorf("Error reading YAML file: %s\n", err)
+		return nil, err
 	}
 
 	err = yaml.Unmarshal(yamlFile, &virtualList)

@@ -38,13 +38,13 @@ func RemoveContainers(spec *v1.PodTemplateSpec) {
 }
 
 // AddMeshContainer todo envoy support ipv6
-func AddMeshContainer(spec *v1.PodTemplateSpec, ns, nodeID string, c util.PodRouteConfig, ipv6 bool, connectNamespace string, secret *v1.Secret) {
+func AddMeshContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 bool, connectNamespace string, secret *v1.Secret, image string) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarVPN,
-		Image:   config.Image,
+		Image:   image,
 		Command: []string{"/bin/sh", "-c"},
 		Args: []string{`
 echo 1 > /proc/sys/net/ipv4/ip_forward
@@ -136,7 +136,7 @@ kubevpn server -l "tun:/localhost:8422?net=${TunIPv4}&net6=${TunIPv6}&route=${CI
 	})
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:  config.ContainerSidecarEnvoyProxy,
-		Image: config.Image,
+		Image: image,
 		Command: []string{
 			"envoy",
 			"-l",
@@ -171,13 +171,13 @@ kubevpn server -l "tun:/localhost:8422?net=${TunIPv4}&net6=${TunIPv6}&route=${CI
 	})
 }
 
-func AddEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 bool, connectNamespace string, secret *v1.Secret) {
+func AddEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 bool, connectNamespace string, image string) {
 	// remove envoy proxy containers if already exist
 	RemoveContainers(spec)
 
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarVPN,
-		Image:   config.Image,
+		Image:   image,
 		Command: []string{"/bin/sh", "-c"},
 		Args: []string{`
 kubevpn server -l "ssh://:2222"`,
@@ -200,7 +200,7 @@ kubevpn server -l "ssh://:2222"`,
 	})
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:  config.ContainerSidecarEnvoyProxy,
-		Image: config.Image,
+		Image: image,
 		Command: []string{
 			"envoy",
 			"-l",
