@@ -71,7 +71,7 @@ func (l ConfigList) Run(ctx context.Context) error {
 		}
 
 		if index != 0 {
-			err := WaitDockerContainerRunning(ctx, conf.name)
+			err = WaitDockerContainerRunning(ctx, conf.name)
 			if err != nil {
 				return err
 			}

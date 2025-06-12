@@ -134,7 +134,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			if err != nil {
 				return err
 			}
-			_ = util.PrintGRPCStream[rpc.DisconnectResponse](ctx, resp)
+			_ = util.PrintGRPCStream[rpc.DisconnectResponse](nil, resp)
 			return nil
 		})
 		var resp rpc.Daemon_ProxyClient
@@ -185,7 +185,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 }
 
 func (option *Options) Dev(ctx context.Context, config *Config, hostConfig *HostConfig) error {
-	templateSpec, err := option.GetPodTemplateSpec()
+	templateSpec, err := option.GetPodTemplateSpec(ctx)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get unstructured object error: %v", err)
 		return err
@@ -237,7 +237,7 @@ func (option *Options) Dev(ctx context.Context, config *Config, hostConfig *Host
 }
 
 func (option *Options) CreateConnectContainer(ctx context.Context, portBindings nat.PortMap, managerNamespace string) (*string, error) {
-	portMap, portSet, err := option.GetExposePort(portBindings)
+	portMap, portSet, err := option.GetExposePort(ctx, portBindings)
 	if err != nil {
 		return nil, err
 	}
@@ -342,8 +342,8 @@ func (option *Options) GetRollbackFuncList() []func() error {
 	return option.rollbackFuncList
 }
 
-func (option *Options) GetExposePort(portBinds nat.PortMap) (nat.PortMap, nat.PortSet, error) {
-	templateSpec, err := option.GetPodTemplateSpec()
+func (option *Options) GetExposePort(ctx context.Context, portBinds nat.PortMap) (nat.PortMap, nat.PortSet, error) {
+	templateSpec, err := option.GetPodTemplateSpec(ctx)
 	if err != nil {
 		plog.G(context.Background()).Errorf("Failed to get unstructured object error: %v", err)
 		return nil, nil, err
@@ -390,13 +390,13 @@ func (option *Options) InitClient(f cmdutil.Factory) (err error) {
 	return
 }
 
-func (option *Options) GetPodTemplateSpec() (*v1.PodTemplateSpec, error) {
-	object, err := util.GetUnstructuredObject(option.factory, option.Namespace, option.Workload)
+func (option *Options) GetPodTemplateSpec(ctx context.Context) (*v1.PodTemplateSpec, error) {
+	_, controller, err := util.GetTopOwnerObject(ctx, option.factory, option.Namespace, option.Workload)
 	if err != nil {
 		return nil, err
 	}
 
-	u := object.Object.(*unstructured.Unstructured)
+	u := controller.Object.(*unstructured.Unstructured)
 	var templateSpec *v1.PodTemplateSpec
 	templateSpec, _, err = util.GetPodTemplateSpecPath(u)
 	return templateSpec, err

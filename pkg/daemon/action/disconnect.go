@@ -85,7 +85,7 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) error {
 			plog.G(ctx).Errorf("Index %d out of range", req.GetID())
 		}
 	case req.KubeconfigBytes != nil && req.Namespace != nil:
-		err = disconnectByKubeConfig(
+		err = disconnectByKubeconfig(
 			resp.Context(),
 			svr,
 			req.GetKubeconfigBytes(),
@@ -133,7 +133,7 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) error {
 	return nil
 }
 
-func disconnectByKubeConfig(ctx context.Context, svr *Server, kubeconfigBytes string, ns string, jump *rpc.SshJump) error {
+func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes string, ns string, jump *rpc.SshJump) error {
 	file, err := util.ConvertToTempKubeconfigFile([]byte(kubeconfigBytes))
 	if err != nil {
 		return err
@@ -156,10 +156,6 @@ func disconnectByKubeConfig(ctx context.Context, svr *Server, kubeconfigBytes st
 }
 
 func disconnect(ctx context.Context, svr *Server, connect *handler.ConnectOptions) {
-	_, err := svr.GetClient(false)
-	if err != nil {
-		return
-	}
 	if svr.connect != nil {
 		isSameCluster, _ := util.IsSameCluster(
 			ctx,

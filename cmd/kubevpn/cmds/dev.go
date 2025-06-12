@@ -2,8 +2,6 @@ package cmds
 
 import (
 	"context"
-	"fmt"
-	"os"
 
 	"github.com/docker/cli/cli/command"
 	"github.com/spf13/cobra"
@@ -75,18 +73,9 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
         kubevpn dev deployment/authors -n default --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD> --entrypoint /bin/bash
 		`)),
 		ValidArgsFunction:     completion.ResourceTypeAndNameCompletionFunc(f),
-		Args:                  cobra.MatchAll(cobra.OnlyValidArgs),
+		Args:                  cobra.MatchAll(cobra.OnlyValidArgs, cobra.MinimumNArgs(1)),
 		DisableFlagsInUseLine: true,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				_, _ = fmt.Fprintf(os.Stdout, "You must specify the type of resource to proxy. %s\n\n", cmdutil.SuggestAPIResources("kubevpn"))
-				fullCmdName := cmd.Parent().CommandPath()
-				usageString := "Required resource not specified."
-				if len(fullCmdName) > 0 && cmdutil.IsSiblingCommandExists(cmd, "explain") {
-					usageString = fmt.Sprintf("%s\nUse \"%s explain <resource>\" for a detailed description of that resource (e.g. %[2]s explain pods).", usageString, fullCmdName)
-				}
-				return cmdutil.UsageErrorf(cmd, usageString)
-			}
 			err := cmd.Flags().Parse(args[1:])
 			if err != nil {
 				return err
@@ -121,6 +110,15 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 				}
 			}
 
+			if err := options.InitClient(f); err != nil {
+				return err
+			}
+
+			conf, hostConfig, err := dev.Parse(cmd.Flags(), options.ContainerOptions)
+			if err != nil {
+				return err
+			}
+
 			defer func() {
 				for _, function := range options.GetRollbackFuncList() {
 					if function != nil {
@@ -130,15 +128,6 @@ func CmdDev(f cmdutil.Factory) *cobra.Command {
 					}
 				}
 			}()
-
-			if err := options.InitClient(f); err != nil {
-				return err
-			}
-
-			conf, hostConfig, err := dev.Parse(cmd.Flags(), options.ContainerOptions)
-			if err != nil {
-				return err
-			}
 
 			return options.Main(cmd.Context(), sshConf, conf, hostConfig, imagePullSecretName, managerNamespace)
 		},

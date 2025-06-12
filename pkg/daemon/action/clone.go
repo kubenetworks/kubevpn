@@ -62,7 +62,7 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 	if err != nil {
 		return err
 	}
-	err = connResp.SendMsg(&connReq)
+	err = connResp.Send(connReq)
 	if err != nil {
 		return err
 	}

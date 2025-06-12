@@ -13,8 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 func GetDNSServiceIPFromPod(ctx context.Context, clientset *kubernetes.Clientset, conf *rest.Config, podName, namespace string) (*dns.ClientConfig, error) {
@@ -73,10 +71,5 @@ func GetDNS(ctx context.Context, clientSet *kubernetes.Clientset, restConfig *re
 	if err != nil {
 		return nil, err
 	}
-	svc, err := clientSet.CoreV1().Services(ns).Get(ctx, config.ConfigMapPodTrafficManager, v12.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	clientConfig.Servers = []string{svc.Spec.ClusterIP}
 	return clientConfig, nil
 }
