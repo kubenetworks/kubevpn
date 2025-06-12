@@ -62,7 +62,7 @@ func GetUnstructuredObjectList(f util.Factory, ns string, workloads []string) ([
 	return infos, err
 }
 
-func GetUnstructuredObjectBySelector(f util.Factory, ns string, selector string) ([]*resource.Info, error) {
+func getUnstructuredObjectBySelector(f util.Factory, ns string, selector string) ([]*resource.Info, error) {
 	do := f.NewBuilder().
 		Unstructured().
 		NamespaceParam(ns).DefaultNamespace().AllNamespaces(false).
@@ -139,7 +139,7 @@ func NormalizedResource(f util.Factory, ns string, workloads []string) ([]string
 
 func GetTopOwnerObject(ctx context.Context, f util.Factory, ns string, workload string) (object, controller *resource.Info, err error) {
 	// normal workload, like pod with controller, deployments, statefulset, replicaset etc...
-	object, controller, err = GetTopOwnerReference(f, ns, workload)
+	object, controller, err = getTopOwnerReference(f, ns, workload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -168,14 +168,52 @@ func GetTopOwnerObject(ctx context.Context, f util.Factory, ns string, workload 
 	}
 	// if pod is not empty, using pods to find top controller
 	if len(podList.Items) != 0 {
-		_, controller, err = GetTopOwnerReference(f, ns, fmt.Sprintf("%s/%s", "pods", podList.Items[0].Name))
+		_, controller, err = getTopOwnerReference(f, ns, fmt.Sprintf("%s/%s", "pods", podList.Items[0].Name))
 		return object, controller, err
 	}
 	// if list is empty, means not create pods, just controllers
-	_, controller, err = GetTopOwnerReferenceBySelector(f, ns, selector.String())
+	_, controller, err = getTopOwnerReferenceBySelector(f, ns, selector.String())
 	return object, controller, err
 }
 
 func IsK8sService(info *resource.Info) bool {
 	return info.Mapping.Resource.Resource == "services"
+}
+
+func getTopOwnerReference(factory util.Factory, ns, workload string) (object, controller *resource.Info, err error) {
+	object, err = GetUnstructuredObject(factory, ns, workload)
+	if err != nil {
+		return nil, nil, err
+	}
+	ownerRef := v2.GetControllerOf(object.Object.(*unstructured.Unstructured))
+	if ownerRef == nil {
+		return object, object, err
+	}
+	var owner = fmt.Sprintf("%s/%s", ownerRef.Kind, ownerRef.Name)
+	for {
+		controller, err = GetUnstructuredObject(factory, ns, owner)
+		if err != nil {
+			return nil, nil, err
+		}
+		ownerRef = v2.GetControllerOf(controller.Object.(*unstructured.Unstructured))
+		if ownerRef == nil {
+			return object, controller, nil
+		}
+		owner = fmt.Sprintf("%s/%s", ownerRef.Kind, ownerRef.Name)
+	}
+}
+
+// getTopOwnerReferenceBySelector assume pods, controller has same labels
+func getTopOwnerReferenceBySelector(factory util.Factory, ns, selector string) (object, controller *resource.Info, err error) {
+	objectList, err := getUnstructuredObjectBySelector(factory, ns, selector)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, info := range objectList {
+		if IsK8sService(info) {
+			continue
+		}
+		return getTopOwnerReference(factory, ns, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
+	}
+	return nil, nil, fmt.Errorf("can not find controller for %s", selector)
 }

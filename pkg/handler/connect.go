@@ -100,7 +100,7 @@ func (c *ConnectOptions) Context() context.Context {
 
 func (c *ConnectOptions) InitDHCP(ctx context.Context) error {
 	if c.dhcp == nil {
-		c.dhcp = dhcp.NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
+		c.dhcp = dhcp.NewDHCPManager(c.clientset, c.Namespace)
 		return c.dhcp.InitDHCP(ctx)
 	}
 	return nil
@@ -211,7 +211,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	plog.G(ctx).Info("Starting connect to cluster")
-	m := dhcp.NewDHCPManager(c.clientset.CoreV1().ConfigMaps(c.Namespace), c.Namespace)
+	m := dhcp.NewDHCPManager(c.clientset, c.Namespace)
 	if err = m.InitDHCP(c.ctx); err != nil {
 		plog.G(ctx).Errorf("Init DHCP server failed: %v", err)
 		return

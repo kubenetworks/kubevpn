@@ -97,11 +97,11 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte, 
 	}
 	for _, workload := range d.Workloads {
 		plog.G(ctx).Infof("Clone workload %s", workload)
-		object, err := util.GetUnstructuredObject(d.factory, d.Namespace, workload)
+		_, controller, err := util.GetTopOwnerObject(ctx, d.factory, d.Namespace, workload)
 		if err != nil {
 			return err
 		}
-		u := object.Object.(*unstructured.Unstructured)
+		u := controller.Object.(*unstructured.Unstructured)
 		if err = unstructured.SetNestedField(u.UnstructuredContent(), int64(1), "spec", "replicas"); err != nil {
 			plog.G(ctx).Warnf("Failed to set repilcaset to 1: %v", err)
 		}
@@ -113,7 +113,7 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte, 
 		}
 		originName := u.GetName()
 		u.SetName(fmt.Sprintf("%s-clone-%s", u.GetName(), newUUID.String()[:5]))
-		d.TargetWorkloadNames[workload] = fmt.Sprintf("%s/%s", object.Mapping.Resource.GroupResource().Resource, u.GetName())
+		d.TargetWorkloadNames[workload] = fmt.Sprintf("%s/%s", controller.Mapping.Resource.GroupResource().Resource, u.GetName())
 		labelsMap := map[string]string{
 			config.ManageBy:   config.ConfigMapPodTrafficManager,
 			"owner-ref":       u.GetName(),
@@ -242,15 +242,11 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte, 
 			if err != nil {
 				return err
 			}
-			//v := unstructured.Unstructured{}
-			//_, _, err = clientgoscheme.Codecs.UniversalDecoder(object.Mapping.GroupVersionKind.GroupVersion()).Decode(marshal, nil, &v)
-			//_, _, err = unstructured.UnstructuredJSONScheme.Decode(marshal, &object.Mapping.GroupVersionKind, &v)
 			if err = unstructured.SetNestedField(u.Object, m, path...); err != nil {
 				return err
 			}
 
-			_, createErr := client.Resource(object.Mapping.Resource).Namespace(d.Namespace).Create(context.Background(), u, metav1.CreateOptions{})
-			//_, createErr := runtimeresource.NewHelper(object.Client, object.Mapping).Create(d.TargetNamespace, true, u)
+			_, createErr := client.Resource(controller.Mapping.Resource).Namespace(d.Namespace).Create(context.Background(), u, metav1.CreateOptions{})
 			return createErr
 		})
 		if retryErr != nil {

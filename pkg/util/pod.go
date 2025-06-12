@@ -19,7 +19,6 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -189,45 +188,7 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 	}
 }
 
-func GetTopOwnerReference(factory util.Factory, ns, workload string) (object, controller *resource.Info, err error) {
-	object, err = GetUnstructuredObject(factory, ns, workload)
-	if err != nil {
-		return nil, nil, err
-	}
-	ownerRef := v1.GetControllerOf(object.Object.(*unstructured.Unstructured))
-	if ownerRef == nil {
-		return object, object, err
-	}
-	var owner = fmt.Sprintf("%s/%s", ownerRef.Kind, ownerRef.Name)
-	for {
-		controller, err = GetUnstructuredObject(factory, ns, owner)
-		if err != nil {
-			return nil, nil, err
-		}
-		ownerRef = v1.GetControllerOf(controller.Object.(*unstructured.Unstructured))
-		if ownerRef == nil {
-			return object, controller, nil
-		}
-		owner = fmt.Sprintf("%s/%s", ownerRef.Kind, ownerRef.Name)
-	}
-}
-
-// GetTopOwnerReferenceBySelector assume pods, controller has same labels
-func GetTopOwnerReferenceBySelector(factory util.Factory, ns, selector string) (object, controller *resource.Info, err error) {
-	objectList, err := GetUnstructuredObjectBySelector(factory, ns, selector)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, info := range objectList {
-		if IsK8sService(info) {
-			continue
-		}
-		return GetTopOwnerReference(factory, ns, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
-	}
-	return nil, nil, fmt.Errorf("can not find controller for %s", selector)
-}
-
-func Shell(_ context.Context, clientset *kubernetes.Clientset, config *rest.Config, podName, containerName, ns string, cmd []string) (string, error) {
+func Shell(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Config, podName, containerName, ns string, cmd []string) (string, error) {
 	stdin, _, _ := term.StdStreams()
 	buf := bytes.NewBuffer(nil)
 	options := exec.ExecOptions{

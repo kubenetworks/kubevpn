@@ -12,7 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -21,14 +21,14 @@ import (
 )
 
 type Manager struct {
-	client    corev1.ConfigMapInterface
+	client    *kubernetes.Clientset
 	cidr      *net.IPNet
 	cidr6     *net.IPNet
 	namespace string
 	clusterID types.UID
 }
 
-func NewDHCPManager(client corev1.ConfigMapInterface, namespace string) *Manager {
+func NewDHCPManager(client *kubernetes.Clientset, namespace string) *Manager {
 	return &Manager{
 		client:    client,
 		namespace: namespace,
@@ -40,14 +40,14 @@ func NewDHCPManager(client corev1.ConfigMapInterface, namespace string) *Manager
 // InitDHCP
 // TODO optimize dhcp, using mac address, ip and deadline as unit
 func (m *Manager) InitDHCP(ctx context.Context) error {
-	cm, err := m.client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	cm, err := m.client.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get configmap %s, err: %v", config.ConfigMapPodTrafficManager, err)
 	}
 
 	if err == nil {
-		m.clusterID = util.GetClusterIDByCM(cm)
-		return nil
+		m.clusterID, err = util.GetClusterID(ctx, m.client.CoreV1().Namespaces(), m.namespace)
+		return err
 	}
 
 	cm = &v1.ConfigMap{
@@ -63,12 +63,12 @@ func (m *Manager) InitDHCP(ctx context.Context) error {
 			config.KeyClusterIPv4POOLS: "",
 		},
 	}
-	cm, err = m.client.Create(ctx, cm, metav1.CreateOptions{})
+	cm, err = m.client.CoreV1().ConfigMaps(m.namespace).Create(ctx, cm, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to create configmap: %v", err)
 	}
-	m.clusterID = util.GetClusterIDByCM(cm)
-	return nil
+	m.clusterID, err = util.GetClusterID(ctx, m.client.CoreV1().Namespaces(), m.namespace)
+	return err
 }
 
 func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
@@ -134,7 +134,7 @@ func (m *Manager) ReleaseIP(ctx context.Context, ips ...net.IP) error {
 }
 
 func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error) error {
-	cm, err := m.client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	cm, err := m.client.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get configmap DHCP server, err: %v", err)
 	}
@@ -189,7 +189,7 @@ func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipalloca
 		return err
 	}
 	cm.Data[config.KeyDHCP6] = base64.StdEncoding.EncodeToString(bytes)
-	_, err = m.client.Update(ctx, cm, metav1.UpdateOptions{})
+	_, err = m.client.CoreV1().ConfigMaps(m.namespace).Update(ctx, cm, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to update DHCP: %v", err)
 	}
@@ -201,7 +201,7 @@ func (m *Manager) Set(ctx context.Context, key, value string) error {
 		retry.DefaultRetry,
 		func() error {
 			p := []byte(fmt.Sprintf(`[{"op": "replace", "path": "/data/%s", "value": "%s"}]`, key, value))
-			_, err := m.client.Patch(ctx, config.ConfigMapPodTrafficManager, types.JSONPatchType, p, metav1.PatchOptions{})
+			_, err := m.client.CoreV1().ConfigMaps(m.namespace).Patch(ctx, config.ConfigMapPodTrafficManager, types.JSONPatchType, p, metav1.PatchOptions{})
 			return err
 		})
 	if err != nil {
@@ -212,7 +212,7 @@ func (m *Manager) Set(ctx context.Context, key, value string) error {
 }
 
 func (m *Manager) Get(ctx context.Context, key string) (string, error) {
-	cm, err := m.client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	cm, err := m.client.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
@@ -220,7 +220,7 @@ func (m *Manager) Get(ctx context.Context, key string) (string, error) {
 }
 
 func (m *Manager) ForEach(ctx context.Context, fnv4 func(net.IP), fnv6 func(net.IP)) error {
-	cm, err := m.client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	cm, err := m.client.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get cm DHCP server, err: %v", err)
 	}

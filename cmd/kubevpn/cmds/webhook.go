@@ -38,7 +38,7 @@ func CmdWebhook(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			manager := dhcp.NewDHCPManager(clientset.CoreV1().ConfigMaps(ns), ns)
+			manager := dhcp.NewDHCPManager(clientset, ns)
 			return webhook.Main(manager, clientset)
 		},
 	}

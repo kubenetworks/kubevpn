@@ -12,7 +12,6 @@ import (
 	"unsafe"
 
 	errors2 "github.com/pkg/errors"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,28 +31,23 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-func GetClusterID(ctx context.Context, client v12.ConfigMapInterface) (types.UID, error) {
-	configMap, err := client.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+func GetClusterID(ctx context.Context, client v12.NamespaceInterface, ns string) (types.UID, error) {
+	namespace, err := client.Get(ctx, ns, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
-	return configMap.UID, nil
+	return namespace.UID, nil
 }
 
-func GetClusterIDByCM(cm *v1.ConfigMap) types.UID {
-	return cm.UID
-}
-
-func IsSameCluster(ctx context.Context, client v12.CoreV1Interface, namespace string, clientB v12.CoreV1Interface, namespaceB string) (bool, error) {
-	if namespace != namespaceB {
+func IsSameCluster(ctx context.Context, clientA v12.CoreV1Interface, namespaceA string, clientB v12.CoreV1Interface, namespaceB string) (bool, error) {
+	if namespaceA != namespaceB {
 		return false, nil
 	}
-	clusterIDA, err := GetClusterID(ctx, client.ConfigMaps(namespace))
+	clusterIDA, err := GetClusterID(ctx, clientA.Namespaces(), namespaceA)
 	if err != nil {
 		return false, err
 	}
-	var clusterIDB types.UID
-	clusterIDB, err = GetClusterID(ctx, clientB.ConfigMaps(namespaceB))
+	clusterIDB, err := GetClusterID(ctx, clientB.Namespaces(), namespaceB)
 	if err != nil {
 		return false, err
 	}
