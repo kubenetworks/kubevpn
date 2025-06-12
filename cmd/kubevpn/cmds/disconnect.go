@@ -35,8 +35,12 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 		after disconnect it will also cleanup DNS and host
 		`)),
 		Example: templates.Examples(i18n.T(`
-		# disconnect from cluster network and restore proxy resource
-        kubevpn disconnect
+		# disconnect from first cluster
+        kubevpn disconnect 0
+		# disconnect from second cluster
+        kubevpn disconnect 1
+		# disconnect from all cluster
+		kubevpn disconnect --all
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			plog.InitLoggerForClient()
@@ -45,14 +49,8 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 		},
 		Args: cobra.MatchAll(cobra.OnlyValidArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 && all {
-				return fmt.Errorf("either specify --all or ID, not both")
-			}
-			if len(clusterIDs) > 0 && all {
-				return fmt.Errorf("either specify --all or cluster-id, not both")
-			}
 			if len(args) == 0 && !all && len(clusterIDs) == 0 {
-				return fmt.Errorf("either specify --all or ID or cluster-id")
+				return fmt.Errorf("either specify --all or ID")
 			}
 			var ids *int32
 			if len(args) > 0 {
@@ -92,5 +90,6 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&all, "all", all, "Disconnect all cluster, disconnect from all cluster network")
 	cmd.Flags().StringArrayVar(&clusterIDs, "cluster-id", []string{}, "Cluster id, command status -o yaml/json will show cluster-id")
+	_ = cmd.Flags().MarkHidden("cluster-id")
 	return cmd
 }
