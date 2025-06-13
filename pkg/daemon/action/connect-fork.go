@@ -152,7 +152,10 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		req.ManagerNamespace = req.Namespace
 	}
 
-	for _, options := range svr.secondaryConnect {
+	for _, options := range append(svr.secondaryConnect, svr.connect) {
+		if options == nil {
+			continue
+		}
 		isSameCluster, _ := util.IsSameCluster(
 			sshCtx,
 			options.GetClientset().CoreV1(), options.Namespace,

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -30,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	pkgtypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -211,13 +211,12 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	plog.G(ctx).Info("Starting connect to cluster")
-	m := dhcp.NewDHCPManager(c.clientset, c.Namespace)
-	if err = m.InitDHCP(c.ctx); err != nil {
+	if err = c.InitDHCP(c.ctx); err != nil {
 		plog.G(ctx).Errorf("Init DHCP server failed: %v", err)
 		return
 	}
 	go c.setupSignalHandler()
-	if err = c.getCIDR(c.ctx, m); err != nil {
+	if err = c.getCIDR(c.ctx); err != nil {
 		plog.G(ctx).Errorf("Failed to get network CIDR: %v", err)
 		return
 	}
@@ -814,7 +813,7 @@ func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error
 // https://stackoverflow.com/questions/45903123/kubernetes-set-service-cidr-and-pod-cidr-the-same
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster/54183373#54183373
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster
-func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) error {
+func (c *ConnectOptions) getCIDR(ctx context.Context) error {
 	var err error
 	c.apiServerIPs, err = util.GetAPIServerIP(c.config.Host)
 	if err != nil {
@@ -823,7 +822,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) error {
 
 	// (1) get CIDR from cache
 	var ipPoolStr string
-	ipPoolStr, err = m.Get(ctx, config.KeyClusterIPv4POOLS)
+	ipPoolStr, err = c.Get(ctx, config.KeyClusterIPv4POOLS)
 	if err != nil {
 		return err
 	}
@@ -845,7 +844,30 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, m *dhcp.Manager) error {
 	for _, cidr := range c.cidrs {
 		s.Insert(cidr.String())
 	}
-	return m.Set(ctx, config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
+	return c.Set(ctx, config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
+}
+
+func (c *ConnectOptions) Set(ctx context.Context, key, value string) error {
+	err := retry.RetryOnConflict(
+		retry.DefaultRetry,
+		func() error {
+			p := []byte(fmt.Sprintf(`[{"op": "replace", "path": "/data/%s", "value": "%s"}]`, key, value))
+			_, err := c.clientset.CoreV1().ConfigMaps(c.Namespace).Patch(ctx, config.ConfigMapPodTrafficManager, k8stypes.JSONPatchType, p, metav1.PatchOptions{})
+			return err
+		})
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to update configmap: %v", err)
+		return err
+	}
+	return nil
+}
+
+func (c *ConnectOptions) Get(ctx context.Context, key string) (string, error) {
+	cm, err := c.clientset.CoreV1().ConfigMaps(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	return cm.Data[key], nil
 }
 
 func (c *ConnectOptions) addExtraRoute(ctx context.Context, name string) error {
@@ -1209,13 +1231,6 @@ func deletePodImmediately(ctx context.Context, clientset *kubernetes.Clientset, 
 		}
 	}
 	return nil
-}
-
-func (c *ConnectOptions) Equal(a *ConnectOptions) bool {
-	return c.Engine == a.Engine &&
-		sets.New[string](c.ExtraRouteInfo.ExtraDomain...).HasAll(a.ExtraRouteInfo.ExtraDomain...) &&
-		sets.New[string](c.ExtraRouteInfo.ExtraCIDR...).HasAll(c.ExtraRouteInfo.ExtraCIDR...) &&
-		(reflect.DeepEqual(c.ExtraRouteInfo.ExtraNodeIP, a.ExtraRouteInfo.ExtraNodeIP) || c.ExtraRouteInfo.ExtraNodeIP == true)
 }
 
 func (c *ConnectOptions) GetTunDeviceName() (string, error) {

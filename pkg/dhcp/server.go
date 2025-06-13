@@ -48,18 +48,19 @@ func (s *Server) ReleaseIP(ctx context.Context, req *rpc.ReleaseIPRequest) (*rpc
 	defer s.Unlock()
 
 	plog.G(ctx).Infof("Handling release IP request, pod name: %s, ns: %s, IPv4: %s, IPv6: %s", req.PodName, req.PodNamespace, req.IPv4CIDR, req.IPv6CIDR)
-	var ips []net.IP
-	for _, ipStr := range []string{req.IPv4CIDR, req.IPv6CIDR} {
-		ip, _, err := net.ParseCIDR(ipStr)
-		if err != nil {
-			plog.G(ctx).Errorf("IP %s is invailed: %v", ipStr, err)
-			continue
-		}
-		ips = append(ips, ip)
+
+	ipv4, _, err := net.ParseCIDR(req.IPv4CIDR)
+	if err != nil {
+		plog.G(ctx).Errorf("IP %s is invailed: %v", req.IPv4CIDR, err)
+	}
+	var ipv6 net.IP
+	ipv6, _, err = net.ParseCIDR(req.IPv6CIDR)
+	if err != nil {
+		plog.G(ctx).Errorf("IP %s is invailed: %v", req.IPv6CIDR, err)
 	}
 
 	manager := NewDHCPManager(s.clientset, req.PodNamespace)
-	if err := manager.ReleaseIP(ctx, ips...); err != nil {
+	if err = manager.ReleaseIP(ctx, ipv4, ipv6); err != nil {
 		plog.G(ctx).Errorf("Failed to release IP: %v", err)
 		return nil, err
 	}

@@ -11,7 +11,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/kubectl/pkg/cmd/util/podcmd"
 	"k8s.io/utils/ptr"
 
@@ -84,16 +83,21 @@ func (h *admissionReviewHandler) handleCreate(ar v1.AdmissionReview) *v1.Admissi
 	// 2) release old ip
 	h.Lock()
 	defer h.Unlock()
-	var ips []net.IP
+	var ipv4, ipv6 net.IP
 	for k := 0; k < len(container.Env); k++ {
 		envVar := container.Env[k]
-		if sets.New[string](config.EnvInboundPodTunIPv4, config.EnvInboundPodTunIPv6).Has(envVar.Name) && envVar.Value != "" {
+		if config.EnvInboundPodTunIPv4 == envVar.Name && envVar.Value != "" {
 			if ip, _, _ := net.ParseCIDR(envVar.Value); ip != nil {
-				ips = append(ips, ip)
+				ipv4 = ip
+			}
+		}
+		if config.EnvInboundPodTunIPv6 == envVar.Name && envVar.Value != "" {
+			if ip, _, _ := net.ParseCIDR(envVar.Value); ip != nil {
+				ipv6 = ip
 			}
 		}
 	}
-	_ = h.dhcp.ReleaseIP(context.Background(), ips...)
+	_ = h.dhcp.ReleaseIP(context.Background(), ipv4, ipv6)
 
 	// 3) rent new ip
 	var v4, v6 *net.IPNet
@@ -171,22 +175,27 @@ func (h *admissionReviewHandler) handleDelete(ar v1.AdmissionReview) *v1.Admissi
 	}
 
 	// 2) release ip
-	var ips []net.IP
+	var ipv4, ipv6 net.IP
 	for _, envVar := range container.Env {
-		if envVar.Name == config.EnvInboundPodTunIPv4 || envVar.Name == config.EnvInboundPodTunIPv6 {
+		if envVar.Name == config.EnvInboundPodTunIPv4 {
 			if ip, _, err := net.ParseCIDR(envVar.Value); err == nil {
-				ips = append(ips, ip)
+				ipv4 = ip
+			}
+		}
+		if envVar.Name == config.EnvInboundPodTunIPv6 {
+			if ip, _, err := net.ParseCIDR(envVar.Value); err == nil {
+				ipv6 = ip
 			}
 		}
 	}
-	if len(ips) != 0 {
+	if ipv4 != nil || ipv6 != nil {
 		h.Lock()
 		defer h.Unlock()
-		err := h.dhcp.ReleaseIP(context.Background(), ips...)
+		err := h.dhcp.ReleaseIP(context.Background(), ipv4, ipv6)
 		if err != nil {
-			plog.G(context.Background()).Errorf("Failed to release IP %v to DHCP server: %v", ips, err)
+			plog.G(context.Background()).Errorf("Failed to release IPv4 %v IPv6 %s to DHCP server: %v", ipv4, ipv6, err)
 		} else {
-			plog.G(context.Background()).Debugf("Release IP %v to DHCP server", ips)
+			plog.G(context.Background()).Debugf("Release IPv4 %v IPv6 %v to DHCP server", ipv4, ipv6)
 		}
 	}
 	return &v1.AdmissionResponse{Allowed: true}
