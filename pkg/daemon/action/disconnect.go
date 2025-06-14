@@ -20,7 +20,11 @@ import (
 
 func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 	if !svr.IsSudo {
-		defer svr.OffloadToConfig()
+		defer func() {
+			if err == nil {
+				svr.OffloadToConfig()
+			}
+		}()
 	}
 
 	req, err := resp.Recv()

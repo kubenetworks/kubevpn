@@ -77,7 +77,7 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 	}
 
 	for i := 0; i < len(v); i++ {
-		if ws.Has(v[i].Uid) {
+		if ws.Has(v[i].Uid) && v[i].Namespace == namespace {
 			v = append(v[:i], v[i+1:]...)
 			i--
 		}
