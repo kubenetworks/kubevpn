@@ -74,10 +74,20 @@ func (svr *Server) LoadFromConfig() error {
 		}
 		break
 	}
-	for _, conf := range append(conf.SecondaryConnect, conf.Connect) {
+	if conf.Connect != nil {
+		var resp rpc.Daemon_ConnectClient
+		resp, err = client.Connect(context.Background())
+		if err == nil {
+			conf.Connect.Request.IPv4 = conf.Connect.LocalTunIPv4.String()
+			conf.Connect.Request.IPv6 = conf.Connect.LocalTunIPv6.String()
+			err = resp.Send(conf.Connect.Request)
+			_ = util.PrintGRPCStream[rpc.ConnectResponse](nil, resp, svr.LogFile)
+		}
+	}
+	for _, conf := range append(conf.SecondaryConnect) {
 		if conf != nil {
 			var resp rpc.Daemon_ConnectClient
-			resp, err = client.Connect(context.Background())
+			resp, err = client.ConnectFork(context.Background())
 			if err != nil {
 				continue
 			}

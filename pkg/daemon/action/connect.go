@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -59,7 +60,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		Lock:                 &svr.Lock,
 		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
-		Request:              req,
+		Request:              proto.Clone(req).(*rpc.ConnectRequest),
 	}
 	var file string
 	file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
@@ -119,7 +120,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
-		Request:              req,
+		Request:              proto.Clone(req).(*rpc.ConnectRequest),
 	}
 	connect.AddRolloutFunc(func() error {
 		sshCancel()
