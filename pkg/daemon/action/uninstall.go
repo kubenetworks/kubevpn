@@ -14,8 +14,6 @@ import (
 )
 
 func (svr *Server) Uninstall(resp rpc.Daemon_UninstallServer) (err error) {
-	defer svr.CleanupConfig()
-
 	req, err := resp.Recv()
 	if err != nil {
 		return err
