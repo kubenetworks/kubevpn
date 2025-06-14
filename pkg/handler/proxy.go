@@ -47,8 +47,8 @@ func (l *ProxyList) Remove(ns, workload string) {
 	}
 }
 
-func (l *ProxyList) Add(connectNamespace string, proxy *Proxy) {
-	go proxy.portMapper.Run(connectNamespace)
+func (l *ProxyList) Add(managerNamespace string, proxy *Proxy) {
+	go proxy.portMapper.Run(managerNamespace)
 	*l = append(*l, proxy)
 }
 
@@ -106,7 +106,7 @@ type Mapper struct {
 	clientset *kubernetes.Clientset
 }
 
-func (m *Mapper) Run(connectNamespace string) {
+func (m *Mapper) Run(managerNamespace string) {
 	if m == nil {
 		return
 	}
@@ -121,7 +121,7 @@ func (m *Mapper) Run(connectNamespace string) {
 
 	var lastLocalPort2EnvoyRulePort map[int32]int32
 	for m.ctx.Err() == nil {
-		localPort2EnvoyRulePort, err := m.getLocalPort2EnvoyRulePort(connectNamespace)
+		localPort2EnvoyRulePort, err := m.getLocalPort2EnvoyRulePort(managerNamespace)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				continue
@@ -200,8 +200,8 @@ func (m *Mapper) Run(connectNamespace string) {
 	}
 }
 
-func (m *Mapper) getLocalPort2EnvoyRulePort(connectNamespace string) (map[int32]int32, error) {
-	configMap, err := m.clientset.CoreV1().ConfigMaps(connectNamespace).Get(m.ctx, config.ConfigMapPodTrafficManager, v1.GetOptions{})
+func (m *Mapper) getLocalPort2EnvoyRulePort(managerNamespace string) (map[int32]int32, error) {
+	configMap, err := m.clientset.CoreV1().ConfigMaps(managerNamespace).Get(m.ctx, config.ConfigMapPodTrafficManager, v1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}

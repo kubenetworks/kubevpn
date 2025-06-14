@@ -27,7 +27,7 @@ import (
 
 // InjectEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
-func InjectEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Factory, connectNamespace string, current, object *runtimeresource.Info, headers map[string]string, portMap []string, image string) (err error) {
+func InjectEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Factory, managerNamespace string, current, object *runtimeresource.Info, headers map[string]string, portMap []string, image string) (err error) {
 	var clientset *kubernetes.Clientset
 	clientset, err = f.KubernetesClientSet()
 	if err != nil {
@@ -50,7 +50,7 @@ func InjectEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Factory, c
 		port[i].EnvoyListenerPort = int32(randomPort)
 		containerPort2EnvoyListenerPort[port[i].ContainerPort] = int32(randomPort)
 	}
-	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(connectNamespace), object.Namespace, nodeID, c, headers, port, portmap)
+	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(managerNamespace), object.Namespace, nodeID, c, headers, port, portmap)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to add envoy config: %v", err)
 		return err
@@ -66,9 +66,9 @@ func InjectEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Factory, c
 		return
 	}
 
-	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, f, connectNamespace)
+	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, f, managerNamespace)
 	// (1) add mesh container
-	AddEnvoyContainer(templateSpec, object.Namespace, nodeID, enableIPv6, connectNamespace, image)
+	AddEnvoyContainer(templateSpec, object.Namespace, nodeID, enableIPv6, managerNamespace, image)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	ps := []P{
 		{
