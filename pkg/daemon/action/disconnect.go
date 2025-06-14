@@ -18,7 +18,12 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) error {
+func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
+	defer func() {
+		if err == nil {
+			_ = svr.OffloadToConfig()
+		}
+	}()
 	req, err := resp.Recv()
 	if err != nil {
 		return err

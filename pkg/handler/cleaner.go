@@ -44,11 +44,11 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 		if userDaemon {
 			plog.G(logCtx).Info("Performing cleanup operations")
 			var ipv4, ipv6 net.IP
-			if c.localTunIPv4 != nil && c.localTunIPv4.IP != nil {
-				ipv4 = c.localTunIPv4.IP
+			if c.LocalTunIPv4 != nil && c.LocalTunIPv4.IP != nil {
+				ipv4 = c.LocalTunIPv4.IP
 			}
-			if c.localTunIPv6 != nil && c.localTunIPv6.IP != nil {
-				ipv6 = c.localTunIPv6.IP
+			if c.LocalTunIPv6 != nil && c.LocalTunIPv6.IP != nil {
+				ipv6 = c.LocalTunIPv6.IP
 			}
 			if c.dhcp != nil {
 				err := c.dhcp.ReleaseIP(ctx, ipv4, ipv6)

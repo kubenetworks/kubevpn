@@ -24,6 +24,8 @@ const (
 	ConfigFile = "config.yaml"
 
 	TmpDir = "tmp"
+
+	DBFile = "db"
 )
 
 var (
@@ -106,4 +108,8 @@ func GetDaemonLogPath(isSudo bool) string {
 
 func GetPProfPath() string {
 	return filepath.Join(daemonPath, PProfDir)
+}
+
+func GetDBPath() string {
+	return filepath.Join(daemonPath, DBFile)
 }

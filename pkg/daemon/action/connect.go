@@ -21,6 +21,11 @@ import (
 )
 
 func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
+	defer func() {
+		if err == nil {
+			_ = svr.OffloadToConfig()
+		}
+	}()
 	req, err := resp.Recv()
 	if err != nil {
 		return err
@@ -55,6 +60,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		Lock:                 &svr.Lock,
 		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
+		Request:              req,
 	}
 	var file string
 	file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
@@ -114,6 +120,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
+		Request:              req,
 	}
 	connect.AddRolloutFunc(func() error {
 		sshCancel()
@@ -184,7 +191,8 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		}
 	}
 
-	ctx, err := connect.RentIP(resp.Context())
+	var ipCtx context.Context
+	ipCtx, err = connect.RentIP(resp.Context(), req.IPv4, req.IPv6)
 	if err != nil {
 		return err
 	}
@@ -196,7 +204,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	}
 	req.KubeconfigBytes = string(content)
 	req.SshJump = ssh.SshConfig{}.ToRPC()
-	connResp, err = cli.Connect(ctx)
+	connResp, err = cli.Connect(ipCtx)
 	if err != nil {
 		return err
 	}

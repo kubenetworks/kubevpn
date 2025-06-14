@@ -63,6 +63,11 @@ message ConnectRequest {
   // 2. detect which namespace helm installed by (helm list -A), match app name==kubevpn and status is deployed
   // 3. otherwise, use options '-n' or '--namespace'
   string ManagerNamespace = 12;
+
+  // Inner ip v4 and v6, for recovery from local db,
+  // this filed only set when recover from local db, otherwise, always empty
+  string IPv4 = 13;
+  string IPv6 = 14;
 }
 
 message ConnectResponse {

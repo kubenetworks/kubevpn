@@ -29,8 +29,14 @@ import (
 //  2. if already connect to cluster
 //     2.1 disconnect from cluster
 //     2.2 same as step 1
-func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (e error) {
-	req, err := resp.Recv()
+func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
+	defer func() {
+		if err == nil {
+			_ = svr.OffloadToConfig()
+		}
+	}()
+	var req *rpc.ProxyRequest
+	req, err = resp.Recv()
 	if err != nil {
 		return err
 	}
@@ -39,7 +45,8 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (e error) {
 	ctx := plog.WithLogger(resp.Context(), logger)
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 
-	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
+	var file string
+	file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
 		return err
 	}
@@ -56,6 +63,7 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (e error) {
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
+		Request:              convert(req),
 	}
 	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
 	if err != nil {
@@ -77,12 +85,13 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (e error) {
 	}
 
 	defer func() {
-		if e != nil && svr.connect != nil {
+		if err != nil && svr.connect != nil {
 			_ = svr.connect.LeaveAllProxyResources(plog.WithLogger(context.Background(), logger))
 		}
 	}()
 
-	cli, err := svr.GetClient(false)
+	var cli rpc.DaemonClient
+	cli, err = svr.GetClient(false)
 	if err != nil {
 		return errors.Wrap(err, "daemon is not available")
 	}

@@ -52,6 +52,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
@@ -71,6 +72,7 @@ type ConnectOptions struct {
 	Lock                 *sync.Mutex
 	Image                string
 	ImagePullSecretName  string
+	Request              *rpc.ConnectRequest `json:"Request,omitempty"`
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -82,8 +84,8 @@ type ConnectOptions struct {
 	cidrs      []*net.IPNet
 	dhcp       *dhcp.Manager
 	// needs to give it back to dhcp
-	localTunIPv4     *net.IPNet
-	localTunIPv6     *net.IPNet
+	LocalTunIPv4     *net.IPNet `json:"LocalTunIPv4,omitempty"`
+	LocalTunIPv6     *net.IPNet `json:"LocalTunIPv6,omitempty"`
 	rollbackFuncList []func() error
 	dnsConfig        *dns.Config
 
@@ -106,21 +108,28 @@ func (c *ConnectOptions) InitDHCP(ctx context.Context) error {
 	return nil
 }
 
-func (c *ConnectOptions) RentIP(ctx context.Context) (context.Context, error) {
+func (c *ConnectOptions) RentIP(ctx context.Context, ipv4, ipv6 string) (context.Context, error) {
 	if err := c.InitDHCP(ctx); err != nil {
 		return nil, err
 	}
-	var err error
-	c.localTunIPv4, c.localTunIPv6, err = c.dhcp.RentIP(ctx)
-	if err != nil {
-		return nil, err
+	if util.IsValidCIDR(ipv4) && util.IsValidCIDR(ipv6) {
+		ip, cidr, _ := net.ParseCIDR(ipv4)
+		c.LocalTunIPv4 = &net.IPNet{IP: ip, Mask: cidr.Mask}
+		ip, cidr, _ = net.ParseCIDR(ipv6)
+		c.LocalTunIPv6 = &net.IPNet{IP: ip, Mask: cidr.Mask}
+	} else {
+		var err error
+		c.LocalTunIPv4, c.LocalTunIPv6, err = c.dhcp.RentIP(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
-	ctx1 := metadata.AppendToOutgoingContext(
+
+	return metadata.AppendToOutgoingContext(
 		context.Background(),
-		config.HeaderIPv4, c.localTunIPv4.String(),
-		config.HeaderIPv6, c.localTunIPv6.String(),
-	)
-	return ctx1, nil
+		config.HeaderIPv4, c.LocalTunIPv4.String(),
+		config.HeaderIPv6, c.LocalTunIPv6.String(),
+	), nil
 }
 
 func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logger) error {
@@ -137,8 +146,8 @@ func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logge
 	if err != nil {
 		return fmt.Errorf("cat not convert IPv4 string: %s: %v", ipv4[0], err)
 	}
-	c.localTunIPv4 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
-	logger.Debugf("Get IPv4 %s from context", c.localTunIPv4.String())
+	c.LocalTunIPv4 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
+	logger.Debugf("Get IPv4 %s from context", c.LocalTunIPv4.String())
 
 	ipv6 := md.Get(config.HeaderIPv6)
 	if len(ipv6) == 0 {
@@ -148,13 +157,13 @@ func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logge
 	if err != nil {
 		return fmt.Errorf("cat not convert IPv6 string: %s: %v", ipv6[0], err)
 	}
-	c.localTunIPv6 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
-	logger.Debugf("Get IPv6 %s from context", c.localTunIPv6.String())
+	c.LocalTunIPv6 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
+	logger.Debugf("Get IPv6 %s from context", c.LocalTunIPv6.String())
 	return nil
 }
 
 func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string, image string) (err error) {
-	if c.localTunIPv4 == nil || c.localTunIPv6 == nil {
+	if c.LocalTunIPv4 == nil || c.LocalTunIPv6 == nil {
 		return fmt.Errorf("local tun IP is invalid")
 	}
 	if c.proxyWorkloads == nil {
@@ -169,8 +178,8 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 	for _, workload := range workloads {
 		plog.G(ctx).Infof("Injecting inbound sidecar for %s in namespace %s", workload, namespace)
 		configInfo := util.PodRouteConfig{
-			LocalTunIPv4: c.localTunIPv4.IP.String(),
-			LocalTunIPv6: c.localTunIPv6.IP.String(),
+			LocalTunIPv4: c.LocalTunIPv4.IP.String(),
+			LocalTunIPv6: c.LocalTunIPv6.IP.String(),
 		}
 		var object, controller *runtimeresource.Info
 		object, controller, err = util.GetTopOwnerObject(ctx, c.factory, namespace, workload)
@@ -323,7 +332,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
 				go util.CheckPodStatus(childCtx, cancelFunc, podName, c.clientset.CoreV1().Pods(c.Namespace))
 				domain := fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, c.Namespace)
-				go healthCheckPortForward(childCtx, cancelFunc, readyChan, strings.Split(portPair[1], ":")[0], domain, c.localTunIPv4.IP)
+				go healthCheckPortForward(childCtx, cancelFunc, readyChan, strings.Split(portPair[1], ":")[0], domain, c.LocalTunIPv4.IP)
 				go healthCheckTCPConn(childCtx, cancelFunc, readyChan, domain, util.GetPodIP(pod)[0])
 				if *first {
 					go func() {
@@ -379,7 +388,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 }
 
 func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress string, lite bool) (err error) {
-	plog.G(ctx).Debugf("IPv4: %s, IPv6: %s", c.localTunIPv4.IP.String(), c.localTunIPv6.IP.String())
+	plog.G(ctx).Debugf("IPv4: %s, IPv6: %s", c.LocalTunIPv4.IP.String(), c.LocalTunIPv6.IP.String())
 
 	tlsSecret, err := c.clientset.CoreV1().Secrets(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
@@ -393,8 +402,8 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 		// windows needs to add tun IP self to route table, but linux and macOS not need
 		if util.IsWindows() {
 			cidrList = append(cidrList,
-				&net.IPNet{IP: c.localTunIPv4.IP, Mask: net.CIDRMask(32, 32)},
-				&net.IPNet{IP: c.localTunIPv6.IP, Mask: net.CIDRMask(128, 128)},
+				&net.IPNet{IP: c.LocalTunIPv4.IP, Mask: net.CIDRMask(32, 32)},
+				&net.IPNet{IP: c.LocalTunIPv6.IP, Mask: net.CIDRMask(128, 128)},
 			)
 		}
 	}
@@ -419,12 +428,12 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 	}
 
 	tunConfig := tun.Config{
-		Addr:   (&net.IPNet{IP: c.localTunIPv4.IP, Mask: net.CIDRMask(32, 32)}).String(),
+		Addr:   (&net.IPNet{IP: c.LocalTunIPv4.IP, Mask: net.CIDRMask(32, 32)}).String(),
 		Routes: routes,
 		MTU:    config.DefaultMTU,
 	}
 	if enable, _ := util.IsIPv6Enabled(); enable {
-		tunConfig.Addr6 = (&net.IPNet{IP: c.localTunIPv6.IP, Mask: net.CIDRMask(128, 128)}).String()
+		tunConfig.Addr6 = (&net.IPNet{IP: c.LocalTunIPv6.IP, Mask: net.CIDRMask(128, 128)}).String()
 	}
 
 	localNode := fmt.Sprintf("tun:/127.0.0.1:8422")
@@ -981,11 +990,11 @@ func (c *ConnectOptions) GetFactory() cmdutil.Factory {
 }
 
 func (c *ConnectOptions) GetLocalTunIP() (v4 string, v6 string) {
-	if c.localTunIPv4 != nil {
-		v4 = c.localTunIPv4.IP.String()
+	if c.LocalTunIPv4 != nil {
+		v4 = c.LocalTunIPv4.IP.String()
 	}
-	if c.localTunIPv6 != nil {
-		v6 = c.localTunIPv6.IP.String()
+	if c.LocalTunIPv6 != nil {
+		v6 = c.LocalTunIPv6.IP.String()
 	}
 	return
 }
@@ -1235,11 +1244,11 @@ func deletePodImmediately(ctx context.Context, clientset *kubernetes.Clientset, 
 
 func (c *ConnectOptions) GetTunDeviceName() (string, error) {
 	var ips []net.IP
-	if c.localTunIPv4 != nil {
-		ips = append(ips, c.localTunIPv4.IP)
+	if c.LocalTunIPv4 != nil {
+		ips = append(ips, c.LocalTunIPv4.IP)
 	}
-	if c.localTunIPv6 != nil {
-		ips = append(ips, c.localTunIPv6.IP)
+	if c.LocalTunIPv6 != nil {
+		ips = append(ips, c.LocalTunIPv6.IP)
 	}
 	device, err := util.GetTunDevice(ips...)
 	if err != nil {

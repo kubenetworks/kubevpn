@@ -254,3 +254,11 @@ func DetectSupportIPv6() (bool, error) {
 	}
 	return disableIPv6 == 0, nil
 }
+
+func IsValidCIDR(str string) bool {
+	_, _, err := net.ParseCIDR(str)
+	if err != nil {
+		return false
+	}
+	return true
+}
