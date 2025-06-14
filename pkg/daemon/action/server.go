@@ -44,11 +44,11 @@ type Config struct {
 }
 
 func (svr *Server) LoadFromConfig() error {
-	file, err := os.ReadFile(config.GetDBPath())
+	content, err := os.ReadFile(config.GetDBPath())
 	if err != nil {
 		return err
 	}
-	jsonConf, err := yaml.YAMLToJSON(file)
+	jsonConf, err := yaml.YAMLToJSON(content)
 	if err != nil {
 		return err
 	}
@@ -84,19 +84,22 @@ func (svr *Server) LoadFromConfig() error {
 			_ = util.PrintGRPCStream[rpc.ConnectResponse](nil, resp, svr.LogFile)
 		}
 	}
-	for _, conf := range append(conf.SecondaryConnect) {
-		if conf != nil {
+	for _, c := range append(conf.SecondaryConnect) {
+		if c != nil {
 			var resp rpc.Daemon_ConnectClient
 			resp, err = client.ConnectFork(context.Background())
 			if err != nil {
 				continue
 			}
-			conf.Request.IPv4 = conf.LocalTunIPv4.String()
-			conf.Request.IPv6 = conf.LocalTunIPv6.String()
-			err = resp.Send(conf.Request)
+			c.Request.IPv4 = c.LocalTunIPv4.String()
+			c.Request.IPv6 = c.LocalTunIPv6.String()
+			err = resp.Send(c.Request)
 			_ = util.PrintGRPCStream[rpc.ConnectResponse](nil, resp, svr.LogFile)
 		}
 	}
+	// because connect/connect-fork will also offload to disk,
+	// but it maybe failed, so we need to write it back to disk
+	err = os.WriteFile(config.GetDBPath(), content, 0644)
 	return nil
 }
 
