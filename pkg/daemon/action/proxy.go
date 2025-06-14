@@ -30,11 +30,6 @@ import (
 //     2.1 disconnect from cluster
 //     2.2 same as step 1
 func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
-	defer func() {
-		if err == nil {
-			_ = svr.OffloadToConfig()
-		}
-	}()
 	var req *rpc.ProxyRequest
 	req, err = resp.Recv()
 	if err != nil {

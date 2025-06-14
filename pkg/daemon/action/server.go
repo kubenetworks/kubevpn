@@ -48,12 +48,12 @@ func (svr *Server) LoadFromConfig() error {
 	if err != nil {
 		return err
 	}
-	configJson, err := yaml.YAMLToJSON(file)
+	jsonConf, err := yaml.YAMLToJSON(file)
 	if err != nil {
 		return err
 	}
 	var conf Config
-	err = json.Unmarshal(configJson, &conf)
+	err = json.Unmarshal(jsonConf, &conf)
 	if err != nil {
 		return err
 	}
@@ -95,15 +95,15 @@ func (svr *Server) OffloadToConfig() error {
 		Connect:          svr.connect,
 		SecondaryConnect: svr.secondaryConnect,
 	}
-	confJson, err := json.Marshal(conf)
+	jsonConf, err := json.Marshal(conf)
 	if err != nil {
 		return err
 	}
-	confYaml, err := yaml.JSONToYAML(confJson)
+	yamlConf, err := yaml.JSONToYAML(jsonConf)
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(config.GetDBPath(), confYaml, 0644)
+	err = os.WriteFile(config.GetDBPath(), yamlConf, 0644)
 	return err
 }
 

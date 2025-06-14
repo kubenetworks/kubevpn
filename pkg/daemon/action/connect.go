@@ -21,11 +21,10 @@ import (
 )
 
 func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
-	defer func() {
-		if err == nil {
-			_ = svr.OffloadToConfig()
-		}
-	}()
+	if !svr.IsSudo {
+		defer svr.OffloadToConfig()
+	}
+
 	req, err := resp.Recv()
 	if err != nil {
 		return err

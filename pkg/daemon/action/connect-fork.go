@@ -18,11 +18,10 @@ import (
 )
 
 func (svr *Server) ConnectFork(resp rpc.Daemon_ConnectForkServer) (err error) {
-	defer func() {
-		if err == nil {
-			_ = svr.OffloadToConfig()
-		}
-	}()
+	if !svr.IsSudo {
+		defer svr.OffloadToConfig()
+	}
+
 	req, err := resp.Recv()
 	if err != nil {
 		return err

@@ -25,7 +25,6 @@ func (svr *Server) Stop(resp rpc.Daemon_QuitServer) error {
 	svr.connect.Cleanup(ctx)
 	svr.t = time.Time{}
 	svr.connect = nil
-	svr.OffloadToConfig()
 	return nil
 }
 

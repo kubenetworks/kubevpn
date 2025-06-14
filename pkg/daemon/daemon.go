@@ -124,7 +124,9 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		_ = l.Close()
 	}
 	o.svr = &action.Server{Cancel: cancel, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: l, ID: o.ID}
-	go o.svr.LoadFromConfig()
+	if !o.IsSudo {
+		go o.svr.LoadFromConfig()
+	}
 	rpc.RegisterDaemonServer(svr, o.svr)
 	return downgradingServer.Serve(lis)
 	//return o.svr.Serve(lis)
