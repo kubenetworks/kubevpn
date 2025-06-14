@@ -267,9 +267,9 @@ func GetClusterIDByConfig(cmd *cobra.Command, config Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	err = c.InitDHCP(cmd.Context())
+	id, err := util.GetClusterID(cmd.Context(), c.GetClientset().CoreV1().Namespaces(), ns)
 	if err != nil {
 		return "", err
 	}
-	return c.GetClusterID(), nil
+	return string(id), nil
 }

@@ -38,6 +38,10 @@ func (svr *Server) Reset(resp rpc.Daemon_ResetServer) error {
 	if err != nil {
 		return err
 	}
+	connect.Namespace, err = util.DetectManagerNamespace(ctx, connect.GetFactory(), req.Namespace)
+	if err != nil {
+		return err
+	}
 	err = connect.Reset(ctx, req.Namespace, req.Workloads)
 	if err != nil {
 		return err

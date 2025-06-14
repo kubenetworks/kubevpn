@@ -20,7 +20,7 @@ func RemoveContainer(spec *corev1.PodSpec) {
 	}
 }
 
-func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig, connectNamespace string, secret *corev1.Secret, image string) {
+func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig, managerNamespace string, secret *corev1.Secret, image string) {
 	// remove vpn container if already exist
 	RemoveContainer(spec)
 	spec.Containers = append(spec.Containers, corev1.Container{
@@ -53,7 +53,7 @@ func AddContainer(spec *corev1.PodSpec, c util.PodRouteConfig, connectNamespace 
 			},
 			{
 				Name:  "TrafficManagerService",
-				Value: fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, connectNamespace),
+				Value: fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, managerNamespace),
 			},
 			{
 				Name: config.EnvPodNamespace,

@@ -90,6 +90,7 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 		TargetWorkloadNames: map[string]string{},
 		LocalDir:            req.LocalDir,
 		RemoteDir:           req.RemoteDir,
+		Request:             req,
 	}
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {

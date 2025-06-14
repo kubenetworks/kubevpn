@@ -32,6 +32,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/syncthing"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -51,6 +52,7 @@ type CloneOptions struct {
 	OriginKubeconfigPath string
 	LocalDir             string
 	RemoteDir            string
+	Request              *rpc.CloneRequest `json:"Request,omitempty"`
 
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient

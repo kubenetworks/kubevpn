@@ -24,7 +24,7 @@ import (
 	util2 "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func InjectVPNSidecar(ctx context.Context, nodeID string, f util.Factory, connectNamespace string, object *resource.Info, c util2.PodRouteConfig, secret *v1.Secret, image string) error {
+func InjectVPNSidecar(ctx context.Context, nodeID string, f util.Factory, managerNamespace string, object *resource.Info, c util2.PodRouteConfig, secret *v1.Secret, image string) error {
 	u := object.Object.(*unstructured.Unstructured)
 
 	podTempSpec, path, err := util2.GetPodTemplateSpecPath(u)
@@ -44,13 +44,13 @@ func InjectVPNSidecar(ctx context.Context, nodeID string, f util.Factory, connec
 	for _, port := range ports {
 		portmap[port.ContainerPort] = fmt.Sprintf("%d", port.ContainerPort)
 	}
-	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(connectNamespace), object.Namespace, nodeID, c, nil, controlplane.ConvertContainerPort(ports...), portmap)
+	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(managerNamespace), object.Namespace, nodeID, c, nil, controlplane.ConvertContainerPort(ports...), portmap)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to add envoy config: %v", err)
 		return err
 	}
 
-	AddContainer(&podTempSpec.Spec, c, connectNamespace, secret, image)
+	AddContainer(&podTempSpec.Spec, c, managerNamespace, secret, image)
 
 	workload := fmt.Sprintf("%s/%s", object.Mapping.Resource.Resource, object.Name)
 	helper := resource.NewHelper(object.Client, object.Mapping)

@@ -13,7 +13,9 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Uninstall(resp rpc.Daemon_UninstallServer) error {
+func (svr *Server) Uninstall(resp rpc.Daemon_UninstallServer) (err error) {
+	defer svr.CleanupConfig()
+
 	req, err := resp.Recv()
 	if err != nil {
 		return err

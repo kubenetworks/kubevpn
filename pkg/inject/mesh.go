@@ -32,7 +32,7 @@ import (
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
 
 // InjectVPNAndEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
-func InjectVPNAndEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Factory, connectNamespace string, object *runtimeresource.Info, c util.PodRouteConfig, headers map[string]string, portMaps []string, secret *v1.Secret, image string) (err error) {
+func InjectVPNAndEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Factory, managerNamespace string, object *runtimeresource.Info, c util.PodRouteConfig, headers map[string]string, portMaps []string, secret *v1.Secret, image string) (err error) {
 	var clientset *kubernetes.Clientset
 	clientset, err = f.KubernetesClientSet()
 	if err != nil {
@@ -77,7 +77,7 @@ func InjectVPNAndEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Fact
 		}
 	}
 
-	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(connectNamespace), object.Namespace, nodeID, c, headers, ports, portmap)
+	err = addEnvoyConfig(clientset.CoreV1().ConfigMaps(managerNamespace), object.Namespace, nodeID, c, headers, ports, portmap)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to add envoy config: %v", err)
 		return err
@@ -89,13 +89,13 @@ func InjectVPNAndEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Fact
 		containerNames.Insert(container.Name)
 	}
 	if containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
-		plog.G(ctx).Infof("Workload %s/%s has already been injected with sidecar", connectNamespace, workload)
+		plog.G(ctx).Infof("Workload %s/%s has already been injected with sidecar", managerNamespace, workload)
 		return nil
 	}
 
-	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, f, connectNamespace)
+	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, f, managerNamespace)
 	// (1) add mesh container
-	AddMeshContainer(templateSpec, object.Namespace, nodeID, enableIPv6, connectNamespace, secret, image)
+	AddMeshContainer(templateSpec, object.Namespace, nodeID, enableIPv6, managerNamespace, secret, image)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	ps := []P{
 		{

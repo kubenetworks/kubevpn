@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -18,6 +19,14 @@ import (
 )
 
 func (svr *Server) ConnectFork(resp rpc.Daemon_ConnectForkServer) (err error) {
+	if !svr.IsSudo {
+		defer func() {
+			if err == nil {
+				svr.OffloadToConfig()
+			}
+		}()
+	}
+
 	req, err := resp.Recv()
 	if err != nil {
 		return err
@@ -38,6 +47,7 @@ func (svr *Server) ConnectFork(resp rpc.Daemon_ConnectForkServer) (err error) {
 		Lock:                 &svr.Lock,
 		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
+		Request:              proto.Clone(req).(*rpc.ConnectRequest),
 	}
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
@@ -100,6 +110,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
+		Request:              proto.Clone(req).(*rpc.ConnectRequest),
 	}
 	connect.AddRolloutFunc(func() error {
 		sshCancel()
@@ -152,7 +163,10 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		req.ManagerNamespace = req.Namespace
 	}
 
-	for _, options := range svr.secondaryConnect {
+	for _, options := range append(svr.secondaryConnect, svr.connect) {
+		if options == nil {
+			continue
+		}
 		isSameCluster, _ := util.IsSameCluster(
 			sshCtx,
 			options.GetClientset().CoreV1(), options.Namespace,
@@ -166,7 +180,8 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		}
 	}
 
-	ctx, err := connect.RentIP(resp.Context())
+	var ipCtx context.Context
+	ipCtx, err = connect.RentIP(resp.Context(), req.IPv4, req.IPv6)
 	if err != nil {
 		return err
 	}
@@ -178,7 +193,7 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 	}
 	req.KubeconfigBytes = string(content)
 	req.SshJump = ssh.SshConfig{}.ToRPC()
-	connResp, err = cli.ConnectFork(ctx)
+	connResp, err = cli.ConnectFork(ipCtx)
 	if err != nil {
 		return err
 	}

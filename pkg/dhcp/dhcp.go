@@ -21,16 +21,16 @@ import (
 )
 
 type Manager struct {
-	client    *kubernetes.Clientset
+	clientset *kubernetes.Clientset
 	cidr      *net.IPNet
 	cidr6     *net.IPNet
 	namespace string
 	clusterID types.UID
 }
 
-func NewDHCPManager(client *kubernetes.Clientset, namespace string) *Manager {
+func NewDHCPManager(clientset *kubernetes.Clientset, namespace string) *Manager {
 	return &Manager{
-		client:    client,
+		clientset: clientset,
 		namespace: namespace,
 		cidr:      &net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask},
 		cidr6:     &net.IPNet{IP: config.RouterIP6, Mask: config.CIDR6.Mask},
@@ -38,15 +38,15 @@ func NewDHCPManager(client *kubernetes.Clientset, namespace string) *Manager {
 }
 
 // InitDHCP
-// TODO optimize dhcp, using mac address, ip and deadline as unit
+// TODO optimize dhcp, using mac address, ipPair and deadline as unit
 func (m *Manager) InitDHCP(ctx context.Context) error {
-	cm, err := m.client.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	cm, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get configmap %s, err: %v", config.ConfigMapPodTrafficManager, err)
 	}
 
 	if err == nil {
-		m.clusterID, err = util.GetClusterID(ctx, m.client.CoreV1().Namespaces(), m.namespace)
+		m.clusterID, err = util.GetClusterID(ctx, m.clientset.CoreV1().Namespaces(), m.namespace)
 		return err
 	}
 
@@ -63,11 +63,11 @@ func (m *Manager) InitDHCP(ctx context.Context) error {
 			config.KeyClusterIPv4POOLS: "",
 		},
 	}
-	cm, err = m.client.CoreV1().ConfigMaps(m.namespace).Create(ctx, cm, metav1.CreateOptions{})
+	cm, err = m.clientset.CoreV1().ConfigMaps(m.namespace).Create(ctx, cm, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to create configmap: %v", err)
 	}
-	m.clusterID, err = util.GetClusterID(ctx, m.client.CoreV1().Namespaces(), m.namespace)
+	m.clusterID, err = util.GetClusterID(ctx, m.clientset.CoreV1().Namespaces(), m.namespace)
 	return err
 }
 
@@ -86,6 +86,7 @@ func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 		}
 		return false
 	}
+	var uselessIPs []net.IP
 	var v4, v6 net.IP
 	err := m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
 		for {
@@ -95,6 +96,7 @@ func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 			if !isAlreadyExistedFunc(v4) {
 				break
 			}
+			uselessIPs = append(uselessIPs, v4)
 		}
 		for {
 			if v6, err = ipv6.AllocateNext(); err != nil {
@@ -103,9 +105,15 @@ func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 			if !isAlreadyExistedFunc(v6) {
 				break
 			}
+			uselessIPs = append(uselessIPs, v6)
 		}
 		return
 	})
+	if len(uselessIPs) != 0 {
+		if er := m.releaseIP(ctx, uselessIPs...); er != nil {
+			plog.G(ctx).Errorf("Failed to release useless IPs: %v", er)
+		}
+	}
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to rent IP from DHCP server: %v", err)
 		return nil, nil, err
@@ -113,28 +121,44 @@ func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 	return &net.IPNet{IP: v4, Mask: m.cidr.Mask}, &net.IPNet{IP: v6, Mask: m.cidr6.Mask}, nil
 }
 
-func (m *Manager) ReleaseIP(ctx context.Context, ips ...net.IP) error {
+func (m *Manager) ReleaseIP(ctx context.Context, v4, v6 net.IP) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
+			if err := ipv4.Release(v4); err != nil {
+				return err
+			}
+			if err := ipv6.Release(v6); err != nil {
+				return err
+			}
+			return nil
+		})
+	})
+}
+
+func (m *Manager) releaseIP(ctx context.Context, ips ...net.IP) error {
 	if len(ips) == 0 {
 		return nil
 	}
-	return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
-		for _, ip := range ips {
-			var err error
-			if ip.To4() != nil {
-				err = ipv4.Release(ip)
-			} else {
-				err = ipv6.Release(ip)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
+			for _, ip := range ips {
+				var err error
+				if ip.To4() != nil {
+					err = ipv4.Release(ip)
+				} else {
+					err = ipv6.Release(ip)
+				}
+				if err != nil {
+					return err
+				}
 			}
-			if err != nil {
-				return err
-			}
-		}
-		return nil
+			return nil
+		})
 	})
 }
 
 func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error) error {
-	cm, err := m.client.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	cm, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get configmap DHCP server, err: %v", err)
 	}
@@ -189,38 +213,15 @@ func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipalloca
 		return err
 	}
 	cm.Data[config.KeyDHCP6] = base64.StdEncoding.EncodeToString(bytes)
-	_, err = m.client.CoreV1().ConfigMaps(m.namespace).Update(ctx, cm, metav1.UpdateOptions{})
+	_, err = m.clientset.CoreV1().ConfigMaps(m.namespace).Update(ctx, cm, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to update DHCP: %v", err)
 	}
 	return nil
 }
 
-func (m *Manager) Set(ctx context.Context, key, value string) error {
-	err := retry.RetryOnConflict(
-		retry.DefaultRetry,
-		func() error {
-			p := []byte(fmt.Sprintf(`[{"op": "replace", "path": "/data/%s", "value": "%s"}]`, key, value))
-			_, err := m.client.CoreV1().ConfigMaps(m.namespace).Patch(ctx, config.ConfigMapPodTrafficManager, types.JSONPatchType, p, metav1.PatchOptions{})
-			return err
-		})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to update configmap: %v", err)
-		return err
-	}
-	return nil
-}
-
-func (m *Manager) Get(ctx context.Context, key string) (string, error) {
-	cm, err := m.client.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return "", err
-	}
-	return cm.Data[key], nil
-}
-
 func (m *Manager) ForEach(ctx context.Context, fnv4 func(net.IP), fnv6 func(net.IP)) error {
-	cm, err := m.client.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	cm, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get cm DHCP server, err: %v", err)
 	}
