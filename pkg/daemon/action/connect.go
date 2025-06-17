@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"os"
-	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
@@ -41,7 +40,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	}
 
 	ctx := resp.Context()
-	if !svr.t.IsZero() {
+	if svr.connect != nil {
 		s := "Only support one cluster connect with full mode, you can use options `--lite` to connect to another cluster"
 		return status.Error(codes.AlreadyExists, s)
 	}
@@ -51,10 +50,8 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 				svr.connect.Cleanup(plog.WithLogger(context.Background(), logger))
 				svr.connect = nil
 			}
-			svr.t = time.Time{}
 		}
 	}()
-	svr.t = time.Now()
 	svr.connect = &handler.ConnectOptions{
 		Namespace:            req.ManagerNamespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
@@ -84,7 +81,6 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		if err != nil {
 			svr.connect.Cleanup(sshCtx)
 			svr.connect = nil
-			svr.t = time.Time{}
 			sshCancel()
 		}
 	}()
@@ -224,7 +220,6 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	if resp.Context().Err() != nil {
 		return resp.Context().Err()
 	}
-	svr.t = time.Now()
 	svr.connect = connect
 
 	return nil

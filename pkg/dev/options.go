@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -158,17 +157,17 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			return err
 		}
 		plog.G(ctx).Infof("Starting connect to cluster in container")
-		err = WaitDockerContainerRunning(ctx, *name)
+		err = util.WaitDockerContainerRunning(ctx, *name)
 		if err != nil {
 			return err
 		}
 		option.AddRollbackFunc(func() error {
 			// docker kill --signal
-			_, _ = ContainerKill(context.Background(), name)
-			_ = RunLogsSinceNow(*name, true)
+			_, _ = util.ContainerKill(context.Background(), name)
+			_ = util.RunLogsSinceNow(*name, true)
 			return nil
 		})
-		err = RunLogsWaitRunning(ctx, *name)
+		err = util.RunLogsWaitRunning(ctx, *name)
 		if err != nil {
 			// interrupt by signal KILL
 			if errors.Is(err, context.Canceled) {
@@ -291,7 +290,7 @@ func (option *Options) CreateConnectContainer(ctx context.Context, portBindings 
 
 	suffix := strings.ReplaceAll(uuid.New().String(), "-", "")[:5]
 	name := util.Join(option.Namespace, "kubevpn", suffix)
-	_, err = CreateNetwork(ctx, config.ConfigMapPodTrafficManager)
+	_, err = util.CreateNetwork(ctx, config.ConfigMapPodTrafficManager)
 	if err != nil {
 		return nil, err
 	}
@@ -318,20 +317,15 @@ func (option *Options) CreateConnectContainer(ctx context.Context, portBindings 
 		args = append(args, "--publish", fmt.Sprintf("%s:%s", port.Port(), bindings[0].HostPort))
 	}
 
-	var result []string
+	var result = []string{"docker"}
 	result = append(result, args...)
 	result = append(result, config.Image)
 	result = append(result, entrypoint...)
-	err = ContainerRun(ctx, result...)
+	err = util.RunContainer(ctx, result)
 	if err != nil {
 		return nil, err
 	}
 	return &name, nil
-}
-
-func ContainerRun(ctx context.Context, args ...string) error {
-	err := exec.CommandContext(ctx, "docker", args...).Run()
-	return err
 }
 
 func (option *Options) AddRollbackFunc(f func() error) {

@@ -40,23 +40,23 @@ type ConfigList []*RunConfig
 func (l ConfigList) Remove(ctx context.Context, userAnotherContainerNet bool) error {
 	for index, runConfig := range l {
 		if !userAnotherContainerNet && index == len(l)-1 {
-			output, err := NetworkDisconnect(ctx, runConfig.name)
+			output, err := util.NetworkDisconnect(ctx, runConfig.name)
 			if err != nil {
 				plog.G(ctx).Warnf("Failed to disconnect container network: %s: %v", string(output), err)
 			}
 		}
-		output, err := ContainerRemove(ctx, runConfig.name)
+		output, err := util.ContainerRemove(ctx, runConfig.name)
 		if err != nil {
 			plog.G(ctx).Warnf("Failed to remove container: %s: %v", string(output), err)
 		}
 	}
 	name := config.ConfigMapPodTrafficManager
-	inspect, err := NetworkInspect(ctx, name)
+	inspect, err := util.NetworkInspect(ctx, name)
 	if err != nil {
 		return err
 	}
 	if len(inspect.Containers) == 0 {
-		return NetworkRemove(ctx, name)
+		return util.NetworkRemove(ctx, name)
 	}
 	return nil
 }
@@ -65,13 +65,13 @@ func (l ConfigList) Run(ctx context.Context) error {
 	for index := len(l) - 1; index >= 0; index-- {
 		conf := l[index]
 
-		err := RunContainer(ctx, conf)
+		err := util.RunContainer(ctx, convertToDockerArgs(conf))
 		if err != nil {
 			return err
 		}
 
 		if index != 0 {
-			err = WaitDockerContainerRunning(ctx, conf.name)
+			err = util.WaitDockerContainerRunning(ctx, conf.name)
 			if err != nil {
 				return err
 			}
@@ -190,7 +190,7 @@ func (option *Options) ConvertPodToContainerConfigList(
 				if hostConfig.PublishAllPorts {
 					options = append(options, "--publish-all")
 				}
-				_, err = CreateNetwork(ctx, config.ConfigMapPodTrafficManager)
+				_, err = util.CreateNetwork(ctx, config.ConfigMapPodTrafficManager)
 				if err != nil {
 					plog.G(ctx).Errorf("Failed to create network: %v", err)
 					return nil, err
