@@ -4,26 +4,15 @@ package elevate
 
 import (
 	"context"
-	"flag"
 	"os"
 	"os/exec"
 	"os/signal"
-	"runtime"
 	"syscall"
-
-	"k8s.io/client-go/tools/clientcmd"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func RunWithElevated() {
-	// fix if startup with normal user, after elevated home dir will change to root user in linux
-	// but unix don't have this issue
-	if runtime.GOOS == "linux" && flag.Lookup("kubeconfig") == nil {
-		if _, err := os.Stat(clientcmd.RecommendedHomeFile); err == nil {
-			os.Args = append(os.Args, "--kubeconfig", clientcmd.RecommendedHomeFile)
-		}
-	}
 	cmd := exec.Command("sudo", append([]string{"--preserve-env=HOME"}, os.Args...)...)
 	plog.G(context.Background()).Debug(cmd.Args)
 	cmd.Stdout = os.Stdout
