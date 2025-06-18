@@ -2,7 +2,6 @@ package action
 
 import (
 	"io"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -23,7 +22,6 @@ func (svr *Server) Stop(resp rpc.Daemon_QuitServer) error {
 	}
 
 	svr.connect.Cleanup(ctx)
-	svr.t = time.Time{}
 	svr.connect = nil
 	return nil
 }

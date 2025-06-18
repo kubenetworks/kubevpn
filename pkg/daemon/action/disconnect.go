@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"os"
-	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -72,13 +71,11 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		}
 		svr.secondaryConnect = nil
 		svr.connect = nil
-		svr.t = time.Time{}
 	case req.ID != nil && req.GetID() == 0:
 		if svr.connect != nil {
 			svr.connect.Cleanup(ctx)
 		}
 		svr.connect = nil
-		svr.t = time.Time{}
 
 		if svr.clone != nil {
 			_ = svr.clone.Cleanup(ctx)
@@ -125,7 +122,6 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		}
 		if foundModeFull {
 			svr.connect = nil
-			svr.t = time.Time{}
 			if svr.clone != nil {
 				_ = svr.clone.Cleanup(ctx)
 			}
@@ -174,7 +170,6 @@ func disconnect(ctx context.Context, svr *Server, connect *handler.ConnectOption
 			plog.G(ctx).Infof("Disconnecting from the cluster...")
 			svr.connect.Cleanup(ctx)
 			svr.connect = nil
-			svr.t = time.Time{}
 		}
 	}
 	for i := 0; i < len(svr.secondaryConnect); i++ {

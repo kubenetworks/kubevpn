@@ -21,7 +21,6 @@ service Daemon {
 
   rpc Logs (stream LogRequest) returns (stream LogResponse) {}
   rpc List (ListRequest) returns (ListResponse) {}
-  rpc Get (GetRequest) returns (GetResponse) {}
   rpc Upgrade (UpgradeRequest) returns (UpgradeResponse) {}
   rpc Status (StatusRequest) returns (StatusResponse) {}
   rpc Version (VersionRequest) returns (VersionResponse) {}
@@ -88,7 +87,7 @@ message DisconnectRequest {
 }
 
 message DisconnectResponse {
-  string message = 1;
+  string Message = 1;
 }
 
 
@@ -129,7 +128,7 @@ message ProxyRequest {
 }
 
 message ProxyResponse {
-  string message = 1;
+  string Message = 1;
 }
 
 message LeaveRequest {
@@ -138,7 +137,7 @@ message LeaveRequest {
 }
 
 message LeaveResponse {
-  string message = 1;
+  string Message = 1;
 }
 
 message CloneRequest {
@@ -173,7 +172,7 @@ message CloneRequest {
 }
 
 message CloneResponse {
-  string message = 1;
+  string Message = 1;
 }
 
 message RemoveRequest {
@@ -181,14 +180,14 @@ message RemoveRequest {
 }
 
 message RemoveResponse {
-  string message = 1;
+  string Message = 1;
 }
 
 message QuitRequest {
 }
 
 message QuitResponse {
-  string message = 1;
+  string Message = 1;
 }
 
 message StatusRequest {
@@ -252,7 +251,7 @@ message VersionRequest {
 }
 
 message VersionResponse {
-  string version = 1;
+  string Version = 1;
 }
 
 message ConfigAddRequest {
@@ -305,23 +304,14 @@ message LogRequest {
 }
 
 message LogResponse {
-  string message = 1;
+  string Message = 1;
 }
 
 message ListRequest {
 }
 
 message ListResponse {
-  string message = 1;
-}
-
-message GetRequest {
-  string Namespace = 2;
-  string resource = 4;
-}
-
-message GetResponse {
-  repeated string metadata = 1;
+  string Message = 1;
 }
 
 message UpgradeRequest {
@@ -340,7 +330,7 @@ message UninstallRequest {
 }
 
 message UninstallResponse {
-  string message = 1;
+  string Message = 1;
 }
 
 message ResetRequest {
@@ -352,7 +342,7 @@ message ResetRequest {
 }
 
 message ResetResponse {
-  string message = 1;
+  string Message = 1;
 }
 
 message SshJump {

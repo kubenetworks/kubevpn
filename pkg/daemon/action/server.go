@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"gopkg.in/natefinch/lumberjack.v2"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/metadata/metadatainformer"
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -27,13 +25,9 @@ type Server struct {
 	LogFile   *lumberjack.Logger
 	Lock      sync.Mutex
 
-	t                time.Time
 	connect          *handler.ConnectOptions
 	clone            *handler.CloneOptions
 	secondaryConnect []*handler.ConnectOptions
-
-	resourceLists []*metav1.APIResourceList
-	informer      metadatainformer.SharedInformerFactory
 
 	ID string
 }
@@ -84,7 +78,7 @@ func (svr *Server) LoadFromConfig() error {
 			_ = util.PrintGRPCStream[rpc.ConnectResponse](nil, resp, svr.LogFile)
 		}
 	}
-	for _, c := range append(conf.SecondaryConnect) {
+	for _, c := range conf.SecondaryConnect {
 		if c != nil {
 			var resp rpc.Daemon_ConnectClient
 			resp, err = client.ConnectFork(context.Background())
@@ -97,9 +91,6 @@ func (svr *Server) LoadFromConfig() error {
 			_ = util.PrintGRPCStream[rpc.ConnectResponse](nil, resp, svr.LogFile)
 		}
 	}
-	// because connect/connect-fork will also offload to disk,
-	// but it maybe failed, so we need to write it back to disk
-	err = os.WriteFile(config.GetDBPath(), content, 0644)
 	return nil
 }
 

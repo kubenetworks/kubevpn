@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"io"
 	"os"
 	"runtime"
@@ -18,6 +17,8 @@ import (
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/cmd/exec"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // CopyOptions have the data required to perform the copy operation
