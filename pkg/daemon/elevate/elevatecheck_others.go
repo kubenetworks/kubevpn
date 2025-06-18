@@ -24,7 +24,7 @@ func RunWithElevated() {
 			os.Args = append(os.Args, "--kubeconfig", clientcmd.RecommendedHomeFile)
 		}
 	}
-	cmd := exec.Command("sudo", append([]string{"--preserve-env"}, os.Args...)...)
+	cmd := exec.Command("sudo", append([]string{"--preserve-env=HOME"}, os.Args...)...)
 	plog.G(context.Background()).Debug(cmd.Args)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
