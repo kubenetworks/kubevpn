@@ -660,3 +660,5 @@ d0b3dab8912a   ghcr.io/kubenetworks/kubevpn:v2.0.0    "/bin/bash"              5
 ### 支持者
 
 [![JetBrains logo.](https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg)](https://jb.gg/OpenSourceSupport)
+
+### [捐赠支持](https://kubevpn.dev/zh/docs/donate/)

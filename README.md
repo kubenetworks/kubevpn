@@ -56,7 +56,6 @@ With KubeVPN, empower yourself to develop applications entirely on your local PC
 curl -fsSL https://kubevpn.dev/install.sh | sh
 ```
 
-
 ### Install from [brew](https://brew.sh/) (macOS / Linux)
 
 ```shell
@@ -743,3 +742,5 @@ If you want to debug this project on local PC. Please follow the steps bellow:
 ### Supported by
 
 [![JetBrains logo.](https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg)](https://jb.gg/OpenSourceSupport)
+
+### [Donate](https://kubevpn.dev/docs/donate)
