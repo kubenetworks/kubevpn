@@ -7,8 +7,9 @@ import (
 	"os"
 	"os/exec"
 
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"golang.org/x/sys/unix"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func RunCmdWithElevated(exe string, args []string) error {
