@@ -4,26 +4,16 @@ package elevate
 
 import (
 	"context"
-	"flag"
 	"os"
 	"os/exec"
-	"runtime"
 
 	"golang.org/x/sys/unix"
-	"k8s.io/client-go/tools/clientcmd"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func RunCmdWithElevated(exe string, args []string) error {
-	// fix if startup with normal user, after elevated home dir will change to root user in linux
-	// but unix don't have this issue
-	if runtime.GOOS == "linux" && flag.Lookup("kubeconfig") == nil {
-		if _, err := os.Stat(clientcmd.RecommendedHomeFile); err == nil {
-			os.Args = append(os.Args, "--kubeconfig", clientcmd.RecommendedHomeFile)
-		}
-	}
-	cmd := exec.Command("sudo", append([]string{"--preserve-env", "--background", exe}, args...)...)
+	cmd := exec.Command("sudo", append([]string{"--preserve-env=HOME", "--background", exe}, args...)...)
 	plog.G(context.Background()).Debug(cmd.Args)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -41,13 +31,6 @@ func RunCmdWithElevated(exe string, args []string) error {
 }
 
 func RunCmd(exe string, args []string) error {
-	// fix if startup with normal user, after elevated home dir will change to root user in linux
-	// but unix don't have this issue
-	if runtime.GOOS == "linux" && flag.Lookup("kubeconfig") == nil {
-		if _, err := os.Stat(clientcmd.RecommendedHomeFile); err == nil {
-			os.Args = append(os.Args, "--kubeconfig", clientcmd.RecommendedHomeFile)
-		}
-	}
 	cmd := exec.Command(exe, args...)
 	cmd.SysProcAttr = &unix.SysProcAttr{
 		Setpgid: true,
