@@ -109,7 +109,7 @@ func restartDeployment(ctx context.Context, namespace string, clientset *kuberne
 		return err
 	}
 	scale.Spec.Replicas = 0
-	_, err = clientset.AppsV1().Deployments(namespace).UpdateScale(ctx, deployName, scale, metav1.UpdateOptions{})
+	scale, err = clientset.AppsV1().Deployments(namespace).UpdateScale(ctx, deployName, scale, metav1.UpdateOptions{})
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to update scale: %v", err)
 		return err
