@@ -21,10 +21,10 @@ rules:
       - delete
   - apiGroups: [ "" ]
     resources: [ "namespaces" ]
-    resourceNames: ["{{ include "kubevpn.namespace" . }}"]
+    resourceNames: [{{ include "kubevpn.namespace" . }}]
     verbs:
       - get
-      - patch
+      - update
   - apiGroups: [ "apps" ]
     resources: [ "deployments/scale", "deployments" ]
     resourceNames:
@@ -59,7 +59,7 @@ rules:
     verbs:
       - get
       - list
-      - patch
+      - update
   - apiGroups:
       - ""
     resources:

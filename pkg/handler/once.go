@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 
-	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -104,14 +103,19 @@ func genTLS(ctx context.Context, namespace string, clientset *kubernetes.Clients
 func restartDeployment(ctx context.Context, namespace string, clientset *kubernetes.Clientset) error {
 	deployName := config.ConfigMapPodTrafficManager
 	plog.G(ctx).Infof("Restarting Deployment %s", deployName)
-	scale := &autoscalingv1.Scale{Spec: autoscalingv1.ScaleSpec{Replicas: 0}}
-	scale1 := &autoscalingv1.Scale{Spec: autoscalingv1.ScaleSpec{Replicas: 1}}
-	_, err := clientset.AppsV1().Deployments(namespace).UpdateScale(ctx, deployName, scale, metav1.UpdateOptions{})
+	scale, err := clientset.AppsV1().Deployments(namespace).GetScale(ctx, deployName, metav1.GetOptions{})
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to get scale: %v", err)
+		return err
+	}
+	scale.Spec.Replicas = 0
+	_, err = clientset.AppsV1().Deployments(namespace).UpdateScale(ctx, deployName, scale, metav1.UpdateOptions{})
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to update scale: %v", err)
 		return err
 	}
-	_, err = clientset.AppsV1().Deployments(namespace).UpdateScale(ctx, deployName, scale1, metav1.UpdateOptions{})
+	scale.Spec.Replicas = 1
+	_, err = clientset.AppsV1().Deployments(namespace).UpdateScale(ctx, deployName, scale, metav1.UpdateOptions{})
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to update scale: %v", err)
 		return err
