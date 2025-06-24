@@ -835,7 +835,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if ipPoolStr != "" {
+	if strings.TrimSpace(ipPoolStr) != "" {
 		for _, s := range strings.Split(ipPoolStr, " ") {
 			_, cidr, _ := net.ParseCIDR(s)
 			if cidr != nil {
