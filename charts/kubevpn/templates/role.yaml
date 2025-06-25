@@ -45,12 +45,23 @@ rules:
       - patch
       - list
   # for get network cidr
-  - apiGroups: [ "" ]
-    resources: [ "pods/exec" ]
-    verbs: [ "create" ]
-  - apiGroups: [ "" ]
-    resources: [ "pods", "pods/log" ]
-    verbs: [ "list", "get", "create", "delete" ]
+  - apiGroups:
+      - ""
+    resources:
+      - pods/exec
+    verbs:
+      - create
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+    verbs:
+      - list
+      - get
+      - create
+      - delete
+      - watch
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
