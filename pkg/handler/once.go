@@ -127,7 +127,9 @@ func restartDeployment(ctx context.Context, namespace string, clientset *kuberne
 
 func getCIDR(ctx context.Context, factory cmdutil.Factory) error {
 	plog.G(ctx).Infof("Getting CIDR")
-	c := &ConnectOptions{}
+	c := &ConnectOptions{
+		Image: config.Image,
+	}
 	err := c.InitClient(factory)
 	if err != nil {
 		return err

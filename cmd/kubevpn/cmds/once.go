@@ -6,6 +6,7 @@ import (
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 )
 
@@ -20,5 +21,6 @@ func CmdOnce(factory cmdutil.Factory) *cobra.Command {
 		Hidden:                true,
 		DisableFlagsInUseLine: true,
 	}
+	cmd.Flags().StringVar(&config.Image, "image", config.Image, "use this image to startup container")
 	return cmd
 }

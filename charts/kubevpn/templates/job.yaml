@@ -34,3 +34,5 @@ spec:
           command:
             - kubevpn
             - once
+            - --image
+            - "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
