@@ -134,7 +134,8 @@ func getCIDR(ctx context.Context, factory cmdutil.Factory) error {
 	if err != nil {
 		return err
 	}
-	err = c.getCIDR(ctx)
+	// run inside pod
+	err = c.getCIDR(ctx, false)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get CIDR: %v", err)
 		return err
