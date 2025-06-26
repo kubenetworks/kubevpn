@@ -21,10 +21,10 @@ rules:
       - delete
   - apiGroups: [ "" ]
     resources: [ "namespaces" ]
-    resourceNames: ["{{ include "kubevpn.namespace" . }}"]
+    resourceNames: [{{ include "kubevpn.namespace" . }}]
     verbs:
       - get
-      - patch
+      - update
   - apiGroups: [ "apps" ]
     resources: [ "deployments/scale", "deployments" ]
     resourceNames:
@@ -43,6 +43,25 @@ rules:
       - get
       - update
       - patch
+      - list
+  # for get network cidr
+  - apiGroups:
+      - ""
+    resources:
+      - pods/exec
+    verbs:
+      - create
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+    verbs:
+      - list
+      - get
+      - create
+      - delete
+      - watch
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -59,7 +78,7 @@ rules:
     verbs:
       - get
       - list
-      - patch
+      - update
   - apiGroups:
       - ""
     resources:
@@ -68,3 +87,10 @@ rules:
       - get
       - list
       - watch
+  # for get network cidr
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - list

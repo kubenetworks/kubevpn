@@ -11,6 +11,7 @@ import (
 const (
 	HOME   = ".kubevpn"
 	Daemon = "daemon"
+	Log    = "log"
 
 	SockPath     = "user_daemon.sock"
 	SudoSockPath = "root_daemon.sock"
@@ -23,14 +24,15 @@ const (
 
 	ConfigFile = "config.yaml"
 
-	TmpDir = "tmp"
+	TempDir = "temp"
 
 	DBFile = "db"
 )
 
 var (
-	daemonPath string
 	homePath   string
+	daemonPath string
+	logPath    string
 
 	//go:embed config.yaml
 	config []byte
@@ -43,8 +45,9 @@ func init() {
 	}
 	homePath = filepath.Join(dir, HOME)
 	daemonPath = filepath.Join(dir, HOME, Daemon)
+	logPath = filepath.Join(dir, HOME, Log)
 
-	var paths = []string{homePath, daemonPath, GetPProfPath(), GetSyncthingPath(), GetTempPath()}
+	var paths = []string{homePath, daemonPath, logPath, GetPProfPath(), GetSyncthingPath(), GetTempPath()}
 	for _, path := range paths {
 		_, err = os.Stat(path)
 		if errors.Is(err, os.ErrNotExist) {
@@ -96,14 +99,14 @@ func GetConfigFile() string {
 }
 
 func GetTempPath() string {
-	return filepath.Join(homePath, TmpDir)
+	return filepath.Join(homePath, TempDir)
 }
 
 func GetDaemonLogPath(isSudo bool) string {
 	if isSudo {
-		return filepath.Join(daemonPath, SudoLogFile)
+		return filepath.Join(logPath, SudoLogFile)
 	}
-	return filepath.Join(daemonPath, UserLogFile)
+	return filepath.Join(logPath, UserLogFile)
 }
 
 func GetPProfPath() string {

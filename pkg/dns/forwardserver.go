@@ -51,10 +51,12 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 	var wg = &sync.WaitGroup{}
 	var isSuccess = &atomic.Bool{}
 
-	searchList := fix(originName, s.forwardDNS.Search)
+	var searchList []string
 	if v, ok := s.dnsCache.Get(originName); ok {
 		searchList = []string{v.(string)}
 		plog.G(ctx).Infof("Use cache name: %s --> %s", originName, v.(string))
+	} else {
+		searchList = fix(originName, s.forwardDNS.Search)
 	}
 
 	for _, name := range searchList {
@@ -67,7 +69,6 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 					msg.Question[i].Name = name
 				}
 
-				var answer *miekgdns.Msg
 				answer, err := miekgdns.ExchangeContext(ctx, msg, net.JoinHostPort(dnsAddr, s.forwardDNS.Port))
 				if err != nil {
 					plog.G(ctx).Errorf("Failed to found DNS name: %s: %v", name, err)
@@ -76,13 +77,11 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 				if len(answer.Answer) == 0 {
 					return
 				}
-				if isSuccess.Load() {
+				if !isSuccess.CompareAndSwap(false, true) {
 					return
 				}
 
-				isSuccess.Store(true)
 				s.dnsCache.Add(originName, name, time.Minute*30)
-				plog.G(ctx).Infof("Resolve domain %s with full name: %s --> %s", originName, name, answer.Answer[0].String())
 
 				for i := 0; i < len(answer.Answer); i++ {
 					answer.Answer[i].Header().Name = originName
@@ -90,6 +89,7 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 				for i := 0; i < len(answer.Question); i++ {
 					answer.Question[i].Name = originName
 				}
+				plog.G(ctx).Infof("Resolve domain %s with full name: %s --> %s", originName, name, answer.String())
 
 				err = w.WriteMsg(answer)
 				if err != nil {

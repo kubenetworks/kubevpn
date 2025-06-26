@@ -11,16 +11,6 @@ RUN apt-get clean && apt-get update && apt-get install -y wget dnsutils vim curl
     net-tools iptables iputils-ping lsof iproute2 tcpdump binutils traceroute conntrack socat iperf3 \
     apt-transport-https ca-certificates curl
 
-RUN if [ $(uname -m) = "x86_64" ]; then \
-      echo "The architecture is AMD64"; \
-      curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && chmod +x kubectl && mv kubectl /usr/local/bin; \
-    elif [ $(uname -m) = "aarch64" ]; then \
-      echo "The architecture is ARM64"; \
-      curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/arm64/kubectl" && chmod +x kubectl && mv kubectl /usr/local/bin; \
-    else \
-      echo "Unsupported architecture."; \
-    fi
-
 ENV TZ=Asia/Shanghai \
     DEBIAN_FRONTEND=noninteractive
 RUN apt update \

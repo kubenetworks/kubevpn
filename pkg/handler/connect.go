@@ -225,7 +225,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		return
 	}
 	go c.setupSignalHandler()
-	if err = c.getCIDR(c.ctx); err != nil {
+	if err = c.getCIDR(c.ctx, true); err != nil {
 		plog.G(ctx).Errorf("Failed to get network CIDR: %v", err)
 		return
 	}
@@ -822,11 +822,13 @@ func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error
 // https://stackoverflow.com/questions/45903123/kubernetes-set-service-cidr-and-pod-cidr-the-same
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster/54183373#54183373
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster
-func (c *ConnectOptions) getCIDR(ctx context.Context) error {
+func (c *ConnectOptions) getCIDR(ctx context.Context, filterAPIServer bool) error {
 	var err error
-	c.apiServerIPs, err = util.GetAPIServerIP(c.config.Host)
-	if err != nil {
-		return err
+	if filterAPIServer {
+		c.apiServerIPs, err = util.GetAPIServerIP(c.config.Host)
+		if err != nil {
+			return err
+		}
 	}
 
 	// (1) get CIDR from cache
@@ -835,7 +837,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if ipPoolStr != "" {
+	if strings.TrimSpace(ipPoolStr) != "" {
 		for _, s := range strings.Split(ipPoolStr, " ") {
 			_, cidr, _ := net.ParseCIDR(s)
 			if cidr != nil {
