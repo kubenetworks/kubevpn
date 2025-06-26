@@ -35,28 +35,17 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	var imagePullSecretName string
 	cmd := &cobra.Command{
 		Use:   "clone",
-		Short: i18n.T("Clone workloads to run in same namespace with same volume、env、and network"),
+		Short: i18n.T("Clone workloads run in current namespace with same volume、env、and network"),
 		Long: templates.LongDesc(i18n.T(`
-		Clone workloads to run in same namespace with same volume、env、and network
+		Clone workloads run in current namespace with same volume、env、and network
 
-		In this way, you can startup another deployment in same cluster or not, but with different image version,
+		In this way, you can startup another deployment in current namespace, but with different image version,
 		it also supports service mesh proxy. only traffic with special header will hit to cloned_resource.
 		`)),
 		Example: templates.Examples(i18n.T(`
 		# clone
-		- clone deployment run into current cluster and current namespace
+		- clone deployment run in current namespace
 		  kubevpn clone deployment/productpage
-
-		- clone deployment run into current cluster with different namespace
-		  kubevpn clone deployment/productpage -n test
-        
-		- clone deployment run into another cluster
-		  kubevpn clone deployment/productpage --target-kubeconfig ~/.kube/other-kubeconfig
-
-        - clone multiple workloads run into current cluster and current namespace
-          kubevpn clone deployment/authors deployment/productpage
-          or 
-          kubevpn clone deployment authors productpage
 
 		# clone with mesh, traffic with header foo=bar, will hit cloned workloads, otherwise hit origin workloads
 		kubevpn clone deployment/productpage --headers foo=bar

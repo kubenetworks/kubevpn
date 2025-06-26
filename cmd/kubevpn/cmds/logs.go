@@ -57,6 +57,6 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&req.Follow, "follow", "f", false, "Specify if the logs should be streamed.")
-	cmd.Flags().Int32VarP(&req.Lines, "number", "N", 10, "Lines of recent log file to display.")
+	cmd.Flags().Int32VarP(&req.Lines, "lines", "l", 10, "Lines of recent log file to display.")
 	return cmd
 }
