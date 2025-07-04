@@ -50,9 +50,15 @@ func (d *ClientDevice) handlePacket(ctx context.Context, forward *Forwarder) {
 				return
 			}
 			defer conn.Close()
-			err = handlePacketClient(ctx, d.tunInbound, d.tunOutbound, conn)
-			if err != nil {
+
+			errChan := make(chan error, 2)
+			go readFromConn(ctx, conn, d.tunInbound, d.tunOutbound, errChan)
+			go writeToConn(ctx, conn, d.tunInbound, errChan)
+
+			select {
+			case err = <-errChan:
 				plog.G(ctx).Errorf("Failed to transport data to remote %s: %v", conn.RemoteAddr(), err)
+			case <-ctx.Done():
 				return
 			}
 		}()
@@ -67,67 +73,68 @@ func forwardConn(ctx context.Context, forwarder *Forwarder) (net.Conn, error) {
 	return conn, nil
 }
 
-func handlePacketClient(ctx context.Context, tunInbound <-chan *Packet, tunOutbound chan<- *Packet, conn net.Conn) error {
-	errChan := make(chan error, 2)
-
-	go func() {
-		defer util.HandleCrash()
-		for packet := range tunInbound {
-			err := conn.SetWriteDeadline(time.Now().Add(config.KeepAliveTime))
-			if err != nil {
-				plog.G(ctx).Errorf("Failed to set write deadline: %v", err)
-				util.SafeWrite(errChan, errors.Wrap(err, "failed to set write deadline"))
-				return
-			}
-			_, err = conn.Write(packet.data[:packet.length])
-			config.LPool.Put(packet.data[:])
-			if err != nil {
-				plog.G(ctx).Errorf("Failed to write packet to remote: %v", err)
-				util.SafeWrite(errChan, errors.Wrap(err, "failed to write packet to remote"))
-				return
-			}
+func readFromConn(ctx context.Context, conn net.Conn, tunInbound chan *Packet, tunOutbound chan *Packet, errChan chan error) {
+	defer util.HandleCrash()
+	var gvisorInbound = make(chan *Packet, MaxSize)
+	go handleGvisorPacket(gvisorInbound, tunInbound).Run(ctx)
+	for {
+		buf := config.LPool.Get().([]byte)[:]
+		err := conn.SetReadDeadline(time.Now().Add(config.KeepAliveTime))
+		if err != nil {
+			config.LPool.Put(buf[:])
+			plog.G(ctx).Errorf("Failed to set read deadline: %v", err)
+			util.SafeWrite(errChan, errors.Wrap(err, "failed to set read deadline"))
+			return
 		}
-	}()
-
-	go func() {
-		defer util.HandleCrash()
-		for {
-			buf := config.LPool.Get().([]byte)[:]
-			err := conn.SetReadDeadline(time.Now().Add(config.KeepAliveTime))
-			if err != nil {
-				plog.G(ctx).Errorf("Failed to set read deadline: %v", err)
-				util.SafeWrite(errChan, errors.Wrap(err, "failed to set read deadline"))
-				return
-			}
-			n, err := conn.Read(buf[:])
-			if err != nil {
-				config.LPool.Put(buf[:])
-				plog.G(ctx).Errorf("Failed to read packet from remote: %v", err)
-				util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to read packet from remote %s", conn.RemoteAddr())))
-				return
-			}
-			if n == 0 {
-				plog.G(ctx).Warnf("Packet length 0")
-				config.LPool.Put(buf[:])
-				continue
-			}
+		n, err := conn.Read(buf[:])
+		if err != nil {
+			config.LPool.Put(buf[:])
+			plog.G(ctx).Errorf("Failed to read packet from remote: %v", err)
+			util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to read packet from remote %s", conn.RemoteAddr())))
+			return
+		}
+		if n < 1 {
+			plog.G(ctx).Warnf("Packet length 0")
+			config.LPool.Put(buf[:])
+			continue
+		}
+		if buf[0] == 1 {
+			util.SafeWrite(gvisorInbound, NewPacket(buf[:], n, nil, nil), func(v *Packet) {
+				config.LPool.Put(v.data[:])
+				plog.G(context.Background()).Errorf("Drop packet, LocalAddr: %s, Remote: %s, Length: %d", conn.LocalAddr(), conn.RemoteAddr(), v.length)
+			})
+		} else {
 			util.SafeWrite(tunOutbound, NewPacket(buf[:], n, nil, nil), func(v *Packet) {
 				config.LPool.Put(v.data[:])
 				plog.G(context.Background()).Errorf("Drop packet, LocalAddr: %s, Remote: %s, Length: %d", conn.LocalAddr(), conn.RemoteAddr(), v.length)
 			})
 		}
-	}()
+	}
+}
 
-	select {
-	case err := <-errChan:
-		return err
-	case <-ctx.Done():
-		return nil
+func writeToConn(ctx context.Context, conn net.Conn, inbound <-chan *Packet, errChan chan error) {
+	defer util.HandleCrash()
+	for packet := range inbound {
+		err := conn.SetWriteDeadline(time.Now().Add(config.KeepAliveTime))
+		if err != nil {
+			plog.G(ctx).Errorf("Failed to set write deadline: %v", err)
+			util.SafeWrite(errChan, errors.Wrap(err, "failed to set write deadline"))
+			return
+		}
+		_, err = conn.Write(packet.data[:packet.length])
+		config.LPool.Put(packet.data[:])
+		if err != nil {
+			plog.G(ctx).Errorf("Failed to write packet to remote: %v", err)
+			util.SafeWrite(errChan, errors.Wrap(err, "failed to write packet to remote"))
+			return
+		}
 	}
 }
 
 func (d *ClientDevice) readFromTun(ctx context.Context) {
 	defer util.HandleCrash()
+	var gvisorInbound = make(chan *Packet, MaxSize)
+	go handleGvisorPacket(gvisorInbound, d.tunOutbound).Run(ctx)
 	for {
 		buf := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(buf[:])
@@ -154,17 +161,17 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 			plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", v.src, v.dst, layers.IPProtocol(protocol).String(), v.length)
 		}
 		if packet.src.Equal(packet.dst) {
-			util.SafeWrite(d.tunOutbound, packet, f)
-			continue
+			util.SafeWrite(gvisorInbound, packet, f)
+		} else {
+			util.SafeWrite(d.tunInbound, packet, f)
 		}
-		util.SafeWrite(d.tunInbound, packet, f)
 	}
 }
 
 func (d *ClientDevice) writeToTun(ctx context.Context) {
 	defer util.HandleCrash()
 	for packet := range d.tunOutbound {
-		_, err := d.tun.Write(packet.data[:packet.length])
+		_, err := d.tun.Write(packet.data[1:packet.length])
 		config.LPool.Put(packet.data[:])
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to write packet to tun device: %v", err)

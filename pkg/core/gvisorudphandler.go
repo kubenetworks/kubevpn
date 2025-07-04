@@ -125,7 +125,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				errChan <- errors.WithMessage(err, "read datagram packet failed")
 				return
 			}
-			if datagram.DataLength == 0 {
+			if datagram.DataLength < 1 {
 				errChan <- fmt.Errorf("length of read packet is zero")
 				return
 			}
@@ -135,7 +135,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				errChan <- errors.WithMessage(err, "set write deadline failed")
 				return
 			}
-			if _, err = udpConn.Write(datagram.Data[:datagram.DataLength]); err != nil {
+			if _, err = udpConn.Write(datagram.Data[1:datagram.DataLength]); err != nil {
 				errChan <- errors.WithMessage(err, "write datagram packet failed")
 				return
 			}
@@ -170,7 +170,10 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				errChan <- errors.WithMessage(err, "set write deadline failed")
 				return
 			}
-			packet := newDatagramPacket(buf, n)
+			copy(buf[1:n+1], buf[:n])
+			// write to client tun device
+			buf[0] = 0
+			packet := newDatagramPacket(buf, n+1)
 			if err = packet.Write(tcpConn); err != nil {
 				errChan <- err
 				return

@@ -76,7 +76,7 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 }
 
 func (h *UDPOverTCPHandler) handlePacket(ctx context.Context, tcpConn net.Conn, datagram *DatagramPacket) error {
-	src, dst, protocol, err := util.ParseIP(datagram.Data[:datagram.DataLength])
+	src, dst, protocol, err := util.ParseIP(datagram.Data[1:datagram.DataLength])
 	if err != nil {
 		plog.G(ctx).Errorf("[TCP] Unknown packet")
 		config.LPool.Put(datagram.Data[:])
@@ -87,6 +87,8 @@ func (h *UDPOverTCPHandler) handlePacket(ctx context.Context, tcpConn net.Conn, 
 
 	if conn, ok := h.routeMapTCP.Load(dst.String()); ok {
 		plog.G(ctx).Debugf("[TCP] Find TCP route SRC: %s to DST: %s -> %s", src, dst, conn.(net.Conn).RemoteAddr())
+		// local client needs handle it with gVisor
+		datagram.Data[0] = 1
 		err = datagram.Write(conn.(net.Conn))
 		config.LPool.Put(datagram.Data[:])
 		if err != nil {
