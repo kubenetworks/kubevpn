@@ -53,9 +53,9 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 			if c.dhcp != nil {
 				err := c.dhcp.ReleaseIP(ctx, ipv4, ipv6)
 				if err != nil {
-					plog.G(logCtx).Errorf("Failed to release IP to DHCP server: %v", err)
+					plog.G(logCtx).Errorf("Failed to IPv4 %v IPv6 %v: %v", ipv4, ipv6, err)
 				} else {
-					plog.G(logCtx).Infof("Releaseed IPv4 %v IPv6 %v to DHCP server", ipv4, ipv6)
+					plog.G(logCtx).Infof("Released IPv4 %v IPv6 %v", ipv4, ipv6)
 				}
 			}
 			if c.clientset != nil {

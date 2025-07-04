@@ -193,9 +193,9 @@ func (h *admissionReviewHandler) handleDelete(ar v1.AdmissionReview) *v1.Admissi
 		defer h.Unlock()
 		err := h.dhcp.ReleaseIP(context.Background(), ipv4, ipv6)
 		if err != nil {
-			plog.G(context.Background()).Errorf("Failed to release IPv4 %v IPv6 %s to DHCP server: %v", ipv4, ipv6, err)
+			plog.G(context.Background()).Errorf("Failed to release IPv4 %v IPv6 %s: %v", ipv4, ipv6, err)
 		} else {
-			plog.G(context.Background()).Debugf("Release IPv4 %v IPv6 %v to DHCP server", ipv4, ipv6)
+			plog.G(context.Background()).Debugf("Release IPv4 %v IPv6 %v", ipv4, ipv6)
 		}
 	}
 	return &v1.AdmissionResponse{Allowed: true}

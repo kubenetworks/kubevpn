@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -259,6 +260,17 @@ func addVirtualRule(v []*controlplane.Virtual, ns, nodeID string, port []control
 	})
 	if v[index].Ports == nil {
 		v[index].Ports = port
+	}
+
+	// envoy rule have order, eg:
+	// 1. null header to a
+	// 2. foo=bar to b
+	// then will never hit to b
+	// so needs to let null header to last rule
+	for x := range v {
+		sort.SliceStable(v[x].Rules, func(i, j int) bool {
+			return len(v[x].Rules[i].Headers) != 0
+		})
 	}
 	return v
 }
