@@ -19,32 +19,38 @@ import (
 
 func TCPForwarder(ctx context.Context, s *stack.Stack) func(stack.TransportEndpointID, *stack.PacketBuffer) bool {
 	return tcp.NewForwarder(s, 0, 100000, func(request *tcp.ForwarderRequest) {
-		defer request.Complete(false)
 		id := request.ID()
 		plog.G(ctx).Infof("[TUN-TCP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
 			id.LocalPort, id.LocalAddress.String(), id.RemotePort, id.RemoteAddress.String(),
 		)
-
+		w := &waiter.Queue{}
+		endpoint, tErr := request.CreateEndpoint(w)
+		if tErr != nil {
+			plog.G(ctx).Errorf("[TUN-TCP] Failed to create endpoint: %v", tErr)
+			request.Complete(true)
+			return
+		}
+		conn := gonet.NewTCPConn(w, endpoint)
+		defer conn.Close()
+		var err error
+		defer func() {
+			if err != nil && !errors.Is(err, io.EOF) {
+				request.Complete(true)
+			} else {
+				request.Complete(false)
+			}
+		}()
 		// 2, dial proxy
 		host := id.LocalAddress.String()
 		port := fmt.Sprintf("%d", id.LocalPort)
 		var remote net.Conn
 		var d = net.Dialer{Timeout: time.Second * 5}
-		remote, err := d.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
+		remote, err = d.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
 		if err != nil {
 			plog.G(ctx).Errorf("[TUN-TCP] Failed to connect addr %s: %v", net.JoinHostPort(host, port), err)
 			return
 		}
 
-		w := &waiter.Queue{}
-		endpoint, tErr := request.CreateEndpoint(w)
-		if tErr != nil {
-			plog.G(ctx).Errorf("[TUN-TCP] Failed to create endpoint: %v", tErr)
-			return
-		}
-		conn := gonet.NewTCPConn(w, endpoint)
-
-		defer conn.Close()
 		defer remote.Close()
 		errChan := make(chan error, 2)
 		go func() {
