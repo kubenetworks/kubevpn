@@ -95,9 +95,6 @@ func (h *UDPOverTCPHandler) handlePacket(ctx context.Context, tcpConn net.Conn, 
 			plog.G(ctx).Errorf("[TCP] Failed to write to %s <- %s : %s", conn.(net.Conn).RemoteAddr(), conn.(net.Conn).LocalAddr(), err)
 			return err
 		}
-	} else if (config.CIDR.Contains(dst) || config.CIDR6.Contains(dst)) && (!config.RouterIP.Equal(dst) && !config.RouterIP6.Equal(dst)) {
-		plog.G(ctx).Warnf("[TCP] No route for src: %s -> dst: %s, drop it", src, dst)
-		config.LPool.Put(datagram.Data[:])
 	} else {
 		plog.G(ctx).Debugf("[TCP] Forward to TUN device, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), datagram.DataLength)
 		util.SafeWrite(h.packetChan, NewPacket(datagram.Data, int(datagram.DataLength), src, dst), func(v *Packet) {

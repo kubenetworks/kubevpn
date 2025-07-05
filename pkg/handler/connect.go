@@ -196,11 +196,11 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
 		if c.Engine == config.EngineGvisor {
-			err = inject.InjectEnvoySidecar(ctx, nodeID, c.factory, c.Namespace, object, controller, headers, portMap, image)
+			err = inject.InjectEnvoyAndSSH(ctx, nodeID, c.factory, c.Namespace, object, controller, headers, portMap, image)
 		} else if len(headers) != 0 || len(portMap) != 0 {
-			err = inject.InjectVPNAndEnvoySidecar(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, headers, portMap, tlsSecret, image)
+			err = inject.InjectServiceMesh(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, headers, portMap, tlsSecret, image)
 		} else {
-			err = inject.InjectVPNSidecar(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, tlsSecret, image)
+			err = inject.InjectVPN(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, tlsSecret, image)
 		}
 		if err != nil {
 			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %s", workload, namespace, err.Error())

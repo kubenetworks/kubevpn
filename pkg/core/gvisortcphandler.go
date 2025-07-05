@@ -20,13 +20,11 @@ import (
 type gvisorTCPHandler struct {
 	// map[srcIP]net.Conn
 	routeMapTCP *sync.Map
-	packetChan  chan *Packet
 }
 
 func GvisorTCPHandler() Handler {
 	return &gvisorTCPHandler{
 		routeMapTCP: RouteMapTCP,
-		packetChan:  TCPPacketChan,
 	}
 }
 
