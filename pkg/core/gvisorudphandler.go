@@ -125,7 +125,7 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				errChan <- errors.WithMessage(err, "read datagram packet failed")
 				return
 			}
-			if datagram.DataLength < 0 {
+			if datagram.DataLength == 0 {
 				errChan <- fmt.Errorf("length of read packet is zero")
 				return
 			}
