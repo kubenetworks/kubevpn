@@ -1,9 +1,61 @@
 package core
 
 import (
+	"context"
 	"encoding/binary"
 	"io"
+	"net"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
+
+func NewUDPConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, error) {
+	return &UDPConnOverTCP{ctx: ctx, Conn: conn}, nil
+}
+
+var _ net.Conn = (*UDPConnOverTCP)(nil)
+
+// UDPConnOverTCP fake udp connection over tcp connection
+type UDPConnOverTCP struct {
+	// tcp connection
+	net.Conn
+	ctx context.Context
+}
+
+func (c *UDPConnOverTCP) Read(b []byte) (int, error) {
+	select {
+	case <-c.ctx.Done():
+		return 0, c.ctx.Err()
+	default:
+		datagram, err := readDatagramPacket(c.Conn, b)
+		if err != nil {
+			return 0, err
+		}
+		return int(datagram.DataLength), nil
+	}
+}
+
+func (c *UDPConnOverTCP) Write(b []byte) (int, error) {
+	buf := config.LPool.Get().([]byte)[:]
+	n := copy(buf, b)
+	defer config.LPool.Put(buf)
+
+	packet := newDatagramPacket(buf, n)
+	if err := packet.Write(c.Conn); err != nil {
+		return 0, err
+	}
+	return len(b), nil
+}
+
+func (c *UDPConnOverTCP) Close() error {
+	if cc, ok := c.Conn.(interface{ CloseRead() error }); ok {
+		_ = cc.CloseRead()
+	}
+	if cc, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		_ = cc.CloseWrite()
+	}
+	return c.Conn.Close()
+}
 
 type DatagramPacket struct {
 	DataLength uint16 // [2]byte

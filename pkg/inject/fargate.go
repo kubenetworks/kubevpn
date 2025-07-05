@@ -25,9 +25,9 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-// InjectEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
+// InjectEnvoyAndSSH patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
-func InjectEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Factory, managerNamespace string, current, object *runtimeresource.Info, headers map[string]string, portMap []string, image string) (err error) {
+func InjectEnvoyAndSSH(ctx context.Context, nodeID string, f cmdutil.Factory, managerNamespace string, current, object *runtimeresource.Info, headers map[string]string, portMap []string, image string) (err error) {
 	var clientset *kubernetes.Clientset
 	clientset, err = f.KubernetesClientSet()
 	if err != nil {

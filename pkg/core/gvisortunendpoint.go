@@ -25,8 +25,12 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, c
 		pktBuffer := endpoint.ReadContext(ctx)
 		if pktBuffer != nil {
 			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionSend, pktBuffer.NetworkProtocolNumber, pktBuffer)
-			buf := pktBuffer.ToView().AsSlice()
-			_, err := tcpConn.Write(buf)
+			data := pktBuffer.ToView().AsSlice()
+			buf := config.LPool.Get().([]byte)[:]
+			n := copy(buf[1:], data)
+			buf[0] = 0
+			_, err := tcpConn.Write(buf[:n+1])
+			config.LPool.Put(buf[:])
 			if err != nil {
 				plog.G(ctx).Errorf("[TUN-GVISOR] Failed to write data to tun device: %v", err)
 			}
@@ -58,9 +62,9 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		var src, dst net.IP
 		// TUN interface with IFF_NO_PI enabled, thus
 		// we need to determine protocol from version field
-		if util.IsIPv4(buf) {
+		if util.IsIPv4(buf[1:read]) {
 			protocol = header.IPv4ProtocolNumber
-			ipHeader, err := ipv4.ParseHeader(buf[:read])
+			ipHeader, err := ipv4.ParseHeader(buf[1:read])
 			if err != nil {
 				plog.G(ctx).Errorf("Failed to parse IPv4 header: %v", err)
 				config.LPool.Put(buf[:])
@@ -69,9 +73,9 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			ipProtocol = ipHeader.Protocol
 			src = ipHeader.Src
 			dst = ipHeader.Dst
-		} else if util.IsIPv6(buf) {
+		} else if util.IsIPv6(buf[1:read]) {
 			protocol = header.IPv6ProtocolNumber
-			ipHeader, err := ipv6.ParseHeader(buf[:read])
+			ipHeader, err := ipv6.ParseHeader(buf[1:read])
 			if err != nil {
 				plog.G(ctx).Errorf("[TCP-GVISOR] Failed to parse IPv6 header: %s", err.Error())
 				config.LPool.Put(buf[:])
@@ -91,48 +95,26 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		// for issue 594, sometimes k8s service network CIDR also use CIDR 198.19.151.170
 		// if we can find dst in route map, just trade packet as inner communicate
 		// if not find dst in route map, just trade packet as k8s service/pod ip
-		_, found := h.routeMapTCP.Load(dst.String())
-		if found && (config.CIDR.Contains(dst) || config.CIDR6.Contains(dst)) {
-			err = h.handlePacket(ctx, buf, read, src, dst, layers.IPProtocol(ipProtocol).String())
+		if c, found := h.routeMapTCP.Load(dst.String()); found {
+			plog.G(ctx).Debugf("[TCP-GVISOR] Find TCP route SRC: %s to DST: %s -> %s", src, dst, c.(net.Conn).RemoteAddr())
+			dgram := newDatagramPacket(buf, read)
+			err = dgram.Write(c.(net.Conn))
+			config.LPool.Put(buf[:])
 			if err != nil {
-				plog.G(ctx).Errorf("[TCP-GVISOR] Failed to handle packet: %v", err)
+				plog.G(ctx).Errorf("[TCP-GVISOR] Failed to write to %s <- %s : %s", c.(net.Conn).RemoteAddr(), c.(net.Conn).LocalAddr(), err)
 			}
-			continue
+		} else {
+			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+				ReserveHeaderBytes: 0,
+				Payload:            buffer.MakeWithData(buf[1:read]),
+			})
+			config.LPool.Put(buf[:])
+			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
+			endpoint.InjectInbound(protocol, pkt)
+			pkt.DecRef()
+			plog.G(ctx).Debugf("[TCP-GVISOR] Write to Gvisor. SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
 		}
-
-		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
-			ReserveHeaderBytes: 0,
-			Payload:            buffer.MakeWithData(buf[:read]),
-		})
-		config.LPool.Put(buf[:])
-		sniffer.LogPacket("[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
-		endpoint.InjectInbound(protocol, pkt)
-		pkt.DecRef()
-		plog.G(ctx).Debugf("[TCP-GVISOR] Write to Gvisor. SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
 	}
-}
-
-func (h *gvisorTCPHandler) handlePacket(ctx context.Context, buf []byte, length int, src, dst net.IP, protocol string) error {
-	if conn, ok := h.routeMapTCP.Load(dst.String()); ok {
-		plog.G(ctx).Debugf("[TCP-GVISOR] Find TCP route SRC: %s to DST: %s -> %s", src, dst, conn.(net.Conn).RemoteAddr())
-		dgram := newDatagramPacket(buf, length)
-		err := dgram.Write(conn.(net.Conn))
-		config.LPool.Put(buf[:])
-		if err != nil {
-			plog.G(ctx).Errorf("[TCP-GVISOR] Failed to write to %s <- %s : %s", conn.(net.Conn).RemoteAddr(), conn.(net.Conn).LocalAddr(), err)
-			return err
-		}
-	} else if config.RouterIP.Equal(dst) || config.RouterIP6.Equal(dst) {
-		plog.G(ctx).Debugf("[TCP-GVISOR] Forward to TUN device, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, protocol, length)
-		util.SafeWrite(h.packetChan, NewPacket(buf[:], length, src, dst), func(v *Packet) {
-			config.LPool.Put(v.data[:])
-			plog.G(context.Background()).Errorf("[TCP-GVISOR] Drop packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, protocol, v.length)
-		})
-	} else {
-		plog.G(ctx).Warnf("[TCP-GVISOR] No route for src: %s -> dst: %s, drop it", src, dst)
-		config.LPool.Put(buf[:])
-	}
-	return nil
 }
 
 func (h *gvisorTCPHandler) addToRouteMapTCP(ctx context.Context, src net.IP, tcpConn net.Conn) {

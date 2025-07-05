@@ -859,19 +859,19 @@ func Init(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	go startupHttpServer(t, "9080", local)
-	go startupHttpServer(t, "8080", local8080)
+	go startupHttpServer(t, "localhost:9080", local)
+	go startupHttpServer(t, "localhost:8080", local8080)
 }
 
-func startupHttpServer(t *testing.T, port, str string) {
+func startupHttpServer(t *testing.T, addr, str string) {
 	var health = func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(str))
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", health)
 	mux.HandleFunc("/health", health)
-	t.Logf("Start listening http port %s ...", port)
-	err := http.ListenAndServe(":"+port, mux)
+	t.Logf("Start listening http addr %s ...", addr)
+	err := http.ListenAndServe(addr, mux)
 	if err != nil {
 		t.Fatal(err)
 	}

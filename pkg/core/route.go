@@ -21,10 +21,6 @@ var (
 	TCPPacketChan = make(chan *Packet, MaxSize)
 )
 
-type TCPUDPacket struct {
-	data *DatagramPacket
-}
-
 // Route example:
 // -l "tcp://:10800" -l "tun://:8422?net=198.19.0.100/16"
 // -l "tun:/10.233.24.133:8422?net=198.19.0.102/16&route=198.19.0.0/16"

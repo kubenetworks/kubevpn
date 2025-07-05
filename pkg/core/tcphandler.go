@@ -36,7 +36,7 @@ func (c *UDPOverTCPConnector) ConnectContext(ctx context.Context, conn net.Conn)
 			return nil, err
 		}
 	}
-	return newUDPConnOverTCP(ctx, conn)
+	return NewUDPConnOverTCP(ctx, conn)
 }
 
 type UDPOverTCPHandler struct {
@@ -76,7 +76,7 @@ func (h *UDPOverTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 }
 
 func (h *UDPOverTCPHandler) handlePacket(ctx context.Context, tcpConn net.Conn, datagram *DatagramPacket) error {
-	src, dst, protocol, err := util.ParseIP(datagram.Data[:datagram.DataLength])
+	src, dst, protocol, err := util.ParseIP(datagram.Data[1:datagram.DataLength])
 	if err != nil {
 		plog.G(ctx).Errorf("[TCP] Unknown packet")
 		config.LPool.Put(datagram.Data[:])
@@ -93,9 +93,6 @@ func (h *UDPOverTCPHandler) handlePacket(ctx context.Context, tcpConn net.Conn, 
 			plog.G(ctx).Errorf("[TCP] Failed to write to %s <- %s : %s", conn.(net.Conn).RemoteAddr(), conn.(net.Conn).LocalAddr(), err)
 			return err
 		}
-	} else if (config.CIDR.Contains(dst) || config.CIDR6.Contains(dst)) && (!config.RouterIP.Equal(dst) && !config.RouterIP6.Equal(dst)) {
-		plog.G(ctx).Warnf("[TCP] No route for src: %s -> dst: %s, drop it", src, dst)
-		config.LPool.Put(datagram.Data[:])
 	} else {
 		plog.G(ctx).Debugf("[TCP] Forward to TUN device, SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), datagram.DataLength)
 		util.SafeWrite(h.packetChan, NewPacket(datagram.Data, int(datagram.DataLength), src, dst), func(v *Packet) {
@@ -126,52 +123,4 @@ func (h *UDPOverTCPHandler) removeFromRouteMapTCP(ctx context.Context, tcpConn n
 		}
 		return true
 	})
-}
-
-var _ net.Conn = (*UDPConnOverTCP)(nil)
-
-// UDPConnOverTCP fake udp connection over tcp connection
-type UDPConnOverTCP struct {
-	// tcp connection
-	net.Conn
-	ctx context.Context
-}
-
-func newUDPConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, error) {
-	return &UDPConnOverTCP{ctx: ctx, Conn: conn}, nil
-}
-
-func (c *UDPConnOverTCP) Read(b []byte) (int, error) {
-	select {
-	case <-c.ctx.Done():
-		return 0, c.ctx.Err()
-	default:
-		datagram, err := readDatagramPacket(c.Conn, b)
-		if err != nil {
-			return 0, err
-		}
-		return int(datagram.DataLength), nil
-	}
-}
-
-func (c *UDPConnOverTCP) Write(b []byte) (int, error) {
-	buf := config.LPool.Get().([]byte)[:]
-	n := copy(buf, b)
-	defer config.LPool.Put(buf)
-
-	packet := newDatagramPacket(buf, n)
-	if err := packet.Write(c.Conn); err != nil {
-		return 0, err
-	}
-	return len(b), nil
-}
-
-func (c *UDPConnOverTCP) Close() error {
-	if cc, ok := c.Conn.(interface{ CloseRead() error }); ok {
-		_ = cc.CloseRead()
-	}
-	if cc, ok := c.Conn.(interface{ CloseWrite() error }); ok {
-		_ = cc.CloseWrite()
-	}
-	return c.Conn.Close()
 }

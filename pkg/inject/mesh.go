@@ -32,8 +32,8 @@ import (
 
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
 
-// InjectVPNAndEnvoySidecar patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
-func InjectVPNAndEnvoySidecar(ctx context.Context, nodeID string, f cmdutil.Factory, managerNamespace string, object *runtimeresource.Info, c util.PodRouteConfig, headers map[string]string, portMaps []string, secret *v1.Secret, image string) (err error) {
+// InjectServiceMesh patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
+func InjectServiceMesh(ctx context.Context, nodeID string, f cmdutil.Factory, managerNamespace string, object *runtimeresource.Info, c util.PodRouteConfig, headers map[string]string, portMaps []string, secret *v1.Secret, image string) (err error) {
 	var clientset *kubernetes.Clientset
 	clientset, err = f.KubernetesClientSet()
 	if err != nil {

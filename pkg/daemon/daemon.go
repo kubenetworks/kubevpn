@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"gopkg.in/natefinch/lumberjack.v2"
+	glog "gvisor.dev/gvisor/pkg/log"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
@@ -61,6 +62,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	klog.SetOutput(l)
 	klog.LogToStderr(false)
 	plog.L.SetOutput(l)
+	glog.SetTarget(plog.ServerEmitter{Writer: &glog.Writer{Next: l}})
 	rest.SetDefaultWarningHandler(rest.NoWarnings{})
 	// every day 00:00:00 rotate log
 	go rotateLog(l)
