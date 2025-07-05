@@ -161,6 +161,8 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 			plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", v.src, v.dst, layers.IPProtocol(protocol).String(), v.length)
 		}
 		if packet.src.Equal(packet.dst) {
+			// local client handle it with gvisor
+			packet.data[0] = 1
 			util.SafeWrite(gvisorInbound, packet, f)
 		} else {
 			util.SafeWrite(d.tunInbound, packet, f)

@@ -63,9 +63,9 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		var src, dst net.IP
 		// TUN interface with IFF_NO_PI enabled, thus
 		// we need to determine protocol from version field
-		if util.IsIPv4(buf) {
+		if util.IsIPv4(buf[1:read]) {
 			protocol = header.IPv4ProtocolNumber
-			ipHeader, err := ipv4.ParseHeader(buf[:read])
+			ipHeader, err := ipv4.ParseHeader(buf[1:read])
 			if err != nil {
 				plog.G(ctx).Errorf("Failed to parse IPv4 header: %v", err)
 				config.LPool.Put(buf[:])
@@ -74,9 +74,9 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			ipProtocol = ipHeader.Protocol
 			src = ipHeader.Src
 			dst = ipHeader.Dst
-		} else if util.IsIPv6(buf) {
+		} else if util.IsIPv6(buf[1:read]) {
 			protocol = header.IPv6ProtocolNumber
-			ipHeader, err := ipv6.ParseHeader(buf[:read])
+			ipHeader, err := ipv6.ParseHeader(buf[1:read])
 			if err != nil {
 				plog.G(ctx).Errorf("[TCP-GVISOR] Failed to parse IPv6 header: %s", err.Error())
 				config.LPool.Put(buf[:])
@@ -99,6 +99,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		if c, found := h.routeMapTCP.Load(dst.String()); found {
 			plog.G(ctx).Debugf("[TCP-GVISOR] Find TCP route SRC: %s to DST: %s -> %s", src, dst, c.(net.Conn).RemoteAddr())
 			dgram := newDatagramPacket(buf, read)
+			buf[0] = 1
 			err = dgram.Write(c.(net.Conn))
 			config.LPool.Put(buf[:])
 			if err != nil {

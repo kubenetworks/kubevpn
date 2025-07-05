@@ -34,7 +34,7 @@ func (h *gvisorLocalTCPHandler) Run(ctx context.Context) {
 	endpoint := channel.New(tcp.DefaultReceiveBufferSize, uint32(config.DefaultMTU), tcpip.GetRandMacAddr())
 	go func() {
 		defer util.HandleCrash()
-		readFromGvisorInboundWriteToEndpointOrTun(ctx, h.gvisorInbound, endpoint, h.outbound)
+		readFromGvisorInboundWriteToEndpoint(ctx, h.gvisorInbound, endpoint)
 		util.SafeClose(h.errChan)
 	}()
 	go func() {

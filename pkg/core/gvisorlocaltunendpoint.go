@@ -26,13 +26,14 @@ func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint,
 			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionSend, pktBuffer.NetworkProtocolNumber, pktBuffer)
 			data := pktBuffer.ToView().AsSlice()
 			buf := config.LPool.Get().([]byte)[:]
-			n := copy(buf, data)
-			out <- NewPacket(buf[:], n, nil, nil)
+			n := copy(buf[1:], data)
+			buf[0] = 1
+			out <- NewPacket(buf[:], n+1, nil, nil)
 		}
 	}
 }
 
-func readFromGvisorInboundWriteToEndpointOrTun(ctx context.Context, in <-chan *Packet, endpoint *channel.Endpoint, tunOutbound chan<- *Packet) {
+func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *Packet, endpoint *channel.Endpoint) {
 	for ctx.Err() == nil {
 		var packet *Packet
 		select {
@@ -79,18 +80,14 @@ func readFromGvisorInboundWriteToEndpointOrTun(ctx context.Context, in <-chan *P
 		}
 
 		ipProto := layers.IPProtocol(ipProtocol)
-		if packet.data[0] == 1 {
-			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
-				ReserveHeaderBytes: 0,
-				Payload:            buffer.MakeWithData(packet.data[1:packet.length]),
-			})
-			config.LPool.Put(packet.data[:])
-			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
-			endpoint.InjectInbound(protocol, pkt)
-			pkt.DecRef()
-			plog.G(ctx).Debugf("[TCP-GVISOR] Write to Gvisor. SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, ipProto.String(), packet.length)
-		} else {
-			tunOutbound <- packet
-		}
+		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+			ReserveHeaderBytes: 0,
+			Payload:            buffer.MakeWithData(packet.data[1:packet.length]),
+		})
+		config.LPool.Put(packet.data[:])
+		sniffer.LogPacket("[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
+		endpoint.InjectInbound(protocol, pkt)
+		pkt.DecRef()
+		plog.G(ctx).Debugf("[TCP-GVISOR] Write to Gvisor. SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, ipProto.String(), packet.length)
 	}
 }

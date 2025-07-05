@@ -165,8 +165,6 @@ func (d *Packet) Length() int {
 }
 
 type Peer struct {
-	conn net.PacketConn
-
 	tunInbound  chan *Packet
 	tunOutbound chan<- *Packet
 
@@ -180,29 +178,6 @@ func (p *Peer) sendErr(err error) {
 	select {
 	case p.errChan <- err:
 	default:
-	}
-}
-
-func (p *Peer) readFromConn(ctx context.Context) {
-	defer util.HandleCrash()
-	for ctx.Err() == nil {
-		buf := config.LPool.Get().([]byte)[:]
-		n, _, err := p.conn.ReadFrom(buf[:])
-		if err != nil {
-			config.LPool.Put(buf[:])
-			p.sendErr(err)
-			return
-		}
-
-		src, dst, protocol, err := util.ParseIP(buf[:n])
-		if err != nil {
-			config.LPool.Put(buf[:])
-			plog.G(ctx).Errorf("[TUN] Unknown packet: %v", err)
-			p.sendErr(err)
-			return
-		}
-		plog.G(context.Background()).Errorf("[TUN] SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
-		p.tunInbound <- NewPacket(buf[:], n, src, dst)
 	}
 }
 
@@ -220,7 +195,6 @@ func (p *Peer) routeTUN(ctx context.Context) {
 			plog.G(ctx).Debugf("[TUN] Find TCP route to dst: %s -> %s", packet.dst.String(), conn.(net.Conn).RemoteAddr())
 			// local client handle it with gVisor
 			copy(packet.data[1:packet.length+1], packet.data[:packet.length])
-			packet.data[0] = 1
 			dgram := newDatagramPacket(packet.data, packet.length+1)
 			err := dgram.Write(conn.(net.Conn))
 			config.LPool.Put(packet.data[:])
