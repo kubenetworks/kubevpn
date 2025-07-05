@@ -50,8 +50,8 @@ func (h *tunHandler) HandleServer(ctx context.Context, tun net.Conn) {
 	}
 
 	defer device.Close()
-	go device.readFromTUN(ctx)
-	go device.writeToTUN(ctx)
+	go device.readFromTun(ctx)
+	go device.writeToTun(ctx)
 	go device.handlePacket(ctx, h.routeMapTCP)
 
 	select {
@@ -72,7 +72,7 @@ type Device struct {
 	errChan chan error
 }
 
-func (d *Device) readFromTUN(ctx context.Context) {
+func (d *Device) readFromTun(ctx context.Context) {
 	defer util.HandleCrash()
 	for {
 		buf := config.LPool.Get().([]byte)[:]
@@ -99,7 +99,7 @@ func (d *Device) readFromTUN(ctx context.Context) {
 	}
 }
 
-func (d *Device) writeToTUN(ctx context.Context) {
+func (d *Device) writeToTun(ctx context.Context) {
 	defer util.HandleCrash()
 	for packet := range d.tunOutbound {
 		_, err := d.tun.Write(packet.data[1:packet.length])

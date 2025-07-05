@@ -28,8 +28,6 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, c
 			data := pktBuffer.ToView().AsSlice()
 			buf := config.LPool.Get().([]byte)[:]
 			n := copy(buf[1:], data)
-			// local client handle it with tun
-			buf[0] = 0
 			_, err := tcpConn.Write(buf[:n+1])
 			config.LPool.Put(buf[:])
 			if err != nil {

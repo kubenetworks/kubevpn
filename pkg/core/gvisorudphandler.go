@@ -171,8 +171,6 @@ func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 				return
 			}
 			copy(buf[1:n+1], buf[:n])
-			// write to client tun device
-			buf[0] = 0
 			packet := newDatagramPacket(buf, n+1)
 			if err = packet.Write(tcpConn); err != nil {
 				errChan <- err
