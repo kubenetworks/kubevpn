@@ -137,7 +137,7 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 	go handleGvisorPacket(gvisorInbound, d.tunOutbound).Run(ctx)
 	for {
 		buf := config.LPool.Get().([]byte)[:]
-		n, err := d.tun.Read(buf[:])
+		n, err := d.tun.Read(buf[1:])
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to read packet from tun device: %s", err)
 			util.SafeWrite(d.errChan, err)
@@ -148,14 +148,14 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 		// Try to determine network protocol number, default zero.
 		var src, dst net.IP
 		var protocol int
-		src, dst, protocol, err = util.ParseIP(buf[:n])
+		src, dst, protocol, err = util.ParseIP(buf[1 : n+1])
 		if err != nil {
 			plog.G(ctx).Errorf("Unknown packet: %v", err)
 			config.LPool.Put(buf[:])
 			continue
 		}
 		plog.G(context.Background()).Debugf("SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
-		packet := NewPacket(buf[:], n, src, dst)
+		packet := NewPacket(buf[:], n+1, src, dst)
 		f := func(v *Packet) {
 			config.LPool.Put(v.data[:])
 			plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", v.src, v.dst, layers.IPProtocol(protocol).String(), v.length)
