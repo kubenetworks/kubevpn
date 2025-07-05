@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
@@ -27,8 +28,14 @@ func LocalUDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.Transp
 			IP:   id.RemoteAddress.AsSlice(),
 			Port: int(id.RemotePort),
 		}
+		var ip net.IP
+		if id.LocalAddress.To4() != (tcpip.Address{}) {
+			ip = net.ParseIP("127.0.0.1")
+		} else {
+			ip = net.IPv6loopback
+		}
 		dst := &net.UDPAddr{
-			IP:   net.ParseIP("127.0.0.1"),
+			IP:   ip,
 			Port: int(id.LocalPort),
 		}
 

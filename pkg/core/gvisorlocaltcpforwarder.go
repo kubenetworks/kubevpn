@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
@@ -36,7 +37,12 @@ func LocalTCPForwarder(ctx context.Context, s *stack.Stack) func(stack.Transport
 		defer conn.Close()
 
 		// 2, dial proxy
-		host := "127.0.0.1"
+		var host string
+		if id.LocalAddress.To4() != (tcpip.Address{}) {
+			host = "127.0.0.1"
+		} else {
+			host = net.IPv6loopback.String()
+		}
 		port := fmt.Sprintf("%d", id.LocalPort)
 		var remote net.Conn
 		var d = net.Dialer{Timeout: time.Second * 5}
