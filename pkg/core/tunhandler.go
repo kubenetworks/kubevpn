@@ -127,7 +127,7 @@ func (d *Device) handlePacket(ctx context.Context, routeMapTCP *sync.Map) {
 		errChan:     make(chan error, 1),
 	}
 
-	go p.routeTUN(ctx)
+	go p.routeTun(ctx)
 	go p.routeTCPToTun(ctx)
 
 	select {
@@ -188,13 +188,13 @@ func (p *Peer) routeTCPToTun(ctx context.Context) {
 	}
 }
 
-func (p *Peer) routeTUN(ctx context.Context) {
+func (p *Peer) routeTun(ctx context.Context) {
 	defer util.HandleCrash()
 	for packet := range p.tunInbound {
 		if conn, ok := p.routeMapTCP.Load(packet.dst.String()); ok {
 			plog.G(ctx).Debugf("[TUN] Find TCP route to dst: %s -> %s", packet.dst.String(), conn.(net.Conn).RemoteAddr())
-			// local client handle it with gVisor
 			copy(packet.data[1:packet.length+1], packet.data[:packet.length])
+			packet.data[0] = 0
 			dgram := newDatagramPacket(packet.data, packet.length+1)
 			err := dgram.Write(conn.(net.Conn))
 			config.LPool.Put(packet.data[:])
