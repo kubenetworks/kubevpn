@@ -87,8 +87,6 @@ func (h *UDPOverTCPHandler) handlePacket(ctx context.Context, tcpConn net.Conn, 
 
 	if conn, ok := h.routeMapTCP.Load(dst.String()); ok {
 		plog.G(ctx).Debugf("[TCP] Find TCP route SRC: %s to DST: %s -> %s", src, dst, conn.(net.Conn).RemoteAddr())
-		// local client needs handle it with gVisor
-		datagram.Data[0] = 1
 		err = datagram.Write(conn.(net.Conn))
 		config.LPool.Put(datagram.Data[:])
 		if err != nil {

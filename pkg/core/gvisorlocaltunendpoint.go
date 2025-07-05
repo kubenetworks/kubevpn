@@ -27,7 +27,7 @@ func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint,
 			data := pktBuffer.ToView().AsSlice()
 			buf := config.LPool.Get().([]byte)[:]
 			n := copy(buf[1:], data)
-			buf[0] = 1
+			buf[0] = 0
 			out <- NewPacket(buf[:], n+1, nil, nil)
 		}
 	}

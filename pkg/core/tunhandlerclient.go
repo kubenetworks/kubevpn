@@ -144,6 +144,7 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 			config.LPool.Put(buf[:])
 			return
 		}
+		buf[0] = 1
 
 		// Try to determine network protocol number, default zero.
 		var src, dst net.IP

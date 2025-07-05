@@ -99,7 +99,6 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		if c, found := h.routeMapTCP.Load(dst.String()); found {
 			plog.G(ctx).Debugf("[TCP-GVISOR] Find TCP route SRC: %s to DST: %s -> %s", src, dst, c.(net.Conn).RemoteAddr())
 			dgram := newDatagramPacket(buf, read)
-			buf[0] = 1
 			err = dgram.Write(c.(net.Conn))
 			config.LPool.Put(buf[:])
 			if err != nil {
@@ -108,7 +107,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		} else {
 			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 				ReserveHeaderBytes: 0,
-				Payload:            buffer.MakeWithData(buf[:read]),
+				Payload:            buffer.MakeWithData(buf[1:read]),
 			})
 			config.LPool.Put(buf[:])
 			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
