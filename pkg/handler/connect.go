@@ -286,7 +286,6 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		plog.G(ctx).Errorf("Add route dynamic failed: %v", err)
 		return
 	}
-	go c.deleteFirewallRule(c.ctx)
 	plog.G(ctx).Infof("Configuring DNS service...")
 	if err = c.setupDNS(c.ctx, svcInformer); err != nil {
 		plog.G(ctx).Errorf("Configure DNS failed: %v", err)
@@ -398,14 +397,6 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 	var cidrList []*net.IPNet
 	if !lite {
 		cidrList = append(cidrList, config.CIDR, config.CIDR6)
-	} else {
-		// windows needs to add tun IP self to route table, but linux and macOS not need
-		if util.IsWindows() {
-			cidrList = append(cidrList,
-				&net.IPNet{IP: c.LocalTunIPv4.IP, Mask: net.CIDRMask(32, 32)},
-				&net.IPNet{IP: c.LocalTunIPv6.IP, Mask: net.CIDRMask(128, 128)},
-			)
-		}
 	}
 	for _, ipNet := range c.cidrs {
 		cidrList = append(cidrList, ipNet)
@@ -644,24 +635,6 @@ func (c *ConnectOptions) addRoute(ipStrList ...string) error {
 	}
 	err := tun.AddRoutes(c.tunName, routes...)
 	return err
-}
-
-func (c *ConnectOptions) deleteFirewallRule(ctx context.Context) {
-	if !util.IsWindows() {
-		return
-	}
-	// The reason why delete firewall rule is:
-	// On windows ping local tun IPv4/v6 not works
-	// so needs to add firewall rule to allow this
-	if !util.FindAllowFirewallRule(ctx) {
-		util.AddAllowFirewallRule(ctx)
-	}
-
-	// The reason why delete firewall rule is:
-	// On windows use 'kubevpn proxy deploy/authors -H user=windows'
-	// Open terminal 'curl localhost:9080' ok
-	// Open terminal 'curl localTunIP:9080' not ok
-	util.DeleteBlockFirewallRule(ctx)
 }
 
 func (c *ConnectOptions) setupDNS(ctx context.Context, svcInformer cache.SharedIndexInformer) error {
