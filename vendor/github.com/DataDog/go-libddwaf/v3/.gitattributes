@@ -1,3 +1,0 @@
-*.dylib -diff
-*.so -diff
-*.a -diff

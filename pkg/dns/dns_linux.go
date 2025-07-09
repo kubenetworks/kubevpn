@@ -13,9 +13,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/coredns/caddy"
-	_ "github.com/coredns/coredns/core/dnsserver"
-	_ "github.com/coredns/coredns/core/plugin"
 	"github.com/docker/docker/libnetwork/resolvconf"
 	miekgdns "github.com/miekg/dns"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -162,32 +159,6 @@ func (c *Config) UseLibraryDNS(tunName string, clientConfig *miekgdns.ClientConf
 	}
 	plog.G(context.Background()).Debugf("Setting up DNS...")
 	return c.OSConfigurator.SetDNS(config)
-}
-
-func SetupLocalDNS(ctx context.Context, clientConfig *miekgdns.ClientConfig, existNameservers []string) error {
-	corefile, err := BuildCoreFile(CoreFileTmpl{
-		UpstreamDNS: clientConfig.Servers[0],
-		Nameservers: strings.Join(existNameservers, " "),
-	})
-	if err != nil {
-		return err
-	}
-
-	plog.G(ctx).Debugf("Corefile content: %s", string(corefile.Body()))
-
-	// Start your engines
-	instance, err := caddy.Start(corefile)
-	if err != nil {
-		return err
-	}
-
-	// Twiddle your thumbs
-	go instance.Wait()
-	go func() {
-		<-ctx.Done()
-		instance.Stop()
-	}()
-	return nil
 }
 
 func (c *Config) CancelDNS() {
