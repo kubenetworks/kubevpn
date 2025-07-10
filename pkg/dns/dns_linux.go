@@ -13,9 +13,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/coredns/caddy"
-	_ "github.com/coredns/coredns/core/dnsserver"
-	_ "github.com/coredns/coredns/core/plugin"
 	"github.com/docker/docker/libnetwork/resolvconf"
 	miekgdns "github.com/miekg/dns"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -31,24 +28,7 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 	config := c.Config
 	tunName := c.TunName
 
-	// 1) setup dns by magicDNS
-	plog.G(ctx).Debugf("Use library to setup DNS...")
-	// https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables#default-environment-variables
-	if _, found := os.LookupEnv("GITHUB_ACTIONS"); !found {
-		err := c.UseLibraryDNS(tunName, config)
-		if err == nil {
-			plog.G(ctx).Debugf("Use library to setup DNS done")
-			return nil
-		} else if errors.Is(err, ErrorNotSupportSplitDNS) {
-			plog.G(ctx).Debugf("Library not support on current OS")
-			err = nil
-		} else {
-			plog.G(ctx).Errorf("Setup DNS by library failed: %v", err)
-			err = nil
-		}
-	}
-
-	// 2) use systemctl or resolvectl to setup dns
+	// 1) use systemctl or resolvectl to setup dns
 	plog.G(ctx).Debugf("Use systemd to setup DNS...")
 	// TODO consider use https://wiki.debian.org/NetworkManager and nmcli to config DNS
 	// try to solve:
@@ -66,20 +46,30 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 		_, err := exec.LookPath(cmd)
 		return err == nil
 	}
-	var success bool
 	plog.G(ctx).Debugf("Try to setup DNS by resolvectl or systemd-resolve...")
 	if exists("resolvectl") {
 		if setupDnsByCmdResolvectl(ctx, tunName, config) == nil {
-			success = true
+			return nil
 		}
 	}
 	if exists("systemd-resolve") {
 		if setupDNSbyCmdSystemdResolve(ctx, tunName, config) == nil {
-			success = true
+			return nil
 		}
 	}
-	if success {
+
+	// 2) setup dns by magicDNS
+	plog.G(ctx).Debugf("Use library to setup DNS...")
+	err := c.UseLibraryDNS(tunName, config)
+	if err == nil {
+		plog.G(ctx).Debugf("Use library to setup DNS done")
 		return nil
+	} else if errors.Is(err, ErrorNotSupportSplitDNS) {
+		plog.G(ctx).Debugf("Library not support on current OS")
+		err = nil
+	} else {
+		plog.G(ctx).Errorf("Setup DNS by library failed: %v", err)
+		err = nil
 	}
 
 	// 3) write dns info to file: /etc/resolv.conf
@@ -162,32 +152,6 @@ func (c *Config) UseLibraryDNS(tunName string, clientConfig *miekgdns.ClientConf
 	}
 	plog.G(context.Background()).Debugf("Setting up DNS...")
 	return c.OSConfigurator.SetDNS(config)
-}
-
-func SetupLocalDNS(ctx context.Context, clientConfig *miekgdns.ClientConfig, existNameservers []string) error {
-	corefile, err := BuildCoreFile(CoreFileTmpl{
-		UpstreamDNS: clientConfig.Servers[0],
-		Nameservers: strings.Join(existNameservers, " "),
-	})
-	if err != nil {
-		return err
-	}
-
-	plog.G(ctx).Debugf("Corefile content: %s", string(corefile.Body()))
-
-	// Start your engines
-	instance, err := caddy.Start(corefile)
-	if err != nil {
-		return err
-	}
-
-	// Twiddle your thumbs
-	go instance.Wait()
-	go func() {
-		<-ctx.Done()
-		instance.Stop()
-	}()
-	return nil
 }
 
 func (c *Config) CancelDNS() {

@@ -393,7 +393,7 @@ func udpClient(t *testing.T, ip string, port int) error {
 func udpServer(t *testing.T, port int) {
 	// 创建监听
 	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
-		IP:   net.IPv4(0, 0, 0, 0),
+		IP:   net.ParseIP("127.0.0.1"),
 		Port: port,
 	})
 	if err != nil {
