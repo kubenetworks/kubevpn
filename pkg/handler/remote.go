@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"time"
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
@@ -312,9 +311,6 @@ func genDeploySpec(namespace, tcp10800, tcp9002, udp53, tcp80, image, imagePullS
 		},
 	}
 
-	innerIpv4CIDR := net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}
-	innerIpv6CIDR := net.IPNet{IP: config.RouterIP6, Mask: config.CIDR6.Mask}
-
 	deploy := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
@@ -361,14 +357,6 @@ func genDeploySpec(namespace, tcp10800, tcp9002, udp53, tcp80, image, imagePullS
 								{
 									Name:  "CIDR6",
 									Value: config.CIDR6.String(),
-								},
-								{
-									Name:  config.EnvInboundPodTunIPv4,
-									Value: innerIpv4CIDR.String(),
-								},
-								{
-									Name:  config.EnvInboundPodTunIPv6,
-									Value: innerIpv6CIDR.String(),
 								},
 							},
 							Ports: []v1.ContainerPort{{

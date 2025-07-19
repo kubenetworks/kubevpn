@@ -11,7 +11,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/kubectl/pkg/cmd/util/podcmd"
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -70,13 +69,8 @@ func (h *admissionReviewHandler) handleCreate(ar v1.AdmissionReview) *v1.Admissi
 	if container == nil {
 		return &v1.AdmissionResponse{UID: ar.Request.UID, Allowed: true}
 	}
-	value, ok := util.FindContainerEnv(container, config.EnvInboundPodTunIPv4)
+	_, ok := util.FindContainerEnv(container, config.EnvInboundPodTunIPv4)
 	if !ok {
-		return &v1.AdmissionResponse{UID: ar.Request.UID, Allowed: true}
-	}
-	// if create pod kubevpn-traffic-manager, just ignore it
-	// because 198.19.0.100 is reserved
-	if x, _, _ := net.ParseCIDR(value); config.RouterIP.Equal(x) {
 		return &v1.AdmissionResponse{UID: ar.Request.UID, Allowed: true}
 	}
 
@@ -142,11 +136,7 @@ func (h *admissionReviewHandler) handleCreate(ar v1.AdmissionReview) *v1.Admissi
 		plog.G(context.Background()).Errorf("Failed to marshal json patch %v, err: %v", patch, err)
 		return toV1AdmissionResponse(err)
 	}
-	var shouldPatchPod = func(pod *corev1.Pod) bool {
-		namedContainer, _ := podcmd.FindContainerByName(pod, config.ContainerSidecarVPN)
-		return namedContainer != nil
-	}
-	return applyPodPatch(ar, shouldPatchPod, string(marshal))
+	return applyPodPatch(ar, string(marshal))
 }
 
 // handle delete pod event
@@ -164,13 +154,8 @@ func (h *admissionReviewHandler) handleDelete(ar v1.AdmissionReview) *v1.Admissi
 	if container == nil {
 		return &v1.AdmissionResponse{Allowed: true}
 	}
-	value, ok := util.FindContainerEnv(container, config.EnvInboundPodTunIPv4)
+	_, ok := util.FindContainerEnv(container, config.EnvInboundPodTunIPv4)
 	if !ok {
-		return &v1.AdmissionResponse{Allowed: true}
-	}
-	// if delete pod kubevpn-traffic-manager, just ignore it
-	// because 198.19.0.100 is reserved
-	if x, _, _ := net.ParseCIDR(value); config.RouterIP.Equal(x) {
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
@@ -201,7 +186,7 @@ func (h *admissionReviewHandler) handleDelete(ar v1.AdmissionReview) *v1.Admissi
 	return &v1.AdmissionResponse{Allowed: true}
 }
 
-func applyPodPatch(ar v1.AdmissionReview, shouldPatchPod func(*corev1.Pod) bool, patch string) *v1.AdmissionResponse {
+func applyPodPatch(ar v1.AdmissionReview, patch string) *v1.AdmissionResponse {
 	plog.G(context.Background()).Infof("Apply pod patch: %s", patch)
 	podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 	if ar.Request.Resource != podResource {
@@ -217,10 +202,10 @@ func applyPodPatch(ar v1.AdmissionReview, shouldPatchPod func(*corev1.Pod) bool,
 		plog.G(context.Background()).Errorf("Failed to decode request into pod, err: %v, req: %s", err, string(raw))
 		return toV1AdmissionResponse(err)
 	}
-	reviewResponse := v1.AdmissionResponse{Allowed: true}
-	if shouldPatchPod(&pod) {
-		reviewResponse.Patch = []byte(patch)
-		reviewResponse.PatchType = ptr.To(v1.PatchTypeJSONPatch)
+	reviewResponse := v1.AdmissionResponse{
+		Allowed:   true,
+		Patch:     []byte(patch),
+		PatchType: ptr.To(v1.PatchTypeJSONPatch),
 	}
 	return &reviewResponse
 }
