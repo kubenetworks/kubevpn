@@ -23,7 +23,6 @@ import (
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
 	apinetworkingv1 "k8s.io/api/networking/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
@@ -48,7 +47,6 @@ import (
 	"k8s.io/kubectl/pkg/scheme"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/utils/pointer"
-	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
@@ -195,7 +193,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		// todo consider to use ephemeral container
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
 		// means mesh mode
-		if c.Engine == config.EngineGvisor {
+		if util.IsK8sService(object) {
 			err = inject.InjectEnvoyAndSSH(ctx, nodeID, c.factory, c.Namespace, object, controller, headers, portMap, image)
 		} else if len(headers) != 0 || len(portMap) != 0 {
 			err = inject.InjectServiceMesh(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, headers, portMap, tlsSecret, image)
@@ -211,7 +209,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 			portMap:    portMap,
 			workload:   workload,
 			namespace:  namespace,
-			portMapper: util.If(c.Engine == config.EngineGvisor, NewMapper(c.clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), headers, workload), nil),
+			portMapper: util.If(util.IsK8sService(object), NewMapper(c.clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), headers, workload), nil),
 		})
 	}
 	return
@@ -229,7 +227,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		plog.G(ctx).Errorf("Failed to get network CIDR: %v", err)
 		return
 	}
-	if err = createOutboundPod(c.ctx, c.clientset, c.Namespace, c.Engine == config.EngineGvisor, c.Image, c.ImagePullSecretName); err != nil {
+	if err = createOutboundPod(c.ctx, c.clientset, c.Namespace, c.Image, c.ImagePullSecretName); err != nil {
 		return
 	}
 	if err = c.upgradeDeploy(c.ctx); err != nil {
@@ -242,11 +240,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 		plog.G(ctx).Errorf("Add extra node IP failed: %v", err)
 		return
 	}
-	var rawTCPForwardPort, gvisorTCPForwardPort, gvisorUDPForwardPort int
-	rawTCPForwardPort, err = util.GetAvailableTCPPortOrDie()
-	if err != nil {
-		return err
-	}
+	var gvisorTCPForwardPort, gvisorUDPForwardPort int
 	gvisorTCPForwardPort, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
 		return err
@@ -257,14 +251,8 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 	}
 	plog.G(ctx).Info("Forwarding port...")
 	portPair := []string{
-		fmt.Sprintf("%d:10800", rawTCPForwardPort),
+		fmt.Sprintf("%d:10801", gvisorTCPForwardPort),
 		fmt.Sprintf("%d:10802", gvisorUDPForwardPort),
-	}
-	if c.Engine == config.EngineGvisor {
-		portPair = []string{
-			fmt.Sprintf("%d:10801", gvisorTCPForwardPort),
-			fmt.Sprintf("%d:10802", gvisorUDPForwardPort),
-		}
 	}
 	if err = c.portForward(c.ctx, portPair); err != nil {
 		return
@@ -272,10 +260,8 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 	if util.IsWindows() {
 		driver.InstallWireGuardTunDriver()
 	}
-	forward := fmt.Sprintf("tcp://127.0.0.1:%d", rawTCPForwardPort)
-	if c.Engine == config.EngineGvisor {
-		forward = fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
-	}
+	forward := fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
+
 	if err = c.startLocalTunServer(c.ctx, forward, isLite); err != nil {
 		plog.G(ctx).Errorf("Start local tun service failed: %v", err)
 		return
@@ -1020,22 +1006,14 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 
 	// 2) update deploy
 	plog.G(ctx).Infof("Set image %s --> %s...", serverImg, clientImg)
-	err = upgradeDeploySpec(ctx, c.factory, c.Namespace, deploy.Name, c.Engine == config.EngineGvisor, clientImg)
-	if err != nil {
-		return err
-	}
-	// because use webhook(kubevpn-traffic-manager container webhook) to assign ip,
-	// if create new pod use old webhook, ip will still change to old CIDR.
-	// so after patched, check again if env is newer or not,
-	// if env is still old, needs to re-patch using new webhook
-	err = restartDeploy(ctx, c.factory, c.clientset, c.Namespace, deploy.Name)
+	err = upgradeDeploySpec(ctx, c.factory, c.Namespace, deploy.Name, clientImg)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name string, gvisor bool, image string) error {
+func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image string) error {
 	r := f.NewBuilder().
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
 		NamespaceParam(ns).DefaultNamespace().
@@ -1069,7 +1047,6 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name string, 
 	}
 	patches := set.CalculatePatches(infos, scheme.DefaultJSONEncoder(), func(obj pkgruntime.Object) ([]byte, error) {
 		_, err = polymorphichelpers.UpdatePodSpecForObjectFn(obj, func(spec *v1.PodSpec) error {
-			udp8422 := "8422-for-udp"
 			tcp10800 := "10800-for-tcp"
 			tcp9002 := "9002-for-envoy"
 			tcp80 := "80-for-webhook"
@@ -1081,7 +1058,7 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name string, 
 					break
 				}
 			}
-			deploySpec := genDeploySpec(ns, udp8422, tcp10800, tcp9002, udp53, tcp80, gvisor, image, imagePullSecret)
+			deploySpec := genDeploySpec(ns, tcp10800, tcp9002, udp53, tcp80, image, imagePullSecret)
 			*spec = deploySpec.Spec.Template.Spec
 			return nil
 		})
@@ -1151,68 +1128,6 @@ func upgradeSecretSpec(ctx context.Context, f cmdutil.Factory, ns string) error 
 	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Update(ctx, mutatingWebhookConfig, metav1.UpdateOptions{})
 	if err != nil {
 		return err
-	}
-	return nil
-}
-
-func restartDeploy(ctx context.Context, f cmdutil.Factory, clientset *kubernetes.Clientset, ns, name string) error {
-	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
-	list, err := util.GetRunningPodList(ctx, clientset, ns, label)
-	if err != nil {
-		return err
-	}
-	pod := list[0]
-	container, _ := util.FindContainerByName(&pod, config.ContainerSidecarVPN)
-	if container == nil {
-		return nil
-	}
-
-	envs := map[string]string{
-		"CIDR4":                     config.CIDR.String(),
-		"CIDR6":                     config.CIDR6.String(),
-		config.EnvInboundPodTunIPv4: (&net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask}).String(),
-		config.EnvInboundPodTunIPv6: (&net.IPNet{IP: config.RouterIP6, Mask: config.CIDR6.Mask}).String(),
-	}
-
-	var mismatch bool
-	for _, existing := range container.Env {
-		if envs[existing.Name] != existing.Value {
-			mismatch = true
-			break
-		}
-	}
-	if !mismatch {
-		return nil
-	}
-	err = deletePodImmediately(ctx, clientset, ns, label)
-	if err != nil {
-		return err
-	}
-	err = util.RolloutStatus(ctx, f, ns, fmt.Sprintf("%s/%s", "deployments", name), time.Minute*60)
-	return err
-}
-
-// delete old pod immediately
-func deletePodImmediately(ctx context.Context, clientset *kubernetes.Clientset, ns string, label string) error {
-	result, err := clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
-		LabelSelector: label,
-	})
-	if err != nil {
-		return err
-	}
-	// delete old pod then delete new pod
-	sort.SliceStable(result.Items, func(i, j int) bool {
-		return result.Items[i].DeletionTimestamp != nil
-	})
-	for _, item := range result.Items {
-		options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
-		err = clientset.CoreV1().Pods(ns).Delete(ctx, item.Name, options)
-		if apierrors.IsNotFound(err) {
-			err = nil
-		}
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }

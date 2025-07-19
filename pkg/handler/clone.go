@@ -327,7 +327,6 @@ func genVPNContainer(workload string, engine config.Engine, namespace string, im
 			"--kubeconfig", "/tmp/.kube/" + config.KUBECONFIG,
 			"--namespace", namespace,
 			"--image", image,
-			"--netstack", string(engine),
 			"--foreground",
 		}, args...),
 		Env: []v1.EnvVar{},

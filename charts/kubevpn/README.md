@@ -26,5 +26,11 @@ helm install kubevpn kubevpn/kubevpn --set image.repository=ccr.ccs.tencentyun.c
 ## AWS Fargate cluster
 
 ```shell
-helm install kubevpn kubevpn/kubevpn --set netstack=gvisor -n kubevpn --create-namespace
+helm install kubevpn kubevpn/kubevpn -n kubevpn --create-namespace
+```
+
+*Proxy/ServiceMesh mode only support k8s service*
+
+```shell
+kubevpn proxy service/authors
 ```
