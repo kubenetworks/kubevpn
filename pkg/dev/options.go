@@ -260,7 +260,6 @@ func (option *Options) CreateConnectContainer(ctx context.Context, portBindings 
 			"-n", option.Namespace,
 			"--kubeconfig", "/root/.kube/config",
 			"--image", config.Image,
-			"--netstack", string(option.Engine),
 		}
 	} else {
 		entrypoint = []string{
@@ -271,7 +270,6 @@ func (option *Options) CreateConnectContainer(ctx context.Context, portBindings 
 			"-n", option.Namespace,
 			"--kubeconfig", "/root/.kube/config",
 			"--image", config.Image,
-			"--netstack", string(option.Engine),
 			"--manager-namespace", managerNamespace,
 		}
 		for k, v := range option.Headers {

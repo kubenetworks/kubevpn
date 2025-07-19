@@ -11,7 +11,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -65,18 +64,9 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		return err
 	}
 	var workloads []string
-	var objectList []*resource.Info
-	workloads, objectList, err = util.NormalizedResource(connect.GetFactory(), req.Namespace, req.Workloads)
+	workloads, _, err = util.NormalizedResource(connect.GetFactory(), req.Namespace, req.Workloads)
 	if err != nil {
 		return err
-	}
-	// netstack gvisor only support k8s service
-	if config.Engine(req.Engine) == config.EngineGvisor {
-		for _, info := range objectList {
-			if !util.IsK8sService(info) {
-				return errors.Errorf("netstack gvisor mode only support k8s services, but got %s", info.Mapping.Resource.Resource)
-			}
-		}
 	}
 
 	defer func() {

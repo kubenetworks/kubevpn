@@ -178,9 +178,10 @@ func AddEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 bool, m
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarVPN,
 		Image:   image,
-		Command: []string{"/bin/sh", "-c"},
-		Args: []string{`
-kubevpn server -l "ssh://:2222"`,
+		Command: []string{"kubevpn"},
+		Args: []string{
+			"server",
+			"-l ssh://:2222",
 		},
 		Resources: v1.ResourceRequirements{
 			Requests: map[v1.ResourceName]resource.Quantity{
@@ -193,10 +194,7 @@ kubevpn server -l "ssh://:2222"`,
 			},
 		},
 		ImagePullPolicy: v1.PullIfNotPresent,
-		SecurityContext: &v1.SecurityContext{
-			RunAsUser:  pointer.Int64(0),
-			RunAsGroup: pointer.Int64(0),
-		},
+		SecurityContext: &v1.SecurityContext{},
 	})
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:  config.ContainerSidecarEnvoyProxy,
