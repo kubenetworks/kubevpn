@@ -28,7 +28,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, namespace string, gvisor bool, image, imagePullSecretName string) (err error) {
+func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, namespace, image, imagePullSecretName string) (err error) {
 	var exists bool
 	exists, err = util.DetectPodExists(ctx, clientset, namespace)
 	if err != nil {
@@ -102,12 +102,11 @@ func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, nam
 
 	// 5) create service
 	plog.G(ctx).Infof("Creating Service %s", config.ConfigMapPodTrafficManager)
-	udp8422 := "8422-for-udp"
 	tcp10800 := "10800-for-tcp"
 	tcp9002 := "9002-for-envoy"
 	tcp80 := "80-for-webhook"
 	udp53 := "53-for-dns"
-	svcSpec := genService(namespace, udp8422, tcp10800, tcp9002, tcp80, udp53)
+	svcSpec := genService(namespace, tcp10800, tcp9002, tcp80, udp53)
 	_, err = clientset.CoreV1().Services(namespace).Create(ctx, svcSpec, metav1.CreateOptions{})
 	if err != nil {
 		plog.G(ctx).Errorf("Creating Service error: %s", err.Error())
@@ -138,7 +137,7 @@ func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, nam
 
 	// 7) create deployment
 	plog.G(ctx).Infof("Creating Deployment %s", config.ConfigMapPodTrafficManager)
-	deploy := genDeploySpec(namespace, udp8422, tcp10800, tcp9002, udp53, tcp80, gvisor, image, imagePullSecretName)
+	deploy := genDeploySpec(namespace, tcp10800, tcp9002, udp53, tcp80, image, imagePullSecretName)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
@@ -241,7 +240,7 @@ func genMutatingWebhookConfiguration(namespace string, crt []byte) *admissionv1.
 	}
 }
 
-func genService(namespace string, udp8422 string, tcp10800 string, tcp9002 string, tcp80 string, udp53 string) *v1.Service {
+func genService(namespace string, tcp10800 string, tcp9002 string, tcp80 string, udp53 string) *v1.Service {
 	return &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
@@ -249,11 +248,6 @@ func genService(namespace string, udp8422 string, tcp10800 string, tcp9002 strin
 		},
 		Spec: v1.ServiceSpec{
 			Ports: []v1.ServicePort{{
-				Name:       udp8422,
-				Protocol:   v1.ProtocolUDP,
-				Port:       8422,
-				TargetPort: intstr.FromInt32(8422),
-			}, {
 				Name:       tcp10800,
 				Protocol:   v1.ProtocolTCP,
 				Port:       10800,
@@ -296,7 +290,7 @@ func genSecret(namespace string, crt []byte, key []byte, host []byte) *v1.Secret
 	return secret
 }
 
-func genDeploySpec(namespace string, udp8422 string, tcp10800 string, tcp9002 string, udp53 string, tcp80 string, gvisor bool, image, imagePullSecretName string) *appsv1.Deployment {
+func genDeploySpec(namespace, tcp10800, tcp9002, udp53, tcp80, image, imagePullSecretName string) *appsv1.Deployment {
 	var resourcesSmall = v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
 			v1.ResourceCPU:    resource.MustParse("100m"),
@@ -345,24 +339,13 @@ func genDeploySpec(namespace string, udp8422 string, tcp10800 string, tcp9002 st
 						{
 							Name:    config.ContainerSidecarVPN,
 							Image:   image,
-							Command: []string{"/bin/sh", "-c"},
-							Args: []string{util.If(
-								gvisor,
-								`
-kubevpn server -l "tcp://:10800" -l "gtcp://:10801" -l "gudp://:10802"`,
-								`
-echo 1 > /proc/sys/net/ipv4/ip_forward
-echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
-echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
-update-alternatives --set iptables /usr/sbin/iptables-legacy
-iptables -P INPUT ACCEPT
-ip6tables -P INPUT ACCEPT
-iptables -P FORWARD ACCEPT
-ip6tables -P FORWARD ACCEPT
-iptables -t nat -A POSTROUTING -s ${CIDR4} -o eth0 -j MASQUERADE
-ip6tables -t nat -A POSTROUTING -s ${CIDR6} -o eth0 -j MASQUERADE
-kubevpn server -l "tcp://:10800" -l "tun://:8422?net=${TunIPv4}&net6=${TunIPv6}" -l "gtcp://:10801" -l "gudp://:10802"`,
-							)},
+							Command: []string{"kubevpn"},
+							Args: []string{
+								"server",
+								"-l tcp://:10800",
+								"-l gtcp://:10801",
+								"-l gudp://:10802",
+							},
 							EnvFrom: []v1.EnvFromSource{{
 								SecretRef: &v1.SecretEnvSource{
 									LocalObjectReference: v1.LocalObjectReference{
@@ -389,10 +372,6 @@ kubevpn server -l "tcp://:10800" -l "tun://:8422?net=${TunIPv4}&net6=${TunIPv6}"
 								},
 							},
 							Ports: []v1.ContainerPort{{
-								Name:          udp8422,
-								ContainerPort: 8422,
-								Protocol:      v1.ProtocolUDP,
-							}, {
 								Name:          tcp10800,
 								ContainerPort: 10800,
 								Protocol:      v1.ProtocolTCP,
@@ -401,17 +380,9 @@ kubevpn server -l "tcp://:10800" -l "tun://:8422?net=${TunIPv4}&net6=${TunIPv6}"
 							ImagePullPolicy: v1.PullIfNotPresent,
 							SecurityContext: &v1.SecurityContext{
 								Capabilities: &v1.Capabilities{
-									Add: util.If(gvisor,
-										[]v1.Capability{},
-										[]v1.Capability{
-											"NET_ADMIN",
-											//"SYS_MODULE",
-										},
-									),
+									Add: []v1.Capability{},
 								},
-								RunAsUser:  pointer.Int64(0),
-								RunAsGroup: pointer.Int64(0),
-								Privileged: util.If(gvisor, pointer.Bool(false), pointer.Bool(true)),
+								Privileged: pointer.Bool(false),
 							},
 						},
 						{

@@ -8,10 +8,6 @@ metadata:
 spec:
   type: {{ .Values.service.type }}
   ports:
-    - name: 8422-for-udp
-      port: {{ .Values.service.port8422 }}
-      protocol: UDP
-      targetPort: 8422
     - name: 10800-for-tcp
       port: {{ .Values.service.port10800 }}
       protocol: TCP

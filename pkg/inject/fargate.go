@@ -93,9 +93,6 @@ func InjectEnvoyAndSSH(ctx context.Context, nodeID string, f cmdutil.Factory, ma
 		return err
 	}
 
-	if !util.IsK8sService(current) {
-		return nil
-	}
 	// 2) modify service containerPort to envoy listener port
 	err = ModifyServiceTargetPort(ctx, clientset, object.Namespace, current.Name, containerPort2EnvoyListenerPort)
 	if err != nil {
