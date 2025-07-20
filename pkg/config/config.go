@@ -41,11 +41,14 @@ const (
 
 	VolumeSyncthing = "syncthing"
 
-	// innerIPv4Pool is used as tun ip
+	// IPv4Pool is used as tun ip
 	// 198.19.0.0/16 network is part of the 198.18.0.0/15 (reserved for benchmarking).
 	// https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml
 	// so we split it into 2 parts: 198.18.0.0/15 --> [198.19.0.0/16, 198.19.0.0/16]
-	innerIPv4Pool = "198.19.0.100/16"
+	IPv4Pool = "198.19.0.0/16"
+	// 2001:2::/64 network is part of the 2001:2::/48 (reserved for benchmarking)
+	// https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml
+	IPv6Pool = "2001:2::/64"
 	/*
 		reason：docker use 172.17.0.0/16 network conflict with k8s service kubernetes
 		➜  ~ kubectl get service kubernetes
@@ -60,11 +63,7 @@ const (
 		 }
 		]
 	*/
-	dockerInnerIPv4Pool = "198.18.0.100/16"
-
-	// 2001:2::/64 network is part of the 2001:2::/48 (reserved for benchmarking)
-	// https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml
-	innerIPv6Pool = "2001:2::9999/64"
+	DockerIPv4Pool = "198.18.0.1/16"
 
 	DefaultNetDir = "/etc/cni/net.d"
 
@@ -123,15 +122,15 @@ var (
 
 func init() {
 	var err error
-	RouterIP, CIDR, err = net.ParseCIDR(innerIPv4Pool)
+	RouterIP, CIDR, err = net.ParseCIDR(IPv4Pool)
 	if err != nil {
 		panic(err)
 	}
-	RouterIP6, CIDR6, err = net.ParseCIDR(innerIPv6Pool)
+	RouterIP6, CIDR6, err = net.ParseCIDR(IPv6Pool)
 	if err != nil {
 		panic(err)
 	}
-	DockerRouterIP, DockerCIDR, err = net.ParseCIDR(dockerInnerIPv4Pool)
+	DockerRouterIP, DockerCIDR, err = net.ParseCIDR(DockerIPv4Pool)
 	if err != nil {
 		panic(err)
 	}

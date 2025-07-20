@@ -32,22 +32,13 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - args:
+        - command:
+            - kubevpn
+          args:
             - server
             - -l "tcp://:10800"
             - -l "gtcp://:10801"
             - -l "gudp://:10802"
-          command:
-            - kubevpn
-          env:
-            - name: CIDR4
-              value: 198.19.0.0/16
-            - name: CIDR6
-              value: 2001:2::/64
-            - name: TunIPv4
-              value: 198.19.0.100/16
-            - name: TunIPv6
-              value: 2001:2::9999/64
           envFrom:
             - secretRef:
                 name: {{ include "kubevpn.fullname" . }}
@@ -55,8 +46,8 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           name: vpn
           ports:
-            - containerPort: {{ .Values.service.port10800 }}
-              name: 10800-for-tcp
+            - containerPort: {{ .Values.service.port10801 }}
+              name: 10801-for-tcp
               protocol: TCP
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

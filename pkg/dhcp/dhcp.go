@@ -32,8 +32,8 @@ func NewDHCPManager(clientset *kubernetes.Clientset, namespace string) *Manager 
 	return &Manager{
 		clientset: clientset,
 		namespace: namespace,
-		cidr:      &net.IPNet{IP: config.RouterIP, Mask: config.CIDR.Mask},
-		cidr6:     &net.IPNet{IP: config.RouterIP6, Mask: config.CIDR6.Mask},
+		cidr:      config.CIDR,
+		cidr6:     config.CIDR6,
 	}
 }
 

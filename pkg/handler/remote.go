@@ -101,11 +101,11 @@ func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, nam
 
 	// 5) create service
 	plog.G(ctx).Infof("Creating Service %s", config.ConfigMapPodTrafficManager)
-	tcp10800 := "10800-for-tcp"
+	tcp10801 := "10801-for-tcp"
 	tcp9002 := "9002-for-envoy"
 	tcp80 := "80-for-webhook"
 	udp53 := "53-for-dns"
-	svcSpec := genService(namespace, tcp10800, tcp9002, tcp80, udp53)
+	svcSpec := genService(namespace, tcp10801, tcp9002, tcp80, udp53)
 	_, err = clientset.CoreV1().Services(namespace).Create(ctx, svcSpec, metav1.CreateOptions{})
 	if err != nil {
 		plog.G(ctx).Errorf("Creating Service error: %s", err.Error())
@@ -136,7 +136,7 @@ func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, nam
 
 	// 7) create deployment
 	plog.G(ctx).Infof("Creating Deployment %s", config.ConfigMapPodTrafficManager)
-	deploy := genDeploySpec(namespace, tcp10800, tcp9002, udp53, tcp80, image, imagePullSecretName)
+	deploy := genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullSecretName)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
@@ -239,7 +239,7 @@ func genMutatingWebhookConfiguration(namespace string, crt []byte) *admissionv1.
 	}
 }
 
-func genService(namespace string, tcp10800 string, tcp9002 string, tcp80 string, udp53 string) *v1.Service {
+func genService(namespace string, tcp10801 string, tcp9002 string, tcp80 string, udp53 string) *v1.Service {
 	return &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
@@ -247,10 +247,10 @@ func genService(namespace string, tcp10800 string, tcp9002 string, tcp80 string,
 		},
 		Spec: v1.ServiceSpec{
 			Ports: []v1.ServicePort{{
-				Name:       tcp10800,
+				Name:       tcp10801,
 				Protocol:   v1.ProtocolTCP,
-				Port:       10800,
-				TargetPort: intstr.FromInt32(10800),
+				Port:       10801,
+				TargetPort: intstr.FromInt32(10801),
 			}, {
 				Name:       tcp9002,
 				Protocol:   v1.ProtocolTCP,
@@ -289,7 +289,7 @@ func genSecret(namespace string, crt []byte, key []byte, host []byte) *v1.Secret
 	return secret
 }
 
-func genDeploySpec(namespace, tcp10800, tcp9002, udp53, tcp80, image, imagePullSecretName string) *appsv1.Deployment {
+func genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullSecretName string) *appsv1.Deployment {
 	var resourcesSmall = v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
 			v1.ResourceCPU:    resource.MustParse("100m"),
@@ -349,19 +349,10 @@ func genDeploySpec(namespace, tcp10800, tcp9002, udp53, tcp80, image, imagePullS
 									},
 								},
 							}},
-							Env: []v1.EnvVar{
-								{
-									Name:  "CIDR4",
-									Value: config.CIDR.String(),
-								},
-								{
-									Name:  "CIDR6",
-									Value: config.CIDR6.String(),
-								},
-							},
+							Env: []v1.EnvVar{},
 							Ports: []v1.ContainerPort{{
-								Name:          tcp10800,
-								ContainerPort: 10800,
+								Name:          tcp10801,
+								ContainerPort: 10801,
 								Protocol:      v1.ProtocolTCP,
 							}},
 							Resources:       resourcesLarge,

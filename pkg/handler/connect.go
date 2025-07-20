@@ -1047,7 +1047,7 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image s
 	}
 	patches := set.CalculatePatches(infos, scheme.DefaultJSONEncoder(), func(obj pkgruntime.Object) ([]byte, error) {
 		_, err = polymorphichelpers.UpdatePodSpecForObjectFn(obj, func(spec *v1.PodSpec) error {
-			tcp10800 := "10800-for-tcp"
+			tcp10801 := "10801-for-tcp"
 			tcp9002 := "9002-for-envoy"
 			tcp80 := "80-for-webhook"
 			udp53 := "53-for-dns"
@@ -1058,7 +1058,7 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image s
 					break
 				}
 			}
-			deploySpec := genDeploySpec(ns, tcp10800, tcp9002, udp53, tcp80, image, imagePullSecret)
+			deploySpec := genDeploySpec(ns, tcp10801, tcp9002, udp53, tcp80, image, imagePullSecret)
 			*spec = deploySpec.Spec.Template.Spec
 			return nil
 		})
