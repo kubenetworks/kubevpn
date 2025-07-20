@@ -413,7 +413,7 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 		tunConfig.Addr6 = (&net.IPNet{IP: c.LocalTunIPv6.IP, Mask: net.CIDRMask(128, 128)}).String()
 	}
 
-	localNode := fmt.Sprintf("tun:/127.0.0.1:8422")
+	localNode := fmt.Sprintf("tun:/%s", forwardAddress)
 	node, err := core.ParseNode(localNode)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to parse local node %s: %v", localNode, err)
@@ -431,7 +431,7 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 	}
 	forwarder := core.NewForwarder(5, forward)
 
-	handler := core.TunHandler(forwarder, node)
+	handler := core.TunHandler(node, forwarder)
 	listener, err := tun.Listener(tunConfig)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to create tun listener: %v", err)
@@ -624,7 +624,7 @@ func (c *ConnectOptions) addRoute(ipStrList ...string) error {
 }
 
 func (c *ConnectOptions) setupDNS(ctx context.Context, svcInformer cache.SharedIndexInformer) error {
-	const portTCP = 10800
+	const portTCP = 10801
 	podList, err := c.GetRunningPodList(ctx)
 	if err != nil {
 		plog.G(ctx).Errorf("Get running pod list failed, err: %v", err)

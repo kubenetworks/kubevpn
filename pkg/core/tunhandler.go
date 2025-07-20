@@ -24,18 +24,18 @@ type tunHandler struct {
 }
 
 // TunHandler creates a handler for tun tunnel.
-func TunHandler(forward *Forwarder, node *Node) Handler {
+func TunHandler(node *Node, forward *Forwarder) Handler {
 	return &tunHandler{
-		forward:     forward,
 		node:        node,
+		forward:     forward,
 		routeMapTCP: RouteMapTCP,
 		errChan:     make(chan error, 1),
 	}
 }
 
 func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
-	if remote := h.node.Remote; remote != "" {
-		h.HandleClient(ctx, tun)
+	if !h.forward.IsEmpty() {
+		h.HandleClient(ctx, tun, h.forward)
 	} else {
 		h.HandleServer(ctx, tun)
 	}

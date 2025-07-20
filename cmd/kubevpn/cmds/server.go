@@ -32,7 +32,7 @@ func CmdServer(cmdutil.Factory) *cobra.Command {
 		`)),
 		Example: templates.Examples(i18n.T(`
         # server listener
-        kubevpn server -l "tcp://:10800" -l "tun://127.0.0.1:8422?net=198.19.0.123/32"
+        kubevpn server -l "tcp://:10800" -l "tun://?net=198.19.0.123/32"
 		`)),
 		PreRun: func(*cobra.Command, []string) {
 			runtime.GOMAXPROCS(0)
@@ -54,7 +54,6 @@ func CmdServer(cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringArrayVarP(&route.Listeners, "listener", "l", []string{}, "Startup listener server. eg: tcp://localhost:1080")
-	cmd.Flags().StringVarP(&route.Forwarder, "forwarder", "f", "", "Special forwarder. eg: tcp://192.168.1.100:2345")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug log or not")
 	return cmd
 }
