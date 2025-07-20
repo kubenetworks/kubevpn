@@ -338,7 +338,6 @@ func genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullS
 							Command: []string{"kubevpn"},
 							Args: []string{
 								"server",
-								"-l tcp://:10800",
 								"-l gtcp://:10801",
 								"-l gudp://:10802",
 							},

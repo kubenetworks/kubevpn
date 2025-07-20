@@ -47,7 +47,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 		r := core.Route{
 			Listeners: []string{
 				"tun://?net=" + DefaultServerIP,
-				"tcp://:10801",
+				"gtcp://:10801",
 			},
 			Retries: 5,
 		}

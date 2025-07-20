@@ -36,7 +36,6 @@ spec:
             - kubevpn
           args:
             - server
-            - -l "tcp://:10800"
             - -l "gtcp://:10801"
             - -l "gudp://:10802"
           envFrom:

@@ -21,7 +21,7 @@ var (
 )
 
 // Route example:
-// -l "tcp://:10800" -l "tun://?net=198.19.0.100/16"
+// -l "gtcp://:10801" -l "tun://?net=198.19.0.100/16"
 // -l "tun:/tcp://10.233.24.133:8422?net=198.19.0.102/16&route=198.19.0.0/16"
 // -l "tun:/tcp://127.0.0.1:10800?net=198.19.0.102/16&route=198.19.0.0/16,10.233.0.0/16"
 type Route struct {
@@ -73,13 +73,6 @@ func (r *Route) GenerateServers() ([]Server, error) {
 			})
 			if err != nil {
 				plog.G(context.Background()).Errorf("Failed to create tun listener: %v", err)
-				return nil, err
-			}
-		case "tcp":
-			handler = TCPHandler()
-			listener, err = TCPListener(node.Addr)
-			if err != nil {
-				plog.G(context.Background()).Errorf("Failed to create tcp listener: %v", err)
 				return nil, err
 			}
 		case "gtcp":

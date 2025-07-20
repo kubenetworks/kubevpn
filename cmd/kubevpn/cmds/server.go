@@ -32,7 +32,7 @@ func CmdServer(cmdutil.Factory) *cobra.Command {
 		`)),
 		Example: templates.Examples(i18n.T(`
         # server listener
-        kubevpn server -l "tcp://:10800" -l "tun://?net=198.19.0.123/32"
+        kubevpn server -l "gtcp://:10801" -l "tun://?net=198.19.0.123/32"
 		`)),
 		PreRun: func(*cobra.Command, []string) {
 			runtime.GOMAXPROCS(0)
