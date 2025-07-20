@@ -413,13 +413,12 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 		tunConfig.Addr6 = (&net.IPNet{IP: c.LocalTunIPv6.IP, Mask: net.CIDRMask(128, 128)}).String()
 	}
 
-	localNode := fmt.Sprintf("tun:/%s", forwardAddress)
+	localNode := "tun://"
 	node, err := core.ParseNode(localNode)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to parse local node %s: %v", localNode, err)
 		return err
 	}
-
 	forward, err := core.ParseNode(forwardAddress)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to parse forward node %s: %v", forwardAddress, err)
