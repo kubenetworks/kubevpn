@@ -194,7 +194,7 @@ func (p *Peer) routeTun(ctx context.Context) {
 		if conn, ok := p.routeMapTCP.Load(packet.dst.String()); ok {
 			plog.G(ctx).Debugf("[TUN] Find TCP route to dst: %s -> %s", packet.dst.String(), conn.(net.Conn).RemoteAddr())
 			copy(packet.data[1:packet.length+1], packet.data[:packet.length])
-			packet.data[0] = 0
+			packet.data[0] = 1
 			dgram := newDatagramPacket(packet.data, packet.length+1)
 			err := dgram.Write(conn.(net.Conn))
 			config.LPool.Put(packet.data[:])
