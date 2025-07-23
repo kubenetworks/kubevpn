@@ -143,7 +143,6 @@ func WaitDockerContainerRunning(ctx context.Context, name string) error {
 func ContainerInspect(ctx context.Context, name string) (types.ContainerJSON, error) {
 	output, err := exec.CommandContext(ctx, "docker", "inspect", name).CombinedOutput()
 	if err != nil {
-		log.G(ctx).Errorf("Failed to wait container to be ready output: %s: %v", string(output), err)
 		_ = RunLogsSinceNow(name, false)
 		return types.ContainerJSON{}, err
 	}
@@ -162,7 +161,6 @@ func ContainerInspect(ctx context.Context, name string) (types.ContainerJSON, er
 func NetworkInspect(ctx context.Context, name string) (network.Inspect, error) {
 	output, err := exec.CommandContext(ctx, "docker", "network", "inspect", name).CombinedOutput()
 	if err != nil {
-		log.G(ctx).Errorf("Failed to wait container to be ready: %v", err)
 		_ = RunLogsSinceNow(name, false)
 		return network.Inspect{}, err
 	}
