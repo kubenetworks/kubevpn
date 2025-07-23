@@ -36,8 +36,8 @@ spec:
             - kubevpn
           args:
             - server
-            - -l "gtcp://:10801"
-            - -l "gudp://:10802"
+            - -l gtcp://:10801
+            - -l gudp://:10802
           envFrom:
             - secretRef:
                 name: {{ include "kubevpn.fullname" . }}
