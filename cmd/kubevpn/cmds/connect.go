@@ -26,7 +26,6 @@ import (
 )
 
 func CmdConnect(f cmdutil.Factory) *cobra.Command {
-	var connect = &handler.ConnectOptions{}
 	var extraRoute = &handler.ExtraRouteInfo{}
 	var sshConf = &pkgssh.SshConfig{}
 	var transferImage, foreground, lite bool
@@ -91,7 +90,6 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				KubeconfigBytes:      string(bytes),
 				Namespace:            ns,
 				ExtraRoute:           extraRoute.ToRPC(),
-				Engine:               string(connect.Engine),
 				OriginKubeconfigPath: util.GetKubeConfigPath(f),
 
 				SshJump:             sshConf.ToRPC(),
@@ -142,7 +140,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
-	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName, &connect.Engine)
+	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName)
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "Hang up")
 	cmd.Flags().BoolVar(&lite, "lite", false, "connect to multiple cluster in lite mode. mode \"lite\": design for only connecting to multiple cluster network. mode \"full\": not only connect to cluster network, it also supports proxy workloads inbound traffic to local PC.")
 	cmd.Flags().StringVar(&managerNamespace, "manager-namespace", "", "The namespace where the traffic manager is to be found. Only works in cluster mode (install kubevpn server by helm)")

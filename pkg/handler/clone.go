@@ -43,7 +43,6 @@ type CloneOptions struct {
 	Headers        map[string]string
 	Workloads      []string
 	ExtraRouteInfo ExtraRouteInfo
-	Engine         config.Engine
 
 	TargetContainer     string
 	TargetImage         string
@@ -231,7 +230,7 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte, 
 					Value: "1",
 				},
 			}...)*/
-			container := genVPNContainer(workload, d.Engine, d.Namespace, image, args)
+			container := genVPNContainer(workload, d.Namespace, image, args)
 			containerSync := genSyncthingContainer(d.RemoteDir, syncDataDirName, image)
 			spec.Spec.Containers = append(containers, *container, *containerSync)
 			//set spec
@@ -315,7 +314,7 @@ func genSyncthingContainer(remoteDir string, syncDataDirName string, image strin
 	return containerSync
 }
 
-func genVPNContainer(workload string, engine config.Engine, namespace string, image string, args []string) *v1.Container {
+func genVPNContainer(workload string, namespace string, image string, args []string) *v1.Container {
 	container := &v1.Container{
 		Name:  config.ContainerSidecarVPN,
 		Image: image,

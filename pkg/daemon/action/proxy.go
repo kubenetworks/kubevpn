@@ -13,7 +13,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -53,7 +52,6 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	}
 	connect := &handler.ConnectOptions{
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
-		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
@@ -184,7 +182,6 @@ func convert(req *rpc.ProxyRequest) *rpc.ConnectRequest {
 	return &rpc.ConnectRequest{
 		KubeconfigBytes:      req.KubeconfigBytes,
 		Namespace:            req.Namespace,
-		Engine:               req.Engine,
 		ExtraRoute:           req.ExtraRoute,
 		SshJump:              req.SshJump,
 		TransferImage:        req.TransferImage,

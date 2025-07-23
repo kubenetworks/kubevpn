@@ -10,7 +10,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -41,7 +40,6 @@ func (svr *Server) ConnectFork(resp rpc.Daemon_ConnectForkServer) (err error) {
 	connect := &handler.ConnectOptions{
 		Namespace:            req.ManagerNamespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
-		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		OriginNamespace:      req.Namespace,
 		Lock:                 &svr.Lock,
@@ -108,7 +106,6 @@ func (svr *Server) redirectConnectForkToSudoDaemon(req *rpc.ConnectRequest, resp
 		Namespace:            req.Namespace,
 		OriginNamespace:      req.Namespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
-		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		Request:              proto.Clone(req).(*rpc.ConnectRequest),
 	}

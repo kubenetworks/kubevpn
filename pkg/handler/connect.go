@@ -63,7 +63,6 @@ import (
 type ConnectOptions struct {
 	Namespace            string
 	ExtraRouteInfo       ExtraRouteInfo
-	Engine               config.Engine
 	Foreground           bool
 	OriginKubeconfigPath string
 	OriginNamespace      string
