@@ -39,8 +39,7 @@ const (
 	ContainerSidecarVPN          = "vpn"
 	ContainerSidecarSyncthing    = "syncthing"
 
-	VolumeEnvoyConfig = "envoy-config"
-	VolumeSyncthing   = "syncthing"
+	VolumeSyncthing = "syncthing"
 
 	// innerIPv4Pool is used as tun ip
 	// 198.19.0.0/16 network is part of the 198.18.0.0/15 (reserved for benchmarking).

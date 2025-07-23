@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"math"
 	"math/rand"
-	"os"
 	"reflect"
 	"strconv"
 	"time"
@@ -46,7 +45,7 @@ func (p *Processor) newVersion() string {
 }
 
 func (p *Processor) ProcessFile(file NotifyMessage) error {
-	configList, err := ParseYaml(file.FilePath)
+	configList, err := ParseYaml(file.Content)
 	if err != nil {
 		p.logger.Errorf("failed to parse config file: %v", err)
 		return err
@@ -66,7 +65,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 		uid := util.GenEnvoyUID(config.Namespace, config.Uid)
 		lastConfig, ok := p.expireCache.Get(uid)
 		if ok && reflect.DeepEqual(lastConfig.(*Virtual), config) {
-			p.logger.Infof("not needs to update, config: %s", string(marshal))
+			p.logger.Infof("no need to update, config: %s", string(marshal))
 			continue
 		}
 
@@ -104,15 +103,10 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 	return nil
 }
 
-func ParseYaml(file string) ([]*Virtual, error) {
+func ParseYaml(content string) ([]*Virtual, error) {
 	var virtualList = make([]*Virtual, 0)
 
-	yamlFile, err := os.ReadFile(file)
-	if err != nil {
-		return nil, err
-	}
-
-	err = yaml.Unmarshal(yamlFile, &virtualList)
+	err := yaml.Unmarshal([]byte(content), &virtualList)
 	if err != nil {
 		return nil, err
 	}

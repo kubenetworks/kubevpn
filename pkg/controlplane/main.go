@@ -2,17 +2,16 @@ package controlplane
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
-	"github.com/fsnotify/fsnotify"
 	log "github.com/sirupsen/logrus"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-func Main(ctx context.Context, filename string, port uint, logger *log.Logger) error {
+func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.Logger) error {
 	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, logger)
 	proc := NewProcessor(snapshotCache, logger)
 
@@ -25,33 +24,20 @@ func Main(ctx context.Context, filename string, port uint, logger *log.Logger) e
 
 	notifyCh := make(chan NotifyMessage, 100)
 
-	notifyCh <- NotifyMessage{
-		Operation: Create,
-		FilePath:  filename,
-	}
-
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return fmt.Errorf("failed to create file watcher: %v", err)
-	}
-	defer watcher.Close()
-	err = watcher.Add(filename)
-	if err != nil {
-		return fmt.Errorf("failed to add file: %s to wather: %v", filename, err)
-	}
+	notifyCh <- NotifyMessage{}
 	go func() {
-		errChan <- Watch(watcher, filename, notifyCh)
+		errChan <- Watch(ctx, factory, notifyCh)
 	}()
 
 	for {
 		select {
 		case msg := <-notifyCh:
-			err = proc.ProcessFile(msg)
+			err := proc.ProcessFile(msg)
 			if err != nil {
 				plog.G(ctx).Errorf("Failed to process file: %v", err)
 				return err
 			}
-		case err = <-errChan:
+		case err := <-errChan:
 			return err
 		case <-ctx.Done():
 			return ctx.Err()

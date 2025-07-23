@@ -340,23 +340,7 @@ func genDeploySpec(namespace string, udp8422 string, tcp10800 string, tcp9002 st
 				},
 				Spec: v1.PodSpec{
 					ServiceAccountName: config.ConfigMapPodTrafficManager,
-					Volumes: []v1.Volume{{
-						Name: config.VolumeEnvoyConfig,
-						VolumeSource: v1.VolumeSource{
-							ConfigMap: &v1.ConfigMapVolumeSource{
-								LocalObjectReference: v1.LocalObjectReference{
-									Name: config.ConfigMapPodTrafficManager,
-								},
-								Items: []v1.KeyToPath{
-									{
-										Key:  config.KeyEnvoy,
-										Path: "envoy-config.yaml",
-									},
-								},
-								Optional: pointer.Bool(false),
-							},
-						},
-					}},
+					Volumes:            []v1.Volume{},
 					Containers: []v1.Container{
 						{
 							Name:    config.ContainerSidecarVPN,
@@ -434,7 +418,7 @@ kubevpn server -l "tcp://:10800" -l "tun://:8422?net=${TunIPv4}&net6=${TunIPv6}"
 							Name:    config.ContainerSidecarControlPlane,
 							Image:   image,
 							Command: []string{"kubevpn"},
-							Args:    []string{"control-plane", "--watchDirectoryFilename", "/etc/envoy/envoy-config.yaml"},
+							Args:    []string{"control-plane"},
 							Ports: []v1.ContainerPort{
 								{
 									Name:          tcp9002,
@@ -447,13 +431,7 @@ kubevpn server -l "tcp://:10800" -l "tun://:8422?net=${TunIPv4}&net6=${TunIPv6}"
 									Protocol:      v1.ProtocolUDP,
 								},
 							},
-							VolumeMounts: []v1.VolumeMount{
-								{
-									Name:      config.VolumeEnvoyConfig,
-									ReadOnly:  true,
-									MountPath: "/etc/envoy",
-								},
-							},
+							VolumeMounts:    []v1.VolumeMount{},
 							ImagePullPolicy: v1.PullIfNotPresent,
 							Resources:       resourcesSmall,
 						},
