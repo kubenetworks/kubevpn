@@ -45,7 +45,6 @@ type Options struct {
 	NoProxy        bool
 	ExtraRouteInfo handler.ExtraRouteInfo
 	ConnectMode    ConnectMode
-	Engine         config.Engine
 
 	// docker options
 	DevImage string
@@ -112,7 +111,6 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			Headers:              option.Headers,
 			Workloads:            util.If(option.NoProxy, nil, []string{option.Workload}),
 			ExtraRoute:           option.ExtraRouteInfo.ToRPC(),
-			Engine:               string(option.Engine),
 			OriginKubeconfigPath: util.GetKubeConfigPath(option.factory),
 			Image:                config.Image,
 			ImagePullSecretName:  imagePullSecretName,
@@ -260,7 +258,6 @@ func (option *Options) CreateConnectContainer(ctx context.Context, portBindings 
 			"-n", option.Namespace,
 			"--kubeconfig", "/root/.kube/config",
 			"--image", config.Image,
-			"--netstack", string(option.Engine),
 		}
 	} else {
 		entrypoint = []string{
@@ -271,7 +268,6 @@ func (option *Options) CreateConnectContainer(ctx context.Context, portBindings 
 			"-n", option.Namespace,
 			"--kubeconfig", "/root/.kube/config",
 			"--image", config.Image,
-			"--netstack", string(option.Engine),
 			"--manager-namespace", managerNamespace,
 		}
 		for k, v := range option.Headers {

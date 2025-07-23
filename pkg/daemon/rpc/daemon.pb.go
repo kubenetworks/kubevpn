@@ -25,7 +25,6 @@ type ConnectRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	KubeconfigBytes string                 `protobuf:"bytes,1,opt,name=KubeconfigBytes,proto3" json:"KubeconfigBytes,omitempty"`
 	Namespace       string                 `protobuf:"bytes,2,opt,name=Namespace,proto3" json:"Namespace,omitempty"`
-	Engine          string                 `protobuf:"bytes,3,opt,name=Engine,proto3" json:"Engine,omitempty"`
 	// extra route table info
 	ExtraRoute *ExtraRoute `protobuf:"bytes,4,opt,name=ExtraRoute,proto3" json:"ExtraRoute,omitempty"`
 	// ssh jump
@@ -94,13 +93,6 @@ func (x *ConnectRequest) GetKubeconfigBytes() string {
 func (x *ConnectRequest) GetNamespace() string {
 	if x != nil {
 		return x.Namespace
-	}
-	return ""
-}
-
-func (x *ConnectRequest) GetEngine() string {
-	if x != nil {
-		return x.Engine
 	}
 	return ""
 }
@@ -365,7 +357,6 @@ type ProxyRequest struct {
 	Headers         map[string]string      `protobuf:"bytes,3,rep,name=Headers,proto3" json:"Headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	PortMap         []string               `protobuf:"bytes,4,rep,name=PortMap,proto3" json:"PortMap,omitempty"`
 	Workloads       []string               `protobuf:"bytes,5,rep,name=Workloads,proto3" json:"Workloads,omitempty"`
-	Engine          string                 `protobuf:"bytes,7,opt,name=Engine,proto3" json:"Engine,omitempty"`
 	// extra route table info
 	ExtraRoute *ExtraRoute `protobuf:"bytes,8,opt,name=ExtraRoute,proto3" json:"ExtraRoute,omitempty"`
 	// ssh jump
@@ -453,13 +444,6 @@ func (x *ProxyRequest) GetWorkloads() []string {
 		return x.Workloads
 	}
 	return nil
-}
-
-func (x *ProxyRequest) GetEngine() string {
-	if x != nil {
-		return x.Engine
-	}
-	return ""
 }
 
 func (x *ProxyRequest) GetExtraRoute() *ExtraRoute {
@@ -671,7 +655,6 @@ type CloneRequest struct {
 	Namespace       string                 `protobuf:"bytes,2,opt,name=Namespace,proto3" json:"Namespace,omitempty"`
 	Headers         map[string]string      `protobuf:"bytes,3,rep,name=Headers,proto3" json:"Headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Workloads       []string               `protobuf:"bytes,4,rep,name=Workloads,proto3" json:"Workloads,omitempty"`
-	Engine          string                 `protobuf:"bytes,6,opt,name=Engine,proto3" json:"Engine,omitempty"`
 	// extra route table info
 	ExtraRoute *ExtraRoute `protobuf:"bytes,7,opt,name=ExtraRoute,proto3" json:"ExtraRoute,omitempty"`
 	// ssh jump
@@ -748,13 +731,6 @@ func (x *CloneRequest) GetWorkloads() []string {
 		return x.Workloads
 	}
 	return nil
-}
-
-func (x *CloneRequest) GetEngine() string {
-	if x != nil {
-		return x.Engine
-	}
-	return ""
 }
 
 func (x *CloneRequest) GetExtraRoute() *ExtraRoute {
@@ -2909,11 +2885,10 @@ var File_daemon_proto protoreflect.FileDescriptor
 
 const file_daemon_proto_rawDesc = "" +
 	"\n" +
-	"\fdaemon.proto\x12\x03rpc\"\xf5\x03\n" +
+	"\fdaemon.proto\x12\x03rpc\"\xdd\x03\n" +
 	"\x0eConnectRequest\x12(\n" +
 	"\x0fKubeconfigBytes\x18\x01 \x01(\tR\x0fKubeconfigBytes\x12\x1c\n" +
-	"\tNamespace\x18\x02 \x01(\tR\tNamespace\x12\x16\n" +
-	"\x06Engine\x18\x03 \x01(\tR\x06Engine\x12/\n" +
+	"\tNamespace\x18\x02 \x01(\tR\tNamespace\x12/\n" +
 	"\n" +
 	"ExtraRoute\x18\x04 \x01(\v2\x0f.rpc.ExtraRouteR\n" +
 	"ExtraRoute\x12&\n" +
@@ -2947,14 +2922,13 @@ const file_daemon_proto_rawDesc = "" +
 	"\n" +
 	"_Namespace\".\n" +
 	"\x12DisconnectResponse\x12\x18\n" +
-	"\aMessage\x18\x01 \x01(\tR\aMessage\"\xf9\x04\n" +
+	"\aMessage\x18\x01 \x01(\tR\aMessage\"\xe1\x04\n" +
 	"\fProxyRequest\x12(\n" +
 	"\x0fKubeconfigBytes\x18\x01 \x01(\tR\x0fKubeconfigBytes\x12\x1c\n" +
 	"\tNamespace\x18\x02 \x01(\tR\tNamespace\x128\n" +
 	"\aHeaders\x18\x03 \x03(\v2\x1e.rpc.ProxyRequest.HeadersEntryR\aHeaders\x12\x18\n" +
 	"\aPortMap\x18\x04 \x03(\tR\aPortMap\x12\x1c\n" +
-	"\tWorkloads\x18\x05 \x03(\tR\tWorkloads\x12\x16\n" +
-	"\x06Engine\x18\a \x01(\tR\x06Engine\x12/\n" +
+	"\tWorkloads\x18\x05 \x03(\tR\tWorkloads\x12/\n" +
 	"\n" +
 	"ExtraRoute\x18\b \x01(\v2\x0f.rpc.ExtraRouteR\n" +
 	"ExtraRoute\x12&\n" +
@@ -2978,13 +2952,12 @@ const file_daemon_proto_rawDesc = "" +
 	"\tNamespace\x18\x01 \x01(\tR\tNamespace\x12\x1c\n" +
 	"\tWorkloads\x18\x02 \x03(\tR\tWorkloads\")\n" +
 	"\rLeaveResponse\x12\x18\n" +
-	"\aMessage\x18\x01 \x01(\tR\aMessage\"\x99\x05\n" +
+	"\aMessage\x18\x01 \x01(\tR\aMessage\"\x81\x05\n" +
 	"\fCloneRequest\x12(\n" +
 	"\x0fKubeconfigBytes\x18\x01 \x01(\tR\x0fKubeconfigBytes\x12\x1c\n" +
 	"\tNamespace\x18\x02 \x01(\tR\tNamespace\x128\n" +
 	"\aHeaders\x18\x03 \x03(\v2\x1e.rpc.CloneRequest.HeadersEntryR\aHeaders\x12\x1c\n" +
-	"\tWorkloads\x18\x04 \x03(\tR\tWorkloads\x12\x16\n" +
-	"\x06Engine\x18\x06 \x01(\tR\x06Engine\x12/\n" +
+	"\tWorkloads\x18\x04 \x03(\tR\tWorkloads\x12/\n" +
 	"\n" +
 	"ExtraRoute\x18\a \x01(\v2\x0f.rpc.ExtraRouteR\n" +
 	"ExtraRoute\x12&\n" +

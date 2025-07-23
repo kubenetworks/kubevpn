@@ -59,7 +59,7 @@ iptables -t nat -A PREROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --t
 ip6tables -t nat -A PREROUTING ! -p icmp ! -s 0:0:0:0:0:0:0:1 ! -d ${CIDR6} -j DNAT --to :15006
 iptables -t nat -A POSTROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR4} -j MASQUERADE
 ip6tables -t nat -A POSTROUTING ! -p icmp ! -s 0:0:0:0:0:0:0:1 ! -d ${CIDR6} -j MASQUERADE
-kubevpn server -l "tun:/localhost:8422?net=${TunIPv4}&net6=${TunIPv6}&route=${CIDR4}" -f "tcp://${TrafficManagerService}:10800"`,
+kubevpn server -l "tun:/tcp://${TrafficManagerService}:10801?net=${TunIPv4}&net6=${TunIPv6}&route=${CIDR4}"`,
 		},
 		Env: []v1.EnvVar{
 			{
@@ -178,9 +178,10 @@ func AddEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 bool, m
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarVPN,
 		Image:   image,
-		Command: []string{"/bin/sh", "-c"},
-		Args: []string{`
-kubevpn server -l "ssh://:2222"`,
+		Command: []string{"kubevpn"},
+		Args: []string{
+			"server",
+			"-l ssh://:2222",
 		},
 		Resources: v1.ResourceRequirements{
 			Requests: map[v1.ResourceName]resource.Quantity{
@@ -193,10 +194,7 @@ kubevpn server -l "ssh://:2222"`,
 			},
 		},
 		ImagePullPolicy: v1.PullIfNotPresent,
-		SecurityContext: &v1.SecurityContext{
-			RunAsUser:  pointer.Int64(0),
-			RunAsGroup: pointer.Int64(0),
-		},
+		SecurityContext: &v1.SecurityContext{},
 	})
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:  config.ContainerSidecarEnvoyProxy,

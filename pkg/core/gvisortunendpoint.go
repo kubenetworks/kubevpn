@@ -103,7 +103,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			if err != nil {
 				plog.G(ctx).Errorf("[TCP-GVISOR] Failed to write to %s <- %s : %s", c.(net.Conn).RemoteAddr(), c.(net.Conn).LocalAddr(), err)
 			}
-		} else {
+		} else if buf[0] == 1 {
 			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 				ReserveHeaderBytes: 0,
 				Payload:            buffer.MakeWithData(buf[1:read]),
@@ -113,6 +113,16 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			endpoint.InjectInbound(protocol, pkt)
 			pkt.DecRef()
 			plog.G(ctx).Debugf("[TCP-GVISOR] Write to Gvisor. SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
+		} else {
+			util.SafeWrite(TCPPacketChan, &Packet{
+				data:   buf[:],
+				length: read,
+				src:    src,
+				dst:    dst,
+			}, func(v *Packet) {
+				config.LPool.Put(buf[:])
+				plog.G(ctx).Debugf("[TCP-TUN] Drop packet. SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
+			})
 		}
 	}
 }

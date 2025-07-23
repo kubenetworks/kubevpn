@@ -93,7 +93,7 @@ func (w *wsHandler) createTwoWayTUNTunnel(ctx context.Context, cli *ssh.Client) 
 		return err
 	}
 
-	remotePort := 10800
+	remotePort := 10801
 	var localPort int
 	localPort, err = util.GetAvailableTCPPortOrDie()
 	if err != nil {
@@ -131,10 +131,9 @@ func (w *wsHandler) createTwoWayTUNTunnel(ctx context.Context, cli *ssh.Client) 
 	w.cidr = append(w.cidr, string(serverIP))
 	r := core.Route{
 		Listeners: []string{
-			fmt.Sprintf("tun:/127.0.0.1:8422?net=%s&route=%s", clientIP, strings.Join(w.cidr, ",")),
+			fmt.Sprintf("tun:/%s?net=%s&route=%s", fmt.Sprintf("tcp://127.0.0.1:%d", localPort), clientIP, strings.Join(w.cidr, ",")),
 		},
-		Forwarder: fmt.Sprintf("tcp://127.0.0.1:%d", localPort),
-		Retries:   5,
+		Retries: 5,
 	}
 	servers, err := handler.Parse(r)
 	if err != nil {

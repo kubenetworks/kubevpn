@@ -105,7 +105,6 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 				Workloads:            args,
 				ExtraRoute:           extraRoute.ToRPC(),
 				OriginKubeconfigPath: util.GetKubeConfigPath(f),
-				Engine:               string(options.Engine),
 				SshJump:              sshConf.ToRPC(),
 				TargetContainer:      options.TargetContainer,
 				TargetImage:          options.TargetImage,
@@ -140,7 +139,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringToStringVarP(&options.Headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to target cluster cloned workloads, If not special, redirect all traffic to target cluster cloned workloads. eg: --headers foo=bar --headers env=dev")
-	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName, &options.Engine)
+	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName)
 
 	cmdutil.AddContainerVarFlags(cmd, &options.TargetContainer, options.TargetContainer)
 	cmd.Flags().StringVar(&options.TargetImage, "target-image", "", "Clone container use this image to startup container, if not special, use origin image")

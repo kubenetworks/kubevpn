@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/pkg/errors"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
@@ -22,17 +21,16 @@ var (
 )
 
 // Route example:
-// -l "tcp://:10800" -l "tun://:8422?net=198.19.0.100/16"
-// -l "tun:/10.233.24.133:8422?net=198.19.0.102/16&route=198.19.0.0/16"
-// -l "tun:/127.0.0.1:8422?net=198.19.0.102/16&route=198.19.0.0/16,10.233.0.0/16" -f "tcp://127.0.0.1:10800"
+// -l "gtcp://:10801" -l "tun://?net=198.19.0.100/16"
+// -l "tun:/tcp://10.233.24.133:8422?net=198.19.0.102/16&route=198.19.0.0/16"
+// -l "tun:/tcp://127.0.0.1:10800?net=198.19.0.102/16&route=198.19.0.0/16,10.233.0.0/16"
 type Route struct {
 	Listeners []string // -l tun
-	Forwarder string   // -f tcp
 	Retries   int
 }
 
-func (r *Route) ParseForwarder() (*Forwarder, error) {
-	forwarder, err := ParseNode(r.Forwarder)
+func ParseForwarder(remote string) (*Forwarder, error) {
+	forwarder, err := ParseNode(remote)
 	if err != nil {
 		return nil, err
 	}
@@ -40,20 +38,13 @@ func (r *Route) ParseForwarder() (*Forwarder, error) {
 		Connector:   NewUDPOverTCPConnector(),
 		Transporter: TCPTransporter(nil),
 	}
-	return NewForwarder(r.Retries, forwarder), nil
+	return NewForwarder(5, forwarder), nil
 }
 
 func (r *Route) GenerateServers() ([]Server, error) {
-	forwarder, err := r.ParseForwarder()
-	if err != nil && !errors.Is(err, ErrorInvalidNode) {
-		plog.G(context.Background()).Errorf("Failed to parse forwarder: %v", err)
-		return nil, err
-	}
-
 	servers := make([]Server, 0, len(r.Listeners))
 	for _, l := range r.Listeners {
-		var node *Node
-		node, err = ParseNode(l)
+		node, err := ParseNode(l)
 		if err != nil {
 			plog.G(context.Background()).Errorf("Failed to parse node %s: %v", l, err)
 			return nil, err
@@ -64,7 +55,14 @@ func (r *Route) GenerateServers() ([]Server, error) {
 
 		switch node.Protocol {
 		case "tun":
-			handler = TunHandler(forwarder, node)
+			var forwarder *Forwarder
+			if node.Remote != "" {
+				forwarder, err = ParseForwarder(node.Remote)
+				if err != nil {
+					return nil, err
+				}
+			}
+			handler = TunHandler(node, forwarder)
 			listener, err = tun.Listener(tun.Config{
 				Name:    node.Get("name"),
 				Addr:    node.Get("net"),
@@ -75,13 +73,6 @@ func (r *Route) GenerateServers() ([]Server, error) {
 			})
 			if err != nil {
 				plog.G(context.Background()).Errorf("Failed to create tun listener: %v", err)
-				return nil, err
-			}
-		case "tcp":
-			handler = TCPHandler()
-			listener, err = TCPListener(node.Addr)
-			if err != nil {
-				plog.G(context.Background()).Errorf("Failed to create tcp listener: %v", err)
 				return nil, err
 			}
 		case "gtcp":
