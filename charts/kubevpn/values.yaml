@@ -96,15 +96,7 @@ autoscaling:
   # targetMemoryUtilizationPercentage: 80
 
 # Additional volumes on the output Deployment definition.
-volumes:
-  - configMap:
-      defaultMode: 420
-      items:
-        - key: ENVOY_CONFIG
-          path: envoy-config.yaml
-      name: kubevpn-traffic-manager
-      optional: false
-    name: envoy-config
+volumes: {}
 
 
 # Additional volumeMounts on the output Deployment definition.

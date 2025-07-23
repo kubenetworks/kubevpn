@@ -82,8 +82,6 @@ spec:
           {{- end }}
         - args:
             - control-plane
-            - --watchDirectoryFilename
-            - /etc/envoy/envoy-config.yaml
           command:
             - kubevpn
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -95,10 +93,6 @@ spec:
               protocol: TCP
           resources:
             {{- toYaml .Values.resourcesSmall | nindent 12 }}
-          volumeMounts:
-            - mountPath: /etc/envoy
-              name: envoy-config
-              readOnly: true
         - args:
             - webhook
           command:

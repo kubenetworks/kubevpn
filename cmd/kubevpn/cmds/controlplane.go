@@ -17,11 +17,8 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func CmdControlPlane(cmdutil.Factory) *cobra.Command {
-	var (
-		watchDirectoryFilename string
-		port                   uint = 9002
-	)
+func CmdControlPlane(f cmdutil.Factory) *cobra.Command {
+	var port uint = 9002
 	cmd := &cobra.Command{
 		Use:    "control-plane",
 		Hidden: true,
@@ -38,11 +35,10 @@ func CmdControlPlane(cmdutil.Factory) *cobra.Command {
 				}
 				plog.G(context.Background()).Fatal(dns.ListenAndServe("udp", ":53", conf))
 			}()
-			err := controlplane.Main(cmd.Context(), watchDirectoryFilename, port, plog.G(context.Background()))
+			err := controlplane.Main(cmd.Context(), f, port, plog.G(context.Background()))
 			return err
 		},
 	}
-	cmd.Flags().StringVarP(&watchDirectoryFilename, "watchDirectoryFilename", "w", "/etc/envoy/envoy-config.yaml", "full path to directory to watch for files")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "true/false")
 	return cmd
 }
