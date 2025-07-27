@@ -18,13 +18,22 @@ func (svr *Server) Leave(resp rpc.Daemon_LeaveServer) error {
 	}
 
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newLeaveWarp(resp), svr.LogFile))
-	if svr.connect == nil {
-		logger.Infof("No proxy resource found")
-		return fmt.Errorf("no proxy resource found")
+
+	var index = -1
+	for i, connection := range svr.connections {
+		if connection.GetConnectionID() == svr.currentConnectionID {
+			index = i
+			break
+		}
 	}
+	if index == -1 {
+		logger.Infof("No connection found")
+		return fmt.Errorf("no connection found")
+	}
+
 	ctx := plog.WithLogger(resp.Context(), logger)
 
-	v4, _ := svr.connect.GetLocalTunIP()
+	v4, _ := svr.connections[index].GetLocalTunIP()
 	var resources []handler.Resources
 	for _, resource := range req.GetWorkloads() {
 		resources = append(resources, handler.Resources{
@@ -32,7 +41,7 @@ func (svr *Server) Leave(resp rpc.Daemon_LeaveServer) error {
 			Workload:  resource,
 		})
 	}
-	return svr.connect.LeaveResource(ctx, resources, v4)
+	return svr.connections[index].LeaveResource(ctx, resources, v4)
 }
 
 type leaveWarp struct {

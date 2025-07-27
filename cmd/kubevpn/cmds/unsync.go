@@ -15,10 +15,10 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func CmdRemove(f cmdutil.Factory) *cobra.Command {
+func CmdUnsync(f cmdutil.Factory) *cobra.Command {
 	var cmd = &cobra.Command{
-		Use:   "remove",
-		Short: "Remove clone resource",
+		Use:   "unsync",
+		Short: "unsync target resource",
 		Long: templates.LongDesc(i18n.T(`
 		Remove clone resource
 
@@ -38,10 +38,10 @@ func CmdRemove(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			req := &rpc.RemoveRequest{
+			req := &rpc.UnsyncRequest{
 				Workloads: args,
 			}
-			resp, err := cli.Remove(context.Background())
+			resp, err := cli.Unsync(context.Background())
 			if err != nil {
 				return err
 			}
@@ -49,7 +49,7 @@ func CmdRemove(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.RemoveResponse](cmd.Context(), resp)
+			err = util.PrintGRPCStream[rpc.UnsyncResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil

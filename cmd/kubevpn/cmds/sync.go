@@ -24,26 +24,26 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util/regctl"
 )
 
-// CmdClone multiple cluster operate, can start up one deployment to another cluster
+// CmdSync multiple cluster operate, can start up one deployment to another cluster
 // kubectl exec POD_NAME -c CONTAINER_NAME /sbin/killall5 or ephemeralcontainers
-func CmdClone(f cmdutil.Factory) *cobra.Command {
-	var options = handler.CloneOptions{}
+func CmdSync(f cmdutil.Factory) *cobra.Command {
+	var options = handler.SyncOptions{}
 	var sshConf = &pkgssh.SshConfig{}
 	var extraRoute = &handler.ExtraRouteInfo{}
 	var transferImage bool
 	var syncDir string
 	var imagePullSecretName string
 	cmd := &cobra.Command{
-		Use:   "clone",
-		Short: i18n.T("Clone workloads run in current namespace with same volume、env、and network"),
+		Use:   "sync",
+		Short: i18n.T("Sync workloads run in current namespace with same volume、env、and network"),
 		Long: templates.LongDesc(i18n.T(`
-		Clone workloads run in current namespace with same volume、env、and network
+		Sync workloads run in current namespace with same volume、env、and network
 
 		In this way, you can startup another deployment in current namespace, but with different image version,
 		it also supports service mesh proxy. only traffic with special header will hit to cloned_resource.
 		`)),
 		Example: templates.Examples(i18n.T(`
-		# clone
+		# sync
 		- clone deployment run in current namespace
 		  kubevpn clone deployment/productpage
 
@@ -98,7 +98,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 					extraRoute.ExtraCIDR = append(extraRoute.ExtraCIDR, ip.String())
 				}
 			}
-			req := &rpc.CloneRequest{
+			req := &rpc.SyncRequest{
 				KubeconfigBytes:      string(bytes),
 				Namespace:            ns,
 				Headers:              options.Headers,
@@ -119,7 +119,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := cli.Clone(context.Background())
+			resp, err := cli.Sync(context.Background())
 			if err != nil {
 				return err
 			}
@@ -127,7 +127,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.CloneResponse](cmd.Context(), resp)
+			err = util.PrintGRPCStream[rpc.SyncResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil
@@ -142,7 +142,7 @@ func CmdClone(f cmdutil.Factory) *cobra.Command {
 	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName)
 
 	cmdutil.AddContainerVarFlags(cmd, &options.TargetContainer, options.TargetContainer)
-	cmd.Flags().StringVar(&options.TargetImage, "target-image", "", "Clone container use this image to startup container, if not special, use origin image")
+	cmd.Flags().StringVar(&options.TargetImage, "target-image", "", "Sync container use this image to startup container, if not special, use origin image")
 	cmd.Flags().StringVar(&syncDir, "sync", "", "Sync local dir to remote pod dir. format: LOCAL_DIR:REMOTE_DIR, eg: ~/code:/app/code")
 
 	handler.AddExtraRoute(cmd.Flags(), extraRoute)

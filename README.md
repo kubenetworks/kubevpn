@@ -262,10 +262,10 @@ ID Mode Cluster               Kubeconfig                 Namespace Status
 0  full ccijorbccotmqodvr189g /Users/naison/.kube/config default   Connected
 ```
 
-then connect to another cluster `ccidd77aam2dtnc3qnddg` with mode `lite`
+then connect to another cluster `ccidd77aam2dtnc3qnddg`
 
 ```shell
-➜  ~ kubevpn connect -n default --kubeconfig ~/.kube/dev_config --lite
+➜  ~ kubevpn connect -n default --kubeconfig ~/.kube/dev_config
 Starting connect
 Got network CIDR from cache
 Use exist traffic manager

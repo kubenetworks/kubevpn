@@ -71,6 +71,26 @@ func CopyGRPCStream[T any](r grpc.ClientStream, w grpc.ServerStream) error {
 	}
 }
 
+func CopyGRPCConnStream(r grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse], w grpc.ServerStream) (string, error) {
+	var connectionID string
+	for {
+		resp, err := r.Recv()
+		if errors.Is(err, io.EOF) {
+			return connectionID, nil
+		}
+		if err != nil {
+			return connectionID, err
+		}
+		if resp.ConnectionID != "" {
+			connectionID = resp.ConnectionID
+		}
+		err = w.SendMsg(resp)
+		if err != nil {
+			return connectionID, err
+		}
+	}
+}
+
 func CopyAndConvertGRPCStream[I any, O any](r grpc.ClientStream, w grpc.ServerStream, convert func(*I) *O) error {
 	for {
 		var i = new(I)

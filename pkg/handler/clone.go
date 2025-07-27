@@ -32,13 +32,12 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/syncthing"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-type CloneOptions struct {
+type SyncOptions struct {
 	Namespace      string
 	Headers        map[string]string
 	Workloads      []string
@@ -51,7 +50,6 @@ type CloneOptions struct {
 	OriginKubeconfigPath string
 	LocalDir             string
 	RemoteDir            string
-	Request              *rpc.CloneRequest `json:"Request,omitempty"`
 
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient
@@ -63,7 +61,7 @@ type CloneOptions struct {
 	syncthingGUIAddr string
 }
 
-func (d *CloneOptions) InitClient(f cmdutil.Factory) (err error) {
+func (d *SyncOptions) InitClient(f cmdutil.Factory) (err error) {
 	d.factory = f
 	if d.config, err = d.factory.ToRESTConfig(); err != nil {
 		return
@@ -80,7 +78,7 @@ func (d *CloneOptions) InitClient(f cmdutil.Factory) (err error) {
 	return
 }
 
-func (d *CloneOptions) SetContext(ctx context.Context) {
+func (d *SyncOptions) SetContext(ctx context.Context) {
 	d.ctx = ctx
 }
 
@@ -91,13 +89,13 @@ func (d *CloneOptions) SetContext(ctx context.Context) {
 * 3) create serviceAccount as needed
 * 4) modify podTempSpec inject kubevpn container
  */
-func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte, image string) error {
+func (d *SyncOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte, image string) error {
 	var args []string
 	if len(d.Headers) != 0 {
 		args = append(args, "--headers", labels.Set(d.Headers).String())
 	}
 	for _, workload := range d.Workloads {
-		plog.G(ctx).Infof("Clone workload %s", workload)
+		plog.G(ctx).Infof("Sync workload %s", workload)
 		_, controller, err := util.GetTopOwnerObject(ctx, d.factory, d.Namespace, workload)
 		if err != nil {
 			return err
@@ -377,7 +375,7 @@ update-alternatives --set iptables /usr/sbin/iptables-legacy`,
 	return container
 }
 
-func (d *CloneOptions) SyncDir(ctx context.Context, labels string) error {
+func (d *SyncOptions) SyncDir(ctx context.Context, labels string) error {
 	list, err := util.GetRunningPodList(ctx, d.clientset, d.Namespace, labels)
 	if err != nil {
 		return err
@@ -455,7 +453,7 @@ func RemoveUselessInfo(u *unstructured.Unstructured) {
 	u.SetAnnotations(a)
 }
 
-func (d *CloneOptions) Cleanup(ctx context.Context, workloads ...string) error {
+func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	if len(workloads) == 0 {
 		for _, v := range d.TargetWorkloadNames {
 			workloads = append(workloads, v)
@@ -491,14 +489,14 @@ func (d *CloneOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	return nil
 }
 
-func (d *CloneOptions) AddRollbackFunc(f func() error) {
+func (d *SyncOptions) AddRollbackFunc(f func() error) {
 	d.rollbackFuncList = append(d.rollbackFuncList, f)
 }
 
-func (d *CloneOptions) GetFactory() cmdutil.Factory {
+func (d *SyncOptions) GetFactory() cmdutil.Factory {
 	return d.factory
 }
 
-func (d *CloneOptions) GetSyncthingGUIAddr() string {
+func (d *SyncOptions) GetSyncthingGUIAddr() string {
 	return d.syncthingGUIAddr
 }

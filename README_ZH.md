@@ -244,10 +244,8 @@ ID Mode Cluster               Kubeconfig                 Namespace Status
 0  full ccijorbccotmqodvr189g /Users/naison/.kube/config default   Connected
 ```
 
-此时还可以使用 `lite` 模式链接到其它集群
-
 ```shell
-➜  ~ kubevpn connect -n default --kubeconfig ~/.kube/dev_config --lite
+➜  ~ kubevpn connect -n default --kubeconfig ~/.kube/dev_config
 Starting connect
 Got network CIDR from cache
 Use exist traffic manager

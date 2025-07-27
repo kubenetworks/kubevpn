@@ -65,18 +65,18 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var clusterIDs []string
+			var connectionIDs []string
 			if aliasName != "" {
 				configs, err := ParseAndGet(localFile, remoteAddr, aliasName)
 				if err != nil {
 					return err
 				}
 				for _, conf := range configs {
-					clusterID, err := GetClusterIDByConfig(cmd, conf)
+					connectionID, err := GetConnectionIDByConfig(cmd, conf)
 					if err != nil {
 						return err
 					}
-					clusterIDs = append(clusterIDs, clusterID)
+					connectionIDs = append(connectionIDs, connectionID)
 				}
 			}
 
@@ -84,7 +84,7 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := cli.Status(cmd.Context(), &rpc.StatusRequest{ClusterIDs: clusterIDs})
+			resp, err := cli.Status(cmd.Context(), &rpc.StatusRequest{ConnectionIDs: connectionIDs})
 			if err != nil {
 				return err
 			}
@@ -109,7 +109,7 @@ func genOutput(status *rpc.StatusResponse, format string) (string, error) {
 		if len(status.List) == 0 {
 			return "", nil
 		}
-		marshal, err := json.Marshal(status.List)
+		marshal, err := json.Marshal(status)
 		if err != nil {
 			return "", err
 		}
@@ -119,7 +119,7 @@ func genOutput(status *rpc.StatusResponse, format string) (string, error) {
 		if len(status.List) == 0 {
 			return "", nil
 		}
-		marshal, err := yaml.Marshal(status.List)
+		marshal, err := yaml.Marshal(status)
 		if err != nil {
 			return "", err
 		}
@@ -127,18 +127,19 @@ func genOutput(status *rpc.StatusResponse, format string) (string, error) {
 	default:
 		var sb = new(bytes.Buffer)
 		w := printers.GetNewTabWriter(sb)
-		genConnectMsg(w, status.List)
+		genConnectMsg(w, status.CurrentConnectionID, status.List)
 		genProxyMsg(w, status.List)
-		genCloneMsg(w, status.List)
+		genSyncMsg(w, status.List)
 		_ = w.Flush()
 		return sb.String(), nil
 	}
 }
 
-func genConnectMsg(w *tabwriter.Writer, status []*rpc.Status) {
-	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Mode", "Cluster", "Kubeconfig", "Namespace", "Status", "Netif")
+func genConnectMsg(w *tabwriter.Writer, currentConnectionID string, status []*rpc.Status) {
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "CURRENT", "CONNECTION ID", "CLUSTER", "KUBECONFIG", "NAMESPACE", "STATUS", "NETIF")
 	for _, c := range status {
-		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", c.ID, c.Mode, c.Cluster, c.Kubeconfig, c.Namespace, c.Status, c.Netif)
+		current := util.If[string](c.ConnectionID == currentConnectionID, "*", "")
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", current, c.ConnectionID, c.Cluster, c.Kubeconfig, c.Namespace, c.Status, c.Netif)
 	}
 }
 
@@ -156,7 +157,7 @@ func genProxyMsg(w *tabwriter.Writer, list []*rpc.Status) {
 
 	_, _ = fmt.Fprintf(w, "\n")
 	w.SetRememberedWidths(nil)
-	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Namespace", "Name", "Headers", "IP", "PortMap", "CurrentPC")
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", strings.Repeat(" ", len("CURRENT")), "CONNECTION ID", "NAMESPACE", "NAME", "HEADERS", "PORTS", "CURRENT PC")
 	for _, c := range list {
 		for _, proxy := range c.ProxyList {
 			for _, rule := range proxy.RuleList {
@@ -171,12 +172,12 @@ func genProxyMsg(w *tabwriter.Writer, list []*rpc.Status) {
 				for k, v := range rule.PortMap {
 					portmap = append(portmap, fmt.Sprintf("%d->%d", k, v))
 				}
-				_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%v\n",
-					c.ID,
+				_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%v\n",
+					"",
+					c.ConnectionID,
 					proxy.Namespace,
 					proxy.Workload,
 					strings.Join(headers, ","),
-					rule.LocalTunIPv4,
 					strings.Join(portmap, ","),
 					rule.CurrentDevice,
 				)
@@ -185,10 +186,10 @@ func genProxyMsg(w *tabwriter.Writer, list []*rpc.Status) {
 	}
 }
 
-func genCloneMsg(w *tabwriter.Writer, list []*rpc.Status) {
+func genSyncMsg(w *tabwriter.Writer, list []*rpc.Status) {
 	var needsPrint bool
 	for _, status := range list {
-		if len(status.CloneList) != 0 {
+		if len(status.SyncList) != 0 {
 			needsPrint = true
 			break
 		}
@@ -199,9 +200,9 @@ func genCloneMsg(w *tabwriter.Writer, list []*rpc.Status) {
 
 	_, _ = fmt.Fprintf(w, "\n")
 	w.SetRememberedWidths(nil)
-	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", "ID", "Namespace", "Name", "Headers", "ToName", "SyncthingGUI")
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", strings.Repeat(" ", len("CURRENT")), "CONNECTION ID", "NAMESPACE", "NAME", "HEADERS", "TO NAME", "SYNCTHING GUI")
 	for _, c := range list {
-		for _, clone := range c.CloneList {
+		for _, clone := range c.SyncList {
 			//_, _ = fmt.Fprintf(w, "%s\n", clone.Workload)
 			for _, rule := range clone.RuleList {
 				var headers []string
@@ -211,8 +212,9 @@ func genCloneMsg(w *tabwriter.Writer, list []*rpc.Status) {
 				if len(headers) == 0 {
 					headers = []string{"*"}
 				}
-				_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
-					c.ID,
+				_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					"",
+					c.ConnectionID,
 					clone.Namespace,
 					clone.Workload,
 					strings.Join(headers, ","),
@@ -224,7 +226,7 @@ func genCloneMsg(w *tabwriter.Writer, list []*rpc.Status) {
 	}
 }
 
-func GetClusterIDByConfig(cmd *cobra.Command, config Config) (string, error) {
+func GetConnectionIDByConfig(cmd *cobra.Command, config Config) (string, error) {
 	flags := flag.NewFlagSet("", flag.ContinueOnError)
 	var sshConf = &pkgssh.SshConfig{}
 	pkgssh.AddSshFlags(flags, sshConf)
@@ -267,9 +269,9 @@ func GetClusterIDByConfig(cmd *cobra.Command, config Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	id, err := util.GetClusterID(cmd.Context(), c.GetClientset().CoreV1().Namespaces(), ns)
+	id, err := util.GetConnectionID(cmd.Context(), c.GetClientset().CoreV1().Namespaces(), ns)
 	if err != nil {
 		return "", err
 	}
-	return string(id), nil
+	return id, nil
 }

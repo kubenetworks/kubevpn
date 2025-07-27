@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
@@ -22,7 +21,6 @@ import (
 
 func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 	var all = false
-	var clusterIDs []string
 	cmd := &cobra.Command{
 		Use:   "disconnect",
 		Short: i18n.T("Disconnect from kubernetes cluster network"),
@@ -50,25 +48,20 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 		},
 		Args: cobra.MatchAll(cobra.OnlyValidArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 && !all && len(clusterIDs) == 0 {
-				return fmt.Errorf("either specify --all or ID")
+			if len(args) == 0 && !all {
+				return fmt.Errorf("either specify --all or connecetion ID")
 			}
-			var ids *int32
+			var id string
 			if len(args) > 0 {
-				integer, err := strconv.Atoi(args[0])
-				if err != nil {
-					return fmt.Errorf("invalid ID: %s: %v", args[0], err)
-				}
-				ids = pointer.Int32(int32(integer))
+				id = args[0]
 			}
 			cli, err := daemon.GetClient(false)
 			if err != nil {
 				return err
 			}
 			req := &rpc.DisconnectRequest{
-				ID:         ids,
-				ClusterIDs: clusterIDs,
-				All:        pointer.Bool(all),
+				ConnectionID: &id,
+				All:          pointer.Bool(all),
 			}
 			resp, err := cli.Disconnect(context.Background())
 			if err != nil {
@@ -90,7 +83,5 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", all, "Disconnect all cluster, disconnect from all cluster network")
-	cmd.Flags().StringArrayVar(&clusterIDs, "cluster-id", []string{}, "Cluster id, command status -o yaml/json will show cluster-id")
-	_ = cmd.Flags().MarkHidden("cluster-id")
 	return cmd
 }

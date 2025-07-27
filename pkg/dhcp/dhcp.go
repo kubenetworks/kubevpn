@@ -11,7 +11,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 
@@ -21,11 +20,11 @@ import (
 )
 
 type Manager struct {
-	clientset *kubernetes.Clientset
-	cidr      *net.IPNet
-	cidr6     *net.IPNet
-	namespace string
-	clusterID types.UID
+	clientset    *kubernetes.Clientset
+	cidr         *net.IPNet
+	cidr6        *net.IPNet
+	namespace    string
+	connectionID string
 }
 
 func NewDHCPManager(clientset *kubernetes.Clientset, namespace string) *Manager {
@@ -46,7 +45,7 @@ func (m *Manager) InitDHCP(ctx context.Context) error {
 	}
 
 	if err == nil {
-		m.clusterID, err = util.GetClusterID(ctx, m.clientset.CoreV1().Namespaces(), m.namespace)
+		m.connectionID, err = util.GetConnectionID(ctx, m.clientset.CoreV1().Namespaces(), m.namespace)
 		return err
 	}
 
@@ -67,7 +66,7 @@ func (m *Manager) InitDHCP(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create configmap: %v", err)
 	}
-	m.clusterID, err = util.GetClusterID(ctx, m.clientset.CoreV1().Namespaces(), m.namespace)
+	m.connectionID, err = util.GetConnectionID(ctx, m.clientset.CoreV1().Namespaces(), m.namespace)
 	return err
 }
 
@@ -263,6 +262,6 @@ func (m *Manager) ForEach(ctx context.Context, fnv4 func(net.IP), fnv6 func(net.
 	return nil
 }
 
-func (m *Manager) GetClusterID() types.UID {
-	return m.clusterID
+func (m *Manager) GetConnectionID() string {
+	return m.connectionID
 }

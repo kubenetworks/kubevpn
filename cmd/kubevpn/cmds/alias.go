@@ -28,7 +28,6 @@ Flags:
   - connect
   - --kubeconfig=~/.kube/config
   - --namespace=test
-  - --lite
 ---
 
 Name: test1
@@ -67,7 +66,6 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 		  - connect
 		  - --kubeconfig=~/.kube/config
 		  - --namespace=default
-		  - --lite
 		---
 		
 		Name: jumper
