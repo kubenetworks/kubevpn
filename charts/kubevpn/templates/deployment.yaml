@@ -32,35 +32,12 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - args:
-            {{- if eq .Values.netstack "system" }}
-            - |
-              echo 1 > /proc/sys/net/ipv4/ip_forward
-              echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
-              echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
-              update-alternatives --set iptables /usr/sbin/iptables-legacy
-              iptables -P INPUT ACCEPT
-              ip6tables -P INPUT ACCEPT
-              iptables -P FORWARD ACCEPT
-              ip6tables -P FORWARD ACCEPT
-              iptables -t nat -A POSTROUTING -s ${CIDR4} -o eth0 -j MASQUERADE
-              ip6tables -t nat -A POSTROUTING -s ${CIDR6} -o eth0 -j MASQUERADE
-              kubevpn server -l "tcp://:10800" -l "tun://:8422?net=${TunIPv4}&net6=${TunIPv6}" -l "gtcp://:10801" -l "gudp://:10802"
-            {{- else }}
-            - kubevpn server -l "tcp://:10800" -l "gtcp://:10801" -l "gudp://:10802"
-            {{- end }}
-          command:
-            - /bin/sh
-            - -c
-          env:
-            - name: CIDR4
-              value: 198.19.0.0/16
-            - name: CIDR6
-              value: 2001:2::/64
-            - name: TunIPv4
-              value: 198.19.0.100/16
-            - name: TunIPv6
-              value: 2001:2::9999/64
+        - command:
+            - kubevpn
+          args:
+            - server
+            - -l gtcp://:10801
+            - -l gudp://:10802
           envFrom:
             - secretRef:
                 name: {{ include "kubevpn.fullname" . }}
@@ -68,18 +45,11 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           name: vpn
           ports:
-            - containerPort: {{ .Values.service.port8422 }}
-              name: 8422-for-udp
-              protocol: UDP
-            - containerPort: {{ .Values.service.port10800 }}
-              name: 10800-for-tcp
+            - containerPort: {{ .Values.service.port10801 }}
+              name: 10801-for-tcp
               protocol: TCP
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if eq .Values.netstack "system" }}
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
-          {{- end }}
         - args:
             - control-plane
           command:

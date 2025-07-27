@@ -12,7 +12,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -55,7 +54,6 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	svr.connect = &handler.ConnectOptions{
 		Namespace:            req.ManagerNamespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
-		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		OriginNamespace:      req.Namespace,
 		Lock:                 &svr.Lock,
@@ -118,7 +116,6 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		Namespace:            req.Namespace,
 		OriginNamespace:      req.Namespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
-		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		Request:              proto.Clone(req).(*rpc.ConnectRequest),
 	}

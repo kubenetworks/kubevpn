@@ -103,7 +103,7 @@ func TestFunctions(t *testing.T) {
 
 	// 8) install centrally in ns test -- proxy mode with service mesh and gvisor
 	t.Run("kubevpnQuit", kubevpnQuit)
-	t.Run("kubevpnProxyWithServiceMeshAndGvisorModePortMap", kubevpnProxyWithServiceMeshAndGvisorModePortMap)
+	t.Run("kubevpnProxyWithServiceMeshAndK8sServicePortMap", kubevpnProxyWithServiceMeshAndK8sServicePortMap)
 	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
 	t.Run("commonTest", commonTest)
 	t.Run("serviceMeshReviewsServiceIPPortMap", serviceMeshReviewsServiceIPPortMap)
@@ -472,7 +472,7 @@ func kubevpnProxyWithServiceMesh(t *testing.T) {
 }
 
 func kubevpnProxyWithServiceMeshAndGvisorMode(t *testing.T) {
-	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--netstack", "gvisor", "--debug")
+	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--debug")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
@@ -481,8 +481,8 @@ func kubevpnProxyWithServiceMeshAndGvisorMode(t *testing.T) {
 	}
 }
 
-func kubevpnProxyWithServiceMeshAndGvisorModePortMap(t *testing.T) {
-	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--netstack", "gvisor", "--debug", "--portmap", "9080:8080")
+func kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {
+	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--debug", "--portmap", "9080:8080")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()

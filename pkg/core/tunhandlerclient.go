@@ -14,7 +14,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
+func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn, forwarder *Forwarder) {
 	device := &ClientDevice{
 		tun:         tun,
 		tunInbound:  make(chan *Packet, MaxSize),
@@ -23,7 +23,7 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn) {
 	}
 
 	defer device.Close()
-	go device.handlePacket(ctx, h.forward)
+	go device.handlePacket(ctx, forwarder)
 	go device.readFromTun(ctx)
 	go device.writeToTun(ctx)
 	go device.heartbeats(ctx)

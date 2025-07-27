@@ -167,7 +167,7 @@ NAME                      TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)     
 authors                   ClusterIP   172.21.5.160    <none>        9080/TCP                             114d    app=authors
 details                   ClusterIP   172.21.6.183    <none>        9080/TCP                             114d    app=details
 kubernetes                ClusterIP   172.21.0.1      <none>        443/TCP                              319d    <none>
-kubevpn-traffic-manager   ClusterIP   172.21.2.86     <none>        8422/UDP,10800/TCP,9002/TCP,80/TCP   2m28s   app=kubevpn-traffic-manager
+kubevpn-traffic-manager   ClusterIP   172.21.2.86     <none>        10800/TCP,9002/TCP,80/TCP            2m28s   app=kubevpn-traffic-manager
 productpage               ClusterIP   172.21.10.49    <none>        9080/TCP                             114d    app=productpage
 ratings                   ClusterIP   172.21.3.247    <none>        9080/TCP                             114d    app=ratings
 reviews                   ClusterIP   172.21.8.24     <none>        9080/TCP                             114d    app=reviews

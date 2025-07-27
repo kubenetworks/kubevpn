@@ -7,7 +7,6 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -27,7 +26,6 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 		KubeconfigBytes:      req.KubeconfigBytes,
 		Namespace:            req.Namespace,
 		ExtraRoute:           req.ExtraRoute,
-		Engine:               req.Engine,
 		SshJump:              req.SshJump,
 		TransferImage:        req.TransferImage,
 		Image:                req.Image,
@@ -82,7 +80,6 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 		Headers:              req.Headers,
 		Workloads:            req.Workloads,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
-		Engine:               config.Engine(req.Engine),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 
 		TargetContainer:     req.TargetContainer,

@@ -26,7 +26,6 @@ import (
 func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	var headers = make(map[string]string)
 	var portmap []string
-	var connect = handler.ConnectOptions{}
 	var extraRoute = &handler.ExtraRouteInfo{}
 	var sshConf = &pkgssh.SshConfig{}
 	var transferImage, foreground bool
@@ -123,7 +122,6 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				PortMap:              portmap,
 				Workloads:            args,
 				ExtraRoute:           extraRoute.ToRPC(),
-				Engine:               string(connect.Engine),
 				SshJump:              sshConf.ToRPC(),
 				TransferImage:        transferImage,
 				Image:                config.Image,
@@ -163,7 +161,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().StringToStringVarP(&headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to local PC, If not special, redirect all traffic to local PC. format: <KEY>=<VALUE> eg: --headers foo=bar --headers env=dev")
 	cmd.Flags().StringArrayVar(&portmap, "portmap", []string{}, "Port map, map container port to local port, format: [tcp/udp]/containerPort:localPort, If not special, localPort will use containerPort. eg: tcp/80:8080 or udp/5000:5001 or 80 or 80:8080")
-	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName, &connect.Engine)
+	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName)
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "foreground hang up")
 	cmd.Flags().StringVar(&managerNamespace, "manager-namespace", "", "The namespace where the traffic manager is to be found. Only works in cluster mode (install kubevpn server by helm)")
 
