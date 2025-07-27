@@ -72,7 +72,7 @@ func cmdConnectionUse(f cmdutil.Factory) *cobra.Command {
 		`)),
 		Example: templates.Examples(i18n.T(`
 		# use a specific connection, change current connection to special id, leave or unsync will use this connection
-		kubevpn connection use xxx
+		kubevpn connection use 03dc50feb8c3
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			// startup daemon process and sudo process
