@@ -1007,6 +1007,11 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// 3) update service
+	err = upgradeServiceSpec(ctx, c.factory, c.Namespace)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1123,6 +1128,30 @@ func upgradeSecretSpec(ctx context.Context, f cmdutil.Factory, ns string) error 
 
 	mutatingWebhookConfig.ResourceVersion = current.ResourceVersion
 	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Update(ctx, mutatingWebhookConfig, metav1.UpdateOptions{})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func upgradeServiceSpec(ctx context.Context, f cmdutil.Factory, ns string) error {
+	tcp10801 := "10801-for-tcp"
+	tcp9002 := "9002-for-envoy"
+	tcp80 := "80-for-webhook"
+	udp53 := "53-for-dns"
+	svcSpec := genService(ns, tcp10801, tcp9002, tcp80, udp53)
+
+	clientset, err := f.KubernetesClientSet()
+	if err != nil {
+		return err
+	}
+	currentSecret, err := clientset.CoreV1().Services(ns).Get(ctx, svcSpec.Name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	svcSpec.ResourceVersion = currentSecret.ResourceVersion
+
+	_, err = clientset.CoreV1().Services(ns).Update(ctx, svcSpec, metav1.UpdateOptions{})
 	if err != nil {
 		return err
 	}
