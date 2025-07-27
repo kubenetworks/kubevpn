@@ -82,14 +82,14 @@ func (d *SyncOptions) SetContext(ctx context.Context) {
 	d.ctx = ctx
 }
 
-// DoClone
+// DoSync
 /*
 * 1) download mount path use empty-dir but skip empty-dir in init-containers
 * 2) get env from containers
 * 3) create serviceAccount as needed
 * 4) modify podTempSpec inject kubevpn container
  */
-func (d *SyncOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte, image string) error {
+func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, image string) error {
 	var args []string
 	if len(d.Headers) != 0 {
 		args = append(args, "--headers", labels.Set(d.Headers).String())
@@ -111,7 +111,7 @@ func (d *SyncOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte, i
 			return err
 		}
 		originName := u.GetName()
-		u.SetName(fmt.Sprintf("%s-clone-%s", u.GetName(), newUUID.String()[:5]))
+		u.SetName(fmt.Sprintf("%s-sync-%s", u.GetName(), newUUID.String()[:5]))
 		d.TargetWorkloadNames[workload] = fmt.Sprintf("%s/%s", controller.Mapping.Resource.GroupResource().Resource, u.GetName())
 		labelsMap := map[string]string{
 			config.ManageBy:   config.ConfigMapPodTrafficManager,
@@ -249,10 +249,10 @@ func (d *SyncOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte, i
 			return createErr
 		})
 		if retryErr != nil {
-			return fmt.Errorf("create clone for resource %s failed: %v", workload, retryErr)
+			return fmt.Errorf("create sync for resource %s failed: %v", workload, retryErr)
 		}
-		plog.G(ctx).Infof("Create clone resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
-		plog.G(ctx).Infof("Wait for clone resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
+		plog.G(ctx).Infof("Create sync resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
+		plog.G(ctx).Infof("Wait for sync resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
 		plog.G(ctx).Infoln()
 		err = util.WaitPodToBeReady(ctx, d.clientset.CoreV1().Pods(d.Namespace), metav1.LabelSelector{MatchLabels: labelsMap})
 		if err != nil {
@@ -460,7 +460,7 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 		}
 	}
 	for _, workload := range workloads {
-		plog.G(ctx).Infof("Cleaning up clone workload: %s", workload)
+		plog.G(ctx).Infof("Cleaning up sync workload: %s", workload)
 		object, err := util.GetUnstructuredObject(d.factory, d.Namespace, workload)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to get unstructured object: %s", err)
@@ -474,10 +474,10 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 		}
 		err = client.Resource(object.Mapping.Resource).Namespace(d.Namespace).Delete(context.Background(), object.Name, metav1.DeleteOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
-			plog.G(ctx).Errorf("Failed to delete clone object: %v", err)
+			plog.G(ctx).Errorf("Failed to delete sync object: %v", err)
 			return err
 		}
-		plog.G(ctx).Infof("Deleted clone object: %s/%s", object.Mapping.Resource.GroupResource().Resource, object.Name)
+		plog.G(ctx).Infof("Deleted sync object: %s/%s", object.Mapping.Resource.GroupResource().Resource, object.Name)
 	}
 	for _, f := range d.rollbackFuncList {
 		if f != nil {

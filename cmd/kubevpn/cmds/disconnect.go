@@ -30,14 +30,12 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 		This command is to disconnect from cluster. after use command 'kubevpn connect',
 		you can use this command to disconnect from a specific cluster. 
 
-		- Before disconnect, it will leave proxy resource and clone resource if resource depends on this cluster. 
+		- Before disconnect, it will leave proxy resource and sync resource if resource depends on this cluster. 
 		- After disconnect, it will also cleanup DNS and host.
 		`)),
 		Example: templates.Examples(i18n.T(`
-		# disconnect from first cluster
-        kubevpn disconnect 0
-		# disconnect from second cluster
-        kubevpn disconnect 1
+		# disconnect from special connection id
+        kubevpn disconnect 03dc50feb8c3
 		# disconnect from all cluster
 		kubevpn disconnect --all
 		`)),

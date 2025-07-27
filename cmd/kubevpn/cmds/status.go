@@ -39,16 +39,16 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 	var format string
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: i18n.T("Show connect status and list proxy/clone resource"),
+		Short: i18n.T("Show connect status and list proxy/sync resource"),
 		Long: templates.LongDesc(i18n.T(`
-		Show connect status and list proxy/clone resource
+		Show connect status and list proxy/sync resource
 
-		Show connect status and list proxy or clone resource, you can check connect status by filed status and netif.
+		Show connect status and list proxy or sync resource, you can check connect status by filed status and netif.
 		if netif is empty, means tun device closed, so it's unhealthy, it will also show route info, if proxy workloads, 
 		not only show myself proxy resource, another route info will also display.
 		`)),
 		Example: templates.Examples(i18n.T(`
-        # show status for connect status and list proxy/clone resource 
+        # show status for connect status and list proxy/sync resource 
         kubevpn status
 
 		# query status by alias config name dev_new 
@@ -202,9 +202,9 @@ func genSyncMsg(w *tabwriter.Writer, list []*rpc.Status) {
 	w.SetRememberedWidths(nil)
 	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", strings.Repeat(" ", len("CURRENT")), "CONNECTION ID", "NAMESPACE", "NAME", "HEADERS", "TO NAME", "SYNCTHING GUI")
 	for _, c := range list {
-		for _, clone := range c.SyncList {
-			//_, _ = fmt.Fprintf(w, "%s\n", clone.Workload)
-			for _, rule := range clone.RuleList {
+		for _, sync := range c.SyncList {
+			//_, _ = fmt.Fprintf(w, "%s\n", sync.Workload)
+			for _, rule := range sync.RuleList {
 				var headers []string
 				for k, v := range rule.Headers {
 					headers = append(headers, fmt.Sprintf("%s=%s", k, v))
@@ -215,11 +215,11 @@ func genSyncMsg(w *tabwriter.Writer, list []*rpc.Status) {
 				_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					"",
 					c.ConnectionID,
-					clone.Namespace,
-					clone.Workload,
+					sync.Namespace,
+					sync.Workload,
 					strings.Join(headers, ","),
 					rule.DstWorkload,
-					clone.SyncthingGUIAddr,
+					sync.SyncthingGUIAddr,
 				)
 			}
 		}

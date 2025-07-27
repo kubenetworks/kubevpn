@@ -40,29 +40,29 @@ func CmdSync(f cmdutil.Factory) *cobra.Command {
 		Sync workloads run in current namespace with same volume、env、and network
 
 		In this way, you can startup another deployment in current namespace, but with different image version,
-		it also supports service mesh proxy. only traffic with special header will hit to cloned_resource.
+		it also supports service mesh proxy. only traffic with special header will hit to sync resource.
 		`)),
 		Example: templates.Examples(i18n.T(`
 		# sync
-		- clone deployment run in current namespace
-		  kubevpn clone deployment/productpage
+		- sync deployment run in current namespace
+		  kubevpn sync deployment/productpage
 
-		# clone with mesh, traffic with header foo=bar, will hit cloned workloads, otherwise hit origin workloads
-		kubevpn clone deployment/productpage --headers foo=bar
+		# sync with mesh, traffic with header foo=bar, will hit sync workloads, otherwise hit origin workloads
+		kubevpn sync deployment/productpage --headers foo=bar
 
-		# clone workloads which api-server behind of bastion host or ssh jump host
-		kubevpn clone deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem --headers foo=bar
+		# sync workloads which api-server behind of bastion host or ssh jump host
+		kubevpn sync deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem --headers foo=bar
 
 		# It also supports ProxyJump, like
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
-		kubevpn clone service/productpage --ssh-alias <alias> --headers foo=bar
+		kubevpn sync service/productpage --ssh-alias <alias> --headers foo=bar
 
 		# Support ssh auth GSSAPI
-        kubevpn clone service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
-        kubevpn clone service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
-        kubevpn clone service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
+        kubevpn sync service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
+        kubevpn sync service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
+        kubevpn sync service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 		`)),
 		Args: cobra.MatchAll(cobra.OnlyValidArgs, cobra.MinimumNArgs(1)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
@@ -138,7 +138,7 @@ func CmdSync(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringToStringVarP(&options.Headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to target cluster cloned workloads, If not special, redirect all traffic to target cluster cloned workloads. eg: --headers foo=bar --headers env=dev")
+	cmd.Flags().StringToStringVarP(&options.Headers, "headers", "H", map[string]string{}, "Traffic with special headers (use `and` to match all headers) with reverse it to target cluster sync workloads, If not special, redirect all traffic to target cluster sync workloads. eg: --headers foo=bar --headers env=dev")
 	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName)
 
 	cmdutil.AddContainerVarFlags(cmd, &options.TargetContainer, options.TargetContainer)

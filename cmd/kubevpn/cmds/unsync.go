@@ -20,15 +20,15 @@ func CmdUnsync(f cmdutil.Factory) *cobra.Command {
 		Use:   "unsync",
 		Short: "unsync target resource",
 		Long: templates.LongDesc(i18n.T(`
-		Remove clone resource
+		Remove sync resource
 
-		This command is design to remove clone resources, after use command 'kubevpn clone xxx', 
-		it will generate and create a new resource in target k8s cluster with format [resource_name]_clone_xxxxx,
+		This command is design to remove sync resources, after use command 'kubevpn sync xxx', 
+		it will generate and create a new resource in target k8s cluster with format [resource_name]_sync_xxxxx,
 		use this command to remove this created resources.
 		`)),
 		Example: templates.Examples(i18n.T(`
         # leave proxy resources to origin
-        kubevpn remove deployment/authors-clone-645d7
+        kubevpn unsync deployment/authors-sync-645d7
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			return daemon.StartupDaemon(cmd.Context())

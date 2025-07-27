@@ -20,7 +20,7 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	if err != nil {
 		return err
 	}
-	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newCloneWarp(resp), svr.LogFile))
+	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newSyncWarp(resp), svr.LogFile))
 
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	connReq := &rpc.ConnectRequest{
@@ -118,7 +118,7 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	}
 	logger.Infof("Sync workloads...")
 	options.SetContext(sshCtx)
-	err = options.DoClone(plog.WithLogger(sshCtx, logger), []byte(req.KubeconfigBytes), req.Image)
+	err = options.DoSync(plog.WithLogger(sshCtx, logger), []byte(req.KubeconfigBytes), req.Image)
 	if err != nil {
 		plog.G(context.Background()).Errorf("Sync workloads failed: %v", err)
 		return err
@@ -137,17 +137,17 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	return nil
 }
 
-type cloneWarp struct {
+type syncWarp struct {
 	server rpc.Daemon_SyncServer
 }
 
-func (r *cloneWarp) Write(p []byte) (n int, err error) {
+func (r *syncWarp) Write(p []byte) (n int, err error) {
 	_ = r.server.Send(&rpc.SyncResponse{
 		Message: string(p),
 	})
 	return len(p), nil
 }
 
-func newCloneWarp(server rpc.Daemon_SyncServer) io.Writer {
-	return &cloneWarp{server: server}
+func newSyncWarp(server rpc.Daemon_SyncServer) io.Writer {
+	return &syncWarp{server: server}
 }

@@ -7,7 +7,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
-func TestPrintProxyAndClone(t *testing.T) {
+func TestPrintProxyAndSync(t *testing.T) {
 	var status = &rpc.StatusResponse{
 		List: []*rpc.Status{
 			{
@@ -44,7 +44,7 @@ func TestPrintProxyAndClone(t *testing.T) {
 						Workload:     "deployment.apps/ratings",
 						RuleList: []*rpc.SyncRule{{
 							Headers:     map[string]string{"user": "naison"},
-							DstWorkload: "deployment.apps/ratings-clone-5ngn6",
+							DstWorkload: "deployment.apps/ratings-sync-5ngn6",
 						}},
 					},
 				},
@@ -117,7 +117,7 @@ func TestPrintProxy(t *testing.T) {
 	fmt.Println(output)
 }
 
-func TestPrintClone(t *testing.T) {
+func TestPrintSync(t *testing.T) {
 	var status = &rpc.StatusResponse{
 		List: []*rpc.Status{
 			{
@@ -137,7 +137,7 @@ func TestPrintClone(t *testing.T) {
 						Workload:     "deployment.apps/ratings",
 						RuleList: []*rpc.SyncRule{{
 							Headers:     map[string]string{"user": "naison"},
-							DstWorkload: "deployment.apps/ratings-clone-5ngn6",
+							DstWorkload: "deployment.apps/ratings-sync-5ngn6",
 						}},
 					},
 				},

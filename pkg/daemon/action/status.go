@@ -69,7 +69,7 @@ func genStatus(connect *handler.ConnectOptions) *rpc.Status {
 	return &info
 }
 
-func gen(ctx context.Context, connect *handler.ConnectOptions, clone *handler.SyncOptions) ([]*rpc.Proxy, []*rpc.Sync, error) {
+func gen(ctx context.Context, connect *handler.ConnectOptions, sync *handler.SyncOptions) ([]*rpc.Proxy, []*rpc.Sync, error) {
 	var proxyList []*rpc.Proxy
 	if connect != nil && connect.GetClientset() != nil {
 		mapInterface := connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace)
@@ -118,8 +118,8 @@ func gen(ctx context.Context, connect *handler.ConnectOptions, clone *handler.Sy
 		}
 	}
 	var syncList []*rpc.Sync
-	if clone != nil {
-		for _, workload := range clone.Workloads {
+	if sync != nil {
+		for _, workload := range sync.Workloads {
 			var connectionID, cluster, kubeconfig, namespace string
 			if connect != nil {
 				connectionID = connect.GetConnectionID()
@@ -133,11 +133,11 @@ func gen(ctx context.Context, connect *handler.ConnectOptions, clone *handler.Sy
 				Kubeconfig:       kubeconfig,
 				Namespace:        namespace,
 				Workload:         workload,
-				SyncthingGUIAddr: clone.GetSyncthingGUIAddr(),
+				SyncthingGUIAddr: sync.GetSyncthingGUIAddr(),
 				RuleList: []*rpc.SyncRule{
 					{
-						Headers:     clone.Headers,
-						DstWorkload: clone.TargetWorkloadNames[workload],
+						Headers:     sync.Headers,
+						DstWorkload: sync.TargetWorkloadNames[workload],
 					},
 				},
 			})
