@@ -518,15 +518,13 @@ func checkConnectStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := []*status{{
-		ID:        0,
-		Mode:      "full",
+	expect := status{List: []*connection{{
 		Namespace: namespace,
 		Status:    "connected",
 		ProxyList: nil,
-	}}
+	}}}
 
-	var statuses []*status
+	var statuses status
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -542,15 +540,13 @@ func centerCheckConnectStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := []*status{{
-		ID:        0,
-		Mode:      "full",
+	expect := status{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: nil,
-	}}
+	}}}
 
-	var statuses []*status
+	var statuses status
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -561,8 +557,11 @@ func centerCheckConnectStatus(t *testing.T) {
 }
 
 type status struct {
-	ID        int32
-	Mode      string
+	CurrentConnectionID string
+	List                []*connection
+}
+
+type connection struct {
 	Namespace string
 	Status    string
 	ProxyList []*proxy
@@ -585,9 +584,7 @@ func checkProxyStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := []*status{{
-		ID:        0,
-		Mode:      "full",
+	expect := status{List: []*connection{{
 		Namespace: namespace,
 		Status:    "connected",
 		ProxyList: []*proxy{{
@@ -599,9 +596,9 @@ func checkProxyStatus(t *testing.T) {
 				PortMap:       map[int32]int32{9080: 9080},
 			}},
 		}},
-	}}
+	}}}
 
-	var statuses []*status
+	var statuses status
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -618,9 +615,7 @@ func centerCheckProxyStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := []*status{{
-		ID:        0,
-		Mode:      "full",
+	expect := status{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: []*proxy{{
@@ -632,9 +627,9 @@ func centerCheckProxyStatus(t *testing.T) {
 				PortMap:       map[int32]int32{9080: 9080},
 			}},
 		}},
-	}}
+	}}}
 
-	var statuses []*status
+	var statuses status
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -651,9 +646,7 @@ func checkProxyWithServiceMeshStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := []*status{{
-		ID:        0,
-		Mode:      "full",
+	expect := status{List: []*connection{{
 		Namespace: namespace,
 		Status:    "connected",
 		ProxyList: []*proxy{{
@@ -665,9 +658,9 @@ func checkProxyWithServiceMeshStatus(t *testing.T) {
 				PortMap:       map[int32]int32{9080: 9080},
 			}},
 		}},
-	}}
+	}}}
 
-	var statuses []*status
+	var statuses status
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -684,9 +677,7 @@ func centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := []*status{{
-		ID:        0,
-		Mode:      "full",
+	expect := status{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: []*proxy{{
@@ -698,9 +689,9 @@ func centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 				PortMap:       map[int32]int32{9080: 9080},
 			}},
 		}},
-	}}
+	}}}
 
-	var statuses []*status
+	var statuses status
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -717,9 +708,7 @@ func checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := []*status{{
-		ID:        0,
-		Mode:      "full",
+	expect := status{List: []*connection{{
 		Namespace: namespace,
 		Status:    "connected",
 		ProxyList: []*proxy{{
@@ -731,9 +720,9 @@ func checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 				PortMap:       map[int32]int32{9080: 9080},
 			}},
 		}},
-	}}
+	}}}
 
-	var statuses []*status
+	var statuses status
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -757,9 +746,7 @@ func centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := []*status{{
-		ID:        0,
-		Mode:      "full",
+	expect := status{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: []*proxy{{
@@ -771,9 +758,9 @@ func centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 				PortMap:       map[int32]int32{9080: 8080},
 			}},
 		}},
-	}}
+	}}}
 
-	var statuses []*status
+	var statuses status
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
