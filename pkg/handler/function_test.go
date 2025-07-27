@@ -557,8 +557,7 @@ func centerCheckConnectStatus(t *testing.T) {
 }
 
 type status struct {
-	CurrentConnectionID string
-	List                []*connection
+	List []*connection
 }
 
 type connection struct {
