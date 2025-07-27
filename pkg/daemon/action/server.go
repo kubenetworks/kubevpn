@@ -25,15 +25,13 @@ type Server struct {
 	LogFile   *lumberjack.Logger
 	Lock      sync.Mutex
 
-	connect          *handler.ConnectOptions
-	clone            *handler.CloneOptions
-	secondaryConnect []*handler.ConnectOptions
+	currentConnectionID string
+	connections         []*handler.ConnectOptions
 
 	ID string
 }
 
 type Config struct {
-	Connect          *handler.ConnectOptions   `json:"Connect"`
 	SecondaryConnect []*handler.ConnectOptions `json:"SecondaryConnect"`
 }
 
@@ -51,7 +49,7 @@ func (svr *Server) LoadFromConfig() error {
 	if err != nil {
 		return err
 	}
-	if conf.Connect == nil && len(conf.SecondaryConnect) == 0 {
+	if len(conf.SecondaryConnect) == 0 {
 		return nil
 	}
 	var client rpc.DaemonClient
@@ -68,20 +66,10 @@ func (svr *Server) LoadFromConfig() error {
 		}
 		break
 	}
-	if conf.Connect != nil {
-		var resp rpc.Daemon_ConnectClient
-		resp, err = client.Connect(context.Background())
-		if err == nil {
-			conf.Connect.Request.IPv4 = conf.Connect.LocalTunIPv4.String()
-			conf.Connect.Request.IPv6 = conf.Connect.LocalTunIPv6.String()
-			err = resp.Send(conf.Connect.Request)
-			_ = util.PrintGRPCStream[rpc.ConnectResponse](nil, resp, svr.LogFile)
-		}
-	}
 	for _, c := range conf.SecondaryConnect {
 		if c != nil {
 			var resp rpc.Daemon_ConnectClient
-			resp, err = client.ConnectFork(context.Background())
+			resp, err = client.Connect(context.Background())
 			if err != nil {
 				continue
 			}
@@ -96,8 +84,7 @@ func (svr *Server) LoadFromConfig() error {
 
 func (svr *Server) OffloadToConfig() error {
 	conf := &Config{
-		Connect:          svr.connect,
-		SecondaryConnect: svr.secondaryConnect,
+		SecondaryConnect: svr.connections,
 	}
 	jsonConf, err := json.Marshal(conf)
 	if err != nil {

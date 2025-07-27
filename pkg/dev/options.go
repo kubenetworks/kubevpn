@@ -145,7 +145,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 			plog.G(ctx).Errorf("Connect to cluster error: %s", err.Error())
 			return err
 		}
-		err = util.PrintGRPCStream[rpc.CloneResponse](ctx, resp)
+		err = util.PrintGRPCStream[rpc.SyncResponse](ctx, resp)
 		return err
 	}
 

@@ -9,8 +9,6 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -23,7 +21,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	if !svr.IsSudo {
 		defer func() {
 			if err == nil {
-				svr.OffloadToConfig()
+				_ = svr.OffloadToConfig()
 			}
 		}()
 	}
@@ -33,25 +31,13 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		return err
 	}
 
-	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newWarp(resp), svr.LogFile))
+	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newConnectForkWarp(resp), svr.LogFile))
 	if !svr.IsSudo {
-		return svr.redirectToSudoDaemon(req, resp, logger)
+		return svr.redirectConnectToSudoDaemon(req, resp, logger)
 	}
 
 	ctx := resp.Context()
-	if svr.connect != nil {
-		s := "Only support one cluster connect with full mode, you can use options `--lite` to connect to another cluster"
-		return status.Error(codes.AlreadyExists, s)
-	}
-	defer func() {
-		if err != nil || ctx.Err() != nil {
-			if svr.connect != nil {
-				svr.connect.Cleanup(plog.WithLogger(context.Background(), logger))
-				svr.connect = nil
-			}
-		}
-	}()
-	svr.connect = &handler.ConnectOptions{
+	connect := &handler.ConnectOptions{
 		Namespace:            req.ManagerNamespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
@@ -61,13 +47,12 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		ImagePullSecretName:  req.ImagePullSecretName,
 		Request:              proto.Clone(req).(*rpc.ConnectRequest),
 	}
-	var file string
-	file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
+	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
 		return err
 	}
 	sshCtx, sshCancel := context.WithCancel(context.Background())
-	svr.connect.AddRolloutFunc(func() error {
+	connect.AddRolloutFunc(func() error {
 		sshCancel()
 		_ = os.Remove(file)
 		return nil
@@ -77,29 +62,34 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	defer plog.WithoutLogger(sshCtx)
 	defer func() {
 		if err != nil {
-			svr.connect.Cleanup(sshCtx)
-			svr.connect = nil
+			connect.Cleanup(plog.WithLogger(context.Background(), logger))
 			sshCancel()
 		}
 	}()
-	err = svr.connect.InitClient(util.InitFactoryByPath(file, req.ManagerNamespace))
+
+	err = connect.InitClient(util.InitFactoryByPath(file, req.ManagerNamespace))
 	if err != nil {
 		return err
 	}
-	err = svr.connect.GetIPFromContext(ctx, logger)
+	err = connect.GetIPFromContext(ctx, logger)
 	if err != nil {
 		return err
 	}
 
-	err = svr.connect.DoConnect(sshCtx, false)
+	err = connect.DoConnect(sshCtx)
 	if err != nil {
 		logger.Errorf("Failed to connect...")
 		return err
 	}
+
+	if resp.Context().Err() != nil {
+		return resp.Context().Err()
+	}
+	svr.connections = append(svr.connections, connect)
 	return nil
 }
 
-func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer, logger *log.Logger) (e error) {
+func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer, logger *log.Logger) (err error) {
 	cli, err := svr.GetClient(true)
 	if err != nil {
 		return errors.Wrap(err, "sudo daemon not start")
@@ -125,7 +115,7 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		return nil
 	})
 	defer func() {
-		if e != nil {
+		if err != nil {
 			connect.Cleanup(plog.WithLogger(context.Background(), logger))
 			sshCancel()
 		}
@@ -170,21 +160,29 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 		req.ManagerNamespace = req.Namespace
 	}
 
-	if svr.connect != nil {
-		isSameCluster, _ := util.IsSameCluster(
-			sshCtx,
-			svr.connect.GetClientset().CoreV1(), svr.connect.Namespace,
-			connect.GetClientset().CoreV1(), connect.Namespace,
-		)
-		if isSameCluster {
+	var connectionID string
+	connectionID, err = util.GetConnectionID(sshCtx, connect.GetClientset().CoreV1().Namespaces(), connect.Namespace)
+	if err != nil {
+		return err
+	}
+
+	for _, options := range svr.connections {
+		if options == nil {
+			continue
+		}
+		var id string
+		id, err = util.GetConnectionID(sshCtx, options.GetClientset().CoreV1().Namespaces(), options.Namespace)
+		if err != nil {
+			return err
+		}
+		if id == connectionID {
 			sshCancel()
-			_ = os.Remove(file)
 			// same cluster, do nothing
-			logger.Infof("Connected to cluster")
-			return nil
-		} else {
-			s := "Only support one cluster connect with full mode, you can use options `--lite` to connect to another cluster"
-			return status.Error(codes.AlreadyExists, s)
+			logger.Infof("Connected with cluster")
+			svr.currentConnectionID = connectionID
+			return resp.Send(&rpc.ConnectResponse{
+				ConnectionID: connectionID,
+			})
 		}
 	}
 
@@ -217,22 +215,24 @@ func (svr *Server) redirectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon
 	if resp.Context().Err() != nil {
 		return resp.Context().Err()
 	}
-	svr.connect = connect
-
-	return nil
+	svr.connections = append(svr.connections, connect)
+	svr.currentConnectionID = connectionID
+	return resp.Send(&rpc.ConnectResponse{
+		ConnectionID: connectionID,
+	})
 }
 
-type warp struct {
+type connectForkWarp struct {
 	server rpc.Daemon_ConnectServer
 }
 
-func (r *warp) Write(p []byte) (n int, err error) {
+func (r *connectForkWarp) Write(p []byte) (n int, err error) {
 	_ = r.server.Send(&rpc.ConnectResponse{
 		Message: string(p),
 	})
 	return len(p), nil
 }
 
-func newWarp(server rpc.Daemon_ConnectServer) io.Writer {
-	return &warp{server: server}
+func newConnectForkWarp(server rpc.Daemon_ConnectServer) io.Writer {
+	return &connectForkWarp{server: server}
 }

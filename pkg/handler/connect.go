@@ -91,6 +91,8 @@ type ConnectOptions struct {
 	once           sync.Once
 	tunName        string
 	proxyWorkloads ProxyList
+
+	Sync *SyncOptions
 }
 
 func (c *ConnectOptions) Context() context.Context {
@@ -214,7 +216,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 	return
 }
 
-func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error) {
+func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	plog.G(ctx).Info("Starting connect to cluster")
 	if err = c.InitDHCP(c.ctx); err != nil {
@@ -261,7 +263,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context, isLite bool) (err error)
 	}
 	forward := fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
 
-	if err = c.startLocalTunServer(c.ctx, forward, isLite); err != nil {
+	if err = c.startLocalTunServer(c.ctx, forward); err != nil {
 		plog.G(ctx).Errorf("Start local tun service failed: %v", err)
 		return
 	}
@@ -371,7 +373,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 	}
 }
 
-func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress string, lite bool) (err error) {
+func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress string) (err error) {
 	plog.G(ctx).Debugf("IPv4: %s, IPv6: %s", c.LocalTunIPv4.IP.String(), c.LocalTunIPv6.IP.String())
 
 	tlsSecret, err := c.clientset.CoreV1().Secrets(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
@@ -380,9 +382,6 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 	}
 
 	var cidrList []*net.IPNet
-	if !lite {
-		cidrList = append(cidrList, config.CIDR, config.CIDR6)
-	}
 	for _, ipNet := range c.cidrs {
 		cidrList = append(cidrList, ipNet)
 	}
@@ -958,9 +957,9 @@ func (c *ConnectOptions) GetLocalTunIP() (v4 string, v6 string) {
 	return
 }
 
-func (c *ConnectOptions) GetClusterID() string {
+func (c *ConnectOptions) GetConnectionID() string {
 	if c != nil && c.dhcp != nil {
-		return string(c.dhcp.GetClusterID())
+		return c.dhcp.GetConnectionID()
 	}
 	return ""
 }
@@ -1005,6 +1004,11 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 	// 2) update deploy
 	plog.G(ctx).Infof("Set image %s --> %s...", serverImg, clientImg)
 	err = upgradeDeploySpec(ctx, c.factory, c.Namespace, deploy.Name, clientImg)
+	if err != nil {
+		return err
+	}
+	// 3) update service
+	err = upgradeServiceSpec(ctx, c.factory, c.Namespace)
 	if err != nil {
 		return err
 	}
@@ -1124,6 +1128,30 @@ func upgradeSecretSpec(ctx context.Context, f cmdutil.Factory, ns string) error 
 
 	mutatingWebhookConfig.ResourceVersion = current.ResourceVersion
 	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Update(ctx, mutatingWebhookConfig, metav1.UpdateOptions{})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func upgradeServiceSpec(ctx context.Context, f cmdutil.Factory, ns string) error {
+	tcp10801 := "10801-for-tcp"
+	tcp9002 := "9002-for-envoy"
+	tcp80 := "80-for-webhook"
+	udp53 := "53-for-dns"
+	svcSpec := genService(ns, tcp10801, tcp9002, tcp80, udp53)
+
+	clientset, err := f.KubernetesClientSet()
+	if err != nil {
+		return err
+	}
+	currentSecret, err := clientset.CoreV1().Services(ns).Get(ctx, svcSpec.Name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	svcSpec.ResourceVersion = currentSecret.ResourceVersion
+
+	_, err = clientset.CoreV1().Services(ns).Update(ctx, svcSpec, metav1.UpdateOptions{})
 	if err != nil {
 		return err
 	}

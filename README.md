@@ -147,8 +147,8 @@ already connected to cluster network, use command `kubevpn status` to check stat
 
 ```shell
 ➜  ~ kubevpn status
-ID Mode Cluster               Kubeconfig                 Namespace Status
-0  full ccijorbccotmqodvr189g /Users/naison/.kube/config default   Connected
+CURRENT   CONNECTION ID   CLUSTER                 KUBECONFIG                      NAMESPACE   STATUS      NETIF
+*         03dc50feb8c3    ccijorbccotmqodvr189g   /Users/naison/.kube/config      default     connected   utun4
 ➜  ~
 ```
 
@@ -251,21 +251,18 @@ use [Domain resolve](./README.md#domain-resolve)
 
 ### Connect to multiple kubernetes cluster network
 
-- Mode `lite`: can connect to multiple cluster network, design for only connecting to multiple cluster network.
-- Mode `Full`: not only connect to cluster network, it also supports proxy workloads inbound traffic to local PC.
-
-already connected cluster `ccijorbccotmqodvr189g` with mode `full`
+already connected cluster `ccijorbccotmqodvr189g`
 
 ```shell
 ➜  ~ kubevpn status
-ID Mode Cluster               Kubeconfig                 Namespace Status
-0  full ccijorbccotmqodvr189g /Users/naison/.kube/config default   Connected
+CURRENT   CONNECTION ID   CLUSTER                 KUBECONFIG                      NAMESPACE   STATUS      NETIF
+*         03dc50feb8c3    ccijorbccotmqodvr189g   /Users/naison/.kube/config      default     connected   utun4
 ```
 
-then connect to another cluster `ccidd77aam2dtnc3qnddg` with mode `lite`
+then connect to another cluster `ccidd77aam2dtnc3qnddg`
 
 ```shell
-➜  ~ kubevpn connect -n default --kubeconfig ~/.kube/dev_config --lite
+➜  ~ kubevpn connect -n default --kubeconfig ~/.kube/dev_config
 Starting connect
 Got network CIDR from cache
 Use exist traffic manager
@@ -282,9 +279,9 @@ use command `kubevpn status` to check connection status
 
 ```shell
 ➜  ~ kubevpn status
-ID Mode Cluster               Kubeconfig                     Namespace Status
-0  full ccijorbccotmqodvr189g /Users/naison/.kube/config     default   Connected
-1  lite ccidd77aam2dtnc3qnddg /Users/naison/.kube/dev_config default   Connected
+CURRENT   CONNECTION ID   CLUSTER                 KUBECONFIG                      NAMESPACE   STATUS      NETIF
+          03dc50feb8c3    ccijorbccotmqodvr189g   /Users/naison/.kube/config      default     connected   utun4
+*         86bfdef0ed05    ccidd77aam2dtnc3qnddg   /Users/naison/.kube/dev_config  default     connected   utun5
 ➜  ~
 ```
 
@@ -303,6 +300,18 @@ Rollout successfully for deployment/productpage
 +----------------------------------------------------------+
 | Now you can access resources in the kubernetes cluster ! |
 +----------------------------------------------------------+
+➜  ~
+```
+
+show status
+
+```shell
+➜  ~ kubevpn status
+CURRENT   CONNECTION ID   CLUSTER                 KUBECONFIG                   NAMESPACE   STATUS      NETIF
+*         03dc50feb8c3    ccijorbccotmqodvr189g   /Users/naison/.kube/config   default     connected   utun4
+
+          CONNECTION ID   NAMESPACE   NAME                           HEADERS   PORTS        CURRENT PC
+          03dc50feb8c3    default     deployments.apps/productpage   *         9080->9080   true
 ➜  ~
 ```
 
@@ -392,6 +401,18 @@ Rollout successfully for deployment/productpage
 +----------------------------------------------------------+
 | Now you can access resources in the kubernetes cluster ! |
 +----------------------------------------------------------+
+➜  ~
+```
+
+show status
+
+```shell
+➜  ~ kubevpn status
+CURRENT   CONNECTION ID   CLUSTER                 KUBECONFIG                   NAMESPACE   STATUS      NETIF
+*         03dc50feb8c3    ccijorbccotmqodvr189g   /Users/naison/.kube/config   default     connected   utun4
+
+          CONNECTION ID   NAMESPACE   NAME                           HEADERS   PORTS        CURRENT PC
+          03dc50feb8c3    default     deployments.apps/productpage   foo=bar   9080->9080   true
 ➜  ~
 ```
 

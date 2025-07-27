@@ -24,22 +24,16 @@ func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 	}
 	ctx = plog.WithLogger(ctx, logger)
 
-	if svr.clone != nil {
-		err := svr.clone.Cleanup(ctx)
-		if err != nil {
-			plog.G(ctx).Errorf("Cleanup clone failed: %v", err)
-		}
-		svr.clone = nil
-	}
-
-	connects := handler.Connects(svr.secondaryConnect).Append(svr.connect)
+	connects := handler.Connects(svr.connections)
 	for _, conn := range connects.Sort() {
 		if conn != nil {
+			if conn.Sync != nil {
+				_ = conn.Sync.Cleanup(ctx)
+			}
 			conn.Cleanup(ctx)
 		}
 	}
-	svr.secondaryConnect = nil
-	svr.connect = nil
+	svr.connections = nil
 
 	if svr.IsSudo {
 		_ = dns.CleanupHosts()

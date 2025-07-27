@@ -7,25 +7,23 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
-func TestPrintProxyAndClone(t *testing.T) {
+func TestPrintProxyAndSync(t *testing.T) {
 	var status = &rpc.StatusResponse{
 		List: []*rpc.Status{
 			{
-				ID:         0,
-				ClusterID:  "ac6d8dfb-1d23-4f2a-b11e-9c775fd22b84",
-				Cluster:    "ccm6epn7qvcplhs3o8p00",
-				Mode:       "full",
-				Kubeconfig: "/Users/bytedance/.kube/test-feiyan-config-private-new",
-				Namespace:  "vke-system",
-				Status:     "connected",
-				Netif:      "utun4",
+				ConnectionID: "9c775fd22b84",
+				Cluster:      "ccm6epn7qvcplhs3o8p00",
+				Kubeconfig:   "/Users/bytedance/.kube/test-feiyan-config-private-new",
+				Namespace:    "vke-system",
+				Status:       "connected",
+				Netif:        "utun4",
 				ProxyList: []*rpc.Proxy{
 					{
-						ClusterID:  "ac6d8dfb-1d23-4f2a-b11e-9c775fd22b84",
-						Cluster:    "ccm6epn7qvcplhs3o8p00",
-						Kubeconfig: "/Users/bytedance/.kube/test-feiyan-config-private-new",
-						Namespace:  "vke-system",
-						Workload:   "deployment.apps/authors",
+						ConnectionID: "9c775fd22b84",
+						Cluster:      "ccm6epn7qvcplhs3o8p00",
+						Kubeconfig:   "/Users/bytedance/.kube/test-feiyan-config-private-new",
+						Namespace:    "vke-system",
+						Workload:     "deployment.apps/authors",
 						RuleList: []*rpc.ProxyRule{
 							{
 								Headers:       map[string]string{"user": "naison"},
@@ -37,35 +35,29 @@ func TestPrintProxyAndClone(t *testing.T) {
 						},
 					},
 				},
-				CloneList: []*rpc.Clone{
+				SyncList: []*rpc.Sync{
 					{
-						ClusterID:  "ac6d8dfb-1d23-4f2a-b11e-9c775fd22b84",
-						Cluster:    "ccm6epn7qvcplhs3o8p00",
-						Kubeconfig: "/Users/bytedance/.kube/test-feiyan-config-private-new",
-						Namespace:  "vke-system",
-						Workload:   "deployment.apps/ratings",
-						RuleList: []*rpc.CloneRule{{
-							Headers:       map[string]string{"user": "naison"},
-							DstClusterID:  "ac6d8dfb-1d23-4f2a-b11e-9c775fd22b84",
-							DstCluster:    "ccm6epn7qvcplhs3o8p00",
-							DstKubeconfig: "/Users/bytedance/.kube/test-feiyan-config-private-new",
-							DstNamespace:  "vke-system",
-							DstWorkload:   "deployment.apps/ratings-clone-5ngn6",
+						ConnectionID: "9c775fd22b84",
+						Cluster:      "ccm6epn7qvcplhs3o8p00",
+						Kubeconfig:   "/Users/bytedance/.kube/test-feiyan-config-private-new",
+						Namespace:    "vke-system",
+						Workload:     "deployment.apps/ratings",
+						RuleList: []*rpc.SyncRule{{
+							Headers:     map[string]string{"user": "naison"},
+							DstWorkload: "deployment.apps/ratings-sync-5ngn6",
 						}},
 					},
 				},
 			},
 			{
-				ID:         1,
-				ClusterID:  "c08cae70-0021-46c9-a1dc-38e6a2f11443",
-				Cluster:    "ccnepblsebp68ivej4a20",
-				Mode:       "full",
-				Kubeconfig: "/Users/bytedance/.kube/dev_fy_config_new",
-				Namespace:  "vke-system",
-				Status:     "connected",
-				Netif:      "utun5",
-				ProxyList:  []*rpc.Proxy{},
-				CloneList:  []*rpc.Clone{},
+				ConnectionID: "38e6a2f11443",
+				Cluster:      "ccnepblsebp68ivej4a20",
+				Kubeconfig:   "/Users/bytedance/.kube/dev_fy_config_new",
+				Namespace:    "vke-system",
+				Status:       "connected",
+				Netif:        "utun5",
+				ProxyList:    []*rpc.Proxy{},
+				SyncList:     []*rpc.Sync{},
 			},
 		},
 	}
@@ -80,21 +72,19 @@ func TestPrintProxy(t *testing.T) {
 	var status = &rpc.StatusResponse{
 		List: []*rpc.Status{
 			{
-				ID:         0,
-				ClusterID:  "ac6d8dfb-1d23-4f2a-b11e-9c775fd22b84",
-				Cluster:    "ccm6epn7qvcplhs3o8p00",
-				Mode:       "full",
-				Kubeconfig: "/Users/bytedance/.kube/test-feiyan-config-private-new",
-				Namespace:  "vke-system",
-				Status:     "connected",
-				Netif:      "utun4",
+				ConnectionID: "9c775fd22b84",
+				Cluster:      "ccm6epn7qvcplhs3o8p00",
+				Kubeconfig:   "/Users/bytedance/.kube/test-feiyan-config-private-new",
+				Namespace:    "vke-system",
+				Status:       "connected",
+				Netif:        "utun4",
 				ProxyList: []*rpc.Proxy{
 					{
-						ClusterID:  "ac6d8dfb-1d23-4f2a-b11e-9c775fd22b84",
-						Cluster:    "ccm6epn7qvcplhs3o8p00",
-						Kubeconfig: "/Users/bytedance/.kube/test-feiyan-config-private-new",
-						Namespace:  "vke-system",
-						Workload:   "deployment.apps/authors",
+						ConnectionID: "9c775fd22b84",
+						Cluster:      "ccm6epn7qvcplhs3o8p00",
+						Kubeconfig:   "/Users/bytedance/.kube/test-feiyan-config-private-new",
+						Namespace:    "vke-system",
+						Workload:     "deployment.apps/authors",
 						RuleList: []*rpc.ProxyRule{
 							{
 								Headers:       map[string]string{"user": "naison"},
@@ -106,19 +96,17 @@ func TestPrintProxy(t *testing.T) {
 						},
 					},
 				},
-				CloneList: []*rpc.Clone{},
+				SyncList: []*rpc.Sync{},
 			},
 			{
-				ID:         1,
-				ClusterID:  "c08cae70-0021-46c9-a1dc-38e6a2f11443",
-				Cluster:    "ccnepblsebp68ivej4a20",
-				Mode:       "full",
-				Kubeconfig: "/Users/bytedance/.kube/dev_fy_config_new",
-				Namespace:  "vke-system",
-				Status:     "connected",
-				Netif:      "utun5",
-				ProxyList:  []*rpc.Proxy{},
-				CloneList:  []*rpc.Clone{},
+				ConnectionID: "38e6a2f11443",
+				Cluster:      "ccnepblsebp68ivej4a20",
+				Kubeconfig:   "/Users/bytedance/.kube/dev_fy_config_new",
+				Namespace:    "vke-system",
+				Status:       "connected",
+				Netif:        "utun5",
+				ProxyList:    []*rpc.Proxy{},
+				SyncList:     []*rpc.Sync{},
 			},
 		},
 	}
@@ -129,48 +117,40 @@ func TestPrintProxy(t *testing.T) {
 	fmt.Println(output)
 }
 
-func TestPrintClone(t *testing.T) {
+func TestPrintSync(t *testing.T) {
 	var status = &rpc.StatusResponse{
 		List: []*rpc.Status{
 			{
-				ID:         0,
-				ClusterID:  "ac6d8dfb-1d23-4f2a-b11e-9c775fd22b84",
-				Cluster:    "ccm6epn7qvcplhs3o8p00",
-				Mode:       "full",
-				Kubeconfig: "/Users/bytedance/.kube/test-feiyan-config-private-new",
-				Namespace:  "vke-system",
-				Status:     "connected",
-				Netif:      "utun4",
-				ProxyList:  []*rpc.Proxy{},
-				CloneList: []*rpc.Clone{
+				ConnectionID: "9c775fd22b84",
+				Cluster:      "ccm6epn7qvcplhs3o8p00",
+				Kubeconfig:   "/Users/bytedance/.kube/test-feiyan-config-private-new",
+				Namespace:    "vke-system",
+				Status:       "connected",
+				Netif:        "utun4",
+				ProxyList:    []*rpc.Proxy{},
+				SyncList: []*rpc.Sync{
 					{
-						ClusterID:  "ac6d8dfb-1d23-4f2a-b11e-9c775fd22b84",
-						Cluster:    "ccm6epn7qvcplhs3o8p00",
-						Kubeconfig: "/Users/bytedance/.kube/test-feiyan-config-private-new",
-						Namespace:  "vke-system",
-						Workload:   "deployment.apps/ratings",
-						RuleList: []*rpc.CloneRule{{
-							Headers:       map[string]string{"user": "naison"},
-							DstClusterID:  "ac6d8dfb-1d23-4f2a-b11e-9c775fd22b84",
-							DstCluster:    "ccm6epn7qvcplhs3o8p00",
-							DstKubeconfig: "/Users/bytedance/.kube/test-feiyan-config-private-new",
-							DstNamespace:  "vke-system",
-							DstWorkload:   "deployment.apps/ratings-clone-5ngn6",
+						ConnectionID: "9c775fd22b84",
+						Cluster:      "ccm6epn7qvcplhs3o8p00",
+						Kubeconfig:   "/Users/bytedance/.kube/test-feiyan-config-private-new",
+						Namespace:    "vke-system",
+						Workload:     "deployment.apps/ratings",
+						RuleList: []*rpc.SyncRule{{
+							Headers:     map[string]string{"user": "naison"},
+							DstWorkload: "deployment.apps/ratings-sync-5ngn6",
 						}},
 					},
 				},
 			},
 			{
-				ID:         1,
-				ClusterID:  "c08cae70-0021-46c9-a1dc-38e6a2f11443",
-				Cluster:    "ccnepblsebp68ivej4a20",
-				Mode:       "full",
-				Kubeconfig: "/Users/bytedance/.kube/dev_fy_config_new",
-				Namespace:  "vke-system",
-				Status:     "connected",
-				Netif:      "utun5",
-				ProxyList:  []*rpc.Proxy{},
-				CloneList:  []*rpc.Clone{},
+				ConnectionID: "38e6a2f11443",
+				Cluster:      "ccnepblsebp68ivej4a20",
+				Kubeconfig:   "/Users/bytedance/.kube/dev_fy_config_new",
+				Namespace:    "vke-system",
+				Status:       "connected",
+				Netif:        "utun5",
+				ProxyList:    []*rpc.Proxy{},
+				SyncList:     []*rpc.Sync{},
 			},
 		},
 	}
@@ -185,28 +165,24 @@ func TestPrint(t *testing.T) {
 	var status = &rpc.StatusResponse{
 		List: []*rpc.Status{
 			{
-				ID:         0,
-				ClusterID:  "ac6d8dfb-1d23-4f2a-b11e-9c775fd22b84",
-				Cluster:    "ccm6epn7qvcplhs3o8p00",
-				Mode:       "full",
-				Kubeconfig: "/Users/bytedance/.kube/test-feiyan-config-private-new",
-				Namespace:  "vke-system",
-				Status:     "connected",
-				Netif:      "utun4",
-				ProxyList:  []*rpc.Proxy{},
-				CloneList:  []*rpc.Clone{},
+				ConnectionID: "9c775fd22b84",
+				Cluster:      "ccm6epn7qvcplhs3o8p00",
+				Kubeconfig:   "/Users/bytedance/.kube/test-feiyan-config-private-new",
+				Namespace:    "vke-system",
+				Status:       "connected",
+				Netif:        "utun4",
+				ProxyList:    []*rpc.Proxy{},
+				SyncList:     []*rpc.Sync{},
 			},
 			{
-				ID:         1,
-				ClusterID:  "c08cae70-0021-46c9-a1dc-38e6a2f11443",
-				Cluster:    "ccnepblsebp68ivej4a20",
-				Mode:       "full",
-				Kubeconfig: "/Users/bytedance/.kube/dev_fy_config_new",
-				Namespace:  "vke-system",
-				Status:     "connected",
-				Netif:      "utun5",
-				ProxyList:  []*rpc.Proxy{},
-				CloneList:  []*rpc.Clone{},
+				ConnectionID: "38e6a2f11443",
+				Cluster:      "ccnepblsebp68ivej4a20",
+				Kubeconfig:   "/Users/bytedance/.kube/dev_fy_config_new",
+				Namespace:    "vke-system",
+				Status:       "connected",
+				Netif:        "utun5",
+				ProxyList:    []*rpc.Proxy{},
+				SyncList:     []*rpc.Sync{},
 			},
 		},
 	}

@@ -22,7 +22,7 @@ func CmdUpgrade(cmdutil.Factory) *cobra.Command {
 		Short: i18n.T("Upgrade kubevpn client to latest version"),
 		Long: templates.LongDesc(i18n.T(`
 		Upgrade kubevpn client to latest version, automatically download and install latest kubevpn from GitHub.
-		disconnect all from k8s cluster, leave all resources, remove all clone resource, and then,  
+		disconnect all from k8s cluster, leave all resources, remove all sync resource, and then,  
 		upgrade local daemon grpc server to latest version.
 		`)),
 		RunE: func(cmd *cobra.Command, args []string) error {

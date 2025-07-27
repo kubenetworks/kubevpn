@@ -7,7 +7,6 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
@@ -21,7 +20,7 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 	if !svr.IsSudo {
 		defer func() {
 			if err == nil {
-				svr.OffloadToConfig()
+				_ = svr.OffloadToConfig()
 			}
 		}()
 	}
@@ -58,36 +57,32 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 
 	switch {
 	case req.GetAll():
-		if svr.clone != nil {
-			_ = svr.clone.Cleanup(ctx)
-		}
-		svr.clone = nil
-
-		connects := handler.Connects(svr.secondaryConnect).Append(svr.connect)
+		connects := handler.Connects(svr.connections)
 		for _, connect := range connects.Sort() {
 			if connect != nil {
+				if connect.Sync != nil {
+					_ = connect.Sync.Cleanup(ctx)
+				}
 				connect.Cleanup(ctx)
 			}
 		}
-		svr.secondaryConnect = nil
-		svr.connect = nil
-	case req.ID != nil && req.GetID() == 0:
-		if svr.connect != nil {
-			svr.connect.Cleanup(ctx)
+		svr.connections = nil
+	case req.GetConnectionID() != "":
+		var connects = *new(handler.Connects)
+		for i := 0; i < len(svr.connections); i++ {
+			if req.GetConnectionID() == svr.connections[i].GetConnectionID() {
+				connects = connects.Append(svr.connections[i])
+				svr.connections = append(svr.connections[:i], svr.connections[i+1:]...)
+				i--
+			}
 		}
-		svr.connect = nil
-
-		if svr.clone != nil {
-			_ = svr.clone.Cleanup(ctx)
-		}
-		svr.clone = nil
-	case req.ID != nil:
-		index := req.GetID() - 1
-		if index < int32(len(svr.secondaryConnect)) {
-			svr.secondaryConnect[index].Cleanup(ctx)
-			svr.secondaryConnect = append(svr.secondaryConnect[:index], svr.secondaryConnect[index+1:]...)
-		} else {
-			plog.G(ctx).Errorf("Index %d out of range", req.GetID())
+		for _, connect := range connects.Sort() {
+			if connect != nil {
+				if connect.Sync != nil {
+					_ = connect.Sync.Cleanup(ctx)
+				}
+				connect.Cleanup(ctx)
+			}
 		}
 	case req.KubeconfigBytes != nil && req.Namespace != nil:
 		err = disconnectByKubeconfig(
@@ -100,36 +95,9 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		if err != nil {
 			return err
 		}
-	case len(req.ClusterIDs) != 0:
-		s := sets.New(req.ClusterIDs...)
-		var connects = *new(handler.Connects)
-		var foundModeFull bool
-		if s.Has(svr.connect.GetClusterID()) {
-			connects = connects.Append(svr.connect)
-			foundModeFull = true
-		}
-		for i := 0; i < len(svr.secondaryConnect); i++ {
-			if s.Has(svr.secondaryConnect[i].GetClusterID()) {
-				connects = connects.Append(svr.secondaryConnect[i])
-				svr.secondaryConnect = append(svr.secondaryConnect[:i], svr.secondaryConnect[i+1:]...)
-				i--
-			}
-		}
-		for _, connect := range connects.Sort() {
-			if connect != nil {
-				connect.Cleanup(ctx)
-			}
-		}
-		if foundModeFull {
-			svr.connect = nil
-			if svr.clone != nil {
-				_ = svr.clone.Cleanup(ctx)
-			}
-			svr.clone = nil
-		}
 	}
 
-	if svr.connect == nil && len(svr.secondaryConnect) == 0 {
+	if len(svr.connections) == 0 {
 		if svr.IsSudo {
 			_ = dns.CleanupHosts()
 		}
@@ -160,21 +128,9 @@ func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes st
 }
 
 func disconnect(ctx context.Context, svr *Server, connect *handler.ConnectOptions) {
-	if svr.connect != nil {
-		isSameCluster, _ := util.IsSameCluster(
-			ctx,
-			svr.connect.GetClientset().CoreV1(), svr.connect.OriginNamespace,
-			connect.GetClientset().CoreV1(), connect.Namespace,
-		)
-		if isSameCluster {
-			plog.G(ctx).Infof("Disconnecting from the cluster...")
-			svr.connect.Cleanup(ctx)
-			svr.connect = nil
-		}
-	}
-	for i := 0; i < len(svr.secondaryConnect); i++ {
-		options := svr.secondaryConnect[i]
-		isSameCluster, _ := util.IsSameCluster(
+	for i := 0; i < len(svr.connections); i++ {
+		options := svr.connections[i]
+		isSameCluster, _ := util.IsSameConnection(
 			ctx,
 			options.GetClientset().CoreV1(), options.OriginNamespace,
 			connect.GetClientset().CoreV1(), connect.Namespace,
@@ -182,11 +138,10 @@ func disconnect(ctx context.Context, svr *Server, connect *handler.ConnectOption
 		if isSameCluster {
 			plog.G(ctx).Infof("Disconnecting from the cluster...")
 			options.Cleanup(ctx)
-			svr.secondaryConnect = append(svr.secondaryConnect[:i], svr.secondaryConnect[i+1:]...)
+			svr.connections = append(svr.connections[:i], svr.connections[i+1:]...)
 			i--
 		}
 	}
-
 }
 
 type disconnectWarp struct {

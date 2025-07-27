@@ -2,6 +2,7 @@ package action
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 
@@ -14,12 +15,12 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
+func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	req, err := resp.Recv()
 	if err != nil {
 		return err
 	}
-	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newCloneWarp(resp), svr.LogFile))
+	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newSyncWarp(resp), svr.LogFile))
 
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	connReq := &rpc.ConnectRequest{
@@ -39,7 +40,6 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 	}
 
 	var connResp grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse]
-	var disconnectResp rpc.Daemon_DisconnectClient
 	sshCtx, sshFunc := context.WithCancel(context.Background())
 	go func() {
 		var s rpc.Cancel
@@ -49,9 +49,6 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 		}
 		if connResp != nil {
 			_ = connResp.SendMsg(&s)
-		}
-		if disconnectResp != nil {
-			_ = disconnectResp.SendMsg(&s)
 		}
 		sshFunc()
 	}()
@@ -64,18 +61,22 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 	if err != nil {
 		return err
 	}
-	err = util.CopyAndConvertGRPCStream[rpc.ConnectResponse, rpc.CloneResponse](
+	var connectionID string
+	err = util.CopyAndConvertGRPCStream[rpc.ConnectResponse, rpc.SyncResponse](
 		connResp,
 		resp,
-		func(r *rpc.ConnectResponse) *rpc.CloneResponse {
+		func(r *rpc.ConnectResponse) *rpc.SyncResponse {
+			if r.ConnectionID != "" {
+				connectionID = r.ConnectionID
+			}
 			_, _ = svr.LogFile.Write([]byte(r.Message))
-			return &rpc.CloneResponse{Message: r.Message}
+			return &rpc.SyncResponse{Message: r.Message}
 		})
 	if err != nil {
 		return err
 	}
 
-	options := &handler.CloneOptions{
+	options := &handler.SyncOptions{
 		Namespace:            req.Namespace,
 		Headers:              req.Headers,
 		Workloads:            req.Workloads,
@@ -87,7 +88,6 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 		TargetWorkloadNames: map[string]string{},
 		LocalDir:            req.LocalDir,
 		RemoteDir:           req.RemoteDir,
-		Request:             req,
 	}
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
 	if err != nil {
@@ -116,28 +116,38 @@ func (svr *Server) Clone(resp rpc.Daemon_CloneServer) (err error) {
 		plog.G(context.Background()).Errorf("Failed to init client: %v", err)
 		return err
 	}
-	logger.Infof("Clone workloads...")
+	logger.Infof("Sync workloads...")
 	options.SetContext(sshCtx)
-	err = options.DoClone(plog.WithLogger(sshCtx, logger), []byte(req.KubeconfigBytes), req.Image)
+	err = options.DoSync(plog.WithLogger(sshCtx, logger), []byte(req.KubeconfigBytes), req.Image)
 	if err != nil {
-		plog.G(context.Background()).Errorf("Clone workloads failed: %v", err)
+		plog.G(context.Background()).Errorf("Sync workloads failed: %v", err)
 		return err
 	}
-	svr.clone = options
+	var opt *handler.ConnectOptions
+	for _, connection := range svr.connections {
+		if connection.GetConnectionID() == connectionID {
+			opt = connection
+			break
+		}
+	}
+	if opt == nil {
+		return fmt.Errorf("cluster %s not found", connectionID)
+	}
+	opt.Sync = options
 	return nil
 }
 
-type cloneWarp struct {
-	server rpc.Daemon_CloneServer
+type syncWarp struct {
+	server rpc.Daemon_SyncServer
 }
 
-func (r *cloneWarp) Write(p []byte) (n int, err error) {
-	_ = r.server.Send(&rpc.CloneResponse{
+func (r *syncWarp) Write(p []byte) (n int, err error) {
+	_ = r.server.Send(&rpc.SyncResponse{
 		Message: string(p),
 	})
 	return len(p), nil
 }
 
-func newCloneWarp(server rpc.Daemon_CloneServer) io.Writer {
-	return &cloneWarp{server: server}
+func newSyncWarp(server rpc.Daemon_SyncServer) io.Writer {
+	return &syncWarp{server: server}
 }

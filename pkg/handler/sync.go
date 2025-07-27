@@ -32,13 +32,12 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/syncthing"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-type CloneOptions struct {
+type SyncOptions struct {
 	Namespace      string
 	Headers        map[string]string
 	Workloads      []string
@@ -51,7 +50,6 @@ type CloneOptions struct {
 	OriginKubeconfigPath string
 	LocalDir             string
 	RemoteDir            string
-	Request              *rpc.CloneRequest `json:"Request,omitempty"`
 
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient
@@ -63,7 +61,7 @@ type CloneOptions struct {
 	syncthingGUIAddr string
 }
 
-func (d *CloneOptions) InitClient(f cmdutil.Factory) (err error) {
+func (d *SyncOptions) InitClient(f cmdutil.Factory) (err error) {
 	d.factory = f
 	if d.config, err = d.factory.ToRESTConfig(); err != nil {
 		return
@@ -80,24 +78,24 @@ func (d *CloneOptions) InitClient(f cmdutil.Factory) (err error) {
 	return
 }
 
-func (d *CloneOptions) SetContext(ctx context.Context) {
+func (d *SyncOptions) SetContext(ctx context.Context) {
 	d.ctx = ctx
 }
 
-// DoClone
+// DoSync
 /*
 * 1) download mount path use empty-dir but skip empty-dir in init-containers
 * 2) get env from containers
 * 3) create serviceAccount as needed
 * 4) modify podTempSpec inject kubevpn container
  */
-func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte, image string) error {
+func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, image string) error {
 	var args []string
 	if len(d.Headers) != 0 {
 		args = append(args, "--headers", labels.Set(d.Headers).String())
 	}
 	for _, workload := range d.Workloads {
-		plog.G(ctx).Infof("Clone workload %s", workload)
+		plog.G(ctx).Infof("Sync workload %s", workload)
 		_, controller, err := util.GetTopOwnerObject(ctx, d.factory, d.Namespace, workload)
 		if err != nil {
 			return err
@@ -113,7 +111,7 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte, 
 			return err
 		}
 		originName := u.GetName()
-		u.SetName(fmt.Sprintf("%s-clone-%s", u.GetName(), newUUID.String()[:5]))
+		u.SetName(fmt.Sprintf("%s-sync-%s", u.GetName(), newUUID.String()[:5]))
 		d.TargetWorkloadNames[workload] = fmt.Sprintf("%s/%s", controller.Mapping.Resource.GroupResource().Resource, u.GetName())
 		labelsMap := map[string]string{
 			config.ManageBy:   config.ConfigMapPodTrafficManager,
@@ -251,10 +249,10 @@ func (d *CloneOptions) DoClone(ctx context.Context, kubeconfigJsonBytes []byte, 
 			return createErr
 		})
 		if retryErr != nil {
-			return fmt.Errorf("create clone for resource %s failed: %v", workload, retryErr)
+			return fmt.Errorf("create sync for resource %s failed: %v", workload, retryErr)
 		}
-		plog.G(ctx).Infof("Create clone resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
-		plog.G(ctx).Infof("Wait for clone resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
+		plog.G(ctx).Infof("Create sync resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
+		plog.G(ctx).Infof("Wait for sync resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
 		plog.G(ctx).Infoln()
 		err = util.WaitPodToBeReady(ctx, d.clientset.CoreV1().Pods(d.Namespace), metav1.LabelSelector{MatchLabels: labelsMap})
 		if err != nil {
@@ -377,7 +375,7 @@ update-alternatives --set iptables /usr/sbin/iptables-legacy`,
 	return container
 }
 
-func (d *CloneOptions) SyncDir(ctx context.Context, labels string) error {
+func (d *SyncOptions) SyncDir(ctx context.Context, labels string) error {
 	list, err := util.GetRunningPodList(ctx, d.clientset, d.Namespace, labels)
 	if err != nil {
 		return err
@@ -455,14 +453,14 @@ func RemoveUselessInfo(u *unstructured.Unstructured) {
 	u.SetAnnotations(a)
 }
 
-func (d *CloneOptions) Cleanup(ctx context.Context, workloads ...string) error {
+func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	if len(workloads) == 0 {
 		for _, v := range d.TargetWorkloadNames {
 			workloads = append(workloads, v)
 		}
 	}
 	for _, workload := range workloads {
-		plog.G(ctx).Infof("Cleaning up clone workload: %s", workload)
+		plog.G(ctx).Infof("Cleaning up sync workload: %s", workload)
 		object, err := util.GetUnstructuredObject(d.factory, d.Namespace, workload)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to get unstructured object: %s", err)
@@ -476,10 +474,10 @@ func (d *CloneOptions) Cleanup(ctx context.Context, workloads ...string) error {
 		}
 		err = client.Resource(object.Mapping.Resource).Namespace(d.Namespace).Delete(context.Background(), object.Name, metav1.DeleteOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
-			plog.G(ctx).Errorf("Failed to delete clone object: %v", err)
+			plog.G(ctx).Errorf("Failed to delete sync object: %v", err)
 			return err
 		}
-		plog.G(ctx).Infof("Deleted clone object: %s/%s", object.Mapping.Resource.GroupResource().Resource, object.Name)
+		plog.G(ctx).Infof("Deleted sync object: %s/%s", object.Mapping.Resource.GroupResource().Resource, object.Name)
 	}
 	for _, f := range d.rollbackFuncList {
 		if f != nil {
@@ -491,14 +489,14 @@ func (d *CloneOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	return nil
 }
 
-func (d *CloneOptions) AddRollbackFunc(f func() error) {
+func (d *SyncOptions) AddRollbackFunc(f func() error) {
 	d.rollbackFuncList = append(d.rollbackFuncList, f)
 }
 
-func (d *CloneOptions) GetFactory() cmdutil.Factory {
+func (d *SyncOptions) GetFactory() cmdutil.Factory {
 	return d.factory
 }
 
-func (d *CloneOptions) GetSyncthingGUIAddr() string {
+func (d *SyncOptions) GetSyncthingGUIAddr() string {
 	return d.syncthingGUIAddr
 }

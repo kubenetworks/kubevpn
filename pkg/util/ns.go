@@ -16,7 +16,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -31,27 +30,27 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-func GetClusterID(ctx context.Context, client v12.NamespaceInterface, ns string) (types.UID, error) {
+func GetConnectionID(ctx context.Context, client v12.NamespaceInterface, ns string) (string, error) {
 	namespace, err := client.Get(ctx, ns, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
-	return namespace.UID, nil
+	return string(namespace.UID[len(namespace.UID)-12:]), nil
 }
 
-func IsSameCluster(ctx context.Context, clientA v12.CoreV1Interface, namespaceA string, clientB v12.CoreV1Interface, namespaceB string) (bool, error) {
+func IsSameConnection(ctx context.Context, clientA v12.CoreV1Interface, namespaceA string, clientB v12.CoreV1Interface, namespaceB string) (bool, error) {
 	if namespaceA != namespaceB {
 		return false, nil
 	}
-	clusterIDA, err := GetClusterID(ctx, clientA.Namespaces(), namespaceA)
+	connectionA, err := GetConnectionID(ctx, clientA.Namespaces(), namespaceA)
 	if err != nil {
 		return false, err
 	}
-	clusterIDB, err := GetClusterID(ctx, clientB.Namespaces(), namespaceB)
+	connectionB, err := GetConnectionID(ctx, clientB.Namespaces(), namespaceB)
 	if err != nil {
 		return false, err
 	}
-	return clusterIDA == clusterIDB, nil
+	return connectionA == connectionB, nil
 }
 
 func ConvertToKubeConfigBytes(factory cmdutil.Factory) ([]byte, string, error) {

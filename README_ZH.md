@@ -240,14 +240,12 @@ reviews                   ClusterIP   172.21.8.24     <none>        9080/TCP    
 
 ```shell
 ➜  ~ kubevpn status
-ID Mode Cluster               Kubeconfig                 Namespace Status
-0  full ccijorbccotmqodvr189g /Users/naison/.kube/config default   Connected
+CURRENT   CONNECTION ID   CLUSTER                 KUBECONFIG                      NAMESPACE   STATUS      NETIF
+*         03dc50feb8c3    ccijorbccotmqodvr189g   /Users/naison/.kube/config      default     connected   utun4
 ```
 
-此时还可以使用 `lite` 模式链接到其它集群
-
 ```shell
-➜  ~ kubevpn connect -n default --kubeconfig ~/.kube/dev_config --lite
+➜  ~ kubevpn connect -n default --kubeconfig ~/.kube/dev_config
 Starting connect
 Got network CIDR from cache
 Use exist traffic manager
@@ -264,9 +262,9 @@ Configured DNS service
 
 ```shell
 ➜  ~ kubevpn status
-ID Mode Cluster               Kubeconfig                     Namespace Status
-0  full ccijorbccotmqodvr189g /Users/naison/.kube/config     default   Connected
-1  lite ccidd77aam2dtnc3qnddg /Users/naison/.kube/dev_config default   Connected
+CURRENT   CONNECTION ID   CLUSTER                 KUBECONFIG                      NAMESPACE   STATUS      NETIF
+          03dc50feb8c3    ccijorbccotmqodvr189g   /Users/naison/.kube/config      default     connected   utun4
+*         86bfdef0ed05    ccidd77aam2dtnc3qnddg   /Users/naison/.kube/dev_config  default     connected   utun5
 ➜  ~
 ```
 
@@ -287,6 +285,18 @@ Rollout successfully for deployment/productpage
 +----------------------------------------------------------+
 | Now you can access resources in the kubernetes cluster ! |
 +----------------------------------------------------------+
+➜  ~
+```
+
+查看一下状态
+
+```shell
+➜  ~ kubevpn status
+CURRENT   CONNECTION ID   CLUSTER                 KUBECONFIG                   NAMESPACE   STATUS      NETIF
+*         03dc50feb8c3    ccijorbccotmqodvr189g   /Users/naison/.kube/config   default     connected   utun4
+
+          CONNECTION ID   NAMESPACE   NAME                           HEADERS   PORTS        CURRENT PC
+          03dc50feb8c3    default     deployments.apps/productpage   *         9080->9080   true
 ➜  ~
 ```
 
@@ -334,6 +344,18 @@ Rollout successfully for deployment/productpage
 +----------------------------------------------------------+
 | Now you can access resources in the kubernetes cluster ! |
 +----------------------------------------------------------+
+➜  ~
+```
+
+查询状态
+
+```shell
+➜  ~ kubevpn status
+CURRENT   CONNECTION ID   CLUSTER                 KUBECONFIG                   NAMESPACE   STATUS      NETIF
+*         03dc50feb8c3    ccijorbccotmqodvr189g   /Users/naison/.kube/config   default     connected   utun4
+
+          CONNECTION ID   NAMESPACE   NAME                           HEADERS   PORTS        CURRENT PC
+          03dc50feb8c3    default     deployments.apps/productpage   foo=bar   9080->9080   true
 ➜  ~
 ```
 

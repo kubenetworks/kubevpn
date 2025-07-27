@@ -6,21 +6,18 @@ package rpc;
 
 service Daemon {
   rpc Connect (stream ConnectRequest) returns (stream ConnectResponse) {}
-  rpc ConnectFork (stream ConnectRequest) returns (stream ConnectResponse) {}
   rpc Disconnect (stream DisconnectRequest) returns (stream DisconnectResponse) {}
   rpc Proxy (stream ProxyRequest) returns (stream ProxyResponse) {}
   rpc Leave (stream LeaveRequest) returns (stream LeaveResponse) {}
-  rpc Clone (stream CloneRequest) returns (stream CloneResponse) {}
-  rpc Remove (stream RemoveRequest) returns (stream RemoveResponse) {}
+  rpc Sync (stream SyncRequest) returns (stream SyncResponse) {}
+  rpc Unsync (stream UnsyncRequest) returns (stream UnsyncResponse) {}
+  rpc ConnectionList (ConnectionListRequest) returns (ConnectionListResponse) {}
+  rpc ConnectionUse (ConnectionUseRequest) returns (ConnectionUseResponse) {}
 
-  rpc ConfigAdd (ConfigAddRequest) returns (ConfigAddResponse) {}
-  rpc ConfigRemove (ConfigRemoveRequest) returns (ConfigRemoveResponse) {}
   rpc SshStart (SshStartRequest) returns (SshStartResponse) {}
   rpc SshStop (SshStopRequest) returns (SshStopResponse) {}
-  rpc SshConnect (stream SshConnectRequest) returns (stream SshConnectResponse) {}
 
   rpc Logs (stream LogRequest) returns (stream LogResponse) {}
-  rpc List (ListRequest) returns (ListResponse) {}
   rpc Upgrade (UpgradeRequest) returns (UpgradeResponse) {}
   rpc Status (StatusRequest) returns (StatusResponse) {}
   rpc Version (VersionRequest) returns (VersionResponse) {}
@@ -70,19 +67,18 @@ message ConnectRequest {
 
 message ConnectResponse {
   string message = 1;
+  string connectionID = 2;
 }
 
 message DisconnectRequest {
-  // 1) disconnect by id
-  optional int32 ID = 1;
+  // 1) disconnect by connection id
+  optional string ConnectionID = 1;
   // 2) disconnect all
   optional bool All = 2;
-  // 3) disconnect by kubeConfig
+  // 3) disconnect by kubeconfig
   optional string KubeconfigBytes = 3;
   optional string Namespace = 4;
   SshJump SshJump = 5;
-  // 4) disconnect by cluster ids
-  repeated string ClusterIDs = 6;
 }
 
 message DisconnectResponse {
@@ -138,7 +134,7 @@ message LeaveResponse {
   string Message = 1;
 }
 
-message CloneRequest {
+message SyncRequest {
   string KubeconfigBytes = 1;
   string Namespace = 2;
   map<string, string> Headers = 3;
@@ -168,15 +164,31 @@ message CloneRequest {
   string RemoteDir = 21;
 }
 
-message CloneResponse {
+message SyncResponse {
   string Message = 1;
 }
 
-message RemoveRequest {
+message UnsyncRequest {
   repeated string Workloads = 1;
 }
 
-message RemoveResponse {
+message UnsyncResponse {
+  string Message = 1;
+}
+
+message ConnectionListRequest {
+}
+
+message ConnectionListResponse {
+  repeated Status List = 1;
+  string CurrentConnectionID = 2;
+}
+
+message ConnectionUseRequest {
+  string ConnectionID = 1;
+}
+
+message ConnectionUseResponse {
   string Message = 1;
 }
 
@@ -188,28 +200,27 @@ message QuitResponse {
 }
 
 message StatusRequest {
-  repeated string ClusterIDs = 1;
+  repeated string ConnectionIDs = 1;
 }
 
 message StatusResponse {
-  repeated Status List = 1;
+  string CurrentConnectionID = 1;
+  repeated Status List = 2;
 }
 
 message Status {
-  int32 ID = 1;
-  string ClusterID = 2;
+  string ConnectionID = 2;
   string Cluster = 3;
-  string Mode = 4;
   string Kubeconfig = 5;
   string Namespace = 6;
   string Status = 7;
   string Netif = 8;
   repeated Proxy ProxyList = 9;
-  repeated Clone CloneList = 10;
+  repeated Sync SyncList = 10;
 }
 
 message Proxy {
-  string ClusterID = 1;
+  string ConnectionID = 1;
   string Cluster = 2;
   string Kubeconfig = 3;
   string Namespace = 4;
@@ -225,23 +236,19 @@ message ProxyRule {
   map<int32, int32>  PortMap = 5;
 }
 
-message Clone {
-  string ClusterID = 1;
+message Sync {
+  string ConnectionID = 1;
   string Cluster = 2;
   string Kubeconfig = 3;
   string Namespace = 4;
   string Workload = 5;
   string SyncthingGUIAddr = 6;
-  repeated CloneRule RuleList = 7;
+  repeated SyncRule RuleList = 7;
 }
 
-message CloneRule {
-  map<string, string> Headers = 6;
-  string DstClusterID = 9;
-  string DstCluster = 10;
-  string DstKubeconfig = 11;
-  string DstNamespace = 12;
-  string DstWorkload = 13;
+message SyncRule {
+  map<string, string> Headers = 1;
+  string DstWorkload = 2;
 }
 
 message VersionRequest {
@@ -249,13 +256,6 @@ message VersionRequest {
 
 message VersionResponse {
   string Version = 1;
-}
-
-message ConfigAddRequest {
-  string KubeconfigBytes = 1;
-  string Namespace = 2;
-  // ssh jump
-  SshJump SshJump = 3;
 }
 
 message SshStartRequest {
@@ -284,30 +284,12 @@ message SshConnectResponse {
   string Stderr = 2;
 }
 
-message ConfigAddResponse {
-  string ClusterID = 1;
-}
-
-message ConfigRemoveRequest {
-  string ClusterID = 1;
-}
-
-message ConfigRemoveResponse {
-}
-
 message LogRequest {
   bool Follow = 1;
   int32 Lines = 2;
 }
 
 message LogResponse {
-  string Message = 1;
-}
-
-message ListRequest {
-}
-
-message ListResponse {
   string Message = 1;
 }
 
