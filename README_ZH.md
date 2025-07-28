@@ -125,9 +125,7 @@ Forwarding port...
 Connected tunnel
 Adding route...
 Configured DNS service
-+----------------------------------------------------------+
-| Now you can access resources in the kubernetes cluster ! |
-+----------------------------------------------------------+
+Now you can access resources in the kubernetes cluster !
 ➜  ~
 ```
 
@@ -253,9 +251,7 @@ Forwarding port...
 Connected tunnel
 Adding route...
 Configured DNS service
-+----------------------------------------------------------+
-| Now you can access resources in the kubernetes cluster ! |
-+----------------------------------------------------------+
+Now you can access resources in the kubernetes cluster !
 ```
 
 使用命令 `kubevpn status` 查看当前链接状态。
@@ -282,9 +278,7 @@ Checking rollout status for deployment/productpage
 Waiting for deployment "productpage" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "productpage" rollout to finish: 1 old replicas are pending termination...
 Rollout successfully for deployment/productpage
-+----------------------------------------------------------+
-| Now you can access resources in the kubernetes cluster ! |
-+----------------------------------------------------------+
+Now you can access resources in the kubernetes cluster !
 ➜  ~
 ```
 
@@ -341,9 +335,7 @@ Checking rollout status for deployment/productpage
 Waiting for deployment "productpage" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "productpage" rollout to finish: 1 old replicas are pending termination...
 Rollout successfully for deployment/productpage
-+----------------------------------------------------------+
-| Now you can access resources in the kubernetes cluster ! |
-+----------------------------------------------------------+
+Now you can access resources in the kubernetes cluster !
 ➜  ~
 ```
 
@@ -398,7 +390,7 @@ Rollout successfully for deployments/productpage
 Docker。
 
 ```shell
-➜  ~ kubevpn dev deployment/authors --headers foo=bar --entrypoint sh
+➜  ~ kubevpn run deployment/authors --headers foo=bar --entrypoint sh
 Starting connect
 Got network CIDR from cache
 Use exist traffic manager
@@ -478,13 +470,13 @@ fc04e42799a5   nginx:latest                    "/docker-entrypoint.…"   37 sec
 如果你只是想在本地启动镜像，可以用一种简单的方式：
 
 ```shell
-kubevpn dev deployment/authors --no-proxy
+kubevpn run deployment/authors --no-proxy
 ```
 
 例如：
 
 ```shell
-➜  ~ kubevpn dev deployment/authors --no-proxy
+➜  ~ kubevpn run deployment/authors --no-proxy
 Starting connect
 Got network CIDR from cache
 Use exist traffic manager
@@ -511,7 +503,7 @@ Created main container: authors_default_kubevpn_ff34b
 
 如果你想指定在本地启动容器的镜像, 可以使用参数 `--dev-image`, 当本地不存在该镜像时,
 会从对应的镜像仓库拉取。如果你想指定启动参数，可以使用 `--entrypoint`
-参数，替换为你想要执行的命令，比如 `--entrypoint /bin/bash`, 更多使用参数，请参见 `kubevpn dev --help`.
+参数，替换为你想要执行的命令，比如 `--entrypoint /bin/bash`, 更多使用参数，请参见 `kubevpn run --help`.
 
 ### DinD ( Docker in Docker ) 在 Docker 中使用 kubevpn
 
@@ -541,7 +533,7 @@ ca82aef6a9eb: Pull complete
 Digest: sha256:368db2e0d98f6866dcefd60512960ce1310e85c24a398fea2a347905ced9507d
 Status: Downloaded newer image for ghcr.io/kubenetworks/kubevpn:latest
 WARNING: image with reference ghcr.io/kubenetworks/kubevpn was found but does not match the specified platform: wanted linux/amd64, actual: linux/arm64
-root@5732124e6447:/app# kubevpn dev deployment/authors --headers user=naison --entrypoint sh
+root@5732124e6447:/app# kubevpn run deployment/authors --headers user=naison --entrypoint sh
 hostname is 5732124e6447
 Starting connect
 Got network CIDR from cache
@@ -570,7 +562,7 @@ Created main container: authors_default_kubevpn_6df5f
 /opt/microservices # ps -ef
 PID   USER     TIME  COMMAND
     1 root      0:00 {bash} /usr/bin/qemu-x86_64 /bin/bash /bin/bash
-   14 root      0:02 {kubevpn} /usr/bin/qemu-x86_64 /usr/local/bin/kubevpn kubevpn dev deployment/authors --headers
+   14 root      0:02 {kubevpn} /usr/bin/qemu-x86_64 /usr/local/bin/kubevpn kubevpn run deployment/authors --headers
    25 root      0:01 {kubevpn} /usr/bin/qemu-x86_64 /usr/local/bin/kubevpn /usr/local/bin/kubevpn daemon
    37 root      0:04 {kubevpn} /usr/bin/qemu-x86_64 /usr/local/bin/kubevpn /usr/local/bin/kubevpn daemon --sudo
    53 root      0:00 nginx: master process nginx -g daemon off;

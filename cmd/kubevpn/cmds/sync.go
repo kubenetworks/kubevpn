@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	pkgerr "github.com/pkg/errors"
@@ -57,12 +58,12 @@ func CmdSync(f cmdutil.Factory) *cobra.Command {
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
-		kubevpn sync service/productpage --ssh-alias <alias> --headers foo=bar
+		kubevpn sync deployment/productpage --ssh-alias <alias> --headers foo=bar
 
 		# Support ssh auth GSSAPI
-        kubevpn sync service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
-        kubevpn sync service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
-        kubevpn sync service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
+        kubevpn sync deployment/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
+        kubevpn sync deployment/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
+        kubevpn sync deployment/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 		`)),
 		Args: cobra.MatchAll(cobra.OnlyValidArgs, cobra.MinimumNArgs(1)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
@@ -134,7 +135,7 @@ func CmdSync(f cmdutil.Factory) *cobra.Command {
 				}
 				return err
 			}
-			util.Print(os.Stdout, config.Slogan)
+			_, _ = fmt.Fprintln(os.Stdout, config.Slogan)
 			return nil
 		},
 	}

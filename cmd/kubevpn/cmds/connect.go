@@ -124,7 +124,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			if !foreground {
-				util.Print(os.Stdout, config.Slogan)
+				_, _ = fmt.Fprintln(os.Stdout, config.Slogan)
 			} else {
 				<-cmd.Context().Done()
 				err = disconnect(cli, bytes, ns, sshConf)

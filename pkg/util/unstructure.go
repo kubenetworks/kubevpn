@@ -113,13 +113,11 @@ func GetPodTemplateSpecPath(u *unstructured.Unstructured) (*v1.PodTemplateSpec, 
 NormalizedResource convert user parameter to standard, example:
 
 	pod/productpage-7667dfcddb-cbsn5 --> deployments.apps/productpage
-	service/productpage --> deployments.apps/productpage
 	replicaset/productpage-7667dfcddb --> deployments.apps/productpage
 	deployment: productpage --> deployments.apps/productpage
 
 	pods without controller
 	pod/productpage-without-controller --> pod/productpage-without-controller
-	service/productpage-without-pod --> controller/controllerName
 */
 func NormalizedResource(f util.Factory, ns string, workloads []string) ([]string, []*resource.Info, error) {
 	if len(workloads) == 0 {

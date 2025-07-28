@@ -1,4 +1,4 @@
-package dev
+package run
 
 import (
 	"context"
@@ -84,7 +84,7 @@ func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, co
 		return err
 	}
 
-	return option.Dev(ctx, config, hostConfig)
+	return option.Run(ctx, config, hostConfig)
 }
 
 // Connect to cluster network on docker container or host
@@ -181,7 +181,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 	return fmt.Errorf("unsupport connect mode: %s", option.ConnectMode)
 }
 
-func (option *Options) Dev(ctx context.Context, config *Config, hostConfig *HostConfig) error {
+func (option *Options) Run(ctx context.Context, config *Config, hostConfig *HostConfig) error {
 	templateSpec, err := option.GetPodTemplateSpec(ctx)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get unstructured object error: %v", err)
