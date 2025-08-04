@@ -46,15 +46,18 @@ func LocalTCPForwarder(ctx context.Context, s *stack.Stack) func(stack.Transport
 
 		// 2, dial proxy
 		var host string
+		var network string
 		if id.LocalAddress.To4() != (tcpip.Address{}) {
 			host = "127.0.0.1"
+			network = "tcp4"
 		} else {
 			host = net.IPv6loopback.String()
+			network = "tcp6"
 		}
 		port := fmt.Sprintf("%d", id.LocalPort)
 		var d = net.Dialer{Timeout: time.Second * 5}
 		var remote net.Conn
-		remote, err = d.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
+		remote, err = d.DialContext(ctx, network, net.JoinHostPort(host, port))
 		if err != nil {
 			plog.G(ctx).Errorf("[TUN-TCP] Failed to connect addr %s: %v", net.JoinHostPort(host, port), err)
 			return

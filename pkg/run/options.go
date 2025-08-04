@@ -103,7 +103,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 				option.ExtraRouteInfo.ExtraCIDR = append(option.ExtraRouteInfo.ExtraCIDR, ip.String())
 			}
 		}
-		// not needs to ssh jump in daemon, because dev mode will hang up until user exit,
+		// no need to ssh jump in daemon, because run mode will hang up until user exit,
 		// so just ssh jump in client is enough
 		req := &rpc.ProxyRequest{
 			KubeconfigBytes:      string(kubeConfigBytes),

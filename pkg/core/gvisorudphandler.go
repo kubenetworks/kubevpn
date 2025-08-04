@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"gvisor.dev/gvisor/pkg/tcpip"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -24,21 +25,27 @@ func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
 	plog.G(ctx).Debugf("[TUN-UDP] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 	// 1, get proxy info
-	endpointID, err := util.ParseProxyInfo(tcpConn)
+	id, err := util.ParseProxyInfo(tcpConn)
 	if err != nil {
 		plog.G(ctx).Errorf("[TUN-UDP] Failed to parse proxy info: %v", err)
 		return
 	}
 	plog.G(ctx).Infof("[TUN-UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress: %s",
-		endpointID.LocalPort, endpointID.LocalAddress.String(), endpointID.RemotePort, endpointID.RemoteAddress.String(),
+		id.LocalPort, id.LocalAddress.String(), id.RemotePort, id.RemoteAddress.String(),
 	)
 	// 2, dial proxy
 	addr := &net.UDPAddr{
-		IP:   endpointID.LocalAddress.AsSlice(),
-		Port: int(endpointID.LocalPort),
+		IP:   id.LocalAddress.AsSlice(),
+		Port: int(id.LocalPort),
+	}
+	var network string
+	if id.LocalAddress.To4() != (tcpip.Address{}) {
+		network = "udp4"
+	} else {
+		network = "udp6"
 	}
 	var remote *net.UDPConn
-	remote, err = net.DialUDP("udp", nil, addr)
+	remote, err = net.DialUDP(network, nil, addr)
 	if err != nil {
 		plog.G(ctx).Errorf("[TUN-UDP] Failed to connect addr %s: %v", addr.String(), err)
 		return

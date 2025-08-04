@@ -12,7 +12,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-type gvisorLocalTCPHandler struct {
+type gvisorLocalHandler struct {
 	// read from tcp conn write to gvisor inbound
 	gvisorInbound <-chan *Packet
 	// write to tcp conn
@@ -22,15 +22,15 @@ type gvisorLocalTCPHandler struct {
 	errChan  chan error
 }
 
-func handleGvisorPacket(gvisorInbound <-chan *Packet, outbound chan<- *Packet) *gvisorLocalTCPHandler {
-	return &gvisorLocalTCPHandler{
+func handleGvisorPacket(gvisorInbound <-chan *Packet, outbound chan<- *Packet) *gvisorLocalHandler {
+	return &gvisorLocalHandler{
 		gvisorInbound: gvisorInbound,
 		outbound:      outbound,
 		errChan:       make(chan error, 1),
 	}
 }
 
-func (h *gvisorLocalTCPHandler) Run(ctx context.Context) {
+func (h *gvisorLocalHandler) Run(ctx context.Context) {
 	endpoint := channel.New(tcp.DefaultReceiveBufferSize, uint32(config.DefaultMTU), tcpip.GetRandMacAddr())
 	go func() {
 		defer util.HandleCrash()
