@@ -204,15 +204,39 @@ func (d *ClientDevice) heartbeats(ctx context.Context) {
 	ticker := time.NewTicker(config.KeepAliveTime)
 	defer ticker.Stop()
 
+	var bytes, bytes6 []byte
 	for ; ctx.Err() == nil; <-ticker.C {
 		if srcIPv4 != nil {
-			util.Ping(ctx, srcIPv4.String(), config.RouterIP.String())
+			bytes, err = util.GenICMPPacket(srcIPv4, config.RouterIP)
+			if err != nil {
+				plog.G(ctx).Errorf("Failed to generate IPv4 packet: %v", err)
+			} else {
+				data := config.LPool.Get().([]byte)[:]
+				length := copy(data[1:], bytes)
+				data[0] = 1
+				util.SafeWrite(d.tunInbound, &Packet{
+					data:   data[:],
+					length: length + 1,
+				})
+			}
 		}
 		if srcIPv6 != nil {
-			util.Ping(ctx, srcIPv6.String(), config.RouterIP6.String())
+			bytes6, err = util.GenICMPPacketIPv6(srcIPv6, config.RouterIP6)
+			if err != nil {
+				plog.G(ctx).Errorf("Failed to generate IPv6 packet: %v", err)
+			} else {
+				data := config.LPool.Get().([]byte)[:]
+				length := copy(data[1:], bytes6)
+				data[0] = 1
+				util.SafeWrite(d.tunInbound, &Packet{
+					data:   data[:],
+					length: length + 1,
+				})
+			}
 		}
+
 		if dockerSrcIPv4 != nil {
-			util.Ping(ctx, dockerSrcIPv4.String(), config.DockerRouterIP.String())
+			_, _ = util.Ping(ctx, dockerSrcIPv4.String(), config.DockerRouterIP.String())
 		}
 	}
 }
