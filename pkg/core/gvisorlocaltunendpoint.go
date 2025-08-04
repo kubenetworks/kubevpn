@@ -88,6 +88,6 @@ func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *Packet
 		sniffer.LogPacket("[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
 		endpoint.InjectInbound(protocol, pkt)
 		pkt.DecRef()
-		plog.G(ctx).Debugf("[TCP-GVISOR] Write to Gvisor. SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, ipProto.String(), packet.length)
+		plog.G(ctx).Debugf("[TCP-GVISOR] Write to gvisor. SRC: %s, DST: %s, IPProtocol: %s, Protocol: %v, Length: %d", src, dst, ipProto.String(), protocol, packet.length)
 	}
 }

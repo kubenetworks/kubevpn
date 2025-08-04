@@ -112,7 +112,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
 			endpoint.InjectInbound(protocol, pkt)
 			pkt.DecRef()
-			plog.G(ctx).Debugf("[TCP-GVISOR] Write to Gvisor. SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
+			plog.G(ctx).Debugf("[TCP-GVISOR] Write to gvisor. SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
 		} else {
 			util.SafeWrite(TCPPacketChan, &Packet{
 				data:   buf[:],

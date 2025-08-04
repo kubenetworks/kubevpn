@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	log "github.com/sirupsen/logrus"
@@ -58,10 +59,10 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
           kubevpn proxy deployment authors productpage
 
 		# Reverse proxy with mesh, traffic with header foo=bar, will hit local PC, otherwise no effect
-		kubevpn proxy service/productpage --headers foo=bar
+		kubevpn proxy deployment/productpage --headers foo=bar
 		
 		# Reverse proxy with mesh, traffic with header foo=bar and env=dev, will hit local PC, otherwise no effect
-		kubevpn proxy service/productpage --headers foo=bar --headers env=dev
+		kubevpn proxy deployment/productpage --headers foo=bar --headers env=dev
 
 		# Connect to api-server behind of bastion host or ssh jump host and proxy kubernetes resource traffic into local PC
 		kubevpn proxy deployment/productpage --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem --headers foo=bar
@@ -70,12 +71,12 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 		┌──────┐     ┌──────┐     ┌──────┐     ┌──────┐                 ┌────────────┐
 		│  pc  ├────►│ ssh1 ├────►│ ssh2 ├────►│ ssh3 ├─────►... ─────► │ api-server │
 		└──────┘     └──────┘     └──────┘     └──────┘                 └────────────┘
-		kubevpn proxy service/productpage --ssh-alias <alias> --headers foo=bar
+		kubevpn proxy deployment/productpage --ssh-alias <alias> --headers foo=bar
 
 		# Support ssh auth GSSAPI
-        kubevpn proxy service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
-        kubevpn proxy service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
-        kubevpn proxy service/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
+        kubevpn proxy deployment/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-keytab /path/to/keytab
+        kubevpn proxy deployment/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-cache /path/to/cache
+        kubevpn proxy deployment/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 
 		# Support port map, you can proxy container port to local port by command:
 		kubevpn proxy deployment/productpage --portmap 80:8080
@@ -145,7 +146,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				}
 				return err
 			}
-			util.Print(os.Stdout, config.Slogan)
+			_, _ = fmt.Fprintln(os.Stdout, config.Slogan)
 			// hangup
 			if foreground {
 				// leave from cluster resources

@@ -1,4 +1,4 @@
-package dev
+package run
 
 import (
 	"context"
@@ -84,7 +84,7 @@ func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, co
 		return err
 	}
 
-	return option.Dev(ctx, config, hostConfig)
+	return option.Run(ctx, config, hostConfig)
 }
 
 // Connect to cluster network on docker container or host
@@ -103,7 +103,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 				option.ExtraRouteInfo.ExtraCIDR = append(option.ExtraRouteInfo.ExtraCIDR, ip.String())
 			}
 		}
-		// not needs to ssh jump in daemon, because dev mode will hang up until user exit,
+		// no need to ssh jump in daemon, because run mode will hang up until user exit,
 		// so just ssh jump in client is enough
 		req := &rpc.ProxyRequest{
 			KubeconfigBytes:      string(kubeConfigBytes),
@@ -181,7 +181,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 	return fmt.Errorf("unsupport connect mode: %s", option.ConnectMode)
 }
 
-func (option *Options) Dev(ctx context.Context, config *Config, hostConfig *HostConfig) error {
+func (option *Options) Run(ctx context.Context, config *Config, hostConfig *HostConfig) error {
 	templateSpec, err := option.GetPodTemplateSpec(ctx)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get unstructured object error: %v", err)

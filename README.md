@@ -137,9 +137,7 @@ Forwarding port...
 Connected tunnel
 Adding route...
 Configured DNS service
-+----------------------------------------------------------+
-| Now you can access resources in the kubernetes cluster ! |
-+----------------------------------------------------------+
+Now you can access resources in the kubernetes cluster !
 ➜  ~
 ```
 
@@ -270,9 +268,7 @@ Forwarding port...
 Connected tunnel
 Adding route...
 Configured DNS service
-+----------------------------------------------------------+
-| Now you can access resources in the kubernetes cluster ! |
-+----------------------------------------------------------+
+Now you can access resources in the kubernetes cluster !
 ```
 
 use command `kubevpn status` to check connection status
@@ -297,9 +293,7 @@ Checking rollout status for deployment/productpage
 Waiting for deployment "productpage" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "productpage" rollout to finish: 1 old replicas are pending termination...
 Rollout successfully for deployment/productpage
-+----------------------------------------------------------+
-| Now you can access resources in the kubernetes cluster ! |
-+----------------------------------------------------------+
+Now you can access resources in the kubernetes cluster !
 ➜  ~
 ```
 
@@ -398,9 +392,7 @@ Checking rollout status for deployment/productpage
 Waiting for deployment "productpage" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "productpage" rollout to finish: 1 old replicas are pending termination...
 Rollout successfully for deployment/productpage
-+----------------------------------------------------------+
-| Now you can access resources in the kubernetes cluster ! |
-+----------------------------------------------------------+
+Now you can access resources in the kubernetes cluster !
 ➜  ~
 ```
 
@@ -456,7 +448,7 @@ Run the Kubernetes pod in the local Docker container, and cooperate with the ser
 the specified header to the local, or all the traffic to the local.
 
 ```shell
-➜  ~ kubevpn dev deployment/authors --headers foo=bar --entrypoint sh
+➜  ~ kubevpn run deployment/authors --headers foo=bar --entrypoint sh
 Starting connect
 Got network CIDR from cache
 Use exist traffic manager
@@ -551,13 +543,13 @@ docker logs $(docker ps --format '{{.Names}}' | grep nginx_default_kubevpn)
 If you just want to start up a docker image, you can use a simple way like this:
 
 ```shell
-kubevpn dev deployment/authors --no-proxy
+kubevpn run deployment/authors --no-proxy
 ```
 
 Example：
 
 ```shell
-➜  ~ kubevpn dev deployment/authors --no-proxy
+➜  ~ kubevpn run deployment/authors --no-proxy
 Starting connect
 Got network CIDR from cache
 Use exist traffic manager
@@ -585,7 +577,7 @@ Now the main process will hang up to show you log.
 If you want to specify the image to start the container locally, you can use the parameter `--dev-image`. When the
 image does not exist locally, it will be pulled from the corresponding mirror warehouse. If you want to specify startup
 parameters, you can use `--entrypoint` parameter, replace it with the command you want to execute, such
-as `--entrypoint /bin/bash`, for more parameters, see `kubevpn dev --help`.
+as `--entrypoint /bin/bash`, for more parameters, see `kubevpn run --help`.
 
 ### DinD ( Docker in Docker ) use kubevpn in Docker
 
@@ -616,7 +608,7 @@ ca82aef6a9eb: Pull complete
 Digest: sha256:368db2e0d98f6866dcefd60512960ce1310e85c24a398fea2a347905ced9507d
 Status: Downloaded newer image for ghcr.io/kubenetworks/kubevpn:latest
 WARNING: image with reference ghcr.io/kubenetworks/kubevpn was found but does not match the specified platform: wanted linux/amd64, actual: linux/arm64
-root@5732124e6447:/app# kubevpn dev deployment/authors --headers user=naison --entrypoint sh
+root@5732124e6447:/app# kubevpn run deployment/authors --headers user=naison --entrypoint sh
 hostname is 5732124e6447
 Starting connect
 Got network CIDR from cache
@@ -645,7 +637,7 @@ Created main container: authors_default_kubevpn_6df5f
 /opt/microservices # ps -ef
 PID   USER     TIME  COMMAND
     1 root      0:00 {bash} /usr/bin/qemu-x86_64 /bin/bash /bin/bash
-   14 root      0:02 {kubevpn} /usr/bin/qemu-x86_64 /usr/local/bin/kubevpn kubevpn dev deployment/authors --headers
+   14 root      0:02 {kubevpn} /usr/bin/qemu-x86_64 /usr/local/bin/kubevpn kubevpn run deployment/authors --headers
    25 root      0:01 {kubevpn} /usr/bin/qemu-x86_64 /usr/local/bin/kubevpn /usr/local/bin/kubevpn daemon
    37 root      0:04 {kubevpn} /usr/bin/qemu-x86_64 /usr/local/bin/kubevpn /usr/local/bin/kubevpn daemon --sudo
    53 root      0:00 nginx: master process nginx -g daemon off;

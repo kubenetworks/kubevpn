@@ -13,7 +13,6 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
-	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 )
 
 func CmdConnection(f cmdutil.Factory) *cobra.Command {
@@ -27,7 +26,6 @@ func CmdConnection(f cmdutil.Factory) *cobra.Command {
 }
 
 func cmdConnectionList(f cmdutil.Factory) *cobra.Command {
-	var sshConf = &pkgssh.SshConfig{}
 	cmd := &cobra.Command{
 		Use:     "list",
 		Short:   i18n.T("List all connections"),
@@ -59,7 +57,6 @@ func cmdConnectionList(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
-	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
 	return cmd
 }
 
