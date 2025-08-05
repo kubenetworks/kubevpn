@@ -132,6 +132,13 @@ Now you can access resources in the kubernetes cluster !
 提示已经链接到集群了。使用命令 `kubevpn status` 检查一下状态。
 
 ```shell
+➜  ~ kubevpn status
+CURRENT   CONNECTION ID   CLUSTER                 KUBECONFIG                      NAMESPACE   STATUS      NETIF
+*         03dc50feb8c3    ccijorbccotmqodvr189g   /Users/naison/.kube/config      default     connected   utun4
+➜  ~
+```
+
+```shell
 ➜  ~ kubectl get pods -o wide
 NAME                                       READY   STATUS             RESTARTS   AGE     IP                NODE              NOMINATED NODE   READINESS GATES
 authors-dbb57d856-mbgqk                    3/3     Running            0          7d23h   172.29.2.132      192.168.0.5       <none>           <none>
