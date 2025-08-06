@@ -46,8 +46,8 @@ func (h *gvisorLocalHandler) Run(ctx context.Context) {
 		readFromEndpointWriteToTun(ctx, endpoint, h.outbound)
 		util.SafeClose(h.errChan)
 	}()
-	stack := NewLocalStack(ctx, sniffer.NewWithPrefix(endpoint, "[gVISOR] "))
-	defer stack.Destroy()
+	s := NewLocalStack(ctx, sniffer.NewWithPrefix(endpoint, "[gVISOR] "))
+	defer s.Destroy()
 	select {
 	case <-h.errChan:
 		return

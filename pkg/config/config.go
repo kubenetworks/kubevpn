@@ -192,9 +192,9 @@ var (
 	  ipv4: 20
 	  ipv6: 40
 
-	mtu: 1417
+	mtu = 1500 - ip header(20/40 v4/v6) - tcp header (20) - tls1.3(5+1+16) - packet over tcp(length(2)+remark(1)) = 1415
 	*/
-	DefaultMTU = 1500 - max(20, 40) - 20 - 5 - 2 - 16
+	DefaultMTU = 1500 - max(20, 40) - 20 - (5 + 1 + 16) - (2 + 1)
 )
 
 var (

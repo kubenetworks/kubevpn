@@ -83,25 +83,6 @@ func GetTunDeviceIP(tunName string) (net.IP, net.IP, net.IP, error) {
 	return srcIPv4, srcIPv6, dockerSrcIPv4, nil
 }
 
-func PingOnce(ctx context.Context, srcIP, dstIP string) (bool, error) {
-	pinger, err := probing.NewPinger(dstIP)
-	if err != nil {
-		return false, err
-	}
-	pinger.Source = srcIP
-	pinger.SetLogger(nil)
-	pinger.SetPrivileged(true)
-	pinger.Count = 1
-	pinger.Timeout = time.Second * 1
-	pinger.ResolveTimeout = time.Second * 1
-	err = pinger.RunWithContext(ctx) // Blocks until finished.
-	if err != nil {
-		return false, err
-	}
-	stat := pinger.Statistics()
-	return stat.PacketsRecv == stat.PacketsSent, err
-}
-
 func Ping(ctx context.Context, srcIP, dstIP string) (bool, error) {
 	pinger, err := probing.NewPinger(dstIP)
 	if err != nil {

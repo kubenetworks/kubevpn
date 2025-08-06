@@ -29,13 +29,10 @@ func LocalUDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.Transp
 			Port: int(id.RemotePort),
 		}
 		var ip net.IP
-		var network string
 		if id.LocalAddress.To4() != (tcpip.Address{}) {
 			ip = net.ParseIP("127.0.0.1")
-			network = "udp4"
 		} else {
 			ip = net.IPv6loopback
-			network = "udp6"
 		}
 		dst := &net.UDPAddr{
 			IP:   ip,
@@ -50,7 +47,7 @@ func LocalUDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.Transp
 		}
 
 		// dial dst
-		remote, err1 := net.DialUDP(network, nil, dst)
+		remote, err1 := net.DialUDP("udp", nil, dst)
 		if err1 != nil {
 			plog.G(ctx).Errorf("[TUN-UDP] Failed to connect dst: %s: %v", dst.String(), err1)
 			return
