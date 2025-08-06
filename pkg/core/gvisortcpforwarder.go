@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
@@ -43,16 +42,10 @@ func TCPForwarder(ctx context.Context, s *stack.Stack) func(stack.TransportEndpo
 		}()
 		// 2, dial proxy
 		host := id.LocalAddress.String()
-		var network string
-		if id.LocalAddress.To4() != (tcpip.Address{}) {
-			network = "tcp4"
-		} else {
-			network = "tcp6"
-		}
 		port := fmt.Sprintf("%d", id.LocalPort)
 		var remote net.Conn
 		var d = net.Dialer{Timeout: time.Second * 5}
-		remote, err = d.DialContext(ctx, network, net.JoinHostPort(host, port))
+		remote, err = d.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
 		if err != nil {
 			plog.G(ctx).Errorf("[TUN-TCP] Failed to connect addr %s: %v", net.JoinHostPort(host, port), err)
 			return

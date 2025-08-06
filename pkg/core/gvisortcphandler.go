@@ -53,8 +53,8 @@ func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {
 		h.readFromEndpointWriteToTCPConn(ctx, tcpConn, endpoint)
 		util.SafeClose(errChan)
 	}()
-	stack := NewStack(ctx, sniffer.NewWithPrefix(endpoint, "[gVISOR] "))
-	defer stack.Destroy()
+	s := NewStack(ctx, sniffer.NewWithPrefix(endpoint, "[gVISOR] "))
+	defer s.Destroy()
 	select {
 	case <-errChan:
 		return

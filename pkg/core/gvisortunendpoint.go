@@ -22,10 +22,10 @@ import (
 func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, conn net.Conn, endpoint *channel.Endpoint) {
 	tcpConn, _ := newGvisorUDPConnOverTCP(ctx, conn)
 	for ctx.Err() == nil {
-		pktBuffer := endpoint.ReadContext(ctx)
-		if pktBuffer != nil {
-			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionSend, pktBuffer.NetworkProtocolNumber, pktBuffer)
-			data := pktBuffer.ToView().AsSlice()
+		pkt := endpoint.ReadContext(ctx)
+		if pkt != nil {
+			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
+			data := pkt.ToView().AsSlice()
 			buf := config.LPool.Get().([]byte)[:]
 			n := copy(buf[1:], data)
 			buf[0] = 0

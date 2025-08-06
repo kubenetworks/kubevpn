@@ -67,6 +67,7 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 			}
 		}
 		svr.connections = nil
+		svr.currentConnectionID = ""
 	case req.GetConnectionID() != "":
 		var connects = *new(handler.Connects)
 		for i := 0; i < len(svr.connections); i++ {
@@ -82,6 +83,11 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 					_ = connect.Sync.Cleanup(ctx)
 				}
 				connect.Cleanup(ctx)
+			}
+		}
+		if svr.currentConnectionID == req.GetConnectionID() {
+			for _, connection := range svr.connections {
+				svr.currentConnectionID = connection.GetConnectionID()
 			}
 		}
 	case req.KubeconfigBytes != nil && req.Namespace != nil:
@@ -123,19 +129,24 @@ func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes st
 	if err != nil {
 		return err
 	}
-	disconnect(ctx, svr, connect)
+	connectionID, err := util.GetConnectionID(ctx, connect.GetClientset().CoreV1().Namespaces(), connect.Namespace)
+	if err != nil {
+		return err
+	}
+	disconnect(ctx, svr, connectionID)
+	if svr.currentConnectionID == connectionID {
+		for _, connection := range svr.connections {
+			svr.currentConnectionID = connection.GetConnectionID()
+		}
+	}
 	return nil
 }
 
-func disconnect(ctx context.Context, svr *Server, connect *handler.ConnectOptions) {
+func disconnect(ctx context.Context, svr *Server, connectionID string) {
 	for i := 0; i < len(svr.connections); i++ {
 		options := svr.connections[i]
-		isSameCluster, _ := util.IsSameConnection(
-			ctx,
-			options.GetClientset().CoreV1(), options.OriginNamespace,
-			connect.GetClientset().CoreV1(), connect.Namespace,
-		)
-		if isSameCluster {
+		id, _ := util.GetConnectionID(ctx, options.GetClientset().CoreV1().Namespaces(), options.OriginNamespace)
+		if id == connectionID {
 			plog.G(ctx).Infof("Disconnecting from the cluster...")
 			options.Cleanup(ctx)
 			svr.connections = append(svr.connections[:i], svr.connections[i+1:]...)

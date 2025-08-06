@@ -63,7 +63,7 @@ func (w *wsHandler) handle(c context.Context, lite bool) {
 	defer cli.Close()
 
 	if !lite {
-		err = w.createTwoWayTUNTunnel(ctx, cli)
+		err = w.createTunnel(ctx, cli)
 		if err != nil {
 			return
 		}
@@ -80,7 +80,7 @@ func (w *wsHandler) handle(c context.Context, lite bool) {
 	return
 }
 
-func (w *wsHandler) createTwoWayTUNTunnel(ctx context.Context, cli *ssh.Client) error {
+func (w *wsHandler) createTunnel(ctx context.Context, cli *ssh.Client) error {
 	err := w.installKubevpnOnRemote(ctx, cli)
 	if err != nil {
 		//w.Log("Install kubevpn error: %v", err)
@@ -126,8 +126,8 @@ func (w *wsHandler) createTwoWayTUNTunnel(ctx context.Context, cli *ssh.Client) 
 		w.Log("Failed to parse server IP %s, stderr: %s: %v", string(serverIP), string(stderr), err)
 		return err
 	}
-	msg := fmt.Sprintf("| You can use client: %s to communicate with server: %s |", clientIP.IP.String(), ip.String())
-	w.PrintLine(msg)
+	msg := util.PrintStr(fmt.Sprintf("You can use client: %s to communicate with server: %s", clientIP.IP.String(), ip.String()))
+	w.Log(msg)
 	w.cidr = append(w.cidr, string(serverIP))
 	r := core.Route{
 		Listeners: []string{
@@ -149,7 +149,7 @@ func (w *wsHandler) createTwoWayTUNTunnel(ctx context.Context, cli *ssh.Client) 
 	plog.G(ctx).Info("Connected private safe tunnel")
 	go func() {
 		for ctx.Err() == nil {
-			util.PingOnce(ctx, clientIP.IP.String(), ip.String())
+			_, _ = util.Ping(ctx, clientIP.IP.String(), ip.String())
 			time.Sleep(time.Second * 15)
 		}
 	}()
@@ -344,13 +344,6 @@ func (w *wsHandler) Log(format string, a ...any) {
 	}
 	w.conn.Write([]byte(str + "\r\n"))
 	plog.G(context.Background()).Infof(format, a...)
-}
-
-func (w *wsHandler) PrintLine(msg string) {
-	line := "+" + strings.Repeat("-", len(msg)-2) + "+"
-	w.Log(line)
-	w.Log(msg)
-	w.Log(line)
 }
 
 var SessionMap = make(map[string]*ssh.Session)

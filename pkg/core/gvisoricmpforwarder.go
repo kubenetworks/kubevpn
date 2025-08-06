@@ -6,22 +6,14 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func ICMPForwarder(ctx context.Context, s *stack.Stack) func(stack.TransportEndpointID, *stack.PacketBuffer) bool {
-	return func(id stack.TransportEndpointID, buffer *stack.PacketBuffer) bool {
+	return func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
+		defer pkt.DecRef()
 		plog.G(ctx).Infof("[TUN-ICMP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
 			id.LocalPort, id.LocalAddress.String(), id.RemotePort, id.RemoteAddress.String(),
 		)
-		ctx1, cancelFunc := context.WithCancel(ctx)
-		defer cancelFunc()
-		ok, err := util.PingOnce(ctx1, id.RemoteAddress.String(), id.LocalAddress.String())
-		if err != nil {
-			plog.G(ctx).Errorf("[TUN-ICMP] Failed to ping dst %s from src %s",
-				id.LocalAddress.String(), id.RemoteAddress.String(),
-			)
-		}
-		return ok
+		return true
 	}
 }

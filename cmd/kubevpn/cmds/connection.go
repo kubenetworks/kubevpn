@@ -17,8 +17,9 @@ import (
 
 func CmdConnection(f cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "connection",
-		Short: "Connection management",
+		Use:     "connection",
+		Short:   "Connection management",
+		Aliases: []string{"conn"},
 	}
 	cmd.AddCommand(cmdConnectionList(f))
 	cmd.AddCommand(cmdConnectionUse(f))
@@ -34,6 +35,8 @@ func cmdConnectionList(f cmdutil.Factory) *cobra.Command {
 		Example: templates.Examples(i18n.T(`
 		# list all connections
 		kubevpn connection ls
+		# list connections by alias conn
+		kubevpn conn ls
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			// startup daemon process and sudo process
@@ -68,7 +71,7 @@ func cmdConnectionUse(f cmdutil.Factory) *cobra.Command {
 		Use a specific connection.
 		`)),
 		Example: templates.Examples(i18n.T(`
-		# use a specific connection, change current connection to special id, leave or unsync will use this connection
+		# use a specific connection, change current connection to special id, cmd sync/unsync will use this connection
 		kubevpn connection use 03dc50feb8c3
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {

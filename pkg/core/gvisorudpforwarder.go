@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
@@ -40,15 +39,8 @@ func UDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.TransportEn
 			return
 		}
 
-		var network string
-		if id.LocalAddress.To4() != (tcpip.Address{}) {
-			network = "udp4"
-		} else {
-			network = "udp6"
-		}
-
 		// dial dst
-		remote, err1 := net.DialUDP(network, nil, dst)
+		remote, err1 := net.DialUDP("udp", nil, dst)
 		if err1 != nil {
 			plog.G(ctx).Errorf("[TUN-UDP] Failed to connect dst: %s: %v", dst.String(), err1)
 			return
