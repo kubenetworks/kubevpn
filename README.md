@@ -442,7 +442,7 @@ Waiting for deployment "productpage" rollout to finish: 1 old replicas are pendi
 Rollout successfully for deployments/productpage
 ```
 
-### Dev mode in local Docker 🐳
+### Run mode in local Docker 🐳
 
 Run the Kubernetes pod in the local Docker container, and cooperate with the service mesh to intercept the traffic with
 the specified header to the local, or all the traffic to the local.

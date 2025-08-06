@@ -391,7 +391,7 @@ Waiting for deployment "productpage" rollout to finish: 1 old replicas are pendi
 Rollout successfully for deployments/productpage
 ```
 
-### 本地进入开发模式 🐳
+### 本地进入运行模式 🐳
 
 将 Kubernetes pod 运行在本地的 Docker 容器中，同时配合 service mesh, 拦截带有指定 header 的流量到本地，或者所有的流量到本地。这个开发模式依赖于本地
 Docker。
