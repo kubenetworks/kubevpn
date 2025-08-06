@@ -30,7 +30,7 @@ func CmdRun(f cmdutil.Factory) *cobra.Command {
 	var imagePullSecretName string
 	var managerNamespace string
 	cmd := &cobra.Command{
-		Use:   "dev TYPE/NAME [-c CONTAINER] [flags] -- [args...]",
+		Use:   "run TYPE/NAME [-c CONTAINER] [flags] -- [args...]",
 		Short: i18n.T("Run kubernetes workloads in local Docker container"),
 		Long: templates.LongDesc(i18n.T(`
 		Run kubernetes workloads in local Docker container with same volume、env、and network
