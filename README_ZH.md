@@ -236,12 +236,7 @@ reviews                   ClusterIP   172.21.8.24     <none>        9080/TCP    
 
 ### 链接到多集群网络
 
-有个两个模式
-
-- 模式 `lite`: 可以链接到多个集群网络，但是仅支持链接到多集群。
-- 模式 `full`: 不仅支持链接到单个集群网络，还可以拦截工作负载流量到本地电脑。
-
-可以看到已经链接到了一个集群 `ccijorbccotmqodvr189g`，是 `full` 模式
+可以看到已经链接到了一个集群 `ccijorbccotmqodvr189g`
 
 ```shell
 ➜  ~ kubevpn status
