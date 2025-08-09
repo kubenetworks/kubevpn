@@ -61,6 +61,7 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 		If you have following config in your ~/.kubevpn/config.yaml
 
 		Name: dev
+		Description: This is dev k8s environment
 		Needs: jumper
 		Flags:
 		  - connect
@@ -69,9 +70,18 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 		---
 		
 		Name: jumper
+		Description: This is jumper k8s environment
 		Flags:
 		  - connect
 		  - --kubeconfig=~/.kube/jumper_config
+		  - --namespace=test
+		  - --extra-hosts=xxx.com
+
+		Name: all-in-one
+		Description: use special flags '--kubeconfig-json', no need to special kubeconfig path
+		Flags:
+		  - connect
+		  - --kubeconfig-json={"apiVersion":"v1","clusters":[{"cluster":{"certificate-authority-data":"LS0tLS1CRU..."}}]}
 		  - --namespace=test
 		  - --extra-hosts=xxx.com
 		
@@ -82,6 +92,9 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 		
 		# kubevpn alias jumper, just connect to cluster jumper
 		kubevpn alias jumper
+
+		# support special flags '--kubeconfig-json', it will save kubeconfig into ~/.kubevpn/temp/[ALIAS_NAME]
+        kubevpn alias all-in-one
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			if localFile != "" {
@@ -100,6 +113,10 @@ func CmdAlias(f cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			for _, conf := range configs {
+				err = ParseArgs(cmd, &conf)
+				if err != nil {
+					return err
+				}
 				c := exec.Command(name, conf.Flags...)
 				c.Stdout = os.Stdout
 				c.Stdin = os.Stdin

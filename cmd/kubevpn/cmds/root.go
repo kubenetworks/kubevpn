@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/rest"
 	restclient "k8s.io/client-go/rest"
@@ -16,6 +17,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func NewKubeVPNCommand() *cobra.Command {
@@ -97,14 +99,25 @@ func NewKubeVPNCommand() *cobra.Command {
 	return cmd
 }
 
+func AddKubeconfigJsonFlag(flags *pflag.FlagSet, kubeconfigJson *string) {
+	flags.StringVar(kubeconfigJson, "kubeconfig-json", ptr.Deref[string](kubeconfigJson, ""), "Json format of kubeconfig to use for CLI requests.")
+}
+
 type warp struct {
 	*genericclioptions.ConfigFlags
+	KubeconfigJson string
 }
 
 func (f *warp) ToRawKubeConfigLoader() clientcmd.ClientConfig {
 	if strings.HasPrefix(ptr.Deref[string](f.KubeConfig, ""), "~") {
 		home := homedir.HomeDir()
 		f.KubeConfig = ptr.To(strings.Replace(*f.KubeConfig, "~", home, 1))
+	}
+	if strings.TrimSpace(f.KubeconfigJson) != "" {
+		path, err := util.ConvertToTempKubeconfigFile([]byte(f.KubeconfigJson))
+		if err == nil {
+			f.KubeConfig = ptr.To(path)
+		}
 	}
 	return f.ConfigFlags.ToRawKubeConfigLoader()
 }

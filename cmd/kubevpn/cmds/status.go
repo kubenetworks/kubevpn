@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/liggitt/tabwriter"
@@ -233,9 +234,11 @@ func GetConnectionIDByConfig(cmd *cobra.Command, config Config) (string, error) 
 	handler.AddExtraRoute(flags, &handler.ExtraRouteInfo{})
 	configFlags := genericclioptions.NewConfigFlags(true)
 	configFlags.AddFlags(flags)
-	matchVersionFlags := cmdutil.NewMatchVersionFlags(&warp{ConfigFlags: configFlags})
+	var kubeconfigJson string
+	AddKubeconfigJsonFlag(flags, &kubeconfigJson)
+	matchVersionFlags := cmdutil.NewMatchVersionFlags(&warp{ConfigFlags: configFlags, KubeconfigJson: kubeconfigJson})
 	matchVersionFlags.AddFlags(flags)
-	factory := cmdutil.NewFactory(matchVersionFlags)
+	f := cmdutil.NewFactory(matchVersionFlags)
 
 	for _, command := range cmd.Parent().Commands() {
 		command.Flags().VisitAll(func(f *flag.Flag) {
@@ -249,7 +252,7 @@ func GetConnectionIDByConfig(cmd *cobra.Command, config Config) (string, error) 
 		_ = flags.Set(flag.Name, value)
 		return nil
 	})
-	bytes, ns, err := util.ConvertToKubeConfigBytes(factory)
+	bytes, ns, err := util.ConvertToKubeConfigBytes(f)
 	if err != nil {
 		return "", err
 	}
@@ -274,4 +277,57 @@ func GetConnectionIDByConfig(cmd *cobra.Command, config Config) (string, error) 
 		return "", err
 	}
 	return id, nil
+}
+
+func ParseArgs(cmd *cobra.Command, conf *Config) error {
+	var str string
+	for i := 0; i < len(conf.Flags); i++ {
+		kubeconfigJson, err := parseKubeconfigJson(cmd, []string{conf.Flags[i]})
+		if err != nil {
+			return err
+		}
+		if kubeconfigJson != "" {
+			str = kubeconfigJson
+			conf.Flags = append(conf.Flags[:i], conf.Flags[i+1:]...)
+			i--
+		}
+	}
+
+	if str == "" {
+		return nil
+	}
+
+	file, err := util.ConvertToKubeconfigFile([]byte(str), filepath.Join(config.GetTempPath(), conf.Name))
+	if err != nil {
+		return err
+	}
+	conf.Flags = append(conf.Flags, fmt.Sprintf("%s=%s", "--kubeconfig", file))
+	return nil
+}
+
+func parseKubeconfigJson(cmd *cobra.Command, args []string) (string, error) {
+	flags := flag.NewFlagSet("", flag.ContinueOnError)
+	var sshConf = &pkgssh.SshConfig{}
+	pkgssh.AddSshFlags(flags, sshConf)
+	handler.AddExtraRoute(flags, &handler.ExtraRouteInfo{})
+	configFlags := genericclioptions.NewConfigFlags(true)
+	configFlags.AddFlags(flags)
+	var kubeconfigJson string
+	AddKubeconfigJsonFlag(flags, &kubeconfigJson)
+	matchVersionFlags := cmdutil.NewMatchVersionFlags(&warp{ConfigFlags: configFlags})
+	matchVersionFlags.AddFlags(flags)
+
+	for _, command := range cmd.Parent().Commands() {
+		command.Flags().VisitAll(func(f *flag.Flag) {
+			if flags.Lookup(f.Name) == nil && flags.ShorthandLookup(f.Shorthand) == nil {
+				flags.AddFlag(f)
+			}
+		})
+	}
+
+	err := flags.ParseAll(args, func(flag *flag.Flag, value string) error {
+		_ = flags.Set(flag.Name, value)
+		return nil
+	})
+	return kubeconfigJson, err
 }
