@@ -4,6 +4,7 @@
 # Just keep simple
 
 Name: dev
+Description: This is dev k8s environment, needs jump by qa env
 Needs: qa
 Flags:
   - connect
@@ -13,6 +14,7 @@ Flags:
 ---
 
 Name: qa
+Description: This is QA k8s environment
 Flags:
   - connect
   - --kubeconfig=~/.kube/jumper_config

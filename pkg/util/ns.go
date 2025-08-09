@@ -152,6 +152,26 @@ func ConvertToTempKubeconfigFile(kubeconfigBytes []byte) (string, error) {
 	return temp.Name(), nil
 }
 
+func ConvertToKubeconfigFile(kubeconfigBytes []byte, filename string) (string, error) {
+	f, err := os.Create(filename)
+	if err != nil {
+		return "", err
+	}
+	_, err = f.Write(kubeconfigBytes)
+	if err != nil {
+		return "", err
+	}
+	err = f.Chmod(0644)
+	if err != nil {
+		return "", err
+	}
+	err = f.Close()
+	if err != nil {
+		return "", err
+	}
+	return f.Name(), nil
+}
+
 func containerPathSeparator(pattern string) bool {
 	for i := 0; i < len(pattern); i++ {
 		if os.IsPathSeparator(pattern[i]) {
