@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"google.golang.org/grpc"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -102,7 +104,11 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 		return nil
 	})
 	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(sshCtx, sshConf, []byte(req.KubeconfigBytes), false)
+		var path string
+		if sshConf.RemoteKubeconfig != "" {
+			path = filepath.Join(config.GetTempPath(), sshConf.GenKubeconfigIdentify())
+		}
+		file, err = ssh.SshJump(sshCtx, sshConf, []byte(req.KubeconfigBytes), path, false)
 	} else {
 		file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
 	}
