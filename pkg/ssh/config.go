@@ -51,6 +51,31 @@ func (conf SshConfig) Clone() SshConfig {
 	}
 }
 
+func (conf *SshConfig) GenKubeconfigIdentify() string {
+	var prefix string
+	if conf.ConfigAlias != "" {
+		prefix = conf.ConfigAlias
+	} else if conf.Addr != "" {
+		if host, port, err := net.SplitHostPort(conf.Addr); err == nil {
+			prefix = fmt.Sprintf("%s_%s", IPToFilename(host), port)
+		} else {
+			prefix = IPToFilename(conf.Addr)
+		}
+	} else if conf.Jump != "" {
+		flags := pflag.NewFlagSet("", pflag.ContinueOnError)
+		var sshConf = &SshConfig{}
+		AddSshFlags(flags, sshConf)
+		_ = flags.Parse(strings.Split(conf.Jump, " "))
+		prefix = sshConf.GenKubeconfigIdentify()
+	}
+
+	if prefix == "" {
+		return filepath.Base(conf.RemoteKubeconfig)
+	}
+
+	return fmt.Sprintf("%s_%s", prefix, filepath.Base(conf.RemoteKubeconfig))
+}
+
 func ParseSshFromRPC(sshJump *rpc.SshJump) *SshConfig {
 	if sshJump == nil {
 		return &SshConfig{}

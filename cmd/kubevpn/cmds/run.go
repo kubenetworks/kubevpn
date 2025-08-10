@@ -89,15 +89,14 @@ func CmdRun(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if sshConf.IsEmpty() {
+				return nil
+			}
 			bytes, _, err := util.ConvertToKubeConfigBytes(f)
 			if err != nil {
 				return err
 			}
-			file, err := util.ConvertToTempKubeconfigFile(bytes)
-			if err != nil {
-				return err
-			}
-			return pkgssh.SshJumpAndSetEnv(cmd.Context(), sshConf, file, false)
+			return pkgssh.SshJumpAndSetEnv(cmd.Context(), sshConf, bytes, false)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.Workload = args[0]

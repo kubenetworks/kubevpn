@@ -126,34 +126,20 @@ func GetAPIServerFromKubeConfigBytes(kubeconfigBytes []byte) *net.IPNet {
 	return &net.IPNet{IP: ip, Mask: mask}
 }
 
-func ConvertToTempKubeconfigFile(kubeconfigBytes []byte) (string, error) {
-	pattern := "*.kubeconfig"
-	cluster, ns, _ := GetCluster(kubeconfigBytes)
-	if cluster != "" && !containerPathSeparator(cluster) && !containerPathSeparator(ns) {
-		pattern = fmt.Sprintf("%s_%s_%s", cluster, ns, pattern)
-		pattern = strings.ReplaceAll(pattern, string(os.PathSeparator), "-")
+func ConvertToTempKubeconfigFile(kubeconfigBytes []byte, path string) (string, error) {
+	var f *os.File
+	var err error
+	if path != "" {
+		f, err = os.Create(path)
+	} else {
+		pattern := "*.kubeconfig"
+		cluster, ns, _ := GetCluster(kubeconfigBytes)
+		if cluster != "" && !containerPathSeparator(cluster) && !containerPathSeparator(ns) {
+			pattern = fmt.Sprintf("%s_%s_%s", cluster, ns, pattern)
+			pattern = strings.ReplaceAll(pattern, string(os.PathSeparator), "-")
+		}
+		f, err = os.CreateTemp(config.GetTempPath(), pattern)
 	}
-	temp, err := os.CreateTemp(config.GetTempPath(), pattern)
-	if err != nil {
-		return "", err
-	}
-	_, err = temp.Write(kubeconfigBytes)
-	if err != nil {
-		return "", err
-	}
-	err = temp.Chmod(0644)
-	if err != nil {
-		return "", err
-	}
-	err = temp.Close()
-	if err != nil {
-		return "", err
-	}
-	return temp.Name(), nil
-}
-
-func ConvertToKubeconfigFile(kubeconfigBytes []byte, filename string) (string, error) {
-	f, err := os.Create(filename)
 	if err != nil {
 		return "", err
 	}
@@ -220,7 +206,7 @@ func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 		}
 		return c
 	}
-	file, err := ConvertToTempKubeconfigFile([]byte(kubeconfigBytes))
+	file, err := ConvertToTempKubeconfigFile([]byte(kubeconfigBytes), "")
 	if err != nil {
 		return nil
 	}
@@ -270,7 +256,7 @@ func GetKubeconfigPath(factory cmdutil.Factory) (string, error) {
 		return "", err
 	}
 
-	file, err := ConvertToTempKubeconfigFile(kubeconfigJsonBytes)
+	file, err := ConvertToTempKubeconfigFile(kubeconfigJsonBytes, "")
 	if err != nil {
 		return "", err
 	}

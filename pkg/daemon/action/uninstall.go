@@ -24,18 +24,17 @@ func (svr *Server) Uninstall(resp rpc.Daemon_UninstallServer) (err error) {
 	}
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newUninstallWarp(resp), svr.LogFile))
 
-	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
-	if err != nil {
-		return err
-	}
+	var file string
 	defer os.Remove(file)
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	var ctx = plog.WithLogger(resp.Context(), logger)
 	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(ctx, sshConf, file, false)
-		if err != nil {
-			return err
-		}
+		file, err = ssh.SshJump(ctx, sshConf, []byte(req.KubeconfigBytes), false)
+	} else {
+		file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
+	}
+	if err != nil {
+		return err
 	}
 	factory := util.InitFactoryByPath(file, req.Namespace)
 	clientset, err := factory.KubernetesClientSet()

@@ -252,20 +252,19 @@ func GetConnectionIDByConfig(cmd *cobra.Command, config Config) (string, error) 
 		_ = flags.Set(flag.Name, value)
 		return nil
 	})
-	bytes, ns, err := util.ConvertToKubeConfigBytes(f)
+	kubeConfigBytes, ns, err := util.ConvertToKubeConfigBytes(f)
 	if err != nil {
 		return "", err
 	}
-	file, err := util.ConvertToTempKubeconfigFile(bytes)
-	if err != nil {
-		return "", err
-	}
+	var file string
 	defer os.Remove(file)
 	if !sshConf.IsEmpty() {
-		file, err = pkgssh.SshJump(cmd.Context(), sshConf, file, false)
-		if err != nil {
-			return "", err
-		}
+		file, err = pkgssh.SshJump(cmd.Context(), sshConf, kubeConfigBytes, false)
+	} else {
+		file, err = util.ConvertToTempKubeconfigFile(kubeConfigBytes, "")
+	}
+	if err != nil {
+		return "", err
 	}
 	var c = &handler.ConnectOptions{}
 	err = c.InitClient(util.InitFactoryByPath(file, ns))
@@ -297,7 +296,7 @@ func ParseArgs(cmd *cobra.Command, conf *Config) error {
 		return nil
 	}
 
-	file, err := util.ConvertToKubeconfigFile([]byte(str), filepath.Join(config.GetTempPath(), conf.Name))
+	file, err := util.ConvertToTempKubeconfigFile([]byte(str), filepath.Join(config.GetTempPath(), conf.Name))
 	if err != nil {
 		return err
 	}

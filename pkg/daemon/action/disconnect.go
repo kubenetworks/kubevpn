@@ -112,17 +112,17 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 }
 
 func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes string, ns string, jump *rpc.SshJump) error {
-	file, err := util.ConvertToTempKubeconfigFile([]byte(kubeconfigBytes))
-	if err != nil {
-		return err
-	}
-	defer os.Remove(file)
+	var file string
+	var err error
 	var sshConf = ssh.ParseSshFromRPC(jump)
 	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(ctx, sshConf, file, false)
-		if err != nil {
-			return err
-		}
+		file, err = ssh.SshJump(ctx, sshConf, []byte(kubeconfigBytes), false)
+	} else {
+		file, err = util.ConvertToTempKubeconfigFile([]byte(kubeconfigBytes), "")
+	}
+	defer os.Remove(file)
+	if err != nil {
+		return err
 	}
 	connect := &handler.ConnectOptions{}
 	err = connect.InitClient(util.InitFactoryByPath(file, ns))
