@@ -56,7 +56,11 @@ func (conf *SshConfig) GenKubeconfigIdentify() string {
 	if conf.ConfigAlias != "" {
 		prefix = conf.ConfigAlias
 	} else if conf.Addr != "" {
-		prefix = IPToFilename(conf.Addr)
+		if host, port, err := net.SplitHostPort(conf.Addr); err == nil {
+			prefix = fmt.Sprintf("%s_%s", IPToFilename(host), port)
+		} else {
+			prefix = IPToFilename(conf.Addr)
+		}
 	} else if conf.Jump != "" {
 		flags := pflag.NewFlagSet("", pflag.ContinueOnError)
 		var sshConf = &SshConfig{}
