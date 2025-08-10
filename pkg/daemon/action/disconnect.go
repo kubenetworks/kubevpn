@@ -116,7 +116,7 @@ func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes st
 	var err error
 	var sshConf = ssh.ParseSshFromRPC(jump)
 	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(ctx, sshConf, []byte(kubeconfigBytes), false)
+		file, err = ssh.SshJump(ctx, sshConf, []byte(kubeconfigBytes), "", false)
 	} else {
 		file, err = util.ConvertToTempKubeconfigFile([]byte(kubeconfigBytes), "")
 	}

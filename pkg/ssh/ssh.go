@@ -10,7 +10,6 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -69,10 +68,7 @@ func RemoteRun(client *gossh.Client, cmd string, env map[string]string) (output 
 	for k, v := range env {
 		// /etc/ssh/sshd_config
 		// AcceptEnv DEBIAN_FRONTEND
-		if err = session.Setenv(k, v); err != nil {
-			plog.G(context.Background()).Warn(err)
-			err = nil
-		}
+		_ = session.Setenv(k, v)
 	}
 	var out bytes.Buffer
 	var er bytes.Buffer
@@ -139,13 +135,10 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 	return nil
 }
 
-func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print bool) (path string, err error) {
+func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, tempPath string, print bool) (path string, err error) {
 	if len(conf.RemoteKubeconfig) != 0 {
 		var stdout []byte
 		var stderr []byte
-		if conf.RemoteKubeconfig[0] == '~' {
-			conf.RemoteKubeconfig = filepath.Join("/home", conf.User, conf.RemoteKubeconfig[1:])
-		}
 		// pre-check network ip connect
 		var cli *gossh.Client
 		cli, err = DialSshRemote(ctx, conf, ctx.Done())
@@ -154,9 +147,11 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 		}
 		defer cli.Close()
 		stdout, stderr, err = RemoteRun(cli,
-			fmt.Sprintf("sh -c 'kubectl config view --flatten --raw --kubeconfig %s || minikube kubectl -- config view --flatten --raw --kubeconfig %s'",
+			fmt.Sprintf("sh -c 'kubectl config view --flatten --raw --kubeconfig %s || minikube kubectl -- config view --flatten --raw --kubeconfig %s || cat %s'",
 				conf.RemoteKubeconfig,
-				conf.RemoteKubeconfig),
+				conf.RemoteKubeconfig,
+				conf.RemoteKubeconfig,
+			),
 			map[string]string{clientcmd.RecommendedConfigPathEnvVar: conf.RemoteKubeconfig},
 		)
 		if err != nil {
@@ -168,7 +163,6 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 			return
 		}
 		kubeconfigBytes = bytes.TrimSpace(stdout)
-		path = filepath.Join(config.GetTempPath(), conf.GenKubeconfigIdentify())
 	}
 	var clientConfig clientcmd.ClientConfig
 	clientConfig, err = clientcmd.NewClientConfigFromBytes(kubeconfigBytes)
@@ -284,7 +278,7 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 		plog.G(ctx).Errorf("failed to marshal config: %v", err)
 		return
 	}
-	path, err = pkgutil.ConvertToTempKubeconfigFile(marshal, path)
+	path, err = pkgutil.ConvertToTempKubeconfigFile(marshal, tempPath)
 	if err != nil {
 		plog.G(ctx).Errorf("failed to write kubeconfig: %v", err)
 		return
@@ -302,7 +296,7 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 }
 
 func SshJumpAndSetEnv(ctx context.Context, sshConf *SshConfig, kubeconfigBytes []byte, print bool) error {
-	path, err := SshJump(ctx, sshConf, kubeconfigBytes, print)
+	path, err := SshJump(ctx, sshConf, kubeconfigBytes, "", print)
 	if err != nil {
 		return err
 	}

@@ -29,7 +29,7 @@ func (svr *Server) Uninstall(resp rpc.Daemon_UninstallServer) (err error) {
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	var ctx = plog.WithLogger(resp.Context(), logger)
 	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(ctx, sshConf, []byte(req.KubeconfigBytes), false)
+		file, err = ssh.SshJump(ctx, sshConf, []byte(req.KubeconfigBytes), "", false)
 	} else {
 		file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
 	}

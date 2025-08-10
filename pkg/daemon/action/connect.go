@@ -2,14 +2,18 @@ package action
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -113,7 +117,11 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	})
 
 	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(sshCtx, sshConf, []byte(req.KubeconfigBytes), true)
+		var path string
+		if sshConf.RemoteKubeconfig != "" {
+			path = filepath.Join(config.GetTempPath(), fmt.Sprintf("%s_%d", sshConf.GenKubeconfigIdentify(), time.Now().Unix()))
+		}
+		file, err = ssh.SshJump(sshCtx, sshConf, []byte(req.KubeconfigBytes), path, true)
 		if err != nil {
 			return err
 		}
