@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -106,7 +107,7 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	if !sshConf.IsEmpty() {
 		var path string
 		if sshConf.RemoteKubeconfig != "" {
-			path = filepath.Join(config.GetTempPath(), sshConf.GenKubeconfigIdentify())
+			path = filepath.Join(config.GetTempPath(), fmt.Sprintf("%s_%d", sshConf.GenKubeconfigIdentify(), time.Now().Unix()))
 		}
 		file, err = ssh.SshJump(sshCtx, sshConf, []byte(req.KubeconfigBytes), path, false)
 	} else {

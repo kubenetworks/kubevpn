@@ -2,9 +2,11 @@ package action
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
@@ -117,7 +119,7 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	if !sshConf.IsEmpty() {
 		var path string
 		if sshConf.RemoteKubeconfig != "" {
-			path = filepath.Join(config.GetTempPath(), sshConf.GenKubeconfigIdentify())
+			path = filepath.Join(config.GetTempPath(), fmt.Sprintf("%s_%d", sshConf.GenKubeconfigIdentify(), time.Now().Unix()))
 		}
 		file, err = ssh.SshJump(sshCtx, sshConf, []byte(req.KubeconfigBytes), path, true)
 		if err != nil {
