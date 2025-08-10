@@ -68,10 +68,7 @@ func RemoteRun(client *gossh.Client, cmd string, env map[string]string) (output 
 	for k, v := range env {
 		// /etc/ssh/sshd_config
 		// AcceptEnv DEBIAN_FRONTEND
-		if err = session.Setenv(k, v); err != nil {
-			plog.G(context.Background()).Warn(err)
-			err = nil
-		}
+		_ = session.Setenv(k, v)
 	}
 	var out bytes.Buffer
 	var er bytes.Buffer
