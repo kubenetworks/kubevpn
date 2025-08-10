@@ -58,10 +58,18 @@ func (conf *SshConfig) GenKubeconfigIdentify() string {
 	} else if conf.Addr != "" {
 		prefix = IPToFilename(conf.Addr)
 	} else if conf.Jump != "" {
-		prefix = conf.Jump
+		flags := pflag.NewFlagSet("", pflag.ContinueOnError)
+		var sshConf = &SshConfig{}
+		AddSshFlags(flags, sshConf)
+		_ = flags.Parse(strings.Split(conf.Jump, " "))
+		prefix = sshConf.GenKubeconfigIdentify()
 	}
 
-	return filepath.Join(prefix, filepath.Base(conf.RemoteKubeconfig))
+	if prefix == "" {
+		return filepath.Base(conf.RemoteKubeconfig)
+	}
+
+	return fmt.Sprintf("%s_%s", prefix, filepath.Base(conf.RemoteKubeconfig))
 }
 
 func ParseSshFromRPC(sshJump *rpc.SshJump) *SshConfig {
