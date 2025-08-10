@@ -20,18 +20,17 @@ func (svr *Server) Reset(resp rpc.Daemon_ResetServer) error {
 	}
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newResetWarp(resp), svr.LogFile))
 
-	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
-	if err != nil {
-		return err
-	}
+	var file string
 	defer os.Remove(file)
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	var ctx = plog.WithLogger(resp.Context(), logger)
 	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(ctx, sshConf, file, false)
-		if err != nil {
-			return err
-		}
+		file, err = ssh.SshJump(ctx, sshConf, []byte(req.KubeconfigBytes), false)
+	} else {
+		file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
+	}
+	if err != nil {
+		return err
 	}
 	connect := &handler.ConnectOptions{}
 	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))

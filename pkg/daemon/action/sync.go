@@ -89,26 +89,25 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 		LocalDir:            req.LocalDir,
 		RemoteDir:           req.RemoteDir,
 	}
-	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
-	if err != nil {
-		return err
-	}
 	defer func() {
 		if err != nil {
 			_ = options.Cleanup(sshCtx)
 			sshFunc()
 		}
 	}()
+	var file string
 	options.AddRollbackFunc(func() error {
 		sshFunc()
 		_ = os.Remove(file)
 		return nil
 	})
 	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(sshCtx, sshConf, file, false)
-		if err != nil {
-			return err
-		}
+		file, err = ssh.SshJump(sshCtx, sshConf, []byte(req.KubeconfigBytes), false)
+	} else {
+		file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
+	}
+	if err != nil {
+		return err
 	}
 	f := util.InitFactoryByPath(file, req.Namespace)
 	err = options.InitClient(f)

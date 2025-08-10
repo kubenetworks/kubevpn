@@ -36,16 +36,14 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 
 	var file string
-	file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
-	if err != nil {
-		return err
-	}
 	defer os.Remove(file)
 	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(ctx, sshConf, file, false)
-		if err != nil {
-			return err
-		}
+		file, err = ssh.SshJump(ctx, sshConf, []byte(req.KubeconfigBytes), false)
+	} else {
+		file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
+	}
+	if err != nil {
+		return err
 	}
 	connect := &handler.ConnectOptions{
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),

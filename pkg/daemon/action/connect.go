@@ -47,7 +47,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		ImagePullSecretName:  req.ImagePullSecretName,
 		Request:              proto.Clone(req).(*rpc.ConnectRequest),
 	}
-	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
+	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
 	if err != nil {
 		return err
 	}
@@ -95,10 +95,6 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		return errors.Wrap(err, "sudo daemon not start")
 	}
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
-	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes))
-	if err != nil {
-		return err
-	}
 	sshCtx, sshCancel := context.WithCancel(context.Background())
 	sshCtx = plog.WithLogger(sshCtx, logger)
 	defer plog.WithoutLogger(sshCtx)
@@ -109,11 +105,28 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		Request:              proto.Clone(req).(*rpc.ConnectRequest),
 	}
+	var file string
 	connect.AddRolloutFunc(func() error {
 		sshCancel()
 		_ = os.Remove(file)
 		return nil
 	})
+
+	if !sshConf.IsEmpty() {
+		file, err = ssh.SshJump(sshCtx, sshConf, []byte(req.KubeconfigBytes), true)
+		if err != nil {
+			return err
+		}
+		if sshConf.RemoteKubeconfig != "" {
+			connect.OriginKubeconfigPath = file
+		}
+	} else {
+		file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
+		if err != nil {
+			return err
+		}
+	}
+
 	defer func() {
 		if err != nil {
 			connect.Cleanup(plog.WithLogger(context.Background(), logger))
@@ -134,13 +147,6 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 			sshCancel()
 		}
 	}()
-
-	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(sshCtx, sshConf, file, true)
-		if err != nil {
-			return err
-		}
-	}
 	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
 	if err != nil {
 		return err

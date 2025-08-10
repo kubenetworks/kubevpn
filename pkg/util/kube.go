@@ -85,7 +85,7 @@ func ConvertK8sApiServerToDomain(kubeConfigPath string) (newPath string, err err
 	if err != nil {
 		return
 	}
-	newPath, err = ConvertToTempKubeconfigFile(marshal)
+	newPath, err = ConvertToTempKubeconfigFile(marshal, "")
 	if err != nil {
 		return
 	}

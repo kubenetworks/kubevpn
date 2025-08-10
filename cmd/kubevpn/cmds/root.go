@@ -114,7 +114,7 @@ func (f *warp) ToRawKubeConfigLoader() clientcmd.ClientConfig {
 		f.KubeConfig = ptr.To(strings.Replace(*f.KubeConfig, "~", home, 1))
 	}
 	if strings.TrimSpace(f.KubeconfigJson) != "" {
-		path, err := util.ConvertToTempKubeconfigFile([]byte(f.KubeconfigJson))
+		path, err := util.ConvertToTempKubeconfigFile([]byte(f.KubeconfigJson), "")
 		if err == nil {
 			f.KubeConfig = ptr.To(path)
 		}

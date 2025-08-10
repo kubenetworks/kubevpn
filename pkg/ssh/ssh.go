@@ -139,8 +139,7 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 	return nil
 }
 
-func SshJump(ctx context.Context, conf *SshConfig, kubeconfig string, print bool) (path string, err error) {
-	var kubeconfigBytes []byte
+func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print bool) (path string, err error) {
 	if len(conf.RemoteKubeconfig) != 0 {
 		var stdout []byte
 		var stderr []byte
@@ -169,11 +168,7 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfig string, print bool
 			return
 		}
 		kubeconfigBytes = bytes.TrimSpace(stdout)
-	} else {
-		kubeconfigBytes, err = os.ReadFile(kubeconfig)
-		if err != nil {
-			return
-		}
+		path = filepath.Join(config.GetTempPath(), filepath.Base(conf.RemoteKubeconfig))
 	}
 	var clientConfig clientcmd.ClientConfig
 	clientConfig, err = clientcmd.NewClientConfigFromBytes(kubeconfigBytes)
@@ -289,7 +284,7 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfig string, print bool
 		plog.G(ctx).Errorf("failed to marshal config: %v", err)
 		return
 	}
-	path, err = pkgutil.ConvertToTempKubeconfigFile(marshal)
+	path, err = pkgutil.ConvertToTempKubeconfigFile(marshal, path)
 	if err != nil {
 		plog.G(ctx).Errorf("failed to write kubeconfig: %v", err)
 		return
@@ -297,7 +292,6 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfig string, print bool
 	go func() {
 		<-ctx.Done()
 		_ = os.Remove(path)
-		_ = os.Remove(kubeconfig)
 	}()
 	if print {
 		plog.G(ctx).Infof("Use temp kubeconfig: %s", path)
@@ -307,11 +301,8 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfig string, print bool
 	return
 }
 
-func SshJumpAndSetEnv(ctx context.Context, sshConf *SshConfig, file string, print bool) error {
-	if sshConf.IsEmpty() {
-		return nil
-	}
-	path, err := SshJump(ctx, sshConf, file, print)
+func SshJumpAndSetEnv(ctx context.Context, sshConf *SshConfig, kubeconfigBytes []byte, print bool) error {
+	path, err := SshJump(ctx, sshConf, kubeconfigBytes, print)
 	if err != nil {
 		return err
 	}
