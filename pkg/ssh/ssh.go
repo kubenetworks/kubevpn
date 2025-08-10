@@ -168,7 +168,7 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 			return
 		}
 		kubeconfigBytes = bytes.TrimSpace(stdout)
-		path = filepath.Join(config.GetTempPath(), filepath.Base(conf.RemoteKubeconfig))
+		path = filepath.Join(config.GetTempPath(), conf.GenKubeconfigIdentify())
 	}
 	var clientConfig clientcmd.ClientConfig
 	clientConfig, err = clientcmd.NewClientConfigFromBytes(kubeconfigBytes)

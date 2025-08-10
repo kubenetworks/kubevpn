@@ -51,6 +51,19 @@ func (conf SshConfig) Clone() SshConfig {
 	}
 }
 
+func (conf *SshConfig) GenKubeconfigIdentify() string {
+	var prefix string
+	if conf.ConfigAlias != "" {
+		prefix = conf.ConfigAlias
+	} else if conf.Addr != "" {
+		prefix = IPToFilename(conf.Addr)
+	} else if conf.Jump != "" {
+		prefix = conf.Jump
+	}
+
+	return filepath.Join(prefix, filepath.Base(conf.RemoteKubeconfig))
+}
+
 func ParseSshFromRPC(sshJump *rpc.SshJump) *SshConfig {
 	if sshJump == nil {
 		return &SshConfig{}
