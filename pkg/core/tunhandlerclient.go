@@ -77,7 +77,7 @@ func readFromConn(ctx context.Context, conn net.Conn, tunInbound chan *Packet, t
 	defer util.HandleCrash()
 	var gvisorInbound = make(chan *Packet, MaxSize)
 	go handleGvisorPacket(gvisorInbound, tunInbound).Run(ctx)
-	for {
+	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
 		err := conn.SetReadDeadline(time.Now().Add(config.KeepAliveTime))
 		if err != nil {
@@ -99,22 +99,25 @@ func readFromConn(ctx context.Context, conn net.Conn, tunInbound chan *Packet, t
 			continue
 		}
 		if buf[0] == 1 {
-			util.SafeWrite(gvisorInbound, NewPacket(buf[:], n, nil, nil), func(v *Packet) {
-				config.LPool.Put(v.data[:])
-				plog.G(context.Background()).Errorf("Drop packet, LocalAddr: %s, Remote: %s, Length: %d", conn.LocalAddr(), conn.RemoteAddr(), v.length)
-			})
+			gvisorInbound <- NewPacket(buf[:], n, nil, nil)
 		} else {
-			util.SafeWrite(tunOutbound, NewPacket(buf[:], n, nil, nil), func(v *Packet) {
-				config.LPool.Put(v.data[:])
-				plog.G(context.Background()).Errorf("Drop packet, LocalAddr: %s, Remote: %s, Length: %d", conn.LocalAddr(), conn.RemoteAddr(), v.length)
-			})
+			tunOutbound <- NewPacket(buf[:], n, nil, nil)
 		}
 	}
 }
 
 func writeToConn(ctx context.Context, conn net.Conn, inbound <-chan *Packet, errChan chan error) {
 	defer util.HandleCrash()
-	for packet := range inbound {
+	for ctx.Err() == nil {
+		var packet *Packet
+		select {
+		case packet = <-inbound:
+			if packet == nil {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
 		err := conn.SetWriteDeadline(time.Now().Add(config.KeepAliveTime))
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to set write deadline: %v", err)
@@ -135,7 +138,7 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 	defer util.HandleCrash()
 	var gvisorInbound = make(chan *Packet, MaxSize)
 	go handleGvisorPacket(gvisorInbound, d.tunOutbound).Run(ctx)
-	for {
+	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(buf[1:])
 		if err != nil {
@@ -158,21 +161,27 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 		}
 		plog.G(context.Background()).Debugf("SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
 		packet := NewPacket(buf[:], n+1, src, dst)
-		f := func(v *Packet) {
-			config.LPool.Put(v.data[:])
-			plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", v.src, v.dst, layers.IPProtocol(protocol).String(), v.length)
-		}
 		if packet.src.Equal(packet.dst) {
-			util.SafeWrite(gvisorInbound, packet, f)
+			gvisorInbound <- packet
 		} else {
-			util.SafeWrite(d.tunInbound, packet, f)
+			d.tunInbound <- packet
 		}
 	}
 }
 
 func (d *ClientDevice) writeToTun(ctx context.Context) {
 	defer util.HandleCrash()
-	for packet := range d.tunOutbound {
+	for ctx.Err() == nil {
+		var packet *Packet
+		select {
+		case packet = <-d.tunOutbound:
+			if packet == nil {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+
 		_, err := d.tun.Write(packet.data[1:packet.length])
 		config.LPool.Put(packet.data[:])
 		if err != nil {
@@ -185,8 +194,6 @@ func (d *ClientDevice) writeToTun(ctx context.Context) {
 
 func (d *ClientDevice) Close() {
 	d.tun.Close()
-	util.SafeClose(d.tunInbound)
-	util.SafeClose(d.tunOutbound)
 }
 
 func (d *ClientDevice) heartbeats(ctx context.Context) {
@@ -214,10 +221,10 @@ func (d *ClientDevice) heartbeats(ctx context.Context) {
 				data := config.LPool.Get().([]byte)[:]
 				length := copy(data[1:], bytes)
 				data[0] = 1
-				util.SafeWrite(d.tunInbound, &Packet{
+				d.tunInbound <- &Packet{
 					data:   data[:],
 					length: length + 1,
-				})
+				}
 			}
 		}
 		if srcIPv6 != nil {
@@ -228,10 +235,10 @@ func (d *ClientDevice) heartbeats(ctx context.Context) {
 				data := config.LPool.Get().([]byte)[:]
 				length := copy(data[1:], bytes6)
 				data[0] = 1
-				util.SafeWrite(d.tunInbound, &Packet{
+				d.tunInbound <- &Packet{
 					data:   data[:],
 					length: length + 1,
-				})
+				}
 			}
 		}
 

@@ -74,7 +74,7 @@ type Device struct {
 
 func (d *Device) readFromTun(ctx context.Context) {
 	defer util.HandleCrash()
-	for {
+	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(buf[:])
 		if err != nil {
@@ -92,16 +92,22 @@ func (d *Device) readFromTun(ctx context.Context) {
 		}
 
 		plog.G(ctx).Debugf("[TUN] SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
-		util.SafeWrite(d.tunInbound, NewPacket(buf[:], n, src, dst), func(v *Packet) {
-			config.LPool.Put(v.data[:])
-			plog.G(context.Background()).Errorf("Drop packet, SRC: %s, DST: %s, Protocol: %s, Length: %d", v.src, v.dst, layers.IPProtocol(protocol).String(), v.length)
-		})
+		d.tunInbound <- NewPacket(buf[:], n, src, dst)
 	}
 }
 
 func (d *Device) writeToTun(ctx context.Context) {
 	defer util.HandleCrash()
-	for packet := range d.tunOutbound {
+	for ctx.Err() == nil {
+		var packet *Packet
+		select {
+		case packet = <-d.tunOutbound:
+			if packet == nil {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
 		_, err := d.tun.Write(packet.data[1:packet.length])
 		config.LPool.Put(packet.data[:])
 		if err != nil {
@@ -114,9 +120,6 @@ func (d *Device) writeToTun(ctx context.Context) {
 
 func (d *Device) Close() {
 	d.tun.Close()
-	util.SafeClose(d.tunInbound)
-	util.SafeClose(d.tunOutbound)
-	util.SafeClose(TCPPacketChan)
 }
 
 func (d *Device) handlePacket(ctx context.Context, routeMapTCP *sync.Map) {
@@ -183,14 +186,32 @@ func (p *Peer) sendErr(err error) {
 
 func (p *Peer) routeTCPToTun(ctx context.Context) {
 	defer util.HandleCrash()
-	for packet := range TCPPacketChan {
+	for ctx.Err() == nil {
+		var packet *Packet
+		select {
+		case packet = <-TCPPacketChan:
+			if packet == nil {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
 		p.tunOutbound <- packet
 	}
 }
 
 func (p *Peer) routeTun(ctx context.Context) {
 	defer util.HandleCrash()
-	for packet := range p.tunInbound {
+	for ctx.Err() == nil {
+		var packet *Packet
+		select {
+		case packet = <-p.tunInbound:
+			if packet == nil {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
 		if conn, ok := p.routeMapTCP.Load(packet.dst.String()); ok {
 			plog.G(ctx).Debugf("[TUN] Find TCP route to dst: %s -> %s", packet.dst.String(), conn.(net.Conn).RemoteAddr())
 			copy(packet.data[1:packet.length+1], packet.data[:packet.length])

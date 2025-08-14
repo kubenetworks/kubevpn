@@ -114,15 +114,12 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			pkt.DecRef()
 			plog.G(ctx).Debugf("[TCP-GVISOR] Write to gvisor. SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
 		} else {
-			util.SafeWrite(TCPPacketChan, &Packet{
+			TCPPacketChan <- &Packet{
 				data:   buf[:],
 				length: read,
 				src:    src,
 				dst:    dst,
-			}, func(v *Packet) {
-				config.LPool.Put(buf[:])
-				plog.G(ctx).Debugf("[TCP-TUN] Drop packet. SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
-			})
+			}
 		}
 	}
 }

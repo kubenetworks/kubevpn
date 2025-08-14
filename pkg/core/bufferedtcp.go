@@ -15,12 +15,12 @@ type bufferedTCP struct {
 	closed bool
 }
 
-func NewBufferedTCP(conn net.Conn) net.Conn {
+func NewBufferedTCP(ctx context.Context, conn net.Conn) net.Conn {
 	c := &bufferedTCP{
 		Conn: conn,
 		Chan: make(chan *DatagramPacket, MaxSize),
 	}
-	go c.Run()
+	go c.Run(ctx)
 	return c
 }
 
@@ -38,8 +38,17 @@ func (c *bufferedTCP) Write(b []byte) (n int, err error) {
 	return n, nil
 }
 
-func (c *bufferedTCP) Run() {
-	for buf := range c.Chan {
+func (c *bufferedTCP) Run(ctx context.Context) {
+	for ctx.Err() == nil {
+		var buf *DatagramPacket
+		select {
+		case buf = <-c.Chan:
+			if buf == nil {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
 		_, err := c.Conn.Write(buf.Data[:buf.DataLength])
 		config.LPool.Put(buf.Data[:])
 		if err != nil {
@@ -49,4 +58,9 @@ func (c *bufferedTCP) Run() {
 			return
 		}
 	}
+}
+
+func (c *bufferedTCP) Close() error {
+	c.closed = true
+	return c.Conn.Close()
 }
