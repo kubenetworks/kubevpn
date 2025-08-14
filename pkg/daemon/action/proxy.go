@@ -38,7 +38,7 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	var file string
 	defer os.Remove(file)
 	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(ctx, sshConf, []byte(req.KubeconfigBytes), "", false)
+		file, err = ssh.SshJump(ctx, sshConf, []byte(req.KubeconfigBytes), false)
 	} else {
 		file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
 	}

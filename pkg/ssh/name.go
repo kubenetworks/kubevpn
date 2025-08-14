@@ -90,14 +90,10 @@ func sanitizeFilename(name string) string {
 			}
 		}
 	}
-
 	fname := result.String()
-
 	fname = strings.Trim(fname, "-_.")
-
 	if fname == "" {
 		return "ip-address"
 	}
-
 	return fname
 }

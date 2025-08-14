@@ -3,12 +3,10 @@ package util
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net"
 	"net/url"
 	"os"
 	"reflect"
-	"strings"
 	"unsafe"
 
 	errors2 "github.com/pkg/errors"
@@ -129,17 +127,11 @@ func GetAPIServerFromKubeConfigBytes(kubeconfigBytes []byte) *net.IPNet {
 func ConvertToTempKubeconfigFile(kubeconfigBytes []byte, path string) (string, error) {
 	var f *os.File
 	var err error
-	if path != "" {
-		f, err = os.Create(path)
-	} else {
-		pattern := "*.kubeconfig"
-		cluster, ns, _ := GetCluster(kubeconfigBytes)
-		if cluster != "" && !containerPathSeparator(cluster) && !containerPathSeparator(ns) {
-			pattern = fmt.Sprintf("%s_%s_%s", cluster, ns, pattern)
-			pattern = strings.ReplaceAll(pattern, string(os.PathSeparator), "-")
-		}
-		f, err = os.CreateTemp(config.GetTempPath(), pattern)
+
+	if path == "" {
+		path = GenKubeconfigTempPath(kubeconfigBytes)
 	}
+	f, err = os.Create(path)
 	if err != nil {
 		return "", err
 	}
@@ -156,41 +148,6 @@ func ConvertToTempKubeconfigFile(kubeconfigBytes []byte, path string) (string, e
 		return "", err
 	}
 	return f.Name(), nil
-}
-
-func containerPathSeparator(pattern string) bool {
-	for i := 0; i < len(pattern); i++ {
-		if os.IsPathSeparator(pattern[i]) {
-			return true
-		}
-	}
-	return false
-}
-
-func GetCluster(kubeConfigBytes []byte) (cluster string, ns string, err error) {
-	var clientConfig clientcmd.ClientConfig
-	clientConfig, err = clientcmd.NewClientConfigFromBytes(kubeConfigBytes)
-	if err != nil {
-		return
-	}
-	var rawConfig api.Config
-	rawConfig, err = clientConfig.RawConfig()
-	if err != nil {
-		return
-	}
-	if err = api.FlattenConfig(&rawConfig); err != nil {
-		return
-	}
-	if rawConfig.Contexts == nil {
-		return
-	}
-	kubeContext := rawConfig.Contexts[rawConfig.CurrentContext]
-	if kubeContext == nil {
-		return
-	}
-	cluster = kubeContext.Cluster
-	ns = kubeContext.Namespace
-	return
 }
 
 func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
