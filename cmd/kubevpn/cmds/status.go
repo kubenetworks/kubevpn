@@ -259,7 +259,7 @@ func GetConnectionIDByConfig(cmd *cobra.Command, config Config) (string, error) 
 	var file string
 	defer os.Remove(file)
 	if !sshConf.IsEmpty() {
-		file, err = pkgssh.SshJump(cmd.Context(), sshConf, kubeConfigBytes, "", false)
+		file, err = pkgssh.SshJump(cmd.Context(), sshConf, kubeConfigBytes, false)
 	} else {
 		file, err = util.ConvertToTempKubeconfigFile(kubeConfigBytes, "")
 	}

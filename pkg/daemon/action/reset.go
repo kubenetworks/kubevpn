@@ -25,7 +25,7 @@ func (svr *Server) Reset(resp rpc.Daemon_ResetServer) error {
 	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	var ctx = plog.WithLogger(resp.Context(), logger)
 	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(ctx, sshConf, []byte(req.KubeconfigBytes), "", false)
+		file, err = ssh.SshJump(ctx, sshConf, []byte(req.KubeconfigBytes), false)
 	} else {
 		file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
 	}

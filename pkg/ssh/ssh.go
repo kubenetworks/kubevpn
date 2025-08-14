@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -135,7 +136,7 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 	return nil
 }
 
-func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, tempPath string, print bool) (path string, err error) {
+func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print bool) (path string, err error) {
 	if len(conf.RemoteKubeconfig) != 0 {
 		var stdout []byte
 		var stderr []byte
@@ -278,7 +279,7 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, tempP
 		plog.G(ctx).Errorf("failed to marshal config: %v", err)
 		return
 	}
-	path, err = pkgutil.ConvertToTempKubeconfigFile(marshal, tempPath)
+	path, err = pkgutil.ConvertToTempKubeconfigFile(marshal, GenKubeconfigTempPath(conf, kubeconfigBytes))
 	if err != nil {
 		plog.G(ctx).Errorf("failed to write kubeconfig: %v", err)
 		return
@@ -296,7 +297,7 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, tempP
 }
 
 func SshJumpAndSetEnv(ctx context.Context, sshConf *SshConfig, kubeconfigBytes []byte, print bool) error {
-	path, err := SshJump(ctx, sshConf, kubeconfigBytes, "", print)
+	path, err := SshJump(ctx, sshConf, kubeconfigBytes, print)
 	if err != nil {
 		return err
 	}
@@ -437,4 +438,12 @@ func copyStream(ctx context.Context, local net.Conn, remote net.Conn) {
 	case <-ctx.Done():
 		return
 	}
+}
+
+func GenKubeconfigTempPath(conf *SshConfig, kubeconfigBytes []byte) string {
+	if conf != nil && conf.RemoteKubeconfig != "" {
+		return filepath.Join(config.GetTempPath(), fmt.Sprintf("%s_%d", conf.GenKubeconfigIdentify(), time.Now().Unix()))
+	}
+
+	return pkgutil.GenKubeconfigTempPath(kubeconfigBytes)
 }
