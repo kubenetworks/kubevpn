@@ -40,8 +40,8 @@ const (
 	local            = `{"status": "Reviews is healthy on local pc"}`
 	local8080        = `{"status": "Reviews is healthy on local pc 8080"}`
 	remote           = `{"status": "Reviews is healthy"}`
-	remoteSyncOrigin = `{"status": "Authors is healthy"}`
-	remoteSyncPod    = `{"status": "Authors is healthy in pod"}`
+	remoteSyncOrigin = `{"status":"Authors is healthy"}`
+	remoteSyncPod    = `{"status":"Authors is healthy in pod"}`
 )
 
 func TestFunctions(t *testing.T) {

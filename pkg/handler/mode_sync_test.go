@@ -17,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -73,6 +72,8 @@ func kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh bool) string {
 		"deploy/authors",
 		"--debug",
 		"--sync", fmt.Sprintf("%s:%s", dir, remoteDir),
+		"-c", "authors",
+		"--target-image", "ghcr.io/kubenetworks/authors:latest",
 	}
 	if isServiceMesh {
 		args = append(args, "--headers", "env=test")
@@ -95,41 +96,32 @@ func kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh bool) string {
 		t.Fatal("expect at least one pod")
 	}
 
-	checkContent(t, list.Items[0].Name, fmt.Sprintf("%s/%s", remoteDir, name))
-	remoteBinary := "/app/main"
-	localBinary := filepath.Join(dir, "main")
-	cpBinaryToPod(ctx, t, localBinary, list.Items[0].Name, config.ContainerSidecarSyncthing, remoteBinary)
-	go execBinary(ctx, t, list.Items[0].Name, remoteBinary)
+	remotePath := fmt.Sprintf("%s/%s", remoteDir, name)
+	containerName := "authors"
+	checkContent(t, list.Items[0].Name, containerName, remotePath)
+	go execServer(ctx, t, list.Items[0].Name, containerName, remotePath)
 
+	endpoint := fmt.Sprintf("http://%s:%v/health", list.Items[0].Status.PodIP, 9080)
+	healthChecker(t, endpoint, nil, remoteSyncPod)
 	app := "authors"
 	ip, err := getPodIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
+	endpoint = fmt.Sprintf("http://%s:%v/health", ip, 9080)
 	return endpoint
 }
 
-func cpBinaryToPod(ctx context.Context, t *testing.T, local string, podName, containerName string, remote string) {
-	cmd := exec.CommandContext(ctx, "kubectl", "cp", local, fmt.Sprintf("%s:%s", podName, remote), "-c", containerName)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func execBinary(ctx context.Context, t *testing.T, podName string, remoteDir string) {
+func execServer(ctx context.Context, t *testing.T, podName string, containerName string, remoteDir string) {
 	for ctx.Err() == nil {
 		output, err := util.Shell(
 			ctx,
 			clientset,
 			restconfig,
 			podName,
-			config.ContainerSidecarSyncthing,
+			containerName,
 			namespace,
-			[]string{remoteDir},
+			[]string{"go", "run", remoteDir},
 		)
 		if err != nil {
 			t.Log(err, output)
@@ -147,7 +139,7 @@ func kubevpnSyncWithServiceMesh(t *testing.T) {
 	healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
 }
 
-func checkContent(t *testing.T, podName string, remotePath string) {
+func checkContent(t *testing.T, podName string, containerName string, remotePath string) {
 	err := retry.OnError(
 		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 120},
 		func(err error) bool { return err != nil },
@@ -157,7 +149,7 @@ func checkContent(t *testing.T, podName string, remotePath string) {
 				clientset,
 				restconfig,
 				podName,
-				config.ContainerSidecarSyncthing,
+				containerName,
 				namespace,
 				[]string{"cat", remotePath},
 			)
@@ -196,13 +188,6 @@ func writeTempFile(t *testing.T) string {
 		t.Fatal(err)
 	}
 	err = temp.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("go", "build", "-o", filepath.Join(subDir, "main"), file)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
