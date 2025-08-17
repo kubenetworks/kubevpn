@@ -37,9 +37,11 @@ var (
 )
 
 const (
-	local     = `{"status": "Reviews is healthy on local pc"}`
-	local8080 = `{"status": "Reviews is healthy on local pc 8080"}`
-	remote    = `{"status": "Reviews is healthy"}`
+	local            = `{"status": "Reviews is healthy on local pc"}`
+	local8080        = `{"status": "Reviews is healthy on local pc 8080"}`
+	remote           = `{"status": "Reviews is healthy"}`
+	remoteSyncOrigin = `{"status": "Authors is healthy"}`
+	remoteSyncPod    = `{"status": "Authors is healthy in pod"}`
 )
 
 func TestFunctions(t *testing.T) {
@@ -113,8 +115,18 @@ func TestFunctions(t *testing.T) {
 	t.Run("kubevpnQuit", kubevpnQuit)
 
 	// 9) test mode sync
-	t.Run("kubevpnSync", kubevpnSync)
-	t.Run("kubevpnSyncStatus", checkSyncStatus)
+	t.Run("kubevpnSyncWithFullProxy", kubevpnSyncWithFullProxy)
+	t.Run("kubevpnSyncWithFullProxyStatus", checkSyncWithFullProxyStatus)
+	t.Run("kubevpnSyncWithServiceMesh", kubevpnSyncWithServiceMesh)
+	t.Run("kubevpnSyncWithServiceMeshStatus", checkSyncWithServiceMeshStatus)
+	t.Run("kubevpnQuit", kubevpnQuit)
+
+	// 10) test mode run
+	t.Run("resetDeployAuthors", resetDeployAuthors)
+	t.Run("kubevpnRunWithFullProxy", kubevpnRunWithFullProxy)
+	t.Run("kubevpnRunWithFullProxyStatus", checkRunWithFullProxyStatus)
+	t.Run("kubevpnRunWithServiceMesh", kubevpnRunWithServiceMesh)
+	t.Run("kubevpnRunWithServiceMeshStatus", checkRunWithServiceMeshStatus)
 }
 
 func commonTest(t *testing.T) {
