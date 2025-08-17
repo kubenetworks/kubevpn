@@ -117,7 +117,11 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	}
 	logger.Infof("Sync workloads...")
 	options.SetContext(sshCtx)
-	err = options.DoSync(plog.WithLogger(sshCtx, logger), []byte(req.KubeconfigBytes), req.Image)
+	newKubeconfigBytes, err := options.ConvertApiServerToNodeIP(resp.Context(), []byte(req.KubeconfigBytes))
+	if err != nil {
+		return err
+	}
+	err = options.DoSync(plog.WithLogger(sshCtx, logger), newKubeconfigBytes, req.Image)
 	if err != nil {
 		plog.G(context.Background()).Errorf("Sync workloads failed: %v", err)
 		return err

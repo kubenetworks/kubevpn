@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 	libconfig "github.com/syncthing/syncthing/lib/config"
 	"github.com/syncthing/syncthing/lib/netutil"
 	v1 "k8s.io/api/core/v1"
@@ -499,4 +502,37 @@ func (d *SyncOptions) GetFactory() cmdutil.Factory {
 
 func (d *SyncOptions) GetSyncthingGUIAddr() string {
 	return d.syncthingGUIAddr
+}
+
+func (d *SyncOptions) ConvertApiServerToNodeIP(ctx context.Context, kubeconfigBytes []byte) ([]byte, error) {
+	list, err := d.clientset.CoreV1().Pods(d.Namespace).List(ctx, metav1.ListOptions{Limit: 100})
+	if err != nil {
+		return nil, err
+	}
+	var result string
+	for _, item := range list.Items {
+		result, err = util.Shell(ctx, d.clientset, d.config, item.Name, "", d.Namespace, []string{"env"})
+		if err == nil {
+			break
+		}
+	}
+	parse, err := godotenv.Parse(strings.NewReader(result))
+	if err != nil {
+		return nil, err
+	}
+
+	host := parse["KUBERNETES_SERVICE_HOST"]
+	port := parse["KUBERNETES_SERVICE_PORT"]
+
+	addrPort, err := netip.ParseAddrPort(net.JoinHostPort(host, port))
+	if err != nil {
+		return nil, err
+	}
+
+	var newKubeconfigBytes []byte
+	newKubeconfigBytes, _, err = util.ModifyAPIServer(ctx, kubeconfigBytes, addrPort)
+	if err != nil {
+		return nil, err
+	}
+	return newKubeconfigBytes, nil
 }

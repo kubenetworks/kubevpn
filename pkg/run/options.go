@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/calmh/incontainer"
 	typescontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
 	"github.com/google/uuid"
@@ -65,7 +66,7 @@ func (option *Options) Main(ctx context.Context, sshConfig *pkgssh.SshConfig, co
 	mode := typescontainer.NetworkMode(option.ContainerOptions.netMode.NetworkMode())
 	if mode.IsContainer() {
 		plog.G(ctx).Infof("Network mode container is %s", mode.ConnectedContainer())
-	} else if mode.IsDefault() && util.RunningInContainer() {
+	} else if mode.IsDefault() && incontainer.Detect() {
 		hostname, err := os.Hostname()
 		if err != nil {
 			return err

@@ -3,12 +3,10 @@ package ssh
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/netip"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,11 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	gossh "golang.org/x/crypto/ssh"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/tools/clientcmd/api"
-	"k8s.io/client-go/tools/clientcmd/api/latest"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -165,77 +159,6 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 		}
 		kubeconfigBytes = bytes.TrimSpace(stdout)
 	}
-	var clientConfig clientcmd.ClientConfig
-	clientConfig, err = clientcmd.NewClientConfigFromBytes(kubeconfigBytes)
-	if err != nil {
-		return
-	}
-	var rawConfig api.Config
-	rawConfig, err = clientConfig.RawConfig()
-	if err != nil {
-		plog.G(ctx).WithError(err).Errorf("failed to build config: %v", err)
-		return
-	}
-	if err = api.FlattenConfig(&rawConfig); err != nil {
-		plog.G(ctx).Errorf("failed to flatten config: %v", err)
-		return
-	}
-	if rawConfig.Contexts == nil {
-		err = errors.New("kubeconfig is invalid")
-		plog.G(ctx).Error("can not get contexts")
-		return
-	}
-	kubeContext := rawConfig.Contexts[rawConfig.CurrentContext]
-	if kubeContext == nil {
-		err = errors.New("kubeconfig is invalid")
-		plog.G(ctx).Errorf("can not find kubeconfig context %s", rawConfig.CurrentContext)
-		return
-	}
-	cluster := rawConfig.Clusters[kubeContext.Cluster]
-	if cluster == nil {
-		err = errors.New("kubeconfig is invalid")
-		plog.G(ctx).Errorf("can not find cluster %s", kubeContext.Cluster)
-		return
-	}
-	var u *url.URL
-	u, err = url.Parse(cluster.Server)
-	if err != nil {
-		plog.G(ctx).Errorf("failed to parse cluster url: %v", err)
-		return
-	}
-
-	serverHost := u.Hostname()
-	serverPort := u.Port()
-	if serverPort == "" {
-		if u.Scheme == "https" {
-			serverPort = "443"
-		} else if u.Scheme == "http" {
-			serverPort = "80"
-		} else {
-			// handle other schemes if necessary
-			err = errors.New("kubeconfig is invalid: wrong protocol")
-			plog.G(ctx).Error(err)
-			return
-		}
-	}
-	ips, err := net.LookupHost(serverHost)
-	if err != nil {
-		return
-	}
-
-	if len(ips) == 0 {
-		// handle error: no IP associated with the hostname
-		err = fmt.Errorf("kubeconfig: no IP associated with the hostname %s", serverHost)
-		plog.G(ctx).Error(err)
-		return
-	}
-
-	var remote netip.AddrPort
-	// Use the first IP address
-	remote, err = netip.ParseAddrPort(net.JoinHostPort(ips[0], serverPort))
-	if err != nil {
-		return
-	}
 	var port int
 	port, err = pkgutil.GetAvailableTCPPortOrDie()
 	if err != nil {
@@ -246,40 +169,28 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 	if err != nil {
 		return
 	}
+	var oldAPIServer netip.AddrPort
+	var newKubeconfigBytes []byte
+	newKubeconfigBytes, oldAPIServer, err = pkgutil.ModifyAPIServer(ctx, kubeconfigBytes, local)
+	if err != nil {
+		return
+	}
 
 	if print {
 		plog.G(ctx).Infof("Waiting jump to bastion host...")
-		plog.G(ctx).Infof("Jump ssh bastion host to apiserver: %s", cluster.Server)
+		plog.G(ctx).Infof("Jump ssh bastion host to apiserver: %s", oldAPIServer.String())
 	} else {
 		plog.G(ctx).Debugf("Waiting jump to bastion host...")
-		plog.G(ctx).Debugf("Jump ssh bastion host to apiserver: %s", cluster.Server)
+		plog.G(ctx).Debugf("Jump ssh bastion host to apiserver: %s", oldAPIServer.String())
 	}
-	err = PortMapUntil(ctx, conf, remote, local)
+
+	err = PortMapUntil(ctx, conf, oldAPIServer, local)
 	if err != nil {
 		plog.G(ctx).Errorf("SSH port map error: %v", err)
 		return
 	}
 
-	rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].Server = fmt.Sprintf("%s://%s", u.Scheme, local.String())
-	rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].TLSServerName = serverHost
-	// To Do: add cli option to skip tls verify
-	// rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].CertificateAuthorityData = nil
-	// rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].InsecureSkipTLSVerify = true
-	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: latest.Version, Kind: "Config"})
-
-	var convertedObj runtime.Object
-	convertedObj, err = latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
-	if err != nil {
-		plog.G(ctx).Errorf("failed to build config: %v", err)
-		return
-	}
-	var marshal []byte
-	marshal, err = json.Marshal(convertedObj)
-	if err != nil {
-		plog.G(ctx).Errorf("failed to marshal config: %v", err)
-		return
-	}
-	path, err = pkgutil.ConvertToTempKubeconfigFile(marshal, GenKubeconfigTempPath(conf, kubeconfigBytes))
+	path, err = pkgutil.ConvertToTempKubeconfigFile(newKubeconfigBytes, GenKubeconfigTempPath(conf, kubeconfigBytes))
 	if err != nil {
 		plog.G(ctx).Errorf("failed to write kubeconfig: %v", err)
 		return
