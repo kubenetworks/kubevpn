@@ -191,6 +191,7 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 func Shell(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Config, podName, containerName, ns string, cmd []string) (string, error) {
 	stdin, _, _ := term.StdStreams()
 	buf := bytes.NewBuffer(nil)
+	errBuf := bytes.NewBuffer(nil)
 	options := exec.ExecOptions{
 		StreamOptions: exec.StreamOptions{
 			Namespace:     ns,
@@ -199,7 +200,7 @@ func Shell(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Co
 			Stdin:         false,
 			TTY:           false,
 			Quiet:         true,
-			IOStreams:     genericiooptions.IOStreams{In: stdin, Out: buf, ErrOut: io.Discard},
+			IOStreams:     genericiooptions.IOStreams{In: stdin, Out: buf, ErrOut: errBuf},
 		},
 		Command:   cmd,
 		Executor:  &exec.DefaultRemoteExecutor{},
@@ -207,7 +208,7 @@ func Shell(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Co
 		Config:    config,
 	}
 	if err := options.Run(); err != nil {
-		return "", err
+		return errBuf.String(), err
 	}
 	return strings.TrimRight(buf.String(), "\n"), nil
 }

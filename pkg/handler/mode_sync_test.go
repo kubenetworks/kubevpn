@@ -55,70 +55,35 @@ func health(w http.ResponseWriter, r *http.Request) {
 }`
 
 func kubevpnSyncWithFullProxy(t *testing.T) {
-	path := writeTempFile(t)
-	name := filepath.Base(path)
-	dir := filepath.Dir(path)
-	remoteDir := "/app/test"
-	cmd := exec.Command("kubevpn", "sync", "deploy/authors", "--debug", "--sync", fmt.Sprintf("%s:%s", dir, remoteDir))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	defer cancelFunc()
 
-	list, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("origin-workload", "authors").String(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list.Items) == 0 {
-		t.Fatal("expect at least one pod")
-	}
-
-	checkContent(t, list.Items[0].Name, fmt.Sprintf("%s/%s", remoteDir, name))
-	go func() {
-		_, err = util.Shell(
-			ctx,
-			clientset,
-			restconfig,
-			list.Items[0].Name,
-			config.ContainerSidecarSyncthing,
-			namespace,
-			[]string{"go", "run", fmt.Sprintf("%s/%s", remoteDir, name)},
-		)
-		if err != nil {
-			t.Log(err.Error())
-		}
-	}()
-
-	app := "authors"
-	ip, err := getPodIP(app)
-	if err != nil {
-		t.Fatal(err)
-	}
-	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
+	endpoint := kubevpnSync(t, ctx, false)
 	healthChecker(t, endpoint, nil, remoteSyncPod)
 	healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
 }
 
-func kubevpnSyncWithServiceMesh(t *testing.T) {
+func kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh bool) string {
 	path := writeTempFile(t)
 	name := filepath.Base(path)
 	dir := filepath.Dir(path)
 	remoteDir := "/app/test"
-	cmd := exec.Command("kubevpn", "sync", "deploy/authors", "--sync", fmt.Sprintf("%s:%s", dir, remoteDir), "--headers", "env=test", "--debug")
+
+	args := []string{"sync",
+		"deploy/authors",
+		"--debug",
+		"--sync", fmt.Sprintf("%s:%s", dir, remoteDir),
+	}
+	if isServiceMesh {
+		args = append(args, "--headers", "env=test")
+	}
+	cmd := exec.Command("kubevpn", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancelFunc := context.WithCancel(context.Background())
-	defer cancelFunc()
 
 	list, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("origin-workload", "authors").String(),
@@ -131,20 +96,10 @@ func kubevpnSyncWithServiceMesh(t *testing.T) {
 	}
 
 	checkContent(t, list.Items[0].Name, fmt.Sprintf("%s/%s", remoteDir, name))
-	go func() {
-		_, err = util.Shell(
-			ctx,
-			clientset,
-			restconfig,
-			list.Items[0].Name,
-			config.ContainerSidecarSyncthing,
-			namespace,
-			[]string{"go", "run", fmt.Sprintf("%s/%s", remoteDir, name)},
-		)
-		if err != nil {
-			t.Log(err.Error())
-		}
-	}()
+	remoteBinary := "/app/main"
+	localBinary := filepath.Join(dir, "main")
+	cpBinaryToPod(ctx, t, localBinary, list.Items[0].Name, config.ContainerSidecarSyncthing, remoteBinary)
+	go execBinary(ctx, t, list.Items[0].Name, remoteBinary)
 
 	app := "authors"
 	ip, err := getPodIP(app)
@@ -152,6 +107,42 @@ func kubevpnSyncWithServiceMesh(t *testing.T) {
 		t.Fatal(err)
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
+	return endpoint
+}
+
+func cpBinaryToPod(ctx context.Context, t *testing.T, local string, podName, containerName string, remote string) {
+	cmd := exec.CommandContext(ctx, "kubectl", "cp", local, fmt.Sprintf("%s:%s", podName, remote), "-c", containerName)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func execBinary(ctx context.Context, t *testing.T, podName string, remoteDir string) {
+	for ctx.Err() == nil {
+		output, err := util.Shell(
+			ctx,
+			clientset,
+			restconfig,
+			podName,
+			config.ContainerSidecarSyncthing,
+			namespace,
+			[]string{remoteDir},
+		)
+		if err != nil {
+			t.Log(err, output)
+		}
+		time.Sleep(time.Second * 1)
+	}
+}
+
+func kubevpnSyncWithServiceMesh(t *testing.T) {
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
+
+	endpoint := kubevpnSync(t, ctx, true)
 	healthChecker(t, endpoint, nil, remoteSyncOrigin)
 	healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
 }
@@ -161,7 +152,15 @@ func checkContent(t *testing.T, podName string, remotePath string) {
 		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 120},
 		func(err error) bool { return err != nil },
 		func() error {
-			shell, err := util.Shell(context.Background(), clientset, restconfig, podName, config.ContainerSidecarSyncthing, namespace, []string{"cat", remotePath})
+			shell, err := util.Shell(
+				context.Background(),
+				clientset,
+				restconfig,
+				podName,
+				config.ContainerSidecarSyncthing,
+				namespace,
+				[]string{"cat", remotePath},
+			)
 			if err != nil {
 				return err
 			}
@@ -176,7 +175,7 @@ func checkContent(t *testing.T, podName string, remotePath string) {
 	}
 }
 
-func TestName(t *testing.T) {
+func TestCompile(t *testing.T) {
 	writeTempFile(t)
 }
 
@@ -200,6 +199,13 @@ func writeTempFile(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cmd := exec.Command("go", "build", "-o", filepath.Join(subDir, "main"), file)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return temp.Name()
 }
 
@@ -211,7 +217,7 @@ func checkSyncWithFullProxyStatus(t *testing.T) {
 	}
 
 	expect := status{List: []*connection{{
-		Namespace: "kubevpn",
+		Namespace: namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
 			Namespace: namespace,
@@ -242,7 +248,8 @@ func checkSyncWithFullProxyStatus(t *testing.T) {
 
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
-		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+		marshalB, _ := json.Marshal(statuses)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(marshalB))
 	}
 	cmd = exec.Command("kubevpn", "unsync", expect.List[0].SyncList[0].RuleList[0].DstWorkload)
 	cmd.Stdout = os.Stdout
@@ -261,7 +268,7 @@ func checkSyncWithServiceMeshStatus(t *testing.T) {
 	}
 
 	expect := status{List: []*connection{{
-		Namespace: "kubevpn",
+		Namespace: namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
 			Namespace: namespace,
@@ -292,7 +299,8 @@ func checkSyncWithServiceMeshStatus(t *testing.T) {
 
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
-		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+		marshalB, _ := json.Marshal(statuses)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(marshalB))
 	}
 	cmd = exec.Command("kubevpn", "unsync", expect.List[0].SyncList[0].RuleList[0].DstWorkload)
 	cmd.Stdout = os.Stdout

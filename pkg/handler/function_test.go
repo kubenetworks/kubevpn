@@ -116,8 +116,10 @@ func TestFunctions(t *testing.T) {
 
 	// 9) test mode sync
 	t.Run("kubevpnSyncWithFullProxy", kubevpnSyncWithFullProxy)
+	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
 	t.Run("kubevpnSyncWithFullProxyStatus", checkSyncWithFullProxyStatus)
 	t.Run("kubevpnSyncWithServiceMesh", kubevpnSyncWithServiceMesh)
+	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
 	t.Run("kubevpnSyncWithServiceMeshStatus", checkSyncWithServiceMeshStatus)
 	t.Run("kubevpnQuit", kubevpnQuit)
 
