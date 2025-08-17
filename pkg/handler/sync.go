@@ -286,7 +286,7 @@ func genSyncthingContainer(remoteDir string, syncDataDirName string, image strin
 		},
 		Resources: v1.ResourceRequirements{
 			Requests: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("500m"),
+				v1.ResourceCPU:    resource.MustParse("200m"),
 				v1.ResourceMemory: resource.MustParse("512Mi"),
 			},
 			Limits: map[v1.ResourceName]resource.Quantity{
@@ -332,11 +332,11 @@ func genVPNContainer(workload string, namespace string, image string, args []str
 		Env: []v1.EnvVar{},
 		Resources: v1.ResourceRequirements{
 			Requests: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("1000m"),
-				v1.ResourceMemory: resource.MustParse("1024Mi"),
+				v1.ResourceCPU:    resource.MustParse("200m"),
+				v1.ResourceMemory: resource.MustParse("512Mi"),
 			},
 			Limits: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("2000m"),
+				v1.ResourceCPU:    resource.MustParse("1000m"),
 				v1.ResourceMemory: resource.MustParse("2048Mi"),
 			},
 		},
