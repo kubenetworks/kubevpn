@@ -111,6 +111,10 @@ func TestFunctions(t *testing.T) {
 	t.Run("centerCheckProxyWithServiceMeshAndGvisorStatus", centerCheckProxyWithServiceMeshAndGvisorStatus)
 	t.Run("kubevpnLeaveService", kubevpnLeaveService)
 	t.Run("kubevpnQuit", kubevpnQuit)
+
+	// 9) test mode sync
+	t.Run("kubevpnSync", kubevpnSync)
+	t.Run("kubevpnSyncStatus", checkSyncStatus)
 }
 
 func commonTest(t *testing.T) {
@@ -563,17 +567,26 @@ type status struct {
 type connection struct {
 	Namespace string
 	Status    string
-	ProxyList []*proxy
+	ProxyList []*proxyItem
+	SyncList  []*syncItem
 }
-type proxy struct {
+type proxyItem struct {
 	Namespace string
 	Workload  string
-	RuleList  []*rule
+	RuleList  []*proxyRule
 }
-type rule struct {
+type proxyRule struct {
 	Headers       map[string]string
 	CurrentDevice bool
 	PortMap       map[int32]int32
+}
+type syncItem struct {
+	Namespace string
+	Workload  string
+	RuleList  []*syncRule
+}
+type syncRule struct {
+	DstWorkload string
 }
 
 func checkProxyStatus(t *testing.T) {
@@ -586,10 +599,10 @@ func checkProxyStatus(t *testing.T) {
 	expect := status{List: []*connection{{
 		Namespace: namespace,
 		Status:    "connected",
-		ProxyList: []*proxy{{
+		ProxyList: []*proxyItem{{
 			Namespace: namespace,
 			Workload:  "deployments.apps/reviews",
-			RuleList: []*rule{{
+			RuleList: []*proxyRule{{
 				Headers:       nil,
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080},
@@ -617,10 +630,10 @@ func centerCheckProxyStatus(t *testing.T) {
 	expect := status{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
-		ProxyList: []*proxy{{
+		ProxyList: []*proxyItem{{
 			Namespace: "default",
 			Workload:  "deployments.apps/reviews",
-			RuleList: []*rule{{
+			RuleList: []*proxyRule{{
 				Headers:       nil,
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080},
@@ -648,10 +661,10 @@ func checkProxyWithServiceMeshStatus(t *testing.T) {
 	expect := status{List: []*connection{{
 		Namespace: namespace,
 		Status:    "connected",
-		ProxyList: []*proxy{{
+		ProxyList: []*proxyItem{{
 			Namespace: namespace,
 			Workload:  "deployments.apps/reviews",
-			RuleList: []*rule{{
+			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080},
@@ -679,10 +692,10 @@ func centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 	expect := status{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
-		ProxyList: []*proxy{{
+		ProxyList: []*proxyItem{{
 			Namespace: "default",
 			Workload:  "deployments.apps/reviews",
-			RuleList: []*rule{{
+			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080},
@@ -710,10 +723,10 @@ func checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	expect := status{List: []*connection{{
 		Namespace: namespace,
 		Status:    "connected",
-		ProxyList: []*proxy{{
+		ProxyList: []*proxyItem{{
 			Namespace: namespace,
 			Workload:  "services/reviews",
-			RuleList: []*rule{{
+			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080},
@@ -748,10 +761,10 @@ func centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	expect := status{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
-		ProxyList: []*proxy{{
+		ProxyList: []*proxyItem{{
 			Namespace: "default",
 			Workload:  "services/reviews",
-			RuleList: []*rule{{
+			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 8080},
