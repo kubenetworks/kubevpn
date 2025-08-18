@@ -50,6 +50,8 @@ func kubevpnRunWithFullProxy(t *testing.T) {
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
 	healthChecker(t, endpoint, nil, remoteSyncPod)
 	healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
+
+	t.Run("kubevpnRunWithFullProxyStatus", checkRunWithFullProxyStatus)
 }
 
 func kubevpnRunWithServiceMesh(t *testing.T) {
@@ -84,6 +86,8 @@ func kubevpnRunWithServiceMesh(t *testing.T) {
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
 	healthChecker(t, endpoint, nil, remoteSyncOrigin)
 	healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
+
+	t.Run("kubevpnRunWithServiceMeshStatus", checkRunWithServiceMeshStatus)
 }
 
 func checkRunWithFullProxyStatus(t *testing.T) {

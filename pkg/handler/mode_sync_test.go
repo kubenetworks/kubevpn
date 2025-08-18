@@ -242,6 +242,31 @@ func checkSyncWithFullProxyStatus(t *testing.T) {
 	}
 }
 
+func checkUnSyncWithFullProxyStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err, string(output))
+	}
+
+	var statuses status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
+		t.Fatal("expect List[0].SyncList[0].RuleList[0] not found", string(output))
+	}
+
+	cmd = exec.Command("kubevpn", "unsync", statuses.List[0].SyncList[0].RuleList[0].DstWorkload)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func checkSyncWithServiceMeshStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
@@ -285,6 +310,31 @@ func checkSyncWithServiceMeshStatus(t *testing.T) {
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(marshalB))
 	}
 	cmd = exec.Command("kubevpn", "unsync", expect.List[0].SyncList[0].RuleList[0].DstWorkload)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func checkUnSyncWithServiceMeshStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err, string(output))
+	}
+
+	var statuses status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
+		t.Fatal("expect List[0].SyncList[0].RuleList[0] not found", string(output))
+	}
+
+	cmd = exec.Command("kubevpn", "unsync", statuses.List[0].SyncList[0].RuleList[0].DstWorkload)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
