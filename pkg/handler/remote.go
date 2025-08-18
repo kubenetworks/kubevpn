@@ -143,7 +143,11 @@ func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, nam
 		return err
 	}
 
-	return waitPodReady(ctx, deploy, clientset.CoreV1().Pods(namespace))
+	_, selector, err := polymorphichelpers.SelectorsForObject(deploy)
+	if err != nil {
+		return err
+	}
+	return WaitPodReady(ctx, clientset.CoreV1().Pods(namespace), selector.String())
 }
 
 func genServiceAccount(namespace string) *v1.ServiceAccount {
@@ -426,11 +430,7 @@ func genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullS
 	return deploy
 }
 
-func waitPodReady(ctx context.Context, deploy *appsv1.Deployment, clientset corev1.PodInterface) error {
-	_, selector, err := polymorphichelpers.SelectorsForObject(deploy)
-	if err != nil {
-		return err
-	}
+func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelector string) error {
 	var isPodReady bool
 	var lastMessage string
 	ctx2, cancelFunc := context.WithTimeout(ctx, time.Minute*60)
@@ -438,10 +438,10 @@ func waitPodReady(ctx context.Context, deploy *appsv1.Deployment, clientset core
 	plog.G(ctx).Infoln()
 	wait.UntilWithContext(ctx2, func(ctx context.Context) {
 		podList, err := clientset.List(ctx2, metav1.ListOptions{
-			LabelSelector: selector.String(),
+			LabelSelector: labelSelector,
 		})
 		if err != nil {
-			plog.G(ctx).Errorf("Failed to list pods for %s: %v", deploy.Name, err)
+			plog.G(ctx).Errorf("Failed to list pods for %s: %v", labelSelector, err)
 			return
 		}
 
@@ -479,8 +479,8 @@ func waitPodReady(ctx context.Context, deploy *appsv1.Deployment, clientset core
 	}, time.Second*3)
 
 	if !isPodReady {
-		plog.G(ctx).Errorf("Wait pod %s to be ready timeout", deploy.Name)
-		return errors.New(fmt.Sprintf("wait pod %s to be ready timeout", deploy.Name))
+		plog.G(ctx).Errorf("Wait pod %s to be ready timeout", labelSelector)
+		return errors.New(fmt.Sprintf("wait pod %s to be ready timeout", labelSelector))
 	}
 
 	return nil

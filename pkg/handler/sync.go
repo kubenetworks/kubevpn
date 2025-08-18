@@ -257,7 +257,7 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 		plog.G(ctx).Infof("Create sync resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
 		plog.G(ctx).Infof("Wait for sync resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
 		plog.G(ctx).Infoln()
-		err = util.WaitPodToBeReady(ctx, d.clientset.CoreV1().Pods(d.Namespace), metav1.LabelSelector{MatchLabels: labelsMap})
+		err = WaitPodReady(ctx, d.clientset.CoreV1().Pods(d.Namespace), fields.SelectorFromSet(labelsMap).String())
 		if err != nil {
 			return err
 		}

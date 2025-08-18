@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
@@ -86,22 +85,20 @@ func kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh bool) string {
 		t.Fatal(err)
 	}
 
-	list, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fields.OneTermEqualSelector("origin-workload", "authors").String(),
-	})
+	list, err := util.GetRunningPodList(ctx, clientset, namespace, fields.OneTermEqualSelector("origin-workload", "authors").String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Items) == 0 {
+	if len(list) == 0 {
 		t.Fatal("expect at least one pod")
 	}
 
 	remotePath := fmt.Sprintf("%s/%s", remoteDir, name)
 	containerName := "authors"
-	checkContent(t, list.Items[0].Name, containerName, remotePath)
-	go execServer(ctx, t, list.Items[0].Name, containerName, remotePath)
+	checkContent(t, list[0].Name, containerName, remotePath)
+	go execServer(ctx, t, list[0].Name, containerName, remotePath)
 
-	endpoint := fmt.Sprintf("http://%s:%v/health", list.Items[0].Status.PodIP, 9080)
+	endpoint := fmt.Sprintf("http://%s:%v/health", list[0].Status.PodIP, 9080)
 	healthChecker(t, endpoint, nil, remoteSyncPod)
 	app := "authors"
 	ip, err := getPodIP(app)
@@ -215,7 +212,7 @@ func checkSyncWithFullProxyStatus(t *testing.T) {
 		}},
 		SyncList: []*syncItem{{
 			Namespace: namespace,
-			Workload:  "deploy/authors",
+			Workload:  "deployments/authors",
 			RuleList:  []*syncRule{{}},
 		}},
 	}}}
@@ -266,7 +263,7 @@ func checkSyncWithServiceMeshStatus(t *testing.T) {
 		}},
 		SyncList: []*syncItem{{
 			Namespace: namespace,
-			Workload:  "deploy/authors",
+			Workload:  "deployments/authors",
 			RuleList:  []*syncRule{{}},
 		}},
 	}}}

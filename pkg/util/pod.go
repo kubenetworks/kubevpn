@@ -213,54 +213,6 @@ func Shell(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Co
 	return strings.TrimRight(buf.String(), "\n"), nil
 }
 
-func WaitPodToBeReady(ctx context.Context, podInterface v12.PodInterface, selector v1.LabelSelector) error {
-	watchStream, err := podInterface.Watch(ctx, v1.ListOptions{
-		LabelSelector: fields.SelectorFromSet(selector.MatchLabels).String(),
-	})
-	if err != nil {
-		return err
-	}
-	defer watchStream.Stop()
-	var last string
-	ticker := time.NewTicker(time.Minute * 60)
-	defer ticker.Stop()
-	for {
-		select {
-		case e, ok := <-watchStream.ResultChan():
-			if !ok {
-				return fmt.Errorf("can not wait pod to be ready because of watch chan has closed")
-			}
-			if podT, ok := e.Object.(*corev1.Pod); ok {
-				if podT.DeletionTimestamp != nil {
-					continue
-				}
-				var sb = bytes.NewBuffer(nil)
-				sb.WriteString(fmt.Sprintf("Pod %s is %s...\n", podT.Name, podT.Status.Phase))
-				PrintStatus(podT, sb)
-
-				if last != sb.String() {
-					plog.G(ctx).Infof(sb.String())
-				}
-				last = sb.String()
-				if podutils.IsPodReady(podT) && func() bool {
-					for _, status := range podT.Status.ContainerStatuses {
-						if !status.Ready {
-							return false
-						}
-					}
-					return true
-				}() {
-					return nil
-				}
-			}
-		case <-ticker.C:
-			return errors.New(fmt.Sprintf("wait pod to be ready timeout"))
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-}
-
 func AllContainerIsRunning(pod *corev1.Pod) bool {
 	isReady := podutils.IsPodReady(pod)
 	if !isReady {
