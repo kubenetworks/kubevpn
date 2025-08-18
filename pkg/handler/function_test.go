@@ -118,11 +118,11 @@ func TestFunctions(t *testing.T) {
 	t.Run("kubevpnSyncWithFullProxy", kubevpnSyncWithFullProxy)
 	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
 	t.Run("kubevpnSyncWithFullProxyStatus", checkSyncWithFullProxyStatus)
-	t.Run("kubevpnUnSyncWithFullProxyStatus", checkUnSyncWithFullProxyStatus)
+	t.Run("kubevpnUnSync", kubevpnUnSync)
 	t.Run("kubevpnSyncWithServiceMesh", kubevpnSyncWithServiceMesh)
 	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
 	t.Run("kubevpnSyncWithServiceMeshStatus", checkSyncWithServiceMeshStatus)
-	t.Run("kubevpnUnSyncWithServiceMeshStatus", checkUnSyncWithServiceMeshStatus)
+	t.Run("kubevpnUnSync", kubevpnUnSync)
 	t.Run("kubevpnQuit", kubevpnQuit)
 
 	// 10) test mode run
