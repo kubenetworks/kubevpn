@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -15,9 +16,11 @@ import (
 
 func resetDeployAuthors(t *testing.T) {
 	cmd := exec.Command("kubevpn", "reset", "deploy/authors")
-	output, err := cmd.CombinedOutput()
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
 	if err != nil {
-		t.Fatalf("error resetting deploy/authors: %s", string(output))
+		t.Fatalf("error resetting deploy/authors: %v", err)
 	}
 }
 
