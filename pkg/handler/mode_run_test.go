@@ -14,6 +14,18 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+func deleteDeployForSaveResource(t *testing.T) {
+	for _, s := range []string{"deploy/productpage", "deploy/ratings", "deploy/details"} {
+		cmd := exec.Command("kubectl", "delete", s, "--force")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err := cmd.Run()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func resetDeployAuthors(t *testing.T) {
 	cmd := exec.Command("kubevpn", "reset", "deploy/authors")
 	cmd.Stdout = os.Stdout
