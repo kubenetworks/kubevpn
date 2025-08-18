@@ -215,7 +215,7 @@ func checkSyncWithFullProxyStatus(t *testing.T) {
 		}},
 		SyncList: []*syncItem{{
 			Namespace: namespace,
-			Workload:  "deployments/authors",
+			Workload:  "deploy/authors",
 			RuleList:  []*syncRule{{}},
 		}},
 	}}}
@@ -266,7 +266,7 @@ func checkSyncWithServiceMeshStatus(t *testing.T) {
 		}},
 		SyncList: []*syncItem{{
 			Namespace: namespace,
-			Workload:  "deployments/authors",
+			Workload:  "deploy/authors",
 			RuleList:  []*syncRule{{}},
 		}},
 	}}}
