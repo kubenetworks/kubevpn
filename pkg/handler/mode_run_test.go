@@ -14,7 +14,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func deleteDeployForSaveResource(t *testing.T) {
+func (u *ut) deleteDeployForSaveResource(t *testing.T) {
 	for _, s := range []string{"deploy/productpage", "deploy/ratings", "deploy/details"} {
 		cmd := exec.Command("kubectl", "delete", s, "--force")
 		cmd.Stdout = os.Stdout
@@ -26,7 +26,7 @@ func deleteDeployForSaveResource(t *testing.T) {
 	}
 }
 
-func resetDeployAuthors(t *testing.T) {
+func (u *ut) resetDeployAuthors(t *testing.T) {
 	cmd := exec.Command("kubevpn", "reset", "deploy/authors")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -36,8 +36,8 @@ func resetDeployAuthors(t *testing.T) {
 	}
 }
 
-func kubevpnRunWithFullProxy(t *testing.T) {
-	path := writeTempFile(t)
+func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
+	path := u.writeTempFile(t)
 	name := filepath.Base(path)
 	dir := filepath.Dir(path)
 	remoteDir := "/app/test"
@@ -58,19 +58,19 @@ func kubevpnRunWithFullProxy(t *testing.T) {
 		t.Fatal(err, stdout, stderr)
 	}
 	app := "authors"
-	ip, err := getPodIP(app)
+	ip, err := u.getPodIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	healthChecker(t, endpoint, nil, remoteSyncPod)
-	healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
+	u.healthChecker(t, endpoint, nil, remoteSyncPod)
+	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
 
-	t.Run("kubevpnRunWithFullProxyStatus", checkRunWithFullProxyStatus)
+	t.Run("kubevpnRunWithFullProxyStatus", u.checkRunWithFullProxyStatus)
 }
 
-func kubevpnRunWithServiceMesh(t *testing.T) {
-	path := writeTempFile(t)
+func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
+	path := u.writeTempFile(t)
 	name := filepath.Base(path)
 	dir := filepath.Dir(path)
 	remoteDir := "/app/test"
@@ -94,18 +94,18 @@ func kubevpnRunWithServiceMesh(t *testing.T) {
 	}
 
 	app := "authors"
-	ip, err := getPodIP(app)
+	ip, err := u.getPodIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	healthChecker(t, endpoint, nil, remoteSyncOrigin)
-	healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
+	u.healthChecker(t, endpoint, nil, remoteSyncOrigin)
+	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
 
-	t.Run("kubevpnRunWithServiceMeshStatus", checkRunWithServiceMeshStatus)
+	t.Run("kubevpnRunWithServiceMeshStatus", u.checkRunWithServiceMeshStatus)
 }
 
-func checkRunWithFullProxyStatus(t *testing.T) {
+func (u *ut) checkRunWithFullProxyStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -137,7 +137,7 @@ func checkRunWithFullProxyStatus(t *testing.T) {
 	}
 }
 
-func checkRunWithServiceMeshStatus(t *testing.T) {
+func (u *ut) checkRunWithServiceMeshStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {

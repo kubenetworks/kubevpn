@@ -27,7 +27,7 @@ import (
 	"net/http"
 )
 
-func main() {
+func (u *ut)main() {
 	http.HandleFunc("/health", health)
 
 	log.Println("Start listening http port 9080 ...")
@@ -36,7 +36,7 @@ func main() {
 	}
 }
 
-func health(w http.ResponseWriter, r *http.Request) {
+func (u *ut)health(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -52,17 +52,17 @@ func health(w http.ResponseWriter, r *http.Request) {
 	w.Write(resp)
 }`
 
-func kubevpnSyncWithFullProxy(t *testing.T) {
+func (u *ut) kubevpnSyncWithFullProxy(t *testing.T) {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	defer cancelFunc()
 
-	endpoint := kubevpnSync(t, ctx, false)
-	healthChecker(t, endpoint, nil, remoteSyncPod)
-	healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
+	endpoint := u.kubevpnSync(t, ctx, false)
+	u.healthChecker(t, endpoint, nil, remoteSyncPod)
+	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
 }
 
-func kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh bool) string {
-	path := writeTempFile(t)
+func (u *ut) kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh bool) string {
+	path := u.writeTempFile(t)
 	name := filepath.Base(path)
 	dir := filepath.Dir(path)
 	remoteDir := "/app/test"
@@ -95,13 +95,13 @@ func kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh bool) string {
 
 	remotePath := fmt.Sprintf("%s/%s", remoteDir, name)
 	containerName := "authors"
-	checkContent(t, list[0].Name, containerName, remotePath)
-	go execServer(ctx, t, list[0].Name, containerName, remotePath)
+	u.checkContent(t, list[0].Name, containerName, remotePath)
+	go u.execServer(ctx, t, list[0].Name, containerName, remotePath)
 
 	endpoint := fmt.Sprintf("http://%s:%v/health", list[0].Status.PodIP, 9080)
-	healthChecker(t, endpoint, nil, remoteSyncPod)
+	u.healthChecker(t, endpoint, nil, remoteSyncPod)
 	app := "authors"
-	ip, err := getPodIP(app)
+	ip, err := u.getPodIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh bool) string {
 	return endpoint
 }
 
-func execServer(ctx context.Context, t *testing.T, podName string, containerName string, remoteDir string) {
+func (u *ut) execServer(ctx context.Context, t *testing.T, podName string, containerName string, remoteDir string) {
 	for ctx.Err() == nil {
 		output, err := util.Shell(
 			ctx,
@@ -127,16 +127,16 @@ func execServer(ctx context.Context, t *testing.T, podName string, containerName
 	}
 }
 
-func kubevpnSyncWithServiceMesh(t *testing.T) {
+func (u *ut) kubevpnSyncWithServiceMesh(t *testing.T) {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	defer cancelFunc()
 
-	endpoint := kubevpnSync(t, ctx, true)
-	healthChecker(t, endpoint, nil, remoteSyncOrigin)
-	healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
+	endpoint := u.kubevpnSync(t, ctx, true)
+	u.healthChecker(t, endpoint, nil, remoteSyncOrigin)
+	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
 }
 
-func checkContent(t *testing.T, podName string, containerName string, remotePath string) {
+func (u *ut) checkContent(t *testing.T, podName string, containerName string, remotePath string) {
 	err := retry.OnError(
 		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 120},
 		func(err error) bool { return err != nil },
@@ -164,11 +164,11 @@ func checkContent(t *testing.T, podName string, containerName string, remotePath
 	}
 }
 
-func TestCompile(t *testing.T) {
-	writeTempFile(t)
+func (u *ut) TestCompile(t *testing.T) {
+	u.writeTempFile(t)
 }
 
-func writeTempFile(t *testing.T) string {
+func (u *ut) writeTempFile(t *testing.T) string {
 	tempDir := t.TempDir()
 	subDir := filepath.Join(tempDir, "code")
 	err := os.Mkdir(subDir, 0755)
@@ -191,7 +191,7 @@ func writeTempFile(t *testing.T) string {
 	return temp.Name()
 }
 
-func checkSyncWithFullProxyStatus(t *testing.T) {
+func (u *ut) checkSyncWithFullProxyStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -235,7 +235,7 @@ func checkSyncWithFullProxyStatus(t *testing.T) {
 	}
 }
 
-func kubevpnUnSync(t *testing.T) {
+func (u *ut) kubevpnUnSync(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -260,7 +260,7 @@ func kubevpnUnSync(t *testing.T) {
 	}
 }
 
-func checkSyncWithServiceMeshStatus(t *testing.T) {
+func (u *ut) checkSyncWithServiceMeshStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {

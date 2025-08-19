@@ -30,6 +30,12 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+type ut struct {
+	namespace  string
+	clientset  *kubernetes.Clientset
+	restconfig *rest.Config
+}
+
 var (
 	namespace  string
 	clientset  *kubernetes.Clientset
@@ -45,104 +51,105 @@ const (
 )
 
 func TestFunctions(t *testing.T) {
+	u := &ut{}
 	// 1) test connect
-	t.Run("init", Init)
-	t.Run("kubevpnConnect", kubevpnConnect)
-	t.Run("commonTest", commonTest)
-	t.Run("checkConnectStatus", checkConnectStatus)
+	t.Run("init", u.Init)
+	t.Run("kubevpnConnect", u.kubevpnConnect)
+	t.Run("commonTest", u.commonTest)
+	t.Run("checkConnectStatus", u.checkConnectStatus)
 
 	// 2) test proxy mode
-	t.Run("kubevpnProxy", kubevpnProxy)
-	t.Run("commonTest", commonTest)
-	t.Run("testUDP", testUDP)
-	t.Run("proxyServiceReviewsServiceIP", proxyServiceReviewsServiceIP)
-	t.Run("proxyServiceReviewsPodIP", proxyServiceReviewsPodIP)
-	t.Run("checkProxyStatus", checkProxyStatus)
+	t.Run("kubevpnProxy", u.kubevpnProxy)
+	t.Run("commonTest", u.commonTest)
+	t.Run("testUDP", u.testUDP)
+	t.Run("proxyServiceReviewsServiceIP", u.proxyServiceReviewsServiceIP)
+	t.Run("proxyServiceReviewsPodIP", u.proxyServiceReviewsPodIP)
+	t.Run("checkProxyStatus", u.checkProxyStatus)
 
 	// 3) test proxy mode with service mesh
-	t.Run("kubevpnLeave", kubevpnLeave)
-	t.Run("kubevpnProxyWithServiceMesh", kubevpnProxyWithServiceMesh)
-	t.Run("commonTest", commonTest)
-	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
-	t.Run("serviceMeshReviewsPodIP", serviceMeshReviewsPodIP)
-	t.Run("checkProxyWithServiceMeshStatus", checkProxyWithServiceMeshStatus)
+	t.Run("kubevpnLeave", u.kubevpnLeave)
+	t.Run("kubevpnProxyWithServiceMesh", u.kubevpnProxyWithServiceMesh)
+	t.Run("commonTest", u.commonTest)
+	t.Run("serviceMeshReviewsServiceIP", u.serviceMeshReviewsServiceIP)
+	t.Run("serviceMeshReviewsPodIP", u.serviceMeshReviewsPodIP)
+	t.Run("checkProxyWithServiceMeshStatus", u.checkProxyWithServiceMeshStatus)
 
 	// 4) test proxy mode with service mesh and gvisor
-	t.Run("kubevpnLeave", kubevpnLeave)
-	t.Run("kubevpnUninstall", kubevpnUninstall)
-	t.Run("kubevpnProxyWithServiceMeshAndGvisorMode", kubevpnProxyWithServiceMeshAndGvisorMode)
-	t.Run("commonTest", commonTest)
-	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
-	t.Run("checkProxyWithServiceMeshAndGvisorStatus", checkProxyWithServiceMeshAndGvisorStatus)
-	t.Run("kubevpnLeaveService", kubevpnLeaveService)
-	t.Run("kubevpnQuit", kubevpnQuit)
+	t.Run("kubevpnLeave", u.kubevpnLeave)
+	t.Run("kubevpnUninstall", u.kubevpnUninstall)
+	t.Run("kubevpnProxyWithServiceMeshAndGvisorMode", u.kubevpnProxyWithServiceMeshAndGvisorMode)
+	t.Run("commonTest", u.commonTest)
+	t.Run("serviceMeshReviewsServiceIP", u.serviceMeshReviewsServiceIP)
+	t.Run("checkProxyWithServiceMeshAndGvisorStatus", u.checkProxyWithServiceMeshAndGvisorStatus)
+	t.Run("kubevpnLeaveService", u.kubevpnLeaveService)
+	t.Run("kubevpnQuit", u.kubevpnQuit)
 
 	// 5) install centrally in ns test -- connect mode
-	t.Run("centerKubevpnUninstall", kubevpnUninstall)
-	t.Run("centerKubevpnInstallInNsKubevpn", kubevpnConnectToNsKubevpn)
-	t.Run("centerKubevpnConnect", kubevpnConnect)
-	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
-	t.Run("centerCheckConnectStatus", centerCheckConnectStatus)
-	t.Run("centerCommonTest", commonTest)
+	t.Run("centerKubevpnUninstall", u.kubevpnUninstall)
+	t.Run("centerKubevpnInstallInNsKubevpn", u.kubevpnConnectToNsKubevpn)
+	t.Run("centerKubevpnConnect", u.kubevpnConnect)
+	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
+	t.Run("centerCheckConnectStatus", u.centerCheckConnectStatus)
+	t.Run("centerCommonTest", u.commonTest)
 
 	// 6) install centrally in ns test -- proxy mode
-	t.Run("centerKubevpnProxy", kubevpnProxy)
-	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
-	t.Run("centerCommonTest", commonTest)
-	t.Run("centerTestUDP", testUDP)
-	t.Run("centerProxyServiceReviewsServiceIP", proxyServiceReviewsServiceIP)
-	t.Run("centerProxyServiceReviewsPodIP", proxyServiceReviewsPodIP)
-	t.Run("centerCheckProxyStatus", centerCheckProxyStatus)
+	t.Run("centerKubevpnProxy", u.kubevpnProxy)
+	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
+	t.Run("centerCommonTest", u.commonTest)
+	t.Run("centerTestUDP", u.testUDP)
+	t.Run("centerProxyServiceReviewsServiceIP", u.proxyServiceReviewsServiceIP)
+	t.Run("centerProxyServiceReviewsPodIP", u.proxyServiceReviewsPodIP)
+	t.Run("centerCheckProxyStatus", u.centerCheckProxyStatus)
 
 	// 7) install centrally in ns test -- proxy mode with service mesh
-	t.Run("kubevpnLeave", kubevpnLeave)
-	t.Run("kubevpnProxyWithServiceMesh", kubevpnProxyWithServiceMesh)
-	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
-	t.Run("commonTest", commonTest)
-	t.Run("serviceMeshReviewsServiceIP", serviceMeshReviewsServiceIP)
-	t.Run("serviceMeshReviewsPodIP", serviceMeshReviewsPodIP)
-	t.Run("centerCheckProxyWithServiceMeshStatus", centerCheckProxyWithServiceMeshStatus)
+	t.Run("kubevpnLeave", u.kubevpnLeave)
+	t.Run("kubevpnProxyWithServiceMesh", u.kubevpnProxyWithServiceMesh)
+	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
+	t.Run("commonTest", u.commonTest)
+	t.Run("serviceMeshReviewsServiceIP", u.serviceMeshReviewsServiceIP)
+	t.Run("serviceMeshReviewsPodIP", u.serviceMeshReviewsPodIP)
+	t.Run("centerCheckProxyWithServiceMeshStatus", u.centerCheckProxyWithServiceMeshStatus)
 
 	// 8) install centrally in ns test -- proxy mode with service mesh and gvisor
-	t.Run("kubevpnQuit", kubevpnQuit)
-	t.Run("kubevpnProxyWithServiceMeshAndK8sServicePortMap", kubevpnProxyWithServiceMeshAndK8sServicePortMap)
-	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
-	t.Run("commonTest", commonTest)
-	t.Run("serviceMeshReviewsServiceIPPortMap", serviceMeshReviewsServiceIPPortMap)
-	t.Run("kubevpnLeave", kubevpnLeave)
-	t.Run("centerCheckProxyWithServiceMeshAndGvisorStatus", centerCheckProxyWithServiceMeshAndGvisorStatus)
-	t.Run("kubevpnLeaveService", kubevpnLeaveService)
-	t.Run("kubevpnQuit", kubevpnQuit)
+	t.Run("kubevpnQuit", u.kubevpnQuit)
+	t.Run("kubevpnProxyWithServiceMeshAndK8sServicePortMap", u.kubevpnProxyWithServiceMeshAndK8sServicePortMap)
+	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
+	t.Run("commonTest", u.commonTest)
+	t.Run("serviceMeshReviewsServiceIPPortMap", u.serviceMeshReviewsServiceIPPortMap)
+	t.Run("kubevpnLeave", u.kubevpnLeave)
+	t.Run("centerCheckProxyWithServiceMeshAndGvisorStatus", u.centerCheckProxyWithServiceMeshAndGvisorStatus)
+	t.Run("kubevpnLeaveService", u.kubevpnLeaveService)
+	t.Run("kubevpnQuit", u.kubevpnQuit)
 
 	// 9) test mode sync
-	t.Run("deleteDeployForSaveResource", deleteDeployForSaveResource)
-	t.Run("kubevpnSyncWithFullProxy", kubevpnSyncWithFullProxy)
-	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
-	t.Run("kubevpnSyncWithFullProxyStatus", checkSyncWithFullProxyStatus)
-	t.Run("kubevpnUnSync", kubevpnUnSync)
-	t.Run("kubevpnSyncWithServiceMesh", kubevpnSyncWithServiceMesh)
-	t.Run("checkServiceShouldNotInNsDefault", checkServiceShouldNotInNsDefault)
-	t.Run("kubevpnSyncWithServiceMeshStatus", checkSyncWithServiceMeshStatus)
-	t.Run("kubevpnUnSync", kubevpnUnSync)
-	t.Run("kubevpnQuit", kubevpnQuit)
+	t.Run("deleteDeployForSaveResource", u.deleteDeployForSaveResource)
+	t.Run("kubevpnSyncWithFullProxy", u.kubevpnSyncWithFullProxy)
+	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
+	t.Run("kubevpnSyncWithFullProxyStatus", u.checkSyncWithFullProxyStatus)
+	t.Run("kubevpnUnSync", u.kubevpnUnSync)
+	t.Run("kubevpnSyncWithServiceMesh", u.kubevpnSyncWithServiceMesh)
+	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
+	t.Run("kubevpnSyncWithServiceMeshStatus", u.checkSyncWithServiceMeshStatus)
+	t.Run("kubevpnUnSync", u.kubevpnUnSync)
+	t.Run("kubevpnQuit", u.kubevpnQuit)
 
 	// 10) test mode run
-	t.Run("resetDeployAuthors", resetDeployAuthors)
-	t.Run("kubevpnRunWithFullProxy", kubevpnRunWithFullProxy)
-	t.Run("kubevpnRunWithServiceMesh", kubevpnRunWithServiceMesh)
+	t.Run("resetDeployAuthors", u.resetDeployAuthors)
+	t.Run("kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
+	t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
 }
 
-func commonTest(t *testing.T) {
+func (u *ut) commonTest(t *testing.T) {
 	// 1) test domain access
-	t.Run("kubevpnStatus", kubevpnStatus)
-	t.Run("pingPodIP", pingPodIP)
-	t.Run("healthCheckPodDetails", healthCheckPodDetails)
-	t.Run("healthCheckServiceDetails", healthCheckServiceDetails)
-	t.Run("shortDomainDetails", shortDomainDetails)
-	t.Run("fullDomainDetails", fullDomainDetails)
+	t.Run("kubevpnStatus", u.kubevpnStatus)
+	t.Run("pingPodIP", u.pingPodIP)
+	t.Run("healthCheckPodDetails", u.healthCheckPodDetails)
+	t.Run("healthCheckServiceDetails", u.healthCheckServiceDetails)
+	t.Run("shortDomainDetails", u.shortDomainDetails)
+	t.Run("fullDomainDetails", u.fullDomainDetails)
 }
 
-func pingPodIP(t *testing.T) {
+func (u *ut) pingPodIP(t *testing.T) {
 	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -168,23 +175,23 @@ func pingPodIP(t *testing.T) {
 				}
 			}
 			t.Errorf("Failed to ping IP: %s of pod: %s", item.Status.PodIP, item.Name)
-			kubectl(t)
+			u.kubectl(t)
 		}()
 	}
 	wg.Wait()
 }
 
-func healthCheckPodDetails(t *testing.T) {
+func (u *ut) healthCheckPodDetails(t *testing.T) {
 	var app = "details"
-	ip, err := getPodIP(app)
+	ip, err := u.getPodIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	healthChecker(t, endpoint, nil, "")
+	u.healthChecker(t, endpoint, nil, "")
 }
 
-func healthChecker(t *testing.T, endpoint string, header map[string]string, keyword string) {
+func (u *ut) healthChecker(t *testing.T, endpoint string, header map[string]string, keyword string) {
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -227,28 +234,28 @@ func healthChecker(t *testing.T, endpoint string, header map[string]string, keyw
 		},
 	)
 	if err != nil {
-		kubectl(t)
+		u.kubectl(t)
 		t.Fatal(err)
 	}
 }
 
-func healthCheckServiceDetails(t *testing.T) {
+func (u *ut) healthCheckServiceDetails(t *testing.T) {
 	var app = "details"
-	ip, err := getServiceIP(app)
+	ip, err := u.getServiceIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	healthChecker(t, endpoint, nil, "")
+	u.healthChecker(t, endpoint, nil, "")
 }
 
-func shortDomainDetails(t *testing.T) {
+func (u *ut) shortDomainDetails(t *testing.T) {
 	var app = "details"
 	endpoint := fmt.Sprintf("http://%s:%v/health", app, 9080)
-	healthChecker(t, endpoint, nil, "")
+	u.healthChecker(t, endpoint, nil, "")
 }
 
-func fullDomainDetails(t *testing.T) {
+func (u *ut) fullDomainDetails(t *testing.T) {
 	var app = "details"
 	domains := []string{
 		fmt.Sprintf("%s.%s.svc.cluster.local", app, namespace),
@@ -258,44 +265,44 @@ func fullDomainDetails(t *testing.T) {
 
 	for _, domain := range domains {
 		endpoint := fmt.Sprintf("http://%s:%v/health", domain, 9080)
-		healthChecker(t, endpoint, nil, "")
+		u.healthChecker(t, endpoint, nil, "")
 	}
 }
 
-func serviceMeshReviewsPodIP(t *testing.T) {
+func (u *ut) serviceMeshReviewsPodIP(t *testing.T) {
 	app := "reviews"
-	ip, err := getPodIP(app)
+	ip, err := u.getPodIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	healthChecker(t, endpoint, nil, remote)
-	healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+	u.healthChecker(t, endpoint, nil, remote)
+	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
-func serviceMeshReviewsServiceIP(t *testing.T) {
+func (u *ut) serviceMeshReviewsServiceIP(t *testing.T) {
 	app := "reviews"
-	ip, err := getServiceIP(app)
+	ip, err := u.getServiceIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	healthChecker(t, endpoint, nil, remote)
-	healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+	u.healthChecker(t, endpoint, nil, remote)
+	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
-func serviceMeshReviewsServiceIPPortMap(t *testing.T) {
+func (u *ut) serviceMeshReviewsServiceIPPortMap(t *testing.T) {
 	app := "reviews"
-	ip, err := getServiceIP(app)
+	ip, err := u.getServiceIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	healthChecker(t, endpoint, nil, remote)
-	healthChecker(t, endpoint, map[string]string{"env": "test"}, local8080)
+	u.healthChecker(t, endpoint, nil, remote)
+	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local8080)
 }
 
-func getServiceIP(app string) (string, error) {
+func (u *ut) getServiceIP(app string) (string, error) {
 	serviceList, err := clientset.CoreV1().Services(namespace).List(context.Background(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
@@ -312,18 +319,18 @@ func getServiceIP(app string) (string, error) {
 	return "", fmt.Errorf("failed to found service ip for service %s", app)
 }
 
-func proxyServiceReviewsPodIP(t *testing.T) {
+func (u *ut) proxyServiceReviewsPodIP(t *testing.T) {
 	app := "reviews"
-	ip, err := getPodIP(app)
+	ip, err := u.getPodIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	healthChecker(t, endpoint, nil, local)
-	healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+	u.healthChecker(t, endpoint, nil, local)
+	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
-func getPodIP(app string) (string, error) {
+func (u *ut) getPodIP(app string) (string, error) {
 	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
@@ -339,24 +346,24 @@ func getPodIP(app string) (string, error) {
 	return "", fmt.Errorf("failed to found pod ip for service %s", app)
 }
 
-func proxyServiceReviewsServiceIP(t *testing.T) {
+func (u *ut) proxyServiceReviewsServiceIP(t *testing.T) {
 	app := "reviews"
-	ip, err := getServiceIP(app)
+	ip, err := u.getServiceIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	healthChecker(t, endpoint, nil, local)
-	healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+	u.healthChecker(t, endpoint, nil, local)
+	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
-func testUDP(t *testing.T) {
+func (u *ut) testUDP(t *testing.T) {
 	app := "reviews"
 	port, err := util.GetAvailableUDPPortOrDie()
 	if err != nil {
 		t.Fatal(err)
 	}
-	go udpServer(t, port)
+	go u.udpServer(t, port)
 
 	var ip string
 	err = retry.OnError(
@@ -365,19 +372,19 @@ func testUDP(t *testing.T) {
 			return err != nil
 		},
 		func() error {
-			ip, err = getPodIP(app)
+			ip, err = u.getPodIP(app)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Logf("Dail udp to IP: %s", ip)
-			return udpClient(t, ip, port)
+			return u.udpClient(t, ip, port)
 		})
 	if err != nil {
 		t.Fatalf("Failed to access pod IP: %s, port: %v", ip, port)
 	}
 }
 
-func udpClient(t *testing.T, ip string, port int) error {
+func (u *ut) udpClient(t *testing.T, ip string, port int) error {
 	udpConn, err := net.DialUDP("udp4", nil, &net.UDPAddr{
 		IP:   net.ParseIP(ip),
 		Port: port,
@@ -409,7 +416,7 @@ func udpClient(t *testing.T, ip string, port int) error {
 	return nil
 }
 
-func udpServer(t *testing.T, port int) {
+func (u *ut) udpServer(t *testing.T, port int) {
 	// 创建监听
 	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
 		IP:   net.ParseIP("127.0.0.1"),
@@ -439,7 +446,7 @@ func udpServer(t *testing.T, port int) {
 	}
 }
 
-func kubevpnConnect(t *testing.T) {
+func (u *ut) kubevpnConnect(t *testing.T) {
 	cmd := exec.Command("kubevpn", "connect", "--debug")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -449,7 +456,7 @@ func kubevpnConnect(t *testing.T) {
 	}
 }
 
-func kubevpnConnectToNsKubevpn(t *testing.T) {
+func (u *ut) kubevpnConnectToNsKubevpn(t *testing.T) {
 	_, err := clientset.CoreV1().Namespaces().Create(context.Background(), &corev1.Namespace{
 		ObjectMeta: v1.ObjectMeta{
 			Name: "kubevpn",
@@ -470,7 +477,7 @@ func kubevpnConnectToNsKubevpn(t *testing.T) {
 	}
 }
 
-func kubevpnProxy(t *testing.T) {
+func (u *ut) kubevpnProxy(t *testing.T) {
 	cmd := exec.Command("kubevpn", "proxy", "deployments/reviews", "--debug")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -480,7 +487,7 @@ func kubevpnProxy(t *testing.T) {
 	}
 }
 
-func kubevpnProxyWithServiceMesh(t *testing.T) {
+func (u *ut) kubevpnProxyWithServiceMesh(t *testing.T) {
 	cmd := exec.Command("kubevpn", "proxy", "deployments/reviews", "--headers", "env=test", "--debug")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -490,7 +497,7 @@ func kubevpnProxyWithServiceMesh(t *testing.T) {
 	}
 }
 
-func kubevpnProxyWithServiceMeshAndGvisorMode(t *testing.T) {
+func (u *ut) kubevpnProxyWithServiceMeshAndGvisorMode(t *testing.T) {
 	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--debug")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -500,7 +507,7 @@ func kubevpnProxyWithServiceMeshAndGvisorMode(t *testing.T) {
 	}
 }
 
-func kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {
+func (u *ut) kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {
 	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--debug", "--portmap", "9080:8080")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -510,7 +517,7 @@ func kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {
 	}
 }
 
-func kubevpnLeave(t *testing.T) {
+func (u *ut) kubevpnLeave(t *testing.T) {
 	cmd := exec.Command("kubevpn", "leave", "deployments/reviews")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -520,7 +527,7 @@ func kubevpnLeave(t *testing.T) {
 	}
 }
 
-func kubevpnLeaveService(t *testing.T) {
+func (u *ut) kubevpnLeaveService(t *testing.T) {
 	cmd := exec.Command("kubevpn", "leave", "services/reviews")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -530,7 +537,7 @@ func kubevpnLeaveService(t *testing.T) {
 	}
 }
 
-func checkConnectStatus(t *testing.T) {
+func (u *ut) checkConnectStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -552,7 +559,7 @@ func checkConnectStatus(t *testing.T) {
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
 	}
 }
-func centerCheckConnectStatus(t *testing.T) {
+func (u *ut) centerCheckConnectStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -604,7 +611,7 @@ type syncRule struct {
 	DstWorkload string
 }
 
-func checkProxyStatus(t *testing.T) {
+func (u *ut) checkProxyStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -635,7 +642,7 @@ func checkProxyStatus(t *testing.T) {
 	}
 }
 
-func centerCheckProxyStatus(t *testing.T) {
+func (u *ut) centerCheckProxyStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -666,7 +673,7 @@ func centerCheckProxyStatus(t *testing.T) {
 	}
 }
 
-func checkProxyWithServiceMeshStatus(t *testing.T) {
+func (u *ut) checkProxyWithServiceMeshStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -697,7 +704,7 @@ func checkProxyWithServiceMeshStatus(t *testing.T) {
 	}
 }
 
-func centerCheckProxyWithServiceMeshStatus(t *testing.T) {
+func (u *ut) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -728,7 +735,7 @@ func centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 	}
 }
 
-func checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
+func (u *ut) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -766,7 +773,7 @@ func checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	}
 }
 
-func centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
+func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -804,7 +811,7 @@ func centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	}
 }
 
-func kubevpnUninstall(t *testing.T) {
+func (u *ut) kubevpnUninstall(t *testing.T) {
 	cmd := exec.Command("kubevpn", "uninstall", "kubevpn")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -814,7 +821,7 @@ func kubevpnUninstall(t *testing.T) {
 	}
 }
 
-func kubevpnStatus(t *testing.T) {
+func (u *ut) kubevpnStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -824,7 +831,7 @@ func kubevpnStatus(t *testing.T) {
 	}
 }
 
-func kubevpnQuit(t *testing.T) {
+func (u *ut) kubevpnQuit(t *testing.T) {
 	cmd := exec.Command("kubevpn", "quit")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -834,14 +841,14 @@ func kubevpnQuit(t *testing.T) {
 	}
 }
 
-func checkServiceShouldNotInNsDefault(t *testing.T) {
+func (u *ut) checkServiceShouldNotInNsDefault(t *testing.T) {
 	_, err := clientset.CoreV1().Services(namespace).Get(context.Background(), pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
 	if !k8serrors.IsNotFound(err) {
 		t.Fatal(err)
 	}
 }
 
-func kubectl(t *testing.T) {
+func (u *ut) kubectl(t *testing.T) {
 	cmdGetPod := exec.Command("kubectl", "get", "pods", "-o", "wide")
 	cmdDescribePod := exec.Command("kubectl", "describe", "pods")
 	cmdGetSvc := exec.Command("kubectl", "get", "services", "-o", "wide")
@@ -857,7 +864,7 @@ func kubectl(t *testing.T) {
 	}
 }
 
-func Init(t *testing.T) {
+func (u *ut) Init(t *testing.T) {
 	var err error
 
 	configFlags := genericclioptions.NewConfigFlags(true)
@@ -873,11 +880,11 @@ func Init(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	go startupHttpServer(t, "localhost:9080", local)
-	go startupHttpServer(t, "localhost:8080", local8080)
+	go u.startupHttpServer(t, "localhost:9080", local)
+	go u.startupHttpServer(t, "localhost:8080", local8080)
 }
 
-func startupHttpServer(t *testing.T, addr, str string) {
+func (u *ut) startupHttpServer(t *testing.T, addr, str string) {
 	var health = func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(str))
 	}
