@@ -12,10 +12,16 @@ import (
 	log "github.com/sirupsen/logrus"
 	glog "gvisor.dev/gvisor/pkg/log"
 	"k8s.io/utils/ptr"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 func InitLoggerForClient() {
-	L = GetLoggerForClient(int32(log.InfoLevel), os.Stdout)
+	if config.Debug {
+		L = GetLoggerForClient(int32(log.DebugLevel), os.Stdout)
+	} else {
+		L = GetLoggerForClient(int32(log.InfoLevel), os.Stdout)
+	}
 }
 
 func GetLoggerForClient(level int32, out io.Writer) *log.Logger {

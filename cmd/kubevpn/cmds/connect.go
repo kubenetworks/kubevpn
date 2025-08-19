@@ -36,12 +36,11 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		Short: i18n.T("Connect to kubernetes cluster network"),
 		Long: templates.LongDesc(i18n.T(`
 		Connect to kubernetes cluster network
-		
-		After connect to kubernetes cluster network, you can ping PodIP or
-		curl ServiceIP in local PC, it also supports k8s DNS resolve. 
-		Like: curl authors/authors.default/authors.default.svc/authors.default.svc.cluster.local.
-		So you can start up your application in local PC. depends on anything in
-		k8s cluster is ok, connect to them just like in k8s cluster.
+
+		Upon establishing a connection to the Kubernetes cluster network, you can directly access Pod IPs and Service IPs from your local machine. 
+        This includes capabilities such as ping Pod IPs or curl Service IPs. 
+		Full Kubernetes DNS resolution is supported, enabling access via standard naming conventions,
+		This allows you to run applications locally while seamlessly connecting to all resources within the Kubernetes cluster, as if operating inside the cluster itself.
 		`)),
 		Example: templates.Examples(i18n.T(`
 		# Connect to k8s cluster network
