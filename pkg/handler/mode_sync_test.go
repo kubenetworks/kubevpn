@@ -27,7 +27,7 @@ import (
 	"net/http"
 )
 
-func (u *ut)main() {
+func main() {
 	http.HandleFunc("/health", health)
 
 	log.Println("Start listening http port 9080 ...")
@@ -36,7 +36,7 @@ func (u *ut)main() {
 	}
 }
 
-func (u *ut)health(w http.ResponseWriter, r *http.Request) {
+func health(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
