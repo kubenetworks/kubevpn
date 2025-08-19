@@ -36,12 +36,6 @@ type ut struct {
 	restconfig *rest.Config
 }
 
-var (
-	namespace  string
-	clientset  *kubernetes.Clientset
-	restconfig *rest.Config
-)
-
 const (
 	local            = `{"status": "Reviews is healthy on local pc"}`
 	local8080        = `{"status": "Reviews is healthy on local pc 8080"}`
@@ -53,7 +47,7 @@ const (
 func TestFunctions(t *testing.T) {
 	u := &ut{}
 	// 1) test connect
-	t.Run("init", u.Init)
+	t.Run("init", u.init)
 	t.Run("kubevpnConnect", u.kubevpnConnect)
 	t.Run("commonTest", u.commonTest)
 	t.Run("checkConnectStatus", u.checkConnectStatus)
@@ -150,7 +144,7 @@ func (u *ut) commonTest(t *testing.T) {
 }
 
 func (u *ut) pingPodIP(t *testing.T) {
-	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{})
+	list, err := u.clientset.CoreV1().Pods(u.namespace).List(context.Background(), v1.ListOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,9 +252,9 @@ func (u *ut) shortDomainDetails(t *testing.T) {
 func (u *ut) fullDomainDetails(t *testing.T) {
 	var app = "details"
 	domains := []string{
-		fmt.Sprintf("%s.%s.svc.cluster.local", app, namespace),
-		fmt.Sprintf("%s.%s.svc", app, namespace),
-		fmt.Sprintf("%s.%s", app, namespace),
+		fmt.Sprintf("%s.%s.svc.cluster.local", app, u.namespace),
+		fmt.Sprintf("%s.%s.svc", app, u.namespace),
+		fmt.Sprintf("%s.%s", app, u.namespace),
 	}
 
 	for _, domain := range domains {
@@ -303,7 +297,7 @@ func (u *ut) serviceMeshReviewsServiceIPPortMap(t *testing.T) {
 }
 
 func (u *ut) getServiceIP(app string) (string, error) {
-	serviceList, err := clientset.CoreV1().Services(namespace).List(context.Background(), v1.ListOptions{
+	serviceList, err := u.clientset.CoreV1().Services(u.namespace).List(context.Background(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
 	if err != nil {
@@ -331,7 +325,7 @@ func (u *ut) proxyServiceReviewsPodIP(t *testing.T) {
 }
 
 func (u *ut) getPodIP(app string) (string, error) {
-	list, err := clientset.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{
+	list, err := u.clientset.CoreV1().Pods(u.namespace).List(context.Background(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
 	if err != nil {
@@ -457,7 +451,7 @@ func (u *ut) kubevpnConnect(t *testing.T) {
 }
 
 func (u *ut) kubevpnConnectToNsKubevpn(t *testing.T) {
-	_, err := clientset.CoreV1().Namespaces().Create(context.Background(), &corev1.Namespace{
+	_, err := u.clientset.CoreV1().Namespaces().Create(context.Background(), &corev1.Namespace{
 		ObjectMeta: v1.ObjectMeta{
 			Name: "kubevpn",
 		},
@@ -545,7 +539,7 @@ func (u *ut) checkConnectStatus(t *testing.T) {
 	}
 
 	expect := status{List: []*connection{{
-		Namespace: namespace,
+		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: nil,
 	}}}
@@ -619,10 +613,10 @@ func (u *ut) checkProxyStatus(t *testing.T) {
 	}
 
 	expect := status{List: []*connection{{
-		Namespace: namespace,
+		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
-			Namespace: namespace,
+			Namespace: u.namespace,
 			Workload:  "deployments.apps/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       nil,
@@ -681,10 +675,10 @@ func (u *ut) checkProxyWithServiceMeshStatus(t *testing.T) {
 	}
 
 	expect := status{List: []*connection{{
-		Namespace: namespace,
+		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
-			Namespace: namespace,
+			Namespace: u.namespace,
 			Workload:  "deployments.apps/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
@@ -743,10 +737,10 @@ func (u *ut) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	}
 
 	expect := status{List: []*connection{{
-		Namespace: namespace,
+		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
-			Namespace: namespace,
+			Namespace: u.namespace,
 			Workload:  "services/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
@@ -842,7 +836,7 @@ func (u *ut) kubevpnQuit(t *testing.T) {
 }
 
 func (u *ut) checkServiceShouldNotInNsDefault(t *testing.T) {
-	_, err := clientset.CoreV1().Services(namespace).Get(context.Background(), pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
+	_, err := u.clientset.CoreV1().Services(u.namespace).Get(context.Background(), pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
 	if !k8serrors.IsNotFound(err) {
 		t.Fatal(err)
 	}
@@ -864,19 +858,19 @@ func (u *ut) kubectl(t *testing.T) {
 	}
 }
 
-func (u *ut) Init(t *testing.T) {
+func (u *ut) init(t *testing.T) {
 	var err error
 
 	configFlags := genericclioptions.NewConfigFlags(true)
 	f := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(configFlags))
 
-	if restconfig, err = f.ToRESTConfig(); err != nil {
+	if u.restconfig, err = f.ToRESTConfig(); err != nil {
 		t.Fatal(err)
 	}
-	if clientset, err = kubernetes.NewForConfig(restconfig); err != nil {
+	if u.clientset, err = kubernetes.NewForConfig(u.restconfig); err != nil {
 		t.Fatal(err)
 	}
-	if namespace, _, err = f.ToRawKubeConfigLoader().Namespace(); err != nil {
+	if u.namespace, _, err = f.ToRawKubeConfigLoader().Namespace(); err != nil {
 		t.Fatal(err)
 	}
 

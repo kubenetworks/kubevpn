@@ -44,11 +44,14 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	defer cancelFunc()
 
+	localPort := 9090
+
 	cmd := exec.CommandContext(ctx, "kubevpn",
 		"run", "deploy/authors",
 		"-c", "authors",
 		"--debug",
 		"-v", fmt.Sprintf("%s:%s", dir, remoteDir),
+		"-p", fmt.Sprintf("%d:9080", localPort),
 		"--entrypoint", fmt.Sprintf("go run %s/%s", remoteDir, name),
 	)
 	stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
@@ -62,9 +65,13 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
+	endpoint := fmt.Sprintf("http://%s:%v/health", ip, localPort)
 	u.healthChecker(t, endpoint, nil, remoteSyncPod)
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
+
+	endpoint = fmt.Sprintf("http://%s:%v/health", ip, 9080)
+	u.healthChecker(t, endpoint, nil, local)
+	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 
 	t.Run("kubevpnRunWithFullProxyStatus", u.checkRunWithFullProxyStatus)
 }
@@ -78,12 +85,15 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	defer cancelFunc()
 
+	localPort := 9090
+
 	cmd := exec.CommandContext(ctx, "kubevpn",
 		"run", "deploy/authors",
 		"-c", "authors",
 		"--debug",
 		"--headers", "env=test",
 		"-v", fmt.Sprintf("%s:%s", dir, remoteDir),
+		"-p", fmt.Sprintf("%d:9080", localPort),
 		"--entrypoint", fmt.Sprintf("go run %s/%s", remoteDir, name),
 	)
 	stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
@@ -98,9 +108,12 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	u.healthChecker(t, endpoint, nil, remoteSyncOrigin)
+	endpoint := fmt.Sprintf("http://%s:%v/health", ip, localPort)
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
+
+	endpoint = fmt.Sprintf("http://%s:%v/health", ip, 9080)
+	u.healthChecker(t, endpoint, nil, remoteSyncOrigin)
+	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 
 	t.Run("kubevpnRunWithServiceMeshStatus", u.checkRunWithServiceMeshStatus)
 }
@@ -116,7 +129,7 @@ func (u *ut) checkRunWithFullProxyStatus(t *testing.T) {
 		Namespace: "kubevpn",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
-			Namespace: namespace,
+			Namespace: u.namespace,
 			Workload:  "deployments.apps/authors",
 			RuleList: []*proxyRule{{
 				Headers:       nil,
@@ -148,7 +161,7 @@ func (u *ut) checkRunWithServiceMeshStatus(t *testing.T) {
 		Namespace: "kubevpn",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
-			Namespace: namespace,
+			Namespace: u.namespace,
 			Workload:  "deployments.apps/authors",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},

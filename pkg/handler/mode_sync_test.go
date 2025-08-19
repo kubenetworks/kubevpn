@@ -85,7 +85,7 @@ func (u *ut) kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh bool) 
 		t.Fatal(err)
 	}
 
-	list, err := util.GetRunningPodList(ctx, clientset, namespace, fields.OneTermEqualSelector("origin-workload", "authors").String())
+	list, err := util.GetRunningPodList(ctx, u.clientset, u.namespace, fields.OneTermEqualSelector("origin-workload", "authors").String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,11 +113,11 @@ func (u *ut) execServer(ctx context.Context, t *testing.T, podName string, conta
 	for ctx.Err() == nil {
 		output, err := util.Shell(
 			ctx,
-			clientset,
-			restconfig,
+			u.clientset,
+			u.restconfig,
 			podName,
 			containerName,
-			namespace,
+			u.namespace,
 			[]string{"go", "run", remoteDir},
 		)
 		if err != nil {
@@ -143,11 +143,11 @@ func (u *ut) checkContent(t *testing.T, podName string, containerName string, re
 		func() error {
 			shell, err := util.Shell(
 				context.Background(),
-				clientset,
-				restconfig,
+				u.clientset,
+				u.restconfig,
 				podName,
 				containerName,
-				namespace,
+				u.namespace,
 				[]string{"cat", remotePath},
 			)
 			if err != nil {
@@ -199,10 +199,10 @@ func (u *ut) checkSyncWithFullProxyStatus(t *testing.T) {
 	}
 
 	expect := status{List: []*connection{{
-		Namespace: namespace,
+		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
-			Namespace: namespace,
+			Namespace: u.namespace,
 			Workload:  "deployments.apps/authors",
 			RuleList: []*proxyRule{{
 				Headers:       nil,
@@ -211,7 +211,7 @@ func (u *ut) checkSyncWithFullProxyStatus(t *testing.T) {
 			}},
 		}},
 		SyncList: []*syncItem{{
-			Namespace: namespace,
+			Namespace: u.namespace,
 			Workload:  "deploy/authors",
 			RuleList:  []*syncRule{{}},
 		}},
@@ -268,10 +268,10 @@ func (u *ut) checkSyncWithServiceMeshStatus(t *testing.T) {
 	}
 
 	expect := status{List: []*connection{{
-		Namespace: namespace,
+		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
-			Namespace: namespace,
+			Namespace: u.namespace,
 			Workload:  "deployments.apps/authors",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
@@ -280,7 +280,7 @@ func (u *ut) checkSyncWithServiceMeshStatus(t *testing.T) {
 			}},
 		}},
 		SyncList: []*syncItem{{
-			Namespace: namespace,
+			Namespace: u.namespace,
 			Workload:  "deploy/authors",
 			RuleList:  []*syncRule{{}},
 		}},
