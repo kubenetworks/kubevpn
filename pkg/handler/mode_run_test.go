@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -56,12 +57,29 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 		"--rm",
 		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
-	stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
-		return strings.Contains(log, "Start listening http port 9080 ...")
-	})
-	if err != nil {
-		t.Fatal(err, stdout, stderr)
-	}
+	done := make(chan any)
+	var once = &sync.Once{}
+	go func() {
+		stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
+			contains := strings.Contains(log, "Start listening http port 9080 ...")
+			if contains {
+				once.Do(func() {
+					close(done)
+				})
+			}
+			return contains
+		})
+		if err != nil {
+			select {
+			case <-done:
+				t.Log(err, stdout, stderr)
+			default:
+				t.Fatal(err, stdout, stderr)
+			}
+		}
+	}()
+	<-done
+
 	app := "authors"
 	ip, err := u.getPodIP(app)
 	if err != nil {
@@ -100,12 +118,28 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 		"--rm",
 		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
-	stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
-		return strings.Contains(log, "Start listening http port 9080 ...")
-	})
-	if err != nil {
-		t.Fatal(err, stdout, stderr)
-	}
+	done := make(chan any)
+	var once = &sync.Once{}
+	go func() {
+		stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
+			contains := strings.Contains(log, "Start listening http port 9080 ...")
+			if contains {
+				once.Do(func() {
+					close(done)
+				})
+			}
+			return contains
+		})
+		if err != nil {
+			select {
+			case <-done:
+				t.Log(err, stdout, stderr)
+			default:
+				t.Fatal(err, stdout, stderr)
+			}
+		}
+	}()
+	<-done
 
 	app := "authors"
 	ip, err := u.getPodIP(app)
