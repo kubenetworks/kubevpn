@@ -54,7 +54,7 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 		"-p", fmt.Sprintf("%d:9080", localPort),
 		"--tty=false", //https://github.com/actions/runner/issues/241
 		"--rm",
-		"--entrypoint", fmt.Sprintf("go run %s/%s", remoteDir, name),
+		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
 	stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
 		return strings.Contains(log, "Start listening http port 9080 ...")
@@ -98,7 +98,7 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 		"-p", fmt.Sprintf("%d:9080", localPort),
 		"--tty=false", //https://github.com/actions/runner/issues/241
 		"--rm",
-		"--entrypoint", fmt.Sprintf("go run %s/%s", remoteDir, name),
+		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
 	stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
 		return strings.Contains(log, "Start listening http port 9080 ...")
