@@ -100,11 +100,8 @@ func CmdRun(f cmdutil.Factory) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.Workload = args[0]
-			for i, arg := range args {
-				if arg == "--" && i != len(args)-1 {
-					options.ContainerOptions.Args = args[i+1:]
-					break
-				}
+			if len(args) > 1 {
+				options.ContainerOptions.Args = args[1:]
 			}
 
 			if err := options.InitClient(f); err != nil {
