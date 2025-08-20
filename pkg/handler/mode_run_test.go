@@ -94,6 +94,13 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 
 	t.Run("kubevpnRunWithFullProxyStatus", u.checkRunWithFullProxyStatus)
+
+	err = cmd.Process.Kill()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for cmd.ProcessState == nil {
+	}
 }
 
 func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
@@ -154,6 +161,13 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 
 	t.Run("kubevpnRunWithServiceMeshStatus", u.checkRunWithServiceMeshStatus)
+
+	err = cmd.Process.Kill()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for cmd.ProcessState == nil {
+	}
 }
 
 func (u *ut) checkRunWithFullProxyStatus(t *testing.T) {
@@ -164,7 +178,7 @@ func (u *ut) checkRunWithFullProxyStatus(t *testing.T) {
 	}
 
 	expect := status{List: []*connection{{
-		Namespace: "kubevpn",
+		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
 			Namespace: u.namespace,
@@ -184,7 +198,8 @@ func (u *ut) checkRunWithFullProxyStatus(t *testing.T) {
 
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
-		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+		marshalB, _ := json.Marshal(statuses)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(marshalB))
 	}
 }
 
@@ -196,7 +211,7 @@ func (u *ut) checkRunWithServiceMeshStatus(t *testing.T) {
 	}
 
 	expect := status{List: []*connection{{
-		Namespace: "kubevpn",
+		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
 			Namespace: u.namespace,
@@ -216,6 +231,7 @@ func (u *ut) checkRunWithServiceMeshStatus(t *testing.T) {
 
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
-		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
+		marshalB, _ := json.Marshal(statuses)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(marshalB))
 	}
 }
