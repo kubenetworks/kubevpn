@@ -131,6 +131,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("resetDeployAuthors", u.resetDeployAuthors)
 	t.Run("kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
 	t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
+	t.Run("kubevpnQuit", u.kubevpnQuit)
 }
 
 func (u *ut) commonTest(t *testing.T) {

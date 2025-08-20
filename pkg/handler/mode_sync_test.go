@@ -95,7 +95,7 @@ func (u *ut) kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh bool) 
 
 	remotePath := fmt.Sprintf("%s/%s", remoteDir, name)
 	containerName := "authors"
-	u.checkContent(t, list[0].Name, containerName, remotePath)
+	u.checkContent(ctx, t, list[0].Name, containerName, remotePath)
 	go u.execServer(ctx, t, list[0].Name, containerName, remotePath)
 
 	endpoint := fmt.Sprintf("http://%s:%v/health", list[0].Status.PodIP, 9080)
@@ -136,13 +136,13 @@ func (u *ut) kubevpnSyncWithServiceMesh(t *testing.T) {
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
 }
 
-func (u *ut) checkContent(t *testing.T, podName string, containerName string, remotePath string) {
+func (u *ut) checkContent(ctx context.Context, t *testing.T, podName string, containerName string, remotePath string) {
 	err := retry.OnError(
 		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 120},
 		func(err error) bool { return err != nil },
 		func() error {
 			shell, err := util.Shell(
-				context.Background(),
+				ctx,
 				u.clientset,
 				u.restconfig,
 				podName,
