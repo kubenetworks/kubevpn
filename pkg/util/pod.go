@@ -203,7 +203,7 @@ func Shell(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Co
 			IOStreams:     genericiooptions.IOStreams{In: stdin, Out: buf, ErrOut: errBuf},
 		},
 		Command:   cmd,
-		Executor:  &exec.DefaultRemoteExecutor{},
+		Executor:  &DefaultRemoteExecutor{Ctx: ctx},
 		PodClient: clientset.CoreV1(),
 		Config:    config,
 	}
