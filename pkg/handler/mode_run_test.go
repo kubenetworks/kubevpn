@@ -95,7 +95,7 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 
 	t.Run("kubevpnRunWithFullProxyStatus", u.checkRunWithFullProxyStatus)
 
-	err = cmd.Process.Kill()
+	err = cmd.Process.Signal(os.Interrupt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 
 	t.Run("kubevpnRunWithServiceMeshStatus", u.checkRunWithServiceMeshStatus)
 
-	err = cmd.Process.Kill()
+	err = cmd.Process.Signal(os.Interrupt)
 	if err != nil {
 		t.Fatal(err)
 	}
