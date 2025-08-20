@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -20,39 +19,41 @@ import (
 	"k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/yaml"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-var (
+type cidrUt struct {
 	namespace  string
 	clientset  *kubernetes.Clientset
 	restclient *rest.RESTClient
 	restconfig *rest.Config
 	f          util.Factory
-)
+}
 
-func before() {
+func (u *cidrUt) init() {
 	var err error
 	configFlags := genericclioptions.NewConfigFlags(true)
-	f = util.NewFactory(util.NewMatchVersionFlags(configFlags))
+	u.f = util.NewFactory(util.NewMatchVersionFlags(configFlags))
 
-	if restconfig, err = f.ToRESTConfig(); err != nil {
+	if u.restconfig, err = u.f.ToRESTConfig(); err != nil {
 		plog.G(context.Background()).Fatal(err)
 	}
-	if restclient, err = rest.RESTClientFor(restconfig); err != nil {
+	if u.restclient, err = rest.RESTClientFor(u.restconfig); err != nil {
 		plog.G(context.Background()).Fatal(err)
 	}
-	if clientset, err = kubernetes.NewForConfig(restconfig); err != nil {
+	if u.clientset, err = kubernetes.NewForConfig(u.restconfig); err != nil {
 		plog.G(context.Background()).Fatal(err)
 	}
-	if namespace, _, err = f.ToRawKubeConfigLoader().Namespace(); err != nil {
+	if u.namespace, _, err = u.f.ToRawKubeConfigLoader().Namespace(); err != nil {
 		plog.G(context.Background()).Fatal(err)
 	}
 }
 
 func TestByDumpClusterInfo(t *testing.T) {
-	before()
-	info, err := GetCIDRByDumpClusterInfo(context.Background(), clientset)
+	u := &cidrUt{}
+	u.init()
+	info, err := GetCIDRByDumpClusterInfo(context.Background(), u.clientset)
 	if err != nil {
 		t.Log(err.Error())
 	}
@@ -62,8 +63,9 @@ func TestByDumpClusterInfo(t *testing.T) {
 }
 
 func TestByCreateSvc(t *testing.T) {
-	before()
-	info, err := GetServiceCIDRByCreateService(context.Background(), clientset.CoreV1().Services("default"))
+	u := &cidrUt{}
+	u.init()
+	info, err := GetServiceCIDRByCreateService(context.Background(), u.clientset.CoreV1().Services("default"))
 	if err != nil {
 		t.Log(err.Error())
 	}
@@ -73,8 +75,9 @@ func TestByCreateSvc(t *testing.T) {
 }
 
 func TestElegant(t *testing.T) {
-	before()
-	elegant := GetCIDR(context.Background(), clientset, restconfig, namespace, config.Image)
+	u := &cidrUt{}
+	u.init()
+	elegant := GetCIDR(context.Background(), u.clientset, u.restconfig, u.namespace, config.Image)
 	for _, ipNet := range elegant {
 		t.Log(ipNet.String())
 	}
