@@ -149,12 +149,13 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 	<-done
 
 	app := "authors"
-	ip, err := u.getPodIP(app)
+	ip, err := u.getServiceIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := fmt.Sprintf("http://%s:%v/health", ip, localPort)
+	endpoint := fmt.Sprintf("http://%s:%v/health", "localhost", localPort)
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
+	u.healthChecker(t, endpoint, nil, remoteSyncPod)
 
 	endpoint = fmt.Sprintf("http://%s:%v/health", ip, 9080)
 	u.healthChecker(t, endpoint, nil, remoteSyncOrigin)
