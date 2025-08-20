@@ -101,7 +101,7 @@ func (u *ut) kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh bool) 
 	endpoint := fmt.Sprintf("http://%s:%v/health", list[0].Status.PodIP, 9080)
 	u.healthChecker(t, endpoint, nil, remoteSyncPod)
 	app := "authors"
-	ip, err := u.getPodIP(app)
+	ip, err := u.getServiceIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
