@@ -282,7 +282,7 @@ spec:
             periodSeconds: 10
           resources:
             requests:
-              cpu: "100m"
+              cpu: "200m"
               memory: "128Mi"
             limits:
               cpu: "500m"
@@ -294,7 +294,7 @@ spec:
             - containerPort: 80
           resources:
             requests:
-              cpu: "100m"
+              cpu: "200m"
               memory: "128Mi"
             limits:
               cpu: "500m"
