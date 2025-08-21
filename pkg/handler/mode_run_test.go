@@ -16,7 +16,7 @@ import (
 )
 
 func (u *ut) deleteDeployForSaveResource(t *testing.T) {
-	for _, s := range []string{"deploy/productpage", "deploy/ratings", "deploy/details"} {
+	for _, s := range []string{"deploy/productpage", "deploy/ratings"} {
 		cmd := exec.Command("kubectl", "delete", s, "--force")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -94,6 +94,7 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 
 	t.Run("kubevpnRunWithFullProxyStatus", u.checkRunWithFullProxyStatus)
+	t.Run("commonTest", u.commonTest)
 
 	err = cmd.Process.Signal(os.Interrupt)
 	if err != nil {
@@ -162,6 +163,7 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 
 	t.Run("kubevpnRunWithServiceMeshStatus", u.checkRunWithServiceMeshStatus)
+	t.Run("commonTest", u.commonTest)
 
 	err = cmd.Process.Signal(os.Interrupt)
 	if err != nil {

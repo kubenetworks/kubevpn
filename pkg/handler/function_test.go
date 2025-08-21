@@ -71,14 +71,31 @@ func TestFunctions(t *testing.T) {
 	// 4) test proxy mode with service mesh and gvisor
 	t.Run("kubevpnLeave", u.kubevpnLeave)
 	t.Run("kubevpnUninstall", u.kubevpnUninstall)
-	t.Run("kubevpnProxyWithServiceMeshAndGvisorMode", u.kubevpnProxyWithServiceMeshAndGvisorMode)
+	t.Run("kubevpnProxyWithServiceMeshAndFargateMode", u.kubevpnProxyWithServiceMeshAndFargateMode)
 	t.Run("commonTest", u.commonTest)
 	t.Run("serviceMeshReviewsServiceIP", u.serviceMeshReviewsServiceIP)
 	t.Run("checkProxyWithServiceMeshAndGvisorStatus", u.checkProxyWithServiceMeshAndGvisorStatus)
 	t.Run("kubevpnLeaveService", u.kubevpnLeaveService)
 	t.Run("kubevpnQuit", u.kubevpnQuit)
 
-	// 5) install centrally in ns test -- connect mode
+	// 5) test mode sync
+	t.Run("deleteDeployForSaveResource", u.deleteDeployForSaveResource)
+	t.Run("kubevpnSyncWithFullProxy", u.kubevpnSyncWithFullProxy)
+	t.Run("kubevpnSyncWithFullProxyStatus", u.checkSyncWithFullProxyStatus)
+	t.Run("commonTest", u.commonTest)
+	t.Run("kubevpnUnSync", u.kubevpnUnSync)
+	t.Run("kubevpnSyncWithServiceMesh", u.kubevpnSyncWithServiceMesh)
+	t.Run("kubevpnSyncWithServiceMeshStatus", u.checkSyncWithServiceMeshStatus)
+	t.Run("commonTest", u.commonTest)
+	t.Run("kubevpnUnSync", u.kubevpnUnSync)
+
+	// 6) test mode run
+	t.Run("resetDeployAuthors", u.resetDeployAuthors)
+	t.Run("kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
+	t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
+	t.Run("kubevpnQuit", u.kubevpnQuit)
+
+	// 7) install centrally in ns test -- connect mode
 	t.Run("centerKubevpnUninstall", u.kubevpnUninstall)
 	t.Run("centerKubevpnInstallInNsKubevpn", u.kubevpnConnectToNsKubevpn)
 	t.Run("centerKubevpnConnect", u.kubevpnConnect)
@@ -86,7 +103,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("centerCheckConnectStatus", u.centerCheckConnectStatus)
 	t.Run("centerCommonTest", u.commonTest)
 
-	// 6) install centrally in ns test -- proxy mode
+	// 8) install centrally in ns test -- proxy mode
 	t.Run("centerKubevpnProxy", u.kubevpnProxy)
 	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
 	t.Run("centerCommonTest", u.commonTest)
@@ -95,7 +112,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("centerProxyServiceReviewsPodIP", u.proxyServiceReviewsPodIP)
 	t.Run("centerCheckProxyStatus", u.centerCheckProxyStatus)
 
-	// 7) install centrally in ns test -- proxy mode with service mesh
+	// 9) install centrally in ns test -- proxy mode with service mesh
 	t.Run("kubevpnLeave", u.kubevpnLeave)
 	t.Run("kubevpnProxyWithServiceMesh", u.kubevpnProxyWithServiceMesh)
 	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
@@ -104,7 +121,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("serviceMeshReviewsPodIP", u.serviceMeshReviewsPodIP)
 	t.Run("centerCheckProxyWithServiceMeshStatus", u.centerCheckProxyWithServiceMeshStatus)
 
-	// 8) install centrally in ns test -- proxy mode with service mesh and gvisor
+	// 10) install centrally in ns test -- proxy mode with service mesh and gvisor
 	t.Run("kubevpnQuit", u.kubevpnQuit)
 	t.Run("kubevpnProxyWithServiceMeshAndK8sServicePortMap", u.kubevpnProxyWithServiceMeshAndK8sServicePortMap)
 	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
@@ -115,19 +132,20 @@ func TestFunctions(t *testing.T) {
 	t.Run("kubevpnLeaveService", u.kubevpnLeaveService)
 	t.Run("kubevpnQuit", u.kubevpnQuit)
 
-	// 9) test mode sync
-	t.Run("deleteDeployForSaveResource", u.deleteDeployForSaveResource)
+	// 11) test mode sync
 	t.Run("kubevpnSyncWithFullProxy", u.kubevpnSyncWithFullProxy)
 	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
 	t.Run("kubevpnSyncWithFullProxyStatus", u.checkSyncWithFullProxyStatus)
+	t.Run("commonTest", u.commonTest)
 	t.Run("kubevpnUnSync", u.kubevpnUnSync)
 	t.Run("kubevpnSyncWithServiceMesh", u.kubevpnSyncWithServiceMesh)
 	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
 	t.Run("kubevpnSyncWithServiceMeshStatus", u.checkSyncWithServiceMeshStatus)
+	t.Run("commonTest", u.commonTest)
 	t.Run("kubevpnUnSync", u.kubevpnUnSync)
 	t.Run("kubevpnQuit", u.kubevpnQuit)
 
-	// 10) test mode run
+	// 12) test mode run
 	t.Run("resetDeployAuthors", u.resetDeployAuthors)
 	t.Run("kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
 	t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
@@ -492,7 +510,7 @@ func (u *ut) kubevpnProxyWithServiceMesh(t *testing.T) {
 	}
 }
 
-func (u *ut) kubevpnProxyWithServiceMeshAndGvisorMode(t *testing.T) {
+func (u *ut) kubevpnProxyWithServiceMeshAndFargateMode(t *testing.T) {
 	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--debug")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
