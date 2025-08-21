@@ -170,11 +170,6 @@ func (u *ut) TestCompile(t *testing.T) {
 
 func (u *ut) writeTempFile(t *testing.T) string {
 	dir := t.TempDir()
-	// for github action macos maybe docker run -v
-	err := os.Chmod(dir, 0777)
-	if err != nil {
-		t.Fatal(err)
-	}
 	file := filepath.Join(dir, "main.go")
 	temp, err := os.Create(file)
 	if err != nil {
@@ -184,9 +179,9 @@ func (u *ut) writeTempFile(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = temp.Chmod(0777)
+	err = temp.Chmod(0755)
 	if err != nil {
-		t.Fatalf("Chmod: %v", err)
+		t.Fatal(err)
 	}
 	err = temp.Close()
 	if err != nil {
