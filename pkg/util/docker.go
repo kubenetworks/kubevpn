@@ -129,7 +129,7 @@ func WaitDockerContainerRunning(ctx context.Context, name string) error {
 		}
 		if inspect.State != nil && (inspect.State.Status == "exited" || inspect.State.Status == "dead" || inspect.State.Dead) {
 			err = errors.New(fmt.Sprintf("container status: %s", inspect.State.Status))
-			break
+			return err
 		}
 		if inspect.State != nil && inspect.State.Running {
 			break

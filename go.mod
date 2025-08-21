@@ -3,6 +3,7 @@ module github.com/wencaiwulue/kubevpn/v2
 go 1.23.2
 
 require (
+	github.com/calmh/incontainer v1.0.0
 	github.com/cilium/ipam v0.0.0-20230509084518-fd66eae7909b
 	github.com/containerd/containerd v1.7.27
 	github.com/containernetworking/cni v1.1.2
@@ -24,6 +25,7 @@ require (
 	github.com/hpcloud/tail v1.0.0
 	github.com/jcmturner/gofork v1.7.6
 	github.com/jcmturner/gokrb5/v8 v8.4.4
+	github.com/joho/godotenv v1.5.1
 	github.com/kevinburke/ssh_config v1.2.0
 	github.com/libp2p/go-netroute v0.2.1
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
@@ -88,7 +90,6 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.13.0 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
-	github.com/calmh/incontainer v1.0.0 // indirect
 	github.com/calmh/xdr v1.2.0 // indirect
 	github.com/ccding/go-stun v0.1.5 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect

@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 	libconfig "github.com/syncthing/syncthing/lib/config"
 	"github.com/syncthing/syncthing/lib/netutil"
 	v1 "k8s.io/api/core/v1"
@@ -254,7 +257,7 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 		plog.G(ctx).Infof("Create sync resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
 		plog.G(ctx).Infof("Wait for sync resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
 		plog.G(ctx).Infoln()
-		err = util.WaitPodToBeReady(ctx, d.clientset.CoreV1().Pods(d.Namespace), metav1.LabelSelector{MatchLabels: labelsMap})
+		err = WaitPodReady(ctx, d.clientset.CoreV1().Pods(d.Namespace), fields.SelectorFromSet(labelsMap).String())
 		if err != nil {
 			return err
 		}
@@ -283,7 +286,7 @@ func genSyncthingContainer(remoteDir string, syncDataDirName string, image strin
 		},
 		Resources: v1.ResourceRequirements{
 			Requests: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("500m"),
+				v1.ResourceCPU:    resource.MustParse("200m"),
 				v1.ResourceMemory: resource.MustParse("512Mi"),
 			},
 			Limits: map[v1.ResourceName]resource.Quantity{
@@ -329,11 +332,11 @@ func genVPNContainer(workload string, namespace string, image string, args []str
 		Env: []v1.EnvVar{},
 		Resources: v1.ResourceRequirements{
 			Requests: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("1000m"),
-				v1.ResourceMemory: resource.MustParse("1024Mi"),
+				v1.ResourceCPU:    resource.MustParse("200m"),
+				v1.ResourceMemory: resource.MustParse("512Mi"),
 			},
 			Limits: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("2000m"),
+				v1.ResourceCPU:    resource.MustParse("1000m"),
 				v1.ResourceMemory: resource.MustParse("2048Mi"),
 			},
 		},
@@ -499,4 +502,37 @@ func (d *SyncOptions) GetFactory() cmdutil.Factory {
 
 func (d *SyncOptions) GetSyncthingGUIAddr() string {
 	return d.syncthingGUIAddr
+}
+
+func (d *SyncOptions) ConvertApiServerToNodeIP(ctx context.Context, kubeconfigBytes []byte) ([]byte, error) {
+	list, err := d.clientset.CoreV1().Pods(d.Namespace).List(ctx, metav1.ListOptions{Limit: 100})
+	if err != nil {
+		return nil, err
+	}
+	var result string
+	for _, item := range list.Items {
+		result, err = util.Shell(ctx, d.clientset, d.config, item.Name, "", d.Namespace, []string{"env"})
+		if err == nil {
+			break
+		}
+	}
+	parse, err := godotenv.Parse(strings.NewReader(result))
+	if err != nil {
+		return nil, err
+	}
+
+	host := parse["KUBERNETES_SERVICE_HOST"]
+	port := parse["KUBERNETES_SERVICE_PORT"]
+
+	addrPort, err := netip.ParseAddrPort(net.JoinHostPort(host, port))
+	if err != nil {
+		return nil, err
+	}
+
+	var newKubeconfigBytes []byte
+	newKubeconfigBytes, _, err = util.ModifyAPIServer(ctx, kubeconfigBytes, addrPort)
+	if err != nil {
+		return nil, err
+	}
+	return newKubeconfigBytes, nil
 }

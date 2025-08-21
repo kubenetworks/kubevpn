@@ -107,15 +107,12 @@ func (option *Options) ConvertPodToContainerConfigList(
 
 	var allPortMap = nat.PortMap{}
 	var allPortSet = nat.PortSet{}
-	for k, v := range hostConfig.PortBindings {
-		if oldValue, ok := allPortMap[k]; ok {
-			allPortMap[k] = append(oldValue, v...)
-		} else {
-			allPortMap[k] = v
-		}
-	}
 	for k, v := range conf.ExposedPorts {
 		allPortSet[k] = v
+	}
+	// user special -p hostPort:containerPort will work
+	for k, v := range hostConfig.PortBindings {
+		allPortMap[k] = v
 	}
 
 	lastContainerIdx := len(temp.Spec.Containers) - 1
@@ -159,12 +156,11 @@ func (option *Options) ConvertPodToContainerConfigList(
 			} else {
 				portBinding = nat.PortBinding{HostPort: strconv.FormatInt(int64(port.ContainerPort), 10)}
 			}
-			if oldValue, ok := allPortMap[p]; ok {
-				allPortMap[p] = append(oldValue, portBinding)
-			} else {
+			// add only if not found
+			if allPortMap[p] == nil {
 				allPortMap[p] = []nat.PortBinding{portBinding}
+				allPortSet[p] = struct{}{}
 			}
-			allPortSet[p] = struct{}{}
 		}
 
 		// if netMode is empty, then 0 ~ last-1 use last container network
@@ -183,7 +179,7 @@ func (option *Options) ConvertPodToContainerConfigList(
 				}
 				for p, bindings := range allPortMap {
 					for _, binding := range bindings {
-						options = append(options, "--publish", fmt.Sprintf("%s:%s", p.Port(), binding.HostPort))
+						options = append(options, "--publish", fmt.Sprintf("%s:%s", binding.HostPort, p.Port()))
 					}
 					options = append(options, "--expose", p.Port())
 				}
