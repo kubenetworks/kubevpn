@@ -169,13 +169,7 @@ func (u *ut) TestCompile(t *testing.T) {
 }
 
 func (u *ut) writeTempFile(t *testing.T) string {
-	tempDir := t.TempDir()
-	subDir := filepath.Join(tempDir, "code")
-	err := os.Mkdir(subDir, 0755)
-	if err != nil {
-		t.Fatal(err)
-	}
-	file := filepath.Join(subDir, "main.go")
+	file := filepath.Join(t.TempDir(), "main.go")
 	temp, err := os.Create(file)
 	if err != nil {
 		t.Fatal(err)
@@ -183,6 +177,10 @@ func (u *ut) writeTempFile(t *testing.T) string {
 	_, err = temp.WriteString(content)
 	if err != nil {
 		t.Fatal(err)
+	}
+	err = temp.Chmod(0777)
+	if err != nil {
+		t.Fatalf("Chmod: %v", err)
 	}
 	err = temp.Close()
 	if err != nil {
