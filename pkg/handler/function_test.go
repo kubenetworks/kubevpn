@@ -95,12 +95,10 @@ func TestFunctions(t *testing.T) {
 	// because of:
 	// Run container with cmd: [docker run --env-file /tmp/623917040.env --domainname  --workdir  --cap-add SYS_PTRACE --cap-add SYS_ADMIN --cap-add SYS_PTRACE --cap-add SYS_ADMIN --security-opt apparmor=unconfined --security-opt seccomp=unconfined --pull missing --name default_authors_716db --user root --env LC_ALL=C.UTF-8 --label app=authors --volume /tmp/329021857635767916:/var/run/secrets/kubernetes.io/serviceaccount --network container:default_nginx_45ee1 --pid container:default_nginx_45ee1 --pull missing --attach STDIN --attach STDOUT --attach STDERR --interactive --privileged --volume /tmp/TestFunctionskubevpnRunWithFullProxy2095435677/001:/app/test --rm --entrypoint go ghcr.io/kubenetworks/authors:latest run /app/test/main.go]
 	// Error: stat /app/test/main.go: no such file or directory
-	if runtime.GOOS != "darwin" {
-		t.Run("resetDeployAuthors", u.resetDeployAuthors)
-		t.Run("kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
-		t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
-		t.Run("kubevpnQuit", u.kubevpnQuit)
-	}
+	t.Run("resetDeployAuthors", u.resetDeployAuthors)
+	t.Run("kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
+	t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
+	t.Run("kubevpnQuit", u.kubevpnQuit)
 
 	// 7) install centrally in ns test -- connect mode
 	t.Run("centerKubevpnUninstall", u.kubevpnUninstall)
@@ -156,12 +154,10 @@ func TestFunctions(t *testing.T) {
 	// because of:
 	// Run container with cmd: [docker run --env-file /tmp/623917040.env --domainname  --workdir  --cap-add SYS_PTRACE --cap-add SYS_ADMIN --cap-add SYS_PTRACE --cap-add SYS_ADMIN --security-opt apparmor=unconfined --security-opt seccomp=unconfined --pull missing --name default_authors_716db --user root --env LC_ALL=C.UTF-8 --label app=authors --volume /tmp/329021857635767916:/var/run/secrets/kubernetes.io/serviceaccount --network container:default_nginx_45ee1 --pid container:default_nginx_45ee1 --pull missing --attach STDIN --attach STDOUT --attach STDERR --interactive --privileged --volume /tmp/TestFunctionskubevpnRunWithFullProxy2095435677/001:/app/test --rm --entrypoint go ghcr.io/kubenetworks/authors:latest run /app/test/main.go]
 	// Error: stat /app/test/main.go: no such file or directory
-	if runtime.GOOS != "darwin" {
-		t.Run("resetDeployAuthors", u.resetDeployAuthors)
-		t.Run("kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
-		t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
-		t.Run("kubevpnQuit", u.kubevpnQuit)
-	}
+	t.Run("resetDeployAuthors", u.resetDeployAuthors)
+	t.Run("kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
+	t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
+	t.Run("kubevpnQuit", u.kubevpnQuit)
 }
 
 func (u *ut) commonTest(t *testing.T) {
