@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -216,6 +217,20 @@ func (u *ut) healthCheckPodDetails(t *testing.T) {
 }
 
 func (u *ut) healthChecker(t *testing.T, endpoint string, header map[string]string, keyword string) {
+	// 0 = this frame.
+	_, file, line, ok := runtime.Caller(2)
+	if ok {
+		// Trim any directory path from the file.
+		slash := strings.LastIndexByte(file, byte('/'))
+		if slash >= 0 {
+			file = file[slash+1:]
+		}
+	} else {
+		// We don't have a filename.
+		file = "???"
+		line = 0
+	}
+
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -259,7 +274,7 @@ func (u *ut) healthChecker(t *testing.T, endpoint string, header map[string]stri
 	)
 	if err != nil {
 		u.kubectl(t)
-		t.Fatal(err)
+		t.Fatal(fmt.Sprintf("%s:%d", file, line), err)
 	}
 }
 
@@ -873,10 +888,10 @@ func (u *ut) checkServiceShouldNotInNsDefault(t *testing.T) {
 }
 
 func (u *ut) kubectl(t *testing.T) {
-	cmdGetPod := exec.Command("kubectl", "get", "pods", "-o", "wide")
-	cmdDescribePod := exec.Command("kubectl", "describe", "pods")
-	cmdGetSvc := exec.Command("kubectl", "get", "services", "-o", "wide")
-	cmdDescribeSvc := exec.Command("kubectl", "describe", "services")
+	cmdGetPod := exec.Command("kubectl", "get", "pods", "-o", "wide", "-A")
+	cmdGetSvc := exec.Command("kubectl", "get", "services", "-o", "wide", "-A")
+	cmdDescribePod := exec.Command("kubectl", "describe", "pods", "-A")
+	cmdDescribeSvc := exec.Command("kubectl", "describe", "services", "-A")
 	for _, cmd := range []*exec.Cmd{cmdGetPod, cmdDescribePod, cmdGetSvc, cmdDescribeSvc} {
 		t.Logf("exec: %v", cmd.Args)
 		cmd.Stdout = os.Stdout
