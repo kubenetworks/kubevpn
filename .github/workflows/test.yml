@@ -157,7 +157,7 @@ jobs:
       - name: Test
         # for docker mount
         env:
-          TMPDIR: /tmp
+          TMPDIR: .
         run: make ut
 
   windows:

@@ -164,7 +164,8 @@ func (u *ut) checkContent(ctx context.Context, t *testing.T, podName string, con
 	}
 }
 
-func (u *ut) TestCompile(t *testing.T) {
+func TestCompile(t *testing.T) {
+	u := &ut{}
 	u.writeTempFile(t)
 }
 
