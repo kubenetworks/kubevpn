@@ -188,7 +188,11 @@ func (u *ut) writeTempFile(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return temp.Name()
+	absPath, err := filepath.Abs(temp.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return absPath
 }
 
 func (u *ut) checkSyncWithFullProxyStatus(t *testing.T) {
