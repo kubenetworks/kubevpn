@@ -122,6 +122,8 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 			"origin-workload": originName,
 		}
 		u.SetLabels(labels.Merge(u.GetLabels(), labelsMap))
+		// for leave resource and disconnect from cluster
+		u.SetDeletionGracePeriodSeconds(ptr.To[int64](60))
 		var path []string
 		var spec *v1.PodTemplateSpec
 		spec, path, err = util.GetPodTemplateSpecPath(u)
@@ -487,6 +489,13 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 			if err := f(); err != nil {
 				plog.G(ctx).Warnf("Failed to exec rollback function: %s", err)
 			}
+		}
+	}
+	for _, workload := range d.Workloads {
+		plog.G(ctx).Infof("Wait workload %s", workload)
+		err := util.RolloutStatus(ctx, d.factory, d.Namespace, workload, time.Minute*60)
+		if err != nil {
+			plog.G(ctx).Warnf("Failed to rollback workload %s: %v", workload, err)
 		}
 	}
 	return nil
