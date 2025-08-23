@@ -92,15 +92,10 @@ func TestFunctions(t *testing.T) {
 	t.Run("kubevpnUnSync", u.kubevpnUnSync)
 
 	// 6) test mode run
-	// because of:
-	// Run container with cmd: [docker run --env-file /tmp/623917040.env --domainname  --workdir  --cap-add SYS_PTRACE --cap-add SYS_ADMIN --cap-add SYS_PTRACE --cap-add SYS_ADMIN --security-opt apparmor=unconfined --security-opt seccomp=unconfined --pull missing --name default_authors_716db --user root --env LC_ALL=C.UTF-8 --label app=authors --volume /tmp/329021857635767916:/var/run/secrets/kubernetes.io/serviceaccount --network container:default_nginx_45ee1 --pid container:default_nginx_45ee1 --pull missing --attach STDIN --attach STDOUT --attach STDERR --interactive --privileged --volume /tmp/TestFunctionskubevpnRunWithFullProxy2095435677/001:/app/test --rm --entrypoint go ghcr.io/kubenetworks/authors:latest run /app/test/main.go]
-	// Error: stat /app/test/main.go: no such file or directory
-	if runtime.GOOS != "darwin" {
-		t.Run("resetDeployAuthors", u.resetDeployAuthors)
-		t.Run("kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
-		t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
-		t.Run("kubevpnQuit", u.kubevpnQuit)
-	}
+	t.Run("resetDeployAuthors", u.resetDeployAuthors)
+	t.Run("kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
+	t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
+	t.Run("kubevpnQuit", u.kubevpnQuit)
 
 	// 7) install centrally in ns test -- connect mode
 	t.Run("centerKubevpnUninstall", u.kubevpnUninstall)
@@ -153,15 +148,10 @@ func TestFunctions(t *testing.T) {
 	t.Run("kubevpnQuit", u.kubevpnQuit)
 
 	// 12) test mode run
-	// because of:
-	// Run container with cmd: [docker run --env-file /tmp/623917040.env --domainname  --workdir  --cap-add SYS_PTRACE --cap-add SYS_ADMIN --cap-add SYS_PTRACE --cap-add SYS_ADMIN --security-opt apparmor=unconfined --security-opt seccomp=unconfined --pull missing --name default_authors_716db --user root --env LC_ALL=C.UTF-8 --label app=authors --volume /tmp/329021857635767916:/var/run/secrets/kubernetes.io/serviceaccount --network container:default_nginx_45ee1 --pid container:default_nginx_45ee1 --pull missing --attach STDIN --attach STDOUT --attach STDERR --interactive --privileged --volume /tmp/TestFunctionskubevpnRunWithFullProxy2095435677/001:/app/test --rm --entrypoint go ghcr.io/kubenetworks/authors:latest run /app/test/main.go]
-	// Error: stat /app/test/main.go: no such file or directory
-	if runtime.GOOS != "darwin" {
-		t.Run("resetDeployAuthors", u.resetDeployAuthors)
-		t.Run("kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
-		t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
-		t.Run("kubevpnQuit", u.kubevpnQuit)
-	}
+	t.Run("resetDeployAuthors", u.resetDeployAuthors)
+	t.Run("kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
+	t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
+	t.Run("kubevpnQuit", u.kubevpnQuit)
 }
 
 func (u *ut) commonTest(t *testing.T) {
@@ -218,7 +208,7 @@ func (u *ut) healthCheckPodDetails(t *testing.T) {
 
 func (u *ut) healthChecker(t *testing.T, endpoint string, header map[string]string, keyword string) {
 	// 0 = this frame.
-	_, file, line, ok := runtime.Caller(2)
+	_, file, line, ok := runtime.Caller(1)
 	if ok {
 		// Trim any directory path from the file.
 		slash := strings.LastIndexByte(file, byte('/'))
@@ -241,7 +231,7 @@ func (u *ut) healthChecker(t *testing.T, endpoint string, header map[string]stri
 
 	client := &http.Client{Timeout: time.Second * 1}
 	err = retry.OnError(
-		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 240},
+		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 120},
 		func(err error) bool { return err != nil },
 		func() error {
 			var resp *http.Response

@@ -45,6 +45,10 @@ func GetVolume(ctx context.Context, clientset *kubernetes.Clientset, f util.Fact
 			if err != nil {
 				return nil, err
 			}
+			localPath, err = filepath.Abs(localPath)
+			if err != nil {
+				return nil, err
+			}
 			if volumeMount.SubPath != "" {
 				localPath = filepath.Join(localPath, volumeMount.SubPath)
 			}
