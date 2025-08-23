@@ -208,7 +208,7 @@ func (u *ut) healthCheckPodDetails(t *testing.T) {
 
 func (u *ut) healthChecker(t *testing.T, endpoint string, header map[string]string, keyword string) {
 	// 0 = this frame.
-	_, file, line, ok := runtime.Caller(2)
+	_, file, line, ok := runtime.Caller(1)
 	if ok {
 		// Trim any directory path from the file.
 		slash := strings.LastIndexByte(file, byte('/'))
