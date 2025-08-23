@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -119,7 +120,11 @@ func GetEnv(ctx context.Context, set *kubernetes.Clientset, config *rest.Config,
 			return nil, err
 		}
 		_ = temp.Close()
-		result[Join(ns, c.Name)] = temp.Name()
+		absPath, err := filepath.Abs(temp.Name())
+		if err != nil {
+			return nil, err
+		}
+		result[Join(ns, c.Name)] = absPath
 	}
 	return result, nil
 }
