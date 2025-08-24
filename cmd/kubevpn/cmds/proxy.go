@@ -156,6 +156,11 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				err = disconnect(cli, bytes, ns, sshConf)
+				if err != nil {
+					return err
+				}
+				_, _ = fmt.Fprint(os.Stdout, "Disconnect completed")
 			}
 			return nil
 		},

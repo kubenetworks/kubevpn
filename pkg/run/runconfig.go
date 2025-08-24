@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -12,6 +12,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/go-connections/nat"
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 	"github.com/miekg/dns"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
@@ -120,8 +121,12 @@ func (option *Options) ConvertPodToContainerConfigList(
 	for index, container := range temp.Spec.Containers {
 		name := util.Join(option.Namespace, container.Name)
 		randomName := util.Join(name, strings.ReplaceAll(uuid.New().String(), "-", "")[:5])
+		localEnv, err := filepath.Abs(envMap[name])
+		if err != nil {
+			return nil, err
+		}
 		var options = []string{
-			"--env-file", envMap[name],
+			"--env-file", localEnv,
 			"--domainname", temp.Spec.Subdomain,
 			"--workdir", container.WorkingDir,
 			"--cap-add", "SYS_PTRACE",
@@ -145,7 +150,11 @@ func (option *Options) ConvertPodToContainerConfigList(
 			options = append(options, "--privileged")
 		}
 		for _, m := range mountVolume[name] {
-			options = append(options, "--volume", fmt.Sprintf("%s:%s", m.Source, m.Target))
+			localDir, err := filepath.Abs(m.Source)
+			if err != nil {
+				return nil, err
+			}
+			options = append(options, "--volume", fmt.Sprintf("%s:%s", localDir, m.Target))
 		}
 
 		for _, port := range container.Ports {
@@ -269,16 +278,14 @@ func MergeDockerOptions(conf *RunConfig, options *Options, config *Config, hostC
 }
 
 func GetEnvByKey(filepath string, key string, defaultValue string) string {
-	content, err := os.ReadFile(filepath)
+	parse, err := godotenv.Read(filepath)
 	if err != nil {
 		return defaultValue
 	}
 
-	for _, kv := range strings.Split(string(content), "\n") {
-		env := strings.Split(kv, "=")
-		if len(env) == 2 && env[0] == key {
-			return env[1]
-		}
+	value, ok := parse[key]
+	if !ok {
+		return defaultValue
 	}
-	return defaultValue
+	return value
 }

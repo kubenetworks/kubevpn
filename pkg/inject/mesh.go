@@ -21,6 +21,7 @@ import (
 	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/yaml"
 
@@ -179,25 +180,27 @@ func UnPatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factor
 }
 
 func addEnvoyConfig(mapInterface v12.ConfigMapInterface, ns, nodeID string, tunIP util.PodRouteConfig, headers map[string]string, port []controlplane.ContainerPort, portmap map[int32]string) error {
-	configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	var v = make([]*controlplane.Virtual, 0)
-	if str, ok := configMap.Data[config.KeyEnvoy]; ok {
-		if err = yaml.Unmarshal([]byte(str), &v); err != nil {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		configMap, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if err != nil {
 			return err
 		}
-	}
+		var v = make([]*controlplane.Virtual, 0)
+		if str, ok := configMap.Data[config.KeyEnvoy]; ok {
+			if err = yaml.Unmarshal([]byte(str), &v); err != nil {
+				return err
+			}
+		}
 
-	v = addVirtualRule(v, ns, nodeID, port, headers, tunIP, portmap)
-	marshal, err := yaml.Marshal(v)
-	if err != nil {
+		v = addVirtualRule(v, ns, nodeID, port, headers, tunIP, portmap)
+		marshal, err := yaml.Marshal(v)
+		if err != nil {
+			return err
+		}
+		configMap.Data[config.KeyEnvoy] = string(marshal)
+		_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
 		return err
-	}
-	configMap.Data[config.KeyEnvoy] = string(marshal)
-	_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
-	return err
+	})
 }
 
 func addVirtualRule(v []*controlplane.Virtual, ns, nodeID string, port []controlplane.ContainerPort, headers map[string]string, tunIP util.PodRouteConfig, portmap map[int32]string) []*controlplane.Virtual {
