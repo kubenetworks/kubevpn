@@ -201,9 +201,6 @@ func ContainerRemove(ctx context.Context, containerName string) ([]byte, error) 
 	if err != nil && strings.Contains(string(output), "not found") {
 		return output, nil
 	}
-	if err != nil && strings.Contains(string(output), "unknown flag: --force") {
-		output, err = exec.CommandContext(ctx, "docker", "remove", containerName).CombinedOutput()
-	}
 	return output, err
 }
 
