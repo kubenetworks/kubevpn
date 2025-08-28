@@ -29,6 +29,7 @@ const (
 	Daemon_ConnectionUse_FullMethodName  = "/rpc.Daemon/ConnectionUse"
 	Daemon_SshStart_FullMethodName       = "/rpc.Daemon/SshStart"
 	Daemon_SshStop_FullMethodName        = "/rpc.Daemon/SshStop"
+	Daemon_Route_FullMethodName          = "/rpc.Daemon/Route"
 	Daemon_Logs_FullMethodName           = "/rpc.Daemon/Logs"
 	Daemon_Upgrade_FullMethodName        = "/rpc.Daemon/Upgrade"
 	Daemon_Status_FullMethodName         = "/rpc.Daemon/Status"
@@ -53,6 +54,7 @@ type DaemonClient interface {
 	ConnectionUse(ctx context.Context, in *ConnectionUseRequest, opts ...grpc.CallOption) (*ConnectionUseResponse, error)
 	SshStart(ctx context.Context, in *SshStartRequest, opts ...grpc.CallOption) (*SshStartResponse, error)
 	SshStop(ctx context.Context, in *SshStopRequest, opts ...grpc.CallOption) (*SshStopResponse, error)
+	Route(ctx context.Context, in *RouteRequest, opts ...grpc.CallOption) (*RouteResponse, error)
 	Logs(ctx context.Context, opts ...grpc.CallOption) (Daemon_LogsClient, error)
 	Upgrade(ctx context.Context, in *UpgradeRequest, opts ...grpc.CallOption) (*UpgradeResponse, error)
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
@@ -293,6 +295,15 @@ func (c *daemonClient) SshStop(ctx context.Context, in *SshStopRequest, opts ...
 	return out, nil
 }
 
+func (c *daemonClient) Route(ctx context.Context, in *RouteRequest, opts ...grpc.CallOption) (*RouteResponse, error) {
+	out := new(RouteResponse)
+	err := c.cc.Invoke(ctx, Daemon_Route_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonClient) Logs(ctx context.Context, opts ...grpc.CallOption) (Daemon_LogsClient, error) {
 	stream, err := c.cc.NewStream(ctx, &Daemon_ServiceDesc.Streams[6], Daemon_Logs_FullMethodName, opts...)
 	if err != nil {
@@ -467,6 +478,7 @@ type DaemonServer interface {
 	ConnectionUse(context.Context, *ConnectionUseRequest) (*ConnectionUseResponse, error)
 	SshStart(context.Context, *SshStartRequest) (*SshStartResponse, error)
 	SshStop(context.Context, *SshStopRequest) (*SshStopResponse, error)
+	Route(context.Context, *RouteRequest) (*RouteResponse, error)
 	Logs(Daemon_LogsServer) error
 	Upgrade(context.Context, *UpgradeRequest) (*UpgradeResponse, error)
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
@@ -511,6 +523,9 @@ func (UnimplementedDaemonServer) SshStart(context.Context, *SshStartRequest) (*S
 }
 func (UnimplementedDaemonServer) SshStop(context.Context, *SshStopRequest) (*SshStopResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SshStop not implemented")
+}
+func (UnimplementedDaemonServer) Route(context.Context, *RouteRequest) (*RouteResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Route not implemented")
 }
 func (UnimplementedDaemonServer) Logs(Daemon_LogsServer) error {
 	return status.Errorf(codes.Unimplemented, "method Logs not implemented")
@@ -777,6 +792,24 @@ func _Daemon_SshStop_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Daemon_Route_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RouteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).Route(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_Route_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).Route(ctx, req.(*RouteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Daemon_Logs_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(DaemonServer).Logs(&daemonLogsServer{stream})
 }
@@ -975,6 +1008,10 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SshStop",
 			Handler:    _Daemon_SshStop_Handler,
+		},
+		{
+			MethodName: "Route",
+			Handler:    _Daemon_Route_Handler,
 		},
 		{
 			MethodName: "Upgrade",

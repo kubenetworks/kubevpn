@@ -16,6 +16,7 @@ service Daemon {
 
   rpc SshStart (SshStartRequest) returns (SshStartResponse) {}
   rpc SshStop (SshStopRequest) returns (SshStopResponse) {}
+  rpc Route (RouteRequest) returns (RouteResponse) {}
 
   rpc Logs (stream LogRequest) returns (stream LogResponse) {}
   rpc Upgrade (UpgradeRequest) returns (UpgradeResponse) {}
@@ -272,6 +273,21 @@ message SshStopRequest {
 
 message SshStopResponse {
   string ServerIP = 1;
+}
+
+message RouteRequest {
+  string cidr = 1;
+  RouteType type = 2;
+  string dev = 3;
+}
+
+enum RouteType {
+  ROUTE_ADD = 0;
+  ROUTE_DELETE = 1;
+}
+
+message RouteResponse {
+  string message = 1;
 }
 
 message SshConnectRequest {

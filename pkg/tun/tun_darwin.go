@@ -9,9 +9,7 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/containernetworking/cni/pkg/types"
 	pkgerr "github.com/pkg/errors"
-	"golang.org/x/net/route"
 	"golang.org/x/sys/unix"
 	"golang.zx2c4.com/wireguard/tun"
 
@@ -90,35 +88,6 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		addr6: &net.IPAddr{IP: ipv6},
 	}
 	return
-}
-
-func addTunRoutes(ifName string, routes ...types.Route) error {
-	tunIfi, err := net.InterfaceByName(ifName)
-	if err != nil {
-		return err
-	}
-	gw := &route.LinkAddr{Index: tunIfi.Index}
-
-	var prefixList []netip.Prefix
-	for _, r := range routes {
-		if net.ParseIP(r.Dst.IP.String()) == nil {
-			continue
-		}
-		var prefix netip.Prefix
-		prefix, err = netip.ParsePrefix(r.Dst.String())
-		if err != nil {
-			return err
-		}
-		prefixList = append(prefixList, prefix)
-	}
-	if len(prefixList) == 0 {
-		return nil
-	}
-	err = addRoute(gw, prefixList...)
-	if err != nil {
-		return fmt.Errorf("failed to add dst %v via %s to route table: %v", prefixList, ifName, err)
-	}
-	return nil
 }
 
 // struct ifaliasreq
