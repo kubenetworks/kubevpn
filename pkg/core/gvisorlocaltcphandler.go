@@ -36,6 +36,7 @@ func (h *gvisorLocalHandler) Run(ctx context.Context) {
 	// for support ipv6 skip checksum
 	// vendor/gvisor.dev/gvisor/pkg/tcpip/stack/nic.go:763
 	endpoint.LinkEPCapabilities = stack.CapabilityRXChecksumOffload
+	defer endpoint.Close()
 	go func() {
 		defer util.HandleCrash()
 		readFromGvisorInboundWriteToEndpoint(ctx, h.gvisorInbound, endpoint)

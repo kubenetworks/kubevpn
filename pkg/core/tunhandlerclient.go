@@ -43,8 +43,11 @@ type ClientDevice struct {
 func (d *ClientDevice) handlePacket(ctx context.Context, forward *Forwarder) {
 	for ctx.Err() == nil {
 		func() {
+			subCtx, cancelFunc := context.WithCancel(ctx)
+			defer cancelFunc()
+
 			defer time.Sleep(time.Second * 2)
-			conn, err := forwardConn(ctx, forward)
+			conn, err := forwardConn(subCtx, forward)
 			if err != nil {
 				plog.G(ctx).Errorf("Failed to get remote conn from %s -> %s: %s", d.tun.LocalAddr(), forward.node.Remote, err)
 				return
@@ -52,8 +55,8 @@ func (d *ClientDevice) handlePacket(ctx context.Context, forward *Forwarder) {
 			defer conn.Close()
 
 			errChan := make(chan error, 2)
-			go readFromConn(ctx, conn, d.tunInbound, d.tunOutbound, errChan)
-			go writeToConn(ctx, conn, d.tunInbound, errChan)
+			go readFromConn(subCtx, conn, d.tunInbound, d.tunOutbound, errChan)
+			go writeToConn(subCtx, conn, d.tunInbound, errChan)
 
 			select {
 			case err = <-errChan:
