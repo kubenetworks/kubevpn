@@ -42,11 +42,12 @@ require (
 	github.com/spf13/pflag v1.0.6
 	github.com/syncthing/syncthing v1.29.2
 	github.com/thejerf/suture/v4 v4.0.6
+	github.com/vishvananda/netlink v1.3.1
 	go.uber.org/automaxprocs v1.6.0
 	golang.org/x/crypto v0.37.0
 	golang.org/x/net v0.39.0
 	golang.org/x/oauth2 v0.28.0
-	golang.org/x/sys v0.32.0
+	golang.org/x/sys v0.35.0
 	golang.org/x/term v0.31.0
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2
 	golang.zx2c4.com/wireguard v0.0.0-20220920152132-bb719d3a6e2c
@@ -233,7 +234,7 @@ require (
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
 	github.com/tklauser/numcpus v0.9.0 // indirect
 	github.com/ulikunitz/xz v0.5.12 // indirect
-	github.com/vishvananda/netns v0.0.4 // indirect
+	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/vitrun/qart v0.0.0-20160531060029-bf64b92db6b0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xeipuuv/gojsonpointer v0.0.0-20190905194746-02993c407bfb // indirect

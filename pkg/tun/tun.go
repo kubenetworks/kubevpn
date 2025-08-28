@@ -131,8 +131,3 @@ func (c *tunConn) SetReadDeadline(time.Time) error {
 func (c *tunConn) SetWriteDeadline(time.Time) error {
 	return &net.OpError{Op: "set", Net: "tun", Source: nil, Addr: nil, Err: errors.New("write deadline not supported")}
 }
-
-// AddRoutes for outer called
-func AddRoutes(tunName string, routes ...types.Route) error {
-	return addTunRoutes(tunName, routes...)
-}
