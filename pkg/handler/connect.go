@@ -401,6 +401,12 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 			routes = append(routes, types.Route{Dst: *ipNet})
 		}
 	}
+	if c.LocalTunIPv4 != nil {
+		routes = append(routes, types.Route{Dst: net.IPNet{IP: c.LocalTunIPv4.IP, Mask: net.CIDRMask(32, 32)}})
+	}
+	if c.LocalTunIPv6 != nil {
+		routes = append(routes, types.Route{Dst: net.IPNet{IP: c.LocalTunIPv6.IP, Mask: net.CIDRMask(128, 128)}})
+	}
 
 	tunConfig := tun.Config{
 		Addr:   (&net.IPNet{IP: c.LocalTunIPv4.IP, Mask: net.CIDRMask(32, 32)}).String(),
