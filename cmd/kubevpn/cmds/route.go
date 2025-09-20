@@ -1,9 +1,7 @@
 package cmds
 
 import (
-	"fmt"
 	"net"
-	"os"
 
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -53,11 +51,10 @@ func CmdRouteAdd(cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := cli.Route(cmd.Context(), &rpc.RouteRequest{Cidr: cidr.String(), Type: rpc.RouteType_ROUTE_ADD})
+			_, err = cli.Route(cmd.Context(), &rpc.RouteRequest{Cidr: cidr.String(), Type: rpc.RouteType_ROUTE_ADD})
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprint(os.Stdout, resp.Message)
 			return err
 		},
 	}
@@ -91,11 +88,10 @@ func CmdRouteDelete(cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := cli.Route(cmd.Context(), &rpc.RouteRequest{Cidr: cidr.String(), Type: rpc.RouteType_ROUTE_DELETE})
+			_, err = cli.Route(cmd.Context(), &rpc.RouteRequest{Cidr: cidr.String(), Type: rpc.RouteType_ROUTE_DELETE})
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprint(os.Stdout, resp.Message)
 			return err
 		},
 	}

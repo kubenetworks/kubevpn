@@ -60,8 +60,6 @@ func (svr *Server) Route(ctx context.Context, req *rpc.RouteRequest) (*rpc.Route
 		if err != nil {
 			return nil, err
 		}
-		return &rpc.RouteResponse{
-			Message: "ok",
-		}, nil
+		return &rpc.RouteResponse{}, nil
 	}
 }
