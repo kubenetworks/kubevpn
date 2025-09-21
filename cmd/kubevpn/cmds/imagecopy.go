@@ -11,7 +11,7 @@ import (
 func CmdImageCopy(cmdutil.Factory) *cobra.Command {
 	var imageCmd = &cobra.Command{
 		Use:   "image <cmd>",
-		Short: "copy images",
+		Short: "Copy images",
 	}
 
 	copyCmd := &cobra.Command{
