@@ -7,13 +7,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	miekgdns "github.com/miekg/dns"
 	v12 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -26,8 +24,6 @@ import (
 // https://github.com/golang/go/issues/12524
 // man 5 resolver
 
-var cancel context.CancelFunc
-var resolv = "/etc/resolv.conf"
 var ignoreSearchSuffix = []string{"com", "io", "net", "org", "cn", "ru"}
 
 // SetupDNS support like
@@ -124,14 +120,14 @@ func (c *Config) usingResolver(ctx context.Context) {
 			continue
 		}
 		if err != nil {
-			plog.G(ctx).Errorf("Failed to read resovler %s error: %v", filename, err)
+			plog.G(ctx).Errorf("Failed to read resovler %s: %v", filename, err)
 			continue
 		}
 
 		var conf *miekgdns.ClientConfig
 		conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(content)))
 		if err != nil {
-			plog.G(ctx).Errorf("Parse resolver %s error: %v", filename, err)
+			plog.G(ctx).Errorf("Failed to parse resolver %s: %v", filename, err)
 			continue
 		}
 		if slices.Contains(conf.Servers, clientConfig.Servers[0]) {
@@ -141,49 +137,9 @@ func (c *Config) usingResolver(ctx context.Context) {
 		conf.Servers = append([]string{clientConfig.Servers[0]}, conf.Servers...)
 		err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
 		if err != nil {
-			plog.G(ctx).Errorf("Failed to write resovler %s error: %v", filename, err)
+			plog.G(ctx).Errorf("Failed to write resovler %s: %v", filename, err)
 		}
 	}
-}
-
-func (c *Config) usingNetworkSetup(ip string, ns string) {
-	networkSetup(ip, ns)
-	var ctx context.Context
-	ctx, cancel = context.WithCancel(context.Background())
-	go func() {
-		ticker := time.NewTicker(time.Second * 10)
-		newWatcher, _ := fsnotify.NewWatcher()
-		defer newWatcher.Close()
-		defer ticker.Stop()
-		_ = newWatcher.Add(resolv)
-		c := make(chan struct{}, 1)
-		c <- struct{}{}
-		for {
-			select {
-			case <-ticker.C:
-				c <- struct{}{}
-			case /*e :=*/ <-newWatcher.Events:
-				//if e.Op == fsnotify.Write {
-				c <- struct{}{}
-				//}
-			case <-c:
-				if rc, err := miekgdns.ClientConfigFromFile(resolv); err == nil && rc.Timeout != 1 {
-					if !sets.New[string](rc.Servers...).Has(ip) {
-						rc.Servers = append(rc.Servers, ip)
-						for _, s := range []string{ns + ".svc.cluster.local", "svc.cluster.local", "cluster.local"} {
-							rc.Search = append(rc.Search, s)
-						}
-						//rc.Ndots = 5
-					}
-					//rc.Attempts = 1
-					rc.Timeout = 1
-					_ = os.WriteFile(resolv, []byte(toString(*rc)), 0644)
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
 }
 
 func toString(config miekgdns.ClientConfig) string {
@@ -220,9 +176,6 @@ func toString(config miekgdns.ClientConfig) string {
 }
 
 func (c *Config) CancelDNS() {
-	if cancel != nil {
-		cancel()
-	}
 	for _, filename := range GetResolvers(c.Config.Search, c.Ns, c.Services) {
 		content, err := os.ReadFile(filename)
 		if err != nil {
@@ -292,107 +245,6 @@ func GetResolvers(searchList []string, nsList []string, serviceName []v12.Servic
 		resolvers = append(resolvers, filepath.Join("/etc/resolver/", s))
 	}
 	return resolvers
-}
-
-/*
-➜  resolver sudo networksetup -setdnsservers Wi-Fi 172.20.135.131 1.1.1.1
-➜  resolver sudo networksetup -setsearchdomains Wi-Fi test.svc.cluster.local svc.cluster.local cluster.local
-➜  resolver sudo networksetup -getsearchdomains Wi-Fi
-test.svc.cluster.local
-svc.cluster.local
-cluster.local
-➜  resolver sudo networksetup -getdnsservers Wi-Fi
-172.20.135.131
-1.1.1.1
-*/
-func networkSetup(ip string, namespace string) {
-	networkCancel()
-	b, err := exec.Command("networksetup", "-listallnetworkservices").Output()
-	if err != nil {
-		return
-	}
-	services := strings.Split(string(b), "\n")
-	for _, s := range services[:len(services)-1] {
-		cmd := exec.Command("networksetup", "-getdnsservers", s)
-		output, err := cmd.Output()
-		if err == nil {
-			var nameservers []string
-			if strings.Contains(string(output), "There aren't any DNS Servers") {
-				nameservers = make([]string, 0, 0)
-				// fix networksetup -getdnsservers is empty, but resolv.conf nameserver is not empty
-				if rc, err := miekgdns.ClientConfigFromFile(resolv); err == nil {
-					nameservers = rc.Servers
-				}
-			} else {
-				nameservers = strings.Split(string(output), "\n")
-				nameservers = nameservers[:len(nameservers)-1]
-			}
-			// add to tail
-			nameservers = append(nameservers, ip)
-			args := []string{"-setdnsservers", s}
-			output, err = exec.Command("networksetup", append(args, nameservers...)...).Output()
-			if err != nil {
-				plog.G(context.Background()).Warnf("Failed to set DNS server for %s, err: %v, output: %s\n", s, err, string(output))
-			}
-		}
-		output, err = exec.Command("networksetup", "-getsearchdomains", s).Output()
-		if err == nil {
-			var searchDomains []string
-			if strings.Contains(string(output), "There aren't any Search Domains") {
-				searchDomains = make([]string, 0, 0)
-			} else {
-				searchDomains = strings.Split(string(output), "\n")
-				searchDomains = searchDomains[:len(searchDomains)-1]
-			}
-			newSearchDomains := make([]string, len(searchDomains)+3, len(searchDomains)+3)
-			copy(newSearchDomains[3:], searchDomains)
-			newSearchDomains[0] = fmt.Sprintf("%s.svc.cluster.local", namespace)
-			newSearchDomains[1] = "svc.cluster.local"
-			newSearchDomains[2] = "cluster.local"
-			args := []string{"-setsearchdomains", s}
-			bytes, err := exec.Command("networksetup", append(args, newSearchDomains...)...).Output()
-			if err != nil {
-				plog.G(context.Background()).Warnf("Failed to set search domain for %s, err: %v, output: %s\n", s, err, string(bytes))
-			}
-		}
-	}
-}
-
-func networkCancel() {
-	b, err := exec.Command("networksetup", "-listallnetworkservices").CombinedOutput()
-	if err != nil {
-		return
-	}
-	services := strings.Split(string(b), "\n")
-	for _, s := range services[:len(services)-1] {
-		output, err := exec.Command("networksetup", "-getsearchdomains", s).Output()
-		if err == nil {
-			i := strings.Split(string(output), "\n")
-			if i[1] == "svc.cluster.local" && i[2] == "cluster.local" {
-				bytes, err := exec.Command("networksetup", "-setsearchdomains", s, strings.Join(i[3:], " ")).Output()
-				if err != nil {
-					plog.G(context.Background()).Warnf("Failed to remove search domain for %s, err: %v, output: %s\n", s, err, string(bytes))
-				}
-
-				output, err := exec.Command("networksetup", "-getdnsservers", s).Output()
-				if err == nil {
-					dnsServers := strings.Split(string(output), "\n")
-					// dnsServers[len(dnsServers)-1]=""
-					// dnsServers[len(dnsServers)-2]="ip which added by KubeVPN"
-					dnsServers = dnsServers[:len(dnsServers)-2]
-					if len(dnsServers) == 0 {
-						// set default dns server to 1.1.1.1 or just keep on empty
-						dnsServers = append(dnsServers, "empty")
-					}
-					args := []string{"-setdnsservers", s}
-					combinedOutput, err := exec.Command("networksetup", append(args, dnsServers...)...).Output()
-					if err != nil {
-						plog.G(context.Background()).Warnf("Failed to remove DNS server for %s, err: %v, output: %s", s, err, string(combinedOutput))
-					}
-				}
-			}
-		}
-	}
 }
 
 func GetHostFile() string {

@@ -45,10 +45,9 @@ type Config struct {
 func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) error {
 	var serviceList []v12.Service
 	c.Lock.Lock()
-	defer c.Lock.Unlock()
-
 	appendHosts := c.generateAppendHosts(serviceList, hosts)
 	err := c.appendHosts(appendHosts)
+	c.Lock.Unlock()
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to add hosts(%s): %v", entryList2String(appendHosts), err)
 		return err

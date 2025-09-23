@@ -36,11 +36,11 @@ func CmdSync(f cmdutil.Factory) *cobra.Command {
 	var imagePullSecretName string
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: i18n.T("Sync workloads run in current namespace with same volume、env、and network"),
+		Short: i18n.T("Sync local dir to cloned workloads dir"),
 		Long: templates.LongDesc(i18n.T(`
-		Sync local dir to workloads which run in current namespace with same volume、env、and network
+		Sync local dir to cloned workloads which run in current namespace with same volume、env and network as target workloads
 
-		In this way, you can startup another deployment in current namespace, but with different image version,
+		In this way, we startup another deployment in current namespace, but with different image version,
 		it also supports service mesh proxy. only traffic with special header will hit to sync resource.
 		`)),
 		Example: templates.Examples(i18n.T(`

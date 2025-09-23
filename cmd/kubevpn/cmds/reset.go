@@ -21,9 +21,9 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &pkgssh.SshConfig{}
 	cmd := &cobra.Command{
 		Use:   "reset",
-		Short: "Reset workloads to origin status",
+		Short: "Reset workloads to origin spec",
 		Long: templates.LongDesc(i18n.T(`
-		Reset workloads to origin status
+		Reset workloads to origin spec
 		
 		Reset will remove injected container envoy-proxy and vpn, and restore service mesh rules.
 		`)),
