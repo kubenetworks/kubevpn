@@ -88,7 +88,7 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 				}
 			}
 			if c.dnsConfig != nil {
-				plog.G(logCtx).Infof("Clearing DNS settings")
+				plog.G(logCtx).Debugf("Clearing DNS settings")
 				c.dnsConfig.CancelDNS()
 			}
 		}

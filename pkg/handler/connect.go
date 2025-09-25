@@ -7,7 +7,6 @@ import (
 	"net"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -317,7 +316,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				podName := pod.GetName()
 				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
 				go util.CheckPodStatus(childCtx, cancelFunc, podName, c.clientset.CoreV1().Pods(c.Namespace))
-				domain := fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, c.Namespace)
+				domain := config.ConfigMapPodTrafficManager
 				go healthCheckPortForward(childCtx, cancelFunc, readyChan, strings.Split(portPair[1], ":")[0], domain, c.LocalTunIPv4.IP)
 				go healthCheckTCPConn(childCtx, cancelFunc, readyChan, domain, util.GetPodIP(pod)[0])
 				if *first {
@@ -627,7 +626,6 @@ func (c *ConnectOptions) addRoute(ipStrList ...string) error {
 }
 
 func (c *ConnectOptions) setupDNS(ctx context.Context, svcInformer cache.SharedIndexInformer) error {
-	const portTCP = 10801
 	podList, err := c.GetRunningPodList(ctx)
 	if err != nil {
 		plog.G(ctx).Errorf("Get running pod list failed, err: %v", err)
@@ -643,22 +641,14 @@ func (c *ConnectOptions) setupDNS(ctx context.Context, svcInformer cache.SharedI
 
 	marshal, _ := json.Marshal(relovConf)
 	plog.G(ctx).Debugf("Get DNS service config: %v", string(marshal))
-	svc, err := c.clientset.CoreV1().Services(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	var svc *v1.Service
+	svc, err = c.clientset.CoreV1().Services(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
-
-	var conn net.Conn
-	d := net.Dialer{Timeout: time.Duration(max(2, relovConf.Timeout)) * time.Second}
-	conn, err = d.DialContext(ctx, "tcp", net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(portTCP)))
+	err = detectNameserver(ctx, relovConf, svc.Spec.ClusterIP, pod.Status.PodIP)
 	if err != nil {
-		relovConf.Servers = []string{pod.Status.PodIP}
-		err = nil
-		plog.G(ctx).Debugf("DNS service use pod IP %s", pod.Status.PodIP)
-	} else {
-		relovConf.Servers = []string{svc.Spec.ClusterIP}
-		_ = conn.Close()
-		plog.G(ctx).Debugf("DNS service use service IP %s", svc.Spec.ClusterIP)
+		return err
 	}
 
 	plog.G(ctx).Infof("Adding extra domain to hosts...")
@@ -1268,25 +1258,38 @@ func healthCheckTCPConn(ctx context.Context, cancelFunc context.CancelFunc, read
 		return
 	}
 
-	var healthChecker = func() error {
-		msg := new(miekgdns.Msg)
-		msg.SetQuestion(miekgdns.Fqdn(domain), miekgdns.TypeA)
-		client := miekgdns.Client{Net: "udp", Timeout: time.Second * 10}
-		_, _, err := client.ExchangeContext(ctx, msg, net.JoinHostPort(dnsServer, "53"))
-		return err
-	}
-
 	newTicker := time.NewTicker(config.KeepAliveTime / 2)
 	defer newTicker.Stop()
 	for ; ctx.Err() == nil; <-newTicker.C {
 		err := retry.OnError(wait.Backoff{Duration: time.Second * 10, Steps: 6}, func(err error) bool {
 			return err != nil
 		}, func() error {
-			return healthChecker()
+			return nameserverChecker(ctx, domain, dnsServer)
 		})
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to query DNS: %v", err)
 			return
 		}
 	}
+}
+
+func detectNameserver(ctx context.Context, relovConf *miekgdns.ClientConfig, serviceIP string, podIP string) error {
+	domain := config.ConfigMapPodTrafficManager
+	err := nameserverChecker(ctx, domain, serviceIP)
+	if err != nil {
+		relovConf.Servers = []string{podIP}
+		plog.G(ctx).Debugf("DNS service use pod IP %s", podIP)
+	} else {
+		relovConf.Servers = []string{serviceIP}
+		plog.G(ctx).Debugf("DNS service use service IP %s", serviceIP)
+	}
+	return nil
+}
+
+func nameserverChecker(ctx context.Context, domain string, dnsServer string) error {
+	msg := new(miekgdns.Msg)
+	msg.SetQuestion(miekgdns.Fqdn(domain), miekgdns.TypeA)
+	client := miekgdns.Client{Net: "udp", Timeout: time.Second * 10}
+	_, _, err := client.ExchangeContext(ctx, msg, net.JoinHostPort(dnsServer, "53"))
+	return err
 }
