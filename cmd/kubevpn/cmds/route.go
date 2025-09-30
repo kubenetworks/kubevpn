@@ -1,9 +1,14 @@
 package cmds
 
 import (
+	"bytes"
+	"fmt"
 	"net"
+	"os"
 
+	"github.com/libp2p/go-netroute"
 	"github.com/spf13/cobra"
+	"k8s.io/cli-runtime/pkg/printers"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -21,6 +26,7 @@ func CmdRoute(f cmdutil.Factory) *cobra.Command {
 	}
 	cmd.AddCommand(CmdRouteAdd(f))
 	cmd.AddCommand(CmdRouteDelete(f))
+	cmd.AddCommand(CmdRouteSearch(f))
 	return cmd
 }
 
@@ -93,6 +99,47 @@ func CmdRouteDelete(cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			return err
+		},
+	}
+	return cmd
+}
+
+func CmdRouteSearch(cmdutil.Factory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "search",
+		Short: "Search a specific route",
+		Long: templates.LongDesc(i18n.T(`
+		Search a specific route
+		`)),
+		Example: templates.Examples(i18n.T(`
+		# Search a specific route
+		kubevpn route search 198.19.0.1
+		`)),
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			plog.InitLoggerForClient()
+			return daemon.StartupDaemon(cmd.Context())
+		},
+		Args: cobra.MatchAll(cobra.ExactArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dst := net.ParseIP(args[0])
+			if dst == nil {
+				return fmt.Errorf("invalid ip: %s", args[0])
+			}
+			r, err := netroute.New()
+			if err != nil {
+				return err
+			}
+			iface, gateway, src, err := r.Route(dst)
+			if err != nil {
+				return err
+			}
+			var sb = new(bytes.Buffer)
+			w := printers.GetNewTabWriter(sb)
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", "DESTINATION", "GATEWAY", "RT_IFA", "MTU", "NETIF")
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n", dst, gateway.String(), src.String(), iface.MTU, iface.Name)
+			_ = w.Flush()
+			_, _ = fmt.Fprint(os.Stdout, sb.String())
+			return nil
 		},
 	}
 	return cmd
