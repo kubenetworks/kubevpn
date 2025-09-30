@@ -147,9 +147,6 @@ func (c *Config) removeHosts(hosts []Entry) error {
 		return nil
 	}
 
-	c.Lock.Lock()
-	defer c.Lock.Unlock()
-
 	for i := 0; i < len(c.Hosts); i++ {
 		if sets.New[Entry]().Insert(hosts...).Has(c.Hosts[i]) {
 			c.Hosts = append(c.Hosts[:i], c.Hosts[i+1:]...)
