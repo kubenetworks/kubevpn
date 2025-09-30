@@ -11,7 +11,6 @@ import (
 
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
@@ -54,7 +53,7 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 }
 
 func (c *Config) CancelDNS() {
-	c.removeHosts(sets.New[Entry]().Insert(c.Hosts...).UnsortedList())
+	c.removeHosts()
 	tun, err := net.InterfaceByName(c.TunName)
 	if err != nil {
 		return

@@ -210,7 +210,7 @@ func (c *Config) CancelDNS() {
 		}
 	}
 	//networkCancel()
-	_ = c.removeHosts(sets.New[Entry]().Insert(c.Hosts...).UnsortedList())
+	_ = c.removeHosts()
 }
 
 // GetResolvers
