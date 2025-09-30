@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	errors2 "github.com/pkg/errors"
@@ -26,7 +27,13 @@ import (
 func GetKubeConfigPath(f cmdutil.Factory) string {
 	rawConfig := f.ToRawKubeConfigLoader()
 	if rawConfig.ConfigAccess().IsExplicitFile() {
-		return rawConfig.ConfigAccess().GetExplicitFile()
+		file := rawConfig.ConfigAccess().GetExplicitFile()
+		abs, err := filepath.Abs(file)
+		if err != nil {
+			return file
+		} else {
+			return abs
+		}
 	} else {
 		return rawConfig.ConfigAccess().GetDefaultFilename()
 	}

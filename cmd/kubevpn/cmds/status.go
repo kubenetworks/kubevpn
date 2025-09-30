@@ -140,8 +140,30 @@ func genConnectMsg(w *tabwriter.Writer, currentConnectionID string, status []*rp
 	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "CURRENT", "CONNECTION ID", "CLUSTER", "KUBECONFIG", "NAMESPACE", "STATUS", "NETIF")
 	for _, c := range status {
 		current := util.If[string](c.ConnectionID == currentConnectionID, "*", "")
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", current, c.ConnectionID, c.Cluster, c.Kubeconfig, c.Namespace, c.Status, c.Netif)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", current, c.ConnectionID, c.Cluster, shortenPath(c.Kubeconfig), c.Namespace, c.Status, c.Netif)
 	}
+}
+
+func shortenPath(absPath string) string {
+	// on windows
+	// cmd.exe not recognize '~', eg: cd ~, will error
+	// powershell.exe can recognize '~'
+	if util.IsWindows() {
+		return absPath
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return absPath
+	}
+	relativePath, err := filepath.Rel(homeDir, absPath)
+	if err != nil {
+		return absPath
+	}
+	if strings.HasPrefix(relativePath, "..") {
+		return absPath
+	}
+	return filepath.Join("~", relativePath)
 }
 
 func genProxyMsg(w *tabwriter.Writer, list []*rpc.Status) {
