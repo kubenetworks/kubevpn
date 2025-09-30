@@ -49,7 +49,7 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) erro
 	err := c.appendHosts(appendHosts)
 	c.Lock.Unlock()
 	if err != nil {
-		plog.G(ctx).Errorf("Failed to add hosts(%s): %v", entryList2String(appendHosts), err)
+		plog.G(ctx).Errorf("Failed to add hosts(%s): %v", c.entryList2String(appendHosts), err)
 		return err
 	}
 
@@ -111,7 +111,7 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, hosts []Entry) {
 		err = c.appendHosts(appendHosts)
 		c.Lock.Unlock()
 		if err != nil && !errors.Is(err, context.Canceled) {
-			plog.G(ctx).Errorf("Failed to add hosts(%s) to hosts: %v", entryList2String(appendHosts), err)
+			plog.G(ctx).Errorf("Failed to add hosts(%s) to hosts: %v", c.entryList2String(appendHosts), err)
 		}
 	}
 }
@@ -137,46 +137,27 @@ func (c *Config) appendHosts(appendHosts []Entry) error {
 		return err
 	}
 	defer f.Close()
-	str := entryList2String(appendHosts)
+	str := c.entryList2String(appendHosts)
 	_, err = f.WriteString(str)
 	return err
 }
 
-func (c *Config) removeHosts(hosts []Entry) error {
-	if len(hosts) == 0 {
-		return nil
-	}
-
-	for i := 0; i < len(c.Hosts); i++ {
-		if sets.New[Entry]().Insert(hosts...).Has(c.Hosts[i]) {
-			c.Hosts = append(c.Hosts[:i], c.Hosts[i+1:]...)
-			i--
-		}
-	}
-
+func (c *Config) removeHosts() error {
 	hostFile := GetHostFile()
 	content, err2 := os.ReadFile(hostFile)
 	if err2 != nil {
 		return err2
 	}
-	if !strings.Contains(string(content), config.HostsKeyWord) {
+	if !strings.Contains(string(content), config.HostsKeyword) {
 		return nil
 	}
 
+	keyword := fmt.Sprintf(config.HostsDeviceKeyword, c.TunName)
 	var retain []string
 	reader := bufio.NewReader(bytes.NewReader(content))
 	for {
 		line, err := reader.ReadString('\n')
-		var needsRemove bool
-		if strings.Contains(line, config.HostsKeyWord) {
-			for _, host := range hosts {
-				if strings.Contains(line, host.IP) && strings.Contains(line, host.Domain) {
-					needsRemove = true
-					break
-				}
-			}
-		}
-		if !needsRemove {
+		if !strings.Contains(line, keyword) {
 			retain = append(retain, line)
 		}
 		if errors.Is(err, io.EOF) {
@@ -205,11 +186,11 @@ type Entry struct {
 	Domain string
 }
 
-func entryList2String(entryList []Entry) string {
+func (c *Config) entryList2String(entryList []Entry) string {
 	var sb = new(bytes.Buffer)
 	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
 	for _, e := range entryList {
-		_, _ = fmt.Fprintf(w, "\n%s\t%s\t%s\t%s", e.IP, e.Domain, "", config.HostsKeyWord)
+		_, _ = fmt.Fprintf(w, "\n%s\t%s\t%s\t%s", e.IP, e.Domain, "", fmt.Sprintf(config.HostsDeviceKeyword, c.TunName))
 	}
 	_ = w.Flush()
 	return sb.String()
@@ -250,7 +231,7 @@ func (c *Config) generateAppendHosts(serviceList []v12.Service, hosts []Entry) [
 		for {
 			line, err := reader.ReadString('\n')
 			for i := 0; i < len(entryList); i++ {
-				if strings.Contains(line, config.HostsKeyWord) && strings.Contains(line, entryList[i].Domain) {
+				if strings.Contains(line, config.HostsKeyword) && strings.Contains(line, entryList[i].Domain) {
 					entryList = append(entryList[:i], entryList[i+1:]...)
 					i--
 				}
@@ -275,7 +256,7 @@ func CleanupHosts() error {
 	if err2 != nil {
 		return err2
 	}
-	if !strings.Contains(string(content), config.HostsKeyWord) {
+	if !strings.Contains(string(content), config.HostsKeyword) {
 		return nil
 	}
 
@@ -283,7 +264,7 @@ func CleanupHosts() error {
 	reader := bufio.NewReader(bytes.NewReader(content))
 	for {
 		line, err := reader.ReadString('\n')
-		if !strings.Contains(line, config.HostsKeyWord) {
+		if !strings.Contains(line, config.HostsKeyword) {
 			retain = append(retain, line)
 		}
 		if errors.Is(err, io.EOF) {

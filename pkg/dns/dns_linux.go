@@ -15,7 +15,6 @@ import (
 
 	"github.com/docker/docker/libnetwork/resolvconf"
 	miekgdns "github.com/miekg/dns"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"tailscale.com/net/dns"
 	"tailscale.com/util/dnsname"
 
@@ -155,7 +154,7 @@ func (c *Config) UseLibraryDNS(tunName string, clientConfig *miekgdns.ClientConf
 }
 
 func (c *Config) CancelDNS() {
-	c.removeHosts(sets.New[Entry]().Insert(c.Hosts...).UnsortedList())
+	c.removeHosts()
 	if c.OSConfigurator != nil {
 		_ = c.OSConfigurator.Close()
 	}

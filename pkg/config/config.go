@@ -93,8 +93,9 @@ const (
 
 	EnvSSHJump = "SSH_JUMP_BY_KUBEVPN"
 
-	// hosts entry key word
-	HostsKeyWord = "# Add by KubeVPN"
+	// hosts entry keyword
+	HostsKeyword       = "Added by KubeVPN"
+	HostsDeviceKeyword = "# For dev %s " + HostsKeyword
 )
 
 var (
