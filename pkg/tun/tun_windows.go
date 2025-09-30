@@ -31,13 +31,26 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if len(cfg.Name) != 0 {
 		tunName = cfg.Name
 	}
+	var interfaces []net.Interface
+	interfaces, err = net.Interfaces()
+	if err != nil {
+		return
+	}
+	maxIndex := -1
+	for _, i := range interfaces {
+		ifIndex := -1
+		_, err := fmt.Sscanf(i.Name, "KubeVPN%d", &ifIndex)
+		if err == nil && ifIndex >= 0 && maxIndex < ifIndex {
+			maxIndex = ifIndex
+		}
+	}
 	mtu := cfg.MTU
 	if mtu <= 0 {
 		mtu = config.DefaultMTU
 	}
 
 	wireguardtun.WintunTunnelType = "KubeVPN"
-	tunDevice, err := wireguardtun.CreateTUN(tunName, mtu)
+	tunDevice, err := wireguardtun.CreateTUN(fmt.Sprintf("KubeVPN%d", maxIndex+1), mtu)
 	if err != nil {
 		err = fmt.Errorf("failed to create TUN device: %w", err)
 		return
