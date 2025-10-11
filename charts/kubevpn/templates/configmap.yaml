@@ -4,8 +4,15 @@ metadata:
   name: {{ include "kubevpn.fullname" . }}
   namespace: {{ include "kubevpn.namespace" . }}
 data:
+  {{- $existingConfigmap := (lookup "v1" "ConfigMap" (include "kubevpn.namespace" .) (include "kubevpn.fullname" .)) }}
+  {{- if $existingConfigmap }}
+    {{- range $key, $value := $existingConfigmap.data }}
+  {{ $key }}: {{ $value | quote }}
+    {{- end }}
+  {{- else }}
   DHCP: ""
   DHCP6: ""
   ENVOY_CONFIG: ""
   IPv4_POOLS: "{{ .Values.cidr.pod }} {{ .Values.cidr.service }}"
   REF_COUNT: "0"
+  {{- end }}

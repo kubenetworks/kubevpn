@@ -8,7 +8,12 @@ webhooks:
       - v1
       - v1beta1
     clientConfig:
+      {{- $secret := (lookup "v1" "Secret" (include "kubevpn.namespace" .) (include "kubevpn.fullname" .)) }}
+      {{- if $secret }}
+      caBundle: {{ index $secret.data "tls_crt"  }}
+      {{- else }}
       caBundle: {{ .Values.tls.crt }}
+      {{- end }}
       service:
         name: {{ include "kubevpn.fullname" . }}
         namespace: {{ include "kubevpn.namespace" . }}
