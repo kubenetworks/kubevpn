@@ -102,8 +102,6 @@ iptables -P FORWARD ACCEPT
 ip6tables -P FORWARD ACCEPT
 iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIPv4}
 ip6tables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIPv6}
-iptables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
-ip6tables -t nat -A POSTROUTING ! -p icmp -j MASQUERADE
 kubevpn server -l "tun:/tcp://${TrafficManagerService}:10801?net=${TunIPv4}&net6=${TunIPv6}&route=${CIDR4}"`,
 		},
 		SecurityContext: &corev1.SecurityContext{
