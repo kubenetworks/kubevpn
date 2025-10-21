@@ -47,8 +47,7 @@ func (l *ProxyList) Remove(ns, workload string) {
 	}
 }
 
-func (l *ProxyList) Add(managerNamespace string, proxy *Proxy) {
-	go proxy.portMapper.Run(managerNamespace)
+func (l *ProxyList) Add(proxy *Proxy) {
 	*l = append(*l, proxy)
 }
 
