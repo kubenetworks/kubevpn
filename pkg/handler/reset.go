@@ -108,7 +108,7 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 
 	plog.G(ctx).Infof("Leaving workload %s", workload)
 
-	inject.RemoveContainers(templateSpec)
+	inject.RemoveContainers(&templateSpec.Spec)
 
 	helper := pkgresource.NewHelper(controller.Client, controller.Mapping)
 	plog.G(ctx).Debugf("The %s is under controller management", workload)

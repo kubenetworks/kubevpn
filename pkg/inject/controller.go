@@ -28,19 +28,19 @@ var envoyConfigFargate []byte
 //go:embed fargate_envoy_ipv4.yaml
 var envoyConfigIPv4Fargate []byte
 
-func RemoveContainers(spec *v1.PodTemplateSpec) {
-	for i := 0; i < len(spec.Spec.Containers); i++ {
-		if sets.New[string](config.ContainerSidecarEnvoyProxy, config.ContainerSidecarVPN).Has(spec.Spec.Containers[i].Name) {
-			spec.Spec.Containers = append(spec.Spec.Containers[:i], spec.Spec.Containers[i+1:]...)
+func RemoveContainers(spec *v1.PodSpec) {
+	for i := 0; i < len(spec.Containers); i++ {
+		if sets.New[string](config.ContainerSidecarEnvoyProxy, config.ContainerSidecarVPN).Has(spec.Containers[i].Name) {
+			spec.Containers = append(spec.Containers[:i], spec.Containers[i+1:]...)
 			i--
 		}
 	}
 }
 
-// AddMeshContainer todo envoy support ipv6
-func AddMeshContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 bool, managerNamespace string, secret *v1.Secret, image string) {
+// AddVPNAndEnvoyContainer todo envoy support ipv6
+func AddVPNAndEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 bool, managerNamespace string, secret *v1.Secret, image string) {
 	// remove envoy proxy containers if already exist
-	RemoveContainers(spec)
+	RemoveContainers(&spec.Spec)
 
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarVPN,
@@ -169,9 +169,9 @@ kubevpn server -l "tun:/tcp://${TrafficManagerService}:10801?net=${TunIPv4}&net6
 	})
 }
 
-func AddEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 bool, managerNamespace string, image string) {
+func AddEnvoyAndSSHContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 bool, managerNamespace string, image string) {
 	// remove envoy proxy containers if already exist
-	RemoveContainers(spec)
+	RemoveContainers(&spec.Spec)
 
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarVPN,
@@ -242,4 +242,113 @@ func GetEnvoyConfig(tmplStr string, value string) string {
 		return ""
 	}
 	return buf.String()
+}
+
+func AddVPNContainer(spec *v1.PodSpec, c util.PodRouteConfig, managerNamespace string, secret *v1.Secret, image string) {
+	// remove vpn container if already exist
+	RemoveContainers(spec)
+	spec.Containers = append(spec.Containers, v1.Container{
+		Name:  config.ContainerSidecarVPN,
+		Image: image,
+		Env: []v1.EnvVar{
+			{
+				Name:  "LocalTunIPv4",
+				Value: c.LocalTunIPv4,
+			},
+			{
+				Name:  "LocalTunIPv6",
+				Value: c.LocalTunIPv6,
+			},
+			{
+				Name:  config.EnvInboundPodTunIPv4,
+				Value: "",
+			},
+			{
+				Name:  config.EnvInboundPodTunIPv6,
+				Value: "",
+			},
+			{
+				Name:  "CIDR4",
+				Value: config.CIDR.String(),
+			},
+			{
+				Name:  "CIDR6",
+				Value: config.CIDR6.String(),
+			},
+			{
+				Name:  "TrafficManagerService",
+				Value: fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, managerNamespace),
+			},
+			{
+				Name: config.EnvPodNamespace,
+				ValueFrom: &v1.EnvVarSource{
+					FieldRef: &v1.ObjectFieldSelector{
+						FieldPath: "metadata.namespace",
+					},
+				},
+			},
+			{
+				Name: config.EnvPodName,
+				ValueFrom: &v1.EnvVarSource{
+					FieldRef: &v1.ObjectFieldSelector{
+						FieldPath: "metadata.name",
+					},
+				},
+			},
+			{
+				Name:  config.TLSServerName,
+				Value: string(secret.Data[config.TLSServerName]),
+			},
+			{
+				Name:  config.TLSCertKey,
+				Value: string(secret.Data[config.TLSCertKey]),
+			},
+			{
+				Name:  config.TLSPrivateKeyKey,
+				Value: string(secret.Data[config.TLSPrivateKeyKey]),
+			},
+		},
+		Command: []string{"/bin/sh", "-c"},
+		// https://www.netfilter.org/documentation/HOWTO/NAT-HOWTO-6.html#ss6.2
+		// for curl -g -6 [2001:2::999a]:9080/health or curl 127.0.0.1:9080/health hit local PC
+		// output chain
+		// iptables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIPv4}
+		// ip6tables -t nat -A OUTPUT -o lo ! -p icmp -j DNAT --to-destination ${LocalTunIPv6}
+		Args: []string{`
+echo 1 > /proc/sys/net/ipv4/ip_forward
+echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
+echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
+echo 1 > /proc/sys/net/ipv4/conf/all/route_localnet
+update-alternatives --set iptables /usr/sbin/iptables-legacy
+iptables -P INPUT ACCEPT
+ip6tables -P INPUT ACCEPT
+iptables -P FORWARD ACCEPT
+ip6tables -P FORWARD ACCEPT
+iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIPv4}
+ip6tables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIPv6}
+kubevpn server -l "tun:/tcp://${TrafficManagerService}:10801?net=${TunIPv4}&net6=${TunIPv6}&route=${CIDR4}"`,
+		},
+		SecurityContext: &v1.SecurityContext{
+			Capabilities: &v1.Capabilities{
+				Add: []v1.Capability{
+					"NET_ADMIN",
+					//"SYS_MODULE",
+				},
+			},
+			RunAsUser:  pointer.Int64(0),
+			RunAsGroup: pointer.Int64(0),
+			Privileged: pointer.Bool(true),
+		},
+		Resources: v1.ResourceRequirements{
+			Requests: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:    resource.MustParse("128m"),
+				v1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+			Limits: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:    resource.MustParse("256m"),
+				v1.ResourceMemory: resource.MustParse("256Mi"),
+			},
+		},
+		ImagePullPolicy: v1.PullIfNotPresent,
+	})
 }
