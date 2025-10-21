@@ -67,7 +67,7 @@ func InjectEnvoyAndSSH(ctx context.Context, nodeID string, f cmdutil.Factory, ma
 
 	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, f, managerNamespace)
 	// (1) add mesh container
-	AddEnvoyContainer(templateSpec, object.Namespace, nodeID, enableIPv6, managerNamespace, image)
+	AddEnvoyAndSSHContainer(templateSpec, object.Namespace, nodeID, enableIPv6, managerNamespace, image)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	ps := []P{
 		{

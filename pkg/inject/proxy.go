@@ -50,7 +50,7 @@ func InjectVPN(ctx context.Context, nodeID string, f util.Factory, managerNamesp
 		return err
 	}
 
-	AddContainer(&podTempSpec.Spec, c, managerNamespace, secret, image)
+	AddVPNContainer(&podTempSpec.Spec, c, managerNamespace, secret, image)
 
 	workload := fmt.Sprintf("%s/%s", object.Mapping.Resource.Resource, object.Name)
 	helper := resource.NewHelper(object.Client, object.Mapping)

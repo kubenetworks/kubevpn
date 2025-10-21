@@ -32,8 +32,8 @@ import (
 
 // https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio
 
-// InjectServiceMesh patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
-func InjectServiceMesh(ctx context.Context, nodeID string, f cmdutil.Factory, managerNamespace string, object *runtimeresource.Info, c util.PodRouteConfig, headers map[string]string, portMaps []string, secret *v1.Secret, image string) (err error) {
+// InjectEnvoyAndVPN patch a sidecar, using iptables to do port-forward let this pod decide should go to 233.254.254.100 or request to 127.0.0.1
+func InjectEnvoyAndVPN(ctx context.Context, nodeID string, f cmdutil.Factory, managerNamespace string, object *runtimeresource.Info, c util.PodRouteConfig, headers map[string]string, portMaps []string, secret *v1.Secret, image string) (err error) {
 	var clientset *kubernetes.Clientset
 	clientset, err = f.KubernetesClientSet()
 	if err != nil {
@@ -96,7 +96,7 @@ func InjectServiceMesh(ctx context.Context, nodeID string, f cmdutil.Factory, ma
 
 	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, f, managerNamespace)
 	// (1) add mesh container
-	AddMeshContainer(templateSpec, object.Namespace, nodeID, enableIPv6, managerNamespace, secret, image)
+	AddVPNAndEnvoyContainer(templateSpec, object.Namespace, nodeID, enableIPv6, managerNamespace, secret, image)
 	helper := pkgresource.NewHelper(object.Client, object.Mapping)
 	ps := []P{
 		{
@@ -142,9 +142,9 @@ func UnPatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factor
 
 	plog.G(ctx).Infof("Leaving workload %s", workload)
 
-	RemoveContainers(templateSpec)
-
 	if empty {
+		RemoveContainers(&templateSpec.Spec)
+
 		helper := pkgresource.NewHelper(object.Client, object.Mapping)
 		// pod without controller
 		if len(depth) == 0 {
@@ -330,13 +330,4 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, namespace string, no
 	configMap.Data[config.KeyEnvoy] = string(bytes)
 	_, err = mapInterface.Update(context.Background(), configMap, metav1.UpdateOptions{})
 	return empty, found, err
-}
-
-func contains(a map[string]string, sub map[string]string) bool {
-	for k, v := range sub {
-		if a[k] != v {
-			return false
-		}
-	}
-	return true
 }

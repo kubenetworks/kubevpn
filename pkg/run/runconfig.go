@@ -97,7 +97,7 @@ func (option *Options) ConvertPodToContainerConfigList(
 	mountVolume map[string][]mount.Mount,
 	dnsConfig *dns.ClientConfig,
 ) (configList ConfigList, err error) {
-	inject.RemoveContainers(&temp)
+	inject.RemoveContainers(&temp.Spec)
 	// move dev container to location first
 	for index, c := range temp.Spec.Containers {
 		if option.ContainerName == c.Name {

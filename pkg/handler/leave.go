@@ -69,7 +69,7 @@ func (c *ConnectOptions) LeaveResource(ctx context.Context, resources []Resource
 			err = inject.ModifyServiceTargetPort(ctx, c.clientset, workload.Namespace, object.Name, map[int32]int32{})
 			errs = append(errs, err)
 		}
-		c.LeavePortMap(workload.Namespace, workload.Workload)
+		c.leavePortMap(workload.Namespace, workload.Workload)
 	}
 	return errors.NewAggregate(errs)
 }

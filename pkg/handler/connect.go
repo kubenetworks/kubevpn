@@ -189,21 +189,6 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		if err != nil {
 			return
 		}
-		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
-		// todo consider to use ephemeral container
-		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
-		// means mesh mode
-		if util.IsK8sService(object) {
-			err = inject.InjectEnvoyAndSSH(ctx, nodeID, c.factory, c.Namespace, object, controller, headers, portMap, image)
-		} else if len(headers) != 0 || len(portMap) != 0 {
-			err = inject.InjectServiceMesh(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, headers, portMap, tlsSecret, image)
-		} else {
-			err = inject.InjectVPN(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, tlsSecret, image)
-		}
-		if err != nil {
-			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %s", workload, namespace, err.Error())
-			return err
-		}
 		c.proxyWorkloads.Add(c.Namespace, &Proxy{
 			headers:    headers,
 			portMap:    portMap,
@@ -211,6 +196,22 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 			namespace:  namespace,
 			portMapper: util.If(util.IsK8sService(object), NewMapper(c.clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), headers, workload), nil),
 		})
+
+		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
+		// todo consider to use ephemeral container
+		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
+		// means mesh mode
+		if util.IsK8sService(object) {
+			err = inject.InjectEnvoyAndSSH(ctx, nodeID, c.factory, c.Namespace, object, controller, headers, portMap, image)
+		} else if len(headers) != 0 || len(portMap) != 0 {
+			err = inject.InjectEnvoyAndVPN(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, headers, portMap, tlsSecret, image)
+		} else {
+			err = inject.InjectVPN(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, tlsSecret, image)
+		}
+		if err != nil {
+			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %s", workload, namespace, err.Error())
+			return err
+		}
 	}
 	return
 }
@@ -1177,7 +1178,7 @@ func (c *ConnectOptions) getRolloutFunc() []func() error {
 	return c.rollbackFuncList
 }
 
-func (c *ConnectOptions) LeavePortMap(ns, workload string) {
+func (c *ConnectOptions) leavePortMap(ns, workload string) {
 	c.proxyWorkloads.Remove(ns, workload)
 }
 
