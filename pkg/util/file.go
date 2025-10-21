@@ -122,10 +122,10 @@ func ParseDirMapping(dir string) (local, remote string, err error) {
 }
 
 func CleanupTempKubeConfigFile() error {
-	return filepath.Walk(config.GetTempPath(), func(path string, info fs.FileInfo, err error) error {
-		if strings.HasSuffix(path, ".kubeconfig") {
-			return os.Remove(path)
+	return filepath.WalkDir(config.GetTempPath(), func(path string, info fs.DirEntry, err error) error {
+		if info.IsDir() {
+			return nil
 		}
-		return err
+		return os.Remove(path)
 	})
 }

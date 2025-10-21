@@ -13,8 +13,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/distribution/reference"
-	"github.com/hashicorp/go-version"
 	"github.com/moby/term"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -24,7 +22,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
-	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
@@ -33,10 +30,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/cmd/exec"
 	"k8s.io/kubectl/pkg/cmd/util"
-	"k8s.io/kubectl/pkg/polymorphichelpers"
-	scheme2 "k8s.io/kubectl/pkg/scheme"
 	"k8s.io/kubectl/pkg/util/podutils"
-	pkgclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -75,28 +69,6 @@ func PrintStatus(pod *corev1.Pod, writer io.Writer) {
 			show(status.Name, status.State.Terminated.Reason, status.State.Terminated.Message)
 		}
 	}
-}
-
-func PrintStatusInline(pod *corev1.Pod) string {
-	var sb = bytes.NewBuffer(nil)
-	w := tabwriter.NewWriter(sb, 1, 1, 1, ' ', 0)
-	show := func(v1, v2 any) {
-		_, _ = fmt.Fprintf(w, "%v\t\t%v", v1, v2)
-	}
-
-	for _, status := range pod.Status.ContainerStatuses {
-		if status.State.Waiting != nil {
-			show(status.State.Waiting.Reason, status.State.Waiting.Message)
-		}
-		if status.State.Running != nil {
-			show("ContainerRunning", "")
-		}
-		if status.State.Terminated != nil {
-			show(status.State.Terminated.Reason, status.State.Terminated.Message)
-		}
-	}
-	_ = w.Flush()
-	return sb.String()
 }
 
 func GetEnv(ctx context.Context, set *kubernetes.Clientset, config *rest.Config, ns, podName string) (map[string]string, error) {
@@ -304,30 +276,6 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 	}
 }
 
-func Rollback(f util.Factory, ns, workload string) {
-	r := f.NewBuilder().
-		WithScheme(scheme2.Scheme, scheme2.Scheme.PrioritizedVersionsAllGroups()...).
-		NamespaceParam(ns).DefaultNamespace().
-		ResourceTypeOrNameArgs(true, workload).
-		ContinueOnError().
-		Latest().
-		Flatten().
-		Do()
-	if r.Err() == nil {
-		_ = r.Visit(func(info *resource.Info, err error) error {
-			if err != nil {
-				return err
-			}
-			rollbacker, err := polymorphichelpers.RollbackerFn(f, info.ResourceMapping())
-			if err != nil {
-				return err
-			}
-			_, err = rollbacker.Rollback(info.Object, nil, 0, util.DryRunNone)
-			return err
-		})
-	}
-}
-
 func GetRunningPodList(ctx context.Context, clientset *kubernetes.Clientset, ns string, labelSelector string) ([]corev1.Pod, error) {
 	list, err := clientset.CoreV1().Pods(ns).List(ctx, v1.ListOptions{
 		LabelSelector: labelSelector,
@@ -345,67 +293,6 @@ func GetRunningPodList(ctx context.Context, clientset *kubernetes.Clientset, ns 
 		return nil, fmt.Errorf("no running pod with label: %s", labelSelector)
 	}
 	return list.Items, nil
-}
-
-// UpdateImage update to newer image
-func UpdateImage(ctx context.Context, factory util.Factory, ns string, deployName string, image string) error {
-	clientSet, err2 := factory.KubernetesClientSet()
-	if err2 != nil {
-		return err2
-	}
-	deployment, err := clientSet.AppsV1().Deployments(ns).Get(ctx, deployName, v1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	origin := deployment.DeepCopy()
-	newImg, err := reference.ParseNormalizedNamed(image)
-	if err != nil {
-		return err
-	}
-	newTag, ok := newImg.(reference.NamedTagged)
-	if !ok {
-		return nil
-	}
-	oldImg, err := reference.ParseNormalizedNamed(deployment.Spec.Template.Spec.Containers[0].Image)
-	if err != nil {
-		return err
-	}
-	var oldTag reference.NamedTagged
-	oldTag, ok = oldImg.(reference.NamedTagged)
-	if !ok {
-		return nil
-	}
-	if reference.Domain(newImg) != reference.Domain(oldImg) {
-		return nil
-	}
-	var oldVersion, newVersion *version.Version
-	oldVersion, err = version.NewVersion(oldTag.Tag())
-	if err != nil {
-		return nil
-	}
-	newVersion, err = version.NewVersion(newTag.Tag())
-	if err != nil {
-		return nil
-	}
-	if oldVersion.GreaterThanOrEqual(newVersion) {
-		return nil
-	}
-
-	plog.G(ctx).Infof("Found newer image %s, set image from %s to it...", image, deployment.Spec.Template.Spec.Containers[0].Image)
-	for i := range deployment.Spec.Template.Spec.Containers {
-		deployment.Spec.Template.Spec.Containers[i].Image = image
-	}
-	p := pkgclient.MergeFrom(deployment)
-	data, err := pkgclient.MergeFrom(origin).Data(deployment)
-	if err != nil {
-		return err
-	}
-	_, err = clientSet.AppsV1().Deployments(ns).Patch(ctx, deployName, p.Type(), data, v1.PatchOptions{})
-	if err != nil {
-		return err
-	}
-	err = RolloutStatus(ctx, factory, ns, fmt.Sprintf("deployments/%s", deployName), time.Minute*60)
-	return err
 }
 
 func DetectPodSupportIPv6(ctx context.Context, factory util.Factory, namespace string) (bool, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
@@ -24,13 +25,15 @@ const (
 func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.StatusResponse, error) {
 	var list []*rpc.Status
 
+	timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelFunc()
 	if len(req.ConnectionIDs) != 0 {
 		for _, connectionID := range req.ConnectionIDs {
 			for _, options := range svr.connections {
 				if options.GetConnectionID() == connectionID {
 					result := genStatus(options)
 					var err error
-					result.ProxyList, result.SyncList, err = gen(ctx, options, options.Sync)
+					result.ProxyList, result.SyncList, err = gen(timeoutCtx, options, options.Sync)
 					if err != nil {
 						plog.G(context.Background()).Errorf("Error generating status: %v", err)
 					}
@@ -42,7 +45,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 		for _, options := range svr.connections {
 			result := genStatus(options)
 			var err error
-			result.ProxyList, result.SyncList, err = gen(ctx, options, options.Sync)
+			result.ProxyList, result.SyncList, err = gen(timeoutCtx, options, options.Sync)
 			if err != nil {
 				plog.G(context.Background()).Errorf("Error generating status: %v", err)
 			}

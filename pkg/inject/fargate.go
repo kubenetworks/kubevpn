@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -88,7 +87,7 @@ func InjectEnvoyAndSSH(ctx context.Context, nodeID string, f cmdutil.Factory, ma
 		return err
 	}
 	plog.G(ctx).Infof("Patching workload %s", workload)
-	err = util.RolloutStatus(ctx, f, object.Namespace, workload, time.Minute*60)
+	err = util.RolloutStatus(ctx, f, object.Namespace, workload)
 	if err != nil {
 		return err
 	}

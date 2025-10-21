@@ -263,7 +263,7 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 		if err != nil {
 			return err
 		}
-		_ = util.RolloutStatus(ctx, d.factory, d.Namespace, workload, time.Minute*60)
+		_ = util.RolloutStatus(ctx, d.factory, d.Namespace, workload)
 
 		if d.LocalDir != "" {
 			err = d.SyncDir(ctx, fields.SelectorFromSet(labelsMap).String())
@@ -493,7 +493,7 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	}
 	for _, workload := range d.Workloads {
 		plog.G(ctx).Infof("Wait workload %s", workload)
-		err := util.RolloutStatus(ctx, d.factory, d.Namespace, workload, time.Minute*60)
+		err := util.RolloutStatus(ctx, d.factory, d.Namespace, workload)
 		if err != nil {
 			plog.G(ctx).Warnf("Failed to rollback workload %s: %v", workload, err)
 		}
