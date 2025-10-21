@@ -189,12 +189,16 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		if err != nil {
 			return
 		}
-		c.proxyWorkloads.Add(c.Namespace, &Proxy{
+		var mapper *Mapper
+		if util.IsK8sService(object) {
+			mapper = NewMapper(c.clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), headers, workload)
+		}
+		c.proxyWorkloads.Add(&Proxy{
 			headers:    headers,
 			portMap:    portMap,
 			workload:   workload,
 			namespace:  namespace,
-			portMapper: util.If(util.IsK8sService(object), NewMapper(c.clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), headers, workload), nil),
+			portMapper: mapper,
 		})
 
 		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
@@ -211,6 +215,9 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		if err != nil {
 			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %s", workload, namespace, err.Error())
 			return err
+		}
+		if mapper != nil {
+			go mapper.Run(c.Namespace)
 		}
 	}
 	return
