@@ -2,7 +2,7 @@ FROM golang:1.23 AS builder
 RUN go env -w GO111MODULE=on && go env -w GOPROXY=https://goproxy.cn,direct
 RUN go install github.com/go-delve/delve/cmd/dlv@latest
 
-FROM envoyproxy/envoy:v1.25.0 AS envoy
+FROM envoyproxy/envoy:v1.36.2 AS envoy
 FROM ubuntu:latest
 
 RUN sed -i s@/security.ubuntu.com/@/mirrors.aliyun.com/@g /etc/apt/sources.list \
