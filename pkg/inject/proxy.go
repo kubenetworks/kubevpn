@@ -80,7 +80,7 @@ func InjectVPN(ctx context.Context, nodeID string, f util.Factory, managerNamesp
 			return err
 		}
 	}
-	err = util2.RolloutStatus(ctx, f, object.Namespace, workload, time.Minute*60)
+	err = util2.RolloutStatus(ctx, f, object.Namespace, workload)
 	return err
 }
 

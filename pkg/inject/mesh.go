@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
@@ -117,7 +116,7 @@ func InjectServiceMesh(ctx context.Context, nodeID string, f cmdutil.Factory, ma
 		return err
 	}
 	plog.G(ctx).Infof("Patching workload %s", workload)
-	err = util.RolloutStatus(ctx, f, object.Namespace, workload, time.Minute*60)
+	err = util.RolloutStatus(ctx, f, object.Namespace, workload)
 	return err
 }
 

@@ -2,12 +2,15 @@ package handler
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/util/retry"
+	"k8s.io/kubectl/pkg/cmd/rollout"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -15,12 +18,12 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func Once(ctx context.Context, factory cmdutil.Factory) error {
-	clientset, err := factory.KubernetesClientSet()
+func Once(ctx context.Context, f cmdutil.Factory) error {
+	clientset, err := f.KubernetesClientSet()
 	if err != nil {
 		return err
 	}
-	namespace, _, err := factory.ToRawKubeConfigLoader().Namespace()
+	namespace, _, err := f.ToRawKubeConfigLoader().Namespace()
 	if err != nil {
 		return err
 	}
@@ -32,11 +35,11 @@ func Once(ctx context.Context, factory cmdutil.Factory) error {
 	if err != nil {
 		return err
 	}
-	err = restartDeployment(ctx, namespace, clientset)
+	err = restartDeploy(ctx, f)
 	if err != nil {
 		return err
 	}
-	err = getCIDR(ctx, factory)
+	err = getCIDR(ctx, f)
 	if err != nil {
 		return err
 	}
@@ -103,37 +106,27 @@ func genTLS(ctx context.Context, namespace string, clientset *kubernetes.Clients
 	return nil
 }
 
-func restartDeployment(ctx context.Context, namespace string, clientset *kubernetes.Clientset) error {
+func restartDeploy(ctx context.Context, f cmdutil.Factory) error {
 	deployName := config.ConfigMapPodTrafficManager
 	plog.G(ctx).Infof("Restarting Deployment %s", deployName)
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return scaleDeploy(ctx, namespace, clientset, deployName, 0)
+	o := rollout.NewRolloutRestartOptions(genericiooptions.IOStreams{
+		In:     os.Stdin,
+		Out:    os.Stdout,
+		ErrOut: os.Stderr,
 	})
+	err := o.Complete(f, nil, []string{fmt.Sprintf("deploy/%s", deployName)})
 	if err != nil {
 		return err
 	}
-	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return scaleDeploy(ctx, namespace, clientset, deployName, 1)
-	})
+	err = o.Validate()
+	if err != nil {
+		return err
+	}
+	err = o.RunRestart()
 	if err != nil {
 		return err
 	}
 	return nil
-}
-
-func scaleDeploy(ctx context.Context, namespace string, clientset *kubernetes.Clientset, deployName string, replicas int32) error {
-	scale, err := clientset.AppsV1().Deployments(namespace).GetScale(ctx, deployName, metav1.GetOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to get scale: %v", err)
-		return err
-	}
-	scale.Spec.Replicas = replicas
-	scale, err = clientset.AppsV1().Deployments(namespace).UpdateScale(ctx, deployName, scale, metav1.UpdateOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to update scale: %v", err)
-		return err
-	}
-	return err
 }
 
 func getCIDR(ctx context.Context, factory cmdutil.Factory) error {

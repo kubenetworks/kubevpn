@@ -14,8 +14,8 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
-	"time"
 
+	"github.com/spf13/cobra"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -23,11 +23,13 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/kubectl/pkg/cmd/rollout"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 
@@ -39,17 +41,30 @@ func IsWindows() bool {
 	return runtime.GOOS == "windows"
 }
 
-func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, ns, workloads string, timeout time.Duration) (err error) {
+// RolloutStatus not use kubectl rollout options is this method can use context to cancel
+func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string) (err error) {
 	plog.GetLogger(ctx1).Infof("Checking rollout status for %s", workloads)
 	defer func() {
 		if err != nil {
 			plog.G(ctx1).Errorf("Rollout status for %s failed: %s", workloads, err.Error())
+			out := plog.GetLogger(ctx1).Out
+			streams := genericiooptions.IOStreams{
+				In:     os.Stdin,
+				Out:    out,
+				ErrOut: out,
+			}
+			o := rollout.NewRolloutUndoOptions(streams)
+			cmd := &cobra.Command{}
+			cmdutil.AddDryRunFlag(cmd)
+			_ = o.Complete(f, cmd, []string{workloads})
+			_ = o.Validate()
+			_ = o.RunUndo()
 		} else {
 			plog.G(ctx1).Infof("Rollout successfully for %s", workloads)
 		}
 	}()
-	client, _ := factory.DynamicClient()
-	r := factory.NewBuilder().
+	client, _ := f.DynamicClient()
+	r := f.NewBuilder().
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
 		NamespaceParam(ns).DefaultNamespace().
 		ResourceTypeOrNameArgs(true, workloads).
@@ -89,7 +104,7 @@ func RolloutStatus(ctx1 context.Context, factory cmdutil.Factory, ns, workloads 
 	}
 
 	// if the rollout isn't done yet, keep watching deployment status
-	ctx, cancel := watchtools.ContextWithOptionalTimeout(ctx1, timeout)
+	ctx, cancel := context.WithCancel(ctx1)
 	defer cancel()
 	return func() error {
 		_, err = watchtools.UntilWithSync(ctx, lw, &unstructured.Unstructured{}, nil, func(e watch.Event) (bool, error) {
