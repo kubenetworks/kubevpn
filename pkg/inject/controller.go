@@ -50,6 +50,7 @@ func AddVPNAndEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 b
 echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
 echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
+echo 0 > /proc/sys/net/ipv4/tcp_timestamps
 update-alternatives --set iptables /usr/sbin/iptables-legacy
 iptables -P INPUT ACCEPT
 ip6tables -P INPUT ACCEPT
