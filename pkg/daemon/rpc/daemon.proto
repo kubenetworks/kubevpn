@@ -216,8 +216,9 @@ message Status {
   string Namespace = 6;
   string Status = 7;
   string Netif = 8;
-  repeated Proxy ProxyList = 9;
-  repeated Sync SyncList = 10;
+  string IPv4 = 9;
+  repeated Proxy ProxyList = 10;
+  repeated Sync SyncList = 11;
 }
 
 message Proxy {

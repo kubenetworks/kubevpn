@@ -61,6 +61,7 @@ func genStatus(connect *handler.ConnectOptions) *rpc.Status {
 	if tunName == "" {
 		status = StatusFailed
 	}
+	v4, _ := connect.GetLocalTunIP()
 	info := rpc.Status{
 		ConnectionID: connect.GetConnectionID(),
 		Cluster:      util.GetKubeconfigCluster(connect.GetFactory()),
@@ -68,6 +69,7 @@ func genStatus(connect *handler.ConnectOptions) *rpc.Status {
 		Namespace:    connect.OriginNamespace,
 		Status:       status,
 		Netif:        tunName,
+		IPv4:         v4,
 	}
 	return &info
 }

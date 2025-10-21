@@ -28,9 +28,10 @@ import (
 )
 
 const (
-	FormatJson  = "json"
-	FormatYaml  = "yaml"
-	FormatTable = "table"
+	FormatJson      = "json"
+	FormatYaml      = "yaml"
+	FormatTable     = "table"
+	FormatTableWide = "wide"
 )
 
 func CmdStatus(f cmdutil.Factory) *cobra.Command {
@@ -100,7 +101,7 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&aliasName, "alias", "", "Alias name, query connect status by alias config name")
 	cmd.Flags().StringVarP(&localFile, "kubevpnconfig", "f", util.If(os.Getenv("KUBEVPNCONFIG") != "", os.Getenv("KUBEVPNCONFIG"), config.GetConfigFile()), "Path to the kubevpnconfig file to use for CLI requests.")
 	cmd.Flags().StringVarP(&remoteAddr, "remote", "r", "", "Remote config file, eg: https://raw.githubusercontent.com/kubenetworks/kubevpn/master/pkg/config/config.yaml")
-	cmd.Flags().StringVarP(&format, "output", "o", FormatTable, fmt.Sprintf("Output format. One of: (%s, %s, %s)", FormatJson, FormatYaml, FormatTable))
+	cmd.Flags().StringVarP(&format, "output", "o", FormatTable, fmt.Sprintf("Output format. One of: (%s, %s, %s, %s)", FormatJson, FormatYaml, FormatTable, FormatTableWide))
 	return cmd
 }
 
@@ -125,6 +126,14 @@ func genOutput(status *rpc.StatusResponse, format string) (string, error) {
 			return "", err
 		}
 		return string(marshal), nil
+	case FormatTableWide:
+		var sb = new(bytes.Buffer)
+		w := printers.GetNewTabWriter(sb)
+		genConnectWideMsg(w, status.CurrentConnectionID, status.List)
+		genProxyMsg(w, status.List)
+		genSyncMsg(w, status.List)
+		_ = w.Flush()
+		return sb.String(), nil
 	default:
 		var sb = new(bytes.Buffer)
 		w := printers.GetNewTabWriter(sb)
@@ -141,6 +150,14 @@ func genConnectMsg(w *tabwriter.Writer, currentConnectionID string, status []*rp
 	for _, c := range status {
 		current := util.If[string](c.ConnectionID == currentConnectionID, "*", "")
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", current, c.ConnectionID, c.Cluster, shortenPath(c.Kubeconfig), c.Namespace, c.Status, c.Netif)
+	}
+}
+
+func genConnectWideMsg(w *tabwriter.Writer, currentConnectionID string, status []*rpc.Status) {
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "CURRENT", "CONNECTION ID", "CLUSTER", "KUBECONFIG", "NAMESPACE", "STATUS", "NETIF", "IP")
+	for _, c := range status {
+		current := util.If[string](c.ConnectionID == currentConnectionID, "*", "")
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", current, c.ConnectionID, c.Cluster, shortenPath(c.Kubeconfig), c.Namespace, c.Status, c.Netif, c.IPv4)
 	}
 }
 
