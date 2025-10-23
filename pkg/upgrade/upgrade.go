@@ -10,7 +10,9 @@ import (
 	"strings"
 
 	goversion "github.com/hashicorp/go-version"
+	"golang.org/x/oauth2"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/elevate"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -25,11 +27,27 @@ import (
 // 5) unzip to temp file
 // 6) check permission of putting new kubevpn back
 // 7) chmod +x, move old to /temp, move new to CURRENT_FOLDER
-func Main(ctx context.Context, client *http.Client, url string) error {
+func Main(ctx context.Context, quit func(ctx context.Context, isSudo bool) error) error {
 	err := elevatePermission()
 	if err != nil {
 		return err
 	}
+
+	var client = http.DefaultClient
+	if config.GitHubOAuthToken != "" {
+		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
+	}
+	url, latestVersion, needsUpgrade, err := NeedsUpgrade(ctx, client, config.Version)
+	if err != nil {
+		return err
+	}
+	if !needsUpgrade {
+		_, _ = fmt.Fprintln(os.Stdout, fmt.Sprintf("Already up to date, don't needs to upgrade, version: %s", latestVersion))
+		return nil
+	}
+	_, _ = fmt.Fprintln(os.Stdout, fmt.Sprintf("Current version: %s less than latest version: %s, needs to upgrade", config.Version, latestVersion))
+	_ = quit(ctx, true)
+	_ = quit(ctx, false)
 
 	err = downloadAndInstall(client, url)
 	if err != nil {
@@ -37,9 +55,9 @@ func Main(ctx context.Context, client *http.Client, url string) error {
 	}
 
 	plog.G(ctx).Infof("Upgrade daemon...")
-	err = daemon.StartupDaemon(context.Background())
+	_ = daemon.StartupDaemon(context.Background())
 	plog.G(ctx).Info("Done")
-	return err
+	return nil
 }
 
 func downloadAndInstall(client *http.Client, url string) error {
