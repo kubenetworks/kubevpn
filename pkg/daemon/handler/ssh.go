@@ -290,7 +290,7 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 		w.Log("Get latest kubevpn version failed: %v", err)
 		return err
 	}
-	w.Log("The latest version is: %s", latestVersion)
+	w.Log("The latest version is %s", latestVersion)
 	var temp *os.File
 	temp, err = os.CreateTemp("", "")
 	if err != nil {
