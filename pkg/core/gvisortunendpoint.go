@@ -41,6 +41,7 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, c
 // tun --> dispatcher
 func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, conn net.Conn, endpoint *channel.Endpoint) {
 	tcpConn, _ := newGvisorUDPConnOverTCP(ctx, conn)
+	defer tcpConn.Close()
 	defer h.removeFromRouteMapTCP(ctx, conn)
 
 	for ctx.Err() == nil {
