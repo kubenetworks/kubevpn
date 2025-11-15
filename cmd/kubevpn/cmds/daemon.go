@@ -37,7 +37,8 @@ func CmdDaemon(cmdutil.Factory) *cobra.Command {
 				go util.StartupPProf(config.SudoPProfPort)
 				_ = os.RemoveAll("/etc/resolver")
 				_ = dns.CleanupHosts()
-				_ = util.CleanupTempKubeConfigFile()
+				// no delete temp kubeconfig because maybe recover from DB
+				//_ = util.CleanupTempKubeConfigFile()
 			} else {
 				go util.StartupPProf(config.PProfPort)
 			}

@@ -62,5 +62,13 @@ func (c *bufferedTCP) Run(ctx context.Context) {
 
 func (c *bufferedTCP) Close() error {
 	c.closed = true
-	return c.Conn.Close()
+	for {
+		var buf *DatagramPacket
+		select {
+		case buf = <-c.Chan:
+			config.LPool.Put(buf.Data[:])
+		default:
+			return c.Conn.Close()
+		}
+	}
 }
