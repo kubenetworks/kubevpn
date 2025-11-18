@@ -66,6 +66,22 @@ jobs:
           ifconfig
           route -n
           sudo ln /usr/bin/resolvectl /usr/bin/systemd-resolve
+          docker run -d \
+            --name=ssh \
+            -e PUID=1000 \
+            -e PGID=0 \
+            -e TZ=Etc/UTC \
+            -e LANG=C.UTF-8 \
+            -e SUDO_ACCESS=true \
+            -e PASSWORD_ACCESS=true \
+            -e USER_PASSWORD=naison \
+            -e USER_NAME=naison \
+            -e DOCKER_MODS=linuxserver/mods:openssh-server-ssh-tunnel \
+            -p 127.0.0.1:2222:2222 \
+            --restart always \
+            --privileged \
+            --net host \
+            lscr.io/linuxserver/openssh-server:latest
 
       - name: Test
         run: make ut
