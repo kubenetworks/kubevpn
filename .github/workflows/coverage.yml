@@ -80,6 +80,7 @@ jobs:
             -p 127.0.0.1:2222:2222 \
             --restart always \
             --privileged \
+            --net host \
             lscr.io/linuxserver/openssh-server:latest
 
       - name: Test
