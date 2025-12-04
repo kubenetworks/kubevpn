@@ -666,7 +666,7 @@ func (c *ConnectOptions) setupDNS(ctx context.Context, svcInformer cache.SharedI
 	}
 
 	ns := []string{c.OriginNamespace}
-	list, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{Limit: 100})
+	list, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{Limit: 500})
 	if err == nil {
 		for _, item := range list.Items {
 			if !sets.New[string](ns...).Has(item.Name) {
