@@ -91,7 +91,7 @@ type Rule struct {
 	PortMap map[int32]string
 }
 
-func (a *Virtual) To(enableIPv6 bool, logger *log.Logger) (
+func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 	listeners []types.Resource,
 	clusters []types.Resource,
 	routes []types.Resource,

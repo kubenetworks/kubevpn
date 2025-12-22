@@ -47,7 +47,7 @@ func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string
 	defer func() {
 		if err != nil {
 			plog.G(ctx1).Errorf("Rollout status for %s failed: %s", workloads, err.Error())
-			out := plog.GetLogger(ctx1).Out
+			out := plog.GetLogger(ctx1).Logger.Out
 			streams := genericiooptions.IOStreams{
 				In:     os.Stdin,
 				Out:    out,

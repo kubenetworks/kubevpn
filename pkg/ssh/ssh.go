@@ -113,9 +113,9 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 					var openChannelError *gossh.OpenChannelError
 					// if ssh server not permitted ssh port-forward, do nothing until exit
 					if errors.As(err, &openChannelError) && openChannelError.Reason == gossh.Prohibited {
-						plog.G(ctx).Debugf("Failed to open ssh port-forward to %s: %v", remote.String(), err)
-						plog.G(ctx).Errorf("Failed to open ssh port-forward to %s: %v", remote.String(), err)
+						plog.G(ctx).Errorf("Prohibited to open ssh port-forward to %s: %v", remote.String(), err)
 						cancelFunc1()
+						return
 					}
 					plog.G(ctx).Debugf("Failed to dial into remote %s: %v", remote.String(), err)
 					return
