@@ -21,13 +21,13 @@ import (
 
 type Processor struct {
 	cache   cache.SnapshotCache
-	logger  *log.Logger
+	logger  *log.Entry
 	version int64
 
 	expireCache *utilcache.Expiring
 }
 
-func NewProcessor(cache cache.SnapshotCache, log *log.Logger) *Processor {
+func NewProcessor(cache cache.SnapshotCache, log *log.Entry) *Processor {
 	return &Processor{
 		cache:       cache,
 		logger:      log,

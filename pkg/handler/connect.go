@@ -336,7 +336,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 						}
 					}()
 				}
-				out := plog.G(ctx).Out
+				out := plog.G(ctx).Logger.Out
 				err = util.PortForwardPod(
 					c.config,
 					c.restclient,
@@ -345,7 +345,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 					portPair,
 					readyChan,
 					childCtx.Done(),
-					out,
+					nil,
 					out,
 				)
 				if *first {

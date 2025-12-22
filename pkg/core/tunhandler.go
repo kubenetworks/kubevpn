@@ -34,6 +34,12 @@ func TunHandler(node *Node, forward *Forwarder) Handler {
 }
 
 func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
+	tunIfi, err := util.GetTunDeviceByConn(tun)
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to get tun device: %v", err)
+		return
+	}
+	ctx = plog.WithField(ctx, tunIfi.Name, "")
 	if !h.forward.IsEmpty() {
 		h.HandleClient(ctx, tun, h.forward)
 	} else {

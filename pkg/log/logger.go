@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -65,6 +66,18 @@ type serverFormat struct {
 // 2009/01/23 01:23:23 d.go:23: message
 func (*serverFormat) Format(e *log.Entry) ([]byte, error) {
 	// e.Caller maybe is nil, because pkg/handler/connect.go:252
+	if len(e.Data) > 0 {
+		return []byte(
+			fmt.Sprintf("%s %s %s:%d %s: %s\n",
+				GenStr(e.Data),
+				e.Time.Format("2006-01-02 15:04:05.000"),
+				filepath.Base(ptr.Deref(e.Caller, runtime.Frame{}).File),
+				ptr.Deref(e.Caller, runtime.Frame{}).Line,
+				e.Level.String(),
+				e.Message,
+			)), nil
+	}
+
 	return []byte(
 		fmt.Sprintf("%s %s:%d %s: %s\n",
 			e.Time.Format("2006-01-02 15:04:05.000"),
@@ -105,4 +118,39 @@ func (g ServerEmitter) Emit(depth int, level glog.Level, timestamp time.Time, fo
 		level.String(),
 		message,
 	)
+}
+
+func GenStr(allFields map[string]any) string {
+	fieldsStr := ""
+
+	keys := make([]string, len(allFields))
+	i := 0
+	for field := range allFields {
+		keys[i] = field
+		i++
+	}
+
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		var valueStr string
+		value := allFields[key]
+
+		if stringer, ok := value.(fmt.Stringer); ok {
+			valueStr = stringer.String()
+		} else {
+			valueStr = fmt.Sprintf("%v", value)
+		}
+
+		if strings.Contains(valueStr, " ") {
+			valueStr = `"` + valueStr + `"`
+		}
+		if valueStr == "" {
+			fieldsStr += key + " "
+		} else {
+			fieldsStr += key + "=" + valueStr + " "
+		}
+
+	}
+	return fmt.Sprintf("[%s]", strings.TrimSpace(fieldsStr))
 }

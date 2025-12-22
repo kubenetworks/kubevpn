@@ -162,7 +162,7 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 			config.LPool.Put(buf[:])
 			continue
 		}
-		plog.G(context.Background()).Debugf("SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
+		plog.G(plog.WithFields(context.Background(), plog.GetFields(ctx))).Debugf("SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
 		packet := NewPacket(buf[:], n+1, src, dst)
 		if packet.src.Equal(packet.dst) {
 			gvisorInbound <- packet

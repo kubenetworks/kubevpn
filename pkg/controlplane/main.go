@@ -11,7 +11,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.Logger) error {
+func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.Entry) error {
 	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, logger)
 	proc := NewProcessor(snapshotCache, logger)
 

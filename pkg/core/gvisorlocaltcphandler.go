@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
@@ -10,6 +11,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -47,7 +49,7 @@ func (h *gvisorLocalHandler) Run(ctx context.Context) {
 		readFromEndpointWriteToTun(ctx, endpoint, h.outbound)
 		util.SafeClose(h.errChan)
 	}()
-	s := NewLocalStack(ctx, sniffer.NewWithPrefix(endpoint, "[gVISOR] "))
+	s := NewLocalStack(ctx, sniffer.NewWithPrefix(endpoint, fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))))
 	defer s.Destroy()
 	select {
 	case <-h.errChan:

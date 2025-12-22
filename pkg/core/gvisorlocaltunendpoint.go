@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -16,10 +17,11 @@ import (
 )
 
 func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint, out chan<- *Packet) {
+	prefix := fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))
 	for ctx.Err() == nil {
 		pkt := endpoint.ReadContext(ctx)
 		if pkt != nil {
-			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
+			sniffer.LogPacket(prefix, sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
 			data := pkt.ToView().AsSlice()
 			buf := config.LPool.Get().([]byte)[:]
 			n := copy(buf[1:], data)
@@ -30,6 +32,7 @@ func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint,
 }
 
 func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *Packet, endpoint *channel.Endpoint) {
+	prefix := fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))
 	for ctx.Err() == nil {
 		var packet *Packet
 		select {
@@ -60,7 +63,7 @@ func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *Packet
 			Payload:            buffer.MakeWithData(packet.data[1:packet.length]),
 		})
 		config.LPool.Put(packet.data[:])
-		sniffer.LogPacket("[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
+		sniffer.LogPacket(prefix, sniffer.DirectionRecv, protocol, pkt)
 		endpoint.InjectInbound(protocol, pkt)
 		pkt.DecRef()
 	}
