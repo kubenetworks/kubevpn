@@ -80,7 +80,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if !sshConf.IsEmpty() {
+			if !sshConf.IsEmpty() && !sshConf.IsLoopback() {
 				if ip := util.GetAPIServerFromKubeConfigBytes(bytes); ip != nil {
 					extraRoute.ExtraCIDR = append(extraRoute.ExtraCIDR, ip.String())
 				}

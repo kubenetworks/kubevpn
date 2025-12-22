@@ -113,6 +113,28 @@ func (conf SshConfig) IsEmpty() bool {
 	return conf.ConfigAlias == "" && conf.Addr == "" && conf.Jump == ""
 }
 
+// IsLoopback TODO support alias and proxyJump
+func (conf SshConfig) IsLoopback() bool {
+	if conf.Addr != "" {
+		var host string
+		var err error
+		if host, _, err = net.SplitHostPort(conf.Addr); err != nil {
+			host = conf.Addr
+		}
+		ip, err := net.LookupIP(host)
+		if err != nil {
+			return false
+		}
+		for _, i := range ip {
+			if i.IsLoopback() {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
 func (conf SshConfig) GetAuth() ([]ssh.AuthMethod, error) {
 	host, _, _ := net.SplitHostPort(conf.Addr)
 	var auth []ssh.AuthMethod
