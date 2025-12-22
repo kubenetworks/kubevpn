@@ -884,8 +884,5 @@ func (u *sshUt) startupHttpServer(t *testing.T, addr, str string) {
 	mux.HandleFunc("/", health)
 	mux.HandleFunc("/health", health)
 	t.Logf("Start listening http addr %s ...", addr)
-	err := http.ListenAndServe(addr, mux)
-	if err != nil {
-		t.Fatal(err)
-	}
+	_ = http.ListenAndServe(addr, mux)
 }
