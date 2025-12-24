@@ -404,7 +404,7 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 
 	var routes []types.Route
 	for _, ipNet := range util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cidrList), c.apiServerIPs) {
-		if ipNet != nil {
+		if ipNet != nil && !ipNet.IP.IsLoopback() {
 			routes = append(routes, types.Route{Dst: *ipNet})
 		}
 	}

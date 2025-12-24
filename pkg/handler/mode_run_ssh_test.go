@@ -19,7 +19,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (u *ut) deleteDeployForSaveResource(t *testing.T) {
+func (u *sshUt) deleteDeployForSaveResource(t *testing.T) {
 	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
 	for _, s := range []string{"productpage", "ratings"} {
 		err := u.clientset.AppsV1().Deployments(u.namespace).Delete(context.Background(), s, options)
@@ -29,7 +29,7 @@ func (u *ut) deleteDeployForSaveResource(t *testing.T) {
 	}
 }
 
-func (u *ut) resetDeployAuthors(t *testing.T) {
+func (u *sshUt) resetDeployAuthors(t *testing.T) {
 	cmd := exec.Command("kubevpn", "reset", "deploy/authors")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -39,7 +39,7 @@ func (u *ut) resetDeployAuthors(t *testing.T) {
 	}
 }
 
-func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
+func (u *sshUt) kubevpnRunWithFullProxy(t *testing.T) {
 	path := u.writeTempFile(t)
 	name := filepath.Base(path)
 	dir := filepath.Dir(path)
@@ -106,7 +106,7 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 	}
 }
 
-func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
+func (u *sshUt) kubevpnRunWithServiceMesh(t *testing.T) {
 	path := u.writeTempFile(t)
 	name := filepath.Base(path)
 	dir := filepath.Dir(path)
@@ -175,7 +175,7 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 	}
 }
 
-func (u *ut) checkRunWithFullProxyStatus(t *testing.T) {
+func (u *sshUt) checkRunWithFullProxyStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -208,7 +208,7 @@ func (u *ut) checkRunWithFullProxyStatus(t *testing.T) {
 	}
 }
 
-func (u *ut) checkRunWithServiceMeshStatus(t *testing.T) {
+func (u *sshUt) checkRunWithServiceMeshStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {

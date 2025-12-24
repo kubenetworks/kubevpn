@@ -32,22 +32,14 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-type ut struct {
+type sshUt struct {
 	namespace  string
 	clientset  *kubernetes.Clientset
 	restconfig *rest.Config
 }
 
-const (
-	local            = `{"status": "Reviews is healthy on local pc"}`
-	local8080        = `{"status": "Reviews is healthy on local pc 8080"}`
-	remote           = `{"status": "Reviews is healthy"}`
-	remoteSyncOrigin = `{"status":"Authors is healthy"}`
-	remoteSyncPod    = `{"status":"Authors is healthy in pod"}`
-)
-
-func TestFunctions(t *testing.T) {
-	u := &ut{}
+func TestSSHFunctions(t *testing.T) {
+	u := &sshUt{}
 	// 1) test connect
 	t.Run("init", u.init)
 	t.Run("kubevpnConnect", u.kubevpnConnect)
@@ -156,7 +148,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("kubevpnQuit", u.kubevpnQuit)
 }
 
-func (u *ut) commonTest(t *testing.T) {
+func (u *sshUt) commonTest(t *testing.T) {
 	// 1) test domain access
 	t.Run("kubevpnStatus", u.kubevpnStatus)
 	t.Run("pingPodIP", u.pingPodIP)
@@ -166,7 +158,7 @@ func (u *ut) commonTest(t *testing.T) {
 	t.Run("fullDomainDetails", u.fullDomainDetails)
 }
 
-func (u *ut) pingPodIP(t *testing.T) {
+func (u *sshUt) pingPodIP(t *testing.T) {
 	list, err := u.clientset.CoreV1().Pods(u.namespace).List(context.Background(), v1.ListOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -198,7 +190,7 @@ func (u *ut) pingPodIP(t *testing.T) {
 	wg.Wait()
 }
 
-func (u *ut) healthCheckPodDetails(t *testing.T) {
+func (u *sshUt) healthCheckPodDetails(t *testing.T) {
 	var app = "details"
 	ip, err := u.getPodIP(app)
 	if err != nil {
@@ -208,7 +200,7 @@ func (u *ut) healthCheckPodDetails(t *testing.T) {
 	u.healthChecker(t, endpoint, nil, "")
 }
 
-func (u *ut) healthChecker(t *testing.T, endpoint string, header map[string]string, keyword string) {
+func (u *sshUt) healthChecker(t *testing.T, endpoint string, header map[string]string, keyword string) {
 	// 0 = this frame.
 	_, file, line, ok := runtime.Caller(1)
 	if ok {
@@ -270,7 +262,7 @@ func (u *ut) healthChecker(t *testing.T, endpoint string, header map[string]stri
 	}
 }
 
-func (u *ut) healthCheckServiceDetails(t *testing.T) {
+func (u *sshUt) healthCheckServiceDetails(t *testing.T) {
 	var app = "details"
 	ip, err := u.getServiceIP(app)
 	if err != nil {
@@ -280,13 +272,13 @@ func (u *ut) healthCheckServiceDetails(t *testing.T) {
 	u.healthChecker(t, endpoint, nil, "")
 }
 
-func (u *ut) shortDomainDetails(t *testing.T) {
+func (u *sshUt) shortDomainDetails(t *testing.T) {
 	var app = "details"
 	endpoint := fmt.Sprintf("http://%s:%v/health", app, 9080)
 	u.healthChecker(t, endpoint, nil, "")
 }
 
-func (u *ut) fullDomainDetails(t *testing.T) {
+func (u *sshUt) fullDomainDetails(t *testing.T) {
 	var app = "details"
 	domains := []string{
 		fmt.Sprintf("%s.%s.svc.cluster.local", app, u.namespace),
@@ -300,7 +292,7 @@ func (u *ut) fullDomainDetails(t *testing.T) {
 	}
 }
 
-func (u *ut) serviceMeshReviewsPodIP(t *testing.T) {
+func (u *sshUt) serviceMeshReviewsPodIP(t *testing.T) {
 	app := "reviews"
 	ip, err := u.getPodIP(app)
 	if err != nil {
@@ -311,7 +303,7 @@ func (u *ut) serviceMeshReviewsPodIP(t *testing.T) {
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
-func (u *ut) serviceMeshReviewsServiceIP(t *testing.T) {
+func (u *sshUt) serviceMeshReviewsServiceIP(t *testing.T) {
 	app := "reviews"
 	ip, err := u.getServiceIP(app)
 	if err != nil {
@@ -322,7 +314,7 @@ func (u *ut) serviceMeshReviewsServiceIP(t *testing.T) {
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
-func (u *ut) serviceMeshReviewsServiceIPPortMap(t *testing.T) {
+func (u *sshUt) serviceMeshReviewsServiceIPPortMap(t *testing.T) {
 	app := "reviews"
 	ip, err := u.getServiceIP(app)
 	if err != nil {
@@ -333,7 +325,7 @@ func (u *ut) serviceMeshReviewsServiceIPPortMap(t *testing.T) {
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local8080)
 }
 
-func (u *ut) getServiceIP(app string) (string, error) {
+func (u *sshUt) getServiceIP(app string) (string, error) {
 	serviceList, err := u.clientset.CoreV1().Services(u.namespace).List(context.Background(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
@@ -350,7 +342,7 @@ func (u *ut) getServiceIP(app string) (string, error) {
 	return "", fmt.Errorf("failed to found service ip for service %s", app)
 }
 
-func (u *ut) proxyServiceReviewsPodIP(t *testing.T) {
+func (u *sshUt) proxyServiceReviewsPodIP(t *testing.T) {
 	app := "reviews"
 	ip, err := u.getPodIP(app)
 	if err != nil {
@@ -361,7 +353,7 @@ func (u *ut) proxyServiceReviewsPodIP(t *testing.T) {
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
-func (u *ut) getPodIP(app string) (string, error) {
+func (u *sshUt) getPodIP(app string) (string, error) {
 	list, err := u.clientset.CoreV1().Pods(u.namespace).List(context.Background(), v1.ListOptions{
 		LabelSelector: fields.OneTermEqualSelector("app", app).String(),
 	})
@@ -377,7 +369,7 @@ func (u *ut) getPodIP(app string) (string, error) {
 	return "", fmt.Errorf("failed to found pod ip for service %s", app)
 }
 
-func (u *ut) proxyServiceReviewsServiceIP(t *testing.T) {
+func (u *sshUt) proxyServiceReviewsServiceIP(t *testing.T) {
 	app := "reviews"
 	ip, err := u.getServiceIP(app)
 	if err != nil {
@@ -388,7 +380,7 @@ func (u *ut) proxyServiceReviewsServiceIP(t *testing.T) {
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
-func (u *ut) testUDP(t *testing.T) {
+func (u *sshUt) testUDP(t *testing.T) {
 	app := "reviews"
 	port, err := util.GetAvailableUDPPortOrDie()
 	if err != nil {
@@ -415,7 +407,7 @@ func (u *ut) testUDP(t *testing.T) {
 	}
 }
 
-func (u *ut) udpClient(t *testing.T, ip string, port int) error {
+func (u *sshUt) udpClient(t *testing.T, ip string, port int) error {
 	udpConn, err := net.DialUDP("udp4", nil, &net.UDPAddr{
 		IP:   net.ParseIP(ip),
 		Port: port,
@@ -447,7 +439,7 @@ func (u *ut) udpClient(t *testing.T, ip string, port int) error {
 	return nil
 }
 
-func (u *ut) udpServer(t *testing.T, port int) {
+func (u *sshUt) udpServer(t *testing.T, port int) {
 	// 创建监听
 	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
 		IP:   net.ParseIP("127.0.0.1"),
@@ -477,8 +469,8 @@ func (u *ut) udpServer(t *testing.T, port int) {
 	}
 }
 
-func (u *ut) kubevpnConnect(t *testing.T) {
-	cmd := exec.Command("kubevpn", "connect", "--debug")
+func (u *sshUt) kubevpnConnect(t *testing.T) {
+	cmd := exec.Command("kubevpn", "connect", "--debug", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
@@ -487,7 +479,7 @@ func (u *ut) kubevpnConnect(t *testing.T) {
 	}
 }
 
-func (u *ut) kubevpnConnectToNsKubevpn(t *testing.T) {
+func (u *sshUt) kubevpnConnectToNsKubevpn(t *testing.T) {
 	_, err := u.clientset.CoreV1().Namespaces().Create(context.Background(), &corev1.Namespace{
 		ObjectMeta: v1.ObjectMeta{
 			Name: "kubevpn",
@@ -508,8 +500,8 @@ func (u *ut) kubevpnConnectToNsKubevpn(t *testing.T) {
 	}
 }
 
-func (u *ut) kubevpnProxy(t *testing.T) {
-	cmd := exec.Command("kubevpn", "proxy", "deployments/reviews", "--debug")
+func (u *sshUt) kubevpnProxy(t *testing.T) {
+	cmd := exec.Command("kubevpn", "proxy", "deployments/reviews", "--debug", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
@@ -518,8 +510,8 @@ func (u *ut) kubevpnProxy(t *testing.T) {
 	}
 }
 
-func (u *ut) kubevpnProxyWithServiceMesh(t *testing.T) {
-	cmd := exec.Command("kubevpn", "proxy", "deployments/reviews", "--headers", "env=test", "--debug")
+func (u *sshUt) kubevpnProxyWithServiceMesh(t *testing.T) {
+	cmd := exec.Command("kubevpn", "proxy", "deployments/reviews", "--headers", "env=test", "--debug", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
@@ -528,8 +520,8 @@ func (u *ut) kubevpnProxyWithServiceMesh(t *testing.T) {
 	}
 }
 
-func (u *ut) kubevpnProxyWithServiceMeshAndFargateMode(t *testing.T) {
-	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--debug")
+func (u *sshUt) kubevpnProxyWithServiceMeshAndFargateMode(t *testing.T) {
+	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--debug", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
@@ -538,8 +530,8 @@ func (u *ut) kubevpnProxyWithServiceMeshAndFargateMode(t *testing.T) {
 	}
 }
 
-func (u *ut) kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {
-	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--debug", "--portmap", "9080:8080")
+func (u *sshUt) kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {
+	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--debug", "--portmap", "9080:8080", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
@@ -548,7 +540,7 @@ func (u *ut) kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {
 	}
 }
 
-func (u *ut) kubevpnLeave(t *testing.T) {
+func (u *sshUt) kubevpnLeave(t *testing.T) {
 	cmd := exec.Command("kubevpn", "leave", "deployments/reviews")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -558,7 +550,7 @@ func (u *ut) kubevpnLeave(t *testing.T) {
 	}
 }
 
-func (u *ut) kubevpnLeaveService(t *testing.T) {
+func (u *sshUt) kubevpnLeaveService(t *testing.T) {
 	cmd := exec.Command("kubevpn", "leave", "services/reviews")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -568,7 +560,7 @@ func (u *ut) kubevpnLeaveService(t *testing.T) {
 	}
 }
 
-func (u *ut) checkConnectStatus(t *testing.T) {
+func (u *sshUt) checkConnectStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -590,7 +582,7 @@ func (u *ut) checkConnectStatus(t *testing.T) {
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
 	}
 }
-func (u *ut) centerCheckConnectStatus(t *testing.T) {
+func (u *sshUt) centerCheckConnectStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -613,36 +605,7 @@ func (u *ut) centerCheckConnectStatus(t *testing.T) {
 	}
 }
 
-type status struct {
-	List []*connection
-}
-
-type connection struct {
-	Namespace string
-	Status    string
-	ProxyList []*proxyItem
-	SyncList  []*syncItem
-}
-type proxyItem struct {
-	Namespace string
-	Workload  string
-	RuleList  []*proxyRule
-}
-type proxyRule struct {
-	Headers       map[string]string
-	CurrentDevice bool
-	PortMap       map[int32]int32
-}
-type syncItem struct {
-	Namespace string
-	Workload  string
-	RuleList  []*syncRule
-}
-type syncRule struct {
-	DstWorkload string
-}
-
-func (u *ut) checkProxyStatus(t *testing.T) {
+func (u *sshUt) checkProxyStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -673,7 +636,7 @@ func (u *ut) checkProxyStatus(t *testing.T) {
 	}
 }
 
-func (u *ut) centerCheckProxyStatus(t *testing.T) {
+func (u *sshUt) centerCheckProxyStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -704,7 +667,7 @@ func (u *ut) centerCheckProxyStatus(t *testing.T) {
 	}
 }
 
-func (u *ut) checkProxyWithServiceMeshStatus(t *testing.T) {
+func (u *sshUt) checkProxyWithServiceMeshStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -735,7 +698,7 @@ func (u *ut) checkProxyWithServiceMeshStatus(t *testing.T) {
 	}
 }
 
-func (u *ut) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
+func (u *sshUt) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -766,7 +729,7 @@ func (u *ut) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 	}
 }
 
-func (u *ut) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
+func (u *sshUt) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -804,7 +767,7 @@ func (u *ut) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	}
 }
 
-func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
+func (u *sshUt) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -842,7 +805,7 @@ func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	}
 }
 
-func (u *ut) kubevpnUninstall(ns string) func(t *testing.T) {
+func (u *sshUt) kubevpnUninstall(ns string) func(t *testing.T) {
 	if ns != "" {
 		return func(t *testing.T) {
 			cmd := exec.Command("kubevpn", "uninstall", "kubevpn", "-n", ns)
@@ -872,7 +835,7 @@ func (u *ut) kubevpnUninstall(ns string) func(t *testing.T) {
 	}
 }
 
-func (u *ut) kubevpnStatus(t *testing.T) {
+func (u *sshUt) kubevpnStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -882,7 +845,7 @@ func (u *ut) kubevpnStatus(t *testing.T) {
 	}
 }
 
-func (u *ut) kubevpnQuit(t *testing.T) {
+func (u *sshUt) kubevpnQuit(t *testing.T) {
 	cmd := exec.Command("kubevpn", "quit")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -892,14 +855,14 @@ func (u *ut) kubevpnQuit(t *testing.T) {
 	}
 }
 
-func (u *ut) checkServiceShouldNotInNsDefault(t *testing.T) {
+func (u *sshUt) checkServiceShouldNotInNsDefault(t *testing.T) {
 	_, err := u.clientset.CoreV1().Services(u.namespace).Get(context.Background(), pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
 	if !k8serrors.IsNotFound(err) {
 		t.Fatal(err)
 	}
 }
 
-func (u *ut) kubectl(t *testing.T) {
+func (u *sshUt) kubectl(t *testing.T) {
 	cmdGetPod := exec.Command("kubectl", "get", "pods", "-o", "wide", "-A")
 	cmdGetSvc := exec.Command("kubectl", "get", "services", "-o", "wide", "-A")
 	cmdDescribePod := exec.Command("kubectl", "describe", "pods", "-A")
@@ -915,7 +878,7 @@ func (u *ut) kubectl(t *testing.T) {
 	}
 }
 
-func (u *ut) init(t *testing.T) {
+func (u *sshUt) init(t *testing.T) {
 	var err error
 
 	configFlags := genericclioptions.NewConfigFlags(true)
@@ -935,7 +898,7 @@ func (u *ut) init(t *testing.T) {
 	go u.startupHttpServer(t, "localhost:8080", local8080)
 }
 
-func (u *ut) startupHttpServer(t *testing.T, addr, str string) {
+func (u *sshUt) startupHttpServer(t *testing.T, addr, str string) {
 	var health = func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(str))
 	}
