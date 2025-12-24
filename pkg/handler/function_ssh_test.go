@@ -145,6 +145,7 @@ func TestSSHFunctions(t *testing.T) {
 	t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
 	t.Run("kubevpnQuit", u.kubevpnQuit)
 	t.Run("kubevpnUninstall", u.kubevpnUninstall("kubevpn"))
+	t.Run("kubevpnQuit", u.kubevpnQuit)
 }
 
 func (u *sshUt) commonTest(t *testing.T) {

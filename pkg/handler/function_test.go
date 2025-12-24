@@ -153,6 +153,7 @@ func TestFunctions(t *testing.T) {
 	t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
 	t.Run("kubevpnQuit", u.kubevpnQuit)
 	t.Run("kubevpnUninstall", u.kubevpnUninstall("kubevpn"))
+	t.Run("kubevpnQuit", u.kubevpnQuit)
 }
 
 func (u *ut) commonTest(t *testing.T) {
