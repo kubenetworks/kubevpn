@@ -12,16 +12,18 @@ import (
 	"sync"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
+
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (u *sshUt) deleteDeployForSaveResource(t *testing.T) {
-	for _, s := range []string{"deploy/productpage", "deploy/ratings"} {
-		cmd := exec.Command("kubectl", "delete", s, "--force")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		err := cmd.Run()
-		if err != nil {
+	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
+	for _, s := range []string{"productpage", "ratings"} {
+		err := u.clientset.AppsV1().Deployments(u.namespace).Delete(context.Background(), s, options)
+		if err != nil && !errors.IsNotFound(err) {
 			t.Fatal(err)
 		}
 	}

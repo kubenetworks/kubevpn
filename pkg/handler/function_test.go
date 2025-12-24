@@ -851,6 +851,13 @@ func (u *ut) kubevpnUninstall(ns string) func(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			cmd = exec.Command("kubectl", "delete", "ns", ns, "--wait")
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			err = cmd.Run()
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	return func(t *testing.T) {
