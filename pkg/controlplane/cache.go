@@ -21,6 +21,7 @@ import (
 	dstv3inspector "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/listener/original_dst/v3"
 	httpconnectionmanager "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	tcpproxy "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
+	preservecasev3 "github.com/envoyproxy/go-control-plane/envoy/extensions/http/header_formatters/preserve_case/v3"
 	httpv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/upstreams/http/v3"
 	matcher "github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
@@ -76,6 +77,14 @@ func ConvertContainerPort(ports ...corev1.ContainerPort) []ContainerPort {
 		})
 	}
 	return result
+}
+
+// createPreserveCaseConfig creates a TypedExtensionConfig for preserving header case
+func createPreserveCaseConfig(anyFunc func(m proto.Message) *anypb.Any) *corev3.TypedExtensionConfig {
+	return &corev3.TypedExtensionConfig{
+		Name:        "preserve_case",
+		TypedConfig: anyFunc(&preservecasev3.PreserveCaseFormatterConfig{}),
+	}
 }
 
 type Rule struct {
@@ -213,7 +222,15 @@ func ToCluster(clusterName string) *cluster.Cluster {
 					IdleTimeout: durationpb.New(time.Second * 10),
 				},
 				UpstreamProtocolOptions: &httpv3.HttpProtocolOptions_UseDownstreamProtocolConfig{
-					UseDownstreamProtocolConfig: &httpv3.HttpProtocolOptions_UseDownstreamHttpConfig{},
+					UseDownstreamProtocolConfig: &httpv3.HttpProtocolOptions_UseDownstreamHttpConfig{
+						HttpProtocolOptions: &corev3.Http1ProtocolOptions{
+							HeaderKeyFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat{
+								HeaderFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat_StatefulFormatter{
+									StatefulFormatter: createPreserveCaseConfig(anyFunc),
+								},
+							},
+						},
+					},
 				},
 			}),
 		},
@@ -236,7 +253,15 @@ func OriginCluster() *cluster.Cluster {
 		TypedExtensionProtocolOptions: map[string]*anypb.Any{
 			"envoy.extensions.upstreams.http.v3.HttpProtocolOptions": anyFunc(&httpv3.HttpProtocolOptions{
 				UpstreamProtocolOptions: &httpv3.HttpProtocolOptions_UseDownstreamProtocolConfig{
-					UseDownstreamProtocolConfig: &httpv3.HttpProtocolOptions_UseDownstreamHttpConfig{},
+					UseDownstreamProtocolConfig: &httpv3.HttpProtocolOptions_UseDownstreamHttpConfig{
+						HttpProtocolOptions: &corev3.Http1ProtocolOptions{
+							HeaderKeyFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat{
+								HeaderFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat_StatefulFormatter{
+									StatefulFormatter: createPreserveCaseConfig(anyFunc),
+								},
+							},
+						},
+					},
 				},
 			}),
 		},
@@ -399,6 +424,14 @@ func ToListener(listenerName string, routeName string, port int32, p corev1.Prot
 				}),
 			},
 		}},
+		// Configure HTTP protocol options to preserve header case
+		HttpProtocolOptions: &corev3.Http1ProtocolOptions{
+			HeaderKeyFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat{
+				HeaderFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat_StatefulFormatter{
+					StatefulFormatter: createPreserveCaseConfig(anyFunc),
+				},
+			},
+		},
 	}
 
 	tcpConfig := &tcpproxy.TcpProxy{
