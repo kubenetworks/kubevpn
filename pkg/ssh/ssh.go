@@ -104,7 +104,6 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 				plog.G(ctx).Debugf("Failed to accept ssh conn: %v", err1)
 				continue
 			}
-			plog.G(ctx).Debugf("Accepted ssh conn from %s", localConn.RemoteAddr().String())
 			go func() {
 				defer localConn.Close()
 
@@ -117,10 +116,10 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 						cancelFunc1()
 						return
 					}
-					plog.G(ctx).Debugf("Failed to dial into remote %s: %v", remote.String(), err)
+					plog.G(ctx).Debugf("Failed to dial remote from %s<=>%s -> %s: %v", localConn.LocalAddr().String(), localConn.RemoteAddr().String(), remote.String(), err)
 					return
 				}
-				plog.G(ctx).Debugf("Opened ssh port-forward to %s", remote.String())
+				plog.G(ctx).Debugf("Opened ssh port-forward to %s<=>%s -> %s", localConn.LocalAddr().String(), localConn.RemoteAddr().String(), remote.String())
 
 				defer remoteConn.Close()
 				copyStream(ctx, localConn, remoteConn)
