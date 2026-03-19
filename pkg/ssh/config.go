@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/kevinburke/ssh_config"
@@ -202,8 +201,9 @@ func (conf SshConfig) AliasRecursion(ctx context.Context, stopChan <-chan struct
 	var name = conf.ConfigAlias
 	var jumper = "ProxyJump"
 	var bastionList = []SshConfig{GetBastion(name, conf)}
+	list := getDefaultSSHConfigList()
 	for {
-		value := defaultSshConfigList.Get(name, jumper)
+		value := list.Get(name, jumper)
 		if value != "" {
 			bastionList = append(bastionList, GetBastion(value, conf))
 			name = value
@@ -248,8 +248,9 @@ func (conf SshConfig) JumpRecursion(ctx context.Context, stopChan <-chan struct{
 		var name = conf.ConfigAlias
 		var jumper = "ProxyJump"
 		bastionList = append(bastionList, GetBastion(name, conf))
+		list := getDefaultSSHConfigList()
 		for {
-			value := defaultSshConfigList.Get(name, jumper)
+			value := list.Get(name, jumper)
 			if value != "" {
 				bastionList = append(bastionList, GetBastion(value, conf))
 				name = value
@@ -325,9 +326,10 @@ func GetBastion(name string, defaultValue SshConfig) SshConfig {
 	conf := SshConfig{
 		ConfigAlias: name,
 	}
+	list := getDefaultSSHConfigList()
 	var propertyList = []string{"ProxyJump", "Hostname", "User", "Port", "IdentityFile"}
 	for i, s := range propertyList {
-		value := defaultSshConfigList.Get(name, s)
+		value := list.Get(name, s)
 		switch i {
 		case 0:
 
@@ -366,28 +368,24 @@ func (c defaultSshConf) Get(alias string, key string) string {
 	return ssh_config.Get(alias, key)
 }
 
-var once sync.Once
-
-var defaultSshConfigList defaultSshConf
-
-func init() {
-	once.Do(func() {
-		paths := []string{
-			filepath.Join(homedir.HomeDir(), ".ssh", "config"),
-			filepath.Join("/", "etc", "ssh", "ssh_config"),
+func getDefaultSSHConfigList() defaultSshConf {
+	var defaultSshConfigList defaultSshConf
+	paths := []string{
+		filepath.Join(homedir.HomeDir(), ".ssh", "config"),
+		filepath.Join("/", "etc", "ssh", "ssh_config"),
+	}
+	for _, path := range paths {
+		file, err := os.ReadFile(path)
+		if err != nil {
+			continue
 		}
-		for _, path := range paths {
-			file, err := os.ReadFile(path)
-			if err != nil {
-				continue
-			}
-			cfg, err := ssh_config.DecodeBytes(file)
-			if err != nil {
-				continue
-			}
-			defaultSshConfigList = append(defaultSshConfigList, cfg)
+		cfg, err := ssh_config.DecodeBytes(file)
+		if err != nil {
+			continue
 		}
-	})
+		defaultSshConfigList = append(defaultSshConfigList, cfg)
+	}
+	return defaultSshConfigList
 }
 
 func newSshClientWrap(client *ssh.Client, cancel context.CancelFunc) *sshClientWrap {
