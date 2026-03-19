@@ -6,6 +6,7 @@ import (
 	"github.com/docker/docker/libnetwork/resolvconf"
 	miekgdns "github.com/miekg/dns"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -28,15 +29,18 @@ func CmdControlPlane(f cmdutil.Factory) *cobra.Command {
 		`)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			go util.StartupPProfForServer(0)
-			go func() {
+			g, ctx := errgroup.WithContext(cmd.Context())
+			g.Go(func() error {
 				conf, err := miekgdns.ClientConfigFromFile(resolvconf.Path())
 				if err != nil {
-					plog.G(context.Background()).Fatal(err)
+					return err
 				}
-				plog.G(context.Background()).Fatal(dns.ListenAndServe("udp", ":53", conf))
-			}()
-			err := controlplane.Main(cmd.Context(), f, port, plog.G(context.Background()))
-			return err
+				return dns.ListenAndServe("udp", ":53", conf)
+			})
+			g.Go(func() error {
+				return controlplane.Main(ctx, f, port, plog.G(context.Background()))
+			})
+			return g.Wait()
 		},
 	}
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "true/false")
