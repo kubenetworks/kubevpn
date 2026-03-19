@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,40 +19,58 @@ import (
 )
 
 const (
-	StatusOk     = "connected"
-	StatusFailed = "disconnected"
+	StatusOk        = "connected"
+	StatusFailed    = "disconnected"
+	StatusUnhealthy = "unhealthy"
 )
 
 func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.StatusResponse, error) {
-	var list []*rpc.Status
-
-	timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-	defer cancelFunc()
 	if len(req.ConnectionIDs) != 0 {
+		var list []*rpc.Status
+		var lock = &sync.Mutex{}
+		wg := sync.WaitGroup{}
 		for _, connectionID := range req.ConnectionIDs {
 			for _, options := range svr.connections {
 				if options.GetConnectionID() == connectionID {
-					result := genStatus(options)
-					var err error
-					result.ProxyList, result.SyncList, err = gen(timeoutCtx, options, options.Sync)
-					if err != nil {
-						plog.G(context.Background()).Errorf("Error generating status: %v", err)
-					}
-					list = append(list, result)
+					wg.Add(1)
+					go func(options *handler.ConnectOptions) {
+						defer wg.Done()
+						result := genStatus(options)
+						var err error
+						result.ProxyList, result.SyncList, err = gen(ctx, options, options.Sync)
+						if err != nil {
+							plog.G(context.Background()).Errorf("Error generating status: %v", err)
+							result.Status = StatusUnhealthy
+						}
+						lock.Lock()
+						list = append(list, result)
+						lock.Unlock()
+					}(options)
 				}
 			}
 		}
-	} else {
-		for _, options := range svr.connections {
+		wg.Wait()
+		return &rpc.StatusResponse{List: list, CurrentConnectionID: svr.currentConnectionID}, nil
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(len(svr.connections))
+	var list = make([]*rpc.Status, len(svr.connections))
+	for i := range svr.connections {
+		go func(i int) {
+			defer wg.Done()
+			options := svr.connections[i]
 			result := genStatus(options)
 			var err error
-			result.ProxyList, result.SyncList, err = gen(timeoutCtx, options, options.Sync)
+			result.ProxyList, result.SyncList, err = gen(ctx, options, options.Sync)
 			if err != nil {
 				plog.G(context.Background()).Errorf("Error generating status: %v", err)
+				result.Status = StatusUnhealthy
 			}
-			list = append(list, result)
-		}
+			list[i] = result
+		}(i)
 	}
+	wg.Wait()
 	return &rpc.StatusResponse{List: list, CurrentConnectionID: svr.currentConnectionID}, nil
 }
 
@@ -75,10 +94,12 @@ func genStatus(connect *handler.ConnectOptions) *rpc.Status {
 }
 
 func gen(ctx context.Context, connect *handler.ConnectOptions, sync *handler.SyncOptions) ([]*rpc.Proxy, []*rpc.Sync, error) {
+	timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelFunc()
 	var proxyList []*rpc.Proxy
 	if connect != nil && connect.GetClientset() != nil {
 		mapInterface := connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace)
-		configMap, err := mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		configMap, err := mapInterface.Get(timeoutCtx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 		if err != nil {
 			return nil, nil, err
 		}
