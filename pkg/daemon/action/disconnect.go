@@ -145,8 +145,7 @@ func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes st
 func disconnect(ctx context.Context, svr *Server, connectionID string) {
 	for i := 0; i < len(svr.connections); i++ {
 		options := svr.connections[i]
-		id, _ := util.GetConnectionID(ctx, options.GetClientset().CoreV1().Namespaces(), options.OriginNamespace)
-		if id == connectionID {
+		if options.GetConnectionID() == connectionID {
 			plog.G(ctx).Infof("Disconnecting from the cluster...")
 			options.Cleanup(ctx)
 			svr.connections = append(svr.connections[:i], svr.connections[i+1:]...)
