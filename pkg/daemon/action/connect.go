@@ -166,22 +166,16 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		req.ManagerNamespace = req.Namespace
 	}
 
-	var connectionID string
-	connectionID, err = util.GetConnectionID(sshCtx, connect.GetClientset().CoreV1().Namespaces(), connect.Namespace)
-	if err != nil {
+	if err = connect.InitDHCP(sshCtx); err != nil {
 		return err
 	}
+	connectionID := connect.GetConnectionID()
 
 	for _, options := range svr.connections {
 		if options == nil {
 			continue
 		}
-		var id string
-		id, err = util.GetConnectionID(sshCtx, options.GetClientset().CoreV1().Namespaces(), options.Namespace)
-		if err != nil {
-			return err
-		}
-		if id == connectionID {
+		if options.GetConnectionID() == connectionID {
 			sshCancel()
 			// same cluster, do nothing
 			logger.Infof("Connected with cluster")

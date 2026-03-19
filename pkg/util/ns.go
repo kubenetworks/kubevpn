@@ -36,21 +36,6 @@ func GetConnectionID(ctx context.Context, client v12.NamespaceInterface, ns stri
 	return string(namespace.UID[len(namespace.UID)-12:]), nil
 }
 
-func IsSameConnection(ctx context.Context, clientA v12.CoreV1Interface, namespaceA string, clientB v12.CoreV1Interface, namespaceB string) (bool, error) {
-	if namespaceA != namespaceB {
-		return false, nil
-	}
-	connectionA, err := GetConnectionID(ctx, clientA.Namespaces(), namespaceA)
-	if err != nil {
-		return false, err
-	}
-	connectionB, err := GetConnectionID(ctx, clientB.Namespaces(), namespaceB)
-	if err != nil {
-		return false, err
-	}
-	return connectionA == connectionB, nil
-}
-
 func ConvertToKubeConfigBytes(factory cmdutil.Factory) ([]byte, string, error) {
 	loader := factory.ToRawKubeConfigLoader()
 	namespace, _, err := loader.Namespace()
