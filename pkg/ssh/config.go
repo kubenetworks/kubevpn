@@ -114,6 +114,15 @@ func (conf SshConfig) IsEmpty() bool {
 
 // IsLoopback TODO support alias and proxyJump
 func (conf SshConfig) IsLoopback() bool {
+	for _, ip := range conf.Host() {
+		if ip.IsLoopback() {
+			return true
+		}
+	}
+	return false
+}
+
+func (conf SshConfig) Host() []net.IP {
 	if conf.Addr != "" {
 		var host string
 		var err error
@@ -122,16 +131,11 @@ func (conf SshConfig) IsLoopback() bool {
 		}
 		ip, err := net.LookupIP(host)
 		if err != nil {
-			return false
+			return []net.IP{}
 		}
-		for _, i := range ip {
-			if i.IsLoopback() {
-				return true
-			}
-		}
-		return false
+		return ip
 	}
-	return false
+	return []net.IP{}
 }
 
 func (conf SshConfig) GetAuth() ([]ssh.AuthMethod, error) {

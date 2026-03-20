@@ -198,7 +198,6 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		return err
 	}
 	req.KubeconfigBytes = string(content)
-	req.SshJump = ssh.SshConfig{}.ToRPC()
 	connResp, err = cli.Connect(ipCtx)
 	if err != nil {
 		return err

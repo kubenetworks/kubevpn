@@ -55,6 +55,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -788,6 +789,9 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, filterAPIServer bool) erro
 		c.apiServerIPs, err = util.GetAPIServerIP(c.config.Host)
 		if err != nil {
 			return err
+		}
+		if c.Request != nil {
+			c.apiServerIPs = append(c.apiServerIPs, ssh.ParseSshFromRPC(c.Request.SshJump).Host()...)
 		}
 	}
 
