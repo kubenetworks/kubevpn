@@ -215,6 +215,7 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	if resp.Context().Err() != nil {
 		return resp.Context().Err()
 	}
+	go connect.Health(sshCtx)
 	svr.connections = append(svr.connections, connect)
 	svr.currentConnectionID = connectionID
 	return resp.Send(&rpc.ConnectResponse{

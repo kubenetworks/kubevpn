@@ -5,9 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -37,7 +35,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 						defer wg.Done()
 						result := genStatus(options)
 						var err error
-						result.ProxyList, result.SyncList, err = gen(ctx, options, options.Sync)
+						result.ProxyList, result.SyncList, err = gen(options, options.Sync)
 						if err != nil {
 							plog.G(context.Background()).Errorf("Error generating status: %v", err)
 							result.Status = StatusUnhealthy
@@ -62,7 +60,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 			options := svr.connections[i]
 			result := genStatus(options)
 			var err error
-			result.ProxyList, result.SyncList, err = gen(ctx, options, options.Sync)
+			result.ProxyList, result.SyncList, err = gen(options, options.Sync)
 			if err != nil {
 				plog.G(context.Background()).Errorf("Error generating status: %v", err)
 				result.Status = StatusUnhealthy
@@ -93,19 +91,13 @@ func genStatus(connect *handler.ConnectOptions) *rpc.Status {
 	return &info
 }
 
-func gen(ctx context.Context, connect *handler.ConnectOptions, sync *handler.SyncOptions) ([]*rpc.Proxy, []*rpc.Sync, error) {
-	timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-	defer cancelFunc()
+func gen(connect *handler.ConnectOptions, sync *handler.SyncOptions) ([]*rpc.Proxy, []*rpc.Sync, error) {
 	var proxyList []*rpc.Proxy
-	if connect != nil && connect.GetClientset() != nil {
-		mapInterface := connect.GetClientset().CoreV1().ConfigMaps(connect.Namespace)
-		configMap, err := mapInterface.Get(timeoutCtx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-		if err != nil {
-			return nil, nil, err
-		}
+	status := connect.HealthStatus()
+	if configMap := status.ConfigMap(); configMap != nil {
 		var v = make([]*controlplane.Virtual, 0)
 		if str, ok := configMap.Data[config.KeyEnvoy]; ok {
-			if err = yaml.Unmarshal([]byte(str), &v); err != nil {
+			if err := yaml.Unmarshal([]byte(str), &v); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -169,7 +161,8 @@ func gen(ctx context.Context, connect *handler.ConnectOptions, sync *handler.Syn
 			})
 		}
 	}
-	return proxyList, syncList, nil
+
+	return proxyList, syncList, status.LastError()
 }
 
 func useSecondPort(m map[int32]string) map[int32]int32 {

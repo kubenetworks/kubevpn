@@ -223,7 +223,7 @@ func (u *sshUt) healthChecker(t *testing.T, endpoint string, header map[string]s
 		req.Header.Add(k, v)
 	}
 
-	client := &http.Client{Timeout: time.Second * 1}
+	client := &http.Client{Timeout: time.Second * 2}
 	err = retry.OnError(
 		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 120},
 		func(err error) bool { return err != nil },
@@ -231,14 +231,14 @@ func (u *sshUt) healthChecker(t *testing.T, endpoint string, header map[string]s
 			var resp *http.Response
 			resp, err = client.Do(req)
 			if err != nil {
-				t.Logf("%s failed to do health check endpoint: %s: %v", time.Now().Format(time.DateTime), endpoint, err)
+				t.Logf("%s failed to do health check endpoint %s with header %s: %v", time.Now().Format(time.DateTime), endpoint, header, err)
 				return err
 			}
 			if resp.StatusCode != 200 {
 				if resp.Body != nil {
 					defer resp.Body.Close()
 					all, _ := io.ReadAll(resp.Body)
-					return fmt.Errorf("status code is %s, conetent: %v", resp.Status, string(all))
+					return fmt.Errorf("status code is %s, content: %v", resp.Status, string(all))
 				}
 				return fmt.Errorf("status code is %s", resp.Status)
 			}
@@ -257,8 +257,9 @@ func (u *sshUt) healthChecker(t *testing.T, endpoint string, header map[string]s
 		},
 	)
 	if err != nil {
+		t.Log(fmt.Sprintf("%s:%d", file, line), err)
 		u.kubectl(t)
-		t.Fatal(fmt.Sprintf("%s:%d", file, line), err)
+		t.FailNow()
 	}
 }
 
@@ -867,7 +868,7 @@ func (u *sshUt) kubectl(t *testing.T) {
 	cmdGetSvc := exec.Command("kubectl", "get", "services", "-o", "wide", "-A")
 	cmdDescribePod := exec.Command("kubectl", "describe", "pods", "-A")
 	cmdDescribeSvc := exec.Command("kubectl", "describe", "services", "-A")
-	for _, cmd := range []*exec.Cmd{cmdGetPod, cmdDescribePod, cmdGetSvc, cmdDescribeSvc} {
+	for _, cmd := range []*exec.Cmd{cmdGetPod, cmdGetSvc, cmdDescribePod, cmdDescribeSvc} {
 		t.Logf("exec: %v", cmd.Args)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

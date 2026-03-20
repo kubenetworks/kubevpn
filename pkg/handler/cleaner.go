@@ -76,10 +76,6 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 				}
 			}
 		} else {
-			if c.cancel != nil {
-				c.cancel()
-			}
-
 			for _, function := range c.getRolloutFunc() {
 				if function != nil {
 					if err := function(); err != nil {
@@ -90,6 +86,9 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 			if c.dnsConfig != nil {
 				plog.G(logCtx).Debugf("Clearing DNS settings")
 				c.dnsConfig.CancelDNS()
+			}
+			if c.cancel != nil {
+				c.cancel()
 			}
 		}
 	})

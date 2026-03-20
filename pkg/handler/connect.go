@@ -68,7 +68,8 @@ type ConnectOptions struct {
 	Lock                 *sync.Mutex
 	Image                string
 	ImagePullSecretName  string
-	Request              *rpc.ConnectRequest `json:"Request,omitempty"`
+	// for reload from ~/.kubevpn/daemon/db
+	Request *rpc.ConnectRequest `json:"Request,omitempty"`
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -90,6 +91,7 @@ type ConnectOptions struct {
 	once           sync.Once
 	tunName        string
 	proxyWorkloads ProxyList
+	healthStatus   HealthStatus
 
 	Sync *SyncOptions
 }
