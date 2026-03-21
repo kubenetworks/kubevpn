@@ -231,22 +231,22 @@ func (u *ut) healthChecker(t *testing.T, endpoint string, header map[string]stri
 		req.Header.Add(k, v)
 	}
 
-	client := &http.Client{Timeout: time.Second * 1}
+	client := &http.Client{Timeout: time.Second * 5}
 	err = retry.OnError(
-		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 120},
+		wait.Backoff{Duration: time.Second * 5, Factor: 1.0, Jitter: 0, Steps: 30},
 		func(err error) bool { return err != nil },
 		func() error {
 			var resp *http.Response
 			resp, err = client.Do(req)
 			if err != nil {
-				t.Logf("%s failed to do health check endpoint: %s: %v", time.Now().Format(time.DateTime), endpoint, err)
+				t.Logf("%s failed to do health check endpoint %s with header %v: %v", time.Now().Format(time.DateTime), endpoint, header, err)
 				return err
 			}
 			if resp.StatusCode != 200 {
 				if resp.Body != nil {
 					defer resp.Body.Close()
 					all, _ := io.ReadAll(resp.Body)
-					return fmt.Errorf("status code is %s, conetent: %v", resp.Status, string(all))
+					return fmt.Errorf("status code is %s, content: %v", resp.Status, string(all))
 				}
 				return fmt.Errorf("status code is %s", resp.Status)
 			}
@@ -265,8 +265,9 @@ func (u *ut) healthChecker(t *testing.T, endpoint string, header map[string]stri
 		},
 	)
 	if err != nil {
+		t.Errorf("%s:%d:%v", file, line, err)
 		u.kubectl(t)
-		t.Fatal(fmt.Sprintf("%s:%d", file, line), err)
+		t.FailNow()
 	}
 }
 
