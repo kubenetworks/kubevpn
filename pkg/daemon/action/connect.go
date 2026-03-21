@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
@@ -215,6 +216,8 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	if resp.Context().Err() != nil {
 		return resp.Context().Err()
 	}
+	connect.HealthCheckOnce(sshCtx, time.Second*5)
+	go connect.HealthPeriod(sshCtx, time.Second*5)
 	svr.connections = append(svr.connections, connect)
 	svr.currentConnectionID = connectionID
 	return resp.Send(&rpc.ConnectResponse{
