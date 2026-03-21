@@ -23,23 +23,25 @@ func (h *HealthStatus) LastError() error {
 	return h.lastErr
 }
 
-func (c *ConnectOptions) Health(ctx context.Context) {
+func (c *ConnectOptions) HealthPeriod(ctx context.Context, duration time.Duration) {
 	for ctx.Err() == nil {
-		go func() {
-			timeoutCtx, cancelFunc := context.WithTimeout(ctx, time.Second*5)
-			defer cancelFunc()
-
-			mapInterface := c.GetClientset().CoreV1().ConfigMaps(c.Namespace)
-			configMap, err := mapInterface.Get(timeoutCtx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-			if err != nil {
-				c.healthStatus.lastErr = err
-				return
-			}
-			c.healthStatus.lastErr = nil
-			c.healthStatus.cm = configMap
-		}()
-		time.Sleep(time.Second * 5)
+		time.Sleep(duration)
+		c.HealthCheckOnce(ctx, duration)
 	}
+}
+
+func (c *ConnectOptions) HealthCheckOnce(ctx context.Context, timeout time.Duration) {
+	timeoutCtx, cancelFunc := context.WithTimeout(ctx, timeout)
+	defer cancelFunc()
+
+	mapInterface := c.GetClientset().CoreV1().ConfigMaps(c.Namespace)
+	configMap, err := mapInterface.Get(timeoutCtx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		c.healthStatus.lastErr = err
+		return
+	}
+	c.healthStatus.lastErr = nil
+	c.healthStatus.cm = configMap
 }
 
 func (c *ConnectOptions) HealthStatus() HealthStatus {
