@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -129,6 +130,7 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		return err
 	}
 	svr.currentConnectionID = connectionID
+	options.HealthCheckOnce(cancel, time.Second*5)
 	return nil
 }
 
