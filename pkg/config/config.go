@@ -42,10 +42,10 @@ const (
 	VolumeSyncthing = "syncthing"
 
 	// IPv4Pool is used as tun ip
-	// 198.19.0.0/16 network is part of the 198.18.0.0/15 (reserved for benchmarking).
+	// 198.18.0.0/16 network is part of the 198.18.0.0/15 (reserved for benchmarking).
 	// https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml
-	// so we split it into 2 parts: 198.18.0.0/15 --> [198.19.0.0/16, 198.19.0.0/16]
-	IPv4Pool = "198.19.0.0/16"
+	// so we split it into 2 parts: 198.18.0.0/15 --> [198.18.0.0/16, 198.19.0.0/16]
+	IPv4Pool = "198.18.0.0/16"
 	// 2001:2::/64 network is part of the 2001:2::/48 (reserved for benchmarking)
 	// https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml
 	IPv6Pool = "2001:2::/64"
@@ -63,7 +63,7 @@ const (
 		 }
 		]
 	*/
-	DockerIPv4Pool = "198.18.0.1/16"
+	DockerIPv4Pool = "198.19.0.1/16"
 
 	DefaultNetDir = "/etc/cni/net.d"
 

@@ -39,7 +39,7 @@ func CmdRouteAdd(cmdutil.Factory) *cobra.Command {
 		`)),
 		Example: templates.Examples(i18n.T(`
         # Add a route to current connection tun device
-		kubevpn route add 198.19.0.1/32
+		kubevpn route add 198.18.0.1/32
 		# Query current connection tun device
 		kubevpn status
 		`)),
@@ -76,7 +76,7 @@ func CmdRouteDelete(cmdutil.Factory) *cobra.Command {
 		`)),
 		Example: templates.Examples(i18n.T(`
 		# Delete a specific route
-		kubevpn route delete 198.19.0.1/32
+		kubevpn route delete 198.18.0.1/32
 		# Query current connection tun device
 		kubevpn status
 		`)),
@@ -113,7 +113,7 @@ func CmdRouteSearch(cmdutil.Factory) *cobra.Command {
 		`)),
 		Example: templates.Examples(i18n.T(`
 		# Search a specific route
-		kubevpn route search 198.19.0.1
+		kubevpn route search 198.18.0.1
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			plog.InitLoggerForClient()

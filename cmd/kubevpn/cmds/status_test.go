@@ -27,7 +27,7 @@ func TestPrintProxyAndSync(t *testing.T) {
 						RuleList: []*rpc.ProxyRule{
 							{
 								Headers:       map[string]string{"user": "naison"},
-								LocalTunIPv4:  "198.19.0.103",
+								LocalTunIPv4:  "198.18.0.103",
 								LocalTunIPv6:  "2001:2::999d",
 								CurrentDevice: false,
 								PortMap:       map[int32]int32{8910: 8910},
@@ -88,7 +88,7 @@ func TestPrintProxy(t *testing.T) {
 						RuleList: []*rpc.ProxyRule{
 							{
 								Headers:       map[string]string{"user": "naison"},
-								LocalTunIPv4:  "198.19.0.103",
+								LocalTunIPv4:  "198.18.0.103",
 								LocalTunIPv6:  "2001:2::999d",
 								CurrentDevice: false,
 								PortMap:       map[int32]int32{8910: 8910},
