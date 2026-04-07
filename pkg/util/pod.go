@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/httpstream"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
@@ -145,6 +147,7 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 		return err
 	}
 
+	suppressExpectedPortForwardCloseErrors()
 	defer forwarder.Close()
 
 	var errChan = make(chan error, 1)
@@ -158,6 +161,25 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 	case <-stopChan:
 		return nil
 	}
+}
+
+var portForwardErrorHandlerOnce sync.Once
+
+func suppressExpectedPortForwardCloseErrors() {
+	portForwardErrorHandlerOnce.Do(func() {
+		prev := append([]utilruntime.ErrorHandler(nil), utilruntime.ErrorHandlers...)
+		utilruntime.ErrorHandlers = []utilruntime.ErrorHandler{
+			func(ctx context.Context, err error, msg string, keysAndValues ...interface{}) {
+				if err != nil && strings.Contains(strings.ToLower(err.Error()), "error closing listener: close tcp") &&
+					strings.Contains(strings.ToLower(err.Error()), "use of closed network connection") {
+					return
+				}
+				for _, handler := range prev {
+					handler(ctx, err, msg, keysAndValues...)
+				}
+			},
+		}
+	})
 }
 
 func Shell(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Config, podName, containerName, ns string, cmd []string) (string, error) {

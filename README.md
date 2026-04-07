@@ -247,6 +247,36 @@ as `productpage`
 ***Disclaimer:*** This only works on the namespace where kubevpn-traffic-manager is deployed. Otherwise,
 use [Domain resolve](./README.md#domain-resolve)
 
+### Local outbound proxy for nested VPNs
+
+If your operating system routes are controlled by another VPN client, route-based access may not work reliably even though `kubevpn connect` succeeds. In that case, use a local outbound proxy instead of depending on cluster CIDR routing.
+
+Start a standalone local SOCKS5 proxy:
+
+```shell
+➜  ~ kubevpn proxy-out --listen-socks 127.0.0.1:1080
+Proxy hint: export ALL_PROXY=socks5h://127.0.0.1:1080
+Proxy scope: TCP traffic only. Use socks5h if you want proxy-side cluster DNS resolution.
+```
+
+Then access cluster Services, Pod IPs, or Service ClusterIPs through the proxy:
+
+```shell
+➜  ~ curl --proxy socks5h://127.0.0.1:1080 http://productpage.default.svc.cluster.local:9080
+➜  ~ curl --proxy socks5h://127.0.0.1:1080 http://172.21.10.49:9080
+```
+
+Or start the managed SOCKS5 proxy as part of `connect`:
+
+```shell
+➜  ~ kubevpn connect --socks
+Started managed local SOCKS5 proxy for connection 03dc50feb8c3 on 127.0.0.1:1080
+Proxy hint: export ALL_PROXY=socks5h://127.0.0.1:1080
+Proxy scope: TCP traffic only. Use socks5h if you want proxy-side cluster DNS resolution.
+```
+
+Use `kubevpn disconnect <connection-id>` or `kubevpn quit` to stop the managed proxy. In this version, outbound proxy mode supports TCP traffic only.
+
 ### Connect to multiple kubernetes cluster network
 
 already connected cluster `ccijorbccotmqodvr189g`

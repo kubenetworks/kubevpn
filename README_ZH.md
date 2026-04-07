@@ -234,6 +234,36 @@ reviews                   ClusterIP   172.21.8.24     <none>        9080/TCP    
 
 可以看到直接使用 service name 的方式，可以正常访问到集群资源。
 
+### 嵌套 VPN 场景下的本地出站代理
+
+如果本机路由被另外一个 VPN 客户端接管，那么即使 `kubevpn connect` 成功，基于路由的访问也可能不稳定。这种情况下可以改用本地出站代理，而不是依赖集群 CIDR 路由。
+
+启动一个独立的本地 SOCKS5 代理：
+
+```shell
+➜  ~ kubevpn proxy-out --listen-socks 127.0.0.1:1080
+Proxy hint: export ALL_PROXY=socks5h://127.0.0.1:1080
+Proxy scope: TCP traffic only. Use socks5h if you want proxy-side cluster DNS resolution.
+```
+
+然后通过代理访问集群中的 Service、Pod IP 或 Service ClusterIP：
+
+```shell
+➜  ~ curl --proxy socks5h://127.0.0.1:1080 http://productpage.default.svc.cluster.local:9080
+➜  ~ curl --proxy socks5h://127.0.0.1:1080 http://172.21.10.49:9080
+```
+
+也可以在 `connect` 时自动启动托管的 SOCKS5 代理：
+
+```shell
+➜  ~ kubevpn connect --socks
+Started managed local SOCKS5 proxy for connection 03dc50feb8c3 on 127.0.0.1:1080
+Proxy hint: export ALL_PROXY=socks5h://127.0.0.1:1080
+Proxy scope: TCP traffic only. Use socks5h if you want proxy-side cluster DNS resolution.
+```
+
+可以通过 `kubevpn disconnect <connection-id>` 或 `kubevpn quit` 停止这个托管代理。当前版本只支持 TCP 代理流量。
+
 ### 链接到多集群网络
 
 可以看到已经链接到了一个集群 `ccijorbccotmqodvr189g`

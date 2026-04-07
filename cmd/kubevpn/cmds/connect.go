@@ -2,7 +2,9 @@ package cmds
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	log "github.com/sirupsen/logrus"
@@ -29,6 +31,8 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	var extraRoute = &handler.ExtraRouteInfo{}
 	var sshConf = &pkgssh.SshConfig{}
 	var transferImage, foreground bool
+	var enableSocks bool
+	var socksListen string
 	var imagePullSecretName string
 	var managerNamespace string
 	cmd := &cobra.Command{
@@ -45,6 +49,10 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		Example: templates.Examples(i18n.T(`
 		# Connect to k8s cluster network
 		kubevpn connect
+
+		# Connect and start a managed local SOCKS5 proxy for nested VPN cases
+		kubevpn connect --socks
+		curl --proxy socks5h://127.0.0.1:1080 http://productpage.default.svc.cluster.local:9080
 
 		# Connect to api-server behind of bastion host or ssh jump host
 		kubevpn connect --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
@@ -115,12 +123,21 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.ConnectResponse](cmd.Context(), resp)
+			connectionID, err := printConnectGRPCStream(cmd.Context(), resp, os.Stdout)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil
 				}
 				return err
+			}
+			if enableSocks {
+				if connectionID == "" {
+					return fmt.Errorf("connected but missing connection ID for socks proxy startup")
+				}
+				if err := startManagedSocksProxy(connectionID, bytes, ns, socksListen); err != nil {
+					return err
+				}
+				printManagedSocksStarted(os.Stdout, connectionID, socksListen)
 			}
 			if !foreground {
 				_, _ = fmt.Fprintln(os.Stdout, config.Slogan)
@@ -137,6 +154,8 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	}
 	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName)
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "Hang up")
+	cmd.Flags().BoolVar(&enableSocks, "socks", false, "Start a managed local SOCKS5 proxy after connect for nested VPN or route-conflict cases")
+	cmd.Flags().StringVar(&socksListen, "socks-listen", "127.0.0.1:1080", "Listen address for the managed local SOCKS5 proxy")
 	cmd.Flags().StringVar(&managerNamespace, "manager-namespace", "", "The namespace where the traffic manager is to be found. Only works in cluster mode (install kubevpn server by helm)")
 
 	handler.AddExtraRoute(cmd.Flags(), extraRoute)
@@ -144,7 +163,35 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	return cmd
 }
 
+func printConnectGRPCStream(ctx context.Context, clientStream grpc.ClientStream, out io.Writer) (string, error) {
+	go func() {
+		if ctx != nil {
+			<-ctx.Done()
+			_ = clientStream.SendMsg(&rpc.Cancel{})
+		}
+	}()
+
+	var connectionID string
+	for {
+		resp := new(rpc.ConnectResponse)
+		err := clientStream.RecvMsg(resp)
+		if errors.Is(err, io.EOF) {
+			return connectionID, nil
+		}
+		if err != nil {
+			return connectionID, err
+		}
+		if resp.ConnectionID != "" {
+			connectionID = resp.ConnectionID
+		}
+		if out != nil && resp.GetMessage() != "" {
+			_, _ = fmt.Fprint(out, resp.GetMessage())
+		}
+	}
+}
+
 func disconnect(cli rpc.DaemonClient, bytes []byte, ns string, sshConf *pkgssh.SshConfig) error {
+	connectionID, _ := connectionIDFromKubeconfigBytes(bytes, ns)
 	resp, err := cli.Disconnect(context.Background())
 	if err != nil {
 		plog.G(context.Background()).Errorf("Disconnect error: %v", err)
@@ -166,5 +213,24 @@ func disconnect(cli rpc.DaemonClient, bytes []byte, ns string, sshConf *pkgssh.S
 		}
 		return err
 	}
+	if connectionID != "" {
+		_ = stopManagedProxy(connectionID)
+		printManagedSocksStopped(os.Stdout, connectionID)
+	}
 	return nil
+}
+
+func connectionIDFromKubeconfigBytes(bytes []byte, ns string) (string, error) {
+	file, err := util.ConvertToTempKubeconfigFile(bytes, "")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(file)
+
+	factory := util.InitFactoryByPath(file, ns)
+	connect := &handler.ConnectOptions{}
+	if err := connect.InitClient(factory); err != nil {
+		return "", err
+	}
+	return util.GetConnectionID(context.Background(), connect.GetClientset().CoreV1().Namespaces(), connect.Namespace)
 }

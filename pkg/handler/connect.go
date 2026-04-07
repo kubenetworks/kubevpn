@@ -1218,7 +1218,9 @@ func healthCheckPortForward(ctx context.Context, cancelFunc context.CancelFunc, 
 	}
 
 	var healthChecker = func() error {
-		conn, err := net.Dial("tcp", fmt.Sprintf(":%s", localGvisorUDPPort))
+		// Use loopback explicitly so the health check keeps working even when the
+		// default route is owned by another tunnel.
+		conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", localGvisorUDPPort))
 		if err != nil {
 			return err
 		}

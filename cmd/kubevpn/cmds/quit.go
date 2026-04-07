@@ -31,6 +31,8 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_ = quit(cmd.Context(), true)
 			_ = quit(cmd.Context(), false)
+			_ = stopAllManagedProxies()
+			_, _ = fmt.Fprintln(os.Stdout, "Stopped all managed local SOCKS proxies")
 			util.CleanExtensionLib()
 			_, _ = fmt.Fprint(os.Stdout, "Exited")
 			return nil

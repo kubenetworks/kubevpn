@@ -18,5 +18,7 @@
 
 # Build artifacts
 bin
+/.bin/
+/kubevpn
 
 *.DS_Store
