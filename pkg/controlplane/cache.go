@@ -391,6 +391,9 @@ func ToListener(listenerName string, routeName string, port int32, p corev1.Prot
 			},
 		},
 		// "details": "Error: terminal filter named envoy.filters.http.router of type envoy.filters.http.router must be the last filter in a http filter chain."
+		// Note: grpc-web filter is intentionally excluded here because it
+		// intercepts requests with Content-Type: multipart/form-data and
+		// application/x-www-form-urlencoded, breaking non-gRPC HTTP traffic.
 		HttpFilters: []*httpconnectionmanager.HttpFilter{
 			{
 				Name: wellknown.CORS,
