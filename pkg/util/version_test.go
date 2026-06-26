@@ -1,6 +1,9 @@
 package util
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func Test_newer(t *testing.T) {
 	type args struct {
@@ -246,5 +249,69 @@ func TestIsVersionMajorOrMinorDiff(t *testing.T) {
 				t.Errorf("CmpClientVersionAndPodImageTag() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFormatBanner(t *testing.T) {
+	banner := FormatBanner("hello world")
+	if !strings.Contains(banner, "hello world") {
+		t.Fatalf("FormatBanner output should contain the message, got: %s", banner)
+	}
+	if !strings.HasPrefix(banner, "+") {
+		t.Fatalf("FormatBanner output should start with '+', got: %s", banner)
+	}
+	if !strings.HasSuffix(banner, "+") {
+		t.Fatalf("FormatBanner output should end with '+', got: %s", banner)
+	}
+	// Verify multi-line input works
+	multiLine := FormatBanner("line one\nline two")
+	if !strings.Contains(multiLine, "line one") || !strings.Contains(multiLine, "line two") {
+		t.Fatalf("FormatBanner should contain both lines, got: %s", multiLine)
+	}
+}
+
+func TestCheckVersionCompatibility_SameVersion(t *testing.T) {
+	// Same MAJOR.MINOR should return 0 (compatible)
+	result := CmpVersionMajorOrMinor("v2.3.1", "v2.3.5")
+	if result != 0 {
+		t.Fatalf("expected 0 for compatible versions (same major.minor), got %d", result)
+	}
+}
+
+func TestCheckVersionCompatibility_IncompatibleMajor(t *testing.T) {
+	// Different MAJOR should return non-zero (incompatible)
+	result := CmpVersionMajorOrMinor("v2.3.1", "v1.3.1")
+	if result == 0 {
+		t.Fatal("expected non-zero for incompatible versions (different major)")
+	}
+	if result != 1 {
+		t.Fatalf("expected 1 when v1 major > v2 major, got %d", result)
+	}
+}
+
+func TestCheckVersionCompatibility_IncompatibleMinor(t *testing.T) {
+	// Different MINOR should return non-zero (incompatible)
+	result := CmpVersionMajorOrMinor("v2.3.1", "v2.1.9")
+	if result == 0 {
+		t.Fatal("expected non-zero for incompatible versions (different minor)")
+	}
+	if result != 1 {
+		t.Fatalf("expected 1 when v1 minor > v2 minor, got %d", result)
+	}
+}
+
+func TestCheckVersionCompatibility_OlderVersion(t *testing.T) {
+	// v1 older than v2 should return -1
+	result := CmpVersionMajorOrMinor("v1.2.0", "v1.5.0")
+	if result != -1 {
+		t.Fatalf("expected -1 when v1 minor < v2 minor, got %d", result)
+	}
+}
+
+func TestCheckVersionCompatibility_InvalidVersion(t *testing.T) {
+	// Invalid version string should return 0 (no comparison possible)
+	result := CmpVersionMajorOrMinor("not-a-version", "v1.2.3")
+	if result != 0 {
+		t.Fatalf("expected 0 for invalid version input, got %d", result)
 	}
 }

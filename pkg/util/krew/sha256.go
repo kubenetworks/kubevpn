@@ -53,6 +53,7 @@ func downloadFile(uri string) (string, error) {
 	return DownloadFileWithName(uri, fmt.Sprintf("%d", time.Now().Unix()))
 }
 
+// GetSha256ForAsset downloads the file at uri and returns its SHA-256 hex digest.
 func GetSha256ForAsset(uri string) (string, error) {
 	file, err := downloadFile(uri)
 	if err != nil {

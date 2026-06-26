@@ -15,7 +15,7 @@ func TestAddVirtualRule(t *testing.T) {
 		Headers   map[string]string
 		LocalTunIPv4 string
 		LocalTunIPv6 string
-		Uid       string
+		UID       string
 		Namespace string
 		PortMap   map[int32]string
 
@@ -30,10 +30,10 @@ func TestAddVirtualRule(t *testing.T) {
 			},
 			LocalTunIPv4: "127.0.0.1",
 			LocalTunIPv6: netip.IPv6Loopback().String(),
-			Uid: "deployments.authors",
+			UID: "deployments.authors",
 			Expect: []*controlplane.Virtual{
 				{
-					Uid: "deployments.authors",
+					UID: "deployments.authors",
 					Ports: []controlplane.ContainerPort{
 						{
 							EnvoyListenerPort: 15006,
@@ -51,7 +51,7 @@ func TestAddVirtualRule(t *testing.T) {
 		},
 	}
 	for _, data := range testdatas {
-		rule := addVirtualRule(data.Rule, data.Namespace, data.Uid, data.Ports, data.Headers, data.LocalTunIPv4, data.LocalTunIPv6, nil)
+		rule := addVirtualRule(data.Rule, data.Namespace, data.UID, data.Ports, data.Headers, data.LocalTunIPv4, data.LocalTunIPv6, nil, false)
 		if !reflect.DeepEqual(rule, data.Expect) {
 			t.FailNow()
 		}
