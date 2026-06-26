@@ -44,15 +44,12 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 			}
 		}()
 
-		r := core.Route{
-			Listeners: []string{
-				"tun://?net=" + DefaultServerIP,
-				"gtcp://:10801",
-			},
-			Retries: 5,
+		nodes := []*core.Node{
+			core.NewNode("tun", "").WithParam("net", DefaultServerIP),
+			core.NewNode("gtcp", ":10801"),
 		}
 		var servers []core.Server
-		servers, err = handler.Parse(r)
+		servers, err = core.GenerateServersFromNodes(nodes, nil)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to parse route: %v", err)
 			return

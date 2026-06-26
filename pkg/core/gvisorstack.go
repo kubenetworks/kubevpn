@@ -16,7 +16,9 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
+type transportForwarder func(ctx context.Context, s *stack.Stack) func(stack.TransportEndpointID, *stack.PacketBuffer) bool
+
+func newGvisorStack(ctx context.Context, tun stack.LinkEndpoint, tcpFwd, udpFwd transportForwarder) *stack.Stack {
 	nicID := tcpip.NICID(1)
 	s := stack.New(stack.Options{
 		NetworkProtocols: []stack.NetworkProtocolFactory{
@@ -29,26 +31,18 @@ func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 		},
 		Clock:                    tcpip.NewStdClock(),
 		AllowPacketEndpointWrite: true,
-		HandleLocal:              false, // if set to true, ping local ip will fail
-		// Enable raw sockets for users with sufficient
-		// privileges.
-		RawFactory: raw.EndpointFactory{},
+		HandleLocal:              false,
+		RawFactory:               raw.EndpointFactory{},
 	})
-	// set handler for TCP UDP ICMP
-	s.SetTransportProtocolHandler(tcp.ProtocolNumber, TCPForwarder(ctx, s))
-	s.SetTransportProtocolHandler(udp.ProtocolNumber, UDPForwarder(ctx, s))
+
+	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpFwd(ctx, s))
+	s.SetTransportProtocolHandler(udp.ProtocolNumber, udpFwd(ctx, s))
 	s.SetTransportProtocolHandler(header.ICMPv4ProtocolNumber, ICMPForwarder(ctx, s))
 	s.SetTransportProtocolHandler(header.ICMPv6ProtocolNumber, ICMPForwarder(ctx, s))
 
 	s.SetRouteTable([]tcpip.Route{
-		{
-			Destination: header.IPv4EmptySubnet,
-			NIC:         nicID,
-		},
-		{
-			Destination: header.IPv6EmptySubnet,
-			NIC:         nicID,
-		},
+		{Destination: header.IPv4EmptySubnet, NIC: nicID},
+		{Destination: header.IPv6EmptySubnet, NIC: nicID},
 	})
 
 	s.CreateNICWithOptions(nicID, packetsocket.New(tun), stack.NICOptions{
@@ -58,7 +52,6 @@ func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 	s.SetPromiscuousMode(nicID, true)
 	s.SetSpoofing(nicID, true)
 
-	// Enable SACK Recovery.
 	{
 		opt := tcpip.TCPSACKEnabled(true)
 		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &opt); err != nil {
@@ -66,7 +59,6 @@ func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 		}
 	}
 
-	// Set default TTLs as required by socket/netstack.
 	{
 		opt := tcpip.DefaultTTLOption(64)
 		if err := s.SetNetworkProtocolOption(ipv4.ProtocolNumber, &opt); err != nil {
@@ -77,7 +69,6 @@ func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 		}
 	}
 
-	// Enable Receive Buffer Auto-Tuning.
 	{
 		opt := tcpip.TCPModerateReceiveBufferOption(true)
 		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &opt); err != nil {
@@ -94,11 +85,13 @@ func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 		}
 	}
 
-	{
-		option := tcpip.TCPModerateReceiveBufferOption(true)
-		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &option); err != nil {
-			plog.G(ctx).Fatalf("Set TCP moderate receive buffer: %v", err)
-		}
-	}
 	return s
+}
+
+func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
+	return newGvisorStack(ctx, tun, TCPForwarder, UDPForwarder)
+}
+
+func NewLocalStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
+	return newGvisorStack(ctx, tun, LocalTCPForwarder, LocalUDPForwarder)
 }

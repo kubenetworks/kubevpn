@@ -6,31 +6,37 @@ import (
 	"net"
 )
 
-var (
-	// ErrorEmptyForwarder is an error that implies the forward is empty.
-	ErrorEmptyForwarder = errors.New("empty forwarder")
-)
+var ErrorEmptyForwarder = errors.New("empty forwarder")
 
+// ParseForwarder creates a Forwarder from a remote URI string (e.g. "tcp://host:port").
+func ParseForwarder(remote string) (*Forwarder, error) {
+	node, err := ParseNode(remote)
+	if err != nil {
+		return nil, err
+	}
+	return &Forwarder{
+		Addr:        node.Addr,
+		Connector:   NewUDPOverTCPConnector(),
+		Transporter: TCPTransporter(nil),
+		MaxRetries:  5,
+	}, nil
+}
+
+// Forwarder dials a remote address with retry, applying transport and connection wrapping.
 type Forwarder struct {
-	retries int
-	node    *Node
+	Addr        string
+	Connector   Connector
+	Transporter Transporter
+	MaxRetries  int
 }
 
-func NewForwarder(retry int, node *Node) *Forwarder {
-	return &Forwarder{retries: retry, node: node}
+func (f *Forwarder) IsEmpty() bool {
+	return f == nil || f.Addr == ""
 }
 
-func (c *Forwarder) Node() *Node {
-	return c.node
-}
-
-func (c *Forwarder) IsEmpty() bool {
-	return c == nil || c.node == nil
-}
-
-func (c *Forwarder) DialContext(ctx context.Context) (conn net.Conn, err error) {
-	for i := 0; i < max(1, c.retries); i++ {
-		conn, err = c.dial(ctx)
+func (f *Forwarder) DialContext(ctx context.Context) (conn net.Conn, err error) {
+	for i := 0; i < max(1, f.MaxRetries); i++ {
+		conn, err = f.dial(ctx)
 		if err == nil {
 			break
 		}
@@ -38,18 +44,15 @@ func (c *Forwarder) DialContext(ctx context.Context) (conn net.Conn, err error) 
 	return
 }
 
-func (c *Forwarder) dial(ctx context.Context) (net.Conn, error) {
-	if c.IsEmpty() {
+func (f *Forwarder) dial(ctx context.Context) (net.Conn, error) {
+	if f.IsEmpty() {
 		return nil, ErrorEmptyForwarder
 	}
-
-	conn, err := c.getConn(ctx)
+	conn, err := f.Transporter.Dial(ctx, f.Addr)
 	if err != nil {
 		return nil, err
 	}
-
-	var cc net.Conn
-	cc, err = c.Node().Client.ConnectContext(ctx, conn)
+	cc, err := f.Connector.ConnectContext(ctx, conn)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -57,39 +60,22 @@ func (c *Forwarder) dial(ctx context.Context) (net.Conn, error) {
 	return cc, nil
 }
 
-func (*Forwarder) resolve(addr string) string {
-	if host, port, err := net.SplitHostPort(addr); err == nil {
-		if ips, err := net.LookupIP(host); err == nil && len(ips) > 0 {
-			return net.JoinHostPort(ips[0].String(), port)
-		}
-	}
-	return addr
-}
-
-func (c *Forwarder) getConn(ctx context.Context) (net.Conn, error) {
-	if c.IsEmpty() {
-		return nil, ErrorEmptyForwarder
-	}
-	return c.Node().Client.Dial(ctx, c.Node().Addr)
-}
-
+// Handler handles an inbound connection.
 type Handler interface {
 	Handle(ctx context.Context, conn net.Conn)
 }
 
-type Client struct {
-	Connector
-	Transporter
-}
-
+// Connector wraps a raw connection (e.g. TCP keep-alive, UDP-over-TCP).
 type Connector interface {
 	ConnectContext(ctx context.Context, conn net.Conn) (net.Conn, error)
 }
 
+// Transporter establishes a transport-level connection to an address.
 type Transporter interface {
 	Dial(ctx context.Context, addr string) (net.Conn, error)
 }
 
+// Server pairs a listener with a handler.
 type Server struct {
 	Listener net.Listener
 	Handler  Handler

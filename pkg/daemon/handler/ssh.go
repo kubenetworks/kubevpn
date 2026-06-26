@@ -129,13 +129,13 @@ func (w *wsHandler) createTunnel(ctx context.Context, cli *ssh.Client) error {
 	msg := util.PrintStr(fmt.Sprintf("You can use client: %s to communicate with server: %s", clientIP.IP.String(), ip.String()))
 	w.Log(msg)
 	w.cidr = append(w.cidr, string(serverIP))
-	r := core.Route{
-		Listeners: []string{
-			fmt.Sprintf("tun:/%s?net=%s&route=%s", fmt.Sprintf("tcp://127.0.0.1:%d", localPort), clientIP, strings.Join(w.cidr, ",")),
-		},
-		Retries: 5,
+	nodes := []*core.Node{
+		core.NewNode("tun", "").
+			WithForward(fmt.Sprintf("tcp://127.0.0.1:%d", localPort)).
+			WithParam("net", clientIP.String()).
+			WithParam("route", strings.Join(w.cidr, ",")),
 	}
-	servers, err := handler.Parse(r)
+	servers, err := core.GenerateServersFromNodes(nodes, nil)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to parse route: %v", err)
 		w.Log("Failed to parse route: %v", err)

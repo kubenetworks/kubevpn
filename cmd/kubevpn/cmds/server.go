@@ -22,7 +22,7 @@ import (
 )
 
 func CmdServer(cmdutil.Factory) *cobra.Command {
-	var route = &core.Route{}
+	var listeners []string
 	cmd := &cobra.Command{
 		Use:    "server",
 		Hidden: true,
@@ -45,7 +45,7 @@ func CmdServer(cmdutil.Factory) *cobra.Command {
 			ctx := cmd.Context()
 			logger := plog.InitLoggerForServer()
 			logger.SetLevel(util.If(config.Debug, log.DebugLevel, log.InfoLevel))
-			servers, err := handler.Parse(*route)
+			servers, err := core.GenerateServers(listeners, nil)
 			if err != nil {
 				plog.G(ctx).Errorf("Parse server failed: %v", err)
 				return err
@@ -53,7 +53,7 @@ func CmdServer(cmdutil.Factory) *cobra.Command {
 			return handler.Run(plog.WithLogger(ctx, logger), servers)
 		},
 	}
-	cmd.Flags().StringArrayVarP(&route.Listeners, "listener", "l", []string{}, "Startup listener server. eg: tcp://localhost:1080")
+	cmd.Flags().StringArrayVarP(&listeners, "listener", "l", []string{}, "Startup listener server. eg: tcp://localhost:1080")
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "Enable debug log or not")
 	return cmd
 }

@@ -22,49 +22,39 @@ func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint,
 		pkt := endpoint.ReadContext(ctx)
 		if pkt != nil {
 			sniffer.LogPacket(prefix, sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
-			data := pkt.ToView().AsSlice()
-			buf := config.LPool.Get().([]byte)[:]
-			n := copy(buf[1:], data)
-			buf[0] = 0
-			out <- NewPacket(buf[:], n+1, nil, nil)
+			buf, length := copyPacketToPool(pkt, 0)
+			out <- NewPacket(buf[:], length, nil, nil)
 		}
 	}
 }
 
 func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *Packet, endpoint *channel.Endpoint) {
 	prefix := fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))
-	for ctx.Err() == nil {
-		var packet *Packet
+	for {
 		select {
-		case packet = <-in:
+		case packet := <-in:
 			if packet == nil {
 				return
 			}
+			var protocol tcpip.NetworkProtocolNumber
+			if util.IsIPv4(packet.data[1:packet.length]) {
+				protocol = header.IPv4ProtocolNumber
+			} else if util.IsIPv6(packet.data[1:packet.length]) {
+				protocol = header.IPv6ProtocolNumber
+			} else {
+				plog.G(ctx).Errorf("[TCP-GVISOR] Unknown packet")
+				config.LPool.Put(packet.data[:])
+				continue
+			}
+			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+				Payload: buffer.MakeWithData(packet.data[1:packet.length]),
+			})
+			config.LPool.Put(packet.data[:])
+			sniffer.LogPacket(prefix, sniffer.DirectionRecv, protocol, pkt)
+			endpoint.InjectInbound(protocol, pkt)
+			pkt.DecRef()
 		case <-ctx.Done():
 			return
 		}
-
-		// Try to determine network protocol number, default zero.
-		var protocol tcpip.NetworkProtocolNumber
-		// TUN interface with IFF_NO_PI enabled, thus
-		// we need to determine protocol from version field
-		if util.IsIPv4(packet.data[1:packet.length]) {
-			protocol = header.IPv4ProtocolNumber
-		} else if util.IsIPv6(packet.data[1:packet.length]) {
-			protocol = header.IPv6ProtocolNumber
-		} else {
-			plog.G(ctx).Errorf("[TCP-GVISOR] Unknown packet")
-			config.LPool.Put(packet.data[:])
-			continue
-		}
-
-		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
-			ReserveHeaderBytes: 0,
-			Payload:            buffer.MakeWithData(packet.data[1:packet.length]),
-		})
-		config.LPool.Put(packet.data[:])
-		sniffer.LogPacket(prefix, sniffer.DirectionRecv, protocol, pkt)
-		endpoint.InjectInbound(protocol, pkt)
-		pkt.DecRef()
 	}
 }

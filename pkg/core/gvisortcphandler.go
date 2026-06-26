@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
-	"sync"
 
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
@@ -19,22 +18,24 @@ import (
 )
 
 type gvisorTCPHandler struct {
-	// map[srcIP]net.Conn
-	routeMapTCP *sync.Map
+	hub *RouteHub
 }
 
-func GvisorTCPHandler() Handler {
+func GvisorTCPHandler(hub *RouteHub) Handler {
+	if hub == nil {
+		hub = DefaultRouteHub
+	}
 	return &gvisorTCPHandler{
-		routeMapTCP: RouteMapTCP,
+		hub: hub,
 	}
 }
 
 func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
-	cancel, cancelFunc := context.WithCancel(ctx)
-	defer cancelFunc()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	plog.G(ctx).Infof("[TUN-GVISOR] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
-	h.handle(cancel, tcpConn)
+	h.handle(ctx, tcpConn)
 }
 
 func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {

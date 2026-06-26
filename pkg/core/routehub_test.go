@@ -1,0 +1,173 @@
+package core
+
+import (
+	"net"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestNewRouteHub(t *testing.T) {
+	hub := NewRouteHub()
+	if hub == nil {
+		t.Fatal("NewRouteHub returned nil")
+	}
+	if hub.RouteMapTCP == nil {
+		t.Fatal("RouteMapTCP is nil")
+	}
+	if hub.TCPPacketChan == nil {
+		t.Fatal("TCPPacketChan is nil")
+	}
+	if cap(hub.TCPPacketChan) != MaxSize {
+		t.Fatalf("TCPPacketChan capacity = %d, want %d", cap(hub.TCPPacketChan), MaxSize)
+	}
+}
+
+func TestDefaultRouteHub(t *testing.T) {
+	if DefaultRouteHub == nil {
+		t.Fatal("DefaultRouteHub is nil")
+	}
+}
+
+func TestRouteHub_Isolation(t *testing.T) {
+	hub1 := NewRouteHub()
+	hub2 := NewRouteHub()
+
+	hub1.RouteMapTCP.Store("10.0.0.1", &net.TCPConn{})
+
+	if _, ok := hub2.RouteMapTCP.Load("10.0.0.1"); ok {
+		t.Fatal("hub2 should not see hub1's route entry")
+	}
+}
+
+func TestRouteHub_SharedState(t *testing.T) {
+	hub := NewRouteHub()
+
+	conn := &mockConn{addr: "192.168.1.1:8080"}
+	hub.RouteMapTCP.Store("198.18.0.100", conn)
+
+	val, ok := hub.RouteMapTCP.Load("198.18.0.100")
+	if !ok {
+		t.Fatal("expected to find route entry")
+	}
+	if val.(net.Conn) != conn {
+		t.Fatal("route entry mismatch")
+	}
+}
+
+func TestRouteHub_TCPPacketChan_ProduceConsume(t *testing.T) {
+	hub := NewRouteHub()
+
+	pkt := &Packet{
+		data:   make([]byte, 100),
+		length: 50,
+		src:    net.ParseIP("198.18.0.100"),
+		dst:    net.ParseIP("198.18.0.101"),
+	}
+
+	go func() {
+		hub.TCPPacketChan <- pkt
+	}()
+
+	select {
+	case received := <-hub.TCPPacketChan:
+		if received != pkt {
+			t.Fatal("received packet does not match sent packet")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for packet")
+	}
+}
+
+func TestRouteHub_ConcurrentAccess(t *testing.T) {
+	hub := NewRouteHub()
+	var wg sync.WaitGroup
+
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ip := net.IPv4(198, 18, byte(i/256), byte(i%256))
+			conn := &mockConn{addr: ip.String() + ":8080"}
+			hub.RouteMapTCP.Store(ip.String(), conn)
+		}(i)
+	}
+
+	wg.Wait()
+
+	count := 0
+	hub.RouteMapTCP.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	if count != 100 {
+		t.Fatalf("expected 100 entries, got %d", count)
+	}
+}
+
+func TestRouteHub_RouteMapTCP_DeleteEntry(t *testing.T) {
+	hub := NewRouteHub()
+
+	conn := &mockConn{addr: "10.0.0.1:1234"}
+	hub.RouteMapTCP.Store("198.18.0.50", conn)
+	hub.RouteMapTCP.Delete("198.18.0.50")
+
+	if _, ok := hub.RouteMapTCP.Load("198.18.0.50"); ok {
+		t.Fatal("entry should have been deleted")
+	}
+}
+
+func TestTunHandler_NilHub_UsesDefault(t *testing.T) {
+	handler := TunHandler(nil, nil)
+	th := handler.(*tunHandler)
+	if th.hub != DefaultRouteHub {
+		t.Fatal("nil hub should fall back to DefaultRouteHub")
+	}
+}
+
+func TestTunHandler_CustomHub(t *testing.T) {
+	hub := NewRouteHub()
+	handler := TunHandler(nil, hub)
+	th := handler.(*tunHandler)
+	if th.hub != hub {
+		t.Fatal("handler should use the provided hub")
+	}
+}
+
+func TestGvisorTCPHandler_NilHub_UsesDefault(t *testing.T) {
+	handler := GvisorTCPHandler(nil)
+	gh := handler.(*gvisorTCPHandler)
+	if gh.hub != DefaultRouteHub {
+		t.Fatal("nil hub should fall back to DefaultRouteHub")
+	}
+}
+
+func TestGvisorTCPHandler_CustomHub(t *testing.T) {
+	hub := NewRouteHub()
+	handler := GvisorTCPHandler(hub)
+	gh := handler.(*gvisorTCPHandler)
+	if gh.hub != hub {
+		t.Fatal("handler should use the provided hub")
+	}
+}
+
+func TestGenerateServers_NilHub_FallsBackToDefault(t *testing.T) {
+	// Should not panic with nil hub — falls back to DefaultRouteHub
+	_, _ = GenerateServers([]string{"unknown://:0"}, nil)
+}
+
+// mockConn implements net.Conn for testing
+type mockConn struct {
+	net.Conn
+	addr string
+}
+
+func (m *mockConn) RemoteAddr() net.Addr {
+	a, _ := net.ResolveTCPAddr("tcp", m.addr)
+	return a
+}
+
+func (m *mockConn) LocalAddr() net.Addr {
+	a, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:0")
+	return a
+}
