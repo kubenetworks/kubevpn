@@ -15,10 +15,12 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// Printable is an interface for gRPC response messages that can provide a human-readable string.
 type Printable interface {
 	GetMessage() string
 }
 
+// PrintGRPCStream reads messages from a gRPC client stream and writes their content to the provided writers (or stdout).
 func PrintGRPCStream[T any](ctx context.Context, clientStream grpc.ClientStream, writers ...io.Writer) error {
 	var out io.Writer = os.Stdout
 	for _, writer := range writers {
@@ -54,6 +56,7 @@ func PrintGRPCStream[T any](ctx context.Context, clientStream grpc.ClientStream,
 	}
 }
 
+// CopyGRPCStream copies messages from a gRPC client stream to a server stream until EOF.
 func CopyGRPCStream[T any](r grpc.ClientStream, w grpc.ServerStream) error {
 	for {
 		var t = new(T)
@@ -71,6 +74,7 @@ func CopyGRPCStream[T any](r grpc.ClientStream, w grpc.ServerStream) error {
 	}
 }
 
+// CopyGRPCConnStream copies ConnectResponse messages from a bidirectional stream to a server stream, returning the connection ID.
 func CopyGRPCConnStream(r grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse], w grpc.ServerStream) (string, error) {
 	var connectionID string
 	for {
@@ -91,6 +95,7 @@ func CopyGRPCConnStream(r grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.Conne
 	}
 }
 
+// CopyAndConvertGRPCStream copies messages from a client stream to a server stream, applying a conversion function to each message.
 func CopyAndConvertGRPCStream[I any, O any](r grpc.ClientStream, w grpc.ServerStream, convert func(*I) *O) error {
 	for {
 		var i = new(I)
@@ -109,6 +114,7 @@ func CopyAndConvertGRPCStream[I any, O any](r grpc.ClientStream, w grpc.ServerSt
 	}
 }
 
+// HandleCrash recovers from a panic, logs the stack trace, then re-panics.
 func HandleCrash() {
 	if r := recover(); r != nil {
 		plog.GetLogger(context.Background()).Error(r)
@@ -117,6 +123,7 @@ func HandleCrash() {
 	}
 }
 
+// ListenCancel waits for a Cancel message on the server stream and invokes the cancel function when received.
 func ListenCancel(resp grpc.ServerStream, cancelFunc context.CancelFunc) {
 	var s rpc.Cancel
 	if resp.RecvMsg(&s) == nil {

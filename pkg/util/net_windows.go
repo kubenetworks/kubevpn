@@ -3,7 +3,7 @@
 package util
 
 import (
-	"github.com/pkg/errors"
+	"errors"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -31,6 +31,7 @@ Enable IPv6:
 	  						Decimal 32
 	  Prefer IPv6 over IPv4	Binary xx0x xxxx
 */
+// IsIPv6Enabled checks the Windows registry to determine whether IPv6 is enabled on the system.
 func IsIPv6Enabled() (bool, error) {
 	key, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters`, registry.QUERY_VALUE)
 	if err != nil {

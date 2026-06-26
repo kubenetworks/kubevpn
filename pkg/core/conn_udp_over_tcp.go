@@ -9,6 +9,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+// NewUDPConnOverTCP wraps a TCP connection with datagram framing for UDP-like semantics.
 func NewUDPConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, error) {
 	return &UDPConnOverTCP{ctx: ctx, Conn: conn}, nil
 }
@@ -57,6 +58,7 @@ func (c *UDPConnOverTCP) Close() error {
 	return c.Conn.Close()
 }
 
+// DatagramPacket represents a length-prefixed datagram over a stream connection.
 type DatagramPacket struct {
 	DataLength uint16 // [2]byte
 	Data       []byte // []byte

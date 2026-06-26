@@ -10,9 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	informerv1 "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -22,6 +25,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// Proxy represents a single proxied workload with its SSH tunnel mapper.
 type Proxy struct {
 	headers   map[string]string
 	portMap   []string
@@ -31,6 +35,7 @@ type Proxy struct {
 	portMapper *Mapper
 }
 
+// ProxyList is a collection of active proxy workloads for a connection.
 type ProxyList []*Proxy
 
 func (l *ProxyList) Remove(ns, workload string) {
@@ -40,10 +45,10 @@ func (l *ProxyList) Remove(ns, workload string) {
 	for i := 0; i < len(*l); i++ {
 		p := (*l)[i]
 		if p.workload == workload && p.namespace == ns {
+			p.portMapper.Stop()
 			*l = append((*l)[:i], (*l)[i+1:]...)
 			i--
 		}
-		p.portMapper.Stop()
 	}
 }
 
@@ -56,7 +61,7 @@ func (l *ProxyList) IsMe(ns, uid string, headers map[string]string) bool {
 		return false
 	}
 	for _, proxy := range *l {
-		if proxy.workload == util.ConvertUidToWorkload(uid) &&
+		if proxy.workload == util.ConvertUIDToWorkload(uid) &&
 			proxy.namespace == ns &&
 			reflect.DeepEqual(proxy.headers, headers) {
 			return true
@@ -65,6 +70,7 @@ func (l *ProxyList) IsMe(ns, uid string, headers map[string]string) bool {
 	return false
 }
 
+// Resources identifies a workload by namespace and name for leave/unpatch operations.
 type Resources struct {
 	Namespace string
 	Workload  string
@@ -81,159 +87,234 @@ func (l ProxyList) ToResources() []Resources {
 	return resources
 }
 
-func NewMapper(clientset *kubernetes.Clientset, ns string, labels string, headers map[string]string, workload string) *Mapper {
+func NewMapper(clientset kubernetes.Interface, ns string, labels string, headers map[string]string, workload string, cmInformer cache.SharedInformer) *Mapper {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	return &Mapper{
-		ns:        ns,
-		headers:   headers,
-		workload:  workload,
-		labels:    labels,
-		ctx:       ctx,
-		cancel:    cancelFunc,
-		clientset: clientset,
+		ns:         ns,
+		headers:    headers,
+		workload:   workload,
+		labels:     labels,
+		ctx:        ctx,
+		cancel:     cancelFunc,
+		clientset:  clientset,
+		cmInformer: cmInformer,
 	}
 }
 
+// Mapper manages SSH reverse tunnels for Fargate/Service mode port forwarding.
 type Mapper struct {
 	ns       string
 	headers  map[string]string
 	workload string
 	labels   string
 
-	ctx       context.Context
-	cancel    context.CancelFunc
-	clientset *kubernetes.Clientset
+	ctx        context.Context
+	cancel     context.CancelFunc
+	clientset  kubernetes.Interface
+	cmInformer cache.SharedInformer
 }
 
-func (m *Mapper) Run(managerNamespace string) {
+// Run uses informer watches on ConfigMap and Pods to react to changes
+// instead of polling. A reconcile ticker acts as a fallback safety net.
+func (m *Mapper) Run() {
 	if m == nil {
 		return
 	}
-	var podNameCtx = &sync.Map{}
+	podTunnels := &sync.Map{}
 	defer func() {
-		podNameCtx.Range(func(key, value any) bool {
+		podTunnels.Range(func(_, value any) bool {
 			value.(context.CancelFunc)()
 			return true
 		})
-		podNameCtx.Clear()
 	}()
 
-	var lastLocalPort2EnvoyRulePort map[int32]int32
+	// reconcile channel — informer events and ticker both feed into this
+	reconcileCh := make(chan struct{}, 1)
+	triggerReconcile := func() {
+		select {
+		case reconcileCh <- struct{}{}:
+		default:
+		}
+	}
+
+	// Shared ConfigMap informer — reuse from ConnectOptions, no extra watch connection
+	m.cmInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(_ interface{}) { triggerReconcile() },
+		UpdateFunc: func(_, _ interface{}) { triggerReconcile() },
+		DeleteFunc: func(_ interface{}) { triggerReconcile() },
+	})
+
+	// Watch Pods matching the service selector
+	podInformer := informerv1.NewFilteredPodInformer(
+		m.clientset, m.ns, 0, cache.Indexers{},
+		func(options *metav1.ListOptions) {
+			options.LabelSelector = m.labels
+		},
+	)
+	podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(_ interface{}) { triggerReconcile() },
+		UpdateFunc: func(_, _ interface{}) { triggerReconcile() },
+		DeleteFunc: func(_ interface{}) { triggerReconcile() },
+	})
+	go podInformer.Run(m.ctx.Done())
+
+	// Fallback ticker — ensures reconciliation even if an informer event is missed
+	ticker := time.NewTicker(time.Second * 30)
+	defer ticker.Stop()
+
+	// Initial reconcile
+	triggerReconcile()
+
+	var lastPortMapping map[int32]int32
 	for m.ctx.Err() == nil {
-		localPort2EnvoyRulePort, err := m.getLocalPort2EnvoyRulePort(managerNamespace)
+		select {
+		case <-reconcileCh:
+		case <-ticker.C:
+		case <-m.ctx.Done():
+			return
+		}
+
+		portMapping, err := m.getPortMappingFromCache()
 		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				continue
+			if !errors.Is(err, context.Canceled) {
+				plog.G(m.ctx).Errorf("Failed to get port mapping: %v", err)
 			}
-			plog.G(m.ctx).Errorf("failed to get local port to envoy rule port: %v", err)
-			time.Sleep(time.Second * 2)
 			continue
 		}
-		if !reflect.DeepEqual(localPort2EnvoyRulePort, lastLocalPort2EnvoyRulePort) {
-			podNameCtx.Range(func(key, value any) bool {
-				value.(context.CancelFunc)()
-				return true
-			})
-			podNameCtx.Clear()
+
+		if !reflect.DeepEqual(portMapping, lastPortMapping) {
+			cancelAllTunnels(podTunnels)
 		}
-		lastLocalPort2EnvoyRulePort = localPort2EnvoyRulePort
+		lastPortMapping = portMapping
 
-		list, err := util.GetRunningPodList(m.ctx, m.clientset, m.ns, m.labels)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				continue
-			}
-			plog.G(m.ctx).Errorf("failed to list running pod: %v", err)
-			time.Sleep(time.Second * 2)
-			continue
-		}
-		podNames := sets.New[string]()
-		for _, pod := range list {
-			podNames.Insert(pod.Name)
-			if _, ok := podNameCtx.Load(pod.Name); ok {
-				continue
-			}
-
-			containerNames := sets.New[string]()
-			for _, container := range pod.Spec.Containers {
-				containerNames.Insert(container.Name)
-			}
-			if !containerNames.HasAny(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
-				plog.G(m.ctx).Infof("Labels with pod have been reset")
-				return
-			}
-
-			podIP, err := netip.ParseAddr(pod.Status.PodIP)
-			if err != nil {
-				continue
-			}
-
-			ctx, cancel := context.WithCancel(m.ctx)
-			podNameCtx.Store(pod.Name, cancel)
-
-			go func(remoteSSHServer netip.AddrPort, podName string) {
-				for containerPort, envoyRulePort := range localPort2EnvoyRulePort {
-					go func(containerPort, envoyRulePort int32) {
-						local := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(containerPort))
-						remote := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(envoyRulePort))
-						for ctx.Err() == nil {
-							func() {
-								ctx2, cancelFunc := context.WithCancel(ctx)
-								defer cancelFunc()
-								_ = ssh.ExposeLocalPortToRemote(ctx2, remoteSSHServer, remote, local)
-							}()
-							time.Sleep(time.Second * 2)
-						}
-					}(containerPort, envoyRulePort)
-				}
-			}(netip.AddrPortFrom(podIP, 2222), pod.Name)
-		}
-		podNameCtx.Range(func(key, value any) bool {
-			if !podNames.Has(key.(string)) {
-				value.(context.CancelFunc)()
-				podNameCtx.Delete(key.(string))
-			}
-			return true
-		})
-		time.Sleep(time.Second * 2)
+		m.reconcilePodsFromInformer(podTunnels, podInformer, portMapping)
 	}
 }
 
-func (m *Mapper) getLocalPort2EnvoyRulePort(managerNamespace string) (map[int32]int32, error) {
-	configMap, err := m.clientset.CoreV1().ConfigMaps(managerNamespace).Get(m.ctx, config.ConfigMapPodTrafficManager, v1.GetOptions{})
-	if err != nil {
-		return nil, err
+// reconcilePodsFromInformer uses the pod informer's cache instead of listing from API server.
+func (m *Mapper) reconcilePodsFromInformer(podTunnels *sync.Map, podInformer cache.SharedInformer, portMapping map[int32]int32) {
+	activePods := sets.New[string]()
+	for _, obj := range podInformer.GetStore().List() {
+		pod, ok := obj.(*v1.Pod)
+		if !ok || pod.Status.Phase != v1.PodRunning || pod.DeletionTimestamp != nil {
+			continue
+		}
+
+		activePods.Insert(pod.Name)
+		if _, exists := podTunnels.Load(pod.Name); exists {
+			continue
+		}
+
+		containerNames := sets.New[string]()
+		for _, container := range pod.Spec.Containers {
+			containerNames.Insert(container.Name)
+		}
+		if !containerNames.HasAny(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
+			plog.G(m.ctx).Infof("Pod %s no longer has sidecar containers", pod.Name)
+			continue
+		}
+
+		podIP, err := netip.ParseAddr(pod.Status.PodIP)
+		if err != nil {
+			continue
+		}
+
+		ctx, cancel := context.WithCancel(m.ctx)
+		podTunnels.Store(pod.Name, cancel)
+		sshServer := netip.AddrPortFrom(podIP, 2222)
+		go m.startTunnels(ctx, sshServer, portMapping)
 	}
-	var v = make([]*controlplane.Virtual, 0)
+
+	podTunnels.Range(func(key, value any) bool {
+		if !activePods.Has(key.(string)) {
+			value.(context.CancelFunc)()
+			podTunnels.Delete(key)
+		}
+		return true
+	})
+}
+
+// getPortMappingFromCache reads the ConfigMap from the shared informer cache.
+func (m *Mapper) getPortMappingFromCache() (map[int32]int32, error) {
+	items := m.cmInformer.GetStore().List()
+	if len(items) == 0 {
+		return nil, nil
+	}
+	configMap, ok := items[0].(*v1.ConfigMap)
+	if !ok {
+		return nil, nil
+	}
+
+	return m.extractPortMapping(configMap)
+}
+
+func (m *Mapper) extractPortMapping(configMap *v1.ConfigMap) (map[int32]int32, error) {
+	var virtuals []*controlplane.Virtual
 	if str, ok := configMap.Data[config.KeyEnvoy]; ok {
-		if err = yaml.Unmarshal([]byte(str), &v); err != nil {
+		if err := yaml.Unmarshal([]byte(str), &virtuals); err != nil {
 			return nil, err
 		}
 	}
 
-	var localPort2EnvoyRulePort = make(map[int32]int32)
-	for _, virtual := range v {
-		if util.ConvertWorkloadToUid(m.workload) == virtual.Uid && m.ns == virtual.Namespace {
-			for _, rule := range virtual.Rules {
-				if reflect.DeepEqual(m.headers, rule.Headers) {
-					for containerPort, portPair := range rule.PortMap {
-						if strings.Index(portPair, ":") > 0 {
-							split := strings.Split(portPair, ":")
-							if len(split) == 2 {
-								envoyRulePort, _ := strconv.Atoi(split[0])
-								localPort, _ := strconv.Atoi(split[1])
-								localPort2EnvoyRulePort[int32(localPort)] = int32(envoyRulePort)
-							}
-						} else {
-							envoyRulePort, _ := strconv.Atoi(portPair)
-							localPort2EnvoyRulePort[containerPort] = int32(envoyRulePort)
-						}
-					}
+	result := make(map[int32]int32)
+	for _, virtual := range virtuals {
+		if util.ConvertWorkloadToUID(m.workload) != virtual.UID || m.ns != virtual.Namespace {
+			continue
+		}
+		for _, rule := range virtual.Rules {
+			if !reflect.DeepEqual(m.headers, rule.Headers) {
+				continue
+			}
+			for containerPort, portPair := range rule.PortMap {
+				if local, remote, ok := parsePortPair(containerPort, portPair); ok {
+					result[local] = remote
 				}
 			}
 		}
 	}
-	return localPort2EnvoyRulePort, nil
+	return result, nil
+}
+
+// startTunnels creates SSH port-forward tunnels for each port mapping entry.
+func (m *Mapper) startTunnels(ctx context.Context, sshServer netip.AddrPort, portMapping map[int32]int32) {
+	for containerPort, envoyPort := range portMapping {
+		go func(containerPort, envoyPort int32) {
+			local := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(containerPort))
+			remote := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(envoyPort))
+			for ctx.Err() == nil {
+				ctx2, cancel := context.WithCancel(ctx)
+				_ = ssh.ExposeLocalPortToRemote(ctx2, sshServer, remote, local)
+				cancel()
+				time.Sleep(time.Second * 2)
+			}
+		}(containerPort, envoyPort)
+	}
+}
+
+// parsePortPair parses a port mapping string into (localPort, envoyRulePort).
+// Format is either "envoyPort:localPort" (colon-separated) or "envoyPort" (plain).
+func parsePortPair(containerPort int32, portPair string) (local, remote int32, ok bool) {
+	if before, after, found := strings.Cut(portPair, ":"); found {
+		envoyPort, err1 := strconv.Atoi(before)
+		localPort, err2 := strconv.Atoi(after)
+		if err1 != nil || err2 != nil {
+			return 0, 0, false
+		}
+		return int32(localPort), int32(envoyPort), true
+	}
+	envoyPort, err := strconv.Atoi(portPair)
+	if err != nil {
+		return 0, 0, false
+	}
+	return containerPort, int32(envoyPort), true
+}
+
+func cancelAllTunnels(tunnels *sync.Map) {
+	tunnels.Range(func(_, value any) bool {
+		value.(context.CancelFunc)()
+		return true
+	})
+	tunnels.Clear()
 }
 
 func (m *Mapper) Stop() {

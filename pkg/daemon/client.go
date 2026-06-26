@@ -9,7 +9,6 @@ import (
 	"os"
 	"time"
 
-	pkgerr "github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -85,7 +84,7 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	return cli, nil
 }
 
-func GetClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClient, conn *grpc.ClientConn, err error) {
+func getClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClient, conn *grpc.ClientConn, err error) {
 	sockPath := config.GetSockPath(isSudo)
 	_, err = os.Stat(sockPath)
 	if errors.Is(err, os.ErrNotExist) {
@@ -174,12 +173,12 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 
 	_, err = GetClient(isSudo)
 	if err != nil {
-		return pkgerr.Wrap(err, "failed to get daemon server client")
+		return fmt.Errorf("failed to get daemon server client: %w", err)
 	}
 	return nil
 }
 
-func GetHttpClient(isSudo bool) *http.Client {
+func getHttpClient(isSudo bool) *http.Client {
 	client := http.Client{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {

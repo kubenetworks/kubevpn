@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,9 +16,10 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// RunLogsWaitRunning streams Docker container logs until the startup slogan appears or the context is cancelled.
 func RunLogsWaitRunning(ctx context.Context, name string) error {
 	buf := bytes.NewBuffer(nil)
 	w := io.MultiWriter(buf, os.Stdout)
@@ -61,6 +61,7 @@ func RunLogsWaitRunning(ctx context.Context, name string) error {
 	}
 }
 
+// RunLogsSinceNow prints Docker container logs from the current moment, optionally following new output.
 func RunLogsSinceNow(name string, follow bool) error {
 	args := []string{"logs", name, "--since", "0m", "--details"}
 	if follow {
@@ -103,23 +104,25 @@ func CreateNetwork(ctx context.Context, name string) (string, error) {
 	return string(id), nil
 }
 
+// RunContainer executes a Docker command with the given args, connecting stdin/stdout/stderr to the terminal.
 func RunContainer(ctx context.Context, args []string) error {
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	log.G(ctx).Debugf("Run container with cmd: %v", cmd.Args)
+	plog.G(ctx).Debugf("Run container with cmd: %v", cmd.Args)
 	err := cmd.Start()
 	if err != nil {
-		log.G(ctx).Errorf("Failed to run container with cmd: %v: %v", cmd.Args, err)
+		plog.G(ctx).Errorf("Failed to run container with cmd: %v: %v", cmd.Args, err)
 		return err
 	}
 	return cmd.Wait()
 }
 
+// WaitDockerContainerRunning polls until the named Docker container reaches the running state or exits.
 func WaitDockerContainerRunning(ctx context.Context, name string) error {
-	log.G(ctx).Infof("Wait container %s to be running...", name)
+	plog.G(ctx).Infof("Wait container %s to be running...", name)
 
 	for ctx.Err() == nil {
 		time.Sleep(time.Second * 1)
@@ -128,7 +131,7 @@ func WaitDockerContainerRunning(ctx context.Context, name string) error {
 			return err
 		}
 		if inspect.State != nil && (inspect.State.Status == "exited" || inspect.State.Status == "dead" || inspect.State.Dead) {
-			err = errors.New(fmt.Sprintf("container status: %s", inspect.State.Status))
+			err = fmt.Errorf("container status: %s", inspect.State.Status)
 			return err
 		}
 		if inspect.State != nil && inspect.State.Running {
@@ -136,10 +139,11 @@ func WaitDockerContainerRunning(ctx context.Context, name string) error {
 		}
 	}
 
-	log.G(ctx).Infof("Container %s is running now", name)
+	plog.G(ctx).Infof("Container %s is running now", name)
 	return nil
 }
 
+// ContainerInspect returns the Docker inspect result for the named container.
 func ContainerInspect(ctx context.Context, name string) (types.ContainerJSON, error) {
 	output, err := exec.CommandContext(ctx, "docker", "inspect", name).CombinedOutput()
 	if err != nil {
@@ -158,6 +162,7 @@ func ContainerInspect(ctx context.Context, name string) (types.ContainerJSON, er
 	return inspect[0], nil
 }
 
+// NetworkInspect returns the Docker network inspect result for the named network.
 func NetworkInspect(ctx context.Context, name string) (network.Inspect, error) {
 	output, err := exec.CommandContext(ctx, "docker", "network", "inspect", name).CombinedOutput()
 	if err != nil {
@@ -176,6 +181,7 @@ func NetworkInspect(ctx context.Context, name string) (network.Inspect, error) {
 	return inspect[0], nil
 }
 
+// NetworkRemove removes the named Docker network, ignoring "not found" errors.
 func NetworkRemove(ctx context.Context, name string) error {
 	output, err := exec.CommandContext(ctx, "docker", "network", "remove", name).CombinedOutput()
 	if err != nil && strings.Contains(string(output), "not found") {
@@ -204,6 +210,7 @@ func ContainerRemove(ctx context.Context, containerName string) ([]byte, error) 
 	return output, err
 }
 
+// ContainerKill sends SIGTERM to the named Docker container.
 func ContainerKill(ctx context.Context, name *string) ([]byte, error) {
 	output, err := exec.CommandContext(ctx, "docker", "kill", *name, "--signal", "SIGTERM").CombinedOutput()
 	if err != nil && strings.Contains(string(output), "not found") {

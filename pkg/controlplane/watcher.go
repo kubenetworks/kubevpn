@@ -17,6 +17,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// NotifyMessage carries ConfigMap content updates from the watcher to the processor.
 type NotifyMessage struct {
 	Content string
 }

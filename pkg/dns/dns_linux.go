@@ -83,7 +83,7 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 		return err
 	}
 	localResolvConf.Servers = append([]string{config.Servers[0]}, localResolvConf.Servers...)
-	err = WriteResolvConf(resolvconf.Path(), *localResolvConf)
+	err = writeResolvConf(resolvconf.Path(), *localResolvConf)
 	return err
 }
 
@@ -175,17 +175,17 @@ func (c *Config) CancelDNS() {
 			break
 		}
 	}
-	err = WriteResolvConf(resolvconf.Path(), *resolvConf)
+	err = writeResolvConf(resolvconf.Path(), *resolvConf)
 	if err != nil {
 		plog.G(context.Background()).Warnf("Failed to remove DNS from resolv conf file: %v", err)
 	}
 }
 
-func GetHostFile() string {
+func getHostFile() string {
 	return "/etc/hosts"
 }
 
-func WriteResolvConf(filename string, config miekgdns.ClientConfig) error {
+func writeResolvConf(filename string, config miekgdns.ClientConfig) error {
 	var options []string
 	if config.Ndots != 0 {
 		options = append(options, fmt.Sprintf("ndots:%d", config.Ndots))

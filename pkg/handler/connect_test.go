@@ -90,7 +90,7 @@ func TestParseNode(t *testing.T) {
 			want: &core.Node{
 				Addr:     "",
 				Protocol: "tun",
-				Remote:   "tcp://remote-addr:9080",
+				Forward:   "tcp://remote-addr:9080",
 				Values: url.Values{
 					"net": []string{"10.10.10.10/24"},
 					"gw":  []string{"10.10.10.1"},
@@ -109,7 +109,7 @@ func TestParseNode(t *testing.T) {
 			want: &core.Node{
 				Addr:     "",
 				Protocol: "tun",
-				Remote:   "tcp://remote-addr:9080",
+				Forward:   "tcp://remote-addr:9080",
 				Values: url.Values{
 					"net": []string{"10.10.10.10/24"},
 					"gw":  []string{"10.10.10.1"},

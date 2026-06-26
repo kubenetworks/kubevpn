@@ -18,6 +18,7 @@ import (
 	"github.com/jcmturner/gokrb5/v8/types"
 )
 
+// Krb5ClientState represents the state machine position of a Kerberos 5 GSSAPI initiator client.
 type Krb5ClientState int
 
 const (
@@ -29,6 +30,7 @@ const (
 	InitiatorReady
 )
 
+// NewKrb5InitiatorClientWithPassword creates a Kerberos 5 initiator client authenticated with a password.
 func NewKrb5InitiatorClientWithPassword(username, password, krb5Conf string) (kcl Krb5InitiatorClient, err error) {
 	c, err := config.Load(krb5Conf)
 	if err != nil {
@@ -53,6 +55,7 @@ func NewKrb5InitiatorClientWithPassword(username, password, krb5Conf string) (kc
 	}, nil
 }
 
+// NewKrb5InitiatorClientWithKeytab creates a Kerberos 5 initiator client authenticated with a keytab file.
 func NewKrb5InitiatorClientWithKeytab(username string, krb5Conf, keytabConf string) (kcl Krb5InitiatorClient, err error) {
 	c, err := config.Load(krb5Conf)
 	if err != nil {
@@ -83,6 +86,7 @@ func NewKrb5InitiatorClientWithKeytab(username string, krb5Conf, keytabConf stri
 	}, nil
 }
 
+// NewKrb5InitiatorClientWithCache creates a Kerberos 5 initiator client authenticated from a credential cache file.
 func NewKrb5InitiatorClientWithCache(krb5Conf, cacheFile string) (kcl Krb5InitiatorClient, err error) {
 	c, err := config.Load(krb5Conf)
 	if err != nil {
@@ -114,6 +118,7 @@ func NewKrb5InitiatorClientWithCache(krb5Conf, cacheFile string) (kcl Krb5Initia
 	}, nil
 }
 
+// Krb5InitiatorClient implements the SSH GSSAPI interface for Kerberos 5 authentication.
 type Krb5InitiatorClient struct {
 	state  Krb5ClientState
 	client *client.Client
@@ -190,7 +195,6 @@ func (k *Krb5InitiatorClient) InitSecContext(target string, token []byte, isGSSD
 
 		outToken, err := krb5Token.Marshal()
 		if err != nil {
-			fmt.Println(err)
 			return []byte{}, false, err
 		}
 		k.state = InitiatorWaitForMutal

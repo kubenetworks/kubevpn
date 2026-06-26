@@ -38,22 +38,24 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// Virtual represents an envoy xDS configuration for a single proxied workload.
 type Virtual struct {
-	Namespace string
-	Uid       string // group.resource.name
-	Ports     []ContainerPort
-	Rules     []*Rule
+	Namespace   string
+	UID         string `yaml:"Uid" json:"Uid"` // group.resource.name
+	FargateMode bool   `yaml:"fargateMode,omitempty" json:"fargateMode,omitempty"`
+	Ports       []ContainerPort
+	Rules       []*Rule
 }
 
+// ContainerPort describes a port on a container with optional envoy listener binding.
 type ContainerPort struct {
 	// If specified, this must be an IANA_SVC_NAME and unique within the pod. Each
 	// named port in a pod must have a unique name. Name for the port that can be
 	// referred to by services.
 	// +optional
 	Name string `json:"name,omitempty"`
-	// Number of port to expose on the host.
-	// If specified, this must be a valid port number, 0 < x < 65536.
-	// envoy listener port, if is not 0, means fargate mode
+	// EnvoyListenerPort is the port envoy binds to in fargate mode (BindToPort=true).
+	// In mesh mode this is 0 (envoy uses iptables-redirected traffic instead).
 	// +optional
 	EnvoyListenerPort int32 `json:"envoyListenerPort,omitempty"`
 	// Number of port to expose on the pod's IP address.
@@ -64,6 +66,22 @@ type ContainerPort struct {
 	// +optional
 	// +default="TCP"
 	Protocol corev1.Protocol `json:"protocol,omitempty"`
+}
+
+// IsFargateMode returns true if this Virtual uses Fargate/Service mode
+// (no iptables, SSH tunnels instead of VPN sidecar).
+// Checks the explicit FargateMode field first, with a fallback to the legacy
+// heuristic (EnvoyListenerPort != 0) for backward compatibility with existing ConfigMaps.
+func (a *Virtual) IsFargateMode() bool {
+	if a.FargateMode {
+		return true
+	}
+	for _, port := range a.Ports {
+		if port.EnvoyListenerPort != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func ConvertContainerPort(ports ...corev1.ContainerPort) []ContainerPort {
@@ -87,6 +105,7 @@ func createPreserveCaseConfig(anyFunc func(m proto.Message) *anypb.Any) *corev3.
 	}
 }
 
+// Rule defines a header-based routing rule for envoy traffic splitting.
 type Rule struct {
 	Headers      map[string]string
 	LocalTunIPv4 string
@@ -106,13 +125,16 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 	routes []types.Resource,
 	endpoints []types.Resource,
 ) {
-	//clusters = append(clusters, OriginCluster())
+	fargate := a.IsFargateMode()
 	for _, port := range a.Ports {
-		isFargateMode := port.EnvoyListenerPort != 0
+		listenPort := port.ContainerPort
+		if fargate {
+			listenPort = port.EnvoyListenerPort
+		}
 
-		listenerName := fmt.Sprintf("%s_%s_%v_%s", a.Namespace, a.Uid, util.If(isFargateMode, port.EnvoyListenerPort, port.ContainerPort), port.Protocol)
+		listenerName := fmt.Sprintf("%s_%s_%v_%s", a.Namespace, a.UID, listenPort, port.Protocol)
 		routeName := listenerName
-		listeners = append(listeners, ToListener(listenerName, routeName, util.If(isFargateMode, port.EnvoyListenerPort, port.ContainerPort), port.Protocol, isFargateMode))
+		listeners = append(listeners, toListener(listenerName, routeName, listenPort, port.Protocol, fargate))
 
 		var rr []*route.Route
 		for _, rule := range a.Rules {
@@ -123,9 +145,9 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 				ips = []string{rule.LocalTunIPv4}
 			}
 			ports := rule.PortMap[port.ContainerPort]
-			if isFargateMode {
-				if strings.Index(ports, ":") > 0 {
-					ports = strings.Split(ports, ":")[0]
+			if fargate {
+				if before, _, ok := strings.Cut(ports, ":"); ok {
+					ports = before
 				} else {
 					logger.Errorf("fargate mode port should have two pair: %s", ports)
 				}
@@ -133,13 +155,13 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 			envoyRulePort, _ := strconv.Atoi(ports)
 			for _, ip := range ips {
 				clusterName := fmt.Sprintf("%s_%v", ip, envoyRulePort)
-				clusters = append(clusters, ToCluster(clusterName))
-				endpoints = append(endpoints, ToEndPoint(clusterName, ip, int32(envoyRulePort)))
-				rr = append(rr, ToRoute(clusterName, rule.Headers))
+				clusters = append(clusters, toCluster(clusterName))
+				endpoints = append(endpoints, toEndPoint(clusterName, ip, int32(envoyRulePort)))
+				rr = append(rr, toRoute(clusterName, rule.Headers))
 			}
 		}
-		// if isFargateMode is true, needs to add default route to container port, because use_original_dst not work
-		if isFargateMode {
+		// fargate needs explicit default route to container port because use_original_dst does not work
+		if fargate {
 			// all ips should is IPv4 127.0.0.1 and ::1
 			var ips = sets.New[string]()
 			for _, rule := range a.Rules {
@@ -151,13 +173,13 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 			}
 			for _, ip := range ips.UnsortedList() {
 				defaultClusterName := fmt.Sprintf("%s_%v", ip, port.ContainerPort)
-				clusters = append(clusters, ToCluster(defaultClusterName))
-				endpoints = append(endpoints, ToEndPoint(defaultClusterName, ip, port.ContainerPort))
-				rr = append(rr, DefaultRouteToCluster(defaultClusterName))
+				clusters = append(clusters, toCluster(defaultClusterName))
+				endpoints = append(endpoints, toEndPoint(defaultClusterName, ip, port.ContainerPort))
+				rr = append(rr, defaultRouteToCluster(defaultClusterName))
 			}
 		} else {
-			rr = append(rr, DefaultRoute())
-			clusters = append(clusters, OriginCluster())
+			rr = append(rr, defaultRoute())
+			clusters = append(clusters, originCluster())
 		}
 		routes = append(routes, &route.RouteConfiguration{
 			Name: routeName,
@@ -174,7 +196,7 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 	return
 }
 
-func ToEndPoint(clusterName string, localTunIP string, port int32) *endpoint.ClusterLoadAssignment {
+func toEndPoint(clusterName string, localTunIP string, port int32) *endpoint.ClusterLoadAssignment {
 	return &endpoint.ClusterLoadAssignment{
 		ClusterName: clusterName,
 		Endpoints: []*endpoint.LocalityLbEndpoints{{
@@ -198,7 +220,7 @@ func ToEndPoint(clusterName string, localTunIP string, port int32) *endpoint.Clu
 	}
 }
 
-func ToCluster(clusterName string) *cluster.Cluster {
+func toCluster(clusterName string) *cluster.Cluster {
 	anyFunc := func(m proto.Message) *anypb.Any {
 		pbst, _ := anypb.New(m)
 		return pbst
@@ -238,7 +260,7 @@ func ToCluster(clusterName string) *cluster.Cluster {
 	}
 }
 
-func OriginCluster() *cluster.Cluster {
+func originCluster() *cluster.Cluster {
 	anyFunc := func(m proto.Message) *anypb.Any {
 		pbst, _ := anypb.New(m)
 		return pbst
@@ -268,7 +290,7 @@ func OriginCluster() *cluster.Cluster {
 	}
 }
 
-func ToRoute(clusterName string, headers map[string]string) *route.Route {
+func toRoute(clusterName string, headers map[string]string) *route.Route {
 	var r []*route.HeaderMatcher
 	for k, v := range headers {
 		r = append(r, &route.HeaderMatcher{
@@ -306,7 +328,7 @@ func ToRoute(clusterName string, headers map[string]string) *route.Route {
 	}
 }
 
-func DefaultRoute() *route.Route {
+func defaultRoute() *route.Route {
 	return &route.Route{
 		Match: &route.RouteMatch{
 			PathSpecifier: &route.RouteMatch_Prefix{
@@ -329,7 +351,7 @@ func DefaultRoute() *route.Route {
 	}
 }
 
-func DefaultRouteToCluster(clusterName string) *route.Route {
+func defaultRouteToCluster(clusterName string) *route.Route {
 	return &route.Route{
 		Match: &route.RouteMatch{
 			PathSpecifier: &route.RouteMatch_Prefix{
@@ -352,17 +374,9 @@ func DefaultRouteToCluster(clusterName string) *route.Route {
 	}
 }
 
-func ToListener(listenerName string, routeName string, port int32, p corev1.Protocol, isFargateMode bool) *listener.Listener {
-	var protocol core.SocketAddress_Protocol
-	switch p {
-	case corev1.ProtocolTCP:
-		protocol = core.SocketAddress_TCP
-	case corev1.ProtocolUDP:
-		protocol = core.SocketAddress_UDP
-	case corev1.ProtocolSCTP:
-		protocol = core.SocketAddress_TCP
-	}
-
+// buildTCPFilterChains creates the HTTP connection manager filter chain and a TCP proxy
+// fallback filter chain used for TCP (and SCTP) listeners.
+func buildTCPFilterChains(routeName string, isFargateMode bool) []*listener.FilterChain {
 	anyFunc := func(m proto.Message) *anypb.Any {
 		pbst, _ := anypb.New(m)
 		return pbst
@@ -441,12 +455,171 @@ func ToListener(listenerName string, routeName string, port int32, p corev1.Prot
 		},
 	}
 
+	chains := []*listener.FilterChain{
+		{
+			FilterChainMatch: &listener.FilterChainMatch{
+				ApplicationProtocols: []string{"http/1.0", "http/1.1", "h2c"},
+			},
+			Filters: []*listener.Filter{
+				{
+					Name: wellknown.HTTPConnectionManager,
+					ConfigType: &listener.Filter_TypedConfig{
+						TypedConfig: anyFunc(httpManager),
+					},
+				},
+			},
+		},
+		{
+			Filters: []*listener.Filter{
+				{
+					Name: wellknown.TCPProxy,
+					ConfigType: &listener.Filter_TypedConfig{
+						TypedConfig: anyFunc(tcpConfig),
+					},
+				},
+			},
+		},
+	}
+
+	return chains
+}
+
+// buildUDPFilterChains creates filter chains for UDP listeners.
+// Currently uses the same HTTP connection manager + TCP proxy structure as TCP
+// to preserve existing routing/header-matching behavior for UDP workloads.
+func buildUDPFilterChains(routeName string) []*listener.FilterChain {
+	anyFunc := func(m proto.Message) *anypb.Any {
+		pbst, _ := anypb.New(m)
+		return pbst
+	}
+
+	httpManager := &httpconnectionmanager.HttpConnectionManager{
+		CodecType:  httpconnectionmanager.HttpConnectionManager_AUTO,
+		StatPrefix: "http",
+		RouteSpecifier: &httpconnectionmanager.HttpConnectionManager_Rds{
+			Rds: &httpconnectionmanager.Rds{
+				ConfigSource: &core.ConfigSource{
+					ResourceApiVersion: resource.DefaultAPIVersion,
+					ConfigSourceSpecifier: &core.ConfigSource_ApiConfigSource{
+						ApiConfigSource: &core.ApiConfigSource{
+							TransportApiVersion:       resource.DefaultAPIVersion,
+							ApiType:                   core.ApiConfigSource_GRPC,
+							SetNodeOnFirstMessageOnly: true,
+							GrpcServices: []*core.GrpcService{{
+								TargetSpecifier: &core.GrpcService_EnvoyGrpc_{
+									EnvoyGrpc: &core.GrpcService_EnvoyGrpc{ClusterName: "xds_cluster"},
+								},
+							}},
+						},
+					},
+				},
+				RouteConfigName: routeName,
+			},
+		},
+		HttpFilters: []*httpconnectionmanager.HttpFilter{
+			{
+				Name: wellknown.GRPCWeb,
+				ConfigType: &httpconnectionmanager.HttpFilter_TypedConfig{
+					TypedConfig: anyFunc(&grpcwebv3.GrpcWeb{}),
+				},
+			},
+			{
+				Name: wellknown.CORS,
+				ConfigType: &httpconnectionmanager.HttpFilter_TypedConfig{
+					TypedConfig: anyFunc(&corsv3.Cors{}),
+				},
+			},
+			{
+				Name: wellknown.Router,
+				ConfigType: &httpconnectionmanager.HttpFilter_TypedConfig{
+					TypedConfig: anyFunc(&routerv3.Router{}),
+				},
+			},
+		},
+		StreamIdleTimeout: durationpb.New(0),
+		UpgradeConfigs: []*httpconnectionmanager.HttpConnectionManager_UpgradeConfig{{
+			UpgradeType: "websocket",
+		}},
+		AccessLog: []*v31.AccessLog{{
+			Name: wellknown.FileAccessLog,
+			ConfigType: &v31.AccessLog_TypedConfig{
+				TypedConfig: anyFunc(&accesslogfilev3.FileAccessLog{
+					Path: "/dev/stdout",
+				}),
+			},
+		}},
+		HttpProtocolOptions: &corev3.Http1ProtocolOptions{
+			HeaderKeyFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat{
+				HeaderFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat_StatefulFormatter{
+					StatefulFormatter: createPreserveCaseConfig(anyFunc),
+				},
+			},
+		},
+	}
+
+	tcpConfig := &tcpproxy.TcpProxy{
+		StatPrefix: "tcp",
+		ClusterSpecifier: &tcpproxy.TcpProxy_Cluster{
+			Cluster: "origin_cluster",
+		},
+	}
+
+	return []*listener.FilterChain{
+		{
+			FilterChainMatch: &listener.FilterChainMatch{
+				ApplicationProtocols: []string{"http/1.0", "http/1.1", "h2c"},
+			},
+			Filters: []*listener.Filter{
+				{
+					Name: wellknown.HTTPConnectionManager,
+					ConfigType: &listener.Filter_TypedConfig{
+						TypedConfig: anyFunc(httpManager),
+					},
+				},
+			},
+		},
+		{
+			Filters: []*listener.Filter{
+				{
+					Name: wellknown.TCPProxy,
+					ConfigType: &listener.Filter_TypedConfig{
+						TypedConfig: anyFunc(tcpConfig),
+					},
+				},
+			},
+		},
+	}
+}
+
+func toListener(listenerName string, routeName string, port int32, p corev1.Protocol, isFargateMode bool) *listener.Listener {
+	var protocol core.SocketAddress_Protocol
+	switch p {
+	case corev1.ProtocolTCP:
+		protocol = core.SocketAddress_TCP
+	case corev1.ProtocolUDP:
+		protocol = core.SocketAddress_UDP
+	case corev1.ProtocolSCTP:
+		protocol = core.SocketAddress_TCP
+	}
+
+	anyFunc := func(m proto.Message) *anypb.Any {
+		pbst, _ := anypb.New(m)
+		return pbst
+	}
+
+	var filterChains []*listener.FilterChain
+	switch p {
+	case corev1.ProtocolUDP:
+		filterChains = buildUDPFilterChains(routeName)
+	default:
+		filterChains = buildTCPFilterChains(routeName, isFargateMode)
+	}
+
 	return &listener.Listener{
 		Name:             listenerName,
 		TrafficDirection: core.TrafficDirection_INBOUND,
 		BindToPort:       &wrapperspb.BoolValue{Value: util.If(isFargateMode, true, false)},
 		UseOriginalDst:   &wrapperspb.BoolValue{Value: true},
-
 		Address: &core.Address{
 			Address: &core.Address_SocketAddress{
 				SocketAddress: &core.SocketAddress{
@@ -458,31 +631,7 @@ func ToListener(listenerName string, routeName string, port int32, p corev1.Prot
 				},
 			},
 		},
-		FilterChains: []*listener.FilterChain{
-			{
-				FilterChainMatch: &listener.FilterChainMatch{
-					ApplicationProtocols: []string{"http/1.0", "http/1.1", "h2c"},
-				},
-				Filters: []*listener.Filter{
-					{
-						Name: wellknown.HTTPConnectionManager,
-						ConfigType: &listener.Filter_TypedConfig{
-							TypedConfig: anyFunc(httpManager),
-						},
-					},
-				},
-			},
-			{
-				Filters: []*listener.Filter{
-					{
-						Name: wellknown.TCPProxy,
-						ConfigType: &listener.Filter_TypedConfig{
-							TypedConfig: anyFunc(tcpConfig),
-						},
-					},
-				},
-			},
-		},
+		FilterChains: filterChains,
 		ListenerFilters: []*listener.ListenerFilter{
 			{
 				Name: wellknown.HttpInspector,

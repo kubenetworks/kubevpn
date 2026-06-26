@@ -1,14 +1,6 @@
 package util
 
-func SafeRead[T any](c chan T) (T, bool) {
-	defer func() {
-		if r := recover(); r != nil {
-		}
-	}()
-	tt, ok := <-c
-	return tt, ok
-}
-
+// SafeWrite attempts a non-blocking send to a channel. Returns false if the channel is full.
 func SafeWrite[T any](c chan<- T, value T, fallback ...func(v T)) bool {
 	defer func() {
 		if r := recover(); r != nil {
@@ -25,6 +17,7 @@ func SafeWrite[T any](c chan<- T, value T, fallback ...func(v T)) bool {
 	}
 }
 
+// SafeClose closes a channel without panicking if already closed.
 func SafeClose[T any](c chan T) {
 	defer func() {
 		if r := recover(); r != nil {

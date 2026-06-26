@@ -68,6 +68,7 @@ type Packet struct {
 	dst    net.IP
 }
 
+// NewPacket creates a Packet with the given buffer, length, and parsed IP addresses.
 func NewPacket(data []byte, length int, src net.IP, dst net.IP) *Packet {
 	return &Packet{
 		data:   data,

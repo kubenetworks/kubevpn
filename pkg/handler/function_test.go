@@ -391,7 +391,7 @@ func (u *ut) proxyServiceReviewsServiceIP(t *testing.T) {
 
 func (u *ut) testUDP(t *testing.T) {
 	app := "reviews"
-	port, err := util.GetAvailableUDPPortOrDie()
+	port, err := util.GetAvailableUDPPort()
 	if err != nil {
 		t.Fatal(err)
 	}

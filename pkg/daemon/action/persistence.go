@@ -16,6 +16,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// Server implements the gRPC Daemon service, managing VPN connections, syncing, and lifecycle operations.
 type Server struct {
 	rpc.UnimplementedDaemonServer
 
@@ -31,10 +32,12 @@ type Server struct {
 	ID string
 }
 
+// Config represents the persisted daemon configuration containing secondary connections to restore on startup.
 type Config struct {
 	SecondaryConnect []*handler.ConnectOptions `json:"SecondaryConnect"`
 }
 
+// LoadFromConfig reads persisted connection state from disk and re-establishes previously active connections.
 func (svr *Server) LoadFromConfig() error {
 	content, err := os.ReadFile(config.GetDBPath())
 	if err != nil {
@@ -56,12 +59,12 @@ func (svr *Server) LoadFromConfig() error {
 	for {
 		_, err = svr.GetClient(true)
 		if err != nil {
-			time.Sleep(time.Millisecond * 200)
+			time.Sleep(config.DaemonPollInterval)
 			continue
 		}
 		client, err = svr.GetClient(false)
 		if err != nil {
-			time.Sleep(time.Millisecond * 200)
+			time.Sleep(config.DaemonPollInterval)
 			continue
 		}
 		break
@@ -82,6 +85,7 @@ func (svr *Server) LoadFromConfig() error {
 	return nil
 }
 
+// OffloadToConfig persists the current connection state to disk for later restoration.
 func (svr *Server) OffloadToConfig() error {
 	conf := &Config{
 		SecondaryConnect: svr.connections,
@@ -98,6 +102,7 @@ func (svr *Server) OffloadToConfig() error {
 	return err
 }
 
+// CleanupConfig removes the persisted configuration file from disk.
 func (svr *Server) CleanupConfig() error {
 	return os.Remove(config.GetDBPath())
 }

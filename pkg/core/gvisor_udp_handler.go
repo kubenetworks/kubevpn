@@ -2,12 +2,12 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"time"
 
-	"github.com/pkg/errors"
 	"gvisor.dev/gvisor/pkg/tcpip"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -17,6 +17,7 @@ import (
 
 type gvisorUDPHandler struct{}
 
+// GvisorUDPHandler creates a Handler for UDP relay over TCP connections.
 func GvisorUDPHandler() Handler {
 	return &gvisorUDPHandler{}
 }
@@ -53,6 +54,7 @@ func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	relayUDPOverTCP(ctx, tcpConn, remote)
 }
 
+// GvisorUDPListener creates a TCP listener for UDP-over-TCP relay connections.
 func GvisorUDPListener(addr string) (net.Listener, error) {
 	plog.G(context.Background()).Infof("[UDP] Listening on %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
@@ -76,14 +78,14 @@ func relayUDPOverTCP(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn
 		defer config.LPool.Put(buf[:])
 
 		for ctx.Err() == nil {
-			err := tcpConn.SetReadDeadline(time.Now().Add(time.Second * 30))
+			err := tcpConn.SetReadDeadline(time.Now().Add(config.UDPRelayTimeout))
 			if err != nil {
-				errChan <- errors.WithMessage(err, "set read deadline failed")
+				errChan <- fmt.Errorf("set read deadline failed: %w", err)
 				return
 			}
 			datagram, err := readDatagramPacket(tcpConn, buf)
 			if err != nil {
-				errChan <- errors.WithMessage(err, "read datagram packet failed")
+				errChan <- fmt.Errorf("read datagram packet failed: %w", err)
 				return
 			}
 			if datagram.DataLength == 0 {
@@ -91,13 +93,13 @@ func relayUDPOverTCP(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn
 				return
 			}
 
-			err = udpConn.SetWriteDeadline(time.Now().Add(time.Second * 30))
+			err = udpConn.SetWriteDeadline(time.Now().Add(config.UDPRelayTimeout))
 			if err != nil {
-				errChan <- errors.WithMessage(err, "set write deadline failed")
+				errChan <- fmt.Errorf("set write deadline failed: %w", err)
 				return
 			}
 			if _, err = udpConn.Write(datagram.Data[:datagram.DataLength]); err != nil {
-				errChan <- errors.WithMessage(err, "write datagram packet failed")
+				errChan <- fmt.Errorf("write datagram packet failed: %w", err)
 				return
 			}
 			plog.G(ctx).Debugf("[UDP] Sent %d bytes: %s -> %s", datagram.DataLength, tcpConn.RemoteAddr(), udpConn.RemoteAddr())
@@ -110,14 +112,14 @@ func relayUDPOverTCP(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn
 		defer config.LPool.Put(buf[:])
 
 		for ctx.Err() == nil {
-			err := udpConn.SetReadDeadline(time.Now().Add(time.Second * 30))
+			err := udpConn.SetReadDeadline(time.Now().Add(config.UDPRelayTimeout))
 			if err != nil {
-				errChan <- errors.WithMessage(err, "set read deadline failed")
+				errChan <- fmt.Errorf("set read deadline failed: %w", err)
 				return
 			}
 			n, _, err := udpConn.ReadFrom(buf[:])
 			if err != nil {
-				errChan <- errors.WithMessage(err, "read datagram packet failed")
+				errChan <- fmt.Errorf("read datagram packet failed: %w", err)
 				return
 			}
 			if n == 0 {
@@ -126,9 +128,9 @@ func relayUDPOverTCP(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn
 			}
 
 			// pipe from peer to tunnel
-			err = tcpConn.SetWriteDeadline(time.Now().Add(time.Second * 30))
+			err = tcpConn.SetWriteDeadline(time.Now().Add(config.UDPRelayTimeout))
 			if err != nil {
-				errChan <- errors.WithMessage(err, "set write deadline failed")
+				errChan <- fmt.Errorf("set write deadline failed: %w", err)
 				return
 			}
 			packet := newDatagramPacket(buf, n)

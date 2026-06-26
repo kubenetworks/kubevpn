@@ -1,0 +1,322 @@
+package handler
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/containernetworking/cni/pkg/types"
+	miekgdns "github.com/miekg/dns"
+	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/stack"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
+	"k8s.io/kubectl/pkg/polymorphichelpers"
+	"k8s.io/kubectl/pkg/util/podutils"
+	"k8s.io/utils/ptr"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+)
+
+// detect pod is delete event, if pod is deleted, needs to redo port-forward immediately
+func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) error {
+	firstCtx, firstCancelFunc := context.WithCancel(ctx)
+	defer firstCancelFunc()
+	var errChan = make(chan error, 1)
+	go func() {
+		runtime.ErrorHandlers = []runtime.ErrorHandler{func(ctx context.Context, err error, msg string, keysAndValues ...interface{}) {
+			plog.G(ctx).Error(err)
+		}}
+		var first = ptr.To(true)
+		for ctx.Err() == nil {
+			func() {
+				defer time.Sleep(time.Millisecond * 200)
+
+				sortBy := activePodsSortFunc
+				label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
+				_, _, _ = polymorphichelpers.GetFirstPod(c.clientset.CoreV1(), c.ManagerNamespace, label, time.Second*5, sortBy)
+				ctx2, cancelFunc2 := context.WithTimeout(ctx, time.Second*10)
+				defer cancelFunc2()
+				podList, err := c.GetRunningPodList(ctx2)
+				if err != nil {
+					plog.G(ctx).Debugf("Failed to get running pod: %v", err)
+					if *first {
+						util.SafeWrite(errChan, err)
+					}
+					return
+				}
+				pod := podList[0]
+				// add route in case of don't have permission to watch pod, but pod recreated ip changed, so maybe this ip can not visit
+				_ = c.addRoute(util.GetPodIP(pod)...)
+				childCtx, cancelFunc := context.WithCancel(ctx)
+				defer cancelFunc()
+				var readyChan = make(chan struct{})
+				podName := pod.GetName()
+				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
+				go util.CheckPodStatus(childCtx, cancelFunc, podName, c.clientset.CoreV1().Pods(c.ManagerNamespace))
+				domain := config.ConfigMapPodTrafficManager
+				go healthCheckPortForward(childCtx, cancelFunc, readyChan, strings.Split(portPair[1], ":")[0], domain, c.LocalTunIPv4.IP)
+				go healthCheckTCPConn(childCtx, cancelFunc, readyChan, domain, util.GetPodIP(pod)[0])
+				if *first {
+					go func() {
+						select {
+						case <-readyChan:
+							firstCancelFunc()
+						case <-childCtx.Done():
+						}
+					}()
+				}
+				out := plog.G(ctx).Logger.Out
+				err = util.PortForwardPod(
+					c.config,
+					c.restclient,
+					podName,
+					c.ManagerNamespace,
+					portPair,
+					readyChan,
+					childCtx.Done(),
+					nil,
+					out,
+				)
+				if *first {
+					util.SafeWrite(errChan, err)
+				}
+				first = ptr.To(false)
+				// exit normal, let context.err to judge to exit or not
+				if err == nil {
+					plog.G(ctx).Debugf("Port forward retrying")
+					return
+				} else {
+					plog.G(ctx).Debugf("Forward port error: %v", err)
+				}
+				if strings.Contains(err.Error(), "unable to listen on any of the requested ports") ||
+					strings.Contains(err.Error(), "address already in use") {
+					plog.G(ctx).Debugf("Port %s already in use, needs to release it manually", portPair)
+				} else {
+					plog.G(ctx).Debugf("Port-forward occurs error: %v", err)
+				}
+			}()
+		}
+	}()
+	ticker := time.NewTicker(time.Second * 60)
+	defer ticker.Stop()
+	select {
+	case <-ticker.C:
+		return config.ErrPortForwardTimeout
+	case err := <-errChan:
+		return err
+	case <-firstCtx.Done():
+		return nil
+	}
+}
+
+func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress string) (err error) {
+	plog.G(ctx).Debugf("IPv4: %s, IPv6: %s", c.LocalTunIPv4.IP.String(), c.LocalTunIPv6.IP.String())
+
+	tlsSecret, err := c.clientset.CoreV1().Secrets(c.ManagerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	var cidrList []*net.IPNet
+	for _, ipNet := range c.cidrs {
+		cidrList = append(cidrList, ipNet)
+	}
+	// add extra-cidr
+	for _, s := range c.ExtraRouteInfo.ExtraCIDR {
+		var ipNet *net.IPNet
+		_, ipNet, err = net.ParseCIDR(s)
+		if err != nil {
+			return fmt.Errorf("invalid extra-cidr %s, err: %w", s, err)
+		}
+		cidrList = append(cidrList, ipNet)
+	}
+
+	var routes []types.Route
+	for _, ipNet := range util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cidrList), c.apiServerIPs) {
+		if ipNet != nil && !ipNet.IP.IsLoopback() {
+			routes = append(routes, types.Route{Dst: *ipNet})
+		}
+	}
+	if c.LocalTunIPv4 != nil {
+		routes = append(routes, types.Route{Dst: net.IPNet{IP: c.LocalTunIPv4.IP, Mask: net.CIDRMask(32, 32)}})
+	}
+	if c.LocalTunIPv6 != nil {
+		routes = append(routes, types.Route{Dst: net.IPNet{IP: c.LocalTunIPv6.IP, Mask: net.CIDRMask(128, 128)}})
+	}
+
+	tunConfig := tun.Config{
+		Addr:   (&net.IPNet{IP: c.LocalTunIPv4.IP, Mask: net.CIDRMask(32, 32)}).String(),
+		Routes: routes,
+		MTU:    config.DefaultMTU,
+	}
+	if enable, _ := util.IsIPv6Enabled(); enable {
+		tunConfig.Addr6 = (&net.IPNet{IP: c.LocalTunIPv6.IP, Mask: net.CIDRMask(128, 128)}).String()
+	}
+
+	forwardNode, err := core.ParseNode(forwardAddress)
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to parse forward node %s: %v", forwardAddress, err)
+		return err
+	}
+	forwarder := &core.Forwarder{
+		Addr:        forwardNode.Addr,
+		Connector:   core.NewUDPOverTCPConnector(),
+		Transporter: core.TCPTransporter(tlsSecret.Data),
+		MaxRetries:  5,
+	}
+
+	handler := core.TunHandler(forwarder, nil)
+	listener, err := tun.Listener(tunConfig)
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to create tun listener: %v", err)
+		return err
+	}
+
+	server := core.Server{
+		Listener: listener,
+		Handler:  handler,
+	}
+
+	go func() {
+		if err := Run(ctx, []core.Server{server}); err != nil && ctx.Err() == nil {
+			plog.G(ctx).Errorf("[Client] Local TUN server exited: %v", err)
+		}
+	}()
+	plog.G(ctx).Infof("[Client] TUN server started, forwarding to %s", forwardAddress)
+
+	c.tunName, err = c.GetTunDeviceName()
+	return err
+}
+
+func Run(ctx context.Context, servers []core.Server) error {
+	errChan := make(chan error, len(servers))
+	for i := range servers {
+		go func(i int) {
+			errChan <- func() error {
+				svr := servers[i]
+				defer svr.Listener.Close()
+				go func() {
+					<-ctx.Done()
+					svr.Listener.Close()
+				}()
+				for ctx.Err() == nil {
+					conn, err := svr.Listener.Accept()
+					if err != nil {
+						return err
+					}
+					go svr.Handler.Handle(ctx, conn)
+				}
+				return ctx.Err()
+			}()
+		}(i)
+	}
+
+	select {
+	case err := <-errChan:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func healthCheckPortForward(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, localGvisorUDPPort string, domain string, ipv4 net.IP) {
+	defer cancelFunc()
+	ticker := time.NewTicker(time.Second * 60)
+	defer ticker.Stop()
+
+	select {
+	case <-readyChan:
+	case <-ticker.C:
+		plog.G(ctx).Debugf("Wait port-forward to be ready timeout")
+		return
+	case <-ctx.Done():
+		return
+	}
+
+	var healthChecker = func() error {
+		// Use loopback explicitly so the health check keeps working even when the
+		// default route is owned by another tunnel.
+		conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", localGvisorUDPPort))
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		err = util.WriteProxyInfo(conn, stack.TransportEndpointID{
+			LocalPort:     53,
+			LocalAddress:  tcpip.AddrFrom4Slice(net.ParseIP("127.0.0.1").To4()),
+			RemotePort:    0,
+			RemoteAddress: tcpip.AddrFrom4Slice(ipv4.To4()),
+		})
+		if err != nil {
+			return err
+		}
+
+		packetConn, _ := core.NewPacketConnOverTCP(ctx, conn)
+		defer packetConn.Close()
+
+		msg := new(miekgdns.Msg)
+		msg.SetQuestion(miekgdns.Fqdn(domain), miekgdns.TypeA)
+		client := miekgdns.Client{Net: "udp", Timeout: time.Second * 10}
+		_, _, err = client.ExchangeWithConnContext(ctx, msg, &miekgdns.Conn{Conn: packetConn})
+		return err
+	}
+
+	newTicker := time.NewTicker(time.Second * 30)
+	defer newTicker.Stop()
+	for ; ctx.Err() == nil; <-newTicker.C {
+		err := retry.OnError(wait.Backoff{Duration: time.Second * 10, Steps: 3}, func(err error) bool {
+			return err != nil
+		}, func() error {
+			return healthChecker()
+		})
+		if err != nil {
+			plog.G(ctx).Errorf("Failed to query DNS: %v", err)
+			return
+		}
+	}
+}
+
+func healthCheckTCPConn(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, domain string, dnsServer string) {
+	defer cancelFunc()
+	ticker := time.NewTicker(time.Second * 60)
+	defer ticker.Stop()
+
+	select {
+	case <-readyChan:
+	case <-ticker.C:
+		plog.G(ctx).Debugf("Wait port-forward to be ready timeout")
+		return
+	case <-ctx.Done():
+		return
+	}
+
+	newTicker := time.NewTicker(time.Second * 30)
+	defer newTicker.Stop()
+	for ; ctx.Err() == nil; <-newTicker.C {
+		err := retry.OnError(wait.Backoff{Duration: time.Second * 10, Steps: 3}, func(err error) bool {
+			return err != nil
+		}, func() error {
+			return nameserverChecker(ctx, domain, dnsServer)
+		})
+		if err != nil {
+			plog.G(ctx).Errorf("Failed to query DNS: %v", err)
+			return
+		}
+	}
+}
+
+var activePodsSortFunc = func(pods []*v1.Pod) sort.Interface {
+	return sort.Reverse(podutils.ActivePods(pods))
+}

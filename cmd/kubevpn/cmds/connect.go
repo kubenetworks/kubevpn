@@ -232,5 +232,5 @@ func connectionIDFromKubeconfigBytes(bytes []byte, ns string) (string, error) {
 	if err := connect.InitClient(factory); err != nil {
 		return "", err
 	}
-	return util.GetConnectionID(context.Background(), connect.GetClientset().CoreV1().Namespaces(), connect.Namespace)
+	return util.GetConnectionID(context.Background(), connect.GetClientset().CoreV1().Namespaces(), connect.ManagerNamespace)
 }

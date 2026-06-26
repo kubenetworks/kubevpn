@@ -13,13 +13,13 @@ import (
 
 func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.Entry) error {
 	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, logger)
-	proc := NewProcessor(snapshotCache, logger)
+	proc := newProcessor(snapshotCache, logger)
 
 	errChan := make(chan error, 2)
 
 	go func() {
 		server := serverv3.NewServer(ctx, snapshotCache, nil)
-		errChan <- RunServer(ctx, server, port)
+		errChan <- runServer(ctx, server, port)
 	}()
 
 	notifyCh := make(chan NotifyMessage, 100)

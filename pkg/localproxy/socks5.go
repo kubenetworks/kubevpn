@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 const (
@@ -22,7 +24,7 @@ const (
 	socks5ReplyUnsup    = 7
 )
 
-func ServeSOCKS5(ctx context.Context, ln net.Listener, connector Connector) error {
+func serveSOCKS5(ctx context.Context, ln net.Listener, connector Connector) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -42,16 +44,19 @@ func handleSOCKS5Conn(ctx context.Context, conn net.Conn, connector Connector) {
 
 	reader := bufio.NewReader(conn)
 	if err := socks5Handshake(reader, conn); err != nil {
+		plog.G(ctx).Debugf("SOCKS5 handshake failed from %s: %v", conn.RemoteAddr(), err)
 		return
 	}
 	host, port, err := socks5ReadRequest(reader)
 	if err != nil {
+		plog.G(ctx).Debugf("SOCKS5 request read failed: %v", err)
 		_ = writeSOCKS5Reply(conn, socks5ReplyGeneral)
 		return
 	}
 
 	remote, err := connector.Connect(ctx, host, port)
 	if err != nil {
+		plog.G(ctx).Debugf("SOCKS5 connect to %s:%d failed: %v", host, port, err)
 		_ = writeSOCKS5Reply(conn, socks5ReplyGeneral)
 		return
 	}

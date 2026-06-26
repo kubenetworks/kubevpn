@@ -20,7 +20,7 @@ func Main(manager *dhcp.Manager) error {
 
 	tlsConfig, err := putil.GetTlsServerConfig(nil)
 	if err != nil {
-		return fmt.Errorf("failed to load tls certificate: %v", err)
+		return fmt.Errorf("failed to load tls certificate: %w", err)
 	}
 
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100

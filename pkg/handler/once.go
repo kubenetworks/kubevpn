@@ -46,7 +46,7 @@ func Once(ctx context.Context, f cmdutil.Factory) error {
 	return nil
 }
 
-func labelNs(ctx context.Context, namespace string, clientset *kubernetes.Clientset) error {
+func labelNs(ctx context.Context, namespace string, clientset kubernetes.Interface) error {
 	plog.G(ctx).Infof("Labeling Namespace %s", namespace)
 	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 	if err != nil {
@@ -63,13 +63,13 @@ func labelNs(ctx context.Context, namespace string, clientset *kubernetes.Client
 	ns.Labels["ns"] = namespace
 	_, err = clientset.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{})
 	if err != nil {
-		plog.G(ctx).Infof("Failed to labele namespace: %v", err)
+		plog.G(ctx).Infof("Failed to label namespace: %v", err)
 		return err
 	}
 	return nil
 }
 
-func genTLS(ctx context.Context, namespace string, clientset *kubernetes.Clientset) error {
+func genTLS(ctx context.Context, namespace string, clientset kubernetes.Interface) error {
 	plog.G(ctx).Infof("Generating TLS for Namespace %s", namespace)
 	crt, key, host, err := util.GenTLSCert(ctx, namespace)
 	if err != nil {

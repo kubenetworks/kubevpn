@@ -38,7 +38,7 @@ func (c *ConnectOptions) Reset(ctx context.Context, namespace string, workloads 
 		return err
 	}
 
-	err = resetConfigMap(ctx, c.clientset.CoreV1().ConfigMaps(c.Namespace), namespace, workloads)
+	err = resetConfigMap(ctx, c.clientset.CoreV1().ConfigMaps(c.ManagerNamespace), namespace, workloads)
 	if err != nil {
 		plog.G(ctx).Error(err)
 	}
@@ -73,11 +73,11 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 	}
 	ws := sets.New[string]()
 	for _, workload := range workloads {
-		ws.Insert(util.ConvertWorkloadToUid(workload))
+		ws.Insert(util.ConvertWorkloadToUID(workload))
 	}
 
 	for i := 0; i < len(v); i++ {
-		if ws.Has(v[i].Uid) && v[i].Namespace == namespace {
+		if ws.Has(v[i].UID) && v[i].Namespace == namespace {
 			v = append(v[:i], v[i+1:]...)
 			i--
 		}
@@ -92,7 +92,7 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 	return err
 }
 
-func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workload string) error {
+func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clientset kubernetes.Interface, namespace, workload string) error {
 	object, controller, err := util.GetTopOwnerObject(ctx, factory, namespace, workload)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
@@ -114,7 +114,7 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 	plog.G(ctx).Debugf("The %s is under controller management", workload)
 	// resource with controller, like deployment,statefulset
 	var bytes []byte
-	bytes, err = json.Marshal([]inject.P{
+	bytes, err = json.Marshal([]inject.JSONPatchOp{
 		{
 			Op:    "replace",
 			Path:  "/" + strings.Join(append(depth, "spec"), "/"),

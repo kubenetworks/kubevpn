@@ -13,6 +13,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// SSHListener creates a TCP listener for the SSH server protocol handler.
 func SSHListener(addr string) (net.Listener, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -22,6 +23,7 @@ func SSHListener(addr string) (net.Listener, error) {
 	return ln, err
 }
 
+// SSHHandler creates a Handler for SSH protocol connections.
 func SSHHandler() Handler {
 	return &sshHandler{}
 }

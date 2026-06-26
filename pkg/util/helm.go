@@ -52,6 +52,7 @@ func DetectManagerNamespace(ctx context.Context, f cmdutil.Factory, namespace st
 	return GetHelmInstalledNamespace(ctx, f)
 }
 
+// GetHelmInstalledNamespace searches Helm releases for the kubevpn app and returns its deployed namespace.
 func GetHelmInstalledNamespace(ctx context.Context, f cmdutil.Factory) (string, error) {
 	cfg := new(action.Configuration)
 	client := action.NewList(cfg)
@@ -79,7 +80,8 @@ func GetHelmInstalledNamespace(ctx context.Context, f cmdutil.Factory) (string, 
 	return "", nil
 }
 
-func DetectPodExists(ctx context.Context, clientset *kubernetes.Clientset, namespace string) (bool, error) {
+// DetectPodExists checks whether a running traffic manager pod exists in the specified namespace.
+func DetectPodExists(ctx context.Context, clientset kubernetes.Interface, namespace string) (bool, error) {
 	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
 	list, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: label,
@@ -88,7 +90,7 @@ func DetectPodExists(ctx context.Context, clientset *kubernetes.Clientset, names
 		return false, err
 	}
 	for i := 0; i < len(list.Items); i++ {
-		if list.Items[i].GetDeletionTimestamp() != nil || !AllContainerIsRunning(&list.Items[i]) {
+		if list.Items[i].GetDeletionTimestamp() != nil || !AllContainersRunning(&list.Items[i]) {
 			list.Items = append(list.Items[:i], list.Items[i+1:]...)
 			i--
 		}

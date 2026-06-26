@@ -3,13 +3,13 @@ package util
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/url"
 	"os"
 	"reflect"
 	"unsafe"
 
-	errors2 "github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -22,12 +22,13 @@ import (
 	"k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/tools/clientcmd/api/latest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// GetConnectionID returns the last 12 characters of the namespace UID as a connection identifier.
 func GetConnectionID(ctx context.Context, client v12.NamespaceInterface, ns string) (string, error) {
 	namespace, err := client.Get(ctx, ns, metav1.GetOptions{})
 	if err != nil {
@@ -36,6 +37,7 @@ func GetConnectionID(ctx context.Context, client v12.NamespaceInterface, ns stri
 	return string(namespace.UID[len(namespace.UID)-12:]), nil
 }
 
+// ConvertToKubeConfigBytes extracts the flattened kubeconfig as JSON bytes and the namespace from the factory.
 func ConvertToKubeConfigBytes(factory cmdutil.Factory) ([]byte, string, error) {
 	loader := factory.ToRawKubeConfigLoader()
 	namespace, _, err := loader.Namespace()
@@ -79,6 +81,7 @@ func ConvertToKubeConfigBytes(factory cmdutil.Factory) ([]byte, string, error) {
 	return marshal, namespace, nil
 }
 
+// GetAPIServerFromKubeConfigBytes parses kubeconfig bytes and returns the API server IP as a /32 or /128 IPNet.
 func GetAPIServerFromKubeConfigBytes(kubeconfigBytes []byte) *net.IPNet {
 	kubeConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
 	if err != nil {
@@ -109,6 +112,7 @@ func GetAPIServerFromKubeConfigBytes(kubeconfigBytes []byte) *net.IPNet {
 	return &net.IPNet{IP: ip, Mask: mask}
 }
 
+// ConvertToTempKubeconfigFile writes kubeconfig bytes to a temp file and returns the path.
 func ConvertToTempKubeconfigFile(kubeconfigBytes []byte, path string) (string, error) {
 	var f *os.File
 	var err error
@@ -135,7 +139,7 @@ func ConvertToTempKubeconfigFile(kubeconfigBytes []byte, path string) (string, e
 	return f.Name(), nil
 }
 
-func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
+func initFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 	configFlags := genericclioptions.NewConfigFlags(true)
 	configFlags.WrapConfigFn = func(c *rest.Config) *rest.Config {
 		if path, ok := os.LookupEnv(config.EnvSSHJump); ok {
@@ -152,20 +156,22 @@ func InitFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
 	if err != nil {
 		return nil
 	}
-	configFlags.KubeConfig = pointer.String(file)
-	configFlags.Namespace = pointer.String(ns)
+	configFlags.KubeConfig = ptr.To(file)
+	configFlags.Namespace = ptr.To(ns)
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
 	return cmdutil.NewFactory(matchVersionFlags)
 }
 
+// InitFactoryByPath creates a kubectl Factory from an explicit kubeconfig file path and namespace.
 func InitFactoryByPath(kubeconfig string, ns string) cmdutil.Factory {
 	configFlags := genericclioptions.NewConfigFlags(true)
-	configFlags.KubeConfig = pointer.String(kubeconfig)
-	configFlags.Namespace = pointer.String(ns)
+	configFlags.KubeConfig = ptr.To(kubeconfig)
+	configFlags.Namespace = ptr.To(ns)
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
 	return cmdutil.NewFactory(matchVersionFlags)
 }
 
+// GetKubeconfigCluster returns the cluster name from the current context of the factory's kubeconfig.
 func GetKubeconfigCluster(f cmdutil.Factory) string {
 	rawConfig, err := f.ToRawKubeConfigLoader().RawConfig()
 	if err != nil {
@@ -177,6 +183,7 @@ func GetKubeconfigCluster(f cmdutil.Factory) string {
 	return ""
 }
 
+// GetKubeconfigPath flattens the factory's kubeconfig and writes it to a temp file, returning the path.
 func GetKubeconfigPath(factory cmdutil.Factory) (string, error) {
 	rawConfig, err := factory.ToRawKubeConfigLoader().RawConfig()
 	if err != nil {
@@ -205,7 +212,8 @@ func GetKubeconfigPath(factory cmdutil.Factory) (string, error) {
 	return file, nil
 }
 
-func GetNsForListPodAndSvc(ctx context.Context, clientset *kubernetes.Clientset, nsList []string) (podNs string, svcNs string, err error) {
+// GetNsForListPodAndSvc finds the first accessible namespace from nsList for listing pods and services.
+func GetNsForListPodAndSvc(ctx context.Context, clientset kubernetes.Interface, nsList []string) (podNs string, svcNs string, err error) {
 	for _, ns := range nsList {
 		_, err = clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{Limit: 1})
 		if errors.IsForbidden(err) {
@@ -218,13 +226,13 @@ func GetNsForListPodAndSvc(ctx context.Context, clientset *kubernetes.Clientset,
 		break
 	}
 	if err != nil {
-		err = errors2.Wrap(err, "can not list pod to add it to route table")
+		err = fmt.Errorf("cannot list pod to add it to route table: %w", err)
 		return
 	}
 	if podNs == "" {
-		log.G(ctx).Debugf("List all namepsace pods")
+		plog.G(ctx).Debugf("List all namepsace pods")
 	} else {
-		log.G(ctx).Debugf("List namepsace %s pods", podNs)
+		plog.G(ctx).Debugf("List namepsace %s pods", podNs)
 	}
 
 	for _, ns := range nsList {
@@ -239,13 +247,13 @@ func GetNsForListPodAndSvc(ctx context.Context, clientset *kubernetes.Clientset,
 		break
 	}
 	if err != nil {
-		err = errors2.Wrap(err, "can not list service to add it to route table")
+		err = fmt.Errorf("cannot list service to add it to route table: %w", err)
 		return
 	}
 	if svcNs == "" {
-		log.G(ctx).Debugf("List all namepsace services")
+		plog.G(ctx).Debugf("List all namepsace services")
 	} else {
-		log.G(ctx).Debugf("List namepsace %s services", svcNs)
+		plog.G(ctx).Debugf("List namepsace %s services", svcNs)
 	}
 	return
 }

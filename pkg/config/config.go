@@ -41,6 +41,12 @@ const (
 
 	VolumeSyncthing = "syncthing"
 
+	// service / deployment port names for traffic-manager
+	PortNameTCP   = "10801-for-tcp"
+	PortNameEnvoy = "9002-for-envoy"
+	PortNameHTTP  = "80-for-webhook"
+	PortNameDNS   = "53-for-dns"
+
 	// IPv4Pool is used as tun ip
 	// 198.18.0.0/16 network is part of the 198.18.0.0/15 (reserved for benchmarking).
 	// https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml
@@ -152,6 +158,21 @@ var (
 	ConnectTimeout   = 5 * time.Second
 	ReadTimeout      = 10 * time.Second
 	WriteTimeout     = 10 * time.Second
+
+	// Health check and reconciliation intervals
+	HealthCheckInterval = 30 * time.Second
+	SSHKeepAliveInterval = 10 * time.Second
+	DNSRouteRefreshInterval = 15 * time.Second
+	DNSRouteDebounceInterval = 3 * time.Second
+
+	// Timeouts for network operations
+	UDPSessionTimeout  = 120 * time.Second
+	UDPRelayTimeout    = 30 * time.Second
+	PortForwardTimeout = 60 * time.Second
+
+	// Reconnection backoff
+	SlotReconnectBackoff = 2 * time.Second
+	DaemonPollInterval   = 200 * time.Millisecond
 )
 
 var (

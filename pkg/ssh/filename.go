@@ -7,6 +7,7 @@ import (
 	"unicode"
 )
 
+// IPToFilename converts an IP address string into a filesystem-safe filename.
 func IPToFilename(ipStr string) string {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {

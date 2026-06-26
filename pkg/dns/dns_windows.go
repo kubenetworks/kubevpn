@@ -98,7 +98,7 @@ func addNicSuffixSearchList(search []string) error {
 	return err
 }
 
-func GetHostFile() string {
+func getHostFile() string {
 	//return "/windows/system32/drivers/etc/hosts"
 	return "C:\\Windows\\System32\\drivers\\etc\\hosts"
 }

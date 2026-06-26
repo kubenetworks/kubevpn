@@ -11,6 +11,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
+// Logs handles the Logs RPC, streaming the daemon's log output (both user and root) with optional follow mode.
 func (svr *Server) Logs(resp rpc.Daemon_LogsServer) error {
 	req, err := resp.Recv()
 	if err != nil {

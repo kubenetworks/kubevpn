@@ -1,12 +1,6 @@
 package handler
 
 import (
-	"bytes"
-	"context"
-	"errors"
-	"fmt"
-	"time"
-
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -14,141 +8,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
-	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/kubectl/pkg/polymorphichelpers"
-	"k8s.io/kubectl/pkg/util/podutils"
-	"k8s.io/utils/pointer"
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
-
-func createOutboundPod(ctx context.Context, clientset *kubernetes.Clientset, namespace, image, imagePullSecretName string) (err error) {
-	var exists bool
-	exists, err = util.DetectPodExists(ctx, clientset, namespace)
-	if err != nil {
-		return err
-	}
-	if exists {
-		plog.G(ctx).Infof("Use exist traffic manager in namespace %s", namespace)
-		return nil
-	}
-
-	var deleteResource = func(ctx context.Context) {
-		options := metav1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)}
-		name := config.ConfigMapPodTrafficManager
-		_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, name+"."+namespace, options)
-		_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, name, options)
-		_ = clientset.RbacV1().Roles(namespace).Delete(ctx, name, options)
-		_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, name, options)
-		_ = clientset.CoreV1().Services(namespace).Delete(ctx, name, options)
-		_ = clientset.CoreV1().Secrets(namespace).Delete(ctx, name, options)
-		_ = clientset.CoreV1().Pods(namespace).Delete(ctx, config.CniNetName, options)
-		_ = clientset.BatchV1().Jobs(namespace).Delete(ctx, name, options)
-		_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, name, options)
-	}
-	defer func() {
-		if err != nil {
-			deleteResource(context.Background())
-		}
-	}()
-	deleteResource(ctx)
-
-	// 1) label namespace
-	plog.G(ctx).Infof("Labeling Namespace %s", namespace)
-	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Get Namespace error: %s", err.Error())
-		return err
-	}
-	if ns.Labels == nil {
-		ns.Labels = map[string]string{}
-	}
-	ns.Labels["ns"] = namespace
-	_, err = clientset.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{})
-	if err != nil {
-		plog.G(ctx).Infof("Labeling Namespace error: %s", err.Error())
-		return err
-	}
-
-	// 2) create serviceAccount
-	plog.G(ctx).Infof("Creating ServiceAccount %s", config.ConfigMapPodTrafficManager)
-	_, err = clientset.CoreV1().ServiceAccounts(namespace).Create(ctx, genServiceAccount(namespace), metav1.CreateOptions{})
-	if err != nil {
-		plog.G(ctx).Infof("Creating ServiceAccount error: %s", err.Error())
-		return err
-	}
-
-	// 3) create roles
-	plog.G(ctx).Infof("Creating Roles %s", config.ConfigMapPodTrafficManager)
-	_, err = clientset.RbacV1().Roles(namespace).Create(ctx, genRole(namespace), metav1.CreateOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Creating Roles error: %s", err.Error())
-		return err
-	}
-
-	// 4) create roleBinding
-	plog.G(ctx).Infof("Creating RoleBinding %s", config.ConfigMapPodTrafficManager)
-	_, err = clientset.RbacV1().RoleBindings(namespace).Create(ctx, genRoleBinding(namespace), metav1.CreateOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Creating RoleBinding error: %s", err.Error())
-		return err
-	}
-
-	// 5) create service
-	plog.G(ctx).Infof("Creating Service %s", config.ConfigMapPodTrafficManager)
-	tcp10801 := "10801-for-tcp"
-	tcp9002 := "9002-for-envoy"
-	tcp80 := "80-for-webhook"
-	udp53 := "53-for-dns"
-	svcSpec := genService(namespace, tcp10801, tcp9002, tcp80, udp53)
-	_, err = clientset.CoreV1().Services(namespace).Create(ctx, svcSpec, metav1.CreateOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Creating Service error: %s", err.Error())
-		return err
-	}
-
-	crt, key, host, err := util.GenTLSCert(ctx, namespace)
-	if err != nil {
-		return err
-	}
-	// reason why not use v1.SecretTypeTls is because it needs key called tls.crt and tls.key, but tls.key can not as env variable
-	// ➜  ~ export tls.key=a
-	//export: not valid in this context: tls.key
-	secret := genSecret(namespace, crt, key, host)
-	_, err = clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Creating secret error: %s", err.Error())
-		return err
-	}
-
-	// 6) create mutatingWebhookConfigurations
-	plog.G(ctx).Infof("Creating MutatingWebhookConfiguration %s", config.ConfigMapPodTrafficManager)
-	mutatingWebhookConfiguration := genMutatingWebhookConfiguration(namespace, crt)
-	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, mutatingWebhookConfiguration, metav1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to create MutatingWebhookConfigurations: %v", err)
-	}
-
-	// 7) create deployment
-	plog.G(ctx).Infof("Creating Deployment %s", config.ConfigMapPodTrafficManager)
-	deploy := genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullSecretName)
-	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
-		return err
-	}
-
-	_, selector, err := polymorphichelpers.SelectorsForObject(deploy)
-	if err != nil {
-		return err
-	}
-	return WaitPodReady(ctx, clientset.CoreV1().Pods(namespace), selector.String())
-}
 
 func genServiceAccount(namespace string) *v1.ServiceAccount {
 	return &v1.ServiceAccount{
@@ -156,7 +20,7 @@ func genServiceAccount(namespace string) *v1.ServiceAccount {
 			Name:      config.ConfigMapPodTrafficManager,
 			Namespace: namespace,
 		},
-		AutomountServiceAccountToken: pointer.Bool(true),
+		AutomountServiceAccountToken: ptr.To(true),
 	}
 }
 
@@ -207,8 +71,8 @@ func genMutatingWebhookConfiguration(namespace string, crt []byte) *admissionv1.
 				Service: &admissionv1.ServiceReference{
 					Namespace: namespace,
 					Name:      config.ConfigMapPodTrafficManager,
-					Path:      pointer.String("/pods"),
-					Port:      pointer.Int32(80),
+					Path:      ptr.To("/pods"),
+					Port:      ptr.To[int32](80),
 				},
 				CABundle: crt,
 			},
@@ -321,7 +185,7 @@ func genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullS
 			Namespace: namespace,
 		},
 		Spec: appsv1.DeploymentSpec{
-			Replicas: pointer.Int32(1),
+			Replicas: ptr.To[int32](1),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{"app": config.ConfigMapPodTrafficManager},
 			},
@@ -358,13 +222,31 @@ func genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullS
 								ContainerPort: 10801,
 								Protocol:      v1.ProtocolTCP,
 							}},
+							LivenessProbe: &v1.Probe{
+								ProbeHandler:        v1.ProbeHandler{TCPSocket: &v1.TCPSocketAction{Port: intstr.FromInt32(10801)}},
+								InitialDelaySeconds: 5,
+								PeriodSeconds:       15,
+								FailureThreshold:    3,
+							},
+							ReadinessProbe: &v1.Probe{
+								ProbeHandler:        v1.ProbeHandler{TCPSocket: &v1.TCPSocketAction{Port: intstr.FromInt32(10801)}},
+								InitialDelaySeconds: 3,
+								PeriodSeconds:       10,
+								FailureThreshold:    3,
+							},
+							StartupProbe: &v1.Probe{
+								ProbeHandler:        v1.ProbeHandler{TCPSocket: &v1.TCPSocketAction{Port: intstr.FromInt32(10801)}},
+								InitialDelaySeconds: 1,
+								PeriodSeconds:       2,
+								FailureThreshold:    15,
+							},
 							Resources:       resourcesLarge,
 							ImagePullPolicy: v1.PullIfNotPresent,
 							SecurityContext: &v1.SecurityContext{
 								Capabilities: &v1.Capabilities{
 									Add: []v1.Capability{},
 								},
-								Privileged: pointer.Bool(false),
+								Privileged: ptr.To(false),
 							},
 						},
 						{
@@ -383,6 +265,24 @@ func genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullS
 									ContainerPort: 53,
 									Protocol:      v1.ProtocolUDP,
 								},
+							},
+							LivenessProbe: &v1.Probe{
+								ProbeHandler:        v1.ProbeHandler{TCPSocket: &v1.TCPSocketAction{Port: intstr.FromInt32(9002)}},
+								InitialDelaySeconds: 5,
+								PeriodSeconds:       15,
+								FailureThreshold:    3,
+							},
+							ReadinessProbe: &v1.Probe{
+								ProbeHandler:        v1.ProbeHandler{TCPSocket: &v1.TCPSocketAction{Port: intstr.FromInt32(9002)}},
+								InitialDelaySeconds: 3,
+								PeriodSeconds:       10,
+								FailureThreshold:    3,
+							},
+							StartupProbe: &v1.Probe{
+								ProbeHandler:        v1.ProbeHandler{TCPSocket: &v1.TCPSocketAction{Port: intstr.FromInt32(9002)}},
+								InitialDelaySeconds: 1,
+								PeriodSeconds:       2,
+								FailureThreshold:    15,
 							},
 							VolumeMounts:    []v1.VolumeMount{},
 							ImagePullPolicy: v1.PullIfNotPresent,
@@ -413,6 +313,36 @@ func genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullS
 									},
 								},
 							}},
+							LivenessProbe: &v1.Probe{
+								ProbeHandler: v1.ProbeHandler{HTTPGet: &v1.HTTPGetAction{
+									Path:   "/readyz",
+									Port:   intstr.FromInt32(80),
+									Scheme: v1.URISchemeHTTPS,
+								}},
+								InitialDelaySeconds: 5,
+								PeriodSeconds:       15,
+								FailureThreshold:    3,
+							},
+							ReadinessProbe: &v1.Probe{
+								ProbeHandler: v1.ProbeHandler{HTTPGet: &v1.HTTPGetAction{
+									Path:   "/readyz",
+									Port:   intstr.FromInt32(80),
+									Scheme: v1.URISchemeHTTPS,
+								}},
+								InitialDelaySeconds: 3,
+								PeriodSeconds:       10,
+								FailureThreshold:    3,
+							},
+							StartupProbe: &v1.Probe{
+								ProbeHandler: v1.ProbeHandler{HTTPGet: &v1.HTTPGetAction{
+									Path:   "/readyz",
+									Port:   intstr.FromInt32(80),
+									Scheme: v1.URISchemeHTTPS,
+								}},
+								InitialDelaySeconds: 1,
+								PeriodSeconds:       2,
+								FailureThreshold:    15,
+							},
 							ImagePullPolicy: v1.PullIfNotPresent,
 							Resources:       resourcesSmall,
 						},
@@ -430,58 +360,3 @@ func genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullS
 	return deploy
 }
 
-func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelector string) error {
-	var isPodReady bool
-	var lastMessage string
-	ctx2, cancelFunc := context.WithTimeout(ctx, time.Minute*60)
-	defer cancelFunc()
-	plog.G(ctx).Infoln()
-	wait.UntilWithContext(ctx2, func(ctx context.Context) {
-		podList, err := clientset.List(ctx2, metav1.ListOptions{
-			LabelSelector: labelSelector,
-		})
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to list pods for %s: %v", labelSelector, err)
-			return
-		}
-
-		for _, pod := range podList.Items {
-			if pod.DeletionTimestamp != nil {
-				continue
-			}
-			var sb = bytes.NewBuffer(nil)
-			sb.WriteString(fmt.Sprintf("Pod %s is %s...\n", pod.Name, pod.Status.Phase))
-			if pod.Status.Reason != "" {
-				sb.WriteString(fmt.Sprintf(" reason %s", pod.Status.Reason))
-			}
-			if pod.Status.Message != "" {
-				sb.WriteString(fmt.Sprintf(" message %s", pod.Status.Message))
-			}
-			util.PrintStatus(&pod, sb)
-			if lastMessage != sb.String() {
-				plog.G(ctx).Info(sb.String())
-			}
-			lastMessage = sb.String()
-
-			readyFunc := func(pod *v1.Pod) bool {
-				for _, status := range pod.Status.ContainerStatuses {
-					if !status.Ready {
-						return false
-					}
-				}
-				return true
-			}
-			if podutils.IsPodReady(&pod) && readyFunc(&pod) {
-				cancelFunc()
-				isPodReady = true
-			}
-		}
-	}, time.Second*3)
-
-	if !isPodReady {
-		plog.G(ctx).Errorf("Wait pod %s to be ready timeout", labelSelector)
-		return errors.New(fmt.Sprintf("wait pod %s to be ready timeout", labelSelector))
-	}
-
-	return nil
-}

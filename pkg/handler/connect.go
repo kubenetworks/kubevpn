@@ -2,53 +2,29 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
-	"slices"
-	"sort"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/containernetworking/cni/pkg/types"
-	"github.com/libp2p/go-netroute"
-	miekgdns "github.com/miekg/dns"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/metadata"
-	"gvisor.dev/gvisor/pkg/tcpip"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
-	admissionv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
-	apinetworkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
-	pkgruntime "k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	pkgtypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/resource"
-	runtimeresource "k8s.io/cli-runtime/pkg/resource"
 	informerv1 "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
-	v2 "k8s.io/client-go/kubernetes/typed/networking/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
-	"k8s.io/kubectl/pkg/cmd/set"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	"k8s.io/kubectl/pkg/polymorphichelpers"
-	"k8s.io/kubectl/pkg/scheme"
-	"k8s.io/kubectl/pkg/util/podutils"
-	"k8s.io/utils/pointer"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
@@ -56,12 +32,12 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// ConnectOptions holds all state for a kubevpn connection session.
 type ConnectOptions struct {
-	Namespace            string
+	ManagerNamespace     string
 	ExtraRouteInfo       ExtraRouteInfo
 	Foreground           bool
 	OriginKubeconfigPath string
@@ -75,7 +51,7 @@ type ConnectOptions struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	clientset  *kubernetes.Clientset
+	clientset  kubernetes.Interface
 	restclient *rest.RESTClient
 	config     *rest.Config
 	factory    cmdutil.Factory
@@ -93,6 +69,7 @@ type ConnectOptions struct {
 	tunName        string
 	proxyWorkloads ProxyList
 	healthStatus   HealthStatus
+	cmInformer     cache.SharedInformer
 
 	Sync *SyncOptions
 }
@@ -103,7 +80,7 @@ func (c *ConnectOptions) Context() context.Context {
 
 func (c *ConnectOptions) InitDHCP(ctx context.Context) error {
 	if c.dhcp == nil {
-		c.dhcp = dhcp.NewDHCPManager(c.clientset, c.Namespace)
+		c.dhcp = dhcp.NewDHCPManager(c.clientset, c.ManagerNamespace)
 		return c.dhcp.InitDHCP(ctx)
 	}
 	return nil
@@ -136,27 +113,27 @@ func (c *ConnectOptions) RentIP(ctx context.Context, ipv4, ipv6 string) (context
 func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logger) error {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return fmt.Errorf("can not get IOP from context")
+		return fmt.Errorf("cannot get IP from context")
 	}
 
 	ipv4 := md.Get(config.HeaderIPv4)
 	if len(ipv4) == 0 {
-		return fmt.Errorf("can not found IPv4 from header: %v", md)
+		return fmt.Errorf("cannot find IPv4 from header: %v", md)
 	}
 	ip, ipNet, err := net.ParseCIDR(ipv4[0])
 	if err != nil {
-		return fmt.Errorf("cat not convert IPv4 string: %s: %v", ipv4[0], err)
+		return fmt.Errorf("can not convert IPv4 string: %s: %w", ipv4[0], err)
 	}
 	c.LocalTunIPv4 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
 	logger.Debugf("Get IPv4 %s from context", c.LocalTunIPv4.String())
 
 	ipv6 := md.Get(config.HeaderIPv6)
 	if len(ipv6) == 0 {
-		return fmt.Errorf("can not found IPv6 from header: %v", md)
+		return fmt.Errorf("cannot find IPv6 from header: %v", md)
 	}
 	ip, ipNet, err = net.ParseCIDR(ipv6[0])
 	if err != nil {
-		return fmt.Errorf("cat not convert IPv6 string: %s: %v", ipv6[0], err)
+		return fmt.Errorf("can not convert IPv6 string: %s: %w", ipv6[0], err)
 	}
 	c.LocalTunIPv6 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
 	logger.Debugf("Get IPv6 %s from context", c.LocalTunIPv6.String())
@@ -171,18 +148,16 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		c.proxyWorkloads = make(ProxyList, 0)
 	}
 
-	tlsSecret, err := c.clientset.CoreV1().Secrets(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	tlsSecret, err := c.clientset.CoreV1().Secrets(c.ManagerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 
 	for _, workload := range workloads {
 		plog.G(ctx).Infof("Injecting inbound sidecar for %s in namespace %s", workload, namespace)
-		configInfo := util.PodRouteConfig{
-			LocalTunIPv4: c.LocalTunIPv4.IP.String(),
-			LocalTunIPv6: c.LocalTunIPv6.IP.String(),
-		}
-		var object, controller *runtimeresource.Info
+		localTunIPv4 := c.LocalTunIPv4.IP.String()
+		localTunIPv6 := c.LocalTunIPv6.IP.String()
+		var object, controller *resource.Info
 		object, controller, err = util.GetTopOwnerObject(ctx, c.factory, namespace, workload)
 		if err != nil {
 			return err
@@ -194,7 +169,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		}
 		var mapper *Mapper
 		if util.IsK8sService(object) {
-			mapper = NewMapper(c.clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), headers, workload)
+			mapper = NewMapper(c.clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), headers, workload, c.GetConfigMapInformer())
 		}
 		c.proxyWorkloads.Add(&Proxy{
 			headers:    headers,
@@ -207,20 +182,28 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 		// todo consider to use ephemeral container
 		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
-		// means mesh mode
-		if util.IsK8sService(object) {
-			err = inject.InjectEnvoyAndSSH(ctx, nodeID, c.factory, c.Namespace, object, controller, headers, portMap, image)
-		} else if len(headers) != 0 || len(portMap) != 0 {
-			err = inject.InjectEnvoyAndVPN(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, headers, portMap, tlsSecret, image)
-		} else {
-			err = inject.InjectVPN(ctx, nodeID, c.factory, c.Namespace, controller, configInfo, tlsSecret, image)
-		}
+		injector := inject.NewInjector(inject.InjectOptions{
+			Factory:          c.factory,
+			Clientset:        c.clientset,
+			ManagerNamespace: c.ManagerNamespace,
+			NodeID:           nodeID,
+			Object:           object,
+			Controller:       controller,
+			LocalTunIPv4:     localTunIPv4,
+			LocalTunIPv6:     localTunIPv6,
+			Headers:          headers,
+			PortMaps:         portMap,
+			Secret:           tlsSecret,
+			Image:            image,
+		})
+		err = injector.Inject(ctx)
 		if err != nil {
 			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %s", workload, namespace, err.Error())
 			return err
 		}
+		plog.G(ctx).Infof("Injected inbound sidecar for %s in namespace %s successfully", workload, namespace)
 		if mapper != nil {
-			go mapper.Run(c.Namespace)
+			go mapper.Run()
 		}
 	}
 	return
@@ -238,25 +221,22 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 		plog.G(ctx).Errorf("Failed to get network CIDR: %v", err)
 		return
 	}
-	if err = createOutboundPod(c.ctx, c.clientset, c.Namespace, c.Image, c.ImagePullSecretName); err != nil {
+	if err = createOutboundPod(c.ctx, c.clientset, c.ManagerNamespace, c.Image, c.ImagePullSecretName); err != nil {
 		return
 	}
 	if err = c.upgradeDeploy(c.ctx); err != nil {
 		return
 	}
-	//if err = c.CreateRemoteInboundPod(c.ctx); err != nil {
-	//	return
-	//}
 	if err = c.addExtraNodeIP(c.ctx); err != nil {
 		plog.G(ctx).Errorf("Add extra node IP failed: %v", err)
 		return
 	}
 	var gvisorTCPForwardPort, gvisorUDPForwardPort int
-	gvisorTCPForwardPort, err = util.GetAvailableTCPPortOrDie()
+	gvisorTCPForwardPort, err = util.GetAvailableTCPPort()
 	if err != nil {
 		return err
 	}
-	gvisorUDPForwardPort, err = util.GetAvailableTCPPortOrDie()
+	gvisorUDPForwardPort, err = util.GetAvailableTCPPort()
 	if err != nil {
 		return err
 	}
@@ -291,476 +271,17 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	return
 }
 
-// detect pod is delete event, if pod is deleted, needs to redo port-forward immediately
-func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) error {
-	firstCtx, firstCancelFunc := context.WithCancel(ctx)
-	defer firstCancelFunc()
-	var errChan = make(chan error, 1)
-	go func() {
-		runtime.ErrorHandlers = []runtime.ErrorHandler{func(ctx context.Context, err error, msg string, keysAndValues ...interface{}) {
-			plog.G(ctx).Error(err)
-		}}
-		var first = pointer.Bool(true)
-		for ctx.Err() == nil {
-			func() {
-				defer time.Sleep(time.Millisecond * 200)
-
-				sortBy := func(pods []*v1.Pod) sort.Interface { return sort.Reverse(podutils.ActivePods(pods)) }
-				label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
-				_, _, _ = polymorphichelpers.GetFirstPod(c.clientset.CoreV1(), c.Namespace, label, time.Second*5, sortBy)
-				ctx2, cancelFunc2 := context.WithTimeout(ctx, time.Second*10)
-				defer cancelFunc2()
-				podList, err := c.GetRunningPodList(ctx2)
-				if err != nil {
-					plog.G(ctx).Debugf("Failed to get running pod: %v", err)
-					if *first {
-						util.SafeWrite(errChan, err)
-					}
-					return
-				}
-				pod := podList[0]
-				// add route in case of don't have permission to watch pod, but pod recreated ip changed, so maybe this ip can not visit
-				_ = c.addRoute(util.GetPodIP(pod)...)
-				childCtx, cancelFunc := context.WithCancel(ctx)
-				defer cancelFunc()
-				var readyChan = make(chan struct{})
-				podName := pod.GetName()
-				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
-				go util.CheckPodStatus(childCtx, cancelFunc, podName, c.clientset.CoreV1().Pods(c.Namespace))
-				domain := config.ConfigMapPodTrafficManager
-				go healthCheckPortForward(childCtx, cancelFunc, readyChan, strings.Split(portPair[1], ":")[0], domain, c.LocalTunIPv4.IP)
-				go healthCheckTCPConn(childCtx, cancelFunc, readyChan, domain, util.GetPodIP(pod)[0])
-				if *first {
-					go func() {
-						select {
-						case <-readyChan:
-							firstCancelFunc()
-						case <-childCtx.Done():
-						}
-					}()
-				}
-				out := plog.G(ctx).Logger.Out
-				err = util.PortForwardPod(
-					c.config,
-					c.restclient,
-					podName,
-					c.Namespace,
-					portPair,
-					readyChan,
-					childCtx.Done(),
-					nil,
-					out,
-				)
-				if *first {
-					util.SafeWrite(errChan, err)
-				}
-				first = pointer.Bool(false)
-				// exit normal, let context.err to judge to exit or not
-				if err == nil {
-					plog.G(ctx).Debugf("Port forward retrying")
-					return
-				} else {
-					plog.G(ctx).Debugf("Forward port error: %v", err)
-				}
-				if strings.Contains(err.Error(), "unable to listen on any of the requested ports") ||
-					strings.Contains(err.Error(), "address already in use") {
-					plog.G(ctx).Debugf("Port %s already in use, needs to release it manually", portPair)
-				} else {
-					plog.G(ctx).Debugf("Port-forward occurs error: %v", err)
-				}
-			}()
-		}
-	}()
-	ticker := time.NewTicker(time.Second * 60)
-	defer ticker.Stop()
-	select {
-	case <-ticker.C:
-		return errors.New("wait port forward to be ready timeout")
-	case err := <-errChan:
-		return err
-	case <-firstCtx.Done():
-		return nil
-	}
-}
-
-func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress string) (err error) {
-	plog.G(ctx).Debugf("IPv4: %s, IPv6: %s", c.LocalTunIPv4.IP.String(), c.LocalTunIPv6.IP.String())
-
-	tlsSecret, err := c.clientset.CoreV1().Secrets(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-
-	var cidrList []*net.IPNet
-	for _, ipNet := range c.cidrs {
-		cidrList = append(cidrList, ipNet)
-	}
-	// add extra-cidr
-	for _, s := range c.ExtraRouteInfo.ExtraCIDR {
-		var ipNet *net.IPNet
-		_, ipNet, err = net.ParseCIDR(s)
-		if err != nil {
-			return fmt.Errorf("invalid extra-cidr %s, err: %v", s, err)
-		}
-		cidrList = append(cidrList, ipNet)
-	}
-
-	var routes []types.Route
-	for _, ipNet := range util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cidrList), c.apiServerIPs) {
-		if ipNet != nil && !ipNet.IP.IsLoopback() {
-			routes = append(routes, types.Route{Dst: *ipNet})
-		}
-	}
-	if c.LocalTunIPv4 != nil {
-		routes = append(routes, types.Route{Dst: net.IPNet{IP: c.LocalTunIPv4.IP, Mask: net.CIDRMask(32, 32)}})
-	}
-	if c.LocalTunIPv6 != nil {
-		routes = append(routes, types.Route{Dst: net.IPNet{IP: c.LocalTunIPv6.IP, Mask: net.CIDRMask(128, 128)}})
-	}
-
-	tunConfig := tun.Config{
-		Addr:   (&net.IPNet{IP: c.LocalTunIPv4.IP, Mask: net.CIDRMask(32, 32)}).String(),
-		Routes: routes,
-		MTU:    config.DefaultMTU,
-	}
-	if enable, _ := util.IsIPv6Enabled(); enable {
-		tunConfig.Addr6 = (&net.IPNet{IP: c.LocalTunIPv6.IP, Mask: net.CIDRMask(128, 128)}).String()
-	}
-
-	forwardNode, err := core.ParseNode(forwardAddress)
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to parse forward node %s: %v", forwardAddress, err)
-		return err
-	}
-	forwarder := &core.Forwarder{
-		Addr:        forwardNode.Addr,
-		Connector:   core.NewUDPOverTCPConnector(),
-		Transporter: core.TCPTransporter(tlsSecret.Data),
-		MaxRetries:  5,
-	}
-
-	handler := core.TunHandler(forwarder, nil)
-	listener, err := tun.Listener(tunConfig)
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to create tun listener: %v", err)
-		return err
-	}
-
-	server := core.Server{
-		Listener: listener,
-		Handler:  handler,
-	}
-
-	go func() {
-		defer server.Listener.Close()
-		go func() {
-			<-ctx.Done()
-			server.Listener.Close()
-		}()
-
-		for ctx.Err() == nil {
-			conn, err := server.Listener.Accept()
-			if err != nil {
-				if !errors.Is(err, tun.ClosedErr) {
-					plog.G(ctx).Errorf("Failed to accept local tun conn: %v", err)
-				}
-				return
-			}
-			go server.Handler.Handle(ctx, conn)
-		}
-	}()
-	plog.G(ctx).Info("Connected private safe tunnel")
-
-	c.tunName, err = c.GetTunDeviceName()
-	return err
-}
-
-// Listen all pod, add route if needed
-func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (cache.SharedIndexInformer, cache.SharedIndexInformer, error) {
-	podNs, svcNs, err := util.GetNsForListPodAndSvc(ctx, c.clientset, []string{v1.NamespaceAll, c.OriginNamespace})
-	if err != nil {
-		return nil, nil, err
-	}
-
-	conf := rest.CopyConfig(c.config)
-	conf.QPS = 1
-	conf.Burst = 2
-	clientSet, err := kubernetes.NewForConfig(conf)
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to create clientset: %v", err)
-		return nil, nil, err
-	}
-	svcIndexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
-	svcInformer := informerv1.NewServiceInformer(clientSet, svcNs, 0, svcIndexers)
-	svcTicker := time.NewTicker(time.Second * 15)
-	_, err = svcInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			svcTicker.Reset(time.Second * 3)
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			svcTicker.Reset(time.Second * 3)
-		},
-		DeleteFunc: func(obj interface{}) {
-			svcTicker.Reset(time.Second * 3)
-		},
-	})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to add service event handler: %v", err)
-		return nil, nil, err
-	}
-
-	go svcInformer.Run(ctx.Done())
-	go func() {
-		defer svcTicker.Stop()
-		for ; ctx.Err() == nil; <-svcTicker.C {
-			svcTicker.Reset(time.Second * 15)
-			serviceList := svcInformer.GetIndexer().List()
-			var ips = sets.New[string]()
-			for _, service := range serviceList {
-				svc, ok := service.(*v1.Service)
-				if !ok {
-					continue
-				}
-				ips.Insert(svc.Spec.ClusterIP)
-				ips.Insert(svc.Spec.ClusterIPs...)
-			}
-			if ctx.Err() != nil {
-				return
-			}
-			if ips.Len() == 0 {
-				continue
-			}
-			err := c.addRoute(ips.UnsortedList()...)
-			if err != nil {
-				plog.G(ctx).Debugf("Add service IP to route table failed: %v", err)
-			}
-		}
-	}()
-
-	podIndexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
-	podInformer := informerv1.NewPodInformer(clientSet, podNs, 0, podIndexers)
-	podTicker := time.NewTicker(time.Second * 15)
-	_, err = podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			podTicker.Reset(time.Second * 3)
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			podTicker.Reset(time.Second * 3)
-		},
-		DeleteFunc: func(obj interface{}) {
-			podTicker.Reset(time.Second * 3)
-		},
-	})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to add service event handler: %v", err)
-		return nil, nil, err
-	}
-	go podInformer.Run(ctx.Done())
-	go func() {
-		defer podTicker.Stop()
-		for ; ctx.Err() == nil; <-podTicker.C {
-			podTicker.Reset(time.Second * 15)
-			podList := podInformer.GetIndexer().List()
-			var ips = sets.New[string]()
-			for _, pod := range podList {
-				p, ok := pod.(*v1.Pod)
-				if !ok {
-					continue
-				}
-				if p.Spec.HostNetwork {
-					continue
-				}
-				ips.Insert(util.GetPodIP(*p)...)
-			}
-			if ctx.Err() != nil {
-				return
-			}
-			if ips.Len() == 0 {
-				continue
-			}
-			err := c.addRoute(ips.UnsortedList()...)
-			if err != nil {
-				plog.G(ctx).Debugf("Add pod IP to route table failed: %v", err)
-			}
-		}
-	}()
-
-	return svcInformer, podInformer, nil
-}
-
-func (c *ConnectOptions) addRoute(ipStrList ...string) error {
-	if c.tunName == "" {
-		return nil
-	}
-	var routes []types.Route
-	r, _ := netroute.New()
-	for _, ipStr := range ipStrList {
-		ip := net.ParseIP(ipStr)
-		if ip == nil {
-			continue
-		}
-		var match bool
-		for _, p := range c.apiServerIPs {
-			// if pod ip or service ip is equal to apiServer ip, can not add it to route table
-			if p.Equal(ip) {
-				match = true
-				break
-			}
-		}
-		if match {
-			continue
-		}
-		var mask net.IPMask
-		if ip.To4() != nil {
-			mask = net.CIDRMask(32, 32)
-		} else {
-			mask = net.CIDRMask(128, 128)
-		}
-		if r != nil {
-			ifi, _, _, err := r.Route(ip)
-			if err == nil && ifi.Name == c.tunName {
-				continue
-			}
-		}
-		routes = append(routes, types.Route{Dst: net.IPNet{IP: ip, Mask: mask}})
-	}
-	if len(routes) == 0 {
-		return nil
-	}
-	err := tun.AddRoutes(c.tunName, routes...)
-	return err
-}
-
-func (c *ConnectOptions) setupDNS(ctx context.Context, svcInformer cache.SharedIndexInformer) error {
-	podList, err := c.GetRunningPodList(ctx)
-	if err != nil {
-		plog.G(ctx).Errorf("Get running pod list failed, err: %v", err)
-		return err
-	}
-	pod := podList[0]
-	plog.G(ctx).Infof("Get DNS service IP from Pod...")
-	relovConf, err := util.GetDNSServiceIPFromPod(ctx, c.clientset, c.config, pod.GetName(), c.Namespace)
-	if err != nil {
-		plog.G(ctx).Errorln(err)
-		return err
-	}
-
-	marshal, _ := json.Marshal(relovConf)
-	plog.G(ctx).Debugf("Get DNS service config: %v", string(marshal))
-	var svc *v1.Service
-	svc, err = c.clientset.CoreV1().Services(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	err = detectNameserver(ctx, relovConf, svc.Spec.ClusterIP, pod.Status.PodIP)
-	if err != nil {
-		return err
-	}
-
-	plog.G(ctx).Infof("Adding extra domain to hosts...")
-	if err = c.addExtraRoute(c.ctx, pod.GetName()); err != nil {
-		plog.G(ctx).Errorf("Add extra route failed: %v", err)
-		return err
-	}
-
-	ns := []string{c.OriginNamespace}
-	list, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{Limit: 500})
-	if err == nil {
-		for _, item := range list.Items {
-			if !sets.New[string](ns...).Has(item.Name) {
-				ns = append(ns, item.Name)
-			}
-		}
-	}
-
-	plog.G(ctx).Infof("Listing namespace %s services...", c.OriginNamespace)
-	c.dnsConfig = &dns.Config{
-		Config:      relovConf,
-		Ns:          ns,
-		Services:    []v1.Service{},
-		SvcInformer: svcInformer,
-		TunName:     c.tunName,
-		Hosts:       c.extraHost,
-		Lock:        c.Lock,
-		HowToGetExternalName: func(domain string) (string, error) {
-			podList, err := c.GetRunningPodList(ctx)
-			if err != nil {
-				return "", err
-			}
-			pod := podList[0]
-			return util.Shell(
-				ctx,
-				c.clientset,
-				c.config,
-				pod.GetName(),
-				config.ContainerSidecarVPN,
-				c.Namespace,
-				[]string{"dig", "+short", domain},
-			)
-		},
-	}
-	plog.G(ctx).Infof("Setup DNS server for device %s...", c.tunName)
-	if err = c.dnsConfig.SetupDNS(ctx); err != nil {
-		return err
-	}
-	plog.G(ctx).Infof("Dump service in namespace %s into hosts...", c.OriginNamespace)
-	// dump service in current namespace for support DNS resolve service:port
-	err = c.dnsConfig.AddServiceNameToHosts(ctx, c.extraHost...)
-	return err
-}
-
-func Run(ctx context.Context, servers []core.Server) error {
-	errChan := make(chan error, len(servers))
-	for i := range servers {
-		go func(i int) {
-			errChan <- func() error {
-				svr := servers[i]
-				defer svr.Listener.Close()
-				go func() {
-					<-ctx.Done()
-					svr.Listener.Close()
-				}()
-				for ctx.Err() == nil {
-					conn, err := svr.Listener.Accept()
-					if err != nil {
-						return err
-					}
-					go svr.Handler.Handle(ctx, conn)
-				}
-				return ctx.Err()
-			}()
-		}(i)
-	}
-
-	select {
-	case err := <-errChan:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-
-func (c *ConnectOptions) InitClient(f cmdutil.Factory) (err error) {
+func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {
+	plog.G(context.Background()).Debug("Initializing Kubernetes client")
 	c.factory = f
-	if c.config, err = c.factory.ToRESTConfig(); err != nil {
-		return
-	}
-	if c.restclient, err = c.factory.RESTClient(); err != nil {
-		return
-	}
-	if c.clientset, err = c.factory.KubernetesClientSet(); err != nil {
-		return
-	}
-	if c.Namespace, _, err = c.factory.ToRawKubeConfigLoader().Namespace(); err != nil {
-		return
-	}
-	return
+	var err error
+	c.config, c.restclient, c.clientset, c.ManagerNamespace, err = util.InitKubeClient(f)
+	return err
 }
 
 func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error) {
-	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
-	return util.GetRunningPodList(ctx, c.clientset, c.Namespace, label)
+	label := "app=" + config.ConfigMapPodTrafficManager
+	return util.GetRunningPodList(ctx, c.clientset, c.ManagerNamespace, label)
 }
 
 // getCIDR
@@ -771,6 +292,7 @@ func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster/54183373#54183373
 // https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster
 func (c *ConnectOptions) getCIDR(ctx context.Context, filterAPIServer bool) error {
+	plog.G(ctx).Debug("Detecting cluster CIDRs")
 	var err error
 	if filterAPIServer {
 		c.apiServerIPs, err = util.GetAPIServerIP(c.config.Host)
@@ -795,12 +317,12 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, filterAPIServer bool) erro
 				c.cidrs = util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(append(c.cidrs, cidr)), c.apiServerIPs)
 			}
 		}
-		plog.G(ctx).Infoln("Get network CIDR from cache")
+		plog.G(ctx).Infof("Get network CIDR from cache")
 		return nil
 	}
 
 	// (2) get CIDR from cni
-	cidrs := util.GetCIDR(ctx, c.clientset, c.config, c.Namespace, c.Image)
+	cidrs := util.GetCIDR(ctx, c.clientset, c.config, c.ManagerNamespace, c.Image)
 	c.cidrs = util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cidrs), c.apiServerIPs)
 	s := sets.New[string]()
 	for _, cidr := range c.cidrs {
@@ -814,7 +336,7 @@ func (c *ConnectOptions) Set(ctx context.Context, key, value string) error {
 		retry.DefaultRetry,
 		func() error {
 			p := []byte(fmt.Sprintf(`[{"op": "replace", "path": "/data/%s", "value": "%s"}]`, key, value))
-			_, err := c.clientset.CoreV1().ConfigMaps(c.Namespace).Patch(ctx, config.ConfigMapPodTrafficManager, k8stypes.JSONPatchType, p, metav1.PatchOptions{})
+			_, err := c.clientset.CoreV1().ConfigMaps(c.ManagerNamespace).Patch(ctx, config.ConfigMapPodTrafficManager, k8stypes.JSONPatchType, p, metav1.PatchOptions{})
 			return err
 		})
 	if err != nil {
@@ -825,116 +347,35 @@ func (c *ConnectOptions) Set(ctx context.Context, key, value string) error {
 }
 
 func (c *ConnectOptions) Get(ctx context.Context, key string) (string, error) {
-	cm, err := c.clientset.CoreV1().ConfigMaps(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	items := c.GetConfigMapInformer().GetStore().List()
+	for _, item := range items {
+		if cm, ok := item.(*v1.ConfigMap); ok {
+			return cm.Data[key], nil
+		}
+	}
+	cm, err := c.clientset.CoreV1().ConfigMaps(c.ManagerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
 	return cm.Data[key], nil
 }
 
-func (c *ConnectOptions) addExtraRoute(ctx context.Context, name string) error {
-	if len(c.ExtraRouteInfo.ExtraDomain) == 0 {
-		return nil
+// GetConfigMapInformer returns a shared informer for the traffic manager ConfigMap.
+// Created once on first call, then reused. Must be called after InitClient.
+func (c *ConnectOptions) GetConfigMapInformer() cache.SharedInformer {
+	if c.cmInformer == nil {
+		c.cmInformer = informerv1.NewFilteredConfigMapInformer(
+			c.clientset, c.ManagerNamespace, 0, cache.Indexers{},
+			func(options *metav1.ListOptions) {
+				options.FieldSelector = fields.OneTermEqualSelector("metadata.name", config.ConfigMapPodTrafficManager).String()
+			},
+		)
+		go c.cmInformer.Run(c.ctx.Done())
 	}
-
-	// parse cname
-	//dig +short db-name.postgres.database.azure.com
-	//1234567.privatelink.db-name.postgres.database.azure.com.
-	//10.0.100.1
-	var parseIP = func(cmdDigOutput string) net.IP {
-		for _, s := range strings.Split(cmdDigOutput, "\n") {
-			ip := net.ParseIP(strings.TrimSpace(s))
-			if ip != nil {
-				return ip
-			}
-		}
-		return nil
-	}
-
-	// 1) use dig +short query, if ok, just return
-	for _, domain := range c.ExtraRouteInfo.ExtraDomain {
-		output, err := util.Shell(ctx, c.clientset, c.config, name, config.ContainerSidecarVPN, c.Namespace, []string{"dig", "+short", domain})
-		if err != nil {
-			return errors.WithMessage(err, "failed to resolve DNS for domain by command dig")
-		}
-		var ip string
-		if parseIP(output) == nil {
-			// try to get ingress record
-			ip = getIngressRecord(ctx, c.clientset.NetworkingV1(), []string{v1.NamespaceAll, c.Namespace}, domain)
-		} else {
-			ip = parseIP(output).String()
-		}
-		if net.ParseIP(ip) == nil {
-			return fmt.Errorf("failed to resolve DNS for domain %s by command dig, output: %s", domain, output)
-		}
-		err = c.addRoute(ip)
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to add IP: %s to route table: %v", ip, err)
-			return err
-		}
-		c.extraHost = append(c.extraHost, dns.Entry{IP: net.ParseIP(ip).String(), Domain: domain})
-	}
-	return nil
+	return c.cmInformer
 }
 
-func getIngressRecord(ctx context.Context, ingressInterface v2.NetworkingV1Interface, nsList []string, domain string) string {
-	var ingressList []apinetworkingv1.Ingress
-	for _, ns := range nsList {
-		list, _ := ingressInterface.Ingresses(ns).List(ctx, metav1.ListOptions{})
-		ingressList = append(ingressList, list.Items...)
-	}
-	for _, item := range ingressList {
-		for _, rule := range item.Spec.Rules {
-			if rule.Host == domain {
-				for _, ingress := range item.Status.LoadBalancer.Ingress {
-					if ingress.IP != "" {
-						return ingress.IP
-					}
-				}
-			}
-		}
-		for _, tl := range item.Spec.TLS {
-			if slices.Contains(tl.Hosts, domain) {
-				for _, ingress := range item.Status.LoadBalancer.Ingress {
-					if ingress.IP != "" {
-						return ingress.IP
-					}
-				}
-			}
-		}
-	}
-	return ""
-}
-
-func (c *ConnectOptions) addExtraNodeIP(ctx context.Context) error {
-	if !c.ExtraRouteInfo.ExtraNodeIP {
-		return nil
-	}
-	list, err := c.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return err
-	}
-	for _, item := range list.Items {
-		for _, address := range item.Status.Addresses {
-			ip := net.ParseIP(address.Address)
-			if ip != nil {
-				var mask net.IPMask
-				if ip.To4() != nil {
-					mask = net.CIDRMask(32, 32)
-				} else {
-					mask = net.CIDRMask(128, 128)
-				}
-				c.ExtraRouteInfo.ExtraCIDR = append(c.ExtraRouteInfo.ExtraCIDR, (&net.IPNet{
-					IP:   ip,
-					Mask: mask,
-				}).String())
-			}
-		}
-	}
-	return nil
-}
-
-func (c *ConnectOptions) GetClientset() *kubernetes.Clientset {
+func (c *ConnectOptions) GetClientset() kubernetes.Interface {
 	return c.clientset
 }
 
@@ -959,200 +400,6 @@ func (c *ConnectOptions) GetConnectionID() string {
 	return ""
 }
 
-func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
-	deploy, err := c.clientset.AppsV1().Deployments(c.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	if len(deploy.Spec.Template.Spec.Containers) == 0 {
-		return fmt.Errorf("can not found any container in deploy %s", deploy.Name)
-	}
-	// check running pod, sometime deployment is rolling back, so need to check running pod
-	podList, err := c.GetRunningPodList(ctx)
-	if err != nil {
-		return err
-	}
-
-	clientVer := config.Version
-	clientImg := c.Image
-	serverImg := deploy.Spec.Template.Spec.Containers[0].Image
-	runningPodImg := podList[0].Spec.Containers[0].Image
-
-	isNeedUpgrade, err := util.IsNewer(clientVer, clientImg, serverImg)
-	isPodNeedUpgrade, err1 := util.IsNewer(clientVer, clientImg, runningPodImg)
-	if !isNeedUpgrade && !isPodNeedUpgrade {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if err1 != nil {
-		return err1
-	}
-
-	// 1) update secret
-	err = upgradeSecretSpec(ctx, c.factory, c.Namespace)
-	if err != nil {
-		return err
-	}
-
-	// 2) update deploy
-	plog.G(ctx).Infof("Set image %s --> %s...", serverImg, clientImg)
-	err = upgradeDeploySpec(ctx, c.factory, c.Namespace, deploy.Name, clientImg)
-	if err != nil {
-		return err
-	}
-	// 3) update service
-	err = upgradeServiceSpec(ctx, c.factory, c.Namespace)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image string) error {
-	r := f.NewBuilder().
-		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
-		NamespaceParam(ns).DefaultNamespace().
-		ResourceNames("deployments", name).
-		ContinueOnError().
-		Latest().
-		Flatten().
-		Do()
-	if err := r.Err(); err != nil {
-		return err
-	}
-	infos, err := r.Infos()
-	if err != nil {
-		return err
-	}
-	// issue: https://github.com/kubernetes/kubernetes/issues/98963
-	for _, info := range infos {
-		_, _ = polymorphichelpers.UpdatePodSpecForObjectFn(info.Object, func(spec *v1.PodSpec) error {
-			for i := 0; i < len(spec.ImagePullSecrets); i++ {
-				if spec.ImagePullSecrets[i].Name == "" {
-					spec.ImagePullSecrets = append(spec.ImagePullSecrets[:i], spec.ImagePullSecrets[i+1:]...)
-					i--
-					continue
-				}
-			}
-			if len(spec.ImagePullSecrets) == 0 {
-				spec.ImagePullSecrets = nil
-			}
-			return nil
-		})
-	}
-	patches := set.CalculatePatches(infos, scheme.DefaultJSONEncoder(), func(obj pkgruntime.Object) ([]byte, error) {
-		_, err = polymorphichelpers.UpdatePodSpecForObjectFn(obj, func(spec *v1.PodSpec) error {
-			tcp10801 := "10801-for-tcp"
-			tcp9002 := "9002-for-envoy"
-			tcp80 := "80-for-webhook"
-			udp53 := "53-for-dns"
-			var imagePullSecret string
-			for _, secret := range spec.ImagePullSecrets {
-				if secret.Name != "" {
-					imagePullSecret = secret.Name
-					break
-				}
-			}
-			deploySpec := genDeploySpec(ns, tcp10801, tcp9002, udp53, tcp80, image, imagePullSecret)
-			*spec = deploySpec.Spec.Template.Spec
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-		return pkgruntime.Encode(scheme.DefaultJSONEncoder(), obj)
-	})
-	for _, p := range patches {
-		if p.Err != nil {
-			return p.Err
-		}
-	}
-	for _, p := range patches {
-		_, err = resource.
-			NewHelper(p.Info.Client, p.Info.Mapping).
-			DryRun(false).
-			Patch(p.Info.Namespace, p.Info.Name, pkgtypes.StrategicMergePatchType, p.Patch, nil)
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to patch image update to pod template: %v", err)
-			return err
-		}
-		err = util.RolloutStatus(ctx, f, ns, fmt.Sprintf("%s/%s", p.Info.Mapping.Resource.GroupResource().String(), p.Info.Name))
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func upgradeSecretSpec(ctx context.Context, f cmdutil.Factory, ns string) error {
-	crt, key, host, err := util.GenTLSCert(ctx, ns)
-	if err != nil {
-		return err
-	}
-	secret := genSecret(ns, crt, key, host)
-
-	clientset, err := f.KubernetesClientSet()
-	if err != nil {
-		return err
-	}
-	currentSecret, err := clientset.CoreV1().Secrets(ns).Get(ctx, secret.Name, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-
-	// already have three keys
-	if currentSecret.Data[config.TLSServerName] != nil &&
-		currentSecret.Data[config.TLSPrivateKeyKey] != nil &&
-		currentSecret.Data[config.TLSCertKey] != nil {
-		return nil
-	}
-
-	_, err = clientset.CoreV1().Secrets(ns).Update(ctx, secret, metav1.UpdateOptions{})
-	if err != nil {
-		return err
-	}
-
-	mutatingWebhookConfig := genMutatingWebhookConfiguration(ns, crt)
-	var current *admissionv1.MutatingWebhookConfiguration
-	current, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Get(ctx, mutatingWebhookConfig.Name, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-
-	mutatingWebhookConfig.ResourceVersion = current.ResourceVersion
-	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Update(ctx, mutatingWebhookConfig, metav1.UpdateOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func upgradeServiceSpec(ctx context.Context, f cmdutil.Factory, ns string) error {
-	tcp10801 := "10801-for-tcp"
-	tcp9002 := "9002-for-envoy"
-	tcp80 := "80-for-webhook"
-	udp53 := "53-for-dns"
-	svcSpec := genService(ns, tcp10801, tcp9002, tcp80, udp53)
-
-	clientset, err := f.KubernetesClientSet()
-	if err != nil {
-		return err
-	}
-	currentSecret, err := clientset.CoreV1().Services(ns).Get(ctx, svcSpec.Name, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	svcSpec.ResourceVersion = currentSecret.ResourceVersion
-
-	_, err = clientset.CoreV1().Services(ns).Update(ctx, svcSpec, metav1.UpdateOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func (c *ConnectOptions) GetTunDeviceName() (string, error) {
 	var ips []net.IP
 	if c.LocalTunIPv4 != nil {
@@ -1168,11 +415,11 @@ func (c *ConnectOptions) GetTunDeviceName() (string, error) {
 	return device.Name, nil
 }
 
-func (c *ConnectOptions) AddRolloutFunc(f func() error) {
+func (c *ConnectOptions) AddRollbackFunc(f func() error) {
 	c.rollbackFuncList = append(c.rollbackFuncList, f)
 }
 
-func (c *ConnectOptions) getRolloutFunc() []func() error {
+func (c *ConnectOptions) getRollbackFuncs() []func() error {
 	return c.rollbackFuncList
 }
 
@@ -1186,111 +433,4 @@ func (c *ConnectOptions) IsMe(ns, uid string, headers map[string]string) bool {
 
 func (c *ConnectOptions) ProxyResources() ProxyList {
 	return c.proxyWorkloads
-}
-
-func healthCheckPortForward(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, localGvisorUDPPort string, domain string, ipv4 net.IP) {
-	defer cancelFunc()
-	ticker := time.NewTicker(time.Second * 60)
-	defer ticker.Stop()
-
-	select {
-	case <-readyChan:
-	case <-ticker.C:
-		plog.G(ctx).Debugf("Wait port-forward to be ready timeout")
-		return
-	case <-ctx.Done():
-		return
-	}
-
-	var healthChecker = func() error {
-		// Use loopback explicitly so the health check keeps working even when the
-		// default route is owned by another tunnel.
-		conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", localGvisorUDPPort))
-		if err != nil {
-			return err
-		}
-		defer conn.Close()
-		err = util.WriteProxyInfo(conn, stack.TransportEndpointID{
-			LocalPort:     53,
-			LocalAddress:  tcpip.AddrFrom4Slice(net.ParseIP("127.0.0.1").To4()),
-			RemotePort:    0,
-			RemoteAddress: tcpip.AddrFrom4Slice(ipv4.To4()),
-		})
-		if err != nil {
-			return err
-		}
-
-		packetConn, _ := core.NewPacketConnOverTCP(ctx, conn)
-		defer packetConn.Close()
-
-		msg := new(miekgdns.Msg)
-		msg.SetQuestion(miekgdns.Fqdn(domain), miekgdns.TypeA)
-		client := miekgdns.Client{Net: "udp", Timeout: time.Second * 10}
-		_, _, err = client.ExchangeWithConnContext(ctx, msg, &miekgdns.Conn{Conn: packetConn})
-		return err
-	}
-
-	newTicker := time.NewTicker(time.Second * 10)
-	defer newTicker.Stop()
-	for ; ctx.Err() == nil; <-newTicker.C {
-		err := retry.OnError(wait.Backoff{Duration: time.Second * 5, Steps: 4}, func(err error) bool {
-			return err != nil
-		}, func() error {
-			return healthChecker()
-		})
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to query DNS: %v", err)
-			return
-		}
-	}
-}
-
-func healthCheckTCPConn(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, domain string, dnsServer string) {
-	defer cancelFunc()
-	ticker := time.NewTicker(time.Second * 60)
-	defer ticker.Stop()
-
-	select {
-	case <-readyChan:
-	case <-ticker.C:
-		plog.G(ctx).Debugf("Wait port-forward to be ready timeout")
-		return
-	case <-ctx.Done():
-		return
-	}
-
-	newTicker := time.NewTicker(config.KeepAliveTime / 2)
-	defer newTicker.Stop()
-	for ; ctx.Err() == nil; <-newTicker.C {
-		err := retry.OnError(wait.Backoff{Duration: time.Second * 10, Steps: 6}, func(err error) bool {
-			return err != nil
-		}, func() error {
-			return nameserverChecker(ctx, domain, dnsServer)
-		})
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to query DNS: %v", err)
-			return
-		}
-	}
-}
-
-func detectNameserver(ctx context.Context, relovConf *miekgdns.ClientConfig, serviceIP string, podIP string) error {
-	domain := config.ConfigMapPodTrafficManager
-	err := nameserverChecker(ctx, domain, serviceIP)
-	if err != nil {
-		relovConf.Servers = []string{podIP}
-		plog.G(ctx).Debugf("DNS service use pod IP %s", podIP)
-	} else {
-		relovConf.Servers = []string{serviceIP}
-		plog.G(ctx).Debugf("DNS service use service IP %s", serviceIP)
-	}
-	return nil
-}
-
-func nameserverChecker(ctx context.Context, domain string, dnsServer string) error {
-	msg := new(miekgdns.Msg)
-	msg.SetQuestion(miekgdns.Fqdn(domain), miekgdns.TypeA)
-	client := miekgdns.Client{Net: "udp", Timeout: time.Second * 10}
-	_, _, err := client.ExchangeContext(ctx, msg, net.JoinHostPort(dnsServer, "53"))
-	return err
 }

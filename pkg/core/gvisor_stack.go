@@ -88,10 +88,12 @@ func newGvisorStack(ctx context.Context, tun stack.LinkEndpoint, tcpFwd, udpFwd 
 	return s
 }
 
+// NewStack creates a gvisor network stack with TCP/UDP/ICMP forwarding to real destinations.
 func NewStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 	return newGvisorStack(ctx, tun, TCPForwarder, UDPForwarder)
 }
 
+// NewLocalStack creates a gvisor stack that forwards to localhost (for testing and dev mode).
 func NewLocalStack(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack {
 	return newGvisorStack(ctx, tun, LocalTCPForwarder, LocalUDPForwarder)
 }

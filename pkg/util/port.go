@@ -1,16 +1,12 @@
 package util
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
-
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // ParsePort [tcp/udp]/remote:local
@@ -41,7 +37,7 @@ func ParsePort(str string) v1.ContainerPort {
 	}
 }
 
-func GetAvailableUDPPortOrDie() (int, error) {
+func getAvailableUDPPort() (int, error) {
 	address, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:0", "localhost"))
 	if err != nil {
 		return 0, err
@@ -54,7 +50,8 @@ func GetAvailableUDPPortOrDie() (int, error) {
 	return listener.LocalAddr().(*net.UDPAddr).Port, nil
 }
 
-func GetAvailableTCPPortOrDie() (int, error) {
+// GetAvailableTCPPort returns an available TCP port on localhost by briefly binding to port 0.
+func GetAvailableTCPPort() (int, error) {
 	address, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", "localhost"))
 	if err != nil {
 		return 0, err
@@ -67,24 +64,7 @@ func GetAvailableTCPPortOrDie() (int, error) {
 	return listener.Addr().(*net.TCPAddr).Port, nil
 }
 
-func WaitPortToBeFree(ctx context.Context, port int) error {
-	plog.G(ctx).Infoln(fmt.Sprintf("Wait port %v to be free...", port))
-	ticker := time.NewTicker(time.Second * 2)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("wait port %d to be free timeout", port)
-		case <-ticker.C:
-			if !IsPortListening(port) {
-				plog.G(ctx).Infof("Port %v are free", port)
-				return nil
-			}
-		}
-	}
-}
-
-func IsPortListening(port int) bool {
+func isPortListening(port int) bool {
 	listener, err := net.Listen("tcp4", net.JoinHostPort("localhost", strconv.Itoa(port)))
 	if err != nil {
 		return true

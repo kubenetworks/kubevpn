@@ -19,6 +19,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// Processor converts Virtual configs into envoy xDS snapshots.
 type Processor struct {
 	cache   cache.SnapshotCache
 	logger  *log.Entry
@@ -27,7 +28,7 @@ type Processor struct {
 	expireCache *utilcache.Expiring
 }
 
-func NewProcessor(cache cache.SnapshotCache, log *log.Entry) *Processor {
+func newProcessor(cache cache.SnapshotCache, log *log.Entry) *Processor {
 	return &Processor{
 		cache:       cache,
 		logger:      log,
@@ -45,14 +46,14 @@ func (p *Processor) newVersion() string {
 }
 
 func (p *Processor) ProcessFile(file NotifyMessage) error {
-	configList, err := ParseYaml(file.Content)
+	configList, err := parseYaml(file.Content)
 	if err != nil {
 		p.logger.Errorf("failed to parse config file: %v", err)
 		return err
 	}
 	enableIPv6, _ := util.DetectSupportIPv6()
 	for _, config := range configList {
-		if len(config.Uid) == 0 {
+		if len(config.UID) == 0 {
 			continue
 		}
 
@@ -62,14 +63,15 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 			p.logger.Errorf("failed to marshal config: %v", err)
 			return err
 		}
-		uid := util.GenEnvoyUID(config.Namespace, config.Uid)
+		uid := util.GenEnvoyUID(config.Namespace, config.UID)
 		lastConfig, ok := p.expireCache.Get(uid)
 		if ok && reflect.DeepEqual(lastConfig.(*Virtual), config) {
-			p.logger.Infof("no need to update, config: %s", string(marshal))
+			p.logger.Debugf("config unchanged for %s, skipping", uid)
 			continue
 		}
 
-		p.logger.Infof("update config, version: %d, config: %s", p.version, marshal)
+		p.logger.Infof("updating xDS config for %s, version: %d", uid, p.version)
+		p.logger.Debugf("config detail: %s", marshal)
 
 		listeners, clusters, routes, endpoints := config.To(enableIPv6, p.logger)
 		resources := map[resource.Type][]types.Resource{
@@ -91,7 +93,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 			p.logger.Errorf("failed to snapshot inconsistency: %v", err)
 			return err
 		}
-		p.logger.Infof("will serve snapshot %+v, nodeID: %s", snapshot, uid)
+		p.logger.Infof("serving xDS snapshot version %d for %s", p.version, uid)
 		err = p.cache.SetSnapshot(context.Background(), uid, snapshot)
 		if err != nil {
 			p.logger.Errorf("snapshot error %q for %v", err, snapshot)
@@ -103,7 +105,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 	return nil
 }
 
-func ParseYaml(content string) ([]*Virtual, error) {
+func parseYaml(content string) ([]*Virtual, error) {
 	var virtualList = make([]*Virtual, 0)
 
 	err := yaml.Unmarshal([]byte(content), &virtualList)

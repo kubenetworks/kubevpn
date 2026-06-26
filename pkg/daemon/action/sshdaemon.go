@@ -23,6 +23,7 @@ var serverIP string
 var mux sync.Mutex
 var sshCancelFunc context.CancelFunc
 
+// SshStart handles the SshStart RPC, creating a TUN server and adding a route for the SSH client's IP.
 func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp *rpc.SshStartResponse, err error) {
 	mux.Lock()
 	defer mux.Unlock()
@@ -91,6 +92,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 	return
 }
 
+// SshStop handles the SshStop RPC, shutting down the SSH TUN server.
 func (svr *Server) SshStop(ctx context.Context, req *rpc.SshStopRequest) (*rpc.SshStopResponse, error) {
 	if sshCancelFunc != nil {
 		sshCancelFunc()

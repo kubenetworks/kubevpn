@@ -14,10 +14,17 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// Quit handles the Quit RPC, cleaning up all connections and stopping the daemon.
 func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 	defer svr.CleanupConfig()
 
-	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newQuitWarp(resp), svr.LogFile))
+	var sendFunc func(string) error
+	if resp != nil {
+		sendFunc = func(msg string) error { return resp.Send(&rpc.QuitResponse{Message: msg}) }
+	} else {
+		sendFunc = func(string) error { return nil }
+	}
+	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newStreamWriter(sendFunc), svr.LogFile))
 	ctx := context.Background()
 	if resp != nil {
 		ctx = resp.Context()
@@ -50,20 +57,3 @@ func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 	return nil
 }
 
-type quitWarp struct {
-	server rpc.Daemon_QuitServer
-}
-
-func (r *quitWarp) Write(p []byte) (n int, err error) {
-	if r.server == nil {
-		return len(p), nil
-	}
-	_ = r.server.Send(&rpc.QuitResponse{
-		Message: string(p),
-	})
-	return len(p), nil
-}
-
-func newQuitWarp(server rpc.Daemon_QuitServer) io.Writer {
-	return &quitWarp{server: server}
-}

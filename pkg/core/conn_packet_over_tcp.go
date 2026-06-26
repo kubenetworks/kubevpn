@@ -10,12 +10,14 @@ import (
 
 var _ net.PacketConn = (*PacketConnOverTCP)(nil)
 
+// PacketConnOverTCP implements net.Conn over a datagram-framed TCP connection.
 type PacketConnOverTCP struct {
 	// tcp connection
 	net.Conn
 	ctx context.Context
 }
 
+// NewPacketConnOverTCP wraps a raw TCP connection with packet-oriented read/write.
 func NewPacketConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, error) {
 	return &PacketConnOverTCP{ctx: ctx, Conn: conn}, nil
 }

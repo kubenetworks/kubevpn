@@ -22,6 +22,7 @@ const (
 	StatusUnhealthy = "unhealthy"
 )
 
+// Status handles the Status RPC, reporting connection and proxy state.
 func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.StatusResponse, error) {
 	if len(req.ConnectionIDs) != 0 {
 		var list []*rpc.Status
@@ -37,7 +38,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 						var err error
 						result.ProxyList, result.SyncList, err = gen(options, options.Sync)
 						if err != nil {
-							plog.G(context.Background()).Errorf("Error generating status: %v", err)
+							plog.G(ctx).Errorf("Error generating status: %v", err)
 							result.Status = StatusUnhealthy
 						}
 						lock.Lock()
@@ -62,7 +63,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 			var err error
 			result.ProxyList, result.SyncList, err = gen(options, options.Sync)
 			if err != nil {
-				plog.G(context.Background()).Errorf("Error generating status: %v", err)
+				plog.G(ctx).Errorf("Error generating status: %v", err)
 				result.Status = StatusUnhealthy
 			}
 			list[i] = result
@@ -104,22 +105,15 @@ func gen(connect *handler.ConnectOptions, sync *handler.SyncOptions) ([]*rpc.Pro
 		v4, v6 := connect.GetLocalTunIP()
 		for _, virtual := range v {
 			// deployments.apps.ry-server --> deployments.apps/ry-server
-			virtual.Uid = util.ConvertUidToWorkload(virtual.Uid)
-			var isFargateMode bool
-			for _, port := range virtual.Ports {
-				if port.EnvoyListenerPort != 0 {
-					isFargateMode = true
-				}
-			}
-
+			virtual.UID = util.ConvertUIDToWorkload(virtual.UID)
 			var proxyRule []*rpc.ProxyRule
 			for _, rule := range virtual.Rules {
 				proxyRule = append(proxyRule, &rpc.ProxyRule{
 					Headers:      rule.Headers,
 					LocalTunIPv4: rule.LocalTunIPv4,
 					LocalTunIPv6: rule.LocalTunIPv6,
-					CurrentDevice: util.If(isFargateMode,
-						connect.IsMe(virtual.Namespace, util.ConvertWorkloadToUid(virtual.Uid), rule.Headers),
+					CurrentDevice: util.If(virtual.IsFargateMode(),
+						connect.IsMe(virtual.Namespace, util.ConvertWorkloadToUID(virtual.UID), rule.Headers),
 						v4 == rule.LocalTunIPv4 && v6 == rule.LocalTunIPv6,
 					),
 					PortMap: useSecondPort(rule.PortMap),
@@ -130,7 +124,7 @@ func gen(connect *handler.ConnectOptions, sync *handler.SyncOptions) ([]*rpc.Pro
 				Cluster:      util.GetKubeconfigCluster(connect.GetFactory()),
 				Kubeconfig:   connect.OriginKubeconfigPath,
 				Namespace:    virtual.Namespace,
-				Workload:     virtual.Uid,
+				Workload:     virtual.UID,
 				RuleList:     proxyRule,
 			})
 		}
@@ -166,10 +160,10 @@ func gen(connect *handler.ConnectOptions, sync *handler.SyncOptions) ([]*rpc.Pro
 }
 
 func useSecondPort(m map[int32]string) map[int32]int32 {
-	var result = make(map[int32]int32)
+	result := make(map[int32]int32)
 	for k, v := range m {
-		if strings.Index(v, ":") > 0 {
-			v = strings.Split(v, ":")[1]
+		if _, after, ok := strings.Cut(v, ":"); ok {
+			v = after
 		}
 		port, _ := strconv.Atoi(v)
 		result[k] = int32(port)

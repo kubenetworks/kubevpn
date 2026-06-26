@@ -23,6 +23,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+// GetTunDevice returns the network interface that has one of the specified IPs assigned.
 func GetTunDevice(ips ...net.IP) (*net.Interface, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
@@ -43,9 +44,10 @@ func GetTunDevice(ips ...net.IP) (*net.Interface, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("can not found any interface with IP %v", ips)
+	return nil, fmt.Errorf("cannot find any interface with IP %v", ips)
 }
 
+// GetTunDeviceByConn returns the network interface associated with the local address of the TUN connection.
 func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 	var ip net.IP
 	switch tun.LocalAddr().(type) {
@@ -57,6 +59,7 @@ func GetTunDeviceByConn(tun net.Conn) (*net.Interface, error) {
 	return GetTunDevice(ip)
 }
 
+// GetTunDeviceIP returns the IPv4, IPv6, and Docker IPv4 addresses assigned to the named TUN interface.
 func GetTunDeviceIP(tunName string) (net.IP, net.IP, net.IP, error) {
 	tunIfi, err := net.InterfaceByName(tunName)
 	if err != nil {
@@ -83,6 +86,7 @@ func GetTunDeviceIP(tunName string) (net.IP, net.IP, net.IP, error) {
 	return srcIPv4, srcIPv6, dockerSrcIPv4, nil
 }
 
+// Ping sends ICMP echo requests from srcIP to dstIP and reports whether all packets were received.
 func Ping(ctx context.Context, srcIP, dstIP string) (bool, error) {
 	pinger, err := probing.NewPinger(dstIP)
 	if err != nil {
@@ -102,14 +106,17 @@ func Ping(ctx context.Context, srcIP, dstIP string) (bool, error) {
 	return stat.PacketsRecv == stat.PacketsSent, err
 }
 
+// IsIPv4 checks if the packet starts with IPv4 version nibble.
 func IsIPv4(packet []byte) bool {
 	return 4 == (packet[0] >> 4)
 }
 
+// IsIPv6 checks if the packet starts with IPv6 version nibble.
 func IsIPv6(packet []byte) bool {
 	return 6 == (packet[0] >> 4)
 }
 
+// ParseIP extracts the source IP, destination IP, and protocol number from a raw IPv4 or IPv6 packet.
 func ParseIP(packet []byte) (src net.IP, dst net.IP, protocol int, err error) {
 	if IsIPv4(packet) {
 		header, err := ipv4.ParseHeader(packet)
@@ -128,7 +135,8 @@ func ParseIP(packet []byte) (src net.IP, dst net.IP, protocol int, err error) {
 	return nil, nil, -1, errors.New("packet is invalid")
 }
 
-func GetIPBaseNic() (*net.IPNet, error) {
+// GetLocalIPNet allocates a deterministic IP from the Docker CIDR based on a hash of local interface addresses.
+func GetLocalIPNet() (*net.IPNet, error) {
 	addrs, _ := net.InterfaceAddrs()
 	var sum int
 	for _, addr := range addrs {
@@ -170,6 +178,7 @@ func getIP(addr net.Addr) net.IP {
 	return ip
 }
 
+// GenICMPPacket generates a minimal IPv4 ICMP Echo Request packet.
 func GenICMPPacket(src net.IP, dst net.IP) ([]byte, error) {
 	buf := gopacket.NewSerializeBuffer()
 	var id uint16
@@ -197,11 +206,13 @@ func GenICMPPacket(src net.IP, dst net.IP) ([]byte, error) {
 	}
 	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize icmp packet, err: %v", err)
+		return nil, fmt.Errorf("failed to serialize icmp packet, err: %w", err)
 	}
 	return buf.Bytes(), nil
 }
 
+// GenICMPPacket generates a minimal IPv4 ICMP Echo Request packet.
+// GenICMPPacketIPv6 generates a minimal IPv6 ICMPv6 Echo Request packet.
 func GenICMPPacketIPv6(src net.IP, dst net.IP) ([]byte, error) {
 	buf := gopacket.NewSerializeBuffer()
 	icmpLayer := layers.ICMPv6{
@@ -219,11 +230,12 @@ func GenICMPPacketIPv6(src net.IP, dst net.IP) ([]byte, error) {
 	}
 	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize icmp6 packet, err: %v", err)
+		return nil, fmt.Errorf("failed to serialize icmp6 packet, err: %w", err)
 	}
 	return buf.Bytes(), nil
 }
 
+// DetectSupportIPv6 checks whether the Linux kernel has IPv6 enabled by reading /proc/sys/net/ipv6/conf/all/disable_ipv6.
 func DetectSupportIPv6() (bool, error) {
 	content, err := os.ReadFile("/proc/sys/net/ipv6/conf/all/disable_ipv6")
 	if err != nil {
@@ -236,6 +248,7 @@ func DetectSupportIPv6() (bool, error) {
 	return disableIPv6 == 0, nil
 }
 
+// IsValidCIDR returns true if the string is a valid CIDR notation.
 func IsValidCIDR(str string) bool {
 	_, _, err := net.ParseCIDR(str)
 	if err != nil {

@@ -10,12 +10,15 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// Unsync handles the Unsync RPC, stopping file synchronization for the specified workloads on the current connection.
 func (svr *Server) Unsync(resp rpc.Daemon_UnsyncServer) error {
 	req, err := resp.Recv()
 	if err != nil {
 		return err
 	}
-	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newRemoveWarp(resp), svr.LogFile))
+	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newStreamWriter(func(msg string) error {
+		return resp.Send(&rpc.UnsyncResponse{Message: msg})
+	}), svr.LogFile))
 	var index = -1
 	for i, connection := range svr.connections {
 		if connection.GetConnectionID() == svr.currentConnectionID {
@@ -36,17 +39,3 @@ func (svr *Server) Unsync(resp rpc.Daemon_UnsyncServer) error {
 	return err
 }
 
-type unsyncWarp struct {
-	server rpc.Daemon_UnsyncServer
-}
-
-func (r *unsyncWarp) Write(p []byte) (n int, err error) {
-	_ = r.server.Send(&rpc.UnsyncResponse{
-		Message: string(p),
-	})
-	return len(p), nil
-}
-
-func newRemoveWarp(server rpc.Daemon_UnsyncServer) io.Writer {
-	return &unsyncWarp{server: server}
-}

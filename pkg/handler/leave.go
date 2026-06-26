@@ -22,7 +22,7 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 		return
 	}
 
-	mapInterface := c.clientset.CoreV1().ConfigMaps(c.Namespace)
+	mapInterface := c.clientset.CoreV1().ConfigMaps(c.ManagerNamespace)
 	var cm *corev1.ConfigMap
 	cm, err = mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -43,6 +43,7 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 }
 
 func (c *ConnectOptions) LeaveResource(ctx context.Context, resources []Resources, v4 string) error {
+	plog.G(ctx).Infof("Leaving %d proxy resources with local IP %s", len(resources), v4)
 	var errs []error
 	for _, workload := range resources {
 		// deployments.apps.ry-server --> deployments.apps/ry-server
@@ -54,9 +55,9 @@ func (c *ConnectOptions) LeaveResource(ctx context.Context, resources []Resource
 		}
 		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 		var empty bool
-		empty, err = inject.UnPatchContainer(ctx, nodeID, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), controller, func(isFargateMode bool, rule *controlplane.Rule) bool {
+		empty, err = inject.UnpatchContainer(ctx, nodeID, c.factory, c.clientset.CoreV1().ConfigMaps(c.ManagerNamespace), controller, func(isFargateMode bool, rule *controlplane.Rule) bool {
 			if isFargateMode {
-				return c.IsMe(workload.Namespace, util.ConvertWorkloadToUid(workload.Workload), rule.Headers)
+				return c.IsMe(workload.Namespace, util.ConvertWorkloadToUID(workload.Workload), rule.Headers)
 			}
 			return rule.LocalTunIPv4 == v4
 		})
@@ -70,6 +71,7 @@ func (c *ConnectOptions) LeaveResource(ctx context.Context, resources []Resource
 			errs = append(errs, err)
 		}
 		c.leavePortMap(workload.Namespace, workload.Workload)
+		plog.G(ctx).Infof("Left workload %s in namespace %s", workload.Workload, workload.Namespace)
 	}
 	return errors.NewAggregate(errs)
 }

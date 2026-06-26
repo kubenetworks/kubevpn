@@ -68,7 +68,7 @@ func RenderTemplate(templateFile string, values interface{}, sha256Map map[strin
 			plog.G(context.Background()).Infof("Getting sha256 for %s", buf.String())
 			sha256, ok := sha256Map[buf.String()]
 			if !ok {
-				panic(fmt.Errorf("can not get sha256 for link %s", buf.String()))
+				panic(fmt.Errorf("cannot get sha256 for link %s", buf.String()))
 			}
 
 			return fmt.Sprintf(`uri: %s

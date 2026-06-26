@@ -11,6 +11,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// ICMPForwarder creates a gvisor handler that replies to ICMP Echo requests inline.
 func ICMPForwarder(ctx context.Context, s *stack.Stack) func(stack.TransportEndpointID, *stack.PacketBuffer) bool {
 	return func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
 		defer pkt.DecRef()
@@ -19,12 +20,12 @@ func ICMPForwarder(ctx context.Context, s *stack.Stack) func(stack.TransportEndp
 		case header.IPv4ProtocolNumber:
 			hdr := header.ICMPv4(pkt.TransportHeader().Slice())
 			if hdr.Type() == header.ICMPv4Echo {
-				go replyICMPv4Echo(ctx, s, id, hdr, pkt.Data().AsRange().ToSlice())
+				replyICMPv4Echo(ctx, s, id, hdr, pkt.Data().AsRange().ToSlice())
 			}
 		case header.IPv6ProtocolNumber:
 			hdr := header.ICMPv6(pkt.TransportHeader().Slice())
 			if hdr.Type() == header.ICMPv6EchoRequest {
-				go replyICMPv6Echo(ctx, s, id, hdr, pkt.Data().AsRange().ToSlice())
+				replyICMPv6Echo(ctx, s, id, hdr, pkt.Data().AsRange().ToSlice())
 			}
 		}
 		return true

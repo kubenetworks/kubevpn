@@ -14,6 +14,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+// DownloadFileWithName downloads the file at uri into a temp directory with the given filename and returns the path.
 func DownloadFileWithName(uri, name string) (string, error) {
 	resp, err := getWithRetry(uri)
 	if err != nil {
@@ -39,12 +40,13 @@ func DownloadFileWithName(uri, name string) (string, error) {
 
 	_, err = io.Copy(out, resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to save file %s. error: %v", file, err)
+		return "", fmt.Errorf("failed to save file %s. error: %w", file, err)
 	}
 
 	return file, nil
 }
 
+// DownloadFileStream downloads the file at uri and returns its contents as a byte slice.
 func DownloadFileStream(uri string) ([]byte, error) {
 	resp, err := getWithRetry(uri)
 	if err != nil {
@@ -59,7 +61,7 @@ func DownloadFileStream(uri string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func DownloadFile(uri string) (string, error) {
+func downloadFile(uri string) (string, error) {
 	return DownloadFileWithName(uri, fmt.Sprintf("%d", time.Now().Unix()))
 }
 
@@ -106,6 +108,7 @@ func backoff(min, max time.Duration, attemptNum int) time.Duration {
 	return sleep
 }
 
+// ParseDirMapping splits a "local:remote" directory mapping string.
 func ParseDirMapping(dir string) (local, remote string, err error) {
 	index := strings.LastIndex(dir, ":")
 	if index < 0 {
@@ -121,6 +124,7 @@ func ParseDirMapping(dir string) (local, remote string, err error) {
 	return
 }
 
+// CleanupTempKubeConfigFile removes all temporary kubeconfig files from the KubeVPN temp directory.
 func CleanupTempKubeConfigFile() error {
 	return filepath.WalkDir(config.GetTempPath(), func(path string, info fs.DirEntry, err error) error {
 		if info.IsDir() {
