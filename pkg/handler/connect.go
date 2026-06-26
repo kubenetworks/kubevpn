@@ -200,7 +200,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		})
 		err = injector.Inject(ctx)
 		if err != nil {
-			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %s", workload, namespace, err.Error())
+			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %v", workload, namespace, err)
 			return err
 		}
 		plog.G(ctx).Infof("Injected inbound sidecar for %s in namespace %s successfully", workload, namespace)

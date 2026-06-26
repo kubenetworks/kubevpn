@@ -42,10 +42,10 @@ func Main(ctx context.Context, quit func(ctx context.Context, isSudo bool) error
 		return err
 	}
 	if !needsUpgrade {
-		_, _ = fmt.Fprintln(os.Stdout, fmt.Sprintf("Already up to date, don't needs to upgrade, version: %s", latestVersion))
+		fmt.Fprintf(os.Stdout, "Already up to date, no need to upgrade, version: %s\n", latestVersion)
 		return nil
 	}
-	_, _ = fmt.Fprintln(os.Stdout, fmt.Sprintf("Current version: %s less than latest version: %s, needs to upgrade", config.Version, latestVersion))
+	fmt.Fprintf(os.Stdout, "Current version: %s less than latest version: %s, needs to upgrade\n", config.Version, latestVersion)
 	_ = quit(ctx, true)
 	_ = quit(ctx, false)
 
@@ -138,13 +138,8 @@ func elevatePermission() error {
 	if os.IsPermission(err) {
 		elevate.RunWithElevated()
 		os.Exit(0)
-	} else if err != nil {
-		return err
-	} else if !elevate.IsAdmin() {
-		elevate.RunWithElevated()
-		os.Exit(0)
 	}
-	return nil
+	return err
 }
 
 func needsUpgrade(ctx context.Context, client *http.Client, version string) (url string, latestVersion string, upgrade bool, err error) {

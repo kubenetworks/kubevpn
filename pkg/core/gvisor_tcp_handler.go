@@ -54,21 +54,21 @@ func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {
 	// for support ipv6 skip checksum
 	// vendor/gvisor.dev/gvisor/pkg/tcpip/stack/nic.go:763
 	endpoint.LinkEPCapabilities = stack.CapabilityRXChecksumOffload
-	errChan := make(chan error, 2)
+	done := make(chan struct{}, 2)
 	go func() {
 		defer util.HandleCrash()
 		h.readFromTCPConnWriteToEndpoint(ctx, NewBufferedTCP(ctx, tcpConn), endpoint)
-		util.SafeClose(errChan)
+		util.SafeClose(done)
 	}()
 	go func() {
 		defer util.HandleCrash()
 		h.readFromEndpointWriteToTCPConn(ctx, tcpConn, endpoint)
-		util.SafeClose(errChan)
+		util.SafeClose(done)
 	}()
 	s := h.newStack(ctx, sniffer.NewWithPrefix(endpoint, "[gVISOR] "))
 	defer s.Destroy()
 	select {
-	case <-errChan:
+	case <-done:
 		return
 	case <-ctx.Done():
 		return

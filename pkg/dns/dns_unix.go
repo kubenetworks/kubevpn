@@ -38,11 +38,8 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 	ticker := time.NewTicker(config.DNSRouteRefreshInterval)
 	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: func(obj interface{}) bool {
-			if svc, ok := obj.(*corev1.Service); ok && svc.Namespace == c.Ns[0] {
-				return true
-			} else {
-				return false
-			}
+			svc, ok := obj.(*corev1.Service)
+			return ok && svc.Namespace == c.Ns[0]
 		},
 		Handler: cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -121,7 +118,7 @@ func (c *Config) usingResolver(ctx context.Context) {
 			continue
 		}
 		if err != nil {
-			plog.G(ctx).Errorf("Failed to read resovler %s: %v", filename, err)
+			plog.G(ctx).Errorf("Failed to read resolver %s: %v", filename, err)
 			continue
 		}
 
@@ -138,7 +135,7 @@ func (c *Config) usingResolver(ctx context.Context) {
 		conf.Servers = append([]string{clientConfig.Servers[0]}, conf.Servers...)
 		err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
 		if err != nil {
-			plog.G(ctx).Errorf("Failed to write resovler %s: %v", filename, err)
+			plog.G(ctx).Errorf("Failed to write resolver %s: %v", filename, err)
 		}
 	}
 }
@@ -207,7 +204,7 @@ func (c *Config) CancelDNS() {
 		}
 		err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
 		if err != nil {
-			plog.G(context.Background()).Errorf("Failed to write resovler %s error: %v", filename, err)
+			plog.G(context.Background()).Errorf("failed to write resolver %s: %v", filename, err)
 		}
 	}
 	//networkCancel()

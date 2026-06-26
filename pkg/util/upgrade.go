@@ -47,7 +47,7 @@ func GetManifest(httpCli *http.Client, goos string, arch string) (version string
 	}
 	var m githubRelease
 	if err = json.Unmarshal(content, &m); err != nil {
-		err = fmt.Errorf("failed to unmarshal response, err: %w", err)
+		err = fmt.Errorf("failed to unmarshal response: %w", err)
 		return
 	}
 	version = m.TagName
@@ -68,7 +68,7 @@ func GetManifest(httpCli *http.Client, goos string, arch string) (version string
 		}
 	}
 
-	err = fmt.Errorf("%s: try download it from: %s", If(m.Message != "", m.Message, string(content)), downloadAddr)
+	err = fmt.Errorf("%s: try downloading from: %s", If(m.Message != "", m.Message, string(content)), downloadAddr)
 	return
 }
 

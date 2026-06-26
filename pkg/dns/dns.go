@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,7 +16,6 @@ import (
 	"time"
 
 	miekgdns "github.com/miekg/dns"
-	"errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
@@ -63,11 +63,8 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, hosts []Entry) {
 	defer ticker.Stop()
 	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: func(obj interface{}) bool {
-			if svc, ok := obj.(*corev1.Service); ok && svc.Namespace == c.Ns[0] {
-				return true
-			} else {
-				return false
-			}
+			svc, ok := obj.(*corev1.Service)
+			return ok && svc.Namespace == c.Ns[0]
 		},
 		Handler: cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -143,42 +140,8 @@ func (c *Config) appendHosts(appendHosts []Entry) error {
 }
 
 func (c *Config) removeHosts() error {
-	hostFile := getHostFile()
-	content, err2 := os.ReadFile(hostFile)
-	if err2 != nil {
-		return err2
-	}
-	if !strings.Contains(string(content), config.HostsKeyword) {
-		return nil
-	}
-
 	keyword := fmt.Sprintf(config.HostsDeviceKeyword, c.TunName)
-	var retain []string
-	reader := bufio.NewReader(bytes.NewReader(content))
-	for {
-		line, err := reader.ReadString('\n')
-		if !strings.Contains(line, keyword) {
-			retain = append(retain, line)
-		}
-		if errors.Is(err, io.EOF) {
-			break
-		} else if err != nil {
-			return err
-		}
-	}
-
-	if len(retain) == 0 {
-		plog.G(context.Background()).Errorf("Hosts files retain line is empty, should not happened")
-		return nil
-	}
-
-	var sb = new(strings.Builder)
-	for _, s := range retain {
-		sb.WriteString(s)
-	}
-	str := strings.TrimSuffix(sb.String(), "\n")
-	err := os.WriteFile(hostFile, []byte(str), 0644)
-	return err
+	return filterHostsFile(keyword)
 }
 
 type Entry struct {
@@ -251,10 +214,15 @@ func (c *Config) generateAppendHosts(serviceList []corev1.Service, hosts []Entry
 }
 
 func CleanupHosts() error {
-	path := getHostFile()
-	content, err2 := os.ReadFile(path)
-	if err2 != nil {
-		return err2
+	return filterHostsFile(config.HostsKeyword)
+}
+
+// filterHostsFile removes all lines containing the given keyword from the hosts file.
+func filterHostsFile(keyword string) error {
+	hostFile := getHostFile()
+	content, err := os.ReadFile(hostFile)
+	if err != nil {
+		return err
 	}
 	if !strings.Contains(string(content), config.HostsKeyword) {
 		return nil
@@ -263,18 +231,18 @@ func CleanupHosts() error {
 	var retain []string
 	reader := bufio.NewReader(bytes.NewReader(content))
 	for {
-		line, err := reader.ReadString('\n')
-		if !strings.Contains(line, config.HostsKeyword) {
+		line, readErr := reader.ReadString('\n')
+		if !strings.Contains(line, keyword) {
 			retain = append(retain, line)
 		}
-		if errors.Is(err, io.EOF) {
+		if errors.Is(readErr, io.EOF) {
 			break
-		} else if err != nil {
-			return err
+		} else if readErr != nil {
+			return readErr
 		}
 	}
 	if len(retain) == 0 {
-		return fmt.Errorf("empty hosts file")
+		return fmt.Errorf("hosts file would be empty after filtering")
 	}
 
 	var sb strings.Builder
@@ -282,6 +250,5 @@ func CleanupHosts() error {
 		sb.WriteString(s)
 	}
 	str := strings.TrimSuffix(sb.String(), "\n")
-	err2 = os.WriteFile(path, []byte(str), 0644)
-	return err2
+	return os.WriteFile(hostFile, []byte(str), 0644)
 }

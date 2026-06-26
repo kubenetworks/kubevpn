@@ -22,6 +22,7 @@ func copyFromLink(fileHeaderList []tar.Header, currFile tar.Header, genDstFilena
 	if err != nil {
 		return err
 	}
+	defer r.Close()
 
 	// write to current file
 	w, err = os.OpenFile(genDstFilename(currFile.Name).String(), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)

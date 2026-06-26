@@ -80,7 +80,7 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 	go func() {
 		defer localListen.Close()
 
-		var clientMap = &sync.Map{}
+		clientMap := &sync.Map{}
 		ctx1, cancelFunc1 := context.WithCancel(ctx)
 		defer cancelFunc1()
 
@@ -202,8 +202,7 @@ func SshJumpAndSetEnv(ctx context.Context, sshConf *SshConfig, kubeconfigBytes [
 	if err != nil {
 		return err
 	}
-	err = os.Setenv(clientcmd.RecommendedConfigPathEnvVar, path)
-	if err != nil {
+	if err = os.Setenv(clientcmd.RecommendedConfigPathEnvVar, path); err != nil {
 		return err
 	}
 	return os.Setenv(config.EnvSSHJump, path)

@@ -52,10 +52,6 @@ func (p localPath) Glob() (matches []string, err error) {
 	return filepath.Glob(p.file)
 }
 
-func (p localPath) StripSlashes() localPath {
-	return newLocalPath(stripLeadingSlash(p.file))
-}
-
 func isRelative(base, target localPath) bool {
 	relative, err := filepath.Rel(base.String(), target.String())
 	if err != nil {
@@ -95,11 +91,6 @@ func (p remotePath) Clean() remotePath {
 
 func (p remotePath) Join(elem pathSpec) remotePath {
 	return newRemotePath(path.Join(p.file, elem.String()))
-}
-
-func (p remotePath) StripShortcuts() remotePath {
-	p = p.Clean()
-	return newRemotePath(stripPathShortcuts(p.file))
 }
 
 func (p remotePath) StripSlashes() remotePath {

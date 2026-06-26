@@ -68,20 +68,7 @@ func (h *admissionReviewHandler) handleCreate(ctx context.Context, ar v1.Admissi
 	// 2) release old ip
 	h.Lock()
 	defer h.Unlock()
-	var ipv4, ipv6 net.IP
-	for k := 0; k < len(container.Env); k++ {
-		envVar := container.Env[k]
-		if config.EnvInboundPodTunIPv4 == envVar.Name && envVar.Value != "" {
-			if ip, _, _ := net.ParseCIDR(envVar.Value); ip != nil {
-				ipv4 = ip
-			}
-		}
-		if config.EnvInboundPodTunIPv6 == envVar.Name && envVar.Value != "" {
-			if ip, _, _ := net.ParseCIDR(envVar.Value); ip != nil {
-				ipv6 = ip
-			}
-		}
-	}
+	ipv4, ipv6 := parseEnvIPs(container)
 	_ = h.dhcp.ReleaseIP(ctx, ipv4, ipv6)
 
 	// 3) rent new ip
@@ -123,7 +110,7 @@ func (h *admissionReviewHandler) handleCreate(ctx context.Context, ar v1.Admissi
 		plog.G(ctx).Errorf("Failed to marshal json patch %v, err: %v", patch, err)
 		return toV1AdmissionResponse(err)
 	}
-	return applyPodPatch(ctx, ar, string(marshal))
+	return applyPodPatch(ctx, string(marshal))
 }
 
 func (h *admissionReviewHandler) handleDelete(ctx context.Context, ar v1.AdmissionReview) *v1.AdmissionResponse {
@@ -146,19 +133,7 @@ func (h *admissionReviewHandler) handleDelete(ctx context.Context, ar v1.Admissi
 	}
 
 	// 2) release ip
-	var ipv4, ipv6 net.IP
-	for _, envVar := range container.Env {
-		if envVar.Name == config.EnvInboundPodTunIPv4 {
-			if ip, _, err := net.ParseCIDR(envVar.Value); err == nil {
-				ipv4 = ip
-			}
-		}
-		if envVar.Name == config.EnvInboundPodTunIPv6 {
-			if ip, _, err := net.ParseCIDR(envVar.Value); err == nil {
-				ipv6 = ip
-			}
-		}
-	}
+	ipv4, ipv6 := parseEnvIPs(container)
 	if ipv4 != nil || ipv6 != nil {
 		h.Lock()
 		defer h.Unlock()
@@ -172,26 +147,28 @@ func (h *admissionReviewHandler) handleDelete(ctx context.Context, ar v1.Admissi
 	return &v1.AdmissionResponse{Allowed: true}
 }
 
-func applyPodPatch(ctx context.Context, ar v1.AdmissionReview, patch string) *v1.AdmissionResponse {
-	plog.G(ctx).Infof("Apply pod patch: %s", patch)
-	podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-	if ar.Request.Resource != podResource {
-		err := fmt.Errorf("expect resource to be %s but real %s", podResource, ar.Request.Resource)
-		plog.G(ctx).Error(err)
-		return toV1AdmissionResponse(err)
+// parseEnvIPs extracts the TUN IPv4 and IPv6 addresses from the container's environment variables.
+func parseEnvIPs(container *corev1.Container) (ipv4, ipv6 net.IP) {
+	for _, envVar := range container.Env {
+		if envVar.Name == config.EnvInboundPodTunIPv4 {
+			if ip, _, err := net.ParseCIDR(envVar.Value); err == nil {
+				ipv4 = ip
+			}
+		}
+		if envVar.Name == config.EnvInboundPodTunIPv6 {
+			if ip, _, err := net.ParseCIDR(envVar.Value); err == nil {
+				ipv6 = ip
+			}
+		}
 	}
+	return
+}
 
-	raw := ar.Request.Object.Raw
-	pod := corev1.Pod{}
-	deserializer := codecs.UniversalDeserializer()
-	if _, _, err := deserializer.Decode(raw, nil, &pod); err != nil {
-		plog.G(ctx).Errorf("Failed to decode request into pod, err: %v, req: %s", err, string(raw))
-		return toV1AdmissionResponse(err)
-	}
-	reviewResponse := v1.AdmissionResponse{
+func applyPodPatch(ctx context.Context, patch string) *v1.AdmissionResponse {
+	plog.G(ctx).Infof("Apply pod patch: %s", patch)
+	return &v1.AdmissionResponse{
 		Allowed:   true,
 		Patch:     []byte(patch),
 		PatchType: ptr.To(v1.PatchTypeJSONPatch),
 	}
-	return &reviewResponse
 }

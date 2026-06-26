@@ -161,7 +161,7 @@ func GetServiceCIDRByCreateService(ctx context.Context, serviceInterface typedco
 			_, cidr, err1 := net.ParseCIDR(strings.TrimSpace(err.Error()[idx+len(defaultCIDRIndex):]))
 			return cidr, err1
 		}
-		return nil, fmt.Errorf("cannot find any keyword of service network CIDR info: %s", err.Error())
+		return nil, fmt.Errorf("cannot find any keyword of service network CIDR info: %w", err)
 	}
 	return nil, fmt.Errorf("cannot find any keyword of service network CIDR info")
 }

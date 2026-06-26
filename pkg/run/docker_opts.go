@@ -201,7 +201,7 @@ func Parse(flags *pflag.FlagSet, copts *ContainerOptions) (*Config, *HostConfig,
 }
 
 func convertToStandardNotation(ports []string) ([]string, error) {
-	optsList := []string{}
+	var optsList []string
 	for _, publish := range ports {
 		if strings.Contains(publish, "=") {
 			params := map[string]string{"protocol": "tcp"}

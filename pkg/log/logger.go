@@ -3,10 +3,11 @@ package log
 import (
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,11 +19,11 @@ import (
 )
 
 func InitLoggerForClient() {
+	level := log.InfoLevel
 	if config.Debug {
-		L = GetLoggerForClient(int32(log.DebugLevel), os.Stdout)
-	} else {
-		L = GetLoggerForClient(int32(log.InfoLevel), os.Stdout)
+		level = log.DebugLevel
 	}
+	L = GetLoggerForClient(int32(level), os.Stdout)
 }
 
 func GetLoggerForClient(level int32, out io.Writer) *log.Logger {
@@ -47,19 +48,14 @@ func InitLoggerForServer() *log.Logger {
 	}
 }
 
-type format struct {
-	log.Formatter
-}
+type format struct{}
 
-// Format
-// message
+// Format outputs only the message text followed by a newline.
 func (*format) Format(e *log.Entry) ([]byte, error) {
-	return []byte(fmt.Sprintf("%s\n", e.Message)), nil
+	return []byte(e.Message + "\n"), nil
 }
 
-type serverFormat struct {
-	log.Formatter
-}
+type serverFormat struct{}
 
 // Format
 // same like log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -93,18 +89,12 @@ type ServerEmitter struct {
 }
 
 func (g ServerEmitter) Emit(depth int, level glog.Level, timestamp time.Time, format string, args ...any) {
-	// 0 = this frame.
 	_, file, line, ok := runtime.Caller(depth + 2)
-	if ok {
-		// Trim any directory path from the file.
-		slash := strings.LastIndexByte(file, byte('/'))
-		if slash >= 0 {
-			file = file[slash+1:]
-		}
-	} else {
-		// We don't have a filename.
+	if !ok {
 		file = "???"
 		line = 0
+	} else {
+		file = filepath.Base(file)
 	}
 
 	// Generate the message.
@@ -121,36 +111,31 @@ func (g ServerEmitter) Emit(depth int, level glog.Level, timestamp time.Time, fo
 }
 
 func GenStr(allFields map[string]any) string {
-	fieldsStr := ""
+	keys := slices.Sorted(maps.Keys(allFields))
 
-	keys := make([]string, len(allFields))
-	i := 0
-	for field := range allFields {
-		keys[i] = field
-		i++
-	}
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, key := range keys {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
 
-	sort.Strings(keys)
-
-	for _, key := range keys {
 		var valueStr string
-		value := allFields[key]
-
-		if stringer, ok := value.(fmt.Stringer); ok {
+		if stringer, ok := allFields[key].(fmt.Stringer); ok {
 			valueStr = stringer.String()
 		} else {
-			valueStr = fmt.Sprintf("%v", value)
+			valueStr = fmt.Sprintf("%v", allFields[key])
 		}
 
 		if strings.Contains(valueStr, " ") {
 			valueStr = `"` + valueStr + `"`
 		}
-		if valueStr == "" {
-			fieldsStr += key + " "
-		} else {
-			fieldsStr += key + "=" + valueStr + " "
+		b.WriteString(key)
+		if valueStr != "" {
+			b.WriteByte('=')
+			b.WriteString(valueStr)
 		}
-
 	}
-	return fmt.Sprintf("[%s]", strings.TrimSpace(fieldsStr))
+	b.WriteByte(']')
+	return b.String()
 }

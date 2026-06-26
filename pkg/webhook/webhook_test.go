@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	v1 "k8s.io/api/admission/v1"
@@ -185,7 +186,7 @@ func TestAdmitPods_WrongResource(t *testing.T) {
 		t.Fatal("expected non-empty error message")
 	}
 	expectedSubstr := "expect resource to be"
-	if !contains(resp.Result.Message, expectedSubstr) {
+	if !strings.Contains(resp.Result.Message, expectedSubstr) {
 		t.Fatalf("expected error message to contain %q, got: %s", expectedSubstr, resp.Result.Message)
 	}
 }
@@ -209,7 +210,7 @@ func TestAdmitPods_UnsupportedOperation(t *testing.T) {
 		t.Fatal("expected Result to contain error message")
 	}
 	expectedSubstr := "expect operation is"
-	if !contains(resp.Result.Message, expectedSubstr) {
+	if !strings.Contains(resp.Result.Message, expectedSubstr) {
 		t.Fatalf("expected error message to contain %q, got: %s", expectedSubstr, resp.Result.Message)
 	}
 }
@@ -235,26 +236,8 @@ func TestAdmitPods_ConnectOperation(t *testing.T) {
 }
 
 func TestApplyPodPatch_ValidPatch(t *testing.T) {
-	pod := corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
-	}
-	podBytes, err := json.Marshal(pod)
-	if err != nil {
-		t.Fatalf("failed to marshal pod: %v", err)
-	}
-
-	ar := v1.AdmissionReview{
-		Request: &v1.AdmissionRequest{
-			UID:       "patch-uid",
-			Operation: v1.Create,
-			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-			Object:    runtime.RawExtension{Raw: podBytes},
-		},
-	}
-
 	patch := `[{"op":"add","path":"/metadata/labels","value":{"injected":"true"}}]`
-	resp := applyPodPatch(context.Background(), ar, patch)
+	resp := applyPodPatch(context.Background(), patch)
 
 	if !resp.Allowed {
 		t.Fatal("expected allowed=true for valid patch")
@@ -273,63 +256,8 @@ func TestApplyPodPatch_ValidPatch(t *testing.T) {
 	}
 }
 
-func TestApplyPodPatch_WrongResource(t *testing.T) {
-	ar := v1.AdmissionReview{
-		Request: &v1.AdmissionRequest{
-			UID:       "patch-wrong-resource-uid",
-			Operation: v1.Create,
-			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"},
-			Object:    runtime.RawExtension{Raw: []byte("{}")},
-		},
-	}
-
-	resp := applyPodPatch(context.Background(), ar, `[]`)
-
-	if resp.Allowed {
-		t.Fatal("expected denied for non-pod resource in applyPodPatch")
-	}
-	if resp.Result == nil || resp.Result.Message == "" {
-		t.Fatal("expected error message for wrong resource")
-	}
-}
-
-func TestApplyPodPatch_InvalidPodObject(t *testing.T) {
-	ar := v1.AdmissionReview{
-		Request: &v1.AdmissionRequest{
-			UID:       "patch-invalid-pod-uid",
-			Operation: v1.Create,
-			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-			Object:    runtime.RawExtension{Raw: []byte("not valid pod json")},
-		},
-	}
-
-	resp := applyPodPatch(context.Background(), ar, `[]`)
-
-	if resp.Allowed {
-		t.Fatal("expected denied for invalid pod object")
-	}
-	if resp.Result == nil || resp.Result.Message == "" {
-		t.Fatal("expected error message for decode failure")
-	}
-}
-
 func TestApplyPodPatch_EmptyPatch(t *testing.T) {
-	pod := corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "empty-patch-pod", Namespace: "default"},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
-	}
-	podBytes, _ := json.Marshal(pod)
-
-	ar := v1.AdmissionReview{
-		Request: &v1.AdmissionRequest{
-			UID:       "empty-patch-uid",
-			Operation: v1.Create,
-			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-			Object:    runtime.RawExtension{Raw: podBytes},
-		},
-	}
-
-	resp := applyPodPatch(context.Background(), ar, `[]`)
+	resp := applyPodPatch(context.Background(), `[]`)
 
 	if !resp.Allowed {
 		t.Fatal("expected allowed=true for empty patch")
@@ -664,18 +592,4 @@ func TestHandleDelete_WithVPN_ReleasesIP(t *testing.T) {
 	if !v6Again.IP.Equal(v6.IP) {
 		t.Errorf("expected re-rented IPv6 %s to equal released %s", v6Again.IP, v6.IP)
 	}
-}
-
-// contains checks if substr is in s.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

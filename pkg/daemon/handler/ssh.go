@@ -287,7 +287,7 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 	}()
 
 	if _, _, e := pkgssh.RemoteRun(sshClient, "kubevpn version", nil); e == nil {
-		w.log("Found command kubevpn command on remote")
+		w.log("Found kubevpn command on remote")
 		return nil
 	}
 
@@ -388,8 +388,9 @@ func init() {
 	}))
 
 	http.Handle("/resize", websocket.Handler(func(conn *websocket.Conn) {
+		ctx := conn.Request().Context()
 		sessionID := conn.Request().Header.Get("session-id")
-		plog.G(context.Background()).Infof("Resize: %s", sessionID)
+		plog.G(ctx).Infof("Resize: %s", sessionID)
 		defer conn.Close()
 
 		readyCtx, ok := sessionRegistry.loadReady(sessionID)
@@ -398,7 +399,7 @@ func init() {
 		}
 
 		select {
-		case <-conn.Request().Context().Done():
+		case <-ctx.Done():
 			return
 		case <-readyCtx.Done():
 		}
@@ -414,19 +415,19 @@ func init() {
 			if errors.Is(err, io.EOF) {
 				return
 			} else if err != nil {
-				plog.G(context.Background()).Errorf("Failed to read resize event for session %s: %v", sessionID, err)
+				plog.G(ctx).Errorf("Failed to read resize event for session %s: %v", sessionID, err)
 				return
 			}
 			var size remotecommand.TerminalSize
 			if err = json.Unmarshal([]byte(line), &size); err != nil {
-				plog.G(context.Background()).Errorf("Unmarshal terminal size failed: %v", err)
+				plog.G(ctx).Errorf("Unmarshal terminal size failed: %v", err)
 				continue
 			}
 			if err = session.WindowChange(int(size.Height), int(size.Width)); err != nil {
 				if errors.Is(err, io.EOF) {
 					return
 				}
-				plog.G(context.Background()).Errorf("Session %s window change failed: %v", sessionID, err)
+				plog.G(ctx).Errorf("Session %s window change failed: %v", sessionID, err)
 			}
 		}
 	}))

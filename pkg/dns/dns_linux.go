@@ -59,7 +59,7 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 
 	// 2) setup dns by magicDNS
 	plog.G(ctx).Debugf("Use library to setup DNS...")
-	err := c.UseLibraryDNS(tunName, config)
+	err := c.UseLibraryDNS(ctx, tunName, config)
 	if err == nil {
 		plog.G(ctx).Debugf("Use library to setup DNS done")
 		return nil
@@ -83,8 +83,7 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 		return err
 	}
 	localResolvConf.Servers = append([]string{config.Servers[0]}, localResolvConf.Servers...)
-	err = writeResolvConf(resolvconf.Path(), *localResolvConf)
-	return err
+	return writeResolvConf(resolvconf.Path(), *localResolvConf)
 }
 
 // setupDnsByCmdResolvectl
@@ -125,8 +124,8 @@ func setupDNSbyCmdSystemdResolve(ctx context.Context, tunName string, config *mi
 
 var errNotSupportSplitDNS = errors.New("not support split DNS")
 
-func (c *Config) UseLibraryDNS(tunName string, clientConfig *miekgdns.ClientConfig) error {
-	configurator, err := dns.NewOSConfigurator(plog.G(context.Background()).Debugf, nil, nil, tunName)
+func (c *Config) UseLibraryDNS(ctx context.Context, tunName string, clientConfig *miekgdns.ClientConfig) error {
+	configurator, err := dns.NewOSConfigurator(plog.G(ctx).Debugf, nil, nil, tunName)
 	if err != nil {
 		return err
 	}
@@ -149,12 +148,12 @@ func (c *Config) UseLibraryDNS(tunName string, clientConfig *miekgdns.ClientConf
 		}
 		config.SearchDomains = append(config.SearchDomains, fqdn)
 	}
-	plog.G(context.Background()).Debugf("Setting up DNS...")
+	plog.G(ctx).Debugf("Setting up DNS...")
 	return c.OSConfigurator.SetDNS(config)
 }
 
 func (c *Config) CancelDNS() {
-	c.removeHosts()
+	_ = c.removeHosts()
 	if c.OSConfigurator != nil {
 		_ = c.OSConfigurator.Close()
 	}

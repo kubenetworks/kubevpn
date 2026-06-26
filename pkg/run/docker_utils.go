@@ -41,9 +41,7 @@ func ConvertK8sImagePullPolicyToDocker(policy corev1.PullPolicy) string {
 }
 
 func convertToDockerArgs(runConfig *RunConfig) []string {
-	var result = []string{"docker"}
-	result = append(result, "run")
-	result = append(result, runConfig.options...)
+	result := append([]string{"docker", "run"}, runConfig.options...)
 	if len(runConfig.command) != 0 {
 		result = append(result, "--entrypoint", strings.Join(runConfig.command, " "))
 	}
