@@ -43,7 +43,7 @@ func LocalUDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.Transp
 func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolver) func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
 	return udp.NewForwarder(s, func(request *udp.ForwarderRequest) {
 		id := request.ID()
-		plog.G(ctx).Infof("[TUN-UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
+		plog.G(ctx).Infof("[Gvisor-UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress: %s",
 			id.LocalPort, id.LocalAddress.String(), id.RemotePort, id.RemoteAddress.String(),
 		)
 		src := &net.UDPAddr{
@@ -55,13 +55,13 @@ func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolve
 		w := &waiter.Queue{}
 		endpoint, tErr := request.CreateEndpoint(w)
 		if tErr != nil {
-			plog.G(ctx).Errorf("[TUN-UDP] Failed to create endpoint to dst: %s: %v", dst.String(), tErr)
+			plog.G(ctx).Errorf("[Gvisor-UDP] Failed to create endpoint to dst: %s: %v", dst.String(), tErr)
 			return
 		}
 
 		remote, err1 := net.DialUDP("udp", nil, dst)
 		if err1 != nil {
-			plog.G(ctx).Errorf("[TUN-UDP] Failed to connect dst: %s: %v", dst.String(), err1)
+			plog.G(ctx).Errorf("[Gvisor-UDP] Failed to connect dst: %s: %v", dst.String(), err1)
 			return
 		}
 
@@ -97,7 +97,7 @@ func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolve
 						break
 					}
 				}
-				plog.G(ctx).Infof("[TUN-UDP] Write length %d data from src: %s -> dst: %s", written, src, dst)
+				plog.G(ctx).Infof("[Gvisor-UDP] Wrote %d bytes: %s -> %s", written, src, dst)
 				errChan <- err
 			}()
 			go func() {
@@ -127,12 +127,12 @@ func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolve
 						break
 					}
 				}
-				plog.G(ctx).Infof("[TUN-UDP] Read length %d data from dst: %s -> src: %s", written, dst, src)
+				plog.G(ctx).Infof("[Gvisor-UDP] Read %d bytes: %s <- %s", written, src, dst)
 				errChan <- err
 			}()
 			err1 = <-errChan
 			if err1 != nil && !errors.Is(err1, io.EOF) {
-				plog.G(ctx).Errorf("[TUN-UDP] Disconnect: %s >-<: %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err1)
+				plog.G(ctx).Errorf("[Gvisor-UDP] Disconnected %s <-> %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err1)
 			}
 		}()
 	}).HandlePacket

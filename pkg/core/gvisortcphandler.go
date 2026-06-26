@@ -34,7 +34,7 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	plog.G(ctx).Infof("[TUN-GVISOR] %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
+	plog.G(ctx).Infof("[Gvisor-TCP] New connection: %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 	h.handle(ctx, tcpConn)
 }
 
@@ -65,7 +65,7 @@ func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {
 }
 
 func GvisorTCPListener(addr string) (net.Listener, error) {
-	plog.G(context.Background()).Infof("Gvisor TCP listening addr: %s", addr)
+	plog.G(context.Background()).Infof("[Gvisor-TCP] Listening on %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -77,13 +77,13 @@ func GvisorTCPListener(addr string) (net.Listener, error) {
 	serverConfig, err := util.GetTlsServerConfig(nil)
 	if err != nil {
 		if errors.Is(err, util.ErrNoTLSConfig) {
-			plog.G(context.Background()).Warn("tls config not found in config, use raw tcp mode")
+			plog.G(context.Background()).Warn("[Gvisor-TCP] TLS config not found, using raw TCP")
 			return &tcpKeepAliveListener{TCPListener: listener}, nil
 		}
-		plog.G(context.Background()).Errorf("failed to get tls server config: %v", err)
+		plog.G(context.Background()).Errorf("[Gvisor-TCP] Failed to get TLS server config: %v", err)
 		_ = listener.Close()
 		return nil, err
 	}
-	plog.G(context.Background()).Debugf("Use tls mode")
+	plog.G(context.Background()).Debugf("[Gvisor-TCP] Using TLS mode")
 	return tls.NewListener(&tcpKeepAliveListener{TCPListener: listener}, serverConfig), nil
 }

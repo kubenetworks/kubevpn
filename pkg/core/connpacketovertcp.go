@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/binary"
 	"net"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -41,13 +42,12 @@ func (c *PacketConnOverTCP) WriteTo(b []byte, _ net.Addr) (int, error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
-
-	buf := config.LPool.Get().([]byte)[:]
-	n := copy(buf, b)
-	defer config.LPool.Put(buf)
-
-	packet := newDatagramPacket(buf, n)
-	if err := packet.Write(c.Conn); err != nil {
+	buf := config.LPool.Get().([]byte)
+	n := copy(buf[2:], b)
+	binary.BigEndian.PutUint16(buf[:2], uint16(n))
+	_, err := c.Conn.Write(buf[:n+2])
+	config.LPool.Put(buf)
+	if err != nil {
 		return 0, err
 	}
 	return len(b), nil

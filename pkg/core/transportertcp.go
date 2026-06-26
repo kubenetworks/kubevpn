@@ -19,10 +19,10 @@ func TCPTransporter(tlsInfo map[string][]byte) Transporter {
 	tlsConfig, err := util.GetTlsClientConfig(tlsInfo)
 	if err != nil {
 		if errors.Is(err, util.ErrNoTLSConfig) {
-			plog.G(context.Background()).Warn("tls config not found in config, use raw tcp mode")
+			plog.G(context.Background()).Warn("[Transport] TLS config not found, using raw TCP")
 			return &tcpTransporter{}
 		}
-		plog.G(context.Background()).Errorf("failed to get tls client config: %v", err)
+		plog.G(context.Background()).Errorf("[Transport] Failed to get TLS client config: %v", err)
 		return &tcpTransporter{}
 	}
 	return &tcpTransporter{tlsConfig: tlsConfig}
@@ -35,10 +35,10 @@ func (tr *tcpTransporter) Dial(ctx context.Context, addr string) (net.Conn, erro
 		return nil, err
 	}
 	if tr.tlsConfig == nil {
-		plog.G(ctx).Debugf("tls config not found in config, use raw tcp mode")
+		plog.G(ctx).Debugf("[Transport] TLS config not found, using raw TCP")
 		return conn, nil
 	}
-	plog.G(ctx).Debugf("Use tls mode")
+	plog.G(ctx).Debugf("[Transport] Using TLS mode")
 	return tls.Client(conn, tr.tlsConfig), nil
 }
 

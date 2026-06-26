@@ -47,7 +47,7 @@ func (d *ClientDevice) handlePacket(ctx context.Context, forward *Forwarder) {
 			defer time.Sleep(time.Second * 2)
 			conn, err := forward.DialContext(subCtx)
 			if err != nil {
-				plog.G(ctx).Errorf("Failed to dial %s from %s: %v", forward.Addr, d.tun.LocalAddr(), err)
+				plog.G(ctx).Errorf("[Client] Failed to dial %s from %s: %v", forward.Addr, d.tun.LocalAddr(), err)
 				return
 			}
 			defer conn.Close()
@@ -58,7 +58,7 @@ func (d *ClientDevice) handlePacket(ctx context.Context, forward *Forwarder) {
 
 			select {
 			case err = <-errChan:
-				plog.G(ctx).Errorf("Failed to transport data to remote %s: %v", conn.RemoteAddr(), err)
+				plog.G(ctx).Errorf("[Client] Transport error to %s: %v", conn.RemoteAddr(), err)
 			case <-ctx.Done():
 				return
 			}
@@ -72,22 +72,25 @@ func readFromConn(ctx context.Context, conn net.Conn, tunInbound chan *Packet, t
 	go handleGvisorPacket(gvisorInbound, tunInbound).Run(ctx)
 	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
-		err := conn.SetReadDeadline(time.Now().Add(config.KeepAliveTime))
+		// Use 3x KeepAliveTime to tolerate missed heartbeat cycles.
+		// Heartbeats are sent every KeepAliveTime, but the server gvisor stack
+		// may not reply to ICMP echo. TCP keepalive handles NAT traversal.
+		err := conn.SetReadDeadline(time.Now().Add(config.KeepAliveTime * 3))
 		if err != nil {
 			config.LPool.Put(buf[:])
-			plog.G(ctx).Errorf("Failed to set read deadline: %v", err)
+			plog.G(ctx).Errorf("[Client] Failed to set read deadline: %v", err)
 			util.SafeWrite(errChan, errors.Wrap(err, "failed to set read deadline"))
 			return
 		}
 		n, err := conn.Read(buf[:])
 		if err != nil {
 			config.LPool.Put(buf[:])
-			plog.G(ctx).Errorf("Failed to read packet from remote: %v", err)
+			plog.G(ctx).Errorf("[Client] Failed to read from remote: %v", err)
 			util.SafeWrite(errChan, errors.Wrap(err, fmt.Sprintf("failed to read packet from remote %s", conn.RemoteAddr())))
 			return
 		}
 		if n < 1 {
-			plog.G(ctx).Warnf("Packet length 0")
+			plog.G(ctx).Warnf("[Client] Received empty packet from remote")
 			config.LPool.Put(buf[:])
 			continue
 		}
@@ -108,14 +111,14 @@ func writeToConn(ctx context.Context, conn net.Conn, inbound <-chan *Packet, err
 				return
 			}
 			if err := conn.SetWriteDeadline(time.Now().Add(config.KeepAliveTime)); err != nil {
-				plog.G(ctx).Errorf("Failed to set write deadline: %v", err)
+				plog.G(ctx).Errorf("[Client] Failed to set write deadline: %v", err)
 				util.SafeWrite(errChan, errors.Wrap(err, "failed to set write deadline"))
 				return
 			}
 			_, err := conn.Write(packet.data[:packet.length])
 			config.LPool.Put(packet.data[:])
 			if err != nil {
-				plog.G(ctx).Errorf("Failed to write packet to remote: %v", err)
+				plog.G(ctx).Errorf("[Client] Failed to write to remote: %v", err)
 				util.SafeWrite(errChan, errors.Wrap(err, "failed to write packet to remote"))
 				return
 			}
@@ -133,7 +136,7 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 		buf := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(buf[1:])
 		if err != nil {
-			plog.G(ctx).Errorf("Failed to read packet from tun device: %s", err)
+			plog.G(ctx).Errorf("[Client] Failed to read from TUN: %v", err)
 			util.SafeWrite(d.errChan, err)
 			config.LPool.Put(buf[:])
 			return
@@ -146,11 +149,11 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 		var protocol int
 		src, dst, protocol, err = util.ParseIP(buf[1 : n+1])
 		if err != nil {
-			plog.G(ctx).Errorf("Unknown packet: %v", err)
+			plog.G(ctx).Errorf("[Client] Unknown packet, dropping: %v", err)
 			config.LPool.Put(buf[:])
 			continue
 		}
-		plog.G(plog.WithFields(context.Background(), plog.GetFields(ctx))).Debugf("SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
+		plog.G(ctx).Debugf("[Client] SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
 		packet := NewPacket(buf[:], n+1, src, dst)
 		if packet.src.Equal(packet.dst) {
 			gvisorInbound <- packet
@@ -163,12 +166,12 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 func (d *ClientDevice) heartbeats(ctx context.Context) {
 	tunIfi, err := util.GetTunDeviceByConn(d.tun)
 	if err != nil {
-		plog.G(ctx).Errorf("Failed to get tun device: %v", err)
+		plog.G(ctx).Errorf("[Client] Failed to get tun device: %v", err)
 		return
 	}
 	srcIPv4, srcIPv6, dockerSrcIPv4, err := util.GetTunDeviceIP(tunIfi.Name)
 	if err != nil {
-		plog.G(ctx).Errorf("Failed to get tun device %s IP: %v", tunIfi.Name, err)
+		plog.G(ctx).Errorf("[Client] Failed to get IP for device %s: %v", tunIfi.Name, err)
 		return
 	}
 
@@ -185,14 +188,14 @@ func (d *ClientDevice) heartbeats(ctx context.Context) {
 	for ; ctx.Err() == nil; <-ticker.C {
 		if srcIPv4 != nil {
 			if icmp, e := util.GenICMPPacket(srcIPv4, config.RouterIP); e != nil {
-				plog.G(ctx).Errorf("Failed to generate IPv4 heartbeat: %v", e)
+				plog.G(ctx).Errorf("[Client] Failed to generate IPv4 heartbeat: %v", e)
 			} else {
 				sendHeartbeat(icmp)
 			}
 		}
 		if srcIPv6 != nil {
 			if icmp, e := util.GenICMPPacketIPv6(srcIPv6, config.RouterIP6); e != nil {
-				plog.G(ctx).Errorf("Failed to generate IPv6 heartbeat: %v", e)
+				plog.G(ctx).Errorf("[Client] Failed to generate IPv6 heartbeat: %v", e)
 			} else {
 				sendHeartbeat(icmp)
 			}

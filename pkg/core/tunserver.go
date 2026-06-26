@@ -32,7 +32,7 @@ func TunHandler(forward *Forwarder, hub *RouteHub) Handler {
 func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
 	tunIfi, err := util.GetTunDeviceByConn(tun)
 	if err != nil {
-		plog.G(ctx).Errorf("Failed to get tun device: %v", err)
+		plog.G(ctx).Errorf("[TUN] Failed to get tun device: %v", err)
 		return
 	}
 	ctx = plog.WithField(ctx, tunIfi.Name, "")
@@ -58,7 +58,7 @@ func (h *tunHandler) HandleServer(ctx context.Context, tun net.Conn) {
 
 	select {
 	case err := <-device.errChan:
-		plog.G(ctx).Errorf("Device exit: %v", err)
+		plog.G(ctx).Errorf("[TUN] Device exit: %v", err)
 		return
 	case <-ctx.Done():
 		return
@@ -107,7 +107,7 @@ func (d *Device) handlePacket(ctx context.Context, hub *RouteHub) {
 
 	select {
 	case err := <-p.errChan:
-		plog.G(ctx).Errorf("[TUN] %s: %v", d.tun.LocalAddr(), err)
+		plog.G(ctx).Errorf("[TUN] Peer error on %s: %v", d.tun.LocalAddr(), err)
 		util.SafeWrite(d.errChan, err)
 		return
 	case <-ctx.Done():
@@ -148,19 +148,19 @@ func (p *Peer) routeTun(ctx context.Context) {
 				return
 			}
 			if conn, ok := p.hub.RouteMapTCP.Load(packet.dst.String()); ok {
-				plog.G(ctx).Debugf("[TUN] Find TCP route to dst: %s -> %s", packet.dst.String(), conn.(net.Conn).RemoteAddr())
+				plog.G(ctx).Debugf("[TUN] Found route to %s via %s", packet.dst, conn.(net.Conn).RemoteAddr())
 				copy(packet.data[1:packet.length+1], packet.data[:packet.length])
 				packet.data[0] = 1
 				dgram := newDatagramPacket(packet.data, packet.length+1)
 				err := dgram.Write(conn.(net.Conn))
 				config.LPool.Put(packet.data[:])
 				if err != nil {
-					plog.G(ctx).Errorf("[TUN] Failed to write TCP %s <- %s : %s", conn.(net.Conn).RemoteAddr(), conn.(net.Conn).LocalAddr(), err)
+					plog.G(ctx).Errorf("[TUN] Failed to write to %s from %s: %v", conn.(net.Conn).RemoteAddr(), conn.(net.Conn).LocalAddr(), err)
 					util.SafeWrite(p.errChan, err)
 					return
 				}
 			} else {
-				plog.G(ctx).Warnf("[TUN] No route for src: %s -> dst: %s, drop it", packet.src, packet.dst)
+				plog.G(ctx).Warnf("[TUN] No route for %s -> %s, dropping", packet.src, packet.dst)
 				config.LPool.Put(packet.data[:])
 			}
 		case <-ctx.Done():
