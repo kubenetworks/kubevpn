@@ -16,19 +16,19 @@ import (
 )
 
 type gvisorLocalHandler struct {
-	// read from tcp conn write to gvisor inbound
 	gvisorInbound <-chan *Packet
-	// write to tcp conn
-	gvisorOutbound chan<- *Packet
-
-	outbound chan<- *Packet
-	errChan  chan error
+	outbound      chan<- *Packet
+	headroom      int
+	errChan       chan error
 }
 
-func handleGvisorPacket(gvisorInbound <-chan *Packet, outbound chan<- *Packet) *gvisorLocalHandler {
+// handleGvisorPacket creates a local gvisor handler.
+// headroom reserves bytes before the prefix in output packets for framing headers.
+func handleGvisorPacket(gvisorInbound <-chan *Packet, outbound chan<- *Packet, headroom int) *gvisorLocalHandler {
 	return &gvisorLocalHandler{
 		gvisorInbound: gvisorInbound,
 		outbound:      outbound,
+		headroom:      headroom,
 		errChan:       make(chan error, 1),
 	}
 }
@@ -46,7 +46,7 @@ func (h *gvisorLocalHandler) Run(ctx context.Context) {
 	}()
 	go func() {
 		defer util.HandleCrash()
-		readFromEndpointWriteToTun(ctx, endpoint, h.outbound)
+		readFromEndpointWriteToTun(ctx, endpoint, h.outbound, h.headroom)
 		util.SafeClose(h.errChan)
 	}()
 	s := NewLocalStack(ctx, sniffer.NewWithPrefix(endpoint, fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))))

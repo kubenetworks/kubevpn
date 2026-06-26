@@ -49,12 +49,14 @@ func (d *tunDevice) Close() {
 }
 
 // copyPacketToPool copies a gvisor packet into a pool buffer with a 1-byte type prefix.
-// Returns the buffer and total length (payload + prefix). Caller must return buf to config.LPool.
-func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte) (buf []byte, length int) {
+// headroom reserves extra bytes before the prefix for framing headers (e.g. 2-byte datagram length).
+// Returns the buffer and payload length (prefix + IP data, NOT including headroom).
+// Caller must return buf to config.LPool.
+func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte, headroom int) (buf []byte, length int) {
 	data := pkt.ToView().AsSlice()
 	buf = config.LPool.Get().([]byte)[:]
-	n := copy(buf[1:], data)
-	buf[0] = prefix
+	n := copy(buf[headroom+1:], data)
+	buf[headroom] = prefix
 	return buf, n + 1
 }
 

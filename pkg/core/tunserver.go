@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/binary"
 	"net"
 
 	"github.com/google/gopacket/layers"
@@ -74,7 +75,9 @@ func (d *Device) readFromTun(ctx context.Context) {
 	defer util.HandleCrash()
 	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
-		n, err := d.tun.Read(buf[:])
+		// Read at offset 3 to reserve space for [2-byte datagram header][1-byte type prefix].
+		// This avoids two memcpys later in routeTun (shift+1) and DatagramPacket.Write (shift+2).
+		n, err := d.tun.Read(buf[3:])
 		if err != nil {
 			config.LPool.Put(buf[:])
 			plog.G(ctx).Errorf("[TUN] Failed to read from tun device: %v", err)
@@ -82,7 +85,7 @@ func (d *Device) readFromTun(ctx context.Context) {
 			return
 		}
 
-		src, dst, protocol, err := util.ParseIP(buf[:n])
+		src, dst, protocol, err := util.ParseIP(buf[3 : 3+n])
 		if err != nil {
 			plog.G(ctx).Errorf("[TUN] Unknown packet")
 			config.LPool.Put(buf[:])
@@ -149,10 +152,14 @@ func (p *Peer) routeTun(ctx context.Context) {
 			}
 			if conn, ok := p.hub.RouteMapTCP.Load(packet.dst.String()); ok {
 				plog.G(ctx).Debugf("[TUN] Found route to %s via %s", packet.dst, conn.(net.Conn).RemoteAddr())
-				copy(packet.data[1:packet.length+1], packet.data[:packet.length])
-				packet.data[0] = 1
-				dgram := newDatagramPacket(packet.data, packet.length+1)
-				err := dgram.Write(conn.(net.Conn))
+				// readFromTun placed IP data at buf[3:], leaving room for:
+				//   buf[0:2] = datagram length header
+				//   buf[2]   = type prefix byte
+				//   buf[3:]  = IP packet data
+				payloadLen := packet.length + 1
+				binary.BigEndian.PutUint16(packet.data[:2], uint16(payloadLen))
+				packet.data[2] = 1
+				_, err := conn.(net.Conn).Write(packet.data[:payloadLen+2])
 				config.LPool.Put(packet.data[:])
 				if err != nil {
 					plog.G(ctx).Errorf("[TUN] Failed to write to %s from %s: %v", conn.(net.Conn).RemoteAddr(), conn.(net.Conn).LocalAddr(), err)

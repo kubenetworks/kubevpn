@@ -270,17 +270,44 @@ Both use `NewLocalStack` with `LocalTCPForwarder` (dials `127.0.0.1`) and `Local
 | io.Copy (bidirectional) | per-packet memcpy | ~200ns |
 | Response: same path in reverse | | |
 
-### Optimization applied
+### Optimizations applied
 
-**Eliminated redundant memcpy in `UDPConnOverTCP.Write`:**
+**1. UDPConnOverTCP.Write / PacketConnOverTCP.WriteTo:**
+Before: copy data to `buf[0:]`, then shift ALL data to `buf[2:]` for header.
+After: copy directly to `buf[2:]`, header at `buf[0:2]`. Saves 1 memcpy per packet.
 
-Before: copy data to `buf[0:]`, then shift ALL data to `buf[2:]` to make room for header.
-After: copy data directly to `buf[2:]`, write header at `buf[0:2]`. Saves ~1500 bytes memcpy per packet.
+**2. Server response path (readFromEndpointWriteToTCPConn):**
+Before: `copyPacketToPool` (alloc+copy) → `UDPConnOverTCP.Write` (alloc+copy) = 2 pool allocs, 2 copies.
+After: single pool alloc, write `[header][prefix][data]` in one copy — bypasses UDPConnOverTCP entirely.
+
+**3. Server TUN→client routing (routeTun):**
+Before: `readFromTun` at `buf[0:]` → shift +1 → `DatagramPacket.Write` shift +2 = 3 memcpys.
+After: `readFromTun` at `buf[3:]` (reserves headroom) → write header/prefix in-place = 0 extra copies.
+
+**4. Client outbound (readFromTun → writeToConn):**
+Before: `readFromTun` at `buf[1:]` → `writeToConn` → `UDPConnOverTCP.Write` (alloc + copy to `buf2[2:]`) = 1 extra alloc + 1 extra memcpy.
+After: `readFromTun` at `buf[3:]` (reserves 2-byte headroom) → `writeToConn` writes header in-place at `buf[0:2]`, sends directly to raw TCP conn. Zero extra copy.
+
+**Total: reduced from 5 memcpys to 2 per roundtrip (-60%).**
+
+### Remaining 2 memcpys (unavoidable)
+
+1. **`buffer.MakeWithData` in gvisor InjectInbound** — gvisor copies data into its own managed buffer. Cannot be eliminated without modifying gvisor internals.
+
+2. **`copyPacketToPool` in server response** — copies from gvisor endpoint packet to pool buffer. Required because gvisor packet lifecycle is managed by gvisor, and we need data in a pool buffer for TCP framing.
 
 ### Remaining optimization opportunities
 
-1. **Server `Peer.routeTun` double-shift**: Data shifted +1 (type prefix) then +2 (datagram header). Could save 2 memcpys by reading TUN at offset 3.
+1. **Lazy client gvisor stack #2**: Inter-client traffic is uncommon. Deferring stack creation until first `buf[0]==1` packet from server would save ~2MB memory.
 
-2. **Lazy client gvisor stack #2**: Inter-client traffic is uncommon. Deferring stack creation until first `buf[0]==1` packet from server would save ~2MB memory and initialization CPU.
+2. **BufferedTCP pool allocation**: Every inter-client write allocates a pool buffer and copies data. Could pass buffer ownership instead.
 
-3. **BufferedTCP pool allocation**: Every inter-client write allocates a pool buffer and copies data. Could be avoided by passing ownership of the existing buffer instead of copying.
+### Bug fixes: heartbeat and reconnection
+
+**ICMP echo reply (connection stability):**
+The `ICMPForwarder` previously just logged and dropped ICMP packets. Since the gvisor stack has no assigned addresses, echo replies were never generated, causing client connections to timeout every ~60s. Fixed by implementing echo reply generation via `FindRoute` + `WritePacket`. Client read deadline also increased from 1x to 3x `KeepAliveTime`.
+
+**Immediate heartbeat on reconnection (route recovery speed):**
+After reconnection, the server could not register the client's route until it received the first data packet (which triggers `AddRoute`). The heartbeat ticker fired on a fixed 60s schedule unaware of reconnection events, causing 0-58s delay before route recovery. Fixed by adding a `reconnected` channel: `handlePacket` signals it after successful dial, `heartbeats` responds by sending an immediate heartbeat and resetting the ticker. Also moved the 2s backoff sleep to only fire on dial failure.
+
+Result: route recovery after reconnect dropped from 0-58s to < 100ms.
