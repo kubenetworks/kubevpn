@@ -343,8 +343,7 @@ func CreateCIDRPod(ctx context.Context, clientset kubernetes.Interface, namespac
 			return nil, err
 		}
 		checker := func(pod *corev1.Pod) bool {
-			isRunning := pod.Status.Phase == corev1.PodRunning
-			return isRunning
+			return pod.Status.Phase == corev1.PodRunning
 		}
 		field := fields.OneTermEqualSelector("metadata.name", pod.Name).String()
 		ctx2, cancelFunc := context.WithTimeout(ctx, time.Second*15)

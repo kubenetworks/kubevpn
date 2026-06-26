@@ -188,8 +188,8 @@ func TestForwarder_IsEmpty_WithAddr(t *testing.T) {
 func TestForwarder_DialContext_Empty(t *testing.T) {
 	f := &Forwarder{}
 	_, err := f.DialContext(context.Background())
-	if err != ErrorEmptyForwarder {
-		t.Fatalf("expected ErrorEmptyForwarder, got %v", err)
+	if err != errEmptyForwarder {
+		t.Fatalf("expected errEmptyForwarder, got %v", err)
 	}
 }
 

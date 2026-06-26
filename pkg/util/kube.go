@@ -149,13 +149,13 @@ func ModifyAPIServer(ctx context.Context, kubeconfigBytes []byte, newAPIServer n
 	kubeContext := rawConfig.Contexts[rawConfig.CurrentContext]
 	if kubeContext == nil {
 		err = pkgconfig.ErrInvalidKubeconfig
-		plog.G(ctx).Errorf("can not find kubeconfig context %s", rawConfig.CurrentContext)
+		plog.G(ctx).Errorf("cannot find kubeconfig context %s", rawConfig.CurrentContext)
 		return nil, netip.AddrPort{}, err
 	}
 	cluster := rawConfig.Clusters[kubeContext.Cluster]
 	if cluster == nil {
 		err = pkgconfig.ErrInvalidKubeconfig
-		plog.G(ctx).Errorf("can not find cluster %s", kubeContext.Cluster)
+		plog.G(ctx).Errorf("cannot find cluster %s", kubeContext.Cluster)
 		return nil, netip.AddrPort{}, err
 	}
 	var u *url.URL
@@ -200,7 +200,7 @@ func ModifyAPIServer(ctx context.Context, kubeconfigBytes []byte, newAPIServer n
 
 	rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].Server = fmt.Sprintf("%s://%s", u.Scheme, newAPIServer.String())
 	rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].TLSServerName = serverHost
-	// To Do: add cli option to skip tls verify
+	// TODO: add cli option to skip tls verify
 	// rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].CertificateAuthorityData = nil
 	// rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].InsecureSkipTLSVerify = true
 	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})

@@ -3,7 +3,6 @@ package action
 import (
 	"context"
 	"net"
-	"sync"
 
 	"github.com/containernetworking/cni/pkg/types"
 
@@ -16,17 +15,15 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-var _, bits = config.DockerCIDR.Mask.Size()
-var DefaultServerIP = (&net.IPNet{IP: config.DockerRouterIP, Mask: net.CIDRMask(bits, bits)}).String()
-
-var serverIP string
-var mux sync.Mutex
-var sshCancelFunc context.CancelFunc
+var defaultServerIP = func() string {
+	_, bits := config.DockerCIDR.Mask.Size()
+	return (&net.IPNet{IP: config.DockerRouterIP, Mask: net.CIDRMask(bits, bits)}).String()
+}()
 
 // SshStart handles the SshStart RPC, creating a TUN server and adding a route for the SSH client's IP.
 func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp *rpc.SshStartResponse, err error) {
-	mux.Lock()
-	defer mux.Unlock()
+	svr.Lock.Lock()
+	defer svr.Lock.Unlock()
 
 	var clientIP net.IP
 	var clientCIDR *net.IPNet
@@ -35,18 +32,18 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 		plog.G(ctx).Errorf("Failed to parse network CIDR: %v", err)
 		return
 	}
-	if serverIP == "" {
+	if svr.sshServerIP == "" {
 		defer func() {
 			if err != nil {
-				if sshCancelFunc != nil {
-					sshCancelFunc()
+				if svr.sshCancelFunc != nil {
+					svr.sshCancelFunc()
 				}
-				serverIP = ""
+				svr.sshServerIP = ""
 			}
 		}()
 
 		nodes := []*core.Node{
-			core.NewNode("tun", "").WithParam("net", DefaultServerIP),
+			core.NewNode("tun", "").WithParam("net", defaultServerIP),
 			core.NewNode("gtcp", ":10801"),
 		}
 		var servers []core.Server
@@ -55,19 +52,18 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 			plog.G(ctx).Errorf("Failed to parse route: %v", err)
 			return
 		}
-		var ctx1 context.Context
-		ctx1, sshCancelFunc = context.WithCancel(context.Background())
+		var sshCtx context.Context
+		sshCtx, svr.sshCancelFunc = context.WithCancel(context.Background())
 		go func() {
-			err := handler.Run(ctx1, servers)
-			if err != nil {
+			if err := handler.Run(sshCtx, servers); err != nil {
 				plog.G(ctx).Errorf("Failed to run route: %v", err)
 			}
 		}()
-		serverIP = DefaultServerIP
+		svr.sshServerIP = defaultServerIP
 	}
 
 	var serverip net.IP
-	serverip, _, err = net.ParseCIDR(serverIP)
+	serverip, _, err = net.ParseCIDR(svr.sshServerIP)
 	if err != nil {
 		return
 	}
@@ -81,21 +77,20 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 			IP:   clientIP,
 			Mask: clientCIDR.Mask,
 		},
-		GW: nil,
 	})
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to add route: %v", err)
 		return
 	}
 
-	resp = &rpc.SshStartResponse{ServerIP: serverIP}
+	resp = &rpc.SshStartResponse{ServerIP: svr.sshServerIP}
 	return
 }
 
 // SshStop handles the SshStop RPC, shutting down the SSH TUN server.
 func (svr *Server) SshStop(ctx context.Context, req *rpc.SshStopRequest) (*rpc.SshStopResponse, error) {
-	if sshCancelFunc != nil {
-		sshCancelFunc()
+	if svr.sshCancelFunc != nil {
+		svr.sshCancelFunc()
 	}
 	return &rpc.SshStopResponse{}, nil
 }

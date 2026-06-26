@@ -33,12 +33,7 @@ func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 
 	connects := handler.Connects(svr.connections)
 	for _, conn := range connects.Sort() {
-		if conn != nil {
-			if conn.Sync != nil {
-				_ = conn.Sync.Cleanup(ctx)
-			}
-			conn.Cleanup(ctx)
-		}
+		cleanupConnection(ctx, conn)
 	}
 	svr.connections = nil
 

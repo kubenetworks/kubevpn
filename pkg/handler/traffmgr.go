@@ -31,25 +31,12 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		return nil
 	}
 
-	var deleteResource = func(ctx context.Context) {
-		options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
-		name := config.ConfigMapPodTrafficManager
-		_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, name+"."+namespace, options)
-		_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, name, options)
-		_ = clientset.RbacV1().Roles(namespace).Delete(ctx, name, options)
-		_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, name, options)
-		_ = clientset.CoreV1().Services(namespace).Delete(ctx, name, options)
-		_ = clientset.CoreV1().Secrets(namespace).Delete(ctx, name, options)
-		_ = clientset.CoreV1().Pods(namespace).Delete(ctx, config.CniNetName, options)
-		_ = clientset.BatchV1().Jobs(namespace).Delete(ctx, name, options)
-		_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, name, options)
-	}
 	defer func() {
 		if err != nil {
-			deleteResource(context.Background())
+			cleanupTrafficManagerResources(context.Background(), clientset, namespace)
 		}
 	}()
-	deleteResource(ctx)
+	cleanupTrafficManagerResources(ctx, clientset, namespace)
 
 	// 1) label namespace
 	plog.G(ctx).Infof("Labeling Namespace %s", namespace)
@@ -178,4 +165,18 @@ func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelec
 		return errors.New("wait for pod ready timeout")
 	}
 	return nil
+}
+
+func cleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.Interface, namespace string) {
+	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
+	name := config.ConfigMapPodTrafficManager
+	_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, name+"."+namespace, options)
+	_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, name, options)
+	_ = clientset.RbacV1().Roles(namespace).Delete(ctx, name, options)
+	_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, name, options)
+	_ = clientset.CoreV1().Services(namespace).Delete(ctx, name, options)
+	_ = clientset.CoreV1().Secrets(namespace).Delete(ctx, name, options)
+	_ = clientset.CoreV1().Pods(namespace).Delete(ctx, config.CniNetName, options)
+	_ = clientset.BatchV1().Jobs(namespace).Delete(ctx, name, options)
+	_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, name, options)
 }

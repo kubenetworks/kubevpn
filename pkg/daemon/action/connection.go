@@ -23,10 +23,47 @@ func (svr *Server) findConnection(connectionID string) (*handler.ConnectOptions,
 func (svr *Server) ConnectionList(ctx context.Context, req *rpc.ConnectionListRequest) (*rpc.ConnectionListResponse, error) {
 	var list []*rpc.Status
 	for _, options := range svr.connections {
-		result := genStatus(options)
+		result := buildConnectionStatus(options)
 		list = append(list, result)
 	}
 	return &rpc.ConnectionListResponse{List: list, CurrentConnectionID: svr.currentConnectionID}, nil
+}
+
+// removeConnection removes all connections matching the given ID from the
+// slice and returns them. The caller is responsible for cleanup.
+func (svr *Server) removeConnection(connectionID string) handler.Connects {
+	var removed handler.Connects
+	for i := 0; i < len(svr.connections); i++ {
+		if svr.connections[i].GetConnectionID() == connectionID {
+			removed = removed.Append(svr.connections[i])
+			svr.connections = append(svr.connections[:i], svr.connections[i+1:]...)
+			i--
+		}
+	}
+	return removed
+}
+
+// resetCurrentConnection updates currentConnectionID after the given ID was
+// removed. It picks the first remaining connection, or clears the field.
+func (svr *Server) resetCurrentConnection(removedID string) {
+	if svr.currentConnectionID != removedID {
+		return
+	}
+	svr.currentConnectionID = ""
+	if len(svr.connections) > 0 {
+		svr.currentConnectionID = svr.connections[0].GetConnectionID()
+	}
+}
+
+// cleanupConnection cleans up a single connection's sync and VPN state.
+func cleanupConnection(ctx context.Context, conn *handler.ConnectOptions) {
+	if conn == nil {
+		return
+	}
+	if conn.Sync != nil {
+		_ = conn.Sync.Cleanup(ctx)
+	}
+	conn.Cleanup(ctx)
 }
 
 // ConnectionUse handles the ConnectionUse RPC, switching the active connection to the specified connection ID.

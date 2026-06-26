@@ -40,15 +40,15 @@ func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
 	runningPodImg := podList[0].Spec.Containers[0].Image
 
 	isNeedUpgrade, err := util.IsNewer(clientVer, clientImg, serverImg)
-	isPodNeedUpgrade, err1 := util.IsNewer(clientVer, clientImg, runningPodImg)
-	if !isNeedUpgrade && !isPodNeedUpgrade {
-		return nil
-	}
 	if err != nil {
 		return err
 	}
-	if err1 != nil {
-		return err1
+	isPodNeedUpgrade, err := util.IsNewer(clientVer, clientImg, runningPodImg)
+	if err != nil {
+		return err
+	}
+	if !isNeedUpgrade && !isPodNeedUpgrade {
+		return nil
 	}
 
 	// 1) update secret
@@ -184,10 +184,7 @@ func upgradeSecretSpec(ctx context.Context, f cmdutil.Factory, ns string) error 
 
 	mutatingWebhookConfig.ResourceVersion = current.ResourceVersion
 	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Update(ctx, mutatingWebhookConfig, metav1.UpdateOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func upgradeServiceSpec(ctx context.Context, f cmdutil.Factory, ns string) error {
@@ -201,15 +198,12 @@ func upgradeServiceSpec(ctx context.Context, f cmdutil.Factory, ns string) error
 	if err != nil {
 		return err
 	}
-	currentSecret, err := clientset.CoreV1().Services(ns).Get(ctx, svcSpec.Name, metav1.GetOptions{})
+	currentSvc, err := clientset.CoreV1().Services(ns).Get(ctx, svcSpec.Name, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
-	svcSpec.ResourceVersion = currentSecret.ResourceVersion
+	svcSpec.ResourceVersion = currentSvc.ResourceVersion
 
 	_, err = clientset.CoreV1().Services(ns).Update(ctx, svcSpec, metav1.UpdateOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }

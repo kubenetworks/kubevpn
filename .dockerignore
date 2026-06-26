@@ -1,0 +1,15 @@
+# Reduce Docker build context size
+.git
+.github
+.claude
+docs
+charts
+snap
+plugins
+*.md
+!README.md
+bin/*
+!bin/kubevpn
+coverage.*
+*.txt
+.golangci.yml

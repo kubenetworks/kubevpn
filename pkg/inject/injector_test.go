@@ -70,7 +70,7 @@ func TestNewInjector_NoHeadersNoPortMaps(t *testing.T) {
 	}
 }
 
-func TestClearPodMetadata(t *testing.T) {
+func Test_clearPodMetadata(t *testing.T) {
 	now := metav1.Now()
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -90,7 +90,7 @@ func TestClearPodMetadata(t *testing.T) {
 		},
 	}
 
-	ClearPodMetadata(pod)
+	clearPodMetadata(pod)
 
 	if pod.SelfLink != "" {
 		t.Errorf("expected SelfLink to be cleared, got %q", pod.SelfLink)

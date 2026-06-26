@@ -2,6 +2,7 @@ package util
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -10,10 +11,9 @@ import (
 
 	"github.com/docker/docker/api/types/mount"
 	"github.com/moby/term"
-	pkgerr "github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	v12 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/errors"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/cmd/util"
@@ -81,10 +81,10 @@ func RemoveDir(volume map[string][]mount.Mount) error {
 	for _, mounts := range volume {
 		for _, m := range mounts {
 			err := os.RemoveAll(m.Source)
-			if err != nil && !pkgerr.Is(err, os.ErrNotExist) {
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				errs = append(errs, fmt.Errorf("failed to delete dir %s: %w", m.Source, err))
 			}
 		}
 	}
-	return errors.NewAggregate(errs)
+	return utilerrors.NewAggregate(errs)
 }

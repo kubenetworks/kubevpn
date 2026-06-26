@@ -132,7 +132,7 @@ func (o *CopyOptions) Run() error {
 		return fmt.Errorf("one of src or dest must be a local file specification")
 	}
 	if len(srcSpec.File.String()) == 0 || len(destSpec.File.String()) == 0 {
-		return errors.New("filepath can not be empty")
+		return errors.New("filepath cannot be empty")
 	}
 
 	if len(srcSpec.PodName) != 0 {

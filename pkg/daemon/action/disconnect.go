@@ -61,37 +61,15 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 	case req.GetAll():
 		connects := handler.Connects(svr.connections)
 		for _, connect := range connects.Sort() {
-			if connect != nil {
-				if connect.Sync != nil {
-					_ = connect.Sync.Cleanup(ctx)
-				}
-				connect.Cleanup(ctx)
-			}
+			cleanupConnection(ctx, connect)
 		}
 		svr.connections = nil
 		svr.currentConnectionID = ""
 	case req.GetConnectionID() != "":
-		var connects = *new(handler.Connects)
-		for i := 0; i < len(svr.connections); i++ {
-			if req.GetConnectionID() == svr.connections[i].GetConnectionID() {
-				connects = connects.Append(svr.connections[i])
-				svr.connections = append(svr.connections[:i], svr.connections[i+1:]...)
-				i--
-			}
+		for _, connect := range svr.removeConnection(req.GetConnectionID()).Sort() {
+			cleanupConnection(ctx, connect)
 		}
-		for _, connect := range connects.Sort() {
-			if connect != nil {
-				if connect.Sync != nil {
-					_ = connect.Sync.Cleanup(ctx)
-				}
-				connect.Cleanup(ctx)
-			}
-		}
-		if svr.currentConnectionID == req.GetConnectionID() {
-			for _, connection := range svr.connections {
-				svr.currentConnectionID = connection.GetConnectionID()
-			}
-		}
+		svr.resetCurrentConnection(req.GetConnectionID())
 	case req.KubeconfigBytes != nil && req.Namespace != nil:
 		err = disconnectByKubeconfig(
 			resp.Context(),
@@ -129,23 +107,14 @@ func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes st
 		return err
 	}
 	disconnect(ctx, svr, connectionID)
-	if svr.currentConnectionID == connectionID {
-		for _, connection := range svr.connections {
-			svr.currentConnectionID = connection.GetConnectionID()
-		}
-	}
+	svr.resetCurrentConnection(connectionID)
 	return nil
 }
 
 func disconnect(ctx context.Context, svr *Server, connectionID string) {
-	for i := 0; i < len(svr.connections); i++ {
-		options := svr.connections[i]
-		if options.GetConnectionID() == connectionID {
-			plog.G(ctx).Infof("Disconnecting from the cluster...")
-			options.Cleanup(ctx)
-			svr.connections = append(svr.connections[:i], svr.connections[i+1:]...)
-			i--
-		}
+	for _, conn := range svr.removeConnection(connectionID) {
+		plog.G(ctx).Infof("Disconnecting from the cluster...")
+		conn.Cleanup(ctx)
 	}
 }
 

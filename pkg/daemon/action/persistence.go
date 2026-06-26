@@ -29,6 +29,9 @@ type Server struct {
 	currentConnectionID string
 	connections         []*handler.ConnectOptions
 
+	sshServerIP   string
+	sshCancelFunc context.CancelFunc
+
 	ID string
 }
 
@@ -38,7 +41,7 @@ type Config struct {
 }
 
 // LoadFromConfig reads persisted connection state from disk and re-establishes previously active connections.
-func (svr *Server) LoadFromConfig() error {
+func (svr *Server) LoadFromConfig(ctx context.Context) error {
 	content, err := os.ReadFile(config.GetDBPath())
 	if err != nil {
 		return err
@@ -56,7 +59,7 @@ func (svr *Server) LoadFromConfig() error {
 		return nil
 	}
 	var client rpc.DaemonClient
-	for {
+	for ctx.Err() == nil {
 		_, err = svr.GetClient(true)
 		if err != nil {
 			time.Sleep(config.DaemonPollInterval)
@@ -68,6 +71,9 @@ func (svr *Server) LoadFromConfig() error {
 			continue
 		}
 		break
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	for _, c := range conf.SecondaryConnect {
 		if c != nil {

@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"unsafe"
 
-	pkgerr "github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 	"golang.zx2c4.com/wireguard/tun"
 
@@ -74,7 +73,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	if err = addTunRoutes(name, cfg.Routes...); err != nil {
-		err = pkgerr.Wrap(err, "Add tun device routes failed")
+		err = fmt.Errorf("add tun device routes failed: %w", err)
 		return
 	}
 

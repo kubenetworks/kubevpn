@@ -10,11 +10,11 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 )
 
-func TestUseSecondPort_ColonSeparated(t *testing.T) {
+func TestExtractLocalPorts_ColonSeparated(t *testing.T) {
 	m := map[int32]string{
 		8080: "29450:19080",
 	}
-	result := useSecondPort(m)
+	result := extractLocalPorts(m)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(result))
 	}
@@ -23,11 +23,11 @@ func TestUseSecondPort_ColonSeparated(t *testing.T) {
 	}
 }
 
-func TestUseSecondPort_PlainNumber(t *testing.T) {
+func TestExtractLocalPorts_PlainNumber(t *testing.T) {
 	m := map[int32]string{
 		8080: "9080",
 	}
-	result := useSecondPort(m)
+	result := extractLocalPorts(m)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(result))
 	}
@@ -36,23 +36,23 @@ func TestUseSecondPort_PlainNumber(t *testing.T) {
 	}
 }
 
-func TestUseSecondPort_Empty(t *testing.T) {
-	result := useSecondPort(nil)
+func TestExtractLocalPorts_Empty(t *testing.T) {
+	result := extractLocalPorts(nil)
 	if len(result) != 0 {
 		t.Fatalf("expected empty map for nil input, got %d entries", len(result))
 	}
 
-	result = useSecondPort(map[int32]string{})
+	result = extractLocalPorts(map[int32]string{})
 	if len(result) != 0 {
 		t.Fatalf("expected empty map for empty input, got %d entries", len(result))
 	}
 }
 
-func TestUseSecondPort_InvalidPort(t *testing.T) {
+func TestExtractLocalPorts_InvalidPort(t *testing.T) {
 	m := map[int32]string{
 		8080: "invalid",
 	}
-	result := useSecondPort(m)
+	result := extractLocalPorts(m)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(result))
 	}
@@ -61,13 +61,13 @@ func TestUseSecondPort_InvalidPort(t *testing.T) {
 	}
 }
 
-func TestUseSecondPort_MultipleEntries(t *testing.T) {
+func TestExtractLocalPorts_MultipleEntries(t *testing.T) {
 	m := map[int32]string{
 		80:   "30000:8080",
 		443:  "30001:8443",
 		3000: "5000",
 	}
-	result := useSecondPort(m)
+	result := extractLocalPorts(m)
 	if len(result) != 3 {
 		t.Fatalf("expected 3 entries, got %d", len(result))
 	}
@@ -83,18 +83,18 @@ func TestUseSecondPort_MultipleEntries(t *testing.T) {
 	}
 }
 
-func TestUseSecondPort_ColonWithInvalidSecond(t *testing.T) {
+func TestExtractLocalPorts_ColonWithInvalidSecond(t *testing.T) {
 	m := map[int32]string{
 		8080: "29450:notanumber",
 	}
-	result := useSecondPort(m)
+	result := extractLocalPorts(m)
 	if result[8080] != 0 {
 		t.Errorf("expected 8080 → 0 for non-numeric after colon, got %d", result[8080])
 	}
 }
 
-func TestGenStatus_NilFactory(t *testing.T) {
-	// genStatus with nil factory should not panic; GetKubeconfigCluster
+func TestBuildConnectionStatus_NilFactory(t *testing.T) {
+	// buildConnectionStatus with nil factory should not panic; GetKubeconfigCluster
 	// will be called with nil which would panic. Use a real factory.
 	tmpKubeconfig := t.TempDir() + "/kubeconfig"
 	kubeconfigContent := `apiVersion: v1
@@ -123,7 +123,7 @@ current-context: test-context
 
 	conn := handler.NewConnectOptionsForTest(factory, tmpKubeconfig, "default")
 
-	status := genStatus(conn)
+	status := buildConnectionStatus(conn)
 	if status == nil {
 		t.Fatal("genStatus returned nil")
 	}
@@ -150,7 +150,7 @@ current-context: test-context
 	}
 }
 
-func TestGenStatus_FieldMapping(t *testing.T) {
+func TestBuildConnectionStatus_FieldMapping(t *testing.T) {
 	tmpKubeconfig := t.TempDir() + "/kubeconfig"
 	kubeconfigContent := `apiVersion: v1
 kind: Config
@@ -178,7 +178,7 @@ current-context: prod-context
 
 	conn := handler.NewConnectOptionsForTest(factory, tmpKubeconfig, "kube-system")
 
-	status := genStatus(conn)
+	status := buildConnectionStatus(conn)
 	if status.Cluster != "prod-cluster" {
 		t.Errorf("expected cluster 'prod-cluster', got %q", status.Cluster)
 	}

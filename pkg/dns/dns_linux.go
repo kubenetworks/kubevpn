@@ -63,7 +63,7 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 	if err == nil {
 		plog.G(ctx).Debugf("Use library to setup DNS done")
 		return nil
-	} else if errors.Is(err, ErrorNotSupportSplitDNS) {
+	} else if errors.Is(err, errNotSupportSplitDNS) {
 		plog.G(ctx).Debugf("Library not support on current OS")
 		err = nil
 	} else {
@@ -123,7 +123,7 @@ func setupDNSbyCmdSystemdResolve(ctx context.Context, tunName string, config *mi
 	return err
 }
 
-var ErrorNotSupportSplitDNS = errors.New("not support split DNS")
+var errNotSupportSplitDNS = errors.New("not support split DNS")
 
 func (c *Config) UseLibraryDNS(tunName string, clientConfig *miekgdns.ClientConfig) error {
 	configurator, err := dns.NewOSConfigurator(plog.G(context.Background()).Debugf, nil, nil, tunName)
@@ -131,7 +131,7 @@ func (c *Config) UseLibraryDNS(tunName string, clientConfig *miekgdns.ClientConf
 		return err
 	}
 	if !configurator.SupportsSplitDNS() {
-		return ErrorNotSupportSplitDNS
+		return errNotSupportSplitDNS
 	}
 	c.OSConfigurator = configurator
 	config := dns.OSConfig{Nameservers: []netip.Addr{}, SearchDomains: []dnsname.FQDN{}}

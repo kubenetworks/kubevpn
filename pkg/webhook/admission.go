@@ -12,6 +12,8 @@ import (
 	"k8s.io/api/admission/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
@@ -74,55 +76,38 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	var responseObj runtime.Object
 	switch *gvk {
 	case v1beta1.SchemeGroupVersion.WithKind("AdmissionReview"):
-		requestedAdmissionReview, ok := obj.(*v1beta1.AdmissionReview)
+		review, ok := obj.(*v1beta1.AdmissionReview)
 		if !ok {
 			plog.G(ctx).Errorf("Expected v1beta1.AdmissionReview but got: %T", obj)
 			return
 		}
-		if ptr.Deref(requestedAdmissionReview.Request.DryRun, false) {
-			plog.G(ctx).Info("Ignore dryrun")
+		if isDryRun(review.Request.DryRun) {
 			responseObj = &v1beta1.AdmissionReview{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: gvk.GroupVersion().String(),
-					Kind:       gvk.Kind,
-				},
-				Response: &v1beta1.AdmissionResponse{
-					Allowed: true,
-					UID:     requestedAdmissionReview.Request.UID,
-				},
+				TypeMeta: metav1.TypeMeta{APIVersion: gvk.GroupVersion().String(), Kind: gvk.Kind},
+				Response: &v1beta1.AdmissionResponse{Allowed: true, UID: review.Request.UID},
 			}
 		} else {
-			responseAdmissionReview := &v1beta1.AdmissionReview{}
-			responseAdmissionReview.SetGroupVersionKind(*gvk)
-			responseAdmissionReview.Response = admit.v1beta1(ctx, *requestedAdmissionReview)
-			responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
-			responseObj = responseAdmissionReview
+			resp := &v1beta1.AdmissionReview{}
+			resp.SetGroupVersionKind(*gvk)
+			resp.Response = admit.v1beta1(ctx, *review)
+			resp.Response.UID = review.Request.UID
+			responseObj = resp
 		}
 
 	case v1.SchemeGroupVersion.WithKind("AdmissionReview"):
-		requestedAdmissionReview, ok := obj.(*v1.AdmissionReview)
+		review, ok := obj.(*v1.AdmissionReview)
 		if !ok {
 			plog.G(ctx).Errorf("Expected v1.AdmissionReview but got: %T", obj)
 			return
 		}
-		if ptr.Deref(requestedAdmissionReview.Request.DryRun, false) {
-			plog.G(ctx).Info("Ignore dryrun")
-			responseObj = &v1.AdmissionReview{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: gvk.GroupVersion().String(),
-					Kind:       gvk.Kind,
-				},
-				Response: &v1.AdmissionResponse{
-					Allowed: true,
-					UID:     requestedAdmissionReview.Request.UID,
-				},
-			}
+		if isDryRun(review.Request.DryRun) {
+			responseObj = allowedReview(gvk, review.Request.UID)
 		} else {
-			responseAdmissionReview := &v1.AdmissionReview{}
-			responseAdmissionReview.SetGroupVersionKind(*gvk)
-			responseAdmissionReview.Response = admit.v1(ctx, *requestedAdmissionReview)
-			responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
-			responseObj = responseAdmissionReview
+			resp := &v1.AdmissionReview{}
+			resp.SetGroupVersionKind(*gvk)
+			resp.Response = admit.v1(ctx, *review)
+			resp.Response.UID = review.Request.UID
+			responseObj = resp
 		}
 
 	default:
@@ -140,8 +125,24 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_, err = w.Write(respBytes)
-	if err != nil {
+	if _, err = w.Write(respBytes); err != nil {
 		plog.G(ctx).Error(err)
+	}
+}
+
+func isDryRun(dryRun *bool) bool {
+	return ptr.Deref(dryRun, false)
+}
+
+func allowedReview(gvk *schema.GroupVersionKind, uid types.UID) *v1.AdmissionReview {
+	return &v1.AdmissionReview{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: gvk.GroupVersion().String(),
+			Kind:       gvk.Kind,
+		},
+		Response: &v1.AdmissionResponse{
+			Allowed: true,
+			UID:     uid,
+		},
 	}
 }
