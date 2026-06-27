@@ -23,7 +23,7 @@ func addTunRoutes(tunName string, routes ...types.Route) error {
 		return err
 	}
 	for _, route := range routes {
-		if net.ParseIP(route.Dst.IP.String()) == nil {
+		if route.Dst.IP == nil {
 			continue
 		}
 		if route.GW == nil {
@@ -61,7 +61,7 @@ func deleteTunRoutes(tunName string, routes ...types.Route) error {
 		return err
 	}
 	for _, route := range routes {
-		if net.ParseIP(route.Dst.IP.String()) == nil {
+		if route.Dst.IP == nil {
 			continue
 		}
 		if route.GW == nil {

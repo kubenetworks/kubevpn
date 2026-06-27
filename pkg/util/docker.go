@@ -44,7 +44,7 @@ func RunLogsWaitRunning(ctx context.Context, name string) error {
 		}
 	}()
 
-	var errChan = make(chan error)
+	errChan := make(chan error)
 	go func() {
 		var err error
 		_, err = stdcopy.StdCopy(w, os.Stdout, buf)

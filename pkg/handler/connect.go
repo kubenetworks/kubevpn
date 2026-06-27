@@ -76,10 +76,12 @@ type ConnectOptions struct {
 	Sync *SyncOptions
 }
 
+// Context returns the connection session's context.
 func (c *ConnectOptions) Context() context.Context {
 	return c.ctx
 }
 
+// InitDHCP initializes the DHCP manager for IP allocation if not already created.
 func (c *ConnectOptions) InitDHCP(ctx context.Context) error {
 	if c.dhcp == nil {
 		c.dhcp = dhcp.NewDHCPManager(c.clientset, c.ManagerNamespace)
@@ -88,6 +90,7 @@ func (c *ConnectOptions) InitDHCP(ctx context.Context) error {
 	return nil
 }
 
+// RentIP leases IPv4 and IPv6 TUN addresses from DHCP, or reuses the provided CIDRs if valid.
 func (c *ConnectOptions) RentIP(ctx context.Context, ipv4, ipv6 string) (context.Context, error) {
 	if err := c.InitDHCP(ctx); err != nil {
 		return nil, err
@@ -112,6 +115,7 @@ func (c *ConnectOptions) RentIP(ctx context.Context, ipv4, ipv6 string) (context
 	), nil
 }
 
+// GetIPFromContext extracts IPv4 and IPv6 TUN addresses from incoming gRPC metadata.
 func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logger) error {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -142,6 +146,7 @@ func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logge
 	return nil
 }
 
+// CreateRemoteInboundPod injects Envoy sidecar proxies into the specified workloads for inbound traffic interception.
 func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string, image string) (err error) {
 	if c.LocalTunIPv4 == nil || c.LocalTunIPv6 == nil {
 		return fmt.Errorf("local tun IP is invalid")
@@ -211,6 +216,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 	return
 }
 
+// DoConnect establishes the full VPN connection: DHCP, CIDR detection, port forwarding, TUN device, routing, and DNS.
 func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	c.isDataPlane = true
@@ -274,6 +280,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	return
 }
 
+// InitClient initializes the Kubernetes clientset, REST client, and config from the given factory.
 func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {
 	plog.G(context.Background()).Debug("Initializing Kubernetes client")
 	c.factory = f
@@ -282,6 +289,7 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {
 	return err
 }
 
+// GetRunningPodList returns the running traffic manager pods in the manager namespace.
 func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error) {
 	label := "app=" + config.ConfigMapPodTrafficManager
 	return util.GetRunningPodList(ctx, c.clientset, c.ManagerNamespace, label)
@@ -334,6 +342,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, filterAPIServer bool) erro
 	return c.Set(ctx, config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
 }
 
+// Set updates a key-value pair in the traffic manager ConfigMap.
 func (c *ConnectOptions) Set(ctx context.Context, key, value string) error {
 	err := retry.RetryOnConflict(
 		retry.DefaultRetry,
@@ -349,6 +358,7 @@ func (c *ConnectOptions) Set(ctx context.Context, key, value string) error {
 	return nil
 }
 
+// Get retrieves a value by key from the traffic manager ConfigMap, using the informer cache first.
 func (c *ConnectOptions) Get(ctx context.Context, key string) (string, error) {
 	items := c.GetConfigMapInformer().GetStore().List()
 	for _, item := range items {
@@ -379,14 +389,17 @@ func (c *ConnectOptions) GetConfigMapInformer() cache.SharedInformer {
 	return c.cmInformer
 }
 
+// GetClientset returns the Kubernetes clientset for this connection.
 func (c *ConnectOptions) GetClientset() kubernetes.Interface {
 	return c.clientset
 }
 
+// GetFactory returns the kubectl factory for this connection.
 func (c *ConnectOptions) GetFactory() cmdutil.Factory {
 	return c.factory
 }
 
+// GetLocalTunIP returns the local TUN device IPv4 and IPv6 addresses as strings.
 func (c *ConnectOptions) GetLocalTunIP() (v4 string, v6 string) {
 	if c.LocalTunIPv4 != nil {
 		v4 = c.LocalTunIPv4.IP.String()
@@ -397,6 +410,7 @@ func (c *ConnectOptions) GetLocalTunIP() (v4 string, v6 string) {
 	return
 }
 
+// GetConnectionID returns the DHCP connection identifier for this session.
 func (c *ConnectOptions) GetConnectionID() string {
 	if c != nil && c.dhcp != nil {
 		return c.dhcp.GetConnectionID()
@@ -404,6 +418,7 @@ func (c *ConnectOptions) GetConnectionID() string {
 	return ""
 }
 
+// GetTunDeviceName returns the OS network interface name of the TUN device for this connection.
 func (c *ConnectOptions) GetTunDeviceName() (string, error) {
 	var ips []net.IP
 	if c.LocalTunIPv4 != nil {
@@ -419,6 +434,7 @@ func (c *ConnectOptions) GetTunDeviceName() (string, error) {
 	return device.Name, nil
 }
 
+// AddRollbackFunc registers a cleanup function to be called when the connection is torn down.
 func (c *ConnectOptions) AddRollbackFunc(f func() error) {
 	c.rollbackFuncList = append(c.rollbackFuncList, f)
 }
@@ -431,10 +447,12 @@ func (c *ConnectOptions) leavePortMap(ns, workload string) {
 	c.proxyWorkloads.Remove(ns, workload)
 }
 
+// IsMe reports whether this connection owns the proxy for the given namespace, UID, and headers.
 func (c *ConnectOptions) IsMe(ns, uid string, headers map[string]string) bool {
 	return c.proxyWorkloads.IsMe(ns, uid, headers)
 }
 
+// ProxyResources returns the list of workloads currently being proxied by this connection.
 func (c *ConnectOptions) ProxyResources() ProxyList {
 	return c.proxyWorkloads
 }

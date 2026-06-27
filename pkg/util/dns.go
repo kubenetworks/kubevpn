@@ -34,9 +34,5 @@ func GetDNS(ctx context.Context, clientSet kubernetes.Interface, restConfig *res
 	if err != nil {
 		return nil, err
 	}
-	clientConfig, err := GetDNSServiceIPFromPod(ctx, clientSet, restConfig, pod, ns)
-	if err != nil {
-		return nil, err
-	}
-	return clientConfig, nil
+	return GetDNSServiceIPFromPod(ctx, clientSet, restConfig, pod, ns)
 }

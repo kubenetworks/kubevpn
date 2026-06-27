@@ -123,7 +123,7 @@ func (c *Config) usingResolver(ctx context.Context) {
 		}
 
 		var conf *miekgdns.ClientConfig
-		conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(content)))
+		conf, err = miekgdns.ClientConfigFromReader(bytes.NewBuffer(content))
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to parse resolver %s: %v", filename, err)
 			continue

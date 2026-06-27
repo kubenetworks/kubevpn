@@ -148,7 +148,7 @@ func ipHash(ip net.IP, slots int) int {
 
 func readFromConn(ctx context.Context, conn net.Conn, slotInbound chan *Packet, tunOutbound chan *Packet, errChan chan error, slotID int) {
 	defer util.HandleCrash()
-	var gvisorInbound = make(chan *Packet, MaxSize)
+	gvisorInbound := make(chan *Packet, MaxSize)
 	go handleGvisorPacket(gvisorInbound, slotInbound, 2).Run(ctx)
 	readTimeout := config.KeepAliveTime * 3
 	nextDeadline := time.Now().Add(readTimeout)
@@ -225,7 +225,7 @@ func writeToConn(ctx context.Context, rawConn net.Conn, inbound <-chan *Packet, 
 
 func (d *ClientDevice) readFromTun(ctx context.Context) {
 	defer util.HandleCrash()
-	var gvisorInbound = make(chan *Packet, MaxSize)
+	gvisorInbound := make(chan *Packet, MaxSize)
 	go handleGvisorPacket(gvisorInbound, d.tunOutbound, 0).Run(ctx)
 	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]

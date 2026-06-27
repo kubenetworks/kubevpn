@@ -51,7 +51,7 @@ func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, ns
 		if err != nil {
 			return err
 		}
-		var v = make([]*controlplane.Virtual, 0)
+		v := make([]*controlplane.Virtual, 0)
 		if str, ok := configMap.Data[config.KeyEnvoy]; ok {
 			if err = yaml.Unmarshal([]byte(str), &v); err != nil {
 				return err

@@ -54,7 +54,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 
 	wg := sync.WaitGroup{}
 	wg.Add(len(svr.connections))
-	var list = make([]*rpc.Status, len(svr.connections))
+	list := make([]*rpc.Status, len(svr.connections))
 	for i := range svr.connections {
 		go func(i int) {
 			defer wg.Done()
@@ -96,7 +96,7 @@ func buildProxyAndSyncStatus(connect *handler.ConnectOptions, sync *handler.Sync
 	var proxyList []*rpc.Proxy
 	status := connect.HealthStatus()
 	if configMap := status.ConfigMap(); configMap != nil {
-		var v = make([]*controlplane.Virtual, 0)
+		v := make([]*controlplane.Virtual, 0)
 		if str, ok := configMap.Data[config.KeyEnvoy]; ok {
 			if err := yaml.Unmarshal([]byte(str), &v); err != nil {
 				return nil, nil, err

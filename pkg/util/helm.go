@@ -89,14 +89,10 @@ func DetectPodExists(ctx context.Context, clientset kubernetes.Interface, namesp
 	if err != nil {
 		return false, err
 	}
-	for i := 0; i < len(list.Items); i++ {
-		if list.Items[i].GetDeletionTimestamp() != nil || !AllContainersRunning(&list.Items[i]) {
-			list.Items = append(list.Items[:i], list.Items[i+1:]...)
-			i--
+	for _, pod := range list.Items {
+		if pod.GetDeletionTimestamp() == nil && AllContainersRunning(&pod) {
+			return true, nil
 		}
 	}
-	if len(list.Items) == 0 {
-		return false, nil
-	}
-	return true, nil
+	return false, nil
 }

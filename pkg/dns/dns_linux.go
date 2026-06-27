@@ -78,7 +78,7 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	localResolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(readFile)))
+	localResolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBuffer(readFile))
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (c *Config) CancelDNS() {
 	if err != nil {
 		return
 	}
-	resolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(readFile)))
+	resolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBuffer(readFile))
 	if err != nil {
 		return
 	}

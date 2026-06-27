@@ -32,7 +32,7 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 		plog.G(ctx).Infof("No proxy resources found")
 		return nil
 	}
-	var v = make([]*controlplane.Virtual, 0)
+	v := make([]*controlplane.Virtual, 0)
 	str := cm.Data[config.KeyEnvoy]
 	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
 		plog.G(ctx).Errorf("Unmarshal envoy config error: %v", err)

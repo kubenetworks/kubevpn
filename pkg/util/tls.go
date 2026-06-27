@@ -29,14 +29,13 @@ func GetTlsClientConfig(tlsSecret map[string][]byte) (*tls.Config, error) {
 	}
 	certPool := x509.NewCertPool()
 	certPool.AppendCertsFromPEM(crtBytes)
-	client := &tls.Config{
+	return &tls.Config{
 		RootCAs:      certPool,
 		Certificates: []tls.Certificate{pair},
 		ServerName:   string(serverName),
 		MinVersion:   tls.VersionTLS13,
 		MaxVersion:   tls.VersionTLS13,
-	}
-	return client, nil
+	}, nil
 }
 
 // GetTlsServerConfig builds a TLS server configuration from the certificate, key, and server name in tlsInfo.
@@ -50,13 +49,12 @@ func GetTlsServerConfig(tlsInfo map[string][]byte) (*tls.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := &tls.Config{
+	return &tls.Config{
 		Certificates: []tls.Certificate{pair},
 		ServerName:   string(serverName),
 		MinVersion:   tls.VersionTLS13,
 		MaxVersion:   tls.VersionTLS13,
-	}
-	return client, nil
+	}, nil
 }
 
 var ErrNoTLSConfig = errors.New("no TLS configuration found")

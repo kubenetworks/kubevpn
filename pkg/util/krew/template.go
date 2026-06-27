@@ -24,13 +24,13 @@ func (i InvalidPluginSpecError) Error() string {
 // for backward compatibility
 // by default addURIAndSha assumed 4 spaces indent
 func fixShaIndentation(v string) string {
-	return strings.Replace(v, "    sha256:", "sha256:", -1)
+	return strings.ReplaceAll(v, "    sha256:", "sha256:")
 }
 
 func indent(spaces int, v string) string {
 	v = fixShaIndentation(v)
 	pad := strings.Repeat(" ", spaces)
-	return strings.TrimSpace(pad + strings.Replace(v, "\n", "\n"+pad, -1))
+	return strings.TrimSpace(pad + strings.ReplaceAll(v, "\n", "\n"+pad))
 }
 
 // ProcessTemplate process the .krew.yaml template for the release request
