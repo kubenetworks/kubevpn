@@ -311,6 +311,6 @@ func TestRemoveEnvoyConfig_ConfigMapNotFound(t *testing.T) {
 }
 
 // yamlUnmarshal is a test helper wrapping sigs.k8s.io/yaml.Unmarshal
-func yamlUnmarshal(data []byte, v interface{}) error {
+func yamlUnmarshal(data []byte, v any) error {
 	return yaml.Unmarshal(data, v)
 }

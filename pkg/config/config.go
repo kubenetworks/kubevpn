@@ -150,25 +150,16 @@ var (
 )
 
 var (
-	KeepAliveTime    = 60 * time.Second
-	DialTimeout      = 15 * time.Second
-	HandshakeTimeout = 5 * time.Second
-	ConnectTimeout   = 5 * time.Second
-	ReadTimeout      = 10 * time.Second
-	WriteTimeout     = 10 * time.Second
+	KeepAliveTime  = 60 * time.Second
+	DialTimeout    = 15 * time.Second
+	ConnectTimeout = 5 * time.Second
 
-	// Health check and reconciliation intervals
-	HealthCheckInterval = 30 * time.Second
-	SSHKeepAliveInterval = 10 * time.Second
-	DNSRouteRefreshInterval = 15 * time.Second
+	DNSRouteRefreshInterval  = 15 * time.Second
 	DNSRouteDebounceInterval = 3 * time.Second
 
-	// Timeouts for network operations
-	UDPSessionTimeout  = 120 * time.Second
-	UDPRelayTimeout    = 30 * time.Second
-	PortForwardTimeout = 60 * time.Second
+	UDPSessionTimeout = 120 * time.Second
+	UDPRelayTimeout   = 30 * time.Second
 
-	// Reconnection backoff
 	SlotReconnectBackoff = 2 * time.Second
 	DaemonPollInterval   = 200 * time.Millisecond
 )

@@ -31,7 +31,7 @@ func main() {
 
 	name := path.Base(tplFile)
 	var links []string
-	t := template.New(name).Funcs(map[string]interface{}{
+	t := template.New(name).Funcs(map[string]any{
 		"addURIAndSha": func(url, tag string) string {
 			t := struct {
 				TagName string

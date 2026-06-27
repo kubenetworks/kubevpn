@@ -43,7 +43,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (cache.SharedIndex
 	}
 	svcIndexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
 	svcInformer := informerv1.NewServiceInformer(clientSet, svcNs, 0, svcIndexers)
-	if err = c.watchAndRoute(ctx, svcInformer, func(obj interface{}) []string {
+	if err = c.watchAndRoute(ctx, svcInformer, func(obj any) []string {
 		svc, ok := obj.(*v1.Service)
 		if !ok {
 			return nil
@@ -55,7 +55,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (cache.SharedIndex
 
 	podIndexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
 	podInformer := informerv1.NewPodInformer(clientSet, podNs, 0, podIndexers)
-	if err = c.watchAndRoute(ctx, podInformer, func(obj interface{}) []string {
+	if err = c.watchAndRoute(ctx, podInformer, func(obj any) []string {
 		p, ok := obj.(*v1.Pod)
 		if !ok || p.Spec.HostNetwork {
 			return nil
@@ -70,7 +70,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (cache.SharedIndex
 
 // watchAndRoute starts an informer and a goroutine that periodically extracts
 // IPs from the cache and adds them to the route table.
-func (c *ConnectOptions) watchAndRoute(ctx context.Context, informer cache.SharedIndexInformer, extractIPs func(interface{}) []string) error {
+func (c *ConnectOptions) watchAndRoute(ctx context.Context, informer cache.SharedIndexInformer, extractIPs func(any) []string) error {
 	ticker := time.NewTicker(time.Second * 15)
 	_, err := informer.AddEventHandler(newTickerResetHandler(ticker))
 	if err != nil {
@@ -190,7 +190,11 @@ func (c *ConnectOptions) addExtraRoute(ctx context.Context, name string) error {
 func getIngressRecord(ctx context.Context, ingressInterface v2.NetworkingV1Interface, nsList []string, domain string) string {
 	var ingressList []apinetworkingv1.Ingress
 	for _, ns := range nsList {
-		list, _ := ingressInterface.Ingresses(ns).List(ctx, metav1.ListOptions{})
+		list, err := ingressInterface.Ingresses(ns).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			plog.G(ctx).Debugf("Failed to list ingresses in namespace %s: %v", ns, err)
+			continue
+		}
 		ingressList = append(ingressList, list.Items...)
 	}
 	for _, item := range ingressList {
@@ -249,13 +253,13 @@ func (c *ConnectOptions) addExtraNodeIP(ctx context.Context) error {
 // informer events into a single route-table update.
 func newTickerResetHandler(ticker *time.Ticker) cache.ResourceEventHandlerFuncs {
 	return cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
+		AddFunc: func(obj any) {
 			ticker.Reset(time.Second * 3)
 		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
+		UpdateFunc: func(oldObj, newObj any) {
 			ticker.Reset(time.Second * 3)
 		},
-		DeleteFunc: func(obj interface{}) {
+		DeleteFunc: func(obj any) {
 			ticker.Reset(time.Second * 3)
 		},
 	}

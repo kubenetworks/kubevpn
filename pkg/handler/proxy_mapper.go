@@ -3,8 +3,8 @@ package handler
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/netip"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -77,9 +77,9 @@ func (m *Mapper) Run() {
 
 	// Shared ConfigMap informer — reuse from ConnectOptions, no extra watch connection
 	m.cmInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(_ interface{}) { triggerReconcile() },
-		UpdateFunc: func(_, _ interface{}) { triggerReconcile() },
-		DeleteFunc: func(_ interface{}) { triggerReconcile() },
+		AddFunc:    func(_ any) { triggerReconcile() },
+		UpdateFunc: func(_, _ any) { triggerReconcile() },
+		DeleteFunc: func(_ any) { triggerReconcile() },
 	})
 
 	// Watch Pods matching the service selector
@@ -90,9 +90,9 @@ func (m *Mapper) Run() {
 		},
 	)
 	podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(_ interface{}) { triggerReconcile() },
-		UpdateFunc: func(_, _ interface{}) { triggerReconcile() },
-		DeleteFunc: func(_ interface{}) { triggerReconcile() },
+		AddFunc:    func(_ any) { triggerReconcile() },
+		UpdateFunc: func(_, _ any) { triggerReconcile() },
+		DeleteFunc: func(_ any) { triggerReconcile() },
 	})
 	go podInformer.Run(m.ctx.Done())
 
@@ -120,7 +120,7 @@ func (m *Mapper) Run() {
 			continue
 		}
 
-		if !reflect.DeepEqual(portMapping, lastPortMapping) {
+		if !maps.Equal(portMapping, lastPortMapping) {
 			cancelAllTunnels(podTunnels)
 		}
 		lastPortMapping = portMapping
@@ -200,7 +200,7 @@ func (m *Mapper) extractPortMapping(configMap *v1.ConfigMap) (map[int32]int32, e
 			continue
 		}
 		for _, rule := range virtual.Rules {
-			if !reflect.DeepEqual(m.headers, rule.Headers) {
+			if !maps.Equal(m.headers, rule.Headers) {
 				continue
 			}
 			for containerPort, portPair := range rule.PortMap {

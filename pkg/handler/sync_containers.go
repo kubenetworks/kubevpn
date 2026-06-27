@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/netip"
 	"net/url"
@@ -147,7 +148,10 @@ func (d *SyncOptions) SyncDir(ctx context.Context, labels string) error {
 		return err
 	}
 	remoteAddr := net.JoinHostPort(list[0].Status.PodIP, strconv.Itoa(libconfig.DefaultTCPPort))
-	localPort, _ := util.GetAvailableTCPPort()
+	localPort, err := util.GetAvailableTCPPort()
+	if err != nil {
+		return fmt.Errorf("failed to allocate local TCP port for syncthing: %w", err)
+	}
 	localAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort))
 	err = syncthing.StartClient(d.ctx, d.LocalDir, localAddr, remoteAddr)
 	if err != nil {

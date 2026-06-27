@@ -63,7 +63,7 @@ func NewInjector(opts InjectOptions) Injector {
 type JSONPatchOp struct {
 	Op    string      `json:"op,omitempty"`
 	Path  string      `json:"path,omitempty"`
-	Value interface{} `json:"value,omitempty"`
+	Value any `json:"value,omitempty"`
 }
 
 func patchWorkload(ctx context.Context, factory cmdutil.Factory, info *resource.Info, templateSpec *v1.PodTemplateSpec, path []string) error {

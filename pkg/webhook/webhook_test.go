@@ -483,7 +483,7 @@ func TestHandleCreate_WithVPN_AllocatesIP(t *testing.T) {
 	}
 
 	// Apply the patch operations to the original pod to verify IP allocation
-	var ops []map[string]interface{}
+	var ops []map[string]any
 	if err := json.Unmarshal(resp.Patch, &ops); err != nil {
 		t.Fatalf("failed to unmarshal patch: %v", err)
 	}

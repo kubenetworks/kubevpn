@@ -45,13 +45,13 @@ func Watch(ctx context.Context, f cmdutil.Factory, notifyCh chan<- NotifyMessage
 	})
 	cmTicker := time.NewTicker(time.Second * 5)
 	_, err = cmInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
+		AddFunc: func(obj any) {
 			cmTicker.Reset(time.Nanosecond * 1)
 		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
+		UpdateFunc: func(oldObj, newObj any) {
 			cmTicker.Reset(time.Nanosecond * 1)
 		},
-		DeleteFunc: func(obj interface{}) {
+		DeleteFunc: func(obj any) {
 			cmTicker.Reset(time.Nanosecond * 1)
 		},
 	})

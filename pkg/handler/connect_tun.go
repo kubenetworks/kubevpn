@@ -35,7 +35,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 	defer firstCancelFunc()
 	var errChan = make(chan error, 1)
 	go func() {
-		runtime.ErrorHandlers = []runtime.ErrorHandler{func(ctx context.Context, err error, msg string, keysAndValues ...interface{}) {
+		runtime.ErrorHandlers = []runtime.ErrorHandler{func(ctx context.Context, err error, msg string, keysAndValues ...any) {
 			plog.G(ctx).Error(err)
 		}}
 		var first = ptr.To(true)

@@ -34,19 +34,15 @@ func indent(spaces int, v string) string {
 }
 
 // ProcessTemplate process the .krew.yaml template for the release request
-func ProcessTemplate(templateFile string, values interface{}, sha256Map map[string]string) ([]byte, error) {
-	spec, err := RenderTemplate(templateFile, values, sha256Map)
-	if err != nil {
-		return nil, err
-	}
-	return spec, nil
+func ProcessTemplate(templateFile string, values any, sha256Map map[string]string) ([]byte, error) {
+	return RenderTemplate(templateFile, values, sha256Map)
 }
 
 // RenderTemplate process the .krew.yaml template for the release request
-func RenderTemplate(templateFile string, values interface{}, sha256Map map[string]string) ([]byte, error) {
+func RenderTemplate(templateFile string, values any, sha256Map map[string]string) ([]byte, error) {
 	plog.G(context.Background()).Debugf("Started processing of template %s", templateFile)
 	name := path.Base(templateFile)
-	t := template.New(name).Funcs(map[string]interface{}{
+	t := template.New(name).Funcs(map[string]any{
 		"indent": indent,
 		"addURIAndSha": func(url, tag string) string {
 			t := struct {

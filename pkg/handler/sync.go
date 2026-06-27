@@ -216,7 +216,7 @@ func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, spec *v1.PodTempla
 	if err != nil {
 		return err
 	}
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	err = json.Unmarshal(marshal, &m)
 	if err != nil {
 		return err

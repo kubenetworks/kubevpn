@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -85,11 +86,14 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 
 	marshal, err := yaml.Marshal(v)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal envoy config: %w", err)
 	}
 	cm.Data[config.KeyEnvoy] = string(marshal)
 	_, err = mapInterface.Update(ctx, cm, metav1.UpdateOptions{})
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to update configmap %s: %w", config.ConfigMapPodTrafficManager, err)
+	}
+	return nil
 }
 
 func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clientset kubernetes.Interface, namespace, workload string) error {
@@ -140,6 +144,8 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 			portmap[port.ContainerPort] = port.ContainerPort
 		}
 	}
-	err = inject.ModifyServiceTargetPort(ctx, clientset, namespace, object.Name, portmap)
-	return err
+	if err = inject.ModifyServiceTargetPort(ctx, clientset, namespace, object.Name, portmap); err != nil {
+		return fmt.Errorf("failed to restore service %s target ports: %w", object.Name, err)
+	}
+	return nil
 }
