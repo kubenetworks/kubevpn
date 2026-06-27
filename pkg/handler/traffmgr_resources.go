@@ -1,7 +1,6 @@
 package handler
 
 import (
-	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -11,7 +10,6 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func genServiceAccount(namespace string) *v1.ServiceAccount {
@@ -59,58 +57,9 @@ func genRoleBinding(namespace string) *rbacv1.RoleBinding {
 	}
 }
 
-func genMutatingWebhookConfiguration(namespace string, crt []byte) *admissionv1.MutatingWebhookConfiguration {
-	return &admissionv1.MutatingWebhookConfiguration{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      config.ConfigMapPodTrafficManager + "." + namespace,
-			Namespace: namespace,
-		},
-		Webhooks: []admissionv1.MutatingWebhook{{
-			Name: config.ConfigMapPodTrafficManager + ".naison.io", // no sense
-			ClientConfig: admissionv1.WebhookClientConfig{
-				Service: &admissionv1.ServiceReference{
-					Namespace: namespace,
-					Name:      config.ConfigMapPodTrafficManager,
-					Path:      ptr.To("/pods"),
-					Port:      ptr.To[int32](80),
-				},
-				CABundle: crt,
-			},
-			Rules: []admissionv1.RuleWithOperations{{
-				Operations: []admissionv1.OperationType{admissionv1.Create, admissionv1.Delete},
-				Rule: admissionv1.Rule{
-					APIGroups:   []string{""},
-					APIVersions: []string{"v1"},
-					Resources:   []string{"pods"},
-					Scope:       ptr.To(admissionv1.NamespacedScope),
-				},
-			}},
-			FailurePolicy: ptr.To(admissionv1.Ignore),
-			// namespace kubevpn is special, if installed to this namespace, means center install mode
-			// same as above label ns
-			NamespaceSelector:       util.If(namespace == config.DefaultNamespaceKubevpn, nil, &metav1.LabelSelector{MatchLabels: map[string]string{"ns": namespace}}),
-			SideEffects:             ptr.To(admissionv1.SideEffectClassNone),
-			TimeoutSeconds:          ptr.To[int32](15),
-			AdmissionReviewVersions: []string{"v1", "v1beta1"},
-			ReinvocationPolicy:      ptr.To(admissionv1.NeverReinvocationPolicy),
-			/*// needs to enable featureGate=AdmissionWebhookMatchConditions
-			MatchConditions: []admissionv1.MatchCondition{
-				{
-					Name: "",
-					Expression: fmt.Sprintf(
-						"container_name.exists(c, c == '%s') && environment_variable.find(e, e == '%s').exists()",
-						config.ContainerSidecarVPN, config.EnvInboundPodTunIPv4,
-					),
-				},
-			},*/
-		}},
-	}
-}
-
 func genService(namespace string) *v1.Service {
 	tcp10801 := config.PortNameTCP
 	tcp9002 := config.PortNameEnvoy
-	tcp80 := config.PortNameHTTP
 	udp53 := config.PortNameDNS
 	return &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -128,11 +77,6 @@ func genService(namespace string) *v1.Service {
 				Protocol:   v1.ProtocolTCP,
 				Port:       9002,
 				TargetPort: intstr.FromInt32(9002),
-			}, {
-				Name:       tcp80,
-				Protocol:   v1.ProtocolTCP,
-				Port:       80,
-				TargetPort: intstr.FromInt32(80),
 			}, {
 				Name:       udp53,
 				Protocol:   v1.ProtocolUDP,
@@ -168,18 +112,10 @@ func tcpProbes(port int32) (*v1.Probe, *v1.Probe, *v1.Probe) {
 		&v1.Probe{ProbeHandler: handler, InitialDelaySeconds: 1, PeriodSeconds: 2, FailureThreshold: 15}
 }
 
-func httpProbes(port int32, path string) (*v1.Probe, *v1.Probe, *v1.Probe) {
-	handler := v1.ProbeHandler{HTTPGet: &v1.HTTPGetAction{Path: path, Port: intstr.FromInt32(port), Scheme: v1.URISchemeHTTPS}}
-	return &v1.Probe{ProbeHandler: handler, InitialDelaySeconds: 5, PeriodSeconds: 15, FailureThreshold: 3},
-		&v1.Probe{ProbeHandler: handler, InitialDelaySeconds: 3, PeriodSeconds: 10, FailureThreshold: 3},
-		&v1.Probe{ProbeHandler: handler, InitialDelaySeconds: 1, PeriodSeconds: 2, FailureThreshold: 15}
-}
-
 func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deployment {
 	tcp10801 := config.PortNameTCP
 	tcp9002 := config.PortNameEnvoy
 	udp53 := config.PortNameDNS
-	tcp80 := config.PortNameHTTP
 	var resourcesSmall = v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
 			v1.ResourceCPU:    resource.MustParse("100m"),
@@ -258,46 +194,24 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 							Image:   image,
 							Command: []string{"kubevpn"},
 							Args:    []string{"control-plane"},
-							Ports: []v1.ContainerPort{
-								{
-									Name:          tcp9002,
-									ContainerPort: 9002,
-									Protocol:      v1.ProtocolTCP,
-								},
-								{
-									Name:          udp53,
-									ContainerPort: 53,
-									Protocol:      v1.ProtocolUDP,
-								},
-							},
+							Ports: []v1.ContainerPort{{
+								Name:          tcp9002,
+								ContainerPort: 9002,
+								Protocol:      v1.ProtocolTCP,
+							}},
 							VolumeMounts:    []v1.VolumeMount{},
 							ImagePullPolicy: v1.PullIfNotPresent,
 							Resources:       resourcesSmall,
 						},
 						{
-							Name:    config.ContainerSidecarWebhook,
+							Name:    config.ContainerSidecarDNS,
 							Image:   image,
 							Command: []string{"kubevpn"},
-							Args:    []string{"webhook"},
+							Args:    []string{"dns"},
 							Ports: []v1.ContainerPort{{
-								Name:          tcp80,
-								ContainerPort: 80,
-								Protocol:      v1.ProtocolTCP,
-							}},
-							EnvFrom: []v1.EnvFromSource{{
-								SecretRef: &v1.SecretEnvSource{
-									LocalObjectReference: v1.LocalObjectReference{
-										Name: config.ConfigMapPodTrafficManager,
-									},
-								},
-							}},
-							Env: []v1.EnvVar{{
-								Name: config.EnvPodNamespace,
-								ValueFrom: &v1.EnvVarSource{
-									FieldRef: &v1.ObjectFieldSelector{
-										FieldPath: "metadata.namespace",
-									},
-								},
+								Name:          udp53,
+								ContainerPort: 53,
+								Protocol:      v1.ProtocolUDP,
 							}},
 							ImagePullPolicy: v1.PullIfNotPresent,
 							Resources:       resourcesSmall,
@@ -311,7 +225,6 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 	containers := deploy.Spec.Template.Spec.Containers
 	containers[0].LivenessProbe, containers[0].ReadinessProbe, containers[0].StartupProbe = tcpProbes(10801)
 	containers[1].LivenessProbe, containers[1].ReadinessProbe, containers[1].StartupProbe = tcpProbes(9002)
-	containers[2].LivenessProbe, containers[2].ReadinessProbe, containers[2].StartupProbe = httpProbes(80, "/readyz")
 
 	if imagePullSecretName != "" {
 		deploy.Spec.Template.Spec.ImagePullSecrets = []v1.LocalObjectReference{{

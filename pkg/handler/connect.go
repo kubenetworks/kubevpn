@@ -9,6 +9,9 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,7 +23,6 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -46,15 +48,13 @@ type ConnectOptions struct {
 	isDataPlane bool
 	OwnerID     string `json:"OwnerID,omitempty"`
 
-	dhcp *dhcp.Manager
-	// needs to give it back to dhcp
-	LocalTunIPv4     *net.IPNet `json:"LocalTunIPv4,omitempty"`
-	LocalTunIPv6     *net.IPNet `json:"LocalTunIPv6,omitempty"`
+	LocalTunIPv4     *net.IPNet
+	LocalTunIPv6     *net.IPNet
 	rollbackFuncList []func() error
 
-	SshHosts []net.IP `json:"-"`
-	once     sync.Once
-	network  *NetworkManager
+	SshHosts       []net.IP `json:"-"`
+	once           sync.Once
+	network        *NetworkManager
 	proxyManager   *ProxyManager
 	configMapStore *ConfigMapStore
 
@@ -66,38 +66,86 @@ func (c *ConnectOptions) Context() context.Context {
 	return c.ctx
 }
 
-// InitDHCP initializes the DHCP manager for IP allocation if not already created.
-func (c *ConnectOptions) InitDHCP(ctx context.Context) error {
-	if c.dhcp == nil {
-		c.dhcp = dhcp.NewDHCPManager(c.clientset, c.ManagerNamespace)
-		return c.dhcp.InitDHCP(ctx)
-	}
-	return nil
-}
-
-// RentIP leases IPv4 and IPv6 TUN addresses from DHCP, or reuses the provided CIDRs if valid.
+// RentIP obtains TUN IP allocation. If ipv4/ipv6 are provided (restart recovery),
+// reuses them. Otherwise delegates to TunConfigService via gRPC.
+// Returns an outgoing gRPC context with the IP metadata for the root daemon.
 func (c *ConnectOptions) RentIP(ctx context.Context, ipv4, ipv6 string) (context.Context, error) {
-	if err := c.InitDHCP(ctx); err != nil {
-		return nil, err
-	}
 	if util.IsValidCIDR(ipv4) && util.IsValidCIDR(ipv6) {
 		ip, cidr, _ := net.ParseCIDR(ipv4)
 		c.LocalTunIPv4 = &net.IPNet{IP: ip, Mask: cidr.Mask}
 		ip, cidr, _ = net.ParseCIDR(ipv6)
 		c.LocalTunIPv6 = &net.IPNet{IP: ip, Mask: cidr.Mask}
 	} else {
-		var err error
-		c.LocalTunIPv4, c.LocalTunIPv6, err = c.dhcp.RentIP(ctx)
+		v4, v6, err := c.getTunIPFromControlPlane(ctx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("get TUN IP from control-plane: %w", err)
 		}
+		c.LocalTunIPv4 = v4
+		c.LocalTunIPv6 = v6
 	}
 
 	return metadata.AppendToOutgoingContext(
 		context.Background(),
 		config.HeaderIPv4, c.LocalTunIPv4.String(),
 		config.HeaderIPv6, c.LocalTunIPv6.String(),
+		config.HeaderOwnerID, c.OwnerID,
 	), nil
+}
+
+// getTunIPFromControlPlane calls TunConfigService.GetTunIP via port-forward to traffic manager.
+func (c *ConnectOptions) getTunIPFromControlPlane(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
+	// Port-forward to traffic manager 9002 is needed here.
+	// In the user daemon path, we use the K8s API directly to port-forward.
+	pods, err := c.GetRunningPodList(ctx)
+	if err != nil || len(pods) == 0 {
+		return nil, nil, fmt.Errorf("no traffic manager pod found: %w", err)
+	}
+
+	localPort, err := util.GetAvailableTCPPort()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	pfCtx, pfCancel := context.WithCancel(ctx)
+	readyCh := make(chan struct{})
+	go func() {
+		_ = util.PortForwardPod(c.config, c.restclient, pods[0].Name, c.ManagerNamespace,
+			[]string{fmt.Sprintf("%d:9002", localPort)}, readyCh, pfCtx.Done(), nil, nil)
+	}()
+
+	select {
+	case <-readyCh:
+	case <-time.After(15 * time.Second):
+		pfCancel()
+		return nil, nil, fmt.Errorf("port-forward to control-plane timed out")
+	}
+	defer pfCancel()
+
+	target := fmt.Sprintf("127.0.0.1:%d", localPort)
+	conn, err := grpc.DialContext(ctx, target,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dial control-plane: %w", err)
+	}
+	defer conn.Close()
+
+	client := rpc.NewTunConfigServiceClient(conn)
+	resp, err := client.GetTunIP(ctx, &rpc.TunIPRequest{
+		OwnerID:   c.OwnerID,
+		Namespace: c.ManagerNamespace,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ip4, cidr4, _ := net.ParseCIDR(resp.IPv4)
+	ip6, cidr6, _ := net.ParseCIDR(resp.IPv6)
+	v4 := &net.IPNet{IP: ip4, Mask: cidr4.Mask}
+	v6 := &net.IPNet{IP: ip6, Mask: cidr6.Mask}
+	plog.G(ctx).Infof("Got TUN IP from control-plane: v4=%s v6=%s", v4, v6)
+	return v4, v6, nil
 }
 
 // GetIPFromContext extracts IPv4 and IPv6 TUN addresses from incoming gRPC metadata.
@@ -128,6 +176,11 @@ func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logge
 	}
 	c.LocalTunIPv6 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
 	logger.Debugf("Get IPv6 %s from context", c.LocalTunIPv6.String())
+
+	if ownerIDs := md.Get(config.HeaderOwnerID); len(ownerIDs) > 0 && ownerIDs[0] != "" {
+		c.OwnerID = ownerIDs[0]
+		logger.Debugf("Get OwnerID %s from context", c.OwnerID)
+	}
 	return nil
 }
 
@@ -202,15 +255,11 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 	return nil
 }
 
-// DoConnect establishes the full VPN connection: DHCP, CIDR detection, port forwarding, TUN device, routing, and DNS.
+// DoConnect establishes the full VPN connection: CIDR detection, port forwarding, TUN device, routing, and DNS.
 func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	c.isDataPlane = true
 	plog.G(ctx).Info("Starting connect to cluster")
-	if err = c.InitDHCP(c.ctx); err != nil {
-		plog.G(ctx).Errorf("Init DHCP server failed: %v", err)
-		return
-	}
 	go c.setupSignalHandler()
 	var cidrs []*net.IPNet
 	var apiServerIPs []net.IP
@@ -238,10 +287,15 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 		ExtraRouteInfo:    &c.ExtraRouteInfo,
 		Image:             c.Image,
 		Lock:              c.Lock,
+		OwnerID:           c.OwnerID,
 		GetRunningPodList: c.GetRunningPodList,
 	})
 
-	return c.network.Start(c.ctx)
+	if err = c.network.Start(c.ctx); err != nil {
+		return
+	}
+	c.network.StartIPWatcher(c.ctx)
+	return
 }
 
 // InitClient initializes the Kubernetes clientset, REST client, and config from the given factory.
@@ -354,12 +408,13 @@ func (c *ConnectOptions) GetLocalTunIP() (v4 string, v6 string) {
 	return
 }
 
-// GetConnectionID returns the DHCP connection identifier for this session.
+// GetConnectionID returns the connection identifier (namespace UID suffix) for this session.
 func (c *ConnectOptions) GetConnectionID() string {
-	if c != nil && c.dhcp != nil {
-		return c.dhcp.GetConnectionID()
+	if c == nil || c.clientset == nil {
+		return ""
 	}
-	return ""
+	id, _ := util.GetConnectionID(context.Background(), c.clientset.CoreV1().Namespaces(), c.ManagerNamespace)
+	return id
 }
 
 // GetTunDeviceName returns the OS network interface name of the TUN device for this connection.

@@ -49,7 +49,6 @@ func Uninstall(ctx context.Context, clientset kubernetes.Interface, ns string) e
 	_ = clientset.CoreV1().ConfigMaps(ns).Delete(ctx, name, options)
 	_ = clientset.CoreV1().Pods(ns).Delete(ctx, config.CniNetName, options)
 	_ = clientset.CoreV1().Secrets(ns).Delete(ctx, name, options)
-	_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, name+"."+ns, options)
 	_ = clientset.RbacV1().RoleBindings(ns).Delete(ctx, name, options)
 	_ = clientset.CoreV1().ServiceAccounts(ns).Delete(ctx, name, options)
 	_ = clientset.RbacV1().Roles(ns).Delete(ctx, name, options)

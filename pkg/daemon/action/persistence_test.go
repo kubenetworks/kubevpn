@@ -475,26 +475,6 @@ func TestServer_ConnectionList_CurrentConnectionID(t *testing.T) {
 	}
 }
 
-func TestServer_ConnectionUse_Found(t *testing.T) {
-	conn1 := handler.NewConnectOptionsWithIDForTest("conn-aaa")
-	conn2 := handler.NewConnectOptionsWithIDForTest("conn-bbb")
-
-	svr := &Server{
-		currentConnectionID: "conn-aaa",
-		connections:         []*handler.ConnectOptions{conn1, conn2},
-	}
-
-	// Switch to conn-bbb
-	_, err := svr.ConnectionUse(context.Background(), &rpc.ConnectionUseRequest{
-		ConnectionID: "conn-bbb",
-	})
-	if err != nil {
-		t.Fatalf("ConnectionUse: %v", err)
-	}
-	if svr.currentConnectionID != "conn-bbb" {
-		t.Errorf("expected currentConnectionID 'conn-bbb', got %q", svr.currentConnectionID)
-	}
-}
 
 func TestServer_OffloadToConfig_RoundTrip(t *testing.T) {
 	dbPath := config.GetDBPath()

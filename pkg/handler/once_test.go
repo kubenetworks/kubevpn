@@ -85,17 +85,6 @@ func TestCreateOutboundPod(t *testing.T) {
 		},
 	)
 
-	// MutatingWebhookConfigurations is cluster-scoped but genMutatingWebhookConfiguration sets
-	// ObjectMeta.Namespace. The fake client rejects this, so we strip the namespace before
-	// letting the default reactor handle it.
-	clientset.PrependReactor("create", "mutatingwebhookconfigurations", func(action clienttesting.Action) (bool, runtime.Object, error) {
-		createAction := action.(clienttesting.CreateAction)
-		obj := createAction.GetObject()
-		obj.(metav1.ObjectMetaAccessor).GetObjectMeta().SetNamespace("")
-		// Return false so the default reactor handles the actual storage
-		return false, nil, nil
-	})
-
 	// Use a reactor to control pod list behavior:
 	// - First call (from DetectPodExists): return empty list so creation proceeds
 	// - Subsequent calls (from WaitPodReady): return a ready pod so wait completes
@@ -123,7 +112,7 @@ func TestCreateOutboundPod(t *testing.T) {
 					ContainerStatuses: []v1.ContainerStatus{
 						{Name: config.ContainerSidecarVPN, Ready: true},
 						{Name: config.ContainerSidecarControlPlane, Ready: true},
-						{Name: config.ContainerSidecarWebhook, Ready: true},
+						{Name: config.ContainerSidecarDNS, Ready: true},
 					},
 				},
 			}},
@@ -155,8 +144,8 @@ func TestCreateOutboundPod(t *testing.T) {
 	if svc.Name != config.ConfigMapPodTrafficManager {
 		t.Fatalf("expected service name %q, got %q", config.ConfigMapPodTrafficManager, svc.Name)
 	}
-	if len(svc.Spec.Ports) != 4 {
-		t.Fatalf("expected 4 service ports, got %d", len(svc.Spec.Ports))
+	if len(svc.Spec.Ports) != 3 {
+		t.Fatalf("expected 3 service ports, got %d", len(svc.Spec.Ports))
 	}
 
 	// Verify Secret was created
@@ -199,16 +188,6 @@ func TestCreateOutboundPod(t *testing.T) {
 	}
 	if rb.Name != config.ConfigMapPodTrafficManager {
 		t.Fatalf("expected role binding name %q, got %q", config.ConfigMapPodTrafficManager, rb.Name)
-	}
-
-	// Verify MutatingWebhookConfiguration was created
-	webhookName := config.ConfigMapPodTrafficManager + "." + namespace
-	mwc, err := clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Get(ctx, webhookName, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("expected mutating webhook configuration to be created, got error: %v", err)
-	}
-	if mwc.Name != webhookName {
-		t.Fatalf("expected webhook name %q, got %q", webhookName, mwc.Name)
 	}
 
 	// Verify namespace was labeled

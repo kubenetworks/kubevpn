@@ -1094,3 +1094,207 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 	},
 	Metadata: "daemon.proto",
 }
+
+const (
+	TunConfigService_GetTunIP_FullMethodName     = "/rpc.TunConfigService/GetTunIP"
+	TunConfigService_WatchTunIP_FullMethodName   = "/rpc.TunConfigService/WatchTunIP"
+	TunConfigService_ReleaseTunIP_FullMethodName = "/rpc.TunConfigService/ReleaseTunIP"
+)
+
+// TunConfigServiceClient is the client API for TunConfigService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type TunConfigServiceClient interface {
+	// GetTunIP allocates or retrieves the TUN IP for the given owner.
+	// If ownerID already has an allocation, returns the existing IP.
+	// Otherwise, DHCP-allocates a new IP and returns it.
+	GetTunIP(ctx context.Context, in *TunIPRequest, opts ...grpc.CallOption) (*TunIPResponse, error)
+	// WatchTunIP opens a server-streaming connection that pushes new TunIPResponse
+	// whenever the owner's IP allocation changes (e.g., conflict resolution, re-allocation).
+	WatchTunIP(ctx context.Context, in *TunIPRequest, opts ...grpc.CallOption) (TunConfigService_WatchTunIPClient, error)
+	// ReleaseTunIP releases the IP allocation for the given owner (graceful shutdown).
+	ReleaseTunIP(ctx context.Context, in *TunIPRequest, opts ...grpc.CallOption) (*TunIPResponse, error)
+}
+
+type tunConfigServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewTunConfigServiceClient(cc grpc.ClientConnInterface) TunConfigServiceClient {
+	return &tunConfigServiceClient{cc}
+}
+
+func (c *tunConfigServiceClient) GetTunIP(ctx context.Context, in *TunIPRequest, opts ...grpc.CallOption) (*TunIPResponse, error) {
+	out := new(TunIPResponse)
+	err := c.cc.Invoke(ctx, TunConfigService_GetTunIP_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tunConfigServiceClient) WatchTunIP(ctx context.Context, in *TunIPRequest, opts ...grpc.CallOption) (TunConfigService_WatchTunIPClient, error) {
+	stream, err := c.cc.NewStream(ctx, &TunConfigService_ServiceDesc.Streams[0], TunConfigService_WatchTunIP_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &tunConfigServiceWatchTunIPClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type TunConfigService_WatchTunIPClient interface {
+	Recv() (*TunIPResponse, error)
+	grpc.ClientStream
+}
+
+type tunConfigServiceWatchTunIPClient struct {
+	grpc.ClientStream
+}
+
+func (x *tunConfigServiceWatchTunIPClient) Recv() (*TunIPResponse, error) {
+	m := new(TunIPResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *tunConfigServiceClient) ReleaseTunIP(ctx context.Context, in *TunIPRequest, opts ...grpc.CallOption) (*TunIPResponse, error) {
+	out := new(TunIPResponse)
+	err := c.cc.Invoke(ctx, TunConfigService_ReleaseTunIP_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// TunConfigServiceServer is the server API for TunConfigService service.
+// All implementations must embed UnimplementedTunConfigServiceServer
+// for forward compatibility
+type TunConfigServiceServer interface {
+	// GetTunIP allocates or retrieves the TUN IP for the given owner.
+	// If ownerID already has an allocation, returns the existing IP.
+	// Otherwise, DHCP-allocates a new IP and returns it.
+	GetTunIP(context.Context, *TunIPRequest) (*TunIPResponse, error)
+	// WatchTunIP opens a server-streaming connection that pushes new TunIPResponse
+	// whenever the owner's IP allocation changes (e.g., conflict resolution, re-allocation).
+	WatchTunIP(*TunIPRequest, TunConfigService_WatchTunIPServer) error
+	// ReleaseTunIP releases the IP allocation for the given owner (graceful shutdown).
+	ReleaseTunIP(context.Context, *TunIPRequest) (*TunIPResponse, error)
+	mustEmbedUnimplementedTunConfigServiceServer()
+}
+
+// UnimplementedTunConfigServiceServer must be embedded to have forward compatible implementations.
+type UnimplementedTunConfigServiceServer struct {
+}
+
+func (UnimplementedTunConfigServiceServer) GetTunIP(context.Context, *TunIPRequest) (*TunIPResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTunIP not implemented")
+}
+func (UnimplementedTunConfigServiceServer) WatchTunIP(*TunIPRequest, TunConfigService_WatchTunIPServer) error {
+	return status.Errorf(codes.Unimplemented, "method WatchTunIP not implemented")
+}
+func (UnimplementedTunConfigServiceServer) ReleaseTunIP(context.Context, *TunIPRequest) (*TunIPResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReleaseTunIP not implemented")
+}
+func (UnimplementedTunConfigServiceServer) mustEmbedUnimplementedTunConfigServiceServer() {}
+
+// UnsafeTunConfigServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to TunConfigServiceServer will
+// result in compilation errors.
+type UnsafeTunConfigServiceServer interface {
+	mustEmbedUnimplementedTunConfigServiceServer()
+}
+
+func RegisterTunConfigServiceServer(s grpc.ServiceRegistrar, srv TunConfigServiceServer) {
+	s.RegisterService(&TunConfigService_ServiceDesc, srv)
+}
+
+func _TunConfigService_GetTunIP_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TunIPRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TunConfigServiceServer).GetTunIP(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TunConfigService_GetTunIP_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TunConfigServiceServer).GetTunIP(ctx, req.(*TunIPRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TunConfigService_WatchTunIP_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(TunIPRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(TunConfigServiceServer).WatchTunIP(m, &tunConfigServiceWatchTunIPServer{stream})
+}
+
+type TunConfigService_WatchTunIPServer interface {
+	Send(*TunIPResponse) error
+	grpc.ServerStream
+}
+
+type tunConfigServiceWatchTunIPServer struct {
+	grpc.ServerStream
+}
+
+func (x *tunConfigServiceWatchTunIPServer) Send(m *TunIPResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func _TunConfigService_ReleaseTunIP_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TunIPRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TunConfigServiceServer).ReleaseTunIP(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TunConfigService_ReleaseTunIP_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TunConfigServiceServer).ReleaseTunIP(ctx, req.(*TunIPRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// TunConfigService_ServiceDesc is the grpc.ServiceDesc for TunConfigService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var TunConfigService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "rpc.TunConfigService",
+	HandlerType: (*TunConfigServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetTunIP",
+			Handler:    _TunConfigService_GetTunIP_Handler,
+		},
+		{
+			MethodName: "ReleaseTunIP",
+			Handler:    _TunConfigService_ReleaseTunIP_Handler,
+		},
+	},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "WatchTunIP",
+			Handler:       _TunConfigService_WatchTunIP_Handler,
+			ServerStreams: true,
+		},
+	},
+	Metadata: "daemon.proto",
+}

@@ -259,6 +259,6 @@ connect := &handler.ConnectOptions{
 ```go
 func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
     ...
-    c.tunName, err = c.GetTunDeviceName()  // Root Daemon 创建 TUN 后设置
+    c.network.Start(ctx)  // Root Daemon: 启动完整网络栈 (port-forward, TUN, routes, DNS)
 }
 ```

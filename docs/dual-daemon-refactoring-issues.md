@@ -20,7 +20,7 @@ Both instantiate `ConnectOptions` but activate different subsets of functionalit
 2. InitClient(ManagerNamespace) → K8sClient initialized
 3. GetIPFromContext() → reads IPv4/IPv6 from gRPC metadata (set by user daemon)
 4. DoConnect() →
-   a. InitDHCP (ManagerNamespace)
+   a. getCIDR (detect CIDRs)
    b. getCIDR → getConfigMapStore() → created with CORRECT ManagerNamespace
    c. createOutboundPod
    d. NetworkManager.Start() → portForward, TUN, routes, DNS
@@ -33,8 +33,8 @@ Both instantiate `ConnectOptions` but activate different subsets of functionalit
 1. ConnectOptions created with ManagerNamespace = req.Namespace (WORKLOAD namespace — temporary!)
 2. InitClient(req.Namespace) → K8sClient initialized
 3. detectAndSetManagerNamespace() → MAY CHANGE connect.ManagerNamespace
-4. InitDHCP(ManagerNamespace) → uses UPDATED namespace (correct)
-5. RentIP() → lease IPs
+4. getTunIPFromControlPlane → uses UPDATED namespace (correct)
+5. RentIP() → calls TunConfigService.GetTunIP via gRPC
 6. forwardConnectToSudo() → stream connect request to root daemon
 7. HealthCheckOnce() → getConfigMapStore() → created with CURRENT ManagerNamespace
 8. HealthPeriod() → periodic check loop
@@ -85,7 +85,7 @@ After refactoring, each sub-manager is only active in one daemon:
 | `network *NetworkManager` | nil | Start()/Stop() | Only root creates TUN/routes/DNS |
 | `proxyManager *ProxyManager` | Created on proxy | nil | Only user daemon injects sidecars |
 | `configMapStore *ConfigMapStore` | Created on health check | Created on getCIDR | Both need ConfigMap access |
-| `dhcp *dhcp.Manager` | InitDHCP → RentIP | InitDHCP (in DoConnect) | Both, but different operations |
+| TunConfigService | RentIP → GetTunIP (user daemon) | N/A (IP from metadata) | User daemon only |
 
 ## Cleanup Path Differences
 
@@ -104,7 +104,7 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 ```
 
 ### User Daemon (cleanupControlPlane):
-1. Release DHCP IPs
+1. ReleaseTunIP via TunConfigService (快速回收，非必须 — lease 过期也会回收)
 2. Delete outbound pod / job
 3. Leave all proxy resources (unpatch sidecars)
 4. Run rollback functions
@@ -124,7 +124,7 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 
 4. **Cleanup must be idempotent.** `sync.Once` ensures Cleanup runs exactly once even if called from signal handler and explicit disconnect concurrently.
 
-5. **Persistence only serializes fields with json tags.** Sub-managers (network, proxyManager, configMapStore) have no json tags — they are runtime-only and rebuilt on restore from `LoadFromConfig`.
+5. **Persistence only serializes OwnerID + RequestRaw.** LocalTunIPv4/v6 no longer persisted (no json tags). On restart, OwnerID is used to re-obtain IP from TunConfigService. Sub-managers are runtime-only and rebuilt from the replayed connect flow.
 
 ## Potential Future Issues
 
@@ -147,4 +147,6 @@ Both daemons store `*ConnectOptions` in `svr.connections`. The user daemon's `He
 
 ### 4. Connection Restore After Daemon Restart
 
-`LoadFromConfig` deserializes `ConnectOptions` from JSON and replays the connect request. The deserialized struct has nil sub-managers — they get rebuilt as the replayed connect flows through the normal path. This is correct: persistence stores only IPs + RequestRaw, and the connect flow creates everything else.
+`LoadFromConfig` deserializes `ConnectOptions` from JSON and replays the connect request. The deserialized struct has nil sub-managers — they get rebuilt as the replayed connect flows through the normal path. Persistence stores OwnerID + RequestRaw. On restart:
+- OwnerID is preserved → TunConfigService returns the same IP (if lease not expired)
+- If lease expired → TunConfigService allocates a new IP → client uses new IP seamlessly

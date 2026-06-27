@@ -278,11 +278,6 @@ func (d *ClientDevice) heartbeats(ctx context.Context) {
 		plog.G(ctx).Errorf("[Client] Failed to get tun device: %v", err)
 		return
 	}
-	srcIPv4, srcIPv6, dockerSrcIPv4, err := util.GetTunDeviceIP(tunIfi.Name)
-	if err != nil {
-		plog.G(ctx).Errorf("[Client] Failed to get IP for device %s: %v", tunIfi.Name, err)
-		return
-	}
 
 	ticker := time.NewTicker(config.KeepAliveTime)
 	defer ticker.Stop()
@@ -295,6 +290,7 @@ func (d *ClientDevice) heartbeats(ctx context.Context) {
 	}
 
 	sendAll := func(reason string) {
+		srcIPv4, srcIPv6, dockerSrcIPv4, _ := util.GetTunDeviceIP(tunIfi.Name)
 		plog.G(ctx).Debugf("[Client] Sending heartbeat (%s)", reason)
 		if srcIPv4 != nil {
 			if icmp, e := util.GenICMPPacket(srcIPv4, config.RouterIP); e != nil {

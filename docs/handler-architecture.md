@@ -2,241 +2,230 @@
 
 ## Overview
 
-`pkg/handler` contains the core business logic for VPN connections, proxy workload management, and file synchronization. After refactoring, responsibility is distributed across three layers:
+`pkg/handler` 是 VPN 连接、代理管理、文件同步的核心业务逻辑层。职责分布在四个子管理器中：
 
 ```
-ConnectOptions (session orchestrator)
-├── NetworkManager (route/TUN/DNS)
-├── ProxyManager (sidecar inject/leave)
-└── K8sClient (shared Kubernetes access)
+ConnectOptions (会话编排器)
+├── NetworkManager      — 完整网络生命周期 (port-forward, TUN, 路由, DNS) + IP 热更新
+├── ProxyManager        — Sidecar 注入/卸载
+├── ConfigMapStore      — ConfigMap 读写 + 健康检查
+└── K8sClient           — Kubernetes 访问（嵌入）
 ```
 
-## ConnectOptions — Session Orchestrator
-
-`ConnectOptions` is the top-level struct representing a VPN connection session. It coordinates initialization order, delegates networking and proxy concerns to sub-managers, and owns the session lifecycle (context, cleanup).
-
-### Dual-Daemon Role
-
-The same struct runs in both daemon layers with independent instances:
-
-| | User Daemon (control plane) | Root Daemon (data plane) |
-|---|---|---|
-| Entry point | `redirectConnectToSudoDaemon` | `Connect` → `DoConnect` |
-| `isDataPlane` | false | true |
-| Role | DHCP, proxy inject, health check | TUN, port-forward, DNS, routes |
-| Persisted | Yes (OffloadToConfig) | No |
-
-### Key Fields
+## ConnectOptions — 会话编排器
 
 ```go
 type ConnectOptions struct {
-    K8sClient                          // embedded: clientset, config, factory
+    K8sClient                       // 嵌入: clientset, config, factory
 
-    ManagerNamespace      string       // namespace of traffic manager infrastructure
-    WorkloadNamespace     string       // namespace of user's target workloads
-    OriginKubeconfigPath  string       // user's kubeconfig file path
+    // 配置 (daemon 层创建时设置)
+    ManagerNamespace     string     // traffic manager 所在 namespace
+    WorkloadNamespace    string     // 用户工作负载 namespace
+    ExtraRouteInfo       ExtraRouteInfo
+    Image                string
+    OriginKubeconfigPath string
+    OwnerID              string     // UUID, 唯一标识本次连接 (用于 TunConfigService)
+    RequestRaw           []byte     // 序列化的 ConnectRequest (用于 daemon 重启回放)
 
-    network      *NetworkManager       // route/TUN delegation (data plane only)
-    proxyManager *ProxyManager         // proxy workload delegation (control plane only)
-    dhcp         *dhcp.Manager         // DHCP IP allocation
+    // 会话生命周期
+    ctx, cancel          context.Context, context.CancelFunc
+    LocalTunIPv4         *net.IPNet // 运行时临时变量 (不持久化)
+    LocalTunIPv6         *net.IPNet
+    rollbackFuncList     []func() error
 
-    LocalTunIPv4 *net.IPNet            // leased TUN IPv4 address
-    LocalTunIPv6 *net.IPNet            // leased TUN IPv6 address
-    RequestRaw   []byte                // serialized ConnectRequest for restart replay
+    // 子管理器
+    network              *NetworkManager
+    proxyManager         *ProxyManager
+    configMapStore       *ConfigMapStore
 }
 ```
 
-### Initialization Sequence (DoConnect — data plane)
+### Dual-Daemon 角色
+
+| | User Daemon (控制面) | Root Daemon (数据面) |
+|---|---|---|
+| 入口 | `redirectConnectToSudoDaemon` | `Connect` → `DoConnect` |
+| IP 获取 | `RentIP` → TunConfigService | `GetIPFromContext` (从 metadata) |
+| 子管理器 | proxyManager, configMapStore | network, configMapStore |
+
+### IP 分配流程 (新模型 — TunConfigService)
 
 ```
-1. InitDHCP           → allocate IPs from ConfigMap
-2. getCIDR            → detect cluster Pod/Service CIDRs
-3. createOutboundPod  → ensure CIDR detection pod exists
-4. upgradeDeploy      → upgrade traffic manager if needed
-5. AddExtraNodeIP     → add node IPs to extra CIDR list
-6. portForward        → port-forward to traffic manager (gvisor TCP/UDP)
-7. startLocalTunServer → create local TUN device + gvisor stack
-8. NetworkManager.AddRouteDynamic → watch pods/services, add routes
-9. setupDNS           → configure local DNS resolution
+User Daemon:
+  RentIP(ctx, "", "")
+    → getTunIPFromControlPlane(ctx)
+      → port-forward :9002
+      → gRPC GetTunIP(ownerID)
+      → TunConfigServer DHCP rent
+    ← 198.18.0.5/32
+  → metadata{IPv4, IPv6, OwnerID} → Root Daemon
+
+Root Daemon:
+  GetIPFromContext → 读取 IP + OwnerID
+  DoConnect → NetworkManager.Start()
+  → NetworkManager.StartIPWatcher(ctx)
+    → WatchTunIP(ownerID) stream
+    → IP 变化 → ChangeTunIP()
 ```
 
-## NetworkManager — Route Table Management
+**不再有 client 侧 DHCP。** IP 完全由 TunConfigService (server 端) 管理。
 
-Owns route-related state and operations. Created during `DoConnect` after TUN device is established.
-
-### Responsibilities
-
-- Add/remove routes on the TUN device
-- Watch pod/service informers and keep route table updated
-- Resolve extra domains via dig on the traffic manager pod
-- Add cluster node IPs to the extra CIDR list
-
-### Key Methods
-
-| Method | Description |
-|--------|-------------|
-| `AddRoute(ips...)` | Add IPs to route table, skip API server IPs |
-| `AddRouteDynamic(ctx)` | Start informers for dynamic routing |
-| `AddExtraRoute(ctx, podName)` | Resolve extra domains, add to routes |
-| `AddExtraNodeIP(ctx)` | Add all node IPs to extra CIDR list |
-
-### Field Semantics
+## NetworkManager — 完整网络生命周期
 
 ```go
 type NetworkManager struct {
-    clientset          kubernetes.Interface
-    config             *rest.Config
-    managerNamespace   string         // traffic manager namespace (for Shell/dig calls)
-    workloadNamespace  string         // user workload namespace (for informer scope)
+    cfg       NetworkConfig    // 不可变配置
+    ctx       context.Context  // 独立上下文 (Stop 只取消网络)
+    cancel    context.CancelFunc
+    tunName   string
+    extraHost []dns.Entry
+    dnsConfig *dns.Config
+}
 
-    tunName            string         // TUN device name (set after TUN creation)
-    apiServerIPs       []net.IP       // IPs excluded from routing
-    extraHost          []dns.Entry    // accumulated domain→IP mappings
-    extraRoute         *ExtraRouteInfo // user-specified extra routes/domains
+type NetworkConfig struct {
+    Clientset, RESTClient, Config  // K8s 访问
+    ManagerNamespace, WorkloadNamespace
+    LocalTunIPv4, LocalTunIPv6     // TUN 设备 IP
+    CIDRs, APIServerIPs            // 路由参数
+    ExtraRouteInfo                 // 额外路由/域名
+    Image, Lock                    // 辅助
+    OwnerID                        // 用于 IP watcher
+    GetRunningPodList              // 依赖注入
 }
 ```
 
-## ProxyManager — Proxy Workload Lifecycle
+### 生命周期 API
 
-Owns the list of currently proxied workloads and handles leave/unpatch operations.
+| 方法 | 说明 |
+|------|------|
+| `Start(ctx)` | 启动: port-forward → TUN → 路由 → DNS |
+| `Stop()` | 停止: DNS → 取消上下文 |
+| `ChangeTunIP(ctx, v4, v6)` | 热更新 TUN IP (不重建网络栈) |
+| `StartIPWatcher(ctx)` | 后台监听 TunConfigService 推送 IP 变更 |
+| `TunName()` | 获取 TUN 设备名 |
 
-### Responsibilities
+### IP 热更新流程
 
-- Track which workloads are being intercepted (Add/Remove)
-- Unpatch sidecar containers on leave (restore original pod spec)
-- Remove envoy config from the shared ConfigMap
-- Thread-safe access via mutex
+```
+TunConfigService push (WatchTunIP stream)
+  → NetworkManager.ChangeTunIP(newIPv4, newIPv6)
+    → tun.ChangeIP(tunName, old, new)     // OS 层修改 (fd 不变)
+    → 更新 cfg.LocalTunIPv4/v6
+    → heartbeat 下次 tick 自动使用新 IP   // 从 OS 重读
+    → Server RouteHub 自动注册新 IP       // 每包 AddRoute
+```
 
-### Key Methods
+## TunConfigService — IP 配置中心
 
-| Method | Description |
-|--------|-------------|
-| `Add(proxy)` | Register a newly proxied workload |
-| `Remove(ns, workload)` | Remove a workload from tracking |
-| `Resources()` | Snapshot of all tracked proxy workloads |
-| `IsMe(ns, uid, headers)` | Check ownership of a proxy rule |
-| `LeaveAll(ctx, localIPv4)` | Unpatch all tracked workloads |
-| `Leave(ctx, resources, v4)` | Unpatch specific workloads |
+运行在 Traffic Manager Pod 的 control-plane gRPC server (端口 9002) 上：
 
-### Field Semantics
+```protobuf
+service TunConfigService {
+  rpc GetTunIP(TunIPRequest) returns (TunIPResponse);      // 分配/续租
+  rpc WatchTunIP(TunIPRequest) returns (stream TunIPResponse); // 变更推送
+  rpc ReleaseTunIP(TunIPRequest) returns (TunIPResponse);  // 显式释放 (可选)
+}
+```
+
+### 续租机制
+
+- `GetTunIP` 每次调用刷新 `LastRenew` 时间戳（兼做续租）
+- `StartLeaseReaper` 后台每 30s 扫描过期分配 (TTL = 5 min)
+- 过期 IP 自动回收到 DHCP 池
+- **不再需要显式 Release** — crash 后 lease 自动过期回收
+- WatchTunIP stream 断开后，如果 client 不再调用 GetTunIP，IP 5 分钟后回收
+
+### OwnerID
+
+| 场景 | OwnerID 值 | 生命周期 |
+|------|-----------|---------|
+| Client (connect/proxy) | `uuid.New().String()[:12]` | 每次连接唯一 |
+| Sidecar (mesh mode) | `podName` | Pod 生命周期 |
+
+**为什么不用 connectionID：** connectionID = namespace UID 后 12 位，是 per-namespace 的，多个 client 连同一 namespace 时冲突。
+
+## ProxyManager — Sidecar 注入/卸载
 
 ```go
 type ProxyManager struct {
     factory            cmdutil.Factory
     clientset          kubernetes.Interface
-    managerNamespace   string         // for ConfigMap operations (envoy config)
-
+    managerNamespace   string
     mu                 sync.Mutex
-    workloads          ProxyList      // currently intercepted workloads
+    workloads          ProxyList
 }
 ```
 
-## K8sClient — Shared Kubernetes Access
+| 方法 | 说明 |
+|------|------|
+| `Add(proxy)` | 注册代理工作负载 |
+| `Remove(ns, workload)` | 移除跟踪 |
+| `Resources()` | 快照列表 |
+| `IsMe(ns, uid, headers)` | 所有权检查 |
+| `LeaveAll(ctx, v4)` | 卸载所有 sidecar |
+| `Leave(ctx, resources, v4)` | 卸载指定工作负载 |
 
-Embedded struct providing Kubernetes client initialization and access.
+## ConfigMapStore — ConfigMap + 健康检查
 
 ```go
-type K8sClient struct {
-    clientset   kubernetes.Interface
-    restclient  *rest.RESTClient
-    config      *rest.Config
-    factory     cmdutil.Factory
+type ConfigMapStore struct {
+    clientset, managerNamespace
+    informerOnce, informer, informerStop
+    healthStatus HealthStatus
 }
 ```
 
-Methods: `InitClient(f)`, `GetFactory()`, `GetClientset()`.
+**延迟初始化：** 通过 `getConfigMapStore()` 首次访问时创建，确保 `ManagerNamespace` 已被 `detectAndSetManagerNamespace` 修正。
 
-Embedded by both `ConnectOptions` and `SyncOptions` to share the initialization pattern.
+## Namespace 规范
 
-## Connection Interface
+| 字段 | 含义 |
+|------|------|
+| `ManagerNamespace` / `managerNamespace` | Traffic manager 所在 namespace |
+| `WorkloadNamespace` / `workloadNamespace` | 用户工作负载 namespace |
+| RPC `req.Namespace` | 始终是工作负载 namespace |
+| RPC `req.ManagerNamespace` | 始终是 manager namespace |
 
-Defined in `connection.go`, documents the API surface that `daemon/action` uses:
-
-```go
-type Connection interface {
-    // Lifecycle
-    InitClient(f cmdutil.Factory) error
-    DoConnect(ctx context.Context) error
-    Cleanup(ctx context.Context)
-    Context() context.Context
-    AddRollbackFunc(f func() error)
-
-    // Identity
-    GetConnectionID() string
-    GetLocalTunIP() (v4, v6 string)
-    IsMe(ns, uid string, headers map[string]string) bool
-
-    // Health
-    HealthCheckOnce(ctx context.Context, timeout time.Duration)
-    HealthPeriod(ctx context.Context, interval time.Duration)
-    HealthStatus() HealthStatus
-
-    // Proxy
-    CreateRemoteInboundPod(ctx, ns, workloads, headers, portMap, image) error
-    LeaveAllProxyResources(ctx) error
-    ProxyResources() ProxyList
-
-    // Accessors
-    GetManagerNamespace() string
-    GetOriginKubeconfigPath() string
-    GetFactory() cmdutil.Factory
-}
-```
-
-This interface enables future migration where `daemon/action` depends on the interface rather than the concrete `*ConnectOptions` type.
-
-## Namespace Convention
-
-All namespace fields use unambiguous full names:
-
-| Field | Meaning | Example |
-|-------|---------|---------|
-| `ManagerNamespace` / `managerNamespace` | Where traffic manager runs | `"kubevpn"` |
-| `WorkloadNamespace` / `workloadNamespace` | Where user's apps run | `"default"` |
-
-The RPC layer uses `req.Namespace` (workload) and `req.ManagerNamespace` (manager). See `docs/namespace-model.md` for full details.
-
-## Dependency Rules
+## 依赖规则
 
 ```
-pkg/daemon/action → pkg/handler (via Connection interface, eventually)
-pkg/handler       → pkg/config, pkg/util, pkg/core, pkg/inject, pkg/dns, pkg/tun, pkg/dhcp
-pkg/ssh           → pkg/config, pkg/util (NO daemon/rpc dependency)
-pkg/util          → pkg/config (NO upward dependencies)
-pkg/core          → pkg/config, pkg/util, pkg/tun
+pkg/daemon/action  → pkg/handler (via Connection interface)
+pkg/daemon/grpcutil → pkg/daemon/rpc
+pkg/handler        → pkg/config, pkg/util, pkg/core, pkg/inject, pkg/dns, pkg/tun
+pkg/handler        → pkg/daemon/rpc (仅 gRPC client: TunConfigService)
+pkg/ssh            → pkg/config, pkg/util (不依赖 daemon/rpc)
+pkg/util           → pkg/config (不依赖上层包)
+pkg/controlplane   → pkg/dhcp, pkg/daemon/rpc (server 端 DHCP + TunConfigService)
 ```
 
-### Forbidden
+**Client 侧不再依赖 pkg/dhcp** — IP 分配完全由 server 端 TunConfigService 管理。
 
-- `pkg/util` must NOT import `pkg/daemon/rpc` or any higher-level package
-- `pkg/ssh` must NOT import `pkg/daemon/rpc`
-- `pkg/handler` must NOT import `pkg/daemon/rpc` in core types (conversion adapters are acceptable)
-
-## File Layout
+## 文件布局
 
 ```
 pkg/handler/
-├── connect.go              ConnectOptions struct, DoConnect, DHCP, CIDR
-├── connect_tun.go          portForward, startLocalTunServer
-├── connect_route.go        newTickerResetHandler (utility)
-├── connect_dns.go          setupDNS
-├── connect_upgrade.go      upgradeDeploy
-├── network.go              NetworkManager struct + route methods
-├── proxy_manager.go        ProxyManager struct + leave methods
-├── proxy.go                Proxy/ProxyList data types
-├── proxy_mapper.go         Mapper for port-forward config watching
-├── k8s_client.go           K8sClient embedded struct
-├── connection.go           Connection interface definition
-├── healthchecker.go        HealthStatus, HealthPeriod
-├── cleaner.go              Cleanup, signal handler
-├── sync.go                 SyncOptions, DoSync
-├── sync_containers.go      Sync container generation
-├── traffmgr.go             Traffic manager pod creation
-├── traffmgr_resources.go   K8s resource generators (deploy, svc, etc.)
-├── leave.go                Delegating leave methods
-├── reset.go                Reset workloads to original spec
-├── once.go                 ConfigMap informer (singleton)
-├── sort.go                 Connects sorting
-├── extraoptions.go         ExtraRouteInfo type + RPC conversion
-└── testing.go              Test helpers
+├── connect.go            ConnectOptions, RentIP, DoConnect, getCIDR
+├── connect_tun.go        Run() server runner, healthCheck helpers
+├── connect_dns.go        detectNameserver helpers
+├── connect_route.go      newTickerResetHandler
+├── connect_upgrade.go    upgradeDeploy
+├── network.go            NetworkManager (Start/Stop/ChangeTunIP/IPWatcher)
+├── proxy_manager.go      ProxyManager (Add/Remove/Leave)
+├── configmap_store.go    ConfigMapStore (Get/Set/Health)
+├── proxy.go              Proxy/ProxyList 数据类型
+├── proxy_mapper.go       Mapper (port-forward 配置监听)
+├── k8s_client.go         K8sClient 嵌入结构
+├── connection.go         Connection 接口定义
+├── healthchecker.go      HealthStatus 类型
+├── cleaner.go            Cleanup, releaseTunIP, 信号处理
+├── sync.go               SyncOptions, DoSync
+├── traffmgr.go           Traffic manager pod 创建
+├── traffmgr_resources.go K8s 资源生成器
+├── leave.go              代理卸载委托
+├── reset.go              重置工作负载
+├── once.go               Server 端辅助 (labelNs, genTLS, getCIDR)
+├── sort.go               Connects 排序
+├── extraoptions.go       ExtraRouteInfo + RPC 转换
+├── sshconv.go            SSH config ↔ RPC 转换
+└── testing.go            测试辅助
 ```

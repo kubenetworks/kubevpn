@@ -2,8 +2,6 @@ package handler
 
 import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
 )
 
 // NewConnectOptionsForTest creates a ConnectOptions with an initialized factory
@@ -12,14 +10,6 @@ func NewConnectOptionsForTest(factory cmdutil.Factory, kubeconfigPath, namespace
 	return &ConnectOptions{
 		K8sClient:            K8sClient{factory: factory},
 		OriginKubeconfigPath: kubeconfigPath,
-		WorkloadNamespace:      namespace,
-	}
-}
-
-// NewConnectOptionsWithIDForTest creates a ConnectOptions with a preset connectionID
-// for unit tests that need GetConnectionID() to return a known value.
-func NewConnectOptionsWithIDForTest(connectionID string) *ConnectOptions {
-	return &ConnectOptions{
-		dhcp: dhcp.NewManagerForTest(connectionID),
+		WorkloadNamespace:    namespace,
 	}
 }

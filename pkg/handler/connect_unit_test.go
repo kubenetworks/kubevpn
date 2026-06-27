@@ -37,31 +37,7 @@ func newTestConnectOptions(t *testing.T) *ConnectOptions {
 	}
 }
 
-func TestConnectOptions_InitDHCP(t *testing.T) {
-	c := newTestConnectOptions(t)
-	err := c.InitDHCP(context.Background())
-	if err != nil {
-		t.Fatalf("InitDHCP: %v", err)
-	}
-	err = c.InitDHCP(context.Background())
-	if err != nil {
-		t.Fatalf("InitDHCP second: %v", err)
-	}
-}
 
-func TestConnectOptions_RentIP(t *testing.T) {
-	c := newTestConnectOptions(t)
-	_, err := c.RentIP(context.Background(), "", "")
-	if err != nil {
-		t.Fatalf("RentIP: %v", err)
-	}
-	if c.LocalTunIPv4 == nil || c.LocalTunIPv6 == nil {
-		t.Fatal("IPs nil after RentIP")
-	}
-	if !config.CIDR.Contains(c.LocalTunIPv4.IP) {
-		t.Fatalf("IPv4 %s not in CIDR", c.LocalTunIPv4)
-	}
-}
 
 func TestConnectOptions_RentIP_PreAssigned(t *testing.T) {
 	c := newTestConnectOptions(t)
@@ -122,9 +98,6 @@ func TestConnectOptions_RollbackFuncs(t *testing.T) {
 
 func TestConnectOptions_GetConnectionID(t *testing.T) {
 	c := newTestConnectOptions(t)
-	if err := c.InitDHCP(context.Background()); err != nil {
-		t.Fatal(err)
-	}
 	id := c.GetConnectionID()
 	if id == "" {
 		t.Fatal("empty connectionID")
@@ -296,14 +269,6 @@ func TestConnectOptions_GetTunDeviceName_WithName(t *testing.T) {
 	}
 }
 
-func TestConnectOptions_GetConnectionID_NilDHCP(t *testing.T) {
-	c := newTestConnectOptions(t)
-	// dhcp is nil — GetConnectionID should return empty string without panic.
-	id := c.GetConnectionID()
-	if id != "" {
-		t.Fatalf("expected empty connectionID with nil dhcp, got %q", id)
-	}
-}
 
 func TestConnectOptions_GetConnectionID_NilReceiver(t *testing.T) {
 	var c *ConnectOptions
@@ -313,13 +278,6 @@ func TestConnectOptions_GetConnectionID_NilReceiver(t *testing.T) {
 	}
 }
 
-func TestConnectOptions_GetConnectionID_WithID(t *testing.T) {
-	c := NewConnectOptionsWithIDForTest("conn-abc-123")
-	id := c.GetConnectionID()
-	if id != "conn-abc-123" {
-		t.Fatalf("GetConnectionID() = %q, want %q", id, "conn-abc-123")
-	}
-}
 
 func TestConnectOptions_ProxyResources_Empty(t *testing.T) {
 	c := newTestConnectOptions(t)

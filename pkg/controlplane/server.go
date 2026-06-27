@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -24,7 +25,7 @@ const (
 	grpcMaxConcurrentStreams = 1000000
 )
 
-func runServer(ctx context.Context, server serverv3.Server, port uint) error {
+func runServer(ctx context.Context, server serverv3.Server, tunConfig *TunConfigServer, port uint) error {
 	grpcOpts := []grpc.ServerOption{
 		grpc.MaxConcurrentStreams(grpcMaxConcurrentStreams),
 		grpc.KeepaliveParams(keepalive.ServerParameters{
@@ -49,6 +50,11 @@ func runServer(ctx context.Context, server serverv3.Server, port uint) error {
 	listenerservice.RegisterListenerDiscoveryServiceServer(grpcServer, server)
 	secretservice.RegisterSecretDiscoveryServiceServer(grpcServer, server)
 	runtimeservice.RegisterRuntimeDiscoveryServiceServer(grpcServer, server)
+
+	if tunConfig != nil {
+		rpc.RegisterTunConfigServiceServer(grpcServer, tunConfig)
+		plog.G(ctx).Infof("TunConfigService registered on port %d", port)
+	}
 
 	plog.G(ctx).Infof("Management server listening on %d", port)
 	return grpcServer.Serve(listener)

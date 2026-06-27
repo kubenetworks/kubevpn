@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	admissionv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
@@ -167,19 +166,6 @@ func upgradeSecretSpec(ctx context.Context, f cmdutil.Factory, ns string) error 
 	}
 
 	_, err = clientset.CoreV1().Secrets(ns).Update(ctx, secret, metav1.UpdateOptions{})
-	if err != nil {
-		return err
-	}
-
-	mutatingWebhookConfig := genMutatingWebhookConfiguration(ns, crt)
-	var current *admissionv1.MutatingWebhookConfiguration
-	current, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Get(ctx, mutatingWebhookConfig.Name, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-
-	mutatingWebhookConfig.ResourceVersion = current.ResourceVersion
-	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Update(ctx, mutatingWebhookConfig, metav1.UpdateOptions{})
 	return err
 }
 
