@@ -93,10 +93,10 @@ func (c *ConnectOptions) cleanupDataPlane(logCtx context.Context) {
 **Verified:** Fields with `json:` tags that survive persistence are:
 - `RequestRaw []byte` — protobuf-serialized ConnectRequest
 - `OwnerID string` — connection ownership
-- `LocalTunIPv4 *net.IPNet` — leased IPv4
-- `LocalTunIPv6 *net.IPNet` — leased IPv6
 
-Removed fields (`cidrs`, `apiServerIPs`, `tunName`, `dnsConfig`, `extraHost`, `healthStatus`, `cmInformer*`) never had json tags and were never persisted. **No persistence breakage.**
+`LocalTunIPv4/v6` 已从 ConnectOptions 中移除，TUN IP 现由 Root Daemon 的 NetworkManager 管理。User Daemon 通过 `getSudoTunIPs` 查询。
+
+Removed fields (`cidrs`, `apiServerIPs`, `tunName`, `dnsConfig`, `extraHost`, `healthStatus`, `cmInformer*`, `LocalTunIPv4/v6`) never had json tags or are no longer on ConnectOptions. **No persistence breakage.**
 
 ### 5. Dead code removed
 

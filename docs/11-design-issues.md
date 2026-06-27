@@ -37,7 +37,7 @@ pkg/tun/           ← TUN 设备管理
 | 关注点 | 字段 |
 |--------|------|
 | K8s 客户端 | clientset, restclient, config, factory |
-| 网络标识 | LocalTunIPv4/v6, tunName, cidrs, dhcp |
+| 网络标识 | network (*NetworkManager), tunName, cidrs |
 | 生命周期 | ctx, cancel, once, rollbackFuncList, isDataPlane |
 | DNS | dnsConfig, extraHost |
 | 代理管理 | proxyWorkloads, healthStatus, cmInformer |

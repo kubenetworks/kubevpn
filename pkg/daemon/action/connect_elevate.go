@@ -86,22 +86,25 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		return err
 	}
 
-	connectionID := connect.GetConnectionID()
+	connect.ConnectionID, err = util.GetConnectionID(context.Background(), connect.K8sClient.GetClientset().CoreV1().Namespaces(), connect.ManagerNamespace)
+	if err != nil {
+		return err
+	}
 
 	svr.connMu.Lock()
-	existing, _ := svr.findConnection(connectionID)
+	existing, _ := svr.findConnection(connect.ConnectionID)
 	if existing != nil {
-		svr.currentConnectionID = connectionID
+		svr.currentConnectionID = connect.ConnectionID
 		svr.connMu.Unlock()
 		session.Cancel()
 		logger.Infof("Connected with cluster")
 		return resp.Send(&rpc.ConnectResponse{
-			ConnectionID: connectionID,
+			ConnectionID: connect.ConnectionID,
 		})
 	}
 	svr.connMu.Unlock()
 
-	return svr.forwardConnectToSudo(session.Ctx, req, connect, resp, cli, &connResp, &connRespMu, file, connectionID, logger)
+	return svr.forwardConnectToSudo(session.Ctx, req, connect, resp, cli, &connResp, &connRespMu, file, connect.ConnectionID, logger)
 }
 
 // detectAndSetManagerNamespace resolves the traffic manager namespace, falling
@@ -145,17 +148,14 @@ func (svr *Server) forwardConnectToSudo(
 		return err
 	}
 
-	ipCtx, err := connect.RentIP(resp.Context(), req.IPv4, req.IPv6)
-	if err != nil {
-		return err
-	}
-
 	content, err := os.ReadFile(kubeconfigPath)
 	if err != nil {
 		return err
 	}
 	req.KubeconfigBytes = string(content)
-	cr, err := cli.Connect(ipCtx)
+	req.OwnerID = connect.OwnerID
+	req.ConnectionID = connectionID
+	cr, err := cli.Connect(context.Background())
 	if err != nil {
 		return err
 	}

@@ -113,7 +113,7 @@ Kubernetes 所有 util 和 core 包都用 table-driven tests。KubeVPN 的 `data
 
 | Task | 测什么 | 策略 |
 |------|--------|------|
-| 3.1 ConnectOptions 单元 | InitClient, RentIP, GetCIDR, Set/Get | mock K8s client |
+| 3.1 ConnectOptions 单元 | InitClient, GetCIDR, Set/Get | mock K8s client |
 | 3.2 Leave/Reset 逻辑 | UnpatchContainer, ModifyServiceTargetPort | mock + verify patch |
 | 3.3 HealthChecker | syncFromCache, HealthCheckOnce | fake informer |
 | 3.4 Mapper tunnel reconcile | Pod add/delete → tunnel start/stop | fake informer + chan |

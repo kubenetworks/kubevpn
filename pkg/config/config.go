@@ -105,13 +105,6 @@ const (
 	// EnvPodNamespace is the env var name populated with the Kubernetes pod namespace.
 	EnvPodNamespace = "POD_NAMESPACE"
 
-	// HeaderIPv4 is the HTTP header name carrying the client's TUN IPv4 address.
-	HeaderIPv4 = "IPv4"
-	// HeaderIPv6 is the HTTP header name carrying the client's TUN IPv6 address.
-	HeaderIPv6 = "IPv6"
-	// HeaderOwnerID carries the connection's unique owner identifier for TunConfigService.
-	HeaderOwnerID = "OwnerID"
-
 	// KUBECONFIG is the key name used when storing kubeconfig data.
 	KUBECONFIG = "kubeconfig"
 

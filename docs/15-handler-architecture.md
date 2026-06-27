@@ -29,8 +29,6 @@ type ConnectOptions struct {
 
     // 会话生命周期
     ctx, cancel          context.Context, context.CancelFunc
-    LocalTunIPv4         *net.IPNet // 运行时临时变量 (不持久化)
-    LocalTunIPv6         *net.IPNet
     rollbackFuncList     []func() error
 
     // 子管理器
@@ -45,30 +43,34 @@ type ConnectOptions struct {
 | | User Daemon (控制面) | Root Daemon (数据面) |
 |---|---|---|
 | 入口 | `redirectConnectToSudoDaemon` | `Connect` → `DoConnect` |
-| IP 获取 | `RentIP` → TunConfigService | `GetIPFromContext` (从 metadata) |
+| IP 获取 | `getSudoTunIPs` 查询 sudo daemon | `NetworkManager.rentIP` (in startTUN) |
 | 子管理器 | proxyManager, configMapStore | network, configMapStore |
 
-### IP 分配流程 (新模型 — TunConfigService)
+### IP 分配流程
 
 ```
 User Daemon:
-  RentIP(ctx, "", "")
-    → getTunIPFromControlPlane(ctx)
-      → port-forward :9002
-      → gRPC GetTunIP(ownerID)
-      → TunConfigServer DHCP rent
-    ← 198.18.0.5/32
-  → metadata{IPv4, IPv6, OwnerID} → Root Daemon
+  CreateOutboundPod → UpgradeDeploy
+  → req.OwnerID = connect.OwnerID
+  → cli.Connect(ctx) → 转发给 Root Daemon
 
 Root Daemon:
-  GetIPFromContext → 读取 IP + OwnerID
+  connect.OwnerID = req.OwnerID
   DoConnect → NetworkManager.Start()
-  → NetworkManager.StartIPWatcher(ctx)
+    → startTUN → rentIP(OwnerID, ExcludeIPs)
+      → gRPC GetTunIP(ownerID) → TunConfigServer DHCP rent
+      → 198.18.0.5/32
+    → 创建 TUN 设备
+  → StartIPWatcher(ctx)
     → WatchTunIP(ownerID) stream
     → IP 变化 → ChangeTunIP()
+
+User Daemon (需要 IP 时):
+  ips := svr.getSudoTunIPs(ctx)         // 查询 sudo daemon Status
+  v4, v6 := resolveTunIP(connect, ips)  // 按 ConnectionID 匹配
 ```
 
-**不再有 client 侧 DHCP。** IP 完全由 TunConfigService (server 端) 管理。
+**IP 完全由 Root Daemon 的 NetworkManager 管理。** User Daemon 不再持有 `LocalTunIPv4/v6`。
 
 ## NetworkManager — 完整网络生命周期
 
@@ -85,7 +87,6 @@ type NetworkManager struct {
 type NetworkConfig struct {
     Clientset, RESTClient, Config  // K8s 访问
     ManagerNamespace, WorkloadNamespace
-    LocalTunIPv4, LocalTunIPv6     // TUN 设备 IP
     CIDRs, APIServerIPs            // 路由参数
     ExtraRouteInfo                 // 额外路由/域名
     Image, Lock                    // 辅助
@@ -110,7 +111,7 @@ type NetworkConfig struct {
 TunConfigService push (WatchTunIP stream)
   → NetworkManager.ChangeTunIP(newIPv4, newIPv6)
     → tun.ChangeIP(tunName, old, new)     // OS 层修改 (fd 不变)
-    → 更新 cfg.LocalTunIPv4/v6
+    → 更新 nm.localTunIPv4/v6
     → heartbeat 下次 tick 自动使用新 IP   // 从 OS 重读
     → Server RouteHub 自动注册新 IP       // 每包 AddRoute
 ```
@@ -218,7 +219,7 @@ pkg/controlplane   → pkg/dhcp, pkg/daemon/rpc (server 端 DHCP + TunConfigServ
 
 ```
 pkg/handler/
-├── connect.go            ConnectOptions, RentIP, DoConnect, getCIDR
+├── connect.go            ConnectOptions, DoConnect, getCIDR
 ├── connect_tun.go        Run() server runner, healthCheck helpers
 ├── connect_dns.go        detectNameserver helpers
 ├── connect_route.go      newTickerResetHandler

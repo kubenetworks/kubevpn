@@ -130,8 +130,12 @@ func (s *ConfigMapStore) HealthCheckOnce(ctx context.Context, timeout time.Durat
 	timeoutCtx, cancelFunc := context.WithTimeout(ctx, timeout)
 	defer cancelFunc()
 
+	start := time.Now()
 	mapInterface := s.clientset.CoreV1().ConfigMaps(s.managerNamespace)
 	configMap, err := mapInterface.Get(timeoutCtx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		plog.G(ctx).Infof("[Perf] ConfigMap GET took %v", elapsed)
+	}
 	if err != nil {
 		s.healthStatus.lastErr = err
 		plog.G(ctx).Debugf("Health check failed: %v", err)

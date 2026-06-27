@@ -81,7 +81,7 @@ func requestTunIPFromControlPlane() (ipv4, ipv6 string, err error) {
 	}
 	namespace := os.Getenv(config.EnvPodNamespace)
 
-	target := fmt.Sprintf("%s:9002", trafficManagerAddr)
+	target := fmt.Sprintf("%s:%d", trafficManagerAddr, config.PortControlPlane)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -115,7 +115,7 @@ func watchTunIPChanges(listener net.Listener) {
 	trafficManagerAddr := os.Getenv("TrafficManagerService")
 	ownerID := os.Getenv(config.EnvPodName)
 	namespace := os.Getenv(config.EnvPodNamespace)
-	target := fmt.Sprintf("%s:9002", trafficManagerAddr)
+	target := fmt.Sprintf("%s:%d", trafficManagerAddr, config.PortControlPlane)
 
 	if trafficManagerAddr == "" || ownerID == "" {
 		return

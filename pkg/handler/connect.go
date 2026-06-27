@@ -8,11 +8,6 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -34,7 +29,6 @@ type ConnectOptions struct {
 
 	ManagerNamespace     string
 	ExtraRouteInfo       ExtraRouteInfo
-	Foreground           bool
 	OriginKubeconfigPath string
 	WorkloadNamespace    string
 	Lock                 *sync.Mutex
@@ -43,13 +37,12 @@ type ConnectOptions struct {
 	// RequestRaw stores the protobuf-serialized ConnectRequest for daemon restart replay.
 	RequestRaw []byte `json:"RequestRaw,omitempty"`
 
-	ctx         context.Context
-	cancel      context.CancelFunc
-	isDataPlane bool
-	OwnerID     string `json:"OwnerID,omitempty"`
+	ctx          context.Context
+	cancel       context.CancelFunc
+	isDataPlane  bool
+	OwnerID      string `json:"OwnerID,omitempty"`
+	ConnectionID string
 
-	LocalTunIPv4     *net.IPNet
-	LocalTunIPv6     *net.IPNet
 	rollbackFuncList []func() error
 
 	SshHosts       []net.IP `json:"-"`
@@ -66,137 +59,10 @@ func (c *ConnectOptions) Context() context.Context {
 	return c.ctx
 }
 
-// RentIP obtains TUN IP allocation. If ipv4/ipv6 are provided (restart recovery),
-// reuses them. Otherwise delegates to TunConfigService via gRPC.
-// Returns an outgoing gRPC context with the IP metadata for the root daemon.
-func (c *ConnectOptions) RentIP(ctx context.Context, ipv4, ipv6 string) (context.Context, error) {
-	if util.IsValidCIDR(ipv4) && util.IsValidCIDR(ipv6) {
-		ip, cidr, _ := net.ParseCIDR(ipv4)
-		c.LocalTunIPv4 = &net.IPNet{IP: ip, Mask: cidr.Mask}
-		ip, cidr, _ = net.ParseCIDR(ipv6)
-		c.LocalTunIPv6 = &net.IPNet{IP: ip, Mask: cidr.Mask}
-	} else {
-		v4, v6, err := c.getTunIPFromControlPlane(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("get TUN IP from control-plane: %w", err)
-		}
-		c.LocalTunIPv4 = v4
-		c.LocalTunIPv6 = v6
-	}
-
-	return metadata.AppendToOutgoingContext(
-		context.Background(),
-		config.HeaderIPv4, c.LocalTunIPv4.String(),
-		config.HeaderIPv6, c.LocalTunIPv6.String(),
-		config.HeaderOwnerID, c.OwnerID,
-	), nil
-}
-
-// getTunIPFromControlPlane calls TunConfigService.GetTunIP via port-forward to traffic manager.
-func (c *ConnectOptions) getTunIPFromControlPlane(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
-	// Port-forward to traffic manager 9002 is needed here.
-	// In the user daemon path, we use the K8s API directly to port-forward.
-	pods, err := c.GetRunningPodList(ctx)
-	if err != nil || len(pods) == 0 {
-		return nil, nil, fmt.Errorf("no traffic manager pod found: %w", err)
-	}
-
-	localPort, err := util.GetAvailableTCPPort()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	pfCtx, pfCancel := context.WithCancel(ctx)
-	readyCh := make(chan struct{})
-	go func() {
-		_ = util.PortForwardPod(c.config, c.restclient, pods[0].Name, c.ManagerNamespace,
-			[]string{fmt.Sprintf("%d:%d", localPort, config.PortControlPlane)}, readyCh, pfCtx.Done(), nil, nil)
-	}()
-
-	select {
-	case <-readyCh:
-	case <-time.After(15 * time.Second):
-		pfCancel()
-		return nil, nil, fmt.Errorf("port-forward to control-plane timed out")
-	}
-	defer pfCancel()
-
-	target := fmt.Sprintf("127.0.0.1:%d", localPort)
-	conn, err := grpc.DialContext(ctx, target,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("dial control-plane: %w", err)
-	}
-	defer conn.Close()
-
-	client := rpc.NewTunConfigServiceClient(conn)
-	resp, err := client.GetTunIP(ctx, &rpc.TunIPRequest{
-		OwnerID:   c.OwnerID,
-		Namespace: c.ManagerNamespace,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-
-	ip4, cidr4, err := net.ParseCIDR(resp.IPv4)
-	if err != nil || cidr4 == nil {
-		return nil, nil, fmt.Errorf("invalid IPv4 from control-plane: %q", resp.IPv4)
-	}
-	v4 := &net.IPNet{IP: ip4, Mask: cidr4.Mask}
-
-	var v6 *net.IPNet
-	if resp.IPv6 != "" {
-		ip6, cidr6, _ := net.ParseCIDR(resp.IPv6)
-		if cidr6 != nil {
-			v6 = &net.IPNet{IP: ip6, Mask: cidr6.Mask}
-		}
-	}
-	plog.G(ctx).Infof("Got TUN IP from control-plane: v4=%s v6=%s", v4, v6)
-	return v4, v6, nil
-}
-
-// GetIPFromContext extracts IPv4 and IPv6 TUN addresses from incoming gRPC metadata.
-func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logger) error {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return fmt.Errorf("cannot get IP from context")
-	}
-
-	ipv4 := md.Get(config.HeaderIPv4)
-	if len(ipv4) == 0 {
-		return fmt.Errorf("cannot find IPv4 from header: %v", md)
-	}
-	ip, ipNet, err := net.ParseCIDR(ipv4[0])
-	if err != nil {
-		return fmt.Errorf("cannot convert IPv4 string: %s: %w", ipv4[0], err)
-	}
-	c.LocalTunIPv4 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
-	logger.Debugf("Get IPv4 %s from context", c.LocalTunIPv4.String())
-
-	ipv6 := md.Get(config.HeaderIPv6)
-	if len(ipv6) == 0 {
-		return fmt.Errorf("cannot find IPv6 from header: %v", md)
-	}
-	ip, ipNet, err = net.ParseCIDR(ipv6[0])
-	if err != nil {
-		return fmt.Errorf("cannot convert IPv6 string: %s: %w", ipv6[0], err)
-	}
-	c.LocalTunIPv6 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
-	logger.Debugf("Get IPv6 %s from context", c.LocalTunIPv6.String())
-
-	if ownerIDs := md.Get(config.HeaderOwnerID); len(ownerIDs) > 0 && ownerIDs[0] != "" {
-		c.OwnerID = ownerIDs[0]
-		logger.Debugf("Get OwnerID %s from context", c.OwnerID)
-	}
-	return nil
-}
-
 // CreateRemoteInboundPod injects Envoy sidecar proxies into the specified workloads for inbound traffic interception.
-func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string, image string) (err error) {
-	if c.LocalTunIPv4 == nil || c.LocalTunIPv6 == nil {
-		return fmt.Errorf("local tun IP is invalid")
+func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string, image string, localTunIPv4, localTunIPv6 string) (err error) {
+	if localTunIPv4 == "" {
+		return fmt.Errorf("local tun IPv4 is empty")
 	}
 	if c.proxyManager == nil {
 		c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
@@ -209,8 +75,6 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 
 	for _, workload := range workloads {
 		plog.G(ctx).Infof("Injecting inbound sidecar for %s in namespace %s", workload, namespace)
-		localTunIPv4 := c.LocalTunIPv4.IP.String()
-		localTunIPv6 := c.LocalTunIPv6.IP.String()
 		var object, controller *resource.Info
 		object, controller, err = util.GetTopOwnerObject(ctx, c.factory, namespace, workload)
 		if err != nil {
@@ -266,7 +130,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 
 // CreateOutboundPod ensures the traffic manager pod exists and is ready.
 // This is a control-plane responsibility and should be called from the user daemon
-// before RentIP, so the TunConfigService is available for IP allocation.
+// before calling the sudo daemon, so the TunConfigService is available for IP allocation.
 func (c *ConnectOptions) CreateOutboundPod(ctx context.Context) error {
 	return createOutboundPod(ctx, c.clientset, c.ManagerNamespace, c.Image, c.ImagePullSecretName)
 }
@@ -291,8 +155,6 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 		Config:            c.config,
 		ManagerNamespace:  c.ManagerNamespace,
 		WorkloadNamespace: c.WorkloadNamespace,
-		LocalTunIPv4:      c.LocalTunIPv4,
-		LocalTunIPv6:      c.LocalTunIPv6,
 		CIDRs:             cidrs,
 		APIServerIPs:      apiServerIPs,
 		ExtraRouteInfo:    &c.ExtraRouteInfo,
@@ -301,7 +163,6 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 		OwnerID:           c.OwnerID,
 		GetRunningPodList: c.GetRunningPodList,
 	})
-
 	if err = c.network.Start(c.ctx); err != nil {
 		return
 	}
@@ -409,42 +270,25 @@ func (c *ConnectOptions) HealthStatus() HealthStatus {
 }
 
 // GetLocalTunIP returns the local TUN device IPv4 and IPv6 addresses as strings.
+// Only meaningful in the data-plane (sudo daemon) where NetworkManager holds the allocated IP.
 func (c *ConnectOptions) GetLocalTunIP() (v4 string, v6 string) {
-	if c.LocalTunIPv4 != nil {
-		v4 = c.LocalTunIPv4.IP.String()
-	}
-	if c.LocalTunIPv6 != nil {
-		v6 = c.LocalTunIPv6.IP.String()
+	if c.network != nil {
+		if ip := c.network.LocalTunIPv4(); ip != nil {
+			v4 = ip.IP.String()
+		}
+		if ip := c.network.LocalTunIPv6(); ip != nil {
+			v6 = ip.IP.String()
+		}
 	}
 	return
 }
 
 // GetConnectionID returns the connection identifier (namespace UID suffix) for this session.
 func (c *ConnectOptions) GetConnectionID() string {
-	if c == nil || c.clientset == nil {
+	if c == nil {
 		return ""
 	}
-	id, _ := util.GetConnectionID(context.Background(), c.clientset.CoreV1().Namespaces(), c.ManagerNamespace)
-	return id
-}
-
-// GetTunDeviceName returns the OS network interface name of the TUN device for this connection.
-func (c *ConnectOptions) GetTunDeviceName() (string, error) {
-	if c.network != nil && c.network.TunName() != "" {
-		return c.network.TunName(), nil
-	}
-	var ips []net.IP
-	if c.LocalTunIPv4 != nil {
-		ips = append(ips, c.LocalTunIPv4.IP)
-	}
-	if c.LocalTunIPv6 != nil {
-		ips = append(ips, c.LocalTunIPv6.IP)
-	}
-	device, err := util.GetTunDevice(ips...)
-	if err != nil {
-		return "", err
-	}
-	return device.Name, nil
+	return c.ConnectionID
 }
 
 // AddRollbackFunc registers a cleanup function to be called when the connection is torn down.
@@ -454,14 +298,6 @@ func (c *ConnectOptions) AddRollbackFunc(f func() error) {
 
 func (c *ConnectOptions) getRollbackFuncs() []func() error {
 	return c.rollbackFuncList
-}
-
-// IsMe reports whether this connection owns the proxy for the given namespace, UID, and headers.
-func (c *ConnectOptions) IsMe(ns, uid string, headers map[string]string) bool {
-	if c.proxyManager == nil {
-		return false
-	}
-	return c.proxyManager.IsMe(ns, uid, headers)
 }
 
 // ProxyResources returns the list of workloads currently being proxied by this connection.

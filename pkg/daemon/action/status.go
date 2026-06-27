@@ -2,6 +2,7 @@ package action
 
 import (
 	"context"
+	"net"
 	"sync"
 
 	"sigs.k8s.io/yaml"
@@ -22,6 +23,11 @@ const (
 
 // Status handles the Status RPC, reporting connection and proxy state.
 func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.StatusResponse, error) {
+	var ips map[string]tunIP
+	if !svr.IsSudo {
+		ips = svr.getSudoTunIPs(ctx)
+	}
+
 	if len(req.ConnectionIDs) != 0 {
 		svr.connMu.RLock()
 		var matched []*handler.ConnectOptions
@@ -40,7 +46,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 			wg.Add(1)
 			go func(options *handler.ConnectOptions) {
 				defer wg.Done()
-				result := buildConnectionStatus(options)
+				result := buildConnectionStatus(options, ips)
 				var err error
 				result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(options, options.Sync)
 				if err != nil {
@@ -68,7 +74,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 	for i, options := range snapshot {
 		go func(i int, options *handler.ConnectOptions) {
 			defer wg.Done()
-			result := buildConnectionStatus(options)
+			result := buildConnectionStatus(options, ips)
 			var err error
 			result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(options, options.Sync)
 			if err != nil {
@@ -82,13 +88,34 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 	return &rpc.StatusResponse{List: list, CurrentConnectionID: currentID}, nil
 }
 
-func buildConnectionStatus(connect *handler.ConnectOptions) *rpc.Status {
+func resolveTunIP(connect *handler.ConnectOptions, ips map[string]tunIP) (v4, v6 string) {
+	if ips != nil {
+		if ip, ok := ips[connect.GetConnectionID()]; ok {
+			return ip.v4, ip.v6
+		}
+	}
+	return connect.GetLocalTunIP()
+}
+
+func buildConnectionStatus(connect *handler.ConnectOptions, ips map[string]tunIP) *rpc.Status {
+	v4, v6 := resolveTunIP(connect, ips)
 	status := StatusOk
-	tunName, _ := connect.GetTunDeviceName()
+	tunName := ""
+	var tunIPs []net.IP
+	if v4 != "" {
+		tunIPs = append(tunIPs, net.ParseIP(v4))
+	}
+	if v6 != "" {
+		tunIPs = append(tunIPs, net.ParseIP(v6))
+	}
+	if len(tunIPs) > 0 {
+		if dev, err := util.GetTunDevice(tunIPs...); err == nil {
+			tunName = dev.Name
+		}
+	}
 	if tunName == "" {
 		status = StatusFailed
 	}
-	v4, _ := connect.GetLocalTunIP()
 	info := rpc.Status{
 		ConnectionID: connect.GetConnectionID(),
 		Cluster:      util.GetKubeconfigCluster(connect.GetFactory()),
@@ -97,6 +124,7 @@ func buildConnectionStatus(connect *handler.ConnectOptions) *rpc.Status {
 		Status:       status,
 		Netif:        tunName,
 		IPv4:         v4,
+		IPv6:         v6,
 	}
 	return &info
 }
@@ -111,21 +139,17 @@ func buildProxyAndSyncStatus(connect *handler.ConnectOptions, sync *handler.Sync
 				return nil, nil, err
 			}
 		}
-		v4, v6 := connect.GetLocalTunIP()
 		for _, virtual := range v {
 			// deployments.apps.ry-server --> deployments.apps/ry-server
 			virtual.UID = util.ConvertUIDToWorkload(virtual.UID)
 			var proxyRule []*rpc.ProxyRule
 			for _, rule := range virtual.Rules {
 				proxyRule = append(proxyRule, &rpc.ProxyRule{
-					Headers:      rule.Headers,
-					LocalTunIPv4: rule.LocalTunIPv4,
-					LocalTunIPv6: rule.LocalTunIPv6,
-					CurrentDevice: util.If(virtual.IsFargateMode(),
-						connect.IsMe(virtual.Namespace, util.ConvertWorkloadToUID(virtual.UID), rule.Headers),
-						v4 == rule.LocalTunIPv4 && v6 == rule.LocalTunIPv6,
-					),
-					PortMap: portMapToLocalPorts(rule),
+					Headers:       rule.Headers,
+					LocalTunIPv4:  rule.LocalTunIPv4,
+					LocalTunIPv6:  rule.LocalTunIPv6,
+					CurrentDevice: rule.OwnerID == connect.OwnerID,
+					PortMap:       portMapToLocalPorts(rule),
 				})
 			}
 			proxyList = append(proxyList, &rpc.Proxy{

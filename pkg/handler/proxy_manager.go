@@ -9,7 +9,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -18,8 +17,8 @@ import (
 // ProxyManager manages the lifecycle of proxy workloads (sidecar injection,
 // leave/unpatch operations) for a VPN connection.
 type ProxyManager struct {
-	factory   cmdutil.Factory
-	clientset kubernetes.Interface
+	factory          cmdutil.Factory
+	clientset        kubernetes.Interface
 	managerNamespace string
 
 	mu        sync.Mutex
@@ -30,10 +29,10 @@ type ProxyManager struct {
 // clientset, and manager namespace.
 func newProxyManager(factory cmdutil.Factory, clientset kubernetes.Interface, managerNamespace string) *ProxyManager {
 	return &ProxyManager{
-		factory:   factory,
-		clientset: clientset,
+		factory:          factory,
+		clientset:        clientset,
 		managerNamespace: managerNamespace,
-		workloads: make(ProxyList, 0),
+		workloads:        make(ProxyList, 0),
 	}
 }
 
@@ -60,26 +59,19 @@ func (pm *ProxyManager) Resources() ProxyList {
 	return result
 }
 
-// IsMe reports whether the proxy manager owns a proxy matching the given namespace, UID, and headers.
-func (pm *ProxyManager) IsMe(ns, uid string, headers map[string]string) bool {
-	pm.mu.Lock()
-	defer pm.mu.Unlock()
-	return pm.workloads.IsMe(ns, uid, headers)
-}
-
 // LeaveAll removes all proxy sidecar injections.
-func (pm *ProxyManager) LeaveAll(ctx context.Context, localIPv4 string) error {
+func (pm *ProxyManager) LeaveAll(ctx context.Context, ownerID string) error {
 	resources := pm.Resources().ToResources()
 	if len(resources) == 0 {
 		plog.G(ctx).Infof("No proxy resources found")
 		return nil
 	}
-	return pm.Leave(ctx, resources, localIPv4)
+	return pm.Leave(ctx, resources, ownerID)
 }
 
 // Leave unpatches the given proxy resources and restores their original pod specs.
-func (pm *ProxyManager) Leave(ctx context.Context, resources []Resources, v4 string) error {
-	plog.G(ctx).Infof("Leaving %d proxy resources with local IP %s", len(resources), v4)
+func (pm *ProxyManager) Leave(ctx context.Context, resources []Resources, ownerID string) error {
+	plog.G(ctx).Infof("Leaving %d proxy resources with OwnerID %s", len(resources), ownerID)
 	var errs []error
 	for _, workload := range resources {
 		// deployments.apps.ry-server --> deployments.apps/ry-server
@@ -91,12 +83,7 @@ func (pm *ProxyManager) Leave(ctx context.Context, resources []Resources, v4 str
 		}
 		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 		var empty bool
-		empty, err = inject.UnpatchContainer(ctx, nodeID, pm.factory, pm.clientset.CoreV1().ConfigMaps(pm.managerNamespace), controller, func(isFargateMode bool, rule *controlplane.Rule) bool {
-			if isFargateMode {
-				return pm.IsMe(workload.Namespace, util.ConvertWorkloadToUID(workload.Workload), rule.Headers)
-			}
-			return rule.LocalTunIPv4 == v4
-		})
+		empty, err = inject.UnpatchContainer(ctx, nodeID, pm.factory, pm.clientset.CoreV1().ConfigMaps(pm.managerNamespace), controller, ownerID)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to leave workload %s in namespace %s: %v", workload.Workload, workload.Namespace, err)
 			errs = append(errs, err)

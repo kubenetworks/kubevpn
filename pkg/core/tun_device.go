@@ -26,6 +26,7 @@ type tunDevice struct {
 
 func (d *tunDevice) writeToTun(ctx context.Context) {
 	defer util.HandleCrash()
+	defer drainPacketChan(d.tunOutbound)
 	for {
 		select {
 		case packet := <-d.tunOutbound:
@@ -53,11 +54,15 @@ func (d *tunDevice) Close() {
 // headroom reserves extra bytes before the prefix for framing headers (e.g. 2-byte datagram length).
 // Returns the buffer and payload length (prefix + IP data, NOT including headroom).
 // Caller must return buf to config.LPool.
+// The PacketBuffer's view is released and its ref count decremented before returning.
 func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte, headroom int) (buf []byte, length int) {
-	data := pkt.ToView().AsSlice()
+	view := pkt.ToView()
+	data := view.AsSlice()
 	buf = config.LPool.Get().([]byte)[:]
 	n := copy(buf[headroom+1:], data)
 	buf[headroom] = prefix
+	view.Release()
+	pkt.DecRef()
 	return buf, n + 1
 }
 

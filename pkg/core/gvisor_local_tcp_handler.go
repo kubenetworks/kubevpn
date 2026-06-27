@@ -8,7 +8,6 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
 	"gvisor.dev/gvisor/pkg/tcpip/link/sniffer"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
-	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -34,7 +33,7 @@ func handleGvisorPacket(gvisorInbound <-chan *Packet, outbound chan<- *Packet, h
 }
 
 func (h *gvisorLocalHandler) Run(ctx context.Context) {
-	endpoint := channel.New(tcp.DefaultReceiveBufferSize, uint32(config.DefaultMTU), tcpip.GetRandMacAddr())
+	endpoint := channel.New(MaxSize, uint32(config.DefaultMTU), tcpip.GetRandMacAddr())
 	// for support ipv6 skip checksum
 	// vendor/gvisor.dev/gvisor/pkg/tcpip/stack/nic.go:763
 	endpoint.LinkEPCapabilities = stack.CapabilityRXChecksumOffload

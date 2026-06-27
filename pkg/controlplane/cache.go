@@ -38,7 +38,8 @@ import (
 // CurrentSchemaVersion is the latest schema version for Virtual configs stored in ConfigMaps.
 // Bump this when making breaking changes to the Virtual/Rule struct layout.
 // A zero value means a legacy config created before versioning was introduced.
-const CurrentSchemaVersion = 1
+// Version 2: OwnerID is required on all rules (no backward compat with empty OwnerID).
+const CurrentSchemaVersion = 2
 
 // Virtual represents an envoy xDS configuration for a single proxied workload.
 type Virtual struct {
@@ -122,11 +123,9 @@ type Rule struct {
 	Headers      map[string]string
 	LocalTunIPv4 string
 	LocalTunIPv6 string
-	// OwnerID identifies the connection that owns this rule.
-	// Supplementary to LocalTunIPv4-based ownership checks — does not replace them.
-	// Populated with the DHCP-assigned TUN IPv4 address at rule creation time.
-	// Empty for rules created before this field was introduced (backward compatible).
-	OwnerID string `yaml:"ownerID,omitempty" json:"ownerID,omitempty"`
+	// OwnerID identifies the connection that owns this rule (a UUID prefix).
+	// Required — used as the primary key for rule matching in addVirtualRule and removeEnvoyConfig.
+	OwnerID string `yaml:"ownerID" json:"ownerID"`
 	// for no privileged mode (AWS Fargate mode), don't have cap NET_ADMIN and privileged: true. so we cannot use OSI layer 3 proxy
 	// containerPort -> envoyRulePort:localPort
 	// envoyRulePort for envoy forward to localhost:envoyRulePort

@@ -51,6 +51,9 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 		p.logger.Errorf("failed to parse config file: %v", err)
 		return err
 	}
+
+	activeUIDs := make(map[string]bool)
+
 	enableIPv6, _ := util.DetectSupportIPv6()
 	for _, config := range configList {
 		if len(config.UID) == 0 {
@@ -69,6 +72,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 			return err
 		}
 		uid := util.GenEnvoyUID(config.Namespace, config.UID)
+		activeUIDs[uid] = true
 		lastConfig, ok := p.expireCache.Get(uid)
 		if ok && reflect.DeepEqual(lastConfig.(*Virtual), config) {
 			p.logger.Debugf("config unchanged for %s, skipping", uid)
@@ -107,6 +111,14 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 
 		p.expireCache.Set(uid, config, time.Minute*5)
 	}
+
+	for _, key := range p.cache.GetStatusKeys() {
+		if !activeUIDs[key] {
+			p.cache.ClearSnapshot(key)
+			p.logger.Infof("cleared stale xDS snapshot for %s", key)
+		}
+	}
+
 	return nil
 }
 

@@ -127,3 +127,25 @@ func (svr *Server) OffloadToConfig() error {
 func (svr *Server) CleanupConfig() error {
 	return os.Remove(config.GetDBPath())
 }
+
+type tunIP struct{ v4, v6 string }
+
+// getSudoTunIPs queries the sudo daemon and returns a map from ConnectionID to TUN IPs.
+func (svr *Server) getSudoTunIPs(ctx context.Context) map[string]tunIP {
+	if svr.GetClient == nil {
+		return nil
+	}
+	cli, err := svr.GetClient(true)
+	if err != nil {
+		return nil
+	}
+	resp, err := cli.Status(ctx, &rpc.StatusRequest{})
+	if err != nil {
+		return nil
+	}
+	m := make(map[string]tunIP, len(resp.GetList()))
+	for _, s := range resp.GetList() {
+		m[s.GetConnectionID()] = tunIP{v4: s.GetIPv4(), v6: s.GetIPv6()}
+	}
+	return m
+}

@@ -89,8 +89,8 @@ resolveKubeconfig(session.Ctx, SshJump, ...)       ← SSH tunnel created
 detectAndSetManagerNamespace(session.Ctx, ...)
 connect.InitDHCP(session.Ctx)
 forwardConnectToSudo(session.Ctx, ...)
-    ├── connect.RentIP(resp.Context(), ...)
-    ├── cli.Connect(ipCtx)                         ← to sudo daemon
+    ├── req.OwnerID = connect.OwnerID
+    ├── cli.Connect(ctx)                           ← to sudo daemon
     └── connect.HealthPeriod(session.Ctx, ...)
 
 Teardown: session.Cancel() → SSH tunnel closes → temp kubeconfig removed
