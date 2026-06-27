@@ -10,134 +10,120 @@ KubeVPN runs as three processes: **CLI** (user-facing command), **User Daemon** 
 | User/Root Daemon | Full structured log | `2006-01-02 15:04:05.000 file.go:42 info: message` | log file (lumberjack) |
 | Daemon → CLI | Progress streamed to user | `message\n` | gRPC stream → CLI stdout |
 
-## Current Problems
-
-### 1. Mutable global logger `L`
-
-```go
-// pkg/log/context.go
-var L = InitLoggerForServer()  // server-format at package init time
-```
-
-Every CLI command overwrites `L` in `PreRunE`:
-
-```go
-plog.InitLoggerForClient()  // MUTATES global L to client-format
-```
-
-This causes:
-- Before `PreRunE`: CLI log uses server-format (user sees `file.go:42 info: message`)
-- After `PreRunE`: L is client-format, but daemon goroutines spawned later also see client-format L
-- Race condition: multiple goroutines read L while CLI mutates it
-
-### 2. Daemon log file gets client-format messages
-
-```go
-// pkg/daemon/action/writer.go
-logger := plog.GetLoggerForClient(level, io.MultiWriter(
-    newStreamWriter(sendMsg),  // gRPC stream → CLI (OK: simple messages)
-    svr.LogFile,               // log file (BAD: same simple format, no timestamp/file:line)
-))
-```
-
-One logger, one formatter, two outputs. The log file gets `message\n` without any debugging context.
-
-### 3. `plog.G(context.Background())` fallback
-
-31 call sites in `pkg/` use `plog.G(context.Background())`. These fall back to global `L`, whose format depends on which process mutated it last.
-
-## Target Architecture
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ CLI Process                                                  │
 │                                                              │
-│  cmd.SetContext(WithLogger(ctx, clientLogger))               │
+│  PreRunE: cmd.SetContext(WithLogger(ctx, NewClientLogger())) │
 │       │                                                      │
 │       ▼                                                      │
 │  plog.G(ctx) ──→ clientLogger ──→ stdout (message only)      │
 │                                                              │
 │  gRPC stream recv ──→ print to stdout (message only)         │
+│                                                              │
+│  plog.G(context.Background()) ──→ global L ──→ stderr        │
+│                                   (server-format, InfoLevel) │
 └─────────────────────────────────────────────────────────────┘
-                          ▲ gRPC stream
+                          ▲ gRPC stream (Info+ only)
                           │
 ┌─────────────────────────┼───────────────────────────────────┐
 │ Daemon Process           │                                    │
 │                          │                                    │
-│  Per-RPC logger (server-format)                               │
+│  Per-RPC logger (server-format, DebugLevel)                   │
 │       │                                                      │
 │       ├──→ svr.LogFile (timestamp + file:line + level)       │
+│       │    ALL levels including Debug                         │
 │       │                                                      │
 │       └──→ StreamHook ──→ gRPC stream (message only)         │
+│            Info+ only (Debug filtered out)                    │
 │                                                              │
 │  plog.G(context.Background()) ──→ global L ──→ logFile       │
-│                                   (server-format, fallback)  │
+│                                   (server-format, DebugLevel)│
 └──────────────────────────────────────────────────────────────┘
 ```
 
-### Key principle: one logger, two outputs, two formats
+### Key principle: one logger, two outputs, two formats, two levels
 
-The daemon's per-RPC logger uses **server-format** as its primary formatter (writes to log file with full debug info). A **StreamHook** intercepts each log entry and sends only the message text to the gRPC stream.
+The daemon's per-RPC logger uses **server-format** as its primary formatter (writes to log file at DebugLevel with full debug info). A **StreamHook** intercepts log entries at **InfoLevel** and sends only the message text to the gRPC stream. Debug messages go to the log file only.
 
 ```go
-// Daemon per-RPC setup:
-logger := plog.GetLoggerForServer(level, svr.LogFile)  // server-format → log file
+// Daemon per-RPC setup (writer.go initStreamLogger):
+logger := plog.GetLoggerForServer(level, svr.LogFile)  // server-format → log file (all levels)
 logger.AddHook(&plog.StreamHook{                        // message-only → gRPC stream
     Writer: newStreamWriter(sendMsg),
-    Level:  log.Level(level),
+    Level:  log.InfoLevel,                               // Info+ only — Debug stays in log file
 })
 ctx = plog.WithLogger(resp.Context(), logger)
 ```
 
 ## Design Rules
 
-### 1. Never mutate global `L`
+### 1. Global `L` is immutable
 
-`L` is initialized once as server-format and never reassigned. `InitLoggerForClient()` (which overwrites `L`) should be removed. CLI injects its logger via context:
+`L` is initialized once as server-format at `InfoLevel`. The daemon upgrades it to `DebugLevel` after redirecting output to the log file (`daemon.go`). CLI never mutates `L`.
 
 ```go
-// Before (bad): mutates global state
-plog.InitLoggerForClient()
+// pkg/log/context.go — initialized once at package init
+var L = InitLoggerForServer()  // server-format, InfoLevel, stderr
 
-// After (good): context-scoped, no global mutation
-cmd.SetContext(plog.WithLogger(cmd.Context(), plog.GetLoggerForClient(...)))
+// pkg/daemon/daemon.go — daemon upgrades after output redirect
+plog.L.SetOutput(l)         // redirect to lumberjack log file
+plog.L.SetLevel(log.DebugLevel)  // enable debug in log file
 ```
 
 ### 2. CLI logger lives in `cmd.Context()`
 
-CLI commands create a client-format logger and inject it into `cmd.Context()`. All CLI-side code uses `plog.G(cmd.Context())` or `plog.G(ctx)` — never `plog.G(context.Background())`.
+CLI commands create a client-format logger and inject it into `cmd.Context()`:
 
-### 3. Daemon logger uses StreamHook for dual output
+```go
+// Every CLI command's PreRunE:
+cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
+```
 
-Daemon RPC handlers create a server-format logger writing to the log file, with a StreamHook that sends message-only text to the gRPC stream. This gives:
-- Log file: `2006-01-02 15:04:05.000 connect.go:42 info: Connecting to cluster`
-- gRPC stream → CLI: `Connecting to cluster`
+`NewClientLogger()` returns a message-only logger writing to stdout. Respects `--debug` flag via `config.Debug`.
 
-### 4. `plog.G(context.Background())` is always server-format
+### 3. StreamHook filters debug from CLI
 
-Any code that uses `context.Background()` falls back to global `L` (server-format). In daemon, this writes to the log file. In CLI, this writes to stderr. Both are acceptable fallback behaviors.
+StreamHook level is always `InfoLevel`, regardless of the logger's own level. This means:
+- `--debug` flag → daemon logger at `DebugLevel` → debug messages in log file
+- StreamHook → only `Info`/`Warn`/`Error` sent to CLI via gRPC stream
+- User never sees `[Client-0] Connected`, `[Transport] Using TLS mode`, etc.
 
-### 5. Log levels flow from CLI to daemon
+### 4. `plog.G(context.Background())` fallback
 
-CLI passes the desired log level via `ConnectRequest.Level`. The daemon creates its per-RPC logger at that level. Debug-level messages appear in the log file but are filtered from the gRPC stream (StreamHook respects the level).
+Code using `context.Background()` falls back to global `L`:
+- In CLI process: `L` is `InfoLevel` → debug messages suppressed, errors go to stderr
+- In daemon process: `L` is `DebugLevel` after startup → all messages go to log file
+
+### 5. Log levels
+
+| Level | Log file | gRPC stream → CLI | CLI stdout |
+|---|---|---|---|
+| Debug | ✅ (daemon only, after L upgrade) | ❌ (StreamHook filters) | ✅ (only with `--debug`) |
+| Info | ✅ | ✅ | ✅ |
+| Warn | ✅ | ✅ | ✅ |
+| Error | ✅ | ✅ | ✅ |
 
 ## Component Reference
 
 | Component | File | Purpose |
 |---|---|---|
-| `L` (global) | `pkg/log/context.go` | Immutable server-format fallback logger |
+| `L` (global) | `pkg/log/context.go` | Immutable server-format fallback logger (InfoLevel default, DebugLevel in daemon) |
 | `G(ctx)` | `pkg/log/context.go` | Get logger from context, fallback to `L` |
 | `WithLogger(ctx, logger)` | `pkg/log/context.go` | Inject logger into context |
-| `GetLoggerForClient` | `pkg/log/logger.go` | Create client-format logger (message-only) |
-| `GetLoggerForServer` | `pkg/log/logger.go` | Create server-format logger (timestamp+file:line) |
-| `StreamHook` | `pkg/log/logger.go` | Hook that sends message-only text to a writer |
-| `initStreamLogger` | `pkg/daemon/action/writer.go` | Create per-RPC logger with dual output |
+| `NewClientLogger()` | `pkg/log/logger.go` | Create client-format logger for CLI (message-only, stdout) |
+| `GetLoggerForClient(level, out)` | `pkg/log/logger.go` | Create client-format logger for custom output |
+| `GetLoggerForServer(level, out)` | `pkg/log/logger.go` | Create server-format logger (timestamp+file:line) |
+| `StreamHook` | `pkg/log/logger.go` | Logrus hook: sends message-only text to a writer at InfoLevel |
+| `initStreamLogger` | `pkg/daemon/action/writer.go` | Create per-RPC logger: server-format to logFile + StreamHook to gRPC |
 | `serverFormat` | `pkg/log/logger.go` | `2006-01-02 15:04:05.000 file.go:42 level: message` |
 | `format` (client) | `pkg/log/logger.go` | `message\n` |
 
 ## Log Output Examples
 
-**CLI stdout** (what user sees when running `kubevpn connect`):
+**CLI stdout** (`kubevpn connect`):
 ```
 Starting connect to cluster
 Forwarding port...
@@ -151,15 +137,13 @@ Now you can access resources in the kubernetes cluster !
 ```
 2026-06-10 08:15:23.456 connect_elevate.go:89 info: Use manager namespace default
 2026-06-10 08:15:23.567 connect.go:143 info: Starting connect to cluster
+2026-06-10 08:15:23.600 gvisor_tcp_handler.go:73 debug: [Gvisor-TCP] Listening on :10801
 2026-06-10 08:15:24.123 network.go:122 info: Forwarding port...
+2026-06-10 08:15:24.200 transporter_tcp.go:29 debug: [Transport] Using TLS mode
+2026-06-10 08:15:24.300 tun_client.go:126 debug: [Client-0] Connected to 127.0.0.1:51496
 2026-06-10 08:15:25.234 network.go:204 info: Allocated TUN IP: v4=198.18.0.5/16 v6=2001:2::5/64
-2026-06-10 08:15:25.345 tun_server.go:92 warning: [Perf] Slow tunInbound send: 10.0.0.1 -> 10.0.0.5 blocked 25ms
+2026-06-10 08:15:25.345 tun_server.go:92 warning: [Perf] Slow tunInbound send blocked 25ms
 2026-06-10 08:15:26.456 network.go:142 info: Adding Pod IP and Service IP to route table...
-2026-06-10 08:15:27.567 network.go:148 info: Configuring DNS service...
 ```
 
-**Fallback** (pkg/ code using `context.Background()` in daemon):
-```
-2026-06-10 08:15:23.100 gvisor_tcp_handler.go:73 info: [Gvisor-TCP] Listening on :10801
-2026-06-10 08:15:23.101 gvisor_udp_handler.go:54 info: [UDP] Listening on :10802
-```
+Note: debug lines (`[Gvisor-TCP]`, `[Transport]`, `[Client-0]`) appear only in the log file, never in CLI output.

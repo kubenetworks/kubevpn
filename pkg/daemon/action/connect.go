@@ -2,8 +2,8 @@ package action
 
 import (
 	"context"
-	"io"
 
+	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
@@ -28,9 +28,13 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		return err
 	}
 
-	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newStreamWriter(func(msg string) error {
-		return resp.Send(&rpc.ConnectResponse{Message: msg})
-	}), svr.LogFile))
+	logger := plog.GetLoggerForServer(req.Level, svr.LogFile)
+	logger.AddHook(&plog.StreamHook{
+		Writer: newStreamWriter(func(msg string) error {
+			return resp.Send(&rpc.ConnectResponse{Message: msg})
+		}),
+		Level: log.InfoLevel,
+	})
 	if !svr.IsSudo {
 		return svr.redirectConnectToSudoDaemon(req, resp, logger)
 	}

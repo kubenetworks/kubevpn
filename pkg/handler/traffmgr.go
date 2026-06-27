@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -87,6 +88,24 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		return err
 	}
 
+	plog.G(ctx).Infof("Creating ConfigMap %s", config.ConfigMapPodTrafficManager)
+	_, err = clientset.CoreV1().ConfigMaps(namespace).Create(ctx, &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.ConfigMapPodTrafficManager,
+			Namespace: namespace,
+		},
+		Data: map[string]string{
+			config.KeyEnvoy:            "",
+			config.KeyDHCP:             "",
+			config.KeyDHCP6:            "",
+			config.KeyClusterIPv4POOLS: "",
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		plog.G(ctx).Errorf("Creating ConfigMap error: %v", err)
+		return err
+	}
+
 	_, err = createTLSSecret(ctx, clientset, namespace)
 	if err != nil {
 		return err
@@ -125,7 +144,7 @@ func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelec
 			return
 		}
 		for _, pod := range podList.Items {
-			if podutils.IsPodReady(&pod) {
+			if podutils.IsPodReady(&pod) && pod.DeletionTimestamp == nil {
 				isPodReady = true
 				cancelFunc()
 				return
@@ -171,6 +190,7 @@ func cleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.In
 	_ = clientset.RbacV1().Roles(namespace).Delete(ctx, name, options)
 	_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, name, options)
 	_ = clientset.CoreV1().Services(namespace).Delete(ctx, name, options)
+	_ = clientset.CoreV1().ConfigMaps(namespace).Delete(ctx, name, options)
 	_ = clientset.CoreV1().Secrets(namespace).Delete(ctx, name, options)
 	_ = clientset.CoreV1().Pods(namespace).Delete(ctx, config.CniNetName, options)
 	_ = clientset.BatchV1().Jobs(namespace).Delete(ctx, name, options)

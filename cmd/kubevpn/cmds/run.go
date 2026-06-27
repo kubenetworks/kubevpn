@@ -78,7 +78,7 @@ func CmdRun(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			err = daemon.StartupDaemon(cmd.Context())
 			if err != nil {
 				return err

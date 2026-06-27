@@ -197,43 +197,64 @@ func dedupAndFilterCIDRs(cidrs []*net.IPNet, apiServerIPs []net.IP) []*net.IPNet
 	return util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cidrs), apiServerIPs)
 }
 
+// parseCachedCIDRs parses a space-separated CIDR string (from ConfigMap cache)
+// and returns the parsed CIDRs after dedup and API server IP filtering.
+func parseCachedCIDRs(ipPoolStr string, apiServerIPs []net.IP) []*net.IPNet {
+	var cidrs []*net.IPNet
+	for _, s := range strings.Split(ipPoolStr, " ") {
+		_, cidr, _ := net.ParseCIDR(s)
+		if cidr != nil {
+			cidrs = append(cidrs, cidr)
+		}
+	}
+	return dedupAndFilterCIDRs(cidrs, apiServerIPs)
+}
+
+// encodeCIDRs serializes CIDRs into a deduplicated space-separated string for ConfigMap storage.
+func encodeCIDRs(cidrs []*net.IPNet) string {
+	s := sets.New[string]()
+	for _, cidr := range cidrs {
+		s.Insert(cidr.String())
+	}
+	return strings.Join(s.UnsortedList(), " ")
+}
+
+// getAPIServerIPs resolves the API server IPs from the kubeconfig host, appending SSH jump host IPs.
+func (c *ConnectOptions) getAPIServerIPs() ([]net.IP, error) {
+	ips, err := util.GetAPIServerIP(c.config.Host)
+	if err != nil {
+		return nil, err
+	}
+	return append(ips, c.SshHosts...), nil
+}
+
 // getCIDR detects cluster Pod/Service CIDRs and API server IPs.
-func (c *ConnectOptions) getCIDR(ctx context.Context) (cidrs []*net.IPNet, apiServerIPs []net.IP, err error) {
+func (c *ConnectOptions) getCIDR(ctx context.Context) ([]*net.IPNet, []net.IP, error) {
 	plog.G(ctx).Debug("Detecting cluster CIDRs")
-	apiServerIPs, err = util.GetAPIServerIP(c.config.Host)
+	apiServerIPs, err := c.getAPIServerIPs()
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(c.SshHosts) > 0 {
-		apiServerIPs = append(apiServerIPs, c.SshHosts...)
-	}
 
-	// (1) get CIDR from cache
 	ipPoolStr, err := c.Get(ctx, config.KeyClusterIPv4POOLS)
 	if err != nil {
 		return nil, nil, err
 	}
 	if strings.TrimSpace(ipPoolStr) != "" {
-		var cached []*net.IPNet
-		for _, s := range strings.Split(ipPoolStr, " ") {
-			_, cidr, _ := net.ParseCIDR(s)
-			if cidr != nil {
-				cached = append(cached, cidr)
-			}
-		}
-		cidrs = dedupAndFilterCIDRs(cached, apiServerIPs)
+		cidrs := parseCachedCIDRs(ipPoolStr, apiServerIPs)
 		plog.G(ctx).Infof("Get network CIDR from cache")
 		return cidrs, apiServerIPs, nil
 	}
 
-	// (2) get CIDR from cni
 	raw := util.GetCIDR(ctx, c.clientset, c.config, c.ManagerNamespace, c.Image)
-	cidrs = dedupAndFilterCIDRs(raw, apiServerIPs)
-	s := sets.New[string]()
-	for _, cidr := range cidrs {
-		s.Insert(cidr.String())
+	cidrs := dedupAndFilterCIDRs(raw, apiServerIPs)
+	if len(cidrs) == 0 {
+		plog.G(ctx).Warnf("No cluster CIDRs detected (raw=%d, all filtered by API server IPs %v)", len(raw), apiServerIPs)
+		return cidrs, apiServerIPs, nil
 	}
-	err = c.Set(ctx, config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
+	encoded := encodeCIDRs(cidrs)
+	plog.G(ctx).Infof("Saving %d cluster CIDRs to cache: %s", len(cidrs), encoded)
+	err = c.Set(ctx, config.KeyClusterIPv4POOLS, encoded)
 	return cidrs, apiServerIPs, err
 }
 

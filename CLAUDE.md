@@ -283,17 +283,17 @@ func TestAddEnvoyConfig(t *testing.T) {
 
 When refactoring backend code (`pkg/`):
 
-0. **Every refactoring must include integration tests** — wire up real components (gRPC, DHCP, ConfigMap, connection management) against `fake.NewSimpleClientset()`. Structure tests as multi-phase stories (connect → proxy → leave → crash → reconnect). Never write single-function unit tests as a substitute.
-
-1. **Never touch `cmd/`** — CLI is frozen
-2. **Always `go build ./...` after changes** — catch compile errors immediately
-3. **Run `go test` and `go vet`** on affected packages before committing
-4. **Commit per logical change** — don't bundle unrelated fixes
-5. **Inherent complexity is OK** — don't split protocol/platform code just to reduce line count
-6. **File renames need `git mv`** — preserve git history
-7. **Prefer explicit over implicit** — use named fields/types instead of magic value checks
-8. **Extract shared helpers** — if 3+ call sites duplicate logic, extract to a shared function
-9. **Any modification: verify global impact** —
+0. **Read `docs/` design documents first** — before any code change, read the relevant design docs in `docs/` to understand the full architecture. Changes must be consistent with the documented design (dual-daemon model, OwnerID ownership, DHCP lifecycle, logging architecture, etc.). If a change conflicts with the docs, update the docs as part of the same commit. Key docs: `02-dual-daemon.md` (which daemon runs what), `05-owner-id.md` (envoy rule ownership), `13-logging-architecture.md` (log routing), `14-rpc-daemon-mapping.md` (RPC → daemon mapping).
+1. **Every refactoring must include integration tests** — wire up real components (gRPC, DHCP, ConfigMap, connection management) against `fake.NewSimpleClientset()`. Structure tests as multi-phase stories (connect → proxy → leave → crash → reconnect). Never write single-function unit tests as a substitute.
+2. **Never touch `cmd/`** — CLI is frozen
+3. **Always `go build ./...` after changes** — catch compile errors immediately
+4. **Run `go test` and `go vet`** on affected packages before committing
+5. **Commit per logical change** — don't bundle unrelated fixes
+6. **Inherent complexity is OK** — don't split protocol/platform code just to reduce line count
+7. **File renames need `git mv`** — preserve git history
+8. **Prefer explicit over implicit** — use named fields/types instead of magic value checks
+9. **Extract shared helpers** — if 3+ call sites duplicate logic, extract to a shared function
+10. **Any modification: verify global impact** —
    - Inserting code in a function: re-read the entire function's control flow
    - Removing a json tag: grep all deserialization paths that read that field
    - Deleting a file/package: grep all `.go` AND `.md` for references

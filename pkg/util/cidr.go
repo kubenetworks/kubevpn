@@ -27,28 +27,25 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-// GetCIDR
-// 1) dump cluster info
-// 2) grep cmdline
-// 3) create svc + cat *.conflist
-// 4) create svc + get pod IP with svc mask
+// GetCIDR discovers cluster Pod and Service CIDRs using multiple strategies:
+// component flags in kube-system pods, CNI config files, and the service IP range error trick.
 func GetCIDR(ctx context.Context, clientset kubernetes.Interface, restconfig *rest.Config, namespace string, image string) []*net.IPNet {
 	defer func() {
 		_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
 	}()
 
 	var result []*net.IPNet
-	plog.G(ctx).Infoln("Getting network CIDR from cluster info...")
+	plog.G(ctx).Infoln("Detecting cluster CIDRs from component flags...")
 	info, err := GetCIDRByDumpClusterInfo(ctx, clientset)
 	if err == nil {
-		plog.G(ctx).Debugf("Getting network CIDR from cluster info successfully")
+		plog.G(ctx).Debugf("Detected CIDRs from component flags")
 		result = append(result, info...)
 	}
 
-	plog.G(ctx).Infoln("Getting network CIDR from CNI...")
+	plog.G(ctx).Infoln("Detecting cluster CIDRs from CNI config...")
 	cni, err := GetCIDRFromCNI(ctx, clientset, restconfig, namespace, image)
 	if err == nil {
-		plog.G(ctx).Debugf("Getting network CIDR from CNI successfully")
+		plog.G(ctx).Debugf("Detected CIDRs from CNI config")
 		result = append(result, cni...)
 	}
 
@@ -57,10 +54,10 @@ func GetCIDR(ctx context.Context, clientset kubernetes.Interface, restconfig *re
 		result = append(result, podCIDR...)
 	}
 
-	plog.G(ctx).Infoln("Getting network CIDR from services...")
+	plog.G(ctx).Infoln("Detecting service CIDR...")
 	svcCIDR, _ := GetServiceCIDRByCreateService(ctx, clientset.CoreV1().Services(namespace))
 	if svcCIDR != nil {
-		plog.G(ctx).Debugf("Getting network CIDR from services successfully")
+		plog.G(ctx).Debugf("Detected service CIDR")
 		result = append(result, svcCIDR)
 
 		podCIDR, err = GetPodCIDRFromPod(ctx, clientset, namespace, svcCIDR)
@@ -72,19 +69,9 @@ func GetCIDR(ctx context.Context, clientset kubernetes.Interface, restconfig *re
 	return result
 }
 
-// parseCIDRFromString extracts CIDRs from Kubernetes component command-line flags.
-/*
-*
-kube-apiserver:
---service-cluster-ip-range=<IPv4 CIDR>,<IPv6 CIDR>
-kube-controller-manager:
---cluster-cidr=<IPv4 CIDR>,<IPv6 CIDR>
---service-cluster-ip-range=<IPv4 CIDR>,<IPv6 CIDR>
---node-cidr-mask-size-ipv4|--node-cidr-mask-size-ipv6 defaults to /24 for IPv4 and /64 for IPv6
-kube-proxy:
---cluster-cidr=<IPv4 CIDR>,<IPv6 CIDR>
-*/
-func parseCIDRFromString(content string) (result []*net.IPNet) {
+// parseCIDRFromFlag extracts CIDRs from Kubernetes component command-line flags
+// (--cluster-cidr and --service-cluster-ip-range).
+func parseCIDRFromFlag(content string) (result []*net.IPNet) {
 	if strings.Contains(content, "cluster-cidr") || strings.Contains(content, "service-cluster-ip-range") {
 		_, cidrList, found := strings.Cut(content, "=")
 		if found {
@@ -99,10 +86,8 @@ func parseCIDRFromString(content string) (result []*net.IPNet) {
 	return
 }
 
-// GetCIDRByDumpClusterInfo
-// root     22008 21846 14 Jan18 ?        6-22:53:35 kube-apiserver --advertise-address=10.56.95.185 --allow-privileged=true --anonymous-auth=True --apiserver-count=3 --authorization-mode=Node,RBAC --bind-address=0.0.0.0 --client-ca-file=/etc/kubernetes/ssl/ca.crt --default-not-ready-toleration-seconds=300 --default-unreachable-toleration-seconds=300 --enable-admission-plugins=NodeRestriction --enable-aggregator-routing=False --enable-bootstrap-token-auth=true --endpoint-reconciler-type=lease --etcd-cafile=/etc/ssl/etcd/ssl/ca.pem --etcd-certfile=/etc/ssl/etcd/ssl/node-kube-control-1.pem --etcd-keyfile=/etc/ssl/etcd/ssl/node-kube-control-1-key.pem --etcd-servers=https://10.56.95.185:2379,https://10.56.95.186:2379,https://10.56.95.187:2379 --etcd-servers-overrides=/events#https://10.56.95.185:2381;https://10.56.95.186:2381;https://10.56.95.187:2381 --event-ttl=1h0m0s --insecure-port=0 --kubelet-certificate-authority=/etc/kubernetes/ssl/kubelet/kubelet-ca.crt --kubelet-client-certificate=/etc/kubernetes/ssl/apiserver-kubelet-client.crt --kubelet-client-key=/etc/kubernetes/ssl/apiserver-kubelet-client.key --kubelet-preferred-address-types=InternalDNS,InternalIP,Hostname,ExternalDNS,ExternalIP --profiling=False --proxy-client-cert-file=/etc/kubernetes/ssl/front-proxy-client.crt --proxy-client-key-file=/etc/kubernetes/ssl/front-proxy-client.key --request-timeout=1m0s --requestheader-allowed-names=front-proxy-client --requestheader-client-ca-file=/etc/kubernetes/ssl/front-proxy-ca.crt --requestheader-extra-headers-prefix=X-Remote-Extra- --requestheader-group-headers=X-Remote-Group --requestheader-username-headers=X-Remote-User --secure-port=6443 --service-account-issuer=https://kubernetes.default.svc.cluster.local --service-account-key-file=/etc/kubernetes/ssl/sa.pub --service-account-signing-key-file=/etc/kubernetes/ssl/sa.key --service-cluster-ip-range=10.233.0.0/18 --service-node-port-range=30000-32767 --storage-backend=etcd3 --tls-cert-file=/etc/kubernetes/ssl/apiserver.crt --tls-private-key-file=/etc/kubernetes/ssl/apiserver.key
-// ref: https://kubernetes.io/docs/concepts/services-networking/dual-stack/#configure-ipv4-ipv6-dual-stack
-// get cidr by dump cluster info
+// GetCIDRByDumpClusterInfo extracts CIDRs from kube-system pod command-line flags
+// (kube-apiserver --service-cluster-ip-range, kube-controller-manager --cluster-cidr, etc.).
 func GetCIDRByDumpClusterInfo(ctx context.Context, clientset kubernetes.Interface) ([]*net.IPNet, error) {
 	podList, err := clientset.CoreV1().Pods(v1.NamespaceSystem).List(ctx, v1.ListOptions{Limit: 100})
 	if err != nil {
@@ -118,12 +103,13 @@ func GetCIDRByDumpClusterInfo(ctx context.Context, clientset kubernetes.Interfac
 
 	var result []*net.IPNet
 	for _, s := range list {
-		result = append(result, parseCIDRFromString(s)...)
+		result = append(result, parseCIDRFromFlag(s)...)
 	}
 	return result, nil
 }
 
-// GetCIDRFromCNI kube-controller-manager--allocate-node-cidrs=true--authentication-kubeconfig=/etc/kubernetes/controller-manager.conf--authorization-kubeconfig=/etc/kubernetes/controller-manager.conf--bind-address=0.0.0.0--client-ca-file=/etc/kubernetes/ssl/ca.crt--cluster-cidr=10.233.64.0/18--cluster-name=cluster.local--cluster-signing-cert-file=/etc/kubernetes/ssl/ca.crt--cluster-signing-key-file=/etc/kubernetes/ssl/ca.key--configure-cloud-routes=false--controllers=*,bootstrapsigner,tokencleaner--kubeconfig=/etc/kubernetes/controller-manager.conf--leader-elect=true--leader-elect-lease-duration=15s--leader-elect-renew-deadline=10s--node-cidr-mask-size=24--node-monitor-grace-period=40s--node-monitor-period=5s--port=0--profiling=False--requestheader-client-ca-file=/etc/kubernetes/ssl/front-proxy-ca.crt--root-ca-file=/etc/kubernetes/ssl/ca.crt--service-account-private-key-file=/etc/kubernetes/ssl/sa.key--service-cluster-ip-range=10.233.0.0/18--terminated-pod-gc-threshold=12500--use-service-account-credentials=true
+// GetCIDRFromCNI extracts CIDRs by reading host /proc/*/cmdline inside a helper pod
+// and grepping for --cluster-cidr and --service-cluster-ip-range flags.
 func GetCIDRFromCNI(ctx context.Context, clientset kubernetes.Interface, restconfig *rest.Config, namespace string, image string) ([]*net.IPNet, error) {
 	pod, err := CreateCIDRPod(ctx, clientset, namespace, image)
 	if err != nil {
@@ -140,7 +126,7 @@ func GetCIDRFromCNI(ctx context.Context, clientset kubernetes.Interface, restcon
 
 	var result []*net.IPNet
 	for _, s := range strings.Split(content, "\n") {
-		result = append(result, parseCIDRFromString(s)...)
+		result = append(result, parseCIDRFromFlag(s)...)
 	}
 
 	return result, nil
@@ -169,48 +155,14 @@ func GetServiceCIDRByCreateService(ctx context.Context, serviceInterface typedco
 				}
 			}
 		}
-		return nil, fmt.Errorf("cannot find any keyword of service network CIDR info: %w", err)
+		return nil, fmt.Errorf("cannot detect service CIDR from error message: %w", err)
 	}
-	return nil, fmt.Errorf("cannot find any keyword of service network CIDR info")
+	return nil, fmt.Errorf("cannot detect service CIDR: service creation did not return expected error")
 }
 
-// GetPodCIDRFromCNI
-/*
-*
-
-	{
-	  "name": "cni0",
-	  "cniVersion":"0.3.1",
-	  "plugins":[
-	    {
-	      "datastore_type": "kubernetes",
-	      "nodename": "10.56.95.185",
-	      "type": "calico",
-	      "log_level": "info",
-	      "log_file_path": "/var/log/calico/cni/cni.log",
-	      "ipam": {
-	        "type": "calico-ipam",
-	        "assign_ipv4": "true",
-	        "ipv4_pools": ["10.233.64.0/18"]
-	      },
-	      "policy": {
-	        "type": "k8s"
-	      },
-	      "kubernetes": {
-	        "kubeconfig": "/etc/cni/net.d/calico-kubeconfig"
-	      }
-	    },
-	    {
-	      "type":"portmap",
-	      "capabilities": {
-	        "portMappings": true
-	      }
-	    }
-	  ]
-	}
-*/
+// GetPodCIDRFromCNI reads CNI conflist files from the helper pod and extracts
+// pod CIDRs from IPAM configuration (e.g. Calico ipv4_pools/ipv6_pools).
 func GetPodCIDRFromCNI(ctx context.Context, clientset kubernetes.Interface, restconfig *rest.Config, namespace string) ([]*net.IPNet, error) {
-	//var cmd = "cat /etc/cni/net.d/*.conflist"
 	content, err := Shell(ctx, clientset, restconfig, config.CniNetName, "", namespace, []string{"cat", "/etc/cni/net.d/*.conflist"})
 	if err != nil {
 		return nil, err
@@ -220,7 +172,7 @@ func GetPodCIDRFromCNI(ctx context.Context, clientset kubernetes.Interface, rest
 	if err != nil {
 		return nil, err
 	}
-	plog.G(ctx).Infoln("Get CNI config", configList.Name)
+	plog.G(ctx).Infoln("Found CNI config", configList.Name)
 	var cidrList []*net.IPNet
 	for _, plugin := range configList.Plugins {
 		switch plugin.Network.Type {

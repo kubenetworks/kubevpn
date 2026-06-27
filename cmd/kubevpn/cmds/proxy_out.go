@@ -41,7 +41,7 @@ Use SOCKS5 with socks5h when you want the proxy to resolve cluster DNS names.
 		curl --proxy socks5h://127.0.0.1:1080 http://172.21.10.49:9080
 		`)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 
 			if err := validateProxyOutListeners(socksListen, httpConnectListen); err != nil {
 				return err

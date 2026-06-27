@@ -73,7 +73,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		kubevpn connect --ssh-jump "--ssh-addr jump.naison.org --ssh-username naison --gssapi-password xxx" --ssh-username root --ssh-addr 127.0.0.1:22 --ssh-keyfile ~/.ssh/dst.pem
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			// startup daemon process and sudo process
 			err := daemon.StartupDaemon(cmd.Context())
 			if err != nil {

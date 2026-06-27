@@ -30,11 +30,15 @@ func newStreamWriter(send func(string) error) io.Writer {
 	return &streamWriter{send: send}
 }
 
-// initStreamLogger creates a logger that writes to both the gRPC stream and
-// the server's log file, then returns the logger and a context carrying it.
-// This standardizes the repeated pattern across RPC handlers.
+// initStreamLogger creates a server-format logger writing to the log file,
+// with a StreamHook that sends message-only text to the gRPC stream.
+// Log file gets full debug info (timestamp+file:line), CLI gets simple messages.
 func (svr *Server) initStreamLogger(resp grpc.ServerStream, level int32, sendMsg func(string) error) (*log.Logger, context.Context) {
-	logger := plog.GetLoggerForClient(level, io.MultiWriter(newStreamWriter(sendMsg), svr.LogFile))
+	logger := plog.GetLoggerForServer(level, svr.LogFile)
+	logger.AddHook(&plog.StreamHook{
+		Writer: newStreamWriter(sendMsg),
+		Level:  log.InfoLevel,
+	})
 	return logger, plog.WithLogger(resp.Context(), logger)
 }
 

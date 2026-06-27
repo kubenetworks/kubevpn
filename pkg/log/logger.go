@@ -18,16 +18,18 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-// InitLoggerForClient configures the package-level logger L for client-side use with stdout output.
-func InitLoggerForClient() {
+// NewClientLogger creates a client-format logger writing to stdout.
+// Used by CLI commands: cmd.SetContext(plog.WithLogger(ctx, plog.NewClientLogger()))
+func NewClientLogger() *log.Logger {
 	level := log.InfoLevel
 	if config.Debug {
 		level = log.DebugLevel
 	}
-	L = GetLoggerForClient(int32(level), os.Stdout)
+	return GetLoggerForClient(int32(level), os.Stdout)
 }
 
-// GetLoggerForClient returns a new logger configured for client-side use at the given level and output writer.
+// GetLoggerForClient returns a new logger configured for client-side use
+// (message-only format, no timestamp/file:line). Used by CLI commands.
 func GetLoggerForClient(level int32, out io.Writer) *log.Logger {
 	return &log.Logger{
 		Out:          out,
@@ -39,16 +41,46 @@ func GetLoggerForClient(level int32, out io.Writer) *log.Logger {
 	}
 }
 
-// InitLoggerForServer returns a new logger configured for server-side use with caller info and stderr output.
-func InitLoggerForServer() *log.Logger {
+// GetLoggerForServer returns a new logger configured for server-side use
+// (timestamp + file:line + level). Used by daemon RPC handlers.
+func GetLoggerForServer(level int32, out io.Writer) *log.Logger {
 	return &log.Logger{
-		Out:          os.Stderr,
+		Out:          out,
 		Formatter:    &serverFormat{},
 		Hooks:        make(log.LevelHooks),
-		Level:        log.DebugLevel,
+		Level:        log.Level(level),
 		ExitFunc:     os.Exit,
 		ReportCaller: true,
 	}
+}
+
+// InitLoggerForServer returns the default server-format logger writing to stderr
+// at InfoLevel. The daemon upgrades to DebugLevel after redirecting output to log file.
+func InitLoggerForServer() *log.Logger {
+	return GetLoggerForServer(int32(log.InfoLevel), os.Stderr)
+}
+
+// StreamHook sends message-only text to a writer (typically a gRPC stream).
+// Attach to a server-format logger so the primary output (log file) gets full
+// debug info while the stream gets clean user-facing messages.
+type StreamHook struct {
+	Writer io.Writer
+	Level  log.Level
+}
+
+func (h *StreamHook) Levels() []log.Level {
+	var levels []log.Level
+	for _, l := range log.AllLevels {
+		if l <= h.Level {
+			levels = append(levels, l)
+		}
+	}
+	return levels
+}
+
+func (h *StreamHook) Fire(entry *log.Entry) error {
+	_, err := h.Writer.Write([]byte(entry.Message + "\n"))
+	return err
 }
 
 type format struct{}

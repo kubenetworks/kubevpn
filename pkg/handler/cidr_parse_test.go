@@ -2,26 +2,8 @@ package handler
 
 import (
 	"net"
-	"strings"
 	"testing"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
-
-// parseCachedCIDRs replicates the CIDR cache parsing logic from getCIDR.
-// It splits a space-separated string of CIDRs, parses each, accumulates them,
-// and applies dedup + API server IP filtering after each addition (matching
-// the incremental pattern in getCIDR).
-func parseCachedCIDRs(ipPoolStr string, apiServerIPs []net.IP) []*net.IPNet {
-	var cidrs []*net.IPNet
-	for _, s := range strings.Split(ipPoolStr, " ") {
-		_, cidr, _ := net.ParseCIDR(s)
-		if cidr != nil {
-			cidrs = util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(append(cidrs, cidr)), apiServerIPs)
-		}
-	}
-	return cidrs
-}
 
 func TestParseCachedCIDRs(t *testing.T) {
 	t.Run("single IPv4 CIDR", func(t *testing.T) {
@@ -116,7 +98,6 @@ func TestParseCachedCIDRs(t *testing.T) {
 
 	t.Run("mixed with IPv6 overlap", func(t *testing.T) {
 		result := parseCachedCIDRs("10.233.0.0/18 fd00::/48 fd00:0:0:1::/64 172.16.0.0/12", nil)
-		// fd00:0:0:1::/64 is inside fd00::/48, should be deduped
 		if len(result) != 3 {
 			t.Fatalf("expected 3, got %d: %v", len(result), result)
 		}
@@ -159,11 +140,50 @@ func TestParseCachedCIDRs(t *testing.T) {
 	})
 
 	t.Run("multiple spaces between CIDRs", func(t *testing.T) {
-		// strings.Split with " " creates empty strings for consecutive spaces;
-		// net.ParseCIDR("") returns nil, so they are skipped
 		result := parseCachedCIDRs("10.96.0.0/12  172.16.0.0/12", nil)
 		if len(result) != 2 {
 			t.Fatalf("expected 2, got %d: %v", len(result), result)
+		}
+	})
+}
+
+func TestEncodeCIDRs(t *testing.T) {
+	mustParseCIDR := func(s string) *net.IPNet {
+		_, cidr, err := net.ParseCIDR(s)
+		if err != nil {
+			t.Fatalf("ParseCIDR(%q): %v", s, err)
+		}
+		return cidr
+	}
+
+	t.Run("nil input", func(t *testing.T) {
+		result := encodeCIDRs(nil)
+		if result != "" {
+			t.Fatalf("expected empty, got %q", result)
+		}
+	})
+
+	t.Run("single CIDR", func(t *testing.T) {
+		result := encodeCIDRs([]*net.IPNet{mustParseCIDR("10.0.0.0/8")})
+		if result != "10.0.0.0/8" {
+			t.Fatalf("expected 10.0.0.0/8, got %q", result)
+		}
+	})
+
+	t.Run("duplicate CIDRs deduplicated", func(t *testing.T) {
+		cidrs := []*net.IPNet{mustParseCIDR("10.0.0.0/8"), mustParseCIDR("10.0.0.0/8")}
+		result := encodeCIDRs(cidrs)
+		if result != "10.0.0.0/8" {
+			t.Fatalf("expected single entry, got %q", result)
+		}
+	})
+
+	t.Run("roundtrip encode-parse", func(t *testing.T) {
+		cidrs := []*net.IPNet{mustParseCIDR("10.0.0.0/8"), mustParseCIDR("172.16.0.0/12")}
+		encoded := encodeCIDRs(cidrs)
+		parsed := parseCachedCIDRs(encoded, nil)
+		if len(parsed) != 2 {
+			t.Fatalf("roundtrip failed: expected 2, got %d: %v", len(parsed), parsed)
 		}
 	})
 }
