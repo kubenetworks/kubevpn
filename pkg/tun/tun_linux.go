@@ -52,7 +52,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 	var ifc *net.Interface
 	if ifc, err = net.InterfaceByName(name); err != nil {
-		err = fmt.Errorf("could not find interface name: %s", err)
+		err = fmt.Errorf("cannot find interface name: %w", err)
 		return
 	}
 

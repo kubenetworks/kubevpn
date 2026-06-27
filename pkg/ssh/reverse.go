@@ -20,9 +20,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-// ExposeLocalPortToRemote
-// remote forwarding port (on remote SSH server network)
-// local service to be forwarded
+// ExposeLocalPortToRemote opens a reverse SSH tunnel, forwarding a remote port on the SSH server to a local service.
 func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, localPort netip.AddrPort) error {
 	// refer to https://godoc.org/golang.org/x/crypto/ssh for other authentication types
 	sshConfig := &ssh.ClientConfig{
@@ -34,7 +32,7 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 	// Connect to SSH remote server using serverEndpoint
 	serverConn, err := ssh.Dial("tcp", remoteSSHServer.String(), sshConfig)
 	if err != nil {
-		plog.G(ctx).Errorf("Dial into remote server error: %s", err)
+		plog.G(ctx).Errorf("Dial into remote server error: %v", err)
 		return err
 	}
 	defer serverConn.Close()
@@ -42,7 +40,7 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 	// Listen on remote server port
 	listener, err := serverConn.Listen("tcp", remotePort.String())
 	if err != nil {
-		plog.G(ctx).Errorf("Listen open port on remote server error: %s", err)
+		plog.G(ctx).Errorf("Listen open port on remote server error: %v", err)
 		return err
 	}
 	defer listener.Close()
@@ -57,7 +55,7 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 	for {
 		client, err := listener.Accept()
 		if err != nil {
-			plog.G(ctx).Errorf("Accept on remote service error: %s", err)
+			plog.G(ctx).Errorf("Accept on remote service error: %v", err)
 			return err
 		}
 		go func(client net.Conn) {
@@ -65,7 +63,7 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 			// Open a (local) connection to localEndpoint whose content will be forwarded so serverEndpoint
 			local, err := net.Dial("tcp", localPort.String())
 			if err != nil {
-				plog.G(ctx).Errorf("Dial INTO local service error: %s", err)
+				plog.G(ctx).Errorf("Dial into local service error: %v", err)
 				return
 			}
 			defer local.Close()

@@ -22,6 +22,7 @@ import (
 
 var daemonClient, sudoDaemonClient rpc.DaemonClient
 
+// GetClient returns a cached gRPC DaemonClient for the given privilege level, creating one if necessary.
 func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	sockPath := config.GetSockPath(isSudo)
 	if _, err = os.Stat(sockPath); errors.Is(err, os.ErrNotExist) {
@@ -112,6 +113,7 @@ func getClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClie
 	return cli, conn, nil
 }
 
+// StartupDaemon ensures both the normal and sudo daemon processes are running, starting them if needed.
 func StartupDaemon(ctx context.Context, path ...string) error {
 	var exe string
 	var err error
@@ -176,6 +178,7 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 	return nil
 }
 
+// GetTCPClient dials the daemon Unix socket and returns a raw net.Conn for HTTP/TCP traffic.
 func GetTCPClient(isSudo bool) net.Conn {
 	conn, err := net.Dial("unix", config.GetSockPath(isSudo))
 	if err != nil {

@@ -294,15 +294,13 @@ func If[T any](b bool, t1, t2 T) T {
 	return t2
 }
 
-// ConvertUIDToWorkload
-// deployments.apps.productpage --> deployments.apps/productpage
+// ConvertUIDToWorkload converts a dot-separated UID (e.g. "deployments.apps.productpage") to a slash-separated workload reference (e.g. "deployments.apps/productpage").
 func ConvertUIDToWorkload(uid string) string {
 	index := strings.LastIndex(uid, ".")
 	return uid[:index] + "/" + uid[index+1:]
 }
 
-// ConvertWorkloadToUID
-// deployments.apps/productpage --> deployments.apps.productpage
+// ConvertWorkloadToUID converts a slash-separated workload reference (e.g. "deployments.apps/productpage") to a dot-separated UID (e.g. "deployments.apps.productpage").
 func ConvertWorkloadToUID(workload string) string {
 	return strings.ReplaceAll(workload, "/", ".")
 }

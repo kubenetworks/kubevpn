@@ -68,6 +68,7 @@ func init() {
 	}
 }
 
+// GetSockPath returns the Unix domain socket path for the user or root daemon.
 func GetSockPath(isSudo bool) string {
 	name := SockPath
 	if isSudo {
@@ -76,6 +77,7 @@ func GetSockPath(isSudo bool) string {
 	return filepath.Join(daemonPath, name)
 }
 
+// GetPidPath returns the PID file path for the user or root daemon.
 func GetPidPath(isSudo bool) string {
 	name := PidPath
 	if isSudo {
@@ -84,18 +86,22 @@ func GetPidPath(isSudo bool) string {
 	return filepath.Join(daemonPath, name)
 }
 
+// GetSyncthingPath returns the directory path for Syncthing runtime data.
 func GetSyncthingPath() string {
 	return filepath.Join(daemonPath, SyncthingDir)
 }
 
+// GetConfigFile returns the path to the kubevpn YAML configuration file.
 func GetConfigFile() string {
 	return filepath.Join(homePath, ConfigFile)
 }
 
+// GetTempPath returns the directory path for kubevpn temporary files.
 func GetTempPath() string {
 	return filepath.Join(homePath, TempDir)
 }
 
+// GetDaemonLogPath returns the log file path for the user or root daemon.
 func GetDaemonLogPath(isSudo bool) string {
 	if isSudo {
 		return filepath.Join(logPath, SudoLogFile)
@@ -103,10 +109,12 @@ func GetDaemonLogPath(isSudo bool) string {
 	return filepath.Join(logPath, UserLogFile)
 }
 
+// GetPProfPath returns the directory path for storing pprof profile data.
 func GetPProfPath() string {
 	return filepath.Join(daemonPath, PProfDir)
 }
 
+// GetDBPath returns the file path for the local embedded database.
 func GetDBPath() string {
 	return filepath.Join(daemonPath, DBFile)
 }

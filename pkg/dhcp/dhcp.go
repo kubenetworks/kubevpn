@@ -19,6 +19,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// Manager manages DHCP IP allocation and release via a Kubernetes ConfigMap.
 type Manager struct {
 	clientset    kubernetes.Interface
 	cidr         *net.IPNet
@@ -27,6 +28,7 @@ type Manager struct {
 	connectionID string
 }
 
+// NewDHCPManager creates a Manager for the given namespace using the default CIDRs.
 func NewDHCPManager(clientset kubernetes.Interface, namespace string) *Manager {
 	return &Manager{
 		clientset: clientset,
@@ -36,7 +38,7 @@ func NewDHCPManager(clientset kubernetes.Interface, namespace string) *Manager {
 	}
 }
 
-// InitDHCP
+// InitDHCP ensures the DHCP ConfigMap exists and loads the namespace connection ID.
 // TODO optimize dhcp, using mac address, ipPair and deadline as unit
 func (m *Manager) InitDHCP(ctx context.Context) error {
 	cm, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
@@ -70,6 +72,7 @@ func (m *Manager) InitDHCP(ctx context.Context) error {
 	return err
 }
 
+// RentIP allocates the next available IPv4 and IPv6 addresses from the DHCP pool.
 func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 	plog.G(ctx).Debugf("Renting IP from DHCP in namespace %s", m.namespace)
 	addrs, _ := net.InterfaceAddrs()
@@ -124,6 +127,7 @@ func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 	return v4Net, v6Net, nil
 }
 
+// ReleaseIP returns the given IPv4 and IPv6 addresses back to the DHCP pool.
 func (m *Manager) ReleaseIP(ctx context.Context, v4, v6 net.IP) error {
 	plog.G(ctx).Infof("Releasing IP: v4=%v v6=%v", v4, v6)
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -224,6 +228,7 @@ func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipalloca
 	return nil
 }
 
+// ForEach iterates over all allocated IPv4 and IPv6 addresses, calling the respective callback for each.
 func (m *Manager) ForEach(ctx context.Context, fnv4 func(net.IP), fnv6 func(net.IP)) error {
 	cm, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
@@ -267,6 +272,7 @@ func (m *Manager) ForEach(ctx context.Context, fnv4 func(net.IP), fnv6 func(net.
 	return nil
 }
 
+// GetConnectionID returns the namespace connection ID populated during InitDHCP.
 func (m *Manager) GetConnectionID() string {
 	return m.connectionID
 }

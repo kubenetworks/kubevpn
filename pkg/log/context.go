@@ -27,6 +27,7 @@ func WithLogger(ctx context.Context, logger *log.Logger) context.Context {
 	return context.WithValue(ctx, loggerKey{}, &loggerValue{logger: logger})
 }
 
+// WithoutLogger removes the logger from the context, causing subsequent calls to fall back to the default logger.
 func WithoutLogger(ctx context.Context) context.Context {
 	if logger := ctx.Value(loggerKey{}); logger != nil {
 		logger.(*loggerValue).logger = nil

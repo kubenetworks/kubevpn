@@ -5,6 +5,7 @@ import (
 	"sort"
 )
 
+// Connects is a sortable slice of ConnectOptions ordered by cross-cluster dependency.
 type Connects []*ConnectOptions
 
 func (s Connects) Len() int {
@@ -15,6 +16,7 @@ func (s Connects) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
+// Append adds a non-nil ConnectOptions to the slice and returns the result.
 func (s Connects) Append(options *ConnectOptions) Connects {
 	if options != nil {
 		return append(s, options)
@@ -77,9 +79,7 @@ func (s Connects) Less(i, j int) bool {
 	return false
 }
 
-// Sort ...
-// base order: first connect last disconnect
-// sort by dependency
+// Sort orders connections so that dependent clusters disconnect before their dependencies.
 func (s Connects) Sort() Connects {
 	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
 		s[i], s[j] = s[j], s[i]

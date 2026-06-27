@@ -20,6 +20,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// RunConfig holds the Docker CLI arguments for a single container to be started.
 type RunConfig struct {
 	name    string
 	options []string
@@ -28,6 +29,7 @@ type RunConfig struct {
 	command []string
 }
 
+// ConfigList is an ordered list of RunConfigs representing all containers for a workload.
 type ConfigList []*RunConfig
 
 func (l ConfigList) Remove(ctx context.Context, useAnotherContainerNet bool) error {

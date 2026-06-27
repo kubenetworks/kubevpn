@@ -15,6 +15,7 @@ import (
 
 var sidecarNames = sets.New[string](config.ContainerSidecarEnvoyProxy, config.ContainerSidecarVPN)
 
+// RemoveContainers removes KubeVPN sidecar containers (VPN, envoy-proxy) from the pod spec.
 func RemoveContainers(spec *v1.PodSpec) {
 	for i := 0; i < len(spec.Containers); i++ {
 		if sidecarNames.Has(spec.Containers[i].Name) {

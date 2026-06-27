@@ -11,6 +11,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// Main starts the envoy xDS control plane: gRPC server, ConfigMap watcher, and snapshot processor.
 func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.Entry) error {
 	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, logger)
 	proc := newProcessor(snapshotCache, logger)

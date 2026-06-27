@@ -25,6 +25,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// ConnectMode specifies how to establish the cluster network connection (host daemon or container).
 type ConnectMode string
 
 const (
@@ -32,6 +33,7 @@ const (
 	ConnectModeHost      ConnectMode = "host"
 )
 
+// Options holds configuration for running a K8s workload locally via Docker.
 type Options struct {
 	Headers        map[string]string
 	Namespace      string
@@ -191,6 +193,7 @@ func toNatPort(port v1.ContainerPort) nat.Port {
 	return nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, strings.ToLower(string(port.Protocol))))
 }
 
+// InitClient initializes the Kubernetes client, REST config, and namespace from the factory.
 func (option *Options) InitClient(f cmdutil.Factory) error {
 	option.factory = f
 	var err error
@@ -198,6 +201,7 @@ func (option *Options) InitClient(f cmdutil.Factory) error {
 	return err
 }
 
+// GetPodTemplateSpec resolves the workload's top-level owner and extracts its PodTemplateSpec.
 func (option *Options) GetPodTemplateSpec(ctx context.Context) (*v1.PodTemplateSpec, error) {
 	_, controller, err := util.GetTopOwnerObject(ctx, option.factory, option.Namespace, option.Workload)
 	if err != nil {
@@ -208,10 +212,12 @@ func (option *Options) GetPodTemplateSpec(ctx context.Context) (*v1.PodTemplateS
 	return templateSpec, err
 }
 
+// AddRollbackFunc registers a cleanup function to be called on teardown.
 func (option *Options) AddRollbackFunc(f func() error) {
 	option.rollbackFuncList = append(option.rollbackFuncList, f)
 }
 
+// GetRollbackFuncList returns all registered rollback/cleanup functions.
 func (option *Options) GetRollbackFuncList() []func() error {
 	return option.rollbackFuncList
 }

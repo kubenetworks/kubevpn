@@ -77,6 +77,7 @@ func ParseSshFromRPC(sshJump *rpc.SshJump) *SshConfig {
 	}
 }
 
+// ToRPC converts the SshConfig into an RPC SshJump message for gRPC transport.
 func (conf SshConfig) ToRPC() *rpc.SshJump {
 	return &rpc.SshJump{
 		Addr:             conf.Addr,
@@ -92,6 +93,7 @@ func (conf SshConfig) ToRPC() *rpc.SshJump {
 	}
 }
 
+// IsEmpty reports whether the SSH config has no address, alias, or jump host configured.
 func (conf SshConfig) IsEmpty() bool {
 	return conf.ConfigAlias == "" && conf.Addr == "" && conf.Jump == ""
 }
@@ -106,6 +108,7 @@ func (conf SshConfig) IsLoopback() bool {
 	return false
 }
 
+// Host resolves the SSH server address to a list of IP addresses via DNS lookup.
 func (conf SshConfig) Host() []net.IP {
 	if conf.Addr != "" {
 		var host string
@@ -122,6 +125,7 @@ func (conf SshConfig) Host() []net.IP {
 	return []net.IP{}
 }
 
+// GetAuth returns the SSH authentication methods derived from the config (password, GSSAPI, or public key).
 func (conf SshConfig) GetAuth() ([]ssh.AuthMethod, error) {
 	host, _, _ := net.SplitHostPort(conf.Addr)
 	var auth []ssh.AuthMethod

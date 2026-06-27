@@ -25,6 +25,7 @@ func (c *ConnectOptions) setupSignalHandler() {
 	}
 }
 
+// Cleanup releases DHCP leases, leaves proxy resources, and runs rollback functions.
 func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 	if c == nil {
 		return

@@ -17,6 +17,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// LeaveAllProxyResources removes all proxy sidecar injections for the current connection's workloads.
 func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error) {
 	if c == nil || c.clientset == nil {
 		return
@@ -42,6 +43,7 @@ func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error)
 	return c.LeaveResource(ctx, c.ProxyResources().ToResources(), v4)
 }
 
+// LeaveResource unpatches the given proxy resources and restores their original pod specs.
 func (c *ConnectOptions) LeaveResource(ctx context.Context, resources []Resources, v4 string) error {
 	plog.G(ctx).Infof("Leaving %d proxy resources with local IP %s", len(resources), v4)
 	var errs []error

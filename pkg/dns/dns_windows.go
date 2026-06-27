@@ -13,6 +13,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// SetupDNS configures cluster DNS servers on the TUN interface using Windows LUID APIs.
 func (c *Config) SetupDNS(ctx context.Context) error {
 	clientConfig := c.Config
 	tunName := c.TunName
@@ -30,24 +31,25 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 		var addr netip.Addr
 		addr, err = netip.ParseAddr(s)
 		if err != nil {
-			plog.G(ctx).Errorf("Parse %s failed: %s", s, err)
+			plog.G(ctx).Errorf("Parse %s failed: %v", s, err)
 			return err
 		}
 		servers = append(servers, addr.Unmap())
 	}
 	err = luid.SetDNS(windows.AF_INET, servers, clientConfig.Search)
 	if err != nil {
-		plog.G(ctx).Errorf("Set DNS failed: %s", err)
+		plog.G(ctx).Errorf("Set DNS failed: %v", err)
 		return err
 	}
 	err = luid.SetDNS(windows.AF_INET6, servers, clientConfig.Search)
 	if err != nil {
-		plog.G(ctx).Errorf("Set DNS failed: %s", err)
+		plog.G(ctx).Errorf("Set DNS failed: %v", err)
 		return err
 	}
 	return nil
 }
 
+// CancelDNS flushes DNS and route entries from the TUN interface and removes managed hosts entries.
 func (c *Config) CancelDNS() {
 	_ = c.removeHosts()
 	tun, err := net.InterfaceByName(c.TunName)

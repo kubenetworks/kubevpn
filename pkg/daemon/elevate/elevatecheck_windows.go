@@ -15,7 +15,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-// ref https://stackoverflow.com/questions/31558066/how-to-ask-for-administer-privileges-on-windows-with-go
+// RunWithElevated re-executes the current process with elevated (sudo/admin) privileges.
 func RunWithElevated() {
 	verb := "runas"
 	exe, _ := os.Executable()
@@ -61,10 +61,7 @@ func RunWithElevatedInnerExec() error {
 	return err
 }
 
-// elevated := windows.GetCurrentProcessToken().IsElevated()
-//
-//	fmt.Printf("admin %v\n", elevated)
-//	return elevated
+// IsAdmin reports whether the current process is running with root/administrator privileges.
 func IsAdmin() bool {
 	_, err := os.Open("\\\\.\\PHYSICALDRIVE0")
 	if err != nil {

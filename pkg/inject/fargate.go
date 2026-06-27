@@ -64,6 +64,7 @@ func (f *fargateInjector) Inject(ctx context.Context) error {
 	return ModifyServiceTargetPort(ctx, o.Clientset, o.Controller.Namespace, o.Object.Name, containerPort2EnvoyListenerPort)
 }
 
+// ModifyServiceTargetPort updates a Service's target ports to point to envoy listener ports.
 func ModifyServiceTargetPort(ctx context.Context, clientset kubernetes.Interface, namespace string, name string, m map[int32]int32) error {
 	svc, err := clientset.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {

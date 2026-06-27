@@ -15,11 +15,13 @@ import (
 	config2 "github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+// Client is an HTTP client for the syncthing REST API.
 type Client struct {
 	GUIAddress string
 	client     *http.Client
 }
 
+// NewClient creates a syncthing API client targeting the given GUI address.
 func NewClient(addr string) *Client {
 	c := &Client{
 		GUIAddress: addr,

@@ -24,10 +24,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-// Reset
-// 1) reset configmap
-// 2) remove inject containers envoy and vpn
-// 3) restore service targetPort to containerPort
+// Reset removes injected sidecar containers and restores workloads to their original spec.
 func (c *ConnectOptions) Reset(ctx context.Context, namespace string, workloads []string) error {
 	if c == nil || c.clientset == nil {
 		return nil

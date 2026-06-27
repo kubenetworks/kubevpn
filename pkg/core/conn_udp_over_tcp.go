@@ -16,7 +16,7 @@ func NewUDPConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, error) {
 
 var _ net.Conn = (*UDPConnOverTCP)(nil)
 
-// UDPConnOverTCP fake udp connection over tcp connection
+// UDPConnOverTCP provides UDP-like datagram semantics over a TCP stream using length-prefix framing.
 type UDPConnOverTCP struct {
 	// tcp connection
 	net.Conn

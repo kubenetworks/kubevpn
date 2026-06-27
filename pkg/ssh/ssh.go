@@ -23,7 +23,7 @@ import (
 	pkgutil "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-// DialSshRemote https://github.com/golang/go/issues/21478
+// DialSshRemote establishes an SSH client connection, resolving aliases and jump hosts recursively.
 func DialSshRemote(ctx context.Context, conf *SshConfig, stopChan <-chan struct{}) (client *gossh.Client, err error) {
 	defer func() {
 		if err != nil && client != nil {

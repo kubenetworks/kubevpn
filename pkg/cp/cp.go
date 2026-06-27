@@ -227,6 +227,7 @@ func (o *CopyOptions) copyFromPod(src, dest fileSpec) error {
 	return o.untarAll(prefix, destFile, reader)
 }
 
+// TarPipe streams tar data from a remote pod with automatic retry on connection loss.
 type TarPipe struct {
 	src       fileSpec
 	o         *CopyOptions

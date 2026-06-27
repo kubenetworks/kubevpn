@@ -22,6 +22,7 @@ type NotifyMessage struct {
 	Content string
 }
 
+// Watch monitors the traffic-manager ConfigMap for changes and sends updates to notifyCh.
 func Watch(ctx context.Context, f cmdutil.Factory, notifyCh chan<- NotifyMessage) error {
 	namespace, _, err := f.ToRawKubeConfigLoader().Namespace()
 	if err != nil {
