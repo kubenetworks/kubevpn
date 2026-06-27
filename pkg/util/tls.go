@@ -89,8 +89,6 @@ func GenTLSCert(ctx context.Context, ns string) ([]byte, []byte, []byte, error) 
 	host := GetTLSHost(ns)
 	alternateIPs := []net.IP{net.IPv4(127, 0, 0, 1)}
 	alternateDNS := []string{"localhost"}
-	// for Mutatingwebhookconfigurations will use domain: kubevpn-traffic-manager.xxx.svc
-	alternateDNS = append(alternateDNS, fmt.Sprintf("%s.svc", host))
 	crt, key, err := cert.GenerateSelfSignedCertKeyWithFixtures(host, alternateIPs, alternateDNS, ".")
 	if err != nil {
 		plog.G(ctx).Errorf("Generate self signed cert and key error: %v", err)

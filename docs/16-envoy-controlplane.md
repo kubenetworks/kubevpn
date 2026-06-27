@@ -1,0 +1,210 @@
+# Envoy xDS Control Plane
+
+## 1. Overview
+
+The control plane (`pkg/controlplane`) runs inside the traffic manager pod and serves as the configuration hub for all envoy sidecar proxies in the cluster. It watches the `kubevpn-traffic-manager` ConfigMap for Virtual/Rule configurations and converts them into envoy xDS snapshots that are pushed to sidecar proxies via gRPC.
+
+The same gRPC server also hosts the `TunConfigService` (documented in `03-dhcp-ip-allocation.md`) for TUN IP allocation.
+
+## 2. Architecture
+
+```
+ConfigMap (ENVOY_CONFIG key)
+    │ K8s informer watch
+    ▼
+  Watcher ──── NotifyMessage{Content} ────▶ notifyCh
+                                               │
+                                               ▼
+                                          Processor
+                                          ├── parseYaml → []*Virtual
+                                          ├── Virtual.To() → xDS resources
+                                          └── cache.SetSnapshot(nodeID, snapshot)
+                                               │
+                                               ▼
+                                     go-control-plane SnapshotCache
+                                               │ ADS gRPC stream
+                                               ▼
+                                     Envoy sidecar proxies
+```
+
+## 3. Data Model
+
+### 3.1 Virtual
+
+A `Virtual` represents the envoy xDS configuration for a single proxied workload. Stored as YAML array in the ConfigMap's `ENVOY_CONFIG` key.
+
+```go
+type Virtual struct {
+    SchemaVersion int             // config schema revision (current: 2, zero = legacy)
+    Namespace     string          // workload namespace
+    UID           string          // group.resource.name identifier
+    FargateMode   bool            // explicit fargate mode flag
+    Ports         []ContainerPort // workload ports
+    Rules         []*Rule         // header-based routing rules
+}
+```
+
+**SchemaVersion**: Tracks breaking changes to the Virtual/Rule layout. `CurrentSchemaVersion = 2` requires OwnerID on all rules. Zero means legacy pre-versioning config.
+
+### 3.2 ContainerPort
+
+```go
+type ContainerPort struct {
+    Name              string          // IANA service name (optional)
+    EnvoyListenerPort int32           // envoy bind port in fargate mode (0 in mesh mode)
+    ContainerPort     int32           // original container port
+    Protocol          corev1.Protocol // TCP, UDP, or SCTP
+}
+```
+
+### 3.3 Rule
+
+A `Rule` defines a header-based routing rule for traffic splitting between users:
+
+```go
+type Rule struct {
+    Headers      map[string]string // header match criteria
+    LocalTunIPv4 string            // destination TUN IP (IPv4)
+    LocalTunIPv6 string            // destination TUN IP (IPv6)
+    OwnerID      string            // connection UUID prefix (required since v2)
+    PortMap      map[int32]string  // containerPort → "envoyPort" or "envoyPort:localPort"
+}
+```
+
+### 3.4 PortMapping
+
+Parsed representation of the `PortMap` string encoding, accessed via `rule.ParsePortMap()`:
+
+```go
+type PortMapping struct {
+    ContainerPort int32 // original container port (map key)
+    EnvoyPort     int32 // port envoy forwards to
+    LocalPort     int32 // port the local machine listens on
+}
+```
+
+Format: `"envoyPort"` (mesh mode, LocalPort defaults to ContainerPort) or `"envoyPort:localPort"` (fargate mode).
+
+### 3.5 Fargate Mode Detection
+
+`Virtual.IsFargateMode()` checks the explicit `FargateMode` bool field first, then falls back to the legacy heuristic (`EnvoyListenerPort != 0`) for backward compatibility.
+
+## 4. Components
+
+### 4.1 Watcher (`watcher.go`)
+
+Monitors the `kubevpn-traffic-manager` ConfigMap using a filtered K8s informer:
+
+- **Filtered informer**: Watches only the single ConfigMap by name via `FieldSelector`
+- **Event coalescing**: On any Add/Update/Delete event, resets a 5-second ticker to fire immediately. This batches rapid changes.
+- **Tick loop**: Every tick (5s default, reset on events), reads the ConfigMap from the informer's local cache and sends `NotifyMessage{Content: data[ENVOY_CONFIG]}` to the notify channel.
+- **DHCP callback**: Also invokes `OnDHCPChange` callbacks on every ConfigMap change, used by TunConfigServer's `ReconcileDHCP` to detect external IP releases.
+
+### 4.2 Processor (`processor.go`)
+
+Converts YAML Virtual configs into envoy xDS snapshots:
+
+```
+ProcessFile(NotifyMessage):
+  1. parseYaml(content) → []*Virtual
+  2. For each Virtual with non-empty UID:
+     a. Check expireCache — skip if unchanged (5-min TTL)
+     b. Virtual.To(enableIPv6) → listeners, clusters, routes, endpoints
+     c. cache.NewSnapshot(version, resources) → validate consistency
+     d. cache.SetSnapshot(nodeID, snapshot) — push to go-control-plane
+     e. Update expireCache
+  3. Clear stale snapshots for UIDs no longer in config (knownUIDs tracking)
+```
+
+**Node ID**: Generated by `util.GenEnvoyUID(namespace, uid)` — this must match the node ID that the envoy sidecar advertises when connecting.
+
+**Version**: Monotonically increasing int64, used by go-control-plane to detect config changes.
+
+**Stale cleanup**: The Processor tracks `knownUIDs`. When a Virtual is removed from the ConfigMap (e.g., user leaves), its snapshot is cleared so envoy stops receiving that config.
+
+### 4.3 xDS Resource Generation (`cache.go`)
+
+`Virtual.To()` generates four types of envoy xDS resources:
+
+**For each port × rule combination:**
+
+| Resource | Name Pattern | Description |
+|----------|-------------|-------------|
+| Listener | `{ns}_{uid}_{port}_{proto}` | Inbound listener on the container port (or envoy port in fargate mode) |
+| Route | same as listener | Route config with header-matching routes + default fallback |
+| Cluster | `{tunIP}_{envoyPort}` | EDS cluster pointing to the user's TUN IP |
+| Endpoint | `{tunIP}_{envoyPort}` | Load assignment: `tunIP:envoyPort` |
+
+**Listener configuration:**
+- `BindToPort`: true in fargate mode (envoy binds directly), false in mesh mode (uses iptables redirect)
+- `UseOriginalDst`: true — preserves the original destination for ORIGINAL_DST cluster
+- Listener filters: `HttpInspector` (detect HTTP) + `OriginalDestination`
+- Filter chains: HTTP connection manager (with gRPC-Web, CORS, Router filters) + TCP proxy fallback
+
+**Routing logic:**
+- Header-matched routes → specific cluster (user's TUN IP + envoy port)
+- Default route → `origin_cluster` (ORIGINAL_DST, forwards to the real container) in mesh mode
+- Default route → user's TUN IP + container port in fargate mode (no ORIGINAL_DST available)
+
+**Origin cluster**: A special `ORIGINAL_DST` cluster used in mesh mode. Envoy forwards unmatched traffic to the original destination (the real application), enabling transparent proxying.
+
+### 4.4 gRPC Server (`server.go`)
+
+Starts a gRPC server on port 9002 that registers:
+
+- All xDS discovery services (ADS, EDS, CDS, RDS, LDS, SDS, RTDS) via go-control-plane
+- `TunConfigService` for DHCP IP allocation (see `03-dhcp-ip-allocation.md`)
+
+Server parameters: max concurrent streams = 1,000,000, keepalive = 15s.
+
+## 5. Startup Flow
+
+`Main()` orchestrates everything:
+
+```
+Main(ctx, factory, port, logger):
+  1. Create SnapshotCache + Processor
+  2. Create TunConfigServer + start LeaseReaper
+  3. Start gRPC server (goroutine)
+  4. Start ConfigMap watcher (goroutine) → sends to notifyCh
+  5. Send initial empty NotifyMessage to trigger first snapshot
+  6. Main loop: receive from notifyCh → proc.ProcessFile()
+```
+
+## 6. Multi-User Traffic Splitting
+
+When multiple users proxy the same workload with different headers:
+
+```yaml
+# ConfigMap ENVOY_CONFIG (simplified)
+- namespace: default
+  Uid: deployments.apps.productpage
+  schemaVersion: 2
+  ports:
+    - containerPort: 9080
+      protocol: TCP
+  rules:
+    - headers: {"x-user": "alice"}
+      localTunIPv4: "198.18.0.5"
+      ownerID: "a1b2c3d4e5f6"
+      portMap: {9080: "9080"}
+    - headers: {"x-user": "bob"}
+      localTunIPv4: "198.18.0.6"
+      ownerID: "f6e5d4c3b2a1"
+      portMap: {9080: "9080"}
+```
+
+Envoy routes requests with `x-user: alice` to `198.18.0.5:9080` (Alice's local machine) and `x-user: bob` to `198.18.0.6:9080` (Bob's). Unmatched requests go to `origin_cluster` (the real application).
+
+## 7. Related Files
+
+| File | Purpose |
+|------|---------|
+| `pkg/controlplane/controlplane.go` | `Main()` — startup orchestration |
+| `pkg/controlplane/cache.go` | Virtual/Rule types, xDS resource generation |
+| `pkg/controlplane/processor.go` | Processor — YAML → xDS snapshot pipeline |
+| `pkg/controlplane/watcher.go` | ConfigMap watcher with informer |
+| `pkg/controlplane/server.go` | gRPC server setup |
+| `pkg/controlplane/tun_config.go` | TunConfigServer (see `03-dhcp-ip-allocation.md`) |
+| `pkg/inject/envoy.go` | Writes Virtual/Rule to ConfigMap (producer side) |
+| `pkg/config/config.go` | ConfigMap key names (`KeyEnvoy`, etc.) |
