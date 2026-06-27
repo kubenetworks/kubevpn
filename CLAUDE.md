@@ -216,9 +216,74 @@ Root Daemon: connect.OwnerID = req.OwnerID → DoConnect (getCIDR → NetworkMan
 - Used as primary key for `findConnection`, `removeConnection`, disconnect, status queries
 - Design doc: `docs/04-connection-id.md`
 
+## Integration Testing
+
+**Every refactoring must include integration tests.** When writing tests, always default to integration tests that wire up multiple real components end-to-end — never write unit tests that call a single function in isolation.
+
+Integration tests wire up real components (gRPC server, DHCP allocator, ConfigMap, envoy rules) against `fake.NewSimpleClientset()` to test multi-user scenarios without a real cluster.
+
+### Test Infrastructure
+
+| Component | How to set up | Example |
+|---|---|---|
+| TunConfigServer + gRPC | `newTestEnv(t)` in `controlplane/integration_test.go` | Returns `env.client` (gRPC client) + `env.server` (direct access) |
+| ConfigMap envoy rules | `fake.NewSimpleClientset(&v1.ConfigMap{...})` | Read-modify-write via `clientset.CoreV1().ConfigMaps(ns)` |
+| Connection management | Direct `Server{}` struct | `svr.findConnection()`, `svr.removeConnection()` |
+| Fake K8s client | `fake.NewSimpleClientset(objects...)` | Supports Get/Update/Patch/List for ConfigMap, Namespace, Secret, Pod |
+
+### Writing Multi-User Integration Tests
+
+Multi-user tests should simulate the **full lifecycle** across multiple components, not just call individual functions:
+
+```go
+// Good: integration test — wires up DHCP + envoy + connection state
+func TestIntegration_MultiUser_FullLifecycle(t *testing.T) {
+    env := newTestEnv(t)  // starts real TunConfigServer + gRPC
+    // Phase 1: allocate IPs via gRPC
+    resp, _ := env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "alice"})
+    // Phase 2: write envoy rules to ConfigMap
+    // Phase 3: one user leaves → verify others unaffected
+    // Phase 4: crash recovery → same OwnerID, new IP
+}
+
+// Bad: unit test disguised as integration — calls one function in isolation
+func TestAddEnvoyConfig(t *testing.T) {
+    addEnvoyConfig(ctx, mapInterface, spec)  // just one function call
+}
+```
+
+### Key Test Patterns
+
+**Multi-user DHCP interaction** (`controlplane/multiuser_integration_test.go`):
+- Use `env.client.GetTunIP()` for each user (real gRPC)
+- Verify IPs are unique across users
+- Force-expire one user's lease → verify other's IP unchanged
+- WatchTunIP stream keeps lease alive vs idle user expiry
+
+**Multi-user envoy rules** (`inject/multiuser_test.go`, `inject/multiuser_interaction_test.go`):
+- User A + B proxy same workload with different headers → 2 rules coexist
+- Same headers → ownership takeover (Case 3 in `addVirtualRule`)
+- One user leaves → other's rule untouched; last user leaves → Virtual removed
+- Crash recovery: same OwnerID re-proxy → rule updated, not duplicated
+
+**Fault injection** (`core/fault_injection_test.go`):
+- `net.Pipe()` + `Close()` to simulate TCP disconnect
+- `flakyConn` wrapper to fail after N writes
+- Real TCP listener for read deadline timeout tests
+- `context.WithCancel` for abrupt shutdown, verify channel drain
+
+### fake.Clientset Limitations
+
+- Does NOT simulate ResourceVersion conflicts — concurrent `Update()` calls overwrite each other silently
+- `retry.RetryOnConflict` never retries (no conflict errors)
+- Concurrent write tests should verify "no panic + valid YAML", not exact counts
+- Full concurrent correctness requires real K8s API (CI with minikube)
+
 ## Refactoring Rules
 
 When refactoring backend code (`pkg/`):
+
+0. **Every refactoring must include integration tests** — wire up real components (gRPC, DHCP, ConfigMap, connection management) against `fake.NewSimpleClientset()`. Structure tests as multi-phase stories (connect → proxy → leave → crash → reconnect). Never write single-function unit tests as a substitute.
 
 1. **Never touch `cmd/`** — CLI is frozen
 2. **Always `go build ./...` after changes** — catch compile errors immediately

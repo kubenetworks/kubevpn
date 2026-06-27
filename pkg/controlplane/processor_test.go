@@ -245,3 +245,114 @@ func TestProcessor_NewVersion_Overflow(t *testing.T) {
 		t.Fatalf("expected internal version 2, got %d", p.version)
 	}
 }
+
+func TestProcessFile_ClearsStaleSnapshots(t *testing.T) {
+	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, nil)
+	logger := log.NewEntry(log.New())
+	p := newProcessor(snapshotCache, logger)
+
+	// Step 1: Create snapshots for two workloads
+	twoWorkloads := `
+- namespace: default
+  Uid: deployments.apps.frontend
+  ports:
+    - containerPort: 8080
+      protocol: TCP
+  rules:
+    - headers:
+        env: test
+      localTunIPv4: "198.18.0.1"
+      portMap:
+        8080: "8080"
+- namespace: default
+  Uid: deployments.apps.backend
+  ports:
+    - containerPort: 3000
+      protocol: TCP
+  rules:
+    - headers:
+        env: test
+      localTunIPv4: "198.18.0.2"
+      portMap:
+        3000: "3000"
+`
+	if err := p.ProcessFile(NotifyMessage{Content: twoWorkloads}); err != nil {
+		t.Fatalf("ProcessFile with two workloads failed: %v", err)
+	}
+
+	frontendID := "default.deployments.apps.frontend"
+	backendID := "default.deployments.apps.backend"
+	if _, err := snapshotCache.GetSnapshot(frontendID); err != nil {
+		t.Fatalf("expected snapshot for %s: %v", frontendID, err)
+	}
+	if _, err := snapshotCache.GetSnapshot(backendID); err != nil {
+		t.Fatalf("expected snapshot for %s: %v", backendID, err)
+	}
+
+	// Step 2: Process with only frontend — backend should be cleared
+	onlyFrontend := `
+- namespace: default
+  Uid: deployments.apps.frontend
+  ports:
+    - containerPort: 8080
+      protocol: TCP
+  rules:
+    - headers:
+        env: test
+      localTunIPv4: "198.18.0.1"
+      portMap:
+        8080: "8080"
+`
+	// Clear expireCache so ProcessFile re-processes (not cache-hit)
+	p.expireCache.Delete(frontendID)
+
+	if err := p.ProcessFile(NotifyMessage{Content: onlyFrontend}); err != nil {
+		t.Fatalf("ProcessFile with one workload failed: %v", err)
+	}
+
+	// frontend should still exist
+	if _, err := snapshotCache.GetSnapshot(frontendID); err != nil {
+		t.Fatalf("frontend snapshot should still exist: %v", err)
+	}
+
+	// backend should be cleared
+	if _, err := snapshotCache.GetSnapshot(backendID); err == nil {
+		t.Fatal("backend snapshot should have been cleared after unproxy, but it still exists")
+	}
+}
+
+func TestProcessFile_EmptyContentClearsAll(t *testing.T) {
+	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, nil)
+	logger := log.NewEntry(log.New())
+	p := newProcessor(snapshotCache, logger)
+
+	content := `
+- namespace: default
+  Uid: deployments.apps.reviews
+  ports:
+    - containerPort: 9080
+      protocol: TCP
+  rules:
+    - headers:
+        env: test
+      localTunIPv4: "198.18.0.1"
+      portMap:
+        9080: "9080"
+`
+	if err := p.ProcessFile(NotifyMessage{Content: content}); err != nil {
+		t.Fatal(err)
+	}
+
+	nodeID := "default.deployments.apps.reviews"
+	if _, err := snapshotCache.GetSnapshot(nodeID); err != nil {
+		t.Fatalf("snapshot should exist: %v", err)
+	}
+
+	// Process empty content — all snapshots should be cleared
+	if err := p.ProcessFile(NotifyMessage{Content: ""}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := snapshotCache.GetSnapshot(nodeID); err == nil {
+		t.Fatal("snapshot should be cleared after empty ProcessFile")
+	}
+}
