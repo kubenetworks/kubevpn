@@ -1,6 +1,7 @@
 package inject
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -16,7 +17,7 @@ func TestAddVirtualRule_Case1_NoExistingEntry(t *testing.T) {
 	portmap := map[int32]string{8080: "9090"}
 	ports := []controlplane.ContainerPort{{ContainerPort: 8080, Protocol: "TCP"}}
 
-	result := addVirtualRule(v, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Ports: ports, Headers: headers, LocalTunIPv4: "10.0.0.1", LocalTunIPv6: "fd00::1", PortMap: portmap, OwnerID: "test-owner"})
+	result := addVirtualRule(context.Background(), v, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Ports: ports, Headers: headers, LocalTunIPv4: "10.0.0.1", LocalTunIPv6: "fd00::1", PortMap: portmap, OwnerID: "test-owner"})
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 virtual, got %d", len(result))
@@ -71,7 +72,7 @@ func TestAddVirtualRule_Case1_PreservesExisting(t *testing.T) {
 	portmap := map[int32]string{8080: "9090"}
 	ports := []controlplane.ContainerPort{{ContainerPort: 8080}}
 
-	result := addVirtualRule(existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Ports: ports, Headers: headers, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: portmap, OwnerID: "test-owner"})
+	result := addVirtualRule(context.Background(), existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Ports: ports, Headers: headers, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: portmap, OwnerID: "test-owner"})
 
 	if len(result) != 2 {
 		t.Fatalf("expected 2 virtuals, got %d", len(result))
@@ -106,7 +107,7 @@ func TestAddVirtualRule_Case2_MergeHeadersAndPortmap(t *testing.T) {
 	newHeaders := map[string]string{"env": "dev"}
 	newPortmap := map[int32]string{9090: "7070"}
 
-	result := addVirtualRule(existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Headers: newHeaders, LocalTunIPv4: "10.0.0.1", LocalTunIPv6: "fd00::1", PortMap: newPortmap, OwnerID: "test-owner"})
+	result := addVirtualRule(context.Background(), existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Headers: newHeaders, LocalTunIPv4: "10.0.0.1", LocalTunIPv6: "fd00::1", PortMap: newPortmap, OwnerID: "test-owner"})
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 virtual, got %d", len(result))
@@ -152,7 +153,7 @@ func TestAddVirtualRule_Case2_SkippedInFargateMode(t *testing.T) {
 	newHeaders := map[string]string{"foo": "bar"}
 	newPortmap := map[int32]string{8080: "9091:7071"}
 
-	result := addVirtualRule(existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Headers: newHeaders, LocalTunIPv4: "10.0.0.1", LocalTunIPv6: "fd00::1", PortMap: newPortmap, FargateMode: true, OwnerID: "test-owner"})
+	result := addVirtualRule(context.Background(), existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Headers: newHeaders, LocalTunIPv4: "10.0.0.1", LocalTunIPv6: "fd00::1", PortMap: newPortmap, FargateMode: true, OwnerID: "test-owner"})
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 virtual, got %d", len(result))
@@ -185,7 +186,7 @@ func TestAddVirtualRule_Case3_ReplaceByHeaders(t *testing.T) {
 	// Different TUN IP, same headers → replace
 	newPortmap := map[int32]string{8080: "7070"}
 
-	result := addVirtualRule(existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Headers: map[string]string{"foo": "bar"}, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: newPortmap, OwnerID: "test-owner"})
+	result := addVirtualRule(context.Background(), existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Headers: map[string]string{"foo": "bar"}, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: newPortmap, OwnerID: "test-owner"})
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 virtual, got %d", len(result))
@@ -228,7 +229,7 @@ func TestAddVirtualRule_Case4_AppendNewRule(t *testing.T) {
 	newHeaders := map[string]string{"env": "staging"}
 	newPortmap := map[int32]string{8080: "7070"}
 
-	result := addVirtualRule(existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Headers: newHeaders, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: newPortmap, OwnerID: "test-owner"})
+	result := addVirtualRule(context.Background(), existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Headers: newHeaders, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: newPortmap, OwnerID: "test-owner"})
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 virtual, got %d", len(result))
@@ -278,7 +279,7 @@ func TestAddVirtualRule_Case4_SortingEmptyHeadersLast(t *testing.T) {
 	newHeaders := map[string]string{"version": "v2"}
 	newPortmap := map[int32]string{8080: "7070"}
 
-	result := addVirtualRule(existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Headers: newHeaders, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: newPortmap, OwnerID: "test-owner"})
+	result := addVirtualRule(context.Background(), existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Headers: newHeaders, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: newPortmap, OwnerID: "test-owner"})
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 virtual, got %d", len(result))
@@ -317,7 +318,7 @@ func TestAddVirtualRule_Case1_DifferentNamespace(t *testing.T) {
 	portmap := map[int32]string{8080: "7070"}
 	ports := []controlplane.ContainerPort{{ContainerPort: 8080}}
 
-	result := addVirtualRule(existing, envoyRuleSpec{Namespace: "staging", NodeID: "deployments.apps.nginx", Ports: ports, Headers: headers, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: portmap, OwnerID: "test-owner"})
+	result := addVirtualRule(context.Background(), existing, envoyRuleSpec{Namespace: "staging", NodeID: "deployments.apps.nginx", Ports: ports, Headers: headers, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: portmap, OwnerID: "test-owner"})
 
 	if len(result) != 2 {
 		t.Fatalf("expected 2 virtuals (different namespaces), got %d", len(result))
@@ -349,7 +350,7 @@ func TestAddVirtualRule_Case4_PortsFilledWhenNil(t *testing.T) {
 	newPortmap := map[int32]string{8080: "7070"}
 	ports := []controlplane.ContainerPort{{ContainerPort: 8080, Protocol: "TCP"}}
 
-	result := addVirtualRule(existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Ports: ports, Headers: newHeaders, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: newPortmap, OwnerID: "test-owner"})
+	result := addVirtualRule(context.Background(), existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Ports: ports, Headers: newHeaders, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: newPortmap, OwnerID: "test-owner"})
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 virtual, got %d", len(result))
@@ -438,7 +439,7 @@ func TestOwnerID_RoundTrip(t *testing.T) {
 	portmap := map[int32]string{8080: "9090"}
 	ports := []controlplane.ContainerPort{{ContainerPort: 8080, Protocol: "TCP"}}
 
-	result := addVirtualRule(nil, envoyRuleSpec{
+	result := addVirtualRule(context.Background(), nil, envoyRuleSpec{
 		Namespace:    "default",
 		NodeID:       "deployments.apps.nginx",
 		Ports:        ports,
@@ -482,7 +483,7 @@ func TestOwnerID_RoundTrip(t *testing.T) {
 	// Step 5: Call addVirtualRule again with a different OwnerID on the SAME workload.
 	// Same headers trigger case 3 (header takeover) — the OwnerID should change.
 	ownerID2 := "xyz789takeover"
-	restored = addVirtualRule(restored, envoyRuleSpec{
+	restored = addVirtualRule(context.Background(), restored, envoyRuleSpec{
 		Namespace:    "default",
 		NodeID:       "deployments.apps.nginx",
 		Headers:      headers, // same headers → case 3

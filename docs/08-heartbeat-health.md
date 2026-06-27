@@ -10,7 +10,7 @@ KubeVPN uses 6 heartbeat/health check mechanisms across 4 layers to maintain con
 ┌─────────────────────────────────────────────────────────────────────┐
 │ Layer 4: Application (business logic)                               │
 │                                                                     │
-│  #4 healthCheckTCPConn       30s   gRPC GetTunIP to control plane  │
+│  #4 healthCheckGRPC          30s   gRPC health check (9002)        │
 │  #5 HealthPeriod             30s   ConfigMap GET (API reachability) │
 │  #6 Mapper.Run           informer  Pod/ConfigMap watch + 30s ticker │
 │                                                                     │
@@ -71,16 +71,15 @@ KubeVPN uses 6 heartbeat/health check mechanisms across 4 layers to maintain con
 - Read: `KeepAliveTime * 3 = 180s` — tolerates 2 missed heartbeat cycles
 - Write: `KeepAliveTime = 60s` — writes should complete quickly
 
-### #4 Control Plane Health Check (gRPC path)
+### #4 Control Plane Health Check (gRPC health)
 
-**File:** `pkg/handler/connect_tun.go` — `healthCheckTCPConn()`
+**File:** `pkg/handler/connect_tun.go` — `healthCheckGRPC()`
 
-**What:** Every 30s, connects to `127.0.0.1:<controlPlanePort>` (port-forwarded from traffic manager :9002) via gRPC and calls `TunConfigService.GetTunIP()` with the connection's OwnerID and Namespace.
+**What:** Every 30s, calls the standard gRPC health check service (`grpc.health.v1.Health/Check`) on `127.0.0.1:<controlPlanePort>` (port-forwarded from traffic manager :9002).
 
-**Why necessary:** Validates the control plane is reachable and the TUN IP allocation is still valid. If this fails, it means either:
-- Port-forward to the traffic manager is broken
-- The traffic manager pod has restarted/crashed
-- The TUN IP lease has expired
+**Connection reuse:** The gRPC connection is kept alive across health checks. On failure, the connection is closed and re-established on the next check.
+
+**Why necessary:** Validates the control plane is reachable via port-forward. Uses gRPC's standard health check protocol (no business logic side effects, unlike the former `GetTunIP`-based check which could trigger silent IP reallocation).
 
 **Failure action:** After 3 consecutive failures (with 10s backoff), calls `cancelFunc()` to tear down the port-forward, which triggers a reconnection in the `portForward()` retry loop.
 
@@ -138,7 +137,7 @@ KubeVPN uses 6 heartbeat/health check mechanisms across 4 layers to maintain con
 | #1 TUN heartbeat | 0 (no API calls) |
 | #2 TCP KeepAlive | 0 (OS level) |
 | #3 Read/Write deadline | 0 (socket level) |
-| #4 gRPC health check | 0 (gRPC to traffic manager, not API) |
+| #4 gRPC health check | 0 (gRPC to control plane, not API) |
 | #5 ConfigMap GET | 2/min (30s fallback ticker) |
 | #6 Mapper watch | 0 (informer, no polling) |
 | **Total** | **~2 requests/min** |

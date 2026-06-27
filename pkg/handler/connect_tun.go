@@ -2,17 +2,23 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"time"
 
+	miekgdns "github.com/miekg/dns"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func Run(ctx context.Context, servers []core.Server) error {
@@ -46,7 +52,7 @@ func Run(ctx context.Context, servers []core.Server) error {
 	}
 }
 
-func healthCheckTCPConn(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, controlPlanePort string, ownerID string, namespace string) {
+func healthCheckGRPC(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, controlPlanePort string) {
 	target := net.JoinHostPort("127.0.0.1", controlPlanePort)
 	var conn *grpc.ClientConn
 
@@ -63,22 +69,85 @@ func healthCheckTCPConn(ctx context.Context, cancelFunc context.CancelFunc, read
 				return err
 			}
 		}
-		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		_, err := rpc.NewTunConfigServiceClient(conn).GetTunIP(timeoutCtx, &rpc.TunIPRequest{
-			OwnerID:   ownerID,
-			Namespace: namespace,
-		})
+		checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer checkCancel()
+		resp, err := grpc_health_v1.NewHealthClient(conn).Check(checkCtx, &grpc_health_v1.HealthCheckRequest{})
 		if err != nil {
 			conn.Close()
 			conn = nil
+			return err
 		}
-		return err
+		if resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
+			conn.Close()
+			conn = nil
+			return fmt.Errorf("control plane not serving: %s", resp.Status)
+		}
+		return nil
 	})
 
 	if conn != nil {
 		conn.Close()
 	}
+}
+
+func healthCheckPortForward(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, localGvisorUDPPort string, domain string) {
+	var conn net.Conn
+	var packetConn net.Conn
+
+	dial := func() error {
+		var err error
+		conn, err = net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", localGvisorUDPPort), 5*time.Second)
+		if err != nil {
+			return err
+		}
+		err = util.WriteProxyInfo(conn, stack.TransportEndpointID{
+			LocalPort:     53,
+			LocalAddress:  tcpip.AddrFrom4Slice(net.ParseIP("127.0.0.1").To4()),
+			RemotePort:    0,
+			RemoteAddress: tcpip.Address{},
+		})
+		if err != nil {
+			conn.Close()
+			conn = nil
+			return err
+		}
+		packetConn, _ = core.NewPacketConnOverTCP(ctx, conn)
+		return nil
+	}
+
+	closeConn := func() {
+		if packetConn != nil {
+			packetConn.Close()
+			packetConn = nil
+		}
+		if conn != nil {
+			conn.Close()
+			conn = nil
+		}
+	}
+
+	checker := func() error {
+		if conn == nil {
+			if err := dial(); err != nil {
+				return err
+			}
+		}
+		msg := new(miekgdns.Msg)
+		msg.SetQuestion(miekgdns.Fqdn(domain), miekgdns.TypeA)
+		client := miekgdns.Client{Net: "udp", Timeout: 10 * time.Second}
+		resp, _, err := client.ExchangeWithConnContext(ctx, msg, &miekgdns.Conn{Conn: packetConn})
+		if err != nil {
+			closeConn()
+			return err
+		}
+		if len(resp.Answer) == 0 {
+			closeConn()
+			return errors.New("no answers")
+		}
+		return nil
+	}
+	healthCheckLoop(ctx, cancelFunc, readyChan, checker)
+	closeConn()
 }
 
 func healthCheckLoop(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, checker func() error) {

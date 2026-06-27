@@ -39,10 +39,11 @@ KubeVPN uses a custom DHCP mechanism to assign a unique TUN device IP address to
 │       └── ForEach                                         │
 │                                                           │
 │  ConfigMap: kubevpn-traffic-manager                        │
-│  ├── DHCP        = base64(bitmap-v4)    ← IPv4 bitmap     │
-│  ├── DHCP6       = base64(bitmap-v6)    ← IPv6 bitmap     │
-│  ├── TUN_ALLOCS  = yaml(ownerID→IP)     ← persisted map   │
-│  └── ENVOY_CONFIG = yaml([]*Virtual)    ← envoy routes    │
+│  ├── TUN_IP_POOL = yaml{ipv4{cidr,bitmap},               │
+│  │                       ipv6{cidr,bitmap}} ← dual-stack  │
+│  ├── TUN_ALLOCS   = yaml(ownerID→IP)     ← persisted map  │
+│  ├── CLUSTER_CIDRS = "cidr cidr ..."     ← cluster CIDRs  │
+│  └── ENVOY_CONFIG  = yaml([]*Virtual)    ← envoy routes   │
 └──────────────────────────────────────────────────────────┘
          ↑ port-forward
 ┌─────────────────────┐
@@ -64,11 +65,16 @@ KubeVPN uses a custom DHCP mechanism to assign a unique TUN device IP address to
 ```
 RentIPExcluding(ctx, excludeIPs):
   1. GET ConfigMap
-  2. base64 decode → bitmap → ipallocator.Range
+  2. parse TUN_IP_POOL (YAML) → {ipv4,ipv6}.bitmap (base64) → ipallocator.Range
   3. AllocateNext() in a loop until an IP not in excludeIPs is found
-  4. Snapshot() → base64 encode → UPDATE ConfigMap
+  4. Snapshot() → base64 → re-marshal TUN_IP_POOL → UPDATE ConfigMap
   (RetryOnConflict automatically retries on conflict)
 ```
+
+> The IPv4 and IPv6 bitmaps are stored together under the single `TUN_IP_POOL`
+> key as a YAML struct (`ipv4.cidr`/`ipv4.bitmap` + `ipv6.cidr`/`ipv6.bitmap`).
+> This replaced the former separate `DHCP` (v4) and `DHCP6` (v6) keys.
+> `RentIP`/`ReleaseIP` operate on both stacks in a single read-modify-write.
 
 **Key Methods:**
 
@@ -263,13 +269,17 @@ ConfigMap name: `kubevpn-traffic-manager`
 
 | Key | Format | Content |
 |-----|--------|---------|
-| `DHCP` | Base64-encoded bitmap | IPv4 allocation status bitmap |
-| `DHCP6` | Base64-encoded bitmap | IPv6 allocation status bitmap |
+| `TUN_IP_POOL` | YAML `{ipv4{cidr,bitmap}, ipv6{cidr,bitmap}}` | Dual-stack TUN IP allocation bitmaps (base64) — merges the former `DHCP` + `DHCP6` |
 | `TUN_ALLOCS` | YAML | `map[ownerID]{ipv4, ipv6, version, lastRenew}` |
 | `ENVOY_CONFIG` | YAML | Envoy routing rules `[]*Virtual` |
-| `IPv4_POOLS` | Text | Cluster IPv4 address pools |
+| `CLUSTER_CIDRS` | Space-separated text | Cluster Pod/Service CIDRs (IPv4 + IPv6) — renamed from `IPv4_POOLS` |
 
 Consistency between bitmap and allocs is guaranteed by K8s `resourceVersion` optimistic locking.
+
+> **Key rename history:** `DHCP` + `DHCP6` → `TUN_IP_POOL` (merged dual-stack
+> struct); `IPv4_POOLS` → `CLUSTER_CIDRS` (the old name was inaccurate — it
+> always held both IPv4 and IPv6 CIDRs). Constants live in `pkg/config/config.go`
+> (`KeyTunIPPool`, `KeyClusterCIDRs`).
 
 ## 8. Failure Scenarios
 

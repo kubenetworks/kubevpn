@@ -15,7 +15,7 @@ The traffic manager is a pod deployed in the cluster that provides the VPN serve
 | 3 | Role | `kubevpn-traffic-manager` | RBAC: get/list/watch/create/update/patch/delete on configmaps + secrets (resourceName scoped) |
 | 4 | RoleBinding | `kubevpn-traffic-manager` | Binds Role to ServiceAccount |
 | 5 | Service | `kubevpn-traffic-manager` | ClusterIP: 10801/TCP, 9002/TCP, 53/UDP |
-| 6 | ConfigMap | `kubevpn-traffic-manager` | Initial keys: ENVOY_CONFIG, DHCP, DHCP6, IPv4_POOLS |
+| 6 | ConfigMap | `kubevpn-traffic-manager` | Initial keys: ENVOY_CONFIG, TUN_IP_POOL, CLUSTER_CIDRS (TUN_ALLOCS added lazily on first IP allocation) |
 | 7 | Secret | `kubevpn-traffic-manager` | TLS cert/key/server_name (Opaque type, env-var friendly keys) |
 | 8 | Deployment | `kubevpn-traffic-manager` | 3 containers: vpn, control-plane, dns |
 
@@ -40,6 +40,8 @@ Liveness:  TCP port, initialDelay=5s, period=15s, failureThreshold=3
 Readiness: TCP port, initialDelay=3s, period=10s, failureThreshold=3
 Startup:   TCP port, initialDelay=1s, period=2s,  failureThreshold=15
 ```
+
+**VPN container probes use port 10802 (gudp)**, not 10801 (gtcp). The gudp listener is a TCP listener (UDP-over-TCP relay), so `tcpSocket` probes work. Using 10802 avoids polluting the gtcp handler logs with probe-triggered EOF errors, since the gtcp handler expects length-prefixed framing on every connection.
 
 ### Other Settings
 

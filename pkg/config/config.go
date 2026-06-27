@@ -190,7 +190,7 @@ var (
 	DNSRouteDebounceInterval = 3 * time.Second
 
 	UDPSessionTimeout = 120 * time.Second
-	UDPRelayTimeout   = 30 * time.Second
+	UDPRelayTimeout   = 60 * time.Second
 
 	SlotReconnectBackoff = 2 * time.Second
 	DaemonPollInterval   = 200 * time.Millisecond

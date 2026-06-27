@@ -58,7 +58,7 @@ Root Daemon:
   connect.OwnerID = req.OwnerID
   DoConnect → NetworkManager.Start()
     → startTUN → rentIP(OwnerID, ExcludeIPs)
-      → gRPC GetTunIP(ownerID) → TunConfigServer DHCP rent
+      → gRPC GetTunIP(ownerID) → TunConfigServer DHCP rent (via rentIP)
       → 198.18.0.5/32
     → create TUN device
   → StartIPWatcher(ctx)

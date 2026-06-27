@@ -41,11 +41,10 @@ func defaultResources() v1.ResourceRequirements {
 func privilegedSecurityContext() *v1.SecurityContext {
 	return &v1.SecurityContext{
 		Capabilities: &v1.Capabilities{
-			Add: []v1.Capability{"NET_ADMIN"},
+			Add: []v1.Capability{"NET_ADMIN", "NET_RAW"},
 		},
 		RunAsUser:  ptr.To[int64](0),
 		RunAsGroup: ptr.To[int64](0),
-		Privileged: ptr.To(true),
 	}
 }
 
@@ -123,7 +122,7 @@ echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
 echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
 echo 0 > /proc/sys/net/ipv4/tcp_timestamps
-update-alternatives --set iptables /usr/sbin/iptables-legacy
+for b in iptables-nft iptables-legacy; do "$b" -t nat -L &>/dev/null && update-alternatives --set iptables /usr/sbin/$b && update-alternatives --set ip6tables /usr/sbin/${b/iptables/ip6tables} && break; done
 iptables -P INPUT ACCEPT
 ip6tables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
@@ -159,4 +158,3 @@ func AddEnvoyAndSSHContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 b
 	spec.Spec.Containers = append(spec.Spec.Containers,
 		newEnvoyContainer(ns, nodeID, ipv6, managerNamespace, image, envoyConfigFargate, envoyConfigIPv4Fargate))
 }
-

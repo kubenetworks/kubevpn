@@ -91,7 +91,7 @@ container:
 ############################ build local
 .PHONY: container-local
 container-local: kubevpn-linux-amd64
-	docker buildx build --platform linux/amd64,linux/arm64 -t ${IMAGE_LATEST} -t ${IMAGE_GH_LATEST} -f $(BUILD_DIR)/local.Dockerfile --push .
+	docker buildx build --platform linux/amd64 -t ccr.ccs.tencentyun.com/kubevpn/kubevpn:test -f $(BUILD_DIR)/local.Dockerfile --push .
 
 .PHONY: container-test
 container-test: kubevpn-linux-amd64
@@ -107,7 +107,7 @@ gen:
 
 .PHONY: ut
 ut:
-	go test -p=1 -v -timeout=120m -coverprofile=coverage.txt -coverpkg=./... ./...
+	go test -p=1 -v -tags=integration -timeout=120m ${LDFLAGS} -coverprofile=coverage.txt -coverpkg=./... ./...
 
 .PHONY: cover
 cover: ut

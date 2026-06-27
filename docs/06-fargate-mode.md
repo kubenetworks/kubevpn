@@ -2,19 +2,21 @@
 
 ## Overview
 
-Fargate mode is one of three traffic interception strategies in KubeVPN, designed for environments that **lack privileged container capabilities** (no `NET_ADMIN`, no `privileged: true`). The canonical example is AWS Fargate, hence the name. It is also known as "Service mode" because it is triggered when the user proxies a **Kubernetes Service** (`svc/...`) rather than a workload directly.
+Fargate mode is one of the traffic interception modes in KubeVPN, designed for environments that **lack privileged container capabilities** (no `NET_ADMIN`, no `privileged: true`). The canonical example is AWS Fargate, hence the name. It is also known as "Service mode" because it is triggered when the user proxies a **Kubernetes Service** (`svc/...`) rather than a workload directly.
 
 ### Strategy Comparison
 
-| | VPN Mode | Mesh Mode | Fargate Mode |
+Since the unified proxy mode, VPN-only and Mesh are no longer separate injectors — they are the same `meshInjector`, differing only in whether `--headers` are set (empty headers = full interception). The columns below show VPN-only and Mesh as *configurations* of that one injector. See [29-sleep-wake-ip-update.md](29-sleep-wake-ip-update.md) and [17-sidecar-injection.md](17-sidecar-injection.md).
+
+| | VPN-only (mesh, no headers) | Mesh (mesh, with headers) | Fargate Mode |
 |---|---|---|---|
-| **Target** | Deployment, StatefulSet, etc. | Workload with port mapping | `svc/<name>` |
+| **Target** | Deployment, StatefulSet, etc. | Workload with header splitting | `svc/<name>` |
 | **Requires privileged** | Yes | Yes | **No** |
-| **Uses iptables** | Yes (DNAT to TUN) | Yes (DNAT to envoy:15006) | **No** |
-| **Sidecar containers** | VPN only | VPN + Envoy | **SSH + Envoy** |
-| **Traffic interception** | Kernel-level (TUN device) | iptables PREROUTING + envoy `use_original_dst` | envoy `BindToPort=true` + SSH reverse tunnel |
-| **User identity** | TUN IP (`198.18.x.x`) | TUN IP | HTTP headers |
-| **Injector** | `vpnInjector` | `meshInjector` | `fargateInjector` |
+| **Uses iptables** | Yes (DNAT to envoy:15006) | Yes (DNAT to envoy:15006) | **No** |
+| **Sidecar containers** | VPN + Envoy | VPN + Envoy | **SSH + Envoy** |
+| **Traffic interception** | iptables PREROUTING + envoy (matches all) | iptables PREROUTING + envoy `use_original_dst` (header routing) | envoy `BindToPort=true` + SSH reverse tunnel |
+| **User identity** | TUN IP (`198.18.x.x`) | TUN IP + HTTP headers | HTTP headers |
+| **Injector** | `meshInjector` | `meshInjector` | `fargateInjector` |
 
 ## Architecture
 

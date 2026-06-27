@@ -414,7 +414,7 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 	// detect pod deletion so we can redo port-forward
 	go util.CheckPodStatus(childCtx, cancelFunc, podName, nm.cfg.Clientset.CoreV1().Pods(nm.cfg.ManagerNamespace))
 	controlPlanePort, _, _ := strings.Cut(portPair[2], ":")
-	go healthCheckTCPConn(childCtx, cancelFunc, readyChan, controlPlanePort, nm.cfg.OwnerID, nm.cfg.ManagerNamespace)
+	go healthCheckGRPC(childCtx, cancelFunc, readyChan, controlPlanePort)
 	if first {
 		go func() {
 			select {

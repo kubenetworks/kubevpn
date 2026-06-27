@@ -1,4 +1,4 @@
-# Proxy 模式统一与 TUN IP 热更新设计文档
+# Unified Proxy Mode and TUN IP Hot-Update Design
 
 ## 1. 问题描述
 
@@ -39,11 +39,10 @@ T1 + 5min: LeaseReaper 回收 IP
     ⚠️ ConfigMap ENVOY_CONFIG 中 Rule.LocalTunIPv4 仍是 "198.18.0.5"
 
 T2: 电脑恢复
-    portForward 重连 → 启动新 healthCheckTCPConn(ownerID="abc123")
-    healthCheckTCPConn 30s 后调用 GetTunIP(ownerID="abc123")
-    → allocs 不存在 → 新分配 198.18.0.7 → 返回新 IP
-    → ⚠️ 但健康检查丢弃返回值（_, err := GetTunIP）
-    → 本地 TUN 设备仍是 198.18.0.5
+    portForward 重连 → 启动新 healthCheckPortForward(domain="kubevpn-traffic-manager.ns")
+    healthCheckPortForward 30s 后发送 DNS 查询（经 gudp relay）
+    → 验证 port-forward + gudp + DNS 容器是否存活
+    → 不调用 GetTunIP，不触发 IP 重分配
 
     IPWatcher.doWatchTunIP 重连 WatchTunIP stream
     → WatchTunIP 只在 NotifyIPChange 时推送
@@ -68,18 +67,9 @@ T2 + 30s: 流量断裂
 
 ### 1.4 根因分析
 
-#### 问题 1：healthCheckTCPConn 的 GetTunIP 触发静默重分配
+#### 问题 1（已修复）：旧 healthCheckTCPConn 的 GetTunIP 触发静默重分配
 
-**位置**：`pkg/handler/connect_tun.go:68`
-
-```go
-_, err := rpc.NewTunConfigServiceClient(conn).GetTunIP(timeoutCtx, &rpc.TunIPRequest{
-    OwnerID:   ownerID,
-    Namespace: namespace,
-})
-```
-
-健康检查每 30s 调用 `GetTunIP`。Lease 过期后 `allocs[ownerID]` 不存在，`GetTunIP` 走新分配路径分配了新 IP 198.18.0.7，但**返回值被丢弃**（`_, err :=`）。服务端 `allocs` 记录了新 IP，客户端完全不知道。
+**已修复**：健康检查已从 gRPC `GetTunIP` 改为 DNS 查询（`healthCheckPortForward`），通过 gudp relay 发送 DNS 请求验证数据面存活。不再调用 `GetTunIP`，彻底消除了健康检查触发静默 IP 重分配的问题。
 
 #### 问题 2：GetTunIP 新分配 IP 时不触发 WatchTunIP 推送
 
@@ -148,10 +138,10 @@ TUN_ALLOCS: |                          # TUN IP 分配映射 (ownerID → 双栈
     version: 1717900100000000000
     lastRenew: 1717900200
 
-CLUSTER_CIDRS: |                       # 集群 CIDR 缓存（改名，原 IPv4_POOLS）
-  - 10.96.0.0/12                       #   Service CIDR (IPv4)
-  - 10.244.0.0/16                      #   Pod CIDR (IPv4)
-  - fd00:10:244::/56                   #   Pod CIDR (IPv6)
+CLUSTER_CIDRS: "10.96.0.0/12 10.244.0.0/16 fd00:10:244::/56"
+                                       # 集群 CIDR 缓存（改名，原 IPv4_POOLS）
+                                       #   空格分隔的 CIDR 字符串（encodeCIDRs/parseCachedCIDRs）
+                                       #   含 Service CIDR + Pod CIDR (IPv4 + IPv6)
                                        #   探测来源: kube-controller-manager / CNI IPAM / Node PodCIDR
                                        #   用于配置本地路由表（哪些 CIDR 走 TUN 隧道）
 
@@ -166,7 +156,7 @@ ENVOY_CONFIG: |                        # envoy 路由配置 ← 本文档核心
 | 改造项 | 改造前 | 改造后 | 涉及文件 |
 |--------|--------|--------|---------|
 | TUN IP 池 | `DHCP`（v4）+ `DHCP6`（v6）两个 key，各存 base64 | 合并为 `TUN_IP_POOL` 一个 key，YAML 结构体含 `ipv4.bitmap` + `ipv6.bitmap` | `pkg/config/config.go`、`pkg/dhcp/dhcp.go`、`pkg/handler/traffmgr.go` |
-| 集群 CIDR | `IPv4_POOLS`（命名不准确，实际含 v6） | `CLUSTER_CIDRS`，YAML 数组格式 | `pkg/config/config.go`、`pkg/handler/connect.go`、`pkg/handler/traffmgr.go`、`pkg/dhcp/dhcp.go` |
+| 集群 CIDR | `IPv4_POOLS`（命名不准确，实际含 v6） | `CLUSTER_CIDRS`，空格分隔 CIDR 字符串 | `pkg/config/config.go`、`pkg/handler/connect.go`、`pkg/handler/traffmgr.go`、`pkg/dhcp/dhcp.go` |
 
 ### 2.2 数据模型
 
@@ -676,8 +666,8 @@ sidecar 路由热更新: xDS endpoint 推送（复用 ENVOY_CONFIG 链路）
 
 电脑恢复:
   Root Daemon → port-forward 重连
-    → healthCheckTCPConn 调用 GetTunIP(ownerID="abc123")
-    → 旧 alloc 已被删除 → DHCP 分配新 IP 198.18.0.7
+    → healthCheckPortForward 发送 DNS 查询（经 gudp relay）
+    → 验证数据面存活（不调用 GetTunIP，不触发 IP 重分配）
 
   TunConfigServer.GetTunIP (服务端，同一调用中):
     1. 分配 198.18.0.7，写入 allocs["abc123"]
@@ -713,7 +703,7 @@ sidecar 路由热更新: xDS endpoint 推送（复用 ENVOY_CONFIG 链路）
 | **ConfigMap 数据结构重构** | | |
 | `pkg/config/config.go` | 修改 | `KeyDHCP`+`KeyDHCP6` → `KeyTunIPPool`；`KeyClusterIPv4POOLS` → `KeyClusterCIDRs` |
 | `pkg/dhcp/dhcp.go` | 修改 | `updateDHCPConfigMap` 改为读写 `TUN_IP_POOL` key（YAML 结构体含 `ipv4.bitmap` + `ipv6.bitmap`） |
-| `pkg/handler/connect.go` | 修改 | `getCIDR` 中 `KeyClusterIPv4POOLS` → `KeyClusterCIDRs`；`encodeCIDRs`/`parseCachedCIDRs` 改为 YAML 数组格式 |
+| `pkg/handler/connect.go` | 修改 | `getCIDR` 中 `KeyClusterIPv4POOLS` → `KeyClusterCIDRs`；`encodeCIDRs`/`parseCachedCIDRs` 使用空格分隔 CIDR 字符串 |
 | `pkg/handler/traffmgr.go` | 修改 | `createOutboundPod` ConfigMap 初始化 key 对齐 |
 | **IP 变化推送修复** | | |
 | `pkg/controlplane/tun_config.go` | 修改 | `GetTunIP` 新分配时调 `notifyWatchers` + `syncEnvoyRuleIP`；新增 `syncEnvoyRuleIP`；`WatchTunIP` ticker 定时推送 |

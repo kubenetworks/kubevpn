@@ -11,13 +11,19 @@ dynamic_resources:
     grpc_services:
       - envoy_grpc:
           cluster_name: xds_cluster
+    set_node_on_first_message_only: true
   cds_config:
     resource_api_version: V3
     ads: {}
   lds_config:
     resource_api_version: V3
     ads: {}
-
+  rds_config:
+    resource_api_version: V3
+    ads: {}
+  eds_config:
+    resource_api_version: V3
+    ads: {}
 static_resources:
   clusters:
     - type: STRICT_DNS
@@ -36,3 +42,4 @@ static_resources:
                     socket_address:
                       address: {{.}}
                       port_value: 9002
+                      ipv4_compat: true

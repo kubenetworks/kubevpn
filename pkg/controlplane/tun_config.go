@@ -26,9 +26,9 @@ type TunConfigServer struct {
 	namespace string
 	dhcp      *dhcp.Manager
 
-	mu        sync.RWMutex
-	allocs    map[string]*tunAllocation // ownerID → allocation
-	watchers  map[string][]chan *rpc.TunIPResponse
+	mu       sync.RWMutex
+	allocs   map[string]*tunAllocation // ownerID → allocation
+	watchers map[string][]chan *rpc.TunIPResponse
 }
 
 type tunAllocation struct {
@@ -104,7 +104,9 @@ func (s *TunConfigServer) loadAllocs(ctx context.Context) {
 			if v6Net != nil {
 				ipv6 = v6Net.IP
 			}
-			_ = s.dhcp.ReleaseIP(ctx, v4Net.IP, ipv6)
+			if err := s.dhcp.ReleaseIP(ctx, v4Net.IP, ipv6); err != nil {
+				plog.G(ctx).Warnf("[TunConfig] Failed to release expired IP %v for %s: %v", v4Net, ownerID, err)
+			}
 			released++
 			plog.G(ctx).Debugf("[TunConfig] Expired alloc for %s (last renew %v), released %v", ownerID, lastRenew, v4Net)
 			continue
@@ -324,13 +326,15 @@ func (s *TunConfigServer) WatchTunIP(req *rpc.TunIPRequest, stream rpc.TunConfig
 				default:
 				}
 			}
+			if err := s.saveAllocs(stream.Context()); err != nil {
+				plog.G(stream.Context()).Warnf("[TunConfig] Failed to persist lease renewal for %s: %v", req.OwnerID, err)
+			}
 			s.mu.Unlock()
 		case <-stream.Context().Done():
 			return nil
 		}
 	}
 }
-
 
 // NotifyIPChange is called by the ConfigMap watcher when an owner's IP changes.
 // It updates the allocation and pushes to all watchers.
@@ -521,7 +525,9 @@ func (s *TunConfigServer) reapExpiredLeases(ctx context.Context) {
 		if alloc.IPv6 != nil {
 			ipv6 = alloc.IPv6.IP
 		}
-		_ = s.dhcp.ReleaseIP(ctx, ipv4, ipv6)
+		if err := s.dhcp.ReleaseIP(ctx, ipv4, ipv6); err != nil {
+			plog.G(ctx).Warnf("[TunConfig] Failed to release IP %v for expired owner %s: %v", alloc.IPv4, ownerID, err)
+		}
 		plog.G(ctx).Infof("[TunConfig] Lease expired for owner %s, reclaimed IP %v", ownerID, alloc.IPv4)
 	}
 

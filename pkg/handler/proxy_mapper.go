@@ -74,11 +74,14 @@ func (m *Mapper) Run() {
 	}
 
 	// Shared ConfigMap informer — reuse from ConnectOptions, no extra watch connection
-	m.cmInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if _, err := m.cmInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { triggerReconcile() },
 		UpdateFunc: func(_, _ any) { triggerReconcile() },
 		DeleteFunc: func(_ any) { triggerReconcile() },
-	})
+	}); err != nil {
+		plog.G(m.ctx).Errorf("Failed to add ConfigMap event handler: %v", err)
+		return
+	}
 
 	// Watch Pods matching the service selector
 	podInformer := informerv1.NewFilteredPodInformer(
@@ -87,11 +90,14 @@ func (m *Mapper) Run() {
 			options.LabelSelector = m.labels
 		},
 	)
-	podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if _, err := podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { triggerReconcile() },
 		UpdateFunc: func(_, _ any) { triggerReconcile() },
 		DeleteFunc: func(_ any) { triggerReconcile() },
-	})
+	}); err != nil {
+		plog.G(m.ctx).Errorf("Failed to add Pod event handler: %v", err)
+		return
+	}
 	go podInformer.Run(m.ctx.Done())
 
 	// Fallback ticker — ensures reconciliation even if an informer event is missed

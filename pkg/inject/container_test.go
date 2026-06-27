@@ -75,8 +75,8 @@ func TestAddVPNAndEnvoyContainer(t *testing.T) {
 	if vpnContainer.SecurityContext == nil {
 		t.Fatal("vpn container SecurityContext is nil")
 	}
-	if vpnContainer.SecurityContext.Privileged == nil || !*vpnContainer.SecurityContext.Privileged {
-		t.Error("vpn container should be privileged")
+	if vpnContainer.SecurityContext.Privileged != nil && *vpnContainer.SecurityContext.Privileged {
+		t.Error("vpn container should NOT be privileged — use capabilities instead")
 	}
 	if vpnContainer.SecurityContext.RunAsUser == nil || *vpnContainer.SecurityContext.RunAsUser != 0 {
 		t.Error("vpn container should run as root (uid 0)")
@@ -84,15 +84,16 @@ func TestAddVPNAndEnvoyContainer(t *testing.T) {
 	if vpnContainer.SecurityContext.Capabilities == nil {
 		t.Fatal("vpn container Capabilities is nil")
 	}
-	foundNetAdmin := false
+	requiredCaps := map[v1.Capability]bool{"NET_ADMIN": false, "NET_RAW": false}
 	for _, cap := range vpnContainer.SecurityContext.Capabilities.Add {
-		if cap == "NET_ADMIN" {
-			foundNetAdmin = true
-			break
+		if _, ok := requiredCaps[cap]; ok {
+			requiredCaps[cap] = true
 		}
 	}
-	if !foundNetAdmin {
-		t.Error("vpn container should have NET_ADMIN capability")
+	for cap, found := range requiredCaps {
+		if !found {
+			t.Errorf("vpn container should have %s capability", cap)
+		}
 	}
 
 	// VPN container should have iptables commands in args

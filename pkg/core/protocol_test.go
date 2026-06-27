@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -374,8 +375,8 @@ func TestTCPTransporter_WithTLS(t *testing.T) {
 	wg.Wait()
 }
 
-func TestTCPTransporter_InvalidTLSSecret_FallsBackToRawTCP(t *testing.T) {
-	// Provide a TLS map with invalid cert data — should fall back to raw TCP.
+func TestTCPTransporter_InvalidTLSSecret_RefusesConnection(t *testing.T) {
+	// Provide a TLS map with invalid cert data — should refuse to connect (not fall back to raw TCP).
 	tlsSecret := map[string][]byte{
 		config.TLSCertKey:       []byte("not-a-cert"),
 		config.TLSPrivateKeyKey: []byte("not-a-key"),
@@ -384,29 +385,17 @@ func TestTCPTransporter_InvalidTLSSecret_FallsBackToRawTCP(t *testing.T) {
 
 	tr := TCPTransporter(tlsSecret)
 
-	// Verify the transporter was created (falls back to nil TLS).
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to start listener: %v", err)
-	}
-	defer ln.Close()
-
-	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		conn.Close()
-	}()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, err := tr.Dial(ctx, ln.Addr().String())
-	if err != nil {
-		t.Fatalf("Dial error: %v", err)
+	conn, err := tr.Dial(ctx, "127.0.0.1:12345")
+	if err == nil {
+		conn.Close()
+		t.Fatal("expected Dial to fail with invalid TLS config, but it succeeded")
 	}
-	conn.Close()
+	if !strings.Contains(err.Error(), "TLS config invalid") {
+		t.Fatalf("expected TLS config invalid error, got: %v", err)
+	}
 }
 
 func TestTCPTransporter_DialUnreachable(t *testing.T) {

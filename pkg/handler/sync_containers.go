@@ -101,7 +101,8 @@ echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
 echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
 echo 1 > /proc/sys/net/ipv4/conf/all/route_localnet
-update-alternatives --set iptables /usr/sbin/iptables-legacy`,
+for b in iptables-nft iptables-legacy; do "$b" -t nat -L &>/dev/null && update-alternatives --set iptables /usr/sbin/$b && update-alternatives --set ip6tables /usr/sbin/${b/iptables/ip6tables} && break; done
+`,
 					},
 				},
 			},

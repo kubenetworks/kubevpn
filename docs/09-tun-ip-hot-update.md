@@ -1,6 +1,13 @@
 # TUN IP Hot Update Design
 
-This document describes the design for TUN IP hot-update on both the sidecar side (in-cluster workloads) and the client side (local machine). Both sides share the same `TunConfigService` gRPC API provided by the control-plane.
+This document describes how TUN IPs are allocated and kept consistent across the **client side** (local machine) and the **sidecar side** (in-cluster workloads). Both sides obtain their IP from the same `TunConfigService` gRPC API provided by the control-plane.
+
+The two sides differ in how they handle a *runtime* IP change:
+
+- **Client side** — the client's TUN device IP can change at runtime (e.g. DHCP lease expiry after a sleep/wake cycle). The client subscribes to `WatchTunIP` and hot-updates its own TUN device via `NetworkManager.ChangeTunIP`.
+- **Sidecar side** — the sidecar fetches its TUN IP **once at startup** and does not hot-update its own device. When a *client's* IP changes, the routing target is updated at the control-plane: `syncEnvoyRuleIP` rewrites `Rule.LocalTunIPv4/v6` in `ENVOY_CONFIG`, and envoy's xDS stream pushes the new endpoint to the sidecar. There is **no sidecar-side TUN watcher and no iptables DNAT to a hardcoded client IP** — that mechanism was removed by the unified proxy mode.
+
+> The unified proxy mode (VPN-only and Mesh both routed through envoy, TCP + UDP) and the IP-change push fix are specified in **[29-sleep-wake-ip-update.md](29-sleep-wake-ip-update.md)** — read it for the authoritative end-to-end design. This document focuses on the shared `TunConfigService` API and the client-side hot-update path.
 
 ---
 
@@ -8,7 +15,7 @@ This document describes the design for TUN IP hot-update on both the sidecar sid
 
 ### 1. Problem Background
 
-Currently, sidecar TUN IPs are allocated once by the MutatingWebhook at Pod creation time and cannot be changed afterward.
+Earlier designs allocated sidecar TUN IPs once by a MutatingWebhook at Pod creation time, with no way to change them afterward. The webhook has since been removed; sidecars now self-allocate from the control-plane at startup (see below).
 
 ### 2. Design Goals
 
@@ -37,8 +44,8 @@ The existing envoy control-plane (`pkg/controlplane`) already provides:
                    |      +-- WatchTunIP(ownerID)    |
                    |                                |
                    |  ConfigMap watcher              |
-                   |  +-- KeyEnvoy -> envoy snapshot |
-                   |  +-- KeyDHCP  -> TUN IP alloc   |
+                   |  +-- KeyEnvoy     -> envoy snap  |
+                   |  +-- KeyTunIPPool -> TUN IP alloc|
                    +--------------------------------+
                           ^ gRPC
                           |
@@ -46,9 +53,11 @@ The existing envoy control-plane (`pkg/controlplane`) already provides:
               |  Sidecar (workload)    |
               |  kubevpn server        |
               |  +-- startup: GetTunIP |
-              |  +-- background: Watch |
-              |  +-- IP change -> hot  |
-              |      update TUN device |
+              |      (once, no watcher) |
+              |  envoy sidecar         |
+              |  +-- xDS endpoint push |
+              |      -> route to new   |
+              |      client TUN IP     |
               +------------------------+
 ```
 
@@ -214,9 +223,8 @@ func tunProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, error
         }
         netAddr = resp.IPv4
         net6Addr = resp.IPv6
-        
-        // Start WatchTunIP in the background (after TUN creation)
-        go watchAndUpdateTunIP(ctx, client, ownerID, tunDevice)
+        // No background watcher: the sidecar's own TUN IP is fixed for the
+        // process lifetime. Runtime routing changes are handled by envoy xDS.
     }
     
     // Create TUN using the obtained IP
@@ -225,79 +233,20 @@ func tunProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, error
 }
 ```
 
-#### 4.5 Sidecar Watch + Periodic Polling Fallback
+The actual implementation is `tunProtocolFactory` + `requestTunIPFromControlPlane` in `pkg/core/protocol_registry.go`. The factory fetches the IP once (when `net=` is empty) and creates the TUN device; it does **not** start any watcher goroutine.
 
-```go
-func watchAndUpdateTunIP(ctx context.Context, client rpc.TunConfigServiceClient, ownerID string, tunName string) {
-    currentVersion := int64(0)
-    
-    for ctx.Err() == nil {
-        // Try the Watch stream
-        stream, err := client.WatchTunIP(ctx, &rpc.TunIPRequest{OwnerID: ownerID})
-        if err != nil {
-            // Watch failed; fall back to periodic polling
-            pollTunIP(ctx, client, ownerID, tunName, &currentVersion)
-            continue
-        }
-        
-        for {
-            resp, err := stream.Recv()
-            if err != nil {
-                break // reconnect
-            }
-            if resp.Version != currentVersion {
-                applyIPChange(tunName, resp)
-                currentVersion = resp.Version
-            }
-        }
-    }
-}
+#### 4.5 No Sidecar-Side Hot-Update (Removed)
 
-// Periodic polling fallback (used when Watch stream disconnects)
-func pollTunIP(ctx context.Context, client rpc.TunConfigServiceClient, ownerID, tunName string, version *int64) {
-    ticker := time.NewTicker(30 * time.Second)
-    defer ticker.Stop()
-    for {
-        select {
-        case <-ticker.C:
-            resp, err := client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: ownerID})
-            if err == nil && resp.Version != *version {
-                applyIPChange(tunName, resp)
-                *version = resp.Version
-            }
-        case <-ctx.Done():
-            return
-        }
-    }
-}
+Earlier designs ran a `watchTunIPChanges` / `pollTunIP` / `applyTunIPChange` loop inside the sidecar that hot-updated the sidecar's own TUN device and rewrote iptables DNAT rules. **All of this was removed** by the unified proxy mode ([29-sleep-wake-ip-update.md](29-sleep-wake-ip-update.md)).
 
-func applyIPChange(tunName string, resp *rpc.TunIPResponse) {
-    oldIPv4, oldIPv6, _, _ := util.GetTunDeviceIP(tunName)
-    
-    // 1. Update TUN device IP
-    if resp.IPv4 != "" {
-        tun.ChangeIP(tunName, formatCIDR(oldIPv4), resp.IPv4)
-    }
-    if resp.IPv6 != "" {
-        tun.ChangeIP(tunName, formatCIDR(oldIPv6), resp.IPv6)
-    }
-    
-    // 2. Update iptables (VPN-only mode)
-    tun.UpdateDNAT(oldIPv4, parseIP(resp.IPv4))
-    
-    // 3. The heartbeat automatically uses the new IP on the next tick (re-read from OS)
-}
-```
+The reasoning:
 
-#### 4.6 `pkg/tun` -- ChangeIP + UpdateDNAT
+- The sidecar's own TUN IP only matters for its data-plane connection back to the traffic manager (`:10801`); it does not need to track client IP changes.
+- The value that *does* change at runtime is the **client's** TUN IP, which is the envoy routing target (`Rule.LocalTunIPv4/v6`). That is now updated at the control-plane by `syncEnvoyRuleIP` and propagated to the sidecar's envoy via the standard `ConfigMap → Watcher → Processor → xDS` push. There is no hardcoded DNAT-to-client-IP anymore — all traffic is DNAT'd to the local envoy listener (`:15006`), and envoy routes to the current client IP.
 
-Same as prior design (unchanged).
+So the sidecar's `kubevpn server` container has no IP-watch logic. `pkg/tun.ChangeIP` is now used **only on the client side** (see below); `pkg/tun.UpdateDNAT` is no longer called by either side (it remains as a low-level helper but has no callers after the unified proxy mode).
 
-#### 4.7 Heartbeat Dynamic IP Reading
-
-Same as prior design: each heartbeat tick re-reads `util.GetTunDeviceIP(tunIfi.Name)` from the OS.
-
-#### 4.8 Webhook IP Allocation (Removed)
+#### 4.6 Webhook IP Allocation (Removed)
 
 The webhook (`pkg/webhook/`) has been fully removed from the codebase. IP allocation is now entirely handled by the TunConfigService gRPC API. Leases expire and are automatically reclaimed; no explicit release is needed.
 
@@ -311,13 +260,13 @@ The existing control-plane watcher already monitors ConfigMap changes. Extend it
 // Previously only sends KeyEnvoy changes:
 notifyCh <- NotifyMessage{Content: configMap.Data[config.KeyEnvoy]}
 
-// New: detect KeyDHCP changes and notify TunConfigServer
-if dhcpChanged(old, new) {
-    tunConfigServer.ReconcileDHCP(configMap.Data[config.KeyDHCP])
+// New: detect TUN_IP_POOL changes and notify TunConfigServer
+if tunIPPoolChanged(old, new) {
+    tunConfigServer.ReconcileDHCP(ctx)
 }
 ```
 
-`ReconcileDHCP` parses the DHCP data, checks whether the IP for each registered ownerID is still valid, reallocates and pushes if not.
+`ReconcileDHCP` walks the current `TUN_IP_POOL` bitmap (via `dhcp.Manager.ForEach`), checks whether the IP for each registered ownerID is still allocated, and re-rents + pushes (`NotifyIPChange`) if not. The IPv4/IPv6 bitmaps and cluster CIDRs now live in the merged `TUN_IP_POOL` and `CLUSTER_CIDRS` keys respectively — see [03-dhcp-ip-allocation.md](03-dhcp-ip-allocation.md).
 
 ### 6. Full Lifecycle
 
@@ -326,73 +275,62 @@ Pod created (with sidecar, no webhook IP allocation)
   |
 Sidecar container starts (kubevpn server -l "tun:/tcp://tm:10801?net=&route=...")
   -> gRPC dial traffic-manager:9002
-  -> GetTunIP(ownerID=podName) -> 198.18.0.5/32
+  -> GetTunIP(ownerID=podName) -> 198.18.0.5/32   (once, at startup)
   -> createTun("utun0", "198.18.0.5/32")
-  -> iptables DNAT -> 198.18.0.5
   -> connect traffic-manager:10801 (data-plane TCP)
   -> heartbeat(198.18.0.5)
-  -> background: WatchTunIP(ownerID) stream
+  (envoy sidecar starts in parallel: ADS stream to xDS :9002)
   |
-  +-- IP change scenario ---------------------+
-  |   External client: detects IP conflict     |
-  |   -> calls TunConfigServer.NotifyIPChange  |
-  |      (release old IP, allocate new IP,     |
-  |       update ConfigMap)                    |
-  |   -> WatchTunIP stream pushes new IP       |
-  |                                            |
-  |   Sidecar receives the push:               |
-  |   -> tun.ChangeIP("utun0", old, new)       |
-  |   -> iptables update                       |
-  |   -> next heartbeat uses new IP            |
-  |   -> Server RouteHub auto-register         |
-  |                                            |
-  +-- Watch disconnects -> degrade to 30s      |
-  |   polling via GetTunIP                     |
-  |   -> version changed -> same hot-update    |
-  |      flow as above                         |
+  +-- Client IP change scenario --------------+
+  |   A client (NOT this sidecar) gets a new   |
+  |   TUN IP (e.g. sleep/wake lease expiry):   |
+  |   -> control-plane GetTunIP allocates new  |
+  |      IP -> syncEnvoyRuleIP rewrites        |
+  |      Rule.LocalTunIPv4 in ENVOY_CONFIG     |
+  |   -> Watcher -> Processor -> xDS push      |
+  |   -> this sidecar's envoy routes to the    |
+  |      new client IP (TCP + UDP)             |
+  |   (the sidecar's own TUN device is         |
+  |    untouched — no ChangeIP, no DNAT edit)  |
   |                                            |
   +-- Pod deleted ----------------------------+
       -> graceful shutdown
-      -> TunConfigServer detects disconnection
-      -> IP returned to DHCP pool
+      -> WatchTunIP / data-plane stream closes
+      -> after LeaseDuration without renewal,
+         the sidecar's IP is reaped back to pool
 ```
 
 ### 7. Comparison
 
-| | Webhook Mode (current) | ConfigMap Watch Mode (v2) | Control-Plane Mode (this design) |
+| | Webhook Mode (legacy) | Sidecar Self-Watch (superseded) | Control-Plane + envoy xDS (current) |
 |---|---|---|---|
 | IP allocation timing | Pod creation | Sidecar startup | Sidecar startup |
-| IP change | Requires Pod restart | Must parse ConfigMap DHCP format | gRPC push, type-safe |
-| K8s RBAC requirements | Webhook needs elevated privileges | Sidecar needs ConfigMap read/write | Sidecar only needs gRPC connection (no K8s API) |
-| Latency | Immediate (at Pod creation) | ConfigMap informer delay | gRPC stream real-time push |
-| Complexity | Webhook + patch | ConfigMap parsing | gRPC service (reuses existing infrastructure) |
-| Fallback mechanism | None | Informer reconnect | Periodic polling via GetTunIP |
+| Sidecar own-IP change at runtime | Requires Pod restart | Sidecar watches + `ChangeIP` + DNAT edit | Not needed (IP fixed for process life) |
+| Client-IP routing change | Requires Pod restart | iptables DNAT to hardcoded client IP | `syncEnvoyRuleIP` → xDS endpoint push |
+| K8s RBAC requirements | Webhook needs elevated privileges | Sidecar gRPC only | Sidecar gRPC only |
+| Latency | Immediate (at Pod creation) | gRPC stream + OS reconfig | gRPC stream real-time push |
+| Protocols | TCP only | TCP only | TCP + UDP (envoy udp_proxy) |
 
 ### 8. File Change List
 
 | File | Operation | Description |
 |------|-----------|-------------|
-| `pkg/daemon/rpc/daemon.proto` | Modify | Add TunConfigService |
-| `pkg/daemon/rpc/*.pb.go` | Regenerate | `make gen` |
-| `pkg/controlplane/tun_config.go` | New | TunConfigServer implementation |
-| `pkg/controlplane/server.go` | Modify | Register TunConfigService |
-| `pkg/controlplane/controlplane.go` | Modify | Create and pass TunConfigServer |
-| `pkg/controlplane/watcher.go` | Modify | Notify TunConfigServer on DHCP changes |
-| `pkg/tun/ip.go` | New | ChangeIP signature |
-| `pkg/tun/ip_linux.go` | New | Linux implementation |
-| `pkg/tun/ip_darwin.go` | New | macOS implementation |
-| `pkg/tun/ip_windows.go` | New | Windows stub |
-| `pkg/tun/iptables_linux.go` | New | DNAT update |
-| `pkg/core/tun_client.go` | Modify | heartbeat dynamic IP reading |
-| `pkg/core/protocol_registry.go` | Modify | tunProtocolFactory supports fetching IP from control-plane |
-| `pkg/inject/container.go` | Modify | Remove TunIPv4/v6 env; leave `net=` parameter empty |
+| `pkg/daemon/rpc/daemon.proto` | Modify | TunConfigService (GetTunIP / WatchTunIP) |
+| `pkg/controlplane/tun_config.go` | Modify | TunConfigServer; `syncEnvoyRuleIP`; `WatchTunIP` ticker push |
+| `pkg/controlplane/cache.go` | Modify | `Virtual.To()` emits UDP listener (`toUDPListener`) |
+| `pkg/controlplane/server.go` | Modify | Register TunConfigService on the xDS gRPC server |
+| `pkg/controlplane/watcher.go` | Modify | Notify TunConfigServer on `TUN_IP_POOL` changes |
+| `pkg/tun/ip*.go` | — | `ChangeIP` (client side only) |
+| `pkg/core/tun_client.go` | Modify | heartbeat dynamic IP reading (client side) |
+| `pkg/core/protocol_registry.go` | Modify | `tunProtocolFactory` fetches IP once; watcher/poll/apply removed |
+| `pkg/inject/container.go` | Modify | DNAT to envoy `:15006`; no hardcoded client-IP DNAT |
 | `pkg/webhook/` | Removed | Entire webhook directory deleted; IP allocation via TunConfigService |
 
 ### 9. Compatibility
 
 - `?net=` non-empty -> legacy path (use the IP from the env var directly)
-- `?net=` empty -> new path (fetch IP from control-plane via GetTunIP)
-- Old and new sidecars can coexist in the same cluster
+- `?net=` empty -> current path (fetch IP from control-plane via GetTunIP)
+- Unified proxy mode is **not** wire-compatible with old sidecars; after upgrading run `kubevpn reset` then re-`proxy` (see [29-sleep-wake-ip-update.md](29-sleep-wake-ip-update.md) §8)
 
 ### 10. Validation
 
@@ -701,11 +639,12 @@ kubevpn connect -n default
 
 | Step | Sidecar | Client |
 |------|---------|--------|
-| Obtain IP | `tunProtocolFactory` -> gRPC dial 9002 | Root Daemon -> port-forward:9002 -> rentIP (in startTUN) |
+| Obtain IP | `tunProtocolFactory` -> gRPC dial 9002 (once) | Root Daemon -> port-forward:9002 -> rentIP (in startTUN) |
 | Create TUN | `tun.Listener` in protocol_registry | `NetworkManager.startTUN` |
-| Watch for changes | `watchTunIPChanges` goroutine | `NetworkManager.StartIPWatcher` |
-| Apply changes | `applyTunIPChange` (direct OS operation) | `NetworkManager.ChangeTunIP` |
-| iptables | UpdateDNAT (VPN-only mode) | Not needed (client does not use DNAT) |
+| Watch for own-IP changes | None — IP fixed for process life | `NetworkManager.StartIPWatcher` (WatchTunIP) |
+| Apply own-IP change | N/A | `NetworkManager.ChangeTunIP` (`tun.ChangeIP`) |
+| Routing on client-IP change | envoy xDS endpoint push (`syncEnvoyRuleIP`) | N/A (the client *is* the routing target) |
+| iptables | DNAT to envoy `:15006` (static) | Not needed (client does not use DNAT) |
 | Release IP | Not needed -- lease expiry auto-reclaims | Not needed -- lease expiry auto-reclaims |
 | ownerID | podName | OwnerID (UUID, unique per connection) |
 
@@ -713,12 +652,12 @@ kubevpn connect -n default
 
 | Component | Package | Shared by Sidecar and Client |
 |-----------|---------|------------------------------|
-| `tun.ChangeIP` | `pkg/tun` | Yes |
-| `tun.UpdateDNAT` | `pkg/tun` | Sidecar only |
+| `tun.ChangeIP` | `pkg/tun` | Client only (sidecar IP is fixed) |
 | heartbeat dynamic IP reading | `pkg/core/tun_client.go` | Yes |
 | `TunConfigService` proto | `pkg/daemon/rpc` | Yes (same gRPC API) |
 | `TunConfigServer` | `pkg/controlplane` | Yes (same server-side instance) |
-| gRPC client logic | Separate implementations | Similar but adapted for different connection methods |
+| `GetTunIP` (allocate at startup) | `pkg/controlplane` | Yes (same RPC) |
+| `WatchTunIP` (subscribe to changes) | `pkg/controlplane` | Client subscribes; sidecar relies on envoy xDS instead |
 
 ### 9. File Changes
 

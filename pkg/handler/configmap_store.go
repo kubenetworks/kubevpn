@@ -30,6 +30,7 @@ type ConfigMapStore struct {
 	informer     cache.SharedInformer
 	informerStop chan struct{}
 
+	healthMu     sync.RWMutex
 	healthStatus HealthStatus
 }
 
@@ -118,8 +119,10 @@ func (s *ConfigMapStore) syncFromCache() {
 	items := s.GetInformer().GetStore().List()
 	for _, item := range items {
 		if cm, ok := item.(*corev1.ConfigMap); ok {
+			s.healthMu.Lock()
 			s.healthStatus.lastErr = nil
 			s.healthStatus.cm = cm
+			s.healthMu.Unlock()
 			return
 		}
 	}
@@ -136,17 +139,22 @@ func (s *ConfigMapStore) HealthCheckOnce(ctx context.Context, timeout time.Durat
 	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
 		plog.G(ctx).Infof("[Perf] ConfigMap GET took %v", elapsed)
 	}
+	s.healthMu.Lock()
 	if err != nil {
 		s.healthStatus.lastErr = err
+		s.healthMu.Unlock()
 		plog.G(ctx).Debugf("Health check failed: %v", err)
 		return
 	}
 	s.healthStatus.lastErr = nil
 	s.healthStatus.cm = configMap
+	s.healthMu.Unlock()
 }
 
 // GetHealthStatus returns the last known health state.
 func (s *ConfigMapStore) GetHealthStatus() HealthStatus {
+	s.healthMu.RLock()
+	defer s.healthMu.RUnlock()
 	return s.healthStatus
 }
 

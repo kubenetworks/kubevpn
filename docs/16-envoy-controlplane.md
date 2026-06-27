@@ -135,13 +135,23 @@ ProcessFile(NotifyMessage):
 | Cluster | `{tunIP}_{envoyPort}` | EDS cluster pointing to the user's TUN IP |
 | Endpoint | `{tunIP}_{envoyPort}` | Load assignment: `tunIP:envoyPort` |
 
-**Listener configuration:**
+**TCP listener configuration:**
 - `BindToPort`: true in fargate mode (envoy binds directly), false in mesh mode (uses iptables redirect)
 - `UseOriginalDst`: true — preserves the original destination for ORIGINAL_DST cluster
 - Listener filters: `HttpInspector` (detect HTTP) + `OriginalDestination`
 - Filter chains: HTTP connection manager (with gRPC-Web, CORS, Router filters) + TCP proxy fallback
 
-**Routing logic:**
+**UDP listener configuration (`toUDPListener`):**
+
+For each UDP container port, `Virtual.To()` also emits a dedicated UDP listener named `{ns}_{uid}_{port}_UDP`:
+- `SocketAddress.Protocol = UDP`, bound to the container port (`BindToPort`-style, no `use_original_dst` — UDP has no `SO_ORIGINAL_DST`)
+- Single listener filter `envoy.filters.udp_listener.udp_proxy` (`UdpProxyConfig`) routing to the **same cluster/endpoint as the TCP path** ({tunIP}_{envoyPort})
+- No header matching — UDP has no headers, so all UDP datagrams go to the user's TUN IP. This is an inherent envoy limitation and matches pre-existing behavior (the old VPN sidecar also could not header-split UDP).
+- IP hot-update works the same as TCP: the shared cluster/endpoint is updated via xDS when `Rule.LocalTunIPv4` changes.
+
+The `udp_proxy` v3 proto is vendored under `vendor/github.com/envoyproxy/go-control-plane/envoy/extensions/filters/udp/udp_proxy/v3`.
+
+**Routing logic (TCP):**
 - Header-matched routes → specific cluster (user's TUN IP + envoy port)
 - Default route → `origin_cluster` (ORIGINAL_DST, forwards to the real container) in mesh mode
 - Default route → user's TUN IP + container port in fargate mode (no ORIGINAL_DST available)

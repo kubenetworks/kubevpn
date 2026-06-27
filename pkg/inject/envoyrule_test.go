@@ -1,6 +1,7 @@
 package inject
 
 import (
+	"context"
 	"net/netip"
 	"reflect"
 	"testing"
@@ -53,7 +54,7 @@ func TestAddVirtualRule(t *testing.T) {
 		},
 	}
 	for _, data := range testdatas {
-		rule := addVirtualRule(data.Rule, envoyRuleSpec{Namespace: data.Namespace, NodeID: data.UID, Ports: data.Ports, Headers: data.Headers, LocalTunIPv4: data.LocalTunIPv4, LocalTunIPv6: data.LocalTunIPv6, OwnerID: "test-owner"})
+		rule := addVirtualRule(context.Background(), data.Rule, envoyRuleSpec{Namespace: data.Namespace, NodeID: data.UID, Ports: data.Ports, Headers: data.Headers, LocalTunIPv4: data.LocalTunIPv4, LocalTunIPv6: data.LocalTunIPv6, OwnerID: "test-owner"})
 		if !reflect.DeepEqual(rule, data.Expect) {
 			t.FailNow()
 		}

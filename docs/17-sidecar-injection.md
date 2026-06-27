@@ -2,7 +2,9 @@
 
 ## 1. Overview
 
-The inject package (`pkg/inject`) manages the lifecycle of sidecar containers injected into Kubernetes workloads. It uses the **Strategy pattern** to choose between three injection modes based on the target workload and user options. It also manages envoy routing rules in the traffic manager ConfigMap.
+The inject package (`pkg/inject`) manages the lifecycle of sidecar containers injected into Kubernetes workloads. It uses the **Strategy pattern** to choose between two injection modes based on the target workload. It also manages envoy routing rules in the traffic manager ConfigMap.
+
+> **Unified proxy mode:** there is no longer a separate VPN-only injector. VPN-only proxying (`kubevpn proxy` without `--headers`) is just Mesh mode with **empty headers** — envoy matches all requests and forwards everything to the user's TUN IP. This eliminates the old hardcoded iptables-DNAT-to-client-IP path and lets all routing (TCP + UDP) hot-update via envoy xDS. See [29-sleep-wake-ip-update.md](29-sleep-wake-ip-update.md).
 
 ## 2. Strategy Pattern
 
@@ -17,10 +19,9 @@ type Injector interface {
 | Condition | Strategy | Containers Injected |
 |-----------|----------|-------------------|
 | Target is a K8s Service | `fargateInjector` | SSH + Envoy |
-| Headers or port maps specified | `meshInjector` | VPN + Envoy |
-| Otherwise | `vpnInjector` | VPN only |
+| Otherwise (any non-Service workload) | `meshInjector` | VPN + Envoy |
 
-All three strategies share the same `InjectOptions` parameter object:
+`meshInjector` handles both header-based traffic splitting (`--headers` set) **and** full VPN-only interception (headers empty). Both strategies share the same `InjectOptions` parameter object:
 
 ```go
 type InjectOptions struct {
@@ -42,27 +43,9 @@ type InjectOptions struct {
 
 ## 3. Injection Strategies
 
-### 3.1 VPN-Only (`vpnInjector`)
+### 3.1 Mesh (`meshInjector`) — covers VPN-only and header splitting
 
-Used for `kubevpn proxy` without header-based traffic splitting.
-
-```
-Inject:
-  1. collectPorts → envoy ports + portmap
-  2. addEnvoyConfig → write Virtual/Rule to ConfigMap
-  3. AddVPNContainer → inject VPN sidecar
-  4. patchWorkload → JSON patch the controller
-```
-
-The VPN container:
-- Enables IP forwarding and iptables DNAT rules
-- All non-ICMP traffic is DNATed to the user's TUN IP
-- Runs `kubevpn server` with TUN tunnel to traffic manager
-- Requires `NET_ADMIN` capability + privileged mode
-
-### 3.2 Mesh (`meshInjector`)
-
-Used for `kubevpn proxy` with `--headers` for traffic splitting.
+Used for `kubevpn proxy`, with or without `--headers`.
 
 ```
 Inject:
@@ -73,13 +56,20 @@ Inject:
   5. patchWorkload → JSON patch the controller
 ```
 
-The mesh mode adds two containers:
-- **VPN container**: Same as VPN-only but iptables DNAT to port 15006 (envoy inbound) instead of TUN IP directly
-- **Envoy container**: Runs envoy with xDS config pointing to the control plane, routes by headers
+Mesh mode adds two containers:
+- **VPN container**: enables IP forwarding and DNATs all non-ICMP, non-cluster traffic to envoy's inbound port `:15006` (a *fixed* port — no client-IP in the rule). Runs `kubevpn server -l "tun:/tcp://...:10801?route=${CIDR4}"` with `net=` empty, so it self-allocates its TUN IP from the control-plane at startup. Requires `NET_ADMIN` + privileged mode.
+- **Envoy container**: runs envoy with xDS config pointing to the control plane; routes by header.
 
-Multiple users can proxy the same workload with different headers — envoy routes each user's traffic to their TUN IP while unmatched traffic goes to `origin_cluster` (the real application).
+**Routing behavior depends on whether headers are set:**
 
-### 3.3 Fargate/Service (`fargateInjector`)
+| Headers | envoy route | Effect |
+|---------|-------------|--------|
+| Empty (VPN-only) | `RouteMatch{Prefix:"/"}` matches everything | All traffic forwarded to the user's TUN IP (full interception) |
+| Set (`--headers`) | header match → user IP; no match → `origin_cluster` | Per-user traffic splitting; unmatched requests hit the real app |
+
+Multiple users can proxy the same workload with different headers — envoy routes each user's traffic to their own TUN IP. Because the routing target (`Rule.LocalTunIPv4/v6`) lives in `ENVOY_CONFIG`, a client IP change is picked up automatically via `syncEnvoyRuleIP` → xDS push (TCP + UDP), with no Pod restart.
+
+### 3.2 Fargate/Service (`fargateInjector`)
 
 Used when targeting a K8s Service (no `NET_ADMIN` capability available).
 
@@ -118,9 +108,10 @@ All sidecar containers receive:
 
 | Function | Containers | Security |
 |----------|-----------|----------|
-| `AddVPNContainer` | VPN only | Privileged + NET_ADMIN |
-| `AddVPNAndEnvoyContainer` | VPN + Envoy | VPN: privileged; Envoy: unprivileged |
-| `AddEnvoyAndSSHContainer` | SSH + Envoy | Both unprivileged |
+| `AddVPNAndEnvoyContainer` | VPN + Envoy (all non-Service proxy) | VPN: privileged; Envoy: unprivileged |
+| `AddEnvoyAndSSHContainer` | SSH + Envoy (Service/Fargate) | Both unprivileged |
+
+> The former `AddVPNContainer` (VPN-only, no envoy) was **removed** with the unified proxy mode — every non-Service proxy now goes through `AddVPNAndEnvoyContainer`.
 
 ## 5. Envoy ConfigMap Management (`envoy.go`)
 
@@ -198,8 +189,7 @@ Templates use Go `text/template` with the traffic manager address as the templat
 | File | Purpose |
 |------|---------|
 | `pkg/inject/injector.go` | Injector interface, factory, shared helpers |
-| `pkg/inject/vpn.go` | VPN-only strategy |
-| `pkg/inject/mesh.go` | Mesh (VPN+Envoy) strategy + UnpatchContainer |
+| `pkg/inject/mesh.go` | Mesh (VPN+Envoy) strategy + UnpatchContainer — also serves VPN-only (empty headers) |
 | `pkg/inject/fargate.go` | Fargate (SSH+Envoy) strategy |
 | `pkg/inject/container.go` | Container spec builders |
 | `pkg/inject/envoy.go` | ConfigMap envoy rule CRUD |

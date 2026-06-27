@@ -43,10 +43,12 @@ type ConnectOptions struct {
 	OwnerID      string `json:"OwnerID,omitempty"`
 	ConnectionID string
 
+	rollbackMu       sync.Mutex
 	rollbackFuncList []func() error
 
 	SshHosts       []net.IP `json:"-"`
-	once           sync.Once
+	cleanupMu      sync.Mutex
+	cleanedUp      bool
 	network        *NetworkManager
 	proxyManager   *ProxyManager
 	configMapStore *ConfigMapStore
@@ -249,11 +251,11 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) ([]*net.IPNet, []net.IP, e
 	raw := util.GetCIDR(ctx, c.clientset, c.config, c.ManagerNamespace, c.Image)
 	cidrs := dedupAndFilterCIDRs(raw, apiServerIPs)
 	if len(cidrs) == 0 {
-		plog.G(ctx).Warnf("No cluster CIDRs detected (raw=%d, all filtered by API server IPs %v)", len(raw), apiServerIPs)
+		plog.G(ctx).Debugf("No cluster CIDRs detected (raw=%d, all filtered by API server IPs %v)", len(raw), apiServerIPs)
 		return cidrs, apiServerIPs, nil
 	}
 	encoded := encodeCIDRs(cidrs)
-	plog.G(ctx).Infof("Saving %d cluster CIDRs to cache: %s", len(cidrs), encoded)
+	plog.G(ctx).Debugf("Saving %d cluster CIDRs to cache: %s", len(cidrs), encoded)
 	err = c.Set(ctx, config.KeyClusterCIDRs, encoded)
 	return cidrs, apiServerIPs, err
 }
@@ -314,11 +316,17 @@ func (c *ConnectOptions) GetConnectionID() string {
 
 // AddRollbackFunc registers a cleanup function to be called when the connection is torn down.
 func (c *ConnectOptions) AddRollbackFunc(f func() error) {
+	c.rollbackMu.Lock()
+	defer c.rollbackMu.Unlock()
 	c.rollbackFuncList = append(c.rollbackFuncList, f)
 }
 
 func (c *ConnectOptions) getRollbackFuncs() []func() error {
-	return c.rollbackFuncList
+	c.rollbackMu.Lock()
+	defer c.rollbackMu.Unlock()
+	fns := make([]func() error, len(c.rollbackFuncList))
+	copy(fns, c.rollbackFuncList)
+	return fns
 }
 
 // ProxyResources returns the list of workloads currently being proxied by this connection.
