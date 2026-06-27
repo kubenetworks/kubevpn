@@ -26,6 +26,9 @@ type Server struct {
 	LogFile   *lumberjack.Logger
 	Lock      sync.Mutex
 
+	// connMu protects connections and currentConnectionID from concurrent access.
+	// Use RLock for read-only access, Lock for mutations.
+	connMu              sync.RWMutex
 	currentConnectionID string
 	connections         []*handler.ConnectOptions
 
@@ -93,8 +96,13 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 
 // OffloadToConfig persists the current connection state to disk for later restoration.
 func (svr *Server) OffloadToConfig() error {
+	svr.connMu.RLock()
+	conns := make([]*handler.ConnectOptions, len(svr.connections))
+	copy(conns, svr.connections)
+	svr.connMu.RUnlock()
+
 	conf := &Config{
-		SecondaryConnect: svr.connections,
+		SecondaryConnect: conns,
 	}
 	jsonConf, err := json.Marshal(conf)
 	if err != nil {

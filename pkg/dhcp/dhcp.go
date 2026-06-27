@@ -91,7 +91,9 @@ func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 	}
 	var uselessIPs []net.IP
 	var v4, v6 net.IP
-	err := m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		uselessIPs = nil
+		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
 		for {
 			if v4, err = ipv4.AllocateNext(); err != nil {
 				return err
@@ -111,6 +113,7 @@ func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 			uselessIPs = append(uselessIPs, v6)
 		}
 		return
+	})
 	})
 	if len(uselessIPs) != 0 {
 		if er := m.releaseIP(ctx, uselessIPs...); er != nil {

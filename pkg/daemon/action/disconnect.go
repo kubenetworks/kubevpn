@@ -59,17 +59,22 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 
 	switch {
 	case req.GetAll():
+		svr.connMu.Lock()
 		connects := handler.Connects(svr.connections)
+		svr.connections = nil
+		svr.currentConnectionID = ""
+		svr.connMu.Unlock()
 		for _, connect := range connects.Sort() {
 			cleanupConnection(ctx, connect)
 		}
-		svr.connections = nil
-		svr.currentConnectionID = ""
 	case req.GetConnectionID() != "":
-		for _, connect := range svr.removeConnection(req.GetConnectionID()).Sort() {
+		svr.connMu.Lock()
+		removed := svr.removeConnection(req.GetConnectionID())
+		svr.resetCurrentConnection(req.GetConnectionID())
+		svr.connMu.Unlock()
+		for _, connect := range removed.Sort() {
 			cleanupConnection(ctx, connect)
 		}
-		svr.resetCurrentConnection(req.GetConnectionID())
 	case req.KubeconfigBytes != nil && req.Namespace != nil:
 		err = disconnectByKubeconfig(
 			resp.Context(),
@@ -83,7 +88,10 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		}
 	}
 
-	if len(svr.connections) == 0 {
+	svr.connMu.RLock()
+	empty := len(svr.connections) == 0
+	svr.connMu.RUnlock()
+	if empty {
 		if svr.IsSudo {
 			_ = dns.CleanupHosts()
 		}
@@ -107,12 +115,17 @@ func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes st
 		return err
 	}
 	disconnect(ctx, svr, connectionID)
+	svr.connMu.Lock()
 	svr.resetCurrentConnection(connectionID)
+	svr.connMu.Unlock()
 	return nil
 }
 
 func disconnect(ctx context.Context, svr *Server, connectionID string) {
-	for _, conn := range svr.removeConnection(connectionID) {
+	svr.connMu.Lock()
+	removed := svr.removeConnection(connectionID)
+	svr.connMu.Unlock()
+	for _, conn := range removed {
 		plog.G(ctx).Infof("Disconnecting from the cluster...")
 		cleanupConnection(ctx, conn)
 	}

@@ -3,6 +3,7 @@ package localproxy
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net"
 	"strings"
 
@@ -142,31 +143,45 @@ func (c *ClusterConnector) resolveServiceToPod(ctx context.Context, svc *corev1.
 		return nil, err
 	}
 	var endpointPort *corev1.EndpointPort
-	var podName, podNS, podIP string
+	var candidates []corev1.EndpointAddress
 	for _, subset := range endpoints.Subsets {
+		var matchedPort *corev1.EndpointPort
 		for i := range subset.Ports {
 			portRef := &subset.Ports[i]
 			if endpointPortMatches(servicePort, portRef, port) {
-				endpointPort = portRef
+				matchedPort = portRef
 				break
 			}
 		}
-		if endpointPort == nil && len(subset.Ports) == 1 {
-			endpointPort = &subset.Ports[0]
+		if matchedPort == nil && len(subset.Ports) == 1 {
+			matchedPort = &subset.Ports[0]
 		}
-		if endpointPort == nil {
+		if matchedPort == nil {
 			continue
 		}
-		for _, addr := range subset.Addresses {
-			podIP = addr.IP
+		if endpointPort == nil {
+			endpointPort = matchedPort
+		}
+		candidates = append(candidates, subset.Addresses...)
+	}
+
+	var podName, podNS, podIP string
+	if len(candidates) > 0 {
+		// Shuffle to distribute traffic across replicas instead of always picking the first.
+		rand.Shuffle(len(candidates), func(i, j int) {
+			candidates[i], candidates[j] = candidates[j], candidates[i]
+		})
+		// Prefer addresses with an explicit Pod reference; fall back to any address.
+		for _, addr := range candidates {
 			if addr.TargetRef != nil && addr.TargetRef.Kind == "Pod" {
 				podName = addr.TargetRef.Name
 				podNS = addr.TargetRef.Namespace
+				podIP = addr.IP
 				break
 			}
 		}
-		if podName != "" || podIP != "" {
-			break
+		if podName == "" {
+			podIP = candidates[0].IP
 		}
 	}
 	if endpointPort == nil {

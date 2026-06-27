@@ -31,11 +31,13 @@ func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 	}
 	ctx = plog.WithLogger(ctx, logger)
 
+	svr.connMu.Lock()
 	connects := handler.Connects(svr.connections)
+	svr.connections = nil
+	svr.connMu.Unlock()
 	for _, conn := range connects.Sort() {
 		cleanupConnection(ctx, conn)
 	}
-	svr.connections = nil
 
 	if svr.IsSudo {
 		_ = dns.CleanupHosts()

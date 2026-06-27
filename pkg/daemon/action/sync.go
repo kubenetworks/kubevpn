@@ -122,7 +122,9 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 		plog.G(resp.Context()).Errorf("Sync workloads failed: %v", err)
 		return err
 	}
+	svr.connMu.RLock()
 	opt, _ := svr.findConnection(connectionID)
+	svr.connMu.RUnlock()
 	if opt == nil {
 		return fmt.Errorf("cluster %s not found", connectionID)
 	}

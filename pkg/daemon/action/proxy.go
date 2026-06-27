@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -66,25 +67,31 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	}
 
 	var connResp grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse]
+	var connRespMu sync.Mutex
 	cancel, cancelFunc := context.WithCancel(ctx)
 	defer cancelFunc()
 	go func() {
 		var s rpc.Cancel
-		err = resp.RecvMsg(&s)
-		if err != nil {
+		if recvErr := resp.RecvMsg(&s); recvErr != nil {
 			return
 		}
-		if connResp != nil {
-			_ = connResp.SendMsg(&s)
+		connRespMu.Lock()
+		cr := connResp
+		connRespMu.Unlock()
+		if cr != nil {
+			_ = cr.SendMsg(&s)
 		}
 		cancelFunc()
 	}()
 
 	plog.G(ctx).Debugf("Connecting to cluster")
-	connResp, err = cli.Connect(context.Background())
-	if err != nil {
-		return err
+	cr, connErr := cli.Connect(context.Background())
+	if connErr != nil {
+		return connErr
 	}
+	connRespMu.Lock()
+	connResp = cr
+	connRespMu.Unlock()
 	err = connResp.Send(convert(req))
 	if err != nil {
 		return err
@@ -95,14 +102,21 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		return err
 	}
 
+	svr.connMu.RLock()
 	options, _ := svr.findConnection(connectionID)
+	svr.connMu.RUnlock()
 	if options == nil {
 		return errors.New("failed to connect to cluster")
 	}
 
 	defer func() {
 		if err != nil {
-			_ = options.LeaveAllProxyResources(plog.WithLogger(context.Background(), logger))
+			cleanupCtx := plog.WithLogger(context.Background(), logger)
+			_ = options.LeaveAllProxyResources(cleanupCtx)
+			disconnect(cleanupCtx, svr, connectionID)
+			svr.connMu.Lock()
+			svr.resetCurrentConnection(connectionID)
+			svr.connMu.Unlock()
 		}
 	}()
 
@@ -117,7 +131,9 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		plog.G(ctx).Errorf("Failed to inject inbound sidecar: %v", err)
 		return err
 	}
+	svr.connMu.Lock()
 	svr.currentConnectionID = connectionID
+	svr.connMu.Unlock()
 	options.HealthCheckOnce(cancel, time.Second*10)
 	return nil
 }
