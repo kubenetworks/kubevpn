@@ -248,10 +248,17 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {
 	var err error
 	c.ManagerNamespace, err = c.K8sClient.InitClient(f)
-	if err == nil {
+	return err
+}
+
+// getConfigMapStore returns the ConfigMapStore, creating it lazily on first access.
+// This must be lazy because ManagerNamespace may be updated by detectAndSetManagerNamespace
+// after InitClient returns (user daemon path).
+func (c *ConnectOptions) getConfigMapStore() *ConfigMapStore {
+	if c.configMapStore == nil {
 		c.configMapStore = NewConfigMapStore(c.clientset, c.ManagerNamespace)
 	}
-	return err
+	return c.configMapStore
 }
 
 // GetRunningPodList returns the running traffic manager pods in the manager namespace.
@@ -306,34 +313,34 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) (cidrs []*net.IPNet, apiSe
 
 // Set updates a key-value pair in the traffic manager ConfigMap.
 func (c *ConnectOptions) Set(ctx context.Context, key, value string) error {
-	return c.configMapStore.Set(ctx, key, value)
+	return c.getConfigMapStore().Set(ctx, key, value)
 }
 
 // Get retrieves a value by key from the traffic manager ConfigMap, using the informer cache first.
 func (c *ConnectOptions) Get(ctx context.Context, key string) (string, error) {
-	return c.configMapStore.Get(ctx, key)
+	return c.getConfigMapStore().Get(ctx, key)
 }
 
 // GetConfigMapInformer returns a shared informer for the traffic manager ConfigMap.
 // Created once on first call, then reused. Thread-safe via sync.Once.
 // Must be called after InitClient.
 func (c *ConnectOptions) GetConfigMapInformer() cache.SharedInformer {
-	return c.configMapStore.GetInformer()
+	return c.getConfigMapStore().GetInformer()
 }
 
 // HealthCheckOnce performs a single health check with the given timeout.
 func (c *ConnectOptions) HealthCheckOnce(ctx context.Context, timeout time.Duration) {
-	c.configMapStore.HealthCheckOnce(ctx, timeout)
+	c.getConfigMapStore().HealthCheckOnce(ctx, timeout)
 }
 
 // HealthPeriod periodically syncs health status on the given interval.
 func (c *ConnectOptions) HealthPeriod(ctx context.Context, interval time.Duration) {
-	c.configMapStore.HealthPeriod(ctx, interval)
+	c.getConfigMapStore().HealthPeriod(ctx, interval)
 }
 
 // HealthStatus returns the last known health state.
 func (c *ConnectOptions) HealthStatus() HealthStatus {
-	return c.configMapStore.GetHealthStatus()
+	return c.getConfigMapStore().GetHealthStatus()
 }
 
 // GetLocalTunIP returns the local TUN device IPv4 and IPv6 addresses as strings.

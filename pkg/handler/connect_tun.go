@@ -82,14 +82,6 @@ func healthCheckTCPConn(ctx context.Context, cancelFunc context.CancelFunc, read
 	})
 }
 
-// addRoute delegates to NetworkManager if available. Before the TUN device is
-// created (and NetworkManager is wired), this is a no-op because tunName is empty.
-func (c *ConnectOptions) addRoute(ipStrList ...string) error {
-	if c.network != nil {
-		return c.network.AddRoute(ipStrList...)
-	}
-	return nil
-}
 
 func healthCheckLoop(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, checker func() error) {
 	defer cancelFunc()

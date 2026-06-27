@@ -45,7 +45,7 @@ func CmdServer(cmdutil.Factory) *cobra.Command {
 			ctx := cmd.Context()
 			logger := plog.InitLoggerForServer()
 			logger.SetLevel(util.If(config.Debug, log.DebugLevel, log.InfoLevel))
-			servers, err := core.GenerateServers(listeners, nil)
+			servers, err := core.GenerateServers(listeners, core.NewRouteHub())
 			if err != nil {
 				plog.G(ctx).Errorf("Parse server failed: %v", err)
 				return err
