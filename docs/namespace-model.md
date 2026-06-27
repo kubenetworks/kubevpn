@@ -37,7 +37,7 @@ KubeVPN operates across two namespaces that may or may not be the same. Confusin
 
 **How determined:** User specifies `-n <namespace>` or kubeconfig default namespace.
 
-**In code:** `ConnectOptions.OriginNamespace`, and the `namespace` parameter in `CreateRemoteInboundPod()`
+**In code:** `ConnectOptions.WorkloadNamespace`, and the `namespace` parameter in `CreateRemoteInboundPod()`
 
 ## When They Differ
 
@@ -63,9 +63,9 @@ kubevpn connect -n default
 
 ```go
 type ConnectOptions struct {
-    ManagerNamespace     string  // ← MANAGER namespace (traffic manager infrastructure)
-    OriginNamespace      string  // ← WORKLOAD namespace (user's -n flag)
-    OriginKubeconfigPath string  // ← user's kubeconfig path
+    ManagerNamespace      string  // ← MANAGER namespace (traffic manager infrastructure)
+    WorkloadNamespace     string  // ← WORKLOAD namespace (user's -n flag)
+    OriginKubeconfigPath  string  // ← user's kubeconfig path
     // ...
 }
 ```
@@ -83,7 +83,7 @@ message ConnectRequest {
 ```go
 connect := &handler.ConnectOptions{
     ManagerNamespace: req.ManagerNamespace,   // same name, clear intent
-    OriginNamespace:  req.Namespace,          // req.Namespace → OriginNamespace
+    WorkloadNamespace:  req.Namespace,        // req.Namespace → WorkloadNamespace
 }
 ```
 
@@ -122,7 +122,7 @@ type Mapper struct {
 | Port-forward target | `PortForwardPod(c.ManagerNamespace)` |
 | Envoy config read/write | `addEnvoyConfig(ConfigMaps(o.ManagerNamespace))` |
 
-### Workload Namespace (`namespace` param / `m.ns` / `c.OriginNamespace`)
+### Workload Namespace (`namespace` param / `m.ns` / `c.WorkloadNamespace`)
 
 | Resource | API call |
 |----------|----------|
@@ -130,9 +130,9 @@ type Mapper struct {
 | Pod informer (Mapper) | `NewFilteredPodInformer(m.ns)` |
 | Service targetPort mod | `Services(namespace).Get/Update` |
 | Leave/unpatch | `GetTopOwnerObject(factory, workload.Namespace)` |
-| DNS service lookup | `Services(c.OriginNamespace).List` |
-| Route table (pods) | `Pods(c.OriginNamespace).List` |
-| Status reporting | `connect.OriginNamespace` shown to user |
+| DNS service lookup | `Services(c.WorkloadNamespace).List` |
+| Route table (pods) | `Pods(c.WorkloadNamespace).List` |
+| Status reporting | `connect.WorkloadNamespace` shown to user |
 
 ## Detection Flow
 
@@ -144,7 +144,7 @@ kubevpn connect -n default --manager-namespace kubevpn
            = "default"            = "kubevpn"
                     │                    │
                     ▼                    ▼
-        connect.OriginNamespace   connect.ManagerNamespace
+        connect.WorkloadNamespace   connect.ManagerNamespace
         = "default"               = "kubevpn"
 ```
 
@@ -163,13 +163,13 @@ kubevpn connect -n default    (no --manager-namespace)
            4. Not found → create in "default" (req.ManagerNamespace = req.Namespace)
                     │
                     ▼
-        connect.OriginNamespace = "default"
+        connect.WorkloadNamespace = "default"
         connect.ManagerNamespace = detected result
 ```
 
 ## Common Pitfalls
 
-1. **Don't use `c.ManagerNamespace` for workload operations.** It's the manager namespace. Use the `namespace` parameter passed to `CreateRemoteInboundPod()` or `c.OriginNamespace`.
+1. **Don't use `c.ManagerNamespace` for workload operations.** It's the manager namespace. Use the `namespace` parameter passed to `CreateRemoteInboundPod()` or `c.WorkloadNamespace`.
 
 2. **Don't use `m.ns` (Mapper) for ConfigMap operations.** The ConfigMap lives in the manager namespace. The Mapper's `cmInformer` already points to the correct namespace.
 

@@ -38,8 +38,8 @@ func TestLeaveAllProxyResources_EmptyConfigMap(t *testing.T) {
 	)
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		K8sClient: K8sClient{clientset: clientset},
-		proxyWorkloads:   ProxyList{},
+		K8sClient:    K8sClient{clientset: clientset},
+		proxyManager: NewProxyManager(nil, clientset, "test-ns"),
 	}
 	err := c.LeaveAllProxyResources(context.Background())
 	if err != nil {
@@ -51,8 +51,8 @@ func TestLeaveAllProxyResources_ConfigMapNotFound(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		K8sClient: K8sClient{clientset: clientset},
-		proxyWorkloads:   ProxyList{},
+		K8sClient:    K8sClient{clientset: clientset},
+		proxyManager: NewProxyManager(nil, clientset, "test-ns"),
 	}
 	err := c.LeaveAllProxyResources(context.Background())
 	if err != nil {
@@ -76,52 +76,52 @@ func TestLeaveResource_NilResources(t *testing.T) {
 	}
 }
 
-func TestLeavePortMap_RemovesWorkload(t *testing.T) {
+func TestProxyManager_Remove_RemovesWorkload(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyWorkloads = ProxyList{
-		{workload: "deployments.apps/app1", namespace: "default"},
-		{workload: "deployments.apps/app2", namespace: "default"},
-		{workload: "services/svc1", namespace: "other-ns"},
-	}
+	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app1", namespace: "default"})
+	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app2", namespace: "default"})
+	c.proxyManager.Add(&Proxy{workload: "services/svc1", namespace: "other-ns"})
 
-	c.leavePortMap("default", "deployments.apps/app1")
+	c.proxyManager.Remove("default", "deployments.apps/app1")
 
-	if len(c.proxyWorkloads) != 2 {
-		t.Fatalf("expected 2 remaining workloads, got %d", len(c.proxyWorkloads))
+	res := c.proxyManager.Resources()
+	if len(res) != 2 {
+		t.Fatalf("expected 2 remaining workloads, got %d", len(res))
 	}
-	for _, p := range c.proxyWorkloads {
+	for _, p := range res {
 		if p.workload == "deployments.apps/app1" && p.namespace == "default" {
 			t.Fatal("app1 should have been removed")
 		}
 	}
 }
 
-func TestLeavePortMap_NonExistentWorkload(t *testing.T) {
+func TestProxyManager_Remove_NonExistentWorkload(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyWorkloads = ProxyList{
-		{workload: "deployments.apps/app1", namespace: "default"},
-	}
+	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app1", namespace: "default"})
 
 	// Removing a non-existent workload should not panic or modify the list
-	c.leavePortMap("default", "deployments.apps/does-not-exist")
+	c.proxyManager.Remove("default", "deployments.apps/does-not-exist")
 
-	if len(c.proxyWorkloads) != 1 {
-		t.Fatalf("expected 1 workload unchanged, got %d", len(c.proxyWorkloads))
+	res := c.proxyManager.Resources()
+	if len(res) != 1 {
+		t.Fatalf("expected 1 workload unchanged, got %d", len(res))
 	}
 }
 
-func TestLeavePortMap_AllWorkloads(t *testing.T) {
+func TestProxyManager_Remove_AllWorkloads(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyWorkloads = ProxyList{
-		{workload: "deployments.apps/app1", namespace: "ns1"},
-		{workload: "deployments.apps/app2", namespace: "ns2"},
-	}
+	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app1", namespace: "ns1"})
+	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app2", namespace: "ns2"})
 
-	c.leavePortMap("ns1", "deployments.apps/app1")
-	c.leavePortMap("ns2", "deployments.apps/app2")
+	c.proxyManager.Remove("ns1", "deployments.apps/app1")
+	c.proxyManager.Remove("ns2", "deployments.apps/app2")
 
-	if len(c.proxyWorkloads) != 0 {
-		t.Fatalf("expected 0 workloads after removing all, got %d", len(c.proxyWorkloads))
+	res := c.proxyManager.Resources()
+	if len(res) != 0 {
+		t.Fatalf("expected 0 workloads after removing all, got %d", len(res))
 	}
 }
 
@@ -256,19 +256,18 @@ func TestLeaveAllProxyResources_WithProxyWorkloads(t *testing.T) {
 			Data:       map[string]string{config.KeyEnvoy: "[]"},
 		},
 	)
+	pm := NewProxyManager(factory, clientset, "test-ns")
+	pm.Add(&Proxy{workload: "deployments.apps/web", namespace: "default"})
+	pm.Add(&Proxy{workload: "deployments.apps/api", namespace: "default"})
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
 		K8sClient: K8sClient{
 			clientset: clientset,
 			factory:   factory,
 		},
-		proxyWorkloads: ProxyList{
-			{workload: "deployments.apps/web", namespace: "default"},
-			{workload: "deployments.apps/api", namespace: "default"},
-		},
+		proxyManager: pm,
 	}
-	// proxyWorkloads has entries, so ToResources() returns non-empty slice.
-	// LeaveResource will be called, which calls GetTopOwnerObject.
+	// proxyManager has entries, so LeaveAll will be called, which calls GetTopOwnerObject.
 	// With a bad kubeconfig, GetTopOwnerObject returns an error for each workload.
 	err := c.LeaveAllProxyResources(context.Background())
 	if err == nil {
@@ -289,6 +288,7 @@ func TestLeaveResource_ErrorPropagationFromGetTopOwnerObject(t *testing.T) {
 			clientset: clientset,
 			factory:   factory,
 		},
+		proxyManager: NewProxyManager(factory, clientset, "test-ns"),
 	}
 	resources := []Resources{
 		{Namespace: "default", Workload: "deployments.apps/nonexistent"},
@@ -312,6 +312,7 @@ func TestLeaveResource_MultipleErrorsAggregated(t *testing.T) {
 			clientset: clientset,
 			factory:   factory,
 		},
+		proxyManager: NewProxyManager(factory, clientset, "test-ns"),
 	}
 	resources := []Resources{
 		{Namespace: "default", Workload: "deployments.apps/app1"},

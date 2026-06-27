@@ -51,28 +51,34 @@ func (s Connects) Less(i, j int) bool {
 		}
 		return false
 	}
+	var aAPIServerIPs []net.IP
+	if a.network != nil {
+		aAPIServerIPs = a.network.cfg.APIServerIPs
+	}
 	for _, extraCIDR := range b.ExtraRouteInfo.ExtraCIDR {
 		ip, cidr, err := net.ParseCIDR(extraCIDR)
 		if err != nil {
 			continue
 		}
-		if containsFunc(cidr, a.apiServerIPs) {
+		if containsFunc(cidr, aAPIServerIPs) {
 			return true
 		}
-		for _, p := range a.apiServerIPs {
+		for _, p := range aAPIServerIPs {
 			if ip.Equal(p) {
 				return true
 			}
 		}
 	}
-	for _, entry := range b.extraHost {
-		ip := net.ParseIP(entry.IP)
-		if ip == nil || ip.IsLoopback() {
-			continue
-		}
-		for _, p := range a.apiServerIPs {
-			if ip.Equal(p) {
-				return true
+	if b.network != nil {
+		for _, entry := range b.network.GetExtraHost() {
+			ip := net.ParseIP(entry.IP)
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			for _, p := range aAPIServerIPs {
+				if ip.Equal(p) {
+					return true
+				}
 			}
 		}
 	}

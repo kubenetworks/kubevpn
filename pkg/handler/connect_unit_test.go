@@ -28,11 +28,12 @@ func newTestConnectOptions(t *testing.T) *ConnectOptions {
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ConnectOptions{
-		ManagerNamespace: "test-ns",
-		OriginNamespace:  "default",
-		K8sClient: K8sClient{clientset: clientset},
-		ctx:              ctx,
-		cancel:           cancel,
+		ManagerNamespace:  "test-ns",
+		WorkloadNamespace: "default",
+		K8sClient:         K8sClient{clientset: clientset},
+		configMapStore:    NewConfigMapStore(clientset, "test-ns"),
+		ctx:               ctx,
+		cancel:            cancel,
 	}
 }
 
@@ -160,7 +161,7 @@ func TestConnectOptions_GetFactory(t *testing.T) {
 
 func TestConnectOptions_LeaveAllProxyResources_Empty(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyWorkloads = ProxyList{}
+	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
 	err := c.LeaveAllProxyResources(context.Background())
 	if err != nil {
 		t.Fatalf("LeaveAllProxyResources empty: %v", err)
@@ -169,9 +170,8 @@ func TestConnectOptions_LeaveAllProxyResources_Empty(t *testing.T) {
 
 func TestConnectOptions_IsMe(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyWorkloads = ProxyList{
-		{workload: "deployments.apps/reviews", namespace: "default", headers: map[string]string{"env": "test"}},
-	}
+	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager.Add(&Proxy{workload: "deployments.apps/reviews", namespace: "default", headers: map[string]string{"env": "test"}})
 	if !c.IsMe("default", "deployments.apps.reviews", map[string]string{"env": "test"}) {
 		t.Fatal("expected IsMe true")
 	}
@@ -203,16 +203,15 @@ func TestConnectOptions_SyncFromCache(t *testing.T) {
 	// Start the informer so the cache populates
 	_ = c.GetConfigMapInformer()
 	time.Sleep(100 * time.Millisecond) // let informer sync
-	c.syncFromCache()
+	c.configMapStore.syncFromCache()
 	// May or may not have synced in time — just verify no panic
 }
 
 func TestConnectOptions_ProxyResources(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyWorkloads = ProxyList{
-		{workload: "deploy/a", namespace: "ns1"},
-		{workload: "deploy/b", namespace: "ns2"},
-	}
+	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager.Add(&Proxy{workload: "deploy/a", namespace: "ns1"})
+	c.proxyManager.Add(&Proxy{workload: "deploy/b", namespace: "ns2"})
 	res := c.ProxyResources()
 	if len(res) != 2 {
 		t.Fatalf("expected 2 proxy resources, got %d", len(res))
@@ -286,14 +285,14 @@ func TestConnectOptions_Set_Overwrite(t *testing.T) {
 
 func TestConnectOptions_GetTunDeviceName_WithName(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.tunName = "utun42"
+	c.network = &NetworkManager{}; c.network.tunName = "utun42"
 	// GetTunDeviceName looks up a real device by IP, so with no matching device
 	// it will return an error. We verify the tunName field is set correctly
 	// and that the method does not panic.
 	_, _ = c.GetTunDeviceName()
 	// Verify the field is accessible and correct.
-	if c.tunName != "utun42" {
-		t.Fatalf("tunName = %q, want %q", c.tunName, "utun42")
+	if c.network.TunName() != "utun42" {
+		t.Fatalf("tunName = %q, want %q", c.network.TunName(), "utun42")
 	}
 }
 
@@ -324,7 +323,7 @@ func TestConnectOptions_GetConnectionID_WithID(t *testing.T) {
 
 func TestConnectOptions_ProxyResources_Empty(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyWorkloads = ProxyList{}
+	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
 	res := c.ProxyResources()
 	if len(res) != 0 {
 		t.Fatalf("expected 0 proxy resources, got %d", len(res))
@@ -333,7 +332,7 @@ func TestConnectOptions_ProxyResources_Empty(t *testing.T) {
 
 func TestConnectOptions_ProxyResources_Nil(t *testing.T) {
 	c := newTestConnectOptions(t)
-	// proxyWorkloads is nil by default
+	// proxyManager is nil by default
 	res := c.ProxyResources()
 	if res != nil {
 		t.Fatalf("expected nil ProxyResources, got %v", res)
@@ -342,11 +341,10 @@ func TestConnectOptions_ProxyResources_Nil(t *testing.T) {
 
 func TestConnectOptions_ProxyResources_ToResources(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyWorkloads = ProxyList{
-		{workload: "deployments.apps/web", namespace: "prod"},
-		{workload: "statefulsets.apps/db", namespace: "prod"},
-		{workload: "deployments.apps/api", namespace: "staging"},
-	}
+	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager.Add(&Proxy{workload: "deployments.apps/web", namespace: "prod"})
+	c.proxyManager.Add(&Proxy{workload: "statefulsets.apps/db", namespace: "prod"})
+	c.proxyManager.Add(&Proxy{workload: "deployments.apps/api", namespace: "staging"})
 	res := c.ProxyResources()
 	if len(res) != 3 {
 		t.Fatalf("expected 3, got %d", len(res))
@@ -374,20 +372,18 @@ func TestDedupAndFilterCIDRs(t *testing.T) {
 	}
 
 	t.Run("empty input", func(t *testing.T) {
-		c := &ConnectOptions{}
-		result := c.dedupAndFilterCIDRs(nil)
+		result := dedupAndFilterCIDRs(nil, nil)
 		if len(result) != 0 {
 			t.Fatalf("expected empty, got %v", result)
 		}
 	})
 
 	t.Run("overlapping CIDRs deduplicated", func(t *testing.T) {
-		c := &ConnectOptions{}
 		cidrs := []*net.IPNet{
 			mustParseCIDR("10.0.0.0/16"),
 			mustParseCIDR("10.0.1.0/24"),
 		}
-		result := c.dedupAndFilterCIDRs(cidrs)
+		result := dedupAndFilterCIDRs(cidrs, nil)
 		if len(result) != 1 {
 			t.Fatalf("expected 1 CIDR after dedup, got %d: %v", len(result), result)
 		}
@@ -397,13 +393,12 @@ func TestDedupAndFilterCIDRs(t *testing.T) {
 	})
 
 	t.Run("API server IPs filtered", func(t *testing.T) {
-		c := &ConnectOptions{}
-		c.apiServerIPs = []net.IP{net.ParseIP("10.0.0.1")}
+		apiServerIPs := []net.IP{net.ParseIP("10.0.0.1")}
 		cidrs := []*net.IPNet{
 			mustParseCIDR("10.0.0.0/24"),
 			mustParseCIDR("192.168.0.0/16"),
 		}
-		result := c.dedupAndFilterCIDRs(cidrs)
+		result := dedupAndFilterCIDRs(cidrs, apiServerIPs)
 		if len(result) != 1 {
 			t.Fatalf("expected 1 CIDR after filtering, got %d: %v", len(result), result)
 		}
@@ -413,13 +408,12 @@ func TestDedupAndFilterCIDRs(t *testing.T) {
 	})
 
 	t.Run("non-overlapping preserved", func(t *testing.T) {
-		c := &ConnectOptions{}
 		cidrs := []*net.IPNet{
 			mustParseCIDR("10.0.0.0/8"),
 			mustParseCIDR("172.16.0.0/12"),
 			mustParseCIDR("192.168.0.0/16"),
 		}
-		result := c.dedupAndFilterCIDRs(cidrs)
+		result := dedupAndFilterCIDRs(cidrs, nil)
 		if len(result) != 3 {
 			t.Fatalf("expected 3 CIDRs, got %d: %v", len(result), result)
 		}

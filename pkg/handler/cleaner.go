@@ -32,8 +32,8 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 	}
 
 	c.once.Do(func() {
-		if c.cmInformerStop != nil {
-			close(c.cmInformerStop)
+		if c.configMapStore != nil {
+			c.configMapStore.Stop()
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 		defer cancel()
@@ -79,13 +79,13 @@ func (c *ConnectOptions) cleanupControlPlane(logCtx context.Context, ctx context
 }
 
 // cleanupDataPlane tears down the data-plane side: runs rollback functions,
-// clears DNS settings, and cancels the connection context.
+// stops the networking stack, and cancels the connection context.
 func (c *ConnectOptions) cleanupDataPlane(logCtx context.Context) {
 	executeRollbackFuncs(logCtx, c.getRollbackFuncs())
 
-	if c.dnsConfig != nil {
-		plog.G(logCtx).Debugf("Clearing DNS settings")
-		c.dnsConfig.CancelDNS()
+	if c.network != nil {
+		plog.G(logCtx).Debugf("Stopping network manager")
+		c.network.Stop()
 	}
 	if c.cancel != nil {
 		c.cancel()

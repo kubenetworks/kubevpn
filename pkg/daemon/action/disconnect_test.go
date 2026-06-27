@@ -102,8 +102,8 @@ func TestDisconnect_MultipleConnections(t *testing.T) {
 // TestDisconnect_PreservesNonMatchingOrder verifies that non-matching
 // connections keep their original order after a disconnect call.
 func TestDisconnect_PreservesNonMatchingOrder(t *testing.T) {
-	conn1 := &handler.ConnectOptions{OriginNamespace: "ns1"}
-	conn2 := &handler.ConnectOptions{OriginNamespace: "ns2"}
+	conn1 := &handler.ConnectOptions{WorkloadNamespace: "ns1"}
+	conn2 := &handler.ConnectOptions{WorkloadNamespace: "ns2"}
 
 	svr := &Server{
 		connections: []*handler.ConnectOptions{conn1, conn2},
@@ -115,8 +115,8 @@ func TestDisconnect_PreservesNonMatchingOrder(t *testing.T) {
 	if len(svr.connections) != 2 {
 		t.Fatalf("expected 2 connections, got %d", len(svr.connections))
 	}
-	if svr.connections[0].OriginNamespace != "ns1" || svr.connections[1].OriginNamespace != "ns2" {
+	if svr.connections[0].WorkloadNamespace != "ns1" || svr.connections[1].WorkloadNamespace != "ns2" {
 		t.Fatalf("connection order changed: got [%s, %s]",
-			svr.connections[0].OriginNamespace, svr.connections[1].OriginNamespace)
+			svr.connections[0].WorkloadNamespace, svr.connections[1].WorkloadNamespace)
 	}
 }

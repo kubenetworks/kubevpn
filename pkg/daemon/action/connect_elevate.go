@@ -28,7 +28,7 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	reqBytes, _ := proto.Marshal(req)
 	connect := &handler.ConnectOptions{
 		ManagerNamespace:     req.Namespace,
-		OriginNamespace:      req.Namespace,
+		WorkloadNamespace:      req.Namespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		RequestRaw:           reqBytes,

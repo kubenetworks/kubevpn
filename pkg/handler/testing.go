@@ -12,7 +12,7 @@ func NewConnectOptionsForTest(factory cmdutil.Factory, kubeconfigPath, namespace
 	return &ConnectOptions{
 		K8sClient:            K8sClient{factory: factory},
 		OriginKubeconfigPath: kubeconfigPath,
-		OriginNamespace:      namespace,
+		WorkloadNamespace:      namespace,
 	}
 }
 

@@ -93,7 +93,7 @@ func buildConnectionStatus(connect *handler.ConnectOptions) *rpc.Status {
 		ConnectionID: connect.GetConnectionID(),
 		Cluster:      util.GetKubeconfigCluster(connect.GetFactory()),
 		Kubeconfig:   connect.OriginKubeconfigPath,
-		Namespace:    connect.OriginNamespace,
+		Namespace:    connect.WorkloadNamespace,
 		Status:       status,
 		Netif:        tunName,
 		IPv4:         v4,
@@ -146,7 +146,7 @@ func buildProxyAndSyncStatus(connect *handler.ConnectOptions, sync *handler.Sync
 				connectionID = connect.GetConnectionID()
 				cluster = util.GetKubeconfigCluster(connect.GetFactory())
 				kubeconfig = connect.OriginKubeconfigPath
-				namespace = connect.OriginNamespace
+				namespace = connect.WorkloadNamespace
 			}
 			syncList = append(syncList, &rpc.Sync{
 				ConnectionID:     connectionID,

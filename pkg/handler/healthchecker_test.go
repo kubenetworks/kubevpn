@@ -45,8 +45,11 @@ func TestConnectOptions_HealthStatus(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pod-traffic-manager", Namespace: "test"},
 	}
 	err := errors.New("timeout")
-	opts := ConnectOptions{
+	store := &ConfigMapStore{
 		healthStatus: HealthStatus{lastErr: err, cm: cm},
+	}
+	opts := ConnectOptions{
+		configMapStore: store,
 	}
 	hs := opts.HealthStatus()
 	if hs.LastError() != err {

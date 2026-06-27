@@ -78,7 +78,7 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	}
 
 	options := &handler.SyncOptions{
-		Namespace:            req.Namespace,
+		WorkloadNamespace:   req.Namespace,
 		Headers:              req.Headers,
 		Workloads:            req.Workloads,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),

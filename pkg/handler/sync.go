@@ -27,7 +27,7 @@ import (
 type SyncOptions struct {
 	K8sClient
 
-	Namespace      string
+	WorkloadNamespace      string
 	Headers        map[string]string
 	Workloads      []string
 	ExtraRouteInfo ExtraRouteInfo
@@ -48,7 +48,7 @@ type SyncOptions struct {
 // InitClient initializes the Kubernetes client, REST client, and namespace from the given factory.
 func (d *SyncOptions) InitClient(f cmdutil.Factory) error {
 	var err error
-	d.Namespace, err = d.K8sClient.InitClient(f)
+	d.WorkloadNamespace, err = d.K8sClient.InitClient(f)
 	return err
 }
 
@@ -68,7 +68,7 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 	}
 	for _, workload := range d.Workloads {
 		plog.G(ctx).Infof("Sync workload %s", workload)
-		_, controller, err := util.GetTopOwnerObject(ctx, d.factory, d.Namespace, workload)
+		_, controller, err := util.GetTopOwnerObject(ctx, d.factory, d.WorkloadNamespace, workload)
 		if err != nil {
 			return err
 		}
@@ -121,7 +121,7 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 			}); err != nil {
 				return err
 			}
-			_, createErr := client.Resource(controller.Mapping.Resource).Namespace(d.Namespace).Create(ctx, u, metav1.CreateOptions{})
+			_, createErr := client.Resource(controller.Mapping.Resource).Namespace(d.WorkloadNamespace).Create(ctx, u, metav1.CreateOptions{})
 			return createErr
 		})
 		if retryErr != nil {
@@ -130,11 +130,11 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 		plog.G(ctx).Infof("Create sync resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
 		plog.G(ctx).Infof("Wait for sync resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
 		plog.G(ctx).Infoln()
-		err = WaitPodReady(ctx, d.clientset.CoreV1().Pods(d.Namespace), fields.SelectorFromSet(labelsMap).String())
+		err = WaitPodReady(ctx, d.clientset.CoreV1().Pods(d.WorkloadNamespace), fields.SelectorFromSet(labelsMap).String())
 		if err != nil {
 			return err
 		}
-		_ = util.RolloutStatus(ctx, d.factory, d.Namespace, workload)
+		_ = util.RolloutStatus(ctx, d.factory, d.WorkloadNamespace, workload)
 
 		if d.LocalDir != "" {
 			err = d.SyncDir(ctx, fields.SelectorFromSet(labelsMap).String())
@@ -214,7 +214,7 @@ func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, s syncPodSpec) err
 	if spec.Spec.SecurityContext == nil {
 		spec.Spec.SecurityContext = &v1.PodSecurityContext{}
 	}
-	container := genVPNContainer(s.workload, d.Namespace, s.image, s.args)
+	container := genVPNContainer(s.workload, d.WorkloadNamespace, s.image, s.args)
 	containerSync := genSyncthingContainer(d.RemoteDir, syncDataDirName, s.image)
 	spec.Spec.Containers = append(containers, *container, *containerSync)
 
@@ -245,7 +245,7 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	var firstErr error
 	for _, workload := range workloads {
 		plog.G(ctx).Infof("Cleaning up sync workload: %s", workload)
-		object, err := util.GetUnstructuredObject(d.factory, d.Namespace, workload)
+		object, err := util.GetUnstructuredObject(d.factory, d.WorkloadNamespace, workload)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
 			if firstErr == nil {
@@ -262,7 +262,7 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 			}
 			continue
 		}
-		err = client.Resource(object.Mapping.Resource).Namespace(d.Namespace).Delete(ctx, object.Name, metav1.DeleteOptions{})
+		err = client.Resource(object.Mapping.Resource).Namespace(d.WorkloadNamespace).Delete(ctx, object.Name, metav1.DeleteOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
 			plog.G(ctx).Errorf("Failed to delete sync object: %v", err)
 			if firstErr == nil {
@@ -281,7 +281,7 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	}
 	for _, workload := range d.Workloads {
 		plog.G(ctx).Infof("Wait workload %s", workload)
-		err := util.RolloutStatus(ctx, d.factory, d.Namespace, workload)
+		err := util.RolloutStatus(ctx, d.factory, d.WorkloadNamespace, workload)
 		if err != nil {
 			plog.G(ctx).Warnf("Failed to rollback workload %s: %v", workload, err)
 		}

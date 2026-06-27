@@ -132,14 +132,13 @@ func getCIDR(ctx context.Context, factory cmdutil.Factory) error {
 	if err != nil {
 		return err
 	}
-	// run inside pod
-	err = c.getCIDR(ctx, false)
+	cidrs, _, err := c.getCIDR(ctx)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get CIDR: %v", err)
 		return err
 	}
 	s := sets.New[string]()
-	for _, cidr := range c.cidrs {
+	for _, cidr := range cidrs {
 		s.Insert(cidr.String())
 	}
 	plog.G(ctx).Infof("Get CIDR: %v", strings.Join(s.UnsortedList(), " "))
