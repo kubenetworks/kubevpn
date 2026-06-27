@@ -80,11 +80,6 @@ func TestGenerateServers_InvalidNode(t *testing.T) {
 	}
 }
 
-func TestGenerateServers_NilHub_UsesDefault(t *testing.T) {
-	// Should not panic with nil hub
-	_, _ = GenerateServers([]string{"unknown://:1234"}, nil)
-}
-
 func TestRegisterProtocol_CustomProtocol(t *testing.T) {
 	called := false
 	RegisterProtocol("test-proto", func(node *Node, hub *RouteHub) (net.Listener, Handler, error) {

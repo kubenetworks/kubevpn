@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func Test_newer(t *testing.T) {
+func TestIsNewer(t *testing.T) {
 	type args struct {
 		clientVersionStr string
 		clientImgStr     string
@@ -208,7 +208,7 @@ func TestGetTargetImage(t *testing.T) {
 	}
 }
 
-func TestIsVersionMajorOrMinorDiff(t *testing.T) {
+func TestCmpClientVersionAndPodImageTag(t *testing.T) {
 	type args struct {
 		clientVersionStr string
 		serverImgStr     string

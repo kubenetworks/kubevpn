@@ -16,7 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
-	"k8s.io/client-go/tools/clientcmd/api/latest"
 	clientcmdlatest "k8s.io/client-go/tools/clientcmd/api/latest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
@@ -29,7 +28,6 @@ import (
 
 // InitKubeClient initializes the core Kubernetes client objects from a factory.
 // Used by ConnectOptions, SyncOptions, and run.Options to avoid triplicating the same setup.
-// InitKubeClient initializes core K8s client objects from a factory.
 func InitKubeClient(f cmdutil.Factory) (cfg *rest.Config, restclient *rest.RESTClient, clientset *kubernetes.Clientset, namespace string, err error) {
 	if cfg, err = f.ToRESTConfig(); err != nil {
 		return
@@ -52,12 +50,10 @@ func GetKubeConfigPath(f cmdutil.Factory) string {
 		abs, err := filepath.Abs(file)
 		if err != nil {
 			return file
-		} else {
-			return abs
 		}
-	} else {
-		return rawConfig.ConfigAccess().GetDefaultFilename()
+		return abs
 	}
+	return rawConfig.ConfigAccess().GetDefaultFilename()
 }
 
 // ConvertK8sApiServerToDomain rewrites the API server address in the kubeconfig to use the "kubernetes" hostname and returns a temp file path.
@@ -106,10 +102,10 @@ func ConvertK8sApiServerToDomain(kubeConfigPath string) (newPath string, err err
 	}
 	host := fmt.Sprintf("%s://%s", u.Scheme, net.JoinHostPort("kubernetes", strconv.Itoa(int(remote.Port()))))
 	rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].Server = host
-	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: latest.Version, Kind: "Config"})
+	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})
 
 	var convertedObj runtime.Object
-	convertedObj, err = latest.Scheme.ConvertToVersion(&rawConfig, latest.ExternalVersion)
+	convertedObj, err = clientcmdlatest.Scheme.ConvertToVersion(&rawConfig, clientcmdlatest.ExternalVersion)
 	if err != nil {
 		return
 	}

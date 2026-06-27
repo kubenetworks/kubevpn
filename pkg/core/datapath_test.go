@@ -28,11 +28,6 @@ import (
 
 // --- Test infrastructure ---
 
-// pipeConn creates a pair of connected net.Conns (in-memory).
-func pipeConn() (net.Conn, net.Conn) {
-	return net.Pipe()
-}
-
 // buildIPv4Packet creates a minimal fake IPv4 packet with given src/dst.
 func buildIPv4Packet(src, dst net.IP, payload []byte) []byte {
 	// Minimal IPv4 header (20 bytes) + payload
@@ -93,7 +88,7 @@ func TestDataPath_ClientToService(t *testing.T) {
 	// Setup: client sends a packet to service IP 10.0.0.5.
 	// Server receives it, "processes" (simulated), and sends response back.
 
-	clientConn, serverConn := pipeConn()
+	clientConn, serverConn := net.Pipe()
 	defer clientConn.Close()
 	defer serverConn.Close()
 
@@ -412,7 +407,7 @@ func TestDataPath_ConcurrentMultiClient(t *testing.T) {
 
 	// Concurrent cross-client traffic: each client sends to every other
 	var wg sync.WaitGroup
-	errors := make(chan error, numClients*numClients)
+	errs := make(chan error, numClients*numClients)
 
 	for i := 0; i < numClients; i++ {
 		for j := 0; j < numClients; j++ {
@@ -426,16 +421,16 @@ func TestDataPath_ConcurrentMultiClient(t *testing.T) {
 				frame := frameDatagram(1, pkt)
 				_, err := hub.WriteToRoute(string(dst.To4()), frame)
 				if err != nil {
-					errors <- fmt.Errorf("%s→%s: %w", src, dst, err)
+					errs <- fmt.Errorf("%s→%s: %w", src, dst, err)
 				}
 			}(clientIPs[i], clientIPs[j])
 		}
 	}
 
 	wg.Wait()
-	close(errors)
+	close(errs)
 
-	for err := range errors {
+	for err := range errs {
 		t.Errorf("concurrent routing error: %v", err)
 	}
 }
@@ -1009,7 +1004,7 @@ func TestPipeline_WriteToTun_StripPrefix(t *testing.T) {
 // --- Test: writeToConn framing (in-place datagram header) ---
 
 func TestPipeline_WriteToConn_FrameFormat(t *testing.T) {
-	clientSide, serverSide := pipeConn()
+	clientSide, serverSide := net.Pipe()
 	defer clientSide.Close()
 	defer serverSide.Close()
 
@@ -1053,7 +1048,7 @@ func TestPipeline_WriteToConn_FrameFormat(t *testing.T) {
 // --- Test: readFromConn → prefix dispatch (prefix=0 → tunOutbound) ---
 
 func TestPipeline_ReadFromConn_PrefixZeroToTunOutbound(t *testing.T) {
-	clientSide, serverSide := pipeConn()
+	clientSide, serverSide := net.Pipe()
 	defer clientSide.Close()
 	defer serverSide.Close()
 
@@ -1102,7 +1097,7 @@ func TestPipeline_ReadFromConn_PrefixZeroToTunOutbound(t *testing.T) {
 // This test uses real UDPConnOverTCP wrapper for readFromConn side.
 
 func TestPipeline_FullRoundTrip(t *testing.T) {
-	clientRaw, serverRaw := pipeConn()
+	clientRaw, serverRaw := net.Pipe()
 	defer clientRaw.Close()
 	defer serverRaw.Close()
 

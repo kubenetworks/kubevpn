@@ -22,7 +22,7 @@ func RunWithElevated() {
 	// while send single CTRL+C, command will quit immediately, but output will cut off and print util quit final
 	// so, mute single CTRL+C, let inner command handle single only
 	go func() {
-		signals := make(chan os.Signal)
+		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGSTOP)
 		<-signals
 	}()
