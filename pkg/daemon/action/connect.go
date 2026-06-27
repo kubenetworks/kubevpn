@@ -36,6 +36,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	}
 
 	ctx := resp.Context()
+	reqBytes, _ := proto.Marshal(req)
 	connect := &handler.ConnectOptions{
 		ManagerNamespace:     req.ManagerNamespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
@@ -44,7 +45,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		Lock:                 &svr.Lock,
 		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
-		Request:              proto.Clone(req).(*rpc.ConnectRequest),
+		RequestRaw:           reqBytes,
 	}
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
 	if err != nil {

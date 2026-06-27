@@ -24,13 +24,11 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -46,8 +44,8 @@ type ConnectOptions struct {
 	Lock                 *sync.Mutex
 	Image                string
 	ImagePullSecretName  string
-	// for reload from ~/.kubevpn/daemon/db
-	Request *rpc.ConnectRequest `json:"Request,omitempty"`
+	// RequestRaw stores the protobuf-serialized ConnectRequest for daemon restart replay.
+	RequestRaw []byte `json:"RequestRaw,omitempty"`
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -62,6 +60,7 @@ type ConnectOptions struct {
 	rollbackFuncList []func() error
 	dnsConfig        *dns.Config
 
+	SshHosts       []net.IP `json:"-"`
 	apiServerIPs   []net.IP
 	extraHost      []dns.Entry
 	once           sync.Once
@@ -313,8 +312,8 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, filterAPIServer bool) erro
 		if err != nil {
 			return err
 		}
-		if c.Request != nil {
-			c.apiServerIPs = append(c.apiServerIPs, ssh.ParseSshFromRPC(c.Request.SshJump).Host()...)
+		if len(c.SshHosts) > 0 {
+			c.apiServerIPs = append(c.apiServerIPs, c.SshHosts...)
 		}
 	}
 
@@ -460,4 +459,19 @@ func (c *ConnectOptions) IsMe(ns, uid string, headers map[string]string) bool {
 // ProxyResources returns the list of workloads currently being proxied by this connection.
 func (c *ConnectOptions) ProxyResources() ProxyList {
 	return c.proxyWorkloads
+}
+
+// GetManagerNamespace returns the namespace where the traffic manager is deployed.
+func (c *ConnectOptions) GetManagerNamespace() string {
+	return c.ManagerNamespace
+}
+
+// GetOriginKubeconfigPath returns the original kubeconfig file path.
+func (c *ConnectOptions) GetOriginKubeconfigPath() string {
+	return c.OriginKubeconfigPath
+}
+
+// GetSync returns the SyncOptions associated with this connection, or nil.
+func (c *ConnectOptions) GetSync() *SyncOptions {
+	return c.Sync
 }

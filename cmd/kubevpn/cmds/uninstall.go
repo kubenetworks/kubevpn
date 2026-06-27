@@ -14,6 +14,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -72,7 +73,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 				err = disconnectResp.Send(&rpc.DisconnectRequest{
 					KubeconfigBytes: ptr.To(string(bytes)),
 					Namespace:       ptr.To(ns),
-					SshJump:         sshConf.ToRPC(),
+					SshJump:         handler.SshConfigToRPC(sshConf),
 				})
 				if err != nil {
 					plog.G(cmd.Context()).Warnf("Failed to disconnect from cluter: %v", err)
@@ -83,7 +84,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 			req := &rpc.UninstallRequest{
 				KubeconfigBytes: string(bytes),
 				Namespace:       ns,
-				SshJump:         sshConf.ToRPC(),
+				SshJump:         handler.SshConfigToRPC(sshConf),
 			}
 			resp, err := cli.Uninstall(context.Background())
 			if err != nil {

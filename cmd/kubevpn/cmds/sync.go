@@ -107,7 +107,7 @@ func CmdSync(f cmdutil.Factory) *cobra.Command {
 				Workloads:            args,
 				ExtraRoute:           extraRoute.ToRPC(),
 				OriginKubeconfigPath: util.GetKubeConfigPath(f),
-				SshJump:              sshConf.ToRPC(),
+				SshJump:              handler.SshConfigToRPC(sshConf),
 				TargetContainer:      options.TargetContainer,
 				TargetImage:          options.TargetImage,
 				TransferImage:        transferImage,

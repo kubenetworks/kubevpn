@@ -13,6 +13,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -67,7 +68,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 				KubeconfigBytes: string(bytes),
 				Namespace:       ns,
 				Workloads:       args,
-				SshJump:         sshConf.ToRPC(),
+				SshJump:         handler.SshConfigToRPC(sshConf),
 			}
 			resp, err := cli.Reset(context.Background())
 			if err != nil {

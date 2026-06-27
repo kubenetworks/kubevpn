@@ -14,6 +14,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -55,7 +56,7 @@ func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.Ssh
 		Image:                config.Image,
 		ImagePullSecretName:  imagePullSecretName,
 		Level:                int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
-		SshJump:              sshConfig.ToRPC(),
+		SshJump:              handler.SshConfigToRPC(sshConfig),
 		ManagerNamespace:     managerNamespace,
 	}
 	option.AddRollbackFunc(func() error {
@@ -66,7 +67,7 @@ func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.Ssh
 		err = resp.Send(&rpc.DisconnectRequest{
 			KubeconfigBytes: ptr.To(string(kubeConfigBytes)),
 			Namespace:       ptr.To(ns),
-			SshJump:         sshConfig.ToRPC(),
+			SshJump:         handler.SshConfigToRPC(sshConfig),
 		})
 		if err != nil {
 			return err

@@ -124,7 +124,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				PortMap:              portmap,
 				Workloads:            args,
 				ExtraRoute:           extraRoute.ToRPC(),
-				SshJump:              sshConf.ToRPC(),
+				SshJump:              handler.SshConfigToRPC(sshConf),
 				TransferImage:        transferImage,
 				Image:                config.Image,
 				ImagePullSecretName:  imagePullSecretName,

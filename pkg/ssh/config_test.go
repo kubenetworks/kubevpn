@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	"github.com/kevinburke/ssh_config"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
 func TestSshConfig_IsEmpty(t *testing.T) {
@@ -47,84 +45,6 @@ func TestSshConfig_IsLoopback(t *testing.T) {
 				t.Fatalf("IsLoopback: want %v, got %v", c.want, got)
 			}
 		})
-	}
-}
-
-func TestParseSshFromRPC_Nil(t *testing.T) {
-	conf := ParseSshFromRPC(nil)
-	if !conf.IsEmpty() {
-		t.Fatal("nil RPC should produce empty config")
-	}
-}
-
-func TestParseSshFromRPC_Full(t *testing.T) {
-	jump := &rpc.SshJump{
-		Addr:             "10.0.0.1:22",
-		User:             "admin",
-		Password:         "secret",
-		Keyfile:          "/home/user/.ssh/id_rsa",
-		Jump:             "--ssh-addr bastion:22",
-		ConfigAlias:      "prod",
-		RemoteKubeconfig: "/root/.kube/config",
-		GSSAPIPassword:   "krb5pass",
-		GSSAPIKeytabConf: "/etc/krb5.keytab",
-		GSSAPICacheFile:  "/tmp/krb5cc_1000",
-	}
-	conf := ParseSshFromRPC(jump)
-	if conf.Addr != "10.0.0.1:22" {
-		t.Fatalf("Addr: want 10.0.0.1:22, got %s", conf.Addr)
-	}
-	if conf.User != "admin" {
-		t.Fatalf("User: want admin, got %s", conf.User)
-	}
-	if conf.Password != "secret" {
-		t.Fatalf("Password mismatch")
-	}
-	if conf.Keyfile != "/home/user/.ssh/id_rsa" {
-		t.Fatalf("Keyfile mismatch")
-	}
-	if conf.Jump != "--ssh-addr bastion:22" {
-		t.Fatalf("Jump mismatch")
-	}
-	if conf.ConfigAlias != "prod" {
-		t.Fatalf("ConfigAlias mismatch")
-	}
-	if conf.RemoteKubeconfig != "/root/.kube/config" {
-		t.Fatalf("RemoteKubeconfig mismatch")
-	}
-}
-
-func TestSshConfig_ToRPC_RoundTrip(t *testing.T) {
-	original := SshConfig{
-		Addr:             "host:22",
-		User:             "user",
-		Password:         "pass",
-		Keyfile:          "/key",
-		Jump:             "jump",
-		ConfigAlias:      "alias",
-		RemoteKubeconfig: "/kubeconfig",
-		GSSAPIPassword:   "gsspass",
-		GSSAPIKeytabConf: "/keytab",
-		GSSAPICacheFile:  "/cache",
-	}
-
-	rpcMsg := original.ToRPC()
-	restored := ParseSshFromRPC(rpcMsg)
-
-	if restored.Addr != original.Addr {
-		t.Fatalf("Addr roundtrip failed: %s vs %s", restored.Addr, original.Addr)
-	}
-	if restored.User != original.User {
-		t.Fatalf("User roundtrip failed")
-	}
-	if restored.Password != original.Password {
-		t.Fatalf("Password roundtrip failed")
-	}
-	if restored.ConfigAlias != original.ConfigAlias {
-		t.Fatalf("ConfigAlias roundtrip failed")
-	}
-	if restored.RemoteKubeconfig != original.RemoteKubeconfig {
-		t.Fatalf("RemoteKubeconfig roundtrip failed")
 	}
 }
 

@@ -100,7 +100,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				ExtraRoute:           extraRoute.ToRPC(),
 				OriginKubeconfigPath: util.GetKubeConfigPath(f),
 
-				SshJump:             sshConf.ToRPC(),
+				SshJump:             handler.SshConfigToRPC(sshConf),
 				TransferImage:       transferImage,
 				Image:               config.Image,
 				ImagePullSecretName: imagePullSecretName,
@@ -201,7 +201,7 @@ func disconnect(cli rpc.DaemonClient, bytes []byte, ns string, sshConf *pkgssh.S
 	err = resp.Send(&rpc.DisconnectRequest{
 		KubeconfigBytes: ptr.To(string(bytes)),
 		Namespace:       ptr.To(ns),
-		SshJump:         sshConf.ToRPC(),
+		SshJump:         handler.SshConfigToRPC(sshConf),
 	})
 	if err != nil {
 		plog.G(context.Background()).Errorf("Disconnect error: %v", err)

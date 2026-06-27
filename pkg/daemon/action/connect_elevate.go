@@ -16,7 +16,6 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -26,12 +25,13 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		return fmt.Errorf("sudo daemon not start: %w", err)
 	}
 	session := NewSessionLifecycle(logger)
+	reqBytes, _ := proto.Marshal(req)
 	connect := &handler.ConnectOptions{
 		ManagerNamespace:     req.Namespace,
 		OriginNamespace:      req.Namespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
-		Request:              proto.Clone(req).(*rpc.ConnectRequest),
+		RequestRaw:           reqBytes,
 		OwnerID:              uuid.New().String()[:12],
 	}
 	var file string
@@ -45,8 +45,11 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	if err != nil {
 		return err
 	}
-	if sshConf := ssh.ParseSshFromRPC(req.SshJump); !sshConf.IsEmpty() && sshConf.RemoteKubeconfig != "" {
-		connect.OriginKubeconfigPath = file
+	if sshConf := parseSshFromRPC(req.SshJump); !sshConf.IsEmpty() {
+		connect.SshHosts = sshConf.Host()
+		if sshConf.RemoteKubeconfig != "" {
+			connect.OriginKubeconfigPath = file
+		}
 	}
 
 	defer func() {

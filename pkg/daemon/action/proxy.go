@@ -11,6 +11,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
@@ -43,12 +44,14 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		return err
 	}
 	defer os.Remove(file)
+	connectReq := convert(req)
+	reqBytes, _ := proto.Marshal(connectReq)
 	connect := &handler.ConnectOptions{
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
-		Request:              convert(req),
+		RequestRaw:           reqBytes,
 	}
 	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
 	if err != nil {

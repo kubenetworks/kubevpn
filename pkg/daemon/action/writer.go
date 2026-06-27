@@ -42,7 +42,7 @@ func (svr *Server) initStreamLogger(resp grpc.ServerStream, level int32, sendMsg
 // If an SSH jump host is configured, it tunnels through SSH first.
 // The caller must defer os.Remove on the returned path.
 func resolveKubeconfig(ctx context.Context, jump *rpc.SshJump, kubeconfigBytes string, portForward bool) (string, error) {
-	sshConf := ssh.ParseSshFromRPC(jump)
+	sshConf := parseSshFromRPC(jump)
 	if !sshConf.IsEmpty() {
 		return ssh.SshJump(ctx, sshConf, []byte(kubeconfigBytes), portForward)
 	}
