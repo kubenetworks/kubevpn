@@ -44,36 +44,34 @@ After:
 
 ```go
 // pkg/handler/connect.go
-
 type ConnectOptions struct {
     // ... existing fields ...
-    cmInformer cache.SharedInformer  // shared ConfigMap informer
+    configMapStore *ConfigMapStore  // shared ConfigMap informer + health checks
 }
 
 func (c *ConnectOptions) GetConfigMapInformer() cache.SharedInformer {
-    if c.cmInformer == nil {
-        c.cmInformer = informerv1.NewFilteredConfigMapInformer(
-            c.clientset, c.ManagerNamespace, 0, cache.Indexers{},
-            func(options *metav1.ListOptions) {
-                options.FieldSelector = fields.OneTermEqualSelector(
-                    "metadata.name", config.ConfigMapPodTrafficManager,
-                ).String()
-            },
-        )
-        go c.cmInformer.Run(c.ctx.Done())
-    }
-    return c.cmInformer
+    return c.getConfigMapStore().GetInformer()
+}
+
+// pkg/handler/configmap_store.go
+type ConfigMapStore struct {
+    clientset        kubernetes.Interface
+    managerNamespace string
+    informerOnce     sync.Once       // thread-safe single initialization
+    informer         cache.SharedInformer
+    informerStop     chan struct{}    // independent lifecycle control
+    healthStatus     HealthStatus
 }
 ```
 
-The informer is created lazily on first access. Its lifecycle is tied to `c.ctx` — when the connection is cleaned up, the watch is closed automatically.
+The informer is created lazily on first access via `sync.Once` (thread-safe). Its lifecycle is managed by `ConfigMapStore.Stop()` which closes the `informerStop` channel, called from `ConnectOptions.Cleanup()`.
 
 ### Consumers
 
 #### 1. HealthPeriod (health status cache)
 
 ```go
-// pkg/handler/healthchecker.go
+// pkg/handler/configmap_store.go
 
 func (c *ConnectOptions) HealthPeriod(ctx context.Context, _ time.Duration) {
     ticker := time.NewTicker(time.Second * 30)
@@ -95,13 +93,13 @@ func (c *ConnectOptions) syncFromCache() {
 #### 2. Mapper (Fargate SSH tunnel manager)
 
 ```go
-// pkg/handler/proxy.go
+// pkg/handler/proxy_mapper.go
 
 func NewMapper(..., cmInformer cache.SharedInformer) *Mapper {
     return &Mapper{cmInformer: cmInformer, ...}
 }
 
-func (m *Mapper) Run(_ string) {
+func (m *Mapper) Run() {
     // Register event handler on shared informer
     m.cmInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
         UpdateFunc: func(_, _ interface{}) { triggerReconcile() },

@@ -49,16 +49,13 @@ type InjectOptions struct {
 
 // NewInjector returns the appropriate Injector for the given workload and options.
 // - Service targets use Fargate mode (SSH + Envoy).
-// - Headers or port maps trigger Mesh mode (VPN + Envoy).
-// - Otherwise, VPN-only mode is used.
+// - All other targets use Mesh mode (VPN + Envoy). When headers are empty,
+//   envoy matches all requests (full traffic interception, equivalent to legacy VPN-only).
 func NewInjector(opts InjectOptions) Injector {
 	if util.IsK8sService(opts.Object) {
 		return &fargateInjector{opts: opts}
 	}
-	if len(opts.Headers) > 0 || len(opts.PortMaps) > 0 {
-		return &meshInjector{opts: opts}
-	}
-	return &vpnInjector{opts: opts}
+	return &meshInjector{opts: opts}
 }
 
 type JSONPatchOp struct {

@@ -13,10 +13,41 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
+	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
+
+// tunIPPool is the YAML structure stored in the TUN_IP_POOL ConfigMap key.
+type tunIPPool struct {
+	IPv4 poolEntry `yaml:"ipv4" json:"ipv4"`
+	IPv6 poolEntry `yaml:"ipv6" json:"ipv6"`
+}
+
+type poolEntry struct {
+	CIDR   string `yaml:"cidr" json:"cidr"`
+	Bitmap string `yaml:"bitmap" json:"bitmap"`
+}
+
+func parseTunIPPool(data string) (*tunIPPool, error) {
+	if data == "" {
+		return &tunIPPool{}, nil
+	}
+	var pool tunIPPool
+	if err := yaml.Unmarshal([]byte(data), &pool); err != nil {
+		return nil, err
+	}
+	return &pool, nil
+}
+
+func marshalTunIPPool(pool *tunIPPool) (string, error) {
+	data, err := yaml.Marshal(pool)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
 
 // Manager manages DHCP IP allocation and release via a Kubernetes ConfigMap.
 type Manager struct {
@@ -53,10 +84,9 @@ func (m *Manager) InitDHCP(ctx context.Context) error {
 			Labels:    map[string]string{},
 		},
 		Data: map[string]string{
-			config.KeyEnvoy:            "",
-			config.KeyDHCP:             "",
-			config.KeyDHCP6:            "",
-			config.KeyClusterIPv4POOLS: "",
+			config.KeyEnvoy:       "",
+			config.KeyTunIPPool:   "",
+			config.KeyClusterCIDRs: "",
 		},
 	}
 	_, err = m.clientset.CoreV1().ConfigMaps(m.namespace).Create(ctx, cm, metav1.CreateOptions{})
@@ -181,35 +211,38 @@ func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipalloca
 	if cm.Data == nil {
 		return fmt.Errorf("configmap is empty")
 	}
-	var dhcp *ipallocator.Range
-	dhcp, err = ipallocator.NewAllocatorCIDRRange(m.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
+
+	pool, err := parseTunIPPool(cm.Data[config.KeyTunIPPool])
+	if err != nil {
+		return fmt.Errorf("failed to parse TUN_IP_POOL: %w", err)
+	}
+
+	dhcp, err := ipallocator.NewAllocatorCIDRRange(m.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
 		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
 	})
 	if err != nil {
 		return err
 	}
-
-	if str := cm.Data[config.KeyDHCP]; str != "" {
-		var b []byte
-		if b, err = base64.StdEncoding.DecodeString(str); err != nil {
-			return err
+	if pool.IPv4.Bitmap != "" {
+		b, decErr := base64.StdEncoding.DecodeString(pool.IPv4.Bitmap)
+		if decErr != nil {
+			return decErr
 		}
 		if err = dhcp.Restore(m.cidr, b); err != nil {
 			return err
 		}
 	}
 
-	var dhcp6 *ipallocator.Range
-	dhcp6, err = ipallocator.NewAllocatorCIDRRange(m.cidr6, func(max int, rangeSpec string) (allocator.Interface, error) {
+	dhcp6, err := ipallocator.NewAllocatorCIDRRange(m.cidr6, func(max int, rangeSpec string) (allocator.Interface, error) {
 		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
 	})
 	if err != nil {
 		return err
 	}
-	if str := cm.Data[config.KeyDHCP6]; str != "" {
-		var b []byte
-		if b, err = base64.StdEncoding.DecodeString(str); err != nil {
-			return err
+	if pool.IPv6.Bitmap != "" {
+		b, decErr := base64.StdEncoding.DecodeString(pool.IPv6.Bitmap)
+		if decErr != nil {
+			return decErr
 		}
 		if err = dhcp6.Restore(m.cidr6, b); err != nil {
 			return err
@@ -224,14 +257,20 @@ func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipalloca
 	if _, bytes, err = dhcp.Snapshot(); err != nil {
 		return err
 	}
-	cm.Data[config.KeyDHCP] = base64.StdEncoding.EncodeToString(bytes)
+	pool.IPv4 = poolEntry{CIDR: m.cidr.String(), Bitmap: base64.StdEncoding.EncodeToString(bytes)}
 	if _, bytes, err = dhcp6.Snapshot(); err != nil {
 		return err
 	}
-	cm.Data[config.KeyDHCP6] = base64.StdEncoding.EncodeToString(bytes)
+	pool.IPv6 = poolEntry{CIDR: m.cidr6.String(), Bitmap: base64.StdEncoding.EncodeToString(bytes)}
+
+	poolStr, err := marshalTunIPPool(pool)
+	if err != nil {
+		return err
+	}
+	cm.Data[config.KeyTunIPPool] = poolStr
 	_, err = m.clientset.CoreV1().ConfigMaps(m.namespace).Update(ctx, cm, metav1.UpdateOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to update DHCP: %w", err)
+		return fmt.Errorf("failed to update TUN_IP_POOL: %w", err)
 	}
 	return nil
 }
@@ -245,35 +284,34 @@ func (m *Manager) ForEach(ctx context.Context, fnv4 func(net.IP), fnv6 func(net.
 	if cm.Data == nil {
 		cm.Data = make(map[string]string)
 	}
-	var dhcp *ipallocator.Range
-	dhcp, err = ipallocator.NewAllocatorCIDRRange(m.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
+
+	pool, err := parseTunIPPool(cm.Data[config.KeyTunIPPool])
+	if err != nil {
+		return fmt.Errorf("failed to parse TUN_IP_POOL: %w", err)
+	}
+
+	dhcp, err := ipallocator.NewAllocatorCIDRRange(m.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
 		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
 	})
 	if err != nil {
 		return err
 	}
-	var str []byte
-	str, err = base64.StdEncoding.DecodeString(cm.Data[config.KeyDHCP])
-	if err == nil {
-		err = dhcp.Restore(m.cidr, str)
-		if err != nil {
-			return err
+	if b, decErr := base64.StdEncoding.DecodeString(pool.IPv4.Bitmap); decErr == nil {
+		if restoreErr := dhcp.Restore(m.cidr, b); restoreErr != nil {
+			return restoreErr
 		}
 	}
 	dhcp.ForEach(fnv4)
 
-	var dhcp6 *ipallocator.Range
-	dhcp6, err = ipallocator.NewAllocatorCIDRRange(m.cidr6, func(max int, rangeSpec string) (allocator.Interface, error) {
+	dhcp6, err := ipallocator.NewAllocatorCIDRRange(m.cidr6, func(max int, rangeSpec string) (allocator.Interface, error) {
 		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
 	})
 	if err != nil {
 		return err
 	}
-	str, err = base64.StdEncoding.DecodeString(cm.Data[config.KeyDHCP6])
-	if err == nil {
-		err = dhcp6.Restore(m.cidr6, str)
-		if err != nil {
-			return err
+	if b, decErr := base64.StdEncoding.DecodeString(pool.IPv6.Bitmap); decErr == nil {
+		if restoreErr := dhcp6.Restore(m.cidr6, b); restoreErr != nil {
+			return restoreErr
 		}
 	}
 	dhcp6.ForEach(fnv6)

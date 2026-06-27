@@ -35,7 +35,7 @@ A `Virtual` represents the envoy xDS configuration for a single proxied workload
 
 ```go
 type Virtual struct {
-    SchemaVersion int             // config schema revision (current: 2, zero = legacy)
+    SchemaVersion int             // config schema revision (current: CurrentSchemaVersion = 2, zero = legacy; v2 requires OwnerID on all rules)
     Namespace     string          // workload namespace
     UID           string          // group.resource.name identifier
     FargateMode   bool            // explicit fargate mode flag

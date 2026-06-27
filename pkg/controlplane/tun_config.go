@@ -122,13 +122,26 @@ func (s *TunConfigServer) loadAllocs(ctx context.Context) {
 		plog.G(ctx).Infof("[TunConfig] Restored %d IP allocations, released %d expired from ConfigMap", loaded, released)
 	}
 	if released > 0 {
-		go s.saveAllocs(context.Background())
+		if err := s.saveAllocs(ctx); err != nil {
+			plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs after cleanup: %v", err)
+		}
+	}
+}
+
+// notifyWatchers pushes a TunIPResponse to all WatchTunIP subscribers for the given ownerID.
+// Must be called with s.mu held.
+func (s *TunConfigServer) notifyWatchers(ownerID string, resp *rpc.TunIPResponse) {
+	for _, ch := range s.watchers[ownerID] {
+		select {
+		case ch <- resp:
+		default:
+		}
 	}
 }
 
 // saveAllocs persists the current allocs map to ConfigMap.
-func (s *TunConfigServer) saveAllocs(ctx context.Context) {
-	s.mu.RLock()
+// Caller must hold s.mu (read or write lock) or ensure no concurrent modification.
+func (s *TunConfigServer) saveAllocs(ctx context.Context) error {
 	persisted := make(map[string]*persistedAlloc, len(s.allocs))
 	for ownerID, alloc := range s.allocs {
 		pa := &persistedAlloc{
@@ -143,14 +156,13 @@ func (s *TunConfigServer) saveAllocs(ctx context.Context) {
 		}
 		persisted[ownerID] = pa
 	}
-	s.mu.RUnlock()
 
 	data, err := yaml.Marshal(persisted)
 	if err != nil {
-		return
+		return err
 	}
 
-	_ = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 		if err != nil {
 			return err
@@ -186,17 +198,14 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 			return resp, nil
 		}
 		// Existing IP conflicts with client's local interfaces — re-allocate.
-		// Old IP stays in DHCP bitmap so RentIPExcluding naturally skips it.
+		// Hold mutex across RentIP (fast ConfigMap operation).
 		delete(s.allocs, req.OwnerID)
 		plog.G(ctx).Infof("[TunConfig] IP %v conflicts with client ExcludeIPs, re-allocating for owner %s", alloc.IPv4, req.OwnerID)
 
-		s.mu.Unlock()
 		v4, v6, err := s.dhcp.RentIPExcluding(ctx, excludeIPs)
 		if err != nil {
-			s.mu.Lock()
 			return nil, err
 		}
-		// Release old IP now that we have a new one
 		var oldV4, oldV6 net.IP
 		if alloc.IPv4 != nil {
 			oldV4 = alloc.IPv4.IP
@@ -204,8 +213,9 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 		if alloc.IPv6 != nil {
 			oldV6 = alloc.IPv6.IP
 		}
-		_ = s.dhcp.ReleaseIP(ctx, oldV4, oldV6)
-		s.mu.Lock()
+		if err := s.dhcp.ReleaseIP(ctx, oldV4, oldV6); err != nil {
+			plog.G(ctx).Warnf("[TunConfig] Failed to release old IP %v: %v", oldV4, err)
+		}
 
 		newAlloc := &tunAllocation{
 			IPv4:      v4,
@@ -215,19 +225,18 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 		}
 		s.allocs[req.OwnerID] = newAlloc
 		plog.G(ctx).Infof("[TunConfig] Re-allocated %s/%s for owner %s", v4, v6, req.OwnerID)
-		go s.saveAllocs(context.Background())
+		if err := s.saveAllocs(ctx); err != nil {
+			plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs: %v", err)
+		}
 
-		return &rpc.TunIPResponse{
-			IPv4:    v4.String(),
-			IPv6:    v6.String(),
-			Version: newAlloc.Version,
-		}, nil
+		resp := &rpc.TunIPResponse{IPv4: v4.String(), IPv6: v6.String(), Version: newAlloc.Version}
+		s.notifyWatchers(req.OwnerID, resp)
+		go s.syncEnvoyRuleIP(context.Background(), req.OwnerID, v4, v6)
+		return resp, nil
 	}
 
-	// New allocation
-	s.mu.Unlock()
+	// New allocation — hold mutex across RentIP (fast ConfigMap operation, no need to release)
 	v4, v6, err := s.dhcp.RentIPExcluding(ctx, excludeIPs)
-	s.mu.Lock()
 	if err != nil {
 		return nil, err
 	}
@@ -241,13 +250,14 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 	s.allocs[req.OwnerID] = alloc
 
 	plog.G(ctx).Infof("[TunConfig] Allocated %s/%s for owner %s", v4, v6, req.OwnerID)
-	go s.saveAllocs(context.Background())
+	if err := s.saveAllocs(ctx); err != nil {
+		plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs: %v", err)
+	}
 
-	return &rpc.TunIPResponse{
-		IPv4:    v4.String(),
-		IPv6:    v6.String(),
-		Version: alloc.Version,
-	}, nil
+	resp := &rpc.TunIPResponse{IPv4: v4.String(), IPv6: v6.String(), Version: alloc.Version}
+	s.notifyWatchers(req.OwnerID, resp)
+	go s.syncEnvoyRuleIP(context.Background(), req.OwnerID, v4, v6)
+	return resp, nil
 }
 
 func parseExcludeIPs(raw []string) []net.IP {
@@ -301,6 +311,19 @@ func (s *TunConfigServer) WatchTunIP(req *rpc.TunIPRequest, stream rpc.TunConfig
 		case <-ticker.C:
 			s.mu.Lock()
 			s.renewLease(req.OwnerID)
+			if alloc, ok := s.allocs[req.OwnerID]; ok {
+				resp := &rpc.TunIPResponse{Version: alloc.Version}
+				if alloc.IPv4 != nil {
+					resp.IPv4 = alloc.IPv4.String()
+				}
+				if alloc.IPv6 != nil {
+					resp.IPv6 = alloc.IPv6.String()
+				}
+				select {
+				case ch <- resp:
+				default:
+				}
+			}
 			s.mu.Unlock()
 		case <-stream.Context().Done():
 			return nil
@@ -330,12 +353,7 @@ func (s *TunConfigServer) NotifyIPChange(ownerID string, newIPv4, newIPv6 *net.I
 		resp.IPv6 = newIPv6.String()
 	}
 
-	for _, ch := range s.watchers[ownerID] {
-		select {
-		case ch <- resp:
-		default:
-		}
-	}
+	s.notifyWatchers(ownerID, resp)
 	s.mu.Unlock()
 }
 
@@ -370,7 +388,12 @@ func (s *TunConfigServer) ReconcileDHCP(ctx context.Context) {
 		}
 	}
 	if changed {
-		s.saveAllocs(ctx)
+		s.mu.RLock()
+		err := s.saveAllocs(ctx)
+		s.mu.RUnlock()
+		if err != nil {
+			plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs after reconciliation: %v", err)
+		}
 	}
 }
 
@@ -393,6 +416,56 @@ func (s *TunConfigServer) removeWatcher(ownerID string, ch chan *rpc.TunIPRespon
 		delete(s.watchers, ownerID)
 	}
 	close(ch)
+}
+
+// syncEnvoyRuleIP updates Rule.LocalTunIPv4/v6 in ENVOY_CONFIG for all Rules matching ownerID.
+// This triggers: Watcher → Processor → xDS push → envoy hot-update.
+func (s *TunConfigServer) syncEnvoyRuleIP(ctx context.Context, ownerID string, newIPv4, newIPv6 *net.IPNet) {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		virtuals, parseErr := parseYaml(cm.Data[config.KeyEnvoy])
+		if parseErr != nil {
+			return parseErr
+		}
+
+		changed := false
+		newV4Str := ""
+		if newIPv4 != nil {
+			newV4Str = newIPv4.IP.String()
+		}
+		newV6Str := ""
+		if newIPv6 != nil {
+			newV6Str = newIPv6.IP.String()
+		}
+		for _, v := range virtuals {
+			for _, rule := range v.Rules {
+				if rule.OwnerID == ownerID && rule.LocalTunIPv4 != newV4Str {
+					rule.LocalTunIPv4 = newV4Str
+					rule.LocalTunIPv6 = newV6Str
+					changed = true
+				}
+			}
+		}
+		if !changed {
+			return nil
+		}
+
+		data, marshalErr := yaml.Marshal(virtuals)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		cm.Data[config.KeyEnvoy] = string(data)
+		_, err = s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
+		return err
+	})
+	if err != nil {
+		plog.G(ctx).Errorf("[TunConfig] syncEnvoyRuleIP failed for owner %s: %v", ownerID, err)
+	} else {
+		plog.G(ctx).Infof("[TunConfig] Synced envoy rule IP for owner %s to %v", ownerID, newIPv4)
+	}
 }
 
 // ControlPlanePort is the gRPC port used by the envoy control plane and TunConfigService.
@@ -434,7 +507,7 @@ func (s *TunConfigServer) reapExpiredLeases(ctx context.Context) {
 	for _, ownerID := range expired {
 		s.mu.Lock()
 		alloc, ok := s.allocs[ownerID]
-		if !ok {
+		if !ok || time.Since(alloc.LastRenew) <= LeaseDuration {
 			s.mu.Unlock()
 			continue
 		}
@@ -453,6 +526,11 @@ func (s *TunConfigServer) reapExpiredLeases(ctx context.Context) {
 	}
 
 	if len(expired) > 0 {
-		s.saveAllocs(ctx)
+		s.mu.RLock()
+		err := s.saveAllocs(ctx)
+		s.mu.RUnlock()
+		if err != nil {
+			plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs after lease reap: %v", err)
+		}
 	}
 }

@@ -65,8 +65,8 @@ func TestNewInjector_NoHeadersNoPortMaps(t *testing.T) {
 		},
 	}
 	injector := NewInjector(opts)
-	if _, ok := injector.(*vpnInjector); !ok {
-		t.Fatalf("expected *vpnInjector, got %T", injector)
+	if _, ok := injector.(*meshInjector); !ok {
+		t.Fatalf("expected *meshInjector (VPN-only = mesh with empty headers), got %T", injector)
 	}
 }
 

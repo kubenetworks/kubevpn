@@ -34,9 +34,8 @@ func newTestEnv(t *testing.T) *testEnv {
 		&v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
 			Data: map[string]string{
-				config.KeyDHCP:  "",
-				config.KeyDHCP6: "",
-				config.KeyEnvoy: "",
+				config.KeyTunIPPool: "",
+				config.KeyEnvoy:     "",
 			},
 		},
 	)
@@ -620,8 +619,8 @@ func TestIntegration_ReconcileDHCPReallocatesLostIP(t *testing.T) {
 
 	// 模拟外部修改：清空 DHCP bitmap（所有 IP 都丢失）
 	cm, _ := env.server.clientset.CoreV1().ConfigMaps("test-ns").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	cm.Data[config.KeyDHCP] = ""
-	cm.Data[config.KeyDHCP6] = ""
+	cm.Data[config.KeyTunIPPool] = ""
+	
 	env.server.clientset.CoreV1().ConfigMaps("test-ns").Update(ctx, cm, metav1.UpdateOptions{})
 
 	// ReconcileDHCP 检测到 IP 丢失
@@ -706,4 +705,407 @@ func TestIntegration_ReclaimResetsPool(t *testing.T) {
 			t.Fatalf("after full reclaim, IP #%d: expected %s, got %s", i, firstIPs[i], newIP)
 		}
 	}
+}
+
+// ========================================================================================
+// Sleep-wake scenario: IP changes after lease expiry, all downstream components updated
+// ========================================================================================
+
+// TestIntegration_SleepWake_GetTunIPNotifiesWatchers verifies that when a lease expires
+// and the owner calls GetTunIP again (as healthCheckTCPConn does), the new IP is pushed
+// to WatchTunIP subscribers (fixing the push chain break).
+func TestIntegration_SleepWake_GetTunIPNotifiesWatchers(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	// Phase 1: initial allocation
+	resp1, err := env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "sleepy-user", Namespace: "test-ns"})
+	if err != nil {
+		t.Fatalf("initial GetTunIP: %v", err)
+	}
+	origIP := parseV4(t, resp1)
+
+	// Phase 2: start WatchTunIP stream (simulates IPWatcher on Root Daemon)
+	watchCtx, watchCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer watchCancel()
+	stream, err := env.client.WatchTunIP(watchCtx, &rpc.TunIPRequest{
+		OwnerID: "sleepy-user", Namespace: "test-ns",
+	})
+	if err != nil {
+		t.Fatalf("WatchTunIP: %v", err)
+	}
+
+	// Wait for watcher registration
+	for i := 0; i < 50; i++ {
+		env.server.mu.RLock()
+		n := len(env.server.watchers["sleepy-user"])
+		env.server.mu.RUnlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Phase 3: simulate sleep → lease expiry
+	env.server.mu.Lock()
+	env.server.allocs["sleepy-user"].LastRenew = time.Now().Add(-LeaseDuration - time.Minute)
+	env.server.mu.Unlock()
+	env.server.reapExpiredLeases(ctx)
+
+	// Occupy the old IP so re-allocation gets a different one
+	_, _ = env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "occupier", Namespace: "test-ns"})
+
+	// Phase 4: simulate wake → healthCheck calls GetTunIP
+	// This should allocate a NEW IP and push it to the WatchTunIP stream
+	resp2, err := env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "sleepy-user", Namespace: "test-ns"})
+	if err != nil {
+		t.Fatalf("reconnect GetTunIP: %v", err)
+	}
+	newIP := parseV4(t, resp2)
+	if origIP.Equal(newIP) {
+		t.Fatalf("expected different IP after expiry+reoccupy, got same %s", origIP)
+	}
+
+	// Phase 5: WatchTunIP stream should have received the new IP
+	pushed, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("WatchTunIP Recv: %v (push chain broken!)", err)
+	}
+	pushedIP := parseV4(t, pushed)
+	if !pushedIP.Equal(newIP) {
+		t.Fatalf("WatchTunIP pushed %s, but GetTunIP returned %s", pushedIP, newIP)
+	}
+}
+
+// TestIntegration_SleepWake_SyncEnvoyRuleIP verifies that when a TUN IP changes,
+// the ENVOY_CONFIG in the ConfigMap is automatically updated with the new IP.
+func TestIntegration_SleepWake_SyncEnvoyRuleIP(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	ownerID := "envoy-sync-user"
+
+	// Phase 1: allocate IP
+	resp1, _ := env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: ownerID, Namespace: "test-ns"})
+	origIP := parseV4(t, resp1)
+
+	// Phase 2: write an envoy rule with the original IP (simulates proxy inject)
+	cm, _ := env.server.clientset.CoreV1().ConfigMaps("test-ns").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	envoyConfig := fmt.Sprintf(`- schemaVersion: 2
+  Uid: deployments.apps.web
+  namespace: test-ns
+  ports:
+  - containerPort: 8080
+    protocol: TCP
+  rules:
+  - headers:
+      version: v1
+    localtunipv4: "%s"
+    ownerID: "%s"
+    portmap:
+      8080: "9080"
+`, origIP.String(), ownerID)
+	cm.Data[config.KeyEnvoy] = envoyConfig
+	_, err := env.server.clientset.CoreV1().ConfigMaps("test-ns").Update(ctx, cm, metav1.UpdateOptions{})
+	if err != nil {
+		t.Fatalf("write ENVOY_CONFIG: %v", err)
+	}
+
+	// Phase 3: expire lease + reap
+	env.server.mu.Lock()
+	env.server.allocs[ownerID].LastRenew = time.Now().Add(-LeaseDuration - time.Minute)
+	env.server.mu.Unlock()
+	env.server.reapExpiredLeases(ctx)
+
+	// Occupy old IP
+	_, _ = env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "occupier2", Namespace: "test-ns"})
+
+	// Phase 4: re-allocate (simulates healthCheck → GetTunIP)
+	resp2, _ := env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: ownerID, Namespace: "test-ns"})
+	newIP := parseV4(t, resp2)
+	if origIP.Equal(newIP) {
+		t.Fatalf("expected different IP, got same %s", origIP)
+	}
+
+	// Phase 5: wait for async syncEnvoyRuleIP to complete
+	time.Sleep(500 * time.Millisecond)
+
+	// Phase 6: verify ENVOY_CONFIG was updated
+	cm, _ = env.server.clientset.CoreV1().ConfigMaps("test-ns").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	virtuals, err := parseYaml(cm.Data[config.KeyEnvoy])
+	if err != nil {
+		t.Fatalf("parse ENVOY_CONFIG: %v", err)
+	}
+
+	found := false
+	for _, v := range virtuals {
+		for _, rule := range v.Rules {
+			if rule.OwnerID == ownerID {
+				found = true
+				ruleIP := net.ParseIP(rule.LocalTunIPv4)
+				if !ruleIP.Equal(newIP) {
+					t.Fatalf("ENVOY_CONFIG Rule.LocalTunIPv4 = %s, expected %s (not updated!)", rule.LocalTunIPv4, newIP)
+				}
+				t.Logf("✓ ENVOY_CONFIG updated: %s → %s", origIP, newIP)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("Rule with ownerID not found in ENVOY_CONFIG")
+	}
+}
+
+// TestIntegration_SleepWake_WatchTickerPushesCurrentIP verifies the ticker fallback:
+// even if the event push was missed, the periodic ticker pushes the current IP.
+func TestIntegration_SleepWake_WatchTickerPushesCurrentIP(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	ownerID := "ticker-user"
+
+	// Phase 1: allocate IP
+	resp1, _ := env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: ownerID, Namespace: "test-ns"})
+	origVersion := resp1.Version
+
+	// Phase 2: connect WatchTunIP
+	watchCtx, watchCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer watchCancel()
+	stream, err := env.client.WatchTunIP(watchCtx, &rpc.TunIPRequest{
+		OwnerID: ownerID, Namespace: "test-ns",
+	})
+	if err != nil {
+		t.Fatalf("WatchTunIP: %v", err)
+	}
+
+	// Wait for watcher
+	for i := 0; i < 50; i++ {
+		env.server.mu.RLock()
+		n := len(env.server.watchers[ownerID])
+		env.server.mu.RUnlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Phase 3: manually change the alloc version to simulate IP change
+	// (without going through GetTunIP, so notifyWatchers is NOT called)
+	env.server.mu.Lock()
+	alloc := env.server.allocs[ownerID]
+	alloc.Version = time.Now().UnixNano()
+	newVersion := alloc.Version
+	env.server.mu.Unlock()
+
+	if newVersion == origVersion {
+		t.Fatal("version should differ")
+	}
+
+	// Phase 4: manually trigger ticker (simulates the LeaseDuration/3 ticker firing)
+	env.server.mu.Lock()
+	env.server.renewLease(ownerID)
+	if a, ok := env.server.allocs[ownerID]; ok {
+		resp := &rpc.TunIPResponse{Version: a.Version}
+		if a.IPv4 != nil {
+			resp.IPv4 = a.IPv4.String()
+		}
+		if a.IPv6 != nil {
+			resp.IPv6 = a.IPv6.String()
+		}
+		for _, ch := range env.server.watchers[ownerID] {
+			select {
+			case ch <- resp:
+			default:
+			}
+		}
+	}
+	env.server.mu.Unlock()
+
+	// Phase 5: stream should receive the current IP via ticker push
+	pushed, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("WatchTunIP Recv: %v", err)
+	}
+	if pushed.Version != newVersion {
+		t.Fatalf("expected version %d from ticker push, got %d", newVersion, pushed.Version)
+	}
+}
+
+// TestIntegration_SleepWake_MultiUser_NoInterference verifies that when user A's IP
+// changes after sleep-wake, user B's envoy rules are not affected.
+func TestIntegration_SleepWake_MultiUser_NoInterference(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	ownerA := "user-alice"
+	ownerB := "user-bob"
+
+	// Phase 1: both users allocate IPs
+	respA, _ := env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: ownerA, Namespace: "test-ns"})
+	respB, _ := env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: ownerB, Namespace: "test-ns"})
+	ipA := parseV4(t, respA)
+	ipB := parseV4(t, respB)
+
+	// Phase 2: write envoy rules for both users
+	cm, _ := env.server.clientset.CoreV1().ConfigMaps("test-ns").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	cm.Data[config.KeyEnvoy] = fmt.Sprintf(`- schemaVersion: 2
+  Uid: deployments.apps.web
+  namespace: test-ns
+  ports:
+  - containerPort: 9080
+    protocol: TCP
+  rules:
+  - headers:
+      x-user: alice
+    localtunipv4: "%s"
+    ownerID: "%s"
+    portmap:
+      9080: "9080"
+  - headers:
+      x-user: bob
+    localtunipv4: "%s"
+    ownerID: "%s"
+    portmap:
+      9080: "9080"
+`, ipA.String(), ownerA, ipB.String(), ownerB)
+	env.server.clientset.CoreV1().ConfigMaps("test-ns").Update(ctx, cm, metav1.UpdateOptions{})
+
+	// Phase 3: Alice sleeps → lease expires → IP reclaimed
+	env.server.mu.Lock()
+	env.server.allocs[ownerA].LastRenew = time.Now().Add(-LeaseDuration - time.Minute)
+	env.server.mu.Unlock()
+	env.server.reapExpiredLeases(ctx)
+
+	// Phase 4: Alice wakes → GetTunIP → new IP
+	respA2, _ := env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: ownerA, Namespace: "test-ns"})
+	newIPa := parseV4(t, respA2)
+
+	time.Sleep(500 * time.Millisecond) // wait for syncEnvoyRuleIP
+
+	// Phase 5: verify Alice's rule updated, Bob's rule untouched
+	cm, _ = env.server.clientset.CoreV1().ConfigMaps("test-ns").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	virtuals, _ := parseYaml(cm.Data[config.KeyEnvoy])
+
+	for _, v := range virtuals {
+		for _, rule := range v.Rules {
+			switch rule.OwnerID {
+			case ownerA:
+				ruleIP := net.ParseIP(rule.LocalTunIPv4)
+				if !ruleIP.Equal(newIPa) {
+					t.Fatalf("Alice's rule not updated: expected %s, got %s", newIPa, rule.LocalTunIPv4)
+				}
+				t.Logf("✓ Alice's rule updated to %s", newIPa)
+			case ownerB:
+				ruleIP := net.ParseIP(rule.LocalTunIPv4)
+				if !ruleIP.Equal(ipB) {
+					t.Fatalf("Bob's rule changed! expected %s, got %s", ipB, rule.LocalTunIPv4)
+				}
+				t.Logf("✓ Bob's rule unchanged at %s", ipB)
+			}
+		}
+	}
+}
+
+// TestIntegration_SleepWake_FullLifecycle is the end-to-end story test:
+// proxy → sleep → lease expire → wake → reconnect → IP changes →
+// WatchTunIP push + ENVOY_CONFIG update → traffic restored.
+func TestIntegration_SleepWake_FullLifecycle(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	ownerID := "lifecycle-user"
+
+	// === T0: proxy (allocate IP + write envoy config) ===
+	resp, _ := env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: ownerID, Namespace: "test-ns"})
+	origIP := parseV4(t, resp)
+	t.Logf("T0: allocated %s", origIP)
+
+	// Write envoy rule
+	cm, _ := env.server.clientset.CoreV1().ConfigMaps("test-ns").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	cm.Data[config.KeyEnvoy] = fmt.Sprintf(`- schemaVersion: 2
+  Uid: deployments.apps.myapp
+  namespace: test-ns
+  ports:
+  - containerPort: 8080
+    protocol: TCP
+  rules:
+  - localtunipv4: "%s"
+    ownerID: "%s"
+    portmap:
+      8080: "8080"
+`, origIP.String(), ownerID)
+	env.server.clientset.CoreV1().ConfigMaps("test-ns").Update(ctx, cm, metav1.UpdateOptions{})
+
+	// Start WatchTunIP (simulates IPWatcher)
+	watchCtx, watchCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer watchCancel()
+	stream, _ := env.client.WatchTunIP(watchCtx, &rpc.TunIPRequest{OwnerID: ownerID, Namespace: "test-ns"})
+
+	for i := 0; i < 50; i++ {
+		env.server.mu.RLock()
+		n := len(env.server.watchers[ownerID])
+		env.server.mu.RUnlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// === T1: sleep → T1+5min: lease expires ===
+	t.Log("T1: simulating sleep + lease expiry")
+	env.server.mu.Lock()
+	env.server.allocs[ownerID].LastRenew = time.Now().Add(-LeaseDuration - time.Minute)
+	env.server.mu.Unlock()
+	env.server.reapExpiredLeases(ctx)
+
+	// Occupy old IP
+	_, _ = env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "occupier-lc", Namespace: "test-ns"})
+
+	// === T2: wake → healthCheck calls GetTunIP ===
+	t.Log("T2: simulating wake + healthCheck GetTunIP")
+	resp2, _ := env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: ownerID, Namespace: "test-ns"})
+	newIP := parseV4(t, resp2)
+	if origIP.Equal(newIP) {
+		t.Fatalf("expected different IP, got same %s", origIP)
+	}
+	t.Logf("T2: re-allocated %s → %s", origIP, newIP)
+
+	// === Verify 1: WatchTunIP stream received the push ===
+	pushed, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("WatchTunIP push failed: %v (push chain broken!)", err)
+	}
+	pushedIP := parseV4(t, pushed)
+	if !pushedIP.Equal(newIP) {
+		t.Fatalf("pushed IP %s != new IP %s", pushedIP, newIP)
+	}
+	t.Logf("✓ WatchTunIP received push: %s", pushedIP)
+
+	// === Verify 2: ENVOY_CONFIG was updated ===
+	time.Sleep(500 * time.Millisecond) // wait for async syncEnvoyRuleIP
+	cm, _ = env.server.clientset.CoreV1().ConfigMaps("test-ns").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	virtuals, _ := parseYaml(cm.Data[config.KeyEnvoy])
+	for _, v := range virtuals {
+		for _, rule := range v.Rules {
+			if rule.OwnerID == ownerID {
+				ruleIP := net.ParseIP(rule.LocalTunIPv4)
+				if !ruleIP.Equal(newIP) {
+					t.Fatalf("ENVOY_CONFIG not updated: rule has %s, expected %s", rule.LocalTunIPv4, newIP)
+				}
+				t.Logf("✓ ENVOY_CONFIG updated: Rule.LocalTunIPv4 = %s", newIP)
+			}
+		}
+	}
+
+	// === Verify 3: allocs consistent ===
+	env.server.mu.RLock()
+	alloc, ok := env.server.allocs[ownerID]
+	env.server.mu.RUnlock()
+	if !ok {
+		t.Fatal("alloc missing after reconnect")
+	}
+	if !alloc.IPv4.IP.Equal(newIP) {
+		t.Fatalf("alloc IP %s != new IP %s", alloc.IPv4.IP, newIP)
+	}
+	t.Logf("✓ allocs consistent: %s", newIP)
+	t.Log("✓ Full lifecycle passed: proxy → sleep → expire → wake → reconnect → IP updated everywhere")
 }

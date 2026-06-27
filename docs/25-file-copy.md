@@ -66,7 +66,7 @@ Two path types enforce correct behavior:
 - `localPath` — local filesystem paths (OS-specific separators)
 - `remotePath` — pod filesystem paths (always `/` separator)
 
-Both implement `filePath` interface with `Dir()`, `Base()`, `Clean()`, `Join()`, `Glob()`, `String()` methods.
+Both implement `pathSpec` interface with `Dir()`, `Base()`, `Clean()`, `Join()`, `Glob()`, `String()` methods.
 
 ## 7. Related Files
 

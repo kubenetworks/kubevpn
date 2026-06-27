@@ -60,11 +60,6 @@ func tunProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, error
 		return nil, nil, err
 	}
 
-	// Start background watcher for IP changes (hot-update)
-	if addr != "" && node.Get("net") == "" {
-		go watchTunIPChanges(listener)
-	}
-
 	return listener, handler, nil
 }
 
@@ -107,125 +102,6 @@ func requestTunIPFromControlPlane() (ipv4, ipv6 string, err error) {
 	// without renewal, the IP is automatically reclaimed by the server's lease reaper.
 
 	return resp.IPv4, resp.IPv6, nil
-}
-
-// watchTunIPChanges connects to TunConfigService.WatchTunIP and hot-updates the TUN device
-// when the IP allocation changes. Falls back to periodic polling if the stream breaks.
-func watchTunIPChanges(listener net.Listener) {
-	trafficManagerAddr := os.Getenv("TrafficManagerService")
-	ownerID := os.Getenv(config.EnvPodName)
-	namespace := os.Getenv(config.EnvPodNamespace)
-	target := fmt.Sprintf("%s:%d", trafficManagerAddr, config.PortControlPlane)
-
-	if trafficManagerAddr == "" || ownerID == "" {
-		return
-	}
-
-	var currentVersion int64
-	ctx := context.Background()
-
-	for {
-		conn, err := grpc.DialContext(ctx, target, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		if err != nil {
-			time.Sleep(10 * time.Second)
-			continue
-		}
-		client := rpc.NewTunConfigServiceClient(conn)
-
-		stream, err := client.WatchTunIP(ctx, &rpc.TunIPRequest{OwnerID: ownerID, Namespace: namespace})
-		if err != nil {
-			conn.Close()
-			// Fallback: poll every 30s
-			pollTunIP(ctx, target, ownerID, namespace, &currentVersion)
-			continue
-		}
-
-		for {
-			resp, recvErr := stream.Recv()
-			if recvErr != nil {
-				break
-			}
-			if resp.Version != currentVersion && currentVersion != 0 {
-				applyTunIPChange(resp)
-			}
-			currentVersion = resp.Version
-		}
-		conn.Close()
-		time.Sleep(5 * time.Second)
-	}
-}
-
-func pollTunIP(ctx context.Context, target, ownerID, namespace string, version *int64) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	for i := 0; i < 10; i++ {
-		select {
-		case <-ticker.C:
-			conn, err := grpc.DialContext(ctx, target, grpc.WithTransportCredentials(insecure.NewCredentials()))
-			if err != nil {
-				continue
-			}
-			client := rpc.NewTunConfigServiceClient(conn)
-			resp, err := client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: ownerID, Namespace: namespace})
-			conn.Close()
-			if err == nil && resp.Version != *version && *version != 0 {
-				applyTunIPChange(resp)
-				*version = resp.Version
-			}
-			if err == nil {
-				return
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-func applyTunIPChange(resp *rpc.TunIPResponse) {
-	ctx := context.Background()
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return
-	}
-
-	var tunName string
-	for _, ifc := range interfaces {
-		addrs, _ := ifc.Addrs()
-		for _, addr := range addrs {
-			if ipNet, ok := addr.(*net.IPNet); ok && config.CIDR.Contains(ipNet.IP) {
-				tunName = ifc.Name
-				break
-			}
-		}
-		if tunName != "" {
-			break
-		}
-	}
-	if tunName == "" {
-		plog.G(ctx).Warn("[TUN] Cannot find TUN device for IP update")
-		return
-	}
-
-	oldIPv4, oldIPv6, _, _ := GetTunDeviceIPByName(tunName)
-
-	if resp.IPv4 != "" {
-		oldAddr := ""
-		if oldIPv4 != nil {
-			oldAddr = (&net.IPNet{IP: oldIPv4, Mask: net.CIDRMask(32, 32)}).String()
-		}
-		if err := tun.ChangeIP(tunName, oldAddr, resp.IPv4); err != nil {
-			plog.G(ctx).Errorf("[TUN] ChangeIP v4 failed: %v", err)
-			return
-		}
-		newIP, _, _ := net.ParseCIDR(resp.IPv4)
-		tun.UpdateDNAT(oldIPv4, newIP)
-	}
-	if resp.IPv6 != "" && oldIPv6 != nil {
-		oldAddr := (&net.IPNet{IP: oldIPv6, Mask: net.CIDRMask(128, 128)}).String()
-		_ = tun.ChangeIP(tunName, oldAddr, resp.IPv6)
-	}
-
-	plog.G(ctx).Infof("[TUN] IP hot-updated: v4=%s v6=%s", resp.IPv4, resp.IPv6)
 }
 
 // GetTunDeviceIPByName returns the IPs assigned to the named interface within kubevpn CIDRs.

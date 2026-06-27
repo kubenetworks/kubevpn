@@ -41,7 +41,7 @@ KubeVPN uses a custom DHCP mechanism to assign a unique TUN device IP address to
 │  ConfigMap: kubevpn-traffic-manager                        │
 │  ├── DHCP        = base64(bitmap-v4)    ← IPv4 bitmap     │
 │  ├── DHCP6       = base64(bitmap-v6)    ← IPv6 bitmap     │
-│  ├── TUN_ALLOCS  = json(ownerID→IP)     ← persisted map   │
+│  ├── TUN_ALLOCS  = yaml(ownerID→IP)     ← persisted map   │
 │  └── ENVOY_CONFIG = yaml([]*Virtual)    ← envoy routes    │
 └──────────────────────────────────────────────────────────┘
          ↑ port-forward
@@ -126,10 +126,10 @@ GetTunIP(ownerID, excludeIPs):
 
 **Persistence (allocs → ConfigMap):**
 
-The allocation mapping is stored as JSON in the `TUN_ALLOCS` key of the ConfigMap.
+The allocation mapping is stored as YAML in the `TUN_ALLOCS` key of the ConfigMap.
 
 **Single-User Example:**
-```json
+```yaml
 {
   "a1b2c3d4e5f6": {
     "ipv4": "198.18.0.5/16",
@@ -143,7 +143,7 @@ The allocation mapping is stored as JSON in the `TUN_ALLOCS` key of the ConfigMa
 **Multi-User + Multi-Cluster Example:**
 
 Three users simultaneously connected to the same cluster namespace `default`, sharing the same ConfigMap:
-```json
+```yaml
 {
   "a1b2c3d4e5f6": {
     "ipv4": "198.18.0.5/16",
@@ -265,7 +265,7 @@ ConfigMap name: `kubevpn-traffic-manager`
 |-----|--------|---------|
 | `DHCP` | Base64-encoded bitmap | IPv4 allocation status bitmap |
 | `DHCP6` | Base64-encoded bitmap | IPv6 allocation status bitmap |
-| `TUN_ALLOCS` | JSON | `map[ownerID]{ipv4, ipv6, version, lastRenew}` |
+| `TUN_ALLOCS` | YAML | `map[ownerID]{ipv4, ipv6, version, lastRenew}` |
 | `ENVOY_CONFIG` | YAML | Envoy routing rules `[]*Virtual` |
 | `IPv4_POOLS` | Text | Cluster IPv4 address pools |
 

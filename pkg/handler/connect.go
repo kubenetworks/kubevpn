@@ -236,7 +236,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) ([]*net.IPNet, []net.IP, e
 		return nil, nil, err
 	}
 
-	ipPoolStr, err := c.Get(ctx, config.KeyClusterIPv4POOLS)
+	ipPoolStr, err := c.Get(ctx, config.KeyClusterCIDRs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -254,7 +254,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) ([]*net.IPNet, []net.IP, e
 	}
 	encoded := encodeCIDRs(cidrs)
 	plog.G(ctx).Infof("Saving %d cluster CIDRs to cache: %s", len(cidrs), encoded)
-	err = c.Set(ctx, config.KeyClusterIPv4POOLS, encoded)
+	err = c.Set(ctx, config.KeyClusterCIDRs, encoded)
 	return cidrs, apiServerIPs, err
 }
 

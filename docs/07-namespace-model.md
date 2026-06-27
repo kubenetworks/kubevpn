@@ -74,8 +74,10 @@ type ConnectOptions struct {
 
 ```protobuf
 message ConnectRequest {
-    string Namespace = 1;           // ← WORKLOAD namespace (user's -n flag)
-    string ManagerNamespace = 2;    // ← MANAGER namespace
+    string KubeconfigBytes = 1;
+    string Namespace = 2;           // ← WORKLOAD namespace (user's -n flag)
+    // ... other fields ...
+    string ManagerNamespace = 12;   // ← MANAGER namespace
 }
 ```
 

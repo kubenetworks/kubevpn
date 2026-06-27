@@ -139,7 +139,7 @@ func TestCleanup_NoRollbackFuncs(t *testing.T) {
 		&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-ns"}},
 		&v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
-			Data:       map[string]string{config.KeyDHCP: "", config.KeyDHCP6: "", config.KeyEnvoy: ""},
+			Data:       map[string]string{config.KeyTunIPPool: "", config.KeyEnvoy: ""},
 		},
 	)
 
@@ -162,7 +162,7 @@ func TestCleanup_WithRollbackFuncs(t *testing.T) {
 		&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-ns"}},
 		&v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
-			Data:       map[string]string{config.KeyDHCP: "", config.KeyDHCP6: "", config.KeyEnvoy: ""},
+			Data:       map[string]string{config.KeyTunIPPool: "", config.KeyEnvoy: ""},
 		},
 	)
 
@@ -192,7 +192,7 @@ func TestCleanup_UserDaemon_WithRollbackFuncs(t *testing.T) {
 		&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-ns"}},
 		&v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
-			Data:       map[string]string{config.KeyDHCP: "", config.KeyDHCP6: "", config.KeyEnvoy: ""},
+			Data:       map[string]string{config.KeyTunIPPool: "", config.KeyEnvoy: ""},
 		},
 	)
 

@@ -351,10 +351,9 @@ func TestImageContainsRegistry(t *testing.T) {
 func TestConfigMapAndKeyConstants(t *testing.T) {
 	constants := map[string]string{
 		"ConfigMapPodTrafficManager": ConfigMapPodTrafficManager,
-		"KeyDHCP":                    KeyDHCP,
-		"KeyDHCP6":                   KeyDHCP6,
-		"KeyEnvoy":                   KeyEnvoy,
-		"KeyClusterIPv4POOLS":        KeyClusterIPv4POOLS,
+		"KeyTunIPPool":    KeyTunIPPool,
+		"KeyEnvoy":        KeyEnvoy,
+		"KeyClusterCIDRs": KeyClusterCIDRs,
 	}
 	for name, val := range constants {
 		if val == "" {

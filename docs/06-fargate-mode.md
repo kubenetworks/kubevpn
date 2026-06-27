@@ -159,7 +159,7 @@ The `To()` method generates envoy xDS resources. Fargate mode affects:
 
 ## SSH Reverse Tunnels
 
-### Mapper (`pkg/handler/proxy.go`)
+### Mapper (`pkg/handler/proxy_mapper.go`)
 
 The `Mapper` struct manages SSH tunnels for fargate-mode proxied resources. Created only when `util.IsK8sService(object)` returns true.
 
@@ -216,8 +216,8 @@ kubevpn proxy svc/reviews --headers env=test
 ```
 kubevpn leave svc/reviews
   │
-  ├── 1. Rule matching: use headers (not TUN IP) to find user's rule
-  │      isFargateMode detected via EnvoyListenerPort != 0
+  ├── 1. Rule matching: match by OwnerID to find user's rule
+  │      isFargateMode detected via Virtual.FargateMode bool (or legacy EnvoyListenerPort fallback)
   │
   ├── 2. Remove rule from ConfigMap
   │      If last rule → remove all sidecar containers from workload
@@ -288,7 +288,7 @@ Fargate generates two random ports per container port (`EnvoyListenerPort` + `en
 | `pkg/inject/fargate_envoy.yaml` | Envoy bootstrap template (no static listener) |
 | `pkg/inject/fargate_envoy_ipv4.yaml` | Envoy bootstrap template IPv4 variant |
 | `pkg/controlplane/cache.go` | `Virtual.To()` — xDS generation with `BindToPort`, default routes |
-| `pkg/handler/proxy.go` | `Mapper` — SSH tunnel lifecycle management |
+| `pkg/handler/proxy_mapper.go` | `Mapper` — SSH tunnel lifecycle management |
 | `pkg/handler/leave.go` | Cleanup: header-based rule matching, Service restoration |
 | `pkg/handler/reset.go` | Hard reset: remove all rules, restore Service |
 | `pkg/ssh/reverse.go` | `ExposeLocalPortToRemote()` — SSH reverse tunnel |

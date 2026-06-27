@@ -67,9 +67,8 @@ UpgradeDeploy:
   2. Compare client version vs server image version (util.IsNewer)
   3. If upgrade needed:
      a. upgradeSecretSpec — ensure Secret has all 3 TLS fields
-     b. upgradeServiceSpec — update Service ports to match genService
-     c. kubectl set image — update all container images
-     d. RolloutStatus — wait for rollout to complete
+     b. upgradeDeploySpec — update pod spec to match genDeploySpec + wait for rollout
+     c. upgradeServiceSpec — update Service ports to match genService
 ```
 
 ## 6. Existence Check

@@ -297,10 +297,9 @@ Same as prior design (unchanged).
 
 Same as prior design: each heartbeat tick re-reads `util.GetTunDeviceIP(tunIfi.Name)` from the OS.
 
-#### 4.8 Removing Webhook IP Allocation
+#### 4.8 Webhook IP Allocation (Removed)
 
-`pkg/webhook/pods.go` handleCreate: remove DHCP + patch env logic.
-handleDelete: already removed. Following the DHCP protocol, leases expire and are automatically reclaimed; no explicit release is needed.
+The webhook (`pkg/webhook/`) has been fully removed from the codebase. IP allocation is now entirely handled by the TunConfigService gRPC API. Leases expire and are automatically reclaimed; no explicit release is needed.
 
 ### 5. ConfigMap Watcher Integration
 
@@ -387,7 +386,7 @@ Sidecar container starts (kubevpn server -l "tun:/tcp://tm:10801?net=&route=..."
 | `pkg/core/tun_client.go` | Modify | heartbeat dynamic IP reading |
 | `pkg/core/protocol_registry.go` | Modify | tunProtocolFactory supports fetching IP from control-plane |
 | `pkg/inject/container.go` | Modify | Remove TunIPv4/v6 env; leave `net=` parameter empty |
-| `pkg/webhook/pods.go` | Modify | Remove DHCP/patch from handleCreate |
+| `pkg/webhook/` | Removed | Entire webhook directory deleted; IP allocation via TunConfigService |
 
 ### 9. Compatibility
 

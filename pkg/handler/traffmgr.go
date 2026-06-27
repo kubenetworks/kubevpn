@@ -95,10 +95,9 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 			Namespace: namespace,
 		},
 		Data: map[string]string{
-			config.KeyEnvoy:            "",
-			config.KeyDHCP:             "",
-			config.KeyDHCP6:            "",
-			config.KeyClusterIPv4POOLS: "",
+			config.KeyEnvoy:       "",
+			config.KeyTunIPPool:   "",
+			config.KeyClusterCIDRs: "",
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {

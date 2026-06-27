@@ -44,7 +44,7 @@ type Config struct {
 
 ### 5.1 Linux (`tun_linux.go`)
 
-- **Device creation**: `tun.CreateTUN("utun", mtu)` — names are auto-assigned (utun0, utun1, ...)
+- **Device creation**: Scans existing interfaces for `utunN` names, calculates `maxIndex+1`, then calls `tun.CreateTUN(fmt.Sprintf("utun%d", maxIndex+1), mtu)` for explicit naming
 - **IP assignment**: `netlink.NetworkLinkAddIp(ifce, ipv4, ipNet)` — uses netlink directly
 - **Route addition**: `netlink.AddRoute(route.String(), "", "", tunName)` via libcontainer/netlink
 - **Interface up**: `netlink.NetworkLinkUp(ifce)`

@@ -159,7 +159,7 @@ pkg/
 
 ### Envoy Config Types
 
-- **`controlplane.Virtual`** — per-workload envoy xDS config stored in ConfigMap. Has `SchemaVersion` field (current: `controlplane.CurrentSchemaVersion = 1`; zero = legacy pre-versioning)
+- **`controlplane.Virtual`** — per-workload envoy xDS config stored in ConfigMap. Has `SchemaVersion` field (current: `controlplane.CurrentSchemaVersion = 2`; zero = legacy pre-versioning, requires OwnerID on all rules)
 - **`controlplane.PortMapping`** — parsed representation of the `Rule.PortMap` string encoding. Use `rule.ParsePortMap()` instead of manually parsing the `"envoyPort:localPort"` strings
 - **`inject.envoyRuleSpec`** — parameter object for `addEnvoyConfig`/`addVirtualRule`. Groups Namespace, NodeID, IPs, Headers, Ports, PortMap, FargateMode, OwnerID
 
