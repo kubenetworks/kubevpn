@@ -6,7 +6,7 @@
 //   - User Daemon (control plane): traffic manager, proxy inject, health check, OwnerID
 //   - Root Daemon (data plane): TUN device, IP allocation, routing, DNS, port-forward
 //
-// See docs/12-dual-daemon-architecture.md for details.
+// See docs/02-dual-daemon.md for details.
 //
 // This package is imported by daemon/action/. It should NOT import daemon/.
 package handler
