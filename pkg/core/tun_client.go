@@ -79,13 +79,27 @@ func (d *ClientDevice) runConnPool(ctx context.Context, forward *Forwarder) {
 				return
 			}
 			if packet.dst != nil {
-				d.slots[ipHash(packet.dst, n)] <- packet
+				select {
+				case d.slots[ipHash(packet.dst, n)] <- packet:
+				default:
+					config.LPool.Put(packet.data[:])
+					// slot channel full — drop packet to prevent cross-slot stall
+				}
 			} else {
-				d.slots[0] <- packet
+				select {
+				case d.slots[0] <- packet:
+				default:
+					config.LPool.Put(packet.data[:])
+				}
 				for i := 1; i < n; i++ {
 					clone := config.LPool.Get().([]byte)
 					copy(clone, packet.data[:packet.length+2])
-					d.slots[i] <- &Packet{data: clone, length: packet.length}
+					select {
+					case d.slots[i] <- &Packet{data: clone, length: packet.length}:
+					default:
+						config.LPool.Put(clone[:])
+						// slot channel full — drop heartbeat clone to prevent cross-slot stall
+					}
 				}
 			}
 		case <-ctx.Done():

@@ -130,15 +130,17 @@ func (c *Config) appendHosts(appendHosts []Entry) error {
 		}
 	}
 
-	hostFile := getHostFile()
-	f, err := os.OpenFile(hostFile, os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
 	str := c.entryList2String(appendHosts)
-	_, err = f.WriteString(str)
-	return err
+	return withHostsFileLock(func() error {
+		hostFile := getHostFile()
+		f, err := os.OpenFile(hostFile, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = f.WriteString(str)
+		return err
+	})
 }
 
 func (c *Config) removeHosts() error {
@@ -223,36 +225,38 @@ func CleanupHosts() error {
 
 // filterHostsFile removes all lines containing the given keyword from the hosts file.
 func filterHostsFile(keyword string) error {
-	hostFile := getHostFile()
-	content, err := os.ReadFile(hostFile)
-	if err != nil {
-		return err
-	}
-	if !strings.Contains(string(content), config.HostsKeyword) {
-		return nil
-	}
-
-	var retain []string
-	reader := bufio.NewReader(bytes.NewReader(content))
-	for {
-		line, readErr := reader.ReadString('\n')
-		if !strings.Contains(line, keyword) {
-			retain = append(retain, line)
+	return withHostsFileLock(func() error {
+		hostFile := getHostFile()
+		content, err := os.ReadFile(hostFile)
+		if err != nil {
+			return err
 		}
-		if errors.Is(readErr, io.EOF) {
-			break
-		} else if readErr != nil {
-			return readErr
+		if !strings.Contains(string(content), config.HostsKeyword) {
+			return nil
 		}
-	}
-	if len(retain) == 0 {
-		return fmt.Errorf("hosts file would be empty after filtering")
-	}
 
-	var sb strings.Builder
-	for _, s := range retain {
-		sb.WriteString(s)
-	}
-	str := strings.TrimSuffix(sb.String(), "\n")
-	return os.WriteFile(hostFile, []byte(str), 0644)
+		var retain []string
+		reader := bufio.NewReader(bytes.NewReader(content))
+		for {
+			line, readErr := reader.ReadString('\n')
+			if !strings.Contains(line, keyword) {
+				retain = append(retain, line)
+			}
+			if errors.Is(readErr, io.EOF) {
+				break
+			} else if readErr != nil {
+				return readErr
+			}
+		}
+		if len(retain) == 0 {
+			return fmt.Errorf("hosts file would be empty after filtering")
+		}
+
+		var sb strings.Builder
+		for _, s := range retain {
+			sb.WriteString(s)
+		}
+		str := strings.TrimSuffix(sb.String(), "\n")
+		return os.WriteFile(hostFile, []byte(str), 0644)
+	})
 }

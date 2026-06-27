@@ -56,6 +56,11 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 		if len(config.UID) == 0 {
 			continue
 		}
+		if config.SchemaVersion == 0 {
+			p.logger.Warnf("legacy envoy config without schema version for %s/%s, consider re-proxying to upgrade", config.Namespace, config.UID)
+		} else if config.SchemaVersion > CurrentSchemaVersion {
+			p.logger.Warnf("envoy config for %s/%s has schema version %d, but this build only supports up to %d", config.Namespace, config.UID, config.SchemaVersion, CurrentSchemaVersion)
+		}
 
 		var marshal []byte
 		marshal, err = json.Marshal(config)

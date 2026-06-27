@@ -46,6 +46,9 @@ pkg/
 ├── cp/                File copy (kubectl cp equivalent)
 ├── daemon/            gRPC daemon server
 │   ├── action/        Per-command daemon handlers (connect, proxy, leave, etc.)
+│   │   ├── connection.go  Connection lookup/remove helpers (findConnection, removeConnection, cleanupConnection)
+│   │   ├── lifecycle.go   SessionLifecycle — context + LIFO cleanup manager for daemon sessions
+│   │   └── writer.go      newStreamWriter, initStreamLogger, resolveKubeconfig
 │   ├── handler/       WebSocket SSH terminal handler
 │   ├── elevate/       Privilege escalation (sudo/admin)
 │   └── rpc/           Generated protobuf (DO NOT EDIT *.pb.go)
@@ -55,13 +58,16 @@ pkg/
 ├── handler/           Core business logic
 │   ├── connect.go         ConnectOptions struct + DoConnect orchestration
 │   ├── connect_tun.go     TUN server, port forwarding, health checks
-│   ├── connect_route.go   Dynamic routing, extra routes
+│   ├── connect_route.go   Dynamic routing, extra routes, watchAndRoute
 │   ├── connect_dns.go     DNS setup
 │   ├── connect_upgrade.go Traffic manager deployment upgrade
+│   ├── k8s_client.go      K8sClient embedded struct (shared by ConnectOptions/SyncOptions)
+│   ├── healthchecker.go   HealthStatus, periodic health check loop
 │   ├── traffmgr.go        Create traffic manager pod
 │   ├── traffmgr_resources.go  K8s resource generators (deploy, svc, secret, etc.)
 │   ├── leave.go           Leave/unpatch proxy resources
 │   ├── proxy.go           Port mapping management
+│   ├── proxy_mapper.go    Mapper for port-forward config from ConfigMap
 │   ├── sync.go            Syncthing-based file sync
 │   └── reset.go           Reset workloads to original spec
 ├── inject/            Sidecar injection (Injector interface + Strategy pattern)
@@ -127,20 +133,33 @@ pkg/
 
 - **Strategy pattern** in `pkg/inject` — `Injector` interface with `NewInjector` factory
 - **Strategy pattern** in `pkg/core` — `stackConstructor` function type for gvisor stack creation
+- **Embedded struct** in `pkg/handler` — `K8sClient` bundles (clientset, restclient, config, factory) + `InitClient`/`GetFactory`/`GetClientset` methods; embedded by `ConnectOptions` and `SyncOptions`
+- **Session lifecycle** in `daemon/action` — `SessionLifecycle` manages context + LIFO cleanup stack for daemon RPC sessions
+- **Parameter object** in `pkg/inject` — `envoyRuleSpec` struct replaces 10+ individual args to `addEnvoyConfig`/`addVirtualRule`
 - **PodContext bundle** in `pkg/run` — groups K8s-fetched data (template, env, volume, DNS)
-- **Registry pattern** in `pkg/daemon/handler` — `sync.Map`-backed session registry
+- **Registry pattern** in `pkg/daemon/handler` — `sync.Map`-backed SSH session registry
 
 ### Shared Helpers (avoid re-implementing these)
 
 | Helper | Package | Purpose |
 |---|---|---|
 | `newStreamWriter(send)` | `daemon/action` | Adapts gRPC streaming Send into `io.Writer` — do NOT create per-action wrapper structs |
+| `svr.initStreamLogger(resp, level, sendMsg)` | `daemon/action` | Creates logger writing to both gRPC stream and log file, returns (logger, ctx) — used by reset, leave, uninstall, unsync |
 | `resolveKubeconfig(ctx, jump, bytes, portForward)` | `daemon/action` | SSH jump + kubeconfig file resolution — do NOT inline the SSH/kubeconfig pattern |
-| `util.InitKubeClient(f)` | `pkg/util` | Returns (config, restclient, clientset, namespace) — used by `InitClient` methods |
+| `NewSessionLifecycle(logger)` | `daemon/action` | Context + LIFO cleanup manager for daemon sessions — replaces ad-hoc context.WithCancel + scattered cleanup |
+| `cleanupConnection(ctx, conn)` | `daemon/action` | Cleans up a connection's sync and VPN state — used by disconnect and quit |
+| `util.InitKubeClient(f)` | `pkg/util` | Returns (config, restclient, clientset, namespace) — used by `K8sClient.InitClient` |
 | `gatherContainerPorts(spec, portMaps)` | `pkg/inject` | Collects container ports from pod spec + portMaps — shared by mesh and fargate |
+| `addEnvoyConfig(ctx, mapInterface, spec)` | `pkg/inject` | Adds envoy proxy rule to ConfigMap using `envoyRuleSpec` — shared by vpn and fargate injectors |
 | `svr.findConnection(id)` | `daemon/action` | Finds connection by ID — do NOT write `for range svr.connections` lookup loops |
 | `svr.removeConnection(id)` | `daemon/action` | Removes connections by ID from slice, returns them for caller cleanup |
 | `svr.resetCurrentConnection(id)` | `daemon/action` | After removing a connection, picks first remaining as current |
+
+### Envoy Config Types
+
+- **`controlplane.Virtual`** — per-workload envoy xDS config stored in ConfigMap. Has `SchemaVersion` field (current: `controlplane.CurrentSchemaVersion = 1`; zero = legacy pre-versioning)
+- **`controlplane.PortMapping`** — parsed representation of the `Rule.PortMap` string encoding. Use `rule.ParsePortMap()` instead of manually parsing the `"envoyPort:localPort"` strings
+- **`inject.envoyRuleSpec`** — parameter object for `addEnvoyConfig`/`addVirtualRule`. Groups Namespace, NodeID, IPs, Headers, Ports, PortMap, FargateMode, OwnerID
 
 ### Fargate/Service Mode
 
@@ -152,20 +171,24 @@ pkg/
 
 ### ConnectOptions Dual-Role Pattern (IMPORTANT)
 
-`ConnectOptions` is used in BOTH daemon layers with different initialization:
+**Full architecture doc: `docs/dual-daemon-architecture.md`**
 
-| | User Daemon (control plane) | Sudo Daemon (data plane) |
+`ConnectOptions` is used in BOTH daemon layers with **independent instances** (they do NOT share memory):
+
+| | User Daemon (control plane) | Root Daemon (data plane) |
 |---|---|---|
-| Init path | `InitClient` + `InitDHCP` | `InitClient` + `DoConnect` |
-| `c.ctx` | **nil** — never set | Set by `DoConnect` |
-| `c.cancel` | **nil** | Set by `DoConnect` |
-| Role | DHCP lease, proxy inject, health check relay | TUN device, port-forward, DNS, routes |
+| Init path | `redirectConnectToSudoDaemon` | `Connect` (IsSudo=true) → `DoConnect` |
+| `isDataPlane` | false | true (set by DoConnect) |
+| Role | DHCP, proxy inject, health check, OwnerID | TUN, port-forward, DNS, routes |
+| Persisted | ✅ OffloadToConfig | ❌ |
 
 **Rules when modifying `ConnectOptions`:**
-- `Cleanup` uses `c.ctx != nil` to distinguish roles — do NOT set `c.ctx` in user daemon path
-- New methods shared by both paths must NOT assume `c.ctx` is set
-- Resources with lifecycle (informers, watchers) must have their own stop channel, not piggyback on `c.ctx`
-- Test both paths: sudo daemon (via `DoConnect`) and user daemon (via `forwardConnectToSudo`)
+- **K8s client fields live in `K8sClient`** — the embedded struct in `k8s_client.go` holds clientset, restclient, config, factory. Use `GetFactory()` / `GetClientset()` accessors. Initialize via `InitClient(f)` which delegates to `util.InitKubeClient`
+- **Determine which daemon uses the field FIRST** — control-plane fields go in `redirectConnectToSudoDaemon`, data-plane fields go in `DoConnect`
+- **NEVER initialize control-plane fields in DoConnect** — DoConnect runs in Root Daemon where those fields are unused
+- **NEVER initialize data-plane fields in redirectConnectToSudoDaemon** — User Daemon doesn't create TUN devices
+- Fields that need to survive daemon restart must have `json:` tags (only User Daemon persists)
+- Test both paths: root daemon (via `DoConnect`) and user daemon (via `forwardConnectToSudo`)
 
 ### ConnectionID
 

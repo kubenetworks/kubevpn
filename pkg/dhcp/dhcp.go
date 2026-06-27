@@ -43,7 +43,7 @@ func NewDHCPManager(clientset kubernetes.Interface, namespace string) *Manager {
 func (m *Manager) InitDHCP(ctx context.Context) error {
 	cm, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to get configmap %s, err: %w", config.ConfigMapPodTrafficManager, err)
+		return fmt.Errorf("failed to get configmap %s: %w", config.ConfigMapPodTrafficManager, err)
 	}
 
 	if err == nil {
@@ -171,7 +171,7 @@ func (m *Manager) releaseIP(ctx context.Context, ips ...net.IP) error {
 func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error) error {
 	cm, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to get configmap DHCP server, err: %w", err)
+		return fmt.Errorf("failed to get configmap DHCP server: %w", err)
 	}
 	if cm.Data == nil {
 		return fmt.Errorf("configmap is empty")
@@ -235,7 +235,7 @@ func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipalloca
 func (m *Manager) ForEach(ctx context.Context, fnv4 func(net.IP), fnv6 func(net.IP)) error {
 	cm, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to get cm DHCP server, err: %w", err)
+		return fmt.Errorf("failed to get DHCP server configmap: %w", err)
 	}
 	if cm.Data == nil {
 		cm.Data = make(map[string]string)

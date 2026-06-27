@@ -6,6 +6,9 @@ import (
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
+	httpconnectionmanager "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
+	tcpproxy "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
+	"github.com/envoyproxy/go-control-plane/pkg/wellknown"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -425,5 +428,119 @@ func TestVirtual_To_FargateDefaultRoute(t *testing.T) {
 	}
 	if !foundDefaultRoute {
 		t.Fatal("expected default route endpoint pointing to 127.0.0.1:8080 (containerPort)")
+	}
+}
+
+func TestBuildFilterChains_NonEmptyRouteName(t *testing.T) {
+	routeName := "default_deployments.apps.reviews_9080_TCP"
+	chains := buildFilterChains(routeName)
+
+	if len(chains) != 2 {
+		t.Fatalf("expected 2 filter chains (HTTP + TCP fallback), got %d", len(chains))
+	}
+
+	httpChain := chains[0]
+	if httpChain.FilterChainMatch == nil {
+		t.Fatal("expected FilterChainMatch on HTTP filter chain")
+	}
+	protos := httpChain.FilterChainMatch.GetApplicationProtocols()
+	expectedProtos := []string{"http/1.0", "http/1.1", "h2c"}
+	if len(protos) != len(expectedProtos) {
+		t.Fatalf("expected %d application protocols, got %d", len(expectedProtos), len(protos))
+	}
+	for i, p := range protos {
+		if p != expectedProtos[i] {
+			t.Fatalf("protocol[%d]: want %q, got %q", i, expectedProtos[i], p)
+		}
+	}
+
+	if len(httpChain.Filters) != 1 {
+		t.Fatalf("expected 1 filter in HTTP chain, got %d", len(httpChain.Filters))
+	}
+	if httpChain.Filters[0].GetName() != wellknown.HTTPConnectionManager {
+		t.Fatalf("expected filter name %q, got %q", wellknown.HTTPConnectionManager, httpChain.Filters[0].GetName())
+	}
+
+	var hcm httpconnectionmanager.HttpConnectionManager
+	if err := httpChain.Filters[0].GetTypedConfig().UnmarshalTo(&hcm); err != nil {
+		t.Fatalf("failed to unmarshal HttpConnectionManager: %v", err)
+	}
+	rds := hcm.GetRds()
+	if rds == nil {
+		t.Fatal("expected RDS route specifier")
+	}
+	if rds.GetRouteConfigName() != routeName {
+		t.Fatalf("RDS route config name: want %q, got %q", routeName, rds.GetRouteConfigName())
+	}
+
+	httpFilters := hcm.GetHttpFilters()
+	if len(httpFilters) != 3 {
+		t.Fatalf("expected 3 HTTP filters, got %d", len(httpFilters))
+	}
+	expectedFilterNames := []string{wellknown.GRPCWeb, wellknown.CORS, wellknown.Router}
+	for i, f := range httpFilters {
+		if f.GetName() != expectedFilterNames[i] {
+			t.Fatalf("HTTP filter[%d]: want %q, got %q", i, expectedFilterNames[i], f.GetName())
+		}
+	}
+
+	tcpChain := chains[1]
+	if tcpChain.FilterChainMatch != nil {
+		t.Fatal("expected no FilterChainMatch on TCP fallback chain")
+	}
+	var tcp tcpproxy.TcpProxy
+	if err := tcpChain.Filters[0].GetTypedConfig().UnmarshalTo(&tcp); err != nil {
+		t.Fatalf("failed to unmarshal TcpProxy: %v", err)
+	}
+	if tcp.GetCluster() != "origin_cluster" {
+		t.Fatalf("TCP proxy cluster: want %q, got %q", "origin_cluster", tcp.GetCluster())
+	}
+}
+
+func TestBuildFilterChains_EmptyRouteName(t *testing.T) {
+	chains := buildFilterChains("")
+	if len(chains) != 2 {
+		t.Fatalf("expected 2 filter chains even with empty route name, got %d", len(chains))
+	}
+
+	var hcm httpconnectionmanager.HttpConnectionManager
+	if err := chains[0].Filters[0].GetTypedConfig().UnmarshalTo(&hcm); err != nil {
+		t.Fatalf("failed to unmarshal HttpConnectionManager: %v", err)
+	}
+	if rdsName := hcm.GetRds().GetRouteConfigName(); rdsName != "" {
+		t.Fatalf("expected empty RDS route config name, got %q", rdsName)
+	}
+}
+
+func TestBuildFilterChains_HTTPManagerConfig(t *testing.T) {
+	chains := buildFilterChains("test-route")
+
+	var hcm httpconnectionmanager.HttpConnectionManager
+	if err := chains[0].Filters[0].GetTypedConfig().UnmarshalTo(&hcm); err != nil {
+		t.Fatalf("failed to unmarshal HttpConnectionManager: %v", err)
+	}
+
+	if hcm.GetCodecType() != httpconnectionmanager.HttpConnectionManager_AUTO {
+		t.Fatalf("expected AUTO codec type, got %v", hcm.GetCodecType())
+	}
+	if hcm.GetStatPrefix() != "http" {
+		t.Fatalf("expected stat prefix %q, got %q", "http", hcm.GetStatPrefix())
+	}
+
+	upgrades := hcm.GetUpgradeConfigs()
+	if len(upgrades) != 1 || upgrades[0].GetUpgradeType() != "websocket" {
+		t.Fatalf("expected 1 websocket upgrade config, got %v", upgrades)
+	}
+
+	accessLogs := hcm.GetAccessLog()
+	if len(accessLogs) != 1 {
+		t.Fatalf("expected 1 access log, got %d", len(accessLogs))
+	}
+	if accessLogs[0].GetName() != wellknown.FileAccessLog {
+		t.Fatalf("expected access log name %q, got %q", wellknown.FileAccessLog, accessLogs[0].GetName())
+	}
+
+	if hcm.GetStreamIdleTimeout().GetSeconds() != 0 {
+		t.Fatalf("expected stream idle timeout 0, got %v", hcm.GetStreamIdleTimeout())
 	}
 }

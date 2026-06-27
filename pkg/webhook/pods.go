@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/mattbaird/jsonpatch"
 	"k8s.io/api/admission/v1"
@@ -68,12 +69,14 @@ func (h *admissionReviewHandler) handleCreate(ctx context.Context, ar v1.Admissi
 	// 2) release old ip
 	h.Lock()
 	defer h.Unlock()
+	dhcpCtx, dhcpCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer dhcpCancel()
 	ipv4, ipv6 := parseEnvIPs(container)
-	_ = h.dhcp.ReleaseIP(ctx, ipv4, ipv6)
+	_ = h.dhcp.ReleaseIP(dhcpCtx, ipv4, ipv6)
 
 	// 3) rent new ip
 	var v4, v6 *net.IPNet
-	v4, v6, err = h.dhcp.RentIP(ctx)
+	v4, v6, err = h.dhcp.RentIP(dhcpCtx)
 	if err != nil {
 		plog.G(ctx).Errorf("Rent IP random failed: %v", err)
 		return toV1AdmissionResponse(err)
@@ -137,7 +140,9 @@ func (h *admissionReviewHandler) handleDelete(ctx context.Context, ar v1.Admissi
 	if ipv4 != nil || ipv6 != nil {
 		h.Lock()
 		defer h.Unlock()
-		err := h.dhcp.ReleaseIP(ctx, ipv4, ipv6)
+		dhcpCtx, dhcpCancel := context.WithTimeout(ctx, 10*time.Second)
+		defer dhcpCancel()
+		err := h.dhcp.ReleaseIP(dhcpCtx, ipv4, ipv6)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to release IPv4 %v IPv6 %s: %v", ipv4, ipv6, err)
 		} else {
