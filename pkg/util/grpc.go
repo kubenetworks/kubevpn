@@ -36,7 +36,7 @@ func PrintGRPCStream[T any](ctx context.Context, clientStream grpc.ClientStream,
 	}()
 
 	for {
-		var t = new(T)
+		t := new(T)
 		err := clientStream.RecvMsg(t)
 		if errors.Is(err, io.EOF) {
 			return nil
@@ -59,7 +59,7 @@ func PrintGRPCStream[T any](ctx context.Context, clientStream grpc.ClientStream,
 // CopyGRPCStream copies messages from a gRPC client stream to a server stream until EOF.
 func CopyGRPCStream[T any](r grpc.ClientStream, w grpc.ServerStream) error {
 	for {
-		var t = new(T)
+		t := new(T)
 		err := r.RecvMsg(t)
 		if errors.Is(err, io.EOF) {
 			return nil
@@ -98,7 +98,7 @@ func CopyGRPCConnStream(r grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.Conne
 // CopyAndConvertGRPCStream copies messages from a client stream to a server stream, applying a conversion function to each message.
 func CopyAndConvertGRPCStream[I any, O any](r grpc.ClientStream, w grpc.ServerStream, convert func(*I) *O) error {
 	for {
-		var i = new(I)
+		i := new(I)
 		err := r.RecvMsg(i)
 		if errors.Is(err, io.EOF) {
 			return nil

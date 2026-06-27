@@ -70,7 +70,7 @@ func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, ns
 }
 
 func addVirtualRule(v []*controlplane.Virtual, ns, nodeID string, port []controlplane.ContainerPort, headers map[string]string, localTunIPv4, localTunIPv6 string, portmap map[int32]string, fargateMode bool) []*controlplane.Virtual {
-	var index = -1
+	index := -1
 	for i, virtual := range v {
 		if nodeID == virtual.UID && virtual.Namespace == ns {
 			index = i
@@ -140,50 +140,57 @@ func addVirtualRule(v []*controlplane.Virtual, ns, nodeID string, port []control
 }
 
 func removeEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, namespace string, nodeID string, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) (empty bool, found bool, err error) {
-	configMap, err := mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if k8serrors.IsNotFound(err) {
-		return true, false, nil
-	}
-	if err != nil {
-		return false, false, err
-	}
-	str, ok := configMap.Data[config.KeyEnvoy]
-	if !ok {
-		return false, false, fmt.Errorf("cannot find value for key: envoy-config.yaml")
-	}
-	var v []*controlplane.Virtual
-	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
-		return false, false, err
-	}
-	for _, virtual := range v {
-		if nodeID == virtual.UID && namespace == virtual.Namespace {
-			for i := 0; i < len(virtual.Rules); i++ {
-				if isMeFunc(virtual.IsFargateMode(), virtual.Rules[i]) {
-					found = true
-					virtual.Rules = append(virtual.Rules[:i], virtual.Rules[i+1:]...)
-					i--
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		// Reset per-attempt state so retries start clean.
+		empty = false
+		found = false
+
+		configMap, getErr := mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if k8serrors.IsNotFound(getErr) {
+			empty = true
+			return nil
+		}
+		if getErr != nil {
+			return getErr
+		}
+		str, ok := configMap.Data[config.KeyEnvoy]
+		if !ok {
+			return fmt.Errorf("cannot find value for key: envoy-config.yaml")
+		}
+		var v []*controlplane.Virtual
+		if unmarshalErr := yaml.Unmarshal([]byte(str), &v); unmarshalErr != nil {
+			return unmarshalErr
+		}
+		for _, virtual := range v {
+			if nodeID == virtual.UID && namespace == virtual.Namespace {
+				for i := 0; i < len(virtual.Rules); i++ {
+					if isMeFunc(virtual.IsFargateMode(), virtual.Rules[i]) {
+						found = true
+						virtual.Rules = append(virtual.Rules[:i], virtual.Rules[i+1:]...)
+						i--
+					}
 				}
 			}
 		}
-	}
-	if !found {
-		return false, false, nil
-	}
-
-	// remove default
-	for i := 0; i < len(v); i++ {
-		if nodeID == v[i].UID && namespace == v[i].Namespace && len(v[i].Rules) == 0 {
-			v = append(v[:i], v[i+1:]...)
-			i--
-			empty = true
+		if !found {
+			return nil
 		}
-	}
-	var b []byte
-	b, err = yaml.Marshal(v)
-	if err != nil {
-		return false, found, err
-	}
-	configMap.Data[config.KeyEnvoy] = string(b)
-	_, err = mapInterface.Update(ctx, configMap, metav1.UpdateOptions{})
+
+		// remove default
+		for i := 0; i < len(v); i++ {
+			if nodeID == v[i].UID && namespace == v[i].Namespace && len(v[i].Rules) == 0 {
+				v = append(v[:i], v[i+1:]...)
+				i--
+				empty = true
+			}
+		}
+		b, marshalErr := yaml.Marshal(v)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		configMap.Data[config.KeyEnvoy] = string(b)
+		_, updateErr := mapInterface.Update(ctx, configMap, metav1.UpdateOptions{})
+		return updateErr
+	})
 	return empty, found, err
 }

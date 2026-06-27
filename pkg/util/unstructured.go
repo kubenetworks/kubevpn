@@ -192,7 +192,7 @@ func getTopOwnerReference(factory util.Factory, ns, workload string) (object, co
 	if ownerRef == nil {
 		return object, object, nil
 	}
-	var owner = fmt.Sprintf("%s/%s", ownerRef.Kind, ownerRef.Name)
+	owner := fmt.Sprintf("%s/%s", ownerRef.Kind, ownerRef.Name)
 	for {
 		controller, err = GetUnstructuredObject(factory, ns, owner)
 		if err != nil {

@@ -99,6 +99,11 @@ func (d *Device) readFromTun(ctx context.Context) {
 }
 
 func (d *Device) handlePacket(ctx context.Context, hub *RouteHub) {
+	// Derive a cancellable context so that when the first goroutine errors,
+	// the other is promptly cancelled instead of lingering on channel reads.
+	childCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	p := &Peer{
 		tunInbound:  d.tunInbound,
 		tunOutbound: d.tunOutbound,
@@ -106,8 +111,8 @@ func (d *Device) handlePacket(ctx context.Context, hub *RouteHub) {
 		errChan:     make(chan error, 1),
 	}
 
-	go p.routeTun(ctx)
-	go p.routeTCPToTun(ctx)
+	go p.routeTun(childCtx)
+	go p.routeTCPToTun(childCtx)
 
 	select {
 	case err := <-p.errChan:
@@ -146,6 +151,7 @@ func (p *Peer) routeTCPToTun(ctx context.Context) {
 
 func (p *Peer) routeTun(ctx context.Context) {
 	defer util.HandleCrash()
+	defer drainPacketChan(p.tunInbound)
 	for {
 		select {
 		case packet := <-p.tunInbound:
@@ -163,13 +169,27 @@ func (p *Peer) routeTun(ctx context.Context) {
 			conn, err := p.hub.WriteToRoute(dstKey, packet.data[:payloadLen+2])
 			config.LPool.Put(packet.data[:])
 			if err != nil {
-				if config.Debug {
-					plog.G(ctx).Warnf("[TUN] No route for %s -> %s, dropping", packet.src, packet.dst)
-				}
+				plog.G(ctx).Warnf("[TUN] No route for %s -> %s, dropping", packet.src, packet.dst)
 			} else if config.Debug {
 				plog.G(ctx).Debugf("[TUN] Routed %s -> %s via %s", packet.src, packet.dst, conn.RemoteAddr())
 			}
 		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// drainPacketChan returns any remaining packet buffers to the pool to prevent leaks
+// when a goroutine exits due to context cancellation.
+func drainPacketChan(ch <-chan *Packet) {
+	for {
+		select {
+		case pkt := <-ch:
+			if pkt == nil {
+				return
+			}
+			config.LPool.Put(pkt.data[:])
+		default:
 			return
 		}
 	}

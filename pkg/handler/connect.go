@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -70,6 +71,7 @@ type ConnectOptions struct {
 	tunName        string
 	proxyWorkloads ProxyList
 	healthStatus     HealthStatus
+	cmInformerOnce   sync.Once
 	cmInformer       cache.SharedInformer
 	cmInformerStop   chan struct{}
 
@@ -172,7 +174,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		var templateSpec *v1.PodTemplateSpec
 		templateSpec, _, err = util.GetPodTemplateSpecPath(controller.Object.(*unstructured.Unstructured))
 		if err != nil {
-			return
+			return err
 		}
 		var mapper *Mapper
 		if util.IsK8sService(object) {
@@ -213,7 +215,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 			go mapper.Run()
 		}
 	}
-	return
+	return nil
 }
 
 // DoConnect establishes the full VPN connection: DHCP, CIDR detection, port forwarding, TUN device, routing, and DNS.
@@ -322,12 +324,14 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, filterAPIServer bool) erro
 		return err
 	}
 	if strings.TrimSpace(ipPoolStr) != "" {
+		var cached []*net.IPNet
 		for _, s := range strings.Split(ipPoolStr, " ") {
 			_, cidr, _ := net.ParseCIDR(s)
 			if cidr != nil {
-				c.cidrs = util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(append(c.cidrs, cidr)), c.apiServerIPs)
+				cached = append(cached, cidr)
 			}
 		}
+		c.cidrs = util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cached), c.apiServerIPs)
 		plog.G(ctx).Infof("Get network CIDR from cache")
 		return nil
 	}
@@ -347,8 +351,16 @@ func (c *ConnectOptions) Set(ctx context.Context, key, value string) error {
 	err := retry.RetryOnConflict(
 		retry.DefaultRetry,
 		func() error {
-			p := []byte(fmt.Sprintf(`[{"op": "replace", "path": "/data/%s", "value": "%s"}]`, key, value))
-			_, err := c.clientset.CoreV1().ConfigMaps(c.ManagerNamespace).Patch(ctx, config.ConfigMapPodTrafficManager, k8stypes.JSONPatchType, p, metav1.PatchOptions{})
+			patch := []map[string]string{{
+				"op":    "replace",
+				"path":  "/data/" + key,
+				"value": value,
+			}}
+			p, err := json.Marshal(patch)
+			if err != nil {
+				return fmt.Errorf("failed to marshal JSON patch: %w", err)
+			}
+			_, err = c.clientset.CoreV1().ConfigMaps(c.ManagerNamespace).Patch(ctx, config.ConfigMapPodTrafficManager, k8stypes.JSONPatchType, p, metav1.PatchOptions{})
 			return err
 		})
 	if err != nil {
@@ -374,9 +386,10 @@ func (c *ConnectOptions) Get(ctx context.Context, key string) (string, error) {
 }
 
 // GetConfigMapInformer returns a shared informer for the traffic manager ConfigMap.
-// Created once on first call, then reused. Must be called after InitClient.
+// Created once on first call, then reused. Thread-safe via sync.Once.
+// Must be called after InitClient.
 func (c *ConnectOptions) GetConfigMapInformer() cache.SharedInformer {
-	if c.cmInformer == nil {
+	c.cmInformerOnce.Do(func() {
 		c.cmInformer = informerv1.NewFilteredConfigMapInformer(
 			c.clientset, c.ManagerNamespace, 0, cache.Indexers{},
 			func(options *metav1.ListOptions) {
@@ -385,7 +398,7 @@ func (c *ConnectOptions) GetConfigMapInformer() cache.SharedInformer {
 		)
 		c.cmInformerStop = make(chan struct{})
 		go c.cmInformer.Run(c.cmInformerStop)
-	}
+	})
 	return c.cmInformer
 }
 

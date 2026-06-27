@@ -50,7 +50,7 @@ func (c *Client) PutConfig(ctx context.Context, conf *config.Configuration) erro
 }
 
 func (c *Client) Call(ctx context.Context, uri, method string, body []byte) ([]byte, error) {
-	var url = path.Join(c.GUIAddress, uri)
+	url := path.Join(c.GUIAddress, uri)
 	req, err := http.NewRequest(method, fmt.Sprintf("http://%s", url), bytes.NewBuffer(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize syncthing API request: %w", err)

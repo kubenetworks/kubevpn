@@ -36,7 +36,7 @@ func TransferImageWithRegctl(ctx context.Context, imageSource, imageTarget strin
 
 	// check for a tty and attach progress reporter
 	done := make(chan bool)
-	var progress = &ImageProgress{
+	progress := &ImageProgress{
 		Start:    time.Now(),
 		Entries:  map[string]*ImageProgressEntry{},
 		AsciiOut: ascii.NewLines(os.Stdout),
