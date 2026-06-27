@@ -90,8 +90,10 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 			if err != nil {
 				continue
 			}
-			req.IPv4 = c.LocalTunIPv4.String()
-			req.IPv6 = c.LocalTunIPv6.String()
+			// Don't inject IPs — TunConfigService allocates via OwnerID on reconnect.
+			// Clear stale IPs so RentIP calls GetTunIP fresh.
+			req.IPv4 = ""
+			req.IPv6 = ""
 			err = resp.Send(&req)
 			_ = grpcutil.PrintGRPCStream[rpc.ConnectResponse](nil, resp, svr.LogFile)
 		}

@@ -124,7 +124,7 @@ func TestUpgradeDeploy_AlreadyUpToDate(t *testing.T) {
 	)
 	c.Image = currentImage
 
-	err := c.upgradeDeploy(context.Background())
+	err := c.UpgradeDeploy(context.Background())
 	if err != nil {
 		t.Fatalf("expected nil error when deployment is up to date, got: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestUpgradeDeploy_OldImage_ShouldAttemptUpdate(t *testing.T) {
 	)
 	c.Image = newImage
 
-	// upgradeDeploy will detect the version mismatch and attempt to upgrade.
+	// UpgradeDeploy will detect the version mismatch and attempt to upgrade.
 	// Since we have no factory (nil), it will panic when trying to call upgradeSecretSpec.
 	// We recover from the panic to prove that the upgrade code path was entered
 	// (i.e., IsNewer returned true and the function did NOT return nil early).
@@ -157,7 +157,7 @@ func TestUpgradeDeploy_OldImage_ShouldAttemptUpdate(t *testing.T) {
 				t.Logf("upgrade attempted as expected, panicked on nil factory: %v", r)
 			}
 		}()
-		err := c.upgradeDeploy(context.Background())
+		err := c.UpgradeDeploy(context.Background())
 		if err == nil {
 			t.Fatal("expected non-nil error or panic because upgrade path requires a factory, but got nil (meaning no upgrade was attempted)")
 		}
@@ -189,7 +189,7 @@ func TestUpgradeDeploy_DeploymentNotFound(t *testing.T) {
 		cancel:           cancel,
 	}
 
-	err := c.upgradeDeploy(context.Background())
+	err := c.UpgradeDeploy(context.Background())
 	if err == nil {
 		t.Fatal("expected error when deployment does not exist, got nil")
 	}

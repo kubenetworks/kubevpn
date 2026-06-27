@@ -21,11 +21,13 @@ func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.E
 	restConfig, _ := factory.ToRESTConfig()
 	clientset, _ := kubernetes.NewForConfig(restConfig)
 
-	tunConfig := NewTunConfigServer(clientset, namespace)
-	if err := tunConfig.Init(ctx); err != nil {
+	tunConfig, err := NewTunConfigServer(ctx, clientset, namespace)
+	if err != nil {
 		plog.G(ctx).Warnf("TunConfigServer init failed (non-fatal): %v", err)
+		tunConfig = nil
+	} else {
+		tunConfig.StartLeaseReaper(ctx)
 	}
-	tunConfig.StartLeaseReaper(ctx)
 
 	errChan := make(chan error, 2)
 

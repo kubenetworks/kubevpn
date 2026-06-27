@@ -185,8 +185,8 @@ func TestRegisterProtocol_MultipleProtocols(t *testing.T) {
 func TestGenerateServersFromNodes_NilHub_PassedThrough(t *testing.T) {
 	const proto = "test-nilhub-pt"
 	RegisterProtocol(proto, func(node *Node, hub *RouteHub) (net.Listener, Handler, error) {
-		if hub != nil {
-			t.Error("hub should be nil when nil is passed (no fallback)")
+		if hub == nil {
+			t.Error("hub should not be nil after fallback creates one")
 		}
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		return ln, &testProtoHandler{}, err

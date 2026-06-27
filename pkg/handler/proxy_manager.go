@@ -26,9 +26,9 @@ type ProxyManager struct {
 	workloads ProxyList
 }
 
-// NewProxyManager creates a ProxyManager with the given Kubernetes factory,
+// newProxyManager creates a ProxyManager with the given Kubernetes factory,
 // clientset, and manager namespace.
-func NewProxyManager(factory cmdutil.Factory, clientset kubernetes.Interface, managerNamespace string) *ProxyManager {
+func newProxyManager(factory cmdutil.Factory, clientset kubernetes.Interface, managerNamespace string) *ProxyManager {
 	return &ProxyManager{
 		factory:   factory,
 		clientset: clientset,

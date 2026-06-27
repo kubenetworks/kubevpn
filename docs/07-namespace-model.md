@@ -16,7 +16,7 @@ KubeVPN operates across two namespaces that may or may not be the same. Confusin
 - `kubevpn-traffic-manager` ConfigMap (DHCP leases + envoy config)
 - `kubevpn-traffic-manager` Secret (TLS certificates)
 - ServiceAccount, Role, RoleBinding
-- MutatingWebhookConfiguration
+
 
 **How determined:**
 1. User specifies `--manager-namespace` explicitly, OR

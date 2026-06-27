@@ -21,7 +21,6 @@
 | `dhcp/` | 272 | 0 | 0% | P1 | Low |
 | `dns/` | 968 | 15 | ~2% | P1 | Medium (平台相关) |
 | `core/` | 2,422 | 3,356 | 48% | P1 | Low (已有基础) |
-| `webhook/` | 456 | 0 | 0% | P2 | Low |
 | `tun/` | 919 | 0 | 0% | P2 | High (需root/特殊设备) |
 | `ssh/` | 1,944 | 113 | ~3% | P2 | High (需SSH server) |
 | `util/` | 3,694 | 1,003 | ~15% | P2 | Low |
@@ -127,7 +126,6 @@ Kubernetes 所有 util 和 core 包都用 table-driven tests。KubeVPN 的 `data
 | Task | Package | 策略 |
 |------|---------|------|
 | 4.1 | `controlplane/` | fake envoy snapshot cache |
-| 4.2 | `webhook/` | httptest.Server + fake AdmissionReview |
 | 4.3 | `dns/` | mock resolver + platform-specific build tags |
 | 4.4 | `ssh/` | testcontainers 跑 SSH server 或 mock |
 | 4.5 | `util/` | 纯函数用 table-driven，K8s 相关用 fake client |
@@ -148,7 +146,6 @@ Kubernetes 所有 util 和 core 包都用 table-driven tests。KubeVPN 的 `data
 
 1. **先做 Phase 1.1 (接口抽象)** — 这是所有后续测试的前提。没有 mock 能力，90% 覆盖率不可能。
 
-2. **从 dhcp/ 和 webhook/ 开始写测试** — 代码量少、逻辑清晰、依赖简单，快速建立信心和模式。
 
 3. **不要一次性全改** — 每个 PR 做一个包的改造+测试，保证主分支始终可工作。
 

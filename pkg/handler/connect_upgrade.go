@@ -19,7 +19,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (c *ConnectOptions) upgradeDeploy(ctx context.Context) error {
+func (c *ConnectOptions) UpgradeDeploy(ctx context.Context) error {
 	deploy, err := c.clientset.AppsV1().Deployments(c.ManagerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return err

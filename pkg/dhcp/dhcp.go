@@ -16,16 +16,14 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // Manager manages DHCP IP allocation and release via a Kubernetes ConfigMap.
 type Manager struct {
-	clientset    kubernetes.Interface
-	cidr         *net.IPNet
-	cidr6        *net.IPNet
-	namespace    string
-	connectionID string
+	clientset kubernetes.Interface
+	cidr      *net.IPNet
+	cidr6     *net.IPNet
+	namespace string
 }
 
 // NewDHCPManager creates a Manager for the given namespace using the default CIDRs.
@@ -38,20 +36,17 @@ func NewDHCPManager(clientset kubernetes.Interface, namespace string) *Manager {
 	}
 }
 
-// InitDHCP ensures the DHCP ConfigMap exists and loads the namespace connection ID.
-// TODO optimize dhcp, using mac address, ipPair and deadline as unit
+// InitDHCP ensures the DHCP ConfigMap exists.
 func (m *Manager) InitDHCP(ctx context.Context) error {
-	cm, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
+	_, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get configmap %s: %w", config.ConfigMapPodTrafficManager, err)
 	}
 
-	if err == nil {
-		m.connectionID, err = util.GetConnectionID(ctx, m.clientset.CoreV1().Namespaces(), m.namespace)
-		return err
-	}
-
-	cm = &v1.ConfigMap{
+	cm := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
 			Namespace: m.namespace,
@@ -64,19 +59,24 @@ func (m *Manager) InitDHCP(ctx context.Context) error {
 			config.KeyClusterIPv4POOLS: "",
 		},
 	}
-	cm, err = m.clientset.CoreV1().ConfigMaps(m.namespace).Create(ctx, cm, metav1.CreateOptions{})
+	_, err = m.clientset.CoreV1().ConfigMaps(m.namespace).Create(ctx, cm, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to create configmap: %w", err)
 	}
-	m.connectionID, err = util.GetConnectionID(ctx, m.clientset.CoreV1().Namespaces(), m.namespace)
-	return err
+	return nil
 }
 
 // RentIP allocates the next available IPv4 and IPv6 addresses from the DHCP pool.
 func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
+	return m.RentIPExcluding(ctx, nil)
+}
+
+// RentIPExcluding allocates the next available IPv4 and IPv6 addresses,
+// skipping any IP that matches a local interface address or appears in excludeIPs.
+func (m *Manager) RentIPExcluding(ctx context.Context, excludeIPs []net.IP) (*net.IPNet, *net.IPNet, error) {
 	plog.G(ctx).Debugf("Renting IP from DHCP in namespace %s", m.namespace)
 	addrs, _ := net.InterfaceAddrs()
-	var isAlreadyExistedFunc = func(ip net.IP) bool {
+	shouldSkip := func(ip net.IP) bool {
 		for _, addr := range addrs {
 			if addr == nil {
 				continue
@@ -87,6 +87,11 @@ func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 				}
 			}
 		}
+		for _, excluded := range excludeIPs {
+			if excluded.Equal(ip) {
+				return true
+			}
+		}
 		return false
 	}
 	var uselessIPs []net.IP
@@ -94,26 +99,26 @@ func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		uselessIPs = nil
 		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
-		for {
-			if v4, err = ipv4.AllocateNext(); err != nil {
-				return err
+			for {
+				if v4, err = ipv4.AllocateNext(); err != nil {
+					return err
+				}
+				if !shouldSkip(v4) {
+					break
+				}
+				uselessIPs = append(uselessIPs, v4)
 			}
-			if !isAlreadyExistedFunc(v4) {
-				break
+			for {
+				if v6, err = ipv6.AllocateNext(); err != nil {
+					return err
+				}
+				if !shouldSkip(v6) {
+					break
+				}
+				uselessIPs = append(uselessIPs, v6)
 			}
-			uselessIPs = append(uselessIPs, v4)
-		}
-		for {
-			if v6, err = ipv6.AllocateNext(); err != nil {
-				return err
-			}
-			if !isAlreadyExistedFunc(v6) {
-				break
-			}
-			uselessIPs = append(uselessIPs, v6)
-		}
-		return
-	})
+			return
+		})
 	})
 	if len(uselessIPs) != 0 {
 		if er := m.releaseIP(ctx, uselessIPs...); er != nil {
@@ -275,7 +280,3 @@ func (m *Manager) ForEach(ctx context.Context, fnv4 func(net.IP), fnv6 func(net.
 	return nil
 }
 
-// GetConnectionID returns the namespace connection ID populated during InitDHCP.
-func (m *Manager) GetConnectionID() string {
-	return m.connectionID
-}

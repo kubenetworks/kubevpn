@@ -65,8 +65,9 @@ service TunConfigService {
 }
 
 message TunIPRequest {
-  string OwnerID = 1;        // sidecar 身份标识 (podName or nodeID)
-  string Namespace = 2;      // workload namespace
+  string OwnerID = 1;              // sidecar 身份标识 (podName or nodeID)
+  string Namespace = 2;            // workload namespace
+  repeated string ExcludeIPs = 4;  // client 本地接口 IP，分配时跳过
 }
 
 message TunIPResponse {
@@ -98,30 +99,28 @@ type allocation struct {
     Version int64
 }
 
-// GetTunIP: 如果 ownerID 已有分配返回现有 IP，否则 DHCP rent 新 IP
+// GetTunIP: 如果 ownerID 已有分配且不冲突，返回现有 IP；
+// 如果已有分配但在 ExcludeIPs 中，重新分配；否则新分配。
+// ExcludeIPs 包含 client 本地接口 IP，server 在 DHCP 分配时跳过。
 func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (*rpc.TunIPResponse, error) {
-    s.mu.Lock()
-    defer s.mu.Unlock()
-    
+    excludeIPs := parseExcludeIPs(req.ExcludeIPs)
+
     if alloc, ok := s.allocated[req.OwnerID]; ok {
-        return &rpc.TunIPResponse{
-            IPv4: alloc.IPv4.String(),
-            IPv6: alloc.IPv6.String(),
-            Version: alloc.Version,
-        }, nil
+        if !isIPExcluded(alloc.IPv4, excludeIPs) {
+            return &rpc.TunIPResponse{...}, nil  // 正常返回
+        }
+        // 冲突：旧 IP 保留在 bitmap，RentIPExcluding 自然跳过
+        delete(s.allocated, req.OwnerID)
+        v4, v6 := s.dhcp.RentIPExcluding(ctx, excludeIPs)
+        s.dhcp.ReleaseIP(ctx, old.IPv4.IP, old.IPv6.IP)  // 释放旧 IP
+        s.allocated[req.OwnerID] = &allocation{IPv4: v4, IPv6: v6, ...}
+        return &rpc.TunIPResponse{...}, nil
     }
-    
+
     // 新分配
-    v4, v6, err := s.dhcp.RentIP(ctx)
-    if err != nil {
-        return nil, err
-    }
-    alloc := &allocation{IPv4: v4, IPv6: v6, Version: time.Now().UnixNano()}
-    s.allocated[req.OwnerID] = alloc
-    
-    return &rpc.TunIPResponse{
-        IPv4: v4.String(), IPv6: v6.String(), Version: alloc.Version,
-    }, nil
+    v4, v6 := s.dhcp.RentIPExcluding(ctx, excludeIPs)
+    s.allocated[req.OwnerID] = &allocation{IPv4: v4, IPv6: v6, ...}
+    return &rpc.TunIPResponse{...}, nil
 }
 
 // WatchTunIP: 长连接，IP 变化时推送
@@ -291,7 +290,7 @@ func applyIPChange(tunName string, resp *rpc.TunIPResponse) {
 ### 4.8 去掉 Webhook IP 分配
 
 `pkg/webhook/pods.go` handleCreate：移除 DHCP + patch env 逻辑。
-handleDelete：保留 ReleaseIP 作为兜底。
+handleDelete：已移除。遵循 DHCP 协议，lease 过期自动回收，无需显式释放。
 
 ## 5. ConfigMap Watcher 集成
 
@@ -395,3 +394,11 @@ Sidecar 容器启动 (kubevpn server -l "tun:/tcp://tm:10801?net=&route=...")
    - 调用 NotifyIPChange 模拟 IP 变更
    - 验证 sidecar 收到推送并热更新 TUN
    - 断开 Watch stream，验证轮询兜底生效
+
+## 11. 已知问题修复
+
+### WatchTunIP 长连接 Lease 过期（已修复）
+
+原始设计中 `WatchTunIP` stream 不刷新 `LastRenew`，超过 5 分钟后 LeaseReaper 会错误回收 IP。
+已在 server 端 `WatchTunIP` 中加入隐式续租 ticker（每 `LeaseDuration/3` 刷新一次）。
+详见 [23-watchtunip-lease-renewal-fix.md](23-watchtunip-lease-renewal-fix.md)。

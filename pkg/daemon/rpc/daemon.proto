@@ -380,13 +380,12 @@ service TunConfigService {
   // whenever the owner's IP allocation changes (e.g., conflict resolution, re-allocation).
   rpc WatchTunIP(TunIPRequest) returns (stream TunIPResponse) {}
 
-  // ReleaseTunIP is intentionally omitted — per DHCP protocol design,
-  // lease expiry handles IP reclaim. No explicit release needed.
 }
 
 message TunIPRequest {
-  string OwnerID = 1;     // sidecar identity (typically podName or nodeID)
-  string Namespace = 2;   // workload namespace (for DHCP scoping)
+  string OwnerID = 1;              // sidecar identity (typically podName or nodeID)
+  string Namespace = 2;            // workload namespace (for DHCP scoping)
+  repeated string ExcludeIPs = 4;  // client local interface IPs to avoid during allocation
 }
 
 message TunIPResponse {

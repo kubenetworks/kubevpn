@@ -104,7 +104,7 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 ```
 
 ### User Daemon (cleanupControlPlane):
-1. ReleaseTunIP via TunConfigService (快速回收，非必须 — lease 过期也会回收)
+1. (无显式 IP 释放 — lease 过期自动回收，遵循 DHCP 协议设计)
 2. Delete outbound pod / job
 3. Leave all proxy resources (unpatch sidecars)
 4. Run rollback functions

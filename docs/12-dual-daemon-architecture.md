@@ -23,7 +23,8 @@ KubeVPN 使用双进程架构（User Daemon + Root Daemon），两个进程各�
 │                                                       │
 │  职责：                                               │
 │  ├── SSH 跳板（resolveKubeconfig）                    │
-│  ├── DHCP IP 租赁（RentIP/ReleaseIP）                 │
+│  ├── Traffic Manager 创建/升级（CreateOutboundPod/UpgradeDeploy）│
+│  ├── IP 分配（RentIP → TunConfigService gRPC）        │
 │  ├── 代理注入（CreateRemoteInboundPod → inject/）      │
 │  ├── 文件同步（DoSync）                               │
 │  ├── 健康检查（HealthPeriod）                         │
@@ -58,16 +59,18 @@ KubeVPN 使用双进程架构（User Daemon + Root Daemon），两个进程各�
 
 ### 2.1 User Daemon 的 ConnectOptions（控制面）
 
-创建位置：`daemon/action/connect.go` → `redirectConnectToSudoDaemon()`
+创建位置：`daemon/action/connect_elevate.go` → `redirectConnectToSudoDaemon()`
 
 ```go
 connect := &handler.ConnectOptions{
     ManagerNamespace:     req.Namespace,
-    WorkloadNamespace:      req.Namespace,
+    WorkloadNamespace:    req.Namespace,
     ExtraRouteInfo:       ...,
     OriginKubeconfigPath: req.OriginKubeconfigPath,
-    Request:              proto.Clone(req).(*rpc.ConnectRequest),
+    RequestRaw:           reqBytes,
     OwnerID:              uuid.New().String()[:12],  // ← 只在这里生成
+    Image:                req.Image,                 // ← 用于 CreateOutboundPod
+    ImagePullSecretName:  req.ImagePullSecretName,   // ← 用于 CreateOutboundPod
 }
 ```
 
@@ -76,12 +79,12 @@ connect := &handler.ConnectOptions{
 |------|------|
 | `K8sClient` (clientset, factory) | 操作 K8s API（注入 sidecar、查询 ConfigMap） |
 | `OwnerID` | 写入 Envoy Rule 标识所有权 |
-| `dhcp` | 租赁/释放 DHCP IP |
+| `Image/ImagePullSecretName` | CreateOutboundPod 创建 traffic manager pod |
 | `proxyWorkloads` | 跟踪当前代理的工作负载 |
 | `healthStatus` | 定期健康检查 |
 | `Sync` | 文件同步选项 |
-| `Request` | 持久化时需要 |
-| `LocalTunIPv4/v6` | 持久化和 IP 匹配 |
+| `RequestRaw` | 持久化时需要 |
+| `LocalTunIPv4/v6` | RentIP 分配，通过 gRPC metadata 传给 Root Daemon |
 
 **不使用的字段（在 User Daemon 中始终为零值）**：
 | 字段 | 原因 |
@@ -102,12 +105,13 @@ connect := &handler.ConnectOptions{
     ManagerNamespace:     req.ManagerNamespace,
     ExtraRouteInfo:       ...,
     OriginKubeconfigPath: req.OriginKubeconfigPath,
-    WorkloadNamespace:      req.Namespace,
+    WorkloadNamespace:    req.Namespace,
     Lock:                 &svr.Lock,
     Image:                req.Image,
     ImagePullSecretName:  req.ImagePullSecretName,
-    Request:              proto.Clone(req).(*rpc.ConnectRequest),
-    // 注意：没有 OwnerID
+    RequestRaw:           reqBytes,
+    // 注意：没有 OwnerID — Root Daemon 不操作 Envoy 配置
+    // 注意：不调用 CreateOutboundPod/UpgradeDeploy — 那是控制面职责
 }
 ```
 
@@ -116,11 +120,8 @@ connect := &handler.ConnectOptions{
 |------|------|
 | `ctx/cancel` | DoConnect 创建，控制数据面生命周期 |
 | `isDataPlane` | DoConnect 设为 true |
-| `tunName` | TUN 设备名 |
-| `dnsConfig` | DNS 配置和清理 |
-| `cidrs` | 集群 CIDR 列表 |
-| `apiServerIPs` | 路由过滤（不把 API server IP 加入路由） |
-| `cmInformer` | ConfigMap informer 用于路由/CIDR 缓存 |
+| `network` | NetworkManager：TUN、端口转发、路由、DNS |
+| `configMapStore` | ConfigMap informer 用于 CIDR 缓存 |
 
 **不使用的字段（在 Root Daemon 中无意义）**：
 | 字段 | 原因 |
@@ -140,26 +141,30 @@ CLI: kubevpn connect
   ▼
 User Daemon: Connect RPC
   ├── redirectConnectToSudoDaemon()
-  │     ├── 创建 ConnectOptions（控制面, 含 OwnerID）
+  │     ├── 创建 ConnectOptions（控制面, 含 OwnerID, Image）
   │     ├── resolveKubeconfig（SSH 跳板）
   │     ├── InitClient
-  │     ├── InitDHCP → RentIP（分配 TUN IP）
-  │     ├── 转发 req 到 Root Daemon ──────────┐
-  │     ├── 等待 Root Daemon 完成               │
-  │     ├── 启动 HealthPeriod                   │
-  │     └── 存入 svr.connections                │
-  │                                             ▼
+  │     ├── detectAndSetManagerNamespace
+  │     ├── forwardConnectToSudo()
+  │     │     ├── CreateOutboundPod（创建 traffic manager pod）
+  │     │     ├── UpgradeDeploy（升级 traffic manager）
+  │     │     ├── RentIP（通过 TunConfigService 分配 TUN IP）
+  │     │     ├── 转发 req 到 Root Daemon ──────────┐
+  │     │     ├── 等待 Root Daemon 完成               │
+  │     │     ├── 启动 HealthPeriod                   │
+  │     │     └── 存入 svr.connections                │
+  │                                                   ▼
   │                                    Root Daemon: Connect RPC
   │                                      ├── 创建 ConnectOptions（数据面）
   │                                      ├── GetIPFromContext（从 gRPC header 取 IP）
   │                                      ├── DoConnect()
-  │                                      │     ├── InitDHCP
   │                                      │     ├── getCIDR
-  │                                      │     ├── createOutboundPod
-  │                                      │     ├── portForward
-  │                                      │     ├── startLocalTunServer
-  │                                      │     ├── addRouteDynamic
-  │                                      │     └── setupDNS
+  │                                      │     ├── NetworkManager.Start()
+  │                                      │     │     ├── portForward
+  │                                      │     │     ├── startTUN
+  │                                      │     │     ├── AddRouteDynamic
+  │                                      │     │     └── setupDNS
+  │                                      │     └── StartIPWatcher
   │                                      └── 存入 svr.connections
   ▼
 User Daemon: 返回成功给 CLI

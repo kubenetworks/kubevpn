@@ -33,8 +33,8 @@ type ConfigMapStore struct {
 	healthStatus HealthStatus
 }
 
-// NewConfigMapStore creates a new ConfigMapStore for the given clientset and namespace.
-func NewConfigMapStore(clientset kubernetes.Interface, managerNamespace string) *ConfigMapStore {
+// newConfigMapStore creates a new ConfigMapStore for the given clientset and namespace.
+func newConfigMapStore(clientset kubernetes.Interface, managerNamespace string) *ConfigMapStore {
 	return &ConfigMapStore{
 		clientset:        clientset,
 		managerNamespace: managerNamespace,

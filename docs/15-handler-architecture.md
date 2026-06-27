@@ -123,17 +123,31 @@ TunConfigService push (WatchTunIP stream)
 service TunConfigService {
   rpc GetTunIP(TunIPRequest) returns (TunIPResponse);      // 分配/续租
   rpc WatchTunIP(TunIPRequest) returns (stream TunIPResponse); // 变更推送
-  rpc ReleaseTunIP(TunIPRequest) returns (TunIPResponse);  // 显式释放 (可选)
+  // 无 ReleaseTunIP — 遵循 DHCP 协议，lease 过期自动回收
+}
+
+message TunIPRequest {
+  string OwnerID = 1;
+  string Namespace = 2;
+  repeated string ExcludeIPs = 4;  // client 本地接口 IP，分配时跳过
 }
 ```
+
+### 冲突避免 — ExcludeIPs
+
+- `rentIP` 将本地所有接口 IP 作为 `ExcludeIPs` 传给 server
+- server 调用 `dhcp.RentIPExcluding(excludeIPs)`，在单次 DHCP 事务中跳过冲突 IP
+- 通常一次调用即可；保留轻量重试（最多 15 次）处理非原子竞态
 
 ### 续租机制
 
 - `GetTunIP` 每次调用刷新 `LastRenew` 时间戳（兼做续租）
+- `WatchTunIP` stream 活跃时，server 端每 `LeaseDuration/3`（约 100s）自动刷新 `LastRenew`（隐式续租）
 - `StartLeaseReaper` 后台每 30s 扫描过期分配 (TTL = 5 min)
 - 过期 IP 自动回收到 DHCP 池
 - **不再需要显式 Release** — crash 后 lease 自动过期回收
 - WatchTunIP stream 断开后，如果 client 不再调用 GetTunIP，IP 5 分钟后回收
+- 详见 [23-watchtunip-lease-renewal-fix.md](23-watchtunip-lease-renewal-fix.md)
 
 ### OwnerID
 
@@ -217,7 +231,7 @@ pkg/handler/
 ├── k8s_client.go         K8sClient 嵌入结构
 ├── connection.go         Connection 接口定义
 ├── healthchecker.go      HealthStatus 类型
-├── cleaner.go            Cleanup, releaseTunIP, 信号处理
+├── cleaner.go            Cleanup, 信号处理
 ├── sync.go               SyncOptions, DoSync
 ├── traffmgr.go           Traffic manager pod 创建
 ├── traffmgr_resources.go K8s 资源生成器
