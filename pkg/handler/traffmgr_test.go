@@ -1,11 +1,15 @@
 package handler
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
@@ -109,7 +113,7 @@ func TestGenRoleBinding(t *testing.T) {
 
 func TestGenService(t *testing.T) {
 	namespace := "test-ns"
-	svc := genService(namespace, "tcp-10801", "tcp-9002", "tcp-80", "udp-53")
+	svc := genService(namespace)
 
 	if svc.Name != config.ConfigMapPodTrafficManager {
 		t.Fatalf("expected name %q, got %q", config.ConfigMapPodTrafficManager, svc.Name)
@@ -137,10 +141,10 @@ func TestGenService(t *testing.T) {
 		protocol v1.Protocol
 	}
 	expected := []portCase{
-		{"tcp-10801", 10801, v1.ProtocolTCP},
-		{"tcp-9002", 9002, v1.ProtocolTCP},
-		{"tcp-80", 80, v1.ProtocolTCP},
-		{"udp-53", 53, v1.ProtocolUDP},
+		{config.PortNameTCP, 10801, v1.ProtocolTCP},
+		{config.PortNameEnvoy, 9002, v1.ProtocolTCP},
+		{config.PortNameHTTP, 80, v1.ProtocolTCP},
+		{config.PortNameDNS, 53, v1.ProtocolUDP},
 	}
 	for i, e := range expected {
 		p := svc.Spec.Ports[i]
@@ -191,14 +195,10 @@ func TestGenSecret(t *testing.T) {
 
 func TestGenDeploySpec(t *testing.T) {
 	namespace := "test-ns"
-	tcp10801 := "tcp-10801"
-	tcp9002 := "tcp-9002"
-	udp53 := "udp-53"
-	tcp80 := "tcp-80"
 	image := "docker.io/naison/kubevpn:test"
 	imagePullSecret := "my-pull-secret"
 
-	deploy := genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullSecret)
+	deploy := genDeploySpec(namespace, image, imagePullSecret)
 
 	if deploy.Name != config.ConfigMapPodTrafficManager {
 		t.Fatalf("expected name %q, got %q", config.ConfigMapPodTrafficManager, deploy.Name)
@@ -296,7 +296,7 @@ func TestGenDeploySpec(t *testing.T) {
 }
 
 func TestGenDeploySpecNoImagePullSecret(t *testing.T) {
-	deploy := genDeploySpec("ns", "tcp-10801", "tcp-9002", "udp-53", "tcp-80", "img:latest", "")
+	deploy := genDeploySpec("ns", "img:latest", "")
 
 	if len(deploy.Spec.Template.Spec.ImagePullSecrets) != 0 {
 		t.Fatalf("expected no imagePullSecrets when name is empty, got %d", len(deploy.Spec.Template.Spec.ImagePullSecrets))
@@ -424,7 +424,7 @@ func TestGenMutatingWebhookConfiguration(t *testing.T) {
 }
 
 func TestGenDeploySpec_Probes(t *testing.T) {
-	deploy := genDeploySpec("test-ns", "tcp-10801", "tcp-9002", "udp-53", "tcp-80", "img:latest", "")
+	deploy := genDeploySpec("test-ns", "img:latest", "")
 	containers := deploy.Spec.Template.Spec.Containers
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
@@ -535,9 +535,7 @@ func TestGenDeploySpec_Probes(t *testing.T) {
 }
 
 func TestGenDeploySpec_ContainerPorts(t *testing.T) {
-	deploy := genDeploySpec("test-ns",
-		config.PortNameTCP, config.PortNameEnvoy, config.PortNameDNS, config.PortNameHTTP,
-		"img:latest", "")
+	deploy := genDeploySpec("test-ns", "img:latest", "")
 	containers := deploy.Spec.Template.Spec.Containers
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
@@ -599,7 +597,7 @@ func TestGenDeploySpec_ContainerPorts(t *testing.T) {
 }
 
 func TestGenDeploySpec_SecurityContext(t *testing.T) {
-	deploy := genDeploySpec("test-ns", "tcp-10801", "tcp-9002", "udp-53", "tcp-80", "img:latest", "")
+	deploy := genDeploySpec("test-ns", "img:latest", "")
 	containers := deploy.Spec.Template.Spec.Containers
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
@@ -637,6 +635,104 @@ func TestGenDeploySpec_SecurityContext(t *testing.T) {
 
 // Ensure the returned types satisfy their respective interfaces for type safety.
 var _ *v1.ServiceAccount = genServiceAccount("x")
-var _ *v1.Service = genService("x", "", "", "", "")
+var _ *v1.Service = genService("x")
 var _ *v1.Secret = genSecret("x", nil, nil, nil)
-var _ *appsv1.Deployment = genDeploySpec("x", "", "", "", "", "", "")
+var _ *appsv1.Deployment = genDeploySpec("x", "", "")
+
+func TestWaitPodReady_Timeout(t *testing.T) {
+	namespace := "test-ns"
+	labelSelector := "app=test-timeout"
+
+	clientset := fake.NewSimpleClientset()
+	podClient := clientset.CoreV1().Pods(namespace)
+
+	// Create a pod that is Pending (not ready) — it will never transition.
+	pendingPod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pending-pod",
+			Namespace: namespace,
+			Labels:    map[string]string{"app": "test-timeout"},
+		},
+		Status: v1.PodStatus{
+			Phase: v1.PodPending,
+			Conditions: []v1.PodCondition{
+				{
+					Type:   v1.PodReady,
+					Status: v1.ConditionFalse,
+				},
+			},
+		},
+	}
+	_, err := podClient.Create(context.Background(), pendingPod, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create pending pod: %v", err)
+	}
+
+	// Use an already-cancelled context so WaitPodReady returns immediately.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = WaitPodReady(ctx, podClient, labelSelector)
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if err.Error() != "wait for pod ready timeout" {
+		t.Fatalf("expected error %q, got %q", "wait for pod ready timeout", err.Error())
+	}
+}
+
+func TestWaitPodReady_TransitionsToReady(t *testing.T) {
+	namespace := "test-ns"
+	labelSelector := "app=test-transition"
+
+	clientset := fake.NewSimpleClientset()
+	podClient := clientset.CoreV1().Pods(namespace)
+
+	// Create a pod that starts as Pending (not ready).
+	pendingPod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "transitioning-pod",
+			Namespace: namespace,
+			Labels:    map[string]string{"app": "test-transition"},
+		},
+		Status: v1.PodStatus{
+			Phase: v1.PodPending,
+			Conditions: []v1.PodCondition{
+				{
+					Type:   v1.PodReady,
+					Status: v1.ConditionFalse,
+				},
+			},
+		},
+	}
+	_, err := podClient.Create(context.Background(), pendingPod, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create pending pod: %v", err)
+	}
+
+	// After a short delay, update the pod to be Ready.
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		readyPod := pendingPod.DeepCopy()
+		readyPod.Status.Phase = v1.PodRunning
+		readyPod.Status.Conditions = []v1.PodCondition{
+			{
+				Type:   v1.PodReady,
+				Status: v1.ConditionTrue,
+			},
+		}
+		_, updateErr := podClient.UpdateStatus(context.Background(), readyPod, metav1.UpdateOptions{})
+		if updateErr != nil {
+			// Cannot t.Fatal from goroutine; the test will fail on timeout instead.
+			t.Errorf("failed to update pod status: %v", updateErr)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err = WaitPodReady(ctx, podClient, labelSelector)
+	if err != nil {
+		t.Fatalf("expected pod to become ready, got error: %v", err)
+	}
+}

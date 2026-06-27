@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"maps"
 	"sort"
@@ -45,7 +46,38 @@ func renderEnvoyConfig(tmplStr string, value string) string {
 	return buf.String()
 }
 
-func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, ns, nodeID string, localTunIPv4, localTunIPv6 string, headers map[string]string, port []controlplane.ContainerPort, portmap map[int32]string, fargateMode bool) error {
+// envoyRuleSpec captures the parameters for adding a proxy rule to the Envoy config.
+// Avoids passing 10+ individual arguments through addEnvoyConfig → addVirtualRule.
+type envoyRuleSpec struct {
+	Namespace    string
+	NodeID       string
+	LocalTunIPv4 string
+	LocalTunIPv6 string
+	Headers      map[string]string
+	Ports        []controlplane.ContainerPort
+	PortMap      map[int32]string
+	FargateMode  bool
+	OwnerID      string
+}
+
+// validate checks that all required fields are populated.
+func (s *envoyRuleSpec) validate() error {
+	if s.Namespace == "" {
+		return errors.New("envoyRuleSpec: namespace must not be empty")
+	}
+	if s.NodeID == "" {
+		return errors.New("envoyRuleSpec: nodeID must not be empty")
+	}
+	if s.LocalTunIPv4 == "" {
+		return errors.New("envoyRuleSpec: localTunIPv4 must not be empty")
+	}
+	return nil
+}
+
+func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, spec envoyRuleSpec) error {
+	if err := spec.validate(); err != nil {
+		return err
+	}
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		configMap, err := mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 		if err != nil {
@@ -58,7 +90,7 @@ func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, ns
 			}
 		}
 
-		v = addVirtualRule(v, ns, nodeID, port, headers, localTunIPv4, localTunIPv6, portmap, fargateMode)
+		v = addVirtualRule(v, spec)
 		marshal, err := yaml.Marshal(v)
 		if err != nil {
 			return err
@@ -69,61 +101,65 @@ func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, ns
 	})
 }
 
-func addVirtualRule(v []*controlplane.Virtual, ns, nodeID string, port []controlplane.ContainerPort, headers map[string]string, localTunIPv4, localTunIPv6 string, portmap map[int32]string, fargateMode bool) []*controlplane.Virtual {
+func addVirtualRule(v []*controlplane.Virtual, spec envoyRuleSpec) []*controlplane.Virtual {
 	index := -1
 	for i, virtual := range v {
-		if nodeID == virtual.UID && virtual.Namespace == ns {
+		if spec.NodeID == virtual.UID && virtual.Namespace == spec.Namespace {
 			index = i
 			break
 		}
 	}
-	// 1) if not found uid, means nobody proxying it, just add it
+
+	newRule := &controlplane.Rule{
+		Headers:      spec.Headers,
+		LocalTunIPv4: spec.LocalTunIPv4,
+		LocalTunIPv6: spec.LocalTunIPv6,
+		OwnerID:      spec.OwnerID,
+		PortMap:      spec.PortMap,
+	}
+
+	// 1) no existing Virtual for this workload — create one
 	if index < 0 {
 		return append(v, &controlplane.Virtual{
-			UID:         nodeID,
-			Namespace:   ns,
-			FargateMode: fargateMode,
-			Ports:       port,
-			Rules: []*controlplane.Rule{{
-				Headers:      headers,
-				LocalTunIPv4: localTunIPv4,
-				LocalTunIPv6: localTunIPv6,
-				PortMap:      portmap,
-			}},
+			SchemaVersion: controlplane.CurrentSchemaVersion,
+			UID:           spec.NodeID,
+			Namespace:     spec.Namespace,
+			FargateMode:   spec.FargateMode,
+			Ports:         spec.Ports,
+			Rules:         []*controlplane.Rule{newRule},
 		})
 	}
 
-	// 2) if already proxy deployment/xxx with header foo=bar. also want to add env=dev
+	// 2) same user updating their own rule (matched by TUN IP, non-fargate)
 	if !v[index].IsFargateMode() {
 		for j, rule := range v[index].Rules {
-			if rule.LocalTunIPv4 == localTunIPv4 &&
-				rule.LocalTunIPv6 == localTunIPv6 {
-				v[index].Rules[j].Headers = util.Merge[string, string](v[index].Rules[j].Headers, headers)
-				v[index].Rules[j].PortMap = util.Merge[int32, string](v[index].Rules[j].PortMap, portmap)
+			if rule.LocalTunIPv4 == spec.LocalTunIPv4 &&
+				rule.LocalTunIPv6 == spec.LocalTunIPv6 {
+				v[index].Rules[j].Headers = util.Merge[string, string](v[index].Rules[j].Headers, spec.Headers)
+				v[index].Rules[j].PortMap = util.Merge[int32, string](v[index].Rules[j].PortMap, spec.PortMap)
+				if v[index].Rules[j].OwnerID == "" {
+					v[index].Rules[j].OwnerID = spec.OwnerID
+				}
 				return v
 			}
 		}
 	}
 
-	// 3) if already proxy deployment/xxx with header foo=bar, other user can replace it to self
+	// 3) different user taking over a rule with matching headers
 	for j, rule := range v[index].Rules {
-		if maps.Equal(rule.Headers, headers) {
-			v[index].Rules[j].LocalTunIPv6 = localTunIPv6
-			v[index].Rules[j].LocalTunIPv4 = localTunIPv4
-			v[index].Rules[j].PortMap = portmap
+		if maps.Equal(rule.Headers, spec.Headers) {
+			v[index].Rules[j].LocalTunIPv6 = spec.LocalTunIPv6
+			v[index].Rules[j].LocalTunIPv4 = spec.LocalTunIPv4
+			v[index].Rules[j].OwnerID = spec.OwnerID
+			v[index].Rules[j].PortMap = spec.PortMap
 			return v
 		}
 	}
 
-	// 4) if header is not same and tunIP is not same, means another users, just add it
-	v[index].Rules = append(v[index].Rules, &controlplane.Rule{
-		Headers:      headers,
-		LocalTunIPv4: localTunIPv4,
-		LocalTunIPv6: localTunIPv6,
-		PortMap:      portmap,
-	})
+	// 4) new user with different headers — append
+	v[index].Rules = append(v[index].Rules, newRule)
 	if v[index].Ports == nil {
-		v[index].Ports = port
+		v[index].Ports = spec.Ports
 	}
 
 	// envoy rule have order, eg:

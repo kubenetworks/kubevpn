@@ -105,10 +105,6 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image s
 	}
 	patches := set.CalculatePatches(infos, scheme.DefaultJSONEncoder(), func(obj pkgruntime.Object) ([]byte, error) {
 		_, err = polymorphichelpers.UpdatePodSpecForObjectFn(obj, func(spec *v1.PodSpec) error {
-			tcp10801 := config.PortNameTCP
-			tcp9002 := config.PortNameEnvoy
-			tcp80 := config.PortNameHTTP
-			udp53 := config.PortNameDNS
 			var imagePullSecret string
 			for _, secret := range spec.ImagePullSecrets {
 				if secret.Name != "" {
@@ -116,7 +112,7 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image s
 					break
 				}
 			}
-			deploySpec := genDeploySpec(ns, tcp10801, tcp9002, udp53, tcp80, image, imagePullSecret)
+			deploySpec := genDeploySpec(ns, image, imagePullSecret)
 			*spec = deploySpec.Spec.Template.Spec
 			return nil
 		})
@@ -188,11 +184,7 @@ func upgradeSecretSpec(ctx context.Context, f cmdutil.Factory, ns string) error 
 }
 
 func upgradeServiceSpec(ctx context.Context, f cmdutil.Factory, ns string) error {
-	tcp10801 := config.PortNameTCP
-	tcp9002 := config.PortNameEnvoy
-	tcp80 := config.PortNameHTTP
-	udp53 := config.PortNameDNS
-	svcSpec := genService(ns, tcp10801, tcp9002, tcp80, udp53)
+	svcSpec := genService(ns)
 
 	clientset, err := f.KubernetesClientSet()
 	if err != nil {

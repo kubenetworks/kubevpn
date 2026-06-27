@@ -32,7 +32,7 @@ func TestAddEnvoyConfig_NewEntry(t *testing.T) {
 	headers := map[string]string{"version": "v1"}
 	portmap := map[int32]string{8080: "9090"}
 
-	err := addEnvoyConfig(context.Background(), mapInterface, "test-ns", "deployments.apps.nginx", "10.0.0.1", "fd00::1", headers, ports, portmap, false)
+	err := addEnvoyConfig(context.Background(), mapInterface, envoyRuleSpec{Namespace: "test-ns", NodeID: "deployments.apps.nginx", LocalTunIPv4: "10.0.0.1", LocalTunIPv6: "fd00::1", Headers: headers, Ports: ports, PortMap: portmap, OwnerID: "test-owner"})
 	if err != nil {
 		t.Fatalf("addEnvoyConfig returned error: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestAddEnvoyConfig_MergeExisting(t *testing.T) {
 	newHeaders := map[string]string{"env": "dev"}
 	newPortmap := map[int32]string{9090: "7070"}
 
-	err := addEnvoyConfig(context.Background(), mapInterface, "test-ns", "deployments.apps.nginx", "10.0.0.1", "fd00::1", newHeaders, nil, newPortmap, false)
+	err := addEnvoyConfig(context.Background(), mapInterface, envoyRuleSpec{Namespace: "test-ns", NodeID: "deployments.apps.nginx", LocalTunIPv4: "10.0.0.1", LocalTunIPv6: "fd00::1", Headers: newHeaders, PortMap: newPortmap, OwnerID: "test-owner"})
 	if err != nil {
 		t.Fatalf("addEnvoyConfig returned error: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestAddEnvoyConfig_FargateMode(t *testing.T) {
 	headers := map[string]string{"user": "alice"}
 	portmap := map[int32]string{8080: "15001:9090"}
 
-	err := addEnvoyConfig(context.Background(), mapInterface, "test-ns", "deployments.apps.web", "10.0.0.5", "fd00::5", headers, ports, portmap, true)
+	err := addEnvoyConfig(context.Background(), mapInterface, envoyRuleSpec{Namespace: "test-ns", NodeID: "deployments.apps.web", LocalTunIPv4: "10.0.0.5", LocalTunIPv6: "fd00::5", Headers: headers, Ports: ports, PortMap: portmap, FargateMode: true, OwnerID: "test-owner"})
 	if err != nil {
 		t.Fatalf("addEnvoyConfig returned error: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestRemoveEnvoyConfig_Found(t *testing.T) {
 	headers := map[string]string{"version": "v2"}
 	portmap := map[int32]string{8080: "9090"}
 
-	err := addEnvoyConfig(context.Background(), mapInterface, "test-ns", "deployments.apps.nginx", "10.0.0.1", "fd00::1", headers, ports, portmap, false)
+	err := addEnvoyConfig(context.Background(), mapInterface, envoyRuleSpec{Namespace: "test-ns", NodeID: "deployments.apps.nginx", LocalTunIPv4: "10.0.0.1", LocalTunIPv6: "fd00::1", Headers: headers, Ports: ports, PortMap: portmap, OwnerID: "test-owner"})
 	if err != nil {
 		t.Fatalf("addEnvoyConfig returned error: %v", err)
 	}

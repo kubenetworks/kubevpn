@@ -350,7 +350,7 @@ func (u *ut) getServiceIP(app string) (string, error) {
 			return ip, nil
 		}
 	}
-	return "", fmt.Errorf("failed to found service ip for service %s", app)
+	return "", fmt.Errorf("failed to find service IP for service %s", app)
 }
 
 func (u *ut) proxyServiceReviewsPodIP(t *testing.T) {
@@ -377,7 +377,7 @@ func (u *ut) getPodIP(app string) (string, error) {
 			return pod.Status.PodIP, nil
 		}
 	}
-	return "", fmt.Errorf("failed to found pod ip for service %s", app)
+	return "", fmt.Errorf("failed to find pod IP for service %s", app)
 }
 
 func (u *ut) proxyServiceReviewsServiceIP(t *testing.T) {

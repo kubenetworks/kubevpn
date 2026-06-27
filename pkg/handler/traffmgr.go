@@ -81,28 +81,15 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 
 	// 5) create service
 	plog.G(ctx).Infof("Creating Service %s", config.ConfigMapPodTrafficManager)
-	tcp10801 := config.PortNameTCP
-	tcp9002 := config.PortNameEnvoy
-	tcp80 := config.PortNameHTTP
-	udp53 := config.PortNameDNS
-	svcSpec := genService(namespace, tcp10801, tcp9002, tcp80, udp53)
+	svcSpec := genService(namespace)
 	_, err = clientset.CoreV1().Services(namespace).Create(ctx, svcSpec, metav1.CreateOptions{})
 	if err != nil {
 		plog.G(ctx).Errorf("Creating Service error: %v", err)
 		return err
 	}
 
-	crt, key, host, err := util.GenTLSCert(ctx, namespace)
+	crt, err := createTLSSecret(ctx, clientset, namespace)
 	if err != nil {
-		return err
-	}
-	// reason why not use v1.SecretTypeTls is because it needs key called tls.crt and tls.key, but tls.key can not as env variable
-	// ➜  ~ export tls.key=a
-	//export: not valid in this context: tls.key
-	secret := genSecret(namespace, crt, key, host)
-	_, err = clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Creating secret error: %v", err)
 		return err
 	}
 
@@ -116,7 +103,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 
 	// 7) create deployment
 	plog.G(ctx).Infof("Creating Deployment %s", config.ConfigMapPodTrafficManager)
-	deploy := genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullSecretName)
+	deploy := genDeploySpec(namespace, image, imagePullSecretName)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
@@ -165,6 +152,26 @@ func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelec
 		return errors.New("wait for pod ready timeout")
 	}
 	return nil
+}
+
+// createTLSSecret generates a TLS certificate and creates the corresponding
+// Secret in the cluster. It returns the CA certificate bytes needed by the
+// MutatingWebhookConfiguration.
+// Note: v1.SecretTypeOpaque is used instead of v1.SecretTypeTls because TLS
+// secret keys (tls.crt, tls.key) contain dots which are invalid as shell
+// environment variable names, and the secret is mounted as env vars.
+func createTLSSecret(ctx context.Context, clientset kubernetes.Interface, namespace string) (crt []byte, err error) {
+	var key, host []byte
+	crt, key, host, err = util.GenTLSCert(ctx, namespace)
+	if err != nil {
+		return nil, err
+	}
+	_, err = clientset.CoreV1().Secrets(namespace).Create(ctx, genSecret(namespace, crt, key, host), metav1.CreateOptions{})
+	if err != nil {
+		plog.G(ctx).Errorf("Creating secret error: %v", err)
+		return nil, err
+	}
+	return crt, nil
 }
 
 func cleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.Interface, namespace string) {

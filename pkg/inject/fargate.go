@@ -41,7 +41,17 @@ func (f *fargateInjector) Inject(ctx context.Context) error {
 		containerPort2EnvoyListenerPort[port[i].ContainerPort] = int32(randomPort)
 	}
 
-	err = addEnvoyConfig(ctx, o.Clientset.CoreV1().ConfigMaps(o.ManagerNamespace), o.Controller.Namespace, o.NodeID, localTunIPv4, localTunIPv6, o.Headers, port, portmap, true)
+	err = addEnvoyConfig(ctx, o.Clientset.CoreV1().ConfigMaps(o.ManagerNamespace), envoyRuleSpec{
+		Namespace:    o.Controller.Namespace,
+		NodeID:       o.NodeID,
+		LocalTunIPv4: localTunIPv4,
+		LocalTunIPv6: localTunIPv6,
+		Headers:      o.Headers,
+		Ports:        port,
+		PortMap:      portmap,
+		FargateMode:  true,
+		OwnerID:      o.OwnerID,
+	})
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to add envoy config: %v", err)
 		return err

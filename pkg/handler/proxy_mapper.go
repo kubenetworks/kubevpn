@@ -5,8 +5,6 @@ import (
 	"errors"
 	"maps"
 	"net/netip"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -203,10 +201,8 @@ func (m *Mapper) extractPortMapping(configMap *v1.ConfigMap) (map[int32]int32, e
 			if !maps.Equal(m.headers, rule.Headers) {
 				continue
 			}
-			for containerPort, portPair := range rule.PortMap {
-				if local, remote, ok := parsePortPair(containerPort, portPair); ok {
-					result[local] = remote
-				}
+			for _, pm := range rule.ParsePortMap() {
+				result[pm.LocalPort] = pm.EnvoyPort
 			}
 		}
 	}
@@ -229,23 +225,6 @@ func (m *Mapper) startTunnels(ctx context.Context, sshServer netip.AddrPort, por
 	}
 }
 
-// parsePortPair parses a port mapping string into (localPort, envoyRulePort).
-// Format is either "envoyPort:localPort" (colon-separated) or "envoyPort" (plain).
-func parsePortPair(containerPort int32, portPair string) (local, remote int32, ok bool) {
-	if before, after, found := strings.Cut(portPair, ":"); found {
-		envoyPort, err1 := strconv.Atoi(before)
-		localPort, err2 := strconv.Atoi(after)
-		if err1 != nil || err2 != nil {
-			return 0, 0, false
-		}
-		return int32(localPort), int32(envoyPort), true
-	}
-	envoyPort, err := strconv.Atoi(portPair)
-	if err != nil {
-		return 0, 0, false
-	}
-	return containerPort, int32(envoyPort), true
-}
 
 func cancelAllTunnels(tunnels *sync.Map) {
 	tunnels.Range(func(_, value any) bool {

@@ -41,8 +41,8 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (cache.SharedIndex
 		plog.G(ctx).Errorf("Failed to create clientset: %v", err)
 		return nil, nil, err
 	}
-	svcIndexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
-	svcInformer := informerv1.NewServiceInformer(clientSet, svcNs, 0, svcIndexers)
+	indexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
+	svcInformer := informerv1.NewServiceInformer(clientSet, svcNs, 0, indexers)
 	if err = c.watchAndRoute(ctx, svcInformer, func(obj any) []string {
 		svc, ok := obj.(*v1.Service)
 		if !ok {
@@ -53,8 +53,7 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (cache.SharedIndex
 		return nil, nil, err
 	}
 
-	podIndexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
-	podInformer := informerv1.NewPodInformer(clientSet, podNs, 0, podIndexers)
+	podInformer := informerv1.NewPodInformer(clientSet, podNs, 0, indexers)
 	if err = c.watchAndRoute(ctx, podInformer, func(obj any) []string {
 		p, ok := obj.(*v1.Pod)
 		if !ok || p.Spec.HostNetwork {
@@ -112,7 +111,7 @@ func (c *ConnectOptions) addRoute(ipStrList ...string) error {
 		}
 		var match bool
 		for _, p := range c.apiServerIPs {
-			// if pod ip or service ip is equal to apiServer ip, can not add it to route table
+			// if pod IP or service IP is equal to API server IP, cannot add it to route table
 			if p.Equal(ip) {
 				match = true
 				break

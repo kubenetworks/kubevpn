@@ -13,8 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/cmd/util/podcmd"
@@ -27,6 +25,8 @@ import (
 
 // SyncOptions holds configuration for syncthing-based file synchronization.
 type SyncOptions struct {
+	K8sClient
+
 	Namespace      string
 	Headers        map[string]string
 	Workloads      []string
@@ -40,11 +40,6 @@ type SyncOptions struct {
 	LocalDir             string
 	RemoteDir            string
 
-	clientset  *kubernetes.Clientset
-	restclient *rest.RESTClient
-	config     *rest.Config
-	factory    cmdutil.Factory
-
 	rollbackFuncList []func() error
 	ctx              context.Context
 	syncthingGUIAddr string
@@ -52,9 +47,8 @@ type SyncOptions struct {
 
 // InitClient initializes the Kubernetes client, REST client, and namespace from the given factory.
 func (d *SyncOptions) InitClient(f cmdutil.Factory) error {
-	d.factory = f
 	var err error
-	d.config, d.restclient, d.clientset, d.Namespace, err = util.InitKubeClient(f)
+	d.Namespace, err = d.K8sClient.InitClient(f)
 	return err
 }
 
@@ -115,7 +109,16 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 			return err
 		}
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			if err := d.prepareSyncPodSpec(ctx, spec, u, workload, kubeconfigJsonBytes, image, args, path, labelsMap); err != nil {
+			if err := d.prepareSyncPodSpec(ctx, syncPodSpec{
+				spec:       spec,
+				u:          u,
+				workload:   workload,
+				kubeconfig: kubeconfigJsonBytes,
+				image:      image,
+				args:       args,
+				path:       path,
+				labels:     labelsMap,
+			}); err != nil {
 				return err
 			}
 			_, createErr := client.Resource(controller.Mapping.Resource).Namespace(d.Namespace).Create(ctx, u, metav1.CreateOptions{})
@@ -145,15 +148,16 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 
 // prepareSyncPodSpec modifies the pod template spec for the sync resource by adding
 // annotations, labels, volumes, and containers needed for syncthing-based file sync.
-func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, spec *v1.PodTemplateSpec, u *unstructured.Unstructured, workload string, kubeconfigJsonBytes []byte, image string, args []string, path []string, labelsMap map[string]string) error {
+func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, s syncPodSpec) error {
+	spec := s.spec
 	anno := spec.GetAnnotations()
 	if anno == nil {
 		anno = map[string]string{}
 	}
-	anno[config.KUBECONFIG] = string(kubeconfigJsonBytes)
+	anno[config.KUBECONFIG] = string(s.kubeconfig)
 	spec.SetAnnotations(anno)
 
-	spec.SetLabels(labelsMap)
+	spec.SetLabels(s.labels)
 
 	syncDataDirName := config.VolumeSyncthing
 	spec.Spec.Volumes = append(spec.Spec.Volumes,
@@ -210,8 +214,8 @@ func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, spec *v1.PodTempla
 	if spec.Spec.SecurityContext == nil {
 		spec.Spec.SecurityContext = &v1.PodSecurityContext{}
 	}
-	container := genVPNContainer(workload, d.Namespace, image, args)
-	containerSync := genSyncthingContainer(d.RemoteDir, syncDataDirName, image)
+	container := genVPNContainer(s.workload, d.Namespace, s.image, s.args)
+	containerSync := genSyncthingContainer(d.RemoteDir, syncDataDirName, s.image)
 	spec.Spec.Containers = append(containers, *container, *containerSync)
 
 	marshal, err := json.Marshal(spec)
@@ -223,7 +227,7 @@ func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, spec *v1.PodTempla
 	if err != nil {
 		return err
 	}
-	if err = unstructured.SetNestedField(u.Object, m, path...); err != nil {
+	if err = unstructured.SetNestedField(s.u.Object, m, s.path...); err != nil {
 		return err
 	}
 	return nil
@@ -290,12 +294,20 @@ func (d *SyncOptions) AddRollbackFunc(f func() error) {
 	d.rollbackFuncList = append(d.rollbackFuncList, f)
 }
 
-// GetFactory returns the kubectl factory used by this SyncOptions instance.
-func (d *SyncOptions) GetFactory() cmdutil.Factory {
-	return d.factory
-}
-
 // GetSyncthingGUIAddr returns the local address of the syncthing GUI for status monitoring.
 func (d *SyncOptions) GetSyncthingGUIAddr() string {
 	return d.syncthingGUIAddr
+}
+
+// syncPodSpec bundles the parameters needed by prepareSyncPodSpec to modify
+// a pod template for syncthing-based file sync.
+type syncPodSpec struct {
+	spec       *v1.PodTemplateSpec
+	u          *unstructured.Unstructured
+	workload   string
+	kubeconfig []byte
+	image      string
+	args       []string
+	path       []string
+	labels     map[string]string
 }
