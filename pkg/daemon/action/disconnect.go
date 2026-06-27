@@ -8,6 +8,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -51,7 +52,7 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		if err != nil {
 			return err
 		}
-		err = util.CopyGRPCStream[rpc.DisconnectResponse](connResp, resp)
+		err = grpcutil.CopyGRPCStream[rpc.DisconnectResponse](connResp, resp)
 		if err != nil {
 			return err
 		}

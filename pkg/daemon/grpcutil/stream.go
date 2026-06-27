@@ -1,4 +1,4 @@
-package util
+package grpcutil
 
 import (
 	"context"
@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime/debug"
 
 	"google.golang.org/grpc"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // Printable is an interface for gRPC response messages that can provide a human-readable string.
@@ -111,15 +109,6 @@ func CopyAndConvertGRPCStream[I any, O any](r grpc.ClientStream, w grpc.ServerSt
 		if err != nil {
 			return err
 		}
-	}
-}
-
-// HandleCrash recovers from a panic, logs the stack trace, then re-panics.
-func HandleCrash() {
-	if r := recover(); r != nil {
-		plog.GetLogger(context.Background()).Error(r)
-		plog.GetLogger(context.Background()).Panicf("Panic: %s", string(debug.Stack()))
-		panic(r)
 	}
 }
 

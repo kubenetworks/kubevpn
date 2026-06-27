@@ -83,39 +83,10 @@ func Parse(flags *pflag.FlagSet, copts *ContainerOptions) (*Config, *HostConfig,
 		attachStderr = true
 	}
 
-	var err error
-
 	mounts := copts.mounts.Value()
-	var binds []string
-	volumes := copts.volumes.GetMap()
-	// add any bind targets to the list of container volumes
-	for bind := range copts.volumes.GetMap() {
-		parsed, err := loader.ParseVolume(bind)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		if parsed.Source != "" {
-			toBind := bind
-
-			if parsed.Type == string(mounttypes.TypeBind) {
-				if hostPart, targetPath, ok := strings.Cut(bind, ":"); ok {
-					if strings.HasPrefix(hostPart, "."+string(filepath.Separator)) || hostPart == "." {
-						if absHostPart, err := filepath.Abs(hostPart); err == nil {
-							hostPart = absHostPart
-						}
-					}
-					toBind = hostPart + ":" + targetPath
-				}
-			}
-
-			// after creating the bind mount we want to delete it from the copts.volumes values because
-			// we do not want bind mounts being committed to image configs
-			binds = append(binds, toBind)
-			// We should delete from the map (`volumes`) here, as deleting from copts.volumes will not work if
-			// there are duplicates entries.
-			delete(volumes, bind)
-		}
+	binds, volumes, err := parseVolumes(copts.volumes)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	var (
@@ -134,46 +105,9 @@ func Parse(flags *pflag.FlagSet, copts *ContainerOptions) (*Config, *HostConfig,
 		entrypoint = []string{""}
 	}
 
-	publishOpts := copts.publish.GetAll()
-	var (
-		ports         map[nat.Port]struct{}
-		portBindings  map[nat.Port][]nat.PortBinding
-		convertedOpts []string
-	)
-
-	convertedOpts, err = convertToStandardNotation(publishOpts)
+	ports, portBindings, err := parsePorts(copts.publish, copts.expose)
 	if err != nil {
 		return nil, nil, err
-	}
-
-	ports, portBindings, err = nat.ParsePortSpecs(convertedOpts)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Merge in exposed ports to the map of published ports
-	for _, e := range copts.expose.GetAll() {
-		if strings.Contains(e, ":") {
-			return nil, nil, fmt.Errorf("invalid port format for --expose: %s", e)
-		}
-		// support two formats for expose, original format <portnum>/[<proto>]
-		// or <startport-endport>/[<proto>]
-		proto, port := nat.SplitProtoPort(e)
-		// Parse the start and end port and create a sequence of ports to expose
-		// if expose a port, the start and end port are the same
-		start, end, err := nat.ParsePortRange(port)
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid range format for --expose: %s: %w", e, err)
-		}
-		for i := start; i <= end; i++ {
-			p, err := nat.NewPort(proto, strconv.FormatUint(i, 10))
-			if err != nil {
-				return nil, nil, err
-			}
-			if _, exists := ports[p]; !exists {
-				ports[p] = struct{}{}
-			}
-		}
 	}
 
 	config := &Config{
@@ -198,6 +132,79 @@ func Parse(flags *pflag.FlagSet, copts *ContainerOptions) (*Config, *HostConfig,
 	}
 
 	return config, hostConfig, nil
+}
+
+// parseVolumes extracts bind mounts and named volumes from the volume options.
+// Bind mounts (with a host source path) are returned separately so they are
+// not committed to image configs.
+func parseVolumes(volumeOpts opts.ListOpts) (binds []string, volumes map[string]struct{}, err error) {
+	volumes = volumeOpts.GetMap()
+	for bind := range volumeOpts.GetMap() {
+		parsed, err := loader.ParseVolume(bind)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if parsed.Source != "" {
+			toBind := bind
+
+			if parsed.Type == string(mounttypes.TypeBind) {
+				if hostPart, targetPath, ok := strings.Cut(bind, ":"); ok {
+					if strings.HasPrefix(hostPart, "."+string(filepath.Separator)) || hostPart == "." {
+						if absHostPart, err := filepath.Abs(hostPart); err == nil {
+							hostPart = absHostPart
+						}
+					}
+					toBind = hostPart + ":" + targetPath
+				}
+			}
+
+			binds = append(binds, toBind)
+			// Delete from the map (not from volumeOpts) to handle duplicate entries.
+			delete(volumes, bind)
+		}
+	}
+	return binds, volumes, nil
+}
+
+// parsePorts parses published and exposed port options into a PortSet and PortMap.
+func parsePorts(publish, expose opts.ListOpts) (nat.PortSet, nat.PortMap, error) {
+	convertedOpts, err := convertToStandardNotation(publish.GetAll())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ports, portBindings, err := nat.ParsePortSpecs(convertedOpts)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Merge in exposed ports to the map of published ports
+	for _, e := range expose.GetAll() {
+		if strings.Contains(e, ":") {
+			return nil, nil, fmt.Errorf("invalid port format for --expose: %s", e)
+		}
+		// support two formats for expose, original format <portnum>/[<proto>]
+		// or <startport-endport>/[<proto>]
+		proto, port := nat.SplitProtoPort(e)
+		// Parse the start and end port and create a sequence of ports to expose
+		// if expose a port, the start and end port are the same
+		start, end, err := nat.ParsePortRange(port)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid range format for --expose: %s, error: %s", e, err)
+		}
+		for i := start; i <= end; i++ {
+			p, err := nat.NewPort(proto, strconv.FormatUint(i, 10))
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, exists := ports[p]; !exists {
+				ports[p] = struct{}{}
+			}
+		}
+	}
+
+	return ports, portBindings, nil
 }
 
 func convertToStandardNotation(ports []string) ([]string, error) {

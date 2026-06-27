@@ -128,3 +128,115 @@ func TestServerName(t *testing.T) {
 		})
 	}
 }
+
+func TestIpsToStrings(t *testing.T) {
+	cases := []struct {
+		name string
+		ips  []net.IP
+		want []string
+	}{
+		{"nil input", nil, []string{}},
+		{"empty slice", []net.IP{}, []string{}},
+		{"single IPv4", []net.IP{net.IPv4(127, 0, 0, 1)}, []string{"127.0.0.1"}},
+		{"multiple IPv4", []net.IP{net.IPv4(10, 0, 0, 1), net.IPv4(192, 168, 1, 1)}, []string{"10.0.0.1", "192.168.1.1"}},
+		{"IPv6 loopback", []net.IP{net.IPv6loopback}, []string{"::1"}},
+		{"mixed", []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback}, []string{"127.0.0.1", "::1"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := ipsToStrings(c.ips)
+			if len(got) != len(c.want) {
+				t.Fatalf("got %d elements, want %d", len(got), len(c.want))
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Errorf("[%d]: got %q, want %q", i, got[i], c.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestGetTlsClientConfig_WithValidCert(t *testing.T) {
+	crt, key, serverName, err := GenTLSCert(context.Background(), "test-ns")
+	if err != nil {
+		t.Fatalf("GenTLSCert: %v", err)
+	}
+	secret := map[string][]byte{
+		config.TLSCertKey:       crt,
+		config.TLSPrivateKeyKey: key,
+		config.TLSServerName:    serverName,
+	}
+	cfg, err := GetTlsClientConfig(secret)
+	if err != nil {
+		t.Fatalf("GetTlsClientConfig: %v", err)
+	}
+	if cfg.ServerName != string(serverName) {
+		t.Errorf("ServerName: got %q, want %q", cfg.ServerName, string(serverName))
+	}
+	if cfg.MinVersion != tls.VersionTLS13 {
+		t.Errorf("MinVersion: got %d, want %d", cfg.MinVersion, tls.VersionTLS13)
+	}
+	if cfg.RootCAs == nil {
+		t.Error("RootCAs should not be nil")
+	}
+	if len(cfg.Certificates) != 1 {
+		t.Errorf("Certificates: got %d, want 1", len(cfg.Certificates))
+	}
+}
+
+func TestGetTlsClientConfig_InvalidKeyPair(t *testing.T) {
+	secret := map[string][]byte{
+		config.TLSCertKey:       []byte("not-a-cert"),
+		config.TLSPrivateKeyKey: []byte("not-a-key"),
+		config.TLSServerName:    []byte("test"),
+	}
+	_, err := GetTlsClientConfig(secret)
+	if err == nil {
+		t.Fatal("expected error for invalid cert/key pair")
+	}
+}
+
+func TestGetTlsClientConfig_NilInput(t *testing.T) {
+	t.Setenv(config.TLSCertKey, "")
+	t.Setenv(config.TLSPrivateKeyKey, "")
+	t.Setenv(config.TLSServerName, "")
+	_, err := GetTlsClientConfig(nil)
+	if !errors.Is(err, ErrNoTLSConfig) {
+		t.Fatalf("expected ErrNoTLSConfig, got: %v", err)
+	}
+}
+
+func TestGetTlsServerConfig_WithValidCert(t *testing.T) {
+	crt, key, serverName, err := GenTLSCert(context.Background(), "test-ns")
+	if err != nil {
+		t.Fatalf("GenTLSCert: %v", err)
+	}
+	secret := map[string][]byte{
+		config.TLSCertKey:       crt,
+		config.TLSPrivateKeyKey: key,
+		config.TLSServerName:    serverName,
+	}
+	cfg, err := GetTlsServerConfig(secret)
+	if err != nil {
+		t.Fatalf("GetTlsServerConfig: %v", err)
+	}
+	if cfg.MinVersion != tls.VersionTLS13 {
+		t.Errorf("MinVersion: got %d, want %d", cfg.MinVersion, tls.VersionTLS13)
+	}
+	if len(cfg.Certificates) != 1 {
+		t.Errorf("Certificates: got %d, want 1", len(cfg.Certificates))
+	}
+}
+
+func TestGetTlsServerConfig_InvalidKeyPair(t *testing.T) {
+	secret := map[string][]byte{
+		config.TLSCertKey:       []byte("not-a-cert"),
+		config.TLSPrivateKeyKey: []byte("not-a-key"),
+		config.TLSServerName:    []byte("test"),
+	}
+	_, err := GetTlsServerConfig(secret)
+	if err == nil {
+		t.Fatal("expected error for invalid cert/key pair")
+	}
+}

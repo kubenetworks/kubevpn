@@ -2,13 +2,11 @@ package action
 
 import (
 	"fmt"
-	"io"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // Leave handles the Leave RPC, removing proxy injection from the specified workloads on the active connection.
@@ -18,9 +16,9 @@ func (svr *Server) Leave(resp rpc.Daemon_LeaveServer) error {
 		return err
 	}
 
-	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newStreamWriter(func(msg string) error {
+	logger, ctx := svr.initStreamLogger(resp, int32(log.InfoLevel), func(msg string) error {
 		return resp.Send(&rpc.LeaveResponse{Message: msg})
-	}), svr.LogFile))
+	})
 
 	svr.connMu.RLock()
 	conn, _ := svr.findConnection(svr.currentConnectionID)
@@ -29,8 +27,6 @@ func (svr *Server) Leave(resp rpc.Daemon_LeaveServer) error {
 		logger.Infof("No connection found")
 		return fmt.Errorf("no connection found")
 	}
-
-	ctx := plog.WithLogger(resp.Context(), logger)
 
 	v4, _ := conn.GetLocalTunIP()
 	var resources []handler.Resources

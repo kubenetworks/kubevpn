@@ -12,6 +12,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
@@ -70,7 +71,7 @@ func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.Ssh
 		if err != nil {
 			return err
 		}
-		_ = util.PrintGRPCStream[rpc.DisconnectResponse](nil, resp)
+		_ = grpcutil.PrintGRPCStream[rpc.DisconnectResponse](nil, resp)
 		return nil
 	})
 	resp, err := cli.Proxy(context.Background())
@@ -83,7 +84,7 @@ func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.Ssh
 		plog.G(ctx).Errorf("Connect to cluster error: %v", err)
 		return err
 	}
-	return util.PrintGRPCStream[rpc.SyncResponse](ctx, resp)
+	return grpcutil.PrintGRPCStream[rpc.SyncResponse](ctx, resp)
 }
 
 func (option *Options) connectViaContainer(ctx context.Context, portBindings nat.PortMap, managerNamespace string) error {

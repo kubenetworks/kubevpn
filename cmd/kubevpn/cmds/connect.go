@@ -19,6 +19,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -206,7 +207,7 @@ func disconnect(cli rpc.DaemonClient, bytes []byte, ns string, sshConf *pkgssh.S
 		plog.G(context.Background()).Errorf("Disconnect error: %v", err)
 		return err
 	}
-	err = util.PrintGRPCStream[rpc.DisconnectResponse](nil, resp)
+	err = grpcutil.PrintGRPCStream[rpc.DisconnectResponse](nil, resp)
 	if err != nil {
 		if status.Code(err) == codes.Canceled {
 			return nil

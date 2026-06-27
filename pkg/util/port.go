@@ -22,12 +22,11 @@ func ParsePort(str string) v1.ContainerPort {
 		str = str[i+1:]
 	}
 	var local, remote int
-	ports := strings.Split(str, ":")
-	if len(ports) == 2 {
-		remote, _ = strconv.Atoi(ports[0])
-		local, _ = strconv.Atoi(ports[1])
+	remoteStr, localStr, hasLocal := strings.Cut(str, ":")
+	remote, _ = strconv.Atoi(remoteStr)
+	if hasLocal {
+		local, _ = strconv.Atoi(localStr)
 	} else {
-		remote, _ = strconv.Atoi(ports[0])
 		local = remote
 	}
 	return v1.ContainerPort{

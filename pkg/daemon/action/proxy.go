@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 	v1 "k8s.io/api/core/v1"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -97,7 +98,7 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		return err
 	}
 	var connectionID string
-	connectionID, err = util.CopyGRPCConnStream(connResp, resp)
+	connectionID, err = grpcutil.CopyGRPCConnStream(connResp, resp)
 	if err != nil {
 		return err
 	}

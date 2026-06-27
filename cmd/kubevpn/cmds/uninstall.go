@@ -12,6 +12,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
@@ -76,7 +77,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 				if err != nil {
 					plog.G(cmd.Context()).Warnf("Failed to disconnect from cluter: %v", err)
 				}
-				_ = util.PrintGRPCStream[rpc.DisconnectResponse](cmd.Context(), disconnectResp)
+				_ = grpcutil.PrintGRPCStream[rpc.DisconnectResponse](cmd.Context(), disconnectResp)
 			}
 
 			req := &rpc.UninstallRequest{
@@ -92,7 +93,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.UninstallResponse](cmd.Context(), resp)
+			err = grpcutil.PrintGRPCStream[rpc.UninstallResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil

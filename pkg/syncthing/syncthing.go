@@ -2,6 +2,7 @@ package syncthing
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"path/filepath"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/syncthing/syncthing/lib/events"
 	"github.com/syncthing/syncthing/lib/logger"
 	"github.com/syncthing/syncthing/lib/netutil"
+	"github.com/syncthing/syncthing/lib/protocol"
 	"github.com/syncthing/syncthing/lib/svcutil"
 	"github.com/syncthing/syncthing/lib/syncthing"
 	"github.com/thejerf/suture/v4"
@@ -32,182 +34,43 @@ var (
 	conf = filepath.Join(pkgconfig.GetSyncthingPath(), "config.xml")
 )
 
-// StartClient starts a syncthing instance configured as a client, syncing localDir with the remote peer.
-func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr string) error {
-	err := cmdutil.SetConfigDataLocationsFromFlags(pkgconfig.GetSyncthingPath(), "", "")
-	if err != nil {
-		return err
+// initServices sets config data locations, creates an early service supervisor
+// and an event logger, returning both for use by StartClient/StartServer.
+func initServices(ctx context.Context, facilityName, facilityDesc string) (*suture.Supervisor, events.Logger, error) {
+	if err := cmdutil.SetConfigDataLocationsFromFlags(pkgconfig.GetSyncthingPath(), "", ""); err != nil {
+		return nil, nil, err
 	}
-	var l = logger.New().NewFacility("main", "Main package")
-	spec := svcutil.SpecWithDebugLogger(l)
+	spec := svcutil.SpecWithDebugLogger(logger.New().NewFacility(facilityName, facilityDesc))
 	earlyService := suture.New("early", spec)
 	earlyService.ServeBackground(ctx)
 
 	evLogger := events.NewLogger()
 	earlyService.Add(evLogger)
-
-	var localID = pkgconfig.LocalDeviceID
-	var remoteID = pkgconfig.RemoteDeviceID
-	var devices []config.DeviceConfiguration
-	devices = append(devices, config.DeviceConfiguration{
-		DeviceID:          localID,
-		Compression:       config.CompressionAlways,
-		Addresses:         []string{localAddr},
-		Name:              local,
-		Untrusted:         false,
-		AutoAcceptFolders: true,
-		Paused:            false,
-	})
-	devices = append(devices, config.DeviceConfiguration{
-		DeviceID:          remoteID,
-		Compression:       config.CompressionAlways,
-		Addresses:         []string{remoteAddr},
-		Name:              remote,
-		Untrusted:         false,
-		AutoAcceptFolders: true,
-		Paused:            false,
-	})
-
-	var folder []config.FolderConfiguration
-	folder = append(folder, config.FolderConfiguration{
-		ID:               dir,
-		Label:            label,
-		FilesystemType:   config.FilesystemTypeBasic,
-		Path:             localDir,
-		Type:             config.FolderTypeSendReceive,
-		Paused:           false,
-		FSWatcherEnabled: true,
-		FSWatcherDelayS:  0.01,
-		RescanIntervalS:  rescanInterval,
-		Devices: []config.FolderDeviceConfiguration{
-			{DeviceID: localID},
-			{DeviceID: remoteID},
-		},
-	})
-	cfgWrapper := config.Wrap(conf, config.Configuration{
-		Devices: devices,
-		Folders: folder,
-		GUI: config.GUIConfiguration{
-			Enabled:    true,
-			RawAddress: localAddr,
-			APIKey:     pkgconfig.SyncthingAPIKey,
-		},
-		Options: config.OptionsConfiguration{
-			AutoUpgradeIntervalH: 0,
-			UpgradeToPreReleases: false,
-			CREnabled:            false,
-		},
-	}, localID, events.NoopLogger)
-	earlyService.Add(cfgWrapper)
-
-	ldb := backend.OpenMemory()
-	appOpts := syncthing.Options{
-		NoUpgrade:            true,
-		ProfilerAddr:         "",
-		ResetDeltaIdxs:       false,
-		Verbose:              false,
-		DBRecheckInterval:    0,
-		DBIndirectGCInterval: 0,
-	}
-
-	app, err := syncthing.New(cfgWrapper, ldb, evLogger, pkgconfig.LocalCert, appOpts)
-	if err != nil {
-		return err
-	}
-
-	if err = app.Start(); err != nil {
-		return err
-	}
-	go func() {
-		<-ctx.Done()
-		app.Stop(svcutil.ExitSuccess)
-	}()
-	go app.Wait()
-	return app.Error()
+	return earlyService, evLogger, nil
 }
 
-// StartServer starts a syncthing instance configured as a server, serving remoteDir for sync.
-func StartServer(ctx context.Context, detach bool, remoteDir string) error {
-	err := cmdutil.SetConfigDataLocationsFromFlags(pkgconfig.GetSyncthingPath(), "", "")
-	if err != nil {
-		return err
+// newDevice builds a DeviceConfiguration with common defaults.
+func newDevice(id protocol.DeviceID, name string, addresses ...string) config.DeviceConfiguration {
+	return config.DeviceConfiguration{
+		DeviceID:          id,
+		Compression:       config.CompressionAlways,
+		Addresses:         addresses,
+		Name:              name,
+		AutoAcceptFolders: true,
 	}
-	spec := svcutil.SpecWithDebugLogger(logger.New().NewFacility("", ""))
-	earlyService := suture.New("early", spec)
-	earlyService.ServeBackground(ctx)
+}
 
-	evLogger := events.NewLogger()
-	earlyService.Add(evLogger)
-
-	var localID = pkgconfig.LocalDeviceID
-	var remoteID = pkgconfig.RemoteDeviceID
-	addr := net.JoinHostPort("0.0.0.0", strconv.Itoa(guiPort))
-	var devices []config.DeviceConfiguration
-	devices = append(devices, config.DeviceConfiguration{
-		DeviceID:          remoteID,
-		Compression:       config.CompressionAlways,
-		Addresses:         []string{addr},
-		Name:              remote,
-		Untrusted:         false,
-		AutoAcceptFolders: true,
-		Paused:            false,
-	})
-	devices = append(devices, config.DeviceConfiguration{
-		DeviceID:          localID,
-		Compression:       config.CompressionAlways,
-		Addresses:         []string{"dynamic"},
-		Name:              local,
-		Untrusted:         false,
-		AutoAcceptFolders: true,
-		Paused:            false,
-	})
-
-	var folder []config.FolderConfiguration
-	folder = append(folder, config.FolderConfiguration{
-		ID:             dir,
-		Label:          label,
-		FilesystemType: config.FilesystemTypeBasic,
-		Path:           remoteDir,
-		Type:           config.FolderTypeSendReceive,
-		Paused:         false,
-		Devices: []config.FolderDeviceConfiguration{
-			{DeviceID: remoteID},
-			{DeviceID: localID},
-		},
-	})
-	cfgWrapper := config.Wrap(conf, config.Configuration{
-		Devices: devices,
-		Folders: folder,
-		GUI: config.GUIConfiguration{
-			Enabled:    true,
-			RawAddress: addr,
-		},
-		Options: config.OptionsConfiguration{
-			RawListenAddresses:   []string{netutil.AddressURL("tcp", net.JoinHostPort("0.0.0.0", strconv.Itoa(config.DefaultTCPPort)))},
-			CRURL:                "",
-			CREnabled:            false,
-			AutoUpgradeIntervalH: 0,
-			UpgradeToPreReleases: false,
-			GlobalAnnEnabled:     false,
-		},
-	}, remoteID, events.NoopLogger)
-	earlyService.Add(cfgWrapper)
-
+// startApp creates a syncthing application from the given config, starts it,
+// and arranges for graceful shutdown when ctx is cancelled. If detach is true
+// the caller does not block on app completion.
+func startApp(ctx context.Context, cfgWrapper config.Wrapper, evLogger events.Logger, cert tls.Certificate, detach bool) error {
 	ldb := backend.OpenMemory()
-	appOpts := syncthing.Options{
-		NoUpgrade:            true,
-		ProfilerAddr:         "",
-		ResetDeltaIdxs:       false,
-		Verbose:              false,
-		DBRecheckInterval:    0,
-		DBIndirectGCInterval: 0,
-	}
+	appOpts := syncthing.Options{NoUpgrade: true}
 
-	app, err := syncthing.New(cfgWrapper, ldb, evLogger, pkgconfig.RemoteCert, appOpts)
+	app, err := syncthing.New(cfgWrapper, ldb, evLogger, cert, appOpts)
 	if err != nil {
 		return err
 	}
-
 	if err = app.Start(); err != nil {
 		return err
 	}
@@ -221,4 +84,91 @@ func StartServer(ctx context.Context, detach bool, remoteDir string) error {
 		app.Wait()
 	}
 	return app.Error()
+}
+
+// StartClient starts a syncthing instance configured as a client, syncing localDir with the remote peer.
+func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr string) error {
+	earlyService, evLogger, err := initServices(ctx, "main", "Main package")
+	if err != nil {
+		return err
+	}
+
+	localID := pkgconfig.LocalDeviceID
+	remoteID := pkgconfig.RemoteDeviceID
+	devices := []config.DeviceConfiguration{
+		newDevice(localID, local, localAddr),
+		newDevice(remoteID, remote, remoteAddr),
+	}
+
+	folders := []config.FolderConfiguration{{
+		ID:               dir,
+		Label:            label,
+		FilesystemType:   config.FilesystemTypeBasic,
+		Path:             localDir,
+		Type:             config.FolderTypeSendReceive,
+		FSWatcherEnabled: true,
+		FSWatcherDelayS:  0.01,
+		RescanIntervalS:  rescanInterval,
+		Devices: []config.FolderDeviceConfiguration{
+			{DeviceID: localID},
+			{DeviceID: remoteID},
+		},
+	}}
+
+	cfgWrapper := config.Wrap(conf, config.Configuration{
+		Devices: devices,
+		Folders: folders,
+		GUI: config.GUIConfiguration{
+			Enabled:    true,
+			RawAddress: localAddr,
+			APIKey:     pkgconfig.SyncthingAPIKey,
+		},
+	}, localID, events.NoopLogger)
+	earlyService.Add(cfgWrapper)
+
+	return startApp(ctx, cfgWrapper, evLogger, pkgconfig.LocalCert, true)
+}
+
+// StartServer starts a syncthing instance configured as a server, serving remoteDir for sync.
+func StartServer(ctx context.Context, detach bool, remoteDir string) error {
+	earlyService, evLogger, err := initServices(ctx, "", "")
+	if err != nil {
+		return err
+	}
+
+	localID := pkgconfig.LocalDeviceID
+	remoteID := pkgconfig.RemoteDeviceID
+	addr := net.JoinHostPort("0.0.0.0", strconv.Itoa(guiPort))
+	devices := []config.DeviceConfiguration{
+		newDevice(remoteID, remote, addr),
+		newDevice(localID, local, "dynamic"),
+	}
+
+	folders := []config.FolderConfiguration{{
+		ID:             dir,
+		Label:          label,
+		FilesystemType: config.FilesystemTypeBasic,
+		Path:           remoteDir,
+		Type:           config.FolderTypeSendReceive,
+		Devices: []config.FolderDeviceConfiguration{
+			{DeviceID: remoteID},
+			{DeviceID: localID},
+		},
+	}}
+
+	cfgWrapper := config.Wrap(conf, config.Configuration{
+		Devices: devices,
+		Folders: folders,
+		GUI: config.GUIConfiguration{
+			Enabled:    true,
+			RawAddress: addr,
+		},
+		Options: config.OptionsConfiguration{
+			RawListenAddresses: []string{netutil.AddressURL("tcp", net.JoinHostPort("0.0.0.0", strconv.Itoa(config.DefaultTCPPort)))},
+			GlobalAnnEnabled:   false,
+		},
+	}, remoteID, events.NoopLogger)
+	earlyService.Add(cfgWrapper)
+
+	return startApp(ctx, cfgWrapper, evLogger, pkgconfig.RemoteCert, detach)
 }

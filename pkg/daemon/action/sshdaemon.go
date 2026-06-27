@@ -47,7 +47,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 			core.NewNode("gtcp", ":10801"),
 		}
 		var servers []core.Server
-		servers, err = core.GenerateServersFromNodes(nodes, nil)
+		servers, err = core.GenerateServersFromNodes(nodes, core.NewRouteHub())
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to parse route: %v", err)
 			return

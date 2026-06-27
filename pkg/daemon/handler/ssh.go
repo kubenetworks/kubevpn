@@ -161,7 +161,7 @@ func (w *wsHandler) createTunnel(ctx context.Context, cli *ssh.Client) error {
 			WithParam("net", clientIP.String()).
 			WithParam("route", strings.Join(w.cidr, ",")),
 	}
-	servers, err := core.GenerateServersFromNodes(nodes, nil)
+	servers, err := core.GenerateServersFromNodes(nodes, core.NewRouteHub())
 	if err != nil {
 		w.log("Failed to parse route: %v", err)
 		return err

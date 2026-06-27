@@ -11,9 +11,9 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // Server implements the gRPC Daemon service, managing VPN connections, syncing, and lifecycle operations.
@@ -88,7 +88,7 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 			c.Request.IPv4 = c.LocalTunIPv4.String()
 			c.Request.IPv6 = c.LocalTunIPv6.String()
 			err = resp.Send(c.Request)
-			_ = util.PrintGRPCStream[rpc.ConnectResponse](nil, resp, svr.LogFile)
+			_ = grpcutil.PrintGRPCStream[rpc.ConnectResponse](nil, resp, svr.LogFile)
 		}
 	}
 	return nil

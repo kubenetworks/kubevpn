@@ -57,7 +57,7 @@ const (
 	// PortNameDNS is the traffic-manager service port name for DNS resolution.
 	PortNameDNS = "53-for-dns"
 
-	// IPv4Pool is used as tun ip
+	// IPv4Pool is used as TUN IP
 	// 198.18.0.0/16 network is part of the 198.18.0.0/15 (reserved for benchmarking).
 	// https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml
 	// so we split it into 2 parts: 198.18.0.0/15 --> [198.18.0.0/16, 198.19.0.0/16]

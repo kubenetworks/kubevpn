@@ -16,6 +16,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -139,7 +140,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.ConnectResponse](cmd.Context(), resp)
+			err = grpcutil.PrintGRPCStream[rpc.ConnectResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil
@@ -190,7 +191,7 @@ func leave(cli rpc.DaemonClient, ns string, args []string) error {
 	if err != nil {
 		return err
 	}
-	err = util.PrintGRPCStream[rpc.LeaveResponse](nil, resp)
+	err = grpcutil.PrintGRPCStream[rpc.LeaveResponse](nil, resp)
 	if err != nil {
 		if status.Code(err) == codes.Canceled {
 			return nil

@@ -66,7 +66,7 @@ func (h *admissionReviewHandler) handleCreate(ctx context.Context, ar v1.Admissi
 		return &v1.AdmissionResponse{UID: ar.Request.UID, Allowed: true}
 	}
 
-	// 2) release old ip
+	// 2) release old IP
 	h.Lock()
 	defer h.Unlock()
 	dhcpCtx, dhcpCancel := context.WithTimeout(ctx, 10*time.Second)
@@ -74,7 +74,7 @@ func (h *admissionReviewHandler) handleCreate(ctx context.Context, ar v1.Admissi
 	ipv4, ipv6 := parseEnvIPs(container)
 	_ = h.dhcp.ReleaseIP(dhcpCtx, ipv4, ipv6)
 
-	// 3) rent new ip
+	// 3) rent new IP
 	var v4, v6 *net.IPNet
 	v4, v6, err = h.dhcp.RentIP(dhcpCtx)
 	if err != nil {
@@ -135,7 +135,7 @@ func (h *admissionReviewHandler) handleDelete(ctx context.Context, ar v1.Admissi
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
-	// 2) release ip
+	// 2) release IP
 	ipv4, ipv6 := parseEnvIPs(container)
 	if ipv4 != nil || ipv6 != nil {
 		h.Lock()

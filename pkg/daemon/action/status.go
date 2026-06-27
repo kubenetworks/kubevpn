@@ -2,8 +2,6 @@ package action
 
 import (
 	"context"
-	"strconv"
-	"strings"
 	"sync"
 
 	"sigs.k8s.io/yaml"
@@ -28,10 +26,8 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 		svr.connMu.RLock()
 		var matched []*handler.ConnectOptions
 		for _, connectionID := range req.ConnectionIDs {
-			for _, options := range svr.connections {
-				if options.GetConnectionID() == connectionID {
-					matched = append(matched, options)
-				}
+			if opt, _ := svr.findConnection(connectionID); opt != nil {
+				matched = append(matched, opt)
 			}
 		}
 		currentID := svr.currentConnectionID
@@ -129,7 +125,7 @@ func buildProxyAndSyncStatus(connect *handler.ConnectOptions, sync *handler.Sync
 						connect.IsMe(virtual.Namespace, util.ConvertWorkloadToUID(virtual.UID), rule.Headers),
 						v4 == rule.LocalTunIPv4 && v6 == rule.LocalTunIPv6,
 					),
-					PortMap: extractLocalPorts(rule.PortMap),
+					PortMap: portMapToLocalPorts(rule),
 				})
 			}
 			proxyList = append(proxyList, &rpc.Proxy{
@@ -172,14 +168,11 @@ func buildProxyAndSyncStatus(connect *handler.ConnectOptions, sync *handler.Sync
 	return proxyList, syncList, status.LastError()
 }
 
-func extractLocalPorts(m map[int32]string) map[int32]int32 {
+// portMapToLocalPorts extracts containerPort → localPort mappings using the typed ParsePortMap helper.
+func portMapToLocalPorts(rule *controlplane.Rule) map[int32]int32 {
 	result := make(map[int32]int32)
-	for k, v := range m {
-		if _, after, ok := strings.Cut(v, ":"); ok {
-			v = after
-		}
-		port, _ := strconv.Atoi(v)
-		result[k] = int32(port)
+	for _, pm := range rule.ParsePortMap() {
+		result[pm.ContainerPort] = pm.LocalPort
 	}
 	return result
 }
