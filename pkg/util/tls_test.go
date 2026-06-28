@@ -21,10 +21,12 @@ func TestTLS(t *testing.T) {
 	t.Setenv(config.TLSPrivateKeyKey, string(keyBytes))
 	t.Setenv(config.TLSServerName, string(alternateDNS))
 
-	listen, err := net.Listen("tcp", ":9090")
+	listen, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer listen.Close()
+	addr := listen.Addr().String()
 	tlsServerConfig, err := GetTlsServerConfig(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -34,7 +36,7 @@ func TestTLS(t *testing.T) {
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
-				t.Error(err)
+				// listener closed on test teardown is expected
 				return
 			}
 			go func(conn net.Conn) {
@@ -50,7 +52,7 @@ func TestTLS(t *testing.T) {
 			}(conn)
 		}
 	}()
-	dial, err := net.Dial("tcp", ":9090")
+	dial, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
 	}

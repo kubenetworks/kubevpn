@@ -29,6 +29,7 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
@@ -100,8 +101,9 @@ func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string
 		},
 	}
 
-	// if the rollout isn't done yet, keep watching deployment status
-	ctx, cancel := context.WithCancel(ctx1)
+	// if the rollout isn't done yet, keep watching deployment status, but bound
+	// the wait so a sidecar that never becomes ready cannot hang forever.
+	ctx, cancel := context.WithTimeout(ctx1, config.RolloutStatusTimeout)
 	defer cancel()
 	_, err = watchtools.UntilWithSync(ctx, lw, &unstructured.Unstructured{}, nil, func(e watch.Event) (bool, error) {
 		switch t := e.Type; t {
@@ -125,6 +127,9 @@ func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string
 			return true, fmt.Errorf("internal error: unexpected event %#v", e)
 		}
 	})
+	if err != nil && ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("rollout status for %s did not finish within %s: %w", workloads, config.RolloutStatusTimeout, err)
+	}
 	return err
 }
 
