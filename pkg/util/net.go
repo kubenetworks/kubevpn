@@ -113,12 +113,12 @@ func Ping(ctx context.Context, srcIP, dstIP string) (bool, error) {
 
 // IsIPv4 checks if the packet starts with IPv4 version nibble.
 func IsIPv4(packet []byte) bool {
-	return 4 == (packet[0] >> 4)
+	return (packet[0] >> 4) == 4
 }
 
 // IsIPv6 checks if the packet starts with IPv6 version nibble.
 func IsIPv6(packet []byte) bool {
-	return 6 == (packet[0] >> 4)
+	return (packet[0] >> 4) == 6
 }
 
 const (
@@ -216,11 +216,11 @@ func getIP(addr net.Addr) net.IP {
 	}
 
 	var ip net.IP
-	switch addr.(type) {
+	switch a := addr.(type) {
 	case *net.IPAddr:
-		ip = addr.(*net.IPAddr).IP
+		ip = a.IP
 	case *net.IPNet:
-		ip = addr.(*net.IPNet).IP
+		ip = a.IP
 	default:
 		ip = net.ParseIP(addr.String())
 	}
@@ -300,8 +300,5 @@ func DetectSupportIPv6() (bool, error) {
 // IsValidCIDR returns true if the string is a valid CIDR notation.
 func IsValidCIDR(str string) bool {
 	_, _, err := net.ParseCIDR(str)
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }

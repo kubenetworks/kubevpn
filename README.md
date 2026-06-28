@@ -543,7 +543,7 @@ Clearing DNS settings
 
 You can see that it will start up two containers with docker, mapping to pod two container, and share port with same
 network, you can use `localhost:port`
-to access another container. And more, all environment、volume and network are the same as remote kubernetes pod, it is
+to access another container. And more, all environment, volume and network are the same as remote kubernetes pod, it is
 truly consistent with the kubernetes runtime. Makes develop on local PC come true.
 
 ```shell

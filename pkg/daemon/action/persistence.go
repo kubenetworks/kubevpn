@@ -100,7 +100,7 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 			if c.OwnerID != "" {
 				req.OwnerID = c.OwnerID
 			}
-			err = resp.Send(&req)
+			_ = resp.Send(&req)
 			_ = grpcutil.PrintGRPCStream[rpc.ConnectResponse](nil, resp, svr.LogFile)
 		}
 	}

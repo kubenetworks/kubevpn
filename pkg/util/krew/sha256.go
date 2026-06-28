@@ -14,8 +14,6 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-const retries = 4
-
 // DownloadFileWithName downloads a file with name
 func DownloadFileWithName(uri, name string) (string, error) {
 	resp, err := getWithRetry(uri)

@@ -52,13 +52,20 @@ func CmpClientVersionAndPodImageTag(clientVersion string, serverImgStr string) i
 }
 
 // CmpVersionMajorOrMinor compares two semver strings by MAJOR and MINOR segments only, returning -1, 0, or 1.
+//
+// It uses STRICT semver parsing (NewSemver, requiring MAJOR.MINOR.PATCH): non-release version
+// strings — "latest", or git SHAs like "378749d" / "89b23e73..." used as dev/CI image tags —
+// fail to parse and compare as 0 (not comparable ⇒ treated as compatible). This prevents the
+// lenient parser from mistaking a SHA's leading digits for a version (e.g. "89b23e73" → major 89)
+// and wrongly reporting "client version and image tag not compatible", which crash-looped the
+// injected sidecar in CI. Only real X.Y.Z releases are ever compared.
 func CmpVersionMajorOrMinor(v1 string, v2 string) int {
-	version1, err := version.NewVersion(v1)
+	version1, err := version.NewSemver(v1)
 	if err != nil {
 		return 0
 	}
 
-	version2, err := version.NewVersion(v2)
+	version2, err := version.NewSemver(v2)
 	if err != nil {
 		return 0
 	}

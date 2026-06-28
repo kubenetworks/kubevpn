@@ -74,19 +74,21 @@ In addition, the client **observes the ICMP echo replies** to the #1 TUN heartbe
 - Read: `KeepAliveTime * 3 = 180s` — tolerates 2 missed heartbeat cycles
 - Write: `KeepAliveTime = 60s` — writes should complete quickly
 
-### #4 Data Plane Health Check (DNS query via gudp relay)
+### #4 Control-Plane Health Check (gRPC over port-forward)
 
-**File:** `pkg/handler/connect_tun.go` — `healthCheckPortForward()`
+**File:** `pkg/handler/connect_tun.go` — `healthCheckGRPC()` (single-shot probe `probeControlPlaneGRPC()`)
 
-**What:** Every 30s, sends a DNS query through the gudp relay (port-forwarded from traffic manager) to verify the full data-plane path is alive (port-forward + gudp + DNS container).
+**What:** Every 30s, dials the local control-plane port (port-forwarded from the traffic manager, `PortControlPlane` 9002) and issues a gRPC health `Check`, verifying the response is `SERVING`.
 
-**Connection reuse:** TCP conn and PacketConn are held outside the checker closure. On failure, `closeConn()` cleans up and sets to nil; the next check rebuilds. `defer closeConn()` at function end ensures resource release.
+**Connection reuse:** `probeControlPlaneGRPC` reuses one `*grpc.ClientConn` across ticks, redialing only after a failure (the same single-shot probe also backs the data-plane status check — see below).
 
-**Why necessary:** Validates the data plane is reachable via port-forward. Uses DNS queries instead of gRPC `GetTunIP` to avoid triggering silent IP reallocation as a side effect of health checking.
+**Why necessary:** Validates that the port-forward to the traffic manager is alive and the control plane is serving.
 
 **Failure action:** After 3 consecutive failures (with 10s backoff), calls `cancelFunc()` to tear down the port-forward, which triggers a reconnection in the `portForward()` retry loop.
 
 **Period:** 30s, with 10s×3 retry backoff before declaring failure
+
+> **Removed (dead code):** an earlier DNS-via-gudp variant `healthCheckPortForward()` (probed the data-plane path with a DNS query) was defined but never wired — only `healthCheckGRPC` is used — and has been deleted.
 
 > **Removed:** an earlier `#5 ConfigMap Health Check` (`HealthPeriod`/`HealthStatus`, a 30s ConfigMap GET) was deleted. `kubevpn status` reflects data-plane liveness only (TUN + heartbeat, see below) and reads the proxy/sync list straight from the shared informer via `ConnectOptions.GetTrafficManagerConfigMap()`, so the health-status cache had no readers. See [11-configmap-informer.md](11-configmap-informer.md).
 

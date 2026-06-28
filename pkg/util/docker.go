@@ -67,8 +67,8 @@ func RunLogsSinceNow(name string, follow bool) error {
 	if follow {
 		args = append(args, "--follow")
 	}
-	output, err := exec.Command("docker", args...).CombinedOutput()
-	_, err = stdcopy.StdCopy(os.Stdout, os.Stderr, bytes.NewReader(output))
+	output, _ := exec.Command("docker", args...).CombinedOutput()
+	_, err := stdcopy.StdCopy(os.Stdout, os.Stderr, bytes.NewReader(output))
 	return err
 }
 

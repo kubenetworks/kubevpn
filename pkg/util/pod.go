@@ -210,23 +210,21 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 			defer w.Stop()
 
 			verifyAPIServerConnection()
-			select {
-			case e, ok := <-w.ResultChan():
-				if !ok {
-					verifyAPIServerConnection()
-					return
-				}
-				switch e.Type {
-				case watch.Deleted:
-					plog.G(ctx).Errorf("Pod %s is deleted", podName)
-					cancelFunc()
-					return
-				case watch.Error:
-					verifyAPIServerConnection()
-					return
-				case watch.Added, watch.Modified, watch.Bookmark:
-					// do nothing
-				}
+			e, ok := <-w.ResultChan()
+			if !ok {
+				verifyAPIServerConnection()
+				return
+			}
+			switch e.Type {
+			case watch.Deleted:
+				plog.G(ctx).Errorf("Pod %s is deleted", podName)
+				cancelFunc()
+				return
+			case watch.Error:
+				verifyAPIServerConnection()
+				return
+			case watch.Added, watch.Modified, watch.Bookmark:
+				// do nothing
 			}
 		}()
 	}

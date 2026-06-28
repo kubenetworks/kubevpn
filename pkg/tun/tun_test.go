@@ -125,16 +125,16 @@ func TestConfigAddrParseable(t *testing.T) {
 	}
 }
 
-func TestTunListenerClosedErr(t *testing.T) {
-	if ClosedErr == nil {
-		t.Fatal("ClosedErr should not be nil")
+func TestTunListenerErrClosed(t *testing.T) {
+	if ErrClosed == nil {
+		t.Fatal("ErrClosed should not be nil")
 	}
-	if ClosedErr.Error() == "" {
-		t.Fatal("ClosedErr should have a message")
+	if ErrClosed.Error() == "" {
+		t.Fatal("ErrClosed should have a message")
 	}
 	expected := "accept on closed listener"
-	if ClosedErr.Error() != expected {
-		t.Fatalf("ClosedErr.Error() = %q, want %q", ClosedErr.Error(), expected)
+	if ErrClosed.Error() != expected {
+		t.Fatalf("ErrClosed.Error() = %q, want %q", ErrClosed.Error(), expected)
 	}
 }
 
@@ -161,13 +161,13 @@ func TestTunListenerCloseAndAccept(t *testing.T) {
 		t.Fatal("second Close() should return error")
 	}
 
-	// Accept after close should return ClosedErr
+	// Accept after close should return ErrClosed
 	_, err := ln.Accept()
 	if err == nil {
 		t.Fatal("Accept() after Close() should return error")
 	}
-	if !errors.Is(err, ClosedErr) {
-		t.Fatalf("Accept() error = %v, want %v", err, ClosedErr)
+	if !errors.Is(err, ErrClosed) {
+		t.Fatalf("Accept() error = %v, want %v", err, ErrClosed)
 	}
 }
 

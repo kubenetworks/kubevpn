@@ -493,9 +493,7 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 	}
 
 	var cidrList []*net.IPNet
-	for _, ipNet := range nm.cfg.CIDRs {
-		cidrList = append(cidrList, ipNet)
-	}
+	cidrList = append(cidrList, nm.cfg.CIDRs...)
 	for _, s := range nm.cfg.ExtraRouteInfo.ExtraCIDR {
 		var ipNet *net.IPNet
 		_, ipNet, err = net.ParseCIDR(s)

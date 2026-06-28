@@ -180,28 +180,28 @@ pkg/
 |---|---|---|
 | Init path | `redirectConnectToSudoDaemon` | `Connect` (IsSudo=true) → `DoConnect` |
 | `isDataPlane` | false | true (set by DoConnect) |
-| Role | traffic manager 创建/升级, proxy inject, health check | TUN, IP 分配 (rentIP), port-forward, DNS, routes, CIDR 探测 |
-| TUN IP | 通过 `getSudoTunIPs` 查询 sudo daemon | `NetworkManager.localTunIPv4/v6` (rentIP 分配) |
+| Role | traffic manager create/upgrade, proxy inject, health check | TUN, IP allocation (rentIP), port-forward, DNS, routes, CIDR detection |
+| TUN IP | query the sudo daemon via `getSudoTunIPs` | `NetworkManager.localTunIPv4/v6` (allocated by rentIP) |
 | Persisted | ✅ OffloadToConfig | ❌ |
 
-**Connect 流程（控制面 → 数据面）:**
+**Connect flow (control plane → data plane):**
 ```
 User Daemon: CreateOutboundPod → UpgradeDeploy → cli.Connect(ctx) [req.OwnerID]
 Root Daemon: connect.OwnerID = req.OwnerID → DoConnect (getCIDR → NetworkManager.Start → rentIP)
 ```
 
-**User Daemon 获取 TUN IP:**
-- User daemon 不再持有 `LocalTunIPv4/v6` 字段
-- 需要 IP 时调用 `svr.getSudoTunIPs(ctx)` 查询 sudo daemon 的 Status RPC
-- 通过 `resolveTunIP(connect, ips)` 按 ConnectionID 匹配对应连接的 IP
-- 用于：sidecar 注入 (`CreateRemoteInboundPod`)、leave、status 查询
+**How the User Daemon obtains the TUN IP:**
+- The user daemon no longer holds the `LocalTunIPv4/v6` fields
+- When it needs an IP, it calls `svr.getSudoTunIPs(ctx)` to query the sudo daemon's Status RPC
+- It matches the IP for each connection by ConnectionID via `resolveTunIP(connect, ips)`
+- Used by: sidecar injection (`CreateRemoteInboundPod`), leave, and status queries
 
 **Rules when modifying `ConnectOptions`:**
 - **K8s client fields live in `K8sClient`** — the embedded struct in `k8s_client.go` holds clientset, restclient, config, factory. Use `GetFactory()` / `GetClientset()` accessors. Initialize via `InitClient(f)` which delegates to `util.InitKubeClient`
 - **Determine which daemon uses the field FIRST** — control-plane fields go in `redirectConnectToSudoDaemon`, data-plane fields go in `DoConnect`
 - **NEVER initialize control-plane fields in DoConnect** — DoConnect runs in Root Daemon where those fields are unused
 - **NEVER initialize data-plane fields in redirectConnectToSudoDaemon** — User Daemon doesn't create TUN devices
-- **Traffic manager pod 创建/升级是控制面职责** — `CreateOutboundPod` 和 `UpgradeDeploy` 在 User Daemon 的 `forwardConnectToSudo` 中调用，`DoConnect` 不再负责
+- **Traffic manager pod create/upgrade is a control-plane responsibility** — `CreateOutboundPod` and `UpgradeDeploy` are called in the User Daemon's `forwardConnectToSudo`; `DoConnect` no longer handles them
 - Fields that need to survive daemon restart must have `json:` tags (only User Daemon persists)
 - Test both paths: root daemon (via `DoConnect`) and user daemon (via `forwardConnectToSudo`)
 
