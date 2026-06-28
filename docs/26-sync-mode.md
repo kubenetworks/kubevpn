@@ -34,6 +34,7 @@ kubevpn sync deployment/myapp --local-dir ./src --remote-dir /app
 type SyncOptions struct {
     K8sClient                       // embedded K8s client
     WorkloadNamespace     string
+    ManagerNamespace      string    // resolved traffic manager ns; threaded into nested proxy
     Headers               map[string]string
     Workloads             []string
     TargetContainer       string    // which container to sync into
@@ -71,12 +72,40 @@ The clone pod gets three types of modifications:
 - Health probes removed (liveness, readiness, startup)
 
 **Sidecar containers added:**
-- **VPN container** (`genVPNContainer`): Runs `kubevpn proxy` with `--foreground`, injects kubeconfig from DownwardAPI. Privileged with `NET_ADMIN` capability.
+- **VPN container** (`genVPNContainer`): Runs `kubevpn proxy` with `--foreground`, injects kubeconfig from DownwardAPI. Privileged with `NET_ADMIN` capability. When `SyncOptions.ManagerNamespace` is set, the command also carries `--manager-namespace <ns>` (see §4.4).
 - **Syncthing container** (`genSyncthingContainer`): Runs `kubevpn syncthing --dir {remoteDir}`, shares the EmptyDir volume with the target container.
 
 ### 4.3 Kubeconfig Injection
 
 The kubeconfig is stored as a pod annotation and mounted via DownwardAPI. This avoids needing a separate Secret for each sync clone. `ConvertApiServerToNodeIP` converts the API server address to a node-reachable IP for in-cluster access.
+
+### 4.4 Manager Namespace Propagation
+
+The cloned workload runs a **nested** `kubevpn proxy <workload> --namespace <workloadNs>`
+inside the VPN sidecar. That nested proxy is the component that injects the envoy sidecar
+into the proxied workload and sets its `TrafficManagerService` env
+(`kubevpn-traffic-manager.<managerNs>`).
+
+`SyncRequest` carries no `ManagerNamespace`, and the `sync` CLI exposes no
+`--manager-namespace` flag. If the nested proxy were left to auto-detect, it would fall back
+to the **workload** namespace whenever the traffic manager lives elsewhere (manager ≠
+workload, e.g. a Helm install in a dedicated namespace), pointing envoy at a non-existent
+`kubevpn-traffic-manager.<workloadNs>` and breaking the control-plane connection.
+
+To prevent this, the resolved manager namespace is threaded through explicitly:
+
+1. The `Sync` daemon action runs the inner `Connect` first, which resolves the manager
+   namespace (`detectAndSetManagerNamespace`) and stores it on the connection.
+2. After `connectionID` is known, the action copies the authoritative value into the sync
+   options: `options.ManagerNamespace = svr.findConnection(connectionID).ManagerNamespace`.
+3. `prepareSyncPodSpec` passes `d.ManagerNamespace` to `genVPNContainer`, which appends
+   `--manager-namespace <ns>` **only when non-empty** (empty preserves the legacy
+   auto-detect behavior).
+
+This keeps the sync clone consistent with the rest of the namespace model
+([07-namespace-model.md](07-namespace-model.md)). Tests:
+`TestSync_PinsManagerNamespace_WhenManagerDiffersFromWorkload`,
+`TestSync_OmitsManagerNamespace_WhenUnset`.
 
 ## 5. Local Syncthing Client (`SyncDir`)
 
@@ -106,8 +135,10 @@ A background goroutine polls running pods every 2 seconds. When the pod name cha
 The `Sync` daemon action:
 1. Receives `SyncRequest` via gRPC
 2. Establishes cluster connection via `Connect` RPC (reuses existing connect flow)
-3. Calls `SyncOptions.DoSync()` with the sync-specific parameters
-4. On cancellation, calls `Cleanup()` to remove clone workloads
+3. Copies the resolved `ManagerNamespace` from the established connection into `SyncOptions`
+   (`svr.findConnection(connectionID).ManagerNamespace`) before sync — see §4.4
+4. Calls `SyncOptions.DoSync()` with the sync-specific parameters
+5. On cancellation, calls `Cleanup()` to remove clone workloads
 
 ## 8. Related Files
 

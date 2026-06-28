@@ -59,20 +59,26 @@ func genSyncthingContainer(remoteDir string, syncDataDirName string, image strin
 	}
 }
 
-func genVPNContainer(workload string, namespace string, image string, args []string) *v1.Container {
+func genVPNContainer(workload string, namespace string, managerNamespace string, image string, args []string) *v1.Container {
+	command := []string{
+		"kubevpn",
+		"proxy",
+		workload,
+		"--kubeconfig", "/tmp/.kube/" + config.KUBECONFIG,
+		"--namespace", namespace,
+		"--image", image,
+	}
+	// Pin the traffic manager namespace so the nested proxy does not fall back to
+	// detecting it (which fails to the workload namespace when manager != workload).
+	if managerNamespace != "" {
+		command = append(command, "--manager-namespace", managerNamespace)
+	}
+	command = append(command, "--foreground")
 	return &v1.Container{
-		Name:  config.ContainerSidecarVPN,
-		Image: image,
-		Command: append([]string{
-			"kubevpn",
-			"proxy",
-			workload,
-			"--kubeconfig", "/tmp/.kube/" + config.KUBECONFIG,
-			"--namespace", namespace,
-			"--image", image,
-			"--foreground",
-		}, args...),
-		Env: []v1.EnvVar{},
+		Name:    config.ContainerSidecarVPN,
+		Image:   image,
+		Command: append(command, args...),
+		Env:     []v1.EnvVar{},
 		Resources: v1.ResourceRequirements{
 			Requests: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:    resource.MustParse("200m"),

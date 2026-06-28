@@ -17,7 +17,7 @@ func TestGenVPNContainer(t *testing.T) {
 	image := "ghcr.io/kubenetworks/kubevpn:test"
 	args := []string{"--headers", "env=test"}
 
-	c := genVPNContainer(workload, namespace, image, args)
+	c := genVPNContainer(workload, namespace, "", image, args)
 
 	if c.Name != config.ContainerSidecarVPN {
 		t.Fatalf("container name = %q, want %q", c.Name, config.ContainerSidecarVPN)
@@ -110,7 +110,7 @@ func TestGenVPNContainer(t *testing.T) {
 }
 
 func TestGenVPNContainer_NoExtraArgs(t *testing.T) {
-	c := genVPNContainer("deploy/web", "default", "img:v1", nil)
+	c := genVPNContainer("deploy/web", "default", "", "img:v1", nil)
 
 	if c.Name != config.ContainerSidecarVPN {
 		t.Fatalf("container name = %q, want %q", c.Name, config.ContainerSidecarVPN)

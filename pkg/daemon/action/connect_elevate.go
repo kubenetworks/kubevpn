@@ -125,13 +125,18 @@ func (svr *Server) detectAndSetManagerNamespace(ctx context.Context, req *rpc.Co
 			return err
 		}
 	}
-	if req.ManagerNamespace != "" {
-		logger.Infof("Use manager namespace %s", req.ManagerNamespace)
-		connect.ManagerNamespace = req.ManagerNamespace
-	} else {
+	if req.ManagerNamespace == "" {
+		// No existing manager found anywhere: fall back to the request namespace.
 		logger.Infof("Use special namespace %s", req.Namespace)
 		req.ManagerNamespace = req.Namespace
+	} else {
+		logger.Infof("Use manager namespace %s", req.ManagerNamespace)
 	}
+	// Keep the user-daemon ConnectOptions and the request forwarded to the root
+	// daemon in lock-step: both must carry the SAME resolved namespace. Assign it
+	// explicitly here rather than relying on the struct's initial ManagerNamespace,
+	// so the two daemons can never diverge if that initialization changes.
+	connect.ManagerNamespace = req.ManagerNamespace
 	return nil
 }
 
