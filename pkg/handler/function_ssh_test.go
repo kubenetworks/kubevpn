@@ -31,7 +31,6 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	pkgconfig "github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 type sshUt struct {
@@ -385,13 +384,13 @@ func (u *sshUt) proxyServiceReviewsServiceIP(t *testing.T) {
 
 func (u *sshUt) testUDP(t *testing.T) {
 	app := "reviews"
-	port, err := util.GetAvailableUDPPort()
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Fixed port matching the UDP port declared on reviews: envoy binds it and
+	// forwards to tunIP:<same port>, which the client's gvisor dials on localhost.
+	port := reviewsUDPPort
 	go u.udpServer(t, port)
 
 	var ip string
+	var err error
 	err = retry.OnError(
 		wait.Backoff{Duration: time.Second, Factor: 2, Jitter: 0.2, Steps: 5},
 		func(err error) bool {
