@@ -31,6 +31,17 @@ type TunConfigServer struct {
 	mu       sync.RWMutex
 	allocs   map[string]*tunAllocation // ownerID → allocation
 	watchers map[string][]chan *rpc.TunIPResponse
+	// lastIPs remembers the IP each ownerID most recently held, even after its
+	// lease was reaped, so a reconnecting (stable) owner can reclaim the same IP
+	// when it is still free. In-memory only; bounded by the real client count
+	// because OwnerID is now stable per machine+user.
+	lastIPs map[string]lastIPRecord
+}
+
+// lastIPRecord is the last IPv4/IPv6 a given owner held.
+type lastIPRecord struct {
+	v4 *net.IPNet
+	v6 *net.IPNet
 }
 
 type tunAllocation struct {
@@ -62,6 +73,7 @@ func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, nam
 		dhcp:      mgr,
 		allocs:    make(map[string]*tunAllocation),
 		watchers:  make(map[string][]chan *rpc.TunIPResponse),
+		lastIPs:   make(map[string]lastIPRecord),
 	}
 	s.loadAllocs(ctx)
 	// Reclaim any bitmap bits left orphaned by a prior crash before serving.
@@ -249,8 +261,10 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 		return resp, nil
 	}
 
-	// New allocation — hold mutex across RentIP (fast ConfigMap operation, no need to release)
-	v4, v6, err := s.dhcp.RentIPExcluding(ctx, excludeIPs)
+	// New allocation — hold mutex across RentIP (fast ConfigMap operation, no need to release).
+	// Prefer the IP this owner most recently held (sticky across lease expiry),
+	// unless it now conflicts with the client's local/sibling IPs (excludeIPs).
+	v4, v6, err := s.allocateForOwner(ctx, req.OwnerID, excludeIPs)
 	if err != nil {
 		return nil, err
 	}
@@ -544,6 +558,8 @@ func (s *TunConfigServer) reapExpiredLeases(ctx context.Context) {
 			continue
 		}
 		delete(s.allocs, ownerID)
+		// Remember the IP so this owner reclaims it on reconnect if still free.
+		s.lastIPs[ownerID] = lastIPRecord{v4: alloc.IPv4, v6: alloc.IPv6}
 		s.mu.Unlock()
 
 		var ipv4, ipv6 net.IP
@@ -573,6 +589,20 @@ func (s *TunConfigServer) reapExpiredLeases(ctx context.Context) {
 	// deployment: GetTunIP is mutex-serialized, so no in-flight allocation is
 	// misclassified as an orphan.
 	s.scrubOrphanBits(ctx)
+}
+
+// allocateForOwner allocates a TUN IP for ownerID, preferring the IP the owner
+// most recently held (when remembered and not excluded) so reconnects are
+// sticky, and falling back to the next available IP otherwise. Caller holds s.mu.
+func (s *TunConfigServer) allocateForOwner(ctx context.Context, ownerID string, excludeIPs []net.IP) (*net.IPNet, *net.IPNet, error) {
+	if rec, ok := s.lastIPs[ownerID]; ok && rec.v4 != nil && !isIPExcluded(rec.v4, excludeIPs) {
+		var prefV6 net.IP
+		if rec.v6 != nil {
+			prefV6 = rec.v6.IP
+		}
+		return s.dhcp.RentIPPreferring(ctx, rec.v4.IP, prefV6, excludeIPs)
+	}
+	return s.dhcp.RentIPExcluding(ctx, excludeIPs)
 }
 
 // rollbackAlloc releases a freshly-rented IP and drops its in-memory record after

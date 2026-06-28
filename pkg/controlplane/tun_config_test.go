@@ -527,6 +527,94 @@ func TestGetTunIP_RollsBackOnPersistFailure(t *testing.T) {
 	}
 }
 
+// Part B (docs/29): after its lease is reaped, a (stable) owner reclaims the
+// same IP on reconnect even when a lower-numbered free IP exists that plain
+// AllocateNext would have returned.
+func TestGetTunIP_StickyReconnectPrefersRememberedIP(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+
+	a, _ := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns"})
+	_, _ = s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "B", Namespace: "test-ns"})
+	c, _ := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "C", Namespace: "test-ns"})
+	ipA, _, _ := net.ParseCIDR(a.IPv4)
+	ipC, _, _ := net.ParseCIDR(c.IPv4)
+
+	// Reap A and C (B keeps its IP) → frees ipA (low) and ipC (higher).
+	s.mu.Lock()
+	s.allocs["A"].LastRenew = time.Now().Add(-LeaseDuration - time.Minute)
+	s.allocs["C"].LastRenew = time.Now().Add(-LeaseDuration - time.Minute)
+	s.mu.Unlock()
+	s.reapExpiredLeases(ctx)
+
+	// C reconnects → must reclaim ipC, not the lower free ipA.
+	c2, err := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "C", Namespace: "test-ns"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ipC2, _, _ := net.ParseCIDR(c2.IPv4)
+	if !ipC.Equal(ipC2) {
+		t.Fatalf("sticky: expected C to reclaim %s, got %s (lower free ipA=%s)", ipC, ipC2, ipA)
+	}
+}
+
+// Part B: if the remembered IP was taken by someone else, reconnect falls back
+// to a different free IP (no collision).
+func TestGetTunIP_StickyFallsBackWhenRememberedIPTaken(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+
+	a, _ := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns"})
+	ipA, _, _ := net.ParseCIDR(a.IPv4)
+
+	s.mu.Lock()
+	s.allocs["A"].LastRenew = time.Now().Add(-LeaseDuration - time.Minute)
+	s.mu.Unlock()
+	s.reapExpiredLeases(ctx)
+
+	// B grabs the freed (lowest) IP, which is ipA.
+	b, _ := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "B", Namespace: "test-ns"})
+	ipB, _, _ := net.ParseCIDR(b.IPv4)
+	if !ipA.Equal(ipB) {
+		t.Fatalf("setup: expected B to take freed %s, got %s", ipA, ipB)
+	}
+
+	// A reconnects → ipA is taken → must fall back to a different IP.
+	a2, err := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ipA2, _, _ := net.ParseCIDR(a2.IPv4)
+	if ipA2.Equal(ipA) {
+		t.Fatalf("expected fallback away from taken IP %s", ipA)
+	}
+}
+
+// Part B + Fix 3: the remembered IP yields to ExcludeIPs (e.g. a sibling cluster
+// holds it locally), falling back to a different IP.
+func TestGetTunIP_StickyYieldsToExcludeIPs(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+
+	a, _ := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns"})
+	ipA, _, _ := net.ParseCIDR(a.IPv4)
+
+	s.mu.Lock()
+	s.allocs["A"].LastRenew = time.Now().Add(-LeaseDuration - time.Minute)
+	s.mu.Unlock()
+	s.reapExpiredLeases(ctx)
+
+	// A reconnects but excludes its old IP → must not reclaim it.
+	a2, err := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns", ExcludeIPs: []string{ipA.String()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ipA2, _, _ := net.ParseCIDR(a2.IPv4)
+	if ipA2.Equal(ipA) {
+		t.Fatalf("expected to yield to ExcludeIPs, but reclaimed %s", ipA)
+	}
+}
+
 // Fix 4: a reconcile-driven IP change (NotifyIPChange) must also update the
 // owner's envoy rule IP, not just the watchers — otherwise mesh traffic keeps
 // routing to the stale local TUN IP.
