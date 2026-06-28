@@ -100,8 +100,8 @@ func NewMapper(..., cmInformer cache.SharedInformer) *Mapper {
 }
 
 func (m *Mapper) Run() {
-    // Register event handler on shared informer
-    m.cmInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+    // Register event handler on shared informer (return value checked — log and return on error)
+    _, err := m.cmInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
         UpdateFunc: func(_, _ interface{}) { triggerReconcile() },
     })
 

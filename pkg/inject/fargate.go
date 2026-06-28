@@ -2,6 +2,7 @@ package inject
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/netip"
 
@@ -74,11 +75,25 @@ func (f *fargateInjector) Inject(ctx context.Context) error {
 	return ModifyServiceTargetPort(ctx, o.Clientset, o.Controller.Namespace, o.Object.Name, containerPort2EnvoyListenerPort)
 }
 
+const annotationOriginalTargetPorts = "kubevpn.io/original-target-ports"
+
 // ModifyServiceTargetPort updates a Service's target ports to point to envoy listener ports.
+// The original targetPort values are saved in an annotation for recovery on abnormal exit.
 func ModifyServiceTargetPort(ctx context.Context, clientset kubernetes.Interface, namespace string, name string, m map[int32]int32) error {
 	svc, err := clientset.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return err
+	}
+	if _, exists := svc.Annotations[annotationOriginalTargetPorts]; !exists {
+		original := make(map[string]string, len(svc.Spec.Ports))
+		for _, p := range svc.Spec.Ports {
+			original[fmt.Sprintf("%d", p.Port)] = p.TargetPort.String()
+		}
+		data, _ := json.Marshal(original)
+		if svc.Annotations == nil {
+			svc.Annotations = make(map[string]string)
+		}
+		svc.Annotations[annotationOriginalTargetPorts] = string(data)
 	}
 	for i := range len(svc.Spec.Ports) {
 		if p, found := m[svc.Spec.Ports[i].Port]; found {
@@ -87,6 +102,31 @@ func ModifyServiceTargetPort(ctx context.Context, clientset kubernetes.Interface
 			svc.Spec.Ports[i].TargetPort = intstr.FromInt32(svc.Spec.Ports[i].Port)
 		}
 	}
+	_, err = clientset.CoreV1().Services(namespace).Update(ctx, svc, metav1.UpdateOptions{})
+	return err
+}
+
+// RestoreServiceTargetPort restores a Service's target ports from the saved annotation.
+func RestoreServiceTargetPort(ctx context.Context, clientset kubernetes.Interface, namespace, name string) error {
+	svc, err := clientset.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	ann, ok := svc.Annotations[annotationOriginalTargetPorts]
+	if !ok {
+		return nil
+	}
+	var original map[string]string
+	if err := json.Unmarshal([]byte(ann), &original); err != nil {
+		return fmt.Errorf("failed to parse original target ports annotation: %w", err)
+	}
+	for i := range len(svc.Spec.Ports) {
+		key := fmt.Sprintf("%d", svc.Spec.Ports[i].Port)
+		if tp, found := original[key]; found {
+			svc.Spec.Ports[i].TargetPort = intstr.Parse(tp)
+		}
+	}
+	delete(svc.Annotations, annotationOriginalTargetPorts)
 	_, err = clientset.CoreV1().Services(namespace).Update(ctx, svc, metav1.UpdateOptions{})
 	return err
 }

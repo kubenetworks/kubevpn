@@ -92,6 +92,7 @@ Case 2: Same user update (OwnerID match)
 
 Case 3: Ownership transfer (Headers match)
   → Update LocalTunIPv4/v6 and OwnerID = new user's uuid
+  → Logs a Warn-level message recording both ownerIDs, workload, and headers
 
 Case 4: New user joins (different Headers, different IP)
   → Append new Rule, set OwnerID = uuid

@@ -110,7 +110,7 @@ jobs:
             lscr.io/linuxserver/openssh-server:latest
 
       - name: Test
-        run: make ut
+        run: sudo make ut
 
   macos:
     runs-on:  macos-15-intel
@@ -196,7 +196,7 @@ jobs:
         # for docker mount
         env:
           TMPDIR: .
-        run: make ut
+        run: sudo make ut
 
   windows:
     runs-on: windows-latest

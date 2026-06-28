@@ -41,7 +41,7 @@ KubeVPN creates a bidirectional network tunnel between a local machine and a Kub
 
 ### Transport Layer
 
-IP packets are encapsulated in a custom datagram framing protocol over TLS/TCP:
+IP packets are encapsulated in a custom datagram framing protocol over TLS/TCP. TLS is mandatory — if TLS config parsing fails with an error other than `ErrNoTLSConfig` (which indicates an intentional no-TLS setup), both client and server refuse to start rather than silently downgrading to plaintext.
 
 ```
 ┌──────────────────────────────────────────┐
@@ -148,7 +148,7 @@ func ipHash(ip net.IP, slots int) int {
 ### Configuration
 
 ```go
-const ConnPoolSize = 4  // pkg/core/tun_client.go
+var ConnPoolSize = 4  // pkg/core/tun_client.go, overridable via KUBEVPN_CONN_POOL_SIZE (range 1-16)
 ```
 
 ### Tradeoffs
@@ -271,6 +271,8 @@ one slot dies and reconnects, the remaining 3 slots handle traffic seamlessly.
 When a connection closes, `RemoveRoutesByConn(conn)` iterates all route entries
 and removes that connection from every `ConnList` it appears in. If a `ConnList`
 becomes empty, the route entry is deleted entirely.
+
+Note: there is a benign TOCTOU between `IsEmpty()` and `Delete()` in the write path — another goroutine could add a connection between the two calls. This is harmless because `sync.Map.Delete` is idempotent and the next packet will re-register the route via `AddRoute`.
 
 ## MTU Calculation
 

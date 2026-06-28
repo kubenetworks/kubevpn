@@ -139,13 +139,7 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 		return nil
 	}
 
-	portmap := make(map[int32]int32)
-	for _, container := range templateSpec.Spec.Containers {
-		for _, port := range container.Ports {
-			portmap[port.ContainerPort] = port.ContainerPort
-		}
-	}
-	if err = inject.ModifyServiceTargetPort(ctx, clientset, namespace, object.Name, portmap); err != nil {
+	if err = inject.RestoreServiceTargetPort(ctx, clientset, namespace, object.Name); err != nil {
 		return fmt.Errorf("failed to restore service %s target ports: %w", object.Name, err)
 	}
 	return nil

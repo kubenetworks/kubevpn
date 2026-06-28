@@ -71,15 +71,15 @@ KubeVPN uses 6 heartbeat/health check mechanisms across 4 layers to maintain con
 - Read: `KeepAliveTime * 3 = 180s` — tolerates 2 missed heartbeat cycles
 - Write: `KeepAliveTime = 60s` — writes should complete quickly
 
-### #4 Control Plane Health Check (gRPC health)
+### #4 Data Plane Health Check (DNS query via gudp relay)
 
-**File:** `pkg/handler/connect_tun.go` — `healthCheckGRPC()`
+**File:** `pkg/handler/connect_tun.go` — `healthCheckPortForward()`
 
-**What:** Every 30s, calls the standard gRPC health check service (`grpc.health.v1.Health/Check`) on `127.0.0.1:<controlPlanePort>` (port-forwarded from traffic manager :9002).
+**What:** Every 30s, sends a DNS query through the gudp relay (port-forwarded from traffic manager) to verify the full data-plane path is alive (port-forward + gudp + DNS container).
 
-**Connection reuse:** The gRPC connection is kept alive across health checks. On failure, the connection is closed and re-established on the next check.
+**Connection reuse:** TCP conn and PacketConn are held outside the checker closure. On failure, `closeConn()` cleans up and sets to nil; the next check rebuilds. `defer closeConn()` at function end ensures resource release.
 
-**Why necessary:** Validates the control plane is reachable via port-forward. Uses gRPC's standard health check protocol (no business logic side effects, unlike the former `GetTunIP`-based check which could trigger silent IP reallocation).
+**Why necessary:** Validates the data plane is reachable via port-forward. Uses DNS queries instead of gRPC `GetTunIP` to avoid triggering silent IP reallocation as a side effect of health checking.
 
 **Failure action:** After 3 consecutive failures (with 10s backoff), calls `cancelFunc()` to tear down the port-forward, which triggers a reconnection in the `portForward()` retry loop.
 
@@ -90,6 +90,8 @@ KubeVPN uses 6 heartbeat/health check mechanisms across 4 layers to maintain con
 **File:** `pkg/handler/configmap_store.go` — `HealthPeriod()`
 
 **What:** Every 30s, syncs the traffic manager ConfigMap from the shared informer cache and does a direct GET to verify API server reachability.
+
+**Thread safety:** `ConfigMapStore` uses `healthMu sync.RWMutex` to protect `healthStatus` — `syncFromCache` and `HealthCheckOnce` write with `Lock`, `GetHealthStatus` reads with `RLock`.
 
 **Why necessary:**
 - Caches the ConfigMap in `healthStatus.cm` for `kubevpn status` queries
@@ -124,7 +126,7 @@ KubeVPN uses 6 heartbeat/health check mechanisms across 4 layers to maintain con
 | Failure | Detected by | Detection time |
 |---------|-------------|----------------|
 | Pod crash/restart | #4, #5, #6 (watch event) | <1s (informer) or 30s (ticker) |
-| Port-forward broken | #4 | 30s + retry |
+| Port-forward broken | #4 (DNS query via gudp) | 30s + retry |
 | TUN tunnel stall | #3 (read deadline) | 180s |
 | TCP connection half-open | #2 (OS keepalive) | ~60s |
 | API server unreachable | #5 | 30s |

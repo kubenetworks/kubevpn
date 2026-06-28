@@ -119,7 +119,7 @@ Teardown (on error): session.Cancel() → SSH closes, BUT VPN stays alive
 
 ## Cleanup Two-Path Design
 
-`ConnectOptions.Cleanup()` distinguishes user vs root daemon:
+`ConnectOptions.Cleanup()` distinguishes user vs root daemon. Cleanup uses a `cleanupMu sync.Mutex` + `cleanedUp bool` (not `sync.Once`) so that failed cleanups can be retried. `rollbackFuncList` is also protected by `rollbackMu sync.Mutex` since `AddRollbackFunc` and `getRollbackFuncs` may run in different goroutines.
 
 ```
 User daemon (!c.isDataPlane):

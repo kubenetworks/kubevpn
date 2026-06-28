@@ -7,7 +7,7 @@ The two sides differ in how they handle a *runtime* IP change:
 - **Client side** — the client's TUN device IP can change at runtime (e.g. DHCP lease expiry after a sleep/wake cycle). The client subscribes to `WatchTunIP` and hot-updates its own TUN device via `NetworkManager.ChangeTunIP`.
 - **Sidecar side** — the sidecar fetches its TUN IP **once at startup** and does not hot-update its own device. When a *client's* IP changes, the routing target is updated at the control-plane: `syncEnvoyRuleIP` rewrites `Rule.LocalTunIPv4/v6` in `ENVOY_CONFIG`, and envoy's xDS stream pushes the new endpoint to the sidecar. There is **no sidecar-side TUN watcher and no iptables DNAT to a hardcoded client IP** — that mechanism was removed by the unified proxy mode.
 
-> The unified proxy mode (VPN-only and Mesh both routed through envoy, TCP + UDP) and the IP-change push fix are specified in **[29-sleep-wake-ip-update.md](29-sleep-wake-ip-update.md)** — read it for the authoritative end-to-end design. This document focuses on the shared `TunConfigService` API and the client-side hot-update path.
+> The unified proxy mode (VPN-only and Mesh both routed through envoy, TCP + UDP) and the IP-change push fix are specified in **[28-sleep-wake-ip-update.md](28-sleep-wake-ip-update.md)** — read it for the authoritative end-to-end design. This document focuses on the shared `TunConfigService` API and the client-side hot-update path.
 
 ---
 
@@ -237,7 +237,7 @@ The actual implementation is `tunProtocolFactory` + `requestTunIPFromControlPlan
 
 #### 4.5 No Sidecar-Side Hot-Update (Removed)
 
-Earlier designs ran a `watchTunIPChanges` / `pollTunIP` / `applyTunIPChange` loop inside the sidecar that hot-updated the sidecar's own TUN device and rewrote iptables DNAT rules. **All of this was removed** by the unified proxy mode ([29-sleep-wake-ip-update.md](29-sleep-wake-ip-update.md)).
+Earlier designs ran a `watchTunIPChanges` / `pollTunIP` / `applyTunIPChange` loop inside the sidecar that hot-updated the sidecar's own TUN device and rewrote iptables DNAT rules. **All of this was removed** by the unified proxy mode ([28-sleep-wake-ip-update.md](28-sleep-wake-ip-update.md)).
 
 The reasoning:
 
@@ -330,7 +330,7 @@ Sidecar container starts (kubevpn server -l "tun:/tcp://tm:10801?net=&route=..."
 
 - `?net=` non-empty -> legacy path (use the IP from the env var directly)
 - `?net=` empty -> current path (fetch IP from control-plane via GetTunIP)
-- Unified proxy mode is **not** wire-compatible with old sidecars; after upgrading run `kubevpn reset` then re-`proxy` (see [29-sleep-wake-ip-update.md](29-sleep-wake-ip-update.md) §8)
+- Unified proxy mode is **not** wire-compatible with old sidecars; after upgrading run `kubevpn reset` then re-`proxy` (see [28-sleep-wake-ip-update.md](28-sleep-wake-ip-update.md) §8)
 
 ### 10. Validation
 

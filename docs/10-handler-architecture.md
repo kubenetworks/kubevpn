@@ -213,6 +213,13 @@ pkg/controlplane   → pkg/dhcp, pkg/daemon/rpc (server-side DHCP + TunConfigSer
 
 **Client side no longer depends on pkg/dhcp** — IP allocation is entirely managed by the server-side TunConfigService.
 
+**Known reverse dependency:** `pkg/handler` imports `pkg/daemon/rpc` (gRPC client for TunConfigService). A medium-term improvement is to define an `IPAllocator` interface in `pkg/handler` and inject the implementation from the daemon layer.
+
+## Future Refactoring Direction
+
+- **ConnectOptions split**: Separate into `ControlPlaneSession` (user daemon: K8s client, proxy management, health checks) and `DataPlaneSession` (root daemon: NetworkManager, TUN), sharing a `ConnectionIdentity` (OwnerID, ConnectionID, Namespace)
+- **Connection interface migration**: Change `Server.connections` to `[]Connection` type with persistence via interface methods (`MarshalConfig()`/`UnmarshalConfig()`)
+
 ## File Layout
 
 ```
