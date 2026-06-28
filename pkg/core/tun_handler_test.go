@@ -43,6 +43,6 @@ func TestServe_CleanShutdownOnCancel(t *testing.T) {
 	t.Run("client", func(t *testing.T) {
 		// forward is empty, so dial attempts fail fast and the slots just loop+backoff until
 		// cancel — exercising the conn-pool/heartbeat routines' shutdown path.
-		run(t, func(dev *tunDevice) transport { return newClientTransport(dev, &Forwarder{}) })
+		run(t, func(dev *tunDevice) transport { return newClientTransport(dev, &Forwarder{}, nil) })
 	})
 }

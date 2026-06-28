@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"testing"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -166,43 +165,4 @@ func TestDoc11_InformerIsSingleton(t *testing.T) {
 		t.Fatal("GetInformer should return the same instance (sync.Once)")
 	}
 	store.Stop()
-}
-
-func TestDoc11_HealthCheckUsesDirectGET(t *testing.T) {
-	// Doc says: HealthCheckOnce makes a direct API call (not informer)
-	// to verify API server reachability
-	clientset := fake.NewSimpleClientset(
-		&v1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "ns"},
-			Data:       map[string]string{"health": "ok"},
-		},
-	)
-	store := newConfigMapStore(clientset, "ns")
-
-	store.HealthCheckOnce(context.Background(), 5*time.Second)
-
-	status := store.GetHealthStatus()
-	if status.LastError() != nil {
-		t.Fatalf("health check failed: %v", status.LastError())
-	}
-	if status.ConfigMap() == nil {
-		t.Fatal("ConfigMap should be set after health check")
-	}
-	if status.ConfigMap().Data["health"] != "ok" {
-		t.Fatal("ConfigMap data mismatch")
-	}
-}
-
-func TestDoc11_HealthCheckDetectsAPIFailure(t *testing.T) {
-	// Doc says: direct GET detects API server unreachable (informer cache can't)
-	// Use empty clientset — ConfigMap doesn't exist → GET returns NotFound
-	clientset := fake.NewSimpleClientset() // no ConfigMap
-	store := newConfigMapStore(clientset, "ns")
-
-	store.HealthCheckOnce(context.Background(), 5*time.Second)
-
-	status := store.GetHealthStatus()
-	if status.LastError() == nil {
-		t.Fatal("health check should fail when ConfigMap doesn't exist")
-	}
 }

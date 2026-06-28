@@ -34,14 +34,17 @@ type clientTransport struct {
 	reconnected chan struct{}
 	// gvisorInbound carries src == dst packets to the local loopback gvisor stack.
 	gvisorInbound chan *Packet
+	// stats records data-plane liveness from observed heartbeat echo replies; may be nil.
+	stats *HeartbeatStats
 }
 
-func newClientTransport(dev *tunDevice, forward *Forwarder) *clientTransport {
+func newClientTransport(dev *tunDevice, forward *Forwarder, stats *HeartbeatStats) *clientTransport {
 	return &clientTransport{
 		dev:           dev,
 		forward:       forward,
 		reconnected:   make(chan struct{}, 1),
 		gvisorInbound: make(chan *Packet, MaxSize),
+		stats:         stats,
 	}
 }
 
@@ -84,6 +87,7 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 			inbound:     make(chan *Packet, MaxSize),
 			tunOutbound: t.dev.tunOutbound,
 			forward:     t.forward,
+			stats:       t.stats,
 		}
 		// Only slot 0 signals reconnects to the heartbeat goroutine.
 		if i == 0 {
@@ -161,6 +165,8 @@ type connSlot struct {
 	// reconnected is non-nil only for slot 0; it signals the heartbeat goroutine to send an
 	// immediate heartbeat after a reconnect so the server re-registers the route promptly.
 	reconnected chan struct{}
+	// stats records data-plane liveness from observed heartbeat echo replies; may be nil.
+	stats *HeartbeatStats
 }
 
 // run manages this slot's single connection with reconnect logic.
@@ -236,6 +242,13 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 		if buf[0] == 1 {
 			gvisorInbound <- NewPacket(buf[:], n, nil, nil)
 		} else {
+			// Heartbeat echo replies from the gateway are the data-plane liveness signal:
+			// record them and drop (the OS would discard them — the echo was crafted by us).
+			if s.stats != nil && isHeartbeatEchoReply(buf[1:n]) {
+				s.stats.MarkReply()
+				config.LPool.Put(buf[:])
+				continue
+			}
 			s.tunOutbound <- NewPacket(buf[:], n, nil, nil)
 		}
 	}

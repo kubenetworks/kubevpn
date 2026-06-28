@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,7 +20,7 @@ import (
 )
 
 // ConfigMapStore provides access to the traffic manager ConfigMap for key-value
-// storage and health monitoring. It owns a shared informer and health check state.
+// storage, backed by a shared informer cache with a direct-API fallback.
 type ConfigMapStore struct {
 	clientset        kubernetes.Interface
 	managerNamespace string
@@ -29,9 +28,6 @@ type ConfigMapStore struct {
 	informerOnce sync.Once
 	informer     cache.SharedInformer
 	informerStop chan struct{}
-
-	healthMu     sync.RWMutex
-	healthStatus HealthStatus
 }
 
 // newConfigMapStore creates a new ConfigMapStore for the given clientset and namespace.
@@ -73,6 +69,19 @@ func (s *ConfigMapStore) Get(ctx context.Context, key string) (string, error) {
 	return cm.Data[key], nil
 }
 
+// GetConfigMap returns the traffic manager ConfigMap, reading the informer cache first
+// (near-real-time, zero API cost) and falling back to a direct GET when the cache is not
+// yet warm.
+func (s *ConfigMapStore) GetConfigMap(ctx context.Context) (*corev1.ConfigMap, error) {
+	items := s.GetInformer().GetStore().List()
+	for _, item := range items {
+		if cm, ok := item.(*corev1.ConfigMap); ok {
+			return cm, nil
+		}
+	}
+	return s.clientset.CoreV1().ConfigMaps(s.managerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+}
+
 // Set updates a key-value pair in the traffic manager ConfigMap.
 func (s *ConfigMapStore) Set(ctx context.Context, key, value string) error {
 	err := retry.RetryOnConflict(
@@ -95,68 +104,6 @@ func (s *ConfigMapStore) Set(ctx context.Context, key, value string) error {
 		return err
 	}
 	return nil
-}
-
-// HealthPeriod periodically syncs the traffic manager ConfigMap into healthStatus.
-// Reads from the shared informer cache (zero API calls when cache is warm),
-// with a direct GET fallback to detect API server unreachable.
-func (s *ConfigMapStore) HealthPeriod(ctx context.Context, _ time.Duration) {
-	ticker := time.NewTicker(config.HealthCheckInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			s.syncFromCache()
-			s.HealthCheckOnce(ctx, config.HealthCheckTimeout)
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// syncFromCache updates healthStatus from the shared informer's local cache.
-func (s *ConfigMapStore) syncFromCache() {
-	items := s.GetInformer().GetStore().List()
-	for _, item := range items {
-		if cm, ok := item.(*corev1.ConfigMap); ok {
-			s.healthMu.Lock()
-			s.healthStatus.lastErr = nil
-			s.healthStatus.cm = cm
-			s.healthMu.Unlock()
-			return
-		}
-	}
-}
-
-// HealthCheckOnce performs a single health check with the given timeout.
-func (s *ConfigMapStore) HealthCheckOnce(ctx context.Context, timeout time.Duration) {
-	timeoutCtx, cancelFunc := context.WithTimeout(ctx, timeout)
-	defer cancelFunc()
-
-	start := time.Now()
-	mapInterface := s.clientset.CoreV1().ConfigMaps(s.managerNamespace)
-	configMap, err := mapInterface.Get(timeoutCtx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	const perfLogThreshold = 200 * time.Millisecond
-	if elapsed := time.Since(start); elapsed > perfLogThreshold {
-		plog.G(ctx).Infof("[Perf] ConfigMap GET took %v", elapsed)
-	}
-	s.healthMu.Lock()
-	if err != nil {
-		s.healthStatus.lastErr = err
-		s.healthMu.Unlock()
-		plog.G(ctx).Debugf("Health check failed: %v", err)
-		return
-	}
-	s.healthStatus.lastErr = nil
-	s.healthStatus.cm = configMap
-	s.healthMu.Unlock()
-}
-
-// GetHealthStatus returns the last known health state.
-func (s *ConfigMapStore) GetHealthStatus() HealthStatus {
-	s.healthMu.RLock()
-	defer s.healthMu.RUnlock()
-	return s.healthStatus
 }
 
 // Stop closes the informer stop channel, shutting down the shared informer.

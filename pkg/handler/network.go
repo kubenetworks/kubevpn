@@ -71,6 +71,7 @@ type NetworkManager struct {
 	controlPlaneLocalPort int // local port for TunConfigService (port-forwarded from 9002)
 	extraHost             []dns.Entry
 	dnsConfig             *dns.Config
+	heartbeatStats        *core.HeartbeatStats // data-plane liveness from observed heartbeat replies
 }
 
 const (
@@ -100,6 +101,12 @@ func (nm *NetworkManager) LocalTunIPv6() *net.IPNet { return nm.localTunIPv6 }
 // TunName returns the TUN device name (empty if not started).
 func (nm *NetworkManager) TunName() string {
 	return nm.tunName
+}
+
+// LastHeartbeat returns the time of the last observed ICMP echo reply from the server gateway,
+// or the zero time if none has been seen. It is the data-plane liveness signal.
+func (nm *NetworkManager) LastHeartbeat() time.Time {
+	return nm.heartbeatStats.LastReply()
 }
 
 // GetExtraHost returns the extra DNS host entries accumulated by AddExtraRoute.
@@ -535,7 +542,8 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 		MaxRetries:  5,
 	}
 
-	handler := core.TunHandler(forwarder, core.NewRouteHub())
+	nm.heartbeatStats = &core.HeartbeatStats{}
+	handler := core.TunHandler(forwarder, core.NewRouteHub(), nm.heartbeatStats)
 	listener, err := tun.Listener(tunConfig)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to create tun listener: %v", err)

@@ -206,11 +206,6 @@ var (
 	SlotReconnectBackoff = 2 * time.Second
 	DaemonPollInterval   = 200 * time.Millisecond
 
-	// HealthCheckTimeout bounds a single connection health check (HealthCheckOnce).
-	HealthCheckTimeout = 10 * time.Second
-	// HealthCheckInterval is the period between recurring connection health checks (HealthPeriod).
-	HealthCheckInterval = 30 * time.Second
-
 	// RolloutStatusTimeout bounds how long RolloutStatus waits for a workload
 	// rollout to finish. Without it, a sidecar that never becomes ready makes
 	// the operation (e.g. `kubevpn proxy`) hang indefinitely.

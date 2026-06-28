@@ -134,9 +134,15 @@ func (svr *Server) CleanupConfig() error {
 	return os.Remove(config.GetDBPath())
 }
 
-type tunIP struct{ v4, v6 string }
+type tunIP struct {
+	v4, v6 string
+	// status is the data-plane verdict computed by the sudo daemon (it owns the TUN and
+	// observes heartbeat replies). The user daemon reuses it instead of recomputing.
+	status string
+}
 
-// getSudoTunIPs queries the sudo daemon and returns a map from ConnectionID to TUN IPs.
+// getSudoTunIPs queries the sudo daemon and returns a map from ConnectionID to the data-plane
+// state (TUN IPs + computed status) it owns.
 func (svr *Server) getSudoTunIPs(ctx context.Context) map[string]tunIP {
 	if svr.GetClient == nil {
 		return nil
@@ -151,7 +157,11 @@ func (svr *Server) getSudoTunIPs(ctx context.Context) map[string]tunIP {
 	}
 	m := make(map[string]tunIP, len(resp.GetList()))
 	for _, s := range resp.GetList() {
-		m[s.GetConnectionID()] = tunIP{v4: s.GetIPv4(), v6: s.GetIPv6()}
+		m[s.GetConnectionID()] = tunIP{
+			v4:     s.GetIPv4(),
+			v6:     s.GetIPv6(),
+			status: s.GetStatus(),
+		}
 	}
 	return m
 }

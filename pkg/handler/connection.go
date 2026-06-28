@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"time"
 
 	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -42,17 +41,6 @@ type Connection interface {
 
 	// GetLocalTunIP returns the local TUN device IPv4 and IPv6 addresses as strings.
 	GetLocalTunIP() (v4, v6 string)
-
-	// --- Health ---
-
-	// HealthCheckOnce performs a single health check with the given timeout.
-	HealthCheckOnce(ctx context.Context, timeout time.Duration)
-
-	// HealthPeriod periodically syncs health status on the given interval.
-	HealthPeriod(ctx context.Context, interval time.Duration)
-
-	// HealthStatus returns the last known health state.
-	HealthStatus() HealthStatus
 
 	// --- Proxy Management ---
 

@@ -75,11 +75,12 @@ func (w *wsHandler) createTunnel(ctx context.Context, cli *ssh.Client) error {
 	}()
 	plog.G(ctx).Info("Connected private safe tunnel")
 
-	const keepAlivePingInterval = 15 * time.Second
+	// Align with the core data-plane heartbeat cadence (config.KeepAliveTime) instead of
+	// running a separate, more aggressive keepalive loop.
 	go func() {
 		for ctx.Err() == nil {
 			_, _ = util.Ping(ctx, clientIP.IP.String(), ip.String())
-			time.Sleep(keepAlivePingInterval)
+			time.Sleep(config.KeepAliveTime)
 		}
 	}()
 	return nil

@@ -276,26 +276,17 @@ func (c *ConnectOptions) Get(ctx context.Context, key string) (string, error) {
 	return c.getConfigMapStore().Get(ctx, key)
 }
 
+// GetTrafficManagerConfigMap returns the traffic manager ConfigMap from the informer cache
+// (GET fallback when cold). Use this for read paths that want near-real-time state.
+func (c *ConnectOptions) GetTrafficManagerConfigMap(ctx context.Context) (*v1.ConfigMap, error) {
+	return c.getConfigMapStore().GetConfigMap(ctx)
+}
+
 // GetConfigMapInformer returns a shared informer for the traffic manager ConfigMap.
 // Created once on first call, then reused. Thread-safe via sync.Once.
 // Must be called after InitClient.
 func (c *ConnectOptions) GetConfigMapInformer() cache.SharedInformer {
 	return c.getConfigMapStore().GetInformer()
-}
-
-// HealthCheckOnce performs a single health check with the given timeout.
-func (c *ConnectOptions) HealthCheckOnce(ctx context.Context, timeout time.Duration) {
-	c.getConfigMapStore().HealthCheckOnce(ctx, timeout)
-}
-
-// HealthPeriod periodically syncs health status on the given interval.
-func (c *ConnectOptions) HealthPeriod(ctx context.Context, interval time.Duration) {
-	c.getConfigMapStore().HealthPeriod(ctx, interval)
-}
-
-// HealthStatus returns the last known health state.
-func (c *ConnectOptions) HealthStatus() HealthStatus {
-	return c.getConfigMapStore().GetHealthStatus()
 }
 
 // GetLocalTunIP returns the local TUN device IPv4 and IPv6 addresses as strings.
@@ -310,6 +301,16 @@ func (c *ConnectOptions) GetLocalTunIP() (v4 string, v6 string) {
 		}
 	}
 	return
+}
+
+// GetLastHeartbeat returns the time of the last observed data-plane heartbeat echo reply,
+// or the zero time if none. Only meaningful in the data-plane (sudo daemon) where
+// NetworkManager owns the TUN client; the user daemon obtains it via the sudo Status RPC.
+func (c *ConnectOptions) GetLastHeartbeat() time.Time {
+	if c.network != nil {
+		return c.network.LastHeartbeat()
+	}
+	return time.Time{}
 }
 
 // GetConnectionID returns the connection identifier (namespace UID suffix) for this session.

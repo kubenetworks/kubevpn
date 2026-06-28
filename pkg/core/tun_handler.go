@@ -33,16 +33,21 @@ type tunHandler struct {
 	forward *Forwarder
 	hub     *RouteHub
 	errChan chan error
+	// stats records data-plane liveness from observed heartbeat echo replies (client role only);
+	// may be nil.
+	stats *HeartbeatStats
 }
 
 // TunHandler creates a handler for the tun tunnel. The same handler serves both roles, decided
 // per connection: a configured forwarder ⇒ client (local machine / sidecar), none ⇒ server
-// (traffic manager hub).
-func TunHandler(forward *Forwarder, hub *RouteHub) Handler {
+// (traffic manager hub). stats is observed by the client role to track heartbeat reply liveness
+// and may be nil (server role, or when liveness tracking is not needed).
+func TunHandler(forward *Forwarder, hub *RouteHub, stats *HeartbeatStats) Handler {
 	return &tunHandler{
 		forward: forward,
 		hub:     hub,
 		errChan: make(chan error, 1),
+		stats:   stats,
 	}
 }
 
@@ -63,7 +68,7 @@ func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
 	if h.forward.IsEmpty() {
 		dev.transport = newServerTransport(dev, h.hub)
 	} else {
-		dev.transport = newClientTransport(dev, h.forward)
+		dev.transport = newClientTransport(dev, h.forward, h.stats)
 	}
 	serve(ctx, dev)
 }

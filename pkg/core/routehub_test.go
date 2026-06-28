@@ -124,7 +124,7 @@ func TestRouteHub_RouteMapTCP_DeleteEntry(t *testing.T) {
 }
 
 func TestTunHandler_NilHub_StoresNil(t *testing.T) {
-	handler := TunHandler(nil, nil)
+	handler := TunHandler(nil, nil, nil)
 	th := handler.(*tunHandler)
 	if th.hub != nil {
 		t.Fatal("nil hub should be stored as nil, callers must provide explicit hub")
@@ -133,7 +133,7 @@ func TestTunHandler_NilHub_StoresNil(t *testing.T) {
 
 func TestTunHandler_CustomHub(t *testing.T) {
 	hub := NewRouteHub()
-	handler := TunHandler(nil, hub)
+	handler := TunHandler(nil, hub, nil)
 	th := handler.(*tunHandler)
 	if th.hub != hub {
 		t.Fatal("handler should use the provided hub")

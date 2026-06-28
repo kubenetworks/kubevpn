@@ -9,9 +9,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -166,62 +163,5 @@ users:
 	}
 	if opts.GetFactory() == nil {
 		t.Fatal("expected non-nil factory after InitClient")
-	}
-}
-
-func TestHealthStatus_ConfigMap(t *testing.T) {
-	hs := HealthStatus{}
-	if hs.ConfigMap() != nil {
-		t.Fatal("expected nil ConfigMap initially")
-	}
-
-	cm := &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-configmap",
-			Namespace: "test-ns",
-		},
-		Data: map[string]string{"key": "value"},
-	}
-	hs.cm = cm
-
-	got := hs.ConfigMap()
-	if got == nil {
-		t.Fatal("ConfigMap() returned nil after setting")
-	}
-	if got.Name != "test-configmap" {
-		t.Fatalf("expected name 'test-configmap', got %q", got.Name)
-	}
-	if got.Namespace != "test-ns" {
-		t.Fatalf("expected namespace 'test-ns', got %q", got.Namespace)
-	}
-	if got.Data["key"] != "value" {
-		t.Fatalf("expected data key='value', got %q", got.Data["key"])
-	}
-}
-
-func TestHealthStatus_LastError(t *testing.T) {
-	hs := HealthStatus{}
-	if hs.LastError() != nil {
-		t.Fatal("expected nil error initially")
-	}
-
-	expectedErr := errors.New("connection refused")
-	hs.lastErr = expectedErr
-
-	got := hs.LastError()
-	if got == nil {
-		t.Fatal("LastError() returned nil after setting")
-	}
-	if got.Error() != "connection refused" {
-		t.Fatalf("expected 'connection refused', got %q", got.Error())
-	}
-	if !errors.Is(got, expectedErr) {
-		t.Fatal("returned error is not the same instance")
-	}
-
-	// Clear the error
-	hs.lastErr = nil
-	if hs.LastError() != nil {
-		t.Fatal("expected nil after clearing error")
 	}
 }

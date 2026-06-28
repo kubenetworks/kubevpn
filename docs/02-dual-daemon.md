@@ -26,7 +26,6 @@ KubeVPN uses a dual-process architecture (User Daemon + Root Daemon), where each
 │  ├── Traffic Manager creation/upgrade (CreateOutboundPod/UpgradeDeploy)│
 │  ├── Proxy injection (CreateRemoteInboundPod → inject/)│
 │  ├── File sync (DoSync)                               │
-│  ├── Health checks (HealthPeriod)                     │
 │  ├── Connection state persistence (OffloadToConfig/LoadFromConfig)│
 │  └── OwnerID generation and management                │
 │                                                       │
@@ -80,7 +79,6 @@ Fields used:
 | `OwnerID` | Written into Envoy Rule to identify ownership |
 | `Image/ImagePullSecretName` | CreateOutboundPod creates the traffic manager pod |
 | `proxyManager` | ProxyManager — manages proxied workloads lifecycle |
-| `configMapStore.healthStatus` | Periodic health checks (via ConfigMapStore) |
 | `Sync` | File sync options |
 | `RequestRaw` | Needed for persistence |
 
@@ -178,7 +176,6 @@ User Daemon: Connect RPC
   │     │     ├── UpgradeDeploy (upgrade traffic manager)
   │     │     ├── Set req.OwnerID, forward req to Root Daemon ──┐
   │     │     ├── Wait for Root Daemon to complete               │
-  │     │     ├── Start HealthPeriod                             │
   │     │     └── Store in svr.connections                       │
   │                                                              ▼
   │                                    Root Daemon: Connect RPC
@@ -239,7 +236,7 @@ User Daemon: Disconnect RPC
 
 ### Rule 1: Determine which daemon a new field belongs to before adding it
 
-Ask yourself: is this field used by `DoConnect` (data plane), or by `CreateRemoteInboundPod`/`LeaveResource`/`HealthPeriod` (control plane)?
+Ask yourself: is this field used by `DoConnect` (data plane), or by `CreateRemoteInboundPod`/`LeaveResource` (control plane)?
 
 - **Data plane**: does not need a json tag, does not need persistence, does not need to be set in `redirectConnectToSudoDaemon`
 - **Control plane**: needs a json tag (for persistence), needs to be initialized in `redirectConnectToSudoDaemon`

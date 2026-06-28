@@ -187,8 +187,6 @@ func (svr *Server) forwardConnectToSudo(
 	if resp.Context().Err() != nil {
 		return resp.Context().Err()
 	}
-	connect.HealthCheckOnce(ctx, config.HealthCheckTimeout)
-	go connect.HealthPeriod(ctx, config.HealthCheckInterval)
 	svr.connMu.Lock()
 	svr.connections = append(svr.connections, connect)
 	svr.currentConnectionID = connectionID

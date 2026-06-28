@@ -63,7 +63,6 @@ pkg/
 │   ├── connect_upgrade.go Traffic manager deployment upgrade
 │   ├── network.go         NetworkManager — owns full networking lifecycle (port-forward, TUN IP allocation, routes, DNS)
 │   ├── k8s_client.go      K8sClient embedded struct (shared by ConnectOptions/SyncOptions)
-│   ├── healthchecker.go   HealthStatus, periodic health check loop
 │   ├── traffmgr.go        Create traffic manager pod
 │   ├── traffmgr_resources.go  K8s resource generators (deploy, svc, secret, etc.)
 │   ├── leave.go           Leave/unpatch proxy resources
