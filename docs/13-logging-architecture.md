@@ -31,13 +31,13 @@ KubeVPN runs as three processes: **CLI** (user-facing command), **User Daemon** 
 ┌─────────────────────────┼───────────────────────────────────┐
 │ Daemon Process           │                                    │
 │                          │                                    │
-│  Per-RPC logger (server-format, DebugLevel)                   │
+│  Per-RPC logger (server-format, file ALWAYS DebugLevel)       │
 │       │                                                      │
-│       ├──→ svr.LogFile (timestamp + file:line + level)       │
-│       │    ALL levels including Debug                         │
+│       ├──→ svr.LogFile (timestamp + [connID=…] + file:line)  │
+│       │    ALL levels including Debug (always)                │
 │       │                                                      │
 │       └──→ StreamHook ──→ gRPC stream (message only)         │
-│            Info+ only (Debug filtered out)                    │
+│            streamLevel = req.Level (Info default, Debug w/ --debug) │
 │                                                              │
 │  plog.G(context.Background()) ──→ global L ──→ logFile       │
 │                                   (server-format, DebugLevel)│
@@ -46,17 +46,25 @@ KubeVPN runs as three processes: **CLI** (user-facing command), **User Daemon** 
 
 ### Key principle: one logger, two outputs, two formats, two levels
 
-The daemon's per-RPC logger uses **server-format** as its primary formatter (writes to log file at DebugLevel with full debug info). A **StreamHook** intercepts log entries at **InfoLevel** and sends only the message text to the gRPC stream. Debug messages go to the log file only.
+The daemon's per-RPC logger uses **server-format** as its primary formatter and **always writes
+to the log file at DebugLevel** — independent of the CLI `--debug` flag, so the file is always a
+full record for post-mortem debugging. A **StreamHook** sends only the message text to the gRPC
+stream at **`streamLevel`**, which is `req.Level` (the CLI's `--debug` intent): **Info by default,
+Debug when the user passed `--debug`**. So Debug lines always land in the file, and additionally
+reach the CLI only when `--debug` is set.
 
 ```go
-// Daemon per-RPC setup (writer.go initStreamLogger):
-logger := plog.GetLoggerForServer(level, svr.LogFile)  // server-format → log file (all levels)
-logger.AddHook(&plog.StreamHook{                        // message-only → gRPC stream
+// Daemon per-RPC setup (writer.go newServerStreamLogger / initStreamLogger):
+logger := plog.GetLoggerForServer(int32(log.DebugLevel), svr.LogFile) // file: ALL levels, always
+logger.AddHook(&plog.StreamHook{                                      // message-only → gRPC stream
     Writer: newStreamWriter(sendMsg),
-    Level:  log.InfoLevel,                               // Info+ only — Debug stays in log file
+    Level:  log.Level(streamLevel),  // req.Level: Info default, Debug with --debug
 })
 ctx = plog.WithLogger(resp.Context(), logger)
 ```
+
+Connect/Proxy/Sync requests carry `Level`; other RPCs (Disconnect/Quit/Leave/Reset/Unsync/Uninstall)
+have no `Level` field and stream at Info.
 
 ## Design Rules
 
@@ -84,12 +92,28 @@ cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 
 `NewClientLogger()` returns a message-only logger writing to stdout. Respects `--debug` flag via `config.Debug`.
 
-### 3. StreamHook filters debug from CLI
+### 3. StreamHook level follows `--debug`; the file is always Debug
 
-StreamHook level is always `InfoLevel`, regardless of the logger's own level. This means:
-- `--debug` flag → daemon logger at `DebugLevel` → debug messages in log file
-- StreamHook → only `Info`/`Warn`/`Error` sent to CLI via gRPC stream
-- User never sees `[Client-0] Connected`, `[Transport] Using TLS mode`, etc.
+The file side is **always** `DebugLevel`. The StreamHook level is `req.Level`:
+- no `--debug` → StreamHook at `Info` → CLI sees only `Info`/`Warn`/`Error`; Debug stays in the file
+  (user never sees `[Client-0] Connected`, `[Transport] Using TLS mode`, etc.)
+- `--debug` → StreamHook at `Debug` → CLI also sees Debug lines (file unchanged, always Debug)
+
+### 3a. Per-connection tagging (`connID`)
+
+Connection-scoped handlers tag their context with the connection ID via
+`plog.WithField(ctx, action.LogFieldConnID, id)`. The server format renders it as a `[connID=xxxx]`
+prefix (via `GenStr`), so concurrent operations sharing one daemon log file can be filtered apart
+(`grep connID=xxxx`). The StreamHook uses the message-only client format, so the prefix never reaches
+CLI stdout. Tagged at: connect (root + user daemon, on `session.Ctx`), proxy, and disconnect-by-id.
+core/gVISOR logs inherit the tag automatically through `plog.GetFields(ctx)`.
+
+### 3b. In-cluster sidecars default to Debug
+
+The traffic-manager `server` and `control-plane` containers, and the injected fargate `server`
+sidecar, are deployed with `--debug` (`pkg/handler/traffmgr_resources.go`, `pkg/inject/container.go`)
+so `kubectl logs` shows Debug by default. `control-plane` applies `config.Debug` to its logger in
+`controlplane.Main`. The `dns` container has no debug flag and is left at Info.
 
 ### 4. `plog.G(context.Background())` fallback
 
@@ -101,7 +125,7 @@ Code using `context.Background()` falls back to global `L`:
 
 | Level | Log file | gRPC stream → CLI | CLI stdout |
 |---|---|---|---|
-| Debug | ✅ (daemon only, after L upgrade) | ❌ (StreamHook filters) | ✅ (only with `--debug`) |
+| Debug | ✅ (always, both daemons) | ✅ only with `--debug` (StreamHook at req.Level) | ✅ (only with `--debug`) |
 | Info | ✅ | ✅ | ✅ |
 | Warn | ✅ | ✅ | ✅ |
 | Error | ✅ | ✅ | ✅ |
@@ -116,8 +140,10 @@ Code using `context.Background()` falls back to global `L`:
 | `NewClientLogger()` | `pkg/log/logger.go` | Create client-format logger for CLI (message-only, stdout) |
 | `GetLoggerForClient(level, out)` | `pkg/log/logger.go` | Create client-format logger for custom output |
 | `GetLoggerForServer(level, out)` | `pkg/log/logger.go` | Create server-format logger (timestamp+file:line) |
-| `StreamHook` | `pkg/log/logger.go` | Logrus hook: sends message-only text to a writer at InfoLevel |
-| `initStreamLogger` | `pkg/daemon/action/writer.go` | Create per-RPC logger: server-format to logFile + StreamHook to gRPC |
+| `StreamHook` | `pkg/log/logger.go` | Logrus hook: sends message-only text to a writer at its configured Level |
+| `newServerStreamLogger` | `pkg/daemon/action/writer.go` | Build per-RPC logger: file always Debug + StreamHook at streamLevel (req.Level) |
+| `initStreamLogger` | `pkg/daemon/action/writer.go` | `newServerStreamLogger` + `WithLogger(resp.Context())` |
+| `LogFieldConnID` | `pkg/daemon/action/writer.go` | ctx field key `"connID"` → `[connID=xxxx]` prefix for per-connection isolation |
 | `serverFormat` | `pkg/log/logger.go` | `2006-01-02 15:04:05.000 file.go:42 level: message` |
 | `format` (client) | `pkg/log/logger.go` | `message\n` |
 
@@ -146,4 +172,6 @@ Now you can access resources in the kubernetes cluster !
 2026-06-10 08:15:26.456 network.go:142 info: Adding Pod IP and Service IP to route table...
 ```
 
-Note: debug lines (`[Gvisor-TCP]`, `[Transport]`, `[Client-0]`) appear only in the log file, never in CLI output.
+Note: debug lines (`[Gvisor-TCP]`, `[Transport]`, `[Client-0]`) always go to the log file; they reach
+CLI stdout only when the user passed `--debug`. With multiple concurrent operations, each line in the
+file carries a `[connID=xxxx]` prefix so they can be filtered apart.

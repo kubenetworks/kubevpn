@@ -9,11 +9,23 @@ import (
 	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// applyDebugLevel raises the logger to DebugLevel when --debug is set. The
+// control-plane command binds --debug to config.Debug, and the sidecar is
+// deployed with --debug, so its control-plane container logs at Debug by
+// default (see pkg/handler/traffmgr_resources.go).
+func applyDebugLevel(logger *log.Entry) {
+	if config.Debug {
+		logger.Logger.SetLevel(log.DebugLevel)
+	}
+}
+
 // Main starts the envoy xDS control plane: gRPC server, ConfigMap watcher, and snapshot processor.
 func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.Entry) error {
+	applyDebugLevel(logger)
 	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, logger)
 	proc := newProcessor(snapshotCache, logger)
 

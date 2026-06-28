@@ -30,14 +30,13 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		return err
 	}
 
-	logger := plog.GetLoggerForServer(int32(log.InfoLevel), svr.LogFile)
-	logger.AddHook(&plog.StreamHook{
-		Writer: newStreamWriter(func(msg string) error {
-			return resp.Send(&rpc.DisconnectResponse{Message: msg})
-		}),
-		Level: log.InfoLevel,
+	logger := newServerStreamLogger(svr.LogFile, int32(log.InfoLevel), func(msg string) error {
+		return resp.Send(&rpc.DisconnectResponse{Message: msg})
 	})
 	ctx := plog.WithLogger(resp.Context(), logger)
+	if id := req.GetConnectionID(); id != "" {
+		ctx = plog.WithField(ctx, LogFieldConnID, id)
+	}
 
 	// disconnect sudo daemon first
 	// then disconnect from user daemon

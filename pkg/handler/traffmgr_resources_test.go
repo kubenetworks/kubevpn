@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"slices"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 func TestTcpProbes(t *testing.T) {
@@ -34,6 +37,30 @@ func TestTcpProbes(t *testing.T) {
 	}
 	if startup.InitialDelaySeconds != 1 || startup.PeriodSeconds != 2 || startup.FailureThreshold != 15 {
 		t.Errorf("startup timing: delay=%d period=%d failures=%d", startup.InitialDelaySeconds, startup.PeriodSeconds, startup.FailureThreshold)
+	}
+}
+
+// Req3: the traffic-manager server and control-plane containers default to
+// --debug so kubectl logs shows Debug; dns has no debug flag and must not get it.
+func TestGenDeploySpec_SidecarDefaultDebug(t *testing.T) {
+	deploy := genDeploySpec("ns", "img:latest", "")
+	byName := map[string]v1.Container{}
+	for _, c := range deploy.Spec.Template.Spec.Containers {
+		byName[c.Name] = c
+	}
+
+	for _, name := range []string{config.ContainerSidecarVPN, config.ContainerSidecarControlPlane} {
+		c, ok := byName[name]
+		if !ok {
+			t.Fatalf("container %q not found", name)
+		}
+		if !slices.Contains(c.Args, "--debug") {
+			t.Errorf("container %q args should contain --debug, got %v", name, c.Args)
+		}
+	}
+
+	if dns, ok := byName[config.ContainerSidecarDNS]; ok && slices.Contains(dns.Args, "--debug") {
+		t.Errorf("dns container must NOT get --debug, got %v", dns.Args)
 	}
 }
 

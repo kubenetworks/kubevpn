@@ -3,7 +3,6 @@ package action
 import (
 	"context"
 
-	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
@@ -28,12 +27,8 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		return err
 	}
 
-	logger := plog.GetLoggerForServer(req.Level, svr.LogFile)
-	logger.AddHook(&plog.StreamHook{
-		Writer: newStreamWriter(func(msg string) error {
-			return resp.Send(&rpc.ConnectResponse{Message: msg})
-		}),
-		Level: log.InfoLevel,
+	logger := newServerStreamLogger(svr.LogFile, req.Level, func(msg string) error {
+		return resp.Send(&rpc.ConnectResponse{Message: msg})
 	})
 	if !svr.IsSudo {
 		return svr.redirectConnectToSudoDaemon(req, resp, logger)
@@ -74,6 +69,9 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	}
 	connect.OwnerID = req.OwnerID
 	connect.ConnectionID = req.ConnectionID
+	// Tag all downstream logs with the connection ID so concurrent connects can
+	// be told apart in the shared root daemon log file.
+	session.Ctx = plog.WithField(session.Ctx, LogFieldConnID, connect.ConnectionID)
 	// Exclude TUN IPs already held by sibling connections (other clusters) so two
 	// clusters never assign the same local TUN IP.
 	connect.ReservedTunIPs = svr.siblingTunIPs

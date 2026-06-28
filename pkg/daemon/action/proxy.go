@@ -7,7 +7,6 @@ import (
 	"os"
 	"sync"
 
-	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	v1 "k8s.io/api/core/v1"
@@ -34,12 +33,8 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		return err
 	}
 
-	logger := plog.GetLoggerForServer(int32(log.InfoLevel), svr.LogFile)
-	logger.AddHook(&plog.StreamHook{
-		Writer: newStreamWriter(func(msg string) error {
-			return resp.Send(&rpc.ProxyResponse{Message: msg})
-		}),
-		Level: log.InfoLevel,
+	logger := newServerStreamLogger(svr.LogFile, req.Level, func(msg string) error {
+		return resp.Send(&rpc.ProxyResponse{Message: msg})
 	})
 	ctx := plog.WithLogger(resp.Context(), logger)
 	file, err := resolveKubeconfig(ctx, req.SshJump, req.KubeconfigBytes, false)
@@ -108,6 +103,8 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	if err != nil {
 		return err
 	}
+	// Tag subsequent logs with the connection ID for concurrent-op isolation.
+	ctx = plog.WithField(ctx, LogFieldConnID, connectionID)
 
 	svr.connMu.RLock()
 	options, _ := svr.findConnection(connectionID)

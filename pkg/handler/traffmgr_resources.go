@@ -177,6 +177,7 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 							Command: []string{"kubevpn"},
 							Args: []string{
 								"server",
+								"--debug",
 								fmt.Sprintf("-l gtcp://:%d", config.PortTCP),
 								fmt.Sprintf("-l gudp://:%d", config.PortUDP),
 							},
@@ -206,7 +207,7 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 							Name:    config.ContainerSidecarControlPlane,
 							Image:   image,
 							Command: []string{"kubevpn"},
-							Args:    []string{"control-plane"},
+							Args:    []string{"control-plane", "--debug"},
 							Ports: []v1.ContainerPort{{
 								Name:          tcp9002,
 								ContainerPort: config.PortControlPlane,
