@@ -151,6 +151,22 @@ For each UDP container port, `Virtual.To()` also emits a dedicated UDP listener 
 
 The `udp_proxy` v3 proto is vendored under `vendor/github.com/envoyproxy/go-control-plane/envoy/extensions/filters/udp/udp_proxy/v3`.
 
+The data path is verified end-to-end against a **real Envoy** in `pkg/controlplane/envoy_e2e_test.go`. Each test feeds a `Virtual` through `Virtual.To()` → snapshot cache → xDS gRPC server to a containerized Envoy, then pushes real traffic through Envoy and asserts the result:
+
+| Test | Verifies |
+|---|---|
+| `TestIntegration_UDP_EnvoyEndToEnd` | UDP datagram → `udp_proxy` → upstream echo → reply |
+| `TestIntegration_TCP_EnvoyEndToEnd` | HTTP request → header-matched route → upstream |
+| `TestIntegration_TCP_HeaderSplit_EnvoyEndToEnd` | multi-rule header split (a→A, b→B, none→default) |
+| `TestIntegration_TCP_EndpointHotUpdate_EnvoyEndToEnd` | live snapshot re-push reroutes endpoint (TUN-IP hot-update) with no restart |
+| `TestIntegration_TCP_RuleTeardown_EnvoyEndToEnd` | removing one rule → its header falls back to default; sibling rule untouched |
+| `TestIntegration_MixedTCPUDP_EnvoyEndToEnd` | one `Virtual` with both a TCP and a UDP port — both listeners serve |
+| `TestIntegration_BootstrapFiles_EnvoyEndToEnd` | each production bootstrap (`pkg/inject/{envoy,envoy_ipv4,fargate_envoy,fargate_envoy_ipv4}.yaml`) boots Envoy, connects to xDS (`:9002`), and serves traffic |
+
+The bootstrap-file test renders each embedded sidecar bootstrap exactly as `inject.renderEnvoyConfig` does and runs it against a real Envoy. It caught that those files carried `rds_config`/`eds_config` under `dynamic_resources` — fields that do not exist in `envoy.config.bootstrap.v3.Bootstrap.DynamicResources` (RDS comes from the HTTP connection manager, EDS from the cluster, both over ADS), which Envoy v1.35+ rejects with "unknown fields"; they were removed.
+
+The TCP tests use Fargate mode because the mesh-mode TCP listener sets `BindToPort=false` (it relies on iptables `original_dst`); the routing code path is otherwise identical. Note `Virtual.To()` emits one listener+cluster **per IP family**, so a UDP rule must populate `LocalTunIPv6` whenever IPv6 is enabled — an empty value yields a duplicate-named listener bound to an invalid empty-address endpoint (the tests therefore pin IPv4 via `Virtual.To(false, …)`). All tests skip gracefully when Docker is unavailable (override the image for restricted networks via `KUBEVPN_E2E_ENVOY_IMAGE`, using a native-arch Envoy — an emulated Envoy can silently drop UDP).
+
 **Routing logic (TCP):**
 - Header-matched routes → specific cluster (user's TUN IP + envoy port)
 - Default route → `origin_cluster` (ORIGINAL_DST, forwards to the real container) in mesh mode
