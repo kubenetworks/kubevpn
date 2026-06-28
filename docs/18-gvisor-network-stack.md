@@ -80,6 +80,13 @@ The server reads IP packets from the TUN device, looks up the destination in `Ro
 
 **Packet framing**: IP data is read at `buf[3:]`, leaving room for `[2-byte length][1-byte type prefix]`. The type prefix byte (`1` = IP packet) distinguishes different payload types.
 
+**Shared read loop**: both server and client read from the TUN via one generic loop,
+`tunDevice.pumpTun(ctx, errLabel, dispatch)` (in `tun_device.go`). It owns the pooled-buffer
+read at `buf[3:]`, `ParseIPFast`, and read/parse error handling (read error → `errChan` + stop;
+parse error → drop + continue), then hands each packet to a per-side `dispatch` callback.
+`Device.readFromTun` is just `pumpTun(ctx, "[TUN]", …)` whose dispatch debug-logs and sends to
+`tunInbound`.
+
 ### 5.2 Client Side (`ClientDevice`)
 
 ```
@@ -89,11 +96,32 @@ HandleClient:
   writeToTun  ◄── tunOutbound ◄──────────────── readFromConn ◄──────────────────────────┘
 ```
 
+`ClientDevice.readFromTun` uses the same `pumpTun` loop as the server; its dispatch sets the
+type prefix and either forwards locally (when `src == dst`, via the gvisor handler) or pushes
+to `tunInbound` for the pool to distribute.
+
 **Connection pool**: The client maintains `ConnPoolSize=4` parallel TCP connections to the server. Packets are distributed by `ipHash(dst)` — a FNV-1a hash of the destination IP, ensuring all packets for the same destination use the same connection (preserving ordering).
+
+**`connSlot`**: each of the `ConnPoolSize` slots is a `connSlot` value that owns its inbound
+channel and connection lifecycle — `run` (dial + reconnect loop), `readFromConn`, and
+`writeToConn` are methods on it (rather than free functions threading a `slotID`). `runConnPool`
+builds the `[]*connSlot`, starts each `go slot.run(ctx)`, and routes inbound packets:
+`dst != nil → trySendToSlot(slots[ipHash(dst)], pkt)`, else `broadcastToSlots(slots, pkt)` for
+heartbeats. Both `readFromConn` and `writeToConn` refresh their conn deadline lazily via a
+shared `periodicDeadline` (one `SetDeadline` syscall per half-timeout instead of per packet).
 
 **Heartbeats**: Periodic ICMP packets sent to all connections to keep routes alive in the server's RouteHub.
 
-**Reconnection**: Each slot reconnects independently on failure. After reconnection, an immediate heartbeat is sent to re-register routes.
+**Reconnection**: Each slot reconnects independently on failure. After reconnection, slot 0 sends an immediate heartbeat to re-register routes.
+
+### 5.3 File layout
+
+| File | Responsibility |
+|------|----------------|
+| `packet.go` | The `Packet` value type (`NewPacket`/`Data`/`Length`), the gvisor `copyPacketToPool` helper, and `logIPPacket` (the debug packet-log helper — the only `gopacket/layers` user among these files) |
+| `tun_device.go` | Shared `tunDevice` base (`tun`, the inbound/outbound channels, `errChan`), `writeToTun`, `Close`, the generic `pumpTun` read loop, and `drainPacketChan` |
+| `tun_client.go` | `ClientDevice`, the connection pool (`runConnPool`, `ipHash`, `trySendToSlot`/`broadcastToSlots`, `periodicDeadline`), and the `connSlot` type |
+| `tun_server.go` | `Device`, `Peer` routing (`routeTun`/`routeTCPToTun`), and `tunHandler` dispatch |
 
 ## 6. RouteHub — Packet Routing
 

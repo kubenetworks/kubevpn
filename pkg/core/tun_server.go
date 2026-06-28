@@ -6,175 +6,62 @@ import (
 	"net"
 	"time"
 
-	"github.com/google/gopacket/layers"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // slowPathWarnThreshold logs a perf warning when a packet hot-path operation blocks longer than this.
 const slowPathWarnThreshold = 20 * time.Millisecond
 
-type tunHandler struct {
-	forward *Forwarder
-	hub     *RouteHub
-	errChan chan error
-}
-
-// TunHandler creates a handler for tun tunnel.
-func TunHandler(forward *Forwarder, hub *RouteHub) Handler {
-	return &tunHandler{
-		forward: forward,
-		hub:     hub,
-		errChan: make(chan error, 1),
-	}
-}
-
-func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
-	tunIfi, err := util.GetTunDeviceByConn(tun)
-	if err != nil {
-		plog.G(ctx).Errorf("[TUN] Failed to get tun device: %v", err)
-		return
-	}
-	ctx = plog.WithField(ctx, tunIfi.Name, "")
-	if !h.forward.IsEmpty() {
-		h.HandleClient(ctx, tun, h.forward)
-	} else {
-		h.HandleServer(ctx, tun)
-	}
-}
-
-func (h *tunHandler) HandleServer(ctx context.Context, tun net.Conn) {
-	device := &Device{tunDevice{
-		tun:         tun,
-		tunInbound:  make(chan *Packet, MaxSize),
-		tunOutbound: make(chan *Packet, MaxSize),
-		errChan:     h.errChan,
-	}}
-
-	defer device.Close()
-	go device.readFromTun(ctx)
-	go device.writeToTun(ctx)
-	go device.handlePacket(ctx, h.hub)
-
-	select {
-	case err := <-device.errChan:
-		plog.G(ctx).Errorf("[TUN] Device exit: %v", err)
-		return
-	case <-ctx.Done():
-		return
-	}
-}
-
-// Device is the server-side tun device handler.
-type Device struct {
-	tunDevice
-}
-
-func (d *Device) readFromTun(ctx context.Context) {
-	defer util.HandleCrash()
-	for ctx.Err() == nil {
-		buf := config.LPool.Get().([]byte)[:]
-		// Read at offset 3 to reserve space for [2-byte datagram header][1-byte type prefix].
-		// This avoids two memcpys later in routeTun (shift+1) and DatagramPacket.Write (shift+2).
-		n, err := d.tun.Read(buf[3:])
-		if err != nil {
-			config.LPool.Put(buf[:])
-			plog.G(ctx).Errorf("[TUN] Failed to read from tun device: %v", err)
-			util.SafeWrite(d.errChan, err)
-			return
-		}
-
-		src, dst, protocol, parseErr := util.ParseIPFast(buf[3 : 3+n])
-		if parseErr != nil {
-			plog.G(ctx).Errorf("[TUN] Unknown packet, dropping")
-			config.LPool.Put(buf[:])
-			continue
-		}
-		if config.Debug {
-			plog.G(ctx).Debugf("[TUN] SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
-		}
-		pkt := NewPacket(buf[:], n, src, dst)
-		sendStart := time.Now()
-		d.tunInbound <- pkt
-		if elapsed := time.Since(sendStart); elapsed > slowPathWarnThreshold {
-			plog.G(ctx).Warnf("[Perf] Slow tunInbound send: %s -> %s blocked %v (channel backpressure)", src, dst, elapsed)
-		}
-	}
-}
-
-func (d *Device) handlePacket(ctx context.Context, hub *RouteHub) {
-	// Derive a cancellable context so that when the first goroutine errors,
-	// the other is promptly cancelled instead of lingering on channel reads.
-	childCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	p := &Peer{
-		tunInbound:  d.tunInbound,
-		tunOutbound: d.tunOutbound,
-		hub:         hub,
-		errChan:     make(chan error, 1),
-	}
-
-	go p.routeTun(childCtx)
-	go p.routeTCPToTun(childCtx)
-
-	select {
-	case err := <-p.errChan:
-		plog.G(ctx).Errorf("[TUN] Peer error on %s: %v", d.tun.LocalAddr(), err)
-		util.SafeWrite(d.errChan, err)
-		return
-	case <-ctx.Done():
-		return
-	}
-}
-
-// Peer manages the routing between TUN device packets and the connection pool.
-type Peer struct {
-	tunInbound  chan *Packet
-	tunOutbound chan<- *Packet
-
+// serverTransport is the traffic-manager (hub) half of the tun device. Packets read from the
+// server's TUN are routed to the owning client connection via RouteHub; packets that the gvisor
+// stacks could not route locally arrive on RouteHub.TCPPacketChan and are written back to the TUN.
+type serverTransport struct {
+	dev *tunDevice
 	hub *RouteHub
-
-	errChan chan error
 }
 
-func (p *Peer) routeTCPToTun(ctx context.Context) {
-	defer util.HandleCrash()
-	defer drainPacketChan(p.hub.TCPPacketChan)
-	for {
-		select {
-		case packet := <-p.hub.TCPPacketChan:
-			if packet == nil {
-				return
-			}
-			p.tunOutbound <- packet
-		case <-ctx.Done():
-			return
-		}
+func newServerTransport(dev *tunDevice, hub *RouteHub) *serverTransport {
+	return &serverTransport{dev: dev, hub: hub}
+}
+
+func (t *serverTransport) label() string { return "[TUN]" }
+
+func (t *serverTransport) routines() []namedRoutine {
+	return []namedRoutine{
+		{"server-route", t.routeTun},
+		{"server-tcp-to-tun", t.routeTCPToTun},
 	}
 }
 
-func (p *Peer) routeTun(ctx context.Context) {
-	defer util.HandleCrash()
-	defer drainPacketChan(p.tunInbound)
+// routeOutbound hands a packet read from the TUN to the route goroutine. IP data sits at buf[3:]
+// (pumpTun reserved buf[0:3] for the datagram length + type prefix), so routeTun can frame in place.
+func (t *serverTransport) routeOutbound(ctx context.Context, buf []byte, n int, src, dst net.IP) {
+	logIPPacket(ctx, "[TUN]", buf[3:3+n])
+	sendStart := time.Now()
+	t.dev.tunInbound <- NewPacket(buf[:], n, src, dst)
+	if elapsed := time.Since(sendStart); elapsed > slowPathWarnThreshold {
+		plog.G(ctx).Warnf("[Perf] Slow tunInbound send: %s -> %s blocked %v (channel backpressure)", src, dst, elapsed)
+	}
+}
+
+// routeTun drains tunInbound and writes each packet to the connection registered for its
+// destination IP in RouteHub (with dead-conn fallback inside WriteToRoute).
+func (t *serverTransport) routeTun(ctx context.Context) {
+	defer drainPacketChan(t.dev.tunInbound)
 	for {
 		select {
-		case packet := <-p.tunInbound:
+		case packet := <-t.dev.tunInbound:
 			if packet == nil {
 				return
 			}
 			dstKey := string(packet.dst)
-			// readFromTun placed IP data at buf[3:], leaving room for:
-			//   buf[0:2] = datagram length header
-			//   buf[2]   = type prefix byte
-			//   buf[3:]  = IP packet data
+			// IP data is at buf[3:]; frame in place: buf[0:2] = length, buf[2] = type prefix.
 			payloadLen := packet.length + 1
 			binary.BigEndian.PutUint16(packet.data[:2], uint16(payloadLen))
 			packet.data[2] = 1
 			writeStart := time.Now()
-			conn, err := p.hub.WriteToRoute(dstKey, packet.data[:payloadLen+2])
+			conn, err := t.hub.WriteToRoute(dstKey, packet.data[:payloadLen+2])
 			if elapsed := time.Since(writeStart); elapsed > slowPathWarnThreshold {
 				plog.G(ctx).Warnf("[Perf] Slow WriteToRoute: %s -> %s took %v", packet.src, packet.dst, elapsed)
 			}
@@ -190,17 +77,18 @@ func (p *Peer) routeTun(ctx context.Context) {
 	}
 }
 
-// drainPacketChan returns any remaining packet buffers to the pool to prevent leaks
-// when a goroutine exits due to context cancellation.
-func drainPacketChan(ch <-chan *Packet) {
+// routeTCPToTun bridges packets that the gvisor stacks could not route locally (delivered on
+// RouteHub.TCPPacketChan) back to the server's TUN via tunOutbound.
+func (t *serverTransport) routeTCPToTun(ctx context.Context) {
+	defer drainPacketChan(t.hub.TCPPacketChan)
 	for {
 		select {
-		case pkt := <-ch:
-			if pkt == nil {
+		case packet := <-t.hub.TCPPacketChan:
+			if packet == nil {
 				return
 			}
-			config.LPool.Put(pkt.data[:])
-		default:
+			t.dev.tunOutbound <- packet
+		case <-ctx.Done():
 			return
 		}
 	}

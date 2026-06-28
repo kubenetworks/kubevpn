@@ -212,12 +212,8 @@ func TestRouteTCPToTun_DrainsOnCancel(t *testing.T) {
 	hub := NewRouteHub()
 	outbound := make(chan *Packet, MaxSize)
 
-	peer := &Peer{
-		tunInbound:  make(chan *Packet, 1),
-		tunOutbound: outbound,
-		hub:         hub,
-		errChan:     make(chan error, 1),
-	}
+	dev := &tunDevice{tunOutbound: outbound, errChan: make(chan error, 1)}
+	st := newServerTransport(dev, hub)
 
 	// Put packets in TCPPacketChan
 	for i := 0; i < 3; i++ {
@@ -228,7 +224,7 @@ func TestRouteTCPToTun_DrainsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		peer.routeTCPToTun(ctx)
+		st.routeTCPToTun(ctx)
 		close(done)
 	}()
 
