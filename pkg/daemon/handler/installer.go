@@ -35,7 +35,8 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 	plog.G(ctx).Info("Install command kubevpn...")
 	w.log("Install kubevpn on remote server...")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	const httpClientTimeout = 30 * time.Second
+	client := &http.Client{Timeout: httpClientTimeout}
 	if config.GitHubOAuthToken != "" {
 		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
 	}
@@ -67,7 +68,7 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 	if err = util.UnzipKubeVPNIntoFile(temp.Name(), tempBin.Name()); err != nil {
 		return err
 	}
-	if err = os.Chmod(tempBin.Name(), 0755); err != nil {
+	if err = os.Chmod(tempBin.Name(), config.FileModeExecutable); err != nil {
 		return err
 	}
 

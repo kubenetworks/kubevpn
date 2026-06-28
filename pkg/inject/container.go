@@ -117,7 +117,7 @@ func AddVPNAndEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 b
 		Name:    config.ContainerSidecarVPN,
 		Image:   image,
 		Command: []string{"/bin/sh", "-c"},
-		Args: []string{`
+		Args: []string{fmt.Sprintf(`
 echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
 echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
@@ -127,9 +127,9 @@ iptables -P INPUT ACCEPT
 ip6tables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
 ip6tables -P FORWARD ACCEPT
-iptables -t nat -A PREROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006
-ip6tables -t nat -A PREROUTING ! -p icmp ! -s 0:0:0:0:0:0:0:1 ! -d ${CIDR6} -j DNAT --to :15006
-kubevpn server -l "tun:/tcp://${TrafficManagerService}:10801?route=${CIDR4}"`,
+iptables -t nat -A PREROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :%d
+ip6tables -t nat -A PREROUTING ! -p icmp ! -s 0:0:0:0:0:0:0:1 ! -d ${CIDR6} -j DNAT --to :%d
+kubevpn server -l "tun:/tcp://${TrafficManagerService}:%d?route=${CIDR4}"`, config.PortEnvoyInbound, config.PortEnvoyInbound, config.PortTCP),
 		},
 		Env:             envs,
 		Resources:       defaultResources(),
@@ -149,7 +149,7 @@ func AddEnvoyAndSSHContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 b
 		Name:            config.ContainerSidecarVPN,
 		Image:           image,
 		Command:         []string{"kubevpn"},
-		Args:            []string{"server", "-l ssh://:2222"},
+		Args:            []string{"server", fmt.Sprintf("-l ssh://:%d", config.PortSSH)},
 		Resources:       defaultResources(),
 		ImagePullPolicy: v1.PullIfNotPresent,
 		SecurityContext: &v1.SecurityContext{},

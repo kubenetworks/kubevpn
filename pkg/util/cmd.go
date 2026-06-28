@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"os/exec"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 // RunWithRollingOutWithChecker runs a command, streaming its combined output line by line
@@ -43,7 +45,7 @@ func RunWithRollingOutWithChecker(cmd *exec.Cmd, checker func(log string) bool) 
 
 func pipeWithBuffer() (*bufio.Reader, *pipeWriter, error) {
 	pr, pw := newPipe()
-	return bufio.NewReaderSize(pr, 64*1024), pw, nil
+	return bufio.NewReaderSize(pr, config.LargeBufferSize), pw, nil
 }
 
 type pipeReader struct{ ch chan []byte }

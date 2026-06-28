@@ -18,6 +18,7 @@ import (
 	"k8s.io/kubectl/pkg/cmd/exec"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -408,11 +409,11 @@ func (o *CopyOptions) untarAll(prefix string, dest localPath, reader io.Reader) 
 			continue
 		}
 
-		if err := os.MkdirAll(destFileName.Dir().String(), 0755); err != nil {
+		if err := os.MkdirAll(destFileName.Dir().String(), config.FileModeExecutable); err != nil {
 			return err
 		}
 		if header.FileInfo().IsDir() {
-			if err := os.MkdirAll(destFileName.String(), 0755); err != nil {
+			if err := os.MkdirAll(destFileName.String(), config.FileModeExecutable); err != nil {
 				return err
 			}
 			continue

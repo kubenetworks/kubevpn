@@ -205,7 +205,8 @@ func CreateCIDRPod(ctx context.Context, clientset kubernetes.Interface, namespac
 			return nil, err
 		}
 		field := fields.OneTermEqualSelector("metadata.name", pod.Name).String()
-		ctx2, cancelFunc := context.WithTimeout(ctx, time.Second*15)
+		const podWaitTimeout = 15 * time.Second
+		ctx2, cancelFunc := context.WithTimeout(ctx, podWaitTimeout)
 		defer cancelFunc()
 		err = WaitPod(ctx2, clientset.CoreV1().Pods(namespace), v1.ListOptions{FieldSelector: field}, func(pod *corev1.Pod) bool {
 			return pod.Status.Phase == corev1.PodRunning

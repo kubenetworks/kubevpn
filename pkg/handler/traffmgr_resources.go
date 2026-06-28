@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"fmt"
+
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -70,18 +72,18 @@ func genService(namespace string) *v1.Service {
 			Ports: []v1.ServicePort{{
 				Name:       tcp10801,
 				Protocol:   v1.ProtocolTCP,
-				Port:       10801,
-				TargetPort: intstr.FromInt32(10801),
+				Port:       config.PortTCP,
+				TargetPort: intstr.FromInt32(config.PortTCP),
 			}, {
 				Name:       tcp9002,
 				Protocol:   v1.ProtocolTCP,
-				Port:       9002,
-				TargetPort: intstr.FromInt32(9002),
+				Port:       config.PortControlPlane,
+				TargetPort: intstr.FromInt32(config.PortControlPlane),
 			}, {
 				Name:       udp53,
 				Protocol:   v1.ProtocolUDP,
-				Port:       53,
-				TargetPort: intstr.FromInt32(53),
+				Port:       config.PortDNS,
+				TargetPort: intstr.FromInt32(config.PortDNS),
 			}},
 			Selector: map[string]string{"app": config.ConfigMapPodTrafficManager},
 			Type:     v1.ServiceTypeClusterIP,
@@ -164,8 +166,8 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 							Command: []string{"kubevpn"},
 							Args: []string{
 								"server",
-								"-l gtcp://:10801",
-								"-l gudp://:10802",
+								fmt.Sprintf("-l gtcp://:%d", config.PortTCP),
+								fmt.Sprintf("-l gudp://:%d", config.PortUDP),
 							},
 							EnvFrom: []v1.EnvFromSource{{
 								SecretRef: &v1.SecretEnvSource{
@@ -177,7 +179,7 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 							Env: []v1.EnvVar{},
 							Ports: []v1.ContainerPort{{
 								Name:          tcp10801,
-								ContainerPort: 10801,
+								ContainerPort: config.PortTCP,
 								Protocol:      v1.ProtocolTCP,
 							}},
 							Resources:       resourcesLarge,
@@ -196,7 +198,7 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 							Args:    []string{"control-plane"},
 							Ports: []v1.ContainerPort{{
 								Name:          tcp9002,
-								ContainerPort: 9002,
+								ContainerPort: config.PortControlPlane,
 								Protocol:      v1.ProtocolTCP,
 							}},
 							VolumeMounts:    []v1.VolumeMount{},
@@ -223,8 +225,8 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 		},
 	}
 	containers := deploy.Spec.Template.Spec.Containers
-	containers[0].LivenessProbe, containers[0].ReadinessProbe, containers[0].StartupProbe = tcpProbes(10802)
-	containers[1].LivenessProbe, containers[1].ReadinessProbe, containers[1].StartupProbe = tcpProbes(9002)
+	containers[0].LivenessProbe, containers[0].ReadinessProbe, containers[0].StartupProbe = tcpProbes(config.PortTCP)
+	containers[1].LivenessProbe, containers[1].ReadinessProbe, containers[1].StartupProbe = tcpProbes(config.PortControlPlane)
 
 	if imagePullSecretName != "" {
 		deploy.Spec.Template.Spec.ImagePullSecrets = []v1.LocalObjectReference{{

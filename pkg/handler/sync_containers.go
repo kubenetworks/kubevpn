@@ -162,9 +162,10 @@ func (d *SyncOptions) SyncDir(ctx context.Context, labels string) error {
 	go func() {
 		client := syncthing.NewClient(localAddr)
 		podName := list[0].Name
+		const syncRetryDelay = 2 * time.Second
 		for d.ctx.Err() == nil {
 			func() {
-				defer time.Sleep(time.Second * 2)
+				defer time.Sleep(syncRetryDelay)
 
 				list, err := util.GetRunningPodList(d.ctx, d.clientset, d.WorkloadNamespace, labels)
 				if err != nil {

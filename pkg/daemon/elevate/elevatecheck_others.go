@@ -44,9 +44,10 @@ func IsAdmin() bool {
 				"Current env KUBECONFIG value: " + os.Getenv(clientcmd.RecommendedConfigPathEnvVar),
 			}
 			PrintLine(nil, strings...)
+			const countdownTick = 1 * time.Second
 			for i := 0; i >= 0; i-- {
 				_, _ = fmt.Printf("\r %ds", i)
-				time.Sleep(time.Second * 1)
+				time.Sleep(countdownTick)
 			}
 			_, _ = fmt.Printf("\r")
 		}

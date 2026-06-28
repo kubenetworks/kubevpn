@@ -2,6 +2,7 @@ package action
 
 import (
 	"context"
+	"fmt"
 	"net"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -44,7 +45,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 
 		nodes := []*core.Node{
 			core.NewNode("tun", "").WithParam("net", defaultServerIP),
-			core.NewNode("gtcp", ":10801"),
+			core.NewNode("gtcp", fmt.Sprintf(":%d", config.PortTCP)),
 		}
 		var servers []core.Server
 		servers, err = core.GenerateServersFromNodes(nodes, core.NewRouteHub())

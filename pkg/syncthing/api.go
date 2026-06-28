@@ -22,10 +22,13 @@ type Client struct {
 }
 
 // NewClient creates a syncthing API client targeting the given GUI address.
+// guiClientTimeout bounds requests to the syncthing GUI/REST API.
+const guiClientTimeout = 5 * time.Second
+
 func NewClient(addr string) *Client {
 	c := &Client{
 		GUIAddress: addr,
-		client:     &http.Client{Timeout: 5 * time.Second},
+		client:     &http.Client{Timeout: guiClientTimeout},
 	}
 	return c
 }

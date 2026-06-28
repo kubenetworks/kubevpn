@@ -124,8 +124,9 @@ func RunContainer(ctx context.Context, args []string) error {
 func WaitDockerContainerRunning(ctx context.Context, name string) error {
 	plog.G(ctx).Infof("Wait container %s to be running...", name)
 
+	const containerPollInterval = 1 * time.Second
 	for ctx.Err() == nil {
-		time.Sleep(time.Second * 1)
+		time.Sleep(containerPollInterval)
 		inspect, err := ContainerInspect(ctx, name)
 		if err != nil {
 			return err

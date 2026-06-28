@@ -73,12 +73,13 @@ func extractRegistry(imageRef string) string {
 // probeRegistryTLS probes the registry to determine TLS support.
 // It tries HTTPS first, then falls back to HTTP if the TLS handshake fails.
 func probeRegistryTLS(ctx context.Context, registry string) config.TLSConf {
+	const registryProbeTimeout = 5 * time.Second
 	host := registry
 	if _, _, err := net.SplitHostPort(host); err != nil {
 		host = net.JoinHostPort(host, "443")
 	}
 
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	dialer := &net.Dialer{Timeout: registryProbeTimeout}
 	conn, err := tls.DialWithDialer(dialer, "tcp", host, &tls.Config{InsecureSkipVerify: true})
 	if err == nil {
 		conn.Close()
@@ -90,7 +91,7 @@ func probeRegistryTLS(ctx context.Context, registry string) config.TLSConf {
 	if _, _, err := net.SplitHostPort(httpHost); err != nil {
 		httpHost = net.JoinHostPort(httpHost, "80")
 	}
-	httpClient := &http.Client{Timeout: 5 * time.Second}
+	httpClient := &http.Client{Timeout: registryProbeTimeout}
 	resp, err := httpClient.Get(fmt.Sprintf("http://%s/v2/", httpHost))
 	if err == nil {
 		resp.Body.Close()
@@ -151,7 +152,7 @@ func TransferImageWithRegctl(ctx context.Context, imageSource, imageTarget strin
 		AsciiOut: ascii.NewLines(os.Stdout),
 		Bar:      ascii.NewProgressBar(os.Stdout),
 	}
-	progressFreq := time.Millisecond * 250
+	const progressFreq = 250 * time.Millisecond
 	ticker := time.NewTicker(progressFreq)
 	defer ticker.Stop()
 	go func() {

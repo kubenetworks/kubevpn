@@ -42,6 +42,15 @@ import (
 // Version 2: OwnerID is required on all rules (no backward compat with empty OwnerID).
 const CurrentSchemaVersion = 2
 
+const (
+	// envoyClusterConnectTimeout is the upstream connect timeout for generated Envoy clusters.
+	envoyClusterConnectTimeout = 5 * time.Second
+	// envoyClusterIdleTimeout is the upstream HTTP idle timeout for generated Envoy clusters.
+	envoyClusterIdleTimeout = 10 * time.Second
+	// envoyUDPProxyIdleTimeout is the idle timeout for the Envoy UDP proxy listener.
+	envoyUDPProxyIdleTimeout = 5 * time.Minute
+)
+
 // Virtual represents an envoy xDS configuration for a single proxied workload.
 type Virtual struct {
 	// SchemaVersion tracks the config schema revision. Zero means legacy (pre-versioning).
@@ -312,12 +321,12 @@ func toCluster(clusterName string) *cluster.Cluster {
 				},
 			},
 		},
-		ConnectTimeout: durationpb.New(5 * time.Second),
+		ConnectTimeout: durationpb.New(envoyClusterConnectTimeout),
 		LbPolicy:       cluster.Cluster_ROUND_ROBIN,
 		TypedExtensionProtocolOptions: map[string]*anypb.Any{
 			"envoy.extensions.upstreams.http.v3.HttpProtocolOptions": mustMarshalAny(&httpv3.HttpProtocolOptions{
 				CommonHttpProtocolOptions: &core.HttpProtocolOptions{
-					IdleTimeout: durationpb.New(time.Second * 10),
+					IdleTimeout: durationpb.New(envoyClusterIdleTimeout),
 				},
 				UpstreamProtocolOptions: &httpv3.HttpProtocolOptions_UseDownstreamProtocolConfig{
 					UseDownstreamProtocolConfig: &httpv3.HttpProtocolOptions_UseDownstreamHttpConfig{
@@ -339,7 +348,7 @@ func toCluster(clusterName string) *cluster.Cluster {
 func originCluster() *cluster.Cluster {
 	return &cluster.Cluster{
 		Name:           "origin_cluster",
-		ConnectTimeout: durationpb.New(time.Second * 5),
+		ConnectTimeout: durationpb.New(envoyClusterConnectTimeout),
 		LbPolicy:       cluster.Cluster_CLUSTER_PROVIDED,
 		ClusterDiscoveryType: &cluster.Cluster_Type{
 			Type: cluster.Cluster_ORIGINAL_DST,
@@ -596,7 +605,7 @@ func toUDPListener(name string, port int32, clusterName string) *listener.Listen
 						RouteSpecifier: &udpproxyv3.UdpProxyConfig_Cluster{
 							Cluster: clusterName,
 						},
-						IdleTimeout: durationpb.New(5 * time.Minute),
+						IdleTimeout: durationpb.New(envoyUDPProxyIdleTimeout),
 					}),
 				},
 			},

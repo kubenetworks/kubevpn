@@ -75,10 +75,11 @@ func (w *wsHandler) createTunnel(ctx context.Context, cli *ssh.Client) error {
 	}()
 	plog.G(ctx).Info("Connected private safe tunnel")
 
+	const keepAlivePingInterval = 15 * time.Second
 	go func() {
 		for ctx.Err() == nil {
 			_, _ = util.Ping(ctx, clientIP.IP.String(), ip.String())
-			time.Sleep(time.Second * 15)
+			time.Sleep(keepAlivePingInterval)
 		}
 	}()
 	return nil

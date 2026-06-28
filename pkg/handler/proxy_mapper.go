@@ -101,7 +101,8 @@ func (m *Mapper) Run() {
 	go podInformer.Run(m.ctx.Done())
 
 	// Fallback ticker — ensures reconciliation even if an informer event is missed
-	ticker := time.NewTicker(time.Second * 30)
+	const reconcileFallbackInterval = 30 * time.Second
+	ticker := time.NewTicker(reconcileFallbackInterval)
 	defer ticker.Stop()
 
 	// Initial reconcile
@@ -163,7 +164,7 @@ func (m *Mapper) reconcilePodsFromInformer(podTunnels *sync.Map, podInformer cac
 
 		ctx, cancel := context.WithCancel(m.ctx)
 		podTunnels.Store(pod.Name, cancel)
-		sshServer := netip.AddrPortFrom(podIP, 2222)
+		sshServer := netip.AddrPortFrom(podIP, config.PortSSH)
 		go m.startTunnels(ctx, sshServer, portMapping)
 	}
 
@@ -221,11 +222,12 @@ func (m *Mapper) startTunnels(ctx context.Context, sshServer netip.AddrPort, por
 		go func(containerPort, envoyPort int32) {
 			local := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(containerPort))
 			remote := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(envoyPort))
+			const sshExposeRetryDelay = 2 * time.Second
 			for ctx.Err() == nil {
 				ctx2, cancel := context.WithCancel(ctx)
 				_ = ssh.ExposeLocalPortToRemote(ctx2, sshServer, remote, local)
 				cancel()
-				time.Sleep(time.Second * 2)
+				time.Sleep(sshExposeRetryDelay)
 			}
 		}(containerPort, envoyPort)
 	}

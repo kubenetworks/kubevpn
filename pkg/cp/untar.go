@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"io"
 	"os"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 // copy from another real file
@@ -18,14 +20,14 @@ func copyFromLink(fileHeaderList []tar.Header, currFile tar.Header, genDstFilena
 	var err error
 	var r, w *os.File
 	// read from origin file
-	r, err = os.OpenFile(genDstFilename(currFile.Linkname).String(), os.O_RDONLY, 0644)
+	r, err = os.OpenFile(genDstFilename(currFile.Linkname).String(), os.O_RDONLY, config.FileModeFile)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
 
 	// write to current file
-	w, err = os.OpenFile(genDstFilename(currFile.Name).String(), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	w, err = os.OpenFile(genDstFilename(currFile.Name).String(), os.O_RDWR|os.O_CREATE|os.O_TRUNC, config.FileModeFile)
 	if err != nil {
 		return err
 	}

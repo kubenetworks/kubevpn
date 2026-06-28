@@ -164,8 +164,9 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 	if err != nil {
 		return err
 	}
+	const pidPollInterval = 50 * time.Millisecond
 	for ctx.Err() == nil {
-		time.Sleep(time.Millisecond * 50)
+		time.Sleep(pidPollInterval)
 		if _, err = os.Stat(pidPath); !errors.Is(err, os.ErrNotExist) {
 			break
 		}

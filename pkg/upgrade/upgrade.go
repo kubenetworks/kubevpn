@@ -34,7 +34,8 @@ func Main(ctx context.Context, quit func(ctx context.Context, isSudo bool) error
 		return err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	const httpClientTimeout = 30 * time.Second
+	client := &http.Client{Timeout: httpClientTimeout}
 	if config.GitHubOAuthToken != "" {
 		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
 	}
@@ -95,7 +96,7 @@ func downloadAndInstall(client *http.Client, url string) error {
 	if err != nil {
 		return err
 	}
-	err = os.Chmod(file.Name(), 0755)
+	err = os.Chmod(file.Name(), config.FileModeExecutable)
 	if err != nil {
 		return err
 	}

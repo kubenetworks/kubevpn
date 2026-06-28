@@ -19,6 +19,9 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// snapshotCacheTTL is how long a generated xDS snapshot stays cached before expiry.
+const snapshotCacheTTL = 5 * time.Minute
+
 // Processor converts Virtual configs into envoy xDS snapshots.
 type Processor struct {
 	cache   cache.SnapshotCache
@@ -111,7 +114,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 			return err
 		}
 
-		p.expireCache.Set(uid, config, time.Minute*5)
+		p.expireCache.Set(uid, config, snapshotCacheTTL)
 	}
 
 	for uid := range p.knownUIDs {

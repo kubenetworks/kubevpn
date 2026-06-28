@@ -87,7 +87,8 @@ func main() {
 		panic(err)
 	}
 	println(string(processTemplate))
-	err = os.WriteFile(dstFile, processTemplate, 0644)
+	const fileModeReadWrite = 0644
+	err = os.WriteFile(dstFile, processTemplate, fileModeReadWrite)
 	if err != nil {
 		panic(err)
 	}

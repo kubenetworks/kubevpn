@@ -6,6 +6,8 @@ import (
 	"embed"
 	"os"
 	"os/exec"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 //go:embed exe/tap-windows-9.21.2.exe
@@ -27,7 +29,7 @@ func Install() error {
 	}
 	_ = tempFile.Sync()
 	_ = tempFile.Close()
-	_ = os.Chmod(tempFile.Name(), 0700)
+	_ = os.Chmod(tempFile.Name(), config.FileModePrivate)
 	cmd := exec.Command(tempFile.Name(), "/S")
 	return cmd.Run()
 }

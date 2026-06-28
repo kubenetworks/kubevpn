@@ -101,13 +101,13 @@ func (s *ConfigMapStore) Set(ctx context.Context, key, value string) error {
 // Reads from the shared informer cache (zero API calls when cache is warm),
 // with a direct GET fallback to detect API server unreachable.
 func (s *ConfigMapStore) HealthPeriod(ctx context.Context, _ time.Duration) {
-	ticker := time.NewTicker(time.Second * 30)
+	ticker := time.NewTicker(config.HealthCheckInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
 			s.syncFromCache()
-			s.HealthCheckOnce(ctx, time.Second*10)
+			s.HealthCheckOnce(ctx, config.HealthCheckTimeout)
 		case <-ctx.Done():
 			return
 		}
@@ -136,7 +136,8 @@ func (s *ConfigMapStore) HealthCheckOnce(ctx context.Context, timeout time.Durat
 	start := time.Now()
 	mapInterface := s.clientset.CoreV1().ConfigMaps(s.managerNamespace)
 	configMap, err := mapInterface.Get(timeoutCtx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+	const perfLogThreshold = 200 * time.Millisecond
+	if elapsed := time.Since(start); elapsed > perfLogThreshold {
 		plog.G(ctx).Infof("[Perf] ConfigMap GET took %v", elapsed)
 	}
 	s.healthMu.Lock()

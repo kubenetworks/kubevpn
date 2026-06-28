@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/kevinburke/ssh_config"
 	"github.com/spf13/pflag"
@@ -241,7 +240,7 @@ func (conf SshConfig) Dial(ctx context.Context, stopChan <-chan struct{}) (clien
 	if err != nil {
 		return nil, err
 	}
-	d := net.Dialer{Timeout: time.Second * 10, KeepAlive: config.KeepAliveTime}
+	d := net.Dialer{Timeout: sshOpTimeout, KeepAlive: config.KeepAliveTime}
 	conn, err := d.DialContext(ctx, "tcp", conf.Addr)
 	if err != nil {
 		return nil, err
@@ -270,7 +269,7 @@ func (conf SshConfig) Dial(ctx context.Context, stopChan <-chan struct{}) (clien
 		Auth:            authMethod,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		//BannerCallback:  ssh.BannerDisplayStderr(),
-		Timeout: time.Second * 10,
+		Timeout: sshOpTimeout,
 	})
 	if err != nil {
 		return nil, err

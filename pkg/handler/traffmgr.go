@@ -127,9 +127,13 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 }
 
 func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelector string) error {
+	const (
+		podReadyTimeout      = 60 * time.Minute
+		podReadyPollInterval = 3 * time.Second
+	)
 	var isPodReady bool
 	var lastMessage string
-	ctx2, cancelFunc := context.WithTimeout(ctx, time.Minute*60)
+	ctx2, cancelFunc := context.WithTimeout(ctx, podReadyTimeout)
 	defer cancelFunc()
 	plog.G(ctx).Infoln()
 	wait.UntilWithContext(ctx2, func(ctx context.Context) {
@@ -156,7 +160,7 @@ func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelec
 				plog.G(ctx).Infof(newMsg)
 			}
 		}
-	}, time.Second*3)
+	}, podReadyPollInterval)
 	if !isPodReady {
 		return errors.New("wait for pod ready timeout")
 	}

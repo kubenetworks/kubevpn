@@ -42,8 +42,11 @@ func LocalTCPForwarder(ctx context.Context, s *stack.Stack) func(stack.Transport
 	return newTCPForwarder(ctx, s, localTCPAddr, true)
 }
 
+// tcpForwarderMaxInFlight bounds the number of in-flight TCP forwarder connection attempts.
+const tcpForwarderMaxInFlight = 100000
+
 func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolver, local bool) func(stack.TransportEndpointID, *stack.PacketBuffer) bool {
-	return tcp.NewForwarder(s, 0, 100000, func(request *tcp.ForwarderRequest) {
+	return tcp.NewForwarder(s, 0, tcpForwarderMaxInFlight, func(request *tcp.ForwarderRequest) {
 		dialCtx := ctx
 		if local {
 			dialCtx = context.Background()
