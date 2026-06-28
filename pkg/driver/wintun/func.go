@@ -17,11 +17,11 @@ func copyDriver(b []byte) error {
 	content, err = os.ReadFile(filename)
 	if err == nil {
 		// already exists and content are same, not need to copy this file
-		if bytes.Compare(b, content) == 0 {
+		if bytes.Equal(b, content) {
 			return nil
 		}
 		_ = os.Remove(filename)
 	}
-	err = os.WriteFile(filename, b, 644)
+	err = os.WriteFile(filename, b, 0644)
 	return err
 }

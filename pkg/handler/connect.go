@@ -55,10 +55,15 @@ type ConnectOptions struct {
 	// daemon, excluded from this connection's allocation to avoid cross-cluster
 	// local IP collisions. Set by the daemon (data-plane only); not persisted.
 	ReservedTunIPs func() []net.IP `json:"-"`
-	proxyManager   *ProxyManager
-	configMapStore *ConfigMapStore
+	proxyManager     *ProxyManager
+	configMapStore   *ConfigMapStore
+	configMapStoreMu sync.Mutex
 
-	Sync *SyncOptions
+	// syncMu guards the Sync pointer, which is read by the Status RPC while
+	// concurrently written by the Sync/Unsync RPCs. Always access Sync through
+	// GetSync/SetSync rather than touching the field directly.
+	syncMu sync.RWMutex
+	Sync   *SyncOptions
 }
 
 // Context returns the connection session's context.
@@ -189,6 +194,8 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {
 // This must be lazy because ManagerNamespace may be updated by detectAndSetManagerNamespace
 // after InitClient returns (user daemon path).
 func (c *ConnectOptions) getConfigMapStore() *ConfigMapStore {
+	c.configMapStoreMu.Lock()
+	defer c.configMapStoreMu.Unlock()
 	if c.configMapStore == nil {
 		c.configMapStore = newConfigMapStore(c.clientset, c.ManagerNamespace)
 	}
@@ -356,5 +363,14 @@ func (c *ConnectOptions) GetOriginKubeconfigPath() string {
 
 // GetSync returns the SyncOptions associated with this connection, or nil.
 func (c *ConnectOptions) GetSync() *SyncOptions {
+	c.syncMu.RLock()
+	defer c.syncMu.RUnlock()
 	return c.Sync
+}
+
+// SetSync stores the SyncOptions associated with this connection.
+func (c *ConnectOptions) SetSync(s *SyncOptions) {
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	c.Sync = s
 }

@@ -28,6 +28,9 @@ type ConfigMapStore struct {
 	informerOnce sync.Once
 	informer     cache.SharedInformer
 	informerStop chan struct{}
+
+	stopMu  sync.Mutex
+	stopped bool
 }
 
 // newConfigMapStore creates a new ConfigMapStore for the given clientset and namespace.
@@ -48,8 +51,13 @@ func (s *ConfigMapStore) GetInformer() cache.SharedInformer {
 				options.FieldSelector = fields.OneTermEqualSelector("metadata.name", config.ConfigMapPodTrafficManager).String()
 			},
 		)
-		s.informerStop = make(chan struct{})
-		go s.informer.Run(s.informerStop)
+		stop := make(chan struct{})
+		// Publish informerStop under stopMu so a concurrent Stop() (which reads it
+		// under the same lock) has a happens-before relationship with this write.
+		s.stopMu.Lock()
+		s.informerStop = stop
+		s.stopMu.Unlock()
+		go s.informer.Run(stop)
 	})
 	return s.informer
 }
@@ -107,8 +115,13 @@ func (s *ConfigMapStore) Set(ctx context.Context, key, value string) error {
 }
 
 // Stop closes the informer stop channel, shutting down the shared informer.
+// It is idempotent: repeated calls (e.g. from a retried Cleanup) are safe and
+// never close the channel twice.
 func (s *ConfigMapStore) Stop() {
-	if s.informerStop != nil {
+	s.stopMu.Lock()
+	defer s.stopMu.Unlock()
+	if s.informerStop != nil && !s.stopped {
 		close(s.informerStop)
+		s.stopped = true
 	}
 }

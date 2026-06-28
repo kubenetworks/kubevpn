@@ -90,8 +90,8 @@ func cleanupConnection(ctx context.Context, conn *handler.ConnectOptions) {
 	if conn == nil {
 		return
 	}
-	if conn.Sync != nil {
-		_ = conn.Sync.Cleanup(ctx)
+	if sync := conn.GetSync(); sync != nil {
+		_ = sync.Cleanup(ctx)
 	}
 	conn.Cleanup(ctx)
 }

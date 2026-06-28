@@ -180,7 +180,9 @@ func recreatePod(ctx context.Context, factory cmdutil.Factory, p *v1.Pod, helper
 		return errPodCreated
 	})
 	if err != nil {
-		if k8serrors.IsAlreadyExists(err) {
+		// errPodCreated means the create succeeded on the final retry step (the
+		// budget was exhausted before the running-state recheck); treat as success.
+		if k8serrors.IsAlreadyExists(err) || errors.Is(err, errPodCreated) {
 			return nil
 		}
 		plog.G(ctx).Errorf("Failed to create resource: %s %s, err: %v", p.Namespace, p.Name, err)

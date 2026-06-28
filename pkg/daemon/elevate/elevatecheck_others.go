@@ -24,7 +24,8 @@ func RunWithElevated() {
 	// so, mute single CTRL+C, let inner command handle single only
 	go func() {
 		signals := make(chan os.Signal, 1)
-		signal.Notify(signals, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGSTOP)
+		// SIGKILL and SIGSTOP cannot be caught by signal.Notify, so only catchable termination signals are muted here.
+		signal.Notify(signals, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 		<-signals
 	}()
 	err := cmd.Run()

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -20,7 +21,11 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
-var daemonClient, sudoDaemonClient rpc.DaemonClient
+var (
+	clientMu         sync.Mutex
+	daemonClient     rpc.DaemonClient
+	sudoDaemonClient rpc.DaemonClient
+)
 
 // GetClient returns a cached gRPC DaemonClient for the given privilege level, creating one if necessary.
 func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
@@ -28,12 +33,16 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	if _, err = os.Stat(sockPath); errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
+	clientMu.Lock()
 	if isSudo && sudoDaemonClient != nil {
+		defer clientMu.Unlock()
 		return sudoDaemonClient, nil
 	}
 	if !isSudo && daemonClient != nil {
+		defer clientMu.Unlock()
 		return daemonClient, nil
 	}
+	clientMu.Unlock()
 
 	ctx := context.Background()
 	conn, err := grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithNoProxy())
@@ -72,15 +81,19 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 		if err != nil {
 			return nil, err
 		}
-		err = grpcutil.PrintGRPCStream[rpc.QuitResponse](nil, quitStream, nil)
-		return
+		_ = grpcutil.PrintGRPCStream[rpc.QuitResponse](ctx, quitStream, nil)
+		// The daemon is outdated and was asked to quit; do not return or cache a
+		// client to it. Returning nil makes StartupDaemon spawn a fresh daemon.
+		return nil, fmt.Errorf("daemon version is outdated and was asked to quit")
 	}
 
+	clientMu.Lock()
 	if isSudo {
 		sudoDaemonClient = cli
 	} else {
 		daemonClient = cli
 	}
+	clientMu.Unlock()
 	return cli, nil
 }
 
@@ -126,14 +139,14 @@ func StartupDaemon(ctx context.Context, path ...string) error {
 		return err
 	}
 	// normal daemon
-	if daemonClient, _ = GetClient(false); daemonClient == nil {
+	if cli, _ := GetClient(false); cli == nil {
 		if err = runDaemon(ctx, exe, false); err != nil {
 			return err
 		}
 	}
 
 	// sudo daemon
-	if sudoDaemonClient, _ = GetClient(true); sudoDaemonClient == nil {
+	if cli, _ := GetClient(true); cli == nil {
 		if err = runDaemon(ctx, exe, true); err != nil {
 			return err
 		}

@@ -86,8 +86,14 @@ func readDatagramPacket(r io.Reader, b []byte) (*DatagramPacket, error) {
 }
 
 func (d *DatagramPacket) Write(w io.Writer) error {
-	n := copy(d.Data[2:], d.Data[:d.DataLength])
-	binary.BigEndian.PutUint16(d.Data[:2], d.DataLength)
-	_, err := w.Write(d.Data[:n+2])
+	// Frame into a scratch buffer instead of shifting d.Data in place: this
+	// method may be called more than once on the same packet (WriteFunc retries
+	// the next connection when one fails), and in-place mutation would corrupt
+	// the frame on the second call.
+	buf := config.LPool.Get().([]byte)
+	defer config.LPool.Put(buf)
+	binary.BigEndian.PutUint16(buf[:2], d.DataLength)
+	n := copy(buf[2:], d.Data[:d.DataLength])
+	_, err := w.Write(buf[:n+2])
 	return err
 }

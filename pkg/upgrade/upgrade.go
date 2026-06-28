@@ -106,21 +106,30 @@ func downloadAndInstall(client *http.Client, url string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(createTemp.Name())
 	err = createTemp.Close()
 	if err != nil {
 		return err
 	}
-	err = os.Remove(createTemp.Name())
+	backupPath := createTemp.Name()
+	err = os.Remove(backupPath)
 	if err != nil {
 		return err
 	}
-	err = util.Move(curFolder, createTemp.Name())
+	// Stash the current binary as a backup.
+	err = util.Move(curFolder, backupPath)
 	if err != nil {
 		return err
 	}
+	// Install the new binary; if it fails, restore the backup so the user is
+	// never left without a kubevpn binary on disk.
 	err = util.Move(file.Name(), curFolder)
-	return err
+	if err != nil {
+		_ = util.Move(backupPath, curFolder)
+		return err
+	}
+	// Success: drop the backup.
+	_ = os.Remove(backupPath)
+	return nil
 }
 
 func elevatePermission() error {

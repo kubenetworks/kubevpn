@@ -39,8 +39,8 @@ func TestSeekToLastLine_RequestMoreLinesThanExist(t *testing.T) {
 	if offset != 0 {
 		t.Errorf("expected offset 0 (start of file), got %d", offset)
 	}
-	if size != 0 {
-		t.Errorf("expected size 0 (fallback), got %d", size)
+	if size != int64(len(content)) {
+		t.Errorf("expected size %d (file end, so a follower tails new lines only), got %d", len(content), size)
 	}
 }
 
@@ -64,7 +64,8 @@ func TestSeekToLastLine_SingleLine(t *testing.T) {
 	f := createTempFile(t, content)
 
 	// File has 1 newline, request 1 line. lineCount reaches 1 but never > 1,
-	// so the function returns (0, 0, nil) meaning "start from beginning".
+	// so the function returns (0, size, nil): read from the start, but report
+	// the file end so a follower tails only new lines.
 	offset, size, err := seekToLastLine(f, 1)
 	if err != nil {
 		t.Fatalf("seekToLastLine: %v", err)
@@ -72,8 +73,8 @@ func TestSeekToLastLine_SingleLine(t *testing.T) {
 	if offset != 0 {
 		t.Errorf("expected offset 0 (whole file), got %d", offset)
 	}
-	if size != 0 {
-		t.Errorf("expected size 0 (fallback), got %d", size)
+	if size != int64(len(content)) {
+		t.Errorf("expected size %d (file end, so a follower tails new lines only), got %d", len(content), size)
 	}
 }
 
@@ -102,7 +103,7 @@ func TestSeekToLastLine_NoTrailingNewline(t *testing.T) {
 	f := createTempFile(t, content)
 
 	// 2 newlines in file, requesting 2 lines. lineCount reaches 2 but
-	// never > 2, so the function returns (0, 0, nil).
+	// never > 2, so the function returns (0, size, nil).
 	offset, size, err := seekToLastLine(f, 2)
 	if err != nil {
 		t.Fatalf("seekToLastLine: %v", err)
@@ -110,8 +111,8 @@ func TestSeekToLastLine_NoTrailingNewline(t *testing.T) {
 	if offset != 0 {
 		t.Errorf("expected offset 0 (not enough newlines), got %d", offset)
 	}
-	if size != 0 {
-		t.Errorf("expected size 0 (fallback), got %d", size)
+	if size != int64(len(content)) {
+		t.Errorf("expected size %d (file end, so a follower tails new lines only), got %d", len(content), size)
 	}
 }
 
@@ -168,7 +169,7 @@ func TestSeekToLastLine_NonexistentFile(t *testing.T) {
 
 func TestSeekToLastLine_OneLine_RequestOne(t *testing.T) {
 	// Edge case: single line with trailing newline, request exactly 1.
-	// 1 newline, lineCount=1, never > 1, so returns (0, 0, nil).
+	// 1 newline, lineCount=1, never > 1, so returns (0, size, nil).
 	content := "hello\n"
 	f := createTempFile(t, content)
 
@@ -179,8 +180,8 @@ func TestSeekToLastLine_OneLine_RequestOne(t *testing.T) {
 	if offset != 0 {
 		t.Errorf("expected offset 0, got %d", offset)
 	}
-	if size != 0 {
-		t.Errorf("expected size 0 (fallback), got %d", size)
+	if size != int64(len(content)) {
+		t.Errorf("expected size %d (file end, so a follower tails new lines only), got %d", len(content), size)
 	}
 }
 

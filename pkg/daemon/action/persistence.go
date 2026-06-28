@@ -101,7 +101,7 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 				req.OwnerID = c.OwnerID
 			}
 			_ = resp.Send(&req)
-			_ = grpcutil.PrintGRPCStream[rpc.ConnectResponse](nil, resp, svr.LogFile)
+			_ = grpcutil.PrintGRPCStream[rpc.ConnectResponse](ctx, resp, svr.LogFile)
 		}
 	}
 	return nil

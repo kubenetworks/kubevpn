@@ -135,12 +135,16 @@ func trySendToSlot(inbound chan *Packet, packet *Packet) {
 // broadcastToSlots delivers packet to slot 0 and a pooled clone to every other slot, so an idle
 // connection still receives heartbeats.
 func broadcastToSlots(slots []*connSlot, packet *Packet) {
-	trySendToSlot(slots[0].inbound, packet)
+	// Clone for the other slots first, while we still own packet.data. Once the
+	// original is handed to slot 0, its buffer may be recycled to the pool (full
+	// channel) or mutated in place by writeToConn, so reading packet.data after
+	// that would be a use-after-free / data race.
 	for i := 1; i < len(slots); i++ {
 		clone := config.LPool.Get().([]byte)
 		copy(clone, packet.data[:packet.length+2])
 		trySendToSlot(slots[i].inbound, &Packet{data: clone, length: packet.length})
 	}
+	trySendToSlot(slots[0].inbound, packet)
 }
 
 // ipHash returns a consistent slot index for an IP address.

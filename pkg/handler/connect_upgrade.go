@@ -32,6 +32,9 @@ func (c *ConnectOptions) UpgradeDeploy(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if len(podList[0].Spec.Containers) == 0 {
+		return fmt.Errorf("cannot find any container in pod %s", podList[0].Name)
+	}
 
 	clientVer := config.Version
 	clientImg := c.Image

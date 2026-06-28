@@ -12,6 +12,9 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// testCtxKey is a private context key type used by tests to avoid key collisions.
+type testCtxKey struct{}
+
 func TestSyncOptions_InitClient(t *testing.T) {
 	// Create a minimal but valid kubeconfig file pointing to a dummy server.
 	tmpDir := t.TempDir()
@@ -69,7 +72,7 @@ func TestSyncOptions_SetContext(t *testing.T) {
 		t.Fatal("ctx should be nil before SetContext")
 	}
 
-	ctx := context.WithValue(context.Background(), struct{}{}, "test-value")
+	ctx := context.WithValue(context.Background(), testCtxKey{}, "test-value")
 	opts.SetContext(ctx)
 
 	if opts.ctx == nil {

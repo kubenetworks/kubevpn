@@ -24,9 +24,9 @@ func (svr *Server) Unsync(resp rpc.Daemon_UnsyncServer) error {
 		logger.Infof("No connection found")
 		return fmt.Errorf("no connection found")
 	}
-	if conn.Sync != nil {
-		err = conn.Sync.Cleanup(ctx, req.Workloads...)
-		conn.Sync = nil
+	if sync := conn.GetSync(); sync != nil {
+		err = sync.Cleanup(ctx, req.Workloads...)
+		conn.SetSync(nil)
 	}
 	return err
 }

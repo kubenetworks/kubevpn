@@ -173,7 +173,9 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 	// so needs to let null header to last rule
 	for x := range v {
 		sort.SliceStable(v[x].Rules, func(i, j int) bool {
-			return len(v[x].Rules[i].Headers) != 0
+			// Rules with headers (specific matches) must sort before the
+			// header-less catch-all rule, otherwise the catch-all shadows them.
+			return len(v[x].Rules[i].Headers) != 0 && len(v[x].Rules[j].Headers) == 0
 		})
 	}
 	return v

@@ -72,7 +72,7 @@ func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.Ssh
 		if err != nil {
 			return err
 		}
-		_ = grpcutil.PrintGRPCStream[rpc.DisconnectResponse](nil, resp)
+		_ = grpcutil.PrintGRPCStream[rpc.DisconnectResponse](context.Background(), resp)
 		return nil
 	})
 	resp, err := cli.Proxy(context.Background())
@@ -157,7 +157,10 @@ func (option *Options) CreateConnectContainer(ctx context.Context, portBindings 
 		args = append(args, "--expose", port.Port())
 	}
 	for port, bindings := range portMap {
-		args = append(args, "--publish", fmt.Sprintf("%s:%s", port.Port(), bindings[0].HostPort))
+		// docker --publish expects hostPort:containerPort (see runconfig.go).
+		for _, binding := range bindings {
+			args = append(args, "--publish", fmt.Sprintf("%s:%s", binding.HostPort, port.Port()))
+		}
 	}
 
 	result := append([]string{"docker"}, args...)

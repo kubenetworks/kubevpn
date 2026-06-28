@@ -82,7 +82,9 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	localResolvConf.Servers = append([]string{config.Servers[0]}, localResolvConf.Servers...)
+	if len(config.Servers) > 0 {
+		localResolvConf.Servers = append([]string{config.Servers[0]}, localResolvConf.Servers...)
+	}
 	return writeResolvConf(resolvconf.Path(), *localResolvConf)
 }
 
@@ -90,13 +92,16 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 // resolvectl dns utun0 10.10.129.161
 // resolvectl domain utun0 default.svc.cluster.local svc.cluster.local cluster.local
 func setupDnsByCmdResolvectl(ctx context.Context, tunName string, config *miekgdns.ClientConfig) error {
+	if len(config.Servers) == 0 {
+		return fmt.Errorf("no DNS server found in pod resolv.conf")
+	}
 	cmd := exec.CommandContext(ctx, "resolvectl", "dns", tunName, config.Servers[0])
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		plog.G(ctx).Debugf("Failed to exec cmd '%s': %s", strings.Join(cmd.Args, " "), string(output))
 		return err
 	}
-	cmd = exec.CommandContext(ctx, "resolvectl", "domain", tunName, config.Search[0], config.Search[1], config.Search[2])
+	cmd = exec.CommandContext(ctx, "resolvectl", append([]string{"domain", tunName}, config.Search...)...)
 	output, err = cmd.CombinedOutput()
 	if err != nil {
 		plog.G(ctx).Debugf("Failed to exec cmd '%s': %s", strings.Join(cmd.Args, " "), string(output))
@@ -106,15 +111,14 @@ func setupDnsByCmdResolvectl(ctx context.Context, tunName string, config *miekgd
 }
 
 func setupDNSbyCmdSystemdResolve(ctx context.Context, tunName string, config *miekgdns.ClientConfig) error {
-	cmd := exec.CommandContext(ctx, "systemd-resolve", []string{
-		"--set-dns",
-		config.Servers[0],
-		"--interface",
-		tunName,
-		"--set-domain=" + config.Search[0],
-		"--set-domain=" + config.Search[1],
-		"--set-domain=" + config.Search[2],
-	}...)
+	if len(config.Servers) == 0 {
+		return fmt.Errorf("no DNS server found in pod resolv.conf")
+	}
+	args := []string{"--set-dns", config.Servers[0], "--interface", tunName}
+	for _, search := range config.Search {
+		args = append(args, "--set-domain="+search)
+	}
+	cmd := exec.CommandContext(ctx, "systemd-resolve", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		plog.G(ctx).Debugf("Failed to exec cmd '%s': %s", strings.Join(cmd.Args, " "), string(output))
@@ -168,11 +172,13 @@ func (c *Config) CancelDNS() {
 	if err != nil {
 		return
 	}
-	for i := 0; i < len(resolvConf.Servers); i++ {
-		if resolvConf.Servers[i] == c.Config.Servers[0] {
-			resolvConf.Servers = append(resolvConf.Servers[:i], resolvConf.Servers[i+1:]...)
-			i--
-			break
+	if len(c.Config.Servers) > 0 {
+		for i := 0; i < len(resolvConf.Servers); i++ {
+			if resolvConf.Servers[i] == c.Config.Servers[0] {
+				resolvConf.Servers = append(resolvConf.Servers[:i], resolvConf.Servers[i+1:]...)
+				i--
+				break
+			}
 		}
 	}
 	err = writeResolvConf(resolvconf.Path(), *resolvConf)

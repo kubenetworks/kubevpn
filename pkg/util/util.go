@@ -248,7 +248,7 @@ func Merge[K comparable, V any](fromMap, toMap map[K]V) map[K]V {
 // Move renames src to dst, falling back to a copy-and-delete if they are on different filesystems.
 func Move(src, dst string) error {
 	err := os.Rename(src, dst)
-	if err != nil && errors.Is(err.(*os.LinkError).Err.(syscall.Errno), syscall.EXDEV) {
+	if err != nil && errors.Is(err, syscall.EXDEV) {
 		return move(src, dst)
 	}
 	return err

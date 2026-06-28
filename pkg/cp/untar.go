@@ -2,6 +2,7 @@ package cp
 
 import (
 	"archive/tar"
+	"fmt"
 	"io"
 	"os"
 
@@ -10,10 +11,21 @@ import (
 
 // copy from another real file
 func copyFromLink(fileHeaderList []tar.Header, currFile tar.Header, genDstFilename func(headerName string) localPath) error {
+	return copyFromLinkVisited(fileHeaderList, currFile, genDstFilename, make(map[string]bool))
+}
+
+func copyFromLinkVisited(fileHeaderList []tar.Header, currFile tar.Header, genDstFilename func(headerName string) localPath, visited map[string]bool) error {
+	// Guard against circular link chains (e.g. A -> B -> A) that would otherwise
+	// recurse until the stack overflows.
+	if visited[currFile.Name] {
+		return fmt.Errorf("circular link chain detected at %q", currFile.Name)
+	}
+	visited[currFile.Name] = true
+
 	for _, t := range fileHeaderList {
 		if t.Name == currFile.Linkname {
 			// handle it recursive if linkA --> linkB --> originFile
-			return copyFromLink(fileHeaderList, t, genDstFilename)
+			return copyFromLinkVisited(fileHeaderList, t, genDstFilename, visited)
 		}
 	}
 

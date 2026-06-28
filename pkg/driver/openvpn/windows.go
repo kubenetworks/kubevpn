@@ -23,6 +23,7 @@ func Install() error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tempFile.Close() }()
 	defer func() { _ = os.Remove(tempFile.Name()) }()
 	if _, err = tempFile.Write(bytes); err != nil {
 		return err

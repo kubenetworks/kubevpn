@@ -64,6 +64,7 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 		return err
 	}
 	tempBin.Close()
+	defer os.Remove(tempBin.Name())
 
 	if err = util.UnzipKubeVPNIntoFile(temp.Name(), tempBin.Name()); err != nil {
 		return err

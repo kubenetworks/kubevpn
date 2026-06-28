@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -181,10 +182,12 @@ func relayUDPReverse(ctx context.Context, framed net.Conn, udpEnd udpEndpoint) {
 }
 
 func isClosedOrEOF(err error) bool {
-	return err == io.EOF || err == io.ErrClosedPipe || errIsNetClosed(err)
+	// Use errors.Is so wrapped errors (ServeUDPReverse wraps with %w) are still
+	// recognized as a normal connection close rather than a real failure.
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) || errIsNetClosed(err)
 }
 
 func errIsNetClosed(err error) bool {
-	ne, ok := err.(net.Error)
-	return ok && !ne.Timeout()
+	var ne net.Error
+	return errors.As(err, &ne) && !ne.Timeout()
 }

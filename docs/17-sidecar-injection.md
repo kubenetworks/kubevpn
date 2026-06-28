@@ -113,6 +113,13 @@ All sidecar containers receive:
 
 > The former `AddVPNContainer` (VPN-only, no envoy) was **removed** with the unified proxy mode — every non-Service proxy now goes through `AddVPNAndEnvoyContainer`.
 
+### ServiceAccount
+
+The injected pod keeps the **workload's own ServiceAccount** (whatever the original Deployment used, usually `default`). The sidecars deliberately do **not** set `spec.serviceAccountName` to the `kubevpn-traffic-manager` SA:
+
+- That SA only exists in the **manager** namespace (see [24-traffic-manager-deployment.md](24-traffic-manager-deployment.md)). Pinning it onto a workload in any other namespace makes the ServiceAccount admission controller **reject pod creation** — the new ReplicaSet never produces a pod, the rollout times out, and `RolloutStatus` undoes the patch, leaving the workload on its original (un-injected) spec.
+- The sidecars never call the K8s API: the VPN sidecar self-allocates its TUN IP from the control plane over **gRPC + TLS** (`requestTunIPFromControlPlane`, see [09-tun-ip-hot-update.md](09-tun-ip-hot-update.md)), authenticating with the `tls_*` env vars — so no ServiceAccount token is needed.
+
 ## 5. Envoy ConfigMap Management (`envoy.go`)
 
 ### Writing Rules
