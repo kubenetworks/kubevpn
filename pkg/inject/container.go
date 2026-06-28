@@ -149,7 +149,7 @@ func AddEnvoyAndSSHContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 b
 		Name:            config.ContainerSidecarVPN,
 		Image:           image,
 		Command:         []string{"kubevpn"},
-		Args:            []string{"server", fmt.Sprintf("-l ssh://:%d", config.PortSSH)},
+		Args:            []string{"server", fmt.Sprintf("-l ssh://:%d", config.PortSSH), fmt.Sprintf("-l udpbridge://:%d", config.PortUDPBridge)},
 		Resources:       defaultResources(),
 		ImagePullPolicy: v1.PullIfNotPresent,
 		SecurityContext: &v1.SecurityContext{},

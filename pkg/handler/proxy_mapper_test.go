@@ -74,6 +74,43 @@ func TestExtractPortMapping_NoMatchingWorkload(t *testing.T) {
 	}
 }
 
+func TestExtractPortMapping_UDPPort(t *testing.T) {
+	virtuals := []*controlplane.Virtual{
+		{
+			Namespace: "test-ns",
+			UID:       "deployments.apps.reviews",
+			Ports: []controlplane.ContainerPort{
+				{ContainerPort: 9080, Protocol: corev1.ProtocolTCP},
+				{ContainerPort: 53, Protocol: corev1.ProtocolUDP},
+			},
+			Rules: []*controlplane.Rule{
+				{
+					Headers: map[string]string{},
+					PortMap: map[int32]string{
+						9080: "19080:9080",
+						53:   "1053:5053",
+					},
+				},
+			},
+		},
+	}
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-cm"},
+		Data:       map[string]string{config.KeyEnvoy: mustMarshalVirtuals(t, virtuals)},
+	}
+	m := newTestMapper("test-ns", "deployments.apps/reviews", map[string]string{})
+	result, err := m.extractPortMapping(cm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pf := result[9080]; pf.EnvoyPort != 19080 || pf.UDP {
+		t.Errorf("TCP port: got %+v, want {EnvoyPort:19080 UDP:false}", pf)
+	}
+	if pf := result[5053]; pf.EnvoyPort != 1053 || !pf.UDP {
+		t.Errorf("UDP port: got %+v, want {EnvoyPort:1053 UDP:true}", pf)
+	}
+}
+
 func TestExtractPortMapping_MatchingWorkloadWithPortMapping(t *testing.T) {
 	virtuals := []*controlplane.Virtual{
 		{
@@ -115,8 +152,11 @@ func TestExtractPortMapping_MatchingWorkloadWithPortMapping(t *testing.T) {
 		t.Fatalf("expected %d entries, got %d: %v", len(expected), len(result), result)
 	}
 	for k, v := range expected {
-		if result[k] != v {
-			t.Errorf("result[%d] = %d, want %d", k, result[k], v)
+		if result[k].EnvoyPort != v {
+			t.Errorf("result[%d].EnvoyPort = %d, want %d", k, result[k].EnvoyPort, v)
+		}
+		if result[k].UDP {
+			t.Errorf("result[%d] unexpectedly marked UDP", k)
 		}
 	}
 }

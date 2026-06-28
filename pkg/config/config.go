@@ -65,6 +65,9 @@ const (
 	PortUDP = 10802
 	// PortSSH is the traffic-manager SSH tunnel port number (service/fargate mode and reverse tunnel).
 	PortSSH = 2222
+	// PortUDPBridge is the sidecar reverse-UDP bridge port (fargate/service mode),
+	// carrying UDP inbound back to the developer since the SSH reverse tunnel is TCP-only.
+	PortUDPBridge = 2223
 	// PortEnvoyInbound is the Envoy inbound capture port that mesh-mode iptables DNAT redirects to.
 	PortEnvoyInbound = 15006
 
