@@ -13,12 +13,13 @@ import (
 )
 
 func main() {
-	// klog v2 defaults -logtostderr=true, which silently ignores -stderrthreshold.
-	// Opt out of that legacy behaviour so klog respects the threshold and doesn't
-	// dump internal K8s client debug logs to CLI stderr.
+	// Register klog flags on the standard flag set so that they can be
+	// configured programmatically.  klog v2 defaults -logtostderr to true,
+	// which silently ignores -stderrthreshold.  Opt out of that legacy
+	// behaviour (kubernetes/klog#432) so users can control the threshold.
 	klog.InitFlags(nil)
-	_ = flag.Set("legacy_stderr_threshold_behavior", "false")
-	_ = flag.Set("stderrthreshold", "INFO")
+	flag.Set("legacy_stderr_threshold_behavior", "false") //nolint:errcheck
+	flag.Set("stderrthreshold", "INFO")                   //nolint:errcheck
 
 	ctx := ctrl.SetupSignalHandler()
 	_ = cmds.NewKubeVPNCommand().ExecuteContext(ctx)
