@@ -49,8 +49,11 @@ func TestDNS_DetectNameserver_ServiceIPUnreachable(t *testing.T) {
 		Servers: []string{"0.0.0.0"},
 		Port:    "53",
 	}
-	// RFC 5737: 192.0.2.0/24 is TEST-NET-1, should be unreachable.
-	serviceIP := "192.0.2.1"
+	// 127.0.0.1 never routes through the kubevpn TUN device, and nothing is
+	// listening on port 53 without root. The DNS query will either get an
+	// immediate ICMP port-unreachable or time out via the context, either
+	// of which causes detectNameserver to fall back to the pod IP.
+	serviceIP := "127.0.0.1"
 	podIP := "10.244.0.99"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -77,7 +80,9 @@ func TestDNS_DetectNameserver_AlwaysReturnsNil(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	err := detectNameserver(ctx, conf, "192.0.2.1", "10.0.0.1")
+	// Use 127.0.0.1 (no DNS listener) — 192.0.2.1 can be routed through an
+	// active kubevpn TUN device, making it falsely reachable.
+	err := detectNameserver(ctx, conf, "127.0.0.1", "10.0.0.1")
 	if err != nil {
 		t.Fatalf("detectNameserver should always return nil, got: %v", err)
 	}
@@ -102,8 +107,11 @@ func TestDNS_NameserverChecker_Failure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	// RFC 5737 TEST-NET: should be unreachable.
-	err := nameserverChecker(ctx, "example.local", "192.0.2.1")
+	// 127.0.0.1:53 has no DNS server listening (binding port 53 requires root).
+	// Unlike RFC 5737 TEST-NET IPs (192.0.2.0/24) which can be routed through
+	// an active kubevpn TUN device, loopback is always local and immediately
+	// gets an ICMP port-unreachable from the kernel.
+	err := nameserverChecker(ctx, "example.local", "127.0.0.1")
 	if err == nil {
 		t.Fatal("nameserverChecker should fail for unreachable server")
 	}

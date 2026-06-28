@@ -15,6 +15,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -59,6 +60,7 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 			req := &rpc.DisconnectRequest{
 				ConnectionID: &id,
 				All:          pointer.Bool(all),
+				Level:        plog.GetLogLevel(),
 			}
 			resp, err := cli.Disconnect(context.Background())
 			if err != nil {
@@ -87,5 +89,6 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", all, "Disconnect all cluster, disconnect from all cluster network")
+	handler.AddDebugFlag(cmd.Flags())
 	return cmd
 }

@@ -1,8 +1,6 @@
 package action
 
 import (
-	log "github.com/sirupsen/logrus"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
@@ -13,7 +11,7 @@ func (svr *Server) Unsync(resp rpc.Daemon_UnsyncServer) error {
 	if err != nil {
 		return err
 	}
-	logger, ctx := svr.initStreamLogger(resp, int32(log.InfoLevel), func(msg string) error {
+	logger, ctx := svr.initStreamLogger(resp, req.Level, func(msg string) error {
 		return resp.Send(&rpc.UnsyncResponse{Message: msg})
 	})
 	svr.connMu.RLock()

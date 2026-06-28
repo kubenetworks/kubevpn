@@ -18,14 +18,20 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+// GetLogLevel returns the logrus level (as int32) implied by the --debug flag: DebugLevel when
+// config.Debug is set, otherwise InfoLevel. CLI commands use it to populate the Level field of
+// daemon RPC requests, so the daemon's StreamHook forwards logs back at the user-requested level.
+func GetLogLevel() int32 {
+	if config.Debug {
+		return int32(log.DebugLevel)
+	}
+	return int32(log.InfoLevel)
+}
+
 // NewClientLogger creates a client-format logger writing to stdout.
 // Used by CLI commands: cmd.SetContext(plog.WithLogger(ctx, plog.NewClientLogger()))
 func NewClientLogger() *log.Logger {
-	level := log.InfoLevel
-	if config.Debug {
-		level = log.DebugLevel
-	}
-	return GetLoggerForClient(int32(level), os.Stdout)
+	return GetLoggerForClient(GetLogLevel(), os.Stdout)
 }
 
 // GetLoggerForClient returns a new logger configured for client-side use

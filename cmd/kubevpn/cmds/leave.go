@@ -13,6 +13,8 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -49,6 +51,7 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 			req := &rpc.LeaveRequest{
 				Namespace: ns,
 				Workloads: args,
+				Level:     plog.GetLogLevel(),
 			}
 			resp, err := cli.Leave(context.Background())
 			if err != nil {
@@ -68,5 +71,6 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
+	handler.AddDebugFlag(leaveCmd.Flags())
 	return leaveCmd
 }

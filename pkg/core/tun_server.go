@@ -6,7 +6,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -72,7 +71,7 @@ func (t *serverTransport) routeTun(ctx context.Context) {
 			packet.release()
 			if err != nil {
 				plog.G(ctx).Warnf("[TUN] No route for %s -> %s, dropping", packet.src, packet.dst)
-			} else if config.Debug {
+			} else if plog.IsDebugEnabled(ctx) {
 				plog.G(ctx).Debugf("[TUN] Routed %s -> %s via %s", packet.src, packet.dst, conn.RemoteAddr())
 			}
 		case <-ctx.Done():

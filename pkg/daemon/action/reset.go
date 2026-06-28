@@ -3,8 +3,6 @@ package action
 import (
 	"os"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -16,7 +14,7 @@ func (svr *Server) Reset(resp rpc.Daemon_ResetServer) error {
 	if err != nil {
 		return err
 	}
-	_, ctx := svr.initStreamLogger(resp, int32(log.InfoLevel), func(msg string) error {
+	_, ctx := svr.initStreamLogger(resp, req.Level, func(msg string) error {
 		return resp.Send(&rpc.ResetResponse{Message: msg})
 	})
 	file, err := resolveKubeconfig(ctx, req.SshJump, req.KubeconfigBytes, false)

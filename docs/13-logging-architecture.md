@@ -66,8 +66,7 @@ logger.AddHook(&plog.StreamHook{                                      // message
 ctx = plog.WithLogger(resp.Context(), logger)
 ```
 
-Connect/Proxy/Sync requests carry `Level`; other RPCs (Disconnect/Quit/Leave/Reset/Unsync/Uninstall)
-have no `Level` field and stream at Info.
+Connect/Proxy/Sync/Disconnect/Quit/Leave/Reset/Unsync/Uninstall all carry `Level` (populated by `plog.GetLogLevel()` in the CLI command handler) so the daemon's StreamHook forwards logs at the user-requested level. The zero-value guard in `newServerStreamLogger` treats a missing Level as Info (e.g. from an older client).
 
 ## Design Rules
 
@@ -141,6 +140,8 @@ Code using `context.Background()` falls back to global `L`:
 | `G(ctx)` | `pkg/log/context.go` | Get logger from context, fallback to `L` |
 | `WithLogger(ctx, logger)` | `pkg/log/context.go` | Inject logger into context |
 | `NewClientLogger()` | `pkg/log/logger.go` | Create client-format logger for CLI (message-only, stdout) |
+| `GetLogLevel()` | `pkg/log/logger.go` | Return DebugLevel or InfoLevel based on `config.Debug`; CLI commands use it to populate RPC `Level` |
+| `IsDebugEnabled(ctx)` | `pkg/log/context.go` | Guard expensive debug-only work (per-packet parsing) without relying on the global `config.Debug` flag |
 | `GetLoggerForClient(level, out)` | `pkg/log/logger.go` | Create client-format logger for custom output |
 | `GetLoggerForServer(level, out)` | `pkg/log/logger.go` | Create server-format logger (timestamp+file:line) |
 | `StreamHook` | `pkg/log/logger.go` | Logrus hook: sends message-only text to a writer at its configured Level |
@@ -170,7 +171,7 @@ Now you can access resources in the kubernetes cluster !
 2026-06-10 08:15:24.123 network.go:122 info: Forwarding port...
 2026-06-10 08:15:24.200 transporter_tcp.go:29 debug: [Transport] Using TLS mode
 2026-06-10 08:15:24.300 tun_client.go:126 debug: [Client-0] Connected to 127.0.0.1:51496
-2026-06-10 08:15:24.310 tun_client.go:263 debug: [Client] OUTBOUND SRC: 198.18.0.5, DST: 10.0.0.5, Protocol: TCP, Length: 60
+2026-06-10 08:15:24.310 tun_client.go:263 debug: [Client-0] OUTBOUND SRC: 198.18.0.5, DST: 10.0.0.5, Protocol: TCP, Length: 60
 2026-06-10 08:15:24.320 tun_client.go:198 debug: [Client-0] INBOUND SRC: 10.0.0.5, DST: 198.18.0.5, Protocol: TCP, Length: 52
 2026-06-10 08:15:25.234 network.go:204 info: Allocated TUN IP: v4=198.18.0.5/32 v6=2001:2::5/128
 2026-06-10 08:15:25.345 tun_server.go:92 warning: [Perf] Slow tunInbound send blocked 25ms

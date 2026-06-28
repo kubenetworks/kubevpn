@@ -19,6 +19,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/elevate"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 var (
@@ -77,7 +78,7 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 		if err != nil {
 			return nil, err
 		}
-		err = quitStream.Send(&rpc.QuitRequest{})
+		err = quitStream.Send(&rpc.QuitRequest{Level: plog.GetLogLevel()})
 		if err != nil {
 			return nil, err
 		}

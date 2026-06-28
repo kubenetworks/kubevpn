@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
@@ -30,7 +28,7 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		return err
 	}
 
-	logger := newServerStreamLogger(svr.LogFile, int32(log.InfoLevel), func(msg string) error {
+	logger := newServerStreamLogger(svr.LogFile, req.Level, func(msg string) error {
 		return resp.Send(&rpc.DisconnectResponse{Message: msg})
 	})
 	ctx := plog.WithLogger(resp.Context(), logger)

@@ -105,7 +105,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			pkt.release()
 			if writeErr != nil {
 				plog.G(ctx).Warnf("[Gvisor-TCP] All routes dead for %s: %v", dst, writeErr)
-			} else if config.Debug {
+			} else if plog.IsDebugEnabled(ctx) {
 				plog.G(ctx).Debugf("[Gvisor-TCP] Routed %s -> %s via %s", src, dst, usedConn.RemoteAddr())
 			}
 		} else if buf[datagramHeaderLen] == packetTypeToGvisor {
@@ -117,7 +117,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
 			endpoint.InjectInbound(protocol, pkt)
 			pkt.DecRef()
-			if config.Debug {
+			if plog.IsDebugEnabled(ctx) {
 				plog.G(ctx).Debugf("[Gvisor-TCP] Injected to stack: %s -> %s, protocol=%s, length=%d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
 			}
 		} else {

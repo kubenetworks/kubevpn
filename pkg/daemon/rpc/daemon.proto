@@ -81,6 +81,8 @@ message DisconnectRequest {
   optional string KubeconfigBytes = 3;
   optional string Namespace = 4;
   SshJump SshJump = 5;
+  // log level controlling what the daemon streams back to the CLI
+  int32 Level = 6;
 }
 
 message DisconnectResponse {
@@ -130,6 +132,8 @@ message ProxyResponse {
 message LeaveRequest {
   string Namespace = 1;
   repeated string Workloads = 2;
+  // log level controlling what the daemon streams back to the CLI
+  int32 Level = 3;
 }
 
 message LeaveResponse {
@@ -172,6 +176,8 @@ message SyncResponse {
 
 message UnsyncRequest {
   repeated string Workloads = 1;
+  // log level controlling what the daemon streams back to the CLI
+  int32 Level = 2;
 }
 
 message UnsyncResponse {
@@ -195,6 +201,8 @@ message ConnectionUseResponse {
 }
 
 message QuitRequest {
+  // log level controlling what the daemon streams back to the CLI
+  int32 Level = 1;
 }
 
 message QuitResponse {
@@ -325,6 +333,8 @@ message UninstallRequest {
   string Namespace = 2;
   // ssh jump
   SshJump SshJump = 3;
+  // log level controlling what the daemon streams back to the CLI
+  int32 Level = 4;
 }
 
 message UninstallResponse {
@@ -337,6 +347,8 @@ message ResetRequest {
   repeated string Workloads = 3;
   // ssh jump
   SshJump SshJump = 4;
+  // log level controlling what the daemon streams back to the CLI
+  int32 Level = 5;
 }
 
 message ResetResponse {

@@ -69,6 +69,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 				Namespace:       ns,
 				Workloads:       args,
 				SshJump:         handler.SshConfigToRPC(sshConf),
+				Level:           plog.GetLogLevel(),
 			}
 			resp, err := cli.Reset(context.Background())
 			if err != nil {
@@ -90,5 +91,6 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 	}
 
 	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
+	handler.AddDebugFlag(cmd.Flags())
 	return cmd
 }

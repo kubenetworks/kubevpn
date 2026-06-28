@@ -13,6 +13,8 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func CmdUnsync(f cmdutil.Factory) *cobra.Command {
@@ -40,6 +42,7 @@ func CmdUnsync(f cmdutil.Factory) *cobra.Command {
 			}
 			req := &rpc.UnsyncRequest{
 				Workloads: args,
+				Level:     plog.GetLogLevel(),
 			}
 			resp, err := cli.Unsync(context.Background())
 			if err != nil {
@@ -59,5 +62,6 @@ func CmdUnsync(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
+	handler.AddDebugFlag(cmd.Flags())
 	return cmd
 }

@@ -13,6 +13,8 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -36,6 +38,7 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
+	handler.AddDebugFlag(cmd.Flags())
 	return cmd
 }
 
@@ -48,7 +51,7 @@ func quit(ctx context.Context, isSudo bool) error {
 	if err != nil {
 		return err
 	}
-	err = resp.Send(&rpc.QuitRequest{})
+	err = resp.Send(&rpc.QuitRequest{Level: plog.GetLogLevel()})
 	if err != nil {
 		return err
 	}

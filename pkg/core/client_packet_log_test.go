@@ -20,12 +20,17 @@ func debugCtx(buf *bytes.Buffer) context.Context {
 	return plog.WithLogger(context.Background(), logger)
 }
 
-// TestClientLog_Outbound verifies the client logs every outbound packet (read
-// from the local TUN) at Debug with an OUTBOUND tag.
-func TestClientLog_Outbound(t *testing.T) {
-	defer func(prev bool) { config.Debug = prev }(config.Debug)
-	config.Debug = true
+// infoCtx returns a ctx carrying an Info-level message-only logger writing to buf. Used to
+// assert that packet logging is suppressed when the logger itself is not at Debug (as in the
+// CLI/server process without --debug); the daemon's file logger is always Debug.
+func infoCtx(buf *bytes.Buffer) context.Context {
+	logger := plog.GetLoggerForClient(int32(log.InfoLevel), buf)
+	return plog.WithLogger(context.Background(), logger)
+}
 
+// TestClientLog_Outbound verifies the client logs every outbound packet (read
+// from the local TUN) at Debug with an OUTBOUND tag when the ctx logger is at Debug.
+func TestClientLog_Outbound(t *testing.T) {
 	var buf bytes.Buffer
 	ctx, cancel := context.WithCancel(debugCtx(&buf))
 	defer cancel()
@@ -58,11 +63,8 @@ func TestClientLog_Outbound(t *testing.T) {
 }
 
 // TestClientLog_Inbound verifies the client logs every inbound packet (read from
-// the server connection) at Debug with an INBOUND tag.
+// the server connection) at Debug with an INBOUND tag when the ctx logger is at Debug.
 func TestClientLog_Inbound(t *testing.T) {
-	defer func(prev bool) { config.Debug = prev }(config.Debug)
-	config.Debug = true
-
 	var buf bytes.Buffer
 	ctx, cancel := context.WithCancel(debugCtx(&buf))
 	defer cancel()
@@ -100,13 +102,12 @@ func TestClientLog_Inbound(t *testing.T) {
 	}
 }
 
-// TestClientLog_DebugDisabled verifies no per-packet line when --debug is off.
-func TestClientLog_DebugDisabled(t *testing.T) {
-	defer func(prev bool) { config.Debug = prev }(config.Debug)
-	config.Debug = false
-
+// TestClientLog_InfoLoggerSuppressed verifies no per-packet line when the ctx logger is below
+// Debug (e.g. CLI/server without --debug). Packet logging is gated on the logger level, not the
+// global config.Debug flag — so the daemon (file logger always Debug) still records packets.
+func TestClientLog_InfoLoggerSuppressed(t *testing.T) {
 	var buf bytes.Buffer
-	ctx, cancel := context.WithCancel(debugCtx(&buf))
+	ctx, cancel := context.WithCancel(infoCtx(&buf))
 	defer cancel()
 
 	tun := newMockTUN()

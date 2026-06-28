@@ -221,7 +221,7 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 							Name:    config.ContainerSidecarDNS,
 							Image:   image,
 							Command: []string{"kubevpn"},
-							Args:    []string{"dns"},
+							Args:    []string{"dns", "--debug"},
 							Ports: []v1.ContainerPort{{
 								Name:          udp53,
 								ContainerPort: 53,

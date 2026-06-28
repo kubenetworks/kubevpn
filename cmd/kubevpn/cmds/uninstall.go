@@ -74,6 +74,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 					KubeconfigBytes: ptr.To(string(bytes)),
 					Namespace:       ptr.To(ns),
 					SshJump:         handler.SshConfigToRPC(sshConf),
+					Level:           plog.GetLogLevel(),
 				})
 				if err != nil {
 					plog.G(cmd.Context()).Warnf("Failed to disconnect from cluter: %v", err)
@@ -85,6 +86,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 				KubeconfigBytes: string(bytes),
 				Namespace:       ns,
 				SshJump:         handler.SshConfigToRPC(sshConf),
+				Level:           plog.GetLogLevel(),
 			}
 			resp, err := cli.Uninstall(context.Background())
 			if err != nil {
@@ -106,5 +108,6 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 	}
 
 	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
+	handler.AddDebugFlag(cmd.Flags())
 	return cmd
 }

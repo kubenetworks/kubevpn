@@ -4,8 +4,6 @@ import (
 	"context"
 	"os"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -18,12 +16,18 @@ func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 	defer svr.CleanupConfig()
 
 	var sendFunc func(string) error
+	var level int32
 	if resp != nil {
+		// QuitRequest carries the CLI's --debug intent; read it so the stream level matches
+		// (newServerStreamLogger normalizes a zero/absent level to Info).
+		if req, recvErr := resp.Recv(); recvErr == nil {
+			level = req.GetLevel()
+		}
 		sendFunc = func(msg string) error { return resp.Send(&rpc.QuitResponse{Message: msg}) }
 	} else {
 		sendFunc = func(string) error { return nil }
 	}
-	logger := newServerStreamLogger(svr.LogFile, int32(log.InfoLevel), sendFunc)
+	logger := newServerStreamLogger(svr.LogFile, level, sendFunc)
 	ctx := context.Background()
 	if resp != nil {
 		ctx = resp.Context()

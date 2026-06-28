@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 
-	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/ptr"
@@ -21,7 +20,7 @@ func (svr *Server) Uninstall(resp rpc.Daemon_UninstallServer) (err error) {
 	if err != nil {
 		return err
 	}
-	_, ctx := svr.initStreamLogger(resp, int32(log.InfoLevel), func(msg string) error {
+	_, ctx := svr.initStreamLogger(resp, req.Level, func(msg string) error {
 		return resp.Send(&rpc.UninstallResponse{Message: msg})
 	})
 	file, err := resolveKubeconfig(ctx, req.SshJump, req.KubeconfigBytes, false)

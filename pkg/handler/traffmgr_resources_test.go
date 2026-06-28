@@ -49,7 +49,9 @@ func TestGenDeploySpec_SidecarDefaultDebug(t *testing.T) {
 		byName[c.Name] = c
 	}
 
-	for _, name := range []string{config.ContainerSidecarVPN, config.ContainerSidecarXDS} {
+	// All kubevpn server-side containers (server, xds, dns) default to Debug so the full record
+	// is available via `kubectl logs`.
+	for _, name := range []string{config.ContainerSidecarVPN, config.ContainerSidecarXDS, config.ContainerSidecarDNS} {
 		c, ok := byName[name]
 		if !ok {
 			t.Fatalf("container %q not found", name)
@@ -57,10 +59,6 @@ func TestGenDeploySpec_SidecarDefaultDebug(t *testing.T) {
 		if !slices.Contains(c.Args, "--debug") {
 			t.Errorf("container %q args should contain --debug, got %v", name, c.Args)
 		}
-	}
-
-	if dns, ok := byName[config.ContainerSidecarDNS]; ok && slices.Contains(dns.Args, "--debug") {
-		t.Errorf("dns container must NOT get --debug, got %v", dns.Args)
 	}
 }
 
