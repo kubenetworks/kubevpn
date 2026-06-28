@@ -84,7 +84,7 @@ func TestIntegration_UDP_EnvoyEndToEnd(t *testing.T) {
 	t.Logf("test container IP (reached by Envoy outbound): %s", hostIP)
 
 	// --- Phase 1: upstream UDP echo server (the "local app" Envoy forwards to) ------------
-	echoPort := startUDPEcho(t)
+	echoPort := startUDPEcho(t, hostIP)
 	t.Logf("upstream UDP echo server on %s:%d", hostIP, echoPort)
 
 	// --- Phase 2: control plane (production Virtual.To() → snapshot) ----------------------
@@ -214,6 +214,78 @@ func TestIntegration_TCP_EnvoyEndToEnd(t *testing.T) {
 		t.Fatalf("HTTP request through Envoy failed: status=%d body=%q (want 200 %q)", status, got, want)
 	}
 	t.Logf("✓ TCP/HTTP header-routed request through real Envoy succeeded: %q (status %d)", got, status)
+}
+
+// TestIntegration_MeshInboundCapture_EnvoyEndToEnd verifies the core property of the
+// mesh-mode inbound fix against a real Envoy: the :15006 virtual-inbound capture listener
+// is accepted and actually BOUND. In mesh mode the per-port listeners are BindToPort=false,
+// so :15006 is the only bound TCP entry point — the sidecar iptables DNATs inbound TCP to
+// it. Before the fix nothing bound :15006, so DNAT'd connections hit a closed port and were
+// reset (the in-cluster "connection reset by peer"). A successful TCP dial to the published
+// :15006 proves Envoy is listening. (The original_dst redirect itself needs real iptables,
+// which is why full mesh routing is only verifiable in-cluster.)
+func TestIntegration_MeshInboundCapture_EnvoyEndToEnd(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not found in PATH; skipping real-Envoy mesh capture e2e test")
+	}
+	ensureEnvoyImage(t)
+	logger := log.NewEntry(log.New())
+	hostIP := outboundIP(t)
+
+	const containerPort = 9080
+	const namespace = "e2e-ns"
+	const uid = "deployments.apps.meshcap"
+	nodeID := util.GenEnvoyUID(namespace, uid)
+
+	// Mesh mode (FargateMode=false): per-port listener BindToPort=false; only the
+	// :15006 capture listener binds.
+	v := &Virtual{
+		SchemaVersion: CurrentSchemaVersion,
+		Namespace:     namespace,
+		UID:           uid,
+		Ports: []ContainerPort{
+			{Name: "http", ContainerPort: containerPort, Protocol: corev1.ProtocolTCP},
+		},
+		Rules: []*Rule{
+			{
+				Headers:      map[string]string{"x-kubevpn-route": "e2e"},
+				LocalTunIPv4: hostIP,
+				OwnerID:      "owner-mesh",
+				PortMap:      map[int32]string{containerPort: fmt.Sprintf("%d", containerPort)},
+			},
+		},
+	}
+	snapshotCache := newXDSSnapshotCache(t, logger, nodeID, v)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	xdsPort := startXDSServer(t, ctx, snapshotCache)
+	bootstrap := envoyBootstrap(hostIP, xdsPort, envoyAdminPort)
+	capSpec := fmt.Sprintf("%d/tcp", config.PortEnvoyInbound)
+	dockerHost, adminBase, hostPorts, logs := startTestEnvoy(t, ctx, nodeID, bootstrap, capSpec)
+
+	// Core assertion: Envoy must bind :15006 and accept connections.
+	addr := net.JoinHostPort(dockerHost, hostPorts[capSpec])
+	var dialErr error
+	for i := 0; i < 30; i++ {
+		c, err := net.DialTimeout("tcp", addr, time.Second)
+		if err == nil {
+			_ = c.Close()
+			dialErr = nil
+			break
+		}
+		dialErr = err
+		time.Sleep(500 * time.Millisecond)
+	}
+	if dialErr != nil {
+		t.Logf("envoy /listeners:\n%s", httpGet(adminBase+"/listeners?format=json"))
+		t.Logf("envoy logs:\n%s", logs.String())
+		t.Fatalf("Envoy did not bind the :15006 inbound capture listener: %v", dialErr)
+	}
+	if l := httpGet(adminBase + "/listeners?format=json"); !strings.Contains(l, strconv.Itoa(config.PortEnvoyInbound)) {
+		t.Fatalf("admin /listeners does not show the :15006 capture listener:\n%s", l)
+	}
+	t.Logf("✓ mesh-mode :15006 inbound capture listener bound and accepting on real Envoy")
 }
 
 // fargateHTTPPort builds a fargate ContainerPort for an HTTP workload: container port is the
@@ -426,7 +498,7 @@ func TestIntegration_MixedTCPUDP_EnvoyEndToEnd(t *testing.T) {
 	hostIP := outboundIP(t)
 
 	upHTTP := startHTTPUpstream(t, "M")
-	upEcho := startUDPEcho(t)
+	upEcho := startUDPEcho(t, hostIP)
 	tcpCPort := freeTCPPort(t) // TCP container port
 	udpCPort := freeTCPPort(t) // UDP container port (just a distinct number)
 	bindTCP := freeTCPPort(t)
@@ -517,7 +589,7 @@ func TestIntegration_BootstrapFiles_EnvoyEndToEnd(t *testing.T) {
 
 			switch c.proto {
 			case "udp":
-				echoPort := startUDPEcho(t)
+				echoPort := startUDPEcho(t, hostIP)
 				listenPort := freeTCPPort(t)
 				v := &Virtual{
 					SchemaVersion: CurrentSchemaVersion,
@@ -921,12 +993,22 @@ func startHTTPUpstream(t *testing.T, reply string) int {
 	return lis.Addr().(*net.TCPAddr).Port
 }
 
-// startUDPEcho starts a UDP echo server bound to 0.0.0.0:0 that replies with the uppercased
+// startUDPEcho starts a UDP echo server bound to hostIP:0 that replies with the uppercased
 // payload (so a correct reply proves the datagram reached this upstream and returned, not a
 // self-bounce inside Envoy). Returns the port; stopped via t.Cleanup.
-func startUDPEcho(t *testing.T) int {
+//
+// It binds the specific hostIP rather than 0.0.0.0 on purpose: Envoy's udp_proxy uses a
+// *connected* upstream socket, so the kernel only delivers replies whose source is exactly the
+// endpoint Envoy forwarded to (hostIP:echoPort). A socket bound to 0.0.0.0 lets the kernel pick
+// the reply's source address by route, which on a multi-homed host (e.g. a CI runner where the
+// docker bridge gateway shares hostIP's subnet) is NOT hostIP — Envoy then drops the reply and
+// the round-trip silently fails. Binding hostIP pins the reply source. This mirrors production,
+// where the upstream is the developer's TUN IP and the gvisor LocalUDPForwarder constructs the
+// reply with source == tunIP (see pkg/core/gvisor_udp_forwarder.go); the kernel route-selection
+// pitfall only exists in this test's direct-socket shortcut around gvisor.
+func startUDPEcho(t *testing.T, hostIP string) int {
 	t.Helper()
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP(hostIP), Port: 0})
 	if err != nil {
 		t.Fatalf("listen echo udp: %v", err)
 	}

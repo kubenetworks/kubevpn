@@ -4,6 +4,12 @@ admin:
       address: "::"
       port_value: 9003
       ipv4_compat: true
+overload_manager:
+  resource_monitors:
+    - name: "envoy.resource_monitors.global_downstream_max_connections"
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.resource_monitors.downstream_connections.v3.DownstreamConnectionsConfig
+        max_active_downstream_connections: 50000
 dynamic_resources:
   ads_config:
     api_type: GRPC

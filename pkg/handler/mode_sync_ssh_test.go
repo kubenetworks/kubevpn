@@ -49,13 +49,7 @@ func (u *sshUt) kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh boo
 	if isServiceMesh {
 		args = append(args, "--headers", "env=test")
 	}
-	cmd := exec.Command("kubevpn", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	runSyncCommand(t, ctx, u.clientset, args)
 
 	list, err := util.GetRunningPodList(ctx, u.clientset, u.namespace, fields.OneTermEqualSelector("origin-workload", "authors").String())
 	if err != nil {
@@ -193,8 +187,11 @@ func (u *sshUt) checkSyncWithFullProxyStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(expect.List) == 0 || len(expect.List[0].SyncList) == 0 || len(expect.List[0].SyncList[0].RuleList) == 0 {
-		t.Fatal("expect List[0].SyncList[0].RuleList[0] not found", string(output))
+	// Guard the unmarshaled status (the right-hand side indexed below): when the
+	// sync-proxy fails to come up, `kubevpn status` returns an empty list, and
+	// indexing statuses.List[0] would panic instead of failing with the output.
+	if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
+		t.Fatal("statuses List[0].SyncList[0].RuleList[0] not found", string(output))
 	}
 
 	expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload
@@ -262,8 +259,11 @@ func (u *sshUt) checkSyncWithServiceMeshStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(expect.List) == 0 || len(expect.List[0].SyncList) == 0 || len(expect.List[0].SyncList[0].RuleList) == 0 {
-		t.Fatal("expect List[0].SyncList[0].RuleList[0] not found", string(output))
+	// Guard the unmarshaled status (the right-hand side indexed below): when the
+	// sync-proxy fails to come up, `kubevpn status` returns an empty list, and
+	// indexing statuses.List[0] would panic instead of failing with the output.
+	if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
+		t.Fatal("statuses List[0].SyncList[0].RuleList[0] not found", string(output))
 	}
 
 	expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	xdscore "github.com/cncf/xds/go/xds/core/v3"
+	xdsmatcher "github.com/cncf/xds/go/xds/type/matcher/v3"
 	v31 "github.com/envoyproxy/go-control-plane/envoy/config/accesslog/v3"
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -20,8 +22,8 @@ import (
 	dstv3inspector "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/listener/original_dst/v3"
 	httpconnectionmanager "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	tcpproxy "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
-	preservecasev3 "github.com/envoyproxy/go-control-plane/envoy/extensions/http/header_formatters/preserve_case/v3"
 	udpproxyv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/udp/udp_proxy/v3"
+	preservecasev3 "github.com/envoyproxy/go-control-plane/envoy/extensions/http/header_formatters/preserve_case/v3"
 	httpv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/upstreams/http/v3"
 	matcher "github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
@@ -34,6 +36,8 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 // CurrentSchemaVersion is the latest schema version for Virtual configs stored in ConfigMaps.
@@ -41,6 +45,11 @@ import (
 // A zero value means a legacy config created before versioning was introduced.
 // Version 2: OwnerID is required on all rules (no backward compat with empty OwnerID).
 const CurrentSchemaVersion = 2
+
+// originClusterName is the name of the shared ORIGINAL_DST cluster that forwards a
+// connection to its original destination (the local app). It backs both the mesh TCP
+// default route (no header match) and the inbound capture listener's passthrough.
+const originClusterName = "origin_cluster"
 
 const (
 	// envoyClusterConnectTimeout is the upstream connect timeout for generated Envoy clusters.
@@ -54,7 +63,7 @@ const (
 // Virtual represents an envoy xDS configuration for a single proxied workload.
 type Virtual struct {
 	// SchemaVersion tracks the config schema revision. Zero means legacy (pre-versioning).
-	SchemaVersion int    `yaml:"schemaVersion,omitempty" json:"schemaVersion,omitempty"`
+	SchemaVersion int `yaml:"schemaVersion,omitempty" json:"schemaVersion,omitempty"`
 	Namespace     string
 	UID           string `yaml:"Uid" json:"Uid"` // group.resource.name
 	FargateMode   bool   `yaml:"fargateMode,omitempty" json:"fargateMode,omitempty"`
@@ -175,6 +184,25 @@ func (r *Rule) ParsePortMap() []PortMapping {
 	return result
 }
 
+// tunIPs returns the rule's local TUN IPs: IPv4 only, or IPv4 + IPv6 when enabled.
+func (r *Rule) tunIPs(enableIPv6 bool) []string {
+	if enableIPv6 {
+		return []string{r.LocalTunIPv4, r.LocalTunIPv6}
+	}
+	return []string{r.LocalTunIPv4}
+}
+
+// envoyPort returns the envoy upstream port mapped for the given container port,
+// or 0 if the rule has no mapping for it.
+func (r *Rule) envoyPort(containerPort int32) int32 {
+	for _, pm := range r.ParsePortMap() {
+		if pm.ContainerPort == containerPort {
+			return pm.EnvoyPort
+		}
+	}
+	return 0
+}
+
 // parsePort converts a port string to int32, returning 0 on parse failure.
 func parsePort(s string) (int32, bool) {
 	n, err := strconv.Atoi(s)
@@ -184,105 +212,136 @@ func parsePort(s string) (int32, bool) {
 	return int32(n), true
 }
 
+// xdsResources accumulates the four Envoy xDS resource lists a Virtual produces. The
+// per-port builders write into it so To() does not have to spread/merge slices by hand.
+type xdsResources struct {
+	listeners []types.Resource
+	clusters  []types.Resource
+	routes    []types.Resource
+	endpoints []types.Resource
+}
+
+// addTunCluster appends the cluster + endpoint routing to ip:port and returns the shared
+// cluster name (also used as the route target). This is the one place the cluster/endpoint
+// pair is created, for both the TCP and UDP builders.
+func (r *xdsResources) addTunCluster(ip string, port int32) string {
+	name := fmt.Sprintf("%s_%v", ip, port)
+	r.clusters = append(r.clusters, toCluster(name))
+	r.endpoints = append(r.endpoints, toEndPoint(name, ip, port))
+	return name
+}
+
+// To converts the Virtual into Envoy xDS resources (listeners, clusters, routes,
+// endpoints). Each port is turned into per-protocol resources; in mesh mode a single
+// virtual-inbound capture listener is added as the bound entry point for the sidecar's
+// iptables DNAT.
 func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 	listeners []types.Resource,
 	clusters []types.Resource,
 	routes []types.Resource,
 	endpoints []types.Resource,
 ) {
+	var res xdsResources
 	fargate := a.IsFargateMode()
+	logger.Debugf("[xDS] convert %s/%s: fargate=%v ipv6=%v ports=%d rules=%d",
+		a.Namespace, a.UID, fargate, enableIPv6, len(a.Ports), len(a.Rules))
 	for _, port := range a.Ports {
+		// Mesh binds the container port; fargate binds the dedicated envoy listener port.
 		listenPort := port.ContainerPort
 		if fargate {
 			listenPort = port.EnvoyListenerPort
 		}
-
-		listenerName := fmt.Sprintf("%s_%s_%v_%s", a.Namespace, a.UID, listenPort, port.Protocol)
-
-		// UDP ports use udp_proxy filter (no HTTP/TCP filter chain, no header routing).
+		logger.Debugf("[xDS] %s/%s port %d/%s -> listen on %d", a.Namespace, a.UID, port.ContainerPort, port.Protocol, listenPort)
 		if port.Protocol == corev1.ProtocolUDP {
-			for _, rule := range a.Rules {
-				var envoyRulePort int32
-				for _, pm := range rule.ParsePortMap() {
-					if pm.ContainerPort == port.ContainerPort {
-						envoyRulePort = pm.EnvoyPort
-						break
-					}
-				}
-				ips := []string{rule.LocalTunIPv4}
-				if enableIPv6 {
-					ips = append(ips, rule.LocalTunIPv6)
-				}
-				for _, ip := range ips {
-					clusterName := fmt.Sprintf("%s_%v", ip, envoyRulePort)
-					clusters = append(clusters, toCluster(clusterName))
-					endpoints = append(endpoints, toEndPoint(clusterName, ip, envoyRulePort))
-					listeners = append(listeners, toUDPListener(listenerName, listenPort, clusterName))
-				}
-			}
-			continue
-		}
-
-		// TCP ports use the existing HTTP connection manager with header-based routing.
-		routeName := listenerName
-		listeners = append(listeners, toListener(listenerName, routeName, listenPort, port.Protocol, fargate))
-
-		var rr []*route.Route
-		for _, rule := range a.Rules {
-			var ips []string
-			if enableIPv6 {
-				ips = []string{rule.LocalTunIPv4, rule.LocalTunIPv6}
-			} else {
-				ips = []string{rule.LocalTunIPv4}
-			}
-			var envoyRulePort int32
-			for _, pm := range rule.ParsePortMap() {
-				if pm.ContainerPort == port.ContainerPort {
-					envoyRulePort = pm.EnvoyPort
-					break
-				}
-			}
-			for _, ip := range ips {
-				clusterName := fmt.Sprintf("%s_%v", ip, envoyRulePort)
-				clusters = append(clusters, toCluster(clusterName))
-				endpoints = append(endpoints, toEndPoint(clusterName, ip, envoyRulePort))
-				rr = append(rr, toRoute(clusterName, rule.Headers))
-			}
-		}
-		// fargate needs explicit default route to container port because use_original_dst does not work
-		if fargate {
-			// all ips should is IPv4 127.0.0.1 and ::1
-			var ips = sets.New[string]()
-			for _, rule := range a.Rules {
-				if enableIPv6 {
-					ips.Insert(rule.LocalTunIPv4, rule.LocalTunIPv6)
-				} else {
-					ips.Insert(rule.LocalTunIPv4)
-				}
-			}
-			for _, ip := range ips.UnsortedList() {
-				defaultClusterName := fmt.Sprintf("%s_%v", ip, port.ContainerPort)
-				clusters = append(clusters, toCluster(defaultClusterName))
-				endpoints = append(endpoints, toEndPoint(defaultClusterName, ip, port.ContainerPort))
-				rr = append(rr, defaultRouteToCluster(defaultClusterName))
-			}
+			a.addUDPPort(&res, port, listenPort, enableIPv6)
 		} else {
-			rr = append(rr, defaultRouteToCluster("origin_cluster"))
-			clusters = append(clusters, originCluster())
+			a.addTCPPort(&res, port, listenPort, fargate, enableIPv6)
 		}
-		routes = append(routes, &route.RouteConfiguration{
-			Name: routeName,
-			VirtualHosts: []*route.VirtualHost{
-				{
-					Name:    "local_service",
-					Domains: []string{"*"},
-					Routes:  rr,
-				},
-			},
-			MaxDirectResponseBodySizeBytes: nil,
-		})
 	}
-	return
+
+	// Mesh mode adds two shared, per-Virtual resources:
+	//   - the :15006 virtual-inbound capture listener: the bound entry point the sidecar
+	//     iptables DNATs to, since the per-port TCP listeners are BindToPort=false.
+	//   - origin_cluster: the ORIGINAL_DST cluster that both the capture passthrough and
+	//     every TCP default route (no header match) forward to. It is referenced by name
+	//     in many places but created exactly once, here.
+	// Fargate binds each listener directly and routes to explicit per-IP clusters, so it
+	// needs neither.
+	if !fargate {
+		res.listeners = append(res.listeners, toInboundCaptureListener(fmt.Sprintf("%s_%s_inbound", a.Namespace, a.UID)))
+		res.clusters = append(res.clusters, originCluster())
+		logger.Debugf("[xDS] %s/%s added mesh inbound capture listener :%d + origin_cluster", a.Namespace, a.UID, config.PortEnvoyInbound)
+	}
+	logger.Debugf("[xDS] %s/%s generated %d listeners, %d clusters, %d routes, %d endpoints",
+		a.Namespace, a.UID, len(res.listeners), len(res.clusters), len(res.routes), len(res.endpoints))
+	return res.listeners, res.clusters, res.routes, res.endpoints
+}
+
+// addUDPPort builds the udp_proxy listener plus its cluster/endpoint for a UDP port, one set
+// per rule per IP family. UDP has no headers, so every datagram is forwarded to the rule's
+// TUN IP. The listener name and bind address are made family-distinct so the v4 and v6
+// listeners do not collapse to one in the xDS snapshot (which would leave the survivor bound
+// to the wrong family); unpopulated IP families are skipped to avoid an endpoint with an
+// invalid empty address.
+func (a *Virtual) addUDPPort(res *xdsResources, port ContainerPort, listenPort int32, enableIPv6 bool) {
+	listenerName := fmt.Sprintf("%s_%s_%v_%s", a.Namespace, a.UID, listenPort, port.Protocol)
+	for _, rule := range a.Rules {
+		envoyRulePort := rule.envoyPort(port.ContainerPort)
+		for _, ip := range rule.tunIPs(enableIPv6) {
+			if ip == "" {
+				continue
+			}
+			bindAddr, name := "0.0.0.0", listenerName
+			if strings.Contains(ip, ":") {
+				bindAddr, name = "::", listenerName+"_v6"
+			}
+			clusterName := res.addTunCluster(ip, envoyRulePort)
+			res.listeners = append(res.listeners, toUDPListener(name, bindAddr, listenPort, clusterName))
+		}
+	}
+}
+
+// addTCPPort builds the TCP listener, route config, and per-rule clusters/endpoints for a
+// TCP port, with header-based routing to each rule's TUN IP. The default route falls back to
+// origin_cluster (mesh, via use_original_dst) or to an explicit per-IP container-port cluster
+// (fargate, where use_original_dst does not work).
+func (a *Virtual) addTCPPort(res *xdsResources, port ContainerPort, listenPort int32, fargate, enableIPv6 bool) {
+	listenerName := fmt.Sprintf("%s_%s_%v_%s", a.Namespace, a.UID, listenPort, port.Protocol)
+	// The listener resolves its routes from an RDS config of the same name.
+	routeName := listenerName
+	res.listeners = append(res.listeners, toListener(listenerName, routeName, listenPort, port.Protocol, fargate))
+
+	var rr []*route.Route
+	for _, rule := range a.Rules {
+		envoyRulePort := rule.envoyPort(port.ContainerPort)
+		for _, ip := range rule.tunIPs(enableIPv6) {
+			rr = append(rr, toRoute(res.addTunCluster(ip, envoyRulePort), rule.Headers))
+		}
+	}
+
+	if fargate {
+		// Fargate needs an explicit default route to the container port (deduped across
+		// rules) because use_original_dst does not work there.
+		ips := sets.New[string]()
+		for _, rule := range a.Rules {
+			ips.Insert(rule.tunIPs(enableIPv6)...)
+		}
+		for _, ip := range ips.UnsortedList() {
+			rr = append(rr, defaultRouteToCluster(res.addTunCluster(ip, port.ContainerPort)))
+		}
+	} else {
+		// Mesh: no header match falls back to origin_cluster (created once in To()).
+		rr = append(rr, defaultRouteToCluster(originClusterName))
+	}
+
+	res.routes = append(res.routes, &route.RouteConfiguration{
+		Name: routeName,
+		VirtualHosts: []*route.VirtualHost{{
+			Name:    "local_service",
+			Domains: []string{"*"},
+			Routes:  rr,
+		}},
+	})
 }
 
 func toEndPoint(clusterName string, localTunIP string, port int32) *endpoint.ClusterLoadAssignment {
@@ -347,7 +406,7 @@ func toCluster(clusterName string) *cluster.Cluster {
 
 func originCluster() *cluster.Cluster {
 	return &cluster.Cluster{
-		Name:           "origin_cluster",
+		Name:           originClusterName,
 		ConnectTimeout: durationpb.New(envoyClusterConnectTimeout),
 		LbPolicy:       cluster.Cluster_CLUSTER_PROVIDED,
 		ClusterDiscoveryType: &cluster.Cluster_Type{
@@ -503,7 +562,7 @@ func buildFilterChains(routeName string) []*listener.FilterChain {
 	tcpConfig := &tcpproxy.TcpProxy{
 		StatPrefix: "tcp",
 		ClusterSpecifier: &tcpproxy.TcpProxy_Cluster{
-			Cluster: "origin_cluster",
+			Cluster: originClusterName,
 		},
 	}
 
@@ -579,9 +638,60 @@ func toListener(listenerName string, routeName string, port int32, p corev1.Prot
 	}
 }
 
+// toInboundCaptureListener creates the mesh-mode virtual-inbound listener bound on
+// config.PortEnvoyInbound (:15006). The sidecar iptables DNATs all inbound TCP to this
+// port; this listener restores the original destination via the original_dst listener
+// filter + use_original_dst and redirects each connection to the per-port virtual
+// listener (BindToPort=false) that matches the original port. Connections whose original
+// port has no per-port listener fall through to this listener's passthrough filter chain,
+// which TCP-proxies to origin_cluster (ORIGINAL_DST) so the app still receives them.
+func toInboundCaptureListener(name string) *listener.Listener {
+	passthrough := &tcpproxy.TcpProxy{
+		StatPrefix:       "inbound_passthrough",
+		ClusterSpecifier: &tcpproxy.TcpProxy_Cluster{Cluster: originClusterName},
+	}
+	return &listener.Listener{
+		Name:             name,
+		TrafficDirection: core.TrafficDirection_INBOUND,
+		BindToPort:       &wrapperspb.BoolValue{Value: true},
+		UseOriginalDst:   &wrapperspb.BoolValue{Value: true},
+		Address: &core.Address{
+			Address: &core.Address_SocketAddress{
+				SocketAddress: &core.SocketAddress{
+					Protocol: core.SocketAddress_TCP,
+					Address:  "0.0.0.0",
+					PortSpecifier: &core.SocketAddress_PortValue{
+						PortValue: uint32(config.PortEnvoyInbound),
+					},
+				},
+			},
+		},
+		ListenerFilters: []*listener.ListenerFilter{
+			{
+				Name: wellknown.OriginalDestination,
+				ConfigType: &listener.ListenerFilter_TypedConfig{
+					TypedConfig: mustMarshalAny(&dstv3inspector.OriginalDst{}),
+				},
+			},
+		},
+		FilterChains: []*listener.FilterChain{
+			{
+				Filters: []*listener.Filter{
+					{
+						Name: wellknown.TCPProxy,
+						ConfigType: &listener.Filter_TypedConfig{
+							TypedConfig: mustMarshalAny(passthrough),
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 // toUDPListener creates a UDP listener with the udp_proxy filter routing to the given cluster.
 // UDP does not support use_original_dst or header-based routing — all traffic goes to the cluster.
-func toUDPListener(name string, port int32, clusterName string) *listener.Listener {
+func toUDPListener(name string, bindAddr string, port int32, clusterName string) *listener.Listener {
 	return &listener.Listener{
 		Name:             name,
 		TrafficDirection: core.TrafficDirection_INBOUND,
@@ -589,7 +699,7 @@ func toUDPListener(name string, port int32, clusterName string) *listener.Listen
 			Address: &core.Address_SocketAddress{
 				SocketAddress: &core.SocketAddress{
 					Protocol: core.SocketAddress_UDP,
-					Address:  "0.0.0.0",
+					Address:  bindAddr,
 					PortSpecifier: &core.SocketAddress_PortValue{
 						PortValue: uint32(port),
 					},
@@ -602,8 +712,20 @@ func toUDPListener(name string, port int32, clusterName string) *listener.Listen
 				ConfigType: &listener.ListenerFilter_TypedConfig{
 					TypedConfig: mustMarshalAny(&udpproxyv3.UdpProxyConfig{
 						StatPrefix: "udp_proxy",
-						RouteSpecifier: &udpproxyv3.UdpProxyConfig_Cluster{
-							Cluster: clusterName,
+						// The single-cluster `cluster` field is deprecated; route via the
+						// matcher API instead. With no match criteria, every datagram falls
+						// through to OnNoMatch -> the udp_proxy Route action for the cluster.
+						RouteSpecifier: &udpproxyv3.UdpProxyConfig_Matcher{
+							Matcher: &xdsmatcher.Matcher{
+								OnNoMatch: &xdsmatcher.Matcher_OnMatch{
+									OnMatch: &xdsmatcher.Matcher_OnMatch_Action{
+										Action: &xdscore.TypedExtensionConfig{
+											Name:        "route",
+											TypedConfig: mustMarshalAny(&udpproxyv3.Route{Cluster: clusterName}),
+										},
+									},
+								},
+							},
 						},
 						IdleTimeout: durationpb.New(envoyUDPProxyIdleTimeout),
 					}),

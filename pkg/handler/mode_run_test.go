@@ -13,13 +13,67 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
+
+// runStartupTimeout bounds how long a `kubevpn run` may take to log its startup marker.
+// Without it, a run whose process stays alive but never starts (e.g. a crash-looping
+// injected sidecar) hangs the test until the global go-test timeout.
+const runStartupTimeout = 6 * time.Minute
+
+// waitRunStartup runs cmd (a `kubevpn run ...`) and blocks until it logs marker, fails
+// fast if it exits before startup, or — on runStartupTimeout — kills the process (via
+// cancel) and dumps the KubeVPN sidecar logs before failing. Shared by the SSH and
+// non-SSH run tests; the caller keeps cmd to signal/stop it once startup succeeds.
+func waitRunStartup(t *testing.T, cmd *exec.Cmd, cancel context.CancelFunc, clientset kubernetes.Interface, marker string) {
+	t.Helper()
+	done := make(chan any)
+	startupErr := make(chan error, 1)
+	var once sync.Once
+	go func() {
+		stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
+			if strings.Contains(log, marker) {
+				once.Do(func() { close(done) })
+				return true
+			}
+			return false
+		})
+		if err != nil {
+			select {
+			case <-done:
+				t.Log(err, stdout, stderr)
+			default:
+				// Exited before startup completed. Signal the waiter instead of calling
+				// t.Fatal from this non-test goroutine (which would not stop the test and
+				// would leave the waiter blocked forever).
+				startupErr <- fmt.Errorf("kubevpn run exited before startup: %w, stdout: %s, stderr: %s", err, stdout, stderr)
+			}
+		}
+	}()
+	select {
+	case <-done:
+	case err := <-startupErr:
+		t.Fatal(err)
+	case <-time.After(runStartupTimeout):
+		cancel() // kill the run process so the reader goroutine returns its captured output
+		dumpKubeVPNSidecarLogs(t, clientset)
+		select {
+		case err := <-startupErr:
+			t.Fatalf("kubevpn run did not log %q within %s — an injected sidecar is likely crash-looping "+
+				"(sidecar logs dumped above): %v", marker, runStartupTimeout, err)
+		case <-time.After(15 * time.Second):
+			t.Fatalf("kubevpn run did not log %q within %s and did not exit after cancel "+
+				"(sidecar logs dumped above)", marker, runStartupTimeout)
+		}
+	}
+}
 
 func (u *ut) deleteDeployForSaveResource(t *testing.T) {
 	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
@@ -61,37 +115,7 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 		"--rm",
 		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
-	done := make(chan any)
-	startupErr := make(chan error, 1)
-	var once = &sync.Once{}
-	go func() {
-		stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
-			contains := strings.Contains(log, "Start listening http port 9080 ...")
-			if contains {
-				once.Do(func() {
-					close(done)
-				})
-			}
-			return contains
-		})
-		if err != nil {
-			select {
-			case <-done:
-				t.Log(err, stdout, stderr)
-			default:
-				// Exited before startup completed. Signal the main goroutine to
-				// unblock instead of calling t.Fatal here (t.Fatal from a
-				// non-test goroutine does not stop the test and would leave the
-				// main goroutine blocked on <-done forever).
-				startupErr <- fmt.Errorf("kubevpn run exited before startup: %w, stdout: %s, stderr: %s", err, stdout, stderr)
-			}
-		}
-	}()
-	select {
-	case <-done:
-	case err := <-startupErr:
-		t.Fatal(err)
-	}
+	waitRunStartup(t, cmd, cancelFunc, u.clientset, "Start listening http port 9080 ...")
 
 	app := "authors"
 	ip, err := u.getPodIP(app)
@@ -139,37 +163,7 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 		"--rm",
 		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
-	done := make(chan any)
-	startupErr := make(chan error, 1)
-	var once = &sync.Once{}
-	go func() {
-		stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
-			contains := strings.Contains(log, "Start listening http port 9080 ...")
-			if contains {
-				once.Do(func() {
-					close(done)
-				})
-			}
-			return contains
-		})
-		if err != nil {
-			select {
-			case <-done:
-				t.Log(err, stdout, stderr)
-			default:
-				// Exited before startup completed. Signal the main goroutine to
-				// unblock instead of calling t.Fatal here (t.Fatal from a
-				// non-test goroutine does not stop the test and would leave the
-				// main goroutine blocked on <-done forever).
-				startupErr <- fmt.Errorf("kubevpn run exited before startup: %w, stdout: %s, stderr: %s", err, stdout, stderr)
-			}
-		}
-	}()
-	select {
-	case <-done:
-	case err := <-startupErr:
-		t.Fatal(err)
-	}
+	waitRunStartup(t, cmd, cancelFunc, u.clientset, "Start listening http port 9080 ...")
 
 	app := "authors"
 	ip, err := u.getServiceIP(app)
