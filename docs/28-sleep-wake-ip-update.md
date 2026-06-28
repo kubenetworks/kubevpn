@@ -776,10 +776,17 @@ confirms, there is **no reservation, no defer-release, no grace-held IP, no
 rollback, and scrub needs no special-casing** (a proposal holds no bitmap bit).
 
 Client-side `ChangeTunIP` is implemented for Linux/Darwin (netlink/ioctl) and
-Windows (winipcfg `DeleteIPAddress`/`AddIPAddress`). The client also self-heals on
-reconnect: `doWatchTunIP` first calls `GetTunIP(ExcludeIPs=…)` (omitting its own
-current IP) so a long disconnect (lease reaped → no push) still recovers a valid,
-non-conflicting IP (server prefers `lastIPs`).
+Windows (winipcfg `DeleteIPAddress`/`AddIPAddress`). It **replaces** the address:
+the old IP is removed and the new one added, both on the device's **host mask**
+(`/32` for IPv4, `/128` for IPv6 — matching how the TUN device is created), and only
+the family that actually changed is touched. This matters on macOS, where the add
+ioctl (`SIOCAIFADDR`) is add-only — the old address must be explicitly deleted
+(`SIOCDIFADDR`), otherwise the device accumulates both IPs; passing the pool mask
+(`/16`) instead of `/32` would also leave the old address behind (the delete would
+not match it). The client also self-heals on reconnect: `doWatchTunIP` first calls
+`GetTunIP(ExcludeIPs=…)` (omitting its own current IP) so a long disconnect (lease
+reaped → no push) still recovers a valid, non-conflicting IP (server prefers
+`lastIPs`).
 
 Note: the **auto recovery path** (`ReconcileDHCP`, sleep/wake) still commits a
 replacement for an *already-lost* IP via `NotifyIPChange` (committed push,
@@ -816,9 +823,17 @@ so a client-originated CLI is out of scope. Assumes single-writer traffic-manage
 | `pkg/inject/container.go` | modify | delete `AddVPNContainer` (unify on `AddVPNAndEnvoyContainer`); drop the `LocalTunIPv4/v6` env vars |
 | `pkg/inject/envoy.yaml` | modify | add base UDP listener config to the bootstrap template |
 | `pkg/core/protocol_registry.go` | simplify | delete `watchTunIPChanges` + `pollTunIP` + `applyTunIPChange` (envoy handles routing) |
+| **Manual TUN_ALLOCS IP override (dry-run, §5b)** | | |
+| `pkg/daemon/rpc/daemon.proto` | modify | add `TunIPResponse.DryRun` + `TunIPRequest.ConfirmIP` (regen `*.pb.go`) |
+| `pkg/controlplane/tun_config.go` | modify | `ReconcileAllocsFromConfigMap` (exported) + per-family `proposeManualChange`/`proposeIPChange`; `GetTunIP` confirm/decline + `commitFamilyLocked`; `pendingProposal`; `expirePendingProposals`; `WatcherCount` |
+| `pkg/controlplane/controlplane.go` | modify | wire `ReconcileAllocsFromConfigMap` as an informer onDHCPChange callback |
+| `pkg/dhcp/dhcp.go` | modify | add `RentSpecificIP` + `InRange` (per-family specific allocation) |
+| `pkg/handler/network.go` | modify | `doWatchTunIP` per-family `handleProposal` (validate→confirm/decline) + reconnect self-heal; `ChangeTunIP` replaces address on host masks (`/32`,`/128`), only the changed family |
+| `pkg/tun/ip_windows.go` | modify | implement `changeIP` (winipcfg Delete/AddIPAddress) |
+| `pkg/tun/ip_darwin.go`, `pkg/tun/tun_darwin.go` | modify | `changeIP` deletes the old address first; add `removeInterfaceAddress`/`delInet4Address`/`delInet6Address` (`SIOCDIFADDR`) so macOS doesn't keep both IPs |
 
-**Zero new proto/RPC** — fully reuses the existing ENVOY_CONFIG → Watcher → Processor → xDS push path and
-the WatchTunIP push.
+The §5b manual-IP override adds **two optional proto fields** (`DryRun`, `ConfirmIP`); everything else still
+reuses the existing ENVOY_CONFIG → Watcher → Processor → xDS push path and the WatchTunIP push.
 
 ---
 

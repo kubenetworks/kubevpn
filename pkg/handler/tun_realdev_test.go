@@ -212,6 +212,19 @@ func localHasIP(ip net.IP) bool {
 	return false
 }
 
+// waitDeviceLacksIP blocks until the named device no longer has ip (the old address
+// must be removed when changing IP — regression guard for the "two IPs" bug).
+func waitDeviceLacksIP(t *testing.T, name string, ip net.IP, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for deviceHasIP(name, ip) {
+		if time.Now().After(deadline) {
+			t.Fatalf("device %s still has old IP %s after %s (should have been removed)", name, ip, timeout)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // waitIPGone blocks until ip is no longer assigned to any local interface (the OS
 // removes a TUN device's addresses asynchronously after Close).
 func waitIPGone(t *testing.T, ip net.IP, timeout time.Duration) {
@@ -301,6 +314,7 @@ func TestRealTUNManualIP_SingleChange(t *testing.T) {
 	if !nm.localTunIPv4.IP.Equal(ip2) {
 		t.Fatalf("nm.localTunIPv4=%s, want %s", nm.localTunIPv4.IP, ip2)
 	}
+	waitDeviceLacksIP(t, nm.tunName, ip1, 5*time.Second) // old IP must be removed (no dup)
 }
 
 // 2. Edit to an IP that conflicts with another local TUN device → client declines,
@@ -568,6 +582,7 @@ func TestRealTUNManualIP_V6Change(t *testing.T) {
 	if !nm.localTunIPv6.IP.Equal(v6new) {
 		t.Fatalf("nm.localTunIPv6=%s want %s", nm.localTunIPv6.IP, v6new)
 	}
+	waitDeviceLacksIP(t, nm.tunName, v6old, 5*time.Second) // old v6 must be removed
 }
 
 // 9. Edit both ipv4 and ipv6 → both change on the device.
@@ -580,6 +595,8 @@ func TestRealTUNManualIP_BothChange(t *testing.T) {
 
 	nm, closer := startOwner(t, ctx, env, "o1", used)
 	defer closer()
+	v4old := nm.localTunIPv4.IP
+	v6old := nm.localTunIPv6.IP
 
 	v4new := pickFreeIP(t, used)
 	v6new := pickFreeIP6(t, used)
@@ -588,4 +605,6 @@ func TestRealTUNManualIP_BothChange(t *testing.T) {
 
 	waitDeviceHasIP(t, nm.tunName, v4new, 10*time.Second)
 	waitDeviceHasIP(t, nm.tunName, v6new, 10*time.Second)
+	waitDeviceLacksIP(t, nm.tunName, v4old, 5*time.Second) // old v4 must be removed (the macOS bug)
+	waitDeviceLacksIP(t, nm.tunName, v6old, 5*time.Second) // old v6 must be removed
 }

@@ -289,16 +289,30 @@ func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net
 	}
 
 	oldV4, oldV6 := nm.localTunIPv4, nm.localTunIPv6
-	oldAddr := ""
-	if oldV4 != nil {
-		oldAddr = oldV4.String()
-	}
-	if err := tun.ChangeIP(nm.tunName, oldAddr, newIPv4.String()); err != nil {
-		return fmt.Errorf("change IPv4 on %s: %w", nm.tunName, err)
+	// Always operate on host masks (/32, /128) — matching how startTUN created the
+	// device. nm.localTunIPv4 carries the pool mask (/16); passing that as oldAddr
+	// makes the delete miss the /32 actually on the device, and adds the new address
+	// with a wrong /16 mask (leaving the old IP behind). Only touch a family that
+	// actually changed.
+	host32 := func(ip net.IP) string { return (&net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)}).String() }
+	host128 := func(ip net.IP) string { return (&net.IPNet{IP: ip, Mask: net.CIDRMask(128, 128)}).String() }
+
+	if oldV4 == nil || !oldV4.IP.Equal(newIPv4.IP) {
+		oldAddr := ""
+		if oldV4 != nil {
+			oldAddr = host32(oldV4.IP)
+		}
+		if err := tun.ChangeIP(nm.tunName, oldAddr, host32(newIPv4.IP)); err != nil {
+			return fmt.Errorf("change IPv4 on %s: %w", nm.tunName, err)
+		}
 	}
 
-	if newIPv6 != nil && oldV6 != nil {
-		if err := tun.ChangeIP(nm.tunName, oldV6.String(), newIPv6.String()); err != nil {
+	if newIPv6 != nil && (oldV6 == nil || !oldV6.IP.Equal(newIPv6.IP)) {
+		oldAddr6 := ""
+		if oldV6 != nil {
+			oldAddr6 = host128(oldV6.IP)
+		}
+		if err := tun.ChangeIP(nm.tunName, oldAddr6, host128(newIPv6.IP)); err != nil {
 			plog.G(ctx).Warnf("[NetworkManager] Change IPv6 failed: %v", err)
 		}
 	}
