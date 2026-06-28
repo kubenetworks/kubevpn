@@ -62,6 +62,7 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
 	done := make(chan any)
+	startupErr := make(chan error, 1)
 	var once = &sync.Once{}
 	go func() {
 		stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
@@ -78,11 +79,19 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 			case <-done:
 				t.Log(err, stdout, stderr)
 			default:
-				t.Fatal(err, stdout, stderr)
+				// Exited before startup completed. Signal the main goroutine to
+				// unblock instead of calling t.Fatal here (t.Fatal from a
+				// non-test goroutine does not stop the test and would leave the
+				// main goroutine blocked on <-done forever).
+				startupErr <- fmt.Errorf("kubevpn run exited before startup: %w, stdout: %s, stderr: %s", err, stdout, stderr)
 			}
 		}
 	}()
-	<-done
+	select {
+	case <-done:
+	case err := <-startupErr:
+		t.Fatal(err)
+	}
 
 	app := "authors"
 	ip, err := u.getPodIP(app)
@@ -131,6 +140,7 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
 	done := make(chan any)
+	startupErr := make(chan error, 1)
 	var once = &sync.Once{}
 	go func() {
 		stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
@@ -147,11 +157,19 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 			case <-done:
 				t.Log(err, stdout, stderr)
 			default:
-				t.Fatal(err, stdout, stderr)
+				// Exited before startup completed. Signal the main goroutine to
+				// unblock instead of calling t.Fatal here (t.Fatal from a
+				// non-test goroutine does not stop the test and would leave the
+				// main goroutine blocked on <-done forever).
+				startupErr <- fmt.Errorf("kubevpn run exited before startup: %w, stdout: %s, stderr: %s", err, stdout, stderr)
 			}
 		}
 	}()
-	<-done
+	select {
+	case <-done:
+	case err := <-startupErr:
+		t.Fatal(err)
+	}
 
 	app := "authors"
 	ip, err := u.getServiceIP(app)
