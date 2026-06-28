@@ -305,13 +305,13 @@ func TestGenDeploySpec_Probes(t *testing.T) {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
 	}
 
-	// VPN container: TCP probes on port 10801
+	// VPN container: TCP probes on port 10802 (PortUDP)
 	vpn := containers[0]
 	if vpn.LivenessProbe == nil || vpn.LivenessProbe.TCPSocket == nil {
 		t.Fatal("VPN container: expected liveness probe with TCPSocket")
 	}
-	if vpn.LivenessProbe.TCPSocket.Port.IntValue() != 10801 {
-		t.Fatalf("VPN container: expected liveness probe port 10801, got %d", vpn.LivenessProbe.TCPSocket.Port.IntValue())
+	if vpn.LivenessProbe.TCPSocket.Port.IntValue() != 10802 {
+		t.Fatalf("VPN container: expected liveness probe port 10802, got %d", vpn.LivenessProbe.TCPSocket.Port.IntValue())
 	}
 	if vpn.LivenessProbe.InitialDelaySeconds != 5 || vpn.LivenessProbe.PeriodSeconds != 15 || vpn.LivenessProbe.FailureThreshold != 3 {
 		t.Fatalf("VPN container: unexpected liveness probe timing: initial=%d period=%d failure=%d",
@@ -321,8 +321,8 @@ func TestGenDeploySpec_Probes(t *testing.T) {
 	if vpn.ReadinessProbe == nil || vpn.ReadinessProbe.TCPSocket == nil {
 		t.Fatal("VPN container: expected readiness probe with TCPSocket")
 	}
-	if vpn.ReadinessProbe.TCPSocket.Port.IntValue() != 10801 {
-		t.Fatalf("VPN container: expected readiness probe port 10801, got %d", vpn.ReadinessProbe.TCPSocket.Port.IntValue())
+	if vpn.ReadinessProbe.TCPSocket.Port.IntValue() != 10802 {
+		t.Fatalf("VPN container: expected readiness probe port 10802, got %d", vpn.ReadinessProbe.TCPSocket.Port.IntValue())
 	}
 	if vpn.ReadinessProbe.InitialDelaySeconds != 3 || vpn.ReadinessProbe.PeriodSeconds != 10 || vpn.ReadinessProbe.FailureThreshold != 3 {
 		t.Fatalf("VPN container: unexpected readiness probe timing: initial=%d period=%d failure=%d",
@@ -332,8 +332,8 @@ func TestGenDeploySpec_Probes(t *testing.T) {
 	if vpn.StartupProbe == nil || vpn.StartupProbe.TCPSocket == nil {
 		t.Fatal("VPN container: expected startup probe with TCPSocket")
 	}
-	if vpn.StartupProbe.TCPSocket.Port.IntValue() != 10801 {
-		t.Fatalf("VPN container: expected startup probe port 10801, got %d", vpn.StartupProbe.TCPSocket.Port.IntValue())
+	if vpn.StartupProbe.TCPSocket.Port.IntValue() != 10802 {
+		t.Fatalf("VPN container: expected startup probe port 10802, got %d", vpn.StartupProbe.TCPSocket.Port.IntValue())
 	}
 	if vpn.StartupProbe.InitialDelaySeconds != 1 || vpn.StartupProbe.PeriodSeconds != 2 || vpn.StartupProbe.FailureThreshold != 15 {
 		t.Fatalf("VPN container: unexpected startup probe timing: initial=%d period=%d failure=%d",

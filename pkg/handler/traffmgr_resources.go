@@ -237,7 +237,7 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 		},
 	}
 	containers := deploy.Spec.Template.Spec.Containers
-	containers[0].LivenessProbe, containers[0].ReadinessProbe, containers[0].StartupProbe = tcpProbes(config.PortTCP)
+	containers[0].LivenessProbe, containers[0].ReadinessProbe, containers[0].StartupProbe = tcpProbes(config.PortUDP)
 	containers[1].LivenessProbe, containers[1].ReadinessProbe, containers[1].StartupProbe = tcpProbes(config.PortControlPlane)
 
 	if imagePullSecretName != "" {
