@@ -146,6 +146,17 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: ptr.To[int32](1),
+			// Recreate (not the default RollingUpdate) guarantees at most one
+			// traffic-manager pod at a time. The control-plane TunConfigServer
+			// keeps its IP-lease state in an in-memory map serialized by a single
+			// mutex; two concurrent pods during a rollout would diverge and the
+			// blind ConfigMap writes would clobber each other, losing leases of
+			// connected clients. Clients keep their IPs across the brief restart
+			// (state is persisted in the ConfigMap), and the data plane (client
+			// TUN/routes, workload envoy sidecars) is unaffected.
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RecreateDeploymentStrategyType,
+			},
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{"app": config.ConfigMapPodTrafficManager},
 			},

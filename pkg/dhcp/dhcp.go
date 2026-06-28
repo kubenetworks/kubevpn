@@ -184,6 +184,13 @@ func (m *Manager) ReleaseIP(ctx context.Context, v4, v6 net.IP) error {
 	})
 }
 
+// ReleaseIPs returns the given IPs (any mix of IPv4/IPv6) back to the pool,
+// auto-detecting the address family of each. Used to reclaim orphaned bitmap
+// bits that have no owning lease.
+func (m *Manager) ReleaseIPs(ctx context.Context, ips ...net.IP) error {
+	return m.releaseIP(ctx, ips...)
+}
+
 func (m *Manager) releaseIP(ctx context.Context, ips ...net.IP) error {
 	if len(ips) == 0 {
 		return nil

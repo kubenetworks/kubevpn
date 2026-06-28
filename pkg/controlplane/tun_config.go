@@ -64,6 +64,8 @@ func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, nam
 		watchers:  make(map[string][]chan *rpc.TunIPResponse),
 	}
 	s.loadAllocs(ctx)
+	// Reclaim any bitmap bits left orphaned by a prior crash before serving.
+	s.scrubOrphanBits(ctx)
 	return s, nil
 }
 
@@ -166,16 +168,24 @@ func (s *TunConfigServer) saveAllocs(ctx context.Context) error {
 		return err
 	}
 
-	patch, err := json.Marshal([]map[string]string{{
-		"op":    "add",
-		"path":  "/data/" + config.KeyTunAllocs,
-		"value": string(data),
-	}})
-	if err != nil {
-		return err
-	}
-	_, err = s.clientset.CoreV1().ConfigMaps(s.namespace).Patch(ctx, config.ConfigMapPodTrafficManager, k8stypes.JSONPatchType, patch, metav1.PatchOptions{})
-	return err
+	// Authoritative, optimistic-locked write of this server's in-memory lease
+	// map. The in-memory map is the source of truth (it already reflects reaps
+	// and renews), so TUN_ALLOCS is overwritten rather than merged — merging
+	// would resurrect intentionally-reclaimed leases. RetryOnConflict re-reads
+	// on a conflicting concurrent write (e.g. a bitmap or envoy patch bumping
+	// the ResourceVersion), so other ConfigMap keys are never clobbered.
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		cm, getErr := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if getErr != nil {
+			return getErr
+		}
+		if cm.Data == nil {
+			cm.Data = make(map[string]string)
+		}
+		cm.Data[config.KeyTunAllocs] = string(data)
+		_, updErr := s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
+		return updErr
+	})
 }
 
 // GetTunIP allocates or retrieves the TUN IP for the given owner.
@@ -228,7 +238,9 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 		s.allocs[req.OwnerID] = newAlloc
 		plog.G(ctx).Infof("[TunConfig] Re-allocated %s/%s for owner %s", v4, v6, req.OwnerID)
 		if err := s.saveAllocs(ctx); err != nil {
-			plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs: %v", err)
+			plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs, rolling back: %v", err)
+			s.rollbackAlloc(ctx, req.OwnerID, v4, v6)
+			return nil, err
 		}
 
 		resp := &rpc.TunIPResponse{IPv4: v4.String(), IPv6: v6.String(), Version: newAlloc.Version}
@@ -253,7 +265,9 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 
 	plog.G(ctx).Infof("[TunConfig] Allocated %s/%s for owner %s", v4, v6, req.OwnerID)
 	if err := s.saveAllocs(ctx); err != nil {
-		plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs: %v", err)
+		plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs, rolling back: %v", err)
+		s.rollbackAlloc(ctx, req.OwnerID, v4, v6)
+		return nil, err
 	}
 
 	resp := &rpc.TunIPResponse{IPv4: v4.String(), IPv6: v6.String(), Version: alloc.Version}
@@ -337,7 +351,9 @@ func (s *TunConfigServer) WatchTunIP(req *rpc.TunIPRequest, stream rpc.TunConfig
 }
 
 // NotifyIPChange is called by the ConfigMap watcher when an owner's IP changes.
-// It updates the allocation and pushes to all watchers.
+// It updates the allocation, pushes to all watchers, and syncs the envoy rule IP
+// so mesh traffic for this owner follows the new TUN IP (the GetTunIP path syncs
+// directly; this covers reconcile-driven changes).
 func (s *TunConfigServer) NotifyIPChange(ownerID string, newIPv4, newIPv6 *net.IPNet) {
 	s.mu.Lock()
 	alloc, ok := s.allocs[ownerID]
@@ -359,6 +375,8 @@ func (s *TunConfigServer) NotifyIPChange(ownerID string, newIPv4, newIPv6 *net.I
 
 	s.notifyWatchers(ownerID, resp)
 	s.mu.Unlock()
+
+	go s.syncEnvoyRuleIP(context.Background(), ownerID, newIPv4, newIPv6)
 }
 
 // ReconcileDHCP is called when the ConfigMap DHCP data changes.
@@ -549,4 +567,67 @@ func (s *TunConfigServer) reapExpiredLeases(ctx context.Context) {
 			plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs after lease reap: %v", err)
 		}
 	}
+
+	// Reclaim bitmap bits that no live allocation owns (e.g. leaked by a crash
+	// between renting and persisting). Safe under the single-writer (Recreate)
+	// deployment: GetTunIP is mutex-serialized, so no in-flight allocation is
+	// misclassified as an orphan.
+	s.scrubOrphanBits(ctx)
+}
+
+// rollbackAlloc releases a freshly-rented IP and drops its in-memory record after
+// a persistence failure, so a bitmap bit is never left without an owning lease
+// (which would never be renewed or reaped). Caller must hold s.mu.
+func (s *TunConfigServer) rollbackAlloc(ctx context.Context, ownerID string, v4, v6 *net.IPNet) {
+	delete(s.allocs, ownerID)
+	var ip4, ip6 net.IP
+	if v4 != nil {
+		ip4 = v4.IP
+	}
+	if v6 != nil {
+		ip6 = v6.IP
+	}
+	if err := s.dhcp.ReleaseIP(ctx, ip4, ip6); err != nil {
+		plog.G(ctx).Errorf("[TunConfig] rollback: failed to release %v/%v: %v", ip4, ip6, err)
+	}
+}
+
+// scrubOrphanBits releases bitmap bits not owned by any live allocation. Orphans
+// arise if the process died between renting an IP (TUN_IP_POOL) and persisting
+// the owner record (TUN_ALLOCS) — the two are separate ConfigMap keys. Without
+// this, such bits are never renewed or reaped and slowly exhaust the pool.
+func (s *TunConfigServer) scrubOrphanBits(ctx context.Context) {
+	s.mu.Lock()
+	owned := make(map[string]bool, len(s.allocs)*2)
+	for _, alloc := range s.allocs {
+		if alloc.IPv4 != nil {
+			owned[alloc.IPv4.IP.String()] = true
+		}
+		if alloc.IPv6 != nil {
+			owned[alloc.IPv6.IP.String()] = true
+		}
+	}
+	var orphans []net.IP
+	collect := func(ip net.IP) {
+		if !owned[ip.String()] {
+			orphans = append(orphans, ip)
+		}
+	}
+	err := s.dhcp.ForEach(ctx, collect, collect)
+	s.mu.Unlock()
+	if err != nil {
+		plog.G(ctx).Warnf("[TunConfig] scrub: failed to enumerate bitmap: %v", err)
+		return
+	}
+
+	// An orphan IP's bit is set, so a concurrent GetTunIP (AllocateNext returns
+	// only unset bits) cannot claim it between here and the release.
+	if len(orphans) == 0 {
+		return
+	}
+	if err := s.dhcp.ReleaseIPs(ctx, orphans...); err != nil {
+		plog.G(ctx).Warnf("[TunConfig] scrub: failed to release %d orphan bits: %v", len(orphans), err)
+		return
+	}
+	plog.G(ctx).Infof("[TunConfig] scrub reclaimed %d orphan bitmap bits", len(orphans))
 }
