@@ -34,3 +34,42 @@ func TestBuildExcludeIPs_NilReserved(t *testing.T) {
 		}
 	}
 }
+
+// tunIPConflicts: a pushed IP that matches a sibling/local IP is a conflict, but
+// the connection's OWN current TUN IP must never count (else a rollback that
+// re-pushes our current IP would loop forever).
+func TestTunIPConflicts(t *testing.T) {
+	ipn := func(s string) *net.IPNet {
+		ip, n, err := net.ParseCIDR(s)
+		if err != nil {
+			t.Fatalf("parse %s: %v", s, err)
+		}
+		n.IP = ip
+		return n
+	}
+	ownV4 := ipn("198.18.0.10/16")
+	siblingV4 := "198.18.0.20"
+	excludes := []string{ownV4.IP.String(), siblingV4, "10.0.0.1"}
+
+	// Pushed IP collides with a sibling → conflict.
+	if !tunIPConflicts(ipn("198.18.0.20/16"), nil, ownV4, nil, excludes) {
+		t.Error("expected conflict for sibling IP 198.18.0.20")
+	}
+	// Pushed IP equals our own current IP → NOT a conflict.
+	if tunIPConflicts(ipn("198.18.0.10/16"), nil, ownV4, nil, excludes) {
+		t.Error("own current IP must not be a conflict")
+	}
+	// Pushed IP not in excludes → no conflict.
+	if tunIPConflicts(ipn("198.18.0.99/16"), nil, ownV4, nil, excludes) {
+		t.Error("unrelated IP must not be a conflict")
+	}
+	// IPv6 conflict path.
+	ownV6 := ipn("2001:2::10/64")
+	ex6 := []string{ownV6.IP.String(), "2001:2::20"}
+	if !tunIPConflicts(nil, ipn("2001:2::20/64"), nil, ownV6, ex6) {
+		t.Error("expected conflict for sibling IPv6 2001:2::20")
+	}
+	if tunIPConflicts(nil, ipn("2001:2::10/64"), nil, ownV6, ex6) {
+		t.Error("own current IPv6 must not be a conflict")
+	}
+}

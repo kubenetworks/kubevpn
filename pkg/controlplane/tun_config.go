@@ -3,7 +3,9 @@ package controlplane
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
+	"sort"
 	"sync"
 	"time"
 
@@ -36,12 +38,32 @@ type TunConfigServer struct {
 	// when it is still free. In-memory only; bounded by the real client count
 	// because OwnerID is now stable per machine+user.
 	lastIPs map[string]lastIPRecord
+
+	// pendingProposal tracks a dry-run IP change proposed to a client but not yet
+	// confirmed. It is pure intent — NO IP is rented while pending. The server never
+	// commits an IP change until the client confirms (via GetTunIP{ConfirmIP}), so a
+	// conflicting proposal is simply dropped (decline/expiry) with nothing to roll
+	// back. In-memory only — lost on restart (proposal vanishes; operator re-edits).
+	pendingProposal map[string]proposal
+
+	// reconcileMu serializes ReconcileAllocsFromConfigMap so two overlapping
+	// informer-driven reconciles never act on each other's stale snapshot.
+	reconcileMu sync.Mutex
 }
 
 // lastIPRecord is the last IPv4/IPv6 a given owner held.
 type lastIPRecord struct {
 	v4 *net.IPNet
 	v6 *net.IPNet
+}
+
+// proposal is a dry-run IP change offered to a client, awaiting confirm/decline.
+// candV4/candV6 are per-family candidates (either may be nil = that family is not
+// being changed). They hold no bitmap reservation; an IP is rented only at confirm.
+type proposal struct {
+	candV4   *net.IPNet
+	candV6   *net.IPNet
+	deadline time.Time
 }
 
 type tunAllocation struct {
@@ -68,12 +90,13 @@ func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, nam
 		return nil, err
 	}
 	s := &TunConfigServer{
-		clientset: clientset,
-		namespace: namespace,
-		dhcp:      mgr,
-		allocs:    make(map[string]*tunAllocation),
-		watchers:  make(map[string][]chan *rpc.TunIPResponse),
-		lastIPs:   make(map[string]lastIPRecord),
+		clientset:       clientset,
+		namespace:       namespace,
+		dhcp:            mgr,
+		allocs:          make(map[string]*tunAllocation),
+		watchers:        make(map[string][]chan *rpc.TunIPResponse),
+		lastIPs:         make(map[string]lastIPRecord),
+		pendingProposal: make(map[string]proposal),
 	}
 	s.loadAllocs(ctx)
 	// Reclaim any bitmap bits left orphaned by a prior crash before serving.
@@ -87,13 +110,12 @@ func (s *TunConfigServer) loadAllocs(ctx context.Context) {
 	if err != nil || cm.Data == nil {
 		return
 	}
-	data := cm.Data[config.KeyTunAllocs]
-	if data == "" {
+	persisted, err := parsePersistedAllocs(cm.Data[config.KeyTunAllocs])
+	if err != nil {
+		plog.G(ctx).Warnf("[TunConfig] Failed to load persisted allocs: %v", err)
 		return
 	}
-	var persisted map[string]*persistedAlloc
-	if err := yaml.Unmarshal([]byte(data), &persisted); err != nil {
-		plog.G(ctx).Warnf("[TunConfig] Failed to load persisted allocs: %v", err)
+	if len(persisted) == 0 {
 		return
 	}
 
@@ -144,6 +166,42 @@ func (s *TunConfigServer) loadAllocs(ctx context.Context) {
 			plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs after cleanup: %v", err)
 		}
 	}
+}
+
+// parsePersistedAllocs decodes the TUN_ALLOCS YAML (ownerID → persistedAlloc).
+// An empty string yields an empty map and no error.
+func parsePersistedAllocs(data string) (map[string]*persistedAlloc, error) {
+	if data == "" {
+		return map[string]*persistedAlloc{}, nil
+	}
+	var persisted map[string]*persistedAlloc
+	if err := yaml.Unmarshal([]byte(data), &persisted); err != nil {
+		return nil, err
+	}
+	return persisted, nil
+}
+
+// cidrToIPNet parses "ip/mask" into an *net.IPNet whose IP is the host address
+// (not the masked network address). Returns nil on empty input or parse failure.
+func cidrToIPNet(s string) *net.IPNet {
+	if s == "" {
+		return nil
+	}
+	ip, ipNet, err := net.ParseCIDR(s)
+	if err != nil || ipNet == nil {
+		return nil
+	}
+	ipNet.IP = ip
+	return ipNet
+}
+
+// WatcherCount returns how many WatchTunIP streams are currently subscribed for an
+// owner. Used for observability and to let tests wait until a client has subscribed
+// before pushing (a dry-run proposal pushed to no watcher would be lost).
+func (s *TunConfigServer) WatcherCount(ownerID string) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.watchers[ownerID])
 }
 
 // notifyWatchers pushes a TunIPResponse to all WatchTunIP subscribers for the given ownerID.
@@ -209,23 +267,66 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Dry-run confirm: the client validated a proposed IP (v4 or v6) and asks to
+	// commit it. The family is inferred from the ConfirmIP address.
+	if req.ConfirmIP != "" {
+		if p, ok := s.pendingProposal[req.OwnerID]; ok {
+			cip := net.ParseIP(req.ConfirmIP)
+			isV6 := cip != nil && cip.To4() == nil
+			cand := p.candV4
+			if isV6 {
+				cand = p.candV6
+			}
+			if cand != nil && cand.IP.String() == req.ConfirmIP {
+				return s.commitFamilyLocked(ctx, req.OwnerID, isV6, cand, excludeIPs)
+			}
+		}
+		// stale/unknown confirm → fall through to normal handling
+	}
+
+	// Dry-run decline: the client rejected a pending proposal family (its candidate
+	// is in ExcludeIPs). Drop that family's slot and keep the current committed IP —
+	// nothing was committed, so there is no rollback. Return current explicitly (do
+	// NOT realloc even if the client also excluded its own current IP).
+	if p, ok := s.pendingProposal[req.OwnerID]; ok &&
+		((p.candV4 != nil && isIPExcluded(p.candV4, excludeIPs)) || (p.candV6 != nil && isIPExcluded(p.candV6, excludeIPs))) {
+		var curV4 net.IP
+		if a, aok := s.allocs[req.OwnerID]; aok && a.IPv4 != nil {
+			curV4 = a.IPv4.IP
+		}
+		if p.candV4 != nil && isIPExcluded(p.candV4, excludeIPs) {
+			plog.G(ctx).Warnf("[TunConfig] owner %s declined proposed IPv4 %v (local conflict)", req.OwnerID, p.candV4.IP)
+			go s.annotateRejected(context.Background(), req.OwnerID, p.candV4.IP, curV4)
+			p.candV4 = nil
+		}
+		if p.candV6 != nil && isIPExcluded(p.candV6, excludeIPs) {
+			plog.G(ctx).Warnf("[TunConfig] owner %s declined proposed IPv6 %v (local conflict)", req.OwnerID, p.candV6.IP)
+			go s.annotateRejected(context.Background(), req.OwnerID, p.candV6.IP, curV4)
+			p.candV6 = nil
+		}
+		if p.candV4 == nil && p.candV6 == nil {
+			delete(s.pendingProposal, req.OwnerID)
+		} else {
+			s.pendingProposal[req.OwnerID] = p
+		}
+		if err := s.saveAllocs(ctx); err != nil { // revert operator's edit in TUN_ALLOCS to actual
+			plog.G(ctx).Warnf("[TunConfig] revert TUN_ALLOCS after decline: %v", err)
+		}
+		if a, aok := s.allocs[req.OwnerID]; aok {
+			a.LastRenew = time.Now()
+			return tunResp(a), nil
+		}
+		// no committed alloc (rare) → fall through to fresh allocation
+	}
+
 	if alloc, ok := s.allocs[req.OwnerID]; ok {
 		if !isIPExcluded(alloc.IPv4, excludeIPs) {
 			alloc.LastRenew = time.Now()
-			resp := &rpc.TunIPResponse{Version: alloc.Version}
-			if alloc.IPv4 != nil {
-				resp.IPv4 = alloc.IPv4.String()
-			}
-			if alloc.IPv6 != nil {
-				resp.IPv6 = alloc.IPv6.String()
-			}
-			return resp, nil
+			return tunResp(alloc), nil
 		}
-		// Existing IP conflicts with client's local interfaces — re-allocate.
-		// Hold mutex across RentIP (fast ConfigMap operation).
+		// Committed IP conflicts with client ExcludeIPs → re-allocate a safe IP.
 		delete(s.allocs, req.OwnerID)
 		plog.G(ctx).Infof("[TunConfig] IP %v conflicts with client ExcludeIPs, re-allocating for owner %s", alloc.IPv4, req.OwnerID)
-
 		v4, v6, err := s.dhcp.RentIPExcluding(ctx, excludeIPs)
 		if err != nil {
 			return nil, err
@@ -240,22 +341,15 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 		if err := s.dhcp.ReleaseIP(ctx, oldV4, oldV6); err != nil {
 			plog.G(ctx).Warnf("[TunConfig] Failed to release old IP %v: %v", oldV4, err)
 		}
-
-		newAlloc := &tunAllocation{
-			IPv4:      v4,
-			IPv6:      v6,
-			Version:   time.Now().UnixNano(),
-			LastRenew: time.Now(),
-		}
+		newAlloc := &tunAllocation{IPv4: v4, IPv6: v6, Version: time.Now().UnixNano(), LastRenew: time.Now()}
 		s.allocs[req.OwnerID] = newAlloc
 		plog.G(ctx).Infof("[TunConfig] Re-allocated %s/%s for owner %s", v4, v6, req.OwnerID)
 		if err := s.saveAllocs(ctx); err != nil {
-			plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs, rolling back: %v", err)
+			plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs: %v", err)
 			s.rollbackAlloc(ctx, req.OwnerID, v4, v6)
 			return nil, err
 		}
-
-		resp := &rpc.TunIPResponse{IPv4: v4.String(), IPv6: v6.String(), Version: newAlloc.Version}
+		resp := tunResp(newAlloc)
 		s.notifyWatchers(req.OwnerID, resp)
 		go s.syncEnvoyRuleIP(context.Background(), req.OwnerID, v4, v6)
 		return resp, nil
@@ -288,6 +382,122 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 	s.notifyWatchers(req.OwnerID, resp)
 	go s.syncEnvoyRuleIP(context.Background(), req.OwnerID, v4, v6)
 	return resp, nil
+}
+
+// tunResp builds a committed (DryRun=false) TunIPResponse from an allocation.
+func tunResp(alloc *tunAllocation) *rpc.TunIPResponse {
+	resp := &rpc.TunIPResponse{Version: alloc.Version}
+	if alloc.IPv4 != nil {
+		resp.IPv4 = alloc.IPv4.String()
+	}
+	if alloc.IPv6 != nil {
+		resp.IPv6 = alloc.IPv6.String()
+	}
+	return resp
+}
+
+// commitFamilyLocked is the single commit point for a confirmed dry-run proposal of
+// ONE address family (v4 or v6). It rents the candidate (falling back to a safe IP
+// if it was taken since the proposal), releases the owner's old IP of that family,
+// leaves the other family untouched, persists, and pushes the committed (DryRun=
+// false) full allocation. Caller holds s.mu.
+func (s *TunConfigServer) commitFamilyLocked(ctx context.Context, owner string, isV6 bool, candidate *net.IPNet, excludeIPs []net.IP) (*rpc.TunIPResponse, error) {
+	cur := s.allocs[owner]
+	var curV4, curV6 *net.IPNet
+	if cur != nil {
+		curV4, curV6 = cur.IPv4, cur.IPv6
+	}
+
+	// Refuse if another live owner holds the candidate (same family; no silent takeover).
+	for o, a := range s.allocs {
+		if o == owner {
+			continue
+		}
+		held := a.IPv4
+		if isV6 {
+			held = a.IPv6
+		}
+		if held != nil && held.IP.Equal(candidate.IP) {
+			plog.G(ctx).Warnf("[TunConfig] commit %v for owner %s: in use by owner %s, refusing", candidate.IP, owner, o)
+			go s.annotateRejected(context.Background(), owner, candidate.IP, nil)
+			s.clearProposalFamily(owner, isV6)
+			if cur != nil {
+				return tunResp(cur), nil
+			}
+			return nil, fmt.Errorf("candidate %v in use", candidate.IP)
+		}
+	}
+
+	// Rent the candidate for this family; fall back to a safe IP if it was taken.
+	committed := candidate
+	var rentErr error
+	if isV6 {
+		rentErr = s.dhcp.RentSpecificIP(ctx, nil, candidate.IP)
+	} else {
+		rentErr = s.dhcp.RentSpecificIP(ctx, candidate.IP, nil)
+	}
+	if rentErr != nil {
+		plog.G(ctx).Warnf("[TunConfig] commit %v for owner %s failed (%v); allocating a safe IP", candidate.IP, owner, rentErr)
+		v4, v6, ferr := s.dhcp.RentIPExcluding(ctx, excludeIPs)
+		if ferr != nil {
+			return nil, ferr
+		}
+		if isV6 {
+			committed = v6
+			_ = s.dhcp.ReleaseIPs(ctx, v4.IP) // release the unused paired v4
+		} else {
+			committed = v4
+			_ = s.dhcp.ReleaseIPs(ctx, v6.IP) // release the unused paired v6
+		}
+	}
+
+	// Release the OLD IP of this family (the other family is untouched).
+	oldFam := curV4
+	if isV6 {
+		oldFam = curV6
+	}
+	if oldFam != nil && !oldFam.IP.Equal(committed.IP) {
+		_ = s.dhcp.ReleaseIPs(ctx, oldFam.IP)
+	}
+
+	newAlloc := &tunAllocation{IPv4: curV4, IPv6: curV6, Version: time.Now().UnixNano(), LastRenew: time.Now()}
+	if isV6 {
+		newAlloc.IPv6 = committed
+	} else {
+		newAlloc.IPv4 = committed
+	}
+	s.allocs[owner] = newAlloc
+	s.clearProposalFamily(owner, isV6)
+	if err := s.saveAllocs(ctx); err != nil {
+		plog.G(ctx).Errorf("[TunConfig] commit: persist failed for owner %s: %v", owner, err)
+		return nil, err
+	}
+	plog.G(ctx).Infof("[TunConfig] committed TUN IP %v (v6=%t) for owner %s (client confirmed)", committed.IP, isV6, owner)
+	// Do NOT notifyWatchers here: the confirming client IS this owner's watcher and
+	// applies the returned resp inline. Echoing it over the stream would re-deliver a
+	// stale snapshot of the *other* family (committed at a different instant), which
+	// the client would re-apply and flap. The ticker re-push keeps other state fresh.
+	go s.syncEnvoyRuleIP(context.Background(), owner, newAlloc.IPv4, newAlloc.IPv6)
+	return tunResp(newAlloc), nil
+}
+
+// clearProposalFamily removes one family's slot from an owner's pending proposal,
+// deleting the proposal entirely when both slots are empty. Caller holds s.mu.
+func (s *TunConfigServer) clearProposalFamily(owner string, isV6 bool) {
+	p, ok := s.pendingProposal[owner]
+	if !ok {
+		return
+	}
+	if isV6 {
+		p.candV6 = nil
+	} else {
+		p.candV4 = nil
+	}
+	if p.candV4 == nil && p.candV6 == nil {
+		delete(s.pendingProposal, owner)
+	} else {
+		s.pendingProposal[owner] = p
+	}
 }
 
 func parseExcludeIPs(raw []string) []net.IP {
@@ -433,6 +643,195 @@ func (s *TunConfigServer) ReconcileDHCP(ctx context.Context) {
 	}
 }
 
+// ReconcileAllocsFromConfigMap honors manual operator edits to the TUN_ALLOCS
+// ConfigMap key. Normally TUN_ALLOCS is a server-written journal; this makes an
+// external edit a control input: if an owner's IPv4 there differs from the
+// server's in-memory allocation, the edited IP becomes the desired address and
+// is applied end-to-end — the bitmap (TUN_IP_POOL) is updated, any other owner
+// holding that IP is forced off it (re-rented + pushed), and the owning client
+// is pushed the change via WatchTunIP so its local TUN device address updates in
+// place (ChangeTunIP). Wired as an informer onDHCPChange callback.
+//
+// Idempotent: an owner whose desired IP already equals its current IP is skipped,
+// so the server's own saveAllocs writes do not loop back through here.
+func (s *TunConfigServer) ReconcileAllocsFromConfigMap(ctx context.Context) {
+	// Serialize reconciles so two overlapping informer events never act on each
+	// other's stale snapshot.
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
+
+	// Re-read/merge loop: each pass re-reads the latest TUN_ALLOCS and applies any
+	// remaining diff, so an operator edit landing during a reconcile is applied on
+	// the next pass instead of being silently overwritten by saveAllocs. Converges
+	// when a pass changes nothing; an edit landing after the last pass triggers its
+	// own informer event.
+	for round := 0; round < maxReconcileRounds; round++ {
+		if !s.reconcileManualOnce(ctx) {
+			return
+		}
+	}
+	plog.G(ctx).Warnf("[TunConfig] reconcile hit maxReconcileRounds=%d; will converge on next informer event", maxReconcileRounds)
+}
+
+// reconcileManualOnce performs one fresh-read reconcile pass over TUN_ALLOCS and
+// reports whether it changed any allocation. Caller holds reconcileMu.
+func (s *TunConfigServer) reconcileManualOnce(ctx context.Context) bool {
+	cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		plog.G(ctx).Errorf("[TunConfig] reconcile: get configmap: %v", err)
+		return false
+	}
+	desired, err := parsePersistedAllocs(cm.Data[config.KeyTunAllocs])
+	if err != nil {
+		plog.G(ctx).Warnf("[TunConfig] reconcile: cannot parse %s: %v", config.KeyTunAllocs, err)
+		return false
+	}
+
+	// Snapshot committed allocations (used to detect "target IP in use by another
+	// owner"). proposeIPChange does its own locking, so we don't hold s.mu here.
+	s.mu.RLock()
+	current := make(map[string]*tunAllocation, len(s.allocs))
+	for k, v := range s.allocs {
+		cp := *v
+		current[k] = &cp
+	}
+	s.mu.RUnlock()
+
+	// Deterministic order for stable logging when multiple owners are edited.
+	owners := make([]string, 0, len(desired))
+	for o := range desired {
+		owners = append(owners, o)
+	}
+	sort.Strings(owners)
+
+	proposed := false
+	for _, owner := range owners {
+		if s.proposeManualChange(ctx, owner, desired[owner], current) {
+			proposed = true
+		}
+	}
+	// Note: proposing does NOT touch committed state (allocs/bitmap/TUN_ALLOCS), so
+	// there is nothing to saveAllocs here. The operator's edit stays in TUN_ALLOCS
+	// as the desired value until the client confirms (commit) or declines (revert).
+	return proposed
+}
+
+// proposeManualChange offers (dry-run) one owner's desired IPv4 and/or IPv6 from
+// TUN_ALLOCS to the client, per family. It does NOT commit: no IP is rented, no
+// allocation changes. The client validates each family locally and confirms (→
+// GetTunIP commits) or declines. Returns whether a NEW proposal was pushed.
+// Caller holds reconcileMu (not s.mu).
+func (s *TunConfigServer) proposeManualChange(ctx context.Context, owner string, want *persistedAlloc, current map[string]*tunAllocation) bool {
+	s.mu.RLock()
+	live, ok := s.allocs[owner]
+	var curV4, curV6 *net.IPNet
+	if ok {
+		curV4, curV6 = live.IPv4, live.IPv6
+	}
+	pend := s.pendingProposal[owner] // zero value (nil slots) if absent
+	s.mu.RUnlock()
+	if !ok {
+		return false // owner not active in memory (offline / reaped) — nothing to propose
+	}
+
+	candV4 := s.familyCandidate(ctx, owner, want.IPv4, curV4, pend.candV4, current, false)
+	candV6 := s.familyCandidate(ctx, owner, want.IPv6, curV6, pend.candV6, current, true)
+	if candV4 == nil && candV6 == nil {
+		return false
+	}
+	s.proposeIPChange(owner, candV4, candV6)
+	plog.G(ctx).Infof("[TunConfig] proposed manual TUN IP v4=%v v6=%v to owner %s (dry-run; awaiting client confirm)", candV4, candV6, owner)
+	return true
+}
+
+// familyCandidate validates one address family's desired IP for an owner and returns
+// the candidate to propose, or nil to skip (empty/unchanged/already-proposed/out-of-
+// range/in-use). isV6 selects the family. Caller need not hold s.mu (reads snapshots).
+func (s *TunConfigServer) familyCandidate(ctx context.Context, owner, wantStr string, curIP, pendCand *net.IPNet, current map[string]*tunAllocation, isV6 bool) *net.IPNet {
+	want := cidrToIPNet(wantStr)
+	if want == nil {
+		if wantStr != "" {
+			plog.G(ctx).Warnf("[TunConfig] manual TUN_ALLOCS IP %q for owner %s is not valid CIDR, ignoring", wantStr, owner)
+		}
+		return nil // empty field = this family is not being changed
+	}
+	if curIP != nil && curIP.IP.Equal(want.IP) {
+		return nil // already committed at target
+	}
+	if pendCand != nil && pendCand.IP.Equal(want.IP) {
+		return nil // already proposed this candidate — don't re-push
+	}
+	if !s.dhcp.InRange(want.IP) {
+		plog.G(ctx).Warnf("[TunConfig] manual TUN_ALLOCS IP %s for owner %s is out of range, ignoring", want.IP, owner)
+		return nil
+	}
+	// No silent takeover: if another live owner holds the target IP (same family), refuse.
+	for b, bAlloc := range current {
+		if b == owner {
+			continue
+		}
+		held := bAlloc.IPv4
+		if isV6 {
+			held = bAlloc.IPv6
+		}
+		if held != nil && held.IP.Equal(want.IP) {
+			plog.G(ctx).Warnf("[TunConfig] manual TUN_ALLOCS IP %s for owner %s is in use by owner %s, ignoring", want.IP, owner, b)
+			go s.annotateRejected(context.Background(), owner, want.IP, nil)
+			return nil
+		}
+	}
+	mask := want.Mask
+	if curIP != nil {
+		mask = curIP.Mask // canonical pool mask
+	}
+	return &net.IPNet{IP: want.IP, Mask: mask}
+}
+
+// proposeIPChange merges the given per-family candidates into the owner's pending
+// proposal and pushes a DryRun TunIPResponse carrying ONLY the (newly) proposed
+// families. No IP is rented; commit happens only at GetTunIP{ConfirmIP}.
+func (s *TunConfigServer) proposeIPChange(owner string, candV4, candV6 *net.IPNet) {
+	if candV4 == nil && candV6 == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.pendingProposal[owner]
+	if candV4 != nil {
+		p.candV4 = candV4
+	}
+	if candV6 != nil {
+		p.candV6 = candV6
+	}
+	p.deadline = time.Now().Add(manualGrace)
+	s.pendingProposal[owner] = p
+	resp := &rpc.TunIPResponse{Version: time.Now().UnixNano(), DryRun: true}
+	if candV4 != nil {
+		resp.IPv4 = candV4.String()
+	}
+	if candV6 != nil {
+		resp.IPv6 = candV6.String()
+	}
+	s.notifyWatchers(owner, resp)
+}
+
+// annotateRejected leaves a breadcrumb on the ConfigMap so an operator whose
+// manual TUN_ALLOCS edit was not applied (client conflict, IP in use, or expiry)
+// can see why via `kubectl describe cm`. A nil reason/old keeps the message short.
+func (s *TunConfigServer) annotateRejected(ctx context.Context, owner string, rejected, old net.IP) {
+	var msg string
+	switch {
+	case old != nil:
+		msg = fmt.Sprintf("%s: requested IP %s rejected by client (local conflict), kept %s", owner, rejected, old)
+	default:
+		msg = fmt.Sprintf("%s: requested IP %s not applied (in use or unavailable)", owner, rejected)
+	}
+	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, "kubevpn.io/tun-allocs-rejected", msg))
+	if _, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Patch(ctx, config.ConfigMapPodTrafficManager, k8stypes.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+		plog.G(ctx).Warnf("[TunConfig] annotateRejected: %v", err)
+	}
+}
+
 // renewLease refreshes LastRenew for the given ownerID. Caller must hold s.mu.
 func (s *TunConfigServer) renewLease(ownerID string) {
 	if alloc, ok := s.allocs[ownerID]; ok {
@@ -457,6 +856,7 @@ func (s *TunConfigServer) removeWatcher(ownerID string, ch chan *rpc.TunIPRespon
 // syncEnvoyRuleIP updates Rule.LocalTunIPv4/v6 in ENVOY_CONFIG for all Rules matching ownerID.
 // This triggers: Watcher → Processor → xDS push → envoy hot-update.
 func (s *TunConfigServer) syncEnvoyRuleIP(ctx context.Context, ownerID string, newIPv4, newIPv6 *net.IPNet) {
+	skipped := false
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 		if err != nil {
@@ -464,7 +864,12 @@ func (s *TunConfigServer) syncEnvoyRuleIP(ctx context.Context, ownerID string, n
 		}
 		virtuals, parseErr := parseYaml(cm.Data[config.KeyEnvoy])
 		if parseErr != nil {
-			return parseErr
+			// ENVOY_CONFIG is not a valid Virtual list (empty/legacy/corrupt) — there
+			// are no rules to sync. Skip rather than error: a hard failure here cannot
+			// be retried into success and only spams the log.
+			plog.G(ctx).Warnf("[TunConfig] syncEnvoyRuleIP: skip owner %s, cannot parse %s: %v", ownerID, config.KeyEnvoy, parseErr)
+			skipped = true
+			return nil
 		}
 
 		changed := false
@@ -506,7 +911,7 @@ func (s *TunConfigServer) syncEnvoyRuleIP(ctx context.Context, ownerID string, n
 	})
 	if err != nil {
 		plog.G(ctx).Errorf("[TunConfig] syncEnvoyRuleIP failed for owner %s: %v", ownerID, err)
-	} else {
+	} else if !skipped {
 		plog.G(ctx).Infof("[TunConfig] Synced envoy rule IP for owner %s to %v", ownerID, newIPv4)
 	}
 }
@@ -521,6 +926,15 @@ const LeaseDuration = 5 * time.Minute
 
 // leaseReapInterval is how often the lease reaper scans for and reclaims expired allocations.
 const leaseReapInterval = 30 * time.Second
+
+// manualGrace is how long a manual TUN_ALLOCS edit keeps the owner's pre-edit IP
+// rented (a reservation) after pushing the new IP, awaiting client accept/reject.
+// On expiry with no reject the change is assumed accepted and the old IP released.
+const manualGrace = 60 * time.Second
+
+// maxReconcileRounds bounds the re-read/merge loop in ReconcileAllocsFromConfigMap
+// that absorbs concurrent operator edits landing during a reconcile.
+const maxReconcileRounds = 5
 
 // StartLeaseReaper launches a background goroutine that periodically checks for
 // expired allocations and reclaims them.
@@ -584,11 +998,38 @@ func (s *TunConfigServer) reapExpiredLeases(ctx context.Context) {
 		}
 	}
 
+	// Drop dry-run proposals whose grace deadline elapsed with no client response
+	// (offline/lost push). No IP was rented for a proposal, so there is nothing to
+	// release — just revert any operator edit still sitting in TUN_ALLOCS to actual.
+	s.expirePendingProposals(ctx)
+
 	// Reclaim bitmap bits that no live allocation owns (e.g. leaked by a crash
 	// between renting and persisting). Safe under the single-writer (Recreate)
 	// deployment: GetTunIP is mutex-serialized, so no in-flight allocation is
 	// misclassified as an orphan.
 	s.scrubOrphanBits(ctx)
+}
+
+// expirePendingProposals drops dry-run proposals past their deadline. Proposals
+// hold no rented IP, so expiry just clears the intent and reverts TUN_ALLOCS to the
+// committed actual (undoing the operator's unconfirmed edit).
+func (s *TunConfigServer) expirePendingProposals(ctx context.Context) {
+	now := time.Now()
+	expired := false
+	s.mu.Lock()
+	for owner, p := range s.pendingProposal {
+		if now.After(p.deadline) {
+			delete(s.pendingProposal, owner)
+			expired = true
+			plog.G(ctx).Debugf("[TunConfig] proposal for owner %s expired (no client response); dropping", owner)
+		}
+	}
+	if expired {
+		if err := s.saveAllocs(ctx); err != nil { // revert any unconfirmed edit in TUN_ALLOCS
+			plog.G(ctx).Warnf("[TunConfig] revert TUN_ALLOCS after proposal expiry: %v", err)
+		}
+	}
+	s.mu.Unlock()
 }
 
 // allocateForOwner allocates a TUN IP for ownerID, preferring the IP the owner
@@ -637,6 +1078,8 @@ func (s *TunConfigServer) scrubOrphanBits(ctx context.Context) {
 			owned[alloc.IPv6.IP.String()] = true
 		}
 	}
+	// Note: dry-run proposals reserve no IP (commit rents only on confirm), so scrub
+	// needs no special-casing for them.
 	var orphans []net.IP
 	collect := func(ip net.IP) {
 		if !owned[ip.String()] {

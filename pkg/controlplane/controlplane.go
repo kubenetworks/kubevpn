@@ -52,7 +52,13 @@ func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.E
 
 	notifyCh <- NotifyMessage{}
 	go func() {
-		errChan <- Watch(ctx, factory, notifyCh, tunConfig.ReconcileDHCP)
+		// tunConfig may be nil when its init failed (non-fatal above); only wire
+		// the DHCP reconcile callback when it is available to avoid a nil deref.
+		if tunConfig != nil {
+			errChan <- Watch(ctx, factory, notifyCh, tunConfig.ReconcileDHCP, tunConfig.ReconcileAllocsFromConfigMap)
+		} else {
+			errChan <- Watch(ctx, factory, notifyCh)
+		}
 	}()
 
 	for {

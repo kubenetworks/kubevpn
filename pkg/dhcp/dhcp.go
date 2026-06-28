@@ -118,6 +118,42 @@ func (m *Manager) RentIPPreferring(ctx context.Context, prefV4, prefV6 net.IP, e
 	return m.rentIP(ctx, prefV4, prefV6, excludeIPs)
 }
 
+// InRange reports whether ip falls within the managed IPv4 or IPv6 CIDR range.
+func (m *Manager) InRange(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if ip.To4() != nil {
+		return m.cidr != nil && m.cidr.Contains(ip)
+	}
+	return m.cidr6 != nil && m.cidr6.Contains(ip)
+}
+
+// RentSpecificIP allocates exactly the given IPv4/IPv6 addresses, failing if any
+// is unavailable (already allocated or out of range). Unlike RentIPPreferring it
+// does NOT fall back to another address — used when an operator pins a specific
+// TUN IP (via TUN_ALLOCS) and the caller wants the exact IP or a hard error so it
+// can decide whether to reclaim it from the current holder. A nil v4 or v6 skips
+// that family. The write is atomic: if either family fails, nothing is allocated.
+func (m *Manager) RentSpecificIP(ctx context.Context, v4, v6 net.IP) error {
+	plog.G(ctx).Infof("Renting specific IP: v4=%v v6=%v", v4, v6)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
+			if v4 != nil {
+				if err := ipv4.Allocate(v4); err != nil {
+					return fmt.Errorf("cannot allocate IPv4 %s: %w", v4, err)
+				}
+			}
+			if v6 != nil {
+				if err := ipv6.Allocate(v6); err != nil {
+					return fmt.Errorf("cannot allocate IPv6 %s: %w", v6, err)
+				}
+			}
+			return nil
+		})
+	})
+}
+
 // makeShouldSkip returns a predicate reporting whether an IP must be skipped
 // because it matches a local interface address or appears in excludeIPs.
 func makeShouldSkip(excludeIPs []net.IP) func(net.IP) bool {
