@@ -13,9 +13,10 @@ import (
 	"k8s.io/client-go/util/cert"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// GetTlsClientConfig builds a TLS client configuration from the certificate, key, and server name in tlsSecret.
 func GetTlsClientConfig(tlsSecret map[string][]byte) (*tls.Config, error) {
 	crtBytes, keyBytes, serverName, err := getTls(tlsSecret)
 	if err != nil {
@@ -38,6 +39,7 @@ func GetTlsClientConfig(tlsSecret map[string][]byte) (*tls.Config, error) {
 	return client, nil
 }
 
+// GetTlsServerConfig builds a TLS server configuration from the certificate, key, and server name in tlsInfo.
 func GetTlsServerConfig(tlsInfo map[string][]byte) (*tls.Config, error) {
 	crtBytes, keyBytes, serverName, err := getTls(tlsInfo)
 	if err != nil {
@@ -79,10 +81,12 @@ func getTls(tlsSecret map[string][]byte) (crtBytes []byte, keyBytes []byte, serv
 	return
 }
 
+// GetTLSHost returns the TLS server name for the traffic manager service in the given namespace.
 func GetTLSHost(ns string) string {
 	return fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, ns)
 }
 
+// GenTLSCert generates a self-signed TLS certificate and key for the traffic manager in the given namespace.
 func GenTLSCert(ctx context.Context, ns string) ([]byte, []byte, []byte, error) {
 	host := GetTLSHost(ns)
 	alternateIPs := []net.IP{net.IPv4(127, 0, 0, 1)}
@@ -91,7 +95,7 @@ func GenTLSCert(ctx context.Context, ns string) ([]byte, []byte, []byte, error) 
 	alternateDNS = append(alternateDNS, fmt.Sprintf("%s.svc", host))
 	crt, key, err := cert.GenerateSelfSignedCertKeyWithFixtures(host, alternateIPs, alternateDNS, ".")
 	if err != nil {
-		log.G(ctx).Errorf("Generate self signed cert and key error: %s", err.Error())
+		plog.G(ctx).Errorf("Generate self signed cert and key error: %s", err.Error())
 		return nil, nil, nil, err
 	}
 

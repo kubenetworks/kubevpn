@@ -127,7 +127,7 @@ func TestConvertUidToWorkload(t *testing.T) {
 		},
 	}
 	for _, data := range testDatas {
-		workload := ConvertUidToWorkload(data.uid)
+		workload := ConvertUIDToWorkload(data.uid)
 		if workload != data.expect {
 			t.FailNow()
 		}
@@ -158,7 +158,7 @@ func TestPrintStr(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if gotWriter := PrintStr(tt.args.slogan); gotWriter != tt.wantWriter {
+			if gotWriter := FormatBanner(tt.args.slogan); gotWriter != tt.wantWriter {
 				t.Errorf("Print() = %v, want %v", gotWriter, tt.wantWriter)
 			}
 		})

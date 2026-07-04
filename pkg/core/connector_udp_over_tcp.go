@@ -7,9 +7,11 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+// UDPOverTCPConnector wraps a TCP connection as a UDP-like datagram connection.
 type UDPOverTCPConnector struct {
 }
 
+// NewUDPOverTCPConnector returns a Connector that wraps TCP with datagram framing.
 func NewUDPOverTCPConnector() Connector {
 	return &UDPOverTCPConnector{}
 }

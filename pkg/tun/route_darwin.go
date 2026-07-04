@@ -36,7 +36,7 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 	}
 	err = addRoute(gw, prefixList...)
 	if err != nil {
-		return fmt.Errorf("failed to add dst %v via %s to route table: %v", prefixList, ifName, err)
+		return fmt.Errorf("failed to add dst %v via %s to route table: %w", prefixList, ifName, err)
 	}
 	return nil
 }
@@ -65,7 +65,7 @@ func deleteTunRoutes(ifName string, routes ...types.Route) error {
 	}
 	err = deleteRoute(gw, prefixList...)
 	if err != nil {
-		return fmt.Errorf("failed to add dst %v via %s to route table: %v", prefixList, ifName, err)
+		return fmt.Errorf("failed to add dst %v via %s to route table: %w", prefixList, ifName, err)
 	}
 	return nil
 }

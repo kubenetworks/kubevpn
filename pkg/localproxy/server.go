@@ -44,14 +44,14 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			name  string
 			addr  string
 			serve serveFn
-		}{name: "SOCKS5", addr: s.SOCKSListenAddr, serve: ServeSOCKS5})
+		}{name: "SOCKS5", addr: s.SOCKSListenAddr, serve: serveSOCKS5})
 	}
 	if s.HTTPConnectListen != "" {
 		entries = append(entries, struct {
 			name  string
 			addr  string
 			serve serveFn
-		}{name: "HTTP CONNECT", addr: s.HTTPConnectListen, serve: ServeHTTPConnect})
+		}{name: "HTTP CONNECT", addr: s.HTTPConnectListen, serve: serveHTTPConnect})
 	}
 
 	errCh := make(chan error, len(entries))

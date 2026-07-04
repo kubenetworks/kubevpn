@@ -85,14 +85,15 @@ func (d *Device) readFromTun(ctx context.Context) {
 			return
 		}
 
-		src, dst, protocol, err := util.ParseIP(buf[3 : 3+n])
-		if err != nil {
-			plog.G(ctx).Errorf("[TUN] Unknown packet")
+		src, dst, protocol, parseErr := util.ParseIPFast(buf[3 : 3+n])
+		if parseErr != nil {
+			plog.G(ctx).Errorf("[TUN] Unknown packet, dropping")
 			config.LPool.Put(buf[:])
 			continue
 		}
-
-		plog.G(ctx).Debugf("[TUN] SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
+		if config.Debug {
+			plog.G(ctx).Debugf("[TUN] SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
+		}
 		d.tunInbound <- NewPacket(buf[:], n, src, dst)
 	}
 }
@@ -118,6 +119,7 @@ func (d *Device) handlePacket(ctx context.Context, hub *RouteHub) {
 	}
 }
 
+// Peer manages the routing between TUN device packets and the connection pool.
 type Peer struct {
 	tunInbound  chan *Packet
 	tunOutbound chan<- *Packet
@@ -150,25 +152,22 @@ func (p *Peer) routeTun(ctx context.Context) {
 			if packet == nil {
 				return
 			}
-			if conn, ok := p.hub.RouteMapTCP.Load(packet.dst.String()); ok {
-				plog.G(ctx).Debugf("[TUN] Found route to %s via %s", packet.dst, conn.(net.Conn).RemoteAddr())
-				// readFromTun placed IP data at buf[3:], leaving room for:
-				//   buf[0:2] = datagram length header
-				//   buf[2]   = type prefix byte
-				//   buf[3:]  = IP packet data
-				payloadLen := packet.length + 1
-				binary.BigEndian.PutUint16(packet.data[:2], uint16(payloadLen))
-				packet.data[2] = 1
-				_, err := conn.(net.Conn).Write(packet.data[:payloadLen+2])
-				config.LPool.Put(packet.data[:])
-				if err != nil {
-					plog.G(ctx).Errorf("[TUN] Failed to write to %s from %s: %v", conn.(net.Conn).RemoteAddr(), conn.(net.Conn).LocalAddr(), err)
-					util.SafeWrite(p.errChan, err)
-					return
+			dstKey := string(packet.dst)
+			// readFromTun placed IP data at buf[3:], leaving room for:
+			//   buf[0:2] = datagram length header
+			//   buf[2]   = type prefix byte
+			//   buf[3:]  = IP packet data
+			payloadLen := packet.length + 1
+			binary.BigEndian.PutUint16(packet.data[:2], uint16(payloadLen))
+			packet.data[2] = 1
+			conn, err := p.hub.WriteToRoute(dstKey, packet.data[:payloadLen+2])
+			config.LPool.Put(packet.data[:])
+			if err != nil {
+				if config.Debug {
+					plog.G(ctx).Warnf("[TUN] No route for %s -> %s, dropping", packet.src, packet.dst)
 				}
-			} else {
-				plog.G(ctx).Warnf("[TUN] No route for %s -> %s, dropping", packet.src, packet.dst)
-				config.LPool.Put(packet.data[:])
+			} else if config.Debug {
+				plog.G(ctx).Debugf("[TUN] Routed %s -> %s via %s", packet.src, packet.dst, conn.RemoteAddr())
 			}
 		case <-ctx.Done():
 			return

@@ -17,25 +17,36 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+type stackConstructor func(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack
+
 type gvisorTCPHandler struct {
-	hub *RouteHub
+	hub      *RouteHub
+	newStack stackConstructor
 }
 
+// GvisorTCPHandler creates a Handler that accepts TCP connections and runs a gvisor stack per connection.
 func GvisorTCPHandler(hub *RouteHub) Handler {
 	if hub == nil {
 		hub = DefaultRouteHub
 	}
-	return &gvisorTCPHandler{
-		hub: hub,
+	return &gvisorTCPHandler{hub: hub, newStack: NewStack}
+}
+
+// GvisorLocalTCPHandler creates a Handler using NewLocalStack (routes to 127.0.0.1).
+func GvisorLocalTCPHandler(hub *RouteHub) Handler {
+	if hub == nil {
+		hub = DefaultRouteHub
 	}
+	return &gvisorTCPHandler{hub: hub, newStack: NewLocalStack}
 }
 
 func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	plog.G(ctx).Infof("[Gvisor-TCP] New connection: %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
+	plog.G(ctx).Infof("[Gvisor-TCP] Client connected: %s", tcpConn.RemoteAddr())
 	h.handle(ctx, tcpConn)
+	plog.G(ctx).Infof("[Gvisor-TCP] Client disconnected: %s", tcpConn.RemoteAddr())
 }
 
 func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {
@@ -54,7 +65,7 @@ func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {
 		h.readFromEndpointWriteToTCPConn(ctx, tcpConn, endpoint)
 		util.SafeClose(errChan)
 	}()
-	s := NewStack(ctx, sniffer.NewWithPrefix(endpoint, "[gVISOR] "))
+	s := h.newStack(ctx, sniffer.NewWithPrefix(endpoint, "[gVISOR] "))
 	defer s.Destroy()
 	select {
 	case <-errChan:
@@ -64,6 +75,7 @@ func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {
 	}
 }
 
+// GvisorTCPListener creates a TCP listener with optional TLS for the gvisor server.
 func GvisorTCPListener(addr string) (net.Listener, error) {
 	plog.G(context.Background()).Infof("[Gvisor-TCP] Listening on %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)

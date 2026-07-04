@@ -2,11 +2,12 @@ package action
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"time"
 
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	v1 "k8s.io/api/core/v1"
@@ -14,7 +15,6 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -32,20 +32,15 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		return err
 	}
 
-	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newProxyWarp(resp), svr.LogFile))
+	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newStreamWriter(func(msg string) error {
+		return resp.Send(&rpc.ProxyResponse{Message: msg})
+	}), svr.LogFile))
 	ctx := plog.WithLogger(resp.Context(), logger)
-	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
-
-	var file string
-	defer os.Remove(file)
-	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(ctx, sshConf, []byte(req.KubeconfigBytes), false)
-	} else {
-		file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
-	}
+	file, err := resolveKubeconfig(ctx, req.SshJump, req.KubeconfigBytes, false)
 	if err != nil {
 		return err
 	}
+	defer os.Remove(file)
 	connect := &handler.ConnectOptions{
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
@@ -67,7 +62,7 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	var cli rpc.DaemonClient
 	cli, err = svr.GetClient(false)
 	if err != nil {
-		return errors.Wrap(err, "daemon is not available")
+		return fmt.Errorf("daemon is not available: %w", err)
 	}
 
 	var connResp grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse]
@@ -100,16 +95,9 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		return err
 	}
 
-	var options *handler.ConnectOptions
-	for _, connection := range svr.connections {
-		if connection.GetConnectionID() == connectionID {
-			options = connection
-			break
-		}
-	}
-
+	options, _ := svr.findConnection(connectionID)
 	if options == nil {
-		return errors.New("Failed to connect to cluster")
+		return errors.New("failed to connect to cluster")
 	}
 
 	defer func() {
@@ -130,24 +118,10 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		return err
 	}
 	svr.currentConnectionID = connectionID
-	options.HealthCheckOnce(cancel, time.Second*5)
+	options.HealthCheckOnce(cancel, time.Second*10)
 	return nil
 }
 
-type proxyWarp struct {
-	server rpc.Daemon_ProxyServer
-}
-
-func (r *proxyWarp) Write(p []byte) (n int, err error) {
-	_ = r.server.Send(&rpc.ProxyResponse{
-		Message: string(p),
-	})
-	return len(p), nil
-}
-
-func newProxyWarp(server rpc.Daemon_ProxyServer) io.Writer {
-	return &proxyWarp{server: server}
-}
 
 func convert(req *rpc.ProxyRequest) *rpc.ConnectRequest {
 	return &rpc.ConnectRequest{

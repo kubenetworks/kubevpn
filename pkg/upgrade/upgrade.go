@@ -37,7 +37,7 @@ func Main(ctx context.Context, quit func(ctx context.Context, isSudo bool) error
 	if config.GitHubOAuthToken != "" {
 		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
 	}
-	url, latestVersion, needsUpgrade, err := NeedsUpgrade(ctx, client, config.Version)
+	url, latestVersion, needsUpgrade, err := needsUpgrade(ctx, client, config.Version)
 	if err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func elevatePermission() error {
 	return nil
 }
 
-func NeedsUpgrade(ctx context.Context, client *http.Client, version string) (url string, latestVersion string, upgrade bool, err error) {
+func needsUpgrade(ctx context.Context, client *http.Client, version string) (url string, latestVersion string, upgrade bool, err error) {
 	latestVersion, url, err = util.GetManifest(client, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		v := "https://github.com/kubenetworks/kubevpn/raw/master/plugins/stable.txt"

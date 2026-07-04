@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/pkg/errors"
+	"errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -115,7 +115,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		plog.G(ctx).Errorf("Failed to configure http2: %v", err)
 		return err
 	}
-	handler := CreateDowngradingHandler(svr, http.HandlerFunc(http.DefaultServeMux.ServeHTTP))
+	handler := createDowngradingHandler(svr, http.HandlerFunc(http.DefaultServeMux.ServeHTTP))
 	downgradingServer.Handler = h2c.NewHandler(handler, &h2Server)
 	o.uptime = time.Now().Unix()
 	// remember to close http server, otherwise daemon will not quit successfully
@@ -142,7 +142,7 @@ func (o *SvrOption) Stop() {
 	}
 }
 
-// CreateDowngradingHandler takes a gRPC server and a plain HTTP handler, and returns an HTTP handler that has the
+// createDowngradingHandler takes a gRPC server and a plain HTTP handler, and returns an HTTP handler that has the
 // capability of handling HTTP requests and gRPC requests that may require downgrading the response to gRPC-Web or gRPC-WebSocket.
 //
 //	if r.ProtoMajor == 2 && strings.HasPrefix(
@@ -151,7 +151,7 @@ func (o *SvrOption) Stop() {
 //	} else {
 //		yourMux.ServeHTTP(w, r)
 //	}
-func CreateDowngradingHandler(grpcServer *grpc.Server, httpHandler http.Handler) http.Handler {
+func createDowngradingHandler(grpcServer *grpc.Server, httpHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 			grpcServer.ServeHTTP(w, r)
@@ -168,7 +168,7 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 			o.Stop()
 			return
 		}
-		client, conn, err := GetClientWithoutCache(ctx, o.IsSudo)
+		client, conn, err := getClientWithoutCache(ctx, o.IsSudo)
 		if conn != nil {
 			defer conn.Close()
 		}

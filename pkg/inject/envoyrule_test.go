@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func TestAddVirtualRule(t *testing.T) {
@@ -14,7 +13,8 @@ func TestAddVirtualRule(t *testing.T) {
 		Rule      []*controlplane.Virtual
 		Ports     []controlplane.ContainerPort
 		Headers   map[string]string
-		TunIP     util.PodRouteConfig
+		LocalTunIPv4 string
+		LocalTunIPv6 string
 		Uid       string
 		Namespace string
 		PortMap   map[int32]string
@@ -28,10 +28,8 @@ func TestAddVirtualRule(t *testing.T) {
 					ContainerPort:     9080,
 				},
 			},
-			TunIP: util.PodRouteConfig{
-				LocalTunIPv4: "127.0.0.1",
-				LocalTunIPv6: netip.IPv6Loopback().String(),
-			},
+			LocalTunIPv4: "127.0.0.1",
+			LocalTunIPv6: netip.IPv6Loopback().String(),
 			Uid: "deployments.authors",
 			Expect: []*controlplane.Virtual{
 				{
@@ -53,7 +51,7 @@ func TestAddVirtualRule(t *testing.T) {
 		},
 	}
 	for _, data := range testdatas {
-		rule := addVirtualRule(data.Rule, data.Namespace, data.Uid, data.Ports, data.Headers, data.TunIP, nil)
+		rule := addVirtualRule(data.Rule, data.Namespace, data.Uid, data.Ports, data.Headers, data.LocalTunIPv4, data.LocalTunIPv6, nil)
 		if !reflect.DeepEqual(rule, data.Expect) {
 			t.FailNow()
 		}

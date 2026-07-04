@@ -6,6 +6,6 @@ import (
 
 func TestRender(t *testing.T) {
 	tmplStr := string(envoyConfig)
-	conf := GetEnvoyConfig(tmplStr, "test")
+	conf := RenderEnvoyConfig(tmplStr, "test")
 	t.Log(conf)
 }

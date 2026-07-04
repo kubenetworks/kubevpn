@@ -2,11 +2,10 @@ package core
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"time"
-
-	"github.com/pkg/errors"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
@@ -32,10 +31,12 @@ func localUDPAddr(id stack.TransportEndpointID) *net.UDPAddr {
 	return &net.UDPAddr{IP: ip, Port: int(id.LocalPort)}
 }
 
+// UDPForwarder creates a gvisor transport handler for UDP packets that dials the real destination.
 func UDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
 	return newUDPForwarder(ctx, s, serverUDPAddr)
 }
 
+// LocalUDPForwarder creates a UDP handler that routes to 127.0.0.1 (for local dev mode).
 func LocalUDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
 	return newUDPForwarder(ctx, s, localUDPAddr)
 }
@@ -78,7 +79,7 @@ func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolve
 				var written int
 				var err error
 				for {
-					err = conn.SetReadDeadline(time.Now().Add(time.Second * 120))
+					err = conn.SetReadDeadline(time.Now().Add(config.UDPSessionTimeout))
 					if err != nil {
 						break
 					}
@@ -88,7 +89,7 @@ func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolve
 						break
 					}
 					written += read
-					err = remote.SetWriteDeadline(time.Now().Add(time.Second * 120))
+					err = remote.SetWriteDeadline(time.Now().Add(config.UDPSessionTimeout))
 					if err != nil {
 						break
 					}
@@ -108,7 +109,7 @@ func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolve
 				var err error
 				var written int
 				for {
-					err = remote.SetReadDeadline(time.Now().Add(time.Second * 120))
+					err = remote.SetReadDeadline(time.Now().Add(config.UDPSessionTimeout))
 					if err != nil {
 						break
 					}
@@ -118,7 +119,7 @@ func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolve
 						break
 					}
 					written += n
-					err = conn.SetWriteDeadline(time.Now().Add(time.Second * 120))
+					err = conn.SetWriteDeadline(time.Now().Add(config.UDPSessionTimeout))
 					if err != nil {
 						break
 					}

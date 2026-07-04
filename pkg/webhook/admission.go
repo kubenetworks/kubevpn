@@ -18,19 +18,15 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-// admissionReviewHandler is a handler to handle business logic, holding an util.Factory
 type admissionReviewHandler struct {
 	sync.Mutex
 	dhcp *dhcp.Manager
 }
 
-// admitv1beta1Func handles a v1beta1 admission
-type admitv1beta1Func func(v1beta1.AdmissionReview) *v1beta1.AdmissionResponse
+type admitv1beta1Func func(context.Context, v1beta1.AdmissionReview) *v1beta1.AdmissionResponse
 
-// admitv1beta1Func handles a v1 admission
-type admitv1Func func(v1.AdmissionReview) *v1.AdmissionResponse
+type admitv1Func func(context.Context, v1.AdmissionReview) *v1.AdmissionResponse
 
-// admitHandler is a handler, for both validators and mutators, that supports multiple admission review versions
 type admitHandler struct {
 	v1beta1 admitv1beta1Func
 	v1      admitv1Func
@@ -44,16 +40,15 @@ func newDelegateToV1AdmitHandler(f admitv1Func) admitHandler {
 }
 
 func delegateV1beta1AdmitToV1(f admitv1Func) admitv1beta1Func {
-	return func(review v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
+	return func(ctx context.Context, review v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 		in := v1.AdmissionReview{Request: convertAdmissionRequestToV1(review.Request)}
-		out := f(in)
+		out := f(ctx, in)
 		return convertAdmissionResponseToV1beta1(out)
 	}
 }
 
-// serve handles the http portion of a request prior to handing to an admit
-// function
 func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
+	ctx := r.Context()
 	var body []byte
 	if r.Body != nil {
 		if data, err := io.ReadAll(r.Body); err == nil {
@@ -61,10 +56,9 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		}
 	}
 
-	// verify the content type is accurate
 	contentType := r.Header.Get("Content-Type")
 	if contentType != "application/json" {
-		plog.G(context.Background()).Errorf("ContentType=%s, expect application/json", contentType)
+		plog.G(ctx).Errorf("ContentType=%s, expect application/json", contentType)
 		return
 	}
 
@@ -72,7 +66,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	obj, gvk, err := deserializer.Decode(body, nil, nil)
 	if err != nil {
 		msg := fmt.Sprintf("Request: %s could not be decoded: %v", string(body), err)
-		plog.G(context.Background()).Error(msg)
+		plog.G(ctx).Error(msg)
 		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
@@ -82,11 +76,11 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	case v1beta1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*v1beta1.AdmissionReview)
 		if !ok {
-			plog.G(context.Background()).Errorf("Expected v1beta1.AdmissionReview but got: %T", obj)
+			plog.G(ctx).Errorf("Expected v1beta1.AdmissionReview but got: %T", obj)
 			return
 		}
 		if ptr.Deref(requestedAdmissionReview.Request.DryRun, false) {
-			plog.G(context.Background()).Info("Ignore dryrun")
+			plog.G(ctx).Info("Ignore dryrun")
 			responseObj = &v1beta1.AdmissionReview{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: gvk.GroupVersion().String(),
@@ -100,18 +94,19 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		} else {
 			responseAdmissionReview := &v1beta1.AdmissionReview{}
 			responseAdmissionReview.SetGroupVersionKind(*gvk)
-			responseAdmissionReview.Response = admit.v1beta1(*requestedAdmissionReview)
+			responseAdmissionReview.Response = admit.v1beta1(ctx, *requestedAdmissionReview)
 			responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 			responseObj = responseAdmissionReview
 		}
+
 	case v1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*v1.AdmissionReview)
 		if !ok {
-			plog.G(context.Background()).Errorf("Expected v1.AdmissionReview but got: %T", obj)
+			plog.G(ctx).Errorf("Expected v1.AdmissionReview but got: %T", obj)
 			return
 		}
 		if ptr.Deref(requestedAdmissionReview.Request.DryRun, false) {
-			plog.G(context.Background()).Info("Ignore dry-run")
+			plog.G(ctx).Info("Ignore dryrun")
 			responseObj = &v1.AdmissionReview{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: gvk.GroupVersion().String(),
@@ -125,26 +120,28 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		} else {
 			responseAdmissionReview := &v1.AdmissionReview{}
 			responseAdmissionReview.SetGroupVersionKind(*gvk)
-			responseAdmissionReview.Response = admit.v1(*requestedAdmissionReview)
+			responseAdmissionReview.Response = admit.v1(ctx, *requestedAdmissionReview)
 			responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 			responseObj = responseAdmissionReview
 		}
+
 	default:
 		msg := fmt.Sprintf("Unsupported group version kind: %v", gvk)
-		plog.G(context.Background()).Error(msg)
+		plog.G(ctx).Error(msg)
 		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
 
 	respBytes, err := json.Marshal(responseObj)
 	if err != nil {
-		plog.G(context.Background()).Errorf("Unable to encode response: %v", err)
+		plog.G(ctx).Error(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	plog.G(context.Background()).Infof("Sending response: %v", string(respBytes))
+
 	w.Header().Set("Content-Type", "application/json")
-	if _, err = w.Write(respBytes); err != nil {
-		plog.G(context.Background()).Errorf("Unable to write response: %v", err)
+	_, err = w.Write(respBytes)
+	if err != nil {
+		plog.G(ctx).Error(err)
 	}
 }

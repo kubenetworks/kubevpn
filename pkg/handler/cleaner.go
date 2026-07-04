@@ -9,7 +9,7 @@ import (
 	"time"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -59,8 +59,8 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 				}
 			}
 			if c.clientset != nil {
-				_ = c.clientset.CoreV1().Pods(c.Namespace).Delete(ctx, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
-				_ = c.clientset.BatchV1().Jobs(c.Namespace).Delete(ctx, config.ConfigMapPodTrafficManager, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
+				_ = c.clientset.CoreV1().Pods(c.ManagerNamespace).Delete(ctx, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
+				_ = c.clientset.BatchV1().Jobs(c.ManagerNamespace).Delete(ctx, config.ConfigMapPodTrafficManager, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
 			}
 			// leave proxy resources
 			err := c.LeaveAllProxyResources(ctx)
@@ -68,18 +68,18 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 				plog.G(logCtx).Errorf("Leave proxy resources error: %v", err)
 			}
 
-			for _, function := range c.getRolloutFunc() {
+			for _, function := range c.getRollbackFuncs() {
 				if function != nil {
 					if err = function(); err != nil {
-						plog.G(logCtx).Warnf("Rollout function error: %v", err)
+						plog.G(logCtx).Warnf("Rollback function error: %v", err)
 					}
 				}
 			}
 		} else {
-			for _, function := range c.getRolloutFunc() {
+			for _, function := range c.getRollbackFuncs() {
 				if function != nil {
 					if err := function(); err != nil {
-						plog.G(logCtx).Warnf("Rollout function error: %v", err)
+						plog.G(logCtx).Warnf("Rollback function error: %v", err)
 					}
 				}
 			}

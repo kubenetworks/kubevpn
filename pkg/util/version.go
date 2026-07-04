@@ -5,7 +5,7 @@ import (
 
 	"github.com/distribution/reference"
 	"github.com/hashicorp/go-version"
-	"github.com/pkg/errors"
+	"errors"
 )
 
 // CmpClientVersionAndClientImage
@@ -51,6 +51,7 @@ func CmpClientVersionAndPodImageTag(clientVersion string, serverImgStr string) i
 	return CmpVersionMajorOrMinor(clientVersion, serverImgTag.Tag())
 }
 
+// CmpVersionMajorOrMinor compares two semver strings by MAJOR and MINOR segments only, returning -1, 0, or 1.
 func CmpVersionMajorOrMinor(v1 string, v2 string) int {
 	version1, err := version.NewVersion(v1)
 	if err != nil {
@@ -80,6 +81,7 @@ func CmpVersionMajorOrMinor(v1 string, v2 string) int {
 	return 0
 }
 
+// GetTargetImage returns the image reference with its tag replaced by the given version string.
 func GetTargetImage(version string, image string) string {
 	serverImg, err := reference.ParseNormalizedNamed(image)
 	if err != nil {
@@ -105,14 +107,14 @@ MAJOR and MINOR different should be same, otherwise needs upgrade
 func IsNewer(clientVer string, clientImg string, serverImg string) (bool, error) {
 	isNeedUpgrade, _ := CmpClientVersionAndClientImage(clientVer, clientImg)
 	if isNeedUpgrade != 0 {
-		err := errors.New("\n" + PrintStr(fmt.Sprintf("Client version and image tag not compatible. client version: %s, image: %s", clientVer, clientImg)))
+		err := errors.New("\n" + FormatBanner(fmt.Sprintf("Client version and image tag not compatible. client version: %s, image: %s", clientVer, clientImg)))
 		return true, err
 	}
 	cmp := CmpClientVersionAndPodImageTag(clientVer, serverImg)
 	if cmp > 0 {
 		return true, nil
 	} else if cmp < 0 {
-		err := errors.New("\n" + PrintStr(fmt.Sprintf("Client version too old. client version: %s, server version: %s", clientVer, serverImg)))
+		err := errors.New("\n" + FormatBanner(fmt.Sprintf("Client version too old. client version: %s, server version: %s", clientVer, serverImg)))
 		return true, err
 	}
 	return false, nil

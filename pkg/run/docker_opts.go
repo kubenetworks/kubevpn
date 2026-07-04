@@ -11,7 +11,6 @@ import (
 	mounttypes "github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/strslice"
 	"github.com/docker/go-connections/nat"
-	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 )
 
@@ -155,7 +154,7 @@ func Parse(flags *pflag.FlagSet, copts *ContainerOptions) (*Config, *HostConfig,
 	// Merge in exposed ports to the map of published ports
 	for _, e := range copts.expose.GetAll() {
 		if strings.Contains(e, ":") {
-			return nil, nil, errors.Errorf("invalid port format for --expose: %s", e)
+			return nil, nil, fmt.Errorf("invalid port format for --expose: %s", e)
 		}
 		// support two formats for expose, original format <portnum>/[<proto>]
 		// or <startport-endport>/[<proto>]
@@ -164,7 +163,7 @@ func Parse(flags *pflag.FlagSet, copts *ContainerOptions) (*Config, *HostConfig,
 		// if expose a port, the start and end port are the same
 		start, end, err := nat.ParsePortRange(port)
 		if err != nil {
-			return nil, nil, errors.Errorf("invalid range format for --expose: %s, error: %s", e, err)
+			return nil, nil, fmt.Errorf("invalid range format for --expose: %s, error: %s", e, err)
 		}
 		for i := start; i <= end; i++ {
 			p, err := nat.NewPort(proto, strconv.FormatUint(i, 10))
@@ -209,7 +208,7 @@ func convertToStandardNotation(ports []string) ([]string, error) {
 			for _, param := range strings.Split(publish, ",") {
 				k, v, ok := strings.Cut(param, "=")
 				if !ok || k == "" {
-					return optsList, errors.Errorf("invalid publish opts format (should be name=value but got '%s')", param)
+					return optsList, fmt.Errorf("invalid publish opts format (should be name=value but got '%s')", param)
 				}
 				params[k] = v
 			}
@@ -229,7 +228,7 @@ func validateAttach(val string) (string, error) {
 			return s, nil
 		}
 	}
-	return val, errors.Errorf("valid streams are STDIN, STDOUT and STDERR")
+	return val, fmt.Errorf("valid streams are STDIN, STDOUT and STDERR")
 }
 
 type Config struct {

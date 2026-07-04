@@ -54,7 +54,7 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 	var searchList []string
 	if v, ok := s.dnsCache.Get(originName); ok {
 		searchList = []string{v.(string)}
-		plog.G(ctx).Infof("Use cache name: %s --> %s", originName, v.(string))
+		plog.G(ctx).Debugf("DNS cache hit: %s → %s", originName, v.(string))
 	} else {
 		searchList = fix(originName, s.forwardDNS.Search)
 	}
@@ -89,11 +89,11 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 				for i := 0; i < len(answer.Question); i++ {
 					answer.Question[i].Name = originName
 				}
-				plog.G(ctx).Infof("Resolve domain %s with full name: %s --> %s", originName, name, answer.String())
+				plog.G(ctx).Debugf("DNS resolved: %s → %s (%d answers)", originName, name, len(answer.Answer))
 
 				err = w.WriteMsg(answer)
 				if err != nil {
-					plog.G(context.Background()).Errorf("Failed to write response for name: %s: %v", name, err.Error())
+					plog.G(ctx).Errorf("Failed to write response for name: %s: %v", name, err.Error())
 				}
 			}()
 		}

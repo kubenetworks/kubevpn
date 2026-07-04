@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/pkg/errors"
+	"errors"
 	"k8s.io/api/core/v1"
 	v2 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -16,6 +16,7 @@ import (
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 )
 
+// GetUnstructuredObject fetches a single Kubernetes resource by type/name string and returns its resource.Info.
 func GetUnstructuredObject(f util.Factory, ns string, workloads string) (*resource.Info, error) {
 	do := f.NewBuilder().
 		Unstructured().
@@ -39,6 +40,7 @@ func GetUnstructuredObject(f util.Factory, ns string, workloads string) (*resour
 	return infos[0], err
 }
 
+// GetUnstructuredObjectList fetches multiple Kubernetes resources by type/name strings and returns their resource.Info list.
 func GetUnstructuredObjectList(f util.Factory, ns string, workloads []string) ([]*resource.Info, error) {
 	do := f.NewBuilder().
 		Unstructured().
@@ -57,7 +59,7 @@ func GetUnstructuredObjectList(f util.Factory, ns string, workloads []string) ([
 		return nil, err
 	}
 	if len(infos) == 0 {
-		return nil, errors.New(fmt.Sprintf("Not found resource %v", workloads))
+		return nil, fmt.Errorf("not found resource %v", workloads)
 	}
 	return infos, err
 }
@@ -81,11 +83,12 @@ func getUnstructuredObjectBySelector(f util.Factory, ns string, selector string)
 		return nil, err
 	}
 	if len(infos) == 0 {
-		return nil, errors.New("Not found")
+		return nil, errors.New("not found")
 	}
 	return infos, err
 }
 
+// GetPodTemplateSpecPath extracts the PodTemplateSpec and its JSON path from an unstructured Kubernetes object.
 func GetPodTemplateSpecPath(u *unstructured.Unstructured) (*v1.PodTemplateSpec, []string, error) {
 	var stringMap map[string]interface{}
 	var b bool
@@ -119,6 +122,7 @@ NormalizedResource convert user parameter to standard, example:
 	pods without controller
 	pod/productpage-without-controller --> pod/productpage-without-controller
 */
+// NormalizedResource resolves workload references (pods, replicasets, etc.) to their canonical group-resource/name form.
 func NormalizedResource(f util.Factory, ns string, workloads []string) ([]string, []*resource.Info, error) {
 	if len(workloads) == 0 {
 		return nil, nil, nil
@@ -135,6 +139,7 @@ func NormalizedResource(f util.Factory, ns string, workloads []string) ([]string
 	return resources, objectList, nil
 }
 
+// GetTopOwnerObject traverses the owner reference chain to find both the original object and its top-level controller.
 func GetTopOwnerObject(ctx context.Context, f util.Factory, ns string, workload string) (object, controller *resource.Info, err error) {
 	// normal workload, like pod with controller, deployments, statefulset, replicaset etc...
 	object, controller, err = getTopOwnerReference(f, ns, workload)
@@ -174,6 +179,7 @@ func GetTopOwnerObject(ctx context.Context, f util.Factory, ns string, workload 
 	return object, controller, err
 }
 
+// IsK8sService reports whether the resource.Info refers to a Kubernetes Service.
 func IsK8sService(info *resource.Info) bool {
 	return info.Mapping.Resource.Resource == "services"
 }

@@ -16,6 +16,7 @@ type bufferedTCP struct {
 	closed atomic.Bool
 }
 
+// NewBufferedTCP wraps a TCP connection with an async write buffer to reduce syscalls.
 func NewBufferedTCP(ctx context.Context, conn net.Conn) net.Conn {
 	c := &bufferedTCP{
 		Conn: conn,
@@ -48,7 +49,7 @@ func (c *bufferedTCP) run(ctx context.Context) {
 			_, err := c.Conn.Write(dgram.Data[:dgram.DataLength])
 			config.LPool.Put(dgram.Data[:])
 			if err != nil {
-				plog.G(context.Background()).Errorf("[TCP] Failed to write packet: %v", err)
+				plog.G(ctx).Errorf("[TCP] Failed to write packet: %v", err)
 				_ = c.Conn.Close()
 				c.closed.Store(true)
 				return

@@ -4,6 +4,7 @@ package util
 
 import "net"
 
+// IsIPv6Enabled reports whether the system has a non-loopback IPv6 address configured.
 func IsIPv6Enabled() (bool, error) {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {

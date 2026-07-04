@@ -3,6 +3,7 @@ package ssh
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,7 +15,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pkg/errors"
 	gossh "golang.org/x/crypto/ssh"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -24,35 +24,23 @@ import (
 )
 
 // DialSshRemote https://github.com/golang/go/issues/21478
-func DialSshRemote(ctx context.Context, conf *SshConfig, stopChan <-chan struct{}) (remote *gossh.Client, err error) {
+func DialSshRemote(ctx context.Context, conf *SshConfig, stopChan <-chan struct{}) (client *gossh.Client, err error) {
 	defer func() {
-		if err != nil {
-			if remote != nil {
-				remote.Close()
-			}
+		if err != nil && client != nil {
+			client.Close()
 		}
 	}()
 
 	if conf.ConfigAlias != "" {
-		remote, err = conf.AliasRecursion(ctx, stopChan)
-	} else if conf.Jump != "" {
-		remote, err = conf.JumpRecursion(ctx, stopChan)
-	} else {
-		remote, err = conf.Dial(ctx, stopChan)
+		return conf.AliasRecursion(ctx, stopChan)
 	}
-
-	// ref: https://github.com/golang/go/issues/21478
-	if err == nil {
-		//go func() {
-		//	err2 := keepAlive(remote, conn, ctx.Done())
-		//	if err2 != nil {
-		//		plog.G(ctx).Debugf("Failed to send keep-alive request: %v", err2)
-		//	}
-		//}()
+	if conf.Jump != "" {
+		return conf.JumpRecursion(ctx, stopChan)
 	}
-	return remote, err
+	return conf.Dial(ctx, stopChan)
 }
 
+// RemoteRun executes a command on the remote SSH server and returns stdout and stderr output.
 func RemoteRun(client *gossh.Client, cmd string, env map[string]string) (output []byte, errOut []byte, err error) {
 	var session *gossh.Session
 	session, err = client.NewSession()
@@ -73,6 +61,7 @@ func RemoteRun(client *gossh.Client, cmd string, env map[string]string) (output 
 	return out.Bytes(), er.Bytes(), err
 }
 
+// PortMapUntil sets up local TCP port forwarding through an SSH tunnel, forwarding local connections to the remote address.
 func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.AddrPort) error {
 	// Listen on remote server port
 	var lc net.ListenConfig
@@ -129,6 +118,7 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 	return nil
 }
 
+// SshJump establishes an SSH tunnel to the Kubernetes API server and returns the path to a rewritten kubeconfig pointing at the local tunnel endpoint.
 func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print bool) (path string, err error) {
 	if len(conf.RemoteKubeconfig) != 0 {
 		var stdout []byte
@@ -149,17 +139,17 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 			map[string]string{clientcmd.RecommendedConfigPathEnvVar: conf.RemoteKubeconfig},
 		)
 		if err != nil {
-			err = errors.Wrap(err, string(stderr))
+			err = fmt.Errorf("%s: %w", string(stderr), err)
 			return
 		}
 		if len(bytes.TrimSpace(stdout)) == 0 {
-			err = errors.Errorf("can not get kubeconfig %s from remote ssh server: %s", conf.RemoteKubeconfig, string(stderr))
+			err = fmt.Errorf("cannot get kubeconfig %s from remote ssh server: %s", conf.RemoteKubeconfig, string(stderr))
 			return
 		}
 		kubeconfigBytes = bytes.TrimSpace(stdout)
 	}
 	var port int
-	port, err = pkgutil.GetAvailableTCPPortOrDie()
+	port, err = pkgutil.GetAvailableTCPPort()
 	if err != nil {
 		return
 	}
@@ -206,6 +196,7 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 	return
 }
 
+// SshJumpAndSetEnv performs SshJump and sets the KUBECONFIG and SSH jump environment variables to the resulting path.
 func SshJumpAndSetEnv(ctx context.Context, sshConf *SshConfig, kubeconfigBytes []byte, print bool) error {
 	path, err := SshJump(ctx, sshConf, kubeconfigBytes, print)
 	if err != nil {
@@ -218,6 +209,7 @@ func SshJumpAndSetEnv(ctx context.Context, sshConf *SshConfig, kubeconfigBytes [
 	return os.Setenv(config.EnvSSHJump, path)
 }
 
+// JumpTo dials through an existing SSH client (bastion) to establish a new SSH connection to the target host.
 func JumpTo(ctx context.Context, bClient *gossh.Client, to SshConfig, stopChan <-chan struct{}) (client *gossh.Client, err error) {
 	if _, _, err = net.SplitHostPort(to.Addr); err != nil {
 		// use default ssh port 22
@@ -318,41 +310,37 @@ func getRemoteConn(ctx context.Context, clientMap *sync.Map, conf *SshConfig, re
 }
 
 func copyStream(ctx context.Context, local net.Conn, remote net.Conn) {
-	chDone := make(chan bool, 2)
+	done := make(chan struct{}, 2)
 
-	// start remote -> local data transfer
-	go func() {
+	copy := func(dst, src net.Conn, direction string) {
 		buf := config.LPool.Get().([]byte)[:]
 		defer config.LPool.Put(buf[:])
-		_, err := io.CopyBuffer(local, remote, buf)
+		_, err := io.CopyBuffer(dst, src, buf)
 		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
-			plog.G(ctx).Errorf("Failed to copy remote -> local: %s", err)
+			plog.G(ctx).Debugf("Copy %s error: %s", direction, err)
 		}
-		chDone <- true
-	}()
-
-	// start local -> remote data transfer
-	go func() {
-		buf := config.LPool.Get().([]byte)[:]
-		defer config.LPool.Put(buf[:])
-		_, err := io.CopyBuffer(remote, local, buf)
-		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
-			plog.G(ctx).Errorf("Failed to copy local -> remote: %s", err)
-		}
-		chDone <- true
-	}()
-
-	select {
-	case <-chDone:
-		return
-	case <-ctx.Done():
-		return
+		done <- struct{}{}
 	}
+
+	go copy(local, remote, "remote->local")
+	go copy(remote, local, "local->remote")
+
+	// Wait for either direction to finish or context cancel, then close both
+	// connections to unblock the other goroutine.
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+	local.Close()
+	remote.Close()
+	// Wait for the second goroutine to finish
+	<-done
 }
 
+// GenKubeconfigTempPath generates a temp file path for kubeconfig based on the SSH config identifier or kubeconfig content.
 func GenKubeconfigTempPath(conf *SshConfig, kubeconfigBytes []byte) string {
 	if conf != nil && conf.RemoteKubeconfig != "" {
-		return filepath.Join(config.GetTempPath(), fmt.Sprintf("%s_%d", conf.GenKubeconfigIdentify(), time.Now().Unix()))
+		return filepath.Join(config.GetTempPath(), fmt.Sprintf("%s_%d", conf.KubeconfigIdentifier(), time.Now().Unix()))
 	}
 
 	return pkgutil.GenKubeconfigTempPath(kubeconfigBytes)

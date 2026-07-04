@@ -2,12 +2,11 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
-	"time"
 
-	"github.com/pkg/errors"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
@@ -32,10 +31,12 @@ func localTCPAddr(id stack.TransportEndpointID) (string, string) {
 	return host, fmt.Sprintf("%d", id.LocalPort)
 }
 
+// TCPForwarder creates a gvisor transport handler for TCP connections that dials the real destination.
 func TCPForwarder(ctx context.Context, s *stack.Stack) func(stack.TransportEndpointID, *stack.PacketBuffer) bool {
 	return newTCPForwarder(ctx, s, serverTCPAddr, false)
 }
 
+// LocalTCPForwarder creates a TCP handler that routes to 127.0.0.1 (for local dev and test mode).
 func LocalTCPForwarder(ctx context.Context, s *stack.Stack) func(stack.TransportEndpointID, *stack.PacketBuffer) bool {
 	return newTCPForwarder(ctx, s, localTCPAddr, true)
 }
@@ -72,7 +73,7 @@ func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolve
 		}()
 
 		host, port := resolve(id)
-		var d = net.Dialer{Timeout: time.Second * 5}
+		var d = net.Dialer{Timeout: config.ConnectTimeout}
 		var remote net.Conn
 		remote, err = d.DialContext(dialCtx, "tcp", net.JoinHostPort(host, port))
 		if err != nil {

@@ -24,7 +24,7 @@ const (
 	grpcMaxConcurrentStreams = 1000000
 )
 
-func RunServer(ctx context.Context, server serverv3.Server, port uint) error {
+func runServer(ctx context.Context, server serverv3.Server, port uint) error {
 	grpcOpts := []grpc.ServerOption{
 		grpc.MaxConcurrentStreams(grpcMaxConcurrentStreams),
 		grpc.KeepaliveParams(keepalive.ServerParameters{

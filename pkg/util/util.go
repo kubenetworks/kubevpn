@@ -16,15 +16,12 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
@@ -37,6 +34,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// IsWindows reports whether the current runtime OS is Windows.
 func IsWindows() bool {
 	return runtime.GOOS == "windows"
 }
@@ -133,11 +131,13 @@ func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string
 	}()
 }
 
+// WriterStringer combines io.Writer and fmt.Stringer for buffered output with string access.
 type WriterStringer interface {
 	io.Writer
 	fmt.Stringer
 }
 
+// NewWriter returns a WriterStringer that stops buffering once the checker function returns true.
 func NewWriter(checker func(log string) bool) WriterStringer {
 	return &proxyWriter{Buffer: bytes.NewBuffer(make([]byte, 0)), checker: checker}
 }
@@ -164,7 +164,7 @@ func (w *proxyWriter) String() string {
 	return w.Buffer.String()
 }
 
-func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string) (stop bool)) (string, string, error) {
+func runWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string) (stop bool)) (string, string, error) {
 	stdoutBuf := NewWriter(checker)
 	stderrBuf := NewWriter(checker)
 
@@ -198,55 +198,7 @@ func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string) (sto
 	return stdoutStr, stderrStr, err
 }
 
-func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.PolicyRule) (allowed bool, err error) {
-	var roleBindingList *rbacv1.RoleBindingList
-	roleBindingList, err = clientset.RbacV1().RoleBindings(ns).List(context.Background(), metav1.ListOptions{})
-	if err != nil {
-		return false, err
-	}
-	for _, item := range roleBindingList.Items {
-		for _, subject := range item.Subjects {
-			if subject.Name == sa && subject.Kind == "ServiceAccount" {
-				var role *rbacv1.Role
-				role, err = clientset.RbacV1().Roles(ns).Get(context.Background(), item.RoleRef.Name, metav1.GetOptions{})
-				if err != nil {
-					return false, err
-				}
-				for _, rule := range role.Rules {
-					if sets.New[string](rule.Resources...).HasAll(resource.Resources...) && sets.New[string](rule.Verbs...).HasAll(resource.Verbs...) {
-						if len(rule.ResourceNames) == 0 || sets.New[string](rule.ResourceNames...).HasAll(resource.ResourceNames...) {
-							return true, nil
-						}
-					}
-				}
-			}
-		}
-	}
-
-	var clusterRoleBindingList *rbacv1.ClusterRoleBindingList
-	clusterRoleBindingList, err = clientset.RbacV1().ClusterRoleBindings().List(context.Background(), metav1.ListOptions{})
-	for _, item := range clusterRoleBindingList.Items {
-		for _, subject := range item.Subjects {
-			if subject.Name == sa && subject.Kind == "ServiceAccount" {
-				var role *rbacv1.ClusterRole
-				role, err = clientset.RbacV1().ClusterRoles().Get(context.Background(), item.RoleRef.Name, metav1.GetOptions{})
-				if err != nil {
-					return false, err
-				}
-				for _, rule := range role.Rules {
-					if sets.New[string](rule.Resources...).HasAll(resource.Resources...) && sets.New[string](rule.Verbs...).HasAll(resource.Verbs...) {
-						if len(rule.ResourceNames) == 0 || sets.New[string](rule.ResourceNames...).HasAll(resource.ResourceNames...) {
-							return true, nil
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return false, nil
-}
-
+// CleanExtensionLib removes the wintun.dll driver file on Windows after uninstalling the WireGuard TUN driver.
 func CleanExtensionLib() {
 	if !IsWindows() {
 		return
@@ -275,12 +227,14 @@ func CleanExtensionLib() {
 	_ = Move(filename, dst)
 }
 
+// Print writes the slogan wrapped in a banner box to the writer.
 func Print(writer io.Writer, slogan string) {
-	str := PrintStr(slogan)
+	str := FormatBanner(slogan)
 	_, _ = writer.Write([]byte(str))
 }
 
-func PrintStr(slogan string) string {
+// FormatBanner wraps the slogan text in an ASCII box border and returns the formatted string.
+func FormatBanner(slogan string) string {
 	scanner := bufio.NewScanner(strings.NewReader(slogan))
 	var length int
 	var lines []string
@@ -307,14 +261,17 @@ func PrintStr(slogan string) string {
 	return sb.String()
 }
 
+// StartupPProf starts an HTTP pprof server on localhost at the given port.
 func StartupPProf(port int) {
 	_ = http.ListenAndServe(fmt.Sprintf("localhost:%d", port), nil)
 }
 
+// StartupPProfForServer starts an HTTP pprof server listening on all interfaces at the given port.
 func StartupPProfForServer(port int) {
 	_ = http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
 }
 
+// Merge copies all entries from ToMap into fromMap and returns the merged result.
 func Merge[K comparable, V any](fromMap, ToMap map[K]V) map[K]V {
 	if fromMap == nil {
 		return ToMap
@@ -327,6 +284,7 @@ func Merge[K comparable, V any](fromMap, ToMap map[K]V) map[K]V {
 	return fromMap
 }
 
+// Move renames src to dst, falling back to a copy-and-delete if they are on different filesystems.
 func Move(src, dst string) error {
 	err := os.Rename(src, dst)
 	if err != nil && errors.Is(err.(*os.LinkError).Err.(syscall.Errno), syscall.EXDEV) {
@@ -372,6 +330,7 @@ func move(src, dst string) (e error) {
 	return os.Remove(src)
 }
 
+// If returns t1 if b is true, otherwise t2 (a generic ternary helper).
 func If[T any](b bool, t1, t2 T) T {
 	if b {
 		return t1
@@ -379,15 +338,15 @@ func If[T any](b bool, t1, t2 T) T {
 	return t2
 }
 
-// ConvertUidToWorkload
+// ConvertUIDToWorkload
 // deployments.apps.productpage --> deployments.apps/productpage
-func ConvertUidToWorkload(uid string) string {
+func ConvertUIDToWorkload(uid string) string {
 	index := strings.LastIndex(uid, ".")
 	return uid[:index] + "/" + uid[index+1:]
 }
 
-// ConvertWorkloadToUid
+// ConvertWorkloadToUID
 // deployments.apps/productpage --> deployments.apps.productpage
-func ConvertWorkloadToUid(workload string) string {
+func ConvertWorkloadToUID(workload string) string {
 	return strings.ReplaceAll(workload, "/", ".")
 }

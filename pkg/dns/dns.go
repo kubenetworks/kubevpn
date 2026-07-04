@@ -15,8 +15,8 @@ import (
 	"time"
 
 	miekgdns "github.com/miekg/dns"
-	"github.com/pkg/errors"
-	v12 "k8s.io/api/core/v1"
+	"errors"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"tailscale.com/net/dns"
@@ -29,7 +29,7 @@ import (
 type Config struct {
 	Config      *miekgdns.ClientConfig
 	Ns          []string
-	Services    []v12.Service
+	Services    []corev1.Service
 	SvcInformer cache.SharedIndexInformer
 	TunName     string
 
@@ -43,7 +43,7 @@ type Config struct {
 }
 
 func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) error {
-	var serviceList []v12.Service
+	var serviceList []corev1.Service
 	c.Lock.Lock()
 	appendHosts := c.generateAppendHosts(serviceList, hosts)
 	err := c.appendHosts(appendHosts)
@@ -59,11 +59,11 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) erro
 
 func (c *Config) watchServiceToAddHosts(ctx context.Context, hosts []Entry) {
 	defer util.HandleCrash()
-	ticker := time.NewTicker(time.Second * 15)
+	ticker := time.NewTicker(config.DNSRouteRefreshInterval)
 	defer ticker.Stop()
 	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: func(obj interface{}) bool {
-			if svc, ok := obj.(*v12.Service); ok && svc.Namespace == c.Ns[0] {
+			if svc, ok := obj.(*corev1.Service); ok && svc.Namespace == c.Ns[0] {
 				return true
 			} else {
 				return false
@@ -71,13 +71,13 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, hosts []Entry) {
 		},
 		Handler: cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				ticker.Reset(time.Second * 3)
+				ticker.Reset(config.DNSRouteDebounceInterval)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				ticker.Reset(time.Second * 3)
+				ticker.Reset(config.DNSRouteDebounceInterval)
 			},
 			DeleteFunc: func(obj interface{}) {
-				ticker.Reset(time.Second * 3)
+				ticker.Reset(config.DNSRouteDebounceInterval)
 			},
 		},
 	})
@@ -86,15 +86,15 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, hosts []Entry) {
 		return
 	}
 	for ; ctx.Err() == nil; <-ticker.C {
-		ticker.Reset(time.Second * 15)
+		ticker.Reset(config.DNSRouteRefreshInterval)
 		serviceList, err := c.SvcInformer.GetIndexer().ByIndex(cache.NamespaceIndex, c.Ns[0])
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to list service by namespace %s: %v", c.Ns[0], err)
 			continue
 		}
-		var services []v12.Service
+		var services []corev1.Service
 		for _, service := range serviceList {
-			svc, ok := service.(*v12.Service)
+			svc, ok := service.(*corev1.Service)
 			if !ok {
 				continue
 			}
@@ -131,7 +131,7 @@ func (c *Config) appendHosts(appendHosts []Entry) error {
 		}
 	}
 
-	hostFile := GetHostFile()
+	hostFile := getHostFile()
 	f, err := os.OpenFile(hostFile, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
@@ -143,7 +143,7 @@ func (c *Config) appendHosts(appendHosts []Entry) error {
 }
 
 func (c *Config) removeHosts() error {
-	hostFile := GetHostFile()
+	hostFile := getHostFile()
 	content, err2 := os.ReadFile(hostFile)
 	if err2 != nil {
 		return err2
@@ -196,7 +196,7 @@ func (c *Config) entryList2String(entryList []Entry) string {
 	return sb.String()
 }
 
-func (c *Config) generateAppendHosts(serviceList []v12.Service, hosts []Entry) []Entry {
+func (c *Config) generateAppendHosts(serviceList []corev1.Service, hosts []Entry) []Entry {
 	const ServiceKubernetes = "kubernetes"
 	var entryList = sets.New[Entry]().Insert(c.Hosts...).Insert(hosts...).UnsortedList()
 
@@ -224,7 +224,7 @@ func (c *Config) generateAppendHosts(serviceList []v12.Service, hosts []Entry) [
 	}
 
 	// 2) if hosts file already contains item, not needs to add it to hosts file
-	hostFile := GetHostFile()
+	hostFile := getHostFile()
 	content, err2 := os.ReadFile(hostFile)
 	if err2 == nil {
 		reader := bufio.NewReader(strings.NewReader(string(content)))
@@ -251,7 +251,7 @@ func (c *Config) generateAppendHosts(serviceList []v12.Service, hosts []Entry) [
 }
 
 func CleanupHosts() error {
-	path := GetHostFile()
+	path := getHostFile()
 	content, err2 := os.ReadFile(path)
 	if err2 != nil {
 		return err2

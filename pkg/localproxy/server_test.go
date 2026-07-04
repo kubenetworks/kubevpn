@@ -267,7 +267,7 @@ func TestSOCKS5ProxyPreservesHostname(t *testing.T) {
 	defer ln.Close()
 
 	go func() {
-		_ = ServeSOCKS5(ctx, ln, connector)
+		_ = serveSOCKS5(ctx, ln, connector)
 	}()
 
 	dialer, err := xproxy.SOCKS5("tcp", ln.Addr().String(), nil, xproxy.Direct)
@@ -322,7 +322,7 @@ func TestHTTPConnectProxyPreservesHostname(t *testing.T) {
 	defer ln.Close()
 
 	go func() {
-		_ = ServeHTTPConnect(ctx, ln, connector)
+		_ = serveHTTPConnect(ctx, ln, connector)
 	}()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
@@ -403,7 +403,7 @@ func TestProxyOutE2ECase(t *testing.T) {
 	}
 	defer ln.Close()
 	go func() {
-		_ = ServeSOCKS5(ctx, ln, connector)
+		_ = serveSOCKS5(ctx, ln, connector)
 	}()
 
 	dialer, err := xproxy.SOCKS5("tcp", ln.Addr().String(), nil, xproxy.Direct)

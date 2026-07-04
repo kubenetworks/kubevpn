@@ -2,14 +2,14 @@ package action
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"time"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -18,6 +18,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// Connect handles the Connect RPC, establishing a VPN tunnel to the cluster.
 func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	if !svr.IsSudo {
 		defer func() {
@@ -32,14 +33,16 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		return err
 	}
 
-	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newConnectForkWarp(resp), svr.LogFile))
+	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newStreamWriter(func(msg string) error {
+		return resp.Send(&rpc.ConnectResponse{Message: msg})
+	}), svr.LogFile))
 	if !svr.IsSudo {
 		return svr.redirectConnectToSudoDaemon(req, resp, logger)
 	}
 
 	ctx := resp.Context()
 	connect := &handler.ConnectOptions{
-		Namespace:            req.ManagerNamespace,
+		ManagerNamespace:     req.ManagerNamespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		OriginNamespace:      req.Namespace,
@@ -52,19 +55,17 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	if err != nil {
 		return err
 	}
-	sshCtx, sshCancel := context.WithCancel(context.Background())
-	connect.AddRolloutFunc(func() error {
-		sshCancel()
-		_ = os.Remove(file)
+	session := NewSessionLifecycle(logger)
+	session.AddTempFile(&file)
+	connect.AddRollbackFunc(func() error {
+		session.RunCleanups()
 		return nil
 	})
-	go util.ListenCancel(resp, sshCancel)
-	sshCtx = plog.WithLogger(sshCtx, logger)
-	defer plog.WithoutLogger(sshCtx)
+	go util.ListenCancel(resp, session.Cancel)
 	defer func() {
 		if err != nil {
 			connect.Cleanup(plog.WithLogger(context.Background(), logger))
-			sshCancel()
+			session.Cancel()
 		}
 	}()
 
@@ -77,7 +78,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		return err
 	}
 
-	err = connect.DoConnect(sshCtx)
+	err = connect.DoConnect(session.Ctx)
 	if err != nil {
 		logger.Errorf("Failed to connect...")
 		return err
@@ -93,45 +94,35 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer, logger *log.Logger) (err error) {
 	cli, err := svr.GetClient(true)
 	if err != nil {
-		return errors.Wrap(err, "sudo daemon not start")
+		return fmt.Errorf("sudo daemon not start: %w", err)
 	}
-	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
-	sshCtx, sshCancel := context.WithCancel(context.Background())
-	sshCtx = plog.WithLogger(sshCtx, logger)
-	defer plog.WithoutLogger(sshCtx)
+	session := NewSessionLifecycle(logger)
 	connect := &handler.ConnectOptions{
-		Namespace:            req.Namespace,
+		ManagerNamespace:     req.Namespace,
 		OriginNamespace:      req.Namespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		Request:              proto.Clone(req).(*rpc.ConnectRequest),
 	}
 	var file string
-	connect.AddRolloutFunc(func() error {
-		sshCancel()
-		_ = os.Remove(file)
+	session.AddTempFile(&file)
+	connect.AddRollbackFunc(func() error {
+		session.RunCleanups()
 		return nil
 	})
 
-	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(sshCtx, sshConf, []byte(req.KubeconfigBytes), true)
-		if err != nil {
-			return err
-		}
-		if sshConf.RemoteKubeconfig != "" {
-			connect.OriginKubeconfigPath = file
-		}
-	} else {
-		file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
-		if err != nil {
-			return err
-		}
+	file, err = resolveKubeconfig(session.Ctx, req.SshJump, req.KubeconfigBytes, true)
+	if err != nil {
+		return err
+	}
+	if sshConf := ssh.ParseSshFromRPC(req.SshJump); !sshConf.IsEmpty() && sshConf.RemoteKubeconfig != "" {
+		connect.OriginKubeconfigPath = file
 	}
 
 	defer func() {
 		if err != nil {
 			connect.Cleanup(plog.WithLogger(context.Background(), logger))
-			sshCancel()
+			session.Cancel()
 		}
 	}()
 
@@ -145,7 +136,7 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		if connResp != nil {
 			_ = connResp.SendMsg(&s)
 		} else {
-			sshCancel()
+			session.Cancel()
 		}
 	}()
 	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
@@ -153,61 +144,80 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		return err
 	}
 
+	if err = svr.detectAndSetManagerNamespace(session.Ctx, req, connect, logger); err != nil {
+		return err
+	}
+
+	if err = connect.InitDHCP(session.Ctx); err != nil {
+		return err
+	}
+	connectionID := connect.GetConnectionID()
+
+	if existing, _ := svr.findConnection(connectionID); existing != nil {
+		session.Cancel()
+		logger.Infof("Connected with cluster")
+		svr.currentConnectionID = connectionID
+		return resp.Send(&rpc.ConnectResponse{
+			ConnectionID: connectionID,
+		})
+	}
+
+	return svr.forwardConnectToSudo(session.Ctx, req, connect, resp, cli, &connResp, file, connectionID, logger)
+}
+
+// detectAndSetManagerNamespace resolves the traffic manager namespace, falling
+// back to the request namespace when no existing manager is found.
+func (svr *Server) detectAndSetManagerNamespace(ctx context.Context, req *rpc.ConnectRequest, connect *handler.ConnectOptions, logger *log.Logger) error {
 	if req.ManagerNamespace == "" {
-		req.ManagerNamespace, err = util.DetectManagerNamespace(plog.WithLogger(sshCtx, logger), connect.GetFactory(), req.Namespace)
+		var err error
+		req.ManagerNamespace, err = util.DetectManagerNamespace(plog.WithLogger(ctx, logger), connect.GetFactory(), req.Namespace)
 		if err != nil {
 			return err
 		}
 	}
 	if req.ManagerNamespace != "" {
 		logger.Infof("Use manager namespace %s", req.ManagerNamespace)
-		connect.Namespace = req.ManagerNamespace
+		connect.ManagerNamespace = req.ManagerNamespace
 	} else {
 		logger.Infof("Use special namespace %s", req.Namespace)
 		req.ManagerNamespace = req.Namespace
 	}
+	return nil
+}
 
-	if err = connect.InitDHCP(sshCtx); err != nil {
-		return err
-	}
-	connectionID := connect.GetConnectionID()
-
-	for _, options := range svr.connections {
-		if options == nil {
-			continue
-		}
-		if options.GetConnectionID() == connectionID {
-			sshCancel()
-			// same cluster, do nothing
-			logger.Infof("Connected with cluster")
-			svr.currentConnectionID = connectionID
-			return resp.Send(&rpc.ConnectResponse{
-				ConnectionID: connectionID,
-			})
-		}
-	}
-
-	var ipCtx context.Context
-	ipCtx, err = connect.RentIP(resp.Context(), req.IPv4, req.IPv6)
+// forwardConnectToSudo rents an IP, forwards the connect request to the sudo
+// daemon, streams the response back to the caller, and starts health checks.
+func (svr *Server) forwardConnectToSudo(
+	ctx context.Context,
+	req *rpc.ConnectRequest,
+	connect *handler.ConnectOptions,
+	resp rpc.Daemon_ConnectServer,
+	cli rpc.DaemonClient,
+	connResp *grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse],
+	kubeconfigPath string,
+	connectionID string,
+	logger *log.Logger,
+) error {
+	ipCtx, err := connect.RentIP(resp.Context(), req.IPv4, req.IPv6)
 	if err != nil {
 		return err
 	}
 
 	// only ssh jump in user daemon
-	content, err := os.ReadFile(file)
+	content, err := os.ReadFile(kubeconfigPath)
 	if err != nil {
 		return err
 	}
 	req.KubeconfigBytes = string(content)
-	connResp, err = cli.Connect(ipCtx)
+	*connResp, err = cli.Connect(ipCtx)
 	if err != nil {
 		return err
 	}
-	err = connResp.Send(req)
+	err = (*connResp).Send(req)
 	if err != nil {
 		return err
 	}
-	err = util.CopyGRPCStream[rpc.ConnectResponse](connResp, resp)
+	err = util.CopyGRPCStream[rpc.ConnectResponse](*connResp, resp)
 	if err != nil {
 		return err
 	}
@@ -215,8 +225,8 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	if resp.Context().Err() != nil {
 		return resp.Context().Err()
 	}
-	connect.HealthCheckOnce(sshCtx, time.Second*5)
-	go connect.HealthPeriod(sshCtx, time.Second*5)
+	connect.HealthCheckOnce(ctx, time.Second*10)
+	go connect.HealthPeriod(ctx, time.Second*30)
 	svr.connections = append(svr.connections, connect)
 	svr.currentConnectionID = connectionID
 	return resp.Send(&rpc.ConnectResponse{
@@ -224,17 +234,3 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	})
 }
 
-type connectForkWarp struct {
-	server rpc.Daemon_ConnectServer
-}
-
-func (r *connectForkWarp) Write(p []byte) (n int, err error) {
-	_ = r.server.Send(&rpc.ConnectResponse{
-		Message: string(p),
-	})
-	return len(p), nil
-}
-
-func newConnectForkWarp(server rpc.Daemon_ConnectServer) io.Writer {
-	return &connectForkWarp{server: server}
-}

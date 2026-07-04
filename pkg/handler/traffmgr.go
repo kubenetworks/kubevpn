@@ -1,0 +1,181 @@
+package handler
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/kubectl/pkg/polymorphichelpers"
+	"k8s.io/kubectl/pkg/util/podutils"
+	"k8s.io/utils/ptr"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+)
+
+func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, namespace, image, imagePullSecretName string) (err error) {
+	var exists bool
+	exists, err = util.DetectPodExists(ctx, clientset, namespace)
+	if err != nil {
+		return err
+	}
+	if exists {
+		plog.G(ctx).Infof("Use exist traffic manager in namespace %s", namespace)
+		return nil
+	}
+
+	var deleteResource = func(ctx context.Context) {
+		options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
+		name := config.ConfigMapPodTrafficManager
+		_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, name+"."+namespace, options)
+		_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, name, options)
+		_ = clientset.RbacV1().Roles(namespace).Delete(ctx, name, options)
+		_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, name, options)
+		_ = clientset.CoreV1().Services(namespace).Delete(ctx, name, options)
+		_ = clientset.CoreV1().Secrets(namespace).Delete(ctx, name, options)
+		_ = clientset.CoreV1().Pods(namespace).Delete(ctx, config.CniNetName, options)
+		_ = clientset.BatchV1().Jobs(namespace).Delete(ctx, name, options)
+		_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, name, options)
+	}
+	defer func() {
+		if err != nil {
+			deleteResource(context.Background())
+		}
+	}()
+	deleteResource(ctx)
+
+	// 1) label namespace
+	plog.G(ctx).Infof("Labeling Namespace %s", namespace)
+	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	if err != nil {
+		plog.G(ctx).Errorf("Get Namespace error: %s", err.Error())
+		return err
+	}
+	if ns.Labels == nil {
+		ns.Labels = map[string]string{}
+	}
+	ns.Labels["ns"] = namespace
+	_, err = clientset.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{})
+	if err != nil {
+		plog.G(ctx).Infof("Labeling Namespace error: %s", err.Error())
+		return err
+	}
+
+	// 2) create serviceAccount
+	plog.G(ctx).Infof("Creating ServiceAccount %s", config.ConfigMapPodTrafficManager)
+	_, err = clientset.CoreV1().ServiceAccounts(namespace).Create(ctx, genServiceAccount(namespace), metav1.CreateOptions{})
+	if err != nil {
+		plog.G(ctx).Infof("Creating ServiceAccount error: %s", err.Error())
+		return err
+	}
+
+	// 3) create roles
+	plog.G(ctx).Infof("Creating Roles %s", config.ConfigMapPodTrafficManager)
+	_, err = clientset.RbacV1().Roles(namespace).Create(ctx, genRole(namespace), metav1.CreateOptions{})
+	if err != nil {
+		plog.G(ctx).Errorf("Creating Roles error: %s", err.Error())
+		return err
+	}
+
+	// 4) create roleBinding
+	plog.G(ctx).Infof("Creating RoleBinding %s", config.ConfigMapPodTrafficManager)
+	_, err = clientset.RbacV1().RoleBindings(namespace).Create(ctx, genRoleBinding(namespace), metav1.CreateOptions{})
+	if err != nil {
+		plog.G(ctx).Errorf("Creating RoleBinding error: %s", err.Error())
+		return err
+	}
+
+	// 5) create service
+	plog.G(ctx).Infof("Creating Service %s", config.ConfigMapPodTrafficManager)
+	tcp10801 := config.PortNameTCP
+	tcp9002 := config.PortNameEnvoy
+	tcp80 := config.PortNameHTTP
+	udp53 := config.PortNameDNS
+	svcSpec := genService(namespace, tcp10801, tcp9002, tcp80, udp53)
+	_, err = clientset.CoreV1().Services(namespace).Create(ctx, svcSpec, metav1.CreateOptions{})
+	if err != nil {
+		plog.G(ctx).Errorf("Creating Service error: %s", err.Error())
+		return err
+	}
+
+	crt, key, host, err := util.GenTLSCert(ctx, namespace)
+	if err != nil {
+		return err
+	}
+	// reason why not use v1.SecretTypeTls is because it needs key called tls.crt and tls.key, but tls.key can not as env variable
+	// ➜  ~ export tls.key=a
+	//export: not valid in this context: tls.key
+	secret := genSecret(namespace, crt, key, host)
+	_, err = clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+	if err != nil {
+		plog.G(ctx).Errorf("Creating secret error: %s", err.Error())
+		return err
+	}
+
+	// 6) create mutatingWebhookConfigurations
+	plog.G(ctx).Infof("Creating MutatingWebhookConfiguration %s", config.ConfigMapPodTrafficManager)
+	mutatingWebhookConfiguration := genMutatingWebhookConfiguration(namespace, crt)
+	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, mutatingWebhookConfiguration, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to create MutatingWebhookConfigurations: %w", err)
+	}
+
+	// 7) create deployment
+	plog.G(ctx).Infof("Creating Deployment %s", config.ConfigMapPodTrafficManager)
+	deploy := genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullSecretName)
+	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
+		return err
+	}
+
+	_, selector, err := polymorphichelpers.SelectorsForObject(deploy)
+	if err != nil {
+		return err
+	}
+	return WaitPodReady(ctx, clientset.CoreV1().Pods(namespace), selector.String())
+}
+
+func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelector string) error {
+	var isPodReady bool
+	var lastMessage string
+	ctx2, cancelFunc := context.WithTimeout(ctx, time.Minute*60)
+	defer cancelFunc()
+	plog.G(ctx).Infoln()
+	wait.UntilWithContext(ctx2, func(ctx context.Context) {
+		podList, err := clientset.List(ctx, metav1.ListOptions{
+			LabelSelector: labelSelector,
+		})
+		if err != nil {
+			return
+		}
+		if len(podList.Items) == 0 {
+			return
+		}
+		for _, pod := range podList.Items {
+			if podutils.IsPodReady(&pod) {
+				isPodReady = true
+				cancelFunc()
+				return
+			}
+			var sb bytes.Buffer
+			util.PrintStatus(&pod, &sb)
+			newMsg := sb.String()
+			if newMsg != lastMessage {
+				lastMessage = newMsg
+				plog.G(ctx).Infof(newMsg)
+			}
+		}
+	}, time.Second*3)
+	if !isPodReady {
+		return errors.New("wait for pod ready timeout")
+	}
+	return nil
+}

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/moby/term"
-	"github.com/pkg/errors"
+	"errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -38,11 +38,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-type PodRouteConfig struct {
-	LocalTunIPv4 string
-	LocalTunIPv6 string
-}
-
+// PrintStatus writes a tabular summary of pod container statuses or conditions to the writer.
 func PrintStatus(pod *corev1.Pod, writer io.Writer) {
 	w := tabwriter.NewWriter(writer, 1, 1, 1, ' ', 0)
 	defer w.Flush()
@@ -73,6 +69,7 @@ func PrintStatus(pod *corev1.Pod, writer io.Writer) {
 	}
 }
 
+// GetEnv executes "env" in each container of the pod and returns a map of container names to temp file paths containing the environment output.
 func GetEnv(ctx context.Context, set *kubernetes.Clientset, config *rest.Config, ns, podName string) (map[string]string, error) {
 	pod, err := set.CoreV1().Pods(ns).Get(ctx, podName, v1.GetOptions{})
 	if err != nil {
@@ -98,6 +95,7 @@ func GetEnv(ctx context.Context, set *kubernetes.Clientset, config *rest.Config,
 	return result, nil
 }
 
+// WaitPod watches pods matching the list options until the checker function returns true or the context is cancelled.
 func WaitPod(ctx context.Context, podInterface v12.PodInterface, list v1.ListOptions, checker func(*corev1.Pod) bool) error {
 	w, err := podInterface.Watch(ctx, list)
 	if err != nil {
@@ -118,6 +116,7 @@ func WaitPod(ctx context.Context, podInterface v12.PodInterface, list v1.ListOpt
 	}
 }
 
+// PortForwardPod establishes port forwarding to the specified pod using SPDY or WebSocket transport.
 func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, namespace string, portPair []string, readyChan chan struct{}, stopChan <-chan struct{}, out, errOut io.Writer) error {
 	url := clientset.
 		Post().
@@ -182,7 +181,8 @@ func suppressExpectedPortForwardCloseErrors() {
 	})
 }
 
-func Shell(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Config, podName, containerName, ns string, cmd []string) (string, error) {
+// Shell executes a command in a pod container and returns the stdout output.
+func Shell(ctx context.Context, clientset kubernetes.Interface, config *rest.Config, podName, containerName, ns string, cmd []string) (string, error) {
 	stdin, _, _ := term.StdStreams()
 	buf := bytes.NewBuffer(nil)
 	errBuf := bytes.NewBuffer(nil)
@@ -207,7 +207,8 @@ func Shell(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Co
 	return strings.TrimRight(buf.String(), "\n"), nil
 }
 
-func AllContainerIsRunning(pod *corev1.Pod) bool {
+// AllContainersRunning reports whether the pod is ready and all containers have a ready status.
+func AllContainersRunning(pod *corev1.Pod) bool {
 	isReady := podutils.IsPodReady(pod)
 	if !isReady {
 		return false
@@ -220,6 +221,7 @@ func AllContainerIsRunning(pod *corev1.Pod) bool {
 	return true
 }
 
+// FindContainerEnv searches for an environment variable by key in the container spec and returns its value.
 func FindContainerEnv(container *corev1.Container, key string) (value string, found bool) {
 	if container == nil {
 		return
@@ -234,6 +236,7 @@ func FindContainerEnv(container *corev1.Container, key string) (value string, fo
 	return
 }
 
+// FindContainerByName returns the container with the given name and its index, or (nil, -1) if not found.
 func FindContainerByName(pod *corev1.Pod, name string) (*corev1.Container, int) {
 	for i := range pod.Spec.Containers {
 		if pod.Spec.Containers[i].Name == name {
@@ -243,6 +246,7 @@ func FindContainerByName(pod *corev1.Pod, name string) (*corev1.Container, int) 
 	return nil, -1
 }
 
+// CheckPodStatus continuously watches the named pod and invokes cancelFunc if the pod is deleted or unreachable.
 func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName string, podInterface v12.PodInterface) {
 	var verifyAPIServerConnection = func() {
 		err := retry.OnError(
@@ -298,7 +302,8 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 	}
 }
 
-func GetRunningPodList(ctx context.Context, clientset *kubernetes.Clientset, ns string, labelSelector string) ([]corev1.Pod, error) {
+// GetRunningPodList returns pods matching the label selector that are in Running phase with all containers ready.
+func GetRunningPodList(ctx context.Context, clientset kubernetes.Interface, ns string, labelSelector string) ([]corev1.Pod, error) {
 	list, err := clientset.CoreV1().Pods(ns).List(ctx, v1.ListOptions{
 		LabelSelector: labelSelector,
 	})
@@ -306,7 +311,7 @@ func GetRunningPodList(ctx context.Context, clientset *kubernetes.Clientset, ns 
 		return nil, err
 	}
 	for i := 0; i < len(list.Items); i++ {
-		if list.Items[i].GetDeletionTimestamp() != nil || !AllContainerIsRunning(&list.Items[i]) {
+		if list.Items[i].GetDeletionTimestamp() != nil || !AllContainersRunning(&list.Items[i]) {
 			list.Items = append(list.Items[:i], list.Items[i+1:]...)
 			i--
 		}
@@ -317,6 +322,7 @@ func GetRunningPodList(ctx context.Context, clientset *kubernetes.Clientset, ns 
 	return list.Items, nil
 }
 
+// DetectPodSupportIPv6 checks whether the traffic manager pod in the cluster has IPv6 enabled.
 func DetectPodSupportIPv6(ctx context.Context, factory util.Factory, namespace string) (bool, error) {
 	clientSet, err := factory.KubernetesClientSet()
 	if err != nil {
@@ -343,6 +349,7 @@ func DetectPodSupportIPv6(ctx context.Context, factory util.Factory, namespace s
 	return disableIPv6 == 0, nil
 }
 
+// GetPodIP returns all valid IP addresses assigned to the pod from its status.
 func GetPodIP(pod corev1.Pod) []string {
 	var result = sets.New[string]().Insert()
 	for _, p := range pod.Status.PodIPs {

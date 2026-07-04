@@ -24,7 +24,7 @@ import (
 )
 
 // GetVolume key format: [container name]-[volume mount name]
-func GetVolume(ctx context.Context, clientset *kubernetes.Clientset, f util.Factory, ns, podName string) (map[string][]mount.Mount, error) {
+func GetVolume(ctx context.Context, clientset kubernetes.Interface, f util.Factory, ns, podName string) (map[string][]mount.Mount, error) {
 	pod, err := clientset.CoreV1().Pods(ns).Get(ctx, podName, v12.GetOptions{})
 	if err != nil {
 		return nil, err
@@ -75,13 +75,14 @@ func GetVolume(ctx context.Context, clientset *kubernetes.Clientset, f util.Fact
 	return result, nil
 }
 
+// RemoveDir removes all source directories referenced by the given Docker mounts map.
 func RemoveDir(volume map[string][]mount.Mount) error {
 	var errs []error
 	for _, mounts := range volume {
 		for _, m := range mounts {
 			err := os.RemoveAll(m.Source)
 			if err != nil && !pkgerr.Is(err, os.ErrNotExist) {
-				errs = append(errs, fmt.Errorf("failed to delete dir %s: %v", m.Source, err))
+				errs = append(errs, fmt.Errorf("failed to delete dir %s: %w", m.Source, err))
 			}
 		}
 	}

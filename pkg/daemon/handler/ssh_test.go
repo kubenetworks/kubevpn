@@ -41,7 +41,7 @@ func TestGetVersionFromOutput(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		version := getDaemonVersionFromOutput([]byte(test.output))
+		version := parseDaemonVersion([]byte(test.output))
 		if version != test.version {
 			t.Failed()
 		}

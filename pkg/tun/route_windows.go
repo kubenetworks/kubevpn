@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/pkg/errors"
+	"errors"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )

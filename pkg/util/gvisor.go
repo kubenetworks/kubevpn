@@ -12,6 +12,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+// WriteProxyInfo serializes the transport endpoint ID (ports and addresses) and writes it to the connection.
 func WriteProxyInfo(conn net.Conn, id stack.TransportEndpointID) error {
 	var b bytes.Buffer
 	buf := config.LPool.Get().([]byte)[:]

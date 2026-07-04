@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pkg/errors"
+	"errors"
 	"golang.org/x/sys/windows"
 	wintun "golang.zx2c4.com/wintun"
 	wireguardtun "golang.zx2c4.com/wireguard/tun"
@@ -23,7 +23,7 @@ import (
 
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if cfg.Addr == "" && cfg.Addr6 == "" {
-		err = fmt.Errorf("IPv4 address and IPv6 address can not be empty at same time")
+		err = fmt.Errorf("ipv4 address and ipv6 address cannot both be empty")
 		return
 	}
 
@@ -68,7 +68,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 			return
 		}
 		if err = ifUID.AddIPAddress(prefix); err != nil {
-			err = fmt.Errorf("can not setup IPv4 address %s to device %s : %v", prefix.String(), tunName, err)
+			err = fmt.Errorf("can not setup IPv4 address %s to device %s : %w", prefix.String(), tunName, err)
 			return
 		}
 	}
@@ -82,7 +82,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 			return
 		}
 		if err = ifUID.AddIPAddress(prefix); err != nil && !errors.Is(err, syscall.ERROR_NOT_FOUND) {
-			err = fmt.Errorf("can not setup IPv6 address %s to device %s : %v", prefix.String(), tunName, err)
+			err = fmt.Errorf("can not setup IPv6 address %s to device %s : %w", prefix.String(), tunName, err)
 			return
 		}
 	}

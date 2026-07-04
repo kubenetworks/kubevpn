@@ -2,11 +2,11 @@ package tun
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
-	pkgerr "github.com/pkg/errors"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
 
@@ -42,7 +42,7 @@ func Listener(config Config) (net.Listener, error) {
 
 	conn, _, err := createTun(config)
 	if err != nil {
-		err = pkgerr.Wrap(err, "create tun device failed")
+		err = fmt.Errorf("create tun device failed: %w", err)
 		return nil, err
 	}
 

@@ -15,6 +15,7 @@ type tcpTransporter struct {
 	tlsConfig *tls.Config
 }
 
+// TCPTransporter creates a Transporter that dials TCP connections with optional TLS.
 func TCPTransporter(tlsInfo map[string][]byte) Transporter {
 	tlsConfig, err := util.GetTlsClientConfig(tlsInfo)
 	if err != nil {

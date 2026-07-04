@@ -13,7 +13,7 @@ import (
 	"time"
 
 	miekgdns "github.com/miekg/dns"
-	v12 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 
@@ -34,10 +34,10 @@ var ignoreSearchSuffix = []string{"com", "io", "net", "org", "cn", "ru"}
 // service.namespace.svc.cluster.local:port
 func (c *Config) SetupDNS(ctx context.Context) error {
 	defer util.HandleCrash()
-	ticker := time.NewTicker(time.Second * 15)
+	ticker := time.NewTicker(config.DNSRouteRefreshInterval)
 	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: func(obj interface{}) bool {
-			if svc, ok := obj.(*v12.Service); ok && svc.Namespace == c.Ns[0] {
+			if svc, ok := obj.(*corev1.Service); ok && svc.Namespace == c.Ns[0] {
 				return true
 			} else {
 				return false
@@ -45,13 +45,13 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 		},
 		Handler: cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				ticker.Reset(time.Second * 3)
+				ticker.Reset(config.DNSRouteDebounceInterval)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				ticker.Reset(time.Second * 3)
+				ticker.Reset(config.DNSRouteDebounceInterval)
 			},
 			DeleteFunc: func(obj interface{}) {
-				ticker.Reset(time.Second * 3)
+				ticker.Reset(config.DNSRouteDebounceInterval)
 			},
 		},
 	})
@@ -62,15 +62,15 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 	go func() {
 		defer ticker.Stop()
 		for ; ctx.Err() == nil; <-ticker.C {
-			ticker.Reset(time.Second * 15)
+			ticker.Reset(config.DNSRouteRefreshInterval)
 			serviceList, err := c.SvcInformer.GetIndexer().ByIndex(cache.NamespaceIndex, c.Ns[0])
 			if err != nil {
 				plog.G(ctx).Errorf("Failed to list service by namespace %s: %v", c.Ns[0], err)
 				continue
 			}
-			var services []v12.Service
+			var services []corev1.Service
 			for _, service := range serviceList {
-				svc, ok := service.(*v12.Service)
+				svc, ok := service.(*corev1.Service)
 				if !ok {
 					continue
 				}
@@ -109,7 +109,7 @@ func (c *Config) usingResolver(ctx context.Context) {
 		Ndots:   clientConfig.Ndots,
 		Timeout: clientConfig.Timeout,
 	}
-	for _, filename := range GetResolvers(c.Config.Search, c.Ns, c.Services) {
+	for _, filename := range getResolvers(c.Config.Search, c.Ns, c.Services) {
 		// ignore search suffix like com, io, net, org, cn, ru, those are top dns server
 		if slices.Contains(ignoreSearchSuffix, filepath.Base(filename)) {
 			continue
@@ -176,7 +176,7 @@ func toString(config miekgdns.ClientConfig) string {
 }
 
 func (c *Config) CancelDNS() {
-	for _, filename := range GetResolvers(c.Config.Search, c.Ns, c.Services) {
+	for _, filename := range getResolvers(c.Config.Search, c.Ns, c.Services) {
 		content, err := os.ReadFile(filename)
 		if err != nil {
 			continue
@@ -213,7 +213,7 @@ func (c *Config) CancelDNS() {
 	_ = c.removeHosts()
 }
 
-// GetResolvers
+// getResolvers
 // service name: authors
 // namespace: test
 // create resolvers suffix:
@@ -223,7 +223,7 @@ func (c *Config) CancelDNS() {
 // cluster.local
 // svc.cluster
 // test.svc
-func GetResolvers(searchList []string, nsList []string, serviceName []v12.Service) []string {
+func getResolvers(searchList []string, nsList []string, serviceName []corev1.Service) []string {
 	result := sets.New[string]().Insert(searchList...).Insert(nsList...)
 
 	const splitter = "."
@@ -247,6 +247,6 @@ func GetResolvers(searchList []string, nsList []string, serviceName []v12.Servic
 	return resolvers
 }
 
-func GetHostFile() string {
+func getHostFile() string {
 	return "/etc/hosts"
 }

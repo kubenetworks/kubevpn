@@ -3,8 +3,24 @@ package run
 import (
 	"strings"
 
+	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 )
+
+func randomSuffix() string {
+	return strings.ReplaceAll(uuid.New().String(), "-", "")[:5]
+}
+
+// containerSecurityOpts returns the common Docker security flags
+// shared by both VPN connect containers and dev workload containers.
+func containerSecurityOpts() []string {
+	return []string{
+		"--cap-add", "SYS_PTRACE",
+		"--cap-add", "SYS_ADMIN",
+		"--security-opt", "apparmor=unconfined",
+		"--security-opt", "seccomp=unconfined",
+	}
+}
 
 // Pull constants
 const (

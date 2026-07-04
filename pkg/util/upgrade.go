@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pkg/errors"
 	"github.com/schollz/progressbar/v3"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -27,6 +26,7 @@ const (
 	downloadAddr = "https://github.com/wencaiwulue/kubevpn/releases/latest"
 )
 
+// GetManifest fetches the latest GitHub release manifest and returns the version tag and download URL for the given OS/arch.
 func GetManifest(httpCli *http.Client, os string, arch string) (version string, url string, err error) {
 	var resp *http.Response
 	var errs []error
@@ -38,18 +38,18 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 		errs = append(errs, err)
 	}
 	if resp == nil {
-		err = errors.Wrap(utilerrors.NewAggregate(errs), "failed to call github api")
+		err = fmt.Errorf("failed to call github api: %w", utilerrors.NewAggregate(errs))
 		return
 	}
 
 	var content []byte
 	if content, err = io.ReadAll(resp.Body); err != nil {
-		err = errors.Wrap(err, "failed to read all response from github api")
+		err = fmt.Errorf("failed to read all response from github api: %w", err)
 		return
 	}
 	var m RootEntity
 	if err = json.Unmarshal(content, &m); err != nil {
-		err = fmt.Errorf("failed to unmarshal response, err: %v", err)
+		err = fmt.Errorf("failed to unmarshal response, err: %w", err)
 		return
 	}
 	version = m.TagName
@@ -114,6 +114,7 @@ func Download(client *http.Client, url string, filename string, stdout, stderr i
 	return err
 }
 
+// UnzipKubeVPNIntoFile extracts the kubevpn binary from a zip archive and writes it to filename.
 func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	archive, err := zip.OpenReader(zipFile)
 	if err != nil {
@@ -130,7 +131,7 @@ func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	}
 
 	if fi == nil {
-		return fmt.Errorf("can not found kubevpn")
+		return fmt.Errorf("cannot find kubevpn")
 	}
 
 	err = os.MkdirAll(filepath.Dir(filename), os.ModePerm)
@@ -156,6 +157,7 @@ func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	return err
 }
 
+// RootEntity represents the JSON response from the GitHub releases API.
 type RootEntity struct {
 	Url             string          `json:"url"`
 	AssetsUrl       string          `json:"assets_url"`
@@ -181,6 +183,7 @@ type RootEntity struct {
 	Message string `json:"message"`
 }
 
+// AuthorEntity represents the author information in a GitHub release.
 type AuthorEntity struct {
 	Login             string `json:"login"`
 	Id                int64  `json:"id"`
@@ -202,6 +205,7 @@ type AuthorEntity struct {
 	SiteAdmin         bool   `json:"site_admin"`
 }
 
+// AssetsEntity represents a downloadable asset attached to a GitHub release.
 type AssetsEntity struct {
 	Url                string         `json:"url"`
 	Id                 int64          `json:"id"`
@@ -218,6 +222,7 @@ type AssetsEntity struct {
 	BrowserDownloadUrl string         `json:"browser_download_url"`
 }
 
+// UploaderEntity represents the user who uploaded a GitHub release asset.
 type UploaderEntity struct {
 	Login             string `json:"login"`
 	Id                int64  `json:"id"`
@@ -239,6 +244,7 @@ type UploaderEntity struct {
 	SiteAdmin         bool   `json:"site_admin"`
 }
 
+// ReactionsEntity represents the emoji reactions on a GitHub release.
 type ReactionsEntity struct {
 	Url        string `json:"url"`
 	TotalCount int64  `json:"total_count"`

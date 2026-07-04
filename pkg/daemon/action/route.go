@@ -14,6 +14,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 )
 
+// Route handles the Route RPC, adding or deleting a CIDR route on the TUN device for the active connection.
 func (svr *Server) Route(ctx context.Context, req *rpc.RouteRequest) (*rpc.RouteResponse, error) {
 	if !svr.IsSudo {
 		logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(svr.LogFile))
