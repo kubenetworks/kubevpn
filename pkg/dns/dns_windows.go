@@ -4,10 +4,8 @@ package dns
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/netip"
-	"os/exec"
 
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
@@ -47,13 +45,11 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 		plog.G(ctx).Errorf("Set DNS failed: %s", err)
 		return err
 	}
-	//_ = updateNicMetric(tunName)
-	//_ = addNicSuffixSearchList(clientConfig.Search)
 	return nil
 }
 
 func (c *Config) CancelDNS() {
-	c.removeHosts()
+	_ = c.removeHosts()
 	tun, err := net.InterfaceByName(c.TunName)
 	if err != nil {
 		return
@@ -66,36 +62,6 @@ func (c *Config) CancelDNS() {
 	_ = luid.FlushDNS(windows.AF_INET6)
 	_ = luid.FlushRoutes(windows.AF_INET)
 	_ = luid.FlushRoutes(windows.AF_INET6)
-}
-
-func updateNicMetric(name string) error {
-	cmd := exec.Command("PowerShell", []string{
-		"Set-NetIPInterface",
-		"-InterfaceAlias",
-		fmt.Sprintf("\"%s\"", name),
-		"-InterfaceMetric",
-		"1",
-	}...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		plog.G(context.Background()).Warnf("Failed to update nic metrics, error: %v, output: %s, command: %v", err, string(out), cmd.Args)
-	}
-	return err
-}
-
-// @see https://docs.microsoft.com/en-us/powershell/module/dnsclient/set-dnsclientglobalsetting?view=windowsserver2019-ps#example-1--set-the-dns-suffix-search-list
-func addNicSuffixSearchList(search []string) error {
-	cmd := exec.Command("PowerShell", []string{
-		"Set-DnsClientGlobalSetting",
-		"-SuffixSearchList",
-		fmt.Sprintf("@(\"%s\", \"%s\", \"%s\")", search[0], search[1], search[2]),
-	}...)
-	output, err := cmd.CombinedOutput()
-	plog.G(context.Background()).Debugln(cmd.Args)
-	if err != nil {
-		plog.G(context.Background()).Warnf("Failed to set DNS suffix search list, err: %v, output: %s, command: %v", err, string(output), cmd.Args)
-	}
-	return err
 }
 
 func getHostFile() string {

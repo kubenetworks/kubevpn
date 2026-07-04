@@ -93,19 +93,11 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 					util.SafeWrite(errChan, err)
 				}
 				first = ptr.To(false)
-				// exit normal, let context.err to judge to exit or not
 				if err == nil {
 					plog.G(ctx).Debugf("Port forward retrying")
 					return
-				} else {
-					plog.G(ctx).Debugf("Forward port error: %v", err)
 				}
-				if strings.Contains(err.Error(), "unable to listen on any of the requested ports") ||
-					strings.Contains(err.Error(), "address already in use") {
-					plog.G(ctx).Debugf("Port %s already in use, needs to release it manually", portPair)
-				} else {
-					plog.G(ctx).Debugf("Port-forward occurs error: %v", err)
-				}
+				plog.G(ctx).Debugf("Port-forward error: %v", err)
 			}()
 		}
 	}()
@@ -232,22 +224,7 @@ func Run(ctx context.Context, servers []core.Server) error {
 }
 
 func healthCheckPortForward(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, localGvisorUDPPort string, domain string, ipv4 net.IP) {
-	defer cancelFunc()
-	ticker := time.NewTicker(time.Second * 60)
-	defer ticker.Stop()
-
-	select {
-	case <-readyChan:
-	case <-ticker.C:
-		plog.G(ctx).Debugf("Wait port-forward to be ready timeout")
-		return
-	case <-ctx.Done():
-		return
-	}
-
-	var healthChecker = func() error {
-		// Use loopback explicitly so the health check keeps working even when the
-		// default route is owned by another tunnel.
+	checker := func() error {
 		conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", localGvisorUDPPort))
 		if err != nil {
 			return err
@@ -272,44 +249,35 @@ func healthCheckPortForward(ctx context.Context, cancelFunc context.CancelFunc, 
 		_, _, err = client.ExchangeWithConnContext(ctx, msg, &miekgdns.Conn{Conn: packetConn})
 		return err
 	}
-
-	newTicker := time.NewTicker(time.Second * 30)
-	defer newTicker.Stop()
-	for ; ctx.Err() == nil; <-newTicker.C {
-		err := retry.OnError(wait.Backoff{Duration: time.Second * 10, Steps: 3}, func(err error) bool {
-			return err != nil
-		}, func() error {
-			return healthChecker()
-		})
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to query DNS: %v", err)
-			return
-		}
-	}
+	healthCheckLoop(ctx, cancelFunc, readyChan, checker)
 }
 
 func healthCheckTCPConn(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, domain string, dnsServer string) {
+	healthCheckLoop(ctx, cancelFunc, readyChan, func() error {
+		return nameserverChecker(ctx, domain, dnsServer)
+	})
+}
+
+func healthCheckLoop(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, checker func() error) {
 	defer cancelFunc()
-	ticker := time.NewTicker(time.Second * 60)
-	defer ticker.Stop()
+	readyTimeout := time.NewTicker(time.Second * 60)
+	defer readyTimeout.Stop()
 
 	select {
 	case <-readyChan:
-	case <-ticker.C:
+	case <-readyTimeout.C:
 		plog.G(ctx).Debugf("Wait port-forward to be ready timeout")
 		return
 	case <-ctx.Done():
 		return
 	}
 
-	newTicker := time.NewTicker(time.Second * 30)
-	defer newTicker.Stop()
-	for ; ctx.Err() == nil; <-newTicker.C {
+	ticker := time.NewTicker(time.Second * 30)
+	defer ticker.Stop()
+	for ; ctx.Err() == nil; <-ticker.C {
 		err := retry.OnError(wait.Backoff{Duration: time.Second * 10, Steps: 3}, func(err error) bool {
 			return err != nil
-		}, func() error {
-			return nameserverChecker(ctx, domain, dnsServer)
-		})
+		}, checker)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to query DNS: %v", err)
 			return

@@ -127,7 +127,7 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 		URL()
 	transport, upgrader, err := spdy.RoundTripperFor(config)
 	if err != nil {
-		plog.G(context.Background()).Errorf("Create spdy roundtripper error: %s", err.Error())
+		plog.G(context.Background()).Errorf("Create spdy roundtripper error: %v", err)
 		return err
 	}
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
@@ -149,7 +149,7 @@ func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, na
 	suppressExpectedPortForwardCloseErrors()
 	defer forwarder.Close()
 
-	var errChan = make(chan error, 1)
+	errChan := make(chan error, 1)
 	go func() {
 		errChan <- forwarder.ForwardPorts()
 	}()
@@ -169,9 +169,12 @@ func suppressExpectedPortForwardCloseErrors() {
 		prev := append([]utilruntime.ErrorHandler(nil), utilruntime.ErrorHandlers...)
 		utilruntime.ErrorHandlers = []utilruntime.ErrorHandler{
 			func(ctx context.Context, err error, msg string, keysAndValues ...interface{}) {
-				if err != nil && strings.Contains(strings.ToLower(err.Error()), "error closing listener: close tcp") &&
-					strings.Contains(strings.ToLower(err.Error()), "use of closed network connection") {
-					return
+				if err != nil {
+					errMsg := strings.ToLower(err.Error())
+					if strings.Contains(errMsg, "error closing listener: close tcp") &&
+						strings.Contains(errMsg, "use of closed network connection") {
+						return
+					}
 				}
 				for _, handler := range prev {
 					handler(ctx, err, msg, keysAndValues...)
@@ -209,8 +212,7 @@ func Shell(ctx context.Context, clientset kubernetes.Interface, config *rest.Con
 
 // AllContainersRunning reports whether the pod is ready and all containers have a ready status.
 func AllContainersRunning(pod *corev1.Pod) bool {
-	isReady := podutils.IsPodReady(pod)
-	if !isReady {
+	if !podutils.IsPodReady(pod) {
 		return false
 	}
 	for _, status := range pod.Status.ContainerStatuses {
@@ -351,7 +353,7 @@ func DetectPodSupportIPv6(ctx context.Context, factory util.Factory, namespace s
 
 // GetPodIP returns all valid IP addresses assigned to the pod from its status.
 func GetPodIP(pod corev1.Pod) []string {
-	var result = sets.New[string]().Insert()
+	result := sets.New[string]()
 	for _, p := range pod.Status.PodIPs {
 		if net.ParseIP(p.IP) != nil {
 			result.Insert(p.IP)

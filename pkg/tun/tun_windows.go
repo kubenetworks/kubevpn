@@ -68,7 +68,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 			return
 		}
 		if err = ifUID.AddIPAddress(prefix); err != nil {
-			err = fmt.Errorf("can not setup IPv4 address %s to device %s : %w", prefix.String(), tunName, err)
+			err = fmt.Errorf("cannot setup IPv4 address %s to device %s : %w", prefix.String(), tunName, err)
 			return
 		}
 	}
@@ -82,7 +82,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 			return
 		}
 		if err = ifUID.AddIPAddress(prefix); err != nil && !errors.Is(err, syscall.ERROR_NOT_FOUND) {
-			err = fmt.Errorf("can not setup IPv6 address %s to device %s : %w", prefix.String(), tunName, err)
+			err = fmt.Errorf("cannot setup IPv6 address %s to device %s : %w", prefix.String(), tunName, err)
 			return
 		}
 	}

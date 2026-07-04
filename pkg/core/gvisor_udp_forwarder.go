@@ -60,9 +60,9 @@ func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolve
 			return
 		}
 
-		remote, err1 := net.DialUDP("udp", nil, dst)
-		if err1 != nil {
-			plog.G(ctx).Errorf("[Gvisor-UDP] Failed to connect dst: %s: %v", dst.String(), err1)
+		remote, err := net.DialUDP("udp", nil, dst)
+		if err != nil {
+			plog.G(ctx).Errorf("[Gvisor-UDP] Failed to connect dst: %s: %v", dst.String(), err)
 			return
 		}
 
@@ -131,9 +131,9 @@ func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolve
 				plog.G(ctx).Infof("[Gvisor-UDP] Read %d bytes: %s <- %s", written, src, dst)
 				errChan <- err
 			}()
-			err1 = <-errChan
-			if err1 != nil && !errors.Is(err1, io.EOF) {
-				plog.G(ctx).Errorf("[Gvisor-UDP] Disconnected %s <-> %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err1)
+			err = <-errChan
+			if err != nil && !errors.Is(err, io.EOF) {
+				plog.G(ctx).Errorf("[Gvisor-UDP] Disconnected %s <-> %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
 			}
 		}()
 	}).HandlePacket

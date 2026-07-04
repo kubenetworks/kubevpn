@@ -157,6 +157,20 @@ func genSecret(namespace string, crt []byte, key []byte, host []byte) *v1.Secret
 	return secret
 }
 
+func tcpProbes(port int32) (*v1.Probe, *v1.Probe, *v1.Probe) {
+	handler := v1.ProbeHandler{TCPSocket: &v1.TCPSocketAction{Port: intstr.FromInt32(port)}}
+	return &v1.Probe{ProbeHandler: handler, InitialDelaySeconds: 5, PeriodSeconds: 15, FailureThreshold: 3},
+		&v1.Probe{ProbeHandler: handler, InitialDelaySeconds: 3, PeriodSeconds: 10, FailureThreshold: 3},
+		&v1.Probe{ProbeHandler: handler, InitialDelaySeconds: 1, PeriodSeconds: 2, FailureThreshold: 15}
+}
+
+func httpProbes(port int32, path string) (*v1.Probe, *v1.Probe, *v1.Probe) {
+	handler := v1.ProbeHandler{HTTPGet: &v1.HTTPGetAction{Path: path, Port: intstr.FromInt32(port), Scheme: v1.URISchemeHTTPS}}
+	return &v1.Probe{ProbeHandler: handler, InitialDelaySeconds: 5, PeriodSeconds: 15, FailureThreshold: 3},
+		&v1.Probe{ProbeHandler: handler, InitialDelaySeconds: 3, PeriodSeconds: 10, FailureThreshold: 3},
+		&v1.Probe{ProbeHandler: handler, InitialDelaySeconds: 1, PeriodSeconds: 2, FailureThreshold: 15}
+}
+
 func genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullSecretName string) *appsv1.Deployment {
 	var resourcesSmall = v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
@@ -222,24 +236,6 @@ func genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullS
 								ContainerPort: 10801,
 								Protocol:      v1.ProtocolTCP,
 							}},
-							LivenessProbe: &v1.Probe{
-								ProbeHandler:        v1.ProbeHandler{TCPSocket: &v1.TCPSocketAction{Port: intstr.FromInt32(10801)}},
-								InitialDelaySeconds: 5,
-								PeriodSeconds:       15,
-								FailureThreshold:    3,
-							},
-							ReadinessProbe: &v1.Probe{
-								ProbeHandler:        v1.ProbeHandler{TCPSocket: &v1.TCPSocketAction{Port: intstr.FromInt32(10801)}},
-								InitialDelaySeconds: 3,
-								PeriodSeconds:       10,
-								FailureThreshold:    3,
-							},
-							StartupProbe: &v1.Probe{
-								ProbeHandler:        v1.ProbeHandler{TCPSocket: &v1.TCPSocketAction{Port: intstr.FromInt32(10801)}},
-								InitialDelaySeconds: 1,
-								PeriodSeconds:       2,
-								FailureThreshold:    15,
-							},
 							Resources:       resourcesLarge,
 							ImagePullPolicy: v1.PullIfNotPresent,
 							SecurityContext: &v1.SecurityContext{
@@ -265,24 +261,6 @@ func genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullS
 									ContainerPort: 53,
 									Protocol:      v1.ProtocolUDP,
 								},
-							},
-							LivenessProbe: &v1.Probe{
-								ProbeHandler:        v1.ProbeHandler{TCPSocket: &v1.TCPSocketAction{Port: intstr.FromInt32(9002)}},
-								InitialDelaySeconds: 5,
-								PeriodSeconds:       15,
-								FailureThreshold:    3,
-							},
-							ReadinessProbe: &v1.Probe{
-								ProbeHandler:        v1.ProbeHandler{TCPSocket: &v1.TCPSocketAction{Port: intstr.FromInt32(9002)}},
-								InitialDelaySeconds: 3,
-								PeriodSeconds:       10,
-								FailureThreshold:    3,
-							},
-							StartupProbe: &v1.Probe{
-								ProbeHandler:        v1.ProbeHandler{TCPSocket: &v1.TCPSocketAction{Port: intstr.FromInt32(9002)}},
-								InitialDelaySeconds: 1,
-								PeriodSeconds:       2,
-								FailureThreshold:    15,
 							},
 							VolumeMounts:    []v1.VolumeMount{},
 							ImagePullPolicy: v1.PullIfNotPresent,
@@ -313,36 +291,6 @@ func genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullS
 									},
 								},
 							}},
-							LivenessProbe: &v1.Probe{
-								ProbeHandler: v1.ProbeHandler{HTTPGet: &v1.HTTPGetAction{
-									Path:   "/readyz",
-									Port:   intstr.FromInt32(80),
-									Scheme: v1.URISchemeHTTPS,
-								}},
-								InitialDelaySeconds: 5,
-								PeriodSeconds:       15,
-								FailureThreshold:    3,
-							},
-							ReadinessProbe: &v1.Probe{
-								ProbeHandler: v1.ProbeHandler{HTTPGet: &v1.HTTPGetAction{
-									Path:   "/readyz",
-									Port:   intstr.FromInt32(80),
-									Scheme: v1.URISchemeHTTPS,
-								}},
-								InitialDelaySeconds: 3,
-								PeriodSeconds:       10,
-								FailureThreshold:    3,
-							},
-							StartupProbe: &v1.Probe{
-								ProbeHandler: v1.ProbeHandler{HTTPGet: &v1.HTTPGetAction{
-									Path:   "/readyz",
-									Port:   intstr.FromInt32(80),
-									Scheme: v1.URISchemeHTTPS,
-								}},
-								InitialDelaySeconds: 1,
-								PeriodSeconds:       2,
-								FailureThreshold:    15,
-							},
 							ImagePullPolicy: v1.PullIfNotPresent,
 							Resources:       resourcesSmall,
 						},
@@ -352,6 +300,11 @@ func genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullS
 			},
 		},
 	}
+	containers := deploy.Spec.Template.Spec.Containers
+	containers[0].LivenessProbe, containers[0].ReadinessProbe, containers[0].StartupProbe = tcpProbes(10801)
+	containers[1].LivenessProbe, containers[1].ReadinessProbe, containers[1].StartupProbe = tcpProbes(9002)
+	containers[2].LivenessProbe, containers[2].ReadinessProbe, containers[2].StartupProbe = httpProbes(80, "/readyz")
+
 	if imagePullSecretName != "" {
 		deploy.Spec.Template.Spec.ImagePullSecrets = []v1.LocalObjectReference{{
 			Name: imagePullSecretName,

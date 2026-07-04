@@ -95,7 +95,7 @@ func GenTLSCert(ctx context.Context, ns string) ([]byte, []byte, []byte, error) 
 	alternateDNS = append(alternateDNS, fmt.Sprintf("%s.svc", host))
 	crt, key, err := cert.GenerateSelfSignedCertKeyWithFixtures(host, alternateIPs, alternateDNS, ".")
 	if err != nil {
-		plog.G(ctx).Errorf("Generate self signed cert and key error: %s", err.Error())
+		plog.G(ctx).Errorf("Generate self signed cert and key error: %v", err)
 		return nil, nil, nil, err
 	}
 

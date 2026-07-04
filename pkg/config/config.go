@@ -146,9 +146,7 @@ func init() {
 var Debug bool
 
 var (
-	SmallBufferSize  = 8 * 1024  // 8KB small buffer
-	MediumBufferSize = 32 * 1024 // 32KB medium buffer
-	LargeBufferSize  = 64 * 1024 // 64KB large buffer
+	LargeBufferSize = 64 * 1024 // 64KB large buffer
 )
 
 var (
@@ -220,16 +218,6 @@ var (
 )
 
 var (
-	SPool = &sync.Pool{
-		New: func() interface{} {
-			return make([]byte, SmallBufferSize)
-		},
-	}
-	MPool = sync.Pool{
-		New: func() any {
-			return make([]byte, MediumBufferSize)
-		},
-	}
 	LPool = sync.Pool{
 		New: func() any {
 			return make([]byte, LargeBufferSize)

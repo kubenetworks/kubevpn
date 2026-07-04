@@ -22,7 +22,7 @@ func CmpClientVersionAndClientImage(clientVersion, clientImgStr string) (int, er
 	}
 	clientImgTag, ok := clientImg.(reference.NamedTagged)
 	if !ok {
-		return 0, fmt.Errorf("can not convert client image")
+		return 0, fmt.Errorf("cannot convert client image")
 	}
 
 	// 1. if client image version is match client cli version, does not need to upgrade

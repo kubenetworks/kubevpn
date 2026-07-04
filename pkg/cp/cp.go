@@ -132,7 +132,7 @@ func (o *CopyOptions) Run() error {
 		return fmt.Errorf("one of src or dest must be a local file specification")
 	}
 	if len(srcSpec.File.String()) == 0 || len(destSpec.File.String()) == 0 {
-		return errors.New("filepath can not be empty")
+		return errors.New("filepath cannot be empty")
 	}
 
 	if len(srcSpec.PodName) != 0 {
@@ -291,7 +291,6 @@ func (t *TarPipe) Read(p []byte) (n int, err error) {
 }
 
 func makeTar(src localPath, dest remotePath, writer io.Writer) error {
-	// TODO: use compression here?
 	tarWriter := tar.NewWriter(writer)
 	defer tarWriter.Close()
 
@@ -355,23 +354,26 @@ func recursiveTar(srcDir, srcFile localPath, destDir, destFile remotePath, tw *t
 				return err
 			}
 
-			f, err := os.Open(fpath)
-			if err != nil {
+			if err := copyFileToTar(fpath, tw); err != nil {
 				return err
 			}
-			defer f.Close()
-
-			if _, err := io.Copy(tw, f); err != nil {
-				return err
-			}
-			return f.Close()
 		}
 	}
 	return nil
 }
 
+func copyFileToTar(fpath string, tw *tar.Writer) error {
+	f, err := os.Open(fpath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = io.Copy(tw, f)
+	return err
+}
+
 func (o *CopyOptions) untarAll(prefix string, dest localPath, reader io.Reader) error {
-	// TODO: use compression here?
 	tarReader := tar.NewReader(reader)
 	var linkList []tar.Header
 	var genDstFilename = func(headerName string) localPath {
@@ -460,8 +462,5 @@ func (o *CopyOptions) execute(options *exec.ExecOptions) error {
 		return err
 	}
 
-	if err := options.Run(); err != nil {
-		return err
-	}
-	return nil
+	return options.Run()
 }

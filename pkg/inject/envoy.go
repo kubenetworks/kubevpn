@@ -32,7 +32,7 @@ var envoyConfigFargate []byte
 //go:embed fargate_envoy_ipv4.yaml
 var envoyConfigIPv4Fargate []byte
 
-func RenderEnvoyConfig(tmplStr string, value string) string {
+func renderEnvoyConfig(tmplStr string, value string) string {
 	tmpl, err := template.New("").Parse(tmplStr)
 	if err != nil {
 		return ""
@@ -45,9 +45,9 @@ func RenderEnvoyConfig(tmplStr string, value string) string {
 	return buf.String()
 }
 
-func addEnvoyConfig(mapInterface v12.ConfigMapInterface, ns, nodeID string, localTunIPv4, localTunIPv6 string, headers map[string]string, port []controlplane.ContainerPort, portmap map[int32]string, fargateMode bool) error {
+func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, ns, nodeID string, localTunIPv4, localTunIPv6 string, headers map[string]string, port []controlplane.ContainerPort, portmap map[int32]string, fargateMode bool) error {
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		configMap, err := mapInterface.Get(context.TODO(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		configMap, err := mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -64,7 +64,7 @@ func addEnvoyConfig(mapInterface v12.ConfigMapInterface, ns, nodeID string, loca
 			return err
 		}
 		configMap.Data[config.KeyEnvoy] = string(marshal)
-		_, err = mapInterface.Update(context.TODO(), configMap, metav1.UpdateOptions{})
+		_, err = mapInterface.Update(ctx, configMap, metav1.UpdateOptions{})
 		return err
 	})
 }
@@ -139,8 +139,8 @@ func addVirtualRule(v []*controlplane.Virtual, ns, nodeID string, port []control
 	return v
 }
 
-func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, namespace string, nodeID string, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) (empty bool, found bool, err error) {
-	configMap, err := mapInterface.Get(context.TODO(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+func removeEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, namespace string, nodeID string, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) (empty bool, found bool, err error) {
+	configMap, err := mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return true, false, nil
 	}
@@ -184,6 +184,6 @@ func removeEnvoyConfig(mapInterface v12.ConfigMapInterface, namespace string, no
 		return false, found, err
 	}
 	configMap.Data[config.KeyEnvoy] = string(b)
-	_, err = mapInterface.Update(context.TODO(), configMap, metav1.UpdateOptions{})
+	_, err = mapInterface.Update(ctx, configMap, metav1.UpdateOptions{})
 	return empty, found, err
 }

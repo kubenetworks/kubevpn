@@ -96,6 +96,7 @@ func (d *ClientDevice) runConnPool(ctx context.Context, forward *Forwarder) {
 
 // runSlot manages a single connection slot with reconnect logic.
 func (d *ClientDevice) runSlot(ctx context.Context, forward *Forwarder, slotID int) {
+	firstConnect := true
 	for ctx.Err() == nil {
 		func() {
 			subCtx, cancel := context.WithCancel(ctx)
@@ -110,13 +111,14 @@ func (d *ClientDevice) runSlot(ctx context.Context, forward *Forwarder, slotID i
 			defer conn.Close()
 			plog.G(ctx).Infof("[Client-%d] Connected to %s", slotID, conn.RemoteAddr())
 
-			// Signal heartbeat on first slot only
-			if slotID == 0 {
+			// Signal heartbeat on reconnect (not first connect — initial heartbeat covers that)
+			if slotID == 0 && !firstConnect {
 				select {
 				case d.reconnected <- struct{}{}:
 				default:
 				}
 			}
+			firstConnect = false
 
 			udpConn := conn.(*UDPConnOverTCP)
 			errChan := make(chan error, 2)

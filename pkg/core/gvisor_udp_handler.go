@@ -146,5 +146,4 @@ func relayUDPOverTCP(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn
 		plog.G(ctx).Errorf("[UDP] Relay error: %v", err)
 	}
 	plog.G(ctx).Debugf("[UDP] Relay closed: %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
-	return
 }

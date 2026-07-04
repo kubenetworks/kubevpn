@@ -16,7 +16,7 @@ import (
 )
 
 func (c *ConnectOptions) setupSignalHandler() {
-	var stopChan = make(chan os.Signal)
+	var stopChan = make(chan os.Signal, 1)
 	signal.Notify(stopChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL)
 	select {
 	case <-stopChan:
@@ -30,18 +30,13 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 		return
 	}
 
-	// only root daemon really do connect
-	// root daemon: data plane
-	// user daemon: control plane
-	var userDaemon = true
-	if c.ctx != nil {
-		userDaemon = false
-	}
-
 	c.once.Do(func() {
+		if c.cmInformerStop != nil {
+			close(c.cmInformerStop)
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 		defer cancel()
-		if userDaemon {
+		if !c.isDataPlane {
 			plog.G(logCtx).Info("Performing cleanup operations")
 			var ipv4, ipv6 net.IP
 			if c.LocalTunIPv4 != nil && c.LocalTunIPv4.IP != nil {

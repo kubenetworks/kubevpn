@@ -114,13 +114,10 @@ func GetAPIServerFromKubeConfigBytes(kubeconfigBytes []byte) *net.IPNet {
 
 // ConvertToTempKubeconfigFile writes kubeconfig bytes to a temp file and returns the path.
 func ConvertToTempKubeconfigFile(kubeconfigBytes []byte, path string) (string, error) {
-	var f *os.File
-	var err error
-
 	if path == "" {
 		path = GenKubeconfigTempPath(kubeconfigBytes)
 	}
-	f, err = os.Create(path)
+	f, err := os.Create(path)
 	if err != nil {
 		return "", err
 	}
@@ -205,11 +202,7 @@ func GetKubeconfigPath(factory cmdutil.Factory) (string, error) {
 		return "", err
 	}
 
-	file, err := ConvertToTempKubeconfigFile(kubeconfigJsonBytes, "")
-	if err != nil {
-		return "", err
-	}
-	return file, nil
+	return ConvertToTempKubeconfigFile(kubeconfigJsonBytes, "")
 }
 
 // GetNsForListPodAndSvc finds the first accessible namespace from nsList for listing pods and services.
@@ -230,9 +223,9 @@ func GetNsForListPodAndSvc(ctx context.Context, clientset kubernetes.Interface, 
 		return
 	}
 	if podNs == "" {
-		plog.G(ctx).Debugf("List all namepsace pods")
+		plog.G(ctx).Debugf("List all namespace pods")
 	} else {
-		plog.G(ctx).Debugf("List namepsace %s pods", podNs)
+		plog.G(ctx).Debugf("List namespace %s pods", podNs)
 	}
 
 	for _, ns := range nsList {
@@ -251,9 +244,9 @@ func GetNsForListPodAndSvc(ctx context.Context, clientset kubernetes.Interface, 
 		return
 	}
 	if svcNs == "" {
-		plog.G(ctx).Debugf("List all namepsace services")
+		plog.G(ctx).Debugf("List all namespace services")
 	} else {
-		plog.G(ctx).Debugf("List namepsace %s services", svcNs)
+		plog.G(ctx).Debugf("List namespace %s services", svcNs)
 	}
 	return
 }

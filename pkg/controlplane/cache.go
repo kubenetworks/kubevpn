@@ -9,7 +9,6 @@ import (
 	v31 "github.com/envoyproxy/go-control-plane/envoy/config/accesslog/v3"
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
-	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	route "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
@@ -34,8 +33,6 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // Virtual represents an envoy xDS configuration for a single proxied workload.
@@ -97,11 +94,18 @@ func ConvertContainerPort(ports ...corev1.ContainerPort) []ContainerPort {
 	return result
 }
 
+// mustMarshalAny marshals a protobuf message into an Any.
+// All call sites pass statically-typed envoy config messages that are always valid.
+func mustMarshalAny(m proto.Message) *anypb.Any {
+	pbst, _ := anypb.New(m)
+	return pbst
+}
+
 // createPreserveCaseConfig creates a TypedExtensionConfig for preserving header case
-func createPreserveCaseConfig(anyFunc func(m proto.Message) *anypb.Any) *corev3.TypedExtensionConfig {
-	return &corev3.TypedExtensionConfig{
+func createPreserveCaseConfig() *core.TypedExtensionConfig {
+	return &core.TypedExtensionConfig{
 		Name:        "preserve_case",
-		TypedConfig: anyFunc(&preservecasev3.PreserveCaseFormatterConfig{}),
+		TypedConfig: mustMarshalAny(&preservecasev3.PreserveCaseFormatterConfig{}),
 	}
 }
 
@@ -178,7 +182,7 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 				rr = append(rr, defaultRouteToCluster(defaultClusterName))
 			}
 		} else {
-			rr = append(rr, defaultRoute())
+			rr = append(rr, defaultRouteToCluster("origin_cluster"))
 			clusters = append(clusters, originCluster())
 		}
 		routes = append(routes, &route.RouteConfiguration{
@@ -221,10 +225,6 @@ func toEndPoint(clusterName string, localTunIP string, port int32) *endpoint.Clu
 }
 
 func toCluster(clusterName string) *cluster.Cluster {
-	anyFunc := func(m proto.Message) *anypb.Any {
-		pbst, _ := anypb.New(m)
-		return pbst
-	}
 	return &cluster.Cluster{
 		Name:                 clusterName,
 		ClusterDiscoveryType: &cluster.Cluster_Type{Type: cluster.Cluster_EDS},
@@ -239,16 +239,16 @@ func toCluster(clusterName string) *cluster.Cluster {
 		ConnectTimeout: durationpb.New(5 * time.Second),
 		LbPolicy:       cluster.Cluster_ROUND_ROBIN,
 		TypedExtensionProtocolOptions: map[string]*anypb.Any{
-			"envoy.extensions.upstreams.http.v3.HttpProtocolOptions": anyFunc(&httpv3.HttpProtocolOptions{
-				CommonHttpProtocolOptions: &corev3.HttpProtocolOptions{
+			"envoy.extensions.upstreams.http.v3.HttpProtocolOptions": mustMarshalAny(&httpv3.HttpProtocolOptions{
+				CommonHttpProtocolOptions: &core.HttpProtocolOptions{
 					IdleTimeout: durationpb.New(time.Second * 10),
 				},
 				UpstreamProtocolOptions: &httpv3.HttpProtocolOptions_UseDownstreamProtocolConfig{
 					UseDownstreamProtocolConfig: &httpv3.HttpProtocolOptions_UseDownstreamHttpConfig{
-						HttpProtocolOptions: &corev3.Http1ProtocolOptions{
-							HeaderKeyFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat{
-								HeaderFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat_StatefulFormatter{
-									StatefulFormatter: createPreserveCaseConfig(anyFunc),
+						HttpProtocolOptions: &core.Http1ProtocolOptions{
+							HeaderKeyFormat: &core.Http1ProtocolOptions_HeaderKeyFormat{
+								HeaderFormat: &core.Http1ProtocolOptions_HeaderKeyFormat_StatefulFormatter{
+									StatefulFormatter: createPreserveCaseConfig(),
 								},
 							},
 						},
@@ -261,10 +261,6 @@ func toCluster(clusterName string) *cluster.Cluster {
 }
 
 func originCluster() *cluster.Cluster {
-	anyFunc := func(m proto.Message) *anypb.Any {
-		pbst, _ := anypb.New(m)
-		return pbst
-	}
 	return &cluster.Cluster{
 		Name:           "origin_cluster",
 		ConnectTimeout: durationpb.New(time.Second * 5),
@@ -273,13 +269,13 @@ func originCluster() *cluster.Cluster {
 			Type: cluster.Cluster_ORIGINAL_DST,
 		},
 		TypedExtensionProtocolOptions: map[string]*anypb.Any{
-			"envoy.extensions.upstreams.http.v3.HttpProtocolOptions": anyFunc(&httpv3.HttpProtocolOptions{
+			"envoy.extensions.upstreams.http.v3.HttpProtocolOptions": mustMarshalAny(&httpv3.HttpProtocolOptions{
 				UpstreamProtocolOptions: &httpv3.HttpProtocolOptions_UseDownstreamProtocolConfig{
 					UseDownstreamProtocolConfig: &httpv3.HttpProtocolOptions_UseDownstreamHttpConfig{
-						HttpProtocolOptions: &corev3.Http1ProtocolOptions{
-							HeaderKeyFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat{
-								HeaderFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat_StatefulFormatter{
-									StatefulFormatter: createPreserveCaseConfig(anyFunc),
+						HttpProtocolOptions: &core.Http1ProtocolOptions{
+							HeaderKeyFormat: &core.Http1ProtocolOptions_HeaderKeyFormat{
+								HeaderFormat: &core.Http1ProtocolOptions_HeaderKeyFormat_StatefulFormatter{
+									StatefulFormatter: createPreserveCaseConfig(),
 								},
 							},
 						},
@@ -328,29 +324,6 @@ func toRoute(clusterName string, headers map[string]string) *route.Route {
 	}
 }
 
-func defaultRoute() *route.Route {
-	return &route.Route{
-		Match: &route.RouteMatch{
-			PathSpecifier: &route.RouteMatch_Prefix{
-				Prefix: "/",
-			},
-		},
-		Action: &route.Route_Route{
-			Route: &route.RouteAction{
-				ClusterSpecifier: &route.RouteAction_Cluster{
-					Cluster: "origin_cluster",
-				},
-				Timeout:     durationpb.New(0),
-				IdleTimeout: durationpb.New(0),
-				MaxStreamDuration: &route.RouteAction_MaxStreamDuration{
-					MaxStreamDuration:    durationpb.New(0),
-					GrpcTimeoutHeaderMax: durationpb.New(0),
-				},
-			},
-		},
-	}
-}
-
 func defaultRouteToCluster(clusterName string) *route.Route {
 	return &route.Route{
 		Match: &route.RouteMatch{
@@ -374,14 +347,9 @@ func defaultRouteToCluster(clusterName string) *route.Route {
 	}
 }
 
-// buildTCPFilterChains creates the HTTP connection manager filter chain and a TCP proxy
-// fallback filter chain used for TCP (and SCTP) listeners.
-func buildTCPFilterChains(routeName string, isFargateMode bool) []*listener.FilterChain {
-	anyFunc := func(m proto.Message) *anypb.Any {
-		pbst, _ := anypb.New(m)
-		return pbst
-	}
-
+// buildFilterChains creates the HTTP connection manager filter chain and a TCP proxy
+// fallback filter chain. Used for all protocol types (TCP, UDP, SCTP).
+func buildFilterChains(routeName string) []*listener.FilterChain {
 	httpManager := &httpconnectionmanager.HttpConnectionManager{
 		CodecType:  httpconnectionmanager.HttpConnectionManager_AUTO,
 		StatPrefix: "http",
@@ -405,24 +373,24 @@ func buildTCPFilterChains(routeName string, isFargateMode bool) []*listener.Filt
 				RouteConfigName: routeName,
 			},
 		},
-		// "details": "Error: terminal filter named envoy.filters.http.router of type envoy.filters.http.router must be the last filter in a http filter chain."
+		// terminal filter envoy.filters.http.router must be the last filter in a http filter chain
 		HttpFilters: []*httpconnectionmanager.HttpFilter{
 			{
 				Name: wellknown.GRPCWeb,
 				ConfigType: &httpconnectionmanager.HttpFilter_TypedConfig{
-					TypedConfig: anyFunc(&grpcwebv3.GrpcWeb{}),
+					TypedConfig: mustMarshalAny(&grpcwebv3.GrpcWeb{}),
 				},
 			},
 			{
 				Name: wellknown.CORS,
 				ConfigType: &httpconnectionmanager.HttpFilter_TypedConfig{
-					TypedConfig: anyFunc(&corsv3.Cors{}),
+					TypedConfig: mustMarshalAny(&corsv3.Cors{}),
 				},
 			},
 			{
 				Name: wellknown.Router,
 				ConfigType: &httpconnectionmanager.HttpFilter_TypedConfig{
-					TypedConfig: anyFunc(&routerv3.Router{}),
+					TypedConfig: mustMarshalAny(&routerv3.Router{}),
 				},
 			},
 		},
@@ -433,125 +401,15 @@ func buildTCPFilterChains(routeName string, isFargateMode bool) []*listener.Filt
 		AccessLog: []*v31.AccessLog{{
 			Name: wellknown.FileAccessLog,
 			ConfigType: &v31.AccessLog_TypedConfig{
-				TypedConfig: anyFunc(&accesslogfilev3.FileAccessLog{
+				TypedConfig: mustMarshalAny(&accesslogfilev3.FileAccessLog{
 					Path: "/dev/stdout",
 				}),
 			},
 		}},
-		// Configure HTTP protocol options to preserve header case
-		HttpProtocolOptions: &corev3.Http1ProtocolOptions{
-			HeaderKeyFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat{
-				HeaderFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat_StatefulFormatter{
-					StatefulFormatter: createPreserveCaseConfig(anyFunc),
-				},
-			},
-		},
-	}
-
-	tcpConfig := &tcpproxy.TcpProxy{
-		StatPrefix: "tcp",
-		ClusterSpecifier: &tcpproxy.TcpProxy_Cluster{
-			Cluster: "origin_cluster",
-		},
-	}
-
-	chains := []*listener.FilterChain{
-		{
-			FilterChainMatch: &listener.FilterChainMatch{
-				ApplicationProtocols: []string{"http/1.0", "http/1.1", "h2c"},
-			},
-			Filters: []*listener.Filter{
-				{
-					Name: wellknown.HTTPConnectionManager,
-					ConfigType: &listener.Filter_TypedConfig{
-						TypedConfig: anyFunc(httpManager),
-					},
-				},
-			},
-		},
-		{
-			Filters: []*listener.Filter{
-				{
-					Name: wellknown.TCPProxy,
-					ConfigType: &listener.Filter_TypedConfig{
-						TypedConfig: anyFunc(tcpConfig),
-					},
-				},
-			},
-		},
-	}
-
-	return chains
-}
-
-// buildUDPFilterChains creates filter chains for UDP listeners.
-// Currently uses the same HTTP connection manager + TCP proxy structure as TCP
-// to preserve existing routing/header-matching behavior for UDP workloads.
-func buildUDPFilterChains(routeName string) []*listener.FilterChain {
-	anyFunc := func(m proto.Message) *anypb.Any {
-		pbst, _ := anypb.New(m)
-		return pbst
-	}
-
-	httpManager := &httpconnectionmanager.HttpConnectionManager{
-		CodecType:  httpconnectionmanager.HttpConnectionManager_AUTO,
-		StatPrefix: "http",
-		RouteSpecifier: &httpconnectionmanager.HttpConnectionManager_Rds{
-			Rds: &httpconnectionmanager.Rds{
-				ConfigSource: &core.ConfigSource{
-					ResourceApiVersion: resource.DefaultAPIVersion,
-					ConfigSourceSpecifier: &core.ConfigSource_ApiConfigSource{
-						ApiConfigSource: &core.ApiConfigSource{
-							TransportApiVersion:       resource.DefaultAPIVersion,
-							ApiType:                   core.ApiConfigSource_GRPC,
-							SetNodeOnFirstMessageOnly: true,
-							GrpcServices: []*core.GrpcService{{
-								TargetSpecifier: &core.GrpcService_EnvoyGrpc_{
-									EnvoyGrpc: &core.GrpcService_EnvoyGrpc{ClusterName: "xds_cluster"},
-								},
-							}},
-						},
-					},
-				},
-				RouteConfigName: routeName,
-			},
-		},
-		HttpFilters: []*httpconnectionmanager.HttpFilter{
-			{
-				Name: wellknown.GRPCWeb,
-				ConfigType: &httpconnectionmanager.HttpFilter_TypedConfig{
-					TypedConfig: anyFunc(&grpcwebv3.GrpcWeb{}),
-				},
-			},
-			{
-				Name: wellknown.CORS,
-				ConfigType: &httpconnectionmanager.HttpFilter_TypedConfig{
-					TypedConfig: anyFunc(&corsv3.Cors{}),
-				},
-			},
-			{
-				Name: wellknown.Router,
-				ConfigType: &httpconnectionmanager.HttpFilter_TypedConfig{
-					TypedConfig: anyFunc(&routerv3.Router{}),
-				},
-			},
-		},
-		StreamIdleTimeout: durationpb.New(0),
-		UpgradeConfigs: []*httpconnectionmanager.HttpConnectionManager_UpgradeConfig{{
-			UpgradeType: "websocket",
-		}},
-		AccessLog: []*v31.AccessLog{{
-			Name: wellknown.FileAccessLog,
-			ConfigType: &v31.AccessLog_TypedConfig{
-				TypedConfig: anyFunc(&accesslogfilev3.FileAccessLog{
-					Path: "/dev/stdout",
-				}),
-			},
-		}},
-		HttpProtocolOptions: &corev3.Http1ProtocolOptions{
-			HeaderKeyFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat{
-				HeaderFormat: &corev3.Http1ProtocolOptions_HeaderKeyFormat_StatefulFormatter{
-					StatefulFormatter: createPreserveCaseConfig(anyFunc),
+		HttpProtocolOptions: &core.Http1ProtocolOptions{
+			HeaderKeyFormat: &core.Http1ProtocolOptions_HeaderKeyFormat{
+				HeaderFormat: &core.Http1ProtocolOptions_HeaderKeyFormat_StatefulFormatter{
+					StatefulFormatter: createPreserveCaseConfig(),
 				},
 			},
 		},
@@ -573,7 +431,7 @@ func buildUDPFilterChains(routeName string) []*listener.FilterChain {
 				{
 					Name: wellknown.HTTPConnectionManager,
 					ConfigType: &listener.Filter_TypedConfig{
-						TypedConfig: anyFunc(httpManager),
+						TypedConfig: mustMarshalAny(httpManager),
 					},
 				},
 			},
@@ -583,7 +441,7 @@ func buildUDPFilterChains(routeName string) []*listener.FilterChain {
 				{
 					Name: wellknown.TCPProxy,
 					ConfigType: &listener.Filter_TypedConfig{
-						TypedConfig: anyFunc(tcpConfig),
+						TypedConfig: mustMarshalAny(tcpConfig),
 					},
 				},
 			},
@@ -602,23 +460,10 @@ func toListener(listenerName string, routeName string, port int32, p corev1.Prot
 		protocol = core.SocketAddress_TCP
 	}
 
-	anyFunc := func(m proto.Message) *anypb.Any {
-		pbst, _ := anypb.New(m)
-		return pbst
-	}
-
-	var filterChains []*listener.FilterChain
-	switch p {
-	case corev1.ProtocolUDP:
-		filterChains = buildUDPFilterChains(routeName)
-	default:
-		filterChains = buildTCPFilterChains(routeName, isFargateMode)
-	}
-
 	return &listener.Listener{
 		Name:             listenerName,
 		TrafficDirection: core.TrafficDirection_INBOUND,
-		BindToPort:       &wrapperspb.BoolValue{Value: util.If(isFargateMode, true, false)},
+		BindToPort:       &wrapperspb.BoolValue{Value: isFargateMode},
 		UseOriginalDst:   &wrapperspb.BoolValue{Value: true},
 		Address: &core.Address{
 			Address: &core.Address_SocketAddress{
@@ -631,18 +476,18 @@ func toListener(listenerName string, routeName string, port int32, p corev1.Prot
 				},
 			},
 		},
-		FilterChains: filterChains,
+		FilterChains: buildFilterChains(routeName),
 		ListenerFilters: []*listener.ListenerFilter{
 			{
 				Name: wellknown.HttpInspector,
 				ConfigType: &listener.ListenerFilter_TypedConfig{
-					TypedConfig: anyFunc(&httpinspector.HttpInspector{}),
+					TypedConfig: mustMarshalAny(&httpinspector.HttpInspector{}),
 				},
 			},
 			{
 				Name: wellknown.OriginalDestination,
 				ConfigType: &listener.ListenerFilter_TypedConfig{
-					TypedConfig: anyFunc(&dstv3inspector.OriginalDst{}),
+					TypedConfig: mustMarshalAny(&dstv3inspector.OriginalDst{}),
 				},
 			},
 		},

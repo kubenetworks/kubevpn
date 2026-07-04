@@ -19,22 +19,16 @@ func (svr *Server) Unsync(resp rpc.Daemon_UnsyncServer) error {
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newStreamWriter(func(msg string) error {
 		return resp.Send(&rpc.UnsyncResponse{Message: msg})
 	}), svr.LogFile))
-	var index = -1
-	for i, connection := range svr.connections {
-		if connection.GetConnectionID() == svr.currentConnectionID {
-			index = i
-			break
-		}
-	}
-	if index == -1 {
+	conn, _ := svr.findConnection(svr.currentConnectionID)
+	if conn == nil {
 		logger.Infof("No connection found")
 		return fmt.Errorf("no connection found")
 	}
 
 	ctx := plog.WithLogger(resp.Context(), logger)
-	if svr.connections[index].Sync != nil {
-		err = svr.connections[index].Sync.Cleanup(ctx, req.Workloads...)
-		svr.connections[index].Sync = nil
+	if conn.Sync != nil {
+		err = conn.Sync.Cleanup(ctx, req.Workloads...)
+		conn.Sync = nil
 	}
 	return err
 }

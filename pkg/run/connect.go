@@ -12,9 +12,9 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
-	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -33,7 +33,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.SshConfig, imagePullSecretName string, managerNamespace string) error {
 	cli, err := daemon.GetClient(false)
 	if err != nil {
-		return fmt.Errorf("get nil daemon client: %w", err)
+		return fmt.Errorf("failed to get daemon client: %w", err)
 	}
 	kubeConfigBytes, ns, err := util.ConvertToKubeConfigBytes(option.factory)
 	if err != nil {
@@ -75,12 +75,12 @@ func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.Ssh
 	})
 	resp, err := cli.Proxy(context.Background())
 	if err != nil {
-		plog.G(ctx).Errorf("Connect to cluster error: %s", err.Error())
+		plog.G(ctx).Errorf("Connect to cluster error: %v", err)
 		return err
 	}
 	err = resp.Send(req)
 	if err != nil {
-		plog.G(ctx).Errorf("Connect to cluster error: %s", err.Error())
+		plog.G(ctx).Errorf("Connect to cluster error: %v", err)
 		return err
 	}
 	return util.PrintGRPCStream[rpc.SyncResponse](ctx, resp)
@@ -158,8 +158,7 @@ func (option *Options) CreateConnectContainer(ctx context.Context, portBindings 
 		args = append(args, "--publish", fmt.Sprintf("%s:%s", port.Port(), bindings[0].HostPort))
 	}
 
-	var result = []string{"docker"}
-	result = append(result, args...)
+	result := append([]string{"docker"}, args...)
 	result = append(result, config.Image)
 	result = append(result, entrypoint...)
 	err = util.RunContainer(ctx, result)

@@ -43,65 +43,47 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (cache.SharedIndex
 	}
 	svcIndexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
 	svcInformer := informerv1.NewServiceInformer(clientSet, svcNs, 0, svcIndexers)
-	svcTicker := time.NewTicker(time.Second * 15)
-	_, err = svcInformer.AddEventHandler(newTickerResetHandler(svcTicker))
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to add service event handler: %v", err)
+	if err = c.watchAndRoute(ctx, svcInformer, func(obj interface{}) []string {
+		svc, ok := obj.(*v1.Service)
+		if !ok {
+			return nil
+		}
+		return append([]string{svc.Spec.ClusterIP}, svc.Spec.ClusterIPs...)
+	}); err != nil {
 		return nil, nil, err
 	}
-
-	go svcInformer.Run(ctx.Done())
-	go func() {
-		defer svcTicker.Stop()
-		for ; ctx.Err() == nil; <-svcTicker.C {
-			svcTicker.Reset(time.Second * 15)
-			serviceList := svcInformer.GetIndexer().List()
-			var ips = sets.New[string]()
-			for _, service := range serviceList {
-				svc, ok := service.(*v1.Service)
-				if !ok {
-					continue
-				}
-				ips.Insert(svc.Spec.ClusterIP)
-				ips.Insert(svc.Spec.ClusterIPs...)
-			}
-			if ctx.Err() != nil {
-				return
-			}
-			if ips.Len() == 0 {
-				continue
-			}
-			err := c.addRoute(ips.UnsortedList()...)
-			if err != nil {
-				plog.G(ctx).Debugf("Add service IP to route table failed: %v", err)
-			}
-		}
-	}()
 
 	podIndexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
 	podInformer := informerv1.NewPodInformer(clientSet, podNs, 0, podIndexers)
-	podTicker := time.NewTicker(time.Second * 15)
-	_, err = podInformer.AddEventHandler(newTickerResetHandler(podTicker))
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to add service event handler: %v", err)
+	if err = c.watchAndRoute(ctx, podInformer, func(obj interface{}) []string {
+		p, ok := obj.(*v1.Pod)
+		if !ok || p.Spec.HostNetwork {
+			return nil
+		}
+		return util.GetPodIP(*p)
+	}); err != nil {
 		return nil, nil, err
 	}
-	go podInformer.Run(ctx.Done())
+
+	return svcInformer, podInformer, nil
+}
+
+// watchAndRoute starts an informer and a goroutine that periodically extracts
+// IPs from the cache and adds them to the route table.
+func (c *ConnectOptions) watchAndRoute(ctx context.Context, informer cache.SharedIndexInformer, extractIPs func(interface{}) []string) error {
+	ticker := time.NewTicker(time.Second * 15)
+	_, err := informer.AddEventHandler(newTickerResetHandler(ticker))
+	if err != nil {
+		return err
+	}
+	go informer.Run(ctx.Done())
 	go func() {
-		defer podTicker.Stop()
-		for ; ctx.Err() == nil; <-podTicker.C {
-			podTicker.Reset(time.Second * 15)
-			podList := podInformer.GetIndexer().List()
-			var ips = sets.New[string]()
-			for _, pod := range podList {
-				p, ok := pod.(*v1.Pod)
-				if !ok {
-					continue
-				}
-				if p.Spec.HostNetwork {
-					continue
-				}
-				ips.Insert(util.GetPodIP(*p)...)
+		defer ticker.Stop()
+		for ; ctx.Err() == nil; <-ticker.C {
+			ticker.Reset(time.Second * 15)
+			ips := sets.New[string]()
+			for _, obj := range informer.GetIndexer().List() {
+				ips.Insert(extractIPs(obj)...)
 			}
 			if ctx.Err() != nil {
 				return
@@ -109,14 +91,12 @@ func (c *ConnectOptions) addRouteDynamic(ctx context.Context) (cache.SharedIndex
 			if ips.Len() == 0 {
 				continue
 			}
-			err := c.addRoute(ips.UnsortedList()...)
-			if err != nil {
-				plog.G(ctx).Debugf("Add pod IP to route table failed: %v", err)
+			if err := c.addRoute(ips.UnsortedList()...); err != nil {
+				plog.G(ctx).Debugf("Add IP to route table failed: %v", err)
 			}
 		}
 	}()
-
-	return svcInformer, podInformer, nil
+	return nil
 }
 
 func (c *ConnectOptions) addRoute(ipStrList ...string) error {

@@ -114,19 +114,13 @@ func restartDeploy(ctx context.Context, f cmdutil.Factory) error {
 		Out:    os.Stdout,
 		ErrOut: os.Stderr,
 	})
-	err := o.Complete(f, nil, []string{fmt.Sprintf("deploy/%s", deployName)})
-	if err != nil {
+	if err := o.Complete(f, nil, []string{fmt.Sprintf("deploy/%s", deployName)}); err != nil {
 		return err
 	}
-	err = o.Validate()
-	if err != nil {
+	if err := o.Validate(); err != nil {
 		return err
 	}
-	err = o.RunRestart()
-	if err != nil {
-		return err
-	}
-	return nil
+	return o.RunRestart()
 }
 
 func getCIDR(ctx context.Context, factory cmdutil.Factory) error {

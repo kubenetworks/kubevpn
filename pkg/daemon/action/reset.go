@@ -37,10 +37,6 @@ func (svr *Server) Reset(resp rpc.Daemon_ResetServer) error {
 	if err != nil {
 		return err
 	}
-	err = connect.Reset(ctx, req.Namespace, req.Workloads)
-	if err != nil {
-		return err
-	}
-	return nil
+	return connect.Reset(ctx, req.Namespace, req.Workloads)
 }
 

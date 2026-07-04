@@ -71,7 +71,7 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 
 				answer, err := miekgdns.ExchangeContext(ctx, msg, net.JoinHostPort(dnsAddr, s.forwardDNS.Port))
 				if err != nil {
-					plog.G(ctx).Errorf("Failed to found DNS name: %s: %v", name, err)
+					plog.G(ctx).Errorf("failed to resolve DNS name %s: %v", name, err)
 					return
 				}
 				if len(answer.Answer) == 0 {
@@ -93,7 +93,7 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 
 				err = w.WriteMsg(answer)
 				if err != nil {
-					plog.G(ctx).Errorf("Failed to write response for name: %s: %v", name, err.Error())
+					plog.G(ctx).Errorf("failed to write DNS response for %s: %v", name, err)
 				}
 			}()
 		}
@@ -102,7 +102,7 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 	wg.Wait()
 
 	if !isSuccess.Load() {
-		plog.G(ctx).Errorf("can't found domain name: %s", originName)
+		plog.G(ctx).Errorf("failed to resolve domain name: %s", originName)
 		m.Response = true
 		_ = w.WriteMsg(m)
 	}

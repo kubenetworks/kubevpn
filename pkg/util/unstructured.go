@@ -219,5 +219,5 @@ func getTopOwnerReferenceBySelector(factory util.Factory, ns, selector string) (
 		}
 		return getTopOwnerReference(factory, ns, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
 	}
-	return nil, nil, fmt.Errorf("can not find controller for %s", selector)
+	return nil, nil, fmt.Errorf("cannot find controller for %s", selector)
 }

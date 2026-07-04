@@ -155,28 +155,6 @@ func TestInitSetsDockerCIDR(t *testing.T) {
 }
 
 func TestPoolAllocations(t *testing.T) {
-	t.Run("SPool returns SmallBufferSize", func(t *testing.T) {
-		buf := SPool.Get().([]byte)
-		defer SPool.Put(buf)
-		if len(buf) != SmallBufferSize {
-			t.Fatalf("SPool buffer len = %d, want %d", len(buf), SmallBufferSize)
-		}
-		if cap(buf) < SmallBufferSize {
-			t.Fatalf("SPool buffer cap = %d, want >= %d", cap(buf), SmallBufferSize)
-		}
-	})
-
-	t.Run("MPool returns MediumBufferSize", func(t *testing.T) {
-		buf := MPool.Get().([]byte)
-		defer MPool.Put(buf)
-		if len(buf) != MediumBufferSize {
-			t.Fatalf("MPool buffer len = %d, want %d", len(buf), MediumBufferSize)
-		}
-		if cap(buf) < MediumBufferSize {
-			t.Fatalf("MPool buffer cap = %d, want >= %d", cap(buf), MediumBufferSize)
-		}
-	})
-
 	t.Run("LPool returns LargeBufferSize", func(t *testing.T) {
 		buf := LPool.Get().([]byte)
 		defer LPool.Put(buf)
@@ -194,24 +172,6 @@ func TestPoolAllocations(t *testing.T) {
 		expected := 64 * 1024
 		if len(buf) != expected {
 			t.Fatalf("LPool buffer len = %d, want %d (64KB)", len(buf), expected)
-		}
-	})
-
-	t.Run("SPool buffer is 8KB", func(t *testing.T) {
-		buf := SPool.Get().([]byte)
-		defer SPool.Put(buf)
-		expected := 8 * 1024
-		if len(buf) != expected {
-			t.Fatalf("SPool buffer len = %d, want %d (8KB)", len(buf), expected)
-		}
-	})
-
-	t.Run("MPool buffer is 32KB", func(t *testing.T) {
-		buf := MPool.Get().([]byte)
-		defer MPool.Put(buf)
-		expected := 32 * 1024
-		if len(buf) != expected {
-			t.Fatalf("MPool buffer len = %d, want %d (32KB)", len(buf), expected)
 		}
 	})
 }
@@ -248,14 +208,8 @@ func TestPortNameConstants(t *testing.T) {
 
 func TestErrors(t *testing.T) {
 	errs := []error{
-		ErrDHCPExhausted,
-		ErrConnectionTimeout,
-		ErrPortInUse,
-		ErrClusterUnreachable,
-		ErrSidecarNotFound,
 		ErrInvalidKubeconfig,
 		ErrPortForwardTimeout,
-		ErrTUNDeviceCreate,
 	}
 	for _, err := range errs {
 		if err == nil {
@@ -268,14 +222,12 @@ func TestErrors(t *testing.T) {
 }
 
 func TestBufferSizes(t *testing.T) {
-	if SmallBufferSize <= 0 {
-		t.Fatal("SmallBufferSize <= 0")
+	if LargeBufferSize <= 0 {
+		t.Fatal("LargeBufferSize <= 0")
 	}
-	if MediumBufferSize <= SmallBufferSize {
-		t.Fatal("MediumBufferSize not > SmallBufferSize")
-	}
-	if LargeBufferSize <= MediumBufferSize {
-		t.Fatal("LargeBufferSize not > MediumBufferSize")
+	expected := 64 * 1024
+	if LargeBufferSize != expected {
+		t.Fatalf("LargeBufferSize = %d, want %d", LargeBufferSize, expected)
 	}
 }
 

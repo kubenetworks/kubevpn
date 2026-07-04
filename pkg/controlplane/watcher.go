@@ -56,7 +56,7 @@ func Watch(ctx context.Context, f cmdutil.Factory, notifyCh chan<- NotifyMessage
 		},
 	})
 	if err != nil {
-		plog.G(ctx).Errorf("Failed to add service event handler: %v", err)
+		plog.G(ctx).Errorf("Failed to add configmap event handler: %v", err)
 		return err
 	}
 

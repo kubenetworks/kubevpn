@@ -34,9 +34,9 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 					wg.Add(1)
 					go func(options *handler.ConnectOptions) {
 						defer wg.Done()
-						result := genStatus(options)
+						result := buildConnectionStatus(options)
 						var err error
-						result.ProxyList, result.SyncList, err = gen(options, options.Sync)
+						result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(options, options.Sync)
 						if err != nil {
 							plog.G(ctx).Errorf("Error generating status: %v", err)
 							result.Status = StatusUnhealthy
@@ -59,9 +59,9 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 		go func(i int) {
 			defer wg.Done()
 			options := svr.connections[i]
-			result := genStatus(options)
+			result := buildConnectionStatus(options)
 			var err error
-			result.ProxyList, result.SyncList, err = gen(options, options.Sync)
+			result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(options, options.Sync)
 			if err != nil {
 				plog.G(ctx).Errorf("Error generating status: %v", err)
 				result.Status = StatusUnhealthy
@@ -73,7 +73,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 	return &rpc.StatusResponse{List: list, CurrentConnectionID: svr.currentConnectionID}, nil
 }
 
-func genStatus(connect *handler.ConnectOptions) *rpc.Status {
+func buildConnectionStatus(connect *handler.ConnectOptions) *rpc.Status {
 	status := StatusOk
 	tunName, _ := connect.GetTunDeviceName()
 	if tunName == "" {
@@ -92,7 +92,7 @@ func genStatus(connect *handler.ConnectOptions) *rpc.Status {
 	return &info
 }
 
-func gen(connect *handler.ConnectOptions, sync *handler.SyncOptions) ([]*rpc.Proxy, []*rpc.Sync, error) {
+func buildProxyAndSyncStatus(connect *handler.ConnectOptions, sync *handler.SyncOptions) ([]*rpc.Proxy, []*rpc.Sync, error) {
 	var proxyList []*rpc.Proxy
 	status := connect.HealthStatus()
 	if configMap := status.ConfigMap(); configMap != nil {
@@ -116,7 +116,7 @@ func gen(connect *handler.ConnectOptions, sync *handler.SyncOptions) ([]*rpc.Pro
 						connect.IsMe(virtual.Namespace, util.ConvertWorkloadToUID(virtual.UID), rule.Headers),
 						v4 == rule.LocalTunIPv4 && v6 == rule.LocalTunIPv6,
 					),
-					PortMap: useSecondPort(rule.PortMap),
+					PortMap: extractLocalPorts(rule.PortMap),
 				})
 			}
 			proxyList = append(proxyList, &rpc.Proxy{
@@ -159,7 +159,7 @@ func gen(connect *handler.ConnectOptions, sync *handler.SyncOptions) ([]*rpc.Pro
 	return proxyList, syncList, status.LastError()
 }
 
-func useSecondPort(m map[int32]string) map[int32]int32 {
+func extractLocalPorts(m map[int32]string) map[int32]int32 {
 	result := make(map[int32]int32)
 	for k, v := range m {
 		if _, after, ok := strings.Cut(v, ":"); ok {

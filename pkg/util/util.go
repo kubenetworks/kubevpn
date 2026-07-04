@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -41,11 +40,11 @@ func IsWindows() bool {
 
 // RolloutStatus not use kubectl rollout options is this method can use context to cancel
 func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string) (err error) {
-	plog.GetLogger(ctx1).Infof("Checking rollout status for %s", workloads)
+	plog.G(ctx1).Infof("Checking rollout status for %s", workloads)
 	defer func() {
 		if err != nil {
-			plog.G(ctx1).Errorf("Rollout status for %s failed: %s", workloads, err.Error())
-			out := plog.GetLogger(ctx1).Logger.Out
+			plog.G(ctx1).Errorf("Rollout status for %s failed: %v", workloads, err)
+			out := plog.G(ctx1).Logger.Out
 			streams := genericiooptions.IOStreams{
 				In:     os.Stdin,
 				Out:    out,
@@ -104,31 +103,29 @@ func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string
 	// if the rollout isn't done yet, keep watching deployment status
 	ctx, cancel := context.WithCancel(ctx1)
 	defer cancel()
-	return func() error {
-		_, err = watchtools.UntilWithSync(ctx, lw, &unstructured.Unstructured{}, nil, func(e watch.Event) (bool, error) {
-			switch t := e.Type; t {
-			case watch.Added, watch.Modified:
-				status, done, err := statusViewer.Status(e.Object.(k8sruntime.Unstructured), 0)
-				if err != nil {
-					return false, err
-				}
-				// Quit waiting if the rollout is done
-				if done {
-					return true, nil
-				}
-				plog.G(ctx).Info(strings.TrimSpace(status))
-				return false, nil
-
-			case watch.Deleted:
-				// We need to abort to avoid cases of recreation and not to silently watch the wrong (new) object
-				return true, fmt.Errorf("object has been deleted")
-
-			default:
-				return true, fmt.Errorf("internal error: unexpected event %#v", e)
+	_, err = watchtools.UntilWithSync(ctx, lw, &unstructured.Unstructured{}, nil, func(e watch.Event) (bool, error) {
+		switch t := e.Type; t {
+		case watch.Added, watch.Modified:
+			status, done, err := statusViewer.Status(e.Object.(k8sruntime.Unstructured), 0)
+			if err != nil {
+				return false, err
 			}
-		})
-		return err
-	}()
+			// Quit waiting if the rollout is done
+			if done {
+				return true, nil
+			}
+			plog.G(ctx).Info(strings.TrimSpace(status))
+			return false, nil
+
+		case watch.Deleted:
+			// We need to abort to avoid cases of recreation and not to silently watch the wrong (new) object
+			return true, fmt.Errorf("object has been deleted")
+
+		default:
+			return true, fmt.Errorf("internal error: unexpected event %#v", e)
+		}
+	})
+	return err
 }
 
 // WriterStringer combines io.Writer and fmt.Stringer for buffered output with string access.
@@ -164,40 +161,6 @@ func (w *proxyWriter) String() string {
 	return w.Buffer.String()
 }
 
-func runWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string) (stop bool)) (string, string, error) {
-	stdoutBuf := NewWriter(checker)
-	stderrBuf := NewWriter(checker)
-
-	stdoutPipe, _ := cmd.StdoutPipe()
-	stderrPipe, _ := cmd.StderrPipe()
-	stdout := io.MultiWriter(os.Stdout, stdoutBuf)
-	stderr := io.MultiWriter(os.Stderr, stderrBuf)
-	go func() {
-		_, _ = io.Copy(stdout, stdoutPipe)
-	}()
-	go func() {
-		_, _ = io.Copy(stderr, stderrPipe)
-	}()
-	if err := cmd.Start(); err != nil {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		return stdoutBuf.String(), stderrBuf.String(), err
-	}
-	if err := cmd.Wait(); err != nil {
-		return "", "", err
-	}
-	var err error
-	if !cmd.ProcessState.Success() {
-		err = errors.New("exit code is not 0")
-	}
-
-	stdoutStr := strings.TrimSpace(stdoutBuf.String())
-	stderrStr := strings.TrimSpace(stderrBuf.String())
-
-	return stdoutStr, stderrStr, err
-}
-
 // CleanExtensionLib removes the wintun.dll driver file on Windows after uninstalling the WireGuard TUN driver.
 func CleanExtensionLib() {
 	if !IsWindows() {
@@ -215,8 +178,7 @@ func CleanExtensionLib() {
 			return !errors.Is(err, os.ErrNotExist)
 		},
 		func() error {
-			err := driver.UninstallWireGuardTunDriver()
-			return err
+			return driver.UninstallWireGuardTunDriver()
 		},
 	)
 	_, err = os.Lstat(filename)
@@ -225,12 +187,6 @@ func CleanExtensionLib() {
 	}
 	dst := filepath.Join(os.TempDir(), filepath.Base(filename))
 	_ = Move(filename, dst)
-}
-
-// Print writes the slogan wrapped in a banner box to the writer.
-func Print(writer io.Writer, slogan string) {
-	str := FormatBanner(slogan)
-	_, _ = writer.Write([]byte(str))
 }
 
 // FormatBanner wraps the slogan text in an ASCII box border and returns the formatted string.
@@ -243,17 +199,17 @@ func FormatBanner(slogan string) string {
 		length = max(length, len(line))
 		lines = append(lines, line)
 	}
-	length = length + 1 + 1
+	length += 2
 	var sb strings.Builder
 
 	sb.WriteString("+" + strings.Repeat("-", length) + "+")
 	for _, line := range lines {
 		sb.WriteByte('\n')
-		sb.WriteString("|")
-		sb.WriteString(strings.Repeat(" ", 1))
+		sb.WriteByte('|')
+		sb.WriteByte(' ')
 		sb.WriteString(line)
 		sb.WriteString(strings.Repeat(" ", length-1-len(line)))
-		sb.WriteString("|")
+		sb.WriteByte('|')
 	}
 	sb.WriteByte('\n')
 	sb.WriteString("+" + strings.Repeat("-", length) + "+")
@@ -271,13 +227,13 @@ func StartupPProfForServer(port int) {
 	_ = http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
 }
 
-// Merge copies all entries from ToMap into fromMap and returns the merged result.
-func Merge[K comparable, V any](fromMap, ToMap map[K]V) map[K]V {
+// Merge copies all entries from toMap into fromMap and returns the merged result.
+func Merge[K comparable, V any](fromMap, toMap map[K]V) map[K]V {
 	if fromMap == nil {
-		return ToMap
+		return toMap
 	}
 
-	for k, v := range ToMap {
+	for k, v := range toMap {
 		fromMap[k] = v
 	}
 

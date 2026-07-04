@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	golog "log"
 	"net"
 	"net/http"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -52,10 +52,6 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		LocalTime:  true,
 		Compress:   false,
 	}
-
-	// for gssapi to lookup KDCs in DNS
-	// c.LibDefaults.DNSLookupKDC = true
-	// c.LibDefaults.DNSLookupRealm = true
 
 	log.SetOutput(l)
 	golog.Default().SetOutput(l)
@@ -127,17 +123,15 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	}
 	o.svr = &action.Server{Cancel: cancel, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: l, ID: o.ID}
 	if !o.IsSudo {
-		go o.svr.LoadFromConfig()
+		go o.svr.LoadFromConfig(o.ctx)
 	}
 	rpc.RegisterDaemonServer(svr, o.svr)
 	return downgradingServer.Serve(lis)
-	//return o.svr.Serve(lis)
 }
 
 func (o *SvrOption) Stop() {
 	o.cancel()
 	if o.svr != nil && o.svr.Cancel != nil {
-		//o.svr.GracefulStop()
 		o.svr.Cancel()
 	}
 }
@@ -222,23 +216,17 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 func writePIDToFile(isSudo bool) error {
 	pidPath := config.GetPidPath(isSudo)
 	pid := os.Getpid()
-	err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0644)
-	if err != nil {
-		return err
-	}
-	err = os.Chmod(pidPath, 0644)
-	return err
+	return os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0644)
 }
 
 // let daemon process to Rotate log. create new log file
 // sudo daemon process then use new log file
 func rotateLog(l *lumberjack.Logger) {
-	sec := time.Duration(0)
 	for {
 		nowTime := time.Now()
 		nowTimeStr := nowTime.Format("2006-01-02")
 		t2, _ := time.ParseInLocation("2006-01-02", nowTimeStr, time.Local)
-		next := t2.AddDate(0, 0, 1).Add(sec)
+		next := t2.AddDate(0, 0, 1)
 		after := next.UnixNano() - nowTime.UnixNano()
 		<-time.After(time.Duration(after) * time.Nanosecond)
 		_ = l.Rotate()

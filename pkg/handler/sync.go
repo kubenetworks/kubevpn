@@ -4,20 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/netip"
-	"net/url"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/joho/godotenv"
-	libconfig "github.com/syncthing/syncthing/lib/config"
-	"github.com/syncthing/syncthing/lib/netutil"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
@@ -28,12 +18,10 @@ import (
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/cmd/util/podcmd"
-	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/syncthing"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -73,13 +61,10 @@ func (d *SyncOptions) SetContext(ctx context.Context) {
 	d.ctx = ctx
 }
 
-// DoSync
-/*
-* 1) download mount path use empty-dir but skip empty-dir in init-containers
-* 2) get env from containers
-* 3) create serviceAccount as needed
-* 4) modify podTempSpec inject kubevpn container
- */
+// DoSync orchestrates syncthing-based file synchronization:
+// 1) creates a sync workload (clone of the target with syncthing sidecar)
+// 2) waits for it to become ready
+// 3) optionally starts local syncthing client for directory sync
 func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, image string) error {
 	var args []string
 	if len(d.Headers) != 0 {
@@ -95,7 +80,7 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 		if err = unstructured.SetNestedField(u.UnstructuredContent(), int64(1), "spec", "replicas"); err != nil {
 			plog.G(ctx).Warnf("Failed to set replicaset to 1: %v", err)
 		}
-		ClearObjectMetadata(u)
+		clearObjectMetadata(u)
 		var newUUID uuid.UUID
 		newUUID, err = uuid.NewUUID()
 		if err != nil {
@@ -110,7 +95,6 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 			"origin-workload": originName,
 		}
 		u.SetLabels(labels.Merge(u.GetLabels(), labelsMap))
-		// for leave resource and disconnect from cluster
 		u.SetDeletionGracePeriodSeconds(ptr.To[int64](60))
 		var path []string
 		var spec *v1.PodTemplateSpec
@@ -136,7 +120,7 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 			return createErr
 		})
 		if retryErr != nil {
-			return fmt.Errorf("create sync for resource %s failed: %v", workload, retryErr)
+			return fmt.Errorf("create sync for resource %s failed: %w", workload, retryErr)
 		}
 		plog.G(ctx).Infof("Create sync resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
 		plog.G(ctx).Infof("Wait for sync resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
@@ -160,7 +144,6 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 // prepareSyncPodSpec modifies the pod template spec for the sync resource by adding
 // annotations, labels, volumes, and containers needed for syncthing-based file sync.
 func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, spec *v1.PodTemplateSpec, u *unstructured.Unstructured, workload string, kubeconfigJsonBytes []byte, image string, args []string, path []string, labelsMap map[string]string) error {
-	// (1) add annotation KUBECONFIG
 	anno := spec.GetAnnotations()
 	if anno == nil {
 		anno = map[string]string{}
@@ -168,10 +151,8 @@ func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, spec *v1.PodTempla
 	anno[config.KUBECONFIG] = string(kubeconfigJsonBytes)
 	spec.SetAnnotations(anno)
 
-	// (2) modify labels
 	spec.SetLabels(labelsMap)
 
-	// (3) add volumes KUBECONFIG and syncDir
 	syncDataDirName := config.VolumeSyncthing
 	spec.Spec.Volumes = append(spec.Spec.Volumes,
 		v1.Volume{
@@ -195,9 +176,7 @@ func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, spec *v1.PodTempla
 		},
 	)
 
-	// (4) add kubevpn containers
 	containers := spec.Spec.Containers
-	// remove vpn sidecar
 	for i := 0; i < len(containers); i++ {
 		containerName := containers[i].Name
 		if containerName == config.ContainerSidecarVPN || containerName == config.ContainerSidecarEnvoyProxy {
@@ -211,7 +190,6 @@ func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, spec *v1.PodTempla
 			return err
 		}
 		if d.TargetImage != "" {
-			// update container[index] image
 			container.Image = d.TargetImage
 		}
 		if d.LocalDir != "" {
@@ -227,35 +205,13 @@ func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, spec *v1.PodTempla
 			container.StartupProbe = nil
 		}
 	}
-	// https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/
 	if spec.Spec.SecurityContext == nil {
 		spec.Spec.SecurityContext = &v1.PodSecurityContext{}
 	}
-	// https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/#enabling-unsafe-sysctls
-	// kubelet --allowed-unsafe-sysctls \
-	//  'kernel.msg*,net.core.somaxconn' ...
-	/*spec.Spec.SecurityContext.Sysctls = append(spec.Spec.SecurityContext.Sysctls, []v1.Sysctl{
-		{
-			Name:  "net.ipv4.ip_forward",
-			Value: "1",
-		},
-		{
-			Name:  "net.ipv6.conf.all.disable_ipv6",
-			Value: "0",
-		},
-		{
-			Name:  "net.ipv6.conf.all.forwarding",
-			Value: "1",
-		},
-		{
-			Name:  "net.ipv4.conf.all.route_localnet",
-			Value: "1",
-		},
-	}...)*/
 	container := genVPNContainer(workload, d.Namespace, image, args)
 	containerSync := genSyncthingContainer(d.RemoteDir, syncDataDirName, image)
 	spec.Spec.Containers = append(containers, *container, *containerSync)
-	// set spec
+
 	marshal, err := json.Marshal(spec)
 	if err != nil {
 		return err
@@ -269,189 +225,6 @@ func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, spec *v1.PodTempla
 		return err
 	}
 	return nil
-}
-
-func genSyncthingContainer(remoteDir string, syncDataDirName string, image string) *v1.Container {
-	containerSync := &v1.Container{
-		Name:  config.ContainerSidecarSyncthing,
-		Image: image,
-		// https://stackoverflow.com/questions/32918849/what-process-signal-does-pod-receive-when-executing-kubectl-rolling-update
-		Command: []string{
-			"kubevpn",
-			"syncthing",
-			"--dir",
-			remoteDir,
-		},
-		Resources: v1.ResourceRequirements{
-			Requests: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("200m"),
-				v1.ResourceMemory: resource.MustParse("512Mi"),
-			},
-			Limits: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("1000m"),
-				v1.ResourceMemory: resource.MustParse("1024Mi"),
-			},
-		},
-		VolumeMounts: []v1.VolumeMount{
-			{
-				Name:      syncDataDirName,
-				ReadOnly:  false,
-				MountPath: remoteDir,
-			},
-		},
-		// only for:
-		// panic: mkdir /.kubevpn: permission denied                                                                                                                                │
-		//                                                                                                                                                                          │
-		// goroutine 1 [running]:                                                                                                                                                   │
-		// github.com/wencaiwulue/kubevpn/v2/pkg/config.init.1()                                                                                                                    │
-		//     /go/src/github.com/wencaiwulue/kubevpn/pkg/config/const.go:34 +0x1ae
-		SecurityContext: &v1.SecurityContext{
-			RunAsUser:  ptr.To[int64](0),
-			RunAsGroup: ptr.To[int64](0),
-		},
-	}
-	return containerSync
-}
-
-func genVPNContainer(workload string, namespace string, image string, args []string) *v1.Container {
-	container := &v1.Container{
-		Name:  config.ContainerSidecarVPN,
-		Image: image,
-		// https://stackoverflow.com/questions/32918849/what-process-signal-does-pod-receive-when-executing-kubectl-rolling-update
-		Command: append([]string{
-			"kubevpn",
-			"proxy",
-			workload,
-			"--kubeconfig", "/tmp/.kube/" + config.KUBECONFIG,
-			"--namespace", namespace,
-			"--image", image,
-			"--foreground",
-		}, args...),
-		Env: []v1.EnvVar{},
-		Resources: v1.ResourceRequirements{
-			Requests: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("200m"),
-				v1.ResourceMemory: resource.MustParse("512Mi"),
-			},
-			Limits: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("1000m"),
-				v1.ResourceMemory: resource.MustParse("2048Mi"),
-			},
-		},
-		VolumeMounts: []v1.VolumeMount{
-			{
-				Name:      config.KUBECONFIG,
-				ReadOnly:  false,
-				MountPath: "/tmp/.kube",
-			},
-		},
-		Lifecycle: &v1.Lifecycle{
-			PostStart: &v1.LifecycleHandler{
-				Exec: &v1.ExecAction{
-					Command: []string{
-						"/bin/bash",
-						"-c",
-						`
-echo 1 > /proc/sys/net/ipv4/ip_forward
-echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
-echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
-echo 1 > /proc/sys/net/ipv4/conf/all/route_localnet
-update-alternatives --set iptables /usr/sbin/iptables-legacy`,
-					},
-				},
-			},
-		},
-		ImagePullPolicy: v1.PullIfNotPresent,
-		SecurityContext: &v1.SecurityContext{
-			Capabilities: &v1.Capabilities{
-				Add: []v1.Capability{
-					"NET_ADMIN",
-				},
-			},
-			RunAsUser:  ptr.To[int64](0),
-			RunAsGroup: ptr.To[int64](0),
-			Privileged: ptr.To(true),
-		},
-	}
-	return container
-}
-
-func (d *SyncOptions) SyncDir(ctx context.Context, labels string) error {
-	list, err := util.GetRunningPodList(ctx, d.clientset, d.Namespace, labels)
-	if err != nil {
-		return err
-	}
-	remoteAddr := net.JoinHostPort(list[0].Status.PodIP, strconv.Itoa(libconfig.DefaultTCPPort))
-	localPort, _ := util.GetAvailableTCPPort()
-	localAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort))
-	err = syncthing.StartClient(d.ctx, d.LocalDir, localAddr, remoteAddr)
-	if err != nil {
-		return err
-	}
-	d.syncthingGUIAddr = (&url.URL{Scheme: "http", Host: localAddr}).String()
-	plog.G(ctx).Infof("Access the syncthing GUI via the following URL: %s", d.syncthingGUIAddr)
-	go func() {
-		client := syncthing.NewClient(localAddr)
-		podName := list[0].Name
-		for d.ctx.Err() == nil {
-			func() {
-				defer time.Sleep(time.Second * 2)
-
-				sortBy := activePodsSortFunc
-				_, _, _ = polymorphichelpers.GetFirstPod(d.clientset.CoreV1(), d.Namespace, labels, time.Second*30, sortBy)
-				list, err := util.GetRunningPodList(d.ctx, d.clientset, d.Namespace, labels)
-				if err != nil {
-					plog.G(ctx).Error(err)
-					return
-				}
-				if podName == list[0].Name {
-					return
-				}
-
-				podName = list[0].Name
-				plog.G(ctx).Debugf("Detect newer pod %s", podName)
-				var conf *libconfig.Configuration
-				conf, err = client.GetConfig(d.ctx)
-				if err != nil {
-					plog.G(ctx).Errorf("Failed to get config from syncthing: %v", err)
-					return
-				}
-				for i := range conf.Devices {
-					if config.RemoteDeviceID.Equals(conf.Devices[i].DeviceID) {
-						addr := netutil.AddressURL("tcp", net.JoinHostPort(list[0].Status.PodIP, strconv.Itoa(libconfig.DefaultTCPPort)))
-						conf.Devices[i].Addresses = []string{addr}
-						plog.G(ctx).Debugf("Use newer remote syncthing endpoint: %s", addr)
-					}
-				}
-				err = client.PutConfig(d.ctx, conf)
-				if err != nil {
-					plog.G(ctx).Errorf("Failed to set config to syncthing: %v", err)
-				}
-			}()
-		}
-	}()
-	return nil
-}
-
-func ClearObjectMetadata(u *unstructured.Unstructured) {
-	if u == nil {
-		return
-	}
-
-	delete(u.Object, "status")
-	_ = unstructured.SetNestedField(u.Object, nil, "status")
-
-	u.SetManagedFields(nil)
-	u.SetResourceVersion("")
-	u.SetCreationTimestamp(metav1.NewTime(time.Time{}))
-	u.SetUID("")
-	u.SetGeneration(0)
-	a := u.GetAnnotations()
-	if len(a) == 0 {
-		a = map[string]string{}
-	}
-	delete(a, "kubectl.kubernetes.io/last-applied-configuration")
-	u.SetAnnotations(a)
 }
 
 func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
@@ -507,37 +280,4 @@ func (d *SyncOptions) GetFactory() cmdutil.Factory {
 
 func (d *SyncOptions) GetSyncthingGUIAddr() string {
 	return d.syncthingGUIAddr
-}
-
-func (d *SyncOptions) ConvertApiServerToNodeIP(ctx context.Context, kubeconfigBytes []byte) ([]byte, error) {
-	list, err := d.clientset.CoreV1().Pods(d.Namespace).List(ctx, metav1.ListOptions{Limit: 100})
-	if err != nil {
-		return nil, err
-	}
-	var result string
-	for _, item := range list.Items {
-		result, err = util.Shell(ctx, d.clientset, d.config, item.Name, "", d.Namespace, []string{"env"})
-		if err == nil {
-			break
-		}
-	}
-	parse, err := godotenv.Parse(strings.NewReader(result))
-	if err != nil {
-		return nil, err
-	}
-
-	host := parse["KUBERNETES_SERVICE_HOST"]
-	port := parse["KUBERNETES_SERVICE_PORT"]
-
-	addrPort, err := netip.ParseAddrPort(net.JoinHostPort(host, port))
-	if err != nil {
-		return nil, err
-	}
-
-	var newKubeconfigBytes []byte
-	newKubeconfigBytes, _, err = util.ModifyAPIServer(ctx, kubeconfigBytes, addrPort)
-	if err != nil {
-		return nil, err
-	}
-	return newKubeconfigBytes, nil
 }

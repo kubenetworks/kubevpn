@@ -37,11 +37,7 @@ func (svr *Server) Uninstall(resp rpc.Daemon_UninstallServer) (err error) {
 	if err != nil {
 		return err
 	}
-	err = Uninstall(ctx, clientset, req.Namespace)
-	if err != nil {
-		return err
-	}
-	return nil
+	return Uninstall(ctx, clientset, req.Namespace)
 }
 
 // Uninstall

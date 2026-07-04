@@ -243,16 +243,16 @@ func TestRemoveContainers(t *testing.T) {
 	}
 }
 
-func TestRenderEnvoyConfig(t *testing.T) {
+func Test_renderEnvoyConfig(t *testing.T) {
 	tmpl := "address: {{.}}"
-	result := RenderEnvoyConfig(tmpl, "kubevpn-traffic-manager.default")
+	result := renderEnvoyConfig(tmpl, "kubevpn-traffic-manager.default")
 	if result != "address: kubevpn-traffic-manager.default" {
 		t.Fatalf("unexpected render: %q", result)
 	}
 }
 
 func TestRenderEnvoyConfig_Invalid(t *testing.T) {
-	result := RenderEnvoyConfig("{{.Invalid", "value")
+	result := renderEnvoyConfig("{{.Invalid", "value")
 	if result != "" {
 		t.Fatalf("expected empty for invalid template, got %q", result)
 	}

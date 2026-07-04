@@ -31,31 +31,18 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		return nil
 	}
 
-	var deleteResource = func(ctx context.Context) {
-		options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
-		name := config.ConfigMapPodTrafficManager
-		_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, name+"."+namespace, options)
-		_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, name, options)
-		_ = clientset.RbacV1().Roles(namespace).Delete(ctx, name, options)
-		_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, name, options)
-		_ = clientset.CoreV1().Services(namespace).Delete(ctx, name, options)
-		_ = clientset.CoreV1().Secrets(namespace).Delete(ctx, name, options)
-		_ = clientset.CoreV1().Pods(namespace).Delete(ctx, config.CniNetName, options)
-		_ = clientset.BatchV1().Jobs(namespace).Delete(ctx, name, options)
-		_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, name, options)
-	}
 	defer func() {
 		if err != nil {
-			deleteResource(context.Background())
+			cleanupTrafficManagerResources(context.Background(), clientset, namespace)
 		}
 	}()
-	deleteResource(ctx)
+	cleanupTrafficManagerResources(ctx, clientset, namespace)
 
 	// 1) label namespace
 	plog.G(ctx).Infof("Labeling Namespace %s", namespace)
 	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 	if err != nil {
-		plog.G(ctx).Errorf("Get Namespace error: %s", err.Error())
+		plog.G(ctx).Errorf("Get Namespace error: %v", err)
 		return err
 	}
 	if ns.Labels == nil {
@@ -64,7 +51,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	ns.Labels["ns"] = namespace
 	_, err = clientset.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{})
 	if err != nil {
-		plog.G(ctx).Infof("Labeling Namespace error: %s", err.Error())
+		plog.G(ctx).Infof("Labeling Namespace error: %v", err)
 		return err
 	}
 
@@ -72,7 +59,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	plog.G(ctx).Infof("Creating ServiceAccount %s", config.ConfigMapPodTrafficManager)
 	_, err = clientset.CoreV1().ServiceAccounts(namespace).Create(ctx, genServiceAccount(namespace), metav1.CreateOptions{})
 	if err != nil {
-		plog.G(ctx).Infof("Creating ServiceAccount error: %s", err.Error())
+		plog.G(ctx).Infof("Creating ServiceAccount error: %v", err)
 		return err
 	}
 
@@ -80,7 +67,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	plog.G(ctx).Infof("Creating Roles %s", config.ConfigMapPodTrafficManager)
 	_, err = clientset.RbacV1().Roles(namespace).Create(ctx, genRole(namespace), metav1.CreateOptions{})
 	if err != nil {
-		plog.G(ctx).Errorf("Creating Roles error: %s", err.Error())
+		plog.G(ctx).Errorf("Creating Roles error: %v", err)
 		return err
 	}
 
@@ -88,7 +75,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	plog.G(ctx).Infof("Creating RoleBinding %s", config.ConfigMapPodTrafficManager)
 	_, err = clientset.RbacV1().RoleBindings(namespace).Create(ctx, genRoleBinding(namespace), metav1.CreateOptions{})
 	if err != nil {
-		plog.G(ctx).Errorf("Creating RoleBinding error: %s", err.Error())
+		plog.G(ctx).Errorf("Creating RoleBinding error: %v", err)
 		return err
 	}
 
@@ -101,7 +88,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	svcSpec := genService(namespace, tcp10801, tcp9002, tcp80, udp53)
 	_, err = clientset.CoreV1().Services(namespace).Create(ctx, svcSpec, metav1.CreateOptions{})
 	if err != nil {
-		plog.G(ctx).Errorf("Creating Service error: %s", err.Error())
+		plog.G(ctx).Errorf("Creating Service error: %v", err)
 		return err
 	}
 
@@ -115,7 +102,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	secret := genSecret(namespace, crt, key, host)
 	_, err = clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
 	if err != nil {
-		plog.G(ctx).Errorf("Creating secret error: %s", err.Error())
+		plog.G(ctx).Errorf("Creating secret error: %v", err)
 		return err
 	}
 
@@ -178,4 +165,18 @@ func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelec
 		return errors.New("wait for pod ready timeout")
 	}
 	return nil
+}
+
+func cleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.Interface, namespace string) {
+	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
+	name := config.ConfigMapPodTrafficManager
+	_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, name+"."+namespace, options)
+	_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, name, options)
+	_ = clientset.RbacV1().Roles(namespace).Delete(ctx, name, options)
+	_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, name, options)
+	_ = clientset.CoreV1().Services(namespace).Delete(ctx, name, options)
+	_ = clientset.CoreV1().Secrets(namespace).Delete(ctx, name, options)
+	_ = clientset.CoreV1().Pods(namespace).Delete(ctx, config.CniNetName, options)
+	_ = clientset.BatchV1().Jobs(namespace).Delete(ctx, name, options)
+	_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, name, options)
 }

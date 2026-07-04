@@ -84,9 +84,9 @@ func tlsEnvVars(secret *v1.Secret) []v1.EnvVar {
 
 func newEnvoyContainer(ns, nodeID string, ipv6 bool, managerNamespace, image string, configIPv6, configIPv4 []byte) v1.Container {
 	addr := trafficManagerAddr(managerNamespace)
-	configYaml := RenderEnvoyConfig(string(configIPv4), addr)
+	configYaml := renderEnvoyConfig(string(configIPv4), addr)
 	if ipv6 {
-		configYaml = RenderEnvoyConfig(string(configIPv6), addr)
+		configYaml = renderEnvoyConfig(string(configIPv6), addr)
 	}
 	return v1.Container{
 		Name:  config.ContainerSidecarEnvoyProxy,

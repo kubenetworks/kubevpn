@@ -73,9 +73,8 @@ func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolve
 		}()
 
 		host, port := resolve(id)
-		var d = net.Dialer{Timeout: config.ConnectTimeout}
-		var remote net.Conn
-		remote, err = d.DialContext(dialCtx, "tcp", net.JoinHostPort(host, port))
+		d := net.Dialer{Timeout: config.ConnectTimeout}
+		remote, err := d.DialContext(dialCtx, "tcp", net.JoinHostPort(host, port))
 		if err != nil {
 			plog.G(dialCtx).Errorf("[Gvisor-TCP] Failed to connect addr %s: %v", net.JoinHostPort(host, port), err)
 			return

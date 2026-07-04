@@ -30,9 +30,9 @@ type RunConfig struct {
 
 type ConfigList []*RunConfig
 
-func (l ConfigList) Remove(ctx context.Context, userAnotherContainerNet bool) error {
+func (l ConfigList) Remove(ctx context.Context, useAnotherContainerNet bool) error {
 	for index, runConfig := range l {
-		if !userAnotherContainerNet && index == len(l)-1 {
+		if !useAnotherContainerNet && index == len(l)-1 {
 			output, err := util.NetworkDisconnect(ctx, runConfig.name)
 			if err != nil {
 				plog.G(ctx).Warnf("Failed to disconnect container network: %s: %v", string(output), err)

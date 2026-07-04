@@ -7,7 +7,7 @@ import (
 )
 
 // NewConnectOptionsForTest creates a ConnectOptions with an initialized factory
-// for use in unit tests that need genStatus or other factory-dependent code paths.
+// for use in unit tests that need buildConnectionStatus or other factory-dependent code paths.
 func NewConnectOptionsForTest(factory cmdutil.Factory, kubeconfigPath, namespace string) *ConnectOptions {
 	return &ConnectOptions{
 		factory:              factory,

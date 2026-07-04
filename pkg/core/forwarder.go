@@ -6,7 +6,7 @@ import (
 	"net"
 )
 
-var ErrorEmptyForwarder = errors.New("empty forwarder")
+var errEmptyForwarder = errors.New("empty forwarder")
 
 // ParseForwarder creates a Forwarder from a remote URI string (e.g. "tcp://host:port").
 func ParseForwarder(remote string) (*Forwarder, error) {
@@ -46,7 +46,7 @@ func (f *Forwarder) DialContext(ctx context.Context) (conn net.Conn, err error) 
 
 func (f *Forwarder) dial(ctx context.Context) (net.Conn, error) {
 	if f.IsEmpty() {
-		return nil, ErrorEmptyForwarder
+		return nil, errEmptyForwarder
 	}
 	conn, err := f.Transporter.Dial(ctx, f.Addr)
 	if err != nil {

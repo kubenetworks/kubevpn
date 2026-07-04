@@ -24,7 +24,7 @@ func (v *vpnInjector) Inject(ctx context.Context) error {
 	}
 
 	ports, portmap := collectPorts(podTempSpec, nil)
-	err = addEnvoyConfig(o.Clientset.CoreV1().ConfigMaps(o.ManagerNamespace), o.Controller.Namespace, o.NodeID, o.LocalTunIPv4, o.LocalTunIPv6, nil, ports, portmap, false)
+	err = addEnvoyConfig(ctx, o.Clientset.CoreV1().ConfigMaps(o.ManagerNamespace), o.Controller.Namespace, o.NodeID, o.LocalTunIPv4, o.LocalTunIPv6, nil, ports, portmap, false)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to add envoy config: %v", err)
 		return err

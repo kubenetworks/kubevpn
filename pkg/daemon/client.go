@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"time"
 
@@ -165,7 +164,6 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 	}
 	for ctx.Err() == nil {
 		time.Sleep(time.Millisecond * 50)
-		//_ = os.Chmod(sockPath, os.ModeSocket)
 		if _, err = os.Stat(pidPath); !errors.Is(err, os.ErrNotExist) {
 			break
 		}
@@ -176,20 +174,6 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 		return fmt.Errorf("failed to get daemon server client: %w", err)
 	}
 	return nil
-}
-
-func getHttpClient(isSudo bool) *http.Client {
-	client := http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				var d net.Dialer
-				d.Timeout = 30 * time.Second
-				d.KeepAlive = 30 * time.Second
-				return d.DialContext(ctx, "unix", config.GetSockPath(isSudo))
-			},
-		},
-	}
-	return &client
 }
 
 func GetTCPClient(isSudo bool) net.Conn {

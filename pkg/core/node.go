@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-var ErrorInvalidNode = errors.New("invalid node")
+var errInvalidNode = errors.New("invalid node")
 
 // Node is a parsed listener/forwarder URI — pure data, no transport state.
 //
@@ -89,14 +89,14 @@ func (node *Node) String() string {
 func ParseNode(s string) (*Node, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return nil, ErrorInvalidNode
+		return nil, errInvalidNode
 	}
 	u, err := url.Parse(s)
 	if err != nil {
 		return nil, err
 	}
 	if u.Scheme == "" {
-		return nil, fmt.Errorf("%w: missing protocol scheme in %q", ErrorInvalidNode, s)
+		return nil, fmt.Errorf("%w: missing protocol scheme in %q", errInvalidNode, s)
 	}
 	return &Node{
 		Protocol: u.Scheme,

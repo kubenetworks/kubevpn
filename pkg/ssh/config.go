@@ -3,7 +3,6 @@ package ssh
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -164,25 +163,20 @@ func (conf SshConfig) GetAuth() ([]ssh.AuthMethod, error) {
 }
 
 func publicKeyFile(file string) (ssh.AuthMethod, error) {
-	var err error
 	if len(file) != 0 && file[0] == '~' {
 		file = filepath.Join(homedir.HomeDir(), file[1:])
 	}
-	file, err = filepath.Abs(file)
+	file, err := filepath.Abs(file)
 	if err != nil {
-		err = fmt.Errorf("cannot read SSH public key file %s: %w", file, err)
-		return nil, err
+		return nil, fmt.Errorf("cannot resolve SSH key file path %s: %w", file, err)
 	}
 	buffer, err := os.ReadFile(file)
 	if err != nil {
-		err = fmt.Errorf("cannot read SSH public key file %s: %w", file, err)
-		return nil, err
+		return nil, fmt.Errorf("cannot read SSH key file %s: %w", file, err)
 	}
-
 	key, err := ssh.ParsePrivateKey(buffer)
 	if err != nil {
-		err = fmt.Errorf("cannot parse SSH public key file %s: %w", file, err)
-		return nil, err
+		return nil, fmt.Errorf("cannot parse SSH key file %s: %w", file, err)
 	}
 	return ssh.PublicKeys(key), nil
 }
@@ -396,21 +390,4 @@ func AddSshFlags(flags *pflag.FlagSet, sshConf *SshConfig) {
 	flags.StringVar(&sshConf.GSSAPIKeytabConf, "gssapi-keytab", "", "GSSAPI keytab file path")
 	flags.StringVar(&sshConf.GSSAPICacheFile, "gssapi-cache", "", "GSSAPI cache file path, use command `kinit -c /path/to/cache USERNAME@RELAM` to generate")
 	flags.StringVar(&sshConf.RemoteKubeconfig, "remote-kubeconfig", "", "Abstract path of kubeconfig on ssh remote server")
-}
-
-func keepAlive(cl *ssh.Client, conn net.Conn, done <-chan struct{}) error {
-	var keepAliveInterval = config.SSHKeepAliveInterval
-	t := time.NewTicker(keepAliveInterval)
-	defer t.Stop()
-	for {
-		select {
-		case <-t.C:
-			_, _, err := cl.SendRequest("keepalive@golang.org", true, nil)
-			if err != nil && err != io.EOF {
-				return fmt.Errorf("failed to send keep alive: %w", err)
-			}
-		case <-done:
-			return nil
-		}
-	}
 }

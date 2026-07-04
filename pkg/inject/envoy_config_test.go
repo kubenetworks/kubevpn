@@ -32,13 +32,13 @@ func TestAddEnvoyConfig_NewEntry(t *testing.T) {
 	headers := map[string]string{"version": "v1"}
 	portmap := map[int32]string{8080: "9090"}
 
-	err := addEnvoyConfig(mapInterface, "test-ns", "deployments.apps.nginx", "10.0.0.1", "fd00::1", headers, ports, portmap, false)
+	err := addEnvoyConfig(context.Background(), mapInterface, "test-ns", "deployments.apps.nginx", "10.0.0.1", "fd00::1", headers, ports, portmap, false)
 	if err != nil {
 		t.Fatalf("addEnvoyConfig returned error: %v", err)
 	}
 
 	// Verify the ConfigMap was updated
-	updated, err := mapInterface.Get(context.TODO(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	updated, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("failed to get ConfigMap: %v", err)
 	}
@@ -109,12 +109,12 @@ func TestAddEnvoyConfig_MergeExisting(t *testing.T) {
 	newHeaders := map[string]string{"env": "dev"}
 	newPortmap := map[int32]string{9090: "7070"}
 
-	err := addEnvoyConfig(mapInterface, "test-ns", "deployments.apps.nginx", "10.0.0.1", "fd00::1", newHeaders, nil, newPortmap, false)
+	err := addEnvoyConfig(context.Background(), mapInterface, "test-ns", "deployments.apps.nginx", "10.0.0.1", "fd00::1", newHeaders, nil, newPortmap, false)
 	if err != nil {
 		t.Fatalf("addEnvoyConfig returned error: %v", err)
 	}
 
-	updated, err := mapInterface.Get(context.TODO(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	updated, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("failed to get ConfigMap: %v", err)
 	}
@@ -166,12 +166,12 @@ func TestAddEnvoyConfig_FargateMode(t *testing.T) {
 	headers := map[string]string{"user": "alice"}
 	portmap := map[int32]string{8080: "15001:9090"}
 
-	err := addEnvoyConfig(mapInterface, "test-ns", "deployments.apps.web", "10.0.0.5", "fd00::5", headers, ports, portmap, true)
+	err := addEnvoyConfig(context.Background(), mapInterface, "test-ns", "deployments.apps.web", "10.0.0.5", "fd00::5", headers, ports, portmap, true)
 	if err != nil {
 		t.Fatalf("addEnvoyConfig returned error: %v", err)
 	}
 
-	updated, err := mapInterface.Get(context.TODO(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	updated, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("failed to get ConfigMap: %v", err)
 	}
@@ -216,13 +216,13 @@ func TestRemoveEnvoyConfig_Found(t *testing.T) {
 	headers := map[string]string{"version": "v2"}
 	portmap := map[int32]string{8080: "9090"}
 
-	err := addEnvoyConfig(mapInterface, "test-ns", "deployments.apps.nginx", "10.0.0.1", "fd00::1", headers, ports, portmap, false)
+	err := addEnvoyConfig(context.Background(), mapInterface, "test-ns", "deployments.apps.nginx", "10.0.0.1", "fd00::1", headers, ports, portmap, false)
 	if err != nil {
 		t.Fatalf("addEnvoyConfig returned error: %v", err)
 	}
 
 	// Remove using isMeFunc that matches by TUN IP
-	empty, found, err := removeEnvoyConfig(mapInterface, "test-ns", "deployments.apps.nginx", func(isFargateMode bool, rule *controlplane.Rule) bool {
+	empty, found, err := removeEnvoyConfig(context.Background(), mapInterface, "test-ns", "deployments.apps.nginx", func(isFargateMode bool, rule *controlplane.Rule) bool {
 		return rule.LocalTunIPv4 == "10.0.0.1"
 	})
 	if err != nil {
@@ -236,7 +236,7 @@ func TestRemoveEnvoyConfig_Found(t *testing.T) {
 	}
 
 	// Verify the ConfigMap has empty virtuals
-	updated, err := mapInterface.Get(context.TODO(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	updated, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("failed to get ConfigMap: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestRemoveEnvoyConfig_NotFound(t *testing.T) {
 	mapInterface := clientset.CoreV1().ConfigMaps("test-ns")
 
 	// Try to remove a non-existent nodeID
-	empty, found, err := removeEnvoyConfig(mapInterface, "test-ns", "deployments.apps.nonexistent", func(isFargateMode bool, rule *controlplane.Rule) bool {
+	empty, found, err := removeEnvoyConfig(context.Background(), mapInterface, "test-ns", "deployments.apps.nonexistent", func(isFargateMode bool, rule *controlplane.Rule) bool {
 		return true // would match anything, but nodeID won't match
 	})
 	if err != nil {
@@ -296,7 +296,7 @@ func TestRemoveEnvoyConfig_ConfigMapNotFound(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	mapInterface := clientset.CoreV1().ConfigMaps("test-ns")
 
-	empty, found, err := removeEnvoyConfig(mapInterface, "test-ns", "deployments.apps.nginx", func(isFargateMode bool, rule *controlplane.Rule) bool {
+	empty, found, err := removeEnvoyConfig(context.Background(), mapInterface, "test-ns", "deployments.apps.nginx", func(isFargateMode bool, rule *controlplane.Rule) bool {
 		return true
 	})
 	if err != nil {

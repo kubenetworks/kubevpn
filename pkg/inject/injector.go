@@ -74,8 +74,8 @@ func patchWorkload(ctx context.Context, factory cmdutil.Factory, info *resource.
 	if len(path) == 0 {
 		plog.G(ctx).Infof("Workload %s is not controlled by any controller", workload)
 		p := &v1.Pod{ObjectMeta: templateSpec.ObjectMeta, Spec: templateSpec.Spec}
-		ClearPodMetadata(p)
-		return RecreatePod(ctx, factory, p, helper)
+		clearPodMetadata(p)
+		return recreatePod(ctx, factory, p, helper)
 	}
 
 	plog.G(ctx).Debugf("The %s is under controller management", workload)
@@ -139,7 +139,7 @@ func collectPorts(templateSpec *v1.PodTemplateSpec, portMaps []string) ([]contro
 	return envoyPorts, portmap
 }
 
-func RecreatePod(ctx context.Context, factory cmdutil.Factory, p *v1.Pod, helper *resource.Helper) error {
+func recreatePod(ctx context.Context, factory cmdutil.Factory, p *v1.Pod, helper *resource.Helper) error {
 	_, err := helper.DeleteWithOptions(p.Namespace, p.Name, &metav1.DeleteOptions{
 		GracePeriodSeconds: ptr.To[int64](0),
 	})
@@ -177,7 +177,7 @@ func RecreatePod(ctx context.Context, factory cmdutil.Factory, p *v1.Pod, helper
 	return nil
 }
 
-func ClearPodMetadata(pod *v1.Pod) {
+func clearPodMetadata(pod *v1.Pod) {
 	pod.SetSelfLink("")
 	pod.SetGeneration(0)
 	pod.SetResourceVersion("")

@@ -48,8 +48,9 @@ type ConnectOptions struct {
 	// for reload from ~/.kubevpn/daemon/db
 	Request *rpc.ConnectRequest `json:"Request,omitempty"`
 
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx         context.Context
+	cancel      context.CancelFunc
+	isDataPlane bool
 
 	clientset  kubernetes.Interface
 	restclient *rest.RESTClient
@@ -68,8 +69,9 @@ type ConnectOptions struct {
 	once           sync.Once
 	tunName        string
 	proxyWorkloads ProxyList
-	healthStatus   HealthStatus
-	cmInformer     cache.SharedInformer
+	healthStatus     HealthStatus
+	cmInformer       cache.SharedInformer
+	cmInformerStop   chan struct{}
 
 	Sync *SyncOptions
 }
@@ -122,7 +124,7 @@ func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logge
 	}
 	ip, ipNet, err := net.ParseCIDR(ipv4[0])
 	if err != nil {
-		return fmt.Errorf("can not convert IPv4 string: %s: %w", ipv4[0], err)
+		return fmt.Errorf("cannot convert IPv4 string: %s: %w", ipv4[0], err)
 	}
 	c.LocalTunIPv4 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
 	logger.Debugf("Get IPv4 %s from context", c.LocalTunIPv4.String())
@@ -133,7 +135,7 @@ func (c *ConnectOptions) GetIPFromContext(ctx context.Context, logger *log.Logge
 	}
 	ip, ipNet, err = net.ParseCIDR(ipv6[0])
 	if err != nil {
-		return fmt.Errorf("can not convert IPv6 string: %s: %w", ipv6[0], err)
+		return fmt.Errorf("cannot convert IPv6 string: %s: %w", ipv6[0], err)
 	}
 	c.LocalTunIPv6 = &net.IPNet{IP: ip, Mask: ipNet.Mask}
 	logger.Debugf("Get IPv6 %s from context", c.LocalTunIPv6.String())
@@ -198,7 +200,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		})
 		err = injector.Inject(ctx)
 		if err != nil {
-			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %s", workload, namespace, err.Error())
+			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %v", workload, namespace, err)
 			return err
 		}
 		plog.G(ctx).Infof("Injected inbound sidecar for %s in namespace %s successfully", workload, namespace)
@@ -211,6 +213,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 
 func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
+	c.isDataPlane = true
 	plog.G(ctx).Info("Starting connect to cluster")
 	if err = c.InitDHCP(c.ctx); err != nil {
 		plog.G(ctx).Errorf("Init DHCP server failed: %v", err)
@@ -370,7 +373,8 @@ func (c *ConnectOptions) GetConfigMapInformer() cache.SharedInformer {
 				options.FieldSelector = fields.OneTermEqualSelector("metadata.name", config.ConfigMapPodTrafficManager).String()
 			},
 		)
-		go c.cmInformer.Run(c.ctx.Done())
+		c.cmInformerStop = make(chan struct{})
+		go c.cmInformer.Run(c.cmInformerStop)
 	}
 	return c.cmInformer
 }
