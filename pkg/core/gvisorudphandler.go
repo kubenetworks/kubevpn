@@ -50,53 +50,7 @@ func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		plog.G(ctx).Errorf("[TUN-UDP] Failed to connect addr %s: %v", addr.String(), err)
 		return
 	}
-	handle(ctx, tcpConn, remote)
-}
-
-// fake udp connect over tcp
-type gvisorUDPConnOverTCP struct {
-	// tcp connection
-	net.Conn
-	ctx context.Context
-}
-
-func newGvisorUDPConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, error) {
-	return &gvisorUDPConnOverTCP{ctx: ctx, Conn: conn}, nil
-}
-
-func (c *gvisorUDPConnOverTCP) Read(b []byte) (int, error) {
-	select {
-	case <-c.ctx.Done():
-		return 0, c.ctx.Err()
-	default:
-		datagram, err := readDatagramPacket(c.Conn, b)
-		if err != nil {
-			return 0, err
-		}
-		return int(datagram.DataLength), nil
-	}
-}
-
-func (c *gvisorUDPConnOverTCP) Write(b []byte) (int, error) {
-	buf := config.LPool.Get().([]byte)[:]
-	n := copy(buf, b)
-	defer config.LPool.Put(buf)
-
-	packet := newDatagramPacket(buf, n)
-	if err := packet.Write(c.Conn); err != nil {
-		return 0, err
-	}
-	return len(b), nil
-}
-
-func (c *gvisorUDPConnOverTCP) Close() error {
-	if cc, ok := c.Conn.(interface{ CloseRead() error }); ok {
-		_ = cc.CloseRead()
-	}
-	if cc, ok := c.Conn.(interface{ CloseWrite() error }); ok {
-		_ = cc.CloseWrite()
-	}
-	return c.Conn.Close()
+	relayUDPOverTCP(ctx, tcpConn, remote)
 }
 
 func GvisorUDPListener(addr string) (net.Listener, error) {
@@ -112,7 +66,7 @@ func GvisorUDPListener(addr string) (net.Listener, error) {
 	return &tcpKeepAliveListener{TCPListener: ln}, nil
 }
 
-func handle(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
+func relayUDPOverTCP(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	defer udpConn.Close()
 	plog.G(ctx).Debugf("[TUN-UDP] %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 	errChan := make(chan error, 2)

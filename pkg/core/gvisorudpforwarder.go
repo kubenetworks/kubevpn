@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
@@ -17,7 +18,29 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+type udpAddrResolver func(id stack.TransportEndpointID) *net.UDPAddr
+
+func serverUDPAddr(id stack.TransportEndpointID) *net.UDPAddr {
+	return &net.UDPAddr{IP: id.LocalAddress.AsSlice(), Port: int(id.LocalPort)}
+}
+
+func localUDPAddr(id stack.TransportEndpointID) *net.UDPAddr {
+	ip := net.ParseIP("127.0.0.1")
+	if id.LocalAddress.To4() == (tcpip.Address{}) {
+		ip = net.IPv6loopback
+	}
+	return &net.UDPAddr{IP: ip, Port: int(id.LocalPort)}
+}
+
 func UDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
+	return newUDPForwarder(ctx, s, serverUDPAddr)
+}
+
+func LocalUDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
+	return newUDPForwarder(ctx, s, localUDPAddr)
+}
+
+func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolver) func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
 	return udp.NewForwarder(s, func(request *udp.ForwarderRequest) {
 		id := request.ID()
 		plog.G(ctx).Infof("[TUN-UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
@@ -27,10 +50,7 @@ func UDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.TransportEn
 			IP:   id.RemoteAddress.AsSlice(),
 			Port: int(id.RemotePort),
 		}
-		dst := &net.UDPAddr{
-			IP:   id.LocalAddress.AsSlice(),
-			Port: int(id.LocalPort),
-		}
+		dst := resolve(id)
 
 		w := &waiter.Queue{}
 		endpoint, tErr := request.CreateEndpoint(w)
@@ -39,7 +59,6 @@ func UDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.TransportEn
 			return
 		}
 
-		// dial dst
 		remote, err1 := net.DialUDP("udp", nil, dst)
 		if err1 != nil {
 			plog.G(ctx).Errorf("[TUN-UDP] Failed to connect dst: %s: %v", dst.String(), err1)

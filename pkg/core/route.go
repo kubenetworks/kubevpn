@@ -4,114 +4,99 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 
-	"github.com/containernetworking/cni/pkg/types"
-
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 )
 
-var (
-	// RouteMapTCP map[srcIP]net.Conn Globe route table for inner ip
-	RouteMapTCP = &sync.Map{}
-	// TCPPacketChan tcp connects
-	TCPPacketChan = make(chan *Packet, MaxSize)
-)
+// ProtocolFactory creates a listener and handler for a given protocol node.
+type ProtocolFactory func(node *Node, hub *RouteHub) (net.Listener, Handler, error)
 
-// Route example:
-// -l "gtcp://:10801" -l "tun://?net=198.18.0.100/16"
-// -l "tun:/tcp://10.233.24.133:8422?net=198.18.0.102/16&route=198.18.0.0/16"
-// -l "tun:/tcp://127.0.0.1:10800?net=198.18.0.102/16&route=198.18.0.0/16,10.233.0.0/16"
-type Route struct {
-	Listeners []string // -l tun
-	Retries   int
+var protocolRegistry = map[string]ProtocolFactory{}
+
+// RegisterProtocol registers a factory for the given protocol name.
+func RegisterProtocol(name string, factory ProtocolFactory) {
+	protocolRegistry[name] = factory
 }
 
-func ParseForwarder(remote string) (*Forwarder, error) {
-	forwarder, err := ParseNode(remote)
-	if err != nil {
-		return nil, err
-	}
-	forwarder.Client = &Client{
-		Connector:   NewUDPOverTCPConnector(),
-		Transporter: TCPTransporter(nil),
-	}
-	return NewForwarder(5, forwarder), nil
+// RouteHub holds the shared routing state between tun and gvisor handlers.
+// RouteMapTCP maps srcIP (string) -> net.Conn, enabling cross-handler route discovery.
+// TCPPacketChan bridges unroutable TCP packets from gvisor endpoint to the tun device.
+type RouteHub struct {
+	RouteMapTCP   *sync.Map
+	TCPPacketChan chan *Packet
 }
 
-func (r *Route) GenerateServers() ([]Server, error) {
-	servers := make([]Server, 0, len(r.Listeners))
-	for _, l := range r.Listeners {
+func NewRouteHub() *RouteHub {
+	return &RouteHub{
+		RouteMapTCP:   &sync.Map{},
+		TCPPacketChan: make(chan *Packet, MaxSize),
+	}
+}
+
+// DefaultRouteHub is the process-wide shared routing hub.
+var DefaultRouteHub = NewRouteHub()
+
+// AddRoute registers or updates the TCP route for a source IP.
+func (hub *RouteHub) AddRoute(ctx context.Context, srcIP net.IP, conn net.Conn) {
+	key := srcIP.String()
+	value, loaded := hub.RouteMapTCP.LoadOrStore(key, conn)
+	if loaded {
+		if value.(net.Conn) != conn {
+			hub.RouteMapTCP.Store(key, conn)
+			plog.G(ctx).Infof("[RouteHub] Replace route: %s -> %s-%s", srcIP, conn.LocalAddr(), conn.RemoteAddr())
+		}
+	} else {
+		plog.G(ctx).Infof("[RouteHub] Add route: %s -> %s-%s", srcIP, conn.LocalAddr(), conn.RemoteAddr())
+	}
+}
+
+// RemoveRoutesByConn removes all TCP routes associated with the given connection.
+func (hub *RouteHub) RemoveRoutesByConn(ctx context.Context, conn net.Conn) {
+	hub.RouteMapTCP.Range(func(key, value any) bool {
+		if value.(net.Conn) == conn {
+			hub.RouteMapTCP.Delete(key)
+			plog.G(ctx).Infof("[RouteHub] Remove route: %s (conn %s)", key, conn.LocalAddr())
+		}
+		return true
+	})
+}
+
+// GenerateServers creates servers from listener URI strings (for CLI/config input).
+func GenerateServers(listeners []string, hub *RouteHub) ([]Server, error) {
+	if len(listeners) == 0 {
+		return nil, fmt.Errorf("no listeners configured")
+	}
+	nodes := make([]*Node, 0, len(listeners))
+	for _, l := range listeners {
 		node, err := ParseNode(l)
 		if err != nil {
-			plog.G(context.Background()).Errorf("Failed to parse node %s: %v", l, err)
-			return nil, err
+			return nil, fmt.Errorf("parse %q: %w", l, err)
 		}
-
-		var listener net.Listener
-		var handler Handler
-
-		switch node.Protocol {
-		case "tun":
-			var forwarder *Forwarder
-			if node.Remote != "" {
-				forwarder, err = ParseForwarder(node.Remote)
-				if err != nil {
-					return nil, err
-				}
-			}
-			handler = TunHandler(node, forwarder)
-			listener, err = tun.Listener(tun.Config{
-				Name:    node.Get("name"),
-				Addr:    node.Get("net"),
-				Addr6:   node.Get("net6"),
-				MTU:     node.GetInt("mtu"),
-				Routes:  parseRoutes(node.Get("route")),
-				Gateway: node.Get("gw"),
-			})
-			if err != nil {
-				plog.G(context.Background()).Errorf("Failed to create tun listener: %v", err)
-				return nil, err
-			}
-		case "gtcp":
-			handler = GvisorTCPHandler()
-			listener, err = GvisorTCPListener(node.Addr)
-			if err != nil {
-				plog.G(context.Background()).Errorf("Failed to create gvisor tcp listener: %v", err)
-				return nil, err
-			}
-		case "gudp":
-			handler = GvisorUDPHandler()
-			listener, err = GvisorUDPListener(node.Addr)
-			if err != nil {
-				plog.G(context.Background()).Errorf("Failed to create gvisor udp listener: %v", err)
-				return nil, err
-			}
-		case "ssh":
-			handler = SSHHandler()
-			listener, err = SSHListener(node.Addr)
-			if err != nil {
-				plog.G(context.Background()).Errorf("Failed to create ssh listener: %v", err)
-				return nil, err
-			}
-		default:
-			plog.G(context.Background()).Errorf("Not support protocol %s", node.Protocol)
-			return nil, fmt.Errorf("not support protocol %s", node.Protocol)
-		}
-		servers = append(servers, Server{Listener: listener, Handler: handler})
+		nodes = append(nodes, node)
 	}
-	return servers, nil
+	return GenerateServersFromNodes(nodes, hub)
 }
 
-func parseRoutes(str string) []types.Route {
-	var routes []types.Route
-	list := strings.Split(str, ",")
-	for _, route := range list {
-		if _, ipNet, _ := net.ParseCIDR(strings.TrimSpace(route)); ipNet != nil {
-			routes = append(routes, types.Route{Dst: *ipNet})
-		}
+// GenerateServersFromNodes creates servers from pre-built Node objects.
+func GenerateServersFromNodes(nodes []*Node, hub *RouteHub) ([]Server, error) {
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("no listeners configured")
 	}
-	return routes
+	if hub == nil {
+		hub = DefaultRouteHub
+	}
+	servers := make([]Server, 0, len(nodes))
+	for _, node := range nodes {
+		factory, ok := protocolRegistry[node.Protocol]
+		if !ok {
+			return nil, fmt.Errorf("unsupported protocol %q", node.Protocol)
+		}
+		ln, handler, err := factory(node, hub)
+		if err != nil {
+			return nil, fmt.Errorf("create %s server: %w", node.Protocol, err)
+		}
+		servers = append(servers, Server{Listener: ln, Handler: handler})
+	}
+	return servers, nil
 }

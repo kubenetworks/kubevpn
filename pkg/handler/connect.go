@@ -427,24 +427,19 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 		tunConfig.Addr6 = (&net.IPNet{IP: c.LocalTunIPv6.IP, Mask: net.CIDRMask(128, 128)}).String()
 	}
 
-	localNode := "tun://"
-	node, err := core.ParseNode(localNode)
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to parse local node %s: %v", localNode, err)
-		return err
-	}
-	forward, err := core.ParseNode(forwardAddress)
+	forwardNode, err := core.ParseNode(forwardAddress)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to parse forward node %s: %v", forwardAddress, err)
 		return err
 	}
-	forward.Client = &core.Client{
+	forwarder := &core.Forwarder{
+		Addr:        forwardNode.Addr,
 		Connector:   core.NewUDPOverTCPConnector(),
 		Transporter: core.TCPTransporter(tlsSecret.Data),
+		MaxRetries:  5,
 	}
-	forwarder := core.NewForwarder(5, forward)
 
-	handler := core.TunHandler(node, forwarder)
+	handler := core.TunHandler(forwarder, nil)
 	listener, err := tun.Listener(tunConfig)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to create tun listener: %v", err)
@@ -745,16 +740,6 @@ func Run(ctx context.Context, servers []core.Server) error {
 	}
 }
 
-func Parse(r core.Route) ([]core.Server, error) {
-	servers, err := r.GenerateServers()
-	if err != nil {
-		return nil, err
-	}
-	if len(servers) == 0 {
-		return nil, fmt.Errorf("server is empty, server config: %s", strings.Join(r.Listeners, ","))
-	}
-	return servers, nil
-}
 
 func (c *ConnectOptions) InitClient(f cmdutil.Factory) (err error) {
 	c.factory = f

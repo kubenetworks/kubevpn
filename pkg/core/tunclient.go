@@ -15,12 +15,12 @@ import (
 )
 
 func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn, forwarder *Forwarder) {
-	device := &ClientDevice{
+	device := &ClientDevice{tunDevice{
 		tun:         tun,
 		tunInbound:  make(chan *Packet, MaxSize),
 		tunOutbound: make(chan *Packet, MaxSize),
 		errChan:     h.errChan,
-	}
+	}}
 
 	defer device.Close()
 	go device.handlePacket(ctx, forwarder)
@@ -33,23 +33,21 @@ func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn, forwarder *
 	}
 }
 
+// ClientDevice is the client-side tun device handler.
 type ClientDevice struct {
-	tun         net.Conn
-	tunInbound  chan *Packet
-	tunOutbound chan *Packet
-	errChan     chan error
+	tunDevice
 }
 
 func (d *ClientDevice) handlePacket(ctx context.Context, forward *Forwarder) {
 	for ctx.Err() == nil {
 		func() {
-			subCtx, cancelFunc := context.WithCancel(ctx)
-			defer cancelFunc()
+			subCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
 
 			defer time.Sleep(time.Second * 2)
-			conn, err := forwardConn(subCtx, forward)
+			conn, err := forward.DialContext(subCtx)
 			if err != nil {
-				plog.G(ctx).Errorf("Failed to get remote conn from %s -> %s: %s", d.tun.LocalAddr(), forward.node.Remote, err)
+				plog.G(ctx).Errorf("Failed to dial %s from %s: %v", forward.Addr, d.tun.LocalAddr(), err)
 				return
 			}
 			defer conn.Close()
@@ -66,14 +64,6 @@ func (d *ClientDevice) handlePacket(ctx context.Context, forward *Forwarder) {
 			}
 		}()
 	}
-}
-
-func forwardConn(ctx context.Context, forwarder *Forwarder) (net.Conn, error) {
-	conn, err := forwarder.DialContext(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to dial forwarder")
-	}
-	return conn, nil
 }
 
 func readFromConn(ctx context.Context, conn net.Conn, tunInbound chan *Packet, tunOutbound chan *Packet, errChan chan error) {
@@ -111,27 +101,25 @@ func readFromConn(ctx context.Context, conn net.Conn, tunInbound chan *Packet, t
 
 func writeToConn(ctx context.Context, conn net.Conn, inbound <-chan *Packet, errChan chan error) {
 	defer util.HandleCrash()
-	for ctx.Err() == nil {
-		var packet *Packet
+	for {
 		select {
-		case packet = <-inbound:
+		case packet := <-inbound:
 			if packet == nil {
 				return
 			}
+			if err := conn.SetWriteDeadline(time.Now().Add(config.KeepAliveTime)); err != nil {
+				plog.G(ctx).Errorf("Failed to set write deadline: %v", err)
+				util.SafeWrite(errChan, errors.Wrap(err, "failed to set write deadline"))
+				return
+			}
+			_, err := conn.Write(packet.data[:packet.length])
+			config.LPool.Put(packet.data[:])
+			if err != nil {
+				plog.G(ctx).Errorf("Failed to write packet to remote: %v", err)
+				util.SafeWrite(errChan, errors.Wrap(err, "failed to write packet to remote"))
+				return
+			}
 		case <-ctx.Done():
-			return
-		}
-		err := conn.SetWriteDeadline(time.Now().Add(config.KeepAliveTime))
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to set write deadline: %v", err)
-			util.SafeWrite(errChan, errors.Wrap(err, "failed to set write deadline"))
-			return
-		}
-		_, err = conn.Write(packet.data[:packet.length])
-		config.LPool.Put(packet.data[:])
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to write packet to remote: %v", err)
-			util.SafeWrite(errChan, errors.Wrap(err, "failed to write packet to remote"))
 			return
 		}
 	}
@@ -172,33 +160,6 @@ func (d *ClientDevice) readFromTun(ctx context.Context) {
 	}
 }
 
-func (d *ClientDevice) writeToTun(ctx context.Context) {
-	defer util.HandleCrash()
-	for ctx.Err() == nil {
-		var packet *Packet
-		select {
-		case packet = <-d.tunOutbound:
-			if packet == nil {
-				return
-			}
-		case <-ctx.Done():
-			return
-		}
-
-		_, err := d.tun.Write(packet.data[1:packet.length])
-		config.LPool.Put(packet.data[:])
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to write packet to tun device: %v", err)
-			util.SafeWrite(d.errChan, err)
-			return
-		}
-	}
-}
-
-func (d *ClientDevice) Close() {
-	d.tun.Close()
-}
-
 func (d *ClientDevice) heartbeats(ctx context.Context) {
 	tunIfi, err := util.GetTunDeviceByConn(d.tun)
 	if err != nil {
@@ -214,37 +175,28 @@ func (d *ClientDevice) heartbeats(ctx context.Context) {
 	ticker := time.NewTicker(config.KeepAliveTime)
 	defer ticker.Stop()
 
-	var bytes, bytes6 []byte
+	sendHeartbeat := func(payload []byte) {
+		buf := config.LPool.Get().([]byte)
+		n := copy(buf[1:], payload)
+		buf[0] = 1
+		d.tunInbound <- &Packet{data: buf, length: n + 1}
+	}
+
 	for ; ctx.Err() == nil; <-ticker.C {
 		if srcIPv4 != nil {
-			bytes, err = util.GenICMPPacket(srcIPv4, config.RouterIP)
-			if err != nil {
-				plog.G(ctx).Errorf("Failed to generate IPv4 packet: %v", err)
+			if icmp, e := util.GenICMPPacket(srcIPv4, config.RouterIP); e != nil {
+				plog.G(ctx).Errorf("Failed to generate IPv4 heartbeat: %v", e)
 			} else {
-				data := config.LPool.Get().([]byte)[:]
-				length := copy(data[1:], bytes)
-				data[0] = 1
-				d.tunInbound <- &Packet{
-					data:   data[:],
-					length: length + 1,
-				}
+				sendHeartbeat(icmp)
 			}
 		}
 		if srcIPv6 != nil {
-			bytes6, err = util.GenICMPPacketIPv6(srcIPv6, config.RouterIP6)
-			if err != nil {
-				plog.G(ctx).Errorf("Failed to generate IPv6 packet: %v", err)
+			if icmp, e := util.GenICMPPacketIPv6(srcIPv6, config.RouterIP6); e != nil {
+				plog.G(ctx).Errorf("Failed to generate IPv6 heartbeat: %v", e)
 			} else {
-				data := config.LPool.Get().([]byte)[:]
-				length := copy(data[1:], bytes6)
-				data[0] = 1
-				d.tunInbound <- &Packet{
-					data:   data[:],
-					length: length + 1,
-				}
+				sendHeartbeat(icmp)
 			}
 		}
-
 		if dockerSrcIPv4 != nil {
 			_, _ = util.Ping(ctx, dockerSrcIPv4.String(), config.DockerRouterIP.String())
 		}
