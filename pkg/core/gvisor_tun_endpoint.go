@@ -37,7 +37,7 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, c
 			pkt.DecRef()
 			payloadLen := ipLen + typePrefixLen
 			binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(payloadLen))
-			buf[datagramHeaderLen] = 0
+			buf[datagramHeaderLen] = packetTypeToTUN
 			_, err := conn.Write(buf[:payloadLen+datagramHeaderLen])
 			config.LPool.Put(buf)
 			if err != nil {
@@ -108,7 +108,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			} else if config.Debug {
 				plog.G(ctx).Debugf("[Gvisor-TCP] Routed %s -> %s via %s", src, dst, usedConn.RemoteAddr())
 			}
-		} else if buf[datagramHeaderLen] == 1 {
+		} else if buf[datagramHeaderLen] == packetTypeToGvisor {
 			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 				ReserveHeaderBytes: 0,
 				Payload:            buffer.MakeWithData(ip),

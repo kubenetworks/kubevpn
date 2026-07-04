@@ -65,7 +65,7 @@ func (t *clientTransport) routines() []namedRoutine {
 func (t *clientTransport) routeOutbound(ctx context.Context, buf []byte, n int, src, dst net.IP) {
 	// buf is canonical (pumpTun reserved buf[0:tunReserve]): set the type prefix and the
 	// IP already sits at buf[tunReserve:]. Both branches forward the same canonical buffer.
-	buf[datagramHeaderLen] = 1
+	buf[datagramHeaderLen] = packetTypeToGvisor
 	logIPPacket(ctx, "[Client] OUTBOUND", buf[tunReserve:tunReserve+n])
 	if src.Equal(dst) {
 		t.gvisorInbound <- NewPacket(buf[:], n+typePrefixLen, src, dst)
@@ -249,7 +249,7 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 		}
 		ip := buf[tunReserve : datagramHeaderLen+n]
 		logIPPacket(ctx, fmt.Sprintf("[Client-%d] INBOUND", s.id), ip)
-		if buf[datagramHeaderLen] == 1 {
+		if buf[datagramHeaderLen] == packetTypeToGvisor {
 			gvisorInbound <- NewPacket(buf[:], n, nil, nil)
 		} else {
 			// Heartbeat echo replies from the gateway are the data-plane liveness signal:
@@ -325,7 +325,7 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 	sendHeartbeat := func(payload []byte) {
 		buf := config.LPool.Get().([]byte)
 		n := copy(buf[tunReserve:], payload)
-		buf[datagramHeaderLen] = 1
+		buf[datagramHeaderLen] = packetTypeToGvisor
 		t.dev.tunInbound <- NewPacket(buf, n+typePrefixLen, nil, nil)
 	}
 

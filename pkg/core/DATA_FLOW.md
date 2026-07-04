@@ -23,12 +23,13 @@ length and type prefix can be written in place — no shifting on the way out.
 
 ### Type prefix
 
-The 1-byte type prefix at `data[2]`:
+The 1-byte type prefix at `data[2]` (named constants in `packet.go`); it is a small
+extensible discriminator — values `2..255` are reserved for future packet types:
 
-| Prefix | Meaning | Action at receiver |
-|--------|---------|--------------------|
-| `0` | Gvisor-processed packet (response from real network) | Write to TUN device directly |
-| `1` | Raw IP packet (needs gvisor processing) | Inject into gvisor stack |
+| Prefix | Constant | Meaning | Action at receiver |
+|--------|----------|---------|--------------------|
+| `0` | `packetTypeToTUN` | Gvisor-processed packet (response from real network) | Write to TUN device directly |
+| `1` | `packetTypeToGvisor` | Raw IP packet (needs gvisor processing) | Inject into gvisor stack |
 
 ## Datagram Protocol (UDP-over-TCP)
 
