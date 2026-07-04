@@ -576,3 +576,66 @@ Saved: 1 pool alloc + 1 memcpy per outbound packet on the hottest client path.
 
 1. `buffer.MakeWithData` in gvisor InjectInbound — gvisor copies data into its own managed buffer
 2. `copyPacketToPool` in server response — copies from gvisor endpoint packet to pool buffer (gvisor packet lifecycle requires this)
+
+---
+
+## Iteration: Data-plane unification + reference counting
+
+Consolidated the prior per-path optimizations into one consistent model and removed the
+last avoidable copies. (Earlier iterations above describe the intermediate state;
+component names noted there may have since changed — see below.)
+
+### Single canonical buffer layout
+
+Every `*Packet` in the data plane now uses one layout, with named constants in `packet.go`:
+
+```
+data[0:2] datagram length header (datagramHeaderLen)
+data[2]   type prefix            (typePrefixLen)
+data[3:]  raw IP                 (tunReserve = 3)
+length = type + IP
+```
+
+`Packet.length` now uniformly means type+IP (the client/server `length` disagreement is
+gone). The scattered offset magic numbers (`buf[3:]`, `buf[1:read]`, `headroom+1`, …) were
+replaced with the constants. With one layout, the former layout-shift copies — the loopback
+`copy(buf[0:n+1], buf[2:3+n])` and the mismatches at `writeToTun` / `readFromGvisorInbound`
+— are gone.
+
+### `DatagramPacket.Write` → `writeDatagram`
+
+The per-call scratch-buffer framing was replaced by `writeDatagram(w, buf, payloadLen)`,
+which stamps the length header in place in the reserved head and writes the frame in one
+contiguous Write. It is idempotent, so it stays correct across `WriteFunc` retries, and it
+emits a single Write (one frame) so it composes with `bufferedTCP`.
+
+### Reference-counted Packet buffers
+
+`Packet` gained an atomic reference count (zero value = single owner; `acquire`/`release`;
+release-below-zero panics), modeled on gvisor's `buffer.View` chunk refcount. This let the
+routing hot paths (`routeTun`, inter-client) hand the framed packet to
+`bufferedTCP.writePacket` **by reference** — `ConnList.WritePacket` / `RouteHub.WriteToRoutePacket`
+transfer one reference to the chosen conn and `run()` releases it after the socket write —
+removing the per-packet `bufferedTCP.Write([]byte)` ownership copy. (`Write([]byte)` is kept
+for net.Conn compliance, off the hot path.)
+
+Heartbeat fan-out still clones per slot: each slot's `writeToConn` stamps the header in
+place and writes concurrently, so a shared buffer would be a data race; heartbeats are
+infrequent so the clone is negligible.
+
+### gvisor boundary copy halved
+
+`copyPacketToPool` and `readFromEndpointWriteToTCPConn` now copy gvisor's section views
+(`pkt.AsSlices()`, aliased — no copy) straight into the pooled buffer in one pass, instead
+of `pkt.ToView()` (which flattens into a throwaway buffer first) plus a second copy.
+
+### Removed
+
+- `PacketConnOverTCP` (`conn_packet_over_tcp.go`) — dead code, no production callers.
+- `newDatagramPacket` — unused after `bufferedTCP` switched to `*Packet`.
+- The reverse-UDP bridge stopped wrapping its conn in `UDPConnOverTCP`; it frames inline
+  with `writeDatagram` / `readDatagramPacket` (one fewer copy).
+
+### Verification
+
+`go build` (linux/windows/darwin), `go vet`, `go test ./pkg/core`, and `go test -race ./pkg/core`.
