@@ -129,7 +129,9 @@ func pipeUDPToTCP(ctx context.Context, udpConn *net.UDPConn, tcpConn net.Conn, b
 		if err := udpConn.SetReadDeadline(time.Now().Add(config.UDPRelayTimeout)); err != nil {
 			return fmt.Errorf("set UDP read deadline: %w", err)
 		}
-		n, _, err := udpConn.ReadFrom(buf)
+		// Read into buf[datagramHeaderLen:] leaving headroom so writeDatagram can stamp the
+		// length prefix in place and write the frame in one shot (zero-copy).
+		n, _, err := udpConn.ReadFrom(buf[datagramHeaderLen:])
 		if err != nil {
 			return fmt.Errorf("read UDP: %w", err)
 		}
@@ -140,7 +142,7 @@ func pipeUDPToTCP(ctx context.Context, udpConn *net.UDPConn, tcpConn net.Conn, b
 		if err = tcpConn.SetWriteDeadline(time.Now().Add(config.UDPRelayTimeout)); err != nil {
 			return fmt.Errorf("set TCP write deadline: %w", err)
 		}
-		if err = newDatagramPacket(buf, n).Write(tcpConn); err != nil {
+		if err = writeDatagram(tcpConn, buf, n); err != nil {
 			return fmt.Errorf("write TCP datagram: %w", err)
 		}
 	}

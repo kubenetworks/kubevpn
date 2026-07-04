@@ -249,18 +249,18 @@ func TestDataPath_InterClient_AtoB(t *testing.T) {
 		hub.AddRoute(ctx, clientB.To4(), connB[i])
 	}
 
-	// A sends packet to B's TUN IP
+	// A sends packet to B's TUN IP. Build the canonical buffer that gvisor_tun_endpoint
+	// produces: type prefix at buf[datagramHeaderLen], IP at buf[tunReserve:].
 	ipPkt := buildIPv4Packet(clientA, clientB, []byte("ping"))
-	dgram := newDatagramPacket(make([]byte, len(ipPkt)+10), len(ipPkt)+1)
-	// Simulate the framing that gvisor_tun_endpoint does
-	copy(dgram.Data[1:], ipPkt)
-	dgram.Data[0] = 1 // prefix=1 (inject to B's gvisor)
-	dgram.DataLength = uint16(len(ipPkt) + 1)
+	buf := make([]byte, len(ipPkt)+10)
+	buf[datagramHeaderLen] = 1 // prefix=1 (inject to B's gvisor)
+	copy(buf[tunReserve:], ipPkt)
+	payloadLen := typePrefixLen + len(ipPkt)
 
 	// Use WriteFuncToRoute (same as gvisor_tun_endpoint does)
 	dstKey := string(clientB.To4())
 	conn, err := hub.WriteFuncToRoute(dstKey, func(c net.Conn) error {
-		return dgram.Write(c)
+		return writeDatagram(c, buf, payloadLen)
 	})
 	if err != nil {
 		t.Fatalf("A→B routing failed: %v", err)
@@ -974,9 +974,9 @@ func TestPipeline_WriteToTun_StripPrefix(t *testing.T) {
 	ipPkt := buildIPv4Packet(srcIP, dstIP, []byte("response"))
 
 	buf := config.LPool.Get().([]byte)
-	buf[0] = 0 // prefix byte (direct to TUN)
-	n := copy(buf[1:], ipPkt)
-	device.tunOutbound <- NewPacket(buf, n+1, nil, nil)
+	buf[datagramHeaderLen] = 0 // prefix byte (direct to TUN)
+	n := copy(buf[tunReserve:], ipPkt)
+	device.tunOutbound <- NewPacket(buf, n+typePrefixLen, nil, nil)
 
 	// Verify: TUN receives the pure IP packet (no prefix byte)
 	select {
@@ -1077,8 +1077,8 @@ func TestPipeline_ReadFromConn_PrefixZeroToTunOutbound(t *testing.T) {
 		if pkt == nil {
 			t.Fatal("got nil")
 		}
-		if pkt.data[0] != 0 {
-			t.Fatalf("expected prefix=0 in tunOutbound, got %d", pkt.data[0])
+		if pkt.data[datagramHeaderLen] != 0 {
+			t.Fatalf("expected prefix=0 in tunOutbound, got %d", pkt.data[datagramHeaderLen])
 		}
 		config.LPool.Put(pkt.data[:])
 	case <-time.After(2 * time.Second):

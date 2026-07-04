@@ -12,7 +12,29 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+const (
+	// datagramHeaderLen is the 2-byte big-endian length prefix that frames each
+	// datagram on the wire: [2-byte length][payload].
+	datagramHeaderLen = 2
+	// typePrefixLen is the 1-byte type prefix in front of the IP payload
+	// (0 = write back to TUN, 1 = inject into the local gvisor stack).
+	typePrefixLen = 1
+	// tunReserve is the headroom reserved at the front of every pooled buffer when
+	// reading from the TUN: [datagramHeaderLen][typePrefixLen]. It lets the datagram
+	// length and type prefix be written in place, without copying, on the way out.
+	tunReserve = datagramHeaderLen + typePrefixLen // 3
+)
+
 // Packet represents a network packet with source and destination addresses.
+//
+// Canonical buffer layout (single, system-wide):
+//
+//	data[0:2]            = datagram length header (datagramHeaderLen)
+//	data[2]              = type prefix (typePrefixLen)
+//	data[3:]             = raw IP payload (starts at tunReserve)
+//	length               = typePrefixLen + len(IP)  // type + IP
+//	wire frame           = data[0 : datagramHeaderLen+length]
+//	raw IP               = data[tunReserve : datagramHeaderLen+length]
 type Packet struct {
 	data   []byte
 	length int
@@ -49,7 +71,7 @@ func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte, headroom int) (buf [
 	view := pkt.ToView()
 	data := view.AsSlice()
 	buf = config.LPool.Get().([]byte)[:]
-	n := copy(buf[headroom+1:], data)
+	n := copy(buf[headroom+typePrefixLen:], data)
 	buf[headroom] = prefix
 	view.Release()
 	pkt.DecRef()

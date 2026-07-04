@@ -270,21 +270,16 @@ func TestUDPConnOverTCP_ContextCancellation(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDatagramPacket_WriteFormat(t *testing.T) {
-	// DatagramPacket.Write outputs [2-byte len][data]
-	// It shifts data in-place: copies Data[:DataLength] to Data[2:] then writes len prefix
+	// writeDatagram outputs [2-byte len][payload], stamping the length in place into the
+	// reserved headroom. The payload must sit at buf[datagramHeaderLen:].
 	data := make([]byte, 65536)
 	payload := []byte("datagram test payload")
-	copy(data, payload)
-
-	dgram := &DatagramPacket{
-		DataLength: uint16(len(payload)),
-		Data:       data,
-	}
+	copy(data[datagramHeaderLen:], payload)
 
 	var buf bytes.Buffer
-	err := dgram.Write(&buf)
+	err := writeDatagram(&buf, data, len(payload))
 	if err != nil {
-		t.Fatalf("DatagramPacket.Write error: %v", err)
+		t.Fatalf("writeDatagram error: %v", err)
 	}
 
 	written := buf.Bytes()

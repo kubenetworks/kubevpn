@@ -53,7 +53,7 @@ func (t *clientTransport) label() string { return "[Client]" }
 func (t *clientTransport) routines() []namedRoutine {
 	return []namedRoutine{
 		{"client-gvisor", func(ctx context.Context) {
-			handleGvisorPacket(t.gvisorInbound, t.dev.tunOutbound, 0).Run(ctx)
+			handleGvisorPacket(t.gvisorInbound, t.dev.tunOutbound, datagramHeaderLen).Run(ctx)
 		}},
 		{"client-conn-pool", t.runConnPool},
 		{"client-heartbeat", t.heartbeats},
@@ -63,14 +63,15 @@ func (t *clientTransport) routines() []namedRoutine {
 // routeOutbound dispatches a packet read from the TUN: loop it back through the local gvisor
 // stack when src == dst, otherwise enqueue it for the connection pool (distributed by dst hash).
 func (t *clientTransport) routeOutbound(ctx context.Context, buf []byte, n int, src, dst net.IP) {
-	buf[2] = 1
-	logIPPacket(ctx, "[Client] OUTBOUND", buf[3:3+n])
+	// buf is canonical (pumpTun reserved buf[0:tunReserve]): set the type prefix and the
+	// IP already sits at buf[tunReserve:]. Both branches forward the same canonical buffer.
+	buf[datagramHeaderLen] = 1
+	logIPPacket(ctx, "[Client] OUTBOUND", buf[tunReserve:tunReserve+n])
 	if src.Equal(dst) {
-		copy(buf[0:n+1], buf[2:3+n])
-		t.gvisorInbound <- NewPacket(buf[:], n+1, src, dst)
+		t.gvisorInbound <- NewPacket(buf[:], n+typePrefixLen, src, dst)
 	} else {
 		// Enqueue to the shared tunInbound; runConnPool distributes to a slot by hash(dst).
-		t.dev.tunInbound <- NewPacket(buf[:], n+1, src, dst)
+		t.dev.tunInbound <- NewPacket(buf[:], n+typePrefixLen, src, dst)
 	}
 }
 
@@ -220,7 +221,7 @@ func (s *connSlot) run(ctx context.Context) {
 func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan error) {
 	defer util.HandleCrash()
 	gvisorInbound := make(chan *Packet, MaxSize)
-	go handleGvisorPacket(gvisorInbound, s.inbound, 2).Run(ctx)
+	go handleGvisorPacket(gvisorInbound, s.inbound, datagramHeaderLen).Run(ctx)
 	dl := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: conn.SetReadDeadline}
 	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
@@ -230,7 +231,9 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 			util.SafeWrite(errChan, fmt.Errorf("failed to set read deadline: %w", err))
 			return
 		}
-		n, err := conn.Read(buf[:])
+		// Read into buf[datagramHeaderLen:] so the stripped datagram payload lands in canonical
+		// position: buf[datagramHeaderLen] is the type prefix, buf[tunReserve:] the IP packet.
+		n, err := conn.Read(buf[datagramHeaderLen:])
 		if err != nil {
 			config.LPool.Put(buf[:])
 			plog.G(ctx).Errorf("[Client-%d] Failed to read from remote: %v", s.id, err)
@@ -241,14 +244,14 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 			config.LPool.Put(buf[:])
 			continue
 		}
-		// Inbound packet from the server: buf[0] is the type prefix, buf[1:n] the IP packet.
-		logIPPacket(ctx, fmt.Sprintf("[Client-%d] INBOUND", s.id), buf[1:n])
-		if buf[0] == 1 {
+		ip := buf[tunReserve : datagramHeaderLen+n]
+		logIPPacket(ctx, fmt.Sprintf("[Client-%d] INBOUND", s.id), ip)
+		if buf[datagramHeaderLen] == 1 {
 			gvisorInbound <- NewPacket(buf[:], n, nil, nil)
 		} else {
 			// Heartbeat echo replies from the gateway are the data-plane liveness signal:
 			// record them and drop (the OS would discard them — the echo was crafted by us).
-			if s.stats != nil && isHeartbeatEchoReply(buf[1:n]) {
+			if s.stats != nil && isHeartbeatEchoReply(ip) {
 				s.stats.MarkReply()
 				config.LPool.Put(buf[:])
 				continue
@@ -275,8 +278,8 @@ func (s *connSlot) writeToConn(ctx context.Context, rawConn net.Conn, errChan ch
 				return
 			}
 			// Write datagram frame in-place: [2-byte length header][prefix+IP data]
-			binary.BigEndian.PutUint16(packet.data[:2], uint16(packet.length))
-			_, err := rawConn.Write(packet.data[:packet.length+2])
+			binary.BigEndian.PutUint16(packet.data[:datagramHeaderLen], uint16(packet.length))
+			_, err := rawConn.Write(packet.data[:packet.length+datagramHeaderLen])
 			config.LPool.Put(packet.data[:])
 			if err != nil {
 				plog.G(ctx).Errorf("[Client-%d] Failed to write to remote: %v", s.id, err)
@@ -318,9 +321,9 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 
 	sendHeartbeat := func(payload []byte) {
 		buf := config.LPool.Get().([]byte)
-		n := copy(buf[3:], payload)
-		buf[2] = 1
-		t.dev.tunInbound <- &Packet{data: buf, length: n + 1}
+		n := copy(buf[tunReserve:], payload)
+		buf[datagramHeaderLen] = 1
+		t.dev.tunInbound <- &Packet{data: buf, length: n + typePrefixLen}
 	}
 
 	sendAll := func(reason string) {

@@ -85,15 +85,13 @@ func readDatagramPacket(r io.Reader, b []byte) (*DatagramPacket, error) {
 	return &DatagramPacket{DataLength: dataLength, Data: b[:]}, nil
 }
 
-func (d *DatagramPacket) Write(w io.Writer) error {
-	// Frame into a scratch buffer instead of shifting d.Data in place: this
-	// method may be called more than once on the same packet (WriteFunc retries
-	// the next connection when one fails), and in-place mutation would corrupt
-	// the frame on the second call.
-	buf := config.LPool.Get().([]byte)
-	defer config.LPool.Put(buf)
-	binary.BigEndian.PutUint16(buf[:2], d.DataLength)
-	n := copy(buf[2:], d.Data[:d.DataLength])
-	_, err := w.Write(buf[:n+2])
+// writeDatagram frames buf as [2-byte big-endian length][payload] and writes it in a single
+// Write. buf must carry the payload at buf[datagramHeaderLen:datagramHeaderLen+payloadLen] with
+// datagramHeaderLen bytes of headroom at buf[:datagramHeaderLen]; the length header is written in
+// place. This is idempotent — safe to retry across connections (WriteFunc) without corrupting the
+// frame — and a single contiguous Write, so it composes with bufferedTCP (one Write == one frame).
+func writeDatagram(w io.Writer, buf []byte, payloadLen int) error {
+	binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(payloadLen))
+	_, err := w.Write(buf[:datagramHeaderLen+payloadLen])
 	return err
 }

@@ -66,7 +66,7 @@ func (d *tunDevice) pumpTun(ctx context.Context, errLabel string, dispatch func(
 	consecutiveErrors := 0
 	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
-		n, err := d.tun.Read(buf[3:])
+		n, err := d.tun.Read(buf[tunReserve:])
 		if err != nil {
 			config.LPool.Put(buf[:])
 			if ctx.Err() != nil {
@@ -85,7 +85,7 @@ func (d *tunDevice) pumpTun(ctx context.Context, errLabel string, dispatch func(
 			continue
 		}
 		consecutiveErrors = 0
-		src, dst, _, parseErr := util.ParseIPFast(buf[3 : 3+n])
+		src, dst, _, parseErr := util.ParseIPFast(buf[tunReserve : tunReserve+n])
 		if parseErr != nil {
 			plog.G(ctx).Errorf("%s Unknown packet, dropping: %v", errLabel, parseErr)
 			config.LPool.Put(buf[:])
@@ -104,7 +104,7 @@ func (d *tunDevice) writeToTun(ctx context.Context) {
 			if packet == nil {
 				return
 			}
-			_, err := d.tun.Write(packet.data[1:packet.length])
+			_, err := d.tun.Write(packet.data[tunReserve : datagramHeaderLen+packet.length])
 			config.LPool.Put(packet.data[:])
 			if err != nil {
 				plog.G(ctx).Errorf("[TUN] Failed to write to tun device: %v", err)

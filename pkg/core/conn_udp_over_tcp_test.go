@@ -5,21 +5,20 @@ import (
 	"testing"
 )
 
-// Regression: DatagramPacket.Write must not mutate d.Data in place, because
-// WriteFunc may call it more than once on the same packet (retrying the next
-// connection). A second call previously produced a corrupted frame.
-func TestDatagramPacket_WriteIdempotent(t *testing.T) {
+// Regression: writeDatagram must be idempotent, because WriteFunc may call it more than
+// once on the same buffer (retrying the next connection). It writes the length header in
+// place into the reserved headroom, so repeated calls produce the identical frame.
+func TestWriteDatagram_Idempotent(t *testing.T) {
 	payload := []byte{0x45, 0xaa, 0xbb, 0xcc, 0xdd}
 	data := make([]byte, 64)
-	copy(data, payload)
-	d := &DatagramPacket{DataLength: uint16(len(payload)), Data: data}
+	copy(data[datagramHeaderLen:], payload)
 
 	var first, second bytes.Buffer
-	if err := d.Write(&first); err != nil {
-		t.Fatalf("first Write: %v", err)
+	if err := writeDatagram(&first, data, len(payload)); err != nil {
+		t.Fatalf("first writeDatagram: %v", err)
 	}
-	if err := d.Write(&second); err != nil {
-		t.Fatalf("second Write: %v", err)
+	if err := writeDatagram(&second, data, len(payload)); err != nil {
+		t.Fatalf("second writeDatagram: %v", err)
 	}
 
 	if !bytes.Equal(first.Bytes(), second.Bytes()) {
