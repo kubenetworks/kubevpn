@@ -229,8 +229,8 @@ func Test_needsUpgrade_MultipleAssets(t *testing.T) {
 	body := fmt.Sprintf(`{
 		"tag_name": "v3.0.0",
 		"assets": [
-			{"name": "kubevpn_v3.0.0_windows_amd64.zip", "browser_download_url": "https://example.com/windows_amd64"},
-			{"name": "kubevpn_v3.0.0_darwin_arm64.zip", "browser_download_url": "https://example.com/darwin_arm64"},
+			{"name": "kubevpn_v3.0.0_freebsd_386.zip", "browser_download_url": "https://example.com/freebsd_386"},
+			{"name": "kubevpn_v3.0.0_freebsd_arm64.zip", "browser_download_url": "https://example.com/freebsd_arm64"},
 			{"name": "kubevpn_v3.0.0_%s_%s.zip", "browser_download_url": "https://example.com/correct"}
 		]
 	}`, runtime.GOOS, runtime.GOARCH)

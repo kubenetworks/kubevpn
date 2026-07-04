@@ -409,7 +409,12 @@ func (u *sshUt) testUDP(t *testing.T) {
 	// Fixed port matching the UDP port declared on reviews: envoy binds it and
 	// forwards to tunIP:<same port>, which the client's gvisor dials on localhost.
 	port := reviewsUDPPort
-	go u.udpServer(t, port)
+	// Tie the server's lifetime to the test so its socket is released when the
+	// test finishes; otherwise the goroutine keeps the fixed port bound and a
+	// later testUDP run (e.g. centerTestUDP) fails with "address already in use".
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go u.udpServer(ctx, t, port)
 
 	var ip string
 	var err error
@@ -463,7 +468,7 @@ func (u *sshUt) udpClient(t *testing.T, ip string, port int) error {
 	return nil
 }
 
-func (u *sshUt) udpServer(t *testing.T, port int) {
+func (u *sshUt) udpServer(ctx context.Context, t *testing.T, port int) {
 	// 创建监听
 	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
 		IP:   net.ParseIP("127.0.0.1"),
@@ -474,11 +479,19 @@ func (u *sshUt) udpServer(t *testing.T, port int) {
 		return
 	}
 	defer udpConn.Close()
+	// Close the socket on cleanup so ReadFromUDP unblocks and the port is freed.
+	go func() {
+		<-ctx.Done()
+		_ = udpConn.Close()
+	}()
 
 	data := make([]byte, 4096)
 	for {
 		read, remoteAddr, err := udpConn.ReadFromUDP(data[:])
 		if err != nil {
+			if ctx.Err() != nil {
+				return // socket closed on cleanup
+			}
 			t.Logf("failed to read udp data from %v: %v", remoteAddr, err)
 			continue
 		}
@@ -615,7 +628,7 @@ func (u *sshUt) checkProxyStatus(t *testing.T) {
 			RuleList: []*proxyRule{{
 				Headers:       nil,
 				CurrentDevice: true,
-				PortMap:       map[int32]int32{9080: 9080},
+				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
 		}},
 	}}}
@@ -646,7 +659,7 @@ func (u *sshUt) centerCheckProxyStatus(t *testing.T) {
 			RuleList: []*proxyRule{{
 				Headers:       nil,
 				CurrentDevice: true,
-				PortMap:       map[int32]int32{9080: 9080},
+				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
 		}},
 	}}}
@@ -677,7 +690,7 @@ func (u *sshUt) checkProxyWithServiceMeshStatus(t *testing.T) {
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
 				CurrentDevice: true,
-				PortMap:       map[int32]int32{9080: 9080},
+				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
 		}},
 	}}}
@@ -708,7 +721,7 @@ func (u *sshUt) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
 				CurrentDevice: true,
-				PortMap:       map[int32]int32{9080: 9080},
+				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
 		}},
 	}}}
@@ -739,7 +752,7 @@ func (u *sshUt) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
 				CurrentDevice: true,
-				PortMap:       map[int32]int32{9080: 9080},
+				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
 		}},
 	}}}
@@ -777,7 +790,7 @@ func (u *sshUt) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
 				CurrentDevice: true,
-				PortMap:       map[int32]int32{9080: 8080},
+				PortMap:       map[int32]int32{9080: 8080, 9081: 9081},
 			}},
 		}},
 	}}}

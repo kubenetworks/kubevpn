@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"os/exec"
 	"runtime"
 	"unsafe"
 
@@ -178,15 +179,6 @@ type inet4IfReq struct {
 	addr unix.RawSockaddrInet4
 }
 
-// struct in6_ifreq used by the IPv6 variant of SIOCDIFADDR.
-type inet6IfReq struct {
-	name [unix.IFNAMSIZ]byte
-	addr unix.RawSockaddrInet6
-}
-
-// IPv6 SIOCDIFADDR (unix only exposes the v4-sized constant; recompute for in6_ifreq).
-const siocDIFAddrInet6 = (unix.SIOCDIFADDR & 0xe000ffff) | (uint(unsafe.Sizeof(inet6IfReq{})) << 16)
-
 // removeInterfaceAddress deletes an address from an interface (best-effort), the
 // counterpart of setInterfaceAddress. Needed because macOS SIOCAIFADDR only ADDS an
 // alias — without an explicit delete, changing the TUN IP would leave the old one.
@@ -211,18 +203,16 @@ func delInet4Address(ifName string, ip netip.Addr) error {
 	return ioctlRequest(fd, unix.SIOCDIFADDR, unsafe.Pointer(req))
 }
 
+// delInet6Address removes an IPv6 address via ifconfig. The IPv6 variant of
+// SIOCDIFADDR (in6_ifreq) has a different, OS-dependent struct size across the
+// BSD family this file builds for, so the ioctl number cannot be portably
+// recomputed; ifconfig is the consistent, reliable path for all of them.
 func delInet6Address(ifName string, ip netip.Addr) error {
-	fd, err := unix.Socket(unix.AF_INET6, unix.SOCK_DGRAM, 0)
+	out, err := exec.Command("ifconfig", ifName, "inet6", ip.String(), "delete").CombinedOutput()
 	if err != nil {
-		return err
+		return fmt.Errorf("ifconfig %s inet6 %s delete: %w: %s", ifName, ip, err, out)
 	}
-	defer unix.Close(fd)
-	ip6 := ip.As16()
-	req := &inet6IfReq{
-		addr: unix.RawSockaddrInet6{Family: unix.AF_INET6, Len: unix.SizeofSockaddrInet6, Addr: ip6},
-	}
-	copy(req.name[:], ifName)
-	return ioctlRequest(fd, siocDIFAddrInet6, unsafe.Pointer(req))
+	return nil
 }
 
 func ioctlRequest(fd int, req uint, ptr unsafe.Pointer) error {

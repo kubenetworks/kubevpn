@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -157,9 +158,13 @@ func TestConvertToTempKubeconfigFile(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to stat file: %v", err)
 		}
-		perm := info.Mode().Perm()
-		if perm != 0644 {
-			t.Errorf("file permissions: got %o, want 0644", perm)
+		// Windows does not honor Unix file permission bits; Stat always
+		// reports 0666 there regardless of the Chmod(0644) call.
+		if runtime.GOOS != "windows" {
+			perm := info.Mode().Perm()
+			if perm != 0644 {
+				t.Errorf("file permissions: got %o, want 0644", perm)
+			}
 		}
 	})
 
