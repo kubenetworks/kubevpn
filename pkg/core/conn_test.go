@@ -269,7 +269,7 @@ func TestUDPConnOverTCP_ContextCancellation(t *testing.T) {
 // DatagramPacket tests
 // ---------------------------------------------------------------------------
 
-func TestDatagramPacket_WriteFormat(t *testing.T) {
+func TestWriteDatagram_Format(t *testing.T) {
 	// writeDatagram outputs [2-byte len][payload], stamping the length in place into the
 	// reserved headroom. The payload must sit at buf[datagramHeaderLen:].
 	data := make([]byte, 65536)
