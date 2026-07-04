@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -37,8 +38,17 @@ func waitRunStartup(t *testing.T, cmd *exec.Cmd, cancel context.CancelFunc, clie
 	done := make(chan any)
 	startupErr := make(chan error, 1)
 	var once sync.Once
+	// rolling captures every line the run container emits, tee'd from the checker as it
+	// streams. RunWithRollingOutWithChecker only returns its own buffer after the process
+	// exits, so when a hung run is killed but does NOT exit (the case below) its output
+	// is otherwise lost — we keep our own copy here to dump on timeout.
+	var rollingMu sync.Mutex
+	var rolling bytes.Buffer
 	go func() {
 		stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
+			rollingMu.Lock()
+			rolling.WriteString(log + "\n")
+			rollingMu.Unlock()
 			if strings.Contains(log, marker) {
 				once.Do(func() { close(done) })
 				return true
@@ -63,14 +73,20 @@ func waitRunStartup(t *testing.T, cmd *exec.Cmd, cancel context.CancelFunc, clie
 		t.Fatal(err)
 	case <-time.After(runStartupTimeout):
 		cancel() // kill the run process so the reader goroutine returns its captured output
+		rollingMu.Lock()
+		captured := rolling.String()
+		rollingMu.Unlock()
+		// Dump the run container's own output FIRST — it is the local kubevpn that failed
+		// to start and is the primary diagnostic; the sidecar logs are secondary context.
+		t.Logf("===== kubevpn run container output captured before timeout =====\n%s", captured)
 		dumpKubeVPNSidecarLogs(t, clientset)
 		select {
 		case err := <-startupErr:
 			t.Fatalf("kubevpn run did not log %q within %s — an injected sidecar is likely crash-looping "+
-				"(sidecar logs dumped above): %v", marker, runStartupTimeout, err)
+				"(run container output and sidecar logs dumped above): %v", marker, runStartupTimeout, err)
 		case <-time.After(15 * time.Second):
 			t.Fatalf("kubevpn run did not log %q within %s and did not exit after cancel "+
-				"(sidecar logs dumped above)", marker, runStartupTimeout)
+				"(run container output and sidecar logs dumped above)", marker, runStartupTimeout)
 		}
 	}
 }
