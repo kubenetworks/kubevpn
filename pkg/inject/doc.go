@@ -1,8 +1,9 @@
 // Package inject implements sidecar injection strategies for Kubernetes workloads.
 //
-// Three strategies selected by NewInjector factory:
-//   - vpnInjector: VPN-only sidecar (no traffic splitting)
-//   - meshInjector: VPN + Envoy sidecar (header-based traffic splitting)
+// Two strategies selected by NewInjector factory:
+//   - meshInjector: VPN + Envoy sidecar. With --headers it does header-based traffic
+//     splitting; with empty headers envoy matches all requests, giving full traffic
+//     interception (the unified replacement for the former VPN-only injector).
 //   - fargateInjector: SSH + Envoy sidecar (for environments without NET_ADMIN)
 //
 // Envoy routing rules are stored as YAML in the traffic manager ConfigMap.

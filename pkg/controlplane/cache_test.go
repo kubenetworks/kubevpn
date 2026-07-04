@@ -207,6 +207,79 @@ func TestVirtual_To_MultipleRules(t *testing.T) {
 	}
 }
 
+// emptyEndpointAddrs returns the names of any generated endpoints whose socket address is
+// empty — an upstream envoy can never connect to, making it fail every routed request with
+// 503 "connection refused".
+func emptyEndpointAddrs(endpoints []types.Resource) []string {
+	var bad []string
+	for _, res := range endpoints {
+		cla := res.(*endpoint.ClusterLoadAssignment)
+		for _, lbe := range cla.GetEndpoints() {
+			for _, e := range lbe.GetLbEndpoints() {
+				if e.GetEndpoint().GetAddress().GetSocketAddress().GetAddress() == "" {
+					bad = append(bad, cla.GetClusterName())
+				}
+			}
+		}
+	}
+	return bad
+}
+
+// TestVirtual_To_SkipsEmptyTunIP_TCP guards against routing TCP traffic to an empty upstream
+// address when a rule's TUN IP is not yet allocated/propagated. A full-proxy (empty-headers)
+// rule with an empty IP would otherwise produce a match-all route to a broken cluster, so
+// envoy fails ALL requests with 503. TCP must mirror addUDPPort's empty-IP guard.
+func TestVirtual_To_SkipsEmptyTunIP_TCP(t *testing.T) {
+	v := &Virtual{
+		Namespace: "default",
+		UID:       "deployments.apps.authors",
+		Ports: []ContainerPort{
+			{ContainerPort: 9080, Protocol: corev1.ProtocolTCP},
+		},
+		Rules: []*Rule{
+			// Full-proxy rule whose TUN IP has not propagated yet.
+			{Headers: map[string]string{}, LocalTunIPv4: "", PortMap: map[int32]string{9080: "9080"}},
+		},
+	}
+
+	logger := log.NewEntry(log.New())
+	_, clusters, _, endpoints := v.To(false, logger)
+
+	if bad := emptyEndpointAddrs(endpoints); len(bad) != 0 {
+		t.Fatalf("empty-address endpoints generated for empty TUN IP: %v", bad)
+	}
+	// The only cluster left should be origin_cluster (the mesh default route target); no
+	// per-rule TUN cluster is created for the empty IP.
+	for _, res := range clusters {
+		if name := res.(*cluster.Cluster).GetName(); name != originClusterName {
+			t.Fatalf("unexpected cluster %q for empty TUN IP (want only %q)", name, originClusterName)
+		}
+	}
+}
+
+// TestVirtual_To_SkipsEmptyTunIP_IPv6Missing guards the v4-only rule in an IPv6-enabled
+// snapshot: rule.tunIPs returns [v4, ""], and the empty IPv6 entry must not yield a broken
+// v6 endpoint.
+func TestVirtual_To_SkipsEmptyTunIP_IPv6Missing(t *testing.T) {
+	v := &Virtual{
+		Namespace: "default",
+		UID:       "deployments.apps.authors",
+		Ports: []ContainerPort{
+			{ContainerPort: 9080, Protocol: corev1.ProtocolTCP},
+		},
+		Rules: []*Rule{
+			{Headers: map[string]string{"env": "test"}, LocalTunIPv4: "198.18.0.1", LocalTunIPv6: "", PortMap: map[int32]string{9080: "9080"}},
+		},
+	}
+
+	logger := log.NewEntry(log.New())
+	_, _, _, endpoints := v.To(true, logger)
+
+	if bad := emptyEndpointAddrs(endpoints); len(bad) != 0 {
+		t.Fatalf("empty-address endpoints generated for missing IPv6: %v", bad)
+	}
+}
+
 func TestVirtual_To_EmptyRules(t *testing.T) {
 	v := &Virtual{
 		Namespace: "default",

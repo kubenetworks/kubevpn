@@ -91,6 +91,28 @@ func waitRunStartup(t *testing.T, cmd *exec.Cmd, cancel context.CancelFunc, clie
 	}
 }
 
+// forceCleanupRunContainers removes any `kubevpn run` containers left behind for the given
+// app label. Run mode starts detached docker containers (publishing the workload's ports);
+// when a run test fails, the deferred context cancel SIGKILLs `kubevpn run` before it can
+// stop them, so the containers keep their published ports (e.g. :80) and the NEXT run test
+// fails with "port is already allocated" and times out. Registered via t.Cleanup so one
+// failure does not cascade. Best-effort: only logs on error.
+func forceCleanupRunContainers(t *testing.T, app string) {
+	t.Helper()
+	out, err := exec.Command("docker", "ps", "-aq", "--filter", "label=app="+app).CombinedOutput()
+	if err != nil {
+		t.Logf("list leftover run containers (app=%s): %v: %s", app, err, out)
+		return
+	}
+	for _, id := range strings.Fields(string(out)) {
+		if rmOut, rmErr := exec.Command("docker", "rm", "-f", id).CombinedOutput(); rmErr != nil {
+			t.Logf("force-remove leftover run container %s: %v: %s", id, rmErr, rmOut)
+		} else {
+			t.Logf("force-removed leftover run container %s (app=%s)", id, app)
+		}
+	}
+}
+
 func (u *ut) deleteDeployForSaveResource(t *testing.T) {
 	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
 	for _, s := range []string{"productpage", "ratings"} {
@@ -112,6 +134,7 @@ func (u *ut) resetDeployAuthors(t *testing.T) {
 }
 
 func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
+	t.Cleanup(func() { forceCleanupRunContainers(t, "authors") })
 	path := u.writeTempFile(t)
 	name := filepath.Base(path)
 	dir := filepath.Dir(path)
@@ -158,6 +181,7 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 }
 
 func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
+	t.Cleanup(func() { forceCleanupRunContainers(t, "authors") })
 	path := u.writeTempFile(t)
 	name := filepath.Base(path)
 	dir := filepath.Dir(path)

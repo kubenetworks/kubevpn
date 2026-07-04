@@ -38,6 +38,7 @@ func (u *sshUt) resetDeployAuthors(t *testing.T) {
 }
 
 func (u *sshUt) kubevpnRunWithFullProxy(t *testing.T) {
+	t.Cleanup(func() { forceCleanupRunContainers(t, "authors") })
 	path := u.writeTempFile(t)
 	name := filepath.Base(path)
 	dir := filepath.Dir(path)
@@ -84,6 +85,7 @@ func (u *sshUt) kubevpnRunWithFullProxy(t *testing.T) {
 }
 
 func (u *sshUt) kubevpnRunWithServiceMesh(t *testing.T) {
+	t.Cleanup(func() { forceCleanupRunContainers(t, "authors") })
 	path := u.writeTempFile(t)
 	name := filepath.Base(path)
 	dir := filepath.Dir(path)

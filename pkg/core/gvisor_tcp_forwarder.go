@@ -46,19 +46,26 @@ func LocalTCPForwarder(ctx context.Context, s *stack.Stack) func(stack.Transport
 const tcpForwarderMaxInFlight = 100000
 
 func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolver, local bool) func(stack.TransportEndpointID, *stack.PacketBuffer) bool {
+	// role distinguishes the two forwarders in the logs: "local" is the reverse path
+	// (envoy/cluster -> this machine's 127.0.0.1 dev service), "cluster" is the forward
+	// path (client -> real k8s destination). Tracing a 503/EOF needs to know which side.
+	role := "cluster"
+	if local {
+		role = "local"
+	}
 	return tcp.NewForwarder(s, 0, tcpForwarderMaxInFlight, func(request *tcp.ForwarderRequest) {
 		dialCtx := ctx
 		if local {
 			dialCtx = context.Background()
 		}
 		id := request.ID()
-		plog.G(dialCtx).Infof("[Gvisor-TCP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress: %s",
-			id.LocalPort, id.LocalAddress.String(), id.RemotePort, id.RemoteAddress.String(),
+		plog.G(dialCtx).Infof("[Gvisor-TCP][%s] new conn dst=%s:%d src=%s:%d",
+			role, id.LocalAddress.String(), id.LocalPort, id.RemoteAddress.String(), id.RemotePort,
 		)
 		w := &waiter.Queue{}
 		endpoint, tErr := request.CreateEndpoint(w)
 		if tErr != nil {
-			plog.G(dialCtx).Errorf("[Gvisor-TCP] Failed to create endpoint: %v", tErr)
+			plog.G(dialCtx).Errorf("[Gvisor-TCP][%s] Failed to create endpoint (dst=%s:%d): %v", role, id.LocalAddress.String(), id.LocalPort, tErr)
 			request.Complete(true)
 			return
 		}
@@ -77,10 +84,12 @@ func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolve
 		}()
 
 		host, port := resolve(id)
+		target := net.JoinHostPort(host, port)
+		plog.G(dialCtx).Infof("[Gvisor-TCP][%s] dialing %s", role, target)
 		d := net.Dialer{Timeout: config.ConnectTimeout}
-		remote, err := d.DialContext(dialCtx, "tcp", net.JoinHostPort(host, port))
+		remote, err := d.DialContext(dialCtx, "tcp", target)
 		if err != nil {
-			plog.G(dialCtx).Errorf("[Gvisor-TCP] Failed to connect addr %s: %v", net.JoinHostPort(host, port), err)
+			plog.G(dialCtx).Errorf("[Gvisor-TCP][%s] Failed to connect addr %s: %v", role, target, err)
 			return
 		}
 
@@ -90,14 +99,14 @@ func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolve
 			buf := config.LPool.Get().([]byte)[:]
 			defer config.LPool.Put(buf[:])
 			written, err2 := io.CopyBuffer(remote, conn, buf)
-			plog.G(dialCtx).Infof("[Gvisor-TCP] Wrote %d bytes to remote", written)
+			plog.G(dialCtx).Infof("[Gvisor-TCP][%s] Wrote %d bytes to %s", role, written, target)
 			errChan <- err2
 		}()
 		go func() {
 			buf := config.LPool.Get().([]byte)[:]
 			defer config.LPool.Put(buf[:])
 			written, err2 := io.CopyBuffer(conn, remote, buf)
-			plog.G(dialCtx).Infof("[Gvisor-TCP] Read %d bytes from remote", written)
+			plog.G(dialCtx).Infof("[Gvisor-TCP][%s] Read %d bytes from %s", role, written, target)
 			errChan <- err2
 		}()
 		err = <-errChan
@@ -105,7 +114,7 @@ func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolve
 		remote.SetReadDeadline(time.Now().Add(time.Second))
 		<-errChan
 		if err != nil && !errors.Is(err, io.EOF) {
-			plog.G(dialCtx).Errorf("[Gvisor-TCP] Disconnected %s <-> %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
+			plog.G(dialCtx).Errorf("[Gvisor-TCP][%s] Disconnected %s <-> %s: %v", role, conn.LocalAddr(), remote.RemoteAddr(), err)
 		}
 	}).HandlePacket
 }
