@@ -133,21 +133,22 @@ func trySendToSlot(inbound chan *Packet, packet *Packet) {
 	}
 }
 
-// broadcastToSlots delivers the same packet to every slot so an idle connection still receives
-// heartbeats. Instead of cloning the buffer per slot, it shares one buffer via refcounting: the
-// reference count is set to the slot count and each slot's writeToConn (or a dropped send via
-// trySendToSlot) releases one reference, freeing the buffer after the last. Safe because the only
-// in-place mutation downstream is the idempotent datagram length header.
+// broadcastToSlots delivers the packet to every slot so an idle connection still receives
+// heartbeats. The buffer is cloned per slot rather than shared: each slot's writeToConn stamps
+// the datagram length header in place and the socket write reads the buffer, all concurrently,
+// so a shared buffer would be a data race. Heartbeats are infrequent and small, so the clone is
+// negligible. Each clone (and the original handed to slot 0) is freed by its slot via release().
 func broadcastToSlots(slots []*connSlot, packet *Packet) {
+	for i := 1; i < len(slots); i++ {
+		clone := config.LPool.Get().([]byte)
+		copy(clone, packet.data[:packet.length+datagramHeaderLen])
+		trySendToSlot(slots[i].inbound, NewPacket(clone, packet.length, nil, nil))
+	}
 	if len(slots) == 0 {
 		packet.release()
 		return
 	}
-	// refs counts extra references beyond the implicit owner, so N consumers => N-1.
-	packet.refs.Store(int32(len(slots) - 1))
-	for _, s := range slots {
-		trySendToSlot(s.inbound, packet)
-	}
+	trySendToSlot(slots[0].inbound, packet)
 }
 
 // ipHash returns a consistent slot index for an IP address.

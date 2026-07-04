@@ -106,8 +106,9 @@ func TestTrySendToSlot_DropsWhenFull(t *testing.T) {
 	config.LPool.Put(first.data[:])
 }
 
-// TestBroadcastToSlots_DeliversToAll verifies a heartbeat reaches every slot (slot 0 the
-// original, the rest pooled clones of equal length).
+// TestBroadcastToSlots_DeliversToAll verifies a heartbeat reaches every slot. All slots
+// share one reference-counted buffer (no clone), so each received packet is released
+// rather than freed directly — the buffer returns to the pool after the last release.
 func TestBroadcastToSlots_DeliversToAll(t *testing.T) {
 	const n = 3
 	slots := make([]*connSlot, n)
@@ -129,7 +130,7 @@ func TestBroadcastToSlots_DeliversToAll(t *testing.T) {
 			if got.length != pkt.length {
 				t.Fatalf("slot %d got length %d, want %d", i, got.length, pkt.length)
 			}
-			config.LPool.Put(got.data[:])
+			got.release()
 		default:
 			t.Fatalf("slot %d did not receive the broadcast", i)
 		}
