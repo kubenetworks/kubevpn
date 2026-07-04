@@ -594,3 +594,61 @@ func TestDryRun_ConfirmV4DeclineV6(t *testing.T) {
 		t.Fatal("proposal should be cleared")
 	}
 }
+
+// Reconnect replay: a proposal pushed while only a STALE (already-dead) watcher was
+// registered — the window after a transient control-plane outage, before the dead
+// watcher channel is reaped but after the client's stream broke — must be re-delivered
+// to the next real subscriber. Otherwise the server keeps the pending intent yet never
+// re-pushes it, so the reconnecting client never confirms and the operator's edit
+// silently stalls (the TestRealTUNManualIP_Disconnect failure mode, over real gRPC).
+func TestDryRun_ProposalReplayedToReconnectedWatcher(t *testing.T) {
+	env := newTestEnv(t)
+	s := env.server
+	ctx := context.Background()
+
+	if _, err := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns"}); err != nil {
+		t.Fatalf("alloc A: %v", err)
+	}
+	ip2 := freeIPs(t, s, 1)[0]
+
+	// A stale watcher channel lingers (its client is gone, nobody reads it).
+	stale := registerWatcher(s, "A")
+
+	// Operator edits TUN_ALLOCS → the proposal is pushed to the stale channel and is
+	// effectively lost to any live client, but the pending intent is recorded.
+	setManualAllocs(t, s, map[string]string{"A": cidr16(ip2)})
+	s.ReconcileAllocsFromConfigMap(ctx)
+	if !pendingProposalExists(s, "A") {
+		t.Fatal("proposal should be pending after reconcile")
+	}
+	if len(stale) == 0 {
+		t.Fatal("sanity: proposal should have landed on the (lost) stale channel")
+	}
+
+	// A reconnects with a real WatchTunIP stream and must receive the pending proposal
+	// as an initial snapshot (without the replay fix this Recv blocks until timeout).
+	wctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	stream, err := env.client.WatchTunIP(wctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns"})
+	if err != nil {
+		t.Fatalf("WatchTunIP: %v", err)
+	}
+	resp, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("expected replayed proposal on reconnect, got recv error: %v", err)
+	}
+	if !resp.DryRun {
+		t.Fatalf("expected a DryRun proposal, got %+v", resp)
+	}
+	if !mustHostIP(t, resp.IPv4).Equal(ip2) {
+		t.Fatalf("replayed proposal IPv4=%s, want %s", resp.IPv4, ip2)
+	}
+
+	// And the reconnected client can now confirm it, committing the operator's edit.
+	if _, err := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns", ConfirmIP: ip2.String()}); err != nil {
+		t.Fatalf("confirm replayed proposal: %v", err)
+	}
+	if !curIP(s, "A").Equal(ip2) {
+		t.Fatalf("after confirm A=%s, want %s", curIP(s, "A"), ip2)
+	}
+}
