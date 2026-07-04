@@ -13,6 +13,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util/regctl/ascii"
 )
 
+// TransferImageWithRegctl copies a container image from imageSource to imageTarget using regclient with progress display.
 func TransferImageWithRegctl(ctx context.Context, imageSource, imageTarget string) error {
 	rc := regclient.New(
 		regclient.WithDockerCerts(),

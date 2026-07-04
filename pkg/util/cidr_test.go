@@ -310,3 +310,124 @@ func TestRemoveLargerOverlappingCIDRs(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoveLargerOverlappingCIDRs_NonOverlapping(t *testing.T) {
+	// Completely disjoint CIDRs should all be preserved
+	cidrs := []*net.IPNet{
+		parseCIDR(t, "10.0.0.0/8"),
+		parseCIDR(t, "172.16.0.0/12"),
+		parseCIDR(t, "192.168.0.0/16"),
+	}
+	got := RemoveLargerOverlappingCIDRs(cidrs)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 non-overlapping CIDRs preserved, got %d: %v", len(got), got)
+	}
+}
+
+func TestRemoveLargerOverlappingCIDRs_NestedMultipleLevels(t *testing.T) {
+	// 10.0.0.0/8 contains 10.1.0.0/16 which contains 10.1.1.0/24
+	// Only the largest (smallest mask) should survive
+	cidrs := []*net.IPNet{
+		parseCIDR(t, "10.1.1.0/24"),
+		parseCIDR(t, "10.0.0.0/8"),
+		parseCIDR(t, "10.1.0.0/16"),
+	}
+	got := RemoveLargerOverlappingCIDRs(cidrs)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 CIDR after removing nested overlaps, got %d: %v", len(got), got)
+	}
+	if got[0].String() != "10.0.0.0/8" {
+		t.Fatalf("expected 10.0.0.0/8, got %s", got[0].String())
+	}
+}
+
+func TestRemoveLargerOverlappingCIDRs_EmptyInput(t *testing.T) {
+	got := RemoveLargerOverlappingCIDRs(nil)
+	if len(got) != 0 {
+		t.Fatalf("expected empty result for nil input, got %v", got)
+	}
+}
+
+func TestRemoveLargerOverlappingCIDRs_SingleCIDR(t *testing.T) {
+	cidrs := []*net.IPNet{parseCIDR(t, "10.244.0.0/16")}
+	got := RemoveLargerOverlappingCIDRs(cidrs)
+	if len(got) != 1 || got[0].String() != "10.244.0.0/16" {
+		t.Fatalf("expected single CIDR preserved, got %v", got)
+	}
+}
+
+func TestRemoveCIDRsContainingIPs_IPOutsideAllCIDRs(t *testing.T) {
+	cidrs := []*net.IPNet{
+		parseCIDR(t, "10.0.0.0/24"),
+		parseCIDR(t, "172.16.0.0/16"),
+	}
+	// IP that doesn't belong to any CIDR
+	ips := []net.IP{net.ParseIP("192.168.1.1")}
+	got := RemoveCIDRsContainingIPs(cidrs, ips)
+	if len(got) != 2 {
+		t.Fatalf("expected all CIDRs preserved when IP is outside, got %d", len(got))
+	}
+}
+
+func TestRemoveCIDRsContainingIPs_IPInsideOneCIDR(t *testing.T) {
+	cidrs := []*net.IPNet{
+		parseCIDR(t, "10.0.0.0/24"),
+		parseCIDR(t, "172.16.0.0/16"),
+		parseCIDR(t, "192.168.0.0/16"),
+	}
+	// Only matches 172.16.0.0/16
+	ips := []net.IP{net.ParseIP("172.16.5.10")}
+	got := RemoveCIDRsContainingIPs(cidrs, ips)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 CIDRs remaining, got %d: %v", len(got), got)
+	}
+	for _, c := range got {
+		if c.String() == "172.16.0.0/16" {
+			t.Fatalf("172.16.0.0/16 should have been removed")
+		}
+	}
+}
+
+func TestRemoveCIDRsContainingIPs_MultipleIPsRemoveMultipleCIDRs(t *testing.T) {
+	cidrs := []*net.IPNet{
+		parseCIDR(t, "10.0.0.0/8"),
+		parseCIDR(t, "172.16.0.0/12"),
+		parseCIDR(t, "192.168.0.0/16"),
+	}
+	ips := []net.IP{
+		net.ParseIP("10.1.2.3"),
+		net.ParseIP("192.168.1.1"),
+	}
+	got := RemoveCIDRsContainingIPs(cidrs, ips)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 CIDR remaining, got %d: %v", len(got), got)
+	}
+	if got[0].String() != "172.16.0.0/12" {
+		t.Fatalf("expected 172.16.0.0/12, got %s", got[0].String())
+	}
+}
+
+func TestRemoveCIDRsContainingIPs_NilInputs(t *testing.T) {
+	// nil cidrs
+	got := RemoveCIDRsContainingIPs(nil, []net.IP{net.ParseIP("10.0.0.1")})
+	if len(got) != 0 {
+		t.Fatalf("expected empty for nil cidrs, got %v", got)
+	}
+
+	// nil ips - all CIDRs preserved
+	cidrs := []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}
+	got = RemoveCIDRsContainingIPs(cidrs, nil)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 CIDR preserved with nil IPs, got %d", len(got))
+	}
+}
+
+// parseCIDR is a test helper that parses a CIDR string or fails the test.
+func parseCIDR(t *testing.T, s string) *net.IPNet {
+	t.Helper()
+	_, ipNet, err := net.ParseCIDR(s)
+	if err != nil {
+		t.Fatalf("failed to parse CIDR %q: %v", s, err)
+	}
+	return ipNet
+}

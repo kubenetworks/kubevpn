@@ -8,6 +8,7 @@ import (
 	"golang.org/x/term"
 )
 
+// Lines manages in-place terminal output by tracking line count and using ANSI escape codes to overwrite.
 type Lines struct {
 	atStart bool
 	buf     []byte
@@ -16,6 +17,7 @@ type Lines struct {
 	width   int
 }
 
+// NewLines creates a Lines instance that writes to w, detecting terminal width if available.
 func NewLines(w io.Writer) *Lines {
 	width := 0
 	if wFd, ok := w.(interface{ Fd() uintptr }); ok && term.IsTerminal(int(wFd.Fd())) {

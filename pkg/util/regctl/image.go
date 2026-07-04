@@ -12,6 +12,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util/regctl/ascii"
 )
 
+// ImageProgress tracks the progress of a container image copy operation for display.
 type ImageProgress struct {
 	mu       sync.Mutex
 	Start    time.Time
@@ -21,6 +22,7 @@ type ImageProgress struct {
 	changed  bool
 }
 
+// ImageProgressEntry holds the state and transfer statistics for a single blob or manifest being copied.
 type ImageProgressEntry struct {
 	kind        types.CallbackKind
 	instance    string

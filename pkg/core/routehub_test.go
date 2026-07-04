@@ -1,6 +1,8 @@
 package core
 
 import (
+	"context"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -32,26 +34,25 @@ func TestDefaultRouteHub(t *testing.T) {
 func TestRouteHub_Isolation(t *testing.T) {
 	hub1 := NewRouteHub()
 	hub2 := NewRouteHub()
+	ctx := context.Background()
 
-	hub1.RouteMapTCP.Store("10.0.0.1", &net.TCPConn{})
+	hub1.AddRoute(ctx, net.ParseIP("10.0.0.1"), newMockConn("10.0.0.1:8080", false))
 
-	if _, ok := hub2.RouteMapTCP.Load("10.0.0.1"); ok {
+	if hub2.HasRoute(string(net.ParseIP("10.0.0.1"))) {
 		t.Fatal("hub2 should not see hub1's route entry")
 	}
 }
 
 func TestRouteHub_SharedState(t *testing.T) {
 	hub := NewRouteHub()
+	ctx := context.Background()
 
-	conn := &mockConn{addr: "192.168.1.1:8080"}
-	hub.RouteMapTCP.Store("198.18.0.100", conn)
+	conn := newMockConn("192.168.1.1:8080", false)
+	ip := net.ParseIP("198.18.0.100")
+	hub.AddRoute(ctx, ip, conn)
 
-	val, ok := hub.RouteMapTCP.Load("198.18.0.100")
-	if !ok {
+	if !hub.HasRoute(string(ip)) {
 		t.Fatal("expected to find route entry")
-	}
-	if val.(net.Conn) != conn {
-		t.Fatal("route entry mismatch")
 	}
 }
 
@@ -81,6 +82,7 @@ func TestRouteHub_TCPPacketChan_ProduceConsume(t *testing.T) {
 
 func TestRouteHub_ConcurrentAccess(t *testing.T) {
 	hub := NewRouteHub()
+	ctx := context.Background()
 	var wg sync.WaitGroup
 
 	for i := 0; i < 100; i++ {
@@ -88,8 +90,8 @@ func TestRouteHub_ConcurrentAccess(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			ip := net.IPv4(198, 18, byte(i/256), byte(i%256))
-			conn := &mockConn{addr: ip.String() + ":8080"}
-			hub.RouteMapTCP.Store(ip.String(), conn)
+			conn := newMockConn(ip.String()+":8080", false)
+			hub.AddRoute(ctx, ip, conn)
 		}(i)
 	}
 
@@ -107,12 +109,14 @@ func TestRouteHub_ConcurrentAccess(t *testing.T) {
 
 func TestRouteHub_RouteMapTCP_DeleteEntry(t *testing.T) {
 	hub := NewRouteHub()
+	ctx := context.Background()
 
-	conn := &mockConn{addr: "10.0.0.1:1234"}
-	hub.RouteMapTCP.Store("198.18.0.50", conn)
-	hub.RouteMapTCP.Delete("198.18.0.50")
+	conn := newMockConn("10.0.0.1:1234", false)
+	ip := net.ParseIP("198.18.0.50")
+	hub.AddRoute(ctx, ip, conn)
+	hub.RemoveRoutesByConn(ctx, conn)
 
-	if _, ok := hub.RouteMapTCP.Load("198.18.0.50"); ok {
+	if hub.HasRoute(string(ip)) {
 		t.Fatal("entry should have been deleted")
 	}
 }
@@ -159,7 +163,19 @@ func TestGenerateServers_NilHub_FallsBackToDefault(t *testing.T) {
 // mockConn implements net.Conn for testing
 type mockConn struct {
 	net.Conn
-	addr string
+	addr      string
+	writeFail bool
+}
+
+func newMockConn(addr string, fail bool) *mockConn {
+	return &mockConn{addr: addr, writeFail: fail}
+}
+
+func (m *mockConn) Write(b []byte) (int, error) {
+	if m.writeFail {
+		return 0, fmt.Errorf("connection dead")
+	}
+	return len(b), nil
 }
 
 func (m *mockConn) RemoteAddr() net.Addr {
