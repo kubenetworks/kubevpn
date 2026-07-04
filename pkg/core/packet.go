@@ -93,16 +93,20 @@ func (d *Packet) Length() int {
 // headroom reserves extra bytes before the prefix for framing headers (e.g. 2-byte datagram length).
 // Returns the buffer and payload length (prefix + IP data, NOT including headroom).
 // Caller must return buf to config.LPool.
-// The PacketBuffer's view is released and its ref count decremented before returning.
+// The PacketBuffer's ref count is decremented before returning.
 func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte, headroom int) (buf []byte, length int) {
-	view := pkt.ToView()
-	data := view.AsSlice()
 	buf = config.LPool.Get().([]byte)[:]
-	n := copy(buf[headroom+typePrefixLen:], data)
+	// Copy straight from gvisor's section views into the pooled buffer. AsSlices aliases
+	// the views (no copy), so this is a single copy out; ToView().AsSlice() would first
+	// flatten the views into a throwaway buffer (a second copy).
+	dst := buf[headroom+typePrefixLen:]
+	n := 0
+	for _, s := range pkt.AsSlices() {
+		n += copy(dst[n:], s)
+	}
 	buf[headroom] = prefix
-	view.Release()
 	pkt.DecRef()
-	return buf, n + 1
+	return buf, n + typePrefixLen
 }
 
 // logIPPacket logs one bare IP packet (no framing prefix) at Debug with a direction label

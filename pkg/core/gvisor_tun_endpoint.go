@@ -25,15 +25,19 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, c
 		pkt := endpoint.ReadContext(ctx)
 		if pkt != nil {
 			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
-			view := pkt.ToView()
-			data := view.AsSlice()
 			buf := config.LPool.Get().([]byte)
-			payloadLen := len(data) + typePrefixLen
+			// Single copy out of gvisor's section views (AsSlices aliases them) into the
+			// pooled buffer at the canonical IP offset; ToView().AsSlice() would flatten
+			// into a throwaway buffer first (a second copy).
+			dst := buf[tunReserve:]
+			ipLen := 0
+			for _, s := range pkt.AsSlices() {
+				ipLen += copy(dst[ipLen:], s)
+			}
+			pkt.DecRef()
+			payloadLen := ipLen + typePrefixLen
 			binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(payloadLen))
 			buf[datagramHeaderLen] = 0
-			copy(buf[tunReserve:], data)
-			view.Release()
-			pkt.DecRef()
 			_, err := conn.Write(buf[:payloadLen+datagramHeaderLen])
 			config.LPool.Put(buf)
 			if err != nil {
