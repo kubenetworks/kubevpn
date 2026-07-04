@@ -52,13 +52,13 @@ func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *Packet
 				protocol = header.IPv6ProtocolNumber
 			} else {
 				plog.G(ctx).Errorf("[Gvisor-TCP] Unknown packet, dropping")
-				config.LPool.Put(packet.data[:])
+				packet.release()
 				continue
 			}
 			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 				Payload: buffer.MakeWithData(ip),
 			})
-			config.LPool.Put(packet.data[:])
+			packet.release()
 			sniffer.LogPacket(prefix, sniffer.DirectionRecv, protocol, pkt)
 			endpoint.InjectInbound(protocol, pkt)
 			pkt.DecRef()

@@ -68,7 +68,7 @@ func (t *serverTransport) routeTun(ctx context.Context) {
 			if elapsed := time.Since(writeStart); elapsed > slowPathWarnThreshold {
 				plog.G(ctx).Warnf("[Perf] Slow WriteToRoute: %s -> %s took %v", packet.src, packet.dst, elapsed)
 			}
-			config.LPool.Put(packet.data[:])
+			packet.release()
 			if err != nil {
 				plog.G(ctx).Warnf("[TUN] No route for %s -> %s, dropping", packet.src, packet.dst)
 			} else if config.Debug {

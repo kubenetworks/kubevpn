@@ -105,7 +105,7 @@ func (d *tunDevice) writeToTun(ctx context.Context) {
 				return
 			}
 			_, err := d.tun.Write(packet.data[tunReserve : datagramHeaderLen+packet.length])
-			config.LPool.Put(packet.data[:])
+			packet.release()
 			if err != nil {
 				plog.G(ctx).Errorf("[TUN] Failed to write to tun device: %v", err)
 				util.SafeWrite(d.errChan, err)
@@ -130,7 +130,7 @@ func drainPacketChan(ch <-chan *Packet) {
 			if pkt == nil {
 				return
 			}
-			config.LPool.Put(pkt.data[:])
+			pkt.release()
 		default:
 			return
 		}

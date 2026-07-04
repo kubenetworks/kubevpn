@@ -123,29 +123,31 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 	}
 }
 
-// trySendToSlot delivers packet to a slot's inbound channel, dropping (and freeing) it if the
+// trySendToSlot delivers packet to a slot's inbound channel, dropping (and releasing) it if the
 // channel is full so a slow slot cannot stall the others.
 func trySendToSlot(inbound chan *Packet, packet *Packet) {
 	select {
 	case inbound <- packet:
 	default:
-		config.LPool.Put(packet.data[:])
+		packet.release()
 	}
 }
 
-// broadcastToSlots delivers packet to slot 0 and a pooled clone to every other slot, so an idle
-// connection still receives heartbeats.
+// broadcastToSlots delivers the same packet to every slot so an idle connection still receives
+// heartbeats. Instead of cloning the buffer per slot, it shares one buffer via refcounting: the
+// reference count is set to the slot count and each slot's writeToConn (or a dropped send via
+// trySendToSlot) releases one reference, freeing the buffer after the last. Safe because the only
+// in-place mutation downstream is the idempotent datagram length header.
 func broadcastToSlots(slots []*connSlot, packet *Packet) {
-	// Clone for the other slots first, while we still own packet.data. Once the
-	// original is handed to slot 0, its buffer may be recycled to the pool (full
-	// channel) or mutated in place by writeToConn, so reading packet.data after
-	// that would be a use-after-free / data race.
-	for i := 1; i < len(slots); i++ {
-		clone := config.LPool.Get().([]byte)
-		copy(clone, packet.data[:packet.length+2])
-		trySendToSlot(slots[i].inbound, &Packet{data: clone, length: packet.length})
+	if len(slots) == 0 {
+		packet.release()
+		return
 	}
-	trySendToSlot(slots[0].inbound, packet)
+	// refs counts extra references beyond the implicit owner, so N consumers => N-1.
+	packet.refs.Store(int32(len(slots) - 1))
+	for _, s := range slots {
+		trySendToSlot(s.inbound, packet)
+	}
 }
 
 // ipHash returns a consistent slot index for an IP address.
@@ -280,7 +282,7 @@ func (s *connSlot) writeToConn(ctx context.Context, rawConn net.Conn, errChan ch
 			// Write datagram frame in-place: [2-byte length header][prefix+IP data]
 			binary.BigEndian.PutUint16(packet.data[:datagramHeaderLen], uint16(packet.length))
 			_, err := rawConn.Write(packet.data[:packet.length+datagramHeaderLen])
-			config.LPool.Put(packet.data[:])
+			packet.release()
 			if err != nil {
 				plog.G(ctx).Errorf("[Client-%d] Failed to write to remote: %v", s.id, err)
 				util.SafeWrite(errChan, fmt.Errorf("failed to write packet to remote: %w", err))
@@ -323,7 +325,7 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 		buf := config.LPool.Get().([]byte)
 		n := copy(buf[tunReserve:], payload)
 		buf[datagramHeaderLen] = 1
-		t.dev.tunInbound <- &Packet{data: buf, length: n + typePrefixLen}
+		t.dev.tunInbound <- NewPacket(buf, n+typePrefixLen, nil, nil)
 	}
 
 	sendAll := func(reason string) {

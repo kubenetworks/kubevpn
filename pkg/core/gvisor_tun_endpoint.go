@@ -117,18 +117,13 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 				plog.G(ctx).Debugf("[Gvisor-TCP] Injected to stack: %s -> %s, protocol=%s, length=%d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
 			}
 		} else {
-			pkt := &Packet{
-				data:   buf[:],
-				length: read,
-				src:    src,
-				dst:    dst,
-			}
+			pkt := NewPacket(buf[:], read, src, dst)
 			// Honor cancellation so this goroutine never blocks forever on a full
 			// channel after the consumer (routeTCPToTun) has exited at shutdown.
 			select {
 			case h.hub.TCPPacketChan <- pkt:
 			case <-ctx.Done():
-				config.LPool.Put(buf[:])
+				pkt.release()
 				return
 			}
 		}
