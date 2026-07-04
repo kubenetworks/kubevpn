@@ -16,13 +16,13 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint, out chan<- *Packet) {
+func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint, out chan<- *Packet, headroom int) {
 	prefix := fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))
 	for ctx.Err() == nil {
 		pkt := endpoint.ReadContext(ctx)
 		if pkt != nil {
 			sniffer.LogPacket(prefix, sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
-			buf, length := copyPacketToPool(pkt, 0)
+			buf, length := copyPacketToPool(pkt, 0, headroom)
 			out <- NewPacket(buf[:], length, nil, nil)
 		}
 	}

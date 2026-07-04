@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/binary"
 	"net"
 
 	"github.com/google/gopacket/layers"
@@ -20,16 +21,20 @@ import (
 )
 
 func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, conn net.Conn, endpoint *channel.Endpoint) {
-	tcpConn, _ := NewUDPConnOverTCP(ctx, conn)
 	for ctx.Err() == nil {
 		pkt := endpoint.ReadContext(ctx)
 		if pkt != nil {
 			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
-			buf, length := copyPacketToPool(pkt, 0)
-			_, err := tcpConn.Write(buf[:length])
-			config.LPool.Put(buf[:])
+			data := pkt.ToView().AsSlice()
+			buf := config.LPool.Get().([]byte)
+			payloadLen := len(data) + 1
+			binary.BigEndian.PutUint16(buf[:2], uint16(payloadLen))
+			buf[2] = 0
+			copy(buf[3:], data)
+			_, err := conn.Write(buf[:payloadLen+2])
+			config.LPool.Put(buf)
 			if err != nil {
-				plog.G(ctx).Errorf("[Gvisor-TCP] Failed to write data to tun device: %v", err)
+				plog.G(ctx).Errorf("[Gvisor-TCP] Failed to write to conn: %v", err)
 			}
 		}
 	}
