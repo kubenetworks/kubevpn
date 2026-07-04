@@ -60,11 +60,12 @@ func (t *serverTransport) routeTun(ctx context.Context) {
 			}
 			dstKey := string(packet.dst)
 			// Canonical layout: type prefix already set by routeOutbound, length is type+IP.
-			// Frame the datagram length in place: buf[0:datagramHeaderLen].
-			payloadLen := packet.length
-			binary.BigEndian.PutUint16(packet.data[:datagramHeaderLen], uint16(payloadLen))
+			// Frame the datagram length in place: buf[0:datagramHeaderLen]. Hand the packet to
+			// the route by reference (zero-copy); the chosen conn takes a reference and we drop
+			// ours below.
+			binary.BigEndian.PutUint16(packet.data[:datagramHeaderLen], uint16(packet.length))
 			writeStart := time.Now()
-			conn, err := t.hub.WriteToRoute(dstKey, packet.data[:payloadLen+datagramHeaderLen])
+			conn, err := t.hub.WriteToRoutePacket(dstKey, packet)
 			if elapsed := time.Since(writeStart); elapsed > slowPathWarnThreshold {
 				plog.G(ctx).Warnf("[Perf] Slow WriteToRoute: %s -> %s took %v", packet.src, packet.dst, elapsed)
 			}

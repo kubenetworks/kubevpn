@@ -92,13 +92,13 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		h.hub.AddRoute(ctx, src, conn)
 		dstKey := string(dst)
 		if h.hub.HasRoute(dstKey) {
-			// Zero-copy framing: buf is canonical with the IP at buf[tunReserve:] and 2 bytes of
-			// headroom at buf[:datagramHeaderLen]; writeDatagram stamps the length in place and
-			// writes buf[:datagramHeaderLen+read] in one shot. Idempotent across WriteFunc retries.
-			usedConn, writeErr := h.hub.WriteFuncToRoute(dstKey, func(c net.Conn) error {
-				return writeDatagram(c, buf, read)
-			})
-			config.LPool.Put(buf[:])
+			// Zero-copy: buf is canonical (IP at buf[tunReserve:], 2 bytes of headroom at
+			// buf[:datagramHeaderLen]). Stamp the length in place and hand the packet to the
+			// route by reference; the chosen conn takes a reference and we drop ours below.
+			pkt := NewPacket(buf, read, src, dst)
+			binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(read))
+			usedConn, writeErr := h.hub.WriteToRoutePacket(dstKey, pkt)
+			pkt.release()
 			if writeErr != nil {
 				plog.G(ctx).Warnf("[Gvisor-TCP] All routes dead for %s: %v", dst, writeErr)
 			} else if config.Debug {

@@ -69,6 +69,40 @@ func (cl *ConnList) Write(data []byte) (net.Conn, error) {
 	return nil, fmt.Errorf("all connections failed")
 }
 
+// packetWriter is implemented by connections that can take ownership of a pooled,
+// reference-counted Packet instead of a copied []byte (e.g. bufferedTCP). This lets the
+// hot routing paths hand off the framed buffer without the net.Conn.Write copy.
+type packetWriter interface {
+	// writePacket enqueues an already-framed packet, taking ownership of one reference
+	// (the caller must have acquired it). Returns false if the conn is closed, in which
+	// case ownership is NOT taken and the caller keeps its reference.
+	writePacket(pkt *Packet) bool
+}
+
+// WritePacket writes an already-framed packet (length header stamped in pkt.data[:2]) to
+// the first healthy conn. For conns that implement packetWriter it transfers one reference
+// (zero-copy); otherwise it falls back to net.Conn.Write (which copies). Dead conns are
+// removed. The caller retains its own reference and must release it after this returns.
+func (cl *ConnList) WritePacket(pkt *Packet) (net.Conn, error) {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	for i := 0; i < len(cl.conns); i++ {
+		if pw, ok := cl.conns[i].(packetWriter); ok {
+			pkt.acquire()
+			if pw.writePacket(pkt) {
+				return cl.conns[i], nil
+			}
+			pkt.release() // conn closed, ownership not taken — undo and try next
+		} else if _, err := cl.conns[i].Write(pkt.data[:datagramHeaderLen+pkt.length]); err == nil {
+			return cl.conns[i], nil
+		}
+		// Dead conn — remove it.
+		cl.conns = append(cl.conns[:i], cl.conns[i+1:]...)
+		i--
+	}
+	return nil, fmt.Errorf("all connections failed")
+}
+
 // WriteFunc attempts to call fn on each healthy conn until one succeeds.
 // Dead conns (fn returns error) are removed from the list.
 func (cl *ConnList) WriteFunc(fn func(conn net.Conn) error) (net.Conn, error) {
@@ -157,6 +191,26 @@ func (hub *RouteHub) WriteFuncToRoute(dstKey string, fn func(conn net.Conn) erro
 	}
 	list := val.(*ConnList)
 	conn, err := list.WriteFunc(fn)
+	if err != nil {
+		// Same harmless TOCTOU as WriteToRoute — see comment there.
+		if list.IsEmpty() {
+			hub.RouteMapTCP.Delete(dstKey)
+		}
+		return nil, err
+	}
+	return conn, nil
+}
+
+// WriteToRoutePacket writes an already-framed packet to the conn(s) registered for dstKey,
+// transferring ownership of one reference to the chosen conn (zero-copy via packetWriter).
+// The caller retains its own reference and must release it afterward.
+func (hub *RouteHub) WriteToRoutePacket(dstKey string, pkt *Packet) (net.Conn, error) {
+	val, ok := hub.RouteMapTCP.Load(dstKey)
+	if !ok {
+		return nil, errNoRoute
+	}
+	list := val.(*ConnList)
+	conn, err := list.WritePacket(pkt)
 	if err != nil {
 		// Same harmless TOCTOU as WriteToRoute — see comment there.
 		if list.IsEmpty() {

@@ -58,17 +58,11 @@ func (c *UDPConnOverTCP) Close() error {
 	return c.Conn.Close()
 }
 
-// DatagramPacket represents a length-prefixed datagram over a stream connection.
+// DatagramPacket represents a length-prefixed datagram read off a stream connection
+// (see readDatagramPacket). Its payload sits at Data[0:DataLength].
 type DatagramPacket struct {
 	DataLength uint16 // [2]byte
 	Data       []byte // []byte
-}
-
-func newDatagramPacket(data []byte, length int) (r *DatagramPacket) {
-	return &DatagramPacket{
-		DataLength: uint16(length),
-		Data:       data,
-	}
 }
 
 // this method will return all byte array in the way: b[:], len(DatagramPacket.Data)==64k
