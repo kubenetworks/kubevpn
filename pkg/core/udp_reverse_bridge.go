@@ -61,8 +61,7 @@ func ServeUDPReverse(ctx context.Context, conn net.Conn) error {
 	defer udpConn.Close()
 	plog.G(ctx).Infof("[UDP-Bridge] serving udp 127.0.0.1:%d", port)
 
-	framed, _ := NewUDPConnOverTCP(ctx, conn)
-	relayUDPReverse(ctx, framed, &listenUDP{c: udpConn})
+	relayUDPReverse(ctx, conn, &listenUDP{c: udpConn})
 	return nil
 }
 
@@ -82,10 +81,9 @@ func DialUDPReverse(ctx context.Context, conn net.Conn, envoyPort, localPort int
 	}
 	defer localConn.Close()
 
-	framed, _ := NewUDPConnOverTCP(ctx, conn)
 	// On the dev side the local UDP socket is connected, so a plain *net.UDPConn
 	// (no per-packet source tracking) is enough; wrap it to share relay logic.
-	relayUDPReverse(ctx, framed, &connectedUDP{localConn})
+	relayUDPReverse(ctx, conn, &connectedUDP{localConn})
 	return nil
 }
 
@@ -134,37 +132,40 @@ func (u *listenUDP) writeTo(b []byte) (int, error) {
 
 func (u *listenUDP) Close() error { return u.c.Close() }
 
-// relayUDPReverse pumps datagrams between a UDPConnOverTCP-framed stream and a
-// UDP endpoint in both directions until either side errors or ctx is done.
-func relayUDPReverse(ctx context.Context, framed net.Conn, udpEnd udpEndpoint) {
+// relayUDPReverse pumps datagrams between the length-prefixed TCP control stream
+// (conn) and a UDP endpoint in both directions until either side errors or ctx is
+// done. Framing is done inline (writeDatagram / readDatagramPacket) so the UDP->TCP
+// direction is zero-copy: UDP is read into the reserved headroom and the length
+// header is stamped in place.
+func relayUDPReverse(ctx context.Context, conn net.Conn, udpEnd udpEndpoint) {
 	errChan := make(chan error, 2)
-	// UDP -> framed (to the other side)
+	// UDP -> conn (to the other side)
 	go func() {
 		buf := config.LPool.Get().([]byte)
 		defer config.LPool.Put(buf)
 		for {
-			n, err := udpEnd.readFrom(buf)
+			n, err := udpEnd.readFrom(buf[datagramHeaderLen:])
 			if err != nil {
 				errChan <- err
 				return
 			}
-			if _, err = framed.Write(buf[:n]); err != nil {
+			if err = writeDatagram(conn, buf, n); err != nil {
 				errChan <- err
 				return
 			}
 		}
 	}()
-	// framed -> UDP (to the local/remote service)
+	// conn -> UDP (to the local/remote service)
 	go func() {
 		buf := config.LPool.Get().([]byte)
 		defer config.LPool.Put(buf)
 		for {
-			n, err := framed.Read(buf)
+			dgram, err := readDatagramPacket(conn, buf)
 			if err != nil {
 				errChan <- err
 				return
 			}
-			if _, err = udpEnd.writeTo(buf[:n]); err != nil {
+			if _, err = udpEnd.writeTo(dgram.Data[:dgram.DataLength]); err != nil {
 				errChan <- err
 				return
 			}
@@ -178,7 +179,7 @@ func relayUDPReverse(ctx context.Context, framed net.Conn, udpEnd udpEndpoint) {
 	case <-ctx.Done():
 	}
 	_ = udpEnd.Close()
-	_ = framed.Close()
+	_ = conn.Close()
 }
 
 func isClosedOrEOF(err error) bool {
