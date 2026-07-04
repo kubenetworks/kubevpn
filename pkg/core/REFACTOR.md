@@ -248,3 +248,81 @@ The client and server sides each have their own gvisor stack, TCP forwarder, and
 | `gvisorlocaludpforwarder.go` | Delete (merged into `gvisorudpforwarder.go`) |
 | `gvisortunendpoint.go` | Use `NewUDPConnOverTCP` instead of `newGvisorUDPConnOverTCP` |
 | `gvisorudphandler.go` | Remove `gvisorUDPConnOverTCP` type and `newGvisorUDPConnOverTCP` |
+
+---
+
+## Iteration 6: Data Flow Analysis and Performance
+
+### Protocol Byte Prefix
+
+All packets between client and server carry a 1-byte type prefix:
+- `0` = gvisor-processed packet (response from real network)
+- `1` = raw IP packet (needs gvisor processing at destination)
+
+### Server Data Flow (cmd/kubevpn/cmds/server.go)
+
+Listeners: `tun://?net=...` + `gtcp://:10801`
+
+```
+Client request path:
+  gtcp TCP conn → readFromTCPConnWriteToEndpoint
+    → UDPConnOverTCP.Read (parse 2-byte datagram header)
+    → Parse IP header, update RouteMapTCP
+    → if buf[0]==1: inject to gvisor stack
+    → gvisor TCPForwarder/UDPForwarder dials real k8s service
+
+Server response path:
+  gvisor endpoint → readFromEndpointWriteToTCPConn
+    → copyPacketToPool (prefix 0)
+    → UDPConnOverTCP.Write (2-byte header + data, single copy)
+    → TCP conn back to client
+
+Inter-client routing:
+  Client A packet → readFromTCPConnWriteToEndpoint
+    → RouteMapTCP lookup for dst
+    → if found: DatagramPacket.Write → B's BufferedTCP → B's TCP conn
+
+TUN device path (less common):
+  Server kernel → Device.readFromTun → tunInbound
+    → Peer.routeTun → RouteMapTCP lookup
+      → if found: shift + DatagramPacket.Write → BufferedTCP
+      → if not found: drop
+  Peer.routeTCPToTun ← TCPPacketChan → tunOutbound → TUN
+```
+
+### Client Data Flow (pkg/handler/connect.go:386)
+
+Listener: `tun://` with forwarder to server's gtcp port
+
+```
+Outbound (local app → k8s):
+  App → TUN → ClientDevice.readFromTun
+    → buf[0]=1, parse IP
+    → if src==dst: gvisorInbound (local gvisor stack #1)
+    → else: tunInbound → writeToConn → UDPConnOverTCP.Write → TCP → server
+
+Inbound (k8s → local app):
+  TCP → readFromConn → UDPConnOverTCP.Read
+    → if buf[0]==0: tunOutbound → writeToTun → TUN → App
+    → if buf[0]==1: gvisorInbound (local gvisor stack #2)
+
+Local gvisor stack #1: handles self-to-self traffic (e.g. ping own tun IP)
+  → output goes to tunOutbound → TUN device
+
+Local gvisor stack #2: handles inter-client traffic (other clients → local services)
+  → LocalTCPForwarder dials 127.0.0.1:port
+  → output goes to tunInbound → writeToConn → back to server for routing
+```
+
+### Performance Optimization Applied
+
+**Eliminated redundant memcpy in UDPConnOverTCP.Write and PacketConnOverTCP.WriteTo:**
+
+Before: data copied to buf[0:], then DatagramPacket.Write shifted all data right by 2 bytes.
+After: data copied directly to buf[2:], header written at buf[0:2]. One copy instead of two.
+
+### Remaining Optimization Opportunities (not implemented — higher risk)
+
+1. **Peer.routeTun shift + DatagramPacket.Write shift**: Server shifts packet data right by 1, then DatagramPacket shifts by 2. Could be avoided if readFromTun reads at offset 3. Risk: changes buffer layout convention.
+
+2. **Lazy gvisor stack initialization on client**: Two gvisor stacks are always created. Stack #2 (inter-client) is only used when other clients connect to local services. Could defer creation until first packet. Risk: startup latency on first inter-client packet.

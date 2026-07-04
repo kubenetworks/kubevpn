@@ -42,7 +42,7 @@ func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *Packet
 			} else if util.IsIPv6(packet.data[1:packet.length]) {
 				protocol = header.IPv6ProtocolNumber
 			} else {
-				plog.G(ctx).Errorf("[TCP-GVISOR] Unknown packet")
+				plog.G(ctx).Errorf("[Gvisor-TCP] Unknown packet, dropping")
 				config.LPool.Put(packet.data[:])
 				continue
 			}

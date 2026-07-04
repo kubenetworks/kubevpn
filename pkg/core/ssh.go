@@ -18,7 +18,7 @@ func SSHListener(addr string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	plog.G(context.Background()).Infof("starting ssh server on port %s...", addr)
+	plog.G(context.Background()).Infof("[SSH] Listening on %s", addr)
 	return ln, err
 }
 
@@ -33,7 +33,7 @@ func (s *sshHandler) Handle(ctx context.Context, conn net.Conn) {
 	forwardHandler := &ssh.ForwardedTCPHandler{}
 	server := ssh.Server{
 		LocalPortForwardingCallback: ssh.LocalPortForwardingCallback(func(ctx ssh.Context, dhost string, dport uint32) bool {
-			plog.G(ctx).Infoln("Accepted forward", dhost, dport)
+			plog.G(ctx).Infof("[SSH] Accepted local forward to %s:%d", dhost, dport)
 			return true
 		}),
 		Handler: ssh.Handler(func(s ssh.Session) {
@@ -41,7 +41,7 @@ func (s *sshHandler) Handle(ctx context.Context, conn net.Conn) {
 			<-s.Context().Done()
 		}),
 		ReversePortForwardingCallback: ssh.ReversePortForwardingCallback(func(ctx ssh.Context, host string, port uint32) bool {
-			plog.G(ctx).Infoln("attempt to bind", host, port, "granted")
+			plog.G(ctx).Infof("[SSH] Reverse port forward granted: %s:%d", host, port)
 			return true
 		}),
 		RequestHandlers: map[string]ssh.RequestHandler{

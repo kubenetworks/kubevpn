@@ -44,10 +44,10 @@ func (hub *RouteHub) AddRoute(ctx context.Context, srcIP net.IP, conn net.Conn) 
 	if loaded {
 		if value.(net.Conn) != conn {
 			hub.RouteMapTCP.Store(key, conn)
-			plog.G(ctx).Infof("[RouteHub] Replace route: %s -> %s-%s", srcIP, conn.LocalAddr(), conn.RemoteAddr())
+			plog.G(ctx).Infof("[Route] Replace route: %s -> %s-%s", srcIP, conn.LocalAddr(), conn.RemoteAddr())
 		}
 	} else {
-		plog.G(ctx).Infof("[RouteHub] Add route: %s -> %s-%s", srcIP, conn.LocalAddr(), conn.RemoteAddr())
+		plog.G(ctx).Infof("[Route] Add route: %s -> %s-%s", srcIP, conn.LocalAddr(), conn.RemoteAddr())
 	}
 }
 
@@ -56,7 +56,7 @@ func (hub *RouteHub) RemoveRoutesByConn(ctx context.Context, conn net.Conn) {
 	hub.RouteMapTCP.Range(func(key, value any) bool {
 		if value.(net.Conn) == conn {
 			hub.RouteMapTCP.Delete(key)
-			plog.G(ctx).Infof("[RouteHub] Remove route: %s (conn %s)", key, conn.LocalAddr())
+			plog.G(ctx).Infof("[Route] Remove route: %s (conn %s)", key, conn.LocalAddr())
 		}
 		return true
 	})

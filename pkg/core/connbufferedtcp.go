@@ -48,7 +48,7 @@ func (c *bufferedTCP) run(ctx context.Context) {
 			_, err := c.Conn.Write(dgram.Data[:dgram.DataLength])
 			config.LPool.Put(dgram.Data[:])
 			if err != nil {
-				plog.G(context.Background()).Errorf("[TCP] Write packet failed: %v", err)
+				plog.G(context.Background()).Errorf("[TCP] Failed to write packet: %v", err)
 				_ = c.Conn.Close()
 				c.closed.Store(true)
 				return

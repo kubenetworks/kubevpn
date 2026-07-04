@@ -47,13 +47,13 @@ func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolve
 			dialCtx = context.Background()
 		}
 		id := request.ID()
-		plog.G(dialCtx).Infof("[TUN-TCP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress %s",
+		plog.G(dialCtx).Infof("[Gvisor-TCP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress: %s",
 			id.LocalPort, id.LocalAddress.String(), id.RemotePort, id.RemoteAddress.String(),
 		)
 		w := &waiter.Queue{}
 		endpoint, tErr := request.CreateEndpoint(w)
 		if tErr != nil {
-			plog.G(dialCtx).Errorf("[TUN-TCP] Failed to create endpoint: %v", tErr)
+			plog.G(dialCtx).Errorf("[Gvisor-TCP] Failed to create endpoint: %v", tErr)
 			request.Complete(true)
 			return
 		}
@@ -76,7 +76,7 @@ func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolve
 		var remote net.Conn
 		remote, err = d.DialContext(dialCtx, "tcp", net.JoinHostPort(host, port))
 		if err != nil {
-			plog.G(dialCtx).Errorf("[TUN-TCP] Failed to connect addr %s: %v", net.JoinHostPort(host, port), err)
+			plog.G(dialCtx).Errorf("[Gvisor-TCP] Failed to connect addr %s: %v", net.JoinHostPort(host, port), err)
 			return
 		}
 
@@ -86,19 +86,19 @@ func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolve
 			buf := config.LPool.Get().([]byte)[:]
 			defer config.LPool.Put(buf[:])
 			written, err2 := io.CopyBuffer(remote, conn, buf)
-			plog.G(dialCtx).Infof("[TUN-TCP] Write length %d data to remote", written)
+			plog.G(dialCtx).Infof("[Gvisor-TCP] Wrote %d bytes to remote", written)
 			errChan <- err2
 		}()
 		go func() {
 			buf := config.LPool.Get().([]byte)[:]
 			defer config.LPool.Put(buf[:])
 			written, err2 := io.CopyBuffer(conn, remote, buf)
-			plog.G(dialCtx).Infof("[TUN-TCP] Read length %d data from remote", written)
+			plog.G(dialCtx).Infof("[Gvisor-TCP] Read %d bytes from remote", written)
 			errChan <- err2
 		}()
 		err = <-errChan
 		if err != nil && !errors.Is(err, io.EOF) {
-			plog.G(dialCtx).Errorf("[TUN-TCP] Disconnect: %s >-<: %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
+			plog.G(dialCtx).Errorf("[Gvisor-TCP] Disconnected %s <-> %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
 		}
 	}).HandlePacket
 }
