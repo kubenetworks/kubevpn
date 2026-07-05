@@ -5,7 +5,8 @@ import (
 
 	"github.com/distribution/reference"
 	"github.com/hashicorp/go-version"
-	"errors"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 // CmpClientVersionAndClientImage
@@ -114,14 +115,14 @@ MAJOR and MINOR different should be same, otherwise needs upgrade
 func IsNewer(clientVer string, clientImg string, serverImg string) (bool, error) {
 	isNeedUpgrade, _ := CmpClientVersionAndClientImage(clientVer, clientImg)
 	if isNeedUpgrade != 0 {
-		err := errors.New("\n" + FormatBanner(fmt.Sprintf("Client version and image tag not compatible. client version: %s, image: %s", clientVer, clientImg)))
+		err := fmt.Errorf("\n%s: %w", FormatBanner(fmt.Sprintf("Client version and image tag not compatible. client version: %s, image: %s", clientVer, clientImg)), config.ErrDaemonVersionMismatch)
 		return true, err
 	}
 	cmp := CmpClientVersionAndPodImageTag(clientVer, serverImg)
 	if cmp > 0 {
 		return true, nil
 	} else if cmp < 0 {
-		err := errors.New("\n" + FormatBanner(fmt.Sprintf("Client version too old. client version: %s, server version: %s", clientVer, serverImg)))
+		err := fmt.Errorf("\n%s: %w", FormatBanner(fmt.Sprintf("Client version too old. client version: %s, server version: %s", clientVer, serverImg)), config.ErrDaemonVersionMismatch)
 		return true, err
 	}
 	return false, nil

@@ -7,6 +7,7 @@ import (
 
 	"github.com/containernetworking/cni/pkg/types"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -19,7 +20,7 @@ func (svr *Server) Route(ctx context.Context, req *rpc.RouteRequest) (*rpc.Route
 		conn, _ := svr.findConnection(svr.currentConnectionID)
 		svr.connMu.RUnlock()
 		if conn == nil {
-			return nil, fmt.Errorf("no connection found")
+			return nil, config.ErrConnectionNotFound
 		}
 
 		ips := svr.getSudoTunIPs(ctx)

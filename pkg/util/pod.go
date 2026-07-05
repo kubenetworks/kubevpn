@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/moby/term"
-	"errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -138,7 +137,7 @@ func WaitPod(ctx context.Context, podInterface v12.PodInterface, list v1.ListOpt
 				}
 			}
 		case <-ctx.Done():
-			return errors.New("wait for pod to be ready timeout")
+			return fmt.Errorf("wait for pod to be ready timeout: %w", ctx.Err())
 		}
 	}
 }
@@ -278,7 +277,7 @@ func GetRunningPodList(ctx context.Context, clientset kubernetes.Interface, ns s
 		}
 	}
 	if len(list.Items) == 0 {
-		return nil, fmt.Errorf("no running pod with label: %s", labelSelector)
+		return nil, fmt.Errorf("no running pod with label %s: %w", labelSelector, config.ErrNotFound)
 	}
 	return list.Items, nil
 }

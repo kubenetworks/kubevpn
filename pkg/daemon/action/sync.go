@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -147,7 +148,7 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	opt, _ := svr.findConnection(connectionID)
 	svr.connMu.RUnlock()
 	if opt == nil {
-		return fmt.Errorf("cluster %s not found", connectionID)
+		return fmt.Errorf("cluster %s not found: %w", connectionID, config.ErrConnectionNotFound)
 	}
 	opt.SetSync(options)
 	return nil

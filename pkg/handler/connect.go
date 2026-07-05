@@ -132,7 +132,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		err = injector.Inject(ctx)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to inject proxy sidecar into workload %q in namespace %q: %v", workload, namespace, err)
-			return err
+			return fmt.Errorf("inject sidecar into %s: %w: %w", workload, err, config.ErrEnvoyInject)
 		}
 		plog.G(ctx).Debugf("Injected proxy sidecar into workload %q in namespace %q", workload, namespace)
 		if mapper != nil {
@@ -147,7 +147,12 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 // This is a control-plane responsibility and should be called from the user daemon
 // before calling the sudo daemon, so the TunConfigService is available for IP allocation.
 func (c *ConnectOptions) CreateOutboundPod(ctx context.Context) error {
-	return createOutboundPod(ctx, c.clientset, c.ManagerNamespace, c.Image, c.ImagePullSecretName)
+	if err := createOutboundPod(ctx, c.clientset, c.ManagerNamespace, c.Image, c.ImagePullSecretName); err != nil {
+		// Tag generic deploy failures; an already-classified cause (RBAC, pod-ready
+		// timeout, image pull) keeps its own, more specific code.
+		return fmt.Errorf("%w: %w", err, config.ErrTrafficManagerDeploy)
+	}
+	return nil
 }
 
 // DoConnect establishes the full VPN connection: CIDR detection, port forwarding, TUN device, routing, and DNS.

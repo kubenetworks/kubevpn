@@ -1,10 +1,9 @@
 package action
 
 import (
-	"fmt"
-
 	log "github.com/sirupsen/logrus"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 )
@@ -25,7 +24,7 @@ func (svr *Server) Leave(resp rpc.Daemon_LeaveServer) error {
 	svr.connMu.RUnlock()
 	if conn == nil {
 		logger.Infof("No connection found")
-		return fmt.Errorf("no connection found")
+		return config.ErrConnectionNotFound
 	}
 
 	var resources []handler.Resources
@@ -37,4 +36,3 @@ func (svr *Server) Leave(resp rpc.Daemon_LeaveServer) error {
 	}
 	return conn.LeaveResource(ctx, resources, conn.OwnerID)
 }
-

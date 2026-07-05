@@ -2,9 +2,9 @@ package action
 
 import (
 	"context"
-	"fmt"
 	"net"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 )
@@ -101,7 +101,7 @@ func (svr *Server) ConnectionUse(ctx context.Context, req *rpc.ConnectionUseRequ
 	svr.connMu.Lock()
 	defer svr.connMu.Unlock()
 	if _, i := svr.findConnection(req.ConnectionID); i == -1 {
-		return nil, fmt.Errorf("no connection found")
+		return nil, config.ErrConnectionNotFound
 	}
 	svr.currentConnectionID = req.ConnectionID
 	return &rpc.ConnectionUseResponse{}, nil
