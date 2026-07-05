@@ -235,6 +235,11 @@ func TestGenICMPPacketIPv6(t *testing.T) {
 	if pkt[0]>>4 != 6 {
 		t.Fatalf("not IPv6: version=%d", pkt[0]>>4)
 	}
+	// Regression: the ICMPv6 checksum (IPv6 header is 40 bytes; checksum at offset 42-43)
+	// must be computed — it was previously left zero, which receivers reject.
+	if csum := binary.BigEndian.Uint16(pkt[42:44]); csum == 0 {
+		t.Fatal("ICMPv6 checksum is zero (regression: must be computed over the pseudo-header)")
+	}
 }
 
 func TestParseIP_IPv4(t *testing.T) {

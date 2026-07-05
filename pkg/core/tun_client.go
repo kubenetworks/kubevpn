@@ -36,6 +36,9 @@ type clientTransport struct {
 	gvisorInbound chan *Packet
 	// stats records data-plane liveness from observed heartbeat echo replies; may be nil.
 	stats *HeartbeatStats
+	// poolSize overrides the number of parallel connections; <=0 means use ConnPoolSize.
+	// Production leaves it 0 (ConnPoolSize); only benchmarks/tests set it to compare sizes.
+	poolSize int
 }
 
 func newClientTransport(dev *tunDevice, forward *Forwarder, stats *HeartbeatStats) *clientTransport {
@@ -79,7 +82,10 @@ func (t *clientTransport) routeOutbound(ctx context.Context, buf []byte, n int, 
 // slot runs independently — if one connection breaks, only that slot reconnects. It waits for all
 // slot goroutines to exit before returning, for deterministic shutdown.
 func (t *clientTransport) runConnPool(ctx context.Context) {
-	n := ConnPoolSize
+	n := t.poolSize
+	if n <= 0 {
+		n = ConnPoolSize
+	}
 	t.slots = make([]*connSlot, n)
 	var wg sync.WaitGroup
 	for i := range t.slots {

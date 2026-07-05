@@ -176,6 +176,8 @@ The TCP tests use Fargate mode because the mesh-mode TCP listener sets `BindToPo
 
 **Origin cluster**: A special `ORIGINAL_DST` cluster used in mesh mode. Envoy forwards unmatched traffic to the original destination (the real application), enabling transparent proxying.
 
+> **Port-coverage difference vs. the old VPN-only sidecar.** Because per-port listeners are emitted only for declared container ports (`a.Ports`), a full-proxy (empty-headers) rule intercepts **only declared ports**. Traffic to an undeclared port reaches the `:15006` capture listener but has no per-port listener to redirect to, so it falls through the passthrough chain to `origin_cluster` — the real app, not the user's machine. The old VPN-only sidecar tunneled **all** ports. See [17-sidecar-injection.md](17-sidecar-injection.md) ("Full-proxy port coverage") for the implications and restore options.
+
 ### 4.4 gRPC Server (`server.go`)
 
 Starts a gRPC server on port 9002 that registers:

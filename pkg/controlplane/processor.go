@@ -120,6 +120,12 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 	for uid := range p.knownUIDs {
 		if !activeUIDs[uid] {
 			p.cache.ClearSnapshot(uid)
+			// Also drop the expire-cache entry. Otherwise a later re-add of an
+			// identical Virtual (e.g. a quick leave→re-proxy/sync of the same
+			// workload) would match the DeepEqual check above, be treated as
+			// "unchanged", and skip SetSnapshot — leaving the snapshot cleared
+			// until the TTL expires, so envoy keeps serving without routes.
+			p.expireCache.Delete(uid)
 			delete(p.knownUIDs, uid)
 			p.logger.Infof("cleared stale xDS snapshot for %s", uid)
 		}

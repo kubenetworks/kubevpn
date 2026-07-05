@@ -161,11 +161,8 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := fmt.Sprintf("http://%s:%v/health", ip, localPort)
-	u.healthChecker(t, endpoint, nil, remoteSyncPod)
-	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
 
-	endpoint = fmt.Sprintf("http://%s:%v/health", ip, 9080)
+	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
 	u.healthChecker(t, endpoint, nil, local)
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 

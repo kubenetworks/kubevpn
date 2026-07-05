@@ -4,7 +4,9 @@
 
 The inject package (`pkg/inject`) manages the lifecycle of sidecar containers injected into Kubernetes workloads. It uses the **Strategy pattern** to choose between two injection modes based on the target workload. It also manages envoy routing rules in the traffic manager ConfigMap.
 
-> **Unified proxy mode:** there is no longer a separate VPN-only injector. VPN-only proxying (`kubevpn proxy` without `--headers`) is just Mesh mode with **empty headers** — envoy matches all requests and forwards everything to the user's TUN IP. This eliminates the old hardcoded iptables-DNAT-to-client-IP path and lets all routing (TCP + UDP) hot-update via envoy xDS. See [28-sleep-wake-ip-update.md](28-sleep-wake-ip-update.md).
+> **Unified proxy mode:** there is no longer a separate VPN-only injector. VPN-only proxying (`kubevpn proxy` without `--headers`) is just Mesh mode with **empty headers** — for every **declared container port** envoy matches all requests and forwards them to the user's TUN IP. This eliminates the old hardcoded iptables-DNAT-to-client-IP path and lets all routing (TCP + UDP) hot-update via envoy xDS. See [28-sleep-wake-ip-update.md](28-sleep-wake-ip-update.md).
+>
+> **Caveat — this is not a full equivalent of the old VPN-only sidecar.** Mesh mode only intercepts *declared* ports (those in the workload's Pod spec / `--portmap`); traffic to *undeclared* ports falls through to the real application, not to your machine. The old VPN-only sidecar forwarded **all** ports. See the **Full-proxy port coverage** section below for the mechanism and the options to restore all-port passthrough.
 
 ## 2. Strategy Pattern
 
@@ -64,7 +66,7 @@ Mesh mode adds two containers:
 
 | Headers | envoy route | Effect |
 |---------|-------------|--------|
-| Empty (VPN-only) | `RouteMatch{Prefix:"/"}` matches everything | All traffic forwarded to the user's TUN IP (full interception) |
+| Empty (VPN-only) | `RouteMatch{Prefix:"/"}` matches everything **on each declared port's listener** | All traffic **on declared ports** forwarded to the user's TUN IP. Undeclared ports have no listener and fall through the `:15006` capture to `origin_cluster` (the real app) — see Full-proxy port coverage below |
 | Set (`--headers`) | header match → user IP; no match → `origin_cluster` | Per-user traffic splitting; unmatched requests hit the real app |
 
 Multiple users can proxy the same workload with different headers — envoy routes each user's traffic to their own TUN IP. Because the routing target (`Rule.LocalTunIPv4/v6`) lives in `ENVOY_CONFIG`, a client IP change is picked up automatically via `syncEnvoyRuleIP` → xDS push (TCP + UDP), with no Pod restart.
@@ -90,6 +92,59 @@ Key differences from mesh mode:
 - **Service targetPort** is updated to point to envoy's listener ports
 - **TUN IPs** are `127.0.0.1` / `::1` — traffic flows via SSH reverse tunnels
 
+### 3.3 Full-proxy Port Coverage (vs. the old VPN-only sidecar)
+
+> **Status: open design decision — no code change yet.** This section records a behavioral
+> regression introduced by the unified-proxy refactor and the options to address it.
+
+#### The difference
+
+| | Old VPN-only sidecar (pre-refactor) | New mesh full-proxy (empty headers) |
+|---|---|---|
+| Mechanism | iptables DNATs **every** inbound port into the tunnel | envoy intercepts only **declared** container ports |
+| Undeclared port (e.g. `:9090`) | forwarded to your machine | falls through to `origin_cluster` → the real app |
+| Port coverage | all ports (L3/L4, port-agnostic) | declared ports only |
+
+The refactor folded VPN-only proxying into mesh mode ("empty headers = match-all"). For
+**declared** ports the two are equivalent — envoy's catch-all route sends everything to your
+TUN IP. But the old sidecar was port-agnostic: it tunneled *any* port. Mesh mode is not, so
+**full-proxy lost the "any port reaches my machine" semantic** for ports the workload never declared.
+
+#### Mechanism
+
+`Virtual.To()` (`pkg/controlplane/cache.go`) emits a per-port TCP listener **only** for the ports
+in `a.Ports`, which `pkg/inject` populates from `collectPorts` / `gatherContainerPorts`
+(`pkg/inject/injector.go`) — i.e. the Pod spec's declared ports plus any `--portmap` entries.
+
+In mesh mode those per-port listeners are `BindToPort=false`, so the sidecar's iptables DNATs all
+inbound TCP to a single virtual-inbound capture listener on `:15006`
+(`toInboundCaptureListener`, `cache.go`). That listener restores the original destination and:
+
+- **declared port** → redirect to its per-port listener → empty-headers catch-all route → your TUN IP;
+- **undeclared port** → passthrough filter chain → `origin_cluster` (`ORIGINAL_DST`) → the real app.
+
+See [16-envoy-controlplane.md](16-envoy-controlplane.md) ("Mesh-mode inbound capture listener" and
+"Routing logic") for the xDS detail.
+
+#### Concrete symptom
+
+`kubevpn run` / `kubevpn sync` e2e probes `podIP:9090`. In host mode the dev container is published
+on `host:9090` and the gvisor `LocalTCPForwarder` dials `127.0.0.1` (`pkg/core/gvisor_tcp_forwarder.go`).
+If `9090` is not a declared port, the request hits the `:15006` capture passthrough → `origin_cluster`
+→ the real app, never the local dev process — so the probe fails. See [20-kubevpn-run.md](20-kubevpn-run.md).
+
+#### Options to restore all-port passthrough
+
+| Option | Idea | Pros | Cons |
+|---|---|---|---|
+| **A. Restore VPN-only injector** | `NewInjector` splits three ways again: empty headers → VPN-only (iptables all-port DNAT to client TUN), `--headers` → mesh, Service → fargate | True all-port passthrough; simplest; matches old semantics | Re-introduces `vpnInjector` + its proxy tracking/leave; conflicts with the "unified mesh" model; **loses envoy TUN-IP hot-update** (VPN-only iptables is static) |
+| **B. Keep envoy + hybrid iptables** | Declared ports DNAT → `:15006` (match-all → TUN, keeps xDS hot-update); undeclared ports bypass envoy and the VPN sidecar transparently forwards them to local | Keeps hot-update **and** restores undeclared-port passthrough | iptables must be generated per declared-port set and kept in sync; one sidecar with two data paths; higher complexity |
+| **C. Pure envoy (`set_filter_state`)** | A `set_filter_state` network filter rewrites the `ORIGINAL_DST` target to `TUN_IP:%DOWNSTREAM_LOCAL_PORT%` (fixed IP, original port) before TCP proxy | Would need no sidecar changes | **Not feasible here:** the `set_filter_state` proto is **not vendored** (`vendor/github.com/envoyproxy` has none; deps are go-control-plane v0.13.4 / envoy v1.35.0). Hand-rolling a raw `Any` or bumping the dependency is fragile. Envoy is fundamentally a per-port L4/L7 proxy with no off-the-shelf "rewrite IP, keep port" for arbitrary TCP |
+
+**Insight:** a pure full-proxy (no headers) does not actually need envoy's splitting — envoy is just a
+match-all → TUN forwarder there. So the cleanest restore is **A**; choose **B** only if envoy's
+TUN-IP hot-update must be preserved for full-proxy.
+
 ## 4. Container Builders (`container.go`)
 
 ### Environment Variables
@@ -111,7 +166,7 @@ All sidecar containers receive:
 | `AddVPNAndEnvoyContainer` | VPN + Envoy (all non-Service proxy) | VPN: NET_ADMIN + NET_RAW (not privileged); Envoy: unprivileged |
 | `AddEnvoyAndSSHContainer` | SSH + Envoy (Service/Fargate) | Both unprivileged |
 
-> The former `AddVPNContainer` (VPN-only, no envoy) was **removed** with the unified proxy mode — every non-Service proxy now goes through `AddVPNAndEnvoyContainer`.
+> The former `AddVPNContainer` (VPN-only, no envoy) was **removed** with the unified proxy mode — every non-Service proxy now goes through `AddVPNAndEnvoyContainer`. Note this changed full-proxy's port-coverage semantic (declared ports only); see the Full-proxy port coverage section above.
 
 ### ServiceAccount
 

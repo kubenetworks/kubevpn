@@ -272,8 +272,17 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 		res.clusters = append(res.clusters, originCluster())
 		logger.Debugf("[xDS] %s/%s added mesh inbound capture listener :%d + origin_cluster", a.Namespace, a.UID, config.PortEnvoyInbound)
 	}
-	logger.Debugf("[xDS] %s/%s generated %d listeners, %d clusters, %d routes, %d endpoints",
-		a.Namespace, a.UID, len(res.listeners), len(res.clusters), len(res.routes), len(res.endpoints))
+	// Info-level rule-set summary so the actual generated rules are visible in the
+	// traffic-manager sidecar log even when it does not run at debug level. Reveals, per
+	// workload, whether a full-proxy (empty-headers) rule exists and its TUN IP / owner —
+	// the key signal for diagnosing "traffic fell through to origin_cluster".
+	rules := make([]string, 0, len(a.Rules))
+	for _, r := range a.Rules {
+		rules = append(rules, fmt.Sprintf("{headers=%v tunV4=%q tunV6=%q owner=%q portmap=%v}",
+			r.Headers, r.LocalTunIPv4, r.LocalTunIPv6, r.OwnerID, r.PortMap))
+	}
+	logger.Infof("[xDS] %s/%s fargate=%v rules=%v -> %d listeners, %d clusters, %d routes, %d endpoints",
+		a.Namespace, a.UID, fargate, rules, len(res.listeners), len(res.clusters), len(res.routes), len(res.endpoints))
 	return res.listeners, res.clusters, res.routes, res.endpoints
 }
 

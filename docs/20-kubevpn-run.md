@@ -27,6 +27,15 @@ Connects via the local daemon (same as `kubevpn connect`/`kubevpn proxy`):
 - The Docker container uses the host network or shares network with the TUN device
 - Registers a rollback function to `Disconnect()` on cleanup
 
+> **Port coverage caveat (host mode).** The dev container is a standalone container published on
+> `host:<port>`, and the gvisor `LocalTCPForwarder` dials `127.0.0.1` (`pkg/core/gvisor_tcp_forwarder.go`).
+> Under the unified mesh full-proxy, only the workload's **declared** ports are routed back to the
+> local machine; an undeclared port (e.g. `9090`) falls through the envoy `:15006` capture to
+> `origin_cluster` (the real app), so a run/sync e2e that probes `podIP:9090` will not reach the local
+> dev process. Root cause and restore options: [17-sidecar-injection.md](17-sidecar-injection.md)
+> ("Full-proxy port coverage"). The earlier `run -p` → proxy-portmap experiment (commits `087cc531` /
+> `b68c3181`) was reverted, so run e2e is back to its pre-experiment behavior.
+
 ### 3.2 Container Mode (`ConnectModeContainer`)
 
 Runs a KubeVPN container that handles the VPN connection:
