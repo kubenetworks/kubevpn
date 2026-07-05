@@ -57,7 +57,7 @@ func TestName(t *testing.T) {
 		plog.G(context.Background()).Infoln("Get CNI config", configList.Name)
 	}
 	for _, plugin := range configList.Plugins {
-		var m map[string]interface{}
+		var m map[string]any
 		_ = json.Unmarshal(plugin.Bytes, &m)
 		slice, _, _ := unstructured.NestedStringSlice(m, "ipam", "ipv4_pools")
 		for _, i := range slice {

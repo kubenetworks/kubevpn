@@ -89,7 +89,7 @@ func getUnstructuredObjectBySelector(f util.Factory, ns string, selector string)
 
 // GetPodTemplateSpecPath extracts the PodTemplateSpec and its JSON path from an unstructured Kubernetes object.
 func GetPodTemplateSpecPath(u *unstructured.Unstructured) (*v1.PodTemplateSpec, []string, error) {
-	var stringMap map[string]interface{}
+	var stringMap map[string]any
 	var b bool
 	var err error
 	var path []string

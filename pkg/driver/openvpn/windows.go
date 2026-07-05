@@ -4,7 +4,6 @@ package openvpn
 
 import (
 	"embed"
-	"io/ioutil"
 	"os"
 	"os/exec"
 )
@@ -18,11 +17,11 @@ func Install() error {
 	if err != nil {
 		return err
 	}
-	tempFile, err := ioutil.TempFile("", "*.exe")
-	defer func() { _ = os.Remove(tempFile.Name()) }()
+	tempFile, err := os.CreateTemp("", "*.exe")
 	if err != nil {
 		return err
 	}
+	defer func() { _ = os.Remove(tempFile.Name()) }()
 	if _, err = tempFile.Write(bytes); err != nil {
 		return err
 	}

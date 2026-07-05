@@ -62,18 +62,18 @@ func (c *Config) watchServiceToAddHosts(ctx context.Context, hosts []Entry) {
 	ticker := time.NewTicker(config.DNSRouteRefreshInterval)
 	defer ticker.Stop()
 	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{
-		FilterFunc: func(obj interface{}) bool {
+		FilterFunc: func(obj any) bool {
 			svc, ok := obj.(*corev1.Service)
 			return ok && svc.Namespace == c.Ns[0]
 		},
 		Handler: cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
+			AddFunc: func(obj any) {
 				ticker.Reset(config.DNSRouteDebounceInterval)
 			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
+			UpdateFunc: func(oldObj, newObj any) {
 				ticker.Reset(config.DNSRouteDebounceInterval)
 			},
-			DeleteFunc: func(obj interface{}) {
+			DeleteFunc: func(obj any) {
 				ticker.Reset(config.DNSRouteDebounceInterval)
 			},
 		},

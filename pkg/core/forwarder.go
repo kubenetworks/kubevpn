@@ -30,10 +30,12 @@ type Forwarder struct {
 	MaxRetries  int
 }
 
+// IsEmpty reports whether the forwarder has no target address configured.
 func (f *Forwarder) IsEmpty() bool {
 	return f == nil || f.Addr == ""
 }
 
+// DialContext dials the remote address with retries up to MaxRetries.
 func (f *Forwarder) DialContext(ctx context.Context) (conn net.Conn, err error) {
 	for i := 0; i < max(1, f.MaxRetries); i++ {
 		conn, err = f.dial(ctx)

@@ -39,7 +39,7 @@ func WriteProxyInfo(conn net.Conn, id stack.TransportEndpointID) error {
 // ParseProxyInfo parse proxy info [20]byte
 func ParseProxyInfo(conn net.Conn) (id stack.TransportEndpointID, err error) {
 	var n int
-	var port = make([]byte, 2)
+	port := make([]byte, 2)
 
 	// local port
 	if n, err = io.ReadFull(conn, port); err != nil || n != 2 {
@@ -57,7 +57,7 @@ func ParseProxyInfo(conn net.Conn) (id stack.TransportEndpointID, err error) {
 	if n, err = io.ReadFull(conn, port[:1]); err != nil || n != 1 {
 		return
 	}
-	var localAddress = make([]byte, port[0])
+	localAddress := make([]byte, port[0])
 	if n, err = io.ReadFull(conn, localAddress); err != nil || n != len(localAddress) {
 		return
 	}
@@ -67,7 +67,7 @@ func ParseProxyInfo(conn net.Conn) (id stack.TransportEndpointID, err error) {
 	if n, err = io.ReadFull(conn, port[:1]); err != nil || n != 1 {
 		return
 	}
-	var remoteAddress = make([]byte, port[0])
+	remoteAddress := make([]byte, port[0])
 	if n, err = io.ReadFull(conn, remoteAddress); err != nil || n != len(remoteAddress) {
 		return
 	}

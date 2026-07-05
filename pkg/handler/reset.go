@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -65,7 +66,7 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 		plog.G(ctx).Infof("No proxy resources found")
 		return nil
 	}
-	var v = make([]*controlplane.Virtual, 0)
+	v := make([]*controlplane.Virtual, 0)
 	str := cm.Data[config.KeyEnvoy]
 	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
 		plog.G(ctx).Errorf("Unmarshal envoy config error: %v", err)
@@ -85,11 +86,14 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 
 	marshal, err := yaml.Marshal(v)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal envoy config: %w", err)
 	}
 	cm.Data[config.KeyEnvoy] = string(marshal)
 	_, err = mapInterface.Update(ctx, cm, metav1.UpdateOptions{})
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to update configmap %s: %w", config.ConfigMapPodTrafficManager, err)
+	}
+	return nil
 }
 
 func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clientset kubernetes.Interface, namespace, workload string) error {
@@ -134,12 +138,14 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 		return nil
 	}
 
-	var portmap = make(map[int32]int32)
+	portmap := make(map[int32]int32)
 	for _, container := range templateSpec.Spec.Containers {
 		for _, port := range container.Ports {
 			portmap[port.ContainerPort] = port.ContainerPort
 		}
 	}
-	err = inject.ModifyServiceTargetPort(ctx, clientset, namespace, object.Name, portmap)
-	return err
+	if err = inject.ModifyServiceTargetPort(ctx, clientset, namespace, object.Name, portmap); err != nil {
+		return fmt.Errorf("failed to restore service %s target ports: %w", object.Name, err)
+	}
+	return nil
 }

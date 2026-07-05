@@ -61,10 +61,6 @@ func DownloadFileStream(uri string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func downloadFile(uri string) (string, error) {
-	return DownloadFileWithName(uri, fmt.Sprintf("%d", time.Now().Unix()))
-}
-
 const (
 	maxRetries   = 4
 	retryWaitMin = 2 * time.Second
@@ -112,7 +108,7 @@ func backoff(min, max time.Duration, attemptNum int) time.Duration {
 func ParseDirMapping(dir string) (local, remote string, err error) {
 	index := strings.LastIndex(dir, ":")
 	if index < 0 {
-		err = fmt.Errorf("directory mapping is invaild: %s", dir)
+		err = fmt.Errorf("directory mapping is invalid: %s", dir)
 		return
 	}
 	local = dir[:index]

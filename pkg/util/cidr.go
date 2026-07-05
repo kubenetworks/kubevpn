@@ -217,7 +217,7 @@ func GetPodCIDRFromCNI(ctx context.Context, clientset kubernetes.Interface, rest
 	for _, plugin := range configList.Plugins {
 		switch plugin.Network.Type {
 		case "calico":
-			var m = map[string]interface{}{}
+			var m = map[string]any{}
 			_ = json.Unmarshal(plugin.Bytes, &m)
 			slice, _, _ := unstructured.NestedStringSlice(m, "ipam", "ipv4_pools")
 			slice6, _, _ := unstructured.NestedStringSlice(m, "ipam", "ipv6_pools")

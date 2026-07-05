@@ -37,18 +37,18 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 	defer util.HandleCrash()
 	ticker := time.NewTicker(config.DNSRouteRefreshInterval)
 	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{
-		FilterFunc: func(obj interface{}) bool {
+		FilterFunc: func(obj any) bool {
 			svc, ok := obj.(*corev1.Service)
 			return ok && svc.Namespace == c.Ns[0]
 		},
 		Handler: cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
+			AddFunc: func(obj any) {
 				ticker.Reset(config.DNSRouteDebounceInterval)
 			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
+			UpdateFunc: func(oldObj, newObj any) {
 				ticker.Reset(config.DNSRouteDebounceInterval)
 			},
-			DeleteFunc: func(obj interface{}) {
+			DeleteFunc: func(obj any) {
 				ticker.Reset(config.DNSRouteDebounceInterval)
 			},
 		},
@@ -123,7 +123,7 @@ func (c *Config) usingResolver(ctx context.Context) {
 		}
 
 		var conf *miekgdns.ClientConfig
-		conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(content)))
+		conf, err = miekgdns.ClientConfigFromReader(bytes.NewBuffer(content))
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to parse resolver %s: %v", filename, err)
 			continue

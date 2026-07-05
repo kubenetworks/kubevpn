@@ -33,12 +33,12 @@ import (
 func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) error {
 	firstCtx, firstCancelFunc := context.WithCancel(ctx)
 	defer firstCancelFunc()
-	var errChan = make(chan error, 1)
+	errChan := make(chan error, 1)
 	go func() {
-		runtime.ErrorHandlers = []runtime.ErrorHandler{func(ctx context.Context, err error, msg string, keysAndValues ...interface{}) {
+		runtime.ErrorHandlers = []runtime.ErrorHandler{func(ctx context.Context, err error, msg string, keysAndValues ...any) {
 			plog.G(ctx).Error(err)
 		}}
-		var first = ptr.To(true)
+		first := ptr.To(true)
 		for ctx.Err() == nil {
 			func() {
 				defer time.Sleep(time.Millisecond * 200)
@@ -61,7 +61,7 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 				_ = c.addRoute(util.GetPodIP(pod)...)
 				childCtx, cancelFunc := context.WithCancel(ctx)
 				defer cancelFunc()
-				var readyChan = make(chan struct{})
+				readyChan := make(chan struct{})
 				podName := pod.GetName()
 				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
 				go util.CheckPodStatus(childCtx, cancelFunc, podName, c.clientset.CoreV1().Pods(c.ManagerNamespace))

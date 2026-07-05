@@ -132,7 +132,7 @@ func TestJSONPatchOp_Marshal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected marshal error: %v", err)
 	}
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unexpected unmarshal error: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestJSONPatchOp_Marshal(t *testing.T) {
 	if decoded["path"] != "/spec/template/spec" {
 		t.Errorf("expected path %q, got %q", "/spec/template/spec", decoded["path"])
 	}
-	valMap, ok := decoded["value"].(map[string]interface{})
+	valMap, ok := decoded["value"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected value to be a map, got %T", decoded["value"])
 	}

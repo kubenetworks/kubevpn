@@ -16,7 +16,7 @@ import (
 )
 
 func (c *ConnectOptions) setupSignalHandler() {
-	var stopChan = make(chan os.Signal, 1)
+	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL)
 	select {
 	case <-stopChan:

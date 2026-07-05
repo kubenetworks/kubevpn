@@ -44,12 +44,7 @@ func GenKubeconfigTempPath(kubeconfigBytes []byte) string {
 
 // ContainsPathSeparator reports whether the pattern contains any OS path separator characters.
 func ContainsPathSeparator(pattern string) bool {
-	for i := 0; i < len(pattern); i++ {
-		if os.IsPathSeparator(pattern[i]) {
-			return true
-		}
-	}
-	return false
+	return strings.ContainsRune(pattern, os.PathSeparator)
 }
 
 // GetCluster extracts the cluster name and namespace from kubeconfig bytes.

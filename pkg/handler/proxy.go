@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"reflect"
+	"maps"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -44,7 +44,7 @@ func (l *ProxyList) IsMe(ns, uid string, headers map[string]string) bool {
 	for _, proxy := range *l {
 		if proxy.workload == util.ConvertUIDToWorkload(uid) &&
 			proxy.namespace == ns &&
-			reflect.DeepEqual(proxy.headers, headers) {
+			maps.Equal(proxy.headers, headers) {
 			return true
 		}
 	}

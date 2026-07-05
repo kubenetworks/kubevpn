@@ -168,7 +168,7 @@ func suppressExpectedPortForwardCloseErrors() {
 	portForwardErrorHandlerOnce.Do(func() {
 		prev := append([]utilruntime.ErrorHandler(nil), utilruntime.ErrorHandlers...)
 		utilruntime.ErrorHandlers = []utilruntime.ErrorHandler{
-			func(ctx context.Context, err error, msg string, keysAndValues ...interface{}) {
+			func(ctx context.Context, err error, msg string, keysAndValues ...any) {
 				if err != nil {
 					errMsg := strings.ToLower(err.Error())
 					if strings.Contains(errMsg, "error closing listener: close tcp") &&

@@ -106,7 +106,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 }
 
 func parseYaml(content string) ([]*Virtual, error) {
-	var virtualList = make([]*Virtual, 0)
+	virtualList := make([]*Virtual, 0)
 
 	err := yaml.Unmarshal([]byte(content), &virtualList)
 	if err != nil {

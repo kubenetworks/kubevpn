@@ -5,7 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"reflect"
+	"maps"
 	"sort"
 	"text/template"
 
@@ -51,7 +51,7 @@ func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, ns
 		if err != nil {
 			return err
 		}
-		var v = make([]*controlplane.Virtual, 0)
+		v := make([]*controlplane.Virtual, 0)
 		if str, ok := configMap.Data[config.KeyEnvoy]; ok {
 			if err = yaml.Unmarshal([]byte(str), &v); err != nil {
 				return err
@@ -107,7 +107,7 @@ func addVirtualRule(v []*controlplane.Virtual, ns, nodeID string, port []control
 
 	// 3) if already proxy deployment/xxx with header foo=bar, other user can replace it to self
 	for j, rule := range v[index].Rules {
-		if reflect.DeepEqual(rule.Headers, headers) {
+		if maps.Equal(rule.Headers, headers) {
 			v[index].Rules[j].LocalTunIPv6 = localTunIPv6
 			v[index].Rules[j].LocalTunIPv4 = localTunIPv4
 			v[index].Rules[j].PortMap = portmap

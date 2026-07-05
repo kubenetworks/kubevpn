@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	goversion "github.com/hashicorp/go-version"
 	"golang.org/x/oauth2"
@@ -33,7 +34,7 @@ func Main(ctx context.Context, quit func(ctx context.Context, isSudo bool) error
 		return err
 	}
 
-	var client = http.DefaultClient
+	client := &http.Client{Timeout: 30 * time.Second}
 	if config.GitHubOAuthToken != "" {
 		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
 	}

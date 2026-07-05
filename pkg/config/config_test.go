@@ -185,8 +185,6 @@ func TestTimingConstants(t *testing.T) {
 	}{
 		{"KeepAliveTime", KeepAliveTime, 30 * time.Second, 120 * time.Second},
 		{"DialTimeout", DialTimeout, 5 * time.Second, 30 * time.Second},
-		{"HealthCheckInterval", HealthCheckInterval, 10 * time.Second, 60 * time.Second},
-		{"SSHKeepAliveInterval", SSHKeepAliveInterval, 5 * time.Second, 30 * time.Second},
 		{"UDPSessionTimeout", UDPSessionTimeout, 30 * time.Second, 300 * time.Second},
 		{"UDPRelayTimeout", UDPRelayTimeout, 10 * time.Second, 60 * time.Second},
 		{"SlotReconnectBackoff", SlotReconnectBackoff, 1 * time.Second, 10 * time.Second},

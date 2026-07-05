@@ -2,10 +2,9 @@ package config
 
 import (
 	_ "embed"
+	"errors"
 	"os"
 	"path/filepath"
-
-	"errors"
 )
 
 const (
@@ -47,16 +46,11 @@ func init() {
 	daemonPath = filepath.Join(dir, HOME, Daemon)
 	logPath = filepath.Join(dir, HOME, Log)
 
-	var paths = []string{homePath, daemonPath, logPath, GetPProfPath(), GetSyncthingPath(), GetTempPath()}
+	paths := []string{homePath, daemonPath, logPath, GetPProfPath(), GetSyncthingPath(), GetTempPath()}
 	for _, path := range paths {
 		_, err = os.Stat(path)
 		if errors.Is(err, os.ErrNotExist) {
-			err = os.MkdirAll(path, 0755)
-			if err != nil {
-				panic(err)
-			}
-			err = os.Chmod(path, 0755)
-			if err != nil {
+			if err = os.MkdirAll(path, 0755); err != nil {
 				panic(err)
 			}
 		} else if err != nil {

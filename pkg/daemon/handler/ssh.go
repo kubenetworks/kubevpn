@@ -294,7 +294,7 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 	plog.G(ctx).Info("Install command kubevpn...")
 	w.log("Install kubevpn on remote server...")
 
-	client := http.DefaultClient
+	client := &http.Client{Timeout: 30 * time.Second}
 	if config.GitHubOAuthToken != "" {
 		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
 	}
