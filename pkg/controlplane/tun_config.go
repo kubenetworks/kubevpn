@@ -85,17 +85,18 @@ type tunAllocation struct {
 }
 
 // persistedAlloc is the YAML-serializable form of tunAllocation.
+//
+// Tags are json (not yaml): saveAllocs marshals via sigs.k8s.io/yaml, which encodes
+// through encoding/json and ignores yaml tags. The keys are therefore honest here —
+// they are what actually lands in the TUN_ALLOCS ConfigMap — and omitempty works, so
+// a client that sends no hostname leaves a clean entry. Reads are case-insensitive,
+// so records written by older builds (capitalized Go-name keys) still load.
 type persistedAlloc struct {
-	IPv4      string `yaml:"ipv4"`
-	IPv6      string `yaml:"ipv6"`
-	Version   int64  `yaml:"version"`
-	LastRenew int64  `yaml:"lastRenew"` // unix timestamp
-	// Hostname uses a json tag because saveAllocs marshals via sigs.k8s.io/yaml
-	// (JSON-based): the yaml tags above are ignored and fields persist under their
-	// Go names (IPv4/Version/...). The json tag both matches that casing and makes
-	// omitempty actually take effect, so old clients that send no hostname keep a
-	// clean TUN_ALLOCS entry.
-	Hostname string `json:"Hostname,omitempty"`
+	IPv4      string `json:"ipv4"`
+	IPv6      string `json:"ipv6"`
+	Version   int64  `json:"version"`
+	LastRenew int64  `json:"lastRenew"` // unix timestamp
+	Hostname  string `json:"hostname,omitempty"`
 }
 
 // NewTunConfigServer creates and initializes a TunConfigServer.

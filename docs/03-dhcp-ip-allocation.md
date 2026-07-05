@@ -144,7 +144,7 @@ The allocation mapping is stored as YAML in the `TUN_ALLOCS` key of the ConfigMa
     "ipv6": "2001:2::5/64",
     "version": 1717900000000000000,
     "lastRenew": 1717900000,
-    "Hostname": "dev-laptop-01"
+    "hostname": "dev-laptop-01"
   }
 }
 ```
@@ -180,7 +180,7 @@ Field descriptions:
 - `ipv4` / `ipv6` — Allocated TUN IP with CIDR mask
 - `version` — Monotonically increasing version number (`time.Now().UnixNano()`), used for WatchTunIP change detection
 - `lastRenew` — Last renewal time (Unix seconds), used by LeaseReaper to determine expiration
-- `Hostname` — Client machine name reported by the data-plane daemon (`os.Hostname()`), recorded purely for debugging so an operator can map an ownerID to a physical machine. Omitted when the client sends none. Persisted under its Go field name because `saveAllocs` marshals via `sigs.k8s.io/yaml` (JSON-based)
+- `hostname` — Client machine name reported by the data-plane daemon (`os.Hostname()`), recorded purely for debugging so an operator can map an ownerID to a physical machine. Omitted (`omitempty`) when the client sends none
 
 **Expiration Scenario:** When user `112233445566` disconnects for more than 5 minutes, LeaseReaper deletes that entry and calls `dhcp.ReleaseIP` to release `198.18.0.7`, clearing the corresponding bit in the bitmap so the IP can be reused by a new user.
 
@@ -276,7 +276,7 @@ ConfigMap name: `kubevpn-traffic-manager`
 | Key | Format | Content |
 |-----|--------|---------|
 | `TUN_IP_POOL` | YAML `{ipv4{cidr,bitmap}, ipv6{cidr,bitmap}}` | Dual-stack TUN IP allocation bitmaps (base64) — merges the former `DHCP` + `DHCP6` |
-| `TUN_ALLOCS` | YAML | `map[ownerID]{ipv4, ipv6, version, lastRenew, Hostname}` (Hostname is debug-only, omitempty) |
+| `TUN_ALLOCS` | YAML | `map[ownerID]{ipv4, ipv6, version, lastRenew, hostname}` (hostname is debug-only, omitempty) |
 | `ENVOY_CONFIG` | YAML | Envoy routing rules `[]*Virtual` |
 | `CLUSTER_CIDRS` | Space-separated text | Cluster Pod/Service CIDRs (IPv4 + IPv6) — renamed from `IPv4_POOLS` |
 
