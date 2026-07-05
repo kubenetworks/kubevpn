@@ -104,6 +104,9 @@ func TestClassifyInterceptor_RichCodeOverWire(t *testing.T) {
 		{"dhcp exhausted", fmt.Errorf("dhcp: %w", config.ErrDHCPExhausted), exitcode.DHCPExhausted},
 		{"tun device", fmt.Errorf("tun: %w", config.ErrTunDeviceFailed), exitcode.TunDeviceFailed},
 		{"connection not found", fmt.Errorf("x: %w", config.ErrConnectionNotFound), exitcode.ConnectionNotFound},
+		{"ssh auth", fmt.Errorf("jump: %w", config.ErrSSHAuth), exitcode.SSHAuth},
+		{"syncthing", fmt.Errorf("sync: %w", config.ErrSyncthing), exitcode.SyncthingFailed},
+		{"cleanup failed", fmt.Errorf("leave: %w", config.ErrCleanupFailed), exitcode.CleanupFailed},
 		{"context canceled", context.Canceled, exitcode.Interrupted},
 		{"plain error", errors.New("boom"), exitcode.Generic},
 	}

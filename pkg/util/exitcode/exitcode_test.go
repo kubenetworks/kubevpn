@@ -52,6 +52,25 @@ func TestClassify(t *testing.T) {
 		{"daemon not running", fmt.Errorf("x: %w", config.ErrDaemonNotRunning), DaemonNotRunning},
 		{"daemon version mismatch", fmt.Errorf("x: %w", config.ErrDaemonVersionMismatch), DaemonVersionMismatch},
 
+		{"cleanup failed", fmt.Errorf("x: %w", config.ErrCleanupFailed), CleanupFailed},
+		{"invalid argument", fmt.Errorf("x: %w", config.ErrInvalidArgument), InvalidArgument},
+
+		{"ssh connect", fmt.Errorf("x: %w", config.ErrSSHConnect), SSHConnect},
+		{"ssh auth", fmt.Errorf("x: %w", config.ErrSSHAuth), SSHAuth},
+		{"ssh config", fmt.Errorf("x: %w", config.ErrSSHConfig), SSHConfig},
+		{"gssapi", fmt.Errorf("x: %w", config.ErrGSSAPI), GSSAPI},
+		{"ssh remote command", fmt.Errorf("x: %w", config.ErrSSHRemoteCommand), SSHRemoteCommand},
+
+		{"syncthing", fmt.Errorf("x: %w", config.ErrSyncthing), SyncthingFailed},
+
+		{"docker daemon", fmt.Errorf("x: %w", config.ErrDockerDaemonNotRunning), DockerDaemonNotRunning},
+		{"docker image pull", fmt.Errorf("x: %w", config.ErrDockerImagePull), DockerImagePull},
+		{"docker run", fmt.Errorf("x: %w", config.ErrDockerRun), DockerRunFailed},
+
+		{"upgrade network", fmt.Errorf("x: %w", config.ErrUpgradeNetwork), UpgradeNetworkFailed},
+		{"upgrade platform", fmt.Errorf("x: %w", config.ErrUpgradeUnsupportedPlatform), UpgradeUnsupportedPlatform},
+		{"upgrade install", fmt.Errorf("x: %w", config.ErrUpgradeInstall), UpgradeInstallFailed},
+
 		{"context canceled", context.Canceled, Interrupted},
 		{"context deadline", context.DeadlineExceeded, Timeout},
 

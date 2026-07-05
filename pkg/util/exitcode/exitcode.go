@@ -71,6 +71,28 @@ const (
 
 	// internal (90)
 	Internal = 90
+	// cleanup / rollback (92)
+	CleanupFailed = 92
+
+	// SSH (100-109)
+	SSHConnect       = 100
+	SSHAuth          = 101
+	SSHConfig        = 102
+	GSSAPI           = 103
+	SSHRemoteCommand = 104
+
+	// file sync (110-119)
+	SyncthingFailed = 110
+
+	// docker / kubevpn run (120-129)
+	DockerDaemonNotRunning = 120
+	DockerImagePull        = 121
+	DockerRunFailed        = 122
+
+	// self-upgrade (140-149)
+	UpgradeNetworkFailed       = 140
+	UpgradeUnsupportedPlatform = 141
+	UpgradeInstallFailed       = 142
 
 	// interrupt
 	Interrupted = 130
@@ -130,6 +152,32 @@ var rules = []struct {
 	{is(config.ErrConnectionNotFound), ConnectionNotFound, codes.NotFound, "CONNECTION_NOT_FOUND"},
 	{is(config.ErrNotFound), NotFound, codes.NotFound, "NOT_FOUND"},
 	{is(config.ErrPermissionDenied), PermissionDenied, codes.PermissionDenied, "PERMISSION_DENIED"},
+
+	// SSH
+	{is(config.ErrGSSAPI), GSSAPI, codes.Unauthenticated, "GSSAPI"},
+	{is(config.ErrSSHAuth), SSHAuth, codes.Unauthenticated, "SSH_AUTH"},
+	{is(config.ErrSSHConfig), SSHConfig, codes.InvalidArgument, "SSH_CONFIG"},
+	{is(config.ErrSSHRemoteCommand), SSHRemoteCommand, codes.Aborted, "SSH_REMOTE_COMMAND"},
+	{is(config.ErrSSHConnect), SSHConnect, codes.Unavailable, "SSH_CONNECT"},
+
+	// file sync
+	{is(config.ErrSyncthing), SyncthingFailed, codes.Internal, "SYNCTHING_FAILED"},
+
+	// docker (kubevpn run)
+	{is(config.ErrDockerDaemonNotRunning), DockerDaemonNotRunning, codes.Unavailable, "DOCKER_DAEMON_NOT_RUNNING"},
+	{is(config.ErrDockerImagePull), DockerImagePull, codes.FailedPrecondition, "DOCKER_IMAGE_PULL"},
+	{is(config.ErrDockerRun), DockerRunFailed, codes.Aborted, "DOCKER_RUN_FAILED"},
+
+	// self-upgrade
+	{is(config.ErrUpgradeNetwork), UpgradeNetworkFailed, codes.Unavailable, "UPGRADE_NETWORK_FAILED"},
+	{is(config.ErrUpgradeUnsupportedPlatform), UpgradeUnsupportedPlatform, codes.InvalidArgument, "UPGRADE_UNSUPPORTED_PLATFORM"},
+	{is(config.ErrUpgradeInstall), UpgradeInstallFailed, codes.Aborted, "UPGRADE_INSTALL_FAILED"},
+
+	// cleanup / rollback
+	{is(config.ErrCleanupFailed), CleanupFailed, codes.Aborted, "CLEANUP_FAILED"},
+
+	// invalid user input (checked late so a more specific code wins)
+	{is(config.ErrInvalidArgument), InvalidArgument, codes.InvalidArgument, "INVALID_ARGUMENT"},
 
 	// context
 	{is(context.Canceled), Interrupted, codes.Canceled, "INTERRUPTED"},

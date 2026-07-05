@@ -10,6 +10,8 @@ import "errors"
 var (
 	// --- config / input ---
 
+	// ErrInvalidArgument indicates user-supplied input is invalid (bad flag/format/spec).
+	ErrInvalidArgument = errors.New("invalid argument")
 	// ErrInvalidKubeconfig indicates the provided kubeconfig file is missing or malformed.
 	ErrInvalidKubeconfig = errors.New("kubeconfig is invalid")
 	// ErrKubeconfigWrongProtocol indicates the kubeconfig server URL uses an unsupported scheme.
@@ -66,4 +68,45 @@ var (
 	ErrDaemonNotRunning = errors.New("daemon not running")
 	// ErrDaemonVersionMismatch indicates the client/daemon/server versions are incompatible.
 	ErrDaemonVersionMismatch = errors.New("daemon version mismatch")
+
+	// --- cleanup / rollback ---
+
+	// ErrCleanupFailed indicates a proxy unpatch / reset restore / configmap rollback failed.
+	ErrCleanupFailed = errors.New("cleanup failed")
+
+	// --- SSH ---
+
+	// ErrSSHConnect indicates an SSH dial/handshake/jump-host reachability failure.
+	ErrSSHConnect = errors.New("ssh connection failed")
+	// ErrSSHAuth indicates an SSH authentication failure (password/key rejected, key read/parse).
+	ErrSSHAuth = errors.New("ssh authentication failed")
+	// ErrSSHConfig indicates an invalid SSH jump spec / config (jump flags, circular ProxyJump).
+	ErrSSHConfig = errors.New("ssh config invalid")
+	// ErrGSSAPI indicates a GSSAPI/Kerberos failure (krb5.conf/keytab/ccache/login/token).
+	ErrGSSAPI = errors.New("gssapi authentication failed")
+	// ErrSSHRemoteCommand indicates a remote command / remote kubeconfig fetch / SCP failure.
+	ErrSSHRemoteCommand = errors.New("ssh remote command failed")
+
+	// --- file sync (syncthing) ---
+
+	// ErrSyncthing indicates a syncthing process/app start, API, or port-allocation failure.
+	ErrSyncthing = errors.New("syncthing failed")
+
+	// --- docker (kubevpn run) ---
+
+	// ErrDockerDaemonNotRunning indicates the local Docker daemon is unreachable.
+	ErrDockerDaemonNotRunning = errors.New("docker daemon not running")
+	// ErrDockerImagePull indicates a Docker image could not be pulled.
+	ErrDockerImagePull = errors.New("docker image pull failed")
+	// ErrDockerRun indicates a Docker container create/start/run failure.
+	ErrDockerRun = errors.New("docker run failed")
+
+	// --- self-upgrade ---
+
+	// ErrUpgradeNetwork indicates a GitHub API / release download network failure.
+	ErrUpgradeNetwork = errors.New("upgrade network failed")
+	// ErrUpgradeUnsupportedPlatform indicates no release asset matches the current platform.
+	ErrUpgradeUnsupportedPlatform = errors.New("upgrade unsupported platform")
+	// ErrUpgradeInstall indicates extracting/replacing the binary failed.
+	ErrUpgradeInstall = errors.New("upgrade install failed")
 )
