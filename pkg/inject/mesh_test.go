@@ -1,6 +1,7 @@
 package inject
 
 import (
+	"strings"
 	"testing"
 
 	v1 "k8s.io/api/core/v1"
@@ -102,6 +103,34 @@ func TestInjectedForManager_NamespaceMigration_Fargate(t *testing.T) {
 	}
 	if n := countContainer(spec, config.ContainerSidecarEnvoy); n != 1 {
 		t.Fatalf("expected exactly 1 envoy sidecar after fargate re-injection, got %d", n)
+	}
+}
+
+// TestInjectedForManager_CRLF reproduces the Windows-only failure: the envoy
+// config is embedded via go:embed, so a Windows checkout (git autocrlf) renders
+// its lines with CRLF endings. injectedForManager must still recognize the baked
+// traffic-manager address regardless of line ending. Simulate it on any platform
+// by rewriting the rendered envoy arg's LF into CRLF.
+func TestInjectedForManager_CRLF(t *testing.T) {
+	secret := &v1.Secret{Data: map[string][]byte{}}
+	spec := &v1.PodTemplateSpec{Spec: v1.PodSpec{Containers: []v1.Container{{Name: "authors"}}}}
+	AddVPNAndEnvoyContainer(spec, "default", "default.deployments.authors", false, "default", secret, "img:test")
+
+	for i := range spec.Spec.Containers {
+		c := &spec.Spec.Containers[i]
+		if c.Name != config.ContainerSidecarEnvoy {
+			continue
+		}
+		for j := range c.Args {
+			c.Args[j] = strings.ReplaceAll(c.Args[j], "\n", "\r\n")
+		}
+	}
+
+	if !injectedForManager(spec, "default") {
+		t.Fatal("expected injectedForManager(default)=true even when the envoy config uses CRLF line endings")
+	}
+	if injectedForManager(spec, "kubevpn") {
+		t.Fatal("expected injectedForManager(kubevpn)=false: envoy still targets kubevpn-traffic-manager.default")
 	}
 }
 

@@ -90,14 +90,22 @@ func injectedForManager(templateSpec *v1.PodTemplateSpec, managerNamespace strin
 	if !alreadyInjected(templateSpec) {
 		return false
 	}
-	want := "address: " + trafficManagerAddr(managerNamespace) + "\n"
+	// Match the rendered "address: <traffic-manager>" line independent of
+	// indentation and line ending. The envoy config is embedded via go:embed,
+	// so a Windows checkout (autocrlf) gives it CRLF endings — anchoring the
+	// match on a trailing "\n" would then miss the "...\r\n" line. Compare each
+	// trimmed line for exact equality, which also avoids prefix collisions
+	// (e.g. namespace "default" vs "default-foo").
+	want := "address: " + trafficManagerAddr(managerNamespace)
 	for _, c := range templateSpec.Spec.Containers {
 		if c.Name != config.ContainerSidecarEnvoy {
 			continue
 		}
 		for _, arg := range c.Args {
-			if strings.Contains(arg, want) {
-				return true
+			for _, line := range strings.Split(arg, "\n") {
+				if strings.TrimSpace(line) == want {
+					return true
+				}
 			}
 		}
 	}
