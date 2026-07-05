@@ -4,13 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
-	"sigs.k8s.io/yaml"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -18,29 +13,17 @@ import (
 )
 
 // LeaveAllProxyResources removes all proxy sidecar injections for the current connection's workloads.
-func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error) {
+func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) error {
 	if c == nil || c.clientset == nil {
-		return
+		return nil
 	}
-
-	mapInterface := c.clientset.CoreV1().ConfigMaps(c.ManagerNamespace)
-	var cm *corev1.ConfigMap
-	cm, err = mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return
-	}
-	if cm == nil || cm.Data == nil || len(cm.Data[config.KeyEnvoy]) == 0 {
+	resources := c.ProxyResources().ToResources()
+	if len(resources) == 0 {
 		plog.G(ctx).Infof("No proxy resources found")
 		return nil
 	}
-	v := make([]*controlplane.Virtual, 0)
-	str := cm.Data[config.KeyEnvoy]
-	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
-		plog.G(ctx).Errorf("Unmarshal envoy config error: %v", err)
-		return
-	}
 	v4, _ := c.GetLocalTunIP()
-	return c.LeaveResource(ctx, c.ProxyResources().ToResources(), v4)
+	return c.LeaveResource(ctx, resources, v4)
 }
 
 // LeaveResource unpatches the given proxy resources and restores their original pod specs.
@@ -69,8 +52,9 @@ func (c *ConnectOptions) LeaveResource(ctx context.Context, resources []Resource
 			continue
 		}
 		if empty && util.IsK8sService(object) {
-			err = inject.ModifyServiceTargetPort(ctx, c.clientset, workload.Namespace, object.Name, map[int32]int32{})
-			errs = append(errs, err)
+			if err = inject.ModifyServiceTargetPort(ctx, c.clientset, workload.Namespace, object.Name, map[int32]int32{}); err != nil {
+				errs = append(errs, err)
+			}
 		}
 		c.leavePortMap(workload.Namespace, workload.Workload)
 		plog.G(ctx).Infof("Left workload %s in namespace %s", workload.Workload, workload.Namespace)

@@ -131,7 +131,7 @@ func GetCIDRFromCNI(ctx context.Context, clientset kubernetes.Interface, restcon
 		return nil, err
 	}
 
-	var cmd = `grep -a -R "service-cluster-ip-range\|cluster-cidr" /etc/cni/proc/*/cmdline | grep -a -v grep | tr "\0" "\n"`
+	cmd := `grep -a -R "service-cluster-ip-range\|cluster-cidr" /etc/cni/proc/*/cmdline | grep -a -v grep | tr "\0" "\n"`
 
 	var content string
 	content, err = Shell(ctx, clientset, restconfig, pod.Name, "", pod.Namespace, []string{"sh", "-c", cmd})
@@ -217,7 +217,7 @@ func GetPodCIDRFromCNI(ctx context.Context, clientset kubernetes.Interface, rest
 	for _, plugin := range configList.Plugins {
 		switch plugin.Network.Type {
 		case "calico":
-			var m = map[string]any{}
+			m := map[string]any{}
 			_ = json.Unmarshal(plugin.Bytes, &m)
 			slice, _, _ := unstructured.NestedStringSlice(m, "ipam", "ipv4_pools")
 			slice6, _, _ := unstructured.NestedStringSlice(m, "ipam", "ipv6_pools")
@@ -234,7 +234,7 @@ func GetPodCIDRFromCNI(ctx context.Context, clientset kubernetes.Interface, rest
 
 // CreateCIDRPod creates a helper pod that mounts /etc/cni and /proc from the host for CIDR discovery.
 func CreateCIDRPod(ctx context.Context, clientset kubernetes.Interface, namespace string, image string) (*corev1.Pod, error) {
-	var procName = "proc-dir-kubevpn"
+	procName := "proc-dir-kubevpn"
 	pod := &corev1.Pod{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      config.CniNetName,

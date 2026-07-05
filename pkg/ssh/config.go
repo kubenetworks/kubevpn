@@ -45,7 +45,7 @@ func (conf *SshConfig) KubeconfigIdentifier() string {
 		}
 	} else if conf.Jump != "" {
 		flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-		var sshConf = &SshConfig{}
+		sshConf := &SshConfig{}
 		AddSshFlags(flags, sshConf)
 		_ = flags.Parse(strings.Split(conf.Jump, " "))
 		prefix = sshConf.KubeconfigIdentifier()
@@ -186,9 +186,9 @@ func publicKeyFile(file string) (ssh.AuthMethod, error) {
 }
 
 func (conf SshConfig) AliasRecursion(ctx context.Context, stopChan <-chan struct{}) (client *ssh.Client, err error) {
-	var name = conf.ConfigAlias
-	var jumper = "ProxyJump"
-	var bastionList = []SshConfig{GetBastion(name, conf)}
+	name := conf.ConfigAlias
+	jumper := "ProxyJump"
+	bastionList := []SshConfig{GetBastion(name, conf)}
 	list := getDefaultSSHConfigList()
 	for {
 		value := list.Get(name, jumper)
@@ -219,7 +219,7 @@ func (conf SshConfig) AliasRecursion(ctx context.Context, stopChan <-chan struct
 
 func (conf SshConfig) JumpRecursion(ctx context.Context, stopChan <-chan struct{}) (client *ssh.Client, err error) {
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-	var sshConf = &SshConfig{}
+	sshConf := &SshConfig{}
 	AddSshFlags(flags, sshConf)
 	err = flags.Parse(strings.Split(conf.Jump, " "))
 	if err != nil {
@@ -233,8 +233,8 @@ func (conf SshConfig) JumpRecursion(ctx context.Context, stopChan <-chan struct{
 
 	var bastionList []SshConfig
 	if conf.ConfigAlias != "" {
-		var name = conf.ConfigAlias
-		var jumper = "ProxyJump"
+		name := conf.ConfigAlias
+		jumper := "ProxyJump"
 		bastionList = append(bastionList, GetBastion(name, conf))
 		list := getDefaultSSHConfigList()
 		for {

@@ -114,7 +114,7 @@ func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes st
 func disconnect(ctx context.Context, svr *Server, connectionID string) {
 	for _, conn := range svr.removeConnection(connectionID) {
 		plog.G(ctx).Infof("Disconnecting from the cluster...")
-		conn.Cleanup(ctx)
+		cleanupConnection(ctx, conn)
 	}
 }
 
