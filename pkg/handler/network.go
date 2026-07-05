@@ -141,7 +141,7 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 	}
 	nm.controlPlaneLocalPort = controlPlanePort
 
-	plog.G(nm.ctx).Info("Forwarding port...")
+	plog.StepStart(nm.ctx, "Forwarding ports")
 	portPair := []string{
 		fmt.Sprintf("%d:%d", gvisorTCPForwardPort, config.PortTCP),
 		fmt.Sprintf("%d:%d", gvisorUDPForwardPort, config.PortUDP),
@@ -151,6 +151,7 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 	if err := nm.portForward(nm.ctx, portPair); err != nil {
 		return err
 	}
+	plog.StepDone(nm.ctx, "Forwarded ports (TCP/UDP/xDS)")
 
 	if util.IsWindows() {
 		driver.InstallWireGuardTunDriver()
@@ -161,13 +162,13 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 		return err
 	}
 
-	plog.G(nm.ctx).Infof("Adding Pod IP and Service IP to route table...")
+	plog.StepStart(nm.ctx, "Adding routes")
 	svcInformer, _, err := nm.AddRouteDynamic(nm.ctx)
 	if err != nil {
 		return err
 	}
+	plog.StepDone(nm.ctx, "Added %d pod/service routes", len(nm.cfg.CIDRs))
 
-	plog.G(nm.ctx).Infof("Configuring DNS service...")
 	if err := nm.setupDNS(nm.ctx, svcInformer); err != nil {
 		return err
 	}
@@ -689,9 +690,15 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 	}
 
 	if nm.localTunIPv4 == nil {
+		plog.StepStart(ctx, "Allocating TUN IP")
 		if err := nm.rentIP(ctx); err != nil {
 			return err
 		}
+		ipSummary := nm.localTunIPv4.IP.String()
+		if nm.localTunIPv6 != nil {
+			ipSummary += " / " + nm.localTunIPv6.IP.String()
+		}
+		plog.StepDone(ctx, "Allocated TUN IP %s", ipSummary)
 	}
 	v6Str := "<none>"
 	if nm.localTunIPv6 != nil {
@@ -722,6 +729,7 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 		MaxRetries:  5,
 	}
 
+	plog.StepStart(ctx, "Creating TUN device")
 	nm.heartbeatStats = &core.HeartbeatStats{}
 	handler := core.TunHandler(forwarder, core.NewRouteHub(), nm.heartbeatStats)
 	listener, err := tun.Listener(tunConfig)
@@ -743,7 +751,11 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 	plog.G(ctx).Debugf("[Client] TUN server started, forwarding to %s", forwardAddress)
 
 	nm.tunName, err = nm.getTunDeviceName()
-	return err
+	if err != nil {
+		return err
+	}
+	plog.StepDone(ctx, "Created TUN device %q", nm.tunName)
+	return nil
 }
 
 // getTunDeviceName resolves the TUN device name from the configured IPs.
@@ -770,7 +782,8 @@ func (nm *NetworkManager) setupDNS(ctx context.Context, svcInformer cache.Shared
 		return err
 	}
 	pod := podList[0]
-	plog.G(ctx).Infof("Get DNS service IP from Pod...")
+	plog.StepStart(ctx, "Configuring DNS")
+	plog.G(ctx).Debugf("Getting DNS service IP from pod...")
 	relovConf, err := util.GetDNSServiceIPFromPod(ctx, nm.cfg.Clientset, nm.cfg.Config, pod.GetName(), nm.cfg.ManagerNamespace)
 	if err != nil {
 		plog.G(ctx).Errorln(err)
@@ -789,7 +802,7 @@ func (nm *NetworkManager) setupDNS(ctx context.Context, svcInformer cache.Shared
 		return err
 	}
 
-	plog.G(ctx).Infof("Adding extra domain to hosts...")
+	plog.G(ctx).Debugf("Adding extra domains to hosts...")
 	if err = nm.AddExtraRoute(ctx, pod.GetName()); err != nil {
 		plog.G(ctx).Errorf("Add extra route failed: %v", err)
 		return err
@@ -805,7 +818,7 @@ func (nm *NetworkManager) setupDNS(ctx context.Context, svcInformer cache.Shared
 		}
 	}
 
-	plog.G(ctx).Infof("Listing namespace %s services...", nm.cfg.WorkloadNamespace)
+	plog.G(ctx).Debugf("Listing namespace %s services...", nm.cfg.WorkloadNamespace)
 	nm.dnsConfig = &dns.Config{
 		Config:      relovConf,
 		Ns:          ns,
@@ -831,14 +844,24 @@ func (nm *NetworkManager) setupDNS(ctx context.Context, svcInformer cache.Shared
 			)
 		},
 	}
-	plog.G(ctx).Infof("Setup DNS server for device %s...", nm.tunName)
+	plog.G(ctx).Debugf("Setting up DNS resolver on device %s...", nm.tunName)
 	if err = nm.dnsConfig.SetupDNS(ctx); err != nil {
 		return err
 	}
-	plog.G(ctx).Infof("Dump service in namespace %s into hosts...", nm.cfg.WorkloadNamespace)
+	if len(relovConf.Servers) > 0 {
+		plog.StepDone(ctx, "Configured DNS (cluster DNS %s)", relovConf.Servers[0])
+	} else {
+		plog.StepDone(ctx, "Configured DNS")
+	}
+
+	plog.StepStart(ctx, "Writing service records to the hosts file")
 	// dump service in current namespace for support DNS resolve service:port
-	err = nm.dnsConfig.AddServiceNameToHosts(ctx, nm.extraHost...)
-	return err
+	n, err := nm.dnsConfig.AddServiceNameToHosts(ctx, nm.extraHost...)
+	if err != nil {
+		return err
+	}
+	plog.StepDone(ctx, "Wrote %d service records to the hosts file (namespace %q)", n, nm.cfg.WorkloadNamespace)
+	return nil
 }
 
 // dedupAndFilterCIDRs removes overlapping CIDRs and filters out those containing API server IPs.

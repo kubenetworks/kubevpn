@@ -27,10 +27,11 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		return err
 	}
 	if exists {
-		plog.G(ctx).Infof("Use exist traffic manager in namespace %s", namespace)
+		plog.StepDone(ctx, "Using traffic manager in namespace %q", namespace)
 		return nil
 	}
 
+	plog.StepStart(ctx, "Creating traffic manager")
 	defer func() {
 		if err != nil {
 			cleanupTrafficManagerResources(context.Background(), clientset, namespace)
@@ -123,7 +124,11 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	if err != nil {
 		return err
 	}
-	return WaitPodReady(ctx, clientset.CoreV1().Pods(namespace), selector.String())
+	if err = WaitPodReady(ctx, clientset.CoreV1().Pods(namespace), selector.String()); err != nil {
+		return err
+	}
+	plog.StepDone(ctx, "Created traffic manager in namespace %q", namespace)
+	return nil
 }
 
 func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelector string) error {

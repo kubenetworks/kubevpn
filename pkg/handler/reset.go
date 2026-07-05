@@ -36,6 +36,7 @@ func (c *ConnectOptions) Reset(ctx context.Context, namespace string, workloads 
 		return err
 	}
 
+	plog.StepStart(ctx, "Resetting workloads")
 	err = resetConfigMap(ctx, c.clientset.CoreV1().ConfigMaps(c.ManagerNamespace), namespace, workloads)
 	if err != nil {
 		plog.G(ctx).Error(err)
@@ -47,6 +48,7 @@ func (c *ConnectOptions) Reset(ctx context.Context, namespace string, workloads 
 			plog.G(ctx).Error(err)
 		}
 	}
+	plog.StepDone(ctx, "Reset %d workloads", len(workloads))
 
 	return nil
 }
@@ -107,7 +109,7 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 		return err
 	}
 
-	plog.G(ctx).Infof("Leaving workload %s", workload)
+	plog.G(ctx).Debugf("Resetting workload %q", workload)
 
 	inject.RemoveContainers(&templateSpec.Spec)
 

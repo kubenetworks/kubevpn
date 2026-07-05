@@ -80,6 +80,21 @@ func GetFields(ctx context.Context) map[string]any {
 	return nil
 }
 
+// StepStart logs the beginning of a setup step. On a TTY the CLI renders it as
+// an animated spinner line; the text should be present-continuous (e.g.
+// "Forwarding ports"). Pair it with StepDone once the step succeeds.
+func StepStart(ctx context.Context, message string) {
+	G(ctx).WithField(stepFieldKey, stepStart).Info(message)
+}
+
+// StepDone logs the successful completion of a step. The CLI finalizes the
+// spinner line as " ✓ <message>"; include any data discovered during the step
+// (e.g. "Forwarded ports (TCP/UDP/xDS)"). On non-TTY output it prints the line
+// plainly with the check mark.
+func StepDone(ctx context.Context, format string, args ...any) {
+	G(ctx).WithField(stepFieldKey, stepDone).Infof(format, args...)
+}
+
 // GetLogger 从 context 中获取 logger，并自动添加 context 中存储的字段
 func GetLogger(ctx context.Context) *log.Entry {
 	logger := getLogger(ctx)

@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // Printable is an interface for gRPC response messages that can provide a human-readable string.
@@ -54,7 +55,11 @@ func PrintGRPCStream[T any](ctx context.Context, clientStream grpc.ClientStream,
 			continue
 		}
 		if p, ok := any(t).(Printable); ok {
-			_, _ = fmt.Fprint(out, p.GetMessage())
+			// Strip any CLI progress sentinel so non-spinner consumers (daemon log
+			// file, `kubevpn run`, the `logs` command) never emit the raw \x1f
+			// marker; the animated rendering lives in the CLI's printProgressStream.
+			_, msg := plog.DecodeStep(p.GetMessage())
+			_, _ = fmt.Fprint(out, msg)
 		} else {
 			buf, _ := json.Marshal(t)
 			_, _ = fmt.Fprint(out, string(buf))

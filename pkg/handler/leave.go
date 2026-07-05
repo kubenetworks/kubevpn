@@ -20,5 +20,10 @@ func (c *ConnectOptions) LeaveResource(ctx context.Context, resources []Resource
 		plog.G(ctx).Infof("No proxy manager initialized, skipping leave")
 		return nil
 	}
-	return c.proxyManager.Leave(ctx, resources, ownerID)
+	plog.StepStart(ctx, "Removing proxy from workloads")
+	if err := c.proxyManager.Leave(ctx, resources, ownerID); err != nil {
+		return err
+	}
+	plog.StepDone(ctx, "Removed proxy from %d workloads", len(resources))
+	return nil
 }

@@ -266,4 +266,4 @@ var (
 )
 
 // Slogan is the success message printed after a connection is established.
-const Slogan = "Now you can access resources in the kubernetes cluster !"
+const Slogan = "Connected. You can now access the Kubernetes cluster."

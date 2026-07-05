@@ -91,7 +91,7 @@ func patchWorkload(ctx context.Context, factory cmdutil.Factory, info *resource.
 		plog.G(ctx).Errorf("Failed to patch resource: %s %s, err: %v", info.Mapping.Resource.Resource, info.Name, err)
 		return err
 	}
-	plog.G(ctx).Infof("Patching workload %s", workload)
+	plog.G(ctx).Debugf("Patched workload %q", workload)
 	return util.RolloutStatus(ctx, factory, info.Namespace, workload)
 }
 

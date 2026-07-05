@@ -2,7 +2,6 @@ package cmds
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,7 +18,6 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -165,30 +163,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 }
 
 func printConnectGRPCStream(ctx context.Context, clientStream grpc.ClientStream, out io.Writer) (string, error) {
-	go func() {
-		if ctx != nil {
-			<-ctx.Done()
-			_ = clientStream.SendMsg(&rpc.Cancel{})
-		}
-	}()
-
-	var connectionID string
-	for {
-		resp := new(rpc.ConnectResponse)
-		err := clientStream.RecvMsg(resp)
-		if errors.Is(err, io.EOF) {
-			return connectionID, nil
-		}
-		if err != nil {
-			return connectionID, err
-		}
-		if resp.ConnectionID != "" {
-			connectionID = resp.ConnectionID
-		}
-		if out != nil && resp.GetMessage() != "" {
-			_, _ = fmt.Fprint(out, resp.GetMessage())
-		}
-	}
+	return printProgressStream[rpc.ConnectResponse](ctx, clientStream, out)
 }
 
 func disconnect(cli rpc.DaemonClient, bytes []byte, ns string, sshConf *pkgssh.SshConfig) error {
@@ -207,7 +182,7 @@ func disconnect(cli rpc.DaemonClient, bytes []byte, ns string, sshConf *pkgssh.S
 		plog.G(context.Background()).Errorf("Disconnect error: %v", err)
 		return err
 	}
-	err = grpcutil.PrintGRPCStream[rpc.DisconnectResponse](nil, resp)
+	_, err = printProgressStream[rpc.DisconnectResponse](nil, resp, os.Stdout)
 	if err != nil {
 		if status.Code(err) == codes.Canceled {
 			return nil

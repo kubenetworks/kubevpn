@@ -60,6 +60,14 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		}
 	}
 
+	// Emit the progress step only from the user daemon (the orchestrator). The
+	// sudo daemon's stream is copied verbatim above, so guarding on !IsSudo keeps
+	// the CLI from rendering the step twice. On an early error return the step is
+	// left unfinished, so the renderer marks it failed (✗).
+	if !svr.IsSudo {
+		plog.StepStart(ctx, "Disconnecting")
+	}
+
 	switch {
 	case req.GetAll():
 		svr.connMu.Lock()
@@ -89,6 +97,10 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		if err != nil {
 			return err
 		}
+	}
+
+	if !svr.IsSudo {
+		plog.StepDone(ctx, "Disconnected from the cluster")
 	}
 
 	svr.connMu.RLock()
@@ -129,7 +141,7 @@ func disconnect(ctx context.Context, svr *Server, connectionID string) {
 	removed := svr.removeConnection(connectionID)
 	svr.connMu.Unlock()
 	for _, conn := range removed {
-		plog.G(ctx).Infof("Disconnecting from the cluster...")
+		plog.G(ctx).Debugf("Disconnecting connection %q", connectionID)
 		cleanupConnection(ctx, conn)
 	}
 }

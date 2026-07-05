@@ -5,6 +5,7 @@ go 1.23.2
 require (
 	github.com/calmh/incontainer v1.0.0
 	github.com/cilium/ipam v0.0.0-20230509084518-fd66eae7909b
+	github.com/cncf/xds/go v0.0.0-20250326154945-ae57f3c0d45f
 	github.com/containerd/containerd v1.7.27
 	github.com/containernetworking/cni v1.1.2
 	github.com/distribution/reference v0.6.0
@@ -39,6 +40,7 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/pflag v1.0.6
 	github.com/syncthing/syncthing v1.29.2
+	github.com/theckman/yacspin v0.13.12
 	github.com/thejerf/suture/v4 v4.0.6
 	github.com/vishvananda/netlink v1.3.1
 	go.uber.org/automaxprocs v1.6.0
@@ -96,7 +98,6 @@ require (
 	github.com/chai2010/gettext-go v1.0.2 // indirect
 	github.com/chmduquesne/rollinghash v4.0.0+incompatible // indirect
 	github.com/cilium/ebpf v0.16.0 // indirect
-	github.com/cncf/xds/go v0.0.0-20250326154945-ae57f3c0d45f // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/platforms v0.2.1 // indirect
 	github.com/coreos/go-iptables v0.7.1-0.20240112124308-65c67c9f46e6 // indirect

@@ -44,19 +44,20 @@ type Config struct {
 }
 
 // AddServiceNameToHosts appends service name entries to the system hosts file and
-// watches for service changes to keep them up to date.
-func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) error {
+// watches for service changes to keep them up to date. It returns the number of
+// host entries written.
+func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) (int, error) {
 	c.Lock.Lock()
 	appendHosts := c.generateAppendHosts(c.Services, hosts)
 	err := c.appendHosts(appendHosts)
 	c.Lock.Unlock()
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to add hosts(%s): %v", c.entryList2String(appendHosts), err)
-		return err
+		return 0, err
 	}
 
 	go c.watchServiceToAddHosts(ctx, hosts)
-	return nil
+	return len(appendHosts), nil
 }
 
 func (c *Config) watchServiceToAddHosts(ctx context.Context, hosts []Entry) {

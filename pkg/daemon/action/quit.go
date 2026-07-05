@@ -34,8 +34,15 @@ func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 	connects := handler.Connects(svr.connections)
 	svr.connections = nil
 	svr.connMu.Unlock()
-	for _, conn := range connects.Sort() {
+	sorted := connects.Sort()
+	if len(sorted) > 0 {
+		plog.StepStart(ctx, "Cleaning up connections")
+	}
+	for _, conn := range sorted {
 		cleanupConnection(ctx, conn)
+	}
+	if len(sorted) > 0 {
+		plog.StepDone(ctx, "Cleaned up %d connections", len(sorted))
 	}
 
 	if svr.IsSudo {

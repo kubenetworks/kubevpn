@@ -87,7 +87,7 @@ func UnpatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factor
 		return false, nil
 	}
 
-	plog.G(ctx).Infof("Leaving workload %s", workload)
+	plog.G(ctx).Debugf("Removing proxy from workload %q", workload)
 
 	if !empty {
 		return empty, nil
