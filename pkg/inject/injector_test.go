@@ -74,12 +74,12 @@ func Test_clearPodMetadata(t *testing.T) {
 	now := metav1.Now()
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:            "test-pod",
-			Namespace:       "default",
-			SelfLink:        "/api/v1/namespaces/default/pods/test-pod",
-			Generation:      3,
-			ResourceVersion: "12345",
-			UID:             types.UID("abc-123"),
+			Name:              "test-pod",
+			Namespace:         "default",
+			SelfLink:          "/api/v1/namespaces/default/pods/test-pod",
+			Generation:        3,
+			ResourceVersion:   "12345",
+			UID:               types.UID("abc-123"),
 			DeletionTimestamp: &now,
 			ManagedFields: []metav1.ManagedFieldsEntry{
 				{Manager: "kubectl", Operation: metav1.ManagedFieldsOperationUpdate},

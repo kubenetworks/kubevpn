@@ -17,9 +17,9 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 //go:embed envoy.yaml
@@ -55,7 +55,7 @@ type envoyRuleSpec struct {
 	LocalTunIPv4 string
 	LocalTunIPv6 string
 	Headers      map[string]string
-	Ports        []controlplane.ContainerPort
+	Ports        []xds.ContainerPort
 	PortMap      map[int32]string
 	FargateMode  bool
 	OwnerID      string
@@ -87,7 +87,7 @@ func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, sp
 		if err != nil {
 			return err
 		}
-		v := make([]*controlplane.Virtual, 0)
+		v := make([]*xds.Virtual, 0)
 		if str, ok := configMap.Data[config.KeyEnvoy]; ok {
 			if err = yaml.Unmarshal([]byte(str), &v); err != nil {
 				return err
@@ -120,7 +120,7 @@ func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, sp
 	})
 }
 
-func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRuleSpec) []*controlplane.Virtual {
+func addVirtualRule(ctx context.Context, v []*xds.Virtual, spec envoyRuleSpec) []*xds.Virtual {
 	index := -1
 	for i, virtual := range v {
 		if spec.NodeID == virtual.UID && virtual.Namespace == spec.Namespace {
@@ -129,7 +129,7 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 		}
 	}
 
-	newRule := &controlplane.Rule{
+	newRule := &xds.Rule{
 		Headers:      spec.Headers,
 		LocalTunIPv4: spec.LocalTunIPv4,
 		LocalTunIPv6: spec.LocalTunIPv6,
@@ -139,13 +139,13 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 
 	// 1) no existing Virtual for this workload — create one
 	if index < 0 {
-		return append(v, &controlplane.Virtual{
-			SchemaVersion: controlplane.CurrentSchemaVersion,
+		return append(v, &xds.Virtual{
+			SchemaVersion: xds.CurrentSchemaVersion,
 			UID:           spec.NodeID,
 			Namespace:     spec.Namespace,
 			FargateMode:   spec.FargateMode,
 			Ports:         spec.Ports,
-			Rules:         []*controlplane.Rule{newRule},
+			Rules:         []*xds.Rule{newRule},
 		})
 	}
 
@@ -214,7 +214,7 @@ func removeEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface,
 		if !ok {
 			return fmt.Errorf("cannot find value for key: envoy-config.yaml: %w", config.ErrCleanupFailed)
 		}
-		var v []*controlplane.Virtual
+		var v []*xds.Virtual
 		if unmarshalErr := yaml.Unmarshal([]byte(str), &v); unmarshalErr != nil {
 			return unmarshalErr
 		}

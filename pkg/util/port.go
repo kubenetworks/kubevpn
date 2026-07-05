@@ -63,4 +63,3 @@ func GetAvailableUDPPort() (int, error) {
 	defer conn.Close()
 	return conn.LocalAddr().(*net.UDPAddr).Port, nil
 }
-

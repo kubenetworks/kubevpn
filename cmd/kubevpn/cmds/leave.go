@@ -27,7 +27,7 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 		you can use this command to leave proxy resources.
 		you can just leave proxy resources which do proxy by yourself.
 		and the last one leave proxy resource, it will also restore workloads container.
-		otherwise it will keep containers [vpn, envoy-proxy] until last one to leave.
+		otherwise it will keep containers [vpn, envoy] until last one to leave.
 		`)),
 		Example: templates.Examples(i18n.T(`
 		# leave proxy resource and restore it to origin

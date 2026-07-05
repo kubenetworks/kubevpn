@@ -191,7 +191,7 @@ func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, s syncPodSpec) err
 	containers := spec.Spec.Containers
 	for i := 0; i < len(containers); i++ {
 		containerName := containers[i].Name
-		if containerName == config.ContainerSidecarVPN || containerName == config.ContainerSidecarEnvoyProxy {
+		if containerName == config.ContainerSidecarVPN || containerName == config.ContainerSidecarEnvoy {
 			containers = append(containers[:i], containers[i+1:]...)
 			i--
 		}

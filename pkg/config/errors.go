@@ -28,8 +28,8 @@ var (
 
 	// ErrPortForwardTimeout indicates a kubectl port-forward did not become ready in time.
 	ErrPortForwardTimeout = errors.New("port-forward readiness timeout")
-	// ErrControlPlaneNotServing indicates the traffic-manager control-plane gRPC is not serving.
-	ErrControlPlaneNotServing = errors.New("control plane not serving")
+	// ErrXDSNotServing indicates the traffic-manager xDS gRPC is not serving.
+	ErrXDSNotServing = errors.New("xds not serving")
 
 	// --- resource state ---
 

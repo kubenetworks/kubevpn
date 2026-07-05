@@ -18,11 +18,11 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 func NewMapper(clientset kubernetes.Interface, ns string, labels string, headers map[string]string, workload string, cmInformer cache.SharedInformer) *Mapper {
@@ -162,7 +162,7 @@ func (m *Mapper) reconcilePodsFromInformer(podTunnels *sync.Map, podInformer cac
 		for _, container := range pod.Spec.Containers {
 			containerNames.Insert(container.Name)
 		}
-		if !containerNames.HasAny(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy) {
+		if !containerNames.HasAny(config.ContainerSidecarVPN, config.ContainerSidecarEnvoy) {
 			plog.G(m.ctx).Infof("Pod %s no longer has sidecar containers", pod.Name)
 			continue
 		}
@@ -201,7 +201,7 @@ func (m *Mapper) getPortMappingFromCache() (map[int32]portForward, error) {
 }
 
 func (m *Mapper) extractPortMapping(configMap *v1.ConfigMap) (map[int32]portForward, error) {
-	var virtuals []*controlplane.Virtual
+	var virtuals []*xds.Virtual
 	if str, ok := configMap.Data[config.KeyEnvoy]; ok {
 		if err := yaml.Unmarshal([]byte(str), &virtuals); err != nil {
 			return nil, err
@@ -268,7 +268,6 @@ func exposeUDPToRemote(ctx context.Context, bridge netip.AddrPort, envoyPort, lo
 	go func() { <-ctx.Done(); _ = conn.Close() }()
 	return core.DialUDPReverse(ctx, conn, int(envoyPort), int(localPort))
 }
-
 
 func cancelAllTunnels(tunnels *sync.Map) {
 	tunnels.Range(func(_, value any) bool {

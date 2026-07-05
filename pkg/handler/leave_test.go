@@ -38,8 +38,8 @@ func TestLeaveAllProxyResources_EmptyConfigMap(t *testing.T) {
 	)
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		K8sClient:    K8sClient{clientset: clientset},
-		proxyManager: newProxyManager(nil, clientset, "test-ns"),
+		K8sClient:        K8sClient{clientset: clientset},
+		proxyManager:     newProxyManager(nil, clientset, "test-ns"),
 	}
 	err := c.LeaveAllProxyResources(context.Background())
 	if err != nil {
@@ -51,8 +51,8 @@ func TestLeaveAllProxyResources_ConfigMapNotFound(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		K8sClient:    K8sClient{clientset: clientset},
-		proxyManager: newProxyManager(nil, clientset, "test-ns"),
+		K8sClient:        K8sClient{clientset: clientset},
+		proxyManager:     newProxyManager(nil, clientset, "test-ns"),
 	}
 	err := c.LeaveAllProxyResources(context.Background())
 	if err != nil {
@@ -145,7 +145,7 @@ func TestCleanup_NoRollbackFuncs(t *testing.T) {
 
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		K8sClient: K8sClient{clientset: clientset},
+		K8sClient:        K8sClient{clientset: clientset},
 		ctx:              ctx,
 		cancel:           cancel,
 	}
@@ -169,7 +169,7 @@ func TestCleanup_WithRollbackFuncs(t *testing.T) {
 	var called []int
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		K8sClient: K8sClient{clientset: clientset},
+		K8sClient:        K8sClient{clientset: clientset},
 		ctx:              ctx,
 		cancel:           cancel,
 	}
@@ -199,7 +199,7 @@ func TestCleanup_UserDaemon_WithRollbackFuncs(t *testing.T) {
 	var called []int
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		K8sClient: K8sClient{clientset: clientset},
+		K8sClient:        K8sClient{clientset: clientset},
 		// ctx is nil => userDaemon = true
 	}
 	c.AddRollbackFunc(func() error { called = append(called, 1); return nil })
@@ -229,7 +229,7 @@ func TestCleanup_OnlyRunsOnce(t *testing.T) {
 	callCount := 0
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		K8sClient: K8sClient{clientset: clientset},
+		K8sClient:        K8sClient{clientset: clientset},
 		ctx:              ctx,
 		cancel:           cancel,
 	}

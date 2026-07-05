@@ -117,7 +117,7 @@ func (nm *NetworkManager) GetExtraHost() []dns.Entry {
 
 // Start brings up the full networking stack in order:
 // 1. Add extra node IPs to route info
-// 2. Port-forward to traffic manager (gvisor TCP/UDP + control-plane)
+// 2. Port-forward to traffic manager (gvisor TCP/UDP + xds)
 // 3. Allocate TUN IP + create local TUN device with gvisor stack
 // 4. Add dynamic routes (watch pods/services)
 // 5. Configure DNS
@@ -146,7 +146,7 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 	portPair := []string{
 		fmt.Sprintf("%d:%d", gvisorTCPForwardPort, config.PortTCP),
 		fmt.Sprintf("%d:%d", gvisorUDPForwardPort, config.PortUDP),
-		fmt.Sprintf("%d:%d", controlPlanePort, config.PortControlPlane),
+		fmt.Sprintf("%d:%d", controlPlanePort, config.PortXDS),
 	}
 
 	if err := nm.portForward(nm.ctx, portPair); err != nil {
@@ -177,7 +177,7 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 	return nil
 }
 
-// rentIP allocates a TUN IP from the control-plane's TunConfigService via the
+// rentIP allocates a TUN IP from the xds's TunConfigService via the
 // already-established port-forward. Passes local interface IPs as ExcludeIPs
 // so the server avoids conflicts. Retries on the rare race where a new
 // interface appears between collecting addresses and receiving the allocation.
@@ -188,7 +188,7 @@ func (nm *NetworkManager) rentIP(ctx context.Context) error {
 		grpc.WithBlock(),
 	)
 	if err != nil {
-		return fmt.Errorf("dial control-plane for RentIP: %w", err)
+		return fmt.Errorf("dial xds for RentIP: %w", err)
 	}
 	defer conn.Close()
 
@@ -203,12 +203,12 @@ func (nm *NetworkManager) rentIP(ctx context.Context) error {
 			Hostname:   nm.cfg.Hostname,
 		})
 		if err != nil {
-			return fmt.Errorf("get TUN IP from control-plane: %w", err)
+			return fmt.Errorf("get TUN IP from xds: %w", err)
 		}
 
 		ip4, cidr4, err := net.ParseCIDR(resp.IPv4)
 		if err != nil || cidr4 == nil {
-			return fmt.Errorf("invalid IPv4 from control-plane: %q", resp.IPv4)
+			return fmt.Errorf("invalid IPv4 from xds: %q", resp.IPv4)
 		}
 		v4 := &net.IPNet{IP: ip4, Mask: cidr4.Mask}
 
@@ -345,17 +345,17 @@ func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net
 	return nil
 }
 
-// StartIPWatcher launches a background goroutine that connects to the control-plane's
+// StartIPWatcher launches a background goroutine that connects to the xds's
 // TunConfigService and watches for IP changes. When a change is detected, it calls ChangeTunIP.
 // Uses the OwnerID from NetworkConfig for identification.
 func (nm *NetworkManager) StartIPWatcher(ctx context.Context) {
 	if nm.cfg.OwnerID == "" {
 		return
 	}
-	go nm.watchTunIPFromControlPlane(ctx)
+	go nm.watchTunIPFromXDS(ctx)
 }
 
-func (nm *NetworkManager) watchTunIPFromControlPlane(ctx context.Context) {
+func (nm *NetworkManager) watchTunIPFromXDS(ctx context.Context) {
 	if nm.controlPlaneLocalPort == 0 {
 		return
 	}

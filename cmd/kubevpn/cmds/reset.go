@@ -27,7 +27,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 		Long: templates.LongDesc(i18n.T(`
 		Reset workloads to origin spec
 		
-		Reset will remove injected container envoy-proxy and vpn, and restore service mesh rules.
+		Reset will remove injected container envoy and vpn, and restore service mesh rules.
 		`)),
 		Example: templates.Examples(i18n.T(`
         # Reset default namespace workloads depooyment/productpage

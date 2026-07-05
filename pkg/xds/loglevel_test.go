@@ -1,4 +1,4 @@
-package controlplane
+package xds
 
 import (
 	"testing"
@@ -8,8 +8,8 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-// Req3: control-plane applies config.Debug to its logger so the sidecar's
-// control-plane container (deployed with --debug) logs at Debug by default.
+// Req3: xds applies config.Debug to its logger so the sidecar's
+// xds container (deployed with --debug) logs at Debug by default.
 func TestApplyDebugLevel(t *testing.T) {
 	defer func(prev bool) { config.Debug = prev }(config.Debug)
 

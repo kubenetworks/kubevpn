@@ -77,8 +77,8 @@ func genService(namespace string) *v1.Service {
 			}, {
 				Name:       tcp9002,
 				Protocol:   v1.ProtocolTCP,
-				Port:       config.PortControlPlane,
-				TargetPort: intstr.FromInt32(config.PortControlPlane),
+				Port:       config.PortXDS,
+				TargetPort: intstr.FromInt32(config.PortXDS),
 			}, {
 				Name:       udp53,
 				Protocol:   v1.ProtocolUDP,
@@ -147,7 +147,7 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 		Spec: appsv1.DeploymentSpec{
 			Replicas: ptr.To[int32](1),
 			// Recreate (not the default RollingUpdate) guarantees at most one
-			// traffic-manager pod at a time. The control-plane TunConfigServer
+			// traffic-manager pod at a time. The xds TunConfigServer
 			// keeps its IP-lease state in an in-memory map serialized by a single
 			// mutex; two concurrent pods during a rollout would diverge and the
 			// blind ConfigMap writes would clobber each other, losing leases of
@@ -204,13 +204,13 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 							},
 						},
 						{
-							Name:    config.ContainerSidecarControlPlane,
+							Name:    config.ContainerSidecarXDS,
 							Image:   image,
 							Command: []string{"kubevpn"},
-							Args:    []string{"control-plane", "--debug"},
+							Args:    []string{"xds", "--debug"},
 							Ports: []v1.ContainerPort{{
 								Name:          tcp9002,
-								ContainerPort: config.PortControlPlane,
+								ContainerPort: config.PortXDS,
 								Protocol:      v1.ProtocolTCP,
 							}},
 							VolumeMounts:    []v1.VolumeMount{},
@@ -238,7 +238,7 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 	}
 	containers := deploy.Spec.Template.Spec.Containers
 	containers[0].LivenessProbe, containers[0].ReadinessProbe, containers[0].StartupProbe = tcpProbes(config.PortUDP)
-	containers[1].LivenessProbe, containers[1].ReadinessProbe, containers[1].StartupProbe = tcpProbes(config.PortControlPlane)
+	containers[1].LivenessProbe, containers[1].ReadinessProbe, containers[1].StartupProbe = tcpProbes(config.PortXDS)
 
 	if imagePullSecretName != "" {
 		deploy.Spec.Template.Spec.ImagePullSecrets = []v1.LocalObjectReference{{

@@ -113,7 +113,7 @@ propagated. Containers run `--user root` with `LC_ALL=C.UTF-8`, the pod's `Subdo
 *downloading* the in-cluster volume contents to a local temp dir (via `pkg/cp` with `MaxTries=10`)
 and binding that dir at the same `MountPath`. Notes:
 
-- The `vpn`/`envoy-proxy` sidecar containers are skipped.
+- The `vpn`/`envoy` sidecar containers are skipped.
 - `MountPath == /tmp` is skipped (Docker manages its own).
 - `SubPath` is appended to the local path so subpath mounts map correctly.
 - Download failure is non-fatal (logged, mount skipped). `RemoveDir` cleans up the temp dirs on

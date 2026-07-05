@@ -51,12 +51,12 @@ func tunProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, error
 	addr := node.Get("net")
 	addr6 := node.Get("net6")
 
-	// Self-DHCP via control-plane: if net= is empty, request IP from TunConfigService
+	// Self-DHCP via xds: if net= is empty, request IP from TunConfigService
 	if addr == "" {
 		var err error
-		addr, addr6, err = requestTunIPFromControlPlane()
+		addr, addr6, err = requestTunIPFromXDS()
 		if err != nil {
-			return nil, nil, fmt.Errorf("request TUN IP from control-plane: %w", err)
+			return nil, nil, fmt.Errorf("request TUN IP from xds: %w", err)
 		}
 	}
 
@@ -76,9 +76,9 @@ func tunProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, error
 	return listener, handler, nil
 }
 
-// requestTunIPFromControlPlane connects to the traffic manager's TunConfigService
+// requestTunIPFromXDS connects to the traffic manager's TunConfigService
 // and allocates a TUN IP for this sidecar.
-func requestTunIPFromControlPlane() (ipv4, ipv6 string, err error) {
+func requestTunIPFromXDS() (ipv4, ipv6 string, err error) {
 	trafficManagerAddr := os.Getenv("TrafficManagerService")
 	if trafficManagerAddr == "" {
 		return "", "", fmt.Errorf("TrafficManagerService env not set")
@@ -90,13 +90,13 @@ func requestTunIPFromControlPlane() (ipv4, ipv6 string, err error) {
 	namespace := os.Getenv(config.EnvPodNamespace)
 
 	const controlPlaneDialTimeout = 30 * time.Second
-	target := fmt.Sprintf("%s:%d", trafficManagerAddr, config.PortControlPlane)
+	target := fmt.Sprintf("%s:%d", trafficManagerAddr, config.PortXDS)
 	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneDialTimeout)
 	defer cancel()
 
 	conn, err := grpc.DialContext(ctx, target, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
 	if err != nil {
-		return "", "", fmt.Errorf("dial control-plane %s: %w", target, err)
+		return "", "", fmt.Errorf("dial xds %s: %w", target, err)
 	}
 	defer conn.Close()
 
@@ -111,7 +111,7 @@ func requestTunIPFromControlPlane() (ipv4, ipv6 string, err error) {
 		return "", "", fmt.Errorf("GetTunIP: %w", err)
 	}
 
-	plog.G(ctx).Infof("[TUN] Got IP from control-plane: v4=%s v6=%s", resp.IPv4, resp.IPv6)
+	plog.G(ctx).Infof("[TUN] Got IP from xds: v4=%s v6=%s", resp.IPv4, resp.IPv6)
 
 	// No explicit release needed — lease expiry (per DHCP protocol) handles IP reclaim.
 	// When this process exits, WatchTunIP stream disconnects, and after LeaseDuration

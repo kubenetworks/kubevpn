@@ -39,7 +39,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		ManagerNamespace:     req.ManagerNamespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
-		WorkloadNamespace:      req.Namespace,
+		WorkloadNamespace:    req.Namespace,
 		Lock:                 &svr.Lock,
 		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,

@@ -42,7 +42,7 @@ The design has two layers, applied together:
 
 ## 3. Current Infrastructure (reusable building blocks)
 
-- Lease layer `pkg/controlplane/tun_config.go`: `GetTunIP` already supports
+- Lease layer `pkg/xds/tun_config.go`: `GetTunIP` already supports
   - returning the same IP when the same OwnerID renews (`s.allocs[ownerID]` hit returns it);
   - reallocation on `ExcludeIPs` conflict.
 - Bitmap layer `pkg/dhcp/dhcp.go`: `RentIPExcluding` uses `AllocateNext` (sequential allocation).
@@ -101,7 +101,7 @@ already sends (Fix 3).
 
 #### 4.2.1 Server-side `lastIPs` memory
 
-`TunConfigServer` in `pkg/controlplane/tun_config.go` gains an in-memory map:
+`TunConfigServer` in `pkg/xds/tun_config.go` gains an in-memory map:
 
 ```go
 lastIPs map[string]lastIPRecord // ownerID → last held {v4, v6}
@@ -125,7 +125,7 @@ func (m *Manager) RentIPPreferring(ctx, prefV4, prefV6 net.IP, exclude []net.IP)
 
 #### 4.2.3 GetTunIP: prefer reuse
 
-`GetTunIP` in `pkg/controlplane/tun_config.go`, **only on the "new allocation" path** (the OwnerID has no
+`GetTunIP` in `pkg/xds/tun_config.go`, **only on the "new allocation" path** (the OwnerID has no
 active lease), calls `allocateForOwner`:
 
 ```
@@ -190,7 +190,7 @@ Reconnect (same client)
 | `pkg/config/const.go` | reuse `homePath` |
 | `pkg/daemon/action/connect_elevate.go` | use `GetClientID()` instead of a random UUID |
 | `pkg/dhcp/dhcp.go` | refactor `rentIP`/`makeShouldSkip`/`allocateOne`, add `RentIPPreferring` |
-| `pkg/controlplane/tun_config.go` | `lastIPs` memory + `allocateForOwner`; `GetTunIP` new-allocation path prefers reuse |
+| `pkg/xds/tun_config.go` | `lastIPs` memory + `allocateForOwner`; `GetTunIP` new-allocation path prefers reuse |
 
 > Note: the originally planned `daemon.proto` new field and `pkg/handler/network.go` client change were
 > replaced by the server-side `lastIPs` approach (see §4.2) due to the lack of a `protoc` environment, and

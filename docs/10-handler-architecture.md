@@ -207,7 +207,7 @@ pkg/handler        → pkg/config, pkg/util, pkg/core, pkg/inject, pkg/dns, pkg/
 pkg/handler        → pkg/daemon/rpc (gRPC client only: TunConfigService)
 pkg/ssh            → pkg/config, pkg/util (no dependency on daemon/rpc)
 pkg/util           → pkg/config (no dependency on upper-layer packages)
-pkg/controlplane   → pkg/dhcp, pkg/daemon/rpc (server-side DHCP + TunConfigService)
+pkg/xds   → pkg/dhcp, pkg/daemon/rpc (server-side DHCP + TunConfigService)
 ```
 
 **Client side no longer depends on pkg/dhcp** — IP allocation is entirely managed by the server-side TunConfigService.

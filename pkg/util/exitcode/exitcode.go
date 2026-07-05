@@ -42,10 +42,10 @@ const (
 	Unauthenticated  = 32
 
 	// cluster reachability (40-49)
-	ClusterUnreachable     = 40
-	PortForwardTimeout     = 41
-	Timeout                = 42
-	ControlPlaneNotServing = 43
+	ClusterUnreachable = 40
+	PortForwardTimeout = 41
+	Timeout            = 42
+	XDSNotServing      = 43
 
 	// resource state (50-59)
 	NotFound           = 50
@@ -133,7 +133,7 @@ var rules = []struct {
 
 	// cluster reachability
 	{is(config.ErrPortForwardTimeout), PortForwardTimeout, codes.Unavailable, "PORT_FORWARD_TIMEOUT"},
-	{is(config.ErrControlPlaneNotServing), ControlPlaneNotServing, codes.Unavailable, "CONTROL_PLANE_NOT_SERVING"},
+	{is(config.ErrXDSNotServing), XDSNotServing, codes.Unavailable, "XDS_NOT_SERVING"},
 
 	// data-plane networking
 	{is(config.ErrTunDeviceFailed), TunDeviceFailed, codes.Aborted, "TUN_DEVICE_FAILED"},

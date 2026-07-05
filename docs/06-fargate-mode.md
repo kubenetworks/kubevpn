@@ -39,7 +39,7 @@ Since the unified proxy mode, VPN-only and Mesh are no longer separate injectors
 │  │ Pod (reviews-xxx)                                                   │      │
 │  │                                                                     │      │
 │  │  ┌─────────────────────────────────────────────────────────┐      │      │
-│  │  │ envoy-proxy (sidecar)                                    │      │      │
+│  │  │ envoy (sidecar)                                    │      │      │
 │  │  │                                                          │      │      │
 │  │  │  listen :38721 (BindToPort=true)                         │      │      │
 │  │  │       │                                                  │      │      │
@@ -97,7 +97,7 @@ Service targetPort (38721)
 
 ## Key Data Structures
 
-### `Virtual` (`pkg/controlplane/cache.go`)
+### `Virtual` (`pkg/xds/cache.go`)
 
 ```go
 type Virtual struct {
@@ -113,7 +113,7 @@ The `Virtual` struct is serialized to YAML in the `kubevpn-traffic-manager` Conf
 
 **`FargateMode`** is the **explicit discriminator** — set to `true` by `fargateInjector` when writing the ConfigMap. The `IsFargateMode()` method checks this field first, with a legacy fallback to `EnvoyListenerPort != 0` for backward compatibility with existing ConfigMaps that predate the explicit field.
 
-### `ContainerPort` (`pkg/controlplane/cache.go`)
+### `ContainerPort` (`pkg/xds/cache.go`)
 
 ```go
 type ContainerPort struct {
@@ -126,7 +126,7 @@ type ContainerPort struct {
 
 `EnvoyListenerPort` holds the actual envoy listening port number in fargate mode. It is no longer the mode discriminator — that role belongs to `Virtual.FargateMode`.
 
-### `Rule` (`pkg/controlplane/cache.go`)
+### `Rule` (`pkg/xds/cache.go`)
 
 ```go
 type Rule struct {
@@ -231,7 +231,7 @@ kubevpn leave svc/reviews
 Fargate mode is indicated by the explicit `Virtual.FargateMode` bool field, set to `true` by `fargateInjector` when writing the ConfigMap entry. All consumers call `virtual.IsFargateMode()` which checks the field first, with a legacy fallback to the `EnvoyListenerPort != 0` heuristic for backward compatibility.
 
 Consumers:
-- `pkg/controlplane/cache.go` — xDS generation (`Virtual.To()`)
+- `pkg/xds/cache.go` — xDS generation (`Virtual.To()`)
 - `pkg/inject/envoy.go` — envoy config creation and removal
 - `pkg/daemon/action/status.go` — status reporting
 - `pkg/handler/leave.go` — cleanup rule matching
@@ -300,7 +300,7 @@ ports and the SSH reverse tunnel for TCP ports (protocol comes from the
 | `pkg/inject/envoy.go` | `addEnvoyConfig()`, `removeEnvoyConfig()` with fargate detection |
 | `pkg/inject/fargate_envoy.yaml` | Envoy bootstrap template (fargate, dual-stack) |
 | `pkg/inject/fargate_envoy_ipv4.yaml` | Envoy bootstrap template IPv4 variant |
-| `pkg/controlplane/cache.go` | `Virtual.To()` — xDS generation with `BindToPort`, default routes |
+| `pkg/xds/cache.go` | `Virtual.To()` — xDS generation with `BindToPort`, default routes |
 | `pkg/handler/proxy_mapper.go` | `Mapper` — SSH tunnel lifecycle management |
 | `pkg/handler/leave.go` | Cleanup: header-based rule matching, Service restoration |
 | `pkg/handler/reset.go` | Hard reset: remove all rules, restore Service |

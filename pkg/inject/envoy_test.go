@@ -7,15 +7,15 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 func TestAddVirtualRule_Case1_NoExistingEntry(t *testing.T) {
 	// Case 1: No existing entry for the given UID/namespace → creates new Virtual
-	v := []*controlplane.Virtual{}
+	v := []*xds.Virtual{}
 	headers := map[string]string{"foo": "bar"}
 	portmap := map[int32]string{8080: "9090"}
-	ports := []controlplane.ContainerPort{{ContainerPort: 8080, Protocol: "TCP"}}
+	ports := []xds.ContainerPort{{ContainerPort: 8080, Protocol: "TCP"}}
 
 	result := addVirtualRule(context.Background(), v, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Ports: ports, Headers: headers, LocalTunIPv4: "10.0.0.1", LocalTunIPv6: "fd00::1", PortMap: portmap, OwnerID: "test-owner"})
 
@@ -55,12 +55,12 @@ func TestAddVirtualRule_Case1_NoExistingEntry(t *testing.T) {
 
 func TestAddVirtualRule_Case1_PreservesExisting(t *testing.T) {
 	// Case 1 with pre-existing entries for other UIDs — new one is appended
-	existing := []*controlplane.Virtual{
+	existing := []*xds.Virtual{
 		{
 			UID:       "deployments.apps.other",
 			Namespace: "default",
-			Ports:     []controlplane.ContainerPort{{ContainerPort: 80}},
-			Rules: []*controlplane.Rule{{
+			Ports:     []xds.ContainerPort{{ContainerPort: 80}},
+			Rules: []*xds.Rule{{
 				Headers:      map[string]string{"x": "y"},
 				LocalTunIPv4: "10.0.0.99",
 				LocalTunIPv6: "fd00::99",
@@ -70,7 +70,7 @@ func TestAddVirtualRule_Case1_PreservesExisting(t *testing.T) {
 	}
 	headers := map[string]string{"env": "dev"}
 	portmap := map[int32]string{8080: "9090"}
-	ports := []controlplane.ContainerPort{{ContainerPort: 8080}}
+	ports := []xds.ContainerPort{{ContainerPort: 8080}}
 
 	result := addVirtualRule(context.Background(), existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Ports: ports, Headers: headers, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: portmap, OwnerID: "test-owner"})
 
@@ -89,12 +89,12 @@ func TestAddVirtualRule_Case1_PreservesExisting(t *testing.T) {
 
 func TestAddVirtualRule_Case2_MergeHeadersAndPortmap(t *testing.T) {
 	// Case 2: Existing entry with same OwnerID, non-fargate → merges headers and portmap
-	existing := []*controlplane.Virtual{
+	existing := []*xds.Virtual{
 		{
 			UID:       "deployments.apps.nginx",
 			Namespace: "default",
-			Ports:     []controlplane.ContainerPort{{ContainerPort: 8080}},
-			Rules: []*controlplane.Rule{{
+			Ports:     []xds.ContainerPort{{ContainerPort: 8080}},
+			Rules: []*xds.Rule{{
 				Headers:      map[string]string{"foo": "bar"},
 				LocalTunIPv4: "10.0.0.1",
 				LocalTunIPv6: "fd00::1",
@@ -135,13 +135,13 @@ func TestAddVirtualRule_Case2_MergeHeadersAndPortmap(t *testing.T) {
 func TestAddVirtualRule_Case2_SkippedInFargateMode(t *testing.T) {
 	// Case 2 does NOT apply in fargate mode — even with same TUN IP, it should not merge
 	// Instead it falls through to case 3 or 4
-	existing := []*controlplane.Virtual{
+	existing := []*xds.Virtual{
 		{
 			UID:         "deployments.apps.nginx",
 			Namespace:   "default",
 			FargateMode: true,
-			Ports:       []controlplane.ContainerPort{{ContainerPort: 8080, EnvoyListenerPort: 15001}},
-			Rules: []*controlplane.Rule{{
+			Ports:       []xds.ContainerPort{{ContainerPort: 8080, EnvoyListenerPort: 15001}},
+			Rules: []*xds.Rule{{
 				Headers:      map[string]string{"foo": "bar"},
 				LocalTunIPv4: "10.0.0.1",
 				LocalTunIPv6: "fd00::1",
@@ -170,12 +170,12 @@ func TestAddVirtualRule_Case2_SkippedInFargateMode(t *testing.T) {
 
 func TestAddVirtualRule_Case3_ReplaceByHeaders(t *testing.T) {
 	// Case 3: Existing entry with same headers → replaces TUN IP and portmap
-	existing := []*controlplane.Virtual{
+	existing := []*xds.Virtual{
 		{
 			UID:       "deployments.apps.nginx",
 			Namespace: "default",
-			Ports:     []controlplane.ContainerPort{{ContainerPort: 8080}},
-			Rules: []*controlplane.Rule{{
+			Ports:     []xds.ContainerPort{{ContainerPort: 8080}},
+			Rules: []*xds.Rule{{
 				Headers:      map[string]string{"foo": "bar"},
 				LocalTunIPv4: "10.0.0.1",
 				LocalTunIPv6: "fd00::1",
@@ -212,12 +212,12 @@ func TestAddVirtualRule_Case3_ReplaceByHeaders(t *testing.T) {
 
 func TestAddVirtualRule_Case4_AppendNewRule(t *testing.T) {
 	// Case 4: Different headers, different TUN IP → appends new rule
-	existing := []*controlplane.Virtual{
+	existing := []*xds.Virtual{
 		{
 			UID:       "deployments.apps.nginx",
 			Namespace: "default",
-			Ports:     []controlplane.ContainerPort{{ContainerPort: 8080}},
-			Rules: []*controlplane.Rule{{
+			Ports:     []xds.ContainerPort{{ContainerPort: 8080}},
+			Rules: []*xds.Rule{{
 				Headers:      map[string]string{"foo": "bar"},
 				LocalTunIPv4: "10.0.0.1",
 				LocalTunIPv6: "fd00::1",
@@ -262,12 +262,12 @@ func TestAddVirtualRule_Case4_AppendNewRule(t *testing.T) {
 
 func TestAddVirtualRule_Case4_SortingEmptyHeadersLast(t *testing.T) {
 	// Verify that after appending, rules with empty headers are sorted last
-	existing := []*controlplane.Virtual{
+	existing := []*xds.Virtual{
 		{
 			UID:       "deployments.apps.nginx",
 			Namespace: "default",
-			Ports:     []controlplane.ContainerPort{{ContainerPort: 8080}},
-			Rules: []*controlplane.Rule{{
+			Ports:     []xds.ContainerPort{{ContainerPort: 8080}},
+			Rules: []*xds.Rule{{
 				Headers:      map[string]string{}, // empty headers (default route)
 				LocalTunIPv4: "10.0.0.1",
 				LocalTunIPv6: "fd00::1",
@@ -301,12 +301,12 @@ func TestAddVirtualRule_Case4_SortingEmptyHeadersLast(t *testing.T) {
 
 func TestAddVirtualRule_Case1_DifferentNamespace(t *testing.T) {
 	// Same UID but different namespace → treated as not found (case 1)
-	existing := []*controlplane.Virtual{
+	existing := []*xds.Virtual{
 		{
 			UID:       "deployments.apps.nginx",
 			Namespace: "production",
-			Ports:     []controlplane.ContainerPort{{ContainerPort: 8080}},
-			Rules: []*controlplane.Rule{{
+			Ports:     []xds.ContainerPort{{ContainerPort: 8080}},
+			Rules: []*xds.Rule{{
 				Headers:      map[string]string{"foo": "bar"},
 				LocalTunIPv4: "10.0.0.1",
 				LocalTunIPv6: "fd00::1",
@@ -316,7 +316,7 @@ func TestAddVirtualRule_Case1_DifferentNamespace(t *testing.T) {
 	}
 	headers := map[string]string{"env": "dev"}
 	portmap := map[int32]string{8080: "7070"}
-	ports := []controlplane.ContainerPort{{ContainerPort: 8080}}
+	ports := []xds.ContainerPort{{ContainerPort: 8080}}
 
 	result := addVirtualRule(context.Background(), existing, envoyRuleSpec{Namespace: "staging", NodeID: "deployments.apps.nginx", Ports: ports, Headers: headers, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: portmap, OwnerID: "test-owner"})
 
@@ -333,12 +333,12 @@ func TestAddVirtualRule_Case1_DifferentNamespace(t *testing.T) {
 
 func TestAddVirtualRule_Case4_PortsFilledWhenNil(t *testing.T) {
 	// Case 4: When appending a rule, if existing Ports is nil, it gets filled
-	existing := []*controlplane.Virtual{
+	existing := []*xds.Virtual{
 		{
 			UID:       "deployments.apps.nginx",
 			Namespace: "default",
 			Ports:     nil, // nil ports
-			Rules: []*controlplane.Rule{{
+			Rules: []*xds.Rule{{
 				Headers:      map[string]string{"foo": "bar"},
 				LocalTunIPv4: "10.0.0.1",
 				LocalTunIPv6: "fd00::1",
@@ -348,7 +348,7 @@ func TestAddVirtualRule_Case4_PortsFilledWhenNil(t *testing.T) {
 	}
 	newHeaders := map[string]string{"env": "dev"}
 	newPortmap := map[int32]string{8080: "7070"}
-	ports := []controlplane.ContainerPort{{ContainerPort: 8080, Protocol: "TCP"}}
+	ports := []xds.ContainerPort{{ContainerPort: 8080, Protocol: "TCP"}}
 
 	result := addVirtualRule(context.Background(), existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Ports: ports, Headers: newHeaders, LocalTunIPv4: "10.0.0.2", LocalTunIPv6: "fd00::2", PortMap: newPortmap, OwnerID: "test-owner"})
 
@@ -437,7 +437,7 @@ func TestOwnerID_RoundTrip(t *testing.T) {
 	ownerID1 := "abc123def456"
 	headers := map[string]string{"x-user": "alice"}
 	portmap := map[int32]string{8080: "9090"}
-	ports := []controlplane.ContainerPort{{ContainerPort: 8080, Protocol: "TCP"}}
+	ports := []xds.ContainerPort{{ContainerPort: 8080, Protocol: "TCP"}}
 
 	result := addVirtualRule(context.Background(), nil, envoyRuleSpec{
 		Namespace:    "default",
@@ -464,7 +464,7 @@ func TestOwnerID_RoundTrip(t *testing.T) {
 	}
 
 	// Step 3: Unmarshal back.
-	var restored []*controlplane.Virtual
+	var restored []*xds.Virtual
 	if err := yaml.Unmarshal(data, &restored); err != nil {
 		t.Fatalf("yaml.Unmarshal failed: %v", err)
 	}

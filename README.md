@@ -123,12 +123,12 @@ Creating Deployment kubevpn-traffic-manager
 
 Pod kubevpn-traffic-manager-66d969fd45-9zlbp is Pending
 Container     Reason            Message
-control-plane ContainerCreating
+xds ContainerCreating
 vpn           ContainerCreating
 
 Pod kubevpn-traffic-manager-66d969fd45-9zlbp is Running
 Container     Reason           Message
-control-plane ContainerRunning
+xds ContainerRunning
 vpn           ContainerRunning
 
 Forwarding port...

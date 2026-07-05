@@ -14,8 +14,8 @@ func fakeSecret() *v1.Secret {
 	return &v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-tls-secret", Namespace: "default"},
 		Data: map[string][]byte{
-			config.TLSServerName:  []byte("test-server"),
-			config.TLSCertKey:     []byte("fake-cert-data"),
+			config.TLSServerName:    []byte("test-server"),
+			config.TLSCertKey:       []byte("fake-cert-data"),
 			config.TLSPrivateKeyKey: []byte("fake-key-data"),
 		},
 	}
@@ -82,7 +82,7 @@ func TestAddVPNAndEnvoyContainer(t *testing.T) {
 
 	AddVPNAndEnvoyContainer(spec, "default", "node1", false, "kubevpn-system", secret, image)
 
-	// Should have 3 containers: original app + vpn + envoy-proxy
+	// Should have 3 containers: original app + vpn + envoy
 	if len(spec.Spec.Containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(spec.Spec.Containers))
 	}
@@ -92,7 +92,7 @@ func TestAddVPNAndEnvoyContainer(t *testing.T) {
 		switch spec.Spec.Containers[i].Name {
 		case config.ContainerSidecarVPN:
 			vpnContainer = &spec.Spec.Containers[i]
-		case config.ContainerSidecarEnvoyProxy:
+		case config.ContainerSidecarEnvoy:
 			envoyContainer = &spec.Spec.Containers[i]
 		}
 	}
@@ -101,7 +101,7 @@ func TestAddVPNAndEnvoyContainer(t *testing.T) {
 		t.Fatal("vpn container not found")
 	}
 	if envoyContainer == nil {
-		t.Fatal("envoy-proxy container not found")
+		t.Fatal("envoy container not found")
 	}
 
 	// VPN container checks
@@ -187,7 +187,7 @@ func TestAddVPNAndEnvoyContainer_Idempotent(t *testing.T) {
 		if c.Name == config.ContainerSidecarVPN {
 			vpnCount++
 		}
-		if c.Name == config.ContainerSidecarEnvoyProxy {
+		if c.Name == config.ContainerSidecarEnvoy {
 			envoyCount++
 		}
 	}
@@ -205,7 +205,7 @@ func TestAddEnvoyAndSSHContainer(t *testing.T) {
 
 	AddEnvoyAndSSHContainer(spec, "default", "node1", false, "kubevpn-system", image)
 
-	// Should have 3 containers: original app + vpn + envoy-proxy
+	// Should have 3 containers: original app + vpn + envoy
 	if len(spec.Spec.Containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(spec.Spec.Containers))
 	}
@@ -215,7 +215,7 @@ func TestAddEnvoyAndSSHContainer(t *testing.T) {
 		switch spec.Spec.Containers[i].Name {
 		case config.ContainerSidecarVPN:
 			vpnContainer = &spec.Spec.Containers[i]
-		case config.ContainerSidecarEnvoyProxy:
+		case config.ContainerSidecarEnvoy:
 			envoyContainer = &spec.Spec.Containers[i]
 		}
 	}
@@ -224,7 +224,7 @@ func TestAddEnvoyAndSSHContainer(t *testing.T) {
 		t.Fatal("vpn container not found")
 	}
 	if envoyContainer == nil {
-		t.Fatal("envoy-proxy container not found")
+		t.Fatal("envoy container not found")
 	}
 
 	// VPN container runs SSH server
@@ -270,7 +270,7 @@ func TestRemoveContainers_OnlySidecars(t *testing.T) {
 	spec := &v1.PodSpec{
 		Containers: []v1.Container{
 			{Name: config.ContainerSidecarVPN, Image: "vpn-image"},
-			{Name: config.ContainerSidecarEnvoyProxy, Image: "envoy-image"},
+			{Name: config.ContainerSidecarEnvoy, Image: "envoy-image"},
 		},
 	}
 
@@ -287,7 +287,7 @@ func TestRemoveContainers_PreservesNonSidecars(t *testing.T) {
 			{Name: "app", Image: "nginx:latest"},
 			{Name: config.ContainerSidecarVPN, Image: "vpn-image"},
 			{Name: "worker", Image: "worker:latest"},
-			{Name: config.ContainerSidecarEnvoyProxy, Image: "envoy-image"},
+			{Name: config.ContainerSidecarEnvoy, Image: "envoy-image"},
 		},
 	}
 

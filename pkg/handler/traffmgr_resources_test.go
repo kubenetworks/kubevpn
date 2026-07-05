@@ -40,7 +40,7 @@ func TestTcpProbes(t *testing.T) {
 	}
 }
 
-// Req3: the traffic-manager server and control-plane containers default to
+// Req3: the traffic-manager server and xds containers default to
 // --debug so kubectl logs shows Debug; dns has no debug flag and must not get it.
 func TestGenDeploySpec_SidecarDefaultDebug(t *testing.T) {
 	deploy := genDeploySpec("ns", "img:latest", "")
@@ -49,7 +49,7 @@ func TestGenDeploySpec_SidecarDefaultDebug(t *testing.T) {
 		byName[c.Name] = c
 	}
 
-	for _, name := range []string{config.ContainerSidecarVPN, config.ContainerSidecarControlPlane} {
+	for _, name := range []string{config.ContainerSidecarVPN, config.ContainerSidecarXDS} {
 		c, ok := byName[name]
 		if !ok {
 			t.Fatalf("container %q not found", name)
@@ -73,7 +73,7 @@ func TestGenDeploySpec_ImagePullSecret(t *testing.T) {
 }
 
 // Fix 1: the traffic-manager must use the Recreate strategy so at most one
-// control-plane pod (and thus one TunConfigServer lease writer) runs at a time.
+// xds pod (and thus one TunConfigServer lease writer) runs at a time.
 func TestGenDeploySpec_RecreateStrategy(t *testing.T) {
 	deploy := genDeploySpec("ns", "img:latest", "")
 	if deploy.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType {
@@ -94,7 +94,7 @@ func TestGenDeploySpec_ProbesSet(t *testing.T) {
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
 	}
-	// VPN and control-plane containers have probes; DNS container does not
+	// VPN and xds containers have probes; DNS container does not
 	for _, c := range containers[:2] {
 		if c.LivenessProbe == nil {
 			t.Errorf("container %s: missing liveness probe", c.Name)

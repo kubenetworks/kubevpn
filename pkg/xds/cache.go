@@ -1,4 +1,4 @@
-package controlplane
+package xds
 
 import (
 	"fmt"
@@ -108,7 +108,7 @@ func (a *Virtual) IsFargateMode() bool {
 	return false
 }
 
-// ConvertContainerPort converts Kubernetes ContainerPort values to controlplane ContainerPort with EnvoyListenerPort=0.
+// ConvertContainerPort converts Kubernetes ContainerPort values to xds ContainerPort with EnvoyListenerPort=0.
 func ConvertContainerPort(ports ...corev1.ContainerPort) []ContainerPort {
 	var result []ContainerPort
 	for _, port := range ports {

@@ -19,9 +19,9 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/utils/ptr"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 var errPodCreated = errors.New("pod created, waiting for running")
@@ -48,9 +48,9 @@ type InjectOptions struct {
 }
 
 // NewInjector returns the appropriate Injector for the given workload and options.
-// - Service targets use Fargate mode (SSH + Envoy).
-// - All other targets use Mesh mode (VPN + Envoy). When headers are empty,
-//   envoy matches all requests (full traffic interception, equivalent to legacy VPN-only).
+//   - Service targets use Fargate mode (SSH + Envoy).
+//   - All other targets use Mesh mode (VPN + Envoy). When headers are empty,
+//     envoy matches all requests (full traffic interception, equivalent to legacy VPN-only).
 func NewInjector(opts InjectOptions) Injector {
 	if util.IsK8sService(opts.Object) {
 		return &fargateInjector{opts: opts}
@@ -59,9 +59,9 @@ func NewInjector(opts InjectOptions) Injector {
 }
 
 type JSONPatchOp struct {
-	Op    string      `json:"op,omitempty"`
-	Path  string      `json:"path,omitempty"`
-	Value any `json:"value,omitempty"`
+	Op    string `json:"op,omitempty"`
+	Path  string `json:"path,omitempty"`
+	Value any    `json:"value,omitempty"`
 }
 
 func patchWorkload(ctx context.Context, factory cmdutil.Factory, info *resource.Info, templateSpec *v1.PodTemplateSpec, path []string) error {
@@ -121,9 +121,9 @@ func gatherContainerPorts(templateSpec *v1.PodTemplateSpec, portMaps []string) [
 	return ports
 }
 
-func collectPorts(templateSpec *v1.PodTemplateSpec, portMaps []string) ([]controlplane.ContainerPort, map[int32]string) {
+func collectPorts(templateSpec *v1.PodTemplateSpec, portMaps []string) ([]xds.ContainerPort, map[int32]string) {
 	ports := gatherContainerPorts(templateSpec, portMaps)
-	envoyPorts := controlplane.ConvertContainerPort(ports...)
+	envoyPorts := xds.ConvertContainerPort(ports...)
 	portmap := make(map[int32]string)
 	for _, p := range envoyPorts {
 		portmap[p.ContainerPort] = fmt.Sprintf("%d", p.ContainerPort)

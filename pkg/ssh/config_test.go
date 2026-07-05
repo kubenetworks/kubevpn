@@ -50,9 +50,9 @@ func TestSshConfig_IsLoopback(t *testing.T) {
 
 func TestSshConfig_Host(t *testing.T) {
 	cases := []struct {
-		name     string
-		conf     SshConfig
-		wantIPs  []net.IP
+		name      string
+		conf      SshConfig
+		wantIPs   []net.IP
 		wantEmpty bool
 	}{
 		{
@@ -61,18 +61,18 @@ func TestSshConfig_Host(t *testing.T) {
 			wantEmpty: true,
 		},
 		{
-			name: "IPv4 with port",
-			conf: SshConfig{Addr: "192.168.1.100:22"},
+			name:    "IPv4 with port",
+			conf:    SshConfig{Addr: "192.168.1.100:22"},
 			wantIPs: []net.IP{net.ParseIP("192.168.1.100")},
 		},
 		{
-			name: "IPv4 without port falls back",
-			conf: SshConfig{Addr: "10.0.0.1"},
+			name:    "IPv4 without port falls back",
+			conf:    SshConfig{Addr: "10.0.0.1"},
 			wantIPs: []net.IP{net.ParseIP("10.0.0.1")},
 		},
 		{
-			name: "loopback",
-			conf: SshConfig{Addr: "127.0.0.1:22"},
+			name:    "loopback",
+			conf:    SshConfig{Addr: "127.0.0.1:22"},
 			wantIPs: []net.IP{net.ParseIP("127.0.0.1")},
 		},
 	}

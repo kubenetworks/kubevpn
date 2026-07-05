@@ -1,4 +1,4 @@
-package controlplane
+package xds
 
 import (
 	"context"
@@ -599,7 +599,7 @@ func (s *TunConfigServer) WatchTunIP(req *rpc.TunIPRequest, stream rpc.TunConfig
 	s.renewLease(req.OwnerID)
 	// Replay any outstanding dry-run proposal to this (re)subscriber as an initial
 	// snapshot. A proposal pushed via notifyWatchers while the client was briefly
-	// absent — e.g. mid-reconnect after a control-plane outage, when a stale watcher
+	// absent — e.g. mid-reconnect after a xds outage, when a stale watcher
 	// channel still lingered — reaches no live client and is otherwise lost: the
 	// server keeps the pending intent but never re-pushes it, so the client never
 	// confirms and the operator's edit silently stalls. Re-delivering here closes
@@ -1027,8 +1027,8 @@ func (s *TunConfigServer) syncEnvoyRuleIP(ctx context.Context, ownerID string, n
 	}
 }
 
-// ControlPlanePort is the gRPC port used by the envoy control plane and TunConfigService.
-const ControlPlanePort uint = config.PortControlPlane
+// XDSPort is the gRPC port used by the envoy control plane and TunConfigService.
+const XDSPort uint = config.PortXDS
 
 // LeaseDuration is how long a TUN IP allocation stays valid without renewal.
 // If a client doesn't call GetTunIP (which doubles as renew) within this duration,

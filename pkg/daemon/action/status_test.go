@@ -7,12 +7,12 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 func TestPortMapToLocalPorts_ColonSeparated(t *testing.T) {
-	rule := &controlplane.Rule{
+	rule := &xds.Rule{
 		PortMap: map[int32]string{
 			8080: "29450:19080",
 		},
@@ -27,7 +27,7 @@ func TestPortMapToLocalPorts_ColonSeparated(t *testing.T) {
 }
 
 func TestPortMapToLocalPorts_PlainNumber(t *testing.T) {
-	rule := &controlplane.Rule{
+	rule := &xds.Rule{
 		PortMap: map[int32]string{
 			8080: "9080",
 		},
@@ -43,19 +43,19 @@ func TestPortMapToLocalPorts_PlainNumber(t *testing.T) {
 }
 
 func TestPortMapToLocalPorts_Empty(t *testing.T) {
-	result := portMapToLocalPorts(&controlplane.Rule{PortMap: nil})
+	result := portMapToLocalPorts(&xds.Rule{PortMap: nil})
 	if len(result) != 0 {
 		t.Fatalf("expected empty map for nil input, got %d entries", len(result))
 	}
 
-	result = portMapToLocalPorts(&controlplane.Rule{PortMap: map[int32]string{}})
+	result = portMapToLocalPorts(&xds.Rule{PortMap: map[int32]string{}})
 	if len(result) != 0 {
 		t.Fatalf("expected empty map for empty input, got %d entries", len(result))
 	}
 }
 
 func TestPortMapToLocalPorts_InvalidPort(t *testing.T) {
-	rule := &controlplane.Rule{
+	rule := &xds.Rule{
 		PortMap: map[int32]string{
 			8080: "invalid",
 		},
@@ -71,7 +71,7 @@ func TestPortMapToLocalPorts_InvalidPort(t *testing.T) {
 }
 
 func TestPortMapToLocalPorts_MultipleEntries(t *testing.T) {
-	rule := &controlplane.Rule{
+	rule := &xds.Rule{
 		PortMap: map[int32]string{
 			80:   "30000:8080",
 			443:  "30001:8443",
@@ -95,7 +95,7 @@ func TestPortMapToLocalPorts_MultipleEntries(t *testing.T) {
 }
 
 func TestPortMapToLocalPorts_ColonWithInvalidSecond(t *testing.T) {
-	rule := &controlplane.Rule{
+	rule := &xds.Rule{
 		PortMap: map[int32]string{
 			8080: "29450:notanumber",
 		},

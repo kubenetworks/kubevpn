@@ -4,7 +4,7 @@ package handler
 // REAL TunConfigService gRPC server (backed by a fake clientset) + a REAL local TUN
 // device + the client IPWatcher, then edit TUN_ALLOCS and assert the actual TUN
 // device IP changes (confirm) or stays (decline), across single/multi-user edits
-// and disconnect / control-plane-restart / client-restart.
+// and disconnect / xds-restart / client-restart.
 //
 // These require CAP_NET_ADMIN to create TUN devices, so each test probe-skips when
 // it cannot. No build tag: under root (e.g. CI `make ut` via sudo) they run for
@@ -27,10 +27,10 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 // requireTUN skips the test if a TUN device cannot be created (no CAP_NET_ADMIN).
@@ -43,10 +43,10 @@ func requireTUN(t *testing.T) {
 	_ = ln.Close()
 }
 
-// cpEnv is a real in-process control-plane: TunConfigServer + gRPC on a fixed port,
+// cpEnv is a real in-process xds: TunConfigServer + gRPC on a fixed port,
 // backed by a fake clientset whose ConfigMap is the editable TUN_ALLOCS store.
 type cpEnv struct {
-	server    *controlplane.TunConfigServer
+	server    *xds.TunConfigServer
 	grpc      *grpc.Server
 	port      int
 	clientset kubernetes.Interface
@@ -63,7 +63,7 @@ func newCPEnv(t *testing.T) *cpEnv {
 			Data:       map[string]string{config.KeyTunIPPool: "", config.KeyEnvoy: ""},
 		},
 	)
-	s, err := controlplane.NewTunConfigServer(context.Background(), clientset, ns)
+	s, err := xds.NewTunConfigServer(context.Background(), clientset, ns)
 	if err != nil {
 		t.Fatalf("NewTunConfigServer: %v", err)
 	}
@@ -82,12 +82,12 @@ func newCPEnv(t *testing.T) *cpEnv {
 // restart stops the gRPC server and brings it back on the SAME port (so the client
 // watcher, which caches its dial target, can reconnect). fresh=true rebuilds the
 // TunConfigServer from scratch (reloading committed state from TUN_ALLOCS), modelling
-// a control-plane pod restart; fresh=false reuses the same server (transient outage).
+// a xds pod restart; fresh=false reuses the same server (transient outage).
 func (e *cpEnv) restart(t *testing.T, fresh bool) {
 	t.Helper()
 	e.grpc.Stop()
 	if fresh {
-		s, err := controlplane.NewTunConfigServer(context.Background(), e.clientset, e.ns)
+		s, err := xds.NewTunConfigServer(context.Background(), e.clientset, e.ns)
 		if err != nil {
 			t.Fatalf("restart NewTunConfigServer: %v", err)
 		}
@@ -111,7 +111,7 @@ func (e *cpEnv) restart(t *testing.T, fresh bool) {
 }
 
 // startOwner = one "user": its own NetworkManager rents an IP, creates a REAL TUN
-// device with it, and starts the IP watcher pointed at the control-plane.
+// device with it, and starts the IP watcher pointed at the xds.
 func startOwner(t *testing.T, parent context.Context, env *cpEnv, owner string, used map[string]bool) (*NetworkManager, func()) {
 	t.Helper()
 	nm := newNetworkManager(NetworkConfig{ManagerNamespace: env.ns, OwnerID: owner})
@@ -430,7 +430,7 @@ func TestRealTUNManualIP_MultiUserSameIP(t *testing.T) {
 	}
 }
 
-//  5. Transient disconnect: control-plane drops then returns on the same port; the
+//  5. Transient disconnect: xds drops then returns on the same port; the
 //     watcher reconnects and a subsequent edit still takes effect.
 func TestRealTUNManualIP_Disconnect(t *testing.T) {
 	requireTUN(t)
@@ -457,7 +457,7 @@ func TestRealTUNManualIP_Disconnect(t *testing.T) {
 
 //  6. Control-plane restart: committed IP (persisted in TUN_ALLOCS) survives a fresh
 //     server; a new edit after restart still works.
-func TestRealTUNManualIP_ControlPlaneRestart(t *testing.T) {
+func TestRealTUNManualIP_XDSRestart(t *testing.T) {
 	requireTUN(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -475,7 +475,7 @@ func TestRealTUNManualIP_ControlPlaneRestart(t *testing.T) {
 	env.restart(t, true) // fresh TunConfigServer, reloads committed state from TUN_ALLOCS
 	waitWatcher(t, env, "o1", ipWatcherRetryInterval+10*time.Second)
 	if !deviceHasIP(nm.tunName, ip2) {
-		t.Fatalf("device lost committed IP %s across control-plane restart", ip2)
+		t.Fatalf("device lost committed IP %s across xds restart", ip2)
 	}
 
 	ip3 := pickFreeIP(t, used)

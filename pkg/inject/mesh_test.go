@@ -27,7 +27,7 @@ func TestAlreadyInjected_EnvoyOnly(t *testing.T) {
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
 				{Name: "app"},
-				{Name: config.ContainerSidecarEnvoyProxy},
+				{Name: config.ContainerSidecarEnvoy},
 			},
 		},
 	}
@@ -73,7 +73,7 @@ func TestInjectedForManager_NamespaceMigration_Mesh(t *testing.T) {
 	if n := countContainer(spec, config.ContainerSidecarVPN); n != 1 {
 		t.Fatalf("expected exactly 1 vpn sidecar after re-injection, got %d", n)
 	}
-	if n := countContainer(spec, config.ContainerSidecarEnvoyProxy); n != 1 {
+	if n := countContainer(spec, config.ContainerSidecarEnvoy); n != 1 {
 		t.Fatalf("expected exactly 1 envoy sidecar after re-injection, got %d", n)
 	}
 }
@@ -100,7 +100,7 @@ func TestInjectedForManager_NamespaceMigration_Fargate(t *testing.T) {
 	if !injectedForManager(spec, "kubevpn") {
 		t.Fatal("expected injectedForManager(kubevpn)=true after fargate re-injection against kubevpn")
 	}
-	if n := countContainer(spec, config.ContainerSidecarEnvoyProxy); n != 1 {
+	if n := countContainer(spec, config.ContainerSidecarEnvoy); n != 1 {
 		t.Fatalf("expected exactly 1 envoy sidecar after fargate re-injection, got %d", n)
 	}
 }

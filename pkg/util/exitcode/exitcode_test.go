@@ -33,7 +33,7 @@ func TestClassify(t *testing.T) {
 		{"permission sentinel", fmt.Errorf("x: %w", config.ErrPermissionDenied), PermissionDenied},
 
 		{"port-forward timeout", fmt.Errorf("x: %w", config.ErrPortForwardTimeout), PortForwardTimeout},
-		{"control plane not serving", fmt.Errorf("x: %w", config.ErrControlPlaneNotServing), ControlPlaneNotServing},
+		{"control plane not serving", fmt.Errorf("x: %w", config.ErrXDSNotServing), XDSNotServing},
 
 		{"connection not found", fmt.Errorf("x: %w", config.ErrConnectionNotFound), ConnectionNotFound},
 		{"resource not found", fmt.Errorf("x: %w", config.ErrNotFound), NotFound},

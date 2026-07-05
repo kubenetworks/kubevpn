@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-The control plane (`pkg/controlplane`) runs inside the traffic manager pod and serves as the configuration hub for all envoy sidecar proxies in the cluster. It watches the `kubevpn-traffic-manager` ConfigMap for Virtual/Rule configurations and converts them into envoy xDS snapshots that are pushed to sidecar proxies via gRPC.
+The control plane (`pkg/xds`) runs inside the traffic manager pod and serves as the configuration hub for all envoy sidecar proxies in the cluster. It watches the `kubevpn-traffic-manager` ConfigMap for Virtual/Rule configurations and converts them into envoy xDS snapshots that are pushed to sidecar proxies via gRPC.
 
 The same gRPC server also hosts the `TunConfigService` (documented in `03-dhcp-ip-allocation.md`) for TUN IP allocation.
 
@@ -151,7 +151,7 @@ For each UDP container port, `Virtual.To()` also emits a dedicated UDP listener 
 
 The `udp_proxy` v3 proto is vendored under `vendor/github.com/envoyproxy/go-control-plane/envoy/extensions/filters/udp/udp_proxy/v3`.
 
-The data path is verified end-to-end against a **real Envoy** in `pkg/controlplane/envoy_e2e_test.go`. Each test feeds a `Virtual` through `Virtual.To()` → snapshot cache → xDS gRPC server to a containerized Envoy, then pushes real traffic through Envoy and asserts the result:
+The data path is verified end-to-end against a **real Envoy** in `pkg/xds/envoy_e2e_test.go`. Each test feeds a `Virtual` through `Virtual.To()` → snapshot cache → xDS gRPC server to a containerized Envoy, then pushes real traffic through Envoy and asserts the result:
 
 | Test | Verifies |
 |---|---|
@@ -230,11 +230,11 @@ Envoy routes requests with `x-user: alice` to `198.18.0.5:9080` (Alice's local m
 
 | File | Purpose |
 |------|---------|
-| `pkg/controlplane/controlplane.go` | `Main()` — startup orchestration |
-| `pkg/controlplane/cache.go` | Virtual/Rule types, xDS resource generation |
-| `pkg/controlplane/processor.go` | Processor — YAML → xDS snapshot pipeline |
-| `pkg/controlplane/watcher.go` | ConfigMap watcher with informer |
-| `pkg/controlplane/server.go` | gRPC server setup |
-| `pkg/controlplane/tun_config.go` | TunConfigServer (see `03-dhcp-ip-allocation.md`) |
+| `pkg/xds/controlplane.go` | `Main()` — startup orchestration |
+| `pkg/xds/cache.go` | Virtual/Rule types, xDS resource generation |
+| `pkg/xds/processor.go` | Processor — YAML → xDS snapshot pipeline |
+| `pkg/xds/watcher.go` | ConfigMap watcher with informer |
+| `pkg/xds/server.go` | gRPC server setup |
+| `pkg/xds/tun_config.go` | TunConfigServer (see `03-dhcp-ip-allocation.md`) |
 | `pkg/inject/envoy.go` | Writes Virtual/Rule to ConfigMap (producer side) |
 | `pkg/config/config.go` | ConfigMap key names (`KeyEnvoy`, etc.) |

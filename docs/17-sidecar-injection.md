@@ -112,7 +112,7 @@ TUN IP. But the old sidecar was port-agnostic: it tunneled *any* port. Mesh mode
 
 #### Mechanism
 
-`Virtual.To()` (`pkg/controlplane/cache.go`) emits a per-port TCP listener **only** for the ports
+`Virtual.To()` (`pkg/xds/cache.go`) emits a per-port TCP listener **only** for the ports
 in `a.Ports`, which `pkg/inject` populates from `collectPorts` / `gatherContainerPorts`
 (`pkg/inject/injector.go`) — i.e. the Pod spec's declared ports plus any `--portmap` entries.
 
@@ -263,6 +263,6 @@ The only difference between mesh and fargate templates is that listeners generat
 | `pkg/inject/fargate.go` | Fargate (SSH+Envoy) strategy |
 | `pkg/inject/container.go` | Container spec builders |
 | `pkg/inject/envoy.go` | ConfigMap envoy rule CRUD |
-| `pkg/controlplane/cache.go` | Virtual/Rule types consumed by inject |
+| `pkg/xds/cache.go` | Virtual/Rule types consumed by inject |
 | `docs/06-fargate-mode.md` | Fargate mode architecture |
 | `docs/05-owner-id.md` | OwnerID rule ownership |

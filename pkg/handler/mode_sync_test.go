@@ -59,21 +59,21 @@ func runSyncCommand(t *testing.T, ctx context.Context, clientset kubernetes.Inte
 	}
 }
 
-// kubeVPNSidecars are the container names KubeVPN injects. The control-plane (xDS) and DNS
+// kubeVPNSidecars are the container names KubeVPN injects. The xds (xDS) and DNS
 // sidecars are included so a failure dump surfaces the envoy rule generation (the [xDS] rule
-// summaries and empty-TUN-IP warnings live in the control-plane container) — without it the
+// summaries and empty-TUN-IP warnings live in the xds container) — without it the
 // reason envoy routes to origin_cluster is invisible. On an e2e failure their logs
 // (not just pod status) are what explain why traffic did not route or a pod crash-looped.
 var kubeVPNSidecars = sets.New[string](
 	config.ContainerSidecarVPN,
-	config.ContainerSidecarEnvoyProxy,
-	config.ContainerSidecarControlPlane,
+	config.ContainerSidecarEnvoy,
+	config.ContainerSidecarXDS,
 	config.ContainerSidecarDNS,
 )
 
 // dumpKubeVPNSidecarLogs prints, across all namespaces, the status and container logs
 // (previous crashed instance first, then current) of every KubeVPN sidecar (vpn,
-// envoy-proxy). The e2e tests otherwise only dump pod status/describe, never the sidecar
+// envoy). The e2e tests otherwise only dump pod status/describe, never the sidecar
 // logs that surface *why* `kubevpn proxy --foreground` exited or envoy failed to route.
 // Best-effort: it logs and continues past any API error, and uses its own short-lived
 // context (a caller's context may already be dead).

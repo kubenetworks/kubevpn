@@ -111,7 +111,7 @@ func TestCreateOutboundPod(t *testing.T) {
 					}},
 					ContainerStatuses: []v1.ContainerStatus{
 						{Name: config.ContainerSidecarVPN, Ready: true},
-						{Name: config.ContainerSidecarControlPlane, Ready: true},
+						{Name: config.ContainerSidecarXDS, Ready: true},
 						{Name: config.ContainerSidecarDNS, Ready: true},
 					},
 				},

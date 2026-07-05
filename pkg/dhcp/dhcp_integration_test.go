@@ -162,4 +162,3 @@ func TestForEach_IteratesAllocated(t *testing.T) {
 		t.Fatalf("expected 3 v6 allocations, got %d", v6count)
 	}
 }
-

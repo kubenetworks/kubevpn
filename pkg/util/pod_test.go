@@ -16,10 +16,10 @@ func TestPodStatusSummary(t *testing.T) {
 		{
 			name: "container waiting reasons",
 			pod: &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
-				{Name: "control-plane", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}}},
+				{Name: "xds", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}}},
 				{Name: "vpn", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}}},
 			}}},
-			want: "control-plane=ContainerCreating, vpn=ContainerCreating",
+			want: "xds=ContainerCreating, vpn=ContainerCreating",
 		},
 		{
 			name: "running container",

@@ -70,4 +70,3 @@ func cleanupLocalContainer(ctx context.Context) error {
 	}
 	return err
 }
-

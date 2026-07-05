@@ -9,11 +9,11 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 const (
@@ -170,7 +170,7 @@ func buildProxyAndSyncStatus(ctx context.Context, connect *handler.ConnectOption
 		return nil, nil, cmErr
 	}
 	if configMap != nil {
-		v := make([]*controlplane.Virtual, 0)
+		v := make([]*xds.Virtual, 0)
 		if str, ok := configMap.Data[config.KeyEnvoy]; ok {
 			if err := yaml.Unmarshal([]byte(str), &v); err != nil {
 				return nil, nil, err
@@ -230,7 +230,7 @@ func buildProxyAndSyncStatus(ctx context.Context, connect *handler.ConnectOption
 }
 
 // portMapToLocalPorts extracts containerPort → localPort mappings using the typed ParsePortMap helper.
-func portMapToLocalPorts(rule *controlplane.Rule) map[int32]int32 {
+func portMapToLocalPorts(rule *xds.Rule) map[int32]int32 {
 	result := make(map[int32]int32)
 	for _, pm := range rule.ParsePortMap() {
 		result[pm.ContainerPort] = pm.LocalPort

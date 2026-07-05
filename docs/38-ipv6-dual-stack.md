@@ -84,7 +84,7 @@ On Windows, `dns_windows.go` calls `luid.SetDNS(AF_INET, …)` and `luid.SetDNS(
 flushes both on teardown. Other platforms configure the resolver for both families. See
 [19-dns-resolution.md](19-dns-resolution.md).
 
-### 3.6 Envoy xDS — per-family + template selection (`pkg/inject`, `pkg/controlplane`)
+### 3.6 Envoy xDS — per-family + template selection (`pkg/inject`, `pkg/xds`)
 
 `LocalTunIPv6` is carried in `envoyRuleSpec` and propagated into each `Rule` so the control plane
 can emit listeners/clusters for the v6 target. The sidecar's bootstrap config has **two embedded

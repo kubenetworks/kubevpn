@@ -27,7 +27,7 @@ Earlier designs allocated sidecar TUN IPs once by a MutatingWebhook at Pod creat
 
 ### 3. Core Idea
 
-The existing envoy control-plane (`pkg/controlplane`) already provides:
+The existing envoy control-plane (`pkg/xds`) already provides:
 - A gRPC server (xDS protocol, port 9002)
 - A ConfigMap watcher that monitors `kubevpn-traffic-manager` ConfigMap changes
 - A Processor that converts Virtual/Rule configurations from the ConfigMap into envoy snapshots
@@ -97,10 +97,10 @@ message TunIPResponse {
 
 #### 4.2 Control-Plane Implementation
 
-Add TUN IP management logic in `pkg/controlplane/`:
+Add TUN IP management logic in `pkg/xds/`:
 
 ```go
-// pkg/controlplane/tun_config.go (new file)
+// pkg/xds/tun_config.go (new file)
 
 type TunConfigServer struct {
     rpc.UnimplementedTunConfigServiceServer
@@ -180,7 +180,7 @@ func (s *TunConfigServer) NotifyIPChange(ownerID string, newIPv4, newIPv6 *net.I
 
 #### 4.3 Registering the New Service on the Control-Plane gRPC Server
 
-Modify `pkg/controlplane/server.go`:
+Modify `pkg/xds/server.go`:
 ```go
 func runServer(ctx context.Context, server serverv3.Server, tunConfig *TunConfigServer, port uint) error {
     // ... existing setup ...
@@ -255,7 +255,7 @@ The webhook (`pkg/webhook/`) has been fully removed from the codebase. IP alloca
 The existing control-plane watcher already monitors ConfigMap changes. Extend it to detect DHCP field changes:
 
 ```go
-// pkg/controlplane/watcher.go -- modify the notifyCh send logic
+// pkg/xds/watcher.go -- modify the notifyCh send logic
 
 // Previously only sends KeyEnvoy changes:
 notifyCh <- NotifyMessage{Content: configMap.Data[config.KeyEnvoy]}
@@ -316,10 +316,10 @@ Sidecar container starts (kubevpn server -l "tun:/tcp://tm:10801?net=&route=..."
 | File | Operation | Description |
 |------|-----------|-------------|
 | `pkg/daemon/rpc/daemon.proto` | Modify | TunConfigService (GetTunIP / WatchTunIP) |
-| `pkg/controlplane/tun_config.go` | Modify | TunConfigServer; `syncEnvoyRuleIP`; `WatchTunIP` ticker push |
-| `pkg/controlplane/cache.go` | Modify | `Virtual.To()` emits UDP listener (`toUDPListener`) |
-| `pkg/controlplane/server.go` | Modify | Register TunConfigService on the xDS gRPC server |
-| `pkg/controlplane/watcher.go` | Modify | Notify TunConfigServer on `TUN_IP_POOL` changes |
+| `pkg/xds/tun_config.go` | Modify | TunConfigServer; `syncEnvoyRuleIP`; `WatchTunIP` ticker push |
+| `pkg/xds/cache.go` | Modify | `Virtual.To()` emits UDP listener (`toUDPListener`) |
+| `pkg/xds/server.go` | Modify | Register TunConfigService on the xDS gRPC server |
+| `pkg/xds/watcher.go` | Modify | Notify TunConfigServer on `TUN_IP_POOL` changes |
 | `pkg/tun/ip*.go` | — | `ChangeIP` (client side only) |
 | `pkg/core/tun_client.go` | Modify | heartbeat dynamic IP reading (client side) |
 | `pkg/core/protocol_registry.go` | Modify | `tunProtocolFactory` fetches IP once; watcher/poll/apply removed |
@@ -336,7 +336,7 @@ Sidecar container starts (kubevpn server -l "tun:/tcp://tm:10801?net=&route=..."
 
 1. `go build ./...`
 2. `make gen` -- generate protobuf
-3. `go test ./pkg/controlplane/... ./pkg/tun/... ./pkg/core/...`
+3. `go test ./pkg/xds/... ./pkg/tun/... ./pkg/core/...`
 4. Integration test:
    - Start traffic manager (with TunConfigService)
    - Start sidecar (with `net=` empty)
@@ -654,9 +654,9 @@ kubevpn connect -n default
 | `tun.ChangeIP` | `pkg/tun` | Client only (sidecar IP is fixed) |
 | heartbeat dynamic IP reading | `pkg/core/tun_client.go` | Yes |
 | `TunConfigService` proto | `pkg/daemon/rpc` | Yes (same gRPC API) |
-| `TunConfigServer` | `pkg/controlplane` | Yes (same server-side instance) |
-| `GetTunIP` (allocate at startup) | `pkg/controlplane` | Yes (same RPC) |
-| `WatchTunIP` (subscribe to changes) | `pkg/controlplane` | Client subscribes; sidecar relies on envoy xDS instead |
+| `TunConfigServer` | `pkg/xds` | Yes (same server-side instance) |
+| `GetTunIP` (allocate at startup) | `pkg/xds` | Yes (same RPC) |
+| `WatchTunIP` (subscribe to changes) | `pkg/xds` | Client subscribes; sidecar relies on envoy xDS instead |
 
 ### 9. File Changes
 

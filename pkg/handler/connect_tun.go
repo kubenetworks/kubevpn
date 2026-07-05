@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	// healthCheckDialTimeout bounds dialing/checking the local control-plane and port-forward endpoints.
+	// healthCheckDialTimeout bounds dialing/checking the local xds and port-forward endpoints.
 	healthCheckDialTimeout = 5 * time.Second
 	// portForwardReadyTimeout is how long to wait for the port-forward to become ready before giving up.
 	portForwardReadyTimeout = 60 * time.Second
@@ -91,7 +91,7 @@ func healthCheckGRPC(ctx context.Context, cancelFunc context.CancelFunc, readyCh
 		if resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
 			conn.Close()
 			conn = nil
-			return fmt.Errorf("control plane not serving: %s: %w", resp.Status, config.ErrControlPlaneNotServing)
+			return fmt.Errorf("xds not serving: %s: %w", resp.Status, config.ErrXDSNotServing)
 		}
 		return nil
 	})

@@ -32,8 +32,8 @@ func GetVolume(ctx context.Context, clientset kubernetes.Interface, f util.Facto
 	}
 	result := map[string][]mount.Mount{}
 	for _, container := range pod.Spec.Containers {
-		// if container name is vpn or envoy-proxy, not need to download volume
-		if container.Name == config.ContainerSidecarVPN || container.Name == config.ContainerSidecarEnvoyProxy {
+		// if container name is vpn or envoy, not need to download volume
+		if container.Name == config.ContainerSidecarVPN || container.Name == config.ContainerSidecarEnvoy {
 			continue
 		}
 		var m []mount.Mount

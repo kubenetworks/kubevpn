@@ -14,13 +14,13 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 // networkTestEnv bundles a TunConfigServer + gRPC server for testing NetworkManager.
 type networkTestEnv struct {
-	server     *controlplane.TunConfigServer
+	server     *xds.TunConfigServer
 	grpcServer *grpc.Server
 	port       int
 }
@@ -33,11 +33,11 @@ func newNetworkTestEnv(t *testing.T) *networkTestEnv {
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
 			Data: map[string]string{
 				config.KeyTunIPPool: "",
-				config.KeyEnvoy: "",
+				config.KeyEnvoy:     "",
 			},
 		},
 	)
-	s, err := controlplane.NewTunConfigServer(context.Background(), clientset, "test-ns")
+	s, err := xds.NewTunConfigServer(context.Background(), clientset, "test-ns")
 	if err != nil {
 		t.Fatalf("NewTunConfigServer: %v", err)
 	}
