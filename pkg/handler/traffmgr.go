@@ -8,6 +8,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -28,8 +29,21 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		return err
 	}
 	if exists {
-		plog.StepDone(ctx, "Using traffic manager in namespace %q", namespace)
-		return nil
+		// A running manager pod is present, but make sure its Deployment still
+		// exists before treating the manager as installed. `kubevpn uninstall`
+		// deletes the Deployment with GracePeriodSeconds=0 while its pod may
+		// briefly linger (cascade GC lag): the pod still reports Running with no
+		// deletionTimestamp, so DetectPodExists returns true. Skipping creation
+		// here would then make the next step (UpgradeDeploy → Deployment Get)
+		// fail with NotFound. Re-create from scratch when the Deployment is gone.
+		_, derr := clientset.AppsV1().Deployments(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if derr == nil {
+			plog.StepDone(ctx, "Using traffic manager in namespace %q", namespace)
+			return nil
+		}
+		if !apierrors.IsNotFound(derr) {
+			return fmt.Errorf("failed to get deployment %s: %w", config.ConfigMapPodTrafficManager, derr)
+		}
 	}
 
 	defer func() {

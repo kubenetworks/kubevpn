@@ -12,6 +12,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func TestGenServiceAccount(t *testing.T) {
@@ -566,5 +567,68 @@ func TestWaitPodReady_TransitionsToReady(t *testing.T) {
 	err = WaitPodReady(ctx, podClient, labelSelector, "")
 	if err != nil {
 		t.Fatalf("expected pod to become ready, got error: %v", err)
+	}
+}
+
+// TestCreateOutboundPod_RecreatesWhenDeploymentMissing reproduces the fargate
+// proxy-after-uninstall race seen in CI (TestFunctions/04-proxy-mesh-fargate):
+// `kubevpn uninstall` deletes the traffic-manager Deployment with
+// GracePeriodSeconds=0, but its pod can briefly linger via cascade-GC lag,
+// still reporting Running with no deletionTimestamp. DetectPodExists then
+// returns true, so the old createOutboundPod skipped creation entirely —
+// leaving the next connect step (UpgradeDeploy → Deployment Get) to fail with
+// `deployments.apps "kubevpn-traffic-manager" not found` (exit 50), which tore
+// down the connection and cascaded into the phase's pingPodIP/health timeouts.
+//
+// The fix requires the Deployment (UpgradeDeploy's real dependency) to exist
+// before treating the manager as installed, so a lingering pod no longer masks
+// a missing Deployment.
+func TestCreateOutboundPod_RecreatesWhenDeploymentMissing(t *testing.T) {
+	const ns = "default"
+
+	// A ready traffic-manager pod that outlived its (already deleted) Deployment.
+	lingeringPod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.ConfigMapPodTrafficManager + "-lingering",
+			Namespace: ns,
+			Labels:    map[string]string{"app": config.ConfigMapPodTrafficManager},
+		},
+		Status: v1.PodStatus{
+			Phase:      v1.PodRunning,
+			Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+			ContainerStatuses: []v1.ContainerStatus{
+				{Name: "vpn", Ready: true, State: v1.ContainerState{Running: &v1.ContainerStateRunning{}}},
+			},
+		},
+	}
+	clientset := fake.NewSimpleClientset(
+		&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}},
+		lingeringPod,
+	)
+
+	// Precondition: the lingering pod makes the manager look present...
+	exists, err := util.DetectPodExists(context.Background(), clientset, ns)
+	if err != nil {
+		t.Fatalf("DetectPodExists: %v", err)
+	}
+	if !exists {
+		t.Fatal("precondition failed: lingering pod should make DetectPodExists report the manager present")
+	}
+	// ...while its Deployment is gone.
+	if _, err := clientset.AppsV1().Deployments(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{}); err == nil {
+		t.Fatal("precondition failed: traffic-manager Deployment should not exist yet")
+	}
+
+	// Bound the call: with the fix WaitPodReady finds the ready pod and returns
+	// immediately; the timeout only guards against a regression hanging CI.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := createOutboundPod(ctx, clientset, ns, "ghcr.io/test/kubevpn:latest", ""); err != nil {
+		t.Fatalf("createOutboundPod returned error: %v", err)
+	}
+
+	// The fix must have re-created the Deployment despite the lingering pod.
+	if _, err := clientset.AppsV1().Deployments(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{}); err != nil {
+		t.Fatalf("expected traffic-manager Deployment to be re-created, got: %v", err)
 	}
 }
