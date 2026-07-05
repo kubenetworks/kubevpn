@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -134,27 +133,45 @@ func restoreTunAllocs(t *testing.T, s *TunConfigServer, val string) {
 	}
 }
 
+// readTunAllocs returns the raw TUN_ALLOCS journal value.
+func readTunAllocs(t *testing.T, s *TunConfigServer) string {
+	t.Helper()
+	cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get cm: %v", err)
+	}
+	return cm.Data[config.KeyTunAllocs]
+}
+
 // TestManualIP_ConvergesUnderJournalLag is the fix for the logged ::1<->::3 flap.
-// Desired now comes from the operator-only TUN_ALLOCS_OVERRIDE key (consumed on
-// commit), while the server's journal output stays in TUN_ALLOCS. To prove the journal
-// read can no longer drive desired, we actively corrupt TUN_ALLOCS with a stale/opposite
-// value before every reconcile — the exact one-write lag that caused the oscillation.
-// With the split, the override is read once, committed once, and consumed: the loop
-// converges to a single commit no matter what the journal says.
+// TUN_ALLOCS is still both the operator's input and the server's journal output, but the
+// reconcile now ignores entries whose version is older than the in-memory allocation —
+// i.e. stale reads of the server's own past writes. To exercise that, before every
+// reconcile after the first we restore the *pre-edit* journal snapshot (the previous
+// committed value with its older version) — the exact one-write lag that used to drive
+// the oscillation. With the version guard the edit is proposed once, committed once
+// (which bumps the version), and every later stale read is rejected: the loop converges
+// to a single commit.
 func TestManualIP_ConvergesUnderJournalLag(t *testing.T) {
 	ctx := context.Background()
 	s := newTestServer(t)
 	rA, _ := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns"})
-	v6prev := mustHostIP(t, rA.IPv6)
 	v6want := freeIPs6(t, s, 1)[0]
 	ch := registerWatcher(s, "A")
+
+	// The journal as the server wrote it before the edit — exactly what a lagging Get
+	// would return (the previous committed v6 with its now-older version).
+	staleJournal := readTunAllocs(t, s)
+	// Operator edits v6 (keeping the version field, as `kubectl edit` does).
 	setManualAllocsDual(t, s, map[string][2]string{"A": {rA.IPv4, v6want.String() + "/64"}})
 
 	var committed []string
 	for i := 0; i < 8; i++ {
-		// Pre-commit lag: feed the journal the OPPOSITE (previous) value each round —
-		// the condition that previously caused perpetual re-proposing.
-		restoreTunAllocs(t, s, marshalOneOwnerV6(t, "A", rA.IPv4, v6prev.String()+"/64"))
+		if i > 0 {
+			// Model the one-write lag: the reconcile's Get returns the server's previous
+			// journal write (older version) instead of the just-committed value.
+			restoreTunAllocs(t, s, staleJournal)
+		}
 		s.ReconcileAllocsFromConfigMap(ctx)
 		drainPushes(ch)
 		s.mu.RLock()
@@ -180,36 +197,4 @@ func TestManualIP_ConvergesUnderJournalLag(t *testing.T) {
 	if cv := curV6(s, "A"); !cv.Equal(v6want) {
 		t.Fatalf("final v6=%s, want %s", cv, v6want)
 	}
-	// The override family must be consumed so a later reconcile cannot re-propose it.
-	if v6 := overrideV6(t, s, "A"); v6 != "" {
-		t.Fatalf("override v6 not consumed after commit: %q", v6)
-	}
-}
-
-// marshalOneOwnerV6 builds a TUN_ALLOCS body with a single owner's v4 (kept) and v6.
-func marshalOneOwnerV6(t *testing.T, owner, v4cidr, v6cidr string) string {
-	t.Helper()
-	pa := map[string]*persistedAlloc{owner: {IPv4: v4cidr, IPv6: v6cidr, Version: 1, LastRenew: 1}}
-	b, err := yaml.Marshal(pa)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	return string(b)
-}
-
-// overrideV6 returns the owner's IPv6 in the TUN_ALLOCS_OVERRIDE key ("" if consumed).
-func overrideV6(t *testing.T, s *TunConfigServer, owner string) string {
-	t.Helper()
-	cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get cm: %v", err)
-	}
-	over, err := parsePersistedAllocs(cm.Data[config.KeyTunAllocsOverride])
-	if err != nil {
-		t.Fatalf("parse override: %v", err)
-	}
-	if pa := over[owner]; pa != nil {
-		return pa.IPv6
-	}
-	return ""
 }

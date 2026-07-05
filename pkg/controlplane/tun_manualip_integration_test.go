@@ -26,14 +26,26 @@ func registerWatcher(s *TunConfigServer, ownerID string) chan *rpc.TunIPResponse
 	return ch
 }
 
+// liveVersion returns the owner's current in-memory allocation version (0 if absent),
+// so test edits can keep it — exactly what `kubectl edit` does — and pass the reconcile's
+// stale-echo guard (an edit with an older version is treated as a stale self-read).
+func liveVersion(s *TunConfigServer, owner string) int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if a, ok := s.allocs[owner]; ok {
+		return a.Version
+	}
+	return 0
+}
+
 // setManualAllocs overwrites the TUN_ALLOCS key with the given owner→CIDR map,
-// simulating an operator editing the ConfigMap by hand.
+// simulating an operator editing the ConfigMap by hand (keeping the version field).
 func setManualAllocs(t *testing.T, s *TunConfigServer, allocs map[string]string) {
 	t.Helper()
 	ctx := context.Background()
 	persisted := map[string]*persistedAlloc{}
 	for owner, v4cidr := range allocs {
-		persisted[owner] = &persistedAlloc{IPv4: v4cidr, Version: 1, LastRenew: time.Now().Unix()}
+		persisted[owner] = &persistedAlloc{IPv4: v4cidr, Version: liveVersion(s, owner), LastRenew: time.Now().Unix()}
 	}
 	data, err := yaml.Marshal(persisted)
 	if err != nil {
@@ -43,7 +55,7 @@ func setManualAllocs(t *testing.T, s *TunConfigServer, allocs map[string]string)
 	if err != nil {
 		t.Fatalf("get cm: %v", err)
 	}
-	cm.Data[config.KeyTunAllocsOverride] = string(data)
+	cm.Data[config.KeyTunAllocs] = string(data)
 	if _, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
 		t.Fatalf("update cm: %v", err)
 	}
@@ -459,7 +471,7 @@ func setManualAllocsDual(t *testing.T, s *TunConfigServer, allocs map[string][2]
 	ctx := context.Background()
 	persisted := map[string]*persistedAlloc{}
 	for owner, pair := range allocs {
-		persisted[owner] = &persistedAlloc{IPv4: pair[0], IPv6: pair[1], Version: 1, LastRenew: time.Now().Unix()}
+		persisted[owner] = &persistedAlloc{IPv4: pair[0], IPv6: pair[1], Version: liveVersion(s, owner), LastRenew: time.Now().Unix()}
 	}
 	data, err := yaml.Marshal(persisted)
 	if err != nil {
@@ -469,7 +481,7 @@ func setManualAllocsDual(t *testing.T, s *TunConfigServer, allocs map[string][2]
 	if err != nil {
 		t.Fatalf("get cm: %v", err)
 	}
-	cm.Data[config.KeyTunAllocsOverride] = string(data)
+	cm.Data[config.KeyTunAllocs] = string(data)
 	if _, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
 		t.Fatalf("update cm: %v", err)
 	}
