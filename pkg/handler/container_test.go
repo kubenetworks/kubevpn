@@ -204,7 +204,7 @@ func TestWaitPodReady_AlreadyRunning(t *testing.T) {
 	podClient := clientset.CoreV1().Pods("default")
 
 	ctx := context.Background()
-	err := WaitPodReady(ctx, podClient, "app=web")
+	err := WaitPodReady(ctx, podClient, "app=web", "")
 	if err != nil {
 		t.Fatalf("WaitPodReady returned error for already-running pod: %v", err)
 	}

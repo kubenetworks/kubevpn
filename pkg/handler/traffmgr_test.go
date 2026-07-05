@@ -503,7 +503,7 @@ func TestWaitPodReady_Timeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err = WaitPodReady(ctx, podClient, labelSelector)
+	err = WaitPodReady(ctx, podClient, labelSelector, "")
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
 	}
@@ -562,7 +562,7 @@ func TestWaitPodReady_TransitionsToReady(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	err = WaitPodReady(ctx, podClient, labelSelector)
+	err = WaitPodReady(ctx, podClient, labelSelector, "")
 	if err != nil {
 		t.Fatalf("expected pod to become ready, got error: %v", err)
 	}

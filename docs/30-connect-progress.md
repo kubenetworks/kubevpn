@@ -137,15 +137,15 @@ own erase sequence (`\r\x1b[K`) before printing, then `Unpause()`s. Without the 
 concatenates onto the spinner line (` ⣽ Creating traffic managerLabeling Namespace ...`). The erase is
 gated on a TTY check, so no escape codes leak into pipes/CI (`TestRenderer_NonTTY` pins this).
 
-> **Long waits update the spinner line, don't scroll.** A step that polls for a condition (e.g.
-> `Creating traffic manager` waiting for its pod) must **not** print the per-poll status as scrolling
-> lines — that floods the screen. Instead refresh the step message via `plog.StepStart`, so the live
-> spinner line updates in place with a one-line summary
-> (`Creating traffic manager (waiting for pod: control-plane=ContainerCreating, ...)`). Build the
-> summary with `util.PodStatusSummary`; keep the full multi-line `util.PrintStatus` table only for the
-> timeout error, so the reason (e.g. Unschedulable / Insufficient memory) is visible without `--debug`.
-> Genuine one-shot sub-operations (creating the ServiceAccount/Roles/Service/ConfigMap/Deployment) may
-> still log at Info — `printAboveSpinner` scrolls them cleanly above the live spinner.
+> **Long waits update the spinner line, don't scroll.** A step that polls for a condition (e.g. waiting
+> for the traffic-manager pod) must **not** print the per-poll status as scrolling lines — that floods
+> the screen. Instead refresh the step message via `plog.StepStart`, so the live spinner line updates in
+> place with a one-line summary (`Waiting for traffic manager pod (control-plane=ContainerCreating,
+> ...)`). Build the summary with `util.PodStatusSummary`; keep the full multi-line `util.PrintStatus`
+> table only for the timeout error, so the reason (e.g. Unschedulable / Insufficient memory) is visible
+> without `--debug`. `WaitPodReady` takes a `stepName`: non-empty drives the spinner line; empty
+> (callers that own their own step, e.g. sync) logs the status at Debug instead. One-shot
+> sub-operations (each resource create) are their own `StepStart`→`StepDone`, settling to a `✓` line.
 
 yacspin supports `Start`→`Stop`→`Start` on one instance, which is what makes the one-`✓`-per-step
 checklist work. The renderer is **not** hand-rolled — kind itself hand-rolls a small spinner, but
@@ -186,7 +186,8 @@ Step text is normalized so the checklist reads uniformly across commands:
 |---|---|---|
 | heading `Connecting to the cluster ...` (bold, `StepTitle`) | — | `pkg/daemon/action/connect_elevate.go` |
 | `Using namespace %q` / `Using manager namespace %q` | ✅ | `connect_elevate.go` (`detectAndSetManagerNamespace`) |
-| `Using traffic manager in namespace %q` (done-only) / `Creating traffic manager` → `Created traffic manager in namespace %q` | partial | `pkg/handler/traffmgr.go` |
+| `Using traffic manager in namespace %q` (done-only, when it already exists) | ✅ | `pkg/handler/traffmgr.go` |
+| else one ✓ per created resource — `Labeling namespace`→`Labeled namespace %q`, `Creating ServiceAccount`→`Created ServiceAccount %q`, then Role / RoleBinding / Service / ConfigMap / Deployment — then `Waiting for traffic manager pod` (live one-line status) → `Traffic manager ready in namespace %q` | — | `pkg/handler/traffmgr.go` (`createOutboundPod`, `WaitPodReady`) |
 | `Detecting cluster CIDRs` → `Detected cluster CIDRs: …` / `Detecting service CIDR` → `Detected service CIDR: …` | — | `pkg/util/cidr.go` |
 | `Detected cluster CIDRs: … (cached)` | ✅ | `pkg/handler/connect.go` (cached path) |
 | `Forwarding ports` → `Forwarded ports (TCP/UDP/xDS)`, `Creating TUN device` → `Created TUN device %q`, `Allocating TUN IP` → `Allocated TUN IP %s`, `Adding routes` → `Added %d pod/service routes`, `Configuring DNS` → `Configured DNS (cluster DNS %s)`, `Writing service records to the hosts file` → `Wrote %d service records to the hosts file (namespace %q)` | — | `pkg/handler/network.go` |
