@@ -181,7 +181,8 @@ func waitWatcher(t *testing.T, env *cpEnv, owner string, timeout time.Duration) 
 	}
 }
 
-// editTunAllocs writes an operator-style TUN_ALLOCS edit (owner→CIDR) to the CM.
+// editTunAllocs writes an operator-style manual-IP edit (owner→CIDR) to the CM's
+// TUN_ALLOCS_OVERRIDE key (the operator-only desired input).
 func editTunAllocs(t *testing.T, env *cpEnv, m map[string]string) {
 	t.Helper()
 	var b strings.Builder
@@ -196,7 +197,7 @@ func editTunAllocs(t *testing.T, env *cpEnv, m map[string]string) {
 	if cm.Data == nil {
 		cm.Data = map[string]string{}
 	}
-	cm.Data[config.KeyTunAllocs] = b.String()
+	cm.Data[config.KeyTunAllocsOverride] = b.String()
 	if _, err := env.clientset.CoreV1().ConfigMaps(env.ns).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
 		t.Fatalf("update cm: %v", err)
 	}
@@ -554,7 +555,7 @@ func editTunAllocsDual(t *testing.T, env *cpEnv, m map[string][2]string) {
 	if cm.Data == nil {
 		cm.Data = map[string]string{}
 	}
-	cm.Data[config.KeyTunAllocs] = b.String()
+	cm.Data[config.KeyTunAllocsOverride] = b.String()
 	if _, err := env.clientset.CoreV1().ConfigMaps(env.ns).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
 		t.Fatalf("update cm: %v", err)
 	}

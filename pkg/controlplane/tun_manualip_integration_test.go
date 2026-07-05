@@ -43,7 +43,7 @@ func setManualAllocs(t *testing.T, s *TunConfigServer, allocs map[string]string)
 	if err != nil {
 		t.Fatalf("get cm: %v", err)
 	}
-	cm.Data[config.KeyTunAllocs] = string(data)
+	cm.Data[config.KeyTunAllocsOverride] = string(data)
 	if _, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
 		t.Fatalf("update cm: %v", err)
 	}
@@ -469,7 +469,7 @@ func setManualAllocsDual(t *testing.T, s *TunConfigServer, allocs map[string][2]
 	if err != nil {
 		t.Fatalf("get cm: %v", err)
 	}
-	cm.Data[config.KeyTunAllocs] = string(data)
+	cm.Data[config.KeyTunAllocsOverride] = string(data)
 	if _, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
 		t.Fatalf("update cm: %v", err)
 	}
