@@ -41,7 +41,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	cleanupTrafficManagerResources(ctx, clientset, namespace)
 
 	// 1) label namespace
-	plog.G(ctx).Debugf("Labeling Namespace %s", namespace)
+	plog.G(ctx).Infof("Labeling Namespace %s", namespace)
 	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 	if err != nil {
 		plog.G(ctx).Errorf("Get Namespace error: %v", err)
@@ -58,7 +58,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	}
 
 	// 2) create serviceAccount
-	plog.G(ctx).Debugf("Creating ServiceAccount %s", config.ConfigMapPodTrafficManager)
+	plog.G(ctx).Infof("Creating ServiceAccount %s", config.ConfigMapPodTrafficManager)
 	_, err = clientset.CoreV1().ServiceAccounts(namespace).Create(ctx, genServiceAccount(namespace), metav1.CreateOptions{})
 	if err != nil {
 		plog.G(ctx).Infof("Creating ServiceAccount error: %v", err)
@@ -66,7 +66,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	}
 
 	// 3) create roles
-	plog.G(ctx).Debugf("Creating Roles %s", config.ConfigMapPodTrafficManager)
+	plog.G(ctx).Infof("Creating Roles %s", config.ConfigMapPodTrafficManager)
 	_, err = clientset.RbacV1().Roles(namespace).Create(ctx, genRole(namespace), metav1.CreateOptions{})
 	if err != nil {
 		plog.G(ctx).Errorf("Creating Roles error: %v", err)
@@ -74,7 +74,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	}
 
 	// 4) create roleBinding
-	plog.G(ctx).Debugf("Creating RoleBinding %s", config.ConfigMapPodTrafficManager)
+	plog.G(ctx).Infof("Creating RoleBinding %s", config.ConfigMapPodTrafficManager)
 	_, err = clientset.RbacV1().RoleBindings(namespace).Create(ctx, genRoleBinding(namespace), metav1.CreateOptions{})
 	if err != nil {
 		plog.G(ctx).Errorf("Creating RoleBinding error: %v", err)
@@ -82,7 +82,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	}
 
 	// 5) create service
-	plog.G(ctx).Debugf("Creating Service %s", config.ConfigMapPodTrafficManager)
+	plog.G(ctx).Infof("Creating Service %s", config.ConfigMapPodTrafficManager)
 	svcSpec := genService(namespace)
 	_, err = clientset.CoreV1().Services(namespace).Create(ctx, svcSpec, metav1.CreateOptions{})
 	if err != nil {
@@ -90,7 +90,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		return err
 	}
 
-	plog.G(ctx).Debugf("Creating ConfigMap %s", config.ConfigMapPodTrafficManager)
+	plog.G(ctx).Infof("Creating ConfigMap %s", config.ConfigMapPodTrafficManager)
 	_, err = clientset.CoreV1().ConfigMaps(namespace).Create(ctx, &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
@@ -113,7 +113,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	}
 
 	// 6) create deployment
-	plog.G(ctx).Debugf("Creating Deployment %s", config.ConfigMapPodTrafficManager)
+	plog.G(ctx).Infof("Creating Deployment %s", config.ConfigMapPodTrafficManager)
 	deploy := genDeploySpec(namespace, image, imagePullSecretName)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
@@ -138,7 +138,7 @@ func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelec
 		podReadyPollInterval = 3 * time.Second
 	)
 	var isPodReady bool
-	var lastMessage string
+	var lastSummary, lastDetail string
 	ctx2, cancelFunc := context.WithTimeout(ctx, podReadyTimeout)
 	defer cancelFunc()
 	wait.UntilWithContext(ctx2, func(ctx context.Context) {
@@ -157,25 +157,24 @@ func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelec
 				cancelFunc()
 				return
 			}
-			var sb bytes.Buffer
-			util.PrintStatus(&pod, &sb)
-			newMsg := sb.String()
-			if newMsg != lastMessage {
-				lastMessage = newMsg
-				// Per-poll pod status is per-item progress detail: keep it at
-				// Debug so the "Creating traffic manager" step stays a single
-				// spinner→✓ line (see docs/30 §5). Surfaces with --debug, which
-				// is where you look when a pod is stuck (e.g. Unschedulable).
-				plog.G(ctx).Debugf("%s", newMsg)
+			// Render the wait as a single, in-place spinner line (refreshing the
+			// step message) instead of scrolling the multi-line status table;
+			// the full table is kept for the timeout error. Only refresh when the
+			// one-line summary changes, to avoid needless repaints.
+			if summary := util.PodStatusSummary(&pod); summary != lastSummary {
+				lastSummary = summary
+				var sb bytes.Buffer
+				util.PrintStatus(&pod, &sb)
+				lastDetail = sb.String()
+				plog.StepStart(ctx, fmt.Sprintf("Creating traffic manager (waiting for pod: %s)", summary))
 			}
 		}
 	}, podReadyPollInterval)
 	if !isPodReady {
-		// The per-poll status is logged at Debug, so carry the last one in the
-		// error — it explains the timeout (e.g. Unschedulable / Insufficient
-		// memory) without needing --debug.
-		if lastMessage != "" {
-			return fmt.Errorf("wait for pod ready timeout, last status:\n%s", lastMessage)
+		if lastDetail != "" {
+			// Carry the full last status so the timeout reason (e.g.
+			// Unschedulable / Insufficient memory) is visible without --debug.
+			return fmt.Errorf("wait for pod ready timeout, last status:\n%s", lastDetail)
 		}
 		return errors.New("wait for pod ready timeout")
 	}

@@ -63,6 +63,39 @@ func PrintStatus(pod *corev1.Pod, writer io.Writer) {
 	}
 }
 
+// PodStatusSummary returns a single-line, human-readable reason a pod is not yet
+// ready — the waiting/terminated reason per container, or the unmet scheduling
+// condition (e.g. "PodScheduled=Unschedulable"). Suitable for a live spinner
+// line; the full detail (with messages) is available via PrintStatus.
+func PodStatusSummary(pod *corev1.Pod) string {
+	var parts []string
+	for _, s := range pod.Status.ContainerStatuses {
+		switch {
+		case s.State.Waiting != nil:
+			parts = append(parts, fmt.Sprintf("%s=%s", s.Name, s.State.Waiting.Reason))
+		case s.State.Terminated != nil:
+			parts = append(parts, fmt.Sprintf("%s=%s", s.Name, s.State.Terminated.Reason))
+		case s.State.Running != nil:
+			parts = append(parts, fmt.Sprintf("%s=Running", s.Name))
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, ", ")
+	}
+	for _, c := range pod.Status.Conditions {
+		if c.Status != corev1.ConditionTrue {
+			if c.Reason != "" {
+				return fmt.Sprintf("%s=%s", c.Type, c.Reason)
+			}
+			return string(c.Type)
+		}
+	}
+	if pod.Status.Phase != "" {
+		return string(pod.Status.Phase)
+	}
+	return "pending"
+}
+
 // GetEnv executes "env" in each container of the pod and returns a map of container names to temp file paths containing the environment output.
 func GetEnv(ctx context.Context, set *kubernetes.Clientset, config *rest.Config, ns, podName string) (map[string]string, error) {
 	pod, err := set.CoreV1().Pods(ns).Get(ctx, podName, v1.GetOptions{})

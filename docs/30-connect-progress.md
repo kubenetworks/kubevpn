@@ -137,10 +137,15 @@ own erase sequence (`\r\x1b[K`) before printing, then `Unpause()`s. Without the 
 concatenates onto the spinner line (` ⣽ Creating traffic managerLabeling Namespace ...`). The erase is
 gated on a TTY check, so no escape codes leak into pipes/CI (`TestRenderer_NonTTY` pins this).
 
-> **Keep step bodies quiet.** A step that wraps many sub-operations (e.g. `Creating traffic manager`,
-> which creates the ServiceAccount/Roles/Service/ConfigMap/Deployment and waits for the pod) must log
-> those sub-operations at **Debug**, per §5 — otherwise they flood the screen above the spinner. They
-> surface with `--debug`; a failing wait still carries its last pod status in the returned error.
+> **Long waits update the spinner line, don't scroll.** A step that polls for a condition (e.g.
+> `Creating traffic manager` waiting for its pod) must **not** print the per-poll status as scrolling
+> lines — that floods the screen. Instead refresh the step message via `plog.StepStart`, so the live
+> spinner line updates in place with a one-line summary
+> (`Creating traffic manager (waiting for pod: control-plane=ContainerCreating, ...)`). Build the
+> summary with `util.PodStatusSummary`; keep the full multi-line `util.PrintStatus` table only for the
+> timeout error, so the reason (e.g. Unschedulable / Insufficient memory) is visible without `--debug`.
+> Genuine one-shot sub-operations (creating the ServiceAccount/Roles/Service/ConfigMap/Deployment) may
+> still log at Info — `printAboveSpinner` scrolls them cleanly above the live spinner.
 
 yacspin supports `Start`→`Stop`→`Start` on one instance, which is what makes the one-`✓`-per-step
 checklist work. The renderer is **not** hand-rolled — kind itself hand-rolls a small spinner, but
