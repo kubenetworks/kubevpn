@@ -286,6 +286,58 @@ func (s *TunConfigServer) saveAllocs(ctx context.Context) error {
 	})
 }
 
+// clearOverrideFamily consumes an operator override once it has been acted on: it
+// removes the given family field(s) from TUN_ALLOCS_OVERRIDE[owner] (deleting the
+// whole entry when both families are gone), so a confirmed/declined/expired edit is
+// not re-proposed on the next reconcile. Best-effort: a failure only delays cleanup,
+// it cannot resurrect the edit incorrectly (a leftover override equal to the committed
+// value reconciles to a no-op). Optimistic-locked; safe to call under s.mu.
+func (s *TunConfigServer) clearOverrideFamily(ctx context.Context, owner string, clearV4, clearV6 bool) {
+	if !clearV4 && !clearV6 {
+		return
+	}
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		cm, getErr := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if getErr != nil {
+			return getErr
+		}
+		if cm.Data == nil {
+			return nil
+		}
+		raw, ok := cm.Data[config.KeyTunAllocsOverride]
+		if !ok || raw == "" {
+			return nil
+		}
+		over, perr := parsePersistedAllocs(raw)
+		if perr != nil {
+			return nil // malformed override: leave it for the reconcile warn path
+		}
+		entry, ok := over[owner]
+		if !ok {
+			return nil
+		}
+		if clearV4 {
+			entry.IPv4 = ""
+		}
+		if clearV6 {
+			entry.IPv6 = ""
+		}
+		if entry.IPv4 == "" && entry.IPv6 == "" {
+			delete(over, owner)
+		}
+		data, merr := yaml.Marshal(over)
+		if merr != nil {
+			return nil
+		}
+		cm.Data[config.KeyTunAllocsOverride] = string(data)
+		_, updErr := s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
+		return updErr
+	})
+	if err != nil {
+		plog.G(ctx).Warnf("[TunConfig] failed to consume override for owner %s: %v", owner, err)
+	}
+}
+
 // GetTunIP allocates or retrieves the TUN IP for the given owner.
 // When ExcludeIPs is set and the existing allocation conflicts with one of them,
 // the old IP is released and a new one is allocated (skipping all ExcludeIPs).
@@ -322,24 +374,31 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 		if a, aok := s.allocs[req.OwnerID]; aok && a.IPv4 != nil {
 			curV4 = a.IPv4.IP
 		}
+		declinedV4, declinedV6 := false, false
 		if p.candV4 != nil && isIPExcluded(p.candV4, excludeIPs) {
 			plog.G(ctx).Warnf("[TunConfig] owner %s declined proposed IPv4 %v (local conflict)", req.OwnerID, p.candV4.IP)
 			s.recordRejectedLocked(req.OwnerID, p.candV4.IP, curV4)
 			p.candV4 = nil
+			declinedV4 = true
 		}
 		if p.candV6 != nil && isIPExcluded(p.candV6, excludeIPs) {
 			plog.G(ctx).Warnf("[TunConfig] owner %s declined proposed IPv6 %v (local conflict)", req.OwnerID, p.candV6.IP)
 			s.recordRejectedLocked(req.OwnerID, p.candV6.IP, curV4)
 			p.candV6 = nil
+			declinedV6 = true
 		}
 		if p.candV4 == nil && p.candV6 == nil {
 			delete(s.pendingProposal, req.OwnerID)
 		} else {
 			s.pendingProposal[req.OwnerID] = p
 		}
-		if err := s.saveAllocs(ctx); err != nil { // revert operator's edit in TUN_ALLOCS to actual
-			plog.G(ctx).Warnf("[TunConfig] revert TUN_ALLOCS after decline: %v", err)
+		// Persist the rejection breadcrumb (saveAllocs folds in s.rejectedAnno; it also
+		// rewrites the journal, which already holds the unchanged actual).
+		if err := s.saveAllocs(ctx); err != nil {
+			plog.G(ctx).Warnf("[TunConfig] persist rejection after decline: %v", err)
 		}
+		// Consume the declined override families so they are not re-proposed.
+		s.clearOverrideFamily(ctx, req.OwnerID, declinedV4, declinedV6)
 		if a, aok := s.allocs[req.OwnerID]; aok {
 			a.LastRenew = time.Now()
 			return tunResp(a), nil
@@ -509,6 +568,9 @@ func (s *TunConfigServer) commitFamilyLocked(ctx context.Context, owner string, 
 		plog.G(ctx).Errorf("[TunConfig] commit: persist failed for owner %s: %v", owner, err)
 		return nil, err
 	}
+	// Consume the operator override for this family: the edit has been applied, so it
+	// must not be re-proposed on the next reconcile (even if a lagging read re-presents it).
+	s.clearOverrideFamily(ctx, owner, !isV6, isV6)
 	plog.G(ctx).Infof("[TunConfig] committed TUN IP %v (v6=%t) for owner %s (client confirmed)", committed.IP, isV6, owner)
 	// Do NOT notifyWatchers here: the confirming client IS this owner's watcher and
 	// applies the returned resp inline. Echoing it over the stream would re-deliver a
@@ -749,9 +811,13 @@ func (s *TunConfigServer) reconcileManualOnce(ctx context.Context) bool {
 		plog.G(ctx).Errorf("[TunConfig] reconcile: get configmap: %v", err)
 		return false
 	}
-	desired, err := parsePersistedAllocs(cm.Data[config.KeyTunAllocs])
+	// Desired comes from the operator-only override key, NOT the server-written journal
+	// (TUN_ALLOCS). Reading desired from a key the server never rewrites means the
+	// reconcile can never read its own just-written journal and re-propose the previous
+	// committed value (the ::1<->::3 oscillation).
+	desired, err := parsePersistedAllocs(cm.Data[config.KeyTunAllocsOverride])
 	if err != nil {
-		plog.G(ctx).Warnf("[TunConfig] reconcile: cannot parse %s: %v", config.KeyTunAllocs, err)
+		plog.G(ctx).Warnf("[TunConfig] reconcile: cannot parse %s: %v", config.KeyTunAllocsOverride, err)
 		return false
 	}
 
@@ -1090,23 +1156,22 @@ func (s *TunConfigServer) reapExpiredLeases(ctx context.Context) {
 }
 
 // expirePendingProposals drops dry-run proposals past their deadline. Proposals
-// hold no rented IP, so expiry just clears the intent and reverts TUN_ALLOCS to the
-// committed actual (undoing the operator's unconfirmed edit).
+// hold no rented IP, so expiry just clears the intent and consumes the operator's
+// unconfirmed override families so they are not re-proposed.
 func (s *TunConfigServer) expirePendingProposals(ctx context.Context) {
 	now := time.Now()
-	expired := false
+	type expiredFams struct{ v4, v6 bool }
+	toClear := map[string]expiredFams{}
 	s.mu.Lock()
 	for owner, p := range s.pendingProposal {
 		if now.After(p.deadline) {
+			toClear[owner] = expiredFams{v4: p.candV4 != nil, v6: p.candV6 != nil}
 			delete(s.pendingProposal, owner)
-			expired = true
 			plog.G(ctx).Debugf("[TunConfig] proposal for owner %s expired (no client response); dropping", owner)
 		}
 	}
-	if expired {
-		if err := s.saveAllocs(ctx); err != nil { // revert any unconfirmed edit in TUN_ALLOCS
-			plog.G(ctx).Warnf("[TunConfig] revert TUN_ALLOCS after proposal expiry: %v", err)
-		}
+	for owner, f := range toClear {
+		s.clearOverrideFamily(ctx, owner, f.v4, f.v6)
 	}
 	s.mu.Unlock()
 }

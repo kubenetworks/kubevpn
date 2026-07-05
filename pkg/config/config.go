@@ -26,7 +26,16 @@ const (
 	// KeyClusterCIDRs is the ConfigMap key for cluster CIDR cache (IPv4 + IPv6).
 	KeyClusterCIDRs = "CLUSTER_CIDRS"
 	// KeyTunAllocs is the ConfigMap key for TUN IP owner allocations (ownerID → IPs).
+	// It is a server-written crash-recovery journal (saveAllocs); operators must NOT
+	// edit it. To force a client's TUN IP, edit KeyTunAllocsOverride instead.
 	KeyTunAllocs = "TUN_ALLOCS"
+	// KeyTunAllocsOverride is the ConfigMap key an operator edits to force a client's
+	// TUN IP (ownerID → desired IPs, same YAML shape as TUN_ALLOCS). It is read-only to
+	// the server's reconcile (the desired input) and never written by saveAllocs, so the
+	// desired value never races the server's journal output. Entries are consumed (the
+	// committed family is deleted) once the client confirms/declines or the proposal
+	// expires.
+	KeyTunAllocsOverride = "TUN_ALLOCS_OVERRIDE"
 
 	// TLSCertKey is the key for tls certificates in a TLS secret.
 	TLSCertKey = "tls_crt"
