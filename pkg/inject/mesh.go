@@ -3,6 +3,7 @@ package inject
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -46,10 +47,18 @@ func (m *meshInjector) Inject(ctx context.Context) error {
 		return err
 	}
 
-	if alreadyInjected(templateSpec) {
+	if injectedForManager(templateSpec, o.ManagerNamespace) {
 		workload := fmt.Sprintf("%s/%s", o.Controller.Mapping.Resource.Resource, o.Controller.Name)
 		plog.G(ctx).Infof("Workload %s/%s has already been injected with sidecar", o.ManagerNamespace, workload)
 		return nil
+	}
+	if alreadyInjected(templateSpec) {
+		// Sidecars exist but target a different traffic-manager namespace. Their
+		// envoy xds_cluster still points at "kubevpn-traffic-manager.<old-ns>",
+		// which stops resolving once that manager is gone, so the sidecar loses
+		// its xDS stream forever. Re-inject against the current manager namespace;
+		// AddVPNAndEnvoyContainer removes the stale containers first.
+		plog.G(ctx).Infof("Re-injecting sidecar into %s/%s: traffic-manager namespace changed", o.Controller.Namespace, o.Controller.Name)
 	}
 
 	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, o.Factory, o.ManagerNamespace)
@@ -64,6 +73,35 @@ func alreadyInjected(templateSpec *v1.PodTemplateSpec) bool {
 		containerNames.Insert(container.Name)
 	}
 	return containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy)
+}
+
+// injectedForManager reports whether the workload already carries the kubevpn
+// sidecars AND the envoy sidecar's xDS bootstrap targets managerNamespace.
+//
+// The traffic-manager address (kubevpn-traffic-manager.<ns>) is rendered into the
+// envoy --config-yaml at injection time, so it is fixed to whatever namespace the
+// manager lived in when the workload was injected. If the manager later moves
+// namespaces (e.g. per-namespace manager → centralized manager), a plain
+// alreadyInjected check would skip re-injection, leaving the envoy xds_cluster
+// pointing at a now-deleted Service whose DNS no longer resolves — the sidecar
+// then loses its xDS stream permanently and serves stale routes. Detecting the
+// mismatch here forces a clean re-injection against the current manager.
+func injectedForManager(templateSpec *v1.PodTemplateSpec, managerNamespace string) bool {
+	if !alreadyInjected(templateSpec) {
+		return false
+	}
+	want := "address: " + trafficManagerAddr(managerNamespace) + "\n"
+	for _, c := range templateSpec.Spec.Containers {
+		if c.Name != config.ContainerSidecarEnvoyProxy {
+			continue
+		}
+		for _, arg := range c.Args {
+			if strings.Contains(arg, want) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // UnpatchContainer removes injected sidecar containers and cleans up envoy configuration.

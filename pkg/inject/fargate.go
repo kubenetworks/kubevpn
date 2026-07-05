@@ -58,10 +58,16 @@ func (f *fargateInjector) Inject(ctx context.Context) error {
 		return err
 	}
 
-	if alreadyInjected(templateSpec) {
+	if injectedForManager(templateSpec, o.ManagerNamespace) {
 		workload := fmt.Sprintf("%s/%s", o.Controller.Mapping.Resource.Resource, o.Controller.Name)
 		plog.G(ctx).Infof("Workload %s/%s has already been injected with sidecar", o.Controller.Namespace, workload)
 		return nil
+	}
+	if alreadyInjected(templateSpec) {
+		// Sidecars exist but target a different traffic-manager namespace whose
+		// envoy xds_cluster DNS no longer resolves — re-inject against the current
+		// manager. AddEnvoyAndSSHContainer removes the stale containers first.
+		plog.G(ctx).Infof("Re-injecting sidecar into %s/%s: traffic-manager namespace changed", o.Controller.Namespace, o.Controller.Name)
 	}
 
 	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, o.Factory, o.ManagerNamespace)
