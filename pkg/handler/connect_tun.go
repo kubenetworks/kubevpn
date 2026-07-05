@@ -24,7 +24,8 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-// detect pod is delete event, if pod is deleted, needs to redo port-forward immediately
+// portForward sets up port-forwarding to the traffic manager pod with automatic
+// retry when the pod is recreated or the connection drops.
 func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) error {
 	firstCtx, firstCancelFunc := context.WithCancel(ctx)
 	defer firstCancelFunc()
@@ -35,62 +36,15 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 		}}
 		first := ptr.To(true)
 		for ctx.Err() == nil {
-			func() {
-				defer time.Sleep(time.Millisecond * 200)
-
-				ctx2, cancelFunc2 := context.WithTimeout(ctx, time.Second*10)
-				defer cancelFunc2()
-				podList, err := c.GetRunningPodList(ctx2)
+			err := c.portForwardOnce(ctx, portPair, *first, firstCancelFunc)
+			if *first {
 				if err != nil {
-					plog.G(ctx).Debugf("Failed to get running pod: %v", err)
-					if *first {
-						util.SafeWrite(errChan, err)
-					}
-					return
-				}
-				pod := podList[0]
-				// add route in case of don't have permission to watch pod, but pod recreated ip changed, so maybe this ip can not visit
-				_ = c.addRoute(util.GetPodIP(pod)...)
-				childCtx, cancelFunc := context.WithCancel(ctx)
-				defer cancelFunc()
-				readyChan := make(chan struct{})
-				podName := pod.GetName()
-				// try to detect pod is delete event, if pod is deleted, needs to redo port-forward
-				go util.CheckPodStatus(childCtx, cancelFunc, podName, c.clientset.CoreV1().Pods(c.ManagerNamespace))
-				domain := config.ConfigMapPodTrafficManager
-				go healthCheckPortForward(childCtx, cancelFunc, readyChan, strings.Split(portPair[1], ":")[0], domain, c.LocalTunIPv4.IP)
-				go healthCheckTCPConn(childCtx, cancelFunc, readyChan, domain, util.GetPodIP(pod)[0])
-				if *first {
-					go func() {
-						select {
-						case <-readyChan:
-							firstCancelFunc()
-						case <-childCtx.Done():
-						}
-					}()
-				}
-				out := plog.G(ctx).Logger.Out
-				err = util.PortForwardPod(
-					c.config,
-					c.restclient,
-					podName,
-					c.ManagerNamespace,
-					portPair,
-					readyChan,
-					childCtx.Done(),
-					nil,
-					out,
-				)
-				if *first {
 					util.SafeWrite(errChan, err)
-				}
-				first = ptr.To(false)
-				if err == nil {
-					plog.G(ctx).Debugf("Port forward retrying")
 					return
 				}
-				plog.G(ctx).Debugf("Port-forward error: %v", err)
-			}()
+			}
+			first = ptr.To(false)
+			time.Sleep(time.Millisecond * 200)
 		}
 	}()
 	ticker := time.NewTicker(time.Second * 60)
@@ -103,6 +57,65 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 	case <-firstCtx.Done():
 		return nil
 	}
+}
+
+// portForwardOnce runs a single port-forward session to the traffic manager pod.
+// It selects a running pod, starts health checks and pod-deletion watchers, then
+// blocks on the port-forward until the session ends. Returns nil when the session
+// was established and later terminated (retry expected), or an error if the pod
+// could not be found. When first is true, onReady is called once the port-forward
+// becomes ready (before the session ends).
+func (c *ConnectOptions) portForwardOnce(ctx context.Context, portPair []string, first bool, onReady func()) error {
+	ctx2, cancelFunc2 := context.WithTimeout(ctx, time.Second*10)
+	defer cancelFunc2()
+	podList, err := c.GetRunningPodList(ctx2)
+	if err != nil {
+		plog.G(ctx).Debugf("Failed to get running pod: %v", err)
+		return err
+	}
+	pod := podList[0]
+	// add route in case we don't have permission to watch the pod, but
+	// the pod was recreated with a new IP that is not yet routable
+	_ = c.addRoute(util.GetPodIP(pod)...)
+
+	childCtx, cancelFunc := context.WithCancel(ctx)
+	defer cancelFunc()
+
+	readyChan := make(chan struct{})
+	podName := pod.GetName()
+	// detect pod deletion so we can redo port-forward
+	go util.CheckPodStatus(childCtx, cancelFunc, podName, c.clientset.CoreV1().Pods(c.ManagerNamespace))
+	domain := config.ConfigMapPodTrafficManager
+	gvisorUDPPort, _, _ := strings.Cut(portPair[1], ":")
+	go healthCheckPortForward(childCtx, cancelFunc, readyChan, gvisorUDPPort, domain, c.LocalTunIPv4.IP)
+	go healthCheckTCPConn(childCtx, cancelFunc, readyChan, domain, util.GetPodIP(pod)[0])
+	if first {
+		go func() {
+			select {
+			case <-readyChan:
+				onReady()
+			case <-childCtx.Done():
+			}
+		}()
+	}
+
+	err = util.PortForwardPod(
+		c.config,
+		c.restclient,
+		podName,
+		c.ManagerNamespace,
+		portPair,
+		readyChan,
+		childCtx.Done(),
+		nil,
+		plog.G(ctx).Logger.Out,
+	)
+	if err != nil {
+		plog.G(ctx).Debugf("Port-forward error: %v", err)
+	} else {
+		plog.G(ctx).Debugf("Port forward retrying")
+	}
+	return nil
 }
 
 func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress string) (err error) {
@@ -128,7 +141,7 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 	}
 
 	var routes []types.Route
-	for _, ipNet := range util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cidrList), c.apiServerIPs) {
+	for _, ipNet := range c.dedupAndFilterCIDRs(cidrList) {
 		if ipNet != nil && !ipNet.IP.IsLoopback() {
 			routes = append(routes, types.Route{Dst: *ipNet})
 		}
@@ -161,7 +174,7 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 		MaxRetries:  5,
 	}
 
-	handler := core.TunHandler(forwarder, nil)
+	handler := core.TunHandler(forwarder, core.NewRouteHub())
 	listener, err := tun.Listener(tunConfig)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to create tun listener: %v", err)

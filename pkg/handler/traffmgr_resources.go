@@ -107,7 +107,11 @@ func genMutatingWebhookConfiguration(namespace string, crt []byte) *admissionv1.
 	}
 }
 
-func genService(namespace string, tcp10801 string, tcp9002 string, tcp80 string, udp53 string) *v1.Service {
+func genService(namespace string) *v1.Service {
+	tcp10801 := config.PortNameTCP
+	tcp9002 := config.PortNameEnvoy
+	tcp80 := config.PortNameHTTP
+	udp53 := config.PortNameDNS
 	return &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
@@ -171,7 +175,11 @@ func httpProbes(port int32, path string) (*v1.Probe, *v1.Probe, *v1.Probe) {
 		&v1.Probe{ProbeHandler: handler, InitialDelaySeconds: 1, PeriodSeconds: 2, FailureThreshold: 15}
 }
 
-func genDeploySpec(namespace, tcp10801, tcp9002, udp53, tcp80, image, imagePullSecretName string) *appsv1.Deployment {
+func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deployment {
+	tcp10801 := config.PortNameTCP
+	tcp9002 := config.PortNameEnvoy
+	udp53 := config.PortNameDNS
+	tcp80 := config.PortNameHTTP
 	var resourcesSmall = v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
 			v1.ResourceCPU:    resource.MustParse("100m"),

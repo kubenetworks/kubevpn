@@ -44,6 +44,7 @@ type InjectOptions struct {
 	PortMaps         []string
 	Secret           *v1.Secret
 	Image            string
+	OwnerID          string
 }
 
 // NewInjector returns the appropriate Injector for the given workload and options.

@@ -25,9 +25,11 @@ func TestNewRouteHub(t *testing.T) {
 	}
 }
 
-func TestDefaultRouteHub(t *testing.T) {
-	if DefaultRouteHub == nil {
-		t.Fatal("DefaultRouteHub is nil")
+func TestNewRouteHub_NotShared(t *testing.T) {
+	hub1 := NewRouteHub()
+	hub2 := NewRouteHub()
+	if hub1 == hub2 {
+		t.Fatal("NewRouteHub should return distinct instances")
 	}
 }
 
@@ -121,11 +123,11 @@ func TestRouteHub_RouteMapTCP_DeleteEntry(t *testing.T) {
 	}
 }
 
-func TestTunHandler_NilHub_UsesDefault(t *testing.T) {
+func TestTunHandler_NilHub_StoresNil(t *testing.T) {
 	handler := TunHandler(nil, nil)
 	th := handler.(*tunHandler)
-	if th.hub != DefaultRouteHub {
-		t.Fatal("nil hub should fall back to DefaultRouteHub")
+	if th.hub != nil {
+		t.Fatal("nil hub should be stored as nil, callers must provide explicit hub")
 	}
 }
 
@@ -138,11 +140,11 @@ func TestTunHandler_CustomHub(t *testing.T) {
 	}
 }
 
-func TestGvisorTCPHandler_NilHub_UsesDefault(t *testing.T) {
+func TestGvisorTCPHandler_NilHub_StoresNil(t *testing.T) {
 	handler := GvisorTCPHandler(nil)
 	gh := handler.(*gvisorTCPHandler)
-	if gh.hub != DefaultRouteHub {
-		t.Fatal("nil hub should fall back to DefaultRouteHub")
+	if gh.hub != nil {
+		t.Fatal("nil hub should be stored as nil, callers must provide explicit hub")
 	}
 }
 
@@ -155,8 +157,8 @@ func TestGvisorTCPHandler_CustomHub(t *testing.T) {
 	}
 }
 
-func TestGenerateServers_NilHub_FallsBackToDefault(t *testing.T) {
-	// Should not panic with nil hub — falls back to DefaultRouteHub
+func TestGenerateServers_NilHub_PassedThrough(t *testing.T) {
+	// nil hub is passed through to protocol factories; callers must provide explicit hub
 	_, _ = GenerateServers([]string{"unknown://:0"}, nil)
 }
 

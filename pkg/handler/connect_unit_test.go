@@ -30,7 +30,7 @@ func newTestConnectOptions(t *testing.T) *ConnectOptions {
 	return &ConnectOptions{
 		ManagerNamespace: "test-ns",
 		OriginNamespace:  "default",
-		clientset:        clientset,
+		K8sClient: K8sClient{clientset: clientset},
 		ctx:              ctx,
 		cancel:           cancel,
 	}
@@ -362,4 +362,66 @@ func TestConnectOptions_ProxyResources_ToResources(t *testing.T) {
 	if resources[2].Workload != "deployments.apps/api" || resources[2].Namespace != "staging" {
 		t.Fatalf("resources[2] = %+v", resources[2])
 	}
+}
+
+func TestDedupAndFilterCIDRs(t *testing.T) {
+	mustParseCIDR := func(s string) *net.IPNet {
+		_, cidr, err := net.ParseCIDR(s)
+		if err != nil {
+			t.Fatalf("ParseCIDR(%q): %v", s, err)
+		}
+		return cidr
+	}
+
+	t.Run("empty input", func(t *testing.T) {
+		c := &ConnectOptions{}
+		result := c.dedupAndFilterCIDRs(nil)
+		if len(result) != 0 {
+			t.Fatalf("expected empty, got %v", result)
+		}
+	})
+
+	t.Run("overlapping CIDRs deduplicated", func(t *testing.T) {
+		c := &ConnectOptions{}
+		cidrs := []*net.IPNet{
+			mustParseCIDR("10.0.0.0/16"),
+			mustParseCIDR("10.0.1.0/24"),
+		}
+		result := c.dedupAndFilterCIDRs(cidrs)
+		if len(result) != 1 {
+			t.Fatalf("expected 1 CIDR after dedup, got %d: %v", len(result), result)
+		}
+		if result[0].String() != "10.0.0.0/16" {
+			t.Fatalf("expected 10.0.0.0/16, got %s", result[0])
+		}
+	})
+
+	t.Run("API server IPs filtered", func(t *testing.T) {
+		c := &ConnectOptions{}
+		c.apiServerIPs = []net.IP{net.ParseIP("10.0.0.1")}
+		cidrs := []*net.IPNet{
+			mustParseCIDR("10.0.0.0/24"),
+			mustParseCIDR("192.168.0.0/16"),
+		}
+		result := c.dedupAndFilterCIDRs(cidrs)
+		if len(result) != 1 {
+			t.Fatalf("expected 1 CIDR after filtering, got %d: %v", len(result), result)
+		}
+		if result[0].String() != "192.168.0.0/16" {
+			t.Fatalf("expected 192.168.0.0/16, got %s", result[0])
+		}
+	})
+
+	t.Run("non-overlapping preserved", func(t *testing.T) {
+		c := &ConnectOptions{}
+		cidrs := []*net.IPNet{
+			mustParseCIDR("10.0.0.0/8"),
+			mustParseCIDR("172.16.0.0/12"),
+			mustParseCIDR("192.168.0.0/16"),
+		}
+		result := c.dedupAndFilterCIDRs(cidrs)
+		if len(result) != 3 {
+			t.Fatalf("expected 3 CIDRs, got %d: %v", len(result), result)
+		}
+	})
 }

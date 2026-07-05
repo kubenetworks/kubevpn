@@ -19,8 +19,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/cli-runtime/pkg/resource"
 	informerv1 "k8s.io/client-go/informers/core/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -38,6 +36,8 @@ import (
 
 // ConnectOptions holds all state for a kubevpn connection session.
 type ConnectOptions struct {
+	K8sClient
+
 	ManagerNamespace     string
 	ExtraRouteInfo       ExtraRouteInfo
 	Foreground           bool
@@ -52,12 +52,9 @@ type ConnectOptions struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	isDataPlane bool
+	OwnerID     string `json:"OwnerID,omitempty"`
 
-	clientset  kubernetes.Interface
-	restclient *rest.RESTClient
-	config     *rest.Config
-	factory    cmdutil.Factory
-	cidrs      []*net.IPNet
+	cidrs []*net.IPNet
 	dhcp       *dhcp.Manager
 	// needs to give it back to dhcp
 	LocalTunIPv4     *net.IPNet `json:"LocalTunIPv4,omitempty"`
@@ -204,6 +201,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 			PortMaps:         portMap,
 			Secret:           tlsSecret,
 			Image:            image,
+			OwnerID:          c.OwnerID,
 		})
 		err = injector.Inject(ctx)
 		if err != nil {
@@ -284,10 +282,8 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 
 // InitClient initializes the Kubernetes clientset, REST client, and config from the given factory.
 func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {
-	plog.G(context.Background()).Debug("Initializing Kubernetes client")
-	c.factory = f
 	var err error
-	c.config, c.restclient, c.clientset, c.ManagerNamespace, err = util.InitKubeClient(f)
+	c.ManagerNamespace, err = c.K8sClient.InitClient(f)
 	return err
 }
 
@@ -295,6 +291,11 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {
 func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error) {
 	label := "app=" + config.ConfigMapPodTrafficManager
 	return util.GetRunningPodList(ctx, c.clientset, c.ManagerNamespace, label)
+}
+
+// dedupAndFilterCIDRs removes overlapping CIDRs and filters out those containing API server IPs.
+func (c *ConnectOptions) dedupAndFilterCIDRs(cidrs []*net.IPNet) []*net.IPNet {
+	return util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cidrs), c.apiServerIPs)
 }
 
 // getCIDR
@@ -331,14 +332,14 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, filterAPIServer bool) erro
 				cached = append(cached, cidr)
 			}
 		}
-		c.cidrs = util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cached), c.apiServerIPs)
+		c.cidrs = c.dedupAndFilterCIDRs(cached)
 		plog.G(ctx).Infof("Get network CIDR from cache")
 		return nil
 	}
 
 	// (2) get CIDR from cni
 	cidrs := util.GetCIDR(ctx, c.clientset, c.config, c.ManagerNamespace, c.Image)
-	c.cidrs = util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cidrs), c.apiServerIPs)
+	c.cidrs = c.dedupAndFilterCIDRs(cidrs)
 	s := sets.New[string]()
 	for _, cidr := range c.cidrs {
 		s.Insert(cidr.String())
@@ -402,15 +403,6 @@ func (c *ConnectOptions) GetConfigMapInformer() cache.SharedInformer {
 	return c.cmInformer
 }
 
-// GetClientset returns the Kubernetes clientset for this connection.
-func (c *ConnectOptions) GetClientset() kubernetes.Interface {
-	return c.clientset
-}
-
-// GetFactory returns the kubectl factory for this connection.
-func (c *ConnectOptions) GetFactory() cmdutil.Factory {
-	return c.factory
-}
 
 // GetLocalTunIP returns the local TUN device IPv4 and IPv6 addresses as strings.
 func (c *ConnectOptions) GetLocalTunIP() (v4 string, v6 string) {

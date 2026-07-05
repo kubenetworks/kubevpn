@@ -75,7 +75,7 @@ func genTLS(ctx context.Context, namespace string, clientset kubernetes.Interfac
 	if err != nil {
 		return err
 	}
-	// reason why not use v1.SecretTypeTls is because it needs key called tls.crt and tls.key, but tls.key can not as env variable
+	// reason why not use v1.SecretTypeTls is because it needs key called tls.crt and tls.key, but tls.key cannot be an env variable
 	// ➜  ~ export tls.key=a
 	//export: not valid in this context: tls.key
 	secret := genSecret(namespace, crt, key, host)

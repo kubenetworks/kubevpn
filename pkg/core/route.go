@@ -113,9 +113,6 @@ func NewRouteHub() *RouteHub {
 	}
 }
 
-// DefaultRouteHub is the process-wide shared routing hub.
-var DefaultRouteHub = NewRouteHub()
-
 // AddRoute registers a conn for the given source IP.
 // Multiple conns can be registered for the same IP (connection pool support).
 func (hub *RouteHub) AddRoute(ctx context.Context, srcIP net.IP, conn net.Conn) {
@@ -211,9 +208,6 @@ func GenerateServers(listeners []string, hub *RouteHub) ([]Server, error) {
 func GenerateServersFromNodes(nodes []*Node, hub *RouteHub) ([]Server, error) {
 	if len(nodes) == 0 {
 		return nil, fmt.Errorf("no listeners configured")
-	}
-	if hub == nil {
-		hub = DefaultRouteHub
 	}
 	servers := make([]Server, 0, len(nodes))
 	for _, node := range nodes {

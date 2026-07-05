@@ -20,9 +20,6 @@ type tunHandler struct {
 
 // TunHandler creates a handler for tun tunnel.
 func TunHandler(forward *Forwarder, hub *RouteHub) Handler {
-	if hub == nil {
-		hub = DefaultRouteHub
-	}
 	return &tunHandler{
 		forward: forward,
 		hub:     hub,

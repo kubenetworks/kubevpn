@@ -49,13 +49,13 @@ users:
 		t.Fatalf("InitClient returned error: %v", err)
 	}
 
-	if opts.factory == nil {
+	if opts.GetFactory() == nil {
 		t.Fatal("factory is nil after InitClient")
 	}
 	if opts.config == nil {
 		t.Fatal("config is nil after InitClient")
 	}
-	if opts.clientset == nil {
+	if opts.GetClientset() == nil {
 		t.Fatal("clientset is nil after InitClient")
 	}
 	if opts.restclient == nil {

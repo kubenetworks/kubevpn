@@ -26,17 +26,11 @@ type gvisorTCPHandler struct {
 
 // GvisorTCPHandler creates a Handler that accepts TCP connections and runs a gvisor stack per connection.
 func GvisorTCPHandler(hub *RouteHub) Handler {
-	if hub == nil {
-		hub = DefaultRouteHub
-	}
 	return &gvisorTCPHandler{hub: hub, newStack: NewStack}
 }
 
 // GvisorLocalTCPHandler creates a Handler using NewLocalStack (routes to 127.0.0.1).
 func GvisorLocalTCPHandler(hub *RouteHub) Handler {
-	if hub == nil {
-		hub = DefaultRouteHub
-	}
 	return &gvisorTCPHandler{hub: hub, newStack: NewLocalStack}
 }
 

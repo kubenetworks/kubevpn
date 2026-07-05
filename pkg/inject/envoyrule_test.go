@@ -33,7 +33,8 @@ func TestAddVirtualRule(t *testing.T) {
 			UID: "deployments.authors",
 			Expect: []*controlplane.Virtual{
 				{
-					UID: "deployments.authors",
+					SchemaVersion: controlplane.CurrentSchemaVersion,
+					UID:           "deployments.authors",
 					Ports: []controlplane.ContainerPort{
 						{
 							EnvoyListenerPort: 15006,
@@ -44,6 +45,7 @@ func TestAddVirtualRule(t *testing.T) {
 						Headers:      nil,
 						LocalTunIPv4: "127.0.0.1",
 						LocalTunIPv6: netip.IPv6Loopback().String(),
+						OwnerID:      "test-owner",
 						PortMap:      nil,
 					}},
 				},
@@ -51,7 +53,7 @@ func TestAddVirtualRule(t *testing.T) {
 		},
 	}
 	for _, data := range testdatas {
-		rule := addVirtualRule(data.Rule, data.Namespace, data.UID, data.Ports, data.Headers, data.LocalTunIPv4, data.LocalTunIPv6, nil, false)
+		rule := addVirtualRule(data.Rule, envoyRuleSpec{Namespace: data.Namespace, NodeID: data.UID, Ports: data.Ports, Headers: data.Headers, LocalTunIPv4: data.LocalTunIPv4, LocalTunIPv6: data.LocalTunIPv6, OwnerID: "test-owner"})
 		if !reflect.DeepEqual(rule, data.Expect) {
 			t.FailNow()
 		}

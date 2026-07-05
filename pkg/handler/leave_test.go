@@ -6,7 +6,9 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes/fake"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
@@ -36,7 +38,7 @@ func TestLeaveAllProxyResources_EmptyConfigMap(t *testing.T) {
 	)
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		clientset:        clientset,
+		K8sClient: K8sClient{clientset: clientset},
 		proxyWorkloads:   ProxyList{},
 	}
 	err := c.LeaveAllProxyResources(context.Background())
@@ -49,7 +51,7 @@ func TestLeaveAllProxyResources_ConfigMapNotFound(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		clientset:        clientset,
+		K8sClient: K8sClient{clientset: clientset},
 		proxyWorkloads:   ProxyList{},
 	}
 	err := c.LeaveAllProxyResources(context.Background())
@@ -143,7 +145,7 @@ func TestCleanup_NoRollbackFuncs(t *testing.T) {
 
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		clientset:        clientset,
+		K8sClient: K8sClient{clientset: clientset},
 		ctx:              ctx,
 		cancel:           cancel,
 	}
@@ -167,7 +169,7 @@ func TestCleanup_WithRollbackFuncs(t *testing.T) {
 	var called []int
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		clientset:        clientset,
+		K8sClient: K8sClient{clientset: clientset},
 		ctx:              ctx,
 		cancel:           cancel,
 	}
@@ -197,7 +199,7 @@ func TestCleanup_UserDaemon_WithRollbackFuncs(t *testing.T) {
 	var called []int
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		clientset:        clientset,
+		K8sClient: K8sClient{clientset: clientset},
 		// ctx is nil => userDaemon = true
 	}
 	c.AddRollbackFunc(func() error { called = append(called, 1); return nil })
@@ -227,7 +229,7 @@ func TestCleanup_OnlyRunsOnce(t *testing.T) {
 	callCount := 0
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		clientset:        clientset,
+		K8sClient: K8sClient{clientset: clientset},
 		ctx:              ctx,
 		cancel:           cancel,
 	}
@@ -239,5 +241,85 @@ func TestCleanup_OnlyRunsOnce(t *testing.T) {
 
 	if callCount != 1 {
 		t.Fatalf("expected rollback called once due to sync.Once, got %d", callCount)
+	}
+}
+
+func TestLeaveAllProxyResources_WithProxyWorkloads(t *testing.T) {
+	kubeconfig := "/nonexistent-kubeconfig-for-test"
+	configFlags := genericclioptions.NewConfigFlags(true)
+	configFlags.KubeConfig = &kubeconfig
+	factory := cmdutil.NewFactory(configFlags)
+
+	clientset := fake.NewSimpleClientset(
+		&v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
+			Data:       map[string]string{config.KeyEnvoy: "[]"},
+		},
+	)
+	c := &ConnectOptions{
+		ManagerNamespace: "test-ns",
+		K8sClient: K8sClient{
+			clientset: clientset,
+			factory:   factory,
+		},
+		proxyWorkloads: ProxyList{
+			{workload: "deployments.apps/web", namespace: "default"},
+			{workload: "deployments.apps/api", namespace: "default"},
+		},
+	}
+	// proxyWorkloads has entries, so ToResources() returns non-empty slice.
+	// LeaveResource will be called, which calls GetTopOwnerObject.
+	// With a bad kubeconfig, GetTopOwnerObject returns an error for each workload.
+	err := c.LeaveAllProxyResources(context.Background())
+	if err == nil {
+		t.Fatal("expected error when resources can't be resolved")
+	}
+}
+
+func TestLeaveResource_ErrorPropagationFromGetTopOwnerObject(t *testing.T) {
+	kubeconfig := "/nonexistent-kubeconfig-for-test"
+	configFlags := genericclioptions.NewConfigFlags(true)
+	configFlags.KubeConfig = &kubeconfig
+	factory := cmdutil.NewFactory(configFlags)
+
+	clientset := fake.NewSimpleClientset()
+	c := &ConnectOptions{
+		ManagerNamespace: "test-ns",
+		K8sClient: K8sClient{
+			clientset: clientset,
+			factory:   factory,
+		},
+	}
+	resources := []Resources{
+		{Namespace: "default", Workload: "deployments.apps/nonexistent"},
+	}
+	err := c.LeaveResource(context.Background(), resources, "198.18.0.1")
+	if err == nil {
+		t.Fatal("expected error from GetTopOwnerObject, got nil")
+	}
+}
+
+func TestLeaveResource_MultipleErrorsAggregated(t *testing.T) {
+	kubeconfig := "/nonexistent-kubeconfig-for-test"
+	configFlags := genericclioptions.NewConfigFlags(true)
+	configFlags.KubeConfig = &kubeconfig
+	factory := cmdutil.NewFactory(configFlags)
+
+	clientset := fake.NewSimpleClientset()
+	c := &ConnectOptions{
+		ManagerNamespace: "test-ns",
+		K8sClient: K8sClient{
+			clientset: clientset,
+			factory:   factory,
+		},
+	}
+	resources := []Resources{
+		{Namespace: "default", Workload: "deployments.apps/app1"},
+		{Namespace: "default", Workload: "deployments.apps/app2"},
+		{Namespace: "other-ns", Workload: "statefulsets.apps/db"},
+	}
+	err := c.LeaveResource(context.Background(), resources, "198.18.0.1")
+	if err == nil {
+		t.Fatal("expected aggregate error, got nil")
 	}
 }

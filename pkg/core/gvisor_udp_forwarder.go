@@ -67,74 +67,71 @@ func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolve
 		}
 
 		conn := gonet.NewUDPConn(w, endpoint)
-		go func() {
-			defer conn.Close()
-			defer remote.Close()
-			errChan := make(chan error, 2)
-			go func() {
-				defer util.HandleCrash()
-				buf := config.LPool.Get().([]byte)[:]
-				defer config.LPool.Put(buf[:])
-
-				var written int
-				var err error
-				for {
-					err = conn.SetReadDeadline(time.Now().Add(config.UDPSessionTimeout))
-					if err != nil {
-						break
-					}
-					var read int
-					read, _, err = conn.ReadFrom(buf[:])
-					if err != nil {
-						break
-					}
-					written += read
-					err = remote.SetWriteDeadline(time.Now().Add(config.UDPSessionTimeout))
-					if err != nil {
-						break
-					}
-					_, err = remote.Write(buf[:read])
-					if err != nil {
-						break
-					}
-				}
-				plog.G(ctx).Infof("[Gvisor-UDP] Wrote %d bytes: %s -> %s", written, src, dst)
-				errChan <- err
-			}()
-			go func() {
-				defer util.HandleCrash()
-				buf := config.LPool.Get().([]byte)[:]
-				defer config.LPool.Put(buf[:])
-
-				var err error
-				var written int
-				for {
-					err = remote.SetReadDeadline(time.Now().Add(config.UDPSessionTimeout))
-					if err != nil {
-						break
-					}
-					var n int
-					n, _, err = remote.ReadFromUDP(buf[:])
-					if err != nil {
-						break
-					}
-					written += n
-					err = conn.SetWriteDeadline(time.Now().Add(config.UDPSessionTimeout))
-					if err != nil {
-						break
-					}
-					_, err = conn.Write(buf[:n])
-					if err != nil {
-						break
-					}
-				}
-				plog.G(ctx).Infof("[Gvisor-UDP] Read %d bytes: %s <- %s", written, src, dst)
-				errChan <- err
-			}()
-			err = <-errChan
-			if err != nil && !errors.Is(err, io.EOF) {
-				plog.G(ctx).Errorf("[Gvisor-UDP] Disconnected %s <-> %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
-			}
-		}()
+		go relayUDP(ctx, conn, remote, src, dst)
 	}).HandlePacket
+}
+
+func relayUDP(ctx context.Context, conn *gonet.UDPConn, remote *net.UDPConn, src, dst *net.UDPAddr) {
+	defer conn.Close()
+	defer remote.Close()
+	errChan := make(chan error, 2)
+	go pipeUDPFromConn(ctx, conn, remote, src, dst, errChan)
+	go pipeUDPToConn(ctx, conn, remote, src, dst, errChan)
+	if err := <-errChan; err != nil && !errors.Is(err, io.EOF) {
+		plog.G(ctx).Errorf("[Gvisor-UDP] Disconnected %s <-> %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
+	}
+}
+
+func pipeUDPFromConn(ctx context.Context, conn *gonet.UDPConn, remote *net.UDPConn, src, dst *net.UDPAddr, errChan chan<- error) {
+	defer util.HandleCrash()
+	buf := config.LPool.Get().([]byte)[:]
+	defer config.LPool.Put(buf[:])
+	var written int
+	var err error
+	for {
+		if err = conn.SetReadDeadline(time.Now().Add(config.UDPSessionTimeout)); err != nil {
+			break
+		}
+		var read int
+		read, _, err = conn.ReadFrom(buf[:])
+		if err != nil {
+			break
+		}
+		written += read
+		if err = remote.SetWriteDeadline(time.Now().Add(config.UDPSessionTimeout)); err != nil {
+			break
+		}
+		if _, err = remote.Write(buf[:read]); err != nil {
+			break
+		}
+	}
+	plog.G(ctx).Infof("[Gvisor-UDP] Wrote %d bytes: %s -> %s", written, src, dst)
+	errChan <- err
+}
+
+func pipeUDPToConn(ctx context.Context, conn *gonet.UDPConn, remote *net.UDPConn, src, dst *net.UDPAddr, errChan chan<- error) {
+	defer util.HandleCrash()
+	buf := config.LPool.Get().([]byte)[:]
+	defer config.LPool.Put(buf[:])
+	var written int
+	var err error
+	for {
+		if err = remote.SetReadDeadline(time.Now().Add(config.UDPSessionTimeout)); err != nil {
+			break
+		}
+		var n int
+		n, _, err = remote.ReadFromUDP(buf[:])
+		if err != nil {
+			break
+		}
+		written += n
+		if err = conn.SetWriteDeadline(time.Now().Add(config.UDPSessionTimeout)); err != nil {
+			break
+		}
+		if _, err = conn.Write(buf[:n]); err != nil {
+			break
+		}
+	}
+	plog.G(ctx).Infof("[Gvisor-UDP] Read %d bytes: %s <- %s", written, src, dst)
+	errChan <- err
 }
