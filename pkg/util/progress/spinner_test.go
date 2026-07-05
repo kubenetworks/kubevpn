@@ -29,6 +29,11 @@ func TestRenderer_NonTTY(t *testing.T) {
 	if !strings.Contains(out, "✓") || !strings.Contains(out, "Forwarded ports (TCP/UDP/xDS)") {
 		t.Errorf("finished step should render a check mark and its done text, got:\n%s", out)
 	}
+	// The cursor-erase sequence used to clean up the spinner line on a TTY must
+	// never leak into a non-terminal writer (pipes, CI, log capture).
+	if strings.Contains(out, "\x1b[K") {
+		t.Errorf("non-TTY output must not contain the erase escape sequence, got:\n%q", out)
+	}
 }
 
 // TestRenderer_NonTTY_PlainOnly ensures a stream with no step markers (e.g. an

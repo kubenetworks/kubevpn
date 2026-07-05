@@ -88,15 +88,8 @@ func (r *Renderer) Write(message string) {
 
 	switch kind {
 	case plog.StepHeading:
-		// A bold heading: no spinner, no check mark. If a step is mid-flight,
-		// pause it so the heading lands on its own line, then resume.
-		if r.spinner != nil && r.running {
-			_ = r.spinner.Pause()
-			styleLine(r.out, ansiBold, text)
-			_ = r.spinner.Unpause()
-		} else {
-			styleLine(r.out, ansiBold, text)
-		}
+		// A bold heading: no spinner, no check mark.
+		r.printAboveSpinner(func() { styleLine(r.out, ansiBold, text) })
 	case plog.StepBegin:
 		if r.spinner == nil {
 			return // matching StepEnd prints the line
@@ -115,14 +108,25 @@ func (r *Renderer) Write(message string) {
 		_ = r.spinner.Stop()
 		r.running = false
 	default:
-		// Ordinary log line: scroll it above the live spinner, then resume.
-		if r.spinner != nil && r.running {
-			_ = r.spinner.Pause()
-			fmt.Fprint(r.out, message)
-			_ = r.spinner.Unpause()
-		} else {
-			fmt.Fprint(r.out, message)
-		}
+		// Ordinary log line: scroll it above the live spinner.
+		r.printAboveSpinner(func() { fmt.Fprint(r.out, message) })
+	}
+}
+
+// printAboveSpinner runs print so its output lands on a clean line above the
+// live spinner. yacspin's Pause leaves its last animation frame on screen, so we
+// erase that residual line (with yacspin's own erase sequence) before printing,
+// then resume — without this, log lines concatenate onto the spinner line
+// (" ⣽ Creating traffic managerLabeling Namespace ..."). Off a TTY, or with no
+// running spinner, it just prints (no escape codes leak into pipes/files).
+func (r *Renderer) printAboveSpinner(print func()) {
+	if r.spinner != nil && r.running && isTerminal(r.out) {
+		_ = r.spinner.Pause()
+		fmt.Fprint(r.out, "\r\x1b[K") // erase the residual spinner frame
+		print()
+		_ = r.spinner.Unpause()
+	} else {
+		print()
 	}
 }
 

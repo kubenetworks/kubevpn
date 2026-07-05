@@ -121,16 +121,26 @@ that don't carry one simply get `""` (the `connectionIDer` type assertion never 
 
 `Write` decodes each message with `plog.DecodeStep` and maps it to yacspin:
 
-- **heading** → print the text in **bold** (no spinner, no `✓`); if a step is mid-flight, `Pause()` /
-  print / `Unpause()` so the heading lands on its own line
+- **heading** → print the text in **bold** (no spinner, no `✓`), via `printAboveSpinner`
 - **begin** → `spinner.Message(text)` + `Start()` (animate this step)
 - **done, spinner running** → `spinner.StopMessage(text)` + `Stop()` (print ` ✓ text`, return to stopped)
 - **done, no spinner running** → print ` ✓ text` directly. This handles the `StepDone`-without-`StepStart`
   case (§3): instant steps never started a spinner, so there is nothing to finalize — the line is
   emitted standalone. (Same branch covers the non-TTY fallback where `spinner == nil`.)
-- **plain log line** → `Pause()` / print above / `Unpause()` so logs scroll above the live spinner
+- **plain log line** → print above the live spinner, via `printAboveSpinner`
 - `Stop()` while a step is still running → `StopFail()` (`✗`), so an interrupted step is never
   falsely reported as done
+
+`printAboveSpinner` is the shared "scroll a line above the live spinner" path (headings and plain log
+lines). yacspin's `Pause()` does **not** erase its last animation frame, so the renderer emits yacspin's
+own erase sequence (`\r\x1b[K`) before printing, then `Unpause()`s. Without the erase, log text
+concatenates onto the spinner line (` ⣽ Creating traffic managerLabeling Namespace ...`). The erase is
+gated on a TTY check, so no escape codes leak into pipes/CI (`TestRenderer_NonTTY` pins this).
+
+> **Keep step bodies quiet.** A step that wraps many sub-operations (e.g. `Creating traffic manager`,
+> which creates the ServiceAccount/Roles/Service/ConfigMap/Deployment and waits for the pod) must log
+> those sub-operations at **Debug**, per §5 — otherwise they flood the screen above the spinner. They
+> surface with `--debug`; a failing wait still carries its last pod status in the returned error.
 
 yacspin supports `Start`→`Stop`→`Start` on one instance, which is what makes the one-`✓`-per-step
 checklist work. The renderer is **not** hand-rolled — kind itself hand-rolls a small spinner, but
