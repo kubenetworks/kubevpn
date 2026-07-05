@@ -93,7 +93,42 @@ On Linux, `UpdateDNAT(oldIP, newIP)` updates iptables DNAT rules when the TUN IP
 
 Non-Linux platforms have a no-op implementation (`iptables_others.go`).
 
-## 9. Related Files
+## 9. Windows Driver Installation & Embedding (`pkg/driver`)
+
+On Linux/macOS the kernel provides the TUN device, but on **Windows** the driver must be installed
+first. `pkg/driver` embeds the driver binaries into the kubevpn executable and drops/installs them
+at runtime. There are two drivers:
+
+### 9.1 Wintun (WireGuard userspace TUN)
+
+This is the driver `tun_windows.go` actually uses. `wintun.dll` is embedded **per architecture**
+via build-tagged files, each with its own `//go:embed`:
+
+| File | Build tag | Embeds |
+|---|---|---|
+| `wintun/amd64.go` | `windows && amd64` | `bin/amd64/wintun.dll` |
+| `wintun/arm64.go` | `windows && arm64` | `bin/arm64/wintun.dll` |
+| `wintun/arm.go` | `windows && arm` | `bin/arm/wintun.dll` |
+| `wintun/x86.go` | `windows && x86` | `bin/x86/wintun.dll` |
+| `wintun/others.go` | `!windows` | stub returning "not implement" |
+
+Each arch's `InstallWintunDriver()` reads its embedded DLL and calls the shared `copyDriver`
+(`wintun/func.go`), which writes `wintun.dll` **next to the executable** — but only if it is
+missing or its bytes differ (content-compared to avoid needless rewrites/locking).
+
+`driver.InstallWireGuardTunDriver()` wraps this in `retry.OnError` (default backoff) and is called
+from `pkg/handler/network.go` before TUN creation. `UninstallWireGuardTunDriver()` simply removes
+the `wintun.dll` beside the executable (called from `pkg/util/util.go` cleanup).
+
+### 9.2 TAP-Windows (OpenVPN, legacy fallback)
+
+`openvpn/windows.go` embeds the `tap-windows-9.21.2.exe` installer (`//go:embed
+exe/tap-windows-9.21.2.exe`). `Install()` writes it to a temp `.exe`, chmods it, and runs it with
+`/S` (silent). `driver.installTunTapDriver()` retries this. Uninstall
+(`driver.uninstallTunTapDriver`) scans drive letters via `getDiskName()` and runs
+`<drive>:\Program Files\TAP-Windows\Uninstall.exe /S`.
+
+## 10. Related Files
 
 | File | Purpose |
 |------|---------|
@@ -111,3 +146,7 @@ Non-Linux platforms have a no-op implementation (`iptables_others.go`).
 | `pkg/tun/route_windows.go` | Windows route management (LUID) |
 | `pkg/tun/iptables_linux.go` | iptables DNAT rules |
 | `pkg/tun/iptables_others.go` | No-op for non-Linux |
+| `pkg/driver/driver.go` | Install/uninstall orchestration (retry, drive-letter scan) |
+| `pkg/driver/wintun/{amd64,arm64,arm,x86,others}.go` | Per-arch embedded `wintun.dll` + `InstallWintunDriver` |
+| `pkg/driver/wintun/func.go` | `copyDriver` (content-compared write next to exe) |
+| `pkg/driver/openvpn/windows.go` | Embedded TAP-Windows installer `Install()` |

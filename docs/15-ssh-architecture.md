@@ -92,6 +92,51 @@ Tried in priority order:
 GSSAPI authentication implements the full Kerberos 5 SPNEGO negotiation (`Krb5InitiatorClient`), including the state machine:
 `InitiatorStart → InitiatorWaitForMutal → InitiatorReady`
 
+#### 2.1 GSSAPI / Kerberos 5 Internals (`gssapi.go`, `gssapi_ccache.go`)
+
+`GetAuth` builds a `Krb5InitiatorClient` from one of three credential sources, then wraps it with
+`ssh.GSSAPIWithMICAuthMethod`. The krb5 config path comes from `GetKrb5Path()` —
+`/etc/krb5.conf` on Unix, `C:\ProgramData\MIT\Kerberos5\krb5.ini` on Windows. Construction errors
+are wrapped with `config.ErrGSSAPI`.
+
+| Constructor | Source | Backing call |
+|---|---|---|
+| `NewKrb5InitiatorClientWithPassword` | password | `client.NewWithPassword` + `Login` |
+| `NewKrb5InitiatorClientWithKeytab` | keytab file | `keytab.Load` + `client.NewWithKeytab` |
+| `NewKrb5InitiatorClientWithCache` | credential cache file | `credentials.LoadCCache` + `client.NewFromCCache` |
+
+**SPNEGO state machine** (`Krb5InitiatorClient.InitSecContext`), driven by the Go SSH library:
+
+```
+InitiatorStart/Restart:
+  GetServiceTicket(target with @→/ )            ── TGS-REQ for the host service
+  spnego.NewKRB5TokenAPREQ(flags, APOptions)    ── build the SPNEGO AP-REQ
+  NewAuthenticator + Cksum=GSSAPI(newAuthenticatorChksum(flags))
+  GenerateSeqNumberAndSubKey → save k.subkey    ── subkey used later for MIC
+  NewAPReq(tkt, sessionKey, auth); set MutualRequired
+  → return marshalled token; state = WaitForMutal
+InitiatorWaitForMutal:
+  Unmarshal the server's AP-REP token           ── mutual auth confirmed
+  → state = Ready
+InitiatorReady:
+  error "called one time too many"
+```
+
+- GSSAPI flags requested: `ContextFlagREADY(128)`, `Integ`, `Mutual` (plus `Deleg` when
+  credential delegation is on). `newAuthenticatorChksum` hand-builds the 24-byte
+  (28 with delegation) GSSAPI checksum field with little-endian flag packing.
+- `GetMIC(field)` produces the SSH MIC by signing with the negotiated `subkey` via
+  `gssapi.NewInitiatorMICToken`. `DeleteSecContext` destroys the client.
+
+**CCache parser** (`gssapi_ccache.go`): the cache-file path uses a hand-rolled parser for the MIT
+**ccache v4 binary format** (the gokrb5 loader is used by `LoadCCache`/`NewFromCCache`, but this
+file provides the full `CCache`/`Unmarshal`/`Marshal` implementation used for round-tripping). It
+handles endianness detection (`getEndian`), the v4 header with the `KDCOffset` field
+(`headerFieldTagKDCOffset = 1`), the default principal, and each `Credential` (keys, AuthTime /
+StartTime / EndTime / RenewTill, `TicketFlags` as an ASN.1 BitString, addresses, authorization
+data, ticket + second ticket). Low-level readers (`readData`, `readAddress`, `readAuthDataEntry`,
+`readTimestamp`, `readInt8/16/32`, `readBytes`) walk the buffer with an explicit position pointer.
+
 #### 3. Kubeconfig Tunnel — `SshJump(ctx, conf, kubeconfigBytes, print)`
 
 Full flow:

@@ -158,7 +158,47 @@ Same length-prefix framing but implements `net.PacketConn` for compatibility wit
 
 ### 7.3 BufferedTCP (`conn_buffered_tcp.go`)
 
-Wraps a TCP connection with buffered writes for improved throughput.
+Wraps a TCP connection with an **async write queue** to coalesce syscalls under load.
+`NewBufferedTCP` starts a single `run(ctx)` goroutine that drains a buffered channel
+(`ch chan *Packet`, capacity `MaxSize`) and writes each framed packet to the socket. Two enqueue
+paths:
+
+- **`writePacket(pkt)`** — the hot path. Enqueues an *already-framed* `Packet` and **transfers one
+  reference**: `run` calls `pkt.release()` after the socket write. Returns `false` if the conn is
+  closed, in which case ownership is **not** taken (caller keeps its ref). This is zero-copy.
+- **`Write(b)`** — the `net.Conn` contract path. Because the caller may reuse `b` after `Write`
+  returns, `b` is **copied** into a pooled buffer. Hot routing paths therefore prefer
+  `writePacket`.
+
+A `closed atomic.Bool` plus a `done` channel (closed when `run` exits) ensure `writePacket`/`Write`
+never block on a drainerless channel after shutdown.
+
+### 7.4 Reference-Counted Packet Pool (`packet.go`)
+
+The data plane avoids per-packet allocation and copying via a single canonical buffer layout and a
+reference count. Every `Packet` wraps a pooled `[]byte` (`config.LPool`) with reserved headroom so
+the wire frame can be stamped in place:
+
+```
+data[0:2] = datagram length header (datagramHeaderLen)
+data[2]   = type prefix (typePrefixLen): 0=write to TUN, 1=inject into gvisor
+data[3:]  = raw IP payload (starts at tunReserve = 3)
+wire frame = data[0 : datagramHeaderLen+length]
+```
+
+Reference counting (`refs atomic.Int32`) lets one buffer be shared by N consumers **without
+copying** — e.g. heartbeat fan-out across all conn slots (`broadcastToSlots`) or an async
+`bufferedTCP` queue:
+
+- `refs` counts *extra* references beyond the implicit owner, so the zero value (a plain
+  `&Packet{}`) is a valid single-owner packet freed by exactly one `release()`.
+- `acquire()` adds a reference; `release()` drops one and returns the buffer to `config.LPool` when
+  the implicit owner's ref is dropped (`refs` reaches `-1`).
+- Releasing more times than acquired **panics** (`released more times than acquired`) — a
+  use-after-free guard rather than silent corruption.
+
+This is modeled on gvisor's chunk refcount (`buffer.View.Clone`/`Release`). Type-prefix values
+`2..255` are reserved for future control/heartbeat frames.
 
 ## 8. Gvisor Stack
 
@@ -203,6 +243,14 @@ Two variants:
 The `tun` protocol factory handles sidecar self-DHCP:
 1. If `net=` parameter is empty, call `requestTunIPFromControlPlane()` → gRPC `GetTunIP` to TunConfigServer
 2. Create the TUN device with the returned IP
+
+**Control-plane handshake** (`requestTunIPFromControlPlane`): the sidecar dials
+`<TrafficManagerService>:<PortControlPlane>` (service address from the `TrafficManagerService` env)
+with a 30s blocking dial, then calls `GetTunIP{OwnerID, Namespace, Hostname}`. `OwnerID` is the
+pod name (`EnvPodName`, falling back to `"unknown"`); `Hostname` is the pod hostname recorded in
+`TUN_ALLOCS` for debugging. There is **no explicit release**: per the DHCP protocol, when the
+process exits its `WatchTunIP` stream disconnects, and after `LeaseDuration` without renewal the
+server's lease reaper reclaims the IP (see [03-dhcp-ip-allocation.md](03-dhcp-ip-allocation.md)).
 
 The factory fetches the IP **once at startup** and does not run any background watcher. The sidecar's own TUN IP is fixed for the process lifetime; runtime routing changes (when a *client's* IP changes) are handled by the control-plane (`syncEnvoyRuleIP`) and pushed to the sidecar's envoy via xDS — not by the sidecar editing its own device. The former `watchTunIPChanges` / `pollTunIP` / `applyTunIPChange` + `tun.UpdateDNAT` path was removed by the unified proxy mode (see [09-tun-ip-hot-update.md](09-tun-ip-hot-update.md) and [28-sleep-wake-ip-update.md](28-sleep-wake-ip-update.md)).
 
