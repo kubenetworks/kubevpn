@@ -41,7 +41,7 @@ func IsWindows() bool {
 
 // RolloutStatus not use kubectl rollout options is this method can use context to cancel
 func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string) (err error) {
-	plog.G(ctx1).Infof("Checking rollout status for %s", workloads)
+	plog.G(ctx1).Debugf("Checking rollout status for %s", workloads)
 	defer func() {
 		if err != nil {
 			plog.G(ctx1).Errorf("Rollout status for %s failed: %v", workloads, err)
@@ -58,7 +58,7 @@ func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string
 			_ = o.Validate()
 			_ = o.RunUndo()
 		} else {
-			plog.G(ctx1).Infof("Rollout successfully for %s", workloads)
+			plog.G(ctx1).Debugf("Rollout successfully for %s", workloads)
 		}
 	}()
 	client, _ := f.DynamicClient()
@@ -116,7 +116,7 @@ func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string
 			if done {
 				return true, nil
 			}
-			plog.G(ctx).Info(strings.TrimSpace(status))
+			plog.G(ctx).Debug(strings.TrimSpace(status))
 			return false, nil
 
 		case watch.Deleted:
