@@ -219,8 +219,13 @@ func (m *Manager) rentIP(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs 
 		plog.G(ctx).Errorf("Failed to rent IP from DHCP server: %v", err)
 		return nil, nil, err
 	}
-	v4Net := &net.IPNet{IP: v4, Mask: m.cidr.Mask}
-	v6Net := &net.IPNet{IP: v6, Mask: m.cidr6.Mask}
+	// Stamp a host mask (/32, /128), not the pool mask. The pool (m.cidr/m.cidr6)
+	// stays the allocation range for InRange/the allocator; a lease only identifies
+	// one host. The client forces a host mask on its TUN device anyway, and the
+	// sidecar gets pool reachability from its explicit route=CIDR4 — so no consumer
+	// needs the pool prefix on the lease.
+	v4Net := &net.IPNet{IP: v4, Mask: net.CIDRMask(32, 32)}
+	v6Net := &net.IPNet{IP: v6, Mask: net.CIDRMask(128, 128)}
 	plog.G(ctx).Infof("Rented IP: v4=%s v6=%s", v4Net, v6Net)
 	return v4Net, v6Net, nil
 }

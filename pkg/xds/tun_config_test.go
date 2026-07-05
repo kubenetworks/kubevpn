@@ -58,6 +58,24 @@ func TestGetTunIP_BasicAllocation(t *testing.T) {
 	t.Logf("Allocated: %s", resp.IPv4)
 }
 
+// 1b. 租约掩码：分配出的 IP 携带主机掩码（/32、/128），而非地址池前缀（/16、/64）
+func TestGetTunIP_HostMask(t *testing.T) {
+	s := newTestServer(t)
+	resp, err := s.GetTunIP(context.Background(), &rpc.TunIPRequest{
+		OwnerID:   "owner-mask",
+		Namespace: "test-ns",
+	})
+	if err != nil {
+		t.Fatalf("GetTunIP: %v", err)
+	}
+	if !strings.HasSuffix(resp.IPv4, "/32") {
+		t.Fatalf("IPv4 lease must carry /32 host mask, got %q", resp.IPv4)
+	}
+	if resp.IPv6 != "" && !strings.HasSuffix(resp.IPv6, "/128") {
+		t.Fatalf("IPv6 lease must carry /128 host mask, got %q", resp.IPv6)
+	}
+}
+
 // 2. 续租：同一 ownerID 第二次调用返回同一 IP 并刷新 LastRenew
 func TestGetTunIP_RenewReturnsSameIP(t *testing.T) {
 	s := newTestServer(t)

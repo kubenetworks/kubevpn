@@ -293,10 +293,10 @@ func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net
 
 	oldV4, oldV6 := nm.localTunIPv4, nm.localTunIPv6
 	// Always operate on host masks (/32, /128) — matching how startTUN created the
-	// device. nm.localTunIPv4 carries the pool mask (/16); passing that as oldAddr
-	// makes the delete miss the /32 actually on the device, and adds the new address
-	// with a wrong /16 mask (leaving the old IP behind). Only touch a family that
-	// actually changed.
+	// device. Leases now carry a host mask too (the TunConfigService stamps /32, /128),
+	// so this is defensive: even if nm.localTunIPv4 ever carried a wider mask, forcing
+	// /32 here keeps the delete/add aligned with the address actually on the device.
+	// Only touch a family that actually changed.
 	host32 := func(ip net.IP) string { return (&net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)}).String() }
 	host128 := func(ip net.IP) string { return (&net.IPNet{IP: ip, Mask: net.CIDRMask(128, 128)}).String() }
 

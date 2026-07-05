@@ -58,7 +58,7 @@ Listener/forwarder URIs follow: `protocol://[host:port][/forward-uri][?key=value
 
 Examples:
 - `gtcp://:10801` — listen for gvisor TCP connections
-- `tun://?net=198.18.0.100/16` — create TUN with specified IP
+- `tun://?net=198.18.0.100/32` — create TUN with specified IP
 - `tun:/tcp://10.0.0.1:10801?route=10.96.0.0/12` — TUN client forwarding to server
 
 ## 5. TUN Handler (Server vs Client)

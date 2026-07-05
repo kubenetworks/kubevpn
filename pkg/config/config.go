@@ -76,12 +76,14 @@ const (
 	// PortEnvoyInbound is the Envoy inbound capture port that mesh-mode iptables DNAT redirects to.
 	PortEnvoyInbound = 15006
 
-	// IPv4Pool is used as TUN IP
+	// IPv4Pool is the TUN IP allocation range. Its prefix bounds the allocator
+	// (InRange); individual leases carry a host mask (/32), not this pool prefix.
 	// 198.18.0.0/16 network is part of the 198.18.0.0/15 (reserved for benchmarking).
 	// https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml
 	// so we split it into 2 parts: 198.18.0.0/15 --> [198.18.0.0/16, 198.19.0.0/16]
 	IPv4Pool = "198.18.0.0/16"
-	// IPv6Pool is the IPv6 CIDR used for TUN device address allocation.
+	// IPv6Pool is the IPv6 TUN IP allocation range. As with IPv4Pool, its prefix
+	// bounds the allocator while individual leases carry a host mask (/128).
 	// 2001:2::/64 network is part of the 2001:2::/48 (reserved for benchmarking)
 	// https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml
 	IPv6Pool = "2001:2::/64"

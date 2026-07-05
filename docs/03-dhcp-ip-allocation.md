@@ -140,8 +140,8 @@ The allocation mapping is stored as YAML in the `TUN_ALLOCS` key of the ConfigMa
 ```yaml
 {
   "a1b2c3d4e5f6": {
-    "ipv4": "198.18.0.5/16",
-    "ipv6": "2001:2::5/64",
+    "ipv4": "198.18.0.5/32",
+    "ipv6": "2001:2::5/128",
     "version": 1717900000000000000,
     "lastRenew": 1717900000,
     "hostname": "dev-laptop-01"
@@ -155,20 +155,20 @@ Three users simultaneously connected to the same cluster namespace `default`, sh
 ```yaml
 {
   "a1b2c3d4e5f6": {
-    "ipv4": "198.18.0.5/16",
-    "ipv6": "2001:2::5/64",
+    "ipv4": "198.18.0.5/32",
+    "ipv6": "2001:2::5/128",
     "version": 1717900000000000000,
     "lastRenew": 1717900120
   },
   "f6e5d4c3b2a1": {
-    "ipv4": "198.18.0.6/16",
-    "ipv6": "2001:2::6/64",
+    "ipv4": "198.18.0.6/32",
+    "ipv6": "2001:2::6/128",
     "version": 1717900100000000000,
     "lastRenew": 1717900200
   },
   "112233445566": {
-    "ipv4": "198.18.0.7/16",
-    "ipv6": "2001:2::7/64",
+    "ipv4": "198.18.0.7/32",
+    "ipv6": "2001:2::7/128",
     "version": 1717900200000000000,
     "lastRenew": 1717900300
   }
@@ -254,7 +254,7 @@ kubevpn connect -n default
   │         3. TunConfigServer:
   │            ├─ dhcp.RentIPExcluding(excludeIPs) → bitmap allocation
   │            ├─ store in allocs[ownerID]
-  │            └─ return 198.18.0.5/16
+  │            └─ return 198.18.0.5/32
   │         4. isLocalIPConflict? → retry or use
   │         5. tun.Listener(tunConfig{Addr: "198.18.0.5/32"})
   │     → StartIPWatcher → WatchTunIP(ownerID)
