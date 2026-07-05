@@ -73,9 +73,13 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		return err
 	}
 
-	unaryPanicInterceptor := grpc.UnaryInterceptor(rpc.UnaryPanicHandler)
-	streamPanicInterceptor := grpc.StreamInterceptor(rpc.StreamPanicHandler)
-	svr := grpc.NewServer(unaryPanicInterceptor, streamPanicInterceptor)
+	// Panic handler runs outermost (turning panics into codes.Internal); the classify
+	// interceptor then maps remaining handler errors to gRPC status codes for exit-code
+	// derivation, leaving already-coded errors (incl. codes.Internal) untouched.
+	svr := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(rpc.UnaryPanicHandler, rpc.UnaryClassifyInterceptor),
+		grpc.ChainStreamInterceptor(rpc.StreamPanicHandler, rpc.StreamClassifyInterceptor),
+	)
 	adminCleanup, err := admin.Register(svr)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to register admin: %v", err)
