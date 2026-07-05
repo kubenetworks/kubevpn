@@ -728,24 +728,26 @@ laptop wakes:
 
 ---
 
-## 5b. Manual IP override via `TUN_ALLOCS_OVERRIDE` (operator action)
+## 5b. Manual IP override via `TUN_ALLOCS` (operator action)
 
-`TUN_ALLOCS` is a **server-written crash-recovery journal** (the in-memory `s.allocs`
-map is the source of truth) — operators must NOT edit it. To force a client's TUN IP,
-edit the **separate `TUN_ALLOCS_OVERRIDE` key** of the `kubevpn-traffic-manager`
-ConfigMap: set the `ipv4` and/or `ipv6` of an owner entry (same YAML shape as
-`TUN_ALLOCS`).
+`TUN_ALLOCS` is normally a **server-written crash-recovery journal** (the in-memory
+`s.allocs` map is the source of truth). An operator can also use it as a **control
+input** to force a client's TUN IP: edit the `ipv4` and/or `ipv6` of an owner entry in
+the `kubevpn-traffic-manager` ConfigMap's `TUN_ALLOCS` key, **keeping the `version`
+field** (as `kubectl edit` does; or omit it).
 
-**Why a separate key (the ::1↔::3 oscillation fix).** Earlier the override *was*
-`TUN_ALLOCS` itself — both the operator's desired input and the server's journal
-output. On a live apiserver a single commit makes several rapid ConfigMap writes
-(bitmap ×2 + allocs), so the informer-driven reconcile's `Get` could read the journal
-as it was *before* the last commit landed — i.e. the previous committed value, the
-opposite of what was just committed — and re-propose it forever. Splitting desired
-(`TUN_ALLOCS_OVERRIDE`, operator-only, never written by `saveAllocs`) from the journal
-(`TUN_ALLOCS`) removes that race: the reconcile can never read its own write back as a
-new desired. The committed family is also **consumed** (deleted from the override) on
-confirm/decline/expire, so even a lagging read cannot re-propose an applied edit.
+**Stale-echo guard (the ::1↔::3 oscillation fix).** `TUN_ALLOCS` is both the operator's
+input and the server's journal output, so the reconcile must tell a genuine edit from a
+stale read of the server's own write. It uses the per-owner monotonic `version`
+(`time.Now().UnixNano()`, stamped on every commit): the reconcile **ignores any entry
+whose `version` is older than the in-memory allocation**. On a live apiserver a single
+commit makes several rapid ConfigMap writes (bitmap ×2 + allocs), so the informer-driven
+`Get` can lag and return a previous journal write — its version is strictly older, so it
+is rejected instead of re-proposed forever. A real edit keeps the current version (or
+omits it → 0), so it is *not* older and is proposed. Every commit/decline/expire bumps
+the version, so an applied or rejected edit becomes strictly older and cannot be
+re-proposed by a lagging read. (Caveat: don't hand-set `version` to a smaller non-zero
+number; `kubectl edit` preserves it.)
 
 **Per-family & independent:** `ipv4` and `ipv6` are reconciled independently — edit
 just `ipv4`, just `ipv6`, or both. Each family becomes its own proposal that the
@@ -758,16 +760,17 @@ server never changes a client's committed IP before the client agrees — there 
 no "commit then roll back".
 
 ```
-kubectl -n <ns> edit cm kubevpn-traffic-manager   # change TUN_ALLOCS_OVERRIDE[owner].ipv4
+kubectl -n <ns> edit cm kubevpn-traffic-manager   # change TUN_ALLOCS[owner].ipv4 (keep version)
    → ConfigMap informer fires (watcher.go)
    → TunConfigServer.reconcileAllocsFromConfigMap (serialized by reconcileMu):
-       • desired read from TUN_ALLOCS_OVERRIDE (NOT the TUN_ALLOCS journal)
+       • stale-echo guard: skip entries whose version < in-memory allocation version
+         (a lagging read of the server's own journal write — not an operator edit)
        • out-of-range / non-CIDR → Warn + ignore
        • target IP held by another live owner → REFUSE (annotate "in use"), no takeover
        • else PROPOSE: record pendingProposal[owner]={candidate,deadline} and push
          WatchTunIP{IPv4:candidate, DryRun:true}. NOTHING is committed — no rent,
-         no release, no allocs change. The override key keeps the edit as the desired
-         value until consumed.
+         no release, no allocs change, no saveAllocs (TUN_ALLOCS keeps the edit as
+         the desired value until commit).
    → Root Daemon IPWatcher (doWatchTunIP), DryRun push → handleProposal:
        • VALIDATE locally (tunIPConflicts vs sibling TUN + host interfaces, ignoring
          own current IP)
@@ -775,14 +778,14 @@ kubectl -n <ns> edit cm kubevpn-traffic-manager   # change TUN_ALLOCS_OVERRIDE[o
        • bad → GetTunIP{ExcludeIPs:[candidate,…]} (decline)
    → server GetTunIP = the ONLY commit point:
        • confirm  → RentSpecificIP(candidate) (fallback to a safe IP if taken since
-                    propose), release owner's old IP, allocs[owner]=candidate,
-                    saveAllocs (TUN_ALLOCS=actual), consume the override family,
-                    syncEnvoyRuleIP, return committed resp (DryRun=false) → client
-                    ChangeTunIP applies it.
+                    propose), release owner's old IP, allocs[owner]=candidate (version
+                    bumped), saveAllocs (TUN_ALLOCS=actual), syncEnvoyRuleIP, return
+                    committed resp (DryRun=false) → client ChangeTunIP applies it.
        • decline  → drop proposal, keep current IP (nothing committed → no rollback),
-                    consume the override family, annotate kubevpn.io/tun-allocs-rejected.
+                    bump version + saveAllocs (revert edit to actual), annotate
+                    kubevpn.io/tun-allocs-rejected.
    → unconfirmed proposals expire via the lease reaper (expirePendingProposals):
-     dropped + override family consumed. No IP was rented, so nothing to release.
+     dropped + version bumped + saveAllocs reverts the edit. No IP was rented.
 ```
 
 Why this is simpler: because the committed IP is never touched until the client
@@ -808,17 +811,18 @@ replacement for an *already-lost* IP via `NotifyIPChange` (committed push,
 and can reject → server allocates a safe IP. There is no good IP to protect there,
 so dry-run is unnecessary.
 
-**Resolved tech-debt (desired/actual split):** both root causes are now removed.
-Dry-run removed the commit-then-veto cause; the desired/actual conflation is fixed by
-splitting the operator's input into the server-read-only `TUN_ALLOCS_OVERRIDE` key,
-which `saveAllocs` never writes. The reconcile reads desired from the override and the
-journal from `TUN_ALLOCS`, so a server journal write can never be re-read as a new
-desired (the former `::1↔::3` oscillation under a lagging apiserver read), and edits to
-different owners no longer race the journal output. Each committed/declined/expired
-family is consumed (deleted) from the override, so an applied edit is never re-proposed
-even if a read lags. Trigger is constrained to ConfigMap-edit (cluster-admin), so a
-client-originated CLI is out of scope. Assumes single-writer traffic-manager
-(`Recreate`) and version-matched client/server (`DryRun` understood by both).
+**Resolved tech-debt (stale-echo guard):** both root causes are now removed. Dry-run
+removed the commit-then-veto cause; the desired/actual conflation is handled by the
+per-owner monotonic `version`. `TUN_ALLOCS` stays a single key (no new ConfigMap key),
+but the reconcile distinguishes a genuine edit (version == current, or 0) from a stale
+read of the server's own journal write (version strictly older) and ignores the latter,
+so a lagging apiserver `Get` can no longer re-propose the previous committed value (the
+former `::1↔::3` oscillation). Commit/decline/expire bump the version, so an applied or
+rejected edit becomes strictly older and cannot be re-proposed. Trigger is constrained
+to ConfigMap-edit (cluster-admin), so a client-originated CLI is out of scope. Assumes
+single-writer traffic-manager (`Recreate`) and version-matched client/server (`DryRun`
+understood by both); operators should keep the `version` field on edit (`kubectl edit`
+does).
 
 ---
 
