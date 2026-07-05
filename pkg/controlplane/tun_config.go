@@ -817,14 +817,19 @@ func (s *TunConfigServer) proposeManualChange(ctx context.Context, owner string,
 		return false // owner not active in memory (offline / reaped) — nothing to propose
 	}
 
-	// Stale-echo guard: TUN_ALLOCS is both the operator's input and the server's journal
-	// output (saveAllocs). On a live apiserver a commit makes several rapid writes, so
-	// this Get can lag and return one of the server's OWN earlier journal writes — whose
-	// version is strictly older than the in-memory allocation. Treating that as an
-	// operator edit re-proposes the previous committed value forever (the ::1<->::3
-	// oscillation). A real edit (`kubectl edit`, which keeps the version field, or one
-	// that omits it → 0) carries version == current (or 0); only a strictly-older,
-	// non-zero version is a stale self-echo, so skip it.
+	// Stale-echo guard. TUN_ALLOCS is both the operator's input and the server's journal
+	// output (saveAllocs). The root cause is a TOCTOU, NOT apiserver cache staleness:
+	// reconcileManualOnce reads the ConfigMap (its `Get` is already an etcd-consistent
+	// quorum read) BEFORE taking s.mu, but reads s.allocs AFTER — while a concurrent
+	// commit holds s.mu across its saveAllocs. So `want` (desired, read from the CM) can
+	// be the value from BEFORE that commit's saveAllocs while the snapshot used as
+	// "current" is from AFTER it: desired != current → re-propose the previous committed
+	// value forever (the ::1<->::3 oscillation). Making the read "more consistent" does
+	// NOT help (it is already consistent); the read of the CM and the read of memory
+	// straddle a commit. The version is monotonic (bumped on every commit/decline/expire),
+	// so a CM whose version is strictly older than the in-memory allocation is exactly
+	// such a cross-commit stale read — skip it. A real edit (`kubectl edit`, which keeps
+	// the version field, or one that omits it → 0) carries version == current (or 0).
 	if want.Version != 0 && want.Version < liveVersion {
 		return false
 	}
