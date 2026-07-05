@@ -35,13 +35,16 @@ func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 	svr.connections = nil
 	svr.connMu.Unlock()
 	sorted := connects.Sort()
-	if len(sorted) > 0 {
+	// Emit the progress step only from the user daemon (the orchestrator). The sudo
+	// daemon cleans up its data-plane connections silently so the CLI renders
+	// "Cleaned up N connections" exactly once — see Disconnect for the same guard.
+	if !svr.IsSudo && len(sorted) > 0 {
 		plog.StepStart(ctx, "Cleaning up connections")
 	}
 	for _, conn := range sorted {
 		cleanupConnection(ctx, conn)
 	}
-	if len(sorted) > 0 {
+	if !svr.IsSudo && len(sorted) > 0 {
 		plog.StepDone(ctx, "Cleaned up %d connections", len(sorted))
 	}
 

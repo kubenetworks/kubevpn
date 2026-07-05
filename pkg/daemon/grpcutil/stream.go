@@ -12,6 +12,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util/progress"
 )
 
 // Printable is an interface for gRPC response messages that can provide a human-readable string.
@@ -63,6 +64,53 @@ func PrintGRPCStream[T any](ctx context.Context, clientStream grpc.ClientStream,
 		} else {
 			buf, _ := json.Marshal(t)
 			_, _ = fmt.Fprint(out, string(buf))
+		}
+	}
+}
+
+// RenderGRPCStream reads messages from a gRPC client stream and renders them as
+// animated CLI progress via progress.Renderer: steps animate as a spinner and
+// finalize with a check mark, while ordinary log lines scroll above. Unlike
+// PrintGRPCStream — which strips the step sentinel for plain consumers (log file,
+// `logs` command) — it forwards the raw message so the renderer can decode the
+// step kind. Use it for interactive CLI commands (e.g. `kubevpn run`) that want
+// the same progress UX as connect. The renderer degrades to plain, ✓-annotated
+// lines off a TTY (pipes, CI).
+func RenderGRPCStream[T any](ctx context.Context, clientStream grpc.ClientStream, out io.Writer) error {
+	if out == nil {
+		out = os.Stdout
+	}
+
+	if ctx != nil {
+		// Forward CLI cancellation (Ctrl-C) to the daemon, but stop watching once
+		// this function returns so the goroutine never outlives the stream.
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			select {
+			case <-ctx.Done():
+				_ = clientStream.SendMsg(&rpc.Cancel{})
+			case <-done:
+			}
+		}()
+	}
+
+	r := progress.New(out)
+	defer r.Stop()
+
+	for {
+		t := new(T)
+		err := clientStream.RecvMsg(t)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if p, ok := any(t).(Printable); ok {
+			if msg := p.GetMessage(); msg != "" {
+				r.Write(msg)
+			}
 		}
 	}
 }

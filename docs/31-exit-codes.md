@@ -83,6 +83,12 @@ text at the boundary, then wrapped with a sentinel: SSH connect-vs-auth-vs-GSSAP
 Docker daemon-down/image-pull/run split (`classifyDockerError` in `pkg/util/docker.go`,
 which captures the `docker` CLI stderr via an `io.MultiWriter` while still streaming it live).
 
+> **Ctrl-C during `kubevpn run` is `130`, not `122`.** When the user interrupts a foreground run, the
+> shared context is cancelled and `docker` is SIGKILLed — which would otherwise be classified as
+> `DockerRunFailed (122)` by `classifyDockerError`. `ConfigList.Run` suppresses that case (returns `nil`
+> when `ctx.Err() != nil`, see [20-kubevpn-run.md](20-kubevpn-run.md)), so the run reports the interrupt
+> code `130` from the signal itself rather than a spurious Docker failure.
+
 **Two-daemon preservation.** A failure in the root daemon is classified there, sent to the
 user daemon, and forwarded to the CLI. `AsStatusError` treats an already-classified error
 (one already carrying a kubevpn `ErrorInfo`, or any non-`Unknown` gRPC code such as a
