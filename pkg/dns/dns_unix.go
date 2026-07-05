@@ -173,6 +173,7 @@ func toString(config miekgdns.ClientConfig) string {
 	return builder.String()
 }
 
+// CancelDNS removes the injected DNS nameserver from macOS resolver files and cleans up hosts entries.
 func (c *Config) CancelDNS() {
 	for _, filename := range getResolvers(c.Config.Search, c.Ns, c.Services) {
 		content, err := os.ReadFile(filename)

@@ -8,10 +8,12 @@ import (
 	"sync"
 )
 
+// Connector dials outbound connections on behalf of the proxy server.
 type Connector interface {
 	Connect(ctx context.Context, host string, port int) (net.Conn, error)
 }
 
+// Server runs SOCKS5 and HTTP CONNECT proxy listeners that forward traffic through a Connector.
 type Server struct {
 	Connector         Connector
 	SOCKSListenAddr   string
@@ -20,6 +22,7 @@ type Server struct {
 	Stderr            io.Writer
 }
 
+// ListenAndServe starts the configured proxy listeners and blocks until the context is cancelled.
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	if s.Connector == nil {
 		return fmt.Errorf("connector is required")

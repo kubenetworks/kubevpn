@@ -12,6 +12,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// RunWithElevated re-executes the current process with elevated (sudo/admin) privileges.
 func RunWithElevated() {
 	cmd := exec.Command("sudo", append([]string{"--preserve-env=HOME"}, os.Args...)...)
 	plog.G(context.Background()).Debug(cmd.Args)
@@ -32,6 +33,7 @@ func RunWithElevated() {
 	}
 }
 
+// IsAdmin reports whether the current process is running with root/administrator privileges.
 func IsAdmin() bool {
 	/*_, ok := os.LookupEnv(config.EnvStartSudoKubeVPNByKubeVPN)
 	if os.Getuid() == 0 {

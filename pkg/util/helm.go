@@ -16,10 +16,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-// DetectManagerNamespace
-//  1. use helm to install kubevpn server, means cluster mode,
-//     all kubevpn client should connect to this namespace.
-//  2. if any error occurs, just ignore and will use options `-n` or `--namespace`
+// DetectManagerNamespace finds the namespace containing a running kubevpn traffic manager, checking the given namespace, the default kubevpn namespace, and Helm releases.
 func DetectManagerNamespace(ctx context.Context, f cmdutil.Factory, namespace string) (string, error) {
 	clientSet, err := f.KubernetesClientSet()
 	if err != nil {

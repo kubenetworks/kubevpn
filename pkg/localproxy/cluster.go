@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+// ClusterConnector implements Connector by resolving cluster service/pod addresses and port-forwarding to them.
 type ClusterConnector struct {
 	Client           ClusterAPI
 	Forwarder        PodDialer
@@ -26,6 +27,7 @@ type resolvedTarget struct {
 	PodPort   int32
 }
 
+// ClusterAPI abstracts Kubernetes service and endpoint lookups for testability.
 type ClusterAPI interface {
 	GetService(ctx context.Context, namespace, name string) (*corev1.Service, error)
 	GetEndpoints(ctx context.Context, namespace, name string) (*corev1.Endpoints, error)
@@ -33,6 +35,7 @@ type ClusterAPI interface {
 	ListPodsByIP(ctx context.Context, ip string) (*corev1.PodList, error)
 }
 
+// PodDialer opens a network connection to a specific pod and port.
 type PodDialer interface {
 	DialPod(ctx context.Context, namespace, podName string, port int32) (net.Conn, error)
 }
@@ -41,6 +44,7 @@ type kubeClusterAPI struct {
 	clientset kubernetes.Interface
 }
 
+// NewClusterAPI creates a ClusterAPI backed by a real Kubernetes clientset.
 func NewClusterAPI(config *rest.Config) (ClusterAPI, *kubernetes.Clientset, error) {
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
@@ -67,6 +71,7 @@ func (k *kubeClusterAPI) ListPodsByIP(ctx context.Context, ip string) (*corev1.P
 	})
 }
 
+// Connect resolves host to a backing pod and dials it via the configured PodDialer.
 func (c *ClusterConnector) Connect(ctx context.Context, host string, port int) (net.Conn, error) {
 	target, err := c.resolveTarget(ctx, host, port)
 	if err != nil {
@@ -240,6 +245,7 @@ func parseServiceHost(host, defaultNamespace string) (service string, namespace 
 	}
 }
 
+// FirstNonLoopbackIPv4 returns the first non-loopback IPv4 address found on the host.
 func FirstNonLoopbackIPv4() string {
 	ifaces, err := net.Interfaces()
 	if err != nil {

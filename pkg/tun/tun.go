@@ -13,6 +13,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+// ClosedErr is returned by Accept when the TUN listener has been closed.
 var ClosedErr = errors.New("accept on closed listener")
 
 // Config is the config for TUN device.

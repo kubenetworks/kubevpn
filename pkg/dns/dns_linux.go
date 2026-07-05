@@ -21,8 +21,8 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-// SetupDNS
-// systemd-resolve --status, systemd-resolve --flush-caches
+// SetupDNS configures the system DNS on Linux using systemd-resolved, a library
+// DNS configurator, or /etc/resolv.conf as fallback.
 func (c *Config) SetupDNS(ctx context.Context) error {
 	config := c.Config
 	tunName := c.TunName
@@ -152,6 +152,7 @@ func (c *Config) UseLibraryDNS(ctx context.Context, tunName string, clientConfig
 	return c.OSConfigurator.SetDNS(config)
 }
 
+// CancelDNS reverts DNS changes made by SetupDNS and removes managed hosts entries.
 func (c *Config) CancelDNS() {
 	_ = c.removeHosts()
 	if c.OSConfigurator != nil {

@@ -32,6 +32,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// SvrOption holds the runtime state for a daemon server instance, including its gRPC server and lifecycle controls.
 type SvrOption struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -43,6 +44,7 @@ type SvrOption struct {
 	ID     string
 }
 
+// Start initializes logging, creates the Unix socket listener, and serves the gRPC daemon until the context is cancelled.
 func (o *SvrOption) Start(ctx context.Context) error {
 	l := &lumberjack.Logger{
 		Filename:   config.GetDaemonLogPath(o.IsSudo),
@@ -129,6 +131,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	return downgradingServer.Serve(lis)
 }
 
+// Stop cancels the server context and invokes the server's cleanup callback to shut down gracefully.
 func (o *SvrOption) Stop() {
 	o.cancel()
 	if o.svr != nil && o.svr.Cancel != nil {

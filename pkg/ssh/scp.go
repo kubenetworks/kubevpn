@@ -16,7 +16,7 @@ import (
 func SCPAndExec(ctx context.Context, stdout, stderr io.Writer, client *ssh.Client, filename, to string, commands ...string) error {
 	err := SCP(ctx, client, stdout, stderr, filename, to)
 	if err != nil {
-		plog.G(ctx).Errorf("Copy file to remote error: %s", err)
+		plog.G(ctx).Errorf("Copy file to remote error: %v", err)
 		return err
 	}
 	for _, command := range commands {

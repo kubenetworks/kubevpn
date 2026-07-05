@@ -26,6 +26,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// Config holds DNS configuration for setting up cluster DNS resolution on the local machine.
 type Config struct {
 	Config      *miekgdns.ClientConfig
 	Ns          []string
@@ -42,6 +43,8 @@ type Config struct {
 	OSConfigurator dns.OSConfigurator
 }
 
+// AddServiceNameToHosts appends service name entries to the system hosts file and
+// watches for service changes to keep them up to date.
 func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) error {
 	var serviceList []corev1.Service
 	c.Lock.Lock()
@@ -144,6 +147,7 @@ func (c *Config) removeHosts() error {
 	return filterHostsFile(keyword)
 }
 
+// Entry represents a single IP-to-domain mapping for the system hosts file.
 type Entry struct {
 	IP     string
 	Domain string
@@ -213,6 +217,7 @@ func (c *Config) generateAppendHosts(serviceList []corev1.Service, hosts []Entry
 	return entryList
 }
 
+// CleanupHosts removes all KubeVPN-managed entries from the system hosts file.
 func CleanupHosts() error {
 	return filterHostsFile(config.HostsKeyword)
 }

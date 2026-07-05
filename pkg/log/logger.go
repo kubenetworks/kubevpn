@@ -18,6 +18,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+// InitLoggerForClient configures the package-level logger L for client-side use with stdout output.
 func InitLoggerForClient() {
 	level := log.InfoLevel
 	if config.Debug {
@@ -26,6 +27,7 @@ func InitLoggerForClient() {
 	L = GetLoggerForClient(int32(level), os.Stdout)
 }
 
+// GetLoggerForClient returns a new logger configured for client-side use at the given level and output writer.
 func GetLoggerForClient(level int32, out io.Writer) *log.Logger {
 	return &log.Logger{
 		Out:          out,
@@ -37,6 +39,7 @@ func GetLoggerForClient(level int32, out io.Writer) *log.Logger {
 	}
 }
 
+// InitLoggerForServer returns a new logger configured for server-side use with caller info and stderr output.
 func InitLoggerForServer() *log.Logger {
 	return &log.Logger{
 		Out:          os.Stderr,
@@ -84,6 +87,7 @@ func (*serverFormat) Format(e *log.Entry) ([]byte, error) {
 		)), nil
 }
 
+// ServerEmitter adapts gvisor's log.Emitter interface to write server-formatted log output.
 type ServerEmitter struct {
 	*glog.Writer
 }
@@ -110,6 +114,7 @@ func (g ServerEmitter) Emit(depth int, level glog.Level, timestamp time.Time, fo
 	)
 }
 
+// GenStr formats a map of log fields into a sorted bracketed key=value string.
 func GenStr(allFields map[string]any) string {
 	keys := slices.Sorted(maps.Keys(allFields))
 

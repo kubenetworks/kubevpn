@@ -32,6 +32,7 @@ var (
 	conf = filepath.Join(pkgconfig.GetSyncthingPath(), "config.xml")
 )
 
+// StartClient starts a syncthing instance configured as a client, syncing localDir with the remote peer.
 func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr string) error {
 	err := cmdutil.SetConfigDataLocationsFromFlags(pkgconfig.GetSyncthingPath(), "", "")
 	if err != nil {
@@ -125,6 +126,7 @@ func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr str
 	return app.Error()
 }
 
+// StartServer starts a syncthing instance configured as a server, serving remoteDir for sync.
 func StartServer(ctx context.Context, detach bool, remoteDir string) error {
 	err := cmdutil.SetConfigDataLocationsFromFlags(pkgconfig.GetSyncthingPath(), "", "")
 	if err != nil {

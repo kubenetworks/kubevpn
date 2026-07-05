@@ -163,7 +163,7 @@ func Parse(flags *pflag.FlagSet, copts *ContainerOptions) (*Config, *HostConfig,
 		// if expose a port, the start and end port are the same
 		start, end, err := nat.ParsePortRange(port)
 		if err != nil {
-			return nil, nil, fmt.Errorf("invalid range format for --expose: %s, error: %s", e, err)
+			return nil, nil, fmt.Errorf("invalid range format for --expose: %s: %w", e, err)
 		}
 		for i := start; i <= end; i++ {
 			p, err := nat.NewPort(proto, strconv.FormatUint(i, 10))
@@ -231,6 +231,7 @@ func validateAttach(val string) (string, error) {
 	return val, fmt.Errorf("valid streams are STDIN, STDOUT and STDERR")
 }
 
+// Config holds Docker container configuration parsed from user-supplied flags (stdin, tty, cmd, etc.).
 type Config struct {
 	AttachStdin  bool                // Attach the standard input, makes possible user interaction
 	AttachStdout bool                // Attach the standard output
@@ -244,6 +245,7 @@ type Config struct {
 	Entrypoint   strslice.StrSlice   // Entrypoint to run when starting the container
 }
 
+// HostConfig holds host-side Docker settings: volume binds, port mappings, and privileges.
 type HostConfig struct {
 	Binds        []string    // List of volume bindings for this container
 	PortBindings nat.PortMap // Port mapping between the exposed port (container) and the host
@@ -254,6 +256,7 @@ type HostConfig struct {
 	Mounts          []mounttypes.Mount `json:",omitempty"`
 }
 
+// RunOptions holds docker run flags for platform and image pull policy.
 type RunOptions struct {
 	Platform string
 	Pull     string // always, missing, never

@@ -12,6 +12,7 @@ import (
 )
 
 const (
+	// MaxSize is the channel buffer capacity for packet queues (inbound, outbound, slots).
 	MaxSize = 1000
 )
 
@@ -78,10 +79,12 @@ func NewPacket(data []byte, length int, src net.IP, dst net.IP) *Packet {
 	}
 }
 
+// Data returns the raw packet buffer (includes framing headers and payload).
 func (d *Packet) Data() []byte {
 	return d.data
 }
 
+// Length returns the number of meaningful bytes in the packet (excluding the leading headroom).
 func (d *Packet) Length() int {
 	return d.length
 }

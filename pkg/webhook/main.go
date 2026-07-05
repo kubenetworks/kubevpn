@@ -9,6 +9,7 @@ import (
 	putil "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// Main starts the admission webhook HTTPS server with DHCP IP injection handlers.
 func Main(manager *dhcp.Manager) error {
 	h := &admissionReviewHandler{dhcp: manager}
 	http.HandleFunc("/pods", func(w http.ResponseWriter, r *http.Request) {
@@ -25,7 +26,7 @@ func Main(manager *dhcp.Manager) error {
 
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
 	server := &http.Server{
-		Addr:      fmt.Sprintf(":%d", 80),
+		Addr:      ":80",
 		TLSConfig: &tls.Config{Certificates: tlsConfig.Certificates},
 	}
 	return server.ListenAndServeTLS("", "")

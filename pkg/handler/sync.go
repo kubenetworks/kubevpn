@@ -50,6 +50,7 @@ type SyncOptions struct {
 	syncthingGUIAddr string
 }
 
+// InitClient initializes the Kubernetes client, REST client, and namespace from the given factory.
 func (d *SyncOptions) InitClient(f cmdutil.Factory) error {
 	d.factory = f
 	var err error
@@ -57,6 +58,7 @@ func (d *SyncOptions) InitClient(f cmdutil.Factory) error {
 	return err
 }
 
+// SetContext sets the background context used by long-running sync operations.
 func (d *SyncOptions) SetContext(ctx context.Context) {
 	d.ctx = ctx
 }
@@ -227,6 +229,7 @@ func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, spec *v1.PodTempla
 	return nil
 }
 
+// Cleanup deletes sync workloads created by DoSync and executes rollback functions.
 func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	if len(workloads) == 0 {
 		for _, v := range d.TargetWorkloadNames {
@@ -237,7 +240,7 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 		plog.G(ctx).Infof("Cleaning up sync workload: %s", workload)
 		object, err := util.GetUnstructuredObject(d.factory, d.Namespace, workload)
 		if err != nil {
-			plog.G(ctx).Errorf("Failed to get unstructured object: %s", err)
+			plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
 			return err
 		}
 		var client dynamic.Interface
@@ -270,14 +273,17 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	return nil
 }
 
+// AddRollbackFunc registers a function to be called during Cleanup for teardown.
 func (d *SyncOptions) AddRollbackFunc(f func() error) {
 	d.rollbackFuncList = append(d.rollbackFuncList, f)
 }
 
+// GetFactory returns the kubectl factory used by this SyncOptions instance.
 func (d *SyncOptions) GetFactory() cmdutil.Factory {
 	return d.factory
 }
 
+// GetSyncthingGUIAddr returns the local address of the syncthing GUI for status monitoring.
 func (d *SyncOptions) GetSyncthingGUIAddr() string {
 	return d.syncthingGUIAddr
 }
