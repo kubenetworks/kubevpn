@@ -77,12 +77,12 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 			}
 			if all {
 				_ = stopAllManagedProxies()
-				_, _ = fmt.Fprintln(os.Stdout, "Stopped local SOCKS proxies")
+				printSuccess(os.Stdout, "Stopped local SOCKS proxies")
 			} else if id != "" {
 				_ = stopManagedProxy(id)
 				printManagedSocksStopped(os.Stdout, id)
 			}
-			_, _ = fmt.Fprint(os.Stdout, "Disconnect completed")
+			printSuccess(os.Stdout, "Disconnect completed")
 			return nil
 		},
 	}

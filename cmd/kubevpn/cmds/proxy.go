@@ -2,7 +2,6 @@ package cmds
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	log "github.com/sirupsen/logrus"
@@ -160,7 +159,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				_, _ = fmt.Fprint(os.Stdout, "Disconnect completed")
+				printSuccess(os.Stdout, "Disconnect completed")
 			}
 			return nil
 		},

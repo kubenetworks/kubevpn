@@ -6,8 +6,11 @@ Every operational `kubevpn` command (`connect`, `proxy`, `sync`, `leave`, `reset
 `disconnect`, `uninstall`, `quit`) renders its steps as a
 [kind](https://github.com/kubernetes-sigs/kind)-style checklist: each step animates as a spinner while
 it runs and finalizes with a green `✓` (or `✗` on failure), carrying the data discovered during the
-step. (`logs` is the one exception — it tails the daemon log files verbatim and never animates.) A
-successful connect looks like:
+step. Their terminal success/teardown lines (`Disconnect completed`, `Exited`, `Stopped local SOCKS
+proxies`, and the connect/proxy/sync `Slogan`) are printed bold-green via `progress.Success`
+(`printSuccess`/`printSlogan` in `cmd/kubevpn/cmds/progress.go`). (`logs` and `run` are the exceptions —
+`logs` tails the daemon log files verbatim, and `run` streams via `grpcutil.PrintGRPCStream` in
+container mode; neither animates.) A successful connect looks like:
 
 ```
 Connecting to the cluster ...

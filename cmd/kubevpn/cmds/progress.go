@@ -13,11 +13,18 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util/progress"
 )
 
+// printSuccess prints a terminal success/teardown line styled as a bold-green
+// terminus (plain off a TTY), matching the green check marks of the steps above
+// it. Centralized here so every command renders these lines identically.
+func printSuccess(out io.Writer, msg string) {
+	progress.Success(out, msg)
+}
+
 // printSlogan prints the connection-success message as a bold-green terminus,
 // matching the green check marks of the steps above it. Centralized here so the
 // connect/proxy/sync commands render it identically.
 func printSlogan(out io.Writer) {
-	progress.Success(out, config.Slogan)
+	printSuccess(out, config.Slogan)
 }
 
 // connectionIDer lets printProgressStream capture a connection ID from a

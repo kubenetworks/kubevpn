@@ -146,7 +146,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				_, _ = fmt.Fprint(os.Stdout, "Disconnect completed")
+				printSuccess(os.Stdout, "Disconnect completed")
 			}
 			return nil
 		},

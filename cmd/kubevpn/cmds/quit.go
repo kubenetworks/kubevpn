@@ -2,7 +2,6 @@ package cmds
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -33,7 +32,7 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
 			_ = quit(cmd.Context(), false)
 			_ = stopAllManagedProxies()
 			util.CleanExtensionLib()
-			_, _ = fmt.Fprint(os.Stdout, "Exited")
+			printSuccess(os.Stdout, "Exited")
 			return nil
 		},
 	}
