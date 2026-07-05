@@ -34,5 +34,5 @@ func (svr *Server) Leave(resp rpc.Daemon_LeaveServer) error {
 			Workload:  resource,
 		})
 	}
-	return conn.LeaveResource(ctx, resources, conn.OwnerID)
+	return conn.LeaveResource(ctx, resources, conn.GetOwnerID())
 }

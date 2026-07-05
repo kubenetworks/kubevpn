@@ -2,9 +2,14 @@ package handler
 
 import (
 	"context"
+	"net"
+	"time"
 
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 )
 
 // Connection defines the API surface that the daemon layer (pkg/daemon/action)
@@ -72,7 +77,41 @@ type Connection interface {
 
 	// GetSync returns the SyncOptions associated with this connection, or nil.
 	GetSync() *SyncOptions
+
+	// SetSync stores the SyncOptions associated with this connection.
+	SetSync(s *SyncOptions)
+
+	// GetRunningPodList returns the list of pods currently running for the traffic manager.
+	GetRunningPodList(ctx context.Context) ([]v1.Pod, error)
+
+	// GetLastHeartbeat returns the time of the last observed data-plane heartbeat echo reply.
+	// Returns the zero time when no heartbeat has been received or NetworkManager is nil.
+	GetLastHeartbeat() time.Time
+
+	// GetTrafficManagerConfigMap returns the traffic manager ConfigMap from the informer cache.
+	GetTrafficManagerConfigMap(ctx context.Context) (*v1.ConfigMap, error)
+
+	// --- Accessors needed by sort.go and daemon/action layer ---
+
+	// GetOwnerID returns the UUID prefix identifying this connection's envoy rule ownership.
+	// Empty string when the connection is not in the user daemon (e.g. root daemon does not use envoy).
+	GetOwnerID() string
+
+	// GetWorkloadNamespace returns the user workload namespace for this connection.
+	GetWorkloadNamespace() string
+
+	// GetAPIServerIPs returns the Kubernetes API server IPs resolved at connect time.
+	// Returns nil when called on a user-daemon ConnectOptions (NetworkManager lives in root daemon).
+	GetAPIServerIPs() []net.IP
+
+	// GetExtraCIDR returns the extra CIDR strings configured for this connection.
+	GetExtraCIDR() []string
+
+	// GetNetworkExtraHost returns extra DNS host entries accumulated during route setup.
+	// Returns nil when called on a user-daemon ConnectOptions (NetworkManager lives in root daemon).
+	GetNetworkExtraHost() []dns.Entry
 }
 
-// Compile-time assertion: *ConnectOptions must satisfy the Connection interface.
-var _ Connection = (*ConnectOptions)(nil)
+// Compile-time assertions: both session types must satisfy the Connection interface.
+var _ Connection = (*ConnectOptions)(nil) // ControlSession (user daemon)
+var _ Connection = (*DataSession)(nil)    // DataSession (root daemon)

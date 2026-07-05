@@ -17,7 +17,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, conn net.Conn, endpoint *channel.Endpoint) {
@@ -76,9 +76,9 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		ip := buf[tunReserve : datagramHeaderLen+read]
 		// Determine network protocol from IP version field (IFF_NO_PI mode)
 		var protocol tcpip.NetworkProtocolNumber
-		if util.IsIPv4(ip) {
+		if netutil.IsIPv4(ip) {
 			protocol = header.IPv4ProtocolNumber
-		} else if util.IsIPv6(ip) {
+		} else if netutil.IsIPv6(ip) {
 			protocol = header.IPv6ProtocolNumber
 		} else {
 			plog.G(ctx).Errorf("[Gvisor-TCP] Unknown packet, dropping")
@@ -86,7 +86,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			continue
 		}
 
-		src, dst, ipProtocol, parseErr := util.ParseIPFast(ip)
+		src, dst, ipProtocol, parseErr := netutil.ParseIPFast(ip)
 		if parseErr != nil {
 			plog.G(ctx).Errorf("[Gvisor-TCP] Failed to parse IP header: %v", parseErr)
 			config.LPool.Put(buf[:])

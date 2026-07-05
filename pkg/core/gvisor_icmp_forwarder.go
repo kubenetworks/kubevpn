@@ -8,7 +8,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 // ICMPForwarder creates a gvisor handler that replies to ICMP Echo requests inline.
@@ -33,7 +33,7 @@ func ICMPForwarder(ctx context.Context, s *stack.Stack) func(stack.TransportEndp
 }
 
 func replyICMPv4Echo(ctx context.Context, s *stack.Stack, id stack.TransportEndpointID, reqHdr header.ICMPv4, payload []byte) {
-	defer util.HandleCrash()
+	defer netutil.HandleCrash()
 	plog.G(ctx).Debugf("[Gvisor-ICMP] Echo request: %s -> %s", id.RemoteAddress, id.LocalAddress)
 
 	replyData := make([]byte, header.ICMPv4MinimumSize+len(payload))
@@ -71,7 +71,7 @@ func replyICMPv4Echo(ctx context.Context, s *stack.Stack, id stack.TransportEndp
 }
 
 func replyICMPv6Echo(ctx context.Context, s *stack.Stack, id stack.TransportEndpointID, reqHdr header.ICMPv6, payload []byte) {
-	defer util.HandleCrash()
+	defer netutil.HandleCrash()
 	plog.G(ctx).Debugf("[Gvisor-ICMP] ICMPv6 echo request: %s -> %s", id.RemoteAddress, id.LocalAddress)
 
 	replyData := make([]byte, header.ICMPv6EchoMinimumSize+len(payload))

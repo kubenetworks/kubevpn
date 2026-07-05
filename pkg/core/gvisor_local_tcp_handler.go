@@ -11,7 +11,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 type gvisorLocalHandler struct {
@@ -39,14 +39,14 @@ func (h *gvisorLocalHandler) Run(ctx context.Context) {
 	endpoint.LinkEPCapabilities = stack.CapabilityRXChecksumOffload
 	defer endpoint.Close()
 	go func() {
-		defer util.HandleCrash()
+		defer netutil.HandleCrash()
 		readFromGvisorInboundWriteToEndpoint(ctx, h.gvisorInbound, endpoint)
-		util.SafeClose(h.errChan)
+		netutil.SafeClose(h.errChan)
 	}()
 	go func() {
-		defer util.HandleCrash()
+		defer netutil.HandleCrash()
 		readFromEndpointWriteToTun(ctx, endpoint, h.outbound, h.headroom)
-		util.SafeClose(h.errChan)
+		netutil.SafeClose(h.errChan)
 	}()
 	s := NewLocalStack(ctx, sniffer.NewWithPrefix(endpoint, fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))))
 	defer s.Destroy()

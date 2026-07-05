@@ -20,9 +20,9 @@ import (
 
 func TestFindConnection_Found(t *testing.T) {
 	svr := &Server{
-		connections: []*handler.ConnectOptions{
-			{ManagerNamespace: "ns1"},
-			{ManagerNamespace: "ns2"},
+		connections: []handler.Connection{
+			&handler.ConnectOptions{ManagerNamespace: "ns1"},
+			&handler.ConnectOptions{ManagerNamespace: "ns2"},
 		},
 	}
 	// We need GetConnectionID — but that requires DHCP init.

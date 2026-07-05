@@ -13,7 +13,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint, out chan<- *Packet, headroom int) {
@@ -46,9 +46,9 @@ func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *Packet
 			}
 			var protocol tcpip.NetworkProtocolNumber
 			ip := packet.data[tunReserve : datagramHeaderLen+packet.length]
-			if util.IsIPv4(ip) {
+			if netutil.IsIPv4(ip) {
 				protocol = header.IPv4ProtocolNumber
-			} else if util.IsIPv6(ip) {
+			} else if netutil.IsIPv6(ip) {
 				protocol = header.IPv6ProtocolNumber
 			} else {
 				plog.G(ctx).Errorf("[Gvisor-TCP] Unknown packet, dropping")

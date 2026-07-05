@@ -13,7 +13,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 type stackConstructor func(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack
@@ -49,14 +49,14 @@ func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {
 	endpoint.LinkEPCapabilities = stack.CapabilityRXChecksumOffload
 	done := make(chan struct{}, 2)
 	go func() {
-		defer util.HandleCrash()
+		defer netutil.HandleCrash()
 		h.readFromTCPConnWriteToEndpoint(ctx, NewBufferedTCP(ctx, tcpConn), endpoint)
-		util.SafeClose(done)
+		netutil.SafeClose(done)
 	}()
 	go func() {
-		defer util.HandleCrash()
+		defer netutil.HandleCrash()
 		h.readFromEndpointWriteToTCPConn(ctx, tcpConn, endpoint)
-		util.SafeClose(done)
+		netutil.SafeClose(done)
 	}()
 	s := h.newStack(ctx, sniffer.NewWithPrefix(endpoint, "[gVISOR] "))
 	defer s.Destroy()
@@ -79,9 +79,9 @@ func GvisorTCPListener(addr string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	serverConfig, err := util.GetTlsServerConfig(nil)
+	serverConfig, err := netutil.GetTlsServerConfig(nil)
 	if err != nil {
-		if errors.Is(err, util.ErrNoTLSConfig) {
+		if errors.Is(err, netutil.ErrNoTLSConfig) {
 			plog.G(context.Background()).Warn("[Gvisor-TCP] TLS config not found, using raw TCP")
 			return &tcpKeepAliveListener{TCPListener: listener}, nil
 		}

@@ -9,7 +9,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 type tcpTransporter struct {
@@ -20,9 +20,9 @@ type tcpTransporter struct {
 // When TLS config is absent (ErrNoTLSConfig), falls back to raw TCP.
 // When TLS config exists but is invalid, returns a transporter that refuses connections.
 func TCPTransporter(tlsInfo map[string][]byte) Transporter {
-	tlsConfig, err := util.GetTlsClientConfig(tlsInfo)
+	tlsConfig, err := netutil.GetTlsClientConfig(tlsInfo)
 	if err != nil {
-		if errors.Is(err, util.ErrNoTLSConfig) {
+		if errors.Is(err, netutil.ErrNoTLSConfig) {
 			plog.G(context.Background()).Warn("[Transport] TLS config not found, using raw TCP")
 			return &tcpTransporter{}
 		}

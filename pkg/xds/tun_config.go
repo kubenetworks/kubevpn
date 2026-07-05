@@ -2,7 +2,6 @@ package xds
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"sort"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/yaml"
@@ -969,8 +967,17 @@ func (s *TunConfigServer) removeWatcher(ownerID string, ch chan *rpc.TunIPRespon
 // syncEnvoyRuleIP updates Rule.LocalTunIPv4/v6 in ENVOY_CONFIG for all Rules matching ownerID.
 // This triggers: Watcher → Processor → xDS push → envoy hot-update.
 func (s *TunConfigServer) syncEnvoyRuleIP(ctx context.Context, ownerID string, newIPv4, newIPv6 *net.IPNet) {
+	newV4Str := ""
+	if newIPv4 != nil {
+		newV4Str = newIPv4.IP.String()
+	}
+	newV6Str := ""
+	if newIPv6 != nil {
+		newV6Str = newIPv6.IP.String()
+	}
+
 	skipped := false
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 		if err != nil {
 			return err
@@ -986,14 +993,6 @@ func (s *TunConfigServer) syncEnvoyRuleIP(ctx context.Context, ownerID string, n
 		}
 
 		changed := false
-		newV4Str := ""
-		if newIPv4 != nil {
-			newV4Str = newIPv4.IP.String()
-		}
-		newV6Str := ""
-		if newIPv6 != nil {
-			newV6Str = newIPv6.IP.String()
-		}
 		for _, v := range virtuals {
 			for _, rule := range v.Rules {
 				if rule.OwnerID == ownerID && rule.LocalTunIPv4 != newV4Str {
@@ -1011,15 +1010,11 @@ func (s *TunConfigServer) syncEnvoyRuleIP(ctx context.Context, ownerID string, n
 		if marshalErr != nil {
 			return marshalErr
 		}
-		patch, patchErr := json.Marshal([]map[string]string{{
-			"op":    "add",
-			"path":  "/data/" + config.KeyEnvoy,
-			"value": string(data),
-		}})
-		if patchErr != nil {
-			return patchErr
+		if cm.Data == nil {
+			cm.Data = make(map[string]string)
 		}
-		_, err = s.clientset.CoreV1().ConfigMaps(s.namespace).Patch(ctx, config.ConfigMapPodTrafficManager, k8stypes.JSONPatchType, patch, metav1.PatchOptions{})
+		cm.Data[config.KeyEnvoy] = string(data)
+		_, err = s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
 		return err
 	})
 	if err != nil {

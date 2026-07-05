@@ -29,7 +29,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
@@ -158,7 +158,7 @@ func createDevice(t *testing.T, v4, v6 net.IP) (string, func()) {
 		_ = ln.Close()
 		t.Fatalf("accept tun conn: %v", err)
 	}
-	dev, err := util.GetTunDevice(v4)
+	dev, err := netutil.GetTunDevice(v4)
 	if err != nil {
 		_ = conn.Close()
 		_ = ln.Close()

@@ -22,7 +22,7 @@ func TestFindConnection_ReturnsFirstMatch(t *testing.T) {
 	svr := &Server{}
 	a := &handler.ConnectOptions{ConnectionID: "abc123456789"}
 	b := &handler.ConnectOptions{ConnectionID: "def123456789"}
-	svr.connections = []*handler.ConnectOptions{a, b}
+	svr.connections = []handler.Connection{a, b}
 
 	found, idx := svr.findConnection("abc123456789")
 	if found != a || idx != 0 {
@@ -37,8 +37,8 @@ func TestFindConnection_ReturnsFirstMatch(t *testing.T) {
 
 func TestFindConnection_NotFound(t *testing.T) {
 	svr := &Server{}
-	svr.connections = []*handler.ConnectOptions{
-		{ConnectionID: "abc123456789"},
+	svr.connections = []handler.Connection{
+		&handler.ConnectOptions{ConnectionID: "abc123456789"},
 	}
 
 	found, idx := svr.findConnection("nonexistent12")
@@ -52,7 +52,7 @@ func TestRemoveConnection_RemovesAllMatching(t *testing.T) {
 	a := &handler.ConnectOptions{ConnectionID: "abc123456789", OwnerID: "owner-a"}
 	b := &handler.ConnectOptions{ConnectionID: "abc123456789", OwnerID: "owner-b"}
 	c := &handler.ConnectOptions{ConnectionID: "other1234567"}
-	svr.connections = []*handler.ConnectOptions{a, b, c}
+	svr.connections = []handler.Connection{a, b, c}
 
 	removed := svr.removeConnection("abc123456789")
 
@@ -69,8 +69,8 @@ func TestRemoveConnection_RemovesAllMatching(t *testing.T) {
 
 func TestRemoveConnection_NoMatch(t *testing.T) {
 	svr := &Server{}
-	svr.connections = []*handler.ConnectOptions{
-		{ConnectionID: "abc123456789"},
+	svr.connections = []handler.Connection{
+		&handler.ConnectOptions{ConnectionID: "abc123456789"},
 	}
 
 	removed := svr.removeConnection("nonexistent12")
@@ -84,9 +84,9 @@ func TestRemoveConnection_NoMatch(t *testing.T) {
 
 func TestResetCurrentConnection_PicksFirstRemaining(t *testing.T) {
 	svr := &Server{}
-	svr.connections = []*handler.ConnectOptions{
-		{ConnectionID: "first1234567"},
-		{ConnectionID: "second123456"},
+	svr.connections = []handler.Connection{
+		&handler.ConnectOptions{ConnectionID: "first1234567"},
+		&handler.ConnectOptions{ConnectionID: "second123456"},
 	}
 	svr.currentConnectionID = "removed123456"
 
@@ -111,8 +111,8 @@ func TestResetCurrentConnection_ClearsWhenEmpty(t *testing.T) {
 
 func TestResetCurrentConnection_NoOpIfDifferentID(t *testing.T) {
 	svr := &Server{}
-	svr.connections = []*handler.ConnectOptions{
-		{ConnectionID: "keep12345678"},
+	svr.connections = []handler.Connection{
+		&handler.ConnectOptions{ConnectionID: "keep12345678"},
 	}
 	svr.currentConnectionID = "keep12345678"
 
@@ -246,7 +246,7 @@ func TestFault_DisconnectDuringActiveConnections(t *testing.T) {
 	a := &handler.ConnectOptions{ConnectionID: "conn-aaaa-1234", OwnerID: "owner-a"}
 	b := &handler.ConnectOptions{ConnectionID: "conn-bbbb-5678", OwnerID: "owner-b"}
 	c := &handler.ConnectOptions{ConnectionID: "conn-cccc-9012", OwnerID: "owner-c"}
-	svr.connections = []*handler.ConnectOptions{a, b, c}
+	svr.connections = []handler.Connection{a, b, c}
 	svr.currentConnectionID = "conn-bbbb-5678"
 
 	removed := svr.removeConnection("conn-bbbb-5678")
@@ -343,7 +343,7 @@ func TestFault_FindConnection_EmptySlice(t *testing.T) {
 func TestFault_RemoveConnection_FromSingleElement(t *testing.T) {
 	svr := &Server{}
 	only := &handler.ConnectOptions{ConnectionID: "only1234567"}
-	svr.connections = []*handler.ConnectOptions{only}
+	svr.connections = []handler.Connection{only}
 	svr.currentConnectionID = "only1234567"
 
 	removed := svr.removeConnection("only1234567")

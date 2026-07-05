@@ -131,14 +131,14 @@ func TestInteraction_SwitchAndOperate(t *testing.T) {
 
 	// t1: findConnection for current → returns prod
 	current, _ := svr.findConnection(svr.currentConnectionID)
-	if current.OwnerID != "owner-prod" {
+	if current.GetOwnerID() != "owner-prod" {
 		t.Fatal("current should be prod")
 	}
 
 	// t2: Switch to staging
 	svr.currentConnectionID = "staging-uid-12"
 	current, _ = svr.findConnection(svr.currentConnectionID)
-	if current.OwnerID != "owner-staging" {
+	if current.GetOwnerID() != "owner-staging" {
 		t.Fatal("current should be staging after switch")
 	}
 
@@ -191,7 +191,7 @@ func TestInteraction_FullLifecycle_ConnectProxyLeaveDisconnectReconnect(t *testi
 	svr.currentConnectionID = "cluster-uid-12"
 
 	found, _ := svr.findConnection("cluster-uid-12")
-	if found == nil || found.OwnerID != "alice-session2" {
+	if found == nil || found.GetOwnerID() != "alice-session2" {
 		t.Fatal("reconnect should create new connection with new OwnerID")
 	}
 }
@@ -239,8 +239,8 @@ func TestInteraction_CrashAndReconnect_OthersUnaffected(t *testing.T) {
 		t.Fatalf("expected 3 after reconnect, got %d", len(svr.connections))
 	}
 	found, _ := svr.findConnection("cluster-b-5678")
-	if found.OwnerID != "bob-owner-02" {
-		t.Fatalf("Bob should have new OwnerID, got %q", found.OwnerID)
+	if found.GetOwnerID() != "bob-owner-02" {
+		t.Fatalf("Bob should have new OwnerID, got %q", found.GetOwnerID())
 	}
 }
 

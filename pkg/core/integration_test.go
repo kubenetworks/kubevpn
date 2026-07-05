@@ -18,7 +18,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 // =============================================================================
@@ -177,7 +177,7 @@ func TestIntegration_DatagramFraming(t *testing.T) {
 	if n != payloadLen || buf[0] != 1 {
 		t.Fatalf("framing error: n=%d, prefix=%d", n, buf[0])
 	}
-	src, dst, _, _ := util.ParseIPFast(buf[1:n])
+	src, dst, _, _ := netutil.ParseIPFast(buf[1:n])
 	if !src.Equal(srcIP) || !dst.Equal(dstIP) {
 		t.Fatalf("IP mismatch")
 	}

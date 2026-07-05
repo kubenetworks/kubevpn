@@ -286,3 +286,20 @@ MTU = 1500 (Ethernet)
 ```
 
 This ensures a full-MTU TUN packet fits within a single Ethernet frame after all encapsulation layers.
+
+## Data-Plane Package Boundaries
+
+The data-plane stack (`pkg/core`, `pkg/dns`) depends only on network primitives — it must not
+pull in Kubernetes cluster-API, Helm, or Docker transitive dependencies. This is enforced by the
+`pkg/util/netutil` sub-package (C3 refactoring):
+
+| Package | Contents | Imports |
+|---------|----------|---------|
+| `pkg/util/netutil` | Pure transport/packet/TLS/gvisor primitives: `SafeWrite`/`SafeClose`, `HandleCrash`, `ParseIPFast`, `IsIPv6Enabled`, TUN device helpers, ICMP generation, `WriteProxyInfo`/`ParseProxyInfo`, TLS helpers | Only `pkg/config` and `pkg/log` from the kubevpn module |
+| `pkg/util` | K8s cluster-ops, Docker, Helm, file/upgrade helpers | K8s client-go, Helm, Docker, CNI libs, … |
+
+`pkg/core` and `pkg/dns` import `pkg/util/netutil` and have **no dependency on `pkg/util`**.
+This keeps the data-plane binary free of the heavy transitive closure that cluster-ops libraries
+bring. All 19 cmd/ files and all upper-layer packages (`pkg/handler`, `pkg/inject`, `pkg/run`,
+`pkg/daemon/action`) continue to import `pkg/util` directly — they were already at the top of
+the import graph and gain nothing from the split.

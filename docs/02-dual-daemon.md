@@ -2,9 +2,16 @@
 
 ## Why This Document Exists
 
-KubeVPN uses a dual-process architecture (User Daemon + Root Daemon), where each process holds an **independent `ConnectOptions` instance** with completely different field semantics and usage scenarios. In the past, the lack of this architecture document led to bugs where fields were initialized in the wrong daemon (e.g., OwnerID being generated uselessly in the Root Daemon).
+KubeVPN uses a dual-process architecture (User Daemon + Root Daemon), where each process holds an **independent session instance** with completely different field semantics and usage scenarios. After the C2-A refactoring, the two session types are:
 
-**Anyone modifying `ConnectOptions` fields or `daemon/action/` code must read this document first.**
+- **`ConnectOptions`** (= `ControlSession`) — User Daemon. Manages traffic manager, proxy injection, persistence.
+- **`DataSession`** — Root Daemon. Manages TUN device, routing, DNS, and the NetworkManager lifecycle.
+
+Both types implement the `Connection` interface. Both embed `SessionBase` (K8s client bundle + rollback lifecycle). They do NOT share memory across daemon boundaries.
+
+In the past, the lack of this architecture document led to bugs where fields were initialized in the wrong daemon (e.g., OwnerID being generated uselessly in the Root Daemon).
+
+**Anyone modifying session type fields or `daemon/action/` code must read this document first.**
 
 ---
 
@@ -46,16 +53,21 @@ KubeVPN uses a dual-process architecture (User Daemon + Root Daemon), where each
 │  ├── gvisor network stack operation                    │
 │  └── Signal handling and cleanup                      │
 │                                                       │
-│  Holds: its own ConnectOptions (data plane)            │
+│  Holds: its own DataSession (data plane)               │
 │  Storage: svr.connections slice                        │
 └─────────────────────────────────────────────────────┘
 ```
 
-## 2. ConnectOptions Dual Instances
+## 2. Session Type Separation (C2-A)
 
-**Key rule: The User Daemon and Root Daemon each create independent `ConnectOptions` instances. They do NOT share memory.**
+**Key rule: The User Daemon and Root Daemon each create independent session instances. They do NOT share memory.**
 
-### 2.1 User Daemon's ConnectOptions (Control Plane)
+After the C2-A refactoring:
+- User Daemon holds `*handler.ConnectOptions` (= `*handler.ControlSession`, a type alias).
+- Root Daemon holds `*handler.DataSession`.
+- Both implement `handler.Connection` and embed `handler.SessionBase`.
+
+### 2.1 User Daemon: ConnectOptions / ControlSession
 
 Creation site: `daemon/action/connect_elevate.go` → `redirectConnectToSudoDaemon()`
 
@@ -75,26 +87,30 @@ connect := &handler.ConnectOptions{
 Fields used:
 | Field | Purpose |
 |-------|---------|
-| `K8sClient` (clientset, factory) | Interact with K8s API (inject sidecar, query ConfigMap) |
+| `SessionBase.K8sClient` (clientset, factory) | Interact with K8s API (inject sidecar, query ConfigMap) |
 | `OwnerID` | Written into Envoy Rule to identify ownership |
 | `Image/ImagePullSecretName` | CreateOutboundPod creates the traffic manager pod |
 | `proxyManager` | ProxyManager — manages proxied workloads lifecycle |
 | `Sync` | File sync options |
 | `RequestRaw` | Needed for persistence |
 
-**Unused fields (always zero-valued in the User Daemon)**:
-| Field | Reason |
-|-------|--------|
-| `ctx/cancel` | DoConnect is not called, so these are never set |
-| `isDataPlane` | Always false |
-| `network` | NetworkManager lives in Root Daemon only (holds TUN, DNS, routes) |
+**Stubs (always return zero/nil/error on ConnectOptions)**:
+| Method | Reason |
+|--------|--------|
+| `DoConnect()` | Returns error — data-plane DoConnect is on DataSession |
+| `Context()` | Returns nil — no data-plane ctx in user daemon |
+| `GetLocalTunIP()` | Returns "", "" — TUN IP is in DataSession |
+| `GetLastHeartbeat()` | Returns time.Time{} — NetworkManager is in DataSession |
+| `GetAPIServerIPs()` | Returns nil — NetworkManager is in DataSession |
+| `GetNetworkExtraHost()` | Returns nil — NetworkManager is in DataSession |
 
-### 2.2 Root Daemon's ConnectOptions (Data Plane)
+### 2.2 Root Daemon: DataSession
 
 Creation site: `daemon/action/connect.go` → `Connect()` (IsSudo=true branch)
 
 ```go
-connect := &handler.ConnectOptions{
+ds := &handler.DataSession{
+    SessionBase: handler.SessionBase{K8sClient: handler.K8sClient{}},
     ManagerNamespace:     req.ManagerNamespace,
     ExtraRouteInfo:       ...,
     OriginKubeconfigPath: req.OriginKubeconfigPath,
@@ -102,27 +118,33 @@ connect := &handler.ConnectOptions{
     Lock:                 &svr.Lock,
     Image:                req.Image,
     ImagePullSecretName:  req.ImagePullSecretName,
-    RequestRaw:           reqBytes,
-    // Note: no OwnerID — Root Daemon does not operate on Envoy config
-    // Note: does not call CreateOutboundPod/UpgradeDeploy — that is the control plane's responsibility
+    OwnerID:              req.OwnerID,
+    ConnectionID:         req.ConnectionID,
+    ReservedTunIPs:       svr.siblingTunIPs,
 }
 ```
 
 Fields used:
 | Field | Purpose |
 |-------|---------|
-| `ctx/cancel` | Created by DoConnect, controls data plane lifecycle |
-| `isDataPlane` | Set to true by DoConnect |
-| `network` | NetworkManager: TUN, port forwarding, routes, DNS |
-| `configMapStore` | ConfigMap informer for CIDR caching |
+| `ctx/cancel` | Set at START of DoConnect; controls data-plane lifecycle |
+| `nm` | NetworkManager: TUN, port forwarding, routes, DNS |
+| `Lock` | Shared DNS lock from svr.Lock |
+| `ReservedTunIPs` | Sibling TUN IPs to exclude from allocation |
+| `SessionBase.configMapStore` | ConfigMap informer for CIDR caching |
 
-**Unused fields (meaningless in the Root Daemon)**:
-| Field | Reason |
-|-------|--------|
-| `OwnerID` | Does not operate on Envoy config |
-| `proxyManager` | Does not manage proxy workloads |
-| `proxyManager` | Does not manage proxy workloads (User Daemon does) |
-| `Sync` | File sync runs in the User Daemon |
+`DataSession.Cleanup()` is ALWAYS the data-plane path — no nil-check needed.
+`DataSession` is NEVER persisted — `OffloadToConfig` only type-asserts to `*ConnectOptions`.
+
+**Stubs (always return zero/nil on DataSession)**:
+| Method | Reason |
+|--------|--------|
+| `CreateRemoteInboundPod()` | Returns error — proxy injection is in ConnectOptions |
+| `LeaveAllProxyResources()` | Returns nil (safe no-op) |
+| `LeaveResource()` | Returns nil (safe no-op) |
+| `ProxyResources()` | Returns nil |
+| `GetSync()` | Returns nil |
+| `SetSync()` | No-op |
 
 ### 2.3 ManagerNamespace Lock-Step Invariant
 
@@ -179,9 +201,9 @@ User Daemon: Connect RPC
   │     │     └── Store in svr.connections                       │
   │                                                              ▼
   │                                    Root Daemon: Connect RPC
-  │                                      ├── Create ConnectOptions (data plane)
-  │                                      ├── connect.OwnerID = req.OwnerID
-  │                                      ├── DoConnect()
+  │                                      ├── Create DataSession (data plane)
+  │                                      ├── ds.OwnerID = req.OwnerID
+  │                                      ├── ds.DoConnect()
   │                                      │     ├── getCIDR
   │                                      │     ├── NetworkManager.Start()
   │                                      │     │     ├── portForward
@@ -232,62 +254,62 @@ User Daemon: Disconnect RPC
         └── Note: TUN IP is NOT explicitly released — DHCP lease expiry handles reclaim
 ```
 
-## 4. Rules for Modifying ConnectOptions
+## 4. Rules for Modifying Session Types
 
 ### Rule 1: Determine which daemon a new field belongs to before adding it
 
 Ask yourself: is this field used by `DoConnect` (data plane), or by `CreateRemoteInboundPod`/`LeaveResource` (control plane)?
 
-- **Data plane**: does not need a json tag, does not need persistence, does not need to be set in `redirectConnectToSudoDaemon`
-- **Control plane**: needs a json tag (for persistence), needs to be initialized in `redirectConnectToSudoDaemon`
+- **Data plane** → add to `DataSession`: does not need a json tag, does not need persistence.
+- **Control plane** → add to `ConnectOptions`: needs a json tag (for persistence), needs to be initialized in `redirectConnectToSudoDaemon`.
+- **Shared** (both daemons read from ConnectRequest) → add to `SessionBase` only if it is NOT set in composite literals by test code. Identity fields (ManagerNamespace, OwnerID, etc.) MUST stay flat on each type.
 
-### Rule 2: Do not initialize control plane fields in DoConnect
+### Rule 2: DoConnect lives on DataSession only
 
-`DoConnect` only runs in the Root Daemon. Any field used only by the User Daemon (e.g., OwnerID) initialized in DoConnect is **dead code** — the Root Daemon's ConnectOptions and the User Daemon's are different objects.
+`ConnectOptions.DoConnect` is a stub that returns an error. The real `DoConnect` is on `DataSession`. Never add network-stack setup logic to `ConnectOptions`.
 
-### Rule 3: Persistence only happens in the User Daemon
+### Rule 3: Cleanup routes by type identity
 
-`OffloadToConfig` is called in the `!svr.IsSudo` path. Only the User Daemon's ConnectOptions is serialized. Fields that need to survive restarts must have a `json:` tag.
+`ConnectOptions.Cleanup` is ALWAYS `cleanupControlPlane`. `DataSession.Cleanup` is ALWAYS `cleanupDataPlane`. No nil-check or flag needed — the type IS the discriminant.
 
-### Rule 4: Do not assume the two daemons' ConnectOptions share state
+### Rule 4: Persistence only happens in the User Daemon
+
+`OffloadToConfig` type-asserts to `*handler.ConnectOptions`. `DataSession` is never persisted. Fields that need to survive daemon restarts must be on `ConnectOptions` with a `json:` tag.
+
+### Rule 5: Do not assume the two daemons' session instances share state
 
 They communicate via gRPC and do not share memory. Any data that needs to cross daemon boundaries must be transmitted via `rpc.ConnectRequest`/`rpc.ConnectResponse`.
 
 ## 5. Common Mistake Examples
 
-### Wrong: Initializing a control-plane-only field in DoConnect
+### Wrong: Adding a data-plane field to ConnectOptions
 
 ```go
-func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
-    c.OwnerID = uuid.New().String()[:12]  // Useless! Root Daemon does not use OwnerID
+type ConnectOptions struct {
     ...
+    tunName string  // Wrong! User Daemon does not create TUN devices
 }
 ```
 
-### Correct: Initialize it when constructing ConnectOptions in the User Daemon
+### Correct: Add it to DataSession
 
 ```go
-// daemon/action/connect.go → redirectConnectToSudoDaemon()
-connect := &handler.ConnectOptions{
+type DataSession struct {
     ...
-    OwnerID: uuid.New().String()[:12],  // User Daemon uses OwnerID
+    nm *NetworkManager  // Root Daemon only: full network stack
 }
 ```
 
-### Wrong: Setting data plane fields in redirectConnectToSudoDaemon
+### Wrong: Calling DoConnect on a ConnectOptions (ControlSession)
 
 ```go
-connect := &handler.ConnectOptions{
-    ...
-    tunName: "utun0",  // Useless! User Daemon does not create TUN devices
-}
+connect := &handler.ConnectOptions{...}
+connect.DoConnect(ctx)  // Wrong! Returns error: "DoConnect is not available on a control-plane session"
 ```
 
-### Correct: Let DoConnect set data plane fields
+### Correct: Use DataSession for the root daemon
 
 ```go
-func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
-    ...
-    c.network.Start(ctx)  // Root Daemon: start full network stack (port-forward, TUN, routes, DNS)
-}
+ds := &handler.DataSession{...}
+ds.DoConnect(ctx)  // Root Daemon: start full network stack
 ```

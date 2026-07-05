@@ -2,10 +2,6 @@ package handler
 
 import (
 	"context"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -14,51 +10,16 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-func (c *ConnectOptions) setupSignalHandler() {
-	stopChan := make(chan os.Signal, 1)
-	// SIGKILL and SIGSTOP cannot be caught by signal.Notify, so they are intentionally omitted.
-	signal.Notify(stopChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	select {
-	case <-stopChan:
-		c.Cleanup(context.Background())
-	case <-c.ctx.Done():
-	}
-}
-
 // Cleanup releases DHCP leases, leaves proxy resources, and runs rollback functions.
-// Uses mutex + flag instead of sync.Once so cleanup can be retried if it fails.
+// ConnectOptions is always the control-plane (user daemon) session type; Cleanup always
+// runs cleanupControlPlane. Uses the shared SessionBase.cleanup for mutex gating.
 func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 	if c == nil {
 		return
 	}
-
-	c.cleanupMu.Lock()
-	if c.cleanedUp {
-		c.cleanupMu.Unlock()
-		return
-	}
-
-	c.configMapStoreMu.Lock()
-	store := c.configMapStore
-	c.configMapStoreMu.Unlock()
-	if store != nil {
-		store.Stop()
-	}
-	const cleanupTimeout = 10 * time.Second
-	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
-	defer cancel()
-
-	if !c.isDataPlane {
-		if err := c.cleanupControlPlane(logCtx, ctx); err != nil {
-			c.cleanupMu.Unlock()
-			plog.G(logCtx).Warnf("Cleanup incomplete, will retry on next call: %v", err)
-			return
-		}
-	} else {
-		c.cleanupDataPlane(logCtx)
-	}
-	c.cleanedUp = true
-	c.cleanupMu.Unlock()
+	c.SessionBase.cleanup(logCtx, func(ctx context.Context) error {
+		return c.cleanupControlPlane(logCtx, ctx)
+	})
 }
 
 // cleanupControlPlane tears down the control-plane side:
@@ -82,20 +43,6 @@ func (c *ConnectOptions) cleanupControlPlane(logCtx context.Context, ctx context
 
 	executeRollbackFuncs(logCtx, c.getRollbackFuncs())
 	return nil
-}
-
-// cleanupDataPlane tears down the data-plane side: runs rollback functions,
-// stops the networking stack, and cancels the connection context.
-func (c *ConnectOptions) cleanupDataPlane(logCtx context.Context) {
-	executeRollbackFuncs(logCtx, c.getRollbackFuncs())
-
-	if c.network != nil {
-		plog.G(logCtx).Debugf("Stopping network manager")
-		c.network.Stop()
-	}
-	if c.cancel != nil {
-		c.cancel()
-	}
 }
 
 // executeRollbackFuncs runs each non-nil rollback function, logging warnings on errors.

@@ -129,7 +129,7 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	// workload namespace when manager != workload).
 	svr.connMu.RLock()
 	if conn, _ := svr.findConnection(connectionID); conn != nil {
-		options.ManagerNamespace = conn.ManagerNamespace
+		options.ManagerNamespace = conn.GetManagerNamespace()
 	}
 	svr.connMu.RUnlock()
 

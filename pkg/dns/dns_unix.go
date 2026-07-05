@@ -19,7 +19,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 // https://github.com/golang/go/issues/12524
@@ -34,7 +34,7 @@ var ignoreSearchSuffix = []string{"com", "io", "net", "org", "cn", "ru"}
 // service.namespace.svc.cluster:port
 // service.namespace.svc.cluster.local:port
 func (c *Config) SetupDNS(ctx context.Context) error {
-	defer util.HandleCrash()
+	defer netutil.HandleCrash()
 	ticker := time.NewTicker(config.DNSRouteRefreshInterval)
 	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: func(obj any) bool {

@@ -31,7 +31,7 @@ func (svr *Server) siblingTunIPs() []net.IP {
 // findConnection returns the first connection matching the given ID
 // and its index. Returns (nil, -1) if not found.
 // The caller must hold svr.connMu (at least RLock).
-func (svr *Server) findConnection(connectionID string) (*handler.ConnectOptions, int) {
+func (svr *Server) findConnection(connectionID string) (handler.Connection, int) {
 	for i, conn := range svr.connections {
 		if conn.GetConnectionID() == connectionID {
 			return conn, i
@@ -86,7 +86,7 @@ func (svr *Server) resetCurrentConnection(removedID string) {
 }
 
 // cleanupConnection cleans up a single connection's sync and VPN state.
-func cleanupConnection(ctx context.Context, conn *handler.ConnectOptions) {
+func cleanupConnection(ctx context.Context, conn handler.Connection) {
 	if conn == nil {
 		return
 	}

@@ -183,15 +183,25 @@ The injected pod keeps the **workload's own ServiceAccount** (whatever the origi
 - That SA only exists in the **manager** namespace (see [24-traffic-manager-deployment.md](24-traffic-manager-deployment.md)). Pinning it onto a workload in any other namespace makes the ServiceAccount admission controller **reject pod creation** — the new ReplicaSet never produces a pod, the rollout times out, and `RolloutStatus` undoes the patch, leaving the workload on its original (un-injected) spec.
 - The sidecars never call the K8s API: the VPN sidecar self-allocates its TUN IP from the control plane over **gRPC + TLS** (`requestTunIPFromControlPlane`, see [09-tun-ip-hot-update.md](09-tun-ip-hot-update.md)), authenticating with the `tls_*` env vars — so no ServiceAccount token is needed.
 
-## 5. Envoy ConfigMap Management (`envoy.go`)
+## 5. Envoy ConfigMap Management (`envoy.go` + `virtual_store.go`)
 
 ### Writing Rules
 
-`addEnvoyConfig(ctx, configMapInterface, envoyRuleSpec)`:
-1. GET ConfigMap with `RetryOnConflict`
-2. Unmarshal YAML from `ENVOY_CONFIG` key → `[]*Virtual`
-3. Call `addVirtualRule(virtuals, spec)` to merge
-4. Marshal back to YAML and UPDATE ConfigMap
+`addEnvoyConfig(ctx, configMapInterface, envoyRuleSpec)` is now a thin wrapper:
+
+```go
+func addEnvoyConfig(ctx, mapInterface, spec) error {
+    return NewVirtualStore(mapInterface).AddRule(ctx, spec)
+}
+```
+
+`VirtualStore.AddRule` performs the actual read-modify-write:
+1. `RetryOnConflict` loop wrapping a GET → decode → mutate → encode → UPDATE
+2. Decode `ENVOY_CONFIG` YAML → `[]*xds.Virtual`
+3. Call `addVirtualRule(virtuals, spec)` to merge the new rule
+4. Marshal back to YAML and UPDATE the ConfigMap (optimistic concurrency via `ResourceVersion`)
+
+See [16-envoy-controlplane.md §5](16-envoy-controlplane.md) for the full `VirtualStore` design.
 
 ### Rule Merging Logic (`addVirtualRule`)
 
@@ -208,7 +218,8 @@ After merging, rules are sorted so that rules with headers come first — envoy 
 
 ### Removing Rules
 
-`removeEnvoyConfig(ctx, configMapInterface, namespace, nodeID, ownerID)`:
+`removeEnvoyConfig(ctx, configMapInterface, namespace, nodeID, ownerID)` delegates to
+`VirtualStore.RemoveRule`, which performs the same RetryOnConflict Get+Update loop:
 1. Find Virtual by nodeID + namespace
 2. Remove all Rules matching the ownerID
 3. If Virtual has no remaining rules, remove the entire Virtual entry
@@ -262,7 +273,8 @@ The only difference between mesh and fargate templates is that listeners generat
 | `pkg/inject/mesh.go` | Mesh (VPN+Envoy) strategy + UnpatchContainer — also serves VPN-only (empty headers) |
 | `pkg/inject/fargate.go` | Fargate (SSH+Envoy) strategy |
 | `pkg/inject/container.go` | Container spec builders |
-| `pkg/inject/envoy.go` | ConfigMap envoy rule CRUD |
+| `pkg/inject/envoy.go` | ConfigMap envoy rule CRUD (thin wrappers over VirtualStore) |
+| `pkg/inject/virtual_store.go` | `VirtualStore` — unified read-modify-write path for `ENVOY_CONFIG` |
 | `pkg/xds/cache.go` | Virtual/Rule types consumed by inject |
 | `docs/06-fargate-mode.md` | Fargate mode architecture |
 | `docs/05-owner-id.md` | OwnerID rule ownership |

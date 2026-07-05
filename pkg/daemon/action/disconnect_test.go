@@ -22,7 +22,7 @@ func TestDisconnect_MatchingID(t *testing.T) {
 	})
 
 	svr := &Server{
-		connections: []*handler.ConnectOptions{conn},
+		connections: []handler.Connection{conn},
 	}
 
 	disconnect(context.Background(), svr, "")
@@ -42,7 +42,7 @@ func TestDisconnect_NonMatchingID(t *testing.T) {
 	// GetConnectionID() returns "" when dhcp is nil, so "nonexistent" won't match.
 
 	svr := &Server{
-		connections: []*handler.ConnectOptions{conn},
+		connections: []handler.Connection{conn},
 	}
 
 	disconnect(context.Background(), svr, "nonexistent")
@@ -85,7 +85,7 @@ func TestDisconnect_MultipleConnections(t *testing.T) {
 	conn3 := makeConn()
 
 	svr := &Server{
-		connections: []*handler.ConnectOptions{conn1, conn2, conn3},
+		connections: []handler.Connection{conn1, conn2, conn3},
 	}
 
 	// All match "" because dhcp is nil on all of them.
@@ -106,7 +106,7 @@ func TestDisconnect_PreservesNonMatchingOrder(t *testing.T) {
 	conn2 := &handler.ConnectOptions{WorkloadNamespace: "ns2"}
 
 	svr := &Server{
-		connections: []*handler.ConnectOptions{conn1, conn2},
+		connections: []handler.Connection{conn1, conn2},
 	}
 
 	// "no-match" won't match any connection (all return "" from GetConnectionID).
@@ -115,8 +115,8 @@ func TestDisconnect_PreservesNonMatchingOrder(t *testing.T) {
 	if len(svr.connections) != 2 {
 		t.Fatalf("expected 2 connections, got %d", len(svr.connections))
 	}
-	if svr.connections[0].WorkloadNamespace != "ns1" || svr.connections[1].WorkloadNamespace != "ns2" {
+	if svr.connections[0].GetWorkloadNamespace() != "ns1" || svr.connections[1].GetWorkloadNamespace() != "ns2" {
 		t.Fatalf("connection order changed: got [%s, %s]",
-			svr.connections[0].WorkloadNamespace, svr.connections[1].WorkloadNamespace)
+			svr.connections[0].GetWorkloadNamespace(), svr.connections[1].GetWorkloadNamespace())
 	}
 }

@@ -1,6 +1,6 @@
 //go:build !windows
 
-package util
+package netutil
 
 import "net"
 

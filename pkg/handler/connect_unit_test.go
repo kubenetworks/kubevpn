@@ -25,14 +25,13 @@ func newTestConnectOptions(t *testing.T) *ConnectOptions {
 			Data:       map[string][]byte{config.TLSCertKey: []byte("cert"), config.TLSPrivateKeyKey: []byte("key"), config.TLSServerName: []byte("host")},
 		},
 	)
-	ctx, cancel := context.WithCancel(context.Background())
 	return &ConnectOptions{
+		SessionBase: SessionBase{
+			K8sClient:      K8sClient{clientset: clientset},
+			configMapStore: newConfigMapStore(clientset, "test-ns"),
+		},
 		ManagerNamespace:  "test-ns",
 		WorkloadNamespace: "default",
-		K8sClient:         K8sClient{clientset: clientset},
-		configMapStore:    newConfigMapStore(clientset, "test-ns"),
-		ctx:               ctx,
-		cancel:            cancel,
 	}
 }
 
@@ -100,9 +99,11 @@ func TestConnectOptions_GetConfigMapInformer(t *testing.T) {
 }
 
 func TestConnectOptions_Context(t *testing.T) {
+	// ConnectOptions is the control-plane session type. Context() is a stub that always
+	// returns nil — the data-plane context lives in DataSession (root daemon).
 	c := newTestConnectOptions(t)
-	if c.Context() == nil {
-		t.Fatal("nil context")
+	if c.Context() != nil {
+		t.Fatal("expected nil Context() on control-plane ConnectOptions (stub)")
 	}
 }
 

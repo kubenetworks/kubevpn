@@ -10,29 +10,29 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 )
 
-func newConnectWithNetwork(ns string, extraCIDR []string, apiServerIPs []net.IP, extraHost []dns.Entry) *ConnectOptions {
-	c := &ConnectOptions{
+func newConnectWithNetwork(ns string, extraCIDR []string, apiServerIPs []net.IP, extraHost []dns.Entry) *DataSession {
+	ds := &DataSession{
 		ManagerNamespace: ns,
 		ExtraRouteInfo: ExtraRouteInfo{
 			ExtraCIDR: extraCIDR,
 		},
 	}
 	if len(apiServerIPs) > 0 || len(extraHost) > 0 {
-		c.network = &NetworkManager{
+		ds.nm = &NetworkManager{
 			cfg: NetworkConfig{
 				APIServerIPs: apiServerIPs,
 			},
 			extraHost: extraHost,
 		}
 	}
-	return c
+	return ds
 }
 
 func TestSortConnect(t *testing.T) {
-	getOrder := func(connects []*ConnectOptions) []string {
+	getOrder := func(connects Connects) []string {
 		var order []string
 		for _, connect := range connects {
-			order = append(order, connect.ManagerNamespace)
+			order = append(order, connect.GetManagerNamespace())
 		}
 		return order
 	}

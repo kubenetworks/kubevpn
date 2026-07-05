@@ -37,10 +37,12 @@ func TestDoc07_ManagerNamespaceUsedForTrafficManager(t *testing.T) {
 	)
 
 	c := &ConnectOptions{
+		SessionBase: SessionBase{
+			K8sClient:      K8sClient{clientset: clientset},
+			configMapStore: newConfigMapStore(clientset, "infra"),
+		},
 		ManagerNamespace:  "infra",
 		WorkloadNamespace: "app",
-		K8sClient:         K8sClient{clientset: clientset},
-		configMapStore:    newConfigMapStore(clientset, "infra"),
 	}
 
 	// ConfigMap operations should use ManagerNamespace ("infra"), not WorkloadNamespace ("app")

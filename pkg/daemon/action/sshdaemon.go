@@ -13,7 +13,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 var defaultServerIP = func() string {
@@ -69,7 +69,7 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 		return
 	}
 	var tunDevice *net.Interface
-	tunDevice, err = util.GetTunDevice(serverip)
+	tunDevice, err = netutil.GetTunDevice(serverip)
 	if err != nil {
 		return
 	}
