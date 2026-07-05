@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -27,7 +28,9 @@ func (f *fakeProgressStream) RecvMsg(m any) error {
 	if f.i >= len(f.resps) {
 		return io.EOF
 	}
-	*(m.(*rpc.ConnectResponse)) = *f.resps[f.i]
+	// Copy via proto.Merge (into the freshly-allocated dst) rather than a value
+	// assignment, which would copy the message's internal mutex.
+	proto.Merge(m.(*rpc.ConnectResponse), f.resps[f.i])
 	f.i++
 	return nil
 }

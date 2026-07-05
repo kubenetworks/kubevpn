@@ -80,6 +80,14 @@ func GetFields(ctx context.Context) map[string]any {
 	return nil
 }
 
+// StepTitle logs a heading that precedes a group of steps (e.g. "Connecting to
+// the cluster ..."). On a TTY the CLI renders it in bold with no spinner and no
+// check mark; on non-TTY output it prints plainly. It carries no "in progress"
+// or "done" semantics — it is purely a banner.
+func StepTitle(ctx context.Context, message string) {
+	G(ctx).WithField(stepFieldKey, stepTitle).Info(message)
+}
+
 // StepStart logs the beginning of a setup step. On a TTY the CLI renders it as
 // an animated spinner line; the text should be present-continuous (e.g.
 // "Forwarding ports"). Pair it with StepDone once the step succeeds.

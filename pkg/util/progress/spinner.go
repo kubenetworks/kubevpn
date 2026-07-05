@@ -7,13 +7,49 @@ package progress
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/theckman/yacspin"
+	"golang.org/x/term"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
+
+// ANSI styles for the non-spinner lines. yacspin already emits raw ANSI for the
+// step check marks (its writer is os.Stdout, not a colorable wrapper), so the
+// heading and success line use raw ANSI too — consistent rendering on every
+// terminal where the check marks already show in color.
+const (
+	ansiBold      = "\x1b[1m"
+	ansiBoldGreen = "\x1b[1;32m"
+	ansiReset     = "\x1b[0m"
+)
+
+// isTerminal reports whether w is an interactive terminal. Non-terminal writers
+// (pipes, files, test buffers) get plain, un-styled output.
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
+}
+
+// styleLine writes msg + newline wrapped in the ANSI code on a terminal, plain
+// otherwise.
+func styleLine(w io.Writer, code, msg string) {
+	if isTerminal(w) {
+		fmt.Fprintf(w, "%s%s%s\n", code, msg, ansiReset)
+	} else {
+		fmt.Fprintln(w, msg)
+	}
+}
+
+// Success prints the connection-success message as a bold-green terminus,
+// echoing the green check marks of the steps above it. On non-TTY output it
+// prints plainly (so log scrapers still match the raw text).
+func Success(w io.Writer, msg string) {
+	styleLine(w, ansiBoldGreen, msg)
+}
 
 // Renderer consumes the daemon message stream (one line per Write) and renders
 // progress. Write is expected to be called serially from a single stream-receive
@@ -51,6 +87,16 @@ func (r *Renderer) Write(message string) {
 	text = strings.TrimRight(text, "\n")
 
 	switch kind {
+	case plog.StepHeading:
+		// A bold heading: no spinner, no check mark. If a step is mid-flight,
+		// pause it so the heading lands on its own line, then resume.
+		if r.spinner != nil && r.running {
+			_ = r.spinner.Pause()
+			styleLine(r.out, ansiBold, text)
+			_ = r.spinner.Unpause()
+		} else {
+			styleLine(r.out, ansiBold, text)
+		}
 	case plog.StepBegin:
 		if r.spinner == nil {
 			return // matching StepEnd prints the line

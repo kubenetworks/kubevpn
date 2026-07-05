@@ -24,6 +24,11 @@ Connecting to the cluster ...
 Connected. You can now access the Kubernetes cluster.
 ```
 
+On a TTY the first line (`Connecting to the cluster ...`) is rendered in **bold** and the final line
+(`Connected. ...`) in **bold green**, framing the green `✓` steps between them; on non-TTY output both
+print as plain text. The heading is a step *kind* (§3); the success terminus is printed by the CLI via
+`progress.Success` (§4), not streamed.
+
 ## 2. The challenge: progress is produced in the daemon, animated in the CLI
 
 Connect steps run in the daemons (the user daemon resolves the manager namespace and traffic manager;
@@ -43,26 +48,30 @@ same CLI renderer before the command's own steps (sidecar injection, file sync) 
 
 ## 3. Step protocol (marker travels on the stream, not in the log file)
 
-Steps are emitted with two helpers in `pkg/log`:
+Steps are emitted with three helpers in `pkg/log`:
 
 | Helper | Meaning | CLI effect |
 |---|---|---|
+| `plog.StepTitle(ctx, msg)` | a bold heading preceding a group of steps | print the line in **bold** (no spinner, no `✓`) |
 | `plog.StepStart(ctx, msg)` | a step began (present-continuous text) | start/refresh the spinner line |
 | `plog.StepDone(ctx, format, args...)` | the step succeeded (text with data) | finalize the line with `✓` |
 
-The helpers attach a logrus field (`_kubevpn_step = start|done`) rather than mutating the message text.
+The helpers attach a logrus field (`_kubevpn_step = title|start|done`) rather than mutating the message text.
 Two outputs then diverge from the same log entry (the "one logger, two outputs" rule of
 [13-logging-architecture.md](13-logging-architecture.md)):
 
 - **gRPC stream → CLI**: `StreamHook.Fire` sees the field and prepends a sentinel to the streamed
-  message — `\x1fS` (begin) or `\x1fD` (done). `\x1f` (ASCII Unit Separator) is valid UTF-8 and never
-  appears in normal messages. Encoding/decoding is centralized in `EncodeStep`/`DecodeStep`.
+  message — `\x1fS` (begin), `\x1fD` (done), or `\x1fT` (heading/title). `\x1f` (ASCII Unit Separator)
+  is valid UTF-8 and never appears in normal messages. Encoding/decoding is centralized in
+  `EncodeStep`/`DecodeStep`.
 - **daemon log file**: `serverFormat` strips the internal field, so the file stays clean
   (`... info: Forwarding ports`) with no sentinel and no field noise.
 
 The wire format is owned by one symmetric pair in `pkg/log/logger.go`: `EncodeStep(kind, msg)`
 produces the sentinel-prefixed string and `DecodeStep(msg)` recovers `(StepKind, text)`, where
-`StepKind` is `StepNone | StepBegin | StepEnd`. Nothing else hard-codes the `\x1f` bytes — both the
+`StepKind` is `StepNone | StepBegin | StepEnd | StepHeading` (the `StepTitle` helper emits
+`StepHeading` — the helper/kind names parallel the existing `StepStart`/`StepBegin` pair). Nothing
+else hard-codes the `\x1f` bytes — both the
 `StreamHook` (producer) and the CLI `Renderer` (consumer) go through this pair, so the encoding can
 change in exactly one place (`TestEncodeDecodeStep_RoundTrip` pins the round-trip).
 
@@ -112,6 +121,8 @@ that don't carry one simply get `""` (the `connectionIDer` type assertion never 
 
 `Write` decodes each message with `plog.DecodeStep` and maps it to yacspin:
 
+- **heading** → print the text in **bold** (no spinner, no `✓`); if a step is mid-flight, `Pause()` /
+  print / `Unpause()` so the heading lands on its own line
 - **begin** → `spinner.Message(text)` + `Start()` (animate this step)
 - **done, spinner running** → `spinner.StopMessage(text)` + `Stop()` (print ` ✓ text`, return to stopped)
 - **done, no spinner running** → print ` ✓ text` directly. This handles the `StepDone`-without-`StepStart`
@@ -129,9 +140,15 @@ of its dependencies were already vendored, so it adds no new transitive dependen
 ### Non-TTY fallback
 
 When stdout is not a terminal (pipes, CI, log capture, the `kubevpn run` container-mode success scan in
-`pkg/util/docker.go`), yacspin auto-detects it and degrades to non-animated, line-by-line output. The
-final success line (`config.Slogan`) is printed by the CLI command after the stream ends, so the
-sentinel-based success detection in container mode keeps working.
+`pkg/util/docker.go`), yacspin auto-detects it and degrades to non-animated, line-by-line output.
+
+The bold heading and the bold-green success line use the same fallback rule. Both write raw ANSI
+(yacspin's check marks already do — its writer is `os.Stdout`, not a colorable wrapper, so this renders
+identically wherever the `✓` shows color) gated on a `golang.org/x/term` TTY check; on a non-terminal
+writer they print plain. The final success line (`config.Slogan`) is printed by the CLI command after
+the stream ends via `progress.Success` (centralized in `printSlogan`, `cmd/kubevpn/cmds/progress.go`),
+so the plain text still matches and the sentinel-based success detection in container mode keeps
+working.
 
 ## 5. Wording style
 
@@ -152,7 +169,7 @@ Step text is normalized so the checklist reads uniformly across commands:
 
 | Step | Done-only? | Where it is emitted |
 |---|---|---|
-| header `Connecting to the cluster ...` (plain, not a step) | — | `pkg/daemon/action/connect_elevate.go` |
+| heading `Connecting to the cluster ...` (bold, `StepTitle`) | — | `pkg/daemon/action/connect_elevate.go` |
 | `Using namespace %q` / `Using manager namespace %q` | ✅ | `connect_elevate.go` (`detectAndSetManagerNamespace`) |
 | `Using traffic manager in namespace %q` (done-only) / `Creating traffic manager` → `Created traffic manager in namespace %q` | partial | `pkg/handler/traffmgr.go` |
 | `Detecting cluster CIDRs` → `Detected cluster CIDRs: …` / `Detecting service CIDR` → `Detected service CIDR: …` | — | `pkg/util/cidr.go` |
@@ -174,8 +191,8 @@ Step text is normalized so the checklist reads uniformly across commands:
 
 "Done-only" marks steps that emit only `StepDone` (no spinner; rendered as a standalone `✓` — see §3).
 The terminal success line `config.Slogan` (`Connected. …`) is **not** a step: the CLI prints it after
-the stream ends (`cmd/kubevpn/cmds/connect.go`), so non-TTY success detection keeps working
-(see §4 "Non-TTY fallback").
+the stream ends via `progress.Success` (bold green on a TTY, plain otherwise — `printSlogan` in
+`cmd/kubevpn/cmds/progress.go`), so non-TTY success detection keeps working (see §4 "Non-TTY fallback").
 
 > **Double-render guard.** `disconnect` runs in both daemons (the user daemon forwards to the sudo
 > daemon and copies its stream). The step is emitted only from the user daemon (`!svr.IsSudo`) so the

@@ -87,7 +87,7 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		return err
 	}
 
-	logger.Info("Connecting to the cluster ...")
+	plog.StepTitle(session.Ctx, "Connecting to the cluster ...")
 	if err = svr.detectAndSetManagerNamespace(session.Ctx, req, connect, logger); err != nil {
 		return err
 	}

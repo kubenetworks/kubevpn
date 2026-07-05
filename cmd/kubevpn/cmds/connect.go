@@ -139,7 +139,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				printManagedSocksStarted(os.Stdout, connectionID, socksListen)
 			}
 			if !foreground {
-				_, _ = fmt.Fprintln(os.Stdout, config.Slogan)
+				printSlogan(os.Stdout)
 			} else {
 				<-cmd.Context().Done()
 				err = disconnect(cli, bytes, ns, sshConf)

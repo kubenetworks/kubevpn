@@ -46,8 +46,38 @@ func TestStep_StreamCarriesSentinel_FileStaysClean(t *testing.T) {
 	}
 }
 
+// TestStepTitle_StreamCarriesHeadingSentinel verifies the heading helper rides
+// the stream as a StepHeading sentinel while the log file stays clean.
+func TestStepTitle_StreamCarriesHeadingSentinel(t *testing.T) {
+	var fileBuf, streamBuf bytes.Buffer
+	logger := GetLoggerForServer(int32(log.DebugLevel), &fileBuf)
+	logger.AddHook(&StreamHook{Writer: &streamBuf, Level: log.InfoLevel})
+	ctx := WithLogger(context.Background(), logger)
+
+	StepTitle(ctx, "Connecting to the cluster ...")
+
+	lines := nonEmptyLines(streamBuf.String())
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 stream line, got %d: %q", len(lines), lines)
+	}
+	if k, text := DecodeStep(lines[0]); k != StepHeading || text != "Connecting to the cluster ..." {
+		t.Fatalf("kind=%v text=%q, want StepHeading/Connecting to the cluster ...", k, text)
+	}
+
+	file := fileBuf.String()
+	if strings.Contains(file, stepSentinelTitle) {
+		t.Errorf("log file must not contain the heading sentinel: %q", file)
+	}
+	if strings.Contains(file, stepFieldKey) {
+		t.Errorf("log file must not contain internal field key %q: %q", stepFieldKey, file)
+	}
+	if !strings.Contains(file, "Connecting to the cluster ...") {
+		t.Errorf("log file should contain the heading text: %q", file)
+	}
+}
+
 func TestEncodeDecodeStep_RoundTrip(t *testing.T) {
-	for _, kind := range []StepKind{StepNone, StepBegin, StepEnd} {
+	for _, kind := range []StepKind{StepNone, StepBegin, StepEnd, StepHeading} {
 		got, text := DecodeStep(EncodeStep(kind, "hello"))
 		if text != "hello" {
 			t.Errorf("kind %v: text=%q, want hello", kind, text)

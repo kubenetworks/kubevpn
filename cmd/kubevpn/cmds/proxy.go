@@ -146,7 +146,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				}
 				return err
 			}
-			_, _ = fmt.Fprintln(os.Stdout, config.Slogan)
+			printSlogan(os.Stdout)
 			// hangup
 			if foreground {
 				// leave from cluster resources

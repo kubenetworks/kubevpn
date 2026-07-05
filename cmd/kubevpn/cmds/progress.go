@@ -7,10 +7,18 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util/progress"
 )
+
+// printSlogan prints the connection-success message as a bold-green terminus,
+// matching the green check marks of the steps above it. Centralized here so the
+// connect/proxy/sync commands render it identically.
+func printSlogan(out io.Writer) {
+	progress.Success(out, config.Slogan)
+}
 
 // connectionIDer lets printProgressStream capture a connection ID from a
 // response type without knowing its concrete type. Only ConnectResponse (and

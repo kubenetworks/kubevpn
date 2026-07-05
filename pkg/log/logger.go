@@ -67,12 +67,15 @@ const (
 	stepFieldKey = "_kubevpn_step"
 	stepStart    = "start"
 	stepDone     = "done"
+	stepTitle    = "title"
 
-	// stepSentinelStart/Done prefix a streamed message to tell the CLI renderer
-	// to begin a spinner / finalize it with a check mark. They use the ASCII Unit
-	// Separator (U+001F) — valid UTF-8 that never appears in normal messages.
+	// stepSentinelStart/Done/Title prefix a streamed message to tell the CLI
+	// renderer to begin a spinner / finalize it with a check mark / print it as a
+	// bold heading. They use the ASCII Unit Separator (U+001F) — valid UTF-8 that
+	// never appears in normal messages.
 	stepSentinelStart = "\x1fS"
 	stepSentinelDone  = "\x1fD"
+	stepSentinelTitle = "\x1fT"
 )
 
 // StepKind classifies a streamed message for the CLI progress renderer.
@@ -85,6 +88,10 @@ const (
 	StepBegin
 	// StepEnd finalizes the active spinner line with a check mark.
 	StepEnd
+	// StepHeading is a bold heading line (no spinner, no check mark) — e.g. the
+	// "Connecting to the cluster ..." banner that precedes the steps. Emitted by
+	// the StepTitle helper.
+	StepHeading
 )
 
 // EncodeStep prefixes a message with the step sentinel for the given kind so the
@@ -95,6 +102,8 @@ func EncodeStep(kind StepKind, message string) string {
 		return stepSentinelStart + message
 	case StepEnd:
 		return stepSentinelDone + message
+	case StepHeading:
+		return stepSentinelTitle + message
 	default:
 		return message
 	}
@@ -109,6 +118,8 @@ func DecodeStep(message string) (StepKind, string) {
 		return StepBegin, message[len(stepSentinelStart):]
 	case strings.HasPrefix(message, stepSentinelDone):
 		return StepEnd, message[len(stepSentinelDone):]
+	case strings.HasPrefix(message, stepSentinelTitle):
+		return StepHeading, message[len(stepSentinelTitle):]
 	default:
 		return StepNone, message
 	}
@@ -139,6 +150,8 @@ func (h *StreamHook) Fire(entry *log.Entry) error {
 		msg = EncodeStep(StepBegin, msg)
 	case stepDone:
 		msg = EncodeStep(StepEnd, msg)
+	case stepTitle:
+		msg = EncodeStep(StepHeading, msg)
 	}
 	_, err := h.Writer.Write([]byte(msg + "\n"))
 	return err

@@ -2,7 +2,6 @@ package cmds
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	pkgerr "github.com/pkg/errors"
@@ -135,7 +134,7 @@ func CmdSync(f cmdutil.Factory) *cobra.Command {
 				}
 				return err
 			}
-			_, _ = fmt.Fprintln(os.Stdout, config.Slogan)
+			printSlogan(os.Stdout)
 			return nil
 		},
 	}

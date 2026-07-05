@@ -31,14 +31,36 @@ func TestRenderer_NonTTY(t *testing.T) {
 	}
 }
 
-// TestRenderer_NonTTY_PlainOnly ensures a stream with no step markers (e.g. the
-// header line) is passed through verbatim.
+// TestRenderer_NonTTY_PlainOnly ensures a stream with no step markers (e.g. an
+// ordinary log line) is passed through verbatim.
 func TestRenderer_NonTTY_PlainOnly(t *testing.T) {
 	var buf bytes.Buffer
 	r := New(&buf)
-	r.Write("Connecting to the cluster ...\n")
+	r.Write("an ordinary log line\n")
+	r.Stop()
+	if got := buf.String(); got != "an ordinary log line\n" {
+		t.Fatalf("plain line should pass through verbatim, got %q", got)
+	}
+}
+
+// TestRenderer_NonTTY_Heading verifies a heading renders as plain text (no ANSI,
+// no spinner, no check mark) on a non-terminal writer.
+func TestRenderer_NonTTY_Heading(t *testing.T) {
+	var buf bytes.Buffer
+	r := New(&buf)
+	r.Write(plog.EncodeStep(plog.StepHeading, "Connecting to the cluster ...") + "\n")
 	r.Stop()
 	if got := buf.String(); got != "Connecting to the cluster ...\n" {
-		t.Fatalf("plain line should pass through verbatim, got %q", got)
+		t.Fatalf("heading should be plain on non-TTY, got %q", got)
+	}
+}
+
+// TestSuccess_NonTTY verifies the success terminus prints plain text (no ANSI)
+// on a non-terminal writer, so log scrapers still match config.Slogan verbatim.
+func TestSuccess_NonTTY(t *testing.T) {
+	var buf bytes.Buffer
+	Success(&buf, "Connected. You can now access the Kubernetes cluster.")
+	if got := buf.String(); got != "Connected. You can now access the Kubernetes cluster.\n" {
+		t.Fatalf("success should be plain on non-TTY, got %q", got)
 	}
 }
