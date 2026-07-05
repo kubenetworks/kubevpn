@@ -100,19 +100,19 @@ func (conf SshConfig) GetAuth() ([]ssh.AuthMethod, error) {
 	} else if conf.GSSAPIPassword != "" {
 		c, err = NewKrb5InitiatorClientWithPassword(conf.User, conf.GSSAPIPassword, krb5Conf)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", err, config.ErrGSSAPI)
 		}
 		auth = append(auth, ssh.GSSAPIWithMICAuthMethod(&c, host))
 	} else if conf.GSSAPIKeytabConf != "" {
 		c, err = NewKrb5InitiatorClientWithKeytab(conf.User, krb5Conf, conf.GSSAPIKeytabConf)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", err, config.ErrGSSAPI)
 		}
 		auth = append(auth, ssh.GSSAPIWithMICAuthMethod(&c, host))
 	} else if conf.GSSAPICacheFile != "" {
 		c, err = NewKrb5InitiatorClientWithCache(krb5Conf, conf.GSSAPICacheFile)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", err, config.ErrGSSAPI)
 		}
 		auth = append(auth, ssh.GSSAPIWithMICAuthMethod(&c, host))
 	} else {
@@ -135,17 +135,35 @@ func publicKeyFile(file string) (ssh.AuthMethod, error) {
 	}
 	file, err := filepath.Abs(file)
 	if err != nil {
-		return nil, fmt.Errorf("cannot resolve SSH key file path %s: %w", file, err)
+		return nil, fmt.Errorf("cannot resolve SSH key file path %s: %w: %w", file, err, config.ErrSSHAuth)
 	}
 	buffer, err := os.ReadFile(file)
 	if err != nil {
-		return nil, fmt.Errorf("cannot read SSH key file %s: %w", file, err)
+		return nil, fmt.Errorf("cannot read SSH key file %s: %w: %w", file, err, config.ErrSSHAuth)
 	}
 	key, err := ssh.ParsePrivateKey(buffer)
 	if err != nil {
-		return nil, fmt.Errorf("cannot parse SSH key file %s: %w", file, err)
+		return nil, fmt.Errorf("cannot parse SSH key file %s: %w: %w", file, err, config.ErrSSHAuth)
 	}
 	return ssh.PublicKeys(key), nil
+}
+
+// wrapDialError classifies an SSH dial/handshake error for exit-code purposes.
+// x/crypto/ssh exposes no typed authentication error, so an auth failure is detected
+// by its message text; GSSAPI/Kerberos token failures surface during the handshake too.
+func wrapDialError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "kerberos") || strings.Contains(msg, "gssapi"):
+		return fmt.Errorf("%w: %w", err, config.ErrGSSAPI)
+	case strings.Contains(msg, "unable to authenticate"):
+		return fmt.Errorf("%w: %w", err, config.ErrSSHAuth)
+	default:
+		return fmt.Errorf("%w: %w", err, config.ErrSSHConnect)
+	}
 }
 
 // resolveProxyJumpChain walks the ProxyJump chain starting from the given alias,
@@ -160,7 +178,7 @@ func resolveProxyJumpChain(startAlias string, defaults SshConfig, list defaultSs
 			break
 		}
 		if visited[value] {
-			return nil, fmt.Errorf("circular ProxyJump detected: %s -> %s", name, value)
+			return nil, fmt.Errorf("circular ProxyJump detected: %s -> %s: %w", name, value, config.ErrSSHConfig)
 		}
 		visited[value] = true
 		bastionList = append(bastionList, GetBastion(value, defaults))
@@ -199,7 +217,7 @@ func (conf SshConfig) JumpRecursion(ctx context.Context, stopChan <-chan struct{
 	AddSshFlags(flags, sshConf)
 	err = flags.Parse(strings.Split(conf.Jump, " "))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse ssh jump %q: %w: %w", conf.Jump, err, config.ErrSSHConfig)
 	}
 	var baseClient *ssh.Client
 	baseClient, err = DialSshRemote(ctx, sshConf, stopChan)
@@ -255,7 +273,7 @@ func (conf SshConfig) Dial(ctx context.Context, stopChan <-chan struct{}) (clien
 	d := net.Dialer{Timeout: sshOpTimeout, KeepAlive: config.KeepAliveTime}
 	conn, err := d.DialContext(ctx, "tcp", conf.Addr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dial ssh %s: %w: %w", conf.Addr, err, config.ErrSSHConnect)
 	}
 	go func() {
 		if stopChan != nil {
@@ -284,7 +302,7 @@ func (conf SshConfig) Dial(ctx context.Context, stopChan <-chan struct{}) (clien
 		Timeout: sshOpTimeout,
 	})
 	if err != nil {
-		return nil, err
+		return nil, wrapDialError(err)
 	}
 	return ssh.NewClient(c, chans, reqs), nil
 }

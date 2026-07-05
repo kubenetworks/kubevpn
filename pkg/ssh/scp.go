@@ -9,6 +9,7 @@ import (
 	"github.com/schollz/progressbar/v3"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -29,7 +30,7 @@ func SCPAndExec(ctx context.Context, stdout, stderr io.Writer, client *ssh.Clien
 		_ = session.Close()
 		if err != nil {
 			plog.G(ctx).Error(string(output))
-			return err
+			return fmt.Errorf("remote command %q: %w: %w", command, err, config.ErrSSHRemoteCommand)
 		}
 		plog.G(ctx).Info(string(output))
 	}
@@ -96,7 +97,7 @@ func sCopy(ctx context.Context, dst io.Writer, src io.Reader, size int64, stdout
 		return err
 	}
 	if written != size {
-		return fmt.Errorf("failed to transfer file to remote: wrote %d bytes but expected %d", written, size)
+		return fmt.Errorf("failed to transfer file to remote: wrote %d bytes but expected %d: %w", written, size, config.ErrSSHRemoteCommand)
 	}
 	return nil
 }
