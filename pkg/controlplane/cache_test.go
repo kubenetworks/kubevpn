@@ -111,6 +111,56 @@ func TestVirtual_To_MeshMode(t *testing.T) {
 		len(listeners), len(clusters), len(routes), len(endpoints))
 }
 
+// TestVirtual_To_RDSUsesADS guards the xDS resilience fix: route config must be
+// delivered over the aggregated (ADS) stream, not a separate RDS gRPC stream, so a
+// traffic-manager restart reconnects all resource types atomically instead of
+// leaving the listener up with empty routes.
+func TestVirtual_To_RDSUsesADS(t *testing.T) {
+	v := &Virtual{
+		Namespace: "default",
+		UID:       "deployments.apps.reviews",
+		Ports: []ContainerPort{
+			{Name: "http", ContainerPort: 9080, Protocol: corev1.ProtocolTCP},
+		},
+		Rules: []*Rule{
+			{
+				Headers:      map[string]string{"env": "test"},
+				LocalTunIPv4: "198.18.0.1",
+				PortMap:      map[int32]string{9080: "9080"},
+			},
+		},
+	}
+
+	logger := log.NewEntry(log.New())
+	listeners, _, _, _ := v.To(false, logger)
+
+	checked := 0
+	for _, l := range nonCaptureListeners(listeners) {
+		for _, fc := range l.GetFilterChains() {
+			for _, f := range fc.GetFilters() {
+				if f.GetName() != wellknown.HTTPConnectionManager {
+					continue
+				}
+				hcm := &httpconnectionmanager.HttpConnectionManager{}
+				if err := f.GetTypedConfig().UnmarshalTo(hcm); err != nil {
+					t.Fatalf("unmarshal HttpConnectionManager: %v", err)
+				}
+				rds, ok := hcm.GetRouteSpecifier().(*httpconnectionmanager.HttpConnectionManager_Rds)
+				if !ok {
+					t.Fatalf("expected Rds route specifier, got %T", hcm.GetRouteSpecifier())
+				}
+				if _, ok := rds.Rds.GetConfigSource().GetConfigSourceSpecifier().(*core.ConfigSource_Ads); !ok {
+					t.Fatalf("expected RDS ConfigSource to use ADS, got %T", rds.Rds.GetConfigSource().GetConfigSourceSpecifier())
+				}
+				checked++
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no HttpConnectionManager filter found to verify RDS uses ADS")
+	}
+}
+
 func TestVirtual_To_FargateMode(t *testing.T) {
 	v := &Virtual{
 		Namespace:   "default",

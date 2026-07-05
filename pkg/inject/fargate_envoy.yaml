@@ -31,7 +31,14 @@ static_resources:
         envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
           "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
           explicit_http_config:
-            http2_protocol_options: {}
+            # Detect a dead xDS connection (traffic-manager restart / Service
+            # endpoint blackout) via HTTP/2 PINGs and reset the stream so envoy
+            # reconnects and re-resolves STRICT_DNS, instead of lingering on a
+            # half-open stream and serving stale routes.
+            http2_protocol_options:
+              connection_keepalive:
+                interval: 30s
+                timeout: 5s
       name: xds_cluster
       load_assignment:
         cluster_name: xds_cluster
