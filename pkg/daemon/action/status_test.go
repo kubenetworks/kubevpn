@@ -125,7 +125,7 @@ current-context: test-context
 
 	status := buildConnectionStatus(conn)
 	if status == nil {
-		t.Fatal("genStatus returned nil")
+		t.Fatal("buildConnectionStatus returned nil")
 	}
 	// No TUN device, no DHCP → status should be "disconnected"
 	if status.Status != StatusFailed {

@@ -7,19 +7,11 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
-func TestSplitPort(t *testing.T) {
+func TestParsePort(t *testing.T) {
 	testDataList := []struct {
 		str    string
 		expect v1.ContainerPort
 	}{
-		{
-			str: "tcp/80:8080",
-			expect: v1.ContainerPort{
-				HostPort:      8080,
-				ContainerPort: 80,
-				Protocol:      v1.ProtocolTCP,
-			},
-		},
 		{
 			str: "tcp/80:8080",
 			expect: v1.ContainerPort{

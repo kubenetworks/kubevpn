@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"errors"
 	"k8s.io/api/core/v1"
 	v2 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -35,9 +34,9 @@ func GetUnstructuredObject(f util.Factory, ns string, workloads string) (*resour
 		return nil, err
 	}
 	if len(infos) == 0 {
-		return nil, fmt.Errorf("not found workloads %s", workloads)
+		return nil, fmt.Errorf("cannot find workload %s", workloads)
 	}
-	return infos[0], err
+	return infos[0], nil
 }
 
 // GetUnstructuredObjectList fetches multiple Kubernetes resources by type/name strings and returns their resource.Info list.
@@ -59,9 +58,9 @@ func GetUnstructuredObjectList(f util.Factory, ns string, workloads []string) ([
 		return nil, err
 	}
 	if len(infos) == 0 {
-		return nil, fmt.Errorf("not found resource %v", workloads)
+		return nil, fmt.Errorf("cannot find resource %v", workloads)
 	}
-	return infos, err
+	return infos, nil
 }
 
 func getUnstructuredObjectBySelector(f util.Factory, ns string, selector string) ([]*resource.Info, error) {
@@ -83,9 +82,9 @@ func getUnstructuredObjectBySelector(f util.Factory, ns string, selector string)
 		return nil, err
 	}
 	if len(infos) == 0 {
-		return nil, errors.New("not found")
+		return nil, fmt.Errorf("cannot find resources matching selector %s", selector)
 	}
-	return infos, err
+	return infos, nil
 }
 
 // GetPodTemplateSpecPath extracts the PodTemplateSpec and its JSON path from an unstructured Kubernetes object.
@@ -191,7 +190,7 @@ func getTopOwnerReference(factory util.Factory, ns, workload string) (object, co
 	}
 	ownerRef := v2.GetControllerOf(object.Object.(*unstructured.Unstructured))
 	if ownerRef == nil {
-		return object, object, err
+		return object, object, nil
 	}
 	var owner = fmt.Sprintf("%s/%s", ownerRef.Kind, ownerRef.Name)
 	for {

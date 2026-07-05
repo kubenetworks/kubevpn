@@ -72,7 +72,7 @@ func GetCIDR(ctx context.Context, clientset kubernetes.Interface, restconfig *re
 	return result
 }
 
-// ParseCIDRFromString
+// parseCIDRFromString extracts CIDRs from Kubernetes component command-line flags.
 /*
 *
 kube-apiserver:
@@ -84,7 +84,7 @@ kube-controller-manager:
 kube-proxy:
 --cluster-cidr=<IPv4 CIDR>,<IPv6 CIDR>
 */
-func ParseCIDRFromString(content string) (result []*net.IPNet) {
+func parseCIDRFromString(content string) (result []*net.IPNet) {
 	if strings.Contains(content, "cluster-cidr") || strings.Contains(content, "service-cluster-ip-range") {
 		split := strings.Split(content, "=")
 		if len(split) == 2 {
@@ -119,7 +119,7 @@ func GetCIDRByDumpClusterInfo(ctx context.Context, clientset kubernetes.Interfac
 
 	var result []*net.IPNet
 	for _, s := range list {
-		result = append(result, ParseCIDRFromString(s)...)
+		result = append(result, parseCIDRFromString(s)...)
 	}
 	return result, nil
 }
@@ -141,7 +141,7 @@ func GetCIDRFromCNI(ctx context.Context, clientset kubernetes.Interface, restcon
 
 	var result []*net.IPNet
 	for _, s := range strings.Split(content, "\n") {
-		result = append(result, ParseCIDRFromString(s)...)
+		result = append(result, parseCIDRFromString(s)...)
 	}
 
 	return result, nil
@@ -334,9 +334,9 @@ func CreateCIDRPod(ctx context.Context, clientset kubernetes.Interface, namespac
 		},
 	}
 	get, err := clientset.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, v1.GetOptions{})
-	if errors.IsNotFound(err) || get.Status.Phase != corev1.PodRunning {
-		if get.Status.Phase != corev1.PodRunning {
-			_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), pod.Name, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
+	if err != nil || get.Status.Phase != corev1.PodRunning {
+		if err == nil || !errors.IsNotFound(err) {
+			_ = clientset.CoreV1().Pods(namespace).Delete(ctx, pod.Name, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
 		}
 		pod, err = clientset.CoreV1().Pods(namespace).Create(ctx, pod, v1.CreateOptions{})
 		if err != nil {
@@ -417,23 +417,23 @@ func GetAPIServerIP(apiServerHost string) ([]net.IP, error) {
 	}
 
 	var ipList []net.IP
-	var set = sets.New[string]()
-	if ip := net.ParseIP(host); ip != nil {
-		if !set.Has(ip.String()) {
+	seen := sets.New[string]()
+	addIP := func(ip net.IP) {
+		key := ip.String()
+		if !seen.Has(key) {
 			ipList = append(ipList, ip)
-			set.Insert(ip.String())
+			seen.Insert(key)
 		}
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		addIP(ip)
 	}
 
 	addrs, _ := net.LookupHost(host)
 	for _, addr := range addrs {
-		ip := net.ParseIP(addr)
-		if ip == nil {
-			continue
-		}
-		if !set.Has(ip.String()) {
-			ipList = append(ipList, ip)
-			set.Insert(ip.String())
+		if ip := net.ParseIP(addr); ip != nil {
+			addIP(ip)
 		}
 	}
 	return ipList, nil

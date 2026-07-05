@@ -347,7 +347,7 @@ func TestServer_ConnectionList_Empty(t *testing.T) {
 }
 
 func TestServer_ConnectionList_WithConnections(t *testing.T) {
-	// genStatus calls GetFactory() which requires a properly initialized factory.
+	// buildConnectionStatus calls GetFactory() which requires a properly initialized factory.
 	// We use a temp kubeconfig to create a real cmdutil.Factory for testing.
 	tmpKubeconfig := t.TempDir() + "/kubeconfig"
 	kubeconfigContent := `apiVersion: v1
@@ -393,7 +393,7 @@ current-context: test-context
 		t.Errorf("expected currentConnectionID 'conn-abc', got %q", resp.CurrentConnectionID)
 	}
 
-	// Verify fields from genStatus — kubeconfig and namespace are passed through
+	// Verify fields from buildConnectionStatus — kubeconfig and namespace are passed through
 	if resp.List[0].Kubeconfig != tmpKubeconfig {
 		t.Errorf("list[0] kubeconfig: got %q", resp.List[0].Kubeconfig)
 	}

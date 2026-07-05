@@ -11,15 +11,22 @@ import (
 )
 
 func TestSortConnect(t *testing.T) {
+	getOrder := func(connects []*ConnectOptions) []string {
+		var order []string
+		for _, connect := range connects {
+			order = append(order, connect.ManagerNamespace)
+		}
+		return order
+	}
+
 	tests := []struct {
 		connects      Connects
 		expectedOrder []string
-		howToGetOrder func(connects []*ConnectOptions) []string
 	}{
 		{
 			connects: []*ConnectOptions{
 				{
-					Namespace: "clusterA",
+					ManagerNamespace: "clusterA",
 					ExtraRouteInfo: ExtraRouteInfo{
 						ExtraCIDR: []string{"192.168.31.1/32"},
 					},
@@ -27,7 +34,7 @@ func TestSortConnect(t *testing.T) {
 					extraHost:    nil,
 				},
 				{
-					Namespace: "clusterB",
+					ManagerNamespace: "clusterB",
 					ExtraRouteInfo: ExtraRouteInfo{
 						ExtraCIDR: []string{"10.16.31.9/32"},
 					},
@@ -36,18 +43,11 @@ func TestSortConnect(t *testing.T) {
 				},
 			},
 			expectedOrder: []string{"clusterB", "clusterA"},
-			howToGetOrder: func(connects []*ConnectOptions) []string {
-				var order []string
-				for _, connect := range connects {
-					order = append(order, connect.Namespace)
-				}
-				return order
-			},
 		},
 		{
 			connects: []*ConnectOptions{
 				{
-					Namespace: "clusterA",
+					ManagerNamespace: "clusterA",
 					ExtraRouteInfo: ExtraRouteInfo{
 						ExtraCIDR: []string{"192.168.31.2/32"},
 					},
@@ -57,7 +57,7 @@ func TestSortConnect(t *testing.T) {
 					}},
 				},
 				{
-					Namespace: "clusterB",
+					ManagerNamespace: "clusterB",
 					ExtraRouteInfo: ExtraRouteInfo{
 						ExtraCIDR: []string{"10.16.31.9/32"},
 					},
@@ -66,24 +66,17 @@ func TestSortConnect(t *testing.T) {
 				},
 			},
 			expectedOrder: []string{"clusterB", "clusterA"},
-			howToGetOrder: func(connects []*ConnectOptions) []string {
-				var order []string
-				for _, connect := range connects {
-					order = append(order, connect.Namespace)
-				}
-				return order
-			},
 		},
 		{
 			connects: []*ConnectOptions{
 				{
-					Namespace:      "clusterA",
-					ExtraRouteInfo: ExtraRouteInfo{},
-					apiServerIPs:   []net.IP{net.ParseIP("192.168.31.100")},
-					extraHost:      nil,
+					ManagerNamespace: "clusterA",
+					ExtraRouteInfo:   ExtraRouteInfo{},
+					apiServerIPs:     []net.IP{net.ParseIP("192.168.31.100")},
+					extraHost:        nil,
 				},
 				{
-					Namespace: "clusterB",
+					ManagerNamespace: "clusterB",
 					ExtraRouteInfo: ExtraRouteInfo{
 						ExtraCIDR: []string{"192.168.31.2/32"},
 					},
@@ -94,24 +87,17 @@ func TestSortConnect(t *testing.T) {
 				},
 			},
 			expectedOrder: []string{"clusterB", "clusterA"},
-			howToGetOrder: func(connects []*ConnectOptions) []string {
-				var order []string
-				for _, connect := range connects {
-					order = append(order, connect.Namespace)
-				}
-				return order
-			},
 		},
 		{
 			connects: []*ConnectOptions{
 				{
-					Namespace:      "clusterA",
-					ExtraRouteInfo: ExtraRouteInfo{},
-					apiServerIPs:   []net.IP{net.ParseIP("192.168.31.100")},
-					extraHost:      nil,
+					ManagerNamespace: "clusterA",
+					ExtraRouteInfo:   ExtraRouteInfo{},
+					apiServerIPs:     []net.IP{net.ParseIP("192.168.31.100")},
+					extraHost:        nil,
 				},
 				{
-					Namespace: "clusterB",
+					ManagerNamespace: "clusterB",
 					ExtraRouteInfo: ExtraRouteInfo{
 						ExtraCIDR: []string{"192.168.31.1/32"},
 					},
@@ -119,7 +105,7 @@ func TestSortConnect(t *testing.T) {
 					extraHost:    nil,
 				},
 				{
-					Namespace: "clusterC",
+					ManagerNamespace: "clusterC",
 					ExtraRouteInfo: ExtraRouteInfo{
 						ExtraCIDR: []string{"10.16.31.9/32"},
 					},
@@ -128,20 +114,13 @@ func TestSortConnect(t *testing.T) {
 				},
 			},
 			expectedOrder: []string{"clusterC", "clusterB", "clusterA"},
-			howToGetOrder: func(connects []*ConnectOptions) []string {
-				var order []string
-				for _, connect := range connects {
-					order = append(order, connect.Namespace)
-				}
-				return order
-			},
 		},
 	}
 	for i, test := range tests {
-		order := test.howToGetOrder(test.connects.Sort())
+		order := getOrder(test.connects.Sort())
 		equal := reflect.DeepEqual(order, test.expectedOrder)
 		if !equal {
-			t.Fatalf("Failed to sort conntions round %d, expected: %v, real: %v", i+1, test.expectedOrder, order)
+			t.Fatalf("Failed to sort connections round %d, expected: %v, real: %v", i+1, test.expectedOrder, order)
 		}
 	}
 }
