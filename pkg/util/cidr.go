@@ -149,17 +149,26 @@ func GetCIDRFromCNI(ctx context.Context, clientset kubernetes.Interface, restcon
 
 // GetServiceCIDRByCreateService discovers the service CIDR by attempting to create a service with an invalid ClusterIP and parsing the error.
 func GetServiceCIDRByCreateService(ctx context.Context, serviceInterface typedcorev1.ServiceInterface) (*net.IPNet, error) {
-	defaultCIDRIndex := "valid IPs is"
+	cidrKeywords := []string{
+		"valid IPs is",
+		"The range of valid IPs",
+		"valid IP range is",
+	}
 	svc := &corev1.Service{
 		ObjectMeta: v1.ObjectMeta{GenerateName: "foo-svc-"},
 		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 80}}, ClusterIP: "0.0.0.0"},
 	}
 	_, err := serviceInterface.Create(ctx, svc, v1.CreateOptions{})
 	if err != nil {
-		idx := strings.LastIndex(err.Error(), defaultCIDRIndex)
-		if idx != -1 {
-			_, cidr, err1 := net.ParseCIDR(strings.TrimSpace(err.Error()[idx+len(defaultCIDRIndex):]))
-			return cidr, err1
+		errMsg := err.Error()
+		for _, keyword := range cidrKeywords {
+			idx := strings.LastIndex(errMsg, keyword)
+			if idx != -1 {
+				_, cidr, parseErr := net.ParseCIDR(strings.TrimSpace(errMsg[idx+len(keyword):]))
+				if parseErr == nil && cidr != nil {
+					return cidr, nil
+				}
+			}
 		}
 		return nil, fmt.Errorf("cannot find any keyword of service network CIDR info: %w", err)
 	}
@@ -356,8 +365,10 @@ func CreateCIDRPod(ctx context.Context, clientset kubernetes.Interface, namespac
 	return pod, nil
 }
 
-// GetPodCIDRFromPod infers pod CIDRs by applying the service CIDR mask to actual pod IPs in the namespace.
-func GetPodCIDRFromPod(ctx context.Context, clientset kubernetes.Interface, namespace string, svc *net.IPNet) ([]*net.IPNet, error) {
+// GetPodCIDRFromPod infers pod CIDRs by applying a default pod CIDR mask to actual pod IPs in the namespace.
+// It uses /16 for IPv4 and /64 for IPv6 as safe defaults that cover most Kubernetes deployments,
+// since the exact pod CIDR mask is not available without node.Spec.PodCIDR.
+func GetPodCIDRFromPod(ctx context.Context, clientset kubernetes.Interface, namespace string, _ *net.IPNet) ([]*net.IPNet, error) {
 	podList, err := clientset.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{Limit: 100})
 	if err != nil {
 		return nil, err
@@ -375,7 +386,13 @@ func GetPodCIDRFromPod(ctx context.Context, clientset kubernetes.Interface, name
 		}
 		for _, t := range s.UnsortedList() {
 			if ip := net.ParseIP(t); ip != nil {
-				_, ipNet, _ := net.ParseCIDR((&net.IPNet{IP: ip, Mask: svc.Mask}).String())
+				var mask net.IPMask
+				if ip.To4() != nil {
+					mask = net.CIDRMask(16, 32)
+				} else {
+					mask = net.CIDRMask(64, 128)
+				}
+				_, ipNet, _ := net.ParseCIDR((&net.IPNet{IP: ip, Mask: mask}).String())
 				if ipNet != nil {
 					result = append(result, ipNet)
 				}

@@ -57,7 +57,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	if err = netlink.NetworkSetMTU(ifc, mtu); err != nil {
-		err = fmt.Errorf("cannot setup mtu %d to device %s : %w", mtu, name, err)
+		err = fmt.Errorf("cannot setup mtu %d to device %s: %w", mtu, name, err)
 		return
 	}
 
@@ -67,7 +67,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 			return
 		}
 		if err = netlink.NetworkLinkAddIp(ifc, ipv4, ipv4CIDR); err != nil {
-			err = fmt.Errorf("cannot set IPv4 address %s to device %s : %w", ipv4.String(), name, err)
+			err = fmt.Errorf("cannot set IPv4 address %s to device %s: %w", ipv4.String(), name, err)
 			return
 		}
 	}
@@ -78,13 +78,13 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 			return
 		}
 		if err = netlink.NetworkLinkAddIp(ifc, ipv6, ipv6CIDR); err != nil && !errors.Is(err, syscall.ENOTSUP) {
-			err = fmt.Errorf("cannot setup IPv6 address %s to device %s : %w", ipv6.String(), name, err)
+			err = fmt.Errorf("cannot setup IPv6 address %s to device %s: %w", ipv6.String(), name, err)
 			return
 		}
 	}
 
 	if err = netlink.NetworkLinkUp(ifc); err != nil {
-		err = fmt.Errorf("cannot up device %s : %w", name, err)
+		err = fmt.Errorf("cannot up device %s: %w", name, err)
 		return
 	}
 

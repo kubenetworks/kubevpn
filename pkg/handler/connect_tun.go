@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"sort"
 	"strings"
 	"time"
 
@@ -12,14 +11,10 @@ import (
 	miekgdns "github.com/miekg/dns"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
-	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
-	"k8s.io/kubectl/pkg/polymorphichelpers"
-	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -43,9 +38,6 @@ func (c *ConnectOptions) portForward(ctx context.Context, portPair []string) err
 			func() {
 				defer time.Sleep(time.Millisecond * 200)
 
-				sortBy := activePodsSortFunc
-				label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
-				_, _, _ = polymorphichelpers.GetFirstPod(c.clientset.CoreV1(), c.ManagerNamespace, label, time.Second*5, sortBy)
 				ctx2, cancelFunc2 := context.WithTimeout(ctx, time.Second*10)
 				defer cancelFunc2()
 				podList, err := c.GetRunningPodList(ctx2)
@@ -130,7 +122,7 @@ func (c *ConnectOptions) startLocalTunServer(ctx context.Context, forwardAddress
 		var ipNet *net.IPNet
 		_, ipNet, err = net.ParseCIDR(s)
 		if err != nil {
-			return fmt.Errorf("invalid extra-cidr %s, err: %w", s, err)
+			return fmt.Errorf("invalid extra-cidr %s: %w", s, err)
 		}
 		cidrList = append(cidrList, ipNet)
 	}
@@ -283,8 +275,4 @@ func healthCheckLoop(ctx context.Context, cancelFunc context.CancelFunc, readyCh
 			return
 		}
 	}
-}
-
-var activePodsSortFunc = func(pods []*v1.Pod) sort.Interface {
-	return sort.Reverse(podutils.ActivePods(pods))
 }

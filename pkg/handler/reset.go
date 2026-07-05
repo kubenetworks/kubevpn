@@ -131,6 +131,10 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 		plog.G(ctx).Errorf("Failed to patch resource: %s %s: %v", controller.Mapping.Resource.Resource, controller.Name, err)
 		return err
 	}
+	workloadRef := fmt.Sprintf("%s/%s", controller.Mapping.Resource.Resource, controller.Name)
+	if err = util.RolloutStatus(ctx, factory, controller.Namespace, workloadRef); err != nil {
+		plog.G(ctx).Warnf("Rollout status check failed for %s: %v", workloadRef, err)
+	}
 	if !util.IsK8sService(object) {
 		return nil
 	}

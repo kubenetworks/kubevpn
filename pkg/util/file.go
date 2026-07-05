@@ -40,7 +40,7 @@ func DownloadFileWithName(uri, name string) (string, error) {
 
 	_, err = io.Copy(out, resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to save file %s. error: %w", file, err)
+		return "", fmt.Errorf("failed to save file %s: %w", file, err)
 	}
 
 	return file, nil

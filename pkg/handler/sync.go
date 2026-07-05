@@ -230,29 +230,41 @@ func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, spec *v1.PodTempla
 }
 
 // Cleanup deletes sync workloads created by DoSync and executes rollback functions.
+// Deletion errors are logged but do not prevent rollback functions from running,
+// ensuring resources are cleaned up even when the API server is partially unreachable.
 func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	if len(workloads) == 0 {
 		for _, v := range d.TargetWorkloadNames {
 			workloads = append(workloads, v)
 		}
 	}
+	var firstErr error
 	for _, workload := range workloads {
 		plog.G(ctx).Infof("Cleaning up sync workload: %s", workload)
 		object, err := util.GetUnstructuredObject(d.factory, d.Namespace, workload)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
-			return err
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 		var client dynamic.Interface
 		client, err = d.factory.DynamicClient()
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to get dynamic client: %v", err)
-			return err
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 		err = client.Resource(object.Mapping.Resource).Namespace(d.Namespace).Delete(ctx, object.Name, metav1.DeleteOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
 			plog.G(ctx).Errorf("Failed to delete sync object: %v", err)
-			return err
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 		plog.G(ctx).Infof("Deleted sync object: %s/%s", object.Mapping.Resource.GroupResource().Resource, object.Name)
 	}
@@ -270,7 +282,7 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 			plog.G(ctx).Warnf("Failed to rollback workload %s: %v", workload, err)
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // AddRollbackFunc registers a function to be called during Cleanup for teardown.

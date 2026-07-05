@@ -190,14 +190,18 @@ func (conf SshConfig) AliasRecursion(ctx context.Context, stopChan <-chan struct
 	jumper := "ProxyJump"
 	bastionList := []SshConfig{GetBastion(name, conf)}
 	list := getDefaultSSHConfigList()
+	visited := map[string]bool{name: true}
 	for {
 		value := list.Get(name, jumper)
-		if value != "" {
-			bastionList = append(bastionList, GetBastion(value, conf))
-			name = value
-			continue
+		if value == "" {
+			break
 		}
-		break
+		if visited[value] {
+			return nil, fmt.Errorf("circular ProxyJump detected: %s -> %s", name, value)
+		}
+		visited[value] = true
+		bastionList = append(bastionList, GetBastion(value, conf))
+		name = value
 	}
 	for i := len(bastionList) - 1; i >= 0; i-- {
 		if client == nil {
@@ -237,14 +241,18 @@ func (conf SshConfig) JumpRecursion(ctx context.Context, stopChan <-chan struct{
 		jumper := "ProxyJump"
 		bastionList = append(bastionList, GetBastion(name, conf))
 		list := getDefaultSSHConfigList()
+		visited := map[string]bool{name: true}
 		for {
 			value := list.Get(name, jumper)
-			if value != "" {
-				bastionList = append(bastionList, GetBastion(value, conf))
-				name = value
-				continue
+			if value == "" {
+				break
 			}
-			break
+			if visited[value] {
+				return nil, fmt.Errorf("circular ProxyJump detected: %s -> %s", name, value)
+			}
+			visited[value] = true
+			bastionList = append(bastionList, GetBastion(value, conf))
+			name = value
 		}
 	}
 	if conf.Addr != "" {

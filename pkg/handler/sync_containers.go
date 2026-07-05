@@ -17,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -166,8 +165,6 @@ func (d *SyncOptions) SyncDir(ctx context.Context, labels string) error {
 			func() {
 				defer time.Sleep(time.Second * 2)
 
-				sortBy := activePodsSortFunc
-				_, _, _ = polymorphichelpers.GetFirstPod(d.clientset.CoreV1(), d.Namespace, labels, time.Second*30, sortBy)
 				list, err := util.GetRunningPodList(d.ctx, d.clientset, d.Namespace, labels)
 				if err != nil {
 					plog.G(ctx).Error(err)

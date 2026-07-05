@@ -25,40 +25,53 @@ const (
 // Status handles the Status RPC, reporting connection and proxy state.
 func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.StatusResponse, error) {
 	if len(req.ConnectionIDs) != 0 {
-		var list []*rpc.Status
-		var lock = &sync.Mutex{}
-		wg := sync.WaitGroup{}
+		svr.connMu.RLock()
+		var matched []*handler.ConnectOptions
 		for _, connectionID := range req.ConnectionIDs {
 			for _, options := range svr.connections {
 				if options.GetConnectionID() == connectionID {
-					wg.Add(1)
-					go func(options *handler.ConnectOptions) {
-						defer wg.Done()
-						result := buildConnectionStatus(options)
-						var err error
-						result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(options, options.Sync)
-						if err != nil {
-							plog.G(ctx).Errorf("Error generating status: %v", err)
-							result.Status = StatusUnhealthy
-						}
-						lock.Lock()
-						list = append(list, result)
-						lock.Unlock()
-					}(options)
+					matched = append(matched, options)
 				}
 			}
 		}
+		currentID := svr.currentConnectionID
+		svr.connMu.RUnlock()
+
+		var list []*rpc.Status
+		var lock = &sync.Mutex{}
+		wg := sync.WaitGroup{}
+		for _, options := range matched {
+			wg.Add(1)
+			go func(options *handler.ConnectOptions) {
+				defer wg.Done()
+				result := buildConnectionStatus(options)
+				var err error
+				result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(options, options.Sync)
+				if err != nil {
+					plog.G(ctx).Errorf("Error generating status: %v", err)
+					result.Status = StatusUnhealthy
+				}
+				lock.Lock()
+				list = append(list, result)
+				lock.Unlock()
+			}(options)
+		}
 		wg.Wait()
-		return &rpc.StatusResponse{List: list, CurrentConnectionID: svr.currentConnectionID}, nil
+		return &rpc.StatusResponse{List: list, CurrentConnectionID: currentID}, nil
 	}
 
+	svr.connMu.RLock()
+	snapshot := make([]*handler.ConnectOptions, len(svr.connections))
+	copy(snapshot, svr.connections)
+	currentID := svr.currentConnectionID
+	svr.connMu.RUnlock()
+
 	wg := sync.WaitGroup{}
-	wg.Add(len(svr.connections))
-	list := make([]*rpc.Status, len(svr.connections))
-	for i := range svr.connections {
-		go func(i int) {
+	wg.Add(len(snapshot))
+	list := make([]*rpc.Status, len(snapshot))
+	for i, options := range snapshot {
+		go func(i int, options *handler.ConnectOptions) {
 			defer wg.Done()
-			options := svr.connections[i]
 			result := buildConnectionStatus(options)
 			var err error
 			result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(options, options.Sync)
@@ -67,10 +80,10 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 				result.Status = StatusUnhealthy
 			}
 			list[i] = result
-		}(i)
+		}(i, options)
 	}
 	wg.Wait()
-	return &rpc.StatusResponse{List: list, CurrentConnectionID: svr.currentConnectionID}, nil
+	return &rpc.StatusResponse{List: list, CurrentConnectionID: currentID}, nil
 }
 
 func buildConnectionStatus(connect *handler.ConnectOptions) *rpc.Status {

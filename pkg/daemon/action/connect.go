@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -87,7 +88,9 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	if resp.Context().Err() != nil {
 		return resp.Context().Err()
 	}
+	svr.connMu.Lock()
 	svr.connections = append(svr.connections, connect)
+	svr.connMu.Unlock()
 	return nil
 }
 
@@ -127,14 +130,17 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	}()
 
 	var connResp grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse]
+	var connRespMu sync.Mutex
 	go func() {
 		var s rpc.Cancel
-		err = resp.RecvMsg(&s)
-		if err != nil {
+		if recvErr := resp.RecvMsg(&s); recvErr != nil {
 			return
 		}
-		if connResp != nil {
-			_ = connResp.SendMsg(&s)
+		connRespMu.Lock()
+		cr := connResp
+		connRespMu.Unlock()
+		if cr != nil {
+			_ = cr.SendMsg(&s)
 		} else {
 			session.Cancel()
 		}
@@ -153,16 +159,20 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	}
 	connectionID := connect.GetConnectionID()
 
-	if existing, _ := svr.findConnection(connectionID); existing != nil {
+	svr.connMu.Lock()
+	existing, _ := svr.findConnection(connectionID)
+	if existing != nil {
+		svr.currentConnectionID = connectionID
+		svr.connMu.Unlock()
 		session.Cancel()
 		logger.Infof("Connected with cluster")
-		svr.currentConnectionID = connectionID
 		return resp.Send(&rpc.ConnectResponse{
 			ConnectionID: connectionID,
 		})
 	}
+	svr.connMu.Unlock()
 
-	return svr.forwardConnectToSudo(session.Ctx, req, connect, resp, cli, &connResp, file, connectionID, logger)
+	return svr.forwardConnectToSudo(session.Ctx, req, connect, resp, cli, &connResp, &connRespMu, file, connectionID, logger)
 }
 
 // detectAndSetManagerNamespace resolves the traffic manager namespace, falling
@@ -194,6 +204,7 @@ func (svr *Server) forwardConnectToSudo(
 	resp rpc.Daemon_ConnectServer,
 	cli rpc.DaemonClient,
 	connResp *grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse],
+	connRespMu *sync.Mutex,
 	kubeconfigPath string,
 	connectionID string,
 	logger *log.Logger,
@@ -209,15 +220,18 @@ func (svr *Server) forwardConnectToSudo(
 		return err
 	}
 	req.KubeconfigBytes = string(content)
-	*connResp, err = cli.Connect(ipCtx)
+	cr, err := cli.Connect(ipCtx)
 	if err != nil {
 		return err
 	}
-	err = (*connResp).Send(req)
+	connRespMu.Lock()
+	*connResp = cr
+	connRespMu.Unlock()
+	err = cr.Send(req)
 	if err != nil {
 		return err
 	}
-	err = util.CopyGRPCStream[rpc.ConnectResponse](*connResp, resp)
+	err = util.CopyGRPCStream[rpc.ConnectResponse](cr, resp)
 	if err != nil {
 		return err
 	}
@@ -227,8 +241,10 @@ func (svr *Server) forwardConnectToSudo(
 	}
 	connect.HealthCheckOnce(ctx, time.Second*10)
 	go connect.HealthPeriod(ctx, time.Second*30)
+	svr.connMu.Lock()
 	svr.connections = append(svr.connections, connect)
 	svr.currentConnectionID = connectionID
+	svr.connMu.Unlock()
 	return resp.Send(&rpc.ConnectResponse{
 		ConnectionID: connectionID,
 	})

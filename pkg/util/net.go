@@ -206,7 +206,7 @@ func GenICMPPacket(src net.IP, dst net.IP) ([]byte, error) {
 	}
 	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize icmp packet, err: %w", err)
+		return nil, fmt.Errorf("failed to serialize icmp packet: %w", err)
 	}
 	return buf.Bytes(), nil
 }
@@ -230,7 +230,7 @@ func GenICMPPacketIPv6(src net.IP, dst net.IP) ([]byte, error) {
 	}
 	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize icmp6 packet, err: %w", err)
+		return nil, fmt.Errorf("failed to serialize icmp6 packet: %w", err)
 	}
 	return buf.Bytes(), nil
 }

@@ -19,7 +19,9 @@ func (svr *Server) Unsync(resp rpc.Daemon_UnsyncServer) error {
 	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newStreamWriter(func(msg string) error {
 		return resp.Send(&rpc.UnsyncResponse{Message: msg})
 	}), svr.LogFile))
+	svr.connMu.RLock()
 	conn, _ := svr.findConnection(svr.currentConnectionID)
+	svr.connMu.RUnlock()
 	if conn == nil {
 		logger.Infof("No connection found")
 		return fmt.Errorf("no connection found")

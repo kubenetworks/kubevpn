@@ -35,13 +35,20 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
+// CurrentSchemaVersion is the latest schema version for Virtual configs stored in ConfigMaps.
+// Bump this when making breaking changes to the Virtual/Rule struct layout.
+// A zero value means a legacy config created before versioning was introduced.
+const CurrentSchemaVersion = 1
+
 // Virtual represents an envoy xDS configuration for a single proxied workload.
 type Virtual struct {
-	Namespace   string
-	UID         string `yaml:"Uid" json:"Uid"` // group.resource.name
-	FargateMode bool   `yaml:"fargateMode,omitempty" json:"fargateMode,omitempty"`
-	Ports       []ContainerPort
-	Rules       []*Rule
+	// SchemaVersion tracks the config schema revision. Zero means legacy (pre-versioning).
+	SchemaVersion int    `yaml:"schemaVersion,omitempty" json:"schemaVersion,omitempty"`
+	Namespace     string
+	UID           string `yaml:"Uid" json:"Uid"` // group.resource.name
+	FargateMode   bool   `yaml:"fargateMode,omitempty" json:"fargateMode,omitempty"`
+	Ports         []ContainerPort
+	Rules         []*Rule
 }
 
 // ContainerPort describes a port on a container with optional envoy listener binding.
@@ -115,13 +122,57 @@ type Rule struct {
 	Headers      map[string]string
 	LocalTunIPv4 string
 	LocalTunIPv6 string
-	// for no privileged mode (AWS Fargate mode), don't have cap NET_ADMIN and privileged: true. so we can not use OSI layer 3 proxy
+	// OwnerID identifies the connection that owns this rule.
+	// Supplementary to LocalTunIPv4-based ownership checks — does not replace them.
+	// Populated with the DHCP-assigned TUN IPv4 address at rule creation time.
+	// Empty for rules created before this field was introduced (backward compatible).
+	OwnerID string `yaml:"ownerID,omitempty" json:"ownerID,omitempty"`
+	// for no privileged mode (AWS Fargate mode), don't have cap NET_ADMIN and privileged: true. so we cannot use OSI layer 3 proxy
 	// containerPort -> envoyRulePort:localPort
 	// envoyRulePort for envoy forward to localhost:envoyRulePort
 	// localPort for local pc listen localhost:localPort
 	// use ssh reverse tunnel, envoy rule endpoint localhost:envoyRulePort will forward to local pc localhost:localPort
 	// localPort is required and envoyRulePort is optional
 	PortMap map[int32]string
+}
+
+// PortMapping represents a parsed port mapping from the PortMap string encoding.
+type PortMapping struct {
+	// ContainerPort is the original container port (the map key in PortMap).
+	ContainerPort int32
+	// EnvoyPort is the port envoy forwards to (the first number in the string value).
+	EnvoyPort int32
+	// LocalPort is the port the local PC listens on.
+	// In non-fargate mode (plain "envoyPort" format), LocalPort equals ContainerPort.
+	// In fargate mode ("envoyPort:localPort" format), LocalPort is the second number.
+	LocalPort int32
+}
+
+// ParsePortMap parses the string-encoded PortMap into typed PortMapping values.
+// The string value is either "envoyPort" (plain number) or "envoyPort:localPort" (colon-separated pair).
+func (r *Rule) ParsePortMap() []PortMapping {
+	result := make([]PortMapping, 0, len(r.PortMap))
+	for containerPort, portStr := range r.PortMap {
+		pm := PortMapping{ContainerPort: containerPort}
+		if before, after, ok := strings.Cut(portStr, ":"); ok {
+			pm.EnvoyPort, _ = parsePort(before)
+			pm.LocalPort, _ = parsePort(after)
+		} else {
+			pm.EnvoyPort, _ = parsePort(portStr)
+			pm.LocalPort = containerPort
+		}
+		result = append(result, pm)
+	}
+	return result
+}
+
+// parsePort converts a port string to int32, returning 0 on parse failure.
+func parsePort(s string) (int32, bool) {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+	return int32(n), true
 }
 
 func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
@@ -149,19 +200,17 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 			} else {
 				ips = []string{rule.LocalTunIPv4}
 			}
-			ports := rule.PortMap[port.ContainerPort]
-			if fargate {
-				if before, _, ok := strings.Cut(ports, ":"); ok {
-					ports = before
-				} else {
-					logger.Errorf("fargate mode port should have two pair: %s", ports)
+			var envoyRulePort int32
+			for _, pm := range rule.ParsePortMap() {
+				if pm.ContainerPort == port.ContainerPort {
+					envoyRulePort = pm.EnvoyPort
+					break
 				}
 			}
-			envoyRulePort, _ := strconv.Atoi(ports)
 			for _, ip := range ips {
 				clusterName := fmt.Sprintf("%s_%v", ip, envoyRulePort)
 				clusters = append(clusters, toCluster(clusterName))
-				endpoints = append(endpoints, toEndPoint(clusterName, ip, int32(envoyRulePort)))
+				endpoints = append(endpoints, toEndPoint(clusterName, ip, envoyRulePort))
 				rr = append(rr, toRoute(clusterName, rule.Headers))
 			}
 		}

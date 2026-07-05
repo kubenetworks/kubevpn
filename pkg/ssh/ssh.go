@@ -294,7 +294,15 @@ func getRemoteConn(ctx context.Context, clientMap *sync.Map, conf *SshConfig, re
 		cancelFunc1()
 		return nil, err
 	}
-	clientMap.Store(uuid.NewString(), newSshClientWrap(client, cancelFunc1))
+	key := uuid.NewString()
+	wrap := newSshClientWrap(client, cancelFunc1)
+	clientMap.Store(key, wrap)
+	go func() {
+		<-ctx.Done()
+		if val, loaded := clientMap.LoadAndDelete(key); loaded {
+			val.(*sshClientWrap).Close()
+		}
+	}()
 	plog.G(ctx1).Debug("Connected to remote ssh server")
 
 	ctx2, cancelFunc2 := context.WithTimeout(ctx, time.Second*10)

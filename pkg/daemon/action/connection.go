@@ -10,6 +10,7 @@ import (
 
 // findConnection returns the first connection matching the given ID
 // and its index. Returns (nil, -1) if not found.
+// The caller must hold svr.connMu (at least RLock).
 func (svr *Server) findConnection(connectionID string) (*handler.ConnectOptions, int) {
 	for i, conn := range svr.connections {
 		if conn.GetConnectionID() == connectionID {
@@ -21,16 +22,20 @@ func (svr *Server) findConnection(connectionID string) (*handler.ConnectOptions,
 
 // ConnectionList handles the ConnectionList RPC, returning the status of all active VPN connections.
 func (svr *Server) ConnectionList(ctx context.Context, req *rpc.ConnectionListRequest) (*rpc.ConnectionListResponse, error) {
+	svr.connMu.RLock()
 	var list []*rpc.Status
 	for _, options := range svr.connections {
 		result := buildConnectionStatus(options)
 		list = append(list, result)
 	}
-	return &rpc.ConnectionListResponse{List: list, CurrentConnectionID: svr.currentConnectionID}, nil
+	currentID := svr.currentConnectionID
+	svr.connMu.RUnlock()
+	return &rpc.ConnectionListResponse{List: list, CurrentConnectionID: currentID}, nil
 }
 
 // removeConnection removes all connections matching the given ID from the
 // slice and returns them. The caller is responsible for cleanup.
+// The caller must hold svr.connMu (write lock).
 func (svr *Server) removeConnection(connectionID string) handler.Connects {
 	var removed handler.Connects
 	for i := 0; i < len(svr.connections); i++ {
@@ -45,6 +50,7 @@ func (svr *Server) removeConnection(connectionID string) handler.Connects {
 
 // resetCurrentConnection updates currentConnectionID after the given ID was
 // removed. It picks the first remaining connection, or clears the field.
+// The caller must hold svr.connMu (write lock).
 func (svr *Server) resetCurrentConnection(removedID string) {
 	if svr.currentConnectionID != removedID {
 		return
@@ -68,6 +74,8 @@ func cleanupConnection(ctx context.Context, conn *handler.ConnectOptions) {
 
 // ConnectionUse handles the ConnectionUse RPC, switching the active connection to the specified connection ID.
 func (svr *Server) ConnectionUse(ctx context.Context, req *rpc.ConnectionUseRequest) (*rpc.ConnectionUseResponse, error) {
+	svr.connMu.Lock()
+	defer svr.connMu.Unlock()
 	if _, i := svr.findConnection(req.ConnectionID); i == -1 {
 		return nil, fmt.Errorf("no connection found")
 	}
