@@ -28,7 +28,7 @@ func (option *Options) Connect(ctx context.Context, sshConfig *pkgssh.SshConfig,
 	case ConnectModeContainer:
 		return option.connectViaContainer(ctx, portBindings, managerNamespace)
 	default:
-		return fmt.Errorf("unsupported connect mode: %s", option.ConnectMode)
+		return fmt.Errorf("unsupported connect mode: %s: %w", option.ConnectMode, config.ErrInvalidArgument)
 	}
 }
 

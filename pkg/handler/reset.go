@@ -90,7 +90,7 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 	cm.Data[config.KeyEnvoy] = string(marshal)
 	_, err = mapInterface.Update(ctx, cm, metav1.UpdateOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to update configmap %s: %w", config.ConfigMapPodTrafficManager, err)
+		return fmt.Errorf("failed to update configmap %s: %w: %w", config.ConfigMapPodTrafficManager, err, config.ErrCleanupFailed)
 	}
 	return nil
 }
@@ -142,7 +142,7 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 	}
 
 	if err = inject.RestoreServiceTargetPort(ctx, clientset, namespace, object.Name); err != nil {
-		return fmt.Errorf("failed to restore service %s target ports: %w", object.Name, err)
+		return fmt.Errorf("failed to restore service %s target ports: %w: %w", object.Name, err, config.ErrCleanupFailed)
 	}
 	return nil
 }

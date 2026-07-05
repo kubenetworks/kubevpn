@@ -9,6 +9,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -97,5 +98,9 @@ func (pm *ProxyManager) Leave(ctx context.Context, resources []Resources, ownerI
 		pm.Remove(workload.Namespace, workload.Workload)
 		plog.G(ctx).Infof("Left workload %s in namespace %s", workload.Workload, workload.Namespace)
 	}
-	return errors.NewAggregate(errs)
+	agg := errors.NewAggregate(errs)
+	if agg == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", agg, config.ErrCleanupFailed)
 }

@@ -126,7 +126,7 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	ips := svr.getSudoTunIPs(ctx)
 	tunV4, tunV6 := resolveTunIP(options, ips)
 	if tunV4 == "" {
-		return fmt.Errorf("no TUN IP found for connection %s", connectionID)
+		return fmt.Errorf("no TUN IP found for connection %s: %w", connectionID, config.ErrTunDeviceFailed)
 	}
 	var podList []v1.Pod
 	podList, err = options.GetRunningPodList(cancel)

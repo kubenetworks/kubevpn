@@ -212,7 +212,7 @@ func removeEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface,
 		}
 		str, ok := configMap.Data[config.KeyEnvoy]
 		if !ok {
-			return fmt.Errorf("cannot find value for key: envoy-config.yaml")
+			return fmt.Errorf("cannot find value for key: envoy-config.yaml: %w", config.ErrCleanupFailed)
 		}
 		var v []*controlplane.Virtual
 		if unmarshalErr := yaml.Unmarshal([]byte(str), &v); unmarshalErr != nil {
