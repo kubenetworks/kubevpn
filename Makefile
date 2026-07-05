@@ -119,6 +119,13 @@ ut:
 ut-no-cluster:
 	go test -p=1 -v -timeout=60m ${LDFLAGS} ./...
 
+# ut-tun runs ONLY the tests behind the `tun` build tag — those that need
+# CAP_NET_ADMIN (TUN device creation / route manipulation). Run as root:
+#   sudo -E env PATH="$PATH" make ut-tun
+.PHONY: ut-tun
+ut-tun:
+	go test -p=1 -v -tags=tun -timeout=30m ${LDFLAGS} ./pkg/...
+
 .PHONY: cover
 cover: ut
 	go tool cover -html=coverage.txt
