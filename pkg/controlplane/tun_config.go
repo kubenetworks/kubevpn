@@ -81,6 +81,7 @@ type tunAllocation struct {
 	IPv6      *net.IPNet
 	Version   int64
 	LastRenew time.Time // last time the client renewed (heartbeat)
+	Hostname  string    // client machine name, for debugging which machine owns this lease
 }
 
 // persistedAlloc is the YAML-serializable form of tunAllocation.
@@ -89,6 +90,12 @@ type persistedAlloc struct {
 	IPv6      string `yaml:"ipv6"`
 	Version   int64  `yaml:"version"`
 	LastRenew int64  `yaml:"lastRenew"` // unix timestamp
+	// Hostname uses a json tag because saveAllocs marshals via sigs.k8s.io/yaml
+	// (JSON-based): the yaml tags above are ignored and fields persist under their
+	// Go names (IPv4/Version/...). The json tag both matches that casing and makes
+	// omitempty actually take effect, so old clients that send no hostname keep a
+	// clean TUN_ALLOCS entry.
+	Hostname string `json:"Hostname,omitempty"`
 }
 
 // NewTunConfigServer creates and initializes a TunConfigServer.
@@ -165,6 +172,7 @@ func (s *TunConfigServer) loadAllocs(ctx context.Context) {
 			IPv6:      v6Net,
 			Version:   pa.Version,
 			LastRenew: lastRenew,
+			Hostname:  pa.Hostname,
 		}
 		loaded++
 	}
@@ -233,6 +241,7 @@ func (s *TunConfigServer) saveAllocs(ctx context.Context) error {
 		pa := &persistedAlloc{
 			Version:   alloc.Version,
 			LastRenew: alloc.LastRenew.Unix(),
+			Hostname:  alloc.Hostname,
 		}
 		if alloc.IPv4 != nil {
 			pa.IPv4 = alloc.IPv4.String()
@@ -296,7 +305,7 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 				cand = p.candV6
 			}
 			if cand != nil && cand.IP.String() == req.ConfirmIP {
-				return s.commitFamilyLocked(ctx, req.OwnerID, isV6, cand, excludeIPs)
+				return s.commitFamilyLocked(ctx, req.OwnerID, isV6, cand, excludeIPs, req.Hostname)
 			}
 		}
 		// stale/unknown confirm → fall through to normal handling
@@ -340,6 +349,9 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 	if alloc, ok := s.allocs[req.OwnerID]; ok {
 		if !isIPExcluded(alloc.IPv4, excludeIPs) {
 			alloc.LastRenew = time.Now()
+			if req.Hostname != "" {
+				alloc.Hostname = req.Hostname
+			}
 			return tunResp(alloc), nil
 		}
 		// Committed IP conflicts with client ExcludeIPs → re-allocate a safe IP.
@@ -359,7 +371,7 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 		if err := s.dhcp.ReleaseIP(ctx, oldV4, oldV6); err != nil {
 			plog.G(ctx).Warnf("[TunConfig] Failed to release old IP %v: %v", oldV4, err)
 		}
-		newAlloc := &tunAllocation{IPv4: v4, IPv6: v6, Version: time.Now().UnixNano(), LastRenew: time.Now()}
+		newAlloc := &tunAllocation{IPv4: v4, IPv6: v6, Version: time.Now().UnixNano(), LastRenew: time.Now(), Hostname: req.Hostname}
 		s.allocs[req.OwnerID] = newAlloc
 		plog.G(ctx).Infof("[TunConfig] Re-allocated %s/%s for owner %s", v4, v6, req.OwnerID)
 		if err := s.saveAllocs(ctx); err != nil {
@@ -386,6 +398,7 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 		IPv6:      v6,
 		Version:   time.Now().UnixNano(),
 		LastRenew: time.Now(),
+		Hostname:  req.Hostname,
 	}
 	s.allocs[req.OwnerID] = alloc
 
@@ -419,7 +432,7 @@ func tunResp(alloc *tunAllocation) *rpc.TunIPResponse {
 // if it was taken since the proposal), releases the owner's old IP of that family,
 // leaves the other family untouched, persists, and pushes the committed (DryRun=
 // false) full allocation. Caller holds s.mu.
-func (s *TunConfigServer) commitFamilyLocked(ctx context.Context, owner string, isV6 bool, candidate *net.IPNet, excludeIPs []net.IP) (*rpc.TunIPResponse, error) {
+func (s *TunConfigServer) commitFamilyLocked(ctx context.Context, owner string, isV6 bool, candidate *net.IPNet, excludeIPs []net.IP, hostname string) (*rpc.TunIPResponse, error) {
 	cur := s.allocs[owner]
 	var curV4, curV6 *net.IPNet
 	if cur != nil {
@@ -479,7 +492,11 @@ func (s *TunConfigServer) commitFamilyLocked(ctx context.Context, owner string, 
 		_ = s.dhcp.ReleaseIPs(ctx, oldFam.IP)
 	}
 
-	newAlloc := &tunAllocation{IPv4: curV4, IPv6: curV6, Version: time.Now().UnixNano(), LastRenew: time.Now()}
+	hn := hostname
+	if hn == "" && cur != nil {
+		hn = cur.Hostname
+	}
+	newAlloc := &tunAllocation{IPv4: curV4, IPv6: curV6, Version: time.Now().UnixNano(), LastRenew: time.Now(), Hostname: hn}
 	if isV6 {
 		newAlloc.IPv6 = committed
 	} else {

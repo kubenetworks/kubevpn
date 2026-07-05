@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -46,15 +47,15 @@ type ConnectOptions struct {
 	rollbackMu       sync.Mutex
 	rollbackFuncList []func() error
 
-	SshHosts       []net.IP `json:"-"`
-	cleanupMu      sync.Mutex
-	cleanedUp      bool
-	network        *NetworkManager
+	SshHosts  []net.IP `json:"-"`
+	cleanupMu sync.Mutex
+	cleanedUp bool
+	network   *NetworkManager
 
 	// ReservedTunIPs returns TUN IPs held by sibling connections in the same
 	// daemon, excluded from this connection's allocation to avoid cross-cluster
 	// local IP collisions. Set by the daemon (data-plane only); not persisted.
-	ReservedTunIPs func() []net.IP `json:"-"`
+	ReservedTunIPs   func() []net.IP `json:"-"`
 	proxyManager     *ProxyManager
 	configMapStore   *ConfigMapStore
 	configMapStoreMu sync.Mutex
@@ -163,6 +164,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 		return
 	}
 
+	hostname, _ := os.Hostname() // best-effort; empty on failure is fine (omitted from TUN_ALLOCS)
 	c.network = newNetworkManager(NetworkConfig{
 		Clientset:         c.clientset,
 		RESTClient:        c.restclient,
@@ -175,6 +177,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 		Image:             c.Image,
 		Lock:              c.Lock,
 		OwnerID:           c.OwnerID,
+		Hostname:          hostname,
 		GetRunningPodList: c.GetRunningPodList,
 		ReservedTunIPs:    c.ReservedTunIPs,
 	})

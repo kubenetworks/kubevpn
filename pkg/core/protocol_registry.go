@@ -100,10 +100,12 @@ func requestTunIPFromControlPlane() (ipv4, ipv6 string, err error) {
 	}
 	defer conn.Close()
 
+	hostname, _ := os.Hostname() // sidecar pod hostname, for TUN_ALLOCS debugging
 	client := rpc.NewTunConfigServiceClient(conn)
 	resp, err := client.GetTunIP(ctx, &rpc.TunIPRequest{
 		OwnerID:   ownerID,
 		Namespace: namespace,
+		Hostname:  hostname,
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("GetTunIP: %w", err)

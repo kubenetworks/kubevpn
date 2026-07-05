@@ -389,6 +389,7 @@ message TunIPRequest {
   string Namespace = 2;            // workload namespace (for DHCP scoping)
   repeated string ExcludeIPs = 4;  // client local interface IPs to avoid during allocation
   string ConfirmIP = 5;            // client confirms it validated this proposed (dry-run) IP; server commits it
+  string Hostname = 6;             // client machine name, recorded in TUN_ALLOCS for debugging (field 3 is a historical gap, do not reuse)
 }
 
 message TunIPResponse {
