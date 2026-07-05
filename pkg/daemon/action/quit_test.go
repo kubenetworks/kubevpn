@@ -55,6 +55,10 @@ func preserveDBFile(t *testing.T) {
 // daemons must still actually perform the cleanup.
 func TestQuit_StepEmittedOnlyByUserDaemon(t *testing.T) {
 	logFile := &lumberjack.Logger{Filename: filepath.Join(t.TempDir(), "daemon.log")}
+	// lumberjack opens the file lazily on first write and keeps the handle open.
+	// Close it before t.TempDir's RemoveAll cleanup runs, otherwise Windows
+	// refuses to delete the still-open daemon.log and the test fails in cleanup.
+	defer func() { _ = logFile.Close() }()
 
 	run := func(t *testing.T, isSudo bool) (stream string, cleanupRan bool) {
 		preserveDBFile(t)
