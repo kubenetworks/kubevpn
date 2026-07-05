@@ -2,7 +2,6 @@ package cmds
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	pkgerr "github.com/pkg/errors"
@@ -67,7 +66,7 @@ func CmdSync(f cmdutil.Factory) *cobra.Command {
 		`)),
 		Args: cobra.MatchAll(cobra.OnlyValidArgs, cobra.MinimumNArgs(1)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			// startup daemon process and sudo process
 			err = daemon.StartupDaemon(cmd.Context())
 			if err != nil {
@@ -106,7 +105,7 @@ func CmdSync(f cmdutil.Factory) *cobra.Command {
 				Workloads:            args,
 				ExtraRoute:           extraRoute.ToRPC(),
 				OriginKubeconfigPath: util.GetKubeConfigPath(f),
-				SshJump:              sshConf.ToRPC(),
+				SshJump:              handler.SshConfigToRPC(sshConf),
 				TargetContainer:      options.TargetContainer,
 				TargetImage:          options.TargetImage,
 				TransferImage:        transferImage,
@@ -128,14 +127,14 @@ func CmdSync(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.SyncResponse](cmd.Context(), resp)
+			_, err = printProgressStream[rpc.SyncResponse](cmd.Context(), resp, os.Stdout)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil
 				}
 				return err
 			}
-			_, _ = fmt.Fprintln(os.Stdout, config.Slogan)
+			printSlogan(os.Stdout)
 			return nil
 		},
 	}

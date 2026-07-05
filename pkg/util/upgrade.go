@@ -10,10 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pkg/errors"
 	"github.com/schollz/progressbar/v3"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 var (
@@ -21,13 +22,11 @@ var (
 		"https://api.github.com/repos/kubenetworks/kubevpn/releases/latest",
 		"https://api.github.com/repos/wencaiwulue/kubevpn/releases/latest",
 	}
-)
-
-const (
 	downloadAddr = "https://github.com/wencaiwulue/kubevpn/releases/latest"
 )
 
-func GetManifest(httpCli *http.Client, os string, arch string) (version string, url string, err error) {
+// GetManifest fetches the latest GitHub release manifest and returns the version tag and download URL for the given OS/arch.
+func GetManifest(httpCli *http.Client, goos string, arch string) (version string, downloadURL string, err error) {
 	var resp *http.Response
 	var errs []error
 	for _, a := range address {
@@ -38,45 +37,44 @@ func GetManifest(httpCli *http.Client, os string, arch string) (version string, 
 		errs = append(errs, err)
 	}
 	if resp == nil {
-		err = errors.Wrap(utilerrors.NewAggregate(errs), "failed to call github api")
+		err = fmt.Errorf("failed to call github api: %w: %w", utilerrors.NewAggregate(errs), config.ErrUpgradeNetwork)
 		return
 	}
+	defer resp.Body.Close()
 
 	var content []byte
 	if content, err = io.ReadAll(resp.Body); err != nil {
-		err = errors.Wrap(err, "failed to read all response from github api")
+		err = fmt.Errorf("failed to read all response from github api: %w: %w", err, config.ErrUpgradeNetwork)
 		return
 	}
-	var m RootEntity
+	var m githubRelease
 	if err = json.Unmarshal(content, &m); err != nil {
-		err = fmt.Errorf("failed to unmarshal response, err: %v", err)
+		err = fmt.Errorf("failed to unmarshal response: %w: %w", err, config.ErrUpgradeNetwork)
 		return
 	}
 	version = m.TagName
 	for _, asset := range m.Assets {
-		if strings.Contains(asset.Name, arch) && strings.Contains(asset.Name, os) {
-			url = asset.BrowserDownloadUrl
+		if strings.Contains(asset.Name, arch) && strings.Contains(asset.Name, goos) {
+			downloadURL = asset.BrowserDownloadURL
 			return
 		}
 	}
 
 	// if os is not windows and darwin, default is linux
-	if !sets.New[string]("windows", "darwin").Has(strings.ToLower(os)) {
+	if !sets.New[string]("windows", "darwin").Has(strings.ToLower(goos)) {
 		for _, asset := range m.Assets {
 			if strings.Contains(asset.Name, "linux") && strings.Contains(asset.Name, arch) {
-				url = asset.BrowserDownloadUrl
+				downloadURL = asset.BrowserDownloadURL
 				return
 			}
 		}
 	}
 
-	err = fmt.Errorf("%s: try download it from: %s", If(m.Message != "", m.Message, string(content)), downloadAddr)
+	err = fmt.Errorf("%s: try downloading from: %s: %w", If(m.Message != "", m.Message, string(content)), downloadAddr, config.ErrUpgradeUnsupportedPlatform)
 	return
 }
 
-// Download
-// https://api.github.com/repos/kubenetworks/kubevpn/releases
-// https://github.com/kubenetworks/kubevpn/releases/download/v1.1.13/kubevpn-windows-arm64.exe
+// Download fetches the file at the given URL, writing it to filename with a progress bar.
 func Download(client *http.Client, url string, filename string, stdout, stderr io.Writer) error {
 	get, err := client.Get(url)
 	if err != nil {
@@ -87,7 +85,7 @@ func Download(client *http.Client, url string, filename string, stdout, stderr i
 	fmt.Fprintf(stdout, "Length: %d (%0.2fM)\n", get.ContentLength, total)
 
 	var f *os.File
-	f, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+	f, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, config.FileModeExecutable)
 	if err != nil {
 		return err
 	}
@@ -109,11 +107,11 @@ func Download(client *http.Client, url string, filename string, stdout, stderr i
 			BarStart:      "[",
 			BarEnd:        "]",
 		}))
-	buf := make([]byte, 10<<(10*2)) // 10M
-	_, err = io.CopyBuffer(io.MultiWriter(f, bar), get.Body, buf)
+	_, err = io.Copy(io.MultiWriter(f, bar), get.Body)
 	return err
 }
 
+// UnzipKubeVPNIntoFile extracts the kubevpn binary from a zip archive and writes it to filename.
 func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	archive, err := zip.OpenReader(zipFile)
 	if err != nil {
@@ -130,7 +128,7 @@ func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	}
 
 	if fi == nil {
-		return fmt.Errorf("can not found kubevpn")
+		return fmt.Errorf("cannot find kubevpn")
 	}
 
 	err = os.MkdirAll(filepath.Dir(filename), os.ModePerm)
@@ -156,98 +154,15 @@ func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	return err
 }
 
-type RootEntity struct {
-	Url             string          `json:"url"`
-	AssetsUrl       string          `json:"assets_url"`
-	UploadUrl       string          `json:"upload_url"`
-	HtmlUrl         string          `json:"html_url"`
-	Id              int64           `json:"id"`
-	NodeId          string          `json:"node_id"`
-	TagName         string          `json:"tag_name"`
-	TargetCommitish string          `json:"target_commitish"`
-	Name            string          `json:"name"`
-	Draft           bool            `json:"draft"`
-	Prerelease      bool            `json:"prerelease"`
-	CreatedAt       string          `json:"created_at"`
-	PublishedAt     string          `json:"published_at"`
-	Assets          []AssetsEntity  `json:"assets"`
-	TarballUrl      string          `json:"tarball_url"`
-	ZipballUrl      string          `json:"zipball_url"`
-	Body            string          `json:"body"`
-	Reactions       ReactionsEntity `json:"reactions"`
-
-	// For error msg: {"message":"API rate limit exceeded for 203.208.189.8. (But here's the good news: Authenticated requests get a higher rate limit. Check out the documentation for more details.)","documentation_url":"https://docs.github.com/rest/overview/resources-in-the-rest-api#rate-limiting"}
-	// Normal response not contains this field
-	Message string `json:"message"`
+// githubRelease is the subset of the GitHub releases API response that we use.
+type githubRelease struct {
+	TagName string        `json:"tag_name"`
+	Assets  []githubAsset `json:"assets"`
+	Message string        `json:"message"`
 }
 
-type AuthorEntity struct {
-	Login             string `json:"login"`
-	Id                int64  `json:"id"`
-	NodeId            string `json:"node_id"`
-	AvatarUrl         string `json:"avatar_url"`
-	GravatarId        string `json:"gravatar_id"`
-	Url               string `json:"url"`
-	HtmlUrl           string `json:"html_url"`
-	FollowersUrl      string `json:"followers_url"`
-	FollowingUrl      string `json:"following_url"`
-	GistsUrl          string `json:"gists_url"`
-	StarredUrl        string `json:"starred_url"`
-	SubscriptionsUrl  string `json:"subscriptions_url"`
-	OrganizationsUrl  string `json:"organizations_url"`
-	ReposUrl          string `json:"repos_url"`
-	EventsUrl         string `json:"events_url"`
-	ReceivedEventsUrl string `json:"received_events_url"`
-	Type              string `json:"type"`
-	SiteAdmin         bool   `json:"site_admin"`
-}
-
-type AssetsEntity struct {
-	Url                string         `json:"url"`
-	Id                 int64          `json:"id"`
-	NodeId             string         `json:"node_id"`
-	Name               string         `json:"name"`
-	Label              string         `json:"label"`
-	Uploader           UploaderEntity `json:"uploader"`
-	ContentType        string         `json:"content_type"`
-	State              string         `json:"state"`
-	Size               int64          `json:"size"`
-	DownloadCount      int64          `json:"download_count"`
-	CreatedAt          string         `json:"created_at"`
-	UpdatedAt          string         `json:"updated_at"`
-	BrowserDownloadUrl string         `json:"browser_download_url"`
-}
-
-type UploaderEntity struct {
-	Login             string `json:"login"`
-	Id                int64  `json:"id"`
-	NodeId            string `json:"node_id"`
-	AvatarUrl         string `json:"avatar_url"`
-	GravatarId        string `json:"gravatar_id"`
-	Url               string `json:"url"`
-	HtmlUrl           string `json:"html_url"`
-	FollowersUrl      string `json:"followers_url"`
-	FollowingUrl      string `json:"following_url"`
-	GistsUrl          string `json:"gists_url"`
-	StarredUrl        string `json:"starred_url"`
-	SubscriptionsUrl  string `json:"subscriptions_url"`
-	OrganizationsUrl  string `json:"organizations_url"`
-	ReposUrl          string `json:"repos_url"`
-	EventsUrl         string `json:"events_url"`
-	ReceivedEventsUrl string `json:"received_events_url"`
-	Type              string `json:"type"`
-	SiteAdmin         bool   `json:"site_admin"`
-}
-
-type ReactionsEntity struct {
-	Url        string `json:"url"`
-	TotalCount int64  `json:"total_count"`
-	Normal1    int64  `json:"+1"`
-	Normal11   int64  `json:"-1"`
-	Laugh      int64  `json:"laugh"`
-	Hooray     int64  `json:"hooray"`
-	Confused   int64  `json:"confused"`
-	Heart      int64  `json:"heart"`
-	Rocket     int64  `json:"rocket"`
-	Eyes       int64  `json:"eyes"`
+// githubAsset is a downloadable file attached to a GitHub release.
+type githubAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
 }

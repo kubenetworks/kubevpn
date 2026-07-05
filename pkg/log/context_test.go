@@ -1,8 +1,11 @@
 package log
 
 import (
+	"bytes"
 	"context"
 	"testing"
+
+	log "github.com/sirupsen/logrus"
 )
 
 func TestLog(t *testing.T) {
@@ -11,6 +14,21 @@ func TestLog(t *testing.T) {
 	logger := G(ctx).WithField("tun", "abc").Logger
 	logger.Debug("debug")
 	logger.Warn("warn")
+}
+
+// TestIsDebugEnabled verifies the helper reflects the ctx logger's level, independent of the
+// global config.Debug flag: a Debug-level logger (as the daemon's file logger always is) reports
+// true, an Info-level logger reports false.
+func TestIsDebugEnabled(t *testing.T) {
+	debugCtx := WithLogger(context.Background(), GetLoggerForServer(int32(log.DebugLevel), &bytes.Buffer{}))
+	if !IsDebugEnabled(debugCtx) {
+		t.Fatal("expected IsDebugEnabled to be true for a Debug-level logger")
+	}
+
+	infoCtx := WithLogger(context.Background(), GetLoggerForServer(int32(log.InfoLevel), &bytes.Buffer{}))
+	if IsDebugEnabled(infoCtx) {
+		t.Fatal("expected IsDebugEnabled to be false for an Info-level logger")
+	}
 }
 
 func TestWithFields(t *testing.T) {

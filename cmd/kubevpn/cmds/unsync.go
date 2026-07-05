@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"context"
+	"os"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
@@ -12,7 +13,8 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 func CmdUnsync(f cmdutil.Factory) *cobra.Command {
@@ -40,6 +42,7 @@ func CmdUnsync(f cmdutil.Factory) *cobra.Command {
 			}
 			req := &rpc.UnsyncRequest{
 				Workloads: args,
+				Level:     plog.GetLogLevel(),
 			}
 			resp, err := cli.Unsync(context.Background())
 			if err != nil {
@@ -49,7 +52,7 @@ func CmdUnsync(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.UnsyncResponse](cmd.Context(), resp)
+			_, err = printProgressStream[rpc.UnsyncResponse](cmd.Context(), resp, os.Stdout)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil
@@ -59,5 +62,6 @@ func CmdUnsync(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
+	handler.AddDebugFlag(cmd.Flags())
 	return cmd
 }

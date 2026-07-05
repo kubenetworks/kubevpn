@@ -9,22 +9,30 @@ import (
 )
 
 const (
-	// configmap name
+	// ConfigMapPodTrafficManager is the name of the ConfigMap used by the traffic manager.
 	ConfigMapPodTrafficManager = "kubevpn-traffic-manager"
 
-	// helm app name kubevpn
+	// HelmAppNameKubevpn is the Helm release name for kubevpn.
 	HelmAppNameKubevpn = "kubevpn"
 
-	// default installed namespace
+	// DefaultNamespaceKubevpn is the default namespace where kubevpn is installed.
 	DefaultNamespaceKubevpn = "kubevpn"
 
-	// config map keys
-	KeyDHCP             = "DHCP"
-	KeyDHCP6            = "DHCP6"
-	KeyEnvoy            = "ENVOY_CONFIG"
-	KeyClusterIPv4POOLS = "IPv4_POOLS"
+	// KeyTunIPPool is the ConfigMap key for the TUN IP address pool (dual-stack bitmap).
+	// Replaces the former DHCP + DHCP6 keys.
+	KeyTunIPPool = "TUN_IP_POOL"
+	// KeyEnvoy is the ConfigMap key for the Envoy proxy configuration.
+	KeyEnvoy = "ENVOY_CONFIG"
+	// KeyClusterCIDRs is the ConfigMap key for cluster CIDR cache (IPv4 + IPv6).
+	KeyClusterCIDRs = "CLUSTER_CIDRS"
+	// KeyTunAllocs is the ConfigMap key for TUN IP owner allocations (ownerID → IPs).
+	// It is a server-written crash-recovery journal (saveAllocs) AND the operator's
+	// manual-IP control input: editing an owner's ipv4/ipv6 (keeping the version field,
+	// as `kubectl edit` does) proposes a new TUN IP. The reconcile ignores entries whose
+	// version is older than the in-memory allocation — those are stale reads of the
+	// server's own journal writes, not operator edits — which prevents an oscillation.
+	KeyTunAllocs = "TUN_ALLOCS"
 
-	// secret keys
 	// TLSCertKey is the key for tls certificates in a TLS secret.
 	TLSCertKey = "tls_crt"
 	// TLSPrivateKeyKey is the key for the private key field in a TLS secret.
@@ -32,23 +40,54 @@ const (
 	// TLSServerName for tls config server name
 	TLSServerName = "tls_server_name"
 
-	// container name
-	ContainerSidecarEnvoyProxy   = "envoy-proxy"
-	ContainerSidecarControlPlane = "control-plane"
-	ContainerSidecarWebhook      = "webhook"
-	ContainerSidecarVPN          = "vpn"
-	ContainerSidecarSyncthing    = "syncthing"
+	// ContainerSidecarEnvoy is the container name for the Envoy proxy sidecar.
+	ContainerSidecarEnvoy = "envoy"
+	// ContainerSidecarXDS is the container name for the xDS server sidecar.
+	ContainerSidecarXDS = "xds"
+	// ContainerSidecarDNS is the container name for the DNS forward server sidecar.
+	ContainerSidecarDNS = "dns"
+	// ContainerSidecarVPN is the container name for the VPN sidecar.
+	ContainerSidecarVPN = "vpn"
+	// ContainerSidecarSyncthing is the container name for the Syncthing file-sync sidecar.
+	ContainerSidecarSyncthing = "syncthing"
 
+	// VolumeSyncthing is the volume name for the Syncthing shared directory.
 	VolumeSyncthing = "syncthing"
 
-	// IPv4Pool is used as tun ip
+	// PortNameTCP is the traffic-manager service port name for TCP tunneling.
+	PortNameTCP = "10801-for-tcp"
+	// PortTCP is the traffic-manager TCP tunnel port number.
+	PortTCP = 10801
+	// PortNameEnvoy is the traffic-manager service port name for the Envoy control plane.
+	PortNameEnvoy = "9002-for-envoy"
+	// PortXDS is the xDS gRPC port number.
+	PortXDS = 9002
+	// PortNameDNS is the traffic-manager service port name for DNS resolution.
+	PortNameDNS = "53-for-dns"
+	// PortDNS is the traffic-manager DNS service port number.
+	PortDNS = 53
+	// PortUDP is the traffic-manager UDP tunnel port number.
+	PortUDP = 10802
+	// PortSSH is the traffic-manager SSH tunnel port number (service/fargate mode and reverse tunnel).
+	PortSSH = 2222
+	// PortUDPBridge is the sidecar reverse-UDP bridge port (fargate/service mode),
+	// carrying UDP inbound back to the developer since the SSH reverse tunnel is TCP-only.
+	PortUDPBridge = 2223
+	// PortEnvoyInbound is the Envoy inbound capture port that mesh-mode iptables DNAT redirects to.
+	PortEnvoyInbound = 15006
+
+	// IPv4Pool is the TUN IP allocation range. Its prefix bounds the allocator
+	// (InRange); individual leases carry a host mask (/32), not this pool prefix.
 	// 198.18.0.0/16 network is part of the 198.18.0.0/15 (reserved for benchmarking).
 	// https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml
 	// so we split it into 2 parts: 198.18.0.0/15 --> [198.18.0.0/16, 198.19.0.0/16]
 	IPv4Pool = "198.18.0.0/16"
+	// IPv6Pool is the IPv6 TUN IP allocation range. As with IPv4Pool, its prefix
+	// bounds the allocator while individual leases carry a host mask (/128).
 	// 2001:2::/64 network is part of the 2001:2::/48 (reserved for benchmarking)
 	// https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml
 	IPv6Pool = "2001:2::/64"
+	// DockerIPv4Pool is the IPv4 CIDR used for kubevpn Docker bridge networks.
 	/*
 		reason：docker use 172.17.0.0/16 network conflict with k8s service kubernetes
 		➜  ~ kubectl get service kubernetes
@@ -65,59 +104,74 @@ const (
 	*/
 	DockerIPv4Pool = "198.19.0.1/16"
 
+	// DefaultNetDir is the default directory for CNI network configuration files.
 	DefaultNetDir = "/etc/cni/net.d"
 
+	// Proc is the path to the Linux procfs mount.
 	Proc = "/proc"
 
+	// CniNetName is the volume name for the CNI network config directory.
 	CniNetName = "cni-net-dir-kubevpn"
 
-	// env name
+	// EnvInboundPodTunIPv4 is the env var name for the pod's TUN device IPv4 address.
 	EnvInboundPodTunIPv4 = "TunIPv4"
+	// EnvInboundPodTunIPv6 is the env var name for the pod's TUN device IPv6 address.
 	EnvInboundPodTunIPv6 = "TunIPv6"
-	EnvPodName           = "POD_NAME"
-	EnvPodNamespace      = "POD_NAMESPACE"
+	// EnvPodName is the env var name populated with the Kubernetes pod name.
+	EnvPodName = "POD_NAME"
+	// EnvPodNamespace is the env var name populated with the Kubernetes pod namespace.
+	EnvPodNamespace = "POD_NAMESPACE"
 
-	// header name
-	HeaderIPv4 = "IPv4"
-	HeaderIPv6 = "IPv6"
-
+	// KUBECONFIG is the key name used when storing kubeconfig data.
 	KUBECONFIG = "kubeconfig"
 
-	// labels
+	// ManageBy is the label key indicating the resource is managed by kubevpn.
 	ManageBy = konfig.ManagedbyLabelKey
 
-	// pprof port
-	PProfPort     = 32345
+	// PProfPort is the pprof HTTP server port for the user daemon.
+	PProfPort = 32345
+	// SudoPProfPort is the pprof HTTP server port for the root daemon.
 	SudoPProfPort = 33345
-	PProfDir      = "pprof"
+	// PProfDir is the directory name for storing pprof profiles.
+	PProfDir = "pprof"
 
+	// EnvSSHJump is the env var set when connected via an SSH jump host.
 	EnvSSHJump = "SSH_JUMP_BY_KUBEVPN"
 
-	// hosts entry keyword
-	HostsKeyword       = "Added by KubeVPN"
+	// HostsKeyword is the marker comment appended to /etc/hosts entries managed by kubevpn.
+	HostsKeyword = "Added by KubeVPN"
+	// HostsDeviceKeyword is the per-device marker comment template for /etc/hosts entries.
 	HostsDeviceKeyword = "# For dev %s " + HostsKeyword
 )
 
 var (
-	// Image inject --ldflags -X
-	Image     = "ghcr.io/kubenetworks/kubevpn:latest"
-	Version   = "latest"
+	// Image is the container image used for injected sidecars, set via -ldflags.
+	Image = "ghcr.io/kubenetworks/kubevpn:latest"
+	// Version is the build version string, set via -ldflags.
+	Version = "latest"
+	// GitCommit is the git commit SHA at build time, set via -ldflags.
 	GitCommit = ""
 
-	// GitHubOAuthToken --ldflags -X
+	// GitHubOAuthToken is the GitHub OAuth token for release checks, set via -ldflags.
 	GitHubOAuthToken = ""
 
+	// OriginImage is the unmodified container image tag derived from Version.
 	OriginImage = "ghcr.io/kubenetworks/kubevpn:" + Version
 )
 
 var (
-	CIDR      *net.IPNet
-	CIDR6     *net.IPNet
-	RouterIP  net.IP
+	// CIDR is the parsed IPv4 network used for TUN address allocation.
+	CIDR *net.IPNet
+	// CIDR6 is the parsed IPv6 network used for TUN address allocation.
+	CIDR6 *net.IPNet
+	// RouterIP is the gateway IPv4 address within CIDR.
+	RouterIP net.IP
+	// RouterIP6 is the gateway IPv6 address within CIDR6.
 	RouterIP6 net.IP
 
-	// for creating docker network
-	DockerCIDR     *net.IPNet
+	// DockerCIDR is the IPv4 network used for the kubevpn Docker bridge.
+	DockerCIDR *net.IPNet
+	// DockerRouterIP is the gateway IPv4 address within DockerCIDR.
 	DockerRouterIP net.IP
 )
 
@@ -137,25 +191,36 @@ func init() {
 	}
 }
 
+// Debug enables verbose debug logging when true.
 var Debug bool
 
 var (
-	SmallBufferSize  = 8 * 1024  // 8KB small buffer
-	MediumBufferSize = 32 * 1024 // 32KB medium buffer
-	LargeBufferSize  = 64 * 1024 // 64KB large buffer
+	// LargeBufferSize is the byte size for large I/O buffers (64KB).
+	LargeBufferSize = 64 * 1024
 )
 
 var (
-	KeepAliveTime    = 60 * time.Second
-	DialTimeout      = 15 * time.Second
-	HandshakeTimeout = 5 * time.Second
-	ConnectTimeout   = 5 * time.Second
-	ReadTimeout      = 10 * time.Second
-	WriteTimeout     = 10 * time.Second
+	KeepAliveTime  = 60 * time.Second
+	DialTimeout    = 15 * time.Second
+	ConnectTimeout = 5 * time.Second
+
+	DNSRouteRefreshInterval  = 15 * time.Second
+	DNSRouteDebounceInterval = 3 * time.Second
+
+	UDPSessionTimeout = 120 * time.Second
+	UDPRelayTimeout   = 60 * time.Second
+
+	SlotReconnectBackoff = 2 * time.Second
+	DaemonPollInterval   = 200 * time.Millisecond
+
+	// RolloutStatusTimeout bounds how long RolloutStatus waits for a workload
+	// rollout to finish. Without it, a sidecar that never becomes ready makes
+	// the operation (e.g. `kubevpn proxy`) hang indefinitely.
+	RolloutStatusTimeout = 2 * time.Minute
 )
 
 var (
-	// DefaultMTU
+	// DefaultMTU is the TUN device MTU, calculated to fit within a 1500-byte Ethernet frame after IP/TCP/TLS overhead.
 	/**
 	  +--------------------------------------------------------------------+
 	  |                     Original IP Packet from TUN                    |
@@ -199,16 +264,7 @@ var (
 )
 
 var (
-	SPool = &sync.Pool{
-		New: func() interface{} {
-			return make([]byte, SmallBufferSize)
-		},
-	}
-	MPool = sync.Pool{
-		New: func() any {
-			return make([]byte, MediumBufferSize)
-		},
-	}
+	// LPool is a sync.Pool of LargeBufferSize byte slices for reuse in I/O paths.
 	LPool = sync.Pool{
 		New: func() any {
 			return make([]byte, LargeBufferSize)
@@ -216,4 +272,5 @@ var (
 	}
 )
 
-const Slogan = "Now you can access resources in the kubernetes cluster !"
+// Slogan is the success message printed after a connection is established.
+const Slogan = "Connected. You can now access the Kubernetes cluster."

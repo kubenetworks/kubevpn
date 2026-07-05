@@ -3,6 +3,7 @@ package localproxy
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net"
 	"strings"
 
@@ -13,6 +14,7 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+// ClusterConnector implements Connector by resolving cluster service/pod addresses and port-forwarding to them.
 type ClusterConnector struct {
 	Client           ClusterAPI
 	Forwarder        PodDialer
@@ -26,6 +28,7 @@ type resolvedTarget struct {
 	PodPort   int32
 }
 
+// ClusterAPI abstracts Kubernetes service and endpoint lookups for testability.
 type ClusterAPI interface {
 	GetService(ctx context.Context, namespace, name string) (*corev1.Service, error)
 	GetEndpoints(ctx context.Context, namespace, name string) (*corev1.Endpoints, error)
@@ -33,6 +36,7 @@ type ClusterAPI interface {
 	ListPodsByIP(ctx context.Context, ip string) (*corev1.PodList, error)
 }
 
+// PodDialer opens a network connection to a specific pod and port.
 type PodDialer interface {
 	DialPod(ctx context.Context, namespace, podName string, port int32) (net.Conn, error)
 }
@@ -41,6 +45,7 @@ type kubeClusterAPI struct {
 	clientset kubernetes.Interface
 }
 
+// NewClusterAPI creates a ClusterAPI backed by a real Kubernetes clientset.
 func NewClusterAPI(config *rest.Config) (ClusterAPI, *kubernetes.Clientset, error) {
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
@@ -67,6 +72,7 @@ func (k *kubeClusterAPI) ListPodsByIP(ctx context.Context, ip string) (*corev1.P
 	})
 }
 
+// Connect resolves host to a backing pod and dials it via the configured PodDialer.
 func (c *ClusterConnector) Connect(ctx context.Context, host string, port int) (net.Conn, error) {
 	target, err := c.resolveTarget(ctx, host, port)
 	if err != nil {
@@ -137,31 +143,45 @@ func (c *ClusterConnector) resolveServiceToPod(ctx context.Context, svc *corev1.
 		return nil, err
 	}
 	var endpointPort *corev1.EndpointPort
-	var podName, podNS, podIP string
+	var candidates []corev1.EndpointAddress
 	for _, subset := range endpoints.Subsets {
+		var matchedPort *corev1.EndpointPort
 		for i := range subset.Ports {
 			portRef := &subset.Ports[i]
 			if endpointPortMatches(servicePort, portRef, port) {
-				endpointPort = portRef
+				matchedPort = portRef
 				break
 			}
 		}
-		if endpointPort == nil && len(subset.Ports) == 1 {
-			endpointPort = &subset.Ports[0]
+		if matchedPort == nil && len(subset.Ports) == 1 {
+			matchedPort = &subset.Ports[0]
 		}
-		if endpointPort == nil {
+		if matchedPort == nil {
 			continue
 		}
-		for _, addr := range subset.Addresses {
-			podIP = addr.IP
+		if endpointPort == nil {
+			endpointPort = matchedPort
+		}
+		candidates = append(candidates, subset.Addresses...)
+	}
+
+	var podName, podNS, podIP string
+	if len(candidates) > 0 {
+		// Shuffle to distribute traffic across replicas instead of always picking the first.
+		rand.Shuffle(len(candidates), func(i, j int) {
+			candidates[i], candidates[j] = candidates[j], candidates[i]
+		})
+		// Prefer addresses with an explicit Pod reference; fall back to any address.
+		for _, addr := range candidates {
 			if addr.TargetRef != nil && addr.TargetRef.Kind == "Pod" {
 				podName = addr.TargetRef.Name
 				podNS = addr.TargetRef.Namespace
+				podIP = addr.IP
 				break
 			}
 		}
-		if podName != "" || podIP != "" {
-			break
+		if podName == "" {
+			podIP = candidates[0].IP
 		}
 	}
 	if endpointPort == nil {
@@ -240,6 +260,7 @@ func parseServiceHost(host, defaultNamespace string) (service string, namespace 
 	}
 }
 
+// FirstNonLoopbackIPv4 returns the first non-loopback IPv4 address found on the host.
 func FirstNonLoopbackIPv4() string {
 	ifaces, err := net.Interfaces()
 	if err != nil {

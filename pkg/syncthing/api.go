@@ -15,24 +15,31 @@ import (
 	config2 "github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+// Client is an HTTP client for the syncthing REST API.
 type Client struct {
 	GUIAddress string
 	client     *http.Client
 }
 
+// NewClient creates a syncthing API client targeting the given GUI address.
+// guiClientTimeout bounds requests to the syncthing GUI/REST API.
+const guiClientTimeout = 5 * time.Second
+
 func NewClient(addr string) *Client {
 	c := &Client{
 		GUIAddress: addr,
-		client:     &http.Client{Timeout: 5 * time.Second},
+		client:     &http.Client{Timeout: guiClientTimeout},
 	}
 	return c
 }
 
 func (c *Client) GetConfig(ctx context.Context) (*config.Configuration, error) {
 	buf, err := c.Call(ctx, "rest/config", "GET", nil)
-	var configuration config.Configuration
-	err = json.Unmarshal(buf, &configuration)
 	if err != nil {
+		return nil, err
+	}
+	var configuration config.Configuration
+	if err = json.Unmarshal(buf, &configuration); err != nil {
 		return nil, err
 	}
 	return &configuration, nil
@@ -48,7 +55,7 @@ func (c *Client) PutConfig(ctx context.Context, conf *config.Configuration) erro
 }
 
 func (c *Client) Call(ctx context.Context, uri, method string, body []byte) ([]byte, error) {
-	var url = path.Join(c.GUIAddress, uri)
+	url := path.Join(c.GUIAddress, uri)
 	req, err := http.NewRequest(method, fmt.Sprintf("http://%s", url), bytes.NewBuffer(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize syncthing API request: %w", err)
@@ -61,7 +68,8 @@ func (c *Client) Call(ctx context.Context, uri, method string, body []byte) ([]b
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("unexpected response from syncthing [%s | %d]: %s", req.URL.String(), resp.StatusCode, string(body))
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected response from syncthing [%s | %d]: %s", req.URL.String(), resp.StatusCode, string(respBody))
 	}
 	body, err = io.ReadAll(resp.Body)
 	if err != nil {

@@ -15,8 +15,8 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
@@ -40,7 +40,7 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 		kubevpn disconnect --all
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			err = daemon.StartupDaemon(cmd.Context())
 			return err
 		},
@@ -60,6 +60,7 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 			req := &rpc.DisconnectRequest{
 				ConnectionID: &id,
 				All:          pointer.Bool(all),
+				Level:        plog.GetLogLevel(),
 			}
 			resp, err := cli.Disconnect(context.Background())
 			if err != nil {
@@ -69,7 +70,7 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.DisconnectResponse](cmd.Context(), resp)
+			_, err = printProgressStream[rpc.DisconnectResponse](cmd.Context(), resp, os.Stdout)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil
@@ -78,15 +79,16 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 			}
 			if all {
 				_ = stopAllManagedProxies()
-				_, _ = fmt.Fprintln(os.Stdout, "Stopped all managed local SOCKS proxies")
+				printSuccess(os.Stdout, "Stopped local SOCKS proxies")
 			} else if id != "" {
 				_ = stopManagedProxy(id)
 				printManagedSocksStopped(os.Stdout, id)
 			}
-			_, _ = fmt.Fprint(os.Stdout, "Disconnect completed")
+			printSuccess(os.Stdout, "Disconnect completed")
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", all, "Disconnect all cluster, disconnect from all cluster network")
+	handler.AddDebugFlag(cmd.Flags())
 	return cmd
 }

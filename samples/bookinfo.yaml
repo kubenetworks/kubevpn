@@ -121,6 +121,12 @@ spec:
   ports:
     - port: 9080
       name: http
+    # UDP port for kubevpn proxy UDP e2e (fargate routes inbound through the
+    # Service); a distinct number from 9080 to avoid the fargate port-map clash.
+    - port: 9081
+      name: udp
+      protocol: UDP
+      targetPort: 9081
   selector:
     app: reviews
 ---
@@ -157,6 +163,11 @@ spec:
               value: "/tmp/logs"
           ports:
             - containerPort: 9080
+            # UDP port for kubevpn proxy UDP e2e (testUDP); the app does not
+            # listen on it — proxying forwards UDP to the developer's machine.
+            # Distinct from 9080 so fargate's per-number port map does not clash.
+            - containerPort: 9081
+              protocol: UDP
           volumeMounts:
             - name: tmp
               mountPath: /tmp

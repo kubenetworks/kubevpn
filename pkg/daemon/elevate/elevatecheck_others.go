@@ -12,6 +12,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// RunWithElevated re-executes the current process with elevated (sudo/admin) privileges.
 func RunWithElevated() {
 	cmd := exec.Command("sudo", append([]string{"--preserve-env=HOME"}, os.Args...)...)
 	plog.G(context.Background()).Debug(cmd.Args)
@@ -22,8 +23,9 @@ func RunWithElevated() {
 	// while send single CTRL+C, command will quit immediately, but output will cut off and print util quit final
 	// so, mute single CTRL+C, let inner command handle single only
 	go func() {
-		signals := make(chan os.Signal)
-		signal.Notify(signals, os.Interrupt, os.Kill, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGSTOP)
+		signals := make(chan os.Signal, 1)
+		// SIGKILL and SIGSTOP cannot be caught by signal.Notify, so only catchable termination signals are muted here.
+		signal.Notify(signals, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 		<-signals
 	}()
 	err := cmd.Run()
@@ -32,19 +34,21 @@ func RunWithElevated() {
 	}
 }
 
+// IsAdmin reports whether the current process is running with root/administrator privileges.
 func IsAdmin() bool {
 	/*_, ok := os.LookupEnv(config.EnvStartSudoKubeVPNByKubeVPN)
 	if os.Getuid() == 0 {
 		if !ok {
 			strings := []string{
-				"Warn: Use sudo to execute command kubevpn can not use user env KUBECONFIG.",
+				"Warn: Use sudo to execute command kubevpn cannot use user env KUBECONFIG.",
 				"Because of sudo user env and user env are different.",
 				"Current env KUBECONFIG value: " + os.Getenv(clientcmd.RecommendedConfigPathEnvVar),
 			}
 			PrintLine(nil, strings...)
+			const countdownTick = 1 * time.Second
 			for i := 0; i >= 0; i-- {
 				_, _ = fmt.Printf("\r %ds", i)
-				time.Sleep(time.Second * 1)
+				time.Sleep(countdownTick)
 			}
 			_, _ = fmt.Printf("\r")
 		}

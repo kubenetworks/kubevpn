@@ -2,10 +2,7 @@ package action
 
 import (
 	"context"
-	"io"
 	"os"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
@@ -14,26 +11,47 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// Quit handles the Quit RPC, cleaning up all connections and stopping the daemon.
 func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 	defer svr.CleanupConfig()
 
-	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newQuitWarp(resp), svr.LogFile))
+	var sendFunc func(string) error
+	var level int32
+	if resp != nil {
+		// QuitRequest carries the CLI's --debug intent; read it so the stream level matches
+		// (newServerStreamLogger normalizes a zero/absent level to Info).
+		if req, recvErr := resp.Recv(); recvErr == nil {
+			level = req.GetLevel()
+		}
+		sendFunc = func(msg string) error { return resp.Send(&rpc.QuitResponse{Message: msg}) }
+	} else {
+		sendFunc = func(string) error { return nil }
+	}
+	logger := newServerStreamLogger(svr.LogFile, level, sendFunc)
 	ctx := context.Background()
 	if resp != nil {
 		ctx = resp.Context()
 	}
 	ctx = plog.WithLogger(ctx, logger)
 
+	svr.connMu.Lock()
 	connects := handler.Connects(svr.connections)
-	for _, conn := range connects.Sort() {
-		if conn != nil {
-			if conn.Sync != nil {
-				_ = conn.Sync.Cleanup(ctx)
-			}
-			conn.Cleanup(ctx)
-		}
-	}
 	svr.connections = nil
+	svr.currentConnectionID = ""
+	svr.connMu.Unlock()
+	sorted := connects.Sort()
+	// Emit the progress step only from the user daemon (the orchestrator). The sudo
+	// daemon cleans up its data-plane connections silently so the CLI renders
+	// "Cleaned up N connections" exactly once — see Disconnect for the same guard.
+	if !svr.IsSudo && len(sorted) > 0 {
+		plog.StepStart(ctx, "Cleaning up connections")
+	}
+	for _, conn := range sorted {
+		cleanupConnection(ctx, conn)
+	}
+	if !svr.IsSudo && len(sorted) > 0 {
+		plog.StepDone(ctx, "Cleaned up %d connections", len(sorted))
+	}
 
 	if svr.IsSudo {
 		_ = dns.CleanupHosts()
@@ -48,22 +66,4 @@ func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 
 	_ = util.CleanupTempKubeConfigFile()
 	return nil
-}
-
-type quitWarp struct {
-	server rpc.Daemon_QuitServer
-}
-
-func (r *quitWarp) Write(p []byte) (n int, err error) {
-	if r.server == nil {
-		return len(p), nil
-	}
-	_ = r.server.Send(&rpc.QuitResponse{
-		Message: string(p),
-	})
-	return len(p), nil
-}
-
-func newQuitWarp(server rpc.Daemon_QuitServer) io.Writer {
-	return &quitWarp{server: server}
 }

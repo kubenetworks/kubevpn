@@ -3,6 +3,7 @@ package dhcp
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net"
 
@@ -11,23 +12,55 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
+	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-type Manager struct {
-	clientset    *kubernetes.Clientset
-	cidr         *net.IPNet
-	cidr6        *net.IPNet
-	namespace    string
-	connectionID string
+// tunIPPool is the YAML structure stored in the TUN_IP_POOL ConfigMap key.
+type tunIPPool struct {
+	IPv4 poolEntry `yaml:"ipv4" json:"ipv4"`
+	IPv6 poolEntry `yaml:"ipv6" json:"ipv6"`
 }
 
-func NewDHCPManager(clientset *kubernetes.Clientset, namespace string) *Manager {
+type poolEntry struct {
+	CIDR   string `yaml:"cidr" json:"cidr"`
+	Bitmap string `yaml:"bitmap" json:"bitmap"`
+}
+
+func parseTunIPPool(data string) (*tunIPPool, error) {
+	if data == "" {
+		return &tunIPPool{}, nil
+	}
+	var pool tunIPPool
+	if err := yaml.Unmarshal([]byte(data), &pool); err != nil {
+		return nil, err
+	}
+	return &pool, nil
+}
+
+func marshalTunIPPool(pool *tunIPPool) (string, error) {
+	data, err := yaml.Marshal(pool)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// Manager manages DHCP IP allocation and release via a Kubernetes ConfigMap.
+type Manager struct {
+	clientset kubernetes.Interface
+	cidr      *net.IPNet
+	cidr6     *net.IPNet
+	namespace string
+}
+
+// NewDHCPManager creates a Manager for the given namespace using the default CIDRs.
+func NewDHCPManager(clientset kubernetes.Interface, namespace string) *Manager {
 	return &Manager{
 		clientset: clientset,
 		namespace: namespace,
@@ -36,77 +69,147 @@ func NewDHCPManager(clientset *kubernetes.Clientset, namespace string) *Manager 
 	}
 }
 
-// InitDHCP
-// TODO optimize dhcp, using mac address, ipPair and deadline as unit
+// InitDHCP ensures the DHCP ConfigMap exists.
 func (m *Manager) InitDHCP(ctx context.Context) error {
-	cm, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to get configmap %s, err: %v", config.ConfigMapPodTrafficManager, err)
-	}
-
+	_, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err == nil {
-		m.connectionID, err = util.GetConnectionID(ctx, m.clientset.CoreV1().Namespaces(), m.namespace)
-		return err
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get configmap %s: %w", config.ConfigMapPodTrafficManager, err)
 	}
 
-	cm = &v1.ConfigMap{
+	cm := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
 			Namespace: m.namespace,
 			Labels:    map[string]string{},
 		},
 		Data: map[string]string{
-			config.KeyEnvoy:            "",
-			config.KeyDHCP:             "",
-			config.KeyDHCP6:            "",
-			config.KeyClusterIPv4POOLS: "",
+			config.KeyEnvoy:        "",
+			config.KeyTunIPPool:    "",
+			config.KeyClusterCIDRs: "",
+			config.KeyTunAllocs:    "",
 		},
 	}
-	cm, err = m.clientset.CoreV1().ConfigMaps(m.namespace).Create(ctx, cm, metav1.CreateOptions{})
+	_, err = m.clientset.CoreV1().ConfigMaps(m.namespace).Create(ctx, cm, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to create configmap: %v", err)
+		return fmt.Errorf("failed to create configmap: %w", err)
 	}
-	m.connectionID, err = util.GetConnectionID(ctx, m.clientset.CoreV1().Namespaces(), m.namespace)
-	return err
+	return nil
 }
 
+// RentIP allocates the next available IPv4 and IPv6 addresses from the DHCP pool.
 func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
-	addrs, _ := net.InterfaceAddrs()
-	var isAlreadyExistedFunc = func(ip net.IP) bool {
-		for _, addr := range addrs {
-			if addr == nil {
-				continue
+	return m.rentIP(ctx, nil, nil, nil)
+}
+
+// RentIPExcluding allocates the next available IPv4 and IPv6 addresses,
+// skipping any IP that matches a local interface address or appears in excludeIPs.
+func (m *Manager) RentIPExcluding(ctx context.Context, excludeIPs []net.IP) (*net.IPNet, *net.IPNet, error) {
+	return m.rentIP(ctx, nil, nil, excludeIPs)
+}
+
+// RentIPPreferring tries to allocate the given preferred IPv4/IPv6 first, so a
+// reconnecting client reclaims its previous IP. It falls back to the next
+// available address when a preferred IP is unavailable (already allocated, out
+// of range, matches a local interface, or is in excludeIPs).
+func (m *Manager) RentIPPreferring(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs []net.IP) (*net.IPNet, *net.IPNet, error) {
+	return m.rentIP(ctx, prefV4, prefV6, excludeIPs)
+}
+
+// InRange reports whether ip falls within the managed IPv4 or IPv6 CIDR range.
+func (m *Manager) InRange(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if ip.To4() != nil {
+		return m.cidr != nil && m.cidr.Contains(ip)
+	}
+	return m.cidr6 != nil && m.cidr6.Contains(ip)
+}
+
+// RentSpecificIP allocates exactly the given IPv4/IPv6 addresses, failing if any
+// is unavailable (already allocated or out of range). Unlike RentIPPreferring it
+// does NOT fall back to another address — used when an operator pins a specific
+// TUN IP (via TUN_ALLOCS) and the caller wants the exact IP or a hard error so it
+// can decide whether to reclaim it from the current holder. A nil v4 or v6 skips
+// that family. The write is atomic: if either family fails, nothing is allocated.
+func (m *Manager) RentSpecificIP(ctx context.Context, v4, v6 net.IP) error {
+	plog.G(ctx).Infof("Renting specific IP: v4=%v v6=%v", v4, v6)
+	return m.retryUpdate(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
+		if v4 != nil {
+			if err := ipv4.Allocate(v4); err != nil {
+				return fmt.Errorf("cannot allocate IPv4 %s: %w", v4, err)
 			}
-			if addrIP, ok := addr.(*net.IPNet); ok {
-				if addrIP.IP.Equal(ip) {
-					return true
-				}
+		}
+		if v6 != nil {
+			if err := ipv6.Allocate(v6); err != nil {
+				return fmt.Errorf("cannot allocate IPv6 %s: %w", v6, err)
+			}
+		}
+		return nil
+	})
+}
+
+// makeShouldSkip returns a predicate reporting whether an IP must be skipped
+// because it matches a local interface address or appears in excludeIPs.
+func makeShouldSkip(excludeIPs []net.IP) func(net.IP) bool {
+	addrs, _ := net.InterfaceAddrs()
+	return func(ip net.IP) bool {
+		for _, addr := range addrs {
+			if addrIP, ok := addr.(*net.IPNet); ok && addrIP.IP.Equal(ip) {
+				return true
+			}
+		}
+		for _, excluded := range excludeIPs {
+			if excluded.Equal(ip) {
+				return true
 			}
 		}
 		return false
 	}
+}
+
+// allocateOne allocates one address from r: the preferred IP if given and
+// usable, otherwise the next available one. IPs skipped along the way are
+// appended to useless for later release.
+func allocateOne(r *ipallocator.Range, preferred net.IP, shouldSkip func(net.IP) bool, useless *[]net.IP) (net.IP, error) {
+	if preferred != nil && !shouldSkip(preferred) {
+		if err := r.Allocate(preferred); err == nil {
+			return preferred, nil
+		}
+		// preferred unavailable (already allocated / out of range) → fall back
+	}
+	for {
+		ip, err := r.AllocateNext()
+		if err != nil {
+			return nil, fmt.Errorf("allocate next IP: %w: %w", err, config.ErrDHCPExhausted)
+		}
+		if !shouldSkip(ip) {
+			return ip, nil
+		}
+		*useless = append(*useless, ip)
+	}
+}
+
+func (m *Manager) rentIP(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs []net.IP) (*net.IPNet, *net.IPNet, error) {
+	plog.G(ctx).Debugf("Renting IP from DHCP in namespace %s", m.namespace)
+	shouldSkip := makeShouldSkip(excludeIPs)
 	var uselessIPs []net.IP
 	var v4, v6 net.IP
-	err := m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
-		for {
-			if v4, err = ipv4.AllocateNext(); err != nil {
+	// Not folded into retryUpdate: uselessIPs must be reset once per retry
+	// attempt (before updateDHCPConfigMap runs), so the reset stays in the outer
+	// retry closure rather than inside the mutate func.
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		uselessIPs = nil
+		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
+			if v4, err = allocateOne(ipv4, prefV4, shouldSkip, &uselessIPs); err != nil {
 				return err
 			}
-			if !isAlreadyExistedFunc(v4) {
-				break
-			}
-			uselessIPs = append(uselessIPs, v4)
-		}
-		for {
-			if v6, err = ipv6.AllocateNext(); err != nil {
-				return err
-			}
-			if !isAlreadyExistedFunc(v6) {
-				break
-			}
-			uselessIPs = append(uselessIPs, v6)
-		}
-		return
+			v6, err = allocateOne(ipv6, prefV6, shouldSkip, &uselessIPs)
+			return err
+		})
 	})
 	if len(uselessIPs) != 0 {
 		if er := m.releaseIP(ctx, uselessIPs...); er != nil {
@@ -117,82 +220,105 @@ func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
 		plog.G(ctx).Errorf("Failed to rent IP from DHCP server: %v", err)
 		return nil, nil, err
 	}
-	return &net.IPNet{IP: v4, Mask: m.cidr.Mask}, &net.IPNet{IP: v6, Mask: m.cidr6.Mask}, nil
+	// Stamp a host mask (/32, /128), not the pool mask. The pool (m.cidr/m.cidr6)
+	// stays the allocation range for InRange/the allocator; a lease only identifies
+	// one host. The client forces a host mask on its TUN device anyway, and the
+	// sidecar gets pool reachability from its explicit route=CIDR4 — so no consumer
+	// needs the pool prefix on the lease.
+	v4Net := &net.IPNet{IP: v4, Mask: net.CIDRMask(32, 32)}
+	v6Net := &net.IPNet{IP: v6, Mask: net.CIDRMask(128, 128)}
+	plog.G(ctx).Infof("Rented IP: v4=%s v6=%s", v4Net, v6Net)
+	return v4Net, v6Net, nil
 }
 
+// ReleaseIP returns the given IPv4 and IPv6 addresses back to the DHCP pool.
 func (m *Manager) ReleaseIP(ctx context.Context, v4, v6 net.IP) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
-			if err := ipv4.Release(v4); err != nil {
-				return err
-			}
-			if err := ipv6.Release(v6); err != nil {
-				return err
-			}
-			return nil
-		})
+	plog.G(ctx).Infof("Releasing IP: v4=%v v6=%v", v4, v6)
+	return m.retryUpdate(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
+		if err := ipv4.Release(v4); err != nil {
+			return err
+		}
+		if err := ipv6.Release(v6); err != nil {
+			return err
+		}
+		return nil
 	})
+}
+
+// ReleaseIPs returns the given IPs (any mix of IPv4/IPv6) back to the pool,
+// auto-detecting the address family of each. Used to reclaim orphaned bitmap
+// bits that have no owning lease.
+func (m *Manager) ReleaseIPs(ctx context.Context, ips ...net.IP) error {
+	return m.releaseIP(ctx, ips...)
 }
 
 func (m *Manager) releaseIP(ctx context.Context, ips ...net.IP) error {
 	if len(ips) == 0 {
 		return nil
 	}
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
-			for _, ip := range ips {
-				var err error
-				if ip.To4() != nil {
-					err = ipv4.Release(ip)
-				} else {
-					err = ipv6.Release(ip)
-				}
-				if err != nil {
-					return err
-				}
+	return m.retryUpdate(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
+		for _, ip := range ips {
+			var err error
+			if ip.To4() != nil {
+				err = ipv4.Release(ip)
+			} else {
+				err = ipv6.Release(ip)
 			}
-			return nil
-		})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// retryUpdate runs f against the DHCP ConfigMap under RetryOnConflict.
+func (m *Manager) retryUpdate(ctx context.Context, f func(ipv4, ipv6 *ipallocator.Range) error) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		return m.updateDHCPConfigMap(ctx, f)
 	})
 }
 
 func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error) error {
 	cm, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to get configmap DHCP server, err: %v", err)
+		return fmt.Errorf("failed to get configmap DHCP server: %w", err)
 	}
 	if cm.Data == nil {
 		return fmt.Errorf("configmap is empty")
 	}
-	var dhcp *ipallocator.Range
-	dhcp, err = ipallocator.NewAllocatorCIDRRange(m.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
+
+	pool, err := parseTunIPPool(cm.Data[config.KeyTunIPPool])
+	if err != nil {
+		return fmt.Errorf("failed to parse TUN_IP_POOL: %w", err)
+	}
+
+	dhcp, err := ipallocator.NewAllocatorCIDRRange(m.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
 		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
 	})
 	if err != nil {
 		return err
 	}
-
-	if str := cm.Data[config.KeyDHCP]; str != "" {
-		var b []byte
-		if b, err = base64.StdEncoding.DecodeString(str); err != nil {
-			return err
+	if pool.IPv4.Bitmap != "" {
+		b, decErr := base64.StdEncoding.DecodeString(pool.IPv4.Bitmap)
+		if decErr != nil {
+			return decErr
 		}
 		if err = dhcp.Restore(m.cidr, b); err != nil {
 			return err
 		}
 	}
 
-	var dhcp6 *ipallocator.Range
-	dhcp6, err = ipallocator.NewAllocatorCIDRRange(m.cidr6, func(max int, rangeSpec string) (allocator.Interface, error) {
+	dhcp6, err := ipallocator.NewAllocatorCIDRRange(m.cidr6, func(max int, rangeSpec string) (allocator.Interface, error) {
 		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
 	})
 	if err != nil {
 		return err
 	}
-	if str := cm.Data[config.KeyDHCP6]; str != "" {
-		var b []byte
-		if b, err = base64.StdEncoding.DecodeString(str); err != nil {
-			return err
+	if pool.IPv6.Bitmap != "" {
+		b, decErr := base64.StdEncoding.DecodeString(pool.IPv6.Bitmap)
+		if decErr != nil {
+			return decErr
 		}
 		if err = dhcp6.Restore(m.cidr6, b); err != nil {
 			return err
@@ -207,61 +333,70 @@ func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipalloca
 	if _, bytes, err = dhcp.Snapshot(); err != nil {
 		return err
 	}
-	cm.Data[config.KeyDHCP] = base64.StdEncoding.EncodeToString(bytes)
+	pool.IPv4 = poolEntry{CIDR: m.cidr.String(), Bitmap: base64.StdEncoding.EncodeToString(bytes)}
 	if _, bytes, err = dhcp6.Snapshot(); err != nil {
 		return err
 	}
-	cm.Data[config.KeyDHCP6] = base64.StdEncoding.EncodeToString(bytes)
-	_, err = m.clientset.CoreV1().ConfigMaps(m.namespace).Update(ctx, cm, metav1.UpdateOptions{})
+	pool.IPv6 = poolEntry{CIDR: m.cidr6.String(), Bitmap: base64.StdEncoding.EncodeToString(bytes)}
+
+	poolStr, err := marshalTunIPPool(pool)
 	if err != nil {
-		return fmt.Errorf("failed to update DHCP: %v", err)
+		return err
+	}
+	patch, err := json.Marshal([]map[string]string{{
+		"op":    "add",
+		"path":  "/data/" + config.KeyTunIPPool,
+		"value": poolStr,
+	}})
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
+	}
+	_, err = m.clientset.CoreV1().ConfigMaps(m.namespace).Patch(ctx, config.ConfigMapPodTrafficManager, k8stypes.JSONPatchType, patch, metav1.PatchOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to patch TUN_IP_POOL: %w", err)
 	}
 	return nil
 }
 
+// ForEach iterates over all allocated IPv4 and IPv6 addresses, calling the respective callback for each.
 func (m *Manager) ForEach(ctx context.Context, fnv4 func(net.IP), fnv6 func(net.IP)) error {
 	cm, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to get cm DHCP server, err: %v", err)
+		return fmt.Errorf("failed to get DHCP server configmap: %w", err)
 	}
 	if cm.Data == nil {
 		cm.Data = make(map[string]string)
 	}
-	var dhcp *ipallocator.Range
-	dhcp, err = ipallocator.NewAllocatorCIDRRange(m.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
+
+	pool, err := parseTunIPPool(cm.Data[config.KeyTunIPPool])
+	if err != nil {
+		return fmt.Errorf("failed to parse TUN_IP_POOL: %w", err)
+	}
+
+	dhcp, err := ipallocator.NewAllocatorCIDRRange(m.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
 		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
 	})
 	if err != nil {
 		return err
 	}
-	var str []byte
-	str, err = base64.StdEncoding.DecodeString(cm.Data[config.KeyDHCP])
-	if err == nil {
-		err = dhcp.Restore(m.cidr, str)
-		if err != nil {
-			return err
+	if b, decErr := base64.StdEncoding.DecodeString(pool.IPv4.Bitmap); decErr == nil {
+		if restoreErr := dhcp.Restore(m.cidr, b); restoreErr != nil {
+			return restoreErr
 		}
 	}
 	dhcp.ForEach(fnv4)
 
-	var dhcp6 *ipallocator.Range
-	dhcp6, err = ipallocator.NewAllocatorCIDRRange(m.cidr6, func(max int, rangeSpec string) (allocator.Interface, error) {
+	dhcp6, err := ipallocator.NewAllocatorCIDRRange(m.cidr6, func(max int, rangeSpec string) (allocator.Interface, error) {
 		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
 	})
 	if err != nil {
 		return err
 	}
-	str, err = base64.StdEncoding.DecodeString(cm.Data[config.KeyDHCP6])
-	if err == nil {
-		err = dhcp6.Restore(m.cidr6, str)
-		if err != nil {
-			return err
+	if b, decErr := base64.StdEncoding.DecodeString(pool.IPv6.Bitmap); decErr == nil {
+		if restoreErr := dhcp6.Restore(m.cidr6, b); restoreErr != nil {
+			return restoreErr
 		}
 	}
 	dhcp6.ForEach(fnv6)
 	return nil
-}
-
-func (m *Manager) GetConnectionID() string {
-	return m.connectionID
 }

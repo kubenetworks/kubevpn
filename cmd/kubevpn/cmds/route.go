@@ -44,7 +44,7 @@ func CmdRouteAdd(cmdutil.Factory) *cobra.Command {
 		kubevpn status
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		Args: cobra.MatchAll(cobra.ExactArgs(1)),
@@ -81,7 +81,7 @@ func CmdRouteDelete(cmdutil.Factory) *cobra.Command {
 		kubevpn status
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		Args: cobra.MatchAll(cobra.ExactArgs(1)),
@@ -116,7 +116,7 @@ func CmdRouteSearch(cmdutil.Factory) *cobra.Command {
 		kubevpn route search 198.18.0.1
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		Args: cobra.MatchAll(cobra.ExactArgs(1)),

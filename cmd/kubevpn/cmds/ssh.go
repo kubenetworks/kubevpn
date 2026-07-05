@@ -54,7 +54,7 @@ func CmdSSH(cmdutil.Factory) *cobra.Command {
         kubevpn ssh --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {

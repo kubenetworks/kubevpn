@@ -16,10 +16,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-// DetectManagerNamespace
-//  1. use helm to install kubevpn server, means cluster mode,
-//     all kubevpn client should connect to this namespace.
-//  2. if any error occurs, just ignore and will use options `-n` or `--namespace`
+// DetectManagerNamespace finds the namespace containing a running kubevpn traffic manager, checking the given namespace, the default kubevpn namespace, and Helm releases.
 func DetectManagerNamespace(ctx context.Context, f cmdutil.Factory, namespace string) (string, error) {
 	clientSet, err := f.KubernetesClientSet()
 	if err != nil {
@@ -52,6 +49,7 @@ func DetectManagerNamespace(ctx context.Context, f cmdutil.Factory, namespace st
 	return GetHelmInstalledNamespace(ctx, f)
 }
 
+// GetHelmInstalledNamespace searches Helm releases for the kubevpn app and returns its deployed namespace.
 func GetHelmInstalledNamespace(ctx context.Context, f cmdutil.Factory) (string, error) {
 	cfg := new(action.Configuration)
 	client := action.NewList(cfg)
@@ -79,7 +77,8 @@ func GetHelmInstalledNamespace(ctx context.Context, f cmdutil.Factory) (string, 
 	return "", nil
 }
 
-func DetectPodExists(ctx context.Context, clientset *kubernetes.Clientset, namespace string) (bool, error) {
+// DetectPodExists checks whether a running traffic manager pod exists in the specified namespace.
+func DetectPodExists(ctx context.Context, clientset kubernetes.Interface, namespace string) (bool, error) {
 	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
 	list, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: label,
@@ -87,14 +86,10 @@ func DetectPodExists(ctx context.Context, clientset *kubernetes.Clientset, names
 	if err != nil {
 		return false, err
 	}
-	for i := 0; i < len(list.Items); i++ {
-		if list.Items[i].GetDeletionTimestamp() != nil || !AllContainerIsRunning(&list.Items[i]) {
-			list.Items = append(list.Items[:i], list.Items[i+1:]...)
-			i--
+	for _, pod := range list.Items {
+		if pod.GetDeletionTimestamp() == nil && AllContainersRunning(&pod) {
+			return true, nil
 		}
 	}
-	if len(list.Items) == 0 {
-		return false, nil
-	}
-	return true, nil
+	return false, nil
 }

@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/cmd/rollout"
@@ -16,6 +14,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 func Once(ctx context.Context, f cmdutil.Factory) error {
@@ -23,7 +22,7 @@ func Once(ctx context.Context, f cmdutil.Factory) error {
 	if err != nil {
 		return err
 	}
-	namespace, _, err := f.ToRawKubeConfigLoader().Namespace()
+	namespace, err := util.GetNamespace(f)
 	if err != nil {
 		return err
 	}
@@ -46,7 +45,7 @@ func Once(ctx context.Context, f cmdutil.Factory) error {
 	return nil
 }
 
-func labelNs(ctx context.Context, namespace string, clientset *kubernetes.Clientset) error {
+func labelNs(ctx context.Context, namespace string, clientset kubernetes.Interface) error {
 	plog.G(ctx).Infof("Labeling Namespace %s", namespace)
 	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 	if err != nil {
@@ -63,19 +62,19 @@ func labelNs(ctx context.Context, namespace string, clientset *kubernetes.Client
 	ns.Labels["ns"] = namespace
 	_, err = clientset.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{})
 	if err != nil {
-		plog.G(ctx).Infof("Failed to labele namespace: %v", err)
+		plog.G(ctx).Infof("Failed to label namespace: %v", err)
 		return err
 	}
 	return nil
 }
 
-func genTLS(ctx context.Context, namespace string, clientset *kubernetes.Clientset) error {
+func genTLS(ctx context.Context, namespace string, clientset kubernetes.Interface) error {
 	plog.G(ctx).Infof("Generating TLS for Namespace %s", namespace)
-	crt, key, host, err := util.GenTLSCert(ctx, namespace)
+	crt, key, host, err := netutil.GenTLSCert(ctx, namespace)
 	if err != nil {
 		return err
 	}
-	// reason why not use v1.SecretTypeTls is because it needs key called tls.crt and tls.key, but tls.key can not as env variable
+	// reason why not use v1.SecretTypeTls is because it needs key called tls.crt and tls.key, but tls.key cannot be an env variable
 	// ➜  ~ export tls.key=a
 	//export: not valid in this context: tls.key
 	secret := genSecret(namespace, crt, key, host)
@@ -90,19 +89,6 @@ func genTLS(ctx context.Context, namespace string, clientset *kubernetes.Clients
 		plog.G(ctx).Errorf("Failed to update secret: %v", err)
 		return err
 	}
-
-	mutatingWebhookConfiguration := genMutatingWebhookConfiguration(namespace, crt)
-	oldConfig, err := clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Get(ctx, mutatingWebhookConfiguration.Name, metav1.GetOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to get mutatingWebhookConfiguration: %v", err)
-		return err
-	}
-	mutatingWebhookConfiguration.ResourceVersion = oldConfig.ResourceVersion
-	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Update(ctx, mutatingWebhookConfiguration, metav1.UpdateOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to update mutatingWebhookConfiguration: %v", err)
-		return err
-	}
 	return nil
 }
 
@@ -114,40 +100,29 @@ func restartDeploy(ctx context.Context, f cmdutil.Factory) error {
 		Out:    os.Stdout,
 		ErrOut: os.Stderr,
 	})
-	err := o.Complete(f, nil, []string{fmt.Sprintf("deploy/%s", deployName)})
-	if err != nil {
+	if err := o.Complete(f, nil, []string{fmt.Sprintf("deploy/%s", deployName)}); err != nil {
 		return err
 	}
-	err = o.Validate()
-	if err != nil {
+	if err := o.Validate(); err != nil {
 		return err
 	}
-	err = o.RunRestart()
-	if err != nil {
-		return err
-	}
-	return nil
+	return o.RunRestart()
 }
 
 func getCIDR(ctx context.Context, factory cmdutil.Factory) error {
 	plog.G(ctx).Infof("Getting CIDR")
-	c := &ConnectOptions{
+	ds := &DataSession{
 		Image: config.Image,
 	}
-	err := c.InitClient(factory)
+	err := ds.InitClient(factory)
 	if err != nil {
 		return err
 	}
-	// run inside pod
-	err = c.getCIDR(ctx, false)
+	cidrs, _, err := ds.getCIDR(ctx)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get CIDR: %v", err)
 		return err
 	}
-	s := sets.New[string]()
-	for _, cidr := range c.cidrs {
-		s.Insert(cidr.String())
-	}
-	plog.G(ctx).Infof("Get CIDR: %v", strings.Join(s.UnsortedList(), " "))
+	plog.G(ctx).Infof("Get CIDR: %v", encodeCIDRs(cidrs))
 	return nil
 }

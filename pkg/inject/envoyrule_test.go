@@ -1,23 +1,24 @@
 package inject
 
 import (
+	"context"
 	"net/netip"
 	"reflect"
 	"testing"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func TestAddVirtualRule(t *testing.T) {
 	testdatas := []struct {
-		Rule      []*controlplane.Virtual
-		Ports     []controlplane.ContainerPort
-		Headers   map[string]string
-		TunIP     util.PodRouteConfig
-		Uid       string
-		Namespace string
-		PortMap   map[int32]string
+		Rule         []*controlplane.Virtual
+		Ports        []controlplane.ContainerPort
+		Headers      map[string]string
+		LocalTunIPv4 string
+		LocalTunIPv6 string
+		UID          string
+		Namespace    string
+		PortMap      map[int32]string
 
 		Expect []*controlplane.Virtual
 	}{
@@ -28,14 +29,13 @@ func TestAddVirtualRule(t *testing.T) {
 					ContainerPort:     9080,
 				},
 			},
-			TunIP: util.PodRouteConfig{
-				LocalTunIPv4: "127.0.0.1",
-				LocalTunIPv6: netip.IPv6Loopback().String(),
-			},
-			Uid: "deployments.authors",
+			LocalTunIPv4: "127.0.0.1",
+			LocalTunIPv6: netip.IPv6Loopback().String(),
+			UID:          "deployments.authors",
 			Expect: []*controlplane.Virtual{
 				{
-					Uid: "deployments.authors",
+					SchemaVersion: controlplane.CurrentSchemaVersion,
+					UID:           "deployments.authors",
 					Ports: []controlplane.ContainerPort{
 						{
 							EnvoyListenerPort: 15006,
@@ -46,6 +46,7 @@ func TestAddVirtualRule(t *testing.T) {
 						Headers:      nil,
 						LocalTunIPv4: "127.0.0.1",
 						LocalTunIPv6: netip.IPv6Loopback().String(),
+						OwnerID:      "test-owner",
 						PortMap:      nil,
 					}},
 				},
@@ -53,7 +54,7 @@ func TestAddVirtualRule(t *testing.T) {
 		},
 	}
 	for _, data := range testdatas {
-		rule := addVirtualRule(data.Rule, data.Namespace, data.Uid, data.Ports, data.Headers, data.TunIP, nil)
+		rule := addVirtualRule(context.Background(), data.Rule, envoyRuleSpec{Namespace: data.Namespace, NodeID: data.UID, Ports: data.Ports, Headers: data.Headers, LocalTunIPv4: data.LocalTunIPv4, LocalTunIPv6: data.LocalTunIPv6, OwnerID: "test-owner"})
 		if !reflect.DeepEqual(rule, data.Expect) {
 			t.FailNow()
 		}

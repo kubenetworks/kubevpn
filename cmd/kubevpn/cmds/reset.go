@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"context"
+	"os"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -25,7 +27,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 		Long: templates.LongDesc(i18n.T(`
 		Reset workloads to origin spec
 		
-		Reset will remove injected container envoy-proxy and vpn, and restore service mesh rules.
+		Reset will remove injected container envoy and vpn, and restore service mesh rules.
 		`)),
 		Example: templates.Examples(i18n.T(`
         # Reset default namespace workloads depooyment/productpage
@@ -49,7 +51,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
         kubevpn reset deployment/productpage --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		Args: cobra.MatchAll(cobra.ExactArgs(1)),
@@ -66,7 +68,8 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 				KubeconfigBytes: string(bytes),
 				Namespace:       ns,
 				Workloads:       args,
-				SshJump:         sshConf.ToRPC(),
+				SshJump:         handler.SshConfigToRPC(sshConf),
+				Level:           plog.GetLogLevel(),
 			}
 			resp, err := cli.Reset(context.Background())
 			if err != nil {
@@ -76,7 +79,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.ResetResponse](cmd.Context(), resp)
+			_, err = printProgressStream[rpc.ResetResponse](cmd.Context(), resp, os.Stdout)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil
@@ -88,5 +91,6 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 	}
 
 	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
+	handler.AddDebugFlag(cmd.Flags())
 	return cmd
 }

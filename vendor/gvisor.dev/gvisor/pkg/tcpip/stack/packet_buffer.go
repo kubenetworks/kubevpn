@@ -20,6 +20,7 @@ import (
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/checksum"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 )
 
@@ -56,6 +57,9 @@ type PacketBufferOptions struct {
 	// OnRelease is a function to be run when the packet buffer is no longer
 	// referenced (released back to the pool).
 	OnRelease func()
+
+	// Mark is the mark value of this packet.
+	Mark uint32
 }
 
 // A PacketBuffer contains all the data of a network packet.
@@ -161,6 +165,9 @@ type PacketBuffer struct {
 	// NetworkPacketInfo holds an incoming packet's network-layer information.
 	NetworkPacketInfo NetworkPacketInfo
 
+	// Mark is the mark value of this packet.
+	Mark uint32
+
 	tuple *tuple
 
 	// onRelease is a function to be run when the packet buffer is no longer
@@ -182,6 +189,7 @@ func NewPacketBuffer(opts PacketBufferOptions) *PacketBuffer {
 	}
 	pk.NetworkPacketInfo.IsForwardedPacket = opts.IsForwardedPacket
 	pk.onRelease = opts.OnRelease
+	pk.Mark = opts.Mark
 	pk.InitRefs()
 	return pk
 }
@@ -380,7 +388,9 @@ func (pk *PacketBuffer) Clone() *PacketBuffer {
 	newPk.headers = pk.headers
 	newPk.Hash = pk.Hash
 	newPk.Owner = pk.Owner
+	newPk.Mark = pk.Mark
 	newPk.GSOOptions = pk.GSOOptions
+	newPk.EgressRoute = pk.EgressRoute
 	newPk.NetworkProtocolNumber = pk.NetworkProtocolNumber
 	newPk.dnatDone = pk.dnatDone
 	newPk.snatDone = pk.snatDone
@@ -430,6 +440,7 @@ func (pk *PacketBuffer) CloneToInbound() *PacketBuffer {
 	newPk.InitRefs()
 	// Treat unfilled header portion as reserved.
 	newPk.reserved = pk.AvailableHeaderBytes()
+	newPk.Mark = pk.Mark
 	newPk.tuple = pk.tuple
 	return newPk
 }
@@ -465,8 +476,49 @@ func (pk *PacketBuffer) DeepCopyForForwarding(reservedHeaderBytes int) *PacketBu
 	}
 
 	newPk.tuple = pk.tuple
+	newPk.Mark = pk.Mark
 
 	return newPk
+}
+
+// IsConnTrackConfigured returns whether connection tracking is configured for this packet.
+func (pk *PacketBuffer) IsConnTrackConfigured() bool {
+	return pk.tuple != nil && pk.tuple.conn != nil
+}
+
+// IsNATConfigured returns whether NAT is configured for this packet.
+func (pk *PacketBuffer) IsNATConfigured(nt NATType) bool {
+	if !pk.IsConnTrackConfigured() {
+		return false
+	}
+	return pk.tuple.conn.IsNATConfigured(nt)
+}
+
+// ConfigureNoopNAT configures a no-op NAT for the packet.
+// Called if no NAT rules are configured for this packet.
+func (pk *PacketBuffer) ConfigureNoopNAT(natType NATType) bool {
+	if !pk.IsConnTrackConfigured() {
+		return false
+	}
+	return pk.tuple.conn.ConfigureNoopNAT(pk, natType)
+}
+
+// ConfigureNAT configures NAT for the packet.
+// Called if NAT rules are configured for this packet.
+// Returns whether NAT was configured or not.
+func (pk *PacketBuffer) ConfigureNAT(portsOrIdents PortOrIdentRange, natAddress tcpip.Address, natType NATType, changePort, changeAddress bool) bool {
+	if !pk.IsConnTrackConfigured() {
+		return false
+	}
+	return pk.tuple.conn.ConfigureNAT(portsOrIdents, natAddress, natType, changePort, changeAddress)
+}
+
+// FinalizeConnTrack finalizes the connection tracking state for the packet.
+func (pk *PacketBuffer) FinalizeConnTrack() bool {
+	if pk.tuple == nil || pk.tuple.conn == nil {
+		return true
+	}
+	return pk.tuple.conn.finalize()
 }
 
 // headerInfo stores metadata about a header in a packet.
@@ -766,4 +818,306 @@ func BufferSince(h PacketHeader) buffer.Buffer {
 	clone := h.pk.buf.Clone()
 	clone.TrimFront(int64(offset))
 	return clone
+}
+
+// ExperimentOptionValue returns the experiment option value from the packet
+// and a bool indicating whether an experiment option value was found.
+func (pk *PacketBuffer) ExperimentOptionValue() (uint16, bool) {
+	switch pk.NetworkProtocolNumber {
+	case header.IPv4ProtocolNumber:
+		h := header.IPv4(pk.NetworkHeader().Slice())
+		opts := h.Options()
+		iter := opts.MakeIterator()
+		for {
+			opt, done, err := iter.Next()
+			if err != nil {
+				return 0, false
+			}
+			if done {
+				return 0, false
+			}
+			if opt.Type() == header.IPv4OptionExperimentType {
+				return opt.(*header.IPv4OptionExperiment).Value(), true
+			}
+		}
+	case header.IPv6ProtocolNumber:
+		h := header.IPv6(pk.NetworkHeader().Slice())
+		v := pk.NetworkHeader().View()
+		if v != nil {
+			v.TrimFront(header.IPv6MinimumSize)
+		}
+		buf := buffer.MakeWithView(v)
+		buf.Append(pk.TransportHeader().View())
+		dataBuf := pk.Data().ToBuffer()
+		buf.Merge(&dataBuf)
+		it := header.MakeIPv6PayloadIterator(header.IPv6ExtensionHeaderIdentifier(h.NextHeader()), buf)
+
+		for {
+			hdr, done, err := it.Next()
+			if done || err != nil {
+				break
+			}
+			if h, ok := hdr.(header.IPv6ExperimentExtHdr); ok {
+				hdr.Release()
+				return h.Value, true
+			}
+			hdr.Release()
+		}
+	default:
+		panic(fmt.Sprintf("Unexpected network protocol number %d", pk.NetworkProtocolNumber))
+	}
+	return 0, false
+}
+
+// GetEmbeddedNetAndTransHeaders returns the network and transport headers of the
+// packet.
+func (pk *PacketBuffer) GetEmbeddedNetAndTransHeaders(netHdrLength int, getNetAndTransHdr netAndTransHeadersFunc, transProto tcpip.TransportProtocolNumber) (header.Network, header.ChecksummableTransport, bool) {
+	switch transProto {
+	case header.TCPProtocolNumber:
+		if netAndTransHeader, ok := pk.Data().PullUp(netHdrLength + header.TCPMinimumSize); ok {
+			netHeader, transHeaderBytes := getNetAndTransHdr(netAndTransHeader, header.TCPMinimumSize)
+			return netHeader, header.TCP(transHeaderBytes), true
+		}
+	case header.UDPProtocolNumber:
+		if netAndTransHeader, ok := pk.Data().PullUp(netHdrLength + header.UDPMinimumSize); ok {
+			netHeader, transHeaderBytes := getNetAndTransHdr(netAndTransHeader, header.UDPMinimumSize)
+			return netHeader, header.UDP(transHeaderBytes), true
+		}
+	}
+	return nil, nil, false
+}
+
+// GetHeaders returns the network and transport headers of the packet.
+func (pk *PacketBuffer) GetHeaders() (netHdr header.Network, transHdr header.Transport, isICMPError bool, ok bool) {
+	switch pk.TransportProtocolNumber {
+	case header.TCPProtocolNumber:
+		if tcpHeader := header.TCP(pk.TransportHeader().Slice()); len(tcpHeader) >= header.TCPMinimumSize {
+			return pk.Network(), tcpHeader, false, true
+		}
+		return nil, nil, false, false
+	case header.UDPProtocolNumber:
+		if udpHeader := header.UDP(pk.TransportHeader().Slice()); len(udpHeader) >= header.UDPMinimumSize {
+			return pk.Network(), udpHeader, false, true
+		}
+		return nil, nil, false, false
+	case header.ICMPv4ProtocolNumber:
+		icmpHeader := header.ICMPv4(pk.TransportHeader().Slice())
+		if len(icmpHeader) < header.ICMPv4MinimumSize {
+			return nil, nil, false, false
+		}
+
+		switch icmpType := icmpHeader.Type(); icmpType {
+		case header.ICMPv4Echo, header.ICMPv4EchoReply:
+			return pk.Network(), icmpHeader, false, true
+		case header.ICMPv4DstUnreachable, header.ICMPv4TimeExceeded, header.ICMPv4ParamProblem:
+		default:
+			panic(fmt.Sprintf("unexpected ICMPv4 type = %d", icmpType))
+		}
+
+		h, ok := pk.Data().PullUp(header.IPv4MinimumSize)
+		if !ok {
+			panic(fmt.Sprintf("should have a valid IPv4 packet; only have %d bytes, want at least %d bytes", pk.Data().Size(), header.IPv4MinimumSize))
+		}
+
+		if header.IPv4(h).HeaderLength() > header.IPv4MinimumSize {
+			// TODO(https://gvisor.dev/issue/6765): Handle IPv4 options.
+			panic("should have dropped packets with IPv4 options")
+		}
+
+		if netHdr, transHdr, ok := pk.GetEmbeddedNetAndTransHeaders(header.IPv4MinimumSize, v4NetAndTransHdr, pk.tuple.tupleID.transProto); ok {
+			return netHdr, transHdr, true, true
+		}
+		return nil, nil, false, false
+	case header.ICMPv6ProtocolNumber:
+		icmpHeader := header.ICMPv6(pk.TransportHeader().Slice())
+		if len(icmpHeader) < header.ICMPv6MinimumSize {
+			return nil, nil, false, false
+		}
+
+		switch icmpType := icmpHeader.Type(); icmpType {
+		case header.ICMPv6EchoRequest, header.ICMPv6EchoReply:
+			return pk.Network(), icmpHeader, false, true
+		case header.ICMPv6DstUnreachable, header.ICMPv6PacketTooBig, header.ICMPv6TimeExceeded, header.ICMPv6ParamProblem:
+		default:
+			panic(fmt.Sprintf("unexpected ICMPv6 type = %d", icmpType))
+		}
+
+		h, ok := pk.Data().PullUp(header.IPv6MinimumSize)
+		if !ok {
+			panic(fmt.Sprintf("should have a valid IPv6 packet; only have %d bytes, want at least %d bytes", pk.Data().Size(), header.IPv6MinimumSize))
+		}
+
+		// We do not support extension headers in ICMP errors so the next header
+		// in the IPv6 packet should be a tracked protocol if we reach this point.
+		//
+		// TODO(https://gvisor.dev/issue/6789): Support extension headers.
+		transProto := pk.tuple.tupleID.transProto
+		if got := header.IPv6(h).TransportProtocol(); got != transProto {
+			panic(fmt.Sprintf("got TransportProtocol() = %d, want = %d", got, transProto))
+		}
+
+		if netHdr, transHdr, ok := pk.GetEmbeddedNetAndTransHeaders(header.IPv6MinimumSize, v6NetAndTransHdr, transProto); ok {
+			return netHdr, transHdr, true, true
+		}
+		return nil, nil, false, false
+	default:
+		return nil, nil, false, false
+	}
+}
+
+// UpdateHeaders updates the headers of the packet with the new port and address.
+func UpdateHeaders(n header.Network, t header.Transport, updateSRCFields, fullChecksum, updatePseudoHeader bool, newPortOrIdent uint16, newAddr tcpip.Address) {
+	switch t := t.(type) {
+	case header.ChecksummableTransport:
+		if updateSRCFields {
+			if fullChecksum {
+				t.SetSourcePortWithChecksumUpdate(newPortOrIdent)
+			} else {
+				t.SetSourcePort(newPortOrIdent)
+			}
+		} else {
+			if fullChecksum {
+				t.SetDestinationPortWithChecksumUpdate(newPortOrIdent)
+			} else {
+				t.SetDestinationPort(newPortOrIdent)
+			}
+		}
+
+		if updatePseudoHeader {
+			var oldAddr tcpip.Address
+			if updateSRCFields {
+				oldAddr = n.SourceAddress()
+			} else {
+				oldAddr = n.DestinationAddress()
+			}
+
+			t.UpdateChecksumPseudoHeaderAddress(oldAddr, newAddr, fullChecksum)
+		}
+	case header.ICMPv4:
+		switch icmpType := t.Type(); icmpType {
+		case header.ICMPv4Echo:
+			if updateSRCFields {
+				t.SetIdentWithChecksumUpdate(newPortOrIdent)
+			}
+		case header.ICMPv4EchoReply:
+			if !updateSRCFields {
+				t.SetIdentWithChecksumUpdate(newPortOrIdent)
+			}
+		default:
+			panic(fmt.Sprintf("unexpected ICMPv4 type = %d", icmpType))
+		}
+	case header.ICMPv6:
+		switch icmpType := t.Type(); icmpType {
+		case header.ICMPv6EchoRequest:
+			if updateSRCFields {
+				t.SetIdentWithChecksumUpdate(newPortOrIdent)
+			}
+		case header.ICMPv6EchoReply:
+			if !updateSRCFields {
+				t.SetIdentWithChecksumUpdate(newPortOrIdent)
+			}
+		default:
+			panic(fmt.Sprintf("unexpected ICMPv6 type = %d", icmpType))
+		}
+
+		var oldAddr tcpip.Address
+		if updateSRCFields {
+			oldAddr = n.SourceAddress()
+		} else {
+			oldAddr = n.DestinationAddress()
+		}
+
+		t.UpdateChecksumPseudoHeaderAddress(oldAddr, newAddr)
+	default:
+		panic(fmt.Sprintf("unhandled transport = %#v", t))
+	}
+
+	if checksummableNetHeader, ok := n.(header.ChecksummableNetwork); ok {
+		if updateSRCFields {
+			checksummableNetHeader.SetSourceAddressWithChecksumUpdate(newAddr)
+		} else {
+			checksummableNetHeader.SetDestinationAddressWithChecksumUpdate(newAddr)
+		}
+	} else if updateSRCFields {
+		n.SetSourceAddress(newAddr)
+	} else {
+		n.SetDestinationAddress(newAddr)
+	}
+}
+
+// CalculateTransportChecksum calculates the transport-layer checksum of the
+// packet.
+// TODO: b/521901282 - Verify with GSO.
+func (pk *PacketBuffer) CalculateTransportChecksum() {
+	netHdr, transHdr, isICMPError, ok := pk.GetHeaders()
+	if isICMPError {
+		// Skip ICMP errors because GetHeaders() returns inner headers, but pk.Data()
+		// contains the outer payload (including inner IP header), which would
+		// corrupt the checksum calculation if used as the transport payload.
+		// Inner headers are already incrementally updated by NAT if needed.
+		// This aligns with Linux, which also relies on incremental updates for
+		// inner headers and does not perform full recalculation from scratch.
+		return
+	}
+	if !ok {
+		// Try to parse headers from Data if not set (e.g., forwarded packet).
+		if pk.NetworkProtocolNumber == 0 {
+			return
+		}
+		netHdr = pk.Network()
+		transProto := netHdr.TransportProtocol()
+
+		var headerSize int
+		switch transProto {
+		case header.TCPProtocolNumber:
+			// Peek at minimum TCP header to find data offset (which includes options).
+			b, ok := pk.Data().PullUp(header.TCPMinimumSize)
+			if !ok {
+				return
+			}
+			tcp := header.TCP(b)
+			headerSize = int(tcp.DataOffset())
+			if headerSize < header.TCPMinimumSize {
+				return
+			}
+		case header.UDPProtocolNumber:
+			headerSize = header.UDPMinimumSize
+		default:
+			return
+		}
+
+		// Consume the transport header.
+		if _, ok := pk.TransportHeader().Consume(headerSize); !ok {
+			return
+		}
+		pk.TransportProtocolNumber = transProto
+
+		// Refresh headers.
+		netHdr, transHdr, isICMPError, ok = pk.GetHeaders()
+		if !ok || isICMPError {
+			return
+		}
+	}
+
+	var xsum uint16
+	switch t := transHdr.(type) {
+	case header.TCP:
+		src := netHdr.SourceAddress()
+		dst := netHdr.DestinationAddress()
+		proto := netHdr.TransportProtocol()
+		totalLen := uint16(len(t) + pk.Data().Size())
+		xsum = header.PseudoHeaderChecksum(proto, src, dst, totalLen)
+		xsum = checksum.Combine(xsum, pk.Data().Checksum())
+		t.SetChecksum(0)
+		t.SetChecksum(^t.CalculateChecksum(xsum))
+	case header.UDP:
+		src := netHdr.SourceAddress()
+		dst := netHdr.DestinationAddress()
+		proto := netHdr.TransportProtocol()
+		totalLen := uint16(len(t) + pk.Data().Size())
+		xsum = header.PseudoHeaderChecksum(proto, src, dst, totalLen)
+		xsum = checksum.Combine(xsum, pk.Data().Checksum())
+		t.SetChecksum(0)
+		t.SetChecksum(^t.CalculateChecksum(xsum))
+	}
 }

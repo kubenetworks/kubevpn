@@ -5,11 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
+	"sync"
 	"time"
 
-	pkgerr "github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -18,23 +17,33 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/elevate"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-var daemonClient, sudoDaemonClient rpc.DaemonClient
+var (
+	clientMu         sync.Mutex
+	daemonClient     rpc.DaemonClient
+	sudoDaemonClient rpc.DaemonClient
+)
 
+// GetClient returns a cached gRPC DaemonClient for the given privilege level, creating one if necessary.
 func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	sockPath := config.GetSockPath(isSudo)
 	if _, err = os.Stat(sockPath); errors.Is(err, os.ErrNotExist) {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", err, config.ErrDaemonNotRunning)
 	}
+	clientMu.Lock()
 	if isSudo && sudoDaemonClient != nil {
+		defer clientMu.Unlock()
 		return sudoDaemonClient, nil
 	}
 	if !isSudo && daemonClient != nil {
+		defer clientMu.Unlock()
 		return daemonClient, nil
 	}
+	clientMu.Unlock()
 
 	ctx := context.Background()
 	conn, err := grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithNoProxy())
@@ -54,7 +63,7 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 		return nil, err
 	}
 	if response.Status != grpc_health_v1.HealthCheckResponse_SERVING {
-		return nil, fmt.Errorf("health check failed: %v", response.Status)
+		return nil, fmt.Errorf("health check failed: %v: %w", response.Status, config.ErrDaemonNotRunning)
 	}
 
 	cli = rpc.NewDaemonClient(conn)
@@ -69,26 +78,31 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 		if err != nil {
 			return nil, err
 		}
-		err = quitStream.Send(&rpc.QuitRequest{})
+		err = quitStream.Send(&rpc.QuitRequest{Level: plog.GetLogLevel()})
 		if err != nil {
 			return nil, err
 		}
-		err = util.PrintGRPCStream[rpc.QuitResponse](nil, quitStream, nil)
-		return
+		_ = grpcutil.PrintGRPCStream[rpc.QuitResponse](ctx, quitStream, nil)
+		// The daemon is outdated and was asked to quit; do not return or cache a
+		// client to it. Returning nil makes StartupDaemon spawn a fresh daemon.
+		return nil, fmt.Errorf("daemon version is outdated and was asked to quit: %w", config.ErrDaemonVersionMismatch)
 	}
 
+	clientMu.Lock()
 	if isSudo {
 		sudoDaemonClient = cli
 	} else {
 		daemonClient = cli
 	}
+	clientMu.Unlock()
 	return cli, nil
 }
 
-func GetClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClient, conn *grpc.ClientConn, err error) {
+func getClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClient, conn *grpc.ClientConn, err error) {
 	sockPath := config.GetSockPath(isSudo)
 	_, err = os.Stat(sockPath)
 	if errors.Is(err, os.ErrNotExist) {
+		err = fmt.Errorf("%w: %w", err, config.ErrDaemonNotRunning)
 		return
 	}
 	conn, err = grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -107,13 +121,14 @@ func GetClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClie
 		return
 	}
 	if response.Status != grpc_health_v1.HealthCheckResponse_SERVING {
-		err = fmt.Errorf("health check failed: %v", response.Status)
+		err = fmt.Errorf("health check failed: %v: %w", response.Status, config.ErrDaemonNotRunning)
 		return
 	}
 	cli = rpc.NewDaemonClient(conn)
 	return cli, conn, nil
 }
 
+// StartupDaemon ensures both the normal and sudo daemon processes are running, starting them if needed.
 func StartupDaemon(ctx context.Context, path ...string) error {
 	var exe string
 	var err error
@@ -126,14 +141,14 @@ func StartupDaemon(ctx context.Context, path ...string) error {
 		return err
 	}
 	// normal daemon
-	if daemonClient, err = GetClient(false); daemonClient == nil {
+	if cli, _ := GetClient(false); cli == nil {
 		if err = runDaemon(ctx, exe, false); err != nil {
 			return err
 		}
 	}
 
 	// sudo daemon
-	if sudoDaemonClient, err = GetClient(true); sudoDaemonClient == nil {
+	if cli, _ := GetClient(true); cli == nil {
 		if err = runDaemon(ctx, exe, true); err != nil {
 			return err
 		}
@@ -164,9 +179,9 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 	if err != nil {
 		return err
 	}
+	const pidPollInterval = 50 * time.Millisecond
 	for ctx.Err() == nil {
-		time.Sleep(time.Millisecond * 50)
-		//_ = os.Chmod(sockPath, os.ModeSocket)
+		time.Sleep(pidPollInterval)
 		if _, err = os.Stat(pidPath); !errors.Is(err, os.ErrNotExist) {
 			break
 		}
@@ -174,25 +189,12 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 
 	_, err = GetClient(isSudo)
 	if err != nil {
-		return pkgerr.Wrap(err, "failed to get daemon server client")
+		return fmt.Errorf("failed to get daemon server client: %w", err)
 	}
 	return nil
 }
 
-func GetHttpClient(isSudo bool) *http.Client {
-	client := http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				var d net.Dialer
-				d.Timeout = 30 * time.Second
-				d.KeepAlive = 30 * time.Second
-				return d.DialContext(ctx, "unix", config.GetSockPath(isSudo))
-			},
-		},
-	}
-	return &client
-}
-
+// GetTCPClient dials the daemon Unix socket and returns a raw net.Conn for HTTP/TCP traffic.
 func GetTCPClient(isSudo bool) net.Conn {
 	conn, err := net.Dial("unix", config.GetSockPath(isSudo))
 	if err != nil {

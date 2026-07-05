@@ -2,94 +2,56 @@ package handler
 
 import (
 	"context"
-	"net"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-func (c *ConnectOptions) setupSignalHandler() {
-	var stopChan = make(chan os.Signal)
-	signal.Notify(stopChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL)
-	select {
-	case <-stopChan:
-		c.Cleanup(context.Background())
-	case <-c.ctx.Done():
-	}
-}
-
+// Cleanup releases DHCP leases, leaves proxy resources, and runs rollback functions.
+// ConnectOptions is always the control-plane (user daemon) session type; Cleanup always
+// runs cleanupControlPlane. Uses the shared SessionBase.cleanup for mutex gating.
 func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 	if c == nil {
 		return
 	}
+	c.SessionBase.cleanup(logCtx, func(ctx context.Context) error {
+		return c.cleanupControlPlane(logCtx, ctx)
+	})
+}
 
-	// only root daemon really do connect
-	// root daemon: data plane
-	// user daemon: control plane
-	var userDaemon = true
-	if c.ctx != nil {
-		userDaemon = false
+// cleanupControlPlane tears down the control-plane side:
+// removes ephemeral K8s resources, leaves proxy workloads, and runs rollback functions.
+// TUN IP is NOT explicitly released — per DHCP protocol, lease expiry handles reclaim.
+// Returns error if critical cleanup steps fail, allowing the caller to retry.
+func (c *ConnectOptions) cleanupControlPlane(logCtx context.Context, ctx context.Context) error {
+	// Debug, not Info: in quit/disconnect this marker duplicates the enclosing
+	// "Cleaning up connections"/"Disconnecting" step, so keep it out of the CLI
+	// stream while preserving it in the daemon log file for diagnostics.
+	plog.G(logCtx).Debug("Performing cleanup operations")
+	if c.clientset != nil {
+		_ = c.clientset.CoreV1().Pods(c.ManagerNamespace).Delete(ctx, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
+		_ = c.clientset.BatchV1().Jobs(c.ManagerNamespace).Delete(ctx, config.ConfigMapPodTrafficManager, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
+	}
+	// leave proxy resources
+	if err := c.LeaveAllProxyResources(ctx); err != nil {
+		plog.G(logCtx).Errorf("Leave proxy resources error: %v", err)
+		return err
 	}
 
-	c.once.Do(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-		defer cancel()
-		if userDaemon {
-			plog.G(logCtx).Info("Performing cleanup operations")
-			var ipv4, ipv6 net.IP
-			if c.LocalTunIPv4 != nil && c.LocalTunIPv4.IP != nil {
-				ipv4 = c.LocalTunIPv4.IP
-			}
-			if c.LocalTunIPv6 != nil && c.LocalTunIPv6.IP != nil {
-				ipv6 = c.LocalTunIPv6.IP
-			}
-			if c.dhcp != nil {
-				err := c.dhcp.ReleaseIP(ctx, ipv4, ipv6)
-				if err != nil {
-					plog.G(logCtx).Errorf("Failed to IPv4 %v IPv6 %v: %v", ipv4, ipv6, err)
-				} else {
-					plog.G(logCtx).Infof("Released IPv4 %v IPv6 %v", ipv4, ipv6)
-				}
-			}
-			if c.clientset != nil {
-				_ = c.clientset.CoreV1().Pods(c.Namespace).Delete(ctx, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
-				_ = c.clientset.BatchV1().Jobs(c.Namespace).Delete(ctx, config.ConfigMapPodTrafficManager, v1.DeleteOptions{GracePeriodSeconds: pointer.Int64(0)})
-			}
-			// leave proxy resources
-			err := c.LeaveAllProxyResources(ctx)
-			if err != nil {
-				plog.G(logCtx).Errorf("Leave proxy resources error: %v", err)
-			}
+	executeRollbackFuncs(logCtx, c.getRollbackFuncs())
+	return nil
+}
 
-			for _, function := range c.getRolloutFunc() {
-				if function != nil {
-					if err = function(); err != nil {
-						plog.G(logCtx).Warnf("Rollout function error: %v", err)
-					}
-				}
-			}
-		} else {
-			for _, function := range c.getRolloutFunc() {
-				if function != nil {
-					if err := function(); err != nil {
-						plog.G(logCtx).Warnf("Rollout function error: %v", err)
-					}
-				}
-			}
-			if c.dnsConfig != nil {
-				plog.G(logCtx).Debugf("Clearing DNS settings")
-				c.dnsConfig.CancelDNS()
-			}
-			if c.cancel != nil {
-				c.cancel()
+// executeRollbackFuncs runs each non-nil rollback function, logging warnings on errors.
+func executeRollbackFuncs(logCtx context.Context, funcs []func() error) {
+	for _, fn := range funcs {
+		if fn != nil {
+			if err := fn(); err != nil {
+				plog.G(logCtx).Warnf("Rollback function error: %v", err)
 			}
 		}
-	})
+	}
 }

@@ -2,74 +2,61 @@ package handler
 
 import (
 	"context"
-	"fmt"
 
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/errors"
-	"sigs.k8s.io/yaml"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) (err error) {
+// LeaveAllProxyResources removes all proxy sidecar injections for this connection's
+// OwnerID. It is called on disconnect/cleanup. With server-side injection the client no
+// longer tracks which mesh workloads it proxied, so it asks the manager to remove every
+// rule for its OwnerID in the workload namespace (empty Workloads = leave-all). It also
+// stops any local Service Mapper. Best-effort: on a clean disconnect the VPN is still up
+// so this reaches the manager; if it fails (e.g. VPN already torn down / crash), the
+// manager's lease reaper reclaims the abandoned rules later (see docs/44 §3b), so a
+// failure here is logged but does not block teardown.
+func (c *ConnectOptions) LeaveAllProxyResources(ctx context.Context) error {
 	if c == nil || c.clientset == nil {
-		return
-	}
-
-	mapInterface := c.clientset.CoreV1().ConfigMaps(c.Namespace)
-	var cm *corev1.ConfigMap
-	cm, err = mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return
-	}
-	if cm == nil || cm.Data == nil || len(cm.Data[config.KeyEnvoy]) == 0 {
-		plog.G(ctx).Infof("No proxy resources found")
 		return nil
 	}
-	var v = make([]*controlplane.Virtual, 0)
-	str := cm.Data[config.KeyEnvoy]
-	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
-		plog.G(ctx).Errorf("Unmarshal envoy config error: %v", err)
-		return
+	if err := c.leaveViaManager(ctx, c.WorkloadNamespace, nil, c.OwnerID); err != nil {
+		plog.G(ctx).Warnf("Server-side leave-all failed (rules will be reclaimed by the manager's lease reaper): %v", err)
 	}
-	v4, _ := c.GetLocalTunIP()
-	return c.LeaveResource(ctx, c.ProxyResources().ToResources(), v4)
+	if c.proxyManager != nil {
+		c.proxyManager.StopAll()
+	}
+	return nil
 }
 
-func (c *ConnectOptions) LeaveResource(ctx context.Context, resources []Resources, v4 string) error {
-	var errs []error
-	for _, workload := range resources {
-		// deployments.apps.ry-server --> deployments.apps/ry-server
-		object, controller, err := util.GetTopOwnerObject(ctx, c.factory, workload.Namespace, workload.Workload)
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
-			errs = append(errs, err)
-			continue
-		}
-		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
-		var empty bool
-		empty, err = inject.UnPatchContainer(ctx, nodeID, c.factory, c.clientset.CoreV1().ConfigMaps(c.Namespace), controller, func(isFargateMode bool, rule *controlplane.Rule) bool {
-			if isFargateMode {
-				return c.IsMe(workload.Namespace, util.ConvertWorkloadToUid(workload.Workload), rule.Headers)
-			}
-			return rule.LocalTunIPv4 == v4
-		})
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to leave workload %s in namespace %s: %v", workload.Workload, workload.Namespace, err)
-			errs = append(errs, err)
-			continue
-		}
-		if empty && util.IsK8sService(object) {
-			err = inject.ModifyServiceTargetPort(ctx, c.clientset, workload.Namespace, object.Name, map[int32]int32{})
-			errs = append(errs, err)
-		}
-		c.leavePortMap(workload.Namespace, workload.Workload)
+// LeaveResource unpatches the given proxy resources server-side: the traffic manager
+// removes the envoy rule and (when no rule remains) the sidecar with its own
+// ServiceAccount over the VPN. There is no local fallback. The workloads come from the
+// request (not a client-side record, which no longer exists for mesh workloads under
+// server-side injection). It also stops any local Service Mapper for the left workloads.
+func (c *ConnectOptions) LeaveResource(ctx context.Context, resources []Resources, ownerID string) error {
+	if len(resources) == 0 {
+		return nil
 	}
-	return errors.NewAggregate(errs)
+	plog.StepStart(ctx, "Removing proxy from workloads")
+
+	// Group by namespace: one LeaveInject call per namespace.
+	byNamespace := make(map[string][]string)
+	var order []string
+	for _, r := range resources {
+		if _, ok := byNamespace[r.Namespace]; !ok {
+			order = append(order, r.Namespace)
+		}
+		byNamespace[r.Namespace] = append(byNamespace[r.Namespace], r.Workload)
+	}
+
+	for _, ns := range order {
+		workloads := byNamespace[ns]
+		if err := c.leaveViaManager(ctx, ns, workloads, ownerID); err != nil {
+			return err
+		}
+		// Manager did the cluster writes; stop any local Mapper for these workloads.
+		c.stopServiceMappers(ns, workloads)
+	}
+
+	plog.StepDone(ctx, "Removed proxy from %d workloads", len(resources))
+	return nil
 }

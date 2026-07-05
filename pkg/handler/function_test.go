@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -27,9 +29,9 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/util/podutils"
 
 	pkgconfig "github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 type ut struct {
@@ -46,117 +48,129 @@ const (
 	remoteSyncPod    = `{"status":"Authors is healthy in pod"}`
 )
 
+// reviewsUDPPort is the UDP port declared on the reviews workload
+// (samples/bookinfo.yaml), distinct from the TCP 9080 so fargate's per-number
+// port map does not clash. In mesh full-proxy the envoy UDP listener binds this
+// container port and forwards to tunIP:<same port>, so the local udpServer must
+// listen on it and the client must dial it — it cannot be a random port.
+const reviewsUDPPort = 9081
+
 func TestFunctions(t *testing.T) {
 	u := &ut{}
 	// 1) test connect
-	t.Run("init", u.init)
-	t.Run("kubevpnConnect", u.kubevpnConnect)
-	t.Run("commonTest", u.commonTest)
-	t.Run("checkConnectStatus", u.checkConnectStatus)
+	t.Run("01-connect/init", u.init)
+	t.Run("01-connect/kubevpnConnect", u.kubevpnConnect)
+	t.Run("01-connect/commonTest", u.commonTest)
+	t.Run("01-connect/checkConnectStatus", u.checkConnectStatus)
 
 	// 2) test proxy mode
-	t.Run("kubevpnProxy", u.kubevpnProxy)
-	t.Run("commonTest", u.commonTest)
-	t.Run("testUDP", u.testUDP)
-	t.Run("proxyServiceReviewsServiceIP", u.proxyServiceReviewsServiceIP)
-	t.Run("proxyServiceReviewsPodIP", u.proxyServiceReviewsPodIP)
-	t.Run("checkProxyStatus", u.checkProxyStatus)
+	t.Run("02-proxy/kubevpnProxy", u.kubevpnProxy)
+	t.Run("02-proxy/commonTest", u.commonTest)
+	t.Run("02-proxy/testUDP", u.testUDP)
+	t.Run("02-proxy/proxyServiceReviewsServiceIP", u.proxyServiceReviewsServiceIP)
+	t.Run("02-proxy/proxyServiceReviewsPodIP", u.proxyServiceReviewsPodIP)
+	t.Run("02-proxy/checkProxyStatus", u.checkProxyStatus)
 
 	// 3) test proxy mode with service mesh
-	t.Run("kubevpnLeave", u.kubevpnLeave)
-	t.Run("kubevpnProxyWithServiceMesh", u.kubevpnProxyWithServiceMesh)
-	t.Run("commonTest", u.commonTest)
-	t.Run("serviceMeshReviewsServiceIP", u.serviceMeshReviewsServiceIP)
-	t.Run("serviceMeshReviewsPodIP", u.serviceMeshReviewsPodIP)
-	t.Run("checkProxyWithServiceMeshStatus", u.checkProxyWithServiceMeshStatus)
+	t.Run("03-proxy-mesh/kubevpnLeave", u.kubevpnLeave)
+	t.Run("03-proxy-mesh/kubevpnProxyWithServiceMesh", u.kubevpnProxyWithServiceMesh)
+	t.Run("03-proxy-mesh/commonTest", u.commonTest)
+	t.Run("03-proxy-mesh/serviceMeshReviewsServiceIP", u.serviceMeshReviewsServiceIP)
+	t.Run("03-proxy-mesh/serviceMeshReviewsPodIP", u.serviceMeshReviewsPodIP)
+	t.Run("03-proxy-mesh/checkProxyWithServiceMeshStatus", u.checkProxyWithServiceMeshStatus)
 
 	// 4) test proxy mode with service mesh and gvisor
-	t.Run("kubevpnLeave", u.kubevpnLeave)
-	t.Run("kubevpnUninstall", u.kubevpnUninstall(""))
-	t.Run("kubevpnProxyWithServiceMeshAndFargateMode", u.kubevpnProxyWithServiceMeshAndFargateMode)
-	t.Run("commonTest", u.commonTest)
-	t.Run("serviceMeshReviewsServiceIP", u.serviceMeshReviewsServiceIP)
-	t.Run("checkProxyWithServiceMeshAndGvisorStatus", u.checkProxyWithServiceMeshAndGvisorStatus)
-	t.Run("kubevpnLeaveService", u.kubevpnLeaveService)
-	t.Run("kubevpnQuit", u.kubevpnQuit)
+	t.Run("04-proxy-mesh-fargate/kubevpnLeave", u.kubevpnLeave)
+	t.Run("04-proxy-mesh-fargate/kubevpnUninstall", u.kubevpnUninstall(""))
+	t.Run("04-proxy-mesh-fargate/kubevpnProxyWithServiceMeshAndFargateMode", u.kubevpnProxyWithServiceMeshAndFargateMode)
+	t.Run("04-proxy-mesh-fargate/commonTest", u.commonTest)
+	t.Run("04-proxy-mesh-fargate/serviceMeshReviewsServiceIP", u.serviceMeshReviewsServiceIP)
+	t.Run("04-proxy-mesh-fargate/checkProxyWithServiceMeshAndGvisorStatus", u.checkProxyWithServiceMeshAndGvisorStatus)
+	t.Run("04-proxy-mesh-fargate/kubevpnLeaveService", u.kubevpnLeaveService)
+	t.Run("04-proxy-mesh-fargate/kubevpnQuit", u.kubevpnQuit)
 
 	// 5) test mode sync
-	t.Run("deleteDeployForSaveResource", u.deleteDeployForSaveResource)
-	t.Run("kubevpnSyncWithFullProxy", u.kubevpnSyncWithFullProxy)
-	t.Run("kubevpnSyncWithFullProxyStatus", u.checkSyncWithFullProxyStatus)
-	t.Run("commonTest", u.commonTest)
-	t.Run("kubevpnUnSync", u.kubevpnUnSync)
-	t.Run("kubevpnSyncWithServiceMesh", u.kubevpnSyncWithServiceMesh)
-	t.Run("kubevpnSyncWithServiceMeshStatus", u.checkSyncWithServiceMeshStatus)
-	t.Run("commonTest", u.commonTest)
-	t.Run("kubevpnUnSync", u.kubevpnUnSync)
+	t.Run("05-sync/deleteDeployForSaveResource", u.deleteDeployForSaveResource)
+	t.Run("05-sync-full/kubevpnSyncWithFullProxy", u.kubevpnSyncWithFullProxy)
+	t.Run("05-sync-full/kubevpnSyncWithFullProxyStatus", u.checkSyncWithFullProxyStatus)
+	t.Run("05-sync-full/commonTest", u.commonTest)
+	t.Run("05-sync-full/kubevpnUnSync", u.kubevpnUnSync)
+	t.Run("05-sync-mesh/kubevpnSyncWithServiceMesh", u.kubevpnSyncWithServiceMesh)
+	t.Run("05-sync-mesh/kubevpnSyncWithServiceMeshStatus", u.checkSyncWithServiceMeshStatus)
+	t.Run("05-sync-mesh/commonTest", u.commonTest)
+	t.Run("05-sync-mesh/kubevpnUnSync", u.kubevpnUnSync)
 
 	// 6) test mode run
-	t.Run("resetDeployAuthors", u.resetDeployAuthors)
-	t.Run("kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
-	t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
-	t.Run("kubevpnQuit", u.kubevpnQuit)
+	t.Run("06-run/resetDeployAuthors", u.resetDeployAuthors)
+	t.Run("06-run/kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
+	t.Run("06-run/kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
+	t.Run("06-run/kubevpnQuit", u.kubevpnQuit)
 
 	// 7) install centrally in ns kubevpn -- connect mode
-	t.Run("centerKubevpnUninstall", u.kubevpnUninstall(""))
-	t.Run("centerKubevpnInstallInNsKubevpn", u.kubevpnConnectToNsKubevpn)
-	t.Run("centerKubevpnConnect", u.kubevpnConnect)
-	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
-	t.Run("centerCheckConnectStatus", u.centerCheckConnectStatus)
-	t.Run("centerCommonTest", u.commonTest)
+	t.Run("07-central-connect/centerKubevpnUninstall", u.kubevpnUninstall(""))
+	t.Run("07-central-connect/centerKubevpnInstallInNsKubevpn", u.kubevpnConnectToNsKubevpn)
+	t.Run("07-central-connect/centerKubevpnConnect", u.kubevpnConnect)
+	t.Run("07-central-connect/checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
+	t.Run("07-central-connect/centerCheckConnectStatus", u.centerCheckConnectStatus)
+	t.Run("07-central-connect/centerCommonTest", u.commonTest)
 
 	// 8) install centrally in ns kubevpn -- proxy mode
-	t.Run("centerKubevpnProxy", u.kubevpnProxy)
-	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
-	t.Run("centerCommonTest", u.commonTest)
-	t.Run("centerTestUDP", u.testUDP)
-	t.Run("centerProxyServiceReviewsServiceIP", u.proxyServiceReviewsServiceIP)
-	t.Run("centerProxyServiceReviewsPodIP", u.proxyServiceReviewsPodIP)
-	t.Run("centerCheckProxyStatus", u.centerCheckProxyStatus)
+	t.Run("08-central-proxy/centerKubevpnProxy", u.kubevpnProxy)
+	t.Run("08-central-proxy/checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
+	t.Run("08-central-proxy/centerCommonTest", u.commonTest)
+	t.Run("08-central-proxy/centerTestUDP", u.testUDP)
+	t.Run("08-central-proxy/centerProxyServiceReviewsServiceIP", u.proxyServiceReviewsServiceIP)
+	t.Run("08-central-proxy/centerProxyServiceReviewsPodIP", u.proxyServiceReviewsPodIP)
+	t.Run("08-central-proxy/centerCheckProxyStatus", u.centerCheckProxyStatus)
 
 	// 9) install centrally in ns kubevpn -- proxy mode with service mesh
-	t.Run("kubevpnLeave", u.kubevpnLeave)
-	t.Run("kubevpnProxyWithServiceMesh", u.kubevpnProxyWithServiceMesh)
-	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
-	t.Run("commonTest", u.commonTest)
-	t.Run("serviceMeshReviewsServiceIP", u.serviceMeshReviewsServiceIP)
-	t.Run("serviceMeshReviewsPodIP", u.serviceMeshReviewsPodIP)
-	t.Run("centerCheckProxyWithServiceMeshStatus", u.centerCheckProxyWithServiceMeshStatus)
+	t.Run("09-central-proxy-mesh/kubevpnLeave", u.kubevpnLeave)
+	t.Run("09-central-proxy-mesh/kubevpnProxyWithServiceMesh", u.kubevpnProxyWithServiceMesh)
+	t.Run("09-central-proxy-mesh/checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
+	t.Run("09-central-proxy-mesh/commonTest", u.commonTest)
+	t.Run("09-central-proxy-mesh/serviceMeshReviewsServiceIP", u.serviceMeshReviewsServiceIP)
+	t.Run("09-central-proxy-mesh/serviceMeshReviewsPodIP", u.serviceMeshReviewsPodIP)
+	t.Run("09-central-proxy-mesh/centerCheckProxyWithServiceMeshStatus", u.centerCheckProxyWithServiceMeshStatus)
 
 	// 10) install centrally in ns kubevpn -- proxy mode with service mesh and gvisor
-	t.Run("kubevpnQuit", u.kubevpnQuit)
-	t.Run("kubevpnProxyWithServiceMeshAndK8sServicePortMap", u.kubevpnProxyWithServiceMeshAndK8sServicePortMap)
-	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
-	t.Run("commonTest", u.commonTest)
-	t.Run("serviceMeshReviewsServiceIPPortMap", u.serviceMeshReviewsServiceIPPortMap)
-	t.Run("kubevpnLeave", u.kubevpnLeave)
-	t.Run("centerCheckProxyWithServiceMeshAndGvisorStatus", u.centerCheckProxyWithServiceMeshAndGvisorStatus)
-	t.Run("kubevpnLeaveService", u.kubevpnLeaveService)
-	t.Run("kubevpnQuit", u.kubevpnQuit)
+	t.Run("10-central-proxy-mesh-portmap/kubevpnQuit-reset", u.kubevpnQuit)
+	t.Run("10-central-proxy-mesh-portmap/kubevpnProxyWithServiceMeshAndK8sServicePortMap", u.kubevpnProxyWithServiceMeshAndK8sServicePortMap)
+	t.Run("10-central-proxy-mesh-portmap/checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
+	t.Run("10-central-proxy-mesh-portmap/commonTest", u.commonTest)
+	t.Run("10-central-proxy-mesh-portmap/serviceMeshReviewsServiceIPPortMap", u.serviceMeshReviewsServiceIPPortMap)
+	t.Run("10-central-proxy-mesh-portmap/kubevpnLeave", u.kubevpnLeave)
+	t.Run("10-central-proxy-mesh-portmap/centerCheckProxyWithServiceMeshAndGvisorStatus", u.centerCheckProxyWithServiceMeshAndGvisorStatus)
+	t.Run("10-central-proxy-mesh-portmap/kubevpnLeaveService", u.kubevpnLeaveService)
+	t.Run("10-central-proxy-mesh-portmap/kubevpnQuit-teardown", u.kubevpnQuit)
 
 	// 11) test mode sync
-	t.Run("kubevpnSyncWithFullProxy", u.kubevpnSyncWithFullProxy)
-	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
-	t.Run("kubevpnSyncWithFullProxyStatus", u.checkSyncWithFullProxyStatus)
-	t.Run("commonTest", u.commonTest)
-	t.Run("kubevpnUnSync", u.kubevpnUnSync)
-	t.Run("kubevpnSyncWithServiceMesh", u.kubevpnSyncWithServiceMesh)
-	t.Run("checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
-	t.Run("kubevpnSyncWithServiceMeshStatus", u.checkSyncWithServiceMeshStatus)
-	t.Run("commonTest", u.commonTest)
-	t.Run("kubevpnUnSync", u.kubevpnUnSync)
-	t.Run("kubevpnQuit", u.kubevpnQuit)
+	t.Run("11-central-sync-full/kubevpnSyncWithFullProxy", u.kubevpnSyncWithFullProxy)
+	t.Run("11-central-sync-full/checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
+	t.Run("11-central-sync-full/kubevpnSyncWithFullProxyStatus", u.checkSyncWithFullProxyStatus)
+	t.Run("11-central-sync-full/commonTest", u.commonTest)
+	t.Run("11-central-sync-full/kubevpnUnSync", u.kubevpnUnSync)
+	t.Run("11-central-sync-mesh/kubevpnSyncWithServiceMesh", u.kubevpnSyncWithServiceMesh)
+	t.Run("11-central-sync-mesh/checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
+	t.Run("11-central-sync-mesh/kubevpnSyncWithServiceMeshStatus", u.checkSyncWithServiceMeshStatus)
+	t.Run("11-central-sync-mesh/commonTest", u.commonTest)
+	t.Run("11-central-sync-mesh/kubevpnUnSync", u.kubevpnUnSync)
+	t.Run("11-central-sync/kubevpnQuit", u.kubevpnQuit)
 
 	// 12) test mode run
-	t.Run("resetDeployAuthors", u.resetDeployAuthors)
-	t.Run("kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
-	t.Run("kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
-	t.Run("kubevpnQuit", u.kubevpnQuit)
-	t.Run("kubevpnUninstall", u.kubevpnUninstall("kubevpn"))
-	t.Run("kubevpnQuit", u.kubevpnQuit)
+	t.Run("12-central-run/resetDeployAuthors", u.resetDeployAuthors)
+	t.Run("12-central-run/kubevpnRunWithFullProxy", u.kubevpnRunWithFullProxy)
+	t.Run("12-central-run/kubevpnRunWithServiceMesh", u.kubevpnRunWithServiceMesh)
+	t.Run("12-central-run/kubevpnQuit-afterRun", u.kubevpnQuit)
+	t.Run("12-central-run/kubevpnUninstall", u.kubevpnUninstall("kubevpn"))
+	t.Run("12-central-run/kubevpnQuit-final", u.kubevpnQuit)
 }
 
 func (u *ut) commonTest(t *testing.T) {
+	// Fail fast if the cluster connection never came up. Without this a broken
+	// connect cascades into the networked subtests below, each of which retries
+	// for 5-12 minutes (pingPodIP: 60 pings/pod; healthChecker: 30x10s), so a
+	// handful of them can exhaust the 2h CI budget and mask the real failure.
+	u.requireConnected(t)
 	// 1) test domain access
 	t.Run("kubevpnStatus", u.kubevpnStatus)
 	t.Run("pingPodIP", u.pingPodIP)
@@ -164,6 +178,27 @@ func (u *ut) commonTest(t *testing.T) {
 	t.Run("healthCheckServiceDetails", u.healthCheckServiceDetails)
 	t.Run("shortDomainDetails", u.shortDomainDetails)
 	t.Run("fullDomainDetails", u.fullDomainDetails)
+}
+
+// requireConnected asserts there is at least one active ("connected") connection,
+// failing the current test immediately otherwise. Used as a precondition gate so a
+// failed connect surfaces fast instead of hanging the networked subtests.
+func (u *ut) requireConnected(t *testing.T) {
+	t.Helper()
+	output, err := exec.Command("kubevpn", "status", "-o", "json").Output()
+	if err != nil {
+		t.Fatalf("kubevpn status failed, cannot verify connection: %v", err)
+	}
+	var statuses connStatus
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatalf("no active connection (status output=%q): %v", string(output), err)
+	}
+	for _, c := range statuses.List {
+		if c != nil && c.Status == "connected" {
+			return
+		}
+	}
+	t.Fatalf("no active connection before running networked tests; status=%s", string(output))
 }
 
 func (u *ut) pingPodIP(t *testing.T) {
@@ -208,9 +243,38 @@ func (u *ut) healthCheckPodDetails(t *testing.T) {
 	u.healthChecker(t, endpoint, nil, "")
 }
 
+// healthCheckBackoff is the default retry budget for a health check:
+// 30 × 5s = 150s.
+func healthCheckBackoff() wait.Backoff {
+	return wait.Backoff{Duration: time.Second * 5, Factor: 1.0, Jitter: 0, Steps: 30}
+}
+
+// meshHealthCheckBackoff is the extended budget for mesh-mode checks:
+// ~60 × 5s ≈ 300s+. Mesh assertions depend on a live envoy xDS/ADS stream to the
+// traffic-manager pod. On the macOS CI runner the apiserver can stall for several
+// minutes (TLS handshake timeouts), blacking out the traffic-manager pod and
+// breaking the ADS stream until it recovers; the default 150s budget expires
+// mid-outage and the assertion fails on infra flakiness rather than a real bug.
+// The wider, jittered budget rides out that window.
+// See docs/43-macos-ci-apiserver-flakiness.md.
+func meshHealthCheckBackoff() wait.Backoff {
+	return wait.Backoff{Duration: time.Second * 5, Factor: 1.0, Jitter: 0.1, Steps: 60}
+}
+
 func (u *ut) healthChecker(t *testing.T, endpoint string, header map[string]string, keyword string) {
 	// 0 = this frame.
 	_, file, line, ok := runtime.Caller(1)
+	u.healthCheckWithBackoff(t, file, line, ok, endpoint, header, keyword, healthCheckBackoff())
+}
+
+// meshHealthChecker is healthChecker with the extended mesh retry budget.
+func (u *ut) meshHealthChecker(t *testing.T, endpoint string, header map[string]string, keyword string) {
+	// 0 = this frame.
+	_, file, line, ok := runtime.Caller(1)
+	u.healthCheckWithBackoff(t, file, line, ok, endpoint, header, keyword, meshHealthCheckBackoff())
+}
+
+func (u *ut) healthCheckWithBackoff(t *testing.T, file string, line int, ok bool, endpoint string, header map[string]string, keyword string, backoff wait.Backoff) {
 	if ok {
 		// Trim any directory path from the file.
 		slash := strings.LastIndexByte(file, byte('/'))
@@ -233,7 +297,7 @@ func (u *ut) healthChecker(t *testing.T, endpoint string, header map[string]stri
 
 	client := &http.Client{Timeout: time.Second * 5}
 	err = retry.OnError(
-		wait.Backoff{Duration: time.Second * 5, Factor: 1.0, Jitter: 0, Steps: 30},
+		backoff,
 		func(err error) bool { return err != nil },
 		func() error {
 			var resp *http.Response
@@ -307,9 +371,10 @@ func (u *ut) serviceMeshReviewsPodIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	u.waitManagerReady(t)
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	u.healthChecker(t, endpoint, nil, remote)
-	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+	u.meshHealthChecker(t, endpoint, nil, remote)
+	u.meshHealthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
 func (u *ut) serviceMeshReviewsServiceIP(t *testing.T) {
@@ -318,9 +383,10 @@ func (u *ut) serviceMeshReviewsServiceIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	u.waitManagerReady(t)
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	u.healthChecker(t, endpoint, nil, remote)
-	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+	u.meshHealthChecker(t, endpoint, nil, remote)
+	u.meshHealthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
 func (u *ut) serviceMeshReviewsServiceIPPortMap(t *testing.T) {
@@ -329,9 +395,40 @@ func (u *ut) serviceMeshReviewsServiceIPPortMap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	u.waitManagerReady(t)
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	u.healthChecker(t, endpoint, nil, remote)
-	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local8080)
+	u.meshHealthChecker(t, endpoint, nil, remote)
+	u.meshHealthChecker(t, endpoint, map[string]string{"env": "test"}, local8080)
+}
+
+// waitManagerReady blocks (best-effort, ~2m) until a kubevpn-traffic-manager pod
+// is Ready in any namespace, so mesh assertions do not begin against a blacked-out
+// xDS control plane. It lists across all namespaces because the manager lives in
+// the workload namespace for per-namespace installs but in "kubevpn" for the
+// central-mode tests. Best-effort: on timeout it only logs — the extended mesh
+// health-check budget (meshHealthCheckBackoff) is the real backstop, so a
+// transient apiserver stall in this gate never turns into a false failure.
+// See docs/43-macos-ci-apiserver-flakiness.md.
+func (u *ut) waitManagerReady(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	label := fields.OneTermEqualSelector("app", pkgconfig.ConfigMapPodTrafficManager).String()
+	err := wait.PollUntilContextCancel(ctx, 3*time.Second, true, func(ctx context.Context) (bool, error) {
+		pods, err := u.clientset.CoreV1().Pods("").List(ctx, v1.ListOptions{LabelSelector: label})
+		if err != nil {
+			// Transient apiserver error — keep polling within the timeout.
+			return false, nil
+		}
+		for i := range pods.Items {
+			if podutils.IsPodReady(&pods.Items[i]) && pods.Items[i].DeletionTimestamp == nil {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	if err != nil {
+		t.Logf("%s traffic-manager not observed Ready before mesh assertions: %v", time.Now().Format(time.DateTime), err)
+	}
 }
 
 func (u *ut) getServiceIP(app string) (string, error) {
@@ -348,7 +445,7 @@ func (u *ut) getServiceIP(app string) (string, error) {
 			return ip, nil
 		}
 	}
-	return "", fmt.Errorf("failed to found service ip for service %s", app)
+	return "", fmt.Errorf("failed to find service IP for service %s", app)
 }
 
 func (u *ut) proxyServiceReviewsPodIP(t *testing.T) {
@@ -375,7 +472,7 @@ func (u *ut) getPodIP(app string) (string, error) {
 			return pod.Status.PodIP, nil
 		}
 	}
-	return "", fmt.Errorf("failed to found pod ip for service %s", app)
+	return "", fmt.Errorf("failed to find pod IP for service %s", app)
 }
 
 func (u *ut) proxyServiceReviewsServiceIP(t *testing.T) {
@@ -391,13 +488,18 @@ func (u *ut) proxyServiceReviewsServiceIP(t *testing.T) {
 
 func (u *ut) testUDP(t *testing.T) {
 	app := "reviews"
-	port, err := util.GetAvailableUDPPortOrDie()
-	if err != nil {
-		t.Fatal(err)
-	}
-	go u.udpServer(t, port)
+	// Fixed port matching the UDP port declared on reviews: envoy binds it and
+	// forwards to tunIP:<same port>, which the client's gvisor dials on localhost.
+	port := reviewsUDPPort
+	// Tie the server's lifetime to the test so its socket is released when the
+	// test finishes; otherwise the goroutine keeps the fixed port bound and a
+	// later testUDP run (e.g. centerTestUDP) fails with "address already in use".
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go u.udpServer(ctx, t, port)
 
 	var ip string
+	var err error
 	err = retry.OnError(
 		wait.Backoff{Duration: time.Second, Factor: 2, Jitter: 0.2, Steps: 5},
 		func(err error) bool {
@@ -448,22 +550,30 @@ func (u *ut) udpClient(t *testing.T, ip string, port int) error {
 	return nil
 }
 
-func (u *ut) udpServer(t *testing.T, port int) {
+func (u *ut) udpServer(ctx context.Context, t *testing.T, port int) {
 	// 创建监听
 	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
 		IP:   net.ParseIP("127.0.0.1"),
 		Port: port,
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("failed to listen udp: %v", err)
 		return
 	}
 	defer udpConn.Close()
+	// Close the socket on cleanup so ReadFromUDP unblocks and the port is freed.
+	go func() {
+		<-ctx.Done()
+		_ = udpConn.Close()
+	}()
 
 	data := make([]byte, 4096)
 	for {
 		read, remoteAddr, err := udpConn.ReadFromUDP(data[:])
 		if err != nil {
+			if ctx.Err() != nil {
+				return // socket closed on cleanup
+			}
 			t.Logf("failed to read udp data from %v: %v", remoteAddr, err)
 			continue
 		}
@@ -576,13 +686,13 @@ func (u *ut) checkConnectStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: nil,
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -598,13 +708,13 @@ func (u *ut) centerCheckConnectStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: nil,
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -614,7 +724,7 @@ func (u *ut) centerCheckConnectStatus(t *testing.T) {
 	}
 }
 
-type status struct {
+type connStatus struct {
 	List []*connection
 }
 
@@ -650,7 +760,7 @@ func (u *ut) checkProxyStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -659,12 +769,12 @@ func (u *ut) checkProxyStatus(t *testing.T) {
 			RuleList: []*proxyRule{{
 				Headers:       nil,
 				CurrentDevice: true,
-				PortMap:       map[int32]int32{9080: 9080},
+				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -681,7 +791,7 @@ func (u *ut) centerCheckProxyStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -690,12 +800,12 @@ func (u *ut) centerCheckProxyStatus(t *testing.T) {
 			RuleList: []*proxyRule{{
 				Headers:       nil,
 				CurrentDevice: true,
-				PortMap:       map[int32]int32{9080: 9080},
+				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -712,7 +822,7 @@ func (u *ut) checkProxyWithServiceMeshStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -721,12 +831,12 @@ func (u *ut) checkProxyWithServiceMeshStatus(t *testing.T) {
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
 				CurrentDevice: true,
-				PortMap:       map[int32]int32{9080: 9080},
+				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -743,7 +853,7 @@ func (u *ut) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -752,12 +862,12 @@ func (u *ut) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
 				CurrentDevice: true,
-				PortMap:       map[int32]int32{9080: 9080},
+				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -774,7 +884,7 @@ func (u *ut) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -783,12 +893,12 @@ func (u *ut) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
 				CurrentDevice: true,
-				PortMap:       map[int32]int32{9080: 9080},
+				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -812,7 +922,7 @@ func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -821,12 +931,12 @@ func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
 				CurrentDevice: true,
-				PortMap:       map[int32]int32{9080: 8080},
+				PortMap:       map[int32]int32{9080: 8080, 9081: 9081},
 			}},
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -901,6 +1011,10 @@ func (u *ut) checkServiceShouldNotInNsDefault(t *testing.T) {
 }
 
 func (u *ut) kubectl(t *testing.T) {
+	// Capture KubeVPN sidecar logs first: the kubectl commands below dump pod status
+	// and describe (events, exit codes) but not the sidecar container logs that explain
+	// why traffic did not route or a sidecar crash-looped.
+	dumpKubeVPNSidecarLogs(t, u.clientset)
 	cmdGetPod := exec.Command("kubectl", "get", "pods", "-o", "wide", "-A")
 	cmdGetSvc := exec.Command("kubectl", "get", "services", "-o", "wide", "-A")
 	cmdDescribePod := exec.Command("kubectl", "describe", "pods", "-A")

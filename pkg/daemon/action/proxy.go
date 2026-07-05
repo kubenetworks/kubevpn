@@ -2,19 +2,19 @@ package action
 
 import (
 	"context"
-	"io"
+	"fmt"
 	"os"
-	"time"
+	"sync"
 
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 	v1 "k8s.io/api/core/v1"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -32,26 +32,23 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		return err
 	}
 
-	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newProxyWarp(resp), svr.LogFile))
+	logger := newServerStreamLogger(svr.LogFile, req.Level, func(msg string) error {
+		return resp.Send(&rpc.ProxyResponse{Message: msg})
+	})
 	ctx := plog.WithLogger(resp.Context(), logger)
-	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
-
-	var file string
-	defer os.Remove(file)
-	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(ctx, sshConf, []byte(req.KubeconfigBytes), false)
-	} else {
-		file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
-	}
+	file, err := resolveKubeconfig(ctx, req.SshJump, req.KubeconfigBytes, false)
 	if err != nil {
 		return err
 	}
+	defer os.Remove(file)
+	connectReq := convert(req)
+	reqBytes, _ := proto.Marshal(connectReq)
 	connect := &handler.ConnectOptions{
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
-		Request:              convert(req),
+		RequestRaw:           reqBytes,
 	}
 	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
 	if err != nil {
@@ -67,86 +64,85 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	var cli rpc.DaemonClient
 	cli, err = svr.GetClient(false)
 	if err != nil {
-		return errors.Wrap(err, "daemon is not available")
+		return fmt.Errorf("daemon is not available: %w", err)
 	}
 
 	var connResp grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse]
+	var connRespMu sync.Mutex
 	cancel, cancelFunc := context.WithCancel(ctx)
 	defer cancelFunc()
 	go func() {
 		var s rpc.Cancel
-		err = resp.RecvMsg(&s)
-		if err != nil {
+		if recvErr := resp.RecvMsg(&s); recvErr != nil {
 			return
 		}
-		if connResp != nil {
-			_ = connResp.SendMsg(&s)
+		connRespMu.Lock()
+		cr := connResp
+		connRespMu.Unlock()
+		if cr != nil {
+			_ = cr.SendMsg(&s)
 		}
 		cancelFunc()
 	}()
 
 	plog.G(ctx).Debugf("Connecting to cluster")
-	connResp, err = cli.Connect(context.Background())
-	if err != nil {
-		return err
+	cr, connErr := cli.Connect(context.Background())
+	if connErr != nil {
+		return connErr
 	}
+	connRespMu.Lock()
+	connResp = cr
+	connRespMu.Unlock()
 	err = connResp.Send(convert(req))
 	if err != nil {
 		return err
 	}
 	var connectionID string
-	connectionID, err = util.CopyGRPCConnStream(connResp, resp)
+	connectionID, err = grpcutil.CopyGRPCConnStream(connResp, resp)
 	if err != nil {
 		return err
 	}
+	// Tag subsequent logs with the connection ID for concurrent-op isolation.
+	ctx = plog.WithField(ctx, LogFieldConnID, connectionID)
 
-	var options *handler.ConnectOptions
-	for _, connection := range svr.connections {
-		if connection.GetConnectionID() == connectionID {
-			options = connection
-			break
-		}
-	}
-
+	svr.connMu.RLock()
+	options, _ := svr.findConnection(connectionID)
+	svr.connMu.RUnlock()
 	if options == nil {
-		return errors.New("Failed to connect to cluster")
+		return fmt.Errorf("failed to connect to cluster: %w", config.ErrConnectionNotFound)
 	}
 
 	defer func() {
 		if err != nil {
-			_ = options.LeaveAllProxyResources(plog.WithLogger(context.Background(), logger))
+			cleanupCtx := plog.WithLogger(context.Background(), logger)
+			_ = options.LeaveAllProxyResources(cleanupCtx)
+			disconnect(cleanupCtx, svr, connectionID)
+			svr.connMu.Lock()
+			svr.resetCurrentConnection(connectionID)
+			svr.connMu.Unlock()
 		}
 	}()
 
+	ips := svr.getSudoTunIPs(ctx)
+	tunV4, tunV6 := resolveTunIP(options, ips)
+	if tunV4 == "" {
+		return fmt.Errorf("no TUN IP found for connection %s: %w", connectionID, config.ErrTunDeviceFailed)
+	}
 	var podList []v1.Pod
 	podList, err = options.GetRunningPodList(cancel)
 	if err != nil {
 		return err
 	}
 	image := podList[0].Spec.Containers[0].Image
-	err = options.CreateRemoteInboundPod(plog.WithLogger(cancel, logger), req.Namespace, workloads, req.Headers, req.PortMap, image)
+	err = options.CreateRemoteInboundPod(plog.WithLogger(cancel, logger), req.Namespace, workloads, req.Headers, req.PortMap, image, tunV4, tunV6)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to inject inbound sidecar: %v", err)
 		return err
 	}
+	svr.connMu.Lock()
 	svr.currentConnectionID = connectionID
-	options.HealthCheckOnce(cancel, time.Second*5)
+	svr.connMu.Unlock()
 	return nil
-}
-
-type proxyWarp struct {
-	server rpc.Daemon_ProxyServer
-}
-
-func (r *proxyWarp) Write(p []byte) (n int, err error) {
-	_ = r.server.Send(&rpc.ProxyResponse{
-		Message: string(p),
-	})
-	return len(p), nil
-}
-
-func newProxyWarp(server rpc.Daemon_ProxyServer) io.Writer {
-	return &proxyWarp{server: server}
 }
 
 func convert(req *rpc.ProxyRequest) *rpc.ConnectRequest {

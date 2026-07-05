@@ -39,24 +39,24 @@ serviceAccount:
   # If not set and create is true, a name is generated using the fullname template
   name: ""
 
+rbac:
+  # Create a cluster-scoped ClusterRole/ClusterRoleBinding granting the traffic
+  # manager permission to inject sidecars (ProxyInject/LeaveInject) into workloads
+  # in ANY namespace. Required for a centralized install that serves clients across
+  # namespaces. Disable only if this manager serves a single namespace.
+  proxyClusterRole: true
+
 podAnnotations: { }
 podLabels:
 
 podSecurityContext: { }
 # fsGroup: 2000
-securityContext:
-  capabilities:
-    add:
-      - NET_ADMIN
-  privileged: true
-  runAsUser: 0
-  runAsGroup: 0
+securityContext: {}
 
 service:
   type: ClusterIP
   port9002: 9002
   port10801: 10801
-  port80: 80
   port53: 53
 
 resources:
@@ -74,14 +74,6 @@ resourcesSmall:
     cpu: 100m
     memory: 128Mi
 
-livenessProbe:
-  httpGet:
-    path: /
-    port: http
-readinessProbe:
-  httpGet:
-    path: /
-    port: http
 
 autoscaling:
   enabled: false

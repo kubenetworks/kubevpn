@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -17,58 +17,103 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// syncBuffer is a bytes.Buffer safe for concurrent Write and String access.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+// RunLogsWaitRunning streams Docker container logs until the startup slogan appears or the context is cancelled.
 func RunLogsWaitRunning(ctx context.Context, name string) error {
-	buf := bytes.NewBuffer(nil)
-	w := io.MultiWriter(buf, os.Stdout)
-
-	args := []string{"logs", name, "--since", "0m", "--details", "--follow"}
-	cmd := exec.Command("docker", args...)
-	cmd.Stdout = w
-	go cmd.Start()
-
 	cancel, cancelFunc := context.WithCancel(ctx)
 	defer cancelFunc()
 
+	args := []string{"logs", name, "--since", "0m", "--details", "--follow"}
+	cmd := exec.CommandContext(cancel, "docker", args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stderr = os.Stderr
+	if err = cmd.Start(); err != nil {
+		return err
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	// Demux docker's multiplexed log stream to stdout (for the user) and to buf
+	// (for slogan detection). buf is read concurrently by the ticker below.
+	buf := &syncBuffer{}
+	copyDone := make(chan struct{})
 	go func() {
-		t := time.NewTicker(time.Second)
-		defer t.Stop()
-		for range t.C {
-			// keyword, maybe can find another way more elegant
+		defer close(copyDone)
+		_, _ = stdcopy.StdCopy(io.MultiWriter(os.Stdout, buf), os.Stderr, stdout)
+	}()
+
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-cancel.Done():
+			return nil
+		case <-copyDone:
+			return nil
+		case <-t.C:
 			if strings.Contains(buf.String(), config.Slogan) {
-				cancelFunc()
-				return
+				return nil
 			}
 		}
-	}()
-
-	var errChan = make(chan error)
-	go func() {
-		var err error
-		_, err = stdcopy.StdCopy(w, os.Stdout, buf)
-		if err != nil {
-			errChan <- err
-		}
-	}()
-
-	select {
-	case err := <-errChan:
-		return err
-	case <-cancel.Done():
-		return nil
 	}
 }
 
+// RunLogsSinceNow prints Docker container logs from the current moment, optionally following new output.
 func RunLogsSinceNow(name string, follow bool) error {
 	args := []string{"logs", name, "--since", "0m", "--details"}
 	if follow {
 		args = append(args, "--follow")
 	}
-	output, err := exec.Command("docker", args...).CombinedOutput()
-	_, err = stdcopy.StdCopy(os.Stdout, os.Stderr, bytes.NewReader(output))
+	output, _ := exec.Command("docker", args...).CombinedOutput()
+	_, err := stdcopy.StdCopy(os.Stdout, os.Stderr, bytes.NewReader(output))
 	return err
+}
+
+// classifyDockerError tags a docker CLI failure with a sentinel based on its output,
+// so the CLI surfaces a specific exit code. output is the captured combined/stderr text.
+func classifyDockerError(err error, output []byte) error {
+	if err == nil {
+		return nil
+	}
+	lower := strings.ToLower(string(output))
+	trimmed := strings.TrimSpace(string(output))
+	switch {
+	case strings.Contains(lower, "cannot connect to the docker daemon"),
+		strings.Contains(lower, "is the docker daemon running"):
+		return fmt.Errorf("%s: %w: %w", trimmed, err, config.ErrDockerDaemonNotRunning)
+	case strings.Contains(lower, "unable to find image"),
+		strings.Contains(lower, "manifest unknown"),
+		strings.Contains(lower, "pull access denied"),
+		strings.Contains(lower, "repository does not exist"):
+		return fmt.Errorf("%s: %w: %w", trimmed, err, config.ErrDockerImagePull)
+	default:
+		return fmt.Errorf("%s: %w: %w", trimmed, err, config.ErrDockerRun)
+	}
 }
 
 // CreateNetwork
@@ -97,38 +142,47 @@ func CreateNetwork(ctx context.Context, name string) (string, error) {
 
 	id, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	if err != nil {
-		return "", err
+		return "", classifyDockerError(err, id)
 	}
 
 	return string(id), nil
 }
 
+// RunContainer executes a Docker command with the given args, connecting stdin/stdout/stderr to the terminal.
 func RunContainer(ctx context.Context, args []string) error {
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Capture stderr alongside streaming it live, so a failure can be classified
+	// (Docker daemon down / image pull / run) without losing real-time output.
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 
-	log.G(ctx).Debugf("Run container with cmd: %v", cmd.Args)
+	plog.G(ctx).Debugf("Run container with cmd: %v", cmd.Args)
 	err := cmd.Start()
 	if err != nil {
-		log.G(ctx).Errorf("Failed to run container with cmd: %v: %v", cmd.Args, err)
-		return err
+		plog.G(ctx).Errorf("Failed to run container with cmd: %v: %v", cmd.Args, err)
+		return classifyDockerError(err, stderrBuf.Bytes())
 	}
-	return cmd.Wait()
+	if err = cmd.Wait(); err != nil {
+		return classifyDockerError(err, stderrBuf.Bytes())
+	}
+	return nil
 }
 
+// WaitDockerContainerRunning polls until the named Docker container reaches the running state or exits.
 func WaitDockerContainerRunning(ctx context.Context, name string) error {
-	log.G(ctx).Infof("Wait container %s to be running...", name)
+	plog.G(ctx).Infof("Wait container %s to be running...", name)
 
+	const containerPollInterval = 1 * time.Second
 	for ctx.Err() == nil {
-		time.Sleep(time.Second * 1)
+		time.Sleep(containerPollInterval)
 		inspect, err := ContainerInspect(ctx, name)
 		if err != nil {
 			return err
 		}
 		if inspect.State != nil && (inspect.State.Status == "exited" || inspect.State.Status == "dead" || inspect.State.Dead) {
-			err = errors.New(fmt.Sprintf("container status: %s", inspect.State.Status))
+			err = fmt.Errorf("container status: %s", inspect.State.Status)
 			return err
 		}
 		if inspect.State != nil && inspect.State.Running {
@@ -136,10 +190,11 @@ func WaitDockerContainerRunning(ctx context.Context, name string) error {
 		}
 	}
 
-	log.G(ctx).Infof("Container %s is running now", name)
+	plog.G(ctx).Infof("Container %s is running now", name)
 	return nil
 }
 
+// ContainerInspect returns the Docker inspect result for the named container.
 func ContainerInspect(ctx context.Context, name string) (types.ContainerJSON, error) {
 	output, err := exec.CommandContext(ctx, "docker", "inspect", name).CombinedOutput()
 	if err != nil {
@@ -158,11 +213,12 @@ func ContainerInspect(ctx context.Context, name string) (types.ContainerJSON, er
 	return inspect[0], nil
 }
 
+// NetworkInspect returns the Docker network inspect result for the named network.
 func NetworkInspect(ctx context.Context, name string) (network.Inspect, error) {
 	output, err := exec.CommandContext(ctx, "docker", "network", "inspect", name).CombinedOutput()
 	if err != nil {
 		_ = RunLogsSinceNow(name, false)
-		return network.Inspect{}, err
+		return network.Inspect{}, classifyDockerError(err, output)
 	}
 	var inspect []network.Inspect
 	rdr := bytes.NewReader(output)
@@ -176,12 +232,13 @@ func NetworkInspect(ctx context.Context, name string) (network.Inspect, error) {
 	return inspect[0], nil
 }
 
+// NetworkRemove removes the named Docker network, ignoring "not found" errors.
 func NetworkRemove(ctx context.Context, name string) error {
 	output, err := exec.CommandContext(ctx, "docker", "network", "remove", name).CombinedOutput()
 	if err != nil && strings.Contains(string(output), "not found") {
 		return nil
 	}
-	return err
+	return classifyDockerError(err, output)
 }
 
 // NetworkDisconnect
@@ -195,15 +252,16 @@ func NetworkDisconnect(ctx context.Context, containerName string) ([]byte, error
 }
 
 // ContainerRemove
-// docker remove --force
+// docker rm --force
 func ContainerRemove(ctx context.Context, containerName string) ([]byte, error) {
-	output, err := exec.CommandContext(ctx, "docker", "remove", "--force", containerName).CombinedOutput()
+	output, err := exec.CommandContext(ctx, "docker", "rm", "--force", containerName).CombinedOutput()
 	if err != nil && strings.Contains(string(output), "not found") {
 		return output, nil
 	}
 	return output, err
 }
 
+// ContainerKill sends SIGTERM to the named Docker container.
 func ContainerKill(ctx context.Context, name *string) ([]byte, error) {
 	output, err := exec.CommandContext(ctx, "docker", "kill", *name, "--signal", "SIGTERM").CombinedOutput()
 	if err != nil && strings.Contains(string(output), "not found") {

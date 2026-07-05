@@ -119,20 +119,17 @@ Creating ServiceAccount kubevpn-traffic-manager
 Creating Roles kubevpn-traffic-manager
 Creating RoleBinding kubevpn-traffic-manager
 Creating Service kubevpn-traffic-manager
-Creating MutatingWebhookConfiguration kubevpn-traffic-manager
 Creating Deployment kubevpn-traffic-manager
 
 Pod kubevpn-traffic-manager-66d969fd45-9zlbp is Pending
 Container     Reason            Message
-control-plane ContainerCreating
+xds ContainerCreating
 vpn           ContainerCreating
-webhook       ContainerCreating
 
 Pod kubevpn-traffic-manager-66d969fd45-9zlbp is Running
 Container     Reason           Message
-control-plane ContainerRunning
+xds ContainerRunning
 vpn           ContainerRunning
-webhook       ContainerRunning
 
 Forwarding port...
 Connected tunnel
@@ -546,7 +543,7 @@ Clearing DNS settings
 
 You can see that it will start up two containers with docker, mapping to pod two container, and share port with same
 network, you can use `localhost:port`
-to access another container. And more, all environment、volume and network are the same as remote kubernetes pod, it is
+to access another container. And more, all environment, volume and network are the same as remote kubernetes pod, it is
 truly consistent with the kubernetes runtime. Makes develop on local PC come true.
 
 ```shell

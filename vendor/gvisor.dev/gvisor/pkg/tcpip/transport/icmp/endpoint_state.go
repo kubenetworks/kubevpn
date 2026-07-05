@@ -1,0 +1,62 @@
+// Copyright 2018 The gVisor Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package icmp
+
+import (
+	"context"
+	"time"
+
+	"gvisor.dev/gvisor/pkg/log"
+	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/stack"
+)
+
+// saveReceivedAt is invoked by stateify.
+func (p *icmpPacket) saveReceivedAt() int64 {
+	return p.receivedAt.UnixNano()
+}
+
+// loadReceivedAt is invoked by stateify.
+func (p *icmpPacket) loadReceivedAt(_ context.Context, nsec int64) {
+	p.receivedAt = time.Unix(0, nsec)
+}
+
+// afterLoad is invoked by stateify.
+func (e *endpoint) afterLoad(ctx context.Context) {
+	e.stack.RegisterRestoredEndpoint(e)
+}
+
+// beforeSave is invoked by stateify.
+func (e *endpoint) beforeSave() {
+	e.freeze()
+	e.stack.RegisterResumableEndpoint(e)
+}
+
+// Restore implements tcpip.RestoredEndpoint.Restore.
+func (e *endpoint) Restore(s *stack.Stack) {
+	if err := e.net.Resume(s); err != nil {
+		log.Warningf("Closing the ICMP endpoint as it cannot be restored, err: %v", err)
+		e.Close()
+		return
+	}
+
+	e.thaw()
+	e.ops.InitHandler(e, e.stack, tcpip.GetStackSendBufferLimits, tcpip.GetStackReceiveBufferLimits)
+}
+
+// Resume implements tcpip.ResumableEndpoint.Resume.
+func (e *endpoint) Resume() {
+	e.thaw()
+}

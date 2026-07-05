@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	golog "log"
 	"net"
 	"net/http"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/reflection"
 	"gopkg.in/natefinch/lumberjack.v2"
 	glog "gvisor.dev/gvisor/pkg/log"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
@@ -32,6 +33,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// SvrOption holds the runtime state for a daemon server instance, including its gRPC server and lifecycle controls.
 type SvrOption struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -43,29 +45,9 @@ type SvrOption struct {
 	ID     string
 }
 
+// Start initializes logging, creates the Unix socket listener, and serves the gRPC daemon until the context is cancelled.
 func (o *SvrOption) Start(ctx context.Context) error {
-	l := &lumberjack.Logger{
-		Filename:   config.GetDaemonLogPath(o.IsSudo),
-		MaxSize:    100,
-		MaxAge:     3,
-		MaxBackups: 3,
-		LocalTime:  true,
-		Compress:   false,
-	}
-
-	// for gssapi to lookup KDCs in DNS
-	// c.LibDefaults.DNSLookupKDC = true
-	// c.LibDefaults.DNSLookupRealm = true
-
-	log.SetOutput(l)
-	golog.Default().SetOutput(l)
-	klog.SetOutput(l)
-	klog.LogToStderr(false)
-	plog.L.SetOutput(l)
-	glog.SetTarget(plog.ServerEmitter{Writer: &glog.Writer{Next: l}})
-	rest.SetDefaultWarningHandler(rest.NoWarnings{})
-	// every day 00:00:00 rotate log
-	go rotateLog(l)
+	l := initLogging(o.IsSudo)
 
 	sockPath := config.GetSockPath(o.IsSudo)
 	err := os.Remove(sockPath)
@@ -82,7 +64,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	lis.(*net.UnixListener).SetUnlinkOnClose(false)
 	go o.detectUnixSocksFile(o.ctx)
 
-	err = os.Chmod(sockPath, 0666)
+	err = os.Chmod(sockPath, config.FileModeSocket)
 	if err != nil {
 		return err
 	}
@@ -92,16 +74,20 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		return err
 	}
 
-	unaryPanicInterceptor := grpc.UnaryInterceptor(rpc.UnaryPanicHandler)
-	streamPanicInterceptor := grpc.StreamInterceptor(rpc.StreamPanicHandler)
-	svr := grpc.NewServer(unaryPanicInterceptor, streamPanicInterceptor)
-	cleanup, err := admin.Register(svr)
+	// Panic handler runs outermost (turning panics into codes.Internal); the classify
+	// interceptor then maps remaining handler errors to gRPC status codes for exit-code
+	// derivation, leaving already-coded errors (incl. codes.Internal) untouched.
+	svr := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(rpc.UnaryPanicHandler, rpc.UnaryClassifyInterceptor),
+		grpc.ChainStreamInterceptor(rpc.StreamPanicHandler, rpc.StreamClassifyInterceptor),
+	)
+	adminCleanup, err := admin.Register(svr)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to register admin: %v", err)
 		return err
 	}
 	grpc_health_v1.RegisterHealthServer(svr, health.NewServer())
-	defer cleanup()
+	defer adminCleanup()
 	reflection.Register(svr)
 	// [tun-client] 198.18.0.101 - 127.0.0.1:8422: dial tcp 127.0.0.1:55407: connect: can't assign requested address
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
@@ -115,34 +101,33 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		plog.G(ctx).Errorf("Failed to configure http2: %v", err)
 		return err
 	}
-	handler := CreateDowngradingHandler(svr, http.HandlerFunc(http.DefaultServeMux.ServeHTTP))
+	handler := createDowngradingHandler(svr, http.HandlerFunc(http.DefaultServeMux.ServeHTTP))
 	downgradingServer.Handler = h2c.NewHandler(handler, &h2Server)
 	o.uptime = time.Now().Unix()
 	// remember to close http server, otherwise daemon will not quit successfully
-	cancel := func() {
+	cleanup := func() {
 		o.svr.Cancel = nil
 		_ = o.svr.Quit(nil)
 		_ = downgradingServer.Close()
 		_ = l.Close()
 	}
-	o.svr = &action.Server{Cancel: cancel, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: l, ID: o.ID}
+	o.svr = &action.Server{Cancel: cleanup, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: l, ID: o.ID}
 	if !o.IsSudo {
-		go o.svr.LoadFromConfig()
+		go o.svr.LoadFromConfig(o.ctx)
 	}
 	rpc.RegisterDaemonServer(svr, o.svr)
 	return downgradingServer.Serve(lis)
-	//return o.svr.Serve(lis)
 }
 
+// Stop cancels the server context and invokes the server's cleanup callback to shut down gracefully.
 func (o *SvrOption) Stop() {
 	o.cancel()
 	if o.svr != nil && o.svr.Cancel != nil {
-		//o.svr.GracefulStop()
 		o.svr.Cancel()
 	}
 }
 
-// CreateDowngradingHandler takes a gRPC server and a plain HTTP handler, and returns an HTTP handler that has the
+// createDowngradingHandler takes a gRPC server and a plain HTTP handler, and returns an HTTP handler that has the
 // capability of handling HTTP requests and gRPC requests that may require downgrading the response to gRPC-Web or gRPC-WebSocket.
 //
 //	if r.ProtoMajor == 2 && strings.HasPrefix(
@@ -151,7 +136,7 @@ func (o *SvrOption) Stop() {
 //	} else {
 //		yourMux.ServeHTTP(w, r)
 //	}
-func CreateDowngradingHandler(grpcServer *grpc.Server, httpHandler http.Handler) http.Handler {
+func createDowngradingHandler(grpcServer *grpc.Server, httpHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 			grpcServer.ServeHTTP(w, r)
@@ -168,7 +153,7 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 			o.Stop()
 			return
 		}
-		client, conn, err := GetClientWithoutCache(ctx, o.IsSudo)
+		client, conn, err := getClientWithoutCache(ctx, o.IsSudo)
 		if conn != nil {
 			defer conn.Close()
 		}
@@ -208,37 +193,47 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 		}
 	}()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			f()
-			time.Sleep(time.Second * 2)
-		}
-	}
+	const pollInterval = 2 * time.Second
+	wait.UntilWithContext(ctx, func(context.Context) { f() }, pollInterval)
 }
 
 func writePIDToFile(isSudo bool) error {
 	pidPath := config.GetPidPath(isSudo)
 	pid := os.Getpid()
-	err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0644)
-	if err != nil {
-		return err
-	}
-	err = os.Chmod(pidPath, 0644)
-	return err
+	return os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), config.FileModeFile)
 }
 
-// let daemon process to Rotate log. create new log file
-// sudo daemon process then use new log file
+// initLogging creates a rotating log file and wires all loggers (logrus, klog, gvisor, plog)
+// to write to it. It also suppresses Kubernetes client warnings and starts the daily log rotation goroutine.
+func initLogging(isSudo bool) *lumberjack.Logger {
+	l := &lumberjack.Logger{
+		Filename:   config.GetDaemonLogPath(isSudo),
+		MaxSize:    100,
+		MaxAge:     3,
+		MaxBackups: 3,
+		LocalTime:  true,
+		Compress:   false,
+	}
+
+	log.SetOutput(l)
+	golog.Default().SetOutput(l)
+	klog.SetOutput(l)
+	klog.LogToStderr(false)
+	plog.L.SetOutput(l)
+	plog.L.SetLevel(log.DebugLevel)
+	glog.SetTarget(plog.ServerEmitter{Writer: &glog.Writer{Next: l}})
+	rest.SetDefaultWarningHandler(rest.NoWarnings{})
+	go rotateLog(l)
+	return l
+}
+
+// rotateLog rotates the log file daily at midnight.
 func rotateLog(l *lumberjack.Logger) {
-	sec := time.Duration(0)
 	for {
 		nowTime := time.Now()
 		nowTimeStr := nowTime.Format("2006-01-02")
 		t2, _ := time.ParseInLocation("2006-01-02", nowTimeStr, time.Local)
-		next := t2.AddDate(0, 0, 1).Add(sec)
+		next := t2.AddDate(0, 0, 1)
 		after := next.UnixNano() - nowTime.UnixNano()
 		<-time.After(time.Duration(after) * time.Nanosecond)
 		_ = l.Rotate()

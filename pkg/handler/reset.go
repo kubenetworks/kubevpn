@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -23,10 +24,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-// Reset
-// 1) reset configmap
-// 2) remove inject containers envoy and vpn
-// 3) restore service targetPort to containerPort
+// Reset removes injected sidecar containers and restores workloads to their original spec.
 func (c *ConnectOptions) Reset(ctx context.Context, namespace string, workloads []string) error {
 	if c == nil || c.clientset == nil {
 		return nil
@@ -38,7 +36,8 @@ func (c *ConnectOptions) Reset(ctx context.Context, namespace string, workloads 
 		return err
 	}
 
-	err = resetConfigMap(ctx, c.clientset.CoreV1().ConfigMaps(c.Namespace), namespace, workloads)
+	plog.StepStart(ctx, "Resetting workloads")
+	err = resetConfigMap(ctx, c.clientset.CoreV1().ConfigMaps(c.ManagerNamespace), namespace, workloads)
 	if err != nil {
 		plog.G(ctx).Error(err)
 	}
@@ -49,6 +48,7 @@ func (c *ConnectOptions) Reset(ctx context.Context, namespace string, workloads 
 			plog.G(ctx).Error(err)
 		}
 	}
+	plog.StepDone(ctx, "Reset %d workloads", len(workloads))
 
 	return nil
 }
@@ -65,7 +65,7 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 		plog.G(ctx).Infof("No proxy resources found")
 		return nil
 	}
-	var v = make([]*controlplane.Virtual, 0)
+	v := make([]*controlplane.Virtual, 0)
 	str := cm.Data[config.KeyEnvoy]
 	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
 		plog.G(ctx).Errorf("Unmarshal envoy config error: %v", err)
@@ -73,11 +73,11 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 	}
 	ws := sets.New[string]()
 	for _, workload := range workloads {
-		ws.Insert(util.ConvertWorkloadToUid(workload))
+		ws.Insert(util.ConvertWorkloadToUID(workload))
 	}
 
 	for i := 0; i < len(v); i++ {
-		if ws.Has(v[i].Uid) && v[i].Namespace == namespace {
+		if ws.Has(v[i].UID) && v[i].Namespace == namespace {
 			v = append(v[:i], v[i+1:]...)
 			i--
 		}
@@ -85,14 +85,17 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 
 	marshal, err := yaml.Marshal(v)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal envoy config: %w", err)
 	}
 	cm.Data[config.KeyEnvoy] = string(marshal)
 	_, err = mapInterface.Update(ctx, cm, metav1.UpdateOptions{})
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to update configmap %s: %w: %w", config.ConfigMapPodTrafficManager, err, config.ErrCleanupFailed)
+	}
+	return nil
 }
 
-func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clientset *kubernetes.Clientset, namespace, workload string) error {
+func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clientset kubernetes.Interface, namespace, workload string) error {
 	object, controller, err := util.GetTopOwnerObject(ctx, factory, namespace, workload)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
@@ -106,7 +109,7 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 		return err
 	}
 
-	plog.G(ctx).Infof("Leaving workload %s", workload)
+	plog.G(ctx).Debugf("Resetting workload %q", workload)
 
 	inject.RemoveContainers(&templateSpec.Spec)
 
@@ -114,7 +117,7 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 	plog.G(ctx).Debugf("The %s is under controller management", workload)
 	// resource with controller, like deployment,statefulset
 	var bytes []byte
-	bytes, err = json.Marshal([]inject.P{
+	bytes, err = json.Marshal([]inject.JSONPatchOp{
 		{
 			Op:    "replace",
 			Path:  "/" + strings.Join(append(depth, "spec"), "/"),
@@ -130,16 +133,17 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 		plog.G(ctx).Errorf("Failed to patch resource: %s %s: %v", controller.Mapping.Resource.Resource, controller.Name, err)
 		return err
 	}
+	workloadRef := fmt.Sprintf("%s/%s", controller.Mapping.Resource.Resource, controller.Name)
+	// reset restores the original spec; a timed-out rollout must not undo it.
+	if err = util.RolloutStatus(ctx, factory, controller.Namespace, workloadRef, false); err != nil {
+		plog.G(ctx).Warnf("Rollout status check failed for %s: %v", workloadRef, err)
+	}
 	if !util.IsK8sService(object) {
 		return nil
 	}
 
-	var portmap = make(map[int32]int32)
-	for _, container := range templateSpec.Spec.Containers {
-		for _, port := range container.Ports {
-			portmap[port.ContainerPort] = port.ContainerPort
-		}
+	if err = inject.RestoreServiceTargetPort(ctx, clientset, namespace, object.Name); err != nil {
+		return fmt.Errorf("failed to restore service %s target ports: %w: %w", object.Name, err, config.ErrCleanupFailed)
 	}
-	err = inject.ModifyServiceTargetPort(ctx, clientset, namespace, object.Name, portmap)
-	return err
+	return nil
 }

@@ -5,7 +5,8 @@ import (
 
 	"github.com/distribution/reference"
 	"github.com/hashicorp/go-version"
-	"github.com/pkg/errors"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 // CmpClientVersionAndClientImage
@@ -22,7 +23,7 @@ func CmpClientVersionAndClientImage(clientVersion, clientImgStr string) (int, er
 	}
 	clientImgTag, ok := clientImg.(reference.NamedTagged)
 	if !ok {
-		return 0, fmt.Errorf("can not convert client image")
+		return 0, fmt.Errorf("cannot convert client image")
 	}
 
 	// 1. if client image version is match client cli version, does not need to upgrade
@@ -51,13 +52,21 @@ func CmpClientVersionAndPodImageTag(clientVersion string, serverImgStr string) i
 	return CmpVersionMajorOrMinor(clientVersion, serverImgTag.Tag())
 }
 
+// CmpVersionMajorOrMinor compares two semver strings by MAJOR and MINOR segments only, returning -1, 0, or 1.
+//
+// It uses STRICT semver parsing (NewSemver, requiring MAJOR.MINOR.PATCH): non-release version
+// strings — "latest", or git SHAs like "378749d" / "89b23e73..." used as dev/CI image tags —
+// fail to parse and compare as 0 (not comparable ⇒ treated as compatible). This prevents the
+// lenient parser from mistaking a SHA's leading digits for a version (e.g. "89b23e73" → major 89)
+// and wrongly reporting "client version and image tag not compatible", which crash-looped the
+// injected sidecar in CI. Only real X.Y.Z releases are ever compared.
 func CmpVersionMajorOrMinor(v1 string, v2 string) int {
-	version1, err := version.NewVersion(v1)
+	version1, err := version.NewSemver(v1)
 	if err != nil {
 		return 0
 	}
 
-	version2, err := version.NewVersion(v2)
+	version2, err := version.NewSemver(v2)
 	if err != nil {
 		return 0
 	}
@@ -80,6 +89,7 @@ func CmpVersionMajorOrMinor(v1 string, v2 string) int {
 	return 0
 }
 
+// GetTargetImage returns the image reference with its tag replaced by the given version string.
 func GetTargetImage(version string, image string) string {
 	serverImg, err := reference.ParseNormalizedNamed(image)
 	if err != nil {
@@ -105,14 +115,14 @@ MAJOR and MINOR different should be same, otherwise needs upgrade
 func IsNewer(clientVer string, clientImg string, serverImg string) (bool, error) {
 	isNeedUpgrade, _ := CmpClientVersionAndClientImage(clientVer, clientImg)
 	if isNeedUpgrade != 0 {
-		err := errors.New("\n" + PrintStr(fmt.Sprintf("Client version and image tag not compatible. client version: %s, image: %s", clientVer, clientImg)))
+		err := fmt.Errorf("\n%s: %w", FormatBanner(fmt.Sprintf("Client version and image tag not compatible. client version: %s, image: %s", clientVer, clientImg)), config.ErrDaemonVersionMismatch)
 		return true, err
 	}
 	cmp := CmpClientVersionAndPodImageTag(clientVer, serverImg)
 	if cmp > 0 {
 		return true, nil
 	} else if cmp < 0 {
-		err := errors.New("\n" + PrintStr(fmt.Sprintf("Client version too old. client version: %s, server version: %s", clientVer, serverImg)))
+		err := fmt.Errorf("\n%s: %w", FormatBanner(fmt.Sprintf("Client version too old. client version: %s, server version: %s", clientVer, serverImg)), config.ErrDaemonVersionMismatch)
 		return true, err
 	}
 	return false, nil

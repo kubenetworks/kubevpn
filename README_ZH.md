@@ -107,20 +107,17 @@ Creating ServiceAccount kubevpn-traffic-manager
 Creating Roles kubevpn-traffic-manager
 Creating RoleBinding kubevpn-traffic-manager
 Creating Service kubevpn-traffic-manager
-Creating MutatingWebhookConfiguration kubevpn-traffic-manager
 Creating Deployment kubevpn-traffic-manager
 
 Pod kubevpn-traffic-manager-66d969fd45-9zlbp is Pending
 Container     Reason            Message
-control-plane ContainerCreating
+xds ContainerCreating
 vpn           ContainerCreating
-webhook       ContainerCreating
 
 Pod kubevpn-traffic-manager-66d969fd45-9zlbp is Running
 Container     Reason           Message
-control-plane ContainerRunning
+xds ContainerRunning
 vpn           ContainerRunning
-webhook       ContainerRunning
 
 Forwarding port...
 Connected tunnel

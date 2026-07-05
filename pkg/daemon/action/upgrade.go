@@ -10,6 +10,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// Upgrade compares the client version against the daemon version and indicates whether the daemon needs upgrading.
 func (svr *Server) Upgrade(ctx context.Context, req *rpc.UpgradeRequest) (*rpc.UpgradeResponse, error) {
 	var err error
 	var clientVersion, daemonVersion *goversion.Version
@@ -22,7 +23,7 @@ func (svr *Server) Upgrade(ctx context.Context, req *rpc.UpgradeRequest) (*rpc.U
 		return nil, err
 	}
 	if clientVersion.GreaterThan(daemonVersion) {
-		plog.G(context.Background()).Info("Daemon version is less than client, needs to upgrade")
+		plog.G(ctx).Info("Daemon version is less than client, needs to upgrade")
 		return &rpc.UpgradeResponse{NeedUpgrade: true}, nil
 	}
 	return &rpc.UpgradeResponse{NeedUpgrade: false}, nil

@@ -6,29 +6,22 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"text/tabwriter"
 	"time"
 
 	"github.com/moby/term"
-	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/util/httpstream"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/portforward"
-	"k8s.io/client-go/transport/spdy"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/cmd/exec"
 	"k8s.io/kubectl/pkg/cmd/util"
@@ -38,11 +31,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-type PodRouteConfig struct {
-	LocalTunIPv4 string
-	LocalTunIPv6 string
-}
-
+// PrintStatus writes a tabular summary of pod container statuses or conditions to the writer.
 func PrintStatus(pod *corev1.Pod, writer io.Writer) {
 	w := tabwriter.NewWriter(writer, 1, 1, 1, ' ', 0)
 	defer w.Flush()
@@ -73,6 +62,40 @@ func PrintStatus(pod *corev1.Pod, writer io.Writer) {
 	}
 }
 
+// PodStatusSummary returns a single-line, human-readable reason a pod is not yet
+// ready — the waiting/terminated reason per container, or the unmet scheduling
+// condition (e.g. "PodScheduled=Unschedulable"). Suitable for a live spinner
+// line; the full detail (with messages) is available via PrintStatus.
+func PodStatusSummary(pod *corev1.Pod) string {
+	var parts []string
+	for _, s := range pod.Status.ContainerStatuses {
+		switch {
+		case s.State.Waiting != nil:
+			parts = append(parts, fmt.Sprintf("%s=%s", s.Name, s.State.Waiting.Reason))
+		case s.State.Terminated != nil:
+			parts = append(parts, fmt.Sprintf("%s=%s", s.Name, s.State.Terminated.Reason))
+		case s.State.Running != nil:
+			parts = append(parts, fmt.Sprintf("%s=Running", s.Name))
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, ", ")
+	}
+	for _, c := range pod.Status.Conditions {
+		if c.Status != corev1.ConditionTrue {
+			if c.Reason != "" {
+				return fmt.Sprintf("%s=%s", c.Type, c.Reason)
+			}
+			return string(c.Type)
+		}
+	}
+	if pod.Status.Phase != "" {
+		return string(pod.Status.Phase)
+	}
+	return "pending"
+}
+
+// GetEnv executes "env" in each container of the pod and returns a map of container names to temp file paths containing the environment output.
 func GetEnv(ctx context.Context, set *kubernetes.Clientset, config *rest.Config, ns, podName string) (map[string]string, error) {
 	pod, err := set.CoreV1().Pods(ns).Get(ctx, podName, v1.GetOptions{})
 	if err != nil {
@@ -98,6 +121,7 @@ func GetEnv(ctx context.Context, set *kubernetes.Clientset, config *rest.Config,
 	return result, nil
 }
 
+// WaitPod watches pods matching the list options until the checker function returns true or the context is cancelled.
 func WaitPod(ctx context.Context, podInterface v12.PodInterface, list v1.ListOptions, checker func(*corev1.Pod) bool) error {
 	w, err := podInterface.Watch(ctx, list)
 	if err != nil {
@@ -113,76 +137,33 @@ func WaitPod(ctx context.Context, podInterface v12.PodInterface, list v1.ListOpt
 				}
 			}
 		case <-ctx.Done():
-			return errors.New("wait for pod to be ready timeout")
+			return fmt.Errorf("wait for pod to be ready timeout: %w", ctx.Err())
 		}
 	}
 }
 
-func PortForwardPod(config *rest.Config, clientset *rest.RESTClient, podName, namespace string, portPair []string, readyChan chan struct{}, stopChan <-chan struct{}, out, errOut io.Writer) error {
-	url := clientset.
-		Post().
-		Resource("pods").
-		Namespace(namespace).
-		Name(podName).
-		SubResource("portforward").
-		URL()
-	transport, upgrader, err := spdy.RoundTripperFor(config)
-	if err != nil {
-		plog.G(context.Background()).Errorf("Create spdy roundtripper error: %s", err.Error())
-		return err
-	}
-	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
-	// Legacy SPDY executor is default. If feature gate enabled, fallback
-	// executor attempts websockets first--then SPDY.
-	if util.RemoteCommandWebsockets.IsEnabled() {
-		// WebSocketExecutor must be "GET" method as described in RFC 6455 Sec. 4.1 (page 17).
-		websocketDialer, err := portforward.NewSPDYOverWebsocketDialer(url, config)
-		if err != nil {
-			return err
-		}
-		dialer = portforward.NewFallbackDialer(websocketDialer, dialer, httpstream.IsUpgradeFailure)
-	}
-	forwarder, err := portforward.New(dialer, portPair, stopChan, readyChan, out, errOut)
-	if err != nil {
-		return err
-	}
-
-	suppressExpectedPortForwardCloseErrors()
-	defer forwarder.Close()
-
-	var errChan = make(chan error, 1)
-	go func() {
-		errChan <- forwarder.ForwardPorts()
-	}()
-
-	select {
-	case err = <-errChan:
-		return err
-	case <-stopChan:
-		return nil
-	}
-}
-
-var portForwardErrorHandlerOnce sync.Once
-
-func suppressExpectedPortForwardCloseErrors() {
-	portForwardErrorHandlerOnce.Do(func() {
-		prev := append([]utilruntime.ErrorHandler(nil), utilruntime.ErrorHandlers...)
-		utilruntime.ErrorHandlers = []utilruntime.ErrorHandler{
-			func(ctx context.Context, err error, msg string, keysAndValues ...interface{}) {
-				if err != nil && strings.Contains(strings.ToLower(err.Error()), "error closing listener: close tcp") &&
-					strings.Contains(strings.ToLower(err.Error()), "use of closed network connection") {
-					return
-				}
-				for _, handler := range prev {
-					handler(ctx, err, msg, keysAndValues...)
-				}
-			},
-		}
+// Shell executes a command in a pod container and returns the stdout output.
+// The exec stream to the pod (over the apiserver) can drop mid-flight on flaky or
+// nested-VM clusters ("error stream protocol error", EOF); since every caller runs
+// a non-interactive read-only command (no stdin), it is safe to retry a fresh exec
+// on such transient stream errors. See retryTransientExec.
+func Shell(ctx context.Context, clientset kubernetes.Interface, config *rest.Config, podName, containerName, ns string, cmd []string) (string, error) {
+	var stdout, stderr string
+	err := retryTransientExec(func() error {
+		var e error
+		stdout, stderr, e = shellOnce(ctx, clientset, config, podName, containerName, ns, cmd)
+		return e
 	})
+	if err != nil {
+		return stderr, err
+	}
+	return stdout, nil
 }
 
-func Shell(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Config, podName, containerName, ns string, cmd []string) (string, error) {
+// shellOnce runs the pod exec once, returning (stdout, stderr, err). Stderr is only
+// meaningful when err != nil (Shell returns it to preserve the previous behavior of
+// surfacing the remote command's stderr on failure).
+func shellOnce(ctx context.Context, clientset kubernetes.Interface, config *rest.Config, podName, containerName, ns string, cmd []string) (string, string, error) {
 	stdin, _, _ := term.StdStreams()
 	buf := bytes.NewBuffer(nil)
 	errBuf := bytes.NewBuffer(nil)
@@ -202,14 +183,14 @@ func Shell(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Co
 		Config:    config,
 	}
 	if err := options.Run(); err != nil {
-		return errBuf.String(), err
+		return "", errBuf.String(), err
 	}
-	return strings.TrimRight(buf.String(), "\n"), nil
+	return strings.TrimRight(buf.String(), "\n"), "", nil
 }
 
-func AllContainerIsRunning(pod *corev1.Pod) bool {
-	isReady := podutils.IsPodReady(pod)
-	if !isReady {
+// AllContainersRunning reports whether the pod is ready and all containers have a ready status.
+func AllContainersRunning(pod *corev1.Pod) bool {
+	if !podutils.IsPodReady(pod) {
 		return false
 	}
 	for _, status := range pod.Status.ContainerStatuses {
@@ -220,6 +201,7 @@ func AllContainerIsRunning(pod *corev1.Pod) bool {
 	return true
 }
 
+// FindContainerEnv searches for an environment variable by key in the container spec and returns its value.
 func FindContainerEnv(container *corev1.Container, key string) (value string, found bool) {
 	if container == nil {
 		return
@@ -234,6 +216,7 @@ func FindContainerEnv(container *corev1.Container, key string) (value string, fo
 	return
 }
 
+// FindContainerByName returns the container with the given name and its index, or (nil, -1) if not found.
 func FindContainerByName(pod *corev1.Pod, name string) (*corev1.Container, int) {
 	for i := range pod.Spec.Containers {
 		if pod.Spec.Containers[i].Name == name {
@@ -243,6 +226,7 @@ func FindContainerByName(pod *corev1.Pod, name string) (*corev1.Container, int) 
 	return nil, -1
 }
 
+// CheckPodStatus continuously watches the named pod and invokes cancelFunc if the pod is deleted or unreachable.
 func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName string, podInterface v12.PodInterface) {
 	var verifyAPIServerConnection = func() {
 		err := retry.OnError(
@@ -251,7 +235,8 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				return err != nil
 			},
 			func() error {
-				ctx1, cancelFunc1 := context.WithTimeout(ctx, time.Second*10)
+				const podGetTimeout = 10 * time.Second
+				ctx1, cancelFunc1 := context.WithTimeout(ctx, podGetTimeout)
 				defer cancelFunc1()
 				_, err := podInterface.Get(ctx1, podName, v1.GetOptions{})
 				return err
@@ -262,9 +247,10 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 		}
 	}
 
+	const podStatusPollInterval = 5 * time.Second
 	for ctx.Err() == nil {
 		func() {
-			defer time.Sleep(time.Second * 5)
+			defer time.Sleep(podStatusPollInterval)
 
 			w, err := podInterface.Watch(ctx, v1.ListOptions{
 				FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
@@ -276,29 +262,28 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 			defer w.Stop()
 
 			verifyAPIServerConnection()
-			select {
-			case e, ok := <-w.ResultChan():
-				if !ok {
-					verifyAPIServerConnection()
-					return
-				}
-				switch e.Type {
-				case watch.Deleted:
-					plog.G(ctx).Errorf("Pod %s is deleted", podName)
-					cancelFunc()
-					return
-				case watch.Error:
-					verifyAPIServerConnection()
-					return
-				case watch.Added, watch.Modified, watch.Bookmark:
-					// do nothing
-				}
+			e, ok := <-w.ResultChan()
+			if !ok {
+				verifyAPIServerConnection()
+				return
+			}
+			switch e.Type {
+			case watch.Deleted:
+				plog.G(ctx).Errorf("Pod %s is deleted", podName)
+				cancelFunc()
+				return
+			case watch.Error:
+				verifyAPIServerConnection()
+				return
+			case watch.Added, watch.Modified, watch.Bookmark:
+				// do nothing
 			}
 		}()
 	}
 }
 
-func GetRunningPodList(ctx context.Context, clientset *kubernetes.Clientset, ns string, labelSelector string) ([]corev1.Pod, error) {
+// GetRunningPodList returns pods matching the label selector that are in Running phase with all containers ready.
+func GetRunningPodList(ctx context.Context, clientset kubernetes.Interface, ns string, labelSelector string) ([]corev1.Pod, error) {
 	list, err := clientset.CoreV1().Pods(ns).List(ctx, v1.ListOptions{
 		LabelSelector: labelSelector,
 	})
@@ -306,17 +291,18 @@ func GetRunningPodList(ctx context.Context, clientset *kubernetes.Clientset, ns 
 		return nil, err
 	}
 	for i := 0; i < len(list.Items); i++ {
-		if list.Items[i].GetDeletionTimestamp() != nil || !AllContainerIsRunning(&list.Items[i]) {
+		if list.Items[i].GetDeletionTimestamp() != nil || !AllContainersRunning(&list.Items[i]) {
 			list.Items = append(list.Items[:i], list.Items[i+1:]...)
 			i--
 		}
 	}
 	if len(list.Items) == 0 {
-		return nil, fmt.Errorf("no running pod with label: %s", labelSelector)
+		return nil, fmt.Errorf("no running pod with label %s: %w", labelSelector, config.ErrNotFound)
 	}
 	return list.Items, nil
 }
 
+// DetectPodSupportIPv6 checks whether the traffic manager pod in the cluster has IPv6 enabled.
 func DetectPodSupportIPv6(ctx context.Context, factory util.Factory, namespace string) (bool, error) {
 	clientSet, err := factory.KubernetesClientSet()
 	if err != nil {
@@ -343,8 +329,9 @@ func DetectPodSupportIPv6(ctx context.Context, factory util.Factory, namespace s
 	return disableIPv6 == 0, nil
 }
 
+// GetPodIP returns all valid IP addresses assigned to the pod from its status.
 func GetPodIP(pod corev1.Pod) []string {
-	var result = sets.New[string]().Insert()
+	result := sets.New[string]()
 	for _, p := range pod.Status.PodIPs {
 		if net.ParseIP(p.IP) != nil {
 			result.Insert(p.IP)

@@ -27,6 +27,7 @@ func WithLogger(ctx context.Context, logger *log.Logger) context.Context {
 	return context.WithValue(ctx, loggerKey{}, &loggerValue{logger: logger})
 }
 
+// WithoutLogger removes the logger from the context, causing subsequent calls to fall back to the default logger.
 func WithoutLogger(ctx context.Context) context.Context {
 	if logger := ctx.Value(loggerKey{}); logger != nil {
 		logger.(*loggerValue).logger = nil
@@ -41,6 +42,16 @@ func getLogger(ctx context.Context) *log.Logger {
 		return logger.(*loggerValue).logger
 	}
 	return L
+}
+
+// IsDebugEnabled reports whether the logger bound to ctx records at Debug level. Use this to
+// guard expensive debug-only work (e.g. per-packet parsing) instead of the global config.Debug
+// flag: the daemon's per-RPC logger always writes the file at Debug regardless of the CLI's
+// --debug, so this stays true in the daemon (the file is a full record) while the StreamHook
+// independently decides what reaches the CLI. In the CLI/server process the logger level follows
+// --debug, so the guard still skips the work when debug is off.
+func IsDebugEnabled(ctx context.Context) bool {
+	return getLogger(ctx).IsLevelEnabled(log.DebugLevel)
 }
 
 type fieldsKey struct{}
@@ -77,6 +88,29 @@ func GetFields(ctx context.Context) map[string]any {
 		}
 	}
 	return nil
+}
+
+// StepTitle logs a heading that precedes a group of steps (e.g. "Connecting to
+// the cluster ..."). On a TTY the CLI renders it in bold with no spinner and no
+// check mark; on non-TTY output it prints plainly. It carries no "in progress"
+// or "done" semantics — it is purely a banner.
+func StepTitle(ctx context.Context, message string) {
+	G(ctx).WithField(stepFieldKey, stepTitle).Info(message)
+}
+
+// StepStart logs the beginning of a setup step. On a TTY the CLI renders it as
+// an animated spinner line; the text should be present-continuous (e.g.
+// "Forwarding ports"). Pair it with StepDone once the step succeeds.
+func StepStart(ctx context.Context, message string) {
+	G(ctx).WithField(stepFieldKey, stepStart).Info(message)
+}
+
+// StepDone logs the successful completion of a step. The CLI finalizes the
+// spinner line as " ✓ <message>"; include any data discovered during the step
+// (e.g. "Forwarded ports (TCP/UDP/xDS)"). On non-TTY output it prints the line
+// plainly with the check mark.
+func StepDone(ctx context.Context, format string, args ...any) {
+	G(ctx).WithField(stepFieldKey, stepDone).Infof(format, args...)
 }
 
 // GetLogger 从 context 中获取 logger，并自动添加 context 中存储的字段

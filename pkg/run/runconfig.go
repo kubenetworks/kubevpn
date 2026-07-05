@@ -5,13 +5,10 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
-	"strconv"
-	"strings"
 
 	typescontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/go-connections/nat"
-	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"github.com/miekg/dns"
 	corev1 "k8s.io/api/core/v1"
@@ -23,24 +20,21 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// RunConfig holds the Docker CLI arguments for a single container to be started.
 type RunConfig struct {
-	name string
-
+	name    string
 	options []string
 	image   string
 	args    []string
 	command []string
-
-	//platform *v1.Platform
-	//Options  RunOptions
-	//Copts    ContainerOptions
 }
 
+// ConfigList is an ordered list of RunConfigs representing all containers for a workload.
 type ConfigList []*RunConfig
 
-func (l ConfigList) Remove(ctx context.Context, userAnotherContainerNet bool) error {
+func (l ConfigList) Remove(ctx context.Context, useAnotherContainerNet bool) error {
 	for index, runConfig := range l {
-		if !userAnotherContainerNet && index == len(l)-1 {
+		if !useAnotherContainerNet && index == len(l)-1 {
 			output, err := util.NetworkDisconnect(ctx, runConfig.name)
 			if err != nil {
 				plog.G(ctx).Warnf("Failed to disconnect container network: %s: %v", string(output), err)
@@ -62,18 +56,22 @@ func (l ConfigList) Remove(ctx context.Context, userAnotherContainerNet bool) er
 	return nil
 }
 
+// Run starts containers in reverse order: sidecars first (detached), dev container last (foreground).
 func (l ConfigList) Run(ctx context.Context) error {
 	for index := len(l) - 1; index >= 0; index-- {
 		conf := l[index]
-
-		err := util.RunContainer(ctx, convertToDockerArgs(conf))
-		if err != nil {
+		if err := util.RunContainer(ctx, convertToDockerArgs(conf)); err != nil {
+			// A cancelled context means the user interrupted (Ctrl-C): exec.CommandContext
+			// SIGKILLs docker, surfacing a spurious "signal: killed: docker run failed".
+			// Treat it as a clean shutdown — the rollback funcs still run, and main sets
+			// exit code 130 from the interrupt signal itself.
+			if ctx.Err() != nil {
+				return nil
+			}
 			return err
 		}
-
 		if index != 0 {
-			err = util.WaitDockerContainerRunning(ctx, conf.name)
-			if err != nil {
+			if err := util.WaitDockerContainerRunning(ctx, conf.name); err != nil {
 				return err
 			}
 		}
@@ -81,161 +79,204 @@ func (l ConfigList) Run(ctx context.Context) error {
 	return nil
 }
 
-// ConvertPodToContainerConfigList
-/**
- if len(option.ContainerOptions.netMode.Value()) is not empty
- 		--> use other container network, needs to clear dns config and exposePort config
- if len(option.ContainerOptions.netMode.Value()) is empty
-		--> use last container(not dev container) network, other container network, needs to clear dns config and exposePort config
-*/
+// ConvertPodToContainerConfigList converts a K8s PodTemplateSpec into Docker container configs.
+//
+// Container layout:
+//   - index 0: "dev" container (user interactive, foreground)
+//   - index 1..N: sidecar containers (detached)
+//
+// Network topology (when no explicit --network is set):
+//   - The last container owns the network namespace (DNS, ports, docker network)
+//   - All other containers attach to it via --network container:<lastName>
 func (option *Options) ConvertPodToContainerConfigList(
 	ctx context.Context,
-	temp corev1.PodTemplateSpec,
+	podCtx *PodContext,
 	conf *Config,
 	hostConfig *HostConfig,
-	envMap map[string]string,
-	mountVolume map[string][]mount.Mount,
-	dnsConfig *dns.ClientConfig,
-) (configList ConfigList, err error) {
+) (ConfigList, error) {
+	temp := *podCtx.TemplateSpec
 	inject.RemoveContainers(&temp.Spec)
-	// move dev container to location first
-	for index, c := range temp.Spec.Containers {
-		if option.ContainerName == c.Name {
-			temp.Spec.Containers[0], temp.Spec.Containers[index] = temp.Spec.Containers[index], temp.Spec.Containers[0]
-			break
-		}
-	}
+	moveDevContainerFirst(&temp, option.ContainerName)
 
-	var allPortMap = nat.PortMap{}
-	var allPortSet = nat.PortSet{}
-	for k, v := range conf.ExposedPorts {
-		allPortSet[k] = v
-	}
-	// user special -p hostPort:containerPort will work
-	for k, v := range hostConfig.PortBindings {
-		allPortMap[k] = v
-	}
+	portMap, portSet := collectExposedPorts(conf, hostConfig)
+	lastIdx := len(temp.Spec.Containers) - 1
+	lastName := util.Join(option.Namespace, temp.Spec.Containers[lastIdx].Name, randomSuffix())
+	hasUserNetMode := len(option.ContainerOptions.netMode.Value()) != 0
+	userNetMode := option.ContainerOptions.netMode.NetworkMode()
 
-	lastContainerIdx := len(temp.Spec.Containers) - 1
-	lastContainerRandomName := util.Join(option.Namespace, temp.Spec.Containers[lastContainerIdx].Name, strings.ReplaceAll(uuid.New().String(), "-", "")[:5])
+	var configList ConfigList
 	for index, container := range temp.Spec.Containers {
-		name := util.Join(option.Namespace, container.Name)
-		randomName := util.Join(name, strings.ReplaceAll(uuid.New().String(), "-", "")[:5])
-		localEnv, err := filepath.Abs(envMap[name])
+		isLast := index == lastIdx
+		isDev := index == 0
+		envKey := util.Join(option.Namespace, container.Name)
+		containerName := util.If(isLast, lastName, util.Join(envKey, randomSuffix()))
+
+		opts, err := buildContainerOptions(container, temp, envKey, containerName, podCtx.EnvMap, podCtx.MountVolume)
 		if err != nil {
 			return nil, err
 		}
-		var options = []string{
-			"--env-file", localEnv,
-			"--domainname", temp.Spec.Subdomain,
-			"--workdir", container.WorkingDir,
-			"--cap-add", "SYS_PTRACE",
-			"--cap-add", "SYS_ADMIN",
-			"--cap-add", "SYS_PTRACE",
-			"--cap-add", "SYS_ADMIN",
-			"--security-opt", "apparmor=unconfined",
-			"--security-opt", "seccomp=unconfined",
-			"--pull", ConvertK8sImagePullPolicyToDocker(container.ImagePullPolicy),
-			"--name", util.If(index == lastContainerIdx, lastContainerRandomName, randomName),
-			"--user", "root",
-			"--env", "LC_ALL=C.UTF-8",
-		}
-		for k, v := range temp.Labels {
-			options = append(options, "--label", fmt.Sprintf("%s=%s", k, v))
-		}
-		if container.TTY {
-			options = append(options, "--tty")
-		}
-		if ptr.Deref(ptr.Deref(container.SecurityContext, corev1.SecurityContext{}).Privileged, false) {
-			options = append(options, "--privileged")
-		}
-		for _, m := range mountVolume[name] {
-			localDir, err := filepath.Abs(m.Source)
-			if err != nil {
-				return nil, err
-			}
-			options = append(options, "--volume", fmt.Sprintf("%s:%s", localDir, m.Target))
+
+		addContainerPortBindings(container.Ports, portMap, portSet)
+
+		if err := appendNetworkOptions(&opts, ctx, index, lastIdx, lastName, hasUserNetMode, userNetMode, podCtx.DNSConfig, podCtx.EnvMap[envKey], container.Name, portMap, hostConfig); err != nil {
+			return nil, err
 		}
 
-		for _, port := range container.Ports {
-			p := nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, strings.ToLower(string(port.Protocol))))
-			var portBinding nat.PortBinding
-			if port.HostPort != 0 {
-				portBinding = nat.PortBinding{HostPort: strconv.FormatInt(int64(port.HostPort), 10)}
-			} else {
-				portBinding = nat.PortBinding{HostPort: strconv.FormatInt(int64(port.ContainerPort), 10)}
-			}
-			// add only if not found
-			if allPortMap[p] == nil {
-				allPortMap[p] = []nat.PortBinding{portBinding}
-				allPortSet[p] = struct{}{}
-			}
+		r := RunConfig{
+			name:    containerName,
+			options: util.If(!isDev, append(opts, "--detach"), opts),
+			image:   util.If(isDev && option.DevImage != "", option.DevImage, container.Image),
+			args:    util.If(isDev && len(conf.Cmd) != 0, conf.Cmd, container.Args),
+			command: util.If(isDev && len(conf.Entrypoint) != 0, conf.Entrypoint, container.Command),
 		}
-
-		// if netMode is empty, then 0 ~ last-1 use last container network
-		if len(option.ContainerOptions.netMode.Value()) == 0 {
-			// set last container
-			if lastContainerIdx == index {
-				options = append(options,
-					"--dns-option", fmt.Sprintf("ndots=%d", dnsConfig.Ndots),
-					"--hostname", GetEnvByKey(envMap[name], "HOSTNAME", container.Name),
-				)
-				for _, server := range dnsConfig.Servers {
-					options = append(options, "--dns", server)
-				}
-				for _, search := range dnsConfig.Search {
-					options = append(options, "--dns-search", search)
-				}
-				for p, bindings := range allPortMap {
-					for _, binding := range bindings {
-						options = append(options, "--publish", fmt.Sprintf("%s:%s", binding.HostPort, p.Port()))
-					}
-					options = append(options, "--expose", p.Port())
-				}
-				if hostConfig.PublishAllPorts {
-					options = append(options, "--publish-all")
-				}
-				_, err = util.CreateNetwork(ctx, config.ConfigMapPodTrafficManager)
-				if err != nil {
-					plog.G(ctx).Errorf("Failed to create network: %v", err)
-					return nil, err
-				}
-				plog.G(ctx).Infof("Create docker network %s", config.ConfigMapPodTrafficManager)
-				options = append(options, "--network", config.ConfigMapPodTrafficManager)
-			} else { // set 0 to last-1 container to use last container network
-				options = append(options, "--network", util.ContainerNet(lastContainerRandomName))
-				options = append(options, "--pid", util.ContainerNet(lastContainerRandomName))
-			}
-		} else { // set all containers to use network mode
-			plog.G(ctx).Infof("Network mode is %s", option.ContainerOptions.netMode.NetworkMode())
-			options = append(options, "--network", option.ContainerOptions.netMode.NetworkMode())
-			if typescontainer.NetworkMode(option.ContainerOptions.netMode.NetworkMode()).IsContainer() {
-				options = append(options, "--pid", option.ContainerOptions.netMode.NetworkMode())
-			}
-		}
-
-		var r = RunConfig{
-			name:    util.If(index == lastContainerIdx, lastContainerRandomName, randomName),
-			options: util.If(index != 0, append(options, "--detach"), options),
-			image:   util.If(index == 0 && option.DevImage != "", option.DevImage, container.Image),
-			args:    util.If(index == 0 && len(conf.Cmd) != 0, conf.Cmd, container.Args),
-			command: util.If(index == 0 && len(conf.Entrypoint) != 0, conf.Entrypoint, container.Command),
-		}
-		if index == 0 {
-			MergeDockerOptions(&r, option, conf, hostConfig)
+		if isDev {
+			mergeDevContainerOptions(&r, option, conf, hostConfig)
 		}
 		configList = append(configList, &r)
 	}
 
 	if hostConfig.AutoRemove {
-		for index := range configList {
-			configList[index].options = append(configList[index].options, "--rm")
+		for i := range configList {
+			configList[i].options = append(configList[i].options, "--rm")
 		}
 	}
 	return configList, nil
 }
 
-func MergeDockerOptions(conf *RunConfig, options *Options, config *Config, hostConfig *HostConfig) {
+func moveDevContainerFirst(temp *corev1.PodTemplateSpec, containerName string) {
+	for i, c := range temp.Spec.Containers {
+		if c.Name == containerName {
+			temp.Spec.Containers[0], temp.Spec.Containers[i] = temp.Spec.Containers[i], temp.Spec.Containers[0]
+			return
+		}
+	}
+}
+
+func collectExposedPorts(conf *Config, hostConfig *HostConfig) (nat.PortMap, nat.PortSet) {
+	portMap := nat.PortMap{}
+	portSet := nat.PortSet{}
+	for k, v := range conf.ExposedPorts {
+		portSet[k] = v
+	}
+	for k, v := range hostConfig.PortBindings {
+		portMap[k] = v
+	}
+	return portMap, portSet
+}
+
+func buildContainerOptions(
+	container corev1.Container,
+	temp corev1.PodTemplateSpec,
+	envKey, containerName string,
+	envMap map[string]string,
+	mountVolume map[string][]mount.Mount,
+) ([]string, error) {
+	localEnv, err := filepath.Abs(envMap[envKey])
+	if err != nil {
+		return nil, err
+	}
+	opts := []string{
+		"--env-file", localEnv,
+		"--domainname", temp.Spec.Subdomain,
+		"--workdir", container.WorkingDir,
+	}
+	opts = append(opts, containerSecurityOpts()...)
+	opts = append(opts,
+		"--pull", ConvertK8sImagePullPolicyToDocker(container.ImagePullPolicy),
+		"--name", containerName,
+		"--user", "root",
+		"--env", "LC_ALL=C.UTF-8",
+	)
+	for k, v := range temp.Labels {
+		opts = append(opts, "--label", fmt.Sprintf("%s=%s", k, v))
+	}
+	if container.TTY {
+		opts = append(opts, "--tty")
+	}
+	if ptr.Deref(ptr.Deref(container.SecurityContext, corev1.SecurityContext{}).Privileged, false) {
+		opts = append(opts, "--privileged")
+	}
+	for _, m := range mountVolume[envKey] {
+		localDir, err := filepath.Abs(m.Source)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, "--volume", fmt.Sprintf("%s:%s", localDir, m.Target))
+	}
+	return opts, nil
+}
+
+func appendNetworkOptions(
+	opts *[]string,
+	ctx context.Context,
+	index, lastIdx int,
+	lastName string,
+	hasUserNetMode bool,
+	userNetMode string,
+	dnsConfig *dns.ClientConfig,
+	envFilePath, containerName string,
+	portMap nat.PortMap,
+	hostConfig *HostConfig,
+) error {
+	if hasUserNetMode {
+		netMode := typescontainer.NetworkMode(userNetMode)
+		*opts = append(*opts, "--network", string(netMode))
+		if netMode.IsContainer() {
+			*opts = append(*opts, "--pid", string(netMode))
+		}
+		return nil
+	}
+
+	if index == lastIdx {
+		return appendNetworkOwnerOptions(opts, ctx, dnsConfig, envFilePath, containerName, portMap, hostConfig)
+	}
+
+	*opts = append(*opts, "--network", util.ContainerNet(lastName))
+	*opts = append(*opts, "--pid", util.ContainerNet(lastName))
+	return nil
+}
+
+// appendNetworkOwnerOptions configures the "network owner" container with DNS, ports, and docker network.
+func appendNetworkOwnerOptions(
+	opts *[]string,
+	ctx context.Context,
+	dnsConfig *dns.ClientConfig,
+	envFilePath, containerName string,
+	portMap nat.PortMap,
+	hostConfig *HostConfig,
+) error {
+	*opts = append(*opts,
+		"--dns-option", fmt.Sprintf("ndots=%d", dnsConfig.Ndots),
+		"--hostname", getEnvByKey(envFilePath, "HOSTNAME", containerName),
+	)
+	for _, server := range dnsConfig.Servers {
+		*opts = append(*opts, "--dns", server)
+	}
+	for _, search := range dnsConfig.Search {
+		*opts = append(*opts, "--dns-search", search)
+	}
+	for p, bindings := range portMap {
+		for _, binding := range bindings {
+			*opts = append(*opts, "--publish", fmt.Sprintf("%s:%s", binding.HostPort, p.Port()))
+		}
+		*opts = append(*opts, "--expose", p.Port())
+	}
+	if hostConfig.PublishAllPorts {
+		*opts = append(*opts, "--publish-all")
+	}
+	_, err := util.CreateNetwork(ctx, config.ConfigMapPodTrafficManager)
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to create network: %v", err)
+		return err
+	}
+	plog.G(ctx).Infof("Create docker network %s", config.ConfigMapPodTrafficManager)
+	*opts = append(*opts, "--network", config.ConfigMapPodTrafficManager)
+	return nil
+}
+
+// mergeDevContainerOptions applies user-specified Docker options and resolves
+// extra domains to --add-host entries for the dev (foreground) container.
+func mergeDevContainerOptions(conf *RunConfig, options *Options, config *Config, hostConfig *HostConfig) {
 	conf.options = append(conf.options, "--pull", options.RunOptions.Pull)
 	if options.RunOptions.Platform != "" {
 		conf.options = append(conf.options, "--platform", options.RunOptions.Platform)
@@ -261,9 +302,12 @@ func MergeDockerOptions(conf *RunConfig, options *Options, config *Config, hostC
 	for _, bind := range hostConfig.Binds {
 		conf.options = append(conf.options, "--volume", bind)
 	}
+	appendExtraHostEntries(conf, options.ExtraRouteInfo.ExtraDomain)
+}
 
-	// host config
-	for _, domain := range options.ExtraRouteInfo.ExtraDomain {
+// appendExtraHostEntries resolves extra domains to IPs and adds --add-host entries.
+func appendExtraHostEntries(conf *RunConfig, domains []string) {
+	for _, domain := range domains {
 		ips, err := net.LookupIP(domain)
 		if err != nil {
 			continue
@@ -277,12 +321,11 @@ func MergeDockerOptions(conf *RunConfig, options *Options, config *Config, hostC
 	}
 }
 
-func GetEnvByKey(filepath string, key string, defaultValue string) string {
+func getEnvByKey(filepath string, key string, defaultValue string) string {
 	parse, err := godotenv.Read(filepath)
 	if err != nil {
 		return defaultValue
 	}
-
 	value, ok := parse[key]
 	if !ok {
 		return defaultValue

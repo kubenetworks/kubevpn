@@ -2,7 +2,6 @@ package cmds
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -14,6 +13,8 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -29,15 +30,20 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
         kubevpn quit
 		`)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_ = quit(cmd.Context(), true)
+			// Quit the user daemon first: its connection cleanup runs server-side
+			// leave-all, which reaches the traffic manager over the VPN and so needs the
+			// data plane still up. The sudo daemon (which owns the TUN) is quit second.
+			// Quitting sudo first would tear down the VPN before leave-all could run,
+			// leaking proxy sidecars/rules until the manager's lease reaper reclaims them.
 			_ = quit(cmd.Context(), false)
+			_ = quit(cmd.Context(), true)
 			_ = stopAllManagedProxies()
-			_, _ = fmt.Fprintln(os.Stdout, "Stopped all managed local SOCKS proxies")
 			util.CleanExtensionLib()
-			_, _ = fmt.Fprint(os.Stdout, "Exited")
+			printSuccess(os.Stdout, "Exited")
 			return nil
 		},
 	}
+	handler.AddDebugFlag(cmd.Flags())
 	return cmd
 }
 
@@ -50,11 +56,11 @@ func quit(ctx context.Context, isSudo bool) error {
 	if err != nil {
 		return err
 	}
-	err = resp.Send(&rpc.QuitRequest{})
+	err = resp.Send(&rpc.QuitRequest{Level: plog.GetLogLevel()})
 	if err != nil {
 		return err
 	}
-	err = util.PrintGRPCStream[rpc.QuitResponse](ctx, resp)
+	_, err = printProgressStream[rpc.QuitResponse](ctx, resp, os.Stdout)
 	if err != nil {
 		if status.Code(err) == codes.Canceled {
 			return nil

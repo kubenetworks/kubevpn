@@ -5,7 +5,8 @@ import (
 	"sort"
 )
 
-type Connects []*ConnectOptions
+// Connects is a sortable slice of Connection ordered by cross-cluster dependency.
+type Connects []Connection
 
 func (s Connects) Len() int {
 	return len(s)
@@ -15,7 +16,8 @@ func (s Connects) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
-func (s Connects) Append(options *ConnectOptions) Connects {
+// Append adds a non-nil Connection to the slice and returns the result.
+func (s Connects) Append(options Connection) Connects {
 	if options != nil {
 		return append(s, options)
 	}
@@ -49,26 +51,27 @@ func (s Connects) Less(i, j int) bool {
 		}
 		return false
 	}
-	for _, extraCIDR := range b.ExtraRouteInfo.ExtraCIDR {
+	aAPIServerIPs := a.GetAPIServerIPs()
+	for _, extraCIDR := range b.GetExtraCIDR() {
 		ip, cidr, err := net.ParseCIDR(extraCIDR)
 		if err != nil {
 			continue
 		}
-		if containsFunc(cidr, a.apiServerIPs) {
+		if containsFunc(cidr, aAPIServerIPs) {
 			return true
 		}
-		for _, p := range a.apiServerIPs {
+		for _, p := range aAPIServerIPs {
 			if ip.Equal(p) {
 				return true
 			}
 		}
 	}
-	for _, entry := range b.extraHost {
+	for _, entry := range b.GetNetworkExtraHost() {
 		ip := net.ParseIP(entry.IP)
 		if ip == nil || ip.IsLoopback() {
 			continue
 		}
-		for _, p := range a.apiServerIPs {
+		for _, p := range aAPIServerIPs {
 			if ip.Equal(p) {
 				return true
 			}
@@ -77,9 +80,7 @@ func (s Connects) Less(i, j int) bool {
 	return false
 }
 
-// Sort ...
-// base order: first connect last disconnect
-// sort by dependency
+// Sort orders connections so that dependent clusters disconnect before their dependencies.
 func (s Connects) Sort() Connects {
 	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
 		s[i], s[j] = s[j], s[i]

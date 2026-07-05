@@ -14,8 +14,6 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-const retries = 4
-
 // DownloadFileWithName downloads a file with name
 func DownloadFileWithName(uri, name string) (string, error) {
 	resp, err := getWithRetry(uri)
@@ -42,7 +40,7 @@ func DownloadFileWithName(uri, name string) (string, error) {
 
 	_, err = io.Copy(out, resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to save file %s. error: %v", file, err)
+		return "", fmt.Errorf("failed to save file %s: %w", file, err)
 	}
 
 	plog.G(context.Background()).Infof("Downloaded file %s", file)
@@ -53,6 +51,7 @@ func downloadFile(uri string) (string, error) {
 	return DownloadFileWithName(uri, fmt.Sprintf("%d", time.Now().Unix()))
 }
 
+// GetSha256ForAsset downloads the file at uri and returns its SHA-256 hex digest.
 func GetSha256ForAsset(uri string) (string, error) {
 	file, err := downloadFile(uri)
 	if err != nil {

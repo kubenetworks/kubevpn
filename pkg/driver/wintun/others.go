@@ -3,7 +3,7 @@
 package wintun
 
 import (
-	"github.com/pkg/errors"
+	"errors"
 )
 
 func InstallWintunDriver() error {

@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"os/exec"
 	"runtime"
 	"unsafe"
 
-	pkgerr "github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 	"golang.zx2c4.com/wireguard/tun"
 
@@ -18,7 +18,7 @@ import (
 
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if cfg.Addr == "" && cfg.Addr6 == "" {
-		err = fmt.Errorf("IPv4 address and IPv6 address can not be empty at same time")
+		err = fmt.Errorf("ipv4 address and ipv6 address cannot both be empty")
 		return
 	}
 
@@ -34,6 +34,12 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if err != nil {
 		return
 	}
+	// Close the device on any error after creation; on success conn owns it.
+	defer func() {
+		if err != nil {
+			_ = ifce.Close()
+		}
+	}()
 
 	var name string
 	name, err = ifce.Name()
@@ -74,7 +80,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	if err = addTunRoutes(name, cfg.Routes...); err != nil {
-		err = pkgerr.Wrap(err, "Add tun device routes failed")
+		err = fmt.Errorf("add tun device routes failed: %w", err)
 		return
 	}
 
@@ -83,9 +89,9 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	conn = &tunConn{
-		ifce:  ifce,
-		addr:  &net.IPAddr{IP: ipv4},
-		addr6: &net.IPAddr{IP: ipv6},
+		batchDevice: newBatchDevice(ifce),
+		addr:        &net.IPAddr{IP: ipv4},
+		addr6:       &net.IPAddr{IP: ipv6},
 	}
 	return
 }
@@ -164,6 +170,49 @@ func setInet6Address(ifName string, prefix netip.Prefix) error {
 	req.lifetime.pref = v6InfiniteLife
 
 	return ioctlRequest(fd, siocAIFAddrInet6, unsafe.Pointer(req))
+}
+
+// struct ifreq (name + a single sockaddr) used by SIOCDIFADDR to delete an address.
+// SIOCDIFADDR matches purely by address (no mask field), so only name+addr matter.
+type inet4IfReq struct {
+	name [unix.IFNAMSIZ]byte
+	addr unix.RawSockaddrInet4
+}
+
+// removeInterfaceAddress deletes an address from an interface (best-effort), the
+// counterpart of setInterfaceAddress. Needed because macOS SIOCAIFADDR only ADDS an
+// alias — without an explicit delete, changing the TUN IP would leave the old one.
+func removeInterfaceAddress(ifName string, ip netip.Addr) error {
+	if ip.Is4() {
+		return delInet4Address(ifName, ip)
+	}
+	return delInet6Address(ifName, ip)
+}
+
+func delInet4Address(ifName string, ip netip.Addr) error {
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	ip4 := ip.As4()
+	req := &inet4IfReq{
+		addr: unix.RawSockaddrInet4{Family: unix.AF_INET, Len: unix.SizeofSockaddrInet4, Addr: ip4},
+	}
+	copy(req.name[:], ifName)
+	return ioctlRequest(fd, unix.SIOCDIFADDR, unsafe.Pointer(req))
+}
+
+// delInet6Address removes an IPv6 address via ifconfig. The IPv6 variant of
+// SIOCDIFADDR (in6_ifreq) has a different, OS-dependent struct size across the
+// BSD family this file builds for, so the ioctl number cannot be portably
+// recomputed; ifconfig is the consistent, reliable path for all of them.
+func delInet6Address(ifName string, ip netip.Addr) error {
+	out, err := exec.Command("ifconfig", ifName, "inet6", ip.String(), "delete").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ifconfig %s inet6 %s delete: %w: %s", ifName, ip, err, out)
+	}
+	return nil
 }
 
 func ioctlRequest(fd int, req uint, ptr unsafe.Pointer) error {

@@ -22,6 +22,11 @@ func TestHttpOverUnix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Close the file handle before removing it: Windows refuses to delete a
+	// file that still has an open handle (Linux allows unlinking open files).
+	if err = temp.Close(); err != nil {
+		t.Fatal(err)
+	}
 	err = os.Remove(temp.Name())
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +47,8 @@ func TestHttpOverUnix(t *testing.T) {
 	go func() {
 		listener, err := net.Listen("unix", temp.Name())
 		if err != nil {
-			t.Fatal(err)
+			t.Error(err)
+			return
 		}
 		defer listener.Close()
 		downgradingServer := &http.Server{}
@@ -50,7 +56,8 @@ func TestHttpOverUnix(t *testing.T) {
 		var h2Server http2.Server
 		err = http2.ConfigureServer(downgradingServer, &h2Server)
 		if err != nil {
-			t.Fatal(err)
+			t.Error(err)
+			return
 		}
 		downgradingServer.Handler = h2c.NewHandler(http.HandlerFunc(http.DefaultServeMux.ServeHTTP), &h2Server)
 		downgradingServer.Serve(listener)

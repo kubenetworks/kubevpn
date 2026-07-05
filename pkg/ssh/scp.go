@@ -9,6 +9,7 @@ import (
 	"github.com/schollz/progressbar/v3"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -16,7 +17,7 @@ import (
 func SCPAndExec(ctx context.Context, stdout, stderr io.Writer, client *ssh.Client, filename, to string, commands ...string) error {
 	err := SCP(ctx, client, stdout, stderr, filename, to)
 	if err != nil {
-		plog.G(ctx).Errorf("Copy file to remote error: %s", err)
+		plog.G(ctx).Errorf("Copy file to remote error: %v", err)
 		return err
 	}
 	for _, command := range commands {
@@ -26,12 +27,12 @@ func SCPAndExec(ctx context.Context, stdout, stderr io.Writer, client *ssh.Clien
 			return err
 		}
 		output, err := session.CombinedOutput(command)
+		_ = session.Close()
 		if err != nil {
 			plog.G(ctx).Error(string(output))
-			return err
-		} else {
-			plog.G(ctx).Info(string(output))
+			return fmt.Errorf("remote command %q: %w: %w", command, err, config.ErrSSHRemoteCommand)
 		}
+		plog.G(ctx).Info(string(output))
 	}
 	return nil
 }
@@ -96,8 +97,7 @@ func sCopy(ctx context.Context, dst io.Writer, src io.Reader, size int64, stdout
 		return err
 	}
 	if written != size {
-		plog.G(ctx).Errorf("Failed to transfer file to remote: written size %d but actuall is %d", written, size)
-		return err
+		return fmt.Errorf("failed to transfer file to remote: wrote %d bytes but expected %d: %w", written, size, config.ErrSSHRemoteCommand)
 	}
 	return nil
 }

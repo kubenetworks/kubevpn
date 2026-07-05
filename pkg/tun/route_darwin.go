@@ -36,7 +36,7 @@ func addTunRoutes(ifName string, routes ...types.Route) error {
 	}
 	err = addRoute(gw, prefixList...)
 	if err != nil {
-		return fmt.Errorf("failed to add dst %v via %s to route table: %v", prefixList, ifName, err)
+		return fmt.Errorf("failed to add dst %v via %s to route table: %w", prefixList, ifName, err)
 	}
 	return nil
 }
@@ -65,7 +65,7 @@ func deleteTunRoutes(ifName string, routes ...types.Route) error {
 	}
 	err = deleteRoute(gw, prefixList...)
 	if err != nil {
-		return fmt.Errorf("failed to add dst %v via %s to route table: %v", prefixList, ifName, err)
+		return fmt.Errorf("failed to delete dst %v from route table via %s: %w", prefixList, ifName, err)
 	}
 	return nil
 }
@@ -116,6 +116,9 @@ func deleteRoute(gw route.Addr, r ...netip.Prefix) error {
 	})
 }
 
+// routeSocketBufferSize is the send/receive buffer size (1024k) set on the route socket.
+const routeSocketBufferSize = 1024 * 1024
+
 func withRouteSocket(f func(routeSocket int) error) error {
 	routeSocket, err := unix.Socket(unix.AF_ROUTE, unix.SOCK_RAW, unix.AF_UNSPEC)
 	if err != nil {
@@ -127,11 +130,11 @@ func withRouteSocket(f func(routeSocket int) error) error {
 		return err
 	}
 	// Set receive buffer size 1024k
-	if err = unix.SetsockoptInt(routeSocket, unix.SOL_SOCKET, unix.SO_RCVBUF, 1024*1024); err != nil {
+	if err = unix.SetsockoptInt(routeSocket, unix.SOL_SOCKET, unix.SO_RCVBUF, routeSocketBufferSize); err != nil {
 		return err
 	}
 	// Set send buffer size 1024k
-	if err = unix.SetsockoptInt(routeSocket, unix.SOL_SOCKET, unix.SO_SNDBUF, 1024*1024); err != nil {
+	if err = unix.SetsockoptInt(routeSocket, unix.SOL_SOCKET, unix.SO_SNDBUF, routeSocketBufferSize); err != nil {
 		return err
 	}
 	return f(routeSocket)

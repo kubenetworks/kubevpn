@@ -2,20 +2,18 @@ package action
 
 import (
 	"context"
-	"io"
+	"fmt"
 	"os"
 
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// Disconnect handles the Disconnect RPC, tearing down VPN tunnel(s).
 func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 	if !svr.IsSudo {
 		defer func() {
@@ -30,16 +28,26 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		return err
 	}
 
-	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newDisconnectWarp(resp), svr.LogFile))
+	logger := newServerStreamLogger(svr.LogFile, req.Level, func(msg string) error {
+		return resp.Send(&rpc.DisconnectResponse{Message: msg})
+	})
 	ctx := plog.WithLogger(resp.Context(), logger)
+	if id := req.GetConnectionID(); id != "" {
+		ctx = plog.WithField(ctx, LogFieldConnID, id)
+	}
 
-	// disconnect sudo daemon first
-	// then disconnect from user daemon
-	// because only ssh jump in user daemon
+	// Order matters. Server-side leave-all removes proxy sidecars/rules by asking the
+	// traffic manager over the VPN (see LeaveAllProxyResources), so it must run while the
+	// data plane is still up — i.e. BEFORE the sudo daemon drops the TUN below. The sudo
+	// daemon is disconnected first (only the user daemon holds the ssh jump); the user
+	// daemon's own connection cleanup (cleanupConnection) runs last and re-attempts leave
+	// as a harmless idempotent no-op.
 	if !svr.IsSudo {
+		svr.leaveProxiesBeforeTeardown(ctx, req)
+
 		cli, err := svr.GetClient(true)
 		if err != nil {
-			return errors.Wrap(err, "sudo daemon not start")
+			return fmt.Errorf("sudo daemon not start: %w", err)
 		}
 		connResp, err := cli.Disconnect(resp.Context())
 		if err != nil {
@@ -49,46 +57,37 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		if err != nil {
 			return err
 		}
-		err = util.CopyGRPCStream[rpc.DisconnectResponse](connResp, resp)
+		err = grpcutil.CopyGRPCStream[rpc.DisconnectResponse](connResp, resp)
 		if err != nil {
 			return err
 		}
 	}
 
+	// Emit the progress step only from the user daemon (the orchestrator). The
+	// sudo daemon's stream is copied verbatim above, so guarding on !IsSudo keeps
+	// the CLI from rendering the step twice. On an early error return the step is
+	// left unfinished, so the renderer marks it failed (✗).
+	if !svr.IsSudo {
+		plog.StepStart(ctx, "Disconnecting")
+	}
+
 	switch {
 	case req.GetAll():
+		svr.connMu.Lock()
 		connects := handler.Connects(svr.connections)
-		for _, connect := range connects.Sort() {
-			if connect != nil {
-				if connect.Sync != nil {
-					_ = connect.Sync.Cleanup(ctx)
-				}
-				connect.Cleanup(ctx)
-			}
-		}
 		svr.connections = nil
 		svr.currentConnectionID = ""
-	case req.GetConnectionID() != "":
-		var connects = *new(handler.Connects)
-		for i := 0; i < len(svr.connections); i++ {
-			if req.GetConnectionID() == svr.connections[i].GetConnectionID() {
-				connects = connects.Append(svr.connections[i])
-				svr.connections = append(svr.connections[:i], svr.connections[i+1:]...)
-				i--
-			}
-		}
+		svr.connMu.Unlock()
 		for _, connect := range connects.Sort() {
-			if connect != nil {
-				if connect.Sync != nil {
-					_ = connect.Sync.Cleanup(ctx)
-				}
-				connect.Cleanup(ctx)
-			}
+			cleanupConnection(ctx, connect)
 		}
-		if svr.currentConnectionID == req.GetConnectionID() {
-			for _, connection := range svr.connections {
-				svr.currentConnectionID = connection.GetConnectionID()
-			}
+	case req.GetConnectionID() != "":
+		svr.connMu.Lock()
+		removed := svr.removeConnection(req.GetConnectionID())
+		svr.resetCurrentConnection(req.GetConnectionID())
+		svr.connMu.Unlock()
+		for _, connect := range removed.Sort() {
+			cleanupConnection(ctx, connect)
 		}
 	case req.KubeconfigBytes != nil && req.Namespace != nil:
 		err = disconnectByKubeconfig(
@@ -103,7 +102,14 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		}
 	}
 
-	if len(svr.connections) == 0 {
+	if !svr.IsSudo {
+		plog.StepDone(ctx, "Disconnected from the cluster")
+	}
+
+	svr.connMu.RLock()
+	empty := len(svr.connections) == 0
+	svr.connMu.RUnlock()
+	if empty {
 		if svr.IsSudo {
 			_ = dns.CleanupHosts()
 		}
@@ -112,59 +118,86 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 }
 
 func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes string, ns string, jump *rpc.SshJump) error {
-	var file string
-	var err error
-	var sshConf = ssh.ParseSshFromRPC(jump)
-	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(ctx, sshConf, []byte(kubeconfigBytes), false)
-	} else {
-		file, err = util.ConvertToTempKubeconfigFile([]byte(kubeconfigBytes), "")
-	}
-	defer os.Remove(file)
-	if err != nil {
-		return err
-	}
-	connect := &handler.ConnectOptions{}
-	err = connect.InitClient(util.InitFactoryByPath(file, ns))
-	if err != nil {
-		return err
-	}
-	connectionID, err := util.GetConnectionID(ctx, connect.GetClientset().CoreV1().Namespaces(), connect.Namespace)
+	connectionID, err := resolveConnectionIDByKubeconfig(ctx, jump, kubeconfigBytes, ns)
 	if err != nil {
 		return err
 	}
 	disconnect(ctx, svr, connectionID)
-	if svr.currentConnectionID == connectionID {
-		for _, connection := range svr.connections {
-			svr.currentConnectionID = connection.GetConnectionID()
-		}
-	}
+	svr.connMu.Lock()
+	svr.resetCurrentConnection(connectionID)
+	svr.connMu.Unlock()
 	return nil
 }
 
-func disconnect(ctx context.Context, svr *Server, connectionID string) {
-	for i := 0; i < len(svr.connections); i++ {
-		options := svr.connections[i]
-		if options.GetConnectionID() == connectionID {
-			plog.G(ctx).Infof("Disconnecting from the cluster...")
-			options.Cleanup(ctx)
-			svr.connections = append(svr.connections[:i], svr.connections[i+1:]...)
-			i--
+// resolveConnectionIDByKubeconfig derives the stored connection ID for a kubeconfig +
+// namespace. Connections are keyed by the ID derived from the *manager* namespace (see
+// connect_elevate.go detectAndSetManagerNamespace + GetConnectionID), which may differ
+// from the workload namespace, so it is resolved the same way — otherwise the lookup
+// misses and the proxy/VPN state leaks when the manager lives in its own namespace.
+func resolveConnectionIDByKubeconfig(ctx context.Context, jump *rpc.SshJump, kubeconfigBytes, ns string) (string, error) {
+	file, err := resolveKubeconfig(ctx, jump, kubeconfigBytes, false)
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(file)
+	connect := &handler.ConnectOptions{}
+	if err = connect.InitClient(util.InitFactoryByPath(file, ns)); err != nil {
+		return "", err
+	}
+	managerNamespace, err := util.DetectManagerNamespace(ctx, connect.GetFactory(), ns)
+	if err != nil {
+		return "", err
+	}
+	if managerNamespace == "" {
+		managerNamespace = ns
+	}
+	return util.GetConnectionID(context.Background(), connect.GetClientset().CoreV1().Namespaces(), managerNamespace)
+}
+
+// leaveProxiesBeforeTeardown resolves the connections targeted by a Disconnect request
+// and asks the traffic manager to remove their proxy sidecars/rules while the VPN data
+// plane is still up. Server-side leave reaches the manager over the VPN, so it MUST run
+// before the sudo daemon drops the TUN. User daemon only (DataSession's leave is a no-op);
+// best-effort — errors are logged and teardown proceeds (the manager's lease reaper
+// reclaims any rule left behind).
+func (svr *Server) leaveProxiesBeforeTeardown(ctx context.Context, req *rpc.DisconnectRequest) {
+	var targets handler.Connects
+	switch {
+	case req.GetAll():
+		svr.connMu.RLock()
+		targets = append(targets, svr.connections...)
+		svr.connMu.RUnlock()
+	case req.GetConnectionID() != "":
+		svr.connMu.RLock()
+		if c, i := svr.findConnection(req.GetConnectionID()); i != -1 {
+			targets = targets.Append(c)
+		}
+		svr.connMu.RUnlock()
+	case req.KubeconfigBytes != nil && req.Namespace != nil:
+		id, err := resolveConnectionIDByKubeconfig(ctx, req.GetSshJump(), req.GetKubeconfigBytes(), req.GetNamespace())
+		if err != nil {
+			plog.G(ctx).Warnf("Resolve connection before leaving proxies failed: %v", err)
+			return
+		}
+		svr.connMu.RLock()
+		if c, i := svr.findConnection(id); i != -1 {
+			targets = targets.Append(c)
+		}
+		svr.connMu.RUnlock()
+	}
+	for _, conn := range targets {
+		if err := conn.LeaveAllProxyResources(ctx); err != nil {
+			plog.G(ctx).Warnf("Leave proxy resources before VPN teardown failed (lease reaper will reclaim): %v", err)
 		}
 	}
 }
 
-type disconnectWarp struct {
-	server rpc.Daemon_DisconnectServer
-}
-
-func (r *disconnectWarp) Write(p []byte) (n int, err error) {
-	_ = r.server.Send(&rpc.DisconnectResponse{
-		Message: string(p),
-	})
-	return len(p), nil
-}
-
-func newDisconnectWarp(server rpc.Daemon_DisconnectServer) io.Writer {
-	return &disconnectWarp{server: server}
+func disconnect(ctx context.Context, svr *Server, connectionID string) {
+	svr.connMu.Lock()
+	removed := svr.removeConnection(connectionID)
+	svr.connMu.Unlock()
+	for _, conn := range removed {
+		plog.G(ctx).Debugf("Disconnecting connection %q", connectionID)
+		cleanupConnection(ctx, conn)
+	}
 }

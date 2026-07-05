@@ -3,17 +3,14 @@
 package dns
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"net"
 	"net/netip"
-	"os"
 	"os/exec"
 	"strings"
 
-	"github.com/docker/docker/libnetwork/resolvconf"
 	miekgdns "github.com/miekg/dns"
 	"tailscale.com/net/dns"
 	"tailscale.com/util/dnsname"
@@ -21,8 +18,11 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-// SetupDNS
-// systemd-resolve --status, systemd-resolve --flush-caches
+// SetupDNS configures the system DNS on Linux using systemd-resolved (resolvectl /
+// systemd-resolve commands) or the tailscale library DNS configurator. In every case the
+// cluster nameserver is scoped to cluster domains on the TUN interface (split DNS); it is
+// never written to the global /etc/resolv.conf. Hosts without a split-capable DNS manager
+// resolve cluster names via /etc/hosts only.
 func (c *Config) SetupDNS(ctx context.Context) error {
 	config := c.Config
 	tunName := c.TunName
@@ -34,13 +34,13 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 	// sudo systemd-resolve --set-dns 172.28.64.10 --interface tun0 --set-domain=vke-system.svc.cluster.local --set-domain=svc.cluster.local --set-domain=cluster.local
 	//Failed to set DNS configuration: Unit dbus-org.freedesktop.resolve1.service not found.
 	// ref: https://superuser.com/questions/1427311/activation-via-systemd-failed-for-unit-dbus-org-freedesktop-resolve1-service
-	// systemctl enable systemd-resolved.service
-	_ = exec.Command("systemctl", "enable", "systemd-resolved.service").Run()
-	// systemctl start systemd-resolved.service
+	// Best-effort start only. We deliberately do NOT `systemctl enable` it: enabling persistently
+	// changes the user's boot configuration just to set up VPN DNS, which can disrupt machines that
+	// use NetworkManager/dnsmasq instead. `systemctl status` is likewise dropped (its output was
+	// discarded). If systemd-resolved isn't the DNS manager here, the resolvectl/systemd-resolve
+	// attempts below simply fail and we fall through to the library path.
 	_ = exec.Command("systemctl", "start", "systemd-resolved.service").Run()
-	//systemctl status systemd-resolved.service
-	_ = exec.Command("systemctl", "status", "systemd-resolved.service").Run()
-	plog.G(ctx).Debugf("Enable service systemd resolved...")
+	plog.G(ctx).Debugf("Started systemd-resolved (best-effort)...")
 	var exists = func(cmd string) bool {
 		_, err := exec.LookPath(cmd)
 		return err == nil
@@ -57,47 +57,40 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 		}
 	}
 
-	// 2) setup dns by magicDNS
+	// 2) setup dns by the library (tailscale), scoped to cluster domains (split DNS)
 	plog.G(ctx).Debugf("Use library to setup DNS...")
-	err := c.UseLibraryDNS(tunName, config)
+	err := c.UseLibraryDNS(ctx, tunName, config)
 	if err == nil {
 		plog.G(ctx).Debugf("Use library to setup DNS done")
 		return nil
-	} else if errors.Is(err, ErrorNotSupportSplitDNS) {
-		plog.G(ctx).Debugf("Library not support on current OS")
-		err = nil
+	}
+	// No split-capable DNS manager (systemd-resolved / NetworkManager / (open)resolvconf) is
+	// available. We deliberately do NOT fall back to writing the cluster nameserver into the
+	// global /etc/resolv.conf, which would hijack all DNS on the host. Cluster service names
+	// still resolve via /etc/hosts entries pushed by the traffic manager; other cluster FQDNs
+	// (e.g. raw pod DNS) will not resolve on such hosts.
+	if errors.Is(err, errNotSupportSplitDNS) {
+		plog.G(ctx).Warnf("No split-capable DNS manager found; cluster DNS resolves via /etc/hosts only")
 	} else {
 		plog.G(ctx).Errorf("Setup DNS by library failed: %v", err)
-		err = nil
 	}
-
-	// 3) write dns info to file: /etc/resolv.conf
-	plog.G(ctx).Debugf("Use resolv.conf to setup DNS...")
-	filename := resolvconf.Path()
-	readFile, err := os.ReadFile(filename)
-	if err != nil {
-		return err
-	}
-	localResolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(readFile)))
-	if err != nil {
-		return err
-	}
-	localResolvConf.Servers = append([]string{config.Servers[0]}, localResolvConf.Servers...)
-	err = WriteResolvConf(resolvconf.Path(), *localResolvConf)
-	return err
+	return nil
 }
 
 // setupDnsByCmdResolvectl
 // resolvectl dns utun0 10.10.129.161
 // resolvectl domain utun0 default.svc.cluster.local svc.cluster.local cluster.local
 func setupDnsByCmdResolvectl(ctx context.Context, tunName string, config *miekgdns.ClientConfig) error {
+	if len(config.Servers) == 0 {
+		return fmt.Errorf("no DNS server found in pod resolv.conf")
+	}
 	cmd := exec.CommandContext(ctx, "resolvectl", "dns", tunName, config.Servers[0])
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		plog.G(ctx).Debugf("Failed to exec cmd '%s': %s", strings.Join(cmd.Args, " "), string(output))
 		return err
 	}
-	cmd = exec.CommandContext(ctx, "resolvectl", "domain", tunName, config.Search[0], config.Search[1], config.Search[2])
+	cmd = exec.CommandContext(ctx, "resolvectl", append([]string{"domain", tunName}, config.Search...)...)
 	output, err = cmd.CombinedOutput()
 	if err != nil {
 		plog.G(ctx).Debugf("Failed to exec cmd '%s': %s", strings.Join(cmd.Args, " "), string(output))
@@ -107,15 +100,14 @@ func setupDnsByCmdResolvectl(ctx context.Context, tunName string, config *miekgd
 }
 
 func setupDNSbyCmdSystemdResolve(ctx context.Context, tunName string, config *miekgdns.ClientConfig) error {
-	cmd := exec.CommandContext(ctx, "systemd-resolve", []string{
-		"--set-dns",
-		config.Servers[0],
-		"--interface",
-		tunName,
-		"--set-domain=" + config.Search[0],
-		"--set-domain=" + config.Search[1],
-		"--set-domain=" + config.Search[2],
-	}...)
+	if len(config.Servers) == 0 {
+		return fmt.Errorf("no DNS server found in pod resolv.conf")
+	}
+	args := []string{"--set-dns", config.Servers[0], "--interface", tunName}
+	for _, search := range config.Search {
+		args = append(args, "--set-domain="+search)
+	}
+	cmd := exec.CommandContext(ctx, "systemd-resolve", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		plog.G(ctx).Debugf("Failed to exec cmd '%s': %s", strings.Join(cmd.Args, " "), string(output))
@@ -123,24 +115,36 @@ func setupDNSbyCmdSystemdResolve(ctx context.Context, tunName string, config *mi
 	return err
 }
 
-var ErrorNotSupportSplitDNS = errors.New("not support split DNS")
+var errNotSupportSplitDNS = errors.New("not support split DNS")
 
-func (c *Config) UseLibraryDNS(tunName string, clientConfig *miekgdns.ClientConfig) error {
-	configurator, err := dns.NewOSConfigurator(plog.G(context.Background()).Debugf, nil, nil, tunName)
+func (c *Config) UseLibraryDNS(ctx context.Context, tunName string, clientConfig *miekgdns.ClientConfig) error {
+	configurator, err := dns.NewOSConfigurator(plog.G(ctx).Debugf, nil, nil, tunName)
 	if err != nil {
 		return err
 	}
 	if !configurator.SupportsSplitDNS() {
-		return ErrorNotSupportSplitDNS
+		return errNotSupportSplitDNS
 	}
 	c.OSConfigurator = configurator
-	config := dns.OSConfig{Nameservers: []netip.Addr{}, SearchDomains: []dnsname.FQDN{}}
+	plog.G(ctx).Debugf("Setting up DNS...")
+	return c.OSConfigurator.SetDNS(buildLibraryOSConfig(clientConfig))
+}
+
+// buildLibraryOSConfig builds the tailscale dns.OSConfig for split DNS. The cluster search
+// domains are set as MatchDomains so ONLY those queries are routed to the cluster nameserver
+// via the TUN interface; every other query keeps using the host's default resolver.
+//
+// A non-empty MatchDomains is precisely what makes the library configure a *split* resolver
+// rather than hijacking the interface as the global default DNS route — see tailscale
+// net/dns resolved.go: SetLinkDefaultRoute(_, len(config.MatchDomains) == 0).
+func buildLibraryOSConfig(clientConfig *miekgdns.ClientConfig) dns.OSConfig {
+	config := dns.OSConfig{}
 	for _, s := range clientConfig.Servers {
 		ip, ok := netip.AddrFromSlice(net.ParseIP(s))
 		if !ok {
 			continue
 		}
-		config.Nameservers = append(config.Nameservers, ip)
+		config.Nameservers = append(config.Nameservers, ip.Unmap())
 	}
 	for _, search := range clientConfig.Search {
 		fqdn, err := dnsname.ToFQDN(search)
@@ -148,55 +152,27 @@ func (c *Config) UseLibraryDNS(tunName string, clientConfig *miekgdns.ClientConf
 			continue
 		}
 		config.SearchDomains = append(config.SearchDomains, fqdn)
+		config.MatchDomains = append(config.MatchDomains, fqdn)
 	}
-	plog.G(context.Background()).Debugf("Setting up DNS...")
-	return c.OSConfigurator.SetDNS(config)
+	return config
 }
 
+// applyResolvers is a no-op on Linux: DNS is configured once via the OS
+// configurator; per-service resolver files are a macOS-only concept.
+func (c *Config) applyResolvers(_ context.Context) {}
+
+// CancelDNS reverts DNS changes made by SetupDNS and removes managed hosts entries.
+//
+// The library split config is reverted via OSConfigurator.Close(); resolvectl/systemd-resolve
+// per-interface settings are dropped by systemd-resolved when the TUN device is destroyed.
+// Nothing is written to the global /etc/resolv.conf, so there is nothing to undo there.
 func (c *Config) CancelDNS() {
-	c.removeHosts()
+	_ = c.removeHosts()
 	if c.OSConfigurator != nil {
 		_ = c.OSConfigurator.Close()
 	}
-
-	filename := resolvconf.Path()
-	readFile, err := os.ReadFile(filename)
-	if err != nil {
-		return
-	}
-	resolvConf, err := miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(readFile)))
-	if err != nil {
-		return
-	}
-	for i := 0; i < len(resolvConf.Servers); i++ {
-		if resolvConf.Servers[i] == c.Config.Servers[0] {
-			resolvConf.Servers = append(resolvConf.Servers[:i], resolvConf.Servers[i+1:]...)
-			i--
-			break
-		}
-	}
-	err = WriteResolvConf(resolvconf.Path(), *resolvConf)
-	if err != nil {
-		plog.G(context.Background()).Warnf("Failed to remove DNS from resolv conf file: %v", err)
-	}
 }
 
-func GetHostFile() string {
+func getHostFile() string {
 	return "/etc/hosts"
-}
-
-func WriteResolvConf(filename string, config miekgdns.ClientConfig) error {
-	var options []string
-	if config.Ndots != 0 {
-		options = append(options, fmt.Sprintf("ndots:%d", config.Ndots))
-	}
-	if config.Attempts != 0 {
-		options = append(options, fmt.Sprintf("attempts:%d", config.Attempts))
-	}
-	if config.Timeout != 0 {
-		options = append(options, fmt.Sprintf("timeout:%d", config.Timeout))
-	}
-
-	_, err := resolvconf.Build(filename, config.Servers, config.Search, options)
-	return err
 }

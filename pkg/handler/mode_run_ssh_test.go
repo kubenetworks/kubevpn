@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -8,15 +10,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"strings"
-	"sync"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func (u *sshUt) deleteDeployForSaveResource(t *testing.T) {
@@ -40,6 +38,7 @@ func (u *sshUt) resetDeployAuthors(t *testing.T) {
 }
 
 func (u *sshUt) kubevpnRunWithFullProxy(t *testing.T) {
+	t.Cleanup(func() { forceCleanupRunContainers(t, "authors") })
 	path := u.writeTempFile(t)
 	name := filepath.Base(path)
 	dir := filepath.Dir(path)
@@ -59,39 +58,15 @@ func (u *sshUt) kubevpnRunWithFullProxy(t *testing.T) {
 		"--rm",
 		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
-	done := make(chan any)
-	var once = &sync.Once{}
-	go func() {
-		stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
-			contains := strings.Contains(log, "Start listening http port 9080 ...")
-			if contains {
-				once.Do(func() {
-					close(done)
-				})
-			}
-			return contains
-		})
-		if err != nil {
-			select {
-			case <-done:
-				t.Log(err, stdout, stderr)
-			default:
-				t.Fatal(err, stdout, stderr)
-			}
-		}
-	}()
-	<-done
+	waitRunStartup(t, cmd, cancelFunc, u.clientset, "Start listening http port 9080 ...")
 
 	app := "authors"
 	ip, err := u.getPodIP(app)
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := fmt.Sprintf("http://%s:%v/health", ip, localPort)
-	u.healthChecker(t, endpoint, nil, remoteSyncPod)
-	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
 
-	endpoint = fmt.Sprintf("http://%s:%v/health", ip, 9080)
+	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
 	u.healthChecker(t, endpoint, nil, local)
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 
@@ -107,6 +82,7 @@ func (u *sshUt) kubevpnRunWithFullProxy(t *testing.T) {
 }
 
 func (u *sshUt) kubevpnRunWithServiceMesh(t *testing.T) {
+	t.Cleanup(func() { forceCleanupRunContainers(t, "authors") })
 	path := u.writeTempFile(t)
 	name := filepath.Base(path)
 	dir := filepath.Dir(path)
@@ -128,28 +104,7 @@ func (u *sshUt) kubevpnRunWithServiceMesh(t *testing.T) {
 		"--rm",
 		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
-	done := make(chan any)
-	var once = &sync.Once{}
-	go func() {
-		stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
-			contains := strings.Contains(log, "Start listening http port 9080 ...")
-			if contains {
-				once.Do(func() {
-					close(done)
-				})
-			}
-			return contains
-		})
-		if err != nil {
-			select {
-			case <-done:
-				t.Log(err, stdout, stderr)
-			default:
-				t.Fatal(err, stdout, stderr)
-			}
-		}
-	}()
-	<-done
+	waitRunStartup(t, cmd, cancelFunc, u.clientset, "Start listening http port 9080 ...")
 
 	app := "authors"
 	ip, err := u.getServiceIP(app)
@@ -160,9 +115,10 @@ func (u *sshUt) kubevpnRunWithServiceMesh(t *testing.T) {
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
 	u.healthChecker(t, endpoint, nil, remoteSyncPod)
 
+	u.waitManagerReady(t)
 	endpoint = fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	u.healthChecker(t, endpoint, nil, remoteSyncOrigin)
-	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+	u.meshHealthChecker(t, endpoint, nil, remoteSyncOrigin)
+	u.meshHealthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 
 	t.Run("kubevpnRunWithServiceMeshStatus", u.checkRunWithServiceMeshStatus)
 	t.Run("commonTest", u.commonTest)
@@ -182,7 +138,7 @@ func (u *sshUt) checkRunWithFullProxyStatus(t *testing.T) {
 		t.Fatal(err, string(output))
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -196,7 +152,7 @@ func (u *sshUt) checkRunWithFullProxyStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +171,7 @@ func (u *sshUt) checkRunWithServiceMeshStatus(t *testing.T) {
 		t.Fatal(err, string(output))
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -229,7 +185,7 @@ func (u *sshUt) checkRunWithServiceMeshStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}

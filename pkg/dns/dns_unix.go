@@ -10,15 +10,14 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	miekgdns "github.com/miekg/dns"
-	v12 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/tools/cache"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 // https://github.com/golang/go/issues/12524
@@ -33,72 +32,33 @@ var ignoreSearchSuffix = []string{"com", "io", "net", "org", "cn", "ru"}
 // service.namespace.svc.cluster:port
 // service.namespace.svc.cluster.local:port
 func (c *Config) SetupDNS(ctx context.Context) error {
-	defer util.HandleCrash()
-	ticker := time.NewTicker(time.Second * 15)
-	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{
-		FilterFunc: func(obj interface{}) bool {
-			if svc, ok := obj.(*v12.Service); ok && svc.Namespace == c.Ns[0] {
-				return true
-			} else {
-				return false
-			}
-		},
-		Handler: cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				ticker.Reset(time.Second * 3)
-			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
-				ticker.Reset(time.Second * 3)
-			},
-			DeleteFunc: func(obj interface{}) {
-				ticker.Reset(time.Second * 3)
-			},
-		},
-	})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to add service event handler: %v", err)
-		return err
-	}
-	go func() {
-		defer ticker.Stop()
-		for ; ctx.Err() == nil; <-ticker.C {
-			ticker.Reset(time.Second * 15)
-			serviceList, err := c.SvcInformer.GetIndexer().ByIndex(cache.NamespaceIndex, c.Ns[0])
-			if err != nil {
-				plog.G(ctx).Errorf("Failed to list service by namespace %s: %v", c.Ns[0], err)
-				continue
-			}
-			var services []v12.Service
-			for _, service := range serviceList {
-				svc, ok := service.(*v12.Service)
-				if !ok {
-					continue
-				}
-				services = append(services, *svc)
-			}
-			if len(services) == 0 {
-				continue
-			}
-			if ctx.Err() != nil {
-				return
-			}
-			c.Services = services
-			c.usingResolver(ctx)
-		}
-	}()
+	defer netutil.HandleCrash()
+	// Service records arrive push-driven via UpdateServices (which calls applyResolvers);
+	// SetupDNS just lays down the initial resolver files for the known state.
 	c.usingResolver(ctx)
 	return nil
 }
 
+// applyResolvers refreshes the macOS per-service resolver files from the current
+// service set. It is invoked by UpdateServices when the pushed service records change.
+func (c *Config) applyResolvers(ctx context.Context) {
+	c.usingResolver(ctx)
+}
+
 func (c *Config) usingResolver(ctx context.Context) {
 	var clientConfig = c.Config
+	// clientConfig.Servers[0] is used below; bail out safely if the pod resolv.conf yielded no
+	// nameserver (Linux/Windows already guard this — keep macOS consistent instead of panicking).
+	if clientConfig == nil || len(clientConfig.Servers) == 0 {
+		return
+	}
 
 	path := "/etc/resolver"
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err = os.MkdirAll(path, 0755); err != nil {
+		if err = os.MkdirAll(path, config.FileModeExecutable); err != nil {
 			plog.G(ctx).Errorf("Create resolver error: %v", err)
 		}
-		if err = os.Chmod(path, 0755); err != nil {
+		if err = os.Chmod(path, config.FileModeExecutable); err != nil {
 			plog.G(ctx).Errorf("Chmod resolver error: %v", err)
 		}
 	}
@@ -109,23 +69,26 @@ func (c *Config) usingResolver(ctx context.Context) {
 		Ndots:   clientConfig.Ndots,
 		Timeout: clientConfig.Timeout,
 	}
-	for _, filename := range GetResolvers(c.Config.Search, c.Ns, c.Services) {
+	c.Lock.Lock()
+	services := c.Services
+	c.Lock.Unlock()
+	for _, filename := range getResolvers(c.Config.Search, c.Ns, services) {
 		// ignore search suffix like com, io, net, org, cn, ru, those are top dns server
 		if slices.Contains(ignoreSearchSuffix, filepath.Base(filename)) {
 			continue
 		}
 		content, err := os.ReadFile(filename)
 		if os.IsNotExist(err) {
-			_ = os.WriteFile(filename, []byte(toString(newConfig)), 0644)
+			_ = os.WriteFile(filename, []byte(toString(newConfig)), config.FileModeFile)
 			continue
 		}
 		if err != nil {
-			plog.G(ctx).Errorf("Failed to read resovler %s: %v", filename, err)
+			plog.G(ctx).Errorf("Failed to read resolver %s: %v", filename, err)
 			continue
 		}
 
 		var conf *miekgdns.ClientConfig
-		conf, err = miekgdns.ClientConfigFromReader(bytes.NewBufferString(string(content)))
+		conf, err = miekgdns.ClientConfigFromReader(bytes.NewBuffer(content))
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to parse resolver %s: %v", filename, err)
 			continue
@@ -135,9 +98,9 @@ func (c *Config) usingResolver(ctx context.Context) {
 		}
 		// insert current name server to first location
 		conf.Servers = append([]string{clientConfig.Servers[0]}, conf.Servers...)
-		err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
+		err = os.WriteFile(filename, []byte(toString(*conf)), config.FileModeFile)
 		if err != nil {
-			plog.G(ctx).Errorf("Failed to write resovler %s: %v", filename, err)
+			plog.G(ctx).Errorf("Failed to write resolver %s: %v", filename, err)
 		}
 	}
 }
@@ -175,8 +138,17 @@ func toString(config miekgdns.ClientConfig) string {
 	return builder.String()
 }
 
+// CancelDNS removes the injected DNS nameserver from macOS resolver files and cleans up hosts entries.
 func (c *Config) CancelDNS() {
-	for _, filename := range GetResolvers(c.Config.Search, c.Ns, c.Services) {
+	// c.Config.Servers[0] is dereferenced below; nothing to undo without it. Still clean up hosts.
+	if c.Config == nil || len(c.Config.Servers) == 0 {
+		_ = c.removeHosts()
+		return
+	}
+	c.Lock.Lock()
+	services := c.Services
+	c.Lock.Unlock()
+	for _, filename := range getResolvers(c.Config.Search, c.Ns, services) {
 		content, err := os.ReadFile(filename)
 		if err != nil {
 			continue
@@ -196,7 +168,7 @@ func (c *Config) CancelDNS() {
 				conf.Servers = append(conf.Servers[:i], conf.Servers[i+1:]...)
 				i--
 				// remove once is enough, because if same cluster connect to different namespace
-				// dns service ip is same
+				// DNS service IP is same
 				break
 			}
 		}
@@ -204,16 +176,16 @@ func (c *Config) CancelDNS() {
 			_ = os.Remove(filename)
 			continue
 		}
-		err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
+		err = os.WriteFile(filename, []byte(toString(*conf)), config.FileModeFile)
 		if err != nil {
-			plog.G(context.Background()).Errorf("Failed to write resovler %s error: %v", filename, err)
+			plog.G(context.Background()).Errorf("failed to write resolver %s: %v", filename, err)
 		}
 	}
 	//networkCancel()
 	_ = c.removeHosts()
 }
 
-// GetResolvers
+// getResolvers
 // service name: authors
 // namespace: test
 // create resolvers suffix:
@@ -223,7 +195,7 @@ func (c *Config) CancelDNS() {
 // cluster.local
 // svc.cluster
 // test.svc
-func GetResolvers(searchList []string, nsList []string, serviceName []v12.Service) []string {
+func getResolvers(searchList []string, nsList []string, serviceName []corev1.Service) []string {
 	result := sets.New[string]().Insert(searchList...).Insert(nsList...)
 
 	const splitter = "."
@@ -247,6 +219,6 @@ func GetResolvers(searchList []string, nsList []string, serviceName []v12.Servic
 	return resolvers
 }
 
-func GetHostFile() string {
+func getHostFile() string {
 	return "/etc/hosts"
 }

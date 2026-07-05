@@ -4,9 +4,10 @@ package openvpn
 
 import (
 	"embed"
-	"io/ioutil"
 	"os"
 	"os/exec"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 //go:embed exe/tap-windows-9.21.2.exe
@@ -18,17 +19,18 @@ func Install() error {
 	if err != nil {
 		return err
 	}
-	tempFile, err := ioutil.TempFile("", "*.exe")
-	defer func() { _ = os.Remove(tempFile.Name()) }()
+	tempFile, err := os.CreateTemp("", "*.exe")
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tempFile.Close() }()
+	defer func() { _ = os.Remove(tempFile.Name()) }()
 	if _, err = tempFile.Write(bytes); err != nil {
 		return err
 	}
 	_ = tempFile.Sync()
 	_ = tempFile.Close()
-	_ = os.Chmod(tempFile.Name(), 0700)
+	_ = os.Chmod(tempFile.Name(), config.FileModePrivate)
 	cmd := exec.Command(tempFile.Name(), "/S")
 	return cmd.Run()
 }

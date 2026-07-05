@@ -2,7 +2,6 @@ package cmds
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -72,7 +71,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		kubevpn connect --ssh-jump "--ssh-addr jump.naison.org --ssh-username naison --gssapi-password xxx" --ssh-username root --ssh-addr 127.0.0.1:22 --ssh-keyfile ~/.ssh/dst.pem
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			// startup daemon process and sudo process
 			err := daemon.StartupDaemon(cmd.Context())
 			if err != nil {
@@ -99,7 +98,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				ExtraRoute:           extraRoute.ToRPC(),
 				OriginKubeconfigPath: util.GetKubeConfigPath(f),
 
-				SshJump:             sshConf.ToRPC(),
+				SshJump:             handler.SshConfigToRPC(sshConf),
 				TransferImage:       transferImage,
 				Image:               config.Image,
 				ImagePullSecretName: imagePullSecretName,
@@ -140,14 +139,14 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				printManagedSocksStarted(os.Stdout, connectionID, socksListen)
 			}
 			if !foreground {
-				_, _ = fmt.Fprintln(os.Stdout, config.Slogan)
+				printSlogan(os.Stdout)
 			} else {
 				<-cmd.Context().Done()
 				err = disconnect(cli, bytes, ns, sshConf)
 				if err != nil {
 					return err
 				}
-				_, _ = fmt.Fprint(os.Stdout, "Disconnect completed")
+				printSuccess(os.Stdout, "Disconnect completed")
 			}
 			return nil
 		},
@@ -164,30 +163,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 }
 
 func printConnectGRPCStream(ctx context.Context, clientStream grpc.ClientStream, out io.Writer) (string, error) {
-	go func() {
-		if ctx != nil {
-			<-ctx.Done()
-			_ = clientStream.SendMsg(&rpc.Cancel{})
-		}
-	}()
-
-	var connectionID string
-	for {
-		resp := new(rpc.ConnectResponse)
-		err := clientStream.RecvMsg(resp)
-		if errors.Is(err, io.EOF) {
-			return connectionID, nil
-		}
-		if err != nil {
-			return connectionID, err
-		}
-		if resp.ConnectionID != "" {
-			connectionID = resp.ConnectionID
-		}
-		if out != nil && resp.GetMessage() != "" {
-			_, _ = fmt.Fprint(out, resp.GetMessage())
-		}
-	}
+	return printProgressStream[rpc.ConnectResponse](ctx, clientStream, out)
 }
 
 func disconnect(cli rpc.DaemonClient, bytes []byte, ns string, sshConf *pkgssh.SshConfig) error {
@@ -200,13 +176,14 @@ func disconnect(cli rpc.DaemonClient, bytes []byte, ns string, sshConf *pkgssh.S
 	err = resp.Send(&rpc.DisconnectRequest{
 		KubeconfigBytes: ptr.To(string(bytes)),
 		Namespace:       ptr.To(ns),
-		SshJump:         sshConf.ToRPC(),
+		SshJump:         handler.SshConfigToRPC(sshConf),
+		Level:           plog.GetLogLevel(),
 	})
 	if err != nil {
 		plog.G(context.Background()).Errorf("Disconnect error: %v", err)
 		return err
 	}
-	err = util.PrintGRPCStream[rpc.DisconnectResponse](nil, resp)
+	_, err = printProgressStream[rpc.DisconnectResponse](nil, resp, os.Stdout)
 	if err != nil {
 		if status.Code(err) == codes.Canceled {
 			return nil
@@ -232,5 +209,5 @@ func connectionIDFromKubeconfigBytes(bytes []byte, ns string) (string, error) {
 	if err := connect.InitClient(factory); err != nil {
 		return "", err
 	}
-	return util.GetConnectionID(context.Background(), connect.GetClientset().CoreV1().Namespaces(), connect.Namespace)
+	return util.GetConnectionID(context.Background(), connect.GetClientset().CoreV1().Namespaces(), connect.ManagerNamespace)
 }

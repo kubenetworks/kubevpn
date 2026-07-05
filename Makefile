@@ -1,4 +1,4 @@
-VERSION ?= $(shell git tag -l --sort=v:refname | tail -1)
+VERSION ?= $(or $(shell git tag -l --sort=v:refname | tail -1),$(shell git rev-parse --short HEAD))
 GIT_COMMIT ?= $(shell git describe --match=NeVeRmAtCh --always --abbrev=7)
 BUILD_TIME ?= $(shell date +"%Y-%m-%dT%H:%M:%SZ")
 BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
@@ -91,11 +91,11 @@ container:
 ############################ build local
 .PHONY: container-local
 container-local: kubevpn-linux-amd64
-	docker buildx build --platform linux/amd64,linux/arm64 -t ${IMAGE_LATEST} -t ${IMAGE_GH_LATEST} -f $(BUILD_DIR)/local.Dockerfile --push .
+	docker buildx build --platform linux/amd64 -t ccr.ccs.tencentyun.com/kubevpn/kubevpn:test -f $(BUILD_DIR)/local.Dockerfile --push .
 
 .PHONY: container-test
 container-test: kubevpn-linux-amd64
-	docker build -t ${IMAGE_GH} -f $(BUILD_DIR)/test.Dockerfile --push .
+	docker buildx build --platform linux/amd64 -t ${IMAGE_GH} -f $(BUILD_DIR)/test.Dockerfile --push .
 
 .PHONY: version
 version:
@@ -105,9 +105,43 @@ version:
 gen:
 	go generate ./...
 
+# ut runs the FULL suite, including tests that need a real Kubernetes cluster
+# (and therefore a kubeconfig). Those live behind the `integration` build tag.
+# The linux/macos CI jobs provision a cluster before running this.
+#
+# E2E_RUN is a `go test -run` regexp filter, default `.` (everything). The macOS
+# CI job overrides it (e.g. E2E_RUN='^TestFunctions$') to split the two heavy
+# handler e2e suites across separate minikube clusters — halving each cluster's
+# sustained load so its apiserver does not degrade under the ~90m single run.
+# See docs/43-macos-ci-apiserver-flakiness.md.
+E2E_RUN ?= .
 .PHONY: ut
 ut:
-	go test -p=1 -v -timeout=120m -coverprofile=coverage.txt -coverpkg=./... ./...
+	go test -p=1 -v -tags=integration -timeout=120m ${LDFLAGS} -coverprofile=coverage.txt -coverpkg=./... -run '${E2E_RUN}' ./...
+
+# ut-no-cluster runs ONLY the tests that need no kubeconfig / real cluster, i.e.
+# everything NOT behind the `integration` build tag. Used by the Windows CI job,
+# which has no Kubernetes cluster available.
+.PHONY: ut-no-cluster
+ut-no-cluster:
+	go test -p=1 -v -timeout=60m ${LDFLAGS} ./...
+
+# ut-compile type-checks the WHOLE tree, INCLUDING integration-tagged test files,
+# without running anything or needing a cluster. `go test` / `ut-no-cluster` never
+# compile `//go:build integration` files, so signature/identifier breakage in them
+# (which fails the cluster-only `ut`) can otherwise go unnoticed. Run as a fast gate
+# in CI before the heavy `ut`.
+.PHONY: ut-compile
+ut-compile:
+	go build ./...
+	go vet -tags=integration ./...
+
+# ut-tun runs ONLY the tests behind the `tun` build tag — those that need
+# CAP_NET_ADMIN (TUN device creation / route manipulation). Run as root:
+#   sudo -E env PATH="$PATH" make ut-tun
+.PHONY: ut-tun
+ut-tun:
+	go test -p=1 -v -tags=tun -timeout=30m ${LDFLAGS} ./pkg/...
 
 .PHONY: cover
 cover: ut

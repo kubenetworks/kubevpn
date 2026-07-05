@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"context"
+	"os"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -52,7 +54,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
         kubevpn uninstall --ssh-addr <HOST:PORT> --ssh-username <USERNAME> --gssapi-password <PASSWORD>
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			return daemon.StartupDaemon(cmd.Context())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -71,18 +73,20 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 				err = disconnectResp.Send(&rpc.DisconnectRequest{
 					KubeconfigBytes: ptr.To(string(bytes)),
 					Namespace:       ptr.To(ns),
-					SshJump:         sshConf.ToRPC(),
+					SshJump:         handler.SshConfigToRPC(sshConf),
+					Level:           plog.GetLogLevel(),
 				})
 				if err != nil {
 					plog.G(cmd.Context()).Warnf("Failed to disconnect from cluter: %v", err)
 				}
-				_ = util.PrintGRPCStream[rpc.DisconnectResponse](cmd.Context(), disconnectResp)
+				_, _ = printProgressStream[rpc.DisconnectResponse](cmd.Context(), disconnectResp, os.Stdout)
 			}
 
 			req := &rpc.UninstallRequest{
 				KubeconfigBytes: string(bytes),
 				Namespace:       ns,
-				SshJump:         sshConf.ToRPC(),
+				SshJump:         handler.SshConfigToRPC(sshConf),
+				Level:           plog.GetLogLevel(),
 			}
 			resp, err := cli.Uninstall(context.Background())
 			if err != nil {
@@ -92,7 +96,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.UninstallResponse](cmd.Context(), resp)
+			_, err = printProgressStream[rpc.UninstallResponse](cmd.Context(), resp, os.Stdout)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil
@@ -104,5 +108,6 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 	}
 
 	pkgssh.AddSshFlags(cmd.Flags(), sshConf)
+	handler.AddDebugFlag(cmd.Flags())
 	return cmd
 }

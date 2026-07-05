@@ -2,10 +2,9 @@ package config
 
 import (
 	_ "embed"
+	"errors"
 	"os"
 	"path/filepath"
-
-	"github.com/pkg/errors"
 )
 
 const (
@@ -29,6 +28,18 @@ const (
 	DBFile = "db"
 )
 
+// File permission modes for files, directories, and sockets created by kubevpn.
+const (
+	// FileModeFile is the mode for regular files: rw-r--r--.
+	FileModeFile os.FileMode = 0644
+	// FileModeExecutable is the mode for executables and directories: rwxr-xr-x.
+	FileModeExecutable os.FileMode = 0755
+	// FileModePrivate is the mode for owner-only files/directories: rwx------.
+	FileModePrivate os.FileMode = 0700
+	// FileModeSocket is the mode for the daemon unix socket: rw-rw-rw-.
+	FileModeSocket os.FileMode = 0666
+)
+
 var (
 	homePath   string
 	daemonPath string
@@ -47,16 +58,11 @@ func init() {
 	daemonPath = filepath.Join(dir, HOME, Daemon)
 	logPath = filepath.Join(dir, HOME, Log)
 
-	var paths = []string{homePath, daemonPath, logPath, GetPProfPath(), GetSyncthingPath(), GetTempPath()}
+	paths := []string{homePath, daemonPath, logPath, GetPProfPath(), GetSyncthingPath(), GetTempPath()}
 	for _, path := range paths {
 		_, err = os.Stat(path)
 		if errors.Is(err, os.ErrNotExist) {
-			err = os.MkdirAll(path, 0755)
-			if err != nil {
-				panic(err)
-			}
-			err = os.Chmod(path, 0755)
-			if err != nil {
+			if err = os.MkdirAll(path, FileModeExecutable); err != nil {
 				panic(err)
 			}
 		} else if err != nil {
@@ -67,13 +73,14 @@ func init() {
 	path := filepath.Join(homePath, ConfigFile)
 	_, err = os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		err = os.WriteFile(path, config, 0644)
+		err = os.WriteFile(path, config, FileModeFile)
 	}
 	if err != nil {
 		panic(err)
 	}
 }
 
+// GetSockPath returns the Unix domain socket path for the user or root daemon.
 func GetSockPath(isSudo bool) string {
 	name := SockPath
 	if isSudo {
@@ -82,6 +89,7 @@ func GetSockPath(isSudo bool) string {
 	return filepath.Join(daemonPath, name)
 }
 
+// GetPidPath returns the PID file path for the user or root daemon.
 func GetPidPath(isSudo bool) string {
 	name := PidPath
 	if isSudo {
@@ -90,18 +98,22 @@ func GetPidPath(isSudo bool) string {
 	return filepath.Join(daemonPath, name)
 }
 
+// GetSyncthingPath returns the directory path for Syncthing runtime data.
 func GetSyncthingPath() string {
 	return filepath.Join(daemonPath, SyncthingDir)
 }
 
+// GetConfigFile returns the path to the kubevpn YAML configuration file.
 func GetConfigFile() string {
 	return filepath.Join(homePath, ConfigFile)
 }
 
+// GetTempPath returns the directory path for kubevpn temporary files.
 func GetTempPath() string {
 	return filepath.Join(homePath, TempDir)
 }
 
+// GetDaemonLogPath returns the log file path for the user or root daemon.
 func GetDaemonLogPath(isSudo bool) string {
 	if isSudo {
 		return filepath.Join(logPath, SudoLogFile)
@@ -109,10 +121,12 @@ func GetDaemonLogPath(isSudo bool) string {
 	return filepath.Join(logPath, UserLogFile)
 }
 
+// GetPProfPath returns the directory path for storing pprof profile data.
 func GetPProfPath() string {
 	return filepath.Join(daemonPath, PProfDir)
 }
 
+// GetDBPath returns the file path for the local embedded database.
 func GetDBPath() string {
 	return filepath.Join(daemonPath, DBFile)
 }

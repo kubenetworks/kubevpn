@@ -215,6 +215,61 @@ func TestResolveTargetByPodIP(t *testing.T) {
 	}
 }
 
+func TestResolveServiceToPod_RandomSelection(t *testing.T) {
+	podNames := []string{"pod-a", "pod-b", "pod-c"}
+	var addresses []corev1.EndpointAddress
+	for _, name := range podNames {
+		addresses = append(addresses, corev1.EndpointAddress{
+			IP: "10.0.0.1", // IP doesn't matter; we care about the TargetRef selection
+			TargetRef: &corev1.ObjectReference{
+				Kind:      "Pod",
+				Name:      name,
+				Namespace: "default",
+			},
+		})
+	}
+
+	api := &fakeClusterAPI{
+		services: map[string]*corev1.Service{
+			"default/my-svc": {
+				ObjectMeta: metav1.ObjectMeta{Name: "my-svc", Namespace: "default"},
+				Spec: corev1.ServiceSpec{
+					Ports: []corev1.ServicePort{{Name: "http", Port: 80}},
+				},
+			},
+		},
+		endpoints: map[string]*corev1.Endpoints{
+			"default/my-svc": {
+				ObjectMeta: metav1.ObjectMeta{Name: "my-svc", Namespace: "default"},
+				Subsets: []corev1.EndpointSubset{{
+					Addresses: addresses,
+					Ports:     []corev1.EndpointPort{{Name: "http", Port: 8080}},
+				}},
+			},
+		},
+	}
+
+	connector := &ClusterConnector{Client: api, DefaultNamespace: "default"}
+	svc := api.services["default/my-svc"]
+
+	seen := make(map[string]int)
+	const iterations = 100
+	for i := 0; i < iterations; i++ {
+		target, err := connector.resolveServiceToPod(context.Background(), svc, 80)
+		if err != nil {
+			t.Fatalf("iteration %d: %v", i, err)
+		}
+		seen[target.PodName]++
+	}
+
+	// With 3 pods and 100 iterations, a random shuffle should select more than one pod.
+	// The probability of always picking the same pod is (1/3)^99 ≈ 0, so this is safe.
+	if len(seen) < 2 {
+		t.Fatalf("expected random distribution across pods, but only saw %v", seen)
+	}
+	t.Logf("distribution over %d calls: %v", iterations, seen)
+}
+
 func TestResolveTargetUnsupportedHost(t *testing.T) {
 	connector := &ClusterConnector{Client: &fakeClusterAPI{}, DefaultNamespace: "default"}
 	if _, err := connector.resolveTarget(context.Background(), "api.example.com", 443); err == nil {
@@ -267,7 +322,7 @@ func TestSOCKS5ProxyPreservesHostname(t *testing.T) {
 	defer ln.Close()
 
 	go func() {
-		_ = ServeSOCKS5(ctx, ln, connector)
+		_ = serveSOCKS5(ctx, ln, connector)
 	}()
 
 	dialer, err := xproxy.SOCKS5("tcp", ln.Addr().String(), nil, xproxy.Direct)
@@ -322,7 +377,7 @@ func TestHTTPConnectProxyPreservesHostname(t *testing.T) {
 	defer ln.Close()
 
 	go func() {
-		_ = ServeHTTPConnect(ctx, ln, connector)
+		_ = serveHTTPConnect(ctx, ln, connector)
 	}()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
@@ -403,7 +458,7 @@ func TestProxyOutE2ECase(t *testing.T) {
 	}
 	defer ln.Close()
 	go func() {
-		_ = ServeSOCKS5(ctx, ln, connector)
+		_ = serveSOCKS5(ctx, ln, connector)
 	}()
 
 	dialer, err := xproxy.SOCKS5("tcp", ln.Addr().String(), nil, xproxy.Direct)

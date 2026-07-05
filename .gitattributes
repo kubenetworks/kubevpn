@@ -1,0 +1,5 @@
+# Force LF for YAML so files embedded via //go:embed (pkg/inject/envoy*.yaml,
+# pkg/config/config.yaml) keep Unix line endings on a Windows checkout
+# (git autocrlf). Otherwise the embedded bytes carry CRLF, which broke
+# injectedForManager's address match on Windows.
+*.yaml text eol=lf

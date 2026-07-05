@@ -31,7 +31,7 @@ func main() {
 
 	name := path.Base(tplFile)
 	var links []string
-	t := template.New(name).Funcs(map[string]interface{}{
+	t := template.New(name).Funcs(map[string]any{
 		"addURIAndSha": func(url, tag string) string {
 			t := struct {
 				TagName string
@@ -87,7 +87,8 @@ func main() {
 		panic(err)
 	}
 	println(string(processTemplate))
-	err = os.WriteFile(dstFile, processTemplate, 0644)
+	const fileModeReadWrite = 0644
+	err = os.WriteFile(dstFile, processTemplate, fileModeReadWrite)
 	if err != nil {
 		panic(err)
 	}

@@ -13,7 +13,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-func InstallTunTapDriver() {
+func installTunTapDriver() {
 	if err := retry.OnError(retry.DefaultRetry, func(err error) bool {
 		return err != nil
 	}, func() error {
@@ -42,7 +42,7 @@ func UninstallWireGuardTunDriver() error {
 	return os.Remove(filename)
 }
 
-func UninstallTunTapDriver() {
+func uninstallTunTapDriver() {
 	filepath.VolumeName("C")
 	path := filepath.Join(getDiskName()+":\\", "Program Files", "TAP-Windows", "Uninstall.exe")
 	cmd := exec.Command(path, "/S")

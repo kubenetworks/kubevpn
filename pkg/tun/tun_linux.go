@@ -16,7 +16,7 @@ import (
 
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if cfg.Addr == "" && cfg.Addr6 == "" {
-		err = fmt.Errorf("IPv4 address and IPv6 address can not be empty at same time")
+		err = fmt.Errorf("ipv4 address and ipv6 address cannot both be empty")
 		return
 	}
 
@@ -44,6 +44,12 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if device, err = tun.CreateTUN(fmt.Sprintf("utun%d", maxIndex+1), mtu); err != nil {
 		return
 	}
+	// Close the device on any error after creation; on success conn owns it.
+	defer func() {
+		if err != nil {
+			_ = device.Close()
+		}
+	}()
 
 	var name string
 	name, err = device.Name()
@@ -52,12 +58,12 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 	var ifc *net.Interface
 	if ifc, err = net.InterfaceByName(name); err != nil {
-		err = fmt.Errorf("could not find interface name: %s", err)
+		err = fmt.Errorf("cannot find interface name: %w", err)
 		return
 	}
 
 	if err = netlink.NetworkSetMTU(ifc, mtu); err != nil {
-		err = fmt.Errorf("can not setup mtu %d to device %s : %v", mtu, name, err)
+		err = fmt.Errorf("cannot setup mtu %d to device %s: %w", mtu, name, err)
 		return
 	}
 
@@ -67,7 +73,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 			return
 		}
 		if err = netlink.NetworkLinkAddIp(ifc, ipv4, ipv4CIDR); err != nil {
-			err = fmt.Errorf("can not set IPv4 address %s to device %s : %v", ipv4.String(), name, err)
+			err = fmt.Errorf("cannot set IPv4 address %s to device %s: %w", ipv4.String(), name, err)
 			return
 		}
 	}
@@ -78,13 +84,13 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 			return
 		}
 		if err = netlink.NetworkLinkAddIp(ifc, ipv6, ipv6CIDR); err != nil && !errors.Is(err, syscall.ENOTSUP) {
-			err = fmt.Errorf("can not setup IPv6 address %s to device %s : %v", ipv6.String(), name, err)
+			err = fmt.Errorf("cannot setup IPv6 address %s to device %s: %w", ipv6.String(), name, err)
 			return
 		}
 	}
 
 	if err = netlink.NetworkLinkUp(ifc); err != nil {
-		err = fmt.Errorf("can not up device %s : %v", name, err)
+		err = fmt.Errorf("cannot up device %s: %w", name, err)
 		return
 	}
 
@@ -97,9 +103,9 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	conn = &tunConn{
-		ifce:  device,
-		addr:  &net.IPAddr{IP: ipv4},
-		addr6: &net.IPAddr{IP: ipv6},
+		batchDevice: newBatchDevice(device),
+		addr:        &net.IPAddr{IP: ipv4},
+		addr6:       &net.IPAddr{IP: ipv6},
 	}
 	return
 }

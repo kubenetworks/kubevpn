@@ -3,24 +3,20 @@ package ssh
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/kevinburke/ssh_config"
-	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 	"golang.org/x/crypto/ssh"
 	"k8s.io/client-go/util/homedir"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
+// SshConfig holds the configuration for an SSH connection including authentication credentials and jump host settings.
 type SshConfig struct {
 	Addr             string
 	User             string
@@ -35,22 +31,7 @@ type SshConfig struct {
 	GSSAPICacheFile  string
 }
 
-func (conf SshConfig) Clone() SshConfig {
-	return SshConfig{
-		Addr:             conf.Addr,
-		User:             conf.User,
-		Password:         conf.Password,
-		Keyfile:          conf.Keyfile,
-		Jump:             conf.Jump,
-		ConfigAlias:      conf.ConfigAlias,
-		RemoteKubeconfig: conf.RemoteKubeconfig,
-		GSSAPIKeytabConf: conf.GSSAPIKeytabConf,
-		GSSAPIPassword:   conf.GSSAPIPassword,
-		GSSAPICacheFile:  conf.GSSAPICacheFile,
-	}
-}
-
-func (conf *SshConfig) GenKubeconfigIdentify() string {
+func (conf *SshConfig) KubeconfigIdentifier() string {
 	var prefix string
 	if conf.ConfigAlias != "" {
 		prefix = conf.ConfigAlias
@@ -62,10 +43,10 @@ func (conf *SshConfig) GenKubeconfigIdentify() string {
 		}
 	} else if conf.Jump != "" {
 		flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-		var sshConf = &SshConfig{}
+		sshConf := &SshConfig{}
 		AddSshFlags(flags, sshConf)
 		_ = flags.Parse(strings.Split(conf.Jump, " "))
-		prefix = sshConf.GenKubeconfigIdentify()
+		prefix = sshConf.KubeconfigIdentifier()
 	}
 
 	if prefix == "" {
@@ -75,39 +56,7 @@ func (conf *SshConfig) GenKubeconfigIdentify() string {
 	return fmt.Sprintf("%s_%s", prefix, filepath.Base(conf.RemoteKubeconfig))
 }
 
-func ParseSshFromRPC(sshJump *rpc.SshJump) *SshConfig {
-	if sshJump == nil {
-		return &SshConfig{}
-	}
-	return &SshConfig{
-		Addr:             sshJump.Addr,
-		User:             sshJump.User,
-		Password:         sshJump.Password,
-		Keyfile:          sshJump.Keyfile,
-		Jump:             sshJump.Jump,
-		ConfigAlias:      sshJump.ConfigAlias,
-		RemoteKubeconfig: sshJump.RemoteKubeconfig,
-		GSSAPIKeytabConf: sshJump.GSSAPIKeytabConf,
-		GSSAPIPassword:   sshJump.GSSAPIPassword,
-		GSSAPICacheFile:  sshJump.GSSAPICacheFile,
-	}
-}
-
-func (conf SshConfig) ToRPC() *rpc.SshJump {
-	return &rpc.SshJump{
-		Addr:             conf.Addr,
-		User:             conf.User,
-		Password:         conf.Password,
-		Keyfile:          conf.Keyfile,
-		Jump:             conf.Jump,
-		ConfigAlias:      conf.ConfigAlias,
-		RemoteKubeconfig: conf.RemoteKubeconfig,
-		GSSAPIKeytabConf: conf.GSSAPIKeytabConf,
-		GSSAPIPassword:   conf.GSSAPIPassword,
-		GSSAPICacheFile:  conf.GSSAPICacheFile,
-	}
-}
-
+// IsEmpty reports whether the SSH config has no address, alias, or jump host configured.
 func (conf SshConfig) IsEmpty() bool {
 	return conf.ConfigAlias == "" && conf.Addr == "" && conf.Jump == ""
 }
@@ -122,6 +71,7 @@ func (conf SshConfig) IsLoopback() bool {
 	return false
 }
 
+// Host resolves the SSH server address to a list of IP addresses via DNS lookup.
 func (conf SshConfig) Host() []net.IP {
 	if conf.Addr != "" {
 		var host string
@@ -138,6 +88,7 @@ func (conf SshConfig) Host() []net.IP {
 	return []net.IP{}
 }
 
+// GetAuth returns the SSH authentication methods derived from the config (password, GSSAPI, or public key).
 func (conf SshConfig) GetAuth() ([]ssh.AuthMethod, error) {
 	host, _, _ := net.SplitHostPort(conf.Addr)
 	var auth []ssh.AuthMethod
@@ -149,18 +100,19 @@ func (conf SshConfig) GetAuth() ([]ssh.AuthMethod, error) {
 	} else if conf.GSSAPIPassword != "" {
 		c, err = NewKrb5InitiatorClientWithPassword(conf.User, conf.GSSAPIPassword, krb5Conf)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", err, config.ErrGSSAPI)
 		}
 		auth = append(auth, ssh.GSSAPIWithMICAuthMethod(&c, host))
 	} else if conf.GSSAPIKeytabConf != "" {
 		c, err = NewKrb5InitiatorClientWithKeytab(conf.User, krb5Conf, conf.GSSAPIKeytabConf)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", err, config.ErrGSSAPI)
 		}
+		auth = append(auth, ssh.GSSAPIWithMICAuthMethod(&c, host))
 	} else if conf.GSSAPICacheFile != "" {
 		c, err = NewKrb5InitiatorClientWithCache(krb5Conf, conf.GSSAPICacheFile)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", err, config.ErrGSSAPI)
 		}
 		auth = append(auth, ssh.GSSAPIWithMICAuthMethod(&c, host))
 	} else {
@@ -178,54 +130,80 @@ func (conf SshConfig) GetAuth() ([]ssh.AuthMethod, error) {
 }
 
 func publicKeyFile(file string) (ssh.AuthMethod, error) {
-	var err error
 	if len(file) != 0 && file[0] == '~' {
 		file = filepath.Join(homedir.HomeDir(), file[1:])
 	}
-	file, err = filepath.Abs(file)
+	file, err := filepath.Abs(file)
 	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("Cannot read SSH public key file %s", file))
-		return nil, err
+		return nil, fmt.Errorf("cannot resolve SSH key file path %s: %w: %w", file, err, config.ErrSSHAuth)
 	}
 	buffer, err := os.ReadFile(file)
 	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("Cannot read SSH public key file %s", file))
-		return nil, err
+		return nil, fmt.Errorf("cannot read SSH key file %s: %w: %w", file, err, config.ErrSSHAuth)
 	}
-
 	key, err := ssh.ParsePrivateKey(buffer)
 	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("Cannot parse SSH public key file %s", file))
-		return nil, err
+		return nil, fmt.Errorf("cannot parse SSH key file %s: %w: %w", file, err, config.ErrSSHAuth)
 	}
 	return ssh.PublicKeys(key), nil
 }
 
-func (conf SshConfig) AliasRecursion(ctx context.Context, stopChan <-chan struct{}) (client *ssh.Client, err error) {
-	var name = conf.ConfigAlias
-	var jumper = "ProxyJump"
-	var bastionList = []SshConfig{GetBastion(name, conf)}
-	list := getDefaultSSHConfigList()
+// wrapDialError classifies an SSH dial/handshake error for exit-code purposes.
+// x/crypto/ssh exposes no typed authentication error, so an auth failure is detected
+// by its message text; GSSAPI/Kerberos token failures surface during the handshake too.
+func wrapDialError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "kerberos") || strings.Contains(msg, "gssapi"):
+		return fmt.Errorf("%w: %w", err, config.ErrGSSAPI)
+	case strings.Contains(msg, "unable to authenticate"):
+		return fmt.Errorf("%w: %w", err, config.ErrSSHAuth)
+	default:
+		return fmt.Errorf("%w: %w", err, config.ErrSSHConnect)
+	}
+}
+
+// resolveProxyJumpChain walks the ProxyJump chain starting from the given alias,
+// returning the ordered list of bastion configs. It returns an error if a cycle is detected.
+func resolveProxyJumpChain(startAlias string, defaults SshConfig, list defaultSshConf) ([]SshConfig, error) {
+	bastionList := []SshConfig{GetBastion(startAlias, defaults)}
+	visited := map[string]bool{startAlias: true}
+	name := startAlias
 	for {
-		value := list.Get(name, jumper)
-		if value != "" {
-			bastionList = append(bastionList, GetBastion(value, conf))
-			name = value
-			continue
+		value := list.Get(name, "ProxyJump")
+		if value == "" {
+			break
 		}
-		break
+		if visited[value] {
+			return nil, fmt.Errorf("circular ProxyJump detected: %s -> %s: %w", name, value, config.ErrSSHConfig)
+		}
+		visited[value] = true
+		bastionList = append(bastionList, GetBastion(value, defaults))
+		name = value
+	}
+	return bastionList, nil
+}
+
+func (conf SshConfig) AliasRecursion(ctx context.Context, stopChan <-chan struct{}) (client *ssh.Client, err error) {
+	list := getDefaultSSHConfigList()
+	bastionList, err := resolveProxyJumpChain(conf.ConfigAlias, conf, list)
+	if err != nil {
+		return nil, err
 	}
 	for i := len(bastionList) - 1; i >= 0; i-- {
 		if client == nil {
 			client, err = bastionList[i].Dial(ctx, stopChan)
 			if err != nil {
-				err = errors.Wrap(err, fmt.Sprintf("Failed to connect to %v", bastionList[i]))
+				err = fmt.Errorf("failed to connect to %v: %w", bastionList[i], err)
 				return
 			}
 		} else {
 			client, err = JumpTo(ctx, client, bastionList[i], stopChan)
 			if err != nil {
-				err = errors.Wrap(err, fmt.Sprintf("Failed to jump to %v", bastionList[i]))
+				err = fmt.Errorf("failed to jump to %v: %w", bastionList[i], err)
 				return
 			}
 		}
@@ -235,42 +213,46 @@ func (conf SshConfig) AliasRecursion(ctx context.Context, stopChan <-chan struct
 
 func (conf SshConfig) JumpRecursion(ctx context.Context, stopChan <-chan struct{}) (client *ssh.Client, err error) {
 	flags := pflag.NewFlagSet("", pflag.ContinueOnError)
-	var sshConf = &SshConfig{}
+	sshConf := &SshConfig{}
 	AddSshFlags(flags, sshConf)
 	err = flags.Parse(strings.Split(conf.Jump, " "))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse ssh jump %q: %w: %w", conf.Jump, err, config.ErrSSHConfig)
 	}
 	var baseClient *ssh.Client
 	baseClient, err = DialSshRemote(ctx, sshConf, stopChan)
 	if err != nil {
 		return nil, err
 	}
+	// Close baseClient only on error; on success it is the transport for the
+	// jumped client (or the returned client itself when there is no further hop).
+	defer func() {
+		if err != nil && baseClient != nil {
+			_ = baseClient.Close()
+		}
+	}()
 
 	var bastionList []SshConfig
 	if conf.ConfigAlias != "" {
-		var name = conf.ConfigAlias
-		var jumper = "ProxyJump"
-		bastionList = append(bastionList, GetBastion(name, conf))
 		list := getDefaultSSHConfigList()
-		for {
-			value := list.Get(name, jumper)
-			if value != "" {
-				bastionList = append(bastionList, GetBastion(value, conf))
-				name = value
-				continue
-			}
-			break
+		bastionList, err = resolveProxyJumpChain(conf.ConfigAlias, conf, list)
+		if err != nil {
+			return nil, err
 		}
 	}
 	if conf.Addr != "" {
 		bastionList = append(bastionList, conf)
 	}
 
+	// No further hop configured: the jump host itself is the target.
+	if len(bastionList) == 0 {
+		return baseClient, nil
+	}
+
 	for _, sshConfig := range bastionList {
 		client, err = JumpTo(ctx, baseClient, sshConfig, stopChan)
 		if err != nil {
-			err = errors.Wrap(err, fmt.Sprintf("Failed to jump to %s", sshConfig))
+			err = fmt.Errorf("failed to jump to %s: %w", sshConfig, err)
 			return
 		}
 	}
@@ -288,18 +270,18 @@ func (conf SshConfig) Dial(ctx context.Context, stopChan <-chan struct{}) (clien
 	if err != nil {
 		return nil, err
 	}
-	d := net.Dialer{Timeout: time.Second * 10, KeepAlive: config.KeepAliveTime}
+	d := net.Dialer{Timeout: sshOpTimeout, KeepAlive: config.KeepAliveTime}
 	conn, err := d.DialContext(ctx, "tcp", conf.Addr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dial ssh %s: %w: %w", conf.Addr, err, config.ErrSSHConnect)
 	}
 	go func() {
 		if stopChan != nil {
 			<-stopChan
-			conn.Close()
-			if client != nil {
-				client.Close()
-			}
+			// Closing the underlying conn tears down both an in-progress handshake
+			// and an established client (which is layered on conn). Avoid reading
+			// the named return `client` here — it races with the function's return.
+			_ = conn.Close()
 		}
 	}()
 	defer func() {
@@ -317,47 +299,38 @@ func (conf SshConfig) Dial(ctx context.Context, stopChan <-chan struct{}) (clien
 		Auth:            authMethod,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		//BannerCallback:  ssh.BannerDisplayStderr(),
-		Timeout: time.Second * 10,
+		Timeout: sshOpTimeout,
 	})
 	if err != nil {
-		return nil, err
+		return nil, wrapDialError(err)
 	}
 	return ssh.NewClient(c, chans, reqs), nil
 }
 
+// GetBastion resolves SSH config values for the given alias name from ~/.ssh/config, falling back to defaultValue credentials.
 func GetBastion(name string, defaultValue SshConfig) SshConfig {
-	var host, port string
+	list := getDefaultSSHConfigList()
+	host := list.Get(name, "Hostname")
+	port := list.Get(name, "Port")
+	if port == "" {
+		port = "22"
+	}
+	keyfile := list.Get(name, "IdentityFile")
+
 	conf := SshConfig{
 		ConfigAlias: name,
+		User:        list.Get(name, "User"),
+		Addr:        net.JoinHostPort(host, port),
 	}
-	list := getDefaultSSHConfigList()
-	var propertyList = []string{"ProxyJump", "Hostname", "User", "Port", "IdentityFile"}
-	for i, s := range propertyList {
-		value := list.Get(name, s)
-		switch i {
-		case 0:
-
-		case 1:
-			host = value
-		case 2:
-			conf.User = value
-		case 3:
-			if port = value; port == "" {
-				port = strconv.Itoa(22)
-			}
-		case 4:
-			if value == "" {
-				conf.Keyfile = defaultValue.Keyfile
-				conf.Password = defaultValue.Password
-				conf.GSSAPIKeytabConf = defaultValue.GSSAPIKeytabConf
-				conf.GSSAPIPassword = defaultValue.GSSAPIPassword
-				conf.GSSAPICacheFile = defaultValue.GSSAPICacheFile
-			} else {
-				conf.Keyfile = value
-			}
-		}
+	if keyfile != "" {
+		conf.Keyfile = keyfile
+	} else {
+		conf.Keyfile = defaultValue.Keyfile
+		conf.Password = defaultValue.Password
+		conf.GSSAPIKeytabConf = defaultValue.GSSAPIKeytabConf
+		conf.GSSAPIPassword = defaultValue.GSSAPIPassword
+		conf.GSSAPICacheFile = defaultValue.GSSAPICacheFile
 	}
-	conf.Addr = net.JoinHostPort(host, port)
 	return conf
 }
 
@@ -406,6 +379,7 @@ func (c *sshClientWrap) Close() error {
 	return c.Client.Close()
 }
 
+// AddSshFlags registers SSH-related command-line flags (addr, username, password, keyfile, etc.) on the flag set.
 func AddSshFlags(flags *pflag.FlagSet, sshConf *SshConfig) {
 	// for ssh jumper host
 	flags.StringVar(&sshConf.Addr, "ssh-addr", "", "Optional ssh jump server address to dial as <hostname>:<port>, eg: 127.0.0.1:22")
@@ -418,21 +392,4 @@ func AddSshFlags(flags *pflag.FlagSet, sshConf *SshConfig) {
 	flags.StringVar(&sshConf.GSSAPIKeytabConf, "gssapi-keytab", "", "GSSAPI keytab file path")
 	flags.StringVar(&sshConf.GSSAPICacheFile, "gssapi-cache", "", "GSSAPI cache file path, use command `kinit -c /path/to/cache USERNAME@RELAM` to generate")
 	flags.StringVar(&sshConf.RemoteKubeconfig, "remote-kubeconfig", "", "Abstract path of kubeconfig on ssh remote server")
-}
-
-func keepAlive(cl *ssh.Client, conn net.Conn, done <-chan struct{}) error {
-	const keepAliveInterval = time.Second * 10
-	t := time.NewTicker(keepAliveInterval)
-	defer t.Stop()
-	for {
-		select {
-		case <-t.C:
-			_, _, err := cl.SendRequest("keepalive@golang.org", true, nil)
-			if err != nil && err != io.EOF {
-				return errors.Wrap(err, "failed to send keep alive")
-			}
-		case <-done:
-			return nil
-		}
-	}
 }

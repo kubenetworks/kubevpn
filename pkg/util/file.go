@@ -14,6 +14,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+// DownloadFileWithName downloads the file at uri into a temp directory with the given filename and returns the path.
 func DownloadFileWithName(uri, name string) (string, error) {
 	resp, err := getWithRetry(uri)
 	if err != nil {
@@ -39,12 +40,13 @@ func DownloadFileWithName(uri, name string) (string, error) {
 
 	_, err = io.Copy(out, resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to save file %s. error: %v", file, err)
+		return "", fmt.Errorf("failed to save file %s: %w", file, err)
 	}
 
 	return file, nil
 }
 
+// DownloadFileStream downloads the file at uri and returns its contents as a byte slice.
 func DownloadFileStream(uri string) ([]byte, error) {
 	resp, err := getWithRetry(uri)
 	if err != nil {
@@ -57,10 +59,6 @@ func DownloadFileStream(uri string) ([]byte, error) {
 		return nil, fmt.Errorf("downloading file %s failed. status code: %d, expected: %d", uri, resp.StatusCode, http.StatusOK)
 	}
 	return io.ReadAll(resp.Body)
-}
-
-func DownloadFile(uri string) (string, error) {
-	return DownloadFileWithName(uri, fmt.Sprintf("%d", time.Now().Unix()))
 }
 
 const (
@@ -92,9 +90,12 @@ func checkRetry(resp *http.Response, err error) bool {
 	return resp != nil && resp.StatusCode == http.StatusNotFound
 }
 
+// drainBodyLimit caps how many bytes are drained from a response body before close, to allow connection reuse.
+const drainBodyLimit = 4096
+
 func drainBody(b io.ReadCloser) {
 	defer b.Close()
-	io.Copy(io.Discard, io.LimitReader(b, int64(4096)))
+	io.Copy(io.Discard, io.LimitReader(b, drainBodyLimit))
 }
 
 func backoff(min, max time.Duration, attemptNum int) time.Duration {
@@ -106,10 +107,11 @@ func backoff(min, max time.Duration, attemptNum int) time.Duration {
 	return sleep
 }
 
+// ParseDirMapping splits a "local:remote" directory mapping string.
 func ParseDirMapping(dir string) (local, remote string, err error) {
 	index := strings.LastIndex(dir, ":")
 	if index < 0 {
-		err = fmt.Errorf("directory mapping is invaild: %s", dir)
+		err = fmt.Errorf("directory mapping is invalid: %s: %w", dir, config.ErrInvalidArgument)
 		return
 	}
 	local = dir[:index]
@@ -121,6 +123,7 @@ func ParseDirMapping(dir string) (local, remote string, err error) {
 	return
 }
 
+// CleanupTempKubeConfigFile removes all temporary kubeconfig files from the KubeVPN temp directory.
 func CleanupTempKubeConfigFile() error {
 	return filepath.WalkDir(config.GetTempPath(), func(path string, info fs.DirEntry, err error) error {
 		if info.IsDir() {

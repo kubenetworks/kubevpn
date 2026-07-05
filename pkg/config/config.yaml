@@ -1,10 +1,20 @@
-# Here is an example config kubevpn config file, please change it into your custom config.
-# Support three filed: Name,Needs,Flags
-# Exec command: kubevpn alias qa <===> kubevpn connect --kubeconfig=~/.kube/jumper_config --namespace=default
-# Just keep simple
+# Example kubevpn alias config.
+#
+# `kubevpn alias` names a kubevpn invocation (with its flags) so you can run it by
+# a short name, like an entry in ~/.ssh/config. Edit this file to match your setup;
+# kubevpn reads it from ~/.kubevpn/config.yaml by default (override with -f / -r).
+#
+#   kubevpn alias dev   <=>   kubevpn connect --kubeconfig=~/.kube/config --namespace=default
+#
+# Each "---"-separated document is one alias with these fields:
+#   Name        (required) short name passed to `kubevpn alias <Name>`
+#   Description (optional) human-readable note, printed when the alias runs
+#   Needs       (optional) another alias to connect first — a dependency chain,
+#                          e.g. a cluster only reachable through a jump cluster
+#   Flags       (required) the full kubevpn argv; the first item is the subcommand
 
 Name: dev
-Description: This is dev k8s environment, needs jump by qa env
+Description: Dev cluster, reachable only after connecting to qa first
 Needs: qa
 Flags:
   - connect
@@ -14,7 +24,7 @@ Flags:
 ---
 
 Name: qa
-Description: This is QA k8s environment
+Description: QA cluster, the jump environment for dev
 Flags:
   - connect
   - --kubeconfig=~/.kube/jumper_config

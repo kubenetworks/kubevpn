@@ -24,29 +24,25 @@ func (i InvalidPluginSpecError) Error() string {
 // for backward compatibility
 // by default addURIAndSha assumed 4 spaces indent
 func fixShaIndentation(v string) string {
-	return strings.Replace(v, "    sha256:", "sha256:", -1)
+	return strings.ReplaceAll(v, "    sha256:", "sha256:")
 }
 
 func indent(spaces int, v string) string {
 	v = fixShaIndentation(v)
 	pad := strings.Repeat(" ", spaces)
-	return strings.TrimSpace(pad + strings.Replace(v, "\n", "\n"+pad, -1))
+	return strings.TrimSpace(pad + strings.ReplaceAll(v, "\n", "\n"+pad))
 }
 
 // ProcessTemplate process the .krew.yaml template for the release request
-func ProcessTemplate(templateFile string, values interface{}, sha256Map map[string]string) ([]byte, error) {
-	spec, err := RenderTemplate(templateFile, values, sha256Map)
-	if err != nil {
-		return nil, err
-	}
-	return spec, nil
+func ProcessTemplate(templateFile string, values any, sha256Map map[string]string) ([]byte, error) {
+	return RenderTemplate(templateFile, values, sha256Map)
 }
 
 // RenderTemplate process the .krew.yaml template for the release request
-func RenderTemplate(templateFile string, values interface{}, sha256Map map[string]string) ([]byte, error) {
+func RenderTemplate(templateFile string, values any, sha256Map map[string]string) ([]byte, error) {
 	plog.G(context.Background()).Debugf("Started processing of template %s", templateFile)
 	name := path.Base(templateFile)
-	t := template.New(name).Funcs(map[string]interface{}{
+	t := template.New(name).Funcs(map[string]any{
 		"indent": indent,
 		"addURIAndSha": func(url, tag string) string {
 			t := struct {
@@ -68,7 +64,7 @@ func RenderTemplate(templateFile string, values interface{}, sha256Map map[strin
 			plog.G(context.Background()).Infof("Getting sha256 for %s", buf.String())
 			sha256, ok := sha256Map[buf.String()]
 			if !ok {
-				panic(fmt.Errorf("can not get sha256 for link %s", buf.String()))
+				panic(fmt.Errorf("cannot get sha256 for link %s", buf.String()))
 			}
 
 			return fmt.Sprintf(`uri: %s

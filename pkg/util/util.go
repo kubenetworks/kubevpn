@@ -9,22 +9,18 @@ import (
 	"io"
 	"net/http"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
-	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
@@ -33,35 +29,48 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// IsWindows reports whether the current runtime OS is Windows.
 func IsWindows() bool {
 	return runtime.GOOS == "windows"
 }
 
-// RolloutStatus not use kubectl rollout options is this method can use context to cancel
-func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string) (err error) {
-	plog.GetLogger(ctx1).Infof("Checking rollout status for %s", workloads)
+// RolloutStatus not use kubectl rollout options is this method can use context to cancel.
+//
+// undoOnFailure controls the failure-path behavior: when true and the rollout
+// does not converge, it runs `kubectl rollout undo` to revert to the previous
+// revision. That is a deliberate safety net for the INJECT path (if a freshly
+// injected sidecar never becomes ready, undo restores the working version — see
+// pkg/inject/container.go). It MUST be false on the unpatch/leave/reset paths:
+// there the previous revision is the one WITH the sidecar, so undo would re-apply
+// the sidecar we just removed and leave the workload dirty.
+func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string, undoOnFailure bool) (err error) {
+	plog.G(ctx1).Debugf("Checking rollout status for %s", workloads)
 	defer func() {
-		if err != nil {
-			plog.G(ctx1).Errorf("Rollout status for %s failed: %s", workloads, err.Error())
-			out := plog.GetLogger(ctx1).Logger.Out
-			streams := genericiooptions.IOStreams{
-				In:     os.Stdin,
-				Out:    out,
-				ErrOut: out,
-			}
-			o := rollout.NewRolloutUndoOptions(streams)
-			cmd := &cobra.Command{}
-			cmdutil.AddDryRunFlag(cmd)
-			_ = o.Complete(f, cmd, []string{workloads})
-			_ = o.Validate()
-			_ = o.RunUndo()
-		} else {
-			plog.G(ctx1).Infof("Rollout successfully for %s", workloads)
+		if err == nil {
+			plog.G(ctx1).Debugf("Rollout successfully for %s", workloads)
+			return
 		}
+		plog.G(ctx1).Errorf("Rollout status for %s failed: %v", workloads, err)
+		if !undoOnFailure {
+			return
+		}
+		out := plog.G(ctx1).Logger.Out
+		streams := genericiooptions.IOStreams{
+			In:     os.Stdin,
+			Out:    out,
+			ErrOut: out,
+		}
+		o := rollout.NewRolloutUndoOptions(streams)
+		cmd := &cobra.Command{}
+		cmdutil.AddDryRunFlag(cmd)
+		_ = o.Complete(f, cmd, []string{workloads})
+		_ = o.Validate()
+		_ = o.RunUndo()
 	}()
 	client, _ := f.DynamicClient()
 	r := f.NewBuilder().
@@ -103,41 +112,45 @@ func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string
 		},
 	}
 
-	// if the rollout isn't done yet, keep watching deployment status
-	ctx, cancel := context.WithCancel(ctx1)
+	// if the rollout isn't done yet, keep watching deployment status, but bound
+	// the wait so a sidecar that never becomes ready cannot hang forever.
+	ctx, cancel := context.WithTimeout(ctx1, config.RolloutStatusTimeout)
 	defer cancel()
-	return func() error {
-		_, err = watchtools.UntilWithSync(ctx, lw, &unstructured.Unstructured{}, nil, func(e watch.Event) (bool, error) {
-			switch t := e.Type; t {
-			case watch.Added, watch.Modified:
-				status, done, err := statusViewer.Status(e.Object.(k8sruntime.Unstructured), 0)
-				if err != nil {
-					return false, err
-				}
-				// Quit waiting if the rollout is done
-				if done {
-					return true, nil
-				}
-				plog.G(ctx).Info(strings.TrimSpace(status))
-				return false, nil
-
-			case watch.Deleted:
-				// We need to abort to avoid cases of recreation and not to silently watch the wrong (new) object
-				return true, fmt.Errorf("object has been deleted")
-
-			default:
-				return true, fmt.Errorf("internal error: unexpected event %#v", e)
+	_, err = watchtools.UntilWithSync(ctx, lw, &unstructured.Unstructured{}, nil, func(e watch.Event) (bool, error) {
+		switch t := e.Type; t {
+		case watch.Added, watch.Modified:
+			status, done, err := statusViewer.Status(e.Object.(k8sruntime.Unstructured), 0)
+			if err != nil {
+				return false, err
 			}
-		})
-		return err
-	}()
+			// Quit waiting if the rollout is done
+			if done {
+				return true, nil
+			}
+			plog.G(ctx).Debug(strings.TrimSpace(status))
+			return false, nil
+
+		case watch.Deleted:
+			// We need to abort to avoid cases of recreation and not to silently watch the wrong (new) object
+			return true, fmt.Errorf("object has been deleted")
+
+		default:
+			return true, fmt.Errorf("internal error: unexpected event %#v", e)
+		}
+	})
+	if err != nil && ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("rollout status for %s did not finish within %s: %w", workloads, config.RolloutStatusTimeout, err)
+	}
+	return err
 }
 
+// WriterStringer combines io.Writer and fmt.Stringer for buffered output with string access.
 type WriterStringer interface {
 	io.Writer
 	fmt.Stringer
 }
 
+// NewWriter returns a WriterStringer that stops buffering once the checker function returns true.
 func NewWriter(checker func(log string) bool) WriterStringer {
 	return &proxyWriter{Buffer: bytes.NewBuffer(make([]byte, 0)), checker: checker}
 }
@@ -164,89 +177,7 @@ func (w *proxyWriter) String() string {
 	return w.Buffer.String()
 }
 
-func RunWithRollingOutWithChecker(cmd *osexec.Cmd, checker func(log string) (stop bool)) (string, string, error) {
-	stdoutBuf := NewWriter(checker)
-	stderrBuf := NewWriter(checker)
-
-	stdoutPipe, _ := cmd.StdoutPipe()
-	stderrPipe, _ := cmd.StderrPipe()
-	stdout := io.MultiWriter(os.Stdout, stdoutBuf)
-	stderr := io.MultiWriter(os.Stderr, stderrBuf)
-	go func() {
-		_, _ = io.Copy(stdout, stdoutPipe)
-	}()
-	go func() {
-		_, _ = io.Copy(stderr, stderrPipe)
-	}()
-	if err := cmd.Start(); err != nil {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		return stdoutBuf.String(), stderrBuf.String(), err
-	}
-	if err := cmd.Wait(); err != nil {
-		return "", "", err
-	}
-	var err error
-	if !cmd.ProcessState.Success() {
-		err = errors.New("exit code is not 0")
-	}
-
-	stdoutStr := strings.TrimSpace(stdoutBuf.String())
-	stderrStr := strings.TrimSpace(stderrBuf.String())
-
-	return stdoutStr, stderrStr, err
-}
-
-func CanI(clientset *kubernetes.Clientset, sa, ns string, resource *rbacv1.PolicyRule) (allowed bool, err error) {
-	var roleBindingList *rbacv1.RoleBindingList
-	roleBindingList, err = clientset.RbacV1().RoleBindings(ns).List(context.Background(), metav1.ListOptions{})
-	if err != nil {
-		return false, err
-	}
-	for _, item := range roleBindingList.Items {
-		for _, subject := range item.Subjects {
-			if subject.Name == sa && subject.Kind == "ServiceAccount" {
-				var role *rbacv1.Role
-				role, err = clientset.RbacV1().Roles(ns).Get(context.Background(), item.RoleRef.Name, metav1.GetOptions{})
-				if err != nil {
-					return false, err
-				}
-				for _, rule := range role.Rules {
-					if sets.New[string](rule.Resources...).HasAll(resource.Resources...) && sets.New[string](rule.Verbs...).HasAll(resource.Verbs...) {
-						if len(rule.ResourceNames) == 0 || sets.New[string](rule.ResourceNames...).HasAll(resource.ResourceNames...) {
-							return true, nil
-						}
-					}
-				}
-			}
-		}
-	}
-
-	var clusterRoleBindingList *rbacv1.ClusterRoleBindingList
-	clusterRoleBindingList, err = clientset.RbacV1().ClusterRoleBindings().List(context.Background(), metav1.ListOptions{})
-	for _, item := range clusterRoleBindingList.Items {
-		for _, subject := range item.Subjects {
-			if subject.Name == sa && subject.Kind == "ServiceAccount" {
-				var role *rbacv1.ClusterRole
-				role, err = clientset.RbacV1().ClusterRoles().Get(context.Background(), item.RoleRef.Name, metav1.GetOptions{})
-				if err != nil {
-					return false, err
-				}
-				for _, rule := range role.Rules {
-					if sets.New[string](rule.Resources...).HasAll(resource.Resources...) && sets.New[string](rule.Verbs...).HasAll(resource.Verbs...) {
-						if len(rule.ResourceNames) == 0 || sets.New[string](rule.ResourceNames...).HasAll(resource.ResourceNames...) {
-							return true, nil
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return false, nil
-}
-
+// CleanExtensionLib removes the wintun.dll driver file on Windows after uninstalling the WireGuard TUN driver.
 func CleanExtensionLib() {
 	if !IsWindows() {
 		return
@@ -263,8 +194,7 @@ func CleanExtensionLib() {
 			return !errors.Is(err, os.ErrNotExist)
 		},
 		func() error {
-			err := driver.UninstallWireGuardTunDriver()
-			return err
+			return driver.UninstallWireGuardTunDriver()
 		},
 	)
 	_, err = os.Lstat(filename)
@@ -275,12 +205,8 @@ func CleanExtensionLib() {
 	_ = Move(filename, dst)
 }
 
-func Print(writer io.Writer, slogan string) {
-	str := PrintStr(slogan)
-	_, _ = writer.Write([]byte(str))
-}
-
-func PrintStr(slogan string) string {
+// FormatBanner wraps the slogan text in an ASCII box border and returns the formatted string.
+func FormatBanner(slogan string) string {
 	scanner := bufio.NewScanner(strings.NewReader(slogan))
 	var length int
 	var lines []string
@@ -289,17 +215,17 @@ func PrintStr(slogan string) string {
 		length = max(length, len(line))
 		lines = append(lines, line)
 	}
-	length = length + 1 + 1
+	length += 2
 	var sb strings.Builder
 
 	sb.WriteString("+" + strings.Repeat("-", length) + "+")
 	for _, line := range lines {
 		sb.WriteByte('\n')
-		sb.WriteString("|")
-		sb.WriteString(strings.Repeat(" ", 1))
+		sb.WriteByte('|')
+		sb.WriteByte(' ')
 		sb.WriteString(line)
 		sb.WriteString(strings.Repeat(" ", length-1-len(line)))
-		sb.WriteString("|")
+		sb.WriteByte('|')
 	}
 	sb.WriteByte('\n')
 	sb.WriteString("+" + strings.Repeat("-", length) + "+")
@@ -307,29 +233,33 @@ func PrintStr(slogan string) string {
 	return sb.String()
 }
 
+// StartupPProf starts an HTTP pprof server on localhost at the given port.
 func StartupPProf(port int) {
 	_ = http.ListenAndServe(fmt.Sprintf("localhost:%d", port), nil)
 }
 
+// StartupPProfForServer starts an HTTP pprof server listening on all interfaces at the given port.
 func StartupPProfForServer(port int) {
 	_ = http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
 }
 
-func Merge[K comparable, V any](fromMap, ToMap map[K]V) map[K]V {
+// Merge copies all entries from toMap into fromMap and returns the merged result.
+func Merge[K comparable, V any](fromMap, toMap map[K]V) map[K]V {
 	if fromMap == nil {
-		return ToMap
+		return toMap
 	}
 
-	for k, v := range ToMap {
+	for k, v := range toMap {
 		fromMap[k] = v
 	}
 
 	return fromMap
 }
 
+// Move renames src to dst, falling back to a copy-and-delete if they are on different filesystems.
 func Move(src, dst string) error {
 	err := os.Rename(src, dst)
-	if err != nil && errors.Is(err.(*os.LinkError).Err.(syscall.Errno), syscall.EXDEV) {
+	if err != nil && errors.Is(err, syscall.EXDEV) {
 		return move(src, dst)
 	}
 	return err
@@ -372,6 +302,7 @@ func move(src, dst string) (e error) {
 	return os.Remove(src)
 }
 
+// If returns t1 if b is true, otherwise t2 (a generic ternary helper).
 func If[T any](b bool, t1, t2 T) T {
 	if b {
 		return t1
@@ -379,15 +310,13 @@ func If[T any](b bool, t1, t2 T) T {
 	return t2
 }
 
-// ConvertUidToWorkload
-// deployments.apps.productpage --> deployments.apps/productpage
-func ConvertUidToWorkload(uid string) string {
+// ConvertUIDToWorkload converts a dot-separated UID (e.g. "deployments.apps.productpage") to a slash-separated workload reference (e.g. "deployments.apps/productpage").
+func ConvertUIDToWorkload(uid string) string {
 	index := strings.LastIndex(uid, ".")
 	return uid[:index] + "/" + uid[index+1:]
 }
 
-// ConvertWorkloadToUid
-// deployments.apps/productpage --> deployments.apps.productpage
-func ConvertWorkloadToUid(workload string) string {
+// ConvertWorkloadToUID converts a slash-separated workload reference (e.g. "deployments.apps/productpage") to a dot-separated UID (e.g. "deployments.apps.productpage").
+func ConvertWorkloadToUID(workload string) string {
 	return strings.ReplaceAll(workload, "/", ".")
 }

@@ -23,7 +23,6 @@ import (
 	"io"
 	"time"
 
-	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/ports"
@@ -88,7 +87,7 @@ type listenContext struct {
 	listenEP *Endpoint
 
 	// hasherMu protects hasher.
-	hasherMu sync.Mutex
+	hasherMu hasherMutex
 	// hasher is the hash function used to generate a SYN cookie.
 	hasher hash.Hash
 
@@ -259,7 +258,7 @@ func (l *listenContext) startHandshake(s *segment, opts header.TCPSynOptions, qu
 
 		// Propagate any inheritable options from the listening endpoint
 		// to the newly created endpoint.
-		l.listenEP.propagateInheritableOptionsLocked(ep) // +checklocksforce
+		l.listenEP.propagateInheritableOptionsLocked(ep) // +checklocksforce:ep.mu
 
 		if !ep.reserveTupleLocked() {
 			ep.mu.Unlock()
@@ -363,6 +362,7 @@ func (e *Endpoint) propagateInheritableOptionsLocked(n *Endpoint) {
 	n.boundBindToDevice = e.boundBindToDevice
 	n.boundPortFlags = e.boundPortFlags
 	n.userMSS = e.userMSS
+	n.ops.SetMark(e.ops.GetMark())
 }
 
 // reserveTupleLocked reserves an accepted endpoint's tuple.
@@ -526,13 +526,15 @@ func (e *Endpoint) handleListenSegment(ctx *listenContext, s *segment) tcpip.Err
 		}
 		cookie := ctx.createCookie(s.id, s.sequenceNumber, encodeMSS(opts.MSS))
 		fields := tcpFields{
-			id:     s.id,
-			ttl:    calculateTTL(route, e.ipv4TTL, e.ipv6HopLimit),
-			tos:    e.sendTOS,
-			flags:  header.TCPFlagSyn | header.TCPFlagAck,
-			seq:    cookie,
-			ack:    s.sequenceNumber + 1,
-			rcvWnd: ctx.rcvWnd,
+			id:        s.id,
+			ttl:       calculateTTL(route, e.ipv4TTL, e.ipv6HopLimit),
+			tos:       e.sendTOS,
+			flags:     header.TCPFlagSyn | header.TCPFlagAck,
+			seq:       cookie,
+			ack:       s.sequenceNumber + 1,
+			rcvWnd:    ctx.rcvWnd,
+			df:        e.pmtud == tcpip.PMTUDiscoveryWant || e.pmtud == tcpip.PMTUDiscoveryDo || e.pmtud == tcpip.PMTUDiscoveryProbe,
+			expOptVal: e.getExperimentOptionValue(route),
 		}
 		if err := e.sendSynTCP(route, fields, synOpts); err != nil {
 			return err

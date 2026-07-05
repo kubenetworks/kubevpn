@@ -4,10 +4,8 @@ package dns
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/netip"
-	"os/exec"
 
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
@@ -15,6 +13,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// SetupDNS configures cluster DNS servers on the TUN interface using Windows LUID APIs.
 func (c *Config) SetupDNS(ctx context.Context) error {
 	clientConfig := c.Config
 	tunName := c.TunName
@@ -32,28 +31,30 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 		var addr netip.Addr
 		addr, err = netip.ParseAddr(s)
 		if err != nil {
-			plog.G(ctx).Errorf("Parse %s failed: %s", s, err)
+			plog.G(ctx).Errorf("Parse %s failed: %v", s, err)
 			return err
 		}
 		servers = append(servers, addr.Unmap())
 	}
 	err = luid.SetDNS(windows.AF_INET, servers, clientConfig.Search)
 	if err != nil {
-		plog.G(ctx).Errorf("Set DNS failed: %s", err)
+		plog.G(ctx).Errorf("Set DNS failed: %v", err)
 		return err
 	}
 	err = luid.SetDNS(windows.AF_INET6, servers, clientConfig.Search)
 	if err != nil {
-		plog.G(ctx).Errorf("Set DNS failed: %s", err)
+		plog.G(ctx).Errorf("Set DNS failed: %v", err)
 		return err
 	}
-	//_ = updateNicMetric(tunName)
-	//_ = addNicSuffixSearchList(clientConfig.Search)
 	return nil
 }
 
+// applyResolvers is a no-op on Windows: per-service resolver files are macOS-only.
+func (c *Config) applyResolvers(_ context.Context) {}
+
+// CancelDNS flushes DNS and route entries from the TUN interface and removes managed hosts entries.
 func (c *Config) CancelDNS() {
-	c.removeHosts()
+	_ = c.removeHosts()
 	tun, err := net.InterfaceByName(c.TunName)
 	if err != nil {
 		return
@@ -68,37 +69,7 @@ func (c *Config) CancelDNS() {
 	_ = luid.FlushRoutes(windows.AF_INET6)
 }
 
-func updateNicMetric(name string) error {
-	cmd := exec.Command("PowerShell", []string{
-		"Set-NetIPInterface",
-		"-InterfaceAlias",
-		fmt.Sprintf("\"%s\"", name),
-		"-InterfaceMetric",
-		"1",
-	}...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		plog.G(context.Background()).Warnf("Failed to update nic metrics, error: %v, output: %s, command: %v", err, string(out), cmd.Args)
-	}
-	return err
-}
-
-// @see https://docs.microsoft.com/en-us/powershell/module/dnsclient/set-dnsclientglobalsetting?view=windowsserver2019-ps#example-1--set-the-dns-suffix-search-list
-func addNicSuffixSearchList(search []string) error {
-	cmd := exec.Command("PowerShell", []string{
-		"Set-DnsClientGlobalSetting",
-		"-SuffixSearchList",
-		fmt.Sprintf("@(\"%s\", \"%s\", \"%s\")", search[0], search[1], search[2]),
-	}...)
-	output, err := cmd.CombinedOutput()
-	plog.G(context.Background()).Debugln(cmd.Args)
-	if err != nil {
-		plog.G(context.Background()).Warnf("Failed to set DNS suffix search list, err: %v, output: %s, command: %v", err, string(output), cmd.Args)
-	}
-	return err
-}
-
-func GetHostFile() string {
+func getHostFile() string {
 	//return "/windows/system32/drivers/etc/hosts"
 	return "C:\\Windows\\System32\\drivers\\etc\\hosts"
 }

@@ -3,26 +3,28 @@ package action
 import (
 	"context"
 	"fmt"
-	"io"
-	"os"
+	"sync"
 
 	"google.golang.org/grpc"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// Sync handles the bidirectional file sync RPC, connecting to the cluster and synchronizing local directories with remote workloads.
 func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	req, err := resp.Recv()
 	if err != nil {
 		return err
 	}
-	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newSyncWarp(resp), svr.LogFile))
+	logger := newServerStreamLogger(svr.LogFile, req.Level, func(msg string) error {
+		return resp.Send(&rpc.SyncResponse{Message: msg})
+	})
 
-	var sshConf = ssh.ParseSshFromRPC(req.SshJump)
 	connReq := &rpc.ConnectRequest{
 		KubeconfigBytes:      req.KubeconfigBytes,
 		Namespace:            req.Namespace,
@@ -40,36 +42,45 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	}
 
 	var connResp grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse]
-	sshCtx, sshFunc := context.WithCancel(context.Background())
+	var connRespMu sync.Mutex
+	session := NewSessionLifecycle(logger)
 	go func() {
 		var s rpc.Cancel
-		err = resp.RecvMsg(&s)
-		if err != nil {
+		if recvErr := resp.RecvMsg(&s); recvErr != nil {
 			return
 		}
-		if connResp != nil {
-			_ = connResp.SendMsg(&s)
+		connRespMu.Lock()
+		cr := connResp
+		connRespMu.Unlock()
+		if cr != nil {
+			_ = cr.SendMsg(&s)
 		}
-		sshFunc()
+		session.Cancel()
 	}()
 
-	connResp, err = cli.Connect(context.Background())
-	if err != nil {
-		return err
+	cr, connErr := cli.Connect(context.Background())
+	if connErr != nil {
+		return connErr
 	}
+	connRespMu.Lock()
+	connResp = cr
+	connRespMu.Unlock()
 	err = connResp.Send(connReq)
 	if err != nil {
 		return err
 	}
 	var connectionID string
-	err = util.CopyAndConvertGRPCStream[rpc.ConnectResponse, rpc.SyncResponse](
+	err = grpcutil.CopyAndConvertGRPCStream[rpc.ConnectResponse, rpc.SyncResponse](
 		connResp,
 		resp,
 		func(r *rpc.ConnectResponse) *rpc.SyncResponse {
 			if r.ConnectionID != "" {
 				connectionID = r.ConnectionID
 			}
-			_, _ = svr.LogFile.Write([]byte(r.Message))
+			// Forward the message (with any step sentinel) to the CLI for spinner
+			// rendering, but strip the sentinel from the log-file copy.
+			_, fileMsg := plog.DecodeStep(r.Message)
+			_, _ = svr.LogFile.Write([]byte(fileMsg))
 			return &rpc.SyncResponse{Message: r.Message}
 		})
 	if err != nil {
@@ -77,7 +88,7 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	}
 
 	options := &handler.SyncOptions{
-		Namespace:            req.Namespace,
+		WorkloadNamespace:    req.Namespace,
 		Headers:              req.Headers,
 		Workloads:            req.Workloads,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
@@ -91,66 +102,56 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	}
 	defer func() {
 		if err != nil {
-			_ = options.Cleanup(sshCtx)
-			sshFunc()
+			_ = options.Cleanup(session.Ctx)
+			session.Cancel()
 		}
 	}()
 	var file string
+	session.AddTempFile(&file)
 	options.AddRollbackFunc(func() error {
-		sshFunc()
-		_ = os.Remove(file)
+		session.RunCleanups()
 		return nil
 	})
-	if !sshConf.IsEmpty() {
-		file, err = ssh.SshJump(sshCtx, sshConf, []byte(req.KubeconfigBytes), false)
-	} else {
-		file, err = util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
-	}
+	file, err = resolveKubeconfig(session.Ctx, req.SshJump, req.KubeconfigBytes, false)
 	if err != nil {
+		plog.G(resp.Context()).Errorf("Failed to resolve kubeconfig: %v", err)
 		return err
 	}
 	f := util.InitFactoryByPath(file, req.Namespace)
 	err = options.InitClient(f)
 	if err != nil {
-		plog.G(context.Background()).Errorf("Failed to init client: %v", err)
+		plog.G(resp.Context()).Errorf("Failed to init client: %v", err)
 		return err
 	}
-	logger.Infof("Sync workloads...")
-	options.SetContext(sshCtx)
+	// The inner Connect above already resolved the traffic manager namespace
+	// (detectAndSetManagerNamespace). Thread that authoritative value into the
+	// sync options so the cloned workload's nested `kubevpn proxy` pins
+	// --manager-namespace instead of re-detecting it (which falls back to the
+	// workload namespace when manager != workload).
+	svr.connMu.RLock()
+	if conn, _ := svr.findConnection(connectionID); conn != nil {
+		options.ManagerNamespace = conn.GetManagerNamespace()
+	}
+	svr.connMu.RUnlock()
+
+	logger.Debugf("Syncing workloads")
+	options.SetContext(session.Ctx)
 	newKubeconfigBytes, err := options.ConvertApiServerToNodeIP(resp.Context(), []byte(req.KubeconfigBytes))
 	if err != nil {
+		plog.G(resp.Context()).Errorf("Failed to convert apiserver to node IP: %v", err)
 		return err
 	}
-	err = options.DoSync(plog.WithLogger(sshCtx, logger), newKubeconfigBytes, req.Image)
+	err = options.DoSync(plog.WithLogger(session.Ctx, logger), newKubeconfigBytes, req.Image)
 	if err != nil {
-		plog.G(context.Background()).Errorf("Sync workloads failed: %v", err)
+		plog.G(resp.Context()).Errorf("Sync workloads failed: %v", err)
 		return err
 	}
-	var opt *handler.ConnectOptions
-	for _, connection := range svr.connections {
-		if connection.GetConnectionID() == connectionID {
-			opt = connection
-			break
-		}
-	}
+	svr.connMu.RLock()
+	opt, _ := svr.findConnection(connectionID)
+	svr.connMu.RUnlock()
 	if opt == nil {
-		return fmt.Errorf("cluster %s not found", connectionID)
+		return fmt.Errorf("cluster %s not found: %w", connectionID, config.ErrConnectionNotFound)
 	}
-	opt.Sync = options
+	opt.SetSync(options)
 	return nil
-}
-
-type syncWarp struct {
-	server rpc.Daemon_SyncServer
-}
-
-func (r *syncWarp) Write(p []byte) (n int, err error) {
-	_ = r.server.Send(&rpc.SyncResponse{
-		Message: string(p),
-	})
-	return len(p), nil
-}
-
-func newSyncWarp(server rpc.Daemon_SyncServer) io.Writer {
-	return &syncWarp{server: server}
 }

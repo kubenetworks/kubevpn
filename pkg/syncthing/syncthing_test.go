@@ -1,6 +1,7 @@
 package syncthing
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/syncthing/syncthing/lib/protocol"
@@ -9,7 +10,8 @@ import (
 )
 
 func TestGenerateCertificate(t *testing.T) {
-	cert, err := tlsutil.NewCertificate("cert.pem", "key.pem", "syncthing", 365000)
+	dir := t.TempDir()
+	cert, err := tlsutil.NewCertificate(filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem"), "syncthing", 365000)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -104,14 +104,14 @@ func (c *CCache) Unmarshal(b []byte) error {
 	p := 0
 	//The first byte of the file always has the value 5
 	if int8(b[p]) != 5 {
-		return errors.New("Invalid credential cache data. First byte does not equal 5")
+		return errors.New("invalid credential cache data: first byte does not equal 5")
 	}
 	p++
 	//Get credential cache version
 	//The second byte contains the version number (1 to 4)
 	c.Version = b[p]
 	if c.Version < 1 || c.Version > 4 {
-		return errors.New("Invalid credential cache data. Keytab version is not within 1 to 4")
+		return errors.New("invalid credential cache data: keytab version is not within 1 to 4")
 	}
 	p++
 	endian := c.getEndian()
@@ -146,6 +146,9 @@ func (c *CCache) Marshal() ([]byte, error) {
 
 	// Write the CCache version
 	err = b.WriteByte(c.Version)
+	if err != nil {
+		return []byte{}, err
+	}
 
 	if c.Version == 4 {
 		// Write version 4 header
@@ -446,7 +449,7 @@ func (c *CCache) getEndian() *binary.ByteOrder {
 
 func parseHeader(b []byte, p *int, c *CCache, e *binary.ByteOrder) error {
 	if c.Version != 4 {
-		return errors.New("Credentials cache version is not 4 so there is no header to parse.")
+		return errors.New("credentials cache version is not 4, no header to parse")
 	}
 	h := header{}
 	h.length = uint16(readInt16(b, p, e))
@@ -457,7 +460,7 @@ func parseHeader(b []byte, p *int, c *CCache, e *binary.ByteOrder) error {
 		f.value = b[*p : *p+int(f.length)]
 		*p += int(f.length)
 		if !f.valid() {
-			return errors.New("Invalid credential cache header found")
+			return errors.New("invalid credential cache header found")
 		}
 		h.fields = append(h.fields, f)
 	}
@@ -651,9 +654,9 @@ func readBytes(b []byte, p *int, s int, e *binary.ByteOrder) []byte {
 }
 
 func isNativeEndianLittle() bool {
-	var x = 0x012345678
-	var p = unsafe.Pointer(&x)
-	var bp = (*[4]byte)(p)
+	x := 0x012345678
+	p := unsafe.Pointer(&x)
+	bp := (*[4]byte)(p)
 
 	var endian bool
 	if 0x01 == bp[0] {

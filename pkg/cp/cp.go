@@ -18,7 +18,9 @@ import (
 	"k8s.io/kubectl/pkg/cmd/exec"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // CopyOptions have the data required to perform the copy operation
@@ -45,7 +47,7 @@ func NewCopyOptions(ioStreams genericiooptions.IOStreams) *CopyOptions {
 }
 
 var (
-	errFileSpecDoesntMatchFormat = errors.New("filespec must match the canonical format: [[namespace/]pod:]file/path")
+	errFileSpecDoesntMatchFormat = fmt.Errorf("filespec must match the canonical format: [[namespace/]pod:]file/path: %w", config.ErrInvalidArgument)
 )
 
 func extractFileSpec(arg string) (fileSpec, error) {
@@ -90,7 +92,7 @@ func (o *CopyOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []str
 	}
 
 	var err error
-	o.Namespace, _, err = f.ToRawKubeConfigLoader().Namespace()
+	o.Namespace, err = util.GetNamespace(f)
 	if err != nil {
 		return err
 	}
@@ -132,7 +134,7 @@ func (o *CopyOptions) Run() error {
 		return fmt.Errorf("one of src or dest must be a local file specification")
 	}
 	if len(srcSpec.File.String()) == 0 || len(destSpec.File.String()) == 0 {
-		return errors.New("filepath can not be empty")
+		return errors.New("filepath cannot be empty")
 	}
 
 	if len(srcSpec.PodName) != 0 {
@@ -227,6 +229,7 @@ func (o *CopyOptions) copyFromPod(src, dest fileSpec) error {
 	return o.untarAll(prefix, destFile, reader)
 }
 
+// TarPipe streams tar data from a remote pod with automatic retry on connection loss.
 type TarPipe struct {
 	src       fileSpec
 	o         *CopyOptions
@@ -291,7 +294,6 @@ func (t *TarPipe) Read(p []byte) (n int, err error) {
 }
 
 func makeTar(src localPath, dest remotePath, writer io.Writer) error {
-	// TODO: use compression here?
 	tarWriter := tar.NewWriter(writer)
 	defer tarWriter.Close()
 
@@ -355,23 +357,26 @@ func recursiveTar(srcDir, srcFile localPath, destDir, destFile remotePath, tw *t
 				return err
 			}
 
-			f, err := os.Open(fpath)
-			if err != nil {
+			if err := copyFileToTar(fpath, tw); err != nil {
 				return err
 			}
-			defer f.Close()
-
-			if _, err := io.Copy(tw, f); err != nil {
-				return err
-			}
-			return f.Close()
 		}
 	}
 	return nil
 }
 
+func copyFileToTar(fpath string, tw *tar.Writer) error {
+	f, err := os.Open(fpath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = io.Copy(tw, f)
+	return err
+}
+
 func (o *CopyOptions) untarAll(prefix string, dest localPath, reader io.Reader) error {
-	// TODO: use compression here?
 	tarReader := tar.NewReader(reader)
 	var linkList []tar.Header
 	var genDstFilename = func(headerName string) localPath {
@@ -405,11 +410,11 @@ func (o *CopyOptions) untarAll(prefix string, dest localPath, reader io.Reader) 
 			continue
 		}
 
-		if err := os.MkdirAll(destFileName.Dir().String(), 0755); err != nil {
+		if err := os.MkdirAll(destFileName.Dir().String(), config.FileModeExecutable); err != nil {
 			return err
 		}
 		if header.FileInfo().IsDir() {
-			if err := os.MkdirAll(destFileName.String(), 0755); err != nil {
+			if err := os.MkdirAll(destFileName.String(), config.FileModeExecutable); err != nil {
 				return err
 			}
 			continue
@@ -460,8 +465,5 @@ func (o *CopyOptions) execute(options *exec.ExecOptions) error {
 		return err
 	}
 
-	if err := options.Run(); err != nil {
-		return err
-	}
-	return nil
+	return options.Run()
 }

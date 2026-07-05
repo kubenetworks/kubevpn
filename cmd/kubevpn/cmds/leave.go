@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"context"
+	"os"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -26,7 +29,7 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 		you can use this command to leave proxy resources.
 		you can just leave proxy resources which do proxy by yourself.
 		and the last one leave proxy resource, it will also restore workloads container.
-		otherwise it will keep containers [vpn, envoy-proxy] until last one to leave.
+		otherwise it will keep containers [vpn, envoy] until last one to leave.
 		`)),
 		Example: templates.Examples(i18n.T(`
 		# leave proxy resource and restore it to origin
@@ -48,6 +51,7 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 			req := &rpc.LeaveRequest{
 				Namespace: ns,
 				Workloads: args,
+				Level:     plog.GetLogLevel(),
 			}
 			resp, err := cli.Leave(context.Background())
 			if err != nil {
@@ -57,7 +61,7 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.LeaveResponse](cmd.Context(), resp)
+			_, err = printProgressStream[rpc.LeaveResponse](cmd.Context(), resp, os.Stdout)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil
@@ -67,5 +71,6 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
+	handler.AddDebugFlag(leaveCmd.Flags())
 	return leaveCmd
 }

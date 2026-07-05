@@ -52,15 +52,19 @@ func (p localPath) Glob() (matches []string, err error) {
 	return filepath.Glob(p.file)
 }
 
-func (p localPath) StripSlashes() localPath {
-	return newLocalPath(stripLeadingSlash(p.file))
-}
-
 func isRelative(base, target localPath) bool {
-	relative, err := filepath.Rel(base.String(), target.String())
+	// Clean both paths first so that ".." segments are resolved before the
+	// relative path is computed, regardless of the OS path separator.
+	cleanBase := filepath.Clean(base.String())
+	cleanTarget := filepath.Clean(target.String())
+	relative, err := filepath.Rel(cleanBase, cleanTarget)
 	if err != nil {
 		return false
 	}
+	// On Windows filepath.Rel returns backslash-separated paths (e.g. "..\b").
+	// Normalize to forward slashes so stripPathShortcuts, which only strips a
+	// leading "../", correctly detects escapes on every platform.
+	relative = filepath.ToSlash(relative)
 	return relative == "." || relative == stripPathShortcuts(relative)
 }
 
@@ -95,11 +99,6 @@ func (p remotePath) Clean() remotePath {
 
 func (p remotePath) Join(elem pathSpec) remotePath {
 	return newRemotePath(path.Join(p.file, elem.String()))
-}
-
-func (p remotePath) StripShortcuts() remotePath {
-	p = p.Clean()
-	return newRemotePath(stripPathShortcuts(p.file))
 }
 
 func (p remotePath) StripSlashes() remotePath {

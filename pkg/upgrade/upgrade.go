@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	goversion "github.com/hashicorp/go-version"
 	"golang.org/x/oauth2"
@@ -33,19 +34,20 @@ func Main(ctx context.Context, quit func(ctx context.Context, isSudo bool) error
 		return err
 	}
 
-	var client = http.DefaultClient
+	const httpClientTimeout = 30 * time.Second
+	client := &http.Client{Timeout: httpClientTimeout}
 	if config.GitHubOAuthToken != "" {
 		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
 	}
-	url, latestVersion, needsUpgrade, err := NeedsUpgrade(ctx, client, config.Version)
+	url, latestVersion, needsUpgrade, err := needsUpgrade(ctx, client, config.Version)
 	if err != nil {
 		return err
 	}
 	if !needsUpgrade {
-		_, _ = fmt.Fprintln(os.Stdout, fmt.Sprintf("Already up to date, don't needs to upgrade, version: %s", latestVersion))
+		fmt.Fprintf(os.Stdout, "Already up to date, no need to upgrade, version: %s\n", latestVersion)
 		return nil
 	}
-	_, _ = fmt.Fprintln(os.Stdout, fmt.Sprintf("Current version: %s less than latest version: %s, needs to upgrade", config.Version, latestVersion))
+	fmt.Fprintf(os.Stdout, "Current version: %s less than latest version: %s, needs to upgrade\n", config.Version, latestVersion)
 	_ = quit(ctx, true)
 	_ = quit(ctx, false)
 
@@ -72,7 +74,7 @@ func downloadAndInstall(client *http.Client, url string) error {
 	}
 	err = util.Download(client, url, temp.Name(), os.Stdout, os.Stderr)
 	if err != nil {
-		return err
+		return fmt.Errorf("download release: %w: %w", err, config.ErrUpgradeNetwork)
 	}
 
 	var curFolder string
@@ -92,11 +94,11 @@ func downloadAndInstall(client *http.Client, url string) error {
 	}
 	err = util.UnzipKubeVPNIntoFile(temp.Name(), file.Name())
 	if err != nil {
-		return err
+		return fmt.Errorf("unzip release: %w: %w", err, config.ErrUpgradeInstall)
 	}
-	err = os.Chmod(file.Name(), 0755)
+	err = os.Chmod(file.Name(), config.FileModeExecutable)
 	if err != nil {
-		return err
+		return fmt.Errorf("chmod new binary: %w: %w", err, config.ErrUpgradeInstall)
 	}
 
 	var createTemp *os.File
@@ -104,21 +106,30 @@ func downloadAndInstall(client *http.Client, url string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(createTemp.Name())
 	err = createTemp.Close()
 	if err != nil {
 		return err
 	}
-	err = os.Remove(createTemp.Name())
+	backupPath := createTemp.Name()
+	err = os.Remove(backupPath)
 	if err != nil {
 		return err
 	}
-	err = util.Move(curFolder, createTemp.Name())
+	// Stash the current binary as a backup.
+	err = util.Move(curFolder, backupPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("backup current binary: %w: %w", err, config.ErrUpgradeInstall)
 	}
+	// Install the new binary; if it fails, restore the backup so the user is
+	// never left without a kubevpn binary on disk.
 	err = util.Move(file.Name(), curFolder)
-	return err
+	if err != nil {
+		_ = util.Move(backupPath, curFolder)
+		return fmt.Errorf("install new binary: %w: %w", err, config.ErrUpgradeInstall)
+	}
+	// Success: drop the backup.
+	_ = os.Remove(backupPath)
+	return nil
 }
 
 func elevatePermission() error {
@@ -138,16 +149,11 @@ func elevatePermission() error {
 	if os.IsPermission(err) {
 		elevate.RunWithElevated()
 		os.Exit(0)
-	} else if err != nil {
-		return err
-	} else if !elevate.IsAdmin() {
-		elevate.RunWithElevated()
-		os.Exit(0)
 	}
-	return nil
+	return err
 }
 
-func NeedsUpgrade(ctx context.Context, client *http.Client, version string) (url string, latestVersion string, upgrade bool, err error) {
+func needsUpgrade(ctx context.Context, client *http.Client, version string) (url string, latestVersion string, upgrade bool, err error) {
 	latestVersion, url, err = util.GetManifest(client, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		v := "https://github.com/kubenetworks/kubevpn/raw/master/plugins/stable.txt"
@@ -157,6 +163,7 @@ func NeedsUpgrade(ctx context.Context, client *http.Client, version string) (url
 		url = fmt.Sprintf("https://github.com/kubenetworks/kubevpn/releases/download/%s/kubevpn_%s_%s_%s.zip", latestVersion, latestVersion, runtime.GOOS, runtime.GOARCH)
 	}
 	if err != nil {
+		err = fmt.Errorf("determine latest version: %w: %w", err, config.ErrUpgradeNetwork)
 		return
 	}
 

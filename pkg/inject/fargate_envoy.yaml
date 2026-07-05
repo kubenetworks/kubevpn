@@ -4,6 +4,12 @@ admin:
       address: "::"
       port_value: 9003
       ipv4_compat: true
+overload_manager:
+  resource_monitors:
+    - name: "envoy.resource_monitors.global_downstream_max_connections"
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.resource_monitors.downstream_connections.v3.DownstreamConnectionsConfig
+        max_active_downstream_connections: 50000
 dynamic_resources:
   ads_config:
     api_type: GRPC
@@ -11,13 +17,13 @@ dynamic_resources:
     grpc_services:
       - envoy_grpc:
           cluster_name: xds_cluster
+    set_node_on_first_message_only: true
   cds_config:
     resource_api_version: V3
     ads: {}
   lds_config:
     resource_api_version: V3
     ads: {}
-
 static_resources:
   clusters:
     - type: STRICT_DNS
@@ -25,7 +31,14 @@ static_resources:
         envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
           "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
           explicit_http_config:
-            http2_protocol_options: {}
+            # Detect a dead xDS connection (traffic-manager restart / Service
+            # endpoint blackout) via HTTP/2 PINGs and reset the stream so envoy
+            # reconnects and re-resolves STRICT_DNS, instead of lingering on a
+            # half-open stream and serving stale routes.
+            http2_protocol_options:
+              connection_keepalive:
+                interval: 30s
+                timeout: 5s
       name: xds_cluster
       load_assignment:
         cluster_name: xds_cluster
@@ -36,3 +49,4 @@ static_resources:
                     socket_address:
                       address: {{.}}
                       port_value: 9002
+                      ipv4_compat: true

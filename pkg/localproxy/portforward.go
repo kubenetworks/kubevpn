@@ -19,6 +19,7 @@ type kubePortForwarder struct {
 	restClient *rest.RESTClient
 }
 
+// NewPodDialer creates a PodDialer that uses kubectl port-forward to connect to pods.
 func NewPodDialer(config *rest.Config, clientset *kubernetes.Clientset) PodDialer {
 	restClient, _ := clientset.CoreV1().RESTClient().(*rest.RESTClient)
 	return &kubePortForwarder{

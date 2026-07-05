@@ -2,7 +2,6 @@ package cmds
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	log "github.com/sirupsen/logrus"
@@ -92,7 +91,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 		`)),
 		Args: cobra.MatchAll(cobra.OnlyValidArgs, cobra.MinimumNArgs(1)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			if err = daemon.StartupDaemon(cmd.Context()); err != nil {
 				return err
 			}
@@ -123,7 +122,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				PortMap:              portmap,
 				Workloads:            args,
 				ExtraRoute:           extraRoute.ToRPC(),
-				SshJump:              sshConf.ToRPC(),
+				SshJump:              handler.SshConfigToRPC(sshConf),
 				TransferImage:        transferImage,
 				Image:                config.Image,
 				ImagePullSecretName:  imagePullSecretName,
@@ -139,14 +138,14 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.ConnectResponse](cmd.Context(), resp)
+			_, err = printProgressStream[rpc.ConnectResponse](cmd.Context(), resp, os.Stdout)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil
 				}
 				return err
 			}
-			_, _ = fmt.Fprintln(os.Stdout, config.Slogan)
+			printSlogan(os.Stdout)
 			// hangup
 			if foreground {
 				// leave from cluster resources
@@ -160,7 +159,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				_, _ = fmt.Fprint(os.Stdout, "Disconnect completed")
+				printSuccess(os.Stdout, "Disconnect completed")
 			}
 			return nil
 		},
@@ -190,7 +189,7 @@ func leave(cli rpc.DaemonClient, ns string, args []string) error {
 	if err != nil {
 		return err
 	}
-	err = util.PrintGRPCStream[rpc.LeaveResponse](nil, resp)
+	_, err = printProgressStream[rpc.LeaveResponse](nil, resp, os.Stdout)
 	if err != nil {
 		if status.Code(err) == codes.Canceled {
 			return nil

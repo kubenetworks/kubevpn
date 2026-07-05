@@ -9,7 +9,7 @@ import (
 	"strconv"
 )
 
-func ServeHTTPConnect(ctx context.Context, ln net.Listener, connector Connector) error {
+func serveHTTPConnect(ctx context.Context, ln net.Listener, connector Connector) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {

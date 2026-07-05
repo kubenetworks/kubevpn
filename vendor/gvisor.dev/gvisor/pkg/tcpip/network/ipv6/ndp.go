@@ -172,6 +172,9 @@ const (
 type NDPEndpoint interface {
 	// SetNDPConfigurations sets the NDP configurations.
 	SetNDPConfigurations(NDPConfigurations)
+
+	// NDPConfigurations returns the NDP configurations.
+	NDPConfigurations() NDPConfigurations
 }
 
 // DHCPv6ConfigurationFromNDPRA is a configuration available via DHCPv6 that an
@@ -468,7 +471,7 @@ type timer struct {
 	// done indicates to the timer that the timer was stopped.
 	done *bool
 
-	timer tcpip.Timer
+	timer tcpip.Timer `state:"nosave"`
 }
 
 // +stateify savable

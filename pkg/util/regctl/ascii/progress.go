@@ -7,12 +7,14 @@ import (
 	"golang.org/x/term"
 )
 
+// ProgressBar renders an ASCII progress bar with configurable characters and width.
 type ProgressBar struct {
 	Width, Min, Max                   int
 	Start, Done, Active, Pending, End byte
 	Out                               io.Writer
 }
 
+// NewProgressBar creates a ProgressBar that writes to w, detecting terminal width for sizing.
 func NewProgressBar(w io.Writer) *ProgressBar {
 	width := 0
 	if wFd, ok := w.(interface{ Fd() uintptr }); ok && term.IsTerminal(int(wFd.Fd())) {

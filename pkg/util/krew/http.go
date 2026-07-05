@@ -43,9 +43,12 @@ func checkRetry(resp *http.Response, err error) bool {
 	return resp != nil && resp.StatusCode == http.StatusNotFound
 }
 
+// drainBodyLimit caps how many bytes are drained from a response body before close, to allow connection reuse.
+const drainBodyLimit = 4096
+
 func drainBody(b io.ReadCloser) {
 	defer b.Close()
-	io.Copy(io.Discard, io.LimitReader(b, int64(4096)))
+	io.Copy(io.Discard, io.LimitReader(b, drainBodyLimit))
 }
 
 func backoff(min, max time.Duration, attemptNum int) time.Duration {
