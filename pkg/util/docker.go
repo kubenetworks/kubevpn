@@ -94,6 +94,28 @@ func RunLogsSinceNow(name string, follow bool) error {
 	return err
 }
 
+// classifyDockerError tags a docker CLI failure with a sentinel based on its output,
+// so the CLI surfaces a specific exit code. output is the captured combined/stderr text.
+func classifyDockerError(err error, output []byte) error {
+	if err == nil {
+		return nil
+	}
+	lower := strings.ToLower(string(output))
+	trimmed := strings.TrimSpace(string(output))
+	switch {
+	case strings.Contains(lower, "cannot connect to the docker daemon"),
+		strings.Contains(lower, "is the docker daemon running"):
+		return fmt.Errorf("%s: %w: %w", trimmed, err, config.ErrDockerDaemonNotRunning)
+	case strings.Contains(lower, "unable to find image"),
+		strings.Contains(lower, "manifest unknown"),
+		strings.Contains(lower, "pull access denied"),
+		strings.Contains(lower, "repository does not exist"):
+		return fmt.Errorf("%s: %w: %w", trimmed, err, config.ErrDockerImagePull)
+	default:
+		return fmt.Errorf("%s: %w: %w", trimmed, err, config.ErrDockerRun)
+	}
+}
+
 // CreateNetwork
 // docker create kubevpn-traffic-manager --labels owner=config.ConfigMapPodTrafficManager --subnet 198.19.0.0/16 --gateway 198.19.0.100
 func CreateNetwork(ctx context.Context, name string) (string, error) {
@@ -120,7 +142,7 @@ func CreateNetwork(ctx context.Context, name string) (string, error) {
 
 	id, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	if err != nil {
-		return "", err
+		return "", classifyDockerError(err, id)
 	}
 
 	return string(id), nil
@@ -131,15 +153,21 @@ func RunContainer(ctx context.Context, args []string) error {
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Capture stderr alongside streaming it live, so a failure can be classified
+	// (Docker daemon down / image pull / run) without losing real-time output.
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 
 	plog.G(ctx).Debugf("Run container with cmd: %v", cmd.Args)
 	err := cmd.Start()
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to run container with cmd: %v: %v", cmd.Args, err)
-		return err
+		return classifyDockerError(err, stderrBuf.Bytes())
 	}
-	return cmd.Wait()
+	if err = cmd.Wait(); err != nil {
+		return classifyDockerError(err, stderrBuf.Bytes())
+	}
+	return nil
 }
 
 // WaitDockerContainerRunning polls until the named Docker container reaches the running state or exits.
@@ -190,7 +218,7 @@ func NetworkInspect(ctx context.Context, name string) (network.Inspect, error) {
 	output, err := exec.CommandContext(ctx, "docker", "network", "inspect", name).CombinedOutput()
 	if err != nil {
 		_ = RunLogsSinceNow(name, false)
-		return network.Inspect{}, err
+		return network.Inspect{}, classifyDockerError(err, output)
 	}
 	var inspect []network.Inspect
 	rdr := bytes.NewReader(output)
@@ -210,7 +238,7 @@ func NetworkRemove(ctx context.Context, name string) error {
 	if err != nil && strings.Contains(string(output), "not found") {
 		return nil
 	}
-	return err
+	return classifyDockerError(err, output)
 }
 
 // NetworkDisconnect
