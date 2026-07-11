@@ -170,11 +170,11 @@ pkg/
 - Do NOT infer mode from `EnvoyListenerPort != 0` — that is a legacy fallback only
 - Port names: use `config.PortNameTCP`, `config.PortNameEnvoy`, `config.PortNameHTTP`, `config.PortNameDNS`
 - Rollback functions: always `AddRollbackFunc` (not `AddRolloutFunc`)
-- Design doc: `docs/04-fargate-mode.md`
+- Design doc: `docs/06-fargate-mode.md`
 
 ### ConnectOptions Dual-Role Pattern (IMPORTANT)
 
-**Full architecture doc: `docs/12-dual-daemon-architecture.md`**
+**Full architecture doc: `docs/02-dual-daemon.md`**
 
 `ConnectOptions` is used in BOTH daemon layers with **independent instances** (they do NOT share memory):
 
@@ -214,7 +214,7 @@ Root Daemon: connect.OwnerID = req.OwnerID → DoConnect (getCIDR → NetworkMan
 - **Transmitted to root daemon** via `ConnectRequest.ConnectionID` proto field
 - Root daemon receives and stores it: `connect.ConnectionID = req.ConnectionID`
 - Used as primary key for `findConnection`, `removeConnection`, disconnect, status queries
-- Design doc: `docs/01-connection-id.md`
+- Design doc: `docs/04-connection-id.md`
 
 ## Refactoring Rules
 

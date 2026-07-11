@@ -90,10 +90,11 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 			if err != nil {
 				continue
 			}
-			// Don't inject IPs — TunConfigService allocates via OwnerID on reconnect.
-			// Clear stale IPs so RentIP calls GetTunIP fresh.
-			req.IPv4 = ""
-			req.IPv6 = ""
+			// Restore OwnerID from persisted ConnectOptions so the reconnect
+			// reuses the same owner identity, preventing orphaned envoy rules.
+			if c.OwnerID != "" {
+				req.OwnerID = c.OwnerID
+			}
 			err = resp.Send(&req)
 			_ = grpcutil.PrintGRPCStream[rpc.ConnectResponse](nil, resp, svr.LogFile)
 		}

@@ -26,13 +26,17 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	}
 	session := NewSessionLifecycle(logger)
 	reqBytes, _ := proto.Marshal(req)
+	ownerID := req.OwnerID
+	if ownerID == "" {
+		ownerID = uuid.New().String()[:12]
+	}
 	connect := &handler.ConnectOptions{
 		ManagerNamespace:     req.Namespace,
 		WorkloadNamespace:    req.Namespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		RequestRaw:           reqBytes,
-		OwnerID:              uuid.New().String()[:12],
+		OwnerID:              ownerID,
 		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
 	}

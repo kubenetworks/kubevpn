@@ -6,5 +6,5 @@
 //   - fargateInjector: SSH + Envoy sidecar (for environments without NET_ADMIN)
 //
 // Envoy routing rules are stored as YAML in the traffic manager ConfigMap.
-// See docs/rule-ownerid-design.md for the OwnerID ownership model.
+// See docs/05-owner-id.md for the OwnerID ownership model.
 package inject
