@@ -39,7 +39,7 @@ func TestLeaveAllProxyResources_EmptyConfigMap(t *testing.T) {
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
 		K8sClient:    K8sClient{clientset: clientset},
-		proxyManager: NewProxyManager(nil, clientset, "test-ns"),
+		proxyManager: newProxyManager(nil, clientset, "test-ns"),
 	}
 	err := c.LeaveAllProxyResources(context.Background())
 	if err != nil {
@@ -52,7 +52,7 @@ func TestLeaveAllProxyResources_ConfigMapNotFound(t *testing.T) {
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
 		K8sClient:    K8sClient{clientset: clientset},
-		proxyManager: NewProxyManager(nil, clientset, "test-ns"),
+		proxyManager: newProxyManager(nil, clientset, "test-ns"),
 	}
 	err := c.LeaveAllProxyResources(context.Background())
 	if err != nil {
@@ -78,7 +78,7 @@ func TestLeaveResource_NilResources(t *testing.T) {
 
 func TestProxyManager_Remove_RemovesWorkload(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
 	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app1", namespace: "default"})
 	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app2", namespace: "default"})
 	c.proxyManager.Add(&Proxy{workload: "services/svc1", namespace: "other-ns"})
@@ -98,7 +98,7 @@ func TestProxyManager_Remove_RemovesWorkload(t *testing.T) {
 
 func TestProxyManager_Remove_NonExistentWorkload(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
 	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app1", namespace: "default"})
 
 	// Removing a non-existent workload should not panic or modify the list
@@ -112,7 +112,7 @@ func TestProxyManager_Remove_NonExistentWorkload(t *testing.T) {
 
 func TestProxyManager_Remove_AllWorkloads(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
 	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app1", namespace: "ns1"})
 	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app2", namespace: "ns2"})
 
@@ -256,7 +256,7 @@ func TestLeaveAllProxyResources_WithProxyWorkloads(t *testing.T) {
 			Data:       map[string]string{config.KeyEnvoy: "[]"},
 		},
 	)
-	pm := NewProxyManager(factory, clientset, "test-ns")
+	pm := newProxyManager(factory, clientset, "test-ns")
 	pm.Add(&Proxy{workload: "deployments.apps/web", namespace: "default"})
 	pm.Add(&Proxy{workload: "deployments.apps/api", namespace: "default"})
 	c := &ConnectOptions{
@@ -288,7 +288,7 @@ func TestLeaveResource_ErrorPropagationFromGetTopOwnerObject(t *testing.T) {
 			clientset: clientset,
 			factory:   factory,
 		},
-		proxyManager: NewProxyManager(factory, clientset, "test-ns"),
+		proxyManager: newProxyManager(factory, clientset, "test-ns"),
 	}
 	resources := []Resources{
 		{Namespace: "default", Workload: "deployments.apps/nonexistent"},
@@ -312,7 +312,7 @@ func TestLeaveResource_MultipleErrorsAggregated(t *testing.T) {
 			clientset: clientset,
 			factory:   factory,
 		},
-		proxyManager: NewProxyManager(factory, clientset, "test-ns"),
+		proxyManager: newProxyManager(factory, clientset, "test-ns"),
 	}
 	resources := []Resources{
 		{Namespace: "default", Workload: "deployments.apps/app1"},

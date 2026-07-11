@@ -94,7 +94,7 @@ c.ownerID = uuid.New().String()[:12]  // e.g., "a1b2c3d4-e5f"
 
 **OwnerID 只存在于 User Daemon（控制面）**，不在 Root Daemon（数据面）。
 
-详见 [docs/dual-daemon-architecture.md](dual-daemon-architecture.md)。
+详见 [docs/12-dual-daemon-architecture.md](12-dual-daemon-architecture.md)。
 
 - 生成：`daemon/action/connect.go` → `redirectConnectToSudoDaemon()` 构造 ConnectOptions 时
 - 使用：`handler/connect.go` → `CreateRemoteInboundPod()` → `inject.NewInjector(OwnerID)`

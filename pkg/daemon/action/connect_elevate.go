@@ -28,11 +28,13 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	reqBytes, _ := proto.Marshal(req)
 	connect := &handler.ConnectOptions{
 		ManagerNamespace:     req.Namespace,
-		WorkloadNamespace:      req.Namespace,
+		WorkloadNamespace:    req.Namespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		RequestRaw:           reqBytes,
 		OwnerID:              uuid.New().String()[:12],
+		Image:                req.Image,
+		ImagePullSecretName:  req.ImagePullSecretName,
 	}
 	var file string
 	session.AddTempFile(&file)
@@ -136,6 +138,13 @@ func (svr *Server) forwardConnectToSudo(
 	connectionID string,
 	logger *log.Logger,
 ) error {
+	if err := connect.CreateOutboundPod(ctx); err != nil {
+		return err
+	}
+	if err := connect.UpgradeDeploy(ctx); err != nil {
+		return err
+	}
+
 	ipCtx, err := connect.RentIP(resp.Context(), req.IPv4, req.IPv6)
 	if err != nil {
 		return err

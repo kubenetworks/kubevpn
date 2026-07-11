@@ -47,7 +47,8 @@ func (f *fakeConnectClientStream) RecvMsg(m interface{}) error {
 	if !ok {
 		return io.ErrUnexpectedEOF
 	}
-	*resp = *f.responses[f.recvIndex]
+	resp.Message = f.responses[f.recvIndex].GetMessage()
+	resp.ConnectionID = f.responses[f.recvIndex].GetConnectionID()
 	f.recvIndex++
 	return nil
 }

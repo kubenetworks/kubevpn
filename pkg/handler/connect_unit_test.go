@@ -31,7 +31,7 @@ func newTestConnectOptions(t *testing.T) *ConnectOptions {
 		ManagerNamespace:  "test-ns",
 		WorkloadNamespace: "default",
 		K8sClient:         K8sClient{clientset: clientset},
-		configMapStore:    NewConfigMapStore(clientset, "test-ns"),
+		configMapStore:    newConfigMapStore(clientset, "test-ns"),
 		ctx:               ctx,
 		cancel:            cancel,
 	}
@@ -134,7 +134,7 @@ func TestConnectOptions_GetFactory(t *testing.T) {
 
 func TestConnectOptions_LeaveAllProxyResources_Empty(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
 	err := c.LeaveAllProxyResources(context.Background())
 	if err != nil {
 		t.Fatalf("LeaveAllProxyResources empty: %v", err)
@@ -143,7 +143,7 @@ func TestConnectOptions_LeaveAllProxyResources_Empty(t *testing.T) {
 
 func TestConnectOptions_IsMe(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
 	c.proxyManager.Add(&Proxy{workload: "deployments.apps/reviews", namespace: "default", headers: map[string]string{"env": "test"}})
 	if !c.IsMe("default", "deployments.apps.reviews", map[string]string{"env": "test"}) {
 		t.Fatal("expected IsMe true")
@@ -182,7 +182,7 @@ func TestConnectOptions_SyncFromCache(t *testing.T) {
 
 func TestConnectOptions_ProxyResources(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
 	c.proxyManager.Add(&Proxy{workload: "deploy/a", namespace: "ns1"})
 	c.proxyManager.Add(&Proxy{workload: "deploy/b", namespace: "ns2"})
 	res := c.ProxyResources()
@@ -281,7 +281,7 @@ func TestConnectOptions_GetConnectionID_NilReceiver(t *testing.T) {
 
 func TestConnectOptions_ProxyResources_Empty(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
 	res := c.ProxyResources()
 	if len(res) != 0 {
 		t.Fatalf("expected 0 proxy resources, got %d", len(res))
@@ -299,7 +299,7 @@ func TestConnectOptions_ProxyResources_Nil(t *testing.T) {
 
 func TestConnectOptions_ProxyResources_ToResources(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
 	c.proxyManager.Add(&Proxy{workload: "deployments.apps/web", namespace: "prod"})
 	c.proxyManager.Add(&Proxy{workload: "statefulsets.apps/db", namespace: "prod"})
 	c.proxyManager.Add(&Proxy{workload: "deployments.apps/api", namespace: "staging"})

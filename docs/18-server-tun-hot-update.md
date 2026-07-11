@@ -79,7 +79,7 @@ Traffic manager pod 被重新调度时 Pod IP 会变：
 ### 场景 3：Client TUN IP 热切换（完整流程设计）
 
 ```
-1. Client: DHCP release old IP
+1. Client: 旧 IP lease 过期自动回收 (无需显式 release)
 2. Client: DHCP rent new IP
 3. Client: 修改本地 TUN 设备 IP (ip addr replace)
 4. Client: 更新路由表
@@ -126,7 +126,8 @@ func (hub *RouteHub) AddRoute(ctx, srcIP, conn) {
 
 ```go
 // pkg/dhcp/dhcp.go
-manager.ReleaseIP(ctx, oldIPv4, oldIPv6)
+// 无需显式 release — lease 过期自动回收
+// manager.ReleaseIP(ctx, oldIPv4, oldIPv6)  // removed
 manager.RentIP(ctx) // 获取新 IP
 ```
 

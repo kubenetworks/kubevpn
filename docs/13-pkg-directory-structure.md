@@ -32,7 +32,6 @@ pkg/
 │   ├── krew/        (5 files,  347 lines) ── Krew 插件发布
 │   └── regctl/      (2 files,  214 lines) ── 镜像拷贝进度
 │       └── ascii/   (2 files,  142 lines) ── ASCII 进度条
-└── webhook/         (5 files,  440 lines) ── Admission webhook
 ```
 
 ## 问题分析

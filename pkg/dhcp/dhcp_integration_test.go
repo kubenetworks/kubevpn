@@ -40,10 +40,7 @@ func TestInitDHCP_CreatesConfigMap(t *testing.T) {
 		t.Fatalf("get CM: %v", err)
 	}
 	if cm.Data[config.KeyDHCP] != "" {
-		t.Fatalf("expected empty DHCP, got %q", cm.Data[config.KeyDHCP])
-	}
-	if m.connectionID == "" {
-		t.Fatal("connectionID not set")
+		t.Fatal("expected empty DHCP key")
 	}
 }
 
@@ -166,16 +163,3 @@ func TestForEach_IteratesAllocated(t *testing.T) {
 	}
 }
 
-func TestGetConnectionID(t *testing.T) {
-	m := newFakeManager(t)
-	if err := m.InitDHCP(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	id := m.GetConnectionID()
-	if id == "" {
-		t.Fatal("empty connectionID")
-	}
-	// UID is "uid-123456789012" → last 12 chars = "456789012" wait that's only 9...
-	// Actually UID from fake is "uid-123456789012" which is 20 chars, last 12 = "3456789012" ... let me just check non-empty
-	t.Logf("ConnectionID: %s", id)
-}

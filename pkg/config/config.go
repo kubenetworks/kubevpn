@@ -26,6 +26,8 @@ const (
 	KeyEnvoy = "ENVOY_CONFIG"
 	// KeyClusterIPv4POOLS is the ConfigMap key for cluster IPv4 address pools.
 	KeyClusterIPv4POOLS = "IPv4_POOLS"
+	// KeyTunAllocs is the ConfigMap key for TUN IP owner allocations (ownerID → IPs).
+	KeyTunAllocs = "TUN_ALLOCS"
 
 	// TLSCertKey is the key for tls certificates in a TLS secret.
 	TLSCertKey = "tls_crt"
@@ -50,8 +52,12 @@ const (
 
 	// PortNameTCP is the traffic-manager service port name for TCP tunneling.
 	PortNameTCP = "10801-for-tcp"
+	// PortTCP is the traffic-manager TCP tunnel port number.
+	PortTCP = 10801
 	// PortNameEnvoy is the traffic-manager service port name for the Envoy control plane.
 	PortNameEnvoy = "9002-for-envoy"
+	// PortControlPlane is the control-plane gRPC port number.
+	PortControlPlane = 9002
 	// PortNameDNS is the traffic-manager service port name for DNS resolution.
 	PortNameDNS = "53-for-dns"
 

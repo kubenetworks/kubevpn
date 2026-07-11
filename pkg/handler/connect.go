@@ -110,7 +110,7 @@ func (c *ConnectOptions) getTunIPFromControlPlane(ctx context.Context) (*net.IPN
 	readyCh := make(chan struct{})
 	go func() {
 		_ = util.PortForwardPod(c.config, c.restclient, pods[0].Name, c.ManagerNamespace,
-			[]string{fmt.Sprintf("%d:9002", localPort)}, readyCh, pfCtx.Done(), nil, nil)
+			[]string{fmt.Sprintf("%d:%d", localPort, config.PortControlPlane)}, readyCh, pfCtx.Done(), nil, nil)
 	}()
 
 	select {
@@ -140,10 +140,19 @@ func (c *ConnectOptions) getTunIPFromControlPlane(ctx context.Context) (*net.IPN
 		return nil, nil, err
 	}
 
-	ip4, cidr4, _ := net.ParseCIDR(resp.IPv4)
-	ip6, cidr6, _ := net.ParseCIDR(resp.IPv6)
+	ip4, cidr4, err := net.ParseCIDR(resp.IPv4)
+	if err != nil || cidr4 == nil {
+		return nil, nil, fmt.Errorf("invalid IPv4 from control-plane: %q", resp.IPv4)
+	}
 	v4 := &net.IPNet{IP: ip4, Mask: cidr4.Mask}
-	v6 := &net.IPNet{IP: ip6, Mask: cidr6.Mask}
+
+	var v6 *net.IPNet
+	if resp.IPv6 != "" {
+		ip6, cidr6, _ := net.ParseCIDR(resp.IPv6)
+		if cidr6 != nil {
+			v6 = &net.IPNet{IP: ip6, Mask: cidr6.Mask}
+		}
+	}
 	plog.G(ctx).Infof("Got TUN IP from control-plane: v4=%s v6=%s", v4, v6)
 	return v4, v6, nil
 }
@@ -190,7 +199,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		return fmt.Errorf("local tun IP is invalid")
 	}
 	if c.proxyManager == nil {
-		c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+		c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
 	}
 
 	tlsSecret, err := c.clientset.CoreV1().Secrets(c.ManagerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
@@ -255,7 +264,15 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 	return nil
 }
 
+// CreateOutboundPod ensures the traffic manager pod exists and is ready.
+// This is a control-plane responsibility and should be called from the user daemon
+// before RentIP, so the TunConfigService is available for IP allocation.
+func (c *ConnectOptions) CreateOutboundPod(ctx context.Context) error {
+	return createOutboundPod(ctx, c.clientset, c.ManagerNamespace, c.Image, c.ImagePullSecretName)
+}
+
 // DoConnect establishes the full VPN connection: CIDR detection, port forwarding, TUN device, routing, and DNS.
+// Control-plane setup (CreateOutboundPod, UpgradeDeploy) must be done before this call.
 func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	c.isDataPlane = true
@@ -267,14 +284,8 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 		plog.G(ctx).Errorf("Failed to get network CIDR: %v", err)
 		return
 	}
-	if err = createOutboundPod(c.ctx, c.clientset, c.ManagerNamespace, c.Image, c.ImagePullSecretName); err != nil {
-		return
-	}
-	if err = c.upgradeDeploy(c.ctx); err != nil {
-		return
-	}
 
-	c.network = NewNetworkManager(NetworkConfig{
+	c.network = newNetworkManager(NetworkConfig{
 		Clientset:         c.clientset,
 		RESTClient:        c.restclient,
 		Config:            c.config,
@@ -310,7 +321,7 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {
 // after InitClient returns (user daemon path).
 func (c *ConnectOptions) getConfigMapStore() *ConfigMapStore {
 	if c.configMapStore == nil {
-		c.configMapStore = NewConfigMapStore(c.clientset, c.ManagerNamespace)
+		c.configMapStore = newConfigMapStore(c.clientset, c.ManagerNamespace)
 	}
 	return c.configMapStore
 }

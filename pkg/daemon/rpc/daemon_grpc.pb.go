@@ -1096,9 +1096,8 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	TunConfigService_GetTunIP_FullMethodName     = "/rpc.TunConfigService/GetTunIP"
-	TunConfigService_WatchTunIP_FullMethodName   = "/rpc.TunConfigService/WatchTunIP"
-	TunConfigService_ReleaseTunIP_FullMethodName = "/rpc.TunConfigService/ReleaseTunIP"
+	TunConfigService_GetTunIP_FullMethodName   = "/rpc.TunConfigService/GetTunIP"
+	TunConfigService_WatchTunIP_FullMethodName = "/rpc.TunConfigService/WatchTunIP"
 )
 
 // TunConfigServiceClient is the client API for TunConfigService service.
@@ -1112,8 +1111,6 @@ type TunConfigServiceClient interface {
 	// WatchTunIP opens a server-streaming connection that pushes new TunIPResponse
 	// whenever the owner's IP allocation changes (e.g., conflict resolution, re-allocation).
 	WatchTunIP(ctx context.Context, in *TunIPRequest, opts ...grpc.CallOption) (TunConfigService_WatchTunIPClient, error)
-	// ReleaseTunIP releases the IP allocation for the given owner (graceful shutdown).
-	ReleaseTunIP(ctx context.Context, in *TunIPRequest, opts ...grpc.CallOption) (*TunIPResponse, error)
 }
 
 type tunConfigServiceClient struct {
@@ -1165,15 +1162,6 @@ func (x *tunConfigServiceWatchTunIPClient) Recv() (*TunIPResponse, error) {
 	return m, nil
 }
 
-func (c *tunConfigServiceClient) ReleaseTunIP(ctx context.Context, in *TunIPRequest, opts ...grpc.CallOption) (*TunIPResponse, error) {
-	out := new(TunIPResponse)
-	err := c.cc.Invoke(ctx, TunConfigService_ReleaseTunIP_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // TunConfigServiceServer is the server API for TunConfigService service.
 // All implementations must embed UnimplementedTunConfigServiceServer
 // for forward compatibility
@@ -1185,8 +1173,6 @@ type TunConfigServiceServer interface {
 	// WatchTunIP opens a server-streaming connection that pushes new TunIPResponse
 	// whenever the owner's IP allocation changes (e.g., conflict resolution, re-allocation).
 	WatchTunIP(*TunIPRequest, TunConfigService_WatchTunIPServer) error
-	// ReleaseTunIP releases the IP allocation for the given owner (graceful shutdown).
-	ReleaseTunIP(context.Context, *TunIPRequest) (*TunIPResponse, error)
 	mustEmbedUnimplementedTunConfigServiceServer()
 }
 
@@ -1199,9 +1185,6 @@ func (UnimplementedTunConfigServiceServer) GetTunIP(context.Context, *TunIPReque
 }
 func (UnimplementedTunConfigServiceServer) WatchTunIP(*TunIPRequest, TunConfigService_WatchTunIPServer) error {
 	return status.Errorf(codes.Unimplemented, "method WatchTunIP not implemented")
-}
-func (UnimplementedTunConfigServiceServer) ReleaseTunIP(context.Context, *TunIPRequest) (*TunIPResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ReleaseTunIP not implemented")
 }
 func (UnimplementedTunConfigServiceServer) mustEmbedUnimplementedTunConfigServiceServer() {}
 
@@ -1255,24 +1238,6 @@ func (x *tunConfigServiceWatchTunIPServer) Send(m *TunIPResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func _TunConfigService_ReleaseTunIP_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(TunIPRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(TunConfigServiceServer).ReleaseTunIP(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: TunConfigService_ReleaseTunIP_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TunConfigServiceServer).ReleaseTunIP(ctx, req.(*TunIPRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // TunConfigService_ServiceDesc is the grpc.ServiceDesc for TunConfigService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1283,10 +1248,6 @@ var TunConfigService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTunIP",
 			Handler:    _TunConfigService_GetTunIP_Handler,
-		},
-		{
-			MethodName: "ReleaseTunIP",
-			Handler:    _TunConfigService_ReleaseTunIP_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

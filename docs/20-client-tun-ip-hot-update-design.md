@@ -94,7 +94,39 @@ return nil
 }
 ```
 
-### 5.2 TunIPWatcher for Client (在 Root Daemon 运行)
+### 5.2 `rentIP` 冲突避免 — ExcludeIPs 方案
+
+`NetworkManager.rentIP` 将本地所有接口 IP 作为 `ExcludeIPs` 传给 server，server 在 DHCP 分配时
+直接跳过这些 IP。通常一次调用即可拿到不冲突的 IP。
+
+保留轻量重试处理非原子竞态（采集本地 IP 和分配之间可能出现新接口）：
+
+```go
+const maxRetries = 15
+for i := 0; i < maxRetries; i++ {
+    resp, err := client.GetTunIP(ctx, &rpc.TunIPRequest{
+        OwnerID:    nm.cfg.OwnerID,
+        Namespace:  nm.cfg.ManagerNamespace,
+        ExcludeIPs: collectLocalIPs(),  // 每次重新采集
+    })
+    v4 := parse(resp.IPv4)
+    if !isLocalIPConflict(v4.IP) {
+        return nil  // 成功
+    }
+    // 极罕见竞态：采集和分配之间出现了新接口
+}
+```
+
+**Server 端处理：**
+- 已有分配且不在 ExcludeIPs 中 → 正常返回（续租）
+- 已有分配但在 ExcludeIPs 中 → 旧 IP 保留在 bitmap，调用 `dhcp.RentIPExcluding(excludeIPs)` 分配新 IP（自然跳过旧 IP），然后释放旧 IP
+- 无分配 → `dhcp.RentIPExcluding(excludeIPs)` 新分配
+
+**为什么不用 ForceNew（先 release 再 rent）：** DHCP 使用 `contiguousScanStrategy`，从 offset 0
+顺序扫描。release 后 rent 总是拿回同一个 IP，多轮重试会死循环。ExcludeIPs 方案在单次 DHCP 事务中
+跳过冲突 IP，避免了这个问题。
+
+### 5.3 TunIPWatcher for Client (在 Root Daemon 运行)
 
 Root daemon 中 `DoConnect` 完成后，启动一个后台 goroutine 监听 TunConfigService：
 
@@ -148,7 +180,7 @@ time.Sleep(5 * time.Second)
 }
 ```
 
-### 5.3 OwnerID 选择
+### 5.4 OwnerID 选择
 
 Sidecar 使用 `podName` 作为 ownerID。Client 使用 **OwnerID**（UUID，每次连接时生成）：
 
@@ -170,7 +202,7 @@ ownerID := c.OwnerID // uuid.New().String()[:12]，在 connect_elevate.go 创建
 - 持久化到 daemon config（`json:"OwnerID"`），重启恢复时使用相同 ID
 - Root Daemon 需要通过 gRPC metadata 接收此值（当前只传 IP，需新增 OwnerID 传递）
 
-### 5.4 Port-Forward 到 Control-Plane 9002
+### 5.5 Port-Forward 到 Control-Plane 9002
 
 当前 NetworkManager 已经 port-forward 到 traffic-manager 的 10801/10802 端口（gvisor TCP/UDP）。需要额外 port-forward 9002
 端口用于 TunConfigService gRPC。
@@ -193,7 +225,7 @@ fmt.Sprintf("%d:9002", localControlPlanePort), // 新增
 
 推荐 **方案 A** — 更简单，复用已有机制。
 
-### 5.5 ConnectOptions 中 DHCP 路径的变更
+### 5.6 ConnectOptions 中 DHCP 路径的变更
 
 **当前流程 (User Daemon):**
 
@@ -215,7 +247,7 @@ User Daemon: GetTunIP(ownerID) via port-forward → control-plane
 注意：User Daemon 仍然做初始 IP 获取（因为它需要在 Root Daemon 启动 TUN 之前就知道 IP，以通过 gRPC metadata 传递）。但后续的
 IP 变更由 Root Daemon 的 watcher 处理。
 
-### 5.6 User Daemon 健康检查适配
+### 5.7 User Daemon 健康检查适配
 
 User Daemon 的 `HealthCheckOnce` 从 ConfigMap 读取状态。如果 IP 变了，User Daemon 也需要更新 `LocalTunIPv4/v6` 字段（用于
 status 显示和 LeaveResource 时的 IP 匹配）。
@@ -243,10 +275,13 @@ kubevpn connect -n default
   │   7. WatchTunIP (后台) → 同步 LocalTunIPv4 显示
   │
   ├─ Root Daemon:
-  │   1. GetIPFromContext → 获取 IP
+  │   1. GetOwnerIDFromContext → 获取 OwnerID
   │   2. DoConnect → NetworkManager.Start()
   │      → portForward(:10801, :10802, :9002)
-  │      → startTUN(198.18.0.5)
+  │      → rentIP: GetTunIP(ownerID, ExcludeIPs=localIPs)
+  │        → server 跳过冲突 IP → 198.18.0.6/32
+  │        → isLocalIPConflict? → no → 使用此 IP
+  │      → startTUN(198.18.0.6)
   │      → routes, DNS
   │   3. StartIPWatcher(ownerID) (后台)
   │      → WatchTunIP via localhost:localPort → 9002
@@ -261,7 +296,7 @@ kubevpn connect -n default
   │   → User Daemon: 同步 LocalTunIPv4 (for status/leave)
   │
   └─ Disconnect:
-      → User Daemon: ReleaseTunIP(ownerID)
+      → Lease 到期自动回收 (无需显式释放)
       → Root Daemon: NetworkManager.Stop()
 ```
 
@@ -274,7 +309,7 @@ kubevpn connect -n default
 | 监听变化     | `watchTunIPChanges` goroutine         | `NetworkManager.StartIPWatcher`            |
 | 应用变更     | `applyTunIPChange` (直接操作 OS)          | `NetworkManager.ChangeTunIP`               |
 | iptables | UpdateDNAT (VPN-only 模式)              | 不需要 (client 不做 DNAT)                       |
-| 释放 IP    | SIGTERM → ReleaseTunIP                | Disconnect → ReleaseTunIP                  |
+| 释放 IP    | 无需 — lease 过期自动回收              | 无需 — lease 过期自动回收                    |
 | ownerID  | podName                               | OwnerID (UUID, 每次连接唯一)                  |
 
 ## 8. 复用的代码
@@ -302,3 +337,11 @@ kubevpn connect -n default
 - 如果 TunConfigService 不可用（旧版 traffic manager），退回直接 DHCP 模式
 - Root Daemon 的 watcher 连接失败不影响 TUN 正常工作（只是不支持热更新）
 - 新旧 client 可以连接同一个 traffic manager（旧 client 不调用 TunConfigService，通过 ConfigMap DHCP 分配 IP）
+
+## 11. 已知问题修复
+
+### WatchTunIP 长连接 Lease 过期（已修复）
+
+原始设计中 `WatchTunIP` stream 不刷新 `LastRenew`，超过 5 分钟后 LeaseReaper 会错误回收 IP。
+已在 server 端 `WatchTunIP` 中加入隐式续租 ticker（每 `LeaseDuration/3` 刷新一次）。
+详见 [23-watchtunip-lease-renewal-fix.md](23-watchtunip-lease-renewal-fix.md)。

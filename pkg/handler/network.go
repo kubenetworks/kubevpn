@@ -44,8 +44,6 @@ type NetworkConfig struct {
 	Config            *rest.Config
 	ManagerNamespace  string
 	WorkloadNamespace string
-	LocalTunIPv4      *net.IPNet
-	LocalTunIPv6      *net.IPNet
 	CIDRs             []*net.IPNet
 	APIServerIPs      []net.IP
 	ExtraRouteInfo    *ExtraRouteInfo
@@ -62,17 +60,32 @@ type NetworkManager struct {
 	cfg NetworkConfig
 
 	// Runtime state (set by Start, cleared by Stop)
-	ctx       context.Context
-	cancel    context.CancelFunc
-	tunName   string
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	localTunIPv4          *net.IPNet // allocated by RentIP, used by TUN/routes/DNS
+	localTunIPv6          *net.IPNet
+	tunName               string
+	controlPlaneLocalPort int // local port for TunConfigService (port-forwarded from 9002)
 	extraHost []dns.Entry
 	dnsConfig *dns.Config
 }
 
-// NewNetworkManager creates a NetworkManager with the given configuration.
-func NewNetworkManager(cfg NetworkConfig) *NetworkManager {
+// newNetworkManager creates a NetworkManager with the given configuration.
+func newNetworkManager(cfg NetworkConfig) *NetworkManager {
 	return &NetworkManager{cfg: cfg}
 }
+
+// SetLocalTunIP sets the TUN IP addresses (called by RentIP before Start).
+func (nm *NetworkManager) SetLocalTunIP(v4, v6 *net.IPNet) {
+	nm.localTunIPv4 = v4
+	nm.localTunIPv6 = v6
+}
+
+// LocalTunIPv4 returns the IPv4 TUN address.
+func (nm *NetworkManager) LocalTunIPv4() *net.IPNet { return nm.localTunIPv4 }
+
+// LocalTunIPv6 returns the IPv6 TUN address.
+func (nm *NetworkManager) LocalTunIPv6() *net.IPNet { return nm.localTunIPv6 }
 
 // TunName returns the TUN device name (empty if not started).
 func (nm *NetworkManager) TunName() string {
@@ -86,10 +99,11 @@ func (nm *NetworkManager) GetExtraHost() []dns.Entry {
 
 // Start brings up the full networking stack in order:
 // 1. Add extra node IPs to route info
-// 2. Port-forward to traffic manager (gvisor TCP/UDP)
-// 3. Create local TUN device with gvisor stack
-// 4. Add dynamic routes (watch pods/services)
-// 5. Configure DNS
+// 2. Port-forward to traffic manager (gvisor TCP/UDP + control-plane)
+// 3. Allocate TUN IP from control-plane (reuses the port-forward)
+// 4. Create local TUN device with gvisor stack
+// 5. Add dynamic routes (watch pods/services)
+// 6. Configure DNS
 func (nm *NetworkManager) Start(ctx context.Context) error {
 	nm.ctx, nm.cancel = context.WithCancel(ctx)
 
@@ -105,14 +119,24 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	controlPlanePort, err := util.GetAvailableTCPPort()
+	if err != nil {
+		return err
+	}
+	nm.controlPlaneLocalPort = controlPlanePort
 
 	plog.G(nm.ctx).Info("Forwarding port...")
 	portPair := []string{
 		fmt.Sprintf("%d:10801", gvisorTCPForwardPort),
 		fmt.Sprintf("%d:10802", gvisorUDPForwardPort),
+		fmt.Sprintf("%d:%d", controlPlanePort, config.PortControlPlane),
 	}
 
 	if err := nm.portForward(nm.ctx, portPair); err != nil {
+		return err
+	}
+
+	if err := nm.rentIP(nm.ctx); err != nil {
 		return err
 	}
 
@@ -139,6 +163,73 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 	return nil
 }
 
+// rentIP allocates a TUN IP from the control-plane's TunConfigService via the
+// already-established port-forward. Passes local interface IPs as ExcludeIPs
+// so the server avoids conflicts. Retries on the rare race where a new
+// interface appears between collecting addresses and receiving the allocation.
+func (nm *NetworkManager) rentIP(ctx context.Context) error {
+	target := fmt.Sprintf("127.0.0.1:%d", nm.controlPlaneLocalPort)
+	conn, err := grpc.DialContext(ctx, target,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		return fmt.Errorf("dial control-plane for RentIP: %w", err)
+	}
+	defer conn.Close()
+
+	client := rpc.NewTunConfigServiceClient(conn)
+
+	const maxRetries = 15
+	for i := 0; i < maxRetries; i++ {
+		resp, err := client.GetTunIP(ctx, &rpc.TunIPRequest{
+			OwnerID:    nm.cfg.OwnerID,
+			Namespace:  nm.cfg.ManagerNamespace,
+			ExcludeIPs: collectLocalIPs(),
+		})
+		if err != nil {
+			return fmt.Errorf("get TUN IP from control-plane: %w", err)
+		}
+
+		ip4, cidr4, err := net.ParseCIDR(resp.IPv4)
+		if err != nil || cidr4 == nil {
+			return fmt.Errorf("invalid IPv4 from control-plane: %q", resp.IPv4)
+		}
+		v4 := &net.IPNet{IP: ip4, Mask: cidr4.Mask}
+
+		if isLocalIPConflict(v4.IP) {
+			plog.G(ctx).Infof("TUN IP %s conflicts with local interface (race), retrying (%d/%d)", v4.IP, i+1, maxRetries)
+			continue
+		}
+
+		var v6 *net.IPNet
+		if resp.IPv6 != "" {
+			ip6, cidr6, _ := net.ParseCIDR(resp.IPv6)
+			if cidr6 != nil {
+				v6 = &net.IPNet{IP: ip6, Mask: cidr6.Mask}
+			}
+		}
+
+		nm.localTunIPv4 = v4
+		nm.localTunIPv6 = v6
+		plog.G(ctx).Infof("Allocated TUN IP: v4=%s v6=%s", v4, v6)
+		return nil
+	}
+
+	return fmt.Errorf("failed to allocate a non-conflicting TUN IP after %d attempts", maxRetries)
+}
+
+func collectLocalIPs() []string {
+	addrs, _ := net.InterfaceAddrs()
+	ips := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		if ipNet, ok := addr.(*net.IPNet); ok {
+			ips = append(ips, ipNet.IP.String())
+		}
+	}
+	return ips
+}
+
 // Stop tears down networking: cancels DNS, stops port-forward/informers, clears state.
 func (nm *NetworkManager) Stop() {
 	if nm.dnsConfig != nil {
@@ -163,23 +254,23 @@ func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net
 	}
 
 	oldAddr := ""
-	if nm.cfg.LocalTunIPv4 != nil {
-		oldAddr = nm.cfg.LocalTunIPv4.String()
+	if nm.localTunIPv4 != nil {
+		oldAddr = nm.localTunIPv4.String()
 	}
 	if err := tun.ChangeIP(nm.tunName, oldAddr, newIPv4.String()); err != nil {
 		return fmt.Errorf("change IPv4 on %s: %w", nm.tunName, err)
 	}
 
-	if newIPv6 != nil && nm.cfg.LocalTunIPv6 != nil {
-		oldAddr6 := nm.cfg.LocalTunIPv6.String()
+	if newIPv6 != nil && nm.localTunIPv6 != nil {
+		oldAddr6 := nm.localTunIPv6.String()
 		if err := tun.ChangeIP(nm.tunName, oldAddr6, newIPv6.String()); err != nil {
 			plog.G(ctx).Warnf("[NetworkManager] Change IPv6 failed: %v", err)
 		}
 	}
 
-	nm.cfg.LocalTunIPv4 = newIPv4
+	nm.localTunIPv4 = newIPv4
 	if newIPv6 != nil {
-		nm.cfg.LocalTunIPv6 = newIPv6
+		nm.localTunIPv6 = newIPv6
 	}
 
 	plog.G(ctx).Infof("[NetworkManager] TUN IP changed: v4=%s v6=%s on %s", newIPv4, newIPv6, nm.tunName)
@@ -197,10 +288,10 @@ func (nm *NetworkManager) StartIPWatcher(ctx context.Context) {
 }
 
 func (nm *NetworkManager) watchTunIPFromControlPlane(ctx context.Context) {
-	// Port 9002 is port-forwarded alongside 10801/10802
-	// Local port is dynamically assigned — for now use a well-known offset
-	// TODO: pass the actual local port for 9002 from the port-forward setup
-	target := "127.0.0.1:9002"
+	if nm.controlPlaneLocalPort == 0 {
+		return
+	}
+	target := fmt.Sprintf("127.0.0.1:%d", nm.controlPlaneLocalPort)
 
 	var currentVersion int64
 
@@ -326,7 +417,7 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 	go util.CheckPodStatus(childCtx, cancelFunc, podName, nm.cfg.Clientset.CoreV1().Pods(nm.cfg.ManagerNamespace))
 	domain := config.ConfigMapPodTrafficManager
 	gvisorUDPPort, _, _ := strings.Cut(portPair[1], ":")
-	go healthCheckPortForward(childCtx, cancelFunc, readyChan, gvisorUDPPort, domain, nm.cfg.LocalTunIPv4.IP)
+	go healthCheckPortForward(childCtx, cancelFunc, readyChan, gvisorUDPPort, domain, nm.localTunIPv4.IP)
 	go healthCheckTCPConn(childCtx, cancelFunc, readyChan, domain, util.GetPodIP(pod)[0])
 	if first {
 		go func() {
@@ -359,7 +450,7 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 
 // startTUN creates the local TUN device with a gvisor network stack.
 func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) error {
-	plog.G(ctx).Debugf("IPv4: %s, IPv6: %s", nm.cfg.LocalTunIPv4.IP.String(), nm.cfg.LocalTunIPv6.IP.String())
+	plog.G(ctx).Debugf("IPv4: %s, IPv6: %s", nm.localTunIPv4.IP.String(), nm.localTunIPv6.IP.String())
 
 	tlsSecret, err := nm.cfg.Clientset.CoreV1().Secrets(nm.cfg.ManagerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
@@ -386,20 +477,20 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 			routes = append(routes, types.Route{Dst: *ipNet})
 		}
 	}
-	if nm.cfg.LocalTunIPv4 != nil {
-		routes = append(routes, types.Route{Dst: net.IPNet{IP: nm.cfg.LocalTunIPv4.IP, Mask: net.CIDRMask(32, 32)}})
+	if nm.localTunIPv4 != nil {
+		routes = append(routes, types.Route{Dst: net.IPNet{IP: nm.localTunIPv4.IP, Mask: net.CIDRMask(32, 32)}})
 	}
-	if nm.cfg.LocalTunIPv6 != nil {
-		routes = append(routes, types.Route{Dst: net.IPNet{IP: nm.cfg.LocalTunIPv6.IP, Mask: net.CIDRMask(128, 128)}})
+	if nm.localTunIPv6 != nil {
+		routes = append(routes, types.Route{Dst: net.IPNet{IP: nm.localTunIPv6.IP, Mask: net.CIDRMask(128, 128)}})
 	}
 
 	tunConfig := tun.Config{
-		Addr:   (&net.IPNet{IP: nm.cfg.LocalTunIPv4.IP, Mask: net.CIDRMask(32, 32)}).String(),
+		Addr:   (&net.IPNet{IP: nm.localTunIPv4.IP, Mask: net.CIDRMask(32, 32)}).String(),
 		Routes: routes,
 		MTU:    config.DefaultMTU,
 	}
 	if enable, _ := util.IsIPv6Enabled(); enable {
-		tunConfig.Addr6 = (&net.IPNet{IP: nm.cfg.LocalTunIPv6.IP, Mask: net.CIDRMask(128, 128)}).String()
+		tunConfig.Addr6 = (&net.IPNet{IP: nm.localTunIPv6.IP, Mask: net.CIDRMask(128, 128)}).String()
 	}
 
 	forwardNode, err := core.ParseNode(forwardAddress)
@@ -440,11 +531,11 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 // getTunDeviceName resolves the TUN device name from the configured IPs.
 func (nm *NetworkManager) getTunDeviceName() (string, error) {
 	var ips []net.IP
-	if nm.cfg.LocalTunIPv4 != nil {
-		ips = append(ips, nm.cfg.LocalTunIPv4.IP)
+	if nm.localTunIPv4 != nil {
+		ips = append(ips, nm.localTunIPv4.IP)
 	}
-	if nm.cfg.LocalTunIPv6 != nil {
-		ips = append(ips, nm.cfg.LocalTunIPv6.IP)
+	if nm.localTunIPv6 != nil {
+		ips = append(ips, nm.localTunIPv6.IP)
 	}
 	device, err := util.GetTunDevice(ips...)
 	if err != nil {

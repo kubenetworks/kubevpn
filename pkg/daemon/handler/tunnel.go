@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -34,7 +35,7 @@ func (w *wsHandler) createTunnel(ctx context.Context, cli *ssh.Client) error {
 	if err != nil {
 		return err
 	}
-	remote, _ := netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", "10801"))
+	remote, _ := netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(config.PortTCP)))
 	local, _ := netip.ParseAddrPort(net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort)))
 
 	if err := pkgssh.PortMapUntil(ctx, w.sshConfig, remote, local); err != nil {
