@@ -26,6 +26,7 @@ type Processor struct {
 	version int64
 
 	expireCache *utilcache.Expiring
+	knownUIDs   map[string]bool
 }
 
 func newProcessor(cache cache.SnapshotCache, log *log.Entry) *Processor {
@@ -34,6 +35,7 @@ func newProcessor(cache cache.SnapshotCache, log *log.Entry) *Processor {
 		logger:      log,
 		version:     rand.Int63n(1000),
 		expireCache: utilcache.NewExpiring(),
+		knownUIDs:   make(map[string]bool),
 	}
 }
 
@@ -112,11 +114,15 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 		p.expireCache.Set(uid, config, time.Minute*5)
 	}
 
-	for _, key := range p.cache.GetStatusKeys() {
-		if !activeUIDs[key] {
-			p.cache.ClearSnapshot(key)
-			p.logger.Infof("cleared stale xDS snapshot for %s", key)
+	for uid := range p.knownUIDs {
+		if !activeUIDs[uid] {
+			p.cache.ClearSnapshot(uid)
+			delete(p.knownUIDs, uid)
+			p.logger.Infof("cleared stale xDS snapshot for %s", uid)
 		}
+	}
+	for uid := range activeUIDs {
+		p.knownUIDs[uid] = true
 	}
 
 	return nil
