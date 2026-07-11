@@ -23,7 +23,7 @@ func TestNotifyMessage(t *testing.T) {
 // (context.Context, cmdutil.Factory, chan<- NotifyMessage) and returns error.
 func TestWatchSignature(t *testing.T) {
 	// Assign Watch to a typed variable to confirm the signature at compile time.
-	var fn func(context.Context, cmdutil.Factory, chan<- NotifyMessage) error
+	var fn func(context.Context, cmdutil.Factory, chan<- NotifyMessage, ...OnDHCPChange) error
 	fn = Watch
 	if fn == nil {
 		t.Fatal("Watch function is nil")

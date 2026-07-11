@@ -38,8 +38,8 @@ const (
 	ContainerSidecarEnvoyProxy = "envoy-proxy"
 	// ContainerSidecarControlPlane is the container name for the xDS control plane sidecar.
 	ContainerSidecarControlPlane = "control-plane"
-	// ContainerSidecarWebhook is the container name for the admission webhook sidecar.
-	ContainerSidecarWebhook = "webhook"
+	// ContainerSidecarDNS is the container name for the DNS forward server sidecar.
+	ContainerSidecarDNS = "dns"
 	// ContainerSidecarVPN is the container name for the VPN sidecar.
 	ContainerSidecarVPN = "vpn"
 	// ContainerSidecarSyncthing is the container name for the Syncthing file-sync sidecar.
@@ -52,8 +52,6 @@ const (
 	PortNameTCP = "10801-for-tcp"
 	// PortNameEnvoy is the traffic-manager service port name for the Envoy control plane.
 	PortNameEnvoy = "9002-for-envoy"
-	// PortNameHTTP is the traffic-manager service port name for the admission webhook.
-	PortNameHTTP = "80-for-webhook"
 	// PortNameDNS is the traffic-manager service port name for DNS resolution.
 	PortNameDNS = "53-for-dns"
 
@@ -105,6 +103,8 @@ const (
 	HeaderIPv4 = "IPv4"
 	// HeaderIPv6 is the HTTP header name carrying the client's TUN IPv6 address.
 	HeaderIPv6 = "IPv6"
+	// HeaderOwnerID carries the connection's unique owner identifier for TunConfigService.
+	HeaderOwnerID = "OwnerID"
 
 	// KUBECONFIG is the key name used when storing kubeconfig data.
 	KUBECONFIG = "kubeconfig"

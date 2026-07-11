@@ -115,7 +115,7 @@ type Mapper struct {
 | Secret (TLS) | `Secrets(c.ManagerNamespace).Get` |
 | Deployment (traffic manager) | `Deployments(c.ManagerNamespace).Get/Create` |
 | Service (traffic manager) | `Services(c.ManagerNamespace).Get/Create` |
-| DHCP manager | `dhcp.NewDHCPManager(clientset, c.ManagerNamespace)` |
+| TunConfigService | gRPC GetTunIP/WatchTunIP (server-side DHCP) |
 | ConfigMap informer | `GetConfigMapInformer()` → `c.ManagerNamespace` |
 | Pod list (traffic manager) | `GetRunningPodList(c.ManagerNamespace)` |
 | CIDR detection | `GetCIDR(c.ManagerNamespace)` |

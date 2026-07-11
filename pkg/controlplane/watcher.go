@@ -22,8 +22,11 @@ type NotifyMessage struct {
 	Content string
 }
 
+// OnDHCPChange is called when the DHCP data in the ConfigMap changes.
+type OnDHCPChange func(ctx context.Context)
+
 // Watch monitors the traffic-manager ConfigMap for changes and sends updates to notifyCh.
-func Watch(ctx context.Context, f cmdutil.Factory, notifyCh chan<- NotifyMessage) error {
+func Watch(ctx context.Context, f cmdutil.Factory, notifyCh chan<- NotifyMessage, onDHCPChange ...OnDHCPChange) error {
 	namespace, _, err := f.ToRawKubeConfigLoader().Namespace()
 	if err != nil {
 		return err
@@ -76,6 +79,9 @@ func Watch(ctx context.Context, f cmdutil.Factory, notifyCh chan<- NotifyMessage
 					configMap.Data = make(map[string]string)
 				}
 				notifyCh <- NotifyMessage{Content: configMap.Data[config.KeyEnvoy]}
+				for _, fn := range onDHCPChange {
+					fn(ctx)
+				}
 				continue
 			}
 		}

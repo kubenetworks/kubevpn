@@ -3,17 +3,13 @@ package cmds
 import (
 	"context"
 
-	"github.com/docker/docker/libnetwork/resolvconf"
-	miekgdns "github.com/miekg/dns"
 	"github.com/spf13/cobra"
-	"golang.org/x/sync/errgroup"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -27,20 +23,11 @@ func CmdControlPlane(f cmdutil.Factory) *cobra.Command {
 		Long: templates.LongDesc(i18n.T(`
 		Control-plane is a envoy xds server, distribute envoy route configuration
 		`)),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		PreRun: func(*cobra.Command, []string) {
 			go util.StartupPProfForServer(0)
-			g, ctx := errgroup.WithContext(cmd.Context())
-			g.Go(func() error {
-				conf, err := miekgdns.ClientConfigFromFile(resolvconf.Path())
-				if err != nil {
-					return err
-				}
-				return dns.ListenAndServe("udp", ":53", conf)
-			})
-			g.Go(func() error {
-				return controlplane.Main(ctx, f, port, plog.G(context.Background()))
-			})
-			return g.Wait()
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return controlplane.Main(cmd.Context(), f, port, plog.G(context.Background()))
 		},
 	}
 	cmd.Flags().BoolVar(&config.Debug, "debug", false, "true/false")

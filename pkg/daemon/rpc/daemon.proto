@@ -367,3 +367,30 @@ message IdentifyResponse {
 }
 
 message Cancel {}
+
+// TunConfigService is served by the traffic manager's control-plane (port 9002).
+// Sidecars call GetTunIP on startup to allocate an IP, then WatchTunIP for changes.
+service TunConfigService {
+  // GetTunIP allocates or retrieves the TUN IP for the given owner.
+  // If ownerID already has an allocation, returns the existing IP.
+  // Otherwise, DHCP-allocates a new IP and returns it.
+  rpc GetTunIP(TunIPRequest) returns (TunIPResponse) {}
+
+  // WatchTunIP opens a server-streaming connection that pushes new TunIPResponse
+  // whenever the owner's IP allocation changes (e.g., conflict resolution, re-allocation).
+  rpc WatchTunIP(TunIPRequest) returns (stream TunIPResponse) {}
+
+  // ReleaseTunIP is intentionally omitted — per DHCP protocol design,
+  // lease expiry handles IP reclaim. No explicit release needed.
+}
+
+message TunIPRequest {
+  string OwnerID = 1;     // sidecar identity (typically podName or nodeID)
+  string Namespace = 2;   // workload namespace (for DHCP scoping)
+}
+
+message TunIPResponse {
+  string IPv4 = 1;        // allocated IPv4 in CIDR notation, e.g. "198.18.0.5/32"
+  string IPv6 = 2;        // allocated IPv6 in CIDR notation, e.g. "fd11::5/128"
+  int64  Version = 3;     // monotonically increasing version for change detection
+}

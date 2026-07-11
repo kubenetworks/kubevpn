@@ -367,7 +367,7 @@ func TestContainerNameConstants(t *testing.T) {
 	names := []string{
 		ContainerSidecarEnvoyProxy,
 		ContainerSidecarControlPlane,
-		ContainerSidecarWebhook,
+		ContainerSidecarDNS,
 		ContainerSidecarVPN,
 		ContainerSidecarSyncthing,
 	}

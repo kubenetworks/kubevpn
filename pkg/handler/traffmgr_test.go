@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -130,9 +129,9 @@ func TestGenService(t *testing.T) {
 		t.Fatalf("expected selector app=%q, got %q", config.ConfigMapPodTrafficManager, svc.Spec.Selector["app"])
 	}
 
-	// 4 ports
-	if len(svc.Spec.Ports) != 4 {
-		t.Fatalf("expected 4 ports, got %d", len(svc.Spec.Ports))
+	// 3 ports
+	if len(svc.Spec.Ports) != 3 {
+		t.Fatalf("expected 3 ports, got %d", len(svc.Spec.Ports))
 	}
 
 	type portCase struct {
@@ -143,7 +142,6 @@ func TestGenService(t *testing.T) {
 	expected := []portCase{
 		{config.PortNameTCP, 10801, v1.ProtocolTCP},
 		{config.PortNameEnvoy, 9002, v1.ProtocolTCP},
-		{config.PortNameHTTP, 80, v1.ProtocolTCP},
 		{config.PortNameDNS, 53, v1.ProtocolUDP},
 	}
 	for i, e := range expected {
@@ -256,29 +254,26 @@ func TestGenDeploySpec(t *testing.T) {
 	if cp.Image != image {
 		t.Fatalf("expected container[1] image %q, got %q", image, cp.Image)
 	}
-	if len(cp.Ports) != 2 {
-		t.Fatalf("expected container[1] to have 2 ports, got %d", len(cp.Ports))
+	if len(cp.Ports) != 1 {
+		t.Fatalf("expected container[1] to have 1 port, got %d", len(cp.Ports))
 	}
-	if cp.Ports[0].ContainerPort != 9002 || cp.Ports[1].ContainerPort != 53 {
-		t.Fatalf("expected container[1] ports 9002 and 53, got %d and %d", cp.Ports[0].ContainerPort, cp.Ports[1].ContainerPort)
+	if cp.Ports[0].ContainerPort != 9002 {
+		t.Fatalf("expected container[1] port 9002, got %d", cp.Ports[0].ContainerPort)
 	}
 	if cp.LivenessProbe == nil || cp.ReadinessProbe == nil || cp.StartupProbe == nil {
 		t.Fatal("expected container[1] to have all three probes")
 	}
 
-	// Container 2: Webhook
-	wh := containers[2]
-	if wh.Name != config.ContainerSidecarWebhook {
-		t.Fatalf("expected container[2] name %q, got %q", config.ContainerSidecarWebhook, wh.Name)
+	// Container 2: DNS
+	dns := containers[2]
+	if dns.Name != config.ContainerSidecarDNS {
+		t.Fatalf("expected container[2] name %q, got %q", config.ContainerSidecarDNS, dns.Name)
 	}
-	if wh.Image != image {
-		t.Fatalf("expected container[2] image %q, got %q", image, wh.Image)
+	if dns.Image != image {
+		t.Fatalf("expected container[2] image %q, got %q", image, dns.Image)
 	}
-	if len(wh.Ports) != 1 || wh.Ports[0].ContainerPort != 80 {
-		t.Fatalf("expected container[2] port 80, got %v", wh.Ports)
-	}
-	if wh.LivenessProbe == nil || wh.ReadinessProbe == nil || wh.StartupProbe == nil {
-		t.Fatal("expected container[2] to have all three probes")
+	if len(dns.Ports) != 1 || dns.Ports[0].ContainerPort != 53 {
+		t.Fatalf("expected container[2] port 53, got %v", dns.Ports)
 	}
 
 	// ImagePullSecrets
@@ -300,126 +295,6 @@ func TestGenDeploySpecNoImagePullSecret(t *testing.T) {
 
 	if len(deploy.Spec.Template.Spec.ImagePullSecrets) != 0 {
 		t.Fatalf("expected no imagePullSecrets when name is empty, got %d", len(deploy.Spec.Template.Spec.ImagePullSecrets))
-	}
-}
-
-func TestGenMutatingWebhookConfiguration(t *testing.T) {
-	namespace := "test-ns"
-	crt := []byte("fake-ca-cert")
-
-	mwc := genMutatingWebhookConfiguration(namespace, crt)
-
-	// Object metadata
-	expectedName := config.ConfigMapPodTrafficManager + "." + namespace
-	if mwc.Name != expectedName {
-		t.Fatalf("expected name %q, got %q", expectedName, mwc.Name)
-	}
-	if mwc.Namespace != namespace {
-		t.Fatalf("expected namespace %q, got %q", namespace, mwc.Namespace)
-	}
-
-	// Exactly one webhook
-	if len(mwc.Webhooks) != 1 {
-		t.Fatalf("expected 1 webhook, got %d", len(mwc.Webhooks))
-	}
-	wh := mwc.Webhooks[0]
-
-	// Webhook name
-	expectedWebhookName := config.ConfigMapPodTrafficManager + ".naison.io"
-	if wh.Name != expectedWebhookName {
-		t.Fatalf("expected webhook name %q, got %q", expectedWebhookName, wh.Name)
-	}
-
-	// CA bundle
-	if string(wh.ClientConfig.CABundle) != string(crt) {
-		t.Fatalf("expected CABundle %q, got %q", crt, wh.ClientConfig.CABundle)
-	}
-
-	// Service reference
-	svcRef := wh.ClientConfig.Service
-	if svcRef == nil {
-		t.Fatal("expected non-nil service reference")
-	}
-	if svcRef.Namespace != namespace {
-		t.Fatalf("expected service namespace %q, got %q", namespace, svcRef.Namespace)
-	}
-	if svcRef.Name != config.ConfigMapPodTrafficManager {
-		t.Fatalf("expected service name %q, got %q", config.ConfigMapPodTrafficManager, svcRef.Name)
-	}
-	if svcRef.Path == nil || *svcRef.Path != "/pods" {
-		t.Fatalf("expected service path %q, got %v", "/pods", svcRef.Path)
-	}
-	if svcRef.Port == nil || *svcRef.Port != 80 {
-		t.Fatalf("expected service port 80, got %v", svcRef.Port)
-	}
-
-	// Rules
-	if len(wh.Rules) != 1 {
-		t.Fatalf("expected 1 rule, got %d", len(wh.Rules))
-	}
-	rule := wh.Rules[0]
-	if len(rule.Operations) != 2 {
-		t.Fatalf("expected 2 operations, got %d", len(rule.Operations))
-	}
-	if rule.Operations[0] != admissionv1.Create || rule.Operations[1] != admissionv1.Delete {
-		t.Fatalf("expected operations [CREATE, DELETE], got %v", rule.Operations)
-	}
-	if len(rule.Rule.APIGroups) != 1 || rule.Rule.APIGroups[0] != "" {
-		t.Fatalf("expected APIGroups [\"\"], got %v", rule.Rule.APIGroups)
-	}
-	if len(rule.Rule.APIVersions) != 1 || rule.Rule.APIVersions[0] != "v1" {
-		t.Fatalf("expected APIVersions [\"v1\"], got %v", rule.Rule.APIVersions)
-	}
-	if len(rule.Rule.Resources) != 1 || rule.Rule.Resources[0] != "pods" {
-		t.Fatalf("expected Resources [\"pods\"], got %v", rule.Rule.Resources)
-	}
-	if rule.Rule.Scope == nil || *rule.Rule.Scope != admissionv1.NamespacedScope {
-		t.Fatalf("expected scope Namespaced, got %v", rule.Rule.Scope)
-	}
-
-	// Failure policy
-	if wh.FailurePolicy == nil || *wh.FailurePolicy != admissionv1.Ignore {
-		t.Fatalf("expected failurePolicy Ignore, got %v", wh.FailurePolicy)
-	}
-
-	// SideEffects
-	if wh.SideEffects == nil || *wh.SideEffects != admissionv1.SideEffectClassNone {
-		t.Fatalf("expected sideEffects None, got %v", wh.SideEffects)
-	}
-
-	// TimeoutSeconds
-	if wh.TimeoutSeconds == nil || *wh.TimeoutSeconds != 15 {
-		t.Fatalf("expected timeoutSeconds 15, got %v", wh.TimeoutSeconds)
-	}
-
-	// AdmissionReviewVersions
-	expectedVersions := []string{"v1", "v1beta1"}
-	if len(wh.AdmissionReviewVersions) != len(expectedVersions) {
-		t.Fatalf("expected %d admissionReviewVersions, got %d", len(expectedVersions), len(wh.AdmissionReviewVersions))
-	}
-	for i, v := range expectedVersions {
-		if wh.AdmissionReviewVersions[i] != v {
-			t.Fatalf("expected admissionReviewVersions[%d]=%q, got %q", i, v, wh.AdmissionReviewVersions[i])
-		}
-	}
-
-	// ReinvocationPolicy
-	if wh.ReinvocationPolicy == nil || *wh.ReinvocationPolicy != admissionv1.NeverReinvocationPolicy {
-		t.Fatalf("expected reinvocationPolicy Never, got %v", wh.ReinvocationPolicy)
-	}
-
-	// NamespaceSelector: non-kubevpn namespace should have label selector
-	if wh.NamespaceSelector == nil {
-		t.Fatal("expected non-nil namespaceSelector for non-kubevpn namespace")
-	}
-	if wh.NamespaceSelector.MatchLabels["ns"] != namespace {
-		t.Fatalf("expected namespaceSelector matchLabels ns=%q, got %v", namespace, wh.NamespaceSelector.MatchLabels)
-	}
-
-	// NamespaceSelector: kubevpn namespace should be nil
-	mwcKubevpn := genMutatingWebhookConfiguration(config.DefaultNamespaceKubevpn, crt)
-	if mwcKubevpn.Webhooks[0].NamespaceSelector != nil {
-		t.Fatalf("expected nil namespaceSelector for kubevpn namespace, got %v", mwcKubevpn.Webhooks[0].NamespaceSelector)
 	}
 }
 
@@ -492,45 +367,10 @@ func TestGenDeploySpec_Probes(t *testing.T) {
 		t.Fatalf("ControlPlane container: expected startup probe port 9002, got %d", cp.StartupProbe.TCPSocket.Port.IntValue())
 	}
 
-	// Webhook container: HTTP probes on port 80 with HTTPS scheme
-	wh := containers[2]
-	if wh.LivenessProbe == nil || wh.LivenessProbe.HTTPGet == nil {
-		t.Fatal("Webhook container: expected liveness probe with HTTPGet")
-	}
-	if wh.LivenessProbe.HTTPGet.Port.IntValue() != 80 {
-		t.Fatalf("Webhook container: expected liveness probe port 80, got %d", wh.LivenessProbe.HTTPGet.Port.IntValue())
-	}
-	if wh.LivenessProbe.HTTPGet.Path != "/readyz" {
-		t.Fatalf("Webhook container: expected liveness probe path /readyz, got %q", wh.LivenessProbe.HTTPGet.Path)
-	}
-	if wh.LivenessProbe.HTTPGet.Scheme != v1.URISchemeHTTPS {
-		t.Fatalf("Webhook container: expected liveness probe scheme HTTPS, got %q", wh.LivenessProbe.HTTPGet.Scheme)
-	}
-
-	if wh.ReadinessProbe == nil || wh.ReadinessProbe.HTTPGet == nil {
-		t.Fatal("Webhook container: expected readiness probe with HTTPGet")
-	}
-	if wh.ReadinessProbe.HTTPGet.Port.IntValue() != 80 {
-		t.Fatalf("Webhook container: expected readiness probe port 80, got %d", wh.ReadinessProbe.HTTPGet.Port.IntValue())
-	}
-	if wh.ReadinessProbe.HTTPGet.Path != "/readyz" {
-		t.Fatalf("Webhook container: expected readiness probe path /readyz, got %q", wh.ReadinessProbe.HTTPGet.Path)
-	}
-	if wh.ReadinessProbe.HTTPGet.Scheme != v1.URISchemeHTTPS {
-		t.Fatalf("Webhook container: expected readiness probe scheme HTTPS, got %q", wh.ReadinessProbe.HTTPGet.Scheme)
-	}
-
-	if wh.StartupProbe == nil || wh.StartupProbe.HTTPGet == nil {
-		t.Fatal("Webhook container: expected startup probe with HTTPGet")
-	}
-	if wh.StartupProbe.HTTPGet.Port.IntValue() != 80 {
-		t.Fatalf("Webhook container: expected startup probe port 80, got %d", wh.StartupProbe.HTTPGet.Port.IntValue())
-	}
-	if wh.StartupProbe.HTTPGet.Path != "/readyz" {
-		t.Fatalf("Webhook container: expected startup probe path /readyz, got %q", wh.StartupProbe.HTTPGet.Path)
-	}
-	if wh.StartupProbe.HTTPGet.Scheme != v1.URISchemeHTTPS {
-		t.Fatalf("Webhook container: expected startup probe scheme HTTPS, got %q", wh.StartupProbe.HTTPGet.Scheme)
+	// DNS container: no probes
+	dns := containers[2]
+	if dns.LivenessProbe != nil || dns.ReadinessProbe != nil || dns.StartupProbe != nil {
+		t.Fatal("DNS container: expected no probes")
 	}
 }
 
@@ -556,43 +396,34 @@ func TestGenDeploySpec_ContainerPorts(t *testing.T) {
 		t.Fatalf("VPN container: expected protocol TCP, got %q", vpn.Ports[0].Protocol)
 	}
 
-	// Control Plane container: 2 ports (PortNameEnvoy on 9002/TCP, PortNameDNS on 53/UDP)
+	// Control Plane container: 1 port (PortNameEnvoy on 9002/TCP)
 	cp := containers[1]
-	if len(cp.Ports) != 2 {
-		t.Fatalf("ControlPlane container: expected 2 ports, got %d", len(cp.Ports))
+	if len(cp.Ports) != 1 {
+		t.Fatalf("ControlPlane container: expected 1 port, got %d", len(cp.Ports))
 	}
 	if cp.Ports[0].Name != config.PortNameEnvoy {
-		t.Fatalf("ControlPlane container: expected port[0] name %q, got %q", config.PortNameEnvoy, cp.Ports[0].Name)
+		t.Fatalf("ControlPlane container: expected port name %q, got %q", config.PortNameEnvoy, cp.Ports[0].Name)
 	}
 	if cp.Ports[0].ContainerPort != 9002 {
-		t.Fatalf("ControlPlane container: expected port[0] containerPort 9002, got %d", cp.Ports[0].ContainerPort)
+		t.Fatalf("ControlPlane container: expected containerPort 9002, got %d", cp.Ports[0].ContainerPort)
 	}
 	if cp.Ports[0].Protocol != v1.ProtocolTCP {
-		t.Fatalf("ControlPlane container: expected port[0] protocol TCP, got %q", cp.Ports[0].Protocol)
-	}
-	if cp.Ports[1].Name != config.PortNameDNS {
-		t.Fatalf("ControlPlane container: expected port[1] name %q, got %q", config.PortNameDNS, cp.Ports[1].Name)
-	}
-	if cp.Ports[1].ContainerPort != 53 {
-		t.Fatalf("ControlPlane container: expected port[1] containerPort 53, got %d", cp.Ports[1].ContainerPort)
-	}
-	if cp.Ports[1].Protocol != v1.ProtocolUDP {
-		t.Fatalf("ControlPlane container: expected port[1] protocol UDP, got %q", cp.Ports[1].Protocol)
+		t.Fatalf("ControlPlane container: expected protocol TCP, got %q", cp.Ports[0].Protocol)
 	}
 
-	// Webhook container: 1 port named PortNameHTTP on 80/TCP
-	wh := containers[2]
-	if len(wh.Ports) != 1 {
-		t.Fatalf("Webhook container: expected 1 port, got %d", len(wh.Ports))
+	// DNS container: 1 port (PortNameDNS on 53/UDP)
+	dns := containers[2]
+	if len(dns.Ports) != 1 {
+		t.Fatalf("DNS container: expected 1 port, got %d", len(dns.Ports))
 	}
-	if wh.Ports[0].Name != config.PortNameHTTP {
-		t.Fatalf("Webhook container: expected port name %q, got %q", config.PortNameHTTP, wh.Ports[0].Name)
+	if dns.Ports[0].Name != config.PortNameDNS {
+		t.Fatalf("DNS container: expected port name %q, got %q", config.PortNameDNS, dns.Ports[0].Name)
 	}
-	if wh.Ports[0].ContainerPort != 80 {
-		t.Fatalf("Webhook container: expected containerPort 80, got %d", wh.Ports[0].ContainerPort)
+	if dns.Ports[0].ContainerPort != 53 {
+		t.Fatalf("DNS container: expected containerPort 53, got %d", dns.Ports[0].ContainerPort)
 	}
-	if wh.Ports[0].Protocol != v1.ProtocolTCP {
-		t.Fatalf("Webhook container: expected protocol TCP, got %q", wh.Ports[0].Protocol)
+	if dns.Ports[0].Protocol != v1.ProtocolUDP {
+		t.Fatalf("DNS container: expected protocol UDP, got %q", dns.Ports[0].Protocol)
 	}
 }
 
@@ -625,7 +456,7 @@ func TestGenDeploySpec_SecurityContext(t *testing.T) {
 		}
 	}
 
-	// ControlPlane and Webhook containers should not have a privileged security context either
+	// ControlPlane and DNS containers should not have a privileged security context either
 	for _, c := range containers[1:] {
 		if c.SecurityContext != nil && c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged {
 			t.Fatalf("container %q: expected Privileged to not be true", c.Name)

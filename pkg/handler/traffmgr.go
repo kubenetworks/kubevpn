@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -88,20 +87,12 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		return err
 	}
 
-	crt, err := createTLSSecret(ctx, clientset, namespace)
+	_, err = createTLSSecret(ctx, clientset, namespace)
 	if err != nil {
 		return err
 	}
 
-	// 6) create mutatingWebhookConfigurations
-	plog.G(ctx).Infof("Creating MutatingWebhookConfiguration %s", config.ConfigMapPodTrafficManager)
-	mutatingWebhookConfiguration := genMutatingWebhookConfiguration(namespace, crt)
-	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, mutatingWebhookConfiguration, metav1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to create MutatingWebhookConfigurations: %w", err)
-	}
-
-	// 7) create deployment
+	// 6) create deployment
 	plog.G(ctx).Infof("Creating Deployment %s", config.ConfigMapPodTrafficManager)
 	deploy := genDeploySpec(namespace, image, imagePullSecretName)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
@@ -155,8 +146,7 @@ func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelec
 }
 
 // createTLSSecret generates a TLS certificate and creates the corresponding
-// Secret in the cluster. It returns the CA certificate bytes needed by the
-// MutatingWebhookConfiguration.
+// Secret in the cluster.
 // Note: v1.SecretTypeOpaque is used instead of v1.SecretTypeTls because TLS
 // secret keys (tls.crt, tls.key) contain dots which are invalid as shell
 // environment variable names, and the secret is mounted as env vars.
@@ -177,7 +167,6 @@ func createTLSSecret(ctx context.Context, clientset kubernetes.Interface, namesp
 func cleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.Interface, namespace string) {
 	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
 	name := config.ConfigMapPodTrafficManager
-	_ = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, name+"."+namespace, options)
 	_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, name, options)
 	_ = clientset.RbacV1().Roles(namespace).Delete(ctx, name, options)
 	_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, name, options)

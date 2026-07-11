@@ -90,19 +90,6 @@ func genTLS(ctx context.Context, namespace string, clientset kubernetes.Interfac
 		plog.G(ctx).Errorf("Failed to update secret: %v", err)
 		return err
 	}
-
-	mutatingWebhookConfiguration := genMutatingWebhookConfiguration(namespace, crt)
-	oldConfig, err := clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Get(ctx, mutatingWebhookConfiguration.Name, metav1.GetOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to get mutatingWebhookConfiguration: %v", err)
-		return err
-	}
-	mutatingWebhookConfiguration.ResourceVersion = oldConfig.ResourceVersion
-	_, err = clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Update(ctx, mutatingWebhookConfiguration, metav1.UpdateOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to update mutatingWebhookConfiguration: %v", err)
-		return err
-	}
 	return nil
 }
 

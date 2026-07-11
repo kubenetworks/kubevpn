@@ -24,8 +24,12 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/utils/ptr"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -35,18 +39,19 @@ import (
 
 // NetworkConfig holds immutable configuration for NetworkManager.
 type NetworkConfig struct {
-	Clientset        kubernetes.Interface
-	RESTClient       *rest.RESTClient
-	Config           *rest.Config
-	ManagerNamespace string
+	Clientset         kubernetes.Interface
+	RESTClient        *rest.RESTClient
+	Config            *rest.Config
+	ManagerNamespace  string
 	WorkloadNamespace string
-	LocalTunIPv4     *net.IPNet
-	LocalTunIPv6     *net.IPNet
-	CIDRs            []*net.IPNet
-	APIServerIPs     []net.IP
-	ExtraRouteInfo   *ExtraRouteInfo
-	Image            string
-	Lock             *sync.Mutex // shared lock for DNS operations
+	LocalTunIPv4      *net.IPNet
+	LocalTunIPv6      *net.IPNet
+	CIDRs             []*net.IPNet
+	APIServerIPs      []net.IP
+	ExtraRouteInfo    *ExtraRouteInfo
+	Image             string
+	Lock              *sync.Mutex // shared lock for DNS operations
+	OwnerID           string      // unique ID for TunConfigService (UUID)
 
 	// GetRunningPodList returns running traffic manager pods.
 	GetRunningPodList func(ctx context.Context) ([]v1.Pod, error)
@@ -145,6 +150,123 @@ func (nm *NetworkManager) Stop() {
 	nm.tunName = ""
 	nm.dnsConfig = nil
 	nm.extraHost = nil
+}
+
+// ChangeTunIP hot-updates the TUN device IP without restarting the network stack.
+// The next heartbeat automatically uses the new IP (heartbeat reads from OS each tick).
+func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net.IPNet) error {
+	if nm.tunName == "" {
+		return fmt.Errorf("TUN device not started")
+	}
+	if newIPv4 == nil {
+		return fmt.Errorf("new IPv4 is nil")
+	}
+
+	oldAddr := ""
+	if nm.cfg.LocalTunIPv4 != nil {
+		oldAddr = nm.cfg.LocalTunIPv4.String()
+	}
+	if err := tun.ChangeIP(nm.tunName, oldAddr, newIPv4.String()); err != nil {
+		return fmt.Errorf("change IPv4 on %s: %w", nm.tunName, err)
+	}
+
+	if newIPv6 != nil && nm.cfg.LocalTunIPv6 != nil {
+		oldAddr6 := nm.cfg.LocalTunIPv6.String()
+		if err := tun.ChangeIP(nm.tunName, oldAddr6, newIPv6.String()); err != nil {
+			plog.G(ctx).Warnf("[NetworkManager] Change IPv6 failed: %v", err)
+		}
+	}
+
+	nm.cfg.LocalTunIPv4 = newIPv4
+	if newIPv6 != nil {
+		nm.cfg.LocalTunIPv6 = newIPv6
+	}
+
+	plog.G(ctx).Infof("[NetworkManager] TUN IP changed: v4=%s v6=%s on %s", newIPv4, newIPv6, nm.tunName)
+	return nil
+}
+
+// StartIPWatcher launches a background goroutine that connects to the control-plane's
+// TunConfigService and watches for IP changes. When a change is detected, it calls ChangeTunIP.
+// Uses the OwnerID from NetworkConfig for identification.
+func (nm *NetworkManager) StartIPWatcher(ctx context.Context) {
+	if nm.cfg.OwnerID == "" {
+		return
+	}
+	go nm.watchTunIPFromControlPlane(ctx)
+}
+
+func (nm *NetworkManager) watchTunIPFromControlPlane(ctx context.Context) {
+	// Port 9002 is port-forwarded alongside 10801/10802
+	// Local port is dynamically assigned — for now use a well-known offset
+	// TODO: pass the actual local port for 9002 from the port-forward setup
+	target := "127.0.0.1:9002"
+
+	var currentVersion int64
+
+	for ctx.Err() == nil {
+		err := nm.doWatchTunIP(ctx, target, &currentVersion)
+		if err != nil && ctx.Err() == nil {
+			plog.G(ctx).Debugf("[IPWatcher] Watch disconnected: %v, retrying in 10s", err)
+		}
+		select {
+		case <-time.After(10 * time.Second):
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (nm *NetworkManager) doWatchTunIP(ctx context.Context, target string, currentVersion *int64) error {
+	conn, err := grpc.DialContext(ctx, target,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		return fmt.Errorf("dial %s: %w", target, err)
+	}
+	defer conn.Close()
+
+	client := rpc.NewTunConfigServiceClient(conn)
+	stream, err := client.WatchTunIP(ctx, &rpc.TunIPRequest{
+		OwnerID:   nm.cfg.OwnerID,
+		Namespace: nm.cfg.ManagerNamespace,
+	})
+	if err != nil {
+		return fmt.Errorf("WatchTunIP: %w", err)
+	}
+
+	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		if resp.Version != *currentVersion && *currentVersion != 0 {
+			newV4, newV6 := parseTunIPResponse(resp)
+			if newV4 != nil {
+				if changeErr := nm.ChangeTunIP(ctx, newV4, newV6); changeErr != nil {
+					plog.G(ctx).Errorf("[IPWatcher] ChangeTunIP failed: %v", changeErr)
+				}
+			}
+		}
+		*currentVersion = resp.Version
+	}
+}
+
+func parseTunIPResponse(resp *rpc.TunIPResponse) (ipv4, ipv6 *net.IPNet) {
+	if resp.IPv4 != "" {
+		ip, cidr, err := net.ParseCIDR(resp.IPv4)
+		if err == nil {
+			ipv4 = &net.IPNet{IP: ip, Mask: cidr.Mask}
+		}
+	}
+	if resp.IPv6 != "" {
+		ip, cidr, err := net.ParseCIDR(resp.IPv6)
+		if err == nil {
+			ipv6 = &net.IPNet{IP: ip, Mask: cidr.Mask}
+		}
+	}
+	return
 }
 
 // portForward sets up port-forwarding to the traffic manager pod with automatic

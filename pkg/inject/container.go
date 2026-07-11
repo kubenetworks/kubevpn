@@ -57,8 +57,6 @@ func commonEnvVars(managerNamespace string) []v1.EnvVar {
 	return []v1.EnvVar{
 		{Name: "CIDR4", Value: config.CIDR.String()},
 		{Name: "CIDR6", Value: config.CIDR6.String()},
-		{Name: config.EnvInboundPodTunIPv4, Value: ""},
-		{Name: config.EnvInboundPodTunIPv6, Value: ""},
 		{Name: "TrafficManagerService", Value: trafficManagerAddr(managerNamespace)},
 		{
 			Name: config.EnvPodNamespace,
@@ -110,6 +108,7 @@ func newEnvoyContainer(ns, nodeID string, ipv6 bool, managerNamespace, image str
 // AddVPNAndEnvoyContainer adds VPN and Envoy sidecar containers for mesh mode.
 func AddVPNAndEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 bool, managerNamespace string, secret *v1.Secret, image string) {
 	RemoveContainers(&spec.Spec)
+	spec.Spec.ServiceAccountName = config.ConfigMapPodTrafficManager
 
 	var envs []v1.EnvVar
 	envs = append(envs, commonEnvVars(managerNamespace)...)
@@ -131,7 +130,7 @@ iptables -P FORWARD ACCEPT
 ip6tables -P FORWARD ACCEPT
 iptables -t nat -A PREROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006
 ip6tables -t nat -A PREROUTING ! -p icmp ! -s 0:0:0:0:0:0:0:1 ! -d ${CIDR6} -j DNAT --to :15006
-kubevpn server -l "tun:/tcp://${TrafficManagerService}:10801?net=${TunIPv4}&net6=${TunIPv6}&route=${CIDR4}"`,
+kubevpn server -l "tun:/tcp://${TrafficManagerService}:10801?route=${CIDR4}"`,
 		},
 		Env:             envs,
 		Resources:       defaultResources(),

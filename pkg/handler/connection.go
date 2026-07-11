@@ -22,8 +22,6 @@ type Connection interface {
 	// InitClient initializes Kubernetes clients from the given factory.
 	InitClient(f cmdutil.Factory) error
 
-	// InitDHCP initializes the DHCP manager for IP allocation.
-	InitDHCP(ctx context.Context) error
 
 	// RentIP leases IPv4 and IPv6 TUN addresses from DHCP.
 	RentIP(ctx context.Context, ipv4, ipv6 string) (context.Context, error)

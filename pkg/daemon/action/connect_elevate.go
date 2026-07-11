@@ -84,9 +84,6 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		return err
 	}
 
-	if err = connect.InitDHCP(session.Ctx); err != nil {
-		return err
-	}
 	connectionID := connect.GetConnectionID()
 
 	svr.connMu.Lock()
