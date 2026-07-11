@@ -1087,6 +1087,11 @@ func (nm *NetworkManager) doWatchNamespaceRoutes(ctx context.Context, target str
 					plog.G(ctx).Debugf("[RouteWatcher] add pod CIDR routes failed: %v", err)
 				}
 			},
+			func(ips []string) {
+				if err := nm.AddRoute(ips...); err != nil {
+					plog.G(ctx).Debugf("[RouteWatcher] add service IP routes failed: %v", err)
+				}
+			},
 			func(svcs []v1.Service) {
 				if nm.dnsConfig != nil {
 					nm.dnsConfig.UpdateServices(ctx, svcs)
@@ -1098,12 +1103,14 @@ func (nm *NetworkManager) doWatchNamespaceRoutes(ctx context.Context, target str
 }
 
 // applyRouteFrame applies one WatchNamespaceRoutes frame to the running state: it resets
-// the service set on a snapshot, adds pushed pod CIDR routes (via addCIDR), upserts/removes
-// service records, and pushes the updated service set to DNS (via setDNS) when it changed.
-// Routes are add-only: RemovedPodCIDRs are NOT unrouted (a stale prefix pointed at the TUN
-// is harmless), they only affect state. Pure of gRPC/NetworkManager for unit-testing.
+// the service set on a snapshot, adds pushed pod CIDR routes (via addCIDR), routes the
+// upserted services' ClusterIPs (via addServiceIPs), upserts/removes service records, and
+// pushes the updated service set to DNS (via setDNS) when it changed.
+// Routes are add-only: RemovedPodCIDRs / RemovedServiceKeys are NOT unrouted (a stale route
+// pointed at the TUN is harmless), they only affect state. Pure of gRPC/NetworkManager for
+// unit-testing.
 func applyRouteFrame(resp *rpc.NamespaceRoutesResponse, services map[string]*rpc.ServiceRecord,
-	addCIDR func([]string), setDNS func([]v1.Service)) {
+	addCIDR func([]string), addServiceIPs func([]string), setDNS func([]v1.Service)) {
 	if resp.Snapshot {
 		for k := range services {
 			delete(services, k)
@@ -1112,12 +1119,21 @@ func applyRouteFrame(resp *rpc.NamespaceRoutesResponse, services map[string]*rpc
 	if len(resp.AddedPodCIDRs) > 0 {
 		addCIDR(resp.AddedPodCIDRs)
 	}
-	// Service ClusterIPs are already covered by the service CIDR route, so no per-service
-	// route is added — the records drive DNS only.
+	// Route each upserted service's ClusterIPs. The whole service CIDR is normally routed at
+	// connect, but that detection is best-effort and may miss/exclude ranges (managed clusters
+	// hide component flags, the error-trick message may not match, or the range is dropped by
+	// the API-server-IP filter). Without a per-service route the name still resolves (hosts
+	// entry) but the connection has no path, so add the ClusterIPs explicitly — addServiceIPs
+	// (nm.AddRoute) skips API server IPs and already-routed IPs and is idempotent.
+	var svcIPs []string
 	changed := resp.Snapshot
 	for _, rec := range resp.UpsertedServices {
 		services[rec.Namespace+"/"+rec.Name] = rec
+		svcIPs = append(svcIPs, rec.ClusterIPs...)
 		changed = true
+	}
+	if len(svcIPs) > 0 {
+		addServiceIPs(svcIPs)
 	}
 	for _, key := range resp.RemovedServiceKeys {
 		if _, ok := services[key]; ok {
