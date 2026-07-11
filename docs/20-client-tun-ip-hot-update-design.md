@@ -35,9 +35,9 @@ User Machine
 ┌───────────────────────────────────────────────────┐
 │  User Daemon (控制面)                              │
 │  ├─ ConnectOptions                                │
-│  │   ├─ DHCP (当前直接操作 ConfigMap)              │
-│  │   ├─ LocalTunIPv4/v6                           │
-│  │   └─ HealthCheck                              │
+│  │   ├─ OwnerID (传给 Root Daemon via req)         │
+│  │   ├─ HealthCheck                              │
+│  │   └─ getSudoTunIPs → 查询 sudo daemon IP       │
 │  │                                                │
 │  └─ → gRPC → Root Daemon                         │
 │                                                    │
@@ -75,19 +75,19 @@ User Machine
 // The next heartbeat automatically uses the new IP.
 func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net.IPNet) error {
 // 1. tun.ChangeIP on OS device
-if err := tun.ChangeIP(nm.tunName, nm.cfg.LocalTunIPv4.String(), newIPv4.String()); err != nil {
+if err := tun.ChangeIP(nm.tunName, nm.localTunIPv4.String(), newIPv4.String()); err != nil {
 return fmt.Errorf("change IPv4: %w", err)
 }
-if newIPv6 != nil && nm.cfg.LocalTunIPv6 != nil {
-_ = tun.ChangeIP(nm.tunName, nm.cfg.LocalTunIPv6.String(), newIPv6.String())
+if newIPv6 != nil && nm.localTunIPv6 != nil {
+_ = tun.ChangeIP(nm.tunName, nm.localTunIPv6.String(), newIPv6.String())
 }
 
 // 2. Update iptables (no-op on client — client doesn't use DNAT)
-// tun.UpdateDNAT(nm.cfg.LocalTunIPv4.IP, newIPv4.IP)  // client doesn't need this
+// tun.UpdateDNAT(nm.localTunIPv4.IP, newIPv4.IP)  // client doesn't need this
 
 // 3. Update internal config
-nm.cfg.LocalTunIPv4 = newIPv4
-nm.cfg.LocalTunIPv6 = newIPv6
+nm.localTunIPv4 = newIPv4
+nm.localTunIPv6 = newIPv6
 
 plog.G(ctx).Infof("[NetworkManager] TUN IP changed: v4=%s v6=%s", newIPv4, newIPv6)
 return nil
@@ -225,38 +225,26 @@ fmt.Sprintf("%d:9002", localControlPlanePort), // 新增
 
 推荐 **方案 A** — 更简单，复用已有机制。
 
-### 5.6 ConnectOptions 中 DHCP 路径的变更
+### 5.6 ConnectOptions 中 IP 获取路径
 
-**当前流程 (User Daemon):**
-
-```
-RentIP → 直接操作 ConfigMap DHCP → 获得 IP
-→ 将 IP 传给 Root Daemon (via gRPC metadata)
-→ Root Daemon 用 IP 创建 TUN
-```
-
-**新流程 (使用 TunConfigService):**
+**当前流程：**
 
 ```
-User Daemon: GetTunIP(ownerID) via port-forward → control-plane
-→ 获得 IP → 传给 Root Daemon (via gRPC metadata)
-→ Root Daemon 用 IP 创建 TUN
-→ Root Daemon 启动 WatchTunIP → IP 变更时 ChangeTunIP
+User Daemon: CreateOutboundPod → UpgradeDeploy → 设置 req.OwnerID → cli.Connect
+Root Daemon: connect.OwnerID = req.OwnerID → DoConnect → NetworkManager.Start
+  → startTUN → rentIP(OwnerID, ExcludeIPs) → 创建 TUN
+  → StartIPWatcher → WatchTunIP → IP 变更时 ChangeTunIP
 ```
 
-注意：User Daemon 仍然做初始 IP 获取（因为它需要在 Root Daemon 启动 TUN 之前就知道 IP，以通过 gRPC metadata 传递）。但后续的
-IP 变更由 Root Daemon 的 watcher 处理。
+User Daemon 不再持有 `LocalTunIPv4/v6`。需要 IP 时通过 `getSudoTunIPs(ctx)` 查询 sudo daemon 的 Status RPC，按 ConnectionID 匹配。
 
-### 5.7 User Daemon 健康检查适配
+### 5.7 User Daemon IP 查询
 
-User Daemon 的 `HealthCheckOnce` 从 ConfigMap 读取状态。如果 IP 变了，User Daemon 也需要更新 `LocalTunIPv4/v6` 字段（用于
-status 显示和 LeaveResource 时的 IP 匹配）。
-
-通过 User Daemon 也监听 TunConfigService 即可同步：
+User Daemon 需要 TUN IP 用于 sidecar 注入、leave、status 显示。通过 `getSudoTunIPs` 查询 sudo daemon：
 
 ```go
-// connect_elevate.go — forwardConnectToSudo 完成后
-go syncTunIPFromControlPlane(ctx, connect, ownerID)
+ips := svr.getSudoTunIPs(ctx)          // map[ConnectionID]tunIP
+v4, v6 := resolveTunIP(connect, ips)   // 按 ConnectionID 匹配
 ```
 
 ## 6. 完整生命周期
@@ -265,17 +253,15 @@ go syncTunIPFromControlPlane(ctx, connect, ownerID)
 kubevpn connect -n default
   │
   ├─ User Daemon:
-  │   1. 创建 ConnectOptions
+  │   1. 创建 ConnectOptions（含 OwnerID = UUID[:12]）
   │   2. InitClient → configMapStore
-  │   3. GetTunIP(ownerID=OwnerID(UUID)) via port-forward:9002
-  │      → control-plane DHCP rent → 198.18.0.5/32
-  │   4. RentIP → 将 IP 设置到 ConnectOptions
-  │   5. forwardConnectToSudo → 传 IP 给 Root Daemon
-  │   6. HealthPeriod (后台)
-  │   7. WatchTunIP (后台) → 同步 LocalTunIPv4 显示
+  │   3. CreateOutboundPod → UpgradeDeploy
+  │   4. 设置 req.OwnerID，forwardConnectToSudo → 转发给 Root Daemon
+  │   5. HealthPeriod (后台)
+  │   6. 需要 IP 时: getSudoTunIPs → resolveTunIP
   │
   ├─ Root Daemon:
-  │   1. GetOwnerIDFromContext → 获取 OwnerID
+  │   1. connect.OwnerID = req.OwnerID
   │   2. DoConnect → NetworkManager.Start()
   │      → portForward(:10801, :10802, :9002)
   │      → rentIP: GetTunIP(ownerID, ExcludeIPs=localIPs)
@@ -293,7 +279,7 @@ kubevpn connect -n default
   │      → tun.ChangeIP("utun0", old, new)
   │      → heartbeat 自动用新 IP
   │      → Server RouteHub auto-register
-  │   → User Daemon: 同步 LocalTunIPv4 (for status/leave)
+  │   → User Daemon: getSudoTunIPs 查询时获取新 IP (for status/leave)
   │
   └─ Disconnect:
       → Lease 到期自动回收 (无需显式释放)
@@ -304,7 +290,7 @@ kubevpn connect -n default
 
 | 步骤       | Sidecar                               | Client                                     |
 |----------|---------------------------------------|--------------------------------------------|
-| 获取 IP    | `tunProtocolFactory` → gRPC dial 9002 | User Daemon → port-forward:9002 → GetTunIP |
+| 获取 IP    | `tunProtocolFactory` → gRPC dial 9002 | Root Daemon → port-forward:9002 → rentIP (in startTUN) |
 | 创建 TUN   | `tun.Listener` in protocol_registry   | `NetworkManager.startTUN`                  |
 | 监听变化     | `watchTunIPChanges` goroutine         | `NetworkManager.StartIPWatcher`            |
 | 应用变更     | `applyTunIPChange` (直接操作 OS)          | `NetworkManager.ChangeTunIP`               |
@@ -329,8 +315,11 @@ kubevpn connect -n default
 |----------------------------------------|----|------------------------------------|
 | `pkg/handler/network.go`               | 修改 | 新增 `ChangeTunIP`, `StartIPWatcher` |
 | `pkg/handler/connect.go`               | 修改 | DoConnect 完成后启动 watcher            |
-| `pkg/daemon/action/connect_elevate.go` | 修改 | User Daemon 用 GetTunIP 替代直接 DHCP   |
-| `pkg/daemon/action/connect.go`         | 修改 | Root Daemon 启动 IP watcher          |
+| `pkg/daemon/action/connect_elevate.go` | 修改 | User Daemon 传 OwnerID via req，不再分配 IP |
+| `pkg/daemon/action/connect.go`         | 修改 | Root Daemon 从 req 读 OwnerID，启动 IP watcher |
+| `pkg/daemon/action/persistence.go`     | 修改 | 新增 getSudoTunIPs/resolveTunIP helpers |
+| `pkg/daemon/action/proxy.go`           | 修改 | 查询 sudo daemon IP 传给 CreateRemoteInboundPod |
+| `pkg/daemon/action/leave.go`           | 修改 | 查询 sudo daemon IP 用于 LeaveResource |
 
 ## 10. 向后兼容
 

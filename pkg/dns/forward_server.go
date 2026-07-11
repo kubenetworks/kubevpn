@@ -27,7 +27,7 @@ func ListenAndServe(network, address string, forwardDNS *miekgdns.ClientConfig) 
 		forwardDNS.Port = strconv.Itoa(53)
 	}
 	return miekgdns.ListenAndServe(address, network, &server{
-		dnsCache:   cache.NewLRUExpireCache(1000 * 1000),
+		dnsCache:   cache.NewLRUExpireCache(10000),
 		forwardDNS: forwardDNS,
 	})
 }

@@ -87,7 +87,7 @@ func TestAddVirtualRule_Case1_PreservesExisting(t *testing.T) {
 }
 
 func TestAddVirtualRule_Case2_MergeHeadersAndPortmap(t *testing.T) {
-	// Case 2: Existing entry with same TUN IP, non-fargate → merges headers and portmap
+	// Case 2: Existing entry with same OwnerID, non-fargate → merges headers and portmap
 	existing := []*controlplane.Virtual{
 		{
 			UID:       "deployments.apps.nginx",
@@ -97,11 +97,12 @@ func TestAddVirtualRule_Case2_MergeHeadersAndPortmap(t *testing.T) {
 				Headers:      map[string]string{"foo": "bar"},
 				LocalTunIPv4: "10.0.0.1",
 				LocalTunIPv6: "fd00::1",
+				OwnerID:      "test-owner",
 				PortMap:      map[int32]string{8080: "9090"},
 			}},
 		},
 	}
-	// Same TUN IP, add new header and portmap entry
+	// Same OwnerID, add new header and portmap entry
 	newHeaders := map[string]string{"env": "dev"}
 	newPortmap := map[int32]string{9090: "7070"}
 
@@ -366,9 +367,25 @@ func TestEnvoyRuleSpec_Validate_Valid(t *testing.T) {
 		Namespace:    "default",
 		NodeID:       "deployments.apps.nginx",
 		LocalTunIPv4: "10.0.0.1",
+		OwnerID:      "test-owner",
 	}
 	if err := spec.validate(); err != nil {
 		t.Errorf("expected no error for valid spec, got %v", err)
+	}
+}
+
+func TestEnvoyRuleSpec_Validate_EmptyOwnerID(t *testing.T) {
+	spec := envoyRuleSpec{
+		Namespace:    "default",
+		NodeID:       "deployments.apps.nginx",
+		LocalTunIPv4: "10.0.0.1",
+	}
+	err := spec.validate()
+	if err == nil {
+		t.Fatal("expected error for empty ownerID, got nil")
+	}
+	if !strings.Contains(err.Error(), "ownerID") {
+		t.Errorf("expected error to contain 'ownerID', got %q", err.Error())
 	}
 }
 

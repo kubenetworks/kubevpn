@@ -66,19 +66,13 @@ type NetworkManager struct {
 	localTunIPv6          *net.IPNet
 	tunName               string
 	controlPlaneLocalPort int // local port for TunConfigService (port-forwarded from 9002)
-	extraHost []dns.Entry
-	dnsConfig *dns.Config
+	extraHost             []dns.Entry
+	dnsConfig             *dns.Config
 }
 
 // newNetworkManager creates a NetworkManager with the given configuration.
 func newNetworkManager(cfg NetworkConfig) *NetworkManager {
 	return &NetworkManager{cfg: cfg}
-}
-
-// SetLocalTunIP sets the TUN IP addresses (called by RentIP before Start).
-func (nm *NetworkManager) SetLocalTunIP(v4, v6 *net.IPNet) {
-	nm.localTunIPv4 = v4
-	nm.localTunIPv6 = v6
 }
 
 // LocalTunIPv4 returns the IPv4 TUN address.
@@ -100,10 +94,9 @@ func (nm *NetworkManager) GetExtraHost() []dns.Entry {
 // Start brings up the full networking stack in order:
 // 1. Add extra node IPs to route info
 // 2. Port-forward to traffic manager (gvisor TCP/UDP + control-plane)
-// 3. Allocate TUN IP from control-plane (reuses the port-forward)
-// 4. Create local TUN device with gvisor stack
-// 5. Add dynamic routes (watch pods/services)
-// 6. Configure DNS
+// 3. Allocate TUN IP + create local TUN device with gvisor stack
+// 4. Add dynamic routes (watch pods/services)
+// 5. Configure DNS
 func (nm *NetworkManager) Start(ctx context.Context) error {
 	nm.ctx, nm.cancel = context.WithCancel(ctx)
 
@@ -133,10 +126,6 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 	}
 
 	if err := nm.portForward(nm.ctx, portPair); err != nil {
-		return err
-	}
-
-	if err := nm.rentIP(nm.ctx); err != nil {
 		return err
 	}
 
@@ -228,6 +217,16 @@ func collectLocalIPs() []string {
 		}
 	}
 	return ips
+}
+
+func isLocalIPConflict(ip net.IP) bool {
+	addrs, _ := net.InterfaceAddrs()
+	for _, addr := range addrs {
+		if ipNet, ok := addr.(*net.IPNet); ok && ipNet.IP.Equal(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // Stop tears down networking: cancels DNS, stops port-forward/informers, clears state.
@@ -372,12 +371,16 @@ func (nm *NetworkManager) portForward(ctx context.Context, portPair []string) er
 		}}
 		first := ptr.To(true)
 		for ctx.Err() == nil {
+			sessionStart := time.Now()
 			err := nm.portForwardOnce(ctx, portPair, *first, firstCancelFunc)
+			sessionDuration := time.Since(sessionStart)
 			if *first {
 				if err != nil {
 					util.SafeWrite(errChan, err)
 					return
 				}
+			} else {
+				plog.G(ctx).Infof("[Perf] Port-forward session ended after %v, reconnecting...", sessionDuration)
 			}
 			first = ptr.To(false)
 			time.Sleep(time.Millisecond * 200)
@@ -415,10 +418,8 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 	podName := pod.GetName()
 	// detect pod deletion so we can redo port-forward
 	go util.CheckPodStatus(childCtx, cancelFunc, podName, nm.cfg.Clientset.CoreV1().Pods(nm.cfg.ManagerNamespace))
-	domain := config.ConfigMapPodTrafficManager
-	gvisorUDPPort, _, _ := strings.Cut(portPair[1], ":")
-	go healthCheckPortForward(childCtx, cancelFunc, readyChan, gvisorUDPPort, domain, nm.localTunIPv4.IP)
-	go healthCheckTCPConn(childCtx, cancelFunc, readyChan, domain, util.GetPodIP(pod)[0])
+	controlPlanePort, _, _ := strings.Cut(portPair[2], ":")
+	go healthCheckTCPConn(childCtx, cancelFunc, readyChan, controlPlanePort, nm.cfg.OwnerID, nm.cfg.ManagerNamespace)
 	if first {
 		go func() {
 			select {
@@ -429,6 +430,7 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 		}()
 	}
 
+	pfStart := time.Now()
 	err = util.PortForwardPod(
 		nm.cfg.Config,
 		nm.cfg.RESTClient,
@@ -440,20 +442,20 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 		nil,
 		plog.G(ctx).Logger.Out,
 	)
-	if err != nil {
-		plog.G(ctx).Debugf("Port-forward error: %v", err)
-	} else {
-		plog.G(ctx).Debugf("Port forward retrying")
-	}
+	plog.G(ctx).Infof("[Perf] PortForwardPod for %s exited after %v, err=%v", podName, time.Since(pfStart), err)
 	return nil
 }
 
-// startTUN creates the local TUN device with a gvisor network stack.
+// startTUN allocates a TUN IP and creates the local TUN device with a gvisor network stack.
 func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) error {
-	plog.G(ctx).Debugf("IPv4: %s, IPv6: %s", nm.localTunIPv4.IP.String(), nm.localTunIPv6.IP.String())
-
 	tlsSecret, err := nm.cfg.Clientset.CoreV1().Secrets(nm.cfg.ManagerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
+		return err
+	}
+
+	forwardNode, err := core.ParseNode(forwardAddress)
+	if err != nil {
+		plog.G(ctx).Errorf("Failed to parse forward node %s: %v", forwardAddress, err)
 		return err
 	}
 
@@ -461,7 +463,6 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 	for _, ipNet := range nm.cfg.CIDRs {
 		cidrList = append(cidrList, ipNet)
 	}
-	// add extra-cidr
 	for _, s := range nm.cfg.ExtraRouteInfo.ExtraCIDR {
 		var ipNet *net.IPNet
 		_, ipNet, err = net.ParseCIDR(s)
@@ -477,6 +478,14 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 			routes = append(routes, types.Route{Dst: *ipNet})
 		}
 	}
+
+	if nm.localTunIPv4 == nil {
+		if err := nm.rentIP(ctx); err != nil {
+			return err
+		}
+	}
+	plog.G(ctx).Debugf("IPv4: %s, IPv6: %s", nm.localTunIPv4.IP.String(), nm.localTunIPv6.IP.String())
+
 	if nm.localTunIPv4 != nil {
 		routes = append(routes, types.Route{Dst: net.IPNet{IP: nm.localTunIPv4.IP, Mask: net.CIDRMask(32, 32)}})
 	}
@@ -493,11 +502,6 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 		tunConfig.Addr6 = (&net.IPNet{IP: nm.localTunIPv6.IP, Mask: net.CIDRMask(128, 128)}).String()
 	}
 
-	forwardNode, err := core.ParseNode(forwardAddress)
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to parse forward node %s: %v", forwardAddress, err)
-		return err
-	}
 	forwarder := &core.Forwarder{
 		Addr:        forwardNode.Addr,
 		Connector:   core.NewUDPOverTCPConnector(),

@@ -8,8 +8,6 @@ import (
 	"net"
 	"time"
 
-	"gvisor.dev/gvisor/pkg/tcpip"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -25,7 +23,7 @@ func GvisorUDPHandler() Handler {
 func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
 	plog.G(ctx).Debugf("[UDP] New connection: %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
-	// 1, get proxy info
+
 	id, err := util.ParseProxyInfo(tcpConn)
 	if err != nil {
 		plog.G(ctx).Errorf("[UDP] Failed to parse proxy info: %v", err)
@@ -34,19 +32,16 @@ func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	plog.G(ctx).Infof("[UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress: %s",
 		id.LocalPort, id.LocalAddress.String(), id.RemotePort, id.RemoteAddress.String(),
 	)
-	// 2, dial proxy
+
+	network := "udp6"
+	if id.LocalAddress.Len() == 4 {
+		network = "udp4"
+	}
 	addr := &net.UDPAddr{
 		IP:   id.LocalAddress.AsSlice(),
 		Port: int(id.LocalPort),
 	}
-	var network string
-	if id.LocalAddress.To4() != (tcpip.Address{}) {
-		network = "udp4"
-	} else {
-		network = "udp6"
-	}
-	var remote *net.UDPConn
-	remote, err = net.DialUDP(network, nil, addr)
+	remote, err := net.DialUDP(network, nil, addr)
 	if err != nil {
 		plog.G(ctx).Errorf("[UDP] Failed to connect %s: %v", addr, err)
 		return
@@ -71,79 +66,79 @@ func GvisorUDPListener(addr string) (net.Listener, error) {
 func relayUDPOverTCP(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
 	defer udpConn.Close()
 	plog.G(ctx).Debugf("[UDP] Relaying: %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	errChan := make(chan error, 2)
+
 	go func() {
 		defer util.HandleCrash()
-		buf := config.LPool.Get().([]byte)[:]
-		defer config.LPool.Put(buf[:])
-
-		for ctx.Err() == nil {
-			err := tcpConn.SetReadDeadline(time.Now().Add(config.UDPRelayTimeout))
-			if err != nil {
-				errChan <- fmt.Errorf("set read deadline failed: %w", err)
-				return
-			}
-			datagram, err := readDatagramPacket(tcpConn, buf)
-			if err != nil {
-				errChan <- fmt.Errorf("read datagram packet failed: %w", err)
-				return
-			}
-			if datagram.DataLength == 0 {
-				errChan <- fmt.Errorf("length of read packet is zero")
-				return
-			}
-
-			err = udpConn.SetWriteDeadline(time.Now().Add(config.UDPRelayTimeout))
-			if err != nil {
-				errChan <- fmt.Errorf("set write deadline failed: %w", err)
-				return
-			}
-			if _, err = udpConn.Write(datagram.Data[:datagram.DataLength]); err != nil {
-				errChan <- fmt.Errorf("write datagram packet failed: %w", err)
-				return
-			}
-			plog.G(ctx).Debugf("[UDP] Sent %d bytes: %s -> %s", datagram.DataLength, tcpConn.RemoteAddr(), udpConn.RemoteAddr())
-		}
+		buf := config.LPool.Get().([]byte)
+		defer config.LPool.Put(buf)
+		errChan <- pipeUDPFromTCP(ctx, tcpConn, udpConn, buf)
 	}()
 
 	go func() {
 		defer util.HandleCrash()
-		buf := config.LPool.Get().([]byte)[:]
-		defer config.LPool.Put(buf[:])
-
-		for ctx.Err() == nil {
-			err := udpConn.SetReadDeadline(time.Now().Add(config.UDPRelayTimeout))
-			if err != nil {
-				errChan <- fmt.Errorf("set read deadline failed: %w", err)
-				return
-			}
-			n, _, err := udpConn.ReadFrom(buf[:])
-			if err != nil {
-				errChan <- fmt.Errorf("read datagram packet failed: %w", err)
-				return
-			}
-			if n == 0 {
-				errChan <- fmt.Errorf("length of read packet is zero")
-				return
-			}
-
-			// pipe from peer to tunnel
-			err = tcpConn.SetWriteDeadline(time.Now().Add(config.UDPRelayTimeout))
-			if err != nil {
-				errChan <- fmt.Errorf("set write deadline failed: %w", err)
-				return
-			}
-			packet := newDatagramPacket(buf, n)
-			if err = packet.Write(tcpConn); err != nil {
-				errChan <- err
-				return
-			}
-			plog.G(ctx).Debugf("[UDP] Received %d bytes: %s <- %s", packet.DataLength, tcpConn.RemoteAddr(), tcpConn.LocalAddr())
-		}
+		buf := config.LPool.Get().([]byte)
+		defer config.LPool.Put(buf)
+		errChan <- pipeUDPToTCP(ctx, udpConn, tcpConn, buf)
 	}()
-	err := <-errChan
-	if err != nil && !errors.Is(err, io.EOF) {
-		plog.G(ctx).Errorf("[UDP] Relay error: %v", err)
+
+	select {
+	case err := <-errChan:
+		if err != nil && !errors.Is(err, io.EOF) {
+			plog.G(ctx).Errorf("[UDP] Relay error: %v", err)
+		}
+	case <-ctx.Done():
 	}
+	cancel()
 	plog.G(ctx).Debugf("[UDP] Relay closed: %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
+}
+
+func pipeUDPFromTCP(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn, buf []byte) error {
+	for ctx.Err() == nil {
+		if err := tcpConn.SetReadDeadline(time.Now().Add(config.UDPRelayTimeout)); err != nil {
+			return fmt.Errorf("set TCP read deadline: %w", err)
+		}
+		datagram, err := readDatagramPacket(tcpConn, buf)
+		if err != nil {
+			return fmt.Errorf("read datagram: %w", err)
+		}
+		if datagram.DataLength == 0 {
+			return errors.New("received zero-length datagram")
+		}
+
+		if err = udpConn.SetWriteDeadline(time.Now().Add(config.UDPRelayTimeout)); err != nil {
+			return fmt.Errorf("set UDP write deadline: %w", err)
+		}
+		if _, err = udpConn.Write(datagram.Data[:datagram.DataLength]); err != nil {
+			return fmt.Errorf("write UDP: %w", err)
+		}
+	}
+	return ctx.Err()
+}
+
+func pipeUDPToTCP(ctx context.Context, udpConn *net.UDPConn, tcpConn net.Conn, buf []byte) error {
+	for ctx.Err() == nil {
+		if err := udpConn.SetReadDeadline(time.Now().Add(config.UDPRelayTimeout)); err != nil {
+			return fmt.Errorf("set UDP read deadline: %w", err)
+		}
+		n, _, err := udpConn.ReadFrom(buf)
+		if err != nil {
+			return fmt.Errorf("read UDP: %w", err)
+		}
+		if n == 0 {
+			return errors.New("received zero-length packet")
+		}
+
+		if err = tcpConn.SetWriteDeadline(time.Now().Add(config.UDPRelayTimeout)); err != nil {
+			return fmt.Errorf("set TCP write deadline: %w", err)
+		}
+		if err = newDatagramPacket(buf, n).Write(tcpConn); err != nil {
+			return fmt.Errorf("write TCP datagram: %w", err)
+		}
+	}
+	return ctx.Err()
 }

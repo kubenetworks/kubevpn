@@ -111,7 +111,7 @@ func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes st
 	if err != nil {
 		return err
 	}
-	connectionID, err := util.GetConnectionID(ctx, connect.GetClientset().CoreV1().Namespaces(), connect.ManagerNamespace)
+	connectionID, err := util.GetConnectionID(context.Background(), connect.GetClientset().CoreV1().Namespaces(), connect.ManagerNamespace)
 	if err != nil {
 		return err
 	}
@@ -131,4 +131,3 @@ func disconnect(ctx context.Context, svr *Server, connectionID string) {
 		cleanupConnection(ctx, conn)
 	}
 }
-

@@ -29,6 +29,7 @@ func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint,
 }
 
 func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *Packet, endpoint *channel.Endpoint) {
+	defer drainPacketChan(in)
 	prefix := fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))
 	for {
 		select {

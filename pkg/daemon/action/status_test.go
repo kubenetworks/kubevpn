@@ -136,7 +136,7 @@ current-context: test-context
 
 	conn := handler.NewConnectOptionsForTest(factory, tmpKubeconfig, "default")
 
-	status := buildConnectionStatus(conn)
+	status := buildConnectionStatus(conn, nil)
 	if status == nil {
 		t.Fatal("buildConnectionStatus returned nil")
 	}
@@ -191,7 +191,7 @@ current-context: prod-context
 
 	conn := handler.NewConnectOptionsForTest(factory, tmpKubeconfig, "kube-system")
 
-	status := buildConnectionStatus(conn)
+	status := buildConnectionStatus(conn, nil)
 	if status.Cluster != "prod-cluster" {
 		t.Errorf("expected cluster 'prod-cluster', got %q", status.Cluster)
 	}

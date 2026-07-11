@@ -35,7 +35,6 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		return svr.redirectConnectToSudoDaemon(req, resp, logger)
 	}
 
-	ctx := resp.Context()
 	reqBytes, _ := proto.Marshal(req)
 	connect := &handler.ConnectOptions{
 		ManagerNamespace:     req.ManagerNamespace,
@@ -69,10 +68,8 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	if err != nil {
 		return err
 	}
-	err = connect.GetIPFromContext(ctx, logger)
-	if err != nil {
-		return err
-	}
+	connect.OwnerID = req.OwnerID
+	connect.ConnectionID = req.ConnectionID
 
 	err = connect.DoConnect(session.Ctx)
 	if err != nil {

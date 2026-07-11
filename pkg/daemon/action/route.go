@@ -9,6 +9,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // Route handles the Route RPC, adding or deleting a CIDR route on the TUN device for the active connection.
@@ -21,10 +22,23 @@ func (svr *Server) Route(ctx context.Context, req *rpc.RouteRequest) (*rpc.Route
 			return nil, fmt.Errorf("no connection found")
 		}
 
-		tunName, err := conn.GetTunDeviceName()
+		ips := svr.getSudoTunIPs(ctx)
+		v4, v6 := resolveTunIP(conn, ips)
+		var tunIPs []net.IP
+		if v4 != "" {
+			tunIPs = append(tunIPs, net.ParseIP(v4))
+		}
+		if v6 != "" {
+			tunIPs = append(tunIPs, net.ParseIP(v6))
+		}
+		if len(tunIPs) == 0 {
+			return nil, fmt.Errorf("no TUN IP available")
+		}
+		dev, err := util.GetTunDevice(tunIPs...)
 		if err != nil {
 			return nil, err
 		}
+		tunName := dev.Name
 		_, ipNet, err := net.ParseCIDR(req.Cidr)
 		if err != nil {
 			return nil, err

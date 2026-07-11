@@ -23,9 +23,13 @@ func (svr *Server) findConnection(connectionID string) (*handler.ConnectOptions,
 // ConnectionList handles the ConnectionList RPC, returning the status of all active VPN connections.
 func (svr *Server) ConnectionList(ctx context.Context, req *rpc.ConnectionListRequest) (*rpc.ConnectionListResponse, error) {
 	svr.connMu.RLock()
+	var ips map[string]tunIP
+	if !svr.IsSudo {
+		ips = svr.getSudoTunIPs(ctx)
+	}
 	var list []*rpc.Status
 	for _, options := range svr.connections {
-		result := buildConnectionStatus(options)
+		result := buildConnectionStatus(options, ips)
 		list = append(list, result)
 	}
 	currentID := svr.currentConnectionID

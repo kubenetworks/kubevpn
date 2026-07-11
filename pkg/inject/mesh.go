@@ -12,7 +12,6 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -69,7 +68,7 @@ func alreadyInjected(templateSpec *v1.PodTemplateSpec) bool {
 
 // UnpatchContainer removes injected sidecar containers and cleans up envoy configuration.
 // Returns (empty, found) where empty indicates all rules were removed and containers cleaned up.
-func UnpatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, object *pkgresource.Info, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) (bool, error) {
+func UnpatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, object *pkgresource.Info, ownerID string) (bool, error) {
 	u := object.Object.(*unstructured.Unstructured)
 	templateSpec, path, err := util.GetPodTemplateSpecPath(u)
 	if err != nil {
@@ -78,7 +77,7 @@ func UnpatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factor
 	}
 
 	workload := util.ConvertUIDToWorkload(nodeID)
-	empty, found, err := removeEnvoyConfig(ctx, mapInterface, object.Namespace, nodeID, isMeFunc)
+	empty, found, err := removeEnvoyConfig(ctx, mapInterface, object.Namespace, nodeID, ownerID)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to remove envoy config: %v", err)
 		return false, err

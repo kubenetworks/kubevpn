@@ -28,7 +28,6 @@ func (svr *Server) Leave(resp rpc.Daemon_LeaveServer) error {
 		return fmt.Errorf("no connection found")
 	}
 
-	v4, _ := conn.GetLocalTunIP()
 	var resources []handler.Resources
 	for _, resource := range req.GetWorkloads() {
 		resources = append(resources, handler.Resources{
@@ -36,6 +35,6 @@ func (svr *Server) Leave(resp rpc.Daemon_LeaveServer) error {
 			Workload:  resource,
 		})
 	}
-	return conn.LeaveResource(ctx, resources, v4)
+	return conn.LeaveResource(ctx, resources, conn.OwnerID)
 }
 

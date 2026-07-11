@@ -36,6 +36,7 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, c
 			config.LPool.Put(buf)
 			if err != nil {
 				plog.G(ctx).Errorf("[Gvisor-TCP] Failed to write to conn: %v", err)
+				return
 			}
 		}
 	}

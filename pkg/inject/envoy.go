@@ -71,6 +71,9 @@ func (s *envoyRuleSpec) validate() error {
 	if s.LocalTunIPv4 == "" {
 		return errors.New("envoyRuleSpec: localTunIPv4 must not be empty")
 	}
+	if s.OwnerID == "" {
+		return errors.New("envoyRuleSpec: ownerID must not be empty")
+	}
 	return nil
 }
 
@@ -130,16 +133,14 @@ func addVirtualRule(v []*controlplane.Virtual, spec envoyRuleSpec) []*controlpla
 		})
 	}
 
-	// 2) same user updating their own rule (matched by TUN IP, non-fargate)
+	// 2) same owner updating their own rule (matched by OwnerID, non-fargate)
 	if !v[index].IsFargateMode() {
 		for j, rule := range v[index].Rules {
-			if rule.LocalTunIPv4 == spec.LocalTunIPv4 &&
-				rule.LocalTunIPv6 == spec.LocalTunIPv6 {
+			if rule.OwnerID == spec.OwnerID {
 				v[index].Rules[j].Headers = util.Merge[string, string](v[index].Rules[j].Headers, spec.Headers)
 				v[index].Rules[j].PortMap = util.Merge[int32, string](v[index].Rules[j].PortMap, spec.PortMap)
-				if v[index].Rules[j].OwnerID == "" {
-					v[index].Rules[j].OwnerID = spec.OwnerID
-				}
+				v[index].Rules[j].LocalTunIPv4 = spec.LocalTunIPv4
+				v[index].Rules[j].LocalTunIPv6 = spec.LocalTunIPv6
 				return v
 			}
 		}
@@ -175,7 +176,7 @@ func addVirtualRule(v []*controlplane.Virtual, spec envoyRuleSpec) []*controlpla
 	return v
 }
 
-func removeEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, namespace string, nodeID string, isMeFunc func(isFargateMode bool, rule *controlplane.Rule) bool) (empty bool, found bool, err error) {
+func removeEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, namespace string, nodeID string, ownerID string) (empty bool, found bool, err error) {
 	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// Reset per-attempt state so retries start clean.
 		empty = false
@@ -200,7 +201,7 @@ func removeEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface,
 		for _, virtual := range v {
 			if nodeID == virtual.UID && namespace == virtual.Namespace {
 				for i := 0; i < len(virtual.Rules); i++ {
-					if isMeFunc(virtual.IsFargateMode(), virtual.Rules[i]) {
+					if ownerID == virtual.Rules[i].OwnerID {
 						found = true
 						virtual.Rules = append(virtual.Rules[:i], virtual.Rules[i+1:]...)
 						i--

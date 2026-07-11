@@ -124,13 +124,18 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		}
 	}()
 
+	ips := svr.getSudoTunIPs(ctx)
+	tunV4, tunV6 := resolveTunIP(options, ips)
+	if tunV4 == "" {
+		return fmt.Errorf("no TUN IP found for connection %s", connectionID)
+	}
 	var podList []v1.Pod
 	podList, err = options.GetRunningPodList(cancel)
 	if err != nil {
 		return err
 	}
 	image := podList[0].Spec.Containers[0].Image
-	err = options.CreateRemoteInboundPod(plog.WithLogger(cancel, logger), req.Namespace, workloads, req.Headers, req.PortMap, image)
+	err = options.CreateRemoteInboundPod(plog.WithLogger(cancel, logger), req.Namespace, workloads, req.Headers, req.PortMap, image, tunV4, tunV6)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to inject inbound sidecar: %v", err)
 		return err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"net"
+	"time"
 
 	"github.com/google/gopacket/layers"
 
@@ -91,7 +92,12 @@ func (d *Device) readFromTun(ctx context.Context) {
 		if config.Debug {
 			plog.G(ctx).Debugf("[TUN] SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
 		}
-		d.tunInbound <- NewPacket(buf[:], n, src, dst)
+		pkt := NewPacket(buf[:], n, src, dst)
+		sendStart := time.Now()
+		d.tunInbound <- pkt
+		if elapsed := time.Since(sendStart); elapsed > 20*time.Millisecond {
+			plog.G(ctx).Warnf("[Perf] Slow tunInbound send: %s -> %s blocked %v (channel backpressure)", src, dst, elapsed)
+		}
 	}
 }
 
@@ -133,6 +139,7 @@ type Peer struct {
 
 func (p *Peer) routeTCPToTun(ctx context.Context) {
 	defer util.HandleCrash()
+	defer drainPacketChan(p.hub.TCPPacketChan)
 	for {
 		select {
 		case packet := <-p.hub.TCPPacketChan:
@@ -163,7 +170,11 @@ func (p *Peer) routeTun(ctx context.Context) {
 			payloadLen := packet.length + 1
 			binary.BigEndian.PutUint16(packet.data[:2], uint16(payloadLen))
 			packet.data[2] = 1
+			writeStart := time.Now()
 			conn, err := p.hub.WriteToRoute(dstKey, packet.data[:payloadLen+2])
+			if elapsed := time.Since(writeStart); elapsed > 20*time.Millisecond {
+				plog.G(ctx).Warnf("[Perf] Slow WriteToRoute: %s -> %s took %v", packet.src, packet.dst, elapsed)
+			}
 			config.LPool.Put(packet.data[:])
 			if err != nil {
 				plog.G(ctx).Warnf("[TUN] No route for %s -> %s, dropping", packet.src, packet.dst)

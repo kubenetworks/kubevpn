@@ -129,7 +129,7 @@ type ConnectOptions struct {
 
     // 子组件 (新)
     k8s      *k8sClient     // clientset, restclient, config, factory
-    tunnel   *tunnelState   // LocalTunIPv4/v6, tunName, dhcp, cidrs
+    tunnel   *tunnelState   // network (*NetworkManager), tunName, cidrs
     routing  *routeManager  // addRoute, addRouteDynamic, apiServerIPs
     health   *healthChecker // HealthPeriod, HealthCheckOnce, healthStatus
     cleanup  *cleanupStack  // rollbackFuncList, once, cancel
@@ -143,7 +143,7 @@ type ConnectOptions struct {
 
 **实际步骤**:
 1. **提取 `k8sClient` 内部结构** — 将 `clientset`, `restclient`, `config`, `factory` 打包，减少 ConnectOptions 字段数
-2. **提取 `tunnelState`** — 将 `LocalTunIPv4/v6`, `tunName`, `dhcp`, `cidrs` 打包
+2. **提取 `tunnelState`** — 已通过 `NetworkManager` 实现（持有 localTunIPv4/v6, tunName 等网络状态）
 3. **保持公开 API 不变** — 只改内部组织
 4. 验证: `go build ./...` + `go test ./pkg/handler/...`
 

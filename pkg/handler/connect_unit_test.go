@@ -37,19 +37,6 @@ func newTestConnectOptions(t *testing.T) *ConnectOptions {
 	}
 }
 
-
-
-func TestConnectOptions_RentIP_PreAssigned(t *testing.T) {
-	c := newTestConnectOptions(t)
-	_, err := c.RentIP(context.Background(), "198.18.0.50/16", "2001:2::50/64")
-	if err != nil {
-		t.Fatalf("RentIP: %v", err)
-	}
-	if !c.LocalTunIPv4.IP.Equal(net.ParseIP("198.18.0.50")) {
-		t.Fatalf("expected 198.18.0.50, got %s", c.LocalTunIPv4.IP)
-	}
-}
-
 func TestConnectOptions_SetGet(t *testing.T) {
 	c := newTestConnectOptions(t)
 	if err := c.Set(context.Background(), "mykey", "myval"); err != nil {
@@ -68,13 +55,7 @@ func TestConnectOptions_GetLocalTunIP(t *testing.T) {
 	c := newTestConnectOptions(t)
 	v4, v6 := c.GetLocalTunIP()
 	if v4 != "" || v6 != "" {
-		t.Fatal("expected empty before assignment")
-	}
-	c.LocalTunIPv4 = &net.IPNet{IP: net.ParseIP("198.18.0.1"), Mask: net.CIDRMask(16, 32)}
-	c.LocalTunIPv6 = &net.IPNet{IP: net.ParseIP("2001:2::1"), Mask: net.CIDRMask(64, 128)}
-	v4, v6 = c.GetLocalTunIP()
-	if v4 != "198.18.0.1" {
-		t.Fatalf("v4 want 198.18.0.1, got %s", v4)
+		t.Fatal("expected empty when no network manager")
 	}
 }
 
@@ -98,9 +79,12 @@ func TestConnectOptions_RollbackFuncs(t *testing.T) {
 
 func TestConnectOptions_GetConnectionID(t *testing.T) {
 	c := newTestConnectOptions(t)
-	id := c.GetConnectionID()
-	if id == "" {
-		t.Fatal("empty connectionID")
+	if c.GetConnectionID() != "" {
+		t.Fatal("expected empty connectionID before assignment")
+	}
+	c.ConnectionID = "abc123def456"
+	if c.GetConnectionID() != "abc123def456" {
+		t.Fatalf("expected abc123def456, got %s", c.GetConnectionID())
 	}
 }
 
@@ -141,21 +125,6 @@ func TestConnectOptions_LeaveAllProxyResources_Empty(t *testing.T) {
 	}
 }
 
-func TestConnectOptions_IsMe(t *testing.T) {
-	c := newTestConnectOptions(t)
-	c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
-	c.proxyManager.Add(&Proxy{workload: "deployments.apps/reviews", namespace: "default", headers: map[string]string{"env": "test"}})
-	if !c.IsMe("default", "deployments.apps.reviews", map[string]string{"env": "test"}) {
-		t.Fatal("expected IsMe true")
-	}
-	if c.IsMe("default", "deployments.apps.reviews", map[string]string{"env": "prod"}) {
-		t.Fatal("expected IsMe false for different headers")
-	}
-	if c.IsMe("other-ns", "deployments.apps.reviews", map[string]string{"env": "test"}) {
-		t.Fatal("expected IsMe false for different namespace")
-	}
-}
-
 func TestConnectOptions_HealthCheckOnce(t *testing.T) {
 	c := newTestConnectOptions(t)
 	c.HealthCheckOnce(context.Background(), 5*time.Second)
@@ -191,24 +160,14 @@ func TestConnectOptions_ProxyResources(t *testing.T) {
 	}
 }
 
-func TestConnectOptions_GetTunDeviceName_Empty(t *testing.T) {
-	c := newTestConnectOptions(t)
-	name, err := c.GetTunDeviceName()
-	if name != "" {
-		t.Fatalf("expected empty tun name, got %q", name)
-	}
-	// err may or may not be nil depending on implementation
-	_ = err
-}
-
 func TestConnectOptions_Set_MultipleKeys(t *testing.T) {
 	c := newTestConnectOptions(t)
 	ctx := context.Background()
 
 	keys := map[string]string{
-		"alpha":   "one",
-		"beta":    "two",
-		"gamma":   "three",
+		"alpha": "one",
+		"beta":  "two",
+		"gamma": "three",
 	}
 	for k, v := range keys {
 		if err := c.Set(ctx, k, v); err != nil {
@@ -256,20 +215,6 @@ func TestConnectOptions_Set_Overwrite(t *testing.T) {
 	}
 }
 
-func TestConnectOptions_GetTunDeviceName_WithName(t *testing.T) {
-	c := newTestConnectOptions(t)
-	c.network = &NetworkManager{}; c.network.tunName = "utun42"
-	// GetTunDeviceName looks up a real device by IP, so with no matching device
-	// it will return an error. We verify the tunName field is set correctly
-	// and that the method does not panic.
-	_, _ = c.GetTunDeviceName()
-	// Verify the field is accessible and correct.
-	if c.network.TunName() != "utun42" {
-		t.Fatalf("tunName = %q, want %q", c.network.TunName(), "utun42")
-	}
-}
-
-
 func TestConnectOptions_GetConnectionID_NilReceiver(t *testing.T) {
 	var c *ConnectOptions
 	id := c.GetConnectionID()
@@ -277,7 +222,6 @@ func TestConnectOptions_GetConnectionID_NilReceiver(t *testing.T) {
 		t.Fatalf("expected empty connectionID on nil receiver, got %q", id)
 	}
 }
-
 
 func TestConnectOptions_ProxyResources_Empty(t *testing.T) {
 	c := newTestConnectOptions(t)

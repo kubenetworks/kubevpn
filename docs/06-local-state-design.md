@@ -2,7 +2,7 @@
 
 ## Problem
 
-KubeVPN daemon 当前通过 `~/.kubevpn/daemon/db` 持久化连接状态，但只序列化了 `ConnectRequest`、`LocalTunIPv4`、`LocalTunIPv6` 三个字段。以下关键状态在 daemon 重启后丢失：
+KubeVPN daemon 当前通过 `~/.kubevpn/daemon/db` 持久化连接状态，但只序列化了 `ConnectRequest` 和 `OwnerID`。TUN IP 不再持久化（由 Root Daemon 的 NetworkManager 在启动时通过 OwnerID 重新从 TunConfigService 获取）。以下关键状态在 daemon 重启后丢失：
 
 | 丢失的状态 | 影响 |
 |-----------|------|
@@ -49,9 +49,7 @@ type ConnectionState struct {
     ClusterName  string `yaml:"clusterName"`  // human-readable cluster name
     Namespace    string `yaml:"namespace"`     // manager namespace
 
-    // Tunnel IPs — needed to re-request the same DHCP lease
-    LocalTunIPv4 string `yaml:"localTunIPv4"`
-    LocalTunIPv6 string `yaml:"localTunIPv6"`
+    // TUN IP 不再持久化 — Root Daemon 通过 OwnerID 从 TunConfigService 重新获取
 
     // The original ConnectRequest — contains kubeconfig, SSH config, extra routes, etc.
     // This is the only thing currently persisted; kept for backward compatibility.
@@ -163,13 +161,7 @@ func (svr *Server) SaveState() error {
             Namespace:    conn.Namespace,
             Request:      conn.Request,
         }
-        // tunnel IPs
-        if conn.LocalTunIPv4 != nil {
-            cs.LocalTunIPv4 = conn.LocalTunIPv4.String()
-        }
-        if conn.LocalTunIPv6 != nil {
-            cs.LocalTunIPv6 = conn.LocalTunIPv6.String()
-        }
+        // TUN IP 不再持久化 — 由 Root Daemon 的 NetworkManager 通过 OwnerID 管理
         // proxy workloads
         for _, proxy := range conn.ProxyResources() {
             cs.Proxies = append(cs.Proxies, config.ProxyState{

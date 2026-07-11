@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
@@ -22,13 +21,6 @@ type Connection interface {
 	// InitClient initializes Kubernetes clients from the given factory.
 	InitClient(f cmdutil.Factory) error
 
-
-	// RentIP leases IPv4 and IPv6 TUN addresses from DHCP.
-	RentIP(ctx context.Context, ipv4, ipv6 string) (context.Context, error)
-
-	// GetIPFromContext extracts IPv4 and IPv6 TUN addresses from incoming gRPC metadata.
-	GetIPFromContext(ctx context.Context, logger *log.Logger) error
-
 	// --- Lifecycle ---
 
 	// DoConnect establishes the VPN connection (TUN device, routes, DNS).
@@ -45,17 +37,11 @@ type Connection interface {
 
 	// --- Identity & Status ---
 
-	// GetConnectionID returns the DHCP connection identifier for this session.
+	// GetConnectionID returns the connection identifier (namespace UID suffix) for this session.
 	GetConnectionID() string
 
 	// GetLocalTunIP returns the local TUN device IPv4 and IPv6 addresses as strings.
 	GetLocalTunIP() (v4, v6 string)
-
-	// GetTunDeviceName returns the OS network interface name of the TUN device.
-	GetTunDeviceName() (string, error)
-
-	// IsMe reports whether this connection owns the proxy for the given namespace, UID, and headers.
-	IsMe(ns, uid string, headers map[string]string) bool
 
 	// --- Health ---
 
@@ -71,13 +57,13 @@ type Connection interface {
 	// --- Proxy Management ---
 
 	// CreateRemoteInboundPod injects Envoy sidecar proxies into the specified workloads.
-	CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string, image string) error
+	CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string, image string, localTunIPv4, localTunIPv6 string) error
 
 	// LeaveAllProxyResources removes all proxy sidecar injections for this connection.
 	LeaveAllProxyResources(ctx context.Context) error
 
 	// LeaveResource unpatches the given proxy resources.
-	LeaveResource(ctx context.Context, resources []Resources, v4 string) error
+	LeaveResource(ctx context.Context, resources []Resources, ownerID string) error
 
 	// ProxyResources returns the list of workloads currently being proxied.
 	ProxyResources() ProxyList

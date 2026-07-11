@@ -2,7 +2,6 @@ package controlplane
 
 import (
 	"context"
-	"encoding/json"
 	"net"
 	"sync"
 	"time"
@@ -10,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
+	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -38,12 +38,12 @@ type tunAllocation struct {
 	LastRenew time.Time // last time the client renewed (heartbeat)
 }
 
-// persistedAlloc is the JSON-serializable form of tunAllocation.
+// persistedAlloc is the YAML-serializable form of tunAllocation.
 type persistedAlloc struct {
-	IPv4      string `json:"ipv4"`
-	IPv6      string `json:"ipv6"`
-	Version   int64  `json:"version"`
-	LastRenew int64  `json:"lastRenew"` // unix timestamp
+	IPv4      string `yaml:"ipv4"`
+	IPv6      string `yaml:"ipv6"`
+	Version   int64  `yaml:"version"`
+	LastRenew int64  `yaml:"lastRenew"` // unix timestamp
 }
 
 // NewTunConfigServer creates and initializes a TunConfigServer.
@@ -76,7 +76,7 @@ func (s *TunConfigServer) loadAllocs(ctx context.Context) {
 		return
 	}
 	var persisted map[string]*persistedAlloc
-	if err := json.Unmarshal([]byte(data), &persisted); err != nil {
+	if err := yaml.Unmarshal([]byte(data), &persisted); err != nil {
 		plog.G(ctx).Warnf("[TunConfig] Failed to load persisted allocs: %v", err)
 		return
 	}
@@ -145,7 +145,7 @@ func (s *TunConfigServer) saveAllocs(ctx context.Context) {
 	}
 	s.mu.RUnlock()
 
-	data, err := json.Marshal(persisted)
+	data, err := yaml.Marshal(persisted)
 	if err != nil {
 		return
 	}

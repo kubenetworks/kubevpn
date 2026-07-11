@@ -279,60 +279,6 @@ func TestProxyList_Remove_MultipleMatches(t *testing.T) {
 	}
 }
 
-func TestProxyList_IsMe_Match(t *testing.T) {
-	var list ProxyList
-	// ConvertUidToWorkload("deployments.apps.productpage") => "deployments.apps/productpage"
-	list.Add(&Proxy{
-		workload:  "deployments.apps/productpage",
-		namespace: "default",
-		headers:   map[string]string{"x-user": "test"},
-	})
-
-	if !list.IsMe("default", "deployments.apps.productpage", map[string]string{"x-user": "test"}) {
-		t.Error("expected IsMe to return true for matching proxy")
-	}
-}
-
-func TestProxyList_IsMe_NoMatch_DifferentHeaders(t *testing.T) {
-	var list ProxyList
-	list.Add(&Proxy{
-		workload:  "deployments.apps/productpage",
-		namespace: "default",
-		headers:   map[string]string{"x-user": "test"},
-	})
-
-	if list.IsMe("default", "deployments.apps.productpage", map[string]string{"x-user": "other"}) {
-		t.Error("expected IsMe to return false for different headers")
-	}
-}
-
-func TestProxyList_IsMe_NoMatch_DifferentNamespace(t *testing.T) {
-	var list ProxyList
-	list.Add(&Proxy{
-		workload:  "deployments.apps/productpage",
-		namespace: "default",
-		headers:   map[string]string{},
-	})
-
-	if list.IsMe("kube-system", "deployments.apps.productpage", map[string]string{}) {
-		t.Error("expected IsMe to return false for different namespace")
-	}
-}
-
-func TestProxyList_IsMe_NilList(t *testing.T) {
-	var list *ProxyList
-	if list.IsMe("default", "deployments.apps.productpage", nil) {
-		t.Error("expected IsMe on nil list to return false")
-	}
-}
-
-func TestProxyList_IsMe_EmptyList(t *testing.T) {
-	list := make(ProxyList, 0)
-	if list.IsMe("default", "deployments.apps.productpage", nil) {
-		t.Error("expected IsMe on empty list to return false")
-	}
-}
-
 func TestProxyList_ToResources_Empty(t *testing.T) {
 	var list ProxyList
 	resources := list.ToResources()

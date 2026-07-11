@@ -151,7 +151,7 @@ DHCP 操作通过 ConfigMap patch 实现，天然原子。
 func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net.IPNet) error {
     // 1. 修改 OS 层 TUN 设备 IP（不销毁设备）
     // 2. 更新路由表中与旧 IP 相关的规则
-    // 3. 更新 nm.cfg.LocalTunIPv4/v6
+    // 3. 更新 nm.localTunIPv4/v6
     // 4. 新包自动用新 IP 发送，Server RouteHub 自动注册
 }
 ```

@@ -3,7 +3,6 @@ package action
 import (
 	"context"
 	"encoding/json"
-	"net"
 	"os"
 	"testing"
 
@@ -37,9 +36,6 @@ func TestServer_OffloadToConfig(t *testing.T) {
 		}
 	})
 
-	_, ipv4Net, _ := net.ParseCIDR("198.18.0.10/32")
-	_, ipv6Net, _ := net.ParseCIDR("2001:2::10/128")
-
 	svr := &Server{
 		connections: []*handler.ConnectOptions{
 			{
@@ -47,15 +43,12 @@ func TestServer_OffloadToConfig(t *testing.T) {
 					Namespace:            "default",
 					OriginKubeconfigPath: "/home/user/.kube/config",
 				}),
-				LocalTunIPv4: ipv4Net,
-				LocalTunIPv6: ipv6Net,
 			},
 			{
 				RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
 					Namespace: "staging",
 					Image:     "ghcr.io/kubenetworks/kubevpn:v2.0.0",
 				}),
-				LocalTunIPv4: ipv4Net,
 			},
 		},
 	}
@@ -105,13 +98,6 @@ func TestServer_OffloadToConfig(t *testing.T) {
 	if req0.OriginKubeconfigPath != "/home/user/.kube/config" {
 		t.Errorf("unexpected kubeconfig path: %q", req0.OriginKubeconfigPath)
 	}
-	if c0.LocalTunIPv4 == nil || c0.LocalTunIPv4.IP.String() != "198.18.0.10" {
-		t.Errorf("unexpected IPv4: %v", c0.LocalTunIPv4)
-	}
-	if c0.LocalTunIPv6 == nil || c0.LocalTunIPv6.IP.String() != "2001:2::10" {
-		t.Errorf("unexpected IPv6: %v", c0.LocalTunIPv6)
-	}
-
 	// Verify second connection
 	c1 := conf.SecondaryConnect[1]
 	if len(c1.RequestRaw) == 0 {
@@ -225,8 +211,6 @@ func TestServer_CleanupConfig_NoFile(t *testing.T) {
 }
 
 func TestConfig_SerializationRoundTrip(t *testing.T) {
-	_, ipv4Net, _ := net.ParseCIDR("198.18.1.5/32")
-	_, ipv6Net, _ := net.ParseCIDR("2001:2::5/128")
 
 	original := &Config{
 		SecondaryConnect: []*handler.ConnectOptions{
@@ -239,8 +223,8 @@ func TestConfig_SerializationRoundTrip(t *testing.T) {
 					Foreground:           true,
 					Level:                3,
 				}),
-				LocalTunIPv4: ipv4Net,
-				LocalTunIPv6: ipv6Net,
+				
+				
 			},
 		},
 	}
@@ -297,12 +281,6 @@ func TestConfig_SerializationRoundTrip(t *testing.T) {
 	if req.Level != 3 {
 		t.Errorf("level mismatch: got %d", req.Level)
 	}
-	if c.LocalTunIPv4 == nil || c.LocalTunIPv4.IP.String() != "198.18.1.5" {
-		t.Errorf("IPv4 mismatch: %v", c.LocalTunIPv4)
-	}
-	if c.LocalTunIPv6 == nil || c.LocalTunIPv6.IP.String() != "2001:2::5" {
-		t.Errorf("IPv6 mismatch: %v", c.LocalTunIPv6)
-	}
 }
 
 func TestConfig_SerializationRoundTrip_NilFields(t *testing.T) {
@@ -310,8 +288,8 @@ func TestConfig_SerializationRoundTrip_NilFields(t *testing.T) {
 		SecondaryConnect: []*handler.ConnectOptions{
 			{
 				RequestRaw:   nil,
-				LocalTunIPv4: nil,
-				LocalTunIPv6: nil,
+				
+				
 			},
 		},
 	}
@@ -344,12 +322,6 @@ func TestConfig_SerializationRoundTrip_NilFields(t *testing.T) {
 	c := restored.SecondaryConnect[0]
 	if len(c.RequestRaw) != 0 {
 		t.Errorf("expected empty RequestRaw, got %v", c.RequestRaw)
-	}
-	if c.LocalTunIPv4 != nil {
-		t.Errorf("expected nil IPv4, got %v", c.LocalTunIPv4)
-	}
-	if c.LocalTunIPv6 != nil {
-		t.Errorf("expected nil IPv6, got %v", c.LocalTunIPv6)
 	}
 }
 
@@ -487,8 +459,6 @@ func TestServer_OffloadToConfig_RoundTrip(t *testing.T) {
 		}
 	})
 
-	_, ipv4Net, _ := net.ParseCIDR("198.18.0.55/32")
-	_, ipv6Net, _ := net.ParseCIDR("2001:2::55/128")
 
 	svr := &Server{
 		connections: []*handler.ConnectOptions{
@@ -498,8 +468,8 @@ func TestServer_OffloadToConfig_RoundTrip(t *testing.T) {
 					OriginKubeconfigPath: "/tmp/kubeconfig",
 					Image:                "ghcr.io/kubenetworks/kubevpn:test",
 				}),
-				LocalTunIPv4: ipv4Net,
-				LocalTunIPv6: ipv6Net,
+				
+				
 			},
 		},
 	}
@@ -543,11 +513,5 @@ func TestServer_OffloadToConfig_RoundTrip(t *testing.T) {
 	}
 	if req.Image != "ghcr.io/kubenetworks/kubevpn:test" {
 		t.Errorf("image: got %q", req.Image)
-	}
-	if c.LocalTunIPv4 == nil || c.LocalTunIPv4.IP.String() != "198.18.0.55" {
-		t.Errorf("IPv4 mismatch: %v", c.LocalTunIPv4)
-	}
-	if c.LocalTunIPv6 == nil || c.LocalTunIPv6.IP.String() != "2001:2::55" {
-		t.Errorf("IPv6 mismatch: %v", c.LocalTunIPv6)
 	}
 }

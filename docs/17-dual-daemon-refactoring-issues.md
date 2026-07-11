@@ -18,12 +18,11 @@ Both instantiate `ConnectOptions` but activate different subsets of functionalit
 ```
 1. ConnectOptions created with ManagerNamespace = req.ManagerNamespace (correct from CLI)
 2. InitClient(ManagerNamespace) → K8sClient initialized
-3. GetIPFromContext() → reads IPv4/IPv6 from gRPC metadata (set by user daemon)
+3. connect.OwnerID = req.OwnerID (from ConnectRequest proto)
 4. DoConnect() →
    a. getCIDR (detect CIDRs)
    b. getCIDR → getConfigMapStore() → created with CORRECT ManagerNamespace
-   c. createOutboundPod
-   d. NetworkManager.Start() → portForward, TUN, routes, DNS
+   c. NetworkManager.Start() → portForward, startTUN (含 rentIP), routes, DNS
 5. Stored in svr.connections
 ```
 
@@ -33,9 +32,7 @@ Both instantiate `ConnectOptions` but activate different subsets of functionalit
 1. ConnectOptions created with ManagerNamespace = req.Namespace (WORKLOAD namespace — temporary!)
 2. InitClient(req.Namespace) → K8sClient initialized
 3. detectAndSetManagerNamespace() → MAY CHANGE connect.ManagerNamespace
-4. getTunIPFromControlPlane → uses UPDATED namespace (correct)
-5. RentIP() → calls TunConfigService.GetTunIP via gRPC
-6. forwardConnectToSudo() → stream connect request to root daemon
+4. forwardConnectToSudo() → set req.OwnerID, stream connect request to root daemon
 7. HealthCheckOnce() → getConfigMapStore() → created with CURRENT ManagerNamespace
 8. HealthPeriod() → periodic check loop
 9. Stored in svr.connections + OffloadToConfig()
@@ -85,7 +82,7 @@ After refactoring, each sub-manager is only active in one daemon:
 | `network *NetworkManager` | nil | Start()/Stop() | Only root creates TUN/routes/DNS |
 | `proxyManager *ProxyManager` | Created on proxy | nil | Only user daemon injects sidecars |
 | `configMapStore *ConfigMapStore` | Created on health check | Created on getCIDR | Both need ConfigMap access |
-| TunConfigService | RentIP → GetTunIP (user daemon) | N/A (IP from metadata) | User daemon only |
+| TunConfigService | N/A (查询 sudo daemon IP) | rentIP in startTUN | Root daemon allocates IP |
 
 ## Cleanup Path Differences
 
@@ -124,7 +121,7 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 
 4. **Cleanup must be idempotent.** `sync.Once` ensures Cleanup runs exactly once even if called from signal handler and explicit disconnect concurrently.
 
-5. **Persistence only serializes OwnerID + RequestRaw.** LocalTunIPv4/v6 no longer persisted (no json tags). On restart, OwnerID is used to re-obtain IP from TunConfigService. Sub-managers are runtime-only and rebuilt from the replayed connect flow.
+5. **Persistence only serializes OwnerID + RequestRaw.** TUN IP 不再持久化在 ConnectOptions 中（已移至 NetworkManager）。重启时 Root Daemon 通过 OwnerID 从 TunConfigService 重新获取 IP。User Daemon 通过 `getSudoTunIPs` 查询。
 
 ## Potential Future Issues
 

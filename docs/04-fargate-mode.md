@@ -251,11 +251,11 @@ Fargate mode is **only triggered for Service targets** (`svc/xxx`). `NewInjector
 
 ### User Identity via Headers Only
 
-In Mesh/VPN mode, each user has a unique TUN IP (`198.18.x.x`) that identifies them in the envoy rules. In Fargate mode, `LocalTunIPv4` is always `127.0.0.1` for all users — identity relies entirely on HTTP Headers:
+In both Mesh/VPN and Fargate modes, rule ownership is now identified by `OwnerID` (a per-connection UUID). In Fargate mode, `LocalTunIPv4` is always `127.0.0.1` — but this no longer matters for ownership matching since `OwnerID` is used instead:
 
-- Multiple users **must** use different `--headers` values
+- Multiple users **must** use different `--headers` values (for envoy routing)
 - If two users proxy the same Service with identical headers, the second overwrites the first (`addVirtualRule` case 3)
-- `leave` also matches by headers, not TUN IP (`leave.go:59-60`)
+- `leave` and `removeEnvoyConfig` match by `OwnerID`, not TUN IP or Headers
 
 ### TCP Only (No UDP/ICMP)
 

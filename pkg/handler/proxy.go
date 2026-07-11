@@ -1,11 +1,5 @@
 package handler
 
-import (
-	"maps"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
-)
-
 // Proxy represents a single proxied workload with its SSH tunnel mapper.
 type Proxy struct {
 	headers   map[string]string
@@ -35,20 +29,6 @@ func (l *ProxyList) Remove(ns, workload string) {
 
 func (l *ProxyList) Add(proxy *Proxy) {
 	*l = append(*l, proxy)
-}
-
-func (l *ProxyList) IsMe(ns, uid string, headers map[string]string) bool {
-	if l == nil {
-		return false
-	}
-	for _, proxy := range *l {
-		if proxy.workload == util.ConvertUIDToWorkload(uid) &&
-			proxy.namespace == ns &&
-			maps.Equal(proxy.headers, headers) {
-			return true
-		}
-	}
-	return false
 }
 
 // Resources identifies a workload by namespace and name for leave/unpatch operations.
