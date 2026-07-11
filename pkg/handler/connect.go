@@ -2,35 +2,27 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/metadata"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/cli-runtime/pkg/resource"
-	informerv1 "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -42,35 +34,29 @@ type ConnectOptions struct {
 	ExtraRouteInfo       ExtraRouteInfo
 	Foreground           bool
 	OriginKubeconfigPath string
-	OriginNamespace      string
+	WorkloadNamespace    string
 	Lock                 *sync.Mutex
 	Image                string
 	ImagePullSecretName  string
-	// for reload from ~/.kubevpn/daemon/db
-	Request *rpc.ConnectRequest `json:"Request,omitempty"`
+	// RequestRaw stores the protobuf-serialized ConnectRequest for daemon restart replay.
+	RequestRaw []byte `json:"RequestRaw,omitempty"`
 
 	ctx         context.Context
 	cancel      context.CancelFunc
 	isDataPlane bool
 	OwnerID     string `json:"OwnerID,omitempty"`
 
-	cidrs []*net.IPNet
-	dhcp       *dhcp.Manager
+	dhcp *dhcp.Manager
 	// needs to give it back to dhcp
 	LocalTunIPv4     *net.IPNet `json:"LocalTunIPv4,omitempty"`
 	LocalTunIPv6     *net.IPNet `json:"LocalTunIPv6,omitempty"`
 	rollbackFuncList []func() error
-	dnsConfig        *dns.Config
 
-	apiServerIPs   []net.IP
-	extraHost      []dns.Entry
-	once           sync.Once
-	tunName        string
-	proxyWorkloads ProxyList
-	healthStatus     HealthStatus
-	cmInformerOnce   sync.Once
-	cmInformer       cache.SharedInformer
-	cmInformerStop   chan struct{}
+	SshHosts []net.IP `json:"-"`
+	once     sync.Once
+	network  *NetworkManager
+	proxyManager   *ProxyManager
+	configMapStore *ConfigMapStore
 
 	Sync *SyncOptions
 }
@@ -150,8 +136,8 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 	if c.LocalTunIPv4 == nil || c.LocalTunIPv6 == nil {
 		return fmt.Errorf("local tun IP is invalid")
 	}
-	if c.proxyWorkloads == nil {
-		c.proxyWorkloads = make(ProxyList, 0)
+	if c.proxyManager == nil {
+		c.proxyManager = NewProxyManager(c.factory, c.clientset, c.ManagerNamespace)
 	}
 
 	tlsSecret, err := c.clientset.CoreV1().Secrets(c.ManagerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
@@ -177,7 +163,7 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		if util.IsK8sService(object) {
 			mapper = NewMapper(c.clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), headers, workload, c.GetConfigMapInformer())
 		}
-		c.proxyWorkloads.Add(&Proxy{
+		c.proxyManager.Add(&Proxy{
 			headers:    headers,
 			portMap:    portMap,
 			workload:   workload,
@@ -226,7 +212,9 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 		return
 	}
 	go c.setupSignalHandler()
-	if err = c.getCIDR(c.ctx, true); err != nil {
+	var cidrs []*net.IPNet
+	var apiServerIPs []net.IP
+	if cidrs, apiServerIPs, err = c.getCIDR(c.ctx); err != nil {
 		plog.G(ctx).Errorf("Failed to get network CIDR: %v", err)
 		return
 	}
@@ -236,48 +224,24 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	if err = c.upgradeDeploy(c.ctx); err != nil {
 		return
 	}
-	if err = c.addExtraNodeIP(c.ctx); err != nil {
-		plog.G(ctx).Errorf("Add extra node IP failed: %v", err)
-		return
-	}
-	var gvisorTCPForwardPort, gvisorUDPForwardPort int
-	gvisorTCPForwardPort, err = util.GetAvailableTCPPort()
-	if err != nil {
-		return err
-	}
-	gvisorUDPForwardPort, err = util.GetAvailableTCPPort()
-	if err != nil {
-		return err
-	}
-	plog.G(ctx).Info("Forwarding port...")
-	portPair := []string{
-		fmt.Sprintf("%d:10801", gvisorTCPForwardPort),
-		fmt.Sprintf("%d:10802", gvisorUDPForwardPort),
-	}
-	if err = c.portForward(c.ctx, portPair); err != nil {
-		return
-	}
-	if util.IsWindows() {
-		driver.InstallWireGuardTunDriver()
-	}
-	forward := fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
 
-	if err = c.startLocalTunServer(c.ctx, forward); err != nil {
-		plog.G(ctx).Errorf("Start local tun service failed: %v", err)
-		return
-	}
-	plog.G(ctx).Infof("Adding Pod IP and Service IP to route table...")
-	var svcInformer cache.SharedIndexInformer
-	if svcInformer, _, err = c.addRouteDynamic(c.ctx); err != nil {
-		plog.G(ctx).Errorf("Add route dynamic failed: %v", err)
-		return
-	}
-	plog.G(ctx).Infof("Configuring DNS service...")
-	if err = c.setupDNS(c.ctx, svcInformer); err != nil {
-		plog.G(ctx).Errorf("Configure DNS failed: %v", err)
-		return
-	}
-	return
+	c.network = NewNetworkManager(NetworkConfig{
+		Clientset:         c.clientset,
+		RESTClient:        c.restclient,
+		Config:            c.config,
+		ManagerNamespace:  c.ManagerNamespace,
+		WorkloadNamespace: c.WorkloadNamespace,
+		LocalTunIPv4:      c.LocalTunIPv4,
+		LocalTunIPv6:      c.LocalTunIPv6,
+		CIDRs:             cidrs,
+		APIServerIPs:      apiServerIPs,
+		ExtraRouteInfo:    &c.ExtraRouteInfo,
+		Image:             c.Image,
+		Lock:              c.Lock,
+		GetRunningPodList: c.GetRunningPodList,
+	})
+
+	return c.network.Start(c.ctx)
 }
 
 // InitClient initializes the Kubernetes clientset, REST client, and config from the given factory.
@@ -287,42 +251,41 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {
 	return err
 }
 
+// getConfigMapStore returns the ConfigMapStore, creating it lazily on first access.
+// This must be lazy because ManagerNamespace may be updated by detectAndSetManagerNamespace
+// after InitClient returns (user daemon path).
+func (c *ConnectOptions) getConfigMapStore() *ConfigMapStore {
+	if c.configMapStore == nil {
+		c.configMapStore = NewConfigMapStore(c.clientset, c.ManagerNamespace)
+	}
+	return c.configMapStore
+}
+
 // GetRunningPodList returns the running traffic manager pods in the manager namespace.
 func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error) {
 	label := "app=" + config.ConfigMapPodTrafficManager
 	return util.GetRunningPodList(ctx, c.clientset, c.ManagerNamespace, label)
 }
 
-// dedupAndFilterCIDRs removes overlapping CIDRs and filters out those containing API server IPs.
-func (c *ConnectOptions) dedupAndFilterCIDRs(cidrs []*net.IPNet) []*net.IPNet {
-	return util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cidrs), c.apiServerIPs)
+func dedupAndFilterCIDRs(cidrs []*net.IPNet, apiServerIPs []net.IP) []*net.IPNet {
+	return util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cidrs), apiServerIPs)
 }
 
-// getCIDR
-// 1: get pod cidr
-// 2: get service cidr
-// distinguish service cidr and pod cidr
-// https://stackoverflow.com/questions/45903123/kubernetes-set-service-cidr-and-pod-cidr-the-same
-// https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster/54183373#54183373
-// https://stackoverflow.com/questions/44190607/how-do-you-find-the-cluster-service-cidr-of-a-kubernetes-cluster
-func (c *ConnectOptions) getCIDR(ctx context.Context, filterAPIServer bool) error {
+// getCIDR detects cluster Pod/Service CIDRs and API server IPs.
+func (c *ConnectOptions) getCIDR(ctx context.Context) (cidrs []*net.IPNet, apiServerIPs []net.IP, err error) {
 	plog.G(ctx).Debug("Detecting cluster CIDRs")
-	var err error
-	if filterAPIServer {
-		c.apiServerIPs, err = util.GetAPIServerIP(c.config.Host)
-		if err != nil {
-			return err
-		}
-		if c.Request != nil {
-			c.apiServerIPs = append(c.apiServerIPs, ssh.ParseSshFromRPC(c.Request.SshJump).Host()...)
-		}
+	apiServerIPs, err = util.GetAPIServerIP(c.config.Host)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(c.SshHosts) > 0 {
+		apiServerIPs = append(apiServerIPs, c.SshHosts...)
 	}
 
 	// (1) get CIDR from cache
-	var ipPoolStr string
-	ipPoolStr, err = c.Get(ctx, config.KeyClusterIPv4POOLS)
+	ipPoolStr, err := c.Get(ctx, config.KeyClusterIPv4POOLS)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if strings.TrimSpace(ipPoolStr) != "" {
 		var cached []*net.IPNet
@@ -332,77 +295,53 @@ func (c *ConnectOptions) getCIDR(ctx context.Context, filterAPIServer bool) erro
 				cached = append(cached, cidr)
 			}
 		}
-		c.cidrs = c.dedupAndFilterCIDRs(cached)
+		cidrs = dedupAndFilterCIDRs(cached, apiServerIPs)
 		plog.G(ctx).Infof("Get network CIDR from cache")
-		return nil
+		return cidrs, apiServerIPs, nil
 	}
 
 	// (2) get CIDR from cni
-	cidrs := util.GetCIDR(ctx, c.clientset, c.config, c.ManagerNamespace, c.Image)
-	c.cidrs = c.dedupAndFilterCIDRs(cidrs)
+	raw := util.GetCIDR(ctx, c.clientset, c.config, c.ManagerNamespace, c.Image)
+	cidrs = dedupAndFilterCIDRs(raw, apiServerIPs)
 	s := sets.New[string]()
-	for _, cidr := range c.cidrs {
+	for _, cidr := range cidrs {
 		s.Insert(cidr.String())
 	}
-	return c.Set(ctx, config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
+	err = c.Set(ctx, config.KeyClusterIPv4POOLS, strings.Join(s.UnsortedList(), " "))
+	return cidrs, apiServerIPs, err
 }
 
 // Set updates a key-value pair in the traffic manager ConfigMap.
 func (c *ConnectOptions) Set(ctx context.Context, key, value string) error {
-	err := retry.RetryOnConflict(
-		retry.DefaultRetry,
-		func() error {
-			patch := []map[string]string{{
-				"op":    "replace",
-				"path":  "/data/" + key,
-				"value": value,
-			}}
-			p, err := json.Marshal(patch)
-			if err != nil {
-				return fmt.Errorf("failed to marshal JSON patch: %w", err)
-			}
-			_, err = c.clientset.CoreV1().ConfigMaps(c.ManagerNamespace).Patch(ctx, config.ConfigMapPodTrafficManager, k8stypes.JSONPatchType, p, metav1.PatchOptions{})
-			return err
-		})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to update configmap: %v", err)
-		return err
-	}
-	return nil
+	return c.getConfigMapStore().Set(ctx, key, value)
 }
 
 // Get retrieves a value by key from the traffic manager ConfigMap, using the informer cache first.
 func (c *ConnectOptions) Get(ctx context.Context, key string) (string, error) {
-	items := c.GetConfigMapInformer().GetStore().List()
-	for _, item := range items {
-		if cm, ok := item.(*v1.ConfigMap); ok {
-			return cm.Data[key], nil
-		}
-	}
-	cm, err := c.clientset.CoreV1().ConfigMaps(c.ManagerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return "", err
-	}
-	return cm.Data[key], nil
+	return c.getConfigMapStore().Get(ctx, key)
 }
 
 // GetConfigMapInformer returns a shared informer for the traffic manager ConfigMap.
 // Created once on first call, then reused. Thread-safe via sync.Once.
 // Must be called after InitClient.
 func (c *ConnectOptions) GetConfigMapInformer() cache.SharedInformer {
-	c.cmInformerOnce.Do(func() {
-		c.cmInformer = informerv1.NewFilteredConfigMapInformer(
-			c.clientset, c.ManagerNamespace, 0, cache.Indexers{},
-			func(options *metav1.ListOptions) {
-				options.FieldSelector = fields.OneTermEqualSelector("metadata.name", config.ConfigMapPodTrafficManager).String()
-			},
-		)
-		c.cmInformerStop = make(chan struct{})
-		go c.cmInformer.Run(c.cmInformerStop)
-	})
-	return c.cmInformer
+	return c.getConfigMapStore().GetInformer()
 }
 
+// HealthCheckOnce performs a single health check with the given timeout.
+func (c *ConnectOptions) HealthCheckOnce(ctx context.Context, timeout time.Duration) {
+	c.getConfigMapStore().HealthCheckOnce(ctx, timeout)
+}
+
+// HealthPeriod periodically syncs health status on the given interval.
+func (c *ConnectOptions) HealthPeriod(ctx context.Context, interval time.Duration) {
+	c.getConfigMapStore().HealthPeriod(ctx, interval)
+}
+
+// HealthStatus returns the last known health state.
+func (c *ConnectOptions) HealthStatus() HealthStatus {
+	return c.getConfigMapStore().GetHealthStatus()
+}
 
 // GetLocalTunIP returns the local TUN device IPv4 and IPv6 addresses as strings.
 func (c *ConnectOptions) GetLocalTunIP() (v4 string, v6 string) {
@@ -425,6 +364,9 @@ func (c *ConnectOptions) GetConnectionID() string {
 
 // GetTunDeviceName returns the OS network interface name of the TUN device for this connection.
 func (c *ConnectOptions) GetTunDeviceName() (string, error) {
+	if c.network != nil && c.network.TunName() != "" {
+		return c.network.TunName(), nil
+	}
 	var ips []net.IP
 	if c.LocalTunIPv4 != nil {
 		ips = append(ips, c.LocalTunIPv4.IP)
@@ -448,16 +390,33 @@ func (c *ConnectOptions) getRollbackFuncs() []func() error {
 	return c.rollbackFuncList
 }
 
-func (c *ConnectOptions) leavePortMap(ns, workload string) {
-	c.proxyWorkloads.Remove(ns, workload)
-}
-
 // IsMe reports whether this connection owns the proxy for the given namespace, UID, and headers.
 func (c *ConnectOptions) IsMe(ns, uid string, headers map[string]string) bool {
-	return c.proxyWorkloads.IsMe(ns, uid, headers)
+	if c.proxyManager == nil {
+		return false
+	}
+	return c.proxyManager.IsMe(ns, uid, headers)
 }
 
 // ProxyResources returns the list of workloads currently being proxied by this connection.
 func (c *ConnectOptions) ProxyResources() ProxyList {
-	return c.proxyWorkloads
+	if c.proxyManager == nil {
+		return nil
+	}
+	return c.proxyManager.Resources()
+}
+
+// GetManagerNamespace returns the namespace where the traffic manager is deployed.
+func (c *ConnectOptions) GetManagerNamespace() string {
+	return c.ManagerNamespace
+}
+
+// GetOriginKubeconfigPath returns the original kubeconfig file path.
+func (c *ConnectOptions) GetOriginKubeconfigPath() string {
+	return c.OriginKubeconfigPath
+}
+
+// GetSync returns the SyncOptions associated with this connection, or nil.
+func (c *ConnectOptions) GetSync() *SyncOptions {
+	return c.Sync
 }

@@ -46,24 +46,7 @@ type SvrOption struct {
 
 // Start initializes logging, creates the Unix socket listener, and serves the gRPC daemon until the context is cancelled.
 func (o *SvrOption) Start(ctx context.Context) error {
-	l := &lumberjack.Logger{
-		Filename:   config.GetDaemonLogPath(o.IsSudo),
-		MaxSize:    100,
-		MaxAge:     3,
-		MaxBackups: 3,
-		LocalTime:  true,
-		Compress:   false,
-	}
-
-	log.SetOutput(l)
-	golog.Default().SetOutput(l)
-	klog.SetOutput(l)
-	klog.LogToStderr(false)
-	plog.L.SetOutput(l)
-	glog.SetTarget(plog.ServerEmitter{Writer: &glog.Writer{Next: l}})
-	rest.SetDefaultWarningHandler(rest.NoWarnings{})
-	// every day 00:00:00 rotate log
-	go rotateLog(l)
+	l := initLogging(o.IsSudo)
 
 	sockPath := config.GetSockPath(o.IsSudo)
 	err := os.Remove(sockPath)
@@ -93,13 +76,13 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	unaryPanicInterceptor := grpc.UnaryInterceptor(rpc.UnaryPanicHandler)
 	streamPanicInterceptor := grpc.StreamInterceptor(rpc.StreamPanicHandler)
 	svr := grpc.NewServer(unaryPanicInterceptor, streamPanicInterceptor)
-	cleanup, err := admin.Register(svr)
+	adminCleanup, err := admin.Register(svr)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to register admin: %v", err)
 		return err
 	}
 	grpc_health_v1.RegisterHealthServer(svr, health.NewServer())
-	defer cleanup()
+	defer adminCleanup()
 	reflection.Register(svr)
 	// [tun-client] 198.18.0.101 - 127.0.0.1:8422: dial tcp 127.0.0.1:55407: connect: can't assign requested address
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
@@ -117,13 +100,13 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	downgradingServer.Handler = h2c.NewHandler(handler, &h2Server)
 	o.uptime = time.Now().Unix()
 	// remember to close http server, otherwise daemon will not quit successfully
-	cancel := func() {
+	cleanup := func() {
 		o.svr.Cancel = nil
 		_ = o.svr.Quit(nil)
 		_ = downgradingServer.Close()
 		_ = l.Close()
 	}
-	o.svr = &action.Server{Cancel: cancel, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: l, ID: o.ID}
+	o.svr = &action.Server{Cancel: cleanup, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: l, ID: o.ID}
 	if !o.IsSudo {
 		go o.svr.LoadFromConfig(o.ctx)
 	}
@@ -222,8 +205,30 @@ func writePIDToFile(isSudo bool) error {
 	return os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0644)
 }
 
-// let daemon process to Rotate log. create new log file
-// sudo daemon process then use new log file
+// initLogging creates a rotating log file and wires all loggers (logrus, klog, gvisor, plog)
+// to write to it. It also suppresses Kubernetes client warnings and starts the daily log rotation goroutine.
+func initLogging(isSudo bool) *lumberjack.Logger {
+	l := &lumberjack.Logger{
+		Filename:   config.GetDaemonLogPath(isSudo),
+		MaxSize:    100,
+		MaxAge:     3,
+		MaxBackups: 3,
+		LocalTime:  true,
+		Compress:   false,
+	}
+
+	log.SetOutput(l)
+	golog.Default().SetOutput(l)
+	klog.SetOutput(l)
+	klog.LogToStderr(false)
+	plog.L.SetOutput(l)
+	glog.SetTarget(plog.ServerEmitter{Writer: &glog.Writer{Next: l}})
+	rest.SetDefaultWarningHandler(rest.NoWarnings{})
+	go rotateLog(l)
+	return l
+}
+
+// rotateLog rotates the log file daily at midnight.
 func rotateLog(l *lumberjack.Logger) {
 	for {
 		nowTime := time.Now()

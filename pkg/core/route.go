@@ -205,9 +205,13 @@ func GenerateServers(listeners []string, hub *RouteHub) ([]Server, error) {
 }
 
 // GenerateServersFromNodes creates servers from pre-built Node objects.
+// If hub is nil, a new RouteHub is created automatically.
 func GenerateServersFromNodes(nodes []*Node, hub *RouteHub) ([]Server, error) {
 	if len(nodes) == 0 {
 		return nil, fmt.Errorf("no listeners configured")
+	}
+	if hub == nil {
+		hub = NewRouteHub()
 	}
 	servers := make([]Server, 0, len(nodes))
 	for _, node := range nodes {

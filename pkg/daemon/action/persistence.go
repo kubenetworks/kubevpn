@@ -7,13 +7,14 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // Server implements the gRPC Daemon service, managing VPN connections, syncing, and lifecycle operations.
@@ -79,16 +80,20 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 		return ctx.Err()
 	}
 	for _, c := range conf.SecondaryConnect {
-		if c != nil {
+		if c != nil && len(c.RequestRaw) > 0 {
+			var req rpc.ConnectRequest
+			if err = proto.Unmarshal(c.RequestRaw, &req); err != nil {
+				continue
+			}
 			var resp rpc.Daemon_ConnectClient
 			resp, err = client.Connect(context.Background())
 			if err != nil {
 				continue
 			}
-			c.Request.IPv4 = c.LocalTunIPv4.String()
-			c.Request.IPv6 = c.LocalTunIPv6.String()
-			err = resp.Send(c.Request)
-			_ = util.PrintGRPCStream[rpc.ConnectResponse](nil, resp, svr.LogFile)
+			req.IPv4 = c.LocalTunIPv4.String()
+			req.IPv6 = c.LocalTunIPv6.String()
+			err = resp.Send(&req)
+			_ = grpcutil.PrintGRPCStream[rpc.ConnectResponse](nil, resp, svr.LogFile)
 		}
 	}
 	return nil

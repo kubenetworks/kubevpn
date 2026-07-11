@@ -11,6 +11,7 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -57,7 +58,7 @@ func CmdLeave(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.LeaveResponse](cmd.Context(), resp)
+			err = grpcutil.PrintGRPCStream[rpc.LeaveResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil

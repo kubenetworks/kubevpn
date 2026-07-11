@@ -32,11 +32,8 @@ func convertIPv6(ip net.IP) string {
 	}
 
 	var zone string
-	if strings.Contains(ip.String(), "%") {
-		parts := strings.Split(ip.String(), "%")
-		if len(parts) > 1 {
-			zone = parts[1]
-		}
+	if _, z, ok := strings.Cut(ip.String(), "%"); ok {
+		zone = z
 	}
 
 	base := fmt.Sprintf("%02x%02x-%02x%02x-%02x%02x-%02x%02x",

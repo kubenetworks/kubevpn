@@ -63,7 +63,7 @@ KubeVPN 使用双进程架构（User Daemon + Root Daemon），两个进程各�
 ```go
 connect := &handler.ConnectOptions{
     ManagerNamespace:     req.Namespace,
-    OriginNamespace:      req.Namespace,
+    WorkloadNamespace:      req.Namespace,
     ExtraRouteInfo:       ...,
     OriginKubeconfigPath: req.OriginKubeconfigPath,
     Request:              proto.Clone(req).(*rpc.ConnectRequest),
@@ -102,7 +102,7 @@ connect := &handler.ConnectOptions{
     ManagerNamespace:     req.ManagerNamespace,
     ExtraRouteInfo:       ...,
     OriginKubeconfigPath: req.OriginKubeconfigPath,
-    OriginNamespace:      req.Namespace,
+    WorkloadNamespace:      req.Namespace,
     Lock:                 &svr.Lock,
     Image:                req.Image,
     ImagePullSecretName:  req.ImagePullSecretName,

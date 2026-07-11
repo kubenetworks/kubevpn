@@ -12,7 +12,9 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -54,7 +56,7 @@ func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.Ssh
 		Image:                config.Image,
 		ImagePullSecretName:  imagePullSecretName,
 		Level:                int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
-		SshJump:              sshConfig.ToRPC(),
+		SshJump:              handler.SshConfigToRPC(sshConfig),
 		ManagerNamespace:     managerNamespace,
 	}
 	option.AddRollbackFunc(func() error {
@@ -65,12 +67,12 @@ func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.Ssh
 		err = resp.Send(&rpc.DisconnectRequest{
 			KubeconfigBytes: ptr.To(string(kubeConfigBytes)),
 			Namespace:       ptr.To(ns),
-			SshJump:         sshConfig.ToRPC(),
+			SshJump:         handler.SshConfigToRPC(sshConfig),
 		})
 		if err != nil {
 			return err
 		}
-		_ = util.PrintGRPCStream[rpc.DisconnectResponse](nil, resp)
+		_ = grpcutil.PrintGRPCStream[rpc.DisconnectResponse](nil, resp)
 		return nil
 	})
 	resp, err := cli.Proxy(context.Background())
@@ -83,7 +85,7 @@ func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.Ssh
 		plog.G(ctx).Errorf("Connect to cluster error: %v", err)
 		return err
 	}
-	return util.PrintGRPCStream[rpc.SyncResponse](ctx, resp)
+	return grpcutil.PrintGRPCStream[rpc.SyncResponse](ctx, resp)
 }
 
 func (option *Options) connectViaContainer(ctx context.Context, portBindings nat.PortMap, managerNamespace string) error {

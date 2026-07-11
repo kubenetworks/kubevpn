@@ -15,7 +15,6 @@ import (
 	"k8s.io/client-go/util/homedir"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
 // SshConfig holds the configuration for an SSH connection including authentication credentials and jump host settings.
@@ -56,41 +55,6 @@ func (conf *SshConfig) KubeconfigIdentifier() string {
 	}
 
 	return fmt.Sprintf("%s_%s", prefix, filepath.Base(conf.RemoteKubeconfig))
-}
-
-// ParseSshFromRPC converts an RPC SshJump message into an SshConfig struct.
-func ParseSshFromRPC(sshJump *rpc.SshJump) *SshConfig {
-	if sshJump == nil {
-		return &SshConfig{}
-	}
-	return &SshConfig{
-		Addr:             sshJump.Addr,
-		User:             sshJump.User,
-		Password:         sshJump.Password,
-		Keyfile:          sshJump.Keyfile,
-		Jump:             sshJump.Jump,
-		ConfigAlias:      sshJump.ConfigAlias,
-		RemoteKubeconfig: sshJump.RemoteKubeconfig,
-		GSSAPIKeytabConf: sshJump.GSSAPIKeytabConf,
-		GSSAPIPassword:   sshJump.GSSAPIPassword,
-		GSSAPICacheFile:  sshJump.GSSAPICacheFile,
-	}
-}
-
-// ToRPC converts the SshConfig into an RPC SshJump message for gRPC transport.
-func (conf SshConfig) ToRPC() *rpc.SshJump {
-	return &rpc.SshJump{
-		Addr:             conf.Addr,
-		User:             conf.User,
-		Password:         conf.Password,
-		Keyfile:          conf.Keyfile,
-		Jump:             conf.Jump,
-		ConfigAlias:      conf.ConfigAlias,
-		RemoteKubeconfig: conf.RemoteKubeconfig,
-		GSSAPIKeytabConf: conf.GSSAPIKeytabConf,
-		GSSAPIPassword:   conf.GSSAPIPassword,
-		GSSAPICacheFile:  conf.GSSAPICacheFile,
-	}
 }
 
 // IsEmpty reports whether the SSH config has no address, alias, or jump host configured.
@@ -185,14 +149,14 @@ func publicKeyFile(file string) (ssh.AuthMethod, error) {
 	return ssh.PublicKeys(key), nil
 }
 
-func (conf SshConfig) AliasRecursion(ctx context.Context, stopChan <-chan struct{}) (client *ssh.Client, err error) {
-	name := conf.ConfigAlias
-	jumper := "ProxyJump"
-	bastionList := []SshConfig{GetBastion(name, conf)}
-	list := getDefaultSSHConfigList()
-	visited := map[string]bool{name: true}
+// resolveProxyJumpChain walks the ProxyJump chain starting from the given alias,
+// returning the ordered list of bastion configs. It returns an error if a cycle is detected.
+func resolveProxyJumpChain(startAlias string, defaults SshConfig, list defaultSshConf) ([]SshConfig, error) {
+	bastionList := []SshConfig{GetBastion(startAlias, defaults)}
+	visited := map[string]bool{startAlias: true}
+	name := startAlias
 	for {
-		value := list.Get(name, jumper)
+		value := list.Get(name, "ProxyJump")
 		if value == "" {
 			break
 		}
@@ -200,8 +164,17 @@ func (conf SshConfig) AliasRecursion(ctx context.Context, stopChan <-chan struct
 			return nil, fmt.Errorf("circular ProxyJump detected: %s -> %s", name, value)
 		}
 		visited[value] = true
-		bastionList = append(bastionList, GetBastion(value, conf))
+		bastionList = append(bastionList, GetBastion(value, defaults))
 		name = value
+	}
+	return bastionList, nil
+}
+
+func (conf SshConfig) AliasRecursion(ctx context.Context, stopChan <-chan struct{}) (client *ssh.Client, err error) {
+	list := getDefaultSSHConfigList()
+	bastionList, err := resolveProxyJumpChain(conf.ConfigAlias, conf, list)
+	if err != nil {
+		return nil, err
 	}
 	for i := len(bastionList) - 1; i >= 0; i-- {
 		if client == nil {
@@ -237,22 +210,10 @@ func (conf SshConfig) JumpRecursion(ctx context.Context, stopChan <-chan struct{
 
 	var bastionList []SshConfig
 	if conf.ConfigAlias != "" {
-		name := conf.ConfigAlias
-		jumper := "ProxyJump"
-		bastionList = append(bastionList, GetBastion(name, conf))
 		list := getDefaultSSHConfigList()
-		visited := map[string]bool{name: true}
-		for {
-			value := list.Get(name, jumper)
-			if value == "" {
-				break
-			}
-			if visited[value] {
-				return nil, fmt.Errorf("circular ProxyJump detected: %s -> %s", name, value)
-			}
-			visited[value] = true
-			bastionList = append(bastionList, GetBastion(value, conf))
-			name = value
+		bastionList, err = resolveProxyJumpChain(conf.ConfigAlias, conf, list)
+		if err != nil {
+			return nil, err
 		}
 	}
 	if conf.Addr != "" {

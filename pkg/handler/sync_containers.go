@@ -142,7 +142,7 @@ func clearObjectMetadata(u *unstructured.Unstructured) {
 }
 
 func (d *SyncOptions) SyncDir(ctx context.Context, labels string) error {
-	list, err := util.GetRunningPodList(ctx, d.clientset, d.Namespace, labels)
+	list, err := util.GetRunningPodList(ctx, d.clientset, d.WorkloadNamespace, labels)
 	if err != nil {
 		return err
 	}
@@ -165,7 +165,7 @@ func (d *SyncOptions) SyncDir(ctx context.Context, labels string) error {
 			func() {
 				defer time.Sleep(time.Second * 2)
 
-				list, err := util.GetRunningPodList(d.ctx, d.clientset, d.Namespace, labels)
+				list, err := util.GetRunningPodList(d.ctx, d.clientset, d.WorkloadNamespace, labels)
 				if err != nil {
 					plog.G(ctx).Error(err)
 					return
@@ -200,13 +200,13 @@ func (d *SyncOptions) SyncDir(ctx context.Context, labels string) error {
 }
 
 func (d *SyncOptions) ConvertApiServerToNodeIP(ctx context.Context, kubeconfigBytes []byte) ([]byte, error) {
-	list, err := d.clientset.CoreV1().Pods(d.Namespace).List(ctx, metav1.ListOptions{Limit: 100})
+	list, err := d.clientset.CoreV1().Pods(d.WorkloadNamespace).List(ctx, metav1.ListOptions{Limit: 100})
 	if err != nil {
 		return nil, err
 	}
 	var result string
 	for _, item := range list.Items {
-		result, err = util.Shell(ctx, d.clientset, d.config, item.Name, "", d.Namespace, []string{"env"})
+		result, err = util.Shell(ctx, d.clientset, d.config, item.Name, "", d.WorkloadNamespace, []string{"env"})
 		if err == nil {
 			break
 		}

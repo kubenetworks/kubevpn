@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
@@ -102,15 +101,8 @@ func ConvertK8sApiServerToDomain(kubeConfigPath string) (newPath string, err err
 	}
 	host := fmt.Sprintf("%s://%s", u.Scheme, net.JoinHostPort("kubernetes", strconv.Itoa(int(remote.Port()))))
 	rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].Server = host
-	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})
-
-	var convertedObj runtime.Object
-	convertedObj, err = clientcmdlatest.Scheme.ConvertToVersion(&rawConfig, clientcmdlatest.ExternalVersion)
-	if err != nil {
-		return
-	}
 	var marshal []byte
-	marshal, err = json.Marshal(convertedObj)
+	marshal, err = serializeKubeconfig(&rawConfig)
 	if err != nil {
 		return
 	}
@@ -199,19 +191,19 @@ func ModifyAPIServer(ctx context.Context, kubeconfigBytes []byte, newAPIServer n
 	// TODO: add cli option to skip tls verify
 	// rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].CertificateAuthorityData = nil
 	// rawConfig.Clusters[rawConfig.Contexts[rawConfig.CurrentContext].Cluster].InsecureSkipTLSVerify = true
-	rawConfig.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})
-
-	var convertedObj runtime.Object
-	convertedObj, err = clientcmdlatest.Scheme.ConvertToVersion(&rawConfig, clientcmdlatest.ExternalVersion)
+	marshal, err := serializeKubeconfig(&rawConfig)
 	if err != nil {
-		plog.G(ctx).Errorf("failed to build config: %v", err)
-		return nil, netip.AddrPort{}, err
-	}
-	var marshal []byte
-	marshal, err = json.Marshal(convertedObj)
-	if err != nil {
-		plog.G(ctx).Errorf("failed to marshal config: %v", err)
+		plog.G(ctx).Errorf("failed to serialize kubeconfig: %v", err)
 		return nil, netip.AddrPort{}, err
 	}
 	return marshal, remote, nil
+}
+
+func serializeKubeconfig(cfg *api.Config) ([]byte, error) {
+	cfg.SetGroupVersionKind(schema.GroupVersionKind{Version: clientcmdlatest.Version, Kind: "Config"})
+	obj, err := clientcmdlatest.Scheme.ConvertToVersion(cfg, clientcmdlatest.ExternalVersion)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(obj)
 }

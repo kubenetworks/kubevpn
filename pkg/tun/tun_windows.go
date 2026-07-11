@@ -107,7 +107,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	// windows,macOS,linux connect to same cluster
-	// macOS and linux can ping each other, but macOS and linux can not ping windows
+	// macOS and linux can ping each other, but macOS and linux cannot ping windows
 	if cfg.Addr != "" {
 		var ipInterface *winipcfg.MibIPInterfaceRow
 		ipInterface, err = ifUID.IPInterface(windows.AF_INET)
@@ -166,7 +166,7 @@ func (c *winTunConn) Read(b []byte) (n int, err error) {
 
 func (c *winTunConn) Write(b []byte) (n int, err error) {
 	if len(b) == 0 {
-		return 0 /*errors.New("can not write empty buffer")*/, nil
+		return 0 /*errors.New("cannot write empty buffer")*/, nil
 	}
 	return c.ifce.Write(b, 0)
 }

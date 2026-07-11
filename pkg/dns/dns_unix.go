@@ -195,7 +195,7 @@ func (c *Config) CancelDNS() {
 				conf.Servers = append(conf.Servers[:i], conf.Servers[i+1:]...)
 				i--
 				// remove once is enough, because if same cluster connect to different namespace
-				// dns service ip is same
+				// DNS service IP is same
 				break
 			}
 		}

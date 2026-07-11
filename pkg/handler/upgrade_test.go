@@ -37,7 +37,7 @@ func newUpgradeTestConnectOptions(t *testing.T, objects ...metav1.Object) *Conne
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		OriginNamespace:  "default",
+		WorkloadNamespace:  "default",
 		K8sClient: K8sClient{clientset: clientset},
 		ctx:              ctx,
 		cancel:           cancel,
@@ -182,7 +182,7 @@ func TestUpgradeDeploy_DeploymentNotFound(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &ConnectOptions{
 		ManagerNamespace: "test-ns",
-		OriginNamespace:  "default",
+		WorkloadNamespace:  "default",
 		K8sClient: K8sClient{clientset: clientset},
 		Image:            "ghcr.io/kubenetworks/kubevpn:v2.3.0",
 		ctx:              ctx,

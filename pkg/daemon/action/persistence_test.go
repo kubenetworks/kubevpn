@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/yaml"
@@ -15,6 +16,14 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 )
+
+func mustMarshalConnectRequest(req *rpc.ConnectRequest) []byte {
+	b, err := proto.Marshal(req)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
 
 func TestServer_OffloadToConfig(t *testing.T) {
 	// Clean up any pre-existing DB file and restore state after test
@@ -34,18 +43,18 @@ func TestServer_OffloadToConfig(t *testing.T) {
 	svr := &Server{
 		connections: []*handler.ConnectOptions{
 			{
-				Request: &rpc.ConnectRequest{
+				RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
 					Namespace:            "default",
 					OriginKubeconfigPath: "/home/user/.kube/config",
-				},
+				}),
 				LocalTunIPv4: ipv4Net,
 				LocalTunIPv6: ipv6Net,
 			},
 			{
-				Request: &rpc.ConnectRequest{
+				RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
 					Namespace: "staging",
 					Image:     "ghcr.io/kubenetworks/kubevpn:v2.0.0",
-				},
+				}),
 				LocalTunIPv4: ipv4Net,
 			},
 		},
@@ -83,14 +92,18 @@ func TestServer_OffloadToConfig(t *testing.T) {
 
 	// Verify first connection fields
 	c0 := conf.SecondaryConnect[0]
-	if c0.Request == nil {
-		t.Fatal("first connection Request is nil")
+	if len(c0.RequestRaw) == 0 {
+		t.Fatal("first connection RequestRaw is empty")
 	}
-	if c0.Request.Namespace != "default" {
-		t.Errorf("expected namespace 'default', got %q", c0.Request.Namespace)
+	var req0 rpc.ConnectRequest
+	if err := proto.Unmarshal(c0.RequestRaw, &req0); err != nil {
+		t.Fatalf("unmarshal first RequestRaw: %v", err)
 	}
-	if c0.Request.OriginKubeconfigPath != "/home/user/.kube/config" {
-		t.Errorf("unexpected kubeconfig path: %q", c0.Request.OriginKubeconfigPath)
+	if req0.Namespace != "default" {
+		t.Errorf("expected namespace 'default', got %q", req0.Namespace)
+	}
+	if req0.OriginKubeconfigPath != "/home/user/.kube/config" {
+		t.Errorf("unexpected kubeconfig path: %q", req0.OriginKubeconfigPath)
 	}
 	if c0.LocalTunIPv4 == nil || c0.LocalTunIPv4.IP.String() != "198.18.0.10" {
 		t.Errorf("unexpected IPv4: %v", c0.LocalTunIPv4)
@@ -101,14 +114,18 @@ func TestServer_OffloadToConfig(t *testing.T) {
 
 	// Verify second connection
 	c1 := conf.SecondaryConnect[1]
-	if c1.Request == nil {
-		t.Fatal("second connection Request is nil")
+	if len(c1.RequestRaw) == 0 {
+		t.Fatal("second connection RequestRaw is empty")
 	}
-	if c1.Request.Namespace != "staging" {
-		t.Errorf("expected namespace 'staging', got %q", c1.Request.Namespace)
+	var req1 rpc.ConnectRequest
+	if err := proto.Unmarshal(c1.RequestRaw, &req1); err != nil {
+		t.Fatalf("unmarshal second RequestRaw: %v", err)
 	}
-	if c1.Request.Image != "ghcr.io/kubenetworks/kubevpn:v2.0.0" {
-		t.Errorf("unexpected image: %q", c1.Request.Image)
+	if req1.Namespace != "staging" {
+		t.Errorf("expected namespace 'staging', got %q", req1.Namespace)
+	}
+	if req1.Image != "ghcr.io/kubenetworks/kubevpn:v2.0.0" {
+		t.Errorf("unexpected image: %q", req1.Image)
 	}
 }
 
@@ -214,14 +231,14 @@ func TestConfig_SerializationRoundTrip(t *testing.T) {
 	original := &Config{
 		SecondaryConnect: []*handler.ConnectOptions{
 			{
-				Request: &rpc.ConnectRequest{
+				RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
 					KubeconfigBytes:      "apiVersion: v1\nclusters: []",
 					Namespace:            "production",
 					OriginKubeconfigPath: "/etc/kube/config",
 					Image:                "ghcr.io/kubenetworks/kubevpn:v2.1.0",
 					Foreground:           true,
 					Level:                3,
-				},
+				}),
 				LocalTunIPv4: ipv4Net,
 				LocalTunIPv6: ipv6Net,
 			},
@@ -258,23 +275,27 @@ func TestConfig_SerializationRoundTrip(t *testing.T) {
 	}
 
 	c := restored.SecondaryConnect[0]
-	if c.Request == nil {
-		t.Fatal("restored Request is nil")
+	if len(c.RequestRaw) == 0 {
+		t.Fatal("restored RequestRaw is empty")
 	}
-	if c.Request.Namespace != "production" {
-		t.Errorf("namespace mismatch: got %q", c.Request.Namespace)
+	var req rpc.ConnectRequest
+	if err := proto.Unmarshal(c.RequestRaw, &req); err != nil {
+		t.Fatalf("unmarshal RequestRaw: %v", err)
 	}
-	if c.Request.OriginKubeconfigPath != "/etc/kube/config" {
-		t.Errorf("kubeconfig path mismatch: got %q", c.Request.OriginKubeconfigPath)
+	if req.Namespace != "production" {
+		t.Errorf("namespace mismatch: got %q", req.Namespace)
 	}
-	if c.Request.Image != "ghcr.io/kubenetworks/kubevpn:v2.1.0" {
-		t.Errorf("image mismatch: got %q", c.Request.Image)
+	if req.OriginKubeconfigPath != "/etc/kube/config" {
+		t.Errorf("kubeconfig path mismatch: got %q", req.OriginKubeconfigPath)
 	}
-	if !c.Request.Foreground {
+	if req.Image != "ghcr.io/kubenetworks/kubevpn:v2.1.0" {
+		t.Errorf("image mismatch: got %q", req.Image)
+	}
+	if !req.Foreground {
 		t.Error("expected Foreground=true")
 	}
-	if c.Request.Level != 3 {
-		t.Errorf("level mismatch: got %d", c.Request.Level)
+	if req.Level != 3 {
+		t.Errorf("level mismatch: got %d", req.Level)
 	}
 	if c.LocalTunIPv4 == nil || c.LocalTunIPv4.IP.String() != "198.18.1.5" {
 		t.Errorf("IPv4 mismatch: %v", c.LocalTunIPv4)
@@ -288,7 +309,7 @@ func TestConfig_SerializationRoundTrip_NilFields(t *testing.T) {
 	original := &Config{
 		SecondaryConnect: []*handler.ConnectOptions{
 			{
-				Request:      nil,
+				RequestRaw:   nil,
 				LocalTunIPv4: nil,
 				LocalTunIPv6: nil,
 			},
@@ -321,8 +342,8 @@ func TestConfig_SerializationRoundTrip_NilFields(t *testing.T) {
 	}
 
 	c := restored.SecondaryConnect[0]
-	if c.Request != nil {
-		t.Errorf("expected nil Request, got %v", c.Request)
+	if len(c.RequestRaw) != 0 {
+		t.Errorf("expected empty RequestRaw, got %v", c.RequestRaw)
 	}
 	if c.LocalTunIPv4 != nil {
 		t.Errorf("expected nil IPv4, got %v", c.LocalTunIPv4)
@@ -492,11 +513,11 @@ func TestServer_OffloadToConfig_RoundTrip(t *testing.T) {
 	svr := &Server{
 		connections: []*handler.ConnectOptions{
 			{
-				Request: &rpc.ConnectRequest{
+				RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
 					Namespace:            "production",
 					OriginKubeconfigPath: "/tmp/kubeconfig",
 					Image:                "ghcr.io/kubenetworks/kubevpn:test",
-				},
+				}),
 				LocalTunIPv4: ipv4Net,
 				LocalTunIPv6: ipv6Net,
 			},
@@ -527,17 +548,21 @@ func TestServer_OffloadToConfig_RoundTrip(t *testing.T) {
 		t.Fatalf("expected 1 connection, got %d", len(conf.SecondaryConnect))
 	}
 	c := conf.SecondaryConnect[0]
-	if c.Request == nil {
-		t.Fatal("restored Request is nil")
+	if len(c.RequestRaw) == 0 {
+		t.Fatal("restored RequestRaw is empty")
 	}
-	if c.Request.Namespace != "production" {
-		t.Errorf("namespace: got %q, want 'production'", c.Request.Namespace)
+	var req rpc.ConnectRequest
+	if err := proto.Unmarshal(c.RequestRaw, &req); err != nil {
+		t.Fatalf("unmarshal RequestRaw: %v", err)
 	}
-	if c.Request.OriginKubeconfigPath != "/tmp/kubeconfig" {
-		t.Errorf("kubeconfig path: got %q", c.Request.OriginKubeconfigPath)
+	if req.Namespace != "production" {
+		t.Errorf("namespace: got %q, want 'production'", req.Namespace)
 	}
-	if c.Request.Image != "ghcr.io/kubenetworks/kubevpn:test" {
-		t.Errorf("image: got %q", c.Request.Image)
+	if req.OriginKubeconfigPath != "/tmp/kubeconfig" {
+		t.Errorf("kubeconfig path: got %q", req.OriginKubeconfigPath)
+	}
+	if req.Image != "ghcr.io/kubenetworks/kubevpn:test" {
+		t.Errorf("image: got %q", req.Image)
 	}
 	if c.LocalTunIPv4 == nil || c.LocalTunIPv4.IP.String() != "198.18.0.55" {
 		t.Errorf("IPv4 mismatch: %v", c.LocalTunIPv4)

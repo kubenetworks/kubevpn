@@ -99,7 +99,7 @@ func (option *Options) Run(ctx context.Context, config *Config, hostConfig *Host
 		for _, s := range podCtx.EnvMap {
 			_ = os.RemoveAll(s)
 		}
-		return util.RemoveDir(podCtx.MountVolume)
+		return RemoveDir(podCtx.MountVolume)
 	})
 
 	configList, err := option.ConvertPodToContainerConfigList(ctx, podCtx, config, hostConfig)
@@ -136,7 +136,7 @@ func (option *Options) fetchPodContext(ctx context.Context) (*PodContext, error)
 		plog.G(ctx).Errorf("Failed to get env from k8s: %v", err)
 		return nil, err
 	}
-	volume, err := util.GetVolume(ctx, option.clientset, option.factory, option.Namespace, podName)
+	volume, err := GetVolume(ctx, option.clientset, option.factory, option.Namespace, podName)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get volume from k8s: %v", err)
 		return nil, err

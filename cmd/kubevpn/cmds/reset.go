@@ -11,7 +11,9 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -66,7 +68,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 				KubeconfigBytes: string(bytes),
 				Namespace:       ns,
 				Workloads:       args,
-				SshJump:         sshConf.ToRPC(),
+				SshJump:         handler.SshConfigToRPC(sshConf),
 			}
 			resp, err := cli.Reset(context.Background())
 			if err != nil {
@@ -76,7 +78,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = util.PrintGRPCStream[rpc.ResetResponse](cmd.Context(), resp)
+			err = grpcutil.PrintGRPCStream[rpc.ResetResponse](cmd.Context(), resp)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil

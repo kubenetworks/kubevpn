@@ -1,4 +1,4 @@
-package util
+package run
 
 import (
 	"context"
@@ -21,6 +21,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/cp"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	pkgutil "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // GetVolume key format: [container name]-[volume mount name]
@@ -70,7 +71,7 @@ func GetVolume(ctx context.Context, clientset kubernetes.Interface, f util.Facto
 			})
 			plog.G(ctx).Infof("%s:%s", localPath, volumeMount.MountPath)
 		}
-		result[Join(ns, container.Name)] = m
+		result[pkgutil.Join(ns, container.Name)] = m
 	}
 	return result, nil
 }

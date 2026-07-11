@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -62,7 +63,7 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 		return err
 	}
 	var connectionID string
-	err = util.CopyAndConvertGRPCStream[rpc.ConnectResponse, rpc.SyncResponse](
+	err = grpcutil.CopyAndConvertGRPCStream[rpc.ConnectResponse, rpc.SyncResponse](
 		connResp,
 		resp,
 		func(r *rpc.ConnectResponse) *rpc.SyncResponse {
@@ -77,7 +78,7 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	}
 
 	options := &handler.SyncOptions{
-		Namespace:            req.Namespace,
+		WorkloadNamespace:   req.Namespace,
 		Headers:              req.Headers,
 		Workloads:            req.Workloads,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),

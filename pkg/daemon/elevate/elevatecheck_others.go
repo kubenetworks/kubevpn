@@ -39,7 +39,7 @@ func IsAdmin() bool {
 	if os.Getuid() == 0 {
 		if !ok {
 			strings := []string{
-				"Warn: Use sudo to execute command kubevpn can not use user env KUBECONFIG.",
+				"Warn: Use sudo to execute command kubevpn cannot use user env KUBECONFIG.",
 				"Because of sudo user env and user env are different.",
 				"Current env KUBECONFIG value: " + os.Getenv(clientcmd.RecommendedConfigPathEnvVar),
 			}

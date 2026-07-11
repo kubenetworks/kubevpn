@@ -61,8 +61,8 @@ users:
 	if opts.restclient == nil {
 		t.Fatal("restclient is nil after InitClient")
 	}
-	if opts.Namespace != "default" {
-		t.Fatalf("expected namespace 'default', got %q", opts.Namespace)
+	if opts.WorkloadNamespace != "default" {
+		t.Fatalf("expected namespace 'default', got %q", opts.WorkloadNamespace)
 	}
 }
 

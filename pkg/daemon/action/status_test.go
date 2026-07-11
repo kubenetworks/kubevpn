@@ -7,14 +7,17 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 )
 
-func TestExtractLocalPorts_ColonSeparated(t *testing.T) {
-	m := map[int32]string{
-		8080: "29450:19080",
+func TestPortMapToLocalPorts_ColonSeparated(t *testing.T) {
+	rule := &controlplane.Rule{
+		PortMap: map[int32]string{
+			8080: "29450:19080",
+		},
 	}
-	result := extractLocalPorts(m)
+	result := portMapToLocalPorts(rule)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(result))
 	}
@@ -23,58 +26,66 @@ func TestExtractLocalPorts_ColonSeparated(t *testing.T) {
 	}
 }
 
-func TestExtractLocalPorts_PlainNumber(t *testing.T) {
-	m := map[int32]string{
-		8080: "9080",
+func TestPortMapToLocalPorts_PlainNumber(t *testing.T) {
+	rule := &controlplane.Rule{
+		PortMap: map[int32]string{
+			8080: "9080",
+		},
 	}
-	result := extractLocalPorts(m)
+	result := portMapToLocalPorts(rule)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(result))
 	}
-	if result[8080] != 9080 {
-		t.Errorf("expected 8080 → 9080, got %d", result[8080])
+	// Plain number format: LocalPort defaults to ContainerPort (8080), not the string value
+	if result[8080] != 8080 {
+		t.Errorf("expected 8080 → 8080 (containerPort fallback), got %d", result[8080])
 	}
 }
 
-func TestExtractLocalPorts_Empty(t *testing.T) {
-	result := extractLocalPorts(nil)
+func TestPortMapToLocalPorts_Empty(t *testing.T) {
+	result := portMapToLocalPorts(&controlplane.Rule{PortMap: nil})
 	if len(result) != 0 {
 		t.Fatalf("expected empty map for nil input, got %d entries", len(result))
 	}
 
-	result = extractLocalPorts(map[int32]string{})
+	result = portMapToLocalPorts(&controlplane.Rule{PortMap: map[int32]string{}})
 	if len(result) != 0 {
 		t.Fatalf("expected empty map for empty input, got %d entries", len(result))
 	}
 }
 
-func TestExtractLocalPorts_InvalidPort(t *testing.T) {
-	m := map[int32]string{
-		8080: "invalid",
+func TestPortMapToLocalPorts_InvalidPort(t *testing.T) {
+	rule := &controlplane.Rule{
+		PortMap: map[int32]string{
+			8080: "invalid",
+		},
 	}
-	result := extractLocalPorts(m)
+	result := portMapToLocalPorts(rule)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(result))
 	}
-	if result[8080] != 0 {
-		t.Errorf("expected 8080 → 0 for invalid port, got %d", result[8080])
+	// Invalid string → EnvoyPort=0, LocalPort=containerPort(8080)
+	if result[8080] != 8080 {
+		t.Errorf("expected 8080 → 8080 for invalid port, got %d", result[8080])
 	}
 }
 
-func TestExtractLocalPorts_MultipleEntries(t *testing.T) {
-	m := map[int32]string{
-		80:   "30000:8080",
-		443:  "30001:8443",
-		3000: "5000",
+func TestPortMapToLocalPorts_MultipleEntries(t *testing.T) {
+	rule := &controlplane.Rule{
+		PortMap: map[int32]string{
+			80:   "30000:8080",
+			443:  "30001:8443",
+			3000: "5000",
+		},
 	}
-	result := extractLocalPorts(m)
+	result := portMapToLocalPorts(rule)
 	if len(result) != 3 {
 		t.Fatalf("expected 3 entries, got %d", len(result))
 	}
 	expected := map[int32]int32{
 		80:   8080,
 		443:  8443,
-		3000: 5000,
+		3000: 3000, // plain number → LocalPort = ContainerPort
 	}
 	for k, want := range expected {
 		if got := result[k]; got != want {
@@ -83,11 +94,13 @@ func TestExtractLocalPorts_MultipleEntries(t *testing.T) {
 	}
 }
 
-func TestExtractLocalPorts_ColonWithInvalidSecond(t *testing.T) {
-	m := map[int32]string{
-		8080: "29450:notanumber",
+func TestPortMapToLocalPorts_ColonWithInvalidSecond(t *testing.T) {
+	rule := &controlplane.Rule{
+		PortMap: map[int32]string{
+			8080: "29450:notanumber",
+		},
 	}
-	result := extractLocalPorts(m)
+	result := portMapToLocalPorts(rule)
 	if result[8080] != 0 {
 		t.Errorf("expected 8080 → 0 for non-numeric after colon, got %d", result[8080])
 	}

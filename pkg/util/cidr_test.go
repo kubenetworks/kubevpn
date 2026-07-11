@@ -373,3 +373,121 @@ func parseCIDR(t *testing.T, s string) *net.IPNet {
 	}
 	return ipNet
 }
+
+func TestBuildCIDRPodSpec(t *testing.T) {
+	const (
+		testNamespace = "test-ns"
+		testImage     = "ghcr.io/kubenetworks/kubevpn:test"
+	)
+	pod := buildCIDRPodSpec(testNamespace, testImage)
+
+	t.Run("pod name and namespace", func(t *testing.T) {
+		if pod.Name != config.CniNetName {
+			t.Errorf("pod name = %q, want %q", pod.Name, config.CniNetName)
+		}
+		if pod.Namespace != testNamespace {
+			t.Errorf("pod namespace = %q, want %q", pod.Namespace, testNamespace)
+		}
+	})
+
+	t.Run("volumes include CNI and proc host paths", func(t *testing.T) {
+		if len(pod.Spec.Volumes) != 2 {
+			t.Fatalf("expected 2 volumes, got %d", len(pod.Spec.Volumes))
+		}
+
+		cniVol := pod.Spec.Volumes[0]
+		if cniVol.Name != config.CniNetName {
+			t.Errorf("first volume name = %q, want %q", cniVol.Name, config.CniNetName)
+		}
+		if cniVol.HostPath == nil || cniVol.HostPath.Path != config.DefaultNetDir {
+			t.Errorf("first volume host path = %v, want %q", cniVol.HostPath, config.DefaultNetDir)
+		}
+
+		procVol := pod.Spec.Volumes[1]
+		if procVol.Name != "proc-dir-kubevpn" {
+			t.Errorf("second volume name = %q, want %q", procVol.Name, "proc-dir-kubevpn")
+		}
+		if procVol.HostPath == nil || procVol.HostPath.Path != config.Proc {
+			t.Errorf("second volume host path = %v, want %q", procVol.HostPath, config.Proc)
+		}
+	})
+
+	t.Run("container image and command", func(t *testing.T) {
+		if len(pod.Spec.Containers) != 1 {
+			t.Fatalf("expected 1 container, got %d", len(pod.Spec.Containers))
+		}
+		c := pod.Spec.Containers[0]
+		if c.Image != testImage {
+			t.Errorf("container image = %q, want %q", c.Image, testImage)
+		}
+		wantCmd := []string{"tail", "-f", "/dev/null"}
+		if !reflect.DeepEqual(c.Command, wantCmd) {
+			t.Errorf("container command = %v, want %v", c.Command, wantCmd)
+		}
+	})
+
+	t.Run("affinity prefers master and control-plane nodes", func(t *testing.T) {
+		if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil {
+			t.Fatal("expected node affinity to be set")
+		}
+		prefs := pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+		if len(prefs) != 1 {
+			t.Fatalf("expected 1 preferred scheduling term, got %d", len(prefs))
+		}
+		exprs := prefs[0].Preference.MatchExpressions
+		if len(exprs) != 2 {
+			t.Fatalf("expected 2 match expressions, got %d", len(exprs))
+		}
+		wantKeys := map[string]bool{
+			"node-role.kubernetes.io/master":        false,
+			"node-role.kubernetes.io/control-plane": false,
+		}
+		for _, expr := range exprs {
+			if _, ok := wantKeys[expr.Key]; !ok {
+				t.Errorf("unexpected affinity key %q", expr.Key)
+			} else {
+				wantKeys[expr.Key] = true
+			}
+		}
+		for k, found := range wantKeys {
+			if !found {
+				t.Errorf("missing affinity key %q", k)
+			}
+		}
+	})
+
+	t.Run("tolerations allow control-plane scheduling", func(t *testing.T) {
+		if len(pod.Spec.Tolerations) != 2 {
+			t.Fatalf("expected 2 tolerations, got %d", len(pod.Spec.Tolerations))
+		}
+		wantKeys := map[string]bool{
+			"node-role.kubernetes.io/master":        false,
+			"node-role.kubernetes.io/control-plane": false,
+		}
+		for _, tol := range pod.Spec.Tolerations {
+			if _, ok := wantKeys[tol.Key]; !ok {
+				t.Errorf("unexpected toleration key %q", tol.Key)
+			} else {
+				wantKeys[tol.Key] = true
+			}
+		}
+		for k, found := range wantKeys {
+			if !found {
+				t.Errorf("missing toleration key %q", k)
+			}
+		}
+	})
+
+	t.Run("topology spread constraints are set", func(t *testing.T) {
+		if len(pod.Spec.TopologySpreadConstraints) != 1 {
+			t.Fatalf("expected 1 topology spread constraint, got %d", len(pod.Spec.TopologySpreadConstraints))
+		}
+		tsc := pod.Spec.TopologySpreadConstraints[0]
+		if tsc.TopologyKey != "kubernetes.io/hostname" {
+			t.Errorf("topology key = %q, want %q", tsc.TopologyKey, "kubernetes.io/hostname")
+		}
+		if tsc.MaxSkew != 1 {
+			t.Errorf("max skew = %d, want 1", tsc.MaxSkew)
+		}
+	})
+}

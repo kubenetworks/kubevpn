@@ -2,7 +2,6 @@ package action
 
 import (
 	"context"
-	"io"
 	"os"
 
 	log "github.com/sirupsen/logrus"
@@ -22,11 +21,9 @@ func (svr *Server) Uninstall(resp rpc.Daemon_UninstallServer) (err error) {
 	if err != nil {
 		return err
 	}
-	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newStreamWriter(func(msg string) error {
+	_, ctx := svr.initStreamLogger(resp, int32(log.InfoLevel), func(msg string) error {
 		return resp.Send(&rpc.UninstallResponse{Message: msg})
-	}), svr.LogFile))
-
-	var ctx = plog.WithLogger(resp.Context(), logger)
+	})
 	file, err := resolveKubeconfig(ctx, req.SshJump, req.KubeconfigBytes, false)
 	if err != nil {
 		return err

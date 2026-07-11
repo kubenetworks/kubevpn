@@ -31,7 +31,7 @@ import (
 // 1) dump cluster info
 // 2) grep cmdline
 // 3) create svc + cat *.conflist
-// 4) create svc + get pod ip with svc mask
+// 4) create svc + get pod IP with svc mask
 func GetCIDR(ctx context.Context, clientset kubernetes.Interface, restconfig *rest.Config, namespace string, image string) []*net.IPNet {
 	defer func() {
 		_ = clientset.CoreV1().Pods(namespace).Delete(context.Background(), config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
@@ -86,9 +86,8 @@ kube-proxy:
 */
 func parseCIDRFromString(content string) (result []*net.IPNet) {
 	if strings.Contains(content, "cluster-cidr") || strings.Contains(content, "service-cluster-ip-range") {
-		split := strings.Split(content, "=")
-		if len(split) == 2 {
-			cidrList := split[1]
+		_, cidrList, found := strings.Cut(content, "=")
+		if found {
 			for _, cidr := range strings.Split(cidrList, ",") {
 				_, c, _ := net.ParseCIDR(cidr)
 				if c != nil {
@@ -243,8 +242,32 @@ func GetPodCIDRFromCNI(ctx context.Context, clientset kubernetes.Interface, rest
 
 // CreateCIDRPod creates a helper pod that mounts /etc/cni and /proc from the host for CIDR discovery.
 func CreateCIDRPod(ctx context.Context, clientset kubernetes.Interface, namespace string, image string) (*corev1.Pod, error) {
+	pod := buildCIDRPodSpec(namespace, image)
+	get, err := clientset.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, v1.GetOptions{})
+	if err != nil || get.Status.Phase != corev1.PodRunning {
+		if err == nil || !errors.IsNotFound(err) {
+			_ = clientset.CoreV1().Pods(namespace).Delete(ctx, pod.Name, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
+		}
+		pod, err = clientset.CoreV1().Pods(namespace).Create(ctx, pod, v1.CreateOptions{})
+		if err != nil {
+			return nil, err
+		}
+		field := fields.OneTermEqualSelector("metadata.name", pod.Name).String()
+		ctx2, cancelFunc := context.WithTimeout(ctx, time.Second*15)
+		defer cancelFunc()
+		err = WaitPod(ctx2, clientset.CoreV1().Pods(namespace), v1.ListOptions{FieldSelector: field}, func(pod *corev1.Pod) bool {
+			return pod.Status.Phase == corev1.PodRunning
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return pod, nil
+}
+
+func buildCIDRPodSpec(namespace, image string) *corev1.Pod {
 	procName := "proc-dir-kubevpn"
-	pod := &corev1.Pod{
+	return &corev1.Pod{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      config.CniNetName,
 			Namespace: namespace,
@@ -342,27 +365,6 @@ func CreateCIDRPod(ctx context.Context, clientset kubernetes.Interface, namespac
 			},
 		},
 	}
-	get, err := clientset.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, v1.GetOptions{})
-	if err != nil || get.Status.Phase != corev1.PodRunning {
-		if err == nil || !errors.IsNotFound(err) {
-			_ = clientset.CoreV1().Pods(namespace).Delete(ctx, pod.Name, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
-		}
-		pod, err = clientset.CoreV1().Pods(namespace).Create(ctx, pod, v1.CreateOptions{})
-		if err != nil {
-			return nil, err
-		}
-		checker := func(pod *corev1.Pod) bool {
-			return pod.Status.Phase == corev1.PodRunning
-		}
-		field := fields.OneTermEqualSelector("metadata.name", pod.Name).String()
-		ctx2, cancelFunc := context.WithTimeout(ctx, time.Second*15)
-		defer cancelFunc()
-		err = WaitPod(ctx2, clientset.CoreV1().Pods(namespace), v1.ListOptions{FieldSelector: field}, checker)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return pod, nil
 }
 
 // GetPodCIDRFromPod infers pod CIDRs by applying a default pod CIDR mask to actual pod IPs in the namespace.

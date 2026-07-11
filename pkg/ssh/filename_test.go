@@ -202,6 +202,145 @@ func TestIPToFilename_Consistency(t *testing.T) {
 	}
 }
 
+func TestIPToFilename_IPv4WithPort(t *testing.T) {
+	// net.ParseIP does not accept host:port — these should all be "invalid-ip"
+	cases := []string{
+		"192.168.1.1:22",
+		"10.0.0.1:8080",
+		"127.0.0.1:0",
+	}
+	for _, input := range cases {
+		t.Run(input, func(t *testing.T) {
+			got := IPToFilename(input)
+			if got != "invalid-ip" {
+				t.Fatalf("IPToFilename(%q) = %q, want %q (port should make it invalid)", input, got, "invalid-ip")
+			}
+		})
+	}
+}
+
+func TestIPToFilename_IPv6WithBrackets(t *testing.T) {
+	// Bracketed IPv6 (as used in URLs) is not valid for net.ParseIP
+	cases := []string{
+		"[::1]",
+		"[2001:db8::1]",
+		"[::1]:22",
+	}
+	for _, input := range cases {
+		t.Run(input, func(t *testing.T) {
+			got := IPToFilename(input)
+			if got != "invalid-ip" {
+				t.Fatalf("IPToFilename(%q) = %q, want %q (bracketed IPv6 should be invalid)", input, got, "invalid-ip")
+			}
+		})
+	}
+}
+
+func TestIPToFilename_Whitespace(t *testing.T) {
+	// Leading/trailing whitespace should make the IP invalid
+	cases := []string{
+		" 192.168.1.1",
+		"192.168.1.1 ",
+		" 192.168.1.1 ",
+		"\t10.0.0.1",
+		"10.0.0.1\n",
+	}
+	for _, input := range cases {
+		t.Run("whitespace", func(t *testing.T) {
+			got := IPToFilename(input)
+			if got != "invalid-ip" {
+				t.Fatalf("IPToFilename(%q) = %q, want %q (whitespace should make it invalid)", input, got, "invalid-ip")
+			}
+		})
+	}
+}
+
+func TestIPToFilename_IPv4MappedIPv6_ExactValue(t *testing.T) {
+	// ::ffff:192.168.1.1 is IPv4-mapped IPv6. net.ParseIP parses it, but
+	// To4() returns non-nil, so it follows the IPv4 path.
+	got := IPToFilename("::ffff:192.168.1.1")
+	// The parsed IP's String() for IPv4-mapped is "192.168.1.1"
+	ip := net.ParseIP("::ffff:192.168.1.1")
+	if ip == nil {
+		t.Fatal("failed to parse ::ffff:192.168.1.1")
+	}
+	if ip.To4() != nil {
+		// IPv4-mapped IPv6 has non-nil To4(), so IPToFilename uses the IPv4 path
+		if got != ip.String() {
+			t.Fatalf("IPToFilename(::ffff:192.168.1.1) = %q, want %q", got, ip.String())
+		}
+	} else {
+		// Should not contain colons
+		for _, r := range got {
+			if r == ':' {
+				t.Fatalf("IPToFilename(::ffff:192.168.1.1) = %q, contains colon", got)
+			}
+		}
+	}
+}
+
+func TestIPToFilename_IPv6_FullExpansion(t *testing.T) {
+	// Verify that different textual representations of the same IPv6 produce the same filename
+	representations := []string{
+		"2001:0db8:0000:0000:0000:0000:0000:0001",
+		"2001:db8::1",
+		"2001:0db8::0001",
+	}
+	results := make(map[string]bool)
+	for _, r := range representations {
+		got := IPToFilename(r)
+		results[got] = true
+	}
+	if len(results) != 1 {
+		t.Fatalf("different representations of same IPv6 produced different filenames: %v", results)
+	}
+}
+
+func TestIPToFilename_SpecialInvalidInputs(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{"null byte", "\x00"},
+		{"unicode", "☁"},
+		{"dots only", "..."},
+		{"just a number", "42"},
+		{"negative number", "-1"},
+		{"hex string", "0xDEADBEEF"},
+		{"cidr notation", "192.168.1.0/24"},
+		{"double colon only", "::"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := IPToFilename(c.input)
+			// "::" is a valid IPv6 (all zeros), everything else should be invalid
+			if c.input == "::" {
+				if got == "invalid-ip" {
+					t.Fatalf("IPToFilename(%q) = %q, but :: is a valid IPv6 address", c.input, got)
+				}
+			} else {
+				if got != "invalid-ip" {
+					t.Fatalf("IPToFilename(%q) = %q, want %q", c.input, got, "invalid-ip")
+				}
+			}
+		})
+	}
+}
+
+func TestIPToFilename_IPv6_AllZeros(t *testing.T) {
+	// "::" is the all-zeros IPv6 address, valid
+	got := IPToFilename("::")
+	if got == "invalid-ip" {
+		t.Fatal("IPToFilename(::) should not return invalid-ip")
+	}
+	// Should be filesystem-safe
+	for _, r := range got {
+		if r == ':' {
+			t.Fatalf("IPToFilename(::) = %q, contains colon", got)
+		}
+	}
+}
+
 func TestIPToFilename_NoUnsafeChars(t *testing.T) {
 	// Test a variety of IPs to ensure no unsafe filesystem characters
 	ips := []string{

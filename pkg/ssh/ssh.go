@@ -123,7 +123,7 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 	if len(conf.RemoteKubeconfig) != 0 {
 		var stdout []byte
 		var stderr []byte
-		// pre-check network ip connect
+		// pre-check network IP connect
 		var cli *gossh.Client
 		cli, err = DialSshRemote(ctx, conf, ctx.Done())
 		if err != nil {
