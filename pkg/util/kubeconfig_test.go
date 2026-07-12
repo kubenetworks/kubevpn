@@ -1,11 +1,17 @@
 package util
 
 import (
+	"encoding/json"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // makeKubeconfig builds a minimal kubeconfig YAML with the given server URL.
@@ -262,6 +268,50 @@ func TestInitFactoryByBytes(t *testing.T) {
 		}
 		if _, err := f.ToRESTConfig(); err == nil {
 			t.Fatal("expected error from ToRESTConfig for malformed kubeconfig")
+		}
+	})
+
+	// Regression: the byte-backed RESTMapper must expand short resource names
+	// (svc → services) like the standard kubectl Factory. Without a
+	// ShortcutExpander, `kubevpn proxy svc/reviews` failed with
+	// "the server doesn't have a resource type svc".
+	t.Run("RESTMapper expands short resource names", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/api", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(metav1.APIVersions{Versions: []string{"v1"}})
+		})
+		mux.HandleFunc("/api/v1", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(metav1.APIResourceList{
+				GroupVersion: "v1",
+				APIResources: []metav1.APIResource{
+					{Name: "services", Namespaced: true, Kind: "Service", ShortNames: []string{"svc"}},
+				},
+			})
+		})
+		mux.HandleFunc("/apis", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(metav1.APIGroupList{})
+		})
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		f := InitFactoryByBytes(makeKubeconfig(srv.URL), "ns")
+		mapper, err := f.ToRESTMapper()
+		if err != nil {
+			t.Fatalf("ToRESTMapper: %v", err)
+		}
+		gvr, err := mapper.ResourceFor(schema.GroupVersionResource{Resource: "svc"})
+		if err != nil {
+			t.Fatalf("short name %q did not resolve: %v", "svc", err)
+		}
+		if gvr.Resource != "services" {
+			t.Fatalf("svc resolved to %q, want %q", gvr.Resource, "services")
 		}
 	})
 }

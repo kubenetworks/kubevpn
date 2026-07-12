@@ -196,7 +196,12 @@ func (g *byteRESTClientGetter) ToRESTMapper() (meta.RESTMapper, error) {
 	if err != nil {
 		return nil, err
 	}
-	return restmapper.NewDeferredDiscoveryRESTMapper(dc), nil
+	// Wrap with a ShortcutExpander so short resource names (svc, deploy, po, ...)
+	// resolve, matching the standard kubectl Factory (genericclioptions ToRESTMapper).
+	// Without it a bare deferred mapper only knows full plural/singular/Kind names,
+	// so `kubevpn proxy svc/reviews` fails with "the server doesn't have a resource type svc".
+	mapper := restmapper.NewDeferredDiscoveryRESTMapper(dc)
+	return restmapper.NewShortcutExpander(mapper, dc, func(string) {}), nil
 }
 
 // InitFactoryByBytes creates a kubectl Factory directly from kubeconfig bytes and
