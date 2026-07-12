@@ -32,6 +32,23 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		return svr.redirectConnectToSudoDaemon(req, resp, logger)
 	}
 
+	// Idempotency guard (root daemon): if a data-plane session already exists for this
+	// ConnectionID, short-circuit instead of building a second one. This is hit when the
+	// user daemon restarts and LoadFromConfig replays Connect while this (surviving) root
+	// daemon still holds the connection — without the guard we would create a duplicate
+	// DataSession, a second TUN/port-forward/route/DNS setup, and leak. Mirrors the
+	// user-side guard in redirectConnectToSudoDaemon. ConnectionID is always forwarded by
+	// the user daemon, so an empty value only happens in tests / direct callers.
+	if req.ConnectionID != "" {
+		svr.connMu.RLock()
+		existing, _ := svr.findConnection(req.ConnectionID)
+		svr.connMu.RUnlock()
+		if existing != nil {
+			logger.Infof("Data plane already established for connection %s", req.ConnectionID)
+			return resp.Send(&rpc.ConnectResponse{ConnectionID: req.ConnectionID})
+		}
+	}
+
 	// RequestRaw / proto.Marshal(req) is intentionally NOT done here: it is a control-plane
 	// persistence field (user daemon only). The root daemon's DataSession is never persisted.
 	ds := &handler.DataSession{
