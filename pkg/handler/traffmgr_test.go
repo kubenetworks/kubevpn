@@ -40,8 +40,9 @@ func TestGenRole(t *testing.T) {
 	if role.Namespace != namespace {
 		t.Fatalf("expected namespace %q, got %q", namespace, role.Namespace)
 	}
-	if len(role.Rules) != 1 {
-		t.Fatalf("expected 1 rule, got %d", len(role.Rules))
+	// Rule 0: configmaps/secrets; Rules 1-2: CIDR detection (see genRole / docs/46).
+	if len(role.Rules) != 3 {
+		t.Fatalf("expected 3 rules, got %d", len(role.Rules))
 	}
 
 	rule := role.Rules[0]

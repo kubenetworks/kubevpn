@@ -3,6 +3,7 @@ package xds
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
@@ -47,6 +48,18 @@ func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.E
 	// Back server-side sidecar injection (ProxyInject) with the in-cluster factory.
 	tunConfig.factory = factory
 	tunConfig.StartLeaseReaper(ctx)
+	// Warm the cluster CIDR + DNS caches in-cluster BEFORE serving, so both are
+	// populated before the first client connects (no first-connect fallback race).
+	// Both are cheap now — no probe pod / no exec (see docs/46), just a few API calls
+	// and a local file read. Each is bounded so a stuck API call cannot hang xds
+	// startup; warm-up is best-effort and degrade-safe (a miss → client falls back).
+	warmup := func(fn func(context.Context), timeout time.Duration) {
+		warmCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		fn(warmCtx)
+	}
+	warmup(tunConfig.WarmClusterCIDRCache, 10*time.Second)
+	warmup(tunConfig.WarmClusterDNSCache, 5*time.Second)
 
 	errChan := make(chan error, 2)
 

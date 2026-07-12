@@ -25,6 +25,10 @@ const (
 	KeyEnvoy = "ENVOY_CONFIG"
 	// KeyClusterCIDRs is the ConfigMap key for cluster CIDR cache (IPv4 + IPv6).
 	KeyClusterCIDRs = "CLUSTER_CIDRS"
+	// KeyClusterDNS is the ConfigMap key holding the manager pod's /etc/resolv.conf
+	// (raw text). The manager publishes it so clients read the cluster DNS server +
+	// search domains from the cache instead of exec-ing into the pod. See docs/46.
+	KeyClusterDNS = "CLUSTER_DNS_RESOLV"
 	// KeyTunAllocs is the ConfigMap key for TUN IP owner allocations (ownerID → IPs).
 	// It is a server-written crash-recovery journal (saveAllocs) AND the operator's
 	// manual-IP control input: editing an owner's ipv4/ipv6 (keeping the version field,

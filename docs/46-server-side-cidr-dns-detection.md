@@ -47,15 +47,16 @@ this is safe and is strictly more correct than the current "filtered by whoever 
   plane that already holds a clientset and starts before any client connects. No import
   cycle (`pkg/xds` does not import `pkg/handler`; both may import `pkg/util`/`pkg/config`).
 - On startup, if `CLUSTER_CIDRS` is empty, run detection **in-cluster** and write the **raw**
-  CIDRs. Reuse `util.GetCIDR`; extract a tiny `encodeCIDRs`-equivalent into `pkg/util` (or
-  duplicate the trivial join) so `pkg/xds` does not import `pkg/handler`.
+  CIDRs. Detection uses `util.GetClusterCIDRNoProbePod` — the pod-free strategies only
+  (kube-system component flags, a rejected Service create, and pod CIDR inferred from existing
+  pod IPs): **no probe pod, no exec**, since the manager is already an in-cluster pod.
 - Client: **unchanged** read path + local fallback (`data_session.go:297`). Because the
   manager warms the cache, the client's `util.GetCIDR` effectively never runs; if the manager
   is old / detection failed / RBAC missing, the cache is empty and the client falls back to
   today's behavior. **Purely additive — cannot break connectivity.**
 - Per-client API-server-IP filtering stays on the client (`parseCachedCIDRs`).
-- RBAC: extend the manager Role (`traffmgr_resources.go`) with `pods create`, `pods/exec`,
-  `services create`, and `pods list` in kube-system. **RBAC failure degrades safely** (cache
+- RBAC: extend the manager Role (`traffmgr_resources.go`) with `pods list` and `services create`
+  (no `pods/create`, no `pods/exec` — detection is pod-free). **RBAC failure degrades safely** (cache
   stays empty → client fallback).
 
 ### C2 — DNS detection in the manager (piggyback, no proto change)
@@ -102,7 +103,27 @@ Integration / CI e2e (minikube — cannot run in the dev sandbox):
 - Remove the manager's new RBAC: assert client still connects (fallback path).
 - DNS: assert client resolves cluster services without `exec`ing the manager pod.
 
-> **Why this is a design doc, not landed code:** the change is manager/data-plane and
-> connectivity-critical; its correctness (detection parity, the raw-vs-filtered cache
-> contract, RBAC) is only verifiable against a real cluster + the CI minikube e2e, which the
-> dev sandbox cannot run. Implementation should land behind that CI e2e.
+## Status
+
+Implemented (unit-tested, additive, degrade-safe) — **pending CI minikube e2e**:
+
+- **C1 cache contract**: `data_session.getCIDR` now caches **raw** (deduped, unfiltered) CIDRs.
+- **C1 warm-up**: `TunConfigServer.WarmClusterCIDRCache` (`pkg/xds/tun_config_cidr.go`), started
+  from `xds.Main`; fills an empty `CLUSTER_CIDRS` in-cluster via `util.GetClusterCIDRNoProbePod`
+  (no probe pod / no exec).
+- **C1 RBAC**: `genRole` grants the manager SA `pods list` + `services create` in
+  the manager namespace (fresh installs; existing managers keep their Role until recreated —
+  warm-up degrades safely meanwhile).
+- **C2**: `TunConfigServer.WarmClusterDNSCache` (`pkg/xds/tun_config_dns.go`) publishes the
+  manager pod's `/etc/resolv.conf` to `CLUSTER_DNS_RESOLV`; `util.GetDNSServiceIPFromPod`
+  reads that key first and falls back to `exec`. Namespace enumeration stays on the client.
+  Timing: **both** the CIDR and DNS warm-ups run **synchronously in `xds.Main` before the
+  server serves** (bounded 10s / 5s), so both caches are present before the first client
+  connects (no fallback race). Both are cheap now — no probe pod / no exec, just a few API
+  calls and a local file read. Each writes once, only when its key is empty; the value
+  persists across manager restarts.
+
+> **CI e2e is still required before relying on it:** correctness of the in-cluster detection
+> (parity with client detection), the RBAC grant, and the existing-manager rollout are only
+> verifiable against a real cluster, which the dev sandbox cannot run. Everything is additive
+> with a client fallback, so a failure there degrades to today's client-side behavior.

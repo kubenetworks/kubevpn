@@ -73,6 +73,26 @@ func GetCIDR(ctx context.Context, clientset kubernetes.Interface, restconfig *re
 
 // GetCIDRByDumpClusterInfo extracts CIDRs from kube-system pod command-line flags
 // (kube-apiserver --service-cluster-ip-range, kube-controller-manager --cluster-cidr, etc.).
+// GetClusterCIDRNoProbePod detects cluster CIDRs WITHOUT creating a probe pod or
+// exec-ing into one — suitable for running inside the cluster (e.g. the traffic
+// manager's server-side warm-up, see docs/46). It combines only the pod-free
+// strategies: component flags from kube-system pod specs, the Service CIDR from a
+// rejected Service create, and the pod CIDR inferred from existing pod IPs. Any
+// strategy lacking RBAC simply contributes nothing.
+func GetClusterCIDRNoProbePod(ctx context.Context, clientset kubernetes.Interface, namespace string) []*net.IPNet {
+	var result []*net.IPNet
+	if info, err := GetCIDRByDumpClusterInfo(ctx, clientset); err == nil {
+		result = append(result, info...)
+	}
+	if svcCIDR, _ := GetServiceCIDRByCreateService(ctx, clientset.CoreV1().Services(namespace)); svcCIDR != nil {
+		result = append(result, svcCIDR)
+	}
+	if podCIDR, err := GetPodCIDRFromPod(ctx, clientset, namespace, nil); err == nil {
+		result = append(result, podCIDR...)
+	}
+	return result
+}
+
 func GetCIDRByDumpClusterInfo(ctx context.Context, clientset kubernetes.Interface) ([]*net.IPNet, error) {
 	podList, err := clientset.CoreV1().Pods(v1.NamespaceSystem).List(ctx, v1.ListOptions{Limit: 100})
 	if err != nil {

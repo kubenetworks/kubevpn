@@ -306,12 +306,17 @@ func (ds *DataSession) getCIDR(ctx context.Context) ([]*net.IPNet, []net.IP, err
 
 	raw := util.GetCIDR(ctx, ds.clientset, ds.config, ds.ManagerNamespace, ds.Image)
 	cidrs := dedupAndFilterCIDRs(raw, apiServerIPs)
-	if len(cidrs) == 0 {
-		plog.G(ctx).Debugf("No cluster CIDRs detected (raw=%d, all filtered by API server IPs %v)", len(raw), apiServerIPs)
+	// Cache the RAW (deduped, unfiltered) CIDRs — NOT the per-client-filtered set.
+	// API-server IPs differ per client and every reader re-filters on read via
+	// parseCachedCIDRs, so caching a filtered set would hide a CIDR (the one holding
+	// this client's API-server IP) from other clients. See docs/46.
+	rawDeduped := util.RemoveLargerOverlappingCIDRs(raw)
+	if len(rawDeduped) == 0 {
+		plog.G(ctx).Debugf("No cluster CIDRs detected (raw=%d)", len(raw))
 		return cidrs, apiServerIPs, nil
 	}
-	encoded := encodeCIDRs(cidrs)
-	plog.G(ctx).Debugf("Saving %d cluster CIDRs to cache: %s", len(cidrs), encoded)
+	encoded := encodeCIDRs(rawDeduped)
+	plog.G(ctx).Debugf("Saving %d raw cluster CIDRs to cache: %s", len(rawDeduped), encoded)
 	err = ds.Set(ctx, config.KeyClusterCIDRs, encoded)
 	return cidrs, apiServerIPs, err
 }
