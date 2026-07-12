@@ -5,7 +5,10 @@ import (
 	"net"
 	"sync/atomic"
 
-	"github.com/google/gopacket/layers"
+	"gvisor.dev/gvisor/pkg/buffer"
+	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/header"
+	"gvisor.dev/gvisor/pkg/tcpip/link/sniffer"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -120,19 +123,24 @@ func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte, headroom int) (buf [
 	return buf, n + typePrefixLen
 }
 
-// logIPPacket logs one bare IP packet (no framing prefix) at Debug with a direction label
-// (e.g. "[Client] OUTBOUND", "[Client-2] INBOUND", "[TUN]"). It is gated on the ctx logger's
-// level (not the global config.Debug flag): the daemon log file is always Debug, so packets are
-// always recorded there and show up in `kubevpn logs`, while req.Level governs only what the
-// StreamHook forwards to the CLI. The level check also skips the parse when debug is off in the
-// CLI/server process. It is the single place these data-plane files render a packet for logging,
-// confining the gopacket/layers dependency here.
+// logIPPacket logs one bare IP packet (no framing prefix) at Debug via gvisor's sniffer, which
+// renders full transport-layer detail (ports, TCP flags/seq/ack/win, ICMP types, etc.). It is
+// gated on the ctx logger's level so the parse+format cost is skipped when debug is off.
 func logIPPacket(ctx context.Context, label string, data []byte) {
 	if !plog.IsDebugEnabled(ctx) {
 		return
 	}
-	if src, dst, proto, err := netutil.ParseIPFast(data); err == nil {
-		plog.G(ctx).Debugf("%s SRC: %s, DST: %s, Protocol: %s, Length: %d",
-			label, src, dst, layers.IPProtocol(proto).String(), len(data))
+	var protocol tcpip.NetworkProtocolNumber
+	if netutil.IsIPv4(data) {
+		protocol = header.IPv4ProtocolNumber
+	} else if netutil.IsIPv6(data) {
+		protocol = header.IPv6ProtocolNumber
+	} else {
+		return
 	}
+	pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+		Payload: buffer.MakeWithData(data),
+	})
+	sniffer.LogPacket(label+" ", sniffer.DirectionSend, protocol, pkt)
+	pkt.DecRef()
 }
