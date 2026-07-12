@@ -30,6 +30,9 @@ type connSlot struct {
 	// stack. readFromConn routes type == packetTypeToGvisor packets here instead of to a per-slot
 	// stack, so the stack outlives any single slot. nil in tests that drive a slot in isolation.
 	interClientInbound chan *Packet
+	// isControl marks this slot as the dedicated control-plane connection. On connect, it sends
+	// a packetTypeControl declaration so the server handles it separately (no RouteHub registration).
+	isControl bool
 }
 
 // run manages this slot's single connection with reconnect logic.
@@ -50,12 +53,16 @@ func (s *connSlot) run(ctx context.Context) {
 
 			udpConn := conn.(*UDPConnOverTCP)
 
-			// Proactively register this conn's route on the server: announce our TUN IP(s) right
-			// away so the server can route reverse traffic to us immediately, without waiting for
-			// the first data packet or a periodic heartbeat broadcast (which may be dropped under
-			// load). Sent synchronously before the read/write loops start, so there is no competing
-			// writer. Best-effort — a failure just falls through; the loops will catch a dead conn.
-			if s.registrations != nil {
+			if s.isControl {
+				// Control conn: send a packetTypeControl declaration so the server enters
+				// the control loop (no AddRoute, no RouteHub registration).
+				controlDecl := []byte{packetTypeControl}
+				if _, err = udpConn.Write(controlDecl); err != nil {
+					plog.G(ctx).Debugf("[Client-%d] Failed to send control declaration: %v", s.id, err)
+					return
+				}
+			} else if s.registrations != nil {
+				// Data conn: announce our TUN IP(s) so the server registers the route immediately.
 				for _, payload := range s.registrations() {
 					if _, err = udpConn.Write(payload); err != nil {
 						plog.G(ctx).Debugf("[Client-%d] Failed to send route registration: %v", s.id, err)
@@ -111,7 +118,9 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 		if buf[datagramHeaderLen] == packetTypeToGvisor {
 			// Hand off to the transport-level inter-client stack. Drop-if-full (and nil-safe for
 			// tests that drive a slot in isolation) so a busy stack cannot stall this slot's reader.
-			trySendToSlot(s.interClientInbound, NewPacket(buf[:], n, nil, nil))
+			if !trySendToSlot(s.interClientInbound, NewPacket(buf[:], n, nil, nil)) {
+				plog.G(ctx).Warnf("[Client-%d] Inter-client buffer full, dropping inbound packet", s.id)
+			}
 		} else {
 			// Heartbeat echo replies from the gateway are the data-plane liveness signal:
 			// record them and drop (the OS would discard them — the echo was crafted by us).
@@ -190,12 +199,14 @@ func (p *periodicDeadline) refresh() error {
 }
 
 // trySendToSlot delivers packet to a slot's inbound channel, dropping (and releasing) it if the
-// channel is full so a slow slot cannot stall the others.
-func trySendToSlot(inbound chan *Packet, packet *Packet) {
+// channel is full so a slow slot cannot stall the others. Returns false if the packet was dropped.
+func trySendToSlot(inbound chan *Packet, packet *Packet) bool {
 	select {
 	case inbound <- packet:
+		return true
 	default:
 		packet.release()
+		return false
 	}
 }
 

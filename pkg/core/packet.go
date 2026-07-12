@@ -31,14 +31,17 @@ const (
 )
 
 // Type prefix values carried in data[2] (1 byte, typePrefixLen). It is a small extensible
-// discriminator: values 2..255 are reserved for future packet types (control frames,
-// heartbeat tags, etc.).
+// discriminator: values 3..255 are reserved for future packet types.
 const (
 	// packetTypeToTUN marks a gvisor-processed packet (e.g. a response from the real
 	// network) to be written straight to the TUN device.
 	packetTypeToTUN byte = 0
 	// packetTypeToGvisor marks a raw IP packet to be injected into the local gvisor stack.
 	packetTypeToGvisor byte = 1
+	// packetTypeControl marks a control-plane frame (heartbeat ICMP). A conn whose first
+	// datagram carries this type is a control conn: the server does NOT register it in
+	// RouteHub and handles it in a dedicated control loop.
+	packetTypeControl byte = 2
 )
 
 // Packet represents a network packet with source and destination addresses.

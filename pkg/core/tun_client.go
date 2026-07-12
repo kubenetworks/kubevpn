@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	// ConnPoolSize is the number of parallel TCP connections to the server.
+	// ConnPoolSize is the number of parallel data TCP connections to the server.
 	// Each connection handles a subset of traffic (partitioned by five-tuple hash —
 	// proto, dst IP, and both ports — falling back to dst IP hash for fragments/ICMP).
 	// Multiple connections reduce head-of-line blocking and improve throughput.
@@ -26,8 +26,11 @@ const (
 type clientTransport struct {
 	dev     *tunDevice
 	forward *Forwarder
-	// slots holds the per-connection pool; built by runConnPool, read by routeOutbound.
+	// slots holds the data connection pool; built by runConnPool, read by routeOutbound.
 	slots []*connSlot
+	// controlSlot is a dedicated connection for heartbeat (control plane), independent of data
+	// slots so that data-plane congestion cannot block liveness probes.
+	controlSlot *connSlot
 	// gvisorInbound carries src == dst packets to the local loopback (self-to-self) gvisor stack.
 	gvisorInbound chan *Packet
 	// interClientInbound carries inter-client packets (type == packetTypeToGvisor, from the server)
@@ -67,6 +70,7 @@ func (t *clientTransport) routines() []namedRoutine {
 			handleGvisorPacket(t.interClientInbound, t.dev.tunInbound, datagramHeaderLen).Run(ctx)
 		}},
 		{"client-conn-pool", t.runConnPool},
+		{"client-control-slot", t.runControlSlot},
 		{"client-heartbeat", t.heartbeats},
 	}
 }
@@ -86,9 +90,9 @@ func (t *clientTransport) routeOutbound(ctx context.Context, buf []byte, n int, 
 	}
 }
 
-// runConnPool creates N parallel connection slots and distributes packets by five-tuple hash. Each
-// slot runs independently — if one connection breaks, only that slot reconnects. It waits for all
-// slot goroutines to exit before returning, for deterministic shutdown.
+// runConnPool creates N parallel data connection slots and distributes packets by five-tuple hash.
+// Data packets use blocking sends to provide TCP backpressure (prevents packet drops that trigger
+// RTO stalls). Each slot runs independently — if one connection breaks, only that slot reconnects.
 func (t *clientTransport) runConnPool(ctx context.Context) {
 	n := t.poolSize
 	if n <= 0 {
@@ -117,7 +121,8 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 	defer wg.Wait()
 
 	// Drain the shared tunInbound and distribute to slots by five-tuple hash.
-	// Heartbeats (dst == nil) are broadcast to ALL slots to keep idle connections alive.
+	// Data packets block on the slot channel to propagate backpressure to the OS TCP stack,
+	// preventing silent drops that cause catastrophic RTO stalls.
 	for {
 		select {
 		case packet := <-t.dev.tunInbound:
@@ -125,16 +130,38 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 				return
 			}
 			if packet.dst != nil {
-				// IP payload is data[tunReserve : datagramHeaderLen+length] (see packet.go layout).
 				key := parseFiveTupleInline(packet.data[tunReserve : datagramHeaderLen+packet.length])
-				trySendToSlot(t.slots[flowHash(key, packet.dst, n)].inbound, packet)
+				select {
+				case t.slots[flowHash(key, packet.dst, n)].inbound <- packet:
+				case <-ctx.Done():
+					packet.release()
+					return
+				}
 			} else {
+				// Fallback broadcast for non-heartbeat control packets (currently unused;
+				// heartbeats bypass tunInbound via controlSlot).
 				broadcastToSlots(t.slots, packet)
 			}
 		case <-ctx.Done():
 			return
 		}
 	}
+}
+
+// runControlSlot manages the dedicated control-plane connection. It carries only heartbeat
+// ICMP echo packets, isolated from data-plane congestion so the liveness watchdog is never
+// starved by a full data slot. The server recognizes this conn by the packetTypeControl prefix
+// on its first datagram and does NOT register it in RouteHub.
+func (t *clientTransport) runControlSlot(ctx context.Context) {
+	t.controlSlot = &connSlot{
+		id:          ConnPoolSize,
+		inbound:     make(chan *Packet, MaxSize),
+		tunOutbound: t.dev.tunOutbound,
+		forward:     t.forward,
+		stats:       t.stats,
+		isControl:   true,
+	}
+	t.controlSlot.run(ctx)
 }
 
 // registrationPayloads builds the proactive route-registration payloads — one ICMP echo to the
@@ -168,6 +195,8 @@ func (t *clientTransport) registrationPayloads() [][]byte {
 	return payloads
 }
 
+// heartbeats sends periodic ICMP echo packets via the dedicated controlSlot, bypassing the data
+// tunInbound path entirely. This ensures liveness probes flow even when data slots are congested.
 func (t *clientTransport) heartbeats(ctx context.Context) {
 	tunIfi, err := netutil.GetTunDeviceByConn(t.dev.tun)
 	if err != nil {
@@ -179,10 +208,13 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 	defer ticker.Stop()
 
 	sendHeartbeat := func(payload []byte) {
+		if t.controlSlot == nil {
+			return
+		}
 		buf := config.LPool.Get().([]byte)
 		n := copy(buf[tunReserve:], payload)
-		buf[datagramHeaderLen] = packetTypeToGvisor
-		t.dev.tunInbound <- NewPacket(buf, n+typePrefixLen, nil, nil)
+		buf[datagramHeaderLen] = packetTypeControl
+		trySendToSlot(t.controlSlot.inbound, NewPacket(buf, n+typePrefixLen, nil, nil))
 	}
 
 	sendAll := func(reason string) {

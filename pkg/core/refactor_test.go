@@ -2,8 +2,6 @@ package core
 
 import (
 	"context"
-	"errors"
-	"net"
 	"testing"
 	"time"
 
@@ -152,38 +150,19 @@ func TestWriteToTun_DrainsOnCancel(t *testing.T) {
 
 // --- readFromEndpointWriteToTCPConn: verify return on write error ---
 
-type errWriter struct {
-	net.Conn
-	writeErr error
-}
 
-func (e *errWriter) Write([]byte) (int, error)        { return 0, e.writeErr }
-func (e *errWriter) Close() error                     { return nil }
-func (e *errWriter) LocalAddr() net.Addr              { return &net.TCPAddr{} }
-func (e *errWriter) RemoteAddr() net.Addr             { return &net.TCPAddr{} }
-func (e *errWriter) SetDeadline(time.Time) error      { return nil }
-func (e *errWriter) SetReadDeadline(time.Time) error  { return nil }
-func (e *errWriter) SetWriteDeadline(time.Time) error { return nil }
-
-func TestReadFromEndpointWriteToTCPConn_ReturnsOnWriteError(t *testing.T) {
+func TestReadFromEndpointWriteToRoute_DropsNoRoute(t *testing.T) {
 	hub := NewRouteHub()
-	h := &gvisorTCPHandler{hub: hub, newStack: NewStack}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	h := &gvisorTCPHandler{hub: hub, ctx: ctx, clients: make(map[string]*clientStack)}
 	endpoint := channel.New(MaxSize, uint32(config.DefaultMTU), "")
 
-	failConn := &errWriter{writeErr: errors.New("connection reset")}
+	go h.readFromEndpointWriteToRoute(ctx, endpoint)
 
-	done := make(chan struct{})
-	go func() {
-		h.readFromEndpointWriteToTCPConn(ctx, failConn, endpoint)
-		close(done)
-	}()
-
-	// WritePackets puts a packet on the endpoint's outbound channel (the direction
-	// that ReadContext reads from). InjectInbound goes the other direction.
+	// Send a packet to an IP with no route — reader should drop it and keep running.
 	ipv4Pkt := buildMinimalIPv4Packet()
 	pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 		Payload: buffer.MakeWithData(ipv4Pkt),
@@ -193,12 +172,21 @@ func TestReadFromEndpointWriteToTCPConn_ReturnsOnWriteError(t *testing.T) {
 	pkts.PushBack(pkt)
 	_, _ = endpoint.WritePackets(pkts)
 
-	select {
-	case <-done:
-		// Good — function returned after write error
-	case <-time.After(2 * time.Second):
-		t.Fatal("readFromEndpointWriteToTCPConn did not return after write error")
-	}
+	// Send a second packet — if the reader survived the no-route drop, it will consume this one.
+	ipv4Pkt2 := buildMinimalIPv4Packet()
+	pkt2 := stack.NewPacketBuffer(stack.PacketBufferOptions{
+		Payload: buffer.MakeWithData(ipv4Pkt2),
+	})
+	pkt2.NetworkProtocolNumber = header.IPv4ProtocolNumber
+	var pkts2 stack.PacketBufferList
+	pkts2.PushBack(pkt2)
+	_, _ = endpoint.WritePackets(pkts2)
+
+	// Give the reader time to process both. If it crashed on the first, the test context
+	// timeout will fire. We just verify the reader is still alive by cancelling gracefully.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	// If we get here, the reader handled no-route without crashing.
 }
 
 // --- Channel capacity: verify MaxSize is used, not tcp.DefaultReceiveBufferSize ---

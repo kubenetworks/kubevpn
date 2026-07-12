@@ -100,7 +100,7 @@ HandleClient:
 type prefix and either forwards locally (when `src == dst`, via the gvisor handler) or pushes
 to `tunInbound` for the pool to distribute.
 
-**Connection pool**: The client maintains `ConnPoolSize=4` parallel TCP connections to the server. Packets are distributed by `flowHash` — a stateless FNV-1a hash of the flow's five-tuple `(proto, dst IP, src port, dst port)` — so distinct connections to the same hot destination IP spread across slots, while every packet of one flow stays on the same connection (a correctness requirement: the server runs one gvisor stack per conn). Packets with no usable ports (ICMP, IP fragments, unparsed IPv6 extension headers) fall back to `ipHash(dst)`. See [41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md).
+**Connection pool**: The client maintains `ConnPoolSize=4` parallel TCP connections to the server. Packets are distributed by `flowHash` — a stateless FNV-1a hash of the flow's five-tuple `(proto, dst IP, src port, dst port)` — so distinct connections to the same hot destination IP spread across slots, while every packet of one flow stays on the same connection (providing session affinity and avoiding reordering). The server shares a single gvisor stack across all connections (see [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md)), so per-flow slot affinity is no longer a correctness requirement but is retained for load distribution. Packets with no usable ports (ICMP, IP fragments, unparsed IPv6 extension headers) fall back to `ipHash(dst)`. See [41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md).
 
 **`connSlot`**: each of the `ConnPoolSize` slots is a `connSlot` value that owns its inbound
 channel and connection lifecycle — `run` (dial + reconnect loop), `readFromConn`, and
@@ -237,7 +237,7 @@ Two variants:
 
 ### 8.3 TUN Endpoints
 
-**gvisor_tun_endpoint.go**: Server-side, bridges between a TCP connection (from VPN client) and a gvisor `channel.Endpoint`. Reads datagram-framed packets from the TCP conn and injects them into gvisor. Reads packets from gvisor and writes them back over TCP. The send path (`readFromEndpointWriteToTCPConn`) carries a frame-boundary guard symmetric with the TUN read guard: a packet too large to fit the `[2 len][1 type][IP]` frame is dropped rather than truncated (TCP recovers). With `GVisorGSOSupported` the endpoint only sees ≤MTU packets, so this is defense-in-depth.
+**gvisor_tun_endpoint.go**: Server-side, bridges between TCP connections (from VPN clients) and the shared gvisor `channel.Endpoint`. `readFromTCPConnWriteToEndpoint` reads datagram-framed packets from a tunnel conn and injects them into the shared stack. `readFromEndpointWriteToRoute` reads packets from the shared stack's endpoint and routes them via RouteHub to the correct client conn (non-blocking via `TryWriteToRoutePacket` to prevent slow-client stalling). The send path carries a frame-boundary guard: a packet too large to fit the `[2 len][1 type][IP]` frame is dropped rather than truncated (TCP recovers). See [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md).
 
 **gvisor_local_tun_endpoint.go**: Client-side, bridges between the local TUN device and gvisor for local traffic (src==dst).
 

@@ -51,34 +51,30 @@ it contributes nothing to the distribution. This mirrors IPVS source-hashing, wh
 only on the fields that actually discriminate flows. The source *port*, assigned per
 connection by the local stack, is the field that spreads many connections to one dst IP.
 
-### The Hard Constraint: Per-Flow Slot Affinity
+### Per-Flow Slot Affinity
 
-Slot assignment **must be deterministic per flow** — every packet of one L4 flow must map
-to the same slot for the life of the flow. This is not merely an ordering nicety; it is a
-correctness requirement:
-
-> The server creates an **independent gvisor stack per pool connection**
-> (`gvisorTCPHandler.handle`, one `channel.Endpoint` + `stack.Stack` per accepted conn).
-> If a flow's packets were split across slots, its SYN would land on one stack and its
-> subsequent segments on another. The second stack has no matching connection state and
-> rejects them — the flow never establishes. This is strictly worse than reordering.
+Slot assignment is deterministic per flow — every packet of one L4 flow maps to the same
+slot. With the shared server-side gvisor stack
+([48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md)), this is no longer a
+**correctness** requirement (all slots feed the same stack, so a split flow would still
+reach the right TCP state), but it is retained for **session affinity** and **avoiding
+packet reordering** across slots.
 
 A pure function of the five-tuple satisfies this for free: same tuple → same hash → same
 slot. And because `N` is fixed (a dead slot reconnects in place and is never removed from
 the array — see [22-tun-device.md](22-tun-device.md)), `hash % N` never changes underneath
 a live flow. No rehash, no flow migration.
 
-### The Return Path Is Symmetric — No Server Change
+### The Return Path — RouteHub Routing
 
-Replies require no routing decision and **no change to the server, `RouteHub`, or
-`ConnList`**. The server's per-connection gvisor stack that handled a flow's outbound
-packets also produces its replies, and `readFromEndpointWriteToTCPConn` writes them straight
-back over that same connection. So whichever slot a flow went out on, its replies come back
-on the same slot — the down-link spreads automatically, following the up-link.
+With the shared server-side gvisor stack, replies from the stack are routed via RouteHub by
+destination IP (the client's TUN IP). `readFromEndpointWriteToRoute` reads each response
+packet, parses its destination, and writes it to the first healthy conn in the client's
+ConnList — the slot is chosen by availability, not by five-tuple affinity. All of a client's
+slots deliver to the same TUN device, so the OS TCP stack handles any reordering.
 
-(`RouteHub`/`ConnList`, keyed by client TUN IP, route only the cases that do *not* ride a
-per-flow gvisor stack: inter-client traffic and the native-TUN path. Those are unchanged;
-see [01-network-architecture.md](01-network-architecture.md) §"Multi-Client Routing".)
+This is the same routing mechanism already used for inter-client traffic and the native-TUN
+path. See [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md).
 
 ## Parsing the Five-Tuple
 

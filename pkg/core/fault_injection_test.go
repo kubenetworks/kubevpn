@@ -20,15 +20,15 @@ import (
 
 func TestFault_ClientDisconnect_ServerCleansUpRoute(t *testing.T) {
 	hub := NewRouteHub()
-	handler := &gvisorTCPHandler{hub: hub, newStack: NewStack}
-
 	clientConn, serverConn := net.Pipe()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	handler := &gvisorTCPHandler{hub: hub, newStack: NewStack, ctx: ctx, clients: make(map[string]*clientStack)}
+
 	done := make(chan struct{})
 	go func() {
-		handler.readFromTCPConnWriteToEndpoint(ctx, NewBufferedTCP(ctx, serverConn), nil)
+		handler.readFromTCPConnWriteToEndpoint(ctx, NewBufferedTCP(ctx, serverConn))
 		close(done)
 	}()
 
@@ -61,15 +61,15 @@ func TestFault_ClientDisconnect_ServerCleansUpRoute(t *testing.T) {
 
 func TestFault_ClientDisconnect_PoolBuffersNotLeaked(t *testing.T) {
 	hub := NewRouteHub()
-	handler := &gvisorTCPHandler{hub: hub, newStack: NewStack}
-
 	clientConn, serverConn := net.Pipe()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	handler := &gvisorTCPHandler{hub: hub, newStack: NewStack, ctx: ctx, clients: make(map[string]*clientStack)}
+
 	done := make(chan struct{})
 	go func() {
-		handler.readFromTCPConnWriteToEndpoint(ctx, NewBufferedTCP(ctx, serverConn), nil)
+		handler.readFromTCPConnWriteToEndpoint(ctx, NewBufferedTCP(ctx, serverConn))
 		close(done)
 	}()
 

@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
@@ -111,18 +109,18 @@ func TestReconnect_ReadDeadlineEvictsGhostRoute(t *testing.T) {
 	defer ln.Close()
 
 	hub := NewRouteHub()
-	h := &gvisorTCPHandler{hub: hub}
-	endpoint := channel.New(MaxSize, uint32(config.DefaultMTU), "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	h := &gvisorTCPHandler{hub: hub, newStack: NewStack, ctx: ctx, clients: make(map[string]*clientStack)}
 
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		h.readFromTCPConnWriteToEndpoint(ctx, NewBufferedTCP(ctx, conn), endpoint)
+		h.readFromTCPConnWriteToEndpoint(ctx, NewBufferedTCP(ctx, conn))
 	}()
 
 	client, err := net.Dial("tcp", ln.Addr().String())
@@ -316,12 +314,11 @@ func TestReconnect_ProactiveRegistration(t *testing.T) {
 
 	// Phase 2: the server handler registers the route from that announcement alone — no prior data.
 	hub := NewRouteHub()
-	h := &gvisorTCPHandler{hub: hub}
-	endpoint := channel.New(MaxSize, uint32(config.DefaultMTU), "")
 	cConn, sConn := net.Pipe()
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
-	go h.readFromTCPConnWriteToEndpoint(ctx2, NewBufferedTCP(ctx2, sConn), endpoint)
+	h := &gvisorTCPHandler{hub: hub, newStack: NewStack, ctx: ctx2, clients: make(map[string]*clientStack)}
+	go h.readFromTCPConnWriteToEndpoint(ctx2, NewBufferedTCP(ctx2, sConn))
 
 	sendFramedPacket(cConn, packetTypeToGvisor, regIP)
 	waitFor(t, 2*time.Second, func() bool { return hub.HasRoute(string(clientTunIP)) },

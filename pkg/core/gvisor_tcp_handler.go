@@ -5,8 +5,12 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
+	"sync"
+	"time"
 
+	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
 	"gvisor.dev/gvisor/pkg/tcpip/link/sniffer"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
@@ -18,60 +22,210 @@ import (
 
 type stackConstructor func(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack
 
+// clientStack manages an independent gvisor stack for one client (identified by TUN IP).
+// Its lifetime spans the client session, surviving individual pool-slot reconnections.
+type clientStack struct {
+	endpoint *channel.Endpoint
+	stack    *stack.Stack
+	cancel   context.CancelFunc
+
+	mu         sync.Mutex
+	graceTimer *time.Timer
+}
+
+// stopGrace cancels any pending grace-period timer (called when a conn is re-added).
+func (cs *clientStack) stopGrace() {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if cs.graceTimer != nil {
+		cs.graceTimer.Stop()
+		cs.graceTimer = nil
+	}
+}
+
+// gvisorTCPHandler accepts TCP tunnel connections and forwards their traffic through
+// per-client gvisor stacks. Each client (unique TUN IP) gets an independent stack that
+// outlives individual connection drops, preserving TCP sessions across reconnections while
+// isolating clients from each other's backpressure.
 type gvisorTCPHandler struct {
 	hub      *RouteHub
 	newStack stackConstructor
+	ctx      context.Context
+
+	mu      sync.Mutex
+	clients map[string]*clientStack
 }
 
-// GvisorTCPHandler creates a Handler that accepts TCP connections and runs a gvisor stack per connection.
+// GvisorTCPHandler creates a Handler that accepts TCP connections and maintains per-client
+// gvisor stacks. Each client's stack survives individual connection disconnects, preserving
+// TCP sessions across reconnections.
 func GvisorTCPHandler(hub *RouteHub) Handler {
-	return &gvisorTCPHandler{hub: hub, newStack: NewStack}
+	h := &gvisorTCPHandler{
+		hub:      hub,
+		newStack: NewStack,
+		clients:  make(map[string]*clientStack),
+	}
+	if hub != nil {
+		hub.OnRouteEmpty = h.onRouteEmpty
+		hub.OnRouteAdded = h.onRouteAdded
+	}
+	return h
 }
 
 // GvisorLocalTCPHandler creates a Handler using NewLocalStack (routes to 127.0.0.1).
 func GvisorLocalTCPHandler(hub *RouteHub) Handler {
-	return &gvisorTCPHandler{hub: hub, newStack: NewLocalStack}
+	h := &gvisorTCPHandler{
+		hub:      hub,
+		newStack: NewLocalStack,
+		clients:  make(map[string]*clientStack),
+	}
+	if hub != nil {
+		hub.OnRouteEmpty = h.onRouteEmpty
+		hub.OnRouteAdded = h.onRouteAdded
+	}
+	return h
 }
 
 func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
-	ctx, cancel := context.WithCancel(ctx)
+	if h.ctx == nil {
+		h.ctx = ctx
+	}
+	connCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	plog.G(ctx).Infof("[Gvisor-TCP] Client connected: %s", tcpConn.RemoteAddr())
-	h.handle(ctx, tcpConn)
-	plog.G(ctx).Infof("[Gvisor-TCP] Client disconnected: %s", tcpConn.RemoteAddr())
+	plog.G(connCtx).Infof("[Gvisor-TCP] Client connected: %s", tcpConn.RemoteAddr())
+	h.readFromTCPConnWriteToEndpoint(connCtx, NewBufferedTCP(connCtx, tcpConn))
+	plog.G(connCtx).Infof("[Gvisor-TCP] Client disconnected: %s", tcpConn.RemoteAddr())
 }
 
-func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {
+// getOrCreateClientStack returns the gvisor stack for the given client IP, creating one
+// if it doesn't exist yet.
+func (h *gvisorTCPHandler) getOrCreateClientStack(srcKey string) *clientStack {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if cs, ok := h.clients[srcKey]; ok {
+		return cs
+	}
+
+	stackCtx, stackCancel := context.WithCancel(h.ctx)
 	endpoint := channel.New(MaxSize, uint32(config.DefaultMTU), tcpip.GetRandMacAddr())
-	// for support ipv6 skip checksum
-	// vendor/gvisor.dev/gvisor/pkg/tcpip/stack/nic.go:763
 	endpoint.LinkEPCapabilities = stack.CapabilityRXChecksumOffload
-	// Enable GVisor (software) GSO so the TCP layer can build large segments and gvisor
-	// segments them internally before they reach this endpoint — the read side then still
-	// hands normal <=MTU packets to the tunnel. We deliberately do NOT use HostGSOSupported:
-	// this endpoint feeds a TCP tunnel, not a host NIC, so host-GSO would push up-to-32KB
-	// super-segments onto the wire that macOS/Windows clients (MTU-sized TUN, no offload)
-	// cannot write. GVisorGSO complements the TUN-side GRO (see docs/22-tun-device.md §4.2).
 	endpoint.SupportedGSOKind = stack.GVisorGSOSupported
-	done := make(chan struct{}, 2)
+
+	s := h.newStack(stackCtx, sniffer.NewWithPrefix(endpoint, "[gVISOR] "))
+
+	cs := &clientStack{
+		endpoint: endpoint,
+		stack:    s,
+		cancel:   stackCancel,
+	}
+	h.clients[srcKey] = cs
+
 	go func() {
 		defer netutil.HandleCrash()
-		h.readFromTCPConnWriteToEndpoint(ctx, NewBufferedTCP(ctx, tcpConn), endpoint)
-		netutil.SafeClose(done)
+		h.readFromEndpointWriteToRoute(stackCtx, endpoint)
 	}()
 	go func() {
-		defer netutil.HandleCrash()
-		h.readFromEndpointWriteToTCPConn(ctx, tcpConn, endpoint)
-		netutil.SafeClose(done)
+		<-stackCtx.Done()
+		s.Destroy()
 	}()
-	s := h.newStack(ctx, sniffer.NewWithPrefix(endpoint, "[gVISOR] "))
-	defer s.Destroy()
-	select {
-	case <-done:
+
+	plog.G(h.ctx).Infof("[Gvisor-TCP] Created per-client stack for %s", net.IP(srcKey))
+	return cs
+}
+
+// destroyClientStack tears down a client's gvisor stack and removes it from the map.
+func (h *gvisorTCPHandler) destroyClientStack(ipKey string) {
+	h.mu.Lock()
+	cs, ok := h.clients[ipKey]
+	if ok {
+		delete(h.clients, ipKey)
+	}
+	h.mu.Unlock()
+
+	if ok {
+		cs.cancel()
+		plog.G(h.ctx).Infof("[Gvisor-TCP] Destroyed per-client stack for %s (grace expired)", net.IP(ipKey))
+	}
+}
+
+// onRouteEmpty is called by RouteHub when the last conn for a client IP is removed.
+// Starts the grace-period timer.
+func (h *gvisorTCPHandler) onRouteEmpty(ipKey string) {
+	h.mu.Lock()
+	cs, ok := h.clients[ipKey]
+	h.mu.Unlock()
+	if !ok {
 		return
-	case <-ctx.Done():
+	}
+
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if cs.graceTimer != nil {
+		cs.graceTimer.Stop()
+	}
+	cs.graceTimer = time.AfterFunc(config.KeepAliveTime*3, func() {
+		h.destroyClientStack(ipKey)
+	})
+	plog.G(h.ctx).Infof("[Gvisor-TCP] All conns gone for %s, grace timer started (%v)", net.IP(ipKey), config.KeepAliveTime*3)
+}
+
+// onRouteAdded is called by RouteHub when a route is first created for a client IP.
+// Cancels any pending grace-period timer.
+func (h *gvisorTCPHandler) onRouteAdded(ipKey string) {
+	h.mu.Lock()
+	cs, ok := h.clients[ipKey]
+	h.mu.Unlock()
+	if !ok {
 		return
+	}
+	cs.stopGrace()
+}
+
+// handleControlConn serves a dedicated control-plane connection. It does NOT register the conn
+// in RouteHub (no AddRoute), so it never receives data-plane traffic. It reads heartbeat ICMP
+// echoes from the client, injects them into the client's gvisor stack for processing, and writes
+// the echo replies directly back on this conn.
+func (h *gvisorTCPHandler) handleControlConn(ctx context.Context, tcpConn net.Conn) {
+	dl := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: tcpConn.SetReadDeadline}
+
+	for ctx.Err() == nil {
+		buf := config.LPool.Get().([]byte)[:]
+		if err := dl.refresh(); err != nil {
+			config.LPool.Put(buf[:])
+			return
+		}
+		read, err := tcpConn.Read(buf[datagramHeaderLen:])
+		if err != nil {
+			config.LPool.Put(buf[:])
+			return
+		}
+		if read == 0 {
+			config.LPool.Put(buf[:])
+			continue
+		}
+		ip := buf[tunReserve : datagramHeaderLen+read]
+		src, _, _, parseErr := netutil.ParseIPFast(ip)
+		if parseErr != nil {
+			config.LPool.Put(buf[:])
+			continue
+		}
+
+		// Inject heartbeat ICMP into the client's per-client gvisor stack.
+		// The stack's ICMP forwarder generates a reply, which readFromEndpointWriteToRoute
+		// routes back to the client via RouteHub (through data conns, not this control conn).
+		cs := h.getOrCreateClientStack(string(src))
+		protocol := header.IPv4ProtocolNumber
+		if netutil.IsIPv6(ip) {
+			protocol = header.IPv6ProtocolNumber
+		}
+		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+			Payload: buffer.MakeWithData(ip),
+		})
+		config.LPool.Put(buf[:])
+		cs.endpoint.InjectInbound(protocol, pkt)
+		pkt.DecRef()
 	}
 }
 

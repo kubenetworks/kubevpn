@@ -22,17 +22,17 @@ import (
 func TestServerRouting_Path3_PrefixZeroToTCPPacketChan(t *testing.T) {
 	// Path 3: prefix=0, no route → goes to hub.TCPPacketChan
 	hub := NewRouteHub()
-	handler := &gvisorTCPHandler{hub: hub, newStack: NewStack}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	handler := &gvisorTCPHandler{hub: hub, newStack: NewStack, ctx: ctx, clients: make(map[string]*clientStack)}
 
 	clientConn, serverConn := net.Pipe()
 	defer clientConn.Close()
 	defer serverConn.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
 	// Wrap serverConn as BufferedTCP (same as production code)
-	go handler.readFromTCPConnWriteToEndpoint(ctx, NewBufferedTCP(ctx, serverConn), nil)
+	go handler.readFromTCPConnWriteToEndpoint(ctx, NewBufferedTCP(ctx, serverConn))
 
 	// Send a prefix=0 packet from clientConn with datagram framing
 	srcIP := net.IPv4(10, 0, 0, 1)
@@ -70,16 +70,16 @@ func TestServerRouting_Path1_RouteExistsForwards(t *testing.T) {
 	defer destServer.Close()
 	hub.AddRoute(context.Background(), net.IPv4(10, 0, 0, 99).To4(), destServer)
 
-	handler := &gvisorTCPHandler{hub: hub, newStack: NewStack}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	handler := &gvisorTCPHandler{hub: hub, newStack: NewStack, ctx: ctx, clients: make(map[string]*clientStack)}
 
 	sourceClient, sourceServer := net.Pipe()
 	defer sourceClient.Close()
 	defer sourceServer.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	go handler.readFromTCPConnWriteToEndpoint(ctx, NewBufferedTCP(ctx, sourceServer), nil)
+	go handler.readFromTCPConnWriteToEndpoint(ctx, NewBufferedTCP(ctx, sourceServer))
 
 	// Send packet from sourceClient destined to 10.0.0.99 (which has a route)
 	srcIP := net.IPv4(10, 0, 0, 1)
