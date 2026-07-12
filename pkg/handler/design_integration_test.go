@@ -45,7 +45,12 @@ func TestDoc07_ManagerNamespaceUsedForTrafficManager(t *testing.T) {
 		WorkloadNamespace: "app",
 	}
 
-	// ConfigMap operations should use ManagerNamespace ("infra"), not WorkloadNamespace ("app")
+	// ConfigMap operations should use ManagerNamespace ("infra"), not WorkloadNamespace ("app").
+	// Get is cache-only, so warm the informer first (it lists ManagerNamespace).
+	defer c.getConfigMapStore().Stop()
+	if err := c.EnsureConfigMapSynced(context.Background()); err != nil {
+		t.Fatalf("EnsureConfigMapSynced: %v", err)
+	}
 	val, err := c.Get(context.Background(), "key1")
 	if err != nil {
 		t.Fatalf("Get from ManagerNamespace failed: %v", err)
@@ -104,7 +109,8 @@ func TestDoc10_ProxyManager_RemoveByWorkload(t *testing.T) {
 }
 
 func TestDoc10_ConfigMapStore_CacheFirst(t *testing.T) {
-	// Doc says: ConfigMapStore.Get reads from informer cache first, falls back to API
+	// ConfigMapStore.Get is cache-only (no live-API fallback): EnsureSynced warms the
+	// informer at connect, then Get is served from memory.
 	clientset := fake.NewSimpleClientset(
 		&v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "ns"},
@@ -112,11 +118,14 @@ func TestDoc10_ConfigMapStore_CacheFirst(t *testing.T) {
 		},
 	)
 	store := newConfigMapStore(clientset, "ns")
+	defer store.Stop()
 
-	// Before informer starts, Get falls back to API
+	if err := store.EnsureSynced(context.Background()); err != nil {
+		t.Fatalf("EnsureSynced: %v", err)
+	}
 	val, err := store.Get(context.Background(), "testkey")
 	if err != nil {
-		t.Fatalf("Get via API fallback: %v", err)
+		t.Fatalf("Get from cache: %v", err)
 	}
 	if val != "testval" {
 		t.Fatalf("expected 'testval', got %q", val)
@@ -124,8 +133,9 @@ func TestDoc10_ConfigMapStore_CacheFirst(t *testing.T) {
 }
 
 func TestDoc10_ConfigMapStore_SetAndGet(t *testing.T) {
-	// Doc says: ConfigMapStore.Set updates ConfigMap, Get retrieves it
-	// Set uses JSON Patch "replace", so the key must already exist
+	// ConfigMapStore.Set updates the ConfigMap via the live API (JSON Patch "replace", so
+	// the key must already exist); Get then reads it from the warm informer cache. Warm
+	// AFTER Set so the informer's initial List observes the new value deterministically.
 	clientset := fake.NewSimpleClientset(
 		&v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "ns"},
@@ -133,9 +143,13 @@ func TestDoc10_ConfigMapStore_SetAndGet(t *testing.T) {
 		},
 	)
 	store := newConfigMapStore(clientset, "ns")
+	defer store.Stop()
 
 	if err := store.Set(context.Background(), "mykey", "newval"); err != nil {
 		t.Fatalf("Set: %v", err)
+	}
+	if err := store.EnsureSynced(context.Background()); err != nil {
+		t.Fatalf("EnsureSynced: %v", err)
 	}
 
 	val, err := store.Get(context.Background(), "mykey")

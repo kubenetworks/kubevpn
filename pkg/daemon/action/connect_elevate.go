@@ -159,6 +159,15 @@ func (svr *Server) forwardConnectToSudo(
 		return err
 	}
 
+	// Warm the control-plane ConfigMap informer now that the traffic manager (and its
+	// ConfigMap) exists, so later status reads are cache-served. The store has no live-API
+	// fallback, so fail fast rather than register a connection whose cache never warms:
+	// CreateOutboundPod/UpgradeDeploy just succeeded, so a sync failure here means the API
+	// became unreachable and the connection would be unusable anyway.
+	if err := connect.EnsureConfigMapSynced(ctx); err != nil {
+		return fmt.Errorf("failed to warm traffic manager ConfigMap cache: %w", err)
+	}
+
 	// Forward the already-resolved (SSH-rewritten) bytes to the sudo daemon, which
 	// builds its own in-process Factory from them — no bytes->file->bytes round-trip.
 	req.KubeconfigBytes = string(kubeconfigBytes)

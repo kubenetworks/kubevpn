@@ -37,8 +37,14 @@ func newTestConnectOptions(t *testing.T) *ConnectOptions {
 
 func TestConnectOptions_SetGet(t *testing.T) {
 	c := newTestConnectOptions(t)
+	defer c.getConfigMapStore().Stop()
 	if err := c.Set(context.Background(), "mykey", "myval"); err != nil {
 		t.Fatalf("Set: %v", err)
+	}
+	// Get is cache-only: warm the informer AFTER Set so its initial List captures the write
+	// (the store never starts the informer during Set, so the first sync sees post-Set state).
+	if err := c.EnsureConfigMapSynced(context.Background()); err != nil {
+		t.Fatalf("EnsureConfigMapSynced: %v", err)
 	}
 	val, err := c.Get(context.Background(), "mykey")
 	if err != nil {
@@ -150,6 +156,11 @@ func TestConnectOptions_Set_MultipleKeys(t *testing.T) {
 			t.Fatalf("Set(%q, %q): %v", k, v, err)
 		}
 	}
+	// Cache-only Get: warm once after all writes so the initial List captures them.
+	defer c.getConfigMapStore().Stop()
+	if err := c.EnsureConfigMapSynced(ctx); err != nil {
+		t.Fatalf("EnsureConfigMapSynced: %v", err)
+	}
 	for k, want := range keys {
 		got, err := c.Get(ctx, k)
 		if err != nil {
@@ -181,6 +192,11 @@ func TestConnectOptions_Set_Overwrite(t *testing.T) {
 	}
 	if err := c.Set(ctx, "dup", "second"); err != nil {
 		t.Fatalf("Set second: %v", err)
+	}
+	// Cache-only Get: warm after the overwrite so the initial List captures "second".
+	defer c.getConfigMapStore().Stop()
+	if err := c.EnsureConfigMapSynced(ctx); err != nil {
+		t.Fatalf("EnsureConfigMapSynced: %v", err)
 	}
 	got, err := c.Get(ctx, "dup")
 	if err != nil {

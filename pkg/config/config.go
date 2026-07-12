@@ -221,6 +221,19 @@ var (
 	// rollout to finish. Without it, a sidecar that never becomes ready makes
 	// the operation (e.g. `kubevpn proxy`) hang indefinitely.
 	RolloutStatusTimeout = 2 * time.Minute
+
+	// ConfigMapSyncTimeout bounds how long ConfigMapStore.EnsureSynced waits for the
+	// traffic manager ConfigMap informer to complete its initial List at connection
+	// establishment. The store has no live-API read fallback, so reads before the cache
+	// is warm return empty; warming here keeps steady-state reads cache-served. Connect
+	// treats a timeout as fatal (fail fast) — a cache that never warms would read empty
+	// forever, and a sync failure here means the API is already unreachable.
+	ConfigMapSyncTimeout = 10 * time.Second
+
+	// SudoStatusTimeout bounds the user daemon's cross-daemon Status hop to the sudo
+	// daemon (getSudoTunIPs). It caps how long a wedged sudo daemon can stall an
+	// otherwise-local command, independent of the read-path fixes.
+	SudoStatusTimeout = 2 * time.Second
 )
 
 var (

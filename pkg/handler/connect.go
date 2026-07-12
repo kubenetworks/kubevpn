@@ -147,13 +147,20 @@ func (c *ConnectOptions) Set(ctx context.Context, key, value string) error {
 	return c.getConfigMapStore().Set(ctx, key, value)
 }
 
-// Get retrieves a value by key from the traffic manager ConfigMap, using the informer cache first.
+// Get retrieves a value by key from the traffic manager ConfigMap via the informer cache.
 func (c *ConnectOptions) Get(ctx context.Context, key string) (string, error) {
 	return c.getConfigMapStore().Get(ctx, key)
 }
 
-// GetTrafficManagerConfigMap returns the traffic manager ConfigMap from the informer cache
-// (GET fallback when cold). Use this for read paths that want near-real-time state.
+// EnsureConfigMapSynced warms the traffic manager ConfigMap informer at connection
+// establishment so later reads are cache-served (the store has no live-API fallback).
+func (c *ConnectOptions) EnsureConfigMapSynced(ctx context.Context) error {
+	return c.getConfigMapStore().EnsureSynced(ctx)
+}
+
+// GetTrafficManagerConfigMap returns the traffic manager ConfigMap from the warm informer
+// cache (see EnsureConfigMapSynced). Returns (nil, nil) on a cache miss — never a blocking
+// live-API GET.
 func (c *ConnectOptions) GetTrafficManagerConfigMap(ctx context.Context) (*v1.ConfigMap, error) {
 	return c.getConfigMapStore().GetConfigMap(ctx)
 }

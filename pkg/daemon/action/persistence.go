@@ -9,12 +9,14 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/natefinch/lumberjack.v2"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // Server implements the gRPC Daemon service, managing VPN connections, syncing, and lifecycle operations.
@@ -107,6 +109,73 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 	return nil
 }
 
+// ReconcileSudoConnections reaps orphaned sudo (data-plane) DataSessions left after daemon
+// drift — e.g. the user daemon was restarted (or lost its persisted state) while the sudo
+// daemon kept running with connections the user daemon no longer tracks. Such an orphan holds
+// a phantom TUN, and (its cluster being unreachable) previously wedged commands via the
+// status read path. Call once at startup, AFTER LoadFromConfig has re-established the
+// authoritative set.
+//
+// User daemon only. To avoid racing an in-flight connect — forwardConnectToSudo registers the
+// sudo DataSession BEFORE appending to the user slice — it reaps only sudo connections that
+// are BOTH absent from the user daemon's set AND not reporting "connected": an establishing or
+// healthy connection reports connected and is spared, while an orphan (unreachable cluster →
+// dead heartbeat) reports unhealthy/disconnected. Best-effort.
+func (svr *Server) ReconcileSudoConnections(ctx context.Context) {
+	if svr.IsSudo || svr.GetClient == nil {
+		return
+	}
+	cli, err := svr.GetClient(true)
+	if err != nil {
+		return
+	}
+	statusCtx, cancel := context.WithTimeout(ctx, config.SudoStatusTimeout)
+	resp, err := cli.Status(statusCtx, &rpc.StatusRequest{})
+	cancel()
+	if err != nil {
+		return
+	}
+
+	svr.connMu.RLock()
+	userIDs := make(map[string]struct{}, len(svr.connections))
+	for _, c := range svr.connections {
+		userIDs[c.GetConnectionID()] = struct{}{}
+	}
+	svr.connMu.RUnlock()
+
+	for _, s := range resp.GetList() {
+		id := s.GetConnectionID()
+		if id == "" {
+			continue
+		}
+		if _, ok := userIDs[id]; ok {
+			continue // tracked by the user daemon — not an orphan
+		}
+		if s.GetStatus() == StatusOk {
+			continue // establishing or healthy — spare it (avoid racing an in-flight connect)
+		}
+		plog.G(ctx).Infof("Reaping orphaned data-plane connection %s (status=%s) with no user-daemon owner", id, s.GetStatus())
+		if err := svr.reapSudoConnection(ctx, cli, id); err != nil {
+			plog.G(ctx).Warnf("Failed to reap orphaned connection %s: %v", id, err)
+		}
+	}
+}
+
+// reapSudoConnection asks the sudo daemon to disconnect a single orphaned connection by ID.
+// The sudo daemon's Disconnect handler (IsSudo) removes the connection and tears down its
+// data plane directly — no leave/forward orchestration, which is correct for an orphan whose
+// cluster is unreachable.
+func (svr *Server) reapSudoConnection(ctx context.Context, cli rpc.DaemonClient, id string) error {
+	stream, err := cli.Disconnect(ctx)
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(&rpc.DisconnectRequest{ConnectionID: ptr.To(id)}); err != nil {
+		return err
+	}
+	return grpcutil.PrintGRPCStream[rpc.DisconnectResponse](ctx, stream, svr.LogFile)
+}
+
 // OffloadToConfig persists the current connection state to disk for later restoration.
 func (svr *Server) OffloadToConfig() error {
 	svr.connMu.RLock()
@@ -155,6 +224,11 @@ func (svr *Server) getSudoTunIPs(ctx context.Context) map[string]tunIP {
 	if err != nil {
 		return nil
 	}
+	// Bound the cross-daemon hop so a wedged sudo daemon can never stall an otherwise-local
+	// user-daemon command (defense in depth beyond the cache-only read path). On timeout the
+	// user daemon reports without the sudo-owned TUN IPs rather than blocking.
+	ctx, cancel := context.WithTimeout(ctx, config.SudoStatusTimeout)
+	defer cancel()
 	resp, err := cli.Status(ctx, &rpc.StatusRequest{})
 	if err != nil {
 		return nil

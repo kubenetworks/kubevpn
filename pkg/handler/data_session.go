@@ -69,6 +69,17 @@ func (ds *DataSession) DoConnect(ctx context.Context) (err error) {
 	plog.G(ctx).Debug("Starting connect to cluster")
 	go ds.setupSignalHandler(ds.ctx)
 
+	// Warm the ConfigMap informer before any read (getCIDR reads KeyClusterCIDRs below).
+	// The store has no live-API fallback, so a connection whose cache never warms would read
+	// empty forever; fail fast instead of silently degrading. CreateOutboundPod already ran in
+	// the user daemon, so the ConfigMap exists and the informer can List it — a sync failure
+	// here means the API is unreachable, which the subsequent connect steps would fail on anyway.
+	if err = ds.getConfigMapStore().EnsureSynced(ds.ctx); err != nil {
+		plog.G(ctx).Errorf("Failed to warm traffic manager ConfigMap cache: %v", err)
+		err = fmt.Errorf("failed to warm traffic manager ConfigMap cache: %w", err)
+		return
+	}
+
 	var cidrs []*net.IPNet
 	var apiServerIPs []net.IP
 	if cidrs, apiServerIPs, err = ds.getCIDR(ds.ctx); err != nil {

@@ -113,7 +113,12 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	}
 	o.svr = &action.Server{Cancel: cleanup, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: l, ID: o.ID}
 	if !o.IsSudo {
-		go o.svr.LoadFromConfig(o.ctx)
+		go func() {
+			// Restore persisted connections first so the user daemon holds its authoritative
+			// set, then reap any orphaned sudo (data-plane) sessions left by daemon drift.
+			_ = o.svr.LoadFromConfig(o.ctx)
+			o.svr.ReconcileSudoConnections(o.ctx)
+		}()
 	}
 	rpc.RegisterDaemonServer(svr, o.svr)
 	return downgradingServer.Serve(lis)
