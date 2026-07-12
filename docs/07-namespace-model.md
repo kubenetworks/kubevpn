@@ -11,8 +11,8 @@ KubeVPN operates across two namespaces that may or may not be the same. Confusin
 **What:** The namespace where the traffic manager infrastructure lives.
 
 **Contains:**
-- `kubevpn-traffic-manager` Deployment (vpn + control-plane + webhook containers)
-- `kubevpn-traffic-manager` Service (ports 10801, 9002, 80, 53)
+- `kubevpn-traffic-manager` Deployment (vpn + control-plane containers)
+- `kubevpn-traffic-manager` Service (ports 10801, 9002, 53)
 - `kubevpn-traffic-manager` ConfigMap (DHCP leases + envoy config)
 - `kubevpn-traffic-manager` Secret (TLS certificates)
 - ServiceAccount, Role, RoleBinding

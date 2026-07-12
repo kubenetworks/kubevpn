@@ -14,5 +14,4 @@ data:
   DHCP6: ""
   ENVOY_CONFIG: ""
   IPv4_POOLS: "{{ .Values.cidr.pod }} {{ .Values.cidr.service }}"
-  REF_COUNT: "0"
   {{- end }}

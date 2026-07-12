@@ -90,8 +90,7 @@ pkg/
 ├── syncthing/         Syncthing client/server integration
 ├── tun/               TUN device creation and route management
 ├── upgrade/           Client self-upgrade
-├── util/              Shared utilities
-└── webhook/           Admission webhook (DHCP IP injection)
+└── util/              Shared utilities
 ```
 
 ## Generated Files — DO NOT EDIT
