@@ -92,6 +92,8 @@ In addition, the client **observes the ICMP echo replies** to the #1 TUN heartbe
 
 **Failure action:** After 3 consecutive failures (with 10s backoff), calls `cancelFunc()` to tear down the port-forward, which triggers a reconnection in the `portForward()` retry loop.
 
+**Status feedback (control-plane health in `status`):** each verdict is also reported to the NetworkManager via an `onHealth(bool)` callback — `true` after a successful check, `false` once the retries are exhausted (a normal ctx-cancel teardown does not report). `NetworkManager.controlPlaneHealthy` (optimistically `true` at start) feeds `deriveConnectionStatus`: a TUN that is up with a fresh heartbeat but a **down control plane** reports `unhealthy` instead of `connected`. Heartbeat stays the primary signal — control-plane health only demotes `connected`→`unhealthy`, never fakes `disconnected`. Exposed via `Connection.GetControlPlaneHealthy()` (`DataSession` reads the NM; `ConnectOptions` stubs `true`).
+
 **Period:** 30s, with 10s×3 retry backoff before declaring failure
 
 > **Removed (dead code):** an earlier DNS-via-gudp variant `healthCheckPortForward()` (probed the data-plane path with a DNS query) was defined but never wired — only `healthCheckGRPC` is used — and has been deleted.
@@ -108,6 +110,20 @@ In addition, the client **observes the ICMP echo replies** to the #1 TUN heartbe
 
 **Trigger:** Informer watch events (immediate) + 30s ticker fallback
 
+### #6 User→Root Daemon Liveness Monitor
+
+**File:** `pkg/daemon/action/persistence.go` — `MonitorSudoLiveness()` (user daemon only)
+
+**What:** After `Connect` returns there is **no long-lived stream** between the user and root daemons (the root daemon's `Connect` returns once `DoConnect` finishes; the data plane lives on its own `ds.ctx`), and the self-staleness watchdog (`detectUnixSocksFile`, [35-daemon-bootstrap.md](35-daemon-bootstrap.md)) only checks each daemon's *own* socket. This is the missing **peer-liveness edge**: every `config.SudoLivenessProbeInterval` (2s, matching the watchdog cadence) the user daemon probes the root daemon and caches a per-connection health snapshot that `Status`/`ConnectionList` serve from (decoupling status latency from the cross-daemon hop).
+
+**Steps per tick:**
+1. **Crash-safe PID pre-check** (`sudoProcessAlive`, `signal 0`): if the root-daemon process is gone, report `disconnected` without a doomed gRPC dial — this catches a `kill -9` that left a stale socket behind (a plain `os.Stat` on the socket would not). Platform-split `process_{unix,windows}.go`; Windows falls through to the probe.
+2. **gRPC probe** (`probeSudo`, bounded by `config.SudoStatusTimeout`): success → cache the fresh snapshot (`connected`); `ErrDaemonNotRunning` → `disconnected`; a transient failure (daemon alive, mid-restart) → keep the last-known connections but downgrade to `unhealthy` (don't flap to `disconnected`). `codes.Unavailable` also drops the cached client so the next probe redials.
+
+**Report-only:** the monitor never respawns the root daemon — that needs interactive privilege escalation ([34-privilege-escalation.md](34-privilege-escalation.md)), which a detached background daemon cannot do. Recovery is left to the next CLI command's `StartupDaemon` (foreground). Reachability transitions are logged once (not every interval).
+
+**Period:** 2s (`config.SudoLivenessProbeInterval`)
+
 ## Timing Relationships
 
 ```
@@ -123,11 +139,12 @@ In addition, the client **observes the ICMP echo replies** to the #1 TUN heartbe
 | Failure | Detected by | Detection time |
 |---------|-------------|----------------|
 | Pod crash/restart | #4, #5 (watch event) | <1s (informer) or 30s (ticker) |
-| Port-forward broken | #4 (DNS query via gudp) | 30s + retry |
+| Port-forward / control plane broken | #4 (gRPC health `Check`) | 30s + retry; surfaced in `status` as `unhealthy` |
 | TUN tunnel stall | #3 (read deadline) | 180s |
 | TCP connection half-open | #2 (OS keepalive) | ~60s |
 | Slot idle (no traffic) | #1 (heartbeat broadcast) | 60s |
 | Data plane not carrying traffic | heartbeat-reply staleness (`status`) | ~90s |
+| Root (sudo) daemon crash | #6 (liveness monitor: PID + gRPC probe) | ~2s → `status` `disconnected` |
 
 ## API Server Load
 
@@ -148,18 +165,19 @@ All ConfigMap reads use the shared informer cache; `GetTrafficManagerConfigMap` 
 
 ### The sudo daemon owns the verdict
 
-The decision inputs — TUN device presence and heartbeat-reply freshness — are both available in the **root (sudo) daemon**, which owns the TUN and observes the replies. So the sudo daemon computes the full `connected` / `unhealthy` / `disconnected` verdict itself, in `deriveConnectionStatus`:
+The decision inputs — TUN device presence, heartbeat-reply freshness, and control-plane (xds) health — are all available in the **root (sudo) daemon**, which owns the TUN, observes the replies, and runs the #4 health check. So the sudo daemon computes the full `connected` / `unhealthy` / `disconnected` verdict itself, in `deriveConnectionStatus`:
 
 ```go
-func deriveConnectionStatus(tunUp bool, lastHeartbeat time.Time) string {
+func deriveConnectionStatus(tunUp bool, lastHeartbeat time.Time, controlPlaneOK bool) string {
     if !tunUp { return StatusFailed }                                  // disconnected
     if lastHeartbeat.IsZero() ||
         time.Since(lastHeartbeat) > heartbeatStaleThreshold { return StatusUnhealthy }
+    if !controlPlaneOK { return StatusUnhealthy }                       // TUN+heartbeat ok, xds down
     return StatusOk                                                    // connected
 }
 ```
 
-`heartbeatStaleThreshold = config.KeepAliveTime * 3 / 2` (90s) — tolerates one missed beat's jitter. Worst-case detection latency is ~90s; recovery is fast because each slot proactively re-announces its route directly on the new conn the moment it reconnects (see #1 *Proactive registration on (re)connect*), and that announcement's echo reply also refreshes the liveness signal.
+`heartbeatStaleThreshold = config.KeepAliveTime * 3 / 2` (90s) — tolerates one missed beat's jitter. Worst-case heartbeat-staleness detection latency is ~90s; recovery is fast because each slot proactively re-announces its route directly on the new conn the moment it reconnects (see #1 *Proactive registration on (re)connect*), and that announcement's echo reply also refreshes the liveness signal. A dead **root daemon** (as opposed to a stale heartbeat) is caught far sooner — ~2s — by the #6 liveness monitor.
 
 ### The user daemon reuses the verdict (no new proto field)
 
@@ -170,17 +188,18 @@ root daemon (data plane)                       user daemon (control plane)
 ─────────────────────────                      ───────────────────────────
 clientTransport.readFromConn
   └─ HeartbeatStats.MarkReply()                Status RPC
-       ▲                                          └─ getSudoTunIPs() ── queries sudo Status
-NetworkManager.LastHeartbeat()                        │  reads Status (the verdict string)
+       ▲                                          └─ sudoHealthSnapshot() ── #6 monitor cache
+NetworkManager.LastHeartbeat()                        │  (probeSudo → sudo Status string)
        ▲                                              ▼
 ConnectOptions.GetLastHeartbeat()              resolveStatus(connect, ips, tunUp)
        ▲                                          └─ user: ip.status from sudo
-deriveConnectionStatus(tunUp, lastHeartbeat)      └─ sudo: deriveConnectionStatus(...)
+deriveConnectionStatus(tunUp, lastHeartbeat,      └─ sudo: deriveConnectionStatus(...)
+                       controlPlaneOK)
   → sets Status string (sudo daemon)
 ```
 
-- Sudo daemon: `buildConnectionStatus` → `resolveStatus` (no map) → `deriveConnectionStatus(tunUp, connect.GetLastHeartbeat())`.
-- User daemon: `getSudoTunIPs` reads the sudo `Status` string into the per-connection `tunIP` map; `resolveStatus` returns it (or `disconnected` if the sudo daemon doesn't know the connection).
+- Sudo daemon: `buildConnectionStatus` → `resolveStatus` (no map) → `deriveConnectionStatus(tunUp, connect.GetLastHeartbeat(), connect.GetControlPlaneHealthy())`.
+- User daemon: the #6 liveness monitor probes the sudo daemon every 2s and caches the `Status` string per connection in `sudoHealth`; `Status`/`ConnectionList` read that cache via `sudoHealthSnapshot` (falling back to a live `getSudoTunIPs` only while the cache is cold). `resolveStatus` returns the cached verdict (or `disconnected` if the sudo daemon doesn't know the connection).
 
 ### Why heartbeat reply (vs an active probe)
 
