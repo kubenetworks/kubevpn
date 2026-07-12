@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"sync"
 	"time"
@@ -35,9 +34,13 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		return err
 	}
 
-	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newStreamWriter(func(msg string) error {
-		return resp.Send(&rpc.ProxyResponse{Message: msg})
-	}), svr.LogFile))
+	logger := plog.GetLoggerForServer(int32(log.InfoLevel), svr.LogFile)
+	logger.AddHook(&plog.StreamHook{
+		Writer: newStreamWriter(func(msg string) error {
+			return resp.Send(&rpc.ProxyResponse{Message: msg})
+		}),
+		Level: log.InfoLevel,
+	})
 	ctx := plog.WithLogger(resp.Context(), logger)
 	file, err := resolveKubeconfig(ctx, req.SshJump, req.KubeconfigBytes, false)
 	if err != nil {

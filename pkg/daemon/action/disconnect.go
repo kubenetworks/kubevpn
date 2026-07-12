@@ -3,7 +3,6 @@ package action
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 
 	log "github.com/sirupsen/logrus"
@@ -31,9 +30,13 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		return err
 	}
 
-	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newStreamWriter(func(msg string) error {
-		return resp.Send(&rpc.DisconnectResponse{Message: msg})
-	}), svr.LogFile))
+	logger := plog.GetLoggerForServer(int32(log.InfoLevel), svr.LogFile)
+	logger.AddHook(&plog.StreamHook{
+		Writer: newStreamWriter(func(msg string) error {
+			return resp.Send(&rpc.DisconnectResponse{Message: msg})
+		}),
+		Level: log.InfoLevel,
+	})
 	ctx := plog.WithLogger(resp.Context(), logger)
 
 	// disconnect sudo daemon first

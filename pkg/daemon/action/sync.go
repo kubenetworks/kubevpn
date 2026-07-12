@@ -3,8 +3,8 @@ package action
 import (
 	"context"
 	"fmt"
-	"io"
 
+	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
@@ -20,9 +20,13 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	if err != nil {
 		return err
 	}
-	logger := plog.GetLoggerForClient(req.Level, io.MultiWriter(newStreamWriter(func(msg string) error {
-		return resp.Send(&rpc.SyncResponse{Message: msg})
-	}), svr.LogFile))
+	logger := plog.GetLoggerForServer(req.Level, svr.LogFile)
+	logger.AddHook(&plog.StreamHook{
+		Writer: newStreamWriter(func(msg string) error {
+			return resp.Send(&rpc.SyncResponse{Message: msg})
+		}),
+		Level: log.InfoLevel,
+	})
 
 	connReq := &rpc.ConnectRequest{
 		KubeconfigBytes:      req.KubeconfigBytes,

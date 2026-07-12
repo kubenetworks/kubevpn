@@ -93,7 +93,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 		`)),
 		Args: cobra.MatchAll(cobra.OnlyValidArgs, cobra.MinimumNArgs(1)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			if err = daemon.StartupDaemon(cmd.Context()); err != nil {
 				return err
 			}

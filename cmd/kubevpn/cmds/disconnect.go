@@ -40,7 +40,7 @@ func CmdDisconnect(f cmdutil.Factory) *cobra.Command {
 		kubevpn disconnect --all
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			err = daemon.StartupDaemon(cmd.Context())
 			return err
 		},

@@ -54,7 +54,7 @@ func TestName(t *testing.T) {
 	// IPv6 with CIDR
 	configList, err := libcni.ConfListFromBytes([]byte(s))
 	if err == nil {
-		plog.G(context.Background()).Infoln("Get CNI config", configList.Name)
+		plog.G(context.Background()).Infoln("Found CNI config", configList.Name)
 	}
 	for _, plugin := range configList.Plugins {
 		var m map[string]any

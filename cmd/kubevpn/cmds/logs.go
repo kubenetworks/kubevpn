@@ -29,7 +29,7 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
         kubevpn logs -f
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			// startup daemon process and sudo process
 			return daemon.StartupDaemon(cmd.Context())
 		},

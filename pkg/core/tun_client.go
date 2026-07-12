@@ -123,7 +123,7 @@ func (d *ClientDevice) runSlot(ctx context.Context, forward *Forwarder, slotID i
 				return
 			}
 			defer conn.Close()
-			plog.G(ctx).Infof("[Client-%d] Connected to %s", slotID, conn.RemoteAddr())
+			plog.G(ctx).Debugf("[Client-%d] Connected to %s", slotID, conn.RemoteAddr())
 
 			// Signal heartbeat on reconnect (not first connect — initial heartbeat covers that)
 			if slotID == 0 && !firstConnect {

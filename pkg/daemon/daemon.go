@@ -222,6 +222,7 @@ func initLogging(isSudo bool) *lumberjack.Logger {
 	klog.SetOutput(l)
 	klog.LogToStderr(false)
 	plog.L.SetOutput(l)
+	plog.L.SetLevel(log.DebugLevel)
 	glog.SetTarget(plog.ServerEmitter{Writer: &glog.Writer{Next: l}})
 	rest.SetDefaultWarningHandler(rest.NoWarnings{})
 	go rotateLog(l)

@@ -2,7 +2,6 @@ package action
 
 import (
 	"context"
-	"io"
 	"os"
 
 	log "github.com/sirupsen/logrus"
@@ -24,7 +23,8 @@ func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 	} else {
 		sendFunc = func(string) error { return nil }
 	}
-	logger := plog.GetLoggerForClient(int32(log.InfoLevel), io.MultiWriter(newStreamWriter(sendFunc), svr.LogFile))
+	logger := plog.GetLoggerForServer(int32(log.InfoLevel), svr.LogFile)
+	logger.AddHook(&plog.StreamHook{Writer: newStreamWriter(sendFunc), Level: log.InfoLevel})
 	ctx := context.Background()
 	if resp != nil {
 		ctx = resp.Context()

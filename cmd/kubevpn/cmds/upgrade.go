@@ -20,7 +20,7 @@ func CmdUpgrade(cmdutil.Factory) *cobra.Command {
 		upgrade local daemon grpc server to latest version.
 		`)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			return upgrade.Main(cmd.Context(), quit)
 		},
 	}

@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/cmd/rollout"
@@ -124,10 +122,6 @@ func getCIDR(ctx context.Context, factory cmdutil.Factory) error {
 		plog.G(ctx).Errorf("Failed to get CIDR: %v", err)
 		return err
 	}
-	s := sets.New[string]()
-	for _, cidr := range cidrs {
-		s.Insert(cidr.String())
-	}
-	plog.G(ctx).Infof("Get CIDR: %v", strings.Join(s.UnsortedList(), " "))
+	plog.G(ctx).Infof("Get CIDR: %v", encodeCIDRs(cidrs))
 	return nil
 }

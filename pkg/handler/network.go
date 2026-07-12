@@ -15,14 +15,12 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apinetworkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	informerv1 "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	v2 "k8s.io/client-go/kubernetes/typed/networking/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/utils/ptr"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -201,7 +199,7 @@ func (nm *NetworkManager) rentIP(ctx context.Context) error {
 
 		nm.localTunIPv4 = v4
 		nm.localTunIPv6 = v6
-		plog.G(ctx).Infof("Allocated TUN IP: v4=%s v6=%s", v4, v6)
+		plog.G(ctx).Debugf("Allocated TUN IP: v4=%s v6=%s", v4, v6)
 		return nil
 	}
 
@@ -366,15 +364,12 @@ func (nm *NetworkManager) portForward(ctx context.Context, portPair []string) er
 	defer firstCancelFunc()
 	errChan := make(chan error, 1)
 	go func() {
-		runtime.ErrorHandlers = []runtime.ErrorHandler{func(ctx context.Context, err error, msg string, keysAndValues ...any) {
-			plog.G(ctx).Error(err)
-		}}
-		first := ptr.To(true)
+		first := true
 		for ctx.Err() == nil {
 			sessionStart := time.Now()
-			err := nm.portForwardOnce(ctx, portPair, *first, firstCancelFunc)
+			err := nm.portForwardOnce(ctx, portPair, first, firstCancelFunc)
 			sessionDuration := time.Since(sessionStart)
-			if *first {
+			if first {
 				if err != nil {
 					util.SafeWrite(errChan, err)
 					return
@@ -382,7 +377,7 @@ func (nm *NetworkManager) portForward(ctx context.Context, portPair []string) er
 			} else {
 				plog.G(ctx).Infof("[Perf] Port-forward session ended after %v, reconnecting...", sessionDuration)
 			}
-			first = ptr.To(false)
+			first = false
 			time.Sleep(time.Millisecond * 200)
 		}
 	}()
@@ -526,7 +521,7 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 			plog.G(ctx).Errorf("[Client] Local TUN server exited: %v", err)
 		}
 	}()
-	plog.G(ctx).Infof("[Client] TUN server started, forwarding to %s", forwardAddress)
+	plog.G(ctx).Debugf("[Client] TUN server started, forwarding to %s", forwardAddress)
 
 	nm.tunName, err = nm.getTunDeviceName()
 	return err

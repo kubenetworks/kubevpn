@@ -30,7 +30,7 @@ kubevpn image copy ghcr.io/kubenetworks/kubevpn:latest registry.example.org/kube
 kubevpn image copy ghcr.io/kubenetworks/kubevpn:latest ghcr.io/kubenetworks/kubevpn:v2.3.4`,
 		Args: cobra.MatchAll(cobra.ExactArgs(2), cobra.OnlyValidArgs),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			plog.InitLoggerForClient()
+			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
