@@ -68,6 +68,19 @@ type NetworkManager struct {
 	dnsConfig             *dns.Config
 }
 
+const (
+	// ipWatcherRetryInterval is the delay before reconnecting the cluster IP watcher.
+	ipWatcherRetryInterval = 10 * time.Second
+	// portForwardPodListTimeout bounds listing the traffic-manager pod before a port-forward session.
+	portForwardPodListTimeout = 10 * time.Second
+	// portForwardReconnectDelay is the pause between port-forward reconnect attempts.
+	portForwardReconnectDelay = 200 * time.Millisecond
+	// routeWatchInterval is the debounce/refresh period for the dynamic route-table watcher.
+	routeWatchInterval = 15 * time.Second
+	// portForwardStartTimeout is how long to wait for the first port-forward session to become ready.
+	portForwardStartTimeout = 60 * time.Second
+)
+
 // newNetworkManager creates a NetworkManager with the given configuration.
 func newNetworkManager(cfg NetworkConfig) *NetworkManager {
 	return &NetworkManager{cfg: cfg}
@@ -118,8 +131,8 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 
 	plog.G(nm.ctx).Info("Forwarding port...")
 	portPair := []string{
-		fmt.Sprintf("%d:10801", gvisorTCPForwardPort),
-		fmt.Sprintf("%d:10802", gvisorUDPForwardPort),
+		fmt.Sprintf("%d:%d", gvisorTCPForwardPort, config.PortTCP),
+		fmt.Sprintf("%d:%d", gvisorUDPForwardPort, config.PortUDP),
 		fmt.Sprintf("%d:%d", controlPlanePort, config.PortControlPlane),
 	}
 
@@ -298,7 +311,7 @@ func (nm *NetworkManager) watchTunIPFromControlPlane(ctx context.Context) {
 			plog.G(ctx).Debugf("[IPWatcher] Watch disconnected: %v, retrying in 10s", err)
 		}
 		select {
-		case <-time.After(10 * time.Second):
+		case <-time.After(ipWatcherRetryInterval):
 		case <-ctx.Done():
 			return
 		}
@@ -378,10 +391,10 @@ func (nm *NetworkManager) portForward(ctx context.Context, portPair []string) er
 				plog.G(ctx).Infof("[Perf] Port-forward session ended after %v, reconnecting...", sessionDuration)
 			}
 			first = false
-			time.Sleep(time.Millisecond * 200)
+			time.Sleep(portForwardReconnectDelay)
 		}
 	}()
-	ticker := time.NewTicker(time.Second * 60)
+	ticker := time.NewTicker(portForwardStartTimeout)
 	defer ticker.Stop()
 	select {
 	case <-ticker.C:
@@ -395,7 +408,7 @@ func (nm *NetworkManager) portForward(ctx context.Context, portPair []string) er
 
 // portForwardOnce runs a single port-forward session to the traffic manager pod.
 func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string, first bool, onReady func()) error {
-	ctx2, cancelFunc2 := context.WithTimeout(ctx, time.Second*10)
+	ctx2, cancelFunc2 := context.WithTimeout(ctx, portForwardPodListTimeout)
 	defer cancelFunc2()
 	podList, err := nm.cfg.GetRunningPodList(ctx2)
 	if err != nil {
@@ -716,7 +729,7 @@ func (nm *NetworkManager) AddRouteDynamic(ctx context.Context) (cache.SharedInde
 // watchAndRoute starts an informer and a goroutine that periodically extracts
 // IPs from the cache and adds them to the route table.
 func (nm *NetworkManager) watchAndRoute(ctx context.Context, informer cache.SharedIndexInformer, extractIPs func(any) []string) error {
-	ticker := time.NewTicker(time.Second * 15)
+	ticker := time.NewTicker(routeWatchInterval)
 	_, err := informer.AddEventHandler(newTickerResetHandler(ticker))
 	if err != nil {
 		return err
@@ -725,7 +738,7 @@ func (nm *NetworkManager) watchAndRoute(ctx context.Context, informer cache.Shar
 	go func() {
 		defer ticker.Stop()
 		for ; ctx.Err() == nil; <-ticker.C {
-			ticker.Reset(time.Second * 15)
+			ticker.Reset(routeWatchInterval)
 			ips := sets.New[string]()
 			for _, obj := range informer.GetIndexer().List() {
 				ips.Insert(extractIPs(obj)...)

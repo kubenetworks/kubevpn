@@ -127,6 +127,9 @@ func recent(resp rpc.Daemon_LogsServer, sudoOffset int64, userOffset int64) erro
 	return sendLines(resp, sudoFile, "[ROOT] ")
 }
 
+// tailBlockSize is the chunk size used when scanning a log file backwards for the last N lines.
+const tailBlockSize = 4096
+
 func seekToLastLine(filename string, lines int64) (int64, int64, error) {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -139,7 +142,7 @@ func seekToLastLine(filename string, lines int64) (int64, int64, error) {
 		return 0, 0, err
 	}
 	size := stat.Size()
-	bufSize := int64(4096)
+	bufSize := int64(tailBlockSize)
 	lineCount := int64(0)
 	remaining := size
 

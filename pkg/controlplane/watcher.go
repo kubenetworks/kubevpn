@@ -25,6 +25,9 @@ type NotifyMessage struct {
 // OnDHCPChange is called when the DHCP data in the ConfigMap changes.
 type OnDHCPChange func(ctx context.Context)
 
+// cmResyncInterval is the polling fallback interval for the ConfigMap watch loop.
+const cmResyncInterval = 5 * time.Second
+
 // Watch monitors the traffic-manager ConfigMap for changes and sends updates to notifyCh.
 func Watch(ctx context.Context, f cmdutil.Factory, notifyCh chan<- NotifyMessage, onDHCPChange ...OnDHCPChange) error {
 	namespace, _, err := f.ToRawKubeConfigLoader().Namespace()
@@ -47,7 +50,7 @@ func Watch(ctx context.Context, f cmdutil.Factory, notifyCh chan<- NotifyMessage
 	cmInformer := informerv1.NewFilteredConfigMapInformer(clientSet, namespace, 0, cmIndexers, func(options *metav1.ListOptions) {
 		options.FieldSelector = fields.OneTermEqualSelector("metadata.name", config.ConfigMapPodTrafficManager).String()
 	})
-	cmTicker := time.NewTicker(time.Second * 5)
+	cmTicker := time.NewTicker(cmResyncInterval)
 	_, err = cmInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
 			cmTicker.Reset(time.Nanosecond * 1)
@@ -67,7 +70,7 @@ func Watch(ctx context.Context, f cmdutil.Factory, notifyCh chan<- NotifyMessage
 	go cmInformer.Run(ctx.Done())
 	defer cmTicker.Stop()
 	for ; ctx.Err() == nil; <-cmTicker.C {
-		cmTicker.Reset(time.Second * 5)
+		cmTicker.Reset(cmResyncInterval)
 		cmList := cmInformer.GetIndexer().List()
 		if len(cmList) == 0 {
 			continue

@@ -13,7 +13,6 @@ import (
 	"context"
 	"net"
 	"net/netip"
-	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -26,7 +25,7 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 	sshConfig := &ssh.ClientConfig{
 		Auth:            []ssh.AuthMethod{},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         time.Second * 10,
+		Timeout:         sshOpTimeout,
 	}
 
 	// Connect to SSH remote server using serverEndpoint

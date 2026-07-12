@@ -28,6 +28,18 @@ const (
 	DBFile = "db"
 )
 
+// File permission modes for files, directories, and sockets created by kubevpn.
+const (
+	// FileModeFile is the mode for regular files: rw-r--r--.
+	FileModeFile os.FileMode = 0644
+	// FileModeExecutable is the mode for executables and directories: rwxr-xr-x.
+	FileModeExecutable os.FileMode = 0755
+	// FileModePrivate is the mode for owner-only files/directories: rwx------.
+	FileModePrivate os.FileMode = 0700
+	// FileModeSocket is the mode for the daemon unix socket: rw-rw-rw-.
+	FileModeSocket os.FileMode = 0666
+)
+
 var (
 	homePath   string
 	daemonPath string
@@ -50,7 +62,7 @@ func init() {
 	for _, path := range paths {
 		_, err = os.Stat(path)
 		if errors.Is(err, os.ErrNotExist) {
-			if err = os.MkdirAll(path, 0755); err != nil {
+			if err = os.MkdirAll(path, FileModeExecutable); err != nil {
 				panic(err)
 			}
 		} else if err != nil {
@@ -61,7 +73,7 @@ func init() {
 	path := filepath.Join(homePath, ConfigFile)
 	_, err = os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		err = os.WriteFile(path, config, 0644)
+		err = os.WriteFile(path, config, FileModeFile)
 	}
 	if err != nil {
 		panic(err)

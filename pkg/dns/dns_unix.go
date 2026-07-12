@@ -93,10 +93,10 @@ func (c *Config) usingResolver(ctx context.Context) {
 
 	path := "/etc/resolver"
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err = os.MkdirAll(path, 0755); err != nil {
+		if err = os.MkdirAll(path, config.FileModeExecutable); err != nil {
 			plog.G(ctx).Errorf("Create resolver error: %v", err)
 		}
-		if err = os.Chmod(path, 0755); err != nil {
+		if err = os.Chmod(path, config.FileModeExecutable); err != nil {
 			plog.G(ctx).Errorf("Chmod resolver error: %v", err)
 		}
 	}
@@ -114,7 +114,7 @@ func (c *Config) usingResolver(ctx context.Context) {
 		}
 		content, err := os.ReadFile(filename)
 		if os.IsNotExist(err) {
-			_ = os.WriteFile(filename, []byte(toString(newConfig)), 0644)
+			_ = os.WriteFile(filename, []byte(toString(newConfig)), config.FileModeFile)
 			continue
 		}
 		if err != nil {
@@ -133,7 +133,7 @@ func (c *Config) usingResolver(ctx context.Context) {
 		}
 		// insert current name server to first location
 		conf.Servers = append([]string{clientConfig.Servers[0]}, conf.Servers...)
-		err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
+		err = os.WriteFile(filename, []byte(toString(*conf)), config.FileModeFile)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to write resolver %s: %v", filename, err)
 		}
@@ -203,7 +203,7 @@ func (c *Config) CancelDNS() {
 			_ = os.Remove(filename)
 			continue
 		}
-		err = os.WriteFile(filename, []byte(toString(*conf)), 0644)
+		err = os.WriteFile(filename, []byte(toString(*conf)), config.FileModeFile)
 		if err != nil {
 			plog.G(context.Background()).Errorf("failed to write resolver %s: %v", filename, err)
 		}

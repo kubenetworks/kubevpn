@@ -480,18 +480,21 @@ func (s *TunConfigServer) syncEnvoyRuleIP(ctx context.Context, ownerID string, n
 }
 
 // ControlPlanePort is the gRPC port used by the envoy control plane and TunConfigService.
-const ControlPlanePort uint = 9002
+const ControlPlanePort uint = config.PortControlPlane
 
 // LeaseDuration is how long a TUN IP allocation stays valid without renewal.
 // If a client doesn't call GetTunIP (which doubles as renew) within this duration,
 // the IP is reclaimed and recycled.
 const LeaseDuration = 5 * time.Minute
 
+// leaseReapInterval is how often the lease reaper scans for and reclaims expired allocations.
+const leaseReapInterval = 30 * time.Second
+
 // StartLeaseReaper launches a background goroutine that periodically checks for
 // expired allocations and reclaims them.
 func (s *TunConfigServer) StartLeaseReaper(ctx context.Context) {
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(leaseReapInterval)
 		defer ticker.Stop()
 		for {
 			select {

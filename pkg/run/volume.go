@@ -42,7 +42,7 @@ func GetVolume(ctx context.Context, clientset kubernetes.Interface, f util.Facto
 				continue
 			}
 			localPath := filepath.Join(os.TempDir(), strconv.Itoa(rand.Int()))
-			err = os.MkdirAll(localPath, 0755)
+			err = os.MkdirAll(localPath, config.FileModeExecutable)
 			if err != nil {
 				return nil, err
 			}

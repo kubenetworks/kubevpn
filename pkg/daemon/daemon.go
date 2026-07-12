@@ -63,7 +63,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	lis.(*net.UnixListener).SetUnlinkOnClose(false)
 	go o.detectUnixSocksFile(o.ctx)
 
-	err = os.Chmod(sockPath, 0666)
+	err = os.Chmod(sockPath, config.FileModeSocket)
 	if err != nil {
 		return err
 	}
@@ -188,13 +188,14 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 		}
 	}()
 
+	const pollInterval = 2 * time.Second
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 			f()
-			time.Sleep(time.Second * 2)
+			time.Sleep(pollInterval)
 		}
 	}
 }
@@ -202,7 +203,7 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 func writePIDToFile(isSudo bool) error {
 	pidPath := config.GetPidPath(isSudo)
 	pid := os.Getpid()
-	return os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0644)
+	return os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), config.FileModeFile)
 }
 
 // initLogging creates a rotating log file and wires all loggers (logrus, klog, gvisor, plog)

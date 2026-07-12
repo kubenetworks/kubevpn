@@ -21,6 +21,23 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+const (
+	// healthCheckDialTimeout bounds dialing/checking the local control-plane and port-forward endpoints.
+	healthCheckDialTimeout = 5 * time.Second
+	// dnsProbeTimeout bounds the DNS probe used to verify the port-forward path.
+	dnsProbeTimeout = 10 * time.Second
+	// portForwardReadyTimeout is how long to wait for the port-forward to become ready before giving up.
+	portForwardReadyTimeout = 60 * time.Second
+	// healthCheckLoopInterval is the period between port-forward health checks.
+	healthCheckLoopInterval = 30 * time.Second
+	// healthCheckPerfWarnThreshold logs a perf warning when a health check exceeds this duration.
+	healthCheckPerfWarnThreshold = 500 * time.Millisecond
+	// healthCheckRetryInterval is the fixed backoff between health-check retries within one tick.
+	healthCheckRetryInterval = 10 * time.Second
+	// healthCheckRetrySteps is the number of health-check retries attempted within one tick.
+	healthCheckRetrySteps = 3
+)
+
 func Run(ctx context.Context, servers []core.Server) error {
 	errChan := make(chan error, len(servers))
 	for i := range servers {
@@ -59,7 +76,7 @@ func healthCheckGRPC(ctx context.Context, cancelFunc context.CancelFunc, readyCh
 	healthCheckLoop(ctx, cancelFunc, readyChan, func() error {
 		if conn == nil {
 			var err error
-			dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+			dialCtx, dialCancel := context.WithTimeout(ctx, healthCheckDialTimeout)
 			defer dialCancel()
 			conn, err = grpc.DialContext(dialCtx, target,
 				grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -69,7 +86,7 @@ func healthCheckGRPC(ctx context.Context, cancelFunc context.CancelFunc, readyCh
 				return err
 			}
 		}
-		checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
+		checkCtx, checkCancel := context.WithTimeout(ctx, healthCheckDialTimeout)
 		defer checkCancel()
 		resp, err := grpc_health_v1.NewHealthClient(conn).Check(checkCtx, &grpc_health_v1.HealthCheckRequest{})
 		if err != nil {
@@ -96,7 +113,7 @@ func healthCheckPortForward(ctx context.Context, cancelFunc context.CancelFunc, 
 
 	dial := func() error {
 		var err error
-		conn, err = net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", localGvisorUDPPort), 5*time.Second)
+		conn, err = net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", localGvisorUDPPort), healthCheckDialTimeout)
 		if err != nil {
 			return err
 		}
@@ -134,7 +151,7 @@ func healthCheckPortForward(ctx context.Context, cancelFunc context.CancelFunc, 
 		}
 		msg := new(miekgdns.Msg)
 		msg.SetQuestion(miekgdns.Fqdn(domain), miekgdns.TypeA)
-		client := miekgdns.Client{Net: "udp", Timeout: 10 * time.Second}
+		client := miekgdns.Client{Net: "udp", Timeout: dnsProbeTimeout}
 		resp, _, err := client.ExchangeWithConnContext(ctx, msg, &miekgdns.Conn{Conn: packetConn})
 		if err != nil {
 			closeConn()
@@ -152,7 +169,7 @@ func healthCheckPortForward(ctx context.Context, cancelFunc context.CancelFunc, 
 
 func healthCheckLoop(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, checker func() error) {
 	defer cancelFunc()
-	readyTimeout := time.NewTicker(time.Second * 60)
+	readyTimeout := time.NewTicker(portForwardReadyTimeout)
 	defer readyTimeout.Stop()
 
 	select {
@@ -164,15 +181,15 @@ func healthCheckLoop(ctx context.Context, cancelFunc context.CancelFunc, readyCh
 		return
 	}
 
-	ticker := time.NewTicker(time.Second * 30)
+	ticker := time.NewTicker(healthCheckLoopInterval)
 	defer ticker.Stop()
 	for ; ctx.Err() == nil; <-ticker.C {
 		checkStart := time.Now()
-		err := retry.OnError(wait.Backoff{Duration: time.Second * 10, Steps: 3}, func(err error) bool {
+		err := retry.OnError(wait.Backoff{Duration: healthCheckRetryInterval, Steps: healthCheckRetrySteps}, func(err error) bool {
 			return err != nil
 		}, checker)
 		elapsed := time.Since(checkStart)
-		if elapsed > 500*time.Millisecond {
+		if elapsed > healthCheckPerfWarnThreshold {
 			plog.G(ctx).Warnf("[Perf] Health check took %v", elapsed)
 		}
 		if err != nil {

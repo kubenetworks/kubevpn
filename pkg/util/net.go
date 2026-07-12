@@ -93,11 +93,16 @@ func Ping(ctx context.Context, srcIP, dstIP string) (bool, error) {
 		return false, err
 	}
 	pinger.Source = srcIP
+	const (
+		pingCount          = 4
+		pingTimeout        = 4 * time.Second
+		pingResolveTimeout = 1 * time.Second
+	)
 	pinger.SetLogger(nil)
 	pinger.SetPrivileged(true)
-	pinger.Count = 4
-	pinger.Timeout = time.Second * 4
-	pinger.ResolveTimeout = time.Second * 1
+	pinger.Count = pingCount
+	pinger.Timeout = pingTimeout
+	pinger.ResolveTimeout = pingResolveTimeout
 	err = pinger.RunWithContext(ctx) // Blocks until finished.
 	if err != nil {
 		return false, err

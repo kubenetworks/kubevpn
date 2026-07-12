@@ -183,7 +183,8 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 				return err != nil
 			},
 			func() error {
-				ctx1, cancelFunc1 := context.WithTimeout(ctx, time.Second*10)
+				const podGetTimeout = 10 * time.Second
+				ctx1, cancelFunc1 := context.WithTimeout(ctx, podGetTimeout)
 				defer cancelFunc1()
 				_, err := podInterface.Get(ctx1, podName, v1.GetOptions{})
 				return err
@@ -194,9 +195,10 @@ func CheckPodStatus(ctx context.Context, cancelFunc context.CancelFunc, podName 
 		}
 	}
 
+	const podStatusPollInterval = 5 * time.Second
 	for ctx.Err() == nil {
 		func() {
-			defer time.Sleep(time.Second * 5)
+			defer time.Sleep(podStatusPollInterval)
 
 			w, err := podInterface.Watch(ctx, v1.ListOptions{
 				FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),

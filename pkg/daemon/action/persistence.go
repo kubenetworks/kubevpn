@@ -120,7 +120,7 @@ func (svr *Server) OffloadToConfig() error {
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(config.GetDBPath(), yamlConf, 0644)
+	err = os.WriteFile(config.GetDBPath(), yamlConf, config.FileModeFile)
 	return err
 }
 

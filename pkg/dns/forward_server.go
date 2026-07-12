@@ -13,7 +13,17 @@ import (
 	miekgdns "github.com/miekg/dns"
 	"k8s.io/apimachinery/pkg/util/cache"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+)
+
+const (
+	// upstreamQueryTimeout bounds a single forwarded DNS query to the upstream resolver.
+	upstreamQueryTimeout = 5 * time.Second
+	// dnsCacheTTL is how long a resolved DNS answer stays cached.
+	dnsCacheTTL = 30 * time.Minute
+	// dnsCacheCapacity is the maximum number of cached DNS entries.
+	dnsCacheCapacity = 10000
 )
 
 // github.com/docker/docker@v23.0.1+incompatible/libnetwork/network_windows.go:53
@@ -24,10 +34,10 @@ type server struct {
 
 func ListenAndServe(network, address string, forwardDNS *miekgdns.ClientConfig) error {
 	if forwardDNS.Port == "" {
-		forwardDNS.Port = strconv.Itoa(53)
+		forwardDNS.Port = strconv.Itoa(config.PortDNS)
 	}
 	return miekgdns.ListenAndServe(address, network, &server{
-		dnsCache:   cache.NewLRUExpireCache(10000),
+		dnsCache:   cache.NewLRUExpireCache(dnsCacheCapacity),
 		forwardDNS: forwardDNS,
 	})
 }
@@ -45,7 +55,7 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 	var q = m.Question[0]
 	var originName = q.Name
 
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*5)
+	ctx, cancelFunc := context.WithTimeout(context.Background(), upstreamQueryTimeout)
 	defer cancelFunc()
 
 	var wg = &sync.WaitGroup{}
@@ -81,7 +91,7 @@ func (s *server) ServeDNS(w miekgdns.ResponseWriter, m *miekgdns.Msg) {
 					return
 				}
 
-				s.dnsCache.Add(originName, name, time.Minute*30)
+				s.dnsCache.Add(originName, name, dnsCacheTTL)
 
 				for i := 0; i < len(answer.Answer); i++ {
 					answer.Answer[i].Header().Name = originName

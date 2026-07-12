@@ -76,8 +76,9 @@ func requestTunIPFromControlPlane() (ipv4, ipv6 string, err error) {
 	}
 	namespace := os.Getenv(config.EnvPodNamespace)
 
+	const controlPlaneDialTimeout = 30 * time.Second
 	target := fmt.Sprintf("%s:%d", trafficManagerAddr, config.PortControlPlane)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneDialTimeout)
 	defer cancel()
 
 	conn, err := grpc.DialContext(ctx, target, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())

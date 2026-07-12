@@ -5,6 +5,8 @@ package dns
 import (
 	"os"
 	"syscall"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 // withHostsFileLock acquires an exclusive flock on a lock file adjacent to the
@@ -12,7 +14,7 @@ import (
 // created or locked, fn is executed without locking as a fallback so that
 // single-instance usage is not broken.
 func withHostsFileLock(fn func() error) error {
-	lockFile, err := os.OpenFile(getHostFile()+".lock", os.O_CREATE|os.O_RDONLY, 0644)
+	lockFile, err := os.OpenFile(getHostFile()+".lock", os.O_CREATE|os.O_RDONLY, config.FileModeFile)
 	if err != nil {
 		return fn()
 	}

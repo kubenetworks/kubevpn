@@ -23,6 +23,9 @@ import (
 	pkgutil "github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// sshOpTimeout bounds SSH dial, handshake, and per-operation context timeouts.
+const sshOpTimeout = 10 * time.Second
+
 // DialSshRemote establishes an SSH client connection, resolving aliases and jump hosts recursively.
 func DialSshRemote(ctx context.Context, conf *SshConfig, stopChan <-chan struct{}) (client *gossh.Client, err error) {
 	defer func() {
@@ -255,7 +258,7 @@ func JumpTo(ctx context.Context, bClient *gossh.Client, to SshConfig, stopChan <
 		Auth:            authMethod,
 		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
 		//BannerCallback:  ssh.BannerDisplayStderr(),
-		Timeout: time.Second * 10,
+		Timeout: sshOpTimeout,
 	})
 	if err != nil {
 		return
@@ -270,7 +273,7 @@ func getRemoteConn(ctx context.Context, clientMap *sync.Map, conf *SshConfig, re
 	var err error
 	clientMap.Range(func(key, value any) bool {
 		cli := value.(*sshClientWrap)
-		ctx1, cancelFunc1 := context.WithTimeout(ctx, time.Second*10)
+		ctx1, cancelFunc1 := context.WithTimeout(ctx, sshOpTimeout)
 		conn, err = cli.DialContext(ctx1, "tcp", remote.String())
 		cancelFunc1()
 		if err != nil {
@@ -305,7 +308,7 @@ func getRemoteConn(ctx context.Context, clientMap *sync.Map, conf *SshConfig, re
 	}()
 	plog.G(ctx1).Debug("Connected to remote ssh server")
 
-	ctx2, cancelFunc2 := context.WithTimeout(ctx, time.Second*10)
+	ctx2, cancelFunc2 := context.WithTimeout(ctx, sshOpTimeout)
 	defer cancelFunc2()
 	conn, err = client.DialContext(ctx2, "tcp", remote.String())
 	if err != nil {

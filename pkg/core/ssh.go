@@ -13,6 +13,9 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// sshHostKeyBits is the RSA key size used for the ephemeral SSH server host key.
+const sshHostKeyBits = 2048
+
 // SSHListener creates a TCP listener for the SSH server protocol handler.
 func SSHListener(addr string) (net.Listener, error) {
 	ln, err := net.Listen("tcp", addr)
@@ -53,7 +56,7 @@ func (s *sshHandler) Handle(ctx context.Context, conn net.Conn) {
 		SubsystemHandlers: ssh.DefaultSubsystemHandlers,
 		ChannelHandlers:   ssh.DefaultChannelHandlers,
 		HostSigners: func() []ssh.Signer {
-			key, err := rsa.GenerateKey(rand.Reader, 2048)
+			key, err := rsa.GenerateKey(rand.Reader, sshHostKeyBits)
 			if err != nil {
 				return nil
 			}

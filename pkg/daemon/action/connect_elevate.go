@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -178,8 +178,8 @@ func (svr *Server) forwardConnectToSudo(
 	if resp.Context().Err() != nil {
 		return resp.Context().Err()
 	}
-	connect.HealthCheckOnce(ctx, time.Second*10)
-	go connect.HealthPeriod(ctx, time.Second*30)
+	connect.HealthCheckOnce(ctx, config.HealthCheckTimeout)
+	go connect.HealthPeriod(ctx, config.HealthCheckInterval)
 	svr.connMu.Lock()
 	svr.connections = append(svr.connections, connect)
 	svr.currentConnectionID = connectionID

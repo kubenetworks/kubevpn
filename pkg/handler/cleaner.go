@@ -40,7 +40,8 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 	if c.configMapStore != nil {
 		c.configMapStore.Stop()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	const cleanupTimeout = 10 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 	defer cancel()
 
 	if !c.isDataPlane {

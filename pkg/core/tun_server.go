@@ -13,6 +13,9 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+// slowPathWarnThreshold logs a perf warning when a packet hot-path operation blocks longer than this.
+const slowPathWarnThreshold = 20 * time.Millisecond
+
 type tunHandler struct {
 	forward *Forwarder
 	hub     *RouteHub
@@ -95,7 +98,7 @@ func (d *Device) readFromTun(ctx context.Context) {
 		pkt := NewPacket(buf[:], n, src, dst)
 		sendStart := time.Now()
 		d.tunInbound <- pkt
-		if elapsed := time.Since(sendStart); elapsed > 20*time.Millisecond {
+		if elapsed := time.Since(sendStart); elapsed > slowPathWarnThreshold {
 			plog.G(ctx).Warnf("[Perf] Slow tunInbound send: %s -> %s blocked %v (channel backpressure)", src, dst, elapsed)
 		}
 	}
@@ -172,7 +175,7 @@ func (p *Peer) routeTun(ctx context.Context) {
 			packet.data[2] = 1
 			writeStart := time.Now()
 			conn, err := p.hub.WriteToRoute(dstKey, packet.data[:payloadLen+2])
-			if elapsed := time.Since(writeStart); elapsed > 20*time.Millisecond {
+			if elapsed := time.Since(writeStart); elapsed > slowPathWarnThreshold {
 				plog.G(ctx).Warnf("[Perf] Slow WriteToRoute: %s -> %s took %v", packet.src, packet.dst, elapsed)
 			}
 			config.LPool.Put(packet.data[:])

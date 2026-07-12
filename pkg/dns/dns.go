@@ -133,7 +133,7 @@ func (c *Config) appendHosts(appendHosts []Entry) error {
 	str := c.entryList2String(appendHosts)
 	return withHostsFileLock(func() error {
 		hostFile := getHostFile()
-		f, err := os.OpenFile(hostFile, os.O_APPEND|os.O_WRONLY, 0644)
+		f, err := os.OpenFile(hostFile, os.O_APPEND|os.O_WRONLY, config.FileModeFile)
 		if err != nil {
 			return err
 		}
@@ -257,6 +257,6 @@ func filterHostsFile(keyword string) error {
 			sb.WriteString(s)
 		}
 		str := strings.TrimSuffix(sb.String(), "\n")
-		return os.WriteFile(hostFile, []byte(str), 0644)
+		return os.WriteFile(hostFile, []byte(str), config.FileModeFile)
 	})
 }

@@ -59,6 +59,14 @@ const (
 	PortControlPlane = 9002
 	// PortNameDNS is the traffic-manager service port name for DNS resolution.
 	PortNameDNS = "53-for-dns"
+	// PortDNS is the traffic-manager DNS service port number.
+	PortDNS = 53
+	// PortUDP is the traffic-manager UDP tunnel port number.
+	PortUDP = 10802
+	// PortSSH is the traffic-manager SSH tunnel port number (service/fargate mode and reverse tunnel).
+	PortSSH = 2222
+	// PortEnvoyInbound is the Envoy inbound capture port that mesh-mode iptables DNAT redirects to.
+	PortEnvoyInbound = 15006
 
 	// IPv4Pool is used as TUN IP
 	// 198.18.0.0/16 network is part of the 198.18.0.0/15 (reserved for benchmarking).
@@ -194,6 +202,11 @@ var (
 
 	SlotReconnectBackoff = 2 * time.Second
 	DaemonPollInterval   = 200 * time.Millisecond
+
+	// HealthCheckTimeout bounds a single connection health check (HealthCheckOnce).
+	HealthCheckTimeout = 10 * time.Second
+	// HealthCheckInterval is the period between recurring connection health checks (HealthPeriod).
+	HealthCheckInterval = 30 * time.Second
 )
 
 var (

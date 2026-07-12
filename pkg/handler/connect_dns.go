@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net"
+	"strconv"
 	"time"
 
 	miekgdns "github.com/miekg/dns"
@@ -27,7 +28,8 @@ func detectNameserver(ctx context.Context, relovConf *miekgdns.ClientConfig, ser
 func nameserverChecker(ctx context.Context, domain string, dnsServer string) error {
 	msg := new(miekgdns.Msg)
 	msg.SetQuestion(miekgdns.Fqdn(domain), miekgdns.TypeA)
-	client := miekgdns.Client{Net: "udp", Timeout: time.Second * 10}
-	_, _, err := client.ExchangeContext(ctx, msg, net.JoinHostPort(dnsServer, "53"))
+	const dnsQueryTimeout = 10 * time.Second
+	client := miekgdns.Client{Net: "udp", Timeout: dnsQueryTimeout}
+	_, _, err := client.ExchangeContext(ctx, msg, net.JoinHostPort(dnsServer, strconv.Itoa(config.PortDNS)))
 	return err
 }

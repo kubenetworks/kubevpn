@@ -137,6 +137,17 @@ func collectPorts(templateSpec *v1.PodTemplateSpec, portMaps []string) ([]contro
 	return envoyPorts, portmap
 }
 
+const (
+	// recreatePodRetrySteps is the number of attempts to recreate a pod after deletion.
+	recreatePodRetrySteps = 10
+	// recreatePodRetryDuration is the initial backoff before the first recreate retry.
+	recreatePodRetryDuration = 50 * time.Millisecond
+	// recreatePodRetryFactor is the exponential backoff multiplier between recreate retries.
+	recreatePodRetryFactor = 5.0
+	// recreatePodRetryJitter is the jitter fraction applied to the recreate backoff.
+	recreatePodRetryJitter = 1.0
+)
+
 func recreatePod(ctx context.Context, factory cmdutil.Factory, p *v1.Pod, helper *resource.Helper) error {
 	_, err := helper.DeleteWithOptions(p.Namespace, p.Name, &metav1.DeleteOptions{
 		GracePeriodSeconds: ptr.To[int64](0),
@@ -145,10 +156,10 @@ func recreatePod(ctx context.Context, factory cmdutil.Factory, p *v1.Pod, helper
 		plog.G(ctx).Errorf("Failed to delete resource: %s %s, ignore, err: %v", p.Namespace, p.Name, err)
 	}
 	err = retry.OnError(wait.Backoff{
-		Steps:    10,
-		Duration: 50 * time.Millisecond,
-		Factor:   5.0,
-		Jitter:   1,
+		Steps:    recreatePodRetrySteps,
+		Duration: recreatePodRetryDuration,
+		Factor:   recreatePodRetryFactor,
+		Jitter:   recreatePodRetryJitter,
 	}, func(err error) bool {
 		if !k8serrors.IsAlreadyExists(err) {
 			return true
