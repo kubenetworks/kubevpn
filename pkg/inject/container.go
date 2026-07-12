@@ -41,11 +41,10 @@ func defaultResources() v1.ResourceRequirements {
 func privilegedSecurityContext() *v1.SecurityContext {
 	return &v1.SecurityContext{
 		Capabilities: &v1.Capabilities{
-			Add: []v1.Capability{"NET_ADMIN"},
+			Add: []v1.Capability{"NET_ADMIN", "NET_RAW"},
 		},
 		RunAsUser:  ptr.To[int64](0),
 		RunAsGroup: ptr.To[int64](0),
-		Privileged: ptr.To(true),
 	}
 }
 
@@ -123,7 +122,7 @@ echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
 echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
 echo 0 > /proc/sys/net/ipv4/tcp_timestamps
-update-alternatives --set iptables /usr/sbin/iptables-legacy
+for b in iptables-nft iptables-legacy; do "$b" -t nat -L &>/dev/null && update-alternatives --set iptables /usr/sbin/$b && update-alternatives --set ip6tables /usr/sbin/${b/iptables/ip6tables} && break; done
 iptables -P INPUT ACCEPT
 ip6tables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
@@ -158,42 +157,4 @@ func AddEnvoyAndSSHContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 b
 
 	spec.Spec.Containers = append(spec.Spec.Containers,
 		newEnvoyContainer(ns, nodeID, ipv6, managerNamespace, image, envoyConfigFargate, envoyConfigIPv4Fargate))
-}
-
-// AddVPNContainer adds a VPN-only sidecar container (no envoy).
-func AddVPNContainer(spec *v1.PodSpec, localTunIPv4, localTunIPv6 string, managerNamespace string, secret *v1.Secret, image string) {
-	RemoveContainers(spec)
-
-	var envs []v1.EnvVar
-	envs = append(envs,
-		v1.EnvVar{Name: "LocalTunIPv4", Value: localTunIPv4},
-		v1.EnvVar{Name: "LocalTunIPv6", Value: localTunIPv6},
-	)
-	envs = append(envs, commonEnvVars(managerNamespace)...)
-	envs = append(envs, tlsEnvVars(secret)...)
-
-	spec.Containers = append(spec.Containers, v1.Container{
-		Name:    config.ContainerSidecarVPN,
-		Image:   image,
-		Env:     envs,
-		Command: []string{"/bin/sh", "-c"},
-		// https://www.netfilter.org/documentation/HOWTO/NAT-HOWTO-6.html#ss6.2
-		Args: []string{`
-echo 1 > /proc/sys/net/ipv4/ip_forward
-echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
-echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
-echo 1 > /proc/sys/net/ipv4/conf/all/route_localnet
-update-alternatives --set iptables /usr/sbin/iptables-legacy
-iptables -P INPUT ACCEPT
-ip6tables -P INPUT ACCEPT
-iptables -P FORWARD ACCEPT
-ip6tables -P FORWARD ACCEPT
-iptables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIPv4}
-ip6tables -t nat -A PREROUTING ! -p icmp -j DNAT --to ${LocalTunIPv6}
-kubevpn server -l "tun:/tcp://${TrafficManagerService}:10801?net=${TunIPv4}&net6=${TunIPv6}&route=${CIDR4}"`,
-		},
-		SecurityContext: privilegedSecurityContext(),
-		Resources:       defaultResources(),
-		ImagePullPolicy: v1.PullIfNotPresent,
-	})
 }

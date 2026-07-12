@@ -59,7 +59,7 @@ session := NewSessionLifecycle(logger)
 
 session.AddTempFile(&file)                    ← remove kubeconfig on cleanup
 connect.AddRollbackFunc(session.RunCleanups)  ← cleanup on disconnect
-go util.ListenCancel(resp, session.Cancel)    ← client cancel → session cancel
+go grpcutil.ListenCancel(resp, session.Cancel)    ← client cancel → session cancel
 
 connect.DoConnect(session.Ctx)
     └── c.ctx = WithCancel(session.Ctx)       ← internal lifecycle
@@ -122,19 +122,19 @@ Teardown (on error): session.Cancel() → SSH closes, BUT VPN stays alive
 `ConnectOptions.Cleanup()` distinguishes user vs root daemon:
 
 ```
-User daemon (c.ctx == nil):
-    1. Release DHCP IP
-    2. Delete CNI pod/job
-    3. Leave all proxy resources
-    4. Execute rollback funcs → session.RunCleanups()
+User daemon (!c.isDataPlane):
+    1. Delete CNI pod/job
+    2. Leave all proxy resources (LeaveAllProxyResources)
+    3. Execute rollback funcs → session.RunCleanups()
         → removes temp files
         → cancels session context (closes SSH tunnel)
         → detaches logger
+    Note: TUN IP is NOT explicitly released — DHCP lease expiry handles reclaim
 
-Root daemon (c.ctx != nil):
+Root daemon (c.isDataPlane):
     1. Execute rollback funcs
-    2. Cancel DNS
-    3. c.cancel() → stops TUN, port-forward, route informers
+    2. network.Stop() → cancel DNS, cancel context
+    3. Context cancellation → stops TUN, port-forward, routes
 ```
 
 ## Before & After

@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"encoding/binary"
+	"errors"
+	"io"
 	"net"
 
 	"github.com/google/gopacket/layers"
@@ -52,7 +54,11 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		buf := config.LPool.Get().([]byte)[:]
 		read, err := tcpConn.Read(buf[:])
 		if err != nil {
-			plog.G(ctx).Errorf("[Gvisor-TCP] Failed to read from tcp conn: %v", err)
+			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+				plog.G(ctx).Debugf("[Gvisor-TCP] Connection closed: %v", err)
+			} else {
+				plog.G(ctx).Errorf("[Gvisor-TCP] Failed to read from tcp conn: %v", err)
+			}
 			config.LPool.Put(buf[:])
 			return
 		}
@@ -116,4 +122,3 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		}
 	}
 }
-

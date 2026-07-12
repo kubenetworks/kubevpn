@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
@@ -97,6 +98,9 @@ func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolve
 			errChan <- err2
 		}()
 		err = <-errChan
+		conn.SetReadDeadline(time.Now().Add(time.Second))
+		remote.SetReadDeadline(time.Now().Add(time.Second))
+		<-errChan
 		if err != nil && !errors.Is(err, io.EOF) {
 			plog.G(dialCtx).Errorf("[Gvisor-TCP] Disconnected %s <-> %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
 		}

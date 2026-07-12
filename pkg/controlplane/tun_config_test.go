@@ -22,8 +22,7 @@ func newTestServer(t *testing.T) *TunConfigServer {
 		&v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
 			Data: map[string]string{
-				config.KeyDHCP:  "",
-				config.KeyDHCP6: "",
+				config.KeyTunIPPool: "",
 				config.KeyEnvoy: "",
 			},
 		},

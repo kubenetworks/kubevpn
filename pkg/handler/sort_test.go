@@ -10,6 +10,24 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 )
 
+func newConnectWithNetwork(ns string, extraCIDR []string, apiServerIPs []net.IP, extraHost []dns.Entry) *ConnectOptions {
+	c := &ConnectOptions{
+		ManagerNamespace: ns,
+		ExtraRouteInfo: ExtraRouteInfo{
+			ExtraCIDR: extraCIDR,
+		},
+	}
+	if len(apiServerIPs) > 0 || len(extraHost) > 0 {
+		c.network = &NetworkManager{
+			cfg: NetworkConfig{
+				APIServerIPs: apiServerIPs,
+			},
+			extraHost: extraHost,
+		}
+	}
+	return c
+}
+
 func TestSortConnect(t *testing.T) {
 	getOrder := func(connects []*ConnectOptions) []string {
 		var order []string
@@ -24,94 +42,31 @@ func TestSortConnect(t *testing.T) {
 		expectedOrder []string
 	}{
 		{
-			connects: []*ConnectOptions{
-				{
-					ManagerNamespace: "clusterA",
-					ExtraRouteInfo: ExtraRouteInfo{
-						ExtraCIDR: []string{"192.168.31.1/32"},
-					},
-					apiServerIPs: []net.IP{net.ParseIP("172.21.0.12")},
-					extraHost:    nil,
-				},
-				{
-					ManagerNamespace: "clusterB",
-					ExtraRouteInfo: ExtraRouteInfo{
-						ExtraCIDR: []string{"10.16.31.9/32"},
-					},
-					apiServerIPs: []net.IP{net.ParseIP("192.168.31.1")},
-					extraHost:    nil,
-				},
+			connects: Connects{
+				newConnectWithNetwork("clusterA", []string{"192.168.31.1/32"}, []net.IP{net.ParseIP("172.21.0.12")}, nil),
+				newConnectWithNetwork("clusterB", []string{"10.16.31.9/32"}, []net.IP{net.ParseIP("192.168.31.1")}, nil),
 			},
 			expectedOrder: []string{"clusterB", "clusterA"},
 		},
 		{
-			connects: []*ConnectOptions{
-				{
-					ManagerNamespace: "clusterA",
-					ExtraRouteInfo: ExtraRouteInfo{
-						ExtraCIDR: []string{"192.168.31.2/32"},
-					},
-					apiServerIPs: []net.IP{net.ParseIP("172.21.0.12")},
-					extraHost: []dns.Entry{{
-						IP: "192.168.31.1",
-					}},
-				},
-				{
-					ManagerNamespace: "clusterB",
-					ExtraRouteInfo: ExtraRouteInfo{
-						ExtraCIDR: []string{"10.16.31.9/32"},
-					},
-					apiServerIPs: []net.IP{net.ParseIP("192.168.31.1")},
-					extraHost:    nil,
-				},
+			connects: Connects{
+				newConnectWithNetwork("clusterA", []string{"192.168.31.2/32"}, []net.IP{net.ParseIP("172.21.0.12")}, []dns.Entry{{IP: "192.168.31.1"}}),
+				newConnectWithNetwork("clusterB", []string{"10.16.31.9/32"}, []net.IP{net.ParseIP("192.168.31.1")}, nil),
 			},
 			expectedOrder: []string{"clusterB", "clusterA"},
 		},
 		{
-			connects: []*ConnectOptions{
-				{
-					ManagerNamespace: "clusterA",
-					ExtraRouteInfo:   ExtraRouteInfo{},
-					apiServerIPs:     []net.IP{net.ParseIP("192.168.31.100")},
-					extraHost:        nil,
-				},
-				{
-					ManagerNamespace: "clusterB",
-					ExtraRouteInfo: ExtraRouteInfo{
-						ExtraCIDR: []string{"192.168.31.2/32"},
-					},
-					apiServerIPs: []net.IP{net.ParseIP("172.21.0.12")},
-					extraHost: []dns.Entry{{
-						IP: "192.168.31.1",
-					}},
-				},
+			connects: Connects{
+				newConnectWithNetwork("clusterA", nil, []net.IP{net.ParseIP("192.168.31.100")}, nil),
+				newConnectWithNetwork("clusterB", []string{"192.168.31.2/32"}, []net.IP{net.ParseIP("172.21.0.12")}, []dns.Entry{{IP: "192.168.31.1"}}),
 			},
 			expectedOrder: []string{"clusterB", "clusterA"},
 		},
 		{
-			connects: []*ConnectOptions{
-				{
-					ManagerNamespace: "clusterA",
-					ExtraRouteInfo:   ExtraRouteInfo{},
-					apiServerIPs:     []net.IP{net.ParseIP("192.168.31.100")},
-					extraHost:        nil,
-				},
-				{
-					ManagerNamespace: "clusterB",
-					ExtraRouteInfo: ExtraRouteInfo{
-						ExtraCIDR: []string{"192.168.31.1/32"},
-					},
-					apiServerIPs: []net.IP{net.ParseIP("172.21.0.12")},
-					extraHost:    nil,
-				},
-				{
-					ManagerNamespace: "clusterC",
-					ExtraRouteInfo: ExtraRouteInfo{
-						ExtraCIDR: []string{"10.16.31.9/32"},
-					},
-					apiServerIPs: []net.IP{net.ParseIP("192.168.31.1")},
-					extraHost:    nil,
-				},
+			connects: Connects{
+				newConnectWithNetwork("clusterA", nil, []net.IP{net.ParseIP("192.168.31.100")}, nil),
+				newConnectWithNetwork("clusterB", []string{"192.168.31.1/32"}, []net.IP{net.ParseIP("172.21.0.12")}, nil),
+				newConnectWithNetwork("clusterC", []string{"10.16.31.9/32"}, []net.IP{net.ParseIP("192.168.31.1")}, nil),
 			},
 			expectedOrder: []string{"clusterC", "clusterB", "clusterA"},
 		},

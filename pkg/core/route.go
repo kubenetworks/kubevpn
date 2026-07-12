@@ -137,7 +137,10 @@ func (hub *RouteHub) WriteToRoute(dstKey string, data []byte) (net.Conn, error) 
 	list := val.(*ConnList)
 	conn, err := list.Write(data)
 	if err != nil {
-		// All conns dead — remove the empty entry
+		// All conns dead — remove the empty entry.
+		// TOCTOU between IsEmpty and Delete is harmless: if another goroutine
+		// added a conn between the two calls, Delete removes it but the next
+		// packet will re-register the route via AddRoute. sync.Map.Delete is idempotent.
 		if list.IsEmpty() {
 			hub.RouteMapTCP.Delete(dstKey)
 		}
@@ -155,6 +158,7 @@ func (hub *RouteHub) WriteFuncToRoute(dstKey string, fn func(conn net.Conn) erro
 	list := val.(*ConnList)
 	conn, err := list.WriteFunc(fn)
 	if err != nil {
+		// Same harmless TOCTOU as WriteToRoute — see comment there.
 		if list.IsEmpty() {
 			hub.RouteMapTCP.Delete(dstKey)
 		}

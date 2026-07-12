@@ -18,6 +18,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -93,7 +94,7 @@ func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, sp
 			}
 		}
 
-		v = addVirtualRule(v, spec)
+		v = addVirtualRule(ctx, v, spec)
 		marshal, err := yaml.Marshal(v)
 		if err != nil {
 			return err
@@ -104,7 +105,7 @@ func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, sp
 	})
 }
 
-func addVirtualRule(v []*controlplane.Virtual, spec envoyRuleSpec) []*controlplane.Virtual {
+func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRuleSpec) []*controlplane.Virtual {
 	index := -1
 	for i, virtual := range v {
 		if spec.NodeID == virtual.UID && virtual.Namespace == spec.Namespace {
@@ -149,6 +150,8 @@ func addVirtualRule(v []*controlplane.Virtual, spec envoyRuleSpec) []*controlpla
 	// 3) different user taking over a rule with matching headers
 	for j, rule := range v[index].Rules {
 		if maps.Equal(rule.Headers, spec.Headers) {
+			plog.G(ctx).Warnf("[Envoy] Header takeover: owner %s is replacing owner %s for workload %s with headers %v",
+				spec.OwnerID, rule.OwnerID, spec.NodeID, spec.Headers)
 			v[index].Rules[j].LocalTunIPv6 = spec.LocalTunIPv6
 			v[index].Rules[j].LocalTunIPv4 = spec.LocalTunIPv4
 			v[index].Rules[j].OwnerID = spec.OwnerID

@@ -173,9 +173,9 @@ Two variants:
 
 The `tun` protocol factory handles sidecar self-DHCP:
 1. If `net=` parameter is empty, call `requestTunIPFromControlPlane()` → gRPC `GetTunIP` to TunConfigServer
-2. Start `watchTunIPChanges()` for hot-update via `WatchTunIP` stream
-3. Falls back to polling every 30s if stream breaks
-4. On IP change, calls `tun.ChangeIP()` and `tun.UpdateDNAT()` to hot-update without pod restart
+2. Create the TUN device with the returned IP
+
+The factory fetches the IP **once at startup** and does not run any background watcher. The sidecar's own TUN IP is fixed for the process lifetime; runtime routing changes (when a *client's* IP changes) are handled by the control-plane (`syncEnvoyRuleIP`) and pushed to the sidecar's envoy via xDS — not by the sidecar editing its own device. The former `watchTunIPChanges` / `pollTunIP` / `applyTunIPChange` + `tun.UpdateDNAT` path was removed by the unified proxy mode (see [09-tun-ip-hot-update.md](09-tun-ip-hot-update.md) and [29-sleep-wake-ip-update.md](29-sleep-wake-ip-update.md)).
 
 ## 10. Forwarder
 

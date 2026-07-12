@@ -15,6 +15,8 @@ import (
 	secretservice "github.com/envoyproxy/go-control-plane/envoy/service/secret/v3"
 	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -37,6 +39,7 @@ func runServer(ctx context.Context, server serverv3.Server, tunConfig *TunConfig
 			PermitWithoutStream: true,
 		})}
 	grpcServer := grpc.NewServer(grpcOpts...)
+	grpc_health_v1.RegisterHealthServer(grpcServer, health.NewServer())
 	var lc net.ListenConfig
 	listener, err := lc.Listen(ctx, "tcp", fmt.Sprintf(":%d", port))
 	if err != nil {

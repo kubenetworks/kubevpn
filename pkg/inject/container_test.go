@@ -75,8 +75,8 @@ func TestAddVPNAndEnvoyContainer(t *testing.T) {
 	if vpnContainer.SecurityContext == nil {
 		t.Fatal("vpn container SecurityContext is nil")
 	}
-	if vpnContainer.SecurityContext.Privileged == nil || !*vpnContainer.SecurityContext.Privileged {
-		t.Error("vpn container should be privileged")
+	if vpnContainer.SecurityContext.Privileged != nil && *vpnContainer.SecurityContext.Privileged {
+		t.Error("vpn container should NOT be privileged — use capabilities instead")
 	}
 	if vpnContainer.SecurityContext.RunAsUser == nil || *vpnContainer.SecurityContext.RunAsUser != 0 {
 		t.Error("vpn container should run as root (uid 0)")
@@ -84,15 +84,16 @@ func TestAddVPNAndEnvoyContainer(t *testing.T) {
 	if vpnContainer.SecurityContext.Capabilities == nil {
 		t.Fatal("vpn container Capabilities is nil")
 	}
-	foundNetAdmin := false
+	requiredCaps := map[v1.Capability]bool{"NET_ADMIN": false, "NET_RAW": false}
 	for _, cap := range vpnContainer.SecurityContext.Capabilities.Add {
-		if cap == "NET_ADMIN" {
-			foundNetAdmin = true
-			break
+		if _, ok := requiredCaps[cap]; ok {
+			requiredCaps[cap] = true
 		}
 	}
-	if !foundNetAdmin {
-		t.Error("vpn container should have NET_ADMIN capability")
+	for cap, found := range requiredCaps {
+		if !found {
+			t.Errorf("vpn container should have %s capability", cap)
+		}
 	}
 
 	// VPN container should have iptables commands in args
@@ -205,73 +206,6 @@ func TestAddEnvoyAndSSHContainer(t *testing.T) {
 	// Envoy container checks
 	if envoyContainer.Image != image {
 		t.Errorf("envoy container image: got %q, want %q", envoyContainer.Image, image)
-	}
-}
-
-func TestAddVPNContainer(t *testing.T) {
-	spec := basePodSpec()
-	secret := fakeSecret()
-	image := "docker.io/naison/kubevpn:test"
-
-	AddVPNContainer(spec, "10.233.0.5", "fd00::5", "kubevpn-system", secret, image)
-
-	// Should have 2 containers: original app + vpn
-	if len(spec.Containers) != 2 {
-		t.Fatalf("expected 2 containers, got %d", len(spec.Containers))
-	}
-
-	var vpnContainer *v1.Container
-	for i := range spec.Containers {
-		if spec.Containers[i].Name == config.ContainerSidecarVPN {
-			vpnContainer = &spec.Containers[i]
-			break
-		}
-	}
-	if vpnContainer == nil {
-		t.Fatal("vpn container not found")
-	}
-
-	// Should have iptables commands
-	if len(vpnContainer.Args) == 0 {
-		t.Fatal("vpn container args should not be empty")
-	}
-	if !strings.Contains(vpnContainer.Args[0], "iptables") {
-		t.Error("vpn container args should contain iptables commands")
-	}
-	if !strings.Contains(vpnContainer.Args[0], "PREROUTING") {
-		t.Error("vpn container args should contain PREROUTING rules")
-	}
-
-	// Should be privileged
-	if vpnContainer.SecurityContext == nil {
-		t.Fatal("vpn container SecurityContext is nil")
-	}
-	if vpnContainer.SecurityContext.Privileged == nil || !*vpnContainer.SecurityContext.Privileged {
-		t.Error("vpn container should be privileged")
-	}
-
-	// Should have local tun IP env vars
-	envMap := make(map[string]string)
-	for _, e := range vpnContainer.Env {
-		envMap[e.Name] = e.Value
-	}
-	if envMap["LocalTunIPv4"] != "10.233.0.5" {
-		t.Errorf("expected LocalTunIPv4='10.233.0.5', got %q", envMap["LocalTunIPv4"])
-	}
-	if envMap["LocalTunIPv6"] != "fd00::5" {
-		t.Errorf("expected LocalTunIPv6='fd00::5', got %q", envMap["LocalTunIPv6"])
-	}
-
-	// Should have TLS env vars from secret
-	if envMap[config.TLSServerName] != "test-server" {
-		t.Errorf("expected TLSServerName='test-server', got %q", envMap[config.TLSServerName])
-	}
-
-	// No envoy container should be present
-	for _, c := range spec.Containers {
-		if c.Name == config.ContainerSidecarEnvoyProxy {
-			t.Error("AddVPNContainer should not add envoy container")
-		}
 	}
 }
 

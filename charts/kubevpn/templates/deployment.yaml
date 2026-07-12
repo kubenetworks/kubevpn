@@ -51,19 +51,19 @@ spec:
               protocol: TCP
           livenessProbe:
             tcpSocket:
-              port: 10801
+              port: 10802
             initialDelaySeconds: 5
             periodSeconds: 15
             failureThreshold: 3
           readinessProbe:
             tcpSocket:
-              port: 10801
+              port: 10802
             initialDelaySeconds: 3
             periodSeconds: 10
             failureThreshold: 3
           startupProbe:
             tcpSocket:
-              port: 10801
+              port: 10802
             initialDelaySeconds: 1
             periodSeconds: 2
             failureThreshold: 15

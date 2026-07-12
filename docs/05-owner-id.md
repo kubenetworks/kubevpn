@@ -41,7 +41,7 @@ type Rule struct {
     Headers      map[string]string
     LocalTunIPv4 string
     LocalTunIPv6 string
-    OwnerID      string `yaml:"ownerID,omitempty" json:"ownerID,omitempty"`
+    OwnerID      string `yaml:"ownerID" json:"ownerID"`
     PortMap      map[int32]string
 }
 ```
@@ -87,8 +87,8 @@ The `addVirtualRule` function handles 4 scenarios, each correctly setting the Ow
 Case 1: Brand new workload (index < 0)
   → Create Virtual + Rule, set OwnerID = uuid
 
-Case 2: Same user update (IP match, non-Fargate)
-  → Merge Headers/PortMap; backfill OwnerID if empty (backward compatibility)
+Case 2: Same user update (OwnerID match)
+  → Update LocalTunIPv4/v6, merge Headers/PortMap
 
 Case 3: Ownership transfer (Headers match)
   → Update LocalTunIPv4/v6 and OwnerID = new user's uuid
@@ -113,21 +113,20 @@ for i := 0; i < len(virtual.Rules); i++ {
 
 No `isFargateMode` branch is needed — OwnerID matching works for all modes.
 
-### 2.6 Backward Compatibility
+### 2.6 Schema Versioning
+
+Since `CurrentSchemaVersion = 2`, OwnerID is **required** on all rules. The YAML tag has no `omitempty` — empty OwnerID values are written explicitly to aid debugging.
 
 | Scenario | Behavior |
 |----------|----------|
-| New version reads old ConfigMap | OwnerID deserializes to `""` (zero value), no impact on existing logic |
+| New version reads old ConfigMap (SchemaVersion 0/1) | OwnerID deserializes to `""` (zero value) |
 | Old version reads new ConfigMap | OwnerID field is ignored (Go YAML parser ignores unknown fields) |
-| New version updates old Rule | Case 2 automatically backfills OwnerID when `OwnerID == ""` |
-| New version leaves old Rule (OwnerID is empty) | Will not match (`uuid != ""`); requires a proxy operation first to backfill OwnerID |
-
-The `omitempty` tag ensures empty OwnerID values are not written to YAML, reducing ConfigMap size.
+| SchemaVersion 2 rule without OwnerID | Should not occur — `addVirtualRule` always sets OwnerID |
 
 ## 3. ConfigMap YAML Example
 
 ```yaml
-- schemaVersion: 1
+- schemaVersion: 2
   uid: deployments.apps.web
   namespace: default
   ports:
@@ -159,6 +158,6 @@ The `omitempty` tag ensures empty OwnerID values are not written to YAML, reduci
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| Old client versions do not understand OwnerID | Low | `omitempty` + Go YAML ignores unknown fields |
+| Old client versions do not understand OwnerID | Low | Go YAML parser ignores unknown fields |
 | Old Rules without OwnerID cannot be left | Low | Case 2/3 automatically backfills OwnerID during proxy operations |
 | ConfigMap size increase | Very Low | ~30 bytes added per Rule |

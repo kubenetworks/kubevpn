@@ -39,7 +39,7 @@ func TestInitDHCP_CreatesConfigMap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get CM: %v", err)
 	}
-	if cm.Data[config.KeyDHCP] != "" {
+	if cm.Data[config.KeyTunIPPool] != "" {
 		t.Fatal("expected empty DHCP key")
 	}
 }
@@ -49,7 +49,7 @@ func TestInitDHCP_ExistingConfigMap(t *testing.T) {
 	// Pre-create the configmap
 	_, err := m.clientset.CoreV1().ConfigMaps("test-ns").Create(context.Background(), &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
-		Data:       map[string]string{config.KeyDHCP: "", config.KeyDHCP6: "", config.KeyEnvoy: ""},
+		Data:       map[string]string{config.KeyTunIPPool: "", config.KeyEnvoy: ""},
 	}, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)

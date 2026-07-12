@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -16,6 +17,8 @@ type tcpTransporter struct {
 }
 
 // TCPTransporter creates a Transporter that dials TCP connections with optional TLS.
+// When TLS config is absent (ErrNoTLSConfig), falls back to raw TCP.
+// When TLS config exists but is invalid, returns a transporter that refuses connections.
 func TCPTransporter(tlsInfo map[string][]byte) Transporter {
 	tlsConfig, err := util.GetTlsClientConfig(tlsInfo)
 	if err != nil {
@@ -23,10 +26,16 @@ func TCPTransporter(tlsInfo map[string][]byte) Transporter {
 			plog.G(context.Background()).Warn("[Transport] TLS config not found, using raw TCP")
 			return &tcpTransporter{}
 		}
-		plog.G(context.Background()).Errorf("[Transport] Failed to get TLS client config: %v", err)
-		return &tcpTransporter{}
+		plog.G(context.Background()).Errorf("[Transport] TLS config invalid: %v — connections will fail", err)
+		return &failTransporter{err: fmt.Errorf("TLS config invalid: %w", err)}
 	}
 	return &tcpTransporter{tlsConfig: tlsConfig}
+}
+
+type failTransporter struct{ err error }
+
+func (t *failTransporter) Dial(_ context.Context, _ string) (net.Conn, error) {
+	return nil, t.err
 }
 
 func (tr *tcpTransporter) Dial(ctx context.Context, addr string) (net.Conn, error) {

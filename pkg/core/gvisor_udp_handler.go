@@ -26,7 +26,11 @@ func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 
 	id, err := util.ParseProxyInfo(tcpConn)
 	if err != nil {
-		plog.G(ctx).Errorf("[UDP] Failed to parse proxy info: %v", err)
+		if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+			plog.G(ctx).Debugf("[UDP] Connection closed: %v", err)
+		} else {
+			plog.G(ctx).Errorf("[UDP] Failed to parse proxy info: %v", err)
+		}
 		return
 	}
 	plog.G(ctx).Infof("[UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress: %s",

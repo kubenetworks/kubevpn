@@ -50,3 +50,17 @@ func GetAvailableTCPPort() (int, error) {
 	return listener.Addr().(*net.TCPAddr).Port, nil
 }
 
+// GetAvailableUDPPort returns an available UDP port on localhost by briefly binding to port 0.
+func GetAvailableUDPPort() (int, error) {
+	address, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:0", "localhost"))
+	if err != nil {
+		return 0, err
+	}
+	conn, err := net.ListenUDP("udp", address)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+	return conn.LocalAddr().(*net.UDPAddr).Port, nil
+}
+

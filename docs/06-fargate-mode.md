@@ -2,19 +2,21 @@
 
 ## Overview
 
-Fargate mode is one of three traffic interception strategies in KubeVPN, designed for environments that **lack privileged container capabilities** (no `NET_ADMIN`, no `privileged: true`). The canonical example is AWS Fargate, hence the name. It is also known as "Service mode" because it is triggered when the user proxies a **Kubernetes Service** (`svc/...`) rather than a workload directly.
+Fargate mode is one of the traffic interception modes in KubeVPN, designed for environments that **lack privileged container capabilities** (no `NET_ADMIN`, no `privileged: true`). The canonical example is AWS Fargate, hence the name. It is also known as "Service mode" because it is triggered when the user proxies a **Kubernetes Service** (`svc/...`) rather than a workload directly.
 
 ### Strategy Comparison
 
-| | VPN Mode | Mesh Mode | Fargate Mode |
+Since the unified proxy mode, VPN-only and Mesh are no longer separate injectors — they are the same `meshInjector`, differing only in whether `--headers` are set (empty headers = full interception). The columns below show VPN-only and Mesh as *configurations* of that one injector. See [29-sleep-wake-ip-update.md](29-sleep-wake-ip-update.md) and [17-sidecar-injection.md](17-sidecar-injection.md).
+
+| | VPN-only (mesh, no headers) | Mesh (mesh, with headers) | Fargate Mode |
 |---|---|---|---|
-| **Target** | Deployment, StatefulSet, etc. | Workload with port mapping | `svc/<name>` |
+| **Target** | Deployment, StatefulSet, etc. | Workload with header splitting | `svc/<name>` |
 | **Requires privileged** | Yes | Yes | **No** |
-| **Uses iptables** | Yes (DNAT to TUN) | Yes (DNAT to envoy:15006) | **No** |
-| **Sidecar containers** | VPN only | VPN + Envoy | **SSH + Envoy** |
-| **Traffic interception** | Kernel-level (TUN device) | iptables PREROUTING + envoy `use_original_dst` | envoy `BindToPort=true` + SSH reverse tunnel |
-| **User identity** | TUN IP (`198.18.x.x`) | TUN IP | HTTP headers |
-| **Injector** | `vpnInjector` | `meshInjector` | `fargateInjector` |
+| **Uses iptables** | Yes (DNAT to envoy:15006) | Yes (DNAT to envoy:15006) | **No** |
+| **Sidecar containers** | VPN + Envoy | VPN + Envoy | **SSH + Envoy** |
+| **Traffic interception** | iptables PREROUTING + envoy (matches all) | iptables PREROUTING + envoy `use_original_dst` (header routing) | envoy `BindToPort=true` + SSH reverse tunnel |
+| **User identity** | TUN IP (`198.18.x.x`) | TUN IP + HTTP headers | HTTP headers |
+| **Injector** | `meshInjector` | `meshInjector` | `fargateInjector` |
 
 ## Architecture
 
@@ -159,7 +161,7 @@ The `To()` method generates envoy xDS resources. Fargate mode affects:
 
 ## SSH Reverse Tunnels
 
-### Mapper (`pkg/handler/proxy.go`)
+### Mapper (`pkg/handler/proxy_mapper.go`)
 
 The `Mapper` struct manages SSH tunnels for fargate-mode proxied resources. Created only when `util.IsK8sService(object)` returns true.
 
@@ -216,8 +218,8 @@ kubevpn proxy svc/reviews --headers env=test
 ```
 kubevpn leave svc/reviews
   │
-  ├── 1. Rule matching: use headers (not TUN IP) to find user's rule
-  │      isFargateMode detected via EnvoyListenerPort != 0
+  ├── 1. Rule matching: match by OwnerID to find user's rule
+  │      isFargateMode detected via Virtual.FargateMode bool (or legacy EnvoyListenerPort fallback)
   │
   ├── 2. Remove rule from ConfigMap
   │      If last rule → remove all sidecar containers from workload
@@ -288,7 +290,7 @@ Fargate generates two random ports per container port (`EnvoyListenerPort` + `en
 | `pkg/inject/fargate_envoy.yaml` | Envoy bootstrap template (no static listener) |
 | `pkg/inject/fargate_envoy_ipv4.yaml` | Envoy bootstrap template IPv4 variant |
 | `pkg/controlplane/cache.go` | `Virtual.To()` — xDS generation with `BindToPort`, default routes |
-| `pkg/handler/proxy.go` | `Mapper` — SSH tunnel lifecycle management |
+| `pkg/handler/proxy_mapper.go` | `Mapper` — SSH tunnel lifecycle management |
 | `pkg/handler/leave.go` | Cleanup: header-based rule matching, Service restoration |
 | `pkg/handler/reset.go` | Hard reset: remove all rules, restore Service |
 | `pkg/ssh/reverse.go` | `ExposeLocalPortToRemote()` — SSH reverse tunnel |

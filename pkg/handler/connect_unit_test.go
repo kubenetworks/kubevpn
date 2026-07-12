@@ -19,7 +19,7 @@ func newTestConnectOptions(t *testing.T) *ConnectOptions {
 		&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-ns", UID: "uid-123456789012"}},
 		&v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
-			Data:       map[string]string{config.KeyDHCP: "", config.KeyDHCP6: "", config.KeyEnvoy: "", config.KeyClusterIPv4POOLS: ""},
+			Data:       map[string]string{config.KeyTunIPPool: "", config.KeyEnvoy: "", config.KeyClusterCIDRs: ""},
 		},
 		&v1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},

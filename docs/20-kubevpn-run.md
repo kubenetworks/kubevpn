@@ -72,12 +72,12 @@ Steps:
 - Resource limits (not enforced in Docker by default)
 
 **Docker networking:**
-- All containers join the KubeVPN Docker network (`kubevpn-traffic-manager`)
-- Sidecar containers use `--network container:<dev>` to share namespace
+- The **last container** (typically a sidecar) owns the network namespace and joins the KubeVPN Docker network (`kubevpn-traffic-manager`)
+- All other containers, including the dev container (index 0), attach via `--network container:<lastContainerName>` to share the network namespace
 
 ## 6. Container Lifecycle
 
-`ConfigList.Run()` starts containers in **reverse order**: sidecars first (detached), then the dev container (foreground). This ensures sidecars are ready before the main application starts.
+`ConfigList.Run()` starts containers in **reverse order**: the network-owning sidecar first (detached), then other sidecars, then the dev container (foreground). This ensures the network namespace exists before other containers attach to it.
 
 `ConfigList.Remove()` cleans up all containers and disconnects from the Docker network.
 

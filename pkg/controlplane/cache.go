@@ -21,6 +21,7 @@ import (
 	httpconnectionmanager "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	tcpproxy "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
 	preservecasev3 "github.com/envoyproxy/go-control-plane/envoy/extensions/http/header_formatters/preserve_case/v3"
+	udpproxyv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/udp/udp_proxy/v3"
 	httpv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/upstreams/http/v3"
 	matcher "github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
@@ -188,6 +189,32 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 		}
 
 		listenerName := fmt.Sprintf("%s_%s_%v_%s", a.Namespace, a.UID, listenPort, port.Protocol)
+
+		// UDP ports use udp_proxy filter (no HTTP/TCP filter chain, no header routing).
+		if port.Protocol == corev1.ProtocolUDP {
+			for _, rule := range a.Rules {
+				var envoyRulePort int32
+				for _, pm := range rule.ParsePortMap() {
+					if pm.ContainerPort == port.ContainerPort {
+						envoyRulePort = pm.EnvoyPort
+						break
+					}
+				}
+				ips := []string{rule.LocalTunIPv4}
+				if enableIPv6 {
+					ips = append(ips, rule.LocalTunIPv6)
+				}
+				for _, ip := range ips {
+					clusterName := fmt.Sprintf("%s_%v", ip, envoyRulePort)
+					clusters = append(clusters, toCluster(clusterName))
+					endpoints = append(endpoints, toEndPoint(clusterName, ip, envoyRulePort))
+					listeners = append(listeners, toUDPListener(listenerName, listenPort, clusterName))
+				}
+			}
+			continue
+		}
+
+		// TCP ports use the existing HTTP connection manager with header-based routing.
 		routeName := listenerName
 		listeners = append(listeners, toListener(listenerName, routeName, listenPort, port.Protocol, fargate))
 
@@ -537,6 +564,40 @@ func toListener(listenerName string, routeName string, port int32, p corev1.Prot
 				Name: wellknown.OriginalDestination,
 				ConfigType: &listener.ListenerFilter_TypedConfig{
 					TypedConfig: mustMarshalAny(&dstv3inspector.OriginalDst{}),
+				},
+			},
+		},
+	}
+}
+
+// toUDPListener creates a UDP listener with the udp_proxy filter routing to the given cluster.
+// UDP does not support use_original_dst or header-based routing — all traffic goes to the cluster.
+func toUDPListener(name string, port int32, clusterName string) *listener.Listener {
+	return &listener.Listener{
+		Name:             name,
+		TrafficDirection: core.TrafficDirection_INBOUND,
+		Address: &core.Address{
+			Address: &core.Address_SocketAddress{
+				SocketAddress: &core.SocketAddress{
+					Protocol: core.SocketAddress_UDP,
+					Address:  "0.0.0.0",
+					PortSpecifier: &core.SocketAddress_PortValue{
+						PortValue: uint32(port),
+					},
+				},
+			},
+		},
+		ListenerFilters: []*listener.ListenerFilter{
+			{
+				Name: "envoy.filters.udp_listener.udp_proxy",
+				ConfigType: &listener.ListenerFilter_TypedConfig{
+					TypedConfig: mustMarshalAny(&udpproxyv3.UdpProxyConfig{
+						StatPrefix: "udp_proxy",
+						RouteSpecifier: &udpproxyv3.UdpProxyConfig_Cluster{
+							Cluster: clusterName,
+						},
+						IdleTimeout: durationpb.New(5 * time.Minute),
+					}),
 				},
 			},
 		},

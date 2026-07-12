@@ -79,8 +79,8 @@ Fields used:
 | `K8sClient` (clientset, factory) | Interact with K8s API (inject sidecar, query ConfigMap) |
 | `OwnerID` | Written into Envoy Rule to identify ownership |
 | `Image/ImagePullSecretName` | CreateOutboundPod creates the traffic manager pod |
-| `proxyWorkloads` | Track currently proxied workloads |
-| `healthStatus` | Periodic health checks |
+| `proxyManager` | ProxyManager — manages proxied workloads lifecycle |
+| `configMapStore.healthStatus` | Periodic health checks (via ConfigMapStore) |
 | `Sync` | File sync options |
 | `RequestRaw` | Needed for persistence |
 
@@ -89,10 +89,7 @@ Fields used:
 |-------|--------|
 | `ctx/cancel` | DoConnect is not called, so these are never set |
 | `isDataPlane` | Always false |
-| `tunName` | Does not create TUN devices |
-| `dnsConfig` | Does not configure DNS |
-| `cidrs` | Does not detect CIDRs (Root Daemon does) |
-| `apiServerIPs` | Does not perform route filtering |
+| `network` | NetworkManager lives in Root Daemon only (holds TUN, DNS, routes) |
 
 ### 2.2 Root Daemon's ConnectOptions (Data Plane)
 
@@ -125,8 +122,8 @@ Fields used:
 | Field | Reason |
 |-------|--------|
 | `OwnerID` | Does not operate on Envoy config |
-| `proxyWorkloads` | Does not manage proxy workloads |
-| `healthStatus` | Does not perform Envoy health checks (User Daemon does) |
+| `proxyManager` | Does not manage proxy workloads |
+| `proxyManager` | Does not manage proxy workloads (User Daemon does) |
 | `Sync` | File sync runs in the User Daemon |
 
 ## 3. Operation Flows
@@ -199,10 +196,10 @@ User Daemon: Disconnect RPC
   │                                    └── cancel context → TUN/routes stop
   │
   └── cleanupControlPlane()
-        ├── ReleaseIP (return DHCP lease)
-        ├── Delete temporary Pod/Job
+        ├── Delete temporary Pod/Job (CNI pod, Helm job)
         ├── LeaveAllProxyResources (clean up Envoy Rules, matched by OwnerID)
-        └── rollback functions
+        ├── rollback functions
+        └── Note: TUN IP is NOT explicitly released — DHCP lease expiry handles reclaim
 ```
 
 ## 4. Rules for Modifying ConnectOptions

@@ -58,7 +58,7 @@ Root Daemon:
   connect.OwnerID = req.OwnerID
   DoConnect → NetworkManager.Start()
     → startTUN → rentIP(OwnerID, ExcludeIPs)
-      → gRPC GetTunIP(ownerID) → TunConfigServer DHCP rent
+      → gRPC GetTunIP(ownerID) → TunConfigServer DHCP rent (via rentIP)
       → 198.18.0.5/32
     → create TUN device
   → StartIPWatcher(ctx)
@@ -175,9 +175,8 @@ type ProxyManager struct {
 | `Add(proxy)` | Register a proxy workload |
 | `Remove(ns, workload)` | Remove from tracking |
 | `Resources()` | Snapshot the list |
-| `IsMe(ns, uid, headers)` | Ownership check |
-| `LeaveAll(ctx, v4)` | Remove all sidecars |
-| `Leave(ctx, resources, v4)` | Remove sidecars from specified workloads |
+| `LeaveAll(ctx, ownerID)` | Remove all sidecars for the given ownerID |
+| `Leave(ctx, resources, ownerID)` | Remove sidecars from specified workloads for the given ownerID |
 
 ## ConfigMapStore — ConfigMap + Health Checks
 

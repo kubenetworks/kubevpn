@@ -25,42 +25,55 @@ func (c *ConnectOptions) setupSignalHandler() {
 }
 
 // Cleanup releases DHCP leases, leaves proxy resources, and runs rollback functions.
+// Uses mutex + flag instead of sync.Once so cleanup can be retried if it fails.
 func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 	if c == nil {
 		return
 	}
 
-	c.once.Do(func() {
-		if c.configMapStore != nil {
-			c.configMapStore.Stop()
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-		defer cancel()
+	c.cleanupMu.Lock()
+	if c.cleanedUp {
+		c.cleanupMu.Unlock()
+		return
+	}
 
-		if !c.isDataPlane {
-			c.cleanupControlPlane(logCtx, ctx)
-		} else {
-			c.cleanupDataPlane(logCtx)
+	if c.configMapStore != nil {
+		c.configMapStore.Stop()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+
+	if !c.isDataPlane {
+		if err := c.cleanupControlPlane(logCtx, ctx); err != nil {
+			c.cleanupMu.Unlock()
+			plog.G(logCtx).Warnf("Cleanup incomplete, will retry on next call: %v", err)
+			return
 		}
-	})
+	} else {
+		c.cleanupDataPlane(logCtx)
+	}
+	c.cleanedUp = true
+	c.cleanupMu.Unlock()
 }
 
 // cleanupControlPlane tears down the control-plane side:
 // removes ephemeral K8s resources, leaves proxy workloads, and runs rollback functions.
 // TUN IP is NOT explicitly released — per DHCP protocol, lease expiry handles reclaim.
-func (c *ConnectOptions) cleanupControlPlane(logCtx context.Context, ctx context.Context) {
+// Returns error if critical cleanup steps fail, allowing the caller to retry.
+func (c *ConnectOptions) cleanupControlPlane(logCtx context.Context, ctx context.Context) error {
 	plog.G(logCtx).Info("Performing cleanup operations")
 	if c.clientset != nil {
 		_ = c.clientset.CoreV1().Pods(c.ManagerNamespace).Delete(ctx, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
 		_ = c.clientset.BatchV1().Jobs(c.ManagerNamespace).Delete(ctx, config.ConfigMapPodTrafficManager, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
 	}
 	// leave proxy resources
-	err := c.LeaveAllProxyResources(ctx)
-	if err != nil {
+	if err := c.LeaveAllProxyResources(ctx); err != nil {
 		plog.G(logCtx).Errorf("Leave proxy resources error: %v", err)
+		return err
 	}
 
 	executeRollbackFuncs(logCtx, c.getRollbackFuncs())
+	return nil
 }
 
 // cleanupDataPlane tears down the data-plane side: runs rollback functions,

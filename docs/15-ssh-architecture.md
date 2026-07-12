@@ -472,9 +472,8 @@ type Server struct {
 | DisconnectRequest | field 5 |
 | ProxyRequest | field 9 |
 | SyncRequest | field 8 |
-| ResetRequest | field 2 |
-| LeaveRequest | field 3 |
-| UnsyncRequest | field 4 |
+| ResetRequest | field 4 |
+| UninstallRequest | field 3 |
 
 ```protobuf
 message SshJump {

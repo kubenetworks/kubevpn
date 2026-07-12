@@ -18,14 +18,13 @@ const (
 	// DefaultNamespaceKubevpn is the default namespace where kubevpn is installed.
 	DefaultNamespaceKubevpn = "kubevpn"
 
-	// KeyDHCP is the ConfigMap key for IPv4 DHCP allocation data.
-	KeyDHCP = "DHCP"
-	// KeyDHCP6 is the ConfigMap key for IPv6 DHCP allocation data.
-	KeyDHCP6 = "DHCP6"
+	// KeyTunIPPool is the ConfigMap key for the TUN IP address pool (dual-stack bitmap).
+	// Replaces the former DHCP + DHCP6 keys.
+	KeyTunIPPool = "TUN_IP_POOL"
 	// KeyEnvoy is the ConfigMap key for the Envoy proxy configuration.
 	KeyEnvoy = "ENVOY_CONFIG"
-	// KeyClusterIPv4POOLS is the ConfigMap key for cluster IPv4 address pools.
-	KeyClusterIPv4POOLS = "IPv4_POOLS"
+	// KeyClusterCIDRs is the ConfigMap key for cluster CIDR cache (IPv4 + IPv6).
+	KeyClusterCIDRs = "CLUSTER_CIDRS"
 	// KeyTunAllocs is the ConfigMap key for TUN IP owner allocations (ownerID → IPs).
 	KeyTunAllocs = "TUN_ALLOCS"
 
@@ -191,7 +190,7 @@ var (
 	DNSRouteDebounceInterval = 3 * time.Second
 
 	UDPSessionTimeout = 120 * time.Second
-	UDPRelayTimeout   = 30 * time.Second
+	UDPRelayTimeout   = 60 * time.Second
 
 	SlotReconnectBackoff = 2 * time.Second
 	DaemonPollInterval   = 200 * time.Millisecond
