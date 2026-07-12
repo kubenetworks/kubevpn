@@ -15,6 +15,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 func TestFindConnection_Found(t *testing.T) {
@@ -199,6 +200,47 @@ func TestResolveKubeconfigBytes_EmptySSH(t *testing.T) {
 	}
 	if string(data) != kubeconfigBytes {
 		t.Fatalf("bytes mismatch:\n  got:  %q\n  want: %q", string(data), kubeconfigBytes)
+	}
+}
+
+// TestResolveKubeconfigBytes_ToFactory_EndToEnd exercises the no-SSH bytes chain
+// shared by every daemon action (connect/proxy/sync/reset/uninstall/disconnect):
+// resolveKubeconfigBytes -> util.InitFactoryByBytes -> InitClient. It must build a
+// usable client entirely in-memory, without any temp kubeconfig file or network.
+func TestResolveKubeconfigBytes_ToFactory_EndToEnd(t *testing.T) {
+	ctx := context.Background()
+	kubeconfigBytes := `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://127.0.0.1:6443
+    insecure-skip-tls-verify: true
+  name: c1
+contexts:
+- context:
+    cluster: c1
+    namespace: default
+  name: ctx
+current-context: ctx
+users:
+- name: c1
+  user:
+    token: fake
+`
+	data, err := resolveKubeconfigBytes(ctx, nil, kubeconfigBytes, false)
+	if err != nil {
+		t.Fatalf("resolveKubeconfigBytes: %v", err)
+	}
+
+	connect := &handler.ConnectOptions{}
+	if err = connect.InitClient(util.InitFactoryByBytes(data, "default")); err != nil {
+		t.Fatalf("InitClient from bytes: %v", err)
+	}
+	if connect.GetClientset() == nil {
+		t.Fatal("expected non-nil clientset built from bytes")
+	}
+	if connect.GetFactory() == nil {
+		t.Fatal("expected non-nil factory built from bytes")
 	}
 }
 

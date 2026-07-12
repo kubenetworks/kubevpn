@@ -125,8 +125,9 @@ Cleanup dispatches by type identity — no flag or nil-check needed:
 
 Both delegate common mechanics (mutex gate, ConfigMapStore stop, 10 s timeout) to
 `SessionBase.cleanup`. Cleanup uses a `cleanupMu sync.Mutex` + `cleanedUp bool` (not `sync.Once`)
-so that failed cleanups can be retried on the next call. `rollbackFuncList` is protected by
-`rollbackMu sync.Mutex` since `AddRollbackFunc` and `getRollbackFuncs` may run concurrently.
+so that failed cleanups can be retried on the next call. The rollback registry lives in the
+embedded `rollbackList` (`pkg/handler/rollback.go`, shared by `SessionBase` and `SyncOptions`);
+its internal `mu sync.Mutex` guards `AddRollbackFunc`/`getRollbackFuncs` against concurrent use.
 
 ```
 ConnectOptions.Cleanup() — user daemon (ControlSession), ALWAYS control-plane:

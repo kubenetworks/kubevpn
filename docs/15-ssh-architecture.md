@@ -225,26 +225,26 @@ temp file is written on either side, and there is no bytes→file→bytes round-
 parseSshFromRPC(req.SshJump) → SshConfig
     │
     ▼
-resolveKubeconfig(ctx, jump, kubeconfigBytes, portForward)
+resolveKubeconfigBytes(ctx, jump, kubeconfigBytes, portForward)  // returns []byte, no temp file
     │
-    ├── SshConfig.IsEmpty() == true → write temp kubeconfig directly
+    ├── SshConfig.IsEmpty() == true → return request bytes unchanged
     │
     └── SshConfig.IsEmpty() == false:
         │
         ▼
-    SshJump(ctx, conf, kubeconfigBytes, print)
+    SshJumpBytes(ctx, conf, kubeconfigBytes, print)  // builds tunnel, returns rewritten bytes
         │
         ├── [optional] SSH remote kubeconfig retrieval
         │
         ├── Rewrite API server → 127.0.0.1:N
         │
-        ├── PortMapUntil(ctx, conf, remote, local)
-        │   │
-        │   └── Background: listen → accept → SSH dial remote → bidirectional copy
-        │
-        └── Write temp kubeconfig file
+        └── PortMapUntil(ctx, conf, remote, local)
             │
-            └── Auto-deleted on ctx.Done()
+            └── Background: listen → accept → SSH dial remote → bidirectional copy
+
+(daemon actions feed the returned bytes to util.InitFactoryByBytes — no file is
+ written. The path-returning SshJump wrapper is used only where a real file is
+ required: `kubevpn run` child process / KUBECONFIG env, via SshJumpAndSetEnv.)
 ```
 
 **Teardown:** When the session context is cancelled (disconnect, daemon exit, user ctrl+c), all resources are cleaned up automatically:
@@ -474,13 +474,15 @@ type Server struct {
 Creation:                                    Teardown:
   User RPC request                             session context cancelled
     → parseSshFromRPC                            → SSH client closed
-    → resolveKubeconfig                          → local listening port closed
-      → SshJump                                  → temp kubeconfig deleted
+    → resolveKubeconfigBytes                     → local listening port closed
+      → SshJumpBytes                             (no temp file to delete)
         → DialSshRemote (create SSH conn)
         → PortMapUntil (create local listener + port forwarding)
-        → write temp kubeconfig
+        → return rewritten kubeconfig bytes
 
 Lifetime = session context lifetime
+(SshJump — the file-materializing wrapper — is used only by kubevpn run; its
+ temp file IS auto-deleted on ctx.Done().)
 ```
 
 ### SSH Remote Terminal Lifecycle
@@ -545,6 +547,6 @@ message SshJump {
 
 ## Related Design Documents
 
-- `02-dual-daemon.md` — Dual daemon model (resolveKubeconfig runs in user daemon)
+- `02-dual-daemon.md` — Dual daemon model (resolveKubeconfigBytes runs in user daemon)
 - `12-session-lifecycle.md` — SessionLifecycle (manages SSH tunnel temp file cleanup)
 - `14-rpc-daemon-mapping.md` — RPC to daemon mapping

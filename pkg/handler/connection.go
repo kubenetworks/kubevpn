@@ -16,9 +16,9 @@ import (
 // uses on a connection object. This interface documents the boundary between
 // the daemon's session management and the handler's connection implementation.
 //
-// For now, only *ConnectOptions satisfies this interface. In a future migration,
-// Server.connections can be typed as []Connection to decouple daemon from the
-// concrete struct.
+// Both *ConnectOptions (control plane) and *DataSession (data plane) satisfy this
+// interface (see the compile-time assertions below); Server.connections is typed
+// as []Connection so the daemon is decoupled from the concrete structs.
 type Connection interface {
 	// --- Initialization ---
 

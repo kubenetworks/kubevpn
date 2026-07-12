@@ -2,6 +2,7 @@ package localproxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -37,24 +38,17 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	defer closeAll()
 
 	type serveFn func(context.Context, net.Listener, Connector) error
-	var entries []struct {
+	type listenerEntry struct {
 		name  string
 		addr  string
 		serve serveFn
 	}
+	var entries []listenerEntry
 	if s.SOCKSListenAddr != "" {
-		entries = append(entries, struct {
-			name  string
-			addr  string
-			serve serveFn
-		}{name: "SOCKS5", addr: s.SOCKSListenAddr, serve: serveSOCKS5})
+		entries = append(entries, listenerEntry{name: "SOCKS5", addr: s.SOCKSListenAddr, serve: serveSOCKS5})
 	}
 	if s.HTTPConnectListen != "" {
-		entries = append(entries, struct {
-			name  string
-			addr  string
-			serve serveFn
-		}{name: "HTTP CONNECT", addr: s.HTTPConnectListen, serve: serveHTTPConnect})
+		entries = append(entries, listenerEntry{name: "HTTP CONNECT", addr: s.HTTPConnectListen, serve: serveHTTPConnect})
 	}
 
 	errCh := make(chan error, len(entries))
@@ -96,11 +90,6 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 }
 
 func isListenerClosedError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if oe, ok := err.(*net.OpError); ok && oe.Err != nil {
-		return oe.Err.Error() == "use of closed network connection"
-	}
-	return err.Error() == "use of closed network connection"
+	// Accept()/Read() after Close return an error wrapping net.ErrClosed.
+	return errors.Is(err, net.ErrClosed)
 }

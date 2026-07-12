@@ -584,21 +584,34 @@ func TestIsListenerClosedError(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "raw closed message",
+			// A raw string that merely reads like the closed message but does not
+			// wrap net.ErrClosed must NOT match — that was the fragile old behavior.
+			name: "raw closed message (not wrapping net.ErrClosed)",
 			err:  fmt.Errorf("use of closed network connection"),
+			want: false,
+		},
+		{
+			name: "net.ErrClosed directly",
+			err:  net.ErrClosed,
 			want: true,
 		},
 		{
-			name: "OpError wrapping closed message",
+			name: "error wrapping net.ErrClosed",
+			err:  fmt.Errorf("accept tcp: %w", net.ErrClosed),
+			want: true,
+		},
+		{
+			// This is what net.Listener.Accept() returns after Close (Go 1.16+).
+			name: "OpError wrapping net.ErrClosed",
 			err: &net.OpError{
 				Op:  "accept",
 				Net: "tcp",
-				Err: fmt.Errorf("use of closed network connection"),
+				Err: net.ErrClosed,
 			},
 			want: true,
 		},
 		{
-			name: "OpError with different message",
+			name: "OpError with different error",
 			err: &net.OpError{
 				Op:  "accept",
 				Net: "tcp",

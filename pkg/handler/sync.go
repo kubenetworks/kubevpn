@@ -168,11 +168,11 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	}
 	plog.StepStart(ctx, "Stopping file sync")
 	// The daemon registers this Cleanup as a deferred error-path handler BEFORE
-	// InitClient sets d.factory (e.g. resolveKubeconfig may fail first). With a
-	// nil factory the GetUnstructuredObject / DynamicClient / RolloutStatus calls
+	// InitClient sets d.factory (e.g. resolveKubeconfigBytes may fail first). With
+	// a nil factory the GetUnstructuredObject / DynamicClient / RolloutStatus calls
 	// below would dereference a nil interface and crash the daemon. There is no
 	// K8s state to unwind yet, so skip the factory-dependent work — but still run
-	// rollbackFuncList to tear down the session (SSH tunnel + temp kubeconfig).
+	// the rollback funcs to tear down the session (SSH tunnel).
 	if d.factory == nil {
 		plog.G(ctx).Debug("Skipping workload cleanup: kubernetes client not initialized")
 		executeRollbackFuncs(ctx, d.getRollbackFuncs())

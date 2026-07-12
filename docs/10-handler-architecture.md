@@ -264,7 +264,7 @@ pkg/handler/
 ├── control_session.go    type ControlSession = ConnectOptions (alias)
 ├── data_session.go       DataSession — data-plane methods, DoConnect, cleanupDataPlane
 ├── connection.go         Connection interface + compile-time assertions for both types
-├── connection_impl.go    (placeholder; methods now in connect.go and data_session.go)
+├── rollback.go           rollbackList — mutex-guarded rollback registry (embedded by SessionBase + SyncOptions)
 ├── cleaner.go            ConnectOptions.Cleanup + cleanupControlPlane + executeRollbackFuncs
 ├── connect_tun.go        Run() server runner, healthCheck helpers
 ├── connect_dns.go        detectNameserver helpers

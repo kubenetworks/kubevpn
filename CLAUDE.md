@@ -66,8 +66,8 @@ pkg/
 ├── daemon/            gRPC daemon server
 │   ├── action/        Per-command daemon handlers (connect, proxy, leave, etc.)
 │   │   ├── connection.go  Connection lookup/remove helpers (findConnection, removeConnection, cleanupConnection)
-│   │   ├── lifecycle.go   SessionLifecycle — context + LIFO cleanup manager for daemon sessions
-│   │   └── writer.go      newStreamWriter, initStreamLogger, resolveKubeconfig
+│   │   ├── lifecycle.go   SessionLifecycle — session context + Teardown (cancel + logger detach) for daemon sessions
+│   │   └── writer.go      newStreamWriter, initStreamLogger, resolveKubeconfigBytes
 │   ├── handler/       WebSocket SSH terminal handler
 │   ├── elevate/       Privilege escalation (sudo/admin)
 │   └── rpc/           Generated protobuf (DO NOT EDIT *.pb.go)
@@ -75,13 +75,19 @@ pkg/
 ├── dns/               DNS setup (platform-specific: linux/unix/windows)
 ├── driver/            TUN/TAP driver management (wintun, openvpn)
 ├── handler/           Core business logic
-│   ├── connect.go         ConnectOptions struct + DoConnect orchestration
+│   ├── session_base.go    SessionBase — shared base (K8sClient + rollbackList + cleanup) embedded by ConnectOptions & DataSession
+│   ├── connect.go         ConnectOptions (= ControlSession) — control-plane methods + data-plane stubs
+│   ├── control_session.go type ControlSession = ConnectOptions (alias)
+│   ├── data_session.go    DataSession — data-plane methods, DoConnect, cleanupDataPlane
+│   ├── connection.go      Connection interface + compile-time assertions (both types satisfy it)
+│   ├── rollback.go        rollbackList — mutex-guarded rollback registry (embedded by SessionBase & SyncOptions)
+│   ├── cleaner.go         ConnectOptions.Cleanup + cleanupControlPlane + executeRollbackFuncs
 │   ├── connect_tun.go     TUN server, port forwarding, health checks
 │   ├── connect_route.go   Dynamic routing, extra routes, watchAndRoute
 │   ├── connect_dns.go     DNS setup
 │   ├── connect_upgrade.go Traffic manager deployment upgrade
 │   ├── network.go         NetworkManager — owns full networking lifecycle (port-forward, TUN IP allocation, routes, DNS)
-│   ├── k8s_client.go      K8sClient embedded struct (shared by ConnectOptions/SyncOptions)
+│   ├── k8s_client.go      K8sClient embedded struct (via SessionBase → ConnectOptions/DataSession/SyncOptions)
 │   ├── traffmgr.go        Create traffic manager pod
 │   ├── traffmgr_resources.go  K8s resource generators (deploy, svc, secret, etc.)
 │   ├── leave.go           Leave/unpatch proxy resources
@@ -151,8 +157,9 @@ pkg/
 
 - **Strategy pattern** in `pkg/inject` — `Injector` interface with `NewInjector` factory
 - **Strategy pattern** in `pkg/core` — `stackConstructor` function type for gvisor stack creation
-- **Embedded struct** in `pkg/handler` — `K8sClient` bundles (clientset, restclient, config, factory) + `InitClient`/`GetFactory`/`GetClientset` methods; embedded by `ConnectOptions` and `SyncOptions`
-- **Session lifecycle** in `daemon/action` — `SessionLifecycle` manages context + LIFO cleanup stack for daemon RPC sessions
+- **Embedded struct** in `pkg/handler` — `K8sClient` bundles (clientset, restclient, config, factory) + `InitClient`/`GetFactory`/`GetClientset` methods; embedded via `SessionBase` by `ConnectOptions`/`DataSession`, and directly by `SyncOptions`
+- **Session lifecycle** in `daemon/action` — `SessionLifecycle` owns the daemon session context + `Teardown()` (cancel + logger detach); the rollback/cleanup registry lives separately in `handler.rollbackList` + `SessionBase.cleanup`
+- **Rollback registry** in `pkg/handler` — `rollbackList` (mutex-guarded `AddRollbackFunc`/`getRollbackFuncs`) embedded by `SessionBase` and `SyncOptions`; run snapshots via `executeRollbackFuncs`
 - **Parameter object** in `pkg/inject` — `envoyRuleSpec` struct replaces 10+ individual args to `addEnvoyConfig`/`addVirtualRule`
 - **PodContext bundle** in `pkg/run` — groups K8s-fetched data (template, env, volume, DNS)
 - **Registry pattern** in `pkg/daemon/handler` — `sync.Map`-backed SSH session registry
@@ -163,8 +170,10 @@ pkg/
 |---|---|---|
 | `newStreamWriter(send)` | `daemon/action` | Adapts gRPC streaming Send into `io.Writer` — do NOT create per-action wrapper structs |
 | `svr.initStreamLogger(resp, level, sendMsg)` | `daemon/action` | Creates logger writing to both gRPC stream and log file, returns (logger, ctx) — used by reset, leave, uninstall, unsync |
-| `resolveKubeconfig(ctx, jump, bytes, portForward)` | `daemon/action` | SSH jump + kubeconfig file resolution — do NOT inline the SSH/kubeconfig pattern |
-| `NewSessionLifecycle(logger)` | `daemon/action` | Context + LIFO cleanup manager for daemon sessions — replaces ad-hoc context.WithCancel + scattered cleanup |
+| `resolveKubeconfigBytes(ctx, jump, bytes, portForward)` | `daemon/action` | SSH jump + returns in-memory kubeconfig bytes (NO temp file) — feed to `util.InitFactoryByBytes`; do NOT inline the SSH/kubeconfig pattern |
+| `util.InitFactoryByBytes(bytes, ns)` | `pkg/util` | Builds a kubectl Factory directly from kubeconfig bytes (in-memory RESTClientGetter) — prefer over `InitFactoryByPath` when the Factory is consumed in-process (no child/mount/env needs a file) |
+| `ssh.SshJumpBytes(ctx, conf, bytes, print)` | `pkg/ssh` | Establishes the SSH tunnel and returns rewritten kubeconfig bytes (no file); `SshJump` is the file-materializing wrapper for child-process/KUBECONFIG consumers |
+| `NewSessionLifecycle(logger)` | `daemon/action` | Session context + `Teardown()` (cancel + logger detach) — replaces ad-hoc context.WithCancel; rollback/cleanup is NOT here (see `handler.rollbackList`) |
 | `cleanupConnection(ctx, conn)` | `daemon/action` | Cleans up a connection's sync and VPN state — used by disconnect and quit |
 | `util.InitKubeClient(f)` | `pkg/util` | Returns (config, restclient, clientset, namespace) — used by `K8sClient.InitClient` |
 | `gatherContainerPorts(spec, portMaps)` | `pkg/inject` | Collects container ports from pod spec + portMaps — shared by mesh and fargate |
@@ -189,16 +198,19 @@ pkg/
 - Rollback functions: always `AddRollbackFunc` (not `AddRolloutFunc`)
 - Design doc: `docs/06-fargate-mode.md`
 
-### ConnectOptions Dual-Role Pattern (IMPORTANT)
+### Dual-Session Pattern: ControlSession vs DataSession (IMPORTANT)
 
-**Full architecture doc: `docs/02-dual-daemon.md`**
+**Full architecture docs: `docs/02-dual-daemon.md`, `docs/10-handler-architecture.md`**
 
-`ConnectOptions` is used in BOTH daemon layers with **independent instances** (they do NOT share memory):
+The two daemon layers use **two distinct types** (not one struct with an `isDataPlane` flag),
+both embedding `SessionBase` (K8sClient + rollbackList + cleanup). `Cleanup` dispatches by
+type — no runtime flag:
 
 | | User Daemon (control plane) | Root Daemon (data plane) |
 |---|---|---|
-| Init path | `redirectConnectToSudoDaemon` | `Connect` (IsSudo=true) → `DoConnect` |
-| `isDataPlane` | false | true (set by DoConnect) |
+| Type | `ControlSession` (= `ConnectOptions`, `connect.go`/`cleaner.go`) | `DataSession` (`data_session.go`) |
+| Init path | `redirectConnectToSudoDaemon` → `forwardConnectToSudo` | `Connect` (IsSudo=true) → `ds.DoConnect` |
+| Cleanup | `cleanupControlPlane` | `cleanupDataPlane` |
 | Role | traffic manager create/upgrade, proxy inject, health check | TUN, IP allocation (rentIP), port-forward, DNS, routes, CIDR detection |
 | TUN IP | query the sudo daemon via `getSudoTunIPs` | `NetworkManager.localTunIPv4/v6` (allocated by rentIP) |
 | Persisted | ✅ OffloadToConfig | ❌ |
@@ -206,23 +218,22 @@ pkg/
 **Connect flow (control plane → data plane):**
 ```
 User Daemon: CreateOutboundPod → UpgradeDeploy → cli.Connect(ctx) [req.OwnerID]
-Root Daemon: connect.OwnerID = req.OwnerID → DoConnect (getCIDR → NetworkManager.Start → rentIP)
+Root Daemon: ds.OwnerID = req.OwnerID → ds.DoConnect (getCIDR → NetworkManager.Start → rentIP)
 ```
 
 **How the User Daemon obtains the TUN IP:**
-- The user daemon no longer holds the `LocalTunIPv4/v6` fields
+- `ControlSession` does not hold `LocalTunIPv4/v6`
 - When it needs an IP, it calls `svr.getSudoTunIPs(ctx)` to query the sudo daemon's Status RPC
 - It matches the IP for each connection by ConnectionID via `resolveTunIP(connect, ips)`
 - Used by: sidecar injection (`CreateRemoteInboundPod`), leave, and status queries
 
-**Rules when modifying `ConnectOptions`:**
-- **K8s client fields live in `K8sClient`** — the embedded struct in `k8s_client.go` holds clientset, restclient, config, factory. Use `GetFactory()` / `GetClientset()` accessors. Initialize via `InitClient(f)` which delegates to `util.InitKubeClient`
-- **Determine which daemon uses the field FIRST** — control-plane fields go in `redirectConnectToSudoDaemon`, data-plane fields go in `DoConnect`
-- **NEVER initialize control-plane fields in DoConnect** — DoConnect runs in Root Daemon where those fields are unused
-- **NEVER initialize data-plane fields in redirectConnectToSudoDaemon** — User Daemon doesn't create TUN devices
-- **Traffic manager pod create/upgrade is a control-plane responsibility** — `CreateOutboundPod` and `UpgradeDeploy` are called in the User Daemon's `forwardConnectToSudo`; `DoConnect` no longer handles them
+**Rules when modifying these types:**
+- **K8s client fields live in `K8sClient`** (embedded via `SessionBase`) — holds clientset, restclient, config, factory. Use `GetFactory()`/`GetClientset()`. Initialize via `InitClient(f)` (delegates to `util.InitKubeClient`); build the factory with `util.InitFactoryByBytes` (no temp file)
+- **Put the field on the type that uses it** — control-plane fields on `ConnectOptions`, data-plane fields on `DataSession`. Shared non-identity plumbing (K8sClient, rollbackList, configMapStore) goes in `SessionBase`
+- **`DoConnect` is a `DataSession` method** (a stub on `ConnectOptions`); it runs in the Root Daemon
+- **Traffic manager pod create/upgrade is a control-plane responsibility** — `CreateOutboundPod`/`UpgradeDeploy` are called in the User Daemon's `forwardConnectToSudo`; `DoConnect` does not handle them
 - Fields that need to survive daemon restart must have `json:` tags (only User Daemon persists)
-- Test both paths: root daemon (via `DoConnect`) and user daemon (via `forwardConnectToSudo`)
+- Test both paths: root daemon (via `DataSession.DoConnect`) and user daemon (via `forwardConnectToSudo`)
 
 ### ConnectionID
 

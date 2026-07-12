@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/netip"
 	"os"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -197,7 +196,10 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 	if err != nil {
 		return "", err
 	}
-	path, err = pkgutil.ConvertToTempKubeconfigFile(newKubeconfigBytes, GenKubeconfigTempPath(conf, kubeconfigBytes))
+	// Empty path → ConvertToTempKubeconfigFile uses os.CreateTemp for an
+	// atomically-unique name, so concurrent SSH jumps never collide on a
+	// deterministic filename.
+	path, err = pkgutil.ConvertToTempKubeconfigFile(newKubeconfigBytes, "")
 	if err != nil {
 		plog.G(ctx).Errorf("failed to write kubeconfig: %v", err)
 		return
@@ -362,13 +364,4 @@ func copyStream(ctx context.Context, local net.Conn, remote net.Conn) {
 	remote.Close()
 	// Wait for the second goroutine to finish
 	<-done
-}
-
-// GenKubeconfigTempPath generates a temp file path for kubeconfig based on the SSH config identifier or kubeconfig content.
-func GenKubeconfigTempPath(conf *SshConfig, kubeconfigBytes []byte) string {
-	if conf != nil && conf.RemoteKubeconfig != "" {
-		return filepath.Join(config.GetTempPath(), fmt.Sprintf("%s_%d", conf.KubeconfigIdentifier(), time.Now().Unix()))
-	}
-
-	return pkgutil.GenKubeconfigTempPath(kubeconfigBytes)
 }
