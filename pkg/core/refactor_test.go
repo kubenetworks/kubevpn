@@ -204,8 +204,10 @@ func TestReadFromEndpointWriteToTCPConn_ReturnsOnWriteError(t *testing.T) {
 // --- Channel capacity: verify MaxSize is used, not tcp.DefaultReceiveBufferSize ---
 
 func TestMaxSizeConstant(t *testing.T) {
-	if MaxSize != 1000 {
-		t.Fatalf("MaxSize changed: expected 1000, got %d", MaxSize)
+	// Deliberate change-detector. MaxSize was reduced 1000 → 256 to cap a saturated
+	// packet channel's worst case at 16 MiB; see TestPacketChannelWorstCaseMemory.
+	if MaxSize != 256 {
+		t.Fatalf("MaxSize changed: expected 256, got %d", MaxSize)
 	}
 }
 

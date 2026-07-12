@@ -12,7 +12,13 @@ import (
 
 const (
 	// MaxSize is the channel buffer capacity for packet queues (inbound, outbound, slots).
-	MaxSize = 1000
+	// Each queued *Packet pins a config.LargeBufferSize (64 KiB) pooled buffer, so a full
+	// channel's worst case is MaxSize × 64 KiB — and the data plane has 7+ such channels,
+	// which multiplies straight into client RSS. 256 keeps a single channel's worst case at
+	// 16 MiB (see TestPacketChannelWorstCaseMemory) while still absorbing bursts; an
+	// over-deep queue mainly adds worst-case memory and head-of-line latency on the shared
+	// tunnel rather than throughput.
+	MaxSize = 256
 
 	// maxConsecutiveTunReadErrors bounds how many back-to-back TUN read errors are tolerated
 	// before the device is declared dead. A single transient error (e.g. the wireguard route
