@@ -40,8 +40,8 @@ func TestWatchLiveness_PrimedThenSilentTriggersReconnect(t *testing.T) {
 	defer cancel()
 
 	stats := &core.HeartbeatStats{}
-	sessionStart := time.Now()
-	stats.MarkReply() // one fresh reply after sessionStart → primes, then never again
+	sessionStart := time.Now().Add(-time.Millisecond) // slightly in the pass so MarkReply is strictly After
+	stats.MarkReply()                                 // one fresh reply after sessionStart → primes, then never again
 
 	// startupDeadline large (so it does not fire), steadyThreshold small (50ms).
 	go watchLiveness(ctx, cancel, sessionStart, 10*time.Millisecond, time.Second, 50*time.Millisecond, stats.LastReply)
