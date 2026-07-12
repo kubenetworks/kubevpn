@@ -106,8 +106,13 @@ gets the same `✓` checklist as `connect`/`proxy` for both the connect phase an
 ## 4. CLI renderer (`pkg/util/progress`)
 
 `progress.Renderer` consumes the stream and drives the animation. It is a thin adapter over
-**`github.com/theckman/yacspin`**, which owns the animation goroutine, TTY detection, Windows VT
-handling (via `fatih/color` + `go-colorable`), and the non-TTY fallback.
+**`github.com/theckman/yacspin`**, which owns the animation goroutine and Windows VT
+handling (via `fatih/color` + `go-colorable`). The **terminal-capability decision is the
+renderer's**, not yacspin's: `progress.New` builds the animated spinner only when
+`smartTTY(out)` is true (an interactive `*os.File` with `TERM != "dumb"`); otherwise it
+leaves `spinner == nil` and uses the deterministic plain fallback (§4 "Non-TTY fallback").
+The same `smartTTY` predicate gates all coloring (heading, `✓`, slogan), so they are colored
+together or plain together.
 
 All commands share a single generic CLI entry point, `printProgressStream[T]`
 (`cmd/kubevpn/cmds/progress.go`), so there is exactly one render loop to reason about:
@@ -165,16 +170,24 @@ of its dependencies were already vendored, so it adds no new transitive dependen
 
 ### Non-TTY fallback
 
-When stdout is not a terminal (pipes, CI, log capture, the `kubevpn run` container-mode success scan in
-`pkg/util/docker.go`), yacspin auto-detects it and degrades to non-animated, line-by-line output.
+When stdout is not a smart TTY (pipes, CI, log capture, a dumb terminal, the `kubevpn run`
+container-mode success scan in `pkg/util/docker.go`), `progress.New` does **not** build the
+yacspin spinner (`smartTTY(out)` is false → `spinner == nil`). The Renderer then uses its
+deterministic plain path: `StepBegin` is a no-op, `StepEnd` prints exactly one ` ✓ text`
+line, and headings/plain lines print unstyled. This is why a piped run shows one clean line
+per step.
 
-The bold heading and the bold-green success line use the same fallback rule. Both write raw ANSI
-(yacspin's check marks already do — its writer is `os.Stdout`, not a colorable wrapper, so this renders
-identically wherever the `✓` shows color) gated on a `golang.org/x/term` TTY check; on a non-terminal
-writer they print plain. The final success line (`config.Slogan`) is printed by the CLI command after
-the stream ends via `progress.Success` (centralized in `printSlogan`, `cmd/kubevpn/cmds/progress.go`),
-so the plain text still matches and the sentinel-based success detection in container mode keeps
-working.
+> **Why not rely on yacspin's own non-TTY degrade?** yacspin still *paints animation frames*
+> off a TTY (each terminated with `\n`), so every step leaked 2–3 lines
+> (` ⣾ Forwarding ports` / ` ⣽ Forwarding ports` / ` ✓ Forwarded ports …`). Gating the spinner
+> on `smartTTY` and taking the `spinner == nil` path removes that noise entirely.
+
+The bold heading and the bold-green success line use the same `smartTTY` gate (`styleLine` /
+`progress.Success`): raw ANSI on a smart TTY, plain otherwise — so they match yacspin's `✓`
+coloring, which is likewise only emitted on a smart TTY. The final success line
+(`config.Slogan`) is printed by the CLI command after the stream ends via `progress.Success`
+(centralized in `printSlogan`, `cmd/kubevpn/cmds/progress.go`), so the plain text still
+matches and the sentinel-based success detection in container mode keeps working.
 
 ## 5. Wording style
 
@@ -241,7 +254,8 @@ seams of the protocol:
 |---|---|---|
 | `TestStep_StreamCarriesSentinel_FileStaysClean` | `pkg/log/step_test.go` | the two-output contract: one `StepStart`+`StepDone` pair yields sentinel-encoded **stream** lines (decode back to `StepBegin`/`StepEnd` + clean text) while the **log file** has no sentinel bytes and no `_kubevpn_step` field |
 | `TestEncodeDecodeStep_RoundTrip` | `pkg/log/step_test.go` | `DecodeStep(EncodeStep(k, msg))` round-trips for every `StepKind` — the wire format stays symmetric |
-| `TestRenderer_NonTTY` | `pkg/util/progress/spinner_test.go` | a `*bytes.Buffer` (not a TTY) → yacspin degrades to line-by-line output; ordinary log lines pass through and a finished step renders `✓` + its done text |
+| `TestRenderer_NonTTY` | `pkg/util/progress/spinner_test.go` | a `*bytes.Buffer` (not a TTY) → no spinner is built; ordinary log lines pass through and a finished step renders exactly one `✓` + its done text, with **no** braille animation frames and no erase escapes |
+| `TestSmartTTY` | `pkg/util/progress/spinner_test.go` | the capability gate: `*bytes.Buffer` and a pipe `*os.File` → false; a real pty slave → true, and false under `TERM=dumb` (pty helper is Linux-only, skipped elsewhere) |
 | `TestRenderer_NonTTY_PlainOnly` | `pkg/util/progress/spinner_test.go` | a stream with no step markers (e.g. the header line) passes through verbatim |
 | `TestPrintGRPCStream_StripsStepSentinel` | `pkg/daemon/grpcutil/stream_test.go` | the non-spinner writer decodes the sentinel away, so log file / container-mode `run` / `logs` never emit raw `\x1f` |
 | `TestRenderGRPCStream_KeepsStepSentinelForSpinner` | `pkg/daemon/grpcutil/stream_test.go` | the spinner sibling keeps the sentinel and renders a finished step as `✓ <done text>` (so host-mode `run` gets the check-mark UX); the raw `\x1f` never leaks |
