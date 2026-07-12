@@ -90,7 +90,7 @@ func (pm *ProxyManager) Leave(ctx context.Context, resources []Resources, ownerI
 			continue
 		}
 		if empty && util.IsK8sService(object) {
-			if err = inject.ModifyServiceTargetPort(ctx, pm.clientset, workload.Namespace, object.Name, map[int32]int32{}); err != nil {
+			if err = inject.RestoreServiceTargetPort(ctx, pm.clientset, workload.Namespace, object.Name); err != nil {
 				errs = append(errs, err)
 			}
 		}

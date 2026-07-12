@@ -6,7 +6,7 @@ Fargate mode is one of the traffic interception modes in KubeVPN, designed for e
 
 ### Strategy Comparison
 
-Since the unified proxy mode, VPN-only and Mesh are no longer separate injectors — they are the same `meshInjector`, differing only in whether `--headers` are set (empty headers = full interception). The columns below show VPN-only and Mesh as *configurations* of that one injector. See [29-sleep-wake-ip-update.md](29-sleep-wake-ip-update.md) and [17-sidecar-injection.md](17-sidecar-injection.md).
+Since the unified proxy mode, VPN-only and Mesh are no longer separate injectors — they are the same `meshInjector`, differing only in whether `--headers` are set (empty headers = full interception). The columns below show VPN-only and Mesh as *configurations* of that one injector. See [28-sleep-wake-ip-update.md](28-sleep-wake-ip-update.md) and [17-sidecar-injection.md](17-sidecar-injection.md).
 
 | | VPN-only (mesh, no headers) | Mesh (mesh, with headers) | Fargate Mode |
 |---|---|---|---|
@@ -143,12 +143,9 @@ In fargate mode, `LocalTunIPv4` is always `"127.0.0.1"` because there's no TUN d
 
 ### Envoy Bootstrap
 
-Fargate mode uses dedicated bootstrap templates (`fargate_envoy.yaml`, `fargate_envoy_ipv4.yaml`) that differ from mesh mode in one critical way:
+Fargate mode uses dedicated bootstrap templates (`fargate_envoy.yaml`, `fargate_envoy_ipv4.yaml`). Both mesh and fargate bootstrap templates share the same structure: only the `xds_cluster` is defined statically (for connecting to the control plane). All listeners are dynamically created by the xDS control plane — there are no static listeners in any template.
 
-- **Mesh**: Static listener on port 15006 with `use_original_dst: true` — catches iptables-redirected traffic
-- **Fargate**: **No static listener** — all listeners are dynamically created by the xDS control plane
-
-Both share the same xDS cluster configuration pointing to `<traffic-manager>:9002`.
+The behavioral difference is in the dynamically generated listeners: fargate uses `BindToPort=true` (envoy opens a real socket), while mesh uses `BindToPort=false` (iptables redirects traffic to envoy).
 
 ### xDS Listener Generation (`Virtual.To()`)
 
@@ -287,7 +284,7 @@ Fargate generates two random ports per container port (`EnvoyListenerPort` + `en
 | `pkg/inject/fargate.go` | `fargateInjector.Inject()`, `collectFargatePorts()`, `ModifyServiceTargetPort()` |
 | `pkg/inject/container.go` | `AddEnvoyAndSSHContainer()` — SSH + Envoy sidecars |
 | `pkg/inject/envoy.go` | `addEnvoyConfig()`, `removeEnvoyConfig()` with fargate detection |
-| `pkg/inject/fargate_envoy.yaml` | Envoy bootstrap template (no static listener) |
+| `pkg/inject/fargate_envoy.yaml` | Envoy bootstrap template (fargate, dual-stack) |
 | `pkg/inject/fargate_envoy_ipv4.yaml` | Envoy bootstrap template IPv4 variant |
 | `pkg/controlplane/cache.go` | `Virtual.To()` — xDS generation with `BindToPort`, default routes |
 | `pkg/handler/proxy_mapper.go` | `Mapper` — SSH tunnel lifecycle management |

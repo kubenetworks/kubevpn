@@ -153,6 +153,7 @@ Two variants:
 - Intercepts TCP SYN from gvisor stack
 - Dials the real destination (e.g., the actual service IP)
 - Relays data bidirectionally between gvisor gonet.Conn and the real TCP conn
+- Both relay goroutines are guaranteed to finish: after the first completes, both sides get `SetReadDeadline(1s)` to unblock the second goroutine
 
 **UDPForwarder** (`gvisor_udp_forwarder.go`):
 - Intercepts UDP packets from gvisor stack
@@ -175,7 +176,7 @@ The `tun` protocol factory handles sidecar self-DHCP:
 1. If `net=` parameter is empty, call `requestTunIPFromControlPlane()` → gRPC `GetTunIP` to TunConfigServer
 2. Create the TUN device with the returned IP
 
-The factory fetches the IP **once at startup** and does not run any background watcher. The sidecar's own TUN IP is fixed for the process lifetime; runtime routing changes (when a *client's* IP changes) are handled by the control-plane (`syncEnvoyRuleIP`) and pushed to the sidecar's envoy via xDS — not by the sidecar editing its own device. The former `watchTunIPChanges` / `pollTunIP` / `applyTunIPChange` + `tun.UpdateDNAT` path was removed by the unified proxy mode (see [09-tun-ip-hot-update.md](09-tun-ip-hot-update.md) and [29-sleep-wake-ip-update.md](29-sleep-wake-ip-update.md)).
+The factory fetches the IP **once at startup** and does not run any background watcher. The sidecar's own TUN IP is fixed for the process lifetime; runtime routing changes (when a *client's* IP changes) are handled by the control-plane (`syncEnvoyRuleIP`) and pushed to the sidecar's envoy via xDS — not by the sidecar editing its own device. The former `watchTunIPChanges` / `pollTunIP` / `applyTunIPChange` + `tun.UpdateDNAT` path was removed by the unified proxy mode (see [09-tun-ip-hot-update.md](09-tun-ip-hot-update.md) and [28-sleep-wake-ip-update.md](28-sleep-wake-ip-update.md)).
 
 ## 10. Forwarder
 

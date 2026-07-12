@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	grpcMaxConcurrentStreams = 1000000
+	grpcMaxConcurrentStreams = 1000
 )
 
 func runServer(ctx context.Context, server serverv3.Server, tunConfig *TunConfigServer, port uint) error {

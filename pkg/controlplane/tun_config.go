@@ -2,11 +2,13 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"sync"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/yaml"
@@ -164,18 +166,16 @@ func (s *TunConfigServer) saveAllocs(ctx context.Context) error {
 		return err
 	}
 
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-		if cm.Data == nil {
-			cm.Data = make(map[string]string)
-		}
-		cm.Data[config.KeyTunAllocs] = string(data)
-		_, err = s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
+	patch, err := json.Marshal([]map[string]string{{
+		"op":    "add",
+		"path":  "/data/" + config.KeyTunAllocs,
+		"value": string(data),
+	}})
+	if err != nil {
 		return err
-	})
+	}
+	_, err = s.clientset.CoreV1().ConfigMaps(s.namespace).Patch(ctx, config.ConfigMapPodTrafficManager, k8stypes.JSONPatchType, patch, metav1.PatchOptions{})
+	return err
 }
 
 // GetTunIP allocates or retrieves the TUN IP for the given owner.
@@ -461,8 +461,15 @@ func (s *TunConfigServer) syncEnvoyRuleIP(ctx context.Context, ownerID string, n
 		if marshalErr != nil {
 			return marshalErr
 		}
-		cm.Data[config.KeyEnvoy] = string(data)
-		_, err = s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
+		patch, patchErr := json.Marshal([]map[string]string{{
+			"op":    "add",
+			"path":  "/data/" + config.KeyEnvoy,
+			"value": string(data),
+		}})
+		if patchErr != nil {
+			return patchErr
+		}
+		_, err = s.clientset.CoreV1().ConfigMaps(s.namespace).Patch(ctx, config.ConfigMapPodTrafficManager, k8stypes.JSONPatchType, patch, metav1.PatchOptions{})
 		return err
 	})
 	if err != nil {

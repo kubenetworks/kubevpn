@@ -3,6 +3,7 @@ package dhcp
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net"
 
@@ -11,6 +12,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/yaml"
@@ -84,9 +86,10 @@ func (m *Manager) InitDHCP(ctx context.Context) error {
 			Labels:    map[string]string{},
 		},
 		Data: map[string]string{
-			config.KeyEnvoy:       "",
-			config.KeyTunIPPool:   "",
+			config.KeyEnvoy:        "",
+			config.KeyTunIPPool:    "",
 			config.KeyClusterCIDRs: "",
+			config.KeyTunAllocs:    "",
 		},
 	}
 	_, err = m.clientset.CoreV1().ConfigMaps(m.namespace).Create(ctx, cm, metav1.CreateOptions{})
@@ -267,10 +270,17 @@ func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipalloca
 	if err != nil {
 		return err
 	}
-	cm.Data[config.KeyTunIPPool] = poolStr
-	_, err = m.clientset.CoreV1().ConfigMaps(m.namespace).Update(ctx, cm, metav1.UpdateOptions{})
+	patch, err := json.Marshal([]map[string]string{{
+		"op":    "add",
+		"path":  "/data/" + config.KeyTunIPPool,
+		"value": poolStr,
+	}})
 	if err != nil {
-		return fmt.Errorf("failed to update TUN_IP_POOL: %w", err)
+		return fmt.Errorf("failed to marshal patch: %w", err)
+	}
+	_, err = m.clientset.CoreV1().ConfigMaps(m.namespace).Patch(ctx, config.ConfigMapPodTrafficManager, k8stypes.JSONPatchType, patch, metav1.PatchOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to patch TUN_IP_POOL: %w", err)
 	}
 	return nil
 }
@@ -317,4 +327,3 @@ func (m *Manager) ForEach(ctx context.Context, fnv4 func(net.IP), fnv6 func(net.
 	dhcp6.ForEach(fnv6)
 	return nil
 }
-

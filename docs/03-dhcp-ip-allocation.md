@@ -95,13 +95,11 @@ Uses `ContiguousAllocationMap` — sequentially scans the bitmap starting from o
 
 **Concurrency Safety:**
 
-Optimistic locking via K8s `resourceVersion`:
-```
-GET ConfigMap (resourceVersion=X)
-→ modify bitmap
-→ UPDATE ConfigMap (with resourceVersion=X)
-→ conflict (409 Conflict) → retry.RetryOnConflict automatically retries
-```
+Each key in the ConfigMap is updated independently via JSON Patch (`JSONPatchType`), so writes to `TUN_IP_POOL` do not conflict with writes to `TUN_ALLOCS` or `ENVOY_CONFIG`. The DHCP bitmap update still requires a GET (to parse the current bitmap) followed by a Patch; `RetryOnConflict` retries on conflict with other DHCP operations.
+
+**Error Handling:**
+
+All `ReleaseIP` calls check and log errors — silent failures could cause permanent IP leaks (bits stuck in the bitmap).
 
 ### 4.2 TunConfigServer (Control Plane)
 
@@ -116,18 +114,22 @@ allocs map[string]*tunAllocation  // ownerID → {IPv4, IPv6, Version, LastRenew
 
 **GetTunIP Flow:**
 
+The entire method runs under `s.mu.Lock()` to prevent concurrent allocations from obtaining the same IP. `RentIPExcluding` is called within the lock (it's a fast ConfigMap operation).
+
 ```
-GetTunIP(ownerID, excludeIPs):
+GetTunIP(ownerID, excludeIPs):          // holds s.mu.Lock for entire method
   ├── exists in allocs and no conflict → return existing IP (renew LastRenew)
   ├── exists in allocs but conflicts with excludeIPs →
   │     1. dhcp.RentIPExcluding(excludeIPs) to allocate a new IP
   │     2. dhcp.ReleaseIP(old IP)
-  │     3. update allocs + persist
-  │     4. return new IP
+  │     3. saveAllocs (synchronous, returns error)
+  │     4. notifyWatchers + syncEnvoyRuleIP
+  │     5. return new IP
   └── not in allocs →
         1. dhcp.RentIPExcluding(excludeIPs) to allocate a new IP
-        2. store in allocs + persist
-        3. return new IP
+        2. saveAllocs (synchronous, returns error)
+        3. notifyWatchers + syncEnvoyRuleIP
+        4. return new IP
 ```
 
 **Persistence (allocs → ConfigMap):**
@@ -200,11 +202,13 @@ On startup, `loadAllocs` restores from ConfigMap, and expired allocations are re
 
 ```
 LeaseReaper (every 30s):
-  for each alloc in allocs:
-    if now - alloc.LastRenew > 5min:
+  collect expired ownerIDs (under read lock)
+  for each expired ownerID:
+    re-acquire write lock
+    double-check: if alloc still exists AND still expired:  // prevents deleting a reconnected client
       delete(allocs, ownerID)
-      dhcp.ReleaseIP(alloc.IPv4, alloc.IPv6)
-      saveAllocs()
+      dhcp.ReleaseIP(alloc.IPv4, alloc.IPv6)  // errors logged, not ignored
+  saveAllocs()
 ```
 
 **Design Rationale:** No explicit IP release is required. After a client disconnects, the lease naturally expires and LeaseReaper reclaims it. This avoids IP leaks caused by incomplete cleanup during disconnection.
