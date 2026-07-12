@@ -15,7 +15,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/cmd/util"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -73,7 +72,7 @@ func TestByCreateSvc(t *testing.T) {
 func TestElegant(t *testing.T) {
 	u := &cidrUt{}
 	u.init()
-	elegant := GetCIDR(context.Background(), u.clientset, u.restconfig, u.namespace, config.Image)
+	elegant := GetCIDR(context.Background(), u.clientset, u.namespace)
 	for _, ipNet := range elegant {
 		t.Log(ipNet.String())
 	}

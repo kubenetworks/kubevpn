@@ -325,7 +325,7 @@ func (ds *DataSession) getCIDR(ctx context.Context) ([]*net.IPNet, []net.IP, err
 		return cidrs, apiServerIPs, nil
 	}
 
-	raw := util.GetCIDR(ctx, ds.clientset, ds.config, ds.ManagerNamespace, ds.Image)
+	raw := util.GetCIDR(ctx, ds.clientset, ds.ManagerNamespace)
 	cidrs := dedupAndFilterCIDRs(raw, apiServerIPs)
 	// Cache the RAW (deduped, unfiltered) CIDRs — NOT the per-client-filtered set.
 	// API-server IPs differ per client and every reader re-filters on read via

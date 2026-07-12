@@ -32,7 +32,6 @@ func (c *ConnectOptions) cleanupControlPlane(logCtx context.Context, ctx context
 	// stream while preserving it in the daemon log file for diagnostics.
 	plog.G(logCtx).Debug("Performing cleanup operations")
 	if c.clientset != nil {
-		_ = c.clientset.CoreV1().Pods(c.ManagerNamespace).Delete(ctx, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
 		_ = c.clientset.BatchV1().Jobs(c.ManagerNamespace).Delete(ctx, config.ConfigMapPodTrafficManager, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
 	}
 	// leave proxy resources

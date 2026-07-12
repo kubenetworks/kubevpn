@@ -54,12 +54,14 @@ this is safe and is strictly more correct than the current "filtered by whoever 
   and Service ClusterIPs) use a narrow **/24** for IPv4 and **/64** for IPv6, so a routed
   range does not hijack locally-used networks; the per-IP /24s are then coalesced upward into
   the enclosing Pod/Service range by `mergeToSupernet` (bounded — /12 v4, /48 v6; see
-  [32-cidr-detection.md](32-cidr-detection.md) §5), and overlaps collapse via
+  [32-cidr-detection.md](32-cidr-detection.md) §4), and overlaps collapse via
   `RemoveLargerOverlappingCIDRs`.
-- Client: **unchanged** read path + local fallback (`data_session.go:297`). Because the
-  manager warms the cache, the client's `util.GetCIDR` effectively never runs; if the manager
-  is old / detection failed / RBAC missing, the cache is empty and the client falls back to
-  today's behavior. **Purely additive — cannot break connectivity.**
+- Client: **unchanged** read path + local fallback. Because the manager warms the cache, the
+  client's `util.GetCIDR` effectively never runs; if the manager is old / detection failed /
+  RBAC missing, the cache is empty and the client falls back to local detection. That fallback
+  is now **also probe-pod-free** — `util.GetCIDR` uses the same pod-free strategy set as the
+  server-side `GetClusterCIDRNoProbePod` (no probe pod / exec), just with progress steps.
+  **Purely additive — cannot break connectivity.**
 - Per-client API-server-IP filtering stays on the client (`parseCachedCIDRs`).
 - RBAC: extend the manager Role (`traffmgr_resources.go`) with `pods list` and
   `services create`/`services list` (no `pods/create`, no `pods/exec` — detection is pod-free).

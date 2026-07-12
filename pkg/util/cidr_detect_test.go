@@ -92,7 +92,7 @@ func TestGetPodCIDRFromPod_MaskAndSkips(t *testing.T) {
 		pod("dual", false, "10.244.3.9", "fd00:10::5"),   // same /24 (dedup) + v6 /64
 	)
 
-	got, err := GetPodCIDRFromPod(context.Background(), cs, ns, nil)
+	got, err := GetPodCIDRFromPod(context.Background(), cs, ns)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -105,6 +105,71 @@ func TestGetPodCIDRFromPod_MaskAndSkips(t *testing.T) {
 	}
 	if set.Has("192.168.1.0/24") {
 		t.Errorf("HostNetwork pod IP must be skipped, got %v", set.UnsortedList())
+	}
+}
+
+// TestDetectServiceCIDRs verifies the shared service-CIDR union includes Strategy 5
+// (infer-from-Services), which is the reporting fix: previously its result was appended after
+// the "Detected service CIDR" line was printed. Strategy 4 (the rejected-Service error trick)
+// contributes nothing against a fake cluster — fake Create does not reject ClusterIP 0.0.0.0,
+// so unlike a real API server it returns no CIDR — leaving the inferred Service /24 in the union.
+func TestDetectServiceCIDRs(t *testing.T) {
+	const ns = "default"
+	cs := fake.NewSimpleClientset(
+		&corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "kubernetes", Namespace: ns},
+			Spec:       corev1.ServiceSpec{ClusterIP: "10.96.0.1"}, // inferred -> 10.96.0.0/24
+		},
+	)
+
+	got := cidrSet(detectServiceCIDRs(context.Background(), cs, ns))
+	if !got.Has("10.96.0.0/24") {
+		t.Errorf("detectServiceCIDRs must include the inferred Service CIDR 10.96.0.0/24, got %v", got.UnsortedList())
+	}
+}
+
+// TestGetCIDR_NoProbePod verifies the client/data-plane entry point runs entirely pod-free:
+// it returns the component-flag CIDRs, the Pod CIDR inferred from live Pod IPs, and the
+// Service CIDR inferred from Services — without ever creating a probe pod (which previously
+// blocked ~15s on WaitPod). Running to completion against a fake cluster (where a probe pod
+// would never reach Running) is itself the proof that no probe pod is created.
+func TestGetCIDR_NoProbePod(t *testing.T) {
+	const ns = "kubevpn"
+	cs := fake.NewSimpleClientset(
+		// kube-system control-plane pod exposing component flags.
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "kube-apiserver", Namespace: metav1.NamespaceSystem},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{
+				Name: "kube-apiserver",
+				Command: []string{
+					"kube-apiserver",
+					"--service-cluster-ip-range=10.96.0.0/12",
+					"--cluster-cidr=10.244.0.0/16",
+				},
+			}}},
+		},
+		// A Service in the namespace → inferred service /24.
+		&corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: ns},
+			Spec:       corev1.ServiceSpec{ClusterIP: "10.96.0.100"},
+		},
+		// A business Pod in the namespace → inferred pod /24.
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: ns},
+			Status:     corev1.PodStatus{PodIP: "10.244.1.5"},
+		},
+	)
+
+	got := cidrSet(GetCIDR(context.Background(), cs, ns))
+	for _, want := range []string{
+		"10.96.0.0/12",  // component flag: service-cluster-ip-range
+		"10.244.0.0/16", // component flag: cluster-cidr
+		"10.244.1.0/24", // inferred from pod IP 10.244.1.5
+		"10.96.0.0/24",  // inferred from Service ClusterIP 10.96.0.100
+	} {
+		if !got.Has(want) {
+			t.Errorf("GetCIDR missing %s, got %v", want, got.UnsortedList())
+		}
 	}
 }
 

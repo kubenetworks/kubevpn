@@ -121,27 +121,6 @@ func GetEnv(ctx context.Context, set *kubernetes.Clientset, config *rest.Config,
 	return result, nil
 }
 
-// WaitPod watches pods matching the list options until the checker function returns true or the context is cancelled.
-func WaitPod(ctx context.Context, podInterface v12.PodInterface, list v1.ListOptions, checker func(*corev1.Pod) bool) error {
-	w, err := podInterface.Watch(ctx, list)
-	if err != nil {
-		return err
-	}
-	defer w.Stop()
-	for {
-		select {
-		case e := <-w.ResultChan():
-			if pod, ok := e.Object.(*corev1.Pod); ok {
-				if checker(pod) {
-					return nil
-				}
-			}
-		case <-ctx.Done():
-			return fmt.Errorf("wait for pod to be ready timeout: %w", ctx.Err())
-		}
-	}
-}
-
 // Shell executes a command in a pod container and returns the stdout output.
 // The exec stream to the pod (over the apiserver) can drop mid-flight on flaky or
 // nested-VM clusters ("error stream protocol error", EOF); since every caller runs

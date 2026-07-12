@@ -20,6 +20,7 @@ Connecting to the cluster ...
  ✓ Using manager namespace "kubevpn"
  ✓ Using existing traffic manager in namespace "kubevpn"
  ✓ Detected cluster CIDRs: 10.0.0.0/8, 172.16.0.0/12
+ ✓ Detected pod CIDR: 10.244.0.0/16
  ✓ Detected service CIDR: 10.96.0.0/12
  ✓ Forwarded ports (TCP/UDP/xDS)
  ✓ Created TUN device "utun5"
@@ -233,7 +234,7 @@ Step text is normalized so the checklist reads uniformly across commands:
 | `Using traffic manager in namespace %q` (done-only, when it already exists) | ✅ | `pkg/handler/traffmgr.go` |
 | else one ✓ per created resource — `Labeling namespace`→`Labeled namespace %q`, `Creating ServiceAccount`→`Created ServiceAccount %q`, then Role / RoleBinding / Service / ConfigMap / Deployment — then `Waiting for traffic manager pod` (live one-line status) → `Traffic manager ready in namespace %q` | — | `pkg/handler/traffmgr.go` (`createOutboundPod`, `WaitPodReady`) |
 | `Upgrading traffic manager` → `Upgraded traffic manager to <version>` (only when the manager image is older than the client and an upgrade is actually performed; covers the image-pull + rollout wait) | — | `pkg/handler/connect_upgrade.go` (`UpgradeDeploy`, user daemon) |
-| `Detecting cluster CIDRs` → `Detected cluster CIDRs: …` / `Detecting service CIDR` → `Detected service CIDR: …` | — | `pkg/util/cidr.go` |
+| `Detecting cluster CIDRs` → `Detected cluster CIDRs: …` / `Detecting pod CIDR` → `Detected pod CIDR: …` / `Detecting service CIDR` → `Detected service CIDR: …` | — | `pkg/util/cidr_detect.go` |
 | `Detected cluster CIDRs: … (cached)` | ✅ | `pkg/handler/connect.go` (cached path) |
 | `Forwarding ports` → `Forwarded ports (TCP/UDP/xDS)`, `Creating TUN device` → `Created TUN device %q`, `Allocating TUN IP` → `Allocated TUN IP %s`, `Adding routes` → `Added %d pod/service routes`, `Configuring DNS` → `Configured DNS (cluster DNS %s)`, `Writing service records to the hosts file` → `Wrote %d service records to the hosts file (namespace %q)` | — | `pkg/handler/network.go` |
 

@@ -108,15 +108,6 @@ const (
 	*/
 	DockerIPv4Pool = "198.19.0.1/16"
 
-	// DefaultNetDir is the default directory for CNI network configuration files.
-	DefaultNetDir = "/etc/cni/net.d"
-
-	// Proc is the path to the Linux procfs mount.
-	Proc = "/proc"
-
-	// CniNetName is the volume name for the CNI network config directory.
-	CniNetName = "cni-net-dir-kubevpn"
-
 	// EnvInboundPodTunIPv4 is the env var name for the pod's TUN device IPv4 address.
 	EnvInboundPodTunIPv4 = "TunIPv4"
 	// EnvInboundPodTunIPv6 is the env var name for the pod's TUN device IPv6 address.
