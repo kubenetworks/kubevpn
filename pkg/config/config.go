@@ -234,6 +234,12 @@ var (
 	// daemon (getSudoTunIPs). It caps how long a wedged sudo daemon can stall an
 	// otherwise-local command, independent of the read-path fixes.
 	SudoStatusTimeout = 2 * time.Second
+
+	// SudoLivenessProbeInterval is how often the user daemon's MonitorSudoLiveness probes the
+	// root (sudo) daemon to keep its cached data-plane health snapshot fresh. Matched to the
+	// self-staleness watchdog's poll cadence (detectUnixSocksFile), so a crashed root daemon is
+	// reflected in `kubevpn status` within ~1 interval — far ahead of the 90s heartbeat window.
+	SudoLivenessProbeInterval = 2 * time.Second
 )
 
 var (

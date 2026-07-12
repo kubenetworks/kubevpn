@@ -27,7 +27,7 @@ const (
 func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.StatusResponse, error) {
 	var ips map[string]tunIP
 	if !svr.IsSudo {
-		ips = svr.getSudoTunIPs(ctx)
+		ips = svr.sudoHealthSnapshot(ctx)
 	}
 
 	if len(req.ConnectionIDs) != 0 {

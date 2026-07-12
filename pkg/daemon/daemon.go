@@ -119,6 +119,9 @@ func (o *SvrOption) Start(ctx context.Context) error {
 			_ = o.svr.LoadFromConfig(o.ctx)
 			o.svr.ReconcileSudoConnections(o.ctx)
 		}()
+		// Continuously track root-daemon liveness so `kubevpn status` reflects a crashed
+		// root daemon within ~one probe interval instead of waiting on the 90s heartbeat.
+		go o.svr.MonitorSudoLiveness(o.ctx)
 	}
 	rpc.RegisterDaemonServer(svr, o.svr)
 	return downgradingServer.Serve(lis)

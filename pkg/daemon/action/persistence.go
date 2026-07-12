@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"sync"
 	"time"
@@ -48,6 +49,12 @@ type Server struct {
 
 	sshServerIP   string
 	sshCancelFunc context.CancelFunc
+
+	// healthMu guards sudoHealth / sudoHealthy — the user daemon's cached view of the sudo
+	// daemon's data-plane liveness, refreshed by MonitorSudoLiveness. User daemon only.
+	healthMu    sync.RWMutex
+	sudoHealth  map[string]tunIP // last probe snapshot (connectionID → state); nil until first probe
+	sudoHealthy bool             // last observed sudo reachability, for transition-only logging
 
 	ID string
 }
@@ -266,4 +273,102 @@ func (svr *Server) getSudoTunIPs(ctx context.Context) map[string]tunIP {
 		plog.G(ctx).Warnf("Probe sudo daemon status failed: %v", err)
 	}
 	return m
+}
+
+// sudoProcessAlive is the crash-safe PID pre-check used by the liveness monitor. It is a var so
+// tests can stub the process check without a real root-daemon PID file.
+var sudoProcessAlive = sudoProcessAliveImpl
+
+// MonitorSudoLiveness periodically probes the root (sudo) daemon and caches a per-connection
+// health snapshot the user daemon serves from Status/ConnectionList. It is the peer-liveness
+// edge the dual-daemon design otherwise lacked: after Connect returns there is no long-lived
+// stream between the two daemons, so without this a crashed root daemon is only noticed lazily
+// on the next CLI call. It REPORTS only — recovery (respawning the root daemon) needs
+// interactive privilege escalation and is deferred to the next CLI command's StartupDaemon.
+// User daemon only.
+func (svr *Server) MonitorSudoLiveness(ctx context.Context) {
+	if svr.IsSudo {
+		return
+	}
+	svr.healthMu.Lock()
+	svr.sudoHealthy = true // start optimistic so only genuine transitions are logged
+	svr.healthMu.Unlock()
+
+	ticker := time.NewTicker(config.SudoLivenessProbeInterval)
+	defer ticker.Stop()
+	for {
+		svr.refreshSudoHealth(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// refreshSudoHealth performs one liveness probe and updates the cached snapshot.
+func (svr *Server) refreshSudoHealth(ctx context.Context) {
+	// Cheap crash-safe pre-check: a dead root-daemon process means the data plane is gone, so
+	// report disconnected without a doomed gRPC dial (works for kill -9, unlike a stale socket).
+	if !sudoProcessAlive() {
+		svr.storeSudoHealth(ctx, map[string]tunIP{}, false, "root daemon process not running")
+		return
+	}
+	m, err := svr.probeSudo(ctx)
+	if err == nil {
+		svr.storeSudoHealth(ctx, m, true, "")
+		return
+	}
+	if errors.Is(err, config.ErrDaemonNotRunning) {
+		svr.storeSudoHealth(ctx, map[string]tunIP{}, false, err.Error())
+		return
+	}
+	// Transient failure (daemon alive but not answering, e.g. mid-restart): keep the last-known
+	// connections but downgrade them to unhealthy rather than flapping straight to disconnected.
+	svr.degradeSudoHealth(ctx, err)
+}
+
+// storeSudoHealth replaces the cached snapshot, logging only on a reachability transition to
+// avoid a log line every probe interval.
+func (svr *Server) storeSudoHealth(ctx context.Context, m map[string]tunIP, healthy bool, reason string) {
+	svr.healthMu.Lock()
+	was := svr.sudoHealthy
+	svr.sudoHealth = m
+	svr.sudoHealthy = healthy
+	svr.healthMu.Unlock()
+	switch {
+	case was && !healthy:
+		plog.G(ctx).Warnf("Root daemon liveness lost (%s); connections reported unhealthy/disconnected until it is restarted by the next CLI command", reason)
+	case !was && healthy:
+		plog.G(ctx).Infof("Root daemon liveness restored")
+	}
+}
+
+// degradeSudoHealth downgrades every cached connection to unhealthy on a transient probe error.
+func (svr *Server) degradeSudoHealth(ctx context.Context, cause error) {
+	svr.healthMu.RLock()
+	degraded := make(map[string]tunIP, len(svr.sudoHealth))
+	for id, s := range svr.sudoHealth {
+		s.status = StatusUnhealthy
+		degraded[id] = s
+	}
+	svr.healthMu.RUnlock()
+	svr.storeSudoHealth(ctx, degraded, false, "transient probe failure: "+cause.Error())
+}
+
+// sudoHealthSnapshot returns the cached per-connection sudo data-plane state for the user
+// daemon's status reads. It falls back to a live probe only while the cache is still cold
+// (before MonitorSudoLiveness has produced its first snapshot).
+func (svr *Server) sudoHealthSnapshot(ctx context.Context) map[string]tunIP {
+	svr.healthMu.RLock()
+	cached := svr.sudoHealth
+	svr.healthMu.RUnlock()
+	if cached == nil {
+		return svr.getSudoTunIPs(ctx)
+	}
+	cp := make(map[string]tunIP, len(cached))
+	for k, v := range cached {
+		cp[k] = v
+	}
+	return cp
 }
