@@ -202,6 +202,14 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 	// (StartRouteWatcher below), instead of a client-side cluster-wide list-watch.
 	plog.StepDone(nm.ctx, "Added %d pod/service CIDR routes", len(nm.cfg.CIDRs))
 
+	// Pre-route the traffic manager's ClusterIP through TUN so that dialManager
+	// (server-side inject) sees a consistent path from SYN onward. Without this,
+	// the route watcher adds the /32 asynchronously and can split a TCP connection
+	// mid-handshake: SYN via pod network, ACK via TUN → gvisor RSTs the orphan ACK.
+	if err := nm.addTrafficManagerServiceRoute(nm.ctx); err != nil {
+		plog.G(nm.ctx).Debugf("Failed to pre-route traffic manager ClusterIP: %v", err)
+	}
+
 	if err := nm.setupDNS(nm.ctx); err != nil {
 		return fmt.Errorf("setup dns: %w: %w", err, config.ErrDNSSetupFailed)
 	}
@@ -1091,6 +1099,29 @@ func (nm *NetworkManager) AddRoute(ipStrList ...string) error {
 		return nil
 	}
 	return tun.AddRoutes(nm.tunName, routes...)
+}
+
+// addTrafficManagerServiceRoute adds /32 TUN routes for the traffic manager's
+// ClusterIPs. Called synchronously during Start, before the async route watcher,
+// so that dialManager's SYN travels through TUN from the start — preventing
+// a mid-handshake route split (SYN via eth0, ACK via TUN) that makes gvisor
+// RST the connection it never saw a SYN for.
+func (nm *NetworkManager) addTrafficManagerServiceRoute(ctx context.Context) error {
+	svc, err := nm.cfg.Clientset.CoreV1().Services(nm.cfg.ManagerNamespace).Get(
+		ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	var ips []string
+	if ip := svc.Spec.ClusterIP; ip != "" && ip != v1.ClusterIPNone {
+		ips = append(ips, ip)
+	}
+	for _, ip := range svc.Spec.ClusterIPs {
+		if ip != "" && ip != v1.ClusterIPNone {
+			ips = append(ips, ip)
+		}
+	}
+	return nm.AddRoute(ips...)
 }
 
 // AddRouteCIDR adds CIDR prefixes (e.g. server-pushed aggregated pod prefixes like
