@@ -43,7 +43,7 @@ type SyncOptions struct {
 	LocalDir             string
 	RemoteDir            string
 
-	rollbackFuncList []func() error
+	rollbackList
 	ctx              context.Context
 	syncthingGUIAddr string
 }
@@ -175,13 +175,7 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	// rollbackFuncList to tear down the session (SSH tunnel + temp kubeconfig).
 	if d.factory == nil {
 		plog.G(ctx).Debug("Skipping workload cleanup: kubernetes client not initialized")
-		for _, f := range d.rollbackFuncList {
-			if f != nil {
-				if err := f(); err != nil {
-					plog.G(ctx).Warnf("Failed to exec rollback function: %s", err)
-				}
-			}
-		}
+		executeRollbackFuncs(ctx, d.getRollbackFuncs())
 		plog.StepDone(ctx, "Stopped file sync")
 		return nil
 	}
@@ -229,20 +223,9 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 			plog.G(ctx).Warnf("Failed to rollback workload %s: %v", workload, err)
 		}
 	}
-	for _, f := range d.rollbackFuncList {
-		if f != nil {
-			if err := f(); err != nil {
-				plog.G(ctx).Warnf("Failed to exec rollback function: %s", err)
-			}
-		}
-	}
+	executeRollbackFuncs(ctx, d.getRollbackFuncs())
 	plog.StepDone(ctx, "Stopped file sync for %d workloads", syncCount)
 	return firstErr
-}
-
-// AddRollbackFunc registers a function to be called during Cleanup for teardown.
-func (d *SyncOptions) AddRollbackFunc(f func() error) {
-	d.rollbackFuncList = append(d.rollbackFuncList, f)
 }
 
 // GetSyncthingGUIAddr returns the local address of the syncthing GUI for status monitoring.

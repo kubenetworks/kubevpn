@@ -58,6 +58,10 @@ func init() {
 	daemonPath = filepath.Join(dir, HOME, Daemon)
 	logPath = filepath.Join(dir, HOME, Log)
 
+	// These dirs are shared by the user (unprivileged) and sudo (root) daemons,
+	// which run with the same HOME. They must be created by the user daemon FIRST
+	// so they are owned by the unprivileged user; the sudo daemon then only Stats
+	// them. StartupDaemon enforces that start order — see pkg/daemon/client.go.
 	paths := []string{homePath, daemonPath, logPath, GetPProfPath(), GetSyncthingPath(), GetTempPath()}
 	for _, path := range paths {
 		_, err = os.Stat(path)

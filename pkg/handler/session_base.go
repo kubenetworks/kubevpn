@@ -22,11 +22,11 @@ import (
 type SessionBase struct {
 	K8sClient
 
-	// Shared lifecycle.
-	rollbackMu       sync.Mutex
-	rollbackFuncList []func() error
-	cleanupMu        sync.Mutex
-	cleanedUp        bool
+	// Shared lifecycle. rollbackList provides the thread-safe AddRollbackFunc /
+	// getRollbackFuncs registry (also embedded by SyncOptions).
+	rollbackList
+	cleanupMu sync.Mutex
+	cleanedUp bool
 
 	// configMapStore is lazily initialized on first access via getConfigMapStore().
 	// It is separate from the identity fields because it depends on ManagerNamespace,
@@ -34,22 +34,6 @@ type SessionBase struct {
 	// (user daemon path).
 	configMapStore   *ConfigMapStore
 	configMapStoreMu sync.Mutex
-}
-
-// AddRollbackFunc registers a cleanup function to be called when the connection is torn down.
-func (sb *SessionBase) AddRollbackFunc(f func() error) {
-	sb.rollbackMu.Lock()
-	defer sb.rollbackMu.Unlock()
-	sb.rollbackFuncList = append(sb.rollbackFuncList, f)
-}
-
-// getRollbackFuncs returns a snapshot of all registered rollback functions.
-func (sb *SessionBase) getRollbackFuncs() []func() error {
-	sb.rollbackMu.Lock()
-	defer sb.rollbackMu.Unlock()
-	fns := make([]func() error, len(sb.rollbackFuncList))
-	copy(fns, sb.rollbackFuncList)
-	return fns
 }
 
 // getConfigMapStore returns the ConfigMapStore for the given namespace, creating it lazily on

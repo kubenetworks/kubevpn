@@ -1,6 +1,7 @@
 package util
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -125,7 +126,22 @@ func ParseDirMapping(dir string) (local, remote string, err error) {
 
 // CleanupTempKubeConfigFile removes all temporary kubeconfig files from the KubeVPN temp directory.
 func CleanupTempKubeConfigFile() error {
-	return filepath.WalkDir(config.GetTempPath(), func(path string, info fs.DirEntry, err error) error {
+	return cleanupTempFilesIn(config.GetTempPath())
+}
+
+// cleanupTempFilesIn removes every regular file under dir (keeping directories).
+// A missing dir is not an error — there is simply nothing to clean.
+func cleanupTempFilesIn(dir string) error {
+	return filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
+		// WalkDir passes a non-nil err (and a nil info) when it cannot stat an
+		// entry — most notably the root dir itself when it does not exist.
+		// Dereferencing info.IsDir() here would panic, so handle err first.
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
 		if info.IsDir() {
 			return nil
 		}

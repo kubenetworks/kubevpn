@@ -131,7 +131,7 @@ func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 		return fmt.Errorf("cannot find kubevpn")
 	}
 
-	err = os.MkdirAll(filepath.Dir(filename), os.ModePerm)
+	err = os.MkdirAll(filepath.Dir(filename), config.FileModeExecutable)
 	if err != nil {
 		return err
 	}
