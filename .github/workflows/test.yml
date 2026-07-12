@@ -110,7 +110,12 @@ jobs:
             lscr.io/linuxserver/openssh-server:latest
 
       - name: Test
-        run: sudo make ut
+        # Run as root for TUN/route setup, but preserve the runner's kubeconfig.
+        # Plain `sudo` resets HOME/KUBECONFIG, so client-go falls back to its
+        # default server http://localhost:8080 (which collides with the test's
+        # own dummy HTTP server) and every API call fails with
+        # "serializer for text/plain; charset=utf-8 doesn't exist".
+        run: sudo -E env HOME="$HOME" KUBECONFIG="$HOME/.kube/config" make ut
 
   macos:
     runs-on:  macos-15-intel
@@ -196,7 +201,12 @@ jobs:
         # for docker mount
         env:
           TMPDIR: .
-        run: sudo make ut
+        # Run as root for TUN/route setup, but preserve the runner's kubeconfig.
+        # Plain `sudo` resets HOME/KUBECONFIG, so client-go falls back to its
+        # default server http://localhost:8080 (which collides with the test's
+        # own dummy HTTP server) and every API call fails with
+        # "serializer for text/plain; charset=utf-8 doesn't exist".
+        run: sudo -E env HOME="$HOME" KUBECONFIG="$HOME/.kube/config" TMPDIR="$TMPDIR" make ut
 
   windows:
     runs-on: windows-latest

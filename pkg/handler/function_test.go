@@ -457,7 +457,7 @@ func (u *ut) udpServer(t *testing.T, port int) {
 		Port: port,
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("failed to listen udp: %v", err)
 		return
 	}
 	defer udpConn.Close()
