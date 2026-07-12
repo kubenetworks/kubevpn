@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"k8s.io/utils/ptr"
@@ -23,11 +25,15 @@ import (
 type Server struct {
 	rpc.UnimplementedDaemonServer
 
-	Cancel    func()
+	Cancel func()
+	// GetClient returns a cached gRPC client for the peer daemon (isSudo selects which).
 	GetClient func(isSudo bool) (rpc.DaemonClient, error)
-	IsSudo    bool
-	LogFile   *lumberjack.Logger
-	Lock      sync.Mutex
+	// InvalidateClient drops the cached peer-daemon client so the next GetClient redials.
+	// Called when a cross-daemon RPC fails with a connection-level error. May be nil in tests.
+	InvalidateClient func(isSudo bool)
+	IsSudo           bool
+	LogFile          *lumberjack.Logger
+	Lock             sync.Mutex
 
 	// connMu protects connections and currentConnectionID from concurrent access.
 	// Use RLock for read-only access, Lock for mutations.
@@ -214,15 +220,19 @@ type tunIP struct {
 	status string
 }
 
-// getSudoTunIPs queries the sudo daemon and returns a map from ConnectionID to the data-plane
-// state (TUN IPs + computed status) it owns.
-func (svr *Server) getSudoTunIPs(ctx context.Context) map[string]tunIP {
+// probeSudo queries the sudo daemon's Status (bounded by config.SudoStatusTimeout) and returns
+// the per-connection data-plane state (TUN IPs + computed status) it owns, together with any
+// error. The error is surfaced — not swallowed — so callers can distinguish a genuinely-down
+// daemon (config.ErrDaemonNotRunning: socket missing / health gate failed) from a transient
+// RPC failure (e.g. the sudo daemon restarting). On a connection-level error (codes.Unavailable)
+// the stale cached client is dropped so the next probe redials and re-runs the health gate.
+func (svr *Server) probeSudo(ctx context.Context) (map[string]tunIP, error) {
 	if svr.GetClient == nil {
-		return nil
+		return nil, nil
 	}
 	cli, err := svr.GetClient(true)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	// Bound the cross-daemon hop so a wedged sudo daemon can never stall an otherwise-local
 	// user-daemon command (defense in depth beyond the cache-only read path). On timeout the
@@ -231,7 +241,10 @@ func (svr *Server) getSudoTunIPs(ctx context.Context) map[string]tunIP {
 	defer cancel()
 	resp, err := cli.Status(ctx, &rpc.StatusRequest{})
 	if err != nil {
-		return nil
+		if svr.InvalidateClient != nil && status.Code(err) == codes.Unavailable {
+			svr.InvalidateClient(true)
+		}
+		return nil, err
 	}
 	m := make(map[string]tunIP, len(resp.GetList()))
 	for _, s := range resp.GetList() {
@@ -240,6 +253,17 @@ func (svr *Server) getSudoTunIPs(ctx context.Context) map[string]tunIP {
 			v6:     s.GetIPv6(),
 			status: s.GetStatus(),
 		}
+	}
+	return m, nil
+}
+
+// getSudoTunIPs is the map-only convenience wrapper over probeSudo used by on-demand status
+// reads. Unlike the old implementation it logs (rather than silently swallows) probe failures,
+// returning nil so callers fall back to their local view.
+func (svr *Server) getSudoTunIPs(ctx context.Context) map[string]tunIP {
+	m, err := svr.probeSudo(ctx)
+	if err != nil {
+		plog.G(ctx).Warnf("Probe sudo daemon status failed: %v", err)
 	}
 	return m
 }

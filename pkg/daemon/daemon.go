@@ -111,7 +111,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		_ = downgradingServer.Close()
 		_ = l.Close()
 	}
-	o.svr = &action.Server{Cancel: cleanup, IsSudo: o.IsSudo, GetClient: GetClient, LogFile: l, ID: o.ID}
+	o.svr = &action.Server{Cancel: cleanup, IsSudo: o.IsSudo, GetClient: GetClient, InvalidateClient: InvalidateClient, LogFile: l, ID: o.ID}
 	if !o.IsSudo {
 		go func() {
 			// Restore persisted connections first so the user daemon holds its authoritative
