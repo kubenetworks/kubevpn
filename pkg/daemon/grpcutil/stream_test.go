@@ -89,3 +89,41 @@ func TestRenderGRPCStream_KeepsStepSentinelForSpinner(t *testing.T) {
 		t.Errorf("non-TTY output must not contain the cursor-erase escape, got: %q", out)
 	}
 }
+
+// fakeServerStream drives ListenCancel: RecvMsg returns recvErr once. nil recvErr simulates a
+// real Cancel message; a non-nil error (e.g. io.EOF) simulates the stream closing normally.
+type fakeServerStream struct {
+	recvErr error
+}
+
+func (f *fakeServerStream) SetHeader(metadata.MD) error  { return nil }
+func (f *fakeServerStream) SendHeader(metadata.MD) error { return nil }
+func (f *fakeServerStream) SetTrailer(metadata.MD)       {}
+func (f *fakeServerStream) Context() context.Context     { return context.Background() }
+func (f *fakeServerStream) SendMsg(any) error            { return nil }
+func (f *fakeServerStream) RecvMsg(any) error            { return f.recvErr }
+
+// TestListenCancel_CancelsOnlyOnExplicitMessage locks the B4 invariant: ListenCancel cancels
+// iff a real Cancel message arrives (RecvMsg == nil). An io.EOF or any other error — which is
+// what the leftover goroutine sees when a data-plane RPC returns normally — must NOT cancel,
+// otherwise the still-running session (TUN/routes/DNS) would be torn down on every Connect.
+func TestListenCancel_CancelsOnlyOnExplicitMessage(t *testing.T) {
+	tests := []struct {
+		name       string
+		recvErr    error
+		wantCancel bool
+	}{
+		{"explicit Cancel message -> cancel", nil, true},
+		{"stream closed (io.EOF) -> no cancel", io.EOF, false},
+		{"other recv error -> no cancel", context.Canceled, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cancelled := false
+			ListenCancel(&fakeServerStream{recvErr: tt.recvErr}, func() { cancelled = true })
+			if cancelled != tt.wantCancel {
+				t.Fatalf("cancelled = %v, want %v", cancelled, tt.wantCancel)
+			}
+		})
+	}
+}

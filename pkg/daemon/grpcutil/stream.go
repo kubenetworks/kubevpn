@@ -173,7 +173,15 @@ func CopyAndConvertGRPCStream[I any, O any](r grpc.ClientStream, w grpc.ServerSt
 	}
 }
 
-// ListenCancel waits for a Cancel message on the server stream and invokes the cancel function when received.
+// ListenCancel waits for an explicit Cancel message on the server stream and invokes cancelFunc
+// only then.
+//
+// INVARIANT: cancelFunc runs iff RecvMsg returns nil (a real Cancel message arrived). Any error
+// — including io.EOF when the stream closes normally after its handler returns — must NOT cancel.
+// This is what lets a data-plane session (e.g. root-daemon Connect) keep running after its RPC
+// returns: the leftover ListenCancel goroutine unblocks with io.EOF and exits WITHOUT tearing
+// the session down. Do not "simplify" this to cancel on any RecvMsg return. Regression-guarded by
+// TestListenCancel_CancelsOnlyOnExplicitMessage.
 func ListenCancel(resp grpc.ServerStream, cancelFunc context.CancelFunc) {
 	var s rpc.Cancel
 	if resp.RecvMsg(&s) == nil {
