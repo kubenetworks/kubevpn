@@ -196,6 +196,9 @@ func (svr *Server) forwardConnectToSudo(
 	svr.connections = append(svr.connections, connect)
 	svr.currentConnectionID = connectionID
 	svr.connMu.Unlock()
+	// Refresh the cached sudo-daemon health snapshot so the very next status query
+	// sees this connection as "connected" instead of hitting a stale (pre-connect) cache.
+	svr.refreshSudoHealth(ctx)
 	return resp.Send(&rpc.ConnectResponse{
 		ConnectionID: connectionID,
 	})
