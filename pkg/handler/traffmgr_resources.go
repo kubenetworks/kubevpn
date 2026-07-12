@@ -85,9 +85,14 @@ func genRole(namespace string) *rbacv1.Role {
 				Resources: []string{"pods"},
 			},
 			{
-				// Create a throwaway Service (rejected by the API) to read the Service
-				// CIDR from the error message. The Service is never actually created.
-				Verbs:     []string{"create"},
+				// Server-side Service CIDR detection (xds WarmClusterCIDRCache), done
+				// WITHOUT a probe pod or exec:
+				//   - create: create a throwaway Service (rejected by the API) to read the
+				//     Service CIDR from the error message. The Service is never actually created.
+				//   - list: fallback that infers the Service CIDR from existing Services'
+				//     ClusterIPs when the create-and-parse-error trick fails (e.g. the API
+				//     error wording differs by k8s version). See docs/46.
+				Verbs:     []string{"create", "list"},
 				APIGroups: []string{""},
 				Resources: []string{"services"},
 			},

@@ -51,6 +51,10 @@ func TestGenRole_Fields(t *testing.T) {
 	if !stringSliceEqual(role.Rules[2].Resources, []string{"services"}) {
 		t.Errorf("Rules[2].Resources: got %v, want [services]", role.Rules[2].Resources)
 	}
+	// create (rejected-Service error trick) + list (infer CIDR from existing ClusterIPs).
+	if !stringSliceEqual(role.Rules[2].Verbs, []string{"create", "list"}) {
+		t.Errorf("Rules[2].Verbs: got %v, want [create list]", role.Rules[2].Verbs)
+	}
 	for _, r := range role.Rules {
 		for _, res := range r.Resources {
 			if res == "pods/exec" {

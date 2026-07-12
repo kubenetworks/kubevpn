@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/util/sets"
+
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
@@ -294,6 +296,73 @@ func TestRemoveCIDRsContainingIPs_NilInputs(t *testing.T) {
 	got = RemoveCIDRsContainingIPs(cidrs, nil)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 CIDR preserved with nil IPs, got %d", len(got))
+	}
+}
+
+func TestMergeToSupernet(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string // order-independent
+	}{
+		{
+			name: "nearby v4 pair merges within floor",
+			in:   []string{"10.96.0.0/24", "10.96.5.0/24"},
+			want: []string{"10.96.0.0/21"},
+		},
+		{
+			name: "scattered v4 reconstructs standard service CIDR",
+			in:   []string{"10.96.0.0/24", "10.107.5.0/24"},
+			want: []string{"10.96.0.0/12"},
+		},
+		{
+			name: "far-apart v4 refuses to merge (below floor)",
+			in:   []string{"10.96.0.0/24", "172.16.0.0/24"},
+			want: []string{"10.96.0.0/24", "172.16.0.0/24"},
+		},
+		{
+			name: "single member returned as-is",
+			in:   []string{"10.96.0.0/24"},
+			want: []string{"10.96.0.0/24"},
+		},
+		{
+			name: "duplicate members deduplicated",
+			in:   []string{"10.96.0.0/24", "10.96.0.0/24"},
+			want: []string{"10.96.0.0/24"},
+		},
+		{
+			name: "dual-stack: v4 merges, distant v6 kept separate",
+			in:   []string{"10.96.0.0/24", "10.96.5.0/24", "fd00::/64", "fd01::/64"},
+			want: []string{"10.96.0.0/21", "fd00::/64", "fd01::/64"},
+		},
+		{
+			name: "nearby v6 pair merges within floor",
+			in:   []string{"fd00:0:0:1::/64", "fd00:0:0:2::/64"},
+			want: []string{"fd00::/62"},
+		},
+		{
+			name: "far-apart v6 refuses to merge (below floor)",
+			in:   []string{"fd00:0:1::/64", "fd00:0:2::/64"},
+			want: []string{"fd00:0:1::/64", "fd00:0:2::/64"},
+		},
+		{
+			name: "empty input",
+			in:   nil,
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var in []*net.IPNet
+			for _, s := range tt.in {
+				in = append(in, parseCIDR(t, s))
+			}
+			got := cidrSet(mergeToSupernet(in))
+			want := sets.New[string](tt.want...)
+			if !got.Equal(want) {
+				t.Errorf("mergeToSupernet(%v) = %v, want %v", tt.in, got.UnsortedList(), want.UnsortedList())
+			}
+		})
 	}
 }
 

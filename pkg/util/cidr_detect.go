@@ -68,6 +68,10 @@ func GetCIDR(ctx context.Context, clientset kubernetes.Interface, restconfig *re
 		plog.StepDone(ctx, "Detected service CIDR: (none)")
 	}
 
+	if svcCIDR, err := GetServiceCIDRFromService(ctx, clientset, namespace); err == nil {
+		result = append(result, svcCIDR...)
+	}
+
 	return result
 }
 
@@ -86,6 +90,9 @@ func GetClusterCIDRNoProbePod(ctx context.Context, clientset kubernetes.Interfac
 	}
 	if svcCIDR, _ := GetServiceCIDRByCreateService(ctx, clientset.CoreV1().Services(namespace)); svcCIDR != nil {
 		result = append(result, svcCIDR)
+	}
+	if svcCIDR, err := GetServiceCIDRFromService(ctx, clientset, namespace); err == nil {
+		result = append(result, svcCIDR...)
 	}
 	if podCIDR, err := GetPodCIDRFromPod(ctx, clientset, namespace, nil); err == nil {
 		result = append(result, podCIDR...)
@@ -325,9 +332,25 @@ func buildCIDRPodSpec(namespace, image string) *corev1.Pod {
 	}
 }
 
+// inferredCIDRFromIP expands a single cluster IP to its inferred containing CIDR:
+// /24 for IPv4, /64 for IPv6. Used as a fallback when the exact CIDR mask is not
+// available (e.g. without node.Spec.PodCIDR or the Service IP range). /24 is deliberately
+// narrow so a routed range does not hijack locally-used networks; each observed IP yields
+// its own /24 and callers dedup/merge overlaps via RemoveLargerOverlappingCIDRs.
+func inferredCIDRFromIP(ip net.IP) *net.IPNet {
+	var mask net.IPMask
+	if ip.To4() != nil {
+		mask = net.CIDRMask(24, 32)
+	} else {
+		mask = net.CIDRMask(64, 128)
+	}
+	_, ipNet, _ := net.ParseCIDR((&net.IPNet{IP: ip, Mask: mask}).String())
+	return ipNet
+}
+
 // GetPodCIDRFromPod infers pod CIDRs by applying a default pod CIDR mask to actual pod IPs in the namespace.
-// It uses /16 for IPv4 and /64 for IPv6 as safe defaults that cover most Kubernetes deployments,
-// since the exact pod CIDR mask is not available without node.Spec.PodCIDR.
+// It uses /24 for IPv4 and /64 for IPv6 (see inferredCIDRFromIP), since the exact pod CIDR
+// mask is not available without node.Spec.PodCIDR.
 func GetPodCIDRFromPod(ctx context.Context, clientset kubernetes.Interface, namespace string, _ *net.IPNet) ([]*net.IPNet, error) {
 	podList, err := clientset.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{Limit: 100})
 	if err != nil {
@@ -346,19 +369,51 @@ func GetPodCIDRFromPod(ctx context.Context, clientset kubernetes.Interface, name
 		}
 		for _, t := range s.UnsortedList() {
 			if ip := net.ParseIP(t); ip != nil {
-				var mask net.IPMask
-				if ip.To4() != nil {
-					mask = net.CIDRMask(16, 32)
-				} else {
-					mask = net.CIDRMask(64, 128)
-				}
-				_, ipNet, _ := net.ParseCIDR((&net.IPNet{IP: ip, Mask: mask}).String())
-				if ipNet != nil {
+				if ipNet := inferredCIDRFromIP(ip); ipNet != nil {
 					result = append(result, ipNet)
 				}
 			}
 		}
 	}
 
-	return result, nil
+	// A cluster generally has one Pod CIDR range; coalesce the per-IP /24s (bounded) so
+	// pods in un-observed sub-ranges still route. See mergeToSupernet.
+	return mergeToSupernet(result), nil
+}
+
+// GetServiceCIDRFromService infers service CIDRs by applying a default mask (/24 for IPv4,
+// /64 for IPv6, see inferredCIDRFromIP) to the ClusterIPs of existing Services in the
+// namespace. It is a pod-free fallback for GetServiceCIDRByCreateService: it needs only
+// `services list` RBAC and does not depend on the API error-message wording. Headless
+// ("None") and empty ClusterIPs are skipped.
+func GetServiceCIDRFromService(ctx context.Context, clientset kubernetes.Interface, namespace string) ([]*net.IPNet, error) {
+	svcList, err := clientset.CoreV1().Services(namespace).List(ctx, v1.ListOptions{Limit: 100})
+	if err != nil {
+		return nil, err
+	}
+
+	seen := sets.New[string]()
+	var result []*net.IPNet
+	for _, item := range svcList.Items {
+		ips := sets.New[string]().Insert(item.Spec.ClusterIP).Insert(item.Spec.ClusterIPs...)
+		for _, s := range ips.UnsortedList() {
+			if s == "" || s == corev1.ClusterIPNone {
+				continue
+			}
+			ip := net.ParseIP(s)
+			if ip == nil {
+				continue
+			}
+			ipNet := inferredCIDRFromIP(ip)
+			if ipNet == nil || seen.Has(ipNet.String()) {
+				continue
+			}
+			seen.Insert(ipNet.String())
+			result = append(result, ipNet)
+		}
+	}
+
+	// A cluster generally has one Service CIDR range; coalesce the per-ClusterIP /24s
+	// (bounded) so services in un-observed sub-ranges still route. See mergeToSupernet.
+	return mergeToSupernet(result), nil
 }

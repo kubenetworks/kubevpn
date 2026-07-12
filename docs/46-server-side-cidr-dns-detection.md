@@ -48,16 +48,22 @@ this is safe and is strictly more correct than the current "filtered by whoever 
   cycle (`pkg/xds` does not import `pkg/handler`; both may import `pkg/util`/`pkg/config`).
 - On startup, if `CLUSTER_CIDRS` is empty, run detection **in-cluster** and write the **raw**
   CIDRs. Detection uses `util.GetClusterCIDRNoProbePod` — the pod-free strategies only
-  (kube-system component flags, a rejected Service create, and pod CIDR inferred from existing
-  pod IPs): **no probe pod, no exec**, since the manager is already an in-cluster pod.
+  (kube-system component flags, a rejected Service create, the Service CIDR inferred from
+  existing Services' ClusterIPs, and the pod CIDR inferred from existing pod IPs): **no probe
+  pod, no exec**, since the manager is already an in-cluster pod. Inferred CIDRs (from pod IPs
+  and Service ClusterIPs) use a narrow **/24** for IPv4 and **/64** for IPv6, so a routed
+  range does not hijack locally-used networks; the per-IP /24s are then coalesced upward into
+  the enclosing Pod/Service range by `mergeToSupernet` (bounded — /12 v4, /48 v6; see
+  [32-cidr-detection.md](32-cidr-detection.md) §5), and overlaps collapse via
+  `RemoveLargerOverlappingCIDRs`.
 - Client: **unchanged** read path + local fallback (`data_session.go:297`). Because the
   manager warms the cache, the client's `util.GetCIDR` effectively never runs; if the manager
   is old / detection failed / RBAC missing, the cache is empty and the client falls back to
   today's behavior. **Purely additive — cannot break connectivity.**
 - Per-client API-server-IP filtering stays on the client (`parseCachedCIDRs`).
-- RBAC: extend the manager Role (`traffmgr_resources.go`) with `pods list` and `services create`
-  (no `pods/create`, no `pods/exec` — detection is pod-free). **RBAC failure degrades safely** (cache
-  stays empty → client fallback).
+- RBAC: extend the manager Role (`traffmgr_resources.go`) with `pods list` and
+  `services create`/`services list` (no `pods/create`, no `pods/exec` — detection is pod-free).
+  **RBAC failure degrades safely** (cache stays empty → client fallback).
 
 ### C2 — DNS detection in the manager (piggyback, no proto change)
 
@@ -111,8 +117,8 @@ Implemented (unit-tested, additive, degrade-safe) — **pending CI minikube e2e*
 - **C1 warm-up**: `TunConfigServer.WarmClusterCIDRCache` (`pkg/xds/tun_config_cidr.go`), started
   from `xds.Main`; fills an empty `CLUSTER_CIDRS` in-cluster via `util.GetClusterCIDRNoProbePod`
   (no probe pod / no exec).
-- **C1 RBAC**: `genRole` grants the manager SA `pods list` + `services create` in
-  the manager namespace (fresh installs; existing managers keep their Role until recreated —
+- **C1 RBAC**: `genRole` grants the manager SA `pods list` + `services create`/`services list`
+  in the manager namespace (fresh installs; existing managers keep their Role until recreated —
   warm-up degrades safely meanwhile).
 - **C2**: `TunConfigServer.WarmClusterDNSCache` (`pkg/xds/tun_config_dns.go`) publishes the
   manager pod's `/etc/resolv.conf` to `CLUSTER_DNS_RESOLV`; `util.GetDNSServiceIPFromPod`
