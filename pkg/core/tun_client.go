@@ -175,7 +175,7 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 		return
 	}
 
-	ticker := time.NewTicker(config.KeepAliveTime)
+	ticker := time.NewTicker(config.HeartbeatInterval)
 	defer ticker.Stop()
 
 	sendHeartbeat := func(payload []byte) {

@@ -88,12 +88,6 @@ type Connection interface {
 	// Returns the zero time when no heartbeat has been received or NetworkManager is nil.
 	GetLastHeartbeat() time.Time
 
-	// GetControlPlaneHealthy reports whether the xds control plane (port-forwarded from the
-	// traffic manager) is currently serving. It is owned by the data plane (root daemon); the
-	// control-plane session returns true (unknown → don't demote) since the user daemon reuses
-	// the sudo-computed status verdict.
-	GetControlPlaneHealthy() bool
-
 	// GetTrafficManagerConfigMap returns the traffic manager ConfigMap from the informer cache.
 	GetTrafficManagerConfigMap(ctx context.Context) (*v1.ConfigMap, error)
 

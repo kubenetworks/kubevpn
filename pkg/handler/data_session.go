@@ -151,16 +151,6 @@ func (ds *DataSession) GetLastHeartbeat() time.Time {
 	return ds.nm.LastHeartbeat()
 }
 
-// GetControlPlaneHealthy reports whether the xds control plane is currently serving. Before the
-// network stack starts (nm == nil) it returns true so a not-yet-established session is not
-// demoted to unhealthy.
-func (ds *DataSession) GetControlPlaneHealthy() bool {
-	if ds.nm == nil {
-		return true
-	}
-	return ds.nm.ControlPlaneHealthy()
-}
-
 // GetAPIServerIPs returns the Kubernetes API server IPs resolved at connect time.
 func (ds *DataSession) GetAPIServerIPs() []net.IP {
 	if ds.nm == nil {

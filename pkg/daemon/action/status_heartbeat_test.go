@@ -10,25 +10,22 @@ func TestDeriveConnectionStatus(t *testing.T) {
 	stale := time.Now().Add(-2 * heartbeatStaleThreshold)
 
 	tests := []struct {
-		name           string
-		tunUp          bool
-		lastHeartbeat  time.Time
-		controlPlaneOK bool
-		want           string
+		name          string
+		tunUp         bool
+		lastHeartbeat time.Time
+		want          string
 	}{
-		{"no tun -> disconnected", false, fresh, true, StatusFailed},
-		{"no tun ignores heartbeat", false, time.Time{}, true, StatusFailed},
-		{"tun + fresh heartbeat + cp ok -> connected", true, fresh, true, StatusOk},
-		{"tun + stale heartbeat -> unhealthy", true, stale, true, StatusUnhealthy},
-		{"tun + never heartbeat -> unhealthy", true, time.Time{}, true, StatusUnhealthy},
-		{"tun + fresh heartbeat + cp down -> unhealthy", true, fresh, false, StatusUnhealthy},
-		{"no tun + cp down still disconnected", false, fresh, false, StatusFailed},
+		{"no tun -> disconnected", false, fresh, StatusFailed},
+		{"no tun ignores heartbeat", false, time.Time{}, StatusFailed},
+		{"tun + fresh heartbeat -> connected", true, fresh, StatusOk},
+		{"tun + stale heartbeat -> unhealthy", true, stale, StatusUnhealthy},
+		{"tun + never heartbeat -> unhealthy", true, time.Time{}, StatusUnhealthy},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := deriveConnectionStatus(tt.tunUp, tt.lastHeartbeat, tt.controlPlaneOK); got != tt.want {
-				t.Errorf("deriveConnectionStatus(%v, %v, cp=%v) = %q, want %q",
-					tt.tunUp, tt.lastHeartbeat, tt.controlPlaneOK, got, tt.want)
+			if got := deriveConnectionStatus(tt.tunUp, tt.lastHeartbeat); got != tt.want {
+				t.Errorf("deriveConnectionStatus(%v, %v) = %q, want %q",
+					tt.tunUp, tt.lastHeartbeat, got, tt.want)
 			}
 		})
 	}

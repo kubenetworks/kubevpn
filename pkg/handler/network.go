@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"net"
 	"slices"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -76,11 +74,6 @@ type NetworkManager struct {
 	extraHost             []dns.Entry
 	dnsConfig             *dns.Config
 	heartbeatStats        *core.HeartbeatStats // data-plane liveness from observed heartbeat replies
-	// controlPlaneHealthy tracks whether the xds control plane (port-forwarded from the traffic
-	// manager) is currently serving. Optimistically true until a health check exhausts its
-	// retries; set true again on the next successful check. Feeds the status verdict so a live
-	// TUN with a dead control plane reports unhealthy rather than connected.
-	controlPlaneHealthy atomic.Bool
 }
 
 const (
@@ -92,19 +85,45 @@ const (
 	portForwardReconnectDelay = 200 * time.Millisecond
 	// portForwardReconnectMaxDelay caps the exponential backoff between reconnects, so a
 	// sustained apiserver stall is not hammered with rapid Pods.List + TLS-handshake retries.
-	portForwardReconnectMaxDelay = 15 * time.Second
+	// Kept small: once a session is detected dead (now within ~10s, including the black-hole
+	// case), the whole tunnel is down until the next session comes up, so a long reconnect gap
+	// directly prolongs the outage. 2s still throttles a hard apiserver stall to ~30 retries/min.
+	portForwardReconnectMaxDelay = 2 * time.Second
 	// portForwardHealthySession is the minimum session duration considered "healthy": a
 	// session that lasted at least this long before dropping resets the reconnect backoff
 	// (normal pod recreation reconnects fast); shorter sessions grow the backoff.
 	portForwardHealthySession = 30 * time.Second
 	// portForwardStartTimeout is how long to wait for the first port-forward session to become ready.
 	portForwardStartTimeout = 60 * time.Second
+	// livenessCheckInterval is how often the data-plane liveness watchdog samples HeartbeatStats.
+	livenessCheckInterval = 5 * time.Second
+	// livenessStartupDeadline bounds how long a session may run without ever producing a fresh
+	// heartbeat echo reply (never becoming ready, or ready-but-black-holed from the start) before it
+	// is force-reconnected. Must be >> the time for a healthy reconnected session to prime a reply
+	// (slot reconnect <= SlotReconnectBackoff + RTT), so a healthy session is never torn down for a
+	// reply it has not had time to receive.
+	livenessStartupDeadline = 30 * time.Second
+	// rentIPCallTimeout bounds a single GetTunIP call so a black-holed port-forward during startup
+	// (which no longer tears itself down via the xDS health check) makes the call time out and retry
+	// instead of hanging forever. The watchdog reconnects the session underneath; a later attempt
+	// then lands on a healthy session.
+	rentIPCallTimeout = 10 * time.Second
 )
+
+// livenessSteadyThreshold is how long an already-primed session (one that produced a fresh heartbeat
+// echo reply) may then go silent before it is treated as black-holed and force-reconnected. A small
+// multiple of config.HeartbeatInterval so a couple of missed beats trip it. It is a var (not a const)
+// because config.HeartbeatInterval is a runtime var.
+var livenessSteadyThreshold = 3 * config.HeartbeatInterval
 
 // newNetworkManager creates a NetworkManager with the given configuration.
 func newNetworkManager(cfg NetworkConfig) *NetworkManager {
 	nm := &NetworkManager{cfg: cfg}
-	nm.controlPlaneHealthy.Store(true) // optimistic until the first health check reports otherwise
+	// Allocate here (once, before any goroutine) so the field is never nil and never re-assigned:
+	// the data-plane liveness watchdog spawned by the first port-forward session reads it before
+	// startTUN runs, and status queries read it concurrently. LastReply stays zero until the TUN
+	// heartbeat sender populates it (the watchdog's startup deadline tolerates that window).
+	nm.heartbeatStats = &core.HeartbeatStats{}
 	return nm
 }
 
@@ -123,16 +142,6 @@ func (nm *NetworkManager) TunName() string {
 // or the zero time if none has been seen. It is the data-plane liveness signal.
 func (nm *NetworkManager) LastHeartbeat() time.Time {
 	return nm.heartbeatStats.LastReply()
-}
-
-// ControlPlaneHealthy reports whether the xds control plane is currently serving.
-func (nm *NetworkManager) ControlPlaneHealthy() bool {
-	return nm.controlPlaneHealthy.Load()
-}
-
-// setControlPlaneHealthy records the latest xds health-check verdict.
-func (nm *NetworkManager) setControlPlaneHealthy(ok bool) {
-	nm.controlPlaneHealthy.Store(ok)
 }
 
 // GetExtraHost returns the extra DNS host entries accumulated by AddExtraRoute.
@@ -210,9 +219,11 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 // interface appears between collecting addresses and receiving the allocation.
 func (nm *NetworkManager) rentIP(ctx context.Context) error {
 	target := fmt.Sprintf("127.0.0.1:%d", nm.controlPlaneLocalPort)
+	// No WithBlock: the local port-forward listener may momentarily be down across a reconnect, so
+	// each GetTunIP waits-for-ready within its own bounded timeout and retries, rather than blocking
+	// the dial forever on a black-holed session.
 	conn, err := grpc.DialContext(ctx, target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	if err != nil {
 		return fmt.Errorf("dial xds for RentIP: %w", err)
@@ -223,14 +234,23 @@ func (nm *NetworkManager) rentIP(ctx context.Context) error {
 
 	const maxRetries = 15
 	for i := 0; i < maxRetries; i++ {
-		resp, err := client.GetTunIP(ctx, &rpc.TunIPRequest{
+		callCtx, callCancel := context.WithTimeout(ctx, rentIPCallTimeout)
+		resp, err := client.GetTunIP(callCtx, &rpc.TunIPRequest{
 			OwnerID:    nm.cfg.OwnerID,
 			Namespace:  nm.cfg.ManagerNamespace,
 			ExcludeIPs: buildExcludeIPs(nm.cfg.ReservedTunIPs),
 			Hostname:   nm.cfg.Hostname,
-		})
+		}, grpc.WaitForReady(true))
+		callCancel()
 		if err != nil {
-			return fmt.Errorf("get TUN IP from xds: %w", err)
+			// A black-holed or not-yet-ready port-forward makes the call time out or the conn
+			// unavailable; retry (the watchdog reconnects the session underneath us) until the
+			// parent ctx is cancelled or retries are exhausted.
+			if ctx.Err() != nil {
+				return fmt.Errorf("get TUN IP from xds: %w", ctx.Err())
+			}
+			plog.G(ctx).Debugf("GetTunIP attempt %d/%d failed: %v; retrying", i+1, maxRetries, err)
+			continue
 		}
 
 		ip4, cidr4, err := net.ParseCIDR(resp.IPv4)
@@ -691,8 +711,8 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 	podName := pod.GetName()
 	// detect pod deletion so we can redo port-forward
 	go util.CheckPodStatus(childCtx, cancelFunc, podName, nm.cfg.Clientset.CoreV1().Pods(nm.cfg.ManagerNamespace))
-	controlPlanePort, _, _ := strings.Cut(portPair[2], ":")
-	go healthCheckGRPC(childCtx, cancelFunc, readyChan, controlPlanePort, nm.setControlPlaneHealthy)
+	// The data-plane heartbeat watchdog is the sole liveness-based reconnect trigger.
+	go nm.watchDataPlaneLiveness(childCtx, cancelFunc, readyChan)
 	if first {
 		go func() {
 			select {
@@ -717,6 +737,74 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 	)
 	plog.G(ctx).Infof("[Perf] PortForwardPod for %s exited after %v, err=%v", podName, time.Since(pfStart), err)
 	return nil
+}
+
+// watchDataPlaneLiveness force-reconnects the current port-forward session when the data plane goes
+// silent while the session still looks alive. A k8s port-forward can "black-hole": the local TCP
+// connects and the session appears up, but no data traverses (seen against flaky cluster network
+// paths / SPDY proxies). The xDS health check catches most such cases, but it probes the
+// control-plane port; a data-only stall (only the TCP/UDP forward stream wedges) would slip past it.
+// HeartbeatStats records ICMP echo replies from the server gateway — a direct end-to-end data-plane
+// liveness signal — so a session that never produces a fresh reply (startupDeadline) or falls silent
+// after having produced one (steadyThreshold) is black-holed. cancelFunc tears the session down; the
+// portForward loop then reconnects. heartbeatStats is allocated in newNetworkManager (never nil).
+// This runs for every session, including the first (typically longest-lived) one. It is the sole
+// data-plane reconnect trigger — the xDS health check only reports control-plane status.
+func (nm *NetworkManager) watchDataPlaneLiveness(ctx context.Context, cancelFunc context.CancelFunc, readyChan <-chan struct{}) {
+	sessionStart := time.Now()
+	// A session that never even becomes ready is still black-holed: bound the wait so it reconnects.
+	select {
+	case <-readyChan:
+	case <-time.After(livenessStartupDeadline):
+		plog.G(ctx).Warnf("Port-forward not ready within %v; reconnecting", livenessStartupDeadline)
+		cancelFunc()
+		return
+	case <-ctx.Done():
+		return
+	}
+	watchLiveness(ctx, cancelFunc, sessionStart, livenessCheckInterval, livenessStartupDeadline, livenessSteadyThreshold, nm.heartbeatStats.LastReply)
+}
+
+// watchLiveness force-reconnects (cancelFunc) a black-holed session using the data-plane heartbeat
+// echo reply as the liveness signal. A session is "primed" once it produces a reply newer than
+// sessionStart — proving fresh data flowed on THIS session (lastReply is shared across sessions, so
+// an older timestamp does not count). Two independent deadlines, both measured so a healthy session
+// is never torn down prematurely:
+//   - not yet primed: reconnect if the session has run startupDeadline without any fresh reply
+//     (never came up, or black-holed from the start). startupDeadline must exceed the time a healthy
+//     reconnected session needs to prime (slot reconnect + RTT).
+//   - primed: reconnect if the last fresh reply is now older than steadyThreshold (went silent).
+//
+// Extracted so it can be driven with small timings and a fake reply source in tests.
+func watchLiveness(ctx context.Context, cancelFunc context.CancelFunc, sessionStart time.Time, interval, startupDeadline, steadyThreshold time.Duration, lastReply func() time.Time) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	primed := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			last := lastReply()
+			if !primed {
+				if last.After(sessionStart) {
+					primed = true
+					continue
+				}
+				if time.Since(sessionStart) >= startupDeadline {
+					plog.G(ctx).Warnf("Data plane never came up (no heartbeat echo reply within %v); reconnecting port-forward", startupDeadline)
+					cancelFunc()
+					return
+				}
+				continue
+			}
+			if time.Since(last) >= steadyThreshold {
+				plog.G(ctx).Warnf("Data plane went silent (no heartbeat echo reply for %v); reconnecting port-forward", steadyThreshold)
+				cancelFunc()
+				return
+			}
+		}
+	}
 }
 
 // startTUN allocates a TUN IP and creates the local TUN device with a gvisor network stack.
@@ -823,7 +911,8 @@ func (nm *NetworkManager) startTunServer(ctx context.Context, forwardNode *core.
 	}
 
 	plog.StepStart(ctx, "Creating TUN device")
-	nm.heartbeatStats = &core.HeartbeatStats{}
+	// heartbeatStats is allocated once in newNetworkManager; reuse it (do not re-assign) so the
+	// liveness watchdog and status queries observe the same instance without a data race.
 	handler := core.TunHandler(forwarder, core.NewRouteHub(), nm.heartbeatStats)
 	listener, err := tun.Listener(tunConfig)
 	if err != nil {

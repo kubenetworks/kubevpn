@@ -199,6 +199,14 @@ var (
 	DialTimeout    = 15 * time.Second
 	ConnectTimeout = 5 * time.Second
 
+	// HeartbeatInterval is how often the client sends its data-plane ICMP heartbeat. It is
+	// deliberately shorter than KeepAliveTime (which drives the read/write deadlines and TCP
+	// keepalive): the heartbeat echo reply is the data-plane liveness signal that drives the
+	// port-forward black-hole watchdog, so a short cadence lets a silent tunnel be detected in
+	// seconds. Sending more often only helps the server read deadline (KeepAliveTime*3), never
+	// hurts it.
+	HeartbeatInterval = 5 * time.Second
+
 	DNSRouteRefreshInterval  = 15 * time.Second
 	DNSRouteDebounceInterval = 3 * time.Second
 
