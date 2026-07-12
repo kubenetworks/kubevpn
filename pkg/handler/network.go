@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -380,9 +381,7 @@ func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net
 		nm.localTunIPv6 = newIPv6
 	}
 
-	// Reconcile only the device's own host-route: cluster CIDR routes are
-	// device-scoped (added as `dev <tun>`, no source IP) and survive the change,
-	// but the /32 (and /128) route for the TUN IP itself must follow the new IP.
+	// Reconcile the device's own host-route.
 	if oldV4 != nil {
 		_ = tun.DeleteRoutes(nm.tunName, types.Route{Dst: net.IPNet{IP: oldV4.IP, Mask: net.CIDRMask(32, 32)}})
 	}
@@ -394,6 +393,15 @@ func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net
 			_ = tun.DeleteRoutes(nm.tunName, types.Route{Dst: net.IPNet{IP: oldV6.IP, Mask: net.CIDRMask(128, 128)}})
 		}
 		_ = tun.AddRoutes(nm.tunName, types.Route{Dst: net.IPNet{IP: newIPv6.IP, Mask: net.CIDRMask(128, 128)}})
+	}
+
+	// On macOS the kernel stamps RT_IFA (source address) from the interface's primary
+	// address at route-add time. After an IP change the old RT_IFA no longer exists on
+	// the device, so outbound packets matching those routes fail with EADDRNOTAVAIL.
+	// Delete + re-add forces the kernel to re-derive RT_IFA from the new address.
+	// Linux and Windows routes are device-scoped and unaffected.
+	if runtime.GOOS == "darwin" {
+		nm.refreshCIDRRoutes(ctx)
 	}
 
 	plog.G(ctx).Infof("[NetworkManager] TUN IP changed: v4=%s v6=%s on %s", newIPv4, newIPv6, nm.tunName)
@@ -1122,6 +1130,26 @@ func (nm *NetworkManager) addTrafficManagerServiceRoute(ctx context.Context) err
 		}
 	}
 	return nm.AddRoute(ips...)
+}
+
+// refreshCIDRRoutes deletes and re-adds all cluster CIDR routes on the TUN device.
+// On macOS the kernel pins RT_IFA (the source address for outbound packets) from the
+// interface's primary address at route-add time; after a TUN IP change the stale
+// RT_IFA causes EADDRNOTAVAIL. Re-adding forces the kernel to stamp the new address.
+func (nm *NetworkManager) refreshCIDRRoutes(ctx context.Context) {
+	var routes []types.Route
+	for _, cidr := range nm.dedupAndFilterCIDRs(nm.cfg.CIDRs) {
+		if cidr != nil && !cidr.IP.IsLoopback() {
+			routes = append(routes, types.Route{Dst: *cidr})
+		}
+	}
+	if len(routes) == 0 {
+		return
+	}
+	_ = tun.DeleteRoutes(nm.tunName, routes...)
+	if err := tun.AddRoutes(nm.tunName, routes...); err != nil {
+		plog.G(ctx).Warnf("[NetworkManager] refresh CIDR routes after IP change failed: %v", err)
+	}
 }
 
 // AddRouteCIDR adds CIDR prefixes (e.g. server-pushed aggregated pod prefixes like
