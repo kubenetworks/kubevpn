@@ -176,6 +176,7 @@ pkg/
 | `NewSessionLifecycle(logger)` | `daemon/action` | Session context + `Teardown()` (cancel + logger detach) — replaces ad-hoc context.WithCancel; rollback/cleanup is NOT here (see `handler.rollbackList`) |
 | `cleanupConnection(ctx, conn)` | `daemon/action` | Cleans up a connection's sync and VPN state — used by disconnect and quit |
 | `util.InitKubeClient(f)` | `pkg/util` | Returns (config, restclient, clientset, namespace) — used by `K8sClient.InitClient` |
+| `util.IsNewer(clientVer, clientImg, serverImg)` | `pkg/util` | Version/image-tag comparison (MAJOR.MINOR, tolerant of SHA/latest) — used by client self-upgrade and traffic-manager `UpgradeDeploy` |
 | `gatherContainerPorts(spec, portMaps)` | `pkg/inject` | Collects container ports from pod spec + portMaps — shared by mesh and fargate |
 | `addEnvoyConfig(ctx, mapInterface, spec)` | `pkg/inject` | Adds envoy proxy rule to ConfigMap using `envoyRuleSpec` — shared by vpn and fargate injectors |
 | `svr.findConnection(id)` | `daemon/action` | Finds connection by ID — do NOT write `for range svr.connections` lookup loops |
@@ -311,7 +312,7 @@ func TestAddEnvoyConfig(t *testing.T) {
 
 When refactoring backend code (`pkg/`):
 
-0. **Read `docs/` design documents first** — before any code change, read the relevant design docs in `docs/` to understand the full architecture. Changes must be consistent with the documented design (dual-daemon model, OwnerID ownership, DHCP lifecycle, logging architecture, etc.). If a change conflicts with the docs, update the docs as part of the same commit. Key docs: `02-dual-daemon.md` (which daemon runs what), `05-owner-id.md` (envoy rule ownership), `13-logging-architecture.md` (log routing), `14-rpc-daemon-mapping.md` (RPC → daemon mapping).
+0. **Read `docs/` design documents first** — before any code change, read the relevant design docs in `docs/` to understand the full architecture. Changes must be consistent with the documented design (dual-daemon model, OwnerID ownership, DHCP lifecycle, logging architecture, etc.). If a change conflicts with the docs, update the docs as part of the same commit. Key docs: `02-dual-daemon.md` (which daemon runs what), `05-owner-id.md` (envoy rule ownership), `13-logging-architecture.md` (log routing), `14-rpc-daemon-mapping.md` (RPC → daemon mapping), `33-client-upgrade.md` (client self-upgrade: download/atomic-swap/rollback).
 1. **Every refactoring must include integration tests** — wire up real components (gRPC, DHCP, ConfigMap, connection management) against `fake.NewSimpleClientset()`. Structure tests as multi-phase stories (connect → proxy → leave → crash → reconnect). Never write single-function unit tests as a substitute.
 2. **Never touch `cmd/`** — CLI is frozen
 3. **Always `go build ./...` after changes** — catch compile errors immediately

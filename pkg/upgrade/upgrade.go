@@ -38,6 +38,9 @@ func Main(ctx context.Context, quit func(ctx context.Context, isSudo bool) error
 	client := &http.Client{Timeout: httpClientTimeout}
 	if config.GitHubOAuthToken != "" {
 		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
+		// oauth2.NewClient returns a client with no Timeout; re-apply it so an
+		// authenticated request cannot hang the upgrade forever.
+		client.Timeout = httpClientTimeout
 	}
 	url, latestVersion, needsUpgrade, err := needsUpgrade(ctx, client, config.Version)
 	if err != nil {
@@ -48,8 +51,14 @@ func Main(ctx context.Context, quit func(ctx context.Context, isSudo bool) error
 		return nil
 	}
 	fmt.Fprintf(os.Stdout, "Current version: %s less than latest version: %s, needs to upgrade\n", config.Version, latestVersion)
-	_ = quit(ctx, true)
-	_ = quit(ctx, false)
+	// Best-effort: stop both daemons so they do not hold the old binary open while
+	// we replace it. Failures are logged but do not block the upgrade.
+	if err = quit(ctx, true); err != nil {
+		plog.G(ctx).Debugf("Failed to quit sudo daemon before upgrade: %v", err)
+	}
+	if err = quit(ctx, false); err != nil {
+		plog.G(ctx).Debugf("Failed to quit user daemon before upgrade: %v", err)
+	}
 
 	err = downloadAndInstall(client, url)
 	if err != nil {
@@ -115,7 +124,9 @@ func downloadAndInstall(client *http.Client, url string) error {
 	if err != nil {
 		return err
 	}
-	// Stash the current binary as a backup.
+	// Stash the current binary as a backup. Renaming the running executable away
+	// first (rather than overwriting it in place) is required on Windows, where the
+	// running .exe is locked and cannot be opened for writing — but rename is allowed.
 	err = util.Move(curFolder, backupPath)
 	if err != nil {
 		return fmt.Errorf("backup current binary: %w: %w", err, config.ErrUpgradeInstall)
@@ -156,15 +167,22 @@ func elevatePermission() error {
 func needsUpgrade(ctx context.Context, client *http.Client, version string) (url string, latestVersion string, upgrade bool, err error) {
 	latestVersion, url, err = util.GetManifest(client, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
+		// Fallback: read the pinned latest version from stable.txt and build the
+		// release URL by convention. Surface the fallback's own error immediately
+		// instead of letting it shadow into a confusing version-parse failure.
 		v := "https://github.com/kubenetworks/kubevpn/raw/master/plugins/stable.txt"
 		var stream []byte
 		stream, err = util.DownloadFileStream(v)
+		if err != nil {
+			err = fmt.Errorf("determine latest version: %w: %w", err, config.ErrUpgradeNetwork)
+			return
+		}
 		latestVersion = strings.TrimSpace(string(stream))
+		if latestVersion == "" {
+			err = fmt.Errorf("determine latest version: empty response from %s: %w", v, config.ErrUpgradeNetwork)
+			return
+		}
 		url = fmt.Sprintf("https://github.com/kubenetworks/kubevpn/releases/download/%s/kubevpn_%s_%s_%s.zip", latestVersion, latestVersion, runtime.GOOS, runtime.GOARCH)
-	}
-	if err != nil {
-		err = fmt.Errorf("determine latest version: %w: %w", err, config.ErrUpgradeNetwork)
-		return
 	}
 
 	var currV, latestV *goversion.Version

@@ -12,15 +12,18 @@ import (
 
 // Upgrade compares the client version against the daemon version and indicates whether the daemon needs upgrading.
 func (svr *Server) Upgrade(ctx context.Context, req *rpc.UpgradeRequest) (*rpc.UpgradeResponse, error) {
-	var err error
-	var clientVersion, daemonVersion *goversion.Version
-	clientVersion, err = goversion.NewVersion(req.ClientVersion)
+	// Dev/CI builds carry a non-semver version (git SHA, "latest", "dev"). Treat an
+	// unparseable version on either side as "no upgrade" rather than failing the RPC
+	// — the daemon version handshake must not error on dev builds.
+	clientVersion, err := goversion.NewVersion(req.ClientVersion)
 	if err != nil {
-		return nil, err
+		plog.G(ctx).Debugf("Skip upgrade check: unparseable client version %q: %v", req.ClientVersion, err)
+		return &rpc.UpgradeResponse{NeedUpgrade: false}, nil
 	}
-	daemonVersion, err = goversion.NewVersion(config.Version)
+	daemonVersion, err := goversion.NewVersion(config.Version)
 	if err != nil {
-		return nil, err
+		plog.G(ctx).Debugf("Skip upgrade check: unparseable daemon version %q: %v", config.Version, err)
+		return &rpc.UpgradeResponse{NeedUpgrade: false}, nil
 	}
 	if clientVersion.GreaterThan(daemonVersion) {
 		plog.G(ctx).Info("Daemon version is less than client, needs to upgrade")

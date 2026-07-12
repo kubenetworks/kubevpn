@@ -39,6 +39,8 @@ func (w *wsHandler) installKubevpnOnRemote(ctx context.Context, sshClient *ssh.C
 	client := &http.Client{Timeout: httpClientTimeout}
 	if config.GitHubOAuthToken != "" {
 		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: config.GitHubOAuthToken, TokenType: "Bearer"}))
+		// oauth2.NewClient drops the Timeout; re-apply it so the request cannot hang.
+		client.Timeout = httpClientTimeout
 	}
 	latestVersion, url, err := util.GetManifest(client, w.platform.OS, w.platform.Architecture)
 	if err != nil {

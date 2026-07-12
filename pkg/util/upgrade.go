@@ -2,6 +2,8 @@ package util
 
 import (
 	"archive/zip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,10 +33,18 @@ func GetManifest(httpCli *http.Client, goos string, arch string) (version string
 	var errs []error
 	for _, a := range address {
 		resp, err = httpCli.Get(a)
-		if err == nil {
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if resp.StatusCode == http.StatusOK {
 			break
 		}
-		errs = append(errs, err)
+		// A non-200 (rate-limit 403, 404, ...) still returns a body; do not parse it
+		// as a release manifest — record and try the next mirror.
+		errs = append(errs, fmt.Errorf("github api %s: status %d", a, resp.StatusCode))
+		_ = resp.Body.Close()
+		resp = nil
 	}
 	if resp == nil {
 		err = fmt.Errorf("failed to call github api: %w: %w", utilerrors.NewAggregate(errs), config.ErrUpgradeNetwork)
@@ -81,6 +91,11 @@ func Download(client *http.Client, url string, filename string, stdout, stderr i
 		return err
 	}
 	defer get.Body.Close()
+	if get.StatusCode != http.StatusOK {
+		// Without this, a 404/403 error page would be written out and later fail
+		// deep in unzip with a misleading "not a valid zip" error.
+		return fmt.Errorf("download %s failed, status code: %d", url, get.StatusCode)
+	}
 	total := float64(get.ContentLength) / 1024 / 1024
 	fmt.Fprintf(stdout, "Length: %d (%0.2fM)\n", get.ContentLength, total)
 
@@ -112,6 +127,10 @@ func Download(client *http.Client, url string, filename string, stdout, stderr i
 }
 
 // UnzipKubeVPNIntoFile extracts the kubevpn binary from a zip archive and writes it to filename.
+// If the archive also bundles a checksums.txt (SHA-256 of the binary), the extracted binary is
+// verified against it. NOTE: this only detects a corrupt/truncated download — the checksum ships
+// inside the same zip, so it is NOT tamper-proof; real supply-chain integrity needs an externally
+// published (ideally signed) checksum. See docs/33-client-upgrade.md.
 func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	archive, err := zip.OpenReader(zipFile)
 	if err != nil {
@@ -119,11 +138,13 @@ func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	}
 	defer archive.Close()
 
-	var fi *zip.File
+	var fi, sumEntry *zip.File
 	for _, f := range archive.File {
-		if strings.Contains(f.Name, "kubevpn") {
+		switch {
+		case filepath.Base(f.Name) == "checksums.txt":
+			sumEntry = f
+		case fi == nil && strings.Contains(f.Name, "kubevpn"):
 			fi = f
-			break
 		}
 	}
 
@@ -150,8 +171,41 @@ func UnzipKubeVPNIntoFile(zipFile, filename string) error {
 	}
 	defer fileInArchive.Close()
 
-	_, err = io.Copy(dstFile, fileInArchive)
-	return err
+	hash := sha256.New()
+	if _, err = io.Copy(io.MultiWriter(dstFile, hash), fileInArchive); err != nil {
+		return err
+	}
+	if sumEntry != nil {
+		if err = verifyBundledChecksum(sumEntry, hash.Sum(nil)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// verifyBundledChecksum compares the extracted binary's SHA-256 against the checksums.txt entry
+// (which contains the hex digest, optionally followed by a filename in `shasum` format).
+func verifyBundledChecksum(sumEntry *zip.File, got []byte) error {
+	rc, err := sumEntry.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return err
+	}
+	want := strings.TrimSpace(string(data))
+	if i := strings.IndexAny(want, " \t"); i > 0 { // tolerate "<hash>  <filename>"
+		want = want[:i]
+	}
+	if want == "" {
+		return nil // empty checksums.txt: nothing to verify against
+	}
+	if gotHex := hex.EncodeToString(got); !strings.EqualFold(want, gotHex) {
+		return fmt.Errorf("kubevpn binary checksum mismatch: want %s, got %s", want, gotHex)
+	}
+	return nil
 }
 
 // githubRelease is the subset of the GitHub releases API response that we use.
