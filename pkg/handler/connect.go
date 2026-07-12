@@ -165,6 +165,10 @@ func (c *ConnectOptions) GetTrafficManagerConfigMap(ctx context.Context) (*v1.Co
 	return c.getConfigMapStore().GetConfigMap(ctx)
 }
 
+func (c *ConnectOptions) RefreshConfigMapCache(ctx context.Context) error {
+	return c.getConfigMapStore().Refresh(ctx)
+}
+
 // GetConfigMapInformer returns a shared informer for the traffic manager ConfigMap.
 // Created once on first call, then reused. Thread-safe via sync.Once.
 // Must be called after InitClient.
@@ -206,6 +210,10 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 	if err := c.createRemoteInboundViaManager(ctx, namespace, headers, portMap, image, localTunIPv4, localTunIPv6, workloads); err != nil {
 		return fmt.Errorf("%w: %w", err, config.ErrEnvoyInject)
 	}
+	// The server-side inject just wrote envoy rules to the ConfigMap. Refresh the
+	// informer cache so the next status query sees ProxyList immediately, without
+	// waiting for the asynchronous watch event to propagate.
+	_ = c.getConfigMapStore().Refresh(ctx)
 	return nil
 }
 

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -156,6 +157,12 @@ func (u *sshUt) writeTempFile(t *testing.T) string {
 }
 
 func (u *sshUt) checkSyncWithFullProxyStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err, string(output))
+	}
+
 	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
@@ -175,7 +182,22 @@ func (u *sshUt) checkSyncWithFullProxyStatus(t *testing.T) {
 		}},
 	}}}
 
-	pollSyncStatus(t, expect)
+	var statuses connStatus
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
+		t.Fatal("statuses List[0].SyncList[0].RuleList[0] not found", string(output))
+	}
+
+	expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload
+
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		marshalB, _ := json.Marshal(statuses)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(marshalB))
+	}
 }
 
 func (u *sshUt) kubevpnUnSync(t *testing.T) {
@@ -204,6 +226,12 @@ func (u *sshUt) kubevpnUnSync(t *testing.T) {
 }
 
 func (u *sshUt) checkSyncWithServiceMeshStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err, string(output))
+	}
+
 	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
@@ -223,5 +251,20 @@ func (u *sshUt) checkSyncWithServiceMeshStatus(t *testing.T) {
 		}},
 	}}}
 
-	pollSyncStatus(t, expect)
+	var statuses connStatus
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
+		t.Fatal("statuses List[0].SyncList[0].RuleList[0] not found", string(output))
+	}
+
+	expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload
+
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		marshalB, _ := json.Marshal(statuses)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(marshalB))
+	}
 }

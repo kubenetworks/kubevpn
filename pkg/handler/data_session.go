@@ -228,6 +228,10 @@ func (ds *DataSession) GetTrafficManagerConfigMap(ctx context.Context) (*v1.Conf
 	return ds.getConfigMapStore().GetConfigMap(ctx)
 }
 
+func (ds *DataSession) RefreshConfigMapCache(ctx context.Context) error {
+	return ds.getConfigMapStore().Refresh(ctx)
+}
+
 // --- Connection interface: control-plane stubs (data-plane session does not proxy workloads) ---
 
 // CreateRemoteInboundPod is not available on a data-plane session.

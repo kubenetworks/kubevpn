@@ -297,6 +297,12 @@ func (u *ut) writeTempFile(t *testing.T) string {
 }
 
 func (u *ut) checkSyncWithFullProxyStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err, string(output))
+	}
+
 	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
@@ -316,40 +322,21 @@ func (u *ut) checkSyncWithFullProxyStatus(t *testing.T) {
 		}},
 	}}}
 
-	pollSyncStatus(t, expect)
-}
+	var statuses connStatus
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
 
-// pollSyncStatus retries `kubevpn status -o json` until the output matches
-// expect (with the dynamic DstWorkload filled in from the actual response).
-//
-// The envoy config key in the traffic manager ConfigMap is written by an
-// out-of-process writer (the sync pod's VPN sidecar). The user daemon reads
-// it through an informer cache whose watch event may lag behind the write,
-// so the first status call right after `kubevpn sync` returns can still see
-// ProxyList:null. Retrying for a short window lets the watch propagate.
-func pollSyncStatus(t *testing.T, expect connStatus) {
-	t.Helper()
-	var lastOutput []byte
-	err := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 10*time.Second, true,
-		func(ctx context.Context) (bool, error) {
-			output, err := exec.Command("kubevpn", "status", "-o", "json").Output()
-			if err != nil {
-				return false, nil
-			}
-			lastOutput = output
-			var statuses connStatus
-			if err = json.Unmarshal(output, &statuses); err != nil {
-				return false, nil
-			}
-			if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
-				return false, nil
-			}
-			expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload
-			return reflect.DeepEqual(statuses, expect), nil
-		})
-	if err != nil {
+	if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
+		t.Fatal("statuses List[0].SyncList[0].RuleList[0] not found", string(output))
+	}
+
+	expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload
+
+	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
-		t.Fatalf("expect: %s, but was: %s", string(marshal), string(lastOutput))
+		marshalB, _ := json.Marshal(statuses)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(marshalB))
 	}
 }
 
@@ -379,6 +366,12 @@ func (u *ut) kubevpnUnSync(t *testing.T) {
 }
 
 func (u *ut) checkSyncWithServiceMeshStatus(t *testing.T) {
+	cmd := exec.Command("kubevpn", "status", "-o", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err, string(output))
+	}
+
 	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
@@ -398,5 +391,20 @@ func (u *ut) checkSyncWithServiceMeshStatus(t *testing.T) {
 		}},
 	}}}
 
-	pollSyncStatus(t, expect)
+	var statuses connStatus
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
+		t.Fatal("statuses List[0].SyncList[0].RuleList[0] not found", string(output))
+	}
+
+	expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload
+
+	if !reflect.DeepEqual(statuses, expect) {
+		marshal, _ := json.Marshal(expect)
+		marshalB, _ := json.Marshal(statuses)
+		t.Fatalf("expect: %s, but was: %s", string(marshal), string(marshalB))
+	}
 }

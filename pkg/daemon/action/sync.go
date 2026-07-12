@@ -150,6 +150,12 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	if opt == nil {
 		return fmt.Errorf("cluster %s not found: %w", connectionID, config.ErrConnectionNotFound)
 	}
+	// The sync pod's VPN sidecar wrote envoy rules to the ConfigMap via ProxyInject.
+	// Refresh the user daemon's informer cache so the next status query sees
+	// ProxyList immediately, without waiting for the watch event to propagate.
+	if err = opt.RefreshConfigMapCache(resp.Context()); err != nil {
+		plog.G(resp.Context()).Debugf("Failed to refresh ConfigMap cache after sync: %v", err)
+	}
 	opt.SetSync(options)
 	return nil
 }

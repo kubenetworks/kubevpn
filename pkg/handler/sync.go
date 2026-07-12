@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	v1 "k8s.io/api/core/v1"
@@ -141,6 +144,10 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 		// meaningful previous revision here and would only disturb the clone.
 		_ = util.RolloutStatus(ctx, d.factory, d.WorkloadNamespace, workload, false)
 
+		if err = d.waitSidecarConnected(ctx, labelsMap); err != nil {
+			plog.G(ctx).Debugf("wait for VPN sidecar connected: %v", err)
+		}
+
 		if d.LocalDir != "" {
 			err = d.SyncDir(ctx, fields.SelectorFromSet(labelsMap).String())
 			if err != nil {
@@ -150,6 +157,42 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 	}
 	plog.StepDone(ctx, "Synced files for %d workloads", len(d.Workloads))
 	return nil
+}
+
+// waitSidecarConnected streams the VPN sidecar container's logs until it prints
+// the connection slogan, meaning server-side inject is complete and the envoy
+// config has been written to the ConfigMap. Without this, DoSync returns as soon
+// as the pod is Running — before the sidecar finishes connect + inject — and a
+// status query immediately after would see ProxyList:null.
+func (d *SyncOptions) waitSidecarConnected(ctx context.Context, labelsMap map[string]string) error {
+	const timeout = 2 * time.Minute
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	list, err := util.GetRunningPodList(ctx, d.clientset, d.WorkloadNamespace,
+		fields.SelectorFromSet(labelsMap).String())
+	if err != nil || len(list) == 0 {
+		return fmt.Errorf("no running sync pod: %w", err)
+	}
+	stream, err := d.clientset.CoreV1().Pods(d.WorkloadNamespace).GetLogs(list[0].Name, &v1.PodLogOptions{
+		Container: config.ContainerSidecarVPN,
+		Follow:    true,
+	}).Stream(ctx)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+
+	scanner := bufio.NewScanner(stream)
+	for scanner.Scan() {
+		if strings.Contains(scanner.Text(), config.Slogan) {
+			return nil
+		}
+	}
+	if err = scanner.Err(); err != nil {
+		return err
+	}
+	return fmt.Errorf("VPN sidecar log ended without %q", config.Slogan)
 }
 
 // Cleanup deletes sync workloads created by DoSync, waits for the original

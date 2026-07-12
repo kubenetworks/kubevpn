@@ -91,6 +91,10 @@ type Connection interface {
 	// GetTrafficManagerConfigMap returns the traffic manager ConfigMap from the informer cache.
 	GetTrafficManagerConfigMap(ctx context.Context) (*v1.ConfigMap, error)
 
+	// RefreshConfigMapCache does a direct API GET and updates the informer store,
+	// so the next cache read sees the latest ConfigMap without waiting for a watch event.
+	RefreshConfigMapCache(ctx context.Context) error
+
 	// --- Accessors needed by sort.go and daemon/action layer ---
 
 	// GetOwnerID returns the UUID prefix identifying this connection's envoy rule ownership.

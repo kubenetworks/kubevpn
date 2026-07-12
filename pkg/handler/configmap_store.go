@@ -110,6 +110,19 @@ func (s *ConfigMapStore) GetConfigMap(_ context.Context) (*corev1.ConfigMap, err
 	return nil, nil
 }
 
+// Refresh does a direct API GET and updates the informer store, so subsequent
+// cache reads see the latest ConfigMap immediately — without waiting for the
+// watch event to propagate. Called after a known out-of-process write (e.g. the
+// traffic manager's ProxyInject wrote an envoy rule) to close the window where
+// the cache still lacks the new data.
+func (s *ConfigMapStore) Refresh(ctx context.Context) error {
+	cm, err := s.clientset.CoreV1().ConfigMaps(s.managerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	return s.GetInformer().GetStore().Update(cm)
+}
+
 // Set updates a key-value pair in the traffic manager ConfigMap.
 func (s *ConfigMapStore) Set(ctx context.Context, key, value string) error {
 	err := retry.RetryOnConflict(
