@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"net"
+	"strings"
 	"sync/atomic"
 
 	"gvisor.dev/gvisor/pkg/buffer"
@@ -138,9 +139,13 @@ func logIPPacket(ctx context.Context, label string, data []byte) {
 	} else {
 		return
 	}
+	var dir sniffer.Direction = sniffer.DirectionSend
+	if strings.Contains(label, "INBOUND") {
+		dir = sniffer.DirectionRecv
+	}
 	pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 		Payload: buffer.MakeWithData(data),
 	})
-	sniffer.LogPacket(label+" ", sniffer.DirectionSend, protocol, pkt)
+	sniffer.LogPacket(label+" ", dir, protocol, pkt)
 	pkt.DecRef()
 }
