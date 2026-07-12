@@ -82,6 +82,13 @@ func (c *ConnectOptions) GetLastHeartbeat() time.Time {
 	return time.Time{}
 }
 
+// GetControlPlaneHealthy is a stub on the control-plane session (returns true = don't demote).
+// Control-plane health lives in DataSession's NetworkManager in the root daemon; the user daemon
+// reuses the status verdict the sudo daemon already computed.
+func (c *ConnectOptions) GetControlPlaneHealthy() bool {
+	return true
+}
+
 // GetAPIServerIPs is a stub on the control-plane session.
 // API server IPs are held by DataSession's NetworkManager in the root daemon.
 func (c *ConnectOptions) GetAPIServerIPs() []net.IP {

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -75,6 +76,11 @@ type NetworkManager struct {
 	extraHost             []dns.Entry
 	dnsConfig             *dns.Config
 	heartbeatStats        *core.HeartbeatStats // data-plane liveness from observed heartbeat replies
+	// controlPlaneHealthy tracks whether the xds control plane (port-forwarded from the traffic
+	// manager) is currently serving. Optimistically true until a health check exhausts its
+	// retries; set true again on the next successful check. Feeds the status verdict so a live
+	// TUN with a dead control plane reports unhealthy rather than connected.
+	controlPlaneHealthy atomic.Bool
 }
 
 const (
@@ -97,7 +103,9 @@ const (
 
 // newNetworkManager creates a NetworkManager with the given configuration.
 func newNetworkManager(cfg NetworkConfig) *NetworkManager {
-	return &NetworkManager{cfg: cfg}
+	nm := &NetworkManager{cfg: cfg}
+	nm.controlPlaneHealthy.Store(true) // optimistic until the first health check reports otherwise
+	return nm
 }
 
 // LocalTunIPv4 returns the IPv4 TUN address.
@@ -115,6 +123,16 @@ func (nm *NetworkManager) TunName() string {
 // or the zero time if none has been seen. It is the data-plane liveness signal.
 func (nm *NetworkManager) LastHeartbeat() time.Time {
 	return nm.heartbeatStats.LastReply()
+}
+
+// ControlPlaneHealthy reports whether the xds control plane is currently serving.
+func (nm *NetworkManager) ControlPlaneHealthy() bool {
+	return nm.controlPlaneHealthy.Load()
+}
+
+// setControlPlaneHealthy records the latest xds health-check verdict.
+func (nm *NetworkManager) setControlPlaneHealthy(ok bool) {
+	nm.controlPlaneHealthy.Store(ok)
 }
 
 // GetExtraHost returns the extra DNS host entries accumulated by AddExtraRoute.
@@ -674,7 +692,7 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 	// detect pod deletion so we can redo port-forward
 	go util.CheckPodStatus(childCtx, cancelFunc, podName, nm.cfg.Clientset.CoreV1().Pods(nm.cfg.ManagerNamespace))
 	controlPlanePort, _, _ := strings.Cut(portPair[2], ":")
-	go healthCheckGRPC(childCtx, cancelFunc, readyChan, controlPlanePort)
+	go healthCheckGRPC(childCtx, cancelFunc, readyChan, controlPlanePort, nm.setControlPlaneHealthy)
 	if first {
 		go func() {
 			select {

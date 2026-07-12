@@ -104,17 +104,25 @@ func resolveTunIP(connect handler.Connection, ips map[string]tunIP) (v4, v6 stri
 // considered unhealthy: 1.5 × the heartbeat interval tolerates one missed beat's jitter.
 var heartbeatStaleThreshold = config.KeepAliveTime * 3 / 2
 
-// deriveConnectionStatus maps TUN presence and the local heartbeat into the reported status.
-// It is computed in the sudo daemon, which owns the TUN and observes heartbeat replies:
+// deriveConnectionStatus maps TUN presence, the local heartbeat, and control-plane health into
+// the reported status. It is computed in the sudo daemon, which owns the TUN, observes heartbeat
+// replies, and runs the xds health check:
 //
-//	no TUN device                          -> disconnected
-//	TUN up but heartbeat stale / never     -> unhealthy
-//	TUN up and a recent heartbeat reply    -> connected
-func deriveConnectionStatus(tunUp bool, lastHeartbeat time.Time) string {
+//	no TUN device                                    -> disconnected
+//	TUN up but heartbeat stale / never               -> unhealthy
+//	TUN up, heartbeat fresh, but control plane down  -> unhealthy
+//	TUN up, heartbeat fresh, control plane serving   -> connected
+//
+// Heartbeat is the primary signal (reachability to the gateway); control-plane health only
+// demotes a would-be "connected" to "unhealthy" — it never fakes "disconnected".
+func deriveConnectionStatus(tunUp bool, lastHeartbeat time.Time, controlPlaneOK bool) string {
 	if !tunUp {
 		return StatusFailed
 	}
 	if lastHeartbeat.IsZero() || time.Since(lastHeartbeat) > heartbeatStaleThreshold {
+		return StatusUnhealthy
+	}
+	if !controlPlaneOK {
 		return StatusUnhealthy
 	}
 	return StatusOk
@@ -136,9 +144,9 @@ func resolveStatus(connect handler.Connection, ips map[string]tunIP, tunUp bool)
 		return StatusFailed
 	}
 	if connect == nil {
-		return deriveConnectionStatus(tunUp, time.Time{})
+		return deriveConnectionStatus(tunUp, time.Time{}, true)
 	}
-	return deriveConnectionStatus(tunUp, connect.GetLastHeartbeat())
+	return deriveConnectionStatus(tunUp, connect.GetLastHeartbeat(), connect.GetControlPlaneHealthy())
 }
 
 func buildConnectionStatus(connect handler.Connection, ips map[string]tunIP) *rpc.Status {

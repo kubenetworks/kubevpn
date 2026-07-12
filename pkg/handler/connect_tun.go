@@ -63,11 +63,14 @@ func Run(ctx context.Context, servers []core.Server) error {
 	}
 }
 
-func healthCheckGRPC(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, controlPlanePort string) {
+// healthCheckGRPC probes the local xds control-plane port every healthCheckLoopInterval. onHealth
+// (may be nil) receives each verdict: true after a successful check, false once the retries are
+// exhausted — letting callers reflect control-plane health in status.
+func healthCheckGRPC(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, controlPlanePort string, onHealth func(bool)) {
 	target := net.JoinHostPort("127.0.0.1", controlPlanePort)
 	var conn *grpc.ClientConn
 
-	healthCheckLoop(ctx, cancelFunc, readyChan, func() error {
+	healthCheckLoop(ctx, cancelFunc, readyChan, onHealth, func() error {
 		if conn == nil {
 			var err error
 			dialCtx, dialCancel := context.WithTimeout(ctx, healthCheckDialTimeout)
@@ -101,7 +104,7 @@ func healthCheckGRPC(ctx context.Context, cancelFunc context.CancelFunc, readyCh
 	}
 }
 
-func healthCheckLoop(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, checker func() error) {
+func healthCheckLoop(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, onHealth func(bool), checker func() error) {
 	defer cancelFunc()
 	readyTimeout := time.NewTicker(portForwardReadyTimeout)
 	defer readyTimeout.Stop()
@@ -128,7 +131,16 @@ func healthCheckLoop(ctx context.Context, cancelFunc context.CancelFunc, readyCh
 		}
 		if err != nil {
 			plog.G(ctx).Errorf("Health check failed after %v: %v", elapsed, err)
+			// Control plane is down (retries exhausted): report before the port-forward is torn
+			// down and reconnected. A ctx-cancelled exit (normal teardown / pod recreation) does
+			// not reach here, so it does not falsely mark the control plane unhealthy.
+			if onHealth != nil {
+				onHealth(false)
+			}
 			return
+		}
+		if onHealth != nil {
+			onHealth(true)
 		}
 	}
 }
