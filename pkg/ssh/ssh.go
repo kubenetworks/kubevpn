@@ -121,8 +121,13 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 	return nil
 }
 
-// SshJump establishes an SSH tunnel to the Kubernetes API server and returns the path to a rewritten kubeconfig pointing at the local tunnel endpoint.
-func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print bool) (path string, err error) {
+// SshJumpBytes establishes an SSH tunnel to the Kubernetes API server and returns
+// the rewritten kubeconfig bytes pointing at the local tunnel endpoint, WITHOUT
+// materializing a temp file. Callers that only need an in-process kubectl Factory
+// should consume these bytes directly (via util.InitFactoryByBytes); use SshJump
+// when a real file is required (child process, container mount, or KUBECONFIG env
+// var). The tunnel stays up for the lifetime of ctx.
+func SshJumpBytes(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print bool) (newKubeconfigBytes []byte, err error) {
 	if len(conf.RemoteKubeconfig) != 0 {
 		var stdout []byte
 		var stderr []byte
@@ -162,7 +167,6 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 		return
 	}
 	var oldAPIServer netip.AddrPort
-	var newKubeconfigBytes []byte
 	newKubeconfigBytes, oldAPIServer, err = pkgutil.ModifyAPIServer(ctx, kubeconfigBytes, local)
 	if err != nil {
 		return
@@ -181,7 +185,18 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 		plog.G(ctx).Errorf("SSH port map error: %v", err)
 		return
 	}
+	return newKubeconfigBytes, nil
+}
 
+// SshJump establishes an SSH tunnel to the Kubernetes API server and returns the
+// path to a rewritten kubeconfig file pointing at the local tunnel endpoint. The
+// file is removed when ctx is done. Prefer SshJumpBytes unless a real file is
+// required (child process, container mount, or KUBECONFIG env var).
+func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print bool) (path string, err error) {
+	newKubeconfigBytes, err := SshJumpBytes(ctx, conf, kubeconfigBytes, print)
+	if err != nil {
+		return "", err
+	}
 	path, err = pkgutil.ConvertToTempKubeconfigFile(newKubeconfigBytes, GenKubeconfigTempPath(conf, kubeconfigBytes))
 	if err != nil {
 		plog.G(ctx).Errorf("failed to write kubeconfig: %v", err)

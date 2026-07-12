@@ -2,7 +2,7 @@
 
 ## Overview
 
-KubeVPN daemon actions (Connect, Sync) use `context.Context` to manage the lifecycle of SSH tunnels, VPN connections, and cleanup operations. The `SessionLifecycle` struct centralizes context + cleanup management, replacing the previous ad-hoc pattern of scattered `ctx/cancel/defer` calls.
+KubeVPN daemon actions (Connect, Sync) use `context.Context` to manage the lifecycle of SSH tunnels and VPN connections. The `SessionLifecycle` struct centralizes the session context + teardown, replacing the previous ad-hoc pattern of scattered `ctx/cancel` calls. Teardown is entirely context-cancellation driven — daemon actions no longer materialize temp kubeconfig files (see [15-ssh-architecture.md](15-ssh-architecture.md); kubeconfig stays in memory as bytes), so there is no cleanup registry.
 
 ## Why Not `resp.Context()`?
 
@@ -26,7 +26,6 @@ The user runs `kubevpn connect`, the CLI prints "Connected" and exits. The tunne
 type SessionLifecycle struct {
     Ctx    context.Context      // session lifecycle — cancel to tear down everything
     Cancel context.CancelFunc   // explicit cancel (e.g., duplicate connection, client cancel)
-    // + mutex-protected cleanup list, idempotent RunCleanups
 }
 ```
 
@@ -37,30 +36,28 @@ type SessionLifecycle struct {
 | `NewSessionLifecycle(logger)` | Creates session with `context.Background()` + attached logger |
 | `session.Ctx` | Use as the parent context for all session operations |
 | `session.Cancel` | Cancel the context (triggers SSH tunnel close, port-forward stop, etc.) |
-| `session.AddCleanup(func)` | Register a cleanup function (runs in LIFO order) |
-| `session.AddTempFile(&path)` | Convenience: register temp file for removal |
-| `session.RunCleanups()` | Execute all cleanups (reverse order) + Cancel + detach logger. **Idempotent.** |
+| `session.Teardown()` | Cancel the context + detach logger. **Idempotent.** Wired into each connection's rollback list. |
 
 ### Properties
 
-- **LIFO cleanup order**: Last registered = first executed (like `defer`)
-- **Idempotent**: `RunCleanups()` can be called multiple times safely (mutex + `done` flag)
-- **Thread-safe**: `AddCleanup` and `RunCleanups` are synchronized via mutex
-- **Automatic logger detach**: `plog.WithoutLogger()` called automatically in `RunCleanups()`
+- **Idempotent**: `Teardown()` can be called multiple times safely (context cancel + logger detach are both idempotent)
+- **Context outlives the RPC**: `Ctx` derives from `context.Background()`, so a CLI exit does not tear the session down
+- **Automatic logger detach**: `Teardown()` calls `plog.WithoutLogger()` so post-teardown logs fall back to the default logger
 
 ## The Three Session Scopes
 
 ### 1. Connect — Sudo Daemon (Data Plane)
 
-No SSH tunnel. Direct kubeconfig file.
+No SSH tunnel. Kubeconfig is built in-process from bytes (`util.InitFactoryByBytes`) —
+no temp kubeconfig file is written.
 
 ```
 session := NewSessionLifecycle(logger)
 
-session.AddTempFile(&file)                    ← remove kubeconfig on cleanup
-ds.AddRollbackFunc(session.RunCleanups)       ← cleanup on disconnect
+ds.AddRollbackFunc(session.Teardown)          ← teardown on disconnect
 go grpcutil.ListenCancel(resp, session.Cancel)    ← client cancel → session cancel
 
+ds.InitClient(InitFactoryByBytes(req.KubeconfigBytes, ns))  ← Factory from bytes, no file
 ds.DoConnect(session.Ctx)                     ← DataSession, root daemon
     └── ds.ctx = WithCancel(session.Ctx)      ← internal lifecycle
            ├── portForward(ds.ctx)
@@ -73,40 +70,41 @@ Teardown: session.Cancel() → ds.ctx cancelled → TUN/DNS/routes stop
 
 ### 2. Connect — User Daemon (Control Plane + SSH)
 
-SSH tunnel to bastion host, then forwards to sudo daemon.
+SSH tunnel to bastion host, then forwards to sudo daemon. The kubeconfig stays in
+memory as bytes throughout — no temp file, no bytes→file→bytes round-trip.
 
 ```
 session := NewSessionLifecycle(logger)
 
-session.AddTempFile(&file)                         ← remove kubeconfig
-connect.AddRollbackFunc(session.RunCleanups)       ← cleanup on disconnect
+connect.AddRollbackFunc(session.Teardown)          ← teardown on disconnect
 
-resolveKubeconfig(session.Ctx, SshJump, ...)       ← SSH tunnel created
-    └── ssh.SshJump(session.Ctx, ...)
+resolvedBytes = resolveKubeconfigBytes(session.Ctx, SshJump, ...)  ← SSH tunnel, returns bytes
+    └── ssh.SshJumpBytes(session.Ctx, ...)         ← rewritten bytes, NO file
            └── PortMapUntil(session.Ctx, ...)
                   └── go func() { <-session.Ctx.Done(); close tunnel }
 
+connect.InitClient(InitFactoryByBytes(resolvedBytes, ns))   ← Factory from bytes
 detectAndSetManagerNamespace(session.Ctx, ...)
 connect.InitDHCP(session.Ctx)
-forwardConnectToSudo(session.Ctx, ...)
+forwardConnectToSudo(session.Ctx, ..., resolvedBytes, ...)  ← forwards bytes directly
+    ├── req.KubeconfigBytes = string(resolvedBytes)         ← no os.ReadFile round-trip
     ├── req.OwnerID = connect.OwnerID
     └── cli.Connect(ctx)                           ← to sudo daemon
 
-Teardown: session.Cancel() → SSH tunnel closes → temp kubeconfig removed
+Teardown: session.Cancel() → SSH tunnel closes
 ```
 
 ### 3. Sync
 
-SSH tunnel for kubeconfig, independent VPN connection.
+SSH tunnel for kubeconfig (bytes only), independent VPN connection.
 
 ```
 session := NewSessionLifecycle(logger)
 
-session.AddTempFile(&file)
-options.AddRollbackFunc(session.RunCleanups)
+options.AddRollbackFunc(session.Teardown)
 
 cli.Connect(context.Background())                  ← independent! survives sync
-resolveKubeconfig(session.Ctx, ...)                ← SSH tunnel
+resolvedBytes = resolveKubeconfigBytes(session.Ctx, ...)   ← SSH tunnel, no file
 options.SetContext(session.Ctx)
 options.DoSync(session.Ctx, ...)
 
@@ -134,10 +132,10 @@ so that failed cleanups can be retried on the next call. `rollbackFuncList` is p
 ConnectOptions.Cleanup() — user daemon (ControlSession), ALWAYS control-plane:
     1. Delete CNI pod/job
     2. Leave all proxy resources (LeaveAllProxyResources)
-    3. Execute rollback funcs → session.RunCleanups()
-        → removes temp files
-        → cancels session context (closes SSH tunnel)
+    3. Execute rollback funcs → session.Teardown()
+        → cancels session context (closes SSH tunnel, port-forwards)
         → detaches logger
+       (no temp kubeconfig files to remove — kubeconfig stays in memory as bytes)
     Note: TUN IP is NOT explicitly released — DHCP lease expiry handles reclaim
 
 DataSession.Cleanup() — root daemon, ALWAYS data-plane:
@@ -180,9 +178,8 @@ defer func() {
 
 ```go
 session := NewSessionLifecycle(logger)
-session.AddTempFile(&file)
 connect.AddRollbackFunc(func() error {
-    session.RunCleanups()
+    session.Teardown()
     return nil
 })
 
@@ -196,16 +193,15 @@ defer func() {
 
 **Improvements:**
 - `session.Ctx` — one clear name regardless of SSH or not
-- `session.RunCleanups()` — single call handles everything (LIFO, idempotent)
+- `session.Teardown()` — single call cancels the context + detaches the logger (idempotent)
 - Logger detach automatic
-- Temp file removal via `AddTempFile` (no manual `os.Remove`)
-- Thread-safe via mutex
+- No temp kubeconfig file to remove (kubeconfig stays in memory as bytes)
 
 ## Source Files
 
 | File | Purpose |
 |------|---------|
-| `pkg/daemon/action/lifecycle.go` | `SessionLifecycle` struct + `NewSessionLifecycle`, `AddCleanup`, `AddTempFile`, `RunCleanups` |
-| `pkg/daemon/action/lifecycle_test.go` | 6 tests: new, cancel, LIFO order, idempotent, temp file, ctx cancelled after cleanup |
+| `pkg/daemon/action/lifecycle.go` | `SessionLifecycle` struct + `NewSessionLifecycle`, `Teardown` |
+| `pkg/daemon/action/lifecycle_test.go` | new, cancel, teardown idempotent |
 | `pkg/daemon/action/connect.go` | Uses `SessionLifecycle` in `Connect` and `redirectConnectToSudoDaemon` |
 | `pkg/daemon/action/sync.go` | Uses `SessionLifecycle` in `Sync` |

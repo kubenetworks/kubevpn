@@ -11,13 +11,17 @@ import (
 	"unsafe"
 
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/tools/clientcmd/api/latest"
@@ -114,10 +118,16 @@ func GetAPIServerFromKubeConfigBytes(kubeconfigBytes []byte) *net.IPNet {
 
 // ConvertToTempKubeconfigFile writes kubeconfig bytes to a temp file and returns the path.
 func ConvertToTempKubeconfigFile(kubeconfigBytes []byte, path string) (string, error) {
+	var f *os.File
+	var err error
 	if path == "" {
-		path = GenKubeconfigTempPath(kubeconfigBytes)
+		// os.CreateTemp guarantees an atomically-unique name so concurrent writers
+		// (root daemon Connect + user daemon Sync) for the same cluster never derive
+		// the same path and race on truncating a file owned by another user.
+		f, err = os.CreateTemp(config.GetTempPath(), GenKubeconfigTempPattern(kubeconfigBytes))
+	} else {
+		f, err = os.Create(path)
 	}
-	f, err := os.Create(path)
 	if err != nil {
 		return "", err
 	}
@@ -138,29 +148,6 @@ func ConvertToTempKubeconfigFile(kubeconfigBytes []byte, path string) (string, e
 	return f.Name(), nil
 }
 
-func initFactory(kubeconfigBytes string, ns string) cmdutil.Factory {
-	configFlags := genericclioptions.NewConfigFlags(true)
-	configFlags.WrapConfigFn = func(c *rest.Config) *rest.Config {
-		if path, ok := os.LookupEnv(config.EnvSSHJump); ok {
-			bytes, err := os.ReadFile(path)
-			cmdutil.CheckErr(err)
-			var conf *rest.Config
-			conf, err = clientcmd.RESTConfigFromKubeConfig(bytes)
-			cmdutil.CheckErr(err)
-			return conf
-		}
-		return c
-	}
-	file, err := ConvertToTempKubeconfigFile([]byte(kubeconfigBytes), "")
-	if err != nil {
-		return nil
-	}
-	configFlags.KubeConfig = ptr.To(file)
-	configFlags.Namespace = ptr.To(ns)
-	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
-	return cmdutil.NewFactory(matchVersionFlags)
-}
-
 // InitFactoryByPath creates a kubectl Factory from an explicit kubeconfig file path and namespace.
 func InitFactoryByPath(kubeconfig string, ns string) cmdutil.Factory {
 	configFlags := genericclioptions.NewConfigFlags(true)
@@ -168,6 +155,70 @@ func InitFactoryByPath(kubeconfig string, ns string) cmdutil.Factory {
 	configFlags.Namespace = ptr.To(ns)
 	matchVersionFlags := cmdutil.NewMatchVersionFlags(configFlags)
 	return cmdutil.NewFactory(matchVersionFlags)
+}
+
+// byteRESTClientGetter is an in-memory genericclioptions.RESTClientGetter backed
+// by kubeconfig bytes, letting a kubectl Factory be built without materializing a
+// temp kubeconfig file. Used by InitFactoryByBytes.
+type byteRESTClientGetter struct {
+	clientConfig clientcmd.ClientConfig
+	// loadErr is surfaced lazily from ToRESTConfig (the first method InitKubeClient
+	// calls) so InitFactoryByBytes can keep InitFactoryByPath's non-nil, lazy-
+	// failure contract instead of returning a nil Factory on malformed bytes.
+	loadErr error
+}
+
+func (g *byteRESTClientGetter) ToRESTConfig() (*rest.Config, error) {
+	if g.loadErr != nil {
+		return nil, g.loadErr
+	}
+	return g.clientConfig.ClientConfig()
+}
+
+func (g *byteRESTClientGetter) ToRawKubeConfigLoader() clientcmd.ClientConfig {
+	return g.clientConfig
+}
+
+func (g *byteRESTClientGetter) ToDiscoveryClient() (discovery.CachedDiscoveryInterface, error) {
+	cfg, err := g.ToRESTConfig()
+	if err != nil {
+		return nil, err
+	}
+	dc, err := discovery.NewDiscoveryClientForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return memory.NewMemCacheClient(dc), nil
+}
+
+func (g *byteRESTClientGetter) ToRESTMapper() (meta.RESTMapper, error) {
+	dc, err := g.ToDiscoveryClient()
+	if err != nil {
+		return nil, err
+	}
+	return restmapper.NewDeferredDiscoveryRESTMapper(dc), nil
+}
+
+// InitFactoryByBytes creates a kubectl Factory directly from kubeconfig bytes and
+// a namespace, without writing a temp kubeconfig file. Prefer this over
+// InitFactoryByPath whenever the resulting Factory is consumed in-process only
+// (i.e. NOT passed to a child process, container volume mount, or KUBECONFIG env
+// var — those still need a real file). Avoiding the temp file removes a whole
+// class of cross-daemon collision / permission / cleanup bugs.
+func InitFactoryByBytes(kubeconfigBytes []byte, ns string) cmdutil.Factory {
+	cfg, loadErr := clientcmd.Load(kubeconfigBytes)
+	if cfg == nil {
+		cfg = api.NewConfig()
+	}
+	overrides := &clientcmd.ConfigOverrides{}
+	if ns != "" {
+		overrides.Context.Namespace = ns
+	}
+	getter := &byteRESTClientGetter{
+		clientConfig: clientcmd.NewDefaultClientConfig(*cfg, overrides),
+		loadErr:      loadErr,
+	}
+	return cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(getter))
 }
 
 // GetKubeconfigCluster returns the cluster name from the current context of the factory's kubeconfig.

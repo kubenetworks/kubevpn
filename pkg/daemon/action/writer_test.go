@@ -3,7 +3,6 @@ package action
 import (
 	"context"
 	"io"
-	"os"
 	"testing"
 )
 
@@ -54,45 +53,31 @@ func TestNewStreamWriter_ReturnsNonNil(t *testing.T) {
 	var _ io.Writer = w
 }
 
-func TestResolveKubeconfig_NilJump_EmptyBytes_CreatesTempFile(t *testing.T) {
+func TestResolveKubeconfigBytes_NilJump_ReturnsBytes(t *testing.T) {
 	ctx := context.Background()
 	kubeconfigBytes := "apiVersion: v1\nkind: Config\n"
 
-	path, err := resolveKubeconfig(ctx, nil, kubeconfigBytes, false)
+	data, err := resolveKubeconfigBytes(ctx, nil, kubeconfigBytes, false)
 	if err != nil {
-		t.Fatalf("resolveKubeconfig: %v", err)
+		t.Fatalf("resolveKubeconfigBytes: %v", err)
 	}
-	defer os.Remove(path)
-
-	if path == "" {
-		t.Fatal("expected non-empty path")
+	if len(data) == 0 {
+		t.Fatal("expected non-empty bytes")
 	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("expected file to exist at %s: %v", path, err)
-	}
-	if info.Size() == 0 {
-		t.Fatal("expected file to have content")
+	if string(data) != kubeconfigBytes {
+		t.Fatalf("bytes mismatch:\n  got:  %q\n  want: %q", string(data), kubeconfigBytes)
 	}
 }
 
-func TestResolveKubeconfig_NilJump_FileReadable(t *testing.T) {
+func TestResolveKubeconfigBytes_NilJump_Unchanged(t *testing.T) {
 	ctx := context.Background()
 	kubeconfigBytes := "apiVersion: v1\nkind: Config\nclusters: []\n"
 
-	path, err := resolveKubeconfig(ctx, nil, kubeconfigBytes, false)
+	data, err := resolveKubeconfigBytes(ctx, nil, kubeconfigBytes, false)
 	if err != nil {
-		t.Fatalf("resolveKubeconfig: %v", err)
+		t.Fatalf("resolveKubeconfigBytes: %v", err)
 	}
-	defer os.Remove(path)
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("failed to read file at %s: %v", path, err)
-	}
-
 	if string(data) != kubeconfigBytes {
-		t.Fatalf("file content mismatch:\n  got:  %q\n  want: %q", string(data), kubeconfigBytes)
+		t.Fatalf("bytes mismatch:\n  got:  %q\n  want: %q", string(data), kubeconfigBytes)
 	}
 }

@@ -198,13 +198,8 @@ func disconnect(cli rpc.DaemonClient, bytes []byte, ns string, sshConf *pkgssh.S
 }
 
 func connectionIDFromKubeconfigBytes(bytes []byte, ns string) (string, error) {
-	file, err := util.ConvertToTempKubeconfigFile(bytes, "")
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(file)
-
-	factory := util.InitFactoryByPath(file, ns)
+	// In-process Factory only — build it straight from bytes, no temp file.
+	factory := util.InitFactoryByBytes(bytes, ns)
 	connect := &handler.ConnectOptions{}
 	if err := connect.InitClient(factory); err != nil {
 		return "", err

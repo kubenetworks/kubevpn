@@ -31,7 +31,7 @@ pkg/daemon/handler/            WebSocket SSH terminal service
 pkg/daemon/action/
 ├── sshdaemon.go               SshStart/SshStop RPC — remote TUN server
 ├── sshconv.go                 RPC SshJump → SshConfig conversion
-└── writer.go                  resolveKubeconfig — SSH tunnel kubeconfig resolution
+└── writer.go                  resolveKubeconfigBytes — SSH tunnel kubeconfig resolution (in-memory bytes)
 
 cmd/kubevpn/cmds/
 ├── ssh.go                     `kubevpn ssh` command
@@ -137,7 +137,7 @@ StartTime / EndTime / RenewTill, `TicketFlags` as an ASN.1 BitString, addresses,
 data, ticket + second ticket). Low-level readers (`readData`, `readAddress`, `readAuthDataEntry`,
 `readTimestamp`, `readInt8/16/32`, `readBytes`) walk the buffer with an explicit position pointer.
 
-#### 3. Kubeconfig Tunnel — `SshJump(ctx, conf, kubeconfigBytes, print)`
+#### 3. Kubeconfig Tunnel — `SshJumpBytes(ctx, conf, kubeconfigBytes, print)`
 
 Full flow:
 
@@ -156,9 +156,14 @@ Full flow:
 5. Set up SSH port forwarding: 127.0.0.1:N → 10.0.1.100:6443
    (via PortMapUntil)
 
-6. Write the rewritten kubeconfig to a temp file, return the path
-   (temp file auto-deleted when ctx is cancelled)
+6. Return the rewritten kubeconfig bytes (the tunnel lives for the lifetime of ctx)
 ```
+
+`SshJumpBytes` returns in-memory bytes and writes no file — daemon actions consume
+them directly via `util.InitFactoryByBytes`. The path-returning wrapper `SshJump`
+calls `SshJumpBytes` then materializes a temp file (auto-deleted on ctx cancel) and
+is used only where a real file is required (child process, container mount, or the
+`KUBECONFIG`/`SSH_JUMP_BY_KUBEVPN` env vars — see `SshJumpAndSetEnv`).
 
 #### 4. Port Forwarding — `PortMapUntil(ctx, conf, remote, local)`
 
@@ -171,16 +176,17 @@ Implements local TCP port forwarding:
 
 #### 5. Daemon Integration
 
-In each RPC action, the SSH jump host is integrated via `resolveKubeconfig`:
+In each RPC action, the SSH jump host is integrated via `resolveKubeconfigBytes`,
+which keeps the kubeconfig in memory (no temp file) and feeds `InitFactoryByBytes`:
 
 ```go
 // daemon/action/writer.go
-func resolveKubeconfig(ctx, jump, kubeconfigBytes, portForward) (string, error) {
+func resolveKubeconfigBytes(ctx, jump, kubeconfigBytes, portForward) ([]byte, error) {
     sshConf := parseSshFromRPC(jump)  // RPC SshJump → SshConfig
     if !sshConf.IsEmpty() {
-        return ssh.SshJump(ctx, sshConf, kubeconfigBytes, portForward)
+        return ssh.SshJumpBytes(ctx, sshConf, []byte(kubeconfigBytes), portForward)
     }
-    return util.ConvertToTempKubeconfigFile(kubeconfigBytes, "")
+    return []byte(kubeconfigBytes), nil
 }
 ```
 
@@ -200,12 +206,13 @@ func resolveKubeconfig(ctx, jump, kubeconfigBytes, portForward) (string, error) 
 ```go
 // connect_elevate.go — in user daemon
 if sshConf := parseSshFromRPC(req.SshJump); !sshConf.IsEmpty() {
-    connect.SshHosts = sshConf.Host()  // record jump host IP
-    if sshConf.RemoteKubeconfig != "" {
-        connect.OriginKubeconfigPath = file  // mark as using remote kubeconfig
-    }
+    connect.SshHosts = sshConf.Host()  // record jump host IP for route exclusion
 }
 ```
+
+The resolved (SSH-rewritten) bytes are then forwarded verbatim to the sudo daemon
+by `forwardConnectToSudo` (`req.KubeconfigBytes = string(resolvedBytes)`) — no
+temp file is written on either side, and there is no bytes→file→bytes round-trip.
 
 `SshHosts` is added to the `getAPIServerIPs()` return value, ensuring TUN routes do not override the route to the jump host (preventing SSH tunnel breakage).
 

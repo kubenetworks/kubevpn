@@ -2,7 +2,6 @@ package action
 
 import (
 	"context"
-	"os"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -23,12 +22,11 @@ func (svr *Server) Uninstall(resp rpc.Daemon_UninstallServer) (err error) {
 	_, ctx := svr.initStreamLogger(resp, req.Level, func(msg string) error {
 		return resp.Send(&rpc.UninstallResponse{Message: msg})
 	})
-	file, err := resolveKubeconfig(ctx, req.SshJump, req.KubeconfigBytes, false)
+	kubeconfigBytes, err := resolveKubeconfigBytes(ctx, req.SshJump, req.KubeconfigBytes, false)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(file)
-	factory := util.InitFactoryByPath(file, req.Namespace)
+	factory := util.InitFactoryByBytes(kubeconfigBytes, req.Namespace)
 	clientset, err := factory.KubernetesClientSet()
 	if err != nil {
 		return err

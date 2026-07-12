@@ -46,14 +46,9 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		ConnectionID:         req.ConnectionID,
 		ReservedTunIPs:       svr.siblingTunIPs,
 	}
-	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
-	if err != nil {
-		return err
-	}
 	session := NewSessionLifecycle(logger)
-	session.AddTempFile(&file)
 	ds.AddRollbackFunc(func() error {
-		session.RunCleanups()
+		session.Teardown()
 		return nil
 	})
 	go grpcutil.ListenCancel(resp, session.Cancel)
@@ -64,7 +59,10 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		}
 	}()
 
-	err = ds.InitClient(util.InitFactoryByPath(file, req.ManagerNamespace))
+	// Root daemon (data plane): the kubeconfig is consumed only by the in-process
+	// kubectl Factory, so build it straight from bytes — no temp file to collide
+	// with the user daemon's or to leak.
+	err = ds.InitClient(util.InitFactoryByBytes([]byte(req.KubeconfigBytes), req.ManagerNamespace))
 	if err != nil {
 		return err
 	}

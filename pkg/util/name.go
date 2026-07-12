@@ -42,6 +42,21 @@ func GenKubeconfigTempPath(kubeconfigBytes []byte) string {
 	return path
 }
 
+// GenKubeconfigTempPattern builds an os.CreateTemp pattern for a kubeconfig temp
+// file. The "<cluster>_<namespace>_" prefix keeps the file human-recognizable
+// while the trailing "*" is replaced by os.CreateTemp with a random, collision-
+// free suffix. A deterministic "<cluster>_<namespace>_<unix-second>" name would
+// collide when the root daemon (Connect) and the user daemon (Sync) both write a
+// kubeconfig for the same cluster/namespace in the same second — the second
+// writer, a different user, cannot truncate the first's file (EACCES).
+func GenKubeconfigTempPattern(kubeconfigBytes []byte) string {
+	cluster, ns, _ := GetCluster(kubeconfigBytes)
+	if ContainsPathSeparator(cluster) || ContainsPathSeparator(ns) {
+		return "kubeconfig_*"
+	}
+	return fmt.Sprintf("%s_%s_*", cluster, ns)
+}
+
 // ContainsPathSeparator reports whether the pattern contains any OS path separator characters.
 func ContainsPathSeparator(pattern string) bool {
 	return strings.ContainsRune(pattern, os.PathSeparator)

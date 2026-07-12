@@ -11,7 +11,6 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // streamWriter adapts a gRPC streaming Send call into an io.Writer.
@@ -64,13 +63,17 @@ func (svr *Server) initStreamLogger(resp grpc.ServerStream, streamLevel int32, s
 	return logger, plog.WithLogger(resp.Context(), logger)
 }
 
-// resolveKubeconfig resolves a kubeconfig file path from an RPC request.
-// If an SSH jump host is configured, it tunnels through SSH first.
-// The caller must defer os.Remove on the returned path.
-func resolveKubeconfig(ctx context.Context, jump *rpc.SshJump, kubeconfigBytes string, portForward bool) (string, error) {
+// resolveKubeconfigBytes resolves kubeconfig bytes from an RPC request WITHOUT
+// writing a temp file. If an SSH jump host is configured it establishes the tunnel
+// (kept alive for the lifetime of ctx) and returns the rewritten bytes pointing at
+// the local endpoint; otherwise it returns the request bytes unchanged. Prefer
+// this over resolveKubeconfig whenever the kubeconfig is consumed only by an
+// in-process kubectl Factory (via util.InitFactoryByBytes) — it avoids the temp
+// file entirely and the collision/permission/cleanup issues that come with it.
+func resolveKubeconfigBytes(ctx context.Context, jump *rpc.SshJump, kubeconfigBytes string, portForward bool) ([]byte, error) {
 	sshConf := parseSshFromRPC(jump)
 	if !sshConf.IsEmpty() {
-		return ssh.SshJump(ctx, sshConf, []byte(kubeconfigBytes), portForward)
+		return ssh.SshJumpBytes(ctx, sshConf, []byte(kubeconfigBytes), portForward)
 	}
-	return util.ConvertToTempKubeconfigFile([]byte(kubeconfigBytes), "")
+	return []byte(kubeconfigBytes), nil
 }

@@ -1,8 +1,6 @@
 package action
 
 import (
-	"os"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -17,13 +15,12 @@ func (svr *Server) Reset(resp rpc.Daemon_ResetServer) error {
 	_, ctx := svr.initStreamLogger(resp, req.Level, func(msg string) error {
 		return resp.Send(&rpc.ResetResponse{Message: msg})
 	})
-	file, err := resolveKubeconfig(ctx, req.SshJump, req.KubeconfigBytes, false)
+	kubeconfigBytes, err := resolveKubeconfigBytes(ctx, req.SshJump, req.KubeconfigBytes, false)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(file)
 	connect := &handler.ConnectOptions{}
-	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByBytes(kubeconfigBytes, req.Namespace))
 	if err != nil {
 		return err
 	}

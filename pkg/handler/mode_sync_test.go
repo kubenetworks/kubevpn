@@ -327,8 +327,11 @@ func (u *ut) checkSyncWithFullProxyStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(expect.List) == 0 || len(expect.List[0].SyncList) == 0 || len(expect.List[0].SyncList[0].RuleList) == 0 {
-		t.Fatal("expect List[0].SyncList[0].RuleList[0] not found", string(output))
+	// Guard the actual parsed output, not the hard-coded expectation: when the
+	// sync failed upstream, statuses is empty and indexing statuses.List[0] below
+	// would panic (index out of range) instead of reporting the diagnostic output.
+	if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
+		t.Fatal("statuses List[0].SyncList[0].RuleList[0] not found", string(output))
 	}
 
 	expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload
@@ -396,8 +399,11 @@ func (u *ut) checkSyncWithServiceMeshStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(expect.List) == 0 || len(expect.List[0].SyncList) == 0 || len(expect.List[0].SyncList[0].RuleList) == 0 {
-		t.Fatal("expect List[0].SyncList[0].RuleList[0] not found", string(output))
+	// Guard the actual parsed output, not the hard-coded expectation: when the
+	// sync failed upstream, statuses is empty and indexing statuses.List[0] below
+	// would panic (index out of range) instead of reporting the diagnostic output.
+	if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
+		t.Fatal("statuses List[0].SyncList[0].RuleList[0] not found", string(output))
 	}
 
 	expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload

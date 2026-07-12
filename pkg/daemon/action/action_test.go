@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -169,10 +168,10 @@ func TestUninstall_PartialResources(t *testing.T) {
 	}
 }
 
-// TestResolveKubeconfig_WithSSHJump verifies that when an SshJump with Addr
-// is provided, resolveKubeconfig attempts an SSH connection that fails
+// TestResolveKubeconfigBytes_WithSSHJump verifies that when an SshJump with Addr
+// is provided, resolveKubeconfigBytes attempts an SSH connection that fails
 // (no real SSH server), returning an error.
-func TestResolveKubeconfig_WithSSHJump(t *testing.T) {
+func TestResolveKubeconfigBytes_WithSSHJump(t *testing.T) {
 	ctx := context.Background()
 	jump := &rpc.SshJump{
 		Addr:     "127.0.0.1:0", // unreachable SSH address
@@ -180,36 +179,26 @@ func TestResolveKubeconfig_WithSSHJump(t *testing.T) {
 		Password: "testpass",
 	}
 
-	_, err := resolveKubeconfig(ctx, jump, "apiVersion: v1\nkind: Config\n", false)
+	_, err := resolveKubeconfigBytes(ctx, jump, "apiVersion: v1\nkind: Config\n", false)
 	if err == nil {
 		t.Fatal("expected error from SSH dial to unreachable address, got nil")
 	}
 }
 
-// TestResolveKubeconfig_EmptySSH verifies that an SshJump with all empty
-// fields (IsEmpty() == true) causes resolveKubeconfig to create a temp file
-// containing the kubeconfig bytes.
-func TestResolveKubeconfig_EmptySSH(t *testing.T) {
+// TestResolveKubeconfigBytes_EmptySSH verifies that an SshJump with all empty
+// fields (IsEmpty() == true) causes resolveKubeconfigBytes to return the request
+// bytes unchanged, without writing any temp file.
+func TestResolveKubeconfigBytes_EmptySSH(t *testing.T) {
 	ctx := context.Background()
 	jump := &rpc.SshJump{} // all fields empty → IsEmpty() returns true
 	kubeconfigBytes := "apiVersion: v1\nkind: Config\nclusters: []\n"
 
-	path, err := resolveKubeconfig(ctx, jump, kubeconfigBytes, false)
+	data, err := resolveKubeconfigBytes(ctx, jump, kubeconfigBytes, false)
 	if err != nil {
-		t.Fatalf("resolveKubeconfig with empty SshJump: %v", err)
-	}
-	defer os.Remove(path)
-
-	if path == "" {
-		t.Fatal("expected non-empty temp file path")
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("failed to read temp file %s: %v", path, err)
+		t.Fatalf("resolveKubeconfigBytes with empty SshJump: %v", err)
 	}
 	if string(data) != kubeconfigBytes {
-		t.Fatalf("temp file content mismatch:\n  got:  %q\n  want: %q", string(data), kubeconfigBytes)
+		t.Fatalf("bytes mismatch:\n  got:  %q\n  want: %q", string(data), kubeconfigBytes)
 	}
 }
 

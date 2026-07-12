@@ -3,7 +3,6 @@ package action
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -135,13 +134,12 @@ func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes st
 // from the workload namespace, so it is resolved the same way — otherwise the lookup
 // misses and the proxy/VPN state leaks when the manager lives in its own namespace.
 func resolveConnectionIDByKubeconfig(ctx context.Context, jump *rpc.SshJump, kubeconfigBytes, ns string) (string, error) {
-	file, err := resolveKubeconfig(ctx, jump, kubeconfigBytes, false)
+	resolvedBytes, err := resolveKubeconfigBytes(ctx, jump, kubeconfigBytes, false)
 	if err != nil {
 		return "", err
 	}
-	defer os.Remove(file)
 	connect := &handler.ConnectOptions{}
-	if err = connect.InitClient(util.InitFactoryByPath(file, ns)); err != nil {
+	if err = connect.InitClient(util.InitFactoryByBytes(resolvedBytes, ns)); err != nil {
 		return "", err
 	}
 	managerNamespace, err := util.DetectManagerNamespace(ctx, connect.GetFactory(), ns)

@@ -29,7 +29,7 @@ In the past, the lack of this architecture document led to bugs where fields wer
 │              pkg/daemon/action/ (IsSudo=false)        │
 │                                                       │
 │  Responsibilities:                                    │
-│  ├── SSH jump host (resolveKubeconfig)                │
+│  ├── SSH jump host (resolveKubeconfigBytes)           │
 │  ├── Traffic Manager creation/upgrade (CreateOutboundPod/UpgradeDeploy)│
 │  ├── Proxy injection (CreateRemoteInboundPod → inject/)│
 │  ├── File sync (DoSync)                               │
@@ -190,12 +190,13 @@ CLI: kubevpn connect
 User Daemon: Connect RPC
   ├── redirectConnectToSudoDaemon()
   │     ├── Create ConnectOptions (control plane, with OwnerID, Image)
-  │     ├── resolveKubeconfig (SSH jump host)
-  │     ├── InitClient
+  │     ├── resolveKubeconfigBytes (SSH jump host → in-memory bytes, no temp file)
+  │     ├── InitClient (InitFactoryByBytes)
   │     ├── detectAndSetManagerNamespace
-  │     ├── forwardConnectToSudo()
+  │     ├── forwardConnectToSudo(..., resolvedBytes)
   │     │     ├── CreateOutboundPod (create traffic manager pod)
   │     │     ├── UpgradeDeploy (upgrade traffic manager)
+  │     │     ├── Set req.KubeconfigBytes = resolvedBytes (no os.ReadFile round-trip)
   │     │     ├── Set req.OwnerID, forward req to Root Daemon ──┐
   │     │     ├── Wait for Root Daemon to complete               │
   │     │     └── Store in svr.connections                       │

@@ -295,18 +295,19 @@ func GetConnectionIDByConfig(cmd *cobra.Command, config Config) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	var file string
-	defer os.Remove(file)
+	// The kubeconfig here feeds only an in-process Factory, so resolve to bytes
+	// (SSH still establishes the tunnel) and skip the temp file entirely.
+	var resolvedBytes []byte
 	if !sshConf.IsEmpty() {
-		file, err = pkgssh.SshJump(cmd.Context(), sshConf, kubeConfigBytes, false)
+		resolvedBytes, err = pkgssh.SshJumpBytes(cmd.Context(), sshConf, kubeConfigBytes, false)
 	} else {
-		file, err = util.ConvertToTempKubeconfigFile(kubeConfigBytes, "")
+		resolvedBytes = kubeConfigBytes
 	}
 	if err != nil {
 		return "", err
 	}
 	var c = &handler.ConnectOptions{}
-	err = c.InitClient(util.InitFactoryByPath(file, ns))
+	err = c.InitClient(util.InitFactoryByBytes(resolvedBytes, ns))
 	if err != nil {
 		return "", err
 	}

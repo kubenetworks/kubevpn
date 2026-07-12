@@ -82,7 +82,7 @@ current-context: localhost`
 		if ns != data.Namespace {
 			t.Fatalf("not equal")
 		}
-		newFactory := initFactory(string(bytes), ns)
+		newFactory := InitFactoryByBytes(bytes, ns)
 		var config *rest.Config
 		config, err = newFactory.ToRESTConfig()
 		if err != nil {
