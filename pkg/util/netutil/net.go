@@ -269,8 +269,21 @@ func GenICMPPacket(src net.IP, dst net.IP) ([]byte, error) {
 // GenICMPPacketIPv6 generates a minimal IPv6 ICMPv6 Echo Request packet.
 func GenICMPPacketIPv6(src net.IP, dst net.IP) ([]byte, error) {
 	buf := gopacket.NewSerializeBuffer()
+	var id uint16
+	for _, b := range src {
+		id += uint16(b)
+	}
 	icmpLayer := layers.ICMPv6{
 		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
+	}
+	// The echo Identifier/SeqNumber form the 4-byte ICMPv6 Echo message body. Without this
+	// layer the packet is only the 4-byte ICMPv6 base header (type/code/checksum) — shorter
+	// than the ICMPv6 echo minimum — which gvisor and real hosts treat as malformed and never
+	// answer, so the IPv6 heartbeat/route-registration echo got no reply. Mirrors the Id/Seq
+	// that GenICMPPacket sets for IPv4.
+	icmpEcho := layers.ICMPv6Echo{
+		Identifier: id,
+		SeqNumber:  uint16(rand.Intn(math.MaxUint16 + 1)),
 	}
 	ipLayer := layers.IPv6{
 		Version:    6,
@@ -289,7 +302,7 @@ func GenICMPPacketIPv6(src net.IP, dst net.IP) ([]byte, error) {
 		FixLengths:       true,
 		ComputeChecksums: true,
 	}
-	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
+	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer, &icmpEcho)
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize icmp6 packet: %w", err)
 	}
