@@ -66,6 +66,13 @@ type Renderer struct {
 	out     io.Writer
 	spinner *yacspin.Spinner // nil → plain fallback (spinner construction failed)
 	running bool
+
+	// Plain-path (spinner == nil) step tracking, used to render a heartbeat: the
+	// first StepBegin of a step is suppressed (so a fast step stays a single ✓),
+	// but a re-begin with new text (a long-running step's status update) prints one
+	// " ○ text" line. open is true between a step's first begin and its end.
+	open     bool
+	lastText string
 }
 
 // New returns a Renderer writing to out. The animated yacspin spinner is built
@@ -107,7 +114,16 @@ func (r *Renderer) Write(message string) {
 		r.printAboveSpinner(func() { styleLine(r.out, ansiBold, text) })
 	case plog.StepBegin:
 		if r.spinner == nil {
-			return // matching StepEnd prints the line
+			// Plain-path heartbeat: print a " ○ text" line only for a re-begin of an
+			// already-open step (a long-running step's changed status). The first begin
+			// is suppressed so a fast step settles to a single ✓; the matching StepEnd
+			// prints that line.
+			if r.open && text != r.lastText {
+				fmt.Fprintf(r.out, " ○ %s\n", text)
+			}
+			r.open = true
+			r.lastText = text
+			return
 		}
 		r.spinner.Message(text)
 		if !r.running {
@@ -117,6 +133,7 @@ func (r *Renderer) Write(message string) {
 	case plog.StepEnd:
 		if r.spinner == nil || !r.running {
 			fmt.Fprintf(r.out, " ✓ %s\n", text)
+			r.open = false
 			return
 		}
 		r.spinner.StopMessage(text)
@@ -152,5 +169,13 @@ func (r *Renderer) Stop() {
 	if r.spinner != nil && r.running {
 		_ = r.spinner.StopFail()
 		r.running = false
+		return
+	}
+	// Plain path: a step still open (never received StepEnd) means the run aborted
+	// mid-step; mark it failed so it is not silently dropped. On success the last
+	// StepEnd already cleared open, so nothing is printed here.
+	if r.spinner == nil && r.open {
+		fmt.Fprintf(r.out, " ✗ %s\n", r.lastText)
+		r.open = false
 	}
 }

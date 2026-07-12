@@ -58,6 +58,68 @@ func TestRenderer_NonTTY(t *testing.T) {
 	}
 }
 
+// TestRenderer_NonTTY_Heartbeat verifies the plain-path heartbeat: a long-running
+// step (re-begun as its status summary changes) prints one " ○ text" line per
+// distinct status, while a fast step (single begin+end) stays a single " ✓ text"
+// line. The first, bare begin of the slow step is suppressed.
+func TestRenderer_NonTTY_Heartbeat(t *testing.T) {
+	var buf bytes.Buffer
+	r := New(&buf)
+
+	// Slow step: bare begin (suppressed) + two status re-begins (○) + end (✓).
+	r.Write(plog.EncodeStep(plog.StepBegin, "Waiting for xds pod") + "\n")
+	r.Write(plog.EncodeStep(plog.StepBegin, "Waiting for xds pod (dns=ContainerCreating)") + "\n")
+	r.Write(plog.EncodeStep(plog.StepBegin, "Waiting for xds pod (dns=Running)") + "\n")
+	r.Write(plog.EncodeStep(plog.StepEnd, "Traffic manager ready in namespace \"default\"") + "\n")
+	// Fast step: single begin (suppressed) + end (✓ only).
+	r.Write(plog.EncodeStep(plog.StepBegin, "Using namespace \"default\"") + "\n")
+	r.Write(plog.EncodeStep(plog.StepEnd, "Using namespace \"default\"") + "\n")
+	r.Stop()
+
+	out := buf.String()
+	want := " ○ Waiting for xds pod (dns=ContainerCreating)\n" +
+		" ○ Waiting for xds pod (dns=Running)\n" +
+		" ✓ Traffic manager ready in namespace \"default\"\n" +
+		" ✓ Using namespace \"default\"\n"
+	if out != want {
+		t.Fatalf("heartbeat output mismatch:\ngot:\n%q\nwant:\n%q", out, want)
+	}
+	// The bare initial begin must not appear as a heartbeat line.
+	if strings.Contains(out, " ○ Waiting for xds pod\n") {
+		t.Errorf("bare initial begin must be suppressed, got:\n%s", out)
+	}
+	// No spinner animation frames and no mid-step failure marker on success.
+	if i := strings.IndexAny(out, spinnerFrameGlyphs); i >= 0 {
+		t.Errorf("non-TTY output must not contain spinner frame glyphs, got:\n%q", out)
+	}
+	if strings.Contains(out, "✗") {
+		t.Errorf("no ✗ expected when every step ends, got:\n%s", out)
+	}
+}
+
+// TestRenderer_NonTTY_FailMidStep verifies that a step still open when the stream
+// aborts (no StepEnd) is marked failed (✗) on the plain path, carrying the last
+// status text.
+func TestRenderer_NonTTY_FailMidStep(t *testing.T) {
+	var buf bytes.Buffer
+	r := New(&buf)
+
+	r.Write(plog.EncodeStep(plog.StepBegin, "Waiting for xds pod") + "\n")
+	r.Write(plog.EncodeStep(plog.StepBegin, "Waiting for xds pod (dns=ContainerCreating)") + "\n")
+	r.Stop() // aborted mid-step
+
+	out := buf.String()
+	if !strings.Contains(out, " ○ Waiting for xds pod (dns=ContainerCreating)\n") {
+		t.Errorf("re-begin should print a ○ heartbeat line, got:\n%s", out)
+	}
+	if !strings.Contains(out, " ✗ Waiting for xds pod (dns=ContainerCreating)\n") {
+		t.Errorf("aborted mid-step should print ✗ with the last status, got:\n%s", out)
+	}
+	if strings.Contains(out, "✓") {
+		t.Errorf("no ✓ expected when the step never ended, got:\n%s", out)
+	}
+}
+
 // TestRenderer_NonTTY_PlainOnly ensures a stream with no step markers (e.g. an
 // ordinary log line) is passed through verbatim.
 func TestRenderer_NonTTY_PlainOnly(t *testing.T) {

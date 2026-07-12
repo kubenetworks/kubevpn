@@ -173,14 +173,30 @@ of its dependencies were already vendored, so it adds no new transitive dependen
 When stdout is not a smart TTY (pipes, CI, log capture, a dumb terminal, the `kubevpn run`
 container-mode success scan in `pkg/util/docker.go`), `progress.New` does **not** build the
 yacspin spinner (`smartTTY(out)` is false → `spinner == nil`). The Renderer then uses its
-deterministic plain path: `StepBegin` is a no-op, `StepEnd` prints exactly one ` ✓ text`
-line, and headings/plain lines print unstyled. This is why a piped run shows one clean line
-per step.
+deterministic plain path — a **heartbeat**, not per-frame animation:
+
+- **`StepBegin`** — the *first* begin of a step is suppressed, so a fast step (begin
+  immediately followed by end) settles to a single ` ✓ text` line. A *re-begin* with new text —
+  a long-running step updating its status (e.g. the pod wait, which re-emits `StepStart` only
+  when its status summary changes, see §3 / `traffmgr.go`) — prints one ` ○ text` heartbeat line.
+- **`StepEnd`** — prints exactly one ` ✓ text` line and closes the step.
+- **`Stop`** — if a step is still open (the run aborted mid-step, no `StepEnd`), prints ` ✗ text`
+  carrying the last status, so a failure is not silently dropped.
+- Headings and ordinary log lines print unstyled.
+
+So a piped run of a slow step shows a few ` ○ …` status lines then ` ✓ …`, e.g.:
+
+```
+ ○ Waiting for traffic manager pod (dns=ContainerCreating, vpn=ContainerCreating, xds=ContainerCreating)
+ ○ Waiting for traffic manager pod (dns=Running, vpn=Running, xds=Running)
+ ✓ Traffic manager ready in namespace "default"
+```
 
 > **Why not rely on yacspin's own non-TTY degrade?** yacspin still *paints animation frames*
-> off a TTY (each terminated with `\n`), so every step leaked 2–3 lines
-> (` ⣾ Forwarding ports` / ` ⣽ Forwarding ports` / ` ✓ Forwarded ports …`). Gating the spinner
-> on `smartTTY` and taking the `spinner == nil` path removes that noise entirely.
+> off a TTY (each terminated with `\n`), so a step leaked one line **per frame** — a ~60s image
+> pull spammed dozens of ` ⣾ Waiting …` / ` ⣽ Waiting …` lines. Gating the spinner on `smartTTY`
+> and taking the `spinner == nil` heartbeat path removes that noise while keeping one status
+> line per change.
 
 The bold heading and the bold-green success line use the same `smartTTY` gate (`styleLine` /
 `progress.Success`): raw ANSI on a smart TTY, plain otherwise — so they match yacspin's `✓`
@@ -255,6 +271,8 @@ seams of the protocol:
 | `TestStep_StreamCarriesSentinel_FileStaysClean` | `pkg/log/step_test.go` | the two-output contract: one `StepStart`+`StepDone` pair yields sentinel-encoded **stream** lines (decode back to `StepBegin`/`StepEnd` + clean text) while the **log file** has no sentinel bytes and no `_kubevpn_step` field |
 | `TestEncodeDecodeStep_RoundTrip` | `pkg/log/step_test.go` | `DecodeStep(EncodeStep(k, msg))` round-trips for every `StepKind` — the wire format stays symmetric |
 | `TestRenderer_NonTTY` | `pkg/util/progress/spinner_test.go` | a `*bytes.Buffer` (not a TTY) → no spinner is built; ordinary log lines pass through and a finished step renders exactly one `✓` + its done text, with **no** braille animation frames and no erase escapes |
+| `TestRenderer_NonTTY_Heartbeat` | `pkg/util/progress/spinner_test.go` | plain-path heartbeat: a slow step's status re-begins render one ` ○ text` line each (bare first begin suppressed) then ` ✓ text`; a fast step stays a single ` ✓ text`; no frame glyphs, no `✗` on success |
+| `TestRenderer_NonTTY_FailMidStep` | `pkg/util/progress/spinner_test.go` | a step still open at `Stop` (no `StepEnd`) renders ` ✗ text` with the last status and no `✓` |
 | `TestSmartTTY` | `pkg/util/progress/spinner_test.go` | the capability gate: `*bytes.Buffer` and a pipe `*os.File` → false; a real pty slave → true, and false under `TERM=dumb` (pty helper is Linux-only, skipped elsewhere) |
 | `TestRenderer_NonTTY_PlainOnly` | `pkg/util/progress/spinner_test.go` | a stream with no step markers (e.g. the header line) passes through verbatim |
 | `TestPrintGRPCStream_StripsStepSentinel` | `pkg/daemon/grpcutil/stream_test.go` | the non-spinner writer decodes the sentinel away, so log file / container-mode `run` / `logs` never emit raw `\x1f` |
