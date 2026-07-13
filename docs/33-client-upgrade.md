@@ -66,6 +66,16 @@ The install is ordered so the user is **never left without a binary**:
 
 All temp files are cleaned up via `defer os.Remove`.
 
+> **Integrity — corruption check only, NOT tamper-proof (known gap).** The release zip bundles a
+> `checksums.txt` (SHA-256 of the binary); `util.UnzipKubeVPNIntoFile` verifies the extracted
+> binary against it and aborts on mismatch. Because that checksum ships **inside the same zip**,
+> it only catches a corrupt/truncated download — an attacker who swaps the zip can update the
+> bundled checksum too. `util.Download` also rejects non-200 responses (so an error page is never
+> mistaken for the binary). Neither is supply-chain integrity: the upgrade runs with elevated
+> privileges (§5), so a compromised release asset / mirror or TLS-stripping MITM could still
+> deliver a malicious binary. Real hardening requires an **externally published, ideally signed**
+> checksum (a separate release asset) verified against the downloaded zip before install.
+
 ## 5. Privilege Escalation (`elevatePermission`)
 
 Before doing anything, `upgrade.Main` probes whether the executable's directory is writable by

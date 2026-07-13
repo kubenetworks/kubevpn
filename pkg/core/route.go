@@ -108,6 +108,7 @@ func (cl *ConnList) WritePacket(pkt *Packet) (net.Conn, error) {
 	return nil, fmt.Errorf("all connections failed")
 }
 
+
 // WriteFunc attempts to call fn on each healthy conn until one succeeds.
 // Dead conns (fn returns error) are removed from the list.
 func (cl *ConnList) WriteFunc(fn func(conn net.Conn) error) (net.Conn, error) {
@@ -142,6 +143,12 @@ func (cl *ConnList) IsEmpty() bool {
 type RouteHub struct {
 	RouteMapTCP   *sync.Map // map[string]*ConnList
 	TCPPacketChan chan *Packet
+	// OnRouteEmpty is called when the last conn for an IP key is removed.
+	// Used by per-client gvisor stacks to start the grace-period timer.
+	OnRouteEmpty func(ipKey string)
+	// OnRouteAdded is called when a route is first created or recovers from empty.
+	// Used by per-client gvisor stacks to cancel the grace-period timer.
+	OnRouteAdded func(ipKey string)
 }
 
 // NewRouteHub creates a new RouteHub for multi-client routing.
@@ -164,6 +171,9 @@ func (hub *RouteHub) AddRoute(ctx context.Context, srcIP net.IP, conn net.Conn) 
 		}
 	} else {
 		plog.G(ctx).Infof("[Route] Add route: %s -> %s-%s", srcIP, conn.LocalAddr(), conn.RemoteAddr())
+		if hub.OnRouteAdded != nil {
+			hub.OnRouteAdded(key)
+		}
 	}
 }
 
@@ -228,6 +238,7 @@ func (hub *RouteHub) WriteToRoutePacket(dstKey string, pkt *Packet) (net.Conn, e
 	return conn, nil
 }
 
+
 // HasRoute checks if a route exists for the given destination IP key.
 func (hub *RouteHub) HasRoute(dstKey string) bool {
 	val, ok := hub.RouteMapTCP.Load(dstKey)
@@ -245,7 +256,11 @@ func (hub *RouteHub) RemoveRoutesByConn(ctx context.Context, conn net.Conn) {
 		empty := list.Remove(conn)
 		if empty {
 			hub.RouteMapTCP.Delete(key)
-			plog.G(ctx).Infof("[Route] Remove route: %s (conn %s)", net.IP(key.(string)), conn.LocalAddr())
+			ipKey := key.(string)
+			plog.G(ctx).Infof("[Route] Remove route: %s (conn %s)", net.IP(ipKey), conn.LocalAddr())
+			if hub.OnRouteEmpty != nil {
+				hub.OnRouteEmpty(ipKey)
+			}
 		}
 		return true
 	})

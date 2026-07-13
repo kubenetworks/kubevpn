@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"os/exec"
 	"runtime"
 	"unsafe"
 
@@ -203,17 +202,9 @@ func delInet4Address(ifName string, ip netip.Addr) error {
 	return ioctlRequest(fd, unix.SIOCDIFADDR, unsafe.Pointer(req))
 }
 
-// delInet6Address removes an IPv6 address via ifconfig. The IPv6 variant of
-// SIOCDIFADDR (in6_ifreq) has a different, OS-dependent struct size across the
-// BSD family this file builds for, so the ioctl number cannot be portably
-// recomputed; ifconfig is the consistent, reliable path for all of them.
-func delInet6Address(ifName string, ip netip.Addr) error {
-	out, err := exec.Command("ifconfig", ifName, "inet6", ip.String(), "delete").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("ifconfig %s inet6 %s delete: %w: %s", ifName, ip, err, out)
-	}
-	return nil
-}
+// delInet6Address is defined per-OS: darwin uses a SIOCDIFADDR_IN6 ioctl (tun_ip6del_darwin.go),
+// freebsd/openbsd use ifconfig (tun_ip6del_bsd.go), because the in6_ifreq struct size that the
+// ioctl number embeds differs across the BSD family.
 
 func ioctlRequest(fd int, req uint, ptr unsafe.Pointer) error {
 	err := unix.IoctlSetInt(fd, req, int(uintptr(ptr)))

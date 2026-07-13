@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"runtime"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -86,18 +86,46 @@ const (
 	portForwardReconnectDelay = 200 * time.Millisecond
 	// portForwardReconnectMaxDelay caps the exponential backoff between reconnects, so a
 	// sustained apiserver stall is not hammered with rapid Pods.List + TLS-handshake retries.
-	portForwardReconnectMaxDelay = 15 * time.Second
+	// Kept small: once a session is detected dead (now within ~10s, including the black-hole
+	// case), the whole tunnel is down until the next session comes up, so a long reconnect gap
+	// directly prolongs the outage. 2s still throttles a hard apiserver stall to ~30 retries/min.
+	portForwardReconnectMaxDelay = 2 * time.Second
 	// portForwardHealthySession is the minimum session duration considered "healthy": a
 	// session that lasted at least this long before dropping resets the reconnect backoff
 	// (normal pod recreation reconnects fast); shorter sessions grow the backoff.
 	portForwardHealthySession = 30 * time.Second
 	// portForwardStartTimeout is how long to wait for the first port-forward session to become ready.
 	portForwardStartTimeout = 60 * time.Second
+	// livenessCheckInterval is how often the data-plane liveness watchdog samples HeartbeatStats.
+	livenessCheckInterval = 5 * time.Second
+	// livenessStartupDeadline bounds how long a session may run without ever producing a fresh
+	// heartbeat echo reply (never becoming ready, or ready-but-black-holed from the start) before it
+	// is force-reconnected. Must be >> the time for a healthy reconnected session to prime a reply
+	// (slot reconnect <= SlotReconnectBackoff + RTT), so a healthy session is never torn down for a
+	// reply it has not had time to receive.
+	livenessStartupDeadline = 30 * time.Second
+	// rentIPCallTimeout bounds a single GetTunIP call so a black-holed port-forward during startup
+	// (which no longer tears itself down via the xDS health check) makes the call time out and retry
+	// instead of hanging forever. The watchdog reconnects the session underneath; a later attempt
+	// then lands on a healthy session.
+	rentIPCallTimeout = 10 * time.Second
 )
+
+// livenessSteadyThreshold is how long an already-primed session (one that produced a fresh heartbeat
+// echo reply) may then go silent before it is treated as black-holed and force-reconnected. A small
+// multiple of config.HeartbeatInterval so a couple of missed beats trip it. It is a var (not a const)
+// because config.HeartbeatInterval is a runtime var.
+var livenessSteadyThreshold = 3 * config.HeartbeatInterval
 
 // newNetworkManager creates a NetworkManager with the given configuration.
 func newNetworkManager(cfg NetworkConfig) *NetworkManager {
-	return &NetworkManager{cfg: cfg}
+	nm := &NetworkManager{cfg: cfg}
+	// Allocate here (once, before any goroutine) so the field is never nil and never re-assigned:
+	// the data-plane liveness watchdog spawned by the first port-forward session reads it before
+	// startTUN runs, and status queries read it concurrently. LastReply stays zero until the TUN
+	// heartbeat sender populates it (the watchdog's startup deadline tolerates that window).
+	nm.heartbeatStats = &core.HeartbeatStats{}
+	return nm
 }
 
 // LocalTunIPv4 returns the IPv4 TUN address.
@@ -175,6 +203,14 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 	// (StartRouteWatcher below), instead of a client-side cluster-wide list-watch.
 	plog.StepDone(nm.ctx, "Added %d pod/service CIDR routes", len(nm.cfg.CIDRs))
 
+	// Pre-route the traffic manager's ClusterIP through TUN so that dialManager
+	// (server-side inject) sees a consistent path from SYN onward. Without this,
+	// the route watcher adds the /32 asynchronously and can split a TCP connection
+	// mid-handshake: SYN via pod network, ACK via TUN → gvisor RSTs the orphan ACK.
+	if err := nm.addTrafficManagerServiceRoute(nm.ctx); err != nil {
+		plog.G(nm.ctx).Debugf("Failed to pre-route traffic manager ClusterIP: %v", err)
+	}
+
 	if err := nm.setupDNS(nm.ctx); err != nil {
 		return fmt.Errorf("setup dns: %w: %w", err, config.ErrDNSSetupFailed)
 	}
@@ -192,9 +228,11 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 // interface appears between collecting addresses and receiving the allocation.
 func (nm *NetworkManager) rentIP(ctx context.Context) error {
 	target := fmt.Sprintf("127.0.0.1:%d", nm.controlPlaneLocalPort)
+	// No WithBlock: the local port-forward listener may momentarily be down across a reconnect, so
+	// each GetTunIP waits-for-ready within its own bounded timeout and retries, rather than blocking
+	// the dial forever on a black-holed session.
 	conn, err := grpc.DialContext(ctx, target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	if err != nil {
 		return fmt.Errorf("dial xds for RentIP: %w", err)
@@ -205,14 +243,23 @@ func (nm *NetworkManager) rentIP(ctx context.Context) error {
 
 	const maxRetries = 15
 	for i := 0; i < maxRetries; i++ {
-		resp, err := client.GetTunIP(ctx, &rpc.TunIPRequest{
+		callCtx, callCancel := context.WithTimeout(ctx, rentIPCallTimeout)
+		resp, err := client.GetTunIP(callCtx, &rpc.TunIPRequest{
 			OwnerID:    nm.cfg.OwnerID,
 			Namespace:  nm.cfg.ManagerNamespace,
 			ExcludeIPs: buildExcludeIPs(nm.cfg.ReservedTunIPs),
 			Hostname:   nm.cfg.Hostname,
-		})
+		}, grpc.WaitForReady(true))
+		callCancel()
 		if err != nil {
-			return fmt.Errorf("get TUN IP from xds: %w", err)
+			// A black-holed or not-yet-ready port-forward makes the call time out or the conn
+			// unavailable; retry (the watchdog reconnects the session underneath us) until the
+			// parent ctx is cancelled or retries are exhausted.
+			if ctx.Err() != nil {
+				return fmt.Errorf("get TUN IP from xds: %w", ctx.Err())
+			}
+			plog.G(ctx).Debugf("GetTunIP attempt %d/%d failed: %v; retrying", i+1, maxRetries, err)
+			continue
 		}
 
 		ip4, cidr4, err := net.ParseCIDR(resp.IPv4)
@@ -334,9 +381,7 @@ func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net
 		nm.localTunIPv6 = newIPv6
 	}
 
-	// Reconcile only the device's own host-route: cluster CIDR routes are
-	// device-scoped (added as `dev <tun>`, no source IP) and survive the change,
-	// but the /32 (and /128) route for the TUN IP itself must follow the new IP.
+	// Reconcile the device's own host-route.
 	if oldV4 != nil {
 		_ = tun.DeleteRoutes(nm.tunName, types.Route{Dst: net.IPNet{IP: oldV4.IP, Mask: net.CIDRMask(32, 32)}})
 	}
@@ -348,6 +393,15 @@ func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net
 			_ = tun.DeleteRoutes(nm.tunName, types.Route{Dst: net.IPNet{IP: oldV6.IP, Mask: net.CIDRMask(128, 128)}})
 		}
 		_ = tun.AddRoutes(nm.tunName, types.Route{Dst: net.IPNet{IP: newIPv6.IP, Mask: net.CIDRMask(128, 128)}})
+	}
+
+	// On macOS the kernel stamps RT_IFA (source address) from the interface's primary
+	// address at route-add time. After an IP change the old RT_IFA no longer exists on
+	// the device, so outbound packets matching those routes fail with EADDRNOTAVAIL.
+	// Delete + re-add forces the kernel to re-derive RT_IFA from the new address.
+	// Linux and Windows routes are device-scoped and unaffected.
+	if runtime.GOOS == "darwin" {
+		nm.refreshCIDRRoutes(ctx)
 	}
 
 	plog.G(ctx).Infof("[NetworkManager] TUN IP changed: v4=%s v6=%s on %s", newIPv4, newIPv6, nm.tunName)
@@ -673,8 +727,8 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 	podName := pod.GetName()
 	// detect pod deletion so we can redo port-forward
 	go util.CheckPodStatus(childCtx, cancelFunc, podName, nm.cfg.Clientset.CoreV1().Pods(nm.cfg.ManagerNamespace))
-	controlPlanePort, _, _ := strings.Cut(portPair[2], ":")
-	go healthCheckGRPC(childCtx, cancelFunc, readyChan, controlPlanePort)
+	// The data-plane heartbeat watchdog is the sole liveness-based reconnect trigger.
+	go nm.watchDataPlaneLiveness(childCtx, cancelFunc, readyChan)
 	if first {
 		go func() {
 			select {
@@ -699,6 +753,74 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 	)
 	plog.G(ctx).Infof("[Perf] PortForwardPod for %s exited after %v, err=%v", podName, time.Since(pfStart), err)
 	return nil
+}
+
+// watchDataPlaneLiveness force-reconnects the current port-forward session when the data plane goes
+// silent while the session still looks alive. A k8s port-forward can "black-hole": the local TCP
+// connects and the session appears up, but no data traverses (seen against flaky cluster network
+// paths / SPDY proxies). The xDS health check catches most such cases, but it probes the
+// control-plane port; a data-only stall (only the TCP/UDP forward stream wedges) would slip past it.
+// HeartbeatStats records ICMP echo replies from the server gateway — a direct end-to-end data-plane
+// liveness signal — so a session that never produces a fresh reply (startupDeadline) or falls silent
+// after having produced one (steadyThreshold) is black-holed. cancelFunc tears the session down; the
+// portForward loop then reconnects. heartbeatStats is allocated in newNetworkManager (never nil).
+// This runs for every session, including the first (typically longest-lived) one. It is the sole
+// data-plane reconnect trigger — the xDS health check only reports control-plane status.
+func (nm *NetworkManager) watchDataPlaneLiveness(ctx context.Context, cancelFunc context.CancelFunc, readyChan <-chan struct{}) {
+	sessionStart := time.Now()
+	// A session that never even becomes ready is still black-holed: bound the wait so it reconnects.
+	select {
+	case <-readyChan:
+	case <-time.After(livenessStartupDeadline):
+		plog.G(ctx).Warnf("Port-forward not ready within %v; reconnecting", livenessStartupDeadline)
+		cancelFunc()
+		return
+	case <-ctx.Done():
+		return
+	}
+	watchLiveness(ctx, cancelFunc, sessionStart, livenessCheckInterval, livenessStartupDeadline, livenessSteadyThreshold, nm.heartbeatStats.LastReply)
+}
+
+// watchLiveness force-reconnects (cancelFunc) a black-holed session using the data-plane heartbeat
+// echo reply as the liveness signal. A session is "primed" once it produces a reply newer than
+// sessionStart — proving fresh data flowed on THIS session (lastReply is shared across sessions, so
+// an older timestamp does not count). Two independent deadlines, both measured so a healthy session
+// is never torn down prematurely:
+//   - not yet primed: reconnect if the session has run startupDeadline without any fresh reply
+//     (never came up, or black-holed from the start). startupDeadline must exceed the time a healthy
+//     reconnected session needs to prime (slot reconnect + RTT).
+//   - primed: reconnect if the last fresh reply is now older than steadyThreshold (went silent).
+//
+// Extracted so it can be driven with small timings and a fake reply source in tests.
+func watchLiveness(ctx context.Context, cancelFunc context.CancelFunc, sessionStart time.Time, interval, startupDeadline, steadyThreshold time.Duration, lastReply func() time.Time) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	primed := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			last := lastReply()
+			if !primed {
+				if last.After(sessionStart) {
+					primed = true
+					continue
+				}
+				if time.Since(sessionStart) >= startupDeadline {
+					plog.G(ctx).Warnf("Data plane never came up (no heartbeat echo reply within %v); reconnecting port-forward", startupDeadline)
+					cancelFunc()
+					return
+				}
+				continue
+			}
+			if time.Since(last) >= steadyThreshold {
+				plog.G(ctx).Warnf("Data plane went silent (no heartbeat echo reply for %v); reconnecting port-forward", steadyThreshold)
+				cancelFunc()
+				return
+			}
+		}
+	}
 }
 
 // startTUN allocates a TUN IP and creates the local TUN device with a gvisor network stack.
@@ -805,7 +927,8 @@ func (nm *NetworkManager) startTunServer(ctx context.Context, forwardNode *core.
 	}
 
 	plog.StepStart(ctx, "Creating TUN device")
-	nm.heartbeatStats = &core.HeartbeatStats{}
+	// heartbeatStats is allocated once in newNetworkManager; reuse it (do not re-assign) so the
+	// liveness watchdog and status queries observe the same instance without a data race.
 	handler := core.TunHandler(forwarder, core.NewRouteHub(), nm.heartbeatStats)
 	listener, err := tun.Listener(tunConfig)
 	if err != nil {
@@ -986,6 +1109,49 @@ func (nm *NetworkManager) AddRoute(ipStrList ...string) error {
 	return tun.AddRoutes(nm.tunName, routes...)
 }
 
+// addTrafficManagerServiceRoute adds /32 TUN routes for the traffic manager's
+// ClusterIPs. Called synchronously during Start, before the async route watcher,
+// so that dialManager's SYN travels through TUN from the start — preventing
+// a mid-handshake route split (SYN via eth0, ACK via TUN) that makes gvisor
+// RST the connection it never saw a SYN for.
+func (nm *NetworkManager) addTrafficManagerServiceRoute(ctx context.Context) error {
+	svc, err := nm.cfg.Clientset.CoreV1().Services(nm.cfg.ManagerNamespace).Get(
+		ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	var ips []string
+	if ip := svc.Spec.ClusterIP; ip != "" && ip != v1.ClusterIPNone {
+		ips = append(ips, ip)
+	}
+	for _, ip := range svc.Spec.ClusterIPs {
+		if ip != "" && ip != v1.ClusterIPNone {
+			ips = append(ips, ip)
+		}
+	}
+	return nm.AddRoute(ips...)
+}
+
+// refreshCIDRRoutes deletes and re-adds all cluster CIDR routes on the TUN device.
+// On macOS the kernel pins RT_IFA (the source address for outbound packets) from the
+// interface's primary address at route-add time; after a TUN IP change the stale
+// RT_IFA causes EADDRNOTAVAIL. Re-adding forces the kernel to stamp the new address.
+func (nm *NetworkManager) refreshCIDRRoutes(ctx context.Context) {
+	var routes []types.Route
+	for _, cidr := range nm.dedupAndFilterCIDRs(nm.cfg.CIDRs) {
+		if cidr != nil && !cidr.IP.IsLoopback() {
+			routes = append(routes, types.Route{Dst: *cidr})
+		}
+	}
+	if len(routes) == 0 {
+		return
+	}
+	_ = tun.DeleteRoutes(nm.tunName, routes...)
+	if err := tun.AddRoutes(nm.tunName, routes...); err != nil {
+		plog.G(ctx).Warnf("[NetworkManager] refresh CIDR routes after IP change failed: %v", err)
+	}
+}
+
 // AddRouteCIDR adds CIDR prefixes (e.g. server-pushed aggregated pod prefixes like
 // "10.244.3.0/24") to the route table via the TUN device, skipping any that are
 // invalid or already routed through the TUN. Unlike AddRoute (which builds /32 /128
@@ -1087,6 +1253,11 @@ func (nm *NetworkManager) doWatchNamespaceRoutes(ctx context.Context, target str
 					plog.G(ctx).Debugf("[RouteWatcher] add pod CIDR routes failed: %v", err)
 				}
 			},
+			func(ips []string) {
+				if err := nm.AddRoute(ips...); err != nil {
+					plog.G(ctx).Debugf("[RouteWatcher] add service IP routes failed: %v", err)
+				}
+			},
 			func(svcs []v1.Service) {
 				if nm.dnsConfig != nil {
 					nm.dnsConfig.UpdateServices(ctx, svcs)
@@ -1098,12 +1269,14 @@ func (nm *NetworkManager) doWatchNamespaceRoutes(ctx context.Context, target str
 }
 
 // applyRouteFrame applies one WatchNamespaceRoutes frame to the running state: it resets
-// the service set on a snapshot, adds pushed pod CIDR routes (via addCIDR), upserts/removes
-// service records, and pushes the updated service set to DNS (via setDNS) when it changed.
-// Routes are add-only: RemovedPodCIDRs are NOT unrouted (a stale prefix pointed at the TUN
-// is harmless), they only affect state. Pure of gRPC/NetworkManager for unit-testing.
+// the service set on a snapshot, adds pushed pod CIDR routes (via addCIDR), routes the
+// upserted services' ClusterIPs (via addServiceIPs), upserts/removes service records, and
+// pushes the updated service set to DNS (via setDNS) when it changed.
+// Routes are add-only: RemovedPodCIDRs / RemovedServiceKeys are NOT unrouted (a stale route
+// pointed at the TUN is harmless), they only affect state. Pure of gRPC/NetworkManager for
+// unit-testing.
 func applyRouteFrame(resp *rpc.NamespaceRoutesResponse, services map[string]*rpc.ServiceRecord,
-	addCIDR func([]string), setDNS func([]v1.Service)) {
+	addCIDR func([]string), addServiceIPs func([]string), setDNS func([]v1.Service)) {
 	if resp.Snapshot {
 		for k := range services {
 			delete(services, k)
@@ -1112,12 +1285,21 @@ func applyRouteFrame(resp *rpc.NamespaceRoutesResponse, services map[string]*rpc
 	if len(resp.AddedPodCIDRs) > 0 {
 		addCIDR(resp.AddedPodCIDRs)
 	}
-	// Service ClusterIPs are already covered by the service CIDR route, so no per-service
-	// route is added — the records drive DNS only.
+	// Route each upserted service's ClusterIPs. The whole service CIDR is normally routed at
+	// connect, but that detection is best-effort and may miss/exclude ranges (managed clusters
+	// hide component flags, the error-trick message may not match, or the range is dropped by
+	// the API-server-IP filter). Without a per-service route the name still resolves (hosts
+	// entry) but the connection has no path, so add the ClusterIPs explicitly — addServiceIPs
+	// (nm.AddRoute) skips API server IPs and already-routed IPs and is idempotent.
+	var svcIPs []string
 	changed := resp.Snapshot
 	for _, rec := range resp.UpsertedServices {
 		services[rec.Namespace+"/"+rec.Name] = rec
+		svcIPs = append(svcIPs, rec.ClusterIPs...)
 		changed = true
+	}
+	if len(svcIPs) > 0 {
+		addServiceIPs(svcIPs)
 	}
 	for _, key := range resp.RemovedServiceKeys {
 		if _, ok := services[key]; ok {

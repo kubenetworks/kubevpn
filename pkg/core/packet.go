@@ -3,9 +3,13 @@ package core
 import (
 	"context"
 	"net"
+	"strings"
 	"sync/atomic"
 
-	"github.com/google/gopacket/layers"
+	"gvisor.dev/gvisor/pkg/buffer"
+	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/header"
+	"gvisor.dev/gvisor/pkg/tcpip/link/sniffer"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -27,14 +31,17 @@ const (
 )
 
 // Type prefix values carried in data[2] (1 byte, typePrefixLen). It is a small extensible
-// discriminator: values 2..255 are reserved for future packet types (control frames,
-// heartbeat tags, etc.).
+// discriminator: values 3..255 are reserved for future packet types.
 const (
 	// packetTypeToTUN marks a gvisor-processed packet (e.g. a response from the real
 	// network) to be written straight to the TUN device.
 	packetTypeToTUN byte = 0
 	// packetTypeToGvisor marks a raw IP packet to be injected into the local gvisor stack.
 	packetTypeToGvisor byte = 1
+	// packetTypeControl marks a control-plane frame (heartbeat ICMP). A conn whose first
+	// datagram carries this type is a control conn: the server does NOT register it in
+	// RouteHub and handles it in a dedicated control loop.
+	packetTypeControl byte = 2
 )
 
 // Packet represents a network packet with source and destination addresses.
@@ -120,19 +127,28 @@ func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte, headroom int) (buf [
 	return buf, n + typePrefixLen
 }
 
-// logIPPacket logs one bare IP packet (no framing prefix) at Debug with a direction label
-// (e.g. "[Client] OUTBOUND", "[Client-2] INBOUND", "[TUN]"). It is gated on the ctx logger's
-// level (not the global config.Debug flag): the daemon log file is always Debug, so packets are
-// always recorded there and show up in `kubevpn logs`, while req.Level governs only what the
-// StreamHook forwards to the CLI. The level check also skips the parse when debug is off in the
-// CLI/server process. It is the single place these data-plane files render a packet for logging,
-// confining the gopacket/layers dependency here.
+// logIPPacket logs one bare IP packet (no framing prefix) at Debug via gvisor's sniffer, which
+// renders full transport-layer detail (ports, TCP flags/seq/ack/win, ICMP types, etc.). It is
+// gated on the ctx logger's level so the parse+format cost is skipped when debug is off.
 func logIPPacket(ctx context.Context, label string, data []byte) {
 	if !plog.IsDebugEnabled(ctx) {
 		return
 	}
-	if src, dst, proto, err := netutil.ParseIPFast(data); err == nil {
-		plog.G(ctx).Debugf("%s SRC: %s, DST: %s, Protocol: %s, Length: %d",
-			label, src, dst, layers.IPProtocol(proto).String(), len(data))
+	var protocol tcpip.NetworkProtocolNumber
+	if netutil.IsIPv4(data) {
+		protocol = header.IPv4ProtocolNumber
+	} else if netutil.IsIPv6(data) {
+		protocol = header.IPv6ProtocolNumber
+	} else {
+		return
 	}
+	var dir sniffer.Direction = sniffer.DirectionSend
+	if strings.Contains(label, "INBOUND") {
+		dir = sniffer.DirectionRecv
+	}
+	pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+		Payload: buffer.MakeWithData(data),
+	})
+	sniffer.LogPacket(label+" ", dir, protocol, pkt)
+	pkt.DecRef()
 }

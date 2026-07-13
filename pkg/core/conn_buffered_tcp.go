@@ -43,6 +43,7 @@ func (c *bufferedTCP) writePacket(pkt *Packet) bool {
 	}
 }
 
+
 // Write satisfies net.Conn. b must be a fully framed datagram ([2-byte length][payload]).
 // Because the net.Conn contract lets the caller reuse b after Write returns, b is copied
 // into a pooled buffer. Hot routing paths use writePacket instead to avoid this copy.

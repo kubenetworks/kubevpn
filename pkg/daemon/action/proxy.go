@@ -3,7 +3,6 @@ package action
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -36,11 +35,10 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		return resp.Send(&rpc.ProxyResponse{Message: msg})
 	})
 	ctx := plog.WithLogger(resp.Context(), logger)
-	file, err := resolveKubeconfig(ctx, req.SshJump, req.KubeconfigBytes, false)
+	kubeconfigBytes, err := resolveKubeconfigBytes(ctx, req.SshJump, req.KubeconfigBytes, false)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(file)
 	connectReq := convert(req)
 	reqBytes, _ := proto.Marshal(connectReq)
 	connect := &handler.ConnectOptions{
@@ -50,7 +48,7 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		ImagePullSecretName:  req.ImagePullSecretName,
 		RequestRaw:           reqBytes,
 	}
-	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByBytes(kubeconfigBytes, req.Namespace))
 	if err != nil {
 		return err
 	}

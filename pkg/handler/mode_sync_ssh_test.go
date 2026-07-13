@@ -187,9 +187,6 @@ func (u *sshUt) checkSyncWithFullProxyStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Guard the unmarshaled status (the right-hand side indexed below): when the
-	// sync-proxy fails to come up, `kubevpn status` returns an empty list, and
-	// indexing statuses.List[0] would panic instead of failing with the output.
 	if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
 		t.Fatal("statuses List[0].SyncList[0].RuleList[0] not found", string(output))
 	}
@@ -259,9 +256,6 @@ func (u *sshUt) checkSyncWithServiceMeshStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Guard the unmarshaled status (the right-hand side indexed below): when the
-	// sync-proxy fails to come up, `kubevpn status` returns an empty list, and
-	// indexing statuses.List[0] would panic instead of failing with the output.
 	if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
 		t.Fatal("statuses List[0].SyncList[0].RuleList[0] not found", string(output))
 	}

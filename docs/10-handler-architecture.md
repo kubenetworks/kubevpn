@@ -8,7 +8,7 @@
 ConnectOptions (session orchestrator)
 ├── NetworkManager      — full networking lifecycle (port-forward, TUN, routes, DNS) + IP hot-reload
 ├── ProxyManager        — sidecar injection/removal
-├── ConfigMapStore      — ConfigMap read/write + health checks
+├── ConfigMapStore      — traffic manager ConfigMap access (cache-only reads, live writes)
 └── K8sClient           — Kubernetes access (embedded)
 ```
 
@@ -198,7 +198,7 @@ type ProxyManager struct {
 | `LeaveAll(ctx, ownerID)` | Remove all sidecars for the given ownerID |
 | `Leave(ctx, resources, ownerID)` | Remove sidecars from specified workloads for the given ownerID |
 
-## ConfigMapStore — ConfigMap + Health Checks
+## ConfigMapStore — traffic manager ConfigMap access
 
 ```go
 type ConfigMapStore struct {
@@ -208,6 +208,8 @@ type ConfigMapStore struct {
 ```
 
 **Lazy initialization:** Created on first access via `getConfigMapStore()`, ensuring `ManagerNamespace` has already been corrected by `detectAndSetManagerNamespace`.
+
+**Cache-only reads (no live-API fallback):** `Get`/`GetConfigMap` read only the shared informer cache; a miss returns empty. `EnsureSynced` warms the cache once at connection establishment (bounded by `config.ConfigMapSyncTimeout`) so steady-state reads are served from memory. Writes (`Set`) still go straight to the API. See [11-configmap-informer.md](11-configmap-informer.md) for why the fallback was removed (it blocked `status` on the TCP timeout when the cluster was unreachable).
 
 ## Namespace Conventions
 
@@ -264,7 +266,7 @@ pkg/handler/
 ├── control_session.go    type ControlSession = ConnectOptions (alias)
 ├── data_session.go       DataSession — data-plane methods, DoConnect, cleanupDataPlane
 ├── connection.go         Connection interface + compile-time assertions for both types
-├── connection_impl.go    (placeholder; methods now in connect.go and data_session.go)
+├── rollback.go           rollbackList — mutex-guarded rollback registry (embedded by SessionBase + SyncOptions)
 ├── cleaner.go            ConnectOptions.Cleanup + cleanupControlPlane + executeRollbackFuncs
 ├── connect_tun.go        Run() server runner, healthCheck helpers
 ├── connect_dns.go        detectNameserver helpers
@@ -272,7 +274,7 @@ pkg/handler/
 ├── connect_upgrade.go    upgradeDeploy
 ├── network.go            NetworkManager (Start/Stop/ChangeTunIP/IPWatcher)
 ├── proxy_manager.go      ProxyManager (Add/Remove/Leave)
-├── configmap_store.go    ConfigMapStore (Get/Set/Health)
+├── configmap_store.go    ConfigMapStore (EnsureSynced/Get/GetConfigMap/Set)
 ├── proxy.go              Proxy/ProxyList data types
 ├── proxy_mapper.go       Mapper (port-forward config watcher)
 ├── k8s_client.go         K8sClient embedded struct

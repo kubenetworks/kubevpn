@@ -27,7 +27,7 @@ const (
 func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.StatusResponse, error) {
 	var ips map[string]tunIP
 	if !svr.IsSudo {
-		ips = svr.getSudoTunIPs(ctx)
+		ips = svr.sudoHealthSnapshot(ctx)
 	}
 
 	if len(req.ConnectionIDs) != 0 {
@@ -104,12 +104,15 @@ func resolveTunIP(connect handler.Connection, ips map[string]tunIP) (v4, v6 stri
 // considered unhealthy: 1.5 × the heartbeat interval tolerates one missed beat's jitter.
 var heartbeatStaleThreshold = config.KeepAliveTime * 3 / 2
 
-// deriveConnectionStatus maps TUN presence and the local heartbeat into the reported status.
-// It is computed in the sudo daemon, which owns the TUN and observes heartbeat replies:
+// deriveConnectionStatus maps TUN presence and the local data-plane heartbeat into the reported
+// status. It is computed in the sudo daemon, which owns the TUN and observes the heartbeat replies:
 //
-//	no TUN device                          -> disconnected
-//	TUN up but heartbeat stale / never     -> unhealthy
-//	TUN up and a recent heartbeat reply    -> connected
+//	no TUN device                        -> disconnected
+//	TUN up but heartbeat stale / never   -> unhealthy
+//	TUN up, heartbeat fresh              -> connected
+//
+// The heartbeat echo reply is the end-to-end data-plane liveness signal (reachability to the server
+// gateway); it also drives the port-forward black-hole watchdog, so a dead tunnel goes stale here.
 func deriveConnectionStatus(tunUp bool, lastHeartbeat time.Time) string {
 	if !tunUp {
 		return StatusFailed

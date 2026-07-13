@@ -2,11 +2,8 @@ package util
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 func TestJoin(t *testing.T) {
@@ -96,34 +93,25 @@ func TestContainsPathSeparator(t *testing.T) {
 	}
 }
 
-func TestGenKubeconfigTempPath(t *testing.T) {
-	t.Run("invalid_kubeconfig_falls_back_to_timestamp", func(t *testing.T) {
-		path := GenKubeconfigTempPath([]byte("not-valid-kubeconfig"))
-		if !strings.HasPrefix(path, config.GetTempPath()) {
-			t.Fatalf("expected prefix %q, got %q", config.GetTempPath(), path)
-		}
-		base := filepath.Base(path)
-		// With invalid kubeconfig, GetCluster returns empty strings (no path separators),
-		// so the path format is "<cluster>_<ns>_<timestamp>" where cluster and ns are empty.
-		if !strings.Contains(base, "_") {
-			t.Fatalf("expected underscore-separated base, got %q", base)
+func TestGenKubeconfigTempPattern(t *testing.T) {
+	t.Run("ends_with_star_for_createtemp", func(t *testing.T) {
+		// os.CreateTemp replaces the trailing "*" with a unique suffix.
+		if got := GenKubeconfigTempPattern(nil); !strings.HasSuffix(got, "*") {
+			t.Fatalf("pattern must end with *, got %q", got)
 		}
 	})
 
-	t.Run("returns_under_temp_path", func(t *testing.T) {
-		path := GenKubeconfigTempPath(nil)
-		if !strings.HasPrefix(path, config.GetTempPath()) {
-			t.Fatalf("expected prefix %q, got %q", config.GetTempPath(), path)
+	t.Run("descriptive_cluster_ns_prefix", func(t *testing.T) {
+		got := GenKubeconfigTempPattern(makeKubeconfig("https://10.0.0.1:6443"))
+		// makeKubeconfig uses cluster "test" with no namespace → "test__*".
+		if !strings.HasPrefix(got, "test_") || !strings.HasSuffix(got, "*") {
+			t.Fatalf("expected 'test_..._*' pattern, got %q", got)
 		}
 	})
 
-	t.Run("different_calls_produce_same_prefix", func(t *testing.T) {
-		p1 := GenKubeconfigTempPath(nil)
-		p2 := GenKubeconfigTempPath(nil)
-		dir1 := filepath.Dir(p1)
-		dir2 := filepath.Dir(p2)
-		if dir1 != dir2 {
-			t.Fatalf("directories differ: %q vs %q", dir1, dir2)
+	t.Run("path_separator_falls_back_to_safe_pattern", func(t *testing.T) {
+		if got := GenKubeconfigTempPattern([]byte("not-valid-kubeconfig")); strings.ContainsRune(got, os.PathSeparator) {
+			t.Fatalf("pattern must not contain a path separator, got %q", got)
 		}
 	})
 }

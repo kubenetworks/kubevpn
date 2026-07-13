@@ -327,8 +327,8 @@ func (u *ut) checkSyncWithFullProxyStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(expect.List) == 0 || len(expect.List[0].SyncList) == 0 || len(expect.List[0].SyncList[0].RuleList) == 0 {
-		t.Fatal("expect List[0].SyncList[0].RuleList[0] not found", string(output))
+	if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
+		t.Fatal("statuses List[0].SyncList[0].RuleList[0] not found", string(output))
 	}
 
 	expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload
@@ -396,8 +396,8 @@ func (u *ut) checkSyncWithServiceMeshStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(expect.List) == 0 || len(expect.List[0].SyncList) == 0 || len(expect.List[0].SyncList[0].RuleList) == 0 {
-		t.Fatal("expect List[0].SyncList[0].RuleList[0] not found", string(output))
+	if len(statuses.List) == 0 || len(statuses.List[0].SyncList) == 0 || len(statuses.List[0].SyncList[0].RuleList) == 0 {
+		t.Fatal("statuses List[0].SyncList[0].RuleList[0] not found", string(output))
 	}
 
 	expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload

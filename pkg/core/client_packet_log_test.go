@@ -3,12 +3,14 @@ package core
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	glog "gvisor.dev/gvisor/pkg/log"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -28,10 +30,33 @@ func infoCtx(buf *bytes.Buffer) context.Context {
 	return plog.WithLogger(context.Background(), logger)
 }
 
+// bufferEmitter captures gvisor glog output into a bytes.Buffer for test assertions.
+type bufferEmitter struct {
+	buf *bytes.Buffer
+}
+
+func (e *bufferEmitter) Emit(_ int, _ glog.Level, _ time.Time, format string, args ...any) {
+	fmt.Fprintf(e.buf, format, args...)
+	e.buf.WriteByte('\n')
+}
+
+// setGvisorLog redirects gvisor glog to buf and returns a cleanup function that restores the
+// previous target. Not safe for parallel tests (gvisor glog is global).
+func setGvisorLog(buf *bytes.Buffer) func() {
+	old := glog.Log()
+	glog.SetTarget(&bufferEmitter{buf: buf})
+	return func() {
+		glog.SetTarget(old)
+	}
+}
+
 // TestClientLog_Outbound verifies the client logs every outbound packet (read
 // from the local TUN) at Debug with an OUTBOUND tag when the ctx logger is at Debug.
 func TestClientLog_Outbound(t *testing.T) {
 	var buf bytes.Buffer
+	cleanup := setGvisorLog(&buf)
+	defer cleanup()
+
 	ctx, cancel := context.WithCancel(debugCtx(&buf))
 	defer cancel()
 
@@ -66,6 +91,9 @@ func TestClientLog_Outbound(t *testing.T) {
 // the server connection) at Debug with an INBOUND tag when the ctx logger is at Debug.
 func TestClientLog_Inbound(t *testing.T) {
 	var buf bytes.Buffer
+	cleanup := setGvisorLog(&buf)
+	defer cleanup()
+
 	ctx, cancel := context.WithCancel(debugCtx(&buf))
 	defer cancel()
 
@@ -107,6 +135,9 @@ func TestClientLog_Inbound(t *testing.T) {
 // global config.Debug flag — so the daemon (file logger always Debug) still records packets.
 func TestClientLog_InfoLoggerSuppressed(t *testing.T) {
 	var buf bytes.Buffer
+	cleanup := setGvisorLog(&buf)
+	defer cleanup()
+
 	ctx, cancel := context.WithCancel(infoCtx(&buf))
 	defer cancel()
 

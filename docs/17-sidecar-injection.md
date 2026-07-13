@@ -59,7 +59,7 @@ Inject:
 ```
 
 Mesh mode adds two containers:
-- **VPN container**: enables IP forwarding and DNATs all non-ICMP, non-cluster traffic to envoy's inbound port `:15006` (a *fixed* port — no client-IP in the rule). Runs `kubevpn server -l "tun:/tcp://...:10801?route=${CIDR4}"` with `net=` empty, so it self-allocates its TUN IP from the control-plane at startup. Requires `NET_ADMIN` + `NET_RAW` capabilities (runs as root but not privileged).
+- **VPN container**: enables IP forwarding and DNATs all non-ICMP, non-cluster traffic to envoy's inbound port `:15006` (a *fixed* port — no client-IP in the rule). Runs `kubevpn server -l "tun:/tcp://...:10801?route=${CIDR4}"` with `net=` empty, so it self-allocates its TUN IP from the control-plane at startup. Requires a **privileged** container (runs as root) with `NET_ADMIN` + `NET_RAW` capabilities — it writes `/proc/sys/net/ipv4/ip_forward` and related sysctls at startup, which `NET_ADMIN` alone does not grant write access to.
 - **Envoy container**: runs envoy with xDS config pointing to the control plane; routes by header.
 
 **Routing behavior depends on whether headers are set:**
@@ -178,7 +178,7 @@ All sidecar containers receive:
 
 | Function | Containers | Security |
 |----------|-----------|----------|
-| `AddVPNAndEnvoyContainer` | VPN + Envoy (all non-Service proxy) | VPN: NET_ADMIN + NET_RAW (not privileged); Envoy: unprivileged |
+| `AddVPNAndEnvoyContainer` | VPN + Envoy (all non-Service proxy) | VPN: privileged (root) + NET_ADMIN + NET_RAW; Envoy: unprivileged |
 | `AddEnvoyAndSSHContainer` | SSH + Envoy (Service/Fargate) | Both unprivileged |
 
 > The former `AddVPNContainer` (VPN-only, no envoy) was **removed** with the unified proxy mode — every non-Service proxy now goes through `AddVPNAndEnvoyContainer`. Note this changed full-proxy's port-coverage semantic (declared ports only); see the Full-proxy port coverage section above.

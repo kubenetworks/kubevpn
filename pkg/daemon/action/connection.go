@@ -45,7 +45,7 @@ func (svr *Server) ConnectionList(ctx context.Context, req *rpc.ConnectionListRe
 	svr.connMu.RLock()
 	var ips map[string]tunIP
 	if !svr.IsSudo {
-		ips = svr.getSudoTunIPs(ctx)
+		ips = svr.sudoHealthSnapshot(ctx)
 	}
 	var list []*rpc.Status
 	for _, options := range svr.connections {

@@ -131,7 +131,7 @@ A background goroutine polls running pods every 2 seconds. When the pod name cha
 3. Execute registered rollback functions
 
 **Ordering matters.** The rollback functions tear down the session — in the daemon
-the only registered one calls `session.RunCleanups()` → `session.Cancel()`, which
+the only registered one calls `session.Teardown()` → `session.Cancel()`, which
 cancels the context the SSH port-forward is bound to and closes the local tunnel
 endpoint that `d.factory` talks through (see [12-session-lifecycle.md](12-session-lifecycle.md)
 and [15-ssh-architecture.md](15-ssh-architecture.md)). The `RolloutStatus` wait in

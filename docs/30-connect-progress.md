@@ -20,6 +20,7 @@ Connecting to the cluster ...
  ✓ Using manager namespace "kubevpn"
  ✓ Using existing traffic manager in namespace "kubevpn"
  ✓ Detected cluster CIDRs: 10.0.0.0/8, 172.16.0.0/12
+ ✓ Detected pod CIDR: 10.244.0.0/16
  ✓ Detected service CIDR: 10.96.0.0/12
  ✓ Forwarded ports (TCP/UDP/xDS)
  ✓ Created TUN device "utun5"
@@ -106,8 +107,13 @@ gets the same `✓` checklist as `connect`/`proxy` for both the connect phase an
 ## 4. CLI renderer (`pkg/util/progress`)
 
 `progress.Renderer` consumes the stream and drives the animation. It is a thin adapter over
-**`github.com/theckman/yacspin`**, which owns the animation goroutine, TTY detection, Windows VT
-handling (via `fatih/color` + `go-colorable`), and the non-TTY fallback.
+**`github.com/theckman/yacspin`**, which owns the animation goroutine and Windows VT
+handling (via `fatih/color` + `go-colorable`). The **terminal-capability decision is the
+renderer's**, not yacspin's: `progress.New` builds the animated spinner only when
+`smartTTY(out)` is true (an interactive `*os.File` with `TERM != "dumb"`); otherwise it
+leaves `spinner == nil` and uses the deterministic plain fallback (§4 "Non-TTY fallback").
+The same `smartTTY` predicate gates all coloring (heading, `✓`, slogan), so they are colored
+together or plain together.
 
 All commands share a single generic CLI entry point, `printProgressStream[T]`
 (`cmd/kubevpn/cmds/progress.go`), so there is exactly one render loop to reason about:
@@ -165,16 +171,40 @@ of its dependencies were already vendored, so it adds no new transitive dependen
 
 ### Non-TTY fallback
 
-When stdout is not a terminal (pipes, CI, log capture, the `kubevpn run` container-mode success scan in
-`pkg/util/docker.go`), yacspin auto-detects it and degrades to non-animated, line-by-line output.
+When stdout is not a smart TTY (pipes, CI, log capture, a dumb terminal, the `kubevpn run`
+container-mode success scan in `pkg/util/docker.go`), `progress.New` does **not** build the
+yacspin spinner (`smartTTY(out)` is false → `spinner == nil`). The Renderer then uses its
+deterministic plain path — a **heartbeat**, not per-frame animation:
 
-The bold heading and the bold-green success line use the same fallback rule. Both write raw ANSI
-(yacspin's check marks already do — its writer is `os.Stdout`, not a colorable wrapper, so this renders
-identically wherever the `✓` shows color) gated on a `golang.org/x/term` TTY check; on a non-terminal
-writer they print plain. The final success line (`config.Slogan`) is printed by the CLI command after
-the stream ends via `progress.Success` (centralized in `printSlogan`, `cmd/kubevpn/cmds/progress.go`),
-so the plain text still matches and the sentinel-based success detection in container mode keeps
-working.
+- **`StepBegin`** — the *first* begin of a step is suppressed, so a fast step (begin
+  immediately followed by end) settles to a single ` ✓ text` line. A *re-begin* with new text —
+  a long-running step updating its status (e.g. the pod wait, which re-emits `StepStart` only
+  when its status summary changes, see §3 / `traffmgr.go`) — prints one ` ○ text` heartbeat line.
+- **`StepEnd`** — prints exactly one ` ✓ text` line and closes the step.
+- **`Stop`** — if a step is still open (the run aborted mid-step, no `StepEnd`), prints ` ✗ text`
+  carrying the last status, so a failure is not silently dropped.
+- Headings and ordinary log lines print unstyled.
+
+So a piped run of a slow step shows a few ` ○ …` status lines then ` ✓ …`, e.g.:
+
+```
+ ○ Waiting for traffic manager pod (dns=ContainerCreating, vpn=ContainerCreating, xds=ContainerCreating)
+ ○ Waiting for traffic manager pod (dns=Running, vpn=Running, xds=Running)
+ ✓ Traffic manager ready in namespace "default"
+```
+
+> **Why not rely on yacspin's own non-TTY degrade?** yacspin still *paints animation frames*
+> off a TTY (each terminated with `\n`), so a step leaked one line **per frame** — a ~60s image
+> pull spammed dozens of ` ⣾ Waiting …` / ` ⣽ Waiting …` lines. Gating the spinner on `smartTTY`
+> and taking the `spinner == nil` heartbeat path removes that noise while keeping one status
+> line per change.
+
+The bold heading and the bold-green success line use the same `smartTTY` gate (`styleLine` /
+`progress.Success`): raw ANSI on a smart TTY, plain otherwise — so they match yacspin's `✓`
+coloring, which is likewise only emitted on a smart TTY. The final success line
+(`config.Slogan`) is printed by the CLI command after the stream ends via `progress.Success`
+(centralized in `printSlogan`, `cmd/kubevpn/cmds/progress.go`), so the plain text still
+matches and the sentinel-based success detection in container mode keeps working.
 
 ## 5. Wording style
 
@@ -204,7 +234,7 @@ Step text is normalized so the checklist reads uniformly across commands:
 | `Using traffic manager in namespace %q` (done-only, when it already exists) | ✅ | `pkg/handler/traffmgr.go` |
 | else one ✓ per created resource — `Labeling namespace`→`Labeled namespace %q`, `Creating ServiceAccount`→`Created ServiceAccount %q`, then Role / RoleBinding / Service / ConfigMap / Deployment — then `Waiting for traffic manager pod` (live one-line status) → `Traffic manager ready in namespace %q` | — | `pkg/handler/traffmgr.go` (`createOutboundPod`, `WaitPodReady`) |
 | `Upgrading traffic manager` → `Upgraded traffic manager to <version>` (only when the manager image is older than the client and an upgrade is actually performed; covers the image-pull + rollout wait) | — | `pkg/handler/connect_upgrade.go` (`UpgradeDeploy`, user daemon) |
-| `Detecting cluster CIDRs` → `Detected cluster CIDRs: …` / `Detecting service CIDR` → `Detected service CIDR: …` | — | `pkg/util/cidr.go` |
+| `Detecting cluster CIDRs` → `Detected cluster CIDRs: …` / `Detecting pod CIDR` → `Detected pod CIDR: …` / `Detecting service CIDR` → `Detected service CIDR: …` | — | `pkg/util/cidr_detect.go` |
 | `Detected cluster CIDRs: … (cached)` | ✅ | `pkg/handler/connect.go` (cached path) |
 | `Forwarding ports` → `Forwarded ports (TCP/UDP/xDS)`, `Creating TUN device` → `Created TUN device %q`, `Allocating TUN IP` → `Allocated TUN IP %s`, `Adding routes` → `Added %d pod/service routes`, `Configuring DNS` → `Configured DNS (cluster DNS %s)`, `Writing service records to the hosts file` → `Wrote %d service records to the hosts file (namespace %q)` | — | `pkg/handler/network.go` |
 
@@ -241,7 +271,10 @@ seams of the protocol:
 |---|---|---|
 | `TestStep_StreamCarriesSentinel_FileStaysClean` | `pkg/log/step_test.go` | the two-output contract: one `StepStart`+`StepDone` pair yields sentinel-encoded **stream** lines (decode back to `StepBegin`/`StepEnd` + clean text) while the **log file** has no sentinel bytes and no `_kubevpn_step` field |
 | `TestEncodeDecodeStep_RoundTrip` | `pkg/log/step_test.go` | `DecodeStep(EncodeStep(k, msg))` round-trips for every `StepKind` — the wire format stays symmetric |
-| `TestRenderer_NonTTY` | `pkg/util/progress/spinner_test.go` | a `*bytes.Buffer` (not a TTY) → yacspin degrades to line-by-line output; ordinary log lines pass through and a finished step renders `✓` + its done text |
+| `TestRenderer_NonTTY` | `pkg/util/progress/spinner_test.go` | a `*bytes.Buffer` (not a TTY) → no spinner is built; ordinary log lines pass through and a finished step renders exactly one `✓` + its done text, with **no** braille animation frames and no erase escapes |
+| `TestRenderer_NonTTY_Heartbeat` | `pkg/util/progress/spinner_test.go` | plain-path heartbeat: a slow step's status re-begins render one ` ○ text` line each (bare first begin suppressed) then ` ✓ text`; a fast step stays a single ` ✓ text`; no frame glyphs, no `✗` on success |
+| `TestRenderer_NonTTY_FailMidStep` | `pkg/util/progress/spinner_test.go` | a step still open at `Stop` (no `StepEnd`) renders ` ✗ text` with the last status and no `✓` |
+| `TestSmartTTY` | `pkg/util/progress/spinner_test.go` | the capability gate: `*bytes.Buffer` and a pipe `*os.File` → false; a real pty slave → true, and false under `TERM=dumb` (pty helper is Linux-only, skipped elsewhere) |
 | `TestRenderer_NonTTY_PlainOnly` | `pkg/util/progress/spinner_test.go` | a stream with no step markers (e.g. the header line) passes through verbatim |
 | `TestPrintGRPCStream_StripsStepSentinel` | `pkg/daemon/grpcutil/stream_test.go` | the non-spinner writer decodes the sentinel away, so log file / container-mode `run` / `logs` never emit raw `\x1f` |
 | `TestRenderGRPCStream_KeepsStepSentinelForSpinner` | `pkg/daemon/grpcutil/stream_test.go` | the spinner sibling keeps the sentinel and renders a finished step as `✓ <done text>` (so host-mode `run` gets the check-mark UX); the raw `\x1f` never leaks |

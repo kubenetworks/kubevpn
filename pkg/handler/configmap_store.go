@@ -20,7 +20,11 @@ import (
 )
 
 // ConfigMapStore provides access to the traffic manager ConfigMap for key-value
-// storage, backed by a shared informer cache with a direct-API fallback.
+// storage, backed by a shared informer cache. Reads are cache-only (no live-API
+// fallback): callers warm the cache once via EnsureSynced at connection establishment,
+// after which every read is served from memory and a cache miss returns empty instead
+// of a doomed live GET that would block on the TCP timeout when the cluster is
+// unreachable. Writes (Set) still go straight to the API.
 type ConfigMapStore struct {
 	clientset        kubernetes.Interface
 	managerNamespace string
@@ -62,32 +66,61 @@ func (s *ConfigMapStore) GetInformer() cache.SharedInformer {
 	return s.informer
 }
 
-// Get retrieves a value by key from the traffic manager ConfigMap, using the informer cache first.
-func (s *ConfigMapStore) Get(ctx context.Context, key string) (string, error) {
-	items := s.GetInformer().GetStore().List()
-	for _, item := range items {
+// EnsureSynced starts the informer (if not already running) and blocks until its cache has
+// completed the initial List, bounded by config.ConfigMapSyncTimeout. Callers invoke this
+// once at connection establishment so that all later reads are served from the warm cache.
+//
+// It returns an error when the cache cannot sync within the bound. The store has no live-API
+// read fallback, so a connection whose cache never warms would read "absent" forever; connect
+// callers therefore treat this error as fatal (fail fast). By this point the traffic manager
+// ConfigMap already exists, so a sync failure means the API is unreachable — which the rest of
+// connect would fail on anyway.
+func (s *ConfigMapStore) EnsureSynced(ctx context.Context) error {
+	informer := s.GetInformer()
+	ctx, cancel := context.WithTimeout(ctx, config.ConfigMapSyncTimeout)
+	defer cancel()
+	if !cache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
+		return fmt.Errorf("timed out waiting for traffic manager ConfigMap cache to sync")
+	}
+	return nil
+}
+
+// Get retrieves a value by key from the traffic manager ConfigMap via the informer cache.
+// The cache is warmed by EnsureSynced at connect time; a cache miss returns "" (not an
+// error), which callers treat as "not set". There is NO live-API fallback — a doomed live
+// GET to an unreachable cluster used to make every daemon read block on the TCP timeout.
+func (s *ConfigMapStore) Get(_ context.Context, key string) (string, error) {
+	for _, item := range s.GetInformer().GetStore().List() {
 		if cm, ok := item.(*corev1.ConfigMap); ok {
 			return cm.Data[key], nil
 		}
 	}
-	cm, err := s.clientset.CoreV1().ConfigMaps(s.managerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return "", err
-	}
-	return cm.Data[key], nil
+	return "", nil
 }
 
-// GetConfigMap returns the traffic manager ConfigMap, reading the informer cache first
-// (near-real-time, zero API cost) and falling back to a direct GET when the cache is not
-// yet warm.
-func (s *ConfigMapStore) GetConfigMap(ctx context.Context) (*corev1.ConfigMap, error) {
-	items := s.GetInformer().GetStore().List()
-	for _, item := range items {
+// GetConfigMap returns the traffic manager ConfigMap from the warm informer cache (see
+// EnsureSynced). A cache miss returns (nil, nil) — callers render it as "no proxy state"
+// and fall back to heartbeat-based status instead of blocking on a live-API GET.
+func (s *ConfigMapStore) GetConfigMap(_ context.Context) (*corev1.ConfigMap, error) {
+	for _, item := range s.GetInformer().GetStore().List() {
 		if cm, ok := item.(*corev1.ConfigMap); ok {
 			return cm, nil
 		}
 	}
-	return s.clientset.CoreV1().ConfigMaps(s.managerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	return nil, nil
+}
+
+// Refresh does a direct API GET and updates the informer store, so subsequent
+// cache reads see the latest ConfigMap immediately — without waiting for the
+// watch event to propagate. Called after a known out-of-process write (e.g. the
+// traffic manager's ProxyInject wrote an envoy rule) to close the window where
+// the cache still lacks the new data.
+func (s *ConfigMapStore) Refresh(ctx context.Context) error {
+	cm, err := s.clientset.CoreV1().ConfigMaps(s.managerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	return s.GetInformer().GetStore().Update(cm)
 }
 
 // Set updates a key-value pair in the traffic manager ConfigMap.

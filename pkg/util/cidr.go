@@ -83,6 +83,111 @@ func RemoveLargerOverlappingCIDRs(cidrNets []*net.IPNet) []*net.IPNet {
 	return result
 }
 
+const (
+	// cidrMergeFloorV4 is the broadest (smallest-prefix) IPv4 supernet mergeToSupernet
+	// is allowed to produce. /12 covers every common Service/Pod CIDR default (/12, /16,
+	// /20, /24) and reconstructs the standard 10.96.0.0/12 from scattered /24s, while
+	// refusing to merge far-apart IPs into an over-broad route that could hijack local networks.
+	cidrMergeFloorV4 = 12
+	// cidrMergeFloorV6 is the IPv6 counterpart: /64 inference is already broad, so only
+	// members sharing a /48 prefix are merged.
+	cidrMergeFloorV6 = 48
+)
+
+// mergeToSupernet groups CIDRs by IP family and, per family, replaces the members with the
+// single smallest supernet that covers them all — but only when that supernet's prefix length
+// is >= the family floor (cidrMergeFloorV4 / cidrMergeFloorV6). A cluster generally has one
+// Service CIDR and one Pod CIDR range, so /24 (or /64) ranges inferred from individual
+// ClusterIPs/PodIPs are coalesced into the enclosing range. When the members are too far apart
+// to plausibly belong to one range (common prefix shorter than the floor), they are returned
+// unchanged (deduplicated) so a pathological spread never yields an over-broad route. A family
+// with a single member is returned as-is.
+func mergeToSupernet(cidrs []*net.IPNet) []*net.IPNet {
+	var v4, v6 []*net.IPNet
+	for _, c := range cidrs {
+		if c == nil {
+			continue
+		}
+		if c.IP.To4() != nil {
+			v4 = append(v4, c)
+		} else {
+			v6 = append(v6, c)
+		}
+	}
+	var result []*net.IPNet
+	result = append(result, mergeFamily(v4, 32, cidrMergeFloorV4)...)
+	result = append(result, mergeFamily(v6, 128, cidrMergeFloorV6)...)
+	return result
+}
+
+// mergeFamily merges a single IP family's CIDRs (all bits-wide: 32 for IPv4, 128 for IPv6).
+// It returns one supernet when the members' longest common prefix is >= floor, otherwise the
+// deduplicated members unchanged.
+func mergeFamily(cidrs []*net.IPNet, bits, floor int) []*net.IPNet {
+	// Deduplicate members by string form; also find the narrowest member prefix so the
+	// merged supernet is never narrower than an input.
+	seen := sets.New[string]()
+	var members []*net.IPNet
+	narrowest := bits
+	for _, c := range cidrs {
+		if seen.Has(c.String()) {
+			continue
+		}
+		seen.Insert(c.String())
+		members = append(members, c)
+		if ones, _ := c.Mask.Size(); ones < narrowest {
+			narrowest = ones
+		}
+	}
+	if len(members) <= 1 {
+		return members
+	}
+
+	// Longest common prefix (in bits) across all member network addresses.
+	common := narrowest
+	base := canonicalIP(members[0].IP, bits)
+	for _, m := range members[1:] {
+		if l := commonPrefixLen(base, canonicalIP(m.IP, bits)); l < common {
+			common = l
+		}
+	}
+	if common < floor {
+		return members
+	}
+
+	mask := net.CIDRMask(common, bits)
+	supernet := &net.IPNet{IP: base.Mask(mask), Mask: mask}
+	return []*net.IPNet{supernet}
+}
+
+// canonicalIP normalizes an IP to its family-native byte length (4 for IPv4, 16 for IPv6).
+func canonicalIP(ip net.IP, bits int) net.IP {
+	if bits == 32 {
+		return ip.To4()
+	}
+	return ip.To16()
+}
+
+// commonPrefixLen returns the number of leading bits shared by two equal-length IPs.
+func commonPrefixLen(a, b net.IP) int {
+	n := 0
+	for i := 0; i < len(a) && i < len(b); i++ {
+		x := a[i] ^ b[i]
+		if x == 0 {
+			n += 8
+			continue
+		}
+		for bit := 7; bit >= 0; bit-- {
+			if x&(1<<uint(bit)) == 0 {
+				n++
+			} else {
+				return n
+			}
+		}
+	}
+	return n
+}
+
 // GetAPIServerIP resolves the API server host URL to a list of IP addresses via parsing and DNS lookup.
 func GetAPIServerIP(apiServerHost string) ([]net.IP, error) {
 	u, err := url.Parse(apiServerHost)

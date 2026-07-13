@@ -194,12 +194,20 @@ func TestGenICMPPacketIPv6(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenICMPPacketIPv6: %v", err)
 	}
-	if len(pkt) < 44 {
-		t.Fatalf("packet too short: %d bytes", len(pkt))
+	// Regression: a valid ICMPv6 echo request needs the 4-byte Identifier/SeqNumber body, so
+	// the packet must be at least IPv6(40) + ICMPv6 echo minimum(8) = 48 bytes. It was
+	// previously only 44 (the 4-byte ICMPv6 base header with no echo body), which gvisor and
+	// real hosts treat as malformed and never answer — breaking the IPv6 heartbeat/registration.
+	if len(pkt) < 48 {
+		t.Fatalf("packet too short: %d bytes (missing ICMPv6 echo id/seq body?)", len(pkt))
 	}
 	// Verify it's IPv6
 	if pkt[0]>>4 != 6 {
 		t.Fatalf("not IPv6: version=%d", pkt[0]>>4)
+	}
+	// ICMPv6 header starts at offset 40; type 128 = Echo Request.
+	if pkt[40] != 128 {
+		t.Fatalf("ICMPv6 type = %d, want EchoRequest(128)", pkt[40])
 	}
 	// Regression: the ICMPv6 checksum (IPv6 header is 40 bytes; checksum at offset 42-43)
 	// must be computed — it was previously left zero, which receivers reject.

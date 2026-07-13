@@ -42,10 +42,9 @@ T1 + 5min: LeaseReaper reclaims the IP
     ⚠️ ConfigMap ENVOY_CONFIG's Rule.LocalTunIPv4 is still "198.18.0.5"
 
 T2: laptop wakes
-    port-forward reconnects → starts a new healthCheckGRPC (control-plane port PortControlPlane 9002)
-    healthCheckGRPC does a gRPC health Check every 30s (verifies SERVING)
-    → verifies the port-forward + control plane are alive
-    → does NOT call GetTunIP, does NOT trigger IP reallocation
+    port-forward reconnects (the heartbeat black-hole watchdog drives liveness)
+    → reconnect re-establishes the tunnel only
+    → does NOT call GetTunIP, does NOT trigger IP reallocation (rentIP runs once at startup)
 
     IPWatcher.doWatchTunIP reconnects the WatchTunIP stream
     → WatchTunIP only pushes on NotifyIPChange
@@ -72,10 +71,12 @@ T2 + 30s: traffic broken
 
 #### Problem 1 (fixed): the old healthCheckTCPConn's GetTunIP triggered silent reallocation
 
-**Fixed**: the health check no longer calls gRPC `GetTunIP`; it uses `healthCheckGRPC` to do a gRPC health
-`Check` against the control-plane port. It does not call `GetTunIP`, fully eliminating health-check-induced
-silent IP reallocation. (An earlier DNS-via-gudp `healthCheckPortForward` was used; it has since been
-deleted as dead code.)
+**Fixed**: a periodic health check no longer calls gRPC `GetTunIP`, so it cannot trigger silent IP
+reallocation. (History: an earlier DNS-via-gudp `healthCheckPortForward` called `GetTunIP`; it was
+replaced by a status-only gRPC `Check` (`healthCheckGRPC`), which was in turn **removed** once the
+heartbeat black-hole watchdog took over port-forward liveness — see
+[47-portforward-blackhole-liveness.md](47-portforward-blackhole-liveness.md).) `rentIP` (the only
+`GetTunIP` caller) runs once at startup, never on a port-forward reconnect.
 
 #### Problem 2: GetTunIP does not push on WatchTunIP when allocating a new IP
 
@@ -704,9 +705,8 @@ client TUN IP hot-update:   WatchTunIP push (fix + fallback)
 laptop sleeps 5 minutes → LeaseReaper reclaims IP 198.18.0.5
 
 laptop wakes:
-  Root Daemon → port-forward reconnects
-    → healthCheckGRPC does a gRPC health Check against the control-plane port
-    → verifies the port-forward + control plane are alive (does NOT call GetTunIP, no IP reallocation)
+  Root Daemon → port-forward reconnects (heartbeat black-hole watchdog drives liveness)
+    → re-establishes the tunnel only (does NOT call GetTunIP, no IP reallocation)
 
   TunConfigServer.GetTunIP (server-side, in the same call):
     1. allocate 198.18.0.7, write allocs["abc123"]

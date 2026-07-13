@@ -3,29 +3,38 @@ package action
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/natefinch/lumberjack.v2"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // Server implements the gRPC Daemon service, managing VPN connections, syncing, and lifecycle operations.
 type Server struct {
 	rpc.UnimplementedDaemonServer
 
-	Cancel    func()
+	Cancel func()
+	// GetClient returns a cached gRPC client for the peer daemon (isSudo selects which).
 	GetClient func(isSudo bool) (rpc.DaemonClient, error)
-	IsSudo    bool
-	LogFile   *lumberjack.Logger
-	Lock      sync.Mutex
+	// InvalidateClient drops the cached peer-daemon client so the next GetClient redials.
+	// Called when a cross-daemon RPC fails with a connection-level error. May be nil in tests.
+	InvalidateClient func(isSudo bool)
+	IsSudo           bool
+	LogFile          *lumberjack.Logger
+	Lock             sync.Mutex
 
 	// connMu protects connections and currentConnectionID from concurrent access.
 	// Use RLock for read-only access, Lock for mutations.
@@ -40,6 +49,12 @@ type Server struct {
 
 	sshServerIP   string
 	sshCancelFunc context.CancelFunc
+
+	// healthMu guards sudoHealth / sudoHealthy — the user daemon's cached view of the sudo
+	// daemon's data-plane liveness, refreshed by MonitorSudoLiveness. User daemon only.
+	healthMu    sync.RWMutex
+	sudoHealth  map[string]tunIP // last probe snapshot (connectionID → state); nil until first probe
+	sudoHealthy bool             // last observed sudo reachability, for transition-only logging
 
 	ID string
 }
@@ -107,6 +122,73 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 	return nil
 }
 
+// ReconcileSudoConnections reaps orphaned sudo (data-plane) DataSessions left after daemon
+// drift — e.g. the user daemon was restarted (or lost its persisted state) while the sudo
+// daemon kept running with connections the user daemon no longer tracks. Such an orphan holds
+// a phantom TUN, and (its cluster being unreachable) previously wedged commands via the
+// status read path. Call once at startup, AFTER LoadFromConfig has re-established the
+// authoritative set.
+//
+// User daemon only. To avoid racing an in-flight connect — forwardConnectToSudo registers the
+// sudo DataSession BEFORE appending to the user slice — it reaps only sudo connections that
+// are BOTH absent from the user daemon's set AND not reporting "connected": an establishing or
+// healthy connection reports connected and is spared, while an orphan (unreachable cluster →
+// dead heartbeat) reports unhealthy/disconnected. Best-effort.
+func (svr *Server) ReconcileSudoConnections(ctx context.Context) {
+	if svr.IsSudo || svr.GetClient == nil {
+		return
+	}
+	cli, err := svr.GetClient(true)
+	if err != nil {
+		return
+	}
+	statusCtx, cancel := context.WithTimeout(ctx, config.SudoStatusTimeout)
+	resp, err := cli.Status(statusCtx, &rpc.StatusRequest{})
+	cancel()
+	if err != nil {
+		return
+	}
+
+	svr.connMu.RLock()
+	userIDs := make(map[string]struct{}, len(svr.connections))
+	for _, c := range svr.connections {
+		userIDs[c.GetConnectionID()] = struct{}{}
+	}
+	svr.connMu.RUnlock()
+
+	for _, s := range resp.GetList() {
+		id := s.GetConnectionID()
+		if id == "" {
+			continue
+		}
+		if _, ok := userIDs[id]; ok {
+			continue // tracked by the user daemon — not an orphan
+		}
+		if s.GetStatus() == StatusOk {
+			continue // establishing or healthy — spare it (avoid racing an in-flight connect)
+		}
+		plog.G(ctx).Infof("Reaping orphaned data-plane connection %s (status=%s) with no user-daemon owner", id, s.GetStatus())
+		if err := svr.reapSudoConnection(ctx, cli, id); err != nil {
+			plog.G(ctx).Warnf("Failed to reap orphaned connection %s: %v", id, err)
+		}
+	}
+}
+
+// reapSudoConnection asks the sudo daemon to disconnect a single orphaned connection by ID.
+// The sudo daemon's Disconnect handler (IsSudo) removes the connection and tears down its
+// data plane directly — no leave/forward orchestration, which is correct for an orphan whose
+// cluster is unreachable.
+func (svr *Server) reapSudoConnection(ctx context.Context, cli rpc.DaemonClient, id string) error {
+	stream, err := cli.Disconnect(ctx)
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(&rpc.DisconnectRequest{ConnectionID: ptr.To(id)}); err != nil {
+		return err
+	}
+	return grpcutil.PrintGRPCStream[rpc.DisconnectResponse](ctx, stream, svr.LogFile)
+}
+
 // OffloadToConfig persists the current connection state to disk for later restoration.
 func (svr *Server) OffloadToConfig() error {
 	svr.connMu.RLock()
@@ -145,19 +227,31 @@ type tunIP struct {
 	status string
 }
 
-// getSudoTunIPs queries the sudo daemon and returns a map from ConnectionID to the data-plane
-// state (TUN IPs + computed status) it owns.
-func (svr *Server) getSudoTunIPs(ctx context.Context) map[string]tunIP {
+// probeSudo queries the sudo daemon's Status (bounded by config.SudoStatusTimeout) and returns
+// the per-connection data-plane state (TUN IPs + computed status) it owns, together with any
+// error. The error is surfaced — not swallowed — so callers can distinguish a genuinely-down
+// daemon (config.ErrDaemonNotRunning: socket missing / health gate failed) from a transient
+// RPC failure (e.g. the sudo daemon restarting). On a connection-level error (codes.Unavailable)
+// the stale cached client is dropped so the next probe redials and re-runs the health gate.
+func (svr *Server) probeSudo(ctx context.Context) (map[string]tunIP, error) {
 	if svr.GetClient == nil {
-		return nil
+		return nil, nil
 	}
 	cli, err := svr.GetClient(true)
 	if err != nil {
-		return nil
+		return nil, err
 	}
+	// Bound the cross-daemon hop so a wedged sudo daemon can never stall an otherwise-local
+	// user-daemon command (defense in depth beyond the cache-only read path). On timeout the
+	// user daemon reports without the sudo-owned TUN IPs rather than blocking.
+	ctx, cancel := context.WithTimeout(ctx, config.SudoStatusTimeout)
+	defer cancel()
 	resp, err := cli.Status(ctx, &rpc.StatusRequest{})
 	if err != nil {
-		return nil
+		if svr.InvalidateClient != nil && status.Code(err) == codes.Unavailable {
+			svr.InvalidateClient(true)
+		}
+		return nil, err
 	}
 	m := make(map[string]tunIP, len(resp.GetList()))
 	for _, s := range resp.GetList() {
@@ -167,5 +261,114 @@ func (svr *Server) getSudoTunIPs(ctx context.Context) map[string]tunIP {
 			status: s.GetStatus(),
 		}
 	}
+	return m, nil
+}
+
+// getSudoTunIPs is the map-only convenience wrapper over probeSudo used by on-demand status
+// reads. Unlike the old implementation it logs (rather than silently swallows) probe failures,
+// returning nil so callers fall back to their local view.
+func (svr *Server) getSudoTunIPs(ctx context.Context) map[string]tunIP {
+	m, err := svr.probeSudo(ctx)
+	if err != nil {
+		plog.G(ctx).Warnf("Probe sudo daemon status failed: %v", err)
+	}
 	return m
+}
+
+// sudoProcessAlive is the crash-safe PID pre-check used by the liveness monitor. It is a var so
+// tests can stub the process check without a real root-daemon PID file.
+var sudoProcessAlive = sudoProcessAliveImpl
+
+// MonitorSudoLiveness periodically probes the root (sudo) daemon and caches a per-connection
+// health snapshot the user daemon serves from Status/ConnectionList. It is the peer-liveness
+// edge the dual-daemon design otherwise lacked: after Connect returns there is no long-lived
+// stream between the two daemons, so without this a crashed root daemon is only noticed lazily
+// on the next CLI call. It REPORTS only — recovery (respawning the root daemon) needs
+// interactive privilege escalation and is deferred to the next CLI command's StartupDaemon.
+// User daemon only.
+func (svr *Server) MonitorSudoLiveness(ctx context.Context) {
+	if svr.IsSudo {
+		return
+	}
+	svr.healthMu.Lock()
+	svr.sudoHealthy = true // start optimistic so only genuine transitions are logged
+	svr.healthMu.Unlock()
+
+	ticker := time.NewTicker(config.SudoLivenessProbeInterval)
+	defer ticker.Stop()
+	for {
+		svr.refreshSudoHealth(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// refreshSudoHealth performs one liveness probe and updates the cached snapshot.
+func (svr *Server) refreshSudoHealth(ctx context.Context) {
+	// Cheap crash-safe pre-check: a dead root-daemon process means the data plane is gone, so
+	// report disconnected without a doomed gRPC dial (works for kill -9, unlike a stale socket).
+	if !sudoProcessAlive() {
+		svr.storeSudoHealth(ctx, map[string]tunIP{}, false, "root daemon process not running")
+		return
+	}
+	m, err := svr.probeSudo(ctx)
+	if err == nil {
+		svr.storeSudoHealth(ctx, m, true, "")
+		return
+	}
+	if errors.Is(err, config.ErrDaemonNotRunning) {
+		svr.storeSudoHealth(ctx, map[string]tunIP{}, false, err.Error())
+		return
+	}
+	// Transient failure (daemon alive but not answering, e.g. mid-restart): keep the last-known
+	// connections but downgrade them to unhealthy rather than flapping straight to disconnected.
+	svr.degradeSudoHealth(ctx, err)
+}
+
+// storeSudoHealth replaces the cached snapshot, logging only on a reachability transition to
+// avoid a log line every probe interval.
+func (svr *Server) storeSudoHealth(ctx context.Context, m map[string]tunIP, healthy bool, reason string) {
+	svr.healthMu.Lock()
+	was := svr.sudoHealthy
+	svr.sudoHealth = m
+	svr.sudoHealthy = healthy
+	svr.healthMu.Unlock()
+	switch {
+	case was && !healthy:
+		plog.G(ctx).Warnf("Root daemon liveness lost (%s); connections reported unhealthy/disconnected until it is restarted by the next CLI command", reason)
+	case !was && healthy:
+		plog.G(ctx).Infof("Root daemon liveness restored")
+	}
+}
+
+// degradeSudoHealth downgrades every cached connection to unhealthy on a transient probe error.
+func (svr *Server) degradeSudoHealth(ctx context.Context, cause error) {
+	svr.healthMu.RLock()
+	degraded := make(map[string]tunIP, len(svr.sudoHealth))
+	for id, s := range svr.sudoHealth {
+		s.status = StatusUnhealthy
+		degraded[id] = s
+	}
+	svr.healthMu.RUnlock()
+	svr.storeSudoHealth(ctx, degraded, false, "transient probe failure: "+cause.Error())
+}
+
+// sudoHealthSnapshot returns the cached per-connection sudo data-plane state for the user
+// daemon's status reads. It falls back to a live probe only while the cache is still cold
+// (before MonitorSudoLiveness has produced its first snapshot).
+func (svr *Server) sudoHealthSnapshot(ctx context.Context) map[string]tunIP {
+	svr.healthMu.RLock()
+	cached := svr.sudoHealth
+	svr.healthMu.RUnlock()
+	if cached == nil {
+		return svr.getSudoTunIPs(ctx)
+	}
+	cp := make(map[string]tunIP, len(cached))
+	for k, v := range cached {
+		cp[k] = v
+	}
+	return cp
 }

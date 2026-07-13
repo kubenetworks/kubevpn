@@ -29,7 +29,7 @@ In the past, the lack of this architecture document led to bugs where fields wer
 │              pkg/daemon/action/ (IsSudo=false)        │
 │                                                       │
 │  Responsibilities:                                    │
-│  ├── SSH jump host (resolveKubeconfig)                │
+│  ├── SSH jump host (resolveKubeconfigBytes)           │
 │  ├── Traffic Manager creation/upgrade (CreateOutboundPod/UpgradeDeploy)│
 │  ├── Proxy injection (CreateRemoteInboundPod → inject/)│
 │  ├── File sync (DoSync)                               │
@@ -190,17 +190,21 @@ CLI: kubevpn connect
 User Daemon: Connect RPC
   ├── redirectConnectToSudoDaemon()
   │     ├── Create ConnectOptions (control plane, with OwnerID, Image)
-  │     ├── resolveKubeconfig (SSH jump host)
-  │     ├── InitClient
+  │     ├── resolveKubeconfigBytes (SSH jump host → in-memory bytes, no temp file)
+  │     ├── InitClient (InitFactoryByBytes)
   │     ├── detectAndSetManagerNamespace
-  │     ├── forwardConnectToSudo()
+  │     ├── forwardConnectToSudo(..., resolvedBytes)
   │     │     ├── CreateOutboundPod (create traffic manager pod)
   │     │     ├── UpgradeDeploy (upgrade traffic manager)
+  │     │     ├── Set req.KubeconfigBytes = resolvedBytes (no os.ReadFile round-trip)
   │     │     ├── Set req.OwnerID, forward req to Root Daemon ──┐
   │     │     ├── Wait for Root Daemon to complete               │
   │     │     └── Store in svr.connections                       │
   │                                                              ▼
   │                                    Root Daemon: Connect RPC
+  │                                      ├── Idempotency guard: if a DataSession already
+  │                                      │   exists for req.ConnectionID, return success
+  │                                      │   without rebuilding (see note below)
   │                                      ├── Create DataSession (data plane)
   │                                      ├── ds.OwnerID = req.OwnerID
   │                                      ├── ds.DoConnect()
@@ -215,6 +219,29 @@ User Daemon: Connect RPC
   ▼
 User Daemon: Return success to CLI
 ```
+
+> **Root-daemon Connect is idempotent per ConnectionID.** The user-side dedup in
+> `redirectConnectToSudoDaemon` only checks the user daemon's in-memory `svr.connections`, which
+> is empty after a user-daemon restart. So when `LoadFromConfig` replays `Connect` while the root
+> daemon is still running, the root side must also short-circuit on a known `ConnectionID` — else
+> it would build a second DataSession (a duplicate TUN / port-forward / route / DNS setup) and
+> leak. Guard: `Connect` (IsSudo) → `svr.findConnection(req.ConnectionID)` before creating `ds`.
+
+### 3.1a Peer Liveness (user ↔ root) and crash recovery
+
+After `Connect` returns there is **no long-lived stream** between the two daemons — the data
+plane lives on the root daemon's own `ds.ctx`, and each daemon's `detectUnixSocksFile` watchdog
+only checks its *own* socket. The user daemon therefore runs `MonitorSudoLiveness` (every
+`config.SudoLivenessProbeInterval` = 2s): a crash-safe PID pre-check + bounded gRPC probe of the
+root daemon, caching a per-connection health snapshot that `Status`/`ConnectionList` serve. See
+[08-heartbeat-health.md](08-heartbeat-health.md) #6.
+
+**Recovery is report-only.** A crashed root daemon is reflected as `unhealthy`/`disconnected`
+within ~2s, but the user daemon does **not** respawn it: spawning the root daemon needs
+interactive privilege escalation ([34-privilege-escalation.md](34-privilege-escalation.md)), which
+a detached background daemon has no TTY for. Re-launch happens on the next CLI command's
+`StartupDaemon` (foreground). At that startup the user daemon also runs `ReconcileSudoConnections`
+to reap orphaned data-plane sessions left by daemon drift.
 
 ### 3.2 Proxy Flow (User Daemon only)
 

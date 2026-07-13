@@ -66,12 +66,37 @@ func genRole(namespace string) *rbacv1.Role {
 	return genRBACRole(
 		config.ConfigMapPodTrafficManager,
 		namespace,
-		[]rbacv1.PolicyRule{{
-			Verbs:         []string{"get", "list", "watch", "create", "update", "patch", "delete"},
-			APIGroups:     []string{""},
-			Resources:     []string{"configmaps", "secrets"},
-			ResourceNames: []string{config.ConfigMapPodTrafficManager},
-		}},
+		[]rbacv1.PolicyRule{
+			{
+				Verbs:         []string{"get", "list", "watch", "create", "update", "patch", "delete"},
+				APIGroups:     []string{""},
+				Resources:     []string{"configmaps", "secrets"},
+				ResourceNames: []string{config.ConfigMapPodTrafficManager},
+			},
+			{
+				// Server-side cluster CIDR detection (xds WarmClusterCIDRCache), done
+				// WITHOUT a probe pod or exec: list pods to infer the pod CIDR (and read
+				// kube-system component flags). Namespaced to the manager namespace; lets
+				// the client shed pods/exec from its own kubeconfig. See docs/46. NOTE: an
+				// existing manager keeps its old Role until recreated — the warm-up degrades
+				// safely (cache stays empty → client falls back to local detection).
+				Verbs:     []string{"list"},
+				APIGroups: []string{""},
+				Resources: []string{"pods"},
+			},
+			{
+				// Server-side Service CIDR detection (xds WarmClusterCIDRCache), done
+				// WITHOUT a probe pod or exec:
+				//   - create: create a throwaway Service (rejected by the API) to read the
+				//     Service CIDR from the error message. The Service is never actually created.
+				//   - list: fallback that infers the Service CIDR from existing Services'
+				//     ClusterIPs when the create-and-parse-error trick fails (e.g. the API
+				//     error wording differs by k8s version). See docs/46.
+				Verbs:     []string{"create", "list"},
+				APIGroups: []string{""},
+				Resources: []string{"services"},
+			},
+		},
 	)
 }
 

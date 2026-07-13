@@ -51,8 +51,8 @@ Key points:
 
 ```
 RPC Reset (action/reset.go)
-  ├── resolveKubeconfig(SshJump, KubeconfigBytes, false)   ── no active connection required
-  ├── ConnectOptions.InitClient + DetectManagerNamespace
+  ├── resolveKubeconfigBytes(SshJump, KubeconfigBytes, false)  ── in-memory bytes, no temp file
+  ├── ConnectOptions.InitClient(util.InitFactoryByBytes(...)) + DetectManagerNamespace
   └── connect.Reset(ns, workloads)                         handler/reset.go
         ├── util.NormalizedResource           ── expand/normalize workload names
         ├── resetConfigMap(managerNS, ns, workloads)

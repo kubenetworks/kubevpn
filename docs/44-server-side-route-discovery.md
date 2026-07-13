@@ -52,8 +52,16 @@ rpc WatchNamespaceRoutes(NamespaceRoutesRequest) returns (stream NamespaceRoutes
 - `AddedPodCIDRs` → `AddRouteCIDR` (whole prefixes, via the same TUN route path as the
   cluster CIDRs), on top of the cluster CIDR routes already installed at connect.
 - `UpsertedServices` / `RemovedServiceKeys` → maintained in a `services` map fed to DNS via
-  `dns.Config.UpdateServices`. Service ClusterIPs are already covered by the service CIDR
-  route, so no per-service route is added — the records drive DNS only.
+  `dns.Config.UpdateServices`, **and** each upserted service's ClusterIPs are added to the
+  route table via `AddRoute`. The whole service CIDR is normally routed at connect, but that
+  detection is best-effort and can miss or exclude the range (managed clusters hide the
+  component flags, the invalid-ClusterIP error message may not match, or the range is dropped
+  by the API-server-IP filter — [32-cidr-detection.md](32-cidr-detection.md) §5). Without a
+  per-service route the name still resolves (hosts entry) but the connection has no path, so
+  the ClusterIPs are routed explicitly. `AddRoute` skips API server IPs and already-routed IPs
+  and is idempotent, so this is cheap and a no-op when the service CIDR already covers the IP.
+  This restores the per-service routing the pre-refactor client informer provided, now scoped
+  to the subscribed namespace.
 
 The client no longer runs any pod/service informer. DNS (`pkg/dns`) dropped its
 `SvcInformer` dependency: hosts are written push-driven by `UpdateServices` (add-only,

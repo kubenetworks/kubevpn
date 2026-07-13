@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	v1 "k8s.io/api/core/v1"
@@ -43,7 +46,7 @@ type SyncOptions struct {
 	LocalDir             string
 	RemoteDir            string
 
-	rollbackFuncList []func() error
+	rollbackList
 	ctx              context.Context
 	syncthingGUIAddr string
 }
@@ -141,6 +144,10 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 		// meaningful previous revision here and would only disturb the clone.
 		_ = util.RolloutStatus(ctx, d.factory, d.WorkloadNamespace, workload, false)
 
+		if err = d.waitSidecarConnected(ctx, labelsMap); err != nil {
+			plog.G(ctx).Debugf("wait for VPN sidecar connected: %v", err)
+		}
+
 		if d.LocalDir != "" {
 			err = d.SyncDir(ctx, fields.SelectorFromSet(labelsMap).String())
 			if err != nil {
@@ -150,6 +157,42 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 	}
 	plog.StepDone(ctx, "Synced files for %d workloads", len(d.Workloads))
 	return nil
+}
+
+// waitSidecarConnected streams the VPN sidecar container's logs until it prints
+// the connection slogan, meaning server-side inject is complete and the envoy
+// config has been written to the ConfigMap. Without this, DoSync returns as soon
+// as the pod is Running — before the sidecar finishes connect + inject — and a
+// status query immediately after would see ProxyList:null.
+func (d *SyncOptions) waitSidecarConnected(ctx context.Context, labelsMap map[string]string) error {
+	const timeout = 2 * time.Minute
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	list, err := util.GetRunningPodList(ctx, d.clientset, d.WorkloadNamespace,
+		fields.SelectorFromSet(labelsMap).String())
+	if err != nil || len(list) == 0 {
+		return fmt.Errorf("no running sync pod: %w", err)
+	}
+	stream, err := d.clientset.CoreV1().Pods(d.WorkloadNamespace).GetLogs(list[0].Name, &v1.PodLogOptions{
+		Container: config.ContainerSidecarVPN,
+		Follow:    true,
+	}).Stream(ctx)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+
+	scanner := bufio.NewScanner(stream)
+	for scanner.Scan() {
+		if strings.Contains(scanner.Text(), config.Slogan) {
+			return nil
+		}
+	}
+	if err = scanner.Err(); err != nil {
+		return err
+	}
+	return fmt.Errorf("VPN sidecar log ended without %q", config.Slogan)
 }
 
 // Cleanup deletes sync workloads created by DoSync, waits for the original
@@ -168,20 +211,14 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	}
 	plog.StepStart(ctx, "Stopping file sync")
 	// The daemon registers this Cleanup as a deferred error-path handler BEFORE
-	// InitClient sets d.factory (e.g. resolveKubeconfig may fail first). With a
-	// nil factory the GetUnstructuredObject / DynamicClient / RolloutStatus calls
+	// InitClient sets d.factory (e.g. resolveKubeconfigBytes may fail first). With
+	// a nil factory the GetUnstructuredObject / DynamicClient / RolloutStatus calls
 	// below would dereference a nil interface and crash the daemon. There is no
 	// K8s state to unwind yet, so skip the factory-dependent work — but still run
-	// rollbackFuncList to tear down the session (SSH tunnel + temp kubeconfig).
+	// the rollback funcs to tear down the session (SSH tunnel).
 	if d.factory == nil {
 		plog.G(ctx).Debug("Skipping workload cleanup: kubernetes client not initialized")
-		for _, f := range d.rollbackFuncList {
-			if f != nil {
-				if err := f(); err != nil {
-					plog.G(ctx).Warnf("Failed to exec rollback function: %s", err)
-				}
-			}
-		}
+		executeRollbackFuncs(ctx, d.getRollbackFuncs())
 		plog.StepDone(ctx, "Stopped file sync")
 		return nil
 	}
@@ -229,20 +266,9 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 			plog.G(ctx).Warnf("Failed to rollback workload %s: %v", workload, err)
 		}
 	}
-	for _, f := range d.rollbackFuncList {
-		if f != nil {
-			if err := f(); err != nil {
-				plog.G(ctx).Warnf("Failed to exec rollback function: %s", err)
-			}
-		}
-	}
+	executeRollbackFuncs(ctx, d.getRollbackFuncs())
 	plog.StepDone(ctx, "Stopped file sync for %d workloads", syncCount)
 	return firstErr
-}
-
-// AddRollbackFunc registers a function to be called during Cleanup for teardown.
-func (d *SyncOptions) AddRollbackFunc(f func() error) {
-	d.rollbackFuncList = append(d.rollbackFuncList, f)
 }
 
 // GetSyncthingGUIAddr returns the local address of the syncthing GUI for status monitoring.

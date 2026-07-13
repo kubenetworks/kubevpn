@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 func TestRemoveCIDRsContainingIPs(t *testing.T) {
@@ -297,6 +297,73 @@ func TestRemoveCIDRsContainingIPs_NilInputs(t *testing.T) {
 	}
 }
 
+func TestMergeToSupernet(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string // order-independent
+	}{
+		{
+			name: "nearby v4 pair merges within floor",
+			in:   []string{"10.96.0.0/24", "10.96.5.0/24"},
+			want: []string{"10.96.0.0/21"},
+		},
+		{
+			name: "scattered v4 reconstructs standard service CIDR",
+			in:   []string{"10.96.0.0/24", "10.107.5.0/24"},
+			want: []string{"10.96.0.0/12"},
+		},
+		{
+			name: "far-apart v4 refuses to merge (below floor)",
+			in:   []string{"10.96.0.0/24", "172.16.0.0/24"},
+			want: []string{"10.96.0.0/24", "172.16.0.0/24"},
+		},
+		{
+			name: "single member returned as-is",
+			in:   []string{"10.96.0.0/24"},
+			want: []string{"10.96.0.0/24"},
+		},
+		{
+			name: "duplicate members deduplicated",
+			in:   []string{"10.96.0.0/24", "10.96.0.0/24"},
+			want: []string{"10.96.0.0/24"},
+		},
+		{
+			name: "dual-stack: v4 merges, distant v6 kept separate",
+			in:   []string{"10.96.0.0/24", "10.96.5.0/24", "fd00::/64", "fd01::/64"},
+			want: []string{"10.96.0.0/21", "fd00::/64", "fd01::/64"},
+		},
+		{
+			name: "nearby v6 pair merges within floor",
+			in:   []string{"fd00:0:0:1::/64", "fd00:0:0:2::/64"},
+			want: []string{"fd00::/62"},
+		},
+		{
+			name: "far-apart v6 refuses to merge (below floor)",
+			in:   []string{"fd00:0:1::/64", "fd00:0:2::/64"},
+			want: []string{"fd00:0:1::/64", "fd00:0:2::/64"},
+		},
+		{
+			name: "empty input",
+			in:   nil,
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var in []*net.IPNet
+			for _, s := range tt.in {
+				in = append(in, parseCIDR(t, s))
+			}
+			got := cidrSet(mergeToSupernet(in))
+			want := sets.New[string](tt.want...)
+			if !got.Equal(want) {
+				t.Errorf("mergeToSupernet(%v) = %v, want %v", tt.in, got.UnsortedList(), want.UnsortedList())
+			}
+		})
+	}
+}
+
 // parseCIDR is a test helper that parses a CIDR string or fails the test.
 func parseCIDR(t *testing.T, s string) *net.IPNet {
 	t.Helper()
@@ -307,120 +374,3 @@ func parseCIDR(t *testing.T, s string) *net.IPNet {
 	return ipNet
 }
 
-func TestBuildCIDRPodSpec(t *testing.T) {
-	const (
-		testNamespace = "test-ns"
-		testImage     = "ghcr.io/kubenetworks/kubevpn:test"
-	)
-	pod := buildCIDRPodSpec(testNamespace, testImage)
-
-	t.Run("pod name and namespace", func(t *testing.T) {
-		if pod.Name != config.CniNetName {
-			t.Errorf("pod name = %q, want %q", pod.Name, config.CniNetName)
-		}
-		if pod.Namespace != testNamespace {
-			t.Errorf("pod namespace = %q, want %q", pod.Namespace, testNamespace)
-		}
-	})
-
-	t.Run("volumes include CNI and proc host paths", func(t *testing.T) {
-		if len(pod.Spec.Volumes) != 2 {
-			t.Fatalf("expected 2 volumes, got %d", len(pod.Spec.Volumes))
-		}
-
-		cniVol := pod.Spec.Volumes[0]
-		if cniVol.Name != config.CniNetName {
-			t.Errorf("first volume name = %q, want %q", cniVol.Name, config.CniNetName)
-		}
-		if cniVol.HostPath == nil || cniVol.HostPath.Path != config.DefaultNetDir {
-			t.Errorf("first volume host path = %v, want %q", cniVol.HostPath, config.DefaultNetDir)
-		}
-
-		procVol := pod.Spec.Volumes[1]
-		if procVol.Name != "proc-dir-kubevpn" {
-			t.Errorf("second volume name = %q, want %q", procVol.Name, "proc-dir-kubevpn")
-		}
-		if procVol.HostPath == nil || procVol.HostPath.Path != config.Proc {
-			t.Errorf("second volume host path = %v, want %q", procVol.HostPath, config.Proc)
-		}
-	})
-
-	t.Run("container image and command", func(t *testing.T) {
-		if len(pod.Spec.Containers) != 1 {
-			t.Fatalf("expected 1 container, got %d", len(pod.Spec.Containers))
-		}
-		c := pod.Spec.Containers[0]
-		if c.Image != testImage {
-			t.Errorf("container image = %q, want %q", c.Image, testImage)
-		}
-		wantCmd := []string{"tail", "-f", "/dev/null"}
-		if !reflect.DeepEqual(c.Command, wantCmd) {
-			t.Errorf("container command = %v, want %v", c.Command, wantCmd)
-		}
-	})
-
-	t.Run("affinity prefers master and control-plane nodes", func(t *testing.T) {
-		if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil {
-			t.Fatal("expected node affinity to be set")
-		}
-		prefs := pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
-		if len(prefs) != 1 {
-			t.Fatalf("expected 1 preferred scheduling term, got %d", len(prefs))
-		}
-		exprs := prefs[0].Preference.MatchExpressions
-		if len(exprs) != 2 {
-			t.Fatalf("expected 2 match expressions, got %d", len(exprs))
-		}
-		wantKeys := map[string]bool{
-			"node-role.kubernetes.io/master":        false,
-			"node-role.kubernetes.io/control-plane": false,
-		}
-		for _, expr := range exprs {
-			if _, ok := wantKeys[expr.Key]; !ok {
-				t.Errorf("unexpected affinity key %q", expr.Key)
-			} else {
-				wantKeys[expr.Key] = true
-			}
-		}
-		for k, found := range wantKeys {
-			if !found {
-				t.Errorf("missing affinity key %q", k)
-			}
-		}
-	})
-
-	t.Run("tolerations allow control-plane scheduling", func(t *testing.T) {
-		if len(pod.Spec.Tolerations) != 2 {
-			t.Fatalf("expected 2 tolerations, got %d", len(pod.Spec.Tolerations))
-		}
-		wantKeys := map[string]bool{
-			"node-role.kubernetes.io/master":        false,
-			"node-role.kubernetes.io/control-plane": false,
-		}
-		for _, tol := range pod.Spec.Tolerations {
-			if _, ok := wantKeys[tol.Key]; !ok {
-				t.Errorf("unexpected toleration key %q", tol.Key)
-			} else {
-				wantKeys[tol.Key] = true
-			}
-		}
-		for k, found := range wantKeys {
-			if !found {
-				t.Errorf("missing toleration key %q", k)
-			}
-		}
-	})
-
-	t.Run("topology spread constraints are set", func(t *testing.T) {
-		if len(pod.Spec.TopologySpreadConstraints) != 1 {
-			t.Fatalf("expected 1 topology spread constraint, got %d", len(pod.Spec.TopologySpreadConstraints))
-		}
-		tsc := pod.Spec.TopologySpreadConstraints[0]
-		if tsc.TopologyKey != "kubernetes.io/hostname" {
-			t.Errorf("topology key = %q, want %q", tsc.TopologyKey, "kubernetes.io/hostname")
-		}
-		if tsc.MaxSkew != 1 {
-			t.Errorf("max skew = %d, want 1", tsc.MaxSkew)
-		}
-	})
-}

@@ -1,11 +1,17 @@
 package util
 
 import (
+	"encoding/json"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // makeKubeconfig builds a minimal kubeconfig YAML with the given server URL.
@@ -192,6 +198,120 @@ func TestConvertToTempKubeconfigFile(t *testing.T) {
 		_, err := ConvertToTempKubeconfigFile(content, "/nonexistent-dir-abc123/kubeconfig")
 		if err == nil {
 			t.Fatal("expected error for invalid path, got nil")
+		}
+	})
+
+	// Regression: the auto-generated name used "<cluster>_<ns>_<unix-second>", so
+	// two callers writing a kubeconfig for the same cluster in the same second
+	// derived the *same* path. When those callers are the root daemon (Connect)
+	// and the user daemon (Sync), the root-owned 0644 file cannot be truncated by
+	// the user daemon's os.Create -> EACCES ("permission denied"), aborting sync.
+	// Every auto-generated path must therefore be unique.
+	t.Run("auto-generated paths are unique", func(t *testing.T) {
+		const n = 20
+		seen := make(map[string]bool, n)
+		for i := 0; i < n; i++ {
+			got, err := ConvertToTempKubeconfigFile(content, "")
+			if err != nil {
+				t.Fatalf("call %d: unexpected error: %v", i, err)
+			}
+			defer os.Remove(got)
+			seen[got] = true
+
+			data, err := os.ReadFile(got)
+			if err != nil {
+				t.Fatalf("call %d: failed to read written file: %v", i, err)
+			}
+			if string(data) != string(content) {
+				t.Fatalf("call %d: file content does not match input", i)
+			}
+		}
+		if len(seen) != n {
+			t.Fatalf("expected %d unique temp kubeconfig paths, got %d (collision)", n, len(seen))
+		}
+	})
+}
+
+func TestInitFactoryByBytes(t *testing.T) {
+	content := makeKubeconfig("https://10.0.0.1:6443")
+
+	t.Run("builds factory and honors namespace override", func(t *testing.T) {
+		f := InitFactoryByBytes(content, "my-ns")
+		if f == nil {
+			t.Fatal("expected non-nil factory")
+		}
+		cfg, err := f.ToRESTConfig()
+		if err != nil {
+			t.Fatalf("ToRESTConfig: %v", err)
+		}
+		if cfg.Host == "" {
+			t.Fatal("expected non-empty host in rest config")
+		}
+		ns, _, err := f.ToRawKubeConfigLoader().Namespace()
+		if err != nil {
+			t.Fatalf("Namespace: %v", err)
+		}
+		if ns != "my-ns" {
+			t.Fatalf("namespace override not honored: got %q, want %q", ns, "my-ns")
+		}
+		// RESTMapper construction is lazy (deferred discovery), so it must not
+		// error without a live server.
+		if _, err = f.ToRESTMapper(); err != nil {
+			t.Fatalf("ToRESTMapper: %v", err)
+		}
+	})
+
+	t.Run("malformed bytes surface error lazily from ToRESTConfig", func(t *testing.T) {
+		f := InitFactoryByBytes([]byte("::not a kubeconfig::"), "ns")
+		if f == nil {
+			t.Fatal("expected non-nil factory even for malformed bytes")
+		}
+		if _, err := f.ToRESTConfig(); err == nil {
+			t.Fatal("expected error from ToRESTConfig for malformed kubeconfig")
+		}
+	})
+
+	// Regression: the byte-backed RESTMapper must expand short resource names
+	// (svc → services) like the standard kubectl Factory. Without a
+	// ShortcutExpander, `kubevpn proxy svc/reviews` failed with
+	// "the server doesn't have a resource type svc".
+	t.Run("RESTMapper expands short resource names", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/api", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(metav1.APIVersions{Versions: []string{"v1"}})
+		})
+		mux.HandleFunc("/api/v1", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(metav1.APIResourceList{
+				GroupVersion: "v1",
+				APIResources: []metav1.APIResource{
+					{Name: "services", Namespaced: true, Kind: "Service", ShortNames: []string{"svc"}},
+				},
+			})
+		})
+		mux.HandleFunc("/apis", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(metav1.APIGroupList{})
+		})
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		f := InitFactoryByBytes(makeKubeconfig(srv.URL), "ns")
+		mapper, err := f.ToRESTMapper()
+		if err != nil {
+			t.Fatalf("ToRESTMapper: %v", err)
+		}
+		gvr, err := mapper.ResourceFor(schema.GroupVersionResource{Resource: "svc"})
+		if err != nil {
+			t.Fatalf("short name %q did not resolve: %v", "svc", err)
+		}
+		if gvr.Resource != "services" {
+			t.Fatalf("svc resolved to %q, want %q", gvr.Resource, "services")
 		}
 	})
 }

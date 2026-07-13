@@ -25,6 +25,10 @@ const (
 	KeyEnvoy = "ENVOY_CONFIG"
 	// KeyClusterCIDRs is the ConfigMap key for cluster CIDR cache (IPv4 + IPv6).
 	KeyClusterCIDRs = "CLUSTER_CIDRS"
+	// KeyClusterDNS is the ConfigMap key holding the manager pod's /etc/resolv.conf
+	// (raw text). The manager publishes it so clients read the cluster DNS server +
+	// search domains from the cache instead of exec-ing into the pod. See docs/46.
+	KeyClusterDNS = "CLUSTER_DNS_RESOLV"
 	// KeyTunAllocs is the ConfigMap key for TUN IP owner allocations (ownerID → IPs).
 	// It is a server-written crash-recovery journal (saveAllocs) AND the operator's
 	// manual-IP control input: editing an owner's ipv4/ipv6 (keeping the version field,
@@ -103,15 +107,6 @@ const (
 		]
 	*/
 	DockerIPv4Pool = "198.19.0.1/16"
-
-	// DefaultNetDir is the default directory for CNI network configuration files.
-	DefaultNetDir = "/etc/cni/net.d"
-
-	// Proc is the path to the Linux procfs mount.
-	Proc = "/proc"
-
-	// CniNetName is the volume name for the CNI network config directory.
-	CniNetName = "cni-net-dir-kubevpn"
 
 	// EnvInboundPodTunIPv4 is the env var name for the pod's TUN device IPv4 address.
 	EnvInboundPodTunIPv4 = "TunIPv4"
@@ -204,6 +199,14 @@ var (
 	DialTimeout    = 15 * time.Second
 	ConnectTimeout = 5 * time.Second
 
+	// HeartbeatInterval is how often the client sends its data-plane ICMP heartbeat. It is
+	// deliberately shorter than KeepAliveTime (which drives the read/write deadlines and TCP
+	// keepalive): the heartbeat echo reply is the data-plane liveness signal that drives the
+	// port-forward black-hole watchdog, so a short cadence lets a silent tunnel be detected in
+	// seconds. Sending more often only helps the server read deadline (KeepAliveTime*3), never
+	// hurts it.
+	HeartbeatInterval = 5 * time.Second
+
 	DNSRouteRefreshInterval  = 15 * time.Second
 	DNSRouteDebounceInterval = 3 * time.Second
 
@@ -217,6 +220,25 @@ var (
 	// rollout to finish. Without it, a sidecar that never becomes ready makes
 	// the operation (e.g. `kubevpn proxy`) hang indefinitely.
 	RolloutStatusTimeout = 2 * time.Minute
+
+	// ConfigMapSyncTimeout bounds how long ConfigMapStore.EnsureSynced waits for the
+	// traffic manager ConfigMap informer to complete its initial List at connection
+	// establishment. The store has no live-API read fallback, so reads before the cache
+	// is warm return empty; warming here keeps steady-state reads cache-served. Connect
+	// treats a timeout as fatal (fail fast) — a cache that never warms would read empty
+	// forever, and a sync failure here means the API is already unreachable.
+	ConfigMapSyncTimeout = 10 * time.Second
+
+	// SudoStatusTimeout bounds the user daemon's cross-daemon Status hop to the sudo
+	// daemon (getSudoTunIPs). It caps how long a wedged sudo daemon can stall an
+	// otherwise-local command, independent of the read-path fixes.
+	SudoStatusTimeout = 2 * time.Second
+
+	// SudoLivenessProbeInterval is how often the user daemon's MonitorSudoLiveness probes the
+	// root (sudo) daemon to keep its cached data-plane health snapshot fresh. Matched to the
+	// self-staleness watchdog's poll cadence (detectUnixSocksFile), so a crashed root daemon is
+	// reflected in `kubevpn status` within ~1 interval — far ahead of the 90s heartbeat window.
+	SudoLivenessProbeInterval = 2 * time.Second
 )
 
 var (

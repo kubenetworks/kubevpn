@@ -3,7 +3,6 @@ package action
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
@@ -41,22 +40,20 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
 	}
-	var file string
-	session.AddTempFile(&file)
 	connect.AddRollbackFunc(func() error {
-		session.RunCleanups()
+		session.Teardown()
 		return nil
 	})
 
-	file, err = resolveKubeconfig(session.Ctx, req.SshJump, req.KubeconfigBytes, true)
+	// User daemon (control plane): the kubeconfig feeds the in-process Factory and
+	// is forwarded (as bytes) to the sudo daemon — no temp file needed on this side.
+	// SSH still establishes the tunnel; resolvedBytes point at the local endpoint.
+	resolvedBytes, err := resolveKubeconfigBytes(session.Ctx, req.SshJump, req.KubeconfigBytes, true)
 	if err != nil {
 		return err
 	}
 	if sshConf := parseSshFromRPC(req.SshJump); !sshConf.IsEmpty() {
 		connect.SshHosts = sshConf.Host()
-		if sshConf.RemoteKubeconfig != "" {
-			connect.OriginKubeconfigPath = file
-		}
 	}
 
 	defer func() {
@@ -82,7 +79,7 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 			session.Cancel()
 		}
 	}()
-	err = connect.InitClient(util.InitFactoryByPath(file, req.Namespace))
+	err = connect.InitClient(util.InitFactoryByBytes(resolvedBytes, req.Namespace))
 	if err != nil {
 		return err
 	}
@@ -113,7 +110,7 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	}
 	svr.connMu.Unlock()
 
-	return svr.forwardConnectToSudo(session.Ctx, req, connect, resp, cli, &connResp, &connRespMu, file, connect.ConnectionID, logger)
+	return svr.forwardConnectToSudo(session.Ctx, req, connect, resp, cli, &connResp, &connRespMu, resolvedBytes, connect.ConnectionID, logger)
 }
 
 // detectAndSetManagerNamespace resolves the traffic manager namespace, falling
@@ -151,7 +148,7 @@ func (svr *Server) forwardConnectToSudo(
 	cli rpc.DaemonClient,
 	connResp *grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse],
 	connRespMu *sync.Mutex,
-	kubeconfigPath string,
+	kubeconfigBytes []byte,
 	connectionID string,
 	logger *log.Logger,
 ) error {
@@ -162,11 +159,18 @@ func (svr *Server) forwardConnectToSudo(
 		return err
 	}
 
-	content, err := os.ReadFile(kubeconfigPath)
-	if err != nil {
-		return err
+	// Warm the control-plane ConfigMap informer now that the traffic manager (and its
+	// ConfigMap) exists, so later status reads are cache-served. The store has no live-API
+	// fallback, so fail fast rather than register a connection whose cache never warms:
+	// CreateOutboundPod/UpgradeDeploy just succeeded, so a sync failure here means the API
+	// became unreachable and the connection would be unusable anyway.
+	if err := connect.EnsureConfigMapSynced(ctx); err != nil {
+		return fmt.Errorf("failed to warm traffic manager ConfigMap cache: %w", err)
 	}
-	req.KubeconfigBytes = string(content)
+
+	// Forward the already-resolved (SSH-rewritten) bytes to the sudo daemon, which
+	// builds its own in-process Factory from them — no bytes->file->bytes round-trip.
+	req.KubeconfigBytes = string(kubeconfigBytes)
 	req.OwnerID = connect.OwnerID
 	req.ConnectionID = connectionID
 	cr, err := cli.Connect(context.Background())
@@ -192,6 +196,9 @@ func (svr *Server) forwardConnectToSudo(
 	svr.connections = append(svr.connections, connect)
 	svr.currentConnectionID = connectionID
 	svr.connMu.Unlock()
+	// Refresh the cached sudo-daemon health snapshot so the very next status query
+	// sees this connection as "connected" instead of hitting a stale (pre-connect) cache.
+	svr.refreshSudoHealth(ctx)
 	return resp.Send(&rpc.ConnectResponse{
 		ConnectionID: connectionID,
 	})

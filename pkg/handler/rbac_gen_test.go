@@ -21,8 +21,10 @@ func TestGenRole_Fields(t *testing.T) {
 	if role.Namespace != ns {
 		t.Errorf("Namespace: got %q, want %q", role.Namespace, ns)
 	}
-	if len(role.Rules) != 1 {
-		t.Fatalf("Rules len: got %d, want 1", len(role.Rules))
+	// Rule 0: configmaps/secrets (resourceName-scoped); Rules 1-2: CIDR detection
+	// (pods/services + pods/exec, see genRole / docs/46).
+	if len(role.Rules) != 3 {
+		t.Fatalf("Rules len: got %d, want 3", len(role.Rules))
 	}
 	rule := role.Rules[0]
 	wantVerbs := []string{"get", "list", "watch", "create", "update", "patch", "delete"}
@@ -37,6 +39,28 @@ func TestGenRole_Fields(t *testing.T) {
 	}
 	if !stringSliceEqual(rule.ResourceNames, []string{config.ConfigMapPodTrafficManager}) {
 		t.Errorf("Rules[0].ResourceNames: got %v, want [%s]", rule.ResourceNames, config.ConfigMapPodTrafficManager)
+	}
+	// No-probe-pod CIDR detection: list pods (Rule 1) + create Service (Rule 2).
+	// Must NOT grant pods/create or pods/exec.
+	if !stringSliceEqual(role.Rules[1].Resources, []string{"pods"}) {
+		t.Errorf("Rules[1].Resources: got %v, want [pods]", role.Rules[1].Resources)
+	}
+	if !stringSliceEqual(role.Rules[1].Verbs, []string{"list"}) {
+		t.Errorf("Rules[1].Verbs: got %v, want [list] (no create/exec)", role.Rules[1].Verbs)
+	}
+	if !stringSliceEqual(role.Rules[2].Resources, []string{"services"}) {
+		t.Errorf("Rules[2].Resources: got %v, want [services]", role.Rules[2].Resources)
+	}
+	// create (rejected-Service error trick) + list (infer CIDR from existing ClusterIPs).
+	if !stringSliceEqual(role.Rules[2].Verbs, []string{"create", "list"}) {
+		t.Errorf("Rules[2].Verbs: got %v, want [create list]", role.Rules[2].Verbs)
+	}
+	for _, r := range role.Rules {
+		for _, res := range r.Resources {
+			if res == "pods/exec" {
+				t.Errorf("manager Role must not grant pods/exec (no-probe-pod detection)")
+			}
+		}
 	}
 }
 

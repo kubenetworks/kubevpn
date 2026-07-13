@@ -184,43 +184,6 @@ func TestRedirectReusesExistingOwnerID(t *testing.T) {
 // Tests for 12-session-lifecycle.md: SessionLifecycle advanced scenarios
 // ============================================================================
 
-func TestSessionLifecycle_ConcurrentAddAndRun(t *testing.T) {
-	// Doc says: AddCleanup is thread-safe (mu sync.Mutex)
-	session := newTestSession()
-	done := make(chan struct{})
-
-	// Add cleanups concurrently
-	for i := 0; i < 100; i++ {
-		go func() {
-			session.AddCleanup(func() error { return nil })
-		}()
-	}
-
-	go func() {
-		session.RunCleanups()
-		close(done)
-	}()
-
-	<-done
-	// No panic = pass
-}
-
-func TestSessionLifecycle_CleanupErrorDoesNotStopOthers(t *testing.T) {
-	// Doc says: cleanups run in LIFO, errors are logged but don't stop execution
-	session := newTestSession()
-	var order []int
-	session.AddCleanup(func() error { order = append(order, 1); return nil })
-	session.AddCleanup(func() error { return context.DeadlineExceeded })
-	session.AddCleanup(func() error { order = append(order, 3); return nil })
-
-	session.RunCleanups()
-
-	// Cleanup 3 and 1 should still run despite cleanup 2's error
-	if len(order) != 2 || order[0] != 3 || order[1] != 1 {
-		t.Fatalf("expected [3, 1], got %v", order)
-	}
-}
-
 func TestSessionLifecycle_ContextOutlivesRPC(t *testing.T) {
 	// Doc says: session uses context.Background(), NOT resp.Context()
 	// So cancelling a "mock RPC context" should NOT affect the session
@@ -308,25 +271,6 @@ func TestFault_CrashRestart_OwnerIDPreserved(t *testing.T) {
 
 	if ownerID != persistedOwnerID {
 		t.Fatalf("should reuse persisted OwnerID %q, got %q", persistedOwnerID, ownerID)
-	}
-}
-
-func TestFault_CleanupPanic_DoesNotCrash(t *testing.T) {
-	// A cleanup function panics → recovered by HandleCrash, other cleanups still run
-	session := newTestSession()
-	var ran []int
-
-	session.AddCleanup(func() error { ran = append(ran, 1); return nil })
-	// Note: SessionLifecycle.RunCleanups catches errors but not panics directly.
-	// In production, util.HandleCrash() catches panics in goroutines.
-	// This test verifies the error path at least doesn't propagate.
-	session.AddCleanup(func() error { ran = append(ran, 2); return nil })
-
-	session.RunCleanups()
-
-	// LIFO: 2 then 1
-	if len(ran) != 2 || ran[0] != 2 || ran[1] != 1 {
-		t.Fatalf("expected [2,1], got %v", ran)
 	}
 }
 

@@ -106,18 +106,16 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 			session.Cancel()
 		}
 	}()
-	var file string
-	session.AddTempFile(&file)
 	options.AddRollbackFunc(func() error {
-		session.RunCleanups()
+		session.Teardown()
 		return nil
 	})
-	file, err = resolveKubeconfig(session.Ctx, req.SshJump, req.KubeconfigBytes, false)
+	kubeconfigBytes, err := resolveKubeconfigBytes(session.Ctx, req.SshJump, req.KubeconfigBytes, false)
 	if err != nil {
 		plog.G(resp.Context()).Errorf("Failed to resolve kubeconfig: %v", err)
 		return err
 	}
-	f := util.InitFactoryByPath(file, req.Namespace)
+	f := util.InitFactoryByBytes(kubeconfigBytes, req.Namespace)
 	err = options.InitClient(f)
 	if err != nil {
 		plog.G(resp.Context()).Errorf("Failed to init client: %v", err)
@@ -151,6 +149,12 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	svr.connMu.RUnlock()
 	if opt == nil {
 		return fmt.Errorf("cluster %s not found: %w", connectionID, config.ErrConnectionNotFound)
+	}
+	// The sync pod's VPN sidecar wrote envoy rules to the ConfigMap via ProxyInject.
+	// Refresh the user daemon's informer cache so the next status query sees
+	// ProxyList immediately, without waiting for the watch event to propagate.
+	if err = opt.RefreshConfigMapCache(resp.Context()); err != nil {
+		plog.G(resp.Context()).Debugf("Failed to refresh ConfigMap cache after sync: %v", err)
 	}
 	opt.SetSync(options)
 	return nil

@@ -48,11 +48,15 @@ func TestNextPortForwardDelay(t *testing.T) {
 }
 
 type routeFrameSink struct {
-	addedCIDRs [][]string
-	dnsCalls   [][]v1.Service
+	addedCIDRs      [][]string
+	addedServiceIPs [][]string
+	dnsCalls        [][]v1.Service
 }
 
-func (s *routeFrameSink) addCIDR(c []string)    { s.addedCIDRs = append(s.addedCIDRs, c) }
+func (s *routeFrameSink) addCIDR(c []string) { s.addedCIDRs = append(s.addedCIDRs, c) }
+func (s *routeFrameSink) addServiceIP(ips []string) {
+	s.addedServiceIPs = append(s.addedServiceIPs, ips)
+}
 func (s *routeFrameSink) setDNS(v []v1.Service) { s.dnsCalls = append(s.dnsCalls, v) }
 
 func svcRec(name, ns, clusterIP string) *rpc.ServiceRecord {
@@ -76,7 +80,7 @@ func TestApplyRouteFrame(t *testing.T) {
 		AddedPodCIDRs:    []string{"10.244.1.0/24", "10.244.2.0/24"},
 		UpsertedServices: []*rpc.ServiceRecord{svcRec("web", "ns", "10.96.0.10")},
 		Version:          1,
-	}, services, sink.addCIDR, sink.setDNS)
+	}, services, sink.addCIDR, sink.addServiceIP, sink.setDNS)
 
 	if len(sink.addedCIDRs) != 1 || len(sink.addedCIDRs[0]) != 2 {
 		t.Fatalf("snapshot: expected one addCIDR call with 2 prefixes, got %v", sink.addedCIDRs)
@@ -87,6 +91,11 @@ func TestApplyRouteFrame(t *testing.T) {
 	if len(sink.dnsCalls) != 1 || len(sink.dnsCalls[0]) != 1 {
 		t.Fatalf("snapshot: expected one DNS push with 1 service, got %v", sink.dnsCalls)
 	}
+	// Service ClusterIPs must be routed, not only fed to DNS: a resolvable name whose
+	// ClusterIP has no route resolves but cannot connect. Snapshot routes web's IP.
+	if len(sink.addedServiceIPs) != 1 || len(sink.addedServiceIPs[0]) != 1 || sink.addedServiceIPs[0][0] != "10.96.0.10" {
+		t.Fatalf("snapshot: expected service IP 10.96.0.10 routed, got %v", sink.addedServiceIPs)
+	}
 
 	// Delta: add a service + a new pod CIDR.
 	applyRouteFrame(&rpc.NamespaceRoutesResponse{
@@ -94,7 +103,7 @@ func TestApplyRouteFrame(t *testing.T) {
 		AddedPodCIDRs:    []string{"10.244.3.0/24"},
 		UpsertedServices: []*rpc.ServiceRecord{svcRec("api", "ns", "10.96.0.20")},
 		Version:          2,
-	}, services, sink.addCIDR, sink.setDNS)
+	}, services, sink.addCIDR, sink.addServiceIP, sink.setDNS)
 
 	if len(services) != 2 {
 		t.Fatalf("delta add: services=%v, want 2", services)
@@ -102,16 +111,21 @@ func TestApplyRouteFrame(t *testing.T) {
 	if got := sink.addedCIDRs[len(sink.addedCIDRs)-1]; len(got) != 1 || got[0] != "10.244.3.0/24" {
 		t.Fatalf("delta add: last addCIDR=%v, want [10.244.3.0/24]", got)
 	}
+	// Delta upsert must route the new service's ClusterIP too.
+	if got := sink.addedServiceIPs[len(sink.addedServiceIPs)-1]; len(got) != 1 || got[0] != "10.96.0.20" {
+		t.Fatalf("delta add: last routed service IP=%v, want [10.96.0.20]", got)
+	}
 
 	// Delta: remove a service. Routes are add-only, so RemovedPodCIDRs must NOT call addCIDR
 	// nor unroute — only DNS updates.
 	cidrCallsBefore := len(sink.addedCIDRs)
+	svcIPCallsBefore := len(sink.addedServiceIPs)
 	applyRouteFrame(&rpc.NamespaceRoutesResponse{
 		Enabled:            true,
 		RemovedPodCIDRs:    []string{"10.244.1.0/24"},
 		RemovedServiceKeys: []string{"ns/web"},
 		Version:            3,
-	}, services, sink.addCIDR, sink.setDNS)
+	}, services, sink.addCIDR, sink.addServiceIP, sink.setDNS)
 
 	if _, ok := services["ns/web"]; ok {
 		t.Fatalf("delta remove: ns/web should be gone, services=%v", services)
@@ -122,10 +136,13 @@ func TestApplyRouteFrame(t *testing.T) {
 	if len(sink.addedCIDRs) != cidrCallsBefore {
 		t.Fatalf("delta remove: routes are add-only, addCIDR must not be called for RemovedPodCIDRs")
 	}
+	if len(sink.addedServiceIPs) != svcIPCallsBefore {
+		t.Fatalf("delta remove: no upserts, service-IP routing must not be called")
+	}
 
 	// A no-op delta (nothing added/removed) must not push DNS.
 	dnsBefore := len(sink.dnsCalls)
-	applyRouteFrame(&rpc.NamespaceRoutesResponse{Enabled: true, Version: 4}, services, sink.addCIDR, sink.setDNS)
+	applyRouteFrame(&rpc.NamespaceRoutesResponse{Enabled: true, Version: 4}, services, sink.addCIDR, sink.addServiceIP, sink.setDNS)
 	if len(sink.dnsCalls) != dnsBefore {
 		t.Fatalf("no-op delta must not push DNS")
 	}
@@ -136,7 +153,7 @@ func TestApplyRouteFrame(t *testing.T) {
 		Enabled:          true,
 		UpsertedServices: []*rpc.ServiceRecord{svcRec("only", "ns", "10.96.0.30")},
 		Version:          5,
-	}, services, sink.addCIDR, sink.setDNS)
+	}, services, sink.addCIDR, sink.addServiceIP, sink.setDNS)
 	if len(services) != 1 || services["ns/only"] == nil {
 		t.Fatalf("snapshot reset: services=%v, want only {ns/only}", services)
 	}

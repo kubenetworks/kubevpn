@@ -86,8 +86,8 @@ func TestSyncOptions_SetContext(t *testing.T) {
 func TestSyncOptions_AddRollbackFunc(t *testing.T) {
 	opts := &SyncOptions{}
 
-	if len(opts.rollbackFuncList) != 0 {
-		t.Fatalf("expected 0 rollback funcs initially, got %d", len(opts.rollbackFuncList))
+	if len(opts.getRollbackFuncs()) != 0 {
+		t.Fatalf("expected 0 rollback funcs initially, got %d", len(opts.getRollbackFuncs()))
 	}
 
 	var callOrder []int
@@ -104,12 +104,13 @@ func TestSyncOptions_AddRollbackFunc(t *testing.T) {
 		return nil
 	})
 
-	if len(opts.rollbackFuncList) != 3 {
-		t.Fatalf("expected 3 rollback funcs, got %d", len(opts.rollbackFuncList))
+	funcs := opts.getRollbackFuncs()
+	if len(funcs) != 3 {
+		t.Fatalf("expected 3 rollback funcs, got %d", len(funcs))
 	}
 
 	// Execute all rollback functions and verify they are callable
-	for _, f := range opts.rollbackFuncList {
+	for _, f := range funcs {
 		_ = f()
 	}
 

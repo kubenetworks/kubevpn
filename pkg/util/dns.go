@@ -10,10 +10,26 @@ import (
 	v12 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-// GetDNSServiceIPFromPod reads /etc/resolv.conf from the specified pod and returns the parsed DNS client configuration.
+// GetDNSServiceIPFromPod returns the cluster DNS client configuration (servers, search
+// domains, port). It prefers the manager-published resolv.conf cached in the traffic-manager
+// ConfigMap (KeyClusterDNS) to avoid an exec, and falls back to exec-ing `cat /etc/resolv.conf`
+// in the pod when the cache is absent (old manager) or unparseable. See docs/46.
 func GetDNSServiceIPFromPod(ctx context.Context, clientset kubernetes.Interface, conf *rest.Config, podName, namespace string) (*dns.ClientConfig, error) {
+	if cm, err := clientset.CoreV1().ConfigMaps(namespace).Get(ctx, config.ConfigMapPodTrafficManager, v12.GetOptions{}); err == nil {
+		if raw := strings.TrimSpace(cm.Data[config.KeyClusterDNS]); raw != "" {
+			if resolvConf, err := dns.ClientConfigFromReader(bytes.NewBufferString(raw)); err == nil {
+				if resolvConf.Port == "" {
+					resolvConf.Port = strconv.Itoa(53)
+				}
+				return resolvConf, nil
+			}
+		}
+	}
+
 	str, err := Shell(ctx, clientset, conf, podName, "", namespace, []string{"cat", "/etc/resolv.conf"})
 	if err != nil {
 		return nil, err

@@ -1,7 +1,6 @@
 package cmds
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -171,7 +170,7 @@ func ParseAndGet(localFile, remoteAddr string, aliasName string) ([]Config, erro
 				names = append(names, c.Name)
 			}
 		}
-		err = errors.New(fmt.Sprintf("Can't find any alias for the name: '%s', avaliable: \n[\"%s\"]\nPlease check config file: %s", aliasName, strings.Join(names, "\", \""), path))
+		err = fmt.Errorf("cannot find any alias for the name: '%s', available: \n[\"%s\"]\nplease check config file: %s", aliasName, strings.Join(names, "\", \""), path)
 		return nil, err
 	}
 	return configs, nil

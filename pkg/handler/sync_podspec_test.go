@@ -212,8 +212,10 @@ func TestPrepareSyncPodSpec(t *testing.T) {
 		},
 	}
 
-	for _, tc := range cases {
-		tc := tc
+	// Range by index: testcase embeds SyncOptions which now carries a sync.Mutex
+	// (via rollbackList), so copying a case value would trip go vet copylocks.
+	for i := range cases {
+		tc := &cases[i]
 		t.Run(tc.name, func(t *testing.T) {
 			spec := defaultSpec(tc.containerName)
 			// Append any extra sidecar containers the test wants pre-populated.

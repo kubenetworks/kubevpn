@@ -25,8 +25,33 @@ import (
 var (
 	clientMu         sync.Mutex
 	daemonClient     rpc.DaemonClient
+	daemonConn       *grpc.ClientConn
 	sudoDaemonClient rpc.DaemonClient
+	sudoDaemonConn   *grpc.ClientConn
 )
+
+// InvalidateClient drops the cached client (and closes its connection) for the given
+// privilege level, forcing the next GetClient to redial and re-run the health/version
+// gate. Call this when an RPC on the cached client fails with a connection-level error
+// (e.g. the peer daemon crashed or restarted), so a stale ClientConn is not reused
+// indefinitely.
+func InvalidateClient(isSudo bool) {
+	clientMu.Lock()
+	defer clientMu.Unlock()
+	if isSudo {
+		if sudoDaemonConn != nil {
+			_ = sudoDaemonConn.Close()
+			sudoDaemonConn = nil
+		}
+		sudoDaemonClient = nil
+	} else {
+		if daemonConn != nil {
+			_ = daemonConn.Close()
+			daemonConn = nil
+		}
+		daemonClient = nil
+	}
+}
 
 // GetClient returns a cached gRPC DaemonClient for the given privilege level, creating one if necessary.
 func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
@@ -91,8 +116,10 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	clientMu.Lock()
 	if isSudo {
 		sudoDaemonClient = cli
+		sudoDaemonConn = conn
 	} else {
 		daemonClient = cli
+		daemonConn = conn
 	}
 	clientMu.Unlock()
 	return cli, nil
@@ -140,14 +167,20 @@ func StartupDaemon(ctx context.Context, path ...string) error {
 	if err != nil {
 		return err
 	}
-	// normal daemon
+	// Ordering matters: the user (unprivileged) daemon MUST start before the sudo
+	// daemon. runDaemon below blocks until the started daemon has written its PID,
+	// and config.init() (which creates the ~/.kubevpn dir tree) runs at process
+	// start — so by the time the sudo daemon spawns, the dirs already exist and are
+	// owned by the unprivileged user. If the sudo daemon ran first it would create
+	// them as root, and the user daemon could no longer write into them (EACCES).
+	// Do NOT reorder these two blocks.
 	if cli, _ := GetClient(false); cli == nil {
 		if err = runDaemon(ctx, exe, false); err != nil {
 			return err
 		}
 	}
 
-	// sudo daemon
+	// sudo daemon (see ordering note above)
 	if cli, _ := GetClient(true); cli == nil {
 		if err = runDaemon(ctx, exe, true); err != nil {
 			return err

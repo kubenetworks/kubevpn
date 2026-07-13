@@ -69,6 +69,17 @@ func (ds *DataSession) DoConnect(ctx context.Context) (err error) {
 	plog.G(ctx).Debug("Starting connect to cluster")
 	go ds.setupSignalHandler(ds.ctx)
 
+	// Warm the ConfigMap informer before any read (getCIDR reads KeyClusterCIDRs below).
+	// The store has no live-API fallback, so a connection whose cache never warms would read
+	// empty forever; fail fast instead of silently degrading. CreateOutboundPod already ran in
+	// the user daemon, so the ConfigMap exists and the informer can List it — a sync failure
+	// here means the API is unreachable, which the subsequent connect steps would fail on anyway.
+	if err = ds.getConfigMapStore().EnsureSynced(ds.ctx); err != nil {
+		plog.G(ctx).Errorf("Failed to warm traffic manager ConfigMap cache: %v", err)
+		err = fmt.Errorf("failed to warm traffic manager ConfigMap cache: %w", err)
+		return
+	}
+
 	var cidrs []*net.IPNet
 	var apiServerIPs []net.IP
 	if cidrs, apiServerIPs, err = ds.getCIDR(ds.ctx); err != nil {
@@ -217,6 +228,10 @@ func (ds *DataSession) GetTrafficManagerConfigMap(ctx context.Context) (*v1.Conf
 	return ds.getConfigMapStore().GetConfigMap(ctx)
 }
 
+func (ds *DataSession) RefreshConfigMapCache(ctx context.Context) error {
+	return ds.getConfigMapStore().Refresh(ctx)
+}
+
 // --- Connection interface: control-plane stubs (data-plane session does not proxy workloads) ---
 
 // CreateRemoteInboundPod is not available on a data-plane session.
@@ -304,14 +319,19 @@ func (ds *DataSession) getCIDR(ctx context.Context) ([]*net.IPNet, []net.IP, err
 		return cidrs, apiServerIPs, nil
 	}
 
-	raw := util.GetCIDR(ctx, ds.clientset, ds.config, ds.ManagerNamespace, ds.Image)
+	raw := util.GetCIDR(ctx, ds.clientset, ds.ManagerNamespace)
 	cidrs := dedupAndFilterCIDRs(raw, apiServerIPs)
-	if len(cidrs) == 0 {
-		plog.G(ctx).Debugf("No cluster CIDRs detected (raw=%d, all filtered by API server IPs %v)", len(raw), apiServerIPs)
+	// Cache the RAW (deduped, unfiltered) CIDRs — NOT the per-client-filtered set.
+	// API-server IPs differ per client and every reader re-filters on read via
+	// parseCachedCIDRs, so caching a filtered set would hide a CIDR (the one holding
+	// this client's API-server IP) from other clients. See docs/46.
+	rawDeduped := util.RemoveLargerOverlappingCIDRs(raw)
+	if len(rawDeduped) == 0 {
+		plog.G(ctx).Debugf("No cluster CIDRs detected (raw=%d)", len(raw))
 		return cidrs, apiServerIPs, nil
 	}
-	encoded := encodeCIDRs(cidrs)
-	plog.G(ctx).Debugf("Saving %d cluster CIDRs to cache: %s", len(cidrs), encoded)
+	encoded := encodeCIDRs(rawDeduped)
+	plog.G(ctx).Debugf("Saving %d raw cluster CIDRs to cache: %s", len(rawDeduped), encoded)
 	err = ds.Set(ctx, config.KeyClusterCIDRs, encoded)
 	return cidrs, apiServerIPs, err
 }
