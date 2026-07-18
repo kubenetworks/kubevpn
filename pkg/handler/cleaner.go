@@ -32,7 +32,11 @@ func (c *ConnectOptions) cleanupControlPlane(logCtx context.Context, ctx context
 	// stream while preserving it in the daemon log file for diagnostics.
 	plog.G(logCtx).Debug("Performing cleanup operations")
 	if c.clientset != nil {
-		_ = c.clientset.BatchV1().Jobs(c.ManagerNamespace).Delete(ctx, config.ConfigMapPodTrafficManager, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
+		// Bound this best-effort delete: without a deadline it inherits client-go's ~30s dial
+		// timeout, adding a full stall to teardown when the cluster is already unreachable.
+		delCtx, cancel := context.WithTimeout(ctx, config.ManagerServiceGetTimeout)
+		_ = c.clientset.BatchV1().Jobs(c.ManagerNamespace).Delete(delCtx, config.ConfigMapPodTrafficManager, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
+		cancel()
 	}
 	// leave proxy resources
 	if err := c.LeaveAllProxyResources(ctx); err != nil {

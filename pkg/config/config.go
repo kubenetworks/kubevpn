@@ -234,6 +234,14 @@ var (
 	// otherwise-local command, independent of the read-path fixes.
 	SudoStatusTimeout = 2 * time.Second
 
+	// ManagerServiceGetTimeout bounds each direct-to-apiserver call made while reaching or
+	// tearing down the traffic manager (Service lookup, manager Job delete). Without it each
+	// inherits client-go's ~30s default dial timeout, so a disconnect/quit against an
+	// unreachable cluster (e.g. deleted) stacks several 30s stalls. A manager Service GET on a
+	// reachable cluster returns in well under a second, so a few seconds is ample; teardown is
+	// best-effort (the manager's lease reaper reclaims anything left), so failing fast is safe.
+	ManagerServiceGetTimeout = 3 * time.Second
+
 	// SudoLivenessProbeInterval is how often the user daemon's MonitorSudoLiveness probes the
 	// root (sudo) daemon to keep its cached data-plane health snapshot fresh. Matched to the
 	// self-staleness watchdog's poll cadence (detectUnixSocksFile), so a crashed root daemon is
