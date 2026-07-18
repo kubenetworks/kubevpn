@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
@@ -20,12 +19,8 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	if err != nil {
 		return err
 	}
-	logger := plog.GetLoggerForServer(req.Level, svr.LogFile)
-	logger.AddHook(&plog.StreamHook{
-		Writer: newStreamWriter(func(msg string) error {
-			return resp.Send(&rpc.SyncResponse{Message: msg})
-		}),
-		Level: log.InfoLevel,
+	logger := newServerStreamLogger(svr.LogFile, req.Level, func(msg string) error {
+		return resp.Send(&rpc.SyncResponse{Message: msg})
 	})
 
 	connReq := &rpc.ConnectRequest{

@@ -23,8 +23,7 @@ func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 	} else {
 		sendFunc = func(string) error { return nil }
 	}
-	logger := plog.GetLoggerForServer(int32(log.InfoLevel), svr.LogFile)
-	logger.AddHook(&plog.StreamHook{Writer: newStreamWriter(sendFunc), Level: log.InfoLevel})
+	logger := newServerStreamLogger(svr.LogFile, int32(log.InfoLevel), sendFunc)
 	ctx := context.Background()
 	if resp != nil {
 		ctx = resp.Context()

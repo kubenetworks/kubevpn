@@ -39,6 +39,32 @@ func basePodSpec() *v1.PodSpec {
 	}
 }
 
+// Req3: the injected fargate VPN sidecar (server) defaults to --debug.
+func TestAddEnvoyAndSSHContainer_DefaultDebug(t *testing.T) {
+	spec := basePodTemplateSpec()
+	AddEnvoyAndSSHContainer(spec, "default", "node1", false, "kubevpn-system", "kubevpn:latest")
+
+	var found bool
+	for _, c := range spec.Spec.Containers {
+		if c.Name != config.ContainerSidecarVPN {
+			continue
+		}
+		found = true
+		var hasDebug bool
+		for _, a := range c.Args {
+			if a == "--debug" {
+				hasDebug = true
+			}
+		}
+		if !hasDebug {
+			t.Errorf("vpn sidecar args should contain --debug, got %v", c.Args)
+		}
+	}
+	if !found {
+		t.Fatalf("vpn sidecar container %q not found", config.ContainerSidecarVPN)
+	}
+}
+
 func TestAddVPNAndEnvoyContainer(t *testing.T) {
 	spec := basePodTemplateSpec()
 	secret := fakeSecret()

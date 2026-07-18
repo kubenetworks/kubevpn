@@ -95,6 +95,9 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	if err != nil {
 		return err
 	}
+	// Tag all downstream logs (forward-to-sudo, health checks) with the connection
+	// ID so concurrent connects can be told apart in the shared user daemon log file.
+	session.Ctx = plog.WithField(session.Ctx, LogFieldConnID, connect.ConnectionID)
 
 	svr.connMu.Lock()
 	existing, _ := svr.findConnection(connect.ConnectionID)
