@@ -815,6 +815,8 @@ func (m *mockConnection) GetWorkloadNamespace() string    { return m.workloadNS 
 func (m *mockConnection) GetAPIServerIPs() []net.IP      { return m.apiServerIPs }
 func (m *mockConnection) GetExtraCIDR() []string         { return m.extraCIDR }
 func (m *mockConnection) GetNetworkExtraHost() []dns.Entry { return m.extraHost }
+func (m *mockConnection) GetSocksListenAddr() string      { return "" }
+func (m *mockConnection) GetSocksEgress() bool            { return false }
 
 // satisfy remaining interface methods not on *ConnectOptions embed (none needed
 // as *ConnectOptions already satisfies the full interface)

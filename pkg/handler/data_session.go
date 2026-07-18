@@ -198,6 +198,12 @@ func (ds *DataSession) GetOriginKubeconfigPath() string {
 	return ds.OriginKubeconfigPath
 }
 
+// GetSocksListenAddr is a data-plane stub: the managed SOCKS5 proxy is a control-plane concern.
+func (ds *DataSession) GetSocksListenAddr() string { return "" }
+
+// GetSocksEgress is a data-plane stub: the managed SOCKS5 proxy is a control-plane concern.
+func (ds *DataSession) GetSocksEgress() bool { return false }
+
 // GetExtraCIDR returns the extra CIDR strings configured for this connection.
 func (ds *DataSession) GetExtraCIDR() []string {
 	return ds.ExtraRouteInfo.ExtraCIDR

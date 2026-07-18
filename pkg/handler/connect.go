@@ -48,7 +48,20 @@ type ConnectOptions struct {
 	// Control-plane only: file sync.
 	syncMu sync.RWMutex
 	Sync   *SyncOptions
+
+	// Control-plane only: user-daemon-managed local SOCKS5 proxy for this connection.
+	// Persisted so status can report them and daemon-restart replay reflects them (the proxy
+	// goroutine itself is stopped via a rollback func and restarted from the replayed
+	// ConnectRequest, so no live handle is stored here).
+	SocksListenAddr string `json:"SocksListenAddr,omitempty"`
+	SocksEgress     bool   `json:"SocksEgress,omitempty"`
 }
+
+// GetSocksListenAddr returns the listen address of the managed SOCKS5 proxy, or "" if none.
+func (c *ConnectOptions) GetSocksListenAddr() string { return c.SocksListenAddr }
+
+// GetSocksEgress reports whether the managed SOCKS5 proxy runs in host-direct egress mode.
+func (c *ConnectOptions) GetSocksEgress() bool { return c.SocksEgress }
 
 // InitClient initializes the Kubernetes clientset, REST client, and config from the given factory.
 func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {

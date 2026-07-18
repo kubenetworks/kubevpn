@@ -61,6 +61,9 @@ func CmdStatus(f cmdutil.Factory) *cobra.Command {
 
 		# query status with output yaml format
 		kubevpn status -o yaml
+
+		# wide output adds the managed SOCKS5 proxy column (address + egress/cluster mode)
+		kubevpn status -o wide
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
@@ -154,11 +157,24 @@ func genConnectMsg(w *tabwriter.Writer, currentConnectionID string, status []*rp
 }
 
 func genConnectWideMsg(w *tabwriter.Writer, currentConnectionID string, status []*rpc.Status) {
-	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "CURRENT", "CONNECTION ID", "CLUSTER", "KUBECONFIG", "NAMESPACE", "STATUS", "NETIF", "IP")
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "CURRENT", "CONNECTION ID", "CLUSTER", "KUBECONFIG", "NAMESPACE", "STATUS", "NETIF", "IP", "SOCKS")
 	for _, c := range status {
 		current := util.If[string](c.ConnectionID == currentConnectionID, "*", "")
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", current, c.ConnectionID, c.Cluster, shortenPath(c.Kubeconfig), c.Namespace, c.Status, c.Netif, c.IPv4)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", current, c.ConnectionID, c.Cluster, shortenPath(c.Kubeconfig), c.Namespace, c.Status, c.Netif, c.IPv4, socksColumn(c))
 	}
+}
+
+// socksColumn renders the managed SOCKS5 proxy column for `status -o wide`:
+// "<addr> (egress|cluster)" when a proxy is running, "-" otherwise.
+func socksColumn(c *rpc.Status) string {
+	if c.SocksListenAddr == "" {
+		return "-"
+	}
+	mode := "cluster"
+	if c.SocksEgress {
+		mode = "egress"
+	}
+	return fmt.Sprintf("%s (%s)", c.SocksListenAddr, mode)
 }
 
 func shortenPath(absPath string) string {
