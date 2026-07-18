@@ -74,8 +74,15 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	}
 	connect.OwnerID = req.OwnerID
 	connect.ConnectionID = req.ConnectionID
+	// Exclude TUN IPs already held by sibling connections (other clusters) so two
+	// clusters never assign the same local TUN IP.
+	connect.ReservedTunIPs = svr.siblingTunIPs
 
+	// Serialize the allocation phase: two concurrent connects must not race their
+	// TUN IP allocation with empty sibling snapshots.
+	svr.connectMu.Lock()
 	err = connect.DoConnect(session.Ctx)
+	svr.connectMu.Unlock()
 	if err != nil {
 		logger.Errorf("Failed to connect...")
 		return err

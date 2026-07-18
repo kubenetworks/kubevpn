@@ -6,7 +6,6 @@ import (
 	"os"
 	"sync"
 
-	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
@@ -28,7 +27,9 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	reqBytes, _ := proto.Marshal(req)
 	ownerID := req.OwnerID
 	if ownerID == "" {
-		ownerID = uuid.New().String()[:12]
+		// Stable per-(machine, OS user) ID so a client reconnects to the same
+		// TUN IP instead of a fresh random one each time.
+		ownerID = config.GetClientID()
 	}
 	connect := &handler.ConnectOptions{
 		ManagerNamespace:     req.Namespace,

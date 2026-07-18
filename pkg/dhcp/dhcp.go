@@ -101,23 +101,31 @@ func (m *Manager) InitDHCP(ctx context.Context) error {
 
 // RentIP allocates the next available IPv4 and IPv6 addresses from the DHCP pool.
 func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
-	return m.RentIPExcluding(ctx, nil)
+	return m.rentIP(ctx, nil, nil, nil)
 }
 
 // RentIPExcluding allocates the next available IPv4 and IPv6 addresses,
 // skipping any IP that matches a local interface address or appears in excludeIPs.
 func (m *Manager) RentIPExcluding(ctx context.Context, excludeIPs []net.IP) (*net.IPNet, *net.IPNet, error) {
-	plog.G(ctx).Debugf("Renting IP from DHCP in namespace %s", m.namespace)
+	return m.rentIP(ctx, nil, nil, excludeIPs)
+}
+
+// RentIPPreferring tries to allocate the given preferred IPv4/IPv6 first, so a
+// reconnecting client reclaims its previous IP. It falls back to the next
+// available address when a preferred IP is unavailable (already allocated, out
+// of range, matches a local interface, or is in excludeIPs).
+func (m *Manager) RentIPPreferring(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs []net.IP) (*net.IPNet, *net.IPNet, error) {
+	return m.rentIP(ctx, prefV4, prefV6, excludeIPs)
+}
+
+// makeShouldSkip returns a predicate reporting whether an IP must be skipped
+// because it matches a local interface address or appears in excludeIPs.
+func makeShouldSkip(excludeIPs []net.IP) func(net.IP) bool {
 	addrs, _ := net.InterfaceAddrs()
-	shouldSkip := func(ip net.IP) bool {
+	return func(ip net.IP) bool {
 		for _, addr := range addrs {
-			if addr == nil {
-				continue
-			}
-			if addrIP, ok := addr.(*net.IPNet); ok {
-				if addrIP.IP.Equal(ip) {
-					return true
-				}
+			if addrIP, ok := addr.(*net.IPNet); ok && addrIP.IP.Equal(ip) {
+				return true
 			}
 		}
 		for _, excluded := range excludeIPs {
@@ -127,30 +135,43 @@ func (m *Manager) RentIPExcluding(ctx context.Context, excludeIPs []net.IP) (*ne
 		}
 		return false
 	}
+}
+
+// allocateOne allocates one address from r: the preferred IP if given and
+// usable, otherwise the next available one. IPs skipped along the way are
+// appended to useless for later release.
+func allocateOne(r *ipallocator.Range, preferred net.IP, shouldSkip func(net.IP) bool, useless *[]net.IP) (net.IP, error) {
+	if preferred != nil && !shouldSkip(preferred) {
+		if err := r.Allocate(preferred); err == nil {
+			return preferred, nil
+		}
+		// preferred unavailable (already allocated / out of range) → fall back
+	}
+	for {
+		ip, err := r.AllocateNext()
+		if err != nil {
+			return nil, err
+		}
+		if !shouldSkip(ip) {
+			return ip, nil
+		}
+		*useless = append(*useless, ip)
+	}
+}
+
+func (m *Manager) rentIP(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs []net.IP) (*net.IPNet, *net.IPNet, error) {
+	plog.G(ctx).Debugf("Renting IP from DHCP in namespace %s", m.namespace)
+	shouldSkip := makeShouldSkip(excludeIPs)
 	var uselessIPs []net.IP
 	var v4, v6 net.IP
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		uselessIPs = nil
 		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
-			for {
-				if v4, err = ipv4.AllocateNext(); err != nil {
-					return err
-				}
-				if !shouldSkip(v4) {
-					break
-				}
-				uselessIPs = append(uselessIPs, v4)
+			if v4, err = allocateOne(ipv4, prefV4, shouldSkip, &uselessIPs); err != nil {
+				return err
 			}
-			for {
-				if v6, err = ipv6.AllocateNext(); err != nil {
-					return err
-				}
-				if !shouldSkip(v6) {
-					break
-				}
-				uselessIPs = append(uselessIPs, v6)
-			}
-			return
+			v6, err = allocateOne(ipv6, prefV6, shouldSkip, &uselessIPs)
+			return err
 		})
 	})
 	if len(uselessIPs) != 0 {
@@ -182,6 +203,13 @@ func (m *Manager) ReleaseIP(ctx context.Context, v4, v6 net.IP) error {
 			return nil
 		})
 	})
+}
+
+// ReleaseIPs returns the given IPs (any mix of IPv4/IPv6) back to the pool,
+// auto-detecting the address family of each. Used to reclaim orphaned bitmap
+// bits that have no owning lease.
+func (m *Manager) ReleaseIPs(ctx context.Context, ips ...net.IP) error {
+	return m.releaseIP(ctx, ips...)
 }
 
 func (m *Manager) releaseIP(ctx context.Context, ips ...net.IP) error {

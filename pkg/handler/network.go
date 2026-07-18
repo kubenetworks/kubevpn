@@ -51,6 +51,11 @@ type NetworkConfig struct {
 
 	// GetRunningPodList returns running traffic manager pods.
 	GetRunningPodList func(ctx context.Context) ([]v1.Pod, error)
+
+	// ReservedTunIPs returns TUN IPs already held by sibling connections (other
+	// clusters) in the same daemon. They are excluded from this connection's
+	// allocation so two clusters don't assign the same local TUN IP. Optional.
+	ReservedTunIPs func() []net.IP
 }
 
 // NetworkManager owns the full networking lifecycle: port-forward, TUN, routes, DNS.
@@ -185,7 +190,7 @@ func (nm *NetworkManager) rentIP(ctx context.Context) error {
 		resp, err := client.GetTunIP(ctx, &rpc.TunIPRequest{
 			OwnerID:    nm.cfg.OwnerID,
 			Namespace:  nm.cfg.ManagerNamespace,
-			ExcludeIPs: collectLocalIPs(),
+			ExcludeIPs: buildExcludeIPs(nm.cfg.ReservedTunIPs),
 		})
 		if err != nil {
 			return fmt.Errorf("get TUN IP from control-plane: %w", err)
@@ -217,6 +222,19 @@ func (nm *NetworkManager) rentIP(ctx context.Context) error {
 	}
 
 	return fmt.Errorf("failed to allocate a non-conflicting TUN IP after %d attempts", maxRetries)
+}
+
+// buildExcludeIPs returns the IPs the TUN allocator must avoid: this host's
+// interface addresses plus any TUN IPs already held by sibling connections
+// (other clusters), so the allocator never hands out a locally-conflicting IP.
+func buildExcludeIPs(reserved func() []net.IP) []string {
+	excludeIPs := collectLocalIPs()
+	if reserved != nil {
+		for _, ip := range reserved() {
+			excludeIPs = append(excludeIPs, ip.String())
+		}
+	}
+	return excludeIPs
 }
 
 func collectLocalIPs() []string {

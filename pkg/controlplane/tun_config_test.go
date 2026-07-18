@@ -9,10 +9,14 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
+	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/dhcp"
 )
 
 func newTestServer(t *testing.T) *TunConfigServer {
@@ -403,5 +407,265 @@ func TestExcludeIPs_PreventsReleaseRentLoop(t *testing.T) {
 		currentIP = newIP.String()
 		excludes = append(excludes, currentIP)
 		t.Logf("round %d: re-allocated to %s", round, currentIP)
+	}
+}
+
+// Fix 1: saveAllocs now writes the whole ConfigMap via an optimistic-locked
+// Update (instead of a per-key JSONPatch). Verify it does NOT clobber the other
+// independently-written keys (ENVOY_CONFIG, CLUSTER_CIDRS, TUN_IP_POOL).
+func TestSaveAllocs_PreservesOtherConfigMapKeys(t *testing.T) {
+	ctx := context.Background()
+	clientset := fake.NewSimpleClientset(
+		&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-ns", UID: "uid-123"}},
+		&v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
+			Data: map[string]string{
+				config.KeyTunIPPool:    "",
+				config.KeyEnvoy:        "envoy-sentinel",
+				config.KeyClusterCIDRs: "cidr-sentinel",
+			},
+		},
+	)
+	s, err := NewTunConfigServer(ctx, clientset, "test-ns")
+	if err != nil {
+		t.Fatalf("NewTunConfigServer: %v", err)
+	}
+
+	if _, err := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "owner-1", Namespace: "test-ns"}); err != nil {
+		t.Fatalf("GetTunIP: %v", err)
+	}
+
+	cm, err := clientset.CoreV1().ConfigMaps("test-ns").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get configmap: %v", err)
+	}
+	if cm.Data[config.KeyEnvoy] != "envoy-sentinel" {
+		t.Errorf("ENVOY_CONFIG clobbered by saveAllocs: %q", cm.Data[config.KeyEnvoy])
+	}
+	if cm.Data[config.KeyClusterCIDRs] != "cidr-sentinel" {
+		t.Errorf("CLUSTER_CIDRS clobbered by saveAllocs: %q", cm.Data[config.KeyClusterCIDRs])
+	}
+	if cm.Data[config.KeyTunAllocs] == "" {
+		t.Error("TUN_ALLOCS not persisted")
+	}
+	if cm.Data[config.KeyTunIPPool] == "" {
+		t.Error("TUN_IP_POOL bitmap not persisted")
+	}
+}
+
+func countAllocatedBits(t *testing.T, s *TunConfigServer) int {
+	t.Helper()
+	count := 0
+	inc := func(net.IP) { count++ }
+	if err := s.dhcp.ForEach(context.Background(), inc, inc); err != nil {
+		t.Fatalf("ForEach: %v", err)
+	}
+	return count
+}
+
+// Fix 2: a bitmap bit with no owning lease (e.g. leaked by a crash between
+// renting and persisting) must be reclaimed by the startup/reaper scrub.
+func TestScrubOrphanBits_ReclaimsLeakedIP(t *testing.T) {
+	ctx := context.Background()
+	clientset := fake.NewSimpleClientset(
+		&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-ns", UID: "uid-123"}},
+		&v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
+			Data:       map[string]string{config.KeyTunIPPool: "", config.KeyEnvoy: ""},
+		},
+	)
+	// Simulate a leak: set bitmap bits via the dhcp manager WITHOUT recording an
+	// owner in TUN_ALLOCS.
+	mgr := dhcp.NewDHCPManager(clientset, "test-ns")
+	if err := mgr.InitDHCP(ctx); err != nil {
+		t.Fatalf("InitDHCP: %v", err)
+	}
+	if _, _, err := mgr.RentIP(ctx); err != nil {
+		t.Fatalf("RentIP: %v", err)
+	}
+
+	// NewTunConfigServer loads allocs (empty) then scrubs orphan bits.
+	s, err := NewTunConfigServer(ctx, clientset, "test-ns")
+	if err != nil {
+		t.Fatalf("NewTunConfigServer: %v", err)
+	}
+	if n := countAllocatedBits(t, s); n != 0 {
+		t.Fatalf("expected 0 allocated bits after scrub, got %d", n)
+	}
+}
+
+// Fix 2: if persisting the allocation fails, GetTunIP must roll back — release
+// the rented IP and drop the in-memory record — so no bitmap bit is orphaned.
+func TestGetTunIP_RollsBackOnPersistFailure(t *testing.T) {
+	ctx := context.Background()
+	clientset := fake.NewSimpleClientset(
+		&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-ns", UID: "uid-123"}},
+		&v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
+			Data:       map[string]string{config.KeyTunIPPool: "", config.KeyEnvoy: ""},
+		},
+	)
+	s, err := NewTunConfigServer(ctx, clientset, "test-ns")
+	if err != nil {
+		t.Fatalf("NewTunConfigServer: %v", err)
+	}
+
+	// saveAllocs uses Get+Update; fail Update so persistence fails. RentIP and
+	// ReleaseIP use Patch, so renting and rollback-release still work.
+	clientset.PrependReactor("update", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("injected update failure")
+	})
+
+	if _, err := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "owner-x", Namespace: "test-ns"}); err == nil {
+		t.Fatal("expected GetTunIP to fail when persistence fails")
+	}
+	if _, ok := s.allocs["owner-x"]; ok {
+		t.Error("in-memory alloc not rolled back")
+	}
+	if n := countAllocatedBits(t, s); n != 0 {
+		t.Errorf("expected bitmap empty after rollback, got %d bits", n)
+	}
+}
+
+// Part B (docs/29): after its lease is reaped, a (stable) owner reclaims the
+// same IP on reconnect even when a lower-numbered free IP exists that plain
+// AllocateNext would have returned.
+func TestGetTunIP_StickyReconnectPrefersRememberedIP(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+
+	a, _ := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns"})
+	_, _ = s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "B", Namespace: "test-ns"})
+	c, _ := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "C", Namespace: "test-ns"})
+	ipA, _, _ := net.ParseCIDR(a.IPv4)
+	ipC, _, _ := net.ParseCIDR(c.IPv4)
+
+	// Reap A and C (B keeps its IP) → frees ipA (low) and ipC (higher).
+	s.mu.Lock()
+	s.allocs["A"].LastRenew = time.Now().Add(-LeaseDuration - time.Minute)
+	s.allocs["C"].LastRenew = time.Now().Add(-LeaseDuration - time.Minute)
+	s.mu.Unlock()
+	s.reapExpiredLeases(ctx)
+
+	// C reconnects → must reclaim ipC, not the lower free ipA.
+	c2, err := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "C", Namespace: "test-ns"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ipC2, _, _ := net.ParseCIDR(c2.IPv4)
+	if !ipC.Equal(ipC2) {
+		t.Fatalf("sticky: expected C to reclaim %s, got %s (lower free ipA=%s)", ipC, ipC2, ipA)
+	}
+}
+
+// Part B: if the remembered IP was taken by someone else, reconnect falls back
+// to a different free IP (no collision).
+func TestGetTunIP_StickyFallsBackWhenRememberedIPTaken(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+
+	a, _ := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns"})
+	ipA, _, _ := net.ParseCIDR(a.IPv4)
+
+	s.mu.Lock()
+	s.allocs["A"].LastRenew = time.Now().Add(-LeaseDuration - time.Minute)
+	s.mu.Unlock()
+	s.reapExpiredLeases(ctx)
+
+	// B grabs the freed (lowest) IP, which is ipA.
+	b, _ := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "B", Namespace: "test-ns"})
+	ipB, _, _ := net.ParseCIDR(b.IPv4)
+	if !ipA.Equal(ipB) {
+		t.Fatalf("setup: expected B to take freed %s, got %s", ipA, ipB)
+	}
+
+	// A reconnects → ipA is taken → must fall back to a different IP.
+	a2, err := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ipA2, _, _ := net.ParseCIDR(a2.IPv4)
+	if ipA2.Equal(ipA) {
+		t.Fatalf("expected fallback away from taken IP %s", ipA)
+	}
+}
+
+// Part B + Fix 3: the remembered IP yields to ExcludeIPs (e.g. a sibling cluster
+// holds it locally), falling back to a different IP.
+func TestGetTunIP_StickyYieldsToExcludeIPs(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+
+	a, _ := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns"})
+	ipA, _, _ := net.ParseCIDR(a.IPv4)
+
+	s.mu.Lock()
+	s.allocs["A"].LastRenew = time.Now().Add(-LeaseDuration - time.Minute)
+	s.mu.Unlock()
+	s.reapExpiredLeases(ctx)
+
+	// A reconnects but excludes its old IP → must not reclaim it.
+	a2, err := s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns", ExcludeIPs: []string{ipA.String()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ipA2, _, _ := net.ParseCIDR(a2.IPv4)
+	if ipA2.Equal(ipA) {
+		t.Fatalf("expected to yield to ExcludeIPs, but reclaimed %s", ipA)
+	}
+}
+
+// Fix 4: a reconcile-driven IP change (NotifyIPChange) must also update the
+// owner's envoy rule IP, not just the watchers — otherwise mesh traffic keeps
+// routing to the stale local TUN IP.
+func TestNotifyIPChange_SyncsEnvoyRuleIP(t *testing.T) {
+	ctx := context.Background()
+	virtuals := []*Virtual{{
+		SchemaVersion: CurrentSchemaVersion,
+		Namespace:     "test-ns",
+		UID:           "deployments.apps.reviews",
+		Rules: []*Rule{{
+			Headers:      map[string]string{},
+			OwnerID:      "owner-1",
+			LocalTunIPv4: "198.18.0.5",
+			LocalTunIPv6: "2001:2::5",
+		}},
+	}}
+	envoyYAML, err := yaml.Marshal(virtuals)
+	if err != nil {
+		t.Fatalf("marshal envoy: %v", err)
+	}
+	clientset := fake.NewSimpleClientset(
+		&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-ns", UID: "uid-123"}},
+		&v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
+			Data:       map[string]string{config.KeyTunIPPool: "", config.KeyEnvoy: string(envoyYAML)},
+		},
+	)
+	s, err := NewTunConfigServer(ctx, clientset, "test-ns")
+	if err != nil {
+		t.Fatalf("NewTunConfigServer: %v", err)
+	}
+
+	newV4 := &net.IPNet{IP: net.ParseIP("198.18.0.9"), Mask: net.CIDRMask(16, 32)}
+	newV6 := &net.IPNet{IP: net.ParseIP("2001:2::9"), Mask: net.CIDRMask(64, 128)}
+	s.NotifyIPChange("owner-1", newV4, newV6)
+
+	// syncEnvoyRuleIP runs asynchronously; poll for the update.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		cm, _ := clientset.CoreV1().ConfigMaps("test-ns").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		vs, perr := parseYaml(cm.Data[config.KeyEnvoy])
+		got := ""
+		if perr == nil && len(vs) == 1 && len(vs[0].Rules) == 1 {
+			got = vs[0].Rules[0].LocalTunIPv4
+		}
+		if got == "198.18.0.9" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("envoy rule IP not synced after NotifyIPChange, got %q want 198.18.0.9", got)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

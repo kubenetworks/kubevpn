@@ -33,6 +33,11 @@ type Server struct {
 	currentConnectionID string
 	connections         []*handler.ConnectOptions
 
+	// connectMu serializes the connect (TUN IP allocation) phase so two
+	// concurrent connects to different clusters cannot race and receive the same
+	// local TUN IP. Held in the root daemon around DoConnect.
+	connectMu sync.Mutex
+
 	sshServerIP   string
 	sshCancelFunc context.CancelFunc
 

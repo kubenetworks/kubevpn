@@ -50,6 +50,11 @@ type ConnectOptions struct {
 	cleanupMu      sync.Mutex
 	cleanedUp      bool
 	network        *NetworkManager
+
+	// ReservedTunIPs returns TUN IPs held by sibling connections in the same
+	// daemon, excluded from this connection's allocation to avoid cross-cluster
+	// local IP collisions. Set by the daemon (data-plane only); not persisted.
+	ReservedTunIPs func() []net.IP `json:"-"`
 	proxyManager   *ProxyManager
 	configMapStore *ConfigMapStore
 
@@ -164,6 +169,7 @@ func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 		Lock:              c.Lock,
 		OwnerID:           c.OwnerID,
 		GetRunningPodList: c.GetRunningPodList,
+		ReservedTunIPs:    c.ReservedTunIPs,
 	})
 	if err = c.network.Start(c.ctx); err != nil {
 		return

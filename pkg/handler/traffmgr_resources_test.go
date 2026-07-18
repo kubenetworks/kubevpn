@@ -3,6 +3,7 @@ package handler
 import (
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -41,6 +42,15 @@ func TestGenDeploySpec_ImagePullSecret(t *testing.T) {
 	secrets := deploy.Spec.Template.Spec.ImagePullSecrets
 	if len(secrets) != 1 || secrets[0].Name != "my-secret" {
 		t.Errorf("expected imagePullSecret 'my-secret', got %v", secrets)
+	}
+}
+
+// Fix 1: the traffic-manager must use the Recreate strategy so at most one
+// control-plane pod (and thus one TunConfigServer lease writer) runs at a time.
+func TestGenDeploySpec_RecreateStrategy(t *testing.T) {
+	deploy := genDeploySpec("ns", "img:latest", "")
+	if deploy.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType {
+		t.Errorf("expected Recreate strategy, got %q", deploy.Spec.Strategy.Type)
 	}
 }
 

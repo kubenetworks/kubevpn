@@ -3,10 +3,30 @@ package action
 import (
 	"context"
 	"fmt"
+	"net"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 )
+
+// siblingTunIPs returns the TUN IPs currently held by all established
+// connections. A new connection excludes these from its own allocation so two
+// clusters never hand out the same local TUN IP.
+func (svr *Server) siblingTunIPs() []net.IP {
+	svr.connMu.RLock()
+	defer svr.connMu.RUnlock()
+	var ips []net.IP
+	for _, conn := range svr.connections {
+		v4, v6 := conn.GetLocalTunIP()
+		if ip := net.ParseIP(v4); ip != nil {
+			ips = append(ips, ip)
+		}
+		if ip := net.ParseIP(v6); ip != nil {
+			ips = append(ips, ip)
+		}
+	}
+	return ips
+}
 
 // findConnection returns the first connection matching the given ID
 // and its index. Returns (nil, -1) if not found.
