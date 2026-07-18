@@ -75,8 +75,10 @@ func TestAddVPNAndEnvoyContainer(t *testing.T) {
 	if vpnContainer.SecurityContext == nil {
 		t.Fatal("vpn container SecurityContext is nil")
 	}
-	if vpnContainer.SecurityContext.Privileged != nil && *vpnContainer.SecurityContext.Privileged {
-		t.Error("vpn container should NOT be privileged — use capabilities instead")
+	// VPN container writes /proc/sys/net/ipv4/ip_forward at startup, which
+	// requires a privileged container.
+	if vpnContainer.SecurityContext.Privileged == nil || !*vpnContainer.SecurityContext.Privileged {
+		t.Error("vpn container should be privileged to write /proc/sys/net/ipv4/ip_forward")
 	}
 	if vpnContainer.SecurityContext.RunAsUser == nil || *vpnContainer.SecurityContext.RunAsUser != 0 {
 		t.Error("vpn container should run as root (uid 0)")
@@ -94,6 +96,12 @@ func TestAddVPNAndEnvoyContainer(t *testing.T) {
 		if !found {
 			t.Errorf("vpn container should have %s capability", cap)
 		}
+	}
+
+	// VPN container startup script uses bash-specific syntax (${b/iptables/ip6tables}
+	// parameter substitution, &> redirect), so it must run under bash, not sh/dash.
+	if len(vpnContainer.Command) == 0 || vpnContainer.Command[0] != "/bin/bash" {
+		t.Errorf("vpn container should run under /bin/bash (script uses bash syntax), got command %v", vpnContainer.Command)
 	}
 
 	// VPN container should have iptables commands in args

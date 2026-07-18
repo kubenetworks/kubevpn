@@ -48,10 +48,11 @@ const (
 )
 
 // reviewsUDPPort is the UDP port declared on the reviews workload
-// (samples/bookinfo.yaml). In mesh full-proxy the envoy UDP listener binds this
+// (samples/bookinfo.yaml), distinct from the TCP 9080 so fargate's per-number
+// port map does not clash. In mesh full-proxy the envoy UDP listener binds this
 // container port and forwards to tunIP:<same port>, so the local udpServer must
 // listen on it and the client must dial it — it cannot be a random port.
-const reviewsUDPPort = 9080
+const reviewsUDPPort = 9081
 
 func TestFunctions(t *testing.T) {
 	u := &ut{}
@@ -908,6 +909,10 @@ func (u *ut) checkServiceShouldNotInNsDefault(t *testing.T) {
 }
 
 func (u *ut) kubectl(t *testing.T) {
+	// Capture KubeVPN sidecar logs first: the kubectl commands below dump pod status
+	// and describe (events, exit codes) but not the sidecar container logs that explain
+	// why traffic did not route or a sidecar crash-looped.
+	dumpKubeVPNSidecarLogs(t, u.clientset)
 	cmdGetPod := exec.Command("kubectl", "get", "pods", "-o", "wide", "-A")
 	cmdGetSvc := exec.Command("kubectl", "get", "services", "-o", "wide", "-A")
 	cmdDescribePod := exec.Command("kubectl", "describe", "pods", "-A")

@@ -865,6 +865,10 @@ func (u *sshUt) checkServiceShouldNotInNsDefault(t *testing.T) {
 }
 
 func (u *sshUt) kubectl(t *testing.T) {
+	// Capture KubeVPN sidecar logs first: the kubectl commands below dump pod status
+	// and describe (events, exit codes) but not the sidecar container logs that explain
+	// why traffic did not route or a sidecar crash-looped.
+	dumpKubeVPNSidecarLogs(t, u.clientset)
 	cmdGetPod := exec.Command("kubectl", "get", "pods", "-o", "wide", "-A")
 	cmdGetSvc := exec.Command("kubectl", "get", "services", "-o", "wide", "-A")
 	cmdDescribePod := exec.Command("kubectl", "describe", "pods", "-A")

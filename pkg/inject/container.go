@@ -45,6 +45,10 @@ func privilegedSecurityContext() *v1.SecurityContext {
 		},
 		RunAsUser:  ptr.To[int64](0),
 		RunAsGroup: ptr.To[int64](0),
+		// The VPN sidecar writes /proc/sys/net/ipv4/ip_forward and related
+		// sysctls at startup, which requires a privileged container — NET_ADMIN
+		// alone does not grant write access to the /proc/sys network knobs.
+		Privileged: ptr.To(true),
 	}
 }
 
@@ -116,7 +120,7 @@ func AddVPNAndEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 b
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarVPN,
 		Image:   image,
-		Command: []string{"/bin/sh", "-c"},
+		Command: []string{"/bin/bash", "-c"},
 		Args: []string{fmt.Sprintf(`
 echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6

@@ -3,15 +3,34 @@ package controlplane
 import (
 	"testing"
 
+	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	httpconnectionmanager "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	tcpproxy "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
+	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	"github.com/envoyproxy/go-control-plane/pkg/wellknown"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
+
+// nonCaptureListeners returns the per-port/UDP listeners, excluding the mesh-mode
+// virtual-inbound capture listener bound on config.PortEnvoyInbound (:15006) that
+// Virtual.To adds for non-fargate Virtuals.
+func nonCaptureListeners(listeners []types.Resource) []*listener.Listener {
+	var out []*listener.Listener
+	for _, res := range listeners {
+		l := res.(*listener.Listener)
+		if l.GetAddress().GetSocketAddress().GetPortValue() == uint32(config.PortEnvoyInbound) {
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
+}
 
 func TestVirtual_IsFargateMode_ExplicitField(t *testing.T) {
 	v := &Virtual{FargateMode: true}
@@ -150,8 +169,8 @@ func TestVirtual_To_IPv6(t *testing.T) {
 	logger := log.NewEntry(log.New())
 	listeners, clusters, _, endpoints := v.To(true, logger)
 
-	if len(listeners) != 1 {
-		t.Fatalf("expected 1 listener, got %d", len(listeners))
+	if got := len(nonCaptureListeners(listeners)); got != 1 {
+		t.Fatalf("expected 1 listener, got %d", got)
 	}
 	// IPv6 mode: each rule generates 2 clusters (v4 + v6) + 1 origin cluster
 	if len(clusters) < 3 {
@@ -201,8 +220,8 @@ func TestVirtual_To_EmptyRules(t *testing.T) {
 	logger := log.NewEntry(log.New())
 	listeners, clusters, routes, _ := v.To(false, logger)
 
-	if len(listeners) != 1 {
-		t.Fatalf("expected 1 listener even with empty rules, got %d", len(listeners))
+	if got := len(nonCaptureListeners(listeners)); got != 1 {
+		t.Fatalf("expected 1 listener even with empty rules, got %d", got)
 	}
 	// Should still have origin cluster for default route
 	if len(clusters) != 1 {
@@ -271,8 +290,160 @@ func TestVirtual_To_UDPProtocol(t *testing.T) {
 	}
 	logger := log.NewEntry(log.New())
 	listeners, _, _, _ := v.To(false, logger)
-	if len(listeners) != 1 {
-		t.Fatalf("expected 1 UDP listener, got %d", len(listeners))
+	if got := len(nonCaptureListeners(listeners)); got != 1 {
+		t.Fatalf("expected 1 UDP listener, got %d", got)
+	}
+}
+
+// TestVirtual_To_UDPDualStack verifies that with IPv6 enabled, a UDP port emits
+// two listeners with DISTINCT names (one per IP family) bound to the matching
+// family address. A shared name would collapse them to one in the xDS snapshot,
+// leaving the surviving listener bound to the wrong family — so the UDP listener
+// would never serve the requested family (observed as the pod refusing UDP).
+func TestVirtual_To_UDPDualStack(t *testing.T) {
+	v := &Virtual{
+		Namespace: "default",
+		UID:       "deployments.apps.dns",
+		Ports: []ContainerPort{
+			{ContainerPort: 53, Protocol: corev1.ProtocolUDP},
+		},
+		Rules: []*Rule{
+			{LocalTunIPv4: "198.18.0.1", LocalTunIPv6: "2001:2::1", PortMap: map[int32]string{53: "53"}},
+		},
+	}
+	logger := log.NewEntry(log.New())
+	listeners, _, _, _ := v.To(true, logger)
+	udpListeners := nonCaptureListeners(listeners)
+	if len(udpListeners) != 2 {
+		t.Fatalf("expected 2 UDP listeners (v4 + v6), got %d", len(udpListeners))
+	}
+	names := map[string]string{} // name -> bind address
+	for _, l := range udpListeners {
+		addr := l.GetAddress().GetSocketAddress()
+		if addr.GetProtocol() != core.SocketAddress_UDP {
+			t.Fatalf("expected UDP protocol, got %v for listener %s", addr.GetProtocol(), l.GetName())
+		}
+		if prev, dup := names[l.GetName()]; dup {
+			t.Fatalf("duplicate UDP listener name %q (would collapse in snapshot); existing bind %s", l.GetName(), prev)
+		}
+		names[l.GetName()] = addr.GetAddress()
+	}
+	var sawV4, sawV6 bool
+	for _, bind := range names {
+		switch bind {
+		case "0.0.0.0":
+			sawV4 = true
+		case "::":
+			sawV6 = true
+		}
+	}
+	if !sawV4 || !sawV6 {
+		t.Fatalf("expected one 0.0.0.0 and one :: UDP listener, got binds %v", names)
+	}
+}
+
+// TestVirtual_To_UDPSkipsEmptyIPv6 verifies that an empty LocalTunIPv6 (IPv6
+// enabled but the rule's v6 TUN IP unpopulated) does NOT emit a second listener
+// with an invalid empty-address endpoint — only the valid v4 listener is emitted.
+func TestVirtual_To_UDPSkipsEmptyIPv6(t *testing.T) {
+	v := &Virtual{
+		Namespace: "default",
+		UID:       "deployments.apps.dns",
+		Ports: []ContainerPort{
+			{ContainerPort: 53, Protocol: corev1.ProtocolUDP},
+		},
+		Rules: []*Rule{
+			{LocalTunIPv4: "198.18.0.1", LocalTunIPv6: "", PortMap: map[int32]string{53: "53"}},
+		},
+	}
+	logger := log.NewEntry(log.New())
+	listeners, _, _, endpoints := v.To(true, logger)
+	if got := len(nonCaptureListeners(listeners)); got != 1 {
+		t.Fatalf("expected 1 UDP listener (empty v6 skipped), got %d", got)
+	}
+	for _, res := range endpoints {
+		cla := res.(*endpoint.ClusterLoadAssignment)
+		for _, ep := range cla.GetEndpoints() {
+			for _, lb := range ep.GetLbEndpoints() {
+				addr := lb.GetEndpoint().GetAddress().GetSocketAddress().GetAddress()
+				if addr == "" {
+					t.Fatalf("endpoint %s has empty address (invalid)", cla.GetClusterName())
+				}
+			}
+		}
+	}
+}
+
+// TestVirtual_To_MeshInboundCaptureListener verifies mesh mode emits the virtual-inbound
+// capture listener bound on config.PortEnvoyInbound (:15006) — the entry point the sidecar
+// iptables DNATs TCP to. Without it, DNAT'd connections hit a closed port and the kernel
+// resets them (observed as "connection reset by peer"). Fargate binds listeners directly
+// and must NOT emit it.
+func TestVirtual_To_MeshInboundCaptureListener(t *testing.T) {
+	mkVirtual := func(fargate bool) *Virtual {
+		v := &Virtual{
+			Namespace: "default",
+			UID:       "deployments.apps.reviews",
+			Ports:     []ContainerPort{{ContainerPort: 9080, Protocol: corev1.ProtocolTCP}},
+			Rules:     []*Rule{{Headers: map[string]string{"env": "test"}, LocalTunIPv4: "198.18.0.1", PortMap: map[int32]string{9080: "9080"}}},
+		}
+		if fargate {
+			v.FargateMode = true
+			v.Ports[0].EnvoyListenerPort = 15080
+		}
+		return v
+	}
+
+	logger := log.NewEntry(log.New())
+
+	// Mesh mode: capture listener present and correctly shaped.
+	listeners, clusters, _, _ := mkVirtual(false).To(false, logger)
+	var capture *listener.Listener
+	for _, res := range listeners {
+		l := res.(*listener.Listener)
+		if l.GetAddress().GetSocketAddress().GetPortValue() == uint32(config.PortEnvoyInbound) {
+			capture = l
+		}
+	}
+	if capture == nil {
+		t.Fatal("mesh mode must emit the :15006 inbound capture listener")
+	}
+	if capture.GetAddress().GetSocketAddress().GetProtocol() != core.SocketAddress_TCP {
+		t.Error("capture listener must be TCP")
+	}
+	if capture.GetBindToPort() == nil || !capture.GetBindToPort().GetValue() {
+		t.Error("capture listener must bind to port")
+	}
+	if !capture.GetUseOriginalDst().GetValue() {
+		t.Error("capture listener must set use_original_dst")
+	}
+	var hasOrigDstFilter bool
+	for _, lf := range capture.GetListenerFilters() {
+		if lf.GetName() == wellknown.OriginalDestination {
+			hasOrigDstFilter = true
+		}
+	}
+	if !hasOrigDstFilter {
+		t.Error("capture listener must have the original_dst listener filter")
+	}
+	// The passthrough filter chain routes to origin_cluster, which must exist.
+	var hasOrigin bool
+	for _, res := range clusters {
+		if c, ok := res.(*cluster.Cluster); ok && c.GetName() == "origin_cluster" {
+			hasOrigin = true
+		}
+	}
+	if !hasOrigin {
+		t.Error("origin_cluster must exist for the capture passthrough")
+	}
+
+	// Fargate mode: NO capture listener (listeners bind directly).
+	flisteners, _, _, _ := mkVirtual(true).To(false, logger)
+	for _, res := range flisteners {
+		l := res.(*listener.Listener)
+		if l.GetAddress().GetSocketAddress().GetPortValue() == uint32(config.PortEnvoyInbound) {
+			t.Error("fargate mode must NOT emit the :15006 capture listener")
+		}
 	}
 }
 
@@ -297,14 +468,14 @@ func TestVirtual_To_MultiplePortsTCP(t *testing.T) {
 	listeners, clusters, routes, endpoints := v.To(false, logger)
 
 	// Each port should produce one listener
-	if len(listeners) != 2 {
-		t.Fatalf("expected 2 listeners for 2 TCP ports, got %d", len(listeners))
+	portListeners := nonCaptureListeners(listeners)
+	if len(portListeners) != 2 {
+		t.Fatalf("expected 2 listeners for 2 TCP ports, got %d", len(portListeners))
 	}
 
 	// Verify both listeners are TCP on the correct ports
 	ports := map[uint32]bool{}
-	for _, res := range listeners {
-		l := res.(*listener.Listener)
+	for _, l := range portListeners {
 		addr := l.GetAddress().GetSocketAddress()
 		if addr.GetProtocol() != core.SocketAddress_TCP {
 			t.Fatalf("expected TCP protocol, got %v for listener %s", addr.GetProtocol(), l.GetName())
@@ -318,9 +489,9 @@ func TestVirtual_To_MultiplePortsTCP(t *testing.T) {
 		t.Fatal("missing listener on port 9090")
 	}
 
-	// Each port: 1 rule cluster + 1 origin cluster = 2 clusters per port = 4 total
-	if len(clusters) < 4 {
-		t.Fatalf("expected at least 4 clusters for 2 ports with 1 rule, got %d", len(clusters))
+	// 1 rule cluster per port (2) + 1 shared origin_cluster (created once per Virtual) = 3
+	if len(clusters) < 3 {
+		t.Fatalf("expected at least 3 clusters for 2 ports with 1 rule, got %d", len(clusters))
 	}
 
 	// Should have 2 route configs (one per port)
@@ -354,13 +525,13 @@ func TestVirtual_To_MixedProtocols(t *testing.T) {
 	logger := log.NewEntry(log.New())
 	listeners, _, _, _ := v.To(false, logger)
 
-	if len(listeners) != 2 {
-		t.Fatalf("expected 2 listeners (1 TCP + 1 UDP), got %d", len(listeners))
+	portListeners := nonCaptureListeners(listeners)
+	if len(portListeners) != 2 {
+		t.Fatalf("expected 2 listeners (1 TCP + 1 UDP), got %d", len(portListeners))
 	}
 
 	var tcpCount, udpCount int
-	for _, res := range listeners {
-		l := res.(*listener.Listener)
+	for _, l := range portListeners {
 		addr := l.GetAddress().GetSocketAddress()
 		switch addr.GetProtocol() {
 		case core.SocketAddress_TCP:
