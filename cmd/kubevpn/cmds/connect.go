@@ -31,6 +31,7 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	var sshConf = &pkgssh.SshConfig{}
 	var transferImage, foreground bool
 	var enableSocks bool
+	var enableEgress bool
 	var socksListen string
 	var imagePullSecretName string
 	var managerNamespace string
@@ -52,6 +53,10 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 		# Connect and start a managed local SOCKS5 proxy for nested VPN cases
 		kubevpn connect --socks
 		curl --proxy socks5h://127.0.0.1:1080 http://productpage.default.svc.cluster.local:9080
+
+		# Connect and start a host-egress SOCKS5 proxy (reach the internet and the cluster through the host)
+		kubevpn connect --socks --egress
+		curl --proxy socks5h://127.0.0.1:1080 https://www.google.com
 
 		# Connect to api-server behind of bastion host or ssh jump host
 		kubevpn connect --ssh-addr 192.168.1.100:22 --ssh-username root --ssh-keyfile ~/.ssh/ssh.pem
@@ -83,6 +88,9 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			return err
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if enableEgress && !enableSocks {
+				return fmt.Errorf("--egress must be used together with --socks")
+			}
 			bytes, ns, err := util.ConvertToKubeConfigBytes(f)
 			if err != nil {
 				return err
@@ -104,6 +112,9 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 				ImagePullSecretName: imagePullSecretName,
 				Level:               int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
 				ManagerNamespace:    managerNamespace,
+				EnableSocks:         enableSocks,
+				SocksListen:         socksListen,
+				SocksEgress:         enableEgress,
 			}
 			// if is foreground, send to sudo daemon server
 			cli, err := daemon.GetClient(false)
@@ -122,21 +133,12 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			connectionID, err := printConnectGRPCStream(cmd.Context(), resp, os.Stdout)
+			_, err = printConnectGRPCStream(cmd.Context(), resp, os.Stdout)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil
 				}
 				return err
-			}
-			if enableSocks {
-				if connectionID == "" {
-					return fmt.Errorf("connected but missing connection ID for socks proxy startup")
-				}
-				if err := startManagedSocksProxy(connectionID, bytes, ns, socksListen); err != nil {
-					return err
-				}
-				printManagedSocksStarted(os.Stdout, connectionID, socksListen)
 			}
 			if !foreground {
 				printSlogan(os.Stdout)
@@ -153,7 +155,8 @@ func CmdConnect(f cmdutil.Factory) *cobra.Command {
 	}
 	handler.AddCommonFlags(cmd.Flags(), &transferImage, &imagePullSecretName)
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "Hang up")
-	cmd.Flags().BoolVar(&enableSocks, "socks", false, "Start a managed local SOCKS5 proxy after connect for nested VPN or route-conflict cases")
+	cmd.Flags().BoolVar(&enableSocks, "socks", false, "Start a user-daemon-managed local SOCKS5 proxy after connect for nested VPN or route-conflict cases")
+	cmd.Flags().BoolVar(&enableEgress, "egress", false, "With --socks: the managed proxy dials directly from the host (host DNS + network, socks5h egress), reaching the internet and — under this VPN — the cluster too")
 	cmd.Flags().StringVar(&socksListen, "socks-listen", "127.0.0.1:1080", "Listen address for the managed local SOCKS5 proxy")
 	cmd.Flags().StringVar(&managerNamespace, "manager-namespace", "", "The namespace where the traffic manager is to be found. Only works in cluster mode (install kubevpn server by helm)")
 
@@ -167,7 +170,6 @@ func printConnectGRPCStream(ctx context.Context, clientStream grpc.ClientStream,
 }
 
 func disconnect(cli rpc.DaemonClient, bytes []byte, ns string, sshConf *pkgssh.SshConfig) error {
-	connectionID, _ := connectionIDFromKubeconfigBytes(bytes, ns)
 	resp, err := cli.Disconnect(context.Background())
 	if err != nil {
 		plog.G(context.Background()).Errorf("Disconnect error: %v", err)
@@ -190,19 +192,5 @@ func disconnect(cli rpc.DaemonClient, bytes []byte, ns string, sshConf *pkgssh.S
 		}
 		return err
 	}
-	if connectionID != "" {
-		_ = stopManagedProxy(connectionID)
-		printManagedSocksStopped(os.Stdout, connectionID)
-	}
 	return nil
-}
-
-func connectionIDFromKubeconfigBytes(bytes []byte, ns string) (string, error) {
-	// In-process Factory only — build it straight from bytes, no temp file.
-	factory := util.InitFactoryByBytes(bytes, ns)
-	connect := &handler.ConnectOptions{}
-	if err := connect.InitClient(factory); err != nil {
-		return "", err
-	}
-	return util.GetConnectionID(context.Background(), connect.GetClientset().CoreV1().Namespaces(), connect.ManagerNamespace)
 }

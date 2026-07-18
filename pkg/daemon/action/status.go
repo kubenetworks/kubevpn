@@ -161,14 +161,16 @@ func buildConnectionStatus(connect handler.Connection, ips map[string]tunIP) *rp
 	}
 
 	info := rpc.Status{
-		ConnectionID: connect.GetConnectionID(),
-		Cluster:      util.GetKubeconfigCluster(connect.GetFactory()),
-		Kubeconfig:   connect.GetOriginKubeconfigPath(),
-		Namespace:    connect.GetWorkloadNamespace(),
-		Status:       resolveStatus(connect, ips, tunName != ""),
-		Netif:        tunName,
-		IPv4:         v4,
-		IPv6:         v6,
+		ConnectionID:    connect.GetConnectionID(),
+		Cluster:         util.GetKubeconfigCluster(connect.GetFactory()),
+		Kubeconfig:      connect.GetOriginKubeconfigPath(),
+		Namespace:       connect.GetWorkloadNamespace(),
+		Status:          resolveStatus(connect, ips, tunName != ""),
+		Netif:           tunName,
+		IPv4:            v4,
+		IPv6:            v6,
+		SocksListenAddr: connect.GetSocksListenAddr(),
+		SocksEgress:     connect.GetSocksEgress(),
 	}
 	return &info
 }

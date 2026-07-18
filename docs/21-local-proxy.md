@@ -88,6 +88,24 @@ type ClusterConnector struct {
 3. Map service port to target pod port
 4. `PodDialer.DialPod(ctx, namespace, podName, podPort)` → kubectl port-forward
 
+### 3.6b HostConnector (`host.go`)
+
+An alternative `Connector` that dials targets **directly from the host** using the host's own
+DNS resolver and network stack (`net.Dialer.DialContext`), bounded by `config.DialTimeout`:
+
+```go
+type HostConnector struct { dialer net.Dialer }
+func (c *HostConnector) Connect(ctx, host, port) (net.Conn, error) // net.Dial host:port
+```
+
+Combined with the servers' hostname pass-through (socks5h), it reaches:
+- the **public internet** via the host's default route, and
+- **cluster** Services/Pods too, **when a KubeVPN TUN is active** (the TUN routes + cluster DNS
+  are installed host-wide, so `net.Dial` to a ClusterIP / cluster name is transparently tunneled).
+
+Unlike `ClusterConnector` it does **no** Kubernetes API lookup and **no** port-forward, so it needs
+no cluster client. Selected by `proxy-out --egress` and by `connect --socks --egress`.
+
 ### 3.7 PodDialer (`portforward.go`)
 
 ```go
@@ -124,4 +142,27 @@ type ClusterAPI interface {
 | `pkg/localproxy/httpconnect.go` | HTTP CONNECT proxy handler |
 | `pkg/localproxy/relay.go` | Bidirectional connection relay |
 | `pkg/localproxy/cluster.go` | ClusterConnector, ClusterAPI, service resolution |
+| `pkg/localproxy/host.go` | HostConnector — direct host-network dial (socks5h egress) |
 | `pkg/localproxy/portforward.go` | PodDialer, kubectl port-forward |
+
+## 5. Invocation modes
+
+The proxy is exposed two ways:
+
+### 5.1 `kubevpn proxy-out` (standalone, no daemon)
+
+Runs the `Server` in the foreground of the CLI process — no daemon, no TUN, no privileges.
+`--egress` selects `HostConnector`; otherwise `ClusterConnector`. Designed for nested-VPN cases
+where OS routes are owned by another VPN client, or for pure host egress.
+
+### 5.2 `kubevpn connect --socks` (user-daemon-managed)
+
+`connect --socks` (optionally `--egress`) sets `ConnectRequest.{EnableSocks,SocksListen,SocksEgress}`.
+The **user daemon** starts the `Server` as an in-process goroutine once the connection is live
+(`forwardConnectToSudo` → `startManagedSocksProxy`), bound to the connection's `SessionLifecycle.Ctx`
+and stopped via an `AddRollbackFunc` on disconnect/quit. Because `SocksListen`/`SocksEgress` travel in
+the persisted `ConnectRequest` (`RequestRaw`), a daemon restart replays the connection and restarts the
+proxy automatically. `kubevpn status -o wide` shows the listen address and mode (`egress`/`cluster`);
+`-o json`/`-o yaml` expose `SocksListenAddr` / `SocksEgress`.
+
+(This replaces the earlier model that forked a detached `proxy-out` subprocess tracked by a PID file.)

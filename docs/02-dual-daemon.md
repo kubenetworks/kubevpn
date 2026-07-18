@@ -4,7 +4,7 @@
 
 KubeVPN uses a dual-process architecture (User Daemon + Root Daemon), where each process holds an **independent session instance** with completely different field semantics and usage scenarios. After the C2-A refactoring, the two session types are:
 
-- **`ConnectOptions`** (= `ControlSession`) — User Daemon. Manages traffic manager, proxy injection, persistence.
+- **`ConnectOptions`** (= `ControlSession`) — User Daemon. Manages traffic manager, proxy injection, persistence, and the per-connection user-daemon-managed local SOCKS5 proxy (`connect --socks`, started in `forwardConnectToSudo`).
 - **`DataSession`** — Root Daemon. Manages TUN device, routing, DNS, and the NetworkManager lifecycle.
 
 Both types implement the `Connection` interface. Both embed `SessionBase` (K8s client bundle + rollback lifecycle). They do NOT share memory across daemon boundaries.

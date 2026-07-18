@@ -10,6 +10,7 @@ plugins
 !README.md
 bin/*
 !bin/kubevpn
+!bin/kubevpn-linux-*
 coverage.*
 *.txt
 .golangci.yml

@@ -75,6 +75,12 @@ type Connection interface {
 	// GetOriginKubeconfigPath returns the original kubeconfig file path.
 	GetOriginKubeconfigPath() string
 
+	// GetSocksListenAddr returns the listen address of the managed SOCKS5 proxy, or "" if none.
+	GetSocksListenAddr() string
+
+	// GetSocksEgress reports whether the managed SOCKS5 proxy runs in host-direct egress mode.
+	GetSocksEgress() bool
+
 	// GetSync returns the SyncOptions associated with this connection, or nil.
 	GetSync() *SyncOptions
 

@@ -42,6 +42,32 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 )
 
+// startDeadlockWatchdog spawns a goroutine that reports msg via t.Errorf ONLY
+// when ctx reaches its deadline while the test is still running. Every test here
+// tears down with `close(done); cancel()`; a naive `select { case <-done; case
+// <-ctx.Done() }` watchdog races those two events and, when the select happens to
+// pick ctx.Done() after the test has already returned, calls t.Errorf on a
+// completed test — which Go turns into "panic: Fail in goroutine after <test> has
+// completed", crashing the whole test binary. Guarding on DeadlineExceeded (normal
+// teardown cancels the ctx, yielding context.Canceled, not DeadlineExceeded) plus
+// a non-blocking re-check of done eliminates that race: a real deadlock keeps the
+// test blocked in wg.Wait() past 5s → DeadlineExceeded → msg; normal completion
+// never reports.
+func startDeadlockWatchdog(t *testing.T, ctx context.Context, done <-chan struct{}, msg string) {
+	go func() {
+		<-ctx.Done()
+		if ctx.Err() != context.DeadlineExceeded {
+			return
+		}
+		select {
+		case <-done:
+			// Finished normally right at the deadline boundary — not a deadlock.
+		default:
+			t.Errorf("%s", msg)
+		}
+	}()
+}
+
 // readConnectionIDs is a lightweight read helper used by reader goroutines in
 // place of ConnectionList. ConnectionList calls buildConnectionStatus which
 // invokes util.GetKubeconfigCluster(factory) — factory is nil on stub
@@ -165,14 +191,8 @@ func TestConcurrency_DisconnectVsRead(t *testing.T) {
 	done := make(chan struct{})
 	var wg sync.WaitGroup
 
-	// Deadlock watchdog: if the test does not finish within 5s, call t.Fatal.
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			t.Errorf("possible deadlock: test did not finish within timeout")
-		}
-	}()
+	// Deadlock watchdog: fires only on a genuine 5s timeout, never on normal teardown.
+	startDeadlockWatchdog(t, ctx, done, "possible deadlock: test did not finish within timeout")
 
 	// Writer goroutines: simulate the disconnect path (disconnect.go:85-91).
 	// Each goroutine removes exactly one connection by ID. Cleanup runs outside lock.
@@ -251,13 +271,7 @@ func TestConcurrency_DisconnectVsConnectionUse(t *testing.T) {
 	defer cancel()
 
 	done := make(chan struct{})
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			t.Errorf("possible deadlock: test did not finish within timeout")
-		}
-	}()
+	startDeadlockWatchdog(t, ctx, done, "possible deadlock: test did not finish within timeout")
 
 	var wg sync.WaitGroup
 
@@ -336,13 +350,7 @@ func TestConcurrency_DoubleRemoveSameID(t *testing.T) {
 	defer cancel()
 
 	done := make(chan struct{})
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			t.Errorf("possible deadlock in double-remove test")
-		}
-	}()
+	startDeadlockWatchdog(t, ctx, done, "possible deadlock in double-remove test")
 
 	var wg sync.WaitGroup
 	var totalRemoved atomic.Int64
@@ -429,13 +437,7 @@ func TestConcurrency_QuitStyleClearVsReads(t *testing.T) {
 	defer cancel()
 
 	done := make(chan struct{})
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			t.Errorf("possible deadlock in quit-style test")
-		}
-	}()
+	startDeadlockWatchdog(t, ctx, done, "possible deadlock in quit-style test")
 
 	var wg sync.WaitGroup
 	stopReaders := make(chan struct{})
@@ -516,13 +518,7 @@ func TestConcurrency_MixedHighFrequency(t *testing.T) {
 	defer cancel()
 
 	done := make(chan struct{})
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			t.Errorf("possible deadlock in mixed high-frequency test")
-		}
-	}()
+	startDeadlockWatchdog(t, ctx, done, "possible deadlock in mixed high-frequency test")
 
 	deadline := time.Now().Add(duration)
 	var wg sync.WaitGroup

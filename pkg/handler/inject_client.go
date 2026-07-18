@@ -18,23 +18,60 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-// managerDialTimeout bounds how long we wait to reach the traffic manager's
-// TunConfigService over the VPN before failing. The server-side operation itself
-// (rollout wait) can take much longer, so this bounds only connection setup.
-const managerDialTimeout = 5 * time.Second
+const (
+	// managerDialTimeout bounds a single attempt to reach the traffic manager's
+	// TunConfigService over the VPN. The server-side operation itself (rollout wait)
+	// can take much longer, so this bounds only connection setup.
+	managerDialTimeout = 5 * time.Second
 
-// dialManager dials the traffic manager's TunConfigService over the VPN (its Service
-// ClusterIP:9002, reachable once connected). Injection is server-side only (no local
-// fallback), so an unreachable manager is a hard error. Blocking dial bounds the wait.
-func (c *ConnectOptions) dialManager(ctx context.Context) (*grpc.ClientConn, error) {
-	svc, err := c.clientset.CoreV1().Services(c.ManagerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	// managerDialRetryBudget bounds the total time the inbound-injection dial retries
+	// across transient failures. Inbound injection dials the manager over a VPN that
+	// was just brought up, and its data path (k8s port-forward) can briefly wedge and
+	// self-heal — network.go's watchLiveness forces a reconnect within
+	// livenessStartupDeadline (30s). A single un-retried 5s dial that lands in that
+	// window aborts the whole connect ("envoy sidecar injection failed"); retrying past
+	// 30s turns the blip into a short delay instead. Leave stays single-shot (best
+	// effort — the manager's lease reaper reclaims rules), so only inject retries.
+	managerDialRetryBudget = 45 * time.Second
+
+	// managerDialRetryBackoff is the pause between inbound-injection dial attempts.
+	managerDialRetryBackoff = 2 * time.Second
+)
+
+// resolveManagerAddr looks up the traffic manager Service and returns its xDS dial
+// address (ClusterIP:9002). A missing Service or a headless/empty ClusterIP is a
+// permanent configuration error, NOT a transient one — callers must fail fast on it
+// rather than retry (injection is server-side only, with no local fallback).
+func (c *ConnectOptions) resolveManagerAddr(ctx context.Context) (string, error) {
+	// Bound only this apiserver GET: without a deadline it inherits client-go's ~30s dial
+	// timeout, so a teardown against an unreachable cluster stalls ~30s here. The dial and
+	// gRPC stream that follow use the caller's ctx and are unaffected.
+	getCtx, cancel := context.WithTimeout(ctx, config.ManagerServiceGetTimeout)
+	defer cancel()
+	svc, err := c.clientset.CoreV1().Services(c.ManagerNamespace).Get(getCtx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("get traffic manager service: %w", err)
+		return "", fmt.Errorf("get traffic manager service: %w", err)
 	}
 	if svc.Spec.ClusterIP == "" || svc.Spec.ClusterIP == v1.ClusterIPNone {
-		return nil, fmt.Errorf("traffic manager service has no ClusterIP")
+		return "", fmt.Errorf("traffic manager service has no ClusterIP")
 	}
-	addr := net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(int(config.PortXDS)))
+	return net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(int(config.PortXDS))), nil
+}
+
+// dialManager dials the traffic manager's TunConfigService over the VPN (its Service
+// ClusterIP:9002, reachable once connected). Single blocking attempt bounded by
+// managerDialTimeout — used by the best-effort leave path (the manager's lease reaper
+// reclaims rules if it fails, so leave does not retry).
+func (c *ConnectOptions) dialManager(ctx context.Context) (*grpc.ClientConn, error) {
+	addr, err := c.resolveManagerAddr(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return c.dialManagerAddr(ctx, addr)
+}
+
+// dialManagerAddr performs one blocking gRPC dial to addr, bounded by managerDialTimeout.
+func (c *ConnectOptions) dialManagerAddr(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, managerDialTimeout)
 	defer cancel()
 	conn, err := grpc.DialContext(dialCtx, addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
@@ -44,6 +81,34 @@ func (c *ConnectOptions) dialManager(ctx context.Context) (*grpc.ClientConn, err
 	return conn, nil
 }
 
+// dialManagerWithRetry resolves the manager address once (permanent errors fail fast),
+// then retries only the blocking dial with a fixed backoff up to managerDialRetryBudget.
+// This absorbs a transient port-forward reconnect right after the VPN comes up, so
+// inbound injection does not abort the entire connect on a single timed-out dial. It
+// stops early if ctx is cancelled; the last dial error is returned.
+func (c *ConnectOptions) dialManagerWithRetry(ctx context.Context) (*grpc.ClientConn, error) {
+	addr, err := c.resolveManagerAddr(ctx)
+	if err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(managerDialRetryBudget)
+	for attempt := 1; ; attempt++ {
+		conn, err := c.dialManagerAddr(ctx, addr)
+		if err == nil {
+			return conn, nil
+		}
+		if ctx.Err() != nil || !time.Now().Add(managerDialRetryBackoff).Before(deadline) {
+			return nil, err
+		}
+		plog.G(ctx).Debugf("dial traffic manager %s failed (attempt %d), retrying in %s: %v", addr, attempt, managerDialRetryBackoff, err)
+		select {
+		case <-time.After(managerDialRetryBackoff):
+		case <-ctx.Done():
+			return nil, err
+		}
+	}
+}
+
 // createRemoteInboundViaManager performs sidecar injection server-side: it dials the
 // traffic manager's ProxyInject RPC over the VPN and streams progress. Injection runs
 // entirely in the pod with the manager's own ServiceAccount; there is no local fallback,
@@ -51,7 +116,7 @@ func (c *ConnectOptions) dialManager(ctx context.Context) (*grpc.ClientConn, err
 // success it starts the client-side port Mapper for any K8s Service workloads the manager
 // reports — the SSH reverse tunnels to the developer's machine cannot run in the pod.
 func (c *ConnectOptions) createRemoteInboundViaManager(ctx context.Context, namespace string, headers map[string]string, portMap []string, image, localTunIPv4, localTunIPv6 string, workloads []string) error {
-	conn, err := c.dialManager(ctx)
+	conn, err := c.dialManagerWithRetry(ctx)
 	if err != nil {
 		return err
 	}

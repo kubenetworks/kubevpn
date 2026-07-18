@@ -13,9 +13,13 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/localproxy"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
+
+// defaultSocksListen is the fallback listen address for the managed SOCKS5 proxy.
+const defaultSocksListen = "127.0.0.1:1080"
 
 func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc.Daemon_ConnectServer, logger *log.Logger) (err error) {
 	cli, err := svr.GetClient(true)
@@ -196,10 +200,72 @@ func (svr *Server) forwardConnectToSudo(
 	svr.connections = append(svr.connections, connect)
 	svr.currentConnectionID = connectionID
 	svr.connMu.Unlock()
+
+	// Start the user-daemon-managed local SOCKS5 proxy (if requested) now that the
+	// connection is live. It runs in-process, bound to the connection's context, and is
+	// stopped via a rollback func on disconnect/quit.
+	startManagedSocksProxy(ctx, connect, req)
+
 	// Refresh the cached sudo-daemon health snapshot so the very next status query
 	// sees this connection as "connected" instead of hitting a stale (pre-connect) cache.
 	svr.refreshSudoHealth(ctx)
 	return resp.Send(&rpc.ConnectResponse{
 		ConnectionID: connectionID,
 	})
+}
+
+// startManagedSocksProxy launches a user-daemon-managed local SOCKS5 proxy for the
+// connection when req.EnableSocks is set. The proxy runs as a goroutine bound to a child of
+// the connection's context and is stopped via a rollback func (invoked on disconnect/quit).
+// With SocksEgress it dials directly from the host (host DNS + network, socks5h egress);
+// otherwise it resolves cluster Services and port-forwards via the Kubernetes API. Failures
+// (e.g. listen address in use) are logged, not fatal — they must not abort a live connect.
+func startManagedSocksProxy(ctx context.Context, connect *handler.ConnectOptions, req *rpc.ConnectRequest) {
+	if !req.GetEnableSocks() {
+		return
+	}
+	listen := req.GetSocksListen()
+	if listen == "" {
+		listen = defaultSocksListen
+	}
+	connect.SocksListenAddr = listen
+	connect.SocksEgress = req.GetSocksEgress()
+
+	socksCtx, cancel := context.WithCancel(ctx)
+	connect.AddRollbackFunc(func() error {
+		cancel()
+		return nil
+	})
+
+	var connector localproxy.Connector
+	if req.GetSocksEgress() {
+		connector = localproxy.NewHostConnector()
+	} else {
+		restConfig, err := connect.GetFactory().ToRESTConfig()
+		if err != nil {
+			plog.G(ctx).Errorf("Local SOCKS proxy not started (rest config): %v", err)
+			cancel()
+			return
+		}
+		clusterAPI, clientset, err := localproxy.NewClusterAPI(restConfig)
+		if err != nil {
+			plog.G(ctx).Errorf("Local SOCKS proxy not started (cluster api): %v", err)
+			cancel()
+			return
+		}
+		connector = &localproxy.ClusterConnector{
+			Client:           clusterAPI,
+			Forwarder:        localproxy.NewPodDialer(restConfig, clientset),
+			RESTConfig:       restConfig,
+			DefaultNamespace: connect.GetWorkloadNamespace(),
+		}
+	}
+
+	go func() {
+		srv := &localproxy.Server{Connector: connector, SOCKSListenAddr: listen}
+		if err := srv.ListenAndServe(socksCtx); err != nil {
+			plog.G(ctx).Warnf("Local SOCKS proxy on %s stopped: %v", listen, err)
+		}
+	}()
+	plog.G(ctx).Infof("Started managed local SOCKS5 proxy on %s (egress=%t)", listen, req.GetSocksEgress())
 }

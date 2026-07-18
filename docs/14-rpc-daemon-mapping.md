@@ -8,7 +8,7 @@ Both user daemon and root daemon register the same `Server` struct with all RPC 
 
 | RPC Method | CLI calls | Runs in | IsSudo check | Forwards to | Notes |
 |---|---|---|---|---|---|
-| `Connect` | user daemon | **both** | ✅ line 18,38 | user→sudo (via `redirectConnectToSudoDaemon`) | User: control plane (traffic mgr, proxy inject). Sudo: data plane (TUN, DHCP, DNS) |
+| `Connect` | user daemon | **both** | ✅ line 18,38 | user→sudo (via `redirectConnectToSudoDaemon`) | User: control plane (traffic mgr, proxy inject; also starts the managed SOCKS5 proxy when `ConnectRequest.EnableSocks`, mode per `SocksEgress`/`SocksListen`). Sudo: data plane (TUN, DHCP, DNS) |
 | `Disconnect` | user daemon | **both** | ✅ line 20,45 | user→sudo (forwards first, then cleans up user side) | User: disconnect sudo first, then clean up SSH/connections |
 | `Proxy` | user daemon | **user only** | ❌ | user→user self-call (`Connect`), then inject sidecar | Calls `GetClient(false)` to run Connect flow on itself |
 | `Leave` | user daemon | **user only** | ❌ | — | Operates on `currentConnectionID` (user daemon state) |

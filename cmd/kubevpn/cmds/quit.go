@@ -37,7 +37,6 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
 			// leaking proxy sidecars/rules until the manager's lease reaper reclaims them.
 			_ = quit(cmd.Context(), false)
 			_ = quit(cmd.Context(), true)
-			_ = stopAllManagedProxies()
 			util.CleanExtensionLib()
 			printSuccess(os.Stdout, "Exited")
 			return nil
