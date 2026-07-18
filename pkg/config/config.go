@@ -70,6 +70,8 @@ const (
 	PortNameDNS = "53-for-dns"
 	// PortDNS is the traffic-manager DNS service port number.
 	PortDNS = 53
+	// PortNameUDP is the traffic-manager service port name for UDP tunneling (over TCP).
+	PortNameUDP = "10802-for-udp"
 	// PortUDP is the traffic-manager UDP tunnel port number.
 	PortUDP = 10802
 	// PortSSH is the traffic-manager SSH tunnel port number (service/fargate mode and reverse tunnel).

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"runtime"
 	"slices"
 	"sync"
@@ -32,6 +33,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/driver"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
@@ -59,6 +61,11 @@ type NetworkConfig struct {
 	// clusters) in the same daemon. They are excluded from this connection's
 	// allocation so two clusters don't assign the same local TUN IP. Optional.
 	ReservedTunIPs func() []net.IP
+
+	// SshConf, when non-nil, enables automatic SSH data-plane probe: if the SSH
+	// host can reach the traffic manager's ClusterIP, port forwarding is done via
+	// SSH tunnel instead of kubectl port-forward (bypassing the API server).
+	SshConf *ssh.SshConfig
 }
 
 // NetworkManager owns the full networking lifecycle: port-forward, TUN, routes, DNS.
@@ -184,8 +191,15 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 		fmt.Sprintf("%d:%d", controlPlanePort, config.PortXDS),
 	}
 
-	if err := nm.portForward(nm.ctx, portPair); err != nil {
-		return err
+	if clusterIP, ok := nm.probeSSHDataPlane(nm.ctx); ok {
+		plog.G(nm.ctx).Infof("SSH host can reach ClusterIP %s, using SSH tunnel for data plane", clusterIP)
+		if err := nm.sshForward(nm.ctx, clusterIP, portPair); err != nil {
+			return err
+		}
+	} else {
+		if err := nm.portForward(nm.ctx, portPair); err != nil {
+			return err
+		}
 	}
 	plog.StepDone(nm.ctx, "Forwarded ports (TCP/UDP/xDS)")
 
@@ -659,6 +673,64 @@ func nextPortForwardDelay(cur, sessionDuration time.Duration) time.Duration {
 		next = portForwardReconnectMaxDelay
 	}
 	return next
+}
+
+// probeSSHDataPlane checks whether the SSH host can reach the traffic manager's
+// ClusterIP directly (i.e., the SSH host is a K8s node with kube-proxy). Returns
+// the ClusterIP and true if reachable, ("", false) otherwise — the caller should
+// fall back to standard kubectl port-forward.
+func (nm *NetworkManager) probeSSHDataPlane(ctx context.Context) (string, bool) {
+	if nm.cfg.SshConf == nil || nm.cfg.SshConf.IsEmpty() {
+		return "", false
+	}
+	svc, err := nm.cfg.Clientset.CoreV1().Services(nm.cfg.ManagerNamespace).
+		Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		plog.G(ctx).Debugf("SSH data-plane probe: failed to get service: %v", err)
+		return "", false
+	}
+	clusterIP := svc.Spec.ClusterIP
+	if clusterIP == "" || clusterIP == "None" {
+		return "", false
+	}
+
+	client, err := ssh.DialSshRemote(ctx, nm.cfg.SshConf, ctx.Done())
+	if err != nil {
+		plog.G(ctx).Debugf("SSH data-plane probe: failed to dial SSH: %v", err)
+		return "", false
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	target := net.JoinHostPort(clusterIP, fmt.Sprintf("%d", config.PortTCP))
+	conn, err := client.DialContext(probeCtx, "tcp", target)
+	if err != nil {
+		plog.G(ctx).Debugf("SSH data-plane probe: SSH host cannot reach %s: %v", target, err)
+		client.Close()
+		return "", false
+	}
+	conn.Close()
+	client.Close()
+	return clusterIP, true
+}
+
+// sshForward sets up SSH tunnels from local ports to the traffic manager's ClusterIP
+// ports. Each portPair entry is "localPort:remotePort"; the remote side is reached
+// through the SSH host via clusterIP.
+func (nm *NetworkManager) sshForward(ctx context.Context, clusterIP string, portPairs []string) error {
+	for _, pair := range portPairs {
+		var localPort, remotePort int
+		if _, err := fmt.Sscanf(pair, "%d:%d", &localPort, &remotePort); err != nil {
+			return fmt.Errorf("invalid port pair %q: %w", pair, err)
+		}
+		local := netip.MustParseAddrPort(fmt.Sprintf("127.0.0.1:%d", localPort))
+		remote := netip.MustParseAddrPort(fmt.Sprintf("%s:%d", clusterIP, remotePort))
+		if err := ssh.PortMapUntil(ctx, nm.cfg.SshConf, remote, local); err != nil {
+			return fmt.Errorf("ssh forward %s -> %s: %w", local, remote, err)
+		}
+		plog.G(ctx).Infof("SSH tunnel: %s -> %s", local, remote)
+	}
+	return nil
 }
 
 // portForward sets up port-forwarding to the traffic manager pod with automatic
