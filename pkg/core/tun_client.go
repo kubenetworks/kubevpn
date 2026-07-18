@@ -5,9 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"sync"
 	"time"
-
-	"github.com/google/gopacket/layers"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -21,86 +20,97 @@ const (
 	ConnPoolSize = 4
 )
 
-func (h *tunHandler) HandleClient(ctx context.Context, tun net.Conn, forwarder *Forwarder) {
-	device := &ClientDevice{
-		tunDevice: tunDevice{
-			tun:         tun,
-			tunInbound:  make(chan *Packet, MaxSize),
-			tunOutbound: make(chan *Packet, MaxSize),
-			errChan:     h.errChan,
-		},
-		reconnected: make(chan struct{}, 1),
-	}
-
-	defer device.Close()
-	go device.runConnPool(ctx, forwarder)
-	go device.readFromTun(ctx)
-	go device.writeToTun(ctx)
-	go device.heartbeats(ctx)
-	select {
-	case <-device.errChan:
-	case <-ctx.Done():
-	}
-}
-
-// ClientDevice is the client-side tun device handler.
-type ClientDevice struct {
-	tunDevice
-	// reconnected signals the heartbeat goroutine to send an immediate heartbeat
-	// after a new connection is established, so the server can register the route
-	// without waiting for the next ticker cycle.
+// clientTransport is the spoke/endpoint half of the tun device. Outbound packets read from the
+// TUN are distributed across a pool of dialed connections to the server (by dst IP hash), or
+// looped back through a local gvisor stack when src == dst. Inbound packets from the server are
+// delivered to the device's tunOutbound by the per-connection readers.
+type clientTransport struct {
+	dev     *tunDevice
+	forward *Forwarder
+	// slots holds the per-connection pool; built by runConnPool, read by routeOutbound.
+	slots []*connSlot
+	// reconnected signals the heartbeat goroutine to send an immediate heartbeat after a
+	// connection is (re)established, so the server registers the route without waiting a cycle.
 	reconnected chan struct{}
-
-	// slots holds per-connection inbound channels for hash-based packet distribution.
-	// Set by runConnPool, read by readFromTun.
-	slots []chan *Packet
+	// gvisorInbound carries src == dst packets to the local loopback gvisor stack.
+	gvisorInbound chan *Packet
 }
 
-// runConnPool creates N parallel connections and distributes packets by dst IP hash.
-// Each slot runs independently — if one connection breaks, only that slot reconnects.
-func (d *ClientDevice) runConnPool(ctx context.Context, forward *Forwarder) {
-	n := ConnPoolSize
-	d.slots = make([]chan *Packet, n)
-	for i := range d.slots {
-		d.slots[i] = make(chan *Packet, MaxSize)
+func newClientTransport(dev *tunDevice, forward *Forwarder) *clientTransport {
+	return &clientTransport{
+		dev:           dev,
+		forward:       forward,
+		reconnected:   make(chan struct{}, 1),
+		gvisorInbound: make(chan *Packet, MaxSize),
 	}
+}
 
-	// Start N independent connection slots
-	for i := 0; i < n; i++ {
-		go d.runSlot(ctx, forward, i)
+func (t *clientTransport) label() string { return "[Client]" }
+
+func (t *clientTransport) routines() []namedRoutine {
+	return []namedRoutine{
+		{"client-gvisor", func(ctx context.Context) {
+			handleGvisorPacket(t.gvisorInbound, t.dev.tunOutbound, 0).Run(ctx)
+		}},
+		{"client-conn-pool", t.runConnPool},
+		{"client-heartbeat", t.heartbeats},
 	}
+}
+
+// routeOutbound dispatches a packet read from the TUN: loop it back through the local gvisor
+// stack when src == dst, otherwise enqueue it for the connection pool (distributed by dst hash).
+func (t *clientTransport) routeOutbound(ctx context.Context, buf []byte, n int, src, dst net.IP) {
+	buf[2] = 1
+	logIPPacket(ctx, "[Client] OUTBOUND", buf[3:3+n])
+	if src.Equal(dst) {
+		copy(buf[0:n+1], buf[2:3+n])
+		t.gvisorInbound <- NewPacket(buf[:], n+1, src, dst)
+	} else {
+		// Enqueue to the shared tunInbound; runConnPool distributes to a slot by hash(dst).
+		t.dev.tunInbound <- NewPacket(buf[:], n+1, src, dst)
+	}
+}
+
+// runConnPool creates N parallel connection slots and distributes packets by dst IP hash. Each
+// slot runs independently — if one connection breaks, only that slot reconnects. It waits for all
+// slot goroutines to exit before returning, for deterministic shutdown.
+func (t *clientTransport) runConnPool(ctx context.Context) {
+	n := ConnPoolSize
+	t.slots = make([]*connSlot, n)
+	var wg sync.WaitGroup
+	for i := range t.slots {
+		slot := &connSlot{
+			id:          i,
+			inbound:     make(chan *Packet, MaxSize),
+			tunOutbound: t.dev.tunOutbound,
+			forward:     t.forward,
+		}
+		// Only slot 0 signals reconnects to the heartbeat goroutine.
+		if i == 0 {
+			slot.reconnected = t.reconnected
+		}
+		t.slots[i] = slot
+		wg.Add(1)
+		go func(s *connSlot) {
+			defer wg.Done()
+			defer util.HandleCrash()
+			s.run(ctx)
+		}(slot)
+	}
+	defer wg.Wait()
 
 	// Drain the shared tunInbound and distribute to slots by dst IP hash.
 	// Heartbeats (dst == nil) are broadcast to ALL slots to keep idle connections alive.
 	for {
 		select {
-		case packet := <-d.tunInbound:
+		case packet := <-t.dev.tunInbound:
 			if packet == nil {
 				return
 			}
 			if packet.dst != nil {
-				select {
-				case d.slots[ipHash(packet.dst, n)] <- packet:
-				default:
-					config.LPool.Put(packet.data[:])
-					// slot channel full — drop packet to prevent cross-slot stall
-				}
+				trySendToSlot(t.slots[ipHash(packet.dst, n)].inbound, packet)
 			} else {
-				select {
-				case d.slots[0] <- packet:
-				default:
-					config.LPool.Put(packet.data[:])
-				}
-				for i := 1; i < n; i++ {
-					clone := config.LPool.Get().([]byte)
-					copy(clone, packet.data[:packet.length+2])
-					select {
-					case d.slots[i] <- &Packet{data: clone, length: packet.length}:
-					default:
-						config.LPool.Put(clone[:])
-						// slot channel full — drop heartbeat clone to prevent cross-slot stall
-					}
-				}
+				broadcastToSlots(t.slots, packet)
 			}
 		case <-ctx.Done():
 			return
@@ -108,44 +118,24 @@ func (d *ClientDevice) runConnPool(ctx context.Context, forward *Forwarder) {
 	}
 }
 
-// runSlot manages a single connection slot with reconnect logic.
-func (d *ClientDevice) runSlot(ctx context.Context, forward *Forwarder, slotID int) {
-	firstConnect := true
-	for ctx.Err() == nil {
-		func() {
-			subCtx, cancel := context.WithCancel(ctx)
-			defer cancel()
+// trySendToSlot delivers packet to a slot's inbound channel, dropping (and freeing) it if the
+// channel is full so a slow slot cannot stall the others.
+func trySendToSlot(inbound chan *Packet, packet *Packet) {
+	select {
+	case inbound <- packet:
+	default:
+		config.LPool.Put(packet.data[:])
+	}
+}
 
-			conn, err := forward.DialContext(subCtx)
-			if err != nil {
-				plog.G(ctx).Errorf("[Client-%d] Failed to dial %s: %v", slotID, forward.Addr, err)
-				time.Sleep(config.SlotReconnectBackoff)
-				return
-			}
-			defer conn.Close()
-			plog.G(ctx).Debugf("[Client-%d] Connected to %s", slotID, conn.RemoteAddr())
-
-			// Signal heartbeat on reconnect (not first connect — initial heartbeat covers that)
-			if slotID == 0 && !firstConnect {
-				select {
-				case d.reconnected <- struct{}{}:
-				default:
-				}
-			}
-			firstConnect = false
-
-			udpConn := conn.(*UDPConnOverTCP)
-			errChan := make(chan error, 2)
-			go readFromConn(subCtx, udpConn, d.slots[slotID], d.tunOutbound, errChan, slotID)
-			go writeToConn(subCtx, udpConn.Conn, d.slots[slotID], errChan, slotID)
-
-			select {
-			case err = <-errChan:
-				plog.G(ctx).Warnf("[Client-%d] Disconnected from %s: %v", slotID, conn.RemoteAddr(), err)
-			case <-ctx.Done():
-				return
-			}
-		}()
+// broadcastToSlots delivers packet to slot 0 and a pooled clone to every other slot, so an idle
+// connection still receives heartbeats.
+func broadcastToSlots(slots []*connSlot, packet *Packet) {
+	trySendToSlot(slots[0].inbound, packet)
+	for i := 1; i < len(slots); i++ {
+		clone := config.LPool.Get().([]byte)
+		copy(clone, packet.data[:packet.length+2])
+		trySendToSlot(slots[i].inbound, &Packet{data: clone, length: packet.length})
 	}
 }
 
@@ -160,33 +150,80 @@ func ipHash(ip net.IP, slots int) int {
 	return int(h % uint32(slots))
 }
 
-func readFromConn(ctx context.Context, conn net.Conn, slotInbound chan *Packet, tunOutbound chan *Packet, errChan chan error, slotID int) {
-	defer util.HandleCrash()
-	gvisorInbound := make(chan *Packet, MaxSize)
-	go handleGvisorPacket(gvisorInbound, slotInbound, 2).Run(ctx)
-	readTimeout := config.KeepAliveTime * 3
-	nextDeadline := time.Now().Add(readTimeout)
-	if err := conn.SetReadDeadline(nextDeadline); err != nil {
-		plog.G(ctx).Errorf("[Client-%d] Failed to set read deadline: %v", slotID, err)
-		util.SafeWrite(errChan, fmt.Errorf("failed to set read deadline: %w", err))
-		return
-	}
+// connSlot is one connection in the client pool. It owns its inbound packet channel and the
+// dial/reconnect lifecycle, and runs the framed read/write loops over the connection. It
+// replaces the previous slotID-threaded free functions.
+type connSlot struct {
+	id          int
+	inbound     chan *Packet
+	tunOutbound chan *Packet
+	forward     *Forwarder
+	// reconnected is non-nil only for slot 0; it signals the heartbeat goroutine to send an
+	// immediate heartbeat after a reconnect so the server re-registers the route promptly.
+	reconnected chan struct{}
+}
+
+// run manages this slot's single connection with reconnect logic.
+func (s *connSlot) run(ctx context.Context) {
+	firstConnect := true
 	for ctx.Err() == nil {
-		buf := config.LPool.Get().([]byte)[:]
-		// Refresh deadline only when >half the timeout has elapsed, avoiding per-packet syscall
-		if time.Until(nextDeadline) < readTimeout/2 {
-			nextDeadline = time.Now().Add(readTimeout)
-			if err := conn.SetReadDeadline(nextDeadline); err != nil {
-				config.LPool.Put(buf[:])
-				plog.G(ctx).Errorf("[Client-%d] Failed to set read deadline: %v", slotID, err)
-				util.SafeWrite(errChan, fmt.Errorf("failed to set read deadline: %w", err))
+		func() {
+			subCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+
+			conn, err := s.forward.DialContext(subCtx)
+			if err != nil {
+				plog.G(ctx).Errorf("[Client-%d] Failed to dial %s: %v", s.id, s.forward.Addr, err)
+				time.Sleep(config.SlotReconnectBackoff)
 				return
 			}
+			defer conn.Close()
+			plog.G(ctx).Debugf("[Client-%d] Connected to %s", s.id, conn.RemoteAddr())
+
+			// Signal heartbeat on reconnect (not first connect — initial heartbeat covers that).
+			if s.reconnected != nil && !firstConnect {
+				select {
+				case s.reconnected <- struct{}{}:
+				default:
+				}
+			}
+			firstConnect = false
+
+			udpConn := conn.(*UDPConnOverTCP)
+			errChan := make(chan error, 2)
+			go s.readFromConn(subCtx, udpConn, errChan)
+			go s.writeToConn(subCtx, udpConn.Conn, errChan)
+
+			select {
+			case err = <-errChan:
+				plog.G(ctx).Warnf("[Client-%d] Disconnected from %s: %v", s.id, conn.RemoteAddr(), err)
+			case <-ctx.Done():
+				return
+			}
+		}()
+	}
+}
+
+// readFromConn reads datagram-framed packets from the server, routing IP packets to the tun
+// and gvisor-prefixed packets to this slot's local gvisor stack. conn is the framed
+// *UDPConnOverTCP in production (typed as net.Conn so tests can drive it with a raw pipe).
+func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan error) {
+	defer util.HandleCrash()
+	gvisorInbound := make(chan *Packet, MaxSize)
+	go handleGvisorPacket(gvisorInbound, s.inbound, 2).Run(ctx)
+	dl := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: conn.SetReadDeadline}
+	for ctx.Err() == nil {
+		buf := config.LPool.Get().([]byte)[:]
+		if err := dl.refresh(); err != nil {
+			config.LPool.Put(buf[:])
+			plog.G(ctx).Errorf("[Client-%d] Failed to set read deadline: %v", s.id, err)
+			util.SafeWrite(errChan, fmt.Errorf("failed to set read deadline: %w", err))
+			return
 		}
 		n, err := conn.Read(buf[:])
 		if err != nil {
 			config.LPool.Put(buf[:])
-			plog.G(ctx).Errorf("[Client-%d] Failed to read from remote: %v", slotID, err)
+			plog.G(ctx).Errorf("[Client-%d] Failed to read from remote: %v", s.id, err)
 			util.SafeWrite(errChan, fmt.Errorf("failed to read packet from remote %s: %w", conn.RemoteAddr(), err))
 			return
 		}
@@ -194,40 +231,38 @@ func readFromConn(ctx context.Context, conn net.Conn, slotInbound chan *Packet, 
 			config.LPool.Put(buf[:])
 			continue
 		}
+		// Inbound packet from the server: buf[0] is the type prefix, buf[1:n] the IP packet.
+		logIPPacket(ctx, fmt.Sprintf("[Client-%d] INBOUND", s.id), buf[1:n])
 		if buf[0] == 1 {
 			gvisorInbound <- NewPacket(buf[:], n, nil, nil)
 		} else {
-			tunOutbound <- NewPacket(buf[:], n, nil, nil)
+			s.tunOutbound <- NewPacket(buf[:], n, nil, nil)
 		}
 	}
 }
 
-// writeToConn writes packets from a slot's inbound channel to the raw TCP conn with datagram framing.
-func writeToConn(ctx context.Context, rawConn net.Conn, inbound <-chan *Packet, errChan chan error, slotID int) {
+// writeToConn writes packets from this slot's inbound channel to the raw TCP conn with
+// datagram framing.
+func (s *connSlot) writeToConn(ctx context.Context, rawConn net.Conn, errChan chan error) {
 	defer util.HandleCrash()
-	writeTimeout := config.KeepAliveTime
-	nextDeadline := time.Now().Add(writeTimeout)
-	_ = rawConn.SetWriteDeadline(nextDeadline)
+	dl := &periodicDeadline{timeout: config.KeepAliveTime, set: rawConn.SetWriteDeadline}
 	for {
 		select {
-		case packet := <-inbound:
+		case packet := <-s.inbound:
 			if packet == nil {
 				return
 			}
-			if time.Until(nextDeadline) < writeTimeout/2 {
-				nextDeadline = time.Now().Add(writeTimeout)
-				if err := rawConn.SetWriteDeadline(nextDeadline); err != nil {
-					plog.G(ctx).Errorf("[Client-%d] Failed to set write deadline: %v", slotID, err)
-					util.SafeWrite(errChan, fmt.Errorf("failed to set write deadline: %w", err))
-					return
-				}
+			if err := dl.refresh(); err != nil {
+				plog.G(ctx).Errorf("[Client-%d] Failed to set write deadline: %v", s.id, err)
+				util.SafeWrite(errChan, fmt.Errorf("failed to set write deadline: %w", err))
+				return
 			}
 			// Write datagram frame in-place: [2-byte length header][prefix+IP data]
 			binary.BigEndian.PutUint16(packet.data[:2], uint16(packet.length))
 			_, err := rawConn.Write(packet.data[:packet.length+2])
 			config.LPool.Put(packet.data[:])
 			if err != nil {
-				plog.G(ctx).Errorf("[Client-%d] Failed to write to remote: %v", slotID, err)
+				plog.G(ctx).Errorf("[Client-%d] Failed to write to remote: %v", s.id, err)
 				util.SafeWrite(errChan, fmt.Errorf("failed to write packet to remote: %w", err))
 				return
 			}
@@ -237,43 +272,25 @@ func writeToConn(ctx context.Context, rawConn net.Conn, inbound <-chan *Packet, 
 	}
 }
 
-func (d *ClientDevice) readFromTun(ctx context.Context) {
-	defer util.HandleCrash()
-	gvisorInbound := make(chan *Packet, MaxSize)
-	go handleGvisorPacket(gvisorInbound, d.tunOutbound, 0).Run(ctx)
-	for ctx.Err() == nil {
-		buf := config.LPool.Get().([]byte)[:]
-		// Read at offset 3 to reserve [2-byte datagram header][1-byte prefix].
-		n, err := d.tun.Read(buf[3:])
-		if err != nil {
-			plog.G(ctx).Errorf("[Client] Failed to read from TUN: %v", err)
-			util.SafeWrite(d.errChan, err)
-			config.LPool.Put(buf[:])
-			return
-		}
-		buf[2] = 1
-
-		src, dst, protocol, parseErr := util.ParseIPFast(buf[3 : 3+n])
-		if parseErr != nil {
-			plog.G(ctx).Errorf("[Client] Unknown packet, dropping: %v", parseErr)
-			config.LPool.Put(buf[:])
-			continue
-		}
-		if config.Debug {
-			plog.G(ctx).Debugf("[Client] SRC: %s, DST: %s, Protocol: %s, Length: %d", src, dst, layers.IPProtocol(protocol).String(), n)
-		}
-		if src.Equal(dst) {
-			copy(buf[0:n+1], buf[2:3+n])
-			gvisorInbound <- NewPacket(buf[:], n+1, src, dst)
-		} else {
-			// Send to shared tunInbound; runConnPool distributes to slot by hash(dst)
-			d.tunInbound <- NewPacket(buf[:], n+1, src, dst)
-		}
-	}
+// periodicDeadline refreshes a connection deadline lazily — only once less than half the
+// timeout remains — to avoid a SetDeadline syscall on every packet. The first refresh() always
+// sets the deadline.
+type periodicDeadline struct {
+	next    time.Time
+	timeout time.Duration
+	set     func(time.Time) error
 }
 
-func (d *ClientDevice) heartbeats(ctx context.Context) {
-	tunIfi, err := util.GetTunDeviceByConn(d.tun)
+func (p *periodicDeadline) refresh() error {
+	if !p.next.IsZero() && time.Until(p.next) >= p.timeout/2 {
+		return nil
+	}
+	p.next = time.Now().Add(p.timeout)
+	return p.set(p.next)
+}
+
+func (t *clientTransport) heartbeats(ctx context.Context) {
+	tunIfi, err := util.GetTunDeviceByConn(t.dev.tun)
 	if err != nil {
 		plog.G(ctx).Errorf("[Client] Failed to get tun device: %v", err)
 		return
@@ -286,7 +303,7 @@ func (d *ClientDevice) heartbeats(ctx context.Context) {
 		buf := config.LPool.Get().([]byte)
 		n := copy(buf[3:], payload)
 		buf[2] = 1
-		d.tunInbound <- &Packet{data: buf, length: n + 1}
+		t.dev.tunInbound <- &Packet{data: buf, length: n + 1}
 	}
 
 	sendAll := func(reason string) {
@@ -316,7 +333,7 @@ func (d *ClientDevice) heartbeats(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			sendAll("periodic")
-		case <-d.reconnected:
+		case <-t.reconnected:
 			sendAll("reconnected")
 			ticker.Reset(config.KeepAliveTime)
 		case <-ctx.Done():

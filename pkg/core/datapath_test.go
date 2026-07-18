@@ -864,9 +864,9 @@ type mockTUN struct {
 
 func newMockTUN() *mockTUN {
 	return &mockTUN{
-		readCh: make(chan []byte, 100),
+		readCh:  make(chan []byte, 100),
 		writeCh: make(chan []byte, 100),
-		closed: make(chan struct{}),
+		closed:  make(chan struct{}),
 	}
 }
 
@@ -905,14 +905,13 @@ func (m *mockTUN) SetWriteDeadline(_ time.Time) error { return nil }
 
 func TestPipeline_ReadFromTun_ParseAndDispatch(t *testing.T) {
 	tun := newMockTUN()
-	device := &ClientDevice{
-		tunDevice: tunDevice{
-			tun:         tun,
-			tunInbound:  make(chan *Packet, MaxSize),
-			tunOutbound: make(chan *Packet, MaxSize),
-			errChan:     make(chan error, 1),
-		},
+	device := &tunDevice{
+		tun:         tun,
+		tunInbound:  make(chan *Packet, MaxSize),
+		tunOutbound: make(chan *Packet, MaxSize),
+		errChan:     make(chan error, 1),
 	}
+	device.transport = newClientTransport(device, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1013,7 +1012,8 @@ func TestPipeline_WriteToConn_FrameFormat(t *testing.T) {
 
 	slotCh := make(chan *Packet, MaxSize)
 	errChan := make(chan error, 2)
-	go writeToConn(ctx, clientSide, slotCh, errChan, 0)
+	slot := &connSlot{id: 0, inbound: slotCh}
+	go slot.writeToConn(ctx, clientSide, errChan)
 
 	// Build a packet as readFromTun produces it:
 	// buf[0:2] = headroom for length header
@@ -1062,7 +1062,8 @@ func TestPipeline_ReadFromConn_PrefixZeroToTunOutbound(t *testing.T) {
 	tunOutbound := make(chan *Packet, MaxSize)
 	errChan := make(chan error, 2)
 
-	go readFromConn(ctx, serverUDP, slotInbound, tunOutbound, errChan, 0)
+	slot := &connSlot{id: 0, inbound: slotInbound, tunOutbound: tunOutbound}
+	go slot.readFromConn(ctx, serverUDP, errChan)
 
 	// Send a prefix=0 packet (with datagram framing) → should go directly to tunOutbound
 	srcIP := net.IPv4(10, 0, 0, 5)
@@ -1113,10 +1114,11 @@ func TestPipeline_FullRoundTrip(t *testing.T) {
 	writeErrCh := make(chan error, 2)
 	readErrCh := make(chan error, 2)
 
-	// writeToConn writes to raw TCP (adds datagram framing)
-	go writeToConn(ctx, clientRaw, slotCh, writeErrCh, 0)
-	// readFromConn reads from UDPConnOverTCP (strips datagram framing)
-	go readFromConn(ctx, clientUDP, slotCh, tunOutbound, readErrCh, 0)
+	// One slot drives both directions: writeToConn writes to raw TCP (adds datagram framing),
+	// readFromConn reads from UDPConnOverTCP (strips datagram framing). Both share slot.inbound.
+	slot := &connSlot{id: 0, inbound: slotCh, tunOutbound: tunOutbound}
+	go slot.writeToConn(ctx, clientRaw, writeErrCh)
+	go slot.readFromConn(ctx, clientUDP, readErrCh)
 
 	// writeToTun consumes tunOutbound
 	tunDev := &tunDevice{

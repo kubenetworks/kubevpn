@@ -167,6 +167,8 @@ Now you can access resources in the kubernetes cluster !
 2026-06-10 08:15:24.123 network.go:122 info: Forwarding port...
 2026-06-10 08:15:24.200 transporter_tcp.go:29 debug: [Transport] Using TLS mode
 2026-06-10 08:15:24.300 tun_client.go:126 debug: [Client-0] Connected to 127.0.0.1:51496
+2026-06-10 08:15:24.310 tun_client.go:263 debug: [Client] OUTBOUND SRC: 198.18.0.5, DST: 10.0.0.5, Protocol: TCP, Length: 60
+2026-06-10 08:15:24.320 tun_client.go:198 debug: [Client-0] INBOUND SRC: 10.0.0.5, DST: 198.18.0.5, Protocol: TCP, Length: 52
 2026-06-10 08:15:25.234 network.go:204 info: Allocated TUN IP: v4=198.18.0.5/16 v6=2001:2::5/64
 2026-06-10 08:15:25.345 tun_server.go:92 warning: [Perf] Slow tunInbound send blocked 25ms
 2026-06-10 08:15:26.456 network.go:142 info: Adding Pod IP and Service IP to route table...
@@ -175,3 +177,7 @@ Now you can access resources in the kubernetes cluster !
 Note: debug lines (`[Gvisor-TCP]`, `[Transport]`, `[Client-0]`) always go to the log file; they reach
 CLI stdout only when the user passed `--debug`. With multiple concurrent operations, each line in the
 file carries a `[connID=xxxx]` prefix so they can be filtered apart.
+
+At Debug, the client logs **every** packet on both directions of the data path: `OUTBOUND` in the
+client read-tun path (`clientTransport.routeOutbound`, local app → cluster) and `INBOUND` in the
+per-connection reader (`connSlot.readFromConn`, cluster → local app), each with src/dst/protocol/length.

@@ -272,9 +272,10 @@ func TestFault_WriteFailsMidStream_CleanExit(t *testing.T) {
 	slotCh := make(chan *Packet, MaxSize)
 	errChan := make(chan error, 2)
 
+	slot := &connSlot{id: 0, inbound: slotCh}
 	done := make(chan struct{})
 	go func() {
-		writeToConn(ctx, flaky, slotCh, errChan, 0)
+		slot.writeToConn(ctx, flaky, errChan)
 		close(done)
 	}()
 
@@ -539,11 +540,11 @@ type errOnWriteTUN struct {
 	err error
 }
 
-func (e *errOnWriteTUN) Write([]byte) (int, error) { return 0, e.err }
-func (e *errOnWriteTUN) Read([]byte) (int, error)  { return 0, io.EOF }
-func (e *errOnWriteTUN) Close() error              { return nil }
-func (e *errOnWriteTUN) LocalAddr() net.Addr       { return &net.IPAddr{IP: net.IPv4(198, 18, 0, 1)} }
-func (e *errOnWriteTUN) RemoteAddr() net.Addr      { return &net.IPAddr{IP: net.IPv4(198, 18, 0, 1)} }
+func (e *errOnWriteTUN) Write([]byte) (int, error)        { return 0, e.err }
+func (e *errOnWriteTUN) Read([]byte) (int, error)         { return 0, io.EOF }
+func (e *errOnWriteTUN) Close() error                     { return nil }
+func (e *errOnWriteTUN) LocalAddr() net.Addr              { return &net.IPAddr{IP: net.IPv4(198, 18, 0, 1)} }
+func (e *errOnWriteTUN) RemoteAddr() net.Addr             { return &net.IPAddr{IP: net.IPv4(198, 18, 0, 1)} }
 func (e *errOnWriteTUN) SetDeadline(time.Time) error      { return nil }
 func (e *errOnWriteTUN) SetReadDeadline(time.Time) error  { return nil }
 func (e *errOnWriteTUN) SetWriteDeadline(time.Time) error { return nil }

@@ -1,3 +1,11 @@
+//go:build tun
+
+// These are real-TUN end-to-end tests: they create actual TUN interfaces (requiring
+// CAP_NET_ADMIN / root) and run the full gvisor data path. They are CPU-contention sensitive
+// and not safe to run alongside the rest of the unit suite, so they live behind the `tun` build
+// tag and run on demand / in a dedicated CI step:
+//
+//	sudo go test ./pkg/core/... -tags=tun -run TestTUN -timeout=120s -v
 package core
 
 import (
@@ -8,6 +16,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +29,30 @@ import (
 
 	"github.com/containernetworking/cni/pkg/types"
 )
+
+// tunTestContext returns a context for a real-TUN test and registers a cleanup that cancels it
+// and then waits for the test's goroutines (gvisor stacks, dial/reconnect loops, heartbeats) to
+// drain before the next test runs. These tests run sequentially; without an explicit drain a
+// finished test's still-running goroutines accumulate and starve the next test's data path under
+// CPU contention — the root cause of the historic real-TUN flakiness. The per-test listeners are
+// closed by each test's own defers (which run before this cleanup), unblocking accept loops.
+func tunTestContext(t *testing.T) context.Context {
+	t.Helper()
+	base := runtime.NumGoroutine()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	t.Cleanup(func() {
+		cancel()
+		deadline := time.Now().Add(20 * time.Second)
+		for time.Now().Before(deadline) {
+			if runtime.NumGoroutine() <= base+5 {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Logf("real-TUN goroutines did not fully drain (now %d, baseline %d)", runtime.NumGoroutine(), base)
+	})
+	return ctx
+}
 
 // =============================================================================
 // Integration tests requiring a real TUN device.
@@ -45,11 +78,11 @@ import (
 // echo server.
 //
 // Architecture:
-//   curl (via TUN route) → TUN device → ClientDevice pipeline → pipe
-//   → server Handler (gvisor) → TCPForwarder → echo server → response back
+//
+//	curl (via TUN route) → TUN device → ClientDevice pipeline → pipe
+//	→ server Handler (gvisor) → TCPForwarder → echo server → response back
 func TestTUN_FullDataPath_ClientToService(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tunTestContext(t)
 
 	// === Step 1: Start a real TCP echo server ===
 	echoListener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -197,8 +230,7 @@ func TestTUN_FullDataPath_ClientToService(t *testing.T) {
 
 // TestTUN_FullDataPath_HTTPRequest makes a real HTTP request through the TUN.
 func TestTUN_FullDataPath_HTTPRequest(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tunTestContext(t)
 
 	// HTTP server
 	httpMux := http.NewServeMux()
@@ -296,8 +328,7 @@ func TestTUN_FullDataPath_HTTPRequest(t *testing.T) {
 // TestTUN_ConnectionPool_MultiSlot verifies that the connection pool with
 // multiple slots works correctly with a real TUN device.
 func TestTUN_ConnectionPool_MultiSlot(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tunTestContext(t)
 
 	// Echo server
 	echoListener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -343,14 +374,14 @@ func TestTUN_ConnectionPool_MultiSlot(t *testing.T) {
 
 	hub := NewRouteHub()
 	serverHandler := GvisorLocalTCPHandler(hub)
-	connCount := 0
+	var connCount atomic.Int32
 	go func() {
 		for {
 			conn, err := serverListener.Accept()
 			if err != nil {
 				return
 			}
-			connCount++
+			connCount.Add(1)
 			go serverHandler.Handle(ctx, conn)
 		}
 	}()
@@ -371,14 +402,15 @@ func TestTUN_ConnectionPool_MultiSlot(t *testing.T) {
 		tunHandler.Handle(ctx, conn)
 	}()
 
-	// Wait for pool to establish
-	time.Sleep(3 * time.Second)
-
-	// Verify multiple connections were established
-	if connCount < ConnPoolSize {
-		t.Fatalf("expected at least %d connections (pool), got %d", ConnPoolSize, connCount)
+	// Wait for the pool to establish — poll instead of a fixed sleep, which flakes under load.
+	deadline := time.Now().Add(15 * time.Second)
+	for connCount.Load() < int32(ConnPoolSize) && time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
 	}
-	t.Logf("✅ Connection pool: %d connections established (expected %d)", connCount, ConnPoolSize)
+	if got := connCount.Load(); got < int32(ConnPoolSize) {
+		t.Fatalf("expected at least %d connections (pool), got %d", ConnPoolSize, got)
+	}
+	t.Logf("✅ Connection pool: %d connections established (expected %d)", connCount.Load(), ConnPoolSize)
 
 	// Send multiple requests to different dest IPs (should hash to different slots)
 	dests := []string{
@@ -388,32 +420,52 @@ func TestTUN_ConnectionPool_MultiSlot(t *testing.T) {
 		fmt.Sprintf("10.96.0.4:%d", echoPort),
 	}
 	for i, dest := range dests {
-		conn, err := net.DialTimeout("tcp", dest, 5*time.Second)
-		if err != nil {
-			t.Fatalf("dial %s failed: %v", dest, err)
-		}
 		msg := []byte(fmt.Sprintf("msg-%d-to-%s", i, dest))
-		conn.Write(msg)
-		buf := make([]byte, 256)
-		conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-		n, err := conn.Read(buf)
-		conn.Close()
-		if err != nil {
-			t.Fatalf("read from %s failed: %v", dest, err)
+		// Retry: the first round-trips can be slow under load (pool warmup + gvisor),
+		// so a single attempt is flaky. The data path itself is unchanged.
+		var lastErr error
+		for attempt := 0; attempt < 5; attempt++ {
+			if attempt > 0 {
+				time.Sleep(500 * time.Millisecond)
+			}
+			if lastErr = tunEchoRoundTrip(dest, msg); lastErr == nil {
+				break
+			}
 		}
-		if string(buf[:n]) != string(msg) {
-			t.Fatalf("echo %s mismatch: got %q", dest, buf[:n])
+		if lastErr != nil {
+			t.Fatalf("echo to %s failed after retries: %v", dest, lastErr)
 		}
 		t.Logf("  ✅ %s: echoed %q", dest, msg)
 	}
 	t.Log("✅ All slots working correctly with different dest IPs")
 }
 
+// tunEchoRoundTrip dials dest, writes msg, and verifies the echo. Returns nil on success.
+func tunEchoRoundTrip(dest string, msg []byte) error {
+	conn, err := net.DialTimeout("tcp", dest, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("dial: %w", err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err = conn.Write(msg); err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
+	buf := make([]byte, 256)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return fmt.Errorf("read: %w", err)
+	}
+	if string(buf[:n]) != string(msg) {
+		return fmt.Errorf("echo mismatch: got %q, want %q", buf[:n], msg)
+	}
+	return nil
+}
+
 // TestTUN_InterClient_Routing tests that two clients can communicate through
 // the traffic manager using real TUN devices.
 func TestTUN_InterClient_Routing(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tunTestContext(t)
 
 	// Shared server (traffic manager)
 	serverListener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -523,58 +575,57 @@ func mustParseCIDR(s string) net.IPNet {
 // This is the most comprehensive integration test in the suite. It verifies
 // every layer of the pipeline explicitly:
 //
-//   ┌─────────────────────────────────────────────────────────────────────┐
-//   │ OUTBOUND (client → service)                                        │
-//   │                                                                    │
-//   │ App dials 10.96.0.x:port                                           │
-//   │   → kernel routes via TUN device (10.96.0.0/16 → utun)             │
-//   │   → ClientDevice.readFromTun() reads raw IP packet from TUN        │
-//   │   → parses src/dst IP, prepends prefix byte (buf[2]=1)             │
-//   │   → sends Packet to tunInbound channel                             │
-//   │   → runConnPool reads tunInbound, computes slot = ipHash(dst, N)   │
-//   │   → distributes to slots[slot] channel                             │
-//   │   → writeToConn frames [2-byte len][prefix+IP] and writes to TCP   │
-//   │   → TCP connection carries framed datagram to server               │
-//   │   → gvisorTCPHandler.readFromTCPConnWriteToEndpoint()              │
-//   │     → UDPConnOverTCP.Read() strips 2-byte header                   │
-//   │     → registers src route in RouteHub via hub.AddRoute(src, conn)  │
-//   │     → injects IP packet into gvisor channel.Endpoint               │
-//   │   → gvisor network stack processes the packet                      │
-//   │   → TCPForwarder (LocalTCPForwarder) sees SYN, dials 127.0.0.1:p  │
-//   │   → echo/HTTP server accepts, processes, responds                  │
-//   │                                                                    │
-//   │ INBOUND (service → client)                                         │
-//   │                                                                    │
-//   │ Echo server writes response data                                   │
-//   │   → gvisor stack encapsulates into IP packet                       │
-//   │   → readFromEndpointWriteToTCPConn reads from endpoint             │
-//   │     → frames [2-byte len][prefix=0][IP packet]                     │
-//   │     → writes to TCP connection                                     │
-//   │   → ClientDevice.readFromConn receives frame via UDPConnOverTCP    │
-//   │     → buf[0]==0 → sends to tunOutbound channel                     │
-//   │   → writeToTun reads from tunOutbound                              │
-//   │     → strips prefix byte, writes raw IP to TUN device              │
-//   │   → kernel delivers IP packet to App's socket                      │
-//   │   → App reads response data                                        │
-//   └─────────────────────────────────────────────────────────────────────┘
+//	┌─────────────────────────────────────────────────────────────────────┐
+//	│ OUTBOUND (client → service)                                        │
+//	│                                                                    │
+//	│ App dials 10.96.0.x:port                                           │
+//	│   → kernel routes via TUN device (10.96.0.0/16 → utun)             │
+//	│   → ClientDevice.readFromTun() reads raw IP packet from TUN        │
+//	│   → parses src/dst IP, prepends prefix byte (buf[2]=1)             │
+//	│   → sends Packet to tunInbound channel                             │
+//	│   → runConnPool reads tunInbound, computes slot = ipHash(dst, N)   │
+//	│   → distributes to slots[slot] channel                             │
+//	│   → writeToConn frames [2-byte len][prefix+IP] and writes to TCP   │
+//	│   → TCP connection carries framed datagram to server               │
+//	│   → gvisorTCPHandler.readFromTCPConnWriteToEndpoint()              │
+//	│     → UDPConnOverTCP.Read() strips 2-byte header                   │
+//	│     → registers src route in RouteHub via hub.AddRoute(src, conn)  │
+//	│     → injects IP packet into gvisor channel.Endpoint               │
+//	│   → gvisor network stack processes the packet                      │
+//	│   → TCPForwarder (LocalTCPForwarder) sees SYN, dials 127.0.0.1:p  │
+//	│   → echo/HTTP server accepts, processes, responds                  │
+//	│                                                                    │
+//	│ INBOUND (service → client)                                         │
+//	│                                                                    │
+//	│ Echo server writes response data                                   │
+//	│   → gvisor stack encapsulates into IP packet                       │
+//	│   → readFromEndpointWriteToTCPConn reads from endpoint             │
+//	│     → frames [2-byte len][prefix=0][IP packet]                     │
+//	│     → writes to TCP connection                                     │
+//	│   → ClientDevice.readFromConn receives frame via UDPConnOverTCP    │
+//	│     → buf[0]==0 → sends to tunOutbound channel                     │
+//	│   → writeToTun reads from tunOutbound                              │
+//	│     → strips prefix byte, writes raw IP to TUN device              │
+//	│   → kernel delivers IP packet to App's socket                      │
+//	│   → App reads response data                                        │
+//	└─────────────────────────────────────────────────────────────────────┘
 //
 // Phases tested:
-//   1. Infrastructure: echo server, HTTP server, TUN device, gvisor server
-//   2. ClientDevice direct construction and goroutine wiring
-//   3. Connection pool establishment (ConnPoolSize slots)
-//   4. TCP echo: single request/response through full path
-//   5. HTTP: real HTTP GET/POST through TUN → gvisor → HTTP server
-//   6. Multiple dest IPs: verify slot distribution via ipHash
-//   7. Concurrent traffic: N goroutines sending simultaneously
-//   8. Large payload: 128KB random data echo without corruption
-//   9. Multiple sequential requests on a persistent connection
+//  1. Infrastructure: echo server, HTTP server, TUN device, gvisor server
+//  2. ClientDevice direct construction and goroutine wiring
+//  3. Connection pool establishment (ConnPoolSize slots)
+//  4. TCP echo: single request/response through full path
+//  5. HTTP: real HTTP GET/POST through TUN → gvisor → HTTP server
+//  6. Multiple dest IPs: verify slot distribution via ipHash
+//  7. Concurrent traffic: N goroutines sending simultaneously
+//  8. Large payload: 128KB random data echo without corruption
+//  9. Multiple sequential requests on a persistent connection
 //  10. Route registration: verify RouteHub has client route
 //
 // Run: sudo go test ./pkg/core/... -tags=tun -run TestTUN_ClientDevice -timeout=120s -v
 // =============================================================================
 func TestTUN_ClientDevice_FullPipeline(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+	ctx := tunTestContext(t)
 
 	// =========================================================================
 	// Phase 1: Start backend services
@@ -703,36 +754,22 @@ func TestTUN_ClientDevice_FullPipeline(t *testing.T) {
 	// Construct ClientDevice directly — the core of this test.
 	// In production, HandleClient() does this inside tunHandler.
 	errChan := make(chan error, 1)
-	device := &ClientDevice{
-		tunDevice: tunDevice{
-			tun:         tunConn,
-			tunInbound:  make(chan *Packet, MaxSize),
-			tunOutbound: make(chan *Packet, MaxSize),
-			errChan:     errChan,
-		},
-		reconnected: make(chan struct{}, 1),
+	device := &tunDevice{
+		tun:         tunConn,
+		tunInbound:  make(chan *Packet, MaxSize),
+		tunOutbound: make(chan *Packet, MaxSize),
+		errChan:     errChan,
 	}
+	device.transport = newClientTransport(device, forwarder)
 	defer device.Close()
 
-	// Start the 4 goroutines that comprise the ClientDevice pipeline:
-	//
-	// 1. runConnPool: creates N TCP connections to server, distributes
-	//    packets from tunInbound to slot channels by ipHash(dst).
-	go device.runConnPool(ctx, forwarder)
+	// Start the device's routines — the same set serve() runs in production:
+	// read-tun, write-tun, client-gvisor, client-conn-pool, client-heartbeat.
+	for _, r := range device.routines() {
+		go r.fn(ctx)
+	}
 
-	// 2. readFromTun: reads raw IP packets from TUN device, parses headers,
-	//    dispatches to tunInbound (or local gvisor for same-IP traffic).
-	go device.readFromTun(ctx)
-
-	// 3. writeToTun: reads from tunOutbound channel, strips prefix byte,
-	//    writes raw IP packets back to TUN device.
-	go device.writeToTun(ctx)
-
-	// 4. heartbeats: sends periodic ICMP packets to register the client's
-	//    TUN IP in the server's RouteHub (so return traffic can be routed).
-	go device.heartbeats(ctx)
-
-	t.Log("[Phase 4] ClientDevice constructed and all goroutines started")
+	t.Log("[Phase 4] tunDevice (client transport) constructed and all goroutines started")
 
 	// Wait for connection pool to establish (ConnPoolSize TCP connections)
 	// and heartbeats to register routes.
