@@ -17,12 +17,6 @@ dynamic_resources:
   lds_config:
     resource_api_version: V3
     ads: {}
-  rds_config:
-    resource_api_version: V3
-    ads: {}
-  eds_config:
-    resource_api_version: V3
-    ads: {}
 static_resources:
   clusters:
     - type: STRICT_DNS
