@@ -199,11 +199,26 @@ jobs:
               --token "${{ secrets.CREATE_HELM_PR }}" \
               --release-name-template "v{{ .Version }}" \
               --index-path ./index.yaml \
-              --charts-repo https://github.com/$owner/$repo
+              --pages-branch master \
+              --pages-index-path charts/index.yaml
           cp ./index.yaml charts/index.yaml
           git add charts/index.yaml
           git commit -m "feat: update helm chart index to ${{ github.ref_name }}"
           git push origin HEAD:master
+      - name: Sync chart to kubenetworks/charts
+        run: |
+          git clone https://x-access-token:${{ secrets.CREATE_HELM_PR }}@github.com/kubenetworks/charts.git /tmp/charts-repo
+          cd /tmp/charts-repo
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+          rm -rf kubevpn
+          cp -r $GITHUB_WORKSPACE/charts/kubevpn kubevpn
+          cp $GITHUB_WORKSPACE/charts/index.yaml index.yaml
+          git add -A
+          git diff --cached --quiet || {
+            git commit -m "feat: update helm charts to version ${{ github.ref_name }}"
+            git push
+          }
 
   snapcraft:
     runs-on: ubuntu-24.04
