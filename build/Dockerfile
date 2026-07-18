@@ -1,15 +1,7 @@
 FROM envoyproxy/envoy:v1.36.2 AS envoy
-FROM golang:1.26 AS builder
-ARG BASE=github.com/wencaiwulue/kubevpn
-
-COPY . /go/src/$BASE
-
-WORKDIR /go/src/$BASE
-
-RUN make kubevpn
-
 FROM debian:bookworm-slim
-ARG BASE=github.com/wencaiwulue/kubevpn
+
+ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y iptables \
     && apt-get autoremove -y \
@@ -18,5 +10,5 @@ RUN apt-get update && apt-get install -y iptables \
 
 WORKDIR /app
 
-COPY --from=builder /go/src/$BASE/bin/kubevpn /usr/local/bin/kubevpn
+COPY bin/kubevpn-linux-${TARGETARCH} /usr/local/bin/kubevpn
 COPY --from=envoy /usr/local/bin/envoy /usr/local/bin/envoy
