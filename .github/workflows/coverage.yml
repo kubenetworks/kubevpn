@@ -43,7 +43,7 @@ jobs:
           minikube image load --remote ghcr.io/kubenetworks/nginx:latest
           minikube image ls
           eval $(minikube docker-env)
-          kubectl apply -f https://raw.githubusercontent.com/kubenetworks/kubevpn/master/samples/bookinfo.yaml
+          kubectl apply -f samples/bookinfo.yaml
 
       - name: Build
         run: |

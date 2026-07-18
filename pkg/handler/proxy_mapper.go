@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"net"
 	"net/netip"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -108,7 +110,7 @@ func (m *Mapper) Run() {
 	// Initial reconcile
 	triggerReconcile()
 
-	var lastPortMapping map[int32]int32
+	var lastPortMapping map[int32]portForward
 	for m.ctx.Err() == nil {
 		select {
 		case <-reconcileCh:
@@ -134,8 +136,16 @@ func (m *Mapper) Run() {
 	}
 }
 
+// portForward describes one inbound port mapping: the envoy port to expose back
+// to the developer and whether it is UDP (which uses the reverse-UDP bridge
+// instead of the TCP-only SSH reverse tunnel).
+type portForward struct {
+	EnvoyPort int32
+	UDP       bool
+}
+
 // reconcilePodsFromInformer uses the pod informer's cache instead of listing from API server.
-func (m *Mapper) reconcilePodsFromInformer(podTunnels *sync.Map, podInformer cache.SharedInformer, portMapping map[int32]int32) {
+func (m *Mapper) reconcilePodsFromInformer(podTunnels *sync.Map, podInformer cache.SharedInformer, portMapping map[int32]portForward) {
 	activePods := sets.New[string]()
 	for _, obj := range podInformer.GetStore().List() {
 		pod, ok := obj.(*v1.Pod)
@@ -164,8 +174,7 @@ func (m *Mapper) reconcilePodsFromInformer(podTunnels *sync.Map, podInformer cac
 
 		ctx, cancel := context.WithCancel(m.ctx)
 		podTunnels.Store(pod.Name, cancel)
-		sshServer := netip.AddrPortFrom(podIP, config.PortSSH)
-		go m.startTunnels(ctx, sshServer, portMapping)
+		go m.startTunnels(ctx, podIP, portMapping)
 	}
 
 	podTunnels.Range(func(key, value any) bool {
@@ -178,7 +187,7 @@ func (m *Mapper) reconcilePodsFromInformer(podTunnels *sync.Map, podInformer cac
 }
 
 // getPortMappingFromCache reads the ConfigMap from the shared informer cache.
-func (m *Mapper) getPortMappingFromCache() (map[int32]int32, error) {
+func (m *Mapper) getPortMappingFromCache() (map[int32]portForward, error) {
 	items := m.cmInformer.GetStore().List()
 	if len(items) == 0 {
 		return nil, nil
@@ -191,7 +200,7 @@ func (m *Mapper) getPortMappingFromCache() (map[int32]int32, error) {
 	return m.extractPortMapping(configMap)
 }
 
-func (m *Mapper) extractPortMapping(configMap *v1.ConfigMap) (map[int32]int32, error) {
+func (m *Mapper) extractPortMapping(configMap *v1.ConfigMap) (map[int32]portForward, error) {
 	var virtuals []*controlplane.Virtual
 	if str, ok := configMap.Data[config.KeyEnvoy]; ok {
 		if err := yaml.Unmarshal([]byte(str), &virtuals); err != nil {
@@ -199,38 +208,65 @@ func (m *Mapper) extractPortMapping(configMap *v1.ConfigMap) (map[int32]int32, e
 		}
 	}
 
-	result := make(map[int32]int32)
+	result := make(map[int32]portForward)
 	for _, virtual := range virtuals {
 		if util.ConvertWorkloadToUID(m.workload) != virtual.UID || m.ns != virtual.Namespace {
 			continue
+		}
+		// Container port → protocol, to route UDP ports through the reverse-UDP bridge.
+		proto := make(map[int32]v1.Protocol, len(virtual.Ports))
+		for _, p := range virtual.Ports {
+			proto[p.ContainerPort] = p.Protocol
 		}
 		for _, rule := range virtual.Rules {
 			if !maps.Equal(m.headers, rule.Headers) {
 				continue
 			}
 			for _, pm := range rule.ParsePortMap() {
-				result[pm.LocalPort] = pm.EnvoyPort
+				result[pm.LocalPort] = portForward{
+					EnvoyPort: pm.EnvoyPort,
+					UDP:       proto[pm.ContainerPort] == v1.ProtocolUDP,
+				}
 			}
 		}
 	}
 	return result, nil
 }
 
-// startTunnels creates SSH port-forward tunnels for each port mapping entry.
-func (m *Mapper) startTunnels(ctx context.Context, sshServer netip.AddrPort, portMapping map[int32]int32) {
-	for containerPort, envoyPort := range portMapping {
-		go func(containerPort, envoyPort int32) {
-			local := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(containerPort))
-			remote := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(envoyPort))
-			const sshExposeRetryDelay = 2 * time.Second
+// startTunnels creates inbound tunnels for each port mapping entry: TCP ports use
+// the SSH reverse tunnel; UDP ports use the sidecar's reverse-UDP bridge.
+func (m *Mapper) startTunnels(ctx context.Context, podIP netip.Addr, portMapping map[int32]portForward) {
+	sshServer := netip.AddrPortFrom(podIP, config.PortSSH)
+	bridgeServer := netip.AddrPortFrom(podIP, config.PortUDPBridge)
+	const retryDelay = 2 * time.Second
+	for localPort, pf := range portMapping {
+		go func(localPort int32, pf portForward) {
 			for ctx.Err() == nil {
 				ctx2, cancel := context.WithCancel(ctx)
-				_ = ssh.ExposeLocalPortToRemote(ctx2, sshServer, remote, local)
+				if pf.UDP {
+					_ = exposeUDPToRemote(ctx2, bridgeServer, pf.EnvoyPort, localPort)
+				} else {
+					local := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(localPort))
+					remote := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(pf.EnvoyPort))
+					_ = ssh.ExposeLocalPortToRemote(ctx2, sshServer, remote, local)
+				}
 				cancel()
-				time.Sleep(sshExposeRetryDelay)
+				time.Sleep(retryDelay)
 			}
-		}(containerPort, envoyPort)
+		}(localPort, pf)
 	}
+}
+
+// exposeUDPToRemote opens a control connection to the sidecar's reverse-UDP
+// bridge and relays the developer's local UDP service to envoyPort in the pod.
+func exposeUDPToRemote(ctx context.Context, bridge netip.AddrPort, envoyPort, localPort int32) error {
+	conn, err := net.DialTimeout("tcp", bridge.String(), config.ConnectTimeout)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	go func() { <-ctx.Done(); _ = conn.Close() }()
+	return core.DialUDPReverse(ctx, conn, int(envoyPort), int(localPort))
 }
 
 

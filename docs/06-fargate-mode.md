@@ -276,6 +276,20 @@ Fargate modifies the Service's `targetPort` from the original container port to 
 
 Fargate generates two random ports per container port (`EnvoyListenerPort` + `envoyRulePort`) using `GetAvailableTCPPort`. There is a TOCTOU window between port allocation and container startup where the port could be claimed by another process. In practice this is rare.
 
+### UDP Inbound (reverse-UDP bridge)
+
+The SSH reverse tunnel (`ExposeLocalPortToRemote`) is TCP-only, so it cannot
+carry UDP back to the developer. For UDP container ports the sidecar runs a
+reverse-UDP bridge listener (`kubevpn server -l udpbridge://:<PortUDPBridge>`,
+`pkg/core/udp_reverse_bridge.go`): the developer opens a TCP control connection
+to it (reachable via the VPN at `podIP:PortUDPBridge`) and announces the envoy
+port; the sidecar then UDP-listens on `127.0.0.1:envoyPort` (where envoy's UDP
+proxy forwards) and relays datagrams over the control connection using the
+length-prefixed `UDPConnOverTCP` framing, which the developer side unwraps and
+dials to `127.0.0.1:localPort`. `Mapper.startTunnels` chooses the bridge for UDP
+ports and the SSH reverse tunnel for TCP ports (protocol comes from the
+`Virtual.Ports` entry matched by container port in `extractPortMapping`).
+
 ## Source Files
 
 | File | Fargate-related content |
@@ -290,5 +304,6 @@ Fargate generates two random ports per container port (`EnvoyListenerPort` + `en
 | `pkg/handler/proxy_mapper.go` | `Mapper` — SSH tunnel lifecycle management |
 | `pkg/handler/leave.go` | Cleanup: header-based rule matching, Service restoration |
 | `pkg/handler/reset.go` | Hard reset: remove all rules, restore Service |
-| `pkg/ssh/reverse.go` | `ExposeLocalPortToRemote()` — SSH reverse tunnel |
+| `pkg/ssh/reverse.go` | `ExposeLocalPortToRemote()` — SSH reverse tunnel (TCP) |
+| `pkg/core/udp_reverse_bridge.go` | `ServeUDPReverse`/`DialUDPReverse` + `udpbridge` protocol — reverse-UDP bridge |
 | `pkg/daemon/action/status.go` | Status reporting: fargate-aware device detection |

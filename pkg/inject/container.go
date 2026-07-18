@@ -127,8 +127,8 @@ iptables -P INPUT ACCEPT
 ip6tables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
 ip6tables -P FORWARD ACCEPT
-iptables -t nat -A PREROUTING ! -p icmp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :%d
-ip6tables -t nat -A PREROUTING ! -p icmp ! -s 0:0:0:0:0:0:0:1 ! -d ${CIDR6} -j DNAT --to :%d
+iptables -t nat -A PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :%d
+ip6tables -t nat -A PREROUTING -p tcp ! -s 0:0:0:0:0:0:0:1 ! -d ${CIDR6} -j DNAT --to :%d
 kubevpn server -l "tun:/tcp://${TrafficManagerService}:%d?route=${CIDR4}"`, config.PortEnvoyInbound, config.PortEnvoyInbound, config.PortTCP),
 		},
 		Env:             envs,
@@ -149,7 +149,7 @@ func AddEnvoyAndSSHContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 b
 		Name:            config.ContainerSidecarVPN,
 		Image:           image,
 		Command:         []string{"kubevpn"},
-		Args:            []string{"server", fmt.Sprintf("-l ssh://:%d", config.PortSSH)},
+		Args:            []string{"server", fmt.Sprintf("-l ssh://:%d", config.PortSSH), fmt.Sprintf("-l udpbridge://:%d", config.PortUDPBridge)},
 		Resources:       defaultResources(),
 		ImagePullPolicy: v1.PullIfNotPresent,
 		SecurityContext: &v1.SecurityContext{},

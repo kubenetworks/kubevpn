@@ -31,7 +31,6 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	pkgconfig "github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 type ut struct {
@@ -47,6 +46,12 @@ const (
 	remoteSyncOrigin = `{"status":"Authors is healthy"}`
 	remoteSyncPod    = `{"status":"Authors is healthy in pod"}`
 )
+
+// reviewsUDPPort is the UDP port declared on the reviews workload
+// (samples/bookinfo.yaml). In mesh full-proxy the envoy UDP listener binds this
+// container port and forwards to tunIP:<same port>, so the local udpServer must
+// listen on it and the client must dial it — it cannot be a random port.
+const reviewsUDPPort = 9080
 
 func TestFunctions(t *testing.T) {
 	u := &ut{}
@@ -393,13 +398,13 @@ func (u *ut) proxyServiceReviewsServiceIP(t *testing.T) {
 
 func (u *ut) testUDP(t *testing.T) {
 	app := "reviews"
-	port, err := util.GetAvailableUDPPort()
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Fixed port matching the UDP port declared on reviews: envoy binds it and
+	// forwards to tunIP:<same port>, which the client's gvisor dials on localhost.
+	port := reviewsUDPPort
 	go u.udpServer(t, port)
 
 	var ip string
+	var err error
 	err = retry.OnError(
 		wait.Backoff{Duration: time.Second, Factor: 2, Jitter: 0.2, Steps: 5},
 		func(err error) bool {
