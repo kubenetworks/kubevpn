@@ -39,6 +39,28 @@ type sshUt struct {
 	restconfig *rest.Config
 }
 
+// e2eCmdTimeout bounds a single foreground kubevpn subprocess. Without it a hung
+// daemon operation (e.g. a rollout that never finishes because an injected
+// sidecar can't become ready) blocks until the global `go test -timeout`,
+// wasting the whole budget. 5m comfortably exceeds a healthy connect/proxy.
+const e2eCmdTimeout = 5 * time.Minute
+
+// runKubevpn runs a foreground `kubevpn` subprocess bounded by e2eCmdTimeout so
+// a stuck step fails the test in minutes instead of hanging the whole binary.
+func runKubevpn(t *testing.T, args ...string) error {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), e2eCmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "kubevpn", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("kubevpn %v timed out after %s: %w", args, e2eCmdTimeout, ctx.Err())
+	}
+	return err
+}
+
 func TestSSHFunctions(t *testing.T) {
 	u := &sshUt{}
 	// 1) test connect
@@ -472,11 +494,7 @@ func (u *sshUt) udpServer(t *testing.T, port int) {
 }
 
 func (u *sshUt) kubevpnConnect(t *testing.T) {
-	cmd := exec.Command("kubevpn", "connect", "--debug", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
+	if err := runKubevpn(t, "connect", "--debug", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -490,74 +508,48 @@ func (u *sshUt) kubevpnConnectToNsKubevpn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmdConnect := exec.Command("kubevpn", "connect", "--namespace", "kubevpn", "--debug")
-	cmdQuit := exec.Command("kubevpn", "quit")
-	for _, cmd := range []*exec.Cmd{cmdConnect, cmdQuit} {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		err = cmd.Run()
-		if err != nil {
+	for _, args := range [][]string{
+		{"connect", "--namespace", "kubevpn", "--debug"},
+		{"quit"},
+	} {
+		if err = runKubevpn(t, args...); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
 func (u *sshUt) kubevpnProxy(t *testing.T) {
-	cmd := exec.Command("kubevpn", "proxy", "deployments/reviews", "--debug", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
+	if err := runKubevpn(t, "proxy", "deployments/reviews", "--debug", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison"); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func (u *sshUt) kubevpnProxyWithServiceMesh(t *testing.T) {
-	cmd := exec.Command("kubevpn", "proxy", "deployments/reviews", "--headers", "env=test", "--debug", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
+	if err := runKubevpn(t, "proxy", "deployments/reviews", "--headers", "env=test", "--debug", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison"); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func (u *sshUt) kubevpnProxyWithServiceMeshAndFargateMode(t *testing.T) {
-	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--debug", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
+	if err := runKubevpn(t, "proxy", "svc/reviews", "--headers", "env=test", "--debug", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison"); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func (u *sshUt) kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {
-	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--debug", "--portmap", "9080:8080", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
+	if err := runKubevpn(t, "proxy", "svc/reviews", "--headers", "env=test", "--debug", "--portmap", "9080:8080", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison"); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func (u *sshUt) kubevpnLeave(t *testing.T) {
-	cmd := exec.Command("kubevpn", "leave", "deployments/reviews")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
+	if err := runKubevpn(t, "leave", "deployments/reviews"); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func (u *sshUt) kubevpnLeaveService(t *testing.T) {
-	cmd := exec.Command("kubevpn", "leave", "services/reviews")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
+	if err := runKubevpn(t, "leave", "services/reviews"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -810,28 +802,19 @@ func (u *sshUt) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 func (u *sshUt) kubevpnUninstall(ns string) func(t *testing.T) {
 	if ns != "" {
 		return func(t *testing.T) {
-			cmd := exec.Command("kubevpn", "uninstall", "kubevpn", "-n", ns)
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			err := cmd.Run()
-			if err != nil {
+			if err := runKubevpn(t, "uninstall", "kubevpn", "-n", ns); err != nil {
 				t.Fatal(err)
 			}
-			cmd = exec.Command("kubectl", "delete", "ns", ns, "--wait")
+			cmd := exec.Command("kubectl", "delete", "ns", ns, "--wait")
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
-			err = cmd.Run()
-			if err != nil {
+			if err := cmd.Run(); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
 	return func(t *testing.T) {
-		cmd := exec.Command("kubevpn", "uninstall", "kubevpn")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		err := cmd.Run()
-		if err != nil {
+		if err := runKubevpn(t, "uninstall", "kubevpn"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -848,11 +831,7 @@ func (u *sshUt) kubevpnStatus(t *testing.T) {
 }
 
 func (u *sshUt) kubevpnQuit(t *testing.T) {
-	cmd := exec.Command("kubevpn", "quit")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
+	if err := runKubevpn(t, "quit"); err != nil {
 		t.Fatal(err)
 	}
 }
