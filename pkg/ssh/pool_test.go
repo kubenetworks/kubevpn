@@ -19,7 +19,7 @@ import (
 type fakeClient struct {
 	mu       sync.Mutex
 	closed   int
-	dialErr  error          // if set, DialContext returns this error
+	dialErr  error // if set, DialContext returns this error
 	dialFunc func() (net.Conn, error)
 }
 
