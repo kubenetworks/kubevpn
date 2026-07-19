@@ -165,6 +165,60 @@ func setInet6Address(ifName string, prefix netip.Prefix) error {
 	return ioctlRequest(fd, siocAIFAddrInet6, unsafe.Pointer(req))
 }
 
+// struct ifreq (name + a single sockaddr) used by SIOCDIFADDR to delete an address.
+// SIOCDIFADDR matches purely by address (no mask field), so only name+addr matter.
+type inet4IfReq struct {
+	name [unix.IFNAMSIZ]byte
+	addr unix.RawSockaddrInet4
+}
+
+// struct in6_ifreq used by the IPv6 variant of SIOCDIFADDR.
+type inet6IfReq struct {
+	name [unix.IFNAMSIZ]byte
+	addr unix.RawSockaddrInet6
+}
+
+// IPv6 SIOCDIFADDR (unix only exposes the v4-sized constant; recompute for in6_ifreq).
+const siocDIFAddrInet6 = (unix.SIOCDIFADDR & 0xe000ffff) | (uint(unsafe.Sizeof(inet6IfReq{})) << 16)
+
+// removeInterfaceAddress deletes an address from an interface (best-effort), the
+// counterpart of setInterfaceAddress. Needed because macOS SIOCAIFADDR only ADDS an
+// alias — without an explicit delete, changing the TUN IP would leave the old one.
+func removeInterfaceAddress(ifName string, ip netip.Addr) error {
+	if ip.Is4() {
+		return delInet4Address(ifName, ip)
+	}
+	return delInet6Address(ifName, ip)
+}
+
+func delInet4Address(ifName string, ip netip.Addr) error {
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	ip4 := ip.As4()
+	req := &inet4IfReq{
+		addr: unix.RawSockaddrInet4{Family: unix.AF_INET, Len: unix.SizeofSockaddrInet4, Addr: ip4},
+	}
+	copy(req.name[:], ifName)
+	return ioctlRequest(fd, unix.SIOCDIFADDR, unsafe.Pointer(req))
+}
+
+func delInet6Address(ifName string, ip netip.Addr) error {
+	fd, err := unix.Socket(unix.AF_INET6, unix.SOCK_DGRAM, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	ip6 := ip.As16()
+	req := &inet6IfReq{
+		addr: unix.RawSockaddrInet6{Family: unix.AF_INET6, Len: unix.SizeofSockaddrInet6, Addr: ip6},
+	}
+	copy(req.name[:], ifName)
+	return ioctlRequest(fd, siocDIFAddrInet6, unsafe.Pointer(req))
+}
+
 func ioctlRequest(fd int, req uint, ptr unsafe.Pointer) error {
 	err := unix.IoctlSetInt(fd, req, int(uintptr(ptr)))
 	runtime.KeepAlive(ptr)

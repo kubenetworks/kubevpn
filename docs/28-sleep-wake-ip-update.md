@@ -728,6 +728,83 @@ laptop wakes:
 
 ---
 
+## 5b. Manual IP override via `TUN_ALLOCS` (operator action)
+
+Normally `TUN_ALLOCS` is a **server-written crash-recovery journal** (the in-memory
+`s.allocs` map is the source of truth). An operator can also use it as a **control
+input** to force a client's TUN IP to a specific address: edit the `ipv4` and/or
+`ipv6` of an owner entry in the `kubevpn-traffic-manager` ConfigMap's `TUN_ALLOCS` key.
+
+**Per-family & independent:** `ipv4` and `ipv6` are reconciled independently — edit
+just `ipv4`, just `ipv6`, or both. Each family becomes its own proposal that the
+client validates, confirms, or declines on its own (a v4+v6 edit = two confirms);
+committing one family never touches the other. Leaving a field unchanged (equal to
+the current value, or empty) means "no change for that family".
+
+It uses a **dry-run (propose → client validates → confirm commits)** flow, so the
+server never changes a client's committed IP before the client agrees — there is
+no "commit then roll back".
+
+```
+kubectl -n <ns> edit cm kubevpn-traffic-manager   # change TUN_ALLOCS[owner].ipv4
+   → ConfigMap informer fires (watcher.go)
+   → TunConfigServer.reconcileAllocsFromConfigMap (serialized by reconcileMu):
+       • out-of-range / non-CIDR → Warn + ignore
+       • target IP held by another live owner → REFUSE (annotate "in use"), no takeover
+       • else PROPOSE: record pendingProposal[owner]={candidate,deadline} and push
+         WatchTunIP{IPv4:candidate, DryRun:true}. NOTHING is committed — no rent,
+         no release, no allocs change, no saveAllocs (TUN_ALLOCS keeps the edit as
+         the desired value).
+   → Root Daemon IPWatcher (doWatchTunIP), DryRun push → handleProposal:
+       • VALIDATE locally (tunIPConflicts vs sibling TUN + host interfaces, ignoring
+         own current IP)
+       • OK  → GetTunIP{ConfirmIP:candidate}      (confirm)
+       • bad → GetTunIP{ExcludeIPs:[candidate,…]} (decline)
+   → server GetTunIP = the ONLY commit point:
+       • confirm  → RentSpecificIP(candidate) (fallback to a safe IP if taken since
+                    propose), release owner's old IP, allocs[owner]=candidate,
+                    saveAllocs (TUN_ALLOCS=actual), syncEnvoyRuleIP, return
+                    committed resp (DryRun=false) → client ChangeTunIP applies it.
+       • decline  → drop proposal, keep current IP (nothing committed → no rollback),
+                    revert TUN_ALLOCS to actual, annotate kubevpn.io/tun-allocs-rejected.
+   → unconfirmed proposals expire via the lease reaper (expirePendingProposals):
+     dropped + TUN_ALLOCS reverted. No IP was rented, so nothing to release.
+```
+
+Why this is simpler: because the committed IP is never touched until the client
+confirms, there is **no reservation, no defer-release, no grace-held IP, no
+rollback, and scrub needs no special-casing** (a proposal holds no bitmap bit).
+
+Client-side `ChangeTunIP` is implemented for Linux/Darwin (netlink/ioctl) and
+Windows (winipcfg `DeleteIPAddress`/`AddIPAddress`). It **replaces** the address:
+the old IP is removed and the new one added, both on the device's **host mask**
+(`/32` for IPv4, `/128` for IPv6 — matching how the TUN device is created), and only
+the family that actually changed is touched. This matters on macOS, where the add
+ioctl (`SIOCAIFADDR`) is add-only — the old address must be explicitly deleted
+(`SIOCDIFADDR`), otherwise the device accumulates both IPs; passing the pool mask
+(`/16`) instead of `/32` would also leave the old address behind (the delete would
+not match it). The client also self-heals on reconnect: `doWatchTunIP` first calls
+`GetTunIP(ExcludeIPs=…)` (omitting its own current IP) so a long disconnect (lease
+reaped → no push) still recovers a valid, non-conflicting IP (server prefers
+`lastIPs`).
+
+Note: the **auto recovery path** (`ReconcileDHCP`, sleep/wake) still commits a
+replacement for an *already-lost* IP via `NotifyIPChange` (committed push,
+`DryRun=false`); the client validates that committed push too (`applyPushedTunIP`)
+and can reject → server allocates a safe IP. There is no good IP to protect there,
+so dry-run is unnecessary.
+
+**Remaining tech-debt:** dry-run removes the commit-then-veto root cause. The other
+root cause stands: `TUN_ALLOCS` is still both the server's output (`saveAllocs`)
+and an operator input. Concurrent edits to *different* owners can still race the
+output write (an edit may need a re-edit). If that becomes common, split desired
+from actual — operator edits a server-read-only `TUN_ALLOCS_OVERRIDE` key (standard
+declarative reconcile). Trigger is constrained to ConfigMap-edit (cluster-admin),
+so a client-originated CLI is out of scope. Assumes single-writer traffic-manager
+(`Recreate`) and version-matched client/server (`DryRun` understood by both).
+
+---
+
 ## 6. Changed Files
 
 | File | Change type | Description |
@@ -746,9 +823,17 @@ laptop wakes:
 | `pkg/inject/container.go` | modify | delete `AddVPNContainer` (unify on `AddVPNAndEnvoyContainer`); drop the `LocalTunIPv4/v6` env vars |
 | `pkg/inject/envoy.yaml` | modify | add base UDP listener config to the bootstrap template |
 | `pkg/core/protocol_registry.go` | simplify | delete `watchTunIPChanges` + `pollTunIP` + `applyTunIPChange` (envoy handles routing) |
+| **Manual TUN_ALLOCS IP override (dry-run, §5b)** | | |
+| `pkg/daemon/rpc/daemon.proto` | modify | add `TunIPResponse.DryRun` + `TunIPRequest.ConfirmIP` (regen `*.pb.go`) |
+| `pkg/controlplane/tun_config.go` | modify | `ReconcileAllocsFromConfigMap` (exported) + per-family `proposeManualChange`/`proposeIPChange`; `GetTunIP` confirm/decline + `commitFamilyLocked`; `pendingProposal`; `expirePendingProposals`; `WatcherCount` |
+| `pkg/controlplane/controlplane.go` | modify | wire `ReconcileAllocsFromConfigMap` as an informer onDHCPChange callback |
+| `pkg/dhcp/dhcp.go` | modify | add `RentSpecificIP` + `InRange` (per-family specific allocation) |
+| `pkg/handler/network.go` | modify | `doWatchTunIP` per-family `handleProposal` (validate→confirm/decline) + reconnect self-heal; `ChangeTunIP` replaces address on host masks (`/32`,`/128`), only the changed family |
+| `pkg/tun/ip_windows.go` | modify | implement `changeIP` (winipcfg Delete/AddIPAddress) |
+| `pkg/tun/ip_darwin.go`, `pkg/tun/tun_darwin.go` | modify | `changeIP` deletes the old address first; add `removeInterfaceAddress`/`delInet4Address`/`delInet6Address` (`SIOCDIFADDR`) so macOS doesn't keep both IPs |
 
-**Zero new proto/RPC** — fully reuses the existing ENVOY_CONFIG → Watcher → Processor → xDS push path and
-the WatchTunIP push.
+The §5b manual-IP override adds **two optional proto fields** (`DryRun`, `ConfirmIP`); everything else still
+reuses the existing ENVOY_CONFIG → Watcher → Processor → xDS push path and the WatchTunIP push.
 
 ---
 

@@ -388,10 +388,12 @@ message TunIPRequest {
   string OwnerID = 1;              // sidecar identity (typically podName or nodeID)
   string Namespace = 2;            // workload namespace (for DHCP scoping)
   repeated string ExcludeIPs = 4;  // client local interface IPs to avoid during allocation
+  string ConfirmIP = 5;            // client confirms it validated this proposed (dry-run) IP; server commits it
 }
 
 message TunIPResponse {
   string IPv4 = 1;        // allocated IPv4 in CIDR notation, e.g. "198.18.0.5/32"
   string IPv6 = 2;        // allocated IPv6 in CIDR notation, e.g. "fd11::5/128"
   int64  Version = 3;     // monotonically increasing version for change detection
+  bool   DryRun = 4;      // true = a proposal: client must validate locally, then confirm or decline (do NOT apply directly)
 }

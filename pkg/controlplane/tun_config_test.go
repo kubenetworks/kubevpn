@@ -420,8 +420,12 @@ func TestSaveAllocs_PreservesOtherConfigMapKeys(t *testing.T) {
 		&v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
 			Data: map[string]string{
-				config.KeyTunIPPool:    "",
-				config.KeyEnvoy:        "envoy-sentinel",
+				config.KeyTunIPPool: "",
+				// Valid empty Virtual list: parseYaml-safe, so the async syncEnvoyRuleIP
+				// (fired by GetTunIP) reads it without the "cannot unmarshal string" error,
+				// and leaves it untouched (no rules to update) — still proving saveAllocs
+				// doesn't clobber it.
+				config.KeyEnvoy:        "[]\n",
 				config.KeyClusterCIDRs: "cidr-sentinel",
 			},
 		},
@@ -439,7 +443,7 @@ func TestSaveAllocs_PreservesOtherConfigMapKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get configmap: %v", err)
 	}
-	if cm.Data[config.KeyEnvoy] != "envoy-sentinel" {
+	if cm.Data[config.KeyEnvoy] != "[]\n" {
 		t.Errorf("ENVOY_CONFIG clobbered by saveAllocs: %q", cm.Data[config.KeyEnvoy])
 	}
 	if cm.Data[config.KeyClusterCIDRs] != "cidr-sentinel" {
