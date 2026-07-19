@@ -132,9 +132,9 @@ func TestGenService(t *testing.T) {
 		t.Fatalf("expected selector app=%q, got %q", config.ConfigMapPodTrafficManager, svc.Spec.Selector["app"])
 	}
 
-	// 3 ports
-	if len(svc.Spec.Ports) != 3 {
-		t.Fatalf("expected 3 ports, got %d", len(svc.Spec.Ports))
+	// 4 ports: TCP 10801, TCP 10802, TCP 9002, UDP 53
+	if len(svc.Spec.Ports) != 4 {
+		t.Fatalf("expected 4 ports, got %d", len(svc.Spec.Ports))
 	}
 
 	type portCase struct {
@@ -144,6 +144,7 @@ func TestGenService(t *testing.T) {
 	}
 	expected := []portCase{
 		{config.PortNameTCP, 10801, v1.ProtocolTCP},
+		{config.PortNameUDP, 10802, v1.ProtocolTCP},
 		{config.PortNameEnvoy, 9002, v1.ProtocolTCP},
 		{config.PortNameDNS, 53, v1.ProtocolUDP},
 	}

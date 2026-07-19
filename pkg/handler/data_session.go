@@ -17,6 +17,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -43,6 +44,7 @@ type DataSession struct {
 	// Lock is from &svr.Lock (DNS shared lock), not from the request proto.
 	Lock           *sync.Mutex
 	ReservedTunIPs func() []net.IP
+	SshConf        *ssh.SshConfig
 
 	// Data-plane lifecycle: set at the START of DoConnect.
 	// nil before DoConnect is called (should never occur in practice —
@@ -103,6 +105,7 @@ func (ds *DataSession) DoConnect(ctx context.Context) (err error) {
 		Hostname:          hostname,
 		GetRunningPodList: ds.GetRunningPodList,
 		ReservedTunIPs:    ds.ReservedTunIPs,
+		SshConf:           ds.SshConf,
 	})
 	if err = ds.nm.Start(ds.ctx); err != nil {
 		return

@@ -62,6 +62,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		OwnerID:              req.OwnerID,
 		ConnectionID:         req.ConnectionID,
 		ReservedTunIPs:       svr.siblingTunIPs,
+		SshConf:              parseSshFromRPC(req.SshJump),
 	}
 	session := NewSessionLifecycle(logger)
 	ds.AddRollbackFunc(func() error {

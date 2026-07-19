@@ -201,6 +201,7 @@ func genProxyClusterRoleBinding(saNamespace string) *rbacv1.ClusterRoleBinding {
 
 func genService(namespace string) *v1.Service {
 	tcp10801 := config.PortNameTCP
+	tcp10802 := config.PortNameUDP
 	tcp9002 := config.PortNameEnvoy
 	udp53 := config.PortNameDNS
 	return &v1.Service{
@@ -214,6 +215,11 @@ func genService(namespace string) *v1.Service {
 				Protocol:   v1.ProtocolTCP,
 				Port:       config.PortTCP,
 				TargetPort: intstr.FromInt32(config.PortTCP),
+			}, {
+				Name:       tcp10802,
+				Protocol:   v1.ProtocolTCP,
+				Port:       config.PortUDP,
+				TargetPort: intstr.FromInt32(config.PortUDP),
 			}, {
 				Name:       tcp9002,
 				Protocol:   v1.ProtocolTCP,

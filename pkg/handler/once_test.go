@@ -144,8 +144,8 @@ func TestCreateOutboundPod(t *testing.T) {
 	if svc.Name != config.ConfigMapPodTrafficManager {
 		t.Fatalf("expected service name %q, got %q", config.ConfigMapPodTrafficManager, svc.Name)
 	}
-	if len(svc.Spec.Ports) != 3 {
-		t.Fatalf("expected 3 service ports, got %d", len(svc.Spec.Ports))
+	if len(svc.Spec.Ports) != 4 {
+		t.Fatalf("expected 4 service ports, got %d", len(svc.Spec.Ports))
 	}
 
 	// Verify Secret was created
