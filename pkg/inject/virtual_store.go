@@ -88,7 +88,7 @@ func (s *VirtualStore) AddRule(ctx context.Context, spec envoyRuleSpec) error {
 				}
 			}
 		}
-		plog.G(ctx).Infof("[Envoy] added rule for %s/%s (headers=%v tunV4=%q owner=%q); workload rules now=%v",
+		plog.G(ctx).Debugf("[Envoy] added rule for %s/%s (headers=%v tunV4=%q owner=%q); workload rules now=%v",
 			spec.Namespace, spec.NodeID, spec.Headers, spec.LocalTunIPv4, spec.OwnerID, rules)
 		return updated, nil
 	})

@@ -72,12 +72,9 @@ func SshJumpBytes(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, 
 		return
 	}
 
+	plog.G(ctx).Debugf("jumped via SSH bastion host to apiserver: %s", oldAPIServer.String())
 	if print {
-		plog.G(ctx).Infof("Waiting jump to bastion host...")
-		plog.G(ctx).Infof("Jump SSH bastion host to apiserver: %s", oldAPIServer.String())
-	} else {
-		plog.G(ctx).Debugf("Waiting jump to bastion host...")
-		plog.G(ctx).Debugf("Jump SSH bastion host to apiserver: %s", oldAPIServer.String())
+		plog.StepDone(ctx, "Jumped via SSH bastion host to apiserver")
 	}
 
 	// Fail fast with a clear error if the tunnel cannot reach the apiserver, so the
