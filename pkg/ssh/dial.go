@@ -13,8 +13,16 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-// sshOpTimeout bounds SSH dial, handshake, and per-operation context timeouts.
-const sshOpTimeout = 10 * time.Second
+const (
+	// sshDialTimeout bounds the TCP dial and SSH handshake to a bastion/jump host.
+	sshDialTimeout = 10 * time.Second
+	// sshTunnelDialTimeout bounds a single dial to a target *through* an established
+	// SSH tunnel. It is deliberately shorter than the kube client's TLS-handshake
+	// timeout (10s, k8s.io/client-go/transport) so that when a bastion cannot reach
+	// the target the failure surfaces as a clear tunnel error instead of an opaque
+	// "net/http: TLS handshake timeout".
+	sshTunnelDialTimeout = 8 * time.Second
+)
 
 // DialSshRemote establishes an SSH client connection, resolving aliases and jump hosts recursively.
 func DialSshRemote(ctx context.Context, conf *SshConfig, stopChan <-chan struct{}) (client *gossh.Client, err error) {
@@ -81,7 +89,7 @@ func JumpTo(ctx context.Context, bClient *gossh.Client, to SshConfig, stopChan <
 		Auth:            authMethod,
 		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
 		//BannerCallback:  ssh.BannerDisplayStderr(),
-		Timeout: sshOpTimeout,
+		Timeout: sshDialTimeout,
 	})
 	if err != nil {
 		err = wrapDialError(err)
@@ -175,7 +183,7 @@ func (conf SshConfig) Dial(ctx context.Context, stopChan <-chan struct{}) (clien
 	if err != nil {
 		return nil, err
 	}
-	d := net.Dialer{Timeout: sshOpTimeout, KeepAlive: config.KeepAliveTime}
+	d := net.Dialer{Timeout: sshDialTimeout, KeepAlive: config.KeepAliveTime}
 	conn, err := d.DialContext(ctx, "tcp", conf.Addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial ssh %s: %w: %w", conf.Addr, err, config.ErrSSHConnect)
@@ -204,7 +212,7 @@ func (conf SshConfig) Dial(ctx context.Context, stopChan <-chan struct{}) (clien
 		Auth:            authMethod,
 		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
 		//BannerCallback:  ssh.BannerDisplayStderr(),
-		Timeout: sshOpTimeout,
+		Timeout: sshDialTimeout,
 	})
 	if err != nil {
 		return nil, wrapDialError(err)

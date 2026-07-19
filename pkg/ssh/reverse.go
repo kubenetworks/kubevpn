@@ -25,7 +25,7 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 	sshConfig := &ssh.ClientConfig{
 		Auth:            []ssh.AuthMethod{},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         sshOpTimeout,
+		Timeout:         sshDialTimeout,
 	}
 
 	// Connect to SSH remote server using serverEndpoint

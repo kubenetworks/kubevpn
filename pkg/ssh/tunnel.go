@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"net/netip"
-	"sync"
 
 	gossh "golang.org/x/crypto/ssh"
 
@@ -33,9 +32,10 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 	go func() {
 		defer localListen.Close()
 
-		clientMap := &sync.Map{}
 		ctx1, cancelFunc1 := context.WithCancel(ctx)
 		defer cancelFunc1()
+		pool := newConnPool(conf)
+		defer pool.Close()
 
 		for ctx1.Err() == nil {
 			localConn, err1 := localListen.Accept()
@@ -43,25 +43,25 @@ func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.Addr
 				if errors.Is(err1, net.ErrClosed) {
 					return
 				}
-				plog.G(ctx).Debugf("Failed to accept ssh conn: %v", err1)
+				plog.G(ctx).Debugf("failed to accept SSH conn: %v", err1)
 				continue
 			}
 			go func() {
 				defer localConn.Close()
 
-				remoteConn, err := getRemoteConn(ctx1, clientMap, conf, remote)
+				remoteConn, err := pool.dial(ctx1, remote)
 				if err != nil {
 					var openChannelError *gossh.OpenChannelError
 					// if ssh server not permitted ssh port-forward, do nothing until exit
 					if errors.As(err, &openChannelError) && openChannelError.Reason == gossh.Prohibited {
-						plog.G(ctx).Errorf("Prohibited to open ssh port-forward to %s: %v", remote.String(), err)
+						plog.G(ctx).Errorf("prohibited to open SSH port-forward to %s: %v", remote.String(), err)
 						cancelFunc1()
 						return
 					}
-					plog.G(ctx).Debugf("Failed to dial remote from %s<=>%s -> %s: %v", localConn.LocalAddr().String(), localConn.RemoteAddr().String(), remote.String(), err)
+					plog.G(ctx).Debugf("failed to dial remote %s<=>%s -> %s: %v", localConn.LocalAddr().String(), localConn.RemoteAddr().String(), remote.String(), err)
 					return
 				}
-				plog.G(ctx).Debugf("Opened ssh port-forward to %s<=>%s -> %s", localConn.LocalAddr().String(), localConn.RemoteAddr().String(), remote.String())
+				plog.G(ctx).Debugf("opened SSH port-forward to %s<=>%s -> %s", localConn.LocalAddr().String(), localConn.RemoteAddr().String(), remote.String())
 
 				defer remoteConn.Close()
 				copyStream(ctx, localConn, remoteConn)
