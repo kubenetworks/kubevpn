@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"testing"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -123,30 +122,6 @@ func TestConnectOptions_LeaveAllProxyResources_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LeaveAllProxyResources empty: %v", err)
 	}
-}
-
-func TestConnectOptions_HealthCheckOnce(t *testing.T) {
-	c := newTestConnectOptions(t)
-	c.HealthCheckOnce(context.Background(), 5*time.Second)
-	status := c.HealthStatus()
-	if status.LastError() != nil {
-		t.Fatalf("HealthCheckOnce failed: %v", status.LastError())
-	}
-	if status.ConfigMap() == nil {
-		t.Fatal("ConfigMap is nil after health check")
-	}
-	if status.ConfigMap().Name != config.ConfigMapPodTrafficManager {
-		t.Fatalf("wrong ConfigMap name: %s", status.ConfigMap().Name)
-	}
-}
-
-func TestConnectOptions_SyncFromCache(t *testing.T) {
-	c := newTestConnectOptions(t)
-	// Start the informer so the cache populates
-	_ = c.GetConfigMapInformer()
-	time.Sleep(100 * time.Millisecond) // let informer sync
-	c.configMapStore.syncFromCache()
-	// May or may not have synced in time — just verify no panic
 }
 
 func TestConnectOptions_ProxyResources(t *testing.T) {

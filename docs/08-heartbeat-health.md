@@ -2,7 +2,9 @@
 
 ## Overview
 
-KubeVPN uses 6 heartbeat/health check mechanisms across 4 layers to maintain connection liveness, detect failures, and trigger recovery. Each serves a distinct purpose — removing any one would leave a gap.
+KubeVPN uses 5 heartbeat/health check mechanisms across 4 layers to maintain connection liveness, detect failures, and trigger recovery. Each serves a distinct purpose — removing any one would leave a gap.
+
+In addition, the client **observes the ICMP echo replies** to the #1 TUN heartbeat and exposes the last-reply time as the data-plane liveness signal driving `kubevpn status` (see [Data-Plane Liveness for `kubevpn status`](#data-plane-liveness-for-kubevpn-status)). This reuses an already-flowing heartbeat — it adds no extra traffic.
 
 ## Mechanism Inventory
 
@@ -11,8 +13,7 @@ KubeVPN uses 6 heartbeat/health check mechanisms across 4 layers to maintain con
 │ Layer 4: Application (business logic)                               │
 │                                                                     │
 │  #4 healthCheckGRPC          30s   gRPC health check (9002)        │
-│  #5 HealthPeriod             30s   ConfigMap GET (API reachability) │
-│  #6 Mapper.Run           informer  Pod/ConfigMap watch + 30s ticker │
+│  #5 Mapper.Run           informer  Pod/ConfigMap watch + 30s ticker │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Layer 3: TUN tunnel (application-layer keepalive)                   │
@@ -42,6 +43,8 @@ KubeVPN uses 6 heartbeat/health check mechanisms across 4 layers to maintain con
 - Keeps all connection pool slots alive (heartbeats are broadcast to all slots)
 
 **Broadcast to all slots:** Heartbeat packets have `dst == nil` and are cloned to all N connection pool slots. This was a bug fix — previously only slot 0 received heartbeats, causing slots 1-3 to timeout every 180s.
+
+**Reply observation (data-plane liveness):** The server's gvisor stack replies to these echoes (`pkg/core/gvisor_icmp_forwarder.go`, preserving Ident/Sequence). The client's `readFromConn` recognizes echo replies from `RouterIP`/`RouterIP6` (`util.IsICMPEchoReplyFrom`), records the timestamp in `core.HeartbeatStats.MarkReply()`, and drops the packet (the OS would discard it anyway — the echo was crafted by us). A recent reply proves the tunnel carries traffic end-to-end to the server and back. See [Data-Plane Liveness for `kubevpn status`](#data-plane-liveness-for-kubevpn-status).
 
 **Period:** 60s (`config.KeepAliveTime`)
 
@@ -85,22 +88,9 @@ KubeVPN uses 6 heartbeat/health check mechanisms across 4 layers to maintain con
 
 **Period:** 30s, with 10s×3 retry backoff before declaring failure
 
-### #5 ConfigMap Health Check (API reachability)
+> **Removed:** an earlier `#5 ConfigMap Health Check` (`HealthPeriod`/`HealthStatus`, a 30s ConfigMap GET) was deleted. `kubevpn status` reflects data-plane liveness only (TUN + heartbeat, see below) and reads the proxy/sync list straight from the shared informer via `ConnectOptions.GetTrafficManagerConfigMap()`, so the health-status cache had no readers. See [11-configmap-informer.md](11-configmap-informer.md).
 
-**File:** `pkg/handler/configmap_store.go` — `HealthPeriod()`
-
-**What:** Every 30s, syncs the traffic manager ConfigMap from the shared informer cache and does a direct GET to verify API server reachability.
-
-**Thread safety:** `ConfigMapStore` uses `healthMu sync.RWMutex` to protect `healthStatus` — `syncFromCache` and `HealthCheckOnce` write with `Lock`, `GetHealthStatus` reads with `RLock`.
-
-**Why necessary:**
-- Caches the ConfigMap in `healthStatus.cm` for `kubevpn status` queries
-- The direct GET detects API server unreachable (informer watch reconnects silently)
-- Status reporting (`daemon/action/status.go`) reads proxy rules from the cached ConfigMap
-
-**Period:** 30s (informer cache reads are instant, direct GET is the fallback)
-
-### #6 Mapper Reconciliation (Fargate mode)
+### #5 Mapper Reconciliation (Fargate mode)
 
 **File:** `pkg/handler/proxy_mapper.go` — `Mapper.Run()`
 
@@ -115,7 +105,6 @@ KubeVPN uses 6 heartbeat/health check mechanisms across 4 layers to maintain con
 ```
         0s      10s     20s     30s     40s     50s     60s     ...     180s
 #4 gRPC |───────────────x───────────────x───────────────x          30s
-#5 CM   |───────────────x───────────────x───────────────x          30s
 #1 TUN  |───────────────────────────────────────────────x          60s
 #2 TCP  |───────────────────────────────────────────────x          60s (OS)
 #3 Read |───────────────────────────────────────────────────────x  180s deadline
@@ -125,12 +114,12 @@ KubeVPN uses 6 heartbeat/health check mechanisms across 4 layers to maintain con
 
 | Failure | Detected by | Detection time |
 |---------|-------------|----------------|
-| Pod crash/restart | #4, #5, #6 (watch event) | <1s (informer) or 30s (ticker) |
+| Pod crash/restart | #4, #5 (watch event) | <1s (informer) or 30s (ticker) |
 | Port-forward broken | #4 (DNS query via gudp) | 30s + retry |
 | TUN tunnel stall | #3 (read deadline) | 180s |
 | TCP connection half-open | #2 (OS keepalive) | ~60s |
-| API server unreachable | #5 | 30s |
 | Slot idle (no traffic) | #1 (heartbeat broadcast) | 60s |
+| Data plane not carrying traffic | heartbeat-reply staleness (`status`) | ~90s |
 
 ## API Server Load
 
@@ -140,8 +129,51 @@ KubeVPN uses 6 heartbeat/health check mechanisms across 4 layers to maintain con
 | #2 TCP KeepAlive | 0 (OS level) |
 | #3 Read/Write deadline | 0 (socket level) |
 | #4 gRPC health check | 0 (gRPC to control plane, not API) |
-| #5 ConfigMap GET | 2/min (30s fallback ticker) |
-| #6 Mapper watch | 0 (informer, no polling) |
-| **Total** | **~2 requests/min** |
+| #5 Mapper watch | 0 (informer, no polling) |
+| **Total** | **~0 requests/min** |
 
-All ConfigMap reads use the shared informer cache. Only the #5 fallback ticker does a direct API GET (for connectivity verification).
+All ConfigMap reads use the shared informer cache; `GetTrafficManagerConfigMap` does a one-off direct GET only when the cache is still cold.
+
+## Data-Plane Liveness for `kubevpn status`
+
+`kubevpn status` reports whether traffic actually flows through the TUN — not merely whether the TUN device exists or the API server is reachable. The signal is the freshness of the #1 heartbeat's echo reply. It deliberately does **not** factor in ConfigMap/API-server reachability (that is an orthogonal concern, not a data-plane signal).
+
+### The sudo daemon owns the verdict
+
+The decision inputs — TUN device presence and heartbeat-reply freshness — are both available in the **root (sudo) daemon**, which owns the TUN and observes the replies. So the sudo daemon computes the full `connected` / `unhealthy` / `disconnected` verdict itself, in `deriveConnectionStatus`:
+
+```go
+func deriveConnectionStatus(tunUp bool, lastHeartbeat time.Time) string {
+    if !tunUp { return StatusFailed }                                  // disconnected
+    if lastHeartbeat.IsZero() ||
+        time.Since(lastHeartbeat) > heartbeatStaleThreshold { return StatusUnhealthy }
+    return StatusOk                                                    // connected
+}
+```
+
+`heartbeatStaleThreshold = config.KeepAliveTime * 3 / 2` (90s) — tolerates one missed beat's jitter. Worst-case detection latency is ~90s; recovery is fast because the heartbeat fires immediately on reconnect (Iteration 14 in `pkg/core/REFACTOR.md`).
+
+### The user daemon reuses the verdict (no new proto field)
+
+`status` is served by the user daemon, which has neither the TUN heartbeat nor the data plane. Rather than ship a raw timestamp and recompute, the user daemon **reuses the `Status` string the sudo daemon already computed** — carried on the existing `Status` field (no new proto field). This mirrors `resolveTunIP`'s user/sudo split:
+
+```
+root daemon (data plane)                       user daemon (control plane)
+─────────────────────────                      ───────────────────────────
+clientTransport.readFromConn
+  └─ HeartbeatStats.MarkReply()                Status RPC
+       ▲                                          └─ getSudoTunIPs() ── queries sudo Status
+NetworkManager.LastHeartbeat()                        │  reads Status (the verdict string)
+       ▲                                              ▼
+ConnectOptions.GetLastHeartbeat()              resolveStatus(connect, ips, tunUp)
+       ▲                                          └─ user: ip.status from sudo
+deriveConnectionStatus(tunUp, lastHeartbeat)      └─ sudo: deriveConnectionStatus(...)
+  → sets Status string (sudo daemon)
+```
+
+- Sudo daemon: `buildConnectionStatus` → `resolveStatus` (no map) → `deriveConnectionStatus(tunUp, connect.GetLastHeartbeat())`.
+- User daemon: `getSudoTunIPs` reads the sudo `Status` string into the per-connection `tunIP` map; `resolveStatus` returns it (or `disconnected` if the sudo daemon doesn't know the connection).
+
+### Why heartbeat reply (vs an active probe)
+
+Reusing the in-flight heartbeat adds **zero** traffic. The trade-off is that it validates reachability to the server **gateway** (`RouterIP`), not a specific Service ClusterIP or the control plane's serving state.

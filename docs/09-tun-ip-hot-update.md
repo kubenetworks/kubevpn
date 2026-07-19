@@ -606,8 +606,7 @@ kubevpn connect -n default
   |   2. InitClient -> configMapStore
   |   3. CreateOutboundPod -> UpgradeDeploy
   |   4. Set req.OwnerID, forwardConnectToSudo -> forward to Root Daemon
-  |   5. HealthPeriod (background)
-  |   6. When IP is needed: getSudoTunIPs -> resolveTunIP
+  |   5. When IP is needed: getSudoTunIPs -> resolveTunIP
   |
   +-- Root Daemon:
   |   1. connect.OwnerID = req.OwnerID

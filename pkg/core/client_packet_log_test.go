@@ -37,7 +37,7 @@ func TestClientLog_Outbound(t *testing.T) {
 		tunOutbound: make(chan *Packet, MaxSize),
 		errChan:     make(chan error, 1),
 	}
-	device.transport = newClientTransport(device, nil)
+	device.transport = newClientTransport(device, nil, nil)
 	go device.readFromTun(ctx)
 
 	tun.readCh <- buildIPv4Packet(net.IPv4(198, 18, 0, 2), net.IPv4(10, 0, 0, 5), []byte("hi"))
@@ -116,7 +116,7 @@ func TestClientLog_DebugDisabled(t *testing.T) {
 		tunOutbound: make(chan *Packet, MaxSize),
 		errChan:     make(chan error, 1),
 	}
-	device.transport = newClientTransport(device, nil)
+	device.transport = newClientTransport(device, nil, nil)
 	go device.readFromTun(ctx)
 	tun.readCh <- buildIPv4Packet(net.IPv4(198, 18, 0, 2), net.IPv4(10, 0, 0, 5), []byte("hi"))
 

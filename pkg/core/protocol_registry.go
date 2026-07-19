@@ -60,7 +60,7 @@ func tunProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, error
 		}
 	}
 
-	handler := TunHandler(forwarder, hub)
+	handler := TunHandler(forwarder, hub, nil)
 	listener, err := tun.Listener(tun.Config{
 		Name:    node.Get("name"),
 		Addr:    addr,

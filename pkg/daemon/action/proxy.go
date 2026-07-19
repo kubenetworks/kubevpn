@@ -11,7 +11,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -143,7 +142,6 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	svr.connMu.Lock()
 	svr.currentConnectionID = connectionID
 	svr.connMu.Unlock()
-	options.HealthCheckOnce(cancel, config.HealthCheckTimeout)
 	return nil
 }
 

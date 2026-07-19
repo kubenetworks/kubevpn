@@ -184,7 +184,6 @@ type ProxyManager struct {
 type ConfigMapStore struct {
     clientset, managerNamespace
     informerOnce, informer, informerStop
-    healthStatus HealthStatus
 }
 ```
 
@@ -236,7 +235,6 @@ pkg/handler/
 ├── proxy_mapper.go       Mapper (port-forward config watcher)
 ├── k8s_client.go         K8sClient embedded struct
 ├── connection.go         Connection interface definition
-├── healthchecker.go      HealthStatus type
 ├── cleaner.go            Cleanup, signal handling
 ├── sync.go               SyncOptions, DoSync
 ├── traffmgr.go           Traffic manager pod creation

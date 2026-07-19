@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"sync"
+	"time"
 
 	"sigs.k8s.io/yaml"
 
@@ -48,10 +49,11 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 				defer wg.Done()
 				result := buildConnectionStatus(options, ips)
 				var err error
-				result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(options, options.Sync)
+				result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(ctx, options, options.Sync)
 				if err != nil {
-					plog.G(ctx).Errorf("Error generating status: %v", err)
-					result.Status = StatusUnhealthy
+					// Proxy/sync rendering failure is a ConfigMap-read issue, not a data-plane
+					// liveness signal — log it but leave the (heartbeat-based) status intact.
+					plog.G(ctx).Errorf("Error generating proxy/sync status: %v", err)
 				}
 				lock.Lock()
 				list = append(list, result)
@@ -76,7 +78,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 			defer wg.Done()
 			result := buildConnectionStatus(options, ips)
 			var err error
-			result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(options, options.Sync)
+			result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(ctx, options, options.Sync)
 			if err != nil {
 				plog.G(ctx).Errorf("Error generating status: %v", err)
 				result.Status = StatusUnhealthy
@@ -97,9 +99,42 @@ func resolveTunIP(connect *handler.ConnectOptions, ips map[string]tunIP) (v4, v6
 	return connect.GetLocalTunIP()
 }
 
+// heartbeatStaleThreshold is how long without an echo reply before the data plane is
+// considered unhealthy: 1.5 × the heartbeat interval tolerates one missed beat's jitter.
+var heartbeatStaleThreshold = config.KeepAliveTime * 3 / 2
+
+// deriveConnectionStatus maps TUN presence and the local heartbeat into the reported status.
+// It is computed in the sudo daemon, which owns the TUN and observes heartbeat replies:
+//
+//	no TUN device                          -> disconnected
+//	TUN up but heartbeat stale / never     -> unhealthy
+//	TUN up and a recent heartbeat reply    -> connected
+func deriveConnectionStatus(tunUp bool, lastHeartbeat time.Time) string {
+	if !tunUp {
+		return StatusFailed
+	}
+	if lastHeartbeat.IsZero() || time.Since(lastHeartbeat) > heartbeatStaleThreshold {
+		return StatusUnhealthy
+	}
+	return StatusOk
+}
+
+// resolveStatus returns the data-plane status verdict. The user daemon reuses the verdict the
+// sudo daemon already computed (carried in the Status string via getSudoTunIPs); the sudo daemon
+// computes it locally from its TUN + heartbeat. Mirrors resolveTunIP's user/sudo split.
+func resolveStatus(connect *handler.ConnectOptions, ips map[string]tunIP, tunUp bool) string {
+	if ips != nil {
+		if ip, ok := ips[connect.GetConnectionID()]; ok {
+			return ip.status
+		}
+		// User daemon, but the sudo daemon has no such connection: data plane is down.
+		return StatusFailed
+	}
+	return deriveConnectionStatus(tunUp, connect.GetLastHeartbeat())
+}
+
 func buildConnectionStatus(connect *handler.ConnectOptions, ips map[string]tunIP) *rpc.Status {
 	v4, v6 := resolveTunIP(connect, ips)
-	status := StatusOk
 	tunName := ""
 	var tunIPs []net.IP
 	if v4 != "" {
@@ -113,15 +148,13 @@ func buildConnectionStatus(connect *handler.ConnectOptions, ips map[string]tunIP
 			tunName = dev.Name
 		}
 	}
-	if tunName == "" {
-		status = StatusFailed
-	}
+
 	info := rpc.Status{
 		ConnectionID: connect.GetConnectionID(),
 		Cluster:      util.GetKubeconfigCluster(connect.GetFactory()),
 		Kubeconfig:   connect.OriginKubeconfigPath,
 		Namespace:    connect.WorkloadNamespace,
-		Status:       status,
+		Status:       resolveStatus(connect, ips, tunName != ""),
 		Netif:        tunName,
 		IPv4:         v4,
 		IPv6:         v6,
@@ -129,10 +162,14 @@ func buildConnectionStatus(connect *handler.ConnectOptions, ips map[string]tunIP
 	return &info
 }
 
-func buildProxyAndSyncStatus(connect *handler.ConnectOptions, sync *handler.SyncOptions) ([]*rpc.Proxy, []*rpc.Sync, error) {
+func buildProxyAndSyncStatus(ctx context.Context, connect *handler.ConnectOptions, sync *handler.SyncOptions) ([]*rpc.Proxy, []*rpc.Sync, error) {
 	var proxyList []*rpc.Proxy
-	status := connect.HealthStatus()
-	if configMap := status.ConfigMap(); configMap != nil {
+	// Read the ConfigMap straight from the informer cache (near-real-time, zero API cost).
+	configMap, cmErr := connect.GetTrafficManagerConfigMap(ctx)
+	if cmErr != nil {
+		return nil, nil, cmErr
+	}
+	if configMap != nil {
 		v := make([]*controlplane.Virtual, 0)
 		if str, ok := configMap.Data[config.KeyEnvoy]; ok {
 			if err := yaml.Unmarshal([]byte(str), &v); err != nil {
@@ -189,7 +226,7 @@ func buildProxyAndSyncStatus(connect *handler.ConnectOptions, sync *handler.Sync
 		}
 	}
 
-	return proxyList, syncList, status.LastError()
+	return proxyList, syncList, nil
 }
 
 // portMapToLocalPorts extracts containerPort → localPort mappings using the typed ParsePortMap helper.

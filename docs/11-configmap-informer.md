@@ -11,7 +11,7 @@ Before:
               ┌──────────────────────────┼──────────────────────────┐
               │ watch #1                 │ watch #2                 │ watch #3
               ▼                          ▼                          ▼
-    healthchecker.go              proxy.go (Mapper)          connect.go Get()
+    health sync                   proxy.go (Mapper)          connect.go Get()
     NewFilteredConfigMap-         NewFilteredConfigMap-       ConfigMaps().Get()
     Informer()                    Informer()                 (direct API call)
 ```
@@ -33,9 +33,9 @@ After:
                                          │
               ┌──────────────────────────┼──────────────────────────┐
               │                          │                          │
-    healthchecker.go              proxy.go (Mapper)          connect.go Get()
-    syncFromCache()               getPortMappingFromCache()  informer.GetStore()
-    (local cache read)            (local cache read)         + API fallback
+    status.go (status)            proxy.go (Mapper)          connect.go Get()
+    GetTrafficManagerConfigMap()  getPortMappingFromCache()  informer.GetStore()
+    (cache + GET fallback)        (local cache read)         + API fallback
 ```
 
 ## Implementation
@@ -60,7 +60,6 @@ type ConfigMapStore struct {
     informerOnce     sync.Once       // thread-safe single initialization
     informer         cache.SharedInformer
     informerStop     chan struct{}    // independent lifecycle control
-    healthStatus     HealthStatus
 }
 ```
 
@@ -68,29 +67,7 @@ The informer is created lazily on first access via `sync.Once` (thread-safe). It
 
 ### Consumers
 
-#### 1. HealthPeriod (health status cache)
-
-```go
-// pkg/handler/configmap_store.go
-
-func (c *ConnectOptions) HealthPeriod(ctx context.Context, _ time.Duration) {
-    ticker := time.NewTicker(time.Second * 30)
-    for {
-        select {
-        case <-ticker.C:
-            c.syncFromCache()           // read from shared informer cache
-            c.HealthCheckOnce(ctx, 10s) // direct GET for connectivity check
-        }
-    }
-}
-
-func (c *ConnectOptions) syncFromCache() {
-    items := c.GetConfigMapInformer().GetStore().List()
-    // update healthStatus.cm from cache
-}
-```
-
-#### 2. Mapper (Fargate SSH tunnel manager)
+#### 1. Mapper (Fargate SSH tunnel manager)
 
 ```go
 // pkg/handler/proxy_mapper.go
@@ -120,7 +97,7 @@ func (m *Mapper) Run() {
 }
 ```
 
-#### 3. ConnectOptions.Get() (read ConfigMap data)
+#### 2. ConnectOptions.Get() / GetTrafficManagerConfigMap() (read ConfigMap data)
 
 ```go
 func (c *ConnectOptions) Get(ctx context.Context, key string) (string, error) {
@@ -135,7 +112,17 @@ func (c *ConnectOptions) Get(ctx context.Context, key string) (string, error) {
     cm, err := c.clientset.CoreV1().ConfigMaps(c.ManagerNamespace).Get(...)
     return cm.Data[key], err
 }
+
+// GetTrafficManagerConfigMap returns the whole ConfigMap with the same
+// informer-first + GET-fallback policy. Used by daemon/action/status.go's
+// buildProxyAndSyncStatus to render the proxy/sync list from near-real-time
+// informer state.
+func (c *ConnectOptions) GetTrafficManagerConfigMap(ctx context.Context) (*v1.ConfigMap, error) {
+    return c.getConfigMapStore().GetConfigMap(ctx)
+}
 ```
+
+> Status reporting (`kubevpn status`) reads the proxy/sync list via `GetTrafficManagerConfigMap` (informer cache). Status liveness comes from the TUN heartbeat, not ConfigMap/API reachability — the former `HealthPeriod`/`HealthStatus` health-status cache has been removed. See [08-heartbeat-health.md](08-heartbeat-health.md).
 
 ## What Stays as Direct API Calls
 

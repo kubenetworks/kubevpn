@@ -16,7 +16,7 @@ Both user daemon and root daemon register the same `Server` struct with all RPC 
 | `Unsync` | user daemon | **user only** | ❌ | — | Cleans up sync on `currentConnectionID` |
 | `Reset` | user daemon | **user only** | ❌ | — | Resets workload spec via K8s API |
 | `Uninstall` | user daemon | **user only** | ❌ | — | Deletes traffic manager deployment |
-| `Status` | user daemon | **both** | ✅ line 27 | user queries sudo for TUN IPs | User: enriches with TUN IPs from sudo. Sudo: returns raw connection info |
+| `Status` | user daemon | **both** | ✅ line 27 | user queries sudo for TUN IPs + status verdict | User: enriches with TUN IPs from sudo and reuses sudo's computed `Status` string (data-plane verdict). Sudo: computes `Status` from local TUN + heartbeat |
 | `Route` | user daemon | **both** | ✅ line 17 | user→sudo (resolves TUN device, forwards) | User: finds TUN IP + device name. Sudo: executes `tun.AddRoutes` |
 | `Quit` | user daemon | **both** | ✅ line 42 | — | User: cleans up connections. Sudo: cleans up DNS/hosts |
 | `ConnectionList` | user daemon | **both** | ✅ line 27 | user queries sudo for TUN IPs | Same pattern as Status |
@@ -39,7 +39,7 @@ Both user daemon and root daemon register the same `Server` struct with all RPC 
 | `removeConnection` | both | Remove all matching connections |
 | `resetCurrentConnection` | both | After removal, pick first remaining as current |
 | `initStreamLogger` | both | Create per-RPC logger with StreamHook |
-| `getSudoTunIPs` | user only | Query sudo daemon Status for TUN IPs |
+| `getSudoTunIPs` | user only | Query sudo daemon Status for TUN IPs + computed status verdict (data-plane liveness) |
 | `LoadFromConfig` | user only | Restore connections on restart |
 | `OffloadToConfig` | user only | Persist connections to disk |
 | `CleanupConfig` | user only | Delete persisted config |
@@ -86,7 +86,7 @@ CLI ──→ Sudo Daemon (GetClient(true))
 1. **Connect**: properly branches on `IsSudo` — user daemon does control plane, sudo daemon does data plane
 2. **Disconnect**: correctly disconnects sudo first, then user (because SSH jump is in user daemon)
 3. **Route**: user resolves TUN device name (needs `getSudoTunIPs`), forwards to sudo for `tun.AddRoutes` (needs root)
-4. **Status/ConnectionList**: user enriches with TUN IPs from sudo
+4. **Status/ConnectionList**: user enriches with TUN IPs and reuses the sudo daemon's computed status verdict (data-plane liveness) — see [08-heartbeat-health.md](08-heartbeat-health.md)
 5. **Proxy/Sync**: self-call via `GetClient(false)` to reuse Connect flow — correct, not a bug
 
 ### ⚠️ Methods without IsSudo guard

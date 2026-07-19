@@ -90,8 +90,7 @@ detectAndSetManagerNamespace(session.Ctx, ...)
 connect.InitDHCP(session.Ctx)
 forwardConnectToSudo(session.Ctx, ...)
     ├── req.OwnerID = connect.OwnerID
-    ├── cli.Connect(ctx)                           ← to sudo daemon
-    └── connect.HealthPeriod(session.Ctx, ...)
+    └── cli.Connect(ctx)                           ← to sudo daemon
 
 Teardown: session.Cancel() → SSH tunnel closes → temp kubeconfig removed
 ```

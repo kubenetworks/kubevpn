@@ -177,7 +177,7 @@ func TestTUN_FullDataPath_ClientToService(t *testing.T) {
 	// === Step 6: Start the client TUN handler ===
 	// This runs the full ClientDevice pipeline:
 	// readFromTun → runConnPool → writeToConn → server → readFromConn → writeToTun
-	tunHandler := TunHandler(forwarder, hub)
+	tunHandler := TunHandler(forwarder, hub, nil)
 	go func() {
 		tunConn, err := tunListener.Accept()
 		if err != nil {
@@ -287,7 +287,7 @@ func TestTUN_FullDataPath_HTTPRequest(t *testing.T) {
 		Transporter: TCPTransporter(nil),
 		MaxRetries:  3,
 	}
-	tunHandler := TunHandler(forwarder, hub)
+	tunHandler := TunHandler(forwarder, hub, nil)
 	go func() {
 		conn, err := tunListener.Accept()
 		if err != nil {
@@ -393,7 +393,7 @@ func TestTUN_ConnectionPool_MultiSlot(t *testing.T) {
 		Transporter: TCPTransporter(nil),
 		MaxRetries:  3,
 	}
-	tunHandler := TunHandler(forwarder, hub)
+	tunHandler := TunHandler(forwarder, hub, nil)
 	go func() {
 		conn, err := tunListener.Accept()
 		if err != nil {
@@ -508,7 +508,7 @@ func TestTUN_InterClient_Routing(t *testing.T) {
 	}
 	go func() {
 		conn, _ := tunA.Accept()
-		TunHandler(fwdA, hub).Handle(ctx, conn)
+		TunHandler(fwdA, hub, nil).Handle(ctx, conn)
 	}()
 
 	// Client B: TUN IP 198.18.0.3
@@ -532,7 +532,7 @@ func TestTUN_InterClient_Routing(t *testing.T) {
 	}
 	go func() {
 		conn, _ := tunB.Accept()
-		TunHandler(fwdB, hub).Handle(ctx, conn)
+		TunHandler(fwdB, hub, nil).Handle(ctx, conn)
 	}()
 
 	// Wait for both clients to connect
@@ -760,7 +760,7 @@ func TestTUN_ClientDevice_FullPipeline(t *testing.T) {
 		tunOutbound: make(chan *Packet, MaxSize),
 		errChan:     errChan,
 	}
-	device.transport = newClientTransport(device, forwarder)
+	device.transport = newClientTransport(device, forwarder, nil)
 	defer device.Close()
 
 	// Start the device's routines — the same set serve() runs in production:

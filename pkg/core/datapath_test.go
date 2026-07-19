@@ -911,7 +911,7 @@ func TestPipeline_ReadFromTun_ParseAndDispatch(t *testing.T) {
 		tunOutbound: make(chan *Packet, MaxSize),
 		errChan:     make(chan error, 1),
 	}
-	device.transport = newClientTransport(device, nil)
+	device.transport = newClientTransport(device, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

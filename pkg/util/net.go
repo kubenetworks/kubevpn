@@ -121,6 +121,50 @@ func IsIPv6(packet []byte) bool {
 	return 6 == (packet[0] >> 4)
 }
 
+const (
+	icmpv4ProtocolNumber = 1
+	icmpv6ProtocolNumber = 58
+	icmpv4EchoReplyType  = 0
+	icmpv6EchoReplyType  = 129
+)
+
+// IsICMPEchoReplyFrom reports whether packet is an ICMP/ICMPv6 Echo Reply whose source
+// address equals src. It is a lightweight, allocation-free parse for the inbound hot path
+// (no IPv6 extension headers are expected for gateway heartbeat replies).
+func IsICMPEchoReplyFrom(packet []byte, src net.IP) bool {
+	if len(packet) < 1 || src == nil {
+		return false
+	}
+	switch {
+	case IsIPv4(packet):
+		ihl := int(packet[0]&0x0f) * 4
+		if len(packet) < ihl+1 || ihl < 20 {
+			return false
+		}
+		if packet[9] != icmpv4ProtocolNumber {
+			return false
+		}
+		if packet[ihl] != icmpv4EchoReplyType {
+			return false
+		}
+		return src.Equal(net.IP(packet[12:16]))
+	case IsIPv6(packet):
+		const ipv6HeaderLen = 40
+		if len(packet) < ipv6HeaderLen+1 {
+			return false
+		}
+		if packet[6] != icmpv6ProtocolNumber {
+			return false
+		}
+		if packet[ipv6HeaderLen] != icmpv6EchoReplyType {
+			return false
+		}
+		return src.Equal(net.IP(packet[8:24]))
+	default:
+		return false
+	}
+}
+
 // ParseIP extracts the source IP, destination IP, and protocol number from a raw IPv4 or IPv6 packet.
 func ParseIP(packet []byte) (src net.IP, dst net.IP, protocol int, err error) {
 	if IsIPv4(packet) {
