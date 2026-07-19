@@ -9,6 +9,11 @@ on:
 jobs:
   image:
     runs-on: ubuntu-latest
+    env:
+      # Single source of truth: the binary's embedded config.Version AND the image tag both use
+      # this, so `kubevpn version` inside the image matches the image tag (the version-compat
+      # gate compares them).
+      VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Go
@@ -16,6 +21,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Build kubevpn binary
+        # VERSION env overrides the Makefile default (?=), embedding it via -X config.Version.
         run: make kubevpn-linux-amd64
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -31,12 +37,17 @@ jobs:
           context: .
           file: build/test.Dockerfile
           push: true
-          tags: ghcr.io/kubenetworks/kubevpn:${{ github.event.pull_request.head.sha || github.sha }}
+          tags: ghcr.io/kubenetworks/kubevpn:${{ env.VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
   linux:
     runs-on: ubuntu-latest
     needs: [ "image" ]
+    env:
+      # Same VERSION as the image job: the built binary's config.Version/config.Image
+      # match the pushed image tag, so the version-compat gate passes and in-process
+      # deploy paths reference an image that actually exists.
+      VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -73,10 +84,6 @@ jobs:
 
       - name: Build
         run: |
-          export VERSION=${{github.event.pull_request.head.sha}}
-          if [[ -z "$VERSION" ]]; then
-            export VERSION=${{ github.sha }}
-          fi
           make kubevpn-linux-amd64
           chmod +x ./bin/kubevpn
           cp ./bin/kubevpn /usr/local/bin/kubevpn
@@ -115,11 +122,14 @@ jobs:
         # default server http://localhost:8080 (which collides with the test's
         # own dummy HTTP server) and every API call fails with
         # "serializer for text/plain; charset=utf-8 doesn't exist".
-        run: sudo -E env HOME="$HOME" KUBECONFIG="$HOME/.kube/config" make ut
+        run: sudo -E env HOME="$HOME" KUBECONFIG="$HOME/.kube/config" VERSION="$VERSION" make ut
 
   macos:
     runs-on:  macos-15-intel
     needs: [ "image" ]
+    env:
+      # Same VERSION as the image job (see linux job).
+      VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -162,10 +172,6 @@ jobs:
 
       - name: Build
         run: |
-          export VERSION=${{github.event.pull_request.head.sha}}
-          if [[ -z "$VERSION" ]]; then
-            export VERSION=${{ github.sha }}
-          fi
           make kubevpn-darwin-amd64
           chmod +x ./bin/kubevpn
           cp ./bin/kubevpn /usr/local/bin/kubevpn
@@ -206,13 +212,19 @@ jobs:
         # default server http://localhost:8080 (which collides with the test's
         # own dummy HTTP server) and every API call fails with
         # "serializer for text/plain; charset=utf-8 doesn't exist".
-        run: sudo -E env HOME="$HOME" KUBECONFIG="$HOME/.kube/config" TMPDIR="$TMPDIR" make ut
+        run: sudo -E env HOME="$HOME" KUBECONFIG="$HOME/.kube/config" TMPDIR="$TMPDIR" VERSION="$VERSION" make ut
 
   windows:
     runs-on: windows-latest
     needs: [ "image" ]
+    # windows-latest cannot run Linux containers natively (its Docker is Windows/windowsfilter),
+    # so the Linux kind cluster runs inside WSL2's Linux Docker. The Windows-native kubevpn.exe
+    # (wintun) reaches the cluster API + traffic-manager via 127.0.0.1 (WSL2 localhost forwarding).
+    # NOTE: WSL2 Docker/kind on hosted runners is finicky; expect to iterate on this in CI.
     env:
       VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
+      # Written from WSL to /mnt/c/kubeconfig; read by the Windows-side kubectl/kubevpn.
+      KUBECONFIG: C:\kubeconfig
     defaults:
       run:
         # The Makefile relies on `VAR=x go build` env-prefixes plus cp/eval, which
@@ -226,38 +238,60 @@ jobs:
         with:
           go-version: '1.23'
 
-      # Switch the runner's Docker to Linux-container mode — kind node images are
-      # Linux, and the default Windows daemon runs Windows containers.
-      - name: Set up Docker (Linux containers)
-        uses: docker/setup-docker-action@v4
+      - name: Set up WSL2 (Ubuntu) with Linux Docker
+        uses: Vampire/setup-wsl@v3
         with:
-          daemon-config: |
-            {
-              "features": { "containerd-snapshotter": true }
-            }
+          distribution: Ubuntu-22.04
+          additional-packages: docker.io curl iproute2
 
-      - name: Install tools
-        run: choco install -y kind kubernetes-cli make
-
-      - name: Create kind cluster
+      - name: Create kind cluster + deploy bookinfo (inside WSL2)
+        shell: wsl-bash {0}
         run: |
-          test "$(docker info --format '{{.OSType}}')" = linux  # fail fast if Windows containers
-          kind create cluster --wait 120s
-          kubectl cluster-info
-          kubectl config view --flatten --raw
+          set -euxo pipefail
+          # Start the Linux Docker daemon (no systemd in WSL by default).
+          sudo service docker start || (sudo dockerd >/tmp/dockerd.log 2>&1 &)
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 2; done
+          test "$(docker info --format '{{.OSType}}')" = linux  # must be a Linux engine now
 
-      - name: Load demo images and deploy bookinfo
-        run: |
-          imgs=(
-            ghcr.io/kubenetworks/examples-bookinfo-details-v1:1.20.2
-            ghcr.io/kubenetworks/examples-bookinfo-ratings-v1:1.20.2
-            ghcr.io/kubenetworks/examples-bookinfo-reviews-v1:1.20.2
-            ghcr.io/kubenetworks/examples-bookinfo-productpage-v1:1.20.2
-            ghcr.io/kubenetworks/authors:latest
-            ghcr.io/kubenetworks/nginx:latest
-          )
-          for i in "${imgs[@]}"; do docker pull "$i"; kind load docker-image "$i"; done
-          kubectl apply -f samples/bookinfo.yaml
+          # Install kind + kubectl (Linux) inside WSL.
+          sudo curl -sSLo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
+          sudo curl -sSLo /usr/local/bin/kubectl "https://dl.k8s.io/release/$(curl -sSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo chmod +x /usr/local/bin/kind /usr/local/bin/kubectl
+
+          # Fixed apiServerAddress/port so Windows host can reach the API via WSL2 localhost.
+          cat > /tmp/kind.yaml <<'EOF'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          networking:
+            apiServerAddress: 127.0.0.1
+            apiServerPort: 6443
+          EOF
+          sudo kind create cluster --config /tmp/kind.yaml --wait 120s
+
+          for img in \
+            ghcr.io/kubenetworks/examples-bookinfo-details-v1:1.20.2 \
+            ghcr.io/kubenetworks/examples-bookinfo-ratings-v1:1.20.2 \
+            ghcr.io/kubenetworks/examples-bookinfo-reviews-v1:1.20.2 \
+            ghcr.io/kubenetworks/examples-bookinfo-productpage-v1:1.20.2 \
+            ghcr.io/kubenetworks/authors:latest \
+            ghcr.io/kubenetworks/nginx:latest; do
+            docker pull "$img"; sudo kind load docker-image "$img"
+          done
+          sudo kubectl apply -f samples/bookinfo.yaml
+
+          # SSH jump host for TestSSHFunctions (mirrors the linux job); reachable at 127.0.0.1:2222.
+          docker run -d --name ssh \
+            -e PUID=1000 -e PGID=0 -e TZ=Etc/UTC -e SUDO_ACCESS=true \
+            -e PASSWORD_ACCESS=true -e USER_PASSWORD=naison -e USER_NAME=naison \
+            -e DOCKER_MODS=linuxserver/mods:openssh-server-ssh-tunnel \
+            -p 127.0.0.1:2222:2222 --restart always \
+            lscr.io/linuxserver/openssh-server:latest
+
+          # Export kubeconfig to C:\kubeconfig (server already 127.0.0.1:6443) for the Windows side.
+          sudo kind get kubeconfig > /mnt/c/kubeconfig
+
+      - name: Install tools (Windows)
+        run: choco install -y kubernetes-cli make
 
       - name: Build kubevpn.exe and put it on PATH
         run: |
@@ -268,6 +302,7 @@ jobs:
 
       - name: Wait for pods to be ready
         run: |
+          kubectl cluster-info
           while ! kubectl wait --for=condition=Ready pods --all --timeout=1800s; do sleep 2; done
           kubectl get pod -A -o wide
 

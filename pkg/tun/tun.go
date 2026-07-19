@@ -13,8 +13,8 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-// ClosedErr is returned by Accept when the TUN listener has been closed.
-var ClosedErr = errors.New("accept on closed listener")
+// ErrClosed is returned by Accept when the TUN listener has been closed.
+var ErrClosed = errors.New("accept on closed listener")
 
 // Config is the config for TUN device.
 type Config struct {
@@ -57,7 +57,7 @@ func (l *tunListener) Accept() (net.Conn, error) {
 	case conn := <-l.conns:
 		return conn, nil
 	case <-l.closed:
-		return nil, ClosedErr
+		return nil, ErrClosed
 	}
 }
 

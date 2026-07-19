@@ -315,3 +315,59 @@ func TestCheckVersionCompatibility_InvalidVersion(t *testing.T) {
 		t.Fatalf("expected 0 for invalid version input, got %d", result)
 	}
 }
+
+// TestCmpVersionMajorOrMinor_SHANotComparable is a regression for the CI failure where a git-SHA
+// client version and a SHA-tagged image were wrongly judged incompatible (the lenient parser read
+// "89b23e73..." as major 89). Strict semver parsing must treat SHAs as non-comparable (0).
+func TestCmpVersionMajorOrMinor_SHANotComparable(t *testing.T) {
+	cases := [][2]string{
+		{"378749d", "89b23e730b0c9d0b91640eb52bf3da33e81d3415"}, // both SHA
+		{"378749d", "v2.10.2"},                                  // SHA vs real semver
+		{"v2.10.2", "89b23e730b0c9d0b91640eb52bf3da33e81d3415"}, // real semver vs SHA
+		{"latest", "v2.10.2"},                                   // "latest" default
+	}
+	for _, c := range cases {
+		if got := CmpVersionMajorOrMinor(c[0], c[1]); got != 0 {
+			t.Errorf("CmpVersionMajorOrMinor(%q, %q) = %d, want 0 (non-comparable)", c[0], c[1], got)
+		}
+	}
+}
+
+// TestCmpClientVersionAndClientImage_SHACompatible reproduces the exact sidecar-crash inputs:
+// the version gate must NOT reject a SHA client version against a SHA-tagged image.
+func TestCmpClientVersionAndClientImage_SHACompatible(t *testing.T) {
+	cmp, err := CmpClientVersionAndClientImage("378749d", "ghcr.io/kubenetworks/kubevpn:89b23e730b0c9d0b91640eb52bf3da33e81d3415")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cmp != 0 {
+		t.Fatalf("expected compatible (0) for SHA client vs SHA image tag, got %d", cmp)
+	}
+}
+
+// TestIsNewer_SHACompatible asserts the upgrade gate no longer errors for SHA client/image,
+// which previously crash-looped the injected sidecar (UpgradeDeploy).
+func TestIsNewer_SHACompatible(t *testing.T) {
+	img := "ghcr.io/kubenetworks/kubevpn:89b23e730b0c9d0b91640eb52bf3da33e81d3415"
+	needUpgrade, err := IsNewer("378749d", img, img)
+	if err != nil {
+		t.Fatalf("IsNewer must not error for SHA client/image, got: %v", err)
+	}
+	if needUpgrade {
+		t.Fatalf("expected no upgrade needed for SHA client/image, got true")
+	}
+}
+
+// TestCmpVersionMajorOrMinor_RealSemverStillCompared guards that strict parsing keeps real
+// release comparisons working.
+func TestCmpVersionMajorOrMinor_RealSemverStillCompared(t *testing.T) {
+	if CmpVersionMajorOrMinor("v2.11.0", "v2.10.5") <= 0 {
+		t.Error("v2.11.0 should be newer than v2.10.5")
+	}
+	if CmpVersionMajorOrMinor("v2.10.0", "v2.11.0") >= 0 {
+		t.Error("v2.10.0 should be older than v2.11.0")
+	}
+	if CmpVersionMajorOrMinor("v2.10.1", "v2.10.9") != 0 {
+		t.Error("same major.minor should compare equal (patch ignored)")
+	}
+}

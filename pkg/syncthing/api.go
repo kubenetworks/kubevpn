@@ -35,9 +35,11 @@ func NewClient(addr string) *Client {
 
 func (c *Client) GetConfig(ctx context.Context) (*config.Configuration, error) {
 	buf, err := c.Call(ctx, "rest/config", "GET", nil)
-	var configuration config.Configuration
-	err = json.Unmarshal(buf, &configuration)
 	if err != nil {
+		return nil, err
+	}
+	var configuration config.Configuration
+	if err = json.Unmarshal(buf, &configuration); err != nil {
 		return nil, err
 	}
 	return &configuration, nil

@@ -1,214 +1,217 @@
 # Stable / Fixed TUN IP Allocation Design
 
-## 1. 背景与问题
+## 1. Background & Problem
 
-KubeVPN 为每个 VPN 连接分配一个 TUN 设备 IP（地址池 `198.18.0.0/16`，见
-`docs/03-dhcp-ip-allocation.md`）。分配由集群内 traffic-manager 的
-`TunConfigServer` 负责，租约按 **OwnerID** 记录在 ConfigMap 的 `TUN_ALLOCS`
-键中，底层位图分配走 `cilium/ipam`。
+KubeVPN allocates a TUN device IP per VPN connection (pool `198.18.0.0/16`, see
+`docs/03-dhcp-ip-allocation.md`). Allocation is owned by the in-cluster traffic-manager's
+`TunConfigServer`; leases are keyed by **OwnerID** in the ConfigMap's `TUN_ALLOCS` key, and the
+underlying bitmap allocation uses `cilium/ipam`.
 
-**问题：同一客户端每次重连拿到的 TUN IP 是不稳定的。**
+**Problem: the same client gets an unstable TUN IP on every reconnect.**
 
-根因：OwnerID 在每次 connect 时随机生成。
+Root cause: OwnerID is randomly generated on every connect.
 
 ```go
-// pkg/daemon/action/connect_elevate.go:31（用户守护进程内）
+// pkg/daemon/action/connect_elevate.go:31 (inside the user daemon)
 ownerID := req.OwnerID
 if ownerID == "" {
-    ownerID = uuid.New().String()[:12] // ← 每次连接都是新随机值
+    ownerID = uuid.New().String()[:12] // ← a fresh random value on every connect
 }
 ```
 
-由此带来两种不稳定：
+This produces two kinds of instability:
 
-| 场景 | 现状 | 后果 |
+| Scenario | Current behavior | Consequence |
 |------|------|------|
-| 租期内（< 5min）重连 | 旧 OwnerID 的租约仍持有旧 IP，新 OwnerID 分到 **另一个** IP | IP 变化；旧 IP 被白白占用到过期 |
-| 租约回收后（> 5min）重连 | 连续位图从 0 扫描，给"下一个空闲"，只是**碰巧**可能相同 | IP 不可预期 |
+| Reconnect within the lease (< 5min) | The old OwnerID's lease still holds the old IP; the new OwnerID gets **another** IP | IP changes; the old IP is wasted until it expires |
+| Reconnect after lease reclaim (> 5min) | The bitmap is scanned from 0 for the "next free" slot, which only **coincidentally** may match | IP is unpredictable |
 
-## 2. 目标与范围
+## 2. Goals & Scope
 
-- **目标**：尽最大努力让同一客户端在重连后拿回**同一个** TUN IP。
-- **粒度**：身份按 **(机器 + 操作系统用户)**，即同一台机器、同一 OS 用户稳定唯一。
-- **性质**：尽力而为（best-effort），**不是**硬性永久预留——离线足够久且该 IP 被他人占用时，会干净回退到新 IP。
-- **不在范围内**：
-  - 永久预留 / 静态分配（离线也不回收、不被他人占用）。
-  - 按"人"跨机器固定（基于 kubeconfig 用户/证书）。
+- **Goal**: best-effort return of the **same** TUN IP to the same client after a reconnect.
+- **Granularity**: identity is per **(machine + OS user)** — stable and unique for the same machine and same OS user.
+- **Nature**: best-effort, **not** a hard permanent reservation — if offline long enough and the IP has been taken by someone else, it cleanly falls back to a new IP.
+- **Out of scope**:
+  - Permanent reservation / static allocation (never reclaimed while offline, never taken by others).
+  - Per-"person" pinning across machines (based on kubeconfig user/cert).
 
-设计分两层，叠加生效：
+The design has two layers, applied together:
 
-- **Part A 稳定 OwnerID**：解决租期内重连（高频场景），并消除"每次重连浪费一个 IP"。
-- **Part B preferred-IP 提示**：解决租约回收后（长时间断开）的重连。
+- **Part A — stable OwnerID**: handles reconnect within the lease (the high-frequency case), and eliminates "waste one IP per reconnect".
+- **Part B — preferred-IP hint**: handles reconnect after lease reclaim (long disconnect).
 
-## 3. 现状分析（可复用的基础设施）
+## 3. Current Infrastructure (reusable building blocks)
 
-- 租约层 `pkg/controlplane/tun_config.go`：`GetTunIP` 已支持
-  - 同一 OwnerID 续租返回同一 IP（`s.allocs[ownerID]` 命中即返回）；
-  - `ExcludeIPs` 冲突时重分配。
-- 位图层 `pkg/dhcp/dhcp.go`：`RentIPExcluding` 走 `AllocateNext`（顺序分配）。
-- 底层 `cilium/ipam` 同时提供**指定 IP 分配**与顺序分配：
+- Lease layer `pkg/controlplane/tun_config.go`: `GetTunIP` already supports
+  - returning the same IP when the same OwnerID renews (`s.allocs[ownerID]` hit returns it);
+  - reallocation on `ExcludeIPs` conflict.
+- Bitmap layer `pkg/dhcp/dhcp.go`: `RentIPExcluding` uses `AllocateNext` (sequential allocation).
+- The underlying `cilium/ipam` offers both **specific-IP allocation** and sequential allocation:
   ```go
   // vendor/github.com/cilium/ipam/service/ipallocator/allocator.go
-  func (r *Range) Allocate(ip net.IP) error   // 指定 IP，被占用则报错
+  func (r *Range) Allocate(ip net.IP) error   // specific IP; errors if taken
   func (r *Range) AllocateNext() (net.IP, error)
   ```
-- 客户端分配入口 `pkg/handler/network.go` 的 `rentIP`（运行在 **root 守护进程**），
-  通过 `TunIPRequest{OwnerID, Namespace, ExcludeIPs}` 调 `GetTunIP`。
-- 持久化目录 `~/.kubevpn`（`pkg/config/const.go` 的 `homePath`），项目已依赖
-  `github.com/google/uuid`。
+- The client allocation entry point `rentIP` in `pkg/handler/network.go` (runs in the **root daemon**)
+  calls `GetTunIP` via `TunIPRequest{OwnerID, Namespace, ExcludeIPs}`.
+- Persistence directory `~/.kubevpn` (`homePath` in `pkg/config/const.go`); the project already depends on
+  `github.com/google/uuid`.
 
-## 4. 设计方案
+## 4. Design
 
-### 4.1 Part A：稳定 OwnerID（持久化 UUID，按机器+用户）
+### 4.1 Part A: Stable OwnerID (persisted UUID, per machine + user)
 
-新增 `config.GetClientID()`：
+Add `config.GetClientID()`:
 
 ```
-首次调用：生成 UUID → 写入 ~/.kubevpn/client_id（文件不存在时）
-后续调用：读取并复用
-返回值：取前 12 位，沿用现有 OwnerID 格式
+First call:   generate a UUID → write to ~/.kubevpn/client_id (if the file is absent)
+Later calls:  read and reuse
+Return value: first 12 chars, matching the existing OwnerID format
 ```
 
-`connect_elevate.go` 中把随机生成改为：
+In `connect_elevate.go`, replace the random generation with:
 
 ```go
 if ownerID == "" {
-    ownerID = config.GetClientID() // 稳定、可持久化
+    ownerID = config.GetClientID() // stable, persisted
 }
 ```
 
-这段逻辑运行在**用户守护进程**，`~/.kubevpn` 即调用者（OS 用户）的家目录，
-因此 OwnerID 自动满足：
+This runs in the **user daemon**, where `~/.kubevpn` is the caller's (OS user's) home directory, so the
+OwnerID automatically satisfies:
 
-- 同一机器、同一 OS 用户 → 稳定唯一，且跨重连、跨守护进程重启不变；
-- 不同 OS 用户 → 不同家目录 → 不同 OwnerID。
+- Same machine, same OS user → stable and unique, unchanged across reconnects and daemon restarts;
+- Different OS user → different home directory → different OwnerID.
 
-**仅 Part A 的效果**：租期内（5min）重连命中 `s.allocs[ownerID]`，直接返回同一
-IP；不再每次重连消耗一个新 IP。
+**Effect of Part A alone**: a reconnect within the lease (5min) hits `s.allocs[ownerID]` and returns the
+same IP directly; no longer consumes a new IP per reconnect.
 
-### 4.2 Part B：服务端"上次 IP"记忆（长时间断开后的粘性）
+### 4.2 Part B: Server-side "last IP" memory (stickiness after a long disconnect)
 
-租约被回收后，`TUN_ALLOCS` 中该 OwnerID 的记录已删除。要在重连时拿回旧 IP，需要
-有人记得"这个 OwnerID 上次用的是哪个 IP"。
+After a lease is reclaimed, that OwnerID's record in `TUN_ALLOCS` is gone. To return the old IP on
+reconnect, something must remember "which IP this OwnerID last used".
 
-**实现选型说明**：原设计是"客户端把上次 IP 作为 `PreferredIPs` 经 gRPC 传上来"，
-需要给 `TunIPRequest` 新增字段并 `make gen` 重新生成 protobuf。由于构建环境无
-`protoc`、且仓库约定不手改 `*.pb.go`，改为**等价的服务端实现**：既然 Part A 已让
-OwnerID 稳定，traffic-manager 自己按 OwnerID 记住"上次分配的 IP"即可，无需新增协议
-字段，也无需客户端持久化。跨集群本地唯一性仍由客户端已经发送的 `ExcludeIPs`
-（Fix 3）保证。
+**Implementation note**: the original design had the client send its last IP as `PreferredIPs` over gRPC,
+which would require a new field on `TunIPRequest` and re-running `make gen` for protobuf. Since the build
+environment has no `protoc` and the repo convention is to not hand-edit `*.pb.go`, we use an **equivalent
+server-side implementation**: now that Part A makes the OwnerID stable, the traffic-manager itself
+remembers "the IP last allocated to this OwnerID" by OwnerID — no new protocol field and no client-side
+persistence needed. Cross-cluster local uniqueness is still guaranteed by the `ExcludeIPs` the client
+already sends (Fix 3).
 
-#### 4.2.1 服务端记忆 lastIPs
+#### 4.2.1 Server-side `lastIPs` memory
 
-`pkg/controlplane/tun_config.go` 的 `TunConfigServer` 增加内存映射：
+`TunConfigServer` in `pkg/controlplane/tun_config.go` gains an in-memory map:
 
 ```go
-lastIPs map[string]lastIPRecord // ownerID → 上次持有的 {v4, v6}
+lastIPs map[string]lastIPRecord // ownerID → last held {v4, v6}
 ```
 
-- **写入时机**：`reapExpiredLeases` 回收某 OwnerID 的租约、`delete(allocs, ownerID)`
-  之前，先 `lastIPs[ownerID] = {alloc.IPv4, alloc.IPv6}`。
-- **特性**：仅内存（traffic-manager 重启后丢失，见 §7）；按 OwnerID 作 key，Part A
-  已保证其按用户稳定唯一，因此条数受真实客户端数量天然约束（不再像随机 UUID 那样
-  无界增长）。
+- **When written**: in `reapExpiredLeases`, before reclaiming an OwnerID's lease and calling
+  `delete(allocs, ownerID)`, first set `lastIPs[ownerID] = {alloc.IPv4, alloc.IPv6}`.
+- **Properties**: in-memory only (lost on traffic-manager restart, see §7); keyed by OwnerID, which Part A
+  keeps stable and unique per user, so the entry count is naturally bounded by the real client count
+  (no longer unbounded growth as with random UUIDs).
 
-#### 4.2.2 位图层支持指定 IP
+#### 4.2.2 Bitmap layer: specific-IP support
 
-`pkg/dhcp/dhcp.go`：把 `RentIPExcluding` 重构为共享 `makeShouldSkip` /
-`allocateOne` 的内部 `rentIP`，并新增：
+`pkg/dhcp/dhcp.go`: refactor `RentIPExcluding` into an internal `rentIP` sharing `makeShouldSkip` /
+`allocateOne`, and add:
 
 ```go
-// 先尝试 ipallocator.Allocate(指定IP)，被占用/不可用/被 skip 则回退 AllocateNext。
+// Try ipallocator.Allocate(specific IP) first; fall back to AllocateNext if taken/unavailable/skipped.
 func (m *Manager) RentIPPreferring(ctx, prefV4, prefV6 net.IP, exclude []net.IP) (*net.IPNet, *net.IPNet, error)
 ```
 
-#### 4.2.3 GetTunIP 优先复用
+#### 4.2.3 GetTunIP: prefer reuse
 
-`pkg/controlplane/tun_config.go` 的 `GetTunIP`，**仅在"新分配"路径**（该 OwnerID
-当前无活跃租约）改为调用 `allocateForOwner`：
-
-```
-若 lastIPs[ownerID] 存在 且 该 IP 不在 ExcludeIPs 中
-        → RentIPPreferring(lastIP, exclude)   // 优先复用旧 IP
-否则    → RentIPExcluding(exclude)             // 顺序分配（维持现状）
-```
-
-"已有租约续租"和"ExcludeIPs 冲突重分配"两条路径不变。Fix 1/2 的不变量（单写者、
-持久化失败回滚、孤儿 bit 清扫）全部保留。
-
-### 4.3 数据流
+`GetTunIP` in `pkg/controlplane/tun_config.go`, **only on the "new allocation" path** (the OwnerID has no
+active lease), calls `allocateForOwner`:
 
 ```
-重连（同一客户端）
-  用户守护进程: OwnerID = GetClientID()  ──(ConnectRequest.OwnerID)──▶ root 守护进程
-  root 守护进程 rentIP: GetTunIP{OwnerID, ExcludeIPs} ─────▶ traffic-manager
-        ├─ 有活跃租约       → 返回原 IP（Part A）
-        └─ 无活跃租约 allocateForOwner：
-              lastIPs[OwnerID] 存在且不在 ExcludeIPs → RentIPPreferring(旧IP)
-                    旧 IP 空闲 → 复用（Part B）
-                    否则       → AllocateNext 回退
-              否则                                  → RentIPExcluding（顺序）
+if lastIPs[ownerID] exists AND that IP is not in ExcludeIPs
+        → RentIPPreferring(lastIP, exclude)   // prefer reusing the old IP
+else    → RentIPExcluding(exclude)             // sequential allocation (unchanged)
 ```
 
-## 5. 多集群 / 多用户 / 多 sidecar 正确性
+The "renew existing lease" and "reallocate on ExcludeIPs conflict" paths are unchanged. All Fix 1/2
+invariants (single writer, rollback on persistence failure, orphan-bit cleanup) are preserved.
 
-| 维度 | 分析 | 结论 |
+### 4.3 Data Flow
+
+```
+Reconnect (same client)
+  user daemon: OwnerID = GetClientID()  ──(ConnectRequest.OwnerID)──▶ root daemon
+  root daemon rentIP: GetTunIP{OwnerID, ExcludeIPs} ─────▶ traffic-manager
+        ├─ active lease       → return original IP (Part A)
+        └─ no active lease, allocateForOwner:
+              lastIPs[OwnerID] exists and not in ExcludeIPs → RentIPPreferring(old IP)
+                    old IP free → reuse (Part B)
+                    otherwise   → AllocateNext fallback
+              otherwise                                     → RentIPExcluding (sequential)
+```
+
+## 5. Multi-cluster / Multi-user / Multi-sidecar Correctness
+
+| Dimension | Analysis | Conclusion |
 |------|------|------|
-| **同集群多用户** | OwnerID 按 OS 用户家目录不同而不同；`lastIPs` 复用仅在该 IP **空闲**时命中，被占则 `Allocate` 失败回退 | 不会两人同 IP |
-| **单客户端多集群** | 每集群独立 ConfigMap/allocs，OwnerID 相同无妨；但本机要求各集群 TUN IP **不重叠** | 见下一行 |
-| **跨集群本地唯一性** | 客户端发送的 `ExcludeIPs` 含兄弟连接已持有的 TUN IP（Fix 3，`buildExcludeIPs`）；服务端复用 `lastIPs` 前会检查 `ExcludeIPs`，命中则跳过 | 跨集群本地仍唯一，复用让位 |
-| **多 sidecar** | sidecar 的 OwnerID 是 podName，与客户端 UUID 是不相交的 key 空间 | 无冲突 |
-| **同集群单客户端多连接** | 用户守护进程按 ConnectionID（manager namespace UID）去重，一集群至多一条连接 | 同一 OwnerID 不会在一个集群出现两条租约 |
+| **Multiple users, same cluster** | OwnerID differs by OS user home directory; `lastIPs` reuse only hits when the IP is **free**, otherwise `Allocate` fails and falls back | No two users share an IP |
+| **One client, multiple clusters** | Each cluster has its own ConfigMap/allocs; the same OwnerID is fine, but the local machine needs **non-overlapping** TUN IPs across clusters | See next row |
+| **Cross-cluster local uniqueness** | The client's `ExcludeIPs` includes the TUN IPs held by sibling connections (Fix 3, `buildExcludeIPs`); the server checks `ExcludeIPs` before reusing `lastIPs`, skipping on a hit | Locally unique across clusters; reuse yields |
+| **Multiple sidecars** | A sidecar's OwnerID is its podName — a disjoint key space from client UUIDs | No conflict |
+| **One client, multiple connections, same cluster** | The user daemon dedups by ConnectionID (manager-namespace UID); at most one connection per cluster | The same OwnerID never has two leases in one cluster |
 
-## 6. 与现有机制的关系
+## 6. Relationship to Existing Mechanisms
 
-- **租约 / reaper**（`docs/03`）：不变。`lastIPs` 只影响"无活跃租约时如何选 IP"，
-  不改变租期与回收。
-- **滚动升级安全 Fix 1**、**位图↔allocs 防泄漏 Fix 2**、**envoy 规则 IP 同步
-  Fix 4**：均不受影响，继续生效。
-- **跨集群本地 IP 排除 Fix 3**：`lastIPs` 复用受客户端发送的 `ExcludeIPs` 约束，
-  本机唯一性优先级高于"复用同一 IP"。
-- **休眠唤醒 `docs/28`**：稳定 OwnerID + `lastIPs` 提升唤醒后拿回同一 IP 的概率；
-  但 VPN-only sidecar 的 iptables DNAT 硬编码热更新仍是独立遗留项，不在本设计内。
+- **Lease / reaper** (`docs/03`): unchanged. `lastIPs` only affects "how to pick an IP when there is no
+  active lease"; it does not change lease duration or reclaim.
+- **Rolling-upgrade safety Fix 1**, **bitmap↔allocs leak prevention Fix 2**, **envoy rule IP sync Fix 4**:
+  all unaffected, still in effect.
+- **Cross-cluster local IP exclusion Fix 3**: `lastIPs` reuse is constrained by the client-sent
+  `ExcludeIPs`; local uniqueness takes priority over "reuse the same IP".
+- **Sleep/wake `docs/28`**: stable OwnerID + `lastIPs` raise the probability of getting the same IP back
+  after wake; the VPN-only sidecar's hard-coded iptables DNAT hot-update is still a separate legacy item,
+  out of scope here.
 
-## 7. 失败与回退（边界场景）
+## 7. Failure & Fallback (edge cases)
 
-| 场景 | 行为 |
+| Scenario | Behavior |
 |------|------|
-| `~/.kubevpn/client_id` 不可写 | 回退为本次随机 UUID（退化为现状，不影响功能） |
-| 旧 IP 已被他人占用 | `Allocate` 失败 → `AllocateNext` 回退到新 IP |
-| 旧 IP 与本机其它集群冲突 | 在 `ExcludeIPs` 中 → 跳过复用 → 回退 |
-| traffic-manager 重启 | `lastIPs` 为内存态会丢失 → 退化为 Part A（活跃租约仍稳定；已回收的超期连接首次重连可能换 IP，之后再次稳定） |
+| `~/.kubevpn/client_id` not writable | Fall back to a random UUID for this run (degrades to current behavior, no functional impact) |
+| Old IP already taken by someone else | `Allocate` fails → `AllocateNext` falls back to a new IP |
+| Old IP conflicts with another local cluster | It is in `ExcludeIPs` → skip reuse → fall back |
+| traffic-manager restart | In-memory `lastIPs` is lost → degrades to Part A (active leases still stable; a reclaimed, expired connection may change IP on its first reconnect, then is stable again) |
 
-## 8. 接口与文件清单
+## 8. Interfaces & File List
 
-| 文件 | 变更 |
+| File | Change |
 |------|------|
-| `pkg/config/clientid.go`（新增） | `GetClientID()`（持久化稳定客户端 UUID） |
-| `pkg/config/const.go` | 复用 `homePath` |
-| `pkg/daemon/action/connect_elevate.go` | 用 `GetClientID()` 取代随机 UUID |
-| `pkg/dhcp/dhcp.go` | 重构 `rentIP`/`makeShouldSkip`/`allocateOne`，新增 `RentIPPreferring` |
-| `pkg/controlplane/tun_config.go` | `lastIPs` 记忆 + `allocateForOwner`，`GetTunIP` 新分配路径优先复用 |
+| `pkg/config/clientid.go` (new) | `GetClientID()` (persist a stable client UUID) |
+| `pkg/config/const.go` | reuse `homePath` |
+| `pkg/daemon/action/connect_elevate.go` | use `GetClientID()` instead of a random UUID |
+| `pkg/dhcp/dhcp.go` | refactor `rentIP`/`makeShouldSkip`/`allocateOne`, add `RentIPPreferring` |
+| `pkg/controlplane/tun_config.go` | `lastIPs` memory + `allocateForOwner`; `GetTunIP` new-allocation path prefers reuse |
 
-> 注：原计划的 `daemon.proto` 新字段与 `pkg/handler/network.go` 客户端改动因
-> 无 `protoc` 环境而改为服务端 `lastIPs` 方案（见 §4.2），不再涉及。
+> Note: the originally planned `daemon.proto` new field and `pkg/handler/network.go` client change were
+> replaced by the server-side `lastIPs` approach (see §4.2) due to the lack of a `protoc` environment, and
+> are no longer involved.
 
-## 9. 测试与验证
+## 9. Testing & Verification
 
-集成测试（`fake.NewSimpleClientset` + `controlplane` 的 `newTestServer`）：
+Integration tests (`fake.NewSimpleClientset` + `controlplane`'s `newTestServer`):
 
-- 被回收后同一 OwnerID 重连 → 复用旧 IP，即便存在更低号的空闲 IP
-  （`TestGetTunIP_StickyReconnectPrefersRememberedIP`）。
-- 旧 IP 已被他人占用 → 回退到另一个空闲 IP，不串号
-  （`TestGetTunIP_StickyFallsBackWhenRememberedIPTaken`）。
-- 旧 IP 出现在 `ExcludeIPs` → 让位回退（`TestGetTunIP_StickyYieldsToExcludeIPs`，Fix 3 优先）。
-- 同一 OwnerID 续租 → 同 IP（已有 `TestGetTunIP_RenewReturnsSameIP` 覆盖）。
-- `config.GetClientID()` 多次调用稳定且持久化（`TestGetClientID_StableAndPersisted`）。
+- Same OwnerID reconnecting after reclaim → reuses the old IP, even if a lower-numbered free IP exists
+  (`TestGetTunIP_StickyReconnectPrefersRememberedIP`).
+- Old IP already taken by someone else → falls back to another free IP, no cross-wiring
+  (`TestGetTunIP_StickyFallsBackWhenRememberedIPTaken`).
+- Old IP appears in `ExcludeIPs` → yields and falls back (`TestGetTunIP_StickyYieldsToExcludeIPs`, Fix 3 priority).
+- Same OwnerID renewing → same IP (already covered by `TestGetTunIP_RenewReturnsSameIP`).
+- `config.GetClientID()` is stable and persisted across calls (`TestGetClientID_StableAndPersisted`).
 
-通用：`go build ./...`（linux/darwin/windows）、`go vet ./pkg/...`、
-`go test ./pkg/...`（已知预存在失败：`TestPing` 环境限制、偶发
-`TestTUN_FullDataPath_HTTPRequest`）。
+General: `go build ./...` (linux/darwin/windows), `go vet ./pkg/...`,
+`go test ./pkg/...` (known pre-existing failures: `TestPing` environment limitation, occasional
+`TestTUN_FullDataPath_HTTPRequest`).
 
-端到端（`/data/.kube/config`，需切到远端 context）：connect 记录 IP → 断开 →
-5min 内重连（Part A 同 IP）与 >5min 重连（Part B 若空闲则同 IP）；两集群并连验证
-本机 IP 仍各不相同。
+End-to-end (`/data/.kube/config`, switch to the remote context): connect and record the IP → disconnect →
+reconnect within 5min (Part A, same IP) and after >5min (Part B, same IP if free); connect to two clusters
+concurrently to verify the local IPs are still distinct.

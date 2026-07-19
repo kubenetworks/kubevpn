@@ -2,30 +2,23 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"time"
 
-	miekgdns "github.com/miekg/dns"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
-	"gvisor.dev/gvisor/pkg/tcpip"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 const (
 	// healthCheckDialTimeout bounds dialing/checking the local control-plane and port-forward endpoints.
 	healthCheckDialTimeout = 5 * time.Second
-	// dnsProbeTimeout bounds the DNS probe used to verify the port-forward path.
-	dnsProbeTimeout = 10 * time.Second
 	// portForwardReadyTimeout is how long to wait for the port-forward to become ready before giving up.
 	portForwardReadyTimeout = 60 * time.Second
 	// healthCheckLoopInterval is the period between port-forward health checks.
@@ -105,66 +98,6 @@ func healthCheckGRPC(ctx context.Context, cancelFunc context.CancelFunc, readyCh
 	if conn != nil {
 		conn.Close()
 	}
-}
-
-func healthCheckPortForward(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, localGvisorUDPPort string, domain string) {
-	var conn net.Conn
-	var packetConn net.Conn
-
-	dial := func() error {
-		var err error
-		conn, err = net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", localGvisorUDPPort), healthCheckDialTimeout)
-		if err != nil {
-			return err
-		}
-		err = util.WriteProxyInfo(conn, stack.TransportEndpointID{
-			LocalPort:     53,
-			LocalAddress:  tcpip.AddrFrom4Slice(net.ParseIP("127.0.0.1").To4()),
-			RemotePort:    0,
-			RemoteAddress: tcpip.Address{},
-		})
-		if err != nil {
-			conn.Close()
-			conn = nil
-			return err
-		}
-		packetConn, _ = core.NewPacketConnOverTCP(ctx, conn)
-		return nil
-	}
-
-	closeConn := func() {
-		if packetConn != nil {
-			packetConn.Close()
-			packetConn = nil
-		}
-		if conn != nil {
-			conn.Close()
-			conn = nil
-		}
-	}
-
-	checker := func() error {
-		if conn == nil {
-			if err := dial(); err != nil {
-				return err
-			}
-		}
-		msg := new(miekgdns.Msg)
-		msg.SetQuestion(miekgdns.Fqdn(domain), miekgdns.TypeA)
-		client := miekgdns.Client{Net: "udp", Timeout: dnsProbeTimeout}
-		resp, _, err := client.ExchangeWithConnContext(ctx, msg, &miekgdns.Conn{Conn: packetConn})
-		if err != nil {
-			closeConn()
-			return err
-		}
-		if len(resp.Answer) == 0 {
-			closeConn()
-			return errors.New("no answers")
-		}
-		return nil
-	}
-	healthCheckLoop(ctx, cancelFunc, readyChan, checker)
-	closeConn()
 }
 
 func healthCheckLoop(ctx context.Context, cancelFunc context.CancelFunc, readyChan chan struct{}, checker func() error) {

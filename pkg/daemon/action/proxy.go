@@ -145,7 +145,6 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	return nil
 }
 
-
 func convert(req *rpc.ProxyRequest) *rpc.ConnectRequest {
 	return &rpc.ConnectRequest{
 		KubeconfigBytes:      req.KubeconfigBytes,

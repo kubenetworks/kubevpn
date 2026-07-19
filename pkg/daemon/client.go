@@ -126,14 +126,14 @@ func StartupDaemon(ctx context.Context, path ...string) error {
 		return err
 	}
 	// normal daemon
-	if daemonClient, err = GetClient(false); daemonClient == nil {
+	if daemonClient, _ = GetClient(false); daemonClient == nil {
 		if err = runDaemon(ctx, exe, false); err != nil {
 			return err
 		}
 	}
 
 	// sudo daemon
-	if sudoDaemonClient, err = GetClient(true); sudoDaemonClient == nil {
+	if sudoDaemonClient, _ = GetClient(true); sudoDaemonClient == nil {
 		if err = runDaemon(ctx, exe, true); err != nil {
 			return err
 		}
