@@ -59,7 +59,7 @@ func ServeUDPReverse(ctx context.Context, conn net.Conn) error {
 		return fmt.Errorf("udp-bridge listen 127.0.0.1:%d: %w", port, err)
 	}
 	defer udpConn.Close()
-	plog.G(ctx).Infof("[UDP-Bridge] serving udp 127.0.0.1:%d", port)
+	plog.G(ctx).Debugf("[UDP-Bridge] serving udp 127.0.0.1:%d", port)
 
 	relayUDPReverse(ctx, conn, &listenUDP{c: udpConn})
 	return nil

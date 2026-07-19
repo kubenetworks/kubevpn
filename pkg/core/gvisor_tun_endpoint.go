@@ -108,7 +108,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			firstPacket = false
 			if buf[datagramHeaderLen] == packetTypeControl {
 				config.LPool.Put(buf[:])
-				plog.G(ctx).Infof("[Gvisor-TCP] Control conn detected: %s", conn.RemoteAddr())
+				plog.G(ctx).Debugf("[Gvisor-TCP] Control conn detected: %s", conn.RemoteAddr())
 				h.handleControlConn(ctx, tcpConn)
 				return
 			}

@@ -65,7 +65,7 @@ func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolve
 			dialCtx = context.Background()
 		}
 		id := request.ID()
-		plog.G(dialCtx).Infof("[Gvisor-TCP][%s] new conn dst=%s:%d src=%s:%d",
+		plog.G(dialCtx).Debugf("[Gvisor-TCP][%s] new conn dst=%s:%d src=%s:%d",
 			role, id.LocalAddress.String(), id.LocalPort, id.RemoteAddress.String(), id.RemotePort,
 		)
 		w := &waiter.Queue{}
@@ -91,7 +91,7 @@ func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolve
 
 		host, port := resolve(id)
 		target := net.JoinHostPort(host, port)
-		plog.G(dialCtx).Infof("[Gvisor-TCP][%s] dialing %s", role, target)
+		plog.G(dialCtx).Debugf("[Gvisor-TCP][%s] dialing %s", role, target)
 		d := net.Dialer{Timeout: config.ConnectTimeout}
 		remote, err := d.DialContext(dialCtx, "tcp", target)
 		if err != nil {
@@ -105,14 +105,14 @@ func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolve
 			buf := config.LPool.Get().([]byte)[:]
 			defer config.LPool.Put(buf[:])
 			written, err2 := io.CopyBuffer(remote, conn, buf)
-			plog.G(dialCtx).Infof("[Gvisor-TCP][%s] Wrote %d bytes to %s", role, written, target)
+			plog.G(dialCtx).Debugf("[Gvisor-TCP][%s] Wrote %d bytes to %s", role, written, target)
 			errChan <- err2
 		}()
 		go func() {
 			buf := config.LPool.Get().([]byte)[:]
 			defer config.LPool.Put(buf[:])
 			written, err2 := io.CopyBuffer(conn, remote, buf)
-			plog.G(dialCtx).Infof("[Gvisor-TCP][%s] Read %d bytes from %s", role, written, target)
+			plog.G(dialCtx).Debugf("[Gvisor-TCP][%s] Read %d bytes from %s", role, written, target)
 			errChan <- err2
 		}()
 		err = <-errChan

@@ -44,7 +44,7 @@ func LocalUDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.Transp
 func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolver) func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
 	return udp.NewForwarder(s, func(request *udp.ForwarderRequest) bool {
 		id := request.ID()
-		plog.G(ctx).Infof("[Gvisor-UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress: %s",
+		plog.G(ctx).Debugf("[Gvisor-UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress: %s",
 			id.LocalPort, id.LocalAddress.String(), id.RemotePort, id.RemoteAddress.String(),
 		)
 		src := &net.UDPAddr{
@@ -107,7 +107,7 @@ func pipeUDPFromConn(ctx context.Context, conn *gonet.UDPConn, remote *net.UDPCo
 			break
 		}
 	}
-	plog.G(ctx).Infof("[Gvisor-UDP] Wrote %d bytes: %s -> %s", written, src, dst)
+	plog.G(ctx).Debugf("[Gvisor-UDP] Wrote %d bytes: %s -> %s", written, src, dst)
 	errChan <- err
 }
 
@@ -134,6 +134,6 @@ func pipeUDPToConn(ctx context.Context, conn *gonet.UDPConn, remote *net.UDPConn
 			break
 		}
 	}
-	plog.G(ctx).Infof("[Gvisor-UDP] Read %d bytes: %s <- %s", written, src, dst)
+	plog.G(ctx).Debugf("[Gvisor-UDP] Read %d bytes: %s <- %s", written, src, dst)
 	errChan <- err
 }

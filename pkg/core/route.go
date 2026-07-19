@@ -108,7 +108,6 @@ func (cl *ConnList) WritePacket(pkt *Packet) (net.Conn, error) {
 	return nil, fmt.Errorf("all connections failed")
 }
 
-
 // WriteFunc attempts to call fn on each healthy conn until one succeeds.
 // Dead conns (fn returns error) are removed from the list.
 func (cl *ConnList) WriteFunc(fn func(conn net.Conn) error) (net.Conn, error) {
@@ -167,10 +166,10 @@ func (hub *RouteHub) AddRoute(ctx context.Context, srcIP net.IP, conn net.Conn) 
 	if loaded {
 		list := val.(*ConnList)
 		if list.Add(conn) {
-			plog.G(ctx).Infof("[Route] Add pool conn: %s -> %s-%s (now %d conns)", srcIP, conn.LocalAddr(), conn.RemoteAddr(), list.Len())
+			plog.G(ctx).Debugf("[Route] Add pool conn: %s -> %s-%s (now %d conns)", srcIP, conn.LocalAddr(), conn.RemoteAddr(), list.Len())
 		}
 	} else {
-		plog.G(ctx).Infof("[Route] Add route: %s -> %s-%s", srcIP, conn.LocalAddr(), conn.RemoteAddr())
+		plog.G(ctx).Debugf("[Route] Add route: %s -> %s-%s", srcIP, conn.LocalAddr(), conn.RemoteAddr())
 		if hub.OnRouteAdded != nil {
 			hub.OnRouteAdded(key)
 		}
@@ -238,7 +237,6 @@ func (hub *RouteHub) WriteToRoutePacket(dstKey string, pkt *Packet) (net.Conn, e
 	return conn, nil
 }
 
-
 // HasRoute checks if a route exists for the given destination IP key.
 func (hub *RouteHub) HasRoute(dstKey string) bool {
 	val, ok := hub.RouteMapTCP.Load(dstKey)
@@ -257,7 +255,7 @@ func (hub *RouteHub) RemoveRoutesByConn(ctx context.Context, conn net.Conn) {
 		if empty {
 			hub.RouteMapTCP.Delete(key)
 			ipKey := key.(string)
-			plog.G(ctx).Infof("[Route] Remove route: %s (conn %s)", net.IP(ipKey), conn.LocalAddr())
+			plog.G(ctx).Debugf("[Route] Remove route: %s (conn %s)", net.IP(ipKey), conn.LocalAddr())
 			if hub.OnRouteEmpty != nil {
 				hub.OnRouteEmpty(ipKey)
 			}
