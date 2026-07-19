@@ -77,7 +77,7 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	}
 
 	options := &handler.SyncOptions{
-		WorkloadNamespace:   req.Namespace,
+		WorkloadNamespace:    req.Namespace,
 		Headers:              req.Headers,
 		Workloads:            req.Workloads,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
@@ -111,6 +111,17 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 		plog.G(resp.Context()).Errorf("Failed to init client: %v", err)
 		return err
 	}
+	// The inner Connect above already resolved the traffic manager namespace
+	// (detectAndSetManagerNamespace). Thread that authoritative value into the
+	// sync options so the cloned workload's nested `kubevpn proxy` pins
+	// --manager-namespace instead of re-detecting it (which falls back to the
+	// workload namespace when manager != workload).
+	svr.connMu.RLock()
+	if conn, _ := svr.findConnection(connectionID); conn != nil {
+		options.ManagerNamespace = conn.ManagerNamespace
+	}
+	svr.connMu.RUnlock()
+
 	logger.Infof("Sync workloads...")
 	options.SetContext(session.Ctx)
 	newKubeconfigBytes, err := options.ConvertApiServerToNodeIP(resp.Context(), []byte(req.KubeconfigBytes))
@@ -131,4 +142,3 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	opt.Sync = options
 	return nil
 }
-

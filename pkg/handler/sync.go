@@ -27,10 +27,15 @@ import (
 type SyncOptions struct {
 	K8sClient
 
-	WorkloadNamespace      string
-	Headers        map[string]string
-	Workloads      []string
-	ExtraRouteInfo ExtraRouteInfo
+	WorkloadNamespace string
+	// ManagerNamespace is the namespace where the traffic manager runs. It may
+	// differ from WorkloadNamespace and is threaded into the cloned workload's
+	// nested `kubevpn proxy` so the injected envoy sidecar points its
+	// TrafficManagerService at the correct namespace.
+	ManagerNamespace string
+	Headers          map[string]string
+	Workloads        []string
+	ExtraRouteInfo   ExtraRouteInfo
 
 	TargetContainer     string
 	TargetImage         string
@@ -214,7 +219,7 @@ func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, s syncPodSpec) err
 	if spec.Spec.SecurityContext == nil {
 		spec.Spec.SecurityContext = &v1.PodSecurityContext{}
 	}
-	container := genVPNContainer(s.workload, d.WorkloadNamespace, s.image, s.args)
+	container := genVPNContainer(s.workload, d.WorkloadNamespace, d.ManagerNamespace, s.image, s.args)
 	containerSync := genSyncthingContainer(d.RemoteDir, syncDataDirName, s.image)
 	spec.Spec.Containers = append(containers, *container, *containerSync)
 

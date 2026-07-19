@@ -99,7 +99,7 @@ All sidecar containers receive:
 | Env Var | Source | Purpose |
 |---------|--------|---------|
 | `CIDR4`, `CIDR6` | `config.CIDR` | VPN address pool |
-| `TrafficManagerService` | `kubevpn-traffic-manager.{ns}` | gRPC endpoint |
+| `TrafficManagerService` | `kubevpn-traffic-manager.{managerNs}` | gRPC endpoint (`{managerNs}` is the **manager** namespace, not the workload namespace — see [07-namespace-model.md](07-namespace-model.md)) |
 | `POD_NAMESPACE` | Downward API | Current namespace |
 | `POD_NAME` | Downward API | Current pod name |
 | `tls_crt`, `tls_key`, `tls_server_name` | TLS Secret | mTLS credentials (VPN/mesh only) |

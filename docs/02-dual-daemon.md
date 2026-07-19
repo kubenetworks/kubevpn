@@ -126,6 +126,39 @@ Fields used:
 | `proxyManager` | Does not manage proxy workloads (User Daemon does) |
 | `Sync` | File sync runs in the User Daemon |
 
+### 2.3 ManagerNamespace Lock-Step Invariant
+
+`ManagerNamespace` is the one control-plane field the Root Daemon also needs (for
+port-forward, TLS secret, CIDR detection — see [07-namespace-model.md](07-namespace-model.md)).
+The two daemons must **never disagree** on it.
+
+Resolution happens in the **User Daemon only**, via `detectAndSetManagerNamespace`
+(`connect_elevate.go`). The Root Daemon never runs detection — it trusts the value
+forwarded on the request. The invariant is enforced by writing the resolved namespace to
+**both** sides in a single shared assignment:
+
+```go
+// detectAndSetManagerNamespace (User Daemon)
+if req.ManagerNamespace == "" {
+    req.ManagerNamespace, _ = util.DetectManagerNamespace(ctx, connect.GetFactory(), req.Namespace)
+}
+if req.ManagerNamespace == "" {
+    req.ManagerNamespace = req.Namespace            // fallback: create in workload ns
+}
+connect.ManagerNamespace = req.ManagerNamespace     // ← user side == forwarded side, always
+```
+
+`forwardConnectToSudo` then sends this same `req` to the Root Daemon, which assigns
+`connect.ManagerNamespace = req.ManagerNamespace`. Because the User Daemon's
+`connect.ManagerNamespace` and the forwarded `req.ManagerNamespace` come from the **same**
+trailing assignment, they are identical by construction — the `ConnectionID` (derived from
+the manager namespace UID) and all data-plane operations therefore agree across daemons.
+
+> Do not set `connect.ManagerNamespace` only inside the "detected" branch and rely on the
+> struct's initial `ManagerNamespace: req.Namespace` to cover the fallback branch — that
+> implicit coupling lets the two sides diverge if the initializer ever changes. Keep the
+> assignment explicit and shared. Invariant test: `TestDetectAndSetManagerNamespace_UserRootConsistency`.
+
 ## 3. Operation Flows
 
 ### 3.1 Connect Flow
