@@ -37,7 +37,7 @@ probe silently and fall back to port-forward — fully backward compatible.
 
 ### Port forwarding via SSH
 
-`sshForward()` calls `ssh.PortMapUntil()` (existing helper in `pkg/ssh/ssh.go`) for each
+`sshForward()` calls `ssh.PortMapUntil()` (existing helper in `pkg/ssh/tunnel.go`) for each
 port pair. This establishes local TCP listeners that tunnel through the SSH connection to
 the traffic manager's ClusterIP:
 
@@ -81,8 +81,8 @@ SSH data-plane path:
 - **Heartbeat watchdog** (`watchDataPlaneLiveness`): unchanged — operates at TUN layer
 - **Pod status watcher** (`CheckPodStatus`): not needed in SSH mode (ClusterIP is stable),
   but the code path is simply not reached (SSH mode does not call `portForwardOnce`)
-- **SSH reconnection**: `PortMapUntil` internally reconnects SSH clients via `getRemoteConn`
-  with a `sync.Map`-based client pool
+- **SSH reconnection**: `PortMapUntil` internally reconnects SSH clients via its
+  `connPool` (single-flight creation, health-aware eviction — see `pkg/ssh/pool.go`)
 
 ## Code locations
 
@@ -95,7 +95,7 @@ SSH data-plane path:
 | Root daemon wiring | `pkg/daemon/action/connect.go` | `Connect()` |
 | Service port 10802 | `pkg/handler/traffmgr_resources.go` | `genService()` |
 | Port name constant | `pkg/config/config.go` | `PortNameUDP` |
-| SSH port forwarding | `pkg/ssh/ssh.go` | `PortMapUntil()` |
+| SSH port forwarding | `pkg/ssh/tunnel.go` | `PortMapUntil()` |
 
 ## Related docs
 

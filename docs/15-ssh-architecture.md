@@ -11,8 +11,14 @@ The KubeVPN SSH subsystem provides two core capabilities:
 
 ```
 pkg/ssh/                       SSH client core library
-├── config.go                  SshConfig type + auth methods + ~/.ssh/config parsing
-├── ssh.go                     Connection setup, port forwarding, kubeconfig tunnel
+├── config.go                  SshConfig type + predicates (IsEmpty/IsLoopback/Host) + AddSshFlags
+├── auth.go                    GetAuth + publicKeyFile (password/GSSAPI/public-key)
+├── sshconfig.go               ~/.ssh/config parsing (GetBastion, resolveProxyJumpChain, ProxyJump chain)
+├── dial.go                    DialSshRemote/Dial/JumpTo/AliasRecursion/JumpRecursion + timeout constants + wrapDialError
+├── pool.go                    connPool — single-flight SSH client cache with health-aware eviction
+├── tunnel.go                  PortMapUntil (local port forward) + copyStream
+├── jump.go                    SshJumpBytes/SshJump/SshJumpAndSetEnv + apiserver reachability probe
+├── exec.go                    RemoteRun (remote command execution)
 ├── reverse.go                 Reverse tunnel (SSH -R equivalent)
 ├── scp.go                     SCP file transfer
 ├── gssapi.go                  GSSAPI/Kerberos authentication (SPNEGO negotiation)
@@ -170,9 +176,49 @@ is used only where a real file is required (child process, container mount, or t
 Implements local TCP port forwarding:
 
 - Listens on the `local` port locally
-- Each inbound connection dials the `remote` address through an SSH channel
-- Uses `sync.Map` to cache SSH client connections (`sshClientWrap`), auto-reconnects on failure
+- Each inbound connection dials the `remote` address through the tunnel's `connPool`
 - Bidirectional data copy via `copyStream`, closes both ends when either direction completes or ctx is cancelled
+
+##### Connection pool — `connPool` (`pool.go`)
+
+`PortMapUntil` owns one `connPool` for the lifetime of the tunnel. The pool holds a
+single, lazily-established SSH client (`sshClientWrap`, which couples the client with
+the cancel func scoping its lifetime) and enforces two invariants:
+
+- **Single-flight creation** — creation is serialized by a mutex, so a burst of
+  concurrent inbound connections at cold start reuse ONE SSH client instead of each
+  racing to open its own.
+- **Health-aware eviction** — `dial` discards the client ONLY on a genuine
+  transport-level failure (EOF / use-of-closed). A per-dial `context.Canceled` /
+  `context.DeadlineExceeded`, or a target that is merely unreachable (the SSH server
+  answers with a `*gossh.OpenChannelError`), leaves the client intact. This prevents
+  the reconnect storm where a slow/unreachable apiserver previously evicted a healthy
+  bastion client and forced a full re-handshake per request.
+
+The client-creation function is injectable (`connPool.dialFunc`, defaulting to
+`DialSshRemote`), so the pool is covered by in-memory tests without a real SSH server.
+
+##### Timeouts (`dial.go`)
+
+Two distinct constants replace the former single 10s timeout:
+
+| Constant | Value | Scope |
+|---|---|---|
+| `sshDialTimeout` | 10s | TCP dial + SSH handshake to a bastion/jump host |
+| `sshTunnelDialTimeout` | 8s | a single dial to a target *through* an established tunnel |
+
+`sshTunnelDialTimeout` is deliberately shorter than the kube client's 10s TLS-handshake
+timeout (`k8s.io/client-go/transport`), so when a bastion cannot reach the apiserver the
+failure surfaces as a clear tunnel error rather than an opaque `net/http: TLS handshake timeout`.
+
+##### Reachability probe (`jump.go`)
+
+Before returning, `SshJumpBytes` probes the apiserver through the tunnel
+(`probeAPIServerReachable`). If the target is unreachable it fails fast with
+`cannot reach apiserver <addr> through SSH tunnel (check bastion→apiserver connectivity)`,
+which propagates to the CLI ahead of — and instead of — the kube client's opaque TLS
+timeout. The `RemoteKubeconfig` path reuses its existing SSH client for the probe so no
+extra handshake is paid.
 
 #### 5. Daemon Integration
 
