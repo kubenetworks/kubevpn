@@ -11,10 +11,11 @@ package ssh
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/netip"
 
-	"golang.org/x/crypto/ssh"
+	gossh "golang.org/x/crypto/ssh"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
@@ -22,25 +23,23 @@ import (
 // ExposeLocalPortToRemote opens a reverse SSH tunnel, forwarding a remote port on the SSH server to a local service.
 func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, localPort netip.AddrPort) error {
 	// refer to https://godoc.org/golang.org/x/crypto/ssh for other authentication types
-	sshConfig := &ssh.ClientConfig{
-		Auth:            []ssh.AuthMethod{},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	sshConfig := &gossh.ClientConfig{
+		Auth:            []gossh.AuthMethod{},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
 		Timeout:         sshDialTimeout,
 	}
 
 	// Connect to SSH remote server using serverEndpoint
-	serverConn, err := ssh.Dial("tcp", remoteSSHServer.String(), sshConfig)
+	serverConn, err := gossh.Dial("tcp", remoteSSHServer.String(), sshConfig)
 	if err != nil {
-		plog.G(ctx).Errorf("Dial into remote server error: %v", err)
-		return err
+		return fmt.Errorf("failed to dial remote SSH server %s: %w", remoteSSHServer.String(), err)
 	}
 	defer serverConn.Close()
 
 	// Listen on remote server port
 	listener, err := serverConn.Listen("tcp", remotePort.String())
 	if err != nil {
-		plog.G(ctx).Errorf("Listen open port on remote server error: %v", err)
-		return err
+		return fmt.Errorf("failed to open remote listener on %s: %w", remotePort.String(), err)
 	}
 	defer listener.Close()
 
@@ -54,7 +53,8 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 	for {
 		client, err := listener.Accept()
 		if err != nil {
-			plog.G(ctx).Errorf("Accept on remote service error: %v", err)
+			// A closed listener during teardown is expected, not an error.
+			plog.G(ctx).Debugf("stop accepting on remote listener: %v", err)
 			return err
 		}
 		go func(client net.Conn) {
@@ -62,7 +62,7 @@ func ExposeLocalPortToRemote(ctx context.Context, remoteSSHServer, remotePort, l
 			// Open a (local) connection to localEndpoint whose content will be forwarded so serverEndpoint
 			local, err := net.Dial("tcp", localPort.String())
 			if err != nil {
-				plog.G(ctx).Errorf("Dial into local service error: %v", err)
+				plog.G(ctx).Debugf("failed to dial local service %s: %v", localPort.String(), err)
 				return
 			}
 			defer local.Close()

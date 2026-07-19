@@ -51,7 +51,7 @@ func SshJumpBytes(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, 
 			return
 		}
 		if len(bytes.TrimSpace(stdout)) == 0 {
-			err = fmt.Errorf("cannot get kubeconfig %s from remote ssh server: %s: %w", conf.RemoteKubeconfig, string(stderr), config.ErrSSHRemoteCommand)
+			err = fmt.Errorf("cannot get kubeconfig %s from remote SSH server: %s: %w", conf.RemoteKubeconfig, string(stderr), config.ErrSSHRemoteCommand)
 			return
 		}
 		kubeconfigBytes = bytes.TrimSpace(stdout)
@@ -74,10 +74,10 @@ func SshJumpBytes(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, 
 
 	if print {
 		plog.G(ctx).Infof("Waiting jump to bastion host...")
-		plog.G(ctx).Infof("Jump ssh bastion host to apiserver: %s", oldAPIServer.String())
+		plog.G(ctx).Infof("Jump SSH bastion host to apiserver: %s", oldAPIServer.String())
 	} else {
 		plog.G(ctx).Debugf("Waiting jump to bastion host...")
-		plog.G(ctx).Debugf("Jump ssh bastion host to apiserver: %s", oldAPIServer.String())
+		plog.G(ctx).Debugf("Jump SSH bastion host to apiserver: %s", oldAPIServer.String())
 	}
 
 	// Fail fast with a clear error if the tunnel cannot reach the apiserver, so the
@@ -89,7 +89,9 @@ func SshJumpBytes(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, 
 
 	err = PortMapUntil(ctx, conf, oldAPIServer, local)
 	if err != nil {
-		plog.G(ctx).Errorf("SSH port map error: %v", err)
+		// PortMapUntil already logs the underlying listen failure; keep this at
+		// Debug so the error is not reported twice.
+		plog.G(ctx).Debugf("SSH port map error: %v", err)
 		return
 	}
 	return newKubeconfigBytes, nil
@@ -118,7 +120,7 @@ func probeReachable(ctx context.Context, client tunnelClient, target netip.AddrP
 	defer cancel()
 	conn, err := client.DialContext(ctx1, "tcp", target.String())
 	if err != nil {
-		return fmt.Errorf("cannot reach apiserver %s through ssh tunnel (check bastion→apiserver connectivity): %w", target.String(), err)
+		return fmt.Errorf("cannot reach apiserver %s through SSH tunnel (check bastion→apiserver connectivity): %w", target.String(), err)
 	}
 	_ = conn.Close()
 	return nil
@@ -138,7 +140,7 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 	// deterministic filename.
 	path, err = pkgutil.ConvertToTempKubeconfigFile(newKubeconfigBytes, "")
 	if err != nil {
-		plog.G(ctx).Errorf("failed to write kubeconfig: %v", err)
+		plog.G(ctx).Debugf("failed to write kubeconfig: %v", err)
 		return
 	}
 	go func() {

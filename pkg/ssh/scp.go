@@ -7,21 +7,20 @@ import (
 	"os"
 
 	"github.com/schollz/progressbar/v3"
-	"golang.org/x/crypto/ssh"
+	gossh "golang.org/x/crypto/ssh"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // SCPAndExec copy file to remote and exec command
-func SCPAndExec(ctx context.Context, stdout, stderr io.Writer, client *ssh.Client, filename, to string, commands ...string) error {
+func SCPAndExec(ctx context.Context, stdout, stderr io.Writer, client *gossh.Client, filename, to string, commands ...string) error {
 	err := SCP(ctx, client, stdout, stderr, filename, to)
 	if err != nil {
-		plog.G(ctx).Errorf("Copy file to remote error: %v", err)
-		return err
+		return fmt.Errorf("failed to copy file to remote: %w", err)
 	}
 	for _, command := range commands {
-		var session *ssh.Session
+		var session *gossh.Session
 		session, err = client.NewSession()
 		if err != nil {
 			return err
@@ -38,7 +37,7 @@ func SCPAndExec(ctx context.Context, stdout, stderr io.Writer, client *ssh.Clien
 }
 
 // SCP https://blog.neilpang.com/%E6%94%B6%E8%97%8F-scp-secure-copy%E5%8D%8F%E8%AE%AE/
-func SCP(ctx context.Context, client *ssh.Client, stdout, stderr io.Writer, filename, to string) error {
+func SCP(ctx context.Context, client *gossh.Client, stdout, stderr io.Writer, filename, to string) error {
 	file, err := os.Open(filename)
 	if err != nil {
 		return err
@@ -60,7 +59,7 @@ func SCP(ctx context.Context, client *ssh.Client, stdout, stderr io.Writer, file
 		fmt.Fprintln(w, "C0644", stat.Size(), to)
 		err := sCopy(ctx, w, file, stat.Size(), stdout, stderr)
 		if err != nil {
-			plog.G(ctx).Errorf("Failed to transfer file to remote: %v", err)
+			plog.G(ctx).Errorf("failed to transfer file to remote: %v", err)
 			return
 		}
 		fmt.Fprint(w, "\x00") // transfer end with \x00
@@ -93,7 +92,6 @@ func sCopy(ctx context.Context, dst io.Writer, src io.Reader, size int64, stdout
 	buf := make([]byte, 10<<(10*2)) // 10M
 	written, err := io.CopyBuffer(io.MultiWriter(dst, bar), src, buf)
 	if err != nil {
-		plog.G(ctx).Errorf("Failed to transfer file to remote: %v", err)
 		return err
 	}
 	if written != size {

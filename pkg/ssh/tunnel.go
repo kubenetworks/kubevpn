@@ -79,7 +79,7 @@ func copyStream(ctx context.Context, local net.Conn, remote net.Conn) {
 		defer config.LPool.Put(buf[:])
 		_, err := io.CopyBuffer(dst, src, buf)
 		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
-			plog.G(ctx).Debugf("Copy %s error: %s", direction, err)
+			plog.G(ctx).Debugf("copy %s error: %v", direction, err)
 		}
 		done <- struct{}{}
 	}

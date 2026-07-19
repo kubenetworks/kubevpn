@@ -130,7 +130,7 @@ func (conf SshConfig) JumpRecursion(ctx context.Context, stopChan <-chan struct{
 	AddSshFlags(flags, sshConf)
 	err = flags.Parse(strings.Split(conf.Jump, " "))
 	if err != nil {
-		return nil, fmt.Errorf("parse ssh jump %q: %w: %w", conf.Jump, err, config.ErrSSHConfig)
+		return nil, fmt.Errorf("parse SSH jump %q: %w: %w", conf.Jump, err, config.ErrSSHConfig)
 	}
 	var baseClient *gossh.Client
 	baseClient, err = DialSshRemote(ctx, sshConf, stopChan)
@@ -186,7 +186,7 @@ func (conf SshConfig) Dial(ctx context.Context, stopChan <-chan struct{}) (clien
 	d := net.Dialer{Timeout: sshDialTimeout, KeepAlive: config.KeepAliveTime}
 	conn, err := d.DialContext(ctx, "tcp", conf.Addr)
 	if err != nil {
-		return nil, fmt.Errorf("dial ssh %s: %w: %w", conf.Addr, err, config.ErrSSHConnect)
+		return nil, fmt.Errorf("dial SSH %s: %w: %w", conf.Addr, err, config.ErrSSHConnect)
 	}
 	go func() {
 		if stopChan != nil {
