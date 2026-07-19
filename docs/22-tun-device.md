@@ -40,6 +40,8 @@ type Config struct {
 - **Deadlines**: Not supported (returns OpError)
 - **LocalAddr**: Returns the TUN device's IP address
 
+**Read-error resilience:** The core read loop that drives `tunConn.Read` (`pkg/core` `tunDevice.pumpTun`) tolerates transient read errors instead of tearing down the data plane. On a read error: if the context is cancelled it returns cleanly (normal shutdown, no noise); otherwise it logs a warning, backs off briefly (`tunReadErrorBackoff`, 100ms) and retries. Only after `maxConsecutiveTunReadErrors` (10) consecutive failures is the device declared dead (reported on `errChan`, which tears down the device and connection pool). A single successful read resets the counter. This keeps a one-off, recoverable error from killing the tunnel while still detecting a genuinely broken device. See §5.2 for the macOS case that motivated it.
+
 ## 5. Platform-Specific Implementation
 
 ### 5.1 Linux (`tun_linux.go`)
@@ -55,6 +57,7 @@ type Config struct {
 - **IP assignment**: `unix.SIOCSIFADDR_IN6` ioctl for IPv6; `ifconfig` command for IPv4
 - **Route addition**: `exec.Command("route", "add", "-net", cidr, "-interface", tunName)`
 - **Interface up**: Automatic with IP assignment on macOS
+- **Route-listener `ENOBUFS` (resilience):** wireguard-go runs a route-socket listener goroutine for interface up/down/MTU events. On an `RTM_IFINFO` message it calls `net.InterfaceByIndex` → `route.FetchRIB`, which under heavy routing-table churn (adding pod/service/CIDR routes during connect) can return `ENOBUFS` — surfaced as `route ip+net: no buffer space available`. wireguard retries only `ENOMEM`, so on `ENOBUFS` the listener exits and delivers the error **once** through the next `Read`. The utun fd itself stays usable, and kubevpn never consumes wireguard `Events()`, so the loss of the listener is harmless. The core read loop therefore tolerates this one-off error (§4) and keeps the data plane alive instead of tearing it down. Previously this manifested as `[TUN] device exited: route ip+net: no buffer space available` followed by the connection pool being cancelled, while `connect` still reported success.
 
 ### 5.3 Windows (`tun_windows.go`)
 

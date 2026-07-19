@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"net"
+	"time"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -12,6 +13,14 @@ import (
 const (
 	// MaxSize is the channel buffer capacity for packet queues (inbound, outbound, slots).
 	MaxSize = 1000
+
+	// maxConsecutiveTunReadErrors bounds how many back-to-back TUN read errors are tolerated
+	// before the device is declared dead. A single transient error (e.g. the wireguard route
+	// listener surfacing ENOBUFS once on macOS — the fd stays usable afterwards) must not tear
+	// down the data plane, but a genuinely broken device must still be torn down.
+	maxConsecutiveTunReadErrors = 10
+	// tunReadErrorBackoff paces retries so a persistently failing read cannot hot-spin.
+	tunReadErrorBackoff = 100 * time.Millisecond
 )
 
 // tunDevice is the single, symmetric TUN engine for both the client and server roles. It runs
@@ -44,22 +53,38 @@ func (d *tunDevice) readFromTun(ctx context.Context) {
 
 // pumpTun reads IP packets from the TUN into pooled buffers (IP data at buf[3:], reserving
 // [2-byte datagram header][1-byte type prefix]) and hands each to dispatch. errLabel prefixes
-// the read/parse error logs. A read error is reported via errChan and stops the loop; a parse
-// error drops the packet (buffer returned to the pool) and continues. On a delivered packet the
-// dispatch callback owns buf and must return it to config.LPool (directly, or by handing it to a
-// channel whose drainer frees it). Both transports share this loop via tunDevice.readFromTun;
-// only their routeOutbound dispatch (debug label, framing, routing) differs.
+// the read/parse error logs. A parse error drops the packet (buffer returned to the pool) and
+// continues. A read error is tolerated: transient/one-off errors are logged and retried (e.g. the
+// macOS wireguard route listener surfaces ENOBUFS once but the fd stays usable); only after
+// maxConsecutiveTunReadErrors back-to-back failures is the device declared dead (reported via
+// errChan, stopping the loop). On a delivered packet the dispatch callback owns buf and must
+// return it to config.LPool (directly, or by handing it to a channel whose drainer frees it).
+// Both transports share this loop via tunDevice.readFromTun; only their routeOutbound dispatch
+// (debug label, framing, routing) differs.
 func (d *tunDevice) pumpTun(ctx context.Context, errLabel string, dispatch func(buf []byte, n int, src, dst net.IP)) {
 	defer util.HandleCrash()
+	consecutiveErrors := 0
 	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
 		n, err := d.tun.Read(buf[3:])
 		if err != nil {
 			config.LPool.Put(buf[:])
-			plog.G(ctx).Errorf("%s Failed to read from TUN: %v", errLabel, err)
-			util.SafeWrite(d.errChan, err)
-			return
+			if ctx.Err() != nil {
+				return // shutting down: the read error is expected, stay quiet
+			}
+			consecutiveErrors++
+			if consecutiveErrors >= maxConsecutiveTunReadErrors {
+				plog.G(ctx).Errorf("%s TUN read failed %d times in a row, giving up: %v", errLabel, consecutiveErrors, err)
+				util.SafeWrite(d.errChan, err)
+				return
+			}
+			// Likely transient (e.g. macOS route-listener ENOBUFS surfaced once); the fd usually
+			// stays usable, so back off briefly and retry instead of tearing down the data plane.
+			plog.G(ctx).Warnf("%s TUN read error (%d/%d), retrying: %v", errLabel, consecutiveErrors, maxConsecutiveTunReadErrors, err)
+			time.Sleep(tunReadErrorBackoff)
+			continue
 		}
+		consecutiveErrors = 0
 		src, dst, _, parseErr := util.ParseIPFast(buf[3 : 3+n])
 		if parseErr != nil {
 			plog.G(ctx).Errorf("%s Unknown packet, dropping: %v", errLabel, parseErr)
