@@ -136,7 +136,7 @@ func (m *Manager) InRange(ip net.IP) bool {
 // can decide whether to reclaim it from the current holder. A nil v4 or v6 skips
 // that family. The write is atomic: if either family fails, nothing is allocated.
 func (m *Manager) RentSpecificIP(ctx context.Context, v4, v6 net.IP) error {
-	plog.G(ctx).Infof("Renting specific IP: v4=%v v6=%v", v4, v6)
+	plog.G(ctx).Debugf("Renting specific IP: v4=%v v6=%v", v4, v6)
 	return m.retryUpdate(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
 		if v4 != nil {
 			if err := ipv4.Allocate(v4); err != nil {
@@ -227,13 +227,13 @@ func (m *Manager) rentIP(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs 
 	// needs the pool prefix on the lease.
 	v4Net := &net.IPNet{IP: v4, Mask: net.CIDRMask(32, 32)}
 	v6Net := &net.IPNet{IP: v6, Mask: net.CIDRMask(128, 128)}
-	plog.G(ctx).Infof("Rented IP: v4=%s v6=%s", v4Net, v6Net)
+	plog.G(ctx).Debugf("Rented IP: v4=%s v6=%s", v4Net, v6Net)
 	return v4Net, v6Net, nil
 }
 
 // ReleaseIP returns the given IPv4 and IPv6 addresses back to the DHCP pool.
 func (m *Manager) ReleaseIP(ctx context.Context, v4, v6 net.IP) error {
-	plog.G(ctx).Infof("Releasing IP: v4=%v v6=%v", v4, v6)
+	plog.G(ctx).Debugf("Releasing IP: v4=%v v6=%v", v4, v6)
 	return m.retryUpdate(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
 		if err := ipv4.Release(v4); err != nil {
 			return err

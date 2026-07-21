@@ -93,9 +93,9 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	}
 	connCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	plog.G(connCtx).Infof("[Gvisor-TCP] Client connected: %s", tcpConn.RemoteAddr())
+	plog.G(connCtx).Debugf("[Gvisor-TCP] Client connected: %s", tcpConn.RemoteAddr())
 	h.readFromTCPConnWriteToEndpoint(connCtx, NewBufferedTCP(connCtx, tcpConn))
-	plog.G(connCtx).Infof("[Gvisor-TCP] Client disconnected: %s", tcpConn.RemoteAddr())
+	plog.G(connCtx).Debugf("[Gvisor-TCP] Client disconnected: %s", tcpConn.RemoteAddr())
 }
 
 // getOrCreateClientStack returns the gvisor stack for the given client IP, creating one
@@ -131,7 +131,7 @@ func (h *gvisorTCPHandler) getOrCreateClientStack(srcKey string) *clientStack {
 		s.Destroy()
 	}()
 
-	plog.G(h.ctx).Infof("[Gvisor-TCP] Created per-client stack for %s", net.IP(srcKey))
+	plog.G(h.ctx).Debugf("[Gvisor-TCP] Created per-client stack for %s", net.IP(srcKey))
 	return cs
 }
 
@@ -146,7 +146,7 @@ func (h *gvisorTCPHandler) destroyClientStack(ipKey string) {
 
 	if ok {
 		cs.cancel()
-		plog.G(h.ctx).Infof("[Gvisor-TCP] Destroyed per-client stack for %s (grace expired)", net.IP(ipKey))
+		plog.G(h.ctx).Debugf("[Gvisor-TCP] Destroyed per-client stack for %s (grace expired)", net.IP(ipKey))
 	}
 }
 
@@ -168,7 +168,7 @@ func (h *gvisorTCPHandler) onRouteEmpty(ipKey string) {
 	cs.graceTimer = time.AfterFunc(config.KeepAliveTime*3, func() {
 		h.destroyClientStack(ipKey)
 	})
-	plog.G(h.ctx).Infof("[Gvisor-TCP] All conns gone for %s, grace timer started (%v)", net.IP(ipKey), config.KeepAliveTime*3)
+	plog.G(h.ctx).Debugf("[Gvisor-TCP] All conns gone for %s, grace timer started (%v)", net.IP(ipKey), config.KeepAliveTime*3)
 }
 
 // onRouteAdded is called by RouteHub when a route is first created for a client IP.
@@ -231,7 +231,7 @@ func (h *gvisorTCPHandler) handleControlConn(ctx context.Context, tcpConn net.Co
 
 // GvisorTCPListener creates a TCP listener with optional TLS for the gvisor server.
 func GvisorTCPListener(addr string) (net.Listener, error) {
-	plog.G(context.Background()).Infof("[Gvisor-TCP] Listening on %s", addr)
+	plog.G(context.Background()).Debugf("[Gvisor-TCP] Listening on %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err

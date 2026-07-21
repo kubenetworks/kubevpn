@@ -34,7 +34,7 @@ func udpBridgeProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler,
 	if err != nil {
 		return nil, nil, err
 	}
-	plog.G(context.Background()).Infof("[UDP-Bridge] Listening on %s", node.Addr)
+	plog.G(context.Background()).Debugf("[UDP-Bridge] Listening on %s", node.Addr)
 	return listener, UDPBridgeHandler(), nil
 }
 
@@ -111,7 +111,7 @@ func requestTunIPFromXDS() (ipv4, ipv6 string, err error) {
 		return "", "", fmt.Errorf("GetTunIP: %w", err)
 	}
 
-	plog.G(ctx).Infof("[TUN] Got IP from xds: v4=%s v6=%s", resp.IPv4, resp.IPv6)
+	plog.G(ctx).Debugf("[TUN] Got IP from xds: v4=%s v6=%s", resp.IPv4, resp.IPv6)
 
 	// No explicit release needed — lease expiry (per DHCP protocol) handles IP reclaim.
 	// When this process exits, WatchTunIP stream disconnects, and after LeaseDuration

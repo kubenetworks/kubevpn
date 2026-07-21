@@ -33,7 +33,7 @@ func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		}
 		return
 	}
-	plog.G(ctx).Infof("[UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress: %s",
+	plog.G(ctx).Debugf("[UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress: %s",
 		id.LocalPort, id.LocalAddress.String(), id.RemotePort, id.RemoteAddress.String(),
 	)
 
@@ -55,7 +55,7 @@ func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 
 // GvisorUDPListener creates a TCP listener for UDP-over-TCP relay connections.
 func GvisorUDPListener(addr string) (net.Listener, error) {
-	plog.G(context.Background()).Infof("[UDP] Listening on %s", addr)
+	plog.G(context.Background()).Debugf("[UDP] Listening on %s", addr)
 	laddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err

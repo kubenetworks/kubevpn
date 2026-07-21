@@ -191,8 +191,10 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 		fmt.Sprintf("%d:%d", controlPlanePort, config.PortXDS),
 	}
 
+	sshDataPlane := false
 	if clusterIP, ok := nm.probeSSHDataPlane(nm.ctx); ok {
-		plog.G(nm.ctx).Infof("SSH host can reach ClusterIP %s, using SSH tunnel for data plane", clusterIP)
+		plog.G(nm.ctx).Debugf("SSH host can reach ClusterIP %s, using SSH tunnel for data plane", clusterIP)
+		sshDataPlane = true
 		if err := nm.sshForward(nm.ctx, clusterIP, portPair); err != nil {
 			return err
 		}
@@ -201,7 +203,11 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 			return err
 		}
 	}
-	plog.StepDone(nm.ctx, "Forwarded ports (TCP/UDP/xDS)")
+	if sshDataPlane {
+		plog.StepDone(nm.ctx, "Forwarded ports via SSH data-plane tunnel (TCP/UDP/xDS)")
+	} else {
+		plog.StepDone(nm.ctx, "Forwarded ports (TCP/UDP/xDS)")
+	}
 
 	if util.IsWindows() {
 		driver.InstallWireGuardTunDriver()
@@ -283,7 +289,7 @@ func (nm *NetworkManager) rentIP(ctx context.Context) error {
 		v4 := &net.IPNet{IP: ip4, Mask: cidr4.Mask}
 
 		if isLocalIPConflict(v4.IP) {
-			plog.G(ctx).Infof("TUN IP %s conflicts with local interface (race), retrying (%d/%d)", v4.IP, i+1, maxRetries)
+			plog.G(ctx).Debugf("TUN IP %s conflicts with local interface (race), retrying (%d/%d)", v4.IP, i+1, maxRetries)
 			continue
 		}
 
@@ -418,7 +424,7 @@ func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net
 		nm.refreshCIDRRoutes(ctx)
 	}
 
-	plog.G(ctx).Infof("[NetworkManager] TUN IP changed: v4=%s v6=%s on %s", newIPv4, newIPv6, nm.tunName)
+	plog.G(ctx).Debugf("[NetworkManager] TUN IP changed: v4=%s v6=%s on %s", newIPv4, newIPv6, nm.tunName)
 	return nil
 }
 
@@ -728,7 +734,7 @@ func (nm *NetworkManager) sshForward(ctx context.Context, clusterIP string, port
 		if err := ssh.PortMapUntil(ctx, nm.cfg.SshConf, remote, local); err != nil {
 			return fmt.Errorf("ssh forward %s -> %s: %w", local, remote, err)
 		}
-		plog.G(ctx).Infof("SSH tunnel: %s -> %s", local, remote)
+		plog.G(ctx).Debugf("SSH tunnel: %s -> %s", local, remote)
 	}
 	return nil
 }
@@ -752,7 +758,7 @@ func (nm *NetworkManager) portForward(ctx context.Context, portPair []string) er
 					return
 				}
 			} else {
-				plog.G(ctx).Infof("[Perf] Port-forward session ended after %v, reconnecting in %v...", sessionDuration, delay)
+				plog.G(ctx).Debugf("[Perf] Port-forward session ended after %v, reconnecting in %v...", sessionDuration, delay)
 			}
 			first = false
 			// Exponential backoff on consecutive short-lived sessions so a stalled
@@ -823,7 +829,7 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 		nil,
 		plog.G(ctx).Logger.Out,
 	)
-	plog.G(ctx).Infof("[Perf] PortForwardPod for %s exited after %v, err=%v", podName, time.Since(pfStart), err)
+	plog.G(ctx).Debugf("[Perf] PortForwardPod for %s exited after %v, err=%v", podName, time.Since(pfStart), err)
 	return nil
 }
 
@@ -1298,7 +1304,7 @@ func (nm *NetworkManager) doWatchNamespaceRoutes(ctx context.Context, target str
 		if status.Code(err) == codes.Unimplemented {
 			// Old traffic manager without server-side discovery: nothing to do, the
 			// cluster CIDR routes already cover routing. Do not retry-spin.
-			plog.G(ctx).Infof("[RouteWatcher] manager has no WatchNamespaceRoutes; using CIDR-only routing")
+			plog.G(ctx).Debugf("[RouteWatcher] manager has no WatchNamespaceRoutes; using CIDR-only routing")
 			<-ctx.Done()
 			return nil
 		}
