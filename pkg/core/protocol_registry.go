@@ -81,7 +81,7 @@ func tunProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, error
 func requestTunIPFromXDS() (ipv4, ipv6 string, err error) {
 	trafficManagerAddr := os.Getenv("TrafficManagerService")
 	if trafficManagerAddr == "" {
-		return "", "", fmt.Errorf("TrafficManagerService env not set")
+		return "", "", fmt.Errorf("env TrafficManagerService not set")
 	}
 	ownerID := os.Getenv(config.EnvPodName)
 	if ownerID == "" {
@@ -108,7 +108,7 @@ func requestTunIPFromXDS() (ipv4, ipv6 string, err error) {
 		Hostname:  hostname,
 	})
 	if err != nil {
-		return "", "", fmt.Errorf("GetTunIP: %w", err)
+		return "", "", fmt.Errorf("get tun IP: %w", err)
 	}
 
 	plog.G(ctx).Debugf("[TUN] Got IP from xds: v4=%s v6=%s", resp.IPv4, resp.IPv6)
