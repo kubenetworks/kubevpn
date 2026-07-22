@@ -79,7 +79,7 @@ pkg/
 │   ├── connect.go         ConnectOptions (= ControlSession) — control-plane methods + data-plane stubs
 │   ├── control_session.go type ControlSession = ConnectOptions (alias)
 │   ├── data_session.go    DataSession — data-plane methods, DoConnect, cleanupDataPlane
-│   ├── connection.go      Connection interface + compile-time assertions (both types satisfy it)
+│   ├── connection.go      Connection (shared) + DataPlane/ProxyController role interfaces + compile-time assertions (Interface Segregation)
 │   ├── rollback.go        rollbackList — mutex-guarded rollback registry (embedded by SessionBase & SyncOptions)
 │   ├── cleaner.go         ConnectOptions.Cleanup + cleanupControlPlane + executeRollbackFuncs
 │   ├── connect_tun.go     TUN server, port forwarding, health checks
@@ -196,7 +196,7 @@ pkg/
 - Detection: use `virtual.IsFargateMode()` which checks the explicit `FargateMode` bool field first
 - Do NOT infer mode from `EnvoyListenerPort != 0` — that is a legacy fallback only
 - Port names: use `config.PortNameTCP`, `config.PortNameEnvoy`, `config.PortNameHTTP`, `config.PortNameDNS`
-- Rollback functions: always `AddRollbackFunc` (not `AddRolloutFunc`)
+- Rollback functions: always `AddRollbackFunc`
 - Design doc: `docs/06-fargate-mode.md`
 
 ### Dual-Session Pattern: ControlSession vs DataSession (IMPORTANT)
@@ -244,6 +244,21 @@ Root Daemon: ds.OwnerID = req.OwnerID → ds.DoConnect (getCIDR → NetworkManag
 - Root daemon receives and stores it: `connect.ConnectionID = req.ConnectionID`
 - Used as primary key for `findConnection`, `removeConnection`, disconnect, status queries
 - Design doc: `docs/04-connection-id.md`
+
+### Connection Interface Segregation (DataPlane / ProxyController)
+
+`pkg/handler/connection.go` defines THREE interfaces, not one:
+
+- **`Connection`** — the shared identity/lifecycle/status surface **both** `*ConnectOptions` and `*DataSession` satisfy. `Server.connections` is typed `[]Connection`.
+- **`DataPlane`** (embeds `Connection`) — root-daemon-only operations: `DoConnect`, `GetLocalTunIP`, `GetAPIServerIPs`, `GetNetworkExtraHost`, `GetLastHeartbeat`. Only `*DataSession` satisfies it.
+- **`ProxyController`** (embeds `Connection`) — user-daemon-only operations: `CreateRemoteInboundPod`, `LeaveAllProxyResources`, `LeaveResource`, `ProxyResources`, `SetSync`. Only `*ConnectOptions` satisfies it.
+
+This replaced the old single 28-method `Connection` interface, where each type carried stubs for the other plane's methods (e.g. `ConnectOptions.DoConnect` returned an error, `DataSession.CreateRemoteInboundPod` was a no-op) — a wrong-plane call compiled and failed at runtime. Now the type system rejects it at compile time.
+
+**Rules when modifying these interfaces:**
+- Consumers that need plane-specific behavior **type-assert** (`if dp, ok := conn.(handler.DataPlane); ok { ... }`), with a zero-value fallback that preserves the old stub behavior. See `resolveTunIP`, `resolveStatus`, `sort.Connects.Less`, and the disconnect/leave/unsync/proxy handlers in `daemon/action`.
+- Never re-add a "stub" method to satisfy an interface — if only one plane owns an operation, put it on the matching role interface and have callers assert.
+- `GetSync`, `GetSocksListenAddr`, `GetSocksEgress` stay on shared `Connection` because their zero value (`nil`/`""`/`false`) is a meaningful "not applicable on this plane" return, not a stub.
 
 ## Integration Testing
 

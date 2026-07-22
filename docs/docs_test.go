@@ -224,6 +224,99 @@ func containsCJK(s string) bool {
 	return false
 }
 
+// claudeSymbols is a curated allowlist of Go identifiers that CLAUDE.md documents
+// as existing API (shared helpers, key types/methods, design-pattern hooks). If any
+// is removed or renamed in code without updating CLAUDE.md, this test fails —
+// catching the kind of doc drift that left a stale "AddRolloutFunc" note in the file.
+//
+// When you legitimately rename/remove one of these, update CLAUDE.md AND this list
+// in the same change. The `file` field is a hint shown in the failure message only;
+// it does not gate the check (symbols may move between files).
+var claudeSymbols = []struct {
+	id   string // Go identifier to find as a whole word in pkg/ + cmd/ source
+	file string // file where CLAUDE.md claims it lives (hint only)
+}{
+	// handler rollback registry
+	{"AddRollbackFunc", "rollback.go"},
+	{"getRollbackFuncs", "rollback.go"},
+	{"executeRollbackFuncs", ""},
+	// daemon/action connection helpers
+	{"findConnection", "connection.go"},
+	{"removeConnection", "connection.go"},
+	{"resetCurrentConnection", ""},
+	{"cleanupConnection", "connection.go"},
+	{"getSudoTunIPs", ""},
+	{"resolveTunIP", ""},
+	// daemon/action stream/writer/lifecycle helpers
+	{"newStreamWriter", "writer.go"},
+	{"initStreamLogger", "writer.go"},
+	{"resolveKubeconfigBytes", "writer.go"},
+	{"NewSessionLifecycle", "lifecycle.go"},
+	// util shared helpers
+	{"InitFactoryByBytes", ""},
+	{"InitFactoryByPath", ""},
+	{"InitKubeClient", ""},
+	{"IsNewer", ""},
+	{"GetConnectionID", ""},
+	// ssh
+	{"SshJumpBytes", "jump.go"},
+	{"SshJump", "jump.go"},
+	// inject strategy
+	{"NewInjector", "injector.go"},
+	{"gatherContainerPorts", ""},
+	{"addEnvoyConfig", "envoy.go"},
+	// controlplane / envoy config types
+	{"IsFargateMode", ""},
+	{"ParsePortMap", ""},
+	{"CurrentSchemaVersion", ""},
+}
+
+// TestClaudeMDSymbolsExist asserts that every identifier CLAUDE.md documents as
+// existing API is actually present in the Go source under pkg/ and cmd/. It guards
+// against documentation drifting from code (e.g. documenting a helper that was
+// removed, as once happened with AddRolloutFunc).
+func TestClaudeMDSymbolsExist(t *testing.T) {
+	type src struct {
+		path    string
+		content string
+	}
+	var sources []src
+	for _, root := range []string{"pkg", "cmd"} {
+		filepath.Walk(filepath.Join(repoRoot, root), func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") {
+				return err
+			}
+			if strings.HasSuffix(path, "_test.go") || strings.HasSuffix(path, ".pb.go") {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			sources = append(sources, src{path: path, content: string(data)})
+			return nil
+		})
+	}
+
+	for _, sym := range claudeSymbols {
+		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(sym.id) + `\b`)
+		found := false
+		for _, s := range sources {
+			if re.MatchString(s.content) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			hint := ""
+			if sym.file != "" {
+				hint = fmt.Sprintf(" (CLAUDE.md says it lives in %s)", sym.file)
+			}
+			t.Errorf("CLAUDE.md documents symbol %q but it is not found in any pkg/ or cmd/ .go source%s — update CLAUDE.md and docs_test.go's claudeSymbols list", sym.id, hint)
+		}
+	}
+}
+
 func TestMain(m *testing.M) {
 	if repoRoot == "" {
 		fmt.Fprintln(os.Stderr, "cannot find repo root")
