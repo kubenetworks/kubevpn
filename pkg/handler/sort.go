@@ -2,7 +2,10 @@ package handler
 
 import (
 	"net"
+	"slices"
 	"sort"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 )
 
 // Connects is a sortable slice of Connection ordered by cross-cluster dependency.
@@ -51,7 +54,19 @@ func (s Connects) Less(i, j int) bool {
 		}
 		return false
 	}
-	aAPIServerIPs := a.GetAPIServerIPs()
+	// API server IPs and extra hosts are owned by the data plane (DataSession); the
+	// control-plane ConnectOptions does not satisfy DataPlane, so the assertion fails
+	// there and both slices stay nil — exactly the old stub behavior (no dependency
+	// detected among user-daemon connections, which is correct: dependency ordering
+	// only matters at the data plane where TUN IPs/routes live).
+	var aAPIServerIPs []net.IP
+	var bExtraHosts []dns.Entry
+	if dp, ok := a.(DataPlane); ok {
+		aAPIServerIPs = dp.GetAPIServerIPs()
+	}
+	if dp, ok := b.(DataPlane); ok {
+		bExtraHosts = dp.GetNetworkExtraHost()
+	}
 	for _, extraCIDR := range b.GetExtraCIDR() {
 		ip, cidr, err := net.ParseCIDR(extraCIDR)
 		if err != nil {
@@ -60,21 +75,17 @@ func (s Connects) Less(i, j int) bool {
 		if containsFunc(cidr, aAPIServerIPs) {
 			return true
 		}
-		for _, p := range aAPIServerIPs {
-			if ip.Equal(p) {
-				return true
-			}
+		if slices.ContainsFunc(aAPIServerIPs, ip.Equal) {
+			return true
 		}
 	}
-	for _, entry := range b.GetNetworkExtraHost() {
+	for _, entry := range bExtraHosts {
 		ip := net.ParseIP(entry.IP)
 		if ip == nil || ip.IsLoopback() {
 			continue
 		}
-		for _, p := range aAPIServerIPs {
-			if ip.Equal(p) {
-				return true
-			}
+		if slices.ContainsFunc(aAPIServerIPs, ip.Equal) {
+			return true
 		}
 	}
 	return false

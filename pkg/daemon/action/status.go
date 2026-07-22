@@ -97,7 +97,14 @@ func resolveTunIP(connect handler.Connection, ips map[string]tunIP) (v4, v6 stri
 			return ip.v4, ip.v6
 		}
 	}
-	return connect.GetLocalTunIP()
+	// GetLocalTunIP is data-plane-only (DataPlane). The user daemon returns above
+	// via the sudo snapshot; only the root daemon reaches here, where connect is a
+	// *DataSession satisfying DataPlane. The comma-ok fallback to empty preserves
+	// the old control-plane stub behavior if this is ever reached there.
+	if dp, ok := connect.(handler.DataPlane); ok {
+		return dp.GetLocalTunIP()
+	}
+	return "", ""
 }
 
 // heartbeatStaleThreshold is how long without an echo reply before the data plane is
@@ -141,7 +148,13 @@ func resolveStatus(connect handler.Connection, ips map[string]tunIP, tunUp bool)
 	if connect == nil {
 		return deriveConnectionStatus(tunUp, time.Time{})
 	}
-	return deriveConnectionStatus(tunUp, connect.GetLastHeartbeat())
+	// GetLastHeartbeat is data-plane-only (DataPlane). The root daemon owns the
+	// heartbeat; the user daemon returns above via the sudo snapshot. Falling back
+	// to the zero time preserves the old control-plane stub behavior.
+	if dp, ok := connect.(handler.DataPlane); ok {
+		return deriveConnectionStatus(tunUp, dp.GetLastHeartbeat())
+	}
+	return deriveConnectionStatus(tunUp, time.Time{})
 }
 
 func buildConnectionStatus(connect handler.Connection, ips map[string]tunIP) *rpc.Status {
