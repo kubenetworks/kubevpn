@@ -5,9 +5,6 @@ import (
 	"os"
 	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/util/retry"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
@@ -31,7 +28,7 @@ func (s *TunConfigServer) WarmClusterDNSCache(ctx context.Context) {
 }
 
 // warmClusterDNSCache is the testable core; readResolv is injected so the ConfigMap
-// skip/write logic can be tested without touching the real /etc/resolv.conf.
+// skip/write logic can be exercised without reading a real /etc/resolv.conf.
 func (s *TunConfigServer) warmClusterDNSCache(ctx context.Context, readResolv func() (string, error)) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -39,12 +36,13 @@ func (s *TunConfigServer) warmClusterDNSCache(ctx context.Context, readResolv fu
 		}
 	}()
 
-	cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	// Skip the (empty-never-overwrite) RMW entirely when the cache is already populated.
+	absent, err := s.configMapKeyAbsent(ctx, config.KeyClusterDNS)
 	if err != nil {
 		plog.G(ctx).Warnf("[TunConfig] DNS warm-up: get ConfigMap: %v", err)
 		return
 	}
-	if strings.TrimSpace(cm.Data[config.KeyClusterDNS]) != "" {
+	if !absent {
 		return // already populated — never overwrite
 	}
 
@@ -58,22 +56,7 @@ func (s *TunConfigServer) warmClusterDNSCache(ctx context.Context, readResolv fu
 		return
 	}
 
-	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(cm.Data[config.KeyClusterDNS]) != "" {
-			return nil // filled in the meantime — leave it
-		}
-		if cm.Data == nil {
-			cm.Data = map[string]string{}
-		}
-		cm.Data[config.KeyClusterDNS] = raw
-		_, err = s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
-		return err
-	})
-	if err != nil {
+	if err := s.writeConfigMapKeyIfAbsent(ctx, config.KeyClusterDNS, raw); err != nil {
 		plog.G(ctx).Warnf("[TunConfig] DNS warm-up: write cache: %v", err)
 		return
 	}
