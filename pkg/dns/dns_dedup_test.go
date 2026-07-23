@@ -44,3 +44,38 @@ func TestGenerateAppendHosts_NoDuplicates(t *testing.T) {
 		}
 	}
 }
+
+// TestLineHasDomain pins the whole-field domain match that replaced the old
+// strings.Contains check. The hosts keyword "Added by KubeVPN" and the tun name share
+// many letters with short domains, so a substring match would match the marker text
+// itself — only a whitespace-delimited whole-field match is correct.
+//
+// lineHasDomain reports whether domain appears as ANY whitespace-delimited field on
+// the line. Its only caller guards with `strings.Contains(line, HostsKeyword)` first,
+// so it runs only on managed lines; the field match then correctly distinguishes "this
+// domain is present" from "this domain's letters appear somewhere on the line".
+func TestLineHasDomain(t *testing.T) {
+	const managed = "10.0.0.2\tmyservice\t\t# For dev kubevpn-tun Added by KubeVPN"
+	cases := []struct {
+		line   string
+		domain string
+		want   bool
+	}{
+		{managed, "myservice", true},  // the domain field
+		{managed, "MyService", true},  // case-insensitive
+		{managed, "b", false},         // single letter — substring of "by"/"KubeVPN", NOT a field — the bug case
+		{managed, "vpn", false},       // substring of "KubeVPN"/"kubevpn-tun", NOT a field
+		{managed, "Kube", false},      // substring of "KubeVPN", NOT a field
+		{managed, "10.0.0.2", true},  // IP is a field (match is field-agnostic; caller filters by keyword)
+		{"# comment with myservice inside", "myservice", true}, // myservice IS a field here — caller's keyword guard excludes unmanaged lines
+		{"", "anything", false},
+	}
+	for _, c := range cases {
+		got := lineHasDomain(c.line, c.domain)
+		if got != c.want {
+			t.Errorf("lineHasDomain(%q, %q) = %v, want %v", c.line, c.domain, got, c.want)
+		}
+	}
+}
+
+
