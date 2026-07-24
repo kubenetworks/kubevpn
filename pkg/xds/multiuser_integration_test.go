@@ -21,11 +21,24 @@ type userSession struct {
 	headers map[string]string
 }
 
+// ipOnly returns the bare IP portion of s, stripping any "/prefix" CIDR suffix.
+// envoy rule LocalTunIPv4/v6 must be a bare IP — it flows into envoy's
+// SocketAddress.Address via tunIPs→toEndPoint (cache.go), which rejects CIDR
+// notation. GetTunIP returns IPNet.String() (e.g. "198.18.0.1/32"); this helper
+// converts that to the bare-IP form the rest of the codebase (cache_test.go,
+// inject_service_test.go, tun_config_sync_test.go) and production envoy config use.
+func ipOnly(s string) string {
+	if ip, _, err := net.ParseCIDR(s); err == nil {
+		return ip.String()
+	}
+	return s
+}
+
 func addVirtualRuleInternal(v []*Virtual, u *userSession, nodeID, ns string) []*Virtual {
 	newRule := &Rule{
 		Headers:      u.headers,
-		LocalTunIPv4: u.tunIPv4,
-		LocalTunIPv6: u.tunIPv6,
+		LocalTunIPv4: ipOnly(u.tunIPv4),
+		LocalTunIPv6: ipOnly(u.tunIPv6),
 		OwnerID:      u.ownerID,
 	}
 	for i, virtual := range v {
@@ -170,8 +183,8 @@ func TestIntegration_MultiUser_FullLifecycle(t *testing.T) {
 		t.Fatalf("Phase 4: expected 2 rules (update not append), got %d", len(check[0].Rules))
 	}
 	for _, r := range check[0].Rules {
-		if r.OwnerID == alice.ownerID && r.LocalTunIPv4 != alice.tunIPv4 {
-			t.Fatalf("Alice rule should have new IP %s, got %s", alice.tunIPv4, r.LocalTunIPv4)
+		if r.OwnerID == alice.ownerID && r.LocalTunIPv4 != ipOnly(alice.tunIPv4) {
+			t.Fatalf("Alice rule should have new IP %s, got %s", ipOnly(alice.tunIPv4), r.LocalTunIPv4)
 		}
 	}
 	t.Logf("Phase 4 PASS: Alice crashed, reconnected: %s → %s", oldIP, alice.tunIPv4)
