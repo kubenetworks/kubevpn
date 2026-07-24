@@ -44,6 +44,8 @@ func TestPrintGRPCStream_StripsStepSentinel(t *testing.T) {
 		"an ordinary line\n",
 	}}
 	var buf strings.Builder
+	// nil ctx is intentional: PrintGRPCStream tolerates a nil ctx (skips the
+	// cancellation watcher) — this exercises that nil-safe path. SA1012 is expected.
 	if err := PrintGRPCStream[rpc.ConnectResponse](nil, stream, &buf); err != nil {
 		t.Fatalf("PrintGRPCStream: %v", err)
 	}
@@ -72,6 +74,8 @@ func TestRenderGRPCStream_KeepsStepSentinelForSpinner(t *testing.T) {
 	// A *bytes.Buffer is not a TTY, so the renderer degrades to plain, ✓-annotated
 	// lines (no spinner animation, no cursor-erase escapes).
 	var buf bytes.Buffer
+	// nil ctx is intentional: RenderGRPCStream tolerates a nil ctx — exercises that
+	// nil-safe path. SA1012 is expected.
 	if err := RenderGRPCStream[rpc.ConnectResponse](nil, stream, &buf); err != nil {
 		t.Fatalf("RenderGRPCStream: %v", err)
 	}

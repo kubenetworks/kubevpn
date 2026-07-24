@@ -952,10 +952,6 @@ func TestC1_Connects_Sort_WithAPIServerIPs(t *testing.T) {
 // *ConnectOptions. (In practice all methods are provided by the embed, but
 // this comment serves as documentation.)
 
-// noopFactory is a minimal cmdutil.Factory stub used where a nil factory panics.
-// It is only used in tests.
-type noopFactory struct{ cmdutil.Factory }
-
 // Stub implementations for methods missing on mockConnection due to the fact
 // that *handler.ConnectOptions does not yet provide them directly.
 // These are provided by the embedded *handler.ConnectOptions already.
