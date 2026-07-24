@@ -76,3 +76,55 @@ func TestLeaveProxiesBeforeTeardown_NoMatch(t *testing.T) {
 		t.Fatal("expected no leave when the connection ID does not match")
 	}
 }
+
+// TestLeaveProxiesBeforeTeardown_SkipsDataPlaneOnlyConnections exercises the Interface
+// Segregation split end-to-end through the real disconnect code path: a *DataSession
+// (DataPlane, NOT ProxyController) in the connection slice must be silently skipped —
+// the type assertion to ProxyController fails, so LeaveAllProxyResources is never
+// called and nothing panics. This is the data-plane half of the contract that
+// recordingConn (ProxyController) covers for the control plane.
+func TestLeaveProxiesBeforeTeardown_SkipsDataPlaneOnlyConnections(t *testing.T) {
+	ctrl, leftCtrl := newRecordingConn("ctrl-id") // *ConnectOptions via embed → ProxyController
+	ds := &handler.DataSession{ConnectionID: "data-id"} // DataPlane, NOT ProxyController
+	svr := &Server{connections: []handler.Connection{ctrl, ds}}
+
+	// Must not panic on the DataSession even though it lacks LeaveAllProxyResources.
+	svr.leaveProxiesBeforeTeardown(context.Background(), &rpc.DisconnectRequest{All: ptr.To(true)})
+
+	if !leftCtrl.Load() {
+		t.Error("expected leave on the control-plane (ProxyController) connection")
+	}
+	// The DataSession has no LeaveAllProxyResources to record; the only assertion
+	// reachable here is that we got here without panicking, which is the contract:
+	// a data-plane-only connection is a valid member of []Connection.
+}
+
+// TestRoleInterfaces_SegregationContract is a compile-time + behavioral integration
+// assertion of the dual-session Interface Segregation: *ConnectOptions satisfies
+// ProxyController (not DataPlane) and *DataSession satisfies DataPlane (not
+// ProxyController), while both satisfy the shared Connection interface. A mixed
+// []Connection slice (one of each plane) sorts without panic via sort.Connects,
+// whose DataPlane assertions fall back to zero on the control-plane member.
+func TestRoleInterfaces_SegregationContract(t *testing.T) {
+	var (
+		_ handler.Connection      = (*handler.ConnectOptions)(nil)
+		_ handler.ProxyController = (*handler.ConnectOptions)(nil)
+
+		_ handler.Connection = (*handler.DataSession)(nil)
+		_ handler.DataPlane  = (*handler.DataSession)(nil)
+	)
+
+	// Mixed-plane slice, as the root daemon never holds but the disconnect loop
+	// must tolerate (and sort.Connects must order without panicking). The control-
+	// plane member is not DataPlane, so GetAPIServerIPs/GetNetworkExtraHost fall back
+	// to nil inside Less — no panic, no dependency edge detected (correct for a
+	// control-plane connection that owns no TUN).
+	mixed := handler.Connects{
+		&handler.DataSession{ConnectionID: "data"},
+		&handler.ConnectOptions{ConnectionID: "ctrl"},
+	}
+	sorted := mixed.Sort()
+	if len(sorted) != 2 {
+		t.Fatalf("expected 2 connections after sort, got %d", len(sorted))
+	}
+}

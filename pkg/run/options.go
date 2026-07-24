@@ -49,7 +49,7 @@ type Options struct {
 	ContainerOptions *ContainerOptions
 
 	factory    cmdutil.Factory
-	clientset  *kubernetes.Clientset
+	clientset  kubernetes.Interface
 	restclient *rest.RESTClient
 	config     *rest.Config
 

@@ -27,6 +27,25 @@ var (
 	downloadAddr = "https://github.com/wencaiwulue/kubevpn/releases/latest"
 )
 
+// nameHasToken reports whether token appears as a whole segment of name, where segments
+// are separated by any of '_', '.', or '-' (case-insensitive). Release asset names look
+// like "kubevpn_v2.0.0_linux_amd64.zip", so the OS/arch are underscore-delimited tokens.
+//
+// It replaces strings.Contains for matching arch: arch="arm" must NOT match the "arm64"
+// segment in "kubevpn_v2.0.0_linux_arm64.zip" (a substring Contains would), or a 32-bit
+// ARM user would download the arm64 binary and fail to run it. The same applies to OS
+// tokens, which are also matched as whole segments for consistency.
+func nameHasToken(name, token string) bool {
+	for _, seg := range strings.FieldsFunc(name, func(r rune) bool {
+		return r == '_' || r == '.' || r == '-'
+	}) {
+		if strings.EqualFold(seg, token) {
+			return true
+		}
+	}
+	return false
+}
+
 // GetManifest fetches the latest GitHub release manifest and returns the version tag and download URL for the given OS/arch.
 func GetManifest(httpCli *http.Client, goos string, arch string) (version string, downloadURL string, err error) {
 	var resp *http.Response
@@ -64,7 +83,7 @@ func GetManifest(httpCli *http.Client, goos string, arch string) (version string
 	}
 	version = m.TagName
 	for _, asset := range m.Assets {
-		if strings.Contains(asset.Name, arch) && strings.Contains(asset.Name, goos) {
+		if nameHasToken(asset.Name, arch) && nameHasToken(asset.Name, goos) {
 			downloadURL = asset.BrowserDownloadURL
 			return
 		}
@@ -73,7 +92,7 @@ func GetManifest(httpCli *http.Client, goos string, arch string) (version string
 	// if os is not windows and darwin, default is linux
 	if !sets.New[string]("windows", "darwin").Has(strings.ToLower(goos)) {
 		for _, asset := range m.Assets {
-			if strings.Contains(asset.Name, "linux") && strings.Contains(asset.Name, arch) {
+			if nameHasToken(asset.Name, "linux") && nameHasToken(asset.Name, arch) {
 				downloadURL = asset.BrowserDownloadURL
 				return
 			}

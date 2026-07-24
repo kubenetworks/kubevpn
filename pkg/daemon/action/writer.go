@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"io"
+	"sync"
 
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -16,17 +17,37 @@ import (
 // streamWriter adapts a gRPC streaming Send call into an io.Writer.
 // All daemon action handlers share this pattern to pipe log output
 // to the client via their respective streaming response types.
+//
+// A send error means the gRPC stream is broken (client disconnected, daemon
+// restarted, etc.). Reporting it would let an io.Writer consumer short-circuit —
+// but logrus's StreamHook ignores Write errors, so surfacing it gains nothing
+// while risking a noisy panic loop. Instead the failure is logged once (guarded
+// by sync.Once so a dead stream does not spam on every log line), and Write
+// reports success so logging continues to the file-backed side of the logger.
 type streamWriter struct {
-	send func(msg string) error
+	send     func(msg string) error
+	once     sync.Once
+	logFail  func(error)
 }
 
 func (w *streamWriter) Write(p []byte) (int, error) {
-	_ = w.send(string(p))
+	if err := w.send(string(p)); err != nil {
+		// Report the first send failure only; subsequent writes against a dead
+		// stream will keep failing silently to avoid log storms.
+		w.once.Do(func() {
+			if w.logFail != nil {
+				w.logFail(err)
+			}
+		})
+	}
 	return len(p), nil
 }
 
 func newStreamWriter(send func(string) error) io.Writer {
-	return &streamWriter{send: send}
+	return &streamWriter{
+		send:    send,
+		logFail: func(err error) { plog.G(context.Background()).Warnf("stream log send failed (client stream closed?): %v", err) },
+	}
 }
 
 // LogFieldConnID is the context field key used to tag every log line with the

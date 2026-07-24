@@ -493,7 +493,7 @@ func (nm *NetworkManager) doWatchTunIP(ctx context.Context, target string, curre
 		Namespace: nm.cfg.ManagerNamespace,
 	})
 	if err != nil {
-		return fmt.Errorf("WatchTunIP: %w", err)
+		return fmt.Errorf("watch tun IP: %w", err)
 	}
 
 	for {
@@ -1308,7 +1308,7 @@ func (nm *NetworkManager) doWatchNamespaceRoutes(ctx context.Context, target str
 			<-ctx.Done()
 			return nil
 		}
-		return fmt.Errorf("WatchNamespaceRoutes: %w", err)
+		return fmt.Errorf("watch namespace routes: %w", err)
 	}
 
 	// services accumulates the current service set across snapshot+delta frames; it is

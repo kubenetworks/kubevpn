@@ -52,7 +52,7 @@ func TestTunHostRoutes_OnlyIPv6(t *testing.T) {
 	if len(routes) != 1 {
 		t.Fatalf("expected 1 route, got %d: %v", len(routes), routes)
 	}
-	assertRoute(t, routes[1-1], v6.IP, 128, 128)
+	assertRoute(t, routes[0], v6.IP, 128, 128)
 }
 
 func TestTunHostRoutes_BothNil(t *testing.T) {

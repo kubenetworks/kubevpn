@@ -55,14 +55,6 @@ func TestConnectOptions_SetGet(t *testing.T) {
 	}
 }
 
-func TestConnectOptions_GetLocalTunIP(t *testing.T) {
-	c := newTestConnectOptions(t)
-	v4, v6 := c.GetLocalTunIP()
-	if v4 != "" || v6 != "" {
-		t.Fatal("expected empty when no network manager")
-	}
-}
-
 func TestConnectOptions_RollbackFuncs(t *testing.T) {
 	c := newTestConnectOptions(t)
 	var order []int

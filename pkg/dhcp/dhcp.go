@@ -279,6 +279,45 @@ func (m *Manager) retryUpdate(ctx context.Context, f func(ipv4, ipv6 *ipallocato
 	})
 }
 
+// restoreAllocator creates a bitmap allocator for cidr and restores its state from the
+// base64-encoded bitmap. It is the shared primitive for loading an IP pool from a
+// ConfigMap entry, used by both the write-back path (updateDHCPConfigMap) and the
+// read-only path (ForEach), which previously each duplicated the v4+v6 build+decode+
+// restore sequence.
+//
+// strict controls decode-error handling:
+//   - strict=true  (write-back path): an empty bitmap short-circuits to a fresh empty
+//     allocator, and a decode error surfaces — corrupted state must not be silently
+//     written back. (Matches the old `if bitmap != ""` + `if decErr != nil { return }`.)
+//   - strict=false (read-only path): a decode error is swallowed and an empty allocator
+//     returned — a corrupt bitmap degrades to iterating 0 IPs rather than failing the
+//     read. (Matches the old `if b, decErr := ...; decErr == nil` tolerate-and-skip.)
+//
+// A Restore error surfaces in both modes (a structurally valid bitmap for the wrong
+// CIDR is a hard error either way).
+func restoreAllocator(cidr *net.IPNet, bitmap string, strict bool) (*ipallocator.Range, error) {
+	r, err := ipallocator.NewAllocatorCIDRRange(cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
+		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if strict && bitmap == "" {
+		return r, nil
+	}
+	b, decErr := base64.StdEncoding.DecodeString(bitmap)
+	if decErr != nil {
+		if strict {
+			return nil, decErr
+		}
+		return r, nil
+	}
+	if err = r.Restore(cidr, b); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
 func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error) error {
 	cm, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
@@ -293,36 +332,13 @@ func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipalloca
 		return fmt.Errorf("failed to parse TUN_IP_POOL: %w", err)
 	}
 
-	dhcp, err := ipallocator.NewAllocatorCIDRRange(m.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
-		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
-	})
+	dhcp, err := restoreAllocator(m.cidr, pool.IPv4.Bitmap, true)
 	if err != nil {
 		return err
 	}
-	if pool.IPv4.Bitmap != "" {
-		b, decErr := base64.StdEncoding.DecodeString(pool.IPv4.Bitmap)
-		if decErr != nil {
-			return decErr
-		}
-		if err = dhcp.Restore(m.cidr, b); err != nil {
-			return err
-		}
-	}
-
-	dhcp6, err := ipallocator.NewAllocatorCIDRRange(m.cidr6, func(max int, rangeSpec string) (allocator.Interface, error) {
-		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
-	})
+	dhcp6, err := restoreAllocator(m.cidr6, pool.IPv6.Bitmap, true)
 	if err != nil {
 		return err
-	}
-	if pool.IPv6.Bitmap != "" {
-		b, decErr := base64.StdEncoding.DecodeString(pool.IPv6.Bitmap)
-		if decErr != nil {
-			return decErr
-		}
-		if err = dhcp6.Restore(m.cidr6, b); err != nil {
-			return err
-		}
 	}
 
 	if err = f(dhcp, dhcp6); err != nil {
@@ -373,29 +389,15 @@ func (m *Manager) ForEach(ctx context.Context, fnv4 func(net.IP), fnv6 func(net.
 		return fmt.Errorf("failed to parse TUN_IP_POOL: %w", err)
 	}
 
-	dhcp, err := ipallocator.NewAllocatorCIDRRange(m.cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
-		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
-	})
+	dhcp, err := restoreAllocator(m.cidr, pool.IPv4.Bitmap, false)
 	if err != nil {
 		return err
-	}
-	if b, decErr := base64.StdEncoding.DecodeString(pool.IPv4.Bitmap); decErr == nil {
-		if restoreErr := dhcp.Restore(m.cidr, b); restoreErr != nil {
-			return restoreErr
-		}
 	}
 	dhcp.ForEach(fnv4)
 
-	dhcp6, err := ipallocator.NewAllocatorCIDRRange(m.cidr6, func(max int, rangeSpec string) (allocator.Interface, error) {
-		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
-	})
+	dhcp6, err := restoreAllocator(m.cidr6, pool.IPv6.Bitmap, false)
 	if err != nil {
 		return err
-	}
-	if b, decErr := base64.StdEncoding.DecodeString(pool.IPv6.Bitmap); decErr == nil {
-		if restoreErr := dhcp6.Restore(m.cidr6, b); restoreErr != nil {
-			return restoreErr
-		}
 	}
 	dhcp6.ForEach(fnv6)
 	return nil

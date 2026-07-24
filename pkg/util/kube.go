@@ -26,7 +26,12 @@ import (
 
 // InitKubeClient initializes the core Kubernetes client objects from a factory.
 // Used by ConnectOptions, SyncOptions, and run.Options to avoid triplicating the same setup.
-func InitKubeClient(f cmdutil.Factory) (cfg *rest.Config, restclient *rest.RESTClient, clientset *kubernetes.Clientset, namespace string, err error) {
+// InitKubeClient initializes the core Kubernetes client objects from a factory.
+// The clientset is returned as kubernetes.Interface (not *kubernetes.Clientset) so
+// callers depend on the interface and can inject a fake (e.g. fake.NewSimpleClientset)
+// without depending on the concrete type. Used by ConnectOptions, SyncOptions, and
+// run.Options to avoid triplicating the same setup.
+func InitKubeClient(f cmdutil.Factory) (cfg *rest.Config, restclient *rest.RESTClient, clientset kubernetes.Interface, namespace string, err error) {
 	if cfg, err = f.ToRESTConfig(); err != nil {
 		return
 	}

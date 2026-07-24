@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/docker/go-connections/nat"
 	log "github.com/sirupsen/logrus"
@@ -77,6 +78,20 @@ func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.Ssh
 	return grpcutil.RenderGRPCStream[rpc.SyncResponse](ctx, resp, os.Stdout)
 }
 
+// Teardown RPCs bound how long the client waits on the daemon during a `kubevpn run`
+// exit. Without them the teardown uses context.Background() and hangs indefinitely when
+// the cluster is unreachable: the daemon's own steps are individually bounded (leave's
+// RolloutStatus waits config.RolloutStatusTimeout=2m), but the client's overall wait was
+// not, so a dead cluster kept `kubevpn run` alive forever after Ctrl-C. leaveTeardownTimeout
+// is deliberately larger than the daemon's rollout window so a healthy server-side leave
+// still completes; on expiry RenderGRPCStream forwards the cancellation to the daemon and
+// returns, letting the process exit while the manager's lease reaper reclaims the rules.
+// vars (not consts) so tests can shrink them to exercise the timeout path quickly.
+var (
+	leaveTeardownTimeout      = 3 * time.Minute
+	disconnectTeardownTimeout = 2 * time.Minute
+)
+
 // teardownRunProxy unwinds a `kubevpn run` (host mode) session on exit: it leaves
 // the injected proxy resources and then disconnects, mirroring the proven
 // `kubevpn proxy --foreground` teardown order (cmd/kubevpn/cmds/proxy.go). Leave
@@ -85,7 +100,8 @@ func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.Ssh
 // regardless of how the manager/workload namespaces relate — unlike a
 // disconnect-by-kubeconfig, which derives the connection ID from the namespace.
 // Both streams render with the spinner + check-mark UX; a leading blank line keeps
-// the first step off the terminal's "^C" echo line.
+// the first step off the terminal's "^C" echo line. Each RPC is time-bounded so a
+// dead cluster cannot wedge the exit (see the teardown-timeout constants above).
 func teardownRunProxy(cli rpc.DaemonClient, noProxy bool, ns, workload string, kubeconfigBytes []byte, sshConfig *pkgssh.SshConfig) error {
 	fmt.Fprintln(os.Stdout)
 
@@ -96,7 +112,9 @@ func teardownRunProxy(cli rpc.DaemonClient, noProxy bool, ns, workload string, k
 		}
 	}
 
-	resp, err := cli.Disconnect(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), disconnectTeardownTimeout)
+	defer cancel()
+	resp, err := cli.Disconnect(ctx)
 	if err != nil {
 		return err
 	}
@@ -108,19 +126,22 @@ func teardownRunProxy(cli rpc.DaemonClient, noProxy bool, ns, workload string, k
 	}); err != nil {
 		return err
 	}
-	return grpcutil.RenderGRPCStream[rpc.DisconnectResponse](context.Background(), resp, os.Stdout)
+	return grpcutil.RenderGRPCStream[rpc.DisconnectResponse](ctx, resp, os.Stdout)
 }
 
-// leaveRunProxy sends a Leave RPC for the proxied workload and renders its stream.
+// leaveRunProxy sends a Leave RPC for the proxied workload and renders its stream,
+// bounded by leaveTeardownTimeout so an unreachable cluster cannot block the exit.
 func leaveRunProxy(cli rpc.DaemonClient, ns, workload string) error {
-	resp, err := cli.Leave(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), leaveTeardownTimeout)
+	defer cancel()
+	resp, err := cli.Leave(ctx)
 	if err != nil {
 		return err
 	}
 	if err = resp.Send(&rpc.LeaveRequest{Namespace: ns, Workloads: []string{workload}, Level: int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel))}); err != nil {
 		return err
 	}
-	return grpcutil.RenderGRPCStream[rpc.LeaveResponse](context.Background(), resp, os.Stdout)
+	return grpcutil.RenderGRPCStream[rpc.LeaveResponse](ctx, resp, os.Stdout)
 }
 
 func (option *Options) connectViaContainer(ctx context.Context, portBindings nat.PortMap, managerNamespace string) error {

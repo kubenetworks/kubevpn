@@ -96,7 +96,7 @@ func PodStatusSummary(pod *corev1.Pod) string {
 }
 
 // GetEnv executes "env" in each container of the pod and returns a map of container names to temp file paths containing the environment output.
-func GetEnv(ctx context.Context, set *kubernetes.Clientset, config *rest.Config, ns, podName string) (map[string]string, error) {
+func GetEnv(ctx context.Context, set kubernetes.Interface, config *rest.Config, ns, podName string) (map[string]string, error) {
 	pod, err := set.CoreV1().Pods(ns).Get(ctx, podName, v1.GetOptions{})
 	if err != nil {
 		return nil, err

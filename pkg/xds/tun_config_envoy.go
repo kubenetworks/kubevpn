@@ -54,6 +54,14 @@ func (s *TunConfigServer) mutateEnvoyVirtuals(
 
 // syncEnvoyRuleIP updates Rule.LocalTunIPv4/v6 in ENVOY_CONFIG for all Rules matching ownerID.
 // This triggers: Watcher → Processor → xDS push → envoy hot-update.
+//
+// LocalTunIPv4/v6 are stored as BARE IPs (e.g. "198.18.0.1"), NOT CIDRs — they flow into
+// envoy's SocketAddress.Address via tunIPs→toEndPoint (cache.go), which rejects CIDR
+// notation. This deliberately differs from GetTunIP's resp.IPv4 (= IPNet.String(), CIDR):
+// the client configures a TUN device from the CIDR, while envoy needs a bare address. The
+// two formats are bridged by net.ParseCIDR on the client. Test helpers writing envoy rules
+// must use the bare-IP form (see multiuser_integration_test.go ipOnly); using GetTunIP's CIDR
+// here was a flaky-test bug (syncEnvoyRuleIP rewrote the CIDR to bare IP async).
 func (s *TunConfigServer) syncEnvoyRuleIP(ctx context.Context, ownerID string, newIPv4, newIPv6 *net.IPNet) {
 	newV4Str := ""
 	if newIPv4 != nil {
