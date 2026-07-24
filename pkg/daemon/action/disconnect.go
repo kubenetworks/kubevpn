@@ -149,7 +149,7 @@ func resolveConnectionIDByKubeconfig(ctx context.Context, jump *rpc.SshJump, kub
 	if managerNamespace == "" {
 		managerNamespace = ns
 	}
-	return util.GetConnectionID(context.Background(), connect.GetClientset().CoreV1().Namespaces(), managerNamespace)
+	return util.GetConnectionID(ctx, connect.GetClientset().CoreV1().Namespaces(), managerNamespace)
 }
 
 // leaveProxiesBeforeTeardown resolves the connections targeted by a Disconnect request
