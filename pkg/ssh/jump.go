@@ -7,8 +7,10 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strconv"
 
+	"github.com/kballard/go-shellquote"
 	gossh "golang.org/x/crypto/ssh"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -55,6 +57,26 @@ func SshJumpBytes(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, 
 			return
 		}
 		kubeconfigBytes = bytes.TrimSpace(stdout)
+		// The remote fetch above may have hit the `cat` fallback (no kubectl on
+		// the bastion), returning the RAW kubeconfig. If it references cert/key
+		// files by relative path, the later local api.FlattenConfig would resolve
+		// those paths against the daemon CWD and fail (the files live on the
+		// remote host). Inline any such referenced files now, over the same SSH
+		// session, so the config is self-contained. No-op when already embedded.
+		kubeconfigBytes, err = embedRemoteCertFiles(
+			kubeconfigBytes,
+			filepath.Dir(conf.RemoteKubeconfig),
+			func(p string) ([]byte, error) {
+				out, stderr, runErr := RemoteRun(cli, shellquote.Join("cat", p), nil)
+				if runErr != nil {
+					return nil, fmt.Errorf("%s: %w", string(stderr), runErr)
+				}
+				return out, nil
+			},
+		)
+		if err != nil {
+			return
+		}
 	}
 	var port int
 	port, err = pkgutil.GetAvailableTCPPort()

@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -139,6 +140,18 @@ func ModifyAPIServer(ctx context.Context, kubeconfigBytes []byte, newAPIServer n
 		return nil, netip.AddrPort{}, err
 	}
 	if err = api.FlattenConfig(&rawConfig); err != nil {
+		// A kubeconfig loaded from bytes (e.g. a --remote-kubeconfig fetched via
+		// SSH) has an empty LocationOfOrigin, so FlattenConfig resolves any relative
+		// cert/key path against the daemon CWD and tries to read it locally — the
+		// file only exists remotely, surfacing an opaque "open ..: operation not
+		// permitted". Wrap it so the real cause and remedy are visible.
+		var pathErr *os.PathError
+		if errors.As(err, &pathErr) {
+			err = fmt.Errorf("kubeconfig references a cert/key file %q that could not be resolved "+
+				"(in-memory bytes have no base path, so it fell back to the daemon CWD): %w; "+
+				"provide a self-contained kubeconfig (embed cert/key data inline) or use "+
+				"--remote-kubeconfig against a bastion that has kubectl", pathErr.Path, err)
+		}
 		plog.G(ctx).Errorf("failed to flatten config: %v", err)
 		return nil, netip.AddrPort{}, err
 	}

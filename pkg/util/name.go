@@ -56,9 +56,10 @@ func GetCluster(kubeConfigBytes []byte) (cluster string, ns string, err error) {
 	if err != nil {
 		return
 	}
-	if err = api.FlattenConfig(&rawConfig); err != nil {
-		return
-	}
+	// No FlattenConfig here: reading the cluster name and namespace needs no
+	// cert/key data, and the caller (GenKubeconfigTempPattern) discards the error.
+	// Flattening would fail on a bytes-loaded config that references cert files by
+	// relative path (empty LocationOfOrigin → resolves against the daemon CWD).
 	if rawConfig.Contexts == nil {
 		return
 	}
