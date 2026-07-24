@@ -247,6 +247,8 @@ var claudeSymbols = []struct {
 	{"cleanupConnection", "connection.go"},
 	{"getSudoTunIPs", ""},
 	{"resolveTunIP", ""},
+	// handler cross-package resource teardown helper
+	{"DeleteTrafficManagerCoreResources", "traffmgr.go"},
 	// daemon/action stream/writer/lifecycle helpers
 	{"newStreamWriter", "writer.go"},
 	{"initStreamLogger", "writer.go"},
